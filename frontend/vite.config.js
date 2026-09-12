@@ -76,6 +76,83 @@ function pickChartsChunk(id) {
 }
 
 // https://vitejs.dev/config/
+
+/** Entra client and tenant ids are GUIDs. `common` is not one, and that is the point. */
+const ENTRA_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Everything a deploy build must have before it is allowed to produce a bundle.
+ *
+ * WHY THIS EXISTS (#516). `msalConfig.js` used to default the authority to
+ * `common` when `VITE_ENTRA_TENANT_ID` was empty, so a deploy build with the
+ * Entra variables unset succeeded and shipped a sign-in page pointed at every
+ * Entra tenant on earth plus personal Microsoft accounts. The backend has had
+ * this instinct since it was written — `verify-token.js` refuses to start
+ * without its two settings, and `infra/variables.tf` rejects an empty audience
+ * because an empty one SILENTLY DISABLES audience validation. The client half
+ * never got it.
+ *
+ * SHAPE, NOT PRESENCE. A presence check would have caught neither live failure
+ * mode: `.env.example` recommended `common` for the tenant and `.default` for
+ * the scope, so the values most likely to be pasted in are non-empty and wrong.
+ * A GUID test rejects empty, `common`, `organizations` and `consumers` in one
+ * rule.
+ *
+ * EVERY PROBLEM AT ONCE. Throwing on the first means three deploy attempts to
+ * learn about three missing variables.
+ *
+ * Exported so it can be tested directly. Do NOT test this by invoking the
+ * config factory: that calls `loadEnv(mode, process.cwd(), '')`, so a
+ * developer's local `frontend/.env` would leak into the assertion and the
+ * result would depend on whose machine it ran on.
+ *
+ * @param {Record<string, string|undefined>} env  The merged environment.
+ * @returns {void} Throws with every problem listed when the build must not proceed.
+ */
+export function assertDeployConfig(env = {}) {
+  const problems = [];
+
+  if (!env.VITE_AZURE_FUNCTIONS_URL) {
+    problems.push(
+      'VITE_AZURE_FUNCTIONS_URL is required for a deploy build. Set it to "/api" ' +
+        'for a same-origin deployment, or to the Function App origin followed by ' +
+        '"/api" for a cross-origin one.'
+    );
+  }
+
+  for (const key of ['VITE_ENTRA_CLIENT_ID', 'VITE_ENTRA_TENANT_ID']) {
+    const value = (env[key] || '').trim();
+    if (!ENTRA_GUID.test(value)) {
+      problems.push(
+        `${key} must be a GUID for a deploy build; got ${value ? `"${value}"` : '(empty)'}. ` +
+          'A multi-tenant authority such as "common", "organizations" or "consumers" is ' +
+          'not valid here: the API pins one tenant by issuer, so those only produce a ' +
+          'sign-in that succeeds and then 401s on every call.'
+      );
+    }
+  }
+
+  // Deliberately not rejecting `/.default`: it is a real, working delegated
+  // request shape against Entra, just not the one this registration is built
+  // around. The lever for that is the documentation, not the build.
+  const scope = (env.VITE_ENTRA_API_SCOPE || '').trim();
+  if (!scope.startsWith('api://')) {
+    problems.push(
+      `VITE_ENTRA_API_SCOPE must start with "api://" for a deploy build; got ${
+        scope ? `"${scope}"` : '(empty)'
+      }. A Graph scope such as User.Read produces a token this API rejects on audience.`
+    );
+  }
+
+  if (problems.length) {
+    throw new Error(
+      `Deploy build refused — ${problems.length} configuration problem(s):\n  - ${problems.join(
+        '\n  - '
+      )}`
+    );
+  }
+}
+
 export default defineConfig(({ mode }) => {
   // Load environment variables.
   // 1. System environment variables (process.env)
@@ -120,16 +197,16 @@ export default defineConfig(({ mode }) => {
     defineConf[`import.meta.env.${key}`] = JSON.stringify(value);
   });
 
-  // A deploy build without an API base produces a bundle whose every backend
-  // call throws at runtime. REQUIRE_API_BASE is set by the deploy workflow so
-  // that misconfiguration fails the build instead of the site; plain CI builds
-  // leave it unset and stay green without backend secrets.
-  if (process.env.REQUIRE_API_BASE === 'true' && !env.VITE_AZURE_FUNCTIONS_URL) {
-    throw new Error(
-      'VITE_AZURE_FUNCTIONS_URL is required for a deploy build. Set it to "/api" ' +
-        'for a same-origin deployment, or to the Function App origin followed by ' +
-        '"/api" for a cross-origin one.'
-    );
+  // REQUIRE_API_BASE means "this is a deploy build". The name is now narrower
+  // than the job — it gates the Entra variables too (#516) — and it is kept
+  // anyway, deliberately. Renaming it is fail-OPEN: deploy-azure-frontend.yml
+  // is what sets it, so a rename landing without the matching workflow edit
+  // would silently stop every check below on every deploy, with nothing going
+  // red. A slightly stale name is the cheaper mistake.
+  //
+  // Plain CI builds leave it unset and stay green without any backend secrets.
+  if (process.env.REQUIRE_API_BASE === 'true') {
+    assertDeployConfig(env);
   }
 
   // Log injected keys (NOT values) to help debug CI issues
