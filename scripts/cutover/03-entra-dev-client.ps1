@@ -143,6 +143,24 @@ if ($PSCmdlet.ShouldProcess($DisplayName, "set redirect URIs: $($target -join ',
 
     az ad sp create --id $dev.appId -o none 2>$null
     az ad app permission admin-consent --id $dev.appId | Out-Null
+
+    # Verified, not assumed — the same check 02-entra-spa-client.ps1 makes, for
+    # the same reason. `admin-consent` exits 0 without necessarily having
+    # granted anything, and a missing grant means sign-in stops at the consent
+    # screen. Local rather than production, but an hour lost to "why does dev
+    # sign-in hang" is the same hour.
+    $devSp = az ad sp show --id $dev.appId -o json | ConvertFrom-Json
+    $apiSp = az ad sp show --id $ApiAppId -o json | ConvertFrom-Json
+    $grants = az rest --method GET `
+        --url "https://graph.microsoft.com/v1.0/servicePrincipals/$($devSp.id)/oauth2PermissionGrants" `
+        -o json | ConvertFrom-Json
+    $grant = $grants.value | Where-Object { $_.resourceId -eq $apiSp.id -and $_.scope -match 'access_as_admin' }
+    if ($grant) {
+        Write-Host "consent: $($grant.consentType), scope '$($grant.scope)'  [ok]" -ForegroundColor Green
+    }
+    else {
+        throw "No admin consent grant for access_as_admin on $($dev.appId). Local sign-in will stop at the consent screen; grant it in the portal."
+    }
 }
 
 Write-Step 'Result'
