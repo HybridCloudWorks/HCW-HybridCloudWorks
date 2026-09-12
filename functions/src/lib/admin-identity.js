@@ -24,7 +24,9 @@
  *     where a "uid" is now an Entra object id.
  */
 import { randomUUID } from 'node:crypto';
-import { ADMIN_ROLES, ENTRA_ADMIN_APP_ROLE } from './auth/roles.js';
+import { ADMIN_ROLES, ENTRA_ADMIN_APP_ROLE, ENTRA_API_DELEGATED_SCOPE } from './auth/roles.js';
+import { ENTRA_REQUIRED_TOKEN_VERSION } from './auth/verify-token.js';
+import { ENTRA_LAB_AGENT_APP_ROLE } from './auth/require-agent.js';
 
 const json = (status, body) => ({
   status,
@@ -222,7 +224,9 @@ export function createAdminIdentityHandlers({
      * who holds the App Role but is missing from the registry, and that caller
      * would be refused by the role guard before learning anything. Nothing
      * here is secret — the audience is in every token's `aud`, the tenant is
-     * in the SPA's build, and the role value is in this repository.
+     * in the SPA's build, and the role and scope values are in this
+     * repository. It is an inventory of what the guard checks, not of what it
+     * checks against.
      */
     async getAuthExpectations(request) {
       const auth = await guard.requireUser(request);
@@ -232,6 +236,13 @@ export function createAdminIdentityHandlers({
         tenantId: env.ENTRA_TENANT_ID || null,
         adminAppRole: ENTRA_ADMIN_APP_ROLE,
         registryContainer: 'admins',
+        // Added with the configuration review surface (#519). Each is a value
+        // the guard enforces and the SPA cannot know, so a page that compares
+        // against them is comparing against the API as deployed rather than
+        // against a frontend constant that agrees with itself.
+        requiredScope: ENTRA_API_DELEGATED_SCOPE,
+        requiredTokenVersion: ENTRA_REQUIRED_TOKEN_VERSION,
+        labAgentAppRole: ENTRA_LAB_AGENT_APP_ROLE,
       });
     },
 

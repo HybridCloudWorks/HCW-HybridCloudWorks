@@ -17,6 +17,44 @@ This project has not cut a tagged release; entries are grouped under
 
 ## [Unreleased]
 
+### Added
+
+- **The Entra configuration is reviewable in the admin GUI (#519).** It was
+  visible nowhere. The tenant, audience, App Roles, scope and token version are
+  plain app settings rather than Key Vault references, so they never appeared in
+  `secret-catalog.js` and never reached the Integrations page — and the SPA's own
+  half (`VITE_ENTRA_CLIENT_ID`, `VITE_ENTRA_TENANT_ID`, `VITE_ENTRA_API_SCOPE`)
+  was rendered nowhere at all. A scope that disagreed with the audience, or a SPA
+  pointed at a different tenant from the API, was invisible until every call
+  started returning 401.
+
+  **Integrations** gains a Microsoft Entra ID panel in the existing "Site
+  platform" group, whose own blurb already described exactly this — *values the
+  site runs on, each one says what changing it breaks*. Two columns: what this
+  browser was built with, and what the API says it enforces, the second from
+  `getAuthExpectations`. A page that compared the frontend against itself would
+  prove only that it agrees with itself. The group now survives an empty
+  credential list, because the API failing to answer is itself a configuration
+  symptom and hiding the panel then would be exactly backwards.
+
+  **Health** gains `azp`, `scp` and `ver` rows and three verdicts: the delegated
+  scope is present, the token version matches, and — the one that matters
+  structurally — `azp` differs from `aud`. `azp` is the client that asked for the
+  token and `aud` is the API it is for; one registration serving both makes them
+  the same GUID, which is the condition DECISION 3 warns about and #522 exists to
+  end. When they match, the card says so and explains why the delegated-scope
+  check keeps it safe meanwhile.
+
+  Identifiers only. No credential, no token, no `oid`, no `email` — the rule the
+  Integrations page states in its own header, and there is a test asserting the
+  panel renders nothing that looks like a JWT or a secret.
+
+  `getAuthExpectations` now also reports `requiredScope`, `requiredTokenVersion`
+  and `labAgentAppRole`, each read from the constant the guard actually enforces
+  rather than a copy, with a test tying the two together. `'2.0'` became an
+  exported constant for the same reason it was worth doing for the App Role
+  names: a second spelling is a silent drift.
+
 ### Fixed
 
 - **A 401 from the API carried no reason, so the admin portal had to guess

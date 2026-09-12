@@ -136,6 +136,23 @@ export function relativeExpiry(expSeconds, nowMs = Date.now()) {
 }
 
 /**
+ * Do an `aud` value and an `azp` value name the same app registration?
+ *
+ * A v2 access token puts the resource's bare client-id GUID in `aud`; a v1 one
+ * puts the App ID URI, `api://<guid>`. `azp` is always the bare GUID. Comparing
+ * them raw would call `api://X` and `X` different apps, and report the SPA and
+ * the API as separate registrations when they are in fact the one registration
+ * — a false PASS on the check that exists to catch exactly that.
+ */
+function sameApp(audience, azp) {
+  const bare = (value) =>
+    String(value)
+      .replace(/^api:\/\//i, '')
+      .toLowerCase();
+  return bare(audience) === bare(azp);
+}
+
+/**
  * Reduce a decoded token to what may be shown. Claim names, and the values of
  * `aud`, `roles`, `exp` and `tid` — nothing that identifies the person.
  *
@@ -160,6 +177,17 @@ export function summarizeToken(payload, expectations, nowMs = Date.now()) {
   const expiry = relativeExpiry(Number(payload.exp), nowMs);
   const expected = expectations || {};
 
+  const scopes =
+    typeof payload.scp === 'string' ? payload.scp.split(' ').filter(Boolean).map(String) : [];
+  // `azp` (v2) or `appid` (v1) — the client that ASKED for this token, as
+  // distinct from `aud`, the API it is for.
+  const azp =
+    typeof payload.azp === 'string'
+      ? payload.azp
+      : typeof payload.appid === 'string'
+        ? payload.appid
+        : null;
+
   return {
     claimNames: Object.keys(payload).sort(),
     aud: audiences.length ? audiences.join(', ') : null,
@@ -169,6 +197,23 @@ export function summarizeToken(payload, expectations, nowMs = Date.now()) {
     roleNames,
     hasAdminRole: expected.adminAppRole ? roleNames.includes(expected.adminAppRole) : null,
     tenantMatches: expected.tenantId ? tid === expected.tenantId : null,
+    scopes,
+    hasRequiredScope: expected.requiredScope ? scopes.includes(expected.requiredScope) : null,
+    tokenVersion: typeof payload.ver === 'string' ? payload.ver : null,
+    versionMatches: expected.requiredTokenVersion
+      ? payload.ver === expected.requiredTokenVersion
+      : null,
+    azp,
+    // THE ROW THAT PINS THE REGISTRATION TOPOLOGY (#519).
+    //
+    // `azp` is the client that asked; `aud` is the API it is for. One app
+    // registration serving both makes them the same GUID, which is the
+    // condition DECISION 3 in verify-token.js warns about and #522 exists to
+    // end. After the split they differ, and if anyone ever points
+    // VITE_ENTRA_CLIENT_ID back at the API's client id this goes red on a page
+    // an admin already visits — instead of nothing happening at all.
+    clientIsSeparateFromApi:
+      azp && audiences.length ? !audiences.some((value) => sameApp(value, azp)) : null,
     expiresLabel: expiry.label,
     expired: expiry.expired,
   };
@@ -205,6 +250,11 @@ export function evaluateIdentity(token, admin) {
   const checks = [
     ['aud matches the API audience', token.audienceMatches],
     ['admin App Role present in roles', token.hasAdminRole],
+    // Since #515 a token without the delegated scope is refused outright, so a
+    // token that reached this page and lacks it means the SPA is requesting the
+    // wrong scope — not that the caller is unauthorized.
+    ['delegated scope present in scp', token.hasRequiredScope],
+    ['token version matches', token.versionMatches],
     ['registry says isAdmin', admin.isAdmin],
     ['registry uid equals token oid', admin.uidMatchesToken],
   ];
@@ -215,7 +265,7 @@ export function evaluateIdentity(token, admin) {
   // is not a pass either. Say which one, so the report names the gap.
   const unknown = checks.filter(([, value]) => value !== true).map(([name]) => name);
   if (unknown.length) return { pass: null, reason: `could not compare: ${unknown.join('; ')}` };
-  return { pass: true, reason: 'all four comparisons hold' };
+  return { pass: true, reason: 'every comparison holds' };
 }
 
 /**
@@ -308,7 +358,18 @@ function identityReportLines({
     lines.push(
       `- App Role \`${expectations?.adminAppRole ?? 'Admin'}\` present in \`roles\`: ${mark(token.hasAdminRole)}`
     );
+    lines.push(
+      `- Delegated scope \`${expectations?.requiredScope ?? 'access_as_admin'}\` present in \`scp\`: ${mark(token.hasRequiredScope)}`
+    );
     lines.push(`- \`tid\` equals the API's ENTRA_TENANT_ID: ${mark(token.tenantMatches)}`);
+    lines.push(
+      `- \`ver\` is ${expectations?.requiredTokenVersion ?? '2.0'}: ${mark(token.versionMatches)}`
+    );
+    // `azp` names the client that asked for the token, not the person.
+    lines.push(`- \`azp\`: ${token.azp ?? '(absent)'}`);
+    lines.push(
+      `- \`azp\` differs from \`aud\` (SPA and API are separate registrations): ${mark(token.clientIsSeparateFromApi)}`
+    );
     lines.push(`- \`exp\`: ${token.expiresLabel}`);
   } else {
     lines.push(`- Token: could not be read (${tokenError || 'no token'})`);
@@ -729,7 +790,10 @@ function TokenClaimsBody({ identity }) {
     <>
       <Row label="Claims present">{token.claimNames.join(', ')}</Row>
       <Row label="aud">{token.aud ?? '(absent)'}</Row>
+      <Row label="azp">{token.azp ?? '(absent)'}</Row>
       <Row label="roles">{list(token.roleNames)}</Row>
+      <Row label="scp">{list(token.scopes)}</Row>
+      <Row label="ver">{token.tokenVersion ?? '(absent)'}</Row>
       <Row label="exp">{token.expiresLabel}</Row>
       <div className="space-y-1 pt-2">
         <Verdict pass={token.audienceMatches}>
@@ -740,11 +804,30 @@ function TokenClaimsBody({ identity }) {
           App Role <code>{expectations?.adminAppRole ?? 'Admin'}</code> present in{' '}
           <code>roles</code>
         </Verdict>
+        <Verdict pass={token.hasRequiredScope}>
+          Delegated scope <code>{expectations?.requiredScope ?? 'access_as_admin'}</code> present in{' '}
+          <code>scp</code>
+        </Verdict>
         <Verdict pass={token.tenantMatches}>
           <code>tid</code> equals the API&apos;s tenant
         </Verdict>
+        <Verdict pass={token.versionMatches}>
+          <code>ver</code> is {expectations?.requiredTokenVersion ?? '2.0'}
+        </Verdict>
+        <Verdict pass={token.clientIsSeparateFromApi}>
+          <code>azp</code> differs from <code>aud</code> — the SPA and the API are separate
+          registrations
+        </Verdict>
         <Verdict pass={token.expired === null ? null : !token.expired}>Token not expired</Verdict>
       </div>
+      {token.clientIsSeparateFromApi === false ? (
+        <Note>
+          One app registration is serving both the SPA and the API, which is what DECISION 3 in
+          verify-token.js warns about and issue #522 exists to end. The delegated-scope check above
+          is what makes it safe meanwhile: an ID token carries this <code>aud</code> and these{' '}
+          <code>roles</code>, but never <code>scp</code>.
+        </Note>
+      ) : null}
     </>
   );
 }
@@ -758,7 +841,9 @@ export function TokenClaimsCard({ identity }) {
         </CardTitle>
         <CardDescription>
           Decoded from the access token this app sends to the API, compared against what the API
-          says it enforces. Values shown: <code>aud</code>, <code>roles</code>, <code>exp</code>.
+          says it enforces. Values shown are configuration, not identity: <code>aud</code>,{' '}
+          <code>azp</code>, <code>roles</code>, <code>scp</code>, <code>ver</code>, <code>exp</code>
+          . Never <code>oid</code>, <code>email</code> or the token itself.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
