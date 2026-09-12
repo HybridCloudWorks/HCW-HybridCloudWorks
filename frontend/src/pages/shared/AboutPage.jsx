@@ -49,9 +49,10 @@ function normalizeCertification(rawData) {
       // from `new URL().hostname` — the two must agree or one page renders a
       // broken image the other has already learned to skip.
       if (/^https?:\/\/(storage|firebasestorage)\.googleapis\.com\//i.test(key)) return undefined;
-      return !key.startsWith('http') && !key.startsWith('/') && !key.startsWith('data:')
-        ? `/${key}`
-        : key;
+      // Case-insensitive: `startsWith('http')` treated `HTTPS://example.com/x`
+      // as a relative path and prefixed it with `/`, producing a URL that
+      // resolves nowhere.
+      return /^(https?:\/\/|\/|data:)/i.test(key) ? key : `/${key}`;
     };
 
     // A. Priority: Complex Object/Array from Firestore (Rowy image upload fields)
