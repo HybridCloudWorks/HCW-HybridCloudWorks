@@ -111,6 +111,24 @@ export const isVideoUrl = (value) => {
   return VIDEO_EXTENSIONS.has(filename.slice(dot + 1).toLowerCase());
 };
 
+/**
+ * A URL pointing into the retired Firebase Storage bucket (#518).
+ *
+ * Both shapes are the same dead bucket: `storage.googleapis.com/<bucket>/…` is
+ * the GCS form and `firebasestorage.googleapis.com/v0/b/<bucket>/o/…` is the
+ * Firebase form of the identical object. Neither resolves — the project was
+ * decommissioned with the migration to Azure.
+ */
+const isDeadFirebaseStorageUrl = (value) => {
+  try {
+    const { hostname } = new URL(value);
+    return hostname === 'storage.googleapis.com' || hostname === 'firebasestorage.googleapis.com';
+  } catch {
+    // Not an absolute URL, so not one of these.
+    return false;
+  }
+};
+
 export const normalizePublicImageUrl = (value) => {
   const url = typeof value === 'string' ? value.trim() : '';
   if (!url) return null;
@@ -121,18 +139,26 @@ export const normalizePublicImageUrl = (value) => {
   // falls back to its placeholder instead of showing an empty frame.
   if (isVideoUrl(url)) return null;
 
-  try {
-    const parsed = new URL(url);
-    if (parsed.hostname === 'storage.googleapis.com') {
-      const pathSegments = parsed.pathname.split('/').filter(Boolean);
-      if (pathSegments.length >= 2) {
-        const [bucket, ...rest] = pathSegments;
-        return `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(rest.join('/'))}?alt=media`;
-      }
-    }
-  } catch {
-    return url;
-  }
+  // THE FIREBASE BUCKET IS GONE (#518).
+  //
+  // This used to rewrite `storage.googleapis.com/<bucket>/<path>` into the
+  // `firebasestorage.../o/<enc>?alt=media` form, on the understanding that it
+  // was preserving images for migrated content. Checked 2026-09-12: the bucket
+  // root and all 28 asset URLs still referenced by the content manifest return
+  // **404**, against live controls. So the rewrite turned one dead URL into
+  // another dead URL, and five published articles rendered a broken frame with
+  // `og:image` and `twitter:image` pointing at 404s — breaking link previews as
+  // well as the page.
+  //
+  // Treating them as absent is what the rest of this function already does for
+  // a video, and it is the right answer for the same reason: every caller's
+  // falsy branch then omits the hero, drops the social tags, and falls a card
+  // back to its placeholder. A missing image renders better than a broken one.
+  //
+  // Not a data migration. The rows still hold these URLs and are now inert;
+  // this holds whether or not they are ever cleaned up, and covers any row that
+  // is restored from an old backup.
+  if (isDeadFirebaseStorageUrl(url)) return null;
 
   return url;
 };

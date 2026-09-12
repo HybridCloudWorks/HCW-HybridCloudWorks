@@ -122,6 +122,10 @@ export function isExternalUrlString(value) {
     return false;
   }
   if (!['http:', 'https:'].includes(parsed.protocol)) return false;
+  // Still excluded, and now for a second reason (#518). These were excluded as
+  // "already ours" during the migration; the bucket is gone, so a fetch would
+  // 404 and there is nothing to re-host either way. Removing the check would
+  // only trade a skip for a failed download.
   if (
     parsed.hostname === 'firebasestorage.googleapis.com' ||
     parsed.hostname === 'storage.googleapis.com'

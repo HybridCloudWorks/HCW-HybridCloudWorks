@@ -38,16 +38,21 @@ function normalizeCertification(rawData) {
     // Helper to clean/validate URLs
     const cleanUrl = (val) => {
       if (!val || typeof val !== 'string') return undefined;
-      let key = val.trim();
+      const key = val.trim();
       if (key === '') return undefined;
-      // Convert GCS URL format to Firebase Storage REST format so storage rules apply
-      const gcsMatch = key.match(/^https:\/\/storage\.googleapis\.com\/([^/]+)\/(.+)$/);
-      if (gcsMatch) {
-        key = `https://firebasestorage.googleapis.com/v0/b/${gcsMatch[1]}/o/${encodeURIComponent(gcsMatch[2])}?alt=media`;
-      }
-      return !key.startsWith('http') && !key.startsWith('/') && !key.startsWith('data:')
-        ? `/${key}`
-        : key;
+      // The Firebase Storage bucket is gone (#518). This used to rewrite the
+      // GCS form into the Firebase REST form "so storage rules apply"; both
+      // point at the same decommissioned project, so the rewrite produced one
+      // dead URL from another. Undefined, so the caller’s existing falsy
+      // branch omits the image rather than rendering a broken frame.
+      // `http` and case-insensitive, matching what blogUtils.js gets for free
+      // from `new URL().hostname` — the two must agree or one page renders a
+      // broken image the other has already learned to skip.
+      if (/^https?:\/\/(storage|firebasestorage)\.googleapis\.com\//i.test(key)) return undefined;
+      // Case-insensitive: `startsWith('http')` treated `HTTPS://example.com/x`
+      // as a relative path and prefixed it with `/`, producing a URL that
+      // resolves nowhere.
+      return /^(https?:\/\/|\/|data:)/i.test(key) ? key : `/${key}`;
     };
 
     // A. Priority: Complex Object/Array from Firestore (Rowy image upload fields)

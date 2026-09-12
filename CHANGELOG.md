@@ -55,251 +55,6 @@ This project has not cut a tagged release; entries are grouped under
   exported constant for the same reason it was worth doing for the App Role
   names: a second spelling is a silent drift.
 
-### Fixed
-
-- **A 401 from the API carried no reason, so the admin portal had to guess
-  (#517).** `deny(401, …)` set only `Content-Type` — no `WWW-Authenticate`,
-  contrary to RFC 6750 — so an expired token, a rejected token and a token
-  missing the delegated scope all reached the browser as the same bare status
-  code. `classifyFailure` inferred "expired session" from all three and offered
-  the same interactive re-authentication, which recovers only the first. For the
-  other two it is a wasted redirect that teaches the operator nothing.
-
-  This is the case #503's own guard comment anticipated in so many words: *"a
-  misconfigured audience, say, where the new token is rejected exactly like the
-  old one."* The once-per-tab flag caught it after one wasted redirect; this
-  catches it before.
-
-  **The RFC's error codes happen to draw exactly the line the client needs.**
-  `invalid_token` means the credential is bad and signing in again fixes it.
-  `insufficient_scope` means the credential verified and lacks a permission, so
-  re-acquiring it returns an identical token and an identical refusal. A 401
-  with no credential at all carries no error code, which RFC 6750 reserves for a
-  credential that was presented and refused. The client now keys on that: a new
-  `UNKNOWN_REASON.CONFIGURATION` renders "Admin access is misconfigured" with the
-  API's own description and **no retry button**, and it does not spend the one
-  automatic recovery either.
-
-  **One header made the difference between working and invisible.** The API is
-  cross-origin, and `WWW-Authenticate` is not CORS-safelisted, so
-  `res.headers.get('www-authenticate')` returned null in the browser however
-  carefully the API set it. `cors.js` now names it in
-  `Access-Control-Expose-Headers`, on the actual response rather than only the
-  preflight.
-
-  A 401 with no challenge — an older API, or a proxy that strips the header —
-  behaves exactly as it did before, and there is a test pinning that.
-
-  A 401 carrying **no credential at all** sends a bare `Bearer realm=""`. RFC
-  6750 §3 is explicit that such a response "SHOULD NOT include an error code or
-  other error information" — there is no failed attempt to describe, and
-  describing one would only tell an unauthenticated caller how the endpoint
-  behaves. The client reads the absent code as "sign in", which is right.
-
-  The header builder escapes rather than strips, so a description survives the
-  round trip to the client's parser intact; CR/LF are normalised to a space,
-  because a quoted-string cannot carry them and a newline in a header value is
-  response splitting.
-
-  The `invalid_token` description is a fixed sentence rather than the verifier's
-  own message. `verify-token.js` says its claim assertions "land in
-  `admin_audit_logs` and never reach the client", and the header becoming
-  readable is exactly when that promise needed enforcing: those messages
-  separate expired from bad-signature from wrong-tenant, and `jwt audience
-  invalid. expected: …` names configuration outright. The client cannot act on
-  the difference — all of them mean sign in again — so only the audit row keeps
-  it.
-
-### Changed
-
-- **MFA is enforced by security defaults, not Conditional Access (#514).**
-  Checked against the live tenant on 2026-09-12: security defaults are enabled
-  in tenant properties, and Conditional Access is unavailable because the tenant
-  is not licensed for Entra ID P1. `AdminAuthGuard.jsx`, `entraAuth.js` and ADR
-  0006 all stated Conditional Access, which would have sent anyone looking for a
-  policy to an empty blade.
-
-  Two consequences are now written down rather than left to be rediscovered:
-  security defaults cannot be scoped or excepted, so a break-glass path has to
-  survive MFA rather than bypass it; and Entra **disables security defaults
-  automatically** the moment any Conditional Access policy is created — so
-  licensing P1 later is not a free upgrade, it is a change that silently
-  replaces the MFA control.
-
-  `lib/auth/roles.js` has said since it was written that Continuous Access
-  Evaluation "does not cover us", and now carries the citation for it: CAE
-  requires that both the client and the resource be CAE-enabled, and CAE-enabled
-  resources are Microsoft first-party services. Declaring `CP1` would take on the
-  obligation to handle claims challenges while no resource in the call graph can
-  issue one.
-
-- **A deploy build with the Entra variables unset shipped a sign-in pointed at
-  every tenant (#516).** `msalConfig.js` defaulted the authority to `common`
-  when `VITE_ENTRA_TENANT_ID` was empty, and `vite.config.js` validated exactly
-  one variable — `VITE_AZURE_FUNCTIONS_URL` — so nothing stopped the build.
-  `deploy-azure-frontend.yml` even carried a comment acknowledging it.
-
-  **What that actually produced is worth stating, because it is not what it
-  sounds like.** `common` was never a route to backend access: the API pins one
-  tenant by issuer, so a token from another directory could never have been
-  authorized. What it produced was a SPA that accepted a sign-in from any Entra
-  tenant or personal Microsoft account, stored that identity in `localStorage`,
-  rendered signed-in UI, and then 401'd on every call — a confusing partial
-  success where an unambiguous failure belonged.
-
-  The backend has had this instinct since it was written: `verify-token.js`
-  refuses to start without its two settings, and `infra/variables.tf` rejects an
-  empty audience because an empty one silently disables audience validation. The
-  client half never got it, and now has it.
-
-  **Shape, not presence.** A presence check would have caught neither realistic
-  mistake, because `.env.example` recommended `common` for the tenant and
-  `/.default` for the scope — both non-empty, both wrong. A GUID test rejects
-  empty, `common`, `organizations` and `consumers` in one rule, and the error
-  lists every problem at once so three missing variables do not cost three
-  deploy attempts. `/.default` is deliberately still allowed: it is a real
-  delegated request shape, just not this registration's, and the lever for that
-  is documentation rather than the build.
-
-  `REQUIRE_API_BASE` keeps its name even though it now gates more than the API
-  base. Renaming it is fail-open — the deploy workflow is what sets it, so a
-  rename landing without the matching workflow edit would silently disable every
-  check with nothing going red.
-
-  `msalConfig.js` now falls back to an all-zero GUID rather than throwing. A
-  module-scope throw would take out the several test files that import it
-  transitively without mocking, and would convert a build-time problem into a
-  runtime crash on a path that already has a working failure mode: MSAL fails at
-  authority resolution, `onAuthStateChanged` reports null, and the sign-in card
-  renders.
-
-  Also corrected: `.env.example` no longer suggests `common` or `/.default`, and
-  `functions/local.settings.json.example` gained `ENTRA_TENANT_ID` and
-  `ENTRA_API_AUDIENCE` and lost `FIREBASE_PROJECT_ID` — without the two Entra
-  settings a local `func start` could not reach `getDefaultGuard()` at all,
-  because `createTokenVerifier` throws on both.
-
-- **The API accepted an ID token as an access token (#515).**
-  `functions/src/lib/auth/verify-token.js` has always opened with DECISION 3,
-  which names the hazard precisely: *"With a single registration, an ID token
-  minted for the SPA carries `aud = <client-id>` — indistinguishable from an
-  access token for the API."* The tenant runs one registration —
-  `scripts/cutover/01-entra-spa.ps1` put an SPA platform on the API's own
-  registration — so the hazard was live rather than hypothetical. An ID token
-  carried the same `aud`, the same v2 issuer and the same signing key as an
-  access token, and because Entra emits assigned app roles in **both** token
-  types it carried `roles: ['Admin']` too. Every check the guard made, it
-  passed.
-
-  **Defence in depth, not an escalation.** Both tokens sit in the same browser
-  cache for the same user, so holding one implies holding the other and there is
-  no cross-user path. But it was this codebase's own documented invariant,
-  violated in production, and the second half of DECISION 3 — "reject anything
-  without a `scp`/`roles` claim" — had never been implemented. `scp` appeared
-  exactly once in `functions/src`, in that sentence.
-
-  **That proposed remedy would not have worked either.** `roles` is in ID tokens,
-  so a roles-presence check separates nothing. `scp` is the claim Entra puts in
-  delegated access tokens and never in ID tokens, and it is now required in
-  `authenticate()` — so `requireUser` endpoints inherit it, which matters because
-  `bootstrapCurrentUserAdmin` is reached that way. Agents are unaffected:
-  `require-agent.js` runs its own client-credentials path, and now refuses a
-  token bearing `scp` so the two guards are disjoint by construction rather than
-  by the two role names happening to differ.
-
-  Alongside it, the verifier now asserts what Microsoft's API-protection
-  guidance asks for and jsonwebtoken does not check: `tid` is a GUID and matches
-  the configured tenant, `iss` agrees with that `tid`, and `ver` is `2.0`. The
-  v1 `sts.windows.net` issuer is gone — with a bare-GUID audience it could never
-  pass, but `infra/variables.tf` documents the `api://` audience as a supported
-  alternative, and the day someone took that option the v1 issuer would have
-  gone live with no version gate behind it. The assertions run *inside* the
-  `jwt.verify` callback, so every claim they read has already had its signature
-  checked and `tid` reaching an audit row is not attacker-controlled.
-
-  **Before deploying, confirm `scp` is in the live token.** Admin → Health lists
-  the claims present in the caller's own token; `scp` must be among them. If it
-  is not, every admin call returns 401 with a `missing-scope` row in
-  `admin_audit_logs` — a clean, attributable failure, and one revert away.
-
-- **An expired token told the owner he was not authorized, and offered to
-  re-provision him (#503).** Opening `/admin/integrations` on 2026-09-11 showed
-  **Access Denied — spatino@hybridcloudworks.com is not authorized** with a
-  **Bootstrap My Admin Access** button. Signing out and back in "fixed" it,
-  which is the tell: the problem was never authorization. The `admins/{oid}`
-  record was correct the whole time.
-
-  **Three outcomes were returning one value.** `fetchAdminStatusFromBackend`
-  answered `{ isAdmin: false }` for a rejected token, for a call that never
-  completed, and for a server that genuinely said no. Only the third is an
-  authorization answer; the first two are a check that could not run, reported
-  as a check that ran and refused. The warning string it logged —
-  `'Not an admin or token expired'` — admitted on the line above that it could
-  not tell which. That is the same defect class as `unknown` versus
-  `disconnected` on the Recording Hub and the 401-versus-403 saga that cost
-  #358 two days.
-
-  The hook now returns a discriminated `accessState` — `authorized`,
-  `unauthorized`, `unknown` — and `unknown` is never cached, so a transient
-  failure does not sit in front of the portal for five minutes. `authedFetch`
-  keeps the HTTP status on the error it throws and `acquireApiToken` tags
-  every failure with the one action that recovers it, which is what makes the
-  three distinguishable at all: `requireUser` on the server denies only with
-  401, so a non-200 from this route is never a verdict about the caller.
-
-  **What the owner sees now.** An expired session redirects to Entra and comes
-  back signed in, without a denial and without anything to click — once per
-  tab, because a second automatic attempt against a genuinely broken
-  configuration is an infinite redirect loop with no screen to read. After
-  that it is an honest "Could not verify your access" card with a **Sign in
-  again** button; an unreachable API gets the same card with **Try again**.
-  Access Denied is now reached only by a real 200 saying so.
-
-  **And the bootstrap button is no longer guessed at.** `getCurrentAdminStatus`
-  returns `canBootstrap`, the server running the same three-way gate the POST
-  enforces, so the button appears only when pressing it would succeed — never
-  for an account that already holds a registry row, active or deactivated.
-  Offering a deactivated admin a self-promotion to `super_admin` is the
-  opposite of what the deactivation meant.
-
-- **The Monday refresh put the six GitHub exams straight back into the Azure
-  catalogue, hours after #507 removed them (#496).** Found by dispatching the
-  workflow #499 had just widened — run 34627119281 on 2026-09-11 opened a pull
-  request re-adding GH-100, GH-200, GH-300, GH-500, GH-600 and GH-900, with
-  their six study-guide outlines behind them, +1167 lines of them.
-
-  **Nothing was broken; the decision was simply in a place no script reads.**
-  GitHub certification moved onto Microsoft Learn, so all six sit on the
-  Microsoft Certifications poster and in the credentials browse API — both of
-  which are this updater's sources. It had always been offering them, and
-  before #496 the catalogue accepted them. #496 recorded the removal in the
-  catalogue's file header and in a cross-catalogue test, and
-  `update-applied-skills.mjs` reads neither. So the rule now lives where the
-  automation meets it: the script refuses any exam another catalogue owns,
-  before building the row.
-
-  **A prefix, not the six codes.** GitHub adding a GH-700 would recreate the
-  duplication exactly, and it belongs to `/github/education` for the same
-  reason the six do — the Azure `LEVEL_META` has no Professional rung, so a
-  GitHub exam cannot be stated truthfully there whatever is typed. Refusals are
-  reported in the pull request body under their own heading rather than dropped
-  silently, and deliberately not in the "not added" bucket, which means "nobody
-  could confirm this exam" and would send a reviewer hunting a source problem
-  that does not exist.
-
-  **The workflow also checked the wrong thing.** Its test step ran
-  `azure/certifications.test.js` alone, which by construction cannot see a
-  contradiction with another catalogue — so the run went green and left the
-  defect for the pull request's CI to catch. It now runs
-  `education-catalogues.test.js` too, where the cross-catalogue guard lives,
-  so the workflow refuses to open that pull request itself.
-
-  Worth recording that the guard worked: `one exam, one catalogue (#496)` is
-  what failed on the bad pull request, on the same day it was written. The
-  regression was caught by CI, not by a reader — but by the pull request's CI
-  rather than the workflow's, which is the gap closed here.
-
-### Added
 
 - **The Monday cron now refreshes the Azure study-guide outlines too, not just
   the catalogue (#499).** The outlines shipped with #498 and refreshed only by
@@ -344,674 +99,6 @@ This project has not cut a tagged release; entries are grouped under
   non-zero "Failed" count means the page still renders an outline, but one
   older than the date the file claims.
 
-### Changed
-
-- **The three dated catalogue rows were settled without waiting three weeks
-  for them (#494).** #494 held four obligations that all read as "come back
-  after 2026-09-30". Three of them did not need the wait, and answering them
-  now turned up two things the issue had wrong.
-
-  **AZ-800 was missing from the issue's own table.** It carries the same
-  `expiryDate: '2026-09-30'` and the same `replacedBy: 'az-802'` as AZ-801, so
-  it trips in the same breath — four rows go stale on 2026-10-01 across three
-  catalogues, not the one the issue expected a person to fix. A test now pins
-  the exact list, so the next dated row is a named expectation rather than a
-  surprise.
-
-  **The pages were never going to lie, which changes what the alarm is for.**
-  `deriveStatus` reads the dates at render time, so on 2026-10-01 AZ-800 and
-  AZ-801 render `retired` and PAA renders `active` with nobody touching a file.
-  No visitor is shown a retired exam as testable. What goes wrong on that day
-  is narrower and worth stating precisely: a stored `status` its own dates have
-  overtaken is a claim nobody has rechecked against the vendor. Pinned at a
-  fixed future date so it is known rather than discovered.
-
-  **Whether the Monday run self-heals AZ-801 was answerable today, and the
-  answer is "in one of three cases".** #494 recorded it as "an expectation, not
-  a guarantee — nobody has watched that workflow correct a row yet", but
-  `reconcileLifecycle` never reads the calendar: it compares the file's status
-  against the source's by `LIFECYCLE_RANK`, so what the 2026-10-05 run will do
-  is decided entirely by what Microsoft reports, and every branch was
-  exercisable immediately. It retires the row when Microsoft reports `retired`
-  on the same date. It does **not** when Microsoft reports a different
-  retirement date — the date conflict is caught before rank and the file wins,
-  leaving the row stale with one report line as the only clue. It does **not**
-  when Microsoft is slow and still reports `expiring`, and that case reports
-  nothing at all. All three are rule 3 working as designed, and none of them
-  was covered: no test anywhere fed the reconciler a source saying `retired`,
-  so the forward move the issue was waiting on had never been exercised.
-
-  **AZ-802 closes the Azure half outright** (owner, 2026-09-11): it becomes the
-  single test replacing both AZ-800 and AZ-801. That is what makes those two
-  rows need no vendor round-trip on 2026-10-01 — the successor is already known
-  and already in the file, which `certifications.test.js` has asserted since
-  #464. The gap was that nothing said the successor is itself undated: AZ-802
-  is `active` and carries no dated field at all, so `findStaleStatuses` can
-  never name it and it is not a third row to revisit later. Now pinned, and it
-  fails the day Microsoft puts a date on AZ-802 — which is the right moment to
-  look, rather than meeting a dated successor as a red build months later with
-  no record of why anyone expected otherwise.
-
-  **MLA-C02 confirmed a false positive**, as #494 argued: `dateProblems` reads
-  only `betaEndDate` and `gaDate` for a beta row, never `betaStartDate`. Pinned
-  both ways — silent on 2026-10-01, and firing on 2027-01-15 once its `gaDate`
-  is reached — so the reasoning is enforced rather than restated in prose the
-  next time somebody sorts by date and panics.
-
-  **PAA was re-read against Google on 2026-09-11** and nothing had moved:
-  still "open until September 30", three hours, ~80 questions, $120 against
-  $200 retail, English, one-year validity, still no GA date. `DATA_AS_OF` is
-  deliberately not bumped — one row was re-read, not all fifteen credentials,
-  and that field is a claim about the whole file.
-
-  The one thing no day before 2026-10-01 can supply is what the credential
-  becomes, because the post-beta state does not exist yet. That obligation is
-  carried by the alarm rather than by the board: on 2026-10-01 the suite fails
-  naming PAA and pointing at `DATA_SOURCE`, which is the instruction the ticket
-  held, delivered on the day it becomes actionable.
-
-### Fixed
-
-- **The same GitHub exam was rendering at two different levels on one screen,
-  and the Azure catalogue could not have been made right (#496).** GH-100,
-  GH-200, GH-300, GH-500, GH-600 and GH-900 were carried in both
-  `frontend/src/data/azure/certifications.js` and
-  `frontend/src/data/github/certifications.js`. `/education` renders every
-  catalogue side by side, so GH-200 appeared in the Foundational row under
-  Azure and the Associate row under GitHub simultaneously.
-
-  **Four of the six disagreed, not one.** The issue caught GH-200 because that
-  is what the index surfaced; GH-100 and GH-500 are `Professional` in the
-  GitHub catalogue against `Fundamentals` in Azure's, and GH-300 `Associate`
-  against `Fundamentals`. Five of the six sat at `Fundamentals` in Azure — a
-  batch default rather than a verified rung.
-
-  **The Azure copy was unfixable, which decided it.** That file's `LEVEL_META`
-  defines Fundamentals, Associate, Expert and Specialty, so `Professional` has
-  no rung there at all: GH-100 and GH-500 could not be stated truthfully in
-  that file whatever was typed into them. The GitHub catalogue, by contrast,
-  was verified per exam against each credential's own Microsoft Learn page
-  three times (#461, twice under #469) and its header records which vendor
-  pages are unreliable and why. Owner decision 2026-09-11: the six rows leave
-  Azure, and GitHub exams belong to `/github/education`. Booking on Microsoft
-  Learn is a real fact about these exams; it did not make a second copy of the
-  rows worth keeping.
-
-  The six now-unreachable `gh-*` study-guide outlines went with them —
-  `outlineFor` is consumed only by the Azure detail page, and
-  `study-guides.test.js` asserts no outline exists for an exam the catalogue
-  does not carry. `eligibleCerts` in `scripts/update-study-guides.mjs` reads
-  the catalogue, so the generator drops them on its own from here.
-
-  **Guarded, because nothing could have caught this.** Every assertion in
-  `education-catalogues.test.js` read one catalogue at a time, so a
-  contradiction between two of them was invisible by construction. A new test
-  fails when any exam code is carried by two providers — codes rather than
-  levels, since the vendors' own vocabularies do not reconcile (AWS
-  `Foundational`, Azure `Fundamentals`, GitHub `Foundations` are one rung) and
-  a mapping table would be another thing to keep correct. Verified against the
-  pre-fix file: it names all six exams and both levels for each.
-
-- **The largest catalogue had no `DATA_SOURCE`, and the test that asserts one
-  covered the other seven (#496).** `azure/certifications.js` exported none,
-  and it sat outside the `CATALOGUES` list in `education-catalogues.test.js`,
-  so it was the one catalogue that could omit it without failing a build — and
-  did, from #461 until now. `EducationIndexPage` carried a documented `??`
-  fallback so the freshness line would still name a vendor.
-
-  It matters most there of any catalogue: Azure is the largest, it is the one
-  refreshed automatically by `update-learn-catalogue.yml`, and so it is the one
-  whose freshness claim is most worth a reader being able to check. The export
-  now names the Microsoft Learn credentials browse page — the same URL the
-  fallback used, so the rendered page does not change — the fallback and its
-  constant are gone, and Azure joined `CATALOGUES`, which puts all eight under
-  the assertion. Verified by removing the export again: the suite goes red
-  naming `azure DATA_SOURCE.label`.
-
-- **A botched find-and-replace had been live on the docs site for two weeks
-  (#506).** `docs/standards/required-inputs.md` opened by saying it had moved
-  "from `TODO.md` on 2026-08-29, when that file was retired and its open work
-  folded into TODO.md" — a sentence that says a file was folded into itself.
-  Later it offered the reassurance that "a citation reading
-  `Required-Inputs §4.5` now reads `Required-Inputs §4.5`".
-
-  The source was `REVIEW.md`. `git show e7271df9` records the rename as
-  `REVIEW.md => wiki/Required-Inputs.md`, and that commit's own message warns
-  **"THE BLANKET RENAME WAS THE WRONG TOOL AND I USED IT FIRST."** It caught
-  the validator and the casing guard; it did not catch the prose, and nothing
-  else could. Repaired from git history rather than guessed.
-
-- **The naming standard told readers the wrong live resource names.** It ended
-  with "**These are not the live names.** Today's estate is
-  `hcw-functions-prod`, `hcw-cosmos-prod`, `hcw-keyvault-prod`,
-  `hcwstorageprod` in `rg-hybridcloudworks-prod`" — contradicting its own
-  centralus section, every runbook, and `infra/variables.tf`, which declares
-  `func-site-prod-cus-01`, `cosmos-site-prod-cus`, `kv-site-prod-cus-01` and
-  `stsiteprodcus01`. Checked against the live estate, not just the code:
-  `func-site-prod-cus-01.azurewebsites.net` answers 403 (it exists, behind the
-  SCM lock) and `hcw-functions-prod.azurewebsites.net` does not resolve at
-  all. The grandfathering rule the paragraph existed to state is kept.
-
-- **About thirty citations pointed at two root documents that no longer
-  exist.** `CHECKLIST.md` merged into `REVIEW.md` on 2026-08-20 and `REVIEW.md`
-  was deleted on 2026-08-29; `variables-and-secrets.md` still uses
-  `CHECKLIST §n` as a table column roughly twenty times.
-
-  **The citations are kept and explained rather than rewritten**, because a
-  mechanical renumber would have been wrong: CHECKLIST was organised by
-  consumer (§1 Functions identity, §7 CI inputs) and Required-Inputs by store
-  (§4.1 workspace, §4.6 Key Vault), so `§7` does not become `§4.7`. A note now
-  says what CHECKLIST was and that its numbers do not carry across. The
-  citations remain the record of where each value was inventoried when its
-  placement was decided.
-
-- **Two decision records claimed a reason that no longer held.** The Container
-  Apps CI-runner ADR was kept on the ground that `infra/ci-runner.tf` "still
-  holds the gated-off resources"; that file, `infra/runner-image/` and
-  `build-runner-image.yml` were deleted on 2026-08-24. The cost analysis and
-  the resource-validation report cited `fix/go-live-remediation` as a pending
-  branch five times; it does not exist on `origin`. The ADR bodies are
-  untouched — the register's rule is that an accepted ADR is immutable — and
-  the notes above them now carry the correction.
-
-- **Opaque references now say what they mean.** Register rows reading "Give
-  T-519's signal a path" and "Weigh closing T-718 against its cost" state the
-  thing instead of the ticket, and one note explains that the `T-NNN` scheme
-  was retired on 2026-09-05 when work moved to issues — so every `T-` in an
-  accepted ADR is a citation, not something to look up.
-
-- **Five history pages were bare checklists.** Four presented unticked
-  July-2026 boxes that read as open work on a site whose front page says the
-  migration finished, including one instructing a move to the GitHub Wiki that
-  ADR 0027 reversed. Each now opens with what a reader learns from it.
-
-- **The front page linked ten operator pages and none of the five generic
-  walkthroughs**, which are the only pages written for a stranger and the only
-  ones carrying no estate names at all. It now opens with where to start if
-  you are not the owner.
-
-### Removed
-
-- **Three history pages that showed a visitor nothing (#506).**
-  `smoke-test-signoff.md` was a blank form: 37 rows, every value column empty,
-  no run ever recorded. It is not evidence, it is the shape evidence would
-  have taken, and the real cutover evidence is in the migration runbook and
-  the phase-4 record. `implementation-plan.md` shared 10 of its 10 headings
-  with `implementation-todo.md`. `legacy-azure-migration-task-tracker.md` was
-  the earliest of the three checklists, superseded by both, still asking for
-  an Azure OpenAI resource retired on 2026-08-19.
-
-  **Runbooks were reviewed and all six are published unchanged**, with their
-  real resource names — owner decision, 2026-09-11. The names are public by
-  construction: the Function App answers on its `azurewebsites.net` hostname,
-  the repository is public, and `infra/variables.tf` carries the defaults. The
-  reasoning in those pages is also inseparable from the names.
-
-- **The 80-page Firebase-era archive is deleted from the documentation site
-  (#505).** It was 54% of the published corpus, it described a platform this
-  workload stopped running on in August 2026, and ADR 0027 had recorded that
-  pruning it was a separate decision. This is that decision.
-
-  **The measurement is what settled it.** Of the 79 content pages, **78 were
-  reachable from nothing** — no ADR, runbook, standard, architecture page or
-  history page linked to any of them. The archive index's own justification,
-  that "several ADRs are only legible next to them", was false when checked
-  page by page: the single apparent match was an ADR quoting a former file
-  path that happens to share a filename, not a link. `mkdocs build --strict`
-  fails on a broken internal link and passes after the deletion, which is the
-  same fact proved a second way.
-
-  It was also where every piece of noise lived. Every mention of a password
-  and every contact address on the whole site was in `archive/` and nowhere
-  else, all of it in templates and shell examples for the retired platform.
-  The redaction gate now reads 71 files instead of 151.
-
-  Deleted rather than hidden, because a page that is published, unmaintained,
-  describes a retired platform and is linked from nothing is not history a
-  reader benefits from — it is noise competing with the 68 pages that describe
-  the system as it is. Git history keeps every one of them, which is where
-  evidence of a retired platform belongs. What a reader loses is nothing they
-  could previously reach by following a link: the Firebase era is still
-  described where it is load-bearing, in ADRs 0001 to 0007, in `history/`, and
-  in ADR 0023 on the estate's retirement.
-
-  **The guard added hours earlier caught its own allowlist going stale**, which
-  is the clearest evidence it was worth writing. `docs/archive/` sat in
-  `no-wiki-pointers.test.mjs`'s exemption list; the assertion that fails when
-  an entry matches no tracked file fired the moment the folder went, so the
-  dead exemption was removed in the same change rather than left as a hole.
-
-### Fixed
-
-- **Thirteen references still sent readers to `wiki/`, five days after it was
-  deleted — including one inside a production alert (#502).** The Wiki was
-  retired on 2026-09-06 by ADR 0027 and `wiki/` was removed from the
-  repository, but the pointers into it were not, and none of them was a dead
-  link in prose. They were instructions:
-
-  `monitor-functions-registered.yml` told the owner, in the body of the alert
-  email that fires when the Function App loses registered functions, to read
-  *The failure with no alert* in `wiki/Alerting-And-Support.md`. The one
-  moment that path is read is the one moment it has to resolve, and for five
-  days it resolved to nothing. Four files across two packages cited
-  `wiki/Blog-Machine.md` as "the cross-package contract of record" — the
-  document a reader is sent to in order to keep the frontend and backend
-  module parsers in step. Two more cited
-  `wiki/0025-cosmos-firewall-datacenter-sentinel.md` for why the manifest job
-  opens a firewall window.
-
-  Four more sat in Terraform comments in `infra/`, naming the record for a
-  firewall rule and an output. All thirteen now point at `docs/`, and the
-  alert carries the published URL beside the path so it is reachable from a
-  phone without a checkout.
-
-  **Nothing noticed because nothing could.** A comment is not compiled and a
-  shell string inside a workflow is not linted, so a documentation move that
-  passed every check left live instructions aimed at a deleted folder.
-  `scripts/no-wiki-pointers.test.mjs` is the thing that notices: it walks
-  every tracked text file and fails on a `wiki/` pointer, with an allowlist
-  for the places history must still be able to say the word — the changelog,
-  ADR 0027 itself, the archived and historical snapshots, and the comments
-  that explain the migration. A second assertion fails when an allowlist entry
-  matches no tracked file, so the exemption list cannot quietly rot into a
-  hole. Verified by reintroducing the alert's pointer: it failed with the file
-  and line.
-
-  **Review found the guard's own blind spot, which is the more useful half.**
-  The first version read Markdown, JavaScript, YAML and PowerShell — and not
-  Terraform, so four live pointers in `infra/` sat behind the gap:
-  `cosmos.tf`, `outputs.tf` and two in `variables.tf`, each telling an
-  operator which document records why a firewall rule or an output exists.
-  The same blind spot was in the grep that found the original nine, so a
-  guard written to catch this class shipped missing a third of it. The
-  extension list is now broad, and a third assertion fails when a tracked
-  file type carrying five or more files is never read at all — so the next
-  language added to the repository is a decision rather than an oversight.
-
-  **The migration itself was complete, and that was checked rather than
-  assumed.** All 142 Wiki pages as they stood before retirement were matched
-  to a file under `docs/`: 137 by name, and the five that are Wiki furniture
-  rather than content — `Home`, `_Sidebar`, the ADR index, the ADR template
-  and the legacy documentation index — to `docs/index.md`, the MkDocs nav,
-  `docs/decisions/index.md`, `docs/decisions/template.md` and
-  `docs/archive/index.md`. Every page in the live Wiki is already a stub
-  pointing at the docs site, and the Wiki is disabled: a reader who follows
-  the old URL is redirected to the repository. The docs site serves all of it
-  at https://docs.hybridcloudworks.com/, over five spot-checked sections.
-
-- **The Social Hub's "AI Caption" button reported "Failed to generate
-  caption" and nothing else, while the API had named the cause one field
-  away (#498).** `generateSocialCaption` answers
-  `{ error: 'Failed to generate caption', message: <why> }`, and
-  `lib/api.js` threw only `error`. So the toast showed the label and
-  discarded the sentence that said whether a provider had no key, a credential
-  was rejected, or the model returned nothing. The same shape that cost #358
-  two days on Publer — the status shown, the reason dropped — reproduced
-  inside this client. The thrown message now carries `message` after the
-  label, guarded so a message that merely restates the error is not repeated;
-  five cases hold it. The underlying cause of the owner's failure is not
-  known from here, and that is the point: the next press will say.
-
-- **Listen & Learn's heading was white on white in light mode.** The one bare
-  `text-white` the #497 sweep missed, because the component lives under
-  `components/education/` and the sweep's file list did not reach it. Fixed
-  the same way and the file added to the guard, so it cannot come back.
-
-- **The two secondary links in the Azure detail sidebar now line up with the
-  primary button.** They centred their content, so labels of different
-  lengths started at different x; all three are left-aligned with a shared
-  icon column, which is what the owner drew a line beside.
-
-- **The weekly Learn catalogue workflow ends quietly when nothing changed
-  instead of failing at "Artifact not found" (#461 item 3).** The refresh job
-  uploads the catalogue only when it changed, but the commit job downloaded it
-  unconditionally, so the first hand-triggered run after #467 (34408439025,
-  2026-09-09) failed on a catalogue that was already current. The refresh job
-  now exports `changed` and the commit job runs only when it is `true`, so an
-  unchanged week shows the job as skipped; the tripwire test asserts the gate.
-- **js-yaml 4.3.1 → 4.3.2 in the frontend lockfile** (Dependabot alert 148,
-  GHSA-2883-xcg3-v3hh, high: `maxTotalMergeKeys` did not bound CPU use for
-  empty merge sources). Lock-only: `package.json` already allowed the patch.
-
-- **Listen & Learn is mounted on the AWS certification pages, its "coming
-  soon" copy no longer names GitHub, every provider in the registry is
-  checked for a dated Learn catalogue, and a flag-disabled timer is visible
-  in Log Analytics once per restart (#461, items 10–12).** The audit found
-  `ListenAndLearn.jsx` telling readers that study podcasts were "live for
-  Azure, GitHub and AWS" while only the Azure detail page mounted the
-  component: AWS had a detail page without it, and GitHub has no detail page
-  at all. `aws/education/CertDetailPage.jsx` now mounts `ListenAndLearn` with
-  `platform="aws"` under the same gate the Azure page uses — the block, and
-  the audio control inside it, render only when published episodes exist —
-  and the backend's `SUPPORTED_PLATFORMS` already accepted `aws`, so nothing
-  changed there; a page test covers both the populated and the empty case.
-  The copy now says Azure and AWS (owner decision: honesty over building a
-  GitHub page). Audio stays Gemini TTS; the speech provider code is
-  untouched. `provider-coverage.test.js` gains a registry-driven check:
-  every provider in `PROVIDER_ALIASES` must have a
-  `src/data/<provider>/certifications.js` or `education.js` exporting a real
-  `DATA_AS_OF` and no row `findStaleStatuses` flags, and it names the
-  provider that has none. That was `finops`, whose page carried its own
-  four rows with no date: they are now `src/data/finops/education.js`,
-  verified 2026-09-09 against learn.finops.org (where
-  finops.org/certification/ redirects) — Practitioner, Professional and
-  Engineer are listed and active, the Engineer row takes the Foundation's
-  name "FinOps Certified Engineer" and its ten-hour sizing, every link
-  points at the page that exists today, and "FinOps for Platform Engineers"
-  was never a certification: the nearest thing, the "FinOps for Engineers"
-  course, reads "Not currently available", so the row is `retired` with that
-  evidence and points at the Engineer credential. The FinOps page renders
-  the "Catalogue checked against …" line and a status badge from the dates,
-  like the other hubs. The AWS detail page's Helmet `<title>` is one
-  template string, the form the Azure page uses, because the multi-child
-  form pre-renders as an empty title. And `functions/src/functions/schedulers.js` logs
-  the first "disabled — skipping" of each timer per process at Warning —
-  `host.json` holds the `Function` category at Warning, so the Information
-  line it used to write never reached Log Analytics and a timer whose flag
-  was off left no trace but a short `DurationMs` — then drops to Information
-  for later skips, so a deliberately-off timer is seen once after every
-  restart without a Warning per tick; `schedulers.test.js` runs the real
-  registered handler twice and asserts one Warning then one Information.
-- **The GitHub, AWS, Terraform, Google Cloud and VMware Learn catalogues
-  match the vendors again, say when they were last checked, and derive
-  "retiring"/"beta" from dates instead of a typed field (#461, items 5–9).**
-  The 2026-09-09 audit found every provider page hard-coded and behind:
-  GitHub had GH-100 on Foundations, GH-300 on Advanced Security and GH-500 on
-  Administration with no GH-900 or Copilot exam; AWS listed SOA-C02 under the
-  CloudOps name a year after SOA-C03 replaced it and knew nothing of the
-  MLA-C01 (2026-09-28), SAP-C02 (2026-11-16), DVA-C02 (2026-11-30) and
-  ANS-C01 (2026-12-31) retirements or the AI Business Strategist beta;
-  Terraform advertised the 003 exam retired in January and a Consul exam
-  HashiCorp retired on 2026-07-15 while omitting both Advanced credentials;
-  GCP was missing five of Google's fourteen and still called the Workspace
-  credential Professional; VMware carried the superseded VCAP-DCV Deploy
-  and no VCP-VVF. Each catalogue now lives in `frontend/src/data/<provider>/`
-  with a `DATA_AS_OF` and `DATA_SOURCE` the page renders as "Catalogue
-  checked against … on Sep 9, 2026" — the one freshness claim that is true.
-  AWS's two duplicate lists (landing page and `CertDetailPage.jsx`) are one
-  file, and `/aws/education/soa-c02` still resolves through `previousSlugs`.
-  The pages share the Azure entry's `frontend/src/lib/certStatus.js`, which
-  gains an `upcoming` status (a version announced but not yet deliverable,
-  such as SAP-C03 from 2026-11-17), `isIsoDate`, `describeCertStatus` (the
-  badge wording, "Retiring · last day to test Nov 16, 2026 · replaced by
-  SAP-C03"), and three more stale checks; every page reads "today" through
-  `useToday(DATA_AS_OF)` so the prerendered HTML and the hydrating render
-  agree, and `education-catalogues.test.js` fails the moment any dated row
-  is past (first due: MLA-C01 on 2026-09-29), which is the reminder to
-  re-verify against the vendor. VCTA-DCV is kept because Broadcom's 2024
-  FAQ names it and no 2026 Broadcom page contradicts it.
-- **Azure Learn statuses are derived from their dates, the ten retired exams
-  say so, and every landing card opens a real detail page (#461 items 1 and
-  2).** The Azure catalogue (`frontend/src/data/azure/certifications.js`) had
-  not been checked since 2026-04-16, so the live page showed AI-900, AI-102,
-  AZ-204, AZ-500, PL-200, PL-500, PL-600, MB-280, MB-335 and MB-700 as
-  "Expiring Soon" ten weeks after Microsoft retired them, twelve GA exams as
-  "BETA · ends Jun 30, 2026", MB-240 as active, and no retirement for
-  AZ-800/AZ-801. Re-verified against the Microsoft Learn credentials browse
-  API and the credential-retirement page on 2026-09-09: those ten plus MB-240
-  are `retired` with their dates and replacements (AI-900 → AI-901, AI-102 →
-  AI-103); AB-210, AB-250, AB-410, AB-620, AI-103, AI-200, AI-300, AI-901,
-  DP-750, DP-800, GH-600 and SC-500 are `active`; SC-730 is retired
-  (Microsoft withdrew it after the beta, no date published); AZ-800 and AZ-801
-  are `expiring` 2026-09-30 → AZ-802, and MS-102 `expiring` 2026-11-30;
-  AZ-802 (active), AB-650 (beta) and AI-500 (beta) are added; five applied
-  skills are retired with Microsoft's dates. The pages now compute status from
-  the dates at render time (`frontend/src/lib/certStatus.js`, `deriveStatus`),
-  render a Retired badge, filter and replacement code, and print `DATA_AS_OF`
-  where they used to claim "scraped weekly", "tracked weekly", "updated
-  weekly" and "Refreshed by Microsoft each month". A vitest fails the day any
-  stored `expiring`/`beta` outlives its date. The Azure detail page drops its
-  own 15-entry copy (five of them retired, DP-203 gone) and reads the shared
-  catalogue, so all 68 landing links resolve instead of 15; the 68
-  `/azure/education/<slug>` routes are pre-rendered — with a single-string
-  Helmet title, since the multi-child form wrote `<title></title>` — and the
-  Listen & Learn block appears only when published audio exists (verified for
-  azure/AB-100).
-- **ElevenLabs no longer reads Listen & Learn, and the Listen & Learn pin no
-  longer governs the podcast: speech providers are chosen per product (#436,
-  #432).** Owner rule 2026-09-09: ElevenLabs is only the podcast voice —
-  article and Plaud transcripts to RSS.com — and Listen & Learn audio is
-  Gemini TTS, generated on demand and stored as MP3, with Azure AI Speech as
-  the GA fallback. #447 had put ElevenLabs first in one global order read by
-  every caller, so the paid podcast voice read every study episode the moment
-  its key landed, and `LISTEN_AND_LEARN_TTS_PROVIDER` — also read by every
-  caller — would have pinned the podcast too, which is why the owner's
-  instruction to set it to `gemini` could not be applied as the code stood.
-  `speech/index.js` now holds `SPEECH_PRODUCTS = { listenAndLearn: ['gemini',
-  'azure'], podcast: ['elevenlabs'] }`; `resolveSpeechProvider`,
-  `synthesizeDialogue` and `estimateSpeechCostUsd` require `product` and
-  refuse to guess without one; each product reads only its own pin
-  (`LISTEN_AND_LEARN_TTS_PROVIDER`, `PODCAST_TTS_PROVIDER`), a pin may name
-  only its product's providers, and `LISTEN_AND_LEARN_TTS_PROVIDER =
-  elevenlabs` fails every run with a sentence quoting the rule. Nothing falls
-  through between products: the podcast without `ELEVENLABS_API_KEY` saves a
-  transcript-only draft whose `audioError` names that setting (pinned in
-  `lib/podcast/generate.test.js` through the real switch), never a Gemini
-  reading, and #447's out-of-credit fallthrough is removed because its only
-  path was the cross-product one. `infra/functionapp.tf` sets
-  `LISTEN_AND_LEARN_TTS_PROVIDER = "gemini"` on the Function App, deliberately
-  Terraform-managed so the rule is stated in the estate and a portal edit is
-  drift (one app setting added; `app-settings-secrets.test.js` and
-  `secret-catalog.test.js` still pass). The 202, the queued line and the
-  `speechEstimateForRun` estimate describe the Listen & Learn product only —
-  Gemini or Azure, never ElevenLabs. ADR 0029 §2b records the rule and keeps
-  §2a as history, saying it was written as if ElevenLabs replaced Gemini for
-  Listen & Learn, which was wrong.
-- **Listen & Learn audio generates again: the Gemini TTS provider read the
-  SDK's `output_audio` accessor, which the REST reply does not have (#458).**
-  Every generation since the provider landed ended with
-  `audioError: "Gemini returned no audio for this dialogue"` on a 200. The
-  request matched the documented multi-speaker contract; the parser did not
-  match the response. `POST /v1beta/interactions` returns an Interaction
-  object whose audio sits in `steps[].content[]` as
-  `{ type: 'audio', data, mime_type, sample_rate, channels }`, with a
-  top-level `status` and optional `errors[]`. `output_audio.data` is a
-  convenience accessor the Python and JavaScript SDKs put on *their*
-  Interaction object, and the guide's examples use it; the REST JSON never
-  carried it, so audio in `steps` was treated as no audio. `speech/gemini.js`
-  now exports `extractAudio`, which walks the `model_output` steps (keeping
-  `output_audio` as a fallback), joins several audio blocks in order, reads a
-  WAV header for its rate and channel count and strips it, and averages
-  stereo to mono for the MP3 encoder. A reply with no audio now says why on
-  the episode card — the `status`, each `errors[].code` and message, and the
-  shape seen by type only (`model_output[text]`, never the text); `failed`
-  and `incomplete` statuses are refused explicitly, the latter because the
-  audio would stop mid-sentence. The default model moved from
-  `gemini-2.5-flash-preview-tts` to `gemini-3.1-flash-tts-preview` (owner
-  request; `COST_TABLE` already priced it at USD 20 per million audio
-  tokens, twice the 2.5 flash rate), with `LISTEN_AND_LEARN_TTS_MODEL` still
-  the override. Verified against the Interactions API reference and the
-  speech-generation guide on 2026-09-09; the module header records what was
-  checked.
-- **Listen & Learn scripts have a portal toggle, the docs build no longer
-  dirties the tree, and the router says who writes a key verdict.** Three
-  small things left behind by #449, #435 and the docs hooks. `script.js`
-  declared `feature: 'listenAndLearn'` behind the injected `generate`, where
-  `ai-call-sites.test.js` cannot see it, and no `listenAndLearn` entry
-  existed in `AI_FEATURES` — so the AI Engine page had no switch for it and
-  the router treated the call as ungated. The feature is now declared at a
-  literal call site in `listen-and-learn/generate.js`, the same shape as
-  `podcast/generate.js`, and the catalogue lists it as **Listen & Learn
-  scripts**; the source scan and the catalogue tests cover both directions.
-  `scripts/docs/__pycache__/*.pyc` was tracked and rewritten by every
-  `mkdocs build --strict`, so every docs session had to check it out before
-  committing; the two files are untracked and `__pycache__/` and `*.pyc` are
-  ignored. The router's key-verdict docstring named "the Publer client" as
-  the other source of a rejected-key verdict; it now names `lib/key-verdict.js`
-  as the single writer and lists the three reporters that feed it (the
-  router, the Publer timer client, the Publer REST proxy).
-- **A rejected Publer key no longer fails `syncSocialCalendarScheduled` every
-  five minutes, and the API-keys page now says the key is rejected (#358).**
-  Measured in Log Analytics on 2026-09-09: Publer answering 401 to a stale
-  key had failed the timer **429 times in 36 hours, 0 successes** — 288
-  exceptions a day, and `alert-app-exceptions-prod-cus` never fired, because
-  the only thing that knew the key was wrong was Publer, saying so into a log
-  nobody reads. That is the blind spot `secrets-health.js` names in its own
-  header: it detects unresolved, not incorrect. A rejected credential is a
-  configuration state, not a transient fault, and `createPublerClient` was
-  treating a 401 like a 500.
-
-  Three things change. The timer's run now returns `{ skipped: true, reason:
-  'credential_rejected', status }` on a 401/403 after one warning naming
-  `PUBLER_API_KEY / PUBLER_WORKSPACE_ID` — the pair travels together, and a
-  key valid for a different workspace answers 401 exactly like a stale one;
-  a 500 or a timeout still throws, because those ARE transient. The Publer
-  client and `publerProxy` report the verdict for `PUBLER_API_KEY` through
-  the path the AI router already had — its `onKeyVerdict` writer, promoted
-  from a private function on the router's default instance into
-  `lib/key-verdict.js` so the two reporters cannot disagree about what a
-  rejected credential is — so the red light on
-  https://hybridcloudworks.com/admin/integrations comes on whichever path
-  sees the rejection first, and the first success after that — the rotation
-  — turns it green again in the same worker: a recorded failure re-arms the
-  once-per-worker success report, which the router's private version had
-  never done (Copilot review of the PR). And `PUBLER_API_KEY` carries
-  `probe: 'publer'` in the catalogue,
-  because the page prints "no liveness check for this one" beside any light
-  nothing reports on, and `secret-catalog.test.js` holds that a probe exists
-  only where a reporter is wired. The proxy's response shape and message are
-  untouched; the Social Hub still reads "Publer answered 401". Klaviyo and
-  Linkie do not opt in: their 401/403 semantics have not been read, and a
-  scope-limited key answering 403 on one endpoint and 200 on the next would
-  flap the light.
-
-### Removed
-
-- **Two workflows and the spent half of `scripts/cutover/`, after an audit of
-  all nineteen.** Owner instruction 2026-09-08: "if the ps1 is no longer
-  needed, we need to clean that workflow — also any other workflow that is
-  not needed has to go". Each removal below is a workflow that had already
-  finished, or one that could not succeed by its own design. Everything else
-  was kept, including two that looked dead and are not.
-
-  **`validate-deployed.yml` — twenty-one days red, structurally.** Dispatched
-  twice on 2026-08-18 and failed both times; never run again. Both jobs fail
-  for one reason: they run on a GitHub-hosted runner, and through Cloudflare a
-  datacenter IP is answered by Bot Fight Mode with a 403 while direct to
-  origin the origin lock answers 403. The `surface` job asserts
-  `test "$code" = "200"` against the apex, so it cannot pass either — the
-  deployment runbook's claim that it "still runs the DNS, TLS and
-  frontend-surface job usefully" is contradicted by its own last run, where
-  that job also failed. `deploy-functions.yml` depends on exactly this
-  behaviour: it curls the same URL from a runner and FAILS the deploy on a
-  200, which is how the origin lock is proven. The checks themselves are not
-  lost — they are `docs/runbooks/edge-dns-verification.md` and
-  `node scripts/smoke-deployed.mjs`, both run from an operator machine
-  Cloudflare admits. The script is untouched and still has its own tests.
-
-  **`retire-wiki.yml` — a one-shot that ran, whose target no longer exists.**
-  It overwrote all 141 Wiki pages with pointers to the docs site on
-  2026-09-06 (dry run, then the real one). The Wiki feature is now off in
-  repository settings — measured `has_wiki: false` on 2026-09-08 — so its
-  first step, `git clone ...wiki.git`, could not succeed if dispatched.
-  `scripts/docs/wiki-redirects.json` is deliberately KEPT: ADR 0027 cites it
-  as the record of what moved where, and that sentence should stay true.
-
-  **`scripts/cutover/05-verify-timer.ps1` and its `workspace-query` helpers.**
-  The script proved a timer fired at its intended time by reading
-  `Trigger Details: ScheduleStatus` from Log Analytics. Two owner decisions
-  took that away from opposite directions: #321 dropped `host.json`'s
-  `Function` category to Warning to stay under the workspace's 0.25 GB/day
-  cap, so the host stopped writing the line (measured 2026-09-08: 4,179
-  `AppTraces` rows in 24 hours, zero containing `ScheduleStatus`); and #345
-  closed the gate it served outright — "all 18 timers are armed and the
-  per-wave observation read is no longer a gate". A tool whose instrument is
-  switched off and whose question has been answered is not waiting for
-  better days.
-
-  **The clock method survives, in the successor.** `verify-timer-witness.mjs`
-  now carries it: compare a fixed-hour timer's observed firing times against
-  its schedule and read the offset, which needs no host verbosity at all.
-  The worked example is `fetchPodcastFeeds` either side of #416 — fires at
-  23:30Z and 01:30Z (odd UTC hours, so an even-numbered Central hour) and
-  then 04:30Z (even, so UTC). The parity flip is the clock change, visible
-  without a single trace row.
-
-  **Two CI steps and one test file went with them, said plainly rather than
-  quietly.** `repository-policy.yml` no longer runs
-  `scripts/cutover/workspace-query.tests.ps1` — a STEP inside
-  `validate-structure`, never the job, so the required context
-  "Validate root and documentation policy" is unchanged.
-  `scripts/powershell-hygiene.test.mjs` (5 tests) was deleted: every one of
-  its assertions read the deleted `.ps1` to pin its skip regex against the
-  JavaScript log lines, so it had no subject left. And
-  `workflow-write-permissions.test.mjs` lost its only `ALLOWED` entry, which
-  TIGHTENS it: the assertion now reads "no workflow in this repository holds
-  `contents: write`" rather than "exactly `retire-wiki.yml` does".
-
-  **What was examined and KEPT**, so the audit does not get repeated.
-  `heal-computed-properties.yml` stays despite the standing "no healers"
-  principle, because the wipe is still real at source: the content and blogs
-  containers are still `azurerm_cosmosdb_sql_container`
-  (`infra/cosmos.tf:243`), that resource still cannot express
-  `computedProperties`, and `PUBLIC_LIST_SQL_ORDER = "1"` is live
-  (`infra/functionapp.tf:518`), so an unhealed wipe breaks the public content
-  list. It can go the day the two containers move to `azapi_resource`.
-  `tfc-plan-check.yml` stays: its 2026-08-31 red was the `Report` step
-  emitting a verdict, which is what that step is for, not a broken workflow.
-  `verify-alert-state.yml` stays: read-only, dispatch-only, green on
-  2026-08-30, and the only way to see `autoMitigate`, which is invisible from
-  the repository and from the TFC run list. In `scripts/cutover/`,
-  `06-seed-secret.ps1` is named as the break-glass path by
-  `docs/runbooks/deployment-runbook.md` and
-  `docs/standards/variables-and-secrets.md`; `04-telegram-webhook.ps1` is the
-  remediation `functions/src/lib/secret-catalog.js` tells an operator to run
-  after a bot-token rotation; and `01-entra-spa.ps1` is parameterised for
-  granting the Admin app role to a named user, which is a recurring operation
-  with no other tool. None is spent.
-
-### Fixed
-
-- **Five education hubs and three detail pages were white text on a white
-  background in light mode, and had been since they were written.** Headings,
-  card titles and stat values used a bare `text-white` with no `dark:`
-  qualifier, while `src/index.css` sets `--background` and `--card` to pure
-  white in light. A learner on a default iPhone saw a hero and then blank
-  space where every section heading should be.
-
-  **The fix already existed in the repository and had never been
-  propagated.** `azure/EducationPage.jsx` pairs its headings as
-  `text-slate-950 dark:text-white` and reads correctly; the other five hubs
-  carried 15 bare instances each and zero dark variants. 102 sites changed,
-  read one at a time rather than swept: **25 were deliberately left**, every
-  one of them white-on-an-opaque-coloured-button, where white is correct.
-
-  Status chips had the same problem in a subtler form. `CertStatusBadge` used
-  `text-amber-300` and friends over `*-500/20` tints, roughly 1.5:1 against a
-  near-white surface. Each status now carries an `*-800` light foreground
-  with the original as its `dark:` variant, around 6:1.
-
-  **Why nothing caught it.** The only colour-contrast gate is a Playwright
-  spec covering one route, and it does not run in CI. It has now been widened
-  to all eight hubs and the three detail templates, but deliberately NOT wired
-  in as a required check: `/aws/education` was already in its route list while
-  that page was white-on-white, so the spec cannot have been passing, and
-  making a red gate required would block every PR. It wants a reading first.
-
-  **What replaces it in the meantime is a test that does run.**
-  `pages/education-a11y.test.js` reads the nine files and fails when a
-  `text-white` token has neither a `dark:` variant nor an opaque background,
-  when a status loses its light foreground, when a carousel dot loses its
-  label, or when a decorative icon loses `aria-hidden`. Verified to fail by
-  reverting one heading: it named the file, the line and the fix.
-
-- **The education carousels were silent to a screen reader, and their controls
-  were 10 pixels wide.** The pagination dots were `<button>` elements with no
-  children, no `aria-label` and no `aria-current`, announced as "button,
-  button, button" — and they are the only route to anything past the fourth
-  card, which on Azure means past the first four of 108. Each dot now sits in
-  a 24-pixel transparent hit area, meeting WCAG 2.5.8 without changing the
-  10-pixel dot itself, and carries its page number and current state.
-
-  168 decorative `material-symbols-outlined` spans gained `aria-hidden`.
-  Because the font renders a ligature, a screen reader had been reading
-  "workspace_premium", "arrow_forward" and "open_in_new" aloud as words —
-  and on a slow connection those words are briefly *visible* too, since the
-  font loads with `display=swap`. Every icon-only control was audited first:
-  the one without an accessible name, Azure's "open on Microsoft Learn" link,
-  got one rather than being hidden.
-
-### Added
 
 - **Every live Azure certification page now carries the official study
   guide's "Skills measured" outline, area by area, each deep-linked to its
@@ -1131,59 +218,6 @@ This project has not cut a tagged release; entries are grouped under
   same GitHub exam is carried in two catalogues at contradicting levels, and
   the Azure catalogue is the only one of eight with no `DATA_SOURCE`.
 
-### Changed
-
-- **Every certification catalogue re-verified against its vendor, ahead of the
-  2026-09-29 deadline (#469).** Seven catalogues were checked row by row
-  against the official source and `DATA_AS_OF` moved to 2026-09-10. Azure is
-  excluded because `update-learn-catalogue.yml` refreshes it on a Monday cron,
-  which was confirmed sound rather than assumed.
-
-  **One real error, nine months old.** The AWS row called itself `SCS-C02`
-  while already linking `SCS-C03`'s exam guide, and nothing had ever compared
-  the two. `SCS-C02` stopped being the current exam on 2025-12-01. The row is
-  now `SCS-C03` with `previousSlugs: ['scs-c02']` so minted links still
-  resolve, following the `SOA-C02` precedent, and the three places that
-  hard-coded the old code outside the catalogue were updated with it —
-  `aws/LandingPage.jsx` and two entries in `MicrocredentialDetailPage.jsx`,
-  which would otherwise have displayed a superseded exam beside a corrected
-  one.
-
-  **Three more corrections, each from the vendor's own page.** VMware's VCTA
-  is gone from Broadcom's index entirely and is now `retired` — with no
-  `retiredDate` and no `replacement`, because Broadcom publishes neither and
-  inventing them is the failure this repository keeps legislating against.
-  Red Hat renamed RHCE to "Red Hat Certified Engineer in Ansible", and the
-  `ex374-` URL the file carried now 404s. The FinOps Professional exam
-  requires three prerequisite certifications rather than two, confirmed in
-  two places on the Foundation's own site.
-
-  **GCP, GitHub and HashiCorp needed no data changes at all**, and two
-  near-misses are worth more than the diff would suggest. A cached copy of
-  GH-100's page still says "(beta)"; the live page does not, so trusting the
-  cache would have flipped a good row to `beta`. And GH-500 is absent from
-  `learn.github.com/credentials` while its own page is live and its study
-  guide took a revision in July 2026 — an omission from a marketing page is
-  not a retirement. Both are now recorded in the file headers as sources NOT
-  to trust, which is the more durable half of the work.
-
-  **What was deliberately not done.** Broadcom lists thirteen VCF
-  certifications against the six this catalogue carries. The titles and exam
-  codes are recorded in the file header, but no rows were added: `hours` and
-  `prepTime` are this site's own study estimates, and fabricating fourteen of
-  them is exactly the confidently-wrong entry the rule exists to prevent.
-  AWS's `successRate` percentages have the same problem and are flagged for a
-  decision — every other field in these catalogues is sourced; that one never
-  was.
-
-  **A clock trap worth recording.** `todayIso()` builds its string from
-  `getFullYear`/`getMonth`/`getDate`, so the freshness check runs on the LOCAL
-  calendar. On a machine in CDT at 23:11, `DATA_AS_OF = '2026-09-11'` — the
-  correct UTC date — fails six tests as "in the future", while a UTC CI runner
-  would accept it. The date used is the one the repository's own clock agrees
-  with.
-
-### Added
 
 - **The Plaud tab says when the 12-hour token refresh last ran, so the
   rotation finally has a witness (#358).** `refreshPlaudToken` rotates the
@@ -1964,7 +998,1152 @@ This project has not cut a tagged release; entries are grouped under
   form failed with `expected +0 to be 2`, the script exiting 0 on Windows
   having run nothing — the same bug that once shipped in `smoke-deployed.mjs`.
 
+
+- **The Plaud Connect tab takes the refresh token too (#342, T-518 Wave 5).**
+  It stored only the access token, while `refreshPlaudToken` rotates the pair
+  with the refresh token and Plaud's access token lasts about a day — so the
+  Library lapsed daily and the timer, once armed, would have marked the
+  document `disconnected` at its first firing. The tab now has a second
+  field for `refresh_token` (both come from `~/.plaud/tokens-mcp.json`), the
+  API stores it write-only beside the access token — never returned, carried
+  through PUT round trips, reported as `hasOauthRefreshToken` — and the
+  banner says whether auto-refresh is armed. Reviewed against Plaud's
+  documentation on 2026-09-05: the quickstart's client id and secret belong
+  to Plaud Embedded, a different product (device SDK and transcription API)
+  that nothing here uses; the MCP tokens are the two values that matter.
+
+
+- **`cleanupSoftDeletedContent` is dry-run until `CONTENT_HARD_DELETE=true`,
+  never deletes a document whose deletion mark has no recorded origin, and
+  reports every run (#334).** Before this the hard reaper deleted anything
+  carrying `softDeletedAt` older than seven days, and three different writers
+  put that mark on a document: the admin soft-delete route, which also
+  records `deletionRequestedBy`; and the two rejected-content agers, which
+  record `softDeletedReason: 'rejected_aged_out'`. A migrated document with an
+  old mark from the Firebase days carries neither, and it would have gone at
+  the first firing. Now the pin is the T-302 rule applied to the one timer
+  that deletes documents rather than blobs — `infra/functionapp.tf` seeds it
+  `"false"` beside the two blob pins — and origin is the rule the pin does not
+  lift: a mark with no `deletionRequestedBy` and no `softDeletedReason` is
+  counted, logged at Warning as a count, recorded by id in the audit entry
+  that every armed run writes once it has examined anything (a dry run
+  writes no audit document), and left for a human in the admin content
+  queue's `soft_deleted` filter.
+
+  Every run now logs one summary line, idle runs included: in dry-run, what
+  it would delete by origin; when armed, what it did. Before this an idle run
+  wrote nothing, not even its audit record, which is why Wave 3a had no
+  witness at all. Traces carry counts only; ids go to the audit document.
+
+- **T-518 Wave 2 armed and observed: the two feed-ingesting timers now run,
+  and `podcasts` has its first production write (#332).** `SYNC_RSS_FEEDS`
+  and `FETCH_PODCAST_FEEDS` were added to `enabled_timers` in the `hcw-azure`
+  workspace in one apply on 2026-09-03, ahead of the 00:00 Chicago window.
+  Same class, so they grouped: both ingest feeds and create content
+  documents, neither deletes anything, and re-delivery is safe by
+  construction — `cacheFeed` upserts `rss_cache` per feed, and `processFeed`
+  reads each episode by id and preserves `createdAt` before upserting.
+
+  **Observed through the durable side effect, not the host trace — the first
+  wave closed on the #328 witness.** The `Executed` rows the runbook's gate 4
+  used to read have not existed since #321 (T-766), so the evidence is what
+  each timer leaves behind, read through the public API by
+  `scripts/verify-timer-witness.mjs`:
+
+  - `syncRssFeeds` — PASS on the first read: every `rss_cache` document
+    re-stamped, newest `refreshedAt` 2026-09-03T07:00:16Z, which is the 02:00
+    Chicago boundary of its every-two-hours schedule to the second. Nothing
+    else writes that stamp at that minute — the admin `fetch-rss-feeds` job
+    had last run the previous evening — so this is the timer.
+  - `fetchPodcastFeeds` — FAIL on the first read (nothing newer than the May
+    migration after the 05:30Z firing), then PASS at the 13:30Z firing on
+    2026-09-04, the first after the #330 deploy restarted the host at
+    13:24Z. `podcasts.updatedAt` is re-stamped on every episode each run, so
+    a fresh stamp is the handler completing an upsert, not merely starting.
+
+  **What the record cannot say.** The 05:30Z miss is not explained. That
+  firing predates #330, so whatever happened — a feed that did not answer,
+  an empty feed, or a handler that did not run — was logged at Information
+  and dropped by the Warning gate; and the firings between the two reads
+  were not read. The next miss will be readable: since #330 a failed feed
+  writes an Error row and an empty feed a Warning row in the
+  `Function.fetchPodcastFeeds` category, with the query in the #330 entry
+  below. This is the collision T-766 describes, met on the first wave to arm
+  after it.
+
+  `T-764` does not close on this entry. Its writer is observed; the closing
+  condition also asks for the `azure` podcast page to render an episode, and
+  that read is still owed.
+
+- **The arming gate reads the timer's durable side effect through the public
+  API, and needs nothing else (#328).** `scripts/verify-timer-witness.mjs`
+  takes a timer name and an ISO `--since`, fetches that timer's witness from
+  the Cloudflare-fronted API — `rss_cache.refreshedAt` for `syncRssFeeds`,
+  `podcasts.updatedAt` for `fetchPodcastFeeds`, `content.publishedAt` for
+  `publishScheduledContent` — and says whether the newest stamp is at or after
+  the moment named. No `az`, no workspace, no extension, no telemetry plane:
+  three fewer places for an observation to be lost. A malformed stamp never
+  counts as evidence; an unparseable `--since` refuses rather than comparing
+  against `NaN`. There is deliberately no cron parser — the schedule is
+  something the operator already knows, and a parser is a second thing to be
+  wrong about.
+
+  Fifteen of the eighteen timers have **no** public witness, and the script
+  says so with exit 2 rather than a pass or a fail, because "cannot evaluate"
+  and "evaluated and failed" are different findings. The runbook's witness
+  table now covers all eighteen with the reason for each *no*, and the
+  script's test asserts that table names exactly the timers `schedulers.js`
+  and `jobs-sweeper.js` register — a timer added without a row fails CI
+  instead of arriving at a cutover with no gate. Thirteen tests; the drift
+  guard was mutation-checked by deleting a row and watching it fail.
+
+  Also records what #327 deferred: the `log-analytics` extension is now
+  Step 0's sixth item in the Cutover-Runbook, and that step's heading no
+  longer carries a count of its own items.
+
+- **Every provider page is live: the last 24 shipped-dark pages came out from
+  behind `ComingSoonPage` (#325).** `finops`, `gcp`, `github` and `terraform` now
+  serve their full sections alongside `aws`, `azure`, `vmware` and `ansible`.
+  Owner decision 2026-09-02, taken as one release rather than section by section.
+
+  The pages were never unfinished. Each is structurally identical to its live
+  AWS or Azure counterpart — the same shared component with a different
+  `provider` prop — so the guard was two lines and nothing else:
+  `ComingSoonPage`'s import and an early `return` above the real one. The routes
+  were already public; visitors have been landing on these URLs and reading
+  "coming soon". What changed is what those URLs answer with.
+
+  **`GUARDED_FILES` in `frontend/scripts/validate-provider-pages.js` is now
+  empty, and the array and its checker deliberately stay.** The mechanism is
+  what makes shipping a page dark *reviewable*: a page behind `ComingSoonPage`
+  with no entry there is an accident, and an entry there with its markers gone
+  is a page that went live without anyone deciding. Deleting the empty array
+  would delete that check for the next page that needs it. The validator reports
+  55 live files, 0 guarded.
+
+  **Eighteen hardcoded `date: 'Updated <month> 2026'` stamps were removed rather
+  than refreshed**, across `terraform/ToolsPage`, `terraform/ModulesPage` and
+  `finops/FocusPage`. Nothing maintains them: they were written months ago and
+  would have gone live in September still claiming February. A date no process
+  updates is a stale claim on a page that will never change, and removing it is
+  the fix that does not need doing again — the same reasoning applied to the
+  timer counts in TODO.md the same day.
+
+- **T-518 Wave 1 armed and observed: the platform's two safe timers now run
+  (#323).** `PLATFORM_JOB_SWEEPER` and `MONITOR_PUBLISHING_PIPELINE` were added
+  to `enabled_timers` in the `hcw-azure` workspace in one apply, taking the
+  estate from three armed timers of eighteen to five.
+
+  **Two timers in one apply is a departure from [Cutover-Runbook](docs/history/cutover-runbook.md)
+  step 5, and it was an owner decision rather than a shortcut.** Step 5 reads
+  one timer per apply, observed before the next. Taken literally across the
+  fifteen that remain that is fifteen applies over roughly five weeks — three
+  of the fifteen fire *weekly*, so their observation windows alone are three
+  weeks — and every one of those applies restarts the Function App through the
+  workspace's permanent `azapi` diff. What the rule exists to prove is that
+  arming works at all, and that was settled before this wave: the mechanism had
+  been observed three times, once across the apply boundary itself
+  (`publishScheduledContent`, four skipped invocations then four ran, with the
+  flag as the only variable). What remains is per-handler behaviour, which
+  groups by risk. The precedent is `CHECK_AGENT_HEALTH` and
+  `CLEANUP_TEMP_STORAGE`, armed together on 2026-08-30 and recorded as a
+  departure with its justification.
+
+  **What still does not group**, and this is the limit of the concession: the
+  two timers that delete documents with no dry-run pin —
+  `CLEANUP_SOFT_DELETED_CONTENT` and `CLEANUP_REJECTED_CONTENT` — stay one per
+  apply. Grouping is a concession to calendar arithmetic, not to destructive
+  operations.
+
+  These two were the right first wave because neither can damage data.
+  `platformJobSweeper` re-enqueues jobs that have sat `queued` past
+  `STALE_QUEUED_MS`, closing the gap in `functions/src/lib/jobs.js` where the
+  job document is written before the queue output binding sends the message —
+  so a binding failure used to leave a job `queued` forever. Re-delivery is
+  safe by construction: the worker claims with an etag-conditioned replace, so
+  a duplicate message for a job that did start is skipped rather than
+  double-processed. `monitorPublishingPipeline` is a read-only watchdog.
+
+  **Observed, not merely applied.** The standard is step 5's fourth gate, and
+  all four were read from the workspace with
+  `scripts/cutover/05-verify-timer.ps1` on 2026-09-02:
+
+  - *Deployment*: both flags read `true` from a live
+    `az functionapp config appsettings list` against `func-site-prod-cus-01`,
+    with the armed set printing as `CHECK_AGENT_HEALTH`,
+    `CLEANUP_TEMP_STORAGE`, `MONITOR_PUBLISHING_PIPELINE`,
+    `PLATFORM_JOB_SWEEPER`, `PUBLISH_SCHEDULED_CONTENT`.
+  - *Runtime*: `platformJobSweeper` registered with schedule `0 */15 * * * *`,
+    read back from the host rather than from source.
+  - *Behaviour*: the sweeper's own `re-enqueued … stale job(s), reaped …
+    abandoned running job(s)` line present in the trace stream, which is the
+    handler reporting its work rather than the host reporting an invocation.
+  - *Invocation*: both timers observed firing inside their windows.
+
+  **The clock half of the gate applies to only one of the two, and saying so
+  matters more than the counts do.** `platformJobSweeper` fires every fifteen
+  minutes, so it has no local-time dependency and the `WEBSITE_TIME_ZONE` trap
+  cannot express itself in its history — for it the gate is the count and the
+  handler's own line, and a timestamp check would prove nothing.
+  `monitorPublishingPipeline` runs `0 0 */6 * * *`, which is 00:00, 06:00,
+  12:00 and 18:00 **Chicago**, so it is the one that can fire five hours early
+  and still pass a naive "did it run" check. Its `ScheduleStatus.Last` landed
+  on the intended local hour. A wave that reported one number for both timers
+  would have proven the weaker thing twice.
+
+  **Arming two timers made four counts elsewhere in TODO.md wrong at once**, and
+  they were removed rather than corrected. The section heading, the master-table
+  row, the attack-sequence phase and an owner-decisions row each said "the
+  remaining 15 timers" — accurate when three of eighteen were armed, wrong the
+  moment five were, and wrong again after every wave that follows. That is the
+  T-722 defect, in the file whose own wave table already carries the rule
+  ("this table is the plan, and no count above it is"), so the fix is the rule
+  rather than an arithmetic update: the counts are gone and the enumerated
+  sentence that lists the armed timers by name — which cannot drift from itself
+  — is what remains. The one remaining count in that section was found by
+  review: `enabled_timers` was still described as "holding those three".
+
+  The per-run figures are not restated here. They were read by the operator at
+  their own prompt and the evidence standard is the observation, not a number
+  copied into a second document where it can drift from the first — the same
+  reason `infra/frontend.tf` states its ingestion reduction as a floor rather
+  than a measurement.
+
+- **The runbook now covers signing in, because five separate `az` failures cost
+  round trips in two days and none of them named its own cause (#323).**
+  `wiki/Cutover-Runbook.md` gains **Step 0**, ahead of the Entra step: the
+  estate's single tenant and its four subscriptions in one table, the scoped
+  device-code login, the subscription pin, and the `az account show` line that
+  says whether any of it worked.
+
+  The five, each recorded with what it actually was rather than what it looked
+  like: a plain `az login` handing off to the Windows WAM broker and spinning
+  with nothing to read; `AADSTS700082`, which reads as a permissions problem
+  and is a cached token past its 90-day inactivity window; a cached tenant that
+  is not the estate tenant — **the expensive one, because reads then succeed
+  and return nothing**, and an empty result from the wrong estate is
+  indistinguishable from a real absence; a tenant-wide login that enumerates
+  everything and leaves scripted reads apparently stuck, with the
+  `az logout` → `az account clear` → scoped-login reset written out; and
+  `AADSTS50076` MFA warnings for two tenants that are not this estate — one of
+  them named `hybridcloudworks.com`, which is the trap — printed several loud
+  lines *above* the results table, so a command that fully succeeded reads at a
+  glance as one that failed.
+
+  The tenant id is written out rather than referenced. It is not a secret —
+  Entra publishes it for any domain at that domain's OpenID configuration
+  endpoint — and the alternative is a placeholder in a command meant to be
+  pasted, which `.claude/CLAUDE.md` prohibits, having twice paid for one.
+  Subscription ids were already written out in this file and in
+  `scripts/cutover/05-verify-timer.ps1`; no credential, key or token appears.
+
+  Also recorded there: `sub-plat-mgmt-prod-cus` and `rg-mgmt-plat-prod-cus`
+  swap their two middle tokens, which is easy to write backwards and fails as
+  a not-found against a name that looks correct.
+
+- **TODO.md's handling rule is now a merge gate, not prose.**
+  `scripts/check-todo-changelog-movement.mjs`, run by the Repository Policy
+  workflow on every pull request, fails when a T-identifier leaves TODO.md
+  without CHANGELOG.md carrying it — the "completed items are removed after
+  the corresponding entry is present" rule, enforced at the same head.
+  Renumbers and moves within TODO.md pass (the id still exists); earlier
+  changelog entries pass (the changelog only grows); and a base that cannot
+  be read exits loudly rather than passing, because a gate that cannot
+  evaluate has not evaluated. Unit-tested for all four shapes and
+  mutation-tested against a fabricated removal.
+
+- **The repository gains its own code-review skill (#316).**
+  `.claude/skills/hcw-code-review/` teaches an agent to review a diff the way
+  this repository's CI and reviewers do: `SKILL.md` scopes the change, routes
+  each touched path to a per-component checklist (frontend, Functions, infra,
+  scripts/workflows, VPS agent and edge probe), and applies the cross-cutting
+  checks the PR template and Repository Policy already enforce — secrets,
+  content-free telemetry, pinning, the Markdown allowlist, TODO/CHANGELOG
+  movement, and the owner-facing instruction rules in `.claude/CLAUDE.md`.
+  Each reference file carries the component's real verification commands —
+  the ones CI runs plus the review-time validators CI does not — so a
+  review's Verification section reports what was actually executed rather
+  than what was assumed. The directory lives
+  under `.claude/`, already allowlisted as a harness directory in
+  `scripts/validate-repository-structure.ps1`.
+
+- **T-519 closed: the reachability alert is armed, and the estate's one
+  outage-surviving signal finally pages (#315).** The blocker was what
+  `wrangler.toml` predicted: the Worker's secret held the Instrumentation Key,
+  not the connection string, so `parseConnectionString` threw on every `*/5`
+  invocation and `availabilityResults` stayed empty. Fixed 2026-09-01 with the
+  piped command in `edge/availability-probe/wrangler.toml` — the value never
+  touched a screen or clipboard — and verified as a chain, not a deploy:
+  `wrangler tail` showed a clean `Ok` invocation; twelve
+  `success == 1` / HTTP 200 rows landed on the 5-minute cadence (18:25–18:45
+  UTC and onward), twice the six a full PT30M window needs, so the rule's
+  first evaluation ran against a populated window;
+  `availability_probe_alert_enabled = true` was applied in the `hcw-azure`
+  workspace; `alert-api-reachability-prod-cus` now lists among the four
+  scheduled-query rules in `rg-web-site-prod-cus`; and the registered function
+  count read 122 both before and after the apply's expected Function App
+  restart. Justification unchanged from the 2026-08-31 measurement: the
+  GitHub-scheduled half of the detection pair delivers 22% of its hourly runs
+  with a 12.7-hour worst-case blind window, and the probe runs on a scheduler
+  GitHub cannot drop. Removed from TODO.md, whose open list drops to four;
+  the standard Azure web test stays disarmed in Terraform (Bot Fight Mode,
+  ADR 0024) with the Worker as the approved path around it.
+
+- **TODO.md gains one working order across everything open (#314).** A repo-wide
+  sweep (dedicated tracker, wiki backlogs, inline markers, `notImplemented`
+  contract) confirmed the five-item table is complete, then added an "attack
+  sequence" section that sequences all of it — the five items, the settings
+  sweep, the optional seeds, the live confirmations — into seven
+  dependency-ordered phases. It adds no items and restates no procedures:
+  each phase links to the one section carrying the commands and success
+  criteria, so the sequence cannot drift from the sections (the T-722 lesson,
+  applied in advance). The 24 dark provider pages gain a row in "Owner
+  decisions" — previously that gate lived only in the inline
+  `// TODO: remove to re-enable` markers and
+  `frontend/scripts/validate-provider-pages.js`, outside the tracker, and the
+  row records that re-enabling a page is two edits (markers deleted AND the
+  path moved `GUARDED_FILES` → `LIVE_FILES`) because the validator asserts
+  both directions.
+
+- **`insertModuleIntoMarkdown` honours its `position` parameter (#314).** The last
+  genuine inline code TODO: both branches appended to the end, so a caller
+  passing a real index got a silent no-op. It now string-splices the
+  serialized module directly ahead of the `position`-th `<module>` tag,
+  leaving every other byte of the document — trailing prose included — where
+  it was; `-1` or an index past the last module appends, byte-identical to
+  the old behaviour. Deliberately NOT parse → splice → rebuild: an insert
+  makes the module list outnumber the placeholders, and
+  `rebuildMarkdownWithModules` appends the surplus at the document end, so a
+  middle insert would move the last existing module past any trailing prose
+  — the first draft did exactly that, and review caught it. Four new test
+  cases pin the contract as exact document bytes.
+
+- **The pre-rendered DOM is hydrated instead of discarded (T-714, #296).**
+  `main.jsx` used `createRoot`, so 120 pre-rendered documents were built,
+  shipped and thrown away at boot. It now calls `hydrateRoot` when the mount
+  point's `data-prerendered-route` stamp matches the live path, seeded from
+  `data-prerendered-seed` on that same element, and client-renders exactly as
+  before when it does not.
+
+  **The stamp is the load-bearing half, not defensive programming.**
+  `staticwebapp.config.json`'s `navigationFallback` serves `/index.html` — the
+  home page's markup — for any path without a file of its own, at HTTP 200.
+  Every `/admin` route arrives that way. Hydrating on "the mount point has
+  children" would have mismatched on the busiest pages in the app.
+
+  Five Playwright tests drive a real browser, including a node-identity probe
+  that proves the server DOM is reused rather than coincidentally identical,
+  and both guards are mutation-tested. `onRecoverableError` reports a mismatch,
+  which was silent in a production build — the failure mode that would have let
+  this regress to wasting every document with nobody noticing.
+
+- **`check-tfc-plan.mjs --commit <sha>` (T-724, #298).** The tool resolved the
+  workspace's LATEST run, which is why `tfc-plan-check.yml` refused to run
+  per-pull-request: the check would have been green, or red, about a run nobody
+  asked about. `--commit` resolves the run HCP Terraform planned for a given
+  commit, through the configuration version's ingress attributes, and the
+  workflow takes a matching `commit` dispatch input.
+
+  "No run for this commit" returns 2, not 0 — it is not "the plan is boring".
+  An absent relationship is skipped (CLI-driven runs carry no configuration
+  version); a **dangling** one throws, so an ignored `include=` cannot
+  masquerade as "no run for this commit". That distinction was found in review:
+  the first draft documented throwing on unreadable shapes and then skipped
+  exactly those cases.
+
+- **`scripts/workflow-write-permissions.test.mjs` (T-726, #298).** A ruleset
+  bypass is granted to the Actions **token**, not to a workflow, so every
+  workflow holding `contents: write` can push to `main` past all twelve
+  required contexts. This pins that set to a reviewed two, each with a written
+  justification. It bounds the exposure; it does not close it. Mutation-tested:
+  granting the permission to `iac-validate.yml` fails the guard.
+
+
+- **Deployment drift is measured now, instead of being discovered by accident
+  (2026-09-01).** `deploy-functions.yml` and `deploy-azure-frontend.yml` are
+  both `workflow_dispatch` only, by a recorded decision — enabling a workflow
+  and enabling auto-deploy-on-merge are separate choices, and only the first was
+  made. So merging deploys nothing, and **nothing said so.**
+
+  That one gap produced both of 2026-08-31's incidents, hours apart, each found
+  by accident rather than by a check:
+
+  - The manifest route merged at 2026-08-30 02:45 UTC against a Function App
+    last deployed at 01:21. `publish-content-manifest.yml` then failed with a
+    404 for two nights, and its own error message blamed the app — which was
+    healthy, reporting 121 registered functions throughout.
+  - The frontend was **35 commits** behind, including a hydration change and a
+    sanitizer hardening, found only because someone deployed for another reason.
+
+  **AGE, NOT COMMIT COUNT**, and that is the whole design. The first incident was
+  ONE commit behind; the second was THIRTY-FIVE. No count threshold separates
+  them — catch the one and you fire on every ordinary merge, tolerate ordinary
+  merges and you miss the outage. What they share is that both sat undeployed
+  for days. Age tolerates the normal merge-then-deploy gap, which is the entire
+  point of dispatch-only releases, and still catches a change merged and
+  forgotten.
+
+  `monitor-deploy-drift.yml` runs every four hours and fails when a service has
+  been behind for 24 hours or more, emailing the owner through GitHub's own
+  notifications — the mechanism `monitor-functions-registered.yml` already uses,
+  needing no action group and no dependency on the subscription being watched.
+  It reads only the GitHub API: the last successful run of each deploy workflow,
+  and the commits on `main` touching that service's paths since. No Azure, no
+  OIDC, no `environment:`, and `contents: read` plus `actions: read`.
+
+  Drift is measured per service over the paths that service ships, so thirty
+  commits touching only `wiki/` leave the Function App exactly as correct as it
+  was.
+
+  **On running this from a schedule GitHub delivers 22% of the time**, said
+  plainly rather than assumed away: for an outage detector that is a real
+  problem, and here it is not. This watches a condition measured in days against
+  a threshold measured in hours, so a check landing every 4.6 hours on average
+  has ample margin against 24. The workflow header records that the reasoning
+  stops holding if the threshold ever drops near the delivery gap.
+
+  36 tests, and six load-bearing decisions are mutation-verified: reading only
+  the first page of commits, dropping the de-duplication, defaulting an
+  unreadable commits payload to an empty page, taking the newest commit instead
+  of the oldest, `>` instead of `>=` on the threshold, and leaving a raw `|` in
+  a table cell. All six fail the suite when introduced.
+
+  **All five fail in the same direction — reporting a service as healthier than
+  it is — and that direction is the actual finding.** Every defect review caught
+  in this file, and every one caught while writing it, made a stale service look
+  current. None made a current service look stale. A monitor whose bugs all
+  point at "everything is fine" fails the one way it must not, so the mutation
+  set is exactly those.
+
+  The sixth is a legibility failure rather than a correctness one, and belongs
+  with them anyway: commit subjects and error text are not this script's to
+  constrain, and a `|` in either ends its Markdown cell early — the row grows a
+  column, everything after it shifts, and the table stops rendering as a table.
+  That table IS the report, read to decide whether to deploy, at the hour a
+  monitor tends to fire. Newlines are folded for the same reason.
+
+  Two defects were caught before merge and are worth recording:
+
+  - `oldestCommit` originally took the **last element**, on the true-but-narrow
+    grounds that GitHub returns commits newest first. That holds for one page of
+    one path and nothing else — the merged list is newest-first only within each
+    per-path segment, so with two paths the last element is the second path's
+    oldest, which can be far newer. Found in review. It now takes the minimum by
+    date and assumes no ordering at all, which removes the class rather than the
+    instance. The same review found the missing pagination and de-duplication.
+  - The `setup-node` pin was a SHA appearing in no other workflow here —
+    invented rather than copied, which is the exact defect pinning by SHA exists
+    to prevent. It is now the pin the other eight workflows use, and both action
+    SHAs were verified against `.github/workflows` before commit.
+
+
+- **The three repository-resolvable test-coverage follow-ups.**
+  *API base resolution* — the original line asked for `api.js` with
+  `VITE_BACKEND_PROVIDER=azure`, a switch that no longer exists because the GCP
+  backend is gone and the Azure base is the only one. `functionsBase.test.js`
+  now pins what replaced it: `getEndpoint` composes an authenticated route onto
+  the configured base in both topologies and throws naming the route when it is
+  unset, an anonymous `publicApi` read goes to the same base, and a source scan
+  fails if `VITE_BACKEND_PROVIDER` or any `VITE_GCP_*` variable reappears —
+  a reintroduced switch would mean a second resolution path, which is the
+  defect that file exists to prevent.
+  *Public content limits* — `limit` and `offset` come straight off an anonymous
+  query string, so `public-reads.test.js` now covers non-numeric, empty, zero,
+  negative, fractional, oversized, `Infinity` and at-the-ceiling values on both
+  `listContent` and `listPodcasts`, including that a negative limit clamps up to
+  one item rather than producing an empty slice, that an offset past the end is
+  an empty page with an honest `total`, and that `limit=0` reads as unset.
+  *Partial configuration updates* — `admin-integrations.test.js` now pins that
+  a PATCH omitting `oauthToken` never sends the key (so the merge cannot clear
+  it), that the untouched token stays out of the response built from the merged
+  document, that the read artefact is dropped, that a revoke remains an
+  explicit empty-string write, and that an `ai-providers` patch touches only
+  the fields it names. `ai_providers` documents hold `apiKeyEnvVar`, the name of
+  a server-side setting, never a key — `oauthToken` on `mcp_servers` is the only
+  secret value either collection stores.
+
+
+- **The visitor-facing upstream delta (T-409).** From Site-Main 088f458,
+  with their tests: `RichTextBody` (architecture and framework overviews
+  render markdown as markdown, HTML as sanitised HTML), `CoderCornerSnippet`
+  + `CodeBlock` (the snippet, language and repository link the coder_corner
+  contract requires now render; fenced code gets highlighting and a copy
+  button), `WafAssessment` + the vendor Well-Architected pillar sets (a
+  Well-Architected tab when an architecture carries `waf`), `FeaturedArchitecture`
+  + `colorClasses` (the AWS/Azure galleries' featured panel is data-driven),
+  and the Ansible and VMware education data, rendered through a new
+  `EducationTracks` component with level filter, learning paths and resources.
+- **The eleven Firestore triggers as six change-feed functions (T-324).**
+  `functions/src/functions/change-feed.js` registers one `app.cosmosDB`
+  function per watched container on the identity-based binding
+  (`COSMOS_CONNECTION__accountEndpoint` + `__credential = managedidentity`,
+  never a connection string), each with its own `leases` prefix. The
+  before-image substitutes are ported from Site-Main `lib/triggers/`: value
+  markers (image mirrors, Publer push), the rising-edge claim on an
+  etag-conditioned replace (AI cover, slug page), the activation stamp
+  (Telegram alerts) and `content_stats_markers` (dashboard counters,
+  idempotent). Image mirroring keeps the `{docId}/images/…` blob scheme and
+  serves through the media route; the template cover is stored as SVG; the
+  AI cover calls Replicate over REST. The three deletes the feed cannot see:
+  `DELETE /api/cms/content/{id}` and `deleteContentItem` move the counters,
+  `DELETE /api/cms/social-posts/{id}` un-publishes on Publer first, and
+  `DELETE /api/cms/blogs/{id}` is new (publisher, audited). `lib/notify.js`
+  is the Telegram notifier with its per-source cooldown; resolve/reopen
+  clear `activationNotifiedAt`.
+- **The external-ingestion timers (T-323, closed).** `syncSocialCalendarScheduled`
+  reconciles `social_posts` with Publer (matched posts take Publer's state,
+  vanished ones are marked deleted, unmatched Publer posts become
+  `publer_<id>`); `fetchBlogListings` scrapes eleven non-RSS listing pages
+  through Firecrawl's v1 REST structured extraction into `content` drafts in
+  the RSS shape; `fetchPodcastFeeds` upserts PodBean episodes into
+  `podcasts`. Each skips itself while its key is a Key Vault stub. Three more
+  `FEATURE_FLAG_*` settings, all `"false"`; `SYNC_SOCIAL_CALENDAR` stays off
+  until the cutover delta import (D12). Fifteen of sixteen timers are now
+  registered; `refreshToolServiceCacheScheduled` stays demoted with Cloud
+  Tools.
+- **Twelve of the sixteen timers (T-323).** `functions/src/lib/timers/`
+  carries `generateReviewerDigest`, `cleanupRejectedContent` (soft),
+  `cleanupSoftDeletedContent` (hard, with linked blogs and `content_versions`
+  rows), `monitorPublishingPipeline`, `checkLiveLinks`,
+  `reVerifyCertifications` (republishes the certifications snapshot),
+  `cleanupUnusedCertImages`, `scrapeSkillsHubRss`, `refreshPlaudToken`,
+  `forgeScheduled`, and the two stubs — `cleanupTempStorage` (prefix + age,
+  not an orphan sweep: T-302) and `checkAgentHealth` (T-401) — each a
+  factory with injected store/fetch/storage, registered in `schedulers.js`
+  through one flag-gated `timer()` helper with the §4.2 NCRONTAB. The two
+  blob-deleting timers are dry-run until `TEMP_STORAGE_CLEANUP_DELETE` /
+  `CERT_IMAGE_CLEANUP_DELETE`. Digest, alert and system-audit records go
+  through `lib/timers/workflow-records.js`. Ten new `FEATURE_FLAG_*` app
+  settings, all `"false"`.
+- **`forge-article` and `generate-weekly-digest` platform jobs; the stale-job
+  sweeper.** ContentForge's pipeline is ported whole
+  (`functions/src/lib/content/forge*.js`, `drafting.js`): dedupe against the
+  published corpus, admin-editable profile and prompts from `admin_config`
+  with code defaults, format rotation, the forge module instruction and word
+  soup, deterministic dash scrub / banned-phrase scan / module repair, the
+  best-fit weighted grader with its keyword prescreen, `forge_ready` vs
+  `editing` routing, version + audit + `forge_stats` writes. The weekly
+  digest drafts from the last N days of live content into `newsletters`
+  (`dryRun` previews); the Mailing List page gained the preview and draft
+  buttons. `platformJobSweeper` (every 15 min, `FEATURE_FLAG_PLATFORM_JOB_SWEEPER`)
+  re-enqueues jobs left `queued` by a failed output binding — the gap
+  lib/jobs.js documented. `generate-listen-and-learn` is deferred to T-411
+  (three Google services, no frontend here), closing T-322.
+- **`batch-inspect` platform job — the article inspector, ported.**
+  `functions/src/lib/content/` carries Site-Main's `scrapeArticle`
+  (`fetch` + cheerio + turndown; strict TLS; reader and headless fallbacks
+  only behind `CONTENTFORGE_SCRAPE_FALLBACK_ENABLED` /
+  `CONTENTFORGE_HEADLESS_FALLBACK_*`), `extractPublishedDate`, the voice /
+  format-rotation block (`pickNextFormat` off `scrapedAt` in Cosmos, fails
+  open), the verbatim analysis system prompt, the critique gate with one
+  automatic revision, and `buildInspectionUpdateData` with its upstream
+  tests. The job (`inspect-jobs.js`) selects up to 25 `ingested` documents —
+  `inspectTrigger: true` first, then unflagged ones that have not failed —
+  inspects each 4 s apart, records `inspectError` on failure and keeps
+  going; results are counts and ids only. `OpsHealthPage` "Batch Inspect"
+  now runs `runJob('batch-inspect', { limit: 10 })`; `batchInspect` left the
+  RPC contract. Not ported: the architecture-diagram (multimodal) path — such
+  documents record an `inspectError` saying so — and cover-on-inspect.
+- **AI router** (`functions/src/lib/ai/router.js`, T-322 §4.4) — ported from
+  Site-Main's `ai-model-router.js` with the provider model the owner chose on
+  2026-08-21: **a provider is on when its key is present.** Anthropic, OpenAI
+  and Gemini (public API by key; Vertex dropped — ADC is a GCP identity the
+  app cannot hold), resolved in that order or pinned by
+  `CONTENTFORGE_AI_PROVIDER`; an unresolved Key Vault reference counts as no
+  key; no key → `AI_NOT_CONFIGURED` with a sentence naming the three
+  secrets. `fetch` instead of axios; purpose → model table, JSON repair
+  round trip, retry on 408/429/5xx, usage capture with cost estimates and
+  the Anthropic prompt-cache marker all kept. 15 tests, none touching the
+  network; the upstream cost tests came across.
+- **`fetch-rss-feeds` — the first real platform job** (T-322), ported from
+  Site-Main's `processRssFeeds`: 20 feeds across 8 providers through
+  `rss-parser`, one `rss_cache` document per feed with `items[]` capped at 20
+  on write (T-319's write-time cap), new `content` drafts through the
+  existing four-stage dedup (≤ 10 per feed), and the `homepage_feeds/latest`
+  round-robin aggregate. The admin "RSS Fetch" button enqueues it via
+  `runJob()` instead of calling `fetchRssFeedsManual` (which never existed
+  here); the `syncRssFeeds` timer stub now runs the same ingest every two
+  hours behind its flag. TLS failures skip the feed with the reason recorded;
+  one feed failing never abandons the sweep. 17 new tests. Not ported: the
+  Telegram alert on feed errors — errors are in the job result.
+- **Platform jobs — the pattern for every handler over Flex Consumption's
+  230 s HTTP cap** (T-322 scaffold). `functions/src/lib/jobs.js`: a job-type
+  registry, `POST /api/enqueueJob` (editor; type allowlist, per-type payload
+  cap; 202 + jobId; message to Storage Queue `platform-jobs` through an output
+  binding on the identity-based host connection), `GET|POST /api/getJob`
+  (viewer), and a queue-triggered worker that claims with an etag-conditioned
+  replace — at-least-once delivery never runs a job twice — and records
+  `succeeded` / `failed` / `timeout` without rethrowing into the queue. New
+  `jobs` container (30-day TTL, indexed like `lab_jobs`). Client:
+  `frontend/src/lib/jobs.js` `runJob()` enqueues and polls with the Labs
+  backoff. Built-in type `noop`. 14 new functions tests, 5 frontend tests; the
+  route inventory now asserts the worker is the only queue trigger.
+- **`infra/scratch.tf` — the migration rehearsal estate.** `cosmos-site-sbx-cus`
+  (serverless, keys **off**, the same firewall shape, the same `hcw` database
+  and the same 72 containers from the same generated spec) and
+  `stsitesbxcus01` (the five content containers plus a private
+  `migration-reports`) in their own resource group `rg-db-site-sbx-cus`,
+  created only while `cosmos_scratch_enabled` / `storage_scratch_enabled` are
+  true and destroyed when they are not. Mirrors production's posture on
+  purpose: a key-authenticated rehearsal against an open account passes while
+  proving nothing about the `DefaultAzureCredential` + RBAC path production
+  takes. Outputs via `one()`; `set-github-variables.ps1` wave 2 seeds
+  `COSMOS_SCRATCH_ENDPOINT`, `STORAGE_SCRATCH_ACCOUNT` and
+  `SCRATCH_RESOURCE_GROUP` from them, and leaves them alone while null.
+- **`scripts/migration-probe.mjs`.** One `SELECT VALUE COUNT(1)` that runs
+  before the export and classifies a Cosmos 403 as `firewall` or `rbac` —
+  two unrelated causes the SDK error does not distinguish, and which would
+  otherwise surface only on the first upsert after a full export.
+- **`scripts/migrate-storage-to-blob.mjs` + `scripts/lib/storage-manifest.mjs`.**
+  Manifest-driven GCS → Blob `--inventory | --copy [--dry-run] [--overwrite] |
+  --verify` on `@google-cloud/storage` + `@azure/storage-blob`, idempotent by
+  `gcsmd5` metadata, carrying `contentType` / `cacheControl`, with a verify
+  that compares counts, bytes, every object's MD5 and a deterministic
+  byte-for-byte sample. `--inventory` exits 2 on an unmanifested prefix,
+  mirroring the Firestore preflight. A vitest suite asserts every target
+  container is one of the five Terraform names. Replaces
+  `migrate-storage-to-blob.sh`.
+- **Wiki pages `Migration-Runbook` and `Phase-4-Data-Migration`.**
+  Referenced from eleven places (README, the plan, `_Sidebar`, the workflow,
+  the manifest header); neither existed. The runbook is the twelve-step
+  operator sequence with the evidence each step produces; the Phase-4 page is
+  the decision log.
+- **`WEBSITE_TIME_ZONE = "America/Chicago"` on the Function App.** Eight of
+  Site-Main's sixteen schedules are declared in that zone; NCRONTAB on Linux
+  evaluates in UTC unless told otherwise.
+- **`storage_resource_group` output**, pairing with `storage_account` the way
+  `web_resource_group` pairs with `functions_storage_account` — what
+  `migrate-data.yml` scopes its per-run firewall window to.
+- **The HCP Terraform → Azure bootstrap, which existed nowhere.**
+  `infra/providers.tf` declares the `azurerm` provider with no credential —
+  correct, because runs execute under HCP Terraform dynamic provider
+  credentials — but the identity those credentials assume has to exist
+  first, and nothing in this repository could create it. `infra/oidc.tf`
+  creates the *GitHub Actions* identity, which only exists after a
+  successful apply. Terraform cannot create the credential Terraform
+  authenticates with. A repository-wide grep for `ARM_CLIENT_ID`,
+  `TFC_AZURE_*` and `app.terraform.io` across `.tf`, `.yml` and `.md`
+  returned nothing: the first apply had no documented path to authenticate,
+  and the gap was invisible to file-by-file review because every individual
+  file was correct and only the join between them was missing.
+
+  `scripts/bootstrap-terraform-oidc.ps1` closes it. It creates
+  `rg-hcw-bootstrap`, the `id-hcw-terraform` user-assigned managed identity,
+  two federated credentials against `https://app.terraform.io` — one per run
+  phase, because Entra matches token subjects exactly and case-sensitively
+  with no wildcards, so a single credential leaves every apply failing at
+  authentication while every plan succeeds — and Contributor plus Role Based
+  Access Control Administrator at subscription scope (Contributor cannot
+  create the role assignments `infra/` declares; RBAC Administrator cannot
+  grant Owner, so the identity cannot escalate itself).
+
+  A managed identity rather than an app registration, for the reason
+  `infra/oidc.tf` already documents: app registrations need Application
+  Administrator in Entra, which Azure Owner does not grant. The identity is
+  deliberately **outside Terraform state**, in its own resource group —
+  Terraform managing the credential it authenticates with means a destroy or
+  a bad plan locks the workspace out of the subscription with no way back.
+
+  The script is idempotent and preflights before it proposes anything: CLI
+  present, signed in, tenant matches, subscription visible, role-assignment
+  rights held, `Microsoft.ManagedIdentity` registered. Sign-in is performed
+  by the script rather than demanded of the operator — being signed in to a
+  different directory is the normal state for anyone working across tenants,
+  so it runs `az login --tenant` itself and re-reads the account afterwards,
+  because a directory switch also changes which subscriptions are visible.
+  `-DeviceCode` covers sessions with no browser of their own (SSH,
+  containers, Cloud Shell) and the case where the browser keeps reusing the
+  wrong cached account; the script falls back to it automatically when the
+  interactive flow fails, since that failure is environmental — no display,
+  no loopback — more often than it is a credential problem. It handles the
+  fresh-tenant case explicitly — a Global Administrator holds no Azure RBAC
+  by default, which produces errors that suggest the wrong fix, so
+  `-ElevateAccess` takes the documented one-time root-scope elevation, grants
+  Owner on the target subscription, and removes the root grant again.
+
+  Documented in Deployment Runbook §0 (which now tables the two OIDC
+  handshakes side by side — confusing them strands the operator hunting for a
+  `CLIENT_ID` that does not exist until after the first apply), CHECKLIST §8
+  (the four workspace environment variables, contractual and exempt from the
+  2-word rule), and REVIEW §4.0. The `iac-repo-standardizer` agent and the
+  IaC Repository Standard both gained a **bootstrap identity** section making
+  this the first thing audited on any repository, since the failure
+  generalizes to every credential-free IaC repo.
+
+
+- **Free-tier disposition recorded on the Cost-Analysis wiki page** (now
+  wiki-as-code, staged in `.github/wiki/`). Decisions from the workload
+  owner's free-services meter review: runner image **stays on Docker Hub**
+  (ACR rejected — month-13 cost for a failover-only image); Cosmos free
+  tier is unusable by design (serverless); Service Bus / VM / SQL / LB
+  12-month meters rejected as expiring traps; blob + egress discounts are
+  automatic. Adds the standing **AI options reference** for the future AI
+  RPCs: always-free F0 SKUs per task (Translator, Language, Vision,
+  Content Safety, Document Intelligence, Speech) with the mechanics that
+  make them budget-safe (throttle-not-bill on quota, create directly with
+  F0 — Foundry-provisioned resources default to S0, keyless applies) and
+  the explicit note that generative drafting/image work has no free Azure
+  tier — that is Azure OpenAI or the SaaS keys. (PR #116)
+
+- **CodeQL `actions` language added to the advanced matrix** — the retired
+  Default setup had been scanning workflow files (`language:actions`); the
+  advanced setup now owns that coverage across the repository's 12
+  workflows. Context: the Tool status page's erroring `language:go` /
+  `language:java-kotlin` entries are stale Default-setup configurations
+  auto-created ~3 weeks ago from stray Go/Java snippet files inside the
+  vendored `.claude/` harness — the exact paths the advanced config
+  excludes. Those languages are deliberately NOT added to the matrix; the
+  stale configurations are removed operator-side from the Tool status
+  page's ⋯ menu. (PR #115)
+
+- **Variable naming standard** (workload owner directive, 2026-08-18) —
+  operator-set configuration names are UPPER_SNAKE_CASE, **maximum 2
+  words** (3 only to break a real collision), with no provider prefixes:
+  `CLIENT_ID`, `TENANT_ID`, `SUBSCRIPTION_ID`, `RESOURCE_GROUP`,
+  `APP_HOSTNAME`. Contractual names (`VITE_*`, `GITHUB_TOKEN`) are exempt.
+  Applied immediately to every workflow-consumed repository variable —
+  all were still unset, so the renames are free: `AZURE_CLIENT_ID`→
+  `CLIENT_ID`, `AZURE_TENANT_ID`→`TENANT_ID`, `AZURE_SUBSCRIPTION_ID`→
+  `SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`→`RESOURCE_GROUP`,
+  `FUNCTION_APP_HOSTNAME`→`APP_HOSTNAME` (`FUNCTIONS_STORAGE_ACCOUNT`
+  keeps its third word to avoid colliding with the content account).
+  The standard is codified in the `iac-repo-standardizer` agent — which
+  now sweeps `vars.*`/`secrets.*` on every standardization run — and in
+  the Wiki IaC-Repository-Standard page; CHECKLIST §7 carries the rule and
+  an `APP_HOSTNAME` row. (PR #114)
+
+- **Apply verification for the T-503–T-506 hardening (2026-08-18)** — the
+  operator applied the full set in HCP Terraform; cold start passed,
+  verifying the T-503 VNet runtime/package-pull path directly. A post-apply
+  `validate-deployed` run is byte-identical to the pre-apply baseline (no
+  external regression), and Repository Policy / IaC Validation / CI /
+  CodeQL are all green on `main`. One verification remains blocked:
+  `heal-computed-properties` — the probe for T-504's `0.0.0.0`
+  Azure-datacenter sentinel — fails at Azure login because the
+  `AZURE_CLIENT_ID` / `AZURE_TENANT_ID` / `AZURE_SUBSCRIPTION_ID`
+  repository variables were never set (a pre-existing gap, failing on every
+  run before the hardening too; now recorded in CHECKLIST §7). Evidence
+  table published as an addendum to the Wiki Resource-Validation-Report;
+  plan v0.2 dispositions moved to APPLIED. (PR #112)
+
+- **T-503 — Functions host storage network-restricted** (apply pending in
+  HCP Terraform; the last item of the T-50x hardening series). The host
+  storage account moves to default-Deny with three deliberate survivors:
+  the Flex app's runtime/package-pull path (VNet integration + new
+  `Microsoft.Storage` service endpoint on the integration subnet — which
+  also makes the content account's existing subnet rule provably
+  non-inert), a per-run firewall window in `deploy-functions.yml` (add
+  runner IP → deploy → always-run remove) under a new Storage Account
+  Contributor grant scoped to exactly this account, and operator windows
+  via `functions_storage_admin_ip_rules`. Rollback is one variable:
+  `functions_storage_network_default_action = "Allow"`. The
+  `#trivy:ignore:AVD-AZU-0012` suppression is deleted — the CI gate now
+  enforces the control it previously excused. New required inputs
+  `AZURE_RESOURCE_GROUP` and `FUNCTIONS_STORAGE_ACCOUNT` recorded in
+  CHECKLIST §7. Verify after apply with a functions deploy **and** a
+  cold-start invocation. (PR #111)
+
+- **T-504/T-505/T-506 — the security and observability remediation ADR-0018
+  refused to ratify, now implemented in Terraform** (apply pending in HCP
+  Terraform). **Cosmos hardening (T-504):** VNet service firewall allowing
+  the Functions integration subnet (new `Microsoft.AzureCosmosDB` service
+  endpoint), the `0.0.0.0` Azure-datacenter sentinel so
+  heal-computed-properties keeps working from GitHub-hosted runners
+  (variable-gated to drop later), operator-window `cosmos_admin_ip_rules`,
+  `local_authentication_disabled` (variable, default true), and continuous
+  backup (free 7-day tier). **Observability layer (T-505):**
+  `infra/observability.tf` adds the `ag-hcw-ops-prod` action group and
+  diagnostic settings for Key Vault, Cosmos (the plan's four categories),
+  the content blob service and Azure OpenAI; the budget gains the approved
+  50/75/90/100 ladder plus a Forecasted-at-100 alert routed through the
+  group; Log Analytics gets the 0.25 GB/day cap. **Keyless OpenAI (T-506):**
+  custom subdomain (planned replacement of the stateless account + both
+  deployments — `openai-client.js` has zero importers, so nothing breaks),
+  `local_auth_enabled = false`, Cognitive Services OpenAI User for the
+  Function App identity, the primary-key output deleted, and an
+  `AZURE_OPENAI_ENDPOINT` app setting for future keyless wiring. Plan
+  v0.2-as-built dispositions updated to "resolved in code, closes on
+  apply". (PR #108)
+
+- **Infrastructure plan v0.2-as-built and ADRs 0018–0021** — implements the
+  REVIEW §8.2 decision (workload owner, 2026-08-18) to supersede plan v0.1
+  with a plan that describes the real system. `.azure/infrastructure-plan.json`
+  is now version `0.2-as-built`: every implemented resource with its
+  as-built properties, each deviation from v0.1 dispositioned as either a
+  ratified decision or explicitly-unratified remediation debt (T-503–T-506,
+  purge protection). Four ADRs staged to the Wiki: **0018** (umbrella
+  supersede + disposition table), **0019** (single Function App —
+  supersedes ADR-0004), **0020** (flat native Terraform root module —
+  supersedes ADR-0005's AVM clause, resolves TODO T-502, and rewrites the
+  README AVM guardrail to "pinned versions, stable addresses"), **0021**
+  (Container Apps CI runner ratified as failover-only). ADR register
+  updated; ADR-0004 marked superseded. New TODO **T-506** (keyless Azure
+  OpenAI: RBAC grant, delete the key output, disable local auth).
+  (PR #107)
+
+- **Resource validation pass, first execution (2026-08-18)** — results
+  published as the Wiki **Resource-Validation-Report** page (staged in
+  `.github/wiki/`, linked from Home and the sidebar). External surface:
+  edge live, TLS healthy to 2026-09-28, `www`/`api-azure` NXDOMAIN
+  (consistent with same-origin), but Cloudflare bot challenge blocks all
+  datacenter-IP validation of the origin. Plan-vs-code parity: ~40% of the
+  approved plan's resources implemented, with material security-posture
+  deviations (Cosmos open to the internet with key auth on, LRS vs ZRS,
+  purge protection defaulted off, ungated keyed OpenAI) and material
+  never-planned resources (CI runner, 71 containers, model deployments).
+  Follow-ups filed: TODO T-504 (Cosmos hardening), T-505 (observability
+  control layer); human decisions REVIEW §8.1 (Cloudflare synthetic-access
+  rule) and §8.2 (reconcile implementation to plan, or supersede the plan
+  as-built). (PR #106)
+
+- **`validate-deployed.yml` — on-demand deployed-surface validation** — a
+  `workflow_dispatch` workflow running the externally observable half of the
+  Deployment Runbook's §4 verification from a GitHub-hosted runner: DNS for
+  the apex/`www`/`api-azure` names, TLS certificate inspection, frontend
+  status + security headers, and `scripts/smoke-deployed.mjs` tier 1
+  (anonymous, no side effects) against a dispatch-time base URL (default
+  `https://hybridcloudworks.com/api`). No secrets or cloud credentials —
+  same doctrine as `ci.yml`; smoke tiers 2–3 remain operator-run. Results
+  land in the job summary. The staged Deployment Runbook §4 references it.
+  (PR #105)
+
+- **IaC repository standardization** — the repository now carries the
+  baseline governance surface expected of a permanent infrastructure repo:
+  `.github/CONTRIBUTING.md`, `.github/SECURITY.md`, `.github/CODEOWNERS`, a
+  pull-request template with a Terraform-plan gate, issue templates
+  (including an infrastructure change request with blast-radius and rollback
+  prompts), a root `.editorconfig`, and `infra/README.md` documenting layout,
+  working rules, guardrails and the ALZ-absorption posture. The repository
+  policy script allowlists exactly these files; narrative documentation still
+  belongs in the Wiki. A new `iac-repo-standardizer` agent
+  (`.claude/agents/`) encodes the standard so future repositories can be
+  brought to the same baseline.
+- **IaC validation gate** — `.github/workflows/iac-validate.yml` runs
+  `terraform fmt`, `terraform validate` (via `init -backend=false`, so no
+  credentials or state access), tflint (`infra/.tflint.hcl`) and a Trivy IaC
+  misconfiguration scan on every pull request touching `infra/**`. Until now
+  nothing validated Terraform changes at all while the prototype delivery
+  workflow stayed disabled.
+- **`prevent_destroy` guards on stateful resources** — the Cosmos DB account,
+  both storage accounts and the Key Vault now refuse plans that would replace
+  them; removing a guard is itself a reviewed change. Applied together with
+  the `terraform fmt` drift that had accumulated in `main.tf`.
+- **Deployment Runbook and IaC Repository Standard as wiki-as-code** — the
+  day-1 apply procedure, day-2 operations, ALZ-absorption sequence, and the
+  standard this repository now conforms to, staged under `.github/wiki/`
+  (with updated `Home` and `_Sidebar`) and published to the GitHub Wiki by
+  the new `sync-wiki.yml` workflow on merge to `main`. The workflow overlays
+  staged pages only — unstaged wiki pages remain UI-editable — and uses the
+  built-in `GITHUB_TOKEN`, so no PAT or additional GitHub App is required.
+  Staged pages become repository-owned: they get PR review like the code
+  they describe. The sidebar's repository links now point at the
+  HybridCloudWorks org instead of the pre-move personal fork.
+
 ### Changed
+
+- **MFA is enforced by security defaults, not Conditional Access (#514).**
+  Checked against the live tenant on 2026-09-12: security defaults are enabled
+  in tenant properties, and Conditional Access is unavailable because the tenant
+  is not licensed for Entra ID P1. `AdminAuthGuard.jsx`, `entraAuth.js` and ADR
+  0006 all stated Conditional Access, which would have sent anyone looking for a
+  policy to an empty blade.
+
+  Two consequences are now written down rather than left to be rediscovered:
+  security defaults cannot be scoped or excepted, so a break-glass path has to
+  survive MFA rather than bypass it; and Entra **disables security defaults
+  automatically** the moment any Conditional Access policy is created — so
+  licensing P1 later is not a free upgrade, it is a change that silently
+  replaces the MFA control.
+
+  `lib/auth/roles.js` has said since it was written that Continuous Access
+  Evaluation "does not cover us", and now carries the citation for it: CAE
+  requires that both the client and the resource be CAE-enabled, and CAE-enabled
+  resources are Microsoft first-party services. Declaring `CP1` would take on the
+  obligation to handle claims challenges while no resource in the call graph can
+  issue one.
+
+- **A deploy build with the Entra variables unset shipped a sign-in pointed at
+  every tenant (#516).** `msalConfig.js` defaulted the authority to `common`
+  when `VITE_ENTRA_TENANT_ID` was empty, and `vite.config.js` validated exactly
+  one variable — `VITE_AZURE_FUNCTIONS_URL` — so nothing stopped the build.
+  `deploy-azure-frontend.yml` even carried a comment acknowledging it.
+
+  **What that actually produced is worth stating, because it is not what it
+  sounds like.** `common` was never a route to backend access: the API pins one
+  tenant by issuer, so a token from another directory could never have been
+  authorized. What it produced was a SPA that accepted a sign-in from any Entra
+  tenant or personal Microsoft account, stored that identity in `localStorage`,
+  rendered signed-in UI, and then 401'd on every call — a confusing partial
+  success where an unambiguous failure belonged.
+
+  The backend has had this instinct since it was written: `verify-token.js`
+  refuses to start without its two settings, and `infra/variables.tf` rejects an
+  empty audience because an empty one silently disables audience validation. The
+  client half never got it, and now has it.
+
+  **Shape, not presence.** A presence check would have caught neither realistic
+  mistake, because `.env.example` recommended `common` for the tenant and
+  `/.default` for the scope — both non-empty, both wrong. A GUID test rejects
+  empty, `common`, `organizations` and `consumers` in one rule, and the error
+  lists every problem at once so three missing variables do not cost three
+  deploy attempts. `/.default` is deliberately still allowed: it is a real
+  delegated request shape, just not this registration's, and the lever for that
+  is documentation rather than the build.
+
+  `REQUIRE_API_BASE` keeps its name even though it now gates more than the API
+  base. Renaming it is fail-open — the deploy workflow is what sets it, so a
+  rename landing without the matching workflow edit would silently disable every
+  check with nothing going red.
+
+  `msalConfig.js` now falls back to an all-zero GUID rather than throwing. A
+  module-scope throw would take out the several test files that import it
+  transitively without mocking, and would convert a build-time problem into a
+  runtime crash on a path that already has a working failure mode: MSAL fails at
+  authority resolution, `onAuthStateChanged` reports null, and the sign-in card
+  renders.
+
+  Also corrected: `.env.example` no longer suggests `common` or `/.default`, and
+  `functions/local.settings.json.example` gained `ENTRA_TENANT_ID` and
+  `ENTRA_API_AUDIENCE` and lost `FIREBASE_PROJECT_ID` — without the two Entra
+  settings a local `func start` could not reach `getDefaultGuard()` at all,
+  because `createTokenVerifier` throws on both.
+
+- **The API accepted an ID token as an access token (#515).**
+  `functions/src/lib/auth/verify-token.js` has always opened with DECISION 3,
+  which names the hazard precisely: *"With a single registration, an ID token
+  minted for the SPA carries `aud = <client-id>` — indistinguishable from an
+  access token for the API."* The tenant runs one registration —
+  `scripts/cutover/01-entra-spa.ps1` put an SPA platform on the API's own
+  registration — so the hazard was live rather than hypothetical. An ID token
+  carried the same `aud`, the same v2 issuer and the same signing key as an
+  access token, and because Entra emits assigned app roles in **both** token
+  types it carried `roles: ['Admin']` too. Every check the guard made, it
+  passed.
+
+  **Defence in depth, not an escalation.** Both tokens sit in the same browser
+  cache for the same user, so holding one implies holding the other and there is
+  no cross-user path. But it was this codebase's own documented invariant,
+  violated in production, and the second half of DECISION 3 — "reject anything
+  without a `scp`/`roles` claim" — had never been implemented. `scp` appeared
+  exactly once in `functions/src`, in that sentence.
+
+  **That proposed remedy would not have worked either.** `roles` is in ID tokens,
+  so a roles-presence check separates nothing. `scp` is the claim Entra puts in
+  delegated access tokens and never in ID tokens, and it is now required in
+  `authenticate()` — so `requireUser` endpoints inherit it, which matters because
+  `bootstrapCurrentUserAdmin` is reached that way. Agents are unaffected:
+  `require-agent.js` runs its own client-credentials path, and now refuses a
+  token bearing `scp` so the two guards are disjoint by construction rather than
+  by the two role names happening to differ.
+
+  Alongside it, the verifier now asserts what Microsoft's API-protection
+  guidance asks for and jsonwebtoken does not check: `tid` is a GUID and matches
+  the configured tenant, `iss` agrees with that `tid`, and `ver` is `2.0`. The
+  v1 `sts.windows.net` issuer is gone — with a bare-GUID audience it could never
+  pass, but `infra/variables.tf` documents the `api://` audience as a supported
+  alternative, and the day someone took that option the v1 issuer would have
+  gone live with no version gate behind it. The assertions run *inside* the
+  `jwt.verify` callback, so every claim they read has already had its signature
+  checked and `tid` reaching an audit row is not attacker-controlled.
+
+  **Before deploying, confirm `scp` is in the live token.** Admin → Health lists
+  the claims present in the caller's own token; `scp` must be among them. If it
+  is not, every admin call returns 401 with a `missing-scope` row in
+  `admin_audit_logs` — a clean, attributable failure, and one revert away.
+
+- **An expired token told the owner he was not authorized, and offered to
+  re-provision him (#503).** Opening `/admin/integrations` on 2026-09-11 showed
+  **Access Denied — spatino@hybridcloudworks.com is not authorized** with a
+  **Bootstrap My Admin Access** button. Signing out and back in "fixed" it,
+  which is the tell: the problem was never authorization. The `admins/{oid}`
+  record was correct the whole time.
+
+  **Three outcomes were returning one value.** `fetchAdminStatusFromBackend`
+  answered `{ isAdmin: false }` for a rejected token, for a call that never
+  completed, and for a server that genuinely said no. Only the third is an
+  authorization answer; the first two are a check that could not run, reported
+  as a check that ran and refused. The warning string it logged —
+  `'Not an admin or token expired'` — admitted on the line above that it could
+  not tell which. That is the same defect class as `unknown` versus
+  `disconnected` on the Recording Hub and the 401-versus-403 saga that cost
+  #358 two days.
+
+  The hook now returns a discriminated `accessState` — `authorized`,
+  `unauthorized`, `unknown` — and `unknown` is never cached, so a transient
+  failure does not sit in front of the portal for five minutes. `authedFetch`
+  keeps the HTTP status on the error it throws and `acquireApiToken` tags
+  every failure with the one action that recovers it, which is what makes the
+  three distinguishable at all: `requireUser` on the server denies only with
+  401, so a non-200 from this route is never a verdict about the caller.
+
+  **What the owner sees now.** An expired session redirects to Entra and comes
+  back signed in, without a denial and without anything to click — once per
+  tab, because a second automatic attempt against a genuinely broken
+  configuration is an infinite redirect loop with no screen to read. After
+  that it is an honest "Could not verify your access" card with a **Sign in
+  again** button; an unreachable API gets the same card with **Try again**.
+  Access Denied is now reached only by a real 200 saying so.
+
+  **And the bootstrap button is no longer guessed at.** `getCurrentAdminStatus`
+  returns `canBootstrap`, the server running the same three-way gate the POST
+  enforces, so the button appears only when pressing it would succeed — never
+  for an account that already holds a registry row, active or deactivated.
+  Offering a deactivated admin a self-promotion to `super_admin` is the
+  opposite of what the deactivation meant.
+
+- **The Monday refresh put the six GitHub exams straight back into the Azure
+  catalogue, hours after #507 removed them (#496).** Found by dispatching the
+  workflow #499 had just widened — run 34627119281 on 2026-09-11 opened a pull
+  request re-adding GH-100, GH-200, GH-300, GH-500, GH-600 and GH-900, with
+  their six study-guide outlines behind them, +1167 lines of them.
+
+  **Nothing was broken; the decision was simply in a place no script reads.**
+  GitHub certification moved onto Microsoft Learn, so all six sit on the
+  Microsoft Certifications poster and in the credentials browse API — both of
+  which are this updater's sources. It had always been offering them, and
+  before #496 the catalogue accepted them. #496 recorded the removal in the
+  catalogue's file header and in a cross-catalogue test, and
+  `update-applied-skills.mjs` reads neither. So the rule now lives where the
+  automation meets it: the script refuses any exam another catalogue owns,
+  before building the row.
+
+  **A prefix, not the six codes.** GitHub adding a GH-700 would recreate the
+  duplication exactly, and it belongs to `/github/education` for the same
+  reason the six do — the Azure `LEVEL_META` has no Professional rung, so a
+  GitHub exam cannot be stated truthfully there whatever is typed. Refusals are
+  reported in the pull request body under their own heading rather than dropped
+  silently, and deliberately not in the "not added" bucket, which means "nobody
+  could confirm this exam" and would send a reviewer hunting a source problem
+  that does not exist.
+
+  **The workflow also checked the wrong thing.** Its test step ran
+  `azure/certifications.test.js` alone, which by construction cannot see a
+  contradiction with another catalogue — so the run went green and left the
+  defect for the pull request's CI to catch. It now runs
+  `education-catalogues.test.js` too, where the cross-catalogue guard lives,
+  so the workflow refuses to open that pull request itself.
+
+  Worth recording that the guard worked: `one exam, one catalogue (#496)` is
+  what failed on the bad pull request, on the same day it was written. The
+  regression was caught by CI, not by a reader — but by the pull request's CI
+  rather than the workflow's, which is the gap closed here.
+
+
+- **The three dated catalogue rows were settled without waiting three weeks
+  for them (#494).** #494 held four obligations that all read as "come back
+  after 2026-09-30". Three of them did not need the wait, and answering them
+  now turned up two things the issue had wrong.
+
+  **AZ-800 was missing from the issue's own table.** It carries the same
+  `expiryDate: '2026-09-30'` and the same `replacedBy: 'az-802'` as AZ-801, so
+  it trips in the same breath — four rows go stale on 2026-10-01 across three
+  catalogues, not the one the issue expected a person to fix. A test now pins
+  the exact list, so the next dated row is a named expectation rather than a
+  surprise.
+
+  **The pages were never going to lie, which changes what the alarm is for.**
+  `deriveStatus` reads the dates at render time, so on 2026-10-01 AZ-800 and
+  AZ-801 render `retired` and PAA renders `active` with nobody touching a file.
+  No visitor is shown a retired exam as testable. What goes wrong on that day
+  is narrower and worth stating precisely: a stored `status` its own dates have
+  overtaken is a claim nobody has rechecked against the vendor. Pinned at a
+  fixed future date so it is known rather than discovered.
+
+  **Whether the Monday run self-heals AZ-801 was answerable today, and the
+  answer is "in one of three cases".** #494 recorded it as "an expectation, not
+  a guarantee — nobody has watched that workflow correct a row yet", but
+  `reconcileLifecycle` never reads the calendar: it compares the file's status
+  against the source's by `LIFECYCLE_RANK`, so what the 2026-10-05 run will do
+  is decided entirely by what Microsoft reports, and every branch was
+  exercisable immediately. It retires the row when Microsoft reports `retired`
+  on the same date. It does **not** when Microsoft reports a different
+  retirement date — the date conflict is caught before rank and the file wins,
+  leaving the row stale with one report line as the only clue. It does **not**
+  when Microsoft is slow and still reports `expiring`, and that case reports
+  nothing at all. All three are rule 3 working as designed, and none of them
+  was covered: no test anywhere fed the reconciler a source saying `retired`,
+  so the forward move the issue was waiting on had never been exercised.
+
+  **AZ-802 closes the Azure half outright** (owner, 2026-09-11): it becomes the
+  single test replacing both AZ-800 and AZ-801. That is what makes those two
+  rows need no vendor round-trip on 2026-10-01 — the successor is already known
+  and already in the file, which `certifications.test.js` has asserted since
+  #464. The gap was that nothing said the successor is itself undated: AZ-802
+  is `active` and carries no dated field at all, so `findStaleStatuses` can
+  never name it and it is not a third row to revisit later. Now pinned, and it
+  fails the day Microsoft puts a date on AZ-802 — which is the right moment to
+  look, rather than meeting a dated successor as a red build months later with
+  no record of why anyone expected otherwise.
+
+  **MLA-C02 confirmed a false positive**, as #494 argued: `dateProblems` reads
+  only `betaEndDate` and `gaDate` for a beta row, never `betaStartDate`. Pinned
+  both ways — silent on 2026-10-01, and firing on 2027-01-15 once its `gaDate`
+  is reached — so the reasoning is enforced rather than restated in prose the
+  next time somebody sorts by date and panics.
+
+  **PAA was re-read against Google on 2026-09-11** and nothing had moved:
+  still "open until September 30", three hours, ~80 questions, $120 against
+  $200 retail, English, one-year validity, still no GA date. `DATA_AS_OF` is
+  deliberately not bumped — one row was re-read, not all fifteen credentials,
+  and that field is a claim about the whole file.
+
+  The one thing no day before 2026-10-01 can supply is what the credential
+  becomes, because the post-beta state does not exist yet. That obligation is
+  carried by the alarm rather than by the board: on 2026-10-01 the suite fails
+  naming PAA and pointing at `DATA_SOURCE`, which is the instruction the ticket
+  held, delivered on the day it becomes actionable.
+
+
+- **Every certification catalogue re-verified against its vendor, ahead of the
+  2026-09-29 deadline (#469).** Seven catalogues were checked row by row
+  against the official source and `DATA_AS_OF` moved to 2026-09-10. Azure is
+  excluded because `update-learn-catalogue.yml` refreshes it on a Monday cron,
+  which was confirmed sound rather than assumed.
+
+  **One real error, nine months old.** The AWS row called itself `SCS-C02`
+  while already linking `SCS-C03`'s exam guide, and nothing had ever compared
+  the two. `SCS-C02` stopped being the current exam on 2025-12-01. The row is
+  now `SCS-C03` with `previousSlugs: ['scs-c02']` so minted links still
+  resolve, following the `SOA-C02` precedent, and the three places that
+  hard-coded the old code outside the catalogue were updated with it —
+  `aws/LandingPage.jsx` and two entries in `MicrocredentialDetailPage.jsx`,
+  which would otherwise have displayed a superseded exam beside a corrected
+  one.
+
+  **Three more corrections, each from the vendor's own page.** VMware's VCTA
+  is gone from Broadcom's index entirely and is now `retired` — with no
+  `retiredDate` and no `replacement`, because Broadcom publishes neither and
+  inventing them is the failure this repository keeps legislating against.
+  Red Hat renamed RHCE to "Red Hat Certified Engineer in Ansible", and the
+  `ex374-` URL the file carried now 404s. The FinOps Professional exam
+  requires three prerequisite certifications rather than two, confirmed in
+  two places on the Foundation's own site.
+
+  **GCP, GitHub and HashiCorp needed no data changes at all**, and two
+  near-misses are worth more than the diff would suggest. A cached copy of
+  GH-100's page still says "(beta)"; the live page does not, so trusting the
+  cache would have flipped a good row to `beta`. And GH-500 is absent from
+  `learn.github.com/credentials` while its own page is live and its study
+  guide took a revision in July 2026 — an omission from a marketing page is
+  not a retirement. Both are now recorded in the file headers as sources NOT
+  to trust, which is the more durable half of the work.
+
+  **What was deliberately not done.** Broadcom lists thirteen VCF
+  certifications against the six this catalogue carries. The titles and exam
+  codes are recorded in the file header, but no rows were added: `hours` and
+  `prepTime` are this site's own study estimates, and fabricating fourteen of
+  them is exactly the confidently-wrong entry the rule exists to prevent.
+  AWS's `successRate` percentages have the same problem and are flagged for a
+  decision — every other field in these catalogues is sourced; that one never
+  was.
+
+  **A clock trap worth recording.** `todayIso()` builds its string from
+  `getFullYear`/`getMonth`/`getDate`, so the freshness check runs on the LOCAL
+  calendar. On a machine in CDT at 23:11, `DATA_AS_OF = '2026-09-11'` — the
+  correct UTC date — fails six tests as "in the future", while a UTC CI runner
+  would accept it. The date used is the one the repository's own clock agrees
+  with.
+
 
 - **Every timer now runs on UTC; nine live jobs moved five hours earlier
   (#416).** Owner decision: all times in this app are UTC. `WEBSITE_TIME_ZONE
@@ -3148,28 +3327,6 @@ This project has not cut a tagged release; entries are grouped under
   `Function.cleanupRejectedContent` override so Wave 3b has its witness
   the moment it is armed.
 
-### Added
-
-- **The Plaud Connect tab takes the refresh token too (#342, T-518 Wave 5).**
-  It stored only the access token, while `refreshPlaudToken` rotates the pair
-  with the refresh token and Plaud's access token lasts about a day — so the
-  Library lapsed daily and the timer, once armed, would have marked the
-  document `disconnected` at its first firing. The tab now has a second
-  field for `refresh_token` (both come from `~/.plaud/tokens-mcp.json`), the
-  API stores it write-only beside the access token — never returned, carried
-  through PUT round trips, reported as `hasOauthRefreshToken` — and the
-  banner says whether auto-refresh is armed. Reviewed against Plaud's
-  documentation on 2026-09-05: the quickstart's client id and secret belong
-  to Plaud Embedded, a different product (device SDK and transcription API)
-  that nothing here uses; the MCP tokens are the two values that matter.
-
-### Fixed
-
-- **`refreshPlaudToken` no longer disconnects a document that has an access
-  token but no refresh token (#342).** It warns and leaves the document as
-  it is; the access token expires on its own schedule.
-
-### Changed
 
 - **The Static Web App runs on the Free tier (#341).** Owner decision
   2026-09-05, closing the question carried in TODO.md since T-721 closed on
@@ -3191,7 +3348,1449 @@ This project has not cut a tagged release; entries are grouped under
   for the next deliberate drop: lift in its own PR, read the plan for one
   destroy, restore in the next.
 
+
+- **`T-766` closed: every remaining timer wave has a stated witness (#338).**
+  Found 2026-09-03 when Wave 2's gates returned nothing: #321 had cut the
+  `Function` log category to Warning, which removed the `Executed` and
+  `ScheduleStatus` rows the timer-observation gate read, while its own record
+  said it had protected the table the gate used. The owner kept the cut and
+  made the side effect the witness (`scripts/verify-timer-witness.mjs`, #328),
+  which observed Wave 2; the per-category `host.json` override was decided
+  for Wave 3a on 2026-09-04 (#334). On 2026-09-05 the owner decided the
+  remaining waves in one sitting — Wave 4's three timers all approved, Wave
+  5's two credentials both held, and waves 4, 5 and 6 to arm together in one
+  apply after 3b, since none of the nine deletes anything — and each row in
+  the T-518 table now names
+  its witness: the override, added for a wave when it arms and removed when
+  it closes. The item's closing condition was a stated witness per wave, so
+  it is met; the per-wave work stays in the wave rows. Two records were
+  corrected on the way: neither Wave 5 timer loops on a missing credential
+  (both skip), and the delta-import ordering rule on `SYNC_SOCIAL_CALENDAR`
+  is moot since the import was retired on 2026-08-24.
+
+- **`host.json` raises one log category, `Function.cleanupSoftDeletedContent`,
+  to Information for Wave 3a (#334).** The T-766 decision for the first wave
+  with no public witness. The reaper's side effect is an absence, so no
+  container read can tell an idle run from a timer that never fired; the
+  override restores that one timer's `Executed` rows at a few lines per
+  invocation, which does not reopen T-719. It is a wave-scoped change and
+  comes out when the wave closes. `05-verify-timer.ps1` now reads a
+  per-category override before the `Function` default, so it works for this
+  timer again.
+
+
+- **T-719 and T-721 closed by owner decision, 2026-09-02.** The verbosity
+  cut merged (#321) and Deploy Functions was dispatched the same day; the
+  owner closed both without gating on the first clean cap-day reading — the
+  below-cap volume is expected confirmation, not a closure criterion, and
+  the evidence standard is the owner's to set on a single-operator estate.
+  Held in reserve if a later reading says the cut was not enough: move
+  `AppTraces` (~38% of the old cap volume) to the Basic table plan at
+  roughly USD 0.65/GB versus USD 2.76/GB. The accepted risk (log alerts sleep from
+  cap-hit to the 08:00 UTC reset if the cap ever binds again) stays
+  recorded in TODO.md's Accepted risks; the Static Web App tier
+  re-justification that lived inside T-721 moved to TODO.md's Owner
+  decisions table rather than closing silently with it. The tracker drops
+  to two open items: T-726 (waits on the first content change) and T-518
+  (arm the timers).
+
+- **The Functions host stops narrating itself: `host.json` drops `default`
+  and `Function` to Warning (T-719 decided, T-721's lever pulled).** Twelve
+  days of data showed daily ingestion pinned at the 0.25 GB cap — the
+  ceiling, not demand — with the log-based 5xx/latency alerts going dark
+  from cap-hit to the 08:00 UTC reset on most days. The owner's decision,
+  2026-09-02: this is a personal content site whose volume is host
+  verbosity, not traffic, so the source is cut instead of the cap being
+  raised for a measurement day. `Host.Results` stays at Information
+  deliberately — it feeds `AppRequests`, which those alerts and the
+  timer-observation gate read, and the pinning test refuses the change that
+  would empty it; `Azure.Core`/`Azure.Identity` were already pinned quiet
+  after T-514. The cap stays at 0.25 GB as headroom. Accepted and recorded
+  with the decision: if the cap ever binds again, log alerts sleep until
+  the reset — the T-519 probe covers unreachability on a pipeline the cap
+  cannot touch, and `logs_daily_cap` warns at 80% first. The closure
+  criterion stated here when this shipped — one cap-day measurably below
+  0.25 — was superseded the same day by the owner's decision recorded
+  above; the below-cap reading is confirmation, not a gate. The
+  Basic-table-plan move stays in reserve if that reading says the cut was
+  not enough.
+
+- **The settings sweep is done — the tracker's Phase 2, three settings that
+  were choices rather than defaults, all clicked by the owner 2026-09-02.**
+  The three stale Terraform Cloud variables
+  (`migration_writer_enabled`, `cosmos_scratch_enabled`,
+  `storage_scratch_enabled`) are deleted from the `hcw-azure` workspace —
+  deletion, not declaration, per the 2026-08-24 removal record; the success
+  criterion (a plan printing no "Value for undeclared variable" warnings)
+  is observable on the next queued run. The `production` environment now
+  carries the `main`-only deployment-branch rule, closing the path where
+  the environment-scoped federated credential matched from any branch
+  (T-705's other half; required reviewers stay deliberately unconfigured
+  per the 2026-08-29 decision). And the two Default-ruleset booleans are
+  decided: **branches must be up to date before merging** (on — a stale
+  head re-proves itself against the moved base before it can land) and
+  **required thread resolution stays off**. "Settings still worth a look"
+  is removed from TODO.md and the attack sequence's Phase 2 is struck.
+
+- **Every pull-request check now runs only when its component actually
+  changed.** The 14 checks stay — every context the ruleset requires still
+  reports on every pull request — but `ci.yml`'s six jobs and CodeQL's three
+  analyses adopt the filtering-inside-the-job pattern `iac-validate.yml`
+  proved under T-523 (a trigger-level `paths:` filter on a required context
+  leaves the PR waiting on "Expected" forever, so the job itself diffs
+  against the base and skips its expensive steps, still posting success).
+  Each filter names the component's real dependency set, not just its own
+  tree: functions tests read `infra/` Terraform source,
+  `.azure/api-surface.json` and the
+  `wiki/Blog-Machine.md` grammar contract; scripts tests pin
+  `.github/workflows/` and `infra/roles`; CodeQL filters by language file
+  extensions. A docs-only pull request drops from six installs, a frontend
+  build and three CodeQL analyses to nine ~10-second no-ops; pushes to
+  `main` and the weekly CodeQL schedule still run everything, so the merged
+  combination and newly published queries are never skipped. The decision,
+  its rejected alternatives and its accepted risks are
+  [ADR 0026](docs/decisions/0026-required-checks-filter-inside-the-job.md); a public
+  write-up of the pattern is staged as
+  [Blog-FinOps-01-CI-Refund](docs/content/blog-finops-01-ci-refund.md).
+
+- **The code-review skill moved to `.github/skills/code-review/`, and its
+  consumer is now GitHub Copilot code review.** Owner decision, 2026-09-01:
+  Copilot reads agent skills only from `.github/skills/`, Claude Code only
+  from `.claude/skills/`, and rather than keep two drifting copies the one
+  canonical copy lives where the automatic PR reviewer finds it. The
+  trade-off, accepted explicitly: Claude Code sessions no longer auto-load
+  the skill (an agent can still be pointed at the files when asked to
+  review). The structure validator's Markdown allowlist gains
+  `.github/skills/` with the reasoning inline; the #316 entry above
+  describes the skill's content, whose location this entry supersedes.
+
+- **The Static Web Apps deployment token is minted per run instead of stored
+  (T-727, #296).** The decision was "move the SWA deploy to OIDC", which cannot
+  mean what it sounds like: `Azure/static-web-apps-deploy` cannot authenticate
+  with a federated credential at all
+  ([azure/static-web-apps#1304](https://github.com/azure/static-web-apps/issues/1304)
+  is an open request for exactly that). So the token stays and the **storage**
+  goes. The deploy job asks ARM for it under the federated identity the
+  repository already uses, masks it, and it lives for one run.
+
+  Retired: the `swa_token` Terraform output, visible on the HCP Terraform
+  Outputs tab to anyone with state read, and the long-lived
+  `AZURE_STATIC_WEB_APPS_API_TOKEN` GitHub secret, deleted by the owner on
+  2026-08-31. **No stored, non-expiring credential remains in this
+  repository's secrets.** Not retired, and the header says so where the output
+  used to be: the token still exists in Terraform state as an attribute of
+  `azurerm_static_web_app.hcw`, which no output block could ever have changed.
+
+  It cost no new federated credential. The deploy job already declares
+  `environment: production` and `github_deploy` already held the matching
+  subject. `Microsoft.Web/staticSites/listSecrets/action` is an action rather
+  than a read, so `Reader` cannot express it and the built-ins that carry it
+  also grant write over the site; the custom `HCW Static Web App Deployer` role
+  grants the single action, assigned to the one site.
+
+- **Three documents said the `hcw-azure` workspace was CLI-driven with no VCS
+  connection (#297).** `terraform -chdir=infra apply`, which this repository
+  instructed the owner to run, answers *"Apply not allowed for workspaces with
+  a VCS connection"*. `TODO.md` had been wrong about this twice in opposite
+  directions.
+
+  The root cause is worth more than the correction. HCP Terraform's workspace
+  **Description** is free text sitting beside the real settings, validated by
+  nothing, and it read "CLI-driven; no VCS connection". That sentence is what
+  was read — while the entry claimed it had been read off the configuration. A
+  description that contradicts its own workspace reads exactly like a setting.
+  Corrected in the workspace and in `TODO.md`, `wiki/Cutover-Runbook.md` and
+  `.github/workflows/tfc-plan-check.yml`.
+
+
+- **Repository trackers reconciled against merged main (2026-08-30).** The
+  `TODO.md` status date and self-count now agree with its August 30 evidence;
+  its owner-action table records the two proven timers rather than saying
+  nothing is armed; and its recovery baseline now names the implemented
+  `Continuous30Days` Cosmos backup, RA-GRS content storage, and remaining LRS
+  Functions host storage. GitHub issues #127, #180 and #231 were re-read against
+  current Terraform and `.azure/api-surface.json`: their unfinished decisions
+  remain open, but superseded file anchors, endpoint counts and recovery
+  baselines no longer describe old code as current state.
+
+  The live `Default` branch ruleset was also read through GitHub on 2026-08-30,
+  rather than inferred from workflow files: it targets `~DEFAULT_BRANCH`,
+  blocks deletion and non-fast-forward updates, requires pull requests and all
+  12 documented status contexts, and has no bypass actors. Its two remaining
+  hardening choices — strict/up-to-date status checks and required review-thread
+  resolution — are both currently off and are recorded in `TODO.md` for an
+  owner decision. The `production` environment's branch restriction could not
+  be read through the integration, so that existing owner verification remains
+  open instead of being reported as proven.
+
+- **The Telegram webhook is registered against Azure, and the tracker was wrong
+  about it (T-526 closed, 2026-08-28).** `getWebhookInfo` returns
+  `https://api-azure.hybridcloudworks.com/api/telegram/webhook` with zero
+  pending updates, and `/help` answers in the chat — the acceptance criterion
+  `TODO.md` set for itself. **The Phase 5 approve-by-reply loop is live**, which
+  makes the whole Blog Machine Telegram path usable: a forge_ready notification
+  with a signed staging link, `/approve {id}` as a reply, and publication
+  through the full gated pipeline. The inline approve/reject buttons deferred to
+  the backlog are unblocked by the same fact.
+
+  **Nothing was re-run to close this.** It had already been done, and three
+  documents went on describing it as pending: `TODO.md` called it "the one
+  deadline on this list" and a countdown against the GCP deletion,
+  `Migration-Plan.md` §6 step 6 marked it OPEN, and its risk register read "High
+  — now a deadline". It surfaced only because `04-telegram-webhook.ps1 -Mode
+  Show` was run to *start* the work.
+
+  That step's own text warned it was "the one that will be forgotten". It was
+  right about the failure mode and wrong about the state — what got forgotten
+  was that it had happened. A tracker overstating urgency is not harmless: it
+  spends attention on finished work and, by being wrong in the direction of
+  alarm, teaches a reader to discount the next alarm.
+
+  **Three defects in the cutover scripts were found by running them**, none of
+  which reading had caught. Every script that opens a firewall window addressed
+  the vault as `az keyvault network-rule add --name <vault>` with no
+  `--resource-group`, which makes az resolve the group by searching the
+  subscription; that search fails where `az keyvault show --name` succeeds, and
+  reports `The Vault 'kv-site-prod-cus-01' not found within subscription` —
+  which reads as "the vault does not exist". Name plus resource group is an
+  unambiguous address with no search step. The vault read then failed
+  `ForbiddenByRbac`, because management-plane and data-plane rights are separate
+  and this estate deliberately grants the operator only the first (REVIEW.md
+  §4.6 records exactly that response and calls it the correct posture) — so
+  `06-seed-secret.ps1` now checks for a data-plane role at the management plane
+  *before* prompting for a credential and *before* opening anything, rather than
+  discovering it at the write.
+
+- **The four planning documents are reconciled to their own conventions
+  (2026-08-28).** Two rules, applied consistently for the first time. **TODO.md
+  and REVIEW.md carry only open work** — completed items are removed once the
+  entry is here, which is TODO.md's own stated footer rule and which the file
+  had stopped obeying: it had accumulated `**Closed:**` enumerations for the
+  architecture review's 35 resolved findings and a "Critical — CLOSED" section,
+  so a reader could no longer tell what was outstanding without reading past a
+  page of finished work. REVIEW.md shed the executed migration-era teardown, the
+  two closed live-confirmation bullets and the completed apex-DNS row for the
+  same reason. **Architecture-Plan.md and Migration-Plan.md keep every entry and
+  strike it through** — they are archived records whose value is the reasoning,
+  so deleting a decision would delete why it was made.
+
+  Four things surfaced from doing it rather than being the point of it, and the
+  largest is the one this rule is for: **six merged pull requests had no
+  changelog entry at all** — #234's availability probe and #243–#248's
+  post-program backlog work. The removal pass caught them because removing an
+  item from TODO.md requires checking that CHANGELOG.md has it, and that check
+  had been skipped while the completed items were merely being marked closed in
+  place. Both entries are above. The open-item counts in TODO.md were also
+  wrong — Low read
+  "5 of 15 closed" against a list of seven, and the total was 32 against a real
+  30. Migration-Plan §6's
+  rollback paragraph still promised "rollback is DNS for as long as Firebase
+  remains deployed", which the owner's decision to delete GCP rather than soak
+  had already reversed; it now records the inversion, because that decision is
+  exactly what puts a deadline on T-526. And two of the plan's eight
+  verification gates — the scheduled-job proof and the cost gate — turn out to
+  be the only unmet exit criteria of the entire migration, which was not legible
+  while they sat in a list whose met items were unmarked.
+
+- **The apex serves the Azure site (T-517 closed, 2026-08-28).** The cutover
+  this repository was built toward is done: `hybridcloudworks.com` — the
+  canonical hostname, the one host that was still Firebase — now resolves to
+  `calm-ground-0d0e6a010.7.azurestaticapps.net` and serves the Static Web
+  App. Evidence, in the order it arrived: the owner-supplied Cloudflare zone
+  export of 2026-08-27 23:47 showed the apex `CNAME` at the SWA with **no
+  Firebase record remaining anywhere in the zone** (the Runbook §3c repoint);
+  the owner then verified serving on 2026-08-28 — the acceptance criterion
+  this tracker holds cutovers to, because DNS state is desired state and
+  T-513 is the recorded case where the two disagreed.
+
+  Two owner decisions recorded with the close-out. First, **the DNS rollback
+  is forgone**: rather than holding the Firebase deployment through the
+  Runbook's one-week soak, GCP is scheduled for deletion. Second, that
+  decision converts the Telegram webhook re-registration (Runbook §3d) from a
+  dormant follow-through into a deadline — the bot's webhook still points at
+  the old Cloud Functions URL, and once GCP is deleted it goes quiet with no
+  error anywhere in Azure. Tracked as **T-526**, to be run before the
+  deletion.
+
+  The Runbook §3c soak criterion ("a full week including every scheduled
+  job") could never have completed as written — no timer is armed (T-518) —
+  so the owner's decision also resolves a dead-lock this tracker had flagged
+  between the two items.
+
+- **The two `data-migration` federated credentials are retired (T-524 closed,
+  2026-08-26).** `infra/oidc.tf` trusted six OIDC subjects and now trusts four.
+  The pair granted no permission of its own — a federated credential decides
+  which subject may act *as* the deploy identity — and with the production-write
+  grants already revoked, a `data-migration` token inherited the same reduced
+  role set a branch token gets. What it removed was a standing trust
+  relationship for a job that cannot run.
+
+  Held back from the earlier cleanup deliberately: retiring a trust
+  relationship is an identity change rather than a Terraform tidy-up, which is
+  why the remediation branch escalated it instead of deleting it. The owner
+  authorised it on 2026-08-26.
+
+  **Validated before the change, not after.** Nothing in `.github/workflows`
+  names that environment; its only consumer, `migrate-data.yml`, was deleted in
+  `59e471b`. Of the four workflows that call `azure/login`, one declares
+  `environment: production` and three declare none, so they present the `ref`
+  form — `deploy-azure-frontend.yml` names an environment but deploys through
+  `Azure/static-web-apps-deploy` and never logs into Azure at all.
+
+  `scripts/oidc-subjects.test.mjs` was then run against three variants of the
+  deletion, because the check that matters is the one that fails:
+
+  | Variant | Guard |
+  | --- | --- |
+  | Both credentials removed | **passes** |
+  | Only the name form removed | **fails** — no immutable-ID-form credential |
+  | Branch pair swept up with them | **fails** — names all three ref-form workflows |
+
+  Both forms went together for the reason the second row states: one without the
+  other is half a credential and fails on whichever form the token happens to
+  carry. If a migration workflow is ever rebuilt it needs both back.
+
+- **The migration-era rehearsal estate is destroyed and the three
+  production-write grants are revoked (B6/B7, applied 2026-08-25).** The apply
+  reported **3 added, 2 changed, 92 destroyed**. The destroy count matched the
+  authorisation in `REVIEW.md` exactly — 90 real destroys plus the 2 azapi
+  resources replaced on every apply — which is the number that mattered, since
+  the record insisted on approving against addresses rather than a count. The
+  adds and changes came in below the recorded 17/5, and that is not a short
+  apply: that figure was written before any of it ran, most of those adds were
+  the alert rules, and #218 and #219 had already created them (ten of thirteen
+  targeted resources, then the remaining three after ARM rejected them at
+  create time). By the time this run planned, they were no longer adds.
+  Everything was verified after the apply rather than inferred from the plan:
+  `rg-db-site-sbx-cus` no longer exists; all four alert rules are still present
+  and enabled; and the deploy identity is down to four operational roles — HCW
+  Cosmos Container Definition Writer on the production account, Storage Account
+  Contributor and Storage Blob Data Contributor on `stsitefuncprodcus01` (the
+  Functions **host** account, needed for the deploy firewall window), and
+  Website Contributor on the Function App. The three revoked grants were scoped
+  to `dbs/hcw` and to `stsiteprodcus01`, the **content** account; none of them
+  appears. What this cost is already recorded: with the grants gone the deploy
+  identity has no write path into the production Cosmos database or the content
+  account, so the delta import is retired for good. The two `data-migration`
+  federated credentials survive — `federated_subjects` still emits
+  `environment:data-migration` twice — and remain an owner decision (T-524).
+
+- **`REVIEW.md` §4.10 listed the wrong number of Terraform outputs.** It said
+  twenty-three and omitted `deploy_principal_id`, because it was assembled by
+  reading `infra/outputs.tf` alone while three outputs live in `infra/oidc.tf`.
+  There are **twenty-four**, and the section now lists them by file. Corrected
+  against the apply's own output block, which is the only listing guaranteed to
+  be complete. Recorded rather than quietly fixed because it is precisely the
+  drift Part 4 exists to prevent, and it was introduced by the change that
+  restored Part 4 four commits earlier.
+
+- **The IaC checks are required to merge, and the three orphaned repository
+  variables are gone (T-523 owner half, T-525, 2026-08-25).** Ruleset
+  `20680114` now requires **12** contexts rather than 10, the two additions
+  being `fmt, validate, tflint` and `Trivy IaC misconfiguration scan`. Every
+  "CI enforces this" line in `CONTRIBUTING` is now true when nobody is
+  watching, where before a branch with a red Trivy run merged exactly as
+  easily as one with a green run. The ordering the item insisted on held:
+  #220 removed the `paths:` filter from the `pull_request` trigger first, and
+  PR #221 — which touches only `tooling/agent-registry.yml` and no
+  infrastructure at all — then confirmed the skip path end to end, its
+  `fmt, validate, tflint` job reporting green in 22s with `Detect infra
+  changes` succeeded and all six Terraform steps `skipped`. Had the ruleset
+  been changed first, that same pull request would have been unmergeable.
+  `COSMOS_SCRATCH_ENDPOINT`, `STORAGE_SCRATCH_ACCOUNT` and
+  `SCRATCH_RESOURCE_GROUP` were deleted in the same pass; `gh variable list`
+  now returns 20 names and `REVIEW.md` §4.2 lists exactly those 20, so the
+  inventory and the live repository agree with no residue to reconcile. The
+  variables named resources that will stop existing when the rehearsal
+  teardown applies, and a value nothing reads is a value the next person
+  assumes is load-bearing.
+
+- **The frontend is on ESLint 10 (D-001 closed).** The item said two plugins
+  blocked it, on the strength of their declared peer ranges. That was half
+  right and the wrong half was load-bearing, so it is worth recording what the
+  block actually was.
+
+  Dependabot's bump failed at `npm ci`, not at lint — an ERESOLVE refusal from
+  `eslint-plugin-jsx-a11y`'s `eslint@"…|| ^9"` peer range. That is metadata, and
+  npm `overrides` pinning both plugins' `eslint` peer to `$eslint` clears it.
+  What remained was one real incompatibility: every rule that consults the React
+  version died with `contextOrFilename.getFilename is not a function`, because
+  ESLint 10 removed `context.getFilename()` and `eslint-plugin-react` calls it
+  while DETECTING the React version. Detection only runs when
+  `settings.react.version` is the literal `'detect'`, so supplying the version
+  skips the removed API entirely. The config now reads it from the installed
+  `react/package.json` rather than pinning a literal, so an upgrade cannot leave
+  the linter reasoning about the wrong React.
+
+  Verified beyond a green run, because a plugin that silently loaded no rules
+  would also look green: a probe file confirmed `react/jsx-key`,
+  `react/no-unescaped-entities`, `jsx-a11y/alt-text` and
+  `react-hooks/rules-of-hooks` all still report on ESLint 10, and `npm ci` — the
+  command that actually failed — now succeeds.
+
+  One rule stays off, for a new reason. `jsx-a11y/label-has-associated-control`
+  was disabled because it crashed on ESLint 9; on 10 it runs and reports 20 real
+  unlabelled form controls. That is an accessibility fix rather than an upgrade,
+  so it is tracked as A-001 and the config comment now says so — the stale one
+  would have told the next reader the rule was unusable.
+- **Listen & Learn spend appears in the portal, and `ai_usage` has one writer.**
+  The Usage tab has read that container since the port; until now only the AI
+  playground wrote to it, so a Listen & Learn run — the second thing here that
+  spends money on a model — would have been invisible. Each run now records a
+  row per model call: one for the script, one for the synthesis, tagged
+  `listen-and-learn:script` and `listen-and-learn:audio`.
+
+  The writer moved into `ai/usage.js` and `ai/proxy.js` now uses it, because the
+  Usage tab does its arithmetic client-side over whatever rows it finds — a
+  second writer with a slightly different shape would not error, it would
+  silently total zero. Recording is best-effort by design, and a test pins the
+  regression that made it otherwise: pricing a row used to happen outside the
+  try, so a caller passing an `ai` without `getCostEstimate` threw a TypeError
+  that propagated out and failed the episode whose cost it was recording.
+
+  TTS rates are in `COST_TABLE` from the published paid-tier pricing read on
+  2026-08-24 — `gemini-2.5-flash-preview-tts` at $0.50 in / $10.00 out per 1M
+  tokens, the other two at double that, which is why the flash model is the
+  default. Token counts come from the API's own `usage` object; when a response
+  omits it the audio count is derived from duration at the documented 32
+  tokens/second and the row is flagged `estimatedTokens`, which the portal shows
+  as "est." so a derived figure is never read as a billed one. On those rates a
+  nine-minute episode is about $0.17 and a five-area certification about $0.87.
+
+  The tab gains a **Breakdown by Feature** table beside the provider one:
+  provider answers "which vendor", which is useless when one vendor serves
+  several features at rates an order of magnitude apart. The Listen & Learn page
+  also reports the run's own cost when the job finishes. A test holds the tab's
+  source labels against the backend's `USAGE_SOURCES` so a new source cannot
+  ship as a raw slug — the same drift guard `DEFAULT_PROVIDERS` already has.
+- **`QueuePage.jsx` is decomposed (T-412).** 1,310 lines became a 320-line page
+  over `queue/itemHelpers.jsx`, `queue/QueueList.jsx`, `queue/constants.js` and
+  `queue/useQueueActions.js`. The hook is the reason for the split: the bulk
+  paths transition many documents one at a time and each partial failure has to
+  be attributed back to its own card, and that code could previously only be
+  reached by rendering four hundred lines of card markup. It now has 22 tests
+  covering the partial-failure paths — a run that half-works removes exactly the
+  documents that moved, leaves the ones that did not, and writes a reason under
+  each — plus the paging loop's zero-count guard and the rejected-filter
+  refusal. Behaviour is unchanged with one fix found by the move: `handleConfirm`
+  was `useCallback(..., [confirmTarget])` while closing over handlers rebuilt
+  every render, so it could act on `items` and `selectedIds` as they were when
+  the modal opened. It is no longer memoized; the dependencies changed every
+  render regardless, so nothing was gained by it.
+- **Publicly readable blob containers now declare their writer.**
+  `PUBLIC_MEDIA_CONTAINERS ⊂ UPLOAD_CONTAINERS` held only because every public
+  container happened to be one people upload to. Listen & Learn audio is written
+  by a job, so `GENERATED_MEDIA_CONTAINERS` names that category and the test
+  asserts each public container has exactly one declared writer and that the two
+  sets are disjoint. Satisfying the old relation would have meant opening the
+  episode container to the admin upload route, where any editor could put an
+  arbitrary file behind an anonymous URL.
+
+
+- **Every backend dependency has a live consumer (T-407); nothing was
+  removed.** The item asked whether `cheerio`, `rss-parser`,
+  `google-auth-library` and the other non-route packages in
+  `functions/package.json` still had one. All of them do, and each consumer is
+  reachable from a registered function: `cheerio` from `cms/content-quality.js`,
+  `content/scrape.js`, `rss/feeds.js` and `sanitize-html.js`; `rss-parser` from
+  `rss/ingest.js` (the `fetch-rss-feeds` job and the `syncRssFeeds` timer) and
+  `timers/podcasts.js`; `google-auth-library` from
+  `cloud-tools/pricing/gcp.js` via the pricing index; and `turndown`,
+  `jsonwebtoken`, `jwks-rsa`, `@aws-sdk/client-pricing` and the four Azure SDK
+  packages from token verification, scraping, pricing, Key Vault, Blob and
+  Cosmos. Recorded rather than closed silently, because "no packages were
+  removed" is the finding.
+- **The remaining upstream feature candidates are evaluated (T-410).** Measured
+  against the Site-Main checkout at `088f458`, the same baseline the T-409
+  delta used:
+  *draw.io hotspot tooling* is the one candidate worth porting.
+  `lib/drawio/parseDrawio.js` and `lib/drawio/hotspotGeometry.js` are 258 lines
+  of pure client-side XML parsing with no Firebase coupling and an upstream test
+  and fixture; `DiagramPanel`'s only backend seam is an image upload, which maps
+  onto the existing `POST /api/cms/uploads/{container}`. It replaces manual
+  hotspot authoring — today `ArchitectureReviewBoard` requires each hotspot's
+  coordinates and label to be typed by hand — with generation from an uploaded
+  `.drawio` file, and `InteractiveDiagram` already consumes the resulting shape.
+  *Admin queue improvements* split in two. The bulk select, bulk reject, bulk
+  delete and confirm-modal paths already exist in this repository's 1,310-line
+  `QueuePage.jsx`; the upstream delta is a decomposition into five modules with
+  tests, plus two additional actions (`bulkApprove`, `bulkForge`). The
+  decomposition is worth doing against this repository's own file rather than
+  porting upstream's, which is written against Firestore-era helpers.
+  *The Architecture listing pages* are not worth porting as they stand.
+  `ArchitectureDesignsPage` and `ArchitectureCreatePage` are 163 lines between
+  them, but they are thin wrappers over `ContentReviewBrowser` (744 lines) and
+  the `components/admin/browser/` subsystem, `useAdminBrowser` and
+  `lib/adminBrowser` — roughly 1,500 further lines — and their data seam,
+  `fetchContentList`, is built from Firestore `where()` clauses. That is the
+  whole-branch shape T-410 was written to refuse, and `EditorListPage` already
+  filters admin content by type, `architecture` included. Which candidate is
+  actually built is a product decision and now sits in [TODO.md](TODO.md).
+- **The ESLint 10 upgrade is still blocked, and by fewer plugins (D-001).**
+  Re-checked against the registry on 2026-08-24: `eslint-plugin-react-hooks`
+  7.1.1 and `@typescript-eslint/eslint-plugin` 8.67.0 now declare
+  `eslint@^10`. `eslint-plugin-react` 7.37.5 still caps its peer range at
+  `^9.7` and `eslint-plugin-jsx-a11y` 6.10.2 at `^9`, so the frontend stays on
+  the ESLint 9 line.
+
+- **Retired the completed migration surface and reset the repository around the
+  HybridCloudWorks website.** Removed the old Firebase Functions package and
+  Labs agent, the completed Firestore/GCS migration workflow and one-shot
+  import tooling, the disabled infrastructure-delivery workflow, and unused
+  Firebase hosting, scaffolding, screenshot, generator, and debug scripts.
+  Retained the Azure container specification because Terraform still consumes
+  it, and retained active Azure operations, CI, deployment, and smoke tooling.
+- **Reconciled repository documentation.** `README.md` now documents the
+  website's features, architecture, local development, and delivery model;
+  `TODO.md` contains only engineer-resolvable pending work; `REVIEW.md`
+  contains only human-owned access, approval, credential, and live-verification
+  items; and both plans are archived records rather than active instructions.
+- **Moved Wiki-as-code to `wiki/`.** The sync workflow and repository policy
+  now use the root `wiki/` staging directory, and the Wiki home/sidebar point
+  at current website and Azure documentation. All repository workflows use
+  GitHub-hosted runners.
+- **Removed remaining active cleanup residue.** Deleted the unused Functions
+  parity contract and duplicate Markdown bug template, updated current
+  infrastructure metadata and operator helpers to reference the website state,
+  and allowlisted the repository's reusable `.github/templates/` directory.
+- **Retired the unused frontend Firebase platform surface.** Removed the old
+  `frontend/firebase.json`, Firebase rules/indexes/storage files, GCP Terraform
+  configuration, and dangling test/lint exclusions; the current frontend
+  package now validates only the live `src/` tree.
+
+
+- **`migrate-data.yml` rewritten.** Dispatch-only; `id-token: write`;
+  `environment: data-migration`; modes `preflight | inventory-gate |
+  export-dry-run | rehearse | verify | storage-inventory | storage-rehearse`
+  with `target` ∈ `scratch` (default) | `production` and a hard refusal of
+  write modes against production. Step order is a correctness constraint:
+  `npm ci`, the Site-Main checkout and the Cosmos probe all run before
+  `google-github-actions/auth`, because the GitHub OIDC token it exchanges
+  lives five minutes. Per-run storage firewall window with `always()` cleanup,
+  mirroring `deploy-functions.yml`. `COSMOS_DATABASE: hcw`. Inputs reach the
+  shell through `env`, never interpolated into `run:`.
+- **`COSMOS_ENDPOINT` is a repository variable, not a secret.** It is a public
+  URL and a non-sensitive Terraform output; as a secret it was masked in logs
+  and unverifiable in the UI. `set-github-variables.ps1` now seeds it as a
+  variable and deletes the old secret; both consuming workflows read
+  `vars.COSMOS_ENDPOINT`. The script also takes
+  `-GcpWorkloadIdentityProvider` / `-GcpServiceAccount` for the two WIF
+  identifiers, and seeds `STORAGE_ACCOUNT` / `STORAGE_RESOURCE_GROUP`.
+- **Migration scripts share one credential path.** `scripts/lib/cli.mjs` gains
+  `connectFirestore()` (ADC, explicit `projectId`), `connectCosmos()`
+  (`DefaultAzureCredential` only), `connectBlob()`, `classifyCosmosError()`,
+  `writeReport()` (full report + publishable `.summary.json` sibling) and
+  `showSamples()`; the migrator, preflight and verifier use them. The
+  manifest is re-baselined at Site-Main `088f458` with `azure_architectures`
+  and `azure_frameworks` added as `probe` — not provisioned, so the generated
+  container spec is unchanged.
+- **`Migration-Plan.md` rebaselined against Site-Main @ `088f458`.** §0 is now
+  donor/recipient with a pinned baseline instead of "reconcile weekly" (the
+  two repositories finished Phase 1 in incompatible directions); §2 carries
+  real status; §4 carries the measured inventories — the six HTTP handlers
+  over the 230 s Flex cap, the 16 timers with NCRONTAB and zone, the 11
+  triggers with change-feed disposition and the three delete paths the feed
+  cannot deliver, and the Vertex-default finding; §5 is rewritten around the
+  tooling defects, the rehearsal estate, the five dispositions, the storage
+  manifest and the public-repository rule; §6–§9 updated to match. The two
+  links to the wrong GitHub org are gone.
+- **Every image render site routes through `resolveMediaUrl()`** (T-318,
+  sixteen files, commit `09154ad`). Stored site-relative
+  `/api/public/media/...` paths now resolve against the Cloudflare API host,
+  which the origin lock made the only working shape; absolute legacy URLs
+  pass through untouched.
+- **`oidc.tf`'s "deliberately NOT granted" note** now says what is true: the
+  migration *does* use the deploy identity, on the scratch account at
+  database scope, and holds nothing extra on production while
+  `migration_writer_enabled` is off.
+- **Every Terraform output renamed to the 2-word standard** (workload owner
+  directive, 2026-08-18: `github_deploy_client_id` was four words). The
+  standard now explicitly covers **outputs** — they are operator-facing,
+  read off the state backend's Outputs tab — and states that **casing
+  follows the language while the word count does not**: UPPER_SNAKE for
+  GitHub variables, lower_snake for HCL. Outputs that feed a GitHub
+  variable now mirror it: `client_id` ↔ `CLIENT_ID`.
+  Headline renames: `github_deploy_client_id`→`client_id`,
+  `github_deploy_federated_subjects`→`federated_subjects`,
+  `function_app_default_hostname`→`function_hostname`,
+  `static_web_app_default_hostname`→`swa_hostname`,
+  `app_insights_connection_string`→`insights_connection`,
+  `ci_runner_job_name`→`runner_job`. Two genuine **duplicates removed**:
+  `azure_functions_hostname` and `azure_swa_hostname` returned values
+  identical to their non-prefixed twins and were folded into one output
+  each. One genuine **collision** resolved with a deliberate third word —
+  the Function App and the deploy identity both expose a principal id, so
+  `app_principal_id` / `deploy_principal_id`. No resource address,
+  `azurerm_*` argument, or state-bearing name changed; `terraform fmt`
+  and `validate` pass.
+  Terraform **input** variables were deliberately NOT renamed: they must
+  match HCP Terraform workspace keys exactly and several are set live, so
+  they are a coordinated setting-plus-code change — filed as TODO T-507
+  with the full proposed table. App settings read via `process.env`,
+  `VITE_*` and `GITHUB_TOKEN` are contractual and untouched. The
+  `iac-repo-standardizer` agent now sweeps every `.tf` file rather than a
+  curated list — the gap that let `ci_runner_job_name` survive the first
+  pass. (PR #117)
+
+
+- **`deploy-infra.yml` rewritten while remaining hard-disabled** — the
+  prototype workflow applied with `-auto-approve` on every push to `main`,
+  masked failed plans with `continue-on-error`, and used unpinned actions.
+  The replacement is `workflow_dispatch`-only, runs in a `production-infra`
+  GitHub Environment for required-reviewer approval, starts an HCP Terraform
+  run whose apply is confirmed in TFC where the state lives, and keeps the
+  `if: ${{ false }}` gate until production applies are authorized.
+
+- **Self-healing computed properties** — `.github/workflows/
+  heal-computed-properties.yml` re-applies `cp_sortDate` on any push touching
+  the Cosmos Terraform or container manifest, and every six hours — because
+  Terraform applies run in TF Cloud on their own clock, a push-time heal can
+  itself be overwritten, so the schedule is what guarantees the wound closes.
+  With `PUBLIC_LIST_SQL_ORDER=1` live, a wiped property breaks the public
+  content list, which is why this is automation rather than a runbook note.
+  The OIDC deploy identity gains Cosmos Data Contributor scoped to exactly the
+  `content` and `blogs` containers (`infra/oidc.tf`) — the one documented
+  exception to its deliberate no-Cosmos posture, and the healer fails loudly
+  on a schedule until that assignment is applied. (TODO.md T-206 follow-up)
+
+- **`cp_sortDate` computed property + flag-gated ORDER BY** — T-206's last
+  step, authored as operator tooling. `scripts/apply-computed-sortdate.mjs
+  --inspect` reports non-ISO date values (the evidence gate), `--apply` adds a
+  computed property that resolves the five published-date aliases server-side
+  with a total fallback, and `PUBLIC_LIST_SQL_ORDER=1` then makes the public
+  list's TOP window return the newest N documents instead of an arbitrary N.
+  A computed property rather than a materialized field: no backfill, no
+  write-site maintenance, and it cannot be missing — which is what makes
+  ORDER BY on it safe under the module's own rule 2. The azurerm provider
+  cannot express computed properties, so the script is the applier and the
+  manifest records the drift hazard: a terraform apply that updates the
+  container wipes the property. Applied to the live containers and flipped on
+  2026-08-14; the deployed smoke test passed against the ordered window,
+  closing T-206 entirely. (TODO.md T-206)
+
+- **Deployed smoke test** — `scripts/smoke-deployed.mjs`, the runnable half of
+  the work order's top item. Tier 1 exercises the anonymous surface with no
+  side effects: the public filter and T-206 projection (asserting the eight
+  excluded body fields stay excluded and `explanation` does not false-alarm),
+  guard liveness on admin RPCs, CORS refusal and preflight, negative-cache
+  headers, the health endpoint's non-disclosure, and that the seventeen
+  notImplemented RPCs still 404. Tier 2 (`--cosmos`) executes the one
+  assumption nothing has executed: that a failed Cosmos patch predicate
+  surfaces through the JS SDK as code 412 and a missing document as 404 — the
+  submission quota's correctness rests on it; it writes a single smoke-prefixed
+  document into the TTL-bounded `submission_quota` container and deletes it.
+  Tier 3 (`SMOKE_BEARER_TOKEN`) verifies a real token is admitted. Six unit
+  tests pin the script's own assertion helpers, because a smoke test with a
+  wrong filter passes against a broken deployment.
+
+- **Anonymous public read API** — `GET public/content`, `public/content/{slugOrId}`,
+  `public/snapshots/{id}`, `public/podcasts`, `public/feed`. The published/draft
+  boundary is enforced server-side, replacing the Firestore security rules that
+  previously performed that role. (#45)
+- **Rate-limited public submission endpoint** — `POST public/submissions` with
+  per-type validation, server-side document composition, and a rolling-hour
+  anonymous quota, closing the unauthenticated `addDoc`-into-content path. (#45, #66)
+- **Admin CMS REST surface** — certifications, social posts, recordings, speaker
+  events, settings, images, AI providers / MCP servers, and usage records under
+  `cms/*`, all behind the two-gate role guard. (#46, #47)
+- **Authenticated file upload endpoint** — `POST cms/uploads/{container}` with a
+  container allowlist, blob-path validation, and a server-enforced 15 MB decoded
+  cap, replacing direct browser writes to Firebase Storage. (#62, #65)
+- **Content pipeline RPCs** — `createContentItem`, `updateContentItem`,
+  `transitionContentStatus`, and the publish pipeline, ported with their original
+  dedup, quality-gate, state-machine, and audit semantics. (#43, #44, #59)
+- **Admin identity, snapshots, ops health, content workflow, gallery, labs, and
+  image-prompt RPCs** — 34 named RPCs total. (#50, #54, #55, #56, #57, #58)
+- **`getLabJob` RPC** — single lab job with output, replacing the Labs console's
+  per-document realtime subscription. (#65)
+- **`GET public/platform-health`** — the landing page's four cloud-status
+  indicators, ported from the Firebase original. Anonymous, with a five-minute
+  cache that is the only thing bounding how hard the route can be made to hit
+  four third-party status APIs; each provider degrades to `UNKNOWN`
+  independently and the handler never returns 500, because a dead upstream must
+  not blank the panel. Ported without adding a dependency — `axios` and
+  `rss-parser` stay unreachable. (TODO.md T-316)
+- **`POST cms/telemetry/legacy-blogs-read`** — the counter that will justify
+  retiring the `blogs` fallback container. Guarded at `viewer`, unlike the
+  anonymous Firebase original: its only caller is an admin page, so anonymity
+  bought nothing and left an unauthenticated write endpoint anyone could use to
+  poison the evidence. (TODO.md T-316)
+- **Anonymous media delivery** — `GET public/media/{container}/{*blobPath}`,
+  serving uploaded images through the Function App's managed identity with
+  immutable cache headers and conditional-request support. The storage account
+  stays closed to the internet; the container allowlist is a strict subset of
+  the containers uploads may write to. (TODO.md T-105)
+- **Self-hosted CI runner** — Azure Container Apps Job with KEDA scale-to-zero, an
+  ephemeral JIT-config runner image published to Docker Hub with a GHCR mirror,
+  and a `CI_RUNNER` repository-variable failover switch. (#48)
+- **Labs agent API** — `POST agent/claimLabJob`, `agent/heartbeat`,
+  `agent/completeLabJob`, behind a machine-identity guard (`LabAgent` App Role
+  plus a `lab_agents/{agentId}` registry document bound to the credential's
+  object id) that is disjoint from the admin role hierarchy. Claim atomicity is
+  an ETag-guarded write with a lease, so a dead agent's jobs are picked up
+  rather than stranded. (TODO.md T-401)
+- **`code-reviewer` agent** — carries the Code Review SOP (CODE_REVIEW_PROMPT.md
+  v1.0) as agent 39 of the harness. (#68)
+- **SOP working documents** — `TODO.md`, `CHECKLIST.md`, `CHANGELOG.md`.
+
+
+- **Firebase-era smoke scripts and nested workflows removed.** Three live smoke
+  scripts read `VITE_GCP_FUNCTIONS_URL` and built a `firebaseConfig` from
+  `VITE_FIREBASE_*` — none of which the application sets any more, so they could
+  not run — and `frontend/.github/` held the source repository's Firebase deploy,
+  E2E and secret-rotation workflows, inert but reading as live configuration.
+  Deleted rather than ported: a half-migrated script that looks runnable and is
+  not is worse than no script, which is exactly what these were. A deployed
+  smoke test is still wanted, written against Entra and the Azure routes.
+  (TODO.md T-317)
+- **Six unused dependencies dropped** from the functions package — `sharp`,
+  `replicate`, `turndown`, `@mendable/firecrawl-js`, `axios` and `rss-parser`,
+  none of them referenced anywhere under `src/`. (TODO.md T-407)
+- **Frontend decoupled from Firebase.** All 34 files importing `firebase/firestore`,
+  5 importing `firebase/auth`, and 4 importing `firebase/storage` now call the
+  Azure Functions API. Public pages (#61), admin CRUD (#62), shared config
+  libraries (#63), workflow pages and the editor (#64), remaining admin pages
+  (#65), and submission forms (#66). The production bundle no longer contains a
+  Firebase chunk.
+- **Admin authentication swapped to Entra ID via MSAL** — `firebase/auth`
+  eliminated from the admin surface; MFA is now an Entra Conditional Access
+  policy rather than app-managed phone MFA; the Entra object id is the
+  `admins/{oid}` registry key. (#60)
+- **Realtime listeners replaced with polling** — the content editor polls its
+  document every 20 s, the Labs dashboard polls a snapshot RPC every 15 s, and
+  the Labs console polls an active job every 5 s. Conflict detection and
+  online/offline semantics are preserved. (#64, #65)
+- **`Review.md` renamed to `REVIEW.md`** and its scope narrowed to
+  human-resolvable blockers, per the SOP.
+- **Repository structure policy** (`scripts/validate-repository-structure.ps1`)
+  now requires the five SOP documents, permits them at the root, and rejects
+  case variants of their filenames.
+
+### Removed
+
+- **Three history pages that showed a visitor nothing (#506).**
+  `smoke-test-signoff.md` was a blank form: 37 rows, every value column empty,
+  no run ever recorded. It is not evidence, it is the shape evidence would
+  have taken, and the real cutover evidence is in the migration runbook and
+  the phase-4 record. `implementation-plan.md` shared 10 of its 10 headings
+  with `implementation-todo.md`. `legacy-azure-migration-task-tracker.md` was
+  the earliest of the three checklists, superseded by both, still asking for
+  an Azure OpenAI resource retired on 2026-08-19.
+
+  **Runbooks were reviewed and all six are published unchanged**, with their
+  real resource names — owner decision, 2026-09-11. The names are public by
+  construction: the Function App answers on its `azurewebsites.net` hostname,
+  the repository is public, and `infra/variables.tf` carries the defaults. The
+  reasoning in those pages is also inseparable from the names.
+
+- **The 80-page Firebase-era archive is deleted from the documentation site
+  (#505).** It was 54% of the published corpus, it described a platform this
+  workload stopped running on in August 2026, and ADR 0027 had recorded that
+  pruning it was a separate decision. This is that decision.
+
+  **The measurement is what settled it.** Of the 79 content pages, **78 were
+  reachable from nothing** — no ADR, runbook, standard, architecture page or
+  history page linked to any of them. The archive index's own justification,
+  that "several ADRs are only legible next to them", was false when checked
+  page by page: the single apparent match was an ADR quoting a former file
+  path that happens to share a filename, not a link. `mkdocs build --strict`
+  fails on a broken internal link and passes after the deletion, which is the
+  same fact proved a second way.
+
+  It was also where every piece of noise lived. Every mention of a password
+  and every contact address on the whole site was in `archive/` and nowhere
+  else, all of it in templates and shell examples for the retired platform.
+  The redaction gate now reads 71 files instead of 151.
+
+  Deleted rather than hidden, because a page that is published, unmaintained,
+  describes a retired platform and is linked from nothing is not history a
+  reader benefits from — it is noise competing with the 68 pages that describe
+  the system as it is. Git history keeps every one of them, which is where
+  evidence of a retired platform belongs. What a reader loses is nothing they
+  could previously reach by following a link: the Firebase era is still
+  described where it is load-bearing, in ADRs 0001 to 0007, in `history/`, and
+  in ADR 0023 on the estate's retirement.
+
+  **The guard added hours earlier caught its own allowlist going stale**, which
+  is the clearest evidence it was worth writing. `docs/archive/` sat in
+  `no-wiki-pointers.test.mjs`'s exemption list; the assertion that fails when
+  an entry matches no tracked file fired the moment the folder went, so the
+  dead exemption was removed in the same change rather than left as a hole.
+
+
+- **Two workflows and the spent half of `scripts/cutover/`, after an audit of
+  all nineteen.** Owner instruction 2026-09-08: "if the ps1 is no longer
+  needed, we need to clean that workflow — also any other workflow that is
+  not needed has to go". Each removal below is a workflow that had already
+  finished, or one that could not succeed by its own design. Everything else
+  was kept, including two that looked dead and are not.
+
+  **`validate-deployed.yml` — twenty-one days red, structurally.** Dispatched
+  twice on 2026-08-18 and failed both times; never run again. Both jobs fail
+  for one reason: they run on a GitHub-hosted runner, and through Cloudflare a
+  datacenter IP is answered by Bot Fight Mode with a 403 while direct to
+  origin the origin lock answers 403. The `surface` job asserts
+  `test "$code" = "200"` against the apex, so it cannot pass either — the
+  deployment runbook's claim that it "still runs the DNS, TLS and
+  frontend-surface job usefully" is contradicted by its own last run, where
+  that job also failed. `deploy-functions.yml` depends on exactly this
+  behaviour: it curls the same URL from a runner and FAILS the deploy on a
+  200, which is how the origin lock is proven. The checks themselves are not
+  lost — they are `docs/runbooks/edge-dns-verification.md` and
+  `node scripts/smoke-deployed.mjs`, both run from an operator machine
+  Cloudflare admits. The script is untouched and still has its own tests.
+
+  **`retire-wiki.yml` — a one-shot that ran, whose target no longer exists.**
+  It overwrote all 141 Wiki pages with pointers to the docs site on
+  2026-09-06 (dry run, then the real one). The Wiki feature is now off in
+  repository settings — measured `has_wiki: false` on 2026-09-08 — so its
+  first step, `git clone ...wiki.git`, could not succeed if dispatched.
+  `scripts/docs/wiki-redirects.json` is deliberately KEPT: ADR 0027 cites it
+  as the record of what moved where, and that sentence should stay true.
+
+  **`scripts/cutover/05-verify-timer.ps1` and its `workspace-query` helpers.**
+  The script proved a timer fired at its intended time by reading
+  `Trigger Details: ScheduleStatus` from Log Analytics. Two owner decisions
+  took that away from opposite directions: #321 dropped `host.json`'s
+  `Function` category to Warning to stay under the workspace's 0.25 GB/day
+  cap, so the host stopped writing the line (measured 2026-09-08: 4,179
+  `AppTraces` rows in 24 hours, zero containing `ScheduleStatus`); and #345
+  closed the gate it served outright — "all 18 timers are armed and the
+  per-wave observation read is no longer a gate". A tool whose instrument is
+  switched off and whose question has been answered is not waiting for
+  better days.
+
+  **The clock method survives, in the successor.** `verify-timer-witness.mjs`
+  now carries it: compare a fixed-hour timer's observed firing times against
+  its schedule and read the offset, which needs no host verbosity at all.
+  The worked example is `fetchPodcastFeeds` either side of #416 — fires at
+  23:30Z and 01:30Z (odd UTC hours, so an even-numbered Central hour) and
+  then 04:30Z (even, so UTC). The parity flip is the clock change, visible
+  without a single trace row.
+
+  **Two CI steps and one test file went with them, said plainly rather than
+  quietly.** `repository-policy.yml` no longer runs
+  `scripts/cutover/workspace-query.tests.ps1` — a STEP inside
+  `validate-structure`, never the job, so the required context
+  "Validate root and documentation policy" is unchanged.
+  `scripts/powershell-hygiene.test.mjs` (5 tests) was deleted: every one of
+  its assertions read the deleted `.ps1` to pin its skip regex against the
+  JavaScript log lines, so it had no subject left. And
+  `workflow-write-permissions.test.mjs` lost its only `ALLOWED` entry, which
+  TIGHTENS it: the assertion now reads "no workflow in this repository holds
+  `contents: write`" rather than "exactly `retire-wiki.yml` does".
+
+  **What was examined and KEPT**, so the audit does not get repeated.
+  `heal-computed-properties.yml` stays despite the standing "no healers"
+  principle, because the wipe is still real at source: the content and blogs
+  containers are still `azurerm_cosmosdb_sql_container`
+  (`infra/cosmos.tf:243`), that resource still cannot express
+  `computedProperties`, and `PUBLIC_LIST_SQL_ORDER = "1"` is live
+  (`infra/functionapp.tf:518`), so an unhealed wipe breaks the public content
+  list. It can go the day the two containers move to `azapi_resource`.
+  `tfc-plan-check.yml` stays: its 2026-08-31 red was the `Report` step
+  emitting a verdict, which is what that step is for, not a broken workflow.
+  `verify-alert-state.yml` stays: read-only, dispatch-only, green on
+  2026-08-30, and the only way to see `autoMitigate`, which is invisible from
+  the repository and from the TFC run list. In `scripts/cutover/`,
+  `06-seed-secret.ps1` is named as the break-glass path by
+  `docs/runbooks/deployment-runbook.md` and
+  `docs/standards/variables-and-secrets.md`; `04-telegram-webhook.ps1` is the
+  remediation `functions/src/lib/secret-catalog.js` tells an operator to run
+  after a bot-token rotation; and `01-entra-spa.ps1` is parameterised for
+  granting the Admin app role to a named user, which is a recurring operation
+  with no other tool. None is spent.
+
+
+- **The `ai_insights` container is dropped from the estate (#340).** Owner
+  decision 2026-09-05, after its reader was retired in #339 (`T-765`):
+  nothing ever wrote it, so it held only the documents the 2026-08-21
+  migration carried across, with no reader. The manifest entry is gone,
+  `infra/cosmos-containers.json` is regenerated (72 containers, from 73),
+  and the container `prevent_destroy` guard is lifted for this one apply,
+  because it covers every instance of the `for_each` and cannot be lifted
+  for one. The apply is the owner's to approve, on a plan that must read
+  exactly one destroy; the PR that follows restores the guard. This is the
+  first container dropped from production since cutover, and it is done as
+  its own apply rather than a rider on any other change, the rule T-302 set
+  for cleanup timers and `scratch.tf` records for the sandbox.
+
+- **The AI insights panel and its `ai_insights` read path (#339, `T-765`).**
+  Owner decision 2026-09-05: retire. `NewsPage` rendered the panel only when
+  `VITE_NEWS_ENABLE_INSIGHTS` was `true` at build time, and the frontend
+  deploy never set it, so no visitor has seen the panel since cutover; and
+  nothing in this repository ever wrote `ai_insights`, so it could only have
+  shown the documents the 2026-08-21 migration carried across, frozen.
+  Removed: `AiInsightsPanel.jsx`, the `insights` branch of `useNewsData` and
+  `fetchPublicFeed`, the build flag, and the second query in
+  `GET /api/public/feed`, whose response no longer carries `insights` (the
+  tests now assert one query, against `rss_cache` only). The container and
+  its documents are deliberately **not** dropped here: that is an apply that
+  destroys data, so it is recorded as its own owner decision in TODO.md
+  rather than riding on the next timer apply.
+
 ### Fixed
+
+- **Five published articles rendered broken hero images, and their link
+  previews were broken too (#518).** The Firebase Storage bucket
+  `hybridcloudworks-61e8d.appspot.com` is gone. Checked 2026-09-12: the bucket
+  root and all **28** distinct asset URLs still referenced by
+  `frontend/data/content-manifest.json` return **404**, verified against
+  `fonts.googleapis.com` and the live site as controls, so this is not a network
+  artefact.
+
+  `normalizePublicImageUrl` was believed to be a compatibility shim preserving
+  images for migrated content — it was protected on that basis. It was not: it
+  rewrote `storage.googleapis.com/<bucket>/<path>` into the
+  `firebasestorage.../o/<enc>?alt=media` form, which is **one dead URL into
+  another dead URL**. Its falsy branch only caught empty strings and videos, not
+  a 404 at fetch time, so the browser got an `<img>` with a dead `src` and
+  `og:image` / `twitter:image` pointed at 404s.
+
+  Both hosts are now treated as absent, which is exactly what this function
+  already did for a video and right for the same reason: every caller's falsy
+  branch omits the hero, drops the social tags, and falls a card back to its
+  placeholder. **A missing image renders better than a broken one.** The same
+  correction went into `AboutPage.jsx`, which carried its own copy of the
+  rewrite.
+
+  **Three of the five files named as shims were left alone, and that is the
+  finding.** `gallery-images.js`, `cert-image-cleanup.js` and `fetch-image.js`
+  do not *fetch* those URLs — they map a legacy URL onto the Azure blob that
+  replaced it so a delete or cleanup can find it, or skip it as not worth
+  re-hosting. Deleting those branches would make the mapping fail for any row
+  whose object *was* migrated, turning a successful delete into a silent orphan.
+  Each now says so in place. The rendering side was where the dead URLs
+  mattered.
+
+  **This is not a data migration, deliberately.** The rows still hold the dead
+  URLs and are now inert; regenerating the manifest from Cosmos would bring them
+  back and change nothing. A test reads the shipped manifest, extracts every
+  Google Storage URL in it, and asserts each one normalizes to absent — so the
+  guarantee holds whatever the data says, including for a row restored from an
+  old backup.
+
+
+- **A 401 from the API carried no reason, so the admin portal had to guess
+  (#517).** `deny(401, …)` set only `Content-Type` — no `WWW-Authenticate`,
+  contrary to RFC 6750 — so an expired token, a rejected token and a token
+  missing the delegated scope all reached the browser as the same bare status
+  code. `classifyFailure` inferred "expired session" from all three and offered
+  the same interactive re-authentication, which recovers only the first. For the
+  other two it is a wasted redirect that teaches the operator nothing.
+
+  This is the case #503's own guard comment anticipated in so many words: *"a
+  misconfigured audience, say, where the new token is rejected exactly like the
+  old one."* The once-per-tab flag caught it after one wasted redirect; this
+  catches it before.
+
+  **The RFC's error codes happen to draw exactly the line the client needs.**
+  `invalid_token` means the credential is bad and signing in again fixes it.
+  `insufficient_scope` means the credential verified and lacks a permission, so
+  re-acquiring it returns an identical token and an identical refusal. A 401
+  with no credential at all carries no error code, which RFC 6750 reserves for a
+  credential that was presented and refused. The client now keys on that: a new
+  `UNKNOWN_REASON.CONFIGURATION` renders "Admin access is misconfigured" with the
+  API's own description and **no retry button**, and it does not spend the one
+  automatic recovery either.
+
+  **One header made the difference between working and invisible.** The API is
+  cross-origin, and `WWW-Authenticate` is not CORS-safelisted, so
+  `res.headers.get('www-authenticate')` returned null in the browser however
+  carefully the API set it. `cors.js` now names it in
+  `Access-Control-Expose-Headers`, on the actual response rather than only the
+  preflight.
+
+  A 401 with no challenge — an older API, or a proxy that strips the header —
+  behaves exactly as it did before, and there is a test pinning that.
+
+  A 401 carrying **no credential at all** sends a bare `Bearer realm=""`. RFC
+  6750 §3 is explicit that such a response "SHOULD NOT include an error code or
+  other error information" — there is no failed attempt to describe, and
+  describing one would only tell an unauthenticated caller how the endpoint
+  behaves. The client reads the absent code as "sign in", which is right.
+
+  The header builder escapes rather than strips, so a description survives the
+  round trip to the client's parser intact; CR/LF are normalised to a space,
+  because a quoted-string cannot carry them and a newline in a header value is
+  response splitting.
+
+  The `invalid_token` description is a fixed sentence rather than the verifier's
+  own message. `verify-token.js` says its claim assertions "land in
+  `admin_audit_logs` and never reach the client", and the header becoming
+  readable is exactly when that promise needed enforcing: those messages
+  separate expired from bad-signature from wrong-tenant, and `jwt audience
+  invalid. expected: …` names configuration outright. The client cannot act on
+  the difference — all of them mean sign in again — so only the audit row keeps
+  it.
+
+
+- **The same GitHub exam was rendering at two different levels on one screen,
+  and the Azure catalogue could not have been made right (#496).** GH-100,
+  GH-200, GH-300, GH-500, GH-600 and GH-900 were carried in both
+  `frontend/src/data/azure/certifications.js` and
+  `frontend/src/data/github/certifications.js`. `/education` renders every
+  catalogue side by side, so GH-200 appeared in the Foundational row under
+  Azure and the Associate row under GitHub simultaneously.
+
+  **Four of the six disagreed, not one.** The issue caught GH-200 because that
+  is what the index surfaced; GH-100 and GH-500 are `Professional` in the
+  GitHub catalogue against `Fundamentals` in Azure's, and GH-300 `Associate`
+  against `Fundamentals`. Five of the six sat at `Fundamentals` in Azure — a
+  batch default rather than a verified rung.
+
+  **The Azure copy was unfixable, which decided it.** That file's `LEVEL_META`
+  defines Fundamentals, Associate, Expert and Specialty, so `Professional` has
+  no rung there at all: GH-100 and GH-500 could not be stated truthfully in
+  that file whatever was typed into them. The GitHub catalogue, by contrast,
+  was verified per exam against each credential's own Microsoft Learn page
+  three times (#461, twice under #469) and its header records which vendor
+  pages are unreliable and why. Owner decision 2026-09-11: the six rows leave
+  Azure, and GitHub exams belong to `/github/education`. Booking on Microsoft
+  Learn is a real fact about these exams; it did not make a second copy of the
+  rows worth keeping.
+
+  The six now-unreachable `gh-*` study-guide outlines went with them —
+  `outlineFor` is consumed only by the Azure detail page, and
+  `study-guides.test.js` asserts no outline exists for an exam the catalogue
+  does not carry. `eligibleCerts` in `scripts/update-study-guides.mjs` reads
+  the catalogue, so the generator drops them on its own from here.
+
+  **Guarded, because nothing could have caught this.** Every assertion in
+  `education-catalogues.test.js` read one catalogue at a time, so a
+  contradiction between two of them was invisible by construction. A new test
+  fails when any exam code is carried by two providers — codes rather than
+  levels, since the vendors' own vocabularies do not reconcile (AWS
+  `Foundational`, Azure `Fundamentals`, GitHub `Foundations` are one rung) and
+  a mapping table would be another thing to keep correct. Verified against the
+  pre-fix file: it names all six exams and both levels for each.
+
+- **The largest catalogue had no `DATA_SOURCE`, and the test that asserts one
+  covered the other seven (#496).** `azure/certifications.js` exported none,
+  and it sat outside the `CATALOGUES` list in `education-catalogues.test.js`,
+  so it was the one catalogue that could omit it without failing a build — and
+  did, from #461 until now. `EducationIndexPage` carried a documented `??`
+  fallback so the freshness line would still name a vendor.
+
+  It matters most there of any catalogue: Azure is the largest, it is the one
+  refreshed automatically by `update-learn-catalogue.yml`, and so it is the one
+  whose freshness claim is most worth a reader being able to check. The export
+  now names the Microsoft Learn credentials browse page — the same URL the
+  fallback used, so the rendered page does not change — the fallback and its
+  constant are gone, and Azure joined `CATALOGUES`, which puts all eight under
+  the assertion. Verified by removing the export again: the suite goes red
+  naming `azure DATA_SOURCE.label`.
+
+- **A botched find-and-replace had been live on the docs site for two weeks
+  (#506).** `docs/standards/required-inputs.md` opened by saying it had moved
+  "from `TODO.md` on 2026-08-29, when that file was retired and its open work
+  folded into TODO.md" — a sentence that says a file was folded into itself.
+  Later it offered the reassurance that "a citation reading
+  `Required-Inputs §4.5` now reads `Required-Inputs §4.5`".
+
+  The source was `REVIEW.md`. `git show e7271df9` records the rename as
+  `REVIEW.md => wiki/Required-Inputs.md`, and that commit's own message warns
+  **"THE BLANKET RENAME WAS THE WRONG TOOL AND I USED IT FIRST."** It caught
+  the validator and the casing guard; it did not catch the prose, and nothing
+  else could. Repaired from git history rather than guessed.
+
+- **The naming standard told readers the wrong live resource names.** It ended
+  with "**These are not the live names.** Today's estate is
+  `hcw-functions-prod`, `hcw-cosmos-prod`, `hcw-keyvault-prod`,
+  `hcwstorageprod` in `rg-hybridcloudworks-prod`" — contradicting its own
+  centralus section, every runbook, and `infra/variables.tf`, which declares
+  `func-site-prod-cus-01`, `cosmos-site-prod-cus`, `kv-site-prod-cus-01` and
+  `stsiteprodcus01`. Checked against the live estate, not just the code:
+  `func-site-prod-cus-01.azurewebsites.net` answers 403 (it exists, behind the
+  SCM lock) and `hcw-functions-prod.azurewebsites.net` does not resolve at
+  all. The grandfathering rule the paragraph existed to state is kept.
+
+- **About thirty citations pointed at two root documents that no longer
+  exist.** `CHECKLIST.md` merged into `REVIEW.md` on 2026-08-20 and `REVIEW.md`
+  was deleted on 2026-08-29; `variables-and-secrets.md` still uses
+  `CHECKLIST §n` as a table column roughly twenty times.
+
+  **The citations are kept and explained rather than rewritten**, because a
+  mechanical renumber would have been wrong: CHECKLIST was organised by
+  consumer (§1 Functions identity, §7 CI inputs) and Required-Inputs by store
+  (§4.1 workspace, §4.6 Key Vault), so `§7` does not become `§4.7`. A note now
+  says what CHECKLIST was and that its numbers do not carry across. The
+  citations remain the record of where each value was inventoried when its
+  placement was decided.
+
+- **Two decision records claimed a reason that no longer held.** The Container
+  Apps CI-runner ADR was kept on the ground that `infra/ci-runner.tf` "still
+  holds the gated-off resources"; that file, `infra/runner-image/` and
+  `build-runner-image.yml` were deleted on 2026-08-24. The cost analysis and
+  the resource-validation report cited `fix/go-live-remediation` as a pending
+  branch five times; it does not exist on `origin`. The ADR bodies are
+  untouched — the register's rule is that an accepted ADR is immutable — and
+  the notes above them now carry the correction.
+
+- **Opaque references now say what they mean.** Register rows reading "Give
+  T-519's signal a path" and "Weigh closing T-718 against its cost" state the
+  thing instead of the ticket, and one note explains that the `T-NNN` scheme
+  was retired on 2026-09-05 when work moved to issues — so every `T-` in an
+  accepted ADR is a citation, not something to look up.
+
+- **Five history pages were bare checklists.** Four presented unticked
+  July-2026 boxes that read as open work on a site whose front page says the
+  migration finished, including one instructing a move to the GitHub Wiki that
+  ADR 0027 reversed. Each now opens with what a reader learns from it.
+
+- **The front page linked ten operator pages and none of the five generic
+  walkthroughs**, which are the only pages written for a stranger and the only
+  ones carrying no estate names at all. It now opens with where to start if
+  you are not the owner.
+
+
+- **Thirteen references still sent readers to `wiki/`, five days after it was
+  deleted — including one inside a production alert (#502).** The Wiki was
+  retired on 2026-09-06 by ADR 0027 and `wiki/` was removed from the
+  repository, but the pointers into it were not, and none of them was a dead
+  link in prose. They were instructions:
+
+  `monitor-functions-registered.yml` told the owner, in the body of the alert
+  email that fires when the Function App loses registered functions, to read
+  *The failure with no alert* in `wiki/Alerting-And-Support.md`. The one
+  moment that path is read is the one moment it has to resolve, and for five
+  days it resolved to nothing. Four files across two packages cited
+  `wiki/Blog-Machine.md` as "the cross-package contract of record" — the
+  document a reader is sent to in order to keep the frontend and backend
+  module parsers in step. Two more cited
+  `wiki/0025-cosmos-firewall-datacenter-sentinel.md` for why the manifest job
+  opens a firewall window.
+
+  Four more sat in Terraform comments in `infra/`, naming the record for a
+  firewall rule and an output. All thirteen now point at `docs/`, and the
+  alert carries the published URL beside the path so it is reachable from a
+  phone without a checkout.
+
+  **Nothing noticed because nothing could.** A comment is not compiled and a
+  shell string inside a workflow is not linted, so a documentation move that
+  passed every check left live instructions aimed at a deleted folder.
+  `scripts/no-wiki-pointers.test.mjs` is the thing that notices: it walks
+  every tracked text file and fails on a `wiki/` pointer, with an allowlist
+  for the places history must still be able to say the word — the changelog,
+  ADR 0027 itself, the archived and historical snapshots, and the comments
+  that explain the migration. A second assertion fails when an allowlist entry
+  matches no tracked file, so the exemption list cannot quietly rot into a
+  hole. Verified by reintroducing the alert's pointer: it failed with the file
+  and line.
+
+  **Review found the guard's own blind spot, which is the more useful half.**
+  The first version read Markdown, JavaScript, YAML and PowerShell — and not
+  Terraform, so four live pointers in `infra/` sat behind the gap:
+  `cosmos.tf`, `outputs.tf` and two in `variables.tf`, each telling an
+  operator which document records why a firewall rule or an output exists.
+  The same blind spot was in the grep that found the original nine, so a
+  guard written to catch this class shipped missing a third of it. The
+  extension list is now broad, and a third assertion fails when a tracked
+  file type carrying five or more files is never read at all — so the next
+  language added to the repository is a decision rather than an oversight.
+
+  **The migration itself was complete, and that was checked rather than
+  assumed.** All 142 Wiki pages as they stood before retirement were matched
+  to a file under `docs/`: 137 by name, and the five that are Wiki furniture
+  rather than content — `Home`, `_Sidebar`, the ADR index, the ADR template
+  and the legacy documentation index — to `docs/index.md`, the MkDocs nav,
+  `docs/decisions/index.md`, `docs/decisions/template.md` and
+  `docs/archive/index.md`. Every page in the live Wiki is already a stub
+  pointing at the docs site, and the Wiki is disabled: a reader who follows
+  the old URL is redirected to the repository. The docs site serves all of it
+  at https://docs.hybridcloudworks.com/, over five spot-checked sections.
+
+- **The Social Hub's "AI Caption" button reported "Failed to generate
+  caption" and nothing else, while the API had named the cause one field
+  away (#498).** `generateSocialCaption` answers
+  `{ error: 'Failed to generate caption', message: <why> }`, and
+  `lib/api.js` threw only `error`. So the toast showed the label and
+  discarded the sentence that said whether a provider had no key, a credential
+  was rejected, or the model returned nothing. The same shape that cost #358
+  two days on Publer — the status shown, the reason dropped — reproduced
+  inside this client. The thrown message now carries `message` after the
+  label, guarded so a message that merely restates the error is not repeated;
+  five cases hold it. The underlying cause of the owner's failure is not
+  known from here, and that is the point: the next press will say.
+
+- **Listen & Learn's heading was white on white in light mode.** The one bare
+  `text-white` the #497 sweep missed, because the component lives under
+  `components/education/` and the sweep's file list did not reach it. Fixed
+  the same way and the file added to the guard, so it cannot come back.
+
+- **The two secondary links in the Azure detail sidebar now line up with the
+  primary button.** They centred their content, so labels of different
+  lengths started at different x; all three are left-aligned with a shared
+  icon column, which is what the owner drew a line beside.
+
+- **The weekly Learn catalogue workflow ends quietly when nothing changed
+  instead of failing at "Artifact not found" (#461 item 3).** The refresh job
+  uploads the catalogue only when it changed, but the commit job downloaded it
+  unconditionally, so the first hand-triggered run after #467 (34408439025,
+  2026-09-09) failed on a catalogue that was already current. The refresh job
+  now exports `changed` and the commit job runs only when it is `true`, so an
+  unchanged week shows the job as skipped; the tripwire test asserts the gate.
+- **js-yaml 4.3.1 → 4.3.2 in the frontend lockfile** (Dependabot alert 148,
+  GHSA-2883-xcg3-v3hh, high: `maxTotalMergeKeys` did not bound CPU use for
+  empty merge sources). Lock-only: `package.json` already allowed the patch.
+
+- **Listen & Learn is mounted on the AWS certification pages, its "coming
+  soon" copy no longer names GitHub, every provider in the registry is
+  checked for a dated Learn catalogue, and a flag-disabled timer is visible
+  in Log Analytics once per restart (#461, items 10–12).** The audit found
+  `ListenAndLearn.jsx` telling readers that study podcasts were "live for
+  Azure, GitHub and AWS" while only the Azure detail page mounted the
+  component: AWS had a detail page without it, and GitHub has no detail page
+  at all. `aws/education/CertDetailPage.jsx` now mounts `ListenAndLearn` with
+  `platform="aws"` under the same gate the Azure page uses — the block, and
+  the audio control inside it, render only when published episodes exist —
+  and the backend's `SUPPORTED_PLATFORMS` already accepted `aws`, so nothing
+  changed there; a page test covers both the populated and the empty case.
+  The copy now says Azure and AWS (owner decision: honesty over building a
+  GitHub page). Audio stays Gemini TTS; the speech provider code is
+  untouched. `provider-coverage.test.js` gains a registry-driven check:
+  every provider in `PROVIDER_ALIASES` must have a
+  `src/data/<provider>/certifications.js` or `education.js` exporting a real
+  `DATA_AS_OF` and no row `findStaleStatuses` flags, and it names the
+  provider that has none. That was `finops`, whose page carried its own
+  four rows with no date: they are now `src/data/finops/education.js`,
+  verified 2026-09-09 against learn.finops.org (where
+  finops.org/certification/ redirects) — Practitioner, Professional and
+  Engineer are listed and active, the Engineer row takes the Foundation's
+  name "FinOps Certified Engineer" and its ten-hour sizing, every link
+  points at the page that exists today, and "FinOps for Platform Engineers"
+  was never a certification: the nearest thing, the "FinOps for Engineers"
+  course, reads "Not currently available", so the row is `retired` with that
+  evidence and points at the Engineer credential. The FinOps page renders
+  the "Catalogue checked against …" line and a status badge from the dates,
+  like the other hubs. The AWS detail page's Helmet `<title>` is one
+  template string, the form the Azure page uses, because the multi-child
+  form pre-renders as an empty title. And `functions/src/functions/schedulers.js` logs
+  the first "disabled — skipping" of each timer per process at Warning —
+  `host.json` holds the `Function` category at Warning, so the Information
+  line it used to write never reached Log Analytics and a timer whose flag
+  was off left no trace but a short `DurationMs` — then drops to Information
+  for later skips, so a deliberately-off timer is seen once after every
+  restart without a Warning per tick; `schedulers.test.js` runs the real
+  registered handler twice and asserts one Warning then one Information.
+- **The GitHub, AWS, Terraform, Google Cloud and VMware Learn catalogues
+  match the vendors again, say when they were last checked, and derive
+  "retiring"/"beta" from dates instead of a typed field (#461, items 5–9).**
+  The 2026-09-09 audit found every provider page hard-coded and behind:
+  GitHub had GH-100 on Foundations, GH-300 on Advanced Security and GH-500 on
+  Administration with no GH-900 or Copilot exam; AWS listed SOA-C02 under the
+  CloudOps name a year after SOA-C03 replaced it and knew nothing of the
+  MLA-C01 (2026-09-28), SAP-C02 (2026-11-16), DVA-C02 (2026-11-30) and
+  ANS-C01 (2026-12-31) retirements or the AI Business Strategist beta;
+  Terraform advertised the 003 exam retired in January and a Consul exam
+  HashiCorp retired on 2026-07-15 while omitting both Advanced credentials;
+  GCP was missing five of Google's fourteen and still called the Workspace
+  credential Professional; VMware carried the superseded VCAP-DCV Deploy
+  and no VCP-VVF. Each catalogue now lives in `frontend/src/data/<provider>/`
+  with a `DATA_AS_OF` and `DATA_SOURCE` the page renders as "Catalogue
+  checked against … on Sep 9, 2026" — the one freshness claim that is true.
+  AWS's two duplicate lists (landing page and `CertDetailPage.jsx`) are one
+  file, and `/aws/education/soa-c02` still resolves through `previousSlugs`.
+  The pages share the Azure entry's `frontend/src/lib/certStatus.js`, which
+  gains an `upcoming` status (a version announced but not yet deliverable,
+  such as SAP-C03 from 2026-11-17), `isIsoDate`, `describeCertStatus` (the
+  badge wording, "Retiring · last day to test Nov 16, 2026 · replaced by
+  SAP-C03"), and three more stale checks; every page reads "today" through
+  `useToday(DATA_AS_OF)` so the prerendered HTML and the hydrating render
+  agree, and `education-catalogues.test.js` fails the moment any dated row
+  is past (first due: MLA-C01 on 2026-09-29), which is the reminder to
+  re-verify against the vendor. VCTA-DCV is kept because Broadcom's 2024
+  FAQ names it and no 2026 Broadcom page contradicts it.
+- **Azure Learn statuses are derived from their dates, the ten retired exams
+  say so, and every landing card opens a real detail page (#461 items 1 and
+  2).** The Azure catalogue (`frontend/src/data/azure/certifications.js`) had
+  not been checked since 2026-04-16, so the live page showed AI-900, AI-102,
+  AZ-204, AZ-500, PL-200, PL-500, PL-600, MB-280, MB-335 and MB-700 as
+  "Expiring Soon" ten weeks after Microsoft retired them, twelve GA exams as
+  "BETA · ends Jun 30, 2026", MB-240 as active, and no retirement for
+  AZ-800/AZ-801. Re-verified against the Microsoft Learn credentials browse
+  API and the credential-retirement page on 2026-09-09: those ten plus MB-240
+  are `retired` with their dates and replacements (AI-900 → AI-901, AI-102 →
+  AI-103); AB-210, AB-250, AB-410, AB-620, AI-103, AI-200, AI-300, AI-901,
+  DP-750, DP-800, GH-600 and SC-500 are `active`; SC-730 is retired
+  (Microsoft withdrew it after the beta, no date published); AZ-800 and AZ-801
+  are `expiring` 2026-09-30 → AZ-802, and MS-102 `expiring` 2026-11-30;
+  AZ-802 (active), AB-650 (beta) and AI-500 (beta) are added; five applied
+  skills are retired with Microsoft's dates. The pages now compute status from
+  the dates at render time (`frontend/src/lib/certStatus.js`, `deriveStatus`),
+  render a Retired badge, filter and replacement code, and print `DATA_AS_OF`
+  where they used to claim "scraped weekly", "tracked weekly", "updated
+  weekly" and "Refreshed by Microsoft each month". A vitest fails the day any
+  stored `expiring`/`beta` outlives its date. The Azure detail page drops its
+  own 15-entry copy (five of them retired, DP-203 gone) and reads the shared
+  catalogue, so all 68 landing links resolve instead of 15; the 68
+  `/azure/education/<slug>` routes are pre-rendered — with a single-string
+  Helmet title, since the multi-child form wrote `<title></title>` — and the
+  Listen & Learn block appears only when published audio exists (verified for
+  azure/AB-100).
+- **ElevenLabs no longer reads Listen & Learn, and the Listen & Learn pin no
+  longer governs the podcast: speech providers are chosen per product (#436,
+  #432).** Owner rule 2026-09-09: ElevenLabs is only the podcast voice —
+  article and Plaud transcripts to RSS.com — and Listen & Learn audio is
+  Gemini TTS, generated on demand and stored as MP3, with Azure AI Speech as
+  the GA fallback. #447 had put ElevenLabs first in one global order read by
+  every caller, so the paid podcast voice read every study episode the moment
+  its key landed, and `LISTEN_AND_LEARN_TTS_PROVIDER` — also read by every
+  caller — would have pinned the podcast too, which is why the owner's
+  instruction to set it to `gemini` could not be applied as the code stood.
+  `speech/index.js` now holds `SPEECH_PRODUCTS = { listenAndLearn: ['gemini',
+  'azure'], podcast: ['elevenlabs'] }`; `resolveSpeechProvider`,
+  `synthesizeDialogue` and `estimateSpeechCostUsd` require `product` and
+  refuse to guess without one; each product reads only its own pin
+  (`LISTEN_AND_LEARN_TTS_PROVIDER`, `PODCAST_TTS_PROVIDER`), a pin may name
+  only its product's providers, and `LISTEN_AND_LEARN_TTS_PROVIDER =
+  elevenlabs` fails every run with a sentence quoting the rule. Nothing falls
+  through between products: the podcast without `ELEVENLABS_API_KEY` saves a
+  transcript-only draft whose `audioError` names that setting (pinned in
+  `lib/podcast/generate.test.js` through the real switch), never a Gemini
+  reading, and #447's out-of-credit fallthrough is removed because its only
+  path was the cross-product one. `infra/functionapp.tf` sets
+  `LISTEN_AND_LEARN_TTS_PROVIDER = "gemini"` on the Function App, deliberately
+  Terraform-managed so the rule is stated in the estate and a portal edit is
+  drift (one app setting added; `app-settings-secrets.test.js` and
+  `secret-catalog.test.js` still pass). The 202, the queued line and the
+  `speechEstimateForRun` estimate describe the Listen & Learn product only —
+  Gemini or Azure, never ElevenLabs. ADR 0029 §2b records the rule and keeps
+  §2a as history, saying it was written as if ElevenLabs replaced Gemini for
+  Listen & Learn, which was wrong.
+- **Listen & Learn audio generates again: the Gemini TTS provider read the
+  SDK's `output_audio` accessor, which the REST reply does not have (#458).**
+  Every generation since the provider landed ended with
+  `audioError: "Gemini returned no audio for this dialogue"` on a 200. The
+  request matched the documented multi-speaker contract; the parser did not
+  match the response. `POST /v1beta/interactions` returns an Interaction
+  object whose audio sits in `steps[].content[]` as
+  `{ type: 'audio', data, mime_type, sample_rate, channels }`, with a
+  top-level `status` and optional `errors[]`. `output_audio.data` is a
+  convenience accessor the Python and JavaScript SDKs put on *their*
+  Interaction object, and the guide's examples use it; the REST JSON never
+  carried it, so audio in `steps` was treated as no audio. `speech/gemini.js`
+  now exports `extractAudio`, which walks the `model_output` steps (keeping
+  `output_audio` as a fallback), joins several audio blocks in order, reads a
+  WAV header for its rate and channel count and strips it, and averages
+  stereo to mono for the MP3 encoder. A reply with no audio now says why on
+  the episode card — the `status`, each `errors[].code` and message, and the
+  shape seen by type only (`model_output[text]`, never the text); `failed`
+  and `incomplete` statuses are refused explicitly, the latter because the
+  audio would stop mid-sentence. The default model moved from
+  `gemini-2.5-flash-preview-tts` to `gemini-3.1-flash-tts-preview` (owner
+  request; `COST_TABLE` already priced it at USD 20 per million audio
+  tokens, twice the 2.5 flash rate), with `LISTEN_AND_LEARN_TTS_MODEL` still
+  the override. Verified against the Interactions API reference and the
+  speech-generation guide on 2026-09-09; the module header records what was
+  checked.
+- **Listen & Learn scripts have a portal toggle, the docs build no longer
+  dirties the tree, and the router says who writes a key verdict.** Three
+  small things left behind by #449, #435 and the docs hooks. `script.js`
+  declared `feature: 'listenAndLearn'` behind the injected `generate`, where
+  `ai-call-sites.test.js` cannot see it, and no `listenAndLearn` entry
+  existed in `AI_FEATURES` — so the AI Engine page had no switch for it and
+  the router treated the call as ungated. The feature is now declared at a
+  literal call site in `listen-and-learn/generate.js`, the same shape as
+  `podcast/generate.js`, and the catalogue lists it as **Listen & Learn
+  scripts**; the source scan and the catalogue tests cover both directions.
+  `scripts/docs/__pycache__/*.pyc` was tracked and rewritten by every
+  `mkdocs build --strict`, so every docs session had to check it out before
+  committing; the two files are untracked and `__pycache__/` and `*.pyc` are
+  ignored. The router's key-verdict docstring named "the Publer client" as
+  the other source of a rejected-key verdict; it now names `lib/key-verdict.js`
+  as the single writer and lists the three reporters that feed it (the
+  router, the Publer timer client, the Publer REST proxy).
+- **A rejected Publer key no longer fails `syncSocialCalendarScheduled` every
+  five minutes, and the API-keys page now says the key is rejected (#358).**
+  Measured in Log Analytics on 2026-09-09: Publer answering 401 to a stale
+  key had failed the timer **429 times in 36 hours, 0 successes** — 288
+  exceptions a day, and `alert-app-exceptions-prod-cus` never fired, because
+  the only thing that knew the key was wrong was Publer, saying so into a log
+  nobody reads. That is the blind spot `secrets-health.js` names in its own
+  header: it detects unresolved, not incorrect. A rejected credential is a
+  configuration state, not a transient fault, and `createPublerClient` was
+  treating a 401 like a 500.
+
+  Three things change. The timer's run now returns `{ skipped: true, reason:
+  'credential_rejected', status }` on a 401/403 after one warning naming
+  `PUBLER_API_KEY / PUBLER_WORKSPACE_ID` — the pair travels together, and a
+  key valid for a different workspace answers 401 exactly like a stale one;
+  a 500 or a timeout still throws, because those ARE transient. The Publer
+  client and `publerProxy` report the verdict for `PUBLER_API_KEY` through
+  the path the AI router already had — its `onKeyVerdict` writer, promoted
+  from a private function on the router's default instance into
+  `lib/key-verdict.js` so the two reporters cannot disagree about what a
+  rejected credential is — so the red light on
+  https://hybridcloudworks.com/admin/integrations comes on whichever path
+  sees the rejection first, and the first success after that — the rotation
+  — turns it green again in the same worker: a recorded failure re-arms the
+  once-per-worker success report, which the router's private version had
+  never done (Copilot review of the PR). And `PUBLER_API_KEY` carries
+  `probe: 'publer'` in the catalogue,
+  because the page prints "no liveness check for this one" beside any light
+  nothing reports on, and `secret-catalog.test.js` holds that a probe exists
+  only where a reporter is wired. The proxy's response shape and message are
+  untouched; the Social Hub still reads "Publer answered 401". Klaviyo and
+  Linkie do not opt in: their 401/403 semantics have not been read, and a
+  scope-limited key answering 403 on one endpoint and 200 on the next would
+  flap the light.
+
+
+- **Five education hubs and three detail pages were white text on a white
+  background in light mode, and had been since they were written.** Headings,
+  card titles and stat values used a bare `text-white` with no `dark:`
+  qualifier, while `src/index.css` sets `--background` and `--card` to pure
+  white in light. A learner on a default iPhone saw a hero and then blank
+  space where every section heading should be.
+
+  **The fix already existed in the repository and had never been
+  propagated.** `azure/EducationPage.jsx` pairs its headings as
+  `text-slate-950 dark:text-white` and reads correctly; the other five hubs
+  carried 15 bare instances each and zero dark variants. 102 sites changed,
+  read one at a time rather than swept: **25 were deliberately left**, every
+  one of them white-on-an-opaque-coloured-button, where white is correct.
+
+  Status chips had the same problem in a subtler form. `CertStatusBadge` used
+  `text-amber-300` and friends over `*-500/20` tints, roughly 1.5:1 against a
+  near-white surface. Each status now carries an `*-800` light foreground
+  with the original as its `dark:` variant, around 6:1.
+
+  **Why nothing caught it.** The only colour-contrast gate is a Playwright
+  spec covering one route, and it does not run in CI. It has now been widened
+  to all eight hubs and the three detail templates, but deliberately NOT wired
+  in as a required check: `/aws/education` was already in its route list while
+  that page was white-on-white, so the spec cannot have been passing, and
+  making a red gate required would block every PR. It wants a reading first.
+
+  **What replaces it in the meantime is a test that does run.**
+  `pages/education-a11y.test.js` reads the nine files and fails when a
+  `text-white` token has neither a `dark:` variant nor an opaque background,
+  when a status loses its light foreground, when a carousel dot loses its
+  label, or when a decorative icon loses `aria-hidden`. Verified to fail by
+  reverting one heading: it named the file, the line and the fix.
+
+- **The education carousels were silent to a screen reader, and their controls
+  were 10 pixels wide.** The pagination dots were `<button>` elements with no
+  children, no `aria-label` and no `aria-current`, announced as "button,
+  button, button" — and they are the only route to anything past the fourth
+  card, which on Azure means past the first four of 108. Each dot now sits in
+  a 24-pixel transparent hit area, meeting WCAG 2.5.8 without changing the
+  10-pixel dot itself, and carries its page number and current state.
+
+  168 decorative `material-symbols-outlined` spans gained `aria-hidden`.
+  Because the font renders a ligature, a screen reader had been reading
+  "workspace_premium", "arrow_forward" and "open_in_new" aloud as words —
+  and on a slow connection those words are briefly *visible* too, since the
+  font loads with `display=swap`. Every icon-only control was audited first:
+  the one without an accessible name, Azure's "open on Microsoft Learn" link,
+  got one rather than being hidden.
+
+
+- **`refreshPlaudToken` no longer disconnects a document that has an access
+  token but no refresh token (#342).** It warns and leaves the document as
+  it is; the access token expires on its own schedule.
+
 
 - **`05-verify-timer.ps1` reported a zero-row answer as a failed query (#336).**
   `Invoke-WorkspaceQuery` ended with `return $rows`, and PowerShell unrolls
@@ -3329,414 +4928,6 @@ This project has not cut a tagged release; entries are grouped under
   nothing in CI that would have caught it. These two were the only dead anchors
   in the repository.
 
-### Removed
-
-- **The `ai_insights` container is dropped from the estate (#340).** Owner
-  decision 2026-09-05, after its reader was retired in #339 (`T-765`):
-  nothing ever wrote it, so it held only the documents the 2026-08-21
-  migration carried across, with no reader. The manifest entry is gone,
-  `infra/cosmos-containers.json` is regenerated (72 containers, from 73),
-  and the container `prevent_destroy` guard is lifted for this one apply,
-  because it covers every instance of the `for_each` and cannot be lifted
-  for one. The apply is the owner's to approve, on a plan that must read
-  exactly one destroy; the PR that follows restores the guard. This is the
-  first container dropped from production since cutover, and it is done as
-  its own apply rather than a rider on any other change, the rule T-302 set
-  for cleanup timers and `scratch.tf` records for the sandbox.
-
-- **The AI insights panel and its `ai_insights` read path (#339, `T-765`).**
-  Owner decision 2026-09-05: retire. `NewsPage` rendered the panel only when
-  `VITE_NEWS_ENABLE_INSIGHTS` was `true` at build time, and the frontend
-  deploy never set it, so no visitor has seen the panel since cutover; and
-  nothing in this repository ever wrote `ai_insights`, so it could only have
-  shown the documents the 2026-08-21 migration carried across, frozen.
-  Removed: `AiInsightsPanel.jsx`, the `insights` branch of `useNewsData` and
-  `fetchPublicFeed`, the build flag, and the second query in
-  `GET /api/public/feed`, whose response no longer carries `insights` (the
-  tests now assert one query, against `rss_cache` only). The container and
-  its documents are deliberately **not** dropped here: that is an apply that
-  destroys data, so it is recorded as its own owner decision in TODO.md
-  rather than riding on the next timer apply.
-
-### Changed
-
-- **`T-766` closed: every remaining timer wave has a stated witness (#338).**
-  Found 2026-09-03 when Wave 2's gates returned nothing: #321 had cut the
-  `Function` log category to Warning, which removed the `Executed` and
-  `ScheduleStatus` rows the timer-observation gate read, while its own record
-  said it had protected the table the gate used. The owner kept the cut and
-  made the side effect the witness (`scripts/verify-timer-witness.mjs`, #328),
-  which observed Wave 2; the per-category `host.json` override was decided
-  for Wave 3a on 2026-09-04 (#334). On 2026-09-05 the owner decided the
-  remaining waves in one sitting — Wave 4's three timers all approved, Wave
-  5's two credentials both held, and waves 4, 5 and 6 to arm together in one
-  apply after 3b, since none of the nine deletes anything — and each row in
-  the T-518 table now names
-  its witness: the override, added for a wave when it arms and removed when
-  it closes. The item's closing condition was a stated witness per wave, so
-  it is met; the per-wave work stays in the wave rows. Two records were
-  corrected on the way: neither Wave 5 timer loops on a missing credential
-  (both skip), and the delta-import ordering rule on `SYNC_SOCIAL_CALENDAR`
-  is moot since the import was retired on 2026-08-24.
-
-- **`host.json` raises one log category, `Function.cleanupSoftDeletedContent`,
-  to Information for Wave 3a (#334).** The T-766 decision for the first wave
-  with no public witness. The reaper's side effect is an absence, so no
-  container read can tell an idle run from a timer that never fired; the
-  override restores that one timer's `Executed` rows at a few lines per
-  invocation, which does not reopen T-719. It is a wave-scoped change and
-  comes out when the wave closes. `05-verify-timer.ps1` now reads a
-  per-category override before the `Function` default, so it works for this
-  timer again.
-
-### Added
-
-- **`cleanupSoftDeletedContent` is dry-run until `CONTENT_HARD_DELETE=true`,
-  never deletes a document whose deletion mark has no recorded origin, and
-  reports every run (#334).** Before this the hard reaper deleted anything
-  carrying `softDeletedAt` older than seven days, and three different writers
-  put that mark on a document: the admin soft-delete route, which also
-  records `deletionRequestedBy`; and the two rejected-content agers, which
-  record `softDeletedReason: 'rejected_aged_out'`. A migrated document with an
-  old mark from the Firebase days carries neither, and it would have gone at
-  the first firing. Now the pin is the T-302 rule applied to the one timer
-  that deletes documents rather than blobs — `infra/functionapp.tf` seeds it
-  `"false"` beside the two blob pins — and origin is the rule the pin does not
-  lift: a mark with no `deletionRequestedBy` and no `softDeletedReason` is
-  counted, logged at Warning as a count, recorded by id in the audit entry
-  that every armed run writes once it has examined anything (a dry run
-  writes no audit document), and left for a human in the admin content
-  queue's `soft_deleted` filter.
-
-  Every run now logs one summary line, idle runs included: in dry-run, what
-  it would delete by origin; when armed, what it did. Before this an idle run
-  wrote nothing, not even its audit record, which is why Wave 3a had no
-  witness at all. Traces carry counts only; ids go to the audit document.
-
-- **T-518 Wave 2 armed and observed: the two feed-ingesting timers now run,
-  and `podcasts` has its first production write (#332).** `SYNC_RSS_FEEDS`
-  and `FETCH_PODCAST_FEEDS` were added to `enabled_timers` in the `hcw-azure`
-  workspace in one apply on 2026-09-03, ahead of the 00:00 Chicago window.
-  Same class, so they grouped: both ingest feeds and create content
-  documents, neither deletes anything, and re-delivery is safe by
-  construction — `cacheFeed` upserts `rss_cache` per feed, and `processFeed`
-  reads each episode by id and preserves `createdAt` before upserting.
-
-  **Observed through the durable side effect, not the host trace — the first
-  wave closed on the #328 witness.** The `Executed` rows the runbook's gate 4
-  used to read have not existed since #321 (T-766), so the evidence is what
-  each timer leaves behind, read through the public API by
-  `scripts/verify-timer-witness.mjs`:
-
-  - `syncRssFeeds` — PASS on the first read: every `rss_cache` document
-    re-stamped, newest `refreshedAt` 2026-09-03T07:00:16Z, which is the 02:00
-    Chicago boundary of its every-two-hours schedule to the second. Nothing
-    else writes that stamp at that minute — the admin `fetch-rss-feeds` job
-    had last run the previous evening — so this is the timer.
-  - `fetchPodcastFeeds` — FAIL on the first read (nothing newer than the May
-    migration after the 05:30Z firing), then PASS at the 13:30Z firing on
-    2026-09-04, the first after the #330 deploy restarted the host at
-    13:24Z. `podcasts.updatedAt` is re-stamped on every episode each run, so
-    a fresh stamp is the handler completing an upsert, not merely starting.
-
-  **What the record cannot say.** The 05:30Z miss is not explained. That
-  firing predates #330, so whatever happened — a feed that did not answer,
-  an empty feed, or a handler that did not run — was logged at Information
-  and dropped by the Warning gate; and the firings between the two reads
-  were not read. The next miss will be readable: since #330 a failed feed
-  writes an Error row and an empty feed a Warning row in the
-  `Function.fetchPodcastFeeds` category, with the query in the #330 entry
-  below. This is the collision T-766 describes, met on the first wave to arm
-  after it.
-
-  `T-764` does not close on this entry. Its writer is observed; the closing
-  condition also asks for the `azure` podcast page to render an episode, and
-  that read is still owed.
-
-- **The arming gate reads the timer's durable side effect through the public
-  API, and needs nothing else (#328).** `scripts/verify-timer-witness.mjs`
-  takes a timer name and an ISO `--since`, fetches that timer's witness from
-  the Cloudflare-fronted API — `rss_cache.refreshedAt` for `syncRssFeeds`,
-  `podcasts.updatedAt` for `fetchPodcastFeeds`, `content.publishedAt` for
-  `publishScheduledContent` — and says whether the newest stamp is at or after
-  the moment named. No `az`, no workspace, no extension, no telemetry plane:
-  three fewer places for an observation to be lost. A malformed stamp never
-  counts as evidence; an unparseable `--since` refuses rather than comparing
-  against `NaN`. There is deliberately no cron parser — the schedule is
-  something the operator already knows, and a parser is a second thing to be
-  wrong about.
-
-  Fifteen of the eighteen timers have **no** public witness, and the script
-  says so with exit 2 rather than a pass or a fail, because "cannot evaluate"
-  and "evaluated and failed" are different findings. The runbook's witness
-  table now covers all eighteen with the reason for each *no*, and the
-  script's test asserts that table names exactly the timers `schedulers.js`
-  and `jobs-sweeper.js` register — a timer added without a row fails CI
-  instead of arriving at a cutover with no gate. Thirteen tests; the drift
-  guard was mutation-checked by deleting a row and watching it fail.
-
-  Also records what #327 deferred: the `log-analytics` extension is now
-  Step 0's sixth item in the Cutover-Runbook, and that step's heading no
-  longer carries a count of its own items.
-
-- **Every provider page is live: the last 24 shipped-dark pages came out from
-  behind `ComingSoonPage` (#325).** `finops`, `gcp`, `github` and `terraform` now
-  serve their full sections alongside `aws`, `azure`, `vmware` and `ansible`.
-  Owner decision 2026-09-02, taken as one release rather than section by section.
-
-  The pages were never unfinished. Each is structurally identical to its live
-  AWS or Azure counterpart — the same shared component with a different
-  `provider` prop — so the guard was two lines and nothing else:
-  `ComingSoonPage`'s import and an early `return` above the real one. The routes
-  were already public; visitors have been landing on these URLs and reading
-  "coming soon". What changed is what those URLs answer with.
-
-  **`GUARDED_FILES` in `frontend/scripts/validate-provider-pages.js` is now
-  empty, and the array and its checker deliberately stay.** The mechanism is
-  what makes shipping a page dark *reviewable*: a page behind `ComingSoonPage`
-  with no entry there is an accident, and an entry there with its markers gone
-  is a page that went live without anyone deciding. Deleting the empty array
-  would delete that check for the next page that needs it. The validator reports
-  55 live files, 0 guarded.
-
-  **Eighteen hardcoded `date: 'Updated <month> 2026'` stamps were removed rather
-  than refreshed**, across `terraform/ToolsPage`, `terraform/ModulesPage` and
-  `finops/FocusPage`. Nothing maintains them: they were written months ago and
-  would have gone live in September still claiming February. A date no process
-  updates is a stale claim on a page that will never change, and removing it is
-  the fix that does not need doing again — the same reasoning applied to the
-  timer counts in TODO.md the same day.
-
-- **T-518 Wave 1 armed and observed: the platform's two safe timers now run
-  (#323).** `PLATFORM_JOB_SWEEPER` and `MONITOR_PUBLISHING_PIPELINE` were added
-  to `enabled_timers` in the `hcw-azure` workspace in one apply, taking the
-  estate from three armed timers of eighteen to five.
-
-  **Two timers in one apply is a departure from [Cutover-Runbook](docs/history/cutover-runbook.md)
-  step 5, and it was an owner decision rather than a shortcut.** Step 5 reads
-  one timer per apply, observed before the next. Taken literally across the
-  fifteen that remain that is fifteen applies over roughly five weeks — three
-  of the fifteen fire *weekly*, so their observation windows alone are three
-  weeks — and every one of those applies restarts the Function App through the
-  workspace's permanent `azapi` diff. What the rule exists to prove is that
-  arming works at all, and that was settled before this wave: the mechanism had
-  been observed three times, once across the apply boundary itself
-  (`publishScheduledContent`, four skipped invocations then four ran, with the
-  flag as the only variable). What remains is per-handler behaviour, which
-  groups by risk. The precedent is `CHECK_AGENT_HEALTH` and
-  `CLEANUP_TEMP_STORAGE`, armed together on 2026-08-30 and recorded as a
-  departure with its justification.
-
-  **What still does not group**, and this is the limit of the concession: the
-  two timers that delete documents with no dry-run pin —
-  `CLEANUP_SOFT_DELETED_CONTENT` and `CLEANUP_REJECTED_CONTENT` — stay one per
-  apply. Grouping is a concession to calendar arithmetic, not to destructive
-  operations.
-
-  These two were the right first wave because neither can damage data.
-  `platformJobSweeper` re-enqueues jobs that have sat `queued` past
-  `STALE_QUEUED_MS`, closing the gap in `functions/src/lib/jobs.js` where the
-  job document is written before the queue output binding sends the message —
-  so a binding failure used to leave a job `queued` forever. Re-delivery is
-  safe by construction: the worker claims with an etag-conditioned replace, so
-  a duplicate message for a job that did start is skipped rather than
-  double-processed. `monitorPublishingPipeline` is a read-only watchdog.
-
-  **Observed, not merely applied.** The standard is step 5's fourth gate, and
-  all four were read from the workspace with
-  `scripts/cutover/05-verify-timer.ps1` on 2026-09-02:
-
-  - *Deployment*: both flags read `true` from a live
-    `az functionapp config appsettings list` against `func-site-prod-cus-01`,
-    with the armed set printing as `CHECK_AGENT_HEALTH`,
-    `CLEANUP_TEMP_STORAGE`, `MONITOR_PUBLISHING_PIPELINE`,
-    `PLATFORM_JOB_SWEEPER`, `PUBLISH_SCHEDULED_CONTENT`.
-  - *Runtime*: `platformJobSweeper` registered with schedule `0 */15 * * * *`,
-    read back from the host rather than from source.
-  - *Behaviour*: the sweeper's own `re-enqueued … stale job(s), reaped …
-    abandoned running job(s)` line present in the trace stream, which is the
-    handler reporting its work rather than the host reporting an invocation.
-  - *Invocation*: both timers observed firing inside their windows.
-
-  **The clock half of the gate applies to only one of the two, and saying so
-  matters more than the counts do.** `platformJobSweeper` fires every fifteen
-  minutes, so it has no local-time dependency and the `WEBSITE_TIME_ZONE` trap
-  cannot express itself in its history — for it the gate is the count and the
-  handler's own line, and a timestamp check would prove nothing.
-  `monitorPublishingPipeline` runs `0 0 */6 * * *`, which is 00:00, 06:00,
-  12:00 and 18:00 **Chicago**, so it is the one that can fire five hours early
-  and still pass a naive "did it run" check. Its `ScheduleStatus.Last` landed
-  on the intended local hour. A wave that reported one number for both timers
-  would have proven the weaker thing twice.
-
-  **Arming two timers made four counts elsewhere in TODO.md wrong at once**, and
-  they were removed rather than corrected. The section heading, the master-table
-  row, the attack-sequence phase and an owner-decisions row each said "the
-  remaining 15 timers" — accurate when three of eighteen were armed, wrong the
-  moment five were, and wrong again after every wave that follows. That is the
-  T-722 defect, in the file whose own wave table already carries the rule
-  ("this table is the plan, and no count above it is"), so the fix is the rule
-  rather than an arithmetic update: the counts are gone and the enumerated
-  sentence that lists the armed timers by name — which cannot drift from itself
-  — is what remains. The one remaining count in that section was found by
-  review: `enabled_timers` was still described as "holding those three".
-
-  The per-run figures are not restated here. They were read by the operator at
-  their own prompt and the evidence standard is the observation, not a number
-  copied into a second document where it can drift from the first — the same
-  reason `infra/frontend.tf` states its ingestion reduction as a floor rather
-  than a measurement.
-
-- **The runbook now covers signing in, because five separate `az` failures cost
-  round trips in two days and none of them named its own cause (#323).**
-  `wiki/Cutover-Runbook.md` gains **Step 0**, ahead of the Entra step: the
-  estate's single tenant and its four subscriptions in one table, the scoped
-  device-code login, the subscription pin, and the `az account show` line that
-  says whether any of it worked.
-
-  The five, each recorded with what it actually was rather than what it looked
-  like: a plain `az login` handing off to the Windows WAM broker and spinning
-  with nothing to read; `AADSTS700082`, which reads as a permissions problem
-  and is a cached token past its 90-day inactivity window; a cached tenant that
-  is not the estate tenant — **the expensive one, because reads then succeed
-  and return nothing**, and an empty result from the wrong estate is
-  indistinguishable from a real absence; a tenant-wide login that enumerates
-  everything and leaves scripted reads apparently stuck, with the
-  `az logout` → `az account clear` → scoped-login reset written out; and
-  `AADSTS50076` MFA warnings for two tenants that are not this estate — one of
-  them named `hybridcloudworks.com`, which is the trap — printed several loud
-  lines *above* the results table, so a command that fully succeeded reads at a
-  glance as one that failed.
-
-  The tenant id is written out rather than referenced. It is not a secret —
-  Entra publishes it for any domain at that domain's OpenID configuration
-  endpoint — and the alternative is a placeholder in a command meant to be
-  pasted, which `.claude/CLAUDE.md` prohibits, having twice paid for one.
-  Subscription ids were already written out in this file and in
-  `scripts/cutover/05-verify-timer.ps1`; no credential, key or token appears.
-
-  Also recorded there: `sub-plat-mgmt-prod-cus` and `rg-mgmt-plat-prod-cus`
-  swap their two middle tokens, which is easy to write backwards and fails as
-  a not-found against a name that looks correct.
-
-- **TODO.md's handling rule is now a merge gate, not prose.**
-  `scripts/check-todo-changelog-movement.mjs`, run by the Repository Policy
-  workflow on every pull request, fails when a T-identifier leaves TODO.md
-  without CHANGELOG.md carrying it — the "completed items are removed after
-  the corresponding entry is present" rule, enforced at the same head.
-  Renumbers and moves within TODO.md pass (the id still exists); earlier
-  changelog entries pass (the changelog only grows); and a base that cannot
-  be read exits loudly rather than passing, because a gate that cannot
-  evaluate has not evaluated. Unit-tested for all four shapes and
-  mutation-tested against a fabricated removal.
-
-- **The repository gains its own code-review skill (#316).**
-  `.claude/skills/hcw-code-review/` teaches an agent to review a diff the way
-  this repository's CI and reviewers do: `SKILL.md` scopes the change, routes
-  each touched path to a per-component checklist (frontend, Functions, infra,
-  scripts/workflows, VPS agent and edge probe), and applies the cross-cutting
-  checks the PR template and Repository Policy already enforce — secrets,
-  content-free telemetry, pinning, the Markdown allowlist, TODO/CHANGELOG
-  movement, and the owner-facing instruction rules in `.claude/CLAUDE.md`.
-  Each reference file carries the component's real verification commands —
-  the ones CI runs plus the review-time validators CI does not — so a
-  review's Verification section reports what was actually executed rather
-  than what was assumed. The directory lives
-  under `.claude/`, already allowlisted as a harness directory in
-  `scripts/validate-repository-structure.ps1`.
-
-- **T-519 closed: the reachability alert is armed, and the estate's one
-  outage-surviving signal finally pages (#315).** The blocker was what
-  `wrangler.toml` predicted: the Worker's secret held the Instrumentation Key,
-  not the connection string, so `parseConnectionString` threw on every `*/5`
-  invocation and `availabilityResults` stayed empty. Fixed 2026-09-01 with the
-  piped command in `edge/availability-probe/wrangler.toml` — the value never
-  touched a screen or clipboard — and verified as a chain, not a deploy:
-  `wrangler tail` showed a clean `Ok` invocation; twelve
-  `success == 1` / HTTP 200 rows landed on the 5-minute cadence (18:25–18:45
-  UTC and onward), twice the six a full PT30M window needs, so the rule's
-  first evaluation ran against a populated window;
-  `availability_probe_alert_enabled = true` was applied in the `hcw-azure`
-  workspace; `alert-api-reachability-prod-cus` now lists among the four
-  scheduled-query rules in `rg-web-site-prod-cus`; and the registered function
-  count read 122 both before and after the apply's expected Function App
-  restart. Justification unchanged from the 2026-08-31 measurement: the
-  GitHub-scheduled half of the detection pair delivers 22% of its hourly runs
-  with a 12.7-hour worst-case blind window, and the probe runs on a scheduler
-  GitHub cannot drop. Removed from TODO.md, whose open list drops to four;
-  the standard Azure web test stays disarmed in Terraform (Bot Fight Mode,
-  ADR 0024) with the Worker as the approved path around it.
-
-- **TODO.md gains one working order across everything open (#314).** A repo-wide
-  sweep (dedicated tracker, wiki backlogs, inline markers, `notImplemented`
-  contract) confirmed the five-item table is complete, then added an "attack
-  sequence" section that sequences all of it — the five items, the settings
-  sweep, the optional seeds, the live confirmations — into seven
-  dependency-ordered phases. It adds no items and restates no procedures:
-  each phase links to the one section carrying the commands and success
-  criteria, so the sequence cannot drift from the sections (the T-722 lesson,
-  applied in advance). The 24 dark provider pages gain a row in "Owner
-  decisions" — previously that gate lived only in the inline
-  `// TODO: remove to re-enable` markers and
-  `frontend/scripts/validate-provider-pages.js`, outside the tracker, and the
-  row records that re-enabling a page is two edits (markers deleted AND the
-  path moved `GUARDED_FILES` → `LIVE_FILES`) because the validator asserts
-  both directions.
-
-- **`insertModuleIntoMarkdown` honours its `position` parameter (#314).** The last
-  genuine inline code TODO: both branches appended to the end, so a caller
-  passing a real index got a silent no-op. It now string-splices the
-  serialized module directly ahead of the `position`-th `<module>` tag,
-  leaving every other byte of the document — trailing prose included — where
-  it was; `-1` or an index past the last module appends, byte-identical to
-  the old behaviour. Deliberately NOT parse → splice → rebuild: an insert
-  makes the module list outnumber the placeholders, and
-  `rebuildMarkdownWithModules` appends the surplus at the document end, so a
-  middle insert would move the last existing module past any trailing prose
-  — the first draft did exactly that, and review caught it. Four new test
-  cases pin the contract as exact document bytes.
-
-- **The pre-rendered DOM is hydrated instead of discarded (T-714, #296).**
-  `main.jsx` used `createRoot`, so 120 pre-rendered documents were built,
-  shipped and thrown away at boot. It now calls `hydrateRoot` when the mount
-  point's `data-prerendered-route` stamp matches the live path, seeded from
-  `data-prerendered-seed` on that same element, and client-renders exactly as
-  before when it does not.
-
-  **The stamp is the load-bearing half, not defensive programming.**
-  `staticwebapp.config.json`'s `navigationFallback` serves `/index.html` — the
-  home page's markup — for any path without a file of its own, at HTTP 200.
-  Every `/admin` route arrives that way. Hydrating on "the mount point has
-  children" would have mismatched on the busiest pages in the app.
-
-  Five Playwright tests drive a real browser, including a node-identity probe
-  that proves the server DOM is reused rather than coincidentally identical,
-  and both guards are mutation-tested. `onRecoverableError` reports a mismatch,
-  which was silent in a production build — the failure mode that would have let
-  this regress to wasting every document with nobody noticing.
-
-- **`check-tfc-plan.mjs --commit <sha>` (T-724, #298).** The tool resolved the
-  workspace's LATEST run, which is why `tfc-plan-check.yml` refused to run
-  per-pull-request: the check would have been green, or red, about a run nobody
-  asked about. `--commit` resolves the run HCP Terraform planned for a given
-  commit, through the configuration version's ingress attributes, and the
-  workflow takes a matching `commit` dispatch input.
-
-  "No run for this commit" returns 2, not 0 — it is not "the plan is boring".
-  An absent relationship is skipped (CLI-driven runs carry no configuration
-  version); a **dangling** one throws, so an ignored `include=` cannot
-  masquerade as "no run for this commit". That distinction was found in review:
-  the first draft documented throwing on unreadable shapes and then skipped
-  exactly those cases.
-
-- **`scripts/workflow-write-permissions.test.mjs` (T-726, #298).** A ruleset
-  bypass is granted to the Actions **token**, not to a workflow, so every
-  workflow holding `contents: write` can push to `main` past all twelve
-  required contexts. This pins that set to a reviewed two, each with a written
-  justification. It bounds the exposure; it does not close it. Mutation-tested:
-  granting the permission to `iac-validate.yml` fails the guard.
-
-### Fixed
 
 - **Three stale wiki records corrected before they cost a round trip (#314).**
   `Architecture-Review-2026-08.md` still read T-714 "OPEN — needs an owner
@@ -3748,211 +4939,6 @@ This project has not cut a tagged release; entries are grouped under
   now marks that item superseded with the reasoning, so the next reader does
   not re-raise a decided question.
 
-### Changed
-
-- **T-719 and T-721 closed by owner decision, 2026-09-02.** The verbosity
-  cut merged (#321) and Deploy Functions was dispatched the same day; the
-  owner closed both without gating on the first clean cap-day reading — the
-  below-cap volume is expected confirmation, not a closure criterion, and
-  the evidence standard is the owner's to set on a single-operator estate.
-  Held in reserve if a later reading says the cut was not enough: move
-  `AppTraces` (~38% of the old cap volume) to the Basic table plan at
-  roughly USD 0.65/GB versus USD 2.76/GB. The accepted risk (log alerts sleep from
-  cap-hit to the 08:00 UTC reset if the cap ever binds again) stays
-  recorded in TODO.md's Accepted risks; the Static Web App tier
-  re-justification that lived inside T-721 moved to TODO.md's Owner
-  decisions table rather than closing silently with it. The tracker drops
-  to two open items: T-726 (waits on the first content change) and T-518
-  (arm the timers).
-
-- **The Functions host stops narrating itself: `host.json` drops `default`
-  and `Function` to Warning (T-719 decided, T-721's lever pulled).** Twelve
-  days of data showed daily ingestion pinned at the 0.25 GB cap — the
-  ceiling, not demand — with the log-based 5xx/latency alerts going dark
-  from cap-hit to the 08:00 UTC reset on most days. The owner's decision,
-  2026-09-02: this is a personal content site whose volume is host
-  verbosity, not traffic, so the source is cut instead of the cap being
-  raised for a measurement day. `Host.Results` stays at Information
-  deliberately — it feeds `AppRequests`, which those alerts and the
-  timer-observation gate read, and the pinning test refuses the change that
-  would empty it; `Azure.Core`/`Azure.Identity` were already pinned quiet
-  after T-514. The cap stays at 0.25 GB as headroom. Accepted and recorded
-  with the decision: if the cap ever binds again, log alerts sleep until
-  the reset — the T-519 probe covers unreachability on a pipeline the cap
-  cannot touch, and `logs_daily_cap` warns at 80% first. The closure
-  criterion stated here when this shipped — one cap-day measurably below
-  0.25 — was superseded the same day by the owner's decision recorded
-  above; the below-cap reading is confirmation, not a gate. The
-  Basic-table-plan move stays in reserve if that reading says the cut was
-  not enough.
-
-- **The settings sweep is done — the tracker's Phase 2, three settings that
-  were choices rather than defaults, all clicked by the owner 2026-09-02.**
-  The three stale Terraform Cloud variables
-  (`migration_writer_enabled`, `cosmos_scratch_enabled`,
-  `storage_scratch_enabled`) are deleted from the `hcw-azure` workspace —
-  deletion, not declaration, per the 2026-08-24 removal record; the success
-  criterion (a plan printing no "Value for undeclared variable" warnings)
-  is observable on the next queued run. The `production` environment now
-  carries the `main`-only deployment-branch rule, closing the path where
-  the environment-scoped federated credential matched from any branch
-  (T-705's other half; required reviewers stay deliberately unconfigured
-  per the 2026-08-29 decision). And the two Default-ruleset booleans are
-  decided: **branches must be up to date before merging** (on — a stale
-  head re-proves itself against the moved base before it can land) and
-  **required thread resolution stays off**. "Settings still worth a look"
-  is removed from TODO.md and the attack sequence's Phase 2 is struck.
-
-- **Every pull-request check now runs only when its component actually
-  changed.** The 14 checks stay — every context the ruleset requires still
-  reports on every pull request — but `ci.yml`'s six jobs and CodeQL's three
-  analyses adopt the filtering-inside-the-job pattern `iac-validate.yml`
-  proved under T-523 (a trigger-level `paths:` filter on a required context
-  leaves the PR waiting on "Expected" forever, so the job itself diffs
-  against the base and skips its expensive steps, still posting success).
-  Each filter names the component's real dependency set, not just its own
-  tree: functions tests read `infra/` Terraform source,
-  `.azure/api-surface.json` and the
-  `wiki/Blog-Machine.md` grammar contract; scripts tests pin
-  `.github/workflows/` and `infra/roles`; CodeQL filters by language file
-  extensions. A docs-only pull request drops from six installs, a frontend
-  build and three CodeQL analyses to nine ~10-second no-ops; pushes to
-  `main` and the weekly CodeQL schedule still run everything, so the merged
-  combination and newly published queries are never skipped. The decision,
-  its rejected alternatives and its accepted risks are
-  [ADR 0026](docs/decisions/0026-required-checks-filter-inside-the-job.md); a public
-  write-up of the pattern is staged as
-  [Blog-FinOps-01-CI-Refund](docs/content/blog-finops-01-ci-refund.md).
-
-- **The code-review skill moved to `.github/skills/code-review/`, and its
-  consumer is now GitHub Copilot code review.** Owner decision, 2026-09-01:
-  Copilot reads agent skills only from `.github/skills/`, Claude Code only
-  from `.claude/skills/`, and rather than keep two drifting copies the one
-  canonical copy lives where the automatic PR reviewer finds it. The
-  trade-off, accepted explicitly: Claude Code sessions no longer auto-load
-  the skill (an agent can still be pointed at the files when asked to
-  review). The structure validator's Markdown allowlist gains
-  `.github/skills/` with the reasoning inline; the #316 entry above
-  describes the skill's content, whose location this entry supersedes.
-
-- **The Static Web Apps deployment token is minted per run instead of stored
-  (T-727, #296).** The decision was "move the SWA deploy to OIDC", which cannot
-  mean what it sounds like: `Azure/static-web-apps-deploy` cannot authenticate
-  with a federated credential at all
-  ([azure/static-web-apps#1304](https://github.com/azure/static-web-apps/issues/1304)
-  is an open request for exactly that). So the token stays and the **storage**
-  goes. The deploy job asks ARM for it under the federated identity the
-  repository already uses, masks it, and it lives for one run.
-
-  Retired: the `swa_token` Terraform output, visible on the HCP Terraform
-  Outputs tab to anyone with state read, and the long-lived
-  `AZURE_STATIC_WEB_APPS_API_TOKEN` GitHub secret, deleted by the owner on
-  2026-08-31. **No stored, non-expiring credential remains in this
-  repository's secrets.** Not retired, and the header says so where the output
-  used to be: the token still exists in Terraform state as an attribute of
-  `azurerm_static_web_app.hcw`, which no output block could ever have changed.
-
-  It cost no new federated credential. The deploy job already declares
-  `environment: production` and `github_deploy` already held the matching
-  subject. `Microsoft.Web/staticSites/listSecrets/action` is an action rather
-  than a read, so `Reader` cannot express it and the built-ins that carry it
-  also grant write over the site; the custom `HCW Static Web App Deployer` role
-  grants the single action, assigned to the one site.
-
-- **Three documents said the `hcw-azure` workspace was CLI-driven with no VCS
-  connection (#297).** `terraform -chdir=infra apply`, which this repository
-  instructed the owner to run, answers *"Apply not allowed for workspaces with
-  a VCS connection"*. `TODO.md` had been wrong about this twice in opposite
-  directions.
-
-  The root cause is worth more than the correction. HCP Terraform's workspace
-  **Description** is free text sitting beside the real settings, validated by
-  nothing, and it read "CLI-driven; no VCS connection". That sentence is what
-  was read — while the entry claimed it had been read off the configuration. A
-  description that contradicts its own workspace reads exactly like a setting.
-  Corrected in the workspace and in `TODO.md`, `wiki/Cutover-Runbook.md` and
-  `.github/workflows/tfc-plan-check.yml`.
-
-### Added
-
-- **Deployment drift is measured now, instead of being discovered by accident
-  (2026-09-01).** `deploy-functions.yml` and `deploy-azure-frontend.yml` are
-  both `workflow_dispatch` only, by a recorded decision — enabling a workflow
-  and enabling auto-deploy-on-merge are separate choices, and only the first was
-  made. So merging deploys nothing, and **nothing said so.**
-
-  That one gap produced both of 2026-08-31's incidents, hours apart, each found
-  by accident rather than by a check:
-
-  - The manifest route merged at 2026-08-30 02:45 UTC against a Function App
-    last deployed at 01:21. `publish-content-manifest.yml` then failed with a
-    404 for two nights, and its own error message blamed the app — which was
-    healthy, reporting 121 registered functions throughout.
-  - The frontend was **35 commits** behind, including a hydration change and a
-    sanitizer hardening, found only because someone deployed for another reason.
-
-  **AGE, NOT COMMIT COUNT**, and that is the whole design. The first incident was
-  ONE commit behind; the second was THIRTY-FIVE. No count threshold separates
-  them — catch the one and you fire on every ordinary merge, tolerate ordinary
-  merges and you miss the outage. What they share is that both sat undeployed
-  for days. Age tolerates the normal merge-then-deploy gap, which is the entire
-  point of dispatch-only releases, and still catches a change merged and
-  forgotten.
-
-  `monitor-deploy-drift.yml` runs every four hours and fails when a service has
-  been behind for 24 hours or more, emailing the owner through GitHub's own
-  notifications — the mechanism `monitor-functions-registered.yml` already uses,
-  needing no action group and no dependency on the subscription being watched.
-  It reads only the GitHub API: the last successful run of each deploy workflow,
-  and the commits on `main` touching that service's paths since. No Azure, no
-  OIDC, no `environment:`, and `contents: read` plus `actions: read`.
-
-  Drift is measured per service over the paths that service ships, so thirty
-  commits touching only `wiki/` leave the Function App exactly as correct as it
-  was.
-
-  **On running this from a schedule GitHub delivers 22% of the time**, said
-  plainly rather than assumed away: for an outage detector that is a real
-  problem, and here it is not. This watches a condition measured in days against
-  a threshold measured in hours, so a check landing every 4.6 hours on average
-  has ample margin against 24. The workflow header records that the reasoning
-  stops holding if the threshold ever drops near the delivery gap.
-
-  36 tests, and six load-bearing decisions are mutation-verified: reading only
-  the first page of commits, dropping the de-duplication, defaulting an
-  unreadable commits payload to an empty page, taking the newest commit instead
-  of the oldest, `>` instead of `>=` on the threshold, and leaving a raw `|` in
-  a table cell. All six fail the suite when introduced.
-
-  **All five fail in the same direction — reporting a service as healthier than
-  it is — and that direction is the actual finding.** Every defect review caught
-  in this file, and every one caught while writing it, made a stale service look
-  current. None made a current service look stale. A monitor whose bugs all
-  point at "everything is fine" fails the one way it must not, so the mutation
-  set is exactly those.
-
-  The sixth is a legibility failure rather than a correctness one, and belongs
-  with them anyway: commit subjects and error text are not this script's to
-  constrain, and a `|` in either ends its Markdown cell early — the row grows a
-  column, everything after it shifts, and the table stops rendering as a table.
-  That table IS the report, read to decide whether to deploy, at the hour a
-  monitor tends to fire. Newlines are folded for the same reason.
-
-  Two defects were caught before merge and are worth recording:
-
-  - `oldestCommit` originally took the **last element**, on the true-but-narrow
-    grounds that GitHub returns commits newest first. That holds for one page of
-    one path and nothing else — the merged list is newest-first only within each
-    per-path segment, so with two paths the last element is the second path's
-    oldest, which can be far newer. Found in review. It now takes the minimum by
-    date and assumes no ordering at all, which removes the class rather than the
-    instance. The same review found the missing pagination and de-duplication.
-  - The `setup-node` pin was a SHA appearing in no other workflow here —
-    invented rather than copied, which is the exact defect pinning by SHA exists
-    to prevent. It is now the pin the other eight workflows use, and both action
-    SHAs were verified against `.github/workflows` before commit.
-
-### Fixed
 
 - **The nightly manifest job opens a pull request instead of pushing to `main`
   (T-726, #304) — and the reason it needed to was not the one given.** The
@@ -4250,6 +5236,722 @@ This project has not cut a tagged release; entries are grouped under
   `[^>]*` the guard relies on — a seed containing `>` would have made the check
   read the tag as ending early. The test's hand-written `unescapeAttr` inverse
   learned it too, which is exactly the drift that function exists to catch.
+
+
+- **The alert rules re-notified every five minutes, because a scheduled query
+  rule is stateless by default.** `alert-app-exceptions-prod-cus` fired at 23:06
+  on 2026-08-25 — the first firing of any rule on this platform — and then kept
+  firing. That was not the rule detecting anything new. `autoMitigate` defaults
+  to false on `azurerm_monitor_scheduled_query_rules_alert_v2`, and a stateless
+  log rule notifies on *every* evaluation whose condition is met, so at `PT5M`
+  Azure sends a fresh Sev1 mail every five to ten minutes for as long as the
+  condition holds. The window makes it worse rather than better: `PT15M`
+  evaluated every `PT5M` means the same burst of exceptions is counted by three
+  consecutive evaluations, so the mail continues for a full fifteen minutes
+  after the last exception was thrown. `alert-func-latency` was the worst of the
+  three at a `PT30M` window — half an hour of mail about latency that had
+  already recovered.
+
+  `auto_mitigation_enabled = true` on `alert-func-http5xx`, `alert-func-latency`
+  and `alert-app-exceptions`. Each now fires once, stays fired while the
+  condition holds, and sends one Resolved mail after the condition has been
+  clear for three evaluation periods.
+
+  **Detection is unchanged and nothing is suppressed** — same evaluation
+  frequency, same query, same threshold, same severity. That is the entire
+  reason this change was made on one night's evidence rather than waiting for
+  the week of firing data ADR 0022 asks for: it is the only available remedy
+  that does not trade coverage for quiet. Every other lever — filtering the
+  query, requiring two failing periods, raising the threshold, lowering the
+  severity from Sev1 — makes the rule detect less, and none of them should be
+  pulled before the diagnostic query now in
+  [Alerting and support](docs/runbooks/alerting-and-support.md) says what is actually
+  throwing. Those levers are documented and ordered there; the thresholds
+  themselves remain the first estimates ADR 0022 declared them to be.
+
+  `mute_actions_after_alert_duration` is mutually exclusive with auto-mitigation
+  and stays where it already was, on `alert-logs-capacity` alone: its condition
+  cannot clear before the 08:00 UTC cap reset, so there is nothing for
+  auto-resolution to resolve. The two metric alerts needed no change — metric
+  alerts are stateful by default. Recorded as decision 6 in
+  [ADR 0022](docs/decisions/0022-alerting-fabric.md).
+
+- **The SCM lock is armed, and the per-run window is proven under `Deny`
+  (T-520 closed, 2026-08-25).** `functions_scm_lock_enabled` was set to `true`
+  on the `hcw-azure` workspace and applied; `az functionapp config
+  access-restriction show` now reports
+  `scmIpSecurityRestrictionsDefaultAction: Deny` with a single `Deny all` rule.
+  The Kudu endpoint no longer answers the internet.
+
+  Deploy run **32902534458** is the evidence that matters, because arming a
+  lock is only half a claim until something has to get through it:
+
+  ```
+  scm default action before the window: Deny
+  Will use Kudu https://<scmsite>/api/publish to deploy since Flex consumption
+    plan is detected.
+  Successfully deployed web package to Function App.
+  functions registered after sync: 109
+  scm window closed — default action 'Deny', no temporary rules left
+  ```
+
+  Every part of the design did what it was written to do. The open step read
+  the baseline as `Deny` rather than assuming `Allow`, which is why the same
+  steps worked unchanged before and after the flip. The deploy published
+  through Kudu with the standing default denying everyone else. The close step
+  removed the rule, confirmed the posture it found was the posture it left, and
+  confirmed no `ci-deploy-scm-*` rule survived — the assertion that keeps a
+  window which silently failed to close from passing as a green deploy.
+
+  Sequencing mattered and is recorded because it is the part that would bite on
+  a repeat: the window shipped in #220 and was observed working under `Allow`
+  (run 32894382986) **before** the variable was flipped. The first deploy after
+  a premature flip is the one that cannot get in to fix itself.
+
+  This closes the reachability half of the exposure. The credential half was
+  already closed — basic authentication is off on both SCM and FTP — so the
+  endpoint now requires an Entra token *and* an allow-listed source.
+
+- **Production deploys could not authenticate at all, and the cause was a
+  workflow edit rather than an identity problem.** `de99aa0` put
+  `deploy-functions.yml` behind `environment: production` to gate production
+  deploys. That is correct in itself and had a consequence nothing accounted
+  for: **declaring an environment changes the OIDC subject GitHub composes.**
+  It becomes `repo:<org>/<repo>:environment:<name>` rather than
+  `repo:<org>/<repo>:ref:<ref>`, so the branch credential cannot match a job
+  that names an environment — the ref form is simply not what is presented.
+  `infra/oidc.tf` trusted `ref:refs/heads/main` and `environment:data-migration`
+  and nothing else, so every production deploy failed at `azure/login`:
+
+  ```
+  AADSTS700213: No matching federated identity record found for presented
+  assertion subject 'repo:HybridCloudWorks@312844660/
+  HCW-HybridCloudWorks@1268997852:environment:production'
+  ```
+
+  Observed on run 32892582041, the first dispatch after that merge. It had been
+  broken since 2026-08-24 and stayed invisible because no deploy ran in
+  between — the failure is silent until someone deploys, and by then it reads
+  as a permissions or tenant problem rather than as the consequence of a
+  workflow edit.
+
+  Fixed by trusting `environment:production` in both the name and
+  immutable-ID forms, matching the existing pair for every other subject: six
+  federated credentials against a cap of 20. The branch pair is **not**
+  redundant now and must not be swept up in a future `data-migration` cleanup —
+  `heal-computed-properties.yml` and `publish-content-manifest.yml` declare no
+  environment, so they still present the ref subject. The rule is per-workflow,
+  not per-repository.
+
+  **A guard now fails the build instead of a deploy.** `scripts/oidc-subjects.test.mjs`
+  cross-references every workflow that uses `azure/login` against the subjects
+  `infra/oidc.tf` declares, and fails naming the missing credential and the
+  error it would have produced. No linter or `terraform validate` could have
+  caught this — both files were individually valid, and only the relationship
+  between them was wrong. The guard was verified by reverting the fix and
+  confirming it fails, rather than assumed to work because it passes. It also
+  asserts both subject forms exist for each environment, since one without the
+  other is half a credential that fails on whichever form the token carries.
+
+- **SCM reachability is closed by a per-run deploy window (T-520, #220).**
+  `scm_ip_restriction_default_action` was the literal `"Allow"` while the
+  front-end origin was locked to `Deny`. Verified against the live app
+  2026-08-25: SCM default `Allow`, main site `Deny` with 17 rules,
+  `scmIpSecurityRestrictionsUseMain` false. Changing the literal was never the
+  fix — the Flex Consumption deploy publishes *through* Kudu and GitHub-hosted
+  runners have no stable egress IPs, so a standing `Deny` breaks every deploy.
+  `deploy-functions.yml` now opens a window before the deploy and unwinds it
+  before the storage window closes. Three things differ from the storage window
+  and each is deliberate: no default-action flip is needed, because App Service
+  honours SCM IP rules normally where the storage firewall ignores them for
+  same-region callers, so the standing posture is never widened; the baseline is
+  read rather than assumed and the close step asserts the posture it found is
+  the posture it left, which is correct both before and after arming, where
+  asserting "`Deny` is back" would fail every deploy until the flip; and the
+  open step fails if `scmIpSecurityRestrictionsUseMain` is not false, since SCM
+  would then inherit the Cloudflare-only origin lock and the runner would be
+  refused with the window apparently open. The close step also asserts no
+  `ci-deploy-scm-*` rule survives — a window that silently failed to close is
+  worse than one that never opened, because the deploy stays green while the
+  endpoint stays admitted. `functions_scm_lock_enabled` defaults to `false`, so
+  the apply is a no-op on behaviour; arming it is a workspace edit and the
+  window must be observed working on a real deploy first. The credential half
+  was already closed: basic authentication is off on both SCM and FTP.
+
+- **`iac-validate` reports on every pull request, so it can become required
+  (T-523, #220).** Both jobs are meant to be required contexts on the `main`
+  ruleset, and adding them while the workflow stayed path-filtered to `infra/**`
+  would have deadlocked the repository: GitHub does not auto-satisfy a required
+  context whose workflow was filtered out, so every pull request not touching
+  `infra/` would have held at *"Expected — waiting for status to be reported"*
+  indefinitely. The trigger therefore changes before the ruleset does.
+  `pull_request` loses its `paths:` filter and the filtering moves inside each
+  job — check out, diff against the base commit, skip the expensive steps when
+  `infra/` did not change — while the job still completes and posts its context.
+  `push` keeps its path filter, because required contexts are a pull request
+  concern. Two details fail silently if got wrong and are recorded in the
+  workflow: `fetch-depth: 0`, since a shallow clone does not contain the base
+  commit; and the detect step overriding the terraform job's
+  `working-directory: infra`, since run from `infra/` the `^infra/` prefix match
+  never matches. Skipping is at step level rather than job level because whether
+  a *skipped* context satisfies a required check is behaviour worth not
+  depending on. The ruleset half remains owner-gated.
+
+- **The unlabelled form controls are associated, and the rule that finds them
+  now runs (A-001, #220).** The rule could not run at all, so the twenty
+  violations recorded against it had never been observed: it crashed with
+  `(0 , _minimatch.default) is not a function` on the first file containing a
+  label, and an ESLint rule crash aborts the entire run. The cause was this
+  repository's own supply-chain override rather than the ESLint version.
+  `eslint-plugin-jsx-a11y` declares `minimatch: ^3.1.2` and imports it as a
+  default export, while `package.json` overrode minimatch to `^10` tree-wide to
+  carry the brace-expansion advisory fix — and minimatch v10 exports no default.
+  The override that closed one supply-chain hole had silently disabled an
+  accessibility rule. Repaired with a scoped override giving the plugin
+  minimatch `^3.1.2` (resolves 3.1.5, past the 3.0.5 ReDoS fix) and
+  brace-expansion `^1.1.12` (resolves 1.1.18, past the advisory), leaving the
+  rest of the tree on 10.2.5; the lockfile change is 38 lines, all additions.
+  With the rule running, the twenty findings proved to be two different things.
+  Seventeen are genuine — a `<label>` that is a sibling of its control with no
+  association, so a screen-reader user gets no field name — fixed by pairing
+  `htmlFor`/`id` across `ArchitectureReviewBoard` (2, keyed per hotspot id since
+  they render in a map), `FrameworkReviewBoard` (4), `MetadataTab` (4) and
+  `SpeakingEventsPage` (7). The other three are not defects: in
+  `ListenAndLearnPage` the label already wraps its control, which is an
+  association, and the rule reported them only because it cannot see a custom
+  `<Input>` as a control. Those are fixed by configuring `controlComponents`,
+  because rewriting working markup to satisfy a misconfigured linter would have
+  been the wrong repair. The rule is now `error` rather than `off`, so neither
+  half can regress.
+
+- **`REVIEW.md` Part 4 is restored as the required-inputs inventory (T-521,
+  #220).** `59e471b` cut `REVIEW.md` from 1,011 lines to 58 and moved the
+  narrative to the Wiki, leaving twelve references to `PART 4 — REQUIRED INPUTS`
+  across eight files pointing at a section that no longer existed. Two of them
+  were live procedure with nowhere to land: `CONTRIBUTING` tells a contributor
+  to record new required inputs there, and the Deployment Runbook tells an
+  operator to move an entry from `SET` to `VERIFIED` after an apply. The defect
+  was the absent section rather than the references, so the section is restored
+  and all twelve pointers are untouched. Only the inventory comes back — the
+  original §4.0 naming and placement rules are now
+  `wiki/Variables-And-Secrets.md`'s job, and restoring them verbatim would have
+  recreated exactly the duplication the Wiki move ended; each file's intro now
+  names the other. The statuses do not share one confidence level and the
+  section says so rather than presenting a uniform claim: GitHub variables (23),
+  secrets (1) and environments (3) were enumerated live on 2026-08-25, so their
+  presence is observed; Key Vault was **not** readable, `az keyvault secret
+  list` returning `ForbiddenByRbac` because the caller holds no data-plane role,
+  which is itself the correct posture, so §4.6 lists the nineteen secrets
+  `infra/main.tf` references — establishing each name and consumer but not its
+  presence; and the HCP Terraform workspace was likewise not read, so §4.1's
+  statuses are labelled as carried forward from 2026-08-20. The Terraform tables
+  are generated from the configuration rather than transcribed: 8 of 58
+  variables have no default and must be set in the workspace, and the seven
+  posture switches are listed with what arming each one does, since those are
+  the entries most likely to be misread as settings. The same live pass is what
+  confirms T-525's three scratch variables are still set with no reader, and
+  that the `data-migration` environment outlives the workflow deleted in
+  `59e471b`.
+
+- **The anonymous feed endpoint is bounded in articles, not just in feeds
+  (T-319).** `GET /api/public/feed` capped how many `rss_cache` documents it
+  returned but not how many items each one carried, and one document is one
+  whole feed — so a hundred bounded documents could still be an unbounded
+  response. Each surviving document is now trimmed to its newest twenty items
+  by `pubDate`, with `itemCount` rewritten to match so the count cannot
+  describe items that are not in the response. Undated items sort last and are
+  dropped first (`Date.parse('')` is NaN, and a missing date is not "now", so
+  one malformed item cannot evict a dated article); an all-undated feed keeps
+  its stored order, and a document whose `items` is absent or not an array is
+  passed through untouched rather than turned into a plausible-looking empty
+  feed. The read ceiling is a second copy of the ingest writer's
+  `MAX_CACHE_ITEMS_PER_FEED` because `public-reads.js` deliberately has no
+  imports; `public-reads.test.js` asserts the two agree so they cannot drift.
+- **The ingest cap keeps the newest items rather than the first (T-319).**
+  `buildCacheItems` sliced the parsed feed in arrival order. Feed order is
+  conventionally newest-first but nothing enforces it, and both readers of the
+  array sort by `pubDate` — `buildHomepageFeedItems` and `useNewsData.js` — so
+  a feed publishing oldest-first cached its archive and never showed its recent
+  articles, with the cache looking full throughout. The sort now happens before
+  the slice, and `processSingleFeed` no longer pre-slices in feed order, which
+  would have decided the selection before `buildCacheItems` could. Drafting is
+  unchanged: it still walks the first ten items of the parsed feed.
+- **`PATCH /api/cms/{ai-providers|mcp-servers}/{id}` no longer persists the
+  `hasOauthToken` read artefact.** `stripOAuthToken` synthesises the flag on
+  every read in place of the write-only token, so a form PATCHing a field it
+  read back sent the boolean with it — and `putConfig` already dropped it for
+  exactly that reason while `patchConfig` did not. Reads recompute the flag, so
+  it shadowed nothing; it was a stale copy of a secret's state written next to
+  the secret, which a later revoke would not have cleared. A PATCH body left
+  with no updatable field after `id` and `hasOauthToken` are dropped is now a
+  `400` rather than a write that touches only `updatedAt` and reports success.
+
+
+- **`CORS_ALLOWED_ORIGINS` could never have worked — the name collides with a
+  platform-injected variable** (T-513). App Service injects read-only CORS
+  environment variables derived from `siteConfig.cors.allowedOrigins`, which is
+  a `string[]`. Ours is unset, so the worker received the serialisation of an
+  empty array — the literal two characters `[]` — in place of whatever was
+  written to the app setting. `parseExtraOrigins` split that on comma and
+  produced one "origin" called `[]`, which matches nothing.
+
+  Renamed to `EXTRA_ALLOWED_ORIGINS`. Nothing here may be called `CORS_*` or
+  `WEBSITE_*` again.
+
+  **Three independent writers proved it, and the last one was conclusive.**
+  Terraform via azurerm, Terraform via the azapi strip, and a plain
+  `az functionapp config appsettings set` each put the correct value in ARM; all
+  three times the worker reported `[]`. The final experiment carried **three
+  keys in one CLI write** — `RUNTIME_CONFIG_GENERATION`,
+  `RUNTIME_CONFIG_WRITER` and the origins. The worker reported the first two
+  verbatim and the third as `[]`. Same write, same instant, same process, two
+  distinct `HostInstanceId`s. Only the name differed.
+
+  That sequence also **exonerated Terraform and the azapi rewrite**, which had
+  been the prime suspect on the reasonable grounds that they were the newest
+  thing rewriting the whole settings collection. They were innocent, and the
+  generation/writer sentinel is what showed it: the workers reported
+  `writer=azapi-strip` and later `writer=cli` with the *current* generation
+  every time, so they were never stale and never missed a write. Without the
+  writer dimension the conclusion would have been "stale worker" and the search
+  would have continued in the wrong place.
+
+- **Telemetry had been dead since 01:33Z and request telemetry had never worked
+  at all** (T-514). Two faults wearing one coat, both in `host.json`.
+
+  `log-plat-prod-cus-01` caps ingestion at **0.25 GB/day** and read
+  `OverQuota`. What filled it was not the application: `Azure.Core` logged
+  **39.3 MB across 76,125 messages** in 24 hours — every SDK HTTP request and
+  response at Information, driven by the host's continuous blob-lease polling —
+  with `Azure.Identity` adding 4.4 MB. Application logs were collateral. Both
+  categories are now `Warning`; fixing the noise beats paying for it.
+
+  Separately, `Host.Results` was set to `Error`. Request telemetry is emitted at
+  Information, so that one line emptied the `AppRequests` table permanently —
+  it had **zero rows, ever**. That is the table that answers *"did the timer
+  fire"*, so Migration-Plan §7's scheduled-job gate was unobservable by
+  construction. Restored to `Information`. `Host.Aggregator` was left on
+  `Trace`, the most verbose level available, for a diagnosis nobody recorded;
+  now `Warning`.
+
+  **Two conclusions this reverses.** The `[cors]` diagnostic from the previous
+  entry was written correctly and discarded at ingestion, and the `[telegram]`
+  control that appeared to prove "no worker logs reach App Insights" was a
+  false negative — worker logging works.
+
+  **And a tooling trap.** `az monitor app-insights query --app <appId>`
+  returned zero rows for every query, including with no time filter, while the
+  workspace held 138,220 traces. The component is workspace-based with the
+  workspace in another subscription, and the proxy returns empty rather than
+  erroring. Query the workspace and the `AppTraces` / `AppRequests` tables
+  directly.
+
+- **The inbound Telegram bot is ported (T-512), not retired.** Migration-Plan §6
+  step 6 said to rewrite `getTelegramWebhookUrl()` and re-run `setWebhook`;
+  there was nothing to point a webhook at, because no receiver had been ported
+  — `notify.js` only *sends*, and no route accepted a Telegram update (checked
+  against the deployed route table, not just the source). Unlike Cloud Tools
+  (T-410) or Listen & Learn (T-411) it was never recorded as a deliberate
+  demotion, so nobody had decided it. The owner chose to keep the bot.
+
+  `POST /api/telegram/webhook` now serves the eleven commands and the free-form
+  Q&A from Site-Main's `telegram-bot.js` + `telegramWebhook`. Two things
+  changed in the port, both forced by the platform:
+
+  - **Long commands enqueue instead of running inline.** Upstream answered
+    Telegram with 200 immediately and kept working afterwards, which Cloud
+    Functions tolerates and Azure does not — an invocation ends at the
+    response, so `/forge` and `/inspect` would have been dropped silently
+    about as often as they ran. Those two and `/rss` now enqueue the platform
+    job that already exists for each (`forge-article`, `batch-inspect`,
+    `fetch-rss-feeds`, T-322) and reply with the job id.
+  - **The route is anonymous, and that is the only option.** Telegram cannot
+    send a bearer token, so `requireRole` has nothing to check. It is guarded
+    by two independent checks instead: the
+    `X-Telegram-Bot-Api-Secret-Token` header compared in **constant time**
+    against `sha256(TELEGRAM_BOT_TOKEN)` — the secret is derived, not stored,
+    so there is only one thing to rotate — and the sending chat id against
+    `TELEGRAM_CHAT_ID`. The first proves Telegram sent it; the second proves
+    the owner did, because anyone who finds a bot can message it. An
+    unauthorized chat gets **no reply at all**, so the bot cannot be used to
+    confirm it exists. `telegram/webhook` is in `PUBLIC_ROUTES` with that
+    reasoning recorded next to it.
+
+  It always answers 200 once the secret validates: Telegram retries non-2xx,
+  so a 500 on a bad command turns one broken message into a retry storm that
+  re-runs the command every few seconds. 32 tests, weighted on the two
+  authorization checks, since a mistake in either makes this an
+  unauthenticated remote control for the platform. `scripts/cutover/04-telegram-webhook.ps1`
+  re-registers the webhook and preflights the receiver first — a webhook aimed
+  at a 404 makes Telegram back off, so the bot stays broken after the real fix.
+
+- **Eight CMS functions never started — seven route templates were each
+  declared two or three times (T-510).** The Azure Functions host keys its
+  route table on the route template *alone*, not template + method, so two
+  functions declaring the same `route` with different `methods` conflict: the
+  host starts one and refuses the other with *"is in error: The route specified
+  conflicts with the route defined by function X"*. The losing verb answers
+  404. `GET`/`PATCH`/`PUT` were lost across `cms/certifications`,
+  `cms/certifications/{id}`, `cms/recordings`, `cms/social-posts`,
+  `cms/settings`, `cms/config/{collection}/{id}` and
+  `cms/keyword-config/{collection}/{id}` — list, edit and save for most of the
+  admin UI, all of which the frontend calls. Confirmed live before the fix:
+  `POST /api/cms/certifications` 401, `GET /api/cms/certifications` 404.
+
+  Present since the 84-function deploy (App Insights, 21:39:15Z 2026-08-21) and
+  invisible because the admin surface is not deployed yet, so nothing had ever
+  called them. Each pair is now one registration via the new
+  `httpRouteByMethod`, which declares every method on one template and fans out
+  on `request.method`; each verb keeps the guard it already had. 79 HTTP
+  registrations become 71 and the deploy total 104 → **96, all serving**.
+
+  `route-inventory.test.js` could not have caught it: its mock is
+  `http: (name, options) => httpRegistrations.set(name, options)`, a Map keyed
+  by function *name*, so both halves of a conflict register and pass properties
+  1–3 — every one of them was individually correct. New **property 4** asserts
+  no two registrations share a route template (parameter names collapsed, case
+  folded, matching how a router compares them) and that every method a merged
+  registration declares has a handler behind it. Verified by injecting a
+  conflict and watching it fail.
+
+- **The keyless `AzureWebJobsStorage` is written by Terraform, not by the
+  deploy** — the attribution in `infra/main.tf` and `deploy-functions.yml` was
+  wrong, and the Azure activity log is the only place the two are
+  distinguishable: the 20:02Z deploy *deleted* the setting, Terraform's 20:31Z
+  apply was the only `sites/config` write after it, and the setting was back.
+  `azurerm_function_app_flex_consumption` re-injects it on every apply whatever
+  `storage_authentication_type` says, without surfacing it in plan
+  ([azurerm#29149](https://github.com/hashicorp/terraform-provider-azurerm/issues/29149),
+  open on the pinned 5.1.0). Nothing in this repository can stop the write, so
+  it is now **stripped inside the same apply that creates it**: an
+  `azapi_resource_action` reads the settings azurerm has just written and an
+  `azapi_update_resource` writes them back without that key. The setting never
+  survives the run, so there is no post-apply step, no scheduled job and
+  nothing to remember. `deploy-functions.yml` **asserts it is absent and fails**
+  rather than deleting it — a repair there would hide a regression in the
+  strip, which is how this stayed a recurring incident instead of becoming a
+  bug: every occurrence was quietly cleaned up by the next deploy.
+
+  Not used: `"AzureWebJobsStorage" = ""`, the workaround the issue is best
+  known for — it stopped working in early May 2026, per three reporters — nor
+  rewriting the function app as a raw `azapi_resource`, which trades a
+  well-understood resource for a hand-written ARM body to dodge one bad key.
+  Both misattributing comments corrected; T-511 tracks the upstream close.
+
+- **The public content list failed the moment `PUBLIC_LIST_SQL_ORDER` went
+  live** — Cosmos: "The index path corresponding to the specified order-by
+  item is excluded". Computed properties are not covered by the `/*`
+  wildcard (the comment in `public-reads.js` said they were); `/cp_sortDate/?`
+  is now an explicit included path on `content` and `blogs`, applied live
+  through ARM with the property preserved and carried in the generated spec so
+  Terraform agrees. 40 minutes of 500s on the list endpoint, 2026-08-21.
+- **New functions were not registered after the deploy** — SyncTriggers
+  failed on a keyless `AzureWebJobsStorage` connection string the deploy
+  leaves behind (the same cause as the 2026-08-20 every-route-404). 83
+  deployed, 80 registered; `enqueueJob`, `getJob` and the job worker did not
+  exist until the setting was deleted and triggers re-synced by hand.
+  `deploy-functions.yml` now does both after every deploy and fails if the
+  registered count is zero.
+- **`cp_sortDate` is live on `content` and `blogs`** (healer run 32448029469,
+  2026-08-21, first successful run on this estate) and the healer workflow can
+  now be dispatched with `mode=inspect` to check the precondition for
+  `PUBLIC_LIST_SQL_ORDER=1`, which `infra/main.tf` now sets — the public
+  content list asks Cosmos for the newest N rather than an arbitrary N. T-206's
+  final step. The custom role the healer needs is created once by the owner
+  from `infra/roles/cosmos-container-writer.json` and consumed by data source;
+  the Terraform identity deliberately cannot define roles (#137).
+- **The healer can now actually heal.** `heal-computed-properties.yml` had never
+  succeeded on this estate: `cp_sortDate` was absent from both `content` and
+  `blogs` on 2026-08-21 with 1,142 documents in `content`. Setting
+  `computedProperties` is a control-plane operation, and the SDK's
+  `container.replace()` sends it to the data plane, which Cosmos refuses with
+  an AAD token regardless of roles. `--apply` now does an ARM PUT on the
+  container resource (polling the async operation and re-reading to confirm),
+  authorized by a new custom role — SQL container read + write on the one
+  account, nothing else; not "Cosmos DB Operator", which is
+  `databaseAccounts/*` minus keys. `buildArmBody()` strips the read-only keys
+  and is unit-tested. New output `cosmos_resource_group` → variable
+  `COSMOS_RESOURCE_GROUP` (T-508).
+- **`deploy-functions.yml`'s storage window now survives a same-region
+  runner** (T-509): the same default-action Allow/Deny bracket
+  `migrate-data.yml` gained in #134, with the Deny restored first and verified.
+- **`heal-computed-properties.yml` still read `secrets.COSMOS_ENDPOINT`** after
+  the value moved to a repository variable and the secret was deleted
+  (2026-08-20); its next run failed with "COSMOS_ENDPOINT is not set". Now
+  `vars.COSMOS_ENDPOINT`. The #128 changelog entry said both consuming
+  workflows had been switched; only `migrate-data.yml` had.
+- **`preflight-firestore-inventory.mjs` referenced `FIRESTORE_PROJECT_ID` without
+  importing it.** Introduced when the Firestore connection moved into
+  `connectFirestore()`; `node --check` and the 65 tests all passed because an
+  undefined identifier is a runtime error on a line no test reaches. The
+  first `mode=preflight` dispatch from `main` (run 32435060952, 2026-08-21)
+  found it — after proving the GCP Workload Identity Federation chain end to
+  end, which is the part that could not be tested locally. Fixed, and
+  `scripts/` now has an ESLint config with `no-undef` as an error, run by
+  the `scripts (migration)` CI job; a sweep of every script found no other
+  instance.
+- **`migrate-data.yml` carried `COSMOS_KEY` and `COSMOS_DATABASE:
+  hybridcloudworks`.** Key auth is disabled on the account and the database is
+  `hcw`, so every import would have failed — with an error naming neither.
+  Both removed; the workflow also lacked `id-token: write`, so it had no OIDC
+  path to either cloud.
+- **Eleven `moved` blocks removed from `infra/main.tf`.** Verified no-ops:
+  the centralus rebuild recreated every container from the spec while all
+  were empty, and `terraform state list` shows only the `for_each` form. A
+  three-line note records that the partition-key change happened through the
+  rebuild.
+- **Stale counts and comments.** `main.tf`'s partition-key comment (67 on
+  `/id` and five exceptions, not 62 and four); the `cosmos_database_name`
+  comment (the scripts default to `hcw`, not `hybridcloudworks`);
+  `cosmos-client.js` (67 of 72, not 66 of 71); and the storage lifecycle rule
+  for `articles/` is now documented as inert — Azure matches
+  `<container>/<blob>` and no `articles` container exists.
+- **`set-github-variables.ps1` and REVIEW §4.2 omitted `FUNCTION_APP_NAME`**,
+  which is set and consumed by `deploy-functions.yml`.
+- **`Azure/functions-action@v2` does not exist.** Found while resolving tags
+  to SHAs: that action's newest tag is `v1.5.7` and its release branch is
+  `releases/v1`, so `deploy-functions.yml` carried a reference that resolves
+  to nothing and would have failed with "Unable to resolve action" the first
+  time the workflow was enabled. Pinned to `v1.5.7`. The workflow is still
+  `if: false`, which is why no run had ever surfaced it.
+
+- **`frontend/.env.example` rewritten against the real environment surface**
+  (T-403). `VITE_ENTRA_API_SCOPE` was required and undocumented — without it
+  every token is acquired for no scope, so sign-in succeeds and every API call
+  fails on audience. The file meanwhile documented `VITE_OWNER_ADMIN_EMAIL` /
+  `_UID`, which nothing reads, and carried Firebase secret-set instructions for
+  decommissioned tooling. Rewritten against the actual `import.meta.env`
+  references.
+
+- **`queryDocs` does not discard the continuation token** (T-311) — recorded
+  because the opposite was asserted in review, and a wrong finding costs more
+  than none. `fetchAll()` consumes the token rather than dropping it: the SDK's
+  `toArrayImplementation` loops `while (hasMoreResults())`, accumulating every
+  page. No change was made because none was needed.
+
+
+- **`iac-validate.yml` Trivy job unresolvable action pin** — the gate shipped
+  in PR #103 referencing `aquasecurity/trivy-action@0.28.0`, a tag that no
+  longer resolves: Aqua's 2026-03-19 security incident (trivy discussions
+  #10425) saw trivy-action git tags re-pointed to malicious commits, and the
+  v0.69.4 binary release was itself malicious. The job now installs the
+  Trivy **binary** pinned to v0.69.3 — the latest release the advisory names
+  safe — from the project's own release artifacts, verified against the
+  release checksum manifest, and no longer uses the marketplace action at
+  all. (PR #104)
+
+
+- **The frontend CI gate now runs the whole test suite.** `test:admin` was a
+  hand-curated file list — every new test file had to be added by hand, and
+  eight known-stale failures elsewhere were simply never run. The eight were
+  stale expectations, not application defects, and are fixed: the route
+  contract now asserts the real pages behind `/gcp`, `/terraform`, `/github`,
+  `/finops`, the three `/tools` routes and the two news routes (mocked, as the
+  suite already did for other providers); and the PublishedPage tests drive
+  the publish flow that actually exists — a pre-publish checklist modal whose
+  "Publish Now" is what publishes — with the checklist itself now unit-tested.
+  `test:admin` is plain `vitest run`; the one legitimately unrunnable file
+  (`firestore.rules.test.js`, which needs the retired Firestore emulator
+  setup) is excluded in vitest.config.js with the reason recorded.
+  Default run: 15 files, 115 tests. (TODO.md T-320)
+- **One anonymous list request could eat four seconds of the database's entire
+  budget.** The public content list ran `SELECT TOP 1000 *` with no WHERE — an
+  *arbitrary* 1000 documents of a ~1k-document container (so published articles
+  could vanish from listings non-deterministically, made intermittent by the
+  300 s cache), each transferred whole at ~20 KB including article bodies no
+  list consumer renders. The public filter now runs in SQL, so the window
+  counts published documents of the requested type/provider; and the projection
+  is an audited explicit field list — the union of what the public list
+  consumers actually read, pinned by a test naming the consumer behind each
+  field. Of nine heavy body fields exactly one has a list reader
+  (`explanation`, a Coder Corner excerpt fallback); the other eight stay out,
+  which is where the RU win lives. The in-memory sort and the ORDER BY
+  avoidance stay until a materialized sort field plus composite index can be
+  deployed. (TODO.md T-206, steps 1–2)
+- **The API contract can no longer lie about what exists.** It documented
+  seventeen RPCs the admin UI invokes that were never registered — every call a
+  live 404, invisible because nothing compared the document to the code. The
+  contract now carries an explicit `rpc.notImplemented` block (all seventeen,
+  blocked on provider credentials), and a test holds the whole document to
+  account: invoked = implemented + notImplemented exactly; every implemented
+  entry resolves to a registered route with the methods it advertises;
+  registered method+route pairs and contract claims form a full bijection.
+  Making the bijection true surfaced more drift, now fixed: `getLabJob` was
+  implemented but missing from the invoked list, the Labs agent API had no
+  contract entry at all, six registered admin/public routes were undocumented,
+  and the `CRUD` shorthand entries now enumerate their real routes — recording
+  honestly that social-posts has no PATCH and recordings no DELETE.
+  (TODO.md T-207)
+- **Public news pages showed no curated imagery.** #63 moved the cached-image
+  lookup off an anonymous Firestore read onto an editor-gated `cms/*` endpoint,
+  reached through a token acquisition that throws outright without a signed-in
+  account. The hook runs on the public `/{provider}/news` route, so for every
+  anonymous visitor the lookup failed and the grid rendered nothing where
+  cached images used to appear. Reading a cached image is now anonymous
+  (`GET public/curated-image/{articleId}`, returning only the URL — never the
+  document, which carries an internal blob path and prompt metadata), while
+  generating a missing one stays behind the admin gate and is no longer
+  attempted without the `editor` role that the server requires — not merely
+  when nobody is signed in, since a signed-in viewer would have collected a 403
+  per article. That also keeps MSAL off the critical path of a public page.
+  Archived images are withheld, so retiring an image in the gallery now keeps
+  it off the public site, and a cache miss is cached for a minute rather than
+  an hour so a freshly generated image is not hidden behind its own absence.
+  (TODO.md T-210)
+- **The anonymous submission limit of five could be turned into two hundred.**
+  The quota read the counter, compared it, and wrote it back as three separate
+  operations, so simultaneous requests all read the same value, all passed the
+  check, and all wrote `count: 1` — accepted submissions bounded only by how
+  many the caller sent, each landing in the review queue, and a counter left at
+  1 so the trick repeated every burst rather than once an hour. The accepted
+  path is now a single conditional atomic increment: Cosmos evaluates
+  `count < limit` and applies the increment as one operation, and writes to one
+  document serialize, so exactly five concurrent callers get through. Starting a
+  window and rolling one over are the two things a predicate cannot express, so
+  they go through operations that have a loser — a create that 409s and a
+  replace that 412s — and the loser re-evaluates rather than assuming.
+  (TODO.md T-204)
+- **An IPv6 client had an unlimited submission budget.** The quota key was the
+  hash of the full address, and a standard residential IPv6 allocation is a
+  whole `/64` — 2^64 addresses, each hashing to its own counter, every one of
+  them reading well under the limit, with `submission_quota` growing a document
+  per address as a side effect. Addresses are now normalized before hashing:
+  full address for IPv4, `/64` prefix for IPv6, with `::` expanded first so one
+  address written three ways lands in one bucket, and `::ffff:` v4-mapped
+  addresses treated as the IPv4 clients they are rather than collapsing every
+  such client into a single shared bucket. (TODO.md T-205)
+- **The editor could silently overwrite a colleague's save.** Replacing
+  `onSnapshot` with a twenty-second poll left behind a one-shot "this response
+  is my own write" flag that was consumed by whatever the next tick happened to
+  return. At millisecond latency that was reliably our own write; at twenty
+  seconds it can be a collaborator's — and the branch then adopted *their* edit
+  marker as our baseline, so the next save passed the server's
+  optimistic-concurrency check and their work vanished with no warning to
+  either person. `saveEditorDraft` now returns the `blogEditedAt` it wrote and
+  the client matches on that identity, so the flag is gone rather than merely
+  narrowed. It also fixes an adjacent bug: a second save inside the poll window
+  used to send the pre-save marker and conflict against the caller's *own*
+  previous write. (TODO.md T-208)
+- **Twenty seconds was long enough to lose an image reorder.** The poll had no
+  change detection, so every idle tick re-applied the remote document over
+  `orderedImageUrls` — local state the user drags into order and that is only
+  persisted on save — and re-rendered the whole editor while doing it. Ticks
+  that carry a marker we have already seen now return early. A genuine remote
+  change still replaces the order; the tests assert both directions, because an
+  early return that goes too far is just a stale editor. (TODO.md T-209)
+- **`total` reported the page size.** Two public list endpoints measured it
+  after slicing, so it always equalled `items.length` and any paginating
+  consumer would conclude there was exactly one page. (TODO.md T-407)
+- **Two routes the frontend called did not exist.** `recordLegacyBlogsRead` and
+  `getPlatformHealth` were registered nowhere — both 404s. The health one meant
+  every anonymous visitor saw four `CHECKING` indicators resolve to "Health
+  check unavailable" on the landing page; the telemetry one meant
+  fallback-container reads went unmeasured, which is the evidence for retiring
+  that container. Both were invisible until T-101, because until then they were
+  pointed at the decommissioned Google host. (TODO.md T-316)
+- **Scheduled publishing works.** `scheduledPublishDate` had a complete write
+  side and no read side: an operator scheduled a post, the server validated and
+  stored the date, the UI confirmed it, and nothing ever published it — no
+  error, no alert. `publishScheduledContent` now runs the same
+  `processPublishContent` pipeline the Publish button uses, rather than a second
+  implementation of it, clears the schedule only after a publish that actually
+  happened, caps each tick at 25 with carry-over, and records failures under the
+  `scheduled_publish_failures` alert type the ops dashboard has counted since
+  the migration without ever having a producer. (TODO.md T-301)
+- **Two concurrent publishes can no longer both succeed.** `patchDoc` gained an
+  optional `ifMatch`, and the publish write is now conditioned on the ETag read
+  at the top of `processPublishContent` — the status gate, quality and image
+  reports and slug were all decided from that document. A lost race is reported
+  as skipped rather than counted as a publish that did not happen. Timer-driven
+  publishing is what turns this from theoretical into reachable. (TODO.md T-301)
+- **The four timers no longer share one flag.** Enabling the scheduled publisher
+  would also have armed `cleanupTempStorage`, an unimplemented TODO that deletes
+  blobs. Each timer has its own flag; `FEATURE_FLAG_SCHEDULERS` is a master kill
+  switch. The blob-GC job itself is still unwritten and still flagged off.
+  (TODO.md T-302, flag half)
+- **Every admin list sort worked again.** `PublishedPage` and `EditorListPage`
+  kept the Firestore-only `?.toMillis?.() || 0`, which against the ISO strings
+  Cosmos returns scores every document 0 — so every comparator returned 0, the
+  lists rendered in raw database order while the sort controls appeared to work,
+  and the timestamp columns showed an em dash. One `lib/dateUtils.js` now backs
+  all of it. The review counted seven copies of that helper; there were **ten**,
+  and a source guard in the new test file found the last three — one of which
+  only surfaced when the bundler refused a redeclaration that ESLint had passed.
+  (TODO.md T-304)
+- **The review board no longer blanks on a scheduled item.** `BlogReviewBoard`
+  called `.toDate()` on what is now an ISO string, inside a `setTimeout` and so
+  outside the error boundary. (TODO.md T-303)
+- **A published article can no longer 404 because a draft shares its slug.**
+  The detail lookup ran `SELECT TOP 1` with no `ORDER BY` and applied the public
+  filter afterwards, so it picked arbitrarily among duplicates and then rejected
+  the winner. It now orders by `_ts` — a system property present on every
+  document, so the drop-on-undefined trap does not apply — and finds the first
+  public candidate. (TODO.md T-305)
+- **The Labs dashboard reported agents "connected" through an outage.** The
+  staleness clock advanced only inside the snapshot fetch's success path, so a
+  failing poll froze it: `now - lastSeenAt` stopped growing and every agent
+  stayed online for exactly as long as nothing was reachable. The clock is an
+  independent interval again — it has to keep running when the fetch does not,
+  which is the only condition under which it says anything. (TODO.md T-309)
+- **A timed-out lab job was polled forever, and a network blip was displayed as
+  a failure.** The console's terminal-status set omitted `timeout`, which the
+  agent does report — while the output pane *in the same file* had the correct
+  four-element list, so the loop kept polling a job its own display had already
+  called finished. Both now read `TERMINAL_JOB_STATUSES` from
+  `lib/labsPolling.js`. A transport error no longer writes `status: 'failed'`
+  onto the job, which was indistinguishable from a real failure and stopped the
+  poll permanently; it is separate state, shown as "still running — retrying",
+  and the poll backs off from 5 s to a 60 s ceiling without ever giving up.
+  (TODO.md T-308)
+- **Overlapping polls could render an older document over a newer one.** Both
+  the Labs snapshot (15 s interval) and the editor's remote-document watch
+  (20 s) allow a 20 s request timeout, so ticks overlap under load and responses
+  can land out of order. Both now skip a tick while one is in flight. In the
+  editor the flag is released in a `finally`: its catch returns early on a
+  missing document and on cancellation, and either path would otherwise have
+  stopped the poll for the lifetime of the page. (TODO.md T-309)
+- **The browser called Google Cloud, not Azure.** `api.js`, `publicApi.js` and
+  `legacyBlogsTelemetry.js` each resolved `VITE_GCP_FUNCTIONS_URL` — a
+  decommissioned Google Cloud Functions host — so roughly sixty call sites,
+  including every authenticated admin request, would have been sent off-platform
+  with an Entra bearer token attached. `lib/functionsBase.js` is now the single
+  resolver over `VITE_AZURE_FUNCTIONS_URL`; the dead `azureConfig.js` provider
+  switch was deleted. The base carries the Functions `api` route prefix and
+  accepts either `/api` (same-origin) or an absolute origin (cross-origin), so
+  deployment topology is configuration rather than code. A deploy build with no
+  base configured now fails instead of shipping. (TODO.md T-101)
+- **Every upload and every gallery delete would have thrown.**
+  `blob-storage.js` required `STORAGE_CONNECTION_STRING`, which no file in
+  `infra/` has ever produced — the code was written for shared-key auth while
+  the infrastructure was built for managed identity. It now uses
+  `DefaultAzureCredential` against `STORAGE_BLOB_ENDPOINT`, matching
+  `cosmos-client.js`, and `generateSasUrl` signs with a user-delegation key
+  instead of an account key. No key or connection string was added.
+  (TODO.md T-104)
+- **Uploaded images were unreachable, and the URL to them was stored anyway.**
+  `allow_nested_items_to_be_public = false` is an account-level master override,
+  so the three containers declared public in Terraform served 409 — while
+  uploads returned the raw blob URL for pages to persist into Cosmos. Uploads
+  now return the media-route URL, non-public containers return none, and the
+  Terraform containers are declared `private`, which is what they always were.
+  (TODO.md T-105)
+- **Scheduled-publish dates were silently dropped** — `scheduledPublishDate` and
+  the editor's `blogEditedAt` were parsed with Firestore `Timestamp`-only code
+  paths that returned `0` for the ISO strings the API now returns. This would
+  have emptied the scheduling calendar and disabled external-edit-conflict
+  detection. (#64)
+- **Labs agents would have shown permanently offline** — the staleness
+  calculation understood only `Timestamp.toMillis()`. (#65)
+- **Admin list projection was missing workflow fields** — `scheduledPublishDate`,
+  `softDeletedAt`, `blogEditedAt` and eight others were absent from the snapshot
+  projection that replaced whole-document Firestore reads. (#64)
+- **MCP server connection state always read as disconnected** — the write-only
+  `oauthToken` strip left consumers unable to detect a stored token; reads now
+  carry a `hasOauthToken` boolean while the value itself never leaves the
+  server. (#62)
+- **Public list endpoint under-projected** — it returned a card-field subset
+  while consumers read `frameworkConcepts`, `featured`, `altCoverImageVariants`
+  and more; it now returns full documents with internal fields stripped. (#61)
 
 ### Security
 
@@ -5086,642 +6788,6 @@ This project has not cut a tagged release; entries are grouped under
   kind this repository could write before, pass through untouched, and the
   admin preview now resolves through the same code as the public page.
 
-### Changed
-
-- **Repository trackers reconciled against merged main (2026-08-30).** The
-  `TODO.md` status date and self-count now agree with its August 30 evidence;
-  its owner-action table records the two proven timers rather than saying
-  nothing is armed; and its recovery baseline now names the implemented
-  `Continuous30Days` Cosmos backup, RA-GRS content storage, and remaining LRS
-  Functions host storage. GitHub issues #127, #180 and #231 were re-read against
-  current Terraform and `.azure/api-surface.json`: their unfinished decisions
-  remain open, but superseded file anchors, endpoint counts and recovery
-  baselines no longer describe old code as current state.
-
-  The live `Default` branch ruleset was also read through GitHub on 2026-08-30,
-  rather than inferred from workflow files: it targets `~DEFAULT_BRANCH`,
-  blocks deletion and non-fast-forward updates, requires pull requests and all
-  12 documented status contexts, and has no bypass actors. Its two remaining
-  hardening choices — strict/up-to-date status checks and required review-thread
-  resolution — are both currently off and are recorded in `TODO.md` for an
-  owner decision. The `production` environment's branch restriction could not
-  be read through the integration, so that existing owner verification remains
-  open instead of being reported as proven.
-
-- **The Telegram webhook is registered against Azure, and the tracker was wrong
-  about it (T-526 closed, 2026-08-28).** `getWebhookInfo` returns
-  `https://api-azure.hybridcloudworks.com/api/telegram/webhook` with zero
-  pending updates, and `/help` answers in the chat — the acceptance criterion
-  `TODO.md` set for itself. **The Phase 5 approve-by-reply loop is live**, which
-  makes the whole Blog Machine Telegram path usable: a forge_ready notification
-  with a signed staging link, `/approve {id}` as a reply, and publication
-  through the full gated pipeline. The inline approve/reject buttons deferred to
-  the backlog are unblocked by the same fact.
-
-  **Nothing was re-run to close this.** It had already been done, and three
-  documents went on describing it as pending: `TODO.md` called it "the one
-  deadline on this list" and a countdown against the GCP deletion,
-  `Migration-Plan.md` §6 step 6 marked it OPEN, and its risk register read "High
-  — now a deadline". It surfaced only because `04-telegram-webhook.ps1 -Mode
-  Show` was run to *start* the work.
-
-  That step's own text warned it was "the one that will be forgotten". It was
-  right about the failure mode and wrong about the state — what got forgotten
-  was that it had happened. A tracker overstating urgency is not harmless: it
-  spends attention on finished work and, by being wrong in the direction of
-  alarm, teaches a reader to discount the next alarm.
-
-  **Three defects in the cutover scripts were found by running them**, none of
-  which reading had caught. Every script that opens a firewall window addressed
-  the vault as `az keyvault network-rule add --name <vault>` with no
-  `--resource-group`, which makes az resolve the group by searching the
-  subscription; that search fails where `az keyvault show --name` succeeds, and
-  reports `The Vault 'kv-site-prod-cus-01' not found within subscription` —
-  which reads as "the vault does not exist". Name plus resource group is an
-  unambiguous address with no search step. The vault read then failed
-  `ForbiddenByRbac`, because management-plane and data-plane rights are separate
-  and this estate deliberately grants the operator only the first (REVIEW.md
-  §4.6 records exactly that response and calls it the correct posture) — so
-  `06-seed-secret.ps1` now checks for a data-plane role at the management plane
-  *before* prompting for a credential and *before* opening anything, rather than
-  discovering it at the write.
-
-- **The four planning documents are reconciled to their own conventions
-  (2026-08-28).** Two rules, applied consistently for the first time. **TODO.md
-  and REVIEW.md carry only open work** — completed items are removed once the
-  entry is here, which is TODO.md's own stated footer rule and which the file
-  had stopped obeying: it had accumulated `**Closed:**` enumerations for the
-  architecture review's 35 resolved findings and a "Critical — CLOSED" section,
-  so a reader could no longer tell what was outstanding without reading past a
-  page of finished work. REVIEW.md shed the executed migration-era teardown, the
-  two closed live-confirmation bullets and the completed apex-DNS row for the
-  same reason. **Architecture-Plan.md and Migration-Plan.md keep every entry and
-  strike it through** — they are archived records whose value is the reasoning,
-  so deleting a decision would delete why it was made.
-
-  Four things surfaced from doing it rather than being the point of it, and the
-  largest is the one this rule is for: **six merged pull requests had no
-  changelog entry at all** — #234's availability probe and #243–#248's
-  post-program backlog work. The removal pass caught them because removing an
-  item from TODO.md requires checking that CHANGELOG.md has it, and that check
-  had been skipped while the completed items were merely being marked closed in
-  place. Both entries are above. The open-item counts in TODO.md were also
-  wrong — Low read
-  "5 of 15 closed" against a list of seven, and the total was 32 against a real
-  30. Migration-Plan §6's
-  rollback paragraph still promised "rollback is DNS for as long as Firebase
-  remains deployed", which the owner's decision to delete GCP rather than soak
-  had already reversed; it now records the inversion, because that decision is
-  exactly what puts a deadline on T-526. And two of the plan's eight
-  verification gates — the scheduled-job proof and the cost gate — turn out to
-  be the only unmet exit criteria of the entire migration, which was not legible
-  while they sat in a list whose met items were unmarked.
-
-- **The apex serves the Azure site (T-517 closed, 2026-08-28).** The cutover
-  this repository was built toward is done: `hybridcloudworks.com` — the
-  canonical hostname, the one host that was still Firebase — now resolves to
-  `calm-ground-0d0e6a010.7.azurestaticapps.net` and serves the Static Web
-  App. Evidence, in the order it arrived: the owner-supplied Cloudflare zone
-  export of 2026-08-27 23:47 showed the apex `CNAME` at the SWA with **no
-  Firebase record remaining anywhere in the zone** (the Runbook §3c repoint);
-  the owner then verified serving on 2026-08-28 — the acceptance criterion
-  this tracker holds cutovers to, because DNS state is desired state and
-  T-513 is the recorded case where the two disagreed.
-
-  Two owner decisions recorded with the close-out. First, **the DNS rollback
-  is forgone**: rather than holding the Firebase deployment through the
-  Runbook's one-week soak, GCP is scheduled for deletion. Second, that
-  decision converts the Telegram webhook re-registration (Runbook §3d) from a
-  dormant follow-through into a deadline — the bot's webhook still points at
-  the old Cloud Functions URL, and once GCP is deleted it goes quiet with no
-  error anywhere in Azure. Tracked as **T-526**, to be run before the
-  deletion.
-
-  The Runbook §3c soak criterion ("a full week including every scheduled
-  job") could never have completed as written — no timer is armed (T-518) —
-  so the owner's decision also resolves a dead-lock this tracker had flagged
-  between the two items.
-
-- **The two `data-migration` federated credentials are retired (T-524 closed,
-  2026-08-26).** `infra/oidc.tf` trusted six OIDC subjects and now trusts four.
-  The pair granted no permission of its own — a federated credential decides
-  which subject may act *as* the deploy identity — and with the production-write
-  grants already revoked, a `data-migration` token inherited the same reduced
-  role set a branch token gets. What it removed was a standing trust
-  relationship for a job that cannot run.
-
-  Held back from the earlier cleanup deliberately: retiring a trust
-  relationship is an identity change rather than a Terraform tidy-up, which is
-  why the remediation branch escalated it instead of deleting it. The owner
-  authorised it on 2026-08-26.
-
-  **Validated before the change, not after.** Nothing in `.github/workflows`
-  names that environment; its only consumer, `migrate-data.yml`, was deleted in
-  `59e471b`. Of the four workflows that call `azure/login`, one declares
-  `environment: production` and three declare none, so they present the `ref`
-  form — `deploy-azure-frontend.yml` names an environment but deploys through
-  `Azure/static-web-apps-deploy` and never logs into Azure at all.
-
-  `scripts/oidc-subjects.test.mjs` was then run against three variants of the
-  deletion, because the check that matters is the one that fails:
-
-  | Variant | Guard |
-  | --- | --- |
-  | Both credentials removed | **passes** |
-  | Only the name form removed | **fails** — no immutable-ID-form credential |
-  | Branch pair swept up with them | **fails** — names all three ref-form workflows |
-
-  Both forms went together for the reason the second row states: one without the
-  other is half a credential and fails on whichever form the token happens to
-  carry. If a migration workflow is ever rebuilt it needs both back.
-
-- **The migration-era rehearsal estate is destroyed and the three
-  production-write grants are revoked (B6/B7, applied 2026-08-25).** The apply
-  reported **3 added, 2 changed, 92 destroyed**. The destroy count matched the
-  authorisation in `REVIEW.md` exactly — 90 real destroys plus the 2 azapi
-  resources replaced on every apply — which is the number that mattered, since
-  the record insisted on approving against addresses rather than a count. The
-  adds and changes came in below the recorded 17/5, and that is not a short
-  apply: that figure was written before any of it ran, most of those adds were
-  the alert rules, and #218 and #219 had already created them (ten of thirteen
-  targeted resources, then the remaining three after ARM rejected them at
-  create time). By the time this run planned, they were no longer adds.
-  Everything was verified after the apply rather than inferred from the plan:
-  `rg-db-site-sbx-cus` no longer exists; all four alert rules are still present
-  and enabled; and the deploy identity is down to four operational roles — HCW
-  Cosmos Container Definition Writer on the production account, Storage Account
-  Contributor and Storage Blob Data Contributor on `stsitefuncprodcus01` (the
-  Functions **host** account, needed for the deploy firewall window), and
-  Website Contributor on the Function App. The three revoked grants were scoped
-  to `dbs/hcw` and to `stsiteprodcus01`, the **content** account; none of them
-  appears. What this cost is already recorded: with the grants gone the deploy
-  identity has no write path into the production Cosmos database or the content
-  account, so the delta import is retired for good. The two `data-migration`
-  federated credentials survive — `federated_subjects` still emits
-  `environment:data-migration` twice — and remain an owner decision (T-524).
-
-- **`REVIEW.md` §4.10 listed the wrong number of Terraform outputs.** It said
-  twenty-three and omitted `deploy_principal_id`, because it was assembled by
-  reading `infra/outputs.tf` alone while three outputs live in `infra/oidc.tf`.
-  There are **twenty-four**, and the section now lists them by file. Corrected
-  against the apply's own output block, which is the only listing guaranteed to
-  be complete. Recorded rather than quietly fixed because it is precisely the
-  drift Part 4 exists to prevent, and it was introduced by the change that
-  restored Part 4 four commits earlier.
-
-- **The IaC checks are required to merge, and the three orphaned repository
-  variables are gone (T-523 owner half, T-525, 2026-08-25).** Ruleset
-  `20680114` now requires **12** contexts rather than 10, the two additions
-  being `fmt, validate, tflint` and `Trivy IaC misconfiguration scan`. Every
-  "CI enforces this" line in `CONTRIBUTING` is now true when nobody is
-  watching, where before a branch with a red Trivy run merged exactly as
-  easily as one with a green run. The ordering the item insisted on held:
-  #220 removed the `paths:` filter from the `pull_request` trigger first, and
-  PR #221 — which touches only `tooling/agent-registry.yml` and no
-  infrastructure at all — then confirmed the skip path end to end, its
-  `fmt, validate, tflint` job reporting green in 22s with `Detect infra
-  changes` succeeded and all six Terraform steps `skipped`. Had the ruleset
-  been changed first, that same pull request would have been unmergeable.
-  `COSMOS_SCRATCH_ENDPOINT`, `STORAGE_SCRATCH_ACCOUNT` and
-  `SCRATCH_RESOURCE_GROUP` were deleted in the same pass; `gh variable list`
-  now returns 20 names and `REVIEW.md` §4.2 lists exactly those 20, so the
-  inventory and the live repository agree with no residue to reconcile. The
-  variables named resources that will stop existing when the rehearsal
-  teardown applies, and a value nothing reads is a value the next person
-  assumes is load-bearing.
-
-- **The frontend is on ESLint 10 (D-001 closed).** The item said two plugins
-  blocked it, on the strength of their declared peer ranges. That was half
-  right and the wrong half was load-bearing, so it is worth recording what the
-  block actually was.
-
-  Dependabot's bump failed at `npm ci`, not at lint — an ERESOLVE refusal from
-  `eslint-plugin-jsx-a11y`'s `eslint@"…|| ^9"` peer range. That is metadata, and
-  npm `overrides` pinning both plugins' `eslint` peer to `$eslint` clears it.
-  What remained was one real incompatibility: every rule that consults the React
-  version died with `contextOrFilename.getFilename is not a function`, because
-  ESLint 10 removed `context.getFilename()` and `eslint-plugin-react` calls it
-  while DETECTING the React version. Detection only runs when
-  `settings.react.version` is the literal `'detect'`, so supplying the version
-  skips the removed API entirely. The config now reads it from the installed
-  `react/package.json` rather than pinning a literal, so an upgrade cannot leave
-  the linter reasoning about the wrong React.
-
-  Verified beyond a green run, because a plugin that silently loaded no rules
-  would also look green: a probe file confirmed `react/jsx-key`,
-  `react/no-unescaped-entities`, `jsx-a11y/alt-text` and
-  `react-hooks/rules-of-hooks` all still report on ESLint 10, and `npm ci` — the
-  command that actually failed — now succeeds.
-
-  One rule stays off, for a new reason. `jsx-a11y/label-has-associated-control`
-  was disabled because it crashed on ESLint 9; on 10 it runs and reports 20 real
-  unlabelled form controls. That is an accessibility fix rather than an upgrade,
-  so it is tracked as A-001 and the config comment now says so — the stale one
-  would have told the next reader the rule was unusable.
-- **Listen & Learn spend appears in the portal, and `ai_usage` has one writer.**
-  The Usage tab has read that container since the port; until now only the AI
-  playground wrote to it, so a Listen & Learn run — the second thing here that
-  spends money on a model — would have been invisible. Each run now records a
-  row per model call: one for the script, one for the synthesis, tagged
-  `listen-and-learn:script` and `listen-and-learn:audio`.
-
-  The writer moved into `ai/usage.js` and `ai/proxy.js` now uses it, because the
-  Usage tab does its arithmetic client-side over whatever rows it finds — a
-  second writer with a slightly different shape would not error, it would
-  silently total zero. Recording is best-effort by design, and a test pins the
-  regression that made it otherwise: pricing a row used to happen outside the
-  try, so a caller passing an `ai` without `getCostEstimate` threw a TypeError
-  that propagated out and failed the episode whose cost it was recording.
-
-  TTS rates are in `COST_TABLE` from the published paid-tier pricing read on
-  2026-08-24 — `gemini-2.5-flash-preview-tts` at $0.50 in / $10.00 out per 1M
-  tokens, the other two at double that, which is why the flash model is the
-  default. Token counts come from the API's own `usage` object; when a response
-  omits it the audio count is derived from duration at the documented 32
-  tokens/second and the row is flagged `estimatedTokens`, which the portal shows
-  as "est." so a derived figure is never read as a billed one. On those rates a
-  nine-minute episode is about $0.17 and a five-area certification about $0.87.
-
-  The tab gains a **Breakdown by Feature** table beside the provider one:
-  provider answers "which vendor", which is useless when one vendor serves
-  several features at rates an order of magnitude apart. The Listen & Learn page
-  also reports the run's own cost when the job finishes. A test holds the tab's
-  source labels against the backend's `USAGE_SOURCES` so a new source cannot
-  ship as a raw slug — the same drift guard `DEFAULT_PROVIDERS` already has.
-- **`QueuePage.jsx` is decomposed (T-412).** 1,310 lines became a 320-line page
-  over `queue/itemHelpers.jsx`, `queue/QueueList.jsx`, `queue/constants.js` and
-  `queue/useQueueActions.js`. The hook is the reason for the split: the bulk
-  paths transition many documents one at a time and each partial failure has to
-  be attributed back to its own card, and that code could previously only be
-  reached by rendering four hundred lines of card markup. It now has 22 tests
-  covering the partial-failure paths — a run that half-works removes exactly the
-  documents that moved, leaves the ones that did not, and writes a reason under
-  each — plus the paging loop's zero-count guard and the rejected-filter
-  refusal. Behaviour is unchanged with one fix found by the move: `handleConfirm`
-  was `useCallback(..., [confirmTarget])` while closing over handlers rebuilt
-  every render, so it could act on `items` and `selectedIds` as they were when
-  the modal opened. It is no longer memoized; the dependencies changed every
-  render regardless, so nothing was gained by it.
-- **Publicly readable blob containers now declare their writer.**
-  `PUBLIC_MEDIA_CONTAINERS ⊂ UPLOAD_CONTAINERS` held only because every public
-  container happened to be one people upload to. Listen & Learn audio is written
-  by a job, so `GENERATED_MEDIA_CONTAINERS` names that category and the test
-  asserts each public container has exactly one declared writer and that the two
-  sets are disjoint. Satisfying the old relation would have meant opening the
-  episode container to the admin upload route, where any editor could put an
-  arbitrary file behind an anonymous URL.
-
-### Fixed
-
-- **The alert rules re-notified every five minutes, because a scheduled query
-  rule is stateless by default.** `alert-app-exceptions-prod-cus` fired at 23:06
-  on 2026-08-25 — the first firing of any rule on this platform — and then kept
-  firing. That was not the rule detecting anything new. `autoMitigate` defaults
-  to false on `azurerm_monitor_scheduled_query_rules_alert_v2`, and a stateless
-  log rule notifies on *every* evaluation whose condition is met, so at `PT5M`
-  Azure sends a fresh Sev1 mail every five to ten minutes for as long as the
-  condition holds. The window makes it worse rather than better: `PT15M`
-  evaluated every `PT5M` means the same burst of exceptions is counted by three
-  consecutive evaluations, so the mail continues for a full fifteen minutes
-  after the last exception was thrown. `alert-func-latency` was the worst of the
-  three at a `PT30M` window — half an hour of mail about latency that had
-  already recovered.
-
-  `auto_mitigation_enabled = true` on `alert-func-http5xx`, `alert-func-latency`
-  and `alert-app-exceptions`. Each now fires once, stays fired while the
-  condition holds, and sends one Resolved mail after the condition has been
-  clear for three evaluation periods.
-
-  **Detection is unchanged and nothing is suppressed** — same evaluation
-  frequency, same query, same threshold, same severity. That is the entire
-  reason this change was made on one night's evidence rather than waiting for
-  the week of firing data ADR 0022 asks for: it is the only available remedy
-  that does not trade coverage for quiet. Every other lever — filtering the
-  query, requiring two failing periods, raising the threshold, lowering the
-  severity from Sev1 — makes the rule detect less, and none of them should be
-  pulled before the diagnostic query now in
-  [Alerting and support](docs/runbooks/alerting-and-support.md) says what is actually
-  throwing. Those levers are documented and ordered there; the thresholds
-  themselves remain the first estimates ADR 0022 declared them to be.
-
-  `mute_actions_after_alert_duration` is mutually exclusive with auto-mitigation
-  and stays where it already was, on `alert-logs-capacity` alone: its condition
-  cannot clear before the 08:00 UTC cap reset, so there is nothing for
-  auto-resolution to resolve. The two metric alerts needed no change — metric
-  alerts are stateful by default. Recorded as decision 6 in
-  [ADR 0022](docs/decisions/0022-alerting-fabric.md).
-
-- **The SCM lock is armed, and the per-run window is proven under `Deny`
-  (T-520 closed, 2026-08-25).** `functions_scm_lock_enabled` was set to `true`
-  on the `hcw-azure` workspace and applied; `az functionapp config
-  access-restriction show` now reports
-  `scmIpSecurityRestrictionsDefaultAction: Deny` with a single `Deny all` rule.
-  The Kudu endpoint no longer answers the internet.
-
-  Deploy run **32902534458** is the evidence that matters, because arming a
-  lock is only half a claim until something has to get through it:
-
-  ```
-  scm default action before the window: Deny
-  Will use Kudu https://<scmsite>/api/publish to deploy since Flex consumption
-    plan is detected.
-  Successfully deployed web package to Function App.
-  functions registered after sync: 109
-  scm window closed — default action 'Deny', no temporary rules left
-  ```
-
-  Every part of the design did what it was written to do. The open step read
-  the baseline as `Deny` rather than assuming `Allow`, which is why the same
-  steps worked unchanged before and after the flip. The deploy published
-  through Kudu with the standing default denying everyone else. The close step
-  removed the rule, confirmed the posture it found was the posture it left, and
-  confirmed no `ci-deploy-scm-*` rule survived — the assertion that keeps a
-  window which silently failed to close from passing as a green deploy.
-
-  Sequencing mattered and is recorded because it is the part that would bite on
-  a repeat: the window shipped in #220 and was observed working under `Allow`
-  (run 32894382986) **before** the variable was flipped. The first deploy after
-  a premature flip is the one that cannot get in to fix itself.
-
-  This closes the reachability half of the exposure. The credential half was
-  already closed — basic authentication is off on both SCM and FTP — so the
-  endpoint now requires an Entra token *and* an allow-listed source.
-
-- **Production deploys could not authenticate at all, and the cause was a
-  workflow edit rather than an identity problem.** `de99aa0` put
-  `deploy-functions.yml` behind `environment: production` to gate production
-  deploys. That is correct in itself and had a consequence nothing accounted
-  for: **declaring an environment changes the OIDC subject GitHub composes.**
-  It becomes `repo:<org>/<repo>:environment:<name>` rather than
-  `repo:<org>/<repo>:ref:<ref>`, so the branch credential cannot match a job
-  that names an environment — the ref form is simply not what is presented.
-  `infra/oidc.tf` trusted `ref:refs/heads/main` and `environment:data-migration`
-  and nothing else, so every production deploy failed at `azure/login`:
-
-  ```
-  AADSTS700213: No matching federated identity record found for presented
-  assertion subject 'repo:HybridCloudWorks@312844660/
-  HCW-HybridCloudWorks@1268997852:environment:production'
-  ```
-
-  Observed on run 32892582041, the first dispatch after that merge. It had been
-  broken since 2026-08-24 and stayed invisible because no deploy ran in
-  between — the failure is silent until someone deploys, and by then it reads
-  as a permissions or tenant problem rather than as the consequence of a
-  workflow edit.
-
-  Fixed by trusting `environment:production` in both the name and
-  immutable-ID forms, matching the existing pair for every other subject: six
-  federated credentials against a cap of 20. The branch pair is **not**
-  redundant now and must not be swept up in a future `data-migration` cleanup —
-  `heal-computed-properties.yml` and `publish-content-manifest.yml` declare no
-  environment, so they still present the ref subject. The rule is per-workflow,
-  not per-repository.
-
-  **A guard now fails the build instead of a deploy.** `scripts/oidc-subjects.test.mjs`
-  cross-references every workflow that uses `azure/login` against the subjects
-  `infra/oidc.tf` declares, and fails naming the missing credential and the
-  error it would have produced. No linter or `terraform validate` could have
-  caught this — both files were individually valid, and only the relationship
-  between them was wrong. The guard was verified by reverting the fix and
-  confirming it fails, rather than assumed to work because it passes. It also
-  asserts both subject forms exist for each environment, since one without the
-  other is half a credential that fails on whichever form the token carries.
-
-- **SCM reachability is closed by a per-run deploy window (T-520, #220).**
-  `scm_ip_restriction_default_action` was the literal `"Allow"` while the
-  front-end origin was locked to `Deny`. Verified against the live app
-  2026-08-25: SCM default `Allow`, main site `Deny` with 17 rules,
-  `scmIpSecurityRestrictionsUseMain` false. Changing the literal was never the
-  fix — the Flex Consumption deploy publishes *through* Kudu and GitHub-hosted
-  runners have no stable egress IPs, so a standing `Deny` breaks every deploy.
-  `deploy-functions.yml` now opens a window before the deploy and unwinds it
-  before the storage window closes. Three things differ from the storage window
-  and each is deliberate: no default-action flip is needed, because App Service
-  honours SCM IP rules normally where the storage firewall ignores them for
-  same-region callers, so the standing posture is never widened; the baseline is
-  read rather than assumed and the close step asserts the posture it found is
-  the posture it left, which is correct both before and after arming, where
-  asserting "`Deny` is back" would fail every deploy until the flip; and the
-  open step fails if `scmIpSecurityRestrictionsUseMain` is not false, since SCM
-  would then inherit the Cloudflare-only origin lock and the runner would be
-  refused with the window apparently open. The close step also asserts no
-  `ci-deploy-scm-*` rule survives — a window that silently failed to close is
-  worse than one that never opened, because the deploy stays green while the
-  endpoint stays admitted. `functions_scm_lock_enabled` defaults to `false`, so
-  the apply is a no-op on behaviour; arming it is a workspace edit and the
-  window must be observed working on a real deploy first. The credential half
-  was already closed: basic authentication is off on both SCM and FTP.
-
-- **`iac-validate` reports on every pull request, so it can become required
-  (T-523, #220).** Both jobs are meant to be required contexts on the `main`
-  ruleset, and adding them while the workflow stayed path-filtered to `infra/**`
-  would have deadlocked the repository: GitHub does not auto-satisfy a required
-  context whose workflow was filtered out, so every pull request not touching
-  `infra/` would have held at *"Expected — waiting for status to be reported"*
-  indefinitely. The trigger therefore changes before the ruleset does.
-  `pull_request` loses its `paths:` filter and the filtering moves inside each
-  job — check out, diff against the base commit, skip the expensive steps when
-  `infra/` did not change — while the job still completes and posts its context.
-  `push` keeps its path filter, because required contexts are a pull request
-  concern. Two details fail silently if got wrong and are recorded in the
-  workflow: `fetch-depth: 0`, since a shallow clone does not contain the base
-  commit; and the detect step overriding the terraform job's
-  `working-directory: infra`, since run from `infra/` the `^infra/` prefix match
-  never matches. Skipping is at step level rather than job level because whether
-  a *skipped* context satisfies a required check is behaviour worth not
-  depending on. The ruleset half remains owner-gated.
-
-- **The unlabelled form controls are associated, and the rule that finds them
-  now runs (A-001, #220).** The rule could not run at all, so the twenty
-  violations recorded against it had never been observed: it crashed with
-  `(0 , _minimatch.default) is not a function` on the first file containing a
-  label, and an ESLint rule crash aborts the entire run. The cause was this
-  repository's own supply-chain override rather than the ESLint version.
-  `eslint-plugin-jsx-a11y` declares `minimatch: ^3.1.2` and imports it as a
-  default export, while `package.json` overrode minimatch to `^10` tree-wide to
-  carry the brace-expansion advisory fix — and minimatch v10 exports no default.
-  The override that closed one supply-chain hole had silently disabled an
-  accessibility rule. Repaired with a scoped override giving the plugin
-  minimatch `^3.1.2` (resolves 3.1.5, past the 3.0.5 ReDoS fix) and
-  brace-expansion `^1.1.12` (resolves 1.1.18, past the advisory), leaving the
-  rest of the tree on 10.2.5; the lockfile change is 38 lines, all additions.
-  With the rule running, the twenty findings proved to be two different things.
-  Seventeen are genuine — a `<label>` that is a sibling of its control with no
-  association, so a screen-reader user gets no field name — fixed by pairing
-  `htmlFor`/`id` across `ArchitectureReviewBoard` (2, keyed per hotspot id since
-  they render in a map), `FrameworkReviewBoard` (4), `MetadataTab` (4) and
-  `SpeakingEventsPage` (7). The other three are not defects: in
-  `ListenAndLearnPage` the label already wraps its control, which is an
-  association, and the rule reported them only because it cannot see a custom
-  `<Input>` as a control. Those are fixed by configuring `controlComponents`,
-  because rewriting working markup to satisfy a misconfigured linter would have
-  been the wrong repair. The rule is now `error` rather than `off`, so neither
-  half can regress.
-
-- **`REVIEW.md` Part 4 is restored as the required-inputs inventory (T-521,
-  #220).** `59e471b` cut `REVIEW.md` from 1,011 lines to 58 and moved the
-  narrative to the Wiki, leaving twelve references to `PART 4 — REQUIRED INPUTS`
-  across eight files pointing at a section that no longer existed. Two of them
-  were live procedure with nowhere to land: `CONTRIBUTING` tells a contributor
-  to record new required inputs there, and the Deployment Runbook tells an
-  operator to move an entry from `SET` to `VERIFIED` after an apply. The defect
-  was the absent section rather than the references, so the section is restored
-  and all twelve pointers are untouched. Only the inventory comes back — the
-  original §4.0 naming and placement rules are now
-  `wiki/Variables-And-Secrets.md`'s job, and restoring them verbatim would have
-  recreated exactly the duplication the Wiki move ended; each file's intro now
-  names the other. The statuses do not share one confidence level and the
-  section says so rather than presenting a uniform claim: GitHub variables (23),
-  secrets (1) and environments (3) were enumerated live on 2026-08-25, so their
-  presence is observed; Key Vault was **not** readable, `az keyvault secret
-  list` returning `ForbiddenByRbac` because the caller holds no data-plane role,
-  which is itself the correct posture, so §4.6 lists the nineteen secrets
-  `infra/main.tf` references — establishing each name and consumer but not its
-  presence; and the HCP Terraform workspace was likewise not read, so §4.1's
-  statuses are labelled as carried forward from 2026-08-20. The Terraform tables
-  are generated from the configuration rather than transcribed: 8 of 58
-  variables have no default and must be set in the workspace, and the seven
-  posture switches are listed with what arming each one does, since those are
-  the entries most likely to be misread as settings. The same live pass is what
-  confirms T-525's three scratch variables are still set with no reader, and
-  that the `data-migration` environment outlives the workflow deleted in
-  `59e471b`.
-
-- **The anonymous feed endpoint is bounded in articles, not just in feeds
-  (T-319).** `GET /api/public/feed` capped how many `rss_cache` documents it
-  returned but not how many items each one carried, and one document is one
-  whole feed — so a hundred bounded documents could still be an unbounded
-  response. Each surviving document is now trimmed to its newest twenty items
-  by `pubDate`, with `itemCount` rewritten to match so the count cannot
-  describe items that are not in the response. Undated items sort last and are
-  dropped first (`Date.parse('')` is NaN, and a missing date is not "now", so
-  one malformed item cannot evict a dated article); an all-undated feed keeps
-  its stored order, and a document whose `items` is absent or not an array is
-  passed through untouched rather than turned into a plausible-looking empty
-  feed. The read ceiling is a second copy of the ingest writer's
-  `MAX_CACHE_ITEMS_PER_FEED` because `public-reads.js` deliberately has no
-  imports; `public-reads.test.js` asserts the two agree so they cannot drift.
-- **The ingest cap keeps the newest items rather than the first (T-319).**
-  `buildCacheItems` sliced the parsed feed in arrival order. Feed order is
-  conventionally newest-first but nothing enforces it, and both readers of the
-  array sort by `pubDate` — `buildHomepageFeedItems` and `useNewsData.js` — so
-  a feed publishing oldest-first cached its archive and never showed its recent
-  articles, with the cache looking full throughout. The sort now happens before
-  the slice, and `processSingleFeed` no longer pre-slices in feed order, which
-  would have decided the selection before `buildCacheItems` could. Drafting is
-  unchanged: it still walks the first ten items of the parsed feed.
-- **`PATCH /api/cms/{ai-providers|mcp-servers}/{id}` no longer persists the
-  `hasOauthToken` read artefact.** `stripOAuthToken` synthesises the flag on
-  every read in place of the write-only token, so a form PATCHing a field it
-  read back sent the boolean with it — and `putConfig` already dropped it for
-  exactly that reason while `patchConfig` did not. Reads recompute the flag, so
-  it shadowed nothing; it was a stale copy of a secret's state written next to
-  the secret, which a later revoke would not have cleared. A PATCH body left
-  with no updatable field after `id` and `hasOauthToken` are dropped is now a
-  `400` rather than a write that touches only `updatedAt` and reports success.
-
-### Added
-
-- **The three repository-resolvable test-coverage follow-ups.**
-  *API base resolution* — the original line asked for `api.js` with
-  `VITE_BACKEND_PROVIDER=azure`, a switch that no longer exists because the GCP
-  backend is gone and the Azure base is the only one. `functionsBase.test.js`
-  now pins what replaced it: `getEndpoint` composes an authenticated route onto
-  the configured base in both topologies and throws naming the route when it is
-  unset, an anonymous `publicApi` read goes to the same base, and a source scan
-  fails if `VITE_BACKEND_PROVIDER` or any `VITE_GCP_*` variable reappears —
-  a reintroduced switch would mean a second resolution path, which is the
-  defect that file exists to prevent.
-  *Public content limits* — `limit` and `offset` come straight off an anonymous
-  query string, so `public-reads.test.js` now covers non-numeric, empty, zero,
-  negative, fractional, oversized, `Infinity` and at-the-ceiling values on both
-  `listContent` and `listPodcasts`, including that a negative limit clamps up to
-  one item rather than producing an empty slice, that an offset past the end is
-  an empty page with an honest `total`, and that `limit=0` reads as unset.
-  *Partial configuration updates* — `admin-integrations.test.js` now pins that
-  a PATCH omitting `oauthToken` never sends the key (so the merge cannot clear
-  it), that the untouched token stays out of the response built from the merged
-  document, that the read artefact is dropped, that a revoke remains an
-  explicit empty-string write, and that an `ai-providers` patch touches only
-  the fields it names. `ai_providers` documents hold `apiKeyEnvVar`, the name of
-  a server-side setting, never a key — `oauthToken` on `mcp_servers` is the only
-  secret value either collection stores.
-
-### Changed
-
-- **Every backend dependency has a live consumer (T-407); nothing was
-  removed.** The item asked whether `cheerio`, `rss-parser`,
-  `google-auth-library` and the other non-route packages in
-  `functions/package.json` still had one. All of them do, and each consumer is
-  reachable from a registered function: `cheerio` from `cms/content-quality.js`,
-  `content/scrape.js`, `rss/feeds.js` and `sanitize-html.js`; `rss-parser` from
-  `rss/ingest.js` (the `fetch-rss-feeds` job and the `syncRssFeeds` timer) and
-  `timers/podcasts.js`; `google-auth-library` from
-  `cloud-tools/pricing/gcp.js` via the pricing index; and `turndown`,
-  `jsonwebtoken`, `jwks-rsa`, `@aws-sdk/client-pricing` and the four Azure SDK
-  packages from token verification, scraping, pricing, Key Vault, Blob and
-  Cosmos. Recorded rather than closed silently, because "no packages were
-  removed" is the finding.
-- **The remaining upstream feature candidates are evaluated (T-410).** Measured
-  against the Site-Main checkout at `088f458`, the same baseline the T-409
-  delta used:
-  *draw.io hotspot tooling* is the one candidate worth porting.
-  `lib/drawio/parseDrawio.js` and `lib/drawio/hotspotGeometry.js` are 258 lines
-  of pure client-side XML parsing with no Firebase coupling and an upstream test
-  and fixture; `DiagramPanel`'s only backend seam is an image upload, which maps
-  onto the existing `POST /api/cms/uploads/{container}`. It replaces manual
-  hotspot authoring — today `ArchitectureReviewBoard` requires each hotspot's
-  coordinates and label to be typed by hand — with generation from an uploaded
-  `.drawio` file, and `InteractiveDiagram` already consumes the resulting shape.
-  *Admin queue improvements* split in two. The bulk select, bulk reject, bulk
-  delete and confirm-modal paths already exist in this repository's 1,310-line
-  `QueuePage.jsx`; the upstream delta is a decomposition into five modules with
-  tests, plus two additional actions (`bulkApprove`, `bulkForge`). The
-  decomposition is worth doing against this repository's own file rather than
-  porting upstream's, which is written against Firestore-era helpers.
-  *The Architecture listing pages* are not worth porting as they stand.
-  `ArchitectureDesignsPage` and `ArchitectureCreatePage` are 163 lines between
-  them, but they are thin wrappers over `ContentReviewBrowser` (744 lines) and
-  the `components/admin/browser/` subsystem, `useAdminBrowser` and
-  `lib/adminBrowser` — roughly 1,500 further lines — and their data seam,
-  `fetchContentList`, is built from Firestore `where()` clauses. That is the
-  whole-branch shape T-410 was written to refuse, and `EditorListPage` already
-  filters admin content by type, `architecture` included. Which candidate is
-  actually built is a product decision and now sits in [TODO.md](TODO.md).
-- **The ESLint 10 upgrade is still blocked, and by fewer plugins (D-001).**
-  Re-checked against the registry on 2026-08-24: `eslint-plugin-react-hooks`
-  7.1.1 and `@typescript-eslint/eslint-plugin` 8.67.0 now declare
-  `eslint@^10`. `eslint-plugin-react` 7.37.5 still caps its peer range at
-  `^9.7` and `eslint-plugin-jsx-a11y` 6.10.2 at `^9`, so the frontend stays on
-  the ESLint 9 line.
-
-- **Retired the completed migration surface and reset the repository around the
-  HybridCloudWorks website.** Removed the old Firebase Functions package and
-  Labs agent, the completed Firestore/GCS migration workflow and one-shot
-  import tooling, the disabled infrastructure-delivery workflow, and unused
-  Firebase hosting, scaffolding, screenshot, generator, and debug scripts.
-  Retained the Azure container specification because Terraform still consumes
-  it, and retained active Azure operations, CI, deployment, and smoke tooling.
-- **Reconciled repository documentation.** `README.md` now documents the
-  website's features, architecture, local development, and delivery model;
-  `TODO.md` contains only engineer-resolvable pending work; `REVIEW.md`
-  contains only human-owned access, approval, credential, and live-verification
-  items; and both plans are archived records rather than active instructions.
-- **Moved Wiki-as-code to `wiki/`.** The sync workflow and repository policy
-  now use the root `wiki/` staging directory, and the Wiki home/sidebar point
-  at current website and Azure documentation. All repository workflows use
-  GitHub-hosted runners.
-- **Removed remaining active cleanup residue.** Deleted the unused Functions
-  parity contract and duplicate Markdown bug template, updated current
-  infrastructure metadata and operator helpers to reference the website state,
-  and allowlisted the repository's reusable `.github/templates/` directory.
-- **Retired the unused frontend Firebase platform surface.** Removed the old
-  `frontend/firebase.json`, Firebase rules/indexes/storage files, GCP Terraform
-  configuration, and dangling test/lint exclusions; the current frontend
-  package now validates only the live `src/` tree.
-
-### Security
 
 - **The data-migration workflow can no longer publish production data.** The
   repository is public, and `migrate-data.yml` uploaded `scripts/reports/` —
@@ -5758,1067 +6824,6 @@ This project has not cut a tagged release; entries are grouped under
   tags current. The repository standard already required this — one
   `actions/checkout` reference had been pinned and the other eleven had not.
 
-### Fixed
-
-- **`CORS_ALLOWED_ORIGINS` could never have worked — the name collides with a
-  platform-injected variable** (T-513). App Service injects read-only CORS
-  environment variables derived from `siteConfig.cors.allowedOrigins`, which is
-  a `string[]`. Ours is unset, so the worker received the serialisation of an
-  empty array — the literal two characters `[]` — in place of whatever was
-  written to the app setting. `parseExtraOrigins` split that on comma and
-  produced one "origin" called `[]`, which matches nothing.
-
-  Renamed to `EXTRA_ALLOWED_ORIGINS`. Nothing here may be called `CORS_*` or
-  `WEBSITE_*` again.
-
-  **Three independent writers proved it, and the last one was conclusive.**
-  Terraform via azurerm, Terraform via the azapi strip, and a plain
-  `az functionapp config appsettings set` each put the correct value in ARM; all
-  three times the worker reported `[]`. The final experiment carried **three
-  keys in one CLI write** — `RUNTIME_CONFIG_GENERATION`,
-  `RUNTIME_CONFIG_WRITER` and the origins. The worker reported the first two
-  verbatim and the third as `[]`. Same write, same instant, same process, two
-  distinct `HostInstanceId`s. Only the name differed.
-
-  That sequence also **exonerated Terraform and the azapi rewrite**, which had
-  been the prime suspect on the reasonable grounds that they were the newest
-  thing rewriting the whole settings collection. They were innocent, and the
-  generation/writer sentinel is what showed it: the workers reported
-  `writer=azapi-strip` and later `writer=cli` with the *current* generation
-  every time, so they were never stale and never missed a write. Without the
-  writer dimension the conclusion would have been "stale worker" and the search
-  would have continued in the wrong place.
-
-- **Telemetry had been dead since 01:33Z and request telemetry had never worked
-  at all** (T-514). Two faults wearing one coat, both in `host.json`.
-
-  `log-plat-prod-cus-01` caps ingestion at **0.25 GB/day** and read
-  `OverQuota`. What filled it was not the application: `Azure.Core` logged
-  **39.3 MB across 76,125 messages** in 24 hours — every SDK HTTP request and
-  response at Information, driven by the host's continuous blob-lease polling —
-  with `Azure.Identity` adding 4.4 MB. Application logs were collateral. Both
-  categories are now `Warning`; fixing the noise beats paying for it.
-
-  Separately, `Host.Results` was set to `Error`. Request telemetry is emitted at
-  Information, so that one line emptied the `AppRequests` table permanently —
-  it had **zero rows, ever**. That is the table that answers *"did the timer
-  fire"*, so Migration-Plan §7's scheduled-job gate was unobservable by
-  construction. Restored to `Information`. `Host.Aggregator` was left on
-  `Trace`, the most verbose level available, for a diagnosis nobody recorded;
-  now `Warning`.
-
-  **Two conclusions this reverses.** The `[cors]` diagnostic from the previous
-  entry was written correctly and discarded at ingestion, and the `[telegram]`
-  control that appeared to prove "no worker logs reach App Insights" was a
-  false negative — worker logging works.
-
-  **And a tooling trap.** `az monitor app-insights query --app <appId>`
-  returned zero rows for every query, including with no time filter, while the
-  workspace held 138,220 traces. The component is workspace-based with the
-  workspace in another subscription, and the proxy returns empty rather than
-  erroring. Query the workspace and the `AppTraces` / `AppRequests` tables
-  directly.
-
-- **The inbound Telegram bot is ported (T-512), not retired.** Migration-Plan §6
-  step 6 said to rewrite `getTelegramWebhookUrl()` and re-run `setWebhook`;
-  there was nothing to point a webhook at, because no receiver had been ported
-  — `notify.js` only *sends*, and no route accepted a Telegram update (checked
-  against the deployed route table, not just the source). Unlike Cloud Tools
-  (T-410) or Listen & Learn (T-411) it was never recorded as a deliberate
-  demotion, so nobody had decided it. The owner chose to keep the bot.
-
-  `POST /api/telegram/webhook` now serves the eleven commands and the free-form
-  Q&A from Site-Main's `telegram-bot.js` + `telegramWebhook`. Two things
-  changed in the port, both forced by the platform:
-
-  - **Long commands enqueue instead of running inline.** Upstream answered
-    Telegram with 200 immediately and kept working afterwards, which Cloud
-    Functions tolerates and Azure does not — an invocation ends at the
-    response, so `/forge` and `/inspect` would have been dropped silently
-    about as often as they ran. Those two and `/rss` now enqueue the platform
-    job that already exists for each (`forge-article`, `batch-inspect`,
-    `fetch-rss-feeds`, T-322) and reply with the job id.
-  - **The route is anonymous, and that is the only option.** Telegram cannot
-    send a bearer token, so `requireRole` has nothing to check. It is guarded
-    by two independent checks instead: the
-    `X-Telegram-Bot-Api-Secret-Token` header compared in **constant time**
-    against `sha256(TELEGRAM_BOT_TOKEN)` — the secret is derived, not stored,
-    so there is only one thing to rotate — and the sending chat id against
-    `TELEGRAM_CHAT_ID`. The first proves Telegram sent it; the second proves
-    the owner did, because anyone who finds a bot can message it. An
-    unauthorized chat gets **no reply at all**, so the bot cannot be used to
-    confirm it exists. `telegram/webhook` is in `PUBLIC_ROUTES` with that
-    reasoning recorded next to it.
-
-  It always answers 200 once the secret validates: Telegram retries non-2xx,
-  so a 500 on a bad command turns one broken message into a retry storm that
-  re-runs the command every few seconds. 32 tests, weighted on the two
-  authorization checks, since a mistake in either makes this an
-  unauthenticated remote control for the platform. `scripts/cutover/04-telegram-webhook.ps1`
-  re-registers the webhook and preflights the receiver first — a webhook aimed
-  at a 404 makes Telegram back off, so the bot stays broken after the real fix.
-
-- **Eight CMS functions never started — seven route templates were each
-  declared two or three times (T-510).** The Azure Functions host keys its
-  route table on the route template *alone*, not template + method, so two
-  functions declaring the same `route` with different `methods` conflict: the
-  host starts one and refuses the other with *"is in error: The route specified
-  conflicts with the route defined by function X"*. The losing verb answers
-  404. `GET`/`PATCH`/`PUT` were lost across `cms/certifications`,
-  `cms/certifications/{id}`, `cms/recordings`, `cms/social-posts`,
-  `cms/settings`, `cms/config/{collection}/{id}` and
-  `cms/keyword-config/{collection}/{id}` — list, edit and save for most of the
-  admin UI, all of which the frontend calls. Confirmed live before the fix:
-  `POST /api/cms/certifications` 401, `GET /api/cms/certifications` 404.
-
-  Present since the 84-function deploy (App Insights, 21:39:15Z 2026-08-21) and
-  invisible because the admin surface is not deployed yet, so nothing had ever
-  called them. Each pair is now one registration via the new
-  `httpRouteByMethod`, which declares every method on one template and fans out
-  on `request.method`; each verb keeps the guard it already had. 79 HTTP
-  registrations become 71 and the deploy total 104 → **96, all serving**.
-
-  `route-inventory.test.js` could not have caught it: its mock is
-  `http: (name, options) => httpRegistrations.set(name, options)`, a Map keyed
-  by function *name*, so both halves of a conflict register and pass properties
-  1–3 — every one of them was individually correct. New **property 4** asserts
-  no two registrations share a route template (parameter names collapsed, case
-  folded, matching how a router compares them) and that every method a merged
-  registration declares has a handler behind it. Verified by injecting a
-  conflict and watching it fail.
-
-- **The keyless `AzureWebJobsStorage` is written by Terraform, not by the
-  deploy** — the attribution in `infra/main.tf` and `deploy-functions.yml` was
-  wrong, and the Azure activity log is the only place the two are
-  distinguishable: the 20:02Z deploy *deleted* the setting, Terraform's 20:31Z
-  apply was the only `sites/config` write after it, and the setting was back.
-  `azurerm_function_app_flex_consumption` re-injects it on every apply whatever
-  `storage_authentication_type` says, without surfacing it in plan
-  ([azurerm#29149](https://github.com/hashicorp/terraform-provider-azurerm/issues/29149),
-  open on the pinned 5.1.0). Nothing in this repository can stop the write, so
-  it is now **stripped inside the same apply that creates it**: an
-  `azapi_resource_action` reads the settings azurerm has just written and an
-  `azapi_update_resource` writes them back without that key. The setting never
-  survives the run, so there is no post-apply step, no scheduled job and
-  nothing to remember. `deploy-functions.yml` **asserts it is absent and fails**
-  rather than deleting it — a repair there would hide a regression in the
-  strip, which is how this stayed a recurring incident instead of becoming a
-  bug: every occurrence was quietly cleaned up by the next deploy.
-
-  Not used: `"AzureWebJobsStorage" = ""`, the workaround the issue is best
-  known for — it stopped working in early May 2026, per three reporters — nor
-  rewriting the function app as a raw `azapi_resource`, which trades a
-  well-understood resource for a hand-written ARM body to dodge one bad key.
-  Both misattributing comments corrected; T-511 tracks the upstream close.
-
-- **The public content list failed the moment `PUBLIC_LIST_SQL_ORDER` went
-  live** — Cosmos: "The index path corresponding to the specified order-by
-  item is excluded". Computed properties are not covered by the `/*`
-  wildcard (the comment in `public-reads.js` said they were); `/cp_sortDate/?`
-  is now an explicit included path on `content` and `blogs`, applied live
-  through ARM with the property preserved and carried in the generated spec so
-  Terraform agrees. 40 minutes of 500s on the list endpoint, 2026-08-21.
-- **New functions were not registered after the deploy** — SyncTriggers
-  failed on a keyless `AzureWebJobsStorage` connection string the deploy
-  leaves behind (the same cause as the 2026-08-20 every-route-404). 83
-  deployed, 80 registered; `enqueueJob`, `getJob` and the job worker did not
-  exist until the setting was deleted and triggers re-synced by hand.
-  `deploy-functions.yml` now does both after every deploy and fails if the
-  registered count is zero.
-- **`cp_sortDate` is live on `content` and `blogs`** (healer run 32448029469,
-  2026-08-21, first successful run on this estate) and the healer workflow can
-  now be dispatched with `mode=inspect` to check the precondition for
-  `PUBLIC_LIST_SQL_ORDER=1`, which `infra/main.tf` now sets — the public
-  content list asks Cosmos for the newest N rather than an arbitrary N. T-206's
-  final step. The custom role the healer needs is created once by the owner
-  from `infra/roles/cosmos-container-writer.json` and consumed by data source;
-  the Terraform identity deliberately cannot define roles (#137).
-- **The healer can now actually heal.** `heal-computed-properties.yml` had never
-  succeeded on this estate: `cp_sortDate` was absent from both `content` and
-  `blogs` on 2026-08-21 with 1,142 documents in `content`. Setting
-  `computedProperties` is a control-plane operation, and the SDK's
-  `container.replace()` sends it to the data plane, which Cosmos refuses with
-  an AAD token regardless of roles. `--apply` now does an ARM PUT on the
-  container resource (polling the async operation and re-reading to confirm),
-  authorized by a new custom role — SQL container read + write on the one
-  account, nothing else; not "Cosmos DB Operator", which is
-  `databaseAccounts/*` minus keys. `buildArmBody()` strips the read-only keys
-  and is unit-tested. New output `cosmos_resource_group` → variable
-  `COSMOS_RESOURCE_GROUP` (T-508).
-- **`deploy-functions.yml`'s storage window now survives a same-region
-  runner** (T-509): the same default-action Allow/Deny bracket
-  `migrate-data.yml` gained in #134, with the Deny restored first and verified.
-- **`heal-computed-properties.yml` still read `secrets.COSMOS_ENDPOINT`** after
-  the value moved to a repository variable and the secret was deleted
-  (2026-08-20); its next run failed with "COSMOS_ENDPOINT is not set". Now
-  `vars.COSMOS_ENDPOINT`. The #128 changelog entry said both consuming
-  workflows had been switched; only `migrate-data.yml` had.
-- **`preflight-firestore-inventory.mjs` referenced `FIRESTORE_PROJECT_ID` without
-  importing it.** Introduced when the Firestore connection moved into
-  `connectFirestore()`; `node --check` and the 65 tests all passed because an
-  undefined identifier is a runtime error on a line no test reaches. The
-  first `mode=preflight` dispatch from `main` (run 32435060952, 2026-08-21)
-  found it — after proving the GCP Workload Identity Federation chain end to
-  end, which is the part that could not be tested locally. Fixed, and
-  `scripts/` now has an ESLint config with `no-undef` as an error, run by
-  the `scripts (migration)` CI job; a sweep of every script found no other
-  instance.
-- **`migrate-data.yml` carried `COSMOS_KEY` and `COSMOS_DATABASE:
-  hybridcloudworks`.** Key auth is disabled on the account and the database is
-  `hcw`, so every import would have failed — with an error naming neither.
-  Both removed; the workflow also lacked `id-token: write`, so it had no OIDC
-  path to either cloud.
-- **Eleven `moved` blocks removed from `infra/main.tf`.** Verified no-ops:
-  the centralus rebuild recreated every container from the spec while all
-  were empty, and `terraform state list` shows only the `for_each` form. A
-  three-line note records that the partition-key change happened through the
-  rebuild.
-- **Stale counts and comments.** `main.tf`'s partition-key comment (67 on
-  `/id` and five exceptions, not 62 and four); the `cosmos_database_name`
-  comment (the scripts default to `hcw`, not `hybridcloudworks`);
-  `cosmos-client.js` (67 of 72, not 66 of 71); and the storage lifecycle rule
-  for `articles/` is now documented as inert — Azure matches
-  `<container>/<blob>` and no `articles` container exists.
-- **`set-github-variables.ps1` and REVIEW §4.2 omitted `FUNCTION_APP_NAME`**,
-  which is set and consumed by `deploy-functions.yml`.
-- **`Azure/functions-action@v2` does not exist.** Found while resolving tags
-  to SHAs: that action's newest tag is `v1.5.7` and its release branch is
-  `releases/v1`, so `deploy-functions.yml` carried a reference that resolves
-  to nothing and would have failed with "Unable to resolve action" the first
-  time the workflow was enabled. Pinned to `v1.5.7`. The workflow is still
-  `if: false`, which is why no run had ever surfaced it.
-
-- **`frontend/.env.example` rewritten against the real environment surface**
-  (T-403). `VITE_ENTRA_API_SCOPE` was required and undocumented — without it
-  every token is acquired for no scope, so sign-in succeeds and every API call
-  fails on audience. The file meanwhile documented `VITE_OWNER_ADMIN_EMAIL` /
-  `_UID`, which nothing reads, and carried Firebase secret-set instructions for
-  decommissioned tooling. Rewritten against the actual `import.meta.env`
-  references.
-
-- **`queryDocs` does not discard the continuation token** (T-311) — recorded
-  because the opposite was asserted in review, and a wrong finding costs more
-  than none. `fetchAll()` consumes the token rather than dropping it: the SDK's
-  `toArrayImplementation` loops `while (hasMoreResults())`, accumulating every
-  page. No change was made because none was needed.
-
-### Added
-
-- **The visitor-facing upstream delta (T-409).** From Site-Main 088f458,
-  with their tests: `RichTextBody` (architecture and framework overviews
-  render markdown as markdown, HTML as sanitised HTML), `CoderCornerSnippet`
-  + `CodeBlock` (the snippet, language and repository link the coder_corner
-  contract requires now render; fenced code gets highlighting and a copy
-  button), `WafAssessment` + the vendor Well-Architected pillar sets (a
-  Well-Architected tab when an architecture carries `waf`), `FeaturedArchitecture`
-  + `colorClasses` (the AWS/Azure galleries' featured panel is data-driven),
-  and the Ansible and VMware education data, rendered through a new
-  `EducationTracks` component with level filter, learning paths and resources.
-- **The eleven Firestore triggers as six change-feed functions (T-324).**
-  `functions/src/functions/change-feed.js` registers one `app.cosmosDB`
-  function per watched container on the identity-based binding
-  (`COSMOS_CONNECTION__accountEndpoint` + `__credential = managedidentity`,
-  never a connection string), each with its own `leases` prefix. The
-  before-image substitutes are ported from Site-Main `lib/triggers/`: value
-  markers (image mirrors, Publer push), the rising-edge claim on an
-  etag-conditioned replace (AI cover, slug page), the activation stamp
-  (Telegram alerts) and `content_stats_markers` (dashboard counters,
-  idempotent). Image mirroring keeps the `{docId}/images/…` blob scheme and
-  serves through the media route; the template cover is stored as SVG; the
-  AI cover calls Replicate over REST. The three deletes the feed cannot see:
-  `DELETE /api/cms/content/{id}` and `deleteContentItem` move the counters,
-  `DELETE /api/cms/social-posts/{id}` un-publishes on Publer first, and
-  `DELETE /api/cms/blogs/{id}` is new (publisher, audited). `lib/notify.js`
-  is the Telegram notifier with its per-source cooldown; resolve/reopen
-  clear `activationNotifiedAt`.
-- **The external-ingestion timers (T-323, closed).** `syncSocialCalendarScheduled`
-  reconciles `social_posts` with Publer (matched posts take Publer's state,
-  vanished ones are marked deleted, unmatched Publer posts become
-  `publer_<id>`); `fetchBlogListings` scrapes eleven non-RSS listing pages
-  through Firecrawl's v1 REST structured extraction into `content` drafts in
-  the RSS shape; `fetchPodcastFeeds` upserts PodBean episodes into
-  `podcasts`. Each skips itself while its key is a Key Vault stub. Three more
-  `FEATURE_FLAG_*` settings, all `"false"`; `SYNC_SOCIAL_CALENDAR` stays off
-  until the cutover delta import (D12). Fifteen of sixteen timers are now
-  registered; `refreshToolServiceCacheScheduled` stays demoted with Cloud
-  Tools.
-- **Twelve of the sixteen timers (T-323).** `functions/src/lib/timers/`
-  carries `generateReviewerDigest`, `cleanupRejectedContent` (soft),
-  `cleanupSoftDeletedContent` (hard, with linked blogs and `content_versions`
-  rows), `monitorPublishingPipeline`, `checkLiveLinks`,
-  `reVerifyCertifications` (republishes the certifications snapshot),
-  `cleanupUnusedCertImages`, `scrapeSkillsHubRss`, `refreshPlaudToken`,
-  `forgeScheduled`, and the two stubs — `cleanupTempStorage` (prefix + age,
-  not an orphan sweep: T-302) and `checkAgentHealth` (T-401) — each a
-  factory with injected store/fetch/storage, registered in `schedulers.js`
-  through one flag-gated `timer()` helper with the §4.2 NCRONTAB. The two
-  blob-deleting timers are dry-run until `TEMP_STORAGE_CLEANUP_DELETE` /
-  `CERT_IMAGE_CLEANUP_DELETE`. Digest, alert and system-audit records go
-  through `lib/timers/workflow-records.js`. Ten new `FEATURE_FLAG_*` app
-  settings, all `"false"`.
-- **`forge-article` and `generate-weekly-digest` platform jobs; the stale-job
-  sweeper.** ContentForge's pipeline is ported whole
-  (`functions/src/lib/content/forge*.js`, `drafting.js`): dedupe against the
-  published corpus, admin-editable profile and prompts from `admin_config`
-  with code defaults, format rotation, the forge module instruction and word
-  soup, deterministic dash scrub / banned-phrase scan / module repair, the
-  best-fit weighted grader with its keyword prescreen, `forge_ready` vs
-  `editing` routing, version + audit + `forge_stats` writes. The weekly
-  digest drafts from the last N days of live content into `newsletters`
-  (`dryRun` previews); the Mailing List page gained the preview and draft
-  buttons. `platformJobSweeper` (every 15 min, `FEATURE_FLAG_PLATFORM_JOB_SWEEPER`)
-  re-enqueues jobs left `queued` by a failed output binding — the gap
-  lib/jobs.js documented. `generate-listen-and-learn` is deferred to T-411
-  (three Google services, no frontend here), closing T-322.
-- **`batch-inspect` platform job — the article inspector, ported.**
-  `functions/src/lib/content/` carries Site-Main's `scrapeArticle`
-  (`fetch` + cheerio + turndown; strict TLS; reader and headless fallbacks
-  only behind `CONTENTFORGE_SCRAPE_FALLBACK_ENABLED` /
-  `CONTENTFORGE_HEADLESS_FALLBACK_*`), `extractPublishedDate`, the voice /
-  format-rotation block (`pickNextFormat` off `scrapedAt` in Cosmos, fails
-  open), the verbatim analysis system prompt, the critique gate with one
-  automatic revision, and `buildInspectionUpdateData` with its upstream
-  tests. The job (`inspect-jobs.js`) selects up to 25 `ingested` documents —
-  `inspectTrigger: true` first, then unflagged ones that have not failed —
-  inspects each 4 s apart, records `inspectError` on failure and keeps
-  going; results are counts and ids only. `OpsHealthPage` "Batch Inspect"
-  now runs `runJob('batch-inspect', { limit: 10 })`; `batchInspect` left the
-  RPC contract. Not ported: the architecture-diagram (multimodal) path — such
-  documents record an `inspectError` saying so — and cover-on-inspect.
-- **AI router** (`functions/src/lib/ai/router.js`, T-322 §4.4) — ported from
-  Site-Main's `ai-model-router.js` with the provider model the owner chose on
-  2026-08-21: **a provider is on when its key is present.** Anthropic, OpenAI
-  and Gemini (public API by key; Vertex dropped — ADC is a GCP identity the
-  app cannot hold), resolved in that order or pinned by
-  `CONTENTFORGE_AI_PROVIDER`; an unresolved Key Vault reference counts as no
-  key; no key → `AI_NOT_CONFIGURED` with a sentence naming the three
-  secrets. `fetch` instead of axios; purpose → model table, JSON repair
-  round trip, retry on 408/429/5xx, usage capture with cost estimates and
-  the Anthropic prompt-cache marker all kept. 15 tests, none touching the
-  network; the upstream cost tests came across.
-- **`fetch-rss-feeds` — the first real platform job** (T-322), ported from
-  Site-Main's `processRssFeeds`: 20 feeds across 8 providers through
-  `rss-parser`, one `rss_cache` document per feed with `items[]` capped at 20
-  on write (T-319's write-time cap), new `content` drafts through the
-  existing four-stage dedup (≤ 10 per feed), and the `homepage_feeds/latest`
-  round-robin aggregate. The admin "RSS Fetch" button enqueues it via
-  `runJob()` instead of calling `fetchRssFeedsManual` (which never existed
-  here); the `syncRssFeeds` timer stub now runs the same ingest every two
-  hours behind its flag. TLS failures skip the feed with the reason recorded;
-  one feed failing never abandons the sweep. 17 new tests. Not ported: the
-  Telegram alert on feed errors — errors are in the job result.
-- **Platform jobs — the pattern for every handler over Flex Consumption's
-  230 s HTTP cap** (T-322 scaffold). `functions/src/lib/jobs.js`: a job-type
-  registry, `POST /api/enqueueJob` (editor; type allowlist, per-type payload
-  cap; 202 + jobId; message to Storage Queue `platform-jobs` through an output
-  binding on the identity-based host connection), `GET|POST /api/getJob`
-  (viewer), and a queue-triggered worker that claims with an etag-conditioned
-  replace — at-least-once delivery never runs a job twice — and records
-  `succeeded` / `failed` / `timeout` without rethrowing into the queue. New
-  `jobs` container (30-day TTL, indexed like `lab_jobs`). Client:
-  `frontend/src/lib/jobs.js` `runJob()` enqueues and polls with the Labs
-  backoff. Built-in type `noop`. 14 new functions tests, 5 frontend tests; the
-  route inventory now asserts the worker is the only queue trigger.
-- **`infra/scratch.tf` — the migration rehearsal estate.** `cosmos-site-sbx-cus`
-  (serverless, keys **off**, the same firewall shape, the same `hcw` database
-  and the same 72 containers from the same generated spec) and
-  `stsitesbxcus01` (the five content containers plus a private
-  `migration-reports`) in their own resource group `rg-db-site-sbx-cus`,
-  created only while `cosmos_scratch_enabled` / `storage_scratch_enabled` are
-  true and destroyed when they are not. Mirrors production's posture on
-  purpose: a key-authenticated rehearsal against an open account passes while
-  proving nothing about the `DefaultAzureCredential` + RBAC path production
-  takes. Outputs via `one()`; `set-github-variables.ps1` wave 2 seeds
-  `COSMOS_SCRATCH_ENDPOINT`, `STORAGE_SCRATCH_ACCOUNT` and
-  `SCRATCH_RESOURCE_GROUP` from them, and leaves them alone while null.
-- **`scripts/migration-probe.mjs`.** One `SELECT VALUE COUNT(1)` that runs
-  before the export and classifies a Cosmos 403 as `firewall` or `rbac` —
-  two unrelated causes the SDK error does not distinguish, and which would
-  otherwise surface only on the first upsert after a full export.
-- **`scripts/migrate-storage-to-blob.mjs` + `scripts/lib/storage-manifest.mjs`.**
-  Manifest-driven GCS → Blob `--inventory | --copy [--dry-run] [--overwrite] |
-  --verify` on `@google-cloud/storage` + `@azure/storage-blob`, idempotent by
-  `gcsmd5` metadata, carrying `contentType` / `cacheControl`, with a verify
-  that compares counts, bytes, every object's MD5 and a deterministic
-  byte-for-byte sample. `--inventory` exits 2 on an unmanifested prefix,
-  mirroring the Firestore preflight. A vitest suite asserts every target
-  container is one of the five Terraform names. Replaces
-  `migrate-storage-to-blob.sh`.
-- **Wiki pages `Migration-Runbook` and `Phase-4-Data-Migration`.**
-  Referenced from eleven places (README, the plan, `_Sidebar`, the workflow,
-  the manifest header); neither existed. The runbook is the twelve-step
-  operator sequence with the evidence each step produces; the Phase-4 page is
-  the decision log.
-- **`WEBSITE_TIME_ZONE = "America/Chicago"` on the Function App.** Eight of
-  Site-Main's sixteen schedules are declared in that zone; NCRONTAB on Linux
-  evaluates in UTC unless told otherwise.
-- **`storage_resource_group` output**, pairing with `storage_account` the way
-  `web_resource_group` pairs with `functions_storage_account` — what
-  `migrate-data.yml` scopes its per-run firewall window to.
-- **The HCP Terraform → Azure bootstrap, which existed nowhere.**
-  `infra/providers.tf` declares the `azurerm` provider with no credential —
-  correct, because runs execute under HCP Terraform dynamic provider
-  credentials — but the identity those credentials assume has to exist
-  first, and nothing in this repository could create it. `infra/oidc.tf`
-  creates the *GitHub Actions* identity, which only exists after a
-  successful apply. Terraform cannot create the credential Terraform
-  authenticates with. A repository-wide grep for `ARM_CLIENT_ID`,
-  `TFC_AZURE_*` and `app.terraform.io` across `.tf`, `.yml` and `.md`
-  returned nothing: the first apply had no documented path to authenticate,
-  and the gap was invisible to file-by-file review because every individual
-  file was correct and only the join between them was missing.
-
-  `scripts/bootstrap-terraform-oidc.ps1` closes it. It creates
-  `rg-hcw-bootstrap`, the `id-hcw-terraform` user-assigned managed identity,
-  two federated credentials against `https://app.terraform.io` — one per run
-  phase, because Entra matches token subjects exactly and case-sensitively
-  with no wildcards, so a single credential leaves every apply failing at
-  authentication while every plan succeeds — and Contributor plus Role Based
-  Access Control Administrator at subscription scope (Contributor cannot
-  create the role assignments `infra/` declares; RBAC Administrator cannot
-  grant Owner, so the identity cannot escalate itself).
-
-  A managed identity rather than an app registration, for the reason
-  `infra/oidc.tf` already documents: app registrations need Application
-  Administrator in Entra, which Azure Owner does not grant. The identity is
-  deliberately **outside Terraform state**, in its own resource group —
-  Terraform managing the credential it authenticates with means a destroy or
-  a bad plan locks the workspace out of the subscription with no way back.
-
-  The script is idempotent and preflights before it proposes anything: CLI
-  present, signed in, tenant matches, subscription visible, role-assignment
-  rights held, `Microsoft.ManagedIdentity` registered. Sign-in is performed
-  by the script rather than demanded of the operator — being signed in to a
-  different directory is the normal state for anyone working across tenants,
-  so it runs `az login --tenant` itself and re-reads the account afterwards,
-  because a directory switch also changes which subscriptions are visible.
-  `-DeviceCode` covers sessions with no browser of their own (SSH,
-  containers, Cloud Shell) and the case where the browser keeps reusing the
-  wrong cached account; the script falls back to it automatically when the
-  interactive flow fails, since that failure is environmental — no display,
-  no loopback — more often than it is a credential problem. It handles the
-  fresh-tenant case explicitly — a Global Administrator holds no Azure RBAC
-  by default, which produces errors that suggest the wrong fix, so
-  `-ElevateAccess` takes the documented one-time root-scope elevation, grants
-  Owner on the target subscription, and removes the root grant again.
-
-  Documented in Deployment Runbook §0 (which now tables the two OIDC
-  handshakes side by side — confusing them strands the operator hunting for a
-  `CLIENT_ID` that does not exist until after the first apply), CHECKLIST §8
-  (the four workspace environment variables, contractual and exempt from the
-  2-word rule), and REVIEW §4.0. The `iac-repo-standardizer` agent and the
-  IaC Repository Standard both gained a **bootstrap identity** section making
-  this the first thing audited on any repository, since the failure
-  generalizes to every credential-free IaC repo.
-
-### Changed
-
-- **`migrate-data.yml` rewritten.** Dispatch-only; `id-token: write`;
-  `environment: data-migration`; modes `preflight | inventory-gate |
-  export-dry-run | rehearse | verify | storage-inventory | storage-rehearse`
-  with `target` ∈ `scratch` (default) | `production` and a hard refusal of
-  write modes against production. Step order is a correctness constraint:
-  `npm ci`, the Site-Main checkout and the Cosmos probe all run before
-  `google-github-actions/auth`, because the GitHub OIDC token it exchanges
-  lives five minutes. Per-run storage firewall window with `always()` cleanup,
-  mirroring `deploy-functions.yml`. `COSMOS_DATABASE: hcw`. Inputs reach the
-  shell through `env`, never interpolated into `run:`.
-- **`COSMOS_ENDPOINT` is a repository variable, not a secret.** It is a public
-  URL and a non-sensitive Terraform output; as a secret it was masked in logs
-  and unverifiable in the UI. `set-github-variables.ps1` now seeds it as a
-  variable and deletes the old secret; both consuming workflows read
-  `vars.COSMOS_ENDPOINT`. The script also takes
-  `-GcpWorkloadIdentityProvider` / `-GcpServiceAccount` for the two WIF
-  identifiers, and seeds `STORAGE_ACCOUNT` / `STORAGE_RESOURCE_GROUP`.
-- **Migration scripts share one credential path.** `scripts/lib/cli.mjs` gains
-  `connectFirestore()` (ADC, explicit `projectId`), `connectCosmos()`
-  (`DefaultAzureCredential` only), `connectBlob()`, `classifyCosmosError()`,
-  `writeReport()` (full report + publishable `.summary.json` sibling) and
-  `showSamples()`; the migrator, preflight and verifier use them. The
-  manifest is re-baselined at Site-Main `088f458` with `azure_architectures`
-  and `azure_frameworks` added as `probe` — not provisioned, so the generated
-  container spec is unchanged.
-- **`Migration-Plan.md` rebaselined against Site-Main @ `088f458`.** §0 is now
-  donor/recipient with a pinned baseline instead of "reconcile weekly" (the
-  two repositories finished Phase 1 in incompatible directions); §2 carries
-  real status; §4 carries the measured inventories — the six HTTP handlers
-  over the 230 s Flex cap, the 16 timers with NCRONTAB and zone, the 11
-  triggers with change-feed disposition and the three delete paths the feed
-  cannot deliver, and the Vertex-default finding; §5 is rewritten around the
-  tooling defects, the rehearsal estate, the five dispositions, the storage
-  manifest and the public-repository rule; §6–§9 updated to match. The two
-  links to the wrong GitHub org are gone.
-- **Every image render site routes through `resolveMediaUrl()`** (T-318,
-  sixteen files, commit `09154ad`). Stored site-relative
-  `/api/public/media/...` paths now resolve against the Cloudflare API host,
-  which the origin lock made the only working shape; absolute legacy URLs
-  pass through untouched.
-- **`oidc.tf`'s "deliberately NOT granted" note** now says what is true: the
-  migration *does* use the deploy identity, on the scratch account at
-  database scope, and holds nothing extra on production while
-  `migration_writer_enabled` is off.
-- **Every Terraform output renamed to the 2-word standard** (workload owner
-  directive, 2026-08-18: `github_deploy_client_id` was four words). The
-  standard now explicitly covers **outputs** — they are operator-facing,
-  read off the state backend's Outputs tab — and states that **casing
-  follows the language while the word count does not**: UPPER_SNAKE for
-  GitHub variables, lower_snake for HCL. Outputs that feed a GitHub
-  variable now mirror it: `client_id` ↔ `CLIENT_ID`.
-  Headline renames: `github_deploy_client_id`→`client_id`,
-  `github_deploy_federated_subjects`→`federated_subjects`,
-  `function_app_default_hostname`→`function_hostname`,
-  `static_web_app_default_hostname`→`swa_hostname`,
-  `app_insights_connection_string`→`insights_connection`,
-  `ci_runner_job_name`→`runner_job`. Two genuine **duplicates removed**:
-  `azure_functions_hostname` and `azure_swa_hostname` returned values
-  identical to their non-prefixed twins and were folded into one output
-  each. One genuine **collision** resolved with a deliberate third word —
-  the Function App and the deploy identity both expose a principal id, so
-  `app_principal_id` / `deploy_principal_id`. No resource address,
-  `azurerm_*` argument, or state-bearing name changed; `terraform fmt`
-  and `validate` pass.
-  Terraform **input** variables were deliberately NOT renamed: they must
-  match HCP Terraform workspace keys exactly and several are set live, so
-  they are a coordinated setting-plus-code change — filed as TODO T-507
-  with the full proposed table. App settings read via `process.env`,
-  `VITE_*` and `GITHUB_TOKEN` are contractual and untouched. The
-  `iac-repo-standardizer` agent now sweeps every `.tf` file rather than a
-  curated list — the gap that let `ci_runner_job_name` survive the first
-  pass. (PR #117)
-
-### Added
-
-- **Free-tier disposition recorded on the Cost-Analysis wiki page** (now
-  wiki-as-code, staged in `.github/wiki/`). Decisions from the workload
-  owner's free-services meter review: runner image **stays on Docker Hub**
-  (ACR rejected — month-13 cost for a failover-only image); Cosmos free
-  tier is unusable by design (serverless); Service Bus / VM / SQL / LB
-  12-month meters rejected as expiring traps; blob + egress discounts are
-  automatic. Adds the standing **AI options reference** for the future AI
-  RPCs: always-free F0 SKUs per task (Translator, Language, Vision,
-  Content Safety, Document Intelligence, Speech) with the mechanics that
-  make them budget-safe (throttle-not-bill on quota, create directly with
-  F0 — Foundry-provisioned resources default to S0, keyless applies) and
-  the explicit note that generative drafting/image work has no free Azure
-  tier — that is Azure OpenAI or the SaaS keys. (PR #116)
-
-- **CodeQL `actions` language added to the advanced matrix** — the retired
-  Default setup had been scanning workflow files (`language:actions`); the
-  advanced setup now owns that coverage across the repository's 12
-  workflows. Context: the Tool status page's erroring `language:go` /
-  `language:java-kotlin` entries are stale Default-setup configurations
-  auto-created ~3 weeks ago from stray Go/Java snippet files inside the
-  vendored `.claude/` harness — the exact paths the advanced config
-  excludes. Those languages are deliberately NOT added to the matrix; the
-  stale configurations are removed operator-side from the Tool status
-  page's ⋯ menu. (PR #115)
-
-- **Variable naming standard** (workload owner directive, 2026-08-18) —
-  operator-set configuration names are UPPER_SNAKE_CASE, **maximum 2
-  words** (3 only to break a real collision), with no provider prefixes:
-  `CLIENT_ID`, `TENANT_ID`, `SUBSCRIPTION_ID`, `RESOURCE_GROUP`,
-  `APP_HOSTNAME`. Contractual names (`VITE_*`, `GITHUB_TOKEN`) are exempt.
-  Applied immediately to every workflow-consumed repository variable —
-  all were still unset, so the renames are free: `AZURE_CLIENT_ID`→
-  `CLIENT_ID`, `AZURE_TENANT_ID`→`TENANT_ID`, `AZURE_SUBSCRIPTION_ID`→
-  `SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`→`RESOURCE_GROUP`,
-  `FUNCTION_APP_HOSTNAME`→`APP_HOSTNAME` (`FUNCTIONS_STORAGE_ACCOUNT`
-  keeps its third word to avoid colliding with the content account).
-  The standard is codified in the `iac-repo-standardizer` agent — which
-  now sweeps `vars.*`/`secrets.*` on every standardization run — and in
-  the Wiki IaC-Repository-Standard page; CHECKLIST §7 carries the rule and
-  an `APP_HOSTNAME` row. (PR #114)
-
-- **Apply verification for the T-503–T-506 hardening (2026-08-18)** — the
-  operator applied the full set in HCP Terraform; cold start passed,
-  verifying the T-503 VNet runtime/package-pull path directly. A post-apply
-  `validate-deployed` run is byte-identical to the pre-apply baseline (no
-  external regression), and Repository Policy / IaC Validation / CI /
-  CodeQL are all green on `main`. One verification remains blocked:
-  `heal-computed-properties` — the probe for T-504's `0.0.0.0`
-  Azure-datacenter sentinel — fails at Azure login because the
-  `AZURE_CLIENT_ID` / `AZURE_TENANT_ID` / `AZURE_SUBSCRIPTION_ID`
-  repository variables were never set (a pre-existing gap, failing on every
-  run before the hardening too; now recorded in CHECKLIST §7). Evidence
-  table published as an addendum to the Wiki Resource-Validation-Report;
-  plan v0.2 dispositions moved to APPLIED. (PR #112)
-
-- **T-503 — Functions host storage network-restricted** (apply pending in
-  HCP Terraform; the last item of the T-50x hardening series). The host
-  storage account moves to default-Deny with three deliberate survivors:
-  the Flex app's runtime/package-pull path (VNet integration + new
-  `Microsoft.Storage` service endpoint on the integration subnet — which
-  also makes the content account's existing subnet rule provably
-  non-inert), a per-run firewall window in `deploy-functions.yml` (add
-  runner IP → deploy → always-run remove) under a new Storage Account
-  Contributor grant scoped to exactly this account, and operator windows
-  via `functions_storage_admin_ip_rules`. Rollback is one variable:
-  `functions_storage_network_default_action = "Allow"`. The
-  `#trivy:ignore:AVD-AZU-0012` suppression is deleted — the CI gate now
-  enforces the control it previously excused. New required inputs
-  `AZURE_RESOURCE_GROUP` and `FUNCTIONS_STORAGE_ACCOUNT` recorded in
-  CHECKLIST §7. Verify after apply with a functions deploy **and** a
-  cold-start invocation. (PR #111)
-
-- **T-504/T-505/T-506 — the security and observability remediation ADR-0018
-  refused to ratify, now implemented in Terraform** (apply pending in HCP
-  Terraform). **Cosmos hardening (T-504):** VNet service firewall allowing
-  the Functions integration subnet (new `Microsoft.AzureCosmosDB` service
-  endpoint), the `0.0.0.0` Azure-datacenter sentinel so
-  heal-computed-properties keeps working from GitHub-hosted runners
-  (variable-gated to drop later), operator-window `cosmos_admin_ip_rules`,
-  `local_authentication_disabled` (variable, default true), and continuous
-  backup (free 7-day tier). **Observability layer (T-505):**
-  `infra/observability.tf` adds the `ag-hcw-ops-prod` action group and
-  diagnostic settings for Key Vault, Cosmos (the plan's four categories),
-  the content blob service and Azure OpenAI; the budget gains the approved
-  50/75/90/100 ladder plus a Forecasted-at-100 alert routed through the
-  group; Log Analytics gets the 0.25 GB/day cap. **Keyless OpenAI (T-506):**
-  custom subdomain (planned replacement of the stateless account + both
-  deployments — `openai-client.js` has zero importers, so nothing breaks),
-  `local_auth_enabled = false`, Cognitive Services OpenAI User for the
-  Function App identity, the primary-key output deleted, and an
-  `AZURE_OPENAI_ENDPOINT` app setting for future keyless wiring. Plan
-  v0.2-as-built dispositions updated to "resolved in code, closes on
-  apply". (PR #108)
-
-- **Infrastructure plan v0.2-as-built and ADRs 0018–0021** — implements the
-  REVIEW §8.2 decision (workload owner, 2026-08-18) to supersede plan v0.1
-  with a plan that describes the real system. `.azure/infrastructure-plan.json`
-  is now version `0.2-as-built`: every implemented resource with its
-  as-built properties, each deviation from v0.1 dispositioned as either a
-  ratified decision or explicitly-unratified remediation debt (T-503–T-506,
-  purge protection). Four ADRs staged to the Wiki: **0018** (umbrella
-  supersede + disposition table), **0019** (single Function App —
-  supersedes ADR-0004), **0020** (flat native Terraform root module —
-  supersedes ADR-0005's AVM clause, resolves TODO T-502, and rewrites the
-  README AVM guardrail to "pinned versions, stable addresses"), **0021**
-  (Container Apps CI runner ratified as failover-only). ADR register
-  updated; ADR-0004 marked superseded. New TODO **T-506** (keyless Azure
-  OpenAI: RBAC grant, delete the key output, disable local auth).
-  (PR #107)
-
-- **Resource validation pass, first execution (2026-08-18)** — results
-  published as the Wiki **Resource-Validation-Report** page (staged in
-  `.github/wiki/`, linked from Home and the sidebar). External surface:
-  edge live, TLS healthy to 2026-09-28, `www`/`api-azure` NXDOMAIN
-  (consistent with same-origin), but Cloudflare bot challenge blocks all
-  datacenter-IP validation of the origin. Plan-vs-code parity: ~40% of the
-  approved plan's resources implemented, with material security-posture
-  deviations (Cosmos open to the internet with key auth on, LRS vs ZRS,
-  purge protection defaulted off, ungated keyed OpenAI) and material
-  never-planned resources (CI runner, 71 containers, model deployments).
-  Follow-ups filed: TODO T-504 (Cosmos hardening), T-505 (observability
-  control layer); human decisions REVIEW §8.1 (Cloudflare synthetic-access
-  rule) and §8.2 (reconcile implementation to plan, or supersede the plan
-  as-built). (PR #106)
-
-- **`validate-deployed.yml` — on-demand deployed-surface validation** — a
-  `workflow_dispatch` workflow running the externally observable half of the
-  Deployment Runbook's §4 verification from a GitHub-hosted runner: DNS for
-  the apex/`www`/`api-azure` names, TLS certificate inspection, frontend
-  status + security headers, and `scripts/smoke-deployed.mjs` tier 1
-  (anonymous, no side effects) against a dispatch-time base URL (default
-  `https://hybridcloudworks.com/api`). No secrets or cloud credentials —
-  same doctrine as `ci.yml`; smoke tiers 2–3 remain operator-run. Results
-  land in the job summary. The staged Deployment Runbook §4 references it.
-  (PR #105)
-
-- **IaC repository standardization** — the repository now carries the
-  baseline governance surface expected of a permanent infrastructure repo:
-  `.github/CONTRIBUTING.md`, `.github/SECURITY.md`, `.github/CODEOWNERS`, a
-  pull-request template with a Terraform-plan gate, issue templates
-  (including an infrastructure change request with blast-radius and rollback
-  prompts), a root `.editorconfig`, and `infra/README.md` documenting layout,
-  working rules, guardrails and the ALZ-absorption posture. The repository
-  policy script allowlists exactly these files; narrative documentation still
-  belongs in the Wiki. A new `iac-repo-standardizer` agent
-  (`.claude/agents/`) encodes the standard so future repositories can be
-  brought to the same baseline.
-- **IaC validation gate** — `.github/workflows/iac-validate.yml` runs
-  `terraform fmt`, `terraform validate` (via `init -backend=false`, so no
-  credentials or state access), tflint (`infra/.tflint.hcl`) and a Trivy IaC
-  misconfiguration scan on every pull request touching `infra/**`. Until now
-  nothing validated Terraform changes at all while the prototype delivery
-  workflow stayed disabled.
-- **`prevent_destroy` guards on stateful resources** — the Cosmos DB account,
-  both storage accounts and the Key Vault now refuse plans that would replace
-  them; removing a guard is itself a reviewed change. Applied together with
-  the `terraform fmt` drift that had accumulated in `main.tf`.
-- **Deployment Runbook and IaC Repository Standard as wiki-as-code** — the
-  day-1 apply procedure, day-2 operations, ALZ-absorption sequence, and the
-  standard this repository now conforms to, staged under `.github/wiki/`
-  (with updated `Home` and `_Sidebar`) and published to the GitHub Wiki by
-  the new `sync-wiki.yml` workflow on merge to `main`. The workflow overlays
-  staged pages only — unstaged wiki pages remain UI-editable — and uses the
-  built-in `GITHUB_TOKEN`, so no PAT or additional GitHub App is required.
-  Staged pages become repository-owned: they get PR review like the code
-  they describe. The sidebar's repository links now point at the
-  HybridCloudWorks org instead of the pre-move personal fork.
-
-### Fixed
-
-- **`iac-validate.yml` Trivy job unresolvable action pin** — the gate shipped
-  in PR #103 referencing `aquasecurity/trivy-action@0.28.0`, a tag that no
-  longer resolves: Aqua's 2026-03-19 security incident (trivy discussions
-  #10425) saw trivy-action git tags re-pointed to malicious commits, and the
-  v0.69.4 binary release was itself malicious. The job now installs the
-  Trivy **binary** pinned to v0.69.3 — the latest release the advisory names
-  safe — from the project's own release artifacts, verified against the
-  release checksum manifest, and no longer uses the marketplace action at
-  all. (PR #104)
-
-### Changed
-
-- **`deploy-infra.yml` rewritten while remaining hard-disabled** — the
-  prototype workflow applied with `-auto-approve` on every push to `main`,
-  masked failed plans with `continue-on-error`, and used unpinned actions.
-  The replacement is `workflow_dispatch`-only, runs in a `production-infra`
-  GitHub Environment for required-reviewer approval, starts an HCP Terraform
-  run whose apply is confirmed in TFC where the state lives, and keeps the
-  `if: ${{ false }}` gate until production applies are authorized.
-
-- **Self-healing computed properties** — `.github/workflows/
-  heal-computed-properties.yml` re-applies `cp_sortDate` on any push touching
-  the Cosmos Terraform or container manifest, and every six hours — because
-  Terraform applies run in TF Cloud on their own clock, a push-time heal can
-  itself be overwritten, so the schedule is what guarantees the wound closes.
-  With `PUBLIC_LIST_SQL_ORDER=1` live, a wiped property breaks the public
-  content list, which is why this is automation rather than a runbook note.
-  The OIDC deploy identity gains Cosmos Data Contributor scoped to exactly the
-  `content` and `blogs` containers (`infra/oidc.tf`) — the one documented
-  exception to its deliberate no-Cosmos posture, and the healer fails loudly
-  on a schedule until that assignment is applied. (TODO.md T-206 follow-up)
-
-- **`cp_sortDate` computed property + flag-gated ORDER BY** — T-206's last
-  step, authored as operator tooling. `scripts/apply-computed-sortdate.mjs
-  --inspect` reports non-ISO date values (the evidence gate), `--apply` adds a
-  computed property that resolves the five published-date aliases server-side
-  with a total fallback, and `PUBLIC_LIST_SQL_ORDER=1` then makes the public
-  list's TOP window return the newest N documents instead of an arbitrary N.
-  A computed property rather than a materialized field: no backfill, no
-  write-site maintenance, and it cannot be missing — which is what makes
-  ORDER BY on it safe under the module's own rule 2. The azurerm provider
-  cannot express computed properties, so the script is the applier and the
-  manifest records the drift hazard: a terraform apply that updates the
-  container wipes the property. Applied to the live containers and flipped on
-  2026-08-14; the deployed smoke test passed against the ordered window,
-  closing T-206 entirely. (TODO.md T-206)
-
-- **Deployed smoke test** — `scripts/smoke-deployed.mjs`, the runnable half of
-  the work order's top item. Tier 1 exercises the anonymous surface with no
-  side effects: the public filter and T-206 projection (asserting the eight
-  excluded body fields stay excluded and `explanation` does not false-alarm),
-  guard liveness on admin RPCs, CORS refusal and preflight, negative-cache
-  headers, the health endpoint's non-disclosure, and that the seventeen
-  notImplemented RPCs still 404. Tier 2 (`--cosmos`) executes the one
-  assumption nothing has executed: that a failed Cosmos patch predicate
-  surfaces through the JS SDK as code 412 and a missing document as 404 — the
-  submission quota's correctness rests on it; it writes a single smoke-prefixed
-  document into the TTL-bounded `submission_quota` container and deletes it.
-  Tier 3 (`SMOKE_BEARER_TOKEN`) verifies a real token is admitted. Six unit
-  tests pin the script's own assertion helpers, because a smoke test with a
-  wrong filter passes against a broken deployment.
-
-- **Anonymous public read API** — `GET public/content`, `public/content/{slugOrId}`,
-  `public/snapshots/{id}`, `public/podcasts`, `public/feed`. The published/draft
-  boundary is enforced server-side, replacing the Firestore security rules that
-  previously performed that role. (#45)
-- **Rate-limited public submission endpoint** — `POST public/submissions` with
-  per-type validation, server-side document composition, and a rolling-hour
-  anonymous quota, closing the unauthenticated `addDoc`-into-content path. (#45, #66)
-- **Admin CMS REST surface** — certifications, social posts, recordings, speaker
-  events, settings, images, AI providers / MCP servers, and usage records under
-  `cms/*`, all behind the two-gate role guard. (#46, #47)
-- **Authenticated file upload endpoint** — `POST cms/uploads/{container}` with a
-  container allowlist, blob-path validation, and a server-enforced 15 MB decoded
-  cap, replacing direct browser writes to Firebase Storage. (#62, #65)
-- **Content pipeline RPCs** — `createContentItem`, `updateContentItem`,
-  `transitionContentStatus`, and the publish pipeline, ported with their original
-  dedup, quality-gate, state-machine, and audit semantics. (#43, #44, #59)
-- **Admin identity, snapshots, ops health, content workflow, gallery, labs, and
-  image-prompt RPCs** — 34 named RPCs total. (#50, #54, #55, #56, #57, #58)
-- **`getLabJob` RPC** — single lab job with output, replacing the Labs console's
-  per-document realtime subscription. (#65)
-- **`GET public/platform-health`** — the landing page's four cloud-status
-  indicators, ported from the Firebase original. Anonymous, with a five-minute
-  cache that is the only thing bounding how hard the route can be made to hit
-  four third-party status APIs; each provider degrades to `UNKNOWN`
-  independently and the handler never returns 500, because a dead upstream must
-  not blank the panel. Ported without adding a dependency — `axios` and
-  `rss-parser` stay unreachable. (TODO.md T-316)
-- **`POST cms/telemetry/legacy-blogs-read`** — the counter that will justify
-  retiring the `blogs` fallback container. Guarded at `viewer`, unlike the
-  anonymous Firebase original: its only caller is an admin page, so anonymity
-  bought nothing and left an unauthenticated write endpoint anyone could use to
-  poison the evidence. (TODO.md T-316)
-- **Anonymous media delivery** — `GET public/media/{container}/{*blobPath}`,
-  serving uploaded images through the Function App's managed identity with
-  immutable cache headers and conditional-request support. The storage account
-  stays closed to the internet; the container allowlist is a strict subset of
-  the containers uploads may write to. (TODO.md T-105)
-- **Self-hosted CI runner** — Azure Container Apps Job with KEDA scale-to-zero, an
-  ephemeral JIT-config runner image published to Docker Hub with a GHCR mirror,
-  and a `CI_RUNNER` repository-variable failover switch. (#48)
-- **Labs agent API** — `POST agent/claimLabJob`, `agent/heartbeat`,
-  `agent/completeLabJob`, behind a machine-identity guard (`LabAgent` App Role
-  plus a `lab_agents/{agentId}` registry document bound to the credential's
-  object id) that is disjoint from the admin role hierarchy. Claim atomicity is
-  an ETag-guarded write with a lease, so a dead agent's jobs are picked up
-  rather than stranded. (TODO.md T-401)
-- **`code-reviewer` agent** — carries the Code Review SOP (CODE_REVIEW_PROMPT.md
-  v1.0) as agent 39 of the harness. (#68)
-- **SOP working documents** — `TODO.md`, `CHECKLIST.md`, `CHANGELOG.md`.
-
-### Changed
-
-- **Firebase-era smoke scripts and nested workflows removed.** Three live smoke
-  scripts read `VITE_GCP_FUNCTIONS_URL` and built a `firebaseConfig` from
-  `VITE_FIREBASE_*` — none of which the application sets any more, so they could
-  not run — and `frontend/.github/` held the source repository's Firebase deploy,
-  E2E and secret-rotation workflows, inert but reading as live configuration.
-  Deleted rather than ported: a half-migrated script that looks runnable and is
-  not is worse than no script, which is exactly what these were. A deployed
-  smoke test is still wanted, written against Entra and the Azure routes.
-  (TODO.md T-317)
-- **Six unused dependencies dropped** from the functions package — `sharp`,
-  `replicate`, `turndown`, `@mendable/firecrawl-js`, `axios` and `rss-parser`,
-  none of them referenced anywhere under `src/`. (TODO.md T-407)
-- **Frontend decoupled from Firebase.** All 34 files importing `firebase/firestore`,
-  5 importing `firebase/auth`, and 4 importing `firebase/storage` now call the
-  Azure Functions API. Public pages (#61), admin CRUD (#62), shared config
-  libraries (#63), workflow pages and the editor (#64), remaining admin pages
-  (#65), and submission forms (#66). The production bundle no longer contains a
-  Firebase chunk.
-- **Admin authentication swapped to Entra ID via MSAL** — `firebase/auth`
-  eliminated from the admin surface; MFA is now an Entra Conditional Access
-  policy rather than app-managed phone MFA; the Entra object id is the
-  `admins/{oid}` registry key. (#60)
-- **Realtime listeners replaced with polling** — the content editor polls its
-  document every 20 s, the Labs dashboard polls a snapshot RPC every 15 s, and
-  the Labs console polls an active job every 5 s. Conflict detection and
-  online/offline semantics are preserved. (#64, #65)
-- **`Review.md` renamed to `REVIEW.md`** and its scope narrowed to
-  human-resolvable blockers, per the SOP.
-- **Repository structure policy** (`scripts/validate-repository-structure.ps1`)
-  now requires the five SOP documents, permits them at the root, and rejects
-  case variants of their filenames.
-
-### Fixed
-
-- **The frontend CI gate now runs the whole test suite.** `test:admin` was a
-  hand-curated file list — every new test file had to be added by hand, and
-  eight known-stale failures elsewhere were simply never run. The eight were
-  stale expectations, not application defects, and are fixed: the route
-  contract now asserts the real pages behind `/gcp`, `/terraform`, `/github`,
-  `/finops`, the three `/tools` routes and the two news routes (mocked, as the
-  suite already did for other providers); and the PublishedPage tests drive
-  the publish flow that actually exists — a pre-publish checklist modal whose
-  "Publish Now" is what publishes — with the checklist itself now unit-tested.
-  `test:admin` is plain `vitest run`; the one legitimately unrunnable file
-  (`firestore.rules.test.js`, which needs the retired Firestore emulator
-  setup) is excluded in vitest.config.js with the reason recorded.
-  Default run: 15 files, 115 tests. (TODO.md T-320)
-- **One anonymous list request could eat four seconds of the database's entire
-  budget.** The public content list ran `SELECT TOP 1000 *` with no WHERE — an
-  *arbitrary* 1000 documents of a ~1k-document container (so published articles
-  could vanish from listings non-deterministically, made intermittent by the
-  300 s cache), each transferred whole at ~20 KB including article bodies no
-  list consumer renders. The public filter now runs in SQL, so the window
-  counts published documents of the requested type/provider; and the projection
-  is an audited explicit field list — the union of what the public list
-  consumers actually read, pinned by a test naming the consumer behind each
-  field. Of nine heavy body fields exactly one has a list reader
-  (`explanation`, a Coder Corner excerpt fallback); the other eight stay out,
-  which is where the RU win lives. The in-memory sort and the ORDER BY
-  avoidance stay until a materialized sort field plus composite index can be
-  deployed. (TODO.md T-206, steps 1–2)
-- **The API contract can no longer lie about what exists.** It documented
-  seventeen RPCs the admin UI invokes that were never registered — every call a
-  live 404, invisible because nothing compared the document to the code. The
-  contract now carries an explicit `rpc.notImplemented` block (all seventeen,
-  blocked on provider credentials), and a test holds the whole document to
-  account: invoked = implemented + notImplemented exactly; every implemented
-  entry resolves to a registered route with the methods it advertises;
-  registered method+route pairs and contract claims form a full bijection.
-  Making the bijection true surfaced more drift, now fixed: `getLabJob` was
-  implemented but missing from the invoked list, the Labs agent API had no
-  contract entry at all, six registered admin/public routes were undocumented,
-  and the `CRUD` shorthand entries now enumerate their real routes — recording
-  honestly that social-posts has no PATCH and recordings no DELETE.
-  (TODO.md T-207)
-- **Public news pages showed no curated imagery.** #63 moved the cached-image
-  lookup off an anonymous Firestore read onto an editor-gated `cms/*` endpoint,
-  reached through a token acquisition that throws outright without a signed-in
-  account. The hook runs on the public `/{provider}/news` route, so for every
-  anonymous visitor the lookup failed and the grid rendered nothing where
-  cached images used to appear. Reading a cached image is now anonymous
-  (`GET public/curated-image/{articleId}`, returning only the URL — never the
-  document, which carries an internal blob path and prompt metadata), while
-  generating a missing one stays behind the admin gate and is no longer
-  attempted without the `editor` role that the server requires — not merely
-  when nobody is signed in, since a signed-in viewer would have collected a 403
-  per article. That also keeps MSAL off the critical path of a public page.
-  Archived images are withheld, so retiring an image in the gallery now keeps
-  it off the public site, and a cache miss is cached for a minute rather than
-  an hour so a freshly generated image is not hidden behind its own absence.
-  (TODO.md T-210)
-- **The anonymous submission limit of five could be turned into two hundred.**
-  The quota read the counter, compared it, and wrote it back as three separate
-  operations, so simultaneous requests all read the same value, all passed the
-  check, and all wrote `count: 1` — accepted submissions bounded only by how
-  many the caller sent, each landing in the review queue, and a counter left at
-  1 so the trick repeated every burst rather than once an hour. The accepted
-  path is now a single conditional atomic increment: Cosmos evaluates
-  `count < limit` and applies the increment as one operation, and writes to one
-  document serialize, so exactly five concurrent callers get through. Starting a
-  window and rolling one over are the two things a predicate cannot express, so
-  they go through operations that have a loser — a create that 409s and a
-  replace that 412s — and the loser re-evaluates rather than assuming.
-  (TODO.md T-204)
-- **An IPv6 client had an unlimited submission budget.** The quota key was the
-  hash of the full address, and a standard residential IPv6 allocation is a
-  whole `/64` — 2^64 addresses, each hashing to its own counter, every one of
-  them reading well under the limit, with `submission_quota` growing a document
-  per address as a side effect. Addresses are now normalized before hashing:
-  full address for IPv4, `/64` prefix for IPv6, with `::` expanded first so one
-  address written three ways lands in one bucket, and `::ffff:` v4-mapped
-  addresses treated as the IPv4 clients they are rather than collapsing every
-  such client into a single shared bucket. (TODO.md T-205)
-- **The editor could silently overwrite a colleague's save.** Replacing
-  `onSnapshot` with a twenty-second poll left behind a one-shot "this response
-  is my own write" flag that was consumed by whatever the next tick happened to
-  return. At millisecond latency that was reliably our own write; at twenty
-  seconds it can be a collaborator's — and the branch then adopted *their* edit
-  marker as our baseline, so the next save passed the server's
-  optimistic-concurrency check and their work vanished with no warning to
-  either person. `saveEditorDraft` now returns the `blogEditedAt` it wrote and
-  the client matches on that identity, so the flag is gone rather than merely
-  narrowed. It also fixes an adjacent bug: a second save inside the poll window
-  used to send the pre-save marker and conflict against the caller's *own*
-  previous write. (TODO.md T-208)
-- **Twenty seconds was long enough to lose an image reorder.** The poll had no
-  change detection, so every idle tick re-applied the remote document over
-  `orderedImageUrls` — local state the user drags into order and that is only
-  persisted on save — and re-rendered the whole editor while doing it. Ticks
-  that carry a marker we have already seen now return early. A genuine remote
-  change still replaces the order; the tests assert both directions, because an
-  early return that goes too far is just a stale editor. (TODO.md T-209)
-- **`total` reported the page size.** Two public list endpoints measured it
-  after slicing, so it always equalled `items.length` and any paginating
-  consumer would conclude there was exactly one page. (TODO.md T-407)
-- **Two routes the frontend called did not exist.** `recordLegacyBlogsRead` and
-  `getPlatformHealth` were registered nowhere — both 404s. The health one meant
-  every anonymous visitor saw four `CHECKING` indicators resolve to "Health
-  check unavailable" on the landing page; the telemetry one meant
-  fallback-container reads went unmeasured, which is the evidence for retiring
-  that container. Both were invisible until T-101, because until then they were
-  pointed at the decommissioned Google host. (TODO.md T-316)
-- **Scheduled publishing works.** `scheduledPublishDate` had a complete write
-  side and no read side: an operator scheduled a post, the server validated and
-  stored the date, the UI confirmed it, and nothing ever published it — no
-  error, no alert. `publishScheduledContent` now runs the same
-  `processPublishContent` pipeline the Publish button uses, rather than a second
-  implementation of it, clears the schedule only after a publish that actually
-  happened, caps each tick at 25 with carry-over, and records failures under the
-  `scheduled_publish_failures` alert type the ops dashboard has counted since
-  the migration without ever having a producer. (TODO.md T-301)
-- **Two concurrent publishes can no longer both succeed.** `patchDoc` gained an
-  optional `ifMatch`, and the publish write is now conditioned on the ETag read
-  at the top of `processPublishContent` — the status gate, quality and image
-  reports and slug were all decided from that document. A lost race is reported
-  as skipped rather than counted as a publish that did not happen. Timer-driven
-  publishing is what turns this from theoretical into reachable. (TODO.md T-301)
-- **The four timers no longer share one flag.** Enabling the scheduled publisher
-  would also have armed `cleanupTempStorage`, an unimplemented TODO that deletes
-  blobs. Each timer has its own flag; `FEATURE_FLAG_SCHEDULERS` is a master kill
-  switch. The blob-GC job itself is still unwritten and still flagged off.
-  (TODO.md T-302, flag half)
-- **Every admin list sort worked again.** `PublishedPage` and `EditorListPage`
-  kept the Firestore-only `?.toMillis?.() || 0`, which against the ISO strings
-  Cosmos returns scores every document 0 — so every comparator returned 0, the
-  lists rendered in raw database order while the sort controls appeared to work,
-  and the timestamp columns showed an em dash. One `lib/dateUtils.js` now backs
-  all of it. The review counted seven copies of that helper; there were **ten**,
-  and a source guard in the new test file found the last three — one of which
-  only surfaced when the bundler refused a redeclaration that ESLint had passed.
-  (TODO.md T-304)
-- **The review board no longer blanks on a scheduled item.** `BlogReviewBoard`
-  called `.toDate()` on what is now an ISO string, inside a `setTimeout` and so
-  outside the error boundary. (TODO.md T-303)
-- **A published article can no longer 404 because a draft shares its slug.**
-  The detail lookup ran `SELECT TOP 1` with no `ORDER BY` and applied the public
-  filter afterwards, so it picked arbitrarily among duplicates and then rejected
-  the winner. It now orders by `_ts` — a system property present on every
-  document, so the drop-on-undefined trap does not apply — and finds the first
-  public candidate. (TODO.md T-305)
-- **The Labs dashboard reported agents "connected" through an outage.** The
-  staleness clock advanced only inside the snapshot fetch's success path, so a
-  failing poll froze it: `now - lastSeenAt` stopped growing and every agent
-  stayed online for exactly as long as nothing was reachable. The clock is an
-  independent interval again — it has to keep running when the fetch does not,
-  which is the only condition under which it says anything. (TODO.md T-309)
-- **A timed-out lab job was polled forever, and a network blip was displayed as
-  a failure.** The console's terminal-status set omitted `timeout`, which the
-  agent does report — while the output pane *in the same file* had the correct
-  four-element list, so the loop kept polling a job its own display had already
-  called finished. Both now read `TERMINAL_JOB_STATUSES` from
-  `lib/labsPolling.js`. A transport error no longer writes `status: 'failed'`
-  onto the job, which was indistinguishable from a real failure and stopped the
-  poll permanently; it is separate state, shown as "still running — retrying",
-  and the poll backs off from 5 s to a 60 s ceiling without ever giving up.
-  (TODO.md T-308)
-- **Overlapping polls could render an older document over a newer one.** Both
-  the Labs snapshot (15 s interval) and the editor's remote-document watch
-  (20 s) allow a 20 s request timeout, so ticks overlap under load and responses
-  can land out of order. Both now skip a tick while one is in flight. In the
-  editor the flag is released in a `finally`: its catch returns early on a
-  missing document and on cancellation, and either path would otherwise have
-  stopped the poll for the lifetime of the page. (TODO.md T-309)
-- **The browser called Google Cloud, not Azure.** `api.js`, `publicApi.js` and
-  `legacyBlogsTelemetry.js` each resolved `VITE_GCP_FUNCTIONS_URL` — a
-  decommissioned Google Cloud Functions host — so roughly sixty call sites,
-  including every authenticated admin request, would have been sent off-platform
-  with an Entra bearer token attached. `lib/functionsBase.js` is now the single
-  resolver over `VITE_AZURE_FUNCTIONS_URL`; the dead `azureConfig.js` provider
-  switch was deleted. The base carries the Functions `api` route prefix and
-  accepts either `/api` (same-origin) or an absolute origin (cross-origin), so
-  deployment topology is configuration rather than code. A deploy build with no
-  base configured now fails instead of shipping. (TODO.md T-101)
-- **Every upload and every gallery delete would have thrown.**
-  `blob-storage.js` required `STORAGE_CONNECTION_STRING`, which no file in
-  `infra/` has ever produced — the code was written for shared-key auth while
-  the infrastructure was built for managed identity. It now uses
-  `DefaultAzureCredential` against `STORAGE_BLOB_ENDPOINT`, matching
-  `cosmos-client.js`, and `generateSasUrl` signs with a user-delegation key
-  instead of an account key. No key or connection string was added.
-  (TODO.md T-104)
-- **Uploaded images were unreachable, and the URL to them was stored anyway.**
-  `allow_nested_items_to_be_public = false` is an account-level master override,
-  so the three containers declared public in Terraform served 409 — while
-  uploads returned the raw blob URL for pages to persist into Cosmos. Uploads
-  now return the media-route URL, non-public containers return none, and the
-  Terraform containers are declared `private`, which is what they always were.
-  (TODO.md T-105)
-- **Scheduled-publish dates were silently dropped** — `scheduledPublishDate` and
-  the editor's `blogEditedAt` were parsed with Firestore `Timestamp`-only code
-  paths that returned `0` for the ISO strings the API now returns. This would
-  have emptied the scheduling calendar and disabled external-edit-conflict
-  detection. (#64)
-- **Labs agents would have shown permanently offline** — the staleness
-  calculation understood only `Timestamp.toMillis()`. (#65)
-- **Admin list projection was missing workflow fields** — `scheduledPublishDate`,
-  `softDeletedAt`, `blogEditedAt` and eight others were absent from the snapshot
-  projection that replaced whole-document Firestore reads. (#64)
-- **MCP server connection state always read as disconnected** — the write-only
-  `oauthToken` strip left consumers unable to detect a stored token; reads now
-  carry a `hasOauthToken` boolean while the value itself never leaves the
-  server. (#62)
-- **Public list endpoint under-projected** — it returned a card-field subset
-  while consumers read `frameworkConcepts`, `featured`, `altCoverImageVariants`
-  and more; it now returns full documents with internal fields stripped. (#61)
-
-### Security
 
 - **Anonymously submitted HTML is sanitized on ingest.** `overviewHtml` arrives
   through the anonymous submission endpoint, is stored, and is eventually

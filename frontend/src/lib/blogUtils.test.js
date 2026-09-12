@@ -99,14 +99,46 @@ describe('normalizePublicImageUrl', () => {
     expect(normalizePublicImageUrl(url)).toBe(url);
   });
 
-  it('still rewrites a storage.googleapis.com URL to its firebasestorage form', () => {
-    expect(
-      normalizePublicImageUrl('https://storage.googleapis.com/my-bucket/covers/hero.png')
-    ).toBe('https://firebasestorage.googleapis.com/v0/b/my-bucket/o/covers%2Fhero.png?alt=media');
+  // #518. This used to assert the rewrite, on the understanding that it
+  // preserved images for migrated content. The bucket is gone: the root and
+  // every asset URL still referenced by the content manifest return 404, so
+  // the rewrite produced one dead URL from another and five published articles
+  // rendered a broken frame with `og:image` pointing at a 404.
+  it.each([
+    'https://storage.googleapis.com/my-bucket/covers/hero.png',
+    // `http` and mixed case too: AboutPage.jsx matches by regex rather than by
+    // `new URL().hostname`, and the two must agree or one page renders a broken
+    // image the other has learned to skip.
+    'http://storage.googleapis.com/my-bucket/covers/hero.png',
+    'HTTPS://FirebaseStorage.GoogleAPIs.com/v0/b/my-bucket/o/covers%2Fhero.png?alt=media',
+    'https://firebasestorage.googleapis.com/v0/b/my-bucket/o/covers%2Fhero.png?alt=media',
+    // A real one, from frontend/data/content-manifest.json.
+    'https://firebasestorage.googleapis.com/v0/b/hybridcloudworks-61e8d.appspot.com/o/covers%2F1775288380237-hero.png?alt=media',
+  ])('treats the retired Firebase bucket as absent: %s', (url) => {
+    expect(normalizePublicImageUrl(url)).toBeNull();
+  });
+
+  it('leaves the Azure blob host alone, which is where images live now', () => {
+    const url = 'https://stsiteprodcus01.blob.core.windows.net/covers/hero.png';
+    expect(normalizePublicImageUrl(url)).toBe(url);
   });
 });
 
 describe('pickPublicImageUrl', () => {
+  // The same shadowing problem the video case describes, with a dead image in
+  // place of the video: `contentImageUrl` sits first in every cover chain, so
+  // an article whose first candidate points at the retired bucket must fall
+  // through to the Azure-hosted cover behind it rather than showing nothing.
+  it('skips a retired-bucket candidate and takes the live cover behind it', () => {
+    const live = 'https://stsiteprodcus01.blob.core.windows.net/covers/hero.png';
+    expect(
+      pickPublicImageUrl(
+        'https://firebasestorage.googleapis.com/v0/b/hybridcloudworks-61e8d.appspot.com/o/covers%2Fgone.png?alt=media',
+        live
+      )
+    ).toBe(live);
+  });
+
   it('skips a video candidate and takes the real cover behind it', () => {
     // The shadowing case: `contentImageUrl` is first in every cover chain, so
     // a `||` chain would commit to the video and lose the AI cover entirely.

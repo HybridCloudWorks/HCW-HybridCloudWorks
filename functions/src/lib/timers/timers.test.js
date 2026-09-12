@@ -473,6 +473,17 @@ describe('certification re-verification', () => {
 });
 
 describe('cert image cleanup', () => {
+  // Returning null here does not mean "not a Google URL" — it means "this blob
+  // is referenced by nothing", and the caller DELETES on that answer. A scheme
+  // or host in the wrong case would quietly turn a referenced blob into an
+  // unreferenced one (#518).
+  it.each([
+    'http://storage.googleapis.com/x/certifications/images/c.png?x=1',
+    'HTTPS://Storage.GoogleAPIs.com/x/certifications/images/c.png?x=1',
+  ])('still resolves a legacy GCS URL written as %s', (url) => {
+    expect(blobNameFromUrl(url)).toBe('images/c.png');
+  });
+
   it('resolves Firebase, GCS and blob URLs to the same blob name', () => {
     expect(
       blobNameFromUrl(

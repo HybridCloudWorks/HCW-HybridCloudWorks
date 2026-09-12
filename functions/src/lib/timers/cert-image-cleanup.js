@@ -33,7 +33,14 @@ export function blobNameFromUrl(url, { accountHost = null } = {}) {
       path = fb[1];
     }
   } else {
-    const gcs = /^https:\/\/storage\.googleapis\.com\/[^/]+\/(.+?)(?:\?|$)/.exec(value);
+    // Kept although the bucket is gone (#518): this derives a blob NAME for an
+    // Azure cleanup, it does not fetch the Google URL. See gallery-images.js.
+    //
+    // `http` and case-insensitive on purpose. Returning null here does not
+    // mean "not a Google URL", it means "this blob is referenced by nothing"
+    // — and the caller DELETES on that answer. A scheme or host in the wrong
+    // case would turn a referenced blob into an unreferenced one.
+    const gcs = /^https?:\/\/storage\.googleapis\.com\/[^/]+\/(.+?)(?:\?|$)/i.exec(value);
     if (gcs) path = gcs[1];
     else {
       try {
