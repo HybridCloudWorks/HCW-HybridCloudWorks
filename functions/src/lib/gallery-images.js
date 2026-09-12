@@ -17,6 +17,15 @@
  * posture (and matching reality: pre-migration blobs live in Firebase
  * Storage, with operational secrets and external access tracked in TODO.md.
  *
+ *
+ * THE GOOGLE BRANCHES STAY, THOUGH THE BUCKET IS GONE (#518). The bucket was
+ * decommissioned and every URL into it 404s — but this path does not FETCH
+ * those URLs, it maps a legacy URL onto the Azure blob that replaced it so a
+ * delete can find it. Removing the branches would make that mapping fail for
+ * any row still carrying a legacy URL whose object WAS migrated, turning a
+ * successful delete into a silent orphan. The rendering side is where the dead
+ * URLs mattered, and it now treats them as absent.
+ *
  * The slot-guard subtlety the source fixed is preserved: `slot` has NO
  * default in validation, so a rename/archive that doesn't mention slot can't
  * silently clear the image's slot tag, while an explicit '' still does.

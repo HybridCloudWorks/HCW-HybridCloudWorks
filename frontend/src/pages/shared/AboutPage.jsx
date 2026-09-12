@@ -38,13 +38,14 @@ function normalizeCertification(rawData) {
     // Helper to clean/validate URLs
     const cleanUrl = (val) => {
       if (!val || typeof val !== 'string') return undefined;
-      let key = val.trim();
+      const key = val.trim();
       if (key === '') return undefined;
-      // Convert GCS URL format to Firebase Storage REST format so storage rules apply
-      const gcsMatch = key.match(/^https:\/\/storage\.googleapis\.com\/([^/]+)\/(.+)$/);
-      if (gcsMatch) {
-        key = `https://firebasestorage.googleapis.com/v0/b/${gcsMatch[1]}/o/${encodeURIComponent(gcsMatch[2])}?alt=media`;
-      }
+      // The Firebase Storage bucket is gone (#518). This used to rewrite the
+      // GCS form into the Firebase REST form "so storage rules apply"; both
+      // point at the same decommissioned project, so the rewrite produced one
+      // dead URL from another. Undefined, so the caller's existing falsy
+      // branch omits the image rather than rendering a broken frame.
+      if (/^https:\/\/(storage|firebasestorage)\.googleapis\.com\//.test(key)) return undefined;
       return !key.startsWith('http') && !key.startsWith('/') && !key.startsWith('data:')
         ? `/${key}`
         : key;

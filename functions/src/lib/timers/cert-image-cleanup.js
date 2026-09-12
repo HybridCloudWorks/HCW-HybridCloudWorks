@@ -33,6 +33,8 @@ export function blobNameFromUrl(url, { accountHost = null } = {}) {
       path = fb[1];
     }
   } else {
+    // Kept although the bucket is gone (#518): this derives a blob NAME for an
+    // Azure cleanup, it does not fetch the Google URL. See gallery-images.js.
     const gcs = /^https:\/\/storage\.googleapis\.com\/[^/]+\/(.+?)(?:\?|$)/.exec(value);
     if (gcs) path = gcs[1];
     else {

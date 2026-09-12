@@ -17,6 +17,47 @@ This project has not cut a tagged release; entries are grouped under
 
 ## [Unreleased]
 
+### Fixed
+
+- **Five published articles rendered broken hero images, and their link
+  previews were broken too (#518).** The Firebase Storage bucket
+  `hybridcloudworks-61e8d.appspot.com` is gone. Checked 2026-09-12: the bucket
+  root and all **28** distinct asset URLs still referenced by
+  `frontend/data/content-manifest.json` return **404**, verified against
+  `fonts.googleapis.com` and the live site as controls, so this is not a network
+  artefact.
+
+  `normalizePublicImageUrl` was believed to be a compatibility shim preserving
+  images for migrated content — it was protected on that basis. It was not: it
+  rewrote `storage.googleapis.com/<bucket>/<path>` into the
+  `firebasestorage.../o/<enc>?alt=media` form, which is **one dead URL into
+  another dead URL**. Its falsy branch only caught empty strings and videos, not
+  a 404 at fetch time, so the browser got an `<img>` with a dead `src` and
+  `og:image` / `twitter:image` pointed at 404s.
+
+  Both hosts are now treated as absent, which is exactly what this function
+  already did for a video and right for the same reason: every caller's falsy
+  branch omits the hero, drops the social tags, and falls a card back to its
+  placeholder. **A missing image renders better than a broken one.** The same
+  correction went into `AboutPage.jsx`, which carried its own copy of the
+  rewrite.
+
+  **Three of the five files named as shims were left alone, and that is the
+  finding.** `gallery-images.js`, `cert-image-cleanup.js` and `fetch-image.js`
+  do not *fetch* those URLs — they map a legacy URL onto the Azure blob that
+  replaced it so a delete or cleanup can find it, or skip it as not worth
+  re-hosting. Deleting those branches would make the mapping fail for any row
+  whose object *was* migrated, turning a successful delete into a silent orphan.
+  Each now says so in place. The rendering side was where the dead URLs
+  mattered.
+
+  **This is not a data migration, deliberately.** The rows still hold the dead
+  URLs and are now inert; regenerating the manifest from Cosmos would bring them
+  back and change nothing. A test reads the shipped manifest, extracts every
+  Google Storage URL in it, and asserts each one normalizes to absent — so the
+  guarantee holds whatever the data says, including for a row restored from an
+  old backup.
+
 ### Added
 
 - **The Entra configuration is reviewable in the admin GUI (#519).** It was
