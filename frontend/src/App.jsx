@@ -13,6 +13,9 @@ import Footer from '@/components/shared/Footer';
 import { VALID_PROVIDERS, ProviderLayout } from '@/context/ProviderContext';
 import { ThemeProvider } from '@/context/ThemeContext';
 import { useAuthRedirectLanding } from '@/hooks/useAuthRedirectLanding';
+// A bare string module, deliberately: importing this from msalConfig.js would
+// drag MSAL onto every public route (#520).
+import { AUTH_REDIRECT_PATH } from '@/lib/authRoutes';
 
 const lazyPage = (loader) => lazy(loader);
 
@@ -386,7 +389,7 @@ function App() {
               <Route path="/templates/coder-corner" element={<CoderCornerSubmissionPage />} />
               <Route path="/templates/rosetta-stone" element={<RosettaStoneSubmissionPage />} />
               {/* --- Entra sign-in redirect target (#520) --- */}
-              <Route path="/auth/callback" element={<AuthCallbackPage />} />
+              <Route path={AUTH_REDIRECT_PATH} element={<AuthCallbackPage />} />
 
               {/* --- Admin CMS --- */}
               <Route

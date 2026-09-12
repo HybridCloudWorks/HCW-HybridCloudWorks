@@ -1,4 +1,7 @@
 import { LogLevel } from '@azure/msal-browser';
+// One string, one module, imported by both sides — see authRoutes.js for why it
+// cannot live here (#520).
+import { AUTH_REDIRECT_PATH } from '@/lib/authRoutes';
 
 /**
  * MSAL configuration — values only, no instance and no window access at
@@ -38,14 +41,6 @@ import { LogLevel } from '@azure/msal-browser';
  */
 const NO_TENANT_CONFIGURED = '00000000-0000-0000-0000-000000000000';
 
-/**
- * The one path Entra is allowed to redirect back to (#520).
- *
- * Exported so the router and the test that pins them together read the same
- * constant rather than two copies of a string.
- */
-export const AUTH_REDIRECT_PATH = '/auth/callback';
-
 export const msalConfig = {
   auth: {
     clientId: import.meta.env.VITE_ENTRA_CLIENT_ID || '',
@@ -66,9 +61,9 @@ export const msalConfig = {
     // working around.
     //
     // THE PATH MUST BE A ROUTE THE ROUTER DECLARES AND A URI THE APP
-    // REGISTRATION LISTS. Neither is checkable at runtime — the first is
-    // pinned by msalConfig.test.js, the second breaks sign-in in production
-    // and nowhere else.
+    // REGISTRATION LISTS. The first is now structural — App.jsx imports the
+    // same constant from authRoutes.js. The second is not checkable from here
+    // at all, and breaks sign-in in production and nowhere else.
     redirectUri:
       typeof window !== 'undefined'
         ? `${window.location.origin}${AUTH_REDIRECT_PATH}`

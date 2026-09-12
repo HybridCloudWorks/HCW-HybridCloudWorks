@@ -89,21 +89,22 @@ describe('the redirect path', () => {
   // new costume. No test that renders a component would notice, because no
   // component is involved: it is an agreement between a config string and a
   // route table.
-  it('is a route App.jsx actually declares', async () => {
-    const { AUTH_REDIRECT_PATH } = await loadConfig({
-      VITE_ENTRA_TENANT_ID: TENANT,
-      VITE_ENTRA_CLIENT_ID: CLIENT,
-    });
+  it('is a route App.jsx actually declares, from the same constant', async () => {
     const app = readFileSync(join(process.cwd(), 'src', 'App.jsx'), 'utf8');
 
-    expect(app).toContain(`path="${AUTH_REDIRECT_PATH}"`);
+    // The literal would also work and is what this file used to assert. The
+    // constant is stronger: a second spelling cannot appear, because there is
+    // only one string and both sides import it from authRoutes.js.
+    expect(app).toContain('path={AUTH_REDIRECT_PATH}');
+    expect(app).toContain("from '@/lib/authRoutes'");
   });
 
   it('is what redirectUri points at, not a second copy of the string', async () => {
-    const { msalConfig, AUTH_REDIRECT_PATH } = await loadConfig({
+    const { msalConfig } = await loadConfig({
       VITE_ENTRA_TENANT_ID: TENANT,
       VITE_ENTRA_CLIENT_ID: CLIENT,
     });
+    const { AUTH_REDIRECT_PATH } = await import('./authRoutes.js');
 
     expect(msalConfig.auth.redirectUri.endsWith(AUTH_REDIRECT_PATH)).toBe(true);
     // An absolute URI, because Entra matches the registered value exactly.
