@@ -48,20 +48,23 @@ import {
 import { bearerTokenFrom } from './verify-token.js';
 
 /**
- * Escape a value for an RFC 7235 quoted-string.
+ * Render a value as an RFC 7235 quoted-string body.
  *
- * These descriptions are ours, not a caller's, but a stray quote would split
- * the header into something a client parses wrongly rather than not at all —
- * the worse of the two failures.
+ * This ESCAPES rather than strips. The earlier version deleted backslashes and
+ * quotes, which silently changed the text and was not what its own name said —
+ * and now that the client unescapes properly (`parseWwwAuthenticate` in
+ * lib/api.js), escaping is the half that makes the round trip lossless.
+ *
+ * CR/LF are normalised to a space rather than escaped, because a quoted-string
+ * cannot carry them and a newline in a header value is response splitting.
+ * Nothing reaching here is attacker-supplied today — every description is a
+ * literal — but that is a property of the current call sites, not of this
+ * function, so it is enforced where it cannot be forgotten.
  */
-const quote = (value) =>
+const quoteString = (value) =>
   String(value)
-    // CR/LF first: a newline in a header value is response splitting, and
-    // nothing here is attacker-supplied today only because every description
-    // is a literal. That is a property of the current call sites, not of this
-    // function, so it is enforced here where it cannot be forgotten.
     .replace(/[\r\n]+/g, ' ')
-    .replace(/[\\"]/g, '');
+    .replace(/([\\"])/g, '\\$1');
 
 /**
  * Uniform JSON error.
@@ -96,9 +99,9 @@ function deny(status, error, challenge) {
 
   if (status === 401) {
     const parts = ['realm=""'];
-    if (challenge?.code) parts.push(`error="${quote(challenge.code)}"`);
+    if (challenge?.code) parts.push(`error="${quoteString(challenge.code)}"`);
     if (challenge?.description) {
-      parts.push(`error_description="${quote(challenge.description)}"`);
+      parts.push(`error_description="${quoteString(challenge.description)}"`);
     }
     headers['WWW-Authenticate'] = `Bearer ${parts.join(', ')}`;
   }
@@ -242,15 +245,13 @@ export function createRoleGuard({ verifier, lookupAdmin, auditDenial, now = Date
     const token = bearerTokenFrom(request);
 
     if (!token) {
-      // No `error` parameter: RFC 6750 reserves that for a credential that was
-      // presented and refused. Nothing was presented here.
-      return {
-        user: null,
-        role: null,
-        error: deny(401, 'Authentication required', {
-          description: 'No bearer token was presented.',
-        }),
-      };
+      // A BARE CHALLENGE. RFC 6750 §3: when the request includes no
+      // authentication credentials at all, the response "SHOULD NOT include an
+      // error code or other error information" — there is no failed attempt to
+      // describe, and saying so would only tell an unauthenticated caller how
+      // this endpoint behaves. The client reads the absent error code as
+      // "sign in", which is exactly right.
+      return { user: null, role: null, error: deny(401, 'Authentication required', {}) };
     }
 
     let user;

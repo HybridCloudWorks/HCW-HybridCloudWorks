@@ -52,6 +52,17 @@ This project has not cut a tagged release; entries are grouped under
   A 401 with no challenge — an older API, or a proxy that strips the header —
   behaves exactly as it did before, and there is a test pinning that.
 
+  A 401 carrying **no credential at all** sends a bare `Bearer realm=""`. RFC
+  6750 §3 is explicit that such a response "SHOULD NOT include an error code or
+  other error information" — there is no failed attempt to describe, and
+  describing one would only tell an unauthenticated caller how the endpoint
+  behaves. The client reads the absent code as "sign in", which is right.
+
+  The header builder escapes rather than strips, so a description survives the
+  round trip to the client's parser intact; CR/LF are normalised to a space,
+  because a quoted-string cannot carry them and a newline in a header value is
+  response splitting.
+
   The `invalid_token` description is a fixed sentence rather than the verifier's
   own message. `verify-token.js` says its claim assertions "land in
   `admin_audit_logs` and never reach the client", and the header becoming

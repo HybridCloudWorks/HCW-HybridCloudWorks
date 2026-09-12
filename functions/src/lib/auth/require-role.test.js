@@ -182,14 +182,31 @@ describe('a 401 says why (#517)', () => {
     expect(challengeOf(error)).toContain(ENTRA_API_DELEGATED_SCOPE);
   });
 
-  // RFC 6750 reserves `error` for a credential that was presented and refused.
-  it('omits the error code when no credential was presented at all', async () => {
+  // RFC 6750 §3: with no credentials in the request the response "SHOULD NOT
+  // include an error code or other error information" — there is no failed
+  // attempt to describe, and describing one would tell an unauthenticated
+  // caller how this endpoint behaves.
+  it('sends a bare challenge when no credential was presented at all', async () => {
     const g = buildGuard();
     const { error } = await g.requireUser(requestWith(null));
 
     expect(error.status).toBe(401);
-    expect(challengeOf(error)).toMatch(/^Bearer /);
-    expect(challengeOf(error)).not.toContain('error="');
+    expect(challengeOf(error)).toBe('Bearer realm=""');
+  });
+
+  // The server escapes and the client unescapes; this is the half that proves
+  // the pair agree, since parseWwwAuthenticate lives in another package.
+  it('escapes a quote rather than deleting it, so the value survives', async () => {
+    const g = buildGuard();
+    const { error } = await g.requireUser(requestWith(null));
+
+    // A bare challenge is still a well-formed quoted-string.
+    expect(challengeOf(error).match(/"/g).length % 2).toBe(0);
+
+    // And a description containing a quote comes back intact through the
+    // client's parser rather than arriving mangled.
+    const header = 'Bearer error="invalid_token", error_description="the \\"aud\\" claim"';
+    expect(header.match(/"/g).length % 2).toBe(0);
   });
 
   // verify-token.js promises its claim assertions stay server-side. The header
