@@ -159,11 +159,21 @@ export async function authedFetch(fnName, { token: presetToken, ...options } = {
       errData.message !== errData.error
         ? ` — ${errData.message.trim()}`
         : '';
-    throw new Error(
+    const error = new Error(
       (errData.error || `${fnName} failed with HTTP ${res.status}. Try again or check the logs.`) +
         cause +
         detailText
     );
+    // The status code, kept on the error rather than flattened into prose.
+    // Without it every failure looks the same to a caller, and useAdminAuth
+    // could not tell "the server says you are not an admin" from "the server
+    // rejected the token" — which is how an expired session rendered as
+    // Access Denied with an offer to re-provision the owner (#503). Callers
+    // that only show `err.message` are unaffected; a thrown Error with extra
+    // own-properties behaves exactly as before.
+    error.status = res.status;
+    error.fnName = fnName;
+    throw error;
   }
 
   return res;

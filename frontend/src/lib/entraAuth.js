@@ -320,13 +320,24 @@ export async function signOutUser() {
  * only when MSAL requires it. Throws 'Not authenticated. Please sign in.'
  * with no active account — the exact message authedFetch used to throw, so
  * caller error handling is unchanged.
+ *
+ * EVERY THROWN ERROR CARRIES `authRecovery`, naming the one thing that would
+ * fix it: `'sign-in'` when there is no session to renew, `'reauthenticate'`
+ * when there is one and the silent renewal failed anyway. Callers used to see
+ * an untagged Error and had no way to distinguish a token that could not be
+ * obtained from a server that said no — so they said no on the token's behalf
+ * (#503). MSAL labels only the failures it is certain about with
+ * `InteractionRequiredAuthError`; the rest arrive as ordinary errors and are
+ * still, from the page's point of view, a check that could not run.
  */
 export async function acquireApiToken({ forceRefresh = false } = {}) {
   await initializeAuth();
   const msal = getMsalInstance();
   const account = msal.getActiveAccount();
   if (!account) {
-    throw new Error('Not authenticated. Please sign in.');
+    const err = new Error('Not authenticated. Please sign in.');
+    err.authRecovery = 'sign-in';
+    throw err;
   }
   try {
     const result = await msal.acquireTokenSilent({ ...apiTokenRequest, account, forceRefresh });
@@ -335,8 +346,34 @@ export async function acquireApiToken({ forceRefresh = false } = {}) {
     if (err instanceof InteractionRequiredAuthError) {
       await msal.acquireTokenRedirect({ ...apiTokenRequest, account });
       // Unreachable: the redirect navigates away.
-      throw new Error('Redirecting to sign-in.');
+      const redirecting = new Error('Redirecting to sign-in.');
+      redirecting.authRecovery = 'reauthenticate';
+      throw redirecting;
     }
+    err.authRecovery = 'reauthenticate';
     throw err;
   }
+}
+
+/**
+ * Re-acquire the API token interactively, for a session that could not be
+ * verified silently.
+ *
+ * Redirect, not popup, for the reasons `prefersRedirect()` records — the
+ * browser decides what `window.open` produces, and a top-level window loses
+ * the handshake. No `prompt` is passed on purpose: if the Entra session is
+ * still good this completes without showing the user anything and returns them
+ * to the page they were on, and if it is gone Entra asks them to sign in. That
+ * is the owner's ask in #503 — either the token is there, or authenticating is
+ * what happens next. Never a denial.
+ *
+ * Returns null in the normal case, because the page navigates away.
+ */
+export async function reauthenticateForApi() {
+  await initializeAuth();
+  const msal = getMsalInstance();
+  const account = msal.getActiveAccount();
+  if (!account) return signIn();
+  await msal.acquireTokenRedirect({ ...apiTokenRequest, account });
+  return null;
 }

@@ -133,8 +133,45 @@ export function createAdminIdentityHandlers({
 }) {
   const actor = (user) => user.email || user.preferred_username || user.oid || user.sub || 'admin';
 
+  /**
+   * Would `bootstrapCurrentUserAdmin` actually succeed for this caller?
+   *
+   * The frontend used to offer "Bootstrap My Admin Access" to anyone it failed
+   * to confirm as an admin, which is how the owner — already holding an
+   * `admins` record — was invited to re-provision himself after nothing worse
+   * than an expired token (#503). The UI cannot guess this: the gate is the
+   * allowlist env vars and the state of the registry, neither of which the
+   * browser can see. So it asks, and this answers with the same three-way gate
+   * the POST enforces.
+   *
+   * `record` short-circuits it. An account with a row in `admins` is either an
+   * admin already (never on this screen) or one that was deliberately
+   * deactivated, and offering the second one a self-promotion to `super_admin`
+   * is the opposite of what the deactivation meant.
+   */
+  async function canBootstrapSelf(user, record) {
+    if (record) return false;
+    if (!checkBootstrapAllowlist(user, env).ok) return false;
+    const activeAdmins = await store.queryDocs(
+      'admins',
+      'SELECT TOP 1 c.id FROM c WHERE c.active = true',
+      []
+    );
+    return activeAdmins.length === 0;
+  }
+
   return {
-    /** GET /api/getCurrentAdminStatus — answers from the admins registry. */
+    /**
+     * GET /api/getCurrentAdminStatus — answers from the admins registry.
+     *
+     * A 200 is an ANSWER: `isAdmin` is true or false because the registry was
+     * read. A 401 or a 500 is a check that could not run, and the frontend is
+     * required to render those differently (#503) — `requireUser` only ever
+     * denies with 401, so a non-200 here is never an authorization verdict.
+     *
+     * The `isAdmin: false` answer carries `canBootstrap` so the UI can offer
+     * the bootstrap button only when it would work.
+     */
     async getCurrentAdminStatus(request, context) {
       const auth = await guard.requireUser(request);
       if (auth.error) {
@@ -147,7 +184,12 @@ export function createAdminIdentityHandlers({
 
         const record = await store.readDoc('admins', oid, oid);
         if (!record || record.active !== true || !record.role) {
-          return json(200, { isAdmin: false, uid: oid, email });
+          return json(200, {
+            isAdmin: false,
+            uid: oid,
+            email,
+            canBootstrap: await canBootstrapSelf(user, record),
+          });
         }
         return json(200, {
           isAdmin: true,
