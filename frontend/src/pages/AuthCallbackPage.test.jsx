@@ -34,9 +34,29 @@ beforeEach(() => {
   // the same worker, which surfaced as an unrelated route test failing in the
   // full run and passing on its own. Restore it explicitly, below.
   originalLocation = Object.getOwnPropertyDescriptor(window, 'location');
+  // EVERY FIELD NAMED, NOT SPREAD. jsdom's `Location` exposes `pathname` and
+  // `search` as accessors on the prototype, so `{ ...window.location }` drops
+  // them — and the code under test builds its replacement URL from exactly
+  // those two. The fragment assertion would then be checking
+  // `'undefinedundefined'` for a `code=` it could never contain, and passing
+  // for the wrong reason.
   Object.defineProperty(window, 'location', {
     configurable: true,
-    value: { ...window.location, hash: FRAGMENT, replace: locationReplace },
+    value: {
+      href: `https://example.test/auth/callback${FRAGMENT}`,
+      origin: 'https://example.test',
+      protocol: 'https:',
+      host: 'example.test',
+      hostname: 'example.test',
+      port: '',
+      pathname: '/auth/callback',
+      search: '',
+      hash: FRAGMENT,
+      replace: locationReplace,
+      assign: vi.fn(),
+      reload: vi.fn(),
+      toString: () => `https://example.test/auth/callback${FRAGMENT}`,
+    },
   });
   vi.spyOn(console, 'error').mockImplementation(() => {});
 });
@@ -53,6 +73,21 @@ describe('a completed sign-in', () => {
 
     await waitFor(() => expect(locationReplace).toHaveBeenCalledWith('/admin'));
     expect(replaceState).toHaveBeenCalled();
+  });
+
+  // MSAL's `navigateToLoginRequestUrl` returns the user to whichever page
+  // started sign-in — `/admin/queue`, say — as a client-side history
+  // navigation, so this component's `.then()` still runs afterwards. Replacing
+  // unconditionally would overwrite the destination they actually asked for.
+  it('does not override the page MSAL already returned the user to', async () => {
+    initializeAuth.mockImplementation(async () => {
+      window.location.pathname = '/admin/queue';
+      window.location.hash = '';
+    });
+    render(<AuthCallbackPage />);
+
+    await waitFor(() => expect(initializeAuth).toHaveBeenCalled());
+    expect(locationReplace).not.toHaveBeenCalled();
   });
 });
 
@@ -72,6 +107,10 @@ describe('a failed sign-in', () => {
 
     await waitFor(() => expect(replaceState).toHaveBeenCalled());
     const [, , url] = replaceState.mock.calls.at(-1);
+
+    // Assert what it IS, not only what it lacks: a URL of `undefinedundefined`
+    // would satisfy "contains no code=" while proving nothing.
+    expect(url).toBe('/auth/callback');
     expect(url).not.toContain('code=');
   });
 

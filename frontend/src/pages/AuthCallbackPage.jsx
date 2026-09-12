@@ -48,6 +48,8 @@
  */
 import React, { useEffect, useState } from 'react';
 
+import { AUTH_REDIRECT_PATH } from '@/lib/authRoutes';
+
 export default function AuthCallbackPage() {
   const [error, setError] = useState(false);
 
@@ -82,10 +84,21 @@ export default function AuthCallbackPage() {
       .then(() => {
         if (cancelled) return;
         clearFragment();
-        // Reaching here in an ordinary tab means MSAL did not navigate away —
-        // either the sign-in had no request URL to return to, or this page was
-        // opened directly. Either way `/admin` is where the user was going.
-        window.location.replace('/admin');
+
+        // ONLY IF MSAL DID NOT ALREADY TAKE US SOMEWHERE.
+        //
+        // `navigateToLoginRequestUrl` defaults to true, so MSAL returns the
+        // browser to whichever page started sign-in — `/admin/queue`, say. That
+        // is a client-side history navigation, so this `.then()` still runs
+        // afterwards, and an unconditional replace would overwrite the
+        // destination the user actually asked for with the portal root.
+        //
+        // Still on the callback path means MSAL had nowhere to send us: the
+        // sign-in had no request URL, or somebody opened this page directly.
+        // `/admin` is the right answer only then.
+        if (window.location.pathname === AUTH_REDIRECT_PATH) {
+          window.location.replace('/admin');
+        }
       })
       .catch((err) => {
         // The detail goes to the console, not to the page. MSAL's messages name
