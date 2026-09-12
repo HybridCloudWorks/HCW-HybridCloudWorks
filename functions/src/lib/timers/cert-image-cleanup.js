@@ -40,7 +40,6 @@ export function blobNameFromUrl(url, { accountHost = null } = {}) {
     // mean "not a Google URL", it means "this blob is referenced by nothing"
     // — and the caller DELETES on that answer. A scheme or host in the wrong
     // case would turn a referenced blob into an unreferenced one.
-    // Azure cleanup, it does not fetch the Google URL. See gallery-images.js.
     const gcs = /^https?:\/\/storage\.googleapis\.com\/[^/]+\/(.+?)(?:\?|$)/i.exec(value);
     if (gcs) path = gcs[1];
     else {
