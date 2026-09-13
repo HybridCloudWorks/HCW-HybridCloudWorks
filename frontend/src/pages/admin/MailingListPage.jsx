@@ -4,9 +4,10 @@
  * Resend replaced Klaviyo, which this page used to read through `klaviyoProxy`:
  * lists, profiles and campaigns, and nothing was ever written. The Newsletter
  * tab now builds weekly issues from what the site published, shows each email
- * exactly as it would send, and schedules it through Resend only when approved
- * (components/admin/newsletter). The subscriber list itself is managed in
- * Resend's Audience view.
+ * exactly as it would send, and lets a draft be edited or rejected
+ * (components/admin/newsletter). It does not send: approval, which schedules an
+ * issue through Resend, is a separate change. The subscriber list itself is
+ * managed in Resend's Audience view.
  *
  * The test posts a NAME to `connectionProbe` and the server builds the call,
  * so `RESEND_API_KEY` never reaches the browser.
@@ -176,7 +177,7 @@ export default function MailingListPage() {
         title="Mailing List"
         service="Resend"
         connected={connected}
-        description="Build, review and approve the weekly newsletter, sent through Resend."
+        description="Build and review the weekly newsletter. Sending through Resend arrives with approval."
         accent="violet"
       />
 
