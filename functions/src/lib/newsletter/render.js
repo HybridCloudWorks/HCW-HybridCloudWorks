@@ -45,11 +45,6 @@ const formatRange = (issue) => {
 const COLORS = { ink: '#111827', muted: '#4b5563', rule: '#e5e7eb', accent: '#2563eb', bg: '#f3f4f6' };
 
 /**
- * @param {object} issue a stored weekly issue
- * @param {{ postalAddress: string }} settings
- * @returns {{ subject: string, html: string, text: string }}
- */
-/**
  * The sections as they will be rendered: every link re-checked HERE, at the
  * last step, rather than trusting that each collector already did. A stored
  * issue, a future section or a hand-edited document with a `javascript:`,
@@ -67,6 +62,11 @@ function renderableSections(issue) {
     .filter((section) => section.items.length > 0);
 }
 
+/**
+ * @param {object} issue a stored weekly issue
+ * @param {{ postalAddress: string }} settings
+ * @returns {{ subject: string, html: string, text: string }}
+ */
 export function renderIssue(issue, { postalAddress }) {
   const subject = issue.subject;
   const range = formatRange(issue);

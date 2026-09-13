@@ -128,8 +128,11 @@ draft must not reach a public surface.
 
 #### 2a. A structured issue replaces the digest, and approval schedules the send slot — amended 2026-09-13
 
-§2 above is kept as written, as history. It assumed `digest.js`'s draft — a
-title and a markdown body — was the payload a broadcast needs. Built, it was
+**§2 above is history and no longer describes the code:** `digest.js` and
+`generate-weekly-digest` no longer exist, and what follows is what replaced
+them. §2 is kept as written so the reasoning that was superseded stays
+readable. It assumed `digest.js`'s draft — a title and a markdown body — was
+the payload a broadcast needs. Built, it was
 not: the digest's query carried no URLs, so its newsletter could name articles
 but not link to them, and nothing ever read the container it wrote to.
 
