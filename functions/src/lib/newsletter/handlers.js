@@ -235,11 +235,18 @@ export function createNewsletterHandlers({
       context.error?.('newsletter signup refused: RESEND_API_KEY is not set');
       return json(503, { ok: false, error: 'Newsletter signup is temporarily unavailable.' });
     }
+    // FAIL CLOSED without the salt. The per-address quota document's id is a
+    // hash of the address and is persisted in Cosmos; unsalted, it is a
+    // dictionary-reversible list of everyone who tried to subscribe.
+    const salt = readKey(env, 'CLIENT_IP_SALT');
+    if (!salt) {
+      context.error?.('newsletter signup refused: CLIENT_IP_SALT is not set');
+      return json(503, { ok: false, error: 'Newsletter signup is temporarily unavailable.' });
+    }
 
     if (!(await withinQuota(`newsletter-caller:${caller.key}`, SUBSCRIBE_PER_CALLER_PER_HOUR))) {
       return tooMany();
     }
-    const salt = readKey(env, 'CLIENT_IP_SALT');
     if (!(await withinQuota(`newsletter-address:${addressKey(email, salt)}`, SUBSCRIBE_PER_ADDRESS_PER_HOUR))) {
       return tooMany();
     }
@@ -309,9 +316,16 @@ export function createNewsletterHandlers({
 
     const created = await client.createContact({ email, segmentId: segment });
     if (!created.ok) {
-      // Most likely the address is already a contact — someone who
-      // unsubscribed and is now choosing to come back, which is exactly the
-      // consent this confirmation records.
+      // Resend does not document which status means "already exists", so the
+      // status is not guessed at: the contact is looked up. Only a contact that
+      // really exists is resubscribed — someone who unsubscribed and is now
+      // choosing to come back, which is exactly the consent this records. A
+      // 401, a 5xx or a transport failure finds no contact and is reported as
+      // the create failure it was, not masked by a PATCH.
+      const existing = await client.getContact(email);
+      if (!existing.ok) {
+        return failed(`create ${describe(created)}; no existing contact (${describe(existing)})`);
+      }
       const resubscribed = await client.resubscribeContact(email);
       if (!resubscribed.ok) {
         return failed(`create ${describe(created)}, then update ${describe(resubscribed)}`);

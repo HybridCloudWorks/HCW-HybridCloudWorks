@@ -89,6 +89,7 @@ function makeResend({
       return reply(200, { object: 'segment', id: created.id });
     }
     if (method === 'POST' && pathname === '/contacts') {
+      if (quirks.createFails) return reply(500, { name: 'internal_server_error', message: 'boom' });
       if (state.contacts.has(body.email)) {
         return reply(409, { name: 'contact_exists', message: 'exists' });
       }
@@ -221,6 +222,18 @@ describe('subscribe', () => {
     expect(resend.fetch).not.toHaveBeenCalled();
   });
 
+  it('fails closed without CLIENT_IP_SALT, rather than persisting unsalted address hashes', async () => {
+    const ctx = context();
+    const { subscribe, resend, store } = build({
+      env: { RESEND_API_KEY: API_KEY, CLIENT_IP_SALT: '@Microsoft.KeyVault(SecretUri=x)' },
+    });
+    const res = await subscribe(request({ body: { email: EMAIL } }), ctx);
+    expect(res.status).toBe(503);
+    expect(resend.fetch).not.toHaveBeenCalled();
+    expect([...store.docs.keys()].some((id) => id.startsWith('newsletter-address:'))).toBe(false);
+    expect(everyLogLine(ctx)).toContain('CLIENT_IP_SALT');
+  });
+
   it('says signup is unavailable, not that it worked, when the key is not seeded', async () => {
     const { subscribe } = build({ env: { RESEND_API_KEY: '@Microsoft.KeyVault(SecretUri=x)' } });
     const res = await subscribe(request({ body: { email: EMAIL } }), context());
@@ -317,6 +330,16 @@ describe('confirm', () => {
     const res = await confirm(request({ body: { token } }), context());
     expect(res.status).toBe(200);
     expect(resend.state.contacts.get(EMAIL)).toEqual({ email: EMAIL, unsubscribed: false, segments: ['seg-news'] });
+  });
+
+  it('reports a create that failed for a real reason, without a masking PATCH', async () => {
+    const resend = makeResend({ quirks: { createFails: true } });
+    const ctx = context();
+    const { confirm, token } = await signedUp({ resend });
+    const res = await confirm(request({ body: { token } }), ctx);
+    expect(res.status).toBe(502);
+    expect(resend.state.calls.some((call) => call.startsWith('PATCH '))).toBe(false);
+    expect(everyLogLine(ctx)).toContain('create HTTP 500 internal_server_error');
   });
 
   it('adds to the segment when create silently ignored it', async () => {
