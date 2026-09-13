@@ -19,6 +19,48 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The weekly newsletter now drafts itself on a timer (#504, ADR 0030 §2a).**
+  `buildNewsletterIssue` runs the issue builder on **Monday 08:00 UTC**, behind
+  `FEATURE_FLAG_BUILD_NEWSLETTER_ISSUE` like every other timer and, like every
+  other timer, **"false" until it has been observed firing**. This is the
+  follow-up §2a names: the send *slot* is a property of one approved broadcast,
+  the weekly *rhythm* is a Function App timer, and there is still exactly one
+  place the rhythm is configured.
+
+  **Monday 08:00 was chosen against the send slot, not for its own sake.** The
+  default slot is Tuesday 09:00 `America/Chicago` — 14:00 UTC in summer, 15:00
+  in winter — so the draft lands about thirty hours ahead of it in either
+  offset, leaving a working Monday to read and approve it. It is also after the
+  03:30 forge run, so the week's last drafted articles are published and carry
+  the public URLs the sections link to. An hour picked without both of those in
+  view would drift into the send slot in one DST direction or miss the last
+  articles in the other.
+
+  **Arming it cannot email anyone.** `build` writes a `draft`; nothing in the
+  builder reaches Resend, and only a publisher's approval sends — which is
+  separately switched off while `newsletter_sending_enabled` is `false`. So
+  this flag is safe to turn on before the sending decision is made, which is
+  the point of landing it as its own change.
+
+  **Re-running is safe by construction.** The issue id is the UTC date of the
+  build, so pressing Build on the Mailing List page the same day refreshes this
+  draft rather than creating a second one that could also be approved, and an
+  issue already approved is never overwritten.
+
+  Adding a timer is never one edit here, and the rest are the kind that rot
+  quietly: `local.timer_catalogue` and the `enabled_timers` validation
+  allowlist, which must agree or the timer is catalogued and unarmable; the
+  registration totals asserted in `route-inventory.test.js` and
+  `timer-schedules-utc.test.js`; and the prose in those two files and in
+  `variables.tf` that states how many timers exist, which no test can fail on
+  and which is wrong the moment it is not updated by hand.
+
+  `timer-schedules-utc.test.js` also gains the UTC intent for the new schedule.
+  It refuses any timer that names an hour without one, which is what stops
+  `0 0 8 * * 1` from quietly meaning something else if an app clock is ever
+  re-introduced — the #416 failure, where an expression and a setting were each
+  valid and only their combination was wrong.
+
 - **Approve the weekly newsletter from the Mailing List page (#504, ADR 0030
   §2a).** `POST /api/cms/newsletters/{id}/approve` routes the approval logic
   added just before this, and the Newsletter tab gains **Approve and

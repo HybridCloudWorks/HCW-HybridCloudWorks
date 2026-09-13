@@ -59,6 +59,7 @@ locals {
     PUBLISH_SCHEDULED_CONTENT    = "publishScheduledContent — publishes content whose scheduledPublishDate is due"
     SYNC_RSS_FEEDS               = "syncRssFeeds — RSS ingest, every 2 hours"
     FORGE_SCHEDULED              = "forgeScheduled — daily 03:30 UTC content forge run"
+    BUILD_NEWSLETTER_ISSUE       = "buildNewsletterIssue — weekly Monday 08:00 UTC, drafts the newsletter issue ahead of the Tuesday send slot. Never sends: only a publisher's approval reaches Resend (ADR 0030 §2a)"
     MONITOR_PUBLISHING_PIPELINE  = "monitorPublishingPipeline — publishing watchdog, every 6 hours"
     GENERATE_REVIEWER_DIGEST     = "generateReviewerDigest — daily 07:00 UTC reviewer digest e-mail"
     CHECK_LIVE_LINKS             = "checkLiveLinks — weekly Monday 06:00 UTC link check"
@@ -609,8 +610,8 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     #
     # These are generated from `local.timer_flags` rather than written out here,
     # so turning a timer on is a WORKSPACE VARIABLE edit — add its name to
-    # `enabled_timers` — and not a code change. Eighteen timers turned on one at
-    # a time would otherwise be eighteen pull requests during a cutover window,
+    # `enabled_timers` — and not a code change. Nineteen timers turned on one at
+    # a time would otherwise be nineteen pull requests during a cutover window,
     # which is how a "one at a time, watch each one" procedure quietly becomes
     # "turn them all on and see what breaks".
     #

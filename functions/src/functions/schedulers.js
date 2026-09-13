@@ -155,6 +155,33 @@ timer('forgeScheduled', 'FORGE_SCHEDULED', '0 30 3 * * *', async (context) => {
   return createForgeScheduled({ store, config, forge, log: context }).run();
 });
 
+// The weekly rhythm ADR 0030 §2a leaves to a timer: when an issue is DRAFTED.
+// It never sends — `build` writes a `draft`, and only a publisher's approval
+// reaches Resend — so this flag turning on cannot email anyone.
+//
+// Monday 08:00 UTC, chosen against the send slot rather than for its own sake.
+// The default slot is Tuesday 09:00 America/Chicago (settings.js), which is
+// 14:00 UTC in summer and 15:00 in winter, so this lands about thirty hours
+// ahead of it and leaves the owner a working Monday to read the draft and
+// approve. It is also after the 03:30 forge run, so the week's last drafted
+// articles are published and carry the public URLs the sections link to.
+//
+// Re-running is safe by construction: the issue id is the UTC date of the
+// build, so a manual Build on the same day refreshes this draft rather than
+// creating a second one, and an issue already approved is never overwritten.
+timer('buildNewsletterIssue', 'BUILD_NEWSLETTER_ISSUE', '0 0 8 * * 1', async (context) => {
+  const [{ createIssueBuilder }, { createDrafter }, ai] = await Promise.all([
+    import('../lib/newsletter/issue.js'),
+    import('../lib/content/drafting.js'),
+    import('../lib/ai/router.js'),
+  ]);
+  return createIssueBuilder({
+    store,
+    drafter: createDrafter({ store, ai }),
+    log: context,
+  }).build({});
+});
+
 // ── Publishing ───────────────────────────────────────────────────────────────
 
 timer('publishScheduledContent', 'PUBLISH_SCHEDULED_CONTENT', '0 */15 * * * *', async (context) => {

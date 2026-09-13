@@ -1111,7 +1111,7 @@ variable "tags" {
 # exactly the "false" it is today until an owner decides otherwise.
 variable "schedulers_master_enabled" {
   description = <<-EOT
-    Master kill switch for all 18 timers (FEATURE_FLAG_SCHEDULERS).
+    Master kill switch for all 19 timers (FEATURE_FLAG_SCHEDULERS).
 
     False holds every timer off regardless of enabled_timers.
     schedulers.js checks this first and skips the handler before reading the
@@ -1120,7 +1120,7 @@ variable "schedulers_master_enabled" {
     True hands control back to enabled_timers, which is still empty by default
     — so turning this on by itself also arms nothing. Both are required, which
     is the point: the master switch is what an operator flips to stop
-    everything during an incident without editing eighteen entries.
+    everything during an incident without editing nineteen entries.
 
     Migration-Plan §6 step 7 arms timers ONE AT A TIME. Set this true first,
     then add timers to enabled_timers one per apply, each observed firing at
@@ -1178,6 +1178,7 @@ variable "enabled_timers" {
     condition = alltrue([
       for name in var.enabled_timers : contains([
         "PUBLISH_SCHEDULED_CONTENT", "SYNC_RSS_FEEDS", "FORGE_SCHEDULED",
+        "BUILD_NEWSLETTER_ISSUE",
         "MONITOR_PUBLISHING_PIPELINE", "GENERATE_REVIEWER_DIGEST", "CHECK_LIVE_LINKS",
         "CLEANUP_REJECTED_CONTENT", "CLEANUP_SOFT_DELETED_CONTENT",
         "REVERIFY_CERTIFICATIONS", "SCRAPE_SKILLS_HUB_RSS", "REFRESH_PLAUD_TOKEN",
