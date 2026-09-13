@@ -124,6 +124,13 @@ const PUBLIC_ROUTES = new Set([
   'public/podcasts',
   'public/feed',
   'public/submissions', // anonymous write: validated, quota-limited, Cloudflare-verified
+  // Newsletter double opt-in (#504, ADR 0030). Subscribe writes nothing to the
+  // list — it emails a signed link — and is limited per caller AND per address,
+  // because it is otherwise a way to make this site email a stranger. Confirm's
+  // authorization is that link: an HMAC over the address and an expiry, keyed
+  // off RESEND_API_KEY — lib/newsletter/confirmation-token.js.
+  'public/newsletter/subscribe',
+  'public/newsletter/confirm',
   'public/media/{container}/{*blobPath}', // container allowlist — lib/blob-paths.js
   // Returns one field, `imageUrl`, for one cached news-article image — never
   // the document, which carries an internal blob path and prompt metadata. It

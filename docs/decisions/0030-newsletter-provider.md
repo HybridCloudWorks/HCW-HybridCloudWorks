@@ -1,6 +1,6 @@
 # ADR 0030: The newsletter provider is Resend, and the site owns the schedule
 
-**Status:** Accepted 2026-09-12
+**Status:** Accepted 2026-09-12; §3 amended 2026-09-13 (§3a)
 **Decision date:** 2026-09-12
 **Owners:** Workload owner
 
@@ -134,6 +134,27 @@ The route is `POST newsletterSubscribe`, taking `{ email, source, website }`
 posts and already parses, so **the frontend does not change**, and the
 vendor's name appears nowhere in the contract. A later provider change is a
 change to the handler.
+
+#### 3a. The path follows the public-route convention, and double opt-in adds a second route — amended 2026-09-13
+
+Two things changed when this was built, and neither touches the contract's
+substance.
+
+**The path is `POST public/newsletter/subscribe`, not `newsletterSubscribe`.**
+Every other anonymous route lives under `public/`, and `route-inventory.test.js`
+keeps its allowlist in those terms. Following the convention cost the frontend
+one changed URL, so "the frontend does not change" above held for the body and
+the response, not for the path. The body is still `{ email, source, website }`
+and still names no vendor.
+
+**Double opt-in, chosen by the owner on 2026-09-13, adds
+`POST public/newsletter/confirm`.** Subscribe emails a signed link and adds
+nobody; confirm verifies it and writes the contact. §4 is why the pending state
+lives in the link rather than in Cosmos: a pending-subscriber container would be
+the mirror §4 refuses. The link's HMAC key is derived from `RESEND_API_KEY`
+rather than being a new secret — whoever holds that key can add contacts
+directly, so a forged confirmation grants them nothing, and it spares a second
+value to seed. `lib/newsletter/confirmation-token.js` carries the full argument.
 
 ### 4. Resend holds the list; the site does not mirror it
 

@@ -44,6 +44,10 @@ const NEVER_PRERENDER = [
   { prefix: '/admin', why: 'private UI behind Entra sign-in' },
   { prefix: '/preview', why: 'signed staging view of an UNPUBLISHED draft (T-606)' },
   {
+    prefix: '/newsletter/confirm',
+    why: 'the double opt-in landing page; it means nothing without the signed link in its fragment (#504)',
+  },
+  {
     prefix: '/auth',
     why: 'an OAuth landing page; pre-rendering publishes a titled, indexable page whose only job is to consume a fragment (#520)',
   },

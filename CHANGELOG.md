@@ -19,6 +19,37 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The newsletter signup works, with double opt-in (#504, ADR 0030 §3a).** The
+  form on every page posted to a route that never existed. It now posts to
+  `public/newsletter/subscribe`, which emails a confirmation link from
+  `newsletter@news.hybridcloudworks.com` and adds nobody to the list; the link
+  opens `/newsletter/confirm`, and only pressing Confirm there writes the contact
+  to Resend's Newsletter segment. This is the second of three steps; sending the
+  weekly digest is the third.
+
+  **Confirm does not trust the write.** ADR 0030 named `resend/resend-node#458`,
+  a contact created `unsubscribed: false` coming back unsubscribed — which would
+  tell someone they are in and then skip them on every broadcast. So after
+  writing, confirm reads the contact and its segments back and answers success
+  only when both say subscribed, repairing once if they do not. Resend does not
+  document what creating an existing contact does either; the same read-back
+  covers it, and someone who had unsubscribed and confirms again is resubscribed,
+  because confirming is that consent.
+
+  **Signup is a way to make this site email a stranger, so it is limited twice:**
+  five attempts per Cloudflare-verified caller per hour, and two confirmation
+  emails per address per hour whoever asks. It never reads the list, so it
+  answers identically whether or not an address is already subscribed. A filled
+  honeypot is answered like a real signup and sends nothing.
+
+  **Three choices keep the address out of places it does not belong.** The token
+  rides in the URL fragment, which no server sees, so the address inside it never
+  reaches a request log. Loading the confirm page confirms nothing — mail scanners
+  open every link before the person does — and only the button POSTs. No log line
+  in either handler contains an address. The token's HMAC key is HKDF-derived
+  from `RESEND_API_KEY`, so there is no second secret to seed: whoever holds that
+  key can add contacts directly, and forging a confirmation grants them nothing.
+
 - **Resend replaces Klaviyo: its key has a row on the API-keys page and a test
   that refuses the wrong kind of key (#504, ADR 0030).** This is the first of
   three steps. It swaps the plumbing; the signup route and sending follow.
