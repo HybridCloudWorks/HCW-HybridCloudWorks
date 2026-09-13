@@ -136,11 +136,13 @@ describe('concurrency through the etag', () => {
     expect(saved.issue.etag).not.toBe('e1');
   });
 
-  it('refuses an edit or a reject that sends no etag, and writes nothing', async () => {
+  it('refuses an edit or a reject that sends no etag or no body, with one error shape, and writes nothing', async () => {
     const { handlers, store } = build();
     for (const res of [
       await handlers.update(request({ body: { customNote: 'No version' } }), context()),
       await handlers.update(request({ body: { customNote: 'Empty', etag: '' } }), context()),
+      await handlers.update(request(), context()),
+      await handlers.update(request({ body: ['not', 'an', 'object'] }), context()),
       await handlers.reject(request({ body: {} }), context()),
       await handlers.reject(request(), context()),
     ]) {

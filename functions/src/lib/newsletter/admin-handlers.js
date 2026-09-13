@@ -169,9 +169,9 @@ export function createNewsletterAdminHandlers({
       const auth = await guard.requireRole(request, 'editor');
       if (auth.error) return auth.error;
       const body = await request.json().catch(() => null);
-      if (!body || typeof body !== 'object' || Array.isArray(body)) {
-        return json(400, { ok: false, error: 'Body must be a JSON object' });
-      }
+      // No body, or not an object, is a write with no etag: the same structured
+      // answer reject gives, so a client handles one error shape for both.
+      if (!body || typeof body !== 'object' || Array.isArray(body)) return etagRequired();
       const unknown = Object.keys(body).filter((key) => !['customNote', 'subject', 'etag'].includes(key));
       if (unknown.length) return json(400, { ok: false, error: `Unknown field(s): ${unknown.join(', ')}` });
       if (missingEtag(body)) return etagRequired();
