@@ -1,6 +1,6 @@
 /**
  * platform-settings.js — the Admin → Platform settings page's read and write
- * of four `admin_config` documents, three of which until now could only be
+ * of five `admin_config` documents, three of which until now could only be
  * seeded by an operator holding a Cosmos data-plane role (#351, #352, and the
  * feed list from #348/#349):
  *
@@ -8,6 +8,8 @@
  *   social-autopost         → admin_config/social_autopost         read by triggers/social-caption-trigger.js
  *   podcast-feeds           → admin_config/podcast_feeds           read by timers/podcasts.js
  *   listen-and-learn-speech → admin_config/listen_and_learn_speech read by functions/listen-and-learn-jobs.js
+ *   newsletter-settings     → admin_config/newsletter_settings     read by lib/newsletter/admin-handlers.js
+ *                             (to be edited from the Mailing List page, not Platform settings)
  *
  * Every write is normalized to EXACTLY the shape its consumer reads — the
  * whole point of a screen over a hand-seeded document is that the shape can
@@ -37,6 +39,14 @@ import {
   listenAndLearnModelOptions,
 } from './listen-and-learn/speech-settings.js';
 import { GEMINI_DEFAULT_MODEL } from './listen-and-learn/speech/gemini.js';
+import {
+  DEFAULT_NEWSLETTER_SETTINGS,
+  MAX_POSTAL_ADDRESS_LENGTH,
+  NEWSLETTER_SETTINGS_CONFIG_ID,
+  SEND_DAYS,
+} from './newsletter/settings.js';
+import { isValidSendTime, isValidTimeZone } from './newsletter/schedule.js';
+import { normalizeEmail } from './newsletter/email.js';
 
 const json = (status, body) => ({
   status,
@@ -324,6 +334,53 @@ export function normalizeListenAndLearnSpeech(body) {
   return { geminiModel: raw };
 }
 
+// ── newsletter ─────────────────────────────────────────────────────────────
+
+/**
+ * `{ postalAddress, replyTo, sendDay, sendTime, timeZone }` → the document the
+ * newsletter approval reads (lib/newsletter/admin-handlers.js). Blank address
+ * and reply-to are ALLOWED here, so the page can save one before the other;
+ * approval is what refuses to send without them (`missingForSending`).
+ */
+export function normalizeNewsletterSettings(body) {
+  if (!isPlainObject(body)) fail('Body must be a JSON object');
+  const keys = Object.keys(DEFAULT_NEWSLETTER_SETTINGS);
+  assertOnlyKeys(body, keys, 'body');
+  const value = { ...DEFAULT_NEWSLETTER_SETTINGS };
+
+  if (body.postalAddress !== undefined) {
+    if (typeof body.postalAddress !== 'string') fail('postalAddress must be a string');
+    const address = body.postalAddress.replace(/\r\n/g, '\n').trim();
+    if (address.length > MAX_POSTAL_ADDRESS_LENGTH) {
+      fail(`postalAddress must be at most ${MAX_POSTAL_ADDRESS_LENGTH} characters`);
+    }
+    value.postalAddress = address;
+  }
+  if (body.replyTo !== undefined) {
+    if (typeof body.replyTo !== 'string') fail('replyTo must be a string');
+    const trimmed = body.replyTo.trim();
+    if (trimmed && !normalizeEmail(trimmed)) fail('replyTo must be an email address');
+    // Replies to the sending subdomain go nowhere: receiving is off there.
+    if (/@news\.hybridcloudworks\.com$/i.test(trimmed)) {
+      fail('replyTo must be an inbox that receives mail; news.hybridcloudworks.com does not');
+    }
+    value.replyTo = trimmed;
+  }
+  if (body.sendDay !== undefined) {
+    if (!SEND_DAYS.includes(body.sendDay)) fail(`sendDay must be one of ${SEND_DAYS.join(', ')}`);
+    value.sendDay = body.sendDay;
+  }
+  if (body.sendTime !== undefined) {
+    if (!isValidSendTime(body.sendTime)) fail('sendTime must be HH:MM (24-hour)');
+    value.sendTime = body.sendTime;
+  }
+  if (body.timeZone !== undefined) {
+    if (!isValidTimeZone(body.timeZone)) fail('timeZone must be an IANA time zone such as America/Chicago');
+    value.timeZone = body.timeZone;
+  }
+  return value;
+}
+
 // ── the catalogue ──────────────────────────────────────────────────────────
 
 /**
@@ -362,6 +419,11 @@ export const PLATFORM_SETTINGS = Object.freeze({
     // choice selected rather than nothing, because that is what will run.
     empty: () => ({ geminiModel: GEMINI_DEFAULT_MODEL }),
     options: listenAndLearnModelOptions,
+  }),
+  'newsletter-settings': Object.freeze({
+    docId: NEWSLETTER_SETTINGS_CONFIG_ID,
+    normalize: normalizeNewsletterSettings,
+    empty: () => ({ ...DEFAULT_NEWSLETTER_SETTINGS }),
   }),
 });
 
@@ -480,6 +542,16 @@ export function createPlatformSettingsHandlers({
         // A model id is a setting, not content, and which one was chosen is
         // the whole point of the row.
         return { geminiModel: value.geminiModel };
+      case 'newsletter-settings':
+        // Whether each is set, never the address or the inbox: those are
+        // personal details, and the audit row records settings, not content.
+        return {
+          postalAddress: Boolean(value.postalAddress),
+          replyTo: Boolean(value.replyTo),
+          sendDay: value.sendDay,
+          sendTime: value.sendTime,
+          timeZone: value.timeZone,
+        };
       default:
         return {};
     }
