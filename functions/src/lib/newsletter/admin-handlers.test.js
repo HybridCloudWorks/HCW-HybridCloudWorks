@@ -48,7 +48,11 @@ function makeStore({ issue = draftIssue(), settings = completeSettings } = {}) {
       const doc = docs.get(`${container}/${id}`);
       return doc ? { ...doc } : null;
     }),
-    queryDocs: vi.fn(async () => [...docs.values()].filter((d) => d.kind === 'weekly_issue')),
+    queryDocs: vi.fn(async (_container, sql) => {
+      // The list must project, not read whole issues.
+      expect(sql).not.toMatch(/SELECT TOP \d+ \* /);
+      return [...docs.values()].filter((d) => d.kind === 'weekly_issue');
+    }),
     upsertDoc: vi.fn(async (container, doc) => {
       etag += 1;
       docs.set(`${container}/${doc.id}`, { ...doc, _etag: `e${etag}` });
@@ -64,7 +68,7 @@ function makeStore({ issue = draftIssue(), settings = completeSettings } = {}) {
   };
 }
 
-function makeResend({ failBroadcast = false } = {}) {
+function makeResend({ failBroadcast = false, onBroadcast } = {}) {
   const broadcasts = [];
   const reply = (status, data) => ({ ok: status < 300, status, text: async () => JSON.stringify(data) });
   const fetch = vi.fn(async (url, init = {}) => {
@@ -73,6 +77,7 @@ function makeResend({ failBroadcast = false } = {}) {
     if (pathname === '/broadcasts') {
       if (failBroadcast) return reply(422, { name: 'validation_error', message: 'from domain not verified' });
       broadcasts.push(JSON.parse(init.body));
+      await onBroadcast?.();
       return reply(200, { id: `bc-${broadcasts.length}` });
     }
     return reply(404, { name: 'unexpected' });
@@ -174,6 +179,32 @@ describe('approve', () => {
     const [a, b] = await Promise.all([handlers.approve(request(), context()), handlers.approve(request(), context())]);
     expect([a.status, b.status].sort()).toEqual([200, 409]);
     expect(resend.broadcasts).toHaveLength(1);
+  });
+
+  it('does not overwrite a reject that lands while Resend is being asked, and names the broadcast', async () => {
+    const store = makeStore();
+    let rejectCtx;
+    const resend = makeResend({
+      // The owner clears the "sending" state from another tab mid-request.
+      onBroadcast: async () => {
+        const res = await createNewsletterAdminHandlers({
+          guard: allow('editor'),
+          store,
+          env: { RESEND_API_KEY: API_KEY },
+          fetch: vi.fn(),
+          now: () => NOW,
+        }).reject(request(), (rejectCtx = context()));
+        expect(res.status).toBe(200);
+      },
+    });
+    const { handlers } = build({ store, resend });
+    const res = await handlers.approve(request(), context());
+
+    expect(res.status).toBe(409);
+    expect(bodyOf(res)).toMatchObject({ code: 'CHANGED_DURING_SEND', broadcastId: 'bc-1' });
+    expect(bodyOf(res).error).toContain("cancel it in Resend's Broadcasts page");
+    expect(store.docs.get(`newsletters/${ID}`).status).toBe('rejected');
+    expect(rejectCtx.error).not.toHaveBeenCalled();
   });
 
   it('refuses to send without the postal address and reply-to, and changes nothing', async () => {

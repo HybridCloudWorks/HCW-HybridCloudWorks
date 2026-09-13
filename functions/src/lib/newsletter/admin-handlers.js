@@ -65,6 +65,9 @@ const SUMMARY_FIELDS = [
   'lastError',
 ];
 
+/** The list reads only what it shows, not every issue's sections. */
+const SUMMARY_PROJECTION = SUMMARY_FIELDS.map((field) => `c.${field}`).join(', ');
+
 const pick = (doc, fields) => Object.fromEntries(fields.filter((f) => doc[f] !== undefined).map((f) => [f, doc[f]]));
 
 const describe = (result) => {
@@ -138,7 +141,7 @@ export function createNewsletterAdminHandlers({
       try {
         const rows = await store.queryDocs(
           'newsletters',
-          `SELECT TOP ${LIST_LIMIT} * FROM c WHERE c.kind = 'weekly_issue' ORDER BY c.createdAt DESC`,
+          `SELECT TOP ${LIST_LIMIT} ${SUMMARY_PROJECTION} FROM c WHERE c.kind = 'weekly_issue' ORDER BY c.createdAt DESC`,
           []
         );
         return json(200, { ok: true, issues: (rows || []).map((row) => pick(row, SUMMARY_FIELDS)) });
@@ -255,20 +258,44 @@ export function createNewsletterAdminHandlers({
       }
 
       const client = createResendClient({ apiKey, fetch: fetchImpl });
+
+      /**
+       * Write the claim's outcome ONLY if the issue is still the claim. Reject
+       * is allowed from `sending` (to clear a stuck send), so an owner can
+       * reject while this request is between the claim and Resend's answer; an
+       * unconditional write here would silently undo that. The fresh read
+       * supplies the ETag the conditional replace needs.
+       *
+       * @returns {Promise<{ written: true } | { written: false, current: object|null }>}
+       */
+      const settle = async (next) => {
+        const current = await store.readDoc('newsletters', issue.id, issue.id);
+        if (current?.status !== 'sending' || current?.approvedAt !== approvedAt) {
+          return { written: false, current };
+        }
+        try {
+          await store.replaceDocIfMatch('newsletters', { ...next, _etag: current._etag });
+          return { written: true };
+        } catch (error) {
+          if (error?.code === 412) return { written: false, current: null };
+          throw error;
+        }
+      };
+
       const revert = async (reason) => {
         context.error?.(`approveNewsletter ${issue.id} not sent: ${reason}`);
-        await store
-          .upsertDoc('newsletters', {
-            ...claimed,
-            status: 'draft',
-            // Not approved after all: nothing was scheduled, so the issue must
-            // not read as approved in the list or the preview.
-            approvedAt: null,
-            approvedBy: null,
-            lastError: reason,
-            updatedAt: now().toISOString(),
-          })
-          .catch((error) => context.error?.(`approveNewsletter could not revert ${issue.id}: ${error?.message ?? error}`));
+        await settle({
+          ...claimed,
+          status: 'draft',
+          // Not approved after all: nothing was scheduled, so the issue must
+          // not read as approved in the list or the preview.
+          approvedAt: null,
+          approvedBy: null,
+          lastError: reason,
+          updatedAt: now().toISOString(),
+        }).catch((error) =>
+          context.error?.(`approveNewsletter could not revert ${issue.id}: ${error?.message ?? error}`)
+        );
         return json(502, { ok: false, error: `Resend did not accept the newsletter: ${reason}` });
       };
 
@@ -300,8 +327,9 @@ export function createNewsletterAdminHandlers({
         ...(plan.sendNow ? { sentAt: now().toISOString() } : { scheduledAt: plan.scheduledAt }),
         updatedAt: now().toISOString(),
       };
+      let outcome;
       try {
-        await store.upsertDoc('newsletters', done);
+        outcome = await settle(done);
       } catch (error) {
         // The broadcast exists; the record of it did not save. Say so rather
         // than report a failure that would invite a second approval.
@@ -309,6 +337,20 @@ export function createNewsletterAdminHandlers({
         return json(200, {
           ok: true,
           warning: `Resend accepted broadcast ${created.data.id}, but the site could not record it. Do not approve again.`,
+        });
+      }
+      if (!outcome.written) {
+        // Rejected (or otherwise changed) while Resend was being asked. The
+        // broadcast exists and the owner's reject stands, so the only honest
+        // answer names the broadcast and what to do about it.
+        context.error?.(
+          `approveNewsletter ${issue.id}: broadcast ${created.data.id} was created, but the issue changed to ${outcome.current?.status ?? 'unknown'} meanwhile`
+        );
+        return json(409, {
+          ok: false,
+          code: 'CHANGED_DURING_SEND',
+          broadcastId: created.data.id,
+          error: `Resend accepted broadcast ${created.data.id}, but this issue was changed while it was being sent. If it should not go out, cancel it in Resend's Broadcasts page.`,
         });
       }
       context.log?.(`approveNewsletter ${issue.id} → broadcast ${created.data.id} ${done.status}`);

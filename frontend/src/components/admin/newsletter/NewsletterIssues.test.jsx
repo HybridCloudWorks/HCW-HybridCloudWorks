@@ -18,7 +18,8 @@ vi.mock('@/lib/api', () => ({
   postJSON: (...args) => postJSON(...args),
   sendJSON: (...args) => sendJSON(...args),
 }));
-vi.mock('@/lib/jobs', () => ({ runJob: vi.fn() }));
+const runJob = vi.fn();
+vi.mock('@/lib/jobs', () => ({ runJob: (...args) => runJob(...args) }));
 
 const ID = 'issue-2026-09-14';
 
@@ -43,6 +44,7 @@ const detail = (over = {}) => ({
 });
 
 beforeEach(() => {
+  runJob.mockReset();
   getJSON.mockReset();
   postJSON.mockReset();
   sendJSON.mockReset();
@@ -124,6 +126,48 @@ describe('NewsletterIssues', () => {
     expect(await screen.findByText(/Check Resend's Broadcasts list/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /approve/i })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /reject/i })).toBeInTheDocument();
+  });
+
+  it('loads a freshly built issue once, not twice', async () => {
+    const NEW = 'issue-2026-09-21';
+    getJSON.mockImplementation(async (route) =>
+      route === 'cms/newsletters'
+        ? { ok: true, issues: [{ id: ID, status: 'sent' }] }
+        : detail({ issue: { id: route.endsWith(NEW) ? NEW : ID } })
+    );
+    runJob.mockResolvedValue({
+      status: 'succeeded',
+      result: { success: true, issueId: NEW, message: 'Drafted.' },
+    });
+    render(<NewsletterIssues />);
+    await screen.findByTitle('Email preview');
+
+    fireEvent.click(screen.getByRole('button', { name: /build this week's issue/i }));
+    await screen.findByText('Drafted.');
+    await waitFor(() =>
+      expect(
+        getJSON.mock.calls.filter(([route]) => route === `cms/newsletters/${NEW}`)
+      ).toHaveLength(1)
+    );
+  });
+
+  it('reloads the open issue after a same-day rebuild', async () => {
+    withIssue();
+    runJob.mockResolvedValue({
+      status: 'succeeded',
+      result: { success: true, issueId: ID, message: 'Drafted.' },
+    });
+    render(<NewsletterIssues />);
+    await screen.findByTitle('Email preview');
+    const before = getJSON.mock.calls.filter(([route]) => route === `cms/newsletters/${ID}`).length;
+
+    fireEvent.click(screen.getByRole('button', { name: /build this week's issue/i }));
+    await screen.findByText('Drafted.');
+    await waitFor(() =>
+      expect(
+        getJSON.mock.calls.filter(([route]) => route === `cms/newsletters/${ID}`)
+      ).toHaveLength(before + 1)
+    );
   });
 
   it("shows the server's reason when approval is refused", async () => {

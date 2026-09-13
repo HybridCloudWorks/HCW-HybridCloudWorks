@@ -283,9 +283,13 @@ export default function NewsletterIssues({ settingsVersion = 0 }) {
       const result = job.result || {};
       setNotice({ ok: result.success === true, message: result.message || 'No issue was built.' });
       await loadList();
-      if (result.issueId) {
-        setSelectedId(result.issueId);
+      if (!result.issueId) return;
+      // A new id is loaded by the selection effect; the SAME id (a same-day
+      // rebuild) does not change the selection, so only then load it here.
+      if (result.issueId === selectedId) {
         await loadDetail(result.issueId);
+      } else {
+        setSelectedId(result.issueId);
       }
     });
 
