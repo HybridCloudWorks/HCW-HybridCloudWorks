@@ -135,6 +135,7 @@ const FrameworkDetailTemplate = lazyPage(
 );
 const BlogDetailTemplate = lazyPage(() => import('@/components/templates/BlogDetailTemplate'));
 const PreviewPage = lazyPage(() => import('@/pages/PreviewPage'));
+const NewsletterConfirmPage = lazyPage(() => import('@/pages/NewsletterConfirmPage'));
 const RosettaStoneSubmissionPage = lazyPage(
   () => import('@/pages/submissions/RosettaStoneSubmissionPage')
 );
@@ -395,6 +396,9 @@ function App() {
               {/* --- Staging preview (T-606): signed-link view of unpublished
                   drafts. Static segment outranks /:provider in route ranking. --- */}
               <Route path="/preview/:id" element={<PreviewPage />} />
+              {/* --- Newsletter double opt-in landing (#504): the signed link's
+                  target. Static segments outrank /:provider. --- */}
+              <Route path="/newsletter/confirm" element={<NewsletterConfirmPage />} />
               {/* --- Templates --- */}
               <Route path="/templates/framework" element={<FrameworkSubmissionPage />} />
               <Route path="/templates/architecture" element={<ArchitectureSubmissionPage />} />

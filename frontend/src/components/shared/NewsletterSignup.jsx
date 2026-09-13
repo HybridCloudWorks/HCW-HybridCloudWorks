@@ -1,11 +1,11 @@
 /**
  * NewsletterSignup — public email-capture card (Hyoga design language).
  *
- * POSTs `{ email, source, website }` to `newsletterSubscribe`, which does not
- * exist yet: it is the next step of ADR 0030 and will add the address to the
- * Resend mailing list server-side. Until then every submission gets a 404,
- * which this component reports as a failure rather than a success (#504).
- * `website` is a honeypot field.
+ * POSTs `{ email, source, website }` to `public/newsletter/subscribe` (#504,
+ * ADR 0030), which emails a double opt-in link and adds nobody to the list
+ * until that link is confirmed — so success here means "check your inbox", and
+ * says so. `website` is a honeypot field. A non-2xx answer, including the 429
+ * for too many attempts, is shown as the server's own sentence.
  *
  * Mounted in Footer.jsx (every page) and BlogDetailTemplate.jsx (every post).
  *
@@ -41,7 +41,7 @@ export default function NewsletterSignup({ source = 'website', className = '' })
     try {
       const base = getFunctionsBase();
       if (!base) throw new Error('Newsletter is not configured.');
-      const res = await fetch(`${base}/newsletterSubscribe`, {
+      const res = await fetch(`${base}/public/newsletter/subscribe`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim(), source, website: honeypot }),
@@ -74,7 +74,7 @@ export default function NewsletterSignup({ source = 'website', className = '' })
           className="mt-5 text-sm font-medium text-emerald-600 dark:text-emerald-400"
           role="status"
         >
-          You&apos;re in — check your inbox to confirm your subscription.
+          Almost there — check your inbox and confirm your subscription within 48 hours.
         </p>
       ) : (
         <form onSubmit={handleSubmit} className="mt-5">

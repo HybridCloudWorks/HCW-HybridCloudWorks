@@ -31,6 +31,7 @@ import './listen-and-learn-jobs.js';
 import './labs-http.js';
 import './legacy-blogs-telemetry-http.js';
 import './manual-images-http.js';
+import './newsletter-http.js';
 import './ops-health-http.js';
 import './platform-health-http.js';
 import './platform-settings-http.js';
