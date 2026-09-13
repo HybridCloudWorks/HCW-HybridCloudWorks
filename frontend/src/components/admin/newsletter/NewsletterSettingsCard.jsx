@@ -2,8 +2,9 @@
  * NewsletterSettingsCard — the settings a newsletter send needs (ADR 0030 §2a).
  *
  * Reads and writes `cms/platform-settings/newsletter-settings`. A partial save
- * is allowed; approval is what refuses to send without the postal address and
- * the reply-to, and the issue view says so beside the Approve button.
+ * is allowed. The issue view lists which of the postal address and reply-to a
+ * send still needs; the approval step, a later change, will refuse to send
+ * without them.
  */
 import React, { useEffect, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
