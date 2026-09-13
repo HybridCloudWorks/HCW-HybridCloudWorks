@@ -19,6 +19,44 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **ADR 0030 records the newsletter provider, and corrects what #504 said was
+  broken.** The evaluation #504 asked for is decided: **Resend**, with the
+  cadence staying in the Function App's timer rather than moving into a vendor's
+  scheduler.
+
+  **The send allowance decides it, not the feature lists.** Klaviyo's free plan
+  is 500 emails a month. A weekly newsletter is 4.33 sends per contact per
+  month, so that plan runs out at **115 subscribers** — and at its own
+  250-contact ceiling the most it can deliver is fortnightly. Resend's marketing
+  meter bills on contacts stored rather than emails sent, so 1,000 contacts
+  receive a weekly newsletter for nothing. The first paid step is USD 40 a month
+  at 5,000 contacts, against roughly USD 100 for Klaviyo at the same size; the
+  record states plainly that this is a cliff and not a ramp, and sets a revisit
+  trigger at 800 contacts so the jump is chosen rather than billed.
+
+  **#504's description of the failure was wrong and the ADR says so.** The issue
+  called the signup form "a control that looks like it worked" and compared it
+  to the Publer button that reported success for a 403. `NewsletterSignup.jsx:46`
+  checks `res.ok` and throws, so the 404 renders a visible "Subscription failed."
+  Nothing is silently discarded and nobody is told they subscribed when they did
+  not. What is live is a visibly broken control on every page — embarrassing
+  rather than lossy, and not a reason to rush the provider choice. Recording the
+  correction matters more than the verdict: the next session to read #504 would
+  otherwise act on an urgency that is not there.
+
+  The one lossy failure this could still produce is named as a risk instead:
+  `resend/resend-node#458` reports a contact created with `unsubscribed: false` coming
+  back unsubscribed, which would capture a subscriber and then skip them on
+  every broadcast. The first write asserts the stored state rather than trusting
+  the call, and a test pins it.
+
+  Also decided: the public route contract names no vendor, so a provider change
+  is a handler change and the frontend does not move; Resend holds the list and
+  Cosmos does not mirror it, for the reason ADR 0029 keeps the feed as the one
+  boundary — two stores of the same truth disagree, and the unsubscribe is where
+  that becomes mailing someone who opted out; and new code targets `segments.*`
+  rather than the deprecated `audiences.*`.
+
 - **A documented, mostly-automated rollback for admin sign-in.** The Entra split
   left one recovery path — set `VITE_ENTRA_CLIENT_ID` back and redeploy — living
   only in a pull request description and somebody's memory. It also stopped
