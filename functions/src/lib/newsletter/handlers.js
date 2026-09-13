@@ -135,6 +135,37 @@ function describe(result) {
 }
 
 /**
+ * The Newsletter segment id: found by name, created if missing. Shared by
+ * confirm (adding a contact) and approval (sending to the segment).
+ */
+export async function findSegmentId(client) {
+  let after;
+  for (let page = 0; page < 20; page += 1) {
+    const listed = await client.listSegments(after);
+    if (!listed.ok) throw new Error(`listing segments failed: ${describe(listed)}`);
+    const rows = Array.isArray(listed.data?.data) ? listed.data.data : [];
+    const found = rows.find((row) => row?.name === NEWSLETTER_SEGMENT_NAME);
+    if (found?.id) return found.id;
+    if (!listed.data?.has_more || rows.length === 0) break;
+    after = rows[rows.length - 1].id;
+  }
+  return null;
+}
+
+export async function resolveSegmentId(client) {
+  const existing = await findSegmentId(client);
+  if (existing) return existing;
+  const created = await client.createSegment(NEWSLETTER_SEGMENT_NAME);
+  if (created.ok && created.data?.id) return created.data.id;
+  // Two cold instances confirming or approving at once can both find no segment and both
+  // create; the loser's failure is not a failure if the winner's segment now
+  // exists. Look once more before giving the subscriber a 502.
+  const raced = await findSegmentId(client);
+  if (raced) return raced;
+  throw new Error(`creating the ${NEWSLETTER_SEGMENT_NAME} segment failed: ${describe(created)}`);
+}
+
+/**
  * @param {object} deps
  * @param {{ anonymousKey: Function }} deps.identity
  * @param {object} deps.store the quota store `enforceSubmissionQuota` needs
@@ -157,33 +188,6 @@ export function createNewsletterHandlers({
     if (!apiKey) return null;
     return { apiKey, client: createResendClient({ apiKey, fetch: fetchImpl }) };
   };
-
-  async function findSegmentId(client) {
-    let after;
-    for (let page = 0; page < 20; page += 1) {
-      const listed = await client.listSegments(after);
-      if (!listed.ok) throw new Error(`listing segments failed: ${describe(listed)}`);
-      const rows = Array.isArray(listed.data?.data) ? listed.data.data : [];
-      const found = rows.find((row) => row?.name === NEWSLETTER_SEGMENT_NAME);
-      if (found?.id) return found.id;
-      if (!listed.data?.has_more || rows.length === 0) break;
-      after = rows[rows.length - 1].id;
-    }
-    return null;
-  }
-
-  async function resolveSegmentId(client) {
-    const existing = await findSegmentId(client);
-    if (existing) return existing;
-    const created = await client.createSegment(NEWSLETTER_SEGMENT_NAME);
-    if (created.ok && created.data?.id) return created.data.id;
-    // Two cold instances confirming at once can both find no segment and both
-    // create; the loser's failure is not a failure if the winner's segment now
-    // exists. Look once more before giving the subscriber a 502.
-    const raced = await findSegmentId(client);
-    if (raced) return raced;
-    throw new Error(`creating the ${NEWSLETTER_SEGMENT_NAME} segment failed: ${describe(created)}`);
-  }
 
   function segmentId(client) {
     if (!segmentIdPromise) {

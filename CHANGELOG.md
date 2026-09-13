@@ -19,6 +19,43 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The weekly newsletter can be built, reviewed and approved, and goes out
+  through Resend (#504, ADR 0030 §2a).** The Mailing List page's Newsletter tab
+  builds this week's issue as a draft, shows the email exactly as it would send,
+  lets the owner edit the subject and add a note, and schedules the broadcast
+  only when Approve is pressed and confirmed. Third of the newsletter steps; the
+  Monday timer that builds the draft unattended, and the Telegram message that
+  says one is waiting, are the next PR.
+
+  **An issue is structured, not an article.** It carries the items of every
+  registered section — new articles linked to the URL publishing stored,
+  Microsoft certification news with exam codes, approved study episodes linked
+  to their certification pages, and podcast episodes — plus a plain-text intro
+  and subject from the drafter. A section is one entry in
+  `lib/newsletter/sections.js`; a section that throws costs its heading, not the
+  issue; a week with nothing new builds nothing and asks no model. If the AI is
+  off, the issue still builds with a dated subject. It replaces
+  `generate-weekly-digest`, whose drafts could not link to anything and landed in
+  a container no code read.
+
+  **Nothing reaches a subscriber that was not approved, or approved twice.**
+  Approve is a publisher action. It refuses until the postal address (required on
+  commercial email) and a reply-to inbox are saved — and refuses a reply-to on
+  `news.hybridcloudworks.com`, which receives no mail. It claims the issue
+  `draft → sending` with an ETag-conditional write before calling Resend, so two
+  approvals at once produce one broadcast; a test fires them together. A refused
+  broadcast returns the issue to draft with Resend's reason.
+
+  **Tuesday 09:00 Central, correctly.** The slot is a weekday, a wall-clock time
+  and an IANA zone, converted to UTC per send, so it stays 09:00 through daylight
+  saving; an issue approved more than three days before its slot sends
+  immediately rather than going out describing a week long past.
+
+  **The email cannot carry markup it was not built with.** Every stored value is
+  escaped once, in the renderer; links must be https or a site path; the admin
+  preview renders in an iframe with an empty sandbox. The footer carries the
+  postal address and Resend's per-recipient unsubscribe link.
+
 - **The newsletter signup works, with double opt-in (#504, ADR 0030 §3a).** The
   form on every page posted to a route that never existed. It now posts to
   `public/newsletter/subscribe`, which emails a confirmation link from

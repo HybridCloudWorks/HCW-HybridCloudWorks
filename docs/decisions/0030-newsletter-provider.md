@@ -1,6 +1,6 @@
 # ADR 0030: The newsletter provider is Resend, and the site owns the schedule
 
-**Status:** Accepted 2026-09-12; §3 amended 2026-09-13 (§3a)
+**Status:** Accepted 2026-09-12; §3 amended 2026-09-13 (§3a); §2 amended 2026-09-13 (§2a)
 **Decision date:** 2026-09-12
 **Owners:** Workload owner
 
@@ -125,6 +125,40 @@ second place the weekly rhythm is configured.
 
 This is ADR 0029 §1b's rule, applied again: the approval is the trigger and a
 draft must not reach a public surface.
+
+#### 2a. A structured issue replaces the digest, and approval schedules the send slot — amended 2026-09-13
+
+§2 above is kept as written, as history. It assumed `digest.js`'s draft — a
+title and a markdown body — was the payload a broadcast needs. Built, it was
+not: the digest's query carried no URLs, so its newsletter could name articles
+but not link to them, and nothing ever read the container it wrote to.
+
+**What replaced it.** `lib/newsletter/issue.js` builds a structured issue: the
+items of every registered section (`lib/newsletter/sections.js` — new articles
+with the public URL publishing stored, Microsoft certification news, approved
+study and podcast episodes), an AI intro and subject from the same drafter, and
+a note the owner may write. The email is rendered from that structure at
+approval (`render.js`), so the owner edits a subject and a note, never HTML.
+Adding a section is one registry entry; the owner asked on 2026-09-13 for
+sections to be addable, and this is the shape that makes it one file.
+
+**What approval does, and the change to §2's `scheduledAt` rule.** The owner
+decided on 2026-09-13 that every issue is approved before it sends, and set the
+slot: Tuesday 09:00 America/Chicago, editable on the Mailing List page with the
+postal address and reply-to a send requires. Approval creates the Resend
+broadcast with `scheduled_at` at that slot, converted DST-correctly, or sends
+immediately when the slot is more than three days away. That IS using Resend's
+scheduler for the moment of sending, which §2 said it would not do for the
+cadence — and the distinction §2 drew still holds: the weekly RHYTHM, when an
+issue is drafted, belongs to a Function App timer (the follow-up PR); the slot
+is a property of one approved broadcast. There is still one place the rhythm is
+configured.
+
+**At most once.** Approval claims the issue `draft → sending` with an
+ETag-conditional write before Resend is called, so a double click or a retry
+cannot create two broadcasts. A refused broadcast returns the issue to `draft`
+with the reason; a process that dies after claiming leaves `sending`, which is
+never retried automatically because a broadcast may exist.
 
 ### 3. `newsletterSubscribe` is implemented once, behind a provider-agnostic contract
 
