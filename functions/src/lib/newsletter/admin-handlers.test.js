@@ -60,8 +60,10 @@ function makeStore({ issue = draftIssue(), settings = completeSettings } = {}) {
       const current = docs.get(`${container}/${doc.id}`);
       if (!current || current._etag !== doc._etag) throw fail(412);
       etag += 1;
-      docs.set(`${container}/${doc.id}`, { ...doc, _etag: `e${etag}` });
-      return doc;
+      const stored = { ...doc, _etag: `e${etag}` };
+      docs.set(`${container}/${doc.id}`, stored);
+      // What Cosmos returns: the document as written, with its new etag.
+      return { ...stored };
     }),
   };
 }
@@ -119,6 +121,41 @@ describe('update', () => {
     expect((await handlers.update(request({ body: { status: 'sent' } }), context())).status).toBe(400);
     const scheduled = build({ store: makeStore({ issue: draftIssue({ status: 'scheduled' }) }) });
     expect((await scheduled.handlers.update(request({ body: { customNote: 'x' } }), context())).status).toBe(409);
+  });
+});
+
+describe('concurrency through the etag', () => {
+  it('hands out the stored etag, and returns the new one after an edit', async () => {
+    const { handlers } = build();
+    const read = bodyOf(await handlers.get(request(), context()));
+    expect(read.issue.etag).toBe('e1');
+    const saved = bodyOf(
+      await handlers.update(request({ body: { customNote: 'Hello', etag: read.issue.etag } }), context())
+    );
+    expect(saved.issue.etag).toBeTruthy();
+    expect(saved.issue.etag).not.toBe('e1');
+  });
+
+  it('refuses an edit made from a stale view, and writes nothing', async () => {
+    const { handlers, store } = build();
+    const first = bodyOf(await handlers.get(request(), context()));
+    await handlers.update(request({ body: { customNote: 'Theirs', etag: first.issue.etag } }), context());
+    const res = await handlers.update(
+      request({ body: { customNote: 'Mine', etag: first.issue.etag } }),
+      context()
+    );
+    expect(res.status).toBe(409);
+    expect(bodyOf(res).code).toBe('ISSUE_CHANGED');
+    expect(store.docs.get(`newsletters/${ID}`).customNote).toBe('Theirs');
+  });
+
+  it('refuses a reject made from a stale view', async () => {
+    const { handlers, store } = build();
+    const first = bodyOf(await handlers.get(request(), context()));
+    await handlers.update(request({ body: { subject: 'Changed', etag: first.issue.etag } }), context());
+    const res = await handlers.reject(request({ body: { etag: first.issue.etag } }), context());
+    expect(res.status).toBe(409);
+    expect(store.docs.get(`newsletters/${ID}`).status).toBe('draft');
   });
 });
 

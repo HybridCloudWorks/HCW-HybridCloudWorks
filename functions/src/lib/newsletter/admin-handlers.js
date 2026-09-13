@@ -80,6 +80,21 @@ export function createNewsletterAdminHandlers({
 
   const notFound = () => json(404, { ok: false, error: 'Issue not found' });
 
+  /**
+   * The caller's view of the issue is stale: it read a version that is no
+   * longer stored. Checked BEFORE writing, against the `etag` the caller got
+   * from GET, because the server's own read is fresh by definition; comparing
+   * only that would let an editor working from an old view overwrite another
+   * editor's change without either of them knowing.
+   */
+  const staleView = (body, issue) => typeof body?.etag === 'string' && body.etag !== issue._etag;
+  const changedElsewhere = () =>
+    json(409, {
+      ok: false,
+      code: 'ISSUE_CHANGED',
+      error: 'This issue changed since you opened it. Reload it and try again.',
+    });
+
   function present(issue, settings) {
     const preview = renderIssue(issue, {
       postalAddress: settings.postalAddress || ADDRESS_NOT_SET,
@@ -101,6 +116,8 @@ export function createNewsletterAdminHandlers({
         sections: issue.sections ?? [],
         problems: issue.problems ?? [],
         broadcastId: issue.broadcastId ?? null,
+        // Echo this back as `etag` on PATCH or reject; a stale one is a 409.
+        etag: issue._etag ?? null,
       },
       preview,
       readyToSend: missing.length === 0,
@@ -146,7 +163,7 @@ export function createNewsletterAdminHandlers({
       if (!body || typeof body !== 'object' || Array.isArray(body)) {
         return json(400, { ok: false, error: 'Body must be a JSON object' });
       }
-      const unknown = Object.keys(body).filter((key) => !['customNote', 'subject'].includes(key));
+      const unknown = Object.keys(body).filter((key) => !['customNote', 'subject', 'etag'].includes(key));
       if (unknown.length) return json(400, { ok: false, error: `Unknown field(s): ${unknown.join(', ')}` });
 
       const patch = {};
@@ -172,16 +189,17 @@ export function createNewsletterAdminHandlers({
         if (issue.status !== 'draft') {
           return json(409, { ok: false, error: `Only a draft can be edited; this issue is ${issue.status}.` });
         }
+        if (staleView(body, issue)) return changedElsewhere();
         const updated = { ...issue, ...patch, updatedAt: now().toISOString() };
+        let written;
         try {
-          await store.replaceDocIfMatch('newsletters', updated);
+          written = await store.replaceDocIfMatch('newsletters', updated);
         } catch (error) {
-          if (error?.code === 412) {
-            return json(409, { ok: false, error: 'The issue changed while you were editing. Reload and try again.' });
-          }
+          if (error?.code === 412) return changedElsewhere();
           throw error;
         }
-        return json(200, present(updated, await readSettings()));
+        // The stored document, so the response carries the NEW etag.
+        return json(200, present(written ?? updated, await readSettings()));
       } catch (error) {
         context.error?.(`updateNewsletter failed: ${error?.message ?? error}`);
         return json(500, { ok: false, error: 'Failed to save the newsletter issue' });
@@ -191,21 +209,24 @@ export function createNewsletterAdminHandlers({
     async reject(request, context) {
       const auth = await guard.requireRole(request, 'editor');
       if (auth.error) return auth.error;
+      const body = await request.json().catch(() => null);
       try {
         const issue = await readIssue(request);
         if (!issue) return notFound();
         if (!['draft', 'sending'].includes(issue.status)) {
           return json(409, { ok: false, error: `A ${issue.status} issue cannot be rejected.` });
         }
+        if (staleView(body, issue)) return changedElsewhere();
         const rejectedAt = now().toISOString();
         const rejected = { ...issue, status: 'rejected', rejectedAt, updatedAt: rejectedAt };
+        let written;
         try {
-          await store.replaceDocIfMatch('newsletters', rejected);
+          written = await store.replaceDocIfMatch('newsletters', rejected);
         } catch (error) {
-          if (error?.code === 412) return json(409, { ok: false, error: 'The issue changed elsewhere. Reload it.' });
+          if (error?.code === 412) return changedElsewhere();
           throw error;
         }
-        return json(200, present(rejected, await readSettings()));
+        return json(200, present(written ?? rejected, await readSettings()));
       } catch (error) {
         context.error?.(`rejectNewsletter failed: ${error?.message ?? error}`);
         return json(500, { ok: false, error: 'Failed to reject the newsletter issue' });
