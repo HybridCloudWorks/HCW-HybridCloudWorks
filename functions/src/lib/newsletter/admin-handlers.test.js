@@ -177,17 +177,19 @@ describe('concurrency through the etag', () => {
 });
 
 describe('reject', () => {
-  it('sets aside a draft, or clears an issue stuck in sending', async () => {
-    for (const status of ['draft', 'sending']) {
-      const { handlers, store } = build({ store: makeStore({ issue: draftIssue({ status }) }) });
-      expect((await handlers.reject(request({ body: { etag: 'e1' } }), context())).status, status).toBe(200);
-      expect(store.docs.get(`newsletters/${ID}`).status).toBe('rejected');
-    }
+  it('sets aside a draft', async () => {
+    const { handlers, store } = build();
+    expect((await handlers.reject(request({ body: { etag: 'e1' } }), context())).status).toBe(200);
+    expect(store.docs.get(`newsletters/${ID}`).status).toBe('rejected');
   });
 
-  it('will not reject an issue that already went out', async () => {
-    const { handlers } = build({ store: makeStore({ issue: draftIssue({ status: 'sent' }) }) });
-    expect((await handlers.reject(request({ body: { etag: 'e1' } }), context())).status).toBe(409);
+  it('rejects only a draft, as the contract says', async () => {
+    for (const status of ['sending', 'scheduled', 'sent', 'rejected']) {
+      const { handlers, store } = build({ store: makeStore({ issue: draftIssue({ status }) }) });
+      const res = await handlers.reject(request({ body: { etag: 'e1' } }), context());
+      expect(res.status, status).toBe(409);
+      expect(store.docs.get(`newsletters/${ID}`).status, status).toBe(status);
+    }
   });
 });
 

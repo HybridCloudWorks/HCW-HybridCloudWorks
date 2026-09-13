@@ -224,8 +224,10 @@ export function createNewsletterAdminHandlers({
       try {
         const issue = await readIssue(request);
         if (!issue) return notFound();
-        if (!['draft', 'sending'].includes(issue.status)) {
-          return json(409, { ok: false, error: `A ${issue.status} issue cannot be rejected.` });
+        // Only a draft: nothing in this API moves an issue past draft, so no
+        // other state can be set aside here. The send step adds its own.
+        if (issue.status !== 'draft') {
+          return json(409, { ok: false, error: `Only a draft can be rejected; this issue is ${issue.status}.` });
         }
         if (staleView(body, issue)) return changedElsewhere();
         const rejectedAt = now().toISOString();
