@@ -50,10 +50,19 @@ This project has not cut a tagged release; entries are grouped under
   Adding a timer is never one edit here, and the rest are the kind that rot
   quietly: `local.timer_catalogue` and the `enabled_timers` validation
   allowlist, which must agree or the timer is catalogued and unarmable; the
-  registration totals asserted in `route-inventory.test.js` and
+  `WITNESSES` table in `verify-timer-witness.mjs`, which is how an operator
+  proves a timer fired now that the host writes no `ScheduleStatus` line —
+  this one is recorded as having **no public witness**, because an issue is a
+  draft with no public route and an approved one is emailed rather than
+  published; the registration totals asserted in `route-inventory.test.js` and
   `timer-schedules-utc.test.js`; and the prose in those two files and in
   `variables.tf` that states how many timers exist, which no test can fail on
   and which is wrong the moment it is not updated by hand.
+
+  The witness table is the one worth knowing about, because its guard is the
+  only one of these that failed in CI rather than locally: `scripts` runs on
+  any `infra/` change, so a timer added without a witness entry is caught —
+  but only by the job a Terraform edit happens to trigger.
 
   `timer-schedules-utc.test.js` also gains the UTC intent for the new schedule.
   It refuses any timer that names an hour without one, which is what stops

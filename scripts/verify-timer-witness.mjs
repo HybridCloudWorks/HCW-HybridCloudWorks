@@ -118,6 +118,9 @@ export const WITNESSES = {
   fetchBlogListings: { none: 'drafts content for review; drafts are not public' },
   scrapeSkillsHubRss: { none: 'drafts content for review; drafts are not public' },
   forgeScheduled: { none: 'drafts content for review; drafts are not public' },
+  buildNewsletterIssue: {
+    none: 'drafts a newsletter issue for approval; issues have no public route, and an approved one is emailed rather than published',
+  },
   generateReviewerDigest: { none: 'sends mail; no document is written' },
   checkLiveLinks: { none: 'annotates content documents; the annotation is not projected publicly' },
   reVerifyCertifications: { none: 'updates certifications; the verification field is not projected publicly' },
