@@ -1111,7 +1111,12 @@ variable "tags" {
 # exactly the "false" it is today until an owner decides otherwise.
 variable "schedulers_master_enabled" {
   description = <<-EOT
-    Master kill switch for all 19 timers (FEATURE_FLAG_SCHEDULERS).
+    Master kill switch for all 20 timers (FEATURE_FLAG_SCHEDULERS).
+
+    Twenty, not the nineteen in local.timer_catalogue: platformJobSweeper
+    (jobs-sweeper.js) and cosmosExportScheduler (cosmos-export.js) are
+    registered outside schedulers.js and carry their own flags, but both read
+    FEATURE_FLAG_SCHEDULERS first, so this switch stops them too.
 
     False holds every timer off regardless of enabled_timers.
     schedulers.js checks this first and skips the handler before reading the
@@ -1187,7 +1192,7 @@ variable "enabled_timers" {
         "PLATFORM_JOB_SWEEPER",
       ], name)
     ])
-    error_message = "enabled_timers accepts only flag suffixes from local.timer_catalogue in main.tf, e.g. SYNC_RSS_FEEDS — not the function name, and not the full FEATURE_FLAG_ prefix."
+    error_message = "enabled_timers accepts only flag suffixes from local.timer_catalogue in functionapp.tf, e.g. SYNC_RSS_FEEDS — not the function name, and not the full FEATURE_FLAG_ prefix."
   }
 }
 

@@ -64,6 +64,27 @@ This project has not cut a tagged release; entries are grouped under
   any `infra/` change, so a timer added without a witness entry is caught —
   but only by the job a Terraform edit happens to trigger.
 
+### Fixed
+
+- **Four pointers to `local.timer_catalogue` and the timer flags still named
+  `main.tf`, which has not held them since 2026-08-29.** `functionapp.tf` was
+  split out of `main.tf` that day (T-754) and these came along without being
+  re-addressed: the `enabled_timers` validation's `error_message`, both
+  references in `timer-catalogue-sync.test.js`, and `schedulers.js`'s header
+  claim about where the flags are "false". The validation one is the expensive
+  one — it is the sentence an operator reads *at the moment a cutover apply has
+  just failed*, and it sent them to a file that does not contain the list they
+  need to edit. The historical note in `variables.tf` that describes what
+  `main.tf` did before 2026-08-24 is left alone: it is correct about the past.
+
+- **The schedulers master switch said it covered 18 timers; it covers 20.**
+  `FEATURE_FLAG_SCHEDULERS` is read by `schedulers.js` (eighteen timers) and
+  also, first, by `jobs-sweeper.js` and `cosmos-export.js` — so it stops all
+  twenty registrations, not the nineteen in `local.timer_catalogue` and not the
+  eighteen in `schedulers.js`. The description now says which and why, because
+  the number alone invites exactly the off-by-one it has been carrying: this
+  change first "corrected" 18 to 19 and was still wrong.
+
   `timer-schedules-utc.test.js` also gains the UTC intent for the new schedule.
   It refuses any timer that names an hour without one, which is what stops
   `0 0 8 * * 1` from quietly meaning something else if an app clock is ever
