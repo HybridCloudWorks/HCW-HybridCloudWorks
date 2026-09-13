@@ -107,7 +107,11 @@ const allow = (role = 'publisher') => ({
   }),
 });
 
-const request = ({ id = ID, body } = {}) => ({ params: { id }, json: async () => body });
+const request = ({ id = ID, body, query = {} } = {}) => ({
+  params: { id },
+  query: new URLSearchParams(query),
+  json: async () => body,
+});
 const context = () => ({ log: vi.fn(), warn: vi.fn(), error: vi.fn() });
 const bodyOf = (res) => JSON.parse(res.body);
 
@@ -494,5 +498,101 @@ describe('list', () => {
       expect.objectContaining({ id: ID, status: 'draft', subject: 'Landing zones', itemCount: 1 }),
     ]);
     expect(body.issues[0]).not.toHaveProperty('sections');
+  });
+
+  it('carries each row\'s etag and leaves deleted issues out', async () => {
+    const { handlers, store } = build();
+    const body = bodyOf(await handlers.list(request(), context()));
+    expect(body.issues[0].etag).toBe('e1');
+    const [sql] = store.queryDocs.mock.calls[0].slice(1);
+    expect(sql).toContain("c.status != 'deleted'");
+  });
+
+  it('lists a month of published issues, padded a day each side for local dates', async () => {
+    const { handlers, store } = build();
+    const res = await handlers.list(request({ query: { month: '2026-09' } }), context());
+    expect(res.status).toBe(200);
+    const [, sql, params] = store.queryDocs.mock.calls[0];
+    expect(sql).toContain("c.status = 'sent'");
+    expect(sql).toContain("c.status = 'scheduled'");
+    expect(params).toEqual([
+      { name: '@from', value: '2026-08-31T00:00:00.000Z' },
+      { name: '@to', value: '2026-10-02T00:00:00.000Z' },
+    ]);
+  });
+
+  it('refuses a malformed month before querying', async () => {
+    const { handlers, store } = build();
+    for (const month of ['2026-9', '2026-13', 'september', '2026-09-01']) {
+      expect((await handlers.list(request({ query: { month } }), context())).status, month).toBe(400);
+    }
+    expect(store.queryDocs).not.toHaveBeenCalled();
+  });
+});
+
+describe('save', () => {
+  it('moves a draft to Drafts and returns the new etag', async () => {
+    const { handlers, store } = build();
+    const res = await handlers.save(request({ body: { etag: 'e1' } }), context());
+    expect(res.status).toBe(200);
+    const stored = store.docs.get(`newsletters/${ID}`);
+    expect(stored).toMatchObject({ status: 'draft', savedAt: NOW.toISOString(), savedBy: 'owner-oid' });
+    expect(bodyOf(res).issue).toMatchObject({ savedAt: NOW.toISOString(), etag: stored._etag });
+  });
+
+  it('does not write again for a draft that is already saved', async () => {
+    const { handlers, store } = build({ store: makeStore({ issue: draftIssue({ savedAt: '2026-09-13T10:00:00Z' }) }) });
+    expect((await handlers.save(request({ body: { etag: 'e1' } }), context())).status).toBe(200);
+    expect(store.replaceDocIfMatch).not.toHaveBeenCalled();
+  });
+
+  it('requires the etag and refuses a stale one or a non-draft', async () => {
+    const { handlers } = build();
+    expect(bodyOf(await handlers.save(request({ body: {} }), context())).code).toBe('ETAG_REQUIRED');
+    expect(bodyOf(await handlers.save(request({ body: { etag: 'old' } }), context())).code).toBe('ISSUE_CHANGED');
+    for (const status of ['sending', 'scheduled', 'sent', 'rejected']) {
+      const other = build({ store: makeStore({ issue: draftIssue({ status }) }) });
+      expect((await other.handlers.save(request({ body: { etag: 'e1' } }), context())).status, status).toBe(409);
+    }
+  });
+});
+
+describe('remove', () => {
+  it('deletes a draft or rejected issue, which then reads as not found', async () => {
+    for (const status of ['draft', 'rejected']) {
+      const { handlers, store } = build({ store: makeStore({ issue: draftIssue({ status }) }) });
+      const res = await handlers.remove(request({ body: { etag: 'e1' } }), context());
+      expect(res.status, status).toBe(200);
+      expect(bodyOf(res)).toEqual({ ok: true, id: ID });
+      expect(store.docs.get(`newsletters/${ID}`)).toMatchObject({ status: 'deleted', deletedBy: 'owner-oid' });
+      expect((await handlers.get(request(), context())).status, status).toBe(404);
+    }
+  });
+
+  it('never deletes an issue that was approved', async () => {
+    for (const status of ['sending', 'scheduled', 'sent']) {
+      const { handlers, store } = build({ store: makeStore({ issue: draftIssue({ status }) }) });
+      expect((await handlers.remove(request({ body: { etag: 'e1' } }), context())).status, status).toBe(409);
+      expect(store.docs.get(`newsletters/${ID}`).status, status).toBe(status);
+    }
+  });
+
+  it('loses to an approval that claimed the issue first', async () => {
+    const { handlers, store } = build();
+    // The approval's claim lands between the page's read and the delete.
+    store.docs.set(`newsletters/${ID}`, { ...store.docs.get(`newsletters/${ID}`), status: 'draft', _etag: 'e9' });
+    const res = await handlers.remove(request({ body: { etag: 'e1' } }), context());
+    expect(bodyOf(res).code).toBe('ISSUE_CHANGED');
+    expect(store.docs.get(`newsletters/${ID}`).status).toBe('draft');
+  });
+
+  it('requires the etag, and is at least an editor decision', async () => {
+    const { handlers } = build();
+    expect(bodyOf(await handlers.remove(request(), context())).code).toBe('ETAG_REQUIRED');
+    const denied = createNewsletterAdminHandlers({
+      guard: { requireRole: vi.fn(async () => ({ error: { status: 401, body: '{}' } })) },
+      store: makeStore(),
+    });
+    expect((await denied.remove(request({ body: { etag: 'e1' } }), context())).status).toBe(401);
   });
 });
