@@ -1,10 +1,11 @@
 /**
- * NewsletterIssues — build, review and edit weekly issues (ADR 0030 §2a).
+ * NewsletterIssues — build, review, edit and approve weekly issues (ADR 0030 §2a).
  *
  * The flow on this panel is the owner's decision of 2026-09-13: an issue is
- * built as a draft and the email is shown exactly as it would send. Approving
- * and sending is a separate change; until it lands, this panel says so rather
- * than showing a button that does nothing.
+ * built as a draft, the email is shown exactly as it would send, and nothing
+ * goes to subscribers until Approve is pressed — and confirmed, because it
+ * cannot be undone from here once Resend has it. Approval sends the version the
+ * page is showing; if the issue changed since, the server refuses it.
  *
  * The preview is an iframe with an EMPTY sandbox: the email's HTML is rendered
  * but cannot run script, submit forms or navigate this page.
@@ -16,7 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { AlertCircle, CheckCircle, Loader2, PenTool, RefreshCw, XCircle } from 'lucide-react';
+import { AlertCircle, CheckCircle, Loader2, PenTool, RefreshCw, Send, XCircle } from 'lucide-react';
 import { getJSON, postJSON, sendJSON } from '@/lib/api';
 import { runJob } from '@/lib/jobs';
 
@@ -89,32 +90,82 @@ function StatusWarnings({ issue }) {
   );
 }
 
-/** What sending will need, said now, so settings are ready before approval exists. */
-function SendReadiness({ detail }) {
+function ApprovalBox({ detail, dirty, busy, onApprove }) {
+  const [confirming, setConfirming] = useState(false);
   const planText = describePlan(detail.sendPlan);
+
+  // Terraform's newsletter_sending_enabled: off, the server refuses approval,
+  // so the page says so instead of offering a button that cannot work.
+  if (!detail.sendingEnabled) {
+    return (
+      <p role="status" className="text-sm text-muted-foreground">
+        Sending is switched off, so this issue cannot be approved yet. It is turned on in Terraform
+        (newsletter_sending_enabled).
+      </p>
+    );
+  }
+  if (!detail.readyToSend) {
+    return (
+      <p role="alert" className="text-sm text-destructive">
+        Add the {detail.missingSettings.join(' and ')} in Newsletter settings before approving.
+      </p>
+    );
+  }
+  // No send plan means the server could not work out a send time from the
+  // settings, and it would refuse approval (SETTINGS_INVALID).
+  if (!detail.sendPlan) {
+    return (
+      <p role="alert" className="text-sm text-destructive">
+        The send day, time or time zone in Newsletter settings is not valid. Save them again before
+        approving.
+      </p>
+    );
+  }
   return (
-    <div className="space-y-1 text-sm">
-      {!detail.sendingEnabled && (
-        <p role="status" className="text-muted-foreground">
-          Sending is switched off. It is turned on in Terraform (newsletter_sending_enabled).
-        </p>
-      )}
-      {detail.readyToSend ? (
-        <p>
-          Settings are complete. Approving and sending arrive in the next update; an issue approved
-          now would go out <strong>{planText}</strong>.
-        </p>
+    <div className="space-y-2">
+      <p className="text-sm">
+        Approving sends this to every confirmed subscriber <strong>{planText}</strong>.
+      </p>
+      {dirty && <p className="text-sm text-destructive">Save your changes before approving.</p>}
+      {confirming ? (
+        <div className="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            className="gap-1.5"
+            onClick={() => onApprove().finally(() => setConfirming(false))}
+            disabled={dirty || Boolean(busy)}
+          >
+            {busy === 'approve' ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Send className="h-3.5 w-3.5" />
+            )}
+            Yes, send it {planText}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setConfirming(false)}
+            disabled={Boolean(busy)}
+          >
+            Cancel
+          </Button>
+        </div>
       ) : (
-        <p role="alert" className="text-destructive">
-          Before this can be sent, add the {detail.missingSettings.join(' and ')} in Newsletter
-          settings.
-        </p>
+        <Button
+          size="sm"
+          className="gap-1.5"
+          onClick={() => setConfirming(true)}
+          disabled={dirty || Boolean(busy)}
+        >
+          <Send className="h-3.5 w-3.5" /> Approve and schedule
+        </Button>
       )}
     </div>
   );
 }
 
-function IssueDetail({ detail, busy, onSave, onReject }) {
+function IssueDetail({ detail, busy, onSave, onApprove, onReject }) {
   const { issue } = detail;
   const [subject, setSubject] = useState(issue.subject || '');
   const [customNote, setCustomNote] = useState(issue.customNote || '');
@@ -182,7 +233,7 @@ function IssueDetail({ detail, busy, onSave, onReject }) {
 
       {isDraft && (
         <div className="rounded-lg border p-3">
-          <SendReadiness detail={detail} />
+          <ApprovalBox detail={detail} dirty={dirty} busy={busy} onApprove={onApprove} />
         </div>
       )}
 
@@ -281,6 +332,45 @@ export default function NewsletterIssues({ settingsVersion = 0 }) {
       await loadList();
     });
 
+  /**
+   * Re-read the issue after an approval that did not come back as a clean
+   * success. A warning or a refusal can mean the server's state moved — to
+   * `sending`, back to `draft`, or to `rejected` — and a page still showing the
+   * old draft would keep offering an Approve the server will refuse.
+   */
+  const refreshAfterApproval = async (id) => {
+    await Promise.all([loadDetail(id), loadList()]).catch(() => {});
+  };
+
+  const handleApprove = () => {
+    const id = selectedId;
+    const etag = detail?.issue?.etag;
+    setBusy('approve');
+    setNotice(null);
+    return (async () => {
+      try {
+        // The version on screen: an issue edited since is refused, not sent.
+        const res = await postJSON(`cms/newsletters/${id}/approve`, { etag });
+        if (res?.warning) {
+          setNotice({ ok: false, message: res.warning });
+          await refreshAfterApproval(id);
+          return;
+        }
+        setDetail(res);
+        const when = res.issue?.scheduledAt
+          ? `scheduled for ${formatWhen(res.issue.scheduledAt)}`
+          : 'sent';
+        setNotice({ ok: true, message: `Approved — the newsletter is ${when}.` });
+        await loadList();
+      } catch (err) {
+        setNotice({ ok: false, message: err.message });
+        await refreshAfterApproval(id);
+      } finally {
+        setBusy('');
+      }
+    })();
+  };
+
   const handleReject = () =>
     run('reject', async () => {
       setDetail(
@@ -358,6 +448,7 @@ export default function NewsletterIssues({ settingsVersion = 0 }) {
           detail={detail}
           busy={busy}
           onSave={handleSave}
+          onApprove={handleApprove}
           onReject={handleReject}
         />
       )}
