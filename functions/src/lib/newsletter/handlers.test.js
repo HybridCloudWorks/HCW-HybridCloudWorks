@@ -334,8 +334,7 @@ describe('confirm', () => {
   });
 
   it('fails closed without CLIENT_IP_SALT, before writing any quota document', async () => {
-    const { subscribe, resend: signupResend, token } = await signedUp();
-    void subscribe;
+    const { resend: signupResend, token } = await signedUp();
     const store = makeStore();
     const confirmOnly = createNewsletterHandlers({
       identity: createClientIdentity({ originSecret: SECRET, ipSalt: '', allowUnverifiedOrigin: false }),
@@ -422,7 +421,7 @@ describe('confirm', () => {
     const later = createNewsletterHandlers({
       identity: createClientIdentity({ originSecret: SECRET, ipSalt: 'salt', allowUnverifiedOrigin: false }),
       store: makeStore(),
-      env: { RESEND_API_KEY: API_KEY },
+      env: { RESEND_API_KEY: API_KEY, CLIENT_IP_SALT: 'salt' },
       fetch: built.resend.fetch,
       now: () => NOW + 49 * 60 * 60 * 1000,
     });
