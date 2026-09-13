@@ -99,7 +99,7 @@ function StatusWarnings({ issue }) {
       {issue.status === 'sending' && (
         <p role="alert" className="text-sm text-destructive">
           This issue was mid-send when something failed. Check Resend&apos;s Broadcasts list before
-          doing anything: if it is there, it went out. Clear clears this state.
+          doing anything: if it is there, it went out. Clear stuck send removes this state.
         </p>
       )}
       {issue.lastError && issue.status === 'draft' && (
