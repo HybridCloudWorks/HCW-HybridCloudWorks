@@ -86,7 +86,8 @@ export function zonedTimeToUtc({ year, month, day, hour, minute }, timeZone) {
 }
 
 /**
- * The next send slot at or after `now`.
+ * The next send slot strictly after `now`. A slot equal to `now` has already
+ * begun, so it answers the same slot next week.
  *
  * @param {Date} now
  * @param {{ sendDay: string, sendTime: string, timeZone: string }} settings

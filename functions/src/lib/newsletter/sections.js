@@ -54,11 +54,6 @@ export function absoluteUrl(value) {
   }
 }
 
-const withinWindow = (iso, since, until) => {
-  const time = Date.parse(iso ?? '');
-  return Number.isFinite(time) && time >= since.getTime() && time < until.getTime();
-};
-
 /** Providers whose certifications have their own detail pages (App.jsx). */
 const CERT_DETAIL_PROVIDERS = new Set(['aws', 'azure']);
 

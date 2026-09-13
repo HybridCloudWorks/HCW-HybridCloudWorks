@@ -258,7 +258,16 @@ export function createNewsletterAdminHandlers({
       const revert = async (reason) => {
         context.error?.(`approveNewsletter ${issue.id} not sent: ${reason}`);
         await store
-          .upsertDoc('newsletters', { ...claimed, status: 'draft', lastError: reason, updatedAt: now().toISOString() })
+          .upsertDoc('newsletters', {
+            ...claimed,
+            status: 'draft',
+            // Not approved after all: nothing was scheduled, so the issue must
+            // not read as approved in the list or the preview.
+            approvedAt: null,
+            approvedBy: null,
+            lastError: reason,
+            updatedAt: now().toISOString(),
+          })
           .catch((error) => context.error?.(`approveNewsletter could not revert ${issue.id}: ${error?.message ?? error}`));
         return json(502, { ok: false, error: `Resend did not accept the newsletter: ${reason}` });
       };

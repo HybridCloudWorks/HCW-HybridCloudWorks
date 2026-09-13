@@ -190,7 +190,12 @@ describe('approve', () => {
     const res = await handlers.approve(request(), context());
     expect(res.status).toBe(502);
     expect(bodyOf(res).error).toContain('from domain not verified');
-    expect(store.docs.get(`newsletters/${ID}`)).toMatchObject({ status: 'draft', lastError: expect.stringContaining('validation_error') });
+    expect(store.docs.get(`newsletters/${ID}`)).toMatchObject({
+      status: 'draft',
+      lastError: expect.stringContaining('validation_error'),
+      approvedAt: null,
+      approvedBy: null,
+    });
   });
 
   it('is a publisher decision, not an editor one', async () => {
