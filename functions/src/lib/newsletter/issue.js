@@ -1,9 +1,11 @@
 /**
  * issue.js — build this week's newsletter as a DRAFT (ADR 0030 §2a).
  *
- * Written to replace `content/digest.js`, which drafts a markdown article from
- * titles and summaries with no links, into a container nothing reads; the job
- * that runs the digest is switched to this in a later change. An issue is
+ * Replaces `lib/content/digest.js`, which drafted a markdown article from
+ * titles and summaries with no links into `newsletters`, where no code read
+ * it; the `build-newsletter-issue` job runs this instead of
+ * `generate-weekly-digest`. Its drafts carry no `kind`, so the admin surface,
+ * which reads only `kind: 'weekly_issue'`, ignores them. An issue is
  * structured instead: the registered sections' items (each with the public URL
  * publishing stored), a short AI-written intro and subject, and a note the
  * owner can add. The email is rendered from that structure (render.js), so
