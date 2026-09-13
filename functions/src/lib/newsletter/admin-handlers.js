@@ -7,7 +7,7 @@
  *   POST  /api/cms/newsletters/{id}/approve  publisher  schedule (or send) it through Resend
  *   POST  /api/cms/newsletters/{id}/reject   editor     set aside a draft, or clear a stuck send
  *
- * `approve` is routed in functions/newsletter-admin-http.js and called by the
+ * `approve` is routed in functions/src/functions/newsletter-admin-http.js and called by the
  * Mailing List page's Approve button. It is refused until the owner sets
  * newsletter_sending_enabled in Terraform.
  *
