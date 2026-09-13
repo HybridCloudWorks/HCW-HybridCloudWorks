@@ -39,11 +39,14 @@ import { createHash } from 'node:crypto';
 import { readKey } from '../ai/router.js';
 import { enforceSubmissionQuota } from '../submissions.js';
 import { createResendClient } from './resend-client.js';
+import { normalizeEmail } from './email.js';
 import {
   buildConfirmationToken,
   deriveConfirmationKey,
   verifyConfirmationToken,
 } from './confirmation-token.js';
+
+export { normalizeEmail };
 
 /** Where newsletters come from — the domain verified in Resend on 2026-09-13. */
 export const NEWSLETTER_FROM = 'HybridCloudWorks <newsletter@news.hybridcloudworks.com>';
@@ -64,28 +67,12 @@ export const CONFIRM_PER_CALLER_PER_HOUR = 10;
 /** Where on the site a signup may say it came from. Anything else is `website`. */
 export const SIGNUP_SOURCES = Object.freeze(['footer', 'blog-post', 'website']);
 
-/** RFC 5321 caps a path at 256 octets including the brackets. */
-const MAX_EMAIL_LENGTH = 254;
-
 const json = (status, body, headers = {}) => ({
   status,
   headers: { 'Content-Type': 'application/json', ...headers },
   body: JSON.stringify(body),
 });
 
-/**
- * A plausible address, trimmed, or null. Deliberately loose: the confirmation
- * email is the real validation, and a strict pattern rejects real addresses.
- */
-export function normalizeEmail(value) {
-  if (typeof value !== 'string') return null;
-  const email = value.trim();
-  if (!email || email.length > MAX_EMAIL_LENGTH) return null;
-  // No whitespace or control characters anywhere, one @, a dot in the domain.
-  if (/[\s\u0000-\u001f\u007f]/.test(email)) return null;
-  if (!/^[^@]+@[^@]+\.[^@]+$/.test(email)) return null;
-  return email;
-}
 
 /** @param {unknown} value */
 export function normalizeSource(value) {

@@ -12,7 +12,7 @@
  * per recipient and handles the unsubscribe, which is why this renderer never
  * builds one of its own.
  */
-import { SITE_ORIGIN } from './sections.js';
+import { SITE_ORIGIN, absoluteUrl } from './sections.js';
 
 export const UNSUBSCRIBE_PLACEHOLDER = '{{{RESEND_UNSUBSCRIBE_URL}}}';
 
@@ -49,12 +49,31 @@ const COLORS = { ink: '#111827', muted: '#4b5563', rule: '#e5e7eb', accent: '#25
  * @param {{ postalAddress: string }} settings
  * @returns {{ subject: string, html: string, text: string }}
  */
+/**
+ * The sections as they will be rendered: every link re-checked HERE, at the
+ * last step, rather than trusting that each collector already did. A stored
+ * issue, a future section or a hand-edited document with a `javascript:`,
+ * `data:` or malformed URL loses that item, and a section left with no items
+ * loses its heading.
+ */
+function renderableSections(issue) {
+  return (issue.sections || [])
+    .map((section) => ({
+      ...section,
+      items: (section.items || [])
+        .map((item) => ({ ...item, url: absoluteUrl(item?.url) }))
+        .filter((item) => item.url && item.title),
+    }))
+    .filter((section) => section.items.length > 0);
+}
+
 export function renderIssue(issue, { postalAddress }) {
   const subject = issue.subject;
   const range = formatRange(issue);
   const p = `margin:0 0 14px;font-size:16px;line-height:1.6;color:${COLORS.ink}`;
+  const sections = renderableSections(issue);
 
-  const sectionHtml = (issue.sections || [])
+  const sectionHtml = sections
     .map((section) => {
       const items = section.items
         .map(
@@ -97,7 +116,7 @@ ${escapeHtml(postalAddress).replace(/\n/g, '<br>')}<br>
 </table></td></tr></table>
 </body></html>`;
 
-  const textSections = (issue.sections || []).map((section) =>
+  const textSections = sections.map((section) =>
     [
       section.title.toUpperCase(),
       ...section.items.map((item) =>

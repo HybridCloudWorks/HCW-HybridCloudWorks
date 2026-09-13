@@ -222,6 +222,31 @@ describe('renderIssue', () => {
     expect(text).toContain('https://hybridcloudworks.com/a?x=1&y=2');
   });
 
+  it('re-checks every link at render, dropping unsafe items and emptied sections', () => {
+    const unsafe = {
+      ...issue,
+      sections: [
+        {
+          id: 'articles',
+          title: 'New on HybridCloudWorks',
+          items: [
+            { title: 'Script', url: 'javascript:alert(1)' },
+            { title: 'Data', url: 'data:text/html,<b>x</b>' },
+            { title: 'Plain http', url: 'http://example.com/x' },
+            { title: 'Site path', url: '/azure/blog/ok' },
+          ],
+        },
+        { id: 'gone', title: 'Only bad links', items: [{ title: 'Bad', url: 'vbscript:x' }] },
+      ],
+    };
+    const { html, text } = renderIssue(unsafe, { postalAddress: 'x' });
+    for (const bad of ['javascript:', 'data:text', 'http://example.com', 'vbscript:', 'Only bad links']) {
+      expect(html, bad).not.toContain(bad);
+      expect(text, bad).not.toContain(bad);
+    }
+    expect(html).toContain('href="https://hybridcloudworks.com/azure/blog/ok"');
+  });
+
   it('dates the week it covers', () => {
     expect(renderIssue(issue, { postalAddress: 'x' }).html).toContain('HybridCloudWorks Weekly · Sep 7 – Sep 14');
   });

@@ -46,7 +46,7 @@ import {
   SEND_DAYS,
 } from './newsletter/settings.js';
 import { isValidSendTime, isValidTimeZone } from './newsletter/schedule.js';
-import { normalizeEmail } from './newsletter/handlers.js';
+import { normalizeEmail } from './newsletter/email.js';
 
 const json = (status, body) => ({
   status,
