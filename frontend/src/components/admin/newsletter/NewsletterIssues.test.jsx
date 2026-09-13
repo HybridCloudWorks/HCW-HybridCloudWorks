@@ -71,27 +71,114 @@ describe('NewsletterIssues', () => {
     expect(frame.getAttribute('srcdoc')).toBe('<p>email body</p>');
   });
 
-  it('says when sending is switched off in Terraform', async () => {
+  it('offers no approval while sending is switched off in Terraform', async () => {
     withIssue({ sendingEnabled: false });
     render(<NewsletterIssues />);
     expect(await screen.findByText(/Sending is switched off/)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /approve|send/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /approve and schedule/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /reject/i })).toBeInTheDocument();
   });
 
-  it('says nothing about the switch once sending is on', async () => {
-    withIssue();
-    render(<NewsletterIssues />);
-    expect(await screen.findByText(/Settings are complete/)).toBeInTheDocument();
-    expect(screen.queryByText(/Sending is switched off/)).not.toBeInTheDocument();
-  });
-
-  it('says what a send will need, and offers no send of any kind', async () => {
+  it('offers no approval until the postal address and reply-to exist', async () => {
     withIssue({ readyToSend: false, missingSettings: ['postal address', 'reply-to address'] });
     render(<NewsletterIssues />);
     expect(
-      await screen.findByText(/add the postal address and reply-to address in Newsletter settings/)
+      await screen.findByText(
+        'Add the postal address and reply-to address in Newsletter settings before approving.'
+      )
     ).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /approve|send/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /approve and schedule/i })).not.toBeInTheDocument();
+  });
+
+  it('asks for confirmation, then approves the version on screen', async () => {
+    withIssue();
+    postJSON.mockResolvedValue(
+      detail({ issue: { status: 'scheduled', scheduledAt: '2026-09-15T14:00:00.000Z' } })
+    );
+    render(<NewsletterIssues />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /approve and schedule/i }));
+    expect(postJSON).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: /yes, send it/i }));
+    await waitFor(() =>
+      expect(postJSON).toHaveBeenCalledWith(`cms/newsletters/${ID}/approve`, { etag: 'e1' })
+    );
+    expect(
+      await screen.findByText(/Approved — the newsletter is scheduled for/)
+    ).toBeInTheDocument();
+  });
+
+  it('will not approve unsaved edits', async () => {
+    withIssue();
+    render(<NewsletterIssues />);
+    fireEvent.change(await screen.findByLabelText('Subject'), {
+      target: { value: 'Changed subject' },
+    });
+    expect(screen.getByRole('button', { name: /approve and schedule/i })).toBeDisabled();
+    expect(screen.getByText('Save your changes before approving.')).toBeInTheDocument();
+  });
+
+  it('re-reads the issue after an unrecorded send, so Approve is not offered again', async () => {
+    let status = 'draft';
+    getJSON.mockImplementation(async (route) =>
+      route === 'cms/newsletters'
+        ? { ok: true, issues: [{ id: ID, status }] }
+        : detail({ issue: { status } })
+    );
+    postJSON.mockImplementation(async () => {
+      status = 'sending';
+      return {
+        ok: true,
+        warning:
+          'Resend accepted broadcast bc-1, but the site could not record it. Do not approve again.',
+      };
+    });
+    render(<NewsletterIssues />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /approve and schedule/i }));
+    fireEvent.click(screen.getByRole('button', { name: /yes, send it/i }));
+
+    expect(await screen.findByText(/Do not approve again/)).toBeInTheDocument();
+    expect(await screen.findByText(/Check Resend's Broadcasts list/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /approve and schedule/i })).not.toBeInTheDocument();
+  });
+
+  it("shows the server's reason when approval is refused, and re-reads the issue", async () => {
+    let status = 'draft';
+    getJSON.mockImplementation(async (route) =>
+      route === 'cms/newsletters'
+        ? { ok: true, issues: [{ id: ID, status }] }
+        : detail({ issue: { status } })
+    );
+    postJSON.mockImplementation(async () => {
+      status = 'rejected';
+      throw Object.assign(
+        new Error(
+          'Resend accepted broadcast bc-1, but this issue was changed while it was being sent.'
+        ),
+        { status: 409 }
+      );
+    });
+    render(<NewsletterIssues />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /approve and schedule/i }));
+    fireEvent.click(screen.getByRole('button', { name: /yes, send it/i }));
+
+    expect(await screen.findByText(/changed while it was being sent/)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: /approve and schedule/i })
+      ).not.toBeInTheDocument()
+    );
+  });
+
+  it('offers only reject for an issue stuck mid-send', async () => {
+    withIssue({ issue: { status: 'sending' } });
+    render(<NewsletterIssues />);
+    expect(await screen.findByText(/Check Resend's Broadcasts list/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /approve/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /reject/i })).toBeInTheDocument();
   });
 
   it('saves the subject and note to the draft', async () => {

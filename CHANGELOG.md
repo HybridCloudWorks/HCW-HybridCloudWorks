@@ -19,6 +19,15 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Approve the weekly newsletter from the Mailing List page (#504, ADR 0030
+  §2a).** `POST /api/cms/newsletters/{id}/approve` routes the approval logic
+  added just before this, and the Newsletter tab gains **Approve and
+  schedule**, then **Yes, send it**. It sends the version on screen, will not
+  approve unsaved edits, re-reads the issue after any answer that is not a clean
+  success, and offers only reject for an issue stuck in `sending`. While
+  `newsletter_sending_enabled` is `false` in Terraform the page says sending is
+  switched off and shows no Approve button, and the route refuses with 503.
+
 - **The approval logic for the weekly newsletter, not yet reachable (#504, ADR
   0030 §2a).** `approve` in `lib/newsletter/admin-handlers.js` and
   `createBroadcast` in the Resend client. No route or page button calls it yet,

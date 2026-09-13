@@ -1144,10 +1144,6 @@ variable "newsletter_sending_enabled" {
     still work. The page says sending is switched off instead of offering
     Approve.
 
-    Approval itself arrives in the change after this variable (#504); until
-    then nothing on the page can send, and the page already reports this
-    switch.
-
     True is the owner's decision that the send path is ready. Before setting
     it, save the postal address and reply-to in Newsletter settings and confirm
     a test signup reached the Newsletter segment in Resend.

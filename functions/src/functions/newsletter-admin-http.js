@@ -1,5 +1,5 @@
 /**
- * newsletter-admin-http.js — reviewing and editing weekly issues
+ * newsletter-admin-http.js — reviewing, editing and approving weekly issues
  * (#504, ADR 0030 §2a). Semantics in lib/newsletter/admin-handlers.js.
  */
 import { httpRoute, httpRouteByMethod } from '../lib/auth/http-route.js';
@@ -30,6 +30,13 @@ httpRouteByMethod('newsletterIssue', {
     GET: (request, context) => admin().get(request, context),
     PATCH: (request, context) => admin().update(request, context),
   },
+});
+
+httpRoute('approveNewsletter', {
+  methods: ['POST'],
+  authLevel: 'anonymous',
+  route: 'cms/newsletters/{id}/approve',
+  handler: (request, context) => admin().approve(request, context),
 });
 
 httpRoute('rejectNewsletter', {

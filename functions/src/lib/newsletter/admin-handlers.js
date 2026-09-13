@@ -7,10 +7,9 @@
  *   POST  /api/cms/newsletters/{id}/approve  publisher  schedule (or send) it through Resend
  *   POST  /api/cms/newsletters/{id}/reject   editor     set aside a draft, or clear a stuck send
  *
- * `approve` is not routed yet: no HTTP route or page button calls it, so this
- * module cannot email anyone on its own. The route and the page's Approve
- * button are their own change, and even then approval is refused until the
- * owner sets newsletter_sending_enabled in Terraform.
+ * `approve` is routed in functions/newsletter-admin-http.js and called by the
+ * Mailing List page's Approve button. It is refused until the owner sets
+ * newsletter_sending_enabled in Terraform.
  *
  * Approval is PUBLISHER, not editor: it emails every confirmed subscriber, which
  * is publishing in every sense the role exists for. It is also the owner's
