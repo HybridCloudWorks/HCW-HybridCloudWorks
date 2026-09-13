@@ -2,11 +2,12 @@
  * Mailing List — the weekly newsletter and its provider, Resend (ADR 0030).
  *
  * Resend replaced Klaviyo, which this page used to read through `klaviyoProxy`:
- * lists, profiles and campaigns, and nothing was ever written. What remains
- * here is what worked — drafting the weekly digest — and a connection test for
- * the Resend key. The subscriber list returns once the signup form writes to
- * Resend; until then there is no list to show, and an empty table would read as
- * "nobody subscribed" rather than "nothing collects subscribers yet".
+ * lists, profiles and campaigns, and nothing was ever written. The Newsletter
+ * tab now builds weekly issues from what the site published, shows each email
+ * exactly as it would send, and lets a draft be edited or rejected
+ * (components/admin/newsletter). It does not send: approval, which schedules an
+ * issue through Resend, is a separate change. The subscriber list itself is
+ * managed in Resend's Audience view.
  *
  * The test posts a NAME to `connectionProbe` and the server builds the call,
  * so `RESEND_API_KEY` never reaches the browser.
@@ -18,20 +19,11 @@ import { useAuthReady } from '@/hooks/useAuthReady';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import ServicePageHeader from '@/components/admin/ServicePageHeader';
-import {
-  Mail,
-  Loader2,
-  RefreshCw,
-  CheckCircle,
-  AlertCircle,
-  ExternalLink,
-  Megaphone,
-  Eye,
-  PenTool,
-} from 'lucide-react';
+import { Mail, Loader2, RefreshCw, CheckCircle, AlertCircle, ExternalLink } from 'lucide-react';
 import { postJSON } from '@/lib/api';
-import { runJob } from '@/lib/jobs';
 import { countList, unwrapProxy } from '@/lib/proxyEnvelope';
+import NewsletterIssues from '@/components/admin/newsletter/NewsletterIssues';
+import NewsletterSettingsCard from '@/components/admin/newsletter/NewsletterSettingsCard';
 
 const TABS = [
   { id: 'newsletter', label: 'Newsletter' },
@@ -56,131 +48,15 @@ export async function checkResend() {
     : `Connected to Resend — ${count} sending domain(s).`;
 }
 
-// ── Weekly digest (a platform job, T-322) ───────────────────────────────────
-// Site-Main called generateWeeklyDigest over HTTP with a 20 s client abort the
-// 300 s handler never met. Here the drafting runs as the
-// `generate-weekly-digest` job and the page polls; dryRun returns the preview
-// without saving to `newsletters`.
-const runWeeklyDigest = async (dryRun) => {
-  const job = await runJob('generate-weekly-digest', { dryRun, days: 7 });
-  if (job.status !== 'succeeded') {
-    throw new Error(job.error || `Digest ${job.status}`);
-  }
-  return job.result || {};
-};
-
 // ── Newsletter Tab ────────────────────────────────────────────────────────────
 
 function NewsletterTab() {
-  const [drafting, setDrafting] = useState(false);
-  const [previewing, setPreviewing] = useState(false);
-  const [digestNotice, setDigestNotice] = useState(null);
-  const [preview, setPreview] = useState(null);
-
-  const handleDraftWeeklyDigest = async () => {
-    setDrafting(true);
-    setDigestNotice(null);
-    try {
-      const res = await runWeeklyDigest(false);
-      setDigestNotice({
-        ok: res.success === true,
-        message: res.success
-          ? `Weekly digest drafted from ${res.sourceItemsCount} item(s). Draft id: ${res.draftId}`
-          : res.message || 'No action taken.',
-      });
-    } catch (err) {
-      setDigestNotice({ ok: false, message: err.message });
-    } finally {
-      setDrafting(false);
-    }
-  };
-
-  const handlePreviewDigest = async () => {
-    setPreviewing(true);
-    setDigestNotice(null);
-    try {
-      const res = await runWeeklyDigest(true);
-      if (res.success) {
-        setPreview(res);
-      } else {
-        setDigestNotice({ ok: false, message: res.message || 'No content to preview.' });
-      }
-    } catch (err) {
-      setDigestNotice({ ok: false, message: err.message });
-    } finally {
-      setPreviewing(false);
-    }
-  };
-
+  // Bumped when settings save, so the open issue re-reads whether it can send.
+  const [settingsVersion, setSettingsVersion] = useState(0);
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold flex items-center gap-2">
-          <Megaphone className="h-4 w-4" /> Weekly digest
-        </h3>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handlePreviewDigest}
-            disabled={previewing || drafting}
-            className="gap-1.5 h-7"
-          >
-            {previewing ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Eye className="h-3.5 w-3.5" />
-            )}
-            Preview Digest
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleDraftWeeklyDigest}
-            disabled={drafting || previewing}
-            className="gap-1.5 h-7"
-          >
-            {drafting ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <PenTool className="h-3.5 w-3.5" />
-            )}
-            Draft Weekly Digest
-          </Button>
-        </div>
-      </div>
-      <p className="text-sm text-muted-foreground">
-        Drafts a newsletter from the last seven days of published content. Drafts are saved on the
-        site; sending them through Resend is not switched on yet.
-      </p>
-      {digestNotice && (
-        <p
-          className={`text-sm flex items-center gap-2 ${digestNotice.ok ? 'text-emerald-600' : 'text-destructive'}`}
-        >
-          {digestNotice.ok ? (
-            <CheckCircle className="h-4 w-4" />
-          ) : (
-            <AlertCircle className="h-4 w-4" />
-          )}
-          {digestNotice.message}
-        </p>
-      )}
-      {preview && (
-        <Card className="p-4 space-y-2">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-medium">{preview.title}</p>
-            <Button variant="ghost" size="sm" className="h-7" onClick={() => setPreview(null)}>
-              Close
-            </Button>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Preview only, nothing saved. {preview.sourceItemsCount} source item(s).
-          </p>
-          <pre className="text-xs whitespace-pre-wrap max-h-96 overflow-auto rounded-md bg-muted p-3">
-            {preview.content}
-          </pre>
-        </Card>
-      )}
+    <div className="space-y-6">
+      <NewsletterIssues settingsVersion={settingsVersion} />
+      <NewsletterSettingsCard onSaved={() => setSettingsVersion((v) => v + 1)} />
     </div>
   );
 }
@@ -301,7 +177,7 @@ export default function MailingListPage() {
         title="Mailing List"
         service="Resend"
         connected={connected}
-        description="The weekly newsletter, and the Resend account that will hold the list and send it."
+        description="Build and review the weekly newsletter. Sending through Resend arrives with approval."
         accent="violet"
       />
 

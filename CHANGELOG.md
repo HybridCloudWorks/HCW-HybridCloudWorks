@@ -19,6 +19,23 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Build and review the weekly newsletter from the Mailing List page (#504, ADR
+  0030 §2a).** Third of the small changes. The Newsletter tab builds this week's
+  issue, lists recent ones, shows the email exactly as subscribers would receive
+  it, and lets an editor change the subject, add a note, or reject the draft.
+  Newsletter settings — postal address, reply-to, send day, time and zone — are
+  on the same tab, and the issue view says what a send still needs. Nothing on
+  the page sends; approval is the next change.
+
+  **The old digest is gone.** `generate-weekly-digest` and `content/digest.js`
+  are replaced by `build-newsletter-issue`, which runs the structured issue
+  builder. The old job's drafts had no links and nothing read them.
+
+  **Edits carry the version they were made against.** Every save and reject sends
+  the issue's etag; if someone else changed the issue first, the page shows the
+  server's sentence and reloads the stored version instead of overwriting it. The
+  email preview renders in an iframe with an empty sandbox.
+
 - **Admin API for weekly newsletter drafts, and the newsletter settings (#504,
   ADR 0030 §2a).** Second of the small changes building the weekly newsletter.
   Editors can list issues, read one rendered exactly as it would send, edit a

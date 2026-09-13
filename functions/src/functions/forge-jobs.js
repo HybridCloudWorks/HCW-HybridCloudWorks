@@ -1,13 +1,11 @@
 /**
- * forge-jobs.js — `forge-article` and `generate-weekly-digest` as platform
- * jobs (T-322).
+ * forge-jobs.js — `forge-article`, the Blog Machine jobs and
+ * `build-newsletter-issue` as platform jobs (T-322).
  *
  * Site-Main: `forgeArticle` (300 s / 1 GiB HTTP, also called in a sequential
- * bulk loop) and `generateWeeklyDigest` (300 s HTTP with a 20 s client abort
- * — the preview never returned in time). Both run under the job worker's
- * non-HTTP budget here. There is no ContentForge page or digest button in
- * this repo's frontend yet (both post-date the 2026-07-22 import); the
- * Mailing List page gained the two digest buttons, the Forge page is T-409.
+ * bulk loop). It runs under the job worker's non-HTTP budget here. The weekly
+ * newsletter builder shares this module because it uses the same drafter; it
+ * replaced `generate-weekly-digest` (ADR 0030 §2a).
  */
 import { readDoc, queryDocs, patchDoc, upsertDoc } from '../lib/cosmos-client.js';
 import * as ai from '../lib/ai/router.js';
@@ -15,7 +13,7 @@ import { defaultForgeConfig } from '../lib/content/forge-config-default.js';
 import { createDrafter } from '../lib/content/drafting.js';
 import { createGrader } from '../lib/content/forge-grader.js';
 import { createForge } from '../lib/content/forge.js';
-import { createDigest } from '../lib/content/digest.js';
+import { createIssueBuilder } from '../lib/newsletter/issue.js';
 import { scrapeArticle } from '../lib/content/scrape.js';
 import {
   scrapeToSource,
@@ -174,13 +172,15 @@ registerJobType('voice-calibration', {
   worker: (payload, { context }) => runVoiceCalibration(payload || {}, { store, ai, log: context }),
 });
 
-registerJobType('generate-weekly-digest', {
-  // Drafts a newsletter into storage; sending is a separate gated step.
+registerJobType('build-newsletter-issue', {
+  // Builds a DRAFT issue; sending is the publisher-level approval (ADR 0030 §2a).
+  // Replaces generate-weekly-digest, whose drafts carried no links and landed
+  // in a container nothing read.
   role: 'editor',
   description:
-    'Draft the weekly newsletter from the content published in the last N days ({ days, dryRun }); dryRun returns the preview without saving.',
+    "Build this week's newsletter issue as a draft from every registered section ({ days }, default 7): new articles, certification news, study and podcast episodes, plus an AI-written intro. Never sends.",
   maxPayloadBytes: 256,
   timeoutMs: 10 * 60 * 1000,
-  worker: (payload) =>
-    createDigest({ store, drafter: createDrafter({ store, ai }) }).run(payload || {}),
+  worker: (payload, { context }) =>
+    createIssueBuilder({ store, drafter: createDrafter({ store, ai }), log: context }).build(payload || {}),
 });

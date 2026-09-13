@@ -21,9 +21,12 @@ const postJSON = vi.fn();
 const runJob = vi.fn();
 let searchParams = 'tab=connection';
 
+const getJSON = vi.fn();
+
 vi.mock('@/lib/api', () => ({
   postJSON: (...args) => postJSON(...args),
-  getJSON: vi.fn(),
+  getJSON: (...args) => getJSON(...args),
+  sendJSON: vi.fn(),
 }));
 vi.mock('@/lib/jobs', () => ({ runJob: (...args) => runJob(...args) }));
 vi.mock('@/hooks/useAuthReady', () => ({ useAuthReady: () => ({ authReady: true }) }));
@@ -39,6 +42,10 @@ const domains = (items) => ({ object: 'list', data: items });
 beforeEach(() => {
   postJSON.mockReset();
   runJob.mockReset();
+  getJSON.mockReset();
+  getJSON.mockImplementation(async (route) =>
+    route === 'cms/newsletters' ? { ok: true, issues: [] } : { value: {} }
+  );
   searchParams = 'tab=connection';
 });
 
@@ -118,25 +125,35 @@ describe('The newsletter tab', () => {
     for (const tab of ['lists', 'campaigns']) {
       searchParams = `tab=${tab}`;
       const { unmount } = render(<MailingListPage />);
-      expect(screen.getByRole('button', { name: /draft weekly digest/i })).toBeInTheDocument();
+      expect(
+        await screen.findByRole('button', { name: /build this week's issue/i })
+      ).toBeInTheDocument();
       unmount();
     }
   });
 
-  it('still drafts the weekly digest, which is the part that always worked', async () => {
+  it('builds the weekly issue with the job that replaced the old digest', async () => {
     searchParams = 'tab=newsletter';
     postJSON.mockResolvedValue(envelope(true, 200, domains([])));
     runJob.mockResolvedValue({
       status: 'succeeded',
-      result: { success: true, sourceItemsCount: 4, draftId: 'n-1' },
+      result: { success: false, message: 'Nothing new in the last 7 days, so no issue was built.' },
     });
     render(<MailingListPage />);
 
-    fireEvent.click(screen.getByRole('button', { name: /draft weekly digest/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /build this week's issue/i }));
 
     await waitFor(() =>
-      expect(screen.getByText(/drafted from 4 item\(s\)\. Draft id: n-1/)).toBeInTheDocument()
+      expect(screen.getByText(/Nothing new in the last 7 days/)).toBeInTheDocument()
     );
-    expect(runJob).toHaveBeenCalledWith('generate-weekly-digest', { dryRun: false, days: 7 });
+    expect(runJob).toHaveBeenCalledWith('build-newsletter-issue', { days: 7 });
+  });
+
+  it('shows the newsletter settings on the same tab', async () => {
+    searchParams = 'tab=newsletter';
+    postJSON.mockResolvedValue(envelope(true, 200, domains([])));
+    render(<MailingListPage />);
+    expect(await screen.findByLabelText('Postal address')).toBeInTheDocument();
+    expect(screen.getByLabelText('Reply-to address')).toBeInTheDocument();
   });
 });

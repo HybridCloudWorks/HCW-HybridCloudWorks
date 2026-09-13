@@ -9,7 +9,6 @@ import {
   dayNumber,
 } from './forge.js';
 import { createDrafter } from './drafting.js';
-import { createDigest } from './digest.js';
 import { DEFAULT_PROFILE, DEFAULT_PROMPTS } from './forge-config.js';
 import { ADMIN_CONFIG_PARTITION } from '../cosmos-client.js';
 
@@ -525,68 +524,5 @@ describe('drafter', () => {
     expect(call.prompt).toMatch(/extractedDescription: N\/A/);
     expect(call.parts).toHaveLength(4);
     expect(call.parts[3]).toEqual({ inlineData: { mimeType: 'application/pdf', data: 'AAAA' } });
-  });
-});
-
-describe('weekly digest', () => {
-  const items = [
-    { Title: 'A', Summary: 'sa', 'Cloud Provider': 'AWS' },
-    { title: 'B', summary: 'sb' },
-  ];
-  const deps = (rows) => ({
-    store: { queryDocs: vi.fn(async () => rows), upsertDoc: vi.fn(async (_c, d) => d) },
-    drafter: {
-      generateDraft: vi.fn(async () => ({
-        title: 'Weekly: two posts',
-        postContent: 'Hello readers',
-      })),
-    },
-    now: () => NOW,
-    uuid: () => 'nl-1',
-  });
-
-  it('reports when nothing was published in the window', async () => {
-    const d = deps([]);
-    expect(await createDigest(d).run({ days: 99 })).toEqual({
-      success: false,
-      message: 'No new content published in the last 31 days.',
-      sourceItemsCount: 0,
-    });
-    expect(d.store.queryDocs.mock.calls[0][2]).toEqual([
-      { name: '@since', value: '2026-07-21T18:00:00.000Z' },
-    ]);
-    expect(d.drafter.generateDraft).not.toHaveBeenCalled();
-  });
-
-  it('previews on dryRun and saves a Draft newsletter otherwise', async () => {
-    const d = deps(items);
-    const preview = await createDigest(d).run({ dryRun: true });
-    expect(preview).toMatchObject({
-      success: true,
-      dryRun: true,
-      title: 'Weekly: two posts',
-      content: 'Hello readers',
-      sourceItemsCount: 2,
-    });
-    expect(d.store.upsertDoc).not.toHaveBeenCalled();
-    expect(d.drafter.generateDraft.mock.calls[0][0].markdown).toBe(
-      'Title: A\nProvider: AWS\nSummary: sa\n\n---\nTitle: B\nProvider: Multi\nSummary: sb\n'
-    );
-    const saved = await createDigest(d).run({});
-    expect(saved).toEqual({
-      success: true,
-      draftId: 'nl-1',
-      sourceItemsCount: 2,
-      message: 'Newsletter drafted successfully.',
-    });
-    expect(d.store.upsertDoc).toHaveBeenCalledWith('newsletters', {
-      id: 'nl-1',
-      title: 'Weekly: two posts',
-      content: 'Hello readers',
-      status: 'Draft',
-      createdAt: NOW.toISOString(),
-      updatedAt: NOW.toISOString(),
-      sourceItemsCount: 2,
-    });
   });
 });
