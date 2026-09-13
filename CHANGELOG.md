@@ -27,7 +27,7 @@ This project has not cut a tagged release; entries are grouped under
   on the same tab, and the issue view says what a send still needs. Nothing on
   the page sends; approval is the next change.
 
-  **The old digest is gone.** `generate-weekly-digest` and `content/digest.js`
+  **The old digest is gone.** `generate-weekly-digest` and `lib/content/digest.js`
   are replaced by `build-newsletter-issue`, which runs the structured issue
   builder. The old job's drafts had no links and nothing read them.
 

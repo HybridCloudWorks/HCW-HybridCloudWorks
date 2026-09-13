@@ -32,7 +32,8 @@ no visitor is told they subscribed when they did not. What is live is a
 different urgency — it is embarrassing rather than lossy, and it does not
 justify rushing the provider decision to clear it.
 
-What the estate has today:
+What the estate had when this was decided (2026-09-12; §2a records what replaced
+the digest):
 
 | Piece | State |
 | --- | --- |

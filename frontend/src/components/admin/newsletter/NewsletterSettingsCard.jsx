@@ -30,6 +30,11 @@ const EMPTY = {
 export default function NewsletterSettingsCard({ onSaved }) {
   const [value, setValue] = useState(EMPTY);
   const [loading, setLoading] = useState(true);
+  // Set only when the stored settings could not be read. The form is NOT shown
+  // then: its fields would hold defaults, and saving them would overwrite the
+  // real settings after nothing worse than a transient load error.
+  const [loadError, setLoadError] = useState('');
+  const [attempt, setAttempt] = useState(0);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState(null);
 
@@ -37,14 +42,24 @@ export default function NewsletterSettingsCard({ onSaved }) {
     let cancelled = false;
     getJSON(NEWSLETTER_SETTINGS_ROUTE)
       .then((res) => {
-        if (!cancelled && res?.value) setValue({ ...EMPTY, ...res.value });
+        if (cancelled) return;
+        setValue({ ...EMPTY, ...(res?.value || {}) });
+        setLoadError('');
       })
-      .catch((err) => !cancelled && setNotice({ ok: false, message: err.message }))
+      .catch((err) => {
+        if (!cancelled) setLoadError(err.message || 'Could not load the newsletter settings.');
+      })
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [attempt]);
+
+  const handleRetry = () => {
+    setLoading(true);
+    setLoadError('');
+    setAttempt((n) => n + 1);
+  };
 
   const set = (key) => (event) =>
     setValue((current) => ({ ...current, [key]: event.target.value }));
@@ -75,12 +90,23 @@ export default function NewsletterSettingsCard({ onSaved }) {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        {loading ? (
+        {loading && (
           <Loader2
             className="h-5 w-5 animate-spin text-muted-foreground"
             aria-label="Loading settings"
           />
-        ) : (
+        )}
+        {!loading && loadError && (
+          <div className="space-y-3">
+            <p role="alert" className="text-sm text-destructive">
+              The saved settings could not be loaded, so they are not shown for editing: {loadError}
+            </p>
+            <Button variant="outline" size="sm" onClick={handleRetry}>
+              Retry
+            </Button>
+          </div>
+        )}
+        {!loading && !loadError && (
           <form onSubmit={handleSave} className="grid gap-4 md:grid-cols-2">
             <div className="md:col-span-2 space-y-1.5">
               <Label htmlFor="nl-postal">Postal address</Label>
