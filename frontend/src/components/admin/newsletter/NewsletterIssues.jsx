@@ -300,20 +300,39 @@ export default function NewsletterIssues({ settingsVersion = 0 }) {
       await loadList();
     });
 
-  const handleApprove = () =>
-    run('approve', async () => {
-      const res = await postJSON(`cms/newsletters/${selectedId}/approve`, {});
+  /**
+   * Re-read the issue after an approval that did not come back as a clean
+   * success. A warning or a refusal can mean the server's state moved — to
+   * `sending`, back to `draft`, or to `rejected` — and a page still showing the
+   * old draft would keep offering an Approve the server will refuse.
+   */
+  const refreshAfterApproval = async (id) => {
+    await Promise.all([loadDetail(id), loadList()]).catch(() => {});
+  };
+
+  const handleApprove = () => {
+    const id = selectedId;
+    return run('approve', async () => {
+      let res;
+      try {
+        res = await postJSON(`cms/newsletters/${id}/approve`, {});
+      } catch (err) {
+        await refreshAfterApproval(id);
+        throw err;
+      }
       if (res?.warning) {
         setNotice({ ok: false, message: res.warning });
-      } else {
-        setDetail(res);
-        const when = res.issue?.scheduledAt
-          ? `scheduled for ${formatWhen(res.issue.scheduledAt)}`
-          : 'sent';
-        setNotice({ ok: true, message: `Approved — the newsletter is ${when}.` });
+        await refreshAfterApproval(id);
+        return;
       }
+      setDetail(res);
+      const when = res.issue?.scheduledAt
+        ? `scheduled for ${formatWhen(res.issue.scheduledAt)}`
+        : 'sent';
+      setNotice({ ok: true, message: `Approved — the newsletter is ${when}.` });
       await loadList();
     });
+  };
 
   const handleReject = () =>
     run('reject', async () => {

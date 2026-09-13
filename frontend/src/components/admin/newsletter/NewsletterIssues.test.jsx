@@ -23,8 +23,10 @@ vi.mock('@/lib/jobs', () => ({ runJob: (...args) => runJob(...args) }));
 
 const ID = 'issue-2026-09-14';
 
-const detail = (over = {}) => ({
+const detail = ({ issue: issueOver = {}, ...over } = {}) => ({
   ok: true,
+  // The issue override MERGES. Spreading `over` whole after this used to
+  // replace the issue with just the overridden fields, leaving no subject.
   issue: {
     id: ID,
     status: 'draft',
@@ -34,7 +36,7 @@ const detail = (over = {}) => ({
     intro: 'We covered a lot.',
     introError: null,
     sections: [],
-    ...over.issue,
+    ...issueOver,
   },
   preview: { subject: 'Landing zones', html: '<p>email body</p>', text: 'email body' },
   readyToSend: true,
@@ -167,6 +169,57 @@ describe('NewsletterIssues', () => {
       expect(
         getJSON.mock.calls.filter(([route]) => route === `cms/newsletters/${ID}`)
       ).toHaveLength(before + 1)
+    );
+  });
+
+  it('re-reads the issue after an unrecorded send, so Approve is not offered again', async () => {
+    let status = 'draft';
+    getJSON.mockImplementation(async (route) =>
+      route === 'cms/newsletters'
+        ? { ok: true, issues: [{ id: ID, status }] }
+        : detail({ issue: { status } })
+    );
+    postJSON.mockImplementation(async () => {
+      status = 'sending';
+      return {
+        ok: true,
+        warning:
+          'Resend accepted broadcast bc-1, but the site could not record it. Do not approve again.',
+      };
+    });
+    render(<NewsletterIssues />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /approve and schedule/i }));
+    fireEvent.click(screen.getByRole('button', { name: /yes, send it/i }));
+
+    expect(await screen.findByText(/Do not approve again/)).toBeInTheDocument();
+    expect(await screen.findByText(/Check Resend's Broadcasts list/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /approve and schedule/i })).not.toBeInTheDocument();
+  });
+
+  it('re-reads the issue after a refused approval too', async () => {
+    let status = 'draft';
+    getJSON.mockImplementation(async (route) =>
+      route === 'cms/newsletters'
+        ? { ok: true, issues: [{ id: ID, status }] }
+        : detail({ issue: { status } })
+    );
+    postJSON.mockImplementation(async () => {
+      status = 'rejected';
+      throw new Error(
+        'Resend accepted broadcast bc-1, but this issue was changed while it was being sent.'
+      );
+    });
+    render(<NewsletterIssues />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /approve and schedule/i }));
+    fireEvent.click(screen.getByRole('button', { name: /yes, send it/i }));
+
+    expect(await screen.findByText(/changed while it was being sent/)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: /approve and schedule/i })
+      ).not.toBeInTheDocument()
     );
   });
 
