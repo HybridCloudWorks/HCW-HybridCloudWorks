@@ -128,6 +128,14 @@ export default function NewsletterCalendar({ today = new Date() }) {
     });
   };
 
+  /** Open one issue: the previous email goes, so the loading line shows. */
+  const chooseIssue = (id) => {
+    if (id === selectedId) return;
+    setDetail(null);
+    setDetailError('');
+    setSelectedId(id);
+  };
+
   const chooseDay = (key) => {
     setSelectedDay(key);
     const list = days.get(key) || [];
@@ -252,7 +260,7 @@ export default function NewsletterCalendar({ today = new Date() }) {
             <li key={row.id}>
               <button
                 type="button"
-                onClick={() => setSelectedId(row.id)}
+                onClick={() => chooseIssue(row.id)}
                 aria-pressed={row.id === selectedId}
                 className={`rounded-lg border px-3 py-2 text-left text-sm ${row.id === selectedId ? 'border-primary' : 'border-border'}`}
               >

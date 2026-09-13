@@ -125,6 +125,36 @@ describe('NewsletterCalendar', () => {
     await waitFor(() => expect(getJSON).toHaveBeenCalledWith('cms/newsletters?month=2025-12'));
   });
 
+  it('shows loading, not the previous email, while another issue on the day loads', async () => {
+    const base = getJSON.getMockImplementation();
+    let release;
+    getJSON.mockImplementation((route) =>
+      route === `cms/newsletters/${alsoSent.id}`
+        ? new Promise((resolve) => {
+            release = () => resolve(base(route));
+          })
+        : base(route)
+    );
+    render(<NewsletterCalendar today={TODAY} />);
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'September 15: 2 sent, 0 scheduled' })
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Landing zones/ }));
+    expect((await screen.findByTitle('Published newsletter')).getAttribute('srcdoc')).toBe(
+      '<p>Landing zones</p>'
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Networking/ }));
+    expect(await screen.findByText(/Loading the newsletter/)).toBeInTheDocument();
+    expect(screen.queryByTitle('Published newsletter')).not.toBeInTheDocument();
+
+    await waitFor(() => expect(release).toBeTypeOf('function'));
+    release();
+    expect((await screen.findByTitle('Published newsletter')).getAttribute('srcdoc')).toBe(
+      '<p>Networking</p>'
+    );
+  });
+
   it('clears a failed preview once another issue loads', async () => {
     const base = getJSON.getMockImplementation();
     getJSON.mockImplementation(async (route) => {
