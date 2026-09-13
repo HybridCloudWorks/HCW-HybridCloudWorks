@@ -19,6 +19,32 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The weekly newsletter's core library: what goes in an issue, how it is
+  built, rendered and scheduled (#504, ADR 0030 §2a).** No route, job or page
+  uses it yet — the admin surface and the job swap are the next two changes,
+  split so each is small enough to review on its own.
+
+  **Sections are a registry.** `lib/newsletter/sections.js` collects new articles
+  (linked to the URL publishing stored, never a guessed one), Microsoft
+  certification news with exam codes, and approved study and podcast episodes. A
+  section is one entry; one that throws costs its heading, not the issue.
+
+  **An issue is a structured draft.** `issue.js` stores the sections' items, a
+  plain-text intro and subject from the existing drafter, and room for the
+  owner's note; a week with nothing new builds nothing and asks no model, and
+  with the AI off the issue still builds. One issue per day, and an issue that
+  has left `draft`/`rejected` is never rebuilt.
+
+  **The email escapes everything and re-checks every link.** `render.js` escapes
+  each stored value once and drops any item whose link is not https or a site
+  path, however it got there; the footer carries the postal address and Resend's
+  per-recipient unsubscribe link.
+
+  **The send slot survives daylight saving.** `schedule.js` turns a weekday, a
+  wall-clock time and an IANA zone into a UTC instant per send, so Tuesday 09:00
+  Central stays 09:00 in March and November. The email-address check moved to
+  `email.js` so settings validation will not load the signup handlers.
+
 - **The newsletter signup works, with double opt-in (#504, ADR 0030 §3a).** The
   form on every page posted to a route that never existed. It now posts to
   `public/newsletter/subscribe`, which emails a confirmation link from
