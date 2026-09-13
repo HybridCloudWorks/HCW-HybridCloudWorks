@@ -28,12 +28,11 @@ This project has not cut a tagged release; entries are grouped under
   `newsletter_sending_enabled` is `false` in Terraform the page says sending is
   switched off and shows no Approve button, and the route refuses with 503.
 
-- **The approval logic for the weekly newsletter, not yet reachable (#504, ADR
-  0030 §2a).** `approve` in `lib/newsletter/admin-handlers.js` and
-  `createBroadcast` in the Resend client. No route or page button calls it yet,
-  so nothing can send; the route and the Approve button follow separately, and
-  approval stays refused until `newsletter_sending_enabled` is `true` in
-  Terraform.
+- **The approval logic for the weekly newsletter (#504, ADR 0030 §2a).**
+  `approve` in `lib/newsletter/admin-handlers.js` and `createBroadcast` in the
+  Resend client. It landed before its route; the route and the Approve button
+  are the entry above. Approval stays refused until `newsletter_sending_enabled`
+  is `true` in Terraform.
 
   **At most once, and only as the approver saw it.** Approval requires the
   issue's etag, so an issue edited after the approver opened it is refused. The

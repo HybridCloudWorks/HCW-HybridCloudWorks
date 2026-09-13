@@ -79,6 +79,15 @@ describe('NewsletterIssues', () => {
     expect(screen.getByRole('button', { name: /reject/i })).toBeInTheDocument();
   });
 
+  it('offers no approval when no send time can be worked out', async () => {
+    withIssue({ sendPlan: null });
+    render(<NewsletterIssues />);
+    expect(
+      await screen.findByText(/send day, time or time zone in Newsletter settings is not valid/)
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /approve and schedule/i })).not.toBeInTheDocument();
+  });
+
   it('offers no approval until the postal address and reply-to exist', async () => {
     withIssue({ readyToSend: false, missingSettings: ['postal address', 'reply-to address'] });
     render(<NewsletterIssues />);

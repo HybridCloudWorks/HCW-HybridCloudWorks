@@ -111,6 +111,16 @@ function ApprovalBox({ detail, dirty, busy, onApprove }) {
       </p>
     );
   }
+  // No send plan means the server could not work out a send time from the
+  // settings, and it would refuse approval (SETTINGS_INVALID).
+  if (!detail.sendPlan) {
+    return (
+      <p role="alert" className="text-sm text-destructive">
+        The send day, time or time zone in Newsletter settings is not valid. Save them again before
+        approving.
+      </p>
+    );
+  }
   return (
     <div className="space-y-2">
       <p className="text-sm">
