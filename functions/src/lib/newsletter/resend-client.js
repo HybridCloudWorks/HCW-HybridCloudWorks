@@ -21,6 +21,7 @@
  *   PATCH  /contacts/{id|email}                      { unsubscribed }
  *   GET    /contacts/{id|email}/segments             { data: [{ id, name }] }
  *   POST   /contacts/{id|email}/segments/{segmentId}
+ *   POST   /broadcasts                               { segment_id, from, reply_to, subject, html, text, name, send, scheduled_at }
  *
  * `segments` on create is an array of OBJECTS, `[{ id }]`, not of strings —
  * the documentation's wording suggests otherwise and `resend/resend-node#854`
@@ -85,5 +86,23 @@ export function createResendClient({ apiKey, fetch: fetchImpl = globalThis.fetch
     listContactSegments: (email) => call('GET', `${contactPath(email)}/segments?limit=100`),
     addContactToSegment: (email, segmentId) =>
       call('POST', `${contactPath(email)}/segments/${encodeURIComponent(segmentId)}`),
+    /**
+     * `POST /broadcasts` with `send: true`: create and send (or schedule, when
+     * `scheduledAt` is given) in one call, so there is no window in which a
+     * created-but-unsent broadcast exists to be sent twice. Resend fills
+     * `{{{RESEND_UNSUBSCRIBE_URL}}}` per recipient.
+     */
+    createBroadcast: ({ segmentId, from, replyTo, subject, html, text, name, scheduledAt }) =>
+      call('POST', '/broadcasts', {
+        segment_id: segmentId,
+        from,
+        ...(replyTo ? { reply_to: replyTo } : {}),
+        subject,
+        html,
+        text,
+        name,
+        send: true,
+        ...(scheduledAt ? { scheduled_at: scheduledAt } : {}),
+      }),
   };
 }

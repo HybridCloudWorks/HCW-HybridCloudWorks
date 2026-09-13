@@ -19,6 +19,23 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The approval logic for the weekly newsletter, not yet reachable (#504, ADR
+  0030 §2a).** `approve` in `lib/newsletter/admin-handlers.js` and
+  `createBroadcast` in the Resend client. No route or page button calls it yet,
+  so nothing can send; the route and the Approve button follow separately, and
+  approval stays refused until `newsletter_sending_enabled` is `true` in
+  Terraform.
+
+  **At most once, and only as the approver saw it.** Approval requires the
+  issue's etag, so an issue edited after the approver opened it is refused. The
+  send slot and the email are worked out first, then the issue is claimed
+  `draft → sending` with an ETag-conditional write before Resend is called, so
+  two approvals at once create one broadcast. The outcome is recorded only while
+  the issue is still that claim: a reject that lands mid-send stands. A refused
+  broadcast returns the issue to draft with Resend's reason. No answer from
+  Resend at all leaves `sending`, because a broadcast may exist. Reject may now
+  clear an issue in `sending`. Approval logs carry the invocation id only.
+
 - **A Terraform switch for newsletter sending, off by default (#504, ADR 0030
   §2a).** New variable `newsletter_sending_enabled` (default `false`) sets the
   app setting `NEWSLETTER_SENDING_ENABLED`. The issue API reports it as
