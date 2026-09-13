@@ -223,6 +223,28 @@ describe('NewsletterIssues', () => {
     );
   });
 
+  it('locks issue selection while an action is running', async () => {
+    withIssue();
+    let finish;
+    postJSON.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = () => resolve(detail({ issue: { status: 'scheduled' } }));
+        })
+    );
+    render(<NewsletterIssues />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /approve and schedule/i }));
+    fireEvent.click(screen.getByRole('button', { name: /yes, send it/i }));
+
+    const issueButton = screen.getByRole('button', { name: /2026-09-14/ });
+    await waitFor(() => expect(issueButton).toBeDisabled());
+    finish();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /2026-09-14/ })).not.toBeDisabled()
+    );
+  });
+
   it("shows the server's reason when approval is refused", async () => {
     withIssue();
     postJSON.mockRejectedValue(

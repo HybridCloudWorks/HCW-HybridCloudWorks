@@ -385,6 +385,9 @@ export default function NewsletterIssues({ settingsVersion = 0 }) {
               <button
                 type="button"
                 onClick={() => setSelectedId(row.id)}
+                // Not while an action runs: its late response would land on
+                // whichever issue had been selected in the meantime.
+                disabled={Boolean(busy)}
                 aria-pressed={row.id === selectedId}
                 className={`rounded-lg border px-3 py-2 text-left text-sm ${row.id === selectedId ? 'border-primary' : 'border-border'}`}
               >
