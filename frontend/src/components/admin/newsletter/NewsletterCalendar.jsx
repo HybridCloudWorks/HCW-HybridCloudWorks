@@ -56,6 +56,9 @@ export default function NewsletterCalendar({ today = new Date() }) {
   const [issues, setIssues] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  // Kept apart from the month's error, and cleared whenever another issue is
+  // chosen, so a failed preview never lingers over one that loaded.
+  const [detailError, setDetailError] = useState('');
   const [selectedDay, setSelectedDay] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [detail, setDetail] = useState(null);
@@ -82,11 +85,20 @@ export default function NewsletterCalendar({ today = new Date() }) {
 
   useEffect(() => {
     if (!selectedId) return;
+    let current = true;
     queueMicrotask(() => {
+      setDetailError('');
       getJSON(`cms/newsletters/${selectedId}`)
-        .then(setDetail)
-        .catch((err) => setError(err.message));
+        .then((res) => {
+          if (current) setDetail(res);
+        })
+        .catch((err) => {
+          if (current) setDetailError(err.message);
+        });
     });
+    return () => {
+      current = false;
+    };
   }, [selectedId]);
 
   const days = useMemo(
@@ -109,6 +121,7 @@ export default function NewsletterCalendar({ today = new Date() }) {
     setSelectedDay(null);
     setSelectedId(null);
     setDetail(null);
+    setDetailError('');
     setCursor(({ year, month }) => {
       const next = new Date(year, month + delta, 1);
       return { year: next.getFullYear(), month: next.getMonth() };
@@ -119,6 +132,7 @@ export default function NewsletterCalendar({ today = new Date() }) {
     setSelectedDay(key);
     const list = days.get(key) || [];
     setDetail(null);
+    setDetailError('');
     setSelectedId(list.length === 1 ? list[0].id : null);
   };
 
@@ -252,7 +266,14 @@ export default function NewsletterCalendar({ today = new Date() }) {
         </ul>
       )}
 
-      {selectedId && !detail && !error && (
+      {detailError && (
+        <p role="alert" className="flex items-start gap-2 text-sm text-destructive">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          {detailError}
+        </p>
+      )}
+
+      {selectedId && !detail && !detailError && (
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading the newsletter…
         </p>

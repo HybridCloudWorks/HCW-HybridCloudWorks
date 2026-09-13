@@ -125,6 +125,27 @@ describe('NewsletterCalendar', () => {
     await waitFor(() => expect(getJSON).toHaveBeenCalledWith('cms/newsletters?month=2025-12'));
   });
 
+  it('clears a failed preview once another issue loads', async () => {
+    const base = getJSON.getMockImplementation();
+    getJSON.mockImplementation(async (route) => {
+      if (route === `cms/newsletters/${sent.id}`)
+        throw new Error('Failed to read the newsletter issue');
+      return base(route);
+    });
+    render(<NewsletterCalendar today={TODAY} />);
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'September 15: 2 sent, 0 scheduled' })
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Landing zones/ }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Failed to read the newsletter issue'
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Networking/ }));
+    expect(await screen.findByTitle('Published newsletter')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
   it('says why when the month cannot be loaded', async () => {
     getJSON.mockRejectedValue(new Error('Failed to list newsletter issues'));
     render(<NewsletterCalendar today={TODAY} />);
