@@ -1,7 +1,7 @@
 # ADR 0030: The newsletter provider is Resend, and the site owns the schedule
 
-**Status:** Accepted 2026-09-13
-**Decision date:** 2026-09-13
+**Status:** Accepted 2026-09-12
+**Decision date:** 2026-09-12
 **Owners:** Workload owner
 
 ## Context
@@ -72,7 +72,7 @@ automation platform used as a read-only address book.
 
 ### 1. Resend is the newsletter provider; Klaviyo is removed rather than left half-wired
 
-Free-tier capability, checked 2026-09-13:
+Free-tier capability, checked 2026-09-12:
 
 | | Klaviyo Free | Resend Free |
 | --- | --- | --- |
@@ -184,7 +184,7 @@ not become a port in six months.
   `hybridcloudworks.com` are Cloudflare DNS records and owner-gated. Neither
   candidate avoids this and neither should be blamed for a bounce rate until
   it is done.
-- **One known SDK defect has to be pinned on first write.** `resend-node` #458
+- **One known SDK defect has to be pinned on first write.** `resend/resend-node#458`
   reports that creating a contact with `unsubscribed: false` produced an
   unsubscribed contact. If that reproduces, a subscriber would be captured and
   then silently skipped by every broadcast — the lossy failure #504 wrongly
@@ -238,7 +238,7 @@ not become a port in six months.
   knows.
 - **Validated for the SDK defect when:** a contact created through the live
   route is read back and asserted subscribed, and a test pins that assertion.
-  Reproducing #458 is not a blocker; discovering it after a list has been
+  Reproducing `resend/resend-node#458` is not a blocker; discovering it after a list has been
   collected would be.
 - **Validated for cost when:** the first month closes with the Resend bill at
   zero and the contact count recorded, so the distance to the 1,000 cliff is a
@@ -292,5 +292,5 @@ changes the choice, but each changes a next step:
   `frontend/src/components/templates/BlogDetailTemplate.jsx`,
   `frontend/src/pages/admin/MailingListPage.jsx`.
 - Resend account quotas and limits, and the Resend pricing knowledge-base
-  page, both checked 2026-09-13; `resend/resend-node` #689 (the Segments
-  migration) and #458 (the unsubscribed-on-create defect).
+  page, both checked 2026-09-12; `resend/resend-node#689` (the Segments
+  migration) and `resend/resend-node#458` (the unsubscribed-on-create defect).

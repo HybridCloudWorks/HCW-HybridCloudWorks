@@ -45,7 +45,7 @@ This project has not cut a tagged release; entries are grouped under
   otherwise act on an urgency that is not there.
 
   The one lossy failure this could still produce is named as a risk instead:
-  `resend-node` #458 reports a contact created with `unsubscribed: false` coming
+  `resend/resend-node#458` reports a contact created with `unsubscribed: false` coming
   back unsubscribed, which would capture a subscriber and then skip them on
   every broadcast. The first write asserts the stored state rather than trusting
   the call, and a test pins it.
