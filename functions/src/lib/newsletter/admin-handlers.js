@@ -85,9 +85,18 @@ export function createNewsletterAdminHandlers({
    * longer stored. Checked BEFORE writing, against the `etag` the caller got
    * from GET, because the server's own read is fresh by definition; comparing
    * only that would let an editor working from an old view overwrite another
-   * editor's change without either of them knowing.
+   * editor's change without either of them knowing. The etag is REQUIRED on
+   * every write: an optional one protects only the callers that remember it.
    */
-  const staleView = (body, issue) => typeof body?.etag === 'string' && body.etag !== issue._etag;
+  const staleView = (body, issue) => body.etag !== issue._etag;
+  /** A write without the version it was made against cannot be checked, so it is refused. */
+  const missingEtag = (body) => typeof body?.etag !== 'string' || body.etag.length === 0;
+  const etagRequired = () =>
+    json(400, {
+      ok: false,
+      code: 'ETAG_REQUIRED',
+      error: 'etag is required: send the issue.etag from the last read of this issue.',
+    });
   const changedElsewhere = () =>
     json(409, {
       ok: false,
@@ -165,6 +174,7 @@ export function createNewsletterAdminHandlers({
       }
       const unknown = Object.keys(body).filter((key) => !['customNote', 'subject', 'etag'].includes(key));
       if (unknown.length) return json(400, { ok: false, error: `Unknown field(s): ${unknown.join(', ')}` });
+      if (missingEtag(body)) return etagRequired();
 
       const patch = {};
       if (body.customNote !== undefined) {
@@ -210,6 +220,7 @@ export function createNewsletterAdminHandlers({
       const auth = await guard.requireRole(request, 'editor');
       if (auth.error) return auth.error;
       const body = await request.json().catch(() => null);
+      if (missingEtag(body)) return etagRequired();
       try {
         const issue = await readIssue(request);
         if (!issue) return notFound();

@@ -8,7 +8,7 @@
  *   social-autopost         → admin_config/social_autopost         read by triggers/social-caption-trigger.js
  *   podcast-feeds           → admin_config/podcast_feeds           read by timers/podcasts.js
  *   listen-and-learn-speech → admin_config/listen_and_learn_speech read by functions/listen-and-learn-jobs.js
- *   newsletter-settings     → admin_config/newsletter_settings     read by newsletter/admin-handlers.js
+ *   newsletter-settings     → admin_config/newsletter_settings     read by lib/newsletter/admin-handlers.js
  *                             (to be edited from the Mailing List page, not Platform settings)
  *
  * Every write is normalized to EXACTLY the shape its consumer reads — the

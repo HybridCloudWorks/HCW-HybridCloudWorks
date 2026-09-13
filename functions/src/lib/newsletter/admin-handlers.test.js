@@ -111,16 +111,16 @@ describe('get', () => {
 describe('update', () => {
   it('saves the note on a draft', async () => {
     const { handlers, store } = build();
-    const res = await handlers.update(request({ body: { customNote: '  Hello readers  ' } }), context());
+    const res = await handlers.update(request({ body: { customNote: '  Hello readers  ', etag: 'e1' } }), context());
     expect(res.status).toBe(200);
     expect(store.docs.get(`newsletters/${ID}`).customNote).toBe('Hello readers');
   });
 
   it('refuses unknown fields and edits to anything but a draft', async () => {
     const { handlers } = build();
-    expect((await handlers.update(request({ body: { status: 'sent' } }), context())).status).toBe(400);
+    expect((await handlers.update(request({ body: { status: 'sent', etag: 'e1' } }), context())).status).toBe(400);
     const scheduled = build({ store: makeStore({ issue: draftIssue({ status: 'scheduled' }) }) });
-    expect((await scheduled.handlers.update(request({ body: { customNote: 'x' } }), context())).status).toBe(409);
+    expect((await scheduled.handlers.update(request({ body: { customNote: 'x', etag: 'e1' } }), context())).status).toBe(409);
   });
 });
 
@@ -134,6 +134,21 @@ describe('concurrency through the etag', () => {
     );
     expect(saved.issue.etag).toBeTruthy();
     expect(saved.issue.etag).not.toBe('e1');
+  });
+
+  it('refuses an edit or a reject that sends no etag, and writes nothing', async () => {
+    const { handlers, store } = build();
+    for (const res of [
+      await handlers.update(request({ body: { customNote: 'No version' } }), context()),
+      await handlers.update(request({ body: { customNote: 'Empty', etag: '' } }), context()),
+      await handlers.reject(request({ body: {} }), context()),
+      await handlers.reject(request(), context()),
+    ]) {
+      expect(res.status).toBe(400);
+      expect(bodyOf(res).code).toBe('ETAG_REQUIRED');
+    }
+    expect(store.docs.get(`newsletters/${ID}`)).toMatchObject({ status: 'draft', customNote: '' });
+    expect(store.replaceDocIfMatch).not.toHaveBeenCalled();
   });
 
   it('refuses an edit made from a stale view, and writes nothing', async () => {
@@ -163,14 +178,14 @@ describe('reject', () => {
   it('sets aside a draft, or clears an issue stuck in sending', async () => {
     for (const status of ['draft', 'sending']) {
       const { handlers, store } = build({ store: makeStore({ issue: draftIssue({ status }) }) });
-      expect((await handlers.reject(request(), context())).status, status).toBe(200);
+      expect((await handlers.reject(request({ body: { etag: 'e1' } }), context())).status, status).toBe(200);
       expect(store.docs.get(`newsletters/${ID}`).status).toBe('rejected');
     }
   });
 
   it('will not reject an issue that already went out', async () => {
     const { handlers } = build({ store: makeStore({ issue: draftIssue({ status: 'sent' }) }) });
-    expect((await handlers.reject(request(), context())).status).toBe(409);
+    expect((await handlers.reject(request({ body: { etag: 'e1' } }), context())).status).toBe(409);
   });
 });
 
