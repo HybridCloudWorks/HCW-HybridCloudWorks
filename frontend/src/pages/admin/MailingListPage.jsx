@@ -1,21 +1,21 @@
 /**
- * Mailing List — Klaviyo integration.
+ * Mailing List — the weekly newsletter and its provider, Resend (ADR 0030).
  *
- * All Klaviyo API calls route through the `klaviyoProxy` Azure Function
- * (KLAVIYO_PRIVATE_KEY lives in Azure Key Vault — never in the client bundle).
- * Public signups happen through the separate rate-limited `newsletterSubscribe`
- * function consumed by <NewsletterSignup />.
+ * Resend replaced Klaviyo, which this page used to read through `klaviyoProxy`:
+ * lists, profiles and campaigns, and nothing was ever written. What remains
+ * here is what worked — drafting the weekly digest — and a connection test for
+ * the Resend key. The subscriber list returns once the signup form writes to
+ * Resend; until then there is no list to show, and an empty table would read as
+ * "nobody subscribed" rather than "nothing collects subscribers yet".
  *
- * Required Azure Function App settings (prefer Key Vault references):
- *   KLAVIYO_PRIVATE_KEY — Klaviyo private API key
- *   KLAVIYO_LIST_ID     — default newsletter list ID (used by newsletterSubscribe)
+ * The test posts a NAME to `connectionProbe` and the server builds the call,
+ * so `RESEND_API_KEY` never reaches the browser.
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { useAuthReady } from '@/hooks/useAuthReady';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import ServicePageHeader from '@/components/admin/ServicePageHeader';
 import {
@@ -25,31 +25,36 @@ import {
   CheckCircle,
   AlertCircle,
   ExternalLink,
-  Users,
   Megaphone,
   Eye,
   PenTool,
 } from 'lucide-react';
 import { postJSON } from '@/lib/api';
 import { runJob } from '@/lib/jobs';
-import { connectionMessage, klaviyoCollection, requireKlaviyoCollection } from '@/lib/klaviyo';
+import { countList, unwrapProxy } from '@/lib/proxyEnvelope';
 
 const TABS = [
-  { id: 'lists', label: 'Subscribers / Lists' },
-  { id: 'campaigns', label: 'Campaigns' },
+  { id: 'newsletter', label: 'Newsletter' },
   { id: 'connection', label: 'Connection' },
 ];
+const TAB_IDS = new Set(TABS.map((tab) => tab.id));
 
-// ── Klaviyo proxy wrappers ────────────────────────────────────────────────────
+// ── Resend connection ─────────────────────────────────────────────────────────
 
-const klaviyoFetch = (path, method = 'GET', body) =>
-  postJSON('klaviyoProxy', { path, method, body });
-
-const kListLists = () => klaviyoFetch('/api/lists/');
-const kListProfiles = (pageSize = 50) =>
-  klaviyoFetch(`/api/profiles/?page[size]=${pageSize}&sort=-created`);
-const kListCampaigns = () =>
-  klaviyoFetch(`/api/campaigns/?filter=${encodeURIComponent("equals(messages.channel,'email')")}`);
+/**
+ * A human sentence for a working key, or a thrown Error with Resend's own.
+ *
+ * GET /domains on the server. A key minted with sending access only is refused
+ * there, which is the failure worth catching before anything is built on it.
+ */
+export async function checkResend() {
+  const body = unwrapProxy(await postJSON('connectionProbe', { probe: 'resend' }), 'Resend');
+  const count = countList(body);
+  if (count === null) return 'Connected to Resend.';
+  return count === 0
+    ? 'Connected, but no sending domain has been added to Resend yet.'
+    : `Connected to Resend — ${count} sending domain(s).`;
+}
 
 // ── Weekly digest (a platform job, T-322) ───────────────────────────────────
 // Site-Main called generateWeeklyDigest over HTTP with a 20 s client abort the
@@ -64,162 +69,13 @@ const runWeeklyDigest = async (dryRun) => {
   return job.result || {};
 };
 
-function fmtDate(value) {
-  if (!value) return '—';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '—';
-  return new Intl.DateTimeFormat('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  }).format(d);
-}
+// ── Newsletter Tab ────────────────────────────────────────────────────────────
 
-function LoadState({ loading, error, onRetry, children }) {
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-  if (error) {
-    return (
-      <div className="flex flex-col items-center py-8 gap-3">
-        <AlertCircle className="h-6 w-6 text-destructive" />
-        <p className="text-sm text-destructive">{error}</p>
-        <Button variant="outline" size="sm" onClick={onRetry}>
-          Retry
-        </Button>
-      </div>
-    );
-  }
-  return children;
-}
-
-// ── Subscribers / Lists Tab ───────────────────────────────────────────────────
-
-function ListsTab() {
-  const [lists, setLists] = useState([]);
-  const [profiles, setProfiles] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError('');
-    try {
-      const [listsRes, profilesRes] = await Promise.all([kListLists(), kListProfiles()]);
-      const listsResult = klaviyoCollection(listsRes);
-      const profilesResult = klaviyoCollection(profilesRes);
-      setLists(listsResult.items);
-      setProfiles(profilesResult.items);
-      // A refused key used to empty both silently, and an empty mailing list
-      // reads as "the audience is empty" rather than "we could not ask".
-      setError(listsResult.error || profilesResult.error);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    queueMicrotask(() => {
-      load();
-    });
-  }, [load]);
-
-  return (
-    <LoadState loading={loading} error={error} onRetry={load}>
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold flex items-center gap-2">
-            <Users className="h-4 w-4" /> Lists
-            {lists.length > 0 && (
-              <Badge variant="secondary" className="text-[10px]">
-                {lists.length}
-              </Badge>
-            )}
-          </h3>
-          <Button variant="ghost" size="sm" onClick={load} className="gap-1.5 h-7">
-            <RefreshCw className="h-3.5 w-3.5" /> Refresh
-          </Button>
-        </div>
-
-        {lists.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No lists found in Klaviyo.</p>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {lists.map((list) => (
-              <Card key={list.id} className="p-4">
-                <p className="text-sm font-medium">{list.attributes?.name || list.id}</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  ID: <code>{list.id}</code> · Created {fmtDate(list.attributes?.created)}
-                </p>
-              </Card>
-            ))}
-          </div>
-        )}
-
-        <div>
-          <h3 className="text-sm font-semibold mb-3">
-            Recent Subscribers
-            {profiles.length > 0 && (
-              <Badge variant="secondary" className="ml-2 text-[10px]">
-                {profiles.length}
-              </Badge>
-            )}
-          </h3>
-          {profiles.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No profiles found.</p>
-          ) : (
-            <div className="space-y-1.5">
-              {profiles.map((p) => (
-                <div
-                  key={p.id}
-                  className="flex items-center gap-3 px-3 py-2 rounded-lg border text-sm"
-                >
-                  <span className="flex-1 min-w-0 truncate font-medium">
-                    {p.attributes?.email || '—'}
-                  </span>
-                  <span className="text-xs text-muted-foreground shrink-0">
-                    {fmtDate(p.attributes?.created)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </LoadState>
-  );
-}
-
-// ── Campaigns Tab (read-only) ─────────────────────────────────────────────────
-
-function CampaignsTab() {
-  const [campaigns, setCampaigns] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+function NewsletterTab() {
   const [drafting, setDrafting] = useState(false);
   const [previewing, setPreviewing] = useState(false);
   const [digestNotice, setDigestNotice] = useState(null);
   const [preview, setPreview] = useState(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError('');
-    try {
-      const { items, error: failure } = klaviyoCollection(await kListCampaigns());
-      setCampaigns(items);
-      setError(failure);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
 
   const handleDraftWeeklyDigest = async () => {
     setDrafting(true);
@@ -256,105 +112,76 @@ function CampaignsTab() {
     }
   };
 
-  useEffect(() => {
-    queueMicrotask(() => {
-      load();
-    });
-  }, [load]);
-
   return (
-    <LoadState loading={loading} error={error} onRetry={load}>
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold flex items-center gap-2">
-            <Megaphone className="h-4 w-4" /> Email Campaigns (read-only)
-          </h3>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handlePreviewDigest}
-              disabled={previewing || drafting}
-              className="gap-1.5 h-7"
-            >
-              {previewing ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Eye className="h-3.5 w-3.5" />
-              )}
-              Preview Digest
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleDraftWeeklyDigest}
-              disabled={drafting || previewing}
-              className="gap-1.5 h-7"
-            >
-              {drafting ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <PenTool className="h-3.5 w-3.5" />
-              )}
-              Draft Weekly Digest
-            </Button>
-            <Button variant="ghost" size="sm" onClick={load} className="gap-1.5 h-7">
-              <RefreshCw className="h-3.5 w-3.5" /> Refresh
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold flex items-center gap-2">
+          <Megaphone className="h-4 w-4" /> Weekly digest
+        </h3>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handlePreviewDigest}
+            disabled={previewing || drafting}
+            className="gap-1.5 h-7"
+          >
+            {previewing ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Eye className="h-3.5 w-3.5" />
+            )}
+            Preview Digest
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleDraftWeeklyDigest}
+            disabled={drafting || previewing}
+            className="gap-1.5 h-7"
+          >
+            {drafting ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <PenTool className="h-3.5 w-3.5" />
+            )}
+            Draft Weekly Digest
+          </Button>
+        </div>
+      </div>
+      <p className="text-sm text-muted-foreground">
+        Drafts a newsletter from the last seven days of published content. Drafts are saved on the
+        site; sending them through Resend is not switched on yet.
+      </p>
+      {digestNotice && (
+        <p
+          className={`text-sm flex items-center gap-2 ${digestNotice.ok ? 'text-emerald-600' : 'text-destructive'}`}
+        >
+          {digestNotice.ok ? (
+            <CheckCircle className="h-4 w-4" />
+          ) : (
+            <AlertCircle className="h-4 w-4" />
+          )}
+          {digestNotice.message}
+        </p>
+      )}
+      {preview && (
+        <Card className="p-4 space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium">{preview.title}</p>
+            <Button variant="ghost" size="sm" className="h-7" onClick={() => setPreview(null)}>
+              Close
             </Button>
           </div>
-        </div>
-        {digestNotice && (
-          <p
-            className={`text-sm flex items-center gap-2 ${digestNotice.ok ? 'text-emerald-600' : 'text-destructive'}`}
-          >
-            {digestNotice.ok ? (
-              <CheckCircle className="h-4 w-4" />
-            ) : (
-              <AlertCircle className="h-4 w-4" />
-            )}
-            {digestNotice.message}
+          <p className="text-xs text-muted-foreground">
+            Preview only, nothing saved. {preview.sourceItemsCount} source item(s).
           </p>
-        )}
-        {preview && (
-          <Card className="p-4 space-y-2">
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-medium">{preview.title}</p>
-              <Button variant="ghost" size="sm" className="h-7" onClick={() => setPreview(null)}>
-                Close
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Preview only, nothing saved. {preview.sourceItemsCount} source item(s).
-            </p>
-            <pre className="text-xs whitespace-pre-wrap max-h-96 overflow-auto rounded-md bg-muted p-3">
-              {preview.content}
-            </pre>
-          </Card>
-        )}
-        {campaigns.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No campaigns found. Create campaigns in Klaviyo.
-          </p>
-        ) : (
-          campaigns.map((c) => (
-            <Card key={c.id} className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{c.attributes?.name || c.id}</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {fmtDate(c.attributes?.created_at || c.attributes?.created)} ·{' '}
-                    {c.attributes?.send_strategy?.method || ''}
-                  </p>
-                </div>
-                <Badge variant="secondary" className="capitalize text-[10px] shrink-0">
-                  {c.attributes?.status || 'unknown'}
-                </Badge>
-              </div>
-            </Card>
-          ))
-        )}
-      </div>
-    </LoadState>
+          <pre className="text-xs whitespace-pre-wrap max-h-96 overflow-auto rounded-md bg-muted p-3">
+            {preview.content}
+          </pre>
+        </Card>
+      )}
+    </div>
   );
 }
 
@@ -368,11 +195,7 @@ function ConnectionTab({ onStatusChange }) {
     setTesting(true);
     setResult(null);
     try {
-      // requireKlaviyoCollection throws on a refused key. The old code called
-      // setResult({ ok: true }) unconditionally, and the proxy answers 200 for
-      // every outcome, so a 401 rendered green with a tick (#430).
-      const lists = requireKlaviyoCollection(await kListLists());
-      setResult({ ok: true, message: connectionMessage(lists) });
+      setResult({ ok: true, message: await checkResend() });
       onStatusChange?.(true);
     } catch (err) {
       setResult({ ok: false, message: err.message });
@@ -386,29 +209,20 @@ function ConnectionTab({ onStatusChange }) {
     <div className="max-w-2xl space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Klaviyo API Connection</CardTitle>
+          <CardTitle className="text-base">Resend API Connection</CardTitle>
           <CardDescription>
-            KLAVIYO_PRIVATE_KEY and KLAVIYO_LIST_ID are stored in Azure Key Vault and used
-            server-side by the klaviyoProxy / newsletterSubscribe Azure Functions — they are never
-            sent to the browser.
+            The Resend API key is stored in Azure Key Vault and used only on the server — it is
+            never sent to the browser. It must be created with Full access; a key with Sending
+            access only cannot manage the mailing list.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {/*
-            THE BUTTON AND THE LINK SHARE A FLEX ROW, because `space-y-4` on
-            this CardContent cannot separate them. `space-y-*` sets margin-top
-            on a following sibling, and both the Button and the anchor render
-            as `inline-flex` — so whenever there is no result panel between
-            them they land on the same line and the vertical spacing does
-            nothing at all. They were touching.
-
-            `flex-wrap` lets the link drop below the button on a narrow card
-            instead of being squeezed, and `gap-x-4` is the horizontal
-            separation `space-y-4` was never going to provide.
-
-            The result panel stays OUTSIDE this row, as its own block child of
-            the `space-y-4` stack, because it is a full-width message and would
-            be laid out inline if it were part of the row.
+            THE BUTTON AND THE LINKS SHARE A FLEX ROW, because `space-y-4` on
+            this CardContent cannot separate them: it sets margin-top on a
+            following sibling, and inline-flex siblings land on one line.
+            `flex-wrap` lets the links drop below the button on a narrow card.
+            The result panel stays outside the row as its own block.
           */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             <Button onClick={handleTest} disabled={testing} className="gap-2">
@@ -420,12 +234,20 @@ function ConnectionTab({ onStatusChange }) {
               Test Connection
             </Button>
             <a
-              href="https://www.klaviyo.com/settings/account/api-keys"
+              href="https://resend.com/api-keys"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
             >
-              Manage API Keys in Klaviyo <ExternalLink className="h-3.5 w-3.5" />
+              API keys in Resend <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+            <a
+              href="https://resend.com/domains"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
+            >
+              Sending domains <ExternalLink className="h-3.5 w-3.5" />
             </a>
           </div>
           {result && (
@@ -455,18 +277,18 @@ function ConnectionTab({ onStatusChange }) {
 export default function MailingListPage() {
   const { authReady } = useAuthReady();
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = searchParams.get('tab') || 'lists';
+  // A bookmark to a tab that no longer exists (`lists`, `campaigns`) lands on
+  // the newsletter rather than on a blank page.
+  const requested = searchParams.get('tab');
+  const activeTab = TAB_IDS.has(requested) ? requested : 'newsletter';
   const [connected, setConnected] = useState('checking');
 
   useEffect(() => {
     if (!authReady) return;
-    // The header dot is produced by the same path as Test Connection, so it
-    // inherited the same lie: resolving was treated as connected.
-    kListLists()
-      .then((res) => {
-        requireKlaviyoCollection(res);
-        setConnected(true);
-      })
+    // The header dot uses the same check as Test Connection, so the two cannot
+    // disagree. GET /domains spends nothing on either Resend meter.
+    checkResend()
+      .then(() => setConnected(true))
       .catch(() => setConnected(false));
   }, [authReady]);
 
@@ -477,9 +299,9 @@ export default function MailingListPage() {
       <ServicePageHeader
         icon={Mail}
         title="Mailing List"
-        service="Klaviyo"
+        service="Resend"
         connected={connected}
-        description="Newsletter subscribers, lists, and campaigns powered by Klaviyo."
+        description="The weekly newsletter, and the Resend account that will hold the list and send it."
         accent="violet"
       />
 
@@ -501,8 +323,7 @@ export default function MailingListPage() {
       </div>
 
       <div>
-        {activeTab === 'lists' && <ListsTab />}
-        {activeTab === 'campaigns' && <CampaignsTab />}
+        {activeTab === 'newsletter' && <NewsletterTab />}
         {activeTab === 'connection' && <ConnectionTab onStatusChange={setConnected} />}
       </div>
     </div>

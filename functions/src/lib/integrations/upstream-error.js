@@ -16,11 +16,11 @@
  * through, because the status code is not the diagnosis.
  *
  * Deliberately generic rather than Publer-specific: `rest-proxy.js` carries
- * Klaviyo and Linkie through the same code path, and an error reader that
- * only understood one vendor would leave the other two exactly as blind.
- * Publer answers `{ errors: [...] }`, Klaviyo `{ errors: [{ detail }] }`,
- * and a plain `{ message }` or `{ error }` is common enough to be worth the
- * two extra lines.
+ * Linkie through the same code path and `connection-probe.js` four more
+ * services, and an error reader that only understood one vendor would leave
+ * the rest exactly as blind. Publer answers `{ errors: [...] }`, a JSON:API
+ * service `{ errors: [{ detail }] }`, and a plain `{ message }` or `{ error }`
+ * is common enough to be worth the two extra lines.
  *
  * Never throws, and never returns anything but a short string: it runs inside
  * an error path, and a reader that can fail turns a reported failure into an
@@ -33,7 +33,7 @@ const MAX_DETAIL_LENGTH = 300;
 function firstString(value) {
   if (typeof value === 'string') return value;
   if (!value || typeof value !== 'object') return '';
-  // Klaviyo's `errors[]` holds objects; JSON:API calls the human sentence
+  // A JSON:API `errors[]` holds objects, and JSON:API calls the human sentence
   // `detail`, and `title` is its heading. `description` is last because it is
   // Telegram's field (`{ ok: false, error_code: 401, description: 'Unauthorized' }`,
   // #483) and appending it cannot change what any existing caller reads.

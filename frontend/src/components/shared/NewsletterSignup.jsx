@@ -1,14 +1,15 @@
 /**
  * NewsletterSignup — public email-capture card (Hyoga design language).
  *
- * Calls the public, rate-limited `newsletterSubscribe` Cloud Function which
- * subscribes the email to the Klaviyo newsletter list server-side — the
- * Klaviyo private key never reaches the browser. Includes a honeypot field.
+ * POSTs `{ email, source, website }` to `newsletterSubscribe`, which does not
+ * exist yet: it is the next step of ADR 0030 and will add the address to the
+ * Resend mailing list server-side. Until then every submission gets a 404,
+ * which this component reports as a failure rather than a success (#504).
+ * `website` is a honeypot field.
  *
- * Export only — not mounted anywhere by default. Recommended mounts:
- * Footer.jsx (above the link columns) and BlogDetailTemplate.jsx (end of post).
+ * Mounted in Footer.jsx (every page) and BlogDetailTemplate.jsx (every post).
  *
- * @param {string} [source] - Attribution tag sent to Klaviyo (custom_source).
+ * @param {string} [source] - Where on the site the signup happened.
  * @param {string} [className]
  */
 

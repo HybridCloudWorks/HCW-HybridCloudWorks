@@ -91,7 +91,7 @@ The source is substantially larger than the current Azure attempt. The migration
 - HTTP, scheduled, Firestore-triggered, and callable Cloud Functions;
 - ContentForge and multi-provider AI routing;
 - RSS ingestion, link monitoring, image processing, and content grading;
-- Publer, Plaud, Telegram, Klaviyo, Linkie, GitHub, YouTube, Firecrawl, Replicate, and other external
+- Publer, Plaud, Telegram, Resend, Linkie, GitHub, YouTube, Firecrawl, Replicate, and other external
   integrations;
 - cloud comparison/migration tools and report exports;
 - Hostinger-based Terraform and Ansible lab execution;
@@ -275,7 +275,7 @@ sequenceDiagram
 
 ### 5.2 Third-party synchronization
 
-Publer, Plaud, Telegram, Klaviyo, Linkie, GitHub, YouTube, and other integrations execute in the worker
+Publer, Plaud, Telegram, Resend, Linkie, GitHub, YouTube, and other integrations execute in the worker
 boundary. Each integration has:
 
 - a canonical local record and stable external ID;

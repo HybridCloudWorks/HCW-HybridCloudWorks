@@ -384,15 +384,17 @@ describe('joining services to credentials', () => {
     { id: 'communication', title: 'Communication', blurb: 'Publishing credentials.' },
     { id: 'gen-ai', title: 'Gen AI', blurb: 'AI keys.' },
   ];
-  const klaviyoKey = item({
-    secret: 'KLAVIYO-PRIVATE-KEY',
+  // Publer, because it is a card with TWO credentials, which is the case the
+  // claiming rules below have to get right.
+  const publerKey = item({
+    secret: 'PUBLER-API-KEY',
     section: 'communication',
-    label: 'Klaviyo — private key',
+    label: 'Publer — API key',
   });
-  const klaviyoList = item({
-    secret: 'KLAVIYO-LIST-ID',
+  const publerWorkspace = item({
+    secret: 'PUBLER-WORKSPACE-ID',
     section: 'communication',
-    label: 'Klaviyo — list id',
+    label: 'Publer — workspace id',
   });
   // Claimed by the Telegram card, so it is no longer a loose credential.
   const telegram = item({
@@ -485,26 +487,26 @@ describe('joining services to credentials', () => {
   it('gives a credential to the service that owns it', () => {
     const { serviceCards } = buildIntegrationView({
       sections,
-      secrets: [klaviyoKey, klaviyoList, telegram],
+      secrets: [publerKey, publerWorkspace, telegram],
     });
-    const klaviyo = serviceCards.find((service) => service.id === 'klaviyo');
-    expect(klaviyo.items.map((row) => row.secret)).toEqual([
-      'KLAVIYO-PRIVATE-KEY',
-      'KLAVIYO-LIST-ID',
+    const publer = serviceCards.find((service) => service.id === 'publer');
+    expect(publer.items.map((row) => row.secret)).toEqual([
+      'PUBLER-API-KEY',
+      'PUBLER-WORKSPACE-ID',
     ]);
   });
 
   it('never shows a claimed credential twice - on its card and loose in the group', () => {
-    // The whole point of the merge. Rotating Klaviyo from the card and from a
+    // The whole point of the merge. Rotating Publer from the card and from a
     // duplicate row further down would be two paths to one write, and the
     // second would look like a different credential.
     const { serviceGroups } = buildIntegrationView({
       sections,
-      secrets: [klaviyoKey, klaviyoList, telegram, firecrawl],
+      secrets: [publerKey, publerWorkspace, telegram, firecrawl],
     });
     const communication = serviceGroups.find((group) => group.id === 'communication');
     const onCards = communication.cards.flatMap((card) => card.items.map((row) => row.secret));
-    expect(onCards).toContain('KLAVIYO-PRIVATE-KEY');
+    expect(onCards).toContain('PUBLER-API-KEY');
     expect(onCards).toContain('TELEGRAM-BOT-TOKEN');
     // Everything in this group belongs to a card, so nothing is left loose.
     expect(communication.loose).toEqual([]);
@@ -536,7 +538,7 @@ describe('joining services to credentials', () => {
   it('leaves nothing loose when every credential went to a service card', () => {
     const { serviceGroups, orphanSections } = buildIntegrationView({
       sections,
-      secrets: [klaviyoKey, klaviyoList],
+      secrets: [publerKey, publerWorkspace],
     });
     expect(orphanSections).toEqual([]);
     for (const group of serviceGroups) {
@@ -549,58 +551,91 @@ describe('joining services to credentials', () => {
     // empty row would read as "not set" for a credential that does not exist.
     const { serviceCards } = buildIntegrationView({ sections, secrets: [] });
     expect(serviceCards.every((service) => service.items.length === 0)).toBe(true);
-    expect(serviceCards.map((service) => service.id)).toContain('klaviyo');
+    expect(serviceCards.map((service) => service.id)).toContain('publer');
   });
 });
 
 describe('the service cards', () => {
-  const withKlaviyo = () =>
+  const withResend = () =>
     getJSON.mockResolvedValue({
       success: true,
       sections: [{ id: 'communication', title: 'Communication', blurb: 'Publishing credentials.' }],
       secrets: [
         item({
-          secret: 'KLAVIYO-PRIVATE-KEY',
+          secret: 'RESEND-API-KEY',
           section: 'communication',
-          label: 'Klaviyo — private key',
+          label: 'Resend — API key',
         }),
       ],
     });
 
   it('carries the test button and the credential row on one card', async () => {
-    withKlaviyo();
+    withResend();
     render(<IntegrationsPage />);
-    await waitFor(() => expect(screen.getByText('Klaviyo')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('Resend')).toBeTruthy());
 
     // The status question and the rotation answer, in one place. The test
     // control is an icon button now - a beaker - so it is found by its label
     // rather than by the words that used to wrap the header row.
-    const card = screen.getByText('Klaviyo').closest('.p-4');
-    expect(within(card).getByRole('button', { name: /^Test Klaviyo$/ })).toBeTruthy();
-    expect(card.textContent).toContain('KLAVIYO-PRIVATE-KEY');
-    expect(within(card).getByLabelText('New value for Klaviyo — private key')).toBeTruthy();
+    const card = screen.getByText('Resend').closest('.p-4');
+    expect(within(card).getByRole('button', { name: /^Test Resend$/ })).toBeTruthy();
+    expect(card.textContent).toContain('RESEND-API-KEY');
+    expect(within(card).getByLabelText('New value for Resend — API key')).toBeTruthy();
   });
 
-  it('runs the service test through its own proxy and reports the result', async () => {
-    withKlaviyo();
-    // THE REAL ENVELOPE. This mocked `{ data: [...] }` - the envelope's shape
-    // minus its `ok`, which the proxy always sets - so it was asserting
-    // against a response the server has never sent, and passed only because
-    // nothing checked `ok`. klaviyoProxy answers `{ ok, status, data }` where
-    // `data` is Klaviyo's own `{ data: [...] }` body.
+  it('runs the service test server-side and reports the result', async () => {
+    withResend();
+    // THE REAL ENVELOPE: connectionProbe answers `{ ok, status, data }` where
+    // `data` is Resend's own `{ object: 'list', data: [...] }` body.
     postJSON.mockResolvedValue({
       ok: true,
       status: 200,
-      data: { data: [{ id: 'list-1' }, { id: 'list-2' }] },
+      data: { object: 'list', data: [{ id: 'd-1' }, { id: 'd-2' }] },
     });
     render(<IntegrationsPage />);
-    await waitFor(() => expect(screen.getByText('Klaviyo')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('Resend')).toBeTruthy());
 
-    const card = screen.getByText('Klaviyo').closest('.p-4');
-    fireEvent.click(within(card).getByRole('button', { name: /^Test Klaviyo$/ }));
+    const card = screen.getByText('Resend').closest('.p-4');
+    fireEvent.click(within(card).getByRole('button', { name: /^Test Resend$/ }));
 
-    await waitFor(() => expect(screen.getByText(/2 list\(s\) visible/)).toBeTruthy());
-    expect(postJSON).toHaveBeenCalledWith('klaviyoProxy', { path: '/api/lists/', method: 'GET' });
+    await waitFor(() => expect(screen.getByText(/2 sending domain\(s\)/)).toBeTruthy());
+    // A name, never a path: the probe builds the call on the server.
+    expect(postJSON).toHaveBeenCalledWith('connectionProbe', { probe: 'resend' });
+  });
+
+  it('says a working Resend key with no domain yet cannot send anything', async () => {
+    withResend();
+    postJSON.mockResolvedValue({ ok: true, status: 200, data: { object: 'list', data: [] } });
+    render(<IntegrationsPage />);
+    await waitFor(() => expect(screen.getByText('Resend')).toBeTruthy());
+
+    const card = screen.getByText('Resend').closest('.p-4');
+    fireEvent.click(within(card).getByRole('button', { name: /^Test Resend$/ }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/no sending domain has been added to Resend yet/)).toBeTruthy()
+    );
+  });
+
+  it('shows Resend refusing a sending-only key instead of a green tick', async () => {
+    withResend();
+    postJSON.mockResolvedValue({
+      ok: false,
+      status: 401,
+      data: {
+        name: 'restricted_api_key',
+        message: 'This API key is restricted to only send emails',
+      },
+      error: 'This API key is restricted to only send emails',
+    });
+    render(<IntegrationsPage />);
+    await waitFor(() => expect(screen.getByText('Resend')).toBeTruthy());
+
+    const card = screen.getByText('Resend').closest('.p-4');
+    fireEvent.click(within(card).getByRole('button', { name: /^Test Resend$/ }));
+
+    await waitFor(() => expect(screen.getByText(/restricted to only send emails/)).toBeTruthy());
+    expect(screen.queryByText(/sending domain\(s\)/)).toBeNull();
   });
 
   it('does not call YouTube a placeholder, because its key has a live consumer', async () => {
@@ -640,19 +675,13 @@ describe('the service cards', () => {
   });
 
   it('still names every service the old Connections page did', () => {
-    // The original seven. The order changed when the cards were sorted into
-    // groups and three education profiles were added, so this asserts
-    // PRESENCE rather than sequence - dropping one is the failure it guards.
+    // The original seven, less Klaviyo, which was removed on purpose when
+    // Resend replaced it (ADR 0030). The order changed when the cards were
+    // sorted into groups and three education profiles were added, so this
+    // asserts PRESENCE rather than sequence - dropping one is the failure it
+    // guards.
     const names = SERVICES.map((service) => service.name);
-    for (const name of [
-      'Publer',
-      'Plaud',
-      'Sessionize',
-      'Credly',
-      'Linkie',
-      'Klaviyo',
-      'YouTube',
-    ]) {
+    for (const name of ['Publer', 'Plaud', 'Sessionize', 'Credly', 'Linkie', 'YouTube']) {
       expect(names, `${name} disappeared from the registry`).toContain(name);
     }
   });
@@ -660,7 +689,7 @@ describe('the service cards', () => {
   it('lists exactly the services it means to, in group order', () => {
     expect(SERVICES.map((service) => service.name)).toEqual([
       'Publer',
-      'Klaviyo',
+      'Resend',
       'Linkie',
       'Telegram',
       'RSS.com',

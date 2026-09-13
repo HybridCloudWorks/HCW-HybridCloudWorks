@@ -19,6 +19,34 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Resend replaces Klaviyo: its key has a row on the API-keys page and a test
+  that refuses the wrong kind of key (#504, ADR 0030).** This is the first of
+  three steps. It swaps the plumbing; the signup route and sending follow.
+
+  **What went.** `klaviyoProxy`, both Klaviyo Key Vault references and their
+  catalogue rows, the Klaviyo card on the Integrations page, the Lists and
+  Campaigns tabs on the Mailing List page, and `lib/klaviyo.js`. Nothing wrote
+  to Klaviyo, so nothing that stored data is lost; the weekly-digest buttons,
+  the one part of that page that worked, stay.
+
+  **What came.** `RESEND_API_KEY`, a Key Vault reference and a catalogue row, and
+  a `resend` entry in `connectionProbe` that calls `GET /domains` on the server.
+  That call was chosen because it answers the question worth asking before
+  anything is built on the key: Resend refuses a key minted with **sending access
+  only**, and that key could never manage contacts or broadcasts. A pass also
+  reports how many sending domains exist, and zero gets its own sentence — the key
+  works and nothing can be sent yet. It records no key verdict, because a
+  refusal here does not always mean "remint".
+
+  **Seed before apply.** The API-keys page writes to Key Vault by catalogue name
+  and does not need the app setting to exist, so the key can be seeded once this
+  deploys and before the Terraform run that adds its reference. Done in that
+  order, `monitor-unresolved-secrets.yml` never sees `RESEND_API_KEY` unresolved.
+
+  Also corrected on the way through: `docs/standards/variables-and-secrets.md`
+  said `infra/main.tf` declares 21 Key Vault references. They are in
+  `infra/functionapp.tf`, and there are 25 after this change.
+
 - **ADR 0030 records the newsletter provider, and corrects what #504 said was
   broken.** The evaluation #504 asked for is decided: **Resend**, with the
   cadence staying in the Function App's timer rather than moving into a vendor's

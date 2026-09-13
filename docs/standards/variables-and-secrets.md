@@ -340,7 +340,7 @@ here, twice — before it is a reason to reintroduce a run-time vault client.
 
 ### Store 1 — Azure Key Vault
 
-Seeded by hand; referenced from `infra/main.tf` app settings as
+Seeded by hand; referenced from `infra/functionapp.tf` app settings as
 `@Microsoft.KeyVault(SecretUri=…)`.
 
 | Value | CHECKLIST | Why store 1 |
@@ -351,14 +351,15 @@ Seeded by hand; referenced from `infra/main.tf` app settings as
 | `GEMINI-API-KEY` | §4 | Public Generative Language API, NOT Vertex — Vertex needs GCP ADC the Function App cannot hold. First in provider preference order since 2026-08-23. Unseeded resolves to the literal `@Microsoft.KeyVault(...)`, which the router reads as no key, so it falls through to OpenAI |
 | `ANTHROPIC-API-KEY`, `OPENAI-API-KEY`, `PERPLEXITY-API-KEY`, `REPLICATE-API-KEY` | §4, partially | Third-party SaaS keys. Distinct from Azure OpenAI, which is keyless. `PERPLEXITY` and `REPLICATE` are referenced as app settings but no longer reachable through the AI router — it implements Gemini, OpenAI and Anthropic only |
 | `FIRECRAWL-API-KEY`, `LINKIE-API-KEY`, `YOUTUBE-API-KEY` | not inventoried | Third-party SaaS keys |
-| `PUBLER-API-KEY`, `PUBLER-WORKSPACE-ID`, `KLAVIYO-PRIVATE-KEY`, `KLAVIYO-LIST-ID` | not inventoried | The two `*-ID` values are identifiers rather than credentials, but they travel with their key and splitting them across stores buys nothing |
+| `PUBLER-API-KEY`, `PUBLER-WORKSPACE-ID` | not inventoried | The `-ID` value is an identifier rather than a credential, but it travels with its key and splitting them across stores buys nothing |
+| `RESEND-API-KEY` | not inventoried | Newsletter list and sending (ADR 0030), replacing Klaviyo's two secrets. A Full access key; a sending-access key cannot manage contacts or broadcasts |
 | `RSSCOM-API-KEY`, `RSSCOM-PODCAST-ID` | not inventoried | Podcast publishing over the RSS.com Core API (ADR 0029 §1b, #437). The `-ID` is the show's numeric id, an identifier that travels with its key, as above |
 | `TELEGRAM-BOT-TOKEN`, `TELEGRAM-CHAT-ID` | not inventoried | As above |
 | `GITHUB-APP-INSTALLATION-ID`, `HOSTINGER-API-TOKEN` | not inventoried | Site rebuild trigger and VPS control |
 | `GCP-BILLING-API-KEY` | not inventoried | Cloud Billing Catalog API key for the public GCP price list — Google's documented auth for it. Replaced a ~2.3 KB service-account JSON on 2026-08-29 |
 | `GITHUB-APP-PRIVATE-KEY` | not inventoried | Multi-line PEM. **Not referenced by `main.tf` and read by nothing** — it has no app setting and no seeding path, deliberately |
 
-`infra/main.tf` declares **21** `@Microsoft.KeyVault` references and no
+`infra/functionapp.tf` declares **25** `@Microsoft.KeyVault` references and no
 run-time reads. CHECKLIST §1–§8 inventories a handful of them. That gap is
 recorded below rather than papered over.
 

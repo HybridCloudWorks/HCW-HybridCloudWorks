@@ -1,6 +1,6 @@
 /**
- * publerProxy, klaviyoProxy, linkieProxy — authenticated pass-through to three
- * third-party REST APIs (#180).
+ * publerProxy, linkieProxy — authenticated pass-through to third-party REST
+ * APIs (#180). A third, klaviyoProxy, was removed with Klaviyo (ADR 0030).
  *
  * All three were listed `notImplemented` while the admin UI called them, so the
  * Connections, Social Hub, Mailing List and Linkie pages were dead. They share
@@ -99,7 +99,7 @@ export function createIntegration({
   // Opt-in, not default: a verdict turns a light red on the API-keys page, and
   // the catalogue promises a probe only where one is wired (`secret-catalog.js`
   // and its test hold the two in step). Publer's 401/403 semantics are known;
-  // Klaviyo's and Linkie's have not been read, and a scope-limited key that
+  // Linkie's have not been read, and a scope-limited key that
   // answers 403 on one endpoint and 200 on the next would flap the light.
   reportsKeyVerdict = false,
   // Which setting a rejection blames, from the upstream status. Defaults to
@@ -130,7 +130,7 @@ export function createIntegration({
  * key that has broader scope than the page needs.
  *
  * Applied where the set of endpoints is small and known. Site-Main did exactly
- * this for Linkie and not for Publer or Klaviyo, whose admin pages construct
+ * this for Linkie and not for Publer, whose admin pages construct
  * paths freely; narrowing those would break screens without an enumeration of
  * every path they can build.
  *
