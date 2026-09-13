@@ -365,6 +365,20 @@ describe('approve', () => {
     expect(again.status).toBe(409);
   });
 
+  it('logs only the name and code of a store error, never its message', async () => {
+    const store = makeStore();
+    const cosmosError = Object.assign(new Error(`Entity with the specified id ${ID} does not exist`), { code: 503 });
+    store.replaceDocIfMatch = vi.fn(async () => {
+      throw cosmosError;
+    });
+    const { handlers } = build({ role: 'publisher', store });
+    const ctx = { ...context(), invocationId: 'inv-9' };
+    expect((await handlers.approve(request(approveBody), ctx)).status).toBe(500);
+    const logged = ctx.error.mock.calls.flat().join('\n');
+    expect(logged).toContain('claim failed [invocation inv-9]: Error code 503');
+    expect(logged).not.toContain(ID);
+  });
+
   it('logs the invocation, never the issue or broadcast id', async () => {
     const { handlers } = build({ role: 'publisher' });
     const ctx = { ...context(), invocationId: 'inv-123' };

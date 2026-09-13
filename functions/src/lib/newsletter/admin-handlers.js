@@ -76,6 +76,16 @@ const SUMMARY_PROJECTION = SUMMARY_FIELDS.map((field) => `c.${field}`).join(', '
 
 const pick = (doc, fields) => Object.fromEntries(fields.filter((f) => doc[f] !== undefined).map((f) => [f, doc[f]]));
 
+/**
+ * An error for an approval LOG LINE: its name and code only. SDK messages can
+ * carry request details such as the document id, so they are never logged.
+ */
+const errorMeta = (error) => {
+  const name = typeof error?.name === 'string' ? error.name : 'Error';
+  const code = typeof error?.code === 'string' || typeof error?.code === 'number' ? ` code ${error.code}` : '';
+  return `${name}${code}`;
+};
+
 /** Resend's refusal for a LOG LINE: status and error name only, never its message. */
 const describeForLog = (result) => {
   const name = typeof result?.data?.name === 'string' ? ` ${result.data.name}` : '';
@@ -290,7 +300,7 @@ export function createNewsletterAdminHandlers({
         settings = await readSettings();
         issue = await readIssue(request);
       } catch (error) {
-        context.error?.(`approveNewsletter read failed ${ref}: ${error?.message ?? error}`);
+        context.error?.(`approveNewsletter read failed ${ref}: ${errorMeta(error)}`);
         return json(500, { ok: false, error: 'Failed to read the newsletter issue' });
       }
       if (!issue) return notFound();
@@ -318,7 +328,7 @@ export function createNewsletterAdminHandlers({
       try {
         plan = resolveSendTime(now(), settings);
       } catch (error) {
-        context.error?.(`approveNewsletter send slot invalid ${ref}: ${error?.message ?? error}`);
+        context.error?.(`approveNewsletter send slot invalid ${ref}: ${errorMeta(error)}`);
         return json(409, {
           ok: false,
           code: 'SETTINGS_INVALID',
@@ -329,7 +339,7 @@ export function createNewsletterAdminHandlers({
       try {
         rendered = renderIssue(issue, { postalAddress: settings.postalAddress });
       } catch (error) {
-        context.error?.(`approveNewsletter render failed ${ref}: ${error?.name ?? 'Error'}`);
+        context.error?.(`approveNewsletter render failed ${ref}: ${errorMeta(error)}`);
         return json(500, { ok: false, error: 'Failed to render the newsletter issue' });
       }
 
@@ -340,7 +350,7 @@ export function createNewsletterAdminHandlers({
         await store.replaceDocIfMatch('newsletters', claimed);
       } catch (error) {
         if (error?.code === 412) return changedElsewhere();
-        context.error?.(`approveNewsletter claim failed ${ref}: ${error?.message ?? error}`);
+        context.error?.(`approveNewsletter claim failed ${ref}: ${errorMeta(error)}`);
         return json(500, { ok: false, error: 'Failed to approve the newsletter issue' });
       }
 
@@ -370,7 +380,7 @@ export function createNewsletterAdminHandlers({
       };
 
       // `reason` reaches the issue and the page; `logSummary` is all that is logged.
-      const revert = async (reason, logSummary = reason) => {
+      const revert = async (reason, logSummary) => {
         context.error?.(`approveNewsletter not sent ${ref}: ${logSummary}`);
         await settle({
           ...claimed,
@@ -382,7 +392,7 @@ export function createNewsletterAdminHandlers({
           lastError: reason,
           updatedAt: now().toISOString(),
         }).catch((error) =>
-          context.error?.(`approveNewsletter could not revert ${ref}: ${error?.message ?? error}`)
+          context.error?.(`approveNewsletter could not revert ${ref}: ${errorMeta(error)}`)
         );
         return json(502, { ok: false, error: `Resend did not accept the newsletter: ${reason}` });
       };
@@ -391,7 +401,7 @@ export function createNewsletterAdminHandlers({
       try {
         segmentId = await resolveSegmentId(client);
       } catch (error) {
-        return revert(error.message);
+        return revert(error.message, errorMeta(error));
       }
 
       const { subject, html, text } = rendered;
@@ -414,7 +424,7 @@ export function createNewsletterAdminHandlers({
           ...claimed,
           lastError: 'No answer from Resend; it may or may not have accepted the broadcast.',
           updatedAt: now().toISOString(),
-        }).catch((error) => context.error?.(`approveNewsletter could not record ${ref}: ${error?.message ?? error}`));
+        }).catch((error) => context.error?.(`approveNewsletter could not record ${ref}: ${errorMeta(error)}`));
         return json(502, {
           ok: false,
           code: 'SEND_OUTCOME_UNKNOWN',
@@ -437,7 +447,7 @@ export function createNewsletterAdminHandlers({
       } catch (error) {
         // The broadcast exists; the record of it did not save. Say so rather
         // than report a failure that would invite a second approval.
-        context.error?.(`approveNewsletter sent but not recorded ${ref}: ${error?.message ?? error}`);
+        context.error?.(`approveNewsletter sent but not recorded ${ref}: ${errorMeta(error)}`);
         return json(200, {
           ok: true,
           warning: `Resend accepted broadcast ${created.data.id}, but the site could not record it. Do not approve again.`,
