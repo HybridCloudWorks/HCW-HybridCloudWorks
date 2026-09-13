@@ -94,6 +94,11 @@ function SendReadiness({ detail }) {
   const planText = describePlan(detail.sendPlan);
   return (
     <div className="space-y-1 text-sm">
+      {!detail.sendingEnabled && (
+        <p role="status" className="text-muted-foreground">
+          Sending is switched off. It is turned on in Terraform (newsletter_sending_enabled).
+        </p>
+      )}
       {detail.readyToSend ? (
         <p>
           Settings are complete. Approving and sending arrive in the next update; an issue approved

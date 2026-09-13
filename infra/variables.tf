@@ -1131,6 +1131,31 @@ variable "schedulers_master_enabled" {
   default     = false
 }
 
+# The newsletter's send switch (ADR 0030 §2a). Default false, so deploying the
+# approval code emails nobody: approving is refused until an owner turns this
+# on in a confirmed Terraform run.
+variable "newsletter_sending_enabled" {
+  description = <<-EOT
+    Lets a publisher's approval on the Mailing List page send a weekly issue
+    to the Newsletter segment through Resend (NEWSLETTER_SENDING_ENABLED).
+
+    False refuses every approval with 503 NEWSLETTER_SENDING_DISABLED before
+    Resend is called; building, previewing, editing and rejecting issues all
+    still work. The page says sending is switched off instead of offering
+    Approve.
+
+    Approval itself arrives in the change after this variable (#504); until
+    then nothing on the page can send, and the page already reports this
+    switch.
+
+    True is the owner's decision that the send path is ready. Before setting
+    it, save the postal address and reply-to in Newsletter settings and confirm
+    a test signup reached the Newsletter segment in Resend.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "enabled_timers" {
   description = <<-EOT
     Timers to arm, by flag suffix — e.g. ["SYNC_RSS_FEEDS"] sets

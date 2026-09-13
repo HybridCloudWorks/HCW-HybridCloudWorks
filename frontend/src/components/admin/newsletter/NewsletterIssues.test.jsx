@@ -41,6 +41,7 @@ const detail = ({ issue: issueOver = {}, ...over } = {}) => ({
   },
   preview: { subject: 'Landing zones', html: '<p>email body</p>', text: 'email body' },
   readyToSend: true,
+  sendingEnabled: true,
   missingSettings: [],
   sendPlan: { sendNow: false, scheduledAt: '2026-09-15T14:00:00.000Z' },
   ...over,
@@ -68,6 +69,20 @@ describe('NewsletterIssues', () => {
     const frame = await screen.findByTitle('Email preview');
     expect(frame.getAttribute('sandbox')).toBe('');
     expect(frame.getAttribute('srcdoc')).toBe('<p>email body</p>');
+  });
+
+  it('says when sending is switched off in Terraform', async () => {
+    withIssue({ sendingEnabled: false });
+    render(<NewsletterIssues />);
+    expect(await screen.findByText(/Sending is switched off/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /approve|send/i })).not.toBeInTheDocument();
+  });
+
+  it('says nothing about the switch once sending is on', async () => {
+    withIssue();
+    render(<NewsletterIssues />);
+    expect(await screen.findByText(/Settings are complete/)).toBeInTheDocument();
+    expect(screen.queryByText(/Sending is switched off/)).not.toBeInTheDocument();
   });
 
   it('says what a send will need, and offers no send of any kind', async () => {

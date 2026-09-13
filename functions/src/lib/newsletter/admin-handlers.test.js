@@ -81,14 +81,27 @@ const request = ({ id = ID, body } = {}) => ({ params: { id }, json: async () =>
 const context = () => ({ log: vi.fn(), warn: vi.fn(), error: vi.fn() });
 const bodyOf = (res) => JSON.parse(res.body);
 
-function build({ store = makeStore(), role = 'editor', now = NOW } = {}) {
+function build({ store = makeStore(), role = 'editor', env = {}, now = NOW } = {}) {
   return {
-    handlers: createNewsletterAdminHandlers({ guard: allow(role), store, now: () => now }),
+    handlers: createNewsletterAdminHandlers({ guard: allow(role), store, env, now: () => now }),
     store,
   };
 }
 
 describe('get', () => {
+  it('reports the Terraform send switch, off unless it is exactly "true"', async () => {
+    for (const [value, expected] of [
+      ['true', true],
+      [undefined, false],
+      ['false', false],
+      ['TRUE', false],
+      ['1', false],
+    ]) {
+      const { handlers } = build({ env: { NEWSLETTER_SENDING_ENABLED: value } });
+      expect(bodyOf(await handlers.get(request(), context())).sendingEnabled, String(value)).toBe(expected);
+    }
+  });
+
   it('renders the email as it would send, and says what is missing before it can', async () => {
     const { handlers } = build({ store: makeStore({ settings: null }) });
     const res = await handlers.get(request(), context());

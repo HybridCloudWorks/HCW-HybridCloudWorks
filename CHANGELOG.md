@@ -19,6 +19,13 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **A Terraform switch for newsletter sending, off by default (#504, ADR 0030
+  §2a).** New variable `newsletter_sending_enabled` (default `false`) sets the
+  app setting `NEWSLETTER_SENDING_ENABLED`. The issue API reports it as
+  `sendingEnabled`, and the Mailing List page says when sending is switched
+  off. Nothing sends yet: approval arrives next, and will be refused while this
+  is off, so turning sending on is the owner's confirmed Terraform run.
+
 - **Build and review the weekly newsletter from the Mailing List page (#504, ADR
   0030 §2a).** Third of the small changes. The Newsletter tab builds this week's
   issue, lists recent ones, shows the email exactly as subscribers would receive
