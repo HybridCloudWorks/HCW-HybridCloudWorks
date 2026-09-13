@@ -19,6 +19,15 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Newsletter, Drafts and Published tabs on the Mailing List page (#504).**
+  The owner's layout of 2026-09-13. **Newsletter** builds this week's issue for
+  review; each issue card has a red X that deletes it at once, and **Keep in
+  Drafts** moves an issue worth sending to **Drafts**, which is the only place
+  an issue is approved. **Published** is a month calendar of what was sent
+  (filled count) or scheduled (outlined count) on each local day; choosing a
+  day shows that day's email in a sandboxed preview. Reject is now only
+  **Clear stuck send**, for an issue left mid-send.
+
 - **Delete, save to Drafts, and a month of published issues in the newsletter
   API (#504).** The API half of the Mailing List page's Review, Drafts and
   Published tabs. `DELETE /api/cms/newsletters/{id}` deletes a draft or

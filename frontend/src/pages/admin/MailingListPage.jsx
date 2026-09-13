@@ -2,12 +2,16 @@
  * Mailing List — the weekly newsletter and its provider, Resend (ADR 0030).
  *
  * Resend replaced Klaviyo, which this page used to read through `klaviyoProxy`:
- * lists, profiles and campaigns, and nothing was ever written. The Newsletter
- * tab now builds weekly issues from what the site published, shows each email
- * exactly as it would send, lets a draft be edited or rejected, and schedules
- * it through Resend only when a publisher approves and confirms
- * (components/admin/newsletter). The subscriber list itself is managed in
- * Resend's Audience view.
+ * lists, profiles and campaigns, and nothing was ever written. The tabs follow
+ * an issue's life (components/admin/newsletter):
+ *
+ *   Newsletter  build this week's issue, review it, delete it or keep it
+ *   Drafts      kept issues, edited and approved; approval schedules it
+ *               through Resend only when a publisher confirms
+ *   Published   a calendar of what was sent or scheduled, each email viewable
+ *   Connection  the Resend key check
+ *
+ * The subscriber list itself is managed in Resend's Audience view.
  *
  * The test posts a NAME to `connectionProbe` and the server builds the call,
  * so `RESEND_API_KEY` never reaches the browser.
@@ -23,10 +27,13 @@ import { Mail, Loader2, RefreshCw, CheckCircle, AlertCircle, ExternalLink } from
 import { postJSON } from '@/lib/api';
 import { countList, unwrapProxy } from '@/lib/proxyEnvelope';
 import NewsletterIssues from '@/components/admin/newsletter/NewsletterIssues';
+import NewsletterCalendar from '@/components/admin/newsletter/NewsletterCalendar';
 import NewsletterSettingsCard from '@/components/admin/newsletter/NewsletterSettingsCard';
 
 const TABS = [
   { id: 'newsletter', label: 'Newsletter' },
+  { id: 'drafts', label: 'Drafts' },
+  { id: 'published', label: 'Published' },
   { id: 'connection', label: 'Connection' },
 ];
 const TAB_IDS = new Set(TABS.map((tab) => tab.id));
@@ -55,7 +62,7 @@ function NewsletterTab() {
   const [settingsVersion, setSettingsVersion] = useState(0);
   return (
     <div className="space-y-6">
-      <NewsletterIssues settingsVersion={settingsVersion} />
+      <NewsletterIssues view="review" settingsVersion={settingsVersion} />
       <NewsletterSettingsCard onSaved={() => setSettingsVersion((v) => v + 1)} />
     </div>
   );
@@ -177,7 +184,7 @@ export default function MailingListPage() {
         title="Mailing List"
         service="Resend"
         connected={connected}
-        description="Build, review and approve the weekly newsletter, sent through Resend."
+        description="Build, keep, approve and look back on the weekly newsletter, sent through Resend."
         accent="violet"
       />
 
@@ -200,6 +207,8 @@ export default function MailingListPage() {
 
       <div>
         {activeTab === 'newsletter' && <NewsletterTab />}
+        {activeTab === 'drafts' && <NewsletterIssues view="drafts" />}
+        {activeTab === 'published' && <NewsletterCalendar />}
         {activeTab === 'connection' && <ConnectionTab onStatusChange={setConnected} />}
       </div>
     </div>

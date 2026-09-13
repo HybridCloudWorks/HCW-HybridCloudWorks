@@ -156,4 +156,36 @@ describe('The newsletter tab', () => {
     expect(await screen.findByLabelText('Postal address')).toBeInTheDocument();
     expect(screen.getByLabelText('Reply-to address')).toBeInTheDocument();
   });
+
+  it('has Newsletter, Drafts, Published and Connection tabs, in that order', () => {
+    searchParams = 'tab=connection';
+    postJSON.mockResolvedValue(envelope(true, 200, domains([])));
+    render(<MailingListPage />);
+    const labels = ['Newsletter', 'Drafts', 'Published', 'Connection'];
+    const tabs = screen.getAllByRole('button').filter((b) => labels.includes(b.textContent));
+    expect(tabs.map((b) => b.textContent)).toEqual(labels);
+  });
+
+  it('opens Drafts without a build button or settings', async () => {
+    searchParams = 'tab=drafts';
+    postJSON.mockResolvedValue(envelope(true, 200, domains([])));
+    render(<MailingListPage />);
+    expect(await screen.findByText(/Nothing in Drafts/)).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /build this week's issue/i })
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Postal address')).not.toBeInTheDocument();
+  });
+
+  it('opens Published on a month calendar', async () => {
+    searchParams = 'tab=published';
+    postJSON.mockResolvedValue(envelope(true, 200, domains([])));
+    render(<MailingListPage />);
+    expect(await screen.findByRole('button', { name: 'Previous month' })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        getJSON.mock.calls.some(([route]) => /^cms\/newsletters\?month=\d{4}-\d{2}$/.test(route))
+      ).toBe(true)
+    );
+  });
 });
