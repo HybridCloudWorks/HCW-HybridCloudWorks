@@ -158,7 +158,7 @@ export function createNewsletterHandlers({
     return { apiKey, client: createResendClient({ apiKey, fetch: fetchImpl }) };
   };
 
-  async function resolveSegmentId(client) {
+  async function findSegmentId(client) {
     let after;
     for (let page = 0; page < 20; page += 1) {
       const listed = await client.listSegments(after);
@@ -169,11 +169,20 @@ export function createNewsletterHandlers({
       if (!listed.data?.has_more || rows.length === 0) break;
       after = rows[rows.length - 1].id;
     }
+    return null;
+  }
+
+  async function resolveSegmentId(client) {
+    const existing = await findSegmentId(client);
+    if (existing) return existing;
     const created = await client.createSegment(NEWSLETTER_SEGMENT_NAME);
-    if (!created.ok || !created.data?.id) {
-      throw new Error(`creating the ${NEWSLETTER_SEGMENT_NAME} segment failed: ${describe(created)}`);
-    }
-    return created.data.id;
+    if (created.ok && created.data?.id) return created.data.id;
+    // Two cold instances confirming at once can both find no segment and both
+    // create; the loser's failure is not a failure if the winner's segment now
+    // exists. Look once more before giving the subscriber a 502.
+    const raced = await findSegmentId(client);
+    if (raced) return raced;
+    throw new Error(`creating the ${NEWSLETTER_SEGMENT_NAME} segment failed: ${describe(created)}`);
   }
 
   function segmentId(client) {
@@ -273,6 +282,13 @@ export function createNewsletterHandlers({
   async function confirm(request, context) {
     const caller = callerKey(request, context);
     if (caller.refused) return caller.refused;
+
+    // Fail closed without the salt, BEFORE the quota write: the caller key is
+    // an address hash persisted as a document id, and unsalted it is reversible.
+    if (!readKey(env, 'CLIENT_IP_SALT')) {
+      context.error?.('newsletter confirm refused: CLIENT_IP_SALT is not set');
+      return json(503, { ok: false, error: 'Newsletter signup is temporarily unavailable.' });
+    }
 
     if (!(await withinQuota(`newsletter-confirm:${caller.key}`, CONFIRM_PER_CALLER_PER_HOUR))) {
       return tooMany();

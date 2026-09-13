@@ -86,6 +86,8 @@ function makeResend({
     if (method === 'POST' && pathname === '/segments') {
       const created = { id: 'seg-created', name: body.name };
       state.segments.push(created);
+      // Another instance won the create: the segment exists, this call fails.
+      if (quirks.segmentCreateRaced) return reply(409, { name: 'conflict', message: 'exists' });
       return reply(200, { object: 'segment', id: created.id });
     }
     if (method === 'POST' && pathname === '/contacts') {
@@ -321,6 +323,32 @@ describe('confirm', () => {
     expect(res.status).toBe(200);
     expect(resend.state.segments).toEqual([{ id: 'seg-created', name: NEWSLETTER_SEGMENT_NAME }]);
     expect(resend.state.contacts.get(EMAIL).segments).toEqual(['seg-created']);
+  });
+
+  it('uses the segment another instance just created instead of failing the subscriber', async () => {
+    const resend = makeResend({ segments: [], quirks: { segmentCreateRaced: true } });
+    const { confirm, token } = await signedUp({ resend });
+    const res = await confirm(request({ body: { token } }), context());
+    expect(res.status).toBe(200);
+    expect(resend.state.contacts.get(EMAIL).segments).toEqual(['seg-created']);
+  });
+
+  it('fails closed without CLIENT_IP_SALT, before writing any quota document', async () => {
+    const { subscribe, resend: signupResend, token } = await signedUp();
+    void subscribe;
+    const store = makeStore();
+    const confirmOnly = createNewsletterHandlers({
+      identity: createClientIdentity({ originSecret: SECRET, ipSalt: '', allowUnverifiedOrigin: false }),
+      store,
+      env: { RESEND_API_KEY: API_KEY, CLIENT_IP_SALT: '@Microsoft.KeyVault(SecretUri=x)' },
+      fetch: signupResend.fetch,
+      now: () => NOW,
+    });
+    const callsBefore = signupResend.state.calls.length;
+    const res = await confirmOnly.confirm(request({ body: { token } }), context());
+    expect(res.status).toBe(503);
+    expect(store.docs.size).toBe(0);
+    expect(signupResend.state.calls.length).toBe(callsBefore);
   });
 
   it('resubscribes an address that had unsubscribed, because confirming is that consent', async () => {
