@@ -59,11 +59,13 @@ const pick = (doc, fields) => Object.fromEntries(fields.filter((f) => doc[f] !==
  * @param {object} deps
  * @param {{ requireRole: Function }} deps.guard
  * @param {{ readDoc: Function, queryDocs: Function, upsertDoc: Function, replaceDocIfMatch: Function }} deps.store
+ * @param {Record<string, string|undefined>} [deps.env]
  * @param {() => Date} [deps.now]
  */
 export function createNewsletterAdminHandlers({
   guard,
   store,
+  env = process.env,
   now = () => new Date(),
 }) {
   async function readSettings() {
@@ -104,6 +106,10 @@ export function createNewsletterAdminHandlers({
       error: 'This issue changed since you opened it. Reload it and try again.',
     });
 
+  // Terraform's newsletter_sending_enabled. Anything but the exact string
+  // "true" is off, so a missing or mistyped setting cannot send.
+  const sendingEnabled = () => env?.NEWSLETTER_SENDING_ENABLED === 'true';
+
   function present(issue, settings) {
     const preview = renderIssue(issue, {
       postalAddress: settings.postalAddress || ADDRESS_NOT_SET,
@@ -131,6 +137,7 @@ export function createNewsletterAdminHandlers({
       preview,
       readyToSend: missing.length === 0,
       missingSettings: missing,
+      sendingEnabled: sendingEnabled(),
       sendPlan,
     };
   }

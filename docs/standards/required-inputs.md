@@ -111,6 +111,7 @@ a switch and is here because it must match a Key Vault secret exactly:
 | --- | --- | --- |
 | `schedulers_master_enabled` | `false` | Master switch for all 18 timers. Both this and a name in `enabled_timers` are required — TODO.md T-518 |
 | `enabled_timers` | `[]` | Per-timer allow-list, armed one name at a time |
+| `newsletter_sending_enabled` | `false` | Lets a publisher's approval send the weekly newsletter through Resend. Set it only after the postal address and reply-to are saved in Newsletter settings |
 | `availability_test_enabled` | `false` | Standard web test and its alert. Stays `false`: Bot Fight Mode still 403s Azure's availability agents, and the reachability signal is served by the ADR 0024 Worker probe instead |
 | `availability_probe_alert_enabled` | `false` in code, **set `true` in the workspace 2026-09-01 (T-519 closed)** | Arms `edge_probe_availability` (`alert-api-reachability-prod-cus`) on the Worker probe's `availabilityResults` rows. Armed only after a full 30-minute window held 6 healthy rows |
 | `cosmos_export_enabled` | `false` | Arms the Cosmos exporter (`FEATURE_FLAG_COSMOS_EXPORT`) and creates `cosmos_export_daily_missing` and `cosmos_export_full_missing` (`alert-cosmos-export-daily-prod-cus`, `alert-cosmos-export-full-prod-cus`) together — ADR 0028. Arm only after the exporter is deployed and a `cosmosExportCompleted` event has been seen, and not on a Sunday after 03:00 UTC |

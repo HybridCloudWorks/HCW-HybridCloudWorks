@@ -492,6 +492,10 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # so monitor-unresolved-secrets.yml never sees it unresolved.
     "RESEND_API_KEY" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/RESEND-API-KEY)"
 
+    # Whether an approval may send (variables.tf). "false" until an owner sets
+    # newsletter_sending_enabled, so approving refuses before Resend is called.
+    "NEWSLETTER_SENDING_ENABLED" = var.newsletter_sending_enabled ? "true" : "false"
+
     # Podcast publishing to RSS.com over its Core API (#437, ADR 0029 §1b). The
     # key is issued at https://dashboard.rss.com/api-access/ on the Max plan;
     # the PODCAST_ID is the numeric `id` that `GET /v4/podcasts` returns for
