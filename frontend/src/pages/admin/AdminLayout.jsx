@@ -71,7 +71,7 @@ const NAV_GROUPS = [
       { to: '/admin/recording-hub', icon: Radio, label: 'Recording Hub', pill: 'Podcast' },
       { to: '/admin/social', icon: Share2, label: 'Social Hub', pill: 'Publer' },
       { to: '/admin/linkie', icon: Link2, label: 'Linkie Hub', pill: 'Linkie' },
-      { to: '/admin/mailing-list', icon: Mail, label: 'Mailing List', pill: 'Klaviyo' },
+      { to: '/admin/mailing-list', icon: Mail, label: 'Mailing List', pill: 'Resend' },
     ],
   },
   {

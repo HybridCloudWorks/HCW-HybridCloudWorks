@@ -27,6 +27,7 @@ import {
 const TOKEN = 'not-a-real-telegram-token:EXAMPLE-VALUE-FOR-TESTS';
 const YT_KEY = 'not-a-real-youtube-key-EXAMPLE-VALUE-FOR-TESTS';
 const RSS_KEY = 'not-a-real-rsscom-key-EXAMPLE-VALUE-FOR-TESTS';
+const RESEND_KEY = 'not-a-real-resend-key-EXAMPLE-VALUE-FOR-TESTS';
 
 const ENV = {
   TELEGRAM_BOT_TOKEN: TOKEN,
@@ -34,6 +35,7 @@ const ENV = {
   RSSCOM_API_KEY: RSS_KEY,
   RSSCOM_PODCAST_ID: '4242',
   YOUTUBE_API_KEY: YT_KEY,
+  RESEND_API_KEY: RESEND_KEY,
 };
 
 const readKey = (env, name) => (typeof env?.[name] === 'string' ? env[name].trim() : '');
@@ -105,7 +107,7 @@ describe('assertUrlSafe', () => {
 
 describe('the probe table', () => {
   it('is closed, and every entry is a GET with no caller-supplied component', () => {
-    expect(PROBE_NAMES).toEqual(['telegram', 'rsscom', 'youtube']);
+    expect(PROBE_NAMES).toEqual(['telegram', 'rsscom', 'youtube', 'resend']);
     for (const name of PROBE_NAMES) {
       const probe = PROBES[name];
       const { url, headers } = probe.buildRequest({ values: ENV });
@@ -123,6 +125,18 @@ describe('the probe table', () => {
     expect(PROBES.telegram.reportsKeyVerdict).toBe(true);
     expect(PROBES.rsscom.reportsKeyVerdict).toBe(false);
     expect(PROBES.youtube.reportsKeyVerdict).toBe(false);
+    // Resend refuses a sending-only key as well as a wrong one, and only the
+    // wrong one means remint.
+    expect(PROBES.resend.reportsKeyVerdict).toBe(false);
+  });
+
+  it('asks Resend a read-only question that a sending-only key cannot answer', () => {
+    // GET /domains spends nothing on either meter, and a pass means the key
+    // can manage contacts and broadcasts, which a sending-only key cannot.
+    expect(PROBES.resend.settings).toEqual(['RESEND_API_KEY']);
+    const { url, headers } = PROBES.resend.buildRequest({ values: ENV });
+    expect(url).toBe('https://api.resend.com/domains');
+    expect(headers.Authorization).toBe(`Bearer ${RESEND_KEY}`);
   });
 
   it('judges Telegram on the token alone, never the chat id', () => {
@@ -258,8 +272,8 @@ describe('createConnectionProbe', () => {
     );
   });
 
-  it('does not record a verdict for RSS.com or YouTube', async () => {
-    for (const probe of ['rsscom', 'youtube']) {
+  it('does not record a verdict for RSS.com, YouTube or Resend', async () => {
+    for (const probe of ['rsscom', 'youtube', 'resend']) {
       const onKeyVerdict = vi.fn(async () => {});
       await build({
         onKeyVerdict,
@@ -290,6 +304,16 @@ describe('createConnectionProbe', () => {
           ok: false,
           status: 401,
           text: `{"description":"bad request to /bot${TOKEN}/getMe"}`,
+        }),
+      },
+      // A header credential echoed back in a JSON error sentence.
+      {
+        probe: 'resend',
+        secret: RESEND_KEY,
+        fetch: respond({
+          ok: false,
+          status: 401,
+          text: `{"name":"restricted_api_key","message":"Key ${RESEND_KEY} can only send"}`,
         }),
       },
       // A body that is not JSON at all, parked in `raw`.

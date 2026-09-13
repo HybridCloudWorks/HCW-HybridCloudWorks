@@ -2,8 +2,8 @@
  * Integrations — every third-party service, its live status, and its keys.
  *
  * This replaces two pages that were about the same subject from opposite ends.
- * Connections could tell you Klaviyo was refusing calls; API Keys could rotate
- * `KLAVIYO-PRIVATE-KEY`. Neither could do the other, so the fix for a dead
+ * Connections could tell you Publer was refusing calls; API Keys could rotate
+ * `PUBLER-API-KEY`. Neither could do the other, so the fix for a dead
  * integration was two pages and a guess about whether they were talking about
  * the same thing. Here a service is one card: what it says about itself, the
  * button that asks it, and the credential rows you would change in response.
@@ -128,19 +128,7 @@ async function testLinkie() {
   return `Connected — ${profiles.length} profile(s).`;
 }
 
-async function testKlaviyo() {
-  // Doubly wrong before: `res.data` is the ENVELOPE's data, which is Klaviyo's
-  // whole body `{ data: [...] }` rather than the array, so the count was zero
-  // even on a genuine success.
-  const body = unwrapProxy(
-    await postJSON('klaviyoProxy', { path: '/api/lists/', method: 'GET' }),
-    'Klaviyo'
-  );
-  const count = countList(body);
-  return count === null ? 'Connected to Klaviyo.' : `Connected — ${count} list(s) visible.`;
-}
-
-// The three whose credentials never reach a browser (#483). Each posts a NAME
+// The services whose credentials never reach a browser (#483). Each posts a NAME
 // to `connectionProbe`, which builds the whole outbound call server-side; none
 // of them names a URL, a path or a method, because the caller supplying one is
 // the confused deputy `rest-proxy.js` spends its header on. The envelope is the
@@ -168,6 +156,20 @@ async function testYouTube() {
   // said out loud because pressing this button spends it — about 100 of the
   // 10,000 units a day that Listen & Learn draws on for real episodes.
   return 'Connected — the Data API answered. This check costs ~100 of 10,000 daily quota units.';
+}
+
+async function testResend() {
+  // GET /domains, server-side. A sending-access-only key is refused here with
+  // Resend's own sentence, which `unwrapProxy` surfaces, so a pass means the
+  // key can manage contacts and broadcasts (ADR 0030).
+  const body = unwrapProxy(await postJSON('connectionProbe', { probe: 'resend' }), 'Resend');
+  const count = countList(body);
+  if (count === null) return 'Connected to Resend.';
+  // Zero is worth its own sentence: the key works, and nothing can be sent
+  // until a domain is added and verified.
+  return count === 0
+    ? 'Connected, but no sending domain has been added to Resend yet.'
+    : `Connected — ${count} sending domain(s).`;
 }
 
 // ── Groups and services ───────────────────────────────────────────────────────
@@ -242,8 +244,8 @@ export const SERVICE_GROUPS = Object.freeze([
  *   `test`  A GET that proves the credential works, or `null` where a browser
  *           cannot make one. `null` is honest rather than lazy: the education
  *           profiles are public HTML that a browser cannot fetch from another
- *           origin, and the YouTube, RSS.com and Telegram keys are only ever
- *           read on the server, so there is nothing here that could call them.
+ *           origin, and the YouTube, RSS.com, Telegram and Resend keys are only
+ *           ever read on the server, so a browser cannot call them directly.
  *
  *           NO BEAKER MEANS THE GLOBE HAS TO WORK HARDER. When a service holds
  *           credentials and offers no test, the only thing this page can do
@@ -271,14 +273,16 @@ export const SERVICES = Object.freeze([
     secrets: ['PUBLER-API-KEY', 'PUBLER-WORKSPACE-ID'],
   },
   {
-    id: 'klaviyo',
+    id: 'resend',
     group: 'communication',
     icon: Mail,
-    name: 'Klaviyo',
-    description: 'Holds the newsletter list and sends the campaigns.',
-    url: 'https://www.klaviyo.com/settings/account/api-keys',
-    test: testKlaviyo,
-    secrets: ['KLAVIYO-PRIVATE-KEY', 'KLAVIYO-LIST-ID'],
+    name: 'Resend',
+    description: 'Holds the newsletter mailing list and sends the newsletter.',
+    // Where the key is minted. It must be created with Full access.
+    url: 'https://resend.com/api-keys',
+    // Server-side: GET /domains, which a sending-only key cannot pass.
+    test: testResend,
+    secrets: ['RESEND-API-KEY'],
   },
   {
     id: 'linkie',

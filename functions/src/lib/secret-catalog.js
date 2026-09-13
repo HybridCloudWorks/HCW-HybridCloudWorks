@@ -216,19 +216,17 @@ export const SECRET_CATALOG = Object.freeze([
     probe: 'publer',
   },
   {
-    setting: 'KLAVIYO_PRIVATE_KEY',
-    secret: 'KLAVIYO-PRIVATE-KEY',
+    setting: 'RESEND_API_KEY',
+    secret: 'RESEND-API-KEY',
     section: 'communication',
-    label: 'Klaviyo \u2014 private key',
-    help: 'API key. Adds subscribers to the mailing list and reads it back. Without it, the signup form quietly does nothing.',
-    probe: null,
-  },
-  {
-    setting: 'KLAVIYO_LIST_ID',
-    secret: 'KLAVIYO-LIST-ID',
-    section: 'communication',
-    label: 'Klaviyo \u2014 list id',
-    help: 'Identifier, not a secret. Which mailing list new subscribers are added to.',
+    label: 'Resend — API key',
+    // ADR 0030. Must be a FULL ACCESS key: a sending-access key can send one
+    // email but cannot add contacts or create broadcasts, and the Integrations
+    // page's beaker is what tells the two apart. No probe: Resend refuses both a
+    // wrong key and a sending-only key, and only the first means remint.
+    help:
+      'API key, created with Full access. Holds the newsletter mailing list and sends the ' +
+      'newsletter. A key with Sending access only will not work.',
     probe: null,
   },
   {

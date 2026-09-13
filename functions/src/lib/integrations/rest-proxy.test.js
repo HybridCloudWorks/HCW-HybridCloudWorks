@@ -259,8 +259,8 @@ describe('per-integration path allowlist', () => {
   });
 
   it('integrations without an allowlist are unrestricted beyond assertSafePath', () => {
-    // Publer and Klaviyo build paths freely in the admin UI; narrowing them
-    // would break screens without an enumeration of every path they construct.
+    // Publer builds paths freely in the admin UI; narrowing it would break
+    // screens without an enumeration of every path they construct.
     expect(isAllowedPath(null, '/anything/at/all')).toBe(true);
   });
 });
@@ -374,8 +374,8 @@ describe('reporting a credential verdict to the API-keys page (#358)', () => {
   });
 
   it('blames the key for both statuses when an integration says nothing', async () => {
-    // The default has to stay the old behaviour: Klaviyo and Linkie have not
-    // had their 401/403 semantics measured, and guessing at a split for them
+    // The default has to stay the old behaviour: Linkie has not
+    // had its 401/403 semantics measured, and guessing at a split for it
     // would be the same mistake in a new place.
     for (const status of [401, 403]) {
       const { handler, onKeyVerdict } = buildReporting({ status, body: {} });
@@ -429,7 +429,7 @@ describe('reporting a credential verdict to the API-keys page (#358)', () => {
   });
 
   it('reports nothing for an integration that did not opt in, even with a writer wired', async () => {
-    // Klaviyo and Linkie: their 401/403 semantics have not been read, and the
+    // Linkie: its 401/403 semantics have not been read, and the
     // catalogue promises a probe only where one is wired.
     const { handler, onKeyVerdict } = buildReporting({
       integration: TEST,

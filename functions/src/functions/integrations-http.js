@@ -1,5 +1,5 @@
 /**
- * integrations-http.js — publerProxy, klaviyoProxy, linkieProxy (#180).
+ * integrations-http.js — publerProxy, linkieProxy (#180).
  * Semantics and the security boundary in lib/integrations/rest-proxy.js.
  *
  * RPC-style route names, matching what the admin UI posts to.
@@ -36,21 +36,6 @@ const PUBLER = createIntegration({
   verdictSettingForStatus: publerSettingForStatus,
 });
 
-// The admin UI sends paths already prefixed with /api (e.g. '/api/lists/'), so
-// the base is the bare host. `revision` is required by Klaviyo on every request
-// and pins the API contract — without it the account's default is used, which
-// can change under the application without a deploy.
-const KLAVIYO = createIntegration({
-  name: 'Klaviyo',
-  baseUrl: 'https://a.klaviyo.com',
-  keyEnv: 'KLAVIYO_PRIVATE_KEY',
-  headers: ({ apiKey }) => ({
-    Authorization: `Klaviyo-API-Key ${apiKey}`,
-    revision: '2024-10-15',
-    accept: 'application/json',
-  }),
-});
-
 // Base URL and allowlist taken from Site-Main's working proxy
 // (functions/cms/proxies.js), not inferred. The first version of this file
 // guessed `https://api.linkie.bio` from the env-var name and was wrong: the API
@@ -77,7 +62,6 @@ const LINKIE = createIntegration({
 
 for (const [name, integration] of [
   ['publerProxy', PUBLER],
-  ['klaviyoProxy', KLAVIYO],
   ['linkieProxy', LINKIE],
 ]) {
   httpRoute(name, {

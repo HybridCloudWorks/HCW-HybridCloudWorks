@@ -1,9 +1,9 @@
 /**
- * connection-probe.js — "does this credential work?" for the three services a
+ * connection-probe.js — "does this credential work?" for the services a
  * browser cannot ask (#483).
  *
- * Telegram, RSS.com and YouTube hold credentials that are only ever read on the
- * server, so the Integrations page had no beaker for them: testing from the
+ * Telegram, RSS.com, YouTube and Resend hold credentials that are only ever
+ * read on the server, so the Integrations page had no beaker for them: testing from the
  * browser would mean sending a Key Vault secret to a browser, which that page
  * will not do. #481 made their globes point at the page where each credential
  * is minted, which is the best a card with no test can do. This module is the
@@ -49,16 +49,19 @@
  * Only Telegram. It answers 401 for a bad token, its `getMe` call takes no
  * other credential, and so a rejection blames exactly one setting.
  *
- * RSS.com and YouTube stay silent, and that is a decision rather than an
- * omission. #358 cost two days because a verdict was split across two settings
+ * RSS.com, YouTube and Resend stay silent, and that is a decision rather than
+ * an omission. #358 cost two days because a verdict was split across two settings
  * on Publer's DOCUMENTED semantics, which turned out to be the reverse of its
  * measured ones. RSS.com's 401/403 split has not been measured here. YouTube is
  * worse: the Data API answers 403 for a disabled API, for an exceeded quota and
  * for a referrer-restricted key, and only some of those mean "the key is
  * wrong". A light that goes red on a quota day would send the owner to remint a
- * key that is fine, which is the exact failure #358 was. Measure first, then
- * wire it; until then the beaker still reports the failure to the operator who
- * pressed it, which is the point of the button.
+ * key that is fine, which is the exact failure #358 was. Resend refuses a wrong
+ * key and a real key minted with sending access only, its documented statuses
+ * for the two have not been measured here, and only the first means "remint".
+ * Measure first, then wire it; until then the beaker
+ * still reports the failure to the operator who pressed it, which is the point
+ * of the button.
  */
 import { createKeyVerdictReporter, isCredentialRejected } from '../key-verdict.js';
 import { readUpstreamError } from './upstream-error.js';
@@ -247,6 +250,26 @@ export const PROBES = Object.freeze({
       url.searchParams.set('key', values.YOUTUBE_API_KEY);
       return { url: url.toString(), headers: { Accept: 'application/json' } };
     },
+  }),
+
+  /**
+   * `GET /domains` — the sending domains the key can see (ADR 0030).
+   *
+   * Chosen over any send-shaped call because it is read-only and costs nothing
+   * against either Resend meter. It also answers the question that matters
+   * before anything is built on the key: a key minted with SENDING ACCESS ONLY
+   * is refused here with Resend's own `restricted_api_key` sentence, and that
+   * key could never manage contacts or broadcasts. A pass here means the key
+   * is full-access, and the count says whether a domain has been added yet.
+   */
+  resend: createProbe({
+    name: 'resend',
+    service: 'Resend',
+    settings: ['RESEND_API_KEY'],
+    buildRequest: ({ values }) => ({
+      url: 'https://api.resend.com/domains',
+      headers: { Authorization: `Bearer ${values.RESEND_API_KEY}`, Accept: 'application/json' },
+    }),
   }),
 });
 

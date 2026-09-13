@@ -21,7 +21,7 @@ describe('readUpstreamError', () => {
     expect(readUpstreamError({ errors: ['first', 'second'] })).toBe('first');
   });
 
-  it('reads an errors array of objects, which is what Klaviyo answers with', () => {
+  it('reads an errors array of objects, which is what a JSON:API service answers with', () => {
     expect(readUpstreamError({ errors: [{ detail: 'The API key is invalid', title: 'Nope' }] })).toBe(
       'The API key is invalid'
     );
@@ -102,7 +102,7 @@ describe('Telegram’s description field (#483)', () => {
 
   it('still prefers the fields the other providers use', () => {
     // Appended last on purpose: adding it must not change what Publer,
-    // Klaviyo or Linkie resolve to.
+    // Linkie or Resend resolve to.
     expect(readUpstreamError({ message: 'the real one', description: 'the vaguer one' })).toBe(
       'the real one'
     );

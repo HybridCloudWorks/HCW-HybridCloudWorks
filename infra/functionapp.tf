@@ -480,13 +480,17 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     "LINKIE_API_KEY"    = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/LINKIE-API-KEY)"
     "YOUTUBE_API_KEY"   = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/YOUTUBE-API-KEY)"
 
-    # Social scheduling (Publer) and newsletter (Klaviyo). The WORKSPACE_ID and
-    # LIST_ID are identifiers rather than credentials, but they travel with their
-    # key and are pointless to split across two storage mechanisms.
+    # Social scheduling (Publer). The WORKSPACE_ID is an identifier rather than
+    # a credential, but it travels with its key and is pointless to split across
+    # two storage mechanisms.
     "PUBLER_API_KEY"      = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/PUBLER-API-KEY)"
     "PUBLER_WORKSPACE_ID" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/PUBLER-WORKSPACE-ID)"
-    "KLAVIYO_PRIVATE_KEY" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/KLAVIYO-PRIVATE-KEY)"
-    "KLAVIYO_LIST_ID"     = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/KLAVIYO-LIST-ID)"
+
+    # Newsletter list and sending (ADR 0030), replacing Klaviyo. A Full access
+    # key: contacts and broadcasts need it, and a sending-access key cannot.
+    # Seed RESEND-API-KEY on the API-keys page BEFORE this reference is applied,
+    # so monitor-unresolved-secrets.yml never sees it unresolved.
+    "RESEND_API_KEY" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/RESEND-API-KEY)"
 
     # Podcast publishing to RSS.com over its Core API (#437, ADR 0029 §1b). The
     # key is issued at https://dashboard.rss.com/api-access/ on the Max plan;

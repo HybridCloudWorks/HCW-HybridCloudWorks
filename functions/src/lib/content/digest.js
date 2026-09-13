@@ -4,8 +4,8 @@
  * Ported from Site-Main `cms/newsletter.js` `generateWeeklyDigest` (088f458):
  * the live `content` published in the last N days becomes one drafted
  * newsletter in `newsletters` (status `Draft`), or — `dryRun` — a preview
- * that saves nothing. The Klaviyo proxy and the public subscribe endpoint in
- * the same upstream module are separate ports (still notImplemented).
+ * that saves nothing. Subscribing and sending are Resend's (ADR 0030) and are
+ * not in this module.
  */
 import { randomUUID } from 'node:crypto';
 

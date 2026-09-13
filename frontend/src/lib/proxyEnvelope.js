@@ -1,6 +1,6 @@
 /**
- * proxyEnvelope.js - reading what `publerProxy`, `klaviyoProxy` and
- * `linkieProxy` actually return.
+ * proxyEnvelope.js - reading what `publerProxy`, `linkieProxy` and
+ * `connectionProbe` actually return.
  *
  * THE PROXIES ANSWER HTTP 200 FOR EVERY OUTCOME. `authedFetch` throws on a
  * non-2xx status, so most calls in this app can treat "it resolved" as "it
@@ -27,7 +27,7 @@ const MAX_DETAIL_LENGTH = 300;
 function firstString(value) {
   if (typeof value === 'string') return value;
   if (!value || typeof value !== 'object') return '';
-  // Klaviyo's `errors[]` holds objects; JSON:API calls the sentence `detail`.
+  // A JSON:API `errors[]` holds objects; JSON:API calls the sentence `detail`.
   // `description` is Telegram's field and is last, so appending it cannot
   // change what any existing caller reads (#483).
   for (const key of ['detail', 'message', 'title', 'error', 'description']) {
@@ -39,8 +39,8 @@ function firstString(value) {
 /**
  * The first human-readable sentence in an upstream error body.
  *
- * Publer answers `{ errors: ['...'] }`, Klaviyo `{ errors: [{ detail }] }`,
- * and a plain `{ message }` or `{ error }` is common enough to be worth the
+ * Publer answers `{ errors: ['...'] }`, a JSON:API service `{ errors: [{ detail }] }`,
+ * Resend a plain `{ message }`, and `{ error }` is common enough to be worth the
  * two extra lines. `raw` is where the proxy parks a body it could not parse.
  *
  * @param {unknown} data parsed upstream body
@@ -97,7 +97,7 @@ export function unwrapProxy(res, service) {
  * How many items an upstream list endpoint returned.
  *
  * Tolerates the three shapes these APIs use: a bare array, `{ data: [] }`
- * (Klaviyo, JSON:API) and `{ <name>: [] }`. Returns `null` when none matches,
+ * (Resend, JSON:API) and `{ <name>: [] }`. Returns `null` when none matches,
  * so a caller can say "connected" without inventing a count it does not have.
  *
  * @param {unknown} body the unwrapped upstream body
