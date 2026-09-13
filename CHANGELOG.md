@@ -19,6 +19,16 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Delete, save to Drafts, and a month of published issues in the newsletter
+  API (#504).** The API half of the Mailing List page's Review, Drafts and
+  Published tabs. `DELETE /api/cms/newsletters/{id}` deletes a draft or
+  rejected issue (never one that was approved); it is a conditional write to
+  `deleted`, so it cannot race an approval, and a deleted issue reads as not
+  found and is rebuilt from scratch. `POST /api/cms/newsletters/{id}/save`
+  keeps a draft, and the builder never rebuilds over a saved one.
+  `GET /api/cms/newsletters?month=YYYY-MM` lists what was sent or scheduled in
+  a month for the calendar. List rows now carry `etag` and `savedAt`.
+
 - **Approve the weekly newsletter from the Mailing List page (#504, ADR 0030
   §2a).** `POST /api/cms/newsletters/{id}/approve` routes the approval logic
   added just before this, and the Newsletter tab gains **Approve and

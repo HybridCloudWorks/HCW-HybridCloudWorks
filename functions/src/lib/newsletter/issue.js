@@ -29,7 +29,7 @@ const MAX_WINDOW_DAYS = 31;
 const MAX_INTRO_LENGTH = 1200;
 
 /** Statuses a rebuild may overwrite. Anything else has left the owner's hands. */
-const REBUILDABLE = new Set(['draft', 'rejected']);
+const REBUILDABLE = new Set(['draft', 'rejected', 'deleted']);
 
 export const INTRO_INSTRUCTION = [
   'You are writing the opening of a weekly email newsletter, not an article.',
@@ -91,7 +91,17 @@ export function createIssueBuilder({ store, drafter, now = () => new Date(), sec
     const since = new Date(until.getTime() - windowDays * 24 * 60 * 60 * 1000);
     const id = `issue-${until.toISOString().slice(0, 10)}`;
 
-    const existing = await store.readDoc('newsletters', id, id).catch(() => null);
+    const stored = await store.readDoc('newsletters', id, id).catch(() => null);
+    // A deleted issue is gone as far as the owner is concerned: rebuild it from
+    // scratch rather than carrying its note or creation time forward.
+    const existing = stored?.status === 'deleted' ? null : stored;
+    if (existing?.status === 'draft' && existing.savedAt) {
+      return {
+        success: false,
+        issueId: id,
+        message: "Today's issue is saved in Drafts, so it is not rebuilt over your edits. Delete it first to build it again.",
+      };
+    }
     if (existing && !REBUILDABLE.has(existing.status)) {
       return {
         success: false,

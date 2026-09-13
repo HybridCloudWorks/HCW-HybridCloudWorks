@@ -29,6 +29,7 @@ httpRouteByMethod('newsletterIssue', {
   handlers: {
     GET: (request, context) => admin().get(request, context),
     PATCH: (request, context) => admin().update(request, context),
+    DELETE: (request, context) => admin().remove(request, context),
   },
 });
 
@@ -37,6 +38,13 @@ httpRoute('approveNewsletter', {
   authLevel: 'anonymous',
   route: 'cms/newsletters/{id}/approve',
   handler: (request, context) => admin().approve(request, context),
+});
+
+httpRoute('saveNewsletter', {
+  methods: ['POST'],
+  authLevel: 'anonymous',
+  route: 'cms/newsletters/{id}/save',
+  handler: (request, context) => admin().save(request, context),
 });
 
 httpRoute('rejectNewsletter', {

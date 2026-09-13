@@ -6,6 +6,15 @@
  *   PATCH /api/cms/newsletters/{id}          editor     a draft's subject and note
  *   POST  /api/cms/newsletters/{id}/approve  publisher  schedule (or send) it through Resend
  *   POST  /api/cms/newsletters/{id}/reject   editor     set aside a draft, or clear a stuck send
+ *   POST  /api/cms/newsletters/{id}/save     editor     keep a draft: it moves to the Drafts tab
+ *   DELETE /api/cms/newsletters/{id}         editor     delete a draft or rejected issue
+ *
+ * The page's three tabs are views of one list: Review holds drafts not yet
+ * saved (and rejected issues), Drafts holds saved drafts, and Published shows
+ * scheduled and sent issues on a calendar, one month per `?month=YYYY-MM`
+ * request. Deleting marks the issue `deleted` with an ETag-conditional write
+ * rather than removing the document, so a delete can never race an approval
+ * that has already claimed the issue; a deleted issue reads as not found.
  *
  * `approve` is routed in functions/src/functions/newsletter-admin-http.js and called by the
  * Mailing List page's Approve button. It is refused until the owner sets
@@ -42,7 +51,11 @@ import { NEWSLETTER_SETTINGS_CONFIG_ID, missingForSending } from './settings.js'
 
 export const MAX_CUSTOM_NOTE_LENGTH = 2000;
 export const MAX_SUBJECT_LENGTH = 120;
-const LIST_LIMIT = 20;
+const LIST_LIMIT = 50;
+const PUBLISHED_LIMIT = 100;
+
+/** Only these can be deleted: anything else was approved, and Resend has it. */
+const DELETABLE = new Set(['draft', 'rejected']);
 
 /** What the preview footer shows before an address is set, so it is obvious. */
 const ADDRESS_NOT_SET = '[Postal address not set — add it in Newsletter settings before approving]';
@@ -67,6 +80,7 @@ const SUMMARY_FIELDS = [
   'scheduledAt',
   'sentAt',
   'rejectedAt',
+  'savedAt',
   'lastError',
 ];
 
@@ -74,6 +88,23 @@ const SUMMARY_FIELDS = [
 const SUMMARY_PROJECTION = SUMMARY_FIELDS.map((field) => `c.${field}`).join(', ');
 
 const pick = (doc, fields) => Object.fromEntries(fields.filter((f) => doc[f] !== undefined).map((f) => [f, doc[f]]));
+
+/** A list row: the summary plus the etag, so a card can be deleted without opening it. */
+const summarise = (row) => ({ ...pick(row, SUMMARY_FIELDS), etag: row._etag ?? null });
+
+/**
+ * The `?month=YYYY-MM` window, padded a day each side: the calendar places an
+ * issue by the viewer's local date, which can fall in the neighbouring UTC
+ * month. The page drops what is outside the month it shows.
+ */
+function monthWindow(month) {
+  const [year, monthNumber] = month.split('-').map(Number);
+  const day = 24 * 60 * 60 * 1000;
+  return {
+    from: new Date(Date.UTC(year, monthNumber - 1, 1) - day).toISOString(),
+    to: new Date(Date.UTC(year, monthNumber, 1) + day).toISOString(),
+  };
+}
 
 /**
  * An error for an approval LOG LINE: its name and code only. SDK messages can
@@ -126,7 +157,7 @@ export function createNewsletterAdminHandlers({
     const id = String(request.params?.id ?? '');
     if (!/^issue-\d{4}-\d{2}-\d{2}$/.test(id)) return null;
     const doc = await store.readDoc('newsletters', id, id);
-    return doc?.kind === 'weekly_issue' ? doc : null;
+    return doc?.kind === 'weekly_issue' && doc.status !== 'deleted' ? doc : null;
   }
 
   const notFound = () => json(404, { ok: false, error: 'Issue not found' });
@@ -195,13 +226,31 @@ export function createNewsletterAdminHandlers({
     async list(request, context) {
       const auth = await guard.requireRole(request, 'editor');
       if (auth.error) return auth.error;
+      const month = request.query?.get?.('month') ?? null;
+      if (month !== null && !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+        return json(400, { ok: false, error: 'month must be YYYY-MM' });
+      }
       try {
-        const rows = await store.queryDocs(
-          'newsletters',
-          `SELECT TOP ${LIST_LIMIT} ${SUMMARY_PROJECTION} FROM c WHERE c.kind = 'weekly_issue' ORDER BY c.createdAt DESC`,
-          []
-        );
-        return json(200, { ok: true, issues: (rows || []).map((row) => pick(row, SUMMARY_FIELDS)) });
+        let rows;
+        if (month) {
+          // Published: what went out, or will, in that month.
+          const { from, to } = monthWindow(month);
+          rows = await store.queryDocs(
+            'newsletters',
+            `SELECT TOP ${PUBLISHED_LIMIT} ${SUMMARY_PROJECTION}, c._etag FROM c WHERE c.kind = 'weekly_issue' AND ((c.status = 'sent' AND c.sentAt >= @from AND c.sentAt < @to) OR (c.status = 'scheduled' AND c.scheduledAt >= @from AND c.scheduledAt < @to)) ORDER BY c.createdAt DESC`,
+            [
+              { name: '@from', value: from },
+              { name: '@to', value: to },
+            ]
+          );
+        } else {
+          rows = await store.queryDocs(
+            'newsletters',
+            `SELECT TOP ${LIST_LIMIT} ${SUMMARY_PROJECTION}, c._etag FROM c WHERE c.kind = 'weekly_issue' AND c.status != 'deleted' ORDER BY c.createdAt DESC`,
+            []
+          );
+        }
+        return json(200, { ok: true, issues: (rows || []).map(summarise) });
       } catch (error) {
         context.error?.(`listNewsletters failed: ${error?.message ?? error}`);
         return json(500, { ok: false, error: 'Failed to list newsletter issues' });
@@ -478,6 +527,77 @@ export function createNewsletterAdminHandlers({
       }
       context.log?.(`approveNewsletter ${done.status} ${ref}`);
       return json(200, present(outcome.doc, settings));
+    },
+
+    async save(request, context) {
+      const auth = await guard.requireRole(request, 'editor');
+      if (auth.error) return auth.error;
+      const body = await request.json().catch(() => null);
+      if (missingEtag(body)) return etagRequired();
+      try {
+        const issue = await readIssue(request);
+        if (!issue) return notFound();
+        if (issue.status !== 'draft') {
+          return json(409, { ok: false, error: `Only a draft can be saved to Drafts; this issue is ${issue.status}.` });
+        }
+        if (staleView(body, issue)) return changedElsewhere();
+        // Already saved: nothing to write, and saying so is not an error.
+        if (issue.savedAt) return json(200, present(issue, await readSettings()));
+        const savedAt = now().toISOString();
+        const saved = {
+          ...issue,
+          savedAt,
+          savedBy: auth.user?.oid || auth.user?.sub || null,
+          updatedAt: savedAt,
+        };
+        let written;
+        try {
+          written = await store.replaceDocIfMatch('newsletters', saved);
+        } catch (error) {
+          if (error?.code === 412) return changedElsewhere();
+          throw error;
+        }
+        return json(200, present(written ?? saved, await readSettings()));
+      } catch (error) {
+        context.error?.(`saveNewsletter failed: ${error?.message ?? error}`);
+        return json(500, { ok: false, error: 'Failed to save the issue to Drafts' });
+      }
+    },
+
+    async remove(request, context) {
+      const auth = await guard.requireRole(request, 'editor');
+      if (auth.error) return auth.error;
+      const body = await request.json().catch(() => null);
+      if (missingEtag(body)) return etagRequired();
+      try {
+        const issue = await readIssue(request);
+        if (!issue) return notFound();
+        if (!DELETABLE.has(issue.status)) {
+          return json(409, {
+            ok: false,
+            error: `A ${issue.status} issue cannot be deleted: it was approved, so Resend has it.`,
+          });
+        }
+        if (staleView(body, issue)) return changedElsewhere();
+        const deletedAt = now().toISOString();
+        const deleted = {
+          ...issue,
+          status: 'deleted',
+          deletedAt,
+          deletedBy: auth.user?.oid || auth.user?.sub || null,
+          updatedAt: deletedAt,
+        };
+        try {
+          await store.replaceDocIfMatch('newsletters', deleted);
+        } catch (error) {
+          if (error?.code === 412) return changedElsewhere();
+          throw error;
+        }
+        return json(200, { ok: true, id: issue.id });
+      } catch (error) {
+        context.error?.(`deleteNewsletter failed: ${error?.message ?? error}`);
+        return json(500, { ok: false, error: 'Failed to delete the newsletter issue' });
+      }
     },
 
     async reject(request, context) {

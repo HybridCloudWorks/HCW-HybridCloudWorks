@@ -172,6 +172,31 @@ describe('createIssueBuilder', () => {
     });
   });
 
+  it('never rebuilds over an issue saved to Drafts', async () => {
+    const store = makeStore({ content: [article] }, {
+      'newsletters/issue-2026-09-14': { id: 'issue-2026-09-14', status: 'draft', savedAt: '2026-09-14T09:00:00Z' },
+    });
+    const result = await createIssueBuilder({ store, drafter: drafter(), now: () => NOW }).build({});
+    expect(result.success).toBe(false);
+    expect(result.message).toMatch(/saved in Drafts/);
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+  });
+
+  it('builds a deleted issue again from scratch', async () => {
+    const store = makeStore({ content: [article] }, {
+      'newsletters/issue-2026-09-14': {
+        id: 'issue-2026-09-14',
+        status: 'deleted',
+        customNote: 'Old note',
+        createdAt: '2026-09-14T08:00:00Z',
+      },
+    });
+    const result = await createIssueBuilder({ store, drafter: drafter(), now: () => NOW }).build({});
+    expect(result.success).toBe(true);
+    const doc = store.written.get('newsletters/issue-2026-09-14');
+    expect(doc).toMatchObject({ status: 'draft', customNote: '', createdAt: NOW.toISOString() });
+  });
+
   it('never rebuilds an issue that has been approved', async () => {
     for (const status of ['sending', 'scheduled', 'sent']) {
       const store = makeStore({ content: [article] }, { 'newsletters/issue-2026-09-14': { id: 'issue-2026-09-14', status } });
