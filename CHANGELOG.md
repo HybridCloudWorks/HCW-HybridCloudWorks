@@ -19,6 +19,24 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Admin API for weekly newsletter drafts, and the newsletter settings (#504,
+  ADR 0030 §2a).** Second of the small changes building the weekly newsletter.
+  Editors can list issues, read one rendered exactly as it would send, edit a
+  draft's subject and note, and reject it:
+  `GET /api/cms/newsletters`, `GET|PATCH /api/cms/newsletters/{id}` and
+  `POST /api/cms/newsletters/{id}/reject`. Nothing in this API sends.
+
+  `cms/platform-settings/newsletter-settings` stores what a send will need: the
+  postal address, a reply-to inbox (one on `news.hybridcloudworks.com`, which
+  receives no mail, is refused), and the send slot as weekday, time and IANA
+  zone. A partial save is allowed; the issue view reports what is still missing
+  and when an issue approved now would go out. The audit row records whether the
+  address and reply-to are set, never their values.
+
+  Edits are ETag-conditional, so a concurrent change is a 409 rather than an
+  overwrite, and an id that is not `issue-YYYY-MM-DD` is refused before Cosmos is
+  read. The page that uses this is the next change.
+
 - **The weekly newsletter's core library: what goes in an issue, how it is
   built, rendered and scheduled (#504, ADR 0030 §2a).** No route, job or page
   uses it yet — the admin surface and the job swap are the next two changes,
