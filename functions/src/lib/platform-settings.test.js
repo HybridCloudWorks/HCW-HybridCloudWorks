@@ -15,6 +15,7 @@ import {
   isAcceptableHeroUrl,
   normalizeDefaultHeroes,
   normalizeListenAndLearnSpeech,
+  normalizeNewsletterSettings,
   normalizePodcastFeeds,
   normalizeSocialAutopost,
   presentSetting,
@@ -424,13 +425,63 @@ describe('listen & learn speech', () => {
   });
 });
 
+describe('newsletter settings', () => {
+  it('defaults to Tuesday 09:00 Central with nothing personal filled in', () => {
+    expect(normalizeNewsletterSettings({})).toEqual({
+      postalAddress: '',
+      replyTo: '',
+      sendDay: 'tuesday',
+      sendTime: '09:00',
+      timeZone: 'America/Chicago',
+    });
+  });
+
+  it('keeps a multi-line postal address and a real reply-to', () => {
+    expect(
+      normalizeNewsletterSettings({
+        postalAddress: ' PO Box 1\r\nAustin, TX 78701 ',
+        replyTo: 'owner@example.com',
+        sendDay: 'thursday',
+        sendTime: '07:30',
+        timeZone: 'Europe/London',
+      })
+    ).toEqual({
+      postalAddress: 'PO Box 1\nAustin, TX 78701',
+      replyTo: 'owner@example.com',
+      sendDay: 'thursday',
+      sendTime: '07:30',
+      timeZone: 'Europe/London',
+    });
+  });
+
+  it('refuses a reply-to on the sending subdomain, which receives no mail', () => {
+    expect(() => normalizeNewsletterSettings({ replyTo: 'hello@news.hybridcloudworks.com' })).toThrow(
+      /does not/
+    );
+  });
+
+  it('refuses what cannot describe a send', () => {
+    for (const bad of [
+      { replyTo: 'not an address' },
+      { sendDay: 'someday' },
+      { sendTime: '9am' },
+      { timeZone: 'Central' },
+      { postalAddress: 'x'.repeat(301) },
+      { unexpected: true },
+    ]) {
+      expect(() => normalizeNewsletterSettings(bad), JSON.stringify(bad)).toThrow(PlatformSettingValidationError);
+    }
+  });
+});
+
 describe('presentSetting', () => {
-  it('names the four settings and nothing else', () => {
+  it('names the five settings and nothing else', () => {
     expect(PLATFORM_SETTING_NAMES).toEqual([
       'default-heroes',
       'social-autopost',
       'podcast-feeds',
       'listen-and-learn-speech',
+      'newsletter-settings',
     ]);
   });
 

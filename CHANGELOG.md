@@ -19,6 +19,38 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The weekly newsletter can be built and reviewed as a draft (#504, ADR 0030
+  §2a).** The Mailing List page's Newsletter tab builds this week's issue, shows
+  the email exactly as it would send, and lets the owner edit the subject, add a
+  note, or reject it. Nothing on it sends: approval — the publisher step that
+  schedules an issue through Resend — is the next PR, split out so the part that
+  emails every subscriber is reviewed on its own. The Monday timer and the
+  Telegram prompt follow that.
+
+  **An issue is structured, not an article.** It carries the items of every
+  registered section — new articles linked to the URL publishing stored,
+  Microsoft certification news with exam codes, approved study episodes linked
+  to their certification pages, and podcast episodes — plus a plain-text intro
+  and subject from the drafter. A section is one entry in
+  `lib/newsletter/sections.js`; a section that throws costs its heading, not the
+  issue; a week with nothing new builds nothing and asks no model. If the AI is
+  off, the issue still builds with a dated subject. It replaces
+  `generate-weekly-digest`, whose drafts could not link to anything and landed in
+  a container no code read.
+
+  **Settings a send will need, saved ahead of it.** Postal address (required on
+  commercial email), a reply-to inbox (one on `news.hybridcloudworks.com`, which
+  receives no mail, is refused), and the send slot — a weekday, a wall-clock time
+  and an IANA zone, converted to UTC so Tuesday 09:00 Central stays 09:00 through
+  daylight saving. The issue view says what is still missing and when an issue
+  approved now would go out.
+
+  **The email cannot carry markup it was not built with.** Every stored value is
+  escaped once, in the renderer; every link is re-checked there, so a
+  `javascript:`, `data:` or plain-http link is dropped however it got into an
+  issue; the admin preview renders in an iframe with an empty sandbox. The footer
+  carries the postal address and Resend's per-recipient unsubscribe link.
+
 - **The newsletter signup works, with double opt-in (#504, ADR 0030 §3a).** The
   form on every page posted to a route that never existed. It now posts to
   `public/newsletter/subscribe`, which emails a confirmation link from
