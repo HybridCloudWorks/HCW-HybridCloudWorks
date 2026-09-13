@@ -55,11 +55,13 @@ automation platform used as a read-only address book.
 - **Cost.** ADR 0015's USD 150 monthly ceiling. A newsletter to a list that
   does not yet exist should cost nothing, and the first paid step should buy
   headroom rather than unblock the basic case.
-- **The schedule already exists here.** `digest.js` drafts on a cadence and
-  the Function App already runs timer triggers (`jobs-sweeper.js`,
-  `cosmos-export.js`, pinned by `timer-schedules-utc.test.js`). A provider
-  that also wants to own scheduling duplicates something that works and
-  creates two answers to when the newsletter goes out.
+- **The scheduling machinery already exists here.** The Function App runs
+  timer triggers (`jobs-sweeper.js`, `cosmos-export.js`, pinned by
+  `timer-schedules-utc.test.js`), and `digest.js` already drafts a newsletter
+  — though today only on demand, as the `generate-weekly-digest` job the
+  Mailing List page queues. Putting that job on a timer is a small addition to
+  a pattern that exists; a provider that also wants to own scheduling would be
+  a second answer to when the newsletter goes out.
 - **Reversibility.** The public route contract must not name a vendor, so a
   provider change is an implementation change behind `newsletterSubscribe`
   rather than a redesign or a frontend change.
@@ -100,8 +102,9 @@ writes to is exactly the half-wired state this record exists to end.
 
 ### 2. The site owns the schedule; Resend is the send API
 
-`digest.js` keeps drafting into `newsletters` with status `Draft`, on the
-Function App's timer. Approval — not generation, not a cron inside the vendor
+`digest.js` keeps drafting into `newsletters` with status `Draft`. It runs
+only on demand today; the weekly run becomes a Function App timer that queues
+the existing `generate-weekly-digest` job. Approval — not generation, not a cron inside the vendor
 — creates the broadcast and sends it. The stored draft already carries the
 whole payload a broadcast needs:
 
