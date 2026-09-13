@@ -365,6 +365,28 @@ describe('approve', () => {
     expect(again.status).toBe(409);
   });
 
+  it('answers a sent-but-unrecorded broadcast with the usual payload plus a warning', async () => {
+    const store = makeStore();
+    const replace = store.replaceDocIfMatch;
+    let calls = 0;
+    // The claim saves; recording the outcome does not.
+    store.replaceDocIfMatch = vi.fn(async (...args) => {
+      calls += 1;
+      if (calls > 1) throw Object.assign(new Error('Service unavailable'), { code: 503 });
+      return replace(...args);
+    });
+    const { handlers, resend } = build({ role: 'publisher', store });
+    const res = await handlers.approve(request(approveBody), context());
+
+    expect(res.status).toBe(200);
+    expect(resend.broadcasts).toHaveLength(1);
+    const body = bodyOf(res);
+    expect(body.warning).toContain('Do not approve again');
+    expect(body).toMatchObject({ ok: true, issue: { id: ID, status: 'sending' }, sendingEnabled: true });
+    expect(body.preview).toBeTruthy();
+    expect(body.issue.etag).toBe(store.docs.get(`newsletters/${ID}`)._etag);
+  });
+
   it('logs only the name and code of a store error, never its message', async () => {
     const store = makeStore();
     const cosmosError = Object.assign(new Error(`Entity with the specified id ${ID} does not exist`), { code: 503 });

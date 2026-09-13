@@ -448,8 +448,18 @@ export function createNewsletterAdminHandlers({
         // The broadcast exists; the record of it did not save. Say so rather
         // than report a failure that would invite a second approval.
         context.error?.(`approveNewsletter sent but not recorded ${ref}: ${errorMeta(error)}`);
+        // Same shape as every other success (issue, preview, sendPlan...), plus
+        // `warning`, so a caller handles one payload. The issue is re-read so it
+        // shows `sending`, which offers no second approval; the claim stands in
+        // if even that read fails.
+        let latest = claimed;
+        try {
+          latest = (await store.readDoc('newsletters', issue.id, issue.id)) ?? claimed;
+        } catch (readError) {
+          context.error?.(`approveNewsletter re-read failed ${ref}: ${errorMeta(readError)}`);
+        }
         return json(200, {
-          ok: true,
+          ...present(latest, settings),
           warning: `Resend accepted broadcast ${created.data.id}, but the site could not record it. Do not approve again.`,
         });
       }
