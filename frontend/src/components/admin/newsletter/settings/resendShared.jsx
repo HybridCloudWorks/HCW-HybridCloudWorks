@@ -151,8 +151,12 @@ export function usePagedList(path, key) {
     queueMicrotask(reload);
   }, [reload]);
 
+  // A ref, not the loadingMore state: a double click lands before the button
+  // re-renders as disabled, and would fetch the same cursor twice.
+  const loadingMoreRef = useRef(false);
   const loadMore = async () => {
-    if (!nextAfter) return;
+    if (!nextAfter || loadingMoreRef.current) return;
+    loadingMoreRef.current = true;
     const mine = generation.current;
     setLoadingMore(true);
     try {
@@ -161,6 +165,7 @@ export function usePagedList(path, key) {
       // A reload started meanwhile discards this page, and its error with it.
       if (mine === generation.current) setError(describeResendError(err));
     } finally {
+      loadingMoreRef.current = false;
       setLoadingMore(false);
     }
   };

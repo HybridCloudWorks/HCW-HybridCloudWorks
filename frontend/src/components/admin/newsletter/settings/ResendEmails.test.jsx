@@ -50,6 +50,16 @@ describe('ResendEmails', () => {
     expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
   });
 
+  it('fetches a cursor once, however fast Load more is pressed', async () => {
+    render(<ResendEmails />);
+    const button = await screen.findByRole('button', { name: 'Load more' });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    expect(await screen.findByText('p***@example.org')).toBeInTheDocument();
+    expect(getJSON.mock.calls.filter(([route]) => route.includes('after=e-1111'))).toHaveLength(1);
+    expect(screen.getAllByText('p***@example.org')).toHaveLength(1);
+  });
+
   it('shows no error from a Load more that fails after Refresh has started', async () => {
     render(<ResendEmails />);
     await screen.findByText('j***@example.com');
