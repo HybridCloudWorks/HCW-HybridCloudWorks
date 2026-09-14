@@ -6,6 +6,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createNewsletterAdminHandlers } from './admin-handlers.js';
 import { NEWSLETTER_FROM } from './handlers.js';
+import { INTRO_INSTRUCTION } from './issue.js';
 
 const API_KEY = 'not-a-real-resend-key-EXAMPLE-VALUE-FOR-TESTS';
 
@@ -72,13 +73,21 @@ function makeStore({ issue = draftIssue(), settings = completeSettings } = {}) {
   };
 }
 
-function makeResend({ failBroadcast = false, noAnswer = false, onBroadcast } = {}) {
+function makeResend({ failBroadcast = false, noAnswer = false, onBroadcast, failEmail = false } = {}) {
   const broadcasts = [];
+  const emails = [];
   const reply = (status, data) => ({ ok: status < 300, status, text: async () => JSON.stringify(data) });
   const fetch = vi.fn(async (url, init = {}) => {
     const { pathname } = new URL(url);
     if (pathname === '/segments') {
       return reply(200, { object: 'list', has_more: false, data: [{ id: 'seg-news', name: 'Newsletter' }] });
+    }
+    if (pathname === '/emails') {
+      if (failEmail) {
+        return reply(403, { name: 'validation_error', message: `The domain is not verified for ${JSON.parse(init.body).to}` });
+      }
+      emails.push(JSON.parse(init.body));
+      return reply(200, { id: `em-${emails.length}` });
     }
     if (pathname === '/broadcasts') {
       if (noAnswer) throw new Error('The operation was aborted due to timeout');
@@ -95,7 +104,7 @@ function makeResend({ failBroadcast = false, noAnswer = false, onBroadcast } = {
     }
     return reply(404, { name: 'unexpected' });
   });
-  return { fetch, broadcasts };
+  return { fetch, broadcasts, emails };
 }
 
 const allow = (role = 'publisher') => ({
@@ -121,6 +130,7 @@ function build({
   role = 'editor',
   env = { RESEND_API_KEY: API_KEY, NEWSLETTER_SENDING_ENABLED: 'true' },
   now = NOW,
+  drafter = null,
 } = {}) {
   return {
     handlers: createNewsletterAdminHandlers({
@@ -129,6 +139,7 @@ function build({
       env,
       fetch: resend.fetch,
       now: () => now,
+      drafter,
     }),
     store,
     resend,
@@ -594,5 +605,359 @@ describe('remove', () => {
       store: makeStore(),
     });
     expect((await denied.remove(request({ body: { etag: 'e1' } }), context())).status).toBe(401);
+  });
+});
+
+const itemA = { title: 'A', url: 'https://hybridcloudworks.com/a', summary: 'sa' };
+const itemB = { title: 'B', url: 'https://hybridcloudworks.com/b' };
+const itemC = { title: 'C', url: 'https://learn.microsoft.com/c', label: 'Retiring' };
+const twoSections = () =>
+  draftIssue({
+    sections: [
+      { id: 'articles', title: 'New', items: [itemA, itemB] },
+      { id: 'certifications', title: 'Certification news', items: [itemC] },
+    ],
+    itemCount: 3,
+  });
+const patch = (fields) => request({ body: { etag: 'e1', ...fields } });
+
+describe('update: preheader', () => {
+  it('stores trimmed preview text, returns it, and renders it hidden at the top of the email', async () => {
+    const { handlers, store } = build();
+    const res = await handlers.update(patch({ preheader: '  Five things   from <this> week  ' }), context());
+    expect(res.status).toBe(200);
+    expect(store.docs.get(`newsletters/${ID}`).preheader).toBe('Five things from <this> week');
+    const body = bodyOf(res);
+    expect(body.issue.preheader).toBe('Five things from <this> week');
+    expect(body.preview.html).toContain('Five things from &lt;this&gt; week');
+  });
+
+  it('refuses preview text over 150 characters or not a string, and writes nothing', async () => {
+    const { handlers, store } = build();
+    expect((await handlers.update(patch({ preheader: 'x'.repeat(151) }), context())).status).toBe(400);
+    expect((await handlers.update(patch({ preheader: 42 }), context())).status).toBe(400);
+    expect((await handlers.update(patch({ preheader: 'x'.repeat(150) }), context())).status).toBe(200);
+    expect(store.replaceDocIfMatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads as empty when never set', async () => {
+    const { handlers } = build();
+    expect(bodyOf(await handlers.get(request(), context())).issue.preheader).toBe('');
+  });
+
+  it('is sent by approve, because approve renders the stored issue', async () => {
+    const { handlers, resend } = build({ role: 'publisher', store: makeStore({ issue: draftIssue({ preheader: 'Inbox preview' }) }) });
+    expect((await handlers.approve(request(approveBody), context())).status).toBe(200);
+    expect(resend.broadcasts[0].html).toContain('Inbox preview');
+  });
+
+  it('still refuses unknown fields alongside the new ones', async () => {
+    const { handlers, store } = build();
+    const res = await handlers.update(patch({ preheader: 'ok', itemCount: 99 }), context());
+    expect(res.status).toBe(400);
+    expect(bodyOf(res).error).toContain('itemCount');
+    expect(store.replaceDocIfMatch).not.toHaveBeenCalled();
+  });
+});
+
+describe('update: sections', () => {
+  const edit = async (sections) => {
+    const built = build({ store: makeStore({ issue: twoSections() }) });
+    const res = await built.handlers.update(patch({ sections }), context());
+    return { res, stored: built.store.docs.get(`newsletters/${ID}`), store: built.store };
+  };
+
+  it('reorders sections and items, and recomputes itemCount', async () => {
+    const { res, stored } = await edit([
+      { id: 'certifications', items: [{ url: itemC.url }] },
+      { id: 'articles', items: [{ url: itemB.url }, { url: itemA.url }] },
+    ]);
+    expect(res.status).toBe(200);
+    expect(stored.sections.map((s) => s.id)).toEqual(['certifications', 'articles']);
+    expect(stored.sections[1].items).toEqual([itemB, itemA]);
+    expect(stored.itemCount).toBe(3);
+    expect(bodyOf(res).issue.itemCount).toBe(3);
+  });
+
+  it('removes items and whole sections, writing the stored items back', async () => {
+    const { res, stored } = await edit([{ id: 'articles', title: 'New', items: [{ ...itemA }] }]);
+    expect(res.status).toBe(200);
+    expect(stored.sections).toEqual([{ id: 'articles', title: 'New', items: [itemA] }]);
+    expect(stored.itemCount).toBe(1);
+  });
+
+  it('treats a section left with no items as removed', async () => {
+    const { res, stored } = await edit([
+      { id: 'articles', items: [] },
+      { id: 'certifications', items: [{ url: itemC.url }] },
+    ]);
+    expect(res.status).toBe(200);
+    expect(stored.sections.map((s) => s.id)).toEqual(['certifications']);
+    expect(stored.itemCount).toBe(1);
+  });
+
+  it('refuses an added item, an edited field, a moved item, an added section and duplicates, writing nothing', async () => {
+    const refused = {
+      'added item': [{ id: 'articles', items: [{ url: itemA.url }, { title: 'New', url: 'https://hybridcloudworks.com/new' }] }],
+      'edited title': [{ id: 'articles', items: [{ ...itemA, title: 'Better title' }] }],
+      'edited url': [{ id: 'articles', items: [{ url: 'javascript:alert(1)' }] }],
+      'added field': [{ id: 'articles', items: [{ url: itemA.url, summary: 'rewritten' }] }],
+      'moved item': [{ id: 'certifications', items: [{ url: itemA.url }] }],
+      'added section': [{ id: 'podcasts', title: 'Podcasts', items: [{ url: itemA.url }] }],
+      'renamed section': [{ id: 'articles', title: 'Renamed', items: [{ url: itemA.url }] }],
+      'duplicate item': [{ id: 'articles', items: [{ url: itemA.url }, { url: itemA.url }] }],
+      'duplicate section': [
+        { id: 'articles', items: [{ url: itemA.url }] },
+        { id: 'articles', items: [{ url: itemB.url }] },
+      ],
+      'nothing left': [],
+      'not an array': { id: 'articles' },
+      'item not an object': [{ id: 'articles', items: [itemA.url] }],
+      'no items array': [{ id: 'articles' }],
+    };
+    for (const [name, sections] of Object.entries(refused)) {
+      const { res, stored, store } = await edit(sections);
+      expect(res.status, name).toBe(400);
+      expect(stored, name).toEqual(twoSections());
+      expect(store.replaceDocIfMatch, name).not.toHaveBeenCalled();
+    }
+  });
+
+  it('checks the sections of a draft only, against the version the etag names', async () => {
+    const sections = [{ id: 'articles', items: [{ url: itemA.url }] }];
+    const sent = build({ store: makeStore({ issue: { ...twoSections(), status: 'sent' } }) });
+    expect((await sent.handlers.update(patch({ sections }), context())).status).toBe(409);
+    const stale = build({ store: makeStore({ issue: twoSections() }) });
+    const res = await stale.handlers.update(request({ body: { sections, etag: 'old' } }), context());
+    expect(bodyOf(res).code).toBe('ISSUE_CHANGED');
+    const missing = build({ store: makeStore({ issue: twoSections() }) });
+    expect(bodyOf(await missing.handlers.update(request({ body: { sections } }), context())).code).toBe('ETAG_REQUIRED');
+  });
+});
+
+const makeDrafter = (result = { title: 'Zones', postContent: '**This week** we looked at [zones](https://x).' }) => ({
+  generateDraft: vi.fn(async () => (result instanceof Error ? Promise.reject(result) : result)),
+});
+
+describe('intro', () => {
+  it("regenerates a draft's intro with the builder's instruction, clears introError and keeps the subject", async () => {
+    const drafter = makeDrafter();
+    const { handlers, store } = build({ drafter, store: makeStore({ issue: draftIssue({ introError: 'AI was off' }) }) });
+    const res = await handlers.intro(request({ body: { etag: 'e1' } }), context());
+    expect(res.status).toBe(200);
+    const stored = store.docs.get(`newsletters/${ID}`);
+    expect(stored).toMatchObject({ intro: 'This week we looked at zones.', introError: null, subject: 'Landing zones' });
+    expect(bodyOf(res).issue).toMatchObject({ intro: 'This week we looked at zones.', etag: stored._etag });
+    const [call] = drafter.generateDraft.mock.calls[0];
+    expect(call.customInstructionPrompt).toBe(INTRO_INSTRUCTION);
+    expect(call.markdown).toContain('- A');
+  });
+
+  it('stores nothing and answers 502 with a readable error when the AI fails', async () => {
+    const drafter = makeDrafter(new Error('AI feature newsletterIntro is disabled'));
+    const { handlers, store } = build({ drafter });
+    const ctx = { ...context(), invocationId: 'inv-7' };
+    const res = await handlers.intro(request({ body: { etag: 'e1' } }), ctx);
+    expect(res.status).toBe(502);
+    expect(bodyOf(res)).toMatchObject({ code: 'AI_FAILED', error: expect.stringContaining('disabled') });
+    expect(store.replaceDocIfMatch).not.toHaveBeenCalled();
+    expect(store.docs.get(`newsletters/${ID}`).intro).toBe('We covered a lot.');
+    const logged = ctx.error.mock.calls.flat().join('\n');
+    expect(logged).toContain('inv-7');
+    expect(logged).not.toContain('disabled');
+    expect(logged).not.toContain(ID);
+  });
+
+  it('stores nothing when the AI returns an empty intro', async () => {
+    const { handlers, store } = build({ drafter: makeDrafter({ title: 'x', postContent: '' }) });
+    expect((await handlers.intro(request({ body: { etag: 'e1' } }), context())).status).toBe(502);
+    expect(store.replaceDocIfMatch).not.toHaveBeenCalled();
+  });
+
+  it('requires the etag, refuses a stale one or a non-draft before calling the AI', async () => {
+    const drafter = makeDrafter();
+    const { handlers } = build({ drafter });
+    expect(bodyOf(await handlers.intro(request({ body: {} }), context())).code).toBe('ETAG_REQUIRED');
+    expect(bodyOf(await handlers.intro(request({ body: { etag: 'old' } }), context())).code).toBe('ISSUE_CHANGED');
+    const sent = build({ drafter, store: makeStore({ issue: draftIssue({ status: 'sent' }) }) });
+    expect((await sent.handlers.intro(request({ body: { etag: 'e1' } }), context())).status).toBe(409);
+    expect(drafter.generateDraft).not.toHaveBeenCalled();
+  });
+
+  it('does not overwrite an edit that lands while the AI is writing', async () => {
+    const store = makeStore();
+    const drafter = {
+      generateDraft: vi.fn(async () => {
+        store.docs.set(`newsletters/${ID}`, { ...store.docs.get(`newsletters/${ID}`), customNote: 'Theirs', _etag: 'e9' });
+        return { title: 't', postContent: 'New intro.' };
+      }),
+    };
+    const { handlers } = build({ store, drafter });
+    const res = await handlers.intro(request({ body: { etag: 'e1' } }), context());
+    expect(bodyOf(res).code).toBe('ISSUE_CHANGED');
+    expect(store.docs.get(`newsletters/${ID}`)).toMatchObject({ customNote: 'Theirs', intro: 'We covered a lot.' });
+  });
+
+  it('is at least an editor decision, and 503 without a drafter', async () => {
+    const denied = createNewsletterAdminHandlers({
+      guard: { requireRole: vi.fn(async () => ({ error: { status: 403, body: '{}' } })) },
+      store: makeStore(),
+      drafter: makeDrafter(),
+    });
+    expect((await denied.intro(request({ body: { etag: 'e1' } }), context())).status).toBe(403);
+    expect((await build().handlers.intro(request({ body: { etag: 'e1' } }), context())).status).toBe(503);
+  });
+});
+
+describe('subjects', () => {
+  it('returns up to five cleaned, deduplicated suggestions of at most 120 characters, and writes nothing', async () => {
+    const drafter = makeDrafter({
+      title: 'Landing zones, again',
+      keyTopics: ['landing zones, AGAIN', '"**Quoted** idea"', 'y'.repeat(200), 'Fourth', 'Fifth', 'Sixth', 7, ''],
+    });
+    const { handlers, store } = build({ drafter });
+    const res = await handlers.subjects(request(), context());
+    expect(res.status).toBe(200);
+    const { subjects } = bodyOf(res);
+    expect(subjects).toHaveLength(5);
+    expect(subjects[0]).toBe('Landing zones, again');
+    expect(subjects[1]).toBe('Quoted idea');
+    expect(subjects[2].length).toBeLessThanOrEqual(120);
+    expect(new Set(subjects.map((s) => s.toLowerCase())).size).toBe(5);
+    for (const s of subjects) expect(s.length).toBeLessThanOrEqual(120);
+    expect(store.replaceDocIfMatch).not.toHaveBeenCalled();
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+  });
+
+  it('answers 502 when the AI fails or offers fewer than three usable lines', async () => {
+    for (const drafter of [
+      makeDrafter(new Error('No AI provider configured')),
+      makeDrafter({ title: 'One', keyTopics: ['one', 'ONE'] }),
+    ]) {
+      const res = await build({ drafter }).handlers.subjects(request(), context());
+      expect(res.status).toBe(502);
+      expect(bodyOf(res).code).toBe('AI_FAILED');
+    }
+  });
+
+  it('is at least an editor decision, and 404 for a missing issue', async () => {
+    const denied = createNewsletterAdminHandlers({
+      guard: { requireRole: vi.fn(async () => ({ error: { status: 401, body: '{}' } })) },
+      store: makeStore(),
+      drafter: makeDrafter(),
+    });
+    expect((await denied.subjects(request(), context())).status).toBe(401);
+    expect((await build({ drafter: makeDrafter() }).handlers.subjects(request({ id: 'issue-2020-01-01' }), context())).status).toBe(404);
+  });
+});
+
+describe('test send', () => {
+  const testBody = (over = {}) => request({ body: { etag: 'e1', ...over } });
+
+  it('emails one [TEST] copy to the reply-to address only, even when the body names another', async () => {
+    const { handlers, store, resend } = build({ role: 'publisher' });
+    const res = await handlers.test(
+      testBody({ to: 'attacker@example.net', replyTo: 'attacker@example.net', sentTo: 'attacker@example.net' }),
+      context()
+    );
+    expect(res.status).toBe(200);
+    const stored = store.docs.get(`newsletters/${ID}`);
+    expect(bodyOf(res)).toEqual({ ok: true, sentTo: 'owner@example.com', etag: stored._etag });
+    expect(resend.emails).toHaveLength(1);
+    expect(resend.emails[0]).toMatchObject({ from: NEWSLETTER_FROM, to: ['owner@example.com'], subject: '[TEST] Landing zones' });
+    expect(JSON.stringify(resend.emails[0])).not.toContain('attacker');
+    expect(resend.broadcasts).toHaveLength(0);
+    expect(resend.fetch.mock.calls.map(([url]) => new URL(url).pathname)).toEqual(['/emails']);
+    expect(stored).toMatchObject({ status: 'draft', lastTestAt: NOW.toISOString() });
+  });
+
+  it('replaces the unsubscribe placeholder, which a single email cannot fill, and says so', async () => {
+    const { handlers, resend } = build({ role: 'publisher' });
+    await handlers.test(testBody(), context());
+    const [email] = resend.emails;
+    expect(email.html).not.toContain('RESEND_UNSUBSCRIBE_URL');
+    expect(email.text).not.toContain('RESEND_UNSUBSCRIBE_URL');
+    expect(email.html).toContain('href="#"');
+    expect(email.html).toContain('unsubscribe link is inactive');
+    expect(email.text).toContain('unsubscribe link is inactive');
+  });
+
+  it('works while sending is switched off, because it cannot reach subscribers', async () => {
+    for (const value of [undefined, 'false']) {
+      const { handlers, resend } = build({ role: 'publisher', env: { RESEND_API_KEY: API_KEY, NEWSLETTER_SENDING_ENABLED: value } });
+      expect((await handlers.test(testBody(), context())).status, String(value)).toBe(200);
+      expect(resend.emails, String(value)).toHaveLength(1);
+    }
+  });
+
+  it('sends at most one test per issue per minute', async () => {
+    const store = makeStore();
+    const resend = makeResend();
+    const first = build({ role: 'publisher', store, resend });
+    const sent = bodyOf(await first.handlers.test(testBody(), context()));
+    const again = await first.handlers.test(testBody({ etag: sent.etag }), context());
+    expect(again.status).toBe(429);
+    expect(bodyOf(again)).toMatchObject({ code: 'TEST_RATE_LIMITED', retryAfterSeconds: 60 });
+    // Even with the old etag, a second press inside the minute is "too soon".
+    expect((await first.handlers.test(testBody(), context())).status).toBe(429);
+    expect(resend.emails).toHaveLength(1);
+    const later = build({ role: 'publisher', store, resend, now: new Date(NOW.getTime() + 60_000) });
+    expect((await later.handlers.test(testBody({ etag: sent.etag }), context())).status).toBe(200);
+    expect(resend.emails).toHaveLength(2);
+  });
+
+  it('sends once when pressed twice at the same moment', async () => {
+    const { handlers, resend } = build({ role: 'publisher' });
+    const [a, b] = await Promise.all([handlers.test(testBody(), context()), handlers.test(testBody(), context())]);
+    expect([a.status, b.status].sort()).toEqual([200, 429]);
+    expect(resend.emails).toHaveLength(1);
+  });
+
+  it('is a publisher decision', async () => {
+    const { handlers, resend } = build({ role: 'editor' });
+    expect((await handlers.test(testBody(), context())).status).toBe(403);
+    expect(resend.fetch).not.toHaveBeenCalled();
+  });
+
+  it('refuses without the settings, the Resend key, the etag, a draft or a fresh view, and sends nothing', async () => {
+    const cases = [
+      [build({ role: 'publisher', store: makeStore({ settings: { ...completeSettings, replyTo: '' } }) }), testBody(), 409, 'SETTINGS_INCOMPLETE'],
+      [build({ role: 'publisher', store: makeStore({ settings: { ...completeSettings, postalAddress: '' } }) }), testBody(), 409, 'SETTINGS_INCOMPLETE'],
+      [build({ role: 'publisher', env: {} }), testBody(), 503, undefined],
+      [build({ role: 'publisher' }), request({ body: {} }), 400, 'ETAG_REQUIRED'],
+      [build({ role: 'publisher' }), testBody({ etag: 'old' }), 409, 'ISSUE_CHANGED'],
+      [build({ role: 'publisher', store: makeStore({ issue: draftIssue({ status: 'scheduled' }) }) }), testBody(), 409, undefined],
+    ];
+    for (const [{ handlers, resend, store }, req, status, code] of cases) {
+      const res = await handlers.test(req, context());
+      expect(res.status, code).toBe(status);
+      expect(bodyOf(res).code, String(status)).toBe(code);
+      expect(resend.fetch).not.toHaveBeenCalled();
+      expect(store.replaceDocIfMatch).not.toHaveBeenCalled();
+    }
+  });
+
+  it("answers 502 with Resend's reason on a refusal, logging only the status and error name", async () => {
+    const { handlers } = build({ role: 'publisher', resend: makeResend({ failEmail: true }) });
+    const ctx = { ...context(), invocationId: 'inv-5' };
+    const res = await handlers.test(testBody(), ctx);
+    expect(res.status).toBe(502);
+    expect(bodyOf(res).error).toContain('not verified');
+    const logged = [...ctx.log.mock.calls, ...ctx.error.mock.calls].flat().join('\n');
+    expect(logged).toContain('HTTP 403 validation_error');
+    expect(logged).toContain('inv-5');
+    for (const secret of ['owner@example.com', ID, 'not verified', 'Landing zones', 'PO Box']) {
+      expect(logged, secret).not.toContain(secret);
+    }
+  });
+
+  it('logs the invocation on success, never the address or issue id', async () => {
+    const { handlers } = build({ role: 'publisher' });
+    const ctx = { ...context(), invocationId: 'inv-6' };
+    expect((await handlers.test(testBody(), ctx)).status).toBe(200);
+    const logged = [...ctx.log.mock.calls, ...ctx.error.mock.calls].flat().join('\n');
+    expect(logged).toContain('inv-6');
+    expect(logged).not.toContain('owner@example.com');
+    expect(logged).not.toContain(ID);
   });
 });

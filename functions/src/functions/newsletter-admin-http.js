@@ -4,14 +4,20 @@
  */
 import { httpRoute, httpRouteByMethod } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
+import * as ai from '../lib/ai/router.js';
+import { createDrafter } from '../lib/content/drafting.js';
 import { queryDocs, readDoc, replaceDocIfMatch, upsertDoc } from '../lib/cosmos-client.js';
 import { createNewsletterAdminHandlers } from '../lib/newsletter/admin-handlers.js';
 
 let handlers = null;
 const admin = () => {
+  const store = { queryDocs, readDoc, replaceDocIfMatch, upsertDoc };
   handlers ??= createNewsletterAdminHandlers({
     guard: getDefaultGuard(),
-    store: { queryDocs, readDoc, replaceDocIfMatch, upsertDoc },
+    store,
+    // The drafter the builder uses (forge-jobs.js), so a regenerated intro is
+    // written the way Monday's was.
+    drafter: createDrafter({ store, ai }),
   });
   return handlers;
 };
@@ -38,6 +44,27 @@ httpRoute('approveNewsletter', {
   authLevel: 'anonymous',
   route: 'cms/newsletters/{id}/approve',
   handler: (request, context) => admin().approve(request, context),
+});
+
+httpRoute('regenerateNewsletterIntro', {
+  methods: ['POST'],
+  authLevel: 'anonymous',
+  route: 'cms/newsletters/{id}/intro',
+  handler: (request, context) => admin().intro(request, context),
+});
+
+httpRoute('suggestNewsletterSubjects', {
+  methods: ['POST'],
+  authLevel: 'anonymous',
+  route: 'cms/newsletters/{id}/subjects',
+  handler: (request, context) => admin().subjects(request, context),
+});
+
+httpRoute('testNewsletter', {
+  methods: ['POST'],
+  authLevel: 'anonymous',
+  route: 'cms/newsletters/{id}/test',
+  handler: (request, context) => admin().test(request, context),
 });
 
 httpRoute('saveNewsletter', {

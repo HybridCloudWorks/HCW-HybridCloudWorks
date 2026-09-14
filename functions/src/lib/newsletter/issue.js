@@ -76,6 +76,86 @@ export function buildIntroContext(sections) {
     .join('\n\n');
 }
 
+/** An AI failure as the owner reads it: the message, capped. */
+export const describeAiError = (error) => String(error?.message ?? error).slice(0, 300);
+
+/**
+ * Draft an intro, and a subject, for an issue's sections. The builder and the
+ * regenerate-intro route (admin-handlers.js) both call this, so an intro
+ * written on Monday and one regenerated on Tuesday come from the same
+ * instruction and the same cleaning. Throws when the AI does: each caller
+ * decides what a failure costs.
+ *
+ * @param {object} args
+ * @param {{ generateDraft: Function }} args.drafter
+ * @param {object[]} args.sections the issue's sections
+ * @param {string} args.subject kept when the model offers no title
+ * @returns {Promise<{ subject: string, intro: string }>}
+ */
+export async function draftIntro({ drafter, sections, subject }) {
+  const draft = await drafter.generateDraft({
+    url: 'weekly-newsletter',
+    cloudProvider: 'Auto',
+    scrapedTitle: subject,
+    description: "This week's newsletter issue.",
+    markdown: buildIntroContext(sections),
+    customInstructionPrompt: INTRO_INSTRUCTION,
+  });
+  const drafted = plainText(stripMarkdown(draft?.title), 120);
+  return {
+    subject: drafted || subject,
+    intro: stripMarkdown(draft?.postContent).slice(0, MAX_INTRO_LENGTH),
+  };
+}
+
+export const SUBJECT_INSTRUCTION = [
+  'You are suggesting subject lines for a weekly email newsletter, not writing an article.',
+  'In "keyTopics": exactly 5 different subject lines, each at most 70 characters, each naming the week\'s',
+  'main theme a different way. In "title": the best of them. No emoji, no clickbait, no quotation marks.',
+  'In "postContent": one plain sentence saying why the first one leads.',
+  'Mention only items listed in the source material. Do not invent news, numbers or dates.',
+].join(' ');
+
+/** At most this many suggestions come back, and at least MIN or the call failed. */
+export const MAX_SUBJECT_SUGGESTIONS = 5;
+export const MIN_SUBJECT_SUGGESTIONS = 3;
+
+/**
+ * Subject-line suggestions for an issue, through the same drafter as the
+ * intro. The drafter's JSON shape is fixed (title, postContent, keyTopics...),
+ * so the suggestions ride in `keyTopics` with `title` as the lead. Cleaned to
+ * plain text of at most 120 characters, deduplicated without regard to case,
+ * capped at five. Throws when the AI does, or when fewer than three survive.
+ *
+ * @returns {Promise<string[]>}
+ */
+export async function suggestSubjects({ drafter, sections, subject }) {
+  const draft = await drafter.generateDraft({
+    url: 'weekly-newsletter-subjects',
+    cloudProvider: 'Auto',
+    scrapedTitle: subject,
+    description: "Subject lines for this week's newsletter issue.",
+    markdown: buildIntroContext(sections),
+    customInstructionPrompt: SUBJECT_INSTRUCTION,
+  });
+  const candidates = [draft?.title, ...(Array.isArray(draft?.keyTopics) ? draft.keyTopics : [])];
+  const seen = new Set();
+  const subjects = [];
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string') continue;
+    const cleaned = plainText(stripMarkdown(candidate).replace(/^["'“”]+|["'“”]+$/g, ''), 120);
+    const key = cleaned.toLowerCase();
+    if (!cleaned || seen.has(key)) continue;
+    seen.add(key);
+    subjects.push(cleaned);
+    if (subjects.length === MAX_SUBJECT_SUGGESTIONS) break;
+  }
+  if (subjects.length < MIN_SUBJECT_SUGGESTIONS) {
+    throw new Error(`The AI suggested ${subjects.length} usable subject line(s); at least ${MIN_SUBJECT_SUGGESTIONS} are needed. Try again.`);
+  }
+  return subjects;
+}
+
 const defaultSubject = (since, until) => {
   const fmt = (date) =>
     new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(date);
@@ -140,21 +220,13 @@ export function createIssueBuilder({ store, drafter, now = () => new Date(), sec
     let introError = null;
     if (drafter) {
       try {
-        const draft = await drafter.generateDraft({
-          url: 'weekly-newsletter',
-          cloudProvider: 'Auto',
-          scrapedTitle: subject,
-          description: "This week's newsletter issue.",
-          markdown: buildIntroContext(collected.sections),
-          customInstructionPrompt: INTRO_INSTRUCTION,
-        });
-        const drafted = plainText(stripMarkdown(draft?.title), 120);
-        if (drafted) subject = drafted;
-        intro = stripMarkdown(draft?.postContent).slice(0, MAX_INTRO_LENGTH);
+        const drafted = await draftIntro({ drafter, sections: collected.sections, subject });
+        subject = drafted.subject;
+        intro = drafted.intro;
       } catch (error) {
         // The AI being off or down costs the intro, not the issue: the items
         // are the newsletter, and the owner can write the note by hand.
-        introError = String(error?.message ?? error).slice(0, 300);
+        introError = describeAiError(error);
         log?.warn?.(`[newsletter] intro not drafted: ${introError}`);
       }
     }

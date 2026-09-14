@@ -11,7 +11,14 @@ import {
   episodesSection,
   plainText,
 } from './sections.js';
-import { INTRO_INSTRUCTION, createIssueBuilder, stripMarkdown } from './issue.js';
+import {
+  INTRO_INSTRUCTION,
+  SUBJECT_INSTRUCTION,
+  createIssueBuilder,
+  draftIntro,
+  stripMarkdown,
+  suggestSubjects,
+} from './issue.js';
 import { UNSUBSCRIBE_PLACEHOLDER, renderIssue } from './render.js';
 
 const NOW = new Date('2026-09-14T12:00:00Z');
@@ -326,5 +333,56 @@ describe('renderIssue', () => {
 
   it('dates the week it covers', () => {
     expect(renderIssue(issue, { postalAddress: 'x' }).html).toContain('HybridCloudWorks Weekly · Sep 7 – Sep 14');
+  });
+
+  it('puts the preheader first in the body as a hidden, escaped block followed by filler', () => {
+    const { html, text } = renderIssue({ ...issue, preheader: 'Zones <b>& more</b>' }, { postalAddress: 'x' });
+    const body = html.slice(html.indexOf('<body'));
+    const firstDiv = body.indexOf('<div style="display:none');
+    expect(firstDiv).toBeGreaterThan(-1);
+    expect(firstDiv).toBeLessThan(body.indexOf('<table'));
+    expect(body).toContain('>Zones &lt;b&gt;&amp; more&lt;/b&gt;</div>');
+    expect(body).not.toContain('<b>');
+    expect(body).toContain('&zwnj;&nbsp;');
+    // Preview text is for the inbox list; the plain-text part does not repeat it.
+    expect(text).not.toContain('Zones');
+  });
+
+  it('emits no preheader block when there is none', () => {
+    for (const preheader of [undefined, '', '   ']) {
+      expect(renderIssue({ ...issue, preheader }, { postalAddress: 'x' }).html, String(preheader)).not.toContain('display:none');
+    }
+  });
+
+  it('renders a test send with an inert unsubscribe link and a note saying why', () => {
+    const { html, text } = renderIssue(issue, { postalAddress: 'x', testSend: true });
+    expect(html).not.toContain(UNSUBSCRIBE_PLACEHOLDER);
+    expect(text).not.toContain(UNSUBSCRIBE_PLACEHOLDER);
+    expect(html).toContain('href="#"');
+    expect(html).toContain('unsubscribe link is inactive');
+    expect(text).toContain('Unsubscribe: #');
+    expect(renderIssue(issue, { postalAddress: 'x' }).html).not.toContain('unsubscribe link is inactive');
+  });
+});
+
+describe('draftIntro and suggestSubjects', () => {
+  const sections = [{ id: 'articles', title: 'New', items: [{ title: 'Zones', url: 'https://hybridcloudworks.com/z', summary: 'What changed' }] }];
+
+  it('drafts the intro from the sections with the intro instruction, the same call the builder makes', async () => {
+    const drafter = { generateDraft: vi.fn(async () => ({ title: '## Zones', postContent: '**We** wrote.' })) };
+    expect(await draftIntro({ drafter, sections, subject: 'Fallback' })).toEqual({ subject: 'Zones', intro: 'We wrote.' });
+    expect(drafter.generateDraft).toHaveBeenCalledWith(
+      expect.objectContaining({ customInstructionPrompt: INTRO_INSTRUCTION, markdown: '## New\n- Zones — What changed', scrapedTitle: 'Fallback' })
+    );
+    const untitled = { generateDraft: vi.fn(async () => ({ postContent: 'x' })) };
+    expect((await draftIntro({ drafter: untitled, sections, subject: 'Fallback' })).subject).toBe('Fallback');
+  });
+
+  it('suggests subjects through the drafter, and throws rather than return too few', async () => {
+    const drafter = { generateDraft: vi.fn(async () => ({ title: 'One', keyTopics: ['Two', 'Three'] })) };
+    expect(await suggestSubjects({ drafter, sections, subject: 's' })).toEqual(['One', 'Two', 'Three']);
+    expect(drafter.generateDraft.mock.calls[0][0].customInstructionPrompt).toBe(SUBJECT_INSTRUCTION);
+    const few = { generateDraft: vi.fn(async () => ({ title: 'One', keyTopics: 'not a list' })) };
+    await expect(suggestSubjects({ drafter: few, sections, subject: 's' })).rejects.toThrow(/at least 3/);
   });
 });

@@ -2,7 +2,7 @@
  * The timer catalogue and its validation allowlist must agree (T-751).
  *
  * The nineteen timer flag suffixes are written twice by hand: once in
- * `local.timer_catalogue` (infra/main.tf), which decides which
+ * `local.timer_catalogue` (infra/functionapp.tf), which decides which
  * FEATURE_FLAG_* settings the Function App receives, and once in the
  * `enabled_timers` validation list (infra/variables.tf), which decides which
  * names an operator is allowed to pass.
@@ -33,7 +33,7 @@ import { fileURLToPath } from 'node:url';
 
 const INFRA = join(fileURLToPath(new URL('../../..', import.meta.url)), 'infra');
 
-/** Flag suffixes declared in `local.timer_catalogue` in main.tf. */
+/** Flag suffixes declared in `local.timer_catalogue` in functionapp.tf. */
 function catalogueSuffixes() {
   const source = terraformSource(INFRA);
   const block = /timer_catalogue\s*=\s*\{([\s\S]*?)\n  \}/.exec(source);
