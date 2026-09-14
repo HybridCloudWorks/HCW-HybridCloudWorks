@@ -138,7 +138,7 @@ jobs:
         # before checkout, so that directory does not exist yet.
         working-directory: .
         run: |
-          echo "::error::Refusing to deploy from ${{ github.ref }}. Production deploys run from main only."
+          echo "::error::Refusing to deploy from ${GITHUB_REF}. Production deploys run from main only."
           exit 1
 
       - name: Checkout
@@ -148,8 +148,11 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
+          # No npm cache here (#563). A production deploy must build from a clean
+          # npm install, not restore a cache another workflow run could have
+          # written: a poisoned cache would ship straight to production.
+          # setup-node v5+ caches automatically unless told not to.
+          package-manager-cache: false
 
       - name: Install dependencies
         run: npm ci
@@ -166,10 +169,15 @@ jobs:
       # having to reconstruct it from the inputs afterwards.
       - name: Note the break-glass override
         if: inputs.entra_client_id_override != ''
+        # Through env, not ${{ }} in the script (#561): a workflow input is
+        # caller-supplied text, and expanding it into `run` would execute it.
+        env:
+          OVERRIDE_CLIENT_ID: ${{ inputs.entra_client_id_override }}
+          VARIABLE_CLIENT_ID: ${{ vars.VITE_ENTRA_CLIENT_ID }}
         run: |
           echo "::warning title=Break-glass deploy::Building with an Entra client id from the workflow input, not the repository variable."
-          echo "  building with : ${{ inputs.entra_client_id_override }}"
-          echo "  variable holds: ${{ vars.VITE_ENTRA_CLIENT_ID }}"
+          echo "  building with : ${OVERRIDE_CLIENT_ID}"
+          echo "  variable holds: ${VARIABLE_CLIENT_ID}"
           echo ""
           echo "This does NOT persist. The next deploy reads the variable again."
           echo "To make it permanent, set the variable to the same value."
