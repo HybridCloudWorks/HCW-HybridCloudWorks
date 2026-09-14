@@ -198,7 +198,7 @@ describe('the group picker', () => {
 
   it('asks for a group change rather than keeping it to itself, so it deep-links', async () => {
     render(<Harness group="communication" />);
-    fireEvent.click(await screen.findByRole('tab', { name: /Education/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Education/ }));
     expect(onGroupChange).toHaveBeenCalledWith('education');
   });
 

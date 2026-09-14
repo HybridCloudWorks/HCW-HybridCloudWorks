@@ -130,6 +130,13 @@ describe('the header and tabs', () => {
     expect(setSearchParams).not.toHaveBeenCalled();
   });
 
+  it('keeps the Services group in the URL when leaving Services for another tab', () => {
+    searchParams = 'tab=services&group=gen-ai';
+    render(<IntegrationsPage />);
+    fireEvent.click(hubTabs().getByRole('tab', { name: 'Keys' }));
+    expect(setSearchParams).toHaveBeenCalledWith({ tab: 'keys', group: 'gen-ai' });
+  });
+
   it('carries the Services group back when returning from another tab', () => {
     searchParams = 'tab=keys&group=gen-ai';
     render(<IntegrationsPage />);

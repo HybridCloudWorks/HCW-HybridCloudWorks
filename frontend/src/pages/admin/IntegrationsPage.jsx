@@ -48,12 +48,12 @@ export default function IntegrationsPage() {
   const activeTab = resolveTab(searchParams.get('tab'));
   const tests = useServiceTests();
 
-  // The chosen Services group survives a click on the active tab and a trip
-  // to another tab and back.
+  // The chosen Services group rides along in the URL on every tab, so it
+  // survives a click on the active tab and a trip to another tab and back.
   const setTab = (id) => {
     if (id === activeTab) return;
     const group = searchParams.get('group');
-    setSearchParams(id === 'services' && group ? { tab: id, group } : { tab: id });
+    setSearchParams(group ? { tab: id, group } : { tab: id });
   };
   const openGroup = (group) => setSearchParams({ tab: 'services', group });
   const tabRefs = React.useRef([]);

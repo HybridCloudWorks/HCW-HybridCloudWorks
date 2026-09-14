@@ -20,15 +20,18 @@ import SessionizeSetting, { useSpeakerId } from './SessionizeSetting';
 import useSecretStatus from './useSecretStatus';
 import { TabError, TabLoading } from './TabNotice';
 
+/**
+ * A filter, not a second tab widget: a group of toggle buttons (aria-pressed).
+ * The hub's tab bar is the page's one tabs pattern.
+ */
 function GroupPicker({ groups, active, onChange }) {
   return (
-    <div role="tablist" aria-label="Service groups" className="flex flex-wrap gap-2">
+    <div role="group" aria-label="Service groups" className="flex flex-wrap gap-2">
       {groups.map((group) => (
         <button
           key={group.id}
           type="button"
-          role="tab"
-          aria-selected={active === group.id}
+          aria-pressed={active === group.id}
           onClick={() => onChange(group.id)}
           className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
             active === group.id
