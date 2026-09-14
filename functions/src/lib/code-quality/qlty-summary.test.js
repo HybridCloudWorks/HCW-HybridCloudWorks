@@ -8,6 +8,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   createCodeQualityHandlers,
   summarizeIssues,
+  minimalIssue,
   pickMetrics,
   CODE_QUALITY_CACHE_MS,
   MAX_PAGES,
@@ -89,7 +90,8 @@ describe('summarizeIssues', () => {
       issue({ tool: 'qlty', ruleKey: 'similar-code', category: 'duplication', level: 'medium', location: { path: 'a.js' } }),
     ]);
     expect(summary.total).toBe(3);
-    expect(summary.byLevel).toMatchObject({ high: 1, medium: 2, low: 0, note: 0, fmt: 0 });
+    expect(summary.byLevel).toEqual({ high: 1, medium: 2, low: 0, note: 0, fmt: 0 });
+    expect(summary.unclassified).toBe(0);
     expect(summary.byCategory).toEqual({ vulnerability: 2, duplication: 1 });
     expect(summary.security).toEqual({ total: 2, byLevel: { high: 1, medium: 1, low: 0, note: 0, fmt: 0 } });
     expect(summary.topRules[0]).toEqual({
@@ -100,6 +102,25 @@ describe('summarizeIssues', () => {
       count: 2,
     });
     expect(summary.topFiles[0]).toEqual({ path: '.github/workflows/ci.yml', level: 'high', count: 2 });
+  });
+
+  it('keeps the level objects to the five known keys when Qlty sends another level', () => {
+    const summary = summarizeIssues([issue({ level: 'critical' }), issue({ level: 'high' })]);
+    expect(summary.total).toBe(2);
+    expect(summary.unclassified).toBe(1);
+    expect(summary.byLevel).toEqual({ high: 1, medium: 0, low: 0, note: 0, fmt: 0 });
+    expect(summary.security.byLevel).toEqual({ high: 1, medium: 0, low: 0, note: 0, fmt: 0 });
+    expect(summary.security.total).toBe(2);
+  });
+
+  it('drops message, fingerprint and lines from each issue as it arrives', () => {
+    expect(minimalIssue(issue())).toEqual({
+      tool: 'zizmor',
+      ruleKey: 'zizmor/artipacked',
+      category: 'vulnerability',
+      level: 'medium',
+      location: { path: '.github/workflows/ci.yml' },
+    });
   });
 
   it('carries no message, fingerprint or line text', () => {

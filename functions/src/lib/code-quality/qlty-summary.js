@@ -63,6 +63,13 @@ const increment = (counts, key) => {
   counts[key] = (counts[key] ?? 0) + 1;
 };
 
+/** Count a level into a fixed `{high, medium, low, note, fmt}` object. False for a level outside LEVELS. */
+const countLevel = (byLevel, level) => {
+  if (!LEVELS.includes(level)) return false;
+  byLevel[level] += 1;
+  return true;
+};
+
 /** Count `key` in `map`, keeping the most severe level seen. `seed` builds a first entry's fields. */
 function tally(map, key, level, seed) {
   if (!map.has(key)) map.set(key, { key, ...seed(), level, count: 0 });
@@ -77,7 +84,18 @@ const topOf = (map, limit) =>
     .slice(0, limit)
     .map(({ key, ...rest }) => rest);
 
-/** The only fields ever read from a Qlty issue, so nothing else can leak into the answer. */
+/**
+ * The only fields kept from a Qlty issue, applied as each page arrives, so a
+ * message, snippet or fingerprint is never even held in memory.
+ */
+export const minimalIssue = (issue) => ({
+  tool: issue?.tool,
+  ruleKey: issue?.ruleKey,
+  category: issue?.category,
+  level: issue?.level,
+  location: { path: issue?.location?.path },
+});
+
 const readIssue = (issue) => ({
   tool: text(issue?.tool, 'unknown'),
   rule: text(issue?.ruleKey, 'unknown'),
@@ -87,7 +105,9 @@ const readIssue = (issue) => ({
 });
 
 /**
- * Condense Qlty issue rows into totals.
+ * Condense Qlty issue rows into totals. `byLevel` and `security.byLevel`
+ * always have exactly the five LEVELS keys; an issue whose level Qlty reports
+ * outside them is counted in `total` and `unclassified` instead.
  *
  * @param {ReadonlyArray<object>} issues
  */
@@ -95,15 +115,16 @@ export function summarizeIssues(issues) {
   const byLevel = zeroByLevel();
   const byCategory = {};
   const security = { total: 0, byLevel: zeroByLevel() };
+  let unclassified = 0;
   const rules = new Map();
   const files = new Map();
 
   for (const { tool, rule, category, level, path } of issues.map(readIssue)) {
-    increment(byLevel, level);
+    if (!countLevel(byLevel, level)) unclassified += 1;
     increment(byCategory, category);
     if (SECURITY_CATEGORIES.includes(category)) {
       security.total += 1;
-      increment(security.byLevel, level);
+      countLevel(security.byLevel, level);
     }
     tally(rules, `${tool}:${rule}`, level, () => ({ tool, rule, category }));
     if (path) tally(files, path, level, () => ({ path }));
@@ -112,6 +133,7 @@ export function summarizeIssues(issues) {
   return {
     total: issues.length,
     byLevel,
+    unclassified,
     byCategory,
     security,
     topRules: topOf(rules, TOP_LIMIT),
@@ -180,7 +202,7 @@ async function listOpenIssues(get, base) {
     const listed = await get(`${base}/issues?${query}`);
     if (!listed.ok) return { refusal: listed };
     const rows = Array.isArray(listed.data?.data) ? listed.data.data : [];
-    issues.push(...rows);
+    issues.push(...rows.map(minimalIssue));
     if (listed.data?.meta?.hasMore !== true || rows.length === 0) return { issues, truncated: false };
   }
   return { issues, truncated: true };
