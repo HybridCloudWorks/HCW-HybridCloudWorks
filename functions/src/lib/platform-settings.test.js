@@ -638,7 +638,7 @@ describe('newsletter settings', () => {
     it('trims the heading and blurb and folds line breaks and runs of spaces into one space', () => {
       const value = normalizeNewsletterSettings({
         signupHeading: '  Get the\r\nweekly   brief  ',
-        signupBlurb: '\tOne email.\n\nEvery Tuesday. ',
+        signupBlurb: '\tOne email.\n\nEvery Tuesday. \u0007',
       });
       expect(value.signupHeading).toBe('Get the weekly brief');
       expect(value.signupBlurb).toBe('One email. Every Tuesday.');
