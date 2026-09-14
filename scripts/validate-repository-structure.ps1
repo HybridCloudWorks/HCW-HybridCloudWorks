@@ -112,7 +112,7 @@ $casingSensitiveNames = @('TODO.md', 'CHANGELOG.md')
 # developer who has run `terraform init`. Same for build and coverage output,
 # and for .qlty, whose gitignored sources/ checkout carries plugin READMEs
 # after any local `qlty check`.
-$unscannedDirectories = @('.git', 'node_modules', '.terraform', 'dist', 'coverage', '.reports', '.qlty') + $harnessDirectories
+$unscannedDirectories = @('.git', 'node_modules', '.terraform', 'dist', 'coverage', '.reports', '.qlty', '.ruff_cache') + $harnessDirectories
 $unscannedPattern = '(^|/)(' + (($unscannedDirectories | ForEach-Object { [regex]::Escape($_) }) -join '|') + ')/'
 
 $actualDirectories = Get-ChildItem -LiteralPath $repositoryRoot -Directory -Force |
