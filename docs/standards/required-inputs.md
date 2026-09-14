@@ -167,8 +167,9 @@ else a workflow needs is either a non-sensitive variable or reached by OIDC.
 | --- | --- | --- |
 | ~~`AZURE_STATIC_WEB_APPS_API_TOKEN`~~ | **RETIRED 2026-08-30, DELETED 2026-08-31 (T-727)** | Nothing. `deploy-azure-frontend.yml` mints the deployment token from ARM under federated identity at deploy time, so no stored value is needed and there is nothing to rotate. The secret was removed from repository settings by the owner on 2026-08-31, after the role assignment applied |
 
-**No stored, non-expiring credential remains in this repository's secrets.**
-`GITHUB_TOKEN` is contractual and injected per run; it is never stored.
+**No stored Azure credential is in this repository's secrets.** The Qlty
+coverage upload (#568) uses GitHub OIDC and stores no token. `GITHUB_TOKEN` is
+contractual and injected per run; it is never stored.
 
 The **Agents** store (Settings → Secrets and variables → Agents) is separate
 from Actions secrets. Copilot's setup job and agent environment read it; a
