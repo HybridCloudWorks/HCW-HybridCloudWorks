@@ -38,7 +38,13 @@ $harnessDirectories = @('.agents', '.claude', 'hooks', 'tooling', '.agentic')
 # on 2026-09-06 and its feature is now switched off in repository settings.
 # `site` is the build output and is gitignored, but this
 # check walks the filesystem, so it is allowed here for local runs.
-$allowedDirectories = @('.azure', '.github', '.vscode', 'docs', 'edge', 'frontend', 'functions', 'infra', 'node_modules', 'scripts', 'site', 'vps-agent') + $harnessDirectories
+#
+# .qlty holds qlty.toml, the Qlty CLI and Qlty Cloud configuration (#568). Qlty
+# reads it only from .qlty/ at the repository root, so it lives there by tool
+# convention, like mkdocs.yml below. A local `qlty check` also runs ruff, which
+# leaves .ruff_cache at the root; that cache ignores itself (it writes its own
+# .gitignore) and never reaches CI, but this check walks the filesystem.
+$allowedDirectories = @('.azure', '.github', '.qlty', '.ruff_cache', '.vscode', 'docs', 'edge', 'frontend', 'functions', 'infra', 'node_modules', 'scripts', 'site', 'vps-agent') + $harnessDirectories
 
 # The engineering plan documents are companions to the approved architecture and
 # are referenced from README.md and from each other; they stay at the root.
@@ -108,8 +114,10 @@ $casingSensitiveNames = @('TODO.md', 'CHANGELOG.md')
 # .terraform holds vendored provider plugins, several of which ship their own
 # CHANGELOG.md. It is gitignored, so CI never sees it — but this scan walks the
 # filesystem, not the git index, so without this entry the gate fails for any
-# developer who has run `terraform init`. Same for build and coverage output.
-$unscannedDirectories = @('.git', 'node_modules', '.terraform', 'dist', 'coverage', '.reports') + $harnessDirectories
+# developer who has run `terraform init`. Same for build and coverage output,
+# and for .qlty, whose gitignored sources/ checkout carries plugin READMEs
+# after any local `qlty check`.
+$unscannedDirectories = @('.git', 'node_modules', '.terraform', 'dist', 'coverage', '.reports', '.qlty', '.ruff_cache') + $harnessDirectories
 $unscannedPattern = '(^|/)(' + (($unscannedDirectories | ForEach-Object { [regex]::Escape($_) }) -join '|') + ')/'
 
 $actualDirectories = Get-ChildItem -LiteralPath $repositoryRoot -Directory -Force |

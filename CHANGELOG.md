@@ -19,6 +19,73 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Integrations Hub: tabs by duty instead of one long page (#570).**
+  `/admin/integrations` is now four tabs at the Newsletter Hub standard, split
+  into `frontend/src/components/admin/integrations/`. **Overview** is one grid
+  of every service, broken and not-configured first, with **Test all**: each
+  service's existing test, run one at a time, with YouTube left out because its
+  test spends daily quota (its tile says so), and the time each ran this
+  session. **Services** shows one group at a time (`?group=`); each card keeps
+  its description, docs link and test, and lists the keys it uses by name and
+  light only. **Keys** holds every catalogue credential under its group, the
+  services that use each one, the unchanged paste and generate actions, and
+  "Other credentials"; one write runs at a time, and no value is fetched or
+  rendered. **Identity** is the Entra configuration panel as it was (#519).
+  Tabs deep-link with `?tab=`, moved or unknown ids land where their content
+  went (Overview by default), and `/admin/connections` and `/admin/api-keys`
+  now redirect to Overview and Keys. Each tab reads its own data with its own
+  loading and error states, reloads are generation-guarded, and a failed
+  refresh clears what it replaced. No API, probe or seeded value changed.
+  There is no Activity tab: key writes keep only the latest writer per key and
+  no admin route reads `admin_audit_logs`, so that history needs a backend
+  first (noted on #570).
+
+- **Platform Settings Hub: one tab per concern, plus a change history (#571).**
+  `/admin/platform` is now four tabs at the Newsletter Hub's level of
+  separation, deep-linked with `?tab=`: **Content defaults** (default covers,
+  and a link card to Newsletter Hub → Settings rather than a second form over
+  the newsletter document), **Social automation** (autoposting, the only tab
+  that asks Publer for accounts), **Audio** (podcast feeds and the Listen &
+  Learn voice) and **Change history**. Each tab mounts only while open and
+  loads its own settings with its own loading, error and Retry states, so a
+  failure in one never blanks another; an unknown `?tab=` lands on Content
+  defaults. Every save sends the same body as before. `useSetting` gains the
+  #555 race guards: a generation number on loads, an in-flight ref on saves
+  (a double submit sends one PUT), and a failed load clears the working copy
+  and hides the form. Change history reads the new
+  `GET /api/cms/platform-settings/history?setting=&limit=&after=` (editor):
+  `platform_setting_updated` rows from `admin_audit_logs`, newest first, TOP
+  1..100 (default 50), with the setting validated against the spec registry
+  and every refusal a 400 before Cosmos. Each entry is
+  `{ id, at, actor, setting, summary }`, where the actor is the display name or
+  else the Entra object id and never the email the row also holds, and paging
+  is by timestamp through `nextAfter`. New audit rows record `userName` from
+  the token's `name` claim so the table can say who. The tab shows time, who,
+  setting and `key: value` summary chips, with a setting filter, Refresh and
+  Load more.
+
+- **Qlty set up in the repository, with test coverage uploaded from CI
+  (#568).** `.qlty/qlty.toml` is committed, so a local `qlty check --all` and
+  Qlty Cloud run the same plugins: the linters that work here (actionlint,
+  editorconfig-checker, eslint for `frontend/` and `scripts/`, prettier, ruff,
+  radarlint-python, ripgrep, tflint) and the security scanners (bandit,
+  checkov, gitleaks, osv-scanner, radarlint-iac, trivy, trufflehog, zizmor).
+  ESLint stopped failing with `Cannot find package 'globals'`: the init-written
+  `package_filters` dropped `globals` (and `react`, which the frontend config
+  reads), so each package's own ESLint config now installs complete.
+  Generated and vendored paths are excluded (`frontend/data/**`, public JSON
+  and fonts, `dist`, `coverage`, `site`, `.agentic`). No security finding is
+  silenced in `qlty.toml`; triage uses each scanner's own ignore file, recorded
+  in `docs/security/scanner-triage.md` (#567). `frontend/` and `functions/`
+  gain `npm run test:coverage` (V8 coverage, `coverage/lcov.info` with
+  repository-relative paths; `functions/` adds `@vitest/coverage-v8` 4.1.11);
+  `npm test` and the required CI jobs are unchanged. The new, non-required
+  `coverage.yml` workflow runs both on pull requests and pushes to `main` and
+  uploads them in one `qltysh/qlty-action/coverage` step pinned to v2.3.0's
+  commit. The upload authenticates with GitHub OIDC, so no Qlty token is
+  stored; pull requests from forks, which cannot mint one, skip the upload with
+  a notice.
+
 - **Use a Resend template as the newsletter's design (#557).** Newsletter
   settings on the Mailing List Settings tab gain a Template block: keep the
   built-in design (the default, and what existing settings read as) or pick one

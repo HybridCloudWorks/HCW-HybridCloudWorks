@@ -8,7 +8,12 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   HERO_PROVIDERS,
+  HISTORY_DEFAULT_LIMIT,
+  HISTORY_MAX_LIMIT,
   MAX_SCHEDULE_DELAY_MINUTES,
+  PLATFORM_SETTING_AUDIT_ACTION,
+  parseHistoryQuery,
+  presentHistoryEntry,
   PLATFORM_SETTINGS,
   PLATFORM_SETTING_NAMES,
   PlatformSettingValidationError,
@@ -966,6 +971,7 @@ describe('handlers', () => {
       id: 'fixed-uuid',
       action: 'platform_setting_updated',
       userId: 'u1',
+      userName: null,
       userEmail: 'owner@example.com',
       timestamp: '2026-09-07T12:00:00.000Z',
       details: { setting: 'social-autopost', enabled: true, accounts: 1, scheduleDelayMinutes: 45 },
@@ -1080,5 +1086,254 @@ describe('handlers', () => {
     expect(log.warn).not.toHaveBeenCalled();
     expect(log.error).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(log.error.mock.calls[0])).not.toContain('private-feed');
+  });
+});
+
+describe('change history', () => {
+  const historyRequest = (query = {}, params = {}) => ({
+    params,
+    query: new URLSearchParams(query),
+    json: async () => null,
+  });
+
+  const auditRow = (over = {}) => ({
+    id: 'a1',
+    action: 'platform_setting_updated',
+    userId: 'oid-1',
+    userName: 'Saul Patino',
+    userEmail: 'owner@example.com',
+    timestamp: '2026-09-14T10:00:00.000Z',
+    details: { setting: 'social-autopost', enabled: true, accounts: 2, scheduleDelayMinutes: 60 },
+    _rid: 'rid',
+    _ts: 1,
+    ...over,
+  });
+
+  const historyStore = (rows = [auditRow()]) => makeStore({ queryDocs: vi.fn(async () => rows) });
+
+  it('no setting is named history, so the literal route and the template cannot mean two things', () => {
+    expect(resolveSetting('history')).toBeNull();
+    expect(PLATFORM_SETTING_NAMES).not.toContain('history');
+  });
+
+  it('passes a guard denial through with no query, from either route', async () => {
+    const store = historyStore();
+    const h = createPlatformSettingsHandlers({ guard: denyGuard, store, ...fixed });
+    expect((await h.getHistory(historyRequest(), context)).status).toBe(403);
+    expect(
+      (await h.getSetting(historyRequest({}, { setting: 'history' }), context)).status
+    ).toBe(403);
+    expect(store.queryDocs).not.toHaveBeenCalled();
+  });
+
+  it('requires the editor role', async () => {
+    const guard = { requireRole: vi.fn(async () => ({ user: { oid: 'u1' }, error: null })) };
+    const h = createPlatformSettingsHandlers({ guard, store: historyStore(), ...fixed });
+    await h.getHistory(historyRequest(), context);
+    expect(guard.requireRole).toHaveBeenCalledWith(expect.anything(), 'editor');
+  });
+
+  it('answers 400 before any query for a setting, limit or cursor it cannot use', async () => {
+    const store = historyStore();
+    const h = createPlatformSettingsHandlers({ guard: allowGuard, store, ...fixed });
+    const bad = [
+      { setting: 'forge-prompts' },
+      { setting: 'constructor' },
+      { setting: '__proto__' },
+      { limit: '0' },
+      { limit: '101' },
+      { limit: '10.5' },
+      { limit: '-1' },
+      { limit: 'ten' },
+      { limit: '1e2' },
+      { after: 'yesterday' },
+      { after: '2026-09-14' },
+      { after: "2026-09-14T10:00:00.000Z' OR 1=1" },
+      { after: '2026-13-45T99:99:99.000Z' },
+      // Not the stored .sssZ shape: string comparison would page wrongly.
+      { after: '2026-09-14T10:00:00Z' },
+      { after: '2026-09-14T10:00:00.5Z' },
+      { after: '2026-09-14T10:00:00.123456Z' },
+    ];
+    for (const query of bad) {
+      const res = await h.getHistory(historyRequest(query), context);
+      expect(res.status, JSON.stringify(query)).toBe(400);
+      expect(parse(res).error).toBeTruthy();
+    }
+    expect(store.queryDocs).not.toHaveBeenCalled();
+  });
+
+  it('parses the defaults and the bounds', () => {
+    expect(parseHistoryQuery(new URLSearchParams())).toEqual({
+      setting: null,
+      limit: HISTORY_DEFAULT_LIMIT,
+      after: null,
+    });
+    expect(
+      parseHistoryQuery(
+        new URLSearchParams({
+          setting: 'podcast-feeds',
+          limit: String(HISTORY_MAX_LIMIT),
+          after: '2026-09-14T10:00:00.000Z',
+        })
+      )
+    ).toEqual({ setting: 'podcast-feeds', limit: 100, after: '2026-09-14T10:00:00.000Z' });
+    expect(parseHistoryQuery(new URLSearchParams({ limit: '1' })).limit).toBe(1);
+  });
+
+  it('queries only the audit action, newest first, with every value a parameter', async () => {
+    const store = historyStore([]);
+    const h = createPlatformSettingsHandlers({ guard: allowGuard, store, ...fixed });
+    await h.getHistory(historyRequest(), context);
+    const [container, query, parameters] = store.queryDocs.mock.calls[0];
+    expect(container).toBe('admin_audit_logs');
+    expect(query).toBe(
+      'SELECT TOP @limit c.id, c.timestamp, c.userId, c.userName, c.details FROM c WHERE c.action = @action ORDER BY c.timestamp DESC'
+    );
+    expect(parameters).toEqual([
+      { name: '@limit', value: 50 },
+      { name: '@action', value: PLATFORM_SETTING_AUDIT_ACTION },
+    ]);
+  });
+
+  it('filters by exact setting and pages strictly older than the cursor', async () => {
+    const store = historyStore([]);
+    const h = createPlatformSettingsHandlers({ guard: allowGuard, store, ...fixed });
+    await h.getHistory(
+      historyRequest({ setting: 'podcast-feeds', limit: '10', after: '2026-09-14T10:00:00.000Z' }),
+      context
+    );
+    const [, query, parameters] = store.queryDocs.mock.calls[0];
+    expect(query).toContain('c.details.setting = @setting');
+    expect(query).toContain('c.timestamp < @after');
+    expect(query).not.toContain('podcast-feeds');
+    expect(query).not.toContain('2026-09-14');
+    expect(parameters).toEqual([
+      { name: '@limit', value: 10 },
+      { name: '@action', value: PLATFORM_SETTING_AUDIT_ACTION },
+      { name: '@setting', value: 'podcast-feeds' },
+      { name: '@after', value: '2026-09-14T10:00:00.000Z' },
+    ]);
+  });
+
+  it('projects each row to id, at, actor, setting and summary, and nothing more', async () => {
+    const h = createPlatformSettingsHandlers({ guard: allowGuard, store: historyStore(), ...fixed });
+    const res = await h.getHistory(historyRequest(), context);
+    expect(res.status).toBe(200);
+    expect(parse(res)).toEqual({
+      success: true,
+      entries: [
+        {
+          id: 'a1',
+          at: '2026-09-14T10:00:00.000Z',
+          actor: 'Saul Patino',
+          setting: 'social-autopost',
+          summary: { enabled: true, accounts: 2, scheduleDelayMinutes: 60 },
+        },
+      ],
+      nextAfter: null,
+    });
+    expect(res.body).not.toContain('owner@example.com');
+    expect(res.body).not.toContain('_rid');
+  });
+
+  it('shows the object id for a row with no display name, and never an email-shaped actor', () => {
+    expect(presentHistoryEntry(auditRow({ userName: undefined })).actor).toBe('oid-1');
+    expect(presentHistoryEntry(auditRow({ userName: 'owner@example.com' })).actor).toBe('oid-1');
+    expect(
+      presentHistoryEntry(auditRow({ userName: null, userId: 'someone@example.com' })).actor
+    ).toBeNull();
+    expect(JSON.stringify(presentHistoryEntry(auditRow({ userName: 'owner@example.com' })))).not.toContain(
+      '@'
+    );
+  });
+
+  it('keeps scalar and list summaries and drops anything nested', () => {
+    const entry = presentHistoryEntry(
+      auditRow({
+        details: {
+          setting: 'newsletter-settings',
+          sections: ['articles', 'podcasts'],
+          templateId: null,
+          nested: { postalAddress: '1 Main St' },
+          mixed: ['a', { b: 1 }],
+        },
+      })
+    );
+    expect(entry.summary).toEqual({ sections: ['articles', 'podcasts'], templateId: null });
+    expect(presentHistoryEntry({ id: 'x' })).toEqual({
+      id: 'x',
+      at: null,
+      actor: null,
+      setting: null,
+      summary: {},
+    });
+  });
+
+  it('returns nextAfter as the last row’s time when a full page came back', async () => {
+    const rows = [
+      auditRow({ id: 'a1', timestamp: '2026-09-14T10:00:00.000Z' }),
+      auditRow({ id: 'a2', timestamp: '2026-09-13T10:00:00.000Z' }),
+    ];
+    const h = createPlatformSettingsHandlers({ guard: allowGuard, store: historyStore(rows), ...fixed });
+    const full = parse(await h.getHistory(historyRequest({ limit: '2' }), context));
+    expect(full.nextAfter).toBe('2026-09-13T10:00:00.000Z');
+    const short = parse(await h.getHistory(historyRequest({ limit: '3' }), context));
+    expect(short.nextAfter).toBeNull();
+  });
+
+  it('serves history from the {setting} template too, the same as the literal route', async () => {
+    const store = historyStore();
+    const h = createPlatformSettingsHandlers({ guard: allowGuard, store, ...fixed });
+    const res = await h.getSetting(
+      historyRequest({ setting: 'podcast-feeds' }, { setting: 'history' }),
+      context
+    );
+    expect(res.status).toBe(200);
+    expect(parse(res).entries).toHaveLength(1);
+    expect(store.readDoc).not.toHaveBeenCalled();
+  });
+
+  it('a failed query is a 500 whose log line carries no query value', async () => {
+    const log = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const store = makeStore({
+      queryDocs: vi.fn(async () => {
+        throw new Error('cosmos down');
+      }),
+    });
+    const h = createPlatformSettingsHandlers({ guard: allowGuard, store, ...fixed });
+    const res = await h.getHistory(
+      historyRequest({ setting: 'podcast-feeds', after: '2026-09-14T10:00:00.000Z' }),
+      log
+    );
+    expect(res.status).toBe(500);
+    expect(log.error).toHaveBeenCalledTimes(1);
+    const line = JSON.stringify(log.error.mock.calls[0]);
+    expect(line).not.toContain('podcast-feeds');
+    expect(line).not.toContain('2026-09-14');
+  });
+
+  it('records the display name on new audit rows, and the history view reads it back', async () => {
+    const store = makeStore();
+    const guard = {
+      requireRole: vi.fn(async () => ({
+        user: { oid: 'u1', name: 'Saul Patino', email: 'owner@example.com' },
+        error: null,
+      })),
+    };
+    const h = createPlatformSettingsHandlers({ guard, store, ...fixed });
+    await h.putSetting(
+      makeRequest({ params: { setting: 'podcast-feeds' }, body: { feeds: [] } }),
+      context
+    );
+    const audit = store.upsertDoc.mock.calls.find(([c]) => c === 'admin_audit_logs')[1];
+    expect(audit.userName).toBe('Saul Patino');
+    expect(presentHistoryEntry(audit)).toEqual({
+      id: 'fixed-uuid',
+      at: '2026-09-07T12:00:00.000Z',
+      actor: 'Saul Patino',
+      setting: 'podcast-feeds',
+      summary: { feeds: 0, mainFeed: false },
+    });
   });
 });
