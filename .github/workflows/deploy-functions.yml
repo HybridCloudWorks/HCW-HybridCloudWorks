@@ -51,7 +51,12 @@ jobs:
         # configure.
         if: github.ref != 'refs/heads/main'
         run: |
-          echo "::error::Refusing to deploy from ${GITHUB_REF}. Production deploys run from main only."
+          # Workflow-command data must percent-encode %, CR and LF, and a branch
+          # name may legally contain %; unescaped, it could misparse the annotation.
+          ref="${GITHUB_REF//%/%25}"
+          ref="${ref//$'\r'/%0D}"
+          ref="${ref//$'\n'/%0A}"
+          echo "::error::Refusing to deploy from ${ref}. Production deploys run from main only."
           exit 1
 
       - name: Checkout

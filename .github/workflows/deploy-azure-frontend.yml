@@ -138,7 +138,12 @@ jobs:
         # before checkout, so that directory does not exist yet.
         working-directory: .
         run: |
-          echo "::error::Refusing to deploy from ${GITHUB_REF}. Production deploys run from main only."
+          # Workflow-command data must percent-encode %, CR and LF, and a branch
+          # name may legally contain %; unescaped, it could misparse the annotation.
+          ref="${GITHUB_REF//%/%25}"
+          ref="${ref//$'\r'/%0D}"
+          ref="${ref//$'\n'/%0A}"
+          echo "::error::Refusing to deploy from ${ref}. Production deploys run from main only."
           exit 1
 
       - name: Checkout
@@ -175,6 +180,13 @@ jobs:
           OVERRIDE_CLIENT_ID: ${{ inputs.entra_client_id_override }}
           VARIABLE_CLIENT_ID: ${{ vars.VITE_ENTRA_CLIENT_ID }}
         run: |
+          # An Entra client id is a GUID. Anything else, including text with a
+          # newline that could start a workflow command in the log, is refused
+          # before it is printed or built into the site.
+          if [[ ! "${OVERRIDE_CLIENT_ID}" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]]; then
+            echo "::error::entra_client_id_override must be a GUID such as 00000000-0000-0000-0000-000000000000."
+            exit 1
+          fi
           echo "::warning title=Break-glass deploy::Building with an Entra client id from the workflow input, not the repository variable."
           echo "  building with : ${OVERRIDE_CLIENT_ID}"
           echo "  variable holds: ${VARIABLE_CLIENT_ID}"
