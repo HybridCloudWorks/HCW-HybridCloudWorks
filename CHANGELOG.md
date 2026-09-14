@@ -19,6 +19,26 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Resend domains, recent emails and API logs on the Mailing List Settings tab (#504).**
+  The page half of the Resend domains, logs and emails API (#553), frontend only.
+  Three cards below the connection check, each loading when the tab opens and
+  failing on its own (503 says Resend is not configured, 429 says how long to
+  wait), so none can hold up the newsletter settings. **Sending domains** lists
+  each domain with its status and region; opening one loads its DNS records
+  (type, host, value with a Copy button, priority, TTL, per-record status) with
+  a note to add them at Cloudflare, a Verify button that says the check runs in
+  the background and offers Refresh, and open and click tracking switches that
+  PATCH only the switch that changed, with a warning that open tracking needs
+  the tracking subdomain CNAME and is recommended for broadcasts only. An Add
+  domain form takes a name (checked as a hostname before sending; the server
+  decides) and a region, defaulting to us-east-1, and opens the new domain on
+  its records. There is no delete; a note links to resend.com/domains for that.
+  **Recent emails** shows the server-masked recipient, subject, time and last
+  event, and **API logs** the time, method, endpoint and a status coloured by
+  2xx, 4xx or 5xx, both paging with Load more. Opening a log shows its redacted
+  request and response bodies as pretty-printed text, never as HTML. The only
+  writes are domain add, verify and tracking, all publisher-only on the server;
+  a refusal is shown in the server's words.
 - **An Audience tab and per-issue metrics on the Mailing List page (#504).**
   The page half of the Resend metrics and audience API. A new **Audience** tab,
   between Published and Settings, shows the Newsletter segment's subscribed,

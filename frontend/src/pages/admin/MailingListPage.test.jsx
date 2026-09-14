@@ -158,6 +158,28 @@ describe('The newsletter tab', () => {
     expect(screen.getByRole('button', { name: /test connection/i })).toBeInTheDocument();
   });
 
+  it('adds Resend domains, emails and logs below the settings and connection on Settings', async () => {
+    searchParams = 'tab=settings';
+    postJSON.mockResolvedValue(envelope(true, 200, domains([])));
+    getJSON.mockImplementation(async (route) => {
+      if (route === 'cms/mailing-list/domains')
+        throw Object.assign(new Error('x'), { status: 503 });
+      if (route.startsWith('cms/mailing-list/emails')) return { ok: true, emails: [] };
+      if (route.startsWith('cms/mailing-list/logs')) return { ok: true, logs: [] };
+      return { value: {} };
+    });
+    render(<MailingListPage />);
+    expect(await screen.findByLabelText('Postal address')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /test connection/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Sending domains' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Recent emails' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'API logs' })).toBeInTheDocument();
+    expect(await screen.findByText(/Resend is not configured/)).toBeInTheDocument();
+    expect(await screen.findByText('No emails yet.')).toBeInTheDocument();
+    expect(await screen.findByText('No API calls logged yet.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Postal address')).toBeInTheDocument();
+  });
+
   it('no longer shows settings under the issues', async () => {
     searchParams = 'tab=newsletter';
     postJSON.mockResolvedValue(envelope(true, 200, domains([])));

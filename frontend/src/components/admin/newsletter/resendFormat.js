@@ -44,6 +44,20 @@ export function formatRate(part, base, rate) {
   return `${value.toFixed(value >= 10 || value === 0 ? 0 : 1)}%`;
 }
 
+/** A date and time to the minute in the viewer's time zone, or '' for anything unparseable. */
+export function formatDateTime(iso) {
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date);
+}
+
 /** A calendar date in the viewer's time zone, or '' for anything unparseable. */
 export function formatDate(iso) {
   if (!iso) return '';
