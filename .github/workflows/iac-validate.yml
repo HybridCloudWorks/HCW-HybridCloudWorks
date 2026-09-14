@@ -69,9 +69,11 @@ jobs:
       - name: Detect infra changes
         id: changes
         working-directory: ${{ github.workspace }}
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
+          if [ "${GITHUB_EVENT_NAME}" != "pull_request" ]; then
             echo "infra=true" >> "$GITHUB_OUTPUT"
             echo "non-pull_request event — running all checks"
             exit 0
@@ -81,7 +83,7 @@ jobs:
           # as "no changes" and silently skip required work. A diff that
           # cannot be computed fails toward running everything. (Found by
           # review on #319, which copied this step's original form.)
-          changed="$(git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD)" || {
+          changed="$(git diff --name-only "${BASE_SHA}" HEAD)" || {
             echo "infra=true" >> "$GITHUB_OUTPUT"
             echo "could not compute the diff — running all checks rather than guessing"
             exit 0
@@ -153,16 +155,18 @@ jobs:
 
       - name: Detect infra changes
         id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
+          if [ "${GITHUB_EVENT_NAME}" != "pull_request" ]; then
             echo "infra=true" >> "$GITHUB_OUTPUT"
             echo "non-pull_request event — running the scan"
             exit 0
           fi
           # Capture the diff first — same reasoning as the terraform job's
           # detect step: a failed diff must fail toward running, not skipping.
-          changed="$(git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD)" || {
+          changed="$(git diff --name-only "${BASE_SHA}" HEAD)" || {
             echo "infra=true" >> "$GITHUB_OUTPUT"
             echo "could not compute the diff — running the scan rather than guessing"
             exit 0

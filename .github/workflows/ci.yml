@@ -100,9 +100,12 @@ jobs:
       - name: Detect component changes
         id: changes
         working-directory: ${{ github.workspace }}
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          FILTER: ${{ matrix.filter }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
+          if [ "${GITHUB_EVENT_NAME}" != "pull_request" ]; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
             echo "non-pull_request event — running all checks"
             exit 0
@@ -111,12 +114,12 @@ jobs:
           # condition, so a failed diff (an unfetchable base sha) would read
           # as "no changes" and silently skip required work. A diff that
           # cannot be computed fails toward running everything.
-          changed="$(git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD)" || {
+          changed="$(git diff --name-only "${BASE_SHA}" HEAD)" || {
             echo "relevant=true" >> "$GITHUB_OUTPUT"
             echo "could not compute the diff — running all checks rather than guessing"
             exit 0
           }
-          if grep -qE '${{ matrix.filter }}|^\.github/workflows/ci\.yml$' <<<"$changed"; then
+          if grep -qE "${FILTER}"'|^\.github/workflows/ci\.yml$' <<<"$changed"; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
             echo "component files changed — running all checks"
           else
@@ -144,19 +147,27 @@ jobs:
       # pre-existing warnings do not fail the job.
       - name: Lint
         if: steps.changes.outputs.relevant == 'true' && matrix.lint != ''
-        run: ${{ matrix.lint }}
+        env:
+          COMMAND: ${{ matrix.lint }}
+        run: bash -eo pipefail -c "$COMMAND"
 
       - name: Format check
         if: steps.changes.outputs.relevant == 'true' && matrix.format != ''
-        run: ${{ matrix.format }}
+        env:
+          COMMAND: ${{ matrix.format }}
+        run: bash -eo pipefail -c "$COMMAND"
 
       - name: Build
         if: steps.changes.outputs.relevant == 'true' && matrix.build != ''
-        run: ${{ matrix.build }}
+        env:
+          COMMAND: ${{ matrix.build }}
+        run: bash -eo pipefail -c "$COMMAND"
 
       - name: Test
         if: steps.changes.outputs.relevant == 'true' && matrix.test != ''
-        run: ${{ matrix.test }}
+        env:
+          COMMAND: ${{ matrix.test }}
+        run: bash -eo pipefail -c "$COMMAND"
 
   # hooks/claude_event.py runs on every Claude Code session start and stop, and
   # tooling/workflow.py owns the state the Stop guard reads. Both were shipped
@@ -177,16 +188,18 @@ jobs:
 
       - name: Detect harness changes
         id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
+          if [ "${GITHUB_EVENT_NAME}" != "pull_request" ]; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
             echo "non-pull_request event — running all checks"
             exit 0
           fi
           # Capture the diff first — same reasoning as the matrix job's
           # detect step: a failed diff must fail toward running, not skipping.
-          changed="$(git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD)" || {
+          changed="$(git diff --name-only "${BASE_SHA}" HEAD)" || {
             echo "relevant=true" >> "$GITHUB_OUTPUT"
             echo "could not compute the diff — running all checks rather than guessing"
             exit 0

@@ -28,7 +28,9 @@ const source = fileURLToPath(new URL('../staticwebapp.config.json', import.meta.
 const destination = fileURLToPath(new URL('../dist/staticwebapp.config.json', import.meta.url));
 
 if (!existsSync(source)) {
-  console.error(`[stage-swa-config] ${source} is missing — the deployed site would lose every route rule.`);
+  console.error(
+    `[stage-swa-config] ${source} is missing — the deployed site would lose every route rule.`
+  );
   process.exit(1);
 }
 if (!existsSync(fileURLToPath(new URL('../dist', import.meta.url)))) {
@@ -37,4 +39,6 @@ if (!existsSync(fileURLToPath(new URL('../dist', import.meta.url)))) {
 }
 
 copyFileSync(source, destination);
-console.log(`[stage-swa-config] staticwebapp.config.json -> dist/ (${statSync(destination).size} bytes)`);
+console.log(
+  `[stage-swa-config] staticwebapp.config.json -> dist/ (${statSync(destination).size} bytes)`
+);

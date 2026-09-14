@@ -184,7 +184,7 @@ jobs:
         run: |
           set -euo pipefail
           RUNNER_IP=$(curl -sS --max-time 10 https://api.ipify.org)
-          RULE="ci-manifest-${{ github.run_id }}"
+          RULE="ci-manifest-${GITHUB_RUN_ID}"
           az functionapp config access-restriction add \
             --resource-group "$RG" --name "$APP" \
             --rule-name "$RULE" --action Allow \

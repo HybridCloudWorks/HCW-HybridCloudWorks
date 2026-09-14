@@ -74,9 +74,13 @@ jobs:
 
       - name: Detect language changes
         id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          FILTER: ${{ matrix.filter }}
+          LANGUAGE: ${{ matrix.language }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
+          if [ "${GITHUB_EVENT_NAME}" != "pull_request" ]; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
             echo "non-pull_request event — analysing everything"
             exit 0
@@ -85,17 +89,17 @@ jobs:
           # condition, so a failed diff (an unfetchable base sha) would read
           # as "no changes" and silently skip the analysis. A diff that
           # cannot be computed fails toward analysing.
-          changed="$(git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD)" || {
+          changed="$(git diff --name-only "${BASE_SHA}" HEAD)" || {
             echo "relevant=true" >> "$GITHUB_OUTPUT"
             echo "could not compute the diff — analysing rather than guessing"
             exit 0
           }
-          if grep -qE '${{ matrix.filter }}|^\.github/workflows/codeql\.yml$|^\.github/codeql/' <<<"$changed"; then
+          if grep -qE "${FILTER}"'|^\.github/workflows/codeql\.yml$|^\.github/codeql/' <<<"$changed"; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
-            echo "${{ matrix.language }} files changed — analysing"
+            echo "${LANGUAGE} files changed — analysing"
           else
             echo "relevant=false" >> "$GITHUB_OUTPUT"
-            echo "no ${{ matrix.language }} change — skipping analysis, still reporting this context"
+            echo "no ${LANGUAGE} change — skipping analysis, still reporting this context"
           fi
 
       - name: Initialize CodeQL

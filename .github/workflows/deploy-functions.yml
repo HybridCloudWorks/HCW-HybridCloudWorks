@@ -170,7 +170,7 @@ jobs:
         run: |
           set -euo pipefail
           RUNNER_IP=$(curl -sS --max-time 10 https://api.ipify.org)
-          RULE="ci-deploy-scm-${{ github.run_id }}"
+          RULE="ci-deploy-scm-${GITHUB_RUN_ID}"
 
           # If SCM inherits the main site's rules, an SCM rule is ignored and
           # the Cloudflare-only origin lock applies to Kudu as well — a runner

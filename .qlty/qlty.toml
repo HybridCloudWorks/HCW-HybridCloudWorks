@@ -179,3 +179,24 @@ name = "trufflehog"
 
 [[plugin]]
 name = "zizmor"
+
+# LINT TRIAGE (#588). Not security silences (those stay in each scanner's own
+# ignore file, per the header). Open work lives in GitHub issues (owner
+# decision 2026-09-05), so a TODO/NOTE/OPTIMIZE word in this repository is a
+# reference to TODO.md or prose, never an untracked task. On `main` on
+# 2026-09-14 ripgrep reported 180 and radarlint-iac 19. A search that day for
+# TODO/NOTE/OPTIMIZE marker comments found no open task: the TODO hits are
+# `TODO.md` references or string literals a validator matches, and each NOTE
+# is an explanation. FIXME, HACK and BUG stay reported.
+[[triage]]
+match.plugins = ["radarlint-iac"]
+# The rule key itself contains a colon, so it must carry the plugin prefix;
+# a bare "terraform:S1135" matches nothing (checked with qlty 0.644.0).
+match.rules = ["radarlint-iac:terraform:S1135"]
+match.file_patterns = ["infra/**"]
+set.ignored = true
+
+[[triage]]
+match.plugins = ["ripgrep"]
+match.rules = ["TODO", "NOTE", "OPTIMIZE"]
+set.ignored = true
