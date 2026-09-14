@@ -241,6 +241,17 @@ describe('ResendDomains', () => {
     );
   });
 
+  it('clears the list when a refresh fails, so a stale list never reads as current', async () => {
+    render(<ResendDomains />);
+    await domainButton('news.hybridcloudworks.com');
+    getJSON.mockRejectedValue(refusal(502, 'Resend did not answer'));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Resend did not answer');
+    expect(
+      screen.queryByRole('button', { name: includes('news.hybridcloudworks.com') })
+    ).not.toBeInTheDocument();
+  });
+
   it('says Resend is not configured on a 503', async () => {
     getJSON.mockRejectedValue(refusal(503, 'Resend is not configured: RESEND_API_KEY is not set'));
     render(<ResendDomains />);

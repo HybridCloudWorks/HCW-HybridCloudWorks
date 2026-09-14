@@ -80,6 +80,8 @@ function useDomains() {
       setDomains(Array.isArray(res?.domains) ? res.domains : []);
       setError('');
     } catch (err) {
+      // A failed refresh must not leave the last list looking current.
+      setDomains([]);
       setError(describeResendError(err));
     } finally {
       setLoading(false);
