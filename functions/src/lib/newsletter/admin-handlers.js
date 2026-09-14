@@ -78,7 +78,7 @@ import { NEWSLETTER_FROM, resolveSegmentId } from './handlers.js';
 import { describeAiError, draftIntro, suggestSubjects } from './issue.js';
 import { renderIssue } from './render.js';
 import { resolveSendTime } from './schedule.js';
-import { NEWSLETTER_SETTINGS_CONFIG_ID, missingForSending } from './settings.js';
+import { BUILT_IN_TEMPLATE_ID, NEWSLETTER_SETTINGS_CONFIG_ID, missingForSending } from './settings.js';
 import { renderIssueInTemplate } from './template-layout.js';
 import { loadTemplateHtml, sharedTemplateCache } from './template-source.js';
 
@@ -287,7 +287,10 @@ export function createNewsletterAdminHandlers({
    * throws for a template problem; the log line carries only its fixed code.
    */
   async function renderChosenDesign(issue, renderSettings, settings, context) {
-    if (!settings.templateId) return { ...renderIssue(issue, renderSettings), templateProblem: null };
+    if (!settings.templateId) {
+      templateCache.select(BUILT_IN_TEMPLATE_ID);
+      return { ...renderIssue(issue, renderSettings), templateProblem: null };
+    }
     const loaded = await loadTemplateHtml({
       templateId: settings.templateId,
       apiKey: readKey(env, 'RESEND_API_KEY'),
@@ -334,7 +337,7 @@ export function createNewsletterAdminHandlers({
         etag: issue._etag ?? null,
       },
       preview,
-      readyToSend: missing.length === 0,
+      readyToSend: missing.length === 0 && !templateProblem,
       missingSettings: missing,
       sendingEnabled: sendingEnabled(),
       sendPlan,

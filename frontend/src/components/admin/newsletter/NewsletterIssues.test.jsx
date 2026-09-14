@@ -336,6 +336,20 @@ describe('the Drafts tab', () => {
     expect(screen.queryByRole('button', { name: /approve and schedule/i })).not.toBeInTheDocument();
   });
 
+  it('offers no approval when the chosen template cannot be used', async () => {
+    kept({
+      readyToSend: false,
+      missingSettings: [],
+      templateProblem: {
+        code: 'TEMPLATE_MARKER_MISSING',
+        message: 'The template does not contain the marker.',
+      },
+    });
+    render(<NewsletterIssues view="drafts" />);
+    expect(await screen.findByText(/The chosen template cannot be used yet/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /approve and schedule/i })).not.toBeInTheDocument();
+  });
+
   it('asks for confirmation, then approves the version on screen', async () => {
     const state = kept();
     postJSON.mockImplementation(async () => {

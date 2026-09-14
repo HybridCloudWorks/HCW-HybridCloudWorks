@@ -1028,6 +1028,7 @@ describe('Resend template as the design (#557)', () => {
       const body = bodyOf(res);
       expect(body.templateProblem).toMatchObject({ code: 'TEMPLATE_FETCH_FAILED' });
       expect(body.templateProblem.message).not.toContain('exploded');
+      expect(body.readyToSend).toBe(false);
       expect(body.preview.html).toContain('HybridCloudWorks Weekly ·');
       const logged = allLogs(ctx);
       expect(logged).toContain('TEMPLATE_FETCH_FAILED');
@@ -1060,7 +1061,7 @@ describe('Resend template as the design (#557)', () => {
       expect(resend.fetch).not.toHaveBeenCalled();
     });
 
-    it('fetches a template once within five minutes, again after, and again when another template is selected', async () => {
+    it('fetches a template once within five minutes, again after, and again when the chosen design changes', async () => {
       let clock = 0;
       const templateCache = createTemplateCache({ now: () => clock });
       const resend = makeResend({ templates: { [TEMPLATE_ID]: published(), 'tpl-other': published() } });
@@ -1075,8 +1076,11 @@ describe('Resend template as the design (#557)', () => {
       await handlers.get(request(), context());
       expect(templatePaths(resend)).toHaveLength(2);
 
-      // Settings saved with another template, then back: each change refetches.
+      // Settings saved with another template, then the built-in design, then
+      // back: each change refetches.
       store.docs.set('admin_config/newsletter_settings', { ...withTemplate, templateId: 'tpl-other' });
+      await handlers.get(request(), context());
+      store.docs.set('admin_config/newsletter_settings', { ...withTemplate, templateId: '' });
       await handlers.get(request(), context());
       store.docs.set('admin_config/newsletter_settings', withTemplate);
       await handlers.get(request(), context());
