@@ -97,8 +97,9 @@ function KeysFooter() {
         <span>
           Terraform declares which credentials exist and how the app finds them; Key Vault holds the
           values. This page only writes values, so nothing you paste here reaches Terraform state or
-          a plan. Names come from <code>infra/main.tf</code> — to add a new one, add its reference
-          there in the same change that teaches the code to read it.
+          a plan. Names come from the Function App settings in <code>infra/functionapp.tf</code> —
+          to add a new one, add its reference there in the same change that teaches the code to read
+          it.
         </span>
       </p>
       <p className="flex items-start gap-2 text-xs text-muted-foreground">
