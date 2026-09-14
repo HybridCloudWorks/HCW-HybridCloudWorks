@@ -5,7 +5,7 @@
  * Pure functions: Qlty issue rows in, totals out. The only fields ever read
  * from an issue are tool, rule key, category, level and path, and
  * `minimalIssue` drops everything else as each page arrives, so a message,
- * snippet or fingerprint cannot reach the answer.
+ * snippet or fingerprint is never cached, returned or logged.
  */
 
 export const TOP_LIMIT = 10;
@@ -56,8 +56,10 @@ const topOf = (map, limit) =>
     .map(({ key, ...rest }) => rest);
 
 /**
- * The only fields kept from a Qlty issue, applied as each page arrives, so a
- * message, snippet or fingerprint is never even held in memory.
+ * The only fields kept from a Qlty issue, applied as each page arrives. Each
+ * page's body is parsed whole before this runs, so the promise is about what
+ * survives it: a message, snippet or fingerprint is never kept across pages,
+ * cached, returned or logged.
  */
 export const minimalIssue = (issue) => ({
   tool: issue?.tool,

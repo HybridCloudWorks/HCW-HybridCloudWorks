@@ -67,26 +67,40 @@ const parseJson = (body) => {
   }
 };
 
-/** One authenticated GET. Resolves `{ ok, status, retryAfter, data }`; never throws for an HTTP status. */
+/**
+ * One authenticated GET. Resolves `{ ok, status, retryAfter, data, unreadable }`;
+ * never throws for an HTTP status. Both endpoints this module reads answer
+ * `{ data: [...] }`, so a 2xx whose body is not that shape is `ok: false,
+ * unreadable: true`: counting it as zero issues would be a false success, and
+ * a cached one.
+ */
 async function qltyGet(fetchImpl, path, token) {
   const response = await fetchImpl(`${QLTY_API}${path}`, {
     method: 'GET',
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
+  const data = parseJson(await response.text());
+  const unreadable = response.ok && !Array.isArray(data?.data);
   return {
-    ok: response.ok,
+    ok: response.ok && !unreadable,
     status: response.status,
     retryAfter: response.headers?.get?.('retry-after') ?? null,
-    data: parseJson(await response.text()),
+    data,
+    unreadable,
   };
 }
 
 /** A Qlty refusal as an HTTP answer. Logs the route, status and invocation only. */
 function refused(route, result, context) {
   const status = result?.status ?? 0;
-  context.warn?.(`${route} Qlty HTTP ${status} ${ref(context)}`);
-  const error = status ? `Qlty answered ${status}` : 'No answer from Qlty';
+  const unreadable = result?.unreadable === true;
+  context.warn?.(`${route} Qlty HTTP ${status}${unreadable ? ' unreadable body' : ''} ${ref(context)}`);
+  const error = unreadable
+    ? `Qlty answered ${status} with a body this route cannot read`
+    : status
+      ? `Qlty answered ${status}`
+      : 'No answer from Qlty';
   if (status !== 429) return json(502, { ok: false, status, error });
   const seconds = Number.parseInt(String(result?.retryAfter ?? ''), 10);
   const retryAfterSeconds = Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds, 3600) : 60;
@@ -105,7 +119,7 @@ async function listOpenIssues(get, base, outOfTime) {
     const query = `page%5Blimit%5D=${PAGE_SIZE}&page%5Boffset%5D=${page * PAGE_SIZE}&status=open`;
     const listed = await get(`${base}/issues?${query}`);
     if (!listed.ok) return { refusal: listed };
-    const rows = Array.isArray(listed.data?.data) ? listed.data.data : [];
+    const rows = listed.data.data;
     issues.push(...rows.map(minimalIssue));
     if (listed.data?.meta?.hasMore !== true || rows.length === 0) return { issues, truncated: false };
   }

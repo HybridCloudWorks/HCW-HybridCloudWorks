@@ -240,6 +240,29 @@ describe('GET cms/code-quality', () => {
     expect(fetch.mock.calls.length).toBe(2);
   });
 
+  it('treats a 2xx with a body it cannot read as a refusal, not an empty success, and does not cache it', async () => {
+    for (const bodyText of ['<html>maintenance</html>', '{"unexpected":true}']) {
+      const ctx = context();
+      const fetch = vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        text: async () => bodyText,
+      }));
+      const { handlers } = build({ fetch });
+      const response = await handlers.summary({}, ctx);
+      expect(response.status).toBe(502);
+      expect(body(response)).toEqual({
+        ok: false,
+        status: 200,
+        error: 'Qlty answered 200 with a body this route cannot read',
+      });
+      expect(ctx.warn).toHaveBeenCalledWith('codeQualitySummary Qlty HTTP 200 unreadable body [invocation inv-1]');
+      await handlers.summary({}, context());
+      expect(fetch).toHaveBeenCalledTimes(2);
+    }
+  });
+
   it('passes a rate limit through as 429 with Retry-After', async () => {
     const { handlers } = build({ fetch: makeQlty({ issuesStatus: 429 }) });
     const response = await handlers.summary({}, context());
