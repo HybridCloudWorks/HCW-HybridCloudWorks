@@ -38,7 +38,7 @@ This project has not cut a tagged release; entries are grouped under
   lines carry no addresses.
 
 - **Faster newsletter editing on the Mailing List page (#504).** The page half
-  of the API change below. A draft on the Newsletter or Drafts tab now opens
+  of the editing API change further down. A draft on the Newsletter or Drafts tab now opens
   with the subject, a **Suggest subjects** button whose three to five AI
   suggestions fill the subject when clicked, a **Preview text** field with a
   150-character counter, and the note. The action bar holds Save changes,
