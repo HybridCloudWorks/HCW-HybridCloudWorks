@@ -156,6 +156,32 @@ describe('the service cards', () => {
     );
   });
 
+  it('tests Sessionize with the trimmed speaker id, and a blank one falls back to the default', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ sessions: [] }) });
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      render(<Harness group="content" />);
+      const input = await screen.findByLabelText('Sessionize Speaker ID');
+      await waitFor(() => expect(input.disabled).toBe(false));
+      const test = within(cardFor('Sessionize')).getByRole('button', { name: /^Test Sessionize$/ });
+
+      fireEvent.change(input, { target: { value: '  speaker-7  ' } });
+      fireEvent.click(test);
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      expect(fetchMock.mock.calls[0][0]).toBe('https://sessionize.com/api/speaker/json/speaker-7');
+
+      await waitFor(() => expect(test.disabled).toBe(false));
+      fireEvent.change(input, { target: { value: '   ' } });
+      fireEvent.click(test);
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      expect(fetchMock.mock.calls[1][0]).toBe(
+        'https://sessionize.com/api/speaker/json/default-speaker'
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('saves the speaker id once, however fast Save is pressed', async () => {
     let finish;
     saveIntegrationSettings.mockReturnValue(new Promise((resolve) => (finish = resolve)));

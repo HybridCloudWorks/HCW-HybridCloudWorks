@@ -42,6 +42,7 @@ import IntegrationsKeys from '@/components/admin/integrations/IntegrationsKeys';
 import IntegrationsIdentity from '@/components/admin/integrations/IntegrationsIdentity';
 import useServiceTests from '@/components/admin/integrations/useServiceTests';
 import { TABS, resolveTab } from '@/components/admin/integrations/tabs';
+import HubTabs from '@/components/admin/HubTabs';
 
 export default function IntegrationsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -56,24 +57,6 @@ export default function IntegrationsPage() {
     setSearchParams(group ? { tab: id, group } : { tab: id });
   };
   const openGroup = (group) => setSearchParams({ tab: 'services', group });
-  const tabRefs = React.useRef([]);
-
-  // WAI-ARIA tabs keyboard pattern: roving tabindex, arrows wrap, Home and End.
-  const onTabKeyDown = (event) => {
-    const current = TABS.findIndex((tab) => tab.id === activeTab);
-    const moves = {
-      ArrowRight: current + 1,
-      ArrowLeft: current - 1,
-      Home: 0,
-      End: TABS.length - 1,
-    };
-    if (!(event.key in moves)) return;
-    event.preventDefault();
-    const next = (moves[event.key] + TABS.length) % TABS.length;
-    setTab(TABS[next].id);
-    tabRefs.current[next]?.focus();
-  };
-
   return (
     <div className="space-y-6">
       <div>
@@ -86,35 +69,13 @@ export default function IntegrationsPage() {
         </p>
       </div>
 
-      <div
-        role="tablist"
-        aria-label="Integrations Hub"
-        className="flex gap-1 overflow-x-auto border-b border-border"
+      <HubTabs
+        tabs={TABS}
+        active={activeTab}
+        onSelect={setTab}
+        idPrefix="integrations"
+        label="Integrations Hub"
       >
-        {TABS.map(({ id, label }) => (
-          <button
-            key={id}
-            type="button"
-            role="tab"
-            ref={(node) => {
-              tabRefs.current[TABS.findIndex((tab) => tab.id === id)] = node;
-            }}
-            tabIndex={activeTab === id ? 0 : -1}
-            aria-selected={activeTab === id}
-            onKeyDown={onTabKeyDown}
-            onClick={() => setTab(id)}
-            className={`-mb-px whitespace-nowrap rounded-t-lg border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
-              activeTab === id
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      <div>
         {activeTab === 'overview' && <IntegrationsOverview tests={tests} onOpenGroup={openGroup} />}
         {activeTab === 'services' && (
           <IntegrationsServices
@@ -126,7 +87,7 @@ export default function IntegrationsPage() {
         )}
         {activeTab === 'keys' && <IntegrationsKeys />}
         {activeTab === 'identity' && <IntegrationsIdentity />}
-      </div>
+      </HubTabs>
     </div>
   );
 }

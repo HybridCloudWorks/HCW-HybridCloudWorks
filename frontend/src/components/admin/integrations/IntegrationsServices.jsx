@@ -100,7 +100,7 @@ export default function IntegrationsServices({ group, onGroupChange, onOpenKeys,
               service={service}
               result={tests.results[service.id]}
               testing={tests.testing.has(service.id)}
-              onTest={() => tests.runTest(service, speakerId)}
+              onTest={() => tests.runTest(service, speakerId.trim())}
             >
               {service.setting === 'sessionizeSpeakerId' ? (
                 <SessionizeSetting
