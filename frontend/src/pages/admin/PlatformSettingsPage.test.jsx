@@ -137,6 +137,38 @@ describe('tabs', () => {
     expect(routesAsked().filter((r) => r === settingRoute('default-heroes'))).toHaveLength(2);
   });
 
+  it('follows the ARIA tabs keyboard pattern: roving tabindex, arrows wrap, Home and End', async () => {
+    renderAt('/admin/platform');
+    await screen.findByText('Default covers');
+    const tab = (name) => screen.getByRole('tab', { name });
+    expect(tab('Content defaults').getAttribute('tabindex')).toBe('0');
+    expect(tab('Audio').getAttribute('tabindex')).toBe('-1');
+
+    fireEvent.keyDown(tab('Content defaults'), { key: 'ArrowRight' });
+    await waitFor(() =>
+      expect(screen.getByTestId('location').textContent).toBe('/admin/platform?tab=social')
+    );
+    expect(document.activeElement).toBe(tab('Social automation'));
+    expect(tab('Social automation').getAttribute('tabindex')).toBe('0');
+
+    fireEvent.keyDown(tab('Social automation'), { key: 'End' });
+    await waitFor(() =>
+      expect(screen.getByTestId('location').textContent).toBe('/admin/platform?tab=history')
+    );
+    fireEvent.keyDown(tab('Change history'), { key: 'ArrowRight' });
+    await waitFor(() =>
+      expect(screen.getByTestId('location').textContent).toBe('/admin/platform?tab=content')
+    );
+    fireEvent.keyDown(tab('Content defaults'), { key: 'ArrowLeft' });
+    await waitFor(() =>
+      expect(screen.getByTestId('location').textContent).toBe('/admin/platform?tab=history')
+    );
+    fireEvent.keyDown(tab('Change history'), { key: 'Home' });
+    await waitFor(() =>
+      expect(screen.getByTestId('location').textContent).toBe('/admin/platform?tab=content')
+    );
+  });
+
   it('a failure in one tab does not reach another', async () => {
     getJSON.mockImplementation(async (route) => {
       if (route === settingRoute('default-heroes')) throw new Error('HTTP 500');

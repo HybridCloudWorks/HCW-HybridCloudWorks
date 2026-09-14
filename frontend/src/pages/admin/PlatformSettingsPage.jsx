@@ -37,10 +37,34 @@ export function resolveTab(requested) {
   return TABS.find((tab) => tab.id === requested) ?? TABS[0];
 }
 
+/**
+ * The tab a key moves to under the WAI-ARIA tabs pattern: arrows wrap, Home and
+ * End jump to the ends. Null for any other key.
+ */
+export function tabIndexForKey(key, current, count) {
+  if (key === 'ArrowRight') return (current + 1) % count;
+  if (key === 'ArrowLeft') return (current - 1 + count) % count;
+  if (key === 'Home') return 0;
+  if (key === 'End') return count - 1;
+  return null;
+}
+
 export default function PlatformSettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const active = resolveTab(searchParams.get('tab'));
   const ActiveTab = active.Component;
+  const tabRefs = React.useRef([]);
+
+  // Roving tabindex: only the selected tab is in the Tab order, and the arrow
+  // keys, Home and End move between tabs (activating on focus).
+  const onTabKeyDown = (event) => {
+    const current = TABS.findIndex((tab) => tab.id === active.id);
+    const next = tabIndexForKey(event.key, current, TABS.length);
+    if (next === null) return;
+    event.preventDefault();
+    setSearchParams({ tab: TABS[next].id });
+    tabRefs.current[next]?.focus();
+  };
 
   return (
     <div className="space-y-6 p-4 sm:p-6">
@@ -60,12 +84,17 @@ export default function PlatformSettingsPage() {
         aria-label="Platform settings"
         className="flex flex-wrap gap-1 border-b border-border"
       >
-        {TABS.map(({ id, label }) => (
+        {TABS.map(({ id, label }, index) => (
           <button
             key={id}
+            ref={(node) => {
+              tabRefs.current[index] = node;
+            }}
             type="button"
             role="tab"
             id={`platform-tab-${id}`}
+            tabIndex={active.id === id ? 0 : -1}
+            onKeyDown={onTabKeyDown}
             aria-selected={active.id === id}
             aria-controls="platform-tabpanel"
             onClick={() => setSearchParams({ tab: id })}
