@@ -153,11 +153,13 @@ export function usePagedList(path, key) {
 
   const loadMore = async () => {
     if (!nextAfter) return;
+    const mine = generation.current;
     setLoadingMore(true);
     try {
       await fetchPage(nextAfter);
     } catch (err) {
-      setError(describeResendError(err));
+      // A reload started meanwhile discards this page, and its error with it.
+      if (mine === generation.current) setError(describeResendError(err));
     } finally {
       setLoadingMore(false);
     }

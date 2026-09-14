@@ -4,7 +4,7 @@
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 
 import ResendEmails from './ResendEmails';
 
@@ -48,6 +48,30 @@ describe('ResendEmails', () => {
     expect(getJSON).toHaveBeenCalledWith('cms/mailing-list/emails?limit=20&after=e-1111');
     expect(screen.getByText('j***@example.com')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
+  });
+
+  it('shows no error from a Load more that fails after Refresh has started', async () => {
+    render(<ResendEmails />);
+    await screen.findByText('j***@example.com');
+    let failMore;
+    let finishReload;
+    getJSON.mockImplementation((route) =>
+      route.includes('after=e-1111')
+        ? new Promise((_, reject) => {
+            failMore = () => reject(refusal(502, 'Resend did not answer'));
+          })
+        : new Promise((resolve) => {
+            finishReload = () =>
+              resolve({ ok: true, emails: [first], has_more: true, next_after: 'e-1111' });
+          })
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => expect(failMore).toBeTypeOf('function'));
+    failMore();
+    finishReload();
+    expect(await screen.findByText('j***@example.com')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
   });
 
   it('says Resend is not configured on a 503', async () => {

@@ -271,6 +271,30 @@ describe('ResendDomains', () => {
     ).toBeGreaterThanOrEqual(2);
   });
 
+  it('lets only the latest refresh write, when an earlier one answers last', async () => {
+    render(<ResendDomains />);
+    await domainButton('news.hybridcloudworks.com');
+    const answers = [];
+    getJSON.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          answers.push(resolve);
+        })
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => expect(answers).toHaveLength(2));
+    const row = (id, name) => ({ id, name, status: 'verified', region: 'us-east-1' });
+    answers[1]({ ok: true, domains: [row('d-new', 'fresh.example.com')] });
+    expect(await domainButton('fresh.example.com')).toBeInTheDocument();
+    answers[0]({ ok: true, domains: [row('d-old', 'stale.example.com')] });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(
+      screen.queryByRole('button', { name: includes('stale.example.com') })
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: includes('fresh.example.com') })).toBeInTheDocument();
+  });
+
   it('clears the list when a refresh fails, so a stale list never reads as current', async () => {
     render(<ResendDomains />);
     await domainButton('news.hybridcloudworks.com');

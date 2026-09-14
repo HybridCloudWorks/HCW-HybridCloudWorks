@@ -12,7 +12,7 @@
  * There is deliberately no delete: the API has none, because removing a
  * sending domain stops the newsletter. That stays in Resend's dashboard.
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { ChevronDown, ChevronRight, ExternalLink, RefreshCw } from 'lucide-react';
@@ -73,18 +73,24 @@ function useDomains() {
   const [domains, setDomains] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  // Only the latest reload may write: an earlier, slower answer is dropped.
+  const generation = useRef(0);
   const reload = useCallback(async () => {
+    generation.current += 1;
+    const mine = generation.current;
     setLoading(true);
     try {
       const res = await getJSON(`${RESEND_ROUTE}/domains`);
+      if (mine !== generation.current) return;
       setDomains(Array.isArray(res?.domains) ? res.domains : []);
       setError('');
     } catch (err) {
+      if (mine !== generation.current) return;
       // A failed refresh must not leave the last list looking current.
       setDomains([]);
       setError(describeResendError(err));
     } finally {
-      setLoading(false);
+      if (mine === generation.current) setLoading(false);
     }
   }, []);
   useEffect(() => {
