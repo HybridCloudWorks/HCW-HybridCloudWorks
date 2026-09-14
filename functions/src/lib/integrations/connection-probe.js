@@ -271,6 +271,22 @@ export const PROBES = Object.freeze({
       headers: { Authorization: `Bearer ${values.RESEND_API_KEY}`, Accept: 'application/json' },
     }),
   }),
+
+  /**
+   * `GET /user` — Qlty's "who does this token belong to" (#569). Read-only
+   * and project-independent, so a pass says the token is live without also
+   * depending on the project's visibility. No key verdict: a 403 could be a
+   * token scope rather than a dead token.
+   */
+  qlty: createProbe({
+    name: 'qlty',
+    service: 'Qlty',
+    settings: ['QLTY_API_TOKEN'],
+    buildRequest: ({ values }) => ({
+      url: 'https://api.qlty.sh/user',
+      headers: { Authorization: `Bearer ${values.QLTY_API_TOKEN}`, Accept: 'application/json' },
+    }),
+  }),
 });
 
 export const PROBE_NAMES = Object.freeze(Object.keys(PROBES));

@@ -67,6 +67,11 @@ export const SECRET_SECTIONS = Object.freeze([
       'this site \u2014 that runs on Azure and is not charged through anything here.',
   },
   {
+    id: 'code-quality',
+    title: 'Code quality',
+    blurb: 'Read-only access to the repository’s scanner results, shown on the Health page.',
+  },
+  {
     id: 'platform',
     title: 'Site platform',
     blurb:
@@ -338,6 +343,19 @@ export const SECRET_CATALOG = Object.freeze([
     help:
       'API key. Reads Google\u2019s public price list. Without it the Google column disappears from ' +
       'the comparison and the other two still work.',
+    probe: null,
+  },
+
+  // ── Code quality ─────────────────────────────────────────────────
+  {
+    setting: 'QLTY_API_TOKEN',
+    secret: 'QLTY-API-TOKEN',
+    section: 'code-quality',
+    label: 'Qlty — access token',
+    help:
+      'Personal access token from qlty.sh (User settings → Access tokens). Reads the ' +
+      'project’s open findings and metrics for the Health page’s Code and Security tab. ' +
+      'Without it that tab says Qlty is not configured and everything else still works.',
     probe: null,
   },
 

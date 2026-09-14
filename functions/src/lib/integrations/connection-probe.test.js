@@ -28,6 +28,7 @@ const TOKEN = 'not-a-real-telegram-token:EXAMPLE-VALUE-FOR-TESTS';
 const YT_KEY = 'not-a-real-youtube-key-EXAMPLE-VALUE-FOR-TESTS';
 const RSS_KEY = 'not-a-real-rsscom-key-EXAMPLE-VALUE-FOR-TESTS';
 const RESEND_KEY = 'not-a-real-resend-key-EXAMPLE-VALUE-FOR-TESTS';
+const QLTY_TOKEN = 'not-a-real-qlty-token-EXAMPLE-VALUE-FOR-TESTS';
 
 const ENV = {
   TELEGRAM_BOT_TOKEN: TOKEN,
@@ -36,6 +37,7 @@ const ENV = {
   RSSCOM_PODCAST_ID: '4242',
   YOUTUBE_API_KEY: YT_KEY,
   RESEND_API_KEY: RESEND_KEY,
+  QLTY_API_TOKEN: QLTY_TOKEN,
 };
 
 const readKey = (env, name) => (typeof env?.[name] === 'string' ? env[name].trim() : '');
@@ -107,7 +109,7 @@ describe('assertUrlSafe', () => {
 
 describe('the probe table', () => {
   it('is closed, and every entry is a GET with no caller-supplied component', () => {
-    expect(PROBE_NAMES).toEqual(['telegram', 'rsscom', 'youtube', 'resend']);
+    expect(PROBE_NAMES).toEqual(['telegram', 'rsscom', 'youtube', 'resend', 'qlty']);
     for (const name of PROBE_NAMES) {
       const probe = PROBES[name];
       const { url, headers } = probe.buildRequest({ values: ENV });
@@ -128,6 +130,15 @@ describe('the probe table', () => {
     // Resend refuses a sending-only key as well as a wrong one, and only the
     // wrong one means remint.
     expect(PROBES.resend.reportsKeyVerdict).toBe(false);
+    // A Qlty 403 could be the token's scope rather than a dead token.
+    expect(PROBES.qlty.reportsKeyVerdict).toBe(false);
+  });
+
+  it('asks Qlty who the token belongs to, a read that depends on no project', () => {
+    expect(PROBES.qlty.settings).toEqual(['QLTY_API_TOKEN']);
+    const { url, headers } = PROBES.qlty.buildRequest({ values: ENV });
+    expect(url).toBe('https://api.qlty.sh/user');
+    expect(headers.Authorization).toBe(`Bearer ${QLTY_TOKEN}`);
   });
 
   it('asks Resend a read-only question that a sending-only key cannot answer', () => {
