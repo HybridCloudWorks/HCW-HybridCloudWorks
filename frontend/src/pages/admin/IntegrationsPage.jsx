@@ -48,8 +48,31 @@ export default function IntegrationsPage() {
   const activeTab = resolveTab(searchParams.get('tab'));
   const tests = useServiceTests();
 
-  const setTab = (id) => setSearchParams({ tab: id });
+  // The chosen Services group survives a click on the active tab and a trip
+  // to another tab and back.
+  const setTab = (id) => {
+    if (id === activeTab) return;
+    const group = searchParams.get('group');
+    setSearchParams(id === 'services' && group ? { tab: id, group } : { tab: id });
+  };
   const openGroup = (group) => setSearchParams({ tab: 'services', group });
+  const tabRefs = React.useRef([]);
+
+  // WAI-ARIA tabs keyboard pattern: roving tabindex, arrows wrap, Home and End.
+  const onTabKeyDown = (event) => {
+    const current = TABS.findIndex((tab) => tab.id === activeTab);
+    const moves = {
+      ArrowRight: current + 1,
+      ArrowLeft: current - 1,
+      Home: 0,
+      End: TABS.length - 1,
+    };
+    if (!(event.key in moves)) return;
+    event.preventDefault();
+    const next = (moves[event.key] + TABS.length) % TABS.length;
+    setTab(TABS[next].id);
+    tabRefs.current[next]?.focus();
+  };
 
   return (
     <div className="space-y-6">
@@ -73,7 +96,12 @@ export default function IntegrationsPage() {
             key={id}
             type="button"
             role="tab"
+            ref={(node) => {
+              tabRefs.current[TABS.findIndex((tab) => tab.id === id)] = node;
+            }}
+            tabIndex={activeTab === id ? 0 : -1}
             aria-selected={activeTab === id}
+            onKeyDown={onTabKeyDown}
             onClick={() => setTab(id)}
             className={`-mb-px whitespace-nowrap rounded-t-lg border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
               activeTab === id

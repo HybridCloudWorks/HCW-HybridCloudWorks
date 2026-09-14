@@ -55,7 +55,10 @@ export default function useServiceTests() {
    */
   const runAll = useCallback(
     async (services, argFor = () => undefined) => {
-      if (allInFlight.current) return;
+      // Not while any test is already running (e.g. one started from a Services
+      // card): runTest skips a service in flight without awaiting it, which
+      // would let "Test all" start the next provider concurrently.
+      if (allInFlight.current || inFlight.current.size > 0) return;
       allInFlight.current = true;
       setRunningAll(true);
       try {

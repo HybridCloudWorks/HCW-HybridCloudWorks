@@ -9,7 +9,7 @@
  * components/admin/integrations.
  */
 import React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 
 import IntegrationsPage from './IntegrationsPage';
@@ -51,6 +51,11 @@ const SECRETS = {
     },
   ],
 };
+
+// The fetch stub must not leak into later files in the same worker.
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 const routes = () => getJSON.mock.calls.map(([route]) => route);
 const hubTabs = () => within(screen.getByRole('tablist', { name: 'Integrations Hub' }));
@@ -116,6 +121,33 @@ describe('the header and tabs', () => {
     render(<IntegrationsPage />);
     fireEvent.click(hubTabs().getByRole('tab', { name: 'Keys' }));
     expect(setSearchParams).toHaveBeenCalledWith({ tab: 'keys' });
+  });
+
+  it('keeps the chosen Services group, and a click on the active tab changes nothing', () => {
+    searchParams = 'tab=services&group=gen-ai';
+    render(<IntegrationsPage />);
+    fireEvent.click(hubTabs().getByRole('tab', { name: 'Services' }));
+    expect(setSearchParams).not.toHaveBeenCalled();
+  });
+
+  it('carries the Services group back when returning from another tab', () => {
+    searchParams = 'tab=keys&group=gen-ai';
+    render(<IntegrationsPage />);
+    fireEvent.click(hubTabs().getByRole('tab', { name: 'Services' }));
+    expect(setSearchParams).toHaveBeenCalledWith({ tab: 'services', group: 'gen-ai' });
+  });
+
+  it('follows the ARIA tabs keyboard pattern: roving tabindex, arrows wrap, Home and End', () => {
+    render(<IntegrationsPage />);
+    const tabs = hubTabs().getAllByRole('tab');
+    expect(tabs[0].getAttribute('tabindex')).toBe('0');
+    expect(tabs[1].getAttribute('tabindex')).toBe('-1');
+    fireEvent.keyDown(tabs[0], { key: 'ArrowRight' });
+    expect(setSearchParams).toHaveBeenLastCalledWith({ tab: 'services' });
+    fireEvent.keyDown(tabs[0], { key: 'ArrowLeft' });
+    expect(setSearchParams).toHaveBeenLastCalledWith({ tab: 'identity' });
+    fireEvent.keyDown(tabs[0], { key: 'End' });
+    expect(setSearchParams).toHaveBeenLastCalledWith({ tab: 'identity' });
   });
 });
 
