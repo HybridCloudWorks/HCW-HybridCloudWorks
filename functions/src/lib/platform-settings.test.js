@@ -1150,6 +1150,10 @@ describe('change history', () => {
       { after: '2026-09-14' },
       { after: "2026-09-14T10:00:00.000Z' OR 1=1" },
       { after: '2026-13-45T99:99:99.000Z' },
+      // Not the stored .sssZ shape: string comparison would page wrongly.
+      { after: '2026-09-14T10:00:00Z' },
+      { after: '2026-09-14T10:00:00.5Z' },
+      { after: '2026-09-14T10:00:00.123456Z' },
     ];
     for (const query of bad) {
       const res = await h.getHistory(historyRequest(query), context);

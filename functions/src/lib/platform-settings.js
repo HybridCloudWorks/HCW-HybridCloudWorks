@@ -660,7 +660,10 @@ export const HISTORY_DEFAULT_LIMIT = 50;
 export const HISTORY_MAX_LIMIT = 100;
 
 /** A timestamp as the audit writer stores it: `Date#toISOString()`. */
-const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?Z$/;
+// Exactly Date#toISOString()'s shape, milliseconds included: the cursor is
+// compared as a string against stored `.sssZ` timestamps, so any other shape
+// would sort differently and skip or repeat rows.
+const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 /**
  * `?setting=&limit=&after=` → `{ setting, limit, after }` or `{ error }`.
