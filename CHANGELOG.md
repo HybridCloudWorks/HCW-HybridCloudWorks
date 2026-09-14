@@ -19,6 +19,29 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Qlty set up in the repository, with test coverage uploaded from CI
+  (#568).** `.qlty/qlty.toml` is committed, so a local `qlty check --all` and
+  Qlty Cloud run the same plugins: the linters that work here (actionlint,
+  editorconfig-checker, eslint for `frontend/` and `scripts/`, prettier, ruff,
+  radarlint-python, ripgrep, tflint) and the security scanners (bandit,
+  checkov, gitleaks, osv-scanner, radarlint-iac, trivy, trufflehog, zizmor).
+  ESLint stopped failing with `Cannot find package 'globals'`: the init-written
+  `package_filters` dropped `globals` (and `react`, which the frontend config
+  reads), so each package's own ESLint config now installs complete.
+  Generated and vendored paths are excluded (`frontend/data/**`, public JSON
+  and fonts, `dist`, `coverage`, `site`, `.agentic`). No security finding is
+  silenced in `qlty.toml`; triage uses each scanner's own ignore file, recorded
+  in `docs/security/scanner-triage.md` (#567). `frontend/` and `functions/`
+  gain `npm run test:coverage` (V8 coverage, `coverage/lcov.info` with
+  repository-relative paths; `functions/` adds `@vitest/coverage-v8` 4.1.11);
+  `npm test` and the required CI jobs are unchanged. The new, non-required
+  `coverage.yml` workflow runs both on pull requests and pushes to `main` and
+  uploads them in one `qltysh/qlty-action/coverage` step pinned to v2.3.0's
+  commit, skipping the upload with a notice while `QLTY_COVERAGE_TOKEN` is
+  unset. The secret is documented in store 4 of
+  [Variables and secrets](docs/standards/variables-and-secrets.md) and in
+  [Required inputs](docs/standards/required-inputs.md) §4.3.
+
 - **Use a Resend template as the newsletter's design (#557).** Newsletter
   settings on the Mailing List Settings tab gain a Template block: keep the
   built-in design (the default, and what existing settings read as) or pick one

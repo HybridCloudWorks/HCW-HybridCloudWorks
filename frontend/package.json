@@ -37,6 +37,7 @@
     "clean": "node -e \"const fs=require('fs');const rm=p=>{try{fs.rmSync(p,{recursive:true,force:true})}catch{}};rm('dist');rm('node_modules/.vite');\"",
     "clean:all": "node -e \"const fs=require('fs');const rm=p=>{try{fs.rmSync(p,{recursive:true,force:true})}catch{}};rm('dist');rm('node_modules');\"",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage --testTimeout=30000 --hookTimeout=60000",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:debug": "playwright test --debug",

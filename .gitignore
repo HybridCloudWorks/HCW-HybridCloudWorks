@@ -50,3 +50,18 @@ __pycache__/
 # Agent worktrees: isolated checkouts created by Claude Code for parallel work.
 # They are real git worktrees, so staging one embeds a repository inside this one.
 .claude/worktrees/
+
+# Qlty CLI working state (#568). Only .qlty/qlty.toml, .qlty/.gitignore and
+# .qlty/configs/ are tracked; .qlty/.gitignore (written by `qlty init`) already
+# ignores the rest, and these are listed here too so a root-level reader sees
+# them. Run output, logs, results, plugin sources and the tool cache are local.
+.qlty/out/
+.qlty/logs/
+.qlty/results/
+.qlty/sources/
+.qlty/cache/
+.qlty/plugin_cachedir/
+
+# Vitest coverage output (`npm run test:coverage`, #568). frontend/.gitignore
+# already covers frontend/coverage; this covers functions/ and any package.
+coverage/

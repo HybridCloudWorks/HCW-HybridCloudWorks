@@ -266,7 +266,10 @@ already exists and is already wired.
 
 What that implies for store 4: it may only hold credentials to systems that are
 **not Azure** and offer **no federation from GitHub**. Today that is HCP
-Terraform and Firebase — two external systems, each with a named reason.
+Terraform and Firebase — two external systems, each with a named reason — plus
+`QLTY_COVERAGE_TOKEN`, an upload-only token for Qlty Cloud that is an accepted
+exception rather than a clean pass: Qlty does offer GitHub OIDC (see its row in
+the store 4 table below).
 `AZURE_STATIC_WEB_APPS_API_TOKEN` fails this test on its first word.
 
 ### Secrets that must never transit Terraform state, and why Key Vault is seeded out-of-band
@@ -431,6 +434,7 @@ available. An entry that cannot answer both belongs in store 3 or nowhere.
 | `GITHUB_TOKEN` | — | GitHub | Injected per-run by GitHub, scoped by `permissions:`, expires with the job. Not stored by us at all | Correct, and contractual |
 | `COPILOT_REVIEW_APP_PRIVATE_KEY` (Agents store, not Actions) | — | GitHub, read-only, this repository | Authenticates GitHub → *GitHub* for the MCP server Copilot code review uses, to reach the Actions, code-scanning, Dependabot and discussions toolsets the built-in per-review token cannot be given. The same shape as `MANIFEST_APP_PRIVATE_KEY`: a GitHub App's key, from which `copilot-setup-steps.yml` mints a one-hour installation token per session. The App holds eight **read** permissions on one repository and nothing else, so the key's ceiling is read-only — a leaked key mints nothing a leaked token would not already grant. **No personal access token, classic or fine-grained, is used**: those are user-bound and long-lived, and store 4 holds none | Justified — the one stored key in the Copilot configuration, and it can only ever produce read-only, one-hour tokens |
 | `TF_API_TOKEN` | §7 | HCP Terraform | Authenticates GitHub → *Terraform*, the reverse direction from §8. The HCP Terraform CLI credential has no inbound GitHub OIDC path. Use a **team** token, not a user token, so it survives the user leaving | Justified |
+| `QLTY_COVERAGE_TOKEN` | — | Qlty Cloud, coverage upload for this one project | Authenticates GitHub → *Qlty* for `.github/workflows/coverage.yml`, which uploads `frontend/` and `functions/` lcov reports with `qltysh/qlty-action/coverage` (#568). A **project** coverage token, not the workspace token: it can upload coverage to this project and do nothing else — no source access, no settings, no other Qlty features — so the worst a leak does is post a false coverage number. It is a GitHub Actions secret only: **not** a Key Vault secret, **not** a Function App setting, and nothing at runtime reads it. Unset, the workflow still runs the tests and skips the upload with a notice. **Federation does exist here**: the same action accepts `oidc: true` with `id-token: write`, which would remove the stored value. The token is the owner's choice in #568; moving to OIDC retires this row | Accepted, owner decision #568; OIDC is the documented way to retire it |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | §7 | Google Cloud | Source-side credential for the one-shot Firestore export, for a system being decommissioned. Must be scoped read-only, and deleted the day the migration completes | Justified, with an expiry |
 | `AZURE_STATIC_WEB_APPS_API_TOKEN` | §7 | **Azure** | None available — see below | **Wrong store** |
 | `AZURE_FUNCTIONS_URL` | §7 | — | A public API base URL | **Resolved 2026-08-18** — now `vars.FUNCTIONS_URL`, store 3 |

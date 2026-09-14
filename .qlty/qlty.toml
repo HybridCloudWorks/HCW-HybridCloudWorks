@@ -1,0 +1,175 @@
+# Qlty project configuration (#568).
+#
+# Read by both the Qlty CLI and Qlty Cloud, so `qlty check --all` locally and
+# the cloud issue list are driven by this one file. Started from
+# `qlty init --yes` (CLI 0.644.0) and then edited; the reasons for every edit
+# are next to the edit.
+#
+# Reference: https://docs.qlty.sh/cli/qlty-toml
+#
+# SILENCES LIVE ELSEWHERE, ON PURPOSE. Security findings are triaged with each
+# scanner's own native ignore file, not with [[triage]] or [[exclude]] blocks
+# here, so the same decision holds when the scanner runs outside Qlty. The record of every triaged
+# finding is docs/security/scanner-triage.md (#567). Do not add a security
+# silence to this file; add it where that page says.
+config_version = "0"
+
+# Qlty already honours .gitignore, so node_modules/, dist/, site/ (the MkDocs
+# build), .agentic/ (workflow run logs) and scripts/.reports/ never reach a
+# plugin. They are repeated here where it matters that Qlty Cloud, which
+# analyses a clean clone, and a local run with build output present agree.
+exclude_patterns = [
+  # Defaults from `qlty init`, less "**/config/**", "**/db/**", "**/seed/**"
+  # and "**/templates/**": in this repository those names hold hand-written
+  # source (frontend/src/config/, frontend/src/components/templates/) that
+  # should be analysed.
+  "*_min.*",
+  "**/assets/**",
+  "**/cache/**",
+  "*-min.*",
+  "*.min.*",
+  "**/.yarn/**",
+  "**/*.d.ts",
+  "**/bower_components/**",
+  "**/build/**",
+  "**/deps/**",
+  "**/extern/**",
+  "**/external/**",
+  "**/generated/**",
+  "**/Godeps/**",
+  "**/gradlew/**",
+  "**/mvnw/**",
+  "**/protos/**",
+  "**/target/**",
+  "**/testdata/**",
+  "**/vendor/**",
+
+  # Build, install and coverage output.
+  "**/node_modules/**",
+  "**/dist/**",
+  "**/coverage/**",
+  "site/**",
+  "**/.terraform/**",
+  "**/__pycache__/**",
+
+  # Local agent run state and logs (gitignored; listed for local runs).
+  ".agentic/**",
+  ".claude/worktrees/**",
+
+  # Generated data. frontend/data/content-manifest.json is written by
+  # scripts/build-content-manifest.mjs through publish-content-manifest.yml,
+  # frontend/public/data/ by `npm run build:data`, and the framework JSON under
+  # frontend/public/ is reference data. None of it is hand-written code, and
+  # linting it only reports the generator's formatting.
+  "frontend/data/**",
+  "frontend/public/data/**",
+  "frontend/public/**/*.json",
+  # Vendored font files (hundreds of them).
+  "frontend/public/fonts/**",
+]
+
+test_patterns = [
+  "**/test/**",
+  "**/tests/**",
+  "**/spec/**",
+  "**/e2e/**",
+  "**/__tests__/**",
+  "**/*.test.*",
+  "**/*.spec.*",
+  "**/*_test.*",
+  "**/*_spec.*",
+  "**/test_*.*",
+  "**/spec_*.*",
+]
+
+[smells]
+mode = "comment"
+
+[[source]]
+name = "default"
+default = true
+
+# ---------------------------------------------------------------------------
+# Linters
+# ---------------------------------------------------------------------------
+
+[[plugin]]
+name = "actionlint"
+
+[[plugin]]
+name = "editorconfig-checker"
+mode = "comment"
+
+# ESLint runs with each package's own flat config, installed from that
+# package's package.json. `qlty init` wrote package_filters of
+# ["eslint", "jest", "prettier"], which dropped `globals` (imported by both
+# eslint.config files) and failed every run with
+# `Cannot find package 'globals'`. `globals` is added to both; frontend also
+# needs `react`, because its config reads react/package.json to pin the React
+# version for eslint-plugin-react. CI's own `npm run lint` jobs remain the
+# gate; this is the same rule set reported in Qlty.
+[[plugin]]
+name = "eslint"
+version = "10.10.0"
+package_file = "package.json"
+package_filters = ["eslint", "globals", "react", "prettier"]
+prefix = "frontend"
+
+[[plugin]]
+name = "eslint"
+version = "10.10.0"
+package_file = "package.json"
+package_filters = ["eslint", "globals"]
+prefix = "scripts"
+
+[[plugin]]
+name = "prettier"
+version = "3.9.6"
+package_file = "frontend/package.json"
+package_filters = ["prettier"]
+
+[[plugin]]
+name = "radarlint-python"
+mode = "comment"
+
+[[plugin]]
+name = "ripgrep"
+mode = "comment"
+
+[[plugin]]
+name = "ruff"
+drivers = [
+  "lint",
+]
+
+[[plugin]]
+name = "tflint"
+
+# ---------------------------------------------------------------------------
+# Security scanners. The set the Qlty Cloud project runs (#568).
+# ---------------------------------------------------------------------------
+
+[[plugin]]
+name = "bandit"
+
+[[plugin]]
+name = "checkov"
+
+[[plugin]]
+name = "gitleaks"
+
+[[plugin]]
+name = "osv-scanner"
+
+[[plugin]]
+name = "radarlint-iac"
+mode = "monitor"
+
+[[plugin]]
+name = "trivy"
+
+[[plugin]]
+name = "trufflehog"
+
+[[plugin]]
+name = "zizmor"

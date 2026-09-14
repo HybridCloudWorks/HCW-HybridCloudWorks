@@ -1,0 +1,98 @@
+# Test coverage for frontend/ and functions/, uploaded to Qlty (#568).
+#
+# NOT A REQUIRED CHECK, and it must not become one. The required contexts on
+# the `main` ruleset are the jobs in ci.yml (`frontend`, `functions (azure)`
+# and the rest) and they still run `npm test` with no instrumentation, so this
+# workflow adds no time to them: it runs beside them, on the same triggers.
+# Because it is not required, the T-523 doctrine in ci.yml (no `paths:` on a
+# required workflow's pull_request trigger) does not bind it; it still runs
+# on every pull request so Qlty has a coverage report for every head it
+# compares.
+#
+# Coverage configuration lives with each package's tests
+# (frontend/vitest.config.js, functions/vitest.config.js). Both write
+# coverage/lcov.info with repository-relative paths (`frontend/src/...`,
+# `functions/src/...`), so one upload carries both packages and Qlty needs no
+# add-prefix or strip-prefix.
+#
+# THE TOKEN IS OPTIONAL, BY DESIGN. `QLTY_COVERAGE_TOKEN` is a repository
+# secret the owner adds (docs/standards/variables-and-secrets.md, store 4).
+# Until it exists, and on pull requests from forks, which receive no secrets,
+# the tests still run and the upload step is skipped with a notice instead of
+# failing a check nobody can fix from the pull request.
+#
+# The token is read in exactly one step, the one that tests for it, and passed
+# to the upload action as an input. It is never in job-level `env`, so no
+# `npm ci` install script can read it.
+
+name: Coverage
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: coverage-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  coverage:
+    name: coverage (qlty)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22'
+          # No npm cache (#563): a job that runs on pull requests must not
+          # restore a cache another run could have written. setup-node v5+
+          # caches automatically unless told not to.
+          package-manager-cache: false
+
+      - name: Install frontend
+        working-directory: frontend
+        run: npm ci
+
+      - name: Frontend tests with coverage
+        working-directory: frontend
+        run: npm run test:coverage
+
+      - name: Install functions
+        working-directory: functions
+        run: npm ci
+
+      - name: Functions tests with coverage
+        working-directory: functions
+        run: npm run test:coverage
+
+      - name: Check for the Qlty coverage token
+        id: token
+        env:
+          QLTY_COVERAGE_TOKEN: ${{ secrets.QLTY_COVERAGE_TOKEN }}
+        run: |
+          if [ -n "$QLTY_COVERAGE_TOKEN" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Coverage not uploaded::QLTY_COVERAGE_TOKEN is not set for this run (not yet added, or a fork pull request). Tests ran and coverage was generated; the Qlty upload was skipped."
+          fi
+
+      - name: Upload coverage to Qlty
+        if: steps.token.outputs.present == 'true'
+        uses: qltysh/qlty-action/coverage@08a0a862c159eae9b9003081da6663d96efef637 # v2.3.0
+        with:
+          token: ${{ secrets.QLTY_COVERAGE_TOKEN }}
+          format: lcov
+          files: |
+            frontend/coverage/lcov.info
+            functions/coverage/lcov.info
