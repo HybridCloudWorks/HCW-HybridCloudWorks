@@ -45,6 +45,9 @@ const detailFor = (row) => ({
 beforeEach(() => {
   getJSON.mockReset();
   getJSON.mockImplementation(async (route) => {
+    if (route.startsWith('cms/mailing-list/metrics?')) {
+      return { ok: true, totals: { delivered: 1200, unique_opened: 540, open_rate: 0.45 } };
+    }
     if (route.startsWith('cms/newsletters?month=')) {
       return { ok: true, issues: route.endsWith('2026-09') ? [sent, alsoSent, scheduled] : [] };
     }
@@ -174,6 +177,77 @@ describe('NewsletterCalendar', () => {
     fireEvent.click(screen.getByRole('button', { name: /Networking/ }));
     expect(await screen.findByTitle('Published newsletter')).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('adds the month’s delivered and open rate from Resend, for the month on screen', async () => {
+    render(<NewsletterCalendar today={TODAY} />);
+    expect(await screen.findByText('1,200 delivered, 45% average open rate')).toBeInTheDocument();
+    const route = getJSON.mock.calls
+      .map(([r]) => r)
+      .find((r) => r.startsWith('cms/mailing-list/metrics?'));
+    const params = new URLSearchParams(route.split('?')[1]);
+    expect(params.get('start_date')).toBe(new Date(2026, 8, 1).toISOString());
+    expect(params.get('end_date')).toBe(TODAY.toISOString());
+    expect(params.has('broadcast_id')).toBe(false);
+    expect(params.has('issue_id')).toBe(false);
+  });
+
+  it('leaves the month figures out when Resend cannot answer, and keeps the calendar', async () => {
+    const base = getJSON.getMockImplementation();
+    getJSON.mockImplementation(async (route) => {
+      if (route.startsWith('cms/mailing-list/metrics?')) {
+        throw Object.assign(new Error('Resend is not configured'), { status: 503 });
+      }
+      return base(route);
+    });
+    render(<NewsletterCalendar today={TODAY} />);
+    expect(await screen.findByText('2 sent, 1 scheduled in September 2026')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(getJSON.mock.calls.some(([r]) => r.startsWith('cms/mailing-list/metrics?'))).toBe(true)
+    );
+    expect(screen.queryByTestId('month-metrics')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('does not ask Resend about a month with nothing sent', async () => {
+    render(<NewsletterCalendar today={TODAY} />);
+    await screen.findByText('2 sent, 1 scheduled in September 2026');
+    fireEvent.click(screen.getByRole('button', { name: 'Previous month' }));
+    expect(await screen.findByText('Nothing was published in August 2026.')).toBeInTheDocument();
+    expect(
+      getJSON.mock.calls.filter(([r]) => r.startsWith('cms/mailing-list/metrics?'))
+    ).toHaveLength(1);
+    expect(screen.queryByTestId('month-metrics')).not.toBeInTheDocument();
+  });
+
+  it('says metrics come later above a scheduled issue’s email', async () => {
+    render(<NewsletterCalendar today={TODAY} />);
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'September 22: 0 sent, 1 scheduled' })
+    );
+    expect(await screen.findByText('Metrics appear after it sends.')).toBeInTheDocument();
+  });
+
+  it('shows a sent issue’s metrics above its email', async () => {
+    const base = getJSON.getMockImplementation();
+    getJSON.mockImplementation(async (route) => {
+      if (route === `cms/newsletters/${sent.id}`) {
+        const res = await base(route);
+        return { ...res, issue: { ...res.issue, broadcastId: 'b-0001' } };
+      }
+      if (route.startsWith('cms/mailing-list/metrics?issue_id=')) {
+        return { ok: true, totals: { delivered: 100, unique_opened: 50 } };
+      }
+      if (route.includes('/clicked-links')) return { ok: true, links: [] };
+      return base(route);
+    });
+    render(<NewsletterCalendar today={TODAY} />);
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'September 15: 2 sent, 0 scheduled' })
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Landing zones/ }));
+    expect(await screen.findByText('50% open rate')).toBeInTheDocument();
+    expect(getJSON).toHaveBeenCalledWith(`cms/mailing-list/metrics?issue_id=${sent.id}`);
   });
 
   it('says why when the month cannot be loaded', async () => {

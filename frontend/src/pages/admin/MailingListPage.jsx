@@ -9,10 +9,11 @@
  *   Drafts      kept issues, edited and approved; approval schedules it
  *               through Resend only when a publisher confirms
  *   Published   a calendar of what was sent or scheduled, each email viewable
+ *               with Resend's metrics for it, and the month's figures
+ *   Audience    the Newsletter segment in Resend: counts, the contacts a page
+ *               at a time, and (publisher) unsubscribe, resubscribe, remove
  *   Settings    what every issue needs (postal address, reply-to, send slot)
  *               and the Resend connection check, in one place
- *
- * The subscriber list itself is managed in Resend's Audience view.
  *
  * The test posts a NAME to `connectionProbe` and the server builds the call,
  * so `RESEND_API_KEY` never reaches the browser.
@@ -29,12 +30,14 @@ import { postJSON } from '@/lib/api';
 import { countList, unwrapProxy } from '@/lib/proxyEnvelope';
 import NewsletterIssues from '@/components/admin/newsletter/NewsletterIssues';
 import NewsletterCalendar from '@/components/admin/newsletter/NewsletterCalendar';
+import NewsletterAudience from '@/components/admin/newsletter/NewsletterAudience';
 import NewsletterSettingsCard from '@/components/admin/newsletter/NewsletterSettingsCard';
 
 const TABS = [
   { id: 'newsletter', label: 'Newsletter' },
   { id: 'drafts', label: 'Drafts' },
   { id: 'published', label: 'Published' },
+  { id: 'audience', label: 'Audience' },
   { id: 'settings', label: 'Settings' },
 ];
 const TAB_IDS = new Set(TABS.map((tab) => tab.id));
@@ -210,6 +213,7 @@ export default function MailingListPage() {
         {activeTab === 'newsletter' && <NewsletterIssues view="review" />}
         {activeTab === 'drafts' && <NewsletterIssues view="drafts" />}
         {activeTab === 'published' && <NewsletterCalendar />}
+        {activeTab === 'audience' && <NewsletterAudience />}
         {activeTab === 'settings' && <SettingsTab onStatusChange={setConnected} />}
       </div>
     </div>

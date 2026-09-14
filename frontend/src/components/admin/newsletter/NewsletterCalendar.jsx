@@ -9,6 +9,11 @@
  * Days are the viewer's LOCAL dates. The API pads its month window a day each
  * side for exactly this, and anything outside the month on screen is dropped.
  * The preview iframe has an EMPTY sandbox, as on the review panel.
+ *
+ * Resend's numbers sit beside what they describe: the month's delivered and
+ * open rate under the counts (MonthMetricsSummary), and an issue's own metrics
+ * above its email (NewsletterMetrics). Both load after the calendar and
+ * neither blocks it.
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card } from '@/components/ui/card';
@@ -17,6 +22,8 @@ import { Button } from '@/components/ui/button';
 import { AlertCircle, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { getJSON } from '@/lib/api';
 import { formatWhen } from './NewsletterIssues';
+import MonthMetricsSummary from './MonthMetricsSummary';
+import NewsletterMetrics from './NewsletterMetrics';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -164,6 +171,12 @@ export default function NewsletterCalendar({ today = new Date() }) {
           <p className="text-xs text-muted-foreground">
             {counts.sent} sent, {counts.scheduled} scheduled in {monthLabel}
           </p>
+          <MonthMetricsSummary
+            year={cursor.year}
+            month={cursor.month}
+            today={today}
+            enabled={!loading && counts.sent > 0}
+          />
         </div>
         <div className="flex items-center gap-1">
           <Button variant="ghost" size="sm" onClick={() => move(-1)} aria-label="Previous month">
@@ -298,6 +311,7 @@ export default function NewsletterCalendar({ today = new Date() }) {
                 : `Sends ${formatWhen(detail.issue.scheduledAt)}`}
             </span>
           </div>
+          <NewsletterMetrics issue={detail.issue} />
           <iframe
             title="Published newsletter"
             sandbox=""
