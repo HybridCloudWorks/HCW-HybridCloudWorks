@@ -129,6 +129,14 @@ describe('the service registry', () => {
       }
     });
 
+    it('reports Plaud broken when mcpProxy answers ok: false with HTTP 200', async () => {
+      postJSON.mockResolvedValueOnce({ ok: false, error: 'Plaud refused the token' });
+      await expect(runnerFor('plaud')()).rejects.toThrow(/Plaud refused the token/);
+
+      postJSON.mockResolvedValueOnce({ ok: true, result: '[]', raw: {} });
+      await expect(runnerFor('plaud')()).resolves.toMatch(/Connected/);
+    });
+
     it('names the bot a Telegram token belongs to, which is the useful half', async () => {
       postJSON.mockResolvedValueOnce({
         ok: true,

@@ -56,11 +56,16 @@ async function testPubler() {
 
 async function testPlaud() {
   // Same path the Recording Hub's Plaud tab uses — credentials stay server-side in mcpProxy.
-  await postJSON('mcpProxy', {
-    serverId: 'plaud',
-    tool: 'list_files',
-    arguments: { limit: 1 },
-  });
+  // mcpProxy answers `{ ok: false, error }` with HTTP 200 for a tool or upstream
+  // refusal (lib/ai/mcp.js), so the envelope's `ok` is the verdict, as above.
+  unwrapProxy(
+    await postJSON('mcpProxy', {
+      serverId: 'plaud',
+      tool: 'list_files',
+      arguments: { limit: 1 },
+    }),
+    'Plaud'
+  );
   return 'Connected — Plaud MCP responded.';
 }
 
