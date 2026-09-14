@@ -127,6 +127,26 @@ describe('the Newsletter (review) tab', () => {
     expect(frame.getAttribute('srcdoc')).toBe('<p>email body</p>');
   });
 
+  it('warns above the preview when the chosen template is not used', async () => {
+    withIssue({
+      templateProblem: {
+        code: 'TEMPLATE_NOT_PUBLISHED',
+        message: 'The chosen template is not published in Resend.',
+      },
+    });
+    render(<NewsletterIssues view="review" />);
+    expect(
+      await screen.findByText(/shows the built-in design: The chosen template is not published/)
+    ).toBeInTheDocument();
+  });
+
+  it('shows no template warning when the preview is the chosen design', async () => {
+    withIssue({ templateProblem: null });
+    render(<NewsletterIssues view="review" />);
+    await screen.findByTitle('Email preview');
+    expect(screen.queryByText(/shows the built-in design/)).not.toBeInTheDocument();
+  });
+
   it('offers no approval here, only Keep in Drafts', async () => {
     withIssue();
     render(<NewsletterIssues view="review" />);
@@ -313,6 +333,20 @@ describe('the Drafts tab', () => {
         'Add the postal address and reply-to address in Newsletter settings before approving.'
       )
     ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /approve and schedule/i })).not.toBeInTheDocument();
+  });
+
+  it('offers no approval when the chosen template cannot be used', async () => {
+    kept({
+      readyToSend: false,
+      missingSettings: [],
+      templateProblem: {
+        code: 'TEMPLATE_MARKER_MISSING',
+        message: 'The template does not contain the marker.',
+      },
+    });
+    render(<NewsletterIssues view="drafts" />);
+    expect(await screen.findByText(/The chosen template cannot be used yet/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /approve and schedule/i })).not.toBeInTheDocument();
   });
 
@@ -627,6 +661,24 @@ describe('editing a draft', () => {
         etag: 'e2',
       })
     );
+  });
+
+  it('says when a test went out in the built-in design because the template could not be used', async () => {
+    kept({ issue: { sections: SECTIONS } });
+    postJSON.mockResolvedValue({
+      ok: true,
+      sentTo: 'owner@example.com',
+      etag: 'e2',
+      templateProblem: {
+        code: 'TEMPLATE_MARKER_MISSING',
+        message: 'The template does not contain the marker.',
+      },
+    });
+    render(<NewsletterIssues view="drafts" />);
+    fireEvent.click(await screen.findByRole('button', { name: /send test to me/i }));
+    expect(
+      await screen.findByText(/Test sent to owner@example.com. It used the built-in design/)
+    ).toBeInTheDocument();
   });
 
   it("shows the server's message when a test is refused as too soon", async () => {

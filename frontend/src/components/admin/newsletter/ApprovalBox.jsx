@@ -21,6 +21,14 @@ export default function ApprovalBox({ detail, dirty, busy, onApprove }) {
       </p>
     );
   }
+  if (detail.templateProblem) {
+    return (
+      <p role="alert" className="text-sm text-destructive">
+        The chosen template cannot be used yet. {detail.templateProblem.message} Fix it in
+        Newsletter settings or choose the built-in design before approving.
+      </p>
+    );
+  }
   if (!detail.readyToSend) {
     return (
       <p role="alert" className="text-sm text-destructive">

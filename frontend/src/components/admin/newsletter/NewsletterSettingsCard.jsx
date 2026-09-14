@@ -6,8 +6,8 @@
  * send still needs; the approval step, a later change, will refuse to send
  * without them.
  *
- * The Content and Signup form blocks (#557) are part of the same form and the
- * same save: the settings are one document written whole, so one form holds
+ * The Content, Signup form and Template blocks (#557) are part of the same form
+ * and the same save: the settings are one document written whole, so one form holds
  * all of it.
  *
  * Race-safety: each load carries a generation number and only the latest may
@@ -25,6 +25,7 @@ import { Loader2, Save } from 'lucide-react';
 import { getJSON, sendJSON } from '@/lib/api';
 import NewsletterContentFields, { contentProblem } from './NewsletterContentFields';
 import NewsletterSignupFields, { signupProblem } from './NewsletterSignupFields';
+import NewsletterTemplateFields from './NewsletterTemplateFields';
 import { DEFAULT_SIGNUP_CONFIG } from '@/lib/newsletterSignup';
 
 export const NEWSLETTER_SETTINGS_ROUTE = 'cms/platform-settings/newsletter-settings';
@@ -44,6 +45,8 @@ const EMPTY = {
   signupPlacement: DEFAULT_SIGNUP_CONFIG.placement,
   signupHeading: DEFAULT_SIGNUP_CONFIG.heading,
   signupBlurb: DEFAULT_SIGNUP_CONFIG.blurb,
+  // The built-in design; otherwise a Resend template id.
+  templateId: '',
 };
 
 export default function NewsletterSettingsCard({ onSaved }) {
@@ -126,7 +129,8 @@ export default function NewsletterSettingsCard({ onSaved }) {
         <CardDescription>
           Every issue carries your postal address (required by law for commercial email) and sends
           replies to the inbox below. Nothing can be approved until both are filled in. Content sets
-          what each issue is built from, and Signup form sets the box visitors subscribe with.
+          what each issue is built from, Signup form sets the box visitors subscribe with, and
+          Template sets the design the email is laid out in.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -197,6 +201,9 @@ export default function NewsletterSettingsCard({ onSaved }) {
             </div>
             <div className="md:col-span-2">
               <NewsletterSignupFields value={value} onChange={setContent} />
+            </div>
+            <div className="md:col-span-2">
+              <NewsletterTemplateFields value={value} onChange={setContent} />
             </div>
             <div className="md:col-span-2 flex flex-wrap items-center gap-3">
               <Button type="submit" disabled={saving} className="gap-2">

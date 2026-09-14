@@ -66,6 +66,16 @@ export const DEFAULT_SIGNUP_HEADING = 'Stay ahead of the cloud curve.';
 export const DEFAULT_SIGNUP_BLURB =
   'Practical hybrid & multi-cloud insights, straight to your inbox. No spam — unsubscribe anytime.';
 
+/**
+ * ## Template (#557)
+ *
+ * The Resend template the email is laid out in (template-layout.js), by id.
+ * An empty string is the built-in design, which is the default and what a
+ * document saved before this field existed normalizes to.
+ */
+export const TEMPLATE_ID_PATTERN = /^[A-Za-z0-9-]{1,64}$/;
+export const BUILT_IN_TEMPLATE_ID = '';
+
 export const DEFAULT_NEWSLETTER_SETTINGS = Object.freeze({
   postalAddress: '',
   replyTo: '',
@@ -79,6 +89,7 @@ export const DEFAULT_NEWSLETTER_SETTINGS = Object.freeze({
   signupPlacement: DEFAULT_SIGNUP_PLACEMENT,
   signupHeading: DEFAULT_SIGNUP_HEADING,
   signupBlurb: DEFAULT_SIGNUP_BLURB,
+  templateId: BUILT_IN_TEMPLATE_ID,
 });
 
 /** A fresh, mutable copy of the defaults: the frozen section rows are not shared. */

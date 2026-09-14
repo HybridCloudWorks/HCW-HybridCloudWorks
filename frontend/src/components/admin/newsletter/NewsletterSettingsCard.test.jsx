@@ -36,6 +36,7 @@ const STORED = {
   signupPlacement: 'both',
   signupHeading: 'Stay ahead of the cloud curve.',
   signupBlurb: 'Weekly notes.',
+  templateId: '',
 };
 
 const OPTIONS = {
@@ -102,7 +103,8 @@ describe('NewsletterSettingsCard', () => {
     render(<NewsletterSettingsCard />);
     fireEvent.click(await screen.findByRole('button', { name: /retry/i }));
     expect(await screen.findByLabelText('Postal address')).toHaveValue('PO Box 1');
-    expect(getJSON).toHaveBeenCalledTimes(2);
+    // Two reads of the settings; the template list is a separate route.
+    expect(getJSON.mock.calls.filter(([route]) => route === ROUTE)).toHaveLength(2);
   });
 
   it('saves what is on the form', async () => {
@@ -339,6 +341,96 @@ describe('NewsletterSettingsCard', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(fetchSpy).not.toHaveBeenCalled();
       expect(sendJSON).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Template', () => {
+    const TEMPLATES_ROUTE = 'cms/mailing-list/templates?limit=100';
+    const TEMPLATES = [
+      { id: 'tpl-weekly', name: ' Weekly brand ', status: 'published' },
+      { id: 'tpl-draft', name: 'Work in progress', status: 'draft' },
+    ];
+
+    /** Settings and the template list answered by route; `templates` may be an Error. */
+    function answer({ value = STORED, templates = TEMPLATES } = {}) {
+      getJSON.mockImplementation(async (route) => {
+        if (route === TEMPLATES_ROUTE) {
+          if (templates instanceof Error) throw templates;
+          return { templates };
+        }
+        return { value, options: OPTIONS };
+      });
+    }
+
+    const option = (name) => screen.getByRole('option', { name });
+
+    it('lists the built-in design and the Resend templates, and saves the chosen templateId', async () => {
+      answer();
+      sendJSON.mockImplementation(async (_route, _method, body) => ({ value: body }));
+      render(<NewsletterSettingsCard />);
+      const select = await screen.findByLabelText('Email design');
+      expect(select).toHaveValue('');
+      await screen.findByRole('option', { name: 'Weekly brand (published)' });
+      expect(getJSON).toHaveBeenCalledWith(TEMPLATES_ROUTE);
+      expect(screen.getByRole('link', { name: /open resend templates/i })).toHaveAttribute(
+        'href',
+        'https://resend.com/templates'
+      );
+      expect(screen.getByText(/put \{\{\{NEWSLETTER_BODY\}\}\} where/)).toBeInTheDocument();
+
+      fireEvent.change(select, { target: { value: 'tpl-weekly' } });
+      save();
+      await waitFor(() =>
+        expect(sendJSON).toHaveBeenCalledWith(ROUTE, 'PUT', { ...STORED, templateId: 'tpl-weekly' })
+      );
+      expect(await screen.findByText('Newsletter settings saved.')).toBeInTheDocument();
+      expect(screen.getByLabelText('Email design')).toHaveValue('tpl-weekly');
+    });
+
+    it('shows an unpublished template disabled, with a note', async () => {
+      answer();
+      render(<NewsletterSettingsCard />);
+      await screen.findByRole('option', { name: 'Work in progress (not published)' });
+      expect(option('Work in progress (not published)')).toBeDisabled();
+      expect(option('Weekly brand (published)')).not.toBeDisabled();
+      expect(screen.getByText(/not published cannot be chosen/)).toBeInTheDocument();
+    });
+
+    it('keeps the saved template and says why when the list cannot be loaded', async () => {
+      answer({
+        value: { ...STORED, templateId: 'tpl-weekly' },
+        templates: Object.assign(new Error('Service unavailable'), { status: 503 }),
+      });
+      sendJSON.mockImplementation(async (_route, _method, body) => ({ value: body }));
+      render(<NewsletterSettingsCard />);
+      expect(
+        await screen.findByText(
+          /could not be loaded, so the saved choice is kept: Resend is not configured/
+        )
+      ).toBeInTheDocument();
+      expect(screen.getByLabelText('Email design')).toHaveValue('tpl-weekly');
+      expect(option('Saved template (tpl-weekly), list unavailable')).toBeInTheDocument();
+      save();
+      await waitFor(() =>
+        expect(sendJSON).toHaveBeenCalledWith(ROUTE, 'PUT', { ...STORED, templateId: 'tpl-weekly' })
+      );
+    });
+
+    it('shows no stale list after a failed reload', async () => {
+      let fail = false;
+      getJSON.mockImplementation(async (route) => {
+        if (route !== TEMPLATES_ROUTE) return { value: STORED, options: OPTIONS };
+        if (fail) throw Object.assign(new Error('Too many'), { status: 429, retryAfterSeconds: 3 });
+        return { templates: TEMPLATES };
+      });
+      render(<NewsletterSettingsCard />);
+      await screen.findByRole('option', { name: 'Weekly brand (published)' });
+      fail = true;
+      fireEvent.click(screen.getByRole('button', { name: /reload templates/i }));
+      expect(await screen.findByText(/Wait 3 seconds/)).toBeInTheDocument();
+      expect(
+        screen.queryByRole('option', { name: 'Weekly brand (published)' })
+      ).not.toBeInTheDocument();
     });
   });
 });

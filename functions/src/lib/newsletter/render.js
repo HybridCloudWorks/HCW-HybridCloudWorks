@@ -86,14 +86,17 @@ function preheaderHtml(preheader) {
 }
 
 /**
+ * An issue rendered in pieces: the inner body (intro, note and sections,
+ * WITHOUT the built-in wrapper, header or footer), the compliance footer's
+ * contents and the preheader block. `renderIssue` assembles the built-in
+ * document from exactly these; template-layout.js places the same pieces in
+ * the owner's Resend template. One renderer, so a template carries the body
+ * the built-in design would.
+ *
  * @param {object} issue a stored weekly issue
  * @param {{ postalAddress: string, testSend?: boolean }} settings
- *   `testSend` renders the one-off test email: `{{{RESEND_UNSUBSCRIBE_URL}}}`
- *   is only filled in for a broadcast, so it becomes a harmless `#` and the
- *   footer says so. The broadcast path never passes it.
- * @returns {{ subject: string, html: string, text: string }}
  */
-export function renderIssue(issue, { postalAddress, testSend = false }) {
+export function renderIssueParts(issue, { postalAddress, testSend = false }) {
   const subject = issue.subject;
   const unsubscribe = testSend ? TEST_UNSUBSCRIBE_HREF : UNSUBSCRIBE_PLACEHOLDER;
   const range = formatRange(issue);
@@ -123,26 +126,36 @@ ${item.summary ? `<div style="font-size:15px;line-height:1.55;color:${COLORS.mut
     : '';
   const intro = issue.intro ? `<tr><td style="padding:0 0 8px">${paragraphsHtml(issue.intro, p)}</td></tr>` : '';
 
-  const html = `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(subject)}</title></head>
-<body style="margin:0;padding:0;background:${COLORS.bg};font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
-${preheaderHtml(issue.preheader)}<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${COLORS.bg}"><tr><td align="center" style="padding:24px 12px">
-<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:8px">
-<tr><td style="padding:32px 32px 8px">
-<div style="font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:${COLORS.muted}">HybridCloudWorks Weekly · ${escapeHtml(range)}</div>
-<h1 style="margin:8px 0 20px;font-size:26px;line-height:1.25;color:${COLORS.ink}">${escapeHtml(subject)}</h1>
-</td></tr>
-<tr><td style="padding:0 32px 8px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+  const bodyHtml = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
 ${intro}${note}${sectionHtml}
-</table></td></tr>
-<tr><td style="padding:24px 32px 32px;border-top:1px solid ${COLORS.rule};font-size:13px;line-height:1.6;color:${COLORS.muted}">
-You are receiving this because you subscribed at <a href="${SITE_ORIGIN}" style="color:${COLORS.muted}">hybridcloudworks.com</a>.<br>
-${escapeHtml(postalAddress).replace(/\n/g, '<br>')}<br>
-<a href="${unsubscribe}" style="color:${COLORS.muted}">Unsubscribe</a>${testSend ? `<br>${escapeHtml(TEST_SEND_NOTE)}` : ''}
-</td></tr>
-</table></td></tr></table>
-</body></html>`;
+</table>`;
 
+  const footerHtml = `You are receiving this because you subscribed at <a href="${SITE_ORIGIN}" style="color:${COLORS.muted}">hybridcloudworks.com</a>.<br>
+${addressHtml(postalAddress)}<br>
+<a href="${unsubscribe}" style="color:${COLORS.muted}">Unsubscribe</a>${testSend ? `<br>${escapeHtml(TEST_SEND_NOTE)}` : ''}`;
+
+  return {
+    subject,
+    range,
+    sections,
+    unsubscribe,
+    bodyHtml,
+    footerHtml,
+    preheader: String(issue.preheader ?? '').trim(),
+    preheaderHtml: preheaderHtml(issue.preheader),
+  };
+}
+
+/** The postal address as HTML: escaped, one `<br>` per line. */
+export function addressHtml(postalAddress) {
+  return escapeHtml(postalAddress).replace(/\n/g, '<br>');
+}
+
+/** The built-in footer's text colour, for the footer a template is given. */
+export const FOOTER_COLOR = COLORS.muted;
+
+/** The plain-text part. Every design sends this one: a template shapes only the HTML. */
+function renderIssueText(issue, { subject, range, sections, unsubscribe }, { postalAddress, testSend = false }) {
   const textSections = sections.map((section) =>
     [
       section.title.toUpperCase(),
@@ -153,7 +166,7 @@ ${escapeHtml(postalAddress).replace(/\n/g, '<br>')}<br>
       ),
     ].join('\n\n')
   );
-  const text = [
+  return [
     `HybridCloudWorks Weekly · ${range}`,
     subject,
     issue.intro,
@@ -167,6 +180,46 @@ ${escapeHtml(postalAddress).replace(/\n/g, '<br>')}<br>
   ]
     .filter((part) => typeof part === 'string' && part.trim())
     .join('\n\n');
+}
+
+/**
+ * The parts and the plain text, for a caller that lays the HTML out itself
+ * (template-layout.js).
+ */
+export function renderIssueContent(issue, settings) {
+  const parts = renderIssueParts(issue, settings);
+  return { parts, text: renderIssueText(issue, parts, settings) };
+}
+
+/**
+ * The issue in the built-in design.
+ *
+ * @param {object} issue a stored weekly issue
+ * @param {{ postalAddress: string, testSend?: boolean }} settings
+ *   `testSend` renders the one-off test email: `{{{RESEND_UNSUBSCRIBE_URL}}}`
+ *   is only filled in for a broadcast, so it becomes a harmless `#` and the
+ *   footer says so. The broadcast path never passes it.
+ * @returns {{ subject: string, html: string, text: string }}
+ */
+export function renderIssue(issue, settings) {
+  const { parts, text } = renderIssueContent(issue, settings);
+  const { subject, range, bodyHtml, footerHtml } = parts;
+
+  const html = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(subject)}</title></head>
+<body style="margin:0;padding:0;background:${COLORS.bg};font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
+${parts.preheaderHtml}<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${COLORS.bg}"><tr><td align="center" style="padding:24px 12px">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:8px">
+<tr><td style="padding:32px 32px 8px">
+<div style="font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:${COLORS.muted}">HybridCloudWorks Weekly · ${escapeHtml(range)}</div>
+<h1 style="margin:8px 0 20px;font-size:26px;line-height:1.25;color:${COLORS.ink}">${escapeHtml(subject)}</h1>
+</td></tr>
+<tr><td style="padding:0 32px 8px">${bodyHtml}</td></tr>
+<tr><td style="padding:24px 32px 32px;border-top:1px solid ${COLORS.rule};font-size:13px;line-height:1.6;color:${COLORS.muted}">
+${footerHtml}
+</td></tr>
+</table></td></tr></table>
+</body></html>`;
 
   return { subject, html, text };
 }

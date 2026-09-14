@@ -444,6 +444,8 @@ describe('newsletter settings', () => {
     signupHeading: 'Stay ahead of the cloud curve.',
     signupBlurb:
       'Practical hybrid & multi-cloud insights, straight to your inbox. No spam — unsubscribe anytime.',
+    // The built-in design (#557): no Resend template chosen.
+    templateId: '',
   };
 
   it('defaults to Tuesday 09:00 Central with nothing personal filled in, and every section', () => {
@@ -609,6 +611,32 @@ describe('newsletter settings', () => {
       signupPlacements: ['footer', 'blogEnd', 'both', 'none'],
       signupHeading: { maxLength: 80 },
       signupBlurb: { maxLength: 240 },
+    });
+  });
+
+  describe('template', () => {
+    it('defaults to the built-in design, including for a document saved before the field existed', () => {
+      expect(normalizeNewsletterSettings({}).templateId).toBe('');
+      const legacy = { id: 'newsletter_settings', postalAddress: 'PO Box 1', signupPlacement: 'footer' };
+      const shown = presentSetting('newsletter-settings', legacy);
+      expect(shown.stored).toBe('valid');
+      expect(shown.value.templateId).toBe('');
+    });
+
+    it('keeps a Resend template id, trimmed, and an explicit empty string', () => {
+      expect(normalizeNewsletterSettings({ templateId: ' 34a080c9-b17d-4187-ad80-5af20266e535 ' }).templateId).toBe(
+        '34a080c9-b17d-4187-ad80-5af20266e535'
+      );
+      expect(normalizeNewsletterSettings({ templateId: 'x'.repeat(64) }).templateId).toBe('x'.repeat(64));
+      expect(normalizeNewsletterSettings({ templateId: '   ' }).templateId).toBe('');
+    });
+
+    it('refuses anything that is not an id or not a string', () => {
+      for (const bad of ['a/b', '../templates', 'a.b', 'a b', 'x'.repeat(65), 'id?x=1']) {
+        expectRejects(() => normalizeNewsletterSettings({ templateId: bad }), /templateId must be empty/);
+      }
+      expectRejects(() => normalizeNewsletterSettings({ templateId: 7 }), /templateId must be a string/);
+      expectRejects(() => normalizeNewsletterSettings({ templateId: null }), /templateId must be a string/);
     });
   });
 
@@ -862,6 +890,19 @@ describe('handlers', () => {
     expect(typeof Object.prototype.docId).toBe('undefined');
   });
 
+  it('selects the saved newsletter template in the template cache, so a different one shows on the next preview', async () => {
+    const templateCache = { select: vi.fn() };
+    const h = createPlatformSettingsHandlers({ guard: allowGuard, store: makeStore(), ...fixed, templateCache });
+    const put = await h.putSetting(
+      makeRequest({ params: { setting: 'newsletter-settings' }, body: { templateId: 'tpl-1' } }),
+      context
+    );
+    expect(put.status).toBe(200);
+    expect(templateCache.select).toHaveBeenCalledWith('tpl-1');
+    await h.putSetting(makeRequest({ params: { setting: 'podcast-feeds' }, body: { feeds: [] } }), context);
+    expect(templateCache.select).toHaveBeenCalledTimes(1);
+  });
+
   it('GET reads the document at the admin_config partition', async () => {
     const store = makeStore({
       readDoc: vi.fn(async () => ({
@@ -994,6 +1035,28 @@ describe('handlers', () => {
     expect(line).toContain('"feeds":1');
     expect(line).toContain('audit container throttled');
     expect(line).not.toContain('private-feed');
+  });
+
+  it('a failed audit row for newsletter settings logs that a template is set, never its id', async () => {
+    const log = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const store = makeStore({
+      upsertDoc: vi.fn(async (container, doc) => {
+        if (container === 'admin_audit_logs') throw new Error('audit container throttled');
+        return doc;
+      }),
+    });
+    const h = createPlatformSettingsHandlers({ guard: allowGuard, store, ...fixed });
+    const res = await h.putSetting(
+      makeRequest({
+        params: { setting: 'newsletter-settings' },
+        body: { templateId: 'tpl-secret-design-1234' },
+      }),
+      log
+    );
+    expect(res.status).toBe(200);
+    const line = String(log.warn.mock.calls[0][0]);
+    expect(line).toContain('"templateId":"[set]"');
+    expect(line).not.toContain('tpl-secret-design-1234');
   });
 
   it('a failed config write is a 500 whose log line names the setting, not the document', async () => {
