@@ -21,6 +21,15 @@
  * same draft (keeping the owner's note) instead of creating two drafts that
  * could both be approved. Once an issue is scheduled or sent, a rebuild on
  * that day is refused: the email readers get must be the one that was approved.
+ *
+ * ## Keeping a build in Drafts
+ *
+ * `build({ keep: true, keptBy })` stamps `savedAt`/`savedBy` on the issue it
+ * writes, as the Save-to-Drafts button does, so the issue lands on the Drafts
+ * tab instead of the Newsletter tab. The Monday timer uses it (#504). Keeping
+ * changes where the draft is shown, never its status: it is still a `draft`,
+ * and still needs the owner's approval to send. Every refusal above applies
+ * unchanged, so a keep never overwrites a kept or approved issue.
  */
 import { SECTIONS, collectSections, plainText } from './sections.js';
 
@@ -83,9 +92,10 @@ const defaultSubject = (since, until) => {
  */
 export function createIssueBuilder({ store, drafter, now = () => new Date(), sections = SECTIONS, log }) {
   /**
-   * @param {{ days?: number }} [payload]
+   * @param {{ days?: number, keep?: boolean, keptBy?: string }} [payload]
+   *   `keep` lands the built issue in Drafts; `keptBy` is recorded as `savedBy`.
    */
-  async function build({ days } = {}) {
+  async function build({ days, keep = false, keptBy = null } = {}) {
     const until = now();
     const windowDays = clampWindowDays(days);
     const since = new Date(until.getTime() - windowDays * 24 * 60 * 60 * 1000);
@@ -99,6 +109,7 @@ export function createIssueBuilder({ store, drafter, now = () => new Date(), sec
       return {
         success: false,
         issueId: id,
+        reason: 'kept',
         message: "Today's issue is saved in Drafts, so it is not rebuilt over your edits. Delete it first to build it again.",
       };
     }
@@ -106,6 +117,8 @@ export function createIssueBuilder({ store, drafter, now = () => new Date(), sec
       return {
         success: false,
         issueId: id,
+        reason: 'locked',
+        status: existing.status,
         message: `Today's issue is already ${existing.status}; it is not rebuilt, so readers get the version that was approved.`,
       };
     }
@@ -116,6 +129,7 @@ export function createIssueBuilder({ store, drafter, now = () => new Date(), sec
       return {
         success: false,
         itemCount: 0,
+        reason: 'empty',
         problems: collected.problems,
         message: `Nothing new in the last ${windowDays} days, so no issue was built.`,
       };
@@ -162,15 +176,19 @@ export function createIssueBuilder({ store, drafter, now = () => new Date(), sec
       problems: collected.problems,
       createdAt: existing?.createdAt ?? stamp,
       updatedAt: stamp,
+      ...(keep ? { savedAt: stamp, savedBy: keptBy ? String(keptBy).slice(0, 100) : null } : {}),
     };
     await store.upsertDoc('newsletters', doc);
     return {
       success: true,
       issueId: id,
+      subject,
       itemCount,
+      introError,
+      kept: Boolean(keep),
       sections: collected.sections.map((section) => section.id),
       problems: collected.problems,
-      message: `Drafted ${id} with ${itemCount} item(s). Review and approve it on the Mailing List page.`,
+      message: `Drafted ${id} with ${itemCount} item(s)${keep ? ' and saved it to Drafts' : ''}. Review and approve it on the Mailing List page.`,
     };
   }
 

@@ -683,6 +683,7 @@ is not publicly readable, nothing was evaluated, and the table below says why.
 | `fetchBlogListings`, `scrapeSkillsHubRss`, `forgeScheduled` | draft `content` for review; drafts are not public | no |
 | `generateReviewerDigest` | sends mail; writes nothing | no |
 | `checkLiveLinks`, `reVerifyCertifications` | annotate documents; the annotation is not projected publicly | no |
+| `buildWeeklyNewsletter` | writes a draft `newsletters` issue (kept in Drafts) and pings Telegram; drafts are not public, and it never sends. Added 2026-09-13 (#504), after the waves closed | no |
 | `cleanupSoftDeletedContent` | deletes documents that were never public. **Dry-run until `CONTENT_HARD_DELETE`**, and a mark with neither `deletionRequestedBy` nor `softDeletedReason` is refused. Wave 3a's witness, decided 2026-09-04 (T-766): the per-category `host.json` override `"Function.cleanupSoftDeletedContent": "Information"`, which restores this timer's `Executed` rows and its one summary line per run, idle runs included; remove it when the wave closes | no |
 | `cleanupRejectedContent` | marks aged rejections soft-deleted; the mark is reversible (cleared by any status change) and nothing public sees it | no |
 | `syncSocialCalendarScheduled` | writes `social_posts`, no public route | no |

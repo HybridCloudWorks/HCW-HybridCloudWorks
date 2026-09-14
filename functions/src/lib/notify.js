@@ -32,6 +32,7 @@ export const SOURCE_DISPLAY_NAMES = Object.freeze({
   sendTestNotification: 'a test notification',
   firecrawl: 'the web scraper (Firecrawl)',
   forgeScheduled: 'the scheduled forge pipeline',
+  buildWeeklyNewsletter: 'the Monday newsletter build',
   cleanupRejectedContent: 'the rejected-content cleanup job',
   cleanupSoftDeletedContent: 'the deleted-content cleanup job',
   workflow_alerts: 'the workflow alert monitor',

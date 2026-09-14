@@ -62,6 +62,7 @@ locals {
     MONITOR_PUBLISHING_PIPELINE  = "monitorPublishingPipeline — publishing watchdog, every 6 hours"
     GENERATE_REVIEWER_DIGEST     = "generateReviewerDigest — daily 07:00 UTC reviewer digest e-mail"
     CHECK_LIVE_LINKS             = "checkLiveLinks — weekly Monday 06:00 UTC link check"
+    BUILD_WEEKLY_NEWSLETTER      = "buildWeeklyNewsletter — weekly Monday 13:00 UTC, builds the newsletter issue into Drafts and pings Telegram. Never sends (#504)"
     CLEANUP_REJECTED_CONTENT     = "cleanupRejectedContent — daily 04:00 UTC, deletes rejected documents"
     CLEANUP_SOFT_DELETED_CONTENT = "cleanupSoftDeletedContent — every 4 hours, purges soft-deleted documents (dry-run unless CONTENT_HARD_DELETE; a mark with no recorded origin is never deleted)"
     REVERIFY_CERTIFICATIONS      = "reVerifyCertifications — weekly Sunday 00:00 UTC certification re-verify"
@@ -609,8 +610,8 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     #
     # These are generated from `local.timer_flags` rather than written out here,
     # so turning a timer on is a WORKSPACE VARIABLE edit — add its name to
-    # `enabled_timers` — and not a code change. Eighteen timers turned on one at
-    # a time would otherwise be eighteen pull requests during a cutover window,
+    # `enabled_timers` — and not a code change. Nineteen timers turned on one at
+    # a time would otherwise be nineteen pull requests during a cutover window,
     # which is how a "one at a time, watch each one" procedure quietly becomes
     # "turn them all on and see what breaks".
     #
