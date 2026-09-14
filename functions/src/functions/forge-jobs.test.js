@@ -27,9 +27,14 @@ vi.mock('../lib/newsletter/issue.js', () => ({
 const { resolveForgeTargets, runForgeFromUrl, FORGE_MAX_BATCH } = await import('./forge-jobs.js');
 const { registerJobType } = await import('../lib/jobs.js');
 
+// Registration happens once, on import. Vitest 5 clears mock call history
+// before each test by default, so the import-time calls are copied here
+// before any test runs, rather than read from the mock inside a test.
+const registrations = [...registerJobType.mock.calls];
+
 describe('build-newsletter-issue', () => {
   const worker = () =>
-    registerJobType.mock.calls.find(([name]) => name === 'build-newsletter-issue')[1].worker;
+    registrations.find(([name]) => name === 'build-newsletter-issue')[1].worker;
 
   it('passes no days of its own, so the window saved in Newsletter settings applies (#557)', async () => {
     issueBuild.mockClear();
