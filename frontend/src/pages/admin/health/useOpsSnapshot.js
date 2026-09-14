@@ -40,21 +40,25 @@ export default function useOpsSnapshot(authReady) {
   // first read's "pending, no error" is the initial state, so the effect below
   // starts it without a synchronous setState (react-hooks/set-state-in-effect).
   const read = useCallback(async (mine) => {
+    const current = () => mine === generation.current;
+    let landed = false;
     try {
       const result = await postJSON('getOpsHealthSnapshot', {});
-      if (mine !== generation.current) return false;
-      setSnapshot(result || EMPTY_SNAPSHOT);
-      setLoaded(true);
-      return true;
+      if (current()) {
+        setSnapshot(result || EMPTY_SNAPSHOT);
+        setLoaded(true);
+        landed = true;
+      }
     } catch (err) {
-      if (mine !== generation.current) return false;
-      setSnapshot(EMPTY_SNAPSHOT);
-      setLoaded(false);
-      setError(err?.message || 'Failed to load ops health snapshot.');
-      return false;
+      if (current()) {
+        setSnapshot(EMPTY_SNAPSHOT);
+        setLoaded(false);
+        setError(err?.message || 'Failed to load ops health snapshot.');
+      }
     } finally {
-      if (mine === generation.current) setPending(false);
+      if (current()) setPending(false);
     }
+    return landed;
   }, []);
 
   const refresh = useCallback(() => {

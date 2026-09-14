@@ -40,10 +40,9 @@
  * error on the two tabs that show it, and Checks and Report carry on.
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React from 'react';
 import { useSearchParams } from 'react-router';
 import { useAuthReady } from '@/hooks/useAuthReady';
-import { postJSON } from '@/lib/api';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -57,7 +56,6 @@ import {
   PipelineReadinessCard,
   PublishingOpsCard,
   WorkflowAlertsCard,
-  getAlertActionLabel,
   getAlertStatus,
 } from './health/signals';
 import {
@@ -67,15 +65,14 @@ import {
   SmokeActionsCard,
   TokenClaimsCard,
   buildReport,
-  collectIdentity,
   evaluateIdentity,
   evaluateLabsProbe,
   messageOf,
-  probeUnauthenticated,
-  runLabsProbeSteps,
   useSmokeActions,
 } from './health/probes';
 import { TABS, resolveTab } from './health/tabs';
+import useAlertActions from './health/useAlertActions';
+import useHealthChecks from './health/useHealthChecks';
 import useOpsSnapshot from './health/useOpsSnapshot';
 
 const VERDICT_TONE = {
@@ -369,131 +366,14 @@ export default function HealthPage() {
     setSearchParams({ tab: id });
   };
 
-  // ── Observed ───────────────────────────────────────────────────────────────
   const ops = useOpsSnapshot(authReady);
-  const [alertActionId, setAlertActionId] = useState('');
-  const [alertFilter, setAlertFilter] = useState('open');
-  const [resolutionNotes, setResolutionNotes] = useState({});
-  // The Alerts tab's own outcome line. It used to be written into the smoke
-  // actions' message, which rendered on a card an operator answering an alert
-  // was no longer looking at.
-  const [alertMessage, setAlertMessage] = useState('');
-  const [alertError, setAlertError] = useState('');
-
-  // ── Verified ───────────────────────────────────────────────────────────────
-  const [identity, setIdentity] = useState(null);
-  const [identityBusy, setIdentityBusy] = useState(false);
-  const [labs, setLabs] = useState(null);
-  const [labsBusy, setLabsBusy] = useState(false);
-  const [unauth, setUnauth] = useState(null);
-  const [unauthBusy, setUnauthBusy] = useState(false);
+  const alerts = useAlertActions(ops);
+  const checks = useHealthChecks(authReady);
+  const { identity, identityBusy, labs, labsBusy, unauth, unauthBusy } = checks;
 
   // A smoke action writes what the snapshot reads, so it re-reads it — through
   // the same generation guard as every other read.
   const smoke = useSmokeActions(ops.refresh);
-
-  // One identity run at a time. The first run and a re-run go through the
-  // same gate: a click while a run is in flight is ignored rather than
-  // starting a second run whose result would race the first (last to resolve
-  // would win). Each run carries a sequence number, so a result from a run
-  // that was superseded — or torn down by a route change — is discarded
-  // instead of being applied over a newer one.
-  const identitySeq = useRef(0);
-  const identityInFlight = useRef(false);
-
-  const runIdentity = useCallback(async () => {
-    if (identityInFlight.current) return false;
-    identityInFlight.current = true;
-    identitySeq.current += 1;
-    const seq = identitySeq.current;
-    try {
-      const result = await collectIdentity();
-      if (seq === identitySeq.current) setIdentity(result);
-    } finally {
-      if (seq === identitySeq.current) identityInFlight.current = false;
-    }
-    return true;
-  }, []);
-
-  useEffect(() => {
-    if (!authReady) return undefined;
-    runIdentity();
-    return () => {
-      // Supersede whatever is in flight: its result is dropped and the gate
-      // reopens for the next mount.
-      identitySeq.current += 1;
-      identityInFlight.current = false;
-    };
-  }, [authReady, runIdentity]);
-
-  const rerunIdentity = useCallback(async () => {
-    if (identityInFlight.current) return;
-    setIdentityBusy(true);
-    try {
-      await runIdentity();
-    } finally {
-      setIdentityBusy(false);
-    }
-  }, [runIdentity]);
-
-  // The first run has no busy flag of its own — `identity === null` is that
-  // state — so the button reads both.
-  const identityRunning = identityBusy || identity === null;
-
-  const runLabs = useCallback(async () => {
-    setLabsBusy(true);
-    try {
-      setLabs(await runLabsProbeSteps());
-    } catch (err) {
-      // The steps record their own failures; this is a throw from outside
-      // them. Shown in the panel as a failed probe, never left as a stuck
-      // spinner with every button disabled.
-      setLabs({
-        enqueue: null,
-        read: null,
-        cancel: null,
-        final: null,
-        error: messageOf(err, 'the probe threw before it could record a result'),
-      });
-    } finally {
-      setLabsBusy(false);
-    }
-  }, []);
-
-  const runUnauth = useCallback(async () => {
-    setUnauthBusy(true);
-    try {
-      setUnauth(await probeUnauthenticated());
-    } catch (err) {
-      setUnauth({
-        httpStatus: null,
-        error: messageOf(err, 'the probe threw before it could record a result'),
-      });
-    } finally {
-      setUnauthBusy(false);
-    }
-  }, []);
-
-  const handleAlertAction = async (alertId, action) => {
-    setAlertError('');
-    setAlertMessage('');
-    setAlertActionId(`${alertId}:${action}`);
-    try {
-      const resolutionNote = resolutionNotes[alertId] || '';
-      await postJSON('updateWorkflowAlert', { alertId, action, resolutionNote });
-      if (action === 'resolve') {
-        setResolutionNotes((prev) => ({ ...prev, [alertId]: '' }));
-      }
-      setAlertMessage(`${getAlertActionLabel(action)} alert ${alertId}.`);
-      // The write landed whatever the re-read does; a failed re-read is the
-      // snapshot's error, shown on this tab beneath the message.
-      await ops.refresh();
-    } catch (error) {
-      setAlertError(error.message || `Failed to ${action} alert.`);
-    } finally {
-      setAlertActionId('');
-    }
-  };
 
   const { snapshot } = ops;
   const readiness = snapshot.readiness || EMPTY_READINESS;
@@ -503,7 +383,7 @@ export default function HealthPage() {
     readiness,
     digestForDisplay,
     operationalSignals: snapshot.operationalSignals || EMPTY_SIGNALS,
-    filteredAlerts: allAlerts.filter((row) => getAlertStatus(row) === alertFilter),
+    filteredAlerts: allAlerts.filter((row) => getAlertStatus(row) === alerts.filter),
     openAlertCount: allAlerts.filter((row) => getAlertStatus(row) === 'open').length,
     publishingOps: digestForDisplay?.publishingOps || null,
     publishingWatchdog: digestForDisplay?.publishingWatchdog || null,
@@ -563,22 +443,13 @@ export default function HealthPage() {
         <ActivePanel
           ops={ops}
           derived={derived}
-          alerts={{
-            filter: alertFilter,
-            setFilter: setAlertFilter,
-            actionId: alertActionId,
-            resolutionNotes,
-            setResolutionNotes,
-            handleAction: handleAlertAction,
-            message: alertMessage,
-            error: alertError,
-          }}
+          alerts={alerts}
           smoke={smoke}
           identity={identity}
-          identityRunning={identityRunning}
-          rerunIdentity={rerunIdentity}
+          identityRunning={checks.identityRunning}
+          rerunIdentity={checks.rerunIdentity}
           labs={labs}
-          probes={{ labs, labsBusy, runLabs, unauth, unauthBusy, runUnauth }}
+          probes={checks}
           report={report}
           settling={settling}
           copyReport={copyReport}
