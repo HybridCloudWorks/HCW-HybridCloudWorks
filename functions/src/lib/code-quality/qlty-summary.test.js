@@ -12,6 +12,7 @@ import {
   pickMetrics,
   CODE_QUALITY_CACHE_MS,
   MAX_PAGES,
+  TIME_BUDGET_MS,
   PAGE_SIZE,
   QLTY_PROJECT_URL,
 } from './qlty-summary.js';
@@ -175,9 +176,33 @@ describe('GET cms/code-quality', () => {
     const pages = Array.from({ length: MAX_PAGES + 5 }, () => [issue()]);
     const { handlers, fetch } = build({ fetch: makeQlty({ pages }) });
     const answer = body(await handlers.summary({}, context()));
-    expect(answer.truncated).toBe(true);
+    expect(answer.truncated).toBe('pages');
     expect(answer.total).toBe(MAX_PAGES);
     expect(fetch).toHaveBeenCalledTimes(MAX_PAGES + 1);
+  });
+
+  it('stops starting pages when the time budget runs out, and does not cache the partial answer', async () => {
+    let clock = NOW.getTime();
+    const pages = Array.from({ length: 10 }, () => [issue()]);
+    const qlty = makeQlty({ pages });
+    // Each Qlty call takes 20 s of the budget.
+    const fetch = vi.fn(async (...args) => {
+      clock += 20_000;
+      return qlty(...args);
+    });
+    const { handlers } = build({ fetch, now: () => new Date(clock) });
+
+    const answer = body(await handlers.summary({}, context()));
+    expect(answer).toMatchObject({ ok: true, truncated: 'time' });
+    // Metrics ends at 20 s, page 1 at 40 s, page 2 at 60 s; with the 60 s
+    // budget spent, page 3 is never started.
+    expect(TIME_BUDGET_MS).toBe(60_000);
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(answer.total).toBe(2);
+
+    const calls = fetch.mock.calls.length;
+    await handlers.summary({}, context());
+    expect(fetch.mock.calls.length).toBeGreaterThan(calls);
   });
 
   it('serves a success from cache for ten minutes, then reads Qlty again', async () => {

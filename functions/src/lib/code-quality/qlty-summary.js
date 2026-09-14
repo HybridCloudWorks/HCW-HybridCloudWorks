@@ -14,6 +14,13 @@
  * cached per process for CODE_QUALITY_CACHE_MS, successes only, so a page left
  * open and refreshed does not spend the limit.
  *
+ * WHY IT HAS A TIME BUDGET. Pages are sequential, each with its own 15 s
+ * timeout, so a slow Qlty could hold the request far past the platform's HTTP
+ * limit and the caller would see only a gateway timeout. After TIME_BUDGET_MS
+ * no further page is started: the counts so far are returned with
+ * `truncated: 'time'`, and that partial answer is not cached, so the next load
+ * tries again.
+ *
  * LOGGING is content-free, as in lib/newsletter/insights-handlers.js: the
  * route name, an HTTP status and the invocation id. The token is only ever in
  * an Authorization header and is never logged or returned.
@@ -31,6 +38,7 @@ export const CODE_QUALITY_CACHE_MS = 10 * 60 * 1000;
 export const PAGE_SIZE = 100;
 export const MAX_PAGES = 50;
 export const TOP_LIMIT = 10;
+export const TIME_BUDGET_MS = 60_000;
 const REQUEST_TIMEOUT_MS = 15_000;
 
 /** Qlty's levels, most severe first. */
@@ -192,12 +200,14 @@ function refused(route, result, context) {
 }
 
 /**
- * Every open issue, paged up to MAX_PAGES. `{ issues, truncated }`, or
- * `{ refusal }` holding the first failed page.
+ * Every open issue, paged up to MAX_PAGES and while `outOfTime()` is false.
+ * `{ issues, truncated: false | 'pages' | 'time' }`, or `{ refusal }` holding
+ * the first failed page.
  */
-async function listOpenIssues(get, base) {
+async function listOpenIssues(get, base, outOfTime) {
   const issues = [];
   for (let page = 0; page < MAX_PAGES; page += 1) {
+    if (page > 0 && outOfTime()) return { issues, truncated: 'time' };
     const query = `page%5Blimit%5D=${PAGE_SIZE}&page%5Boffset%5D=${page * PAGE_SIZE}&status=open`;
     const listed = await get(`${base}/issues?${query}`);
     if (!listed.ok) return { refusal: listed };
@@ -205,15 +215,15 @@ async function listOpenIssues(get, base) {
     issues.push(...rows.map(minimalIssue));
     if (listed.data?.meta?.hasMore !== true || rows.length === 0) return { issues, truncated: false };
   }
-  return { issues, truncated: true };
+  return { issues, truncated: 'pages' };
 }
 
 /** Metrics and every open issue, condensed. `{ value }` or `{ refusal }`. */
-async function readProject(get, at) {
+async function readProject(get, at, outOfTime) {
   const base = `/gh/${encodeURIComponent(QLTY_OWNER)}/projects/${encodeURIComponent(QLTY_PROJECT)}`;
   const metrics = await get(`${base}/metrics`);
   if (!metrics.ok) return { refusal: metrics };
-  const listed = await listOpenIssues(get, base);
+  const listed = await listOpenIssues(get, base, outOfTime);
   if (listed.refusal) return listed;
   return {
     value: {
@@ -247,7 +257,7 @@ export function createCodeQualityHandlers({
   fetch: fetchImpl = globalThis.fetch,
   now = () => new Date(),
 }) {
-  /** Per process: `{ at, value }` of the last successful summary. */
+  /** Per process: `{ at, value }` of the last complete summary. */
   let cache = null;
 
   const answer = (entry) =>
@@ -258,10 +268,12 @@ export function createCodeQualityHandlers({
     const at = now().getTime();
     if (cache && at - cache.at < CODE_QUALITY_CACHE_MS) return answer(cache);
     try {
-      const read = await readProject((path) => qltyGet(fetchImpl, path, token), at);
+      const outOfTime = () => now().getTime() - at >= TIME_BUDGET_MS;
+      const read = await readProject((path) => qltyGet(fetchImpl, path, token), at, outOfTime);
       if (read.refusal) return refused(route, read.refusal, context);
-      cache = { at, value: read.value };
-      return answer(cache);
+      const entry = { at, value: read.value };
+      if (read.value.truncated !== 'time') cache = entry;
+      return answer(entry);
     } catch (error) {
       context.error?.(`${route} failed ${text(error?.name, 'Error')} ${ref(context)}`);
       return json(500, { ok: false, error: 'The Code and Security request failed.' });
