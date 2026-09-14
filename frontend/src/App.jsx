@@ -15,6 +15,8 @@ import { ThemeProvider } from '@/context/ThemeContext';
 // A bare string module, deliberately: importing this from msalConfig.js would
 // drag MSAL onto every public route (#520).
 import { AUTH_REDIRECT_PATH } from '@/lib/authRoutes';
+// Plain data, so the Integrations Hub page itself stays lazily loaded (#570).
+import { LEGACY_ROUTES as INTEGRATIONS_LEGACY_ROUTES } from '@/components/admin/integrations/tabs';
 
 const lazyPage = (loader) => lazy(loader);
 
@@ -446,8 +448,10 @@ function App() {
                 <Route path="mailing-list" element={<AdminMailingListPage />} />
                 <Route path="ops-health" element={<Navigate to="/admin/health" replace />} />
                 <Route path="diagnostics" element={<Navigate to="/admin/health" replace />} />
-                <Route path="connections" element={<Navigate to="/admin/integrations" replace />} />
-                <Route path="api-keys" element={<Navigate to="/admin/integrations" replace />} />
+                {/* #570: the two pages the Integrations Hub replaced land on their tab. */}
+                {INTEGRATIONS_LEGACY_ROUTES.map(({ path, to }) => (
+                  <Route key={path} path={path} element={<Navigate to={to} replace />} />
+                ))}
                 <Route path="labs" element={<AdminLabsPage />} />
                 <Route path="listen-and-learn" element={<AdminListenAndLearnPage />} />
                 <Route path="*" element={<NotFoundPage />} />
