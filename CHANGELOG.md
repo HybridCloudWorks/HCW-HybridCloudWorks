@@ -19,6 +19,11 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **A Settings tab on the Mailing List page (#504).** Newsletter settings no
+  longer sit under the issues, and the Connection tab is gone: both are on
+  **Settings**, the last tab. A bookmark to the old Connection tab opens
+  Settings.
+
 - **Newsletter, Drafts and Published tabs on the Mailing List page (#504).**
   The owner's layout of 2026-09-13. **Newsletter** builds this week's issue for
   review; each issue card has a red X that deletes it at once, and **Keep in

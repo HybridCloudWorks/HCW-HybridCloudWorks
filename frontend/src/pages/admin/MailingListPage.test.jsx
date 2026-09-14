@@ -19,7 +19,7 @@ import MailingListPage from './MailingListPage';
 
 const postJSON = vi.fn();
 const runJob = vi.fn();
-let searchParams = 'tab=connection';
+let searchParams = 'tab=settings';
 
 const getJSON = vi.fn();
 
@@ -46,7 +46,7 @@ beforeEach(() => {
   getJSON.mockImplementation(async (route) =>
     route === 'cms/newsletters' ? { ok: true, issues: [] } : { value: {} }
   );
-  searchParams = 'tab=connection';
+  searchParams = 'tab=settings';
 });
 
 describe('Test Connection', () => {
@@ -149,19 +149,37 @@ describe('The newsletter tab', () => {
     expect(runJob).toHaveBeenCalledWith('build-newsletter-issue', { days: 7 });
   });
 
-  it('shows the newsletter settings on the same tab', async () => {
-    searchParams = 'tab=newsletter';
+  it('keeps newsletter settings and the Resend connection on the Settings tab', async () => {
+    searchParams = 'tab=settings';
     postJSON.mockResolvedValue(envelope(true, 200, domains([])));
     render(<MailingListPage />);
     expect(await screen.findByLabelText('Postal address')).toBeInTheDocument();
     expect(screen.getByLabelText('Reply-to address')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /test connection/i })).toBeInTheDocument();
   });
 
-  it('has Newsletter, Drafts, Published and Connection tabs, in that order', () => {
+  it('no longer shows settings under the issues', async () => {
+    searchParams = 'tab=newsletter';
+    postJSON.mockResolvedValue(envelope(true, 200, domains([])));
+    render(<MailingListPage />);
+    expect(
+      await screen.findByRole('button', { name: /build this week's issue/i })
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText('Postal address')).not.toBeInTheDocument();
+  });
+
+  it('sends an old Connection bookmark to Settings', async () => {
     searchParams = 'tab=connection';
     postJSON.mockResolvedValue(envelope(true, 200, domains([])));
     render(<MailingListPage />);
-    const labels = ['Newsletter', 'Drafts', 'Published', 'Connection'];
+    expect(await screen.findByRole('button', { name: /test connection/i })).toBeInTheDocument();
+  });
+
+  it('has Newsletter, Drafts, Published and Settings tabs, in that order', () => {
+    searchParams = 'tab=settings';
+    postJSON.mockResolvedValue(envelope(true, 200, domains([])));
+    render(<MailingListPage />);
+    const labels = ['Newsletter', 'Drafts', 'Published', 'Settings'];
     const tabs = screen.getAllByRole('button').filter((b) => labels.includes(b.textContent));
     expect(tabs.map((b) => b.textContent)).toEqual(labels);
   });
