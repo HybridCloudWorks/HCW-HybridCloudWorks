@@ -79,7 +79,11 @@ afterEach(() => {
   delete navigator.clipboard;
 });
 
-const domainButton = async (name) => screen.findByRole('button', { name: new RegExp(name) });
+// Substring matchers, not RegExps: a hostname in a RegExp is an unanchored,
+// unescaped pattern, which CodeQL rightly flags even in a test.
+const includes = (text) => (value) => value.includes(text);
+
+const domainButton = async (name) => screen.findByRole('button', { name: includes(name) });
 
 const openNews = async () => {
   render(<ResendDomains />);
@@ -113,7 +117,7 @@ describe('ResendDomains', () => {
     expect(within(table).getByText('resend._domainkey')).toBeInTheDocument();
     expect(within(table).getByText('10')).toBeInTheDocument();
     expect(within(table).getByText('not started')).toBeInTheDocument();
-    expect(screen.getByText(/Cloudflare for hybridcloudworks.com/)).toBeInTheDocument();
+    expect(screen.getByText(includes('Cloudflare for hybridcloudworks.com'))).toBeInTheDocument();
     expect(screen.getByText('Open tracking off · Click tracking on')).toBeInTheDocument();
     expect(screen.getByRole('switch', { name: 'Open tracking' })).toHaveAttribute(
       'aria-checked',
@@ -214,7 +218,7 @@ describe('ResendDomains', () => {
     expect(screen.getByLabelText('Region')).toHaveValue('us-east-1');
     fireEvent.change(screen.getByLabelText('Domain name'), { target: { value: 'not a domain' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add domain' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent(/news.example.com/);
+    expect(await screen.findByRole('alert')).toHaveTextContent('news.example.com');
     expect(sendJSON).not.toHaveBeenCalled();
   });
 
@@ -231,7 +235,7 @@ describe('ResendDomains', () => {
   it('offers no delete, and points to Resend for it', async () => {
     await openNews();
     expect(screen.queryByRole('button', { name: /delete|remove/i })).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /resend.com\/domains/ })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: includes('resend.com/domains') })).toHaveAttribute(
       'href',
       'https://resend.com/domains'
     );
