@@ -3,8 +3,9 @@
  *
  * A client and not `rest-proxy.js`, for the reason `connection-probe.js` gives:
  * nothing here takes a path from a caller. Every URL is built from a fixed
- * template, and the only caller-derived value in any of them is an email
- * address, which is percent-encoded into its path segment.
+ * template. The caller-derived values are an email address, a Resend id, a
+ * cursor or a validated query value, each percent-encoded into its own path
+ * segment or query parameter; the handlers validate them first.
  *
  * Every method answers `{ ok, status, data }` and never throws for an HTTP
  * failure, so the caller decides what a 404 or a 422 means in its own flow.
@@ -22,6 +23,20 @@
  *   GET    /contacts/{id|email}/segments             { data: [{ id, name }] }
  *   POST   /contacts/{id|email}/segments/{segmentId}
  *   POST   /broadcasts                               { segment_id, from, reply_to, subject, html, text, name, send, scheduled_at }
+ *
+ * Read for the Mailing List page (insights-handlers.js), same date:
+ *   GET    /emails/metrics?start_date&end_date&metrics&dimensions&granularity&broadcast_id
+ *   GET    /broadcasts/{id}/clicked-links?limit&after
+ *   GET    /broadcasts/{id}/recipients?type&limit&after
+ *   GET    /segments/{id}/contacts?limit&after
+ *   DELETE /contacts/{id|email}
+ *   GET    /domains, GET /domains/{id}, POST /domains { name, region },
+ *   POST   /domains/{id}/verify, PATCH /domains/{id} { open_tracking, click_tracking }
+ *   GET    /logs?limit&after, GET /logs/{id}
+ *   GET    /emails?limit&after
+ *   GET    /templates?limit&after, GET /templates/{id}
+ *
+ * A 429 also carries `retryAfter`, Resend's `retry-after` header as sent.
  *
  * `segments` on create is an array of OBJECTS, `[{ id }]`, not of strings —
  * the documentation's wording suggests otherwise and `resend/resend-node#854`
@@ -69,10 +84,32 @@ export function createResendClient({ apiKey, fetch: fetchImpl = globalThis.fetch
     } catch {
       data = { raw: text.slice(0, 2000) };
     }
-    return { ok: response.ok, status: response.status, data };
+    const result = { ok: response.ok, status: response.status, data };
+    if (response.status === 429) {
+      // Resend's rate limit is per team; the header says how long to wait.
+      const header = response.headers?.get?.('retry-after');
+      result.retryAfter = typeof header === 'string' ? header : null;
+    }
+    return result;
   }
 
   const contactPath = (email) => `/contacts/${encodeURIComponent(email)}`;
+  const seg = (value) => encodeURIComponent(String(value));
+
+  /**
+   * A query string from fixed keys. Values are validated by the caller; this
+   * only drops the absent ones and percent-encodes the rest.
+   */
+  const qs = (params) => {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value === undefined || value === null || value === '') continue;
+      search.set(key, String(value));
+    }
+    const text = search.toString();
+    return text ? `?${text}` : '';
+  };
+  const page = ({ limit, after } = {}) => ({ limit, after });
 
   return {
     sendEmail: (message) => call('POST', '/emails', message),
@@ -104,5 +141,45 @@ export function createResendClient({ apiKey, fetch: fetchImpl = globalThis.fetch
         send: true,
         ...(scheduledAt ? { scheduled_at: scheduledAt } : {}),
       }),
+
+    // ── Reads and configuration for the Mailing List page (insights-handlers.js).
+    // None of these sends email. List-type metric parameters are sent
+    // comma-separated, which Resend documents as equivalent to repeating them.
+    getEmailMetrics: ({ startDate, endDate, metrics, dimensions, granularity, broadcastId }) =>
+      call(
+        'GET',
+        `/emails/metrics${qs({
+          start_date: startDate,
+          end_date: endDate,
+          metrics: metrics?.join(','),
+          dimensions: dimensions?.join(','),
+          granularity,
+          broadcast_id: broadcastId,
+        })}`
+      ),
+    listBroadcastClickedLinks: (broadcastId, options) =>
+      call('GET', `/broadcasts/${seg(broadcastId)}/clicked-links${qs(page(options))}`),
+    listBroadcastRecipients: (broadcastId, { type, limit, after } = {}) =>
+      call('GET', `/broadcasts/${seg(broadcastId)}/recipients${qs({ type, limit, after })}`),
+    listSegmentContacts: (segmentId, options) =>
+      call('GET', `/segments/${seg(segmentId)}/contacts${qs(page(options))}`),
+    // By Resend contact id: the admin routes never put an address in a path.
+    setContactUnsubscribed: (contactId, unsubscribed) =>
+      call('PATCH', `/contacts/${seg(contactId)}`, { unsubscribed: Boolean(unsubscribed) }),
+    deleteContact: (contactId) => call('DELETE', `/contacts/${seg(contactId)}`),
+    listDomains: () => call('GET', '/domains'),
+    getDomain: (domainId) => call('GET', `/domains/${seg(domainId)}`),
+    createDomain: ({ name, region }) => call('POST', '/domains', { name, ...(region ? { region } : {}) }),
+    verifyDomain: (domainId) => call('POST', `/domains/${seg(domainId)}/verify`),
+    updateDomainTracking: (domainId, { openTracking, clickTracking }) =>
+      call('PATCH', `/domains/${seg(domainId)}`, {
+        ...(openTracking === undefined ? {} : { open_tracking: openTracking }),
+        ...(clickTracking === undefined ? {} : { click_tracking: clickTracking }),
+      }),
+    listLogs: (options) => call('GET', `/logs${qs(page(options))}`),
+    getLog: (logId) => call('GET', `/logs/${seg(logId)}`),
+    listEmails: (options) => call('GET', `/emails${qs(page(options))}`),
+    listTemplates: (options) => call('GET', `/templates${qs(page(options))}`),
+    getTemplate: (templateId) => call('GET', `/templates/${seg(templateId)}`),
   };
 }

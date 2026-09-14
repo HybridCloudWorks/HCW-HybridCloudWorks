@@ -19,8 +19,26 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Resend metrics, audience, domains, logs and templates for the Mailing List
+  page, in the API (#504).** The owner wants Resend's numbers and settings on
+  the site rather than in Resend's dashboard; this is the API half, and the
+  Metrics, Audience and Settings → Resend pages follow. New routes under
+  `/api/cms/mailing-list/`: `metrics` (by broadcast, or by newsletter issue,
+  defaulting to the last 30 days), a broadcast's `clicked-links` and
+  `recipients`, one page of the Newsletter `audience` plus a cached
+  `audience/summary` of subscribed and unsubscribed counts, `domains` with
+  their DNS records, `logs` (bodies only on the detail, with credentials and
+  email addresses redacted), recent `emails` with masked recipients, and
+  `templates`. Reads need editor. **No route sends email.** The ones that
+  write to Resend — unsubscribing or deleting a contact, and adding,
+  verifying or changing tracking on a domain — are publisher-only; deleting a
+  domain is deliberately not offered. Every id, cursor, date, address and
+  limit is validated before Resend is called, a Resend refusal comes back as a
+  502 carrying Resend's reason (a rate limit as a 429 with the wait), and log
+  lines carry no addresses.
+
 - **Faster newsletter editing on the Mailing List page (#504).** The page half
-  of the API change below. A draft on the Newsletter or Drafts tab now opens
+  of the editing API change further down. A draft on the Newsletter or Drafts tab now opens
   with the subject, a **Suggest subjects** button whose three to five AI
   suggestions fill the subject when clicked, a **Preview text** field with a
   150-character counter, and the note. The action bar holds Save changes,
@@ -36,6 +54,7 @@ This project has not cut a tagged release; entries are grouped under
   stale. Frontend only; **nothing on the page reaches subscribers except the
   unchanged Approve**. `IssueDetail`, `SectionEditor`, `ApprovalBox` and
   `issueFormat` are split out of `NewsletterIssues.jsx`.
+
 - **Faster newsletter editing in the API: preview text, section trimming, AI
   intro and subject help, and a test send (#504).** The owner found editing a
   weekly issue "still very stiff"; this is the API half, the page follows.
