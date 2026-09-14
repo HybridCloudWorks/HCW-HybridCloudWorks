@@ -43,6 +43,8 @@ export const MOVED_TABS = Object.freeze({
 /** The tab to show for a `?tab=` value: its own, where it moved, or Overview. */
 export function resolveTab(requested) {
   // Own properties only: `?tab=constructor` must not read Object.prototype.
-  const id = Object.hasOwn(MOVED_TABS, requested ?? '') ? MOVED_TABS[requested] : requested;
+  const id = Object.prototype.hasOwnProperty.call(MOVED_TABS, requested ?? '')
+    ? MOVED_TABS[requested]
+    : requested;
   return TAB_IDS.has(id) ? id : DEFAULT_TAB;
 }
