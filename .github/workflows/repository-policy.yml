@@ -44,7 +44,9 @@ jobs:
 
       - name: TODO removals are recorded in the CHANGELOG
         if: github.event_name == 'pull_request'
-        run: node scripts/check-todo-changelog-movement.mjs --base "${{ github.event.pull_request.base.sha }}"
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: node scripts/check-todo-changelog-movement.mjs --base "${BASE_SHA}"
 
       # Parses every .ps1/.psm1 and checks its bytes. Four defects were found in
       # cutover/05-verify-timer.ps1 in one evening on 2026-08-30 — one of them a

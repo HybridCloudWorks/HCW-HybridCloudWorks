@@ -274,13 +274,14 @@ match is the file name `TODO.md` inside an explanatory comment, such as
 | terraform:S1135 | `infra/variables.tf:107` | False positive | Qlty triage rule below |
 
 radarlint has no inline suppression, and its only configuration is
-`.qlty/qlty.toml`. That file is owned by #568 (PR #581), so the rule belongs
-there rather than in a second copy:
+`.qlty/qlty.toml`, where #588 added this rule. The rule key contains a colon,
+so the match needs the plugin prefix; the bare `terraform:S1135` matches
+nothing:
 
 ```toml
 [[triage]]
 match.plugins = ["radarlint-iac"]
-match.rules = ["terraform:S1135"]
+match.rules = ["radarlint-iac:terraform:S1135"]
 match.file_patterns = ["infra/**"]
 set.ignored = true
 ```

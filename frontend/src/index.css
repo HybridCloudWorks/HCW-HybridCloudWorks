@@ -1024,17 +1024,44 @@
   background: linear-gradient(180deg, var(--gradient-start) 0%, var(--gradient-end) 70%);
 }
 
-:is(.theme-azure, .theme-aws, .theme-gcp, .theme-github, .theme-terraform, .theme-finops, .theme-vmware, .theme-ansible)
+:is(
+    .theme-azure,
+    .theme-aws,
+    .theme-gcp,
+    .theme-github,
+    .theme-terraform,
+    .theme-finops,
+    .theme-vmware,
+    .theme-ansible
+  )
   :is(.bg-white, .bg-gray-50, .bg-gray-100) {
   background-color: var(--light-gray) !important;
 }
 
-:is(.theme-azure, .theme-aws, .theme-gcp, .theme-github, .theme-terraform, .theme-finops, .theme-vmware, .theme-ansible)
+:is(
+    .theme-azure,
+    .theme-aws,
+    .theme-gcp,
+    .theme-github,
+    .theme-terraform,
+    .theme-finops,
+    .theme-vmware,
+    .theme-ansible
+  )
   :is(.border-gray-200, .border-gray-100) {
   border-color: var(--border-gray) !important;
 }
 
-:is(.theme-azure, .theme-aws, .theme-gcp, .theme-github, .theme-terraform, .theme-finops, .theme-vmware, .theme-ansible)
+:is(
+    .theme-azure,
+    .theme-aws,
+    .theme-gcp,
+    .theme-github,
+    .theme-terraform,
+    .theme-finops,
+    .theme-vmware,
+    .theme-ansible
+  )
   .divide-gray-300
   > :not([hidden])
   ~ :not([hidden]) {
@@ -1042,22 +1069,60 @@
 }
 
 /* Header/footer chrome — per-theme background via --header-bg/--header-blur */
-:is(.theme-azure, .theme-aws, .theme-gcp, .theme-github, .theme-terraform, .theme-finops, .theme-vmware, .theme-ansible)
+:is(
+    .theme-azure,
+    .theme-aws,
+    .theme-gcp,
+    .theme-github,
+    .theme-terraform,
+    .theme-finops,
+    .theme-vmware,
+    .theme-ansible
+  )
   :is(header, footer) {
   background-color: var(--header-bg);
   -webkit-backdrop-filter: blur(var(--header-blur));
   backdrop-filter: blur(var(--header-blur));
 }
 
-:is(.theme-azure, .theme-aws, .theme-gcp, .theme-github, .theme-terraform, .theme-finops, .theme-vmware, .theme-ansible) header {
+:is(
+    .theme-azure,
+    .theme-aws,
+    .theme-gcp,
+    .theme-github,
+    .theme-terraform,
+    .theme-finops,
+    .theme-vmware,
+    .theme-ansible
+  )
+  header {
   border-bottom: 2px solid var(--border-gray);
 }
 
-:is(.theme-azure, .theme-aws, .theme-gcp, .theme-github, .theme-terraform, .theme-finops, .theme-vmware, .theme-ansible) footer {
+:is(
+    .theme-azure,
+    .theme-aws,
+    .theme-gcp,
+    .theme-github,
+    .theme-terraform,
+    .theme-finops,
+    .theme-vmware,
+    .theme-ansible
+  )
+  footer {
   border-top: 2px solid var(--border-gray);
 }
 
-:is(.theme-azure, .theme-aws, .theme-gcp, .theme-github, .theme-terraform, .theme-finops, .theme-vmware, .theme-ansible)
+:is(
+    .theme-azure,
+    .theme-aws,
+    .theme-gcp,
+    .theme-github,
+    .theme-terraform,
+    .theme-finops,
+    .theme-vmware,
+    .theme-ansible
+  )
   .blueprint-card {
   background-color: #ffffff;
   border-color: var(--border-gray);
@@ -1066,19 +1131,46 @@
     0 1px 3px -2px rgba(var(--primary-rgb, 100, 116, 139), 0.3);
 }
 
-:is(.theme-azure, .theme-aws, .theme-gcp, .theme-github, .theme-terraform, .theme-finops, .theme-vmware, .theme-ansible)
+:is(
+    .theme-azure,
+    .theme-aws,
+    .theme-gcp,
+    .theme-github,
+    .theme-terraform,
+    .theme-finops,
+    .theme-vmware,
+    .theme-ansible
+  )
   :is(.accent-line, .blueprint-line) {
   background-color: var(--slate-blue);
   height: 4px;
   border-radius: 2px;
 }
 
-:is(.theme-azure, .theme-aws, .theme-gcp, .theme-github, .theme-terraform, .theme-finops, .theme-vmware, .theme-ansible)
+:is(
+    .theme-azure,
+    .theme-aws,
+    .theme-gcp,
+    .theme-github,
+    .theme-terraform,
+    .theme-finops,
+    .theme-vmware,
+    .theme-ansible
+  )
   .btn-primary {
   background-color: var(--slate-blue);
 }
 
-:is(.theme-azure, .theme-aws, .theme-gcp, .theme-github, .theme-terraform, .theme-finops, .theme-vmware, .theme-ansible)
+:is(
+    .theme-azure,
+    .theme-aws,
+    .theme-gcp,
+    .theme-github,
+    .theme-terraform,
+    .theme-finops,
+    .theme-vmware,
+    .theme-ansible
+  )
   .btn-primary:hover {
   background-color: var(--accent-dark);
 }
@@ -1091,7 +1183,16 @@
  * accent color and dropped contrast below WCAG AA. See GH #174.
  * The exclusion list is the superset of all previous per-provider lists.
  */
-:is(.theme-azure, .theme-aws, .theme-gcp, .theme-github, .theme-terraform, .theme-finops, .theme-vmware, .theme-ansible)
+:is(
+    .theme-azure,
+    .theme-aws,
+    .theme-gcp,
+    .theme-github,
+    .theme-terraform,
+    .theme-finops,
+    .theme-vmware,
+    .theme-ansible
+  )
   a:where(
     :not([class*='-primary']):not([class*='bg-blue-']):not([class*='bg-slate-']):not(
         [class*='bg-card']
@@ -1099,12 +1200,30 @@
         [class*='bg-emerald-']
       ):not([class*='bg-teal-'])
   ),
-:is(.theme-azure, .theme-aws, .theme-gcp, .theme-github, .theme-terraform, .theme-finops, .theme-vmware, .theme-ansible)
+:is(
+    .theme-azure,
+    .theme-aws,
+    .theme-gcp,
+    .theme-github,
+    .theme-terraform,
+    .theme-finops,
+    .theme-vmware,
+    .theme-ansible
+  )
   .link-style {
   color: var(--slate-blue);
 }
 
-:is(.theme-azure, .theme-aws, .theme-gcp, .theme-github, .theme-terraform, .theme-finops, .theme-vmware, .theme-ansible)
+:is(
+    .theme-azure,
+    .theme-aws,
+    .theme-gcp,
+    .theme-github,
+    .theme-terraform,
+    .theme-finops,
+    .theme-vmware,
+    .theme-ansible
+  )
   a:where(
     :not([class*='-primary']):not([class*='bg-blue-']):not([class*='bg-slate-']):not(
         [class*='bg-card']
@@ -1112,7 +1231,16 @@
         [class*='bg-emerald-']
       ):not([class*='bg-teal-'])
   ):hover,
-:is(.theme-azure, .theme-aws, .theme-gcp, .theme-github, .theme-terraform, .theme-finops, .theme-vmware, .theme-ansible)
+:is(
+    .theme-azure,
+    .theme-aws,
+    .theme-gcp,
+    .theme-github,
+    .theme-terraform,
+    .theme-finops,
+    .theme-vmware,
+    .theme-ansible
+  )
   .link-style:hover {
   color: var(--link-hover, var(--accent-dark));
 }

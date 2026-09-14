@@ -6579,6 +6579,19 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Security
 
+- **The 21 remaining zizmor template-injection findings are fixed, and Qlty's
+  TODO noise is triaged (#588).** `ci.yml`, `codeql.yml`, `iac-validate.yml`,
+  `repository-policy.yml`, `deploy-functions.yml` and `publish-content-manifest.yml`
+  no longer expand `github.event_name`, `github.run_id`, the pull request base
+  sha or `matrix.*` inside `run:` scripts; each reaches the script through
+  `env:` or the runner's own `$GITHUB_*` variable. None was attacker-controlled,
+  and every command runs with the same values. zizmor 1.30.1 now reports no
+  template-injection. `.qlty/qlty.toml` ignores ripgrep TODO/NOTE/OPTIMIZE and
+  radarlint-iac `terraform:S1135` in `infra/`, keeping FIXME, HACK and BUG; the
+  triage record's rule snippet is corrected, because a rule key containing a
+  colon only matches with its plugin prefix. Three files Qlty's prettier check
+  flagged are formatted.
+
 - **Every security scanner finding on `main` is triaged, and most are
   resolved (#567, closes #562).** `docs/security/scanner-triage.md` has one row
   per finding from a local Qlty run: 113 across zizmor, checkov, trivy, bandit,
