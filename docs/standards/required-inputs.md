@@ -254,6 +254,7 @@ problem. The two cost very different amounts to diagnose.
 | `RESEND-API-KEY` | Newsletter list and sending | ADR 0030. Created at `https://resend.com/api-keys` with **Full access** — a sending-access key cannot manage contacts or broadcasts, and the Integrations page's Resend test refuses it. Seed it before the Terraform run that adds its reference, so `monitor-unresolved-secrets.yml` never sees it unresolved |
 | `RSSCOM-API-KEY` | Podcast publishing | Issued at `https://dashboard.rss.com/api-access/` on the Max plan (ADR 0029 §1b, #437). Unseeded, approving an episode leaves it on the manual upload path |
 | `RSSCOM-PODCAST-ID` | Podcast publishing | The numeric `id` that `GET https://api.rss.com/v4/podcasts` returns for the show; an identifier, not a credential |
+| `QLTY-API-TOKEN` | Health Hub Code and Security tab | #569. A personal access token from `https://qlty.sh/user/settings/tokens`, read-only use: the project's open issues and metrics. Seed it on the Integrations Keys tab before the Terraform run that adds its reference, so `monitor-unresolved-secrets.yml` never sees it unresolved. Unseeded, the tab says Qlty is not configured |
 | `TELEGRAM-BOT-TOKEN` | Notifications | |
 | `TELEGRAM-CHAT-ID` | Notifications | |
 

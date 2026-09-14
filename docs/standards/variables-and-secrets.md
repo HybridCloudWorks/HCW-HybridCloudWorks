@@ -358,6 +358,7 @@ Seeded by hand; referenced from `infra/functionapp.tf` app settings as
 | `RESEND-API-KEY` | not inventoried | Newsletter list and sending (ADR 0030), replacing Klaviyo's two secrets. A Full access key; a sending-access key cannot manage contacts or broadcasts |
 | `RSSCOM-API-KEY`, `RSSCOM-PODCAST-ID` | not inventoried | Podcast publishing over the RSS.com Core API (ADR 0029 §1b, #437). The `-ID` is the show's numeric id, an identifier that travels with its key, as above |
 | `TELEGRAM-BOT-TOKEN`, `TELEGRAM-CHAT-ID` | not inventoried | As above |
+| `QLTY-API-TOKEN` | not inventoried | Qlty personal access token for the Health Hub's Code and Security summary (#569, `lib/code-quality/qlty-summary.js`). Sent only as a Bearer header to `api.qlty.sh`; the summary route returns counts and paths, never finding text |
 | `GITHUB-APP-INSTALLATION-ID`, `HOSTINGER-API-TOKEN` | not inventoried | Site rebuild trigger and VPS control |
 | `GCP-BILLING-API-KEY` | not inventoried | Cloud Billing Catalog API key for the public GCP price list — Google's documented auth for it. Replaced a ~2.3 KB service-account JSON on 2026-08-29 |
 | `GITHUB-APP-PRIVATE-KEY` | not inventoried | Multi-line PEM. **Not referenced by `main.tf` and read by nothing** — it has no app setting and no seeding path, deliberately |

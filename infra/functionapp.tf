@@ -507,6 +507,15 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     "RSSCOM_API_KEY"    = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/RSSCOM-API-KEY)"
     "RSSCOM_PODCAST_ID" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/RSSCOM-PODCAST-ID)"
 
+    # Qlty (#569): read-only access to this repository's open findings and
+    # metrics for the Health Hub's Code and Security tab
+    # (lib/code-quality/qlty-summary.js). A personal access token from
+    # https://qlty.sh/user/settings/tokens. Seed QLTY-API-TOKEN on the
+    # Integrations Keys tab BEFORE this reference is applied, so
+    # monitor-unresolved-secrets.yml never sees it unresolved. Unseeded,
+    # readKey() treats the reference as "not configured" and the tab says so.
+    "QLTY_API_TOKEN" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/QLTY-API-TOKEN)"
+
     # Plaud Embedded Transcription API (#442): the direction the Plaud MCP
     # lacks — transcribing audio the owner uploads. A DIFFERENT credential from
     # the MCP OAuth token pair, which lives on the mcp_servers/plaud document

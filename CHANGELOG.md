@@ -19,6 +19,20 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Code and Security summary API for the Health Hub (#569).** `GET
+  /api/cms/code-quality` (editor) reads this repository's Qlty project
+  server-side with the new `QLTY-API-TOKEN` secret (app setting
+  `QLTY_API_TOKEN`): project metrics, and every open issue paged 100 at a time.
+  It answers condensed totals by level, category and security, the top ten
+  rules and files, and Qlty's own grades and coverage, cached for ten minutes.
+  No finding message, snippet or fingerprint leaves the server, and log lines
+  carry only the route, status and invocation. Checked live on 2026-09-14: it
+  counts 1,353 open issues and 48 security issues, equal to Qlty's Total
+  Issues and Security Issues metrics. The token gets a `Code quality` section
+  in the secret catalogue, so it can be seeded from the Integrations Keys tab,
+  and a `qlty` connection probe (`GET https://api.qlty.sh/user`). The Health
+  Hub tab that shows the summary follows in a separate PR.
+
 - **Integrations Hub: tabs by duty instead of one long page (#570).**
   `/admin/integrations` is now four tabs at the Newsletter Hub standard, split
   into `frontend/src/components/admin/integrations/`. **Overview** is one grid
