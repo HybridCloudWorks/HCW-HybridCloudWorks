@@ -33,6 +33,7 @@ import './legacy-blogs-telemetry-http.js';
 import './manual-images-http.js';
 import './newsletter-http.js';
 import './newsletter-admin-http.js';
+import './newsletter-insights-http.js';
 import './ops-health-http.js';
 import './platform-health-http.js';
 import './platform-settings-http.js';
