@@ -19,6 +19,27 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Integrations Hub: tabs by duty instead of one long page (#570).**
+  `/admin/integrations` is now four tabs at the Newsletter Hub standard, split
+  into `frontend/src/components/admin/integrations/`. **Overview** is one grid
+  of every service, broken and not-configured first, with **Test all**: each
+  service's existing test, run one at a time, with YouTube left out because its
+  test spends daily quota (its tile says so), and the time each ran this
+  session. **Services** shows one group at a time (`?group=`); each card keeps
+  its description, docs link and test, and lists the keys it uses by name and
+  light only. **Keys** holds every catalogue credential under its group, the
+  services that use each one, the unchanged paste and generate actions, and
+  "Other credentials"; one write runs at a time, and no value is fetched or
+  rendered. **Identity** is the Entra configuration panel as it was (#519).
+  Tabs deep-link with `?tab=`, moved or unknown ids land where their content
+  went (Overview by default), and `/admin/connections` and `/admin/api-keys`
+  now redirect to Overview and Keys. Each tab reads its own data with its own
+  loading and error states, reloads are generation-guarded, and a failed
+  refresh clears what it replaced. No API, probe or seeded value changed.
+  There is no Activity tab: key writes keep only the latest writer per key and
+  no admin route reads `admin_audit_logs`, so that history needs a backend
+  first (noted on #570).
+
 - **Use a Resend template as the newsletter's design (#557).** Newsletter
   settings on the Mailing List Settings tab gain a Template block: keep the
   built-in design (the default, and what existing settings read as) or pick one
