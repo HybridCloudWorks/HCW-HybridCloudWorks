@@ -295,6 +295,66 @@ describe('ResendDomains', () => {
     expect(screen.getByRole('button', { name: includes('fresh.example.com') })).toBeInTheDocument();
   });
 
+  it('sends Verify, a tracking change and Add domain once, however fast they are pressed', async () => {
+    let finish;
+    sendJSON.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+    );
+    await openNews();
+    const verifyButton = screen.getByRole('button', { name: 'Verify' });
+    fireEvent.click(verifyButton);
+    fireEvent.click(verifyButton);
+    const openSwitch = screen.getByRole('switch', { name: 'Open tracking' });
+    fireEvent.click(openSwitch);
+    fireEvent.click(openSwitch);
+    fireEvent.change(screen.getByLabelText('Domain name'), {
+      target: { value: 'twice.example.com' },
+    });
+    const addButton = screen.getByRole('button', { name: 'Add domain' });
+    fireEvent.click(addButton);
+    fireEvent.click(addButton);
+    await waitFor(() => expect(sendJSON).toHaveBeenCalledTimes(3));
+    const kinds = sendJSON.mock.calls.map(([path, method]) => `${method} ${path}`).sort();
+    expect(kinds).toEqual([
+      'PATCH cms/mailing-list/domains/d-1111',
+      'POST cms/mailing-list/domains',
+      'POST cms/mailing-list/domains/d-1111/verify',
+    ]);
+    finish({ ok: true });
+  });
+
+  it('lets only the latest detail reload write, when an earlier one answers last', async () => {
+    sendJSON.mockResolvedValue({ ok: true });
+    await openNews();
+    // The panel's own Refresh appears once verification has been requested.
+    fireEvent.click(screen.getByRole('button', { name: 'Verify' }));
+    await screen.findByRole('status');
+    const answers = [];
+    getJSON.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          answers.push(resolve);
+        })
+    );
+    const panelRefresh = screen.getAllByRole('button', { name: 'Refresh' }).at(-1);
+    fireEvent.click(panelRefresh);
+    fireEvent.click(panelRefresh);
+    await waitFor(() => expect(answers).toHaveLength(2));
+    const withValue = (value) => ({
+      ok: true,
+      domain: { ...NEWS_DETAIL, records: [{ ...NEWS_DETAIL.records[0], value }] },
+    });
+    answers[1](withValue('p=LATEST'));
+    expect(await screen.findByText('p=LATEST')).toBeInTheDocument();
+    answers[0](withValue('p=STALE'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByText('p=STALE')).not.toBeInTheDocument();
+    expect(screen.getByText('p=LATEST')).toBeInTheDocument();
+  });
+
   it('clears the list when a refresh fails, so a stale list never reads as current', async () => {
     render(<ResendDomains />);
     await domainButton('news.hybridcloudworks.com');

@@ -8,7 +8,7 @@
  * the server's DOMAIN_REGIONS list (functions/src/lib/newsletter/
  * insights-handlers.js), which no route returns, so it is repeated here.
  */
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Loader2, Plus } from 'lucide-react';
@@ -34,6 +34,7 @@ export default function DomainAddForm({ onAdded }) {
   const [name, setName] = useState('');
   const [region, setRegion] = useState(DEFAULT_REGION);
   const [saving, setSaving] = useState(false);
+  const submitting = useRef(false);
   const [error, setError] = useState('');
 
   const submit = async (event) => {
@@ -43,6 +44,9 @@ export default function DomainAddForm({ onAdded }) {
       setError('Enter a domain name such as news.example.com.');
       return;
     }
+    // A ref, not `saving`: a double submit lands before the button disables.
+    if (submitting.current) return;
+    submitting.current = true;
     setSaving(true);
     setError('');
     try {
@@ -52,6 +56,7 @@ export default function DomainAddForm({ onAdded }) {
     } catch (err) {
       setError(describeResendError(err));
     } finally {
+      submitting.current = false;
       setSaving(false);
     }
   };

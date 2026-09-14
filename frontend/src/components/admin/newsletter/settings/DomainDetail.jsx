@@ -14,7 +14,7 @@
  * A PATCH sends only the switch that changed. Resend answers `{ ok, id }`, so
  * the new value is applied to the loaded detail here rather than re-read.
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { AlertTriangle, CheckCircle, RefreshCw, ShieldCheck } from 'lucide-react';
@@ -143,16 +143,21 @@ function VerifyControls({ verifying, verified, onVerify, onRefresh }) {
 function useDomainDetail(id, domain, onLoaded) {
   const [loading, setLoading] = useState(!domain);
   const [error, setError] = useState('');
+  // Only the latest reload may write: an earlier, slower answer is dropped.
+  const generation = useRef(0);
   const reload = useCallback(async () => {
+    generation.current += 1;
+    const mine = generation.current;
     setLoading(true);
     try {
       const res = await getJSON(domainRoute(id));
+      if (mine !== generation.current) return;
       setError('');
       if (res?.domain) onLoaded(res.domain);
     } catch (err) {
-      setError(describeResendError(err));
+      if (mine === generation.current) setError(describeResendError(err));
     } finally {
-      setLoading(false);
+      if (mine === generation.current) setLoading(false);
     }
   }, [id, onLoaded]);
   // Load whenever no detail is held: on open, and again after the list's
@@ -171,8 +176,17 @@ export default function DomainDetail({ id, domain, onLoaded }) {
   const [verifying, setVerifying] = useState(false);
   const [verified, setVerified] = useState(false);
   const [actionError, setActionError] = useState('');
+  // Refs, not state, guard the writes: a double click lands before the
+  // re-render that disables the control, and would send the write twice.
+  const inFlight = useRef(new Set());
+  const claim = (key) => {
+    if (inFlight.current.has(key)) return false;
+    inFlight.current.add(key);
+    return true;
+  };
 
   const verify = async () => {
+    if (!claim('verify')) return;
     setVerifying(true);
     setActionError('');
     try {
@@ -181,11 +195,13 @@ export default function DomainDetail({ id, domain, onLoaded }) {
     } catch (err) {
       setActionError(describeResendError(err));
     } finally {
+      inFlight.current.delete('verify');
       setVerifying(false);
     }
   };
 
   const toggle = async (field, value) => {
+    if (!claim(field)) return;
     setBusy((previous) => new Set(previous).add(field));
     setActionError('');
     try {
@@ -194,6 +210,7 @@ export default function DomainDetail({ id, domain, onLoaded }) {
     } catch (err) {
       setActionError(describeResendError(err));
     } finally {
+      inFlight.current.delete(field);
       setBusy((previous) => {
         const next = new Set(previous);
         next.delete(field);
