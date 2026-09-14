@@ -133,6 +133,9 @@ export function useSetting(name, authReady) {
   }, [name, authReady, attempt]);
 
   const reload = useCallback(() => {
+    // Supersede any load still in flight at once, not on the next effect run:
+    // until the effect re-runs, an older answer would still count as current.
+    generation.current += 1;
     setLoading(true);
     setError(null);
     setAttempt((n) => n + 1);
