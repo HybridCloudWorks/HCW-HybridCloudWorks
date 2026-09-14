@@ -70,6 +70,7 @@ name: TFC Plan Check
 
 on:
   workflow_dispatch:
+    # checkov:skip=CKV_GHA_7: read-only plan check; run id is pattern-validated by the script, commit is only compared. docs/security/scanner-triage.md#checkov
     inputs:
       run_id:
         description: 'HCP Terraform run to check, e.g. run-AbCdEf1234567890. Leave blank for the workspace latest.'
@@ -94,6 +95,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       # Self-arming, like the reader workflows: before TFC_TOKEN is seeded this
       # reports honestly that it did not run, rather than failing and training

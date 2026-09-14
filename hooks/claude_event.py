@@ -11,7 +11,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
+import shutil
+# Fixed argv lists only, never shell=True, no event data in any argument.
+# Triage: docs/security/scanner-triage.md#bandit
+import subprocess  # nosec B404
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,9 +29,13 @@ def resolve_root(event: dict) -> Path:
     env = os.environ.get("CLAUDE_PROJECT_DIR")
     if env:
         return Path(env).resolve()
+    git = shutil.which("git")
     try:
-        proc = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
+        if git is None:
+            raise OSError("git is not on PATH")
+        # Absolute git from shutil.which and a constant argv: nothing untrusted.
+        proc = subprocess.run(  # nosec B603
+            [git, "rev-parse", "--show-toplevel"],
             capture_output=True, text=True, timeout=10,
         )
         if proc.returncode == 0 and proc.stdout.strip():
@@ -84,7 +91,9 @@ def main() -> int:
     if not validator.is_file():
         return 0  # fail open: a mislocated install must never trap the session
     try:
-        result = subprocess.run(
+        # The running interpreter on the repository's own validator; workflow_id
+        # is one argv element (no shell), read from the repository's state file.
+        result = subprocess.run(  # nosec B603
             [sys.executable, str(validator), "--root", str(root), "validate", "--workflow", workflow_id, "--check"],
             capture_output=True, text=True, timeout=30,
         )

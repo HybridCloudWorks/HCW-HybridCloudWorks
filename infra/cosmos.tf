@@ -18,6 +18,7 @@
 # Single-region: centralus, the same region as the rest of the estate.
 # =============================================================================
 resource "azurerm_cosmosdb_account" "hcw" {
+  #checkov:skip=CKV_AZURE_140:Local auth is disabled; var.cosmos_local_auth_disabled defaults to true and checkov cannot evaluate the negation. docs/security/scanner-triage.md#checkov
   name = var.cosmos_db_account_name
   # Kept as its own variable rather than folded into azure_location: where a
   # Cosmos account MAY be created is governed by two APIs that disagree, and
@@ -117,6 +118,13 @@ resource "azurerm_cosmosdb_account" "hcw" {
   # The variable keeps the "disabled" sense deliberately: it reads as the
   # security posture being asserted, and renaming it belongs to T-507.
   local_authentication_enabled = !var.cosmos_local_auth_disabled
+
+  # Databases, containers and throughput change through Resource Manager only,
+  # never through an account key. With local auth off above this changes no
+  # live behaviour; it keeps the lock if local auth is ever switched back on
+  # for a key consumer, which then gets data access but no schema writes.
+  # Free, in-place, reversible. docs/security/scanner-triage.md (CKV_AZURE_132).
+  access_key_metadata_writes_enabled = false
 
   # Continuous backup — point-in-time restore instead of the periodic default.
   # One-way conversion (continuous cannot go back to periodic).

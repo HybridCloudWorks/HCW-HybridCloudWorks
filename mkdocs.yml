@@ -134,6 +134,8 @@ nav:
       - Naming convention: standards/naming-convention.md
       - Variables and secrets: standards/variables-and-secrets.md
       - Required inputs: standards/required-inputs.md
+  - Security:
+      - Scanner triage: security/scanner-triage.md
   - Architecture:
       - Target architecture: architecture/architecture.md
       - Review 2026-08: architecture/architecture-review-2026-08.md

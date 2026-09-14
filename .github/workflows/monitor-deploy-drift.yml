@@ -79,6 +79,7 @@ on:
     # dropping most of them.
     - cron: '17 */4 * * *'
   workflow_dispatch:
+    # checkov:skip=CKV_GHA_7: read-only monitor; threshold goes through env and the script refuses a non-positive number. docs/security/scanner-triage.md#checkov
     inputs:
       threshold_hours:
         description: 'Fail when a service has been behind for at least this many hours.'
@@ -101,6 +102,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
@@ -132,6 +135,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7

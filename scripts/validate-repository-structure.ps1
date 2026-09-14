@@ -80,6 +80,11 @@ $allowedRootFiles = @(
   # MkDocs configuration for the docs site (issue #360). MkDocs reads it from
   # the directory it is run in, so it lives at the root by tool convention.
   'mkdocs.yml',
+  # Scanner suppression files (#567). gitleaks and checkov read them from the
+  # directory they run in, so they live at the root by tool convention. Every
+  # entry in either is a row in docs/security/scanner-triage.md.
+  '.gitleaksignore',
+  '.checkov.yaml',
   # Three files left the root on 2026-08-29. Architecture_Plan.md and
   # Migration_Plan.md were archived records rather than live documents and moved
   # to wiki/ (now docs/history/), so they publish as documentation instead of
