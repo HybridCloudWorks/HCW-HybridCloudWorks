@@ -66,6 +66,27 @@ describe('applyTemplateLayout', () => {
     expect(html).not.toMatch(/\{\{\{NEWSLETTER_/);
   });
 
+  it('puts the body at the template marker even when the subject spells a marker', () => {
+    const { parts } = renderIssueContent(FIXTURE_ISSUE, SETTINGS);
+    const issue = { ...FIXTURE_ISSUE, subject: 'Inside {{{NEWSLETTER_BODY}}} and {{{RESEND_UNSUBSCRIBE_URL}}}' };
+    const { html } = merge(
+      page(`<h1>{{{NEWSLETTER_SUBJECT}}}</h1><main>${NEWSLETTER_BODY_MARKER}</main>${COMPLIANT_FOOTER}`),
+      issue
+    );
+    expect(html).toContain(`<main>${parts.bodyHtml}</main>`);
+    expect(html).toContain('<h1>Inside &#123;&#123;&#123;NEWSLETTER_BODY&#125;&#125;&#125; and &#123;&#123;&#123;RESEND_UNSUBSCRIBE_URL&#125;&#125;&#125;</h1>');
+    expect(html).not.toContain(NEWSLETTER_BODY_MARKER);
+  });
+
+  it('places the appended footer before the real </body> in a template with expanding Unicode', () => {
+    // 'İ' lower-cases to two code units, which used to shift the index.
+    const template = `<html><body><p>${'İ'.repeat(40)}</p>${NEWSLETTER_BODY_MARKER}</body></html>`;
+    const { html } = merge(template);
+    expect(html.endsWith('</body></html>')).toBe(true);
+    expect(html.indexOf('{{{RESEND_UNSUBSCRIBE_URL}}}')).toBeGreaterThan(html.indexOf('İ'.repeat(40)));
+    expect(html.indexOf('{{{RESEND_UNSUBSCRIBE_URL}}}')).toBeLessThan(html.lastIndexOf('</body>'));
+  });
+
   it('adds the hidden preheader block after <body> when the template has no preheader marker', () => {
     const { parts } = renderIssueContent(FIXTURE_ISSUE, SETTINGS);
     const { html } = merge(page(`${NEWSLETTER_BODY_MARKER}${COMPLIANT_FOOTER}`));

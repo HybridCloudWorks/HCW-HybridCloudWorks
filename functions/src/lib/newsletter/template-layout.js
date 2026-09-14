@@ -103,8 +103,21 @@ export function templateUnusableReason(templateHtml) {
 
 /** `insert` placed before the last `</body>`, or at the end when there is none. */
 function beforeBodyClose(html, insert) {
-  const at = html.toLowerCase().lastIndexOf('</body');
+  // Matched on the original string: lower-casing the whole document first can
+  // change its length (some Unicode characters expand), which would shift the
+  // index and splice the footer into the wrong place.
+  let at = -1;
+  for (const match of html.matchAll(/<\/body\b/gi)) at = match.index;
   return at === -1 ? `${html}${insert}` : `${html.slice(0, at)}${insert}${html.slice(at)}`;
+}
+
+/**
+ * Issue text for a marker: HTML-escaped, and with braces as entities, so text
+ * such as a subject reading `{{{NEWSLETTER_BODY}}}` can never become a marker
+ * (or a Resend placeholder) once it is in the document. Braces render the same.
+ */
+function markerText(value) {
+  return escapeHtml(value).replaceAll('{', '&#123;').replaceAll('}', '&#125;');
 }
 
 /** `insert` placed just after the opening `<body ...>`, or at the start when there is none. */
@@ -146,9 +159,9 @@ export function applyTemplateLayout(templateHtml, parts, { postalAddress, testSe
   const hasAddress = containsAddress(html, postalAddress);
   const hasPreheaderMarker = html.includes(NEWSLETTER_PREHEADER_MARKER);
 
-  html = replaceAll(html, NEWSLETTER_SUBJECT_MARKER, escapeHtml(parts.subject));
-  html = replaceAll(html, NEWSLETTER_PREHEADER_MARKER, escapeHtml(parts.preheader));
-  html = replaceAll(html, NEWSLETTER_PERIOD_MARKER, escapeHtml(parts.range));
+  html = replaceAll(html, NEWSLETTER_SUBJECT_MARKER, markerText(parts.subject));
+  html = replaceAll(html, NEWSLETTER_PREHEADER_MARKER, markerText(parts.preheader));
+  html = replaceAll(html, NEWSLETTER_PERIOD_MARKER, markerText(parts.range));
   if (!hasPreheaderMarker && parts.preheaderHtml) html = afterBodyOpen(html, parts.preheaderHtml);
 
   if (testSend) {
