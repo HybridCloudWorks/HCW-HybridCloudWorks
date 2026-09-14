@@ -15,15 +15,12 @@
 # `functions/src/...`), so one upload carries both packages and Qlty needs no
 # add-prefix or strip-prefix.
 #
-# THE TOKEN IS OPTIONAL, BY DESIGN. `QLTY_COVERAGE_TOKEN` is a repository
-# secret the owner adds (docs/standards/variables-and-secrets.md, store 4).
-# Until it exists, and on pull requests from forks, which receive no secrets,
-# the tests still run and the upload step is skipped with a notice instead of
-# failing a check nobody can fix from the pull request.
-#
-# The token is read in exactly one step, the one that tests for it, and passed
-# to the upload action as an input. It is never in job-level `env`, so no
-# `npm ci` install script can read it.
+# NO STORED TOKEN. The upload authenticates to Qlty with GitHub OIDC
+# (`oidc: true`, `id-token: write` on this job only), so there is no
+# QLTY_COVERAGE_TOKEN to store, rotate or leak — the same federated-first rule
+# as every Azure login in this repository (docs/standards/variables-and-secrets.md).
+# Pull requests from forks cannot mint an OIDC token, so for those the tests
+# still run and the upload is skipped with a notice.
 
 name: Coverage
 
@@ -44,6 +41,10 @@ jobs:
     name: coverage (qlty)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      # Only for the Qlty OIDC upload; nothing else in the job requests a token.
+      id-token: write
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -75,23 +76,15 @@ jobs:
         working-directory: functions
         run: npm run test:coverage
 
-      - name: Check for the Qlty coverage token
-        id: token
-        env:
-          QLTY_COVERAGE_TOKEN: ${{ secrets.QLTY_COVERAGE_TOKEN }}
-        run: |
-          if [ -n "$QLTY_COVERAGE_TOKEN" ]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Coverage not uploaded::QLTY_COVERAGE_TOKEN is not set for this run (not yet added, or a fork pull request). Tests ran and coverage was generated; the Qlty upload was skipped."
-          fi
+      - name: Note a fork pull request
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+        run: echo "::notice title=Coverage not uploaded::Pull requests from forks cannot mint the OIDC token Qlty needs. Tests ran and coverage was generated; the upload was skipped."
 
       - name: Upload coverage to Qlty
-        if: steps.token.outputs.present == 'true'
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
         uses: qltysh/qlty-action/coverage@08a0a862c159eae9b9003081da6663d96efef637 # v2.3.0
         with:
-          token: ${{ secrets.QLTY_COVERAGE_TOKEN }}
+          oidc: true
           format: lcov
           files: |
             frontend/coverage/lcov.info

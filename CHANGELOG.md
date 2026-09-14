@@ -37,10 +37,9 @@ This project has not cut a tagged release; entries are grouped under
   `npm test` and the required CI jobs are unchanged. The new, non-required
   `coverage.yml` workflow runs both on pull requests and pushes to `main` and
   uploads them in one `qltysh/qlty-action/coverage` step pinned to v2.3.0's
-  commit, skipping the upload with a notice while `QLTY_COVERAGE_TOKEN` is
-  unset. The secret is documented in store 4 of
-  [Variables and secrets](docs/standards/variables-and-secrets.md) and in
-  [Required inputs](docs/standards/required-inputs.md) §4.3.
+  commit. The upload authenticates with GitHub OIDC, so no Qlty token is
+  stored; pull requests from forks, which cannot mint one, skip the upload with
+  a notice.
 
 - **Use a Resend template as the newsletter's design (#557).** Newsletter
   settings on the Mailing List Settings tab gain a Template block: keep the

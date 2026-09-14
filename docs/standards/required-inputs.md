@@ -166,12 +166,10 @@ else a workflow needs is either a non-sensitive variable or reached by OIDC.
 | Name | Status | Consumer |
 | --- | --- | --- |
 | ~~`AZURE_STATIC_WEB_APPS_API_TOKEN`~~ | **RETIRED 2026-08-30, DELETED 2026-08-31 (T-727)** | Nothing. `deploy-azure-frontend.yml` mints the deployment token from ARM under federated identity at deploy time, so no stored value is needed and there is nothing to rotate. The secret was removed from repository settings by the owner on 2026-08-31, after the role assignment applied |
-| `QLTY_COVERAGE_TOKEN` | **OWNER STEP (#568)** — not set until the owner adds it | `.github/workflows/coverage.yml`, the Qlty coverage upload. Qlty **project** coverage token; it can only upload coverage to this project. Optional: while unset the workflow runs the tests and skips the upload with a notice. Not a Key Vault secret and not an app setting. The value shown in a screenshot on 2026-09-14 must not be used: regenerate it in Qlty (project settings → Code Coverage → refresh token), then add it at <https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/settings/secrets/actions/new>. Justified in [Variables and secrets](variables-and-secrets.md#store-4-github-actions-secrets-with-justification) |
 
-**No stored Azure credential is in this repository's secrets.** The one
-stored value planned, `QLTY_COVERAGE_TOKEN`, authenticates to Qlty and can
-only upload coverage. `GITHUB_TOKEN` is contractual and injected per run; it
-is never stored.
+**No stored Azure credential is in this repository's secrets.** The Qlty
+coverage upload (#568) uses GitHub OIDC and stores no token. `GITHUB_TOKEN` is
+contractual and injected per run; it is never stored.
 
 The **Agents** store (Settings → Secrets and variables → Agents) is separate
 from Actions secrets. Copilot's setup job and agent environment read it; a
