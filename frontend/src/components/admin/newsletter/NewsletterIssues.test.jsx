@@ -2,7 +2,9 @@
  * The review and Drafts panels. What must hold: the email preview cannot run
  * anything, each tab shows only its own issues, a card's red X deletes at once,
  * keeping moves an issue to Drafts, approval lives only on Drafts, and it says
- * what a send will need before offering one.
+ * what a send will need before offering one. Editing a draft stays local until
+ * Save changes, sends sections as the stored items in their new order, never
+ * removes the last item, and a test send hands back the etag the next save uses.
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -411,5 +413,244 @@ describe('the Drafts tab', () => {
     expect(
       screen.queryByRole('button', { name: /build this week's issue/i })
     ).not.toBeInTheDocument();
+  });
+});
+
+describe('editing a draft', () => {
+  const A = { title: 'Item A', url: 'https://example.com/a', summary: 'About A', label: 'Blog' };
+  const B = { title: 'Item B', url: 'https://example.com/b', summary: 'About B', label: 'Blog' };
+  const C = { title: 'Item C', url: 'https://example.com/c', summary: 'About C', label: 'Video' };
+  const SECTIONS = [
+    { id: 'blog', title: 'Blog', items: [A, B] },
+    { id: 'video', title: 'Videos', items: [C] },
+  ];
+  const withSections = (over = {}) =>
+    withIssue({ ...over, issue: { sections: SECTIONS, preheader: '', ...over.issue } });
+  const button = (name) => screen.getByRole('button', { name });
+  const patchBody = () => sendJSON.mock.calls.find(([, method]) => method === 'PATCH')?.[2];
+
+  it('saves the preview text in the PATCH, with a character counter', async () => {
+    withSections();
+    sendJSON.mockResolvedValue(detail({ issue: { preheader: 'Read this first' } }));
+    render(<NewsletterIssues view="review" />);
+
+    fireEvent.change(await screen.findByLabelText(/Preview text/), {
+      target: { value: 'Read this first' },
+    });
+    expect(screen.getByText('15/150')).toBeInTheDocument();
+    expect(screen.getByLabelText(/Preview text/)).toHaveAttribute('maxlength', '150');
+    fireEvent.click(button(/save changes/i));
+
+    await waitFor(() =>
+      expect(sendJSON).toHaveBeenCalledWith(`cms/newsletters/${ID}`, 'PATCH', {
+        preheader: 'Read this first',
+        etag: 'e1',
+      })
+    );
+  });
+
+  it('links each item to its page in a new tab', async () => {
+    withSections();
+    render(<NewsletterIssues view="review" />);
+    const link = await screen.findByRole('link', { name: 'Item A' });
+    expect(link).toHaveAttribute('href', A.url);
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link.getAttribute('rel')).toMatch(/noopener/);
+  });
+
+  it('sends the sections in their new order with only the remaining stored items', async () => {
+    withSections();
+    sendJSON.mockResolvedValue(detail());
+    render(<NewsletterIssues view="review" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Move section Videos up' }));
+    fireEvent.click(button('Move item Item B up'));
+    fireEvent.click(button('Remove item Item A'));
+    fireEvent.click(button(/save changes/i));
+
+    await waitFor(() => expect(patchBody()).toBeDefined());
+    expect(patchBody()).toEqual({
+      sections: [
+        { id: 'video', items: [C] },
+        { id: 'blog', items: [B] },
+      ],
+      etag: 'e1',
+    });
+  });
+
+  it('sends a removed section as absent', async () => {
+    withSections();
+    sendJSON.mockResolvedValue(detail());
+    render(<NewsletterIssues view="review" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove section Blog' }));
+    fireEvent.click(button(/save changes/i));
+
+    await waitFor(() => expect(patchBody()).toBeDefined());
+    expect(patchBody().sections).toEqual([{ id: 'video', items: [C] }]);
+  });
+
+  it('Reset discards local edits', async () => {
+    withSections();
+    render(<NewsletterIssues view="review" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove item Item A' }));
+    fireEvent.change(screen.getByLabelText('Subject'), { target: { value: 'Changed' } });
+    fireEvent.change(screen.getByLabelText(/Preview text/), { target: { value: 'Changed' } });
+    expect(screen.queryByRole('link', { name: 'Item A' })).not.toBeInTheDocument();
+
+    fireEvent.click(button(/reset/i));
+
+    expect(screen.getByRole('link', { name: 'Item A' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Subject')).toHaveValue('Landing zones');
+    expect(screen.getByLabelText(/Preview text/)).toHaveValue('');
+    expect(button(/save changes/i)).toBeDisabled();
+    expect(button(/keep in drafts/i)).not.toBeDisabled();
+  });
+
+  it('will not remove the last remaining item', async () => {
+    withSections();
+    render(<NewsletterIssues view="review" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove section Videos' }));
+    fireEvent.click(button('Remove item Item A'));
+
+    const last = button('Remove item Item B');
+    expect(last).toBeDisabled();
+    expect(last.getAttribute('title')).toMatch(/at least one item/);
+    expect(button('Remove section Blog')).toBeDisabled();
+  });
+
+  it('counts section edits as unsaved, so Keep is disabled', async () => {
+    withSections();
+    render(<NewsletterIssues view="review" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Move item Item B up' }));
+    expect(button(/keep in drafts/i)).toBeDisabled();
+    expect(button(/save changes/i)).not.toBeDisabled();
+  });
+
+  it('counts section edits as unsaved, so Approve is disabled', async () => {
+    kept({ issue: { sections: SECTIONS } });
+    render(<NewsletterIssues view="drafts" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove item Item C' }));
+    expect(button(/approve and schedule/i)).toBeDisabled();
+    expect(screen.getByText('Save your changes before approving.')).toBeInTheDocument();
+  });
+
+  it('regenerates the intro with the etag and shows the new issue', async () => {
+    withSections();
+    postJSON.mockResolvedValue(
+      detail({
+        issue: { intro: 'A fresh intro.', updatedAt: 'later', etag: 'e2' },
+        preview: { html: '<p>A fresh intro.</p>' },
+      })
+    );
+    render(<NewsletterIssues view="review" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /regenerate intro/i }));
+
+    await waitFor(() =>
+      expect(postJSON).toHaveBeenCalledWith(`cms/newsletters/${ID}/intro`, { etag: 'e1' })
+    );
+    expect(await screen.findByText('Intro regenerated.')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByTitle('Email preview').getAttribute('srcdoc')).toBe(
+        '<p>A fresh intro.</p>'
+      )
+    );
+  });
+
+  it("shows the server's reason when the intro cannot be regenerated", async () => {
+    withSections();
+    postJSON.mockRejectedValue(
+      Object.assign(new Error('The AI could not write an intro. Try again.'), { status: 502 })
+    );
+    render(<NewsletterIssues view="review" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /regenerate intro/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('The AI could not write an intro');
+    expect(button(/regenerate intro/i)).not.toBeDisabled();
+  });
+
+  it('will not regenerate the intro over unsaved edits', async () => {
+    withSections();
+    render(<NewsletterIssues view="review" />);
+    fireEvent.change(await screen.findByLabelText('Subject'), { target: { value: 'Mine' } });
+    expect(button(/regenerate intro/i)).toBeDisabled();
+    expect(button(/send test to me/i)).toBeDisabled();
+  });
+
+  it('fills the subject from a suggestion, saved with Save changes', async () => {
+    withSections();
+    postJSON.mockResolvedValue({ ok: true, subjects: ['Zones', 'Landing well', 'Hub and spoke'] });
+    sendJSON.mockResolvedValue(detail());
+    render(<NewsletterIssues view="review" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /suggest subjects/i }));
+    await waitFor(() =>
+      expect(postJSON).toHaveBeenCalledWith(`cms/newsletters/${ID}/subjects`, {})
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Landing well' }));
+
+    expect(screen.getByLabelText('Subject')).toHaveValue('Landing well');
+    expect(sendJSON).not.toHaveBeenCalled();
+    fireEvent.click(button(/save changes/i));
+    await waitFor(() =>
+      expect(sendJSON).toHaveBeenCalledWith(`cms/newsletters/${ID}`, 'PATCH', {
+        subject: 'Landing well',
+        etag: 'e1',
+      })
+    );
+  });
+
+  it('sends a test, says where it went, counts down, and saves with the new etag', async () => {
+    kept({ issue: { sections: SECTIONS } });
+    postJSON.mockResolvedValue({ ok: true, sentTo: 'owner@example.com', etag: 'e2' });
+    sendJSON.mockResolvedValue(detail());
+    render(<NewsletterIssues view="drafts" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /send test to me/i }));
+
+    await waitFor(() =>
+      expect(postJSON).toHaveBeenCalledWith(`cms/newsletters/${ID}/test`, { etag: 'e1' })
+    );
+    expect(await screen.findByText('Test sent to owner@example.com.')).toBeInTheDocument();
+    const again = await screen.findByRole('button', { name: /send test again in \d+s/i });
+    expect(again).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText('Subject'), { target: { value: 'After the test' } });
+    fireEvent.click(button(/save changes/i));
+    await waitFor(() =>
+      expect(sendJSON).toHaveBeenCalledWith(`cms/newsletters/${ID}`, 'PATCH', {
+        subject: 'After the test',
+        etag: 'e2',
+      })
+    );
+  });
+
+  it("shows the server's message when a test is refused as too soon", async () => {
+    withSections();
+    postJSON.mockRejectedValue(
+      Object.assign(new Error('A test was sent less than a minute ago. Try again shortly.'), {
+        status: 429,
+      })
+    );
+    render(<NewsletterIssues view="review" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /send test to me/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('less than a minute ago');
+    expect(button(/send test to me/i)).not.toBeDisabled();
+  });
+
+  it('shows the refusal when the signed-in user is not a publisher', async () => {
+    withSections();
+    postJSON.mockRejectedValue(Object.assign(new Error('Forbidden'), { status: 403 }));
+    render(<NewsletterIssues view="review" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /send test to me/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Forbidden');
   });
 });

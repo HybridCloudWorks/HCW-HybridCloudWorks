@@ -14,37 +14,25 @@
  * Approval sends the version the page is showing; if the issue changed since,
  * the server refuses it.
  *
- * The preview is an iframe with an EMPTY sandbox: the email's HTML is rendered
- * but cannot run script, submit forms or navigate this page.
+ * The open issue is edited in IssueDetail (subject, preview text, note,
+ * sections, AI intro and subjects, a test send to the owner). This file owns
+ * the list, the selection and every request, so all of them share `run`: one
+ * action at a time, the selection locked while it runs, and a 409 re-reads
+ * the issue.
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import {
-  AlertCircle,
-  Archive,
-  CheckCircle,
-  Loader2,
-  PenTool,
-  RefreshCw,
-  Send,
-  X,
-  XCircle,
-} from 'lucide-react';
+import { AlertCircle, CheckCircle, Loader2, PenTool, RefreshCw, X } from 'lucide-react';
 import { getJSON, postJSON, sendJSON } from '@/lib/api';
 import { runJob } from '@/lib/jobs';
+import IssueDetail from './IssueDetail';
+import { STATUS_LABELS, formatWhen } from './issueFormat';
 
-const STATUS_LABELS = {
-  draft: 'Draft',
-  sending: 'Sending',
-  scheduled: 'Scheduled',
-  sent: 'Sent',
-  rejected: 'Rejected',
-};
+export { formatWhen };
+
+/** The server allows one test send per issue a minute (429 inside it). */
+const TEST_COOLDOWN_MS = 60_000;
 
 /** Which issues each view shows. Anything scheduled or sent is on the calendar. */
 const IN_VIEW = {
@@ -54,27 +42,6 @@ const IN_VIEW = {
 
 /** What the server will delete: nothing that was approved. */
 const DELETABLE = new Set(['draft', 'rejected']);
-
-export function formatWhen(iso) {
-  if (!iso) return '';
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return '';
-  return new Intl.DateTimeFormat('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    timeZoneName: 'short',
-  }).format(date);
-}
-
-/** "immediately", a formatted instant, or '' when there is no plan. */
-function describePlan(plan) {
-  if (!plan) return '';
-  if (plan.sendNow) return 'immediately';
-  return formatWhen(plan.scheduledAt);
-}
 
 function Notice({ notice }) {
   if (!notice) return null;
@@ -93,210 +60,15 @@ function Notice({ notice }) {
   );
 }
 
-function StatusWarnings({ issue }) {
-  return (
-    <>
-      {issue.status === 'sending' && (
-        <p role="alert" className="text-sm text-destructive">
-          This issue was mid-send when something failed. Check Resend&apos;s Broadcasts list before
-          doing anything: if it is there, it went out. Clear stuck send removes this state.
-        </p>
-      )}
-      {issue.lastError && issue.status === 'draft' && (
-        <p role="alert" className="text-sm text-destructive">
-          The last approval was refused: {issue.lastError}
-        </p>
-      )}
-      {issue.introError && (
-        <p className="text-sm text-muted-foreground">
-          The AI intro was not written ({issue.introError}). Add a note below if you want one.
-        </p>
-      )}
-    </>
-  );
-}
-
-function ApprovalBox({ detail, dirty, busy, onApprove }) {
-  const [confirming, setConfirming] = useState(false);
-  const planText = describePlan(detail.sendPlan);
-
-  // Terraform's newsletter_sending_enabled: off, the server refuses approval,
-  // so the page says so instead of offering a button that cannot work.
-  if (!detail.sendingEnabled) {
-    return (
-      <p role="status" className="text-sm text-muted-foreground">
-        Sending is switched off, so this issue cannot be approved yet. It is turned on in Terraform
-        (newsletter_sending_enabled).
-      </p>
-    );
-  }
-  if (!detail.readyToSend) {
-    return (
-      <p role="alert" className="text-sm text-destructive">
-        Add the {detail.missingSettings.join(' and ')} in Newsletter settings before approving.
-      </p>
-    );
-  }
-  // No send plan means the server could not work out a send time from the
-  // settings, and it would refuse approval (SETTINGS_INVALID).
-  if (!detail.sendPlan) {
-    return (
-      <p role="alert" className="text-sm text-destructive">
-        The send day, time or time zone in Newsletter settings is not valid. Save them again before
-        approving.
-      </p>
-    );
-  }
-  return (
-    <div className="space-y-2">
-      <p className="text-sm">
-        Approving sends this to every confirmed subscriber <strong>{planText}</strong>.
-      </p>
-      {dirty && <p className="text-sm text-destructive">Save your changes before approving.</p>}
-      {confirming ? (
-        <div className="flex flex-wrap gap-2">
-          <Button
-            size="sm"
-            className="gap-1.5"
-            onClick={() => onApprove().finally(() => setConfirming(false))}
-            disabled={dirty || Boolean(busy)}
-          >
-            {busy === 'approve' ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Send className="h-3.5 w-3.5" />
-            )}
-            Yes, send it {planText}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setConfirming(false)}
-            disabled={Boolean(busy)}
-          >
-            Cancel
-          </Button>
-        </div>
-      ) : (
-        <Button
-          size="sm"
-          className="gap-1.5"
-          onClick={() => setConfirming(true)}
-          disabled={dirty || Boolean(busy)}
-        >
-          <Send className="h-3.5 w-3.5" /> Approve and schedule
-        </Button>
-      )}
-    </div>
-  );
-}
-
-function IssueDetail({ view, detail, busy, onSave, onKeep, onApprove, onReject }) {
-  const { issue } = detail;
-  const [subject, setSubject] = useState(issue.subject || '');
-  const [customNote, setCustomNote] = useState(issue.customNote || '');
-  const isDraft = issue.status === 'draft';
-  const dirty = isDraft && (subject !== issue.subject || customNote !== (issue.customNote || ''));
-
-  return (
-    <Card className="p-4 space-y-4">
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <Badge>{STATUS_LABELS[issue.status] || issue.status}</Badge>
-        <span className="text-muted-foreground">{issue.itemCount} item(s)</span>
-        {issue.scheduledAt && <span>Sends {formatWhen(issue.scheduledAt)}</span>}
-        {issue.sentAt && <span>Sent {formatWhen(issue.sentAt)}</span>}
-      </div>
-
-      <StatusWarnings issue={issue} />
-
-      {isDraft && (
-        <div className="grid gap-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="nl-subject">Subject</Label>
-            <Input
-              id="nl-subject"
-              maxLength={120}
-              value={subject}
-              onChange={(e) => setSubject(e.target.value)}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="nl-note">Your note (optional, shown under the intro)</Label>
-            <Textarea
-              id="nl-note"
-              rows={4}
-              maxLength={2000}
-              value={customNote}
-              onChange={(e) => setCustomNote(e.target.value)}
-              placeholder="Announcements, events, anything the sections do not cover"
-            />
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => onSave({ subject, customNote })}
-              disabled={!dirty || Boolean(busy)}
-            >
-              {busy === 'save' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-              Save changes
-            </Button>
-            {view === 'review' && (
-              <Button
-                size="sm"
-                className="gap-1.5"
-                onClick={onKeep}
-                // Keeping sends the stored version's etag, so edits save first.
-                disabled={dirty || Boolean(busy)}
-                title={dirty ? 'Save your changes first' : undefined}
-              >
-                {busy === 'keep' ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Archive className="h-3.5 w-3.5" />
-                )}
-                Keep in Drafts
-              </Button>
-            )}
-          </div>
-        </div>
-      )}
-
-      {issue.status === 'sending' && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="gap-1.5"
-          onClick={onReject}
-          disabled={Boolean(busy)}
-        >
-          <XCircle className="h-3.5 w-3.5" /> Clear stuck send
-        </Button>
-      )}
-
-      {isDraft && view === 'drafts' && (
-        <div className="rounded-lg border p-3">
-          <ApprovalBox detail={detail} dirty={dirty} busy={busy} onApprove={onApprove} />
-        </div>
-      )}
-
-      <iframe
-        title="Email preview"
-        sandbox=""
-        srcDoc={detail.preview.html}
-        className="w-full rounded-lg border bg-white"
-        style={{ height: 720 }}
-      />
-    </Card>
-  );
-}
-
 export default function NewsletterIssues({ view = 'review', settingsVersion = 0 }) {
   const [issues, setIssues] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [detail, setDetail] = useState(null);
   const [busy, setBusy] = useState('');
   const [notice, setNotice] = useState(null);
+  // Issue id -> when its next test send is allowed (ms). Held here, not in
+  // IssueDetail, so the countdown survives a save that remounts the detail.
+  const [testReadyAt, setTestReadyAt] = useState({});
 
   const loadList = useCallback(async () => {
     const res = await getJSON('cms/newsletters');
@@ -341,7 +113,7 @@ export default function NewsletterIssues({ view = 'review', settingsVersion = 0 
     setBusy(label);
     setNotice(null);
     try {
-      await action();
+      return await action();
     } catch (err) {
       setNotice({ ok: false, message: err.message });
       // Someone else changed this issue since it was loaded: show what is
@@ -399,6 +171,42 @@ export default function NewsletterIssues({ view = 'review', settingsVersion = 0 
       setNotice({ ok: true, message: 'Changes saved.' });
       await loadList();
     });
+
+  const handleRegenerateIntro = () =>
+    run('intro', async () => {
+      setDetail(
+        await postJSON(`cms/newsletters/${selectedId}/intro`, { etag: detail?.issue?.etag })
+      );
+      setNotice({ ok: true, message: 'Intro regenerated.' });
+      await loadList();
+    });
+
+  /** Writes nothing; resolves to the suggestions, or undefined on failure. */
+  const handleSuggestSubjects = () =>
+    run('subjects', async () => {
+      const res = await postJSON(`cms/newsletters/${selectedId}/subjects`, {});
+      return res.subjects || [];
+    });
+
+  const handleSendTest = () => {
+    const id = selectedId;
+    return run('test', async () => {
+      const res = await postJSON(`cms/newsletters/${id}/test`, { etag: detail?.issue?.etag });
+      // Recording the send changed the issue's etag. Hold the new one, or the
+      // next save, keep or approval would be refused as stale.
+      if (res?.etag) {
+        setDetail((current) =>
+          current?.issue?.id === id
+            ? { ...current, issue: { ...current.issue, etag: res.etag } }
+            : current
+        );
+      }
+      setTestReadyAt((current) => ({ ...current, [id]: Date.now() + TEST_COOLDOWN_MS }));
+      setNotice({ ok: true, message: `Test sent to ${res?.sentTo}.` });
+      // The list row carries the etag the red X deletes with.
+      await loadList();
+    });
+  };
 
   /**
    * Re-read the issue after an approval that did not come back as a clean
@@ -538,10 +346,14 @@ export default function NewsletterIssues({ view = 'review', settingsVersion = 0 
           view={view}
           detail={detail}
           busy={busy}
+          testReadyAt={testReadyAt[detail.issue.id]}
           onSave={handleSave}
           onKeep={handleKeep}
           onApprove={handleApprove}
           onReject={handleReject}
+          onRegenerateIntro={handleRegenerateIntro}
+          onSuggestSubjects={handleSuggestSubjects}
+          onSendTest={handleSendTest}
         />
       )}
     </div>

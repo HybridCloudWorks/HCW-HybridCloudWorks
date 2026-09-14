@@ -19,6 +19,23 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Faster newsletter editing on the Mailing List page (#504).** The page half
+  of the API change below. A draft on the Newsletter or Drafts tab now opens
+  with the subject, a **Suggest subjects** button whose three to five AI
+  suggestions fill the subject when clicked, a **Preview text** field with a
+  150-character counter, and the note. The action bar holds Save changes,
+  **Reset** (discards local edits), **Regenerate intro**, **Send test to me**
+  (one `[TEST]` copy to the reply-to in settings, then a 60-second countdown)
+  and Keep in Drafts or the approval box. Below it, a **section editor** sits
+  beside the email preview on wide screens: sections collapse, and sections
+  and items move up and down or are removed, with the last item protected as
+  the server requires. Section edits count as unsaved, so Keep and Approve
+  stay disabled until they are saved, and Regenerate intro and the test send
+  wait for a save too, since both act on the stored issue. After a test send
+  the page holds the issue's new etag, so the next save is not refused as
+  stale. Frontend only; **nothing on the page reaches subscribers except the
+  unchanged Approve**. `IssueDetail`, `SectionEditor`, `ApprovalBox` and
+  `issueFormat` are split out of `NewsletterIssues.jsx`.
 - **Faster newsletter editing in the API: preview text, section trimming, AI
   intro and subject help, and a test send (#504).** The owner found editing a
   weekly issue "still very stiff"; this is the API half, the page follows.
