@@ -47,10 +47,11 @@ export function readSignupConfig(body) {
   const placement = SIGNUP_PLACEMENTS.includes(source.placement)
     ? source.placement
     : DEFAULT_SIGNUP_CONFIG.placement;
-  const heading =
-    typeof source.heading === 'string' && source.heading.trim()
-      ? source.heading
-      : DEFAULT_SIGNUP_CONFIG.heading;
-  const blurb = typeof source.blurb === 'string' ? source.blurb : DEFAULT_SIGNUP_CONFIG.blurb;
+  // Trimmed as the server normalizes them: surrounding spaces never render,
+  // and a whitespace-only blurb is empty, which hides the paragraph.
+  const trimmedHeading = typeof source.heading === 'string' ? source.heading.trim() : '';
+  const heading = trimmedHeading || DEFAULT_SIGNUP_CONFIG.heading;
+  const blurb =
+    typeof source.blurb === 'string' ? source.blurb.trim() : DEFAULT_SIGNUP_CONFIG.blurb;
   return { placement, heading, blurb };
 }
