@@ -1,0 +1,14 @@
+# checkov configuration. Every suppression here, and every inline
+# `#checkov:skip=` in infra/ and .github/workflows/, is triaged in
+# docs/security/scanner-triage.md#checkov. Prefer an inline skip on the one
+# resource; this file is for what cannot carry a comment.
+
+skip-check:
+  # CKV_SECRET_6 is checkov's bare entropy heuristic. Its one finding is the
+  # Wiki page name "Variables-And-Secrets" in scripts/docs/wiki-redirects.json,
+  # a JSON file that cannot carry an inline skip, and a scoped skip-path is not
+  # honoured when checkov is handed single files (as Qlty runs it). Secret
+  # detection stays with gitleaks and trufflehog, which match credential
+  # formats rather than entropy, and with checkov's own format-specific
+  # CKV_SECRET_* rules, which stay on.
+  - CKV_SECRET_6

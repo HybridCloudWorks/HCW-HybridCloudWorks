@@ -23,7 +23,10 @@ import argparse
 import json
 import os
 import re
-import subprocess
+import shutil
+# One fixed argv (git rev-parse), never shell=True.
+# Triage: docs/security/scanner-triage.md#bandit
+import subprocess  # nosec B404
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -50,9 +53,13 @@ def project_dir(cli_root: str | None) -> Path:
     env = os.environ.get("CLAUDE_PROJECT_DIR")
     if env:
         return Path(env).resolve()
+    git = shutil.which("git")
     try:
-        proc = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
+        if git is None:
+            raise OSError("git is not on PATH")
+        # Absolute git from shutil.which and a constant argv: nothing untrusted.
+        proc = subprocess.run(  # nosec B603
+            [git, "rev-parse", "--show-toplevel"],
             capture_output=True, text=True, timeout=10,
         )
         if proc.returncode == 0 and proc.stdout.strip():

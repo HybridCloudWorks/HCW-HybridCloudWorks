@@ -6512,6 +6512,31 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Security
 
+- **Every security scanner finding on `main` is triaged, and most are
+  resolved (#567, closes #562).** `docs/security/scanner-triage.md` has one row
+  per finding from a local Qlty run: 113 across zizmor, checkov, trivy, bandit,
+  gitleaks and radarlint-iac. Each row gives the verdict and its evidence.
+  - **Fixed, 41.** Every `actions/checkout` sets `persist-credentials: false`;
+    no job pushes with the checkout token. `deploy-functions.yml` reads
+    repository variables and step outputs through `env:`, not `${{ }}` in
+    `run:`. `hooks/claude_event.py` and `tooling/workflow.py` resolve `git`
+    with `shutil.which`.
+  - **Two free, in-place Terraform changes.** `allow_nested_items_to_be_public
+    = false` on the Function host storage account, and
+    `access_key_metadata_writes_enabled = false` on Cosmos.
+  - **Silenced, 36 (false positives and accepted risks).** Each one points
+    back to its row: inline `#checkov:skip` and `#trivy:ignore` comments,
+    `# nosec` with the reason, fingerprints in `.gitleaksignore`, and one
+    entropy rule in `.checkov.yaml`. The repository-structure check now allows
+    those two root files.
+  - **Left visible, 17.** They need an owner decision on cost or
+    irreversibility: private endpoints, customer-managed keys, infrastructure
+    encryption, host storage geo-redundancy, storage logging and Flex zone
+    redundancy.
+  - **radarlint-iac S1135, 19.** Each hit is the file name `TODO.md` in a
+    comment. They wait on the `.qlty/qlty.toml` triage rule from #568.
+  - **#562.** No unpinned `uses:` exists anywhere.
+
 - **Author-written HTML can no longer claim ids the application looks up
   (#298).** DOMPurify's default configuration strips an injected
   `<script id="…">` but keeps an injected `<div id="…">`, and
