@@ -50,6 +50,11 @@ const {
   runUploadTranscription,
 } = await import('./podcast-jobs.js');
 
+// Registration happens once, on import. Vitest 5 clears mock call history
+// before each test by default, so the import-time calls are copied here
+// before any test runs, rather than read from the mock inside a test.
+const registrations = [...registerJobType.mock.calls];
+
 describe('parseTranscriptPayload', () => {
   it('accepts an article id and trims it', () => {
     expect(parseTranscriptPayload({ articleId: ' content-1 ' })).toEqual({
@@ -134,7 +139,7 @@ describe('runTranscriptPublish', () => {
 
 describe('registration', () => {
   it('registers generate-podcast-transcript at editor, the role of the route that enqueues it', () => {
-    const [type, spec] = registerJobType.mock.calls.find(
+    const [type, spec] = registrations.find(
       ([name]) => name === 'generate-podcast-transcript'
     );
     expect(type).toBe('generate-podcast-transcript');
@@ -145,7 +150,7 @@ describe('registration', () => {
   });
 
   it('registers publish-podcast-transcript at publisher, the role of review and the retry', () => {
-    const [type, spec] = registerJobType.mock.calls.find(
+    const [type, spec] = registrations.find(
       ([name]) => name === 'publish-podcast-transcript'
     );
     expect(type).toBe('publish-podcast-transcript');
@@ -159,7 +164,7 @@ describe('registration', () => {
   });
 
   it('clears the pending marker when the publish job dies around the step, and stays quiet on success', async () => {
-    const [, spec] = registerJobType.mock.calls.find(
+    const [, spec] = registrations.find(
       ([name]) => name === 'publish-podcast-transcript'
     );
     const now = () => new Date('2026-09-09T10:00:00.000Z');
@@ -191,7 +196,7 @@ describe('registration', () => {
   });
   it('registers the two recording-side jobs (#442) at editor, like the routes that enqueue them', () => {
     for (const name of ['generate-podcast-transcript-from-recording', 'transcribe-recording-upload']) {
-      const [, spec] = registerJobType.mock.calls.find(([type]) => type === name);
+      const [, spec] = registrations.find(([type]) => type === name);
       expect(spec.role, name).toBe('editor');
       expect(typeof spec.worker, name).toBe('function');
       expect(spec.maxPayloadBytes, name).toBeLessThanOrEqual(1024);

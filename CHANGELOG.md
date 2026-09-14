@@ -19,6 +19,29 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Health Hub: tabs by duty instead of one long scroll (#569).**
+  `/admin/health` now has four tabs on the shared `HubTabs` bar, deep-linked
+  with `?tab=`:
+  - **Overview:** the at-a-glance strip, readiness, publishing and operational
+    signals.
+  - **Alerts:** workflow alerts with their filter and actions, and their own
+    outcome line. Before, it was written onto the smoke-test card.
+  - **Checks:** smoke tests, token claims, admin registry, the Labs probes and
+    Re-run identity checks.
+  - **Report:** the Markdown report and Copy report.
+
+  Old ids such as `diagnostics`, `signals` and `verify` land on the tab that
+  now holds that content. The header and tab bar always render: a failed
+  ops-health read is an error on Overview and Alerts, with Try again, while
+  Checks and Report carry on. The strip's observed badges say UNKNOWN rather
+  than zeros until the snapshot arrives. Every snapshot read (first load,
+  refresh after a smoke test or alert action, Try again) goes through
+  `health/useOpsSnapshot.js`, which has a generation guard. A slow read
+  cannot overwrite a newer one, and a failed read clears the numbers instead
+  of leaving them beside the error. Shared state stays on the page, so
+  switching tabs never refetches or reruns a probe. The Code and Security tab
+  follows in a separate PR.
+
 - **Code and Security summary API for the Health Hub (#569).** `GET
   /api/cms/code-quality` (editor) reads this repository's Qlty project
   server-side with the new `QLTY-API-TOKEN` secret (app setting
