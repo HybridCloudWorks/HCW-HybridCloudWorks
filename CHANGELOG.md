@@ -2294,6 +2294,28 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **The admin sidebar stays put, reads cleanly, and calls the newsletter page
+  Newsletter Hub (#566).** The admin shell is now exactly one viewport tall:
+  the sidebar is pinned, its menu scrolls on its own when it outgrows the
+  screen, and only the content column (`#admin-main`) scrolls, so the
+  ContentForge brand never leaves view on a long page such as New Content.
+  Pinning with `sticky` alone was measured and does not work on this site:
+  `html { overflow-y: scroll }` with `body { overflow-x: hidden }` makes the
+  body a scroll container that never scrolls, so a sticky aside pins to it
+  rather than to the window. ScrollToTop now also resets `#admin-main`, so a
+  page opened from the menu starts at the top. The brand block trades its
+  fixed `h-14` and `leading-none` for a minimum height with padding, which is
+  what clipped "ContentForge" at 125% and 150% zoom. The nested `<main>` is
+  gone: `#admin-main` is a div inside App's `<main id="main-content">`, so an
+  admin page has one main landmark. The product tags beside menu items (New,
+  Podcast, Publer, Linkie, Resend, VPS) are removed; the Review Queue and
+  Editor count badges stay. "Mailing List" becomes "Newsletter Hub" in the
+  menu, the page header, the Telegram message when the Monday build fails, the
+  builder's "review and approve" message, and the Resend error fallbacks on
+  the page and the API. The route `/admin/mailing-list` and the
+  `cms/mailing-list/*` API paths are unchanged, so bookmarks and links keep
+  working.
+
 - **The SPA and the API are two app registrations again, and localhost is off
   the production one (#522, #521).** This ADR-0006 decision — "one Entra SPA
   registration, one API registration" — was accepted, written into

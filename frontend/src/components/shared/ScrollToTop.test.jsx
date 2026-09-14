@@ -14,8 +14,8 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render } from '@testing-library/react';
-import { MemoryRouter } from 'react-router';
+import { act, render } from '@testing-library/react';
+import { MemoryRouter, useNavigate } from 'react-router';
 import ScrollToTop from './ScrollToTop';
 
 /** Mount the component inside a route, with the landmark and announcer present. */
@@ -87,6 +87,41 @@ describe('ScrollToTop', () => {
     expect(document.activeElement?.id).not.toBe('main-content');
     await flushFrame();
     expect(document.getElementById('route-announcer').textContent).toBe('');
+  });
+
+  it('resets the admin content column, which scrolls instead of the window', async () => {
+    // The admin shell is one viewport tall and #admin-main is its scroll
+    // container (#566). It survives navigation between admin pages, so a
+    // window scroll alone would leave the next page opened mid-way down.
+    document.body.innerHTML = `
+      <main id="main-content" tabindex="-1"><div id="admin-main"></div></main>
+      <div id="route-announcer"></div>
+    `;
+    const adminMain = document.getElementById('admin-main');
+    let scrollTop = 0;
+    Object.defineProperty(adminMain, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: (value) => {
+        scrollTop = value;
+      },
+    });
+
+    let goTo;
+    function Navigator() {
+      goTo = useNavigate();
+      return null;
+    }
+    render(
+      <MemoryRouter initialEntries={['/admin/submit']}>
+        <ScrollToTop />
+        <Navigator />
+      </MemoryRouter>
+    );
+
+    scrollTop = 1800;
+    await act(async () => goTo('/admin/mailing-list'));
+    expect(scrollTop).toBe(0);
   });
 
   it('does not throw when the landmark or announcer is absent', () => {

@@ -38,6 +38,12 @@ const ScrollToTop = () => {
     if (hash) return;
 
     window.scrollTo(0, 0);
+    // The admin shell does not scroll the window: its content column is its
+    // own scroll container, and it persists across admin routes, so without
+    // this a page opened from the menu would start wherever the last one was
+    // left (#566). Absent on public routes, where the window is what scrolls.
+    const adminMain = document.getElementById('admin-main');
+    if (adminMain) adminMain.scrollTop = 0;
 
     const main = document.getElementById('main-content');
     if (main) main.focus({ preventScroll: true });
