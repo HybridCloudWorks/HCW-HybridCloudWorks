@@ -190,6 +190,7 @@ describe('ResendDomains', () => {
       click_tracking: false,
       records: [{ record: 'DKIM', name: 'resend._domainkey.letters', type: 'TXT', value: 'p=NEW' }],
     };
+    // A create answer with the tracking fields is a full detail: no second read.
     sendJSON.mockResolvedValue({ ok: true, domain: created });
     render(<ResendDomains />);
     await domainButton('news.hybridcloudworks.com');
@@ -210,6 +211,70 @@ describe('ResendDomains', () => {
     expect(item).toHaveAttribute('aria-expanded', 'true');
     expect(await screen.findByText('p=NEW')).toBeInTheDocument();
     expect(getJSON).not.toHaveBeenCalledWith('cms/mailing-list/domains/d-3333');
+  });
+
+  it('reads the detail after a create that returned no tracking fields, so the switches are real', async () => {
+    const created = {
+      id: 'd-3333',
+      name: 'letters.example.com',
+      status: 'not_started',
+      region: 'us-east-1',
+      records: [{ record: 'DKIM', name: 'resend._domainkey.letters', type: 'TXT', value: 'p=NEW' }],
+    };
+    const base = getJSON.getMockImplementation();
+    getJSON.mockImplementation(async (route) =>
+      route === 'cms/mailing-list/domains/d-3333'
+        ? { ok: true, domain: { ...created, open_tracking: false, click_tracking: true } }
+        : base(route)
+    );
+    sendJSON.mockResolvedValue({ ok: true, domain: created });
+    render(<ResendDomains />);
+    await domainButton('news.hybridcloudworks.com');
+    fireEvent.change(screen.getByLabelText('Domain name'), {
+      target: { value: 'letters.example.com' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add domain' }));
+
+    expect(await screen.findByText('p=NEW')).toBeInTheDocument();
+    await waitFor(() => expect(getJSON).toHaveBeenCalledWith('cms/mailing-list/domains/d-3333'));
+    expect(await screen.findByText('Open tracking off · Click tracking on')).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: 'Click tracking' })).toHaveAttribute(
+      'aria-checked',
+      'true'
+    );
+  });
+
+  it('does not leave a partial detail when a tracking change finishes after Refresh dropped it', async () => {
+    await openNews();
+    let finishPatch;
+    sendJSON.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishPatch = resolve;
+        })
+    );
+    fireEvent.click(screen.getByRole('switch', { name: 'Open tracking' }));
+    await waitFor(() => expect(finishPatch).toBeTypeOf('function'));
+
+    // Refresh drops the cached detail; its reload of the detail then fails.
+    getJSON.mockImplementation(async (route) => {
+      if (route === 'cms/mailing-list/domains/d-1111') {
+        throw Object.assign(new Error('rate_limit_exceeded'), {
+          status: 429,
+          retryAfterSeconds: 2,
+        });
+      }
+      return { ok: true, domains: [NEWS] };
+    });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Refresh' })[0]);
+    finishPatch({ ok: true });
+
+    expect(
+      await screen.findByText(includes('Wait 2 seconds, then try again.'))
+    ).toBeInTheDocument();
+    expect(screen.getByText('Tracking: open to see')).toBeInTheDocument();
+    expect(screen.queryByText(/returned no/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('switch', { name: 'Open tracking' })).not.toBeInTheDocument();
   });
 
   it('defaults the region to us-east-1 and refuses a name that is not a hostname', async () => {

@@ -160,9 +160,11 @@ function useDomainDetail(id, domain, onLoaded) {
       if (mine === generation.current) setLoading(false);
     }
   }, [id, onLoaded]);
-  // Load whenever no detail is held: on open, and again after the list's
-  // Refresh drops the cached details. Refresh inside the panel calls reload.
-  const missing = !domain;
+  // Load whenever no full detail is held: on open, after the list's Refresh
+  // drops the cached details, and after a create, whose answer carries the
+  // records but not the tracking fields (so the switches would guess). The
+  // records a create returned stay on screen while that load runs.
+  const missing = !domain || typeof domain.open_tracking !== 'boolean';
   useEffect(() => {
     if (!missing) return;
     queueMicrotask(reload);
@@ -206,7 +208,10 @@ export default function DomainDetail({ id, domain, onLoaded }) {
     setActionError('');
     try {
       await sendJSON(domainRoute(id), 'PATCH', { [field]: value });
-      onLoaded((current) => ({ ...current, [field]: value }));
+      // Only onto a detail still held: a list Refresh may have dropped it while
+      // this write ran, and a lone `{ [field]: value }` would then pass for a
+      // domain with no records. The reload that Refresh starts reads the change.
+      onLoaded((current) => (current ? { ...current, [field]: value } : current));
     } catch (err) {
       setActionError(describeResendError(err));
     } finally {
