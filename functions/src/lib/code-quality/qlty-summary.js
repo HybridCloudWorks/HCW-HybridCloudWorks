@@ -50,16 +50,26 @@ const json = (status, body, headers = {}) => ({
   body: JSON.stringify(body),
 });
 
-const text = (value) => (typeof value === 'string' ? value : '');
+const text = (value, fallback = '') => (typeof value === 'string' && value ? value : fallback);
 
 const levelRank = (level) => {
   const index = LEVELS.indexOf(level);
   return index === -1 ? LEVELS.length : index;
 };
 
+const zeroByLevel = () => Object.fromEntries(LEVELS.map((level) => [level, 0]));
+
 const increment = (counts, key) => {
   counts[key] = (counts[key] ?? 0) + 1;
 };
+
+/** Count `key` in `map`, keeping the most severe level seen. `seed` builds a first entry's fields. */
+function tally(map, key, level, seed) {
+  if (!map.has(key)) map.set(key, { key, ...seed(), level, count: 0 });
+  const entry = map.get(key);
+  entry.count += 1;
+  if (levelRank(level) < levelRank(entry.level)) entry.level = level;
+}
 
 const topOf = (map, limit) =>
   [...map.values()]
@@ -67,51 +77,36 @@ const topOf = (map, limit) =>
     .slice(0, limit)
     .map(({ key, ...rest }) => rest);
 
+/** The only fields ever read from a Qlty issue, so nothing else can leak into the answer. */
+const readIssue = (issue) => ({
+  tool: text(issue?.tool, 'unknown'),
+  rule: text(issue?.ruleKey, 'unknown'),
+  category: text(issue?.category, 'unknown'),
+  level: text(issue?.level, 'unknown'),
+  path: text(issue?.location?.path),
+});
+
 /**
- * Condense Qlty issue rows into totals. Reads only tool, ruleKey, category,
- * level and location.path, so nothing else can leak into the answer.
+ * Condense Qlty issue rows into totals.
  *
  * @param {ReadonlyArray<object>} issues
  */
 export function summarizeIssues(issues) {
-  const byLevel = Object.fromEntries(LEVELS.map((level) => [level, 0]));
+  const byLevel = zeroByLevel();
   const byCategory = {};
-  const security = { total: 0, byLevel: Object.fromEntries(LEVELS.map((level) => [level, 0])) };
+  const security = { total: 0, byLevel: zeroByLevel() };
   const rules = new Map();
   const files = new Map();
 
-  for (const issue of issues) {
-    const tool = text(issue?.tool) || 'unknown';
-    const ruleKey = text(issue?.ruleKey) || 'unknown';
-    const category = text(issue?.category) || 'unknown';
-    const level = text(issue?.level) || 'unknown';
-    const path = text(issue?.location?.path);
-
+  for (const { tool, rule, category, level, path } of issues.map(readIssue)) {
     increment(byLevel, level);
     increment(byCategory, category);
     if (SECURITY_CATEGORIES.includes(category)) {
       security.total += 1;
       increment(security.byLevel, level);
     }
-
-    const rule = `${tool}:${ruleKey}`;
-    const seen = rules.get(rule);
-    if (seen) {
-      seen.count += 1;
-      if (levelRank(level) < levelRank(seen.level)) seen.level = level;
-    } else {
-      rules.set(rule, { key: rule, tool, rule: ruleKey, category, level, count: 1 });
-    }
-
-    if (path) {
-      const file = files.get(path);
-      if (file) {
-        file.count += 1;
-        if (levelRank(level) < levelRank(file.level)) file.level = level;
-      } else {
-        files.set(path, { key: path, path, level, count: 1 });
-      }
-    }
+    tally(rules, `${tool}:${rule}`, level, () => ({ tool, rule, category }));
+    if (path) tally(files, path, level, () => ({ path }));
   }
 
   return {
@@ -138,6 +133,85 @@ export function pickMetrics(rows) {
     }));
 }
 
+const ref = (context) => `[invocation ${context?.invocationId ?? 'unknown'}]`;
+
+const parseJson = (body) => {
+  try {
+    return JSON.parse(body);
+  } catch {
+    return null;
+  }
+};
+
+/** One authenticated GET. Resolves `{ ok, status, retryAfter, data }`; never throws for an HTTP status. */
+async function qltyGet(fetchImpl, path, token) {
+  const response = await fetchImpl(`${QLTY_API}${path}`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  return {
+    ok: response.ok,
+    status: response.status,
+    retryAfter: response.headers?.get?.('retry-after') ?? null,
+    data: parseJson(await response.text()),
+  };
+}
+
+/** A Qlty refusal as an HTTP answer. Logs the route, status and invocation only. */
+function refused(route, result, context) {
+  const status = result?.status ?? 0;
+  context.warn?.(`${route} Qlty HTTP ${status} ${ref(context)}`);
+  const error = status ? `Qlty answered ${status}` : 'No answer from Qlty';
+  if (status !== 429) return json(502, { ok: false, status, error });
+  const seconds = Number.parseInt(String(result?.retryAfter ?? ''), 10);
+  const retryAfterSeconds = Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds, 3600) : 60;
+  return json(429, { ok: false, status, retryAfterSeconds, error }, { 'Retry-After': String(retryAfterSeconds) });
+}
+
+/**
+ * Every open issue, paged up to MAX_PAGES. `{ issues, truncated }`, or
+ * `{ refusal }` holding the first failed page.
+ */
+async function listOpenIssues(get, base) {
+  const issues = [];
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const query = `page%5Blimit%5D=${PAGE_SIZE}&page%5Boffset%5D=${page * PAGE_SIZE}&status=open`;
+    const listed = await get(`${base}/issues?${query}`);
+    if (!listed.ok) return { refusal: listed };
+    const rows = Array.isArray(listed.data?.data) ? listed.data.data : [];
+    issues.push(...rows);
+    if (listed.data?.meta?.hasMore !== true || rows.length === 0) return { issues, truncated: false };
+  }
+  return { issues, truncated: true };
+}
+
+/** Metrics and every open issue, condensed. `{ value }` or `{ refusal }`. */
+async function readProject(get, at) {
+  const base = `/gh/${encodeURIComponent(QLTY_OWNER)}/projects/${encodeURIComponent(QLTY_PROJECT)}`;
+  const metrics = await get(`${base}/metrics`);
+  if (!metrics.ok) return { refusal: metrics };
+  const listed = await listOpenIssues(get, base);
+  if (listed.refusal) return listed;
+  return {
+    value: {
+      projectUrl: QLTY_PROJECT_URL,
+      issuesUrl: QLTY_ISSUES_URL,
+      metrics: pickMetrics(metrics.data?.data),
+      ...summarizeIssues(listed.issues),
+      truncated: listed.truncated,
+      fetchedAt: new Date(at).toISOString(),
+    },
+  };
+}
+
+const NOT_CONFIGURED = Object.freeze({
+  ok: false,
+  code: 'INTEGRATION_NOT_CONFIGURED',
+  error: 'Qlty is not configured: QLTY_API_TOKEN is not set',
+  projectUrl: QLTY_PROJECT_URL,
+});
+
 /**
  * @param {object} deps
  * @param {{ requireRole: Function }} deps.guard
@@ -154,98 +228,31 @@ export function createCodeQualityHandlers({
   /** Per process: `{ at, value }` of the last successful summary. */
   let cache = null;
 
-  const ref = (context) => `[invocation ${context?.invocationId ?? 'unknown'}]`;
+  const answer = (entry) =>
+    json(200, { ok: true, ...entry.value, cachedAt: new Date(entry.at).toISOString() });
 
-  /** One authenticated GET. Resolves `{ ok, status, data }`; never throws for an HTTP status. */
-  async function get(path, token) {
-    const response = await fetchImpl(`${QLTY_API}${path}`, {
-      method: 'GET',
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
-    let data = null;
+  /** The summary once the caller is authorised and the token is present. */
+  async function fresh(route, token, context) {
+    const at = now().getTime();
+    if (cache && at - cache.at < CODE_QUALITY_CACHE_MS) return answer(cache);
     try {
-      data = JSON.parse(await response.text());
-    } catch {
-      data = null;
+      const read = await readProject((path) => qltyGet(fetchImpl, path, token), at);
+      if (read.refusal) return refused(route, read.refusal, context);
+      cache = { at, value: read.value };
+      return answer(cache);
+    } catch (error) {
+      context.error?.(`${route} failed ${text(error?.name, 'Error')} ${ref(context)}`);
+      return json(500, { ok: false, error: 'The Code and Security request failed.' });
     }
-    return {
-      ok: response.ok,
-      status: response.status,
-      retryAfter: response.headers?.get?.('retry-after') ?? null,
-      data,
-    };
-  }
-
-  function refused(route, result, context) {
-    const status = result?.status ?? 0;
-    context.warn?.(`${route} Qlty HTTP ${status} ${ref(context)}`);
-    const error = status ? `Qlty answered ${status}` : 'No answer from Qlty';
-    if (status === 429) {
-      const seconds = Number.parseInt(String(result?.retryAfter ?? ''), 10);
-      const retryAfterSeconds = Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds, 3600) : 60;
-      return json(429, { ok: false, status, retryAfterSeconds, error }, { 'Retry-After': String(retryAfterSeconds) });
-    }
-    return json(502, { ok: false, status, error });
   }
 
   return {
     /** EDITOR. `GET cms/code-quality`: the condensed summary, cached. */
     async summary(request, context) {
-      const route = 'codeQualitySummary';
       const auth = await guard.requireRole(request, 'editor');
       if (auth?.error) return auth.error;
-
       const token = readKey(env, 'QLTY_API_TOKEN');
-      if (!token) {
-        return json(200, {
-          ok: false,
-          code: 'INTEGRATION_NOT_CONFIGURED',
-          error: 'Qlty is not configured: QLTY_API_TOKEN is not set',
-          projectUrl: QLTY_PROJECT_URL,
-        });
-      }
-
-      const at = now().getTime();
-      if (cache && at - cache.at < CODE_QUALITY_CACHE_MS) {
-        return json(200, { ok: true, ...cache.value, cachedAt: new Date(cache.at).toISOString() });
-      }
-
-      const base = `/gh/${encodeURIComponent(QLTY_OWNER)}/projects/${encodeURIComponent(QLTY_PROJECT)}`;
-      try {
-        const metrics = await get(`${base}/metrics`, token);
-        if (!metrics.ok) return refused(route, metrics, context);
-
-        const issues = [];
-        let truncated = false;
-        for (let page = 0; ; page += 1) {
-          if (page === MAX_PAGES) {
-            truncated = true;
-            break;
-          }
-          const query = `page%5Blimit%5D=${PAGE_SIZE}&page%5Boffset%5D=${page * PAGE_SIZE}&status=open`;
-          const listed = await get(`${base}/issues?${query}`, token);
-          if (!listed.ok) return refused(route, listed, context);
-          const rows = Array.isArray(listed.data?.data) ? listed.data.data : [];
-          issues.push(...rows);
-          if (listed.data?.meta?.hasMore !== true || rows.length === 0) break;
-        }
-
-        const value = {
-          projectUrl: QLTY_PROJECT_URL,
-          issuesUrl: QLTY_ISSUES_URL,
-          metrics: pickMetrics(metrics.data?.data),
-          ...summarizeIssues(issues),
-          truncated,
-          fetchedAt: new Date(at).toISOString(),
-        };
-        cache = { at, value };
-        return json(200, { ok: true, ...value, cachedAt: new Date(at).toISOString() });
-      } catch (error) {
-        const name = typeof error?.name === 'string' ? error.name : 'Error';
-        context.error?.(`${route} failed ${name} ${ref(context)}`);
-        return json(500, { ok: false, error: 'The Code and Security request failed.' });
-      }
+      return token ? fresh('codeQualitySummary', token, context) : json(200, NOT_CONFIGURED);
     },
   };
 }
