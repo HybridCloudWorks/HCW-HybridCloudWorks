@@ -50,11 +50,14 @@ export default function useSecretStatus() {
       });
   }, []);
 
+  // Refresh pressed before sign-in finishes would be that same 401, so it waits
+  // for auth like the first load; the effect below loads as soon as it is ready.
   const reload = useCallback(() => {
+    if (!authReady) return Promise.resolve();
     const mine = ++generation.current;
     setLoading(true);
     return fetchStatus(mine);
-  }, [fetchStatus]);
+  }, [authReady, fetchStatus]);
 
   useEffect(() => {
     if (!authReady) return undefined;

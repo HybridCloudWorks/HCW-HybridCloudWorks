@@ -15,6 +15,8 @@
  *   - "Test all" runs ONE AT A TIME, awaiting each before the next, so pressing
  *     it sends one request to each provider in turn rather than a burst to all
  *     of them; and a second press while it runs does nothing;
+ *   - while "Test all" runs, a test started from a card is refused too, so
+ *     the one-provider-at-a-time guarantee holds from either direction;
  *   - a service marked `skipInTestAll` (YouTube, which spends quota) is left
  *     out of "Test all"; the Overview says so on its tile, so it is never
  *     silent, and any result from testing it on its own is kept.
@@ -31,7 +33,9 @@ export default function useServiceTests() {
   const inFlight = useRef(new Set());
   const allInFlight = useRef(false);
 
-  const runTest = useCallback(async (service, arg) => {
+  // The test itself. `runAll` calls this directly; everything else goes
+  // through `runTest`, which refuses while "Test all" owns the queue.
+  const startTest = useCallback(async (service, arg) => {
     if (!service?.test || inFlight.current.has(service.id)) return null;
     inFlight.current.add(service.id);
     setTesting(new Set(inFlight.current));
@@ -47,6 +51,11 @@ export default function useServiceTests() {
     setResults((previous) => ({ ...previous, [service.id]: result }));
     return result;
   }, []);
+
+  const runTest = useCallback(
+    (service, arg) => (allInFlight.current ? Promise.resolve(null) : startTest(service, arg)),
+    [startTest]
+  );
 
   /**
    * @param {ReadonlyArray<object>} services
@@ -64,14 +73,14 @@ export default function useServiceTests() {
       try {
         for (const service of services) {
           if (!service.test || service.skipInTestAll) continue;
-          await runTest(service, await argFor(service));
+          await startTest(service, await argFor(service));
         }
       } finally {
         allInFlight.current = false;
         setRunningAll(false);
       }
     },
-    [runTest]
+    [startTest]
   );
 
   return { results, testing, runningAll, runTest, runAll };

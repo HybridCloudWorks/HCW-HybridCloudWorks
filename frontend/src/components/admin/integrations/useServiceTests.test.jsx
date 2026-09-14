@@ -44,6 +44,33 @@ describe('useServiceTests', () => {
     expect(resend.test).toHaveBeenCalledTimes(1);
   });
 
+  it('refuses a card test while "Test all" is still running', async () => {
+    const slow = deferred();
+    const gemini = { id: 'gemini', test: vi.fn(() => slow.promise) };
+    const resend = { id: 'resend', test: vi.fn(async () => 'ok') };
+    const { result } = renderHook(() => useServiceTests());
+
+    let all;
+    act(() => {
+      all = result.current.runAll([gemini]);
+    });
+    let card;
+    await act(async () => {
+      card = await result.current.runTest(resend);
+    });
+    expect(card).toBeNull();
+    expect(resend.test).not.toHaveBeenCalled();
+
+    await act(async () => {
+      slow.resolve('done');
+      await all;
+    });
+    await act(async () => {
+      await result.current.runTest(resend);
+    });
+    expect(resend.test).toHaveBeenCalledTimes(1);
+  });
+
   it('runs "Test all" one service at a time', async () => {
     const order = [];
     const make = (id) => ({
