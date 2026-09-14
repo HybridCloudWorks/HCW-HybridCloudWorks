@@ -172,7 +172,7 @@ describe('GET cms/code-quality', () => {
     expect(response.body).not.toContain(SECRET_MESSAGE);
   });
 
-  it('stops at the page cap, says so, and does not cache the partial answer', async () => {
+  it('stops at the page cap, says so, and caches it, since a retry would hit the same cap', async () => {
     const pages = Array.from({ length: MAX_PAGES + 5 }, () => [issue()]);
     const fetch = makeQlty({ pages });
     const { handlers } = build({ fetch });
@@ -182,8 +182,9 @@ describe('GET cms/code-quality', () => {
     expect(fetch).toHaveBeenCalledTimes(MAX_PAGES + 1);
 
     const calls = fetch.mock.calls.length;
-    await handlers.summary({}, context());
-    expect(fetch.mock.calls.length).toBeGreaterThan(calls);
+    const again = body(await handlers.summary({}, context()));
+    expect(fetch.mock.calls.length).toBe(calls);
+    expect(again.truncated).toBe('pages');
   });
 
   it('stops starting pages when the time budget runs out, and does not cache the partial answer', async () => {
