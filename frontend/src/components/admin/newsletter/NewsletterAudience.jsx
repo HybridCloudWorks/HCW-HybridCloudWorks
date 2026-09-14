@@ -141,7 +141,7 @@ function Notice({ children }) {
   );
 }
 
-function ContactsTable({ contacts, busyId, onToggle, onRemove }) {
+function ContactsTable({ contacts, busyIds, onToggle, onRemove }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
       <table className="w-full min-w-[40rem] text-left text-sm">
@@ -159,7 +159,7 @@ function ContactsTable({ contacts, busyId, onToggle, onRemove }) {
             <AudienceRow
               key={contact.id}
               contact={contact}
-              busy={busyId === contact.id}
+              busy={busyIds.has(contact.id)}
               onToggle={onToggle}
               onRemove={onRemove}
             />
@@ -175,12 +175,14 @@ export default function NewsletterAudience() {
   const search = useDebounced(searchInput);
   const summary = useAudienceSummary();
   const list = useAudienceList(search);
-  const [busyId, setBusyId] = useState(null);
+  // One entry per write in flight, so a second row's action cannot re-enable
+  // a row whose own write has not finished.
+  const [busyIds, setBusyIds] = useState(() => new Set());
   const [actionError, setActionError] = useState('');
 
   /** Run a write for one contact, then apply it to the loaded rows and recount. */
   const act = async (contact, write, apply) => {
-    setBusyId(contact.id);
+    setBusyIds((previous) => new Set(previous).add(contact.id));
     setActionError('');
     try {
       await write();
@@ -189,7 +191,11 @@ export default function NewsletterAudience() {
     } catch (err) {
       setActionError(describeResendError(err));
     } finally {
-      setBusyId(null);
+      setBusyIds((previous) => {
+        const next = new Set(previous);
+        next.delete(contact.id);
+        return next;
+      });
     }
   };
 
@@ -262,7 +268,7 @@ export default function NewsletterAudience() {
       {!list.loading && page.contacts.length > 0 && (
         <ContactsTable
           contacts={page.contacts}
-          busyId={busyId}
+          busyIds={busyIds}
           onToggle={toggle}
           onRemove={remove}
         />

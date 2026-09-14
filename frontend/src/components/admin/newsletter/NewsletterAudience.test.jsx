@@ -203,6 +203,38 @@ describe('NewsletterAudience', () => {
     expect(screen.getByText('john@example.com')).toBeInTheDocument();
   });
 
+  it('keeps a row busy until its own write finishes, even when another row acts meanwhile', async () => {
+    let finishJane;
+    sendJSON.mockImplementation((path) =>
+      path.endsWith('c-1111')
+        ? new Promise((resolve) => {
+            finishJane = () => resolve({ ok: true });
+          })
+        : Promise.resolve({ ok: true })
+    );
+    render(<NewsletterAudience />);
+    const jane = await rowFor('jane@example.com');
+    const john = await rowFor('john@example.com');
+
+    fireEvent.click(within(jane).getByRole('button', { name: 'Unsubscribe' }));
+    await waitFor(() =>
+      expect(within(jane).getByRole('button', { name: 'Unsubscribe' })).toBeDisabled()
+    );
+
+    fireEvent.click(within(john).getByRole('button', { name: 'Resubscribe' }));
+    await waitFor(() =>
+      expect(sendJSON).toHaveBeenCalledWith('cms/mailing-list/audience/c-2222', 'PATCH', {
+        unsubscribed: false,
+      })
+    );
+    // John's write is done; Jane's is not, so her row stays disabled.
+    await waitFor(() => expect(within(john).getByText('Subscribed')).toBeInTheDocument());
+    expect(within(jane).getByRole('button', { name: 'Unsubscribe' })).toBeDisabled();
+
+    finishJane();
+    expect(await within(jane).findByText('Unsubscribed')).toBeInTheDocument();
+  });
+
   it('shows the server’s message when a write is refused', async () => {
     sendJSON.mockRejectedValue(refusal(403, 'This action requires the publisher role'));
     render(<NewsletterAudience />);
