@@ -35,8 +35,10 @@ export default function HubTabs({ tabs, active, onSelect, idPrefix, label, child
   const tabId = (id) => `${idPrefix}-tab-${id}`;
   const panelId = `${idPrefix}-tabpanel`;
 
-  const onKeyDown = (event) => {
-    const current = tabs.findIndex((tab) => tab.id === active);
+  // Moves from the tab that has focus, not from `active`: a held arrow key
+  // fires again before the parent re-renders, and counting from the stale
+  // selection would stall focus one step along.
+  const onKeyDown = (event, current) => {
     const next = nextTabIndex(event.key, current, tabs.length);
     if (next === null) return;
     event.preventDefault();
@@ -65,7 +67,7 @@ export default function HubTabs({ tabs, active, onSelect, idPrefix, label, child
               aria-selected={selected}
               aria-controls={panelId}
               tabIndex={selected ? 0 : -1}
-              onKeyDown={onKeyDown}
+              onKeyDown={(event) => onKeyDown(event, index)}
               onClick={() => onSelect(id)}
               className={`-mb-px whitespace-nowrap rounded-t-lg border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
                 selected

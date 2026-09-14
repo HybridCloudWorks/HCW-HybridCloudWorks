@@ -57,6 +57,10 @@ describe('HubTabs', () => {
     fireEvent.keyDown(one, { key: 'ArrowRight' });
     expect(onSelect).toHaveBeenLastCalledWith('two');
     expect(document.activeElement).toBe(two);
+    // A held key repeats before `active` changes: it must keep moving from focus.
+    fireEvent.keyDown(two, { key: 'ArrowRight' });
+    expect(onSelect).toHaveBeenLastCalledWith('three');
+    expect(document.activeElement).toBe(three);
     fireEvent.keyDown(one, { key: 'End' });
     expect(onSelect).toHaveBeenLastCalledWith('three');
     expect(document.activeElement).toBe(three);

@@ -199,6 +199,19 @@ describe('the service cards', () => {
     expect(saveIntegrationSettings).toHaveBeenCalledWith({ sessionizeSpeakerId: 'speaker-42' });
   });
 
+  it('still reports a failed save when the rejection carries no Error', async () => {
+    saveIntegrationSettings.mockRejectedValue(undefined);
+    render(<Harness group="content" />);
+    const input = await screen.findByLabelText('Sessionize Speaker ID');
+    await waitFor(() => expect(input.disabled).toBe(false));
+    fireEvent.click(within(cardFor('Sessionize')).getByRole('button', { name: /Save/ }));
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'Save failed', variant: 'destructive' })
+      )
+    );
+  });
+
   it('says why Plaud has no credential row rather than showing none and explaining nothing', async () => {
     render(<Harness group="content" />);
     await waitFor(() => expect(screen.getByText('Plaud')).toBeTruthy());

@@ -64,7 +64,11 @@ export default function SessionizeSetting({ speakerId, setSpeakerId, loading }) 
       await saveIntegrationSettings({ sessionizeSpeakerId: speakerId.trim() });
       toast({ title: 'Settings saved', description: 'Sessionize speaker ID updated.' });
     } catch (err) {
-      toast({ title: 'Save failed', description: err.message, variant: 'destructive' });
+      toast({
+        title: 'Save failed',
+        description: err?.message ?? 'Could not save the speaker ID.',
+        variant: 'destructive',
+      });
     } finally {
       savingRef.current = false;
       setSaving(false);
