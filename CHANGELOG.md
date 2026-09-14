@@ -19,6 +19,30 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Platform Settings Hub: one tab per concern, plus a change history (#571).**
+  `/admin/platform` is now four tabs at the Newsletter Hub's level of
+  separation, deep-linked with `?tab=`: **Content defaults** (default covers,
+  and a link card to Newsletter Hub → Settings rather than a second form over
+  the newsletter document), **Social automation** (autoposting, the only tab
+  that asks Publer for accounts), **Audio** (podcast feeds and the Listen &
+  Learn voice) and **Change history**. Each tab mounts only while open and
+  loads its own settings with its own loading, error and Retry states, so a
+  failure in one never blanks another; an unknown `?tab=` lands on Content
+  defaults. Every save sends the same body as before. `useSetting` gains the
+  #555 race guards: a generation number on loads, an in-flight ref on saves
+  (a double submit sends one PUT), and a failed load clears the working copy
+  and hides the form. Change history reads the new
+  `GET /api/cms/platform-settings/history?setting=&limit=&after=` (editor):
+  `platform_setting_updated` rows from `admin_audit_logs`, newest first, TOP
+  1..100 (default 50), with the setting validated against the spec registry
+  and every refusal a 400 before Cosmos. Each entry is
+  `{ id, at, actor, setting, summary }`, where the actor is the display name or
+  else the Entra object id and never the email the row also holds, and paging
+  is by timestamp through `nextAfter`. New audit rows record `userName` from
+  the token's `name` claim so the table can say who. The tab shows time, who,
+  setting and `key: value` summary chips, with a setting filter, Refresh and
+  Load more.
+
 - **Use a Resend template as the newsletter's design (#557).** Newsletter
   settings on the Mailing List Settings tab gain a Template block: keep the
   built-in design (the default, and what existing settings read as) or pick one
