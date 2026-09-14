@@ -14,7 +14,7 @@
  * A PATCH sends only the switch that changed. Resend answers `{ ok, id }`, so
  * the new value is applied to the loaded detail here rather than re-read.
  */
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { AlertTriangle, CheckCircle, RefreshCw, ShieldCheck } from 'lucide-react';
@@ -155,13 +155,13 @@ function useDomainDetail(id, domain, onLoaded) {
       setLoading(false);
     }
   }, [id, onLoaded]);
-  // Load once on open, and only when no detail is held; Refresh calls reload itself.
-  const started = useRef(Boolean(domain));
+  // Load whenever no detail is held: on open, and again after the list's
+  // Refresh drops the cached details. Refresh inside the panel calls reload.
+  const missing = !domain;
   useEffect(() => {
-    if (started.current) return;
-    started.current = true;
+    if (!missing) return;
     queueMicrotask(reload);
-  }, [reload]);
+  }, [missing, reload]);
   return { loading, error, reload };
 }
 

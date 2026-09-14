@@ -241,6 +241,36 @@ describe('ResendDomains', () => {
     );
   });
 
+  it('shows the refreshed status, not a cached detail, after Refresh', async () => {
+    await openNews();
+    const news = await domainButton('news.hybridcloudworks.com');
+    expect(within(news).getByText('verified')).toBeInTheDocument();
+    const base = getJSON.getMockImplementation();
+    getJSON.mockImplementation(async (route) => {
+      const res = await base(route);
+      if (route === 'cms/mailing-list/domains') {
+        return {
+          ...res,
+          domains: res.domains.map((d) => (d.id === 'd-1111' ? { ...d, status: 'failed' } : d)),
+        };
+      }
+      if (route === 'cms/mailing-list/domains/d-1111')
+        return { ...res, domain: { ...res.domain, status: 'failed' } };
+      return res;
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    await waitFor(() =>
+      expect(
+        within(
+          screen.getByRole('button', { name: includes('news.hybridcloudworks.com') })
+        ).getByText('failed')
+      ).toBeInTheDocument()
+    );
+    expect(
+      getJSON.mock.calls.filter(([route]) => route === 'cms/mailing-list/domains/d-1111').length
+    ).toBeGreaterThanOrEqual(2);
+  });
+
   it('clears the list when a refresh fails, so a stale list never reads as current', async () => {
     render(<ResendDomains />);
     await domainButton('news.hybridcloudworks.com');

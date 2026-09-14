@@ -108,9 +108,18 @@ export default function ResendDomains() {
 
   const toggle = (id) => setOpenId((current) => (current === id ? null : id));
 
+  /**
+   * Re-read the list and drop every held detail, so no cached status or record
+   * outlives a refresh; an open domain loads its detail again.
+   */
+  const refresh = () => {
+    setDetails({});
+    return list.reload();
+  };
+
   const added = (domain) => {
     if (!domain?.id) {
-      list.reload();
+      refresh();
       return;
     }
     list.setDomains((previous) => [
@@ -130,7 +139,7 @@ export default function ResendDomains() {
             The domains Resend sends from. Open one for its DNS records, verification and tracking.
           </CardDescription>
         </div>
-        <Button variant="outline" size="sm" className="gap-2" onClick={list.reload}>
+        <Button variant="outline" size="sm" className="gap-2" onClick={refresh}>
           <RefreshCw className="h-4 w-4" /> Refresh
         </Button>
       </CardHeader>
