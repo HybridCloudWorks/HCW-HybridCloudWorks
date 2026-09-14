@@ -35,6 +35,11 @@ import { signOutUser } from '@/lib/entraAuth';
 // ── Nav Groups ────────────────────────────────────────────────────────────────
 // Each group has a label, icon, and items. Items can have a badge key
 // which maps to a live count from the snapshot API.
+//
+// No text tags ("New", "Resend", "VPS"…) beside an item (#566). A badge is
+// state — how many things are waiting — and earns its place in the menu; a
+// tag naming the product behind a page does not. That belongs in the page's
+// own header, where the owner is looking when it matters.
 
 const NAV_GROUPS = [
   {
@@ -58,8 +63,8 @@ const NAV_GROUPS = [
   {
     label: 'Creative',
     items: [
-      { to: '/admin/forge-studio', icon: Flame, label: 'Forge Studio', pill: 'New' },
-      { to: '/admin/ai-engine', icon: Bot, label: 'AI Engine', pill: 'New' },
+      { to: '/admin/forge-studio', icon: Flame, label: 'Forge Studio' },
+      { to: '/admin/ai-engine', icon: Bot, label: 'AI Engine' },
       { to: '/admin/image-gallery', icon: Images, label: 'Image Gallery' },
       { to: '/admin/image-prompts', icon: Image, label: 'Prompts' },
     ],
@@ -68,10 +73,10 @@ const NAV_GROUPS = [
     label: 'Amplify',
     items: [
       { to: '/admin/calendar', icon: Calendar, label: 'Calendar' },
-      { to: '/admin/recording-hub', icon: Radio, label: 'Recording Hub', pill: 'Podcast' },
-      { to: '/admin/social', icon: Share2, label: 'Social Hub', pill: 'Publer' },
-      { to: '/admin/linkie', icon: Link2, label: 'Linkie Hub', pill: 'Linkie' },
-      { to: '/admin/mailing-list', icon: Mail, label: 'Mailing List', pill: 'Resend' },
+      { to: '/admin/recording-hub', icon: Radio, label: 'Recording Hub' },
+      { to: '/admin/social', icon: Share2, label: 'Social Hub' },
+      { to: '/admin/linkie', icon: Link2, label: 'Linkie Hub' },
+      { to: '/admin/mailing-list', icon: Mail, label: 'Newsletter Hub' },
     ],
   },
   {
@@ -88,7 +93,7 @@ const NAV_GROUPS = [
       { to: '/admin/platform', icon: SlidersHorizontal, label: 'Platform Settings' },
       { to: '/admin/health', icon: Activity, label: 'Health' },
       { to: '/admin/integrations', icon: Plug, label: 'Integrations' },
-      { to: '/admin/labs', icon: FlaskConical, label: 'Labs', pill: 'VPS' },
+      { to: '/admin/labs', icon: FlaskConical, label: 'Labs' },
     ],
   },
 ];
@@ -100,7 +105,7 @@ export { NAV_GROUPS };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function NavItem({ to, icon: Icon, label, end, badgeKey, pill, counts, collapsed }) {
+function NavItem({ to, icon: Icon, label, end, badgeKey, counts, collapsed }) {
   const count = badgeKey ? (counts?.[badgeKey] ?? 0) : 0;
 
   return (
@@ -126,11 +131,6 @@ function NavItem({ to, icon: Icon, label, end, badgeKey, pill, counts, collapsed
           {count > 0 && (
             <span className="ml-auto shrink-0 min-w-5 h-5 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center px-1.5">
               {count > 99 ? '99+' : count}
-            </span>
-          )}
-          {pill && count === 0 && (
-            <span className="ml-auto shrink-0 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/60 border border-border rounded px-1">
-              {pill}
             </span>
           )}
         </>
@@ -218,24 +218,49 @@ export default function AdminLayout() {
   // was therefore 64px shorter than the window with nothing occupying the gap,
   // which is what pushed the sidebar's brand block flush against the top of
   // the viewport with no breathing room above "ContentForge".
+  //
+  // THE SIDEBAR NEVER SCROLLS AWAY (#566). The shell is exactly one viewport
+  // tall (`h-dvh overflow-hidden`), so the window has nothing to scroll; the
+  // content column `#admin-main` is the scroll container and the aside stays
+  // put, with its nav list scrolling on its own when the menu is taller than
+  // the screen.
+  //
+  // Why not only `sticky top-0` on the aside with the window still scrolling,
+  // which would leave ScrollToTop untouched: it does not stick on this site.
+  // index.css gives `html` `overflow-y: scroll` and `body` `overflow-x:
+  // hidden`, and because the root's overflow is not `visible`, the body's is
+  // not propagated to the viewport — `body` becomes a scroll container that
+  // never scrolls, and a sticky element pins to that instead of the window.
+  // Measured in Chromium on 2026-09-14: after `scrollTo(0, 2000)` the aside's
+  // top was -2000 with that CSS and 0 without it. The sticky classes stay as
+  // a belt for the day that rule changes; they are not what holds it.
+  //
+  // `dvh`, not `vh`: on mobile browsers `100vh` is the height with the
+  // toolbar hidden, which would push Sign Out under the toolbar.
+  //
+  // `#admin-main` is a div, not a `<main>`: App.jsx already wraps every route
+  // in `<main id="main-content">`, and two nested main landmarks is one too
+  // many. ScrollToTop resets this container's scroll on route change.
   return (
-    <div className="min-h-screen flex bg-background">
+    <div className="h-dvh overflow-hidden flex bg-background">
       {/* ── Sidebar ─────────────────────────────────────────────────────── */}
       <aside
-        className={`relative border-r border-border bg-card flex flex-col shrink-0 transition-all duration-200 ${
+        className={`sticky top-0 h-dvh border-r border-border bg-card flex flex-col shrink-0 transition-all duration-200 ${
           isSidebarCollapsed ? 'w-16' : 'w-64'
         }`}
       >
-        {/* Brand header */}
+        {/* Brand header. A minimum height with real padding and line height,
+            not a fixed `h-14` with `leading-none`: at 125% and 150% zoom the
+            two lines outgrew the box and "ContentForge" was cut at the top. */}
         <div
-          className={`flex items-center border-b border-border px-3 h-14 shrink-0 ${
-            isSidebarCollapsed ? 'justify-center' : 'justify-between'
+          className={`flex items-center border-b border-border px-3 py-3 min-h-14 shrink-0 ${
+            isSidebarCollapsed ? 'justify-center' : 'justify-between gap-2'
           }`}
         >
           {!isSidebarCollapsed && (
             <div className="min-w-0">
-              <p className="text-sm font-bold tracking-tight leading-none">ContentForge</p>
-              <p className="text-[10px] text-muted-foreground mt-0.5">Influencer CMS</p>
+              <p className="text-sm font-bold tracking-tight leading-5">ContentForge</p>
+              <p className="text-[10px] leading-4 text-muted-foreground">Influencer CMS</p>
             </div>
           )}
           <button
@@ -253,7 +278,7 @@ export default function AdminLayout() {
         </div>
 
         {/* Nav groups */}
-        <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-4">
+        <nav className="flex-1 min-h-0 overflow-y-auto py-3 px-2 space-y-4">
           {NAV_GROUPS.map((group) => (
             <div key={group.label} className="space-y-0.5">
               {!isSidebarCollapsed && (
@@ -299,11 +324,11 @@ export default function AdminLayout() {
       </aside>
 
       {/* ── Main content ─────────────────────────────────────────────────── */}
-      <main id="admin-main" className="flex-1 min-w-0 overflow-y-auto">
+      <div id="admin-main" className="flex-1 min-w-0 overflow-y-auto">
         <div className="max-w-2xl mx-auto p-6">
           <Outlet />
         </div>
-      </main>
+      </div>
     </div>
   );
 }

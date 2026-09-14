@@ -165,6 +165,8 @@ describe('createIssueBuilder', () => {
     const d = { generateDraft: vi.fn(async () => { throw new Error('forgeDrafting is disabled'); }) };
     const result = await createIssueBuilder({ store, drafter: d, now: () => NOW, log: { warn: vi.fn() } }).build({});
     expect(result.success).toBe(true);
+    // The page is Newsletter Hub in the menu (#566); the message names it that way.
+    expect(result.message).toMatch(/Review and approve it in the Newsletter Hub\.$/);
     const doc = store.written.get('newsletters/issue-2026-09-14');
     expect(doc.subject).toBe('HybridCloudWorks Weekly: Sep 7 – Sep 14');
     expect(doc.intro).toBe('');

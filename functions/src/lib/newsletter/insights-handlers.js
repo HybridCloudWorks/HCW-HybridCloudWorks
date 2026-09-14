@@ -331,7 +331,7 @@ export function createNewsletterInsightsHandlers({
   const failed = (route, error, context) => {
     const name = typeof error?.name === 'string' ? error.name : 'Error';
     context.error?.(`${route} failed ${name} ${ref(context)}`);
-    return json(500, { ok: false, error: 'The Mailing List request failed' });
+    return json(500, { ok: false, error: 'The Newsletter Hub request failed.' });
   };
 
   /**

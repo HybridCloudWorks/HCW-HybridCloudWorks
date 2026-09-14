@@ -1,6 +1,6 @@
 /**
  * Shared by the Audience tab and the metrics on Published (#504): what a
- * failed Mailing List call says, and how Resend's numbers are shown.
+ * failed Newsletter Hub call says, and how Resend's numbers are shown.
  *
  * The routes behind these (functions/src/lib/newsletter/insights-handlers.js)
  * answer 503 when RESEND_API_KEY is not set, 429 with `retryAfterSeconds` when
@@ -18,7 +18,7 @@ export function describeResendError(err) {
     const seconds = Number.isFinite(err.retryAfterSeconds) ? err.retryAfterSeconds : 1;
     return `Resend is rate limiting requests. Wait ${seconds} second${seconds === 1 ? '' : 's'}, then try again.`;
   }
-  return err?.message || 'The Mailing List request failed.';
+  return err?.message || 'The Newsletter Hub request failed.';
 }
 
 const numberFormat = new Intl.NumberFormat('en-US');
