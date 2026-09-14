@@ -267,6 +267,9 @@ already exists and is already wired.
 What that implies for store 4: it may only hold credentials to systems that are
 **not Azure** and offer **no federation from GitHub**. Today that is HCP
 Terraform and Firebase — two external systems, each with a named reason.
+Qlty Cloud's coverage upload (`.github/workflows/coverage.yml`, #568) stores
+nothing: it authenticates with GitHub OIDC (`oidc: true`), so there is no
+`QLTY_COVERAGE_TOKEN` secret.
 `AZURE_STATIC_WEB_APPS_API_TOKEN` fails this test on its first word.
 
 ### Secrets that must never transit Terraform state, and why Key Vault is seeded out-of-band
