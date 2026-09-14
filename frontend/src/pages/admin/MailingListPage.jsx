@@ -12,8 +12,9 @@
  *               with Resend's metrics for it, and the month's figures
  *   Audience    the Newsletter segment in Resend: counts, the contacts a page
  *               at a time, and (publisher) unsubscribe, resubscribe, remove
- *   Settings    what every issue needs (postal address, reply-to, send slot)
- *               and the Resend connection check, in one place
+ *   Settings    what every issue needs (postal address, reply-to, send slot),
+ *               the Resend connection check, and Resend itself: sending
+ *               domains (records, verify, tracking), recent emails and API logs
  *
  * The test posts a NAME to `connectionProbe` and the server builds the call,
  * so `RESEND_API_KEY` never reaches the browser.
@@ -32,6 +33,9 @@ import NewsletterIssues from '@/components/admin/newsletter/NewsletterIssues';
 import NewsletterCalendar from '@/components/admin/newsletter/NewsletterCalendar';
 import NewsletterAudience from '@/components/admin/newsletter/NewsletterAudience';
 import NewsletterSettingsCard from '@/components/admin/newsletter/NewsletterSettingsCard';
+import ResendDomains from '@/components/admin/newsletter/settings/ResendDomains';
+import ResendEmails from '@/components/admin/newsletter/settings/ResendEmails';
+import ResendLogs from '@/components/admin/newsletter/settings/ResendLogs';
 
 const TABS = [
   { id: 'newsletter', label: 'Newsletter' },
@@ -66,12 +70,18 @@ export async function checkResend() {
 /**
  * Everything that is set once rather than per issue. The issue tabs mount
  * fresh when opened, so they read saved settings without being told.
+ *
+ * The Resend cards mount only with this tab, and each loads and fails on its
+ * own, so Resend being slow or unconfigured never holds up the settings card.
  */
 function SettingsTab({ onStatusChange }) {
   return (
     <div className="max-w-3xl space-y-6">
       <NewsletterSettingsCard />
       <ConnectionCard onStatusChange={onStatusChange} />
+      <ResendDomains />
+      <ResendEmails />
+      <ResendLogs />
     </div>
   );
 }
