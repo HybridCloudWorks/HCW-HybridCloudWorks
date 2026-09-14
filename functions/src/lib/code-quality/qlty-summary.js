@@ -165,7 +165,7 @@ export function createCodeQualityHandlers({
       const read = await readProject((path) => qltyGet(fetchImpl, path, token), at, outOfTime);
       if (read.refusal) return refused(route, read.refusal, context);
       const entry = { at, value: read.value };
-      if (read.value.truncated !== 'time') cache = entry;
+      if (read.value.truncated === false) cache = entry;
       return answer(entry);
     } catch (error) {
       context.error?.(`${route} failed ${text(error?.name, 'Error')} ${ref(context)}`);
