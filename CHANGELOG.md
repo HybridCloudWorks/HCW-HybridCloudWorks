@@ -19,6 +19,25 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Faster newsletter editing in the API: preview text, section trimming, AI
+  intro and subject help, and a test send (#504).** The owner found editing a
+  weekly issue "still very stiff"; this is the API half, the page follows.
+  `PATCH /api/cms/newsletters/{id}` now also takes `preheader` (the inbox
+  preview text, at most 150 characters, rendered as the standard hidden block
+  at the top of the email) and `sections`, which may only remove or reorder
+  items and sections: every item is matched to a stored one by section and
+  URL, the stored items are written back, and anything added, moved or edited
+  is a 400. `POST .../intro` regenerates a draft's intro with the builder's
+  own drafter and instruction (a failure stores nothing, 502);
+  `POST .../subjects` returns three to five subject-line suggestions and
+  writes nothing. `POST .../test` (publisher) emails one `[TEST]` copy to the
+  reply-to address in Newsletter settings, never an address from the request,
+  at most once a minute per issue. **Nothing here can reach subscribers**:
+  the test uses Resend's single-email endpoint, which is why it works while
+  sending is switched off. Approve is unchanged apart from now rendering the
+  preheader. Also corrects `timer-catalogue-sync.test.js`, which placed
+  `local.timer_catalogue` in `infra/main.tf`; it is in `infra/functionapp.tf`.
+
 - **The weekly newsletter builds itself into Drafts every Monday (#504).** A
   new timer, `buildWeeklyNewsletter`, runs Monday 13:00 UTC (08:00 CDT /
   07:00 CST), builds the last seven days into an issue saved straight to the
