@@ -11,8 +11,9 @@
  * from `GET .../issues?status=open` 100 at a time, up to MAX_PAGES (a cap, so a
  * runaway project cannot hold the request open; `truncated` says it was hit).
  * About 14 pages today against a 5,000-an-hour rate limit, and the answer is
- * cached per process for CODE_QUALITY_CACHE_MS, successes only, so a page left
- * open and refreshed does not spend the limit.
+ * cached per process for CODE_QUALITY_CACHE_MS, successes only (including a
+ * page-cap answer, which a retry would only repeat), so a page left open and
+ * refreshed does not spend the limit.
  *
  * WHY IT HAS A TIME BUDGET. Pages are sequential, each with its own 15 s
  * timeout, so a slow Qlty could hold the request far past the platform's HTTP
@@ -150,7 +151,7 @@ export function createCodeQualityHandlers({
   fetch: fetchImpl = globalThis.fetch,
   now = () => new Date(),
 }) {
-  /** Per process: `{ at, value }` of the last complete summary. */
+  /** Per process: `{ at, value }` of the last summary that was not cut short by the time budget. */
   let cache = null;
 
   const answer = (entry) =>
