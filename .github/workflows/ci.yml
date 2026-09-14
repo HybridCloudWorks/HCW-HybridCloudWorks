@@ -149,25 +149,25 @@ jobs:
         if: steps.changes.outputs.relevant == 'true' && matrix.lint != ''
         env:
           COMMAND: ${{ matrix.lint }}
-        run: eval "$COMMAND"
+        run: bash -c "$COMMAND"
 
       - name: Format check
         if: steps.changes.outputs.relevant == 'true' && matrix.format != ''
         env:
           COMMAND: ${{ matrix.format }}
-        run: eval "$COMMAND"
+        run: bash -c "$COMMAND"
 
       - name: Build
         if: steps.changes.outputs.relevant == 'true' && matrix.build != ''
         env:
           COMMAND: ${{ matrix.build }}
-        run: eval "$COMMAND"
+        run: bash -c "$COMMAND"
 
       - name: Test
         if: steps.changes.outputs.relevant == 'true' && matrix.test != ''
         env:
           COMMAND: ${{ matrix.test }}
-        run: eval "$COMMAND"
+        run: bash -c "$COMMAND"
 
   # hooks/claude_event.py runs on every Claude Code session start and stop, and
   # tooling/workflow.py owns the state the Stop guard reads. Both were shipped
