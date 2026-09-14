@@ -512,6 +512,28 @@ describe('newsletter settings', () => {
     ]);
   });
 
+  it('drops a retired section row before validating it, so its extra keys never invalidate the document', () => {
+    expect(
+      normalizeNewsletterSettings({
+        sections: [
+          { id: 'retired-section', enabled: null, maxItems: 'lots', legacyFlag: true },
+          { id: 'articles', enabled: true, maxItems: 5 },
+          { id: 'articles', enabled: 'yes', extra: 1 },
+        ],
+      }).sections
+    ).toEqual([
+      { id: 'articles', enabled: true, maxItems: 5 },
+      { id: 'certification-news', enabled: true, maxItems: 12 },
+      { id: 'episodes', enabled: true, maxItems: 12 },
+    ]);
+  });
+
+  it('refuses enabled: null on a known section rather than treating it as on', () => {
+    expect(() =>
+      normalizeNewsletterSettings({ sections: [{ id: 'articles', enabled: null, maxItems: 5 }] })
+    ).toThrow(/enabled must be true or false/);
+  });
+
   it('clamps item counts to 1..20 and the window to 1..31', () => {
     const value = normalizeNewsletterSettings({
       sections: [

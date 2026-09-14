@@ -230,7 +230,14 @@ export function createIssueBuilder({ store, drafter, now = () => new Date(), sec
   async function readSettings() {
     try {
       const doc = await store.readDoc('admin_config', NEWSLETTER_SETTINGS_CONFIG_ID, ADMIN_CONFIG_PARTITION);
-      return { settings: presentSetting('newsletter-settings', doc).value, problem: null };
+      const presented = presentSetting('newsletter-settings', doc);
+      // A stored document that fails validation presents as the defaults; say
+      // why on the issue, as the Platform Settings API does, instead of silently.
+      const problem =
+        presented.stored === 'invalid'
+          ? `settings: the saved newsletter settings are invalid (${presented.problem}), so the default content choices were used`
+          : null;
+      return { settings: presented.value, problem };
     } catch (error) {
       log?.warn?.(`[newsletter] settings not read, defaults used: ${error?.message ?? error}`);
       return { settings: newsletterSettingsDefaults(), problem: 'settings: could not be read, so the default content choices were used' };

@@ -376,15 +376,19 @@ function normalizeSectionSettings(raw) {
   const out = [];
   raw.forEach((entry, index) => {
     if (!isPlainObject(entry)) fail(`sections[${index}] must be an object`);
-    assertOnlyKeys(entry, ['id', 'enabled', 'maxItems'], `sections[${index}]`);
     if (typeof entry.id !== 'string') fail(`sections[${index}].id must be a string`);
-    const enabled = entry.enabled ?? true;
+    // Decide to drop BEFORE validating the rest: a retired or repeated section
+    // row is discarded whatever else it carries, so it can never make the
+    // whole document invalid.
+    if (!known.has(entry.id) || seen.has(entry.id)) return;
+    assertOnlyKeys(entry, ['id', 'enabled', 'maxItems'], `sections[${index}]`);
+    // Only an absent `enabled` defaults; null is refused like any non-boolean.
+    const enabled = entry.enabled === undefined ? true : entry.enabled;
     if (typeof enabled !== 'boolean') fail(`sections[${index}].enabled must be true or false`);
     const maxItems =
       entry.maxItems === undefined
         ? MAX_ITEMS_PER_SECTION
         : clampInteger(entry.maxItems, MIN_SECTION_ITEMS, MAX_SECTION_ITEMS, `sections[${index}].maxItems`);
-    if (!known.has(entry.id) || seen.has(entry.id)) return;
     seen.add(entry.id);
     out.push({ id: entry.id, enabled, maxItems });
   });

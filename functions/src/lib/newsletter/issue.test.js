@@ -362,6 +362,16 @@ describe('createIssueBuilder', () => {
       expect(warn).toHaveBeenCalled();
     });
 
+    it('records why when the stored settings are invalid, and builds with the defaults', async () => {
+      const store = makeStore(rows(), {
+        'admin_config/newsletter_settings': { id: 'newsletter_settings', windowDays: 'a fortnight' },
+      });
+      const result = await createIssueBuilder({ store, drafter: drafter(), now: () => NOW }).build();
+      expect(result.success).toBe(true);
+      expect(result.sections).toEqual(['articles', 'certification-news', 'episodes']);
+      expect(result.problems[0]).toMatch(/saved newsletter settings are invalid \(.*windowDays.*\)/);
+    });
+
     it('plans a registered section the saved list does not name after the saved ones', () => {
       const a = { id: 'a' };
       const b = { id: 'b' };
