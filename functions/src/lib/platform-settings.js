@@ -788,8 +788,12 @@ export function createPlatformSettingsHandlers({
         try {
           await audit('platform_setting_updated', auth.user, details);
         } catch (auditError) {
+          // The audit row may keep the template id; telemetry does not. The log
+          // says only whether a template is chosen.
+          const logged =
+            details.templateId === undefined ? details : { ...details, templateId: details.templateId ? '[set]' : null };
           context.warn?.(
-            `putPlatformSetting(${name}) saved but the audit row failed (${JSON.stringify(details)}): ${auditError?.message || auditError}`
+            `putPlatformSetting(${name}) saved but the audit row failed (${JSON.stringify(logged)}): ${auditError?.message || auditError}`
           );
         }
         return json(200, {

@@ -1037,6 +1037,28 @@ describe('handlers', () => {
     expect(line).not.toContain('private-feed');
   });
 
+  it('a failed audit row for newsletter settings logs that a template is set, never its id', async () => {
+    const log = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const store = makeStore({
+      upsertDoc: vi.fn(async (container, doc) => {
+        if (container === 'admin_audit_logs') throw new Error('audit container throttled');
+        return doc;
+      }),
+    });
+    const h = createPlatformSettingsHandlers({ guard: allowGuard, store, ...fixed });
+    const res = await h.putSetting(
+      makeRequest({
+        params: { setting: 'newsletter-settings' },
+        body: { templateId: 'tpl-secret-design-1234' },
+      }),
+      log
+    );
+    expect(res.status).toBe(200);
+    const line = String(log.warn.mock.calls[0][0]);
+    expect(line).toContain('"templateId":"[set]"');
+    expect(line).not.toContain('tpl-secret-design-1234');
+  });
+
   it('a failed config write is a 500 whose log line names the setting, not the document', async () => {
     const log = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
     // The first upsert is the config document itself; nothing was saved.
