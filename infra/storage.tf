@@ -46,6 +46,10 @@
 # where storage is a minor line next to telemetry — that is cheap insurance
 # for the only copy of every image the site serves.
 # =============================================================================
+# Resource logs for blob read/write/delete go to Log Analytics through
+# azurerm_monitor_diagnostic_setting.content_blob; trivy reads only classic
+# queue_properties logging. docs/security/scanner-triage.md#trivy
+#trivy:ignore:AVD-AZU-0057
 resource "azurerm_storage_account" "hcw" {
   name                     = var.storage_account_name
   resource_group_name      = azurerm_resource_group.app["stor"].name
@@ -149,30 +153,35 @@ resource "azurerm_storage_account" "hcw" {
 # ones lives in functions/src/lib/blob-paths.js (PUBLIC_MEDIA_CONTAINERS) and
 # must be kept in step with the comments here.
 resource "azurerm_storage_container" "blogs" {
+  #checkov:skip=CKV2_AZURE_21:Blob read logging is on for this account via azurerm_monitor_diagnostic_setting.content_blob (StorageRead). docs/security/scanner-triage.md#checkov
   name                  = "blogs"
   storage_account_id    = azurerm_storage_account.hcw.id
   container_access_type = "private" # blog cover images, served via the media route
 }
 
 resource "azurerm_storage_container" "covers" {
+  #checkov:skip=CKV2_AZURE_21:Blob read logging is on for this account via azurerm_monitor_diagnostic_setting.content_blob (StorageRead). docs/security/scanner-triage.md#checkov
   name                  = "covers"
   storage_account_id    = azurerm_storage_account.hcw.id
   container_access_type = "private" # content cover images, served via the media route
 }
 
 resource "azurerm_storage_container" "certifications" {
+  #checkov:skip=CKV2_AZURE_21:Blob read logging is on for this account via azurerm_monitor_diagnostic_setting.content_blob (StorageRead). docs/security/scanner-triage.md#checkov
   name                  = "certifications"
   storage_account_id    = azurerm_storage_account.hcw.id
   container_access_type = "private" # certification badges, served via the media route
 }
 
 resource "azurerm_storage_container" "speakerevents" {
+  #checkov:skip=CKV2_AZURE_21:Blob read logging is on for this account via azurerm_monitor_diagnostic_setting.content_blob (StorageRead). docs/security/scanner-triage.md#checkov
   name                  = "speakerevents"
   storage_account_id    = azurerm_storage_account.hcw.id
   container_access_type = "private" # private: event assets served via API
 }
 
 resource "azurerm_storage_container" "content" {
+  #checkov:skip=CKV2_AZURE_21:Blob read logging is on for this account via azurerm_monitor_diagnostic_setting.content_blob (StorageRead). docs/security/scanner-triage.md#checkov
   name                  = "content"
   storage_account_id    = azurerm_storage_account.hcw.id
   container_access_type = "private" # private: raw content assets, not public
@@ -184,6 +193,7 @@ resource "azurerm_storage_container" "content" {
 # what makes it reachable anonymously, and the account denies anonymous reads
 # outright regardless.
 resource "azurerm_storage_container" "listenandlearn" {
+  #checkov:skip=CKV2_AZURE_21:Blob read logging is on for this account via azurerm_monitor_diagnostic_setting.content_blob (StorageRead). docs/security/scanner-triage.md#checkov
   name                  = "listenandlearn"
   storage_account_id    = azurerm_storage_account.hcw.id
   container_access_type = "private" # episode MP3s, served via the media route
@@ -197,6 +207,7 @@ resource "azurerm_storage_container" "listenandlearn" {
 # settings as listenandlearn; PUBLIC_MEDIA_CONTAINERS in blob-paths.js already
 # names it, so it is reachable through the route the moment this applies.
 resource "azurerm_storage_container" "podcast" {
+  #checkov:skip=CKV2_AZURE_21:Blob read logging is on for this account via azurerm_monitor_diagnostic_setting.content_blob (StorageRead). docs/security/scanner-triage.md#checkov
   name                  = "podcast"
   storage_account_id    = azurerm_storage_account.hcw.id
   container_access_type = "private" # transcript MP3s, served via the media route
@@ -223,6 +234,7 @@ resource "azurerm_storage_container" "podcast" {
 # (variables.tf). The apply that adds this adds an empty container and the
 # expire-cosmos-export lifecycle rule below, and changes nothing that runs.
 resource "azurerm_storage_container" "cosmos_export" {
+  #checkov:skip=CKV2_AZURE_21:Blob read logging is on for this account via azurerm_monitor_diagnostic_setting.content_blob (StorageRead). docs/security/scanner-triage.md#checkov
   name                  = "cosmos-export"
   storage_account_id    = azurerm_storage_account.hcw.id
   container_access_type = "private" # Cosmos export runs and change-feed state; never served
@@ -361,6 +373,8 @@ resource "azurerm_storage_management_policy" "cleanup" {
 
 
 resource "azurerm_storage_account" "functions" {
+  #checkov:skip=CKV2_AZURE_33:ADR 0008 keeps Function host storage public-endpoint by accepted decision (default Deny network rules). docs/security/scanner-triage.md#checkov
+  #checkov:skip=CKV_AZURE_59:ADR 0008, as above; the deploy firewall window needs the public endpoint with default Deny. docs/security/scanner-triage.md#checkov
   name                     = var.functions_storage_account_name
   resource_group_name      = azurerm_resource_group.app["web"].name
   location                 = azurerm_resource_group.app["web"].location
@@ -368,6 +382,12 @@ resource "azurerm_storage_account" "functions" {
   account_replication_type = "LRS"
   min_tls_version          = "TLS1_2"
   tags                     = local.tags
+
+  # No container here is anonymous (function-releases is private), so the
+  # account-level override costs nothing and matches the content account
+  # above. The provider default is true. In-place and reversible.
+  # docs/security/scanner-triage.md (checkov CKV2_AZURE_47 / CKV_AZURE_190).
+  allow_nested_items_to_be_public = false
 
   # Account keys off — the credential half of the same posture the network
   # rules below take. All three access paths listed there are Entra-based

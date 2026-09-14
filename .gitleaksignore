@@ -1,0 +1,24 @@
+# gitleaks false positives, one fingerprint per verified finding.
+# Each is triaged in docs/security/scanner-triage.md#gitleaks — read the row
+# before adding a line here. Fingerprint shape for a filesystem scan is
+# path:rule:line, so a line that moves needs its fingerprint moved with it.
+
+# Firebase Storage download URLs for images the public site already serves;
+# the token grants read on that one public object. The manifest is
+# regenerated weekly (publish-content-manifest.yml), so these three move when
+# it does: re-verify the new lines are the same URL shape, then move them.
+frontend/data/content-manifest.json:generic-api-key:407
+frontend/data/content-manifest.json:generic-api-key:830
+frontend/data/content-manifest.json:generic-api-key:831
+
+# Test fixture: base64url of {"v":1} and of the word "signature". Not a token.
+frontend/src/pages/NewsletterConfirmPage.test.jsx:generic-api-key:16
+
+# The Azure Cosmos DB emulator's published well-known key, against localhost.
+functions/local.settings.json.example:generic-api-key:7
+
+# Entra API application (client) id: an identifier, not a credential.
+scripts/cutover/01-entra-api.ps1:generic-api-key:51
+scripts/cutover/02-entra-spa-client.ps1:generic-api-key:75
+scripts/cutover/03-entra-dev-client.ps1:generic-api-key:61
+scripts/rollback/restore-admin-signin.ps1:generic-api-key:60
