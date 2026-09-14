@@ -1,7 +1,7 @@
 /**
  * The timer catalogue and its validation allowlist must agree (T-751).
  *
- * The eighteen timer flag suffixes are written twice by hand: once in
+ * The nineteen timer flag suffixes are written twice by hand: once in
  * `local.timer_catalogue` (infra/main.tf), which decides which
  * FEATURE_FLAG_* settings the Function App receives, and once in the
  * `enabled_timers` validation list (infra/variables.tf), which decides which

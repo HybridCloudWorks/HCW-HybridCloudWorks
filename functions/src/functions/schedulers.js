@@ -50,6 +50,7 @@ import { createPublerClient, createPublerReconcile } from '../lib/timers/publer-
 import { recordKeyVerdict } from '../lib/key-verdict.js';
 import { createBlogListingsScrape } from '../lib/timers/blog-listings.js';
 import { createPodcastIngest, createPodcastParser } from '../lib/timers/podcasts.js';
+import { createNewsletterAutoBuild } from '../lib/timers/newsletter-autobuild.js';
 
 const masterDisabled = () => process.env.FEATURE_FLAG_SCHEDULERS === 'false';
 
@@ -178,6 +179,25 @@ timer('generateReviewerDigest', 'GENERATE_REVIEWER_DIGEST', '0 0 7 * * *', (cont
 timer('checkLiveLinks', 'CHECK_LIVE_LINKS', '0 0 6 * * 1', (context) =>
   createLinkCheck({ store, log: context }).run()
 );
+
+timer('buildWeeklyNewsletter', 'BUILD_WEEKLY_NEWSLETTER', '0 0 13 * * 1', async (context) => {
+  // #504: Monday 13:00 UTC — 08:00 CDT / 07:00 CST — so the draft is waiting
+  // well before the default Tuesday 09:00 Central send. Builds the last seven
+  // days into Drafts and pings Telegram with the link. NEVER SENDS: approval
+  // stays a manual press on the Drafts tab. Same builder wiring as the
+  // build-newsletter-issue job (forge-jobs.js).
+  const [{ createIssueBuilder }, { createDrafter }, { createNotifier }, ai] = await Promise.all([
+    import('../lib/newsletter/issue.js'),
+    import('../lib/content/drafting.js'),
+    import('../lib/notify.js'),
+    import('../lib/ai/router.js'),
+  ]);
+  return createNewsletterAutoBuild({
+    builder: createIssueBuilder({ store, drafter: createDrafter({ store, ai }), log: context }),
+    notifier: createNotifier({ store, log: context }),
+    log: context,
+  }).run();
+});
 
 // ── Retirement ───────────────────────────────────────────────────────────────
 

@@ -182,6 +182,58 @@ describe('createIssueBuilder', () => {
     expect(store.upsertDoc).not.toHaveBeenCalled();
   });
 
+  it('lands the issue in Drafts when asked to keep it, still as a draft', async () => {
+    const store = makeStore({ content: [article] });
+    const result = await createIssueBuilder({ store, drafter: drafter(), now: () => NOW }).build({
+      days: 7,
+      keep: true,
+      keptBy: 'auto-build',
+    });
+    expect(result).toMatchObject({
+      success: true,
+      kept: true,
+      issueId: 'issue-2026-09-14',
+      subject: 'Landing zones, again',
+      itemCount: 1,
+      introError: null,
+    });
+    expect(store.written.get('newsletters/issue-2026-09-14')).toMatchObject({
+      status: 'draft',
+      savedAt: NOW.toISOString(),
+      savedBy: 'auto-build',
+    });
+  });
+
+  it('does not mark a build as saved unless asked to keep it', async () => {
+    const store = makeStore({ content: [article] });
+    const result = await createIssueBuilder({ store, drafter: drafter(), now: () => NOW }).build({});
+    expect(result.kept).toBe(false);
+    const doc = store.written.get('newsletters/issue-2026-09-14');
+    expect(doc).not.toHaveProperty('savedAt');
+    expect(doc).not.toHaveProperty('savedBy');
+  });
+
+  it('keeping still refuses to overwrite a kept or approved issue, and says why', async () => {
+    const kept = makeStore({ content: [article] }, {
+      'newsletters/issue-2026-09-14': { id: 'issue-2026-09-14', status: 'draft', savedAt: '2026-09-14T09:00:00Z', subject: 'Mine' },
+    });
+    const keptResult = await createIssueBuilder({ store: kept, drafter: drafter(), now: () => NOW }).build({ keep: true, keptBy: 'auto-build' });
+    expect(keptResult).toMatchObject({ success: false, reason: 'kept' });
+    expect(kept.upsertDoc).not.toHaveBeenCalled();
+    expect(kept.written.get('newsletters/issue-2026-09-14').subject).toBe('Mine');
+
+    const sent = makeStore({ content: [article] }, { 'newsletters/issue-2026-09-14': { id: 'issue-2026-09-14', status: 'sent' } });
+    const sentResult = await createIssueBuilder({ store: sent, drafter: drafter(), now: () => NOW }).build({ keep: true });
+    expect(sentResult).toMatchObject({ success: false, reason: 'locked', status: 'sent' });
+    expect(sent.upsertDoc).not.toHaveBeenCalled();
+
+    const empty = makeStore();
+    expect(await createIssueBuilder({ store: empty, drafter: drafter(), now: () => NOW }).build({ keep: true })).toMatchObject({
+      success: false,
+      reason: 'empty',
+    });
+  });
+
   it('builds a deleted issue again from scratch', async () => {
     const store = makeStore({ content: [article] }, {
       'newsletters/issue-2026-09-14': {

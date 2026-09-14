@@ -181,6 +181,9 @@ registerJobType('build-newsletter-issue', {
     "Build this week's newsletter issue as a draft from every registered section ({ days }, default 7): new articles, certification news, study and podcast episodes, plus an AI-written intro. Never sends.",
   maxPayloadBytes: 256,
   timeoutMs: 10 * 60 * 1000,
+  // Only `days` is passed through: `keep`/`keptBy` belong to the Monday timer
+  // (#504), and a job payload is caller-supplied, so it must not set who a
+  // draft was saved by. Saving from the page goes through saveNewsletter.
   worker: (payload, { context }) =>
-    createIssueBuilder({ store, drafter: createDrafter({ store, ai }), log: context }).build(payload || {}),
+    createIssueBuilder({ store, drafter: createDrafter({ store, ai }), log: context }).build({ days: payload?.days }),
 });

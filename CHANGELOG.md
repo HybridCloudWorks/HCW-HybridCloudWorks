@@ -19,6 +19,18 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The weekly newsletter builds itself into Drafts every Monday (#504).** A
+  new timer, `buildWeeklyNewsletter`, runs Monday 13:00 UTC (08:00 CDT /
+  07:00 CST), builds the last seven days into an issue saved straight to the
+  **Drafts** tab, and sends a Telegram message with the subject, the item
+  count and a link to `/admin/mailing-list?tab=drafts`. A week with nothing
+  new, or a day whose issue is already kept in Drafts or approved, writes
+  nothing and says so; a missing AI intro is called out. **It never sends**:
+  approval stays a manual press on the Drafts tab. It ships disarmed behind
+  `FEATURE_FLAG_BUILD_WEEKLY_NEWSLETTER` — add `BUILD_WEEKLY_NEWSLETTER` to
+  `enabled_timers` in the HCP Terraform workspace to arm it. The issue builder
+  gained a `keep` option for this, and the `build-newsletter-issue` job now
+  passes only `days` through from its payload.
 - **A Settings tab on the Mailing List page (#504).** Newsletter settings no
   longer sit under the issues, and the Connection tab is gone: both are on
   **Settings**, the last tab. A bookmark to the old Connection tab opens

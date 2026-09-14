@@ -120,6 +120,7 @@ export const WITNESSES = {
   forgeScheduled: { none: 'drafts content for review; drafts are not public' },
   generateReviewerDigest: { none: 'sends mail; no document is written' },
   checkLiveLinks: { none: 'annotates content documents; the annotation is not projected publicly' },
+  buildWeeklyNewsletter: { none: 'writes a draft newsletter issue and pings Telegram; drafts are not public, and it never sends' },
   reVerifyCertifications: { none: 'updates certifications; the verification field is not projected publicly' },
   cleanupUnusedCertImages: { none: 'dry-run until CERT_IMAGE_CLEANUP_DELETE; blobs are private' },
   cleanupSoftDeletedContent: { none: 'deletes soft-deleted documents, which were never public' },
