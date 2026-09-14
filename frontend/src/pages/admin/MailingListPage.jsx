@@ -9,7 +9,8 @@
  *   Drafts      kept issues, edited and approved; approval schedules it
  *               through Resend only when a publisher confirms
  *   Published   a calendar of what was sent or scheduled, each email viewable
- *   Connection  the Resend key check
+ *   Settings    what every issue needs (postal address, reply-to, send slot)
+ *               and the Resend connection check, in one place
  *
  * The subscriber list itself is managed in Resend's Audience view.
  *
@@ -34,9 +35,11 @@ const TABS = [
   { id: 'newsletter', label: 'Newsletter' },
   { id: 'drafts', label: 'Drafts' },
   { id: 'published', label: 'Published' },
-  { id: 'connection', label: 'Connection' },
+  { id: 'settings', label: 'Settings' },
 ];
 const TAB_IDS = new Set(TABS.map((tab) => tab.id));
+/** Tabs that moved: a bookmark to one lands where its content went. */
+const MOVED_TABS = { connection: 'settings' };
 
 // ── Resend connection ─────────────────────────────────────────────────────────
 
@@ -57,20 +60,22 @@ export async function checkResend() {
 
 // ── Newsletter Tab ────────────────────────────────────────────────────────────
 
-function NewsletterTab() {
-  // Bumped when settings save, so the open issue re-reads whether it can send.
-  const [settingsVersion, setSettingsVersion] = useState(0);
+// ── Settings Tab ──────────────────────────────────────────────────────────────
+
+/**
+ * Everything that is set once rather than per issue. The issue tabs mount
+ * fresh when opened, so they read saved settings without being told.
+ */
+function SettingsTab({ onStatusChange }) {
   return (
-    <div className="space-y-6">
-      <NewsletterIssues view="review" settingsVersion={settingsVersion} />
-      <NewsletterSettingsCard onSaved={() => setSettingsVersion((v) => v + 1)} />
+    <div className="max-w-3xl space-y-6">
+      <NewsletterSettingsCard />
+      <ConnectionCard onStatusChange={onStatusChange} />
     </div>
   );
 }
 
-// ── Connection Tab ────────────────────────────────────────────────────────────
-
-function ConnectionTab({ onStatusChange }) {
+function ConnectionCard({ onStatusChange }) {
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState(null);
 
@@ -89,69 +94,67 @@ function ConnectionTab({ onStatusChange }) {
   };
 
   return (
-    <div className="max-w-2xl space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Resend API Connection</CardTitle>
-          <CardDescription>
-            The Resend API key is stored in Azure Key Vault and used only on the server — it is
-            never sent to the browser. It must be created with Full access; a key with Sending
-            access only cannot manage the mailing list.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {/*
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Resend API Connection</CardTitle>
+        <CardDescription>
+          The Resend API key is stored in Azure Key Vault and used only on the server — it is never
+          sent to the browser. It must be created with Full access; a key with Sending access only
+          cannot manage the mailing list.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/*
             THE BUTTON AND THE LINKS SHARE A FLEX ROW, because `space-y-4` on
             this CardContent cannot separate them: it sets margin-top on a
             following sibling, and inline-flex siblings land on one line.
             `flex-wrap` lets the links drop below the button on a narrow card.
             The result panel stays outside the row as its own block.
           */}
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <Button onClick={handleTest} disabled={testing} className="gap-2">
-              {testing ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <RefreshCw className="h-4 w-4" />
-              )}
-              Test Connection
-            </Button>
-            <a
-              href="https://resend.com/api-keys"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
-            >
-              API keys in Resend <ExternalLink className="h-3.5 w-3.5" />
-            </a>
-            <a
-              href="https://resend.com/domains"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
-            >
-              Sending domains <ExternalLink className="h-3.5 w-3.5" />
-            </a>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <Button onClick={handleTest} disabled={testing} className="gap-2">
+            {testing ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+            Test Connection
+          </Button>
+          <a
+            href="https://resend.com/api-keys"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
+          >
+            API keys in Resend <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+          <a
+            href="https://resend.com/domains"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
+          >
+            Sending domains <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+        </div>
+        {result && (
+          <div
+            className={`flex items-start gap-2 p-3 rounded-lg border text-sm ${
+              result.ok
+                ? 'border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-400'
+                : 'border-destructive/40 bg-destructive/10 text-destructive'
+            }`}
+          >
+            {result.ok ? (
+              <CheckCircle className="h-4 w-4 shrink-0 mt-0.5" />
+            ) : (
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+            )}
+            <p>{result.message}</p>
           </div>
-          {result && (
-            <div
-              className={`flex items-start gap-2 p-3 rounded-lg border text-sm ${
-                result.ok
-                  ? 'border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-400'
-                  : 'border-destructive/40 bg-destructive/10 text-destructive'
-              }`}
-            >
-              {result.ok ? (
-                <CheckCircle className="h-4 w-4 shrink-0 mt-0.5" />
-              ) : (
-                <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-              )}
-              <p>{result.message}</p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -162,7 +165,7 @@ export default function MailingListPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   // A bookmark to a tab that no longer exists (`lists`, `campaigns`) lands on
   // the newsletter rather than on a blank page.
-  const requested = searchParams.get('tab');
+  const requested = MOVED_TABS[searchParams.get('tab')] ?? searchParams.get('tab');
   const activeTab = TAB_IDS.has(requested) ? requested : 'newsletter';
   const [connected, setConnected] = useState('checking');
 
@@ -206,10 +209,10 @@ export default function MailingListPage() {
       </div>
 
       <div>
-        {activeTab === 'newsletter' && <NewsletterTab />}
+        {activeTab === 'newsletter' && <NewsletterIssues view="review" />}
         {activeTab === 'drafts' && <NewsletterIssues view="drafts" />}
         {activeTab === 'published' && <NewsletterCalendar />}
-        {activeTab === 'connection' && <ConnectionTab onStatusChange={setConnected} />}
+        {activeTab === 'settings' && <SettingsTab onStatusChange={setConnected} />}
       </div>
     </div>
   );
