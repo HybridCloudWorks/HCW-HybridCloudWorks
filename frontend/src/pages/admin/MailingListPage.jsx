@@ -58,8 +58,6 @@ export async function checkResend() {
     : `Connected to Resend — ${count} sending domain(s).`;
 }
 
-// ── Newsletter Tab ────────────────────────────────────────────────────────────
-
 // ── Settings Tab ──────────────────────────────────────────────────────────────
 
 /**
