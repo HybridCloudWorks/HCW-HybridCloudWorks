@@ -178,7 +178,7 @@ registerJobType('build-newsletter-issue', {
   // in a container nothing read.
   role: 'editor',
   description:
-    "Build this week's newsletter issue as a draft from every registered section ({ days }, default 7): new articles, certification news, study and podcast episodes, plus an AI-written intro. Never sends.",
+    "Build this week's newsletter issue as a draft from the sections, item limits, window and intro chosen in Newsletter settings -> Content ({ days } overrides the saved window, clamped 1-31): new articles, certification news, study and podcast episodes, plus an AI-written intro when it is on. Never sends.",
   maxPayloadBytes: 256,
   timeoutMs: 10 * 60 * 1000,
   // Only `days` is passed through: `keep`/`keptBy` belong to the Monday timer

@@ -128,7 +128,8 @@ export default function NewsletterIssues({ view = 'review', settingsVersion = 0 
 
   const handleBuild = () =>
     run('build', async () => {
-      const job = await runJob('build-newsletter-issue', { days: 7 });
+      // No days: the window saved in Newsletter settings → Content applies (#557).
+      const job = await runJob('build-newsletter-issue', {});
       if (job.status !== 'succeeded') throw new Error(job.error || `Build ${job.status}`);
       const result = job.result || {};
       setNotice({ ok: result.success === true, message: result.message || 'No issue was built.' });

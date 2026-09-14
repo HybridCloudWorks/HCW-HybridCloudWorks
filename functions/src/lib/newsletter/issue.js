@@ -30,11 +30,28 @@
  * changes where the draft is shown, never its status: it is still a `draft`,
  * and still needs the owner's approval to send. Every refusal above applies
  * unchanged, so a keep never overwrites a kept or approved issue.
+ *
+ * ## What goes in is the owner's choice (#557)
+ *
+ * Every build reads Newsletter settings → Content: only the sections turned
+ * on, in the saved order, each capped at its saved item count; the saved
+ * number of days back unless the caller names `days` (which is still clamped);
+ * and the AI intro only when it is on, in the saved tone. The Build button and
+ * the Monday timer both pass no `days`, so both follow the saved window.
  */
+import { ADMIN_CONFIG_PARTITION } from '../cosmos-client.js';
+import { presentSetting } from '../platform-settings.js';
 import { SECTIONS, collectSections, plainText } from './sections.js';
+import {
+  DEFAULT_INTRO_TONE,
+  DEFAULT_WINDOW_DAYS,
+  INTRO_TONES,
+  MAX_WINDOW_DAYS,
+  NEWSLETTER_SETTINGS_CONFIG_ID,
+  newsletterSettingsDefaults,
+} from './settings.js';
 
-export const DEFAULT_WINDOW_DAYS = 7;
-const MAX_WINDOW_DAYS = 31;
+export { DEFAULT_WINDOW_DAYS };
 const MAX_INTRO_LENGTH = 1200;
 
 /** Statuses a rebuild may overwrite. Anything else has left the owner's hands. */
@@ -48,6 +65,12 @@ export const INTRO_INSTRUCTION = [
   'Plain text only in postContent: no markdown, no headings, no lists, no links, no bullet characters.',
   'Mention only items listed in the source material. Do not invent news, numbers or dates.',
 ].join(' ');
+
+/** The intro instruction with the tone sentence for `tone` appended; an unknown tone reads as the default. */
+export function introInstruction(tone = DEFAULT_INTRO_TONE) {
+  const sentence = Object.hasOwn(INTRO_TONES, tone) ? INTRO_TONES[tone] : INTRO_TONES[DEFAULT_INTRO_TONE];
+  return `${INTRO_INSTRUCTION} ${sentence}`;
+}
 
 /** Remove markdown a model may still emit, so the renderer only ever escapes text. */
 export function stripMarkdown(value) {
@@ -90,16 +113,17 @@ export const describeAiError = (error) => String(error?.message ?? error).slice(
  * @param {{ generateDraft: Function }} args.drafter
  * @param {object[]} args.sections the issue's sections
  * @param {string} args.subject kept when the model offers no title
+ * @param {string} [args.tone] Newsletter settings' introTone
  * @returns {Promise<{ subject: string, intro: string }>}
  */
-export async function draftIntro({ drafter, sections, subject }) {
+export async function draftIntro({ drafter, sections, subject, tone }) {
   const draft = await drafter.generateDraft({
     url: 'weekly-newsletter',
     cloudProvider: 'Auto',
     scrapedTitle: subject,
     description: "This week's newsletter issue.",
     markdown: buildIntroContext(sections),
-    customInstructionPrompt: INTRO_INSTRUCTION,
+    customInstructionPrompt: introInstruction(tone),
   });
   const drafted = plainText(stripMarkdown(draft?.title), 120);
   return {
@@ -156,6 +180,32 @@ export async function suggestSubjects({ drafter, sections, subject }) {
   return subjects;
 }
 
+/**
+ * The registry sections a build collects, from the saved Content list: the
+ * enabled ones in the saved order with their item caps. A registered section
+ * the list does not name is collected after them at the default cap, the same
+ * rule the settings normalizer applies, so a section passed in that the saved
+ * list predates is never silently skipped.
+ */
+export function planSections(registry, entries = []) {
+  const byId = new Map(registry.map((section) => [section.id, section]));
+  const named = new Set();
+  const sections = [];
+  const maxItems = {};
+  for (const entry of entries) {
+    const section = byId.get(entry?.id);
+    if (!section || named.has(section.id)) continue;
+    named.add(section.id);
+    if (!entry.enabled) continue;
+    sections.push(section);
+    if (Number.isInteger(entry.maxItems)) maxItems[section.id] = entry.maxItems;
+  }
+  for (const section of registry) {
+    if (!named.has(section.id)) sections.push(section);
+  }
+  return { sections, maxItems };
+}
+
 const defaultSubject = (since, until) => {
   const fmt = (date) =>
     new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(date);
@@ -172,12 +222,30 @@ const defaultSubject = (since, until) => {
  */
 export function createIssueBuilder({ store, drafter, now = () => new Date(), sections = SECTIONS, log }) {
   /**
+   * Newsletter settings, as admin-handlers reads them. An unreadable document
+   * costs the owner's choices for this build, not the build: the defaults are
+   * what the builder did before settings existed, and the problem is recorded
+   * on the issue so the draft says why it may not match the settings.
+   */
+  async function readSettings() {
+    try {
+      const doc = await store.readDoc('admin_config', NEWSLETTER_SETTINGS_CONFIG_ID, ADMIN_CONFIG_PARTITION);
+      return { settings: presentSetting('newsletter-settings', doc).value, problem: null };
+    } catch (error) {
+      log?.warn?.(`[newsletter] settings not read, defaults used: ${error?.message ?? error}`);
+      return { settings: newsletterSettingsDefaults(), problem: 'settings: could not be read, so the default content choices were used' };
+    }
+  }
+
+  /**
    * @param {{ days?: number, keep?: boolean, keptBy?: string }} [payload]
-   *   `keep` lands the built issue in Drafts; `keptBy` is recorded as `savedBy`.
+   *   `days` overrides the saved window (clamped); `keep` lands the built issue
+   *   in Drafts; `keptBy` is recorded as `savedBy`.
    */
   async function build({ days, keep = false, keptBy = null } = {}) {
     const until = now();
-    const windowDays = clampWindowDays(days);
+    const { settings, problem: settingsProblem } = await readSettings();
+    const windowDays = clampWindowDays(days === undefined || days === null ? settings.windowDays : days);
     const since = new Date(until.getTime() - windowDays * 24 * 60 * 60 * 1000);
     const id = `issue-${until.toISOString().slice(0, 10)}`;
 
@@ -203,7 +271,9 @@ export function createIssueBuilder({ store, drafter, now = () => new Date(), sec
       };
     }
 
-    const collected = await collectSections({ store, since, until, sections, log });
+    const plan = planSections(sections, settings.sections);
+    const collected = await collectSections({ store, since, until, sections: plan.sections, maxItems: plan.maxItems, log });
+    if (settingsProblem) collected.problems.unshift(settingsProblem);
     const itemCount = collected.sections.reduce((sum, section) => sum + section.items.length, 0);
     if (itemCount === 0) {
       return {
@@ -218,9 +288,10 @@ export function createIssueBuilder({ store, drafter, now = () => new Date(), sec
     let subject = defaultSubject(since, until);
     let intro = '';
     let introError = null;
-    if (drafter) {
+    // Intro off is a choice, not a failure: no AI call, no intro, no introError.
+    if (drafter && settings.introEnabled !== false) {
       try {
-        const drafted = await draftIntro({ drafter, sections: collected.sections, subject });
+        const drafted = await draftIntro({ drafter, sections: collected.sections, subject, tone: settings.introTone });
         subject = drafted.subject;
         intro = drafted.intro;
       } catch (error) {

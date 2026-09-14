@@ -6,7 +6,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createNewsletterAdminHandlers } from './admin-handlers.js';
 import { NEWSLETTER_FROM } from './handlers.js';
-import { INTRO_INSTRUCTION } from './issue.js';
+import { INTRO_INSTRUCTION, introInstruction } from './issue.js';
 
 const API_KEY = 'not-a-real-resend-key-EXAMPLE-VALUE-FOR-TESTS';
 
@@ -749,8 +749,22 @@ describe('intro', () => {
     expect(stored).toMatchObject({ intro: 'This week we looked at zones.', introError: null, subject: 'Landing zones' });
     expect(bodyOf(res).issue).toMatchObject({ intro: 'This week we looked at zones.', etag: stored._etag });
     const [call] = drafter.generateDraft.mock.calls[0];
-    expect(call.customInstructionPrompt).toBe(INTRO_INSTRUCTION);
+    expect(call.customInstructionPrompt).toBe(introInstruction('professional'));
+    expect(call.customInstructionPrompt.startsWith(INTRO_INSTRUCTION)).toBe(true);
     expect(call.markdown).toContain('- A');
+  });
+
+  it('writes the regenerated intro in the tone saved in Newsletter settings', async () => {
+    const drafter = makeDrafter();
+    const { handlers } = build({
+      drafter,
+      store: makeStore({ settings: { ...completeSettings, introTone: 'enthusiastic' } }),
+    });
+    const res = await handlers.intro(request({ body: { etag: 'e1' } }), context());
+    expect(res.status).toBe(200);
+    const [call] = drafter.generateDraft.mock.calls[0];
+    expect(call.customInstructionPrompt).toBe(introInstruction('enthusiastic'));
+    expect(call.customInstructionPrompt).toMatch(/Tone: upbeat and enthusiastic/);
   });
 
   it('stores nothing and answers 502 with a readable error when the AI fails', async () => {

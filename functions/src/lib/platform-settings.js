@@ -9,6 +9,7 @@
  *   podcast-feeds           → admin_config/podcast_feeds           read by timers/podcasts.js
  *   listen-and-learn-speech → admin_config/listen_and_learn_speech read by functions/listen-and-learn-jobs.js
  *   newsletter-settings     → admin_config/newsletter_settings     read by lib/newsletter/admin-handlers.js
+ *                             and lib/newsletter/issue.js (content: sections, window, intro)
  *                             (to be edited from the Mailing List page, not Platform settings)
  *
  * Every write is normalized to EXACTLY the shape its consumer reads — the
@@ -41,10 +42,18 @@ import {
 import { GEMINI_DEFAULT_MODEL } from './listen-and-learn/speech/gemini.js';
 import {
   DEFAULT_NEWSLETTER_SETTINGS,
+  INTRO_TONE_IDS,
   MAX_POSTAL_ADDRESS_LENGTH,
+  MAX_SECTION_ITEMS,
+  MAX_WINDOW_DAYS,
+  MIN_SECTION_ITEMS,
+  MIN_WINDOW_DAYS,
   NEWSLETTER_SETTINGS_CONFIG_ID,
   SEND_DAYS,
+  newsletterContentOptions,
+  newsletterSettingsDefaults,
 } from './newsletter/settings.js';
+import { MAX_ITEMS_PER_SECTION, SECTIONS } from './newsletter/sections.js';
 import { isValidSendTime, isValidTimeZone } from './newsletter/schedule.js';
 import { normalizeEmail } from './newsletter/email.js';
 
@@ -336,17 +345,89 @@ export function normalizeListenAndLearnSpeech(body) {
 
 // ── newsletter ─────────────────────────────────────────────────────────────
 
+/** More rows than any registry will hold: a bound on work, not on sections. */
+const MAX_SECTION_ROWS = 50;
+
+/** A numeric string read as a number; anything else is returned as given. */
+const toNumber = (raw) => (typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : raw);
+
+const clampInteger = (raw, min, max, where) => {
+  const n = toNumber(raw);
+  if (typeof n !== 'number' || !Number.isFinite(n)) fail(`${where} must be a number`);
+  return Math.min(max, Math.max(min, Math.floor(n)));
+};
+
 /**
- * `{ postalAddress, replyTo, sendDay, sendTime, timeZone }` → the document the
- * newsletter approval reads (lib/newsletter/admin-handlers.js). Blank address
- * and reply-to are ALLOWED here, so the page can save one before the other;
- * approval is what refuses to send without them (`missingForSending`).
+ * The ordered section list: `[{ id, enabled, maxItems }]`. Ids the registry
+ * does not know are DROPPED rather than refused — a section retired from the
+ * code must not make every saved document unreadable — and a repeated id keeps
+ * its first place. Registry sections the list does not name are appended,
+ * enabled, at the builder's limit, so a section added to the code shows up in
+ * the next issue without anyone saving settings. maxItems is clamped to
+ * MIN_SECTION_ITEMS..MAX_SECTION_ITEMS. At least one section must be on: an
+ * issue with no sections is never built, and saving that would read as "the
+ * newsletter is broken" on Monday rather than as a choice.
+ */
+function normalizeSectionSettings(raw) {
+  if (!Array.isArray(raw)) fail('sections must be an array of { id, enabled, maxItems }');
+  if (raw.length > MAX_SECTION_ROWS) fail(`sections may hold at most ${MAX_SECTION_ROWS} entries`);
+  const known = new Set(SECTIONS.map((section) => section.id));
+  const seen = new Set();
+  const out = [];
+  raw.forEach((entry, index) => {
+    if (!isPlainObject(entry)) fail(`sections[${index}] must be an object`);
+    assertOnlyKeys(entry, ['id', 'enabled', 'maxItems'], `sections[${index}]`);
+    if (typeof entry.id !== 'string') fail(`sections[${index}].id must be a string`);
+    const enabled = entry.enabled ?? true;
+    if (typeof enabled !== 'boolean') fail(`sections[${index}].enabled must be true or false`);
+    const maxItems =
+      entry.maxItems === undefined
+        ? MAX_ITEMS_PER_SECTION
+        : clampInteger(entry.maxItems, MIN_SECTION_ITEMS, MAX_SECTION_ITEMS, `sections[${index}].maxItems`);
+    if (!known.has(entry.id) || seen.has(entry.id)) return;
+    seen.add(entry.id);
+    out.push({ id: entry.id, enabled, maxItems });
+  });
+  for (const id of known) {
+    if (!seen.has(id)) out.push({ id, enabled: true, maxItems: MAX_ITEMS_PER_SECTION });
+  }
+  if (!out.some((entry) => entry.enabled)) fail('Turn on at least one section');
+  return out;
+}
+
+/** The content fields (#557): sections, windowDays, introEnabled, introTone. */
+function normalizeNewsletterContent(body, value) {
+  if (body.sections !== undefined) value.sections = normalizeSectionSettings(body.sections);
+  if (body.windowDays !== undefined) {
+    value.windowDays = clampInteger(body.windowDays, MIN_WINDOW_DAYS, MAX_WINDOW_DAYS, 'windowDays');
+  }
+  if (body.introEnabled !== undefined) {
+    if (typeof body.introEnabled !== 'boolean') fail('introEnabled must be true or false');
+    value.introEnabled = body.introEnabled;
+  }
+  if (body.introTone !== undefined) {
+    if (!INTRO_TONE_IDS.includes(body.introTone)) {
+      fail(`introTone must be one of ${INTRO_TONE_IDS.join(', ')}`);
+    }
+    value.introTone = body.introTone;
+  }
+}
+
+/**
+ * `{ postalAddress, replyTo, sendDay, sendTime, timeZone, sections, windowDays,
+ * introEnabled, introTone }` → the document the newsletter approval reads
+ * (lib/newsletter/admin-handlers.js) and the issue builder reads for content
+ * (lib/newsletter/issue.js). Blank address and reply-to are ALLOWED here, so
+ * the page can save one before the other; approval is what refuses to send
+ * without them (`missingForSending`). A field left out takes its default, so a
+ * document saved before the content fields existed reads as the defaults.
  */
 export function normalizeNewsletterSettings(body) {
   if (!isPlainObject(body)) fail('Body must be a JSON object');
   const keys = Object.keys(DEFAULT_NEWSLETTER_SETTINGS);
   assertOnlyKeys(body, keys, 'body');
-  const value = { ...DEFAULT_NEWSLETTER_SETTINGS };
+  const value = newsletterSettingsDefaults();
+  normalizeNewsletterContent(body, value);
 
   if (body.postalAddress !== undefined) {
     if (typeof body.postalAddress !== 'string') fail('postalAddress must be a string');
@@ -423,7 +504,9 @@ export const PLATFORM_SETTINGS = Object.freeze({
   'newsletter-settings': Object.freeze({
     docId: NEWSLETTER_SETTINGS_CONFIG_ID,
     normalize: normalizeNewsletterSettings,
-    empty: () => ({ ...DEFAULT_NEWSLETTER_SETTINGS }),
+    empty: newsletterSettingsDefaults,
+    // Section titles, tones and bounds for the Content form (#557).
+    options: newsletterContentOptions,
   }),
 });
 
@@ -551,6 +634,10 @@ export function createPlatformSettingsHandlers({
           sendDay: value.sendDay,
           sendTime: value.sendTime,
           timeZone: value.timeZone,
+          sections: value.sections.filter((entry) => entry.enabled).map((entry) => entry.id),
+          windowDays: value.windowDays,
+          introEnabled: value.introEnabled,
+          introTone: value.introTone,
         };
       default:
         return {};

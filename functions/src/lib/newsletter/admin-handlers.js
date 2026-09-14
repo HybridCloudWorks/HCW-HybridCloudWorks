@@ -415,8 +415,8 @@ export function createNewsletterAdminHandlers({
     },
 
     /**
-     * Regenerate a draft's intro with the builder's own drafter and
-     * instruction (issue.js draftIntro). Only the intro is written, never the
+     * Regenerate a draft's intro with the builder's own drafter, instruction
+     * and saved tone (issue.js draftIntro). Only the intro is written, never the
      * subject, which the owner may have edited. An AI failure writes nothing.
      */
     async intro(request, context) {
@@ -434,9 +434,16 @@ export function createNewsletterAdminHandlers({
         }
         if (staleView(body, issue)) return changedElsewhere();
 
+        // The saved tone (Newsletter settings → Content), the same one a build uses.
+        const settings = await readSettings();
         let intro;
         try {
-          ({ intro } = await draftIntro({ drafter, sections: issue.sections ?? [], subject: issue.subject }));
+          ({ intro } = await draftIntro({
+            drafter,
+            sections: issue.sections ?? [],
+            subject: issue.subject,
+            tone: settings.introTone,
+          }));
         } catch (error) {
           context.error?.(`regenerateNewsletterIntro AI failed ${ref}: ${errorMeta(error)}`);
           return json(502, { ok: false, code: 'AI_FAILED', error: `The intro was not regenerated: ${describeAiError(error)}` });
@@ -455,7 +462,7 @@ export function createNewsletterAdminHandlers({
           if (error?.code === 412) return changedElsewhere();
           throw error;
         }
-        return json(200, present(written ?? updated, await readSettings()));
+        return json(200, present(written ?? updated, settings));
       } catch (error) {
         context.error?.(`regenerateNewsletterIntro failed ${ref}: ${errorMeta(error)}`);
         return json(500, { ok: false, error: 'Failed to regenerate the intro' });

@@ -16,9 +16,12 @@ import {
   SUBJECT_INSTRUCTION,
   createIssueBuilder,
   draftIntro,
+  introInstruction,
+  planSections,
   stripMarkdown,
   suggestSubjects,
 } from './issue.js';
+import { INTRO_TONES } from './settings.js';
 import { UNSUBSCRIBE_PLACEHOLDER, renderIssue } from './render.js';
 
 const NOW = new Date('2026-09-14T12:00:00Z');
@@ -144,7 +147,7 @@ describe('createIssueBuilder', () => {
       periodEnd: NOW.toISOString(),
     });
     const call = d.generateDraft.mock.calls[0][0];
-    expect(call.customInstructionPrompt).toBe(INTRO_INSTRUCTION);
+    expect(call.customInstructionPrompt).toBe(introInstruction('professional'));
     expect(call.markdown).toContain('Landing zones in 2026');
   });
 
@@ -265,6 +268,115 @@ describe('createIssueBuilder', () => {
     }
   });
 
+  describe('Newsletter settings → Content (#557)', () => {
+    const articles = (n) =>
+      Array.from({ length: n }, (_, i) => ({
+        ...article,
+        Title: `Article ${i + 1}`,
+        publishedUrl: `https://hybridcloudworks.com/azure/blog/a-${i + 1}`,
+      }));
+    const certEvent = { type: 'update', certCodes: ['AZ-104'], title: 'AZ-104 updated', link: 'https://learn.microsoft.com/az-104', pubDate: '2026-09-10T00:00:00Z' };
+    const podcast = { provider: 'azure', title: 'Episode 3', link: 'https://media.rss.com/show/ep-3', publishedAt: '2026-09-11T00:00:00Z' };
+    const rows = (n = 3) => ({ content: articles(n), certEvents: [certEvent], podcasts: [podcast] });
+    const withSettings = (settings, content = rows()) =>
+      makeStore(content, { 'admin_config/newsletter_settings': { id: 'newsletter_settings', ...settings } });
+
+    it('builds from every section in registry order, 7 days back, when nothing is saved', async () => {
+      const store = makeStore(rows());
+      const result = await createIssueBuilder({ store, drafter: drafter(), now: () => NOW }).build();
+      expect(result.sections).toEqual(['articles', 'certification-news', 'episodes']);
+      expect(store.written.get('newsletters/issue-2026-09-14').periodStart).toBe(SINCE.toISOString());
+    });
+
+    it('collects only enabled sections, in the saved order, each capped at its saved count', async () => {
+      const store = withSettings(
+        {
+          sections: [
+            { id: 'episodes', enabled: true, maxItems: 5 },
+            { id: 'certification-news', enabled: false, maxItems: 12 },
+            { id: 'articles', enabled: true, maxItems: 2 },
+          ],
+        },
+        rows(6)
+      );
+      const result = await createIssueBuilder({ store, drafter: drafter(), now: () => NOW }).build();
+      expect(result.sections).toEqual(['episodes', 'articles']);
+      const doc = store.written.get('newsletters/issue-2026-09-14');
+      expect(doc.sections.map((s) => [s.id, s.items.length])).toEqual([
+        ['episodes', 1],
+        ['articles', 2],
+      ]);
+      expect(doc.itemCount).toBe(3);
+      expect(store.queryDocs.mock.calls.map(([container]) => container)).not.toContain('certEvents');
+    });
+
+    it('looks back the saved number of days when the caller names none', async () => {
+      const store = withSettings({ windowDays: 14 });
+      await createIssueBuilder({ store, drafter: drafter(), now: () => NOW }).build({});
+      const doc = store.written.get('newsletters/issue-2026-09-14');
+      expect(doc.periodStart).toBe('2026-08-31T12:00:00.000Z');
+      const [, , params] = store.queryDocs.mock.calls[0];
+      expect(params[0]).toEqual({ name: '@since', value: '2026-08-31T12:00:00.000Z' });
+    });
+
+    it('lets an explicit days win over the saved window, still clamped', async () => {
+      const store = withSettings({ windowDays: 14 });
+      await createIssueBuilder({ store, drafter: drafter(), now: () => NOW }).build({ days: 3 });
+      expect(store.written.get('newsletters/issue-2026-09-14').periodStart).toBe('2026-09-11T12:00:00.000Z');
+
+      const wide = withSettings({ windowDays: 14 });
+      await createIssueBuilder({ store: wide, drafter: drafter(), now: () => NOW }).build({ days: 365 });
+      expect(wide.written.get('newsletters/issue-2026-09-14').periodStart).toBe('2026-08-14T12:00:00.000Z');
+    });
+
+    it('writes no intro, asks no model and records no error when the intro is off', async () => {
+      const store = withSettings({ introEnabled: false });
+      const d = drafter();
+      const result = await createIssueBuilder({ store, drafter: d, now: () => NOW }).build({});
+      expect(result).toMatchObject({ success: true, introError: null });
+      expect(d.generateDraft).not.toHaveBeenCalled();
+      const doc = store.written.get('newsletters/issue-2026-09-14');
+      expect(doc).toMatchObject({ intro: '', introError: null, subject: 'HybridCloudWorks Weekly: Sep 7 – Sep 14' });
+    });
+
+    it('gives the drafter the saved tone, after the unchanged instruction', async () => {
+      const store = withSettings({ introTone: 'friendly' });
+      const d = drafter();
+      await createIssueBuilder({ store, drafter: d, now: () => NOW }).build({});
+      const prompt = d.generateDraft.mock.calls[0][0].customInstructionPrompt;
+      expect(prompt).toBe(`${INTRO_INSTRUCTION} ${INTRO_TONES.friendly}`);
+    });
+
+    it('builds with the defaults, and says so on the issue, when the settings cannot be read', async () => {
+      const store = makeStore(rows());
+      const read = store.readDoc.getMockImplementation();
+      store.readDoc.mockImplementation(async (container, id) => {
+        if (container === 'admin_config') throw new Error('Cosmos unavailable');
+        return read(container, id);
+      });
+      const warn = vi.fn();
+      const result = await createIssueBuilder({ store, drafter: drafter(), now: () => NOW, log: { warn } }).build();
+      expect(result.success).toBe(true);
+      expect(result.sections).toEqual(['articles', 'certification-news', 'episodes']);
+      expect(result.problems[0]).toMatch(/settings: could not be read/);
+      expect(warn).toHaveBeenCalled();
+    });
+
+    it('plans a registered section the saved list does not name after the saved ones', () => {
+      const a = { id: 'a' };
+      const b = { id: 'b' };
+      const c = { id: 'c' };
+      expect(planSections([a, b, c], [{ id: 'c', enabled: true, maxItems: 4 }, { id: 'a', enabled: false, maxItems: 1 }, { id: 'zz', enabled: true }])).toEqual({
+        sections: [c, b],
+        maxItems: { c: 4 },
+      });
+    });
+
+    it('uses an unknown tone as the default rather than sending nothing', () => {
+      expect(introInstruction('sarcastic')).toBe(introInstruction('professional'));
+    });
+  });
+
   it('strips markdown a model still emits', () => {
     expect(stripMarkdown('# Title\n- one\n- **two**\n1. three `code` _it_ [link](https://x)')).toBe(
       'Title\none\ntwo\nthree code it link'
@@ -372,7 +484,7 @@ describe('draftIntro and suggestSubjects', () => {
     const drafter = { generateDraft: vi.fn(async () => ({ title: '## Zones', postContent: '**We** wrote.' })) };
     expect(await draftIntro({ drafter, sections, subject: 'Fallback' })).toEqual({ subject: 'Zones', intro: 'We wrote.' });
     expect(drafter.generateDraft).toHaveBeenCalledWith(
-      expect.objectContaining({ customInstructionPrompt: INTRO_INSTRUCTION, markdown: '## New\n- Zones — What changed', scrapedTitle: 'Fallback' })
+      expect.objectContaining({ customInstructionPrompt: introInstruction(), markdown: '## New\n- Zones — What changed', scrapedTitle: 'Fallback' })
     );
     const untitled = { generateDraft: vi.fn(async () => ({ postContent: 'x' })) };
     expect((await draftIntro({ drafter: untitled, sections, subject: 'Fallback' })).subject).toBe('Fallback');

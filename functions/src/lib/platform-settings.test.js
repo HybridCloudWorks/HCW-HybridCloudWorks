@@ -9,6 +9,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   HERO_PROVIDERS,
   MAX_SCHEDULE_DELAY_MINUTES,
+  PLATFORM_SETTINGS,
   PLATFORM_SETTING_NAMES,
   PlatformSettingValidationError,
   createPlatformSettingsHandlers,
@@ -34,6 +35,7 @@ import {
   resolvePodcastFeeds,
 } from './timers/podcasts.js';
 import { ADMIN_CONFIG_PARTITION } from './cosmos-client.js';
+import { MAX_ITEMS_PER_SECTION, SECTIONS } from './newsletter/sections.js';
 
 const context = { log: vi.fn(), error: vi.fn() };
 
@@ -426,13 +428,153 @@ describe('listen & learn speech', () => {
 });
 
 describe('newsletter settings', () => {
-  it('defaults to Tuesday 09:00 Central with nothing personal filled in', () => {
+  const DEFAULT_CONTENT = {
+    sections: [
+      { id: 'articles', enabled: true, maxItems: 12 },
+      { id: 'certification-news', enabled: true, maxItems: 12 },
+      { id: 'episodes', enabled: true, maxItems: 12 },
+    ],
+    windowDays: 7,
+    introEnabled: true,
+    introTone: 'professional',
+  };
+
+  it('defaults to Tuesday 09:00 Central with nothing personal filled in, and every section', () => {
     expect(normalizeNewsletterSettings({})).toEqual({
       postalAddress: '',
       replyTo: '',
       sendDay: 'tuesday',
       sendTime: '09:00',
       timeZone: 'America/Chicago',
+      ...DEFAULT_CONTENT,
+    });
+  });
+
+  it('defaults the content to every registered section in registry order at the builder limit', () => {
+    expect(DEFAULT_CONTENT.sections.map((s) => s.id)).toEqual(SECTIONS.map((s) => s.id));
+    expect(DEFAULT_CONTENT.sections.every((s) => s.maxItems === MAX_ITEMS_PER_SECTION)).toBe(true);
+  });
+
+  it('reads a document saved before the content fields existed as the defaults, with no migration', () => {
+    const legacy = {
+      id: 'newsletter_settings',
+      configScope: ADMIN_CONFIG_PARTITION,
+      postalAddress: 'PO Box 1',
+      replyTo: 'owner@example.com',
+      sendDay: 'thursday',
+      sendTime: '07:30',
+      timeZone: 'Europe/London',
+      updatedAt: '2026-09-01T00:00:00Z',
+    };
+    const shown = presentSetting('newsletter-settings', legacy);
+    expect(shown.stored).toBe('valid');
+    expect(shown.value).toMatchObject(DEFAULT_CONTENT);
+    expect(shown.value.postalAddress).toBe('PO Box 1');
+  });
+
+  it('keeps a saved order, on/off and item counts', () => {
+    const value = normalizeNewsletterSettings({
+      sections: [
+        { id: 'episodes', enabled: true, maxItems: 3 },
+        { id: 'articles', enabled: false, maxItems: 5 },
+        { id: 'certification-news', enabled: true, maxItems: 20 },
+      ],
+      windowDays: 14,
+      introEnabled: false,
+      introTone: 'concise',
+    });
+    expect(value).toMatchObject({
+      sections: [
+        { id: 'episodes', enabled: true, maxItems: 3 },
+        { id: 'articles', enabled: false, maxItems: 5 },
+        { id: 'certification-news', enabled: true, maxItems: 20 },
+      ],
+      windowDays: 14,
+      introEnabled: false,
+      introTone: 'concise',
+    });
+  });
+
+  it('drops unknown and repeated section ids, and appends missing ones enabled at the default', () => {
+    expect(
+      normalizeNewsletterSettings({
+        sections: [
+          { id: 'retired-section', enabled: true, maxItems: 4 },
+          { id: 'episodes', enabled: false, maxItems: 2 },
+          { id: 'episodes', enabled: true, maxItems: 9 },
+          { id: 'articles', enabled: true, maxItems: 6 },
+        ],
+      }).sections
+    ).toEqual([
+      { id: 'episodes', enabled: false, maxItems: 2 },
+      { id: 'articles', enabled: true, maxItems: 6 },
+      { id: 'certification-news', enabled: true, maxItems: 12 },
+    ]);
+  });
+
+  it('clamps item counts to 1..20 and the window to 1..31', () => {
+    const value = normalizeNewsletterSettings({
+      sections: [
+        { id: 'articles', enabled: true, maxItems: 0 },
+        { id: 'certification-news', enabled: true, maxItems: 99 },
+        { id: 'episodes', enabled: true, maxItems: '7.8' },
+      ],
+      windowDays: 400,
+    });
+    expect(value.sections.map((s) => s.maxItems)).toEqual([1, 20, 7]);
+    expect(value.windowDays).toBe(31);
+    expect(normalizeNewsletterSettings({ windowDays: -3 }).windowDays).toBe(1);
+    expect(normalizeNewsletterSettings({ windowDays: '10' }).windowDays).toBe(10);
+  });
+
+  it('requires at least one section to be on, counting the appended ones', () => {
+    expect(() =>
+      normalizeNewsletterSettings({
+        sections: [
+          { id: 'articles', enabled: false },
+          { id: 'certification-news', enabled: false },
+          { id: 'episodes', enabled: false },
+        ],
+      })
+    ).toThrow(/at least one section/);
+    // A list naming only one section, turned off, still has the other two appended on.
+    expect(
+      normalizeNewsletterSettings({ sections: [{ id: 'articles', enabled: false }] }).sections.filter(
+        (s) => s.enabled
+      )
+    ).toHaveLength(2);
+  });
+
+  it('refuses content values that cannot be read', () => {
+    for (const bad of [
+      { sections: 'articles' },
+      { sections: [{ id: 'articles', enabled: 'yes' }] },
+      { sections: [{ id: 'articles', maxItems: 'lots' }] },
+      { sections: [{ id: 'articles', colour: 'red' }] },
+      { sections: [{ id: 7 }] },
+      { windowDays: 'a week' },
+      { introEnabled: 'false' },
+      { introTone: 'sarcastic' },
+    ]) {
+      expect(() => normalizeNewsletterSettings(bad), JSON.stringify(bad)).toThrow(
+        PlatformSettingValidationError
+      );
+    }
+  });
+
+  it('accepts exactly the offered tones', () => {
+    for (const tone of ['professional', 'friendly', 'concise', 'enthusiastic']) {
+      expect(normalizeNewsletterSettings({ introTone: tone }).introTone).toBe(tone);
+    }
+    expect(() => normalizeNewsletterSettings({ introTone: 'Professional' })).toThrow(/introTone/);
+  });
+
+  it('offers the section titles, tones and bounds beside the value', () => {
+    expect(PLATFORM_SETTINGS['newsletter-settings'].options()).toEqual({
+      sections: SECTIONS.map((s) => ({ id: s.id, title: s.title })),
+      introTones: ['professional', 'friendly', 'concise', 'enthusiastic'],
+      windowDays: { min: 1, max: 31 },
+      maxItems: { min: 1, max: 20 },
     });
   });
 
@@ -451,6 +593,7 @@ describe('newsletter settings', () => {
       sendDay: 'thursday',
       sendTime: '07:30',
       timeZone: 'Europe/London',
+      ...DEFAULT_CONTENT,
     });
   });
 

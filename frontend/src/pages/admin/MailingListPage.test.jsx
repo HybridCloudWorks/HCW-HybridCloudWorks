@@ -146,7 +146,8 @@ describe('The newsletter tab', () => {
     await waitFor(() =>
       expect(screen.getByText(/Nothing new in the last 7 days/)).toBeInTheDocument()
     );
-    expect(runJob).toHaveBeenCalledWith('build-newsletter-issue', { days: 7 });
+    // No days: the window saved in Newsletter settings applies (#557).
+    expect(runJob).toHaveBeenCalledWith('build-newsletter-issue', {});
   });
 
   it('keeps newsletter settings and the Resend connection on the Settings tab', async () => {
