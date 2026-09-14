@@ -19,6 +19,22 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Choose where the newsletter signup box appears, and its wording (#557).**
+  Newsletter settings on the Mailing List Settings tab gain a Signup form
+  block: show the box in the footer on every page, at the end of blog posts,
+  both, or nowhere, and set its heading (up to 80 characters) and blurb (up to
+  240), with character counts and a live preview that uses the site's own box
+  and cannot subscribe anyone. It saves with the rest of the settings. The site
+  reads the choice from a new anonymous `GET /api/public/newsletter/signup-config`,
+  which answers `{ placement, heading, blurb }` and nothing else from the
+  settings document, is cached for five minutes, and answers the defaults with
+  200 when the settings cannot be read. The footer and the blog post share one
+  request per page load, render the wording as plain text, and show the
+  defaults (both places, the original wording) while it loads, if it fails,
+  and in the pre-rendered HTML, so a site whose settings were never saved looks
+  exactly as it did before. The public subscribe and confirm routes are
+  unchanged.
+
 - **Choose what each newsletter issue is built from (#557).** Newsletter
   settings on the Mailing List Settings tab gain a Content block: tick which
   sections go in, put them in order with up and down buttons, set the most

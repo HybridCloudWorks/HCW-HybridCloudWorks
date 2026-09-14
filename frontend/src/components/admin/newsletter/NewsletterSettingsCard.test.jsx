@@ -4,10 +4,12 @@
  * the real settings.
  */
 import React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 
 import NewsletterSettingsCard from './NewsletterSettingsCard';
+
+const fetchSpy = vi.fn();
 
 const getJSON = vi.fn();
 const sendJSON = vi.fn();
@@ -31,6 +33,9 @@ const STORED = {
   windowDays: 7,
   introEnabled: true,
   introTone: 'professional',
+  signupPlacement: 'both',
+  signupHeading: 'Stay ahead of the cloud curve.',
+  signupBlurb: 'Weekly notes.',
 };
 
 const OPTIONS = {
@@ -64,6 +69,12 @@ const save = () => fireEvent.click(screen.getByRole('button', { name: /save sett
 beforeEach(() => {
   getJSON.mockReset();
   sendJSON.mockReset();
+  fetchSpy.mockReset();
+  vi.stubGlobal('fetch', fetchSpy);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe('NewsletterSettingsCard', () => {
@@ -242,6 +253,92 @@ describe('NewsletterSettingsCard', () => {
       resolveFirst({ value: { ...STORED, windowDays: 3 }, options: OPTIONS });
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(screen.getByLabelText('Days back')).toHaveValue(21);
+    });
+  });
+  describe('Signup form', () => {
+    it('shows the saved placement, heading and blurb with character counts', async () => {
+      await renderLoaded({ ...STORED, signupPlacement: 'blogEnd' });
+      const placement = screen.getByLabelText('Where it appears');
+      expect(placement).toHaveValue('blogEnd');
+      expect(
+        within(placement)
+          .getAllByRole('option')
+          .map((o) => o.textContent)
+      ).toEqual(['Footer on every page', 'End of blog posts', 'Both', 'Nowhere (hide the form)']);
+      expect(screen.getByLabelText('Heading')).toHaveValue('Stay ahead of the cloud curve.');
+      expect(screen.getByLabelText('Blurb')).toHaveValue('Weekly notes.');
+      expect(screen.getByText('30/80 characters')).toBeInTheDocument();
+      expect(screen.getByText('13/240 characters')).toBeInTheDocument();
+    });
+
+    it('fills in the site defaults for settings saved before the signup fields existed', async () => {
+      const legacy = { ...STORED };
+      delete legacy.signupPlacement;
+      delete legacy.signupHeading;
+      delete legacy.signupBlurb;
+      await renderLoaded(legacy);
+      expect(screen.getByLabelText('Where it appears')).toHaveValue('both');
+      expect(screen.getByLabelText('Heading')).toHaveValue('Stay ahead of the cloud curve.');
+    });
+
+    it('previews the wording as it is typed, as literal text', async () => {
+      await renderLoaded();
+      fireEvent.change(screen.getByLabelText('Heading'), {
+        target: { value: '<b>New</b> heading' },
+      });
+      fireEvent.change(screen.getByLabelText('Blurb'), { target: { value: 'New blurb' } });
+      const preview = screen.getByRole('region', { name: 'Newsletter signup preview' });
+      expect(within(preview).getByRole('heading')).toHaveTextContent('<b>New</b> heading');
+      expect(within(preview).getByText('New blurb')).toBeInTheDocument();
+      expect(preview.querySelector('b')).toBeNull();
+      expect(screen.getByText('18/80 characters')).toBeInTheDocument();
+    });
+
+    it('saves the placement, heading and blurb in the settings payload', async () => {
+      await renderLoaded();
+      fireEvent.change(screen.getByLabelText('Where it appears'), { target: { value: 'none' } });
+      fireEvent.change(screen.getByLabelText('Heading'), { target: { value: 'Join us' } });
+      fireEvent.change(screen.getByLabelText('Blurb'), { target: { value: 'Monthly.' } });
+      const saved = {
+        ...STORED,
+        signupPlacement: 'none',
+        signupHeading: 'Join us',
+        signupBlurb: 'Monthly.',
+      };
+      sendJSON.mockResolvedValue({ value: saved, options: OPTIONS });
+      save();
+      await waitFor(() => expect(sendJSON).toHaveBeenCalledWith(ROUTE, 'PUT', saved));
+      expect(await screen.findByText('Newsletter settings saved.')).toBeInTheDocument();
+      expect(
+        screen.getByText('Hidden on the site. This is how it would look.')
+      ).toBeInTheDocument();
+    });
+
+    it('refuses to save a blank heading, and says why', async () => {
+      await renderLoaded();
+      fireEvent.change(screen.getByLabelText('Heading'), { target: { value: '   ' } });
+      save();
+      expect(await screen.findByText('Enter a heading for the signup form.')).toBeInTheDocument();
+      expect(sendJSON).not.toHaveBeenCalled();
+    });
+
+    it('caps the inputs at the server limits', async () => {
+      await renderLoaded();
+      expect(screen.getByLabelText('Heading')).toHaveAttribute('maxLength', '80');
+      expect(screen.getByLabelText('Blurb')).toHaveAttribute('maxLength', '240');
+    });
+
+    it('never subscribes anyone from the preview, and never saves from it', async () => {
+      await renderLoaded();
+      const preview = screen.getByRole('region', { name: 'Newsletter signup preview' });
+      const subscribe = within(preview).getByRole('button', { name: 'Subscribe' });
+      expect(subscribe).toBeDisabled();
+      expect(subscribe).toHaveAttribute('type', 'button');
+      expect(within(preview).getByLabelText('Email address')).toBeDisabled();
+      fireEvent.click(subscribe);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(sendJSON).not.toHaveBeenCalled();
     });
   });
 });

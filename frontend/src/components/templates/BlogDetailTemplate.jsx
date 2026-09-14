@@ -18,7 +18,7 @@ import { canPairModules, isHeadingOnlyTextSegment } from '@/lib/modulePairing';
 import { ARTICLE_PROSE_CLASS, HEADING_PROSE_CLASS } from '@/lib/articleStyles';
 import ShareVia from '@/components/shared/ShareVia';
 import ResponsiveCoverImage from '@/components/shared/ResponsiveCoverImage';
-import NewsletterSignup from '@/components/shared/NewsletterSignup';
+import PlacedNewsletterSignup from '@/components/shared/PlacedNewsletterSignup';
 import { pickPublicImageUrl } from '@/lib/blogUtils';
 import { resolveMediaUrl } from '../../lib/functionsBase';
 
@@ -543,9 +543,8 @@ export default function BlogDetailTemplate({
             {backLabel}
           </Link>
         </div>
-        <div className="mt-10">
-          <NewsletterSignup source="blog-post" />
-        </div>
+        {/* Shown only when the owner's signup placement includes blog posts (#557). */}
+        <PlacedNewsletterSignup where="blogEnd" source="blog-post" className="mt-10" />
       </article>
     </div>
   );

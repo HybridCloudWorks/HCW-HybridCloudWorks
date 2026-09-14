@@ -439,6 +439,13 @@ describe('newsletter settings', () => {
     introTone: 'professional',
   };
 
+  const DEFAULT_SIGNUP = {
+    signupPlacement: 'both',
+    signupHeading: 'Stay ahead of the cloud curve.',
+    signupBlurb:
+      'Practical hybrid & multi-cloud insights, straight to your inbox. No spam — unsubscribe anytime.',
+  };
+
   it('defaults to Tuesday 09:00 Central with nothing personal filled in, and every section', () => {
     expect(normalizeNewsletterSettings({})).toEqual({
       postalAddress: '',
@@ -447,6 +454,7 @@ describe('newsletter settings', () => {
       sendTime: '09:00',
       timeZone: 'America/Chicago',
       ...DEFAULT_CONTENT,
+      ...DEFAULT_SIGNUP,
     });
   });
 
@@ -469,6 +477,7 @@ describe('newsletter settings', () => {
     const shown = presentSetting('newsletter-settings', legacy);
     expect(shown.stored).toBe('valid');
     expect(shown.value).toMatchObject(DEFAULT_CONTENT);
+    expect(shown.value).toMatchObject(DEFAULT_SIGNUP);
     expect(shown.value.postalAddress).toBe('PO Box 1');
   });
 
@@ -597,6 +606,78 @@ describe('newsletter settings', () => {
       introTones: ['professional', 'friendly', 'concise', 'enthusiastic'],
       windowDays: { min: 1, max: 31 },
       maxItems: { min: 1, max: 20 },
+      signupPlacements: ['footer', 'blogEnd', 'both', 'none'],
+      signupHeading: { maxLength: 80 },
+      signupBlurb: { maxLength: 240 },
+    });
+  });
+
+  describe('signup form', () => {
+    it('defaults to the box in both places with the wording the site carried before', () => {
+      expect(normalizeNewsletterSettings({})).toMatchObject(DEFAULT_SIGNUP);
+    });
+
+    it('keeps each placement it offers', () => {
+      for (const placement of ['footer', 'blogEnd', 'both', 'none']) {
+        expect(normalizeNewsletterSettings({ signupPlacement: placement }).signupPlacement).toBe(
+          placement
+        );
+      }
+    });
+
+    it('refuses a placement it does not offer, by name, before reading the wording', () => {
+      for (const bad of ['Footer', 'sidebar', '', null, 1, ['footer']]) {
+        expectRejects(
+          () =>
+            normalizeNewsletterSettings({ signupPlacement: bad, signupHeading: 42, signupBlurb: {} }),
+          /signupPlacement must be one of footer, blogEnd, both, none/
+        );
+      }
+    });
+
+    it('trims the heading and blurb and folds line breaks and runs of spaces into one space', () => {
+      const value = normalizeNewsletterSettings({
+        signupHeading: '  Get the\r\nweekly   brief  ',
+        signupBlurb: '\tOne email.\n\nEvery Tuesday. ',
+      });
+      expect(value.signupHeading).toBe('Get the weekly brief');
+      expect(value.signupBlurb).toBe('One email. Every Tuesday.');
+    });
+
+    it('keeps markup as the literal text it is', () => {
+      expect(normalizeNewsletterSettings({ signupHeading: '<b>Bold</b> & more' }).signupHeading).toBe(
+        '<b>Bold</b> & more'
+      );
+    });
+
+    it('accepts the heading at 80 characters and the blurb at 240, measured after trimming', () => {
+      const value = normalizeNewsletterSettings({
+        signupHeading: ` ${'h'.repeat(80)} `,
+        signupBlurb: ` ${'b'.repeat(240)} `,
+      });
+      expect(value.signupHeading).toHaveLength(80);
+      expect(value.signupBlurb).toHaveLength(240);
+    });
+
+    it('refuses a heading over 80 characters or a blurb over 240', () => {
+      expectRejects(
+        () => normalizeNewsletterSettings({ signupHeading: 'h'.repeat(81) }),
+        /signupHeading must be at most 80 characters/
+      );
+      expectRejects(
+        () => normalizeNewsletterSettings({ signupBlurb: 'b'.repeat(241) }),
+        /signupBlurb must be at most 240 characters/
+      );
+    });
+
+    it('refuses a blank heading but allows a blank blurb', () => {
+      expectRejects(() => normalizeNewsletterSettings({ signupHeading: '  \n ' }), /must not be blank/);
+      expect(normalizeNewsletterSettings({ signupBlurb: '   ' }).signupBlurb).toBe('');
+    });
+
+    it('refuses wording that is not a string', () => {
+      expectRejects(() => normalizeNewsletterSettings({ signupHeading: 7 }), /signupHeading must be a string/);
+      expectRejects(() => normalizeNewsletterSettings({ signupBlurb: null }), /signupBlurb must be a string/);
     });
   });
 
@@ -616,6 +697,7 @@ describe('newsletter settings', () => {
       sendTime: '07:30',
       timeZone: 'Europe/London',
       ...DEFAULT_CONTENT,
+      ...DEFAULT_SIGNUP,
     });
   });
 
