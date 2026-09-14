@@ -12,8 +12,11 @@ decides, and is listed under [Needs owner decision](#needs-owner-decision).
 ## Counts
 
 Qlty CLI 0.644.0, `qlty check --all --filter <plugin> --no-formatters`, run
-locally on 2026-09-14. zizmor also runs directly as `uvx zizmor --offline
-.github/workflows` (1.30.1), and its counts agree.
+locally on 2026-09-14. zizmor (1.30.1) also runs directly, and its counts agree:
+
+```bash
+uvx zizmor --offline .github/workflows
+```
 
 | Scanner | Before | Fixed | False positive | Accepted | Needs owner decision | After |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
