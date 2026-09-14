@@ -163,9 +163,10 @@ export function createResendClient({ apiKey, fetch: fetchImpl = globalThis.fetch
       call('GET', `/broadcasts/${seg(broadcastId)}/recipients${qs({ type, limit, after })}`),
     listSegmentContacts: (segmentId, options) =>
       call('GET', `/segments/${seg(segmentId)}/contacts${qs(page(options))}`),
-    setContactUnsubscribed: (email, unsubscribed) =>
-      call('PATCH', contactPath(email), { unsubscribed: Boolean(unsubscribed) }),
-    deleteContact: (email) => call('DELETE', contactPath(email)),
+    // By Resend contact id: the admin routes never put an address in a path.
+    setContactUnsubscribed: (contactId, unsubscribed) =>
+      call('PATCH', `/contacts/${seg(contactId)}`, { unsubscribed: Boolean(unsubscribed) }),
+    deleteContact: (contactId) => call('DELETE', `/contacts/${seg(contactId)}`),
     listDomains: () => call('GET', '/domains'),
     getDomain: (domainId) => call('GET', `/domains/${seg(domainId)}`),
     createDomain: ({ name, region }) => call('POST', '/domains', { name, ...(region ? { region } : {}) }),

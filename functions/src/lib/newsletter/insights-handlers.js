@@ -122,7 +122,8 @@ const rowsOf = (result) => (Array.isArray(result?.data?.data) ? result.data.data
 
 // ── Redaction ───────────────────────────────────────────────────────────────
 
-const EMAIL_IN_TEXT = /[A-Za-z0-9._%+'-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g;
+/** An address, with its at-sign literal or percent-encoded (`%40`), as a path built with encodeURIComponent carries it. */
+const EMAIL_IN_TEXT = /[A-Za-z0-9._%+'-]+(?:@|%40)[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/gi;
 const BEARER_IN_TEXT = /\bBearer\s+[^\s"',;]+/gi;
 /** Resend keys start `re_`; anything that looks like one goes. */
 const RESEND_KEY_IN_TEXT = /\bre_[A-Za-z0-9_-]{8,}/g;
@@ -143,7 +144,8 @@ export function redactText(text) {
  * A deep copy of a log body with credentials and addresses removed: any value
  * under a key that names a credential is replaced whole, and every string (and
  * every key) has bearer tokens, Resend keys and email addresses taken out.
- * Anything nested deeper than MAX_REDACT_DEPTH is dropped rather than walked.
+ * Anything nested deeper than MAX_REDACT_DEPTH is replaced with the REDACTED
+ * marker rather than walked.
  */
 export function redactSensitive(value, depth = 0) {
   if (depth > MAX_REDACT_DEPTH) return REDACTED;
@@ -526,7 +528,14 @@ export function createNewsletterInsightsHandlers({
         const segment = await segmentId(opened.client);
         if (segment.result) return refused(route, segment.result, context);
         if (!segment.id) {
-          return json(200, { ok: true, segmentFound: false, contacts: [], has_more: false, next_after: null });
+          return json(200, {
+            ok: true,
+            segmentFound: false,
+            contacts: [],
+            has_more: false,
+            next_after: null,
+            searchScope: 'page',
+          });
         }
         return await relay(
           route,

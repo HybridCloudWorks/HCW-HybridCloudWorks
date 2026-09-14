@@ -433,7 +433,14 @@ describe('audience', () => {
     const resend = makeResend({ 'GET /segments': () => reply(200, { has_more: false, data: [] }) });
     const { handlers } = build({ resend });
     const res = await handlers.audience(request(), context());
-    expect(bodyOf(res)).toMatchObject({ ok: true, segmentFound: false, contacts: [] });
+    expect(bodyOf(res)).toEqual({
+      ok: true,
+      segmentFound: false,
+      contacts: [],
+      has_more: false,
+      next_after: null,
+      searchScope: 'page',
+    });
     expect(resend.calls.every((c) => c.method === 'GET')).toBe(true);
   });
 
@@ -676,6 +683,9 @@ describe('redaction helpers', () => {
     expect(redactText('Authorization: Bearer abc.def-ghi')).toBe(`Authorization: Bearer ${REDACTED}`);
     expect(redactText('key re_1234567890abcdef here')).toBe(`key ${REDACTED} here`);
     expect(redactText("o'brien+x@mail.example.org")).toBe(REDACTED_EMAIL);
+    // Our own client percent-encodes addresses into paths.
+    expect(redactText('/contacts/jane.doe%40example.com')).toBe(`/contacts/${REDACTED_EMAIL}`);
+    expect(redactText('/contacts/JANE%40Example.COM/segments')).toBe(`/contacts/${REDACTED_EMAIL}/segments`);
   });
 
   it('redactSensitive walks arrays, redacts keys and bounds depth', () => {

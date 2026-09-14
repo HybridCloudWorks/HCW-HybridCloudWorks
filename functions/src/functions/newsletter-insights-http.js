@@ -78,7 +78,7 @@ httpRouteByMethod('mailingListDomain', {
   },
 });
 
-httpRoute('verifyMailingListDomain', {
+httpRoute('mailingListDomainVerify', {
   methods: ['POST'],
   authLevel: 'anonymous',
   route: 'cms/mailing-list/domains/{domainId}/verify',
