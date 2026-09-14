@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router';
-import NewsletterSignup from '@/components/shared/NewsletterSignup';
+import PlacedNewsletterSignup from '@/components/shared/PlacedNewsletterSignup';
 
 // Hoisted to module scope so jsx-ast-utils can statically resolve `href`
 // in the JSX below. Inlining `import.meta.env.X` directly into a JSX prop
@@ -16,9 +16,12 @@ export default function Footer() {
   return (
     // Background comes from the tokenized footer chrome (--header-bg) in index.css
     <footer className="mt-8 py-6 border-t border-glass-border">
-      <div className="max-w-[1400px] mx-auto px-4 md:px-6 w-full mb-6">
-        <NewsletterSignup source="footer" />
-      </div>
+      {/* Shown only when the owner's signup placement includes the footer (#557). */}
+      <PlacedNewsletterSignup
+        where="footer"
+        source="footer"
+        className="max-w-[1400px] mx-auto px-4 md:px-6 w-full mb-6"
+      />
       <div className="max-w-[1400px] mx-auto px-4 md:px-6 w-full flex flex-col md:flex-row items-center justify-between gap-2 md:gap-0">
         {/* Left: Copyright */}
         <div className="flex-1 flex flex-col md:flex-row items-center md:items-start md:justify-start">

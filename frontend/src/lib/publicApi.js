@@ -146,6 +146,17 @@ export async function fetchPublicSnapshotItems(id) {
 }
 
 /**
+ * GET public/newsletter/signup-config — where the newsletter signup box shows
+ * and its heading and blurb (#557): `{ placement, heading, blurb }`. The
+ * server answers its defaults rather than failing, so a throw here is a
+ * network or configuration problem; hooks/useNewsletterSignupConfig.js turns
+ * it into the built-in defaults.
+ */
+export async function fetchNewsletterSignupConfig() {
+  return publicGet('public/newsletter/signup-config');
+}
+
+/**
  * POST public/submissions — anonymous content submission. The server owns
  * validation, document composition, and the per-client hourly quota (429),
  * replacing the pages' direct addDoc writes into the content collection.

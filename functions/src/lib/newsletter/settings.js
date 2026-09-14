@@ -46,6 +46,26 @@ export const DEFAULT_INTRO_TONE = 'professional';
 export const defaultSectionSettings = () =>
   SECTIONS.map((section) => ({ id: section.id, enabled: true, maxItems: MAX_ITEMS_PER_SECTION }));
 
+/**
+ * ## Signup form (#557)
+ *
+ * Where the public signup box appears and what it says, read anonymously by
+ * the site through GET public/newsletter/signup-config (signup-config.js).
+ * Plain text only: the site renders both strings as text, never as HTML. A
+ * document saved before these fields existed normalizes to exactly what the
+ * site showed before them: the box in the footer AND at the end of every blog
+ * post, with the heading and blurb NewsletterSignup.jsx carried hardcoded.
+ * frontend/src/lib/newsletterSignup.js holds the same defaults for first
+ * paint, and signup-config.test.js holds the two copies together.
+ */
+export const SIGNUP_PLACEMENTS = Object.freeze(['footer', 'blogEnd', 'both', 'none']);
+export const DEFAULT_SIGNUP_PLACEMENT = 'both';
+export const MAX_SIGNUP_HEADING_LENGTH = 80;
+export const MAX_SIGNUP_BLURB_LENGTH = 240;
+export const DEFAULT_SIGNUP_HEADING = 'Stay ahead of the cloud curve.';
+export const DEFAULT_SIGNUP_BLURB =
+  'Practical hybrid & multi-cloud insights, straight to your inbox. No spam — unsubscribe anytime.';
+
 export const DEFAULT_NEWSLETTER_SETTINGS = Object.freeze({
   postalAddress: '',
   replyTo: '',
@@ -56,6 +76,9 @@ export const DEFAULT_NEWSLETTER_SETTINGS = Object.freeze({
   windowDays: DEFAULT_WINDOW_DAYS,
   introEnabled: true,
   introTone: DEFAULT_INTRO_TONE,
+  signupPlacement: DEFAULT_SIGNUP_PLACEMENT,
+  signupHeading: DEFAULT_SIGNUP_HEADING,
+  signupBlurb: DEFAULT_SIGNUP_BLURB,
 });
 
 /** A fresh, mutable copy of the defaults: the frozen section rows are not shared. */
@@ -70,6 +93,9 @@ export const newsletterContentOptions = () => ({
   introTones: [...INTRO_TONE_IDS],
   windowDays: { min: MIN_WINDOW_DAYS, max: MAX_WINDOW_DAYS },
   maxItems: { min: MIN_SECTION_ITEMS, max: MAX_SECTION_ITEMS },
+  signupPlacements: [...SIGNUP_PLACEMENTS],
+  signupHeading: { maxLength: MAX_SIGNUP_HEADING_LENGTH },
+  signupBlurb: { maxLength: MAX_SIGNUP_BLURB_LENGTH },
 });
 
 export const MAX_POSTAL_ADDRESS_LENGTH = 300;

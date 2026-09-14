@@ -7,15 +7,29 @@
  * says so. `website` is a honeypot field. A non-2xx answer, including the 429
  * for too many attempts, is shown as the server's own sentence.
  *
- * Mounted in Footer.jsx (every page) and BlogDetailTemplate.jsx (every post).
+ * Mounted in Footer.jsx (every page) and BlogDetailTemplate.jsx (every post),
+ * each only where the owner's placement setting allows (#557), and in the
+ * Mailing List Settings tab as a preview.
+ *
+ * The heading and blurb are owner-written plain text and are rendered as React
+ * text children, so markup in them shows literally and is never parsed. A
+ * blank blurb shows no paragraph.
+ *
+ * `preview` renders the same box with nothing that can send: the input and the
+ * button are disabled, the button is not a submit button, and the submit
+ * handler returns before any request even if a form submit is forced.
  *
  * @param {string} [source] - Where on the site the signup happened.
+ * @param {string} [heading] - Owner-set heading; defaults to the built-in one.
+ * @param {string} [blurb] - Owner-set blurb; defaults to the built-in one.
+ * @param {boolean} [preview] - Render a non-submitting preview.
  * @param {string} [className]
  */
 
 import React, { useId, useState } from 'react';
 import Eyebrow from '@/components/shared/Eyebrow';
 import { getFunctionsBase } from '@/lib/functionsBase';
+import { DEFAULT_SIGNUP_CONFIG } from '@/lib/newsletterSignup';
 
 const STATUS = {
   IDLE: 'idle',
@@ -24,7 +38,13 @@ const STATUS = {
   ERROR: 'error',
 };
 
-export default function NewsletterSignup({ source = 'website', className = '' }) {
+export default function NewsletterSignup({
+  source = 'website',
+  heading = DEFAULT_SIGNUP_CONFIG.heading,
+  blurb = DEFAULT_SIGNUP_CONFIG.blurb,
+  preview = false,
+  className = '',
+}) {
   // Unique per mount — the component appears in both Footer and blog posts,
   // so a hardcoded id would duplicate on article pages.
   const inputId = useId();
@@ -35,7 +55,7 @@ export default function NewsletterSignup({ source = 'website', className = '' })
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    if (status === STATUS.LOADING) return;
+    if (preview || status === STATUS.LOADING) return;
     setStatus(STATUS.LOADING);
     setErrorMessage('');
     try {
@@ -59,15 +79,15 @@ export default function NewsletterSignup({ source = 'website', className = '' })
   };
 
   return (
-    <section className={`glass rounded-2xl p-6 sm:p-8 ${className}`} aria-label="Newsletter signup">
+    <section
+      className={`glass rounded-2xl p-6 sm:p-8 ${className}`}
+      aria-label={preview ? 'Newsletter signup preview' : 'Newsletter signup'}
+    >
       <Eyebrow>Newsletter</Eyebrow>
       <h2 className="mt-3 text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
-        Stay ahead of the cloud curve.
+        {heading}
       </h2>
-      <p className="mt-2 text-sm text-muted-foreground max-w-md">
-        Practical hybrid &amp; multi-cloud insights, straight to your inbox. No spam — unsubscribe
-        anytime.
-      </p>
+      {blurb ? <p className="mt-2 text-sm text-muted-foreground max-w-md">{blurb}</p> : null}
 
       {status === STATUS.SUCCESS ? (
         <p
@@ -101,12 +121,12 @@ export default function NewsletterSignup({ source = 'website', className = '' })
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
-              disabled={status === STATUS.LOADING}
+              disabled={preview || status === STATUS.LOADING}
               className="min-w-0 flex-1 bg-transparent px-4 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
             />
             <button
-              type="submit"
-              disabled={status === STATUS.LOADING}
+              type={preview ? 'button' : 'submit'}
+              disabled={preview || status === STATUS.LOADING}
               className="shrink-0 rounded-full bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
             >
               {status === STATUS.LOADING ? 'Subscribing…' : 'Subscribe'}

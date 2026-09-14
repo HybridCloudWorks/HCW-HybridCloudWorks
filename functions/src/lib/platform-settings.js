@@ -10,6 +10,7 @@
  *   listen-and-learn-speech → admin_config/listen_and_learn_speech read by functions/listen-and-learn-jobs.js
  *   newsletter-settings     → admin_config/newsletter_settings     read by lib/newsletter/admin-handlers.js
  *                             and lib/newsletter/issue.js (content: sections, window, intro)
+ *                             and lib/newsletter/signup-config.js (the public signup box)
  *                             (to be edited from the Mailing List page, not Platform settings)
  *
  * Every write is normalized to EXACTLY the shape its consumer reads — the
@@ -45,11 +46,14 @@ import {
   INTRO_TONE_IDS,
   MAX_POSTAL_ADDRESS_LENGTH,
   MAX_SECTION_ITEMS,
+  MAX_SIGNUP_BLURB_LENGTH,
+  MAX_SIGNUP_HEADING_LENGTH,
   MAX_WINDOW_DAYS,
   MIN_SECTION_ITEMS,
   MIN_WINDOW_DAYS,
   NEWSLETTER_SETTINGS_CONFIG_ID,
   SEND_DAYS,
+  SIGNUP_PLACEMENTS,
   newsletterContentOptions,
   newsletterSettingsDefaults,
 } from './newsletter/settings.js';
@@ -418,8 +422,47 @@ function normalizeNewsletterContent(body, value) {
 }
 
 /**
+ * One line of plain text: every run of whitespace or control characters,
+ * line breaks included, becomes a single space, and the ends are trimmed.
+ * The site renders it as text, so nothing here is escaped; what is refused is
+ * only what could not be shown as one line in a box.
+ */
+function signupText(raw, field, maxLength) {
+  if (typeof raw !== 'string') fail(`${field} must be a string`);
+  // eslint-disable-next-line no-control-regex
+  const text = raw.replace(/[\s\u0000-\u001f\u007f]+/g, ' ').trim();
+  if (text.length > maxLength) fail(`${field} must be at most ${maxLength} characters`);
+  return text;
+}
+
+/**
+ * The signup form fields (#557): signupPlacement, signupHeading, signupBlurb.
+ * The placement is checked first and on its own, so a value the site cannot
+ * place is refused by name before either string is looked at. A blank heading
+ * is refused — the box would open on an empty title — while a blank blurb is
+ * allowed and the site then shows no paragraph.
+ */
+function normalizeNewsletterSignup(body, value) {
+  if (body.signupPlacement !== undefined) {
+    if (!SIGNUP_PLACEMENTS.includes(body.signupPlacement)) {
+      fail(`signupPlacement must be one of ${SIGNUP_PLACEMENTS.join(', ')}`);
+    }
+    value.signupPlacement = body.signupPlacement;
+  }
+  if (body.signupHeading !== undefined) {
+    const heading = signupText(body.signupHeading, 'signupHeading', MAX_SIGNUP_HEADING_LENGTH);
+    if (!heading) fail('signupHeading must not be blank');
+    value.signupHeading = heading;
+  }
+  if (body.signupBlurb !== undefined) {
+    value.signupBlurb = signupText(body.signupBlurb, 'signupBlurb', MAX_SIGNUP_BLURB_LENGTH);
+  }
+}
+
+/**
  * `{ postalAddress, replyTo, sendDay, sendTime, timeZone, sections, windowDays,
- * introEnabled, introTone }` → the document the newsletter approval reads
+ * introEnabled, introTone, signupPlacement, signupHeading, signupBlurb }` →
+ * the document the newsletter approval reads
  * (lib/newsletter/admin-handlers.js) and the issue builder reads for content
  * (lib/newsletter/issue.js). Blank address and reply-to are ALLOWED here, so
  * the page can save one before the other; approval is what refuses to send
@@ -432,6 +475,7 @@ export function normalizeNewsletterSettings(body) {
   assertOnlyKeys(body, keys, 'body');
   const value = newsletterSettingsDefaults();
   normalizeNewsletterContent(body, value);
+  normalizeNewsletterSignup(body, value);
 
   if (body.postalAddress !== undefined) {
     if (typeof body.postalAddress !== 'string') fail('postalAddress must be a string');
@@ -642,6 +686,11 @@ export function createPlatformSettingsHandlers({
           windowDays: value.windowDays,
           introEnabled: value.introEnabled,
           introTone: value.introTone,
+          // Where the box shows is a setting; its wording is content, so only
+          // whether it differs from the default is recorded.
+          signupPlacement: value.signupPlacement,
+          signupHeadingCustom: value.signupHeading !== DEFAULT_NEWSLETTER_SETTINGS.signupHeading,
+          signupBlurbCustom: value.signupBlurb !== DEFAULT_NEWSLETTER_SETTINGS.signupBlurb,
         };
       default:
         return {};

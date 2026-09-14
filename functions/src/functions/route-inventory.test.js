@@ -131,6 +131,10 @@ const PUBLIC_ROUTES = new Set([
   // off RESEND_API_KEY — lib/newsletter/confirmation-token.js.
   'public/newsletter/subscribe',
   'public/newsletter/confirm',
+  // Where the signup box shows and its heading and blurb (#557). Three fields
+  // projected by name from the settings document, never the postal address or
+  // the reply-to it also holds; a read failure answers the defaults.
+  'public/newsletter/signup-config',
   'public/media/{container}/{*blobPath}', // container allowlist — lib/blob-paths.js
   // Returns one field, `imageUrl`, for one cached news-article image — never
   // the document, which carries an internal blob path and prompt metadata. It
