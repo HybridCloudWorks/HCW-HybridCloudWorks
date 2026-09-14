@@ -67,6 +67,9 @@ describe('createNewsletterAutoBuild', () => {
     const log = { error: vi.fn() };
     await expect(createNewsletterAutoBuild({ builder, notifier: n, log }).run()).rejects.toThrow('Cosmos unreachable');
     expect(n.notifyTelegram.mock.calls[0][0]).toMatchObject({ severity: 'warning', source: AUTOBUILD_SOURCE });
+    // The page is called Newsletter Hub in the menu (#566); the route keeps its old name.
+    expect(n.notifyTelegram.mock.calls[0][0].message).toContain('You can build it from the Newsletter Hub:');
+    expect(n.notifyTelegram.mock.calls[0][0].message).not.toContain('Mailing List');
     expect(log.error).toHaveBeenCalled();
   });
 

@@ -338,7 +338,7 @@ export function createIssueBuilder({ store, drafter, now = () => new Date(), sec
       kept: Boolean(keep),
       sections: collected.sections.map((section) => section.id),
       problems: collected.problems,
-      message: `Drafted ${id} with ${itemCount} item(s)${keep ? ' and saved it to Drafts' : ''}. Review and approve it on the Mailing List page.`,
+      message: `Drafted ${id} with ${itemCount} item(s)${keep ? ' and saved it to Drafts' : ''}. Review and approve it in the Newsletter Hub.`,
     };
   }
 

@@ -49,6 +49,15 @@ beforeEach(() => {
   searchParams = 'tab=settings';
 });
 
+describe('the page header', () => {
+  it('names the page Newsletter Hub, matching the menu (#566)', () => {
+    postJSON.mockResolvedValue(envelope(true, 200, domains([])));
+    render(<MailingListPage />);
+    expect(screen.getByText('Newsletter Hub')).toBeInTheDocument();
+    expect(screen.queryByText('Mailing List')).not.toBeInTheDocument();
+  });
+});
+
 describe('Test Connection', () => {
   it('asks the server by name, never by path', async () => {
     postJSON.mockResolvedValue(envelope(true, 200, domains([])));

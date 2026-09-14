@@ -4,7 +4,7 @@
  *
  * **This never sends.** It calls the issue builder with `keep: true`, which
  * writes a `draft` with `savedAt` set so the issue shows on the Drafts tab of
- * the Mailing List page. Nothing here reaches Resend, and nothing here approves:
+ * the Newsletter Hub page. Nothing here reaches Resend, and nothing here approves:
  * the only way an issue reaches subscribers is the owner pressing Approve on
  * that tab (ADR 0029 §1b, ADR 0030 §2a).
  *
@@ -80,7 +80,7 @@ export function createNewsletterAutoBuild({ builder, notifier, log = {}, siteUrl
       log.error?.(`[${AUTOBUILD_SOURCE}] build failed: ${reason}`);
       await notifier.notifyTelegram({
         title: 'Newsletter build failed',
-        message: `The Monday build of the weekly newsletter failed: ${reason}\n\nNothing was sent. You can build it from the Mailing List page:\n${draftsUrl}`,
+        message: `The Monday build of the weekly newsletter failed: ${reason}\n\nNothing was sent. You can build it from the Newsletter Hub:\n${draftsUrl}`,
         severity: 'warning',
         source: AUTOBUILD_SOURCE,
       });
