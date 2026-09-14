@@ -19,8 +19,32 @@ vi.mock('../lib/ai/router.js', () => ({
   generateTextResponse: vi.fn(),
   getActiveAiProvider: vi.fn(),
 }));
+const issueBuild = vi.hoisted(() => vi.fn(async () => ({ success: true })));
+vi.mock('../lib/newsletter/issue.js', () => ({
+  createIssueBuilder: vi.fn(() => ({ build: issueBuild })),
+}));
 
 const { resolveForgeTargets, runForgeFromUrl, FORGE_MAX_BATCH } = await import('./forge-jobs.js');
+const { registerJobType } = await import('../lib/jobs.js');
+
+describe('build-newsletter-issue', () => {
+  const worker = () =>
+    registerJobType.mock.calls.find(([name]) => name === 'build-newsletter-issue')[1].worker;
+
+  it('passes no days of its own, so the window saved in Newsletter settings applies (#557)', async () => {
+    issueBuild.mockClear();
+    await worker()({}, { context: {} });
+    expect(issueBuild).toHaveBeenCalledWith({ days: undefined });
+    await worker()(undefined, { context: {} });
+    expect(issueBuild).toHaveBeenLastCalledWith({ days: undefined });
+  });
+
+  it('still passes an explicit days through for the builder to clamp, and nothing else', async () => {
+    issueBuild.mockClear();
+    await worker()({ days: 14, keep: true, keptBy: 'someone' }, { context: {} });
+    expect(issueBuild).toHaveBeenCalledWith({ days: 14 });
+  });
+});
 
 describe('resolveForgeTargets', () => {
   it('accepts sourceContentId and sourceContentIds, deduped and trimmed', () => {

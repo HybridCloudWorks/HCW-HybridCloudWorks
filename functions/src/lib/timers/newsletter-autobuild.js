@@ -8,6 +8,10 @@
  * the only way an issue reaches subscribers is the owner pressing Approve on
  * that tab (ADR 0029 §1b, ADR 0030 §2a).
  *
+ * It passes no `days`: how far back to look, which sections and whether an
+ * intro is written are Newsletter settings → Content (#557), read by the
+ * builder, so the Monday build and the Build button follow the same choices.
+ *
  * The builder's refusals are kept, not worked around. If today's issue is
  * already saved to Drafts, or has been approved, scheduled or sent, the build
  * writes nothing and the message says so. A week with nothing new builds
@@ -22,7 +26,6 @@ import { SITE_ORIGIN } from '../newsletter/sections.js';
 
 export const AUTOBUILD_SOURCE = 'buildWeeklyNewsletter';
 export const AUTOBUILD_ACTOR = 'auto-build';
-export const AUTOBUILD_WINDOW_DAYS = 7;
 
 /** Where the admin page shows kept drafts: App.jsx `/admin/mailing-list`, tab `drafts`. */
 export const DRAFTS_PATH = '/admin/mailing-list?tab=drafts';
@@ -71,7 +74,7 @@ export function createNewsletterAutoBuild({ builder, notifier, log = {}, siteUrl
   async function run() {
     let result;
     try {
-      result = await builder.build({ days: AUTOBUILD_WINDOW_DAYS, keep: true, keptBy: AUTOBUILD_ACTOR });
+      result = await builder.build({ keep: true, keptBy: AUTOBUILD_ACTOR });
     } catch (error) {
       const reason = String(error?.message ?? error).slice(0, 300);
       log.error?.(`[${AUTOBUILD_SOURCE}] build failed: ${reason}`);

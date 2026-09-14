@@ -20,7 +20,9 @@ describe('createNewsletterAutoBuild', () => {
     const n = notifier();
     const summary = await createNewsletterAutoBuild({ builder, notifier: n }).run();
 
-    expect(builder.build).toHaveBeenCalledWith({ days: 7, keep: true, keptBy: AUTOBUILD_ACTOR });
+    // No days: the window is Newsletter settings, Content, read by the builder (#557).
+    expect(builder.build).toHaveBeenCalledWith({ keep: true, keptBy: AUTOBUILD_ACTOR });
+    expect(builder.build.mock.calls[0][0]).not.toHaveProperty('days');
     expect(summary).toMatchObject({ success: true, reason: 'built', itemCount: 5, notified: true });
     const sent = n.notifyTelegram.mock.calls[0][0];
     expect(sent).toMatchObject({ source: AUTOBUILD_SOURCE, severity: 'info' });

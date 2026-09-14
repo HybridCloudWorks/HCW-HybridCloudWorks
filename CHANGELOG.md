@@ -19,6 +19,19 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Choose what each newsletter issue is built from (#557).** Newsletter
+  settings on the Mailing List Settings tab gain a Content block: tick which
+  sections go in, put them in order with up and down buttons, set the most
+  items each may show (1 to 20), how many days back to look (1 to 31), whether
+  the AI intro is written and in which tone (professional, friendly, short and
+  direct, enthusiastic). It saves with the rest of the settings and the form
+  shows what the server stored. The issue builder reads these for both the
+  Build this week's issue button and the Monday automatic build, neither of
+  which passes a fixed seven days any more; an explicit `days` on the job still
+  wins, clamped. Turning the intro off builds with no AI call and no intro
+  error; the regenerate-intro button uses the saved tone. Settings saved before
+  this read as the old behaviour (every section, 12 items each, seven days, a
+  professional intro), with no migration. Nothing here sends email.
 - **Resend domains, recent emails and API logs on the Mailing List Settings tab (#504).**
   The page half of the Resend domains, logs and emails API (#553), frontend only.
   Three cards below the connection check, each loading when the tab opens and

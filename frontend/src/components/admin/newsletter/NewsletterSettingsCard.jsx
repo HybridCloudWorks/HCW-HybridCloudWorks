@@ -5,8 +5,16 @@
  * is allowed. The issue view lists which of the postal address and reply-to a
  * send still needs; the approval step, a later change, will refuse to send
  * without them.
+ *
+ * The Content block (#557) is part of the same form and the same save: the
+ * settings are one document written whole, so one form holds all of it.
+ *
+ * Race-safety: each load carries a generation number and only the latest may
+ * write state, so a slow first load cannot land over a retry; a save is
+ * guarded by a ref as well as the disabled button, so a double click sends
+ * one PUT; and a failed load hides the form and clears what it held.
  */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,6 +22,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Loader2, Save } from 'lucide-react';
 import { getJSON, sendJSON } from '@/lib/api';
+import NewsletterContentFields, { contentProblem } from './NewsletterContentFields';
 
 export const NEWSLETTER_SETTINGS_ROUTE = 'cms/platform-settings/newsletter-settings';
 
@@ -25,6 +34,10 @@ const EMPTY = {
   sendDay: 'tuesday',
   sendTime: '09:00',
   timeZone: 'America/Chicago',
+  sections: [],
+  windowDays: 7,
+  introEnabled: true,
+  introTone: 'professional',
 };
 
 export default function NewsletterSettingsCard({ onSaved }) {
@@ -37,21 +50,29 @@ export default function NewsletterSettingsCard({ onSaved }) {
   const [attempt, setAttempt] = useState(0);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState(null);
+  const [options, setOptions] = useState(null);
+  const loadGeneration = useRef(0);
+  const savingRef = useRef(false);
 
   useEffect(() => {
-    let cancelled = false;
+    const generation = ++loadGeneration.current;
+    const current = () => generation === loadGeneration.current;
     getJSON(NEWSLETTER_SETTINGS_ROUTE)
       .then((res) => {
-        if (cancelled) return;
+        if (!current()) return;
         setValue({ ...EMPTY, ...(res?.value || {}) });
+        setOptions(res?.options || null);
         setLoadError('');
       })
       .catch((err) => {
-        if (!cancelled) setLoadError(err.message || 'Could not load the newsletter settings.');
+        if (!current()) return;
+        setValue(EMPTY);
+        setLoadError(err.message || 'Could not load the newsletter settings.');
       })
-      .finally(() => !cancelled && setLoading(false));
+      .finally(() => current() && setLoading(false));
     return () => {
-      cancelled = true;
+      // Unmounting or a newer attempt: this load may no longer write state.
+      if (current()) loadGeneration.current += 1;
     };
   }, [attempt]);
 
@@ -64,18 +85,30 @@ export default function NewsletterSettingsCard({ onSaved }) {
   const set = (key) => (event) =>
     setValue((current) => ({ ...current, [key]: event.target.value }));
 
+  const setContent = (patch) => setValue((current) => ({ ...current, ...patch }));
+
   const handleSave = async (event) => {
     event.preventDefault();
+    if (savingRef.current) return;
+    const problem = contentProblem(value);
+    if (problem) {
+      setNotice({ ok: false, message: problem });
+      return;
+    }
+    savingRef.current = true;
     setSaving(true);
     setNotice(null);
     try {
       const res = await sendJSON(NEWSLETTER_SETTINGS_ROUTE, 'PUT', value);
+      // What the server stored, after its own clamping, is what the form shows.
       setValue({ ...EMPTY, ...res.value });
+      if (res.options) setOptions(res.options);
       setNotice({ ok: true, message: 'Newsletter settings saved.' });
       onSaved?.();
     } catch (err) {
       setNotice({ ok: false, message: err.message });
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
@@ -86,7 +119,8 @@ export default function NewsletterSettingsCard({ onSaved }) {
         <CardTitle className="text-base">Newsletter settings</CardTitle>
         <CardDescription>
           Every issue carries your postal address (required by law for commercial email) and sends
-          replies to the inbox below. Nothing can be approved until both are filled in.
+          replies to the inbox below. Nothing can be approved until both are filled in. Content sets
+          what each issue is built from.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -151,6 +185,9 @@ export default function NewsletterSettingsCard({ onSaved }) {
             <div className="space-y-1.5">
               <Label htmlFor="nl-time">Send time</Label>
               <Input id="nl-time" type="time" value={value.sendTime} onChange={set('sendTime')} />
+            </div>
+            <div className="md:col-span-2">
+              <NewsletterContentFields value={value} options={options} onChange={setContent} />
             </div>
             <div className="md:col-span-2 flex flex-wrap items-center gap-3">
               <Button type="submit" disabled={saving} className="gap-2">

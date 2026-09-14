@@ -5,7 +5,9 @@
  * ## Adding a section
  *
  * Write one entry and put it in SECTIONS. Nothing else changes: the builder
- * collects every registered section, drops the empty ones, and the renderer
+ * collects every registered section the owner has not turned off in
+ * Newsletter settings → Content (a new one is on by default, appended after
+ * the saved order), drops the empty ones, and the renderer
  * lays out whatever items come back. An entry is:
  *
  *   {
@@ -192,16 +194,19 @@ export const episodesSection = Object.freeze({
 export const SECTIONS = Object.freeze([articlesSection, certificationNewsSection, episodesSection]);
 
 /**
- * Collect every registered section for the window. A section that throws is
- * reported and left out rather than sinking the issue: one unreadable
- * container should cost a heading, not the week's newsletter.
+ * Collect the given sections, in the given order, for the window. A section
+ * that throws is reported and left out rather than sinking the issue: one
+ * unreadable container should cost a heading, not the week's newsletter.
+ * `maxItems` caps a section by id (Newsletter settings → Content); a section it
+ * does not name keeps MAX_ITEMS_PER_SECTION.
  */
-export async function collectSections({ store, since, until, sections = SECTIONS, log }) {
+export async function collectSections({ store, since, until, sections = SECTIONS, maxItems = {}, log }) {
   const out = [];
   const problems = [];
   for (const section of sections) {
+    const limit = Object.hasOwn(maxItems, section.id) ? maxItems[section.id] : MAX_ITEMS_PER_SECTION;
     try {
-      const items = (await section.collect({ store, since, until })).slice(0, MAX_ITEMS_PER_SECTION);
+      const items = (await section.collect({ store, since, until })).slice(0, limit);
       if (items.length > 0) out.push({ id: section.id, title: section.title, items });
     } catch (error) {
       problems.push(`${section.id}: ${error?.message ?? error}`);
