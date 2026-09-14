@@ -137,3 +137,25 @@ describe('a refusal carries the reason to the caller (#517)', () => {
     await expect(postJSON('x', {})).rejects.toMatchObject({ wwwAuthenticate: {} });
   });
 });
+
+describe('a rate limit carries the wait to the caller (#504)', () => {
+  it('attaches retryAfterSeconds and the code from the body', async () => {
+    fetch.mockResolvedValue({
+      ok: false,
+      status: 429,
+      json: async () => ({ ok: false, retryAfterSeconds: 7, code: 'RATE', error: 'Too many' }),
+    });
+    await expect(postJSON('x', {})).rejects.toMatchObject({
+      status: 429,
+      retryAfterSeconds: 7,
+      code: 'RATE',
+    });
+  });
+
+  it('leaves them off when the body has none, or a wait that is not a positive number', async () => {
+    fetch.mockResolvedValue(failing({ error: 'E', retryAfterSeconds: '7' }));
+    const error = await postJSON('x', {}).catch((err) => err);
+    expect(error).not.toHaveProperty('retryAfterSeconds');
+    expect(error).not.toHaveProperty('code');
+  });
+});

@@ -126,6 +126,19 @@ export function parseWwwAuthenticate(header) {
 }
 
 /**
+ * How long a rate-limited route asks the caller to wait, and the route's
+ * machine-readable reason, when the refusal body gave them (the Mailing List
+ * routes answer a Resend 429 with `retryAfterSeconds`, #504). Read from the
+ * body because a cross-origin `Retry-After` header is not exposed to the page.
+ */
+function attachRefusalHints(error, errData) {
+  if (Number.isFinite(errData?.retryAfterSeconds) && errData.retryAfterSeconds > 0) {
+    error.retryAfterSeconds = errData.retryAfterSeconds;
+  }
+  if (typeof errData?.code === 'string') error.code = errData.code;
+}
+
+/**
  * Authenticated fetch wrapper.
  * Automatically injects an Entra Bearer token.
  * Admin status forces a token refresh so a newly granted role is visible immediately.
@@ -212,6 +225,7 @@ export async function authedFetch(fnName, { token: presetToken, ...options } = {
     // own-properties behaves exactly as before.
     error.status = res.status;
     error.fnName = fnName;
+    attachRefusalHints(error, errData);
     // The reason, when the API gave one (#517). `error.status` told a caller
     // that the request failed; this tells them what would fix it — and the
     // distinction matters most on a 401, where `invalid_token` means sign in

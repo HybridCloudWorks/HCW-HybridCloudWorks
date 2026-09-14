@@ -19,6 +19,24 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **An Audience tab and per-issue metrics on the Mailing List page (#504).**
+  The page half of the Resend metrics and audience API. A new **Audience** tab,
+  between Published and Settings, shows the Newsletter segment's subscribed,
+  unsubscribed and total counts (with when they were counted, and a note when
+  they are a lower bound), then the contacts fifty at a time with Load more
+  and a debounced email search that says it searches the loaded page. Each row
+  can be unsubscribed, resubscribed or removed; those are the only writes, they
+  are publisher-only on the server, a refusal shows the server's message, and
+  Remove asks first because it deletes the contact from Resend. Contacts are
+  addressed by Resend id, never by email. On **Published**, a sent issue now
+  shows delivered, unique opens and clicks with their rates, bounces,
+  unsubscribes and complaints above its email, its top ten links, and a
+  collapsible list of who opened, clicked or bounced; a scheduled issue says
+  metrics come after it sends. The month header adds that month's delivered
+  count and open rate, loaded after the calendar and left out if Resend cannot
+  answer. A 503 says Resend is not configured and a 429 says how long to wait,
+  which `lib/api.js` now carries on the thrown error as `retryAfterSeconds`.
+
 - **Resend metrics, audience, domains, logs and templates for the Mailing List
   page, in the API (#504).** The owner wants Resend's numbers and settings on
   the site rather than in Resend's dashboard; this is the API half, and the

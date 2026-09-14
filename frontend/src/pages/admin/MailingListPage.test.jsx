@@ -175,11 +175,11 @@ describe('The newsletter tab', () => {
     expect(await screen.findByRole('button', { name: /test connection/i })).toBeInTheDocument();
   });
 
-  it('has Newsletter, Drafts, Published and Settings tabs, in that order', () => {
+  it('has Newsletter, Drafts, Published, Audience and Settings tabs, in that order', () => {
     searchParams = 'tab=settings';
     postJSON.mockResolvedValue(envelope(true, 200, domains([])));
     render(<MailingListPage />);
-    const labels = ['Newsletter', 'Drafts', 'Published', 'Settings'];
+    const labels = ['Newsletter', 'Drafts', 'Published', 'Audience', 'Settings'];
     const tabs = screen.getAllByRole('button').filter((b) => labels.includes(b.textContent));
     expect(tabs.map((b) => b.textContent)).toEqual(labels);
   });
@@ -193,6 +193,19 @@ describe('The newsletter tab', () => {
       screen.queryByRole('button', { name: /build this week's issue/i })
     ).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Postal address')).not.toBeInTheDocument();
+  });
+
+  it('opens Audience on the Newsletter segment in Resend', async () => {
+    searchParams = 'tab=audience';
+    postJSON.mockResolvedValue(envelope(true, 200, domains([])));
+    getJSON.mockImplementation(async (route) =>
+      route.startsWith('cms/mailing-list/audience?')
+        ? { ok: true, segmentFound: false, contacts: [], has_more: false, next_after: null }
+        : { ok: true, total: 0, subscribed: 0, unsubscribed: 0, truncated: false }
+    );
+    render(<MailingListPage />);
+    expect(await screen.findByText(/No subscribers yet/)).toBeInTheDocument();
+    expect(getJSON).toHaveBeenCalledWith('cms/mailing-list/audience/summary');
   });
 
   it('opens Published on a month calendar', async () => {
