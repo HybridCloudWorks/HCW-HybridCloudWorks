@@ -19,6 +19,28 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Use a Resend template as the newsletter's design (#557).** Newsletter
+  settings on the Mailing List Settings tab gain a Template block: keep the
+  built-in design (the default, and what existing settings read as) or pick one
+  of your published Resend templates, listed from
+  `GET /api/cms/mailing-list/templates`; unpublished templates show disabled,
+  and when the list cannot be loaded the saved choice is kept and the reason is
+  shown. Resend broadcasts take no template id and template variables cannot
+  loop over articles, so the site does the merge
+  (`lib/newsletter/template-layout.js`): the week's body, rendered exactly as
+  the built-in design renders it, goes at `{{{NEWSLETTER_BODY}}}` (required,
+  exactly once); `{{{NEWSLETTER_SUBJECT}}}`, `{{{NEWSLETTER_PREHEADER}}}` and
+  `{{{NEWSLETTER_PERIOD}}}` are filled with escaped text; `{{{UNSUBSCRIBE_URL}}}`
+  is rewritten to `{{{RESEND_UNSUBSCRIBE_URL}}}`; and the postal address and
+  unsubscribe link are appended when the template lacks them. The template is
+  fetched with a five-minute in-process cache per id, dropped when a different
+  template is saved. The preview and the test send use the template, or the
+  built-in design with a visible `templateProblem` warning when it cannot be
+  fetched or used; approval is refused with `409 TEMPLATE_UNUSABLE` before the
+  issue is claimed, so a newsletter never goes out in a design other than the
+  one chosen. The plain-text part is unchanged, and the built-in HTML is pinned
+  byte-for-byte by `render.test.js`.
+
 - **Choose where the newsletter signup box appears, and its wording (#557).**
   Newsletter settings on the Mailing List Settings tab gain a Signup form
   block: show the box in the footer on every page, at the end of blog posts,

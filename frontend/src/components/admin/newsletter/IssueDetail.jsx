@@ -245,15 +245,35 @@ function ActionBar({
   );
 }
 
+/**
+ * A template is chosen in Newsletter settings but this preview is the built-in
+ * design, because the server could not fetch or use it. Approval is refused
+ * until it can, so the warning says why here, before anyone tries.
+ */
+export function TemplateProblem({ problem }) {
+  if (!problem) return null;
+  const reason = typeof problem.message === 'string' ? problem.message.trim() : '';
+  return (
+    <p role="status" className="text-sm text-amber-700 dark:text-amber-400">
+      Your Resend template is not used in this preview, so it shows the built-in design
+      {reason ? `: ${reason}` : '.'} Approval is refused until the template can be used, or the
+      built-in design is chosen in Newsletter settings.
+    </p>
+  );
+}
+
 function Preview({ detail }) {
   return (
-    <iframe
-      title="Email preview"
-      sandbox=""
-      srcDoc={detail.preview.html}
-      className="w-full rounded-lg border bg-white"
-      style={{ height: 720 }}
-    />
+    <div className="space-y-2">
+      <TemplateProblem problem={detail.templateProblem} />
+      <iframe
+        title="Email preview"
+        sandbox=""
+        srcDoc={detail.preview.html}
+        className="w-full rounded-lg border bg-white"
+        style={{ height: 720 }}
+      />
+    </div>
   );
 }
 

@@ -42,6 +42,7 @@ import {
 } from './listen-and-learn/speech-settings.js';
 import { GEMINI_DEFAULT_MODEL } from './listen-and-learn/speech/gemini.js';
 import {
+  BUILT_IN_TEMPLATE_ID,
   DEFAULT_NEWSLETTER_SETTINGS,
   INTRO_TONE_IDS,
   MAX_POSTAL_ADDRESS_LENGTH,
@@ -54,12 +55,14 @@ import {
   NEWSLETTER_SETTINGS_CONFIG_ID,
   SEND_DAYS,
   SIGNUP_PLACEMENTS,
+  TEMPLATE_ID_PATTERN,
   newsletterContentOptions,
   newsletterSettingsDefaults,
 } from './newsletter/settings.js';
 import { MAX_ITEMS_PER_SECTION, SECTIONS } from './newsletter/sections.js';
 import { isValidSendTime, isValidTimeZone } from './newsletter/schedule.js';
 import { normalizeEmail } from './newsletter/email.js';
+import { sharedTemplateCache } from './newsletter/template-source.js';
 
 const json = (status, body) => ({
   status,
@@ -460,8 +463,23 @@ function normalizeNewsletterSignup(body, value) {
 }
 
 /**
+ * The template field (#557): a Resend template id, or '' for the built-in
+ * design. Trimmed, because it is pasted and read back from Resend's API.
+ */
+function normalizeNewsletterTemplate(body, value) {
+  if (body.templateId === undefined) return;
+  if (typeof body.templateId !== 'string') fail('templateId must be a string');
+  const templateId = body.templateId.trim();
+  if (templateId !== BUILT_IN_TEMPLATE_ID && !TEMPLATE_ID_PATTERN.test(templateId)) {
+    fail('templateId must be empty (the built-in design) or a Resend template id');
+  }
+  value.templateId = templateId;
+}
+
+/**
  * `{ postalAddress, replyTo, sendDay, sendTime, timeZone, sections, windowDays,
- * introEnabled, introTone, signupPlacement, signupHeading, signupBlurb }` →
+ * introEnabled, introTone, signupPlacement, signupHeading, signupBlurb,
+ * templateId }` →
  * the document the newsletter approval reads
  * (lib/newsletter/admin-handlers.js) and the issue builder reads for content
  * (lib/newsletter/issue.js). Blank address and reply-to are ALLOWED here, so
@@ -476,6 +494,7 @@ export function normalizeNewsletterSettings(body) {
   const value = newsletterSettingsDefaults();
   normalizeNewsletterContent(body, value);
   normalizeNewsletterSignup(body, value);
+  normalizeNewsletterTemplate(body, value);
 
   if (body.postalAddress !== undefined) {
     if (typeof body.postalAddress !== 'string') fail('postalAddress must be a string');
@@ -634,12 +653,14 @@ export function presentSetting(name, doc) {
  * @param {{ readDoc: Function, upsertDoc: Function }} deps.store
  * @param {() => Date} [deps.now]
  * @param {() => string} [deps.uuid]
+ * @param {{ select: Function }} [deps.templateCache] the newsletter template cache (template-source.js)
  */
 export function createPlatformSettingsHandlers({
   guard,
   store,
   now = () => new Date(),
   uuid = () => crypto.randomUUID(),
+  templateCache = sharedTemplateCache,
 }) {
   const resolve = (request) => resolveSetting(request.params?.setting);
 
@@ -691,6 +712,8 @@ export function createPlatformSettingsHandlers({
           signupPlacement: value.signupPlacement,
           signupHeadingCustom: value.signupHeading !== DEFAULT_NEWSLETTER_SETTINGS.signupHeading,
           signupBlurbCustom: value.signupBlurb !== DEFAULT_NEWSLETTER_SETTINGS.signupBlurb,
+          // An id, not content: which design the email uses.
+          templateId: value.templateId || null,
         };
       default:
         return {};
@@ -755,6 +778,9 @@ export function createPlatformSettingsHandlers({
           updatedAt,
           updatedBy: auth.user?.oid || auth.user?.sub || null,
         });
+        // A different newsletter template takes effect on the next preview,
+        // not when the cached copy of the previous one expires.
+        if (name === 'newsletter-settings') templateCache.select(value.templateId);
         // Best effort, like forge-stats bumps: the setting is already saved,
         // so a failed audit row must not turn into a 500 that makes the page
         // report a failure (and the owner retry) for a write that took.

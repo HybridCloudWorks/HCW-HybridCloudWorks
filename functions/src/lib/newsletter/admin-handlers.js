@@ -59,6 +59,16 @@
  * Resend's single-email endpoint. It never reads an address from the request
  * and never touches a segment or a broadcast, which is why it works while
  * NEWSLETTER_SENDING_ENABLED is off.
+ *
+ * ## The design is the one that was previewed
+ *
+ * With a Resend template chosen in Newsletter settings (#557), the preview, the
+ * test send and the broadcast are all laid out in it (template-layout.js),
+ * from the same cached copy (template-source.js). When the template cannot be
+ * fetched or used, the preview and the test send fall back to the built-in
+ * design and say why in `templateProblem`. Approval does NOT fall back: it is
+ * refused with 409 TEMPLATE_UNUSABLE before the claim, so an issue is never
+ * broadcast in a design other than the one the owner chose and previewed.
  */
 import { readKey } from '../ai/router.js';
 import { ADMIN_CONFIG_PARTITION } from '../cosmos-client.js';
@@ -69,6 +79,8 @@ import { describeAiError, draftIntro, suggestSubjects } from './issue.js';
 import { renderIssue } from './render.js';
 import { resolveSendTime } from './schedule.js';
 import { NEWSLETTER_SETTINGS_CONFIG_ID, missingForSending } from './settings.js';
+import { renderIssueInTemplate } from './template-layout.js';
+import { loadTemplateHtml, sharedTemplateCache } from './template-source.js';
 
 export const MAX_CUSTOM_NOTE_LENGTH = 2000;
 export const MAX_SUBJECT_LENGTH = 120;
@@ -215,6 +227,7 @@ function applySectionEdit(storedSections, submitted) {
  * @param {typeof fetch} [deps.fetch]
  * @param {() => Date} [deps.now]
  * @param {{ generateDraft: Function } | null} [deps.drafter] the builder's drafter; null refuses the AI routes
+ * @param {ReturnType<import('./template-source.js').createTemplateCache>} [deps.templateCache]
  */
 export function createNewsletterAdminHandlers({
   guard,
@@ -223,6 +236,7 @@ export function createNewsletterAdminHandlers({
   fetch: fetchImpl = globalThis.fetch,
   now = () => new Date(),
   drafter = null,
+  templateCache = sharedTemplateCache,
 }) {
   async function readSettings() {
     const doc = await store.readDoc('admin_config', NEWSLETTER_SETTINGS_CONFIG_ID, ADMIN_CONFIG_PARTITION);
@@ -266,10 +280,38 @@ export function createNewsletterAdminHandlers({
   // "true" is off, so a missing or mistyped setting cannot send.
   const sendingEnabled = () => env?.NEWSLETTER_SENDING_ENABLED === 'true';
 
-  function present(issue, settings) {
-    const preview = renderIssue(issue, {
-      postalAddress: settings.postalAddress || ADDRESS_NOT_SET,
+  /**
+   * The issue rendered in the design chosen in settings: the built-in one when
+   * no template is chosen, else the template, or the built-in one plus
+   * `templateProblem` when the template cannot be fetched or used. Never
+   * throws for a template problem; the log line carries only its fixed code.
+   */
+  async function renderChosenDesign(issue, renderSettings, settings, context) {
+    if (!settings.templateId) return { ...renderIssue(issue, renderSettings), templateProblem: null };
+    const loaded = await loadTemplateHtml({
+      templateId: settings.templateId,
+      apiKey: readKey(env, 'RESEND_API_KEY'),
+      fetch: fetchImpl,
+      cache: templateCache,
     });
+    const rendered = loaded.problem
+      ? { ...renderIssue(issue, renderSettings), templateProblem: loaded.problem }
+      : renderIssueInTemplate(issue, renderSettings, loaded.html);
+    if (rendered.templateProblem) {
+      context?.warn?.(
+        `newsletter template not used [invocation ${context?.invocationId ?? 'unknown'}]: ${rendered.templateProblem.code}`
+      );
+    }
+    return rendered;
+  }
+
+  async function present(issue, settings, context) {
+    const { templateProblem, ...preview } = await renderChosenDesign(
+      issue,
+      { postalAddress: settings.postalAddress || ADDRESS_NOT_SET },
+      settings,
+      context
+    );
     const missing = missingForSending(settings);
     let sendPlan = null;
     try {
@@ -296,6 +338,8 @@ export function createNewsletterAdminHandlers({
       missingSettings: missing,
       sendingEnabled: sendingEnabled(),
       sendPlan,
+      // Set when a template is chosen but the preview is the built-in design.
+      templateProblem,
     };
   }
 
@@ -340,7 +384,7 @@ export function createNewsletterAdminHandlers({
       try {
         const issue = await readIssue(request);
         if (!issue) return notFound();
-        return json(200, present(issue, await readSettings()));
+        return json(200, await present(issue, await readSettings(), context));
       } catch (error) {
         context.error?.(`getNewsletter failed: ${error?.message ?? error}`);
         return json(500, { ok: false, error: 'Failed to read the newsletter issue' });
@@ -407,7 +451,7 @@ export function createNewsletterAdminHandlers({
           throw error;
         }
         // The stored document, so the response carries the NEW etag.
-        return json(200, present(written ?? updated, await readSettings()));
+        return json(200, await present(written ?? updated, await readSettings(), context));
       } catch (error) {
         context.error?.(`updateNewsletter failed: ${error?.message ?? error}`);
         return json(500, { ok: false, error: 'Failed to save the newsletter issue' });
@@ -462,7 +506,7 @@ export function createNewsletterAdminHandlers({
           if (error?.code === 412) return changedElsewhere();
           throw error;
         }
-        return json(200, present(written ?? updated, settings));
+        return json(200, await present(written ?? updated, settings, context));
       } catch (error) {
         context.error?.(`regenerateNewsletterIntro failed ${ref}: ${errorMeta(error)}`);
         return json(500, { ok: false, error: 'Failed to regenerate the intro' });
@@ -561,9 +605,11 @@ export function createNewsletterAdminHandlers({
       if (limited) return limited;
       if (staleView(body, issue)) return changedElsewhere();
 
+      // In the chosen design; an unusable template falls back to the built-in
+      // one for a test, and the answer says so.
       let rendered;
       try {
-        rendered = renderIssue(issue, { postalAddress: settings.postalAddress, testSend: true });
+        rendered = await renderChosenDesign(issue, { postalAddress: settings.postalAddress, testSend: true }, settings, context);
       } catch (error) {
         context.error?.(`testNewsletter render failed ${ref}: ${errorMeta(error)}`);
         return json(500, { ok: false, error: 'Failed to render the newsletter issue' });
@@ -594,10 +640,20 @@ export function createNewsletterAdminHandlers({
       const etag = claimed?._etag ?? null;
       if (!sent.ok) {
         context.error?.(`testNewsletter not sent ${ref}: ${describeForLog(sent)}`);
-        return json(502, { ok: false, etag, error: `Resend did not accept the test email: ${describeForOwner(sent)}` });
+        return json(502, {
+          ok: false,
+          etag,
+          ...(rendered.templateProblem ? { templateProblem: rendered.templateProblem } : {}),
+          error: `Resend did not accept the test email: ${describeForOwner(sent)}`,
+        });
       }
       context.log?.(`testNewsletter sent ${ref}`);
-      return json(200, { ok: true, sentTo, etag });
+      return json(200, {
+        ok: true,
+        sentTo,
+        etag,
+        ...(rendered.templateProblem ? { templateProblem: rendered.templateProblem } : {}),
+      });
     },
 
     async approve(request, context) {
@@ -664,10 +720,22 @@ export function createNewsletterAdminHandlers({
       }
       let rendered;
       try {
-        rendered = renderIssue(issue, { postalAddress: settings.postalAddress });
+        rendered = await renderChosenDesign(issue, { postalAddress: settings.postalAddress }, settings, context);
       } catch (error) {
         context.error?.(`approveNewsletter render failed ${ref}: ${errorMeta(error)}`);
         return json(500, { ok: false, error: 'Failed to render the newsletter issue' });
+      }
+      // The chosen template could not be fetched or used. The preview showed
+      // the built-in design with a warning; sending that instead of the design
+      // the owner chose is refused, before anything is claimed.
+      if (rendered.templateProblem) {
+        context.error?.(`approveNewsletter template unusable ${ref}: ${rendered.templateProblem.code}`);
+        return json(409, {
+          ok: false,
+          code: 'TEMPLATE_UNUSABLE',
+          templateProblem: rendered.templateProblem,
+          error: `The template chosen in Newsletter settings cannot be used: ${rendered.templateProblem.message} Fix it in Resend or choose the built-in design, check the preview, then approve.`,
+        });
       }
 
       const approvedAt = now().toISOString();
@@ -786,7 +854,7 @@ export function createNewsletterAdminHandlers({
           context.error?.(`approveNewsletter re-read failed ${ref}: ${errorMeta(readError)}`);
         }
         return json(200, {
-          ...present(latest, settings),
+          ...(await present(latest, settings, context)),
           warning: `Resend accepted broadcast ${created.data.id}, but the site could not record it. Do not approve again.`,
         });
       }
@@ -805,7 +873,7 @@ export function createNewsletterAdminHandlers({
         });
       }
       context.log?.(`approveNewsletter ${done.status} ${ref}`);
-      return json(200, present(outcome.doc, settings));
+      return json(200, await present(outcome.doc, settings, context));
     },
 
     async save(request, context) {
@@ -821,7 +889,7 @@ export function createNewsletterAdminHandlers({
         }
         if (staleView(body, issue)) return changedElsewhere();
         // Already saved: nothing to write, and saying so is not an error.
-        if (issue.savedAt) return json(200, present(issue, await readSettings()));
+        if (issue.savedAt) return json(200, await present(issue, await readSettings(), context));
         const savedAt = now().toISOString();
         const saved = {
           ...issue,
@@ -836,7 +904,7 @@ export function createNewsletterAdminHandlers({
           if (error?.code === 412) return changedElsewhere();
           throw error;
         }
-        return json(200, present(written ?? saved, await readSettings()));
+        return json(200, await present(written ?? saved, await readSettings(), context));
       } catch (error) {
         context.error?.(`saveNewsletter failed: ${error?.message ?? error}`);
         return json(500, { ok: false, error: 'Failed to save the issue to Drafts' });
@@ -902,7 +970,7 @@ export function createNewsletterAdminHandlers({
           if (error?.code === 412) return changedElsewhere();
           throw error;
         }
-        return json(200, present(written ?? rejected, await readSettings()));
+        return json(200, await present(written ?? rejected, await readSettings(), context));
       } catch (error) {
         context.error?.(`rejectNewsletter failed: ${error?.message ?? error}`);
         return json(500, { ok: false, error: 'Failed to reject the newsletter issue' });

@@ -7,6 +7,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { createNewsletterAdminHandlers } from './admin-handlers.js';
 import { NEWSLETTER_FROM } from './handlers.js';
 import { INTRO_INSTRUCTION, introInstruction } from './issue.js';
+import { createTemplateCache } from './template-source.js';
 
 const API_KEY = 'not-a-real-resend-key-EXAMPLE-VALUE-FOR-TESTS';
 
@@ -73,12 +74,22 @@ function makeStore({ issue = draftIssue(), settings = completeSettings } = {}) {
   };
 }
 
-function makeResend({ failBroadcast = false, noAnswer = false, onBroadcast, failEmail = false } = {}) {
+/**
+ * `templates` answers GET /templates/{id}: `{ [id]: [status, body] | Error }`,
+ * or a function of the id. Unlisted ids are 404.
+ */
+function makeResend({ failBroadcast = false, noAnswer = false, onBroadcast, failEmail = false, templates = {} } = {}) {
   const broadcasts = [];
   const emails = [];
   const reply = (status, data) => ({ ok: status < 300, status, text: async () => JSON.stringify(data) });
   const fetch = vi.fn(async (url, init = {}) => {
     const { pathname } = new URL(url);
+    if (pathname.startsWith('/templates/')) {
+      const id = decodeURIComponent(pathname.slice('/templates/'.length));
+      const answer = typeof templates === 'function' ? templates(id) : templates[id];
+      if (answer instanceof Error) throw answer;
+      return answer ? reply(...answer) : reply(404, { name: 'not_found', message: `Template ${id} not found` });
+    }
     if (pathname === '/segments') {
       return reply(200, { object: 'list', has_more: false, data: [{ id: 'seg-news', name: 'Newsletter' }] });
     }
@@ -131,6 +142,8 @@ function build({
   env = { RESEND_API_KEY: API_KEY, NEWSLETTER_SENDING_ENABLED: 'true' },
   now = NOW,
   drafter = null,
+  // Fresh per build, so no test sees another's cached template.
+  templateCache = createTemplateCache(),
 } = {}) {
   return {
     handlers: createNewsletterAdminHandlers({
@@ -140,6 +153,7 @@ function build({
       fetch: resend.fetch,
       now: () => now,
       drafter,
+      templateCache,
     }),
     store,
     resend,
@@ -973,5 +987,207 @@ describe('test send', () => {
     expect(logged).toContain('inv-6');
     expect(logged).not.toContain('owner@example.com');
     expect(logged).not.toContain(ID);
+  });
+});
+
+describe('Resend template as the design (#557)', () => {
+  const TEMPLATE_ID = 'tpl-weekly-1';
+  const withTemplate = { ...completeSettings, templateId: TEMPLATE_ID };
+  const BRAND = '<header class="brand">HCW brand header</header>';
+  const templateHtml = (inner = '{{{NEWSLETTER_BODY}}}') =>
+    `<!doctype html><html><body>${BRAND}<h1>{{{NEWSLETTER_SUBJECT}}}</h1>${inner}<footer><a href="{{{RESEND_UNSUBSCRIBE_URL}}}">Unsubscribe</a></footer></body></html>`;
+  const published = (html = templateHtml()) => [
+    200,
+    { object: 'template', id: TEMPLATE_ID, name: 'Weekly', status: 'published', html },
+  ];
+  const templatePaths = (resend) =>
+    resend.fetch.mock.calls.map(([url]) => new URL(url).pathname).filter((path) => path.startsWith('/templates/'));
+  const allLogs = (ctx) => [...ctx.log.mock.calls, ...ctx.warn.mock.calls, ...ctx.error.mock.calls].flat().join('\n');
+
+  describe('preview', () => {
+    it('renders the issue inside the chosen template', async () => {
+      const resend = makeResend({ templates: { [TEMPLATE_ID]: published() } });
+      const { handlers } = build({ store: makeStore({ settings: withTemplate }), resend });
+      const body = bodyOf(await handlers.get(request(), context()));
+      expect(body.templateProblem).toBeNull();
+      expect(body.preview.html).toContain(BRAND);
+      expect(body.preview.html).toContain('<h1>Landing zones</h1>');
+      expect(body.preview.html).toContain('https://hybridcloudworks.com/a');
+      expect(body.preview.html).toContain('PO Box 1, Austin, TX');
+      expect(body.preview.html).not.toContain('HybridCloudWorks Weekly ·');
+    });
+
+    it('shows the built-in design with templateProblem when the template cannot be fetched, and logs only the code', async () => {
+      const resend = makeResend({
+        templates: { [TEMPLATE_ID]: [500, { name: 'internal_server_error', message: 'Template tpl-weekly-1 exploded' }] },
+      });
+      const { handlers } = build({ store: makeStore({ settings: withTemplate }), resend });
+      const ctx = { ...context(), invocationId: 'inv-t1' };
+      const res = await handlers.get(request(), ctx);
+      expect(res.status).toBe(200);
+      const body = bodyOf(res);
+      expect(body.templateProblem).toMatchObject({ code: 'TEMPLATE_FETCH_FAILED' });
+      expect(body.templateProblem.message).not.toContain('exploded');
+      expect(body.preview.html).toContain('HybridCloudWorks Weekly ·');
+      const logged = allLogs(ctx);
+      expect(logged).toContain('TEMPLATE_FETCH_FAILED');
+      expect(logged).toContain('inv-t1');
+      for (const secret of [TEMPLATE_ID, ID, 'exploded', 'Landing zones', 'PO Box']) {
+        expect(logged, secret).not.toContain(secret);
+      }
+    });
+
+    it('names each fallback: not published, not found, unusable, no Resend key', async () => {
+      const cases = [
+        [{ [TEMPLATE_ID]: [200, { id: TEMPLATE_ID, status: 'draft', html: templateHtml() }] }, undefined, 'TEMPLATE_NOT_PUBLISHED'],
+        [{}, undefined, 'TEMPLATE_NOT_FOUND'],
+        [{ [TEMPLATE_ID]: published('<html><body>no marker</body></html>') }, undefined, 'TEMPLATE_MARKER_MISSING'],
+        [{ [TEMPLATE_ID]: published() }, {}, 'RESEND_NOT_CONFIGURED'],
+      ];
+      for (const [templates, env, code] of cases) {
+        const resend = makeResend({ templates });
+        const { handlers } = build({ store: makeStore({ settings: withTemplate }), resend, ...(env ? { env } : {}) });
+        const body = bodyOf(await handlers.get(request(), context()));
+        expect(body.templateProblem?.code, code).toBe(code);
+        expect(body.preview.html, code).toContain('HybridCloudWorks Weekly ·');
+      }
+    });
+
+    it('does not ask Resend at all with the built-in design chosen', async () => {
+      const { handlers, resend } = build();
+      const body = bodyOf(await handlers.get(request(), context()));
+      expect(body.templateProblem).toBeNull();
+      expect(resend.fetch).not.toHaveBeenCalled();
+    });
+
+    it('fetches a template once within five minutes, again after, and again when another template is selected', async () => {
+      let clock = 0;
+      const templateCache = createTemplateCache({ now: () => clock });
+      const resend = makeResend({ templates: { [TEMPLATE_ID]: published(), 'tpl-other': published() } });
+      const store = makeStore({ settings: withTemplate });
+      const { handlers } = build({ store, resend, templateCache });
+
+      await handlers.get(request(), context());
+      await handlers.get(request(), context());
+      expect(templatePaths(resend)).toEqual([`/templates/${TEMPLATE_ID}`]);
+
+      clock += 5 * 60 * 1000;
+      await handlers.get(request(), context());
+      expect(templatePaths(resend)).toHaveLength(2);
+
+      // Settings saved with another template, then back: each change refetches.
+      store.docs.set('admin_config/newsletter_settings', { ...withTemplate, templateId: 'tpl-other' });
+      await handlers.get(request(), context());
+      store.docs.set('admin_config/newsletter_settings', withTemplate);
+      await handlers.get(request(), context());
+      expect(templatePaths(resend)).toEqual([
+        `/templates/${TEMPLATE_ID}`,
+        `/templates/${TEMPLATE_ID}`,
+        '/templates/tpl-other',
+        `/templates/${TEMPLATE_ID}`,
+      ]);
+    });
+
+    it('never caches a failure, so publishing the template is picked up on the next read', async () => {
+      let answer = [200, { id: TEMPLATE_ID, status: 'draft', html: templateHtml() }];
+      const resend = makeResend({ templates: () => answer });
+      const { handlers } = build({ store: makeStore({ settings: withTemplate }), resend });
+      expect(bodyOf(await handlers.get(request(), context())).templateProblem.code).toBe('TEMPLATE_NOT_PUBLISHED');
+      answer = published();
+      expect(bodyOf(await handlers.get(request(), context())).templateProblem).toBeNull();
+    });
+  });
+
+  describe('test send', () => {
+    it('sends the test in the template, with the unsubscribe link inert', async () => {
+      const resend = makeResend({ templates: { [TEMPLATE_ID]: published() } });
+      const { handlers } = build({ role: 'publisher', store: makeStore({ settings: withTemplate }), resend });
+      const res = await handlers.test(request({ body: { etag: 'e1' } }), context());
+      expect(res.status).toBe(200);
+      expect(bodyOf(res).templateProblem).toBeUndefined();
+      const [email] = resend.emails;
+      expect(email.html).toContain(BRAND);
+      expect(email.html).not.toContain('RESEND_UNSUBSCRIBE_URL');
+      expect(email.html).toContain('<a href="#">Unsubscribe</a>');
+      expect(email.html).toContain('unsubscribe link is inactive');
+      expect(email.text).toContain('unsubscribe link is inactive');
+    });
+
+    it('sends the built-in design when the template is unusable, and says so', async () => {
+      const resend = makeResend({
+        templates: { [TEMPLATE_ID]: published(templateHtml('{{{NEWSLETTER_BODY}}}{{{NEWSLETTER_BODY}}}')) },
+      });
+      const { handlers } = build({ role: 'publisher', store: makeStore({ settings: withTemplate }), resend });
+      const res = await handlers.test(request({ body: { etag: 'e1' } }), context());
+      expect(res.status).toBe(200);
+      expect(bodyOf(res).templateProblem).toMatchObject({ code: 'TEMPLATE_MARKER_REPEATED' });
+      expect(resend.emails[0].html).toContain('HybridCloudWorks Weekly ·');
+      expect(resend.emails[0].html).not.toContain(BRAND);
+    });
+  });
+
+  describe('approve', () => {
+    it('refuses with 409 TEMPLATE_UNUSABLE before any claim or broadcast when the template is unusable', async () => {
+      const cases = [
+        makeResend({ templates: { [TEMPLATE_ID]: published('<html><body>no marker</body></html>') } }),
+        makeResend({ templates: { [TEMPLATE_ID]: [503, { name: 'service_unavailable' }] } }),
+        makeResend({ templates: { [TEMPLATE_ID]: new Error('socket hang up') } }),
+        makeResend({ templates: {} }),
+      ];
+      for (const resend of cases) {
+        const store = makeStore({ settings: withTemplate });
+        const { handlers } = build({ role: 'publisher', store, resend });
+        const ctx = { ...context(), invocationId: 'inv-t2' };
+        const res = await handlers.approve(request(approveBody), ctx);
+        expect(res.status).toBe(409);
+        const body = bodyOf(res);
+        expect(body.code).toBe('TEMPLATE_UNUSABLE');
+        expect(body.templateProblem.code).toMatch(/^TEMPLATE_/);
+        expect(body.error).toContain('cannot be used');
+        expect(store.replaceDocIfMatch).not.toHaveBeenCalled();
+        expect(store.docs.get(`newsletters/${ID}`)).toMatchObject({ status: 'draft', _etag: 'e1' });
+        expect(resend.broadcasts).toHaveLength(0);
+        const paths = resend.fetch.mock.calls.map(([url]) => new URL(url).pathname);
+        expect(paths).not.toContain('/broadcasts');
+        expect(paths).not.toContain('/segments');
+        const logged = allLogs(ctx);
+        expect(logged).toContain('inv-t2');
+        for (const secret of [TEMPLATE_ID, ID, 'Landing zones', 'PO Box', 'socket hang up']) {
+          expect(logged, secret).not.toContain(secret);
+        }
+      }
+    });
+
+    it('still refuses without a Resend key before looking for a template', async () => {
+      const resend = makeResend({ templates: { [TEMPLATE_ID]: published() } });
+      const { handlers } = build({
+        role: 'publisher',
+        store: makeStore({ settings: withTemplate }),
+        resend,
+        env: { NEWSLETTER_SENDING_ENABLED: 'true' },
+      });
+      expect((await handlers.approve(request(approveBody), context())).status).toBe(503);
+      expect(resend.fetch).not.toHaveBeenCalled();
+    });
+
+    it('broadcasts the merged html, which carries the postal address and the unsubscribe placeholder', async () => {
+      const resend = makeResend({ templates: { [TEMPLATE_ID]: published() } });
+      const store = makeStore({ settings: withTemplate });
+      const { handlers } = build({ role: 'publisher', store, resend });
+      const res = await handlers.approve(request(approveBody), context());
+      expect(res.status).toBe(200);
+      expect(resend.broadcasts).toHaveLength(1);
+      const [broadcast] = resend.broadcasts;
+      expect(broadcast.html).toContain(BRAND);
+      expect(broadcast.html).toContain('PO Box 1, Austin, TX');
+      expect(broadcast.html).toContain('{{{RESEND_UNSUBSCRIBE_URL}}}');
+      expect(broadcast.html).toContain('https://hybridcloudworks.com/a');
+      expect(broadcast.html).not.toContain('{{{NEWSLETTER_BODY}}}');
+      expect(broadcast.text).toContain('Unsubscribe: {{{RESEND_UNSUBSCRIBE_URL}}}');
+      expect(store.docs.get(`newsletters/${ID}`).status).toBe('scheduled');
+      // The answer's preview is the same design, from the cached copy.
+      expect(bodyOf(res).preview.html).toBe(broadcast.html);
+      expect(templatePaths(resend)).toHaveLength(1);
+    });
   });
 });

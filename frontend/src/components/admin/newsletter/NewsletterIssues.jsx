@@ -203,7 +203,11 @@ export default function NewsletterIssues({ view = 'review', settingsVersion = 0 
         );
       }
       setTestReadyAt((current) => ({ ...current, [id]: Date.now() + TEST_COOLDOWN_MS }));
-      setNotice({ ok: true, message: `Test sent to ${res?.sentTo}.` });
+      // An unusable template sends the test in the built-in design; say so.
+      const fallback = res?.templateProblem?.message
+        ? ` It used the built-in design because your template could not be used: ${res.templateProblem.message}`
+        : '';
+      setNotice({ ok: true, message: `Test sent to ${res?.sentTo}.${fallback}` });
       // The list row carries the etag the red X deletes with.
       await loadList();
     });
