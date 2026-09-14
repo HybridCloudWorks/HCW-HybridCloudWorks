@@ -82,8 +82,14 @@ test_patterns = [
   "**/spec_*.*",
 ]
 
+# Monitor, not comment (owner, 2026-09-14). Code smells stay on the Qlty
+# dashboard and feed the Health Hub's Code and Security tab (#569), but they
+# do not post pull request comments: the main ruleset requires every review
+# conversation to be resolved, so an inline "many returns" note on idiomatic
+# early-return React hooks blocked merges without being a defect. Security
+# and lint findings from the plugins below are unaffected.
 [smells]
-mode = "comment"
+mode = "monitor"
 
 [[source]]
 name = "default"
