@@ -1,5 +1,8 @@
 # HybridCloudWorks Website
 
+[![Maintainability](https://qlty.sh/gh/HybridCloudWorks/projects/HCW-HybridCloudWorks/maintainability.svg)](https://qlty.sh/gh/HybridCloudWorks/projects/HCW-HybridCloudWorks)
+[![Code Coverage](https://qlty.sh/gh/HybridCloudWorks/projects/HCW-HybridCloudWorks/coverage.svg)](https://qlty.sh/gh/HybridCloudWorks/projects/HCW-HybridCloudWorks)
+
 HybridCloudWorks is a cloud engineering website and operations portal covering
 Azure, AWS, Google Cloud, GitHub, Terraform, FinOps, VMware, and Ansible. It
 publishes technical articles, architecture guidance, frameworks, certification
