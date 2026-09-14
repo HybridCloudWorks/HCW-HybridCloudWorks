@@ -19,7 +19,7 @@
  * own sentence, which could echo the template.
  */
 import { createResendClient } from './resend-client.js';
-import { MAX_TEMPLATE_BYTES } from './template-layout.js';
+import { templateUnusableReason } from './template-layout.js';
 
 export const TEMPLATE_CACHE_TTL_MS = 5 * 60 * 1000;
 /** A bound on memory; only one template is ever selected at a time. */
@@ -103,7 +103,10 @@ export async function loadTemplateHtml({ templateId, apiKey, fetch: fetchImpl, c
   if (typeof html !== 'string' || !html.trim()) {
     return problem('TEMPLATE_NOT_HTML', 'The chosen template has no HTML.');
   }
-  // An oversized one is refused by the layout; it is not worth holding in memory.
-  if (Buffer.byteLength(html, 'utf8') <= MAX_TEMPLATE_BYTES) cache.set(templateId, html);
+  // Only a template the layout can use is held. An unusable one (no body
+  // marker, the marker twice, oversized) is returned so the caller can say why,
+  // but not cached: the owner's fix in Resend must show on the next request,
+  // not five minutes later.
+  if (!templateUnusableReason(html)) cache.set(templateId, html);
   return { html };
 }

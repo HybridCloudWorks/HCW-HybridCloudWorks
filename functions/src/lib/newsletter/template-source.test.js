@@ -53,6 +53,18 @@ describe('loadTemplateHtml', () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
+  it('does not cache a template the layout cannot use, so a fix in Resend shows at once', async () => {
+    let html = '<p>no marker yet</p>';
+    const fetch = vi.fn(async () => reply(200, { id: 'tpl', status: 'published', html }));
+    const cache = createTemplateCache();
+    expect(await loadTemplateHtml({ templateId: 'tpl', apiKey: 'k', fetch, cache })).toEqual({ html });
+    expect(cache.size).toBe(0);
+    html = '<p>{{{NEWSLETTER_BODY}}}</p>';
+    expect(await loadTemplateHtml({ templateId: 'tpl', apiKey: 'k', fetch, cache })).toEqual({ html });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(cache.size).toBe(1);
+  });
+
   it('answers a problem, never a throw, and caches none of them', async () => {
     const cache = createTemplateCache();
     const cases = [
