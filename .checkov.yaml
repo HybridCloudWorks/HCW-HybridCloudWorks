@@ -1,7 +1,10 @@
-# checkov configuration. Every suppression here, and every inline
-# `#checkov:skip=` in infra/ and .github/workflows/, is triaged in
-# docs/security/scanner-triage.md#checkov. Prefer an inline skip on the one
-# resource; this file is for what cannot carry a comment.
+# checkov configuration. Every suppression here, and every inline skip, is
+# triaged in docs/security/scanner-triage.md#checkov. Prefer an inline skip on
+# the one resource; this file is for what cannot carry a comment.
+#
+# Inline skips have two spellings, and checkov accepts both: Terraform in
+# infra/ writes `#checkov:skip=`, and workflows in .github/workflows/ write
+# `# checkov:skip=`, with the space YAML comment style expects.
 
 skip-check:
   # CKV_SECRET_6 is checkov's bare entropy heuristic. Its one finding is the

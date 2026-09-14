@@ -124,8 +124,9 @@ composite actions (no `action.yml` or `action.yaml`). Closes #562.
 
 ## checkov
 
-Inline suppressions are `#checkov:skip=RULE:reason` on the resource, or on the
-`workflow_dispatch:` key of the workflow. The one repository-wide skip is in
+Inline suppressions are `#checkov:skip=RULE:reason` on the Terraform resource,
+or `# checkov:skip=RULE:reason` (YAML comment spacing) on the
+`workflow_dispatch:` key of the workflow. Checkov accepts both spellings. The one repository-wide skip is in
 `.checkov.yaml`, with its reason.
 
 ### workflow_dispatch inputs, CKV_GHA_7 (6): accepted
