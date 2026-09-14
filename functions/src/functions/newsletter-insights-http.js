@@ -52,7 +52,7 @@ httpRoute('mailingListAudienceSummary', {
 
 httpRouteByMethod('mailingListContact', {
   authLevel: 'anonymous',
-  route: 'cms/mailing-list/audience/{email}',
+  route: 'cms/mailing-list/audience/{contactId}',
   handlers: {
     PATCH: (request, context) => insights().updateContact(request, context),
     DELETE: (request, context) => insights().deleteContact(request, context),

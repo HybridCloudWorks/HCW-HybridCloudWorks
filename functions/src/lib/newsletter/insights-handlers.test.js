@@ -100,8 +100,8 @@ const ROUTES = [
   { name: 'recipients', role: 'editor', req: () => request({ params: { broadcastId: BROADCAST }, query: { type: 'opened' } }) },
   { name: 'audience', role: 'editor', req: () => request() },
   { name: 'audienceSummary', role: 'editor', req: () => request() },
-  { name: 'updateContact', role: 'publisher', req: () => request({ params: { email: SUBSCRIBER }, body: { unsubscribed: true } }) },
-  { name: 'deleteContact', role: 'publisher', req: () => request({ params: { email: SUBSCRIBER } }) },
+  { name: 'updateContact', role: 'publisher', req: () => request({ params: { contactId: 'c1' }, body: { unsubscribed: true } }) },
+  { name: 'deleteContact', role: 'publisher', req: () => request({ params: { contactId: 'c1' } }) },
   { name: 'listDomains', role: 'editor', req: () => request() },
   { name: 'getDomain', role: 'editor', req: () => request({ params: { domainId: DOMAIN } }) },
   { name: 'createDomain', role: 'publisher', req: () => request({ body: { name: 'news.example.com' } }) },
@@ -164,11 +164,11 @@ describe('validation happens before any fetch', () => {
     ['recipients', request({ params: { broadcastId: BROADCAST }, query: { type: 'sent', after: 'a&b=c' } })],
     ['audience', request({ query: { search: 'x'.repeat(101) } })],
     ['audience', request({ query: { limit: '1.5' } })],
-    ['updateContact', request({ params: { email: 'not-an-address' }, body: { unsubscribed: true } })],
-    ['updateContact', request({ params: { email: SUBSCRIBER }, body: { unsubscribed: 'yes' } })],
-    ['updateContact', request({ params: { email: SUBSCRIBER }, body: { unsubscribed: true, email: 'x@y.z' } })],
-    ['updateContact', request({ params: { email: SUBSCRIBER } })],
-    ['deleteContact', request({ params: { email: 'a b@example.com' } })],
+    ['updateContact', request({ params: { contactId: 'jane.doe@example.com' }, body: { unsubscribed: true } })],
+    ['updateContact', request({ params: { contactId: 'c1' }, body: { unsubscribed: 'yes' } })],
+    ['updateContact', request({ params: { contactId: 'c1' }, body: { unsubscribed: true, email: 'x@y.z' } })],
+    ['updateContact', request({ params: { contactId: 'c1' } })],
+    ['deleteContact', request({ params: { contactId: 'jane.doe@example.com' } })],
     ['getDomain', request({ params: { domainId: '' } })],
     ['createDomain', request({ body: { name: 'https://evil.example.com/path' } })],
     ['createDomain', request({ body: { name: '-bad.example.com' } })],
@@ -204,11 +204,11 @@ describe('validation happens before any fetch', () => {
     expect(resend.calls[0].body).toEqual({ name: 'news.example.com', region: 'eu-west-1' });
   });
 
-  it('an email in the path is percent-encoded into its own segment', async () => {
-    const resend = makeResend({ 'PATCH /contacts/jane%2Btag%40example.com': () => reply(200, { id: 'c1' }) });
+  it('addresses a contact by its opaque id, so no email ever sits in a request path', async () => {
+    const resend = makeResend({ 'PATCH /contacts/c1': () => reply(200, { id: 'c1' }) });
     const { handlers } = build({ resend });
     const res = await handlers.updateContact(
-      request({ params: { email: 'jane+tag@example.com' }, body: { unsubscribed: false } }),
+      request({ params: { contactId: 'c1' }, body: { unsubscribed: false } }),
       context()
     );
     expect(res.status).toBe(200);
@@ -504,16 +504,16 @@ describe('audience', () => {
     expect((await handlers.audienceSummary(request(), context())).status).toBe(200);
   });
 
-  it('delete removes the contact by address, logs no address, and clears the summary cache', async () => {
+  it('delete removes the contact by id, logs no id or address, and clears the summary cache', async () => {
     const resend = makeResend({
       'GET /segments': segments,
       [`GET /segments/${SEGMENT}/contacts`]: () => contacts([]),
-      'DELETE /contacts/jane.doe%40example.com': () => reply(200, { deleted: true }),
+      'DELETE /contacts/c1': () => reply(200, { deleted: true }),
     });
     const { handlers } = build({ resend });
     await handlers.audienceSummary(request(), context());
     const ctx = context();
-    const res = await handlers.deleteContact(request({ params: { email: SUBSCRIBER } }), ctx);
+    const res = await handlers.deleteContact(request({ params: { contactId: 'c1' } }), ctx);
     expect(bodyOf(res)).toEqual({ ok: true });
     expect(loggedText(ctx)).not.toContain('jane');
     await handlers.audienceSummary(request(), context());

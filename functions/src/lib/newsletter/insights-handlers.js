@@ -7,8 +7,12 @@
  *   GET    /api/cms/mailing-list/broadcasts/{broadcastId}/recipients  editor
  *   GET    /api/cms/mailing-list/audience                             editor
  *   GET    /api/cms/mailing-list/audience/summary                     editor
- *   PATCH  /api/cms/mailing-list/audience/{email}                     publisher
- *   DELETE /api/cms/mailing-list/audience/{email}                     publisher
+ *   PATCH  /api/cms/mailing-list/audience/{contactId}                 publisher
+ *   DELETE /api/cms/mailing-list/audience/{contactId}                 publisher
+ *
+ * Contacts are addressed by Resend's opaque contact id, never by email: a path
+ * is recorded in request telemetry, and an address there would put a
+ * subscriber's email in the logs.
  *   GET    /api/cms/mailing-list/domains                              editor
  *   POST   /api/cms/mailing-list/domains                              publisher
  *   GET    /api/cms/mailing-list/domains/{domainId}                   editor
@@ -30,7 +34,7 @@
  *
  * ## Nothing the caller sends becomes a URL
  *
- * Path ids and cursors must match ID_PATTERN, emails pass normalizeEmail,
+ * Path ids (contacts included) and cursors must match ID_PATTERN,
  * dates must be ISO, enums are checked against their lists and limits are
  * 1-100 — all before a key is read into a request. The client then
  * percent-encodes each value into a fixed template.
@@ -46,7 +50,6 @@
  * Resend's messages can echo what was sent.
  */
 import { readKey } from '../ai/router.js';
-import { normalizeEmail } from './email.js';
 import { NEWSLETTER_SEGMENT_NAME } from './handlers.js';
 import { createResendClient } from './resend-client.js';
 
@@ -598,15 +601,15 @@ export function createNewsletterInsightsHandlers({
       const route = 'mailingListContactUpdate';
       const opened = await open(request, 'publisher');
       if (opened.response) return opened.response;
-      const email = normalizeEmail(request.params?.email);
-      if (!email) return badRequest('The address in the path is not a valid email address');
+      const contactId = String(request.params?.contactId ?? '');
+      if (!ID_PATTERN.test(contactId)) return badRequest('The path must carry a Resend contact id');
       const body = await request.json().catch(() => null);
       if (!isPlainObject(body)) return badRequest('Send a JSON body { unsubscribed: true | false }');
       const unknown = Object.keys(body).filter((key) => key !== 'unsubscribed');
       if (unknown.length) return badRequest(`Unknown field(s): ${unknown.join(', ')}`);
       if (typeof body.unsubscribed !== 'boolean') return badRequest('unsubscribed must be true or false');
       try {
-        const result = await opened.client.setContactUnsubscribed(email, body.unsubscribed);
+        const result = await opened.client.setContactUnsubscribed(contactId, body.unsubscribed);
         if (!result.ok) return refused(route, result, context);
         summaryCache = null;
         context.log?.(`${route} ok ${ref(context)}`);
@@ -621,10 +624,10 @@ export function createNewsletterInsightsHandlers({
       const route = 'mailingListContactDelete';
       const opened = await open(request, 'publisher');
       if (opened.response) return opened.response;
-      const email = normalizeEmail(request.params?.email);
-      if (!email) return badRequest('The address in the path is not a valid email address');
+      const contactId = String(request.params?.contactId ?? '');
+      if (!ID_PATTERN.test(contactId)) return badRequest('The path must carry a Resend contact id');
       try {
-        const result = await opened.client.deleteContact(email);
+        const result = await opened.client.deleteContact(contactId);
         if (!result.ok) return refused(route, result, context);
         summaryCache = null;
         context.log?.(`${route} ok ${ref(context)}`);
