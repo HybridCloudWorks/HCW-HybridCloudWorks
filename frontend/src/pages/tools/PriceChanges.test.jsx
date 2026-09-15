@@ -23,7 +23,8 @@ const jsonResponse = (body, status = 200) => ({
   json: async () => body,
 });
 
-const item = (provider, serviceId, label, from, to, deltaPct, unit = 'hour') => ({
+/** One row of a window, as the server shapes it; `unit` defaults to an hourly meter. */
+const item = ({ provider, serviceId, label, from, to, deltaPct, unit = 'hour' }) => ({
   serviceId,
   label,
   provider,
@@ -34,6 +35,17 @@ const item = (provider, serviceId, label, from, to, deltaPct, unit = 'hour') => 
   deltaPct,
 });
 
+const VM_UP = { provider: 'aws', serviceId: 'compute-vm', label: 'Virtual machine' };
+const STORAGE_DOWN = {
+  provider: 'gcp',
+  serviceId: 'storage-object',
+  label: 'Object storage',
+  from: 0.02,
+  to: 0.018,
+  deltaPct: -10,
+  unit: 'GB-month',
+};
+
 const CHANGES = {
   success: true,
   changes: {
@@ -43,18 +55,23 @@ const CHANGES = {
       '7d': {
         since: '2026-09-08T06:00:00.000Z',
         sampleDay: '2026-09-08',
-        items: [
-          item('aws', 'compute-vm', 'Virtual machine', 0.192, 0.201, 4.6875),
-          item('gcp', 'storage-object', 'Object storage', 0.02, 0.018, -10, 'GB-month'),
-        ],
+        items: [item({ ...VM_UP, from: 0.192, to: 0.201, deltaPct: 4.6875 }), item(STORAGE_DOWN)],
       },
       '30d': {
         since: '2026-08-16T06:00:00.000Z',
         sampleDay: '2026-08-16',
         items: [
-          item('aws', 'compute-vm', 'Virtual machine', 0.19, 0.201, 5.789),
-          item('gcp', 'storage-object', 'Object storage', 0.02, 0.018, -10, 'GB-month'),
-          item('azure', 'edge-cdn', 'CDN egress', 0.08, 0.081, 1.25, 'GB egress'),
+          item({ ...VM_UP, from: 0.19, to: 0.201, deltaPct: 5.789 }),
+          item(STORAGE_DOWN),
+          item({
+            provider: 'azure',
+            serviceId: 'edge-cdn',
+            label: 'CDN egress',
+            from: 0.08,
+            to: 0.081,
+            deltaPct: 1.25,
+            unit: 'GB egress',
+          }),
         ],
       },
     },

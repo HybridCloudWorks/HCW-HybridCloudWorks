@@ -178,16 +178,18 @@ describe('the pricing-scenario fence', () => {
     warmup.unmount();
 
     const html = renderToString(<Article text={ARTICLE} />);
-    // Tags and React's text-boundary comments stripped: the words on the page.
-    const text = html.replace(/<[^>]+>/g, '');
+    const container = document.createElement('div');
+    container.innerHTML = html;
+    // The words on the static page, read back through the DOM so React's
+    // text-boundary comments and the highlighter's spans do not split them.
+    const text = container.textContent;
     expect(text).toContain('Price a scenario: Three-tier web app');
     expect(text).toContain('Loading prices for this scenario…');
     expect(text).toContain('Open in the comparison tool');
     expect(text).not.toContain('Loading the scenario…');
     expect(text).toContain('echo hello');
+    expect(container.querySelector('[data-testid="pricing-scenario-card"]')).toBeTruthy();
 
-    const container = document.createElement('div');
-    container.innerHTML = html;
     document.body.appendChild(container);
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     let root;

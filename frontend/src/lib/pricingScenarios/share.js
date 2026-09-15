@@ -27,15 +27,14 @@ export function isRegionId(value) {
 const keyFor = (serviceId) =>
   serviceId === 'edge-cdn' ? 'egress' : `${QUANTITY_PREFIX}${serviceId}`;
 
+/** The fixed keys this module owns; a quantity key is `q.<service>` instead. */
+const OWN_KEYS = new Set(['scenario', 'extras', 'egress', 'compare']);
+
 /** The query keys this module owns. */
 export function isScenarioParam(key) {
-  return (
-    key === 'scenario' ||
-    key === 'extras' ||
-    key === 'egress' ||
-    key === 'compare' ||
-    key.startsWith(QUANTITY_PREFIX)
-  );
+  const isFixedKey = OWN_KEYS.has(key);
+  const isQuantityKey = key.startsWith(QUANTITY_PREFIX);
+  return isFixedKey || isQuantityKey;
 }
 
 /**
