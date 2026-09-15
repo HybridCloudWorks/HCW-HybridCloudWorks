@@ -54,6 +54,25 @@ describe('useGuardedLoad', () => {
     expect(result.current.error).toBe('');
   });
 
+  it('is loading again while a re-enabled effect read is in flight after a failure', async () => {
+    const second = deferred();
+    const load = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockReturnValueOnce(second.promise);
+    const { result, rerender } = setup(load);
+    await waitFor(() => expect(result.current.error).toBe('Failed: offline'));
+    expect(result.current.loading).toBe(false);
+    rerender({ ready: false });
+    rerender({ ready: true });
+    expect(result.current.loading).toBe(true);
+    await act(async () => {
+      second.resolve(['back']);
+    });
+    expect(result.current.loading).toBe(false);
+    expect(result.current.data).toEqual(['back']);
+  });
+
   it('loads and stamps when it landed', async () => {
     const load = vi.fn().mockResolvedValue(['a']);
     const { result } = setup(load);

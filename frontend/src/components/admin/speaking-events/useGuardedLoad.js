@@ -28,6 +28,16 @@ export default function useGuardedLoad(load, { enabled = true, empty, describeEr
   const [error, setError] = useState('');
   const generation = useRef(0);
 
+  // Pending again whenever `enabled` turns on, not only on mount: after a failed
+  // read (loaded false, pending false) the read the effect starts must show as
+  // loading. Adjusted during render, the way React recommends for state that
+  // follows a prop, rather than by a setState inside the effect.
+  const [wasEnabled, setWasEnabled] = useState(enabled);
+  if (enabled !== wasEnabled) {
+    setWasEnabled(enabled);
+    if (enabled) setPending(true);
+  }
+
   const read = useCallback(
     async (mine) => {
       const current = () => mine === generation.current;
