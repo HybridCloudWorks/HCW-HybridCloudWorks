@@ -51,6 +51,9 @@ function applyOutcome(state, outcome) {
   if (outcome.rows) {
     state.setItems(outcome.rows);
     state.setLoaded(true);
+    // A read that did not go through refreshList (e.g. auth toggling back on)
+    // must still clear an earlier failure once its rows land.
+    state.setError('');
   } else {
     const err = outcome.error;
     console.error('[Certifications] load failed', err);

@@ -10,7 +10,7 @@
 
 import { useCallback, useRef, useState } from 'react';
 import { sendJSON } from '@/lib/api';
-import { COLLECTION } from './certView';
+import { COLLECTION, sortByDisplayOrder } from './certView';
 
 /**
  * Per-cert in-flight guard. `claim(id)` is false when a write to that cert is
@@ -91,8 +91,12 @@ export function removeCert(state, cert) {
   });
 }
 
-/** Put a row the editor saved into the list (the editor already sent it). */
+/**
+ * Put a row the editor saved into the list (the editor already sent it), and
+ * keep the list in display order: the editor can change `display_order`, and
+ * a new cert's default order is taken from the last row.
+ */
 export function upsertCert(state, saved) {
   state.writes.current += 1;
-  state.setItems((rows) => upsertRow(rows, saved));
+  state.setItems((rows) => sortByDisplayOrder(upsertRow(rows, saved)));
 }

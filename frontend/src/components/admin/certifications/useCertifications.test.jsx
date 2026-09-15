@@ -221,4 +221,28 @@ describe('useCertifications writes', () => {
     });
     expect(result.current.items.map((c) => c.name)).toEqual(['Edited', 'Added']);
   });
+
+  it('keeps display order after an editor save moves a cert', async () => {
+    getJSON.mockResolvedValue(NEWER);
+    const { result } = renderHook(() => useCertifications(true));
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    act(() => {
+      result.current.upsertLocal({ _docId: 'a', name: 'Moved A', display_order: 9 });
+    });
+    expect(result.current.items.map((c) => c._docId)).toEqual(['b', 'a']);
+  });
+
+  it('clears an earlier load error when a later read started by auth lands', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    getJSON.mockRejectedValueOnce(new Error('refused')).mockResolvedValueOnce(FIRST);
+    const { result, rerender } = renderHook(({ ready }) => useCertifications(ready), {
+      initialProps: { ready: true },
+    });
+    await waitFor(() => expect(result.current.error).toBe('refused'));
+    rerender({ ready: false });
+    rerender({ ready: true });
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    expect(result.current.error).toBe('');
+    spy.mockRestore();
+  });
 });
