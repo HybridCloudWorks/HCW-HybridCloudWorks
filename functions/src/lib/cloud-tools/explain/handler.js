@@ -35,7 +35,7 @@
  * The model's text is stripped of anything that looks like a URL (prompt.js)
  * before it is stored or returned.
  *
- * The handler is a pipeline of steps over one `state`: each step either
+ * The handler is a pipeline of module-scope steps over one `state`: each step either
  * answers (returns a reply) or fills in what the next step needs (returns
  * null). One place turns a reply into an HTTP response, one place turns a
  * throw into the 500.
@@ -89,136 +89,133 @@ async function parseBody(request) {
 }
 
 /**
- * The pipeline, in order. Each step is `(state) => Promise<reply|null>`.
- *
+ * The pipeline's steps, each `(deps, state) => Promise<reply|null>` at module
+ * scope: a step either answers (returns a reply) or fills in what the next
+ * step needs (returns null). `deps` is `{ identity, store, ai, now }` — see
+ * createExplainHandlers.
+ */
+
+async function readRequest(_deps, state) {
+  if (String(state.request.method).toUpperCase() !== 'POST') {
+    return reply(405, { error: 'POST only' });
+  }
+  const read = await parseBody(state.request);
+  const validated = read.error ? read : validateExplainRequest(read.body);
+  if (validated.error) return reply(400, { error: validated.error });
+  state.value = validated.value;
+  state.canonical = canonicalExplainRequest(validated.value);
+  state.id = explainCacheId(state.canonical);
+  return null;
+}
+
+async function serveCached({ store }, state) {
+  const cached = await store.readDoc(CACHE_CONTAINER, state.id, state.id);
+  if (typeof cached?.text !== 'string' || !cached.text) return null;
+  return reply(
+    200,
+    { success: true, explanation: explanation(cached, true) },
+    { 'Cache-Control': `public, max-age=${HIT_CACHE_SECONDS}` }
+  );
+}
+
+// Nothing could be spent, so nothing is counted: the router's own selection
+// before any counter moves. The same refusal at call time is handled in
+// `generate`.
+async function checkProvider({ ai }, state) {
+  try {
+    await ai.resolveProvider(EXPLAIN_FEATURE);
+    return null;
+  } catch (error) {
+    if (!isUnavailable(error)) throw error;
+    state.context.warn?.(`explain unavailable: ${error.message}`);
+    return unavailable();
+  }
+}
+
+async function checkIdentity({ identity }, state) {
+  try {
+    state.clientKey = identity.anonymousKey(state.request).key;
+    return null;
+  } catch {
+    state.context.warn?.('explain rejected: unverified origin');
+    return reply(403, { error: 'Forbidden' });
+  }
+}
+
+async function checkClientQuota({ store, now }, state) {
+  const allowed = await takeClientQuota(store, { clientKey: state.clientKey, now: now() });
+  return allowed ? null : reply(429, { error: 'Too many requests' }, { 'Retry-After': '3600' });
+}
+
+async function checkDailyQuota({ store, now }, state) {
+  state.nowIso = new Date(now()).toISOString();
+  const allowed = await takeDailyQuota(store, { day: utcDay(state.nowIso), nowIso: state.nowIso });
+  return allowed ? null : reply(503, { error: 'Explanations are paused for today' });
+}
+
+async function generate({ ai, store }, state) {
+  const usageOut = [];
+  let generated;
+  try {
+    generated = await ai.generateTextResponse({
+      prompt: state.canonical,
+      systemPrompt: EXPLAIN_SYSTEM_PROMPT,
+      purpose: 'general',
+      usageOut,
+      // The literal, not EXPLAIN_FEATURE: ai-call-sites.test.js reads the
+      // feature off the call by source scan, and a constant here would read
+      // as an ungated call. The test pins the two agree.
+      feature: 'pricingExplain',
+    });
+  } catch (error) {
+    if (!isUnavailable(error)) throw error;
+    state.context.warn?.(`explain unavailable: ${error.message}`);
+    return unavailable();
+  }
+  const text = stripUrls(generated);
+  if (!text) return reply(502, { error: 'The model returned nothing' });
+  const doc = {
+    id: state.id,
+    kind: 'explain',
+    region: state.value.region,
+    scenarioId: state.value.scenarioId,
+    text,
+    model: usageOut[0]?.model ?? null,
+    generatedAt: state.nowIso,
+    ttl: EXPLAIN_CACHE_TTL_SECONDS,
+  };
+  await store.upsertDoc(CACHE_CONTAINER, doc);
+  return reply(200, { success: true, explanation: explanation(doc, false) });
+}
+
+/** The pipeline, in the order the header describes. */
+const STEPS = Object.freeze([
+  readRequest,
+  serveCached,
+  checkProvider,
+  checkIdentity,
+  checkClientQuota,
+  checkDailyQuota,
+  generate,
+]);
+
+/**
  * @param {object} deps
  * @param {{ anonymousKey: Function }} deps.identity client-identity.js
  * @param {{ readDoc: Function, upsertDoc: Function, incrementIf: Function, createDoc: Function, replaceDocIfMatch: Function }} deps.store
  * @param {{ resolveProvider: Function, generateTextResponse: Function }} deps.ai the router
- * @param {() => number} deps.now epoch ms
- */
-function createSteps({ identity, store, ai, now }) {
-  async function readRequest(state) {
-    if (String(state.request.method).toUpperCase() !== 'POST') {
-      return reply(405, { error: 'POST only' });
-    }
-    const read = await parseBody(state.request);
-    const validated = read.error ? read : validateExplainRequest(read.body);
-    if (validated.error) return reply(400, { error: validated.error });
-    state.value = validated.value;
-    state.canonical = canonicalExplainRequest(validated.value);
-    state.id = explainCacheId(state.canonical);
-    return null;
-  }
-
-  async function serveCached(state) {
-    const cached = await store.readDoc(CACHE_CONTAINER, state.id, state.id);
-    if (typeof cached?.text !== 'string' || !cached.text) return null;
-    return reply(
-      200,
-      { success: true, explanation: explanation(cached, true) },
-      { 'Cache-Control': `public, max-age=${HIT_CACHE_SECONDS}` }
-    );
-  }
-
-  // Nothing could be spent, so nothing is counted: the router's own
-  // selection before any counter moves. The same refusal at call time is
-  // handled in `generate`.
-  async function checkProvider(state) {
-    try {
-      await ai.resolveProvider(EXPLAIN_FEATURE);
-      return null;
-    } catch (error) {
-      if (!isUnavailable(error)) throw error;
-      state.context.warn?.(`explain unavailable: ${error.message}`);
-      return unavailable();
-    }
-  }
-
-  async function checkIdentity(state) {
-    try {
-      state.clientKey = identity.anonymousKey(state.request).key;
-      return null;
-    } catch {
-      state.context.warn?.('explain rejected: unverified origin');
-      return reply(403, { error: 'Forbidden' });
-    }
-  }
-
-  async function checkClientQuota(state) {
-    const allowed = await takeClientQuota(store, { clientKey: state.clientKey, now: now() });
-    return allowed ? null : reply(429, { error: 'Too many requests' }, { 'Retry-After': '3600' });
-  }
-
-  async function checkDailyQuota(state) {
-    state.nowIso = new Date(now()).toISOString();
-    const allowed = await takeDailyQuota(store, {
-      day: utcDay(state.nowIso),
-      nowIso: state.nowIso,
-    });
-    return allowed ? null : reply(503, { error: 'Explanations are paused for today' });
-  }
-
-  async function generate(state) {
-    const usageOut = [];
-    let generated;
-    try {
-      generated = await ai.generateTextResponse({
-        prompt: state.canonical,
-        systemPrompt: EXPLAIN_SYSTEM_PROMPT,
-        purpose: 'general',
-        usageOut,
-        // The literal, not EXPLAIN_FEATURE: ai-call-sites.test.js reads the
-        // feature off the call by source scan, and a constant here would read
-        // as an ungated call. The test pins the two agree.
-        feature: 'pricingExplain',
-      });
-    } catch (error) {
-      if (!isUnavailable(error)) throw error;
-      state.context.warn?.(`explain unavailable: ${error.message}`);
-      return unavailable();
-    }
-    const text = stripUrls(generated);
-    if (!text) return reply(502, { error: 'The model returned nothing' });
-    const doc = {
-      id: state.id,
-      kind: 'explain',
-      region: state.value.region,
-      scenarioId: state.value.scenarioId,
-      text,
-      model: usageOut[0]?.model ?? null,
-      generatedAt: state.nowIso,
-      ttl: EXPLAIN_CACHE_TTL_SECONDS,
-    };
-    await store.upsertDoc(CACHE_CONTAINER, doc);
-    return reply(200, { success: true, explanation: explanation(doc, false) });
-  }
-
-  return [
-    readRequest,
-    serveCached,
-    checkProvider,
-    checkIdentity,
-    checkClientQuota,
-    checkDailyQuota,
-    generate,
-  ];
-}
-
-/**
- * @param {object} deps see createSteps
  * @param {() => number} [deps.now] epoch ms
  */
 export function createExplainHandlers({ identity, store, ai, now = Date.now }) {
-  const steps = createSteps({ identity, store, ai, now });
+  const deps = { identity, store, ai, now };
 
   return {
     /** POST /api/public/cloud-tools/explain */
     async explain(request, context) {
       const state = { request, context };
       try {
-        for (const step of steps) {
-          const outcome = await step(state);
+        for (const step of STEPS) {
+          const outcome = await step(deps, state);
           if (outcome) return toResponse(outcome);
         }
         // `generate` always replies; reaching here is a programming error.
