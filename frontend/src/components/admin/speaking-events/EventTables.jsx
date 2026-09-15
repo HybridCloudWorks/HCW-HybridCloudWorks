@@ -28,7 +28,8 @@ export function SectionHeading({ children }) {
   );
 }
 
-function DeleteButton({ docId, editor }) {
+/** `label` names the row, so each delete control has its own accessible name. */
+function DeleteButton({ docId, editor, label }) {
   const busy = editor.deleting === docId;
   return (
     <Button
@@ -37,7 +38,7 @@ function DeleteButton({ docId, editor }) {
       className="h-7 px-2 text-xs text-destructive hover:text-destructive"
       onClick={() => editor.remove(docId)}
       disabled={busy}
-      aria-label="Delete stored override"
+      aria-label={label}
     >
       {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
     </Button>
@@ -140,7 +141,13 @@ function SessionizeRow({ ev, editor, showLinks }) {
             <Pencil className="h-3 w-3 mr-1" />
             {fd ? 'Edit' : 'Enrich'}
           </Button>
-          {fd && <DeleteButton docId={fd._docId} editor={editor} />}
+          {fd && (
+            <DeleteButton
+              docId={fd._docId}
+              editor={editor}
+              label={`Delete stored override for ${safeString(ev.name) || `Sessionize #${ev.id}`}`}
+            />
+          )}
         </div>
       </td>
     </tr>
@@ -202,7 +209,11 @@ function ManualRow({ fd, editor, showLinks }) {
           >
             <Pencil className="h-3 w-3 mr-1" /> Edit
           </Button>
-          <DeleteButton docId={fd._docId} editor={editor} />
+          <DeleteButton
+            docId={fd._docId}
+            editor={editor}
+            label={`Delete manual entry ${safeString(fd.eventName) || safeString(fd.name) || fd._docId}`}
+          />
         </div>
       </td>
     </tr>

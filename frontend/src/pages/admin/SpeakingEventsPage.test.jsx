@@ -157,6 +157,18 @@ describe('Upcoming and Past', () => {
     expect(fetch).toHaveBeenCalledWith('https://sessionize.com/api/speaker/json/speaker-42');
   });
 
+  it('gives every delete control its own accessible name, naming its row', async () => {
+    searchParams = 'tab=past';
+    render(<SpeakingEventsPage />);
+    await panel().findByText('Old Conf');
+    const names = panel()
+      .getAllByRole('button', { name: /^Delete / })
+      .map((button) => button.getAttribute('aria-label'));
+    expect(names.length).toBeGreaterThan(0);
+    expect(new Set(names).size).toBe(names.length);
+    expect(names.some((name) => name.includes('Old Conf'))).toBe(true);
+  });
+
   it('shows delivered sessions on Past with their slides link', async () => {
     searchParams = 'tab=past';
     render(<SpeakingEventsPage />);
