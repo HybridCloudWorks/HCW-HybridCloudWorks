@@ -18,8 +18,9 @@
  * Deep links are `?tab=`; an unknown id, or one naming a tab's content, lands
  * where that content is (speaking-events/tabs.js).
  *
- * State three tabs read lives here: the Sessionize read, the stored overrides,
- * the override editor and the sync. So switching tabs never refetches, and a
+ * The state that Upcoming, Past and Sources share lives on this page: the
+ * Sessionize read, the stored overrides, the override editor and the sync.
+ * So switching tabs never refetches, and a
  * form opened on Upcoming is still open on Sources. Each read is
  * generation-guarded and each write has an in-flight guard; each tab shows
  * the loading and error state of only the reads it uses, and the header and
