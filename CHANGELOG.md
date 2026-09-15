@@ -19,6 +19,23 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Speaking Events Hub: tabs by duty (#573).** `/admin/speaking-events` is now
+  five tabs on the shared `HubTabs` bar, deep-linked with `?tab=`:
+  - **Upcoming:** future sessions, soonest first.
+  - **Past:** delivered sessions, newest first, with slide and event links.
+  - **Sources:** when Sessionize was last read, a preview of what a sync would
+    create or fill in, Sync from Sessionize, and manual entries.
+  - **Publishing:** the public snapshot and what a publish would write now.
+  - **Settings:** the Sessionize speaker id, read-only, with a link to the
+    Integrations card that stays its only editor.
+
+  Old ids such as `events`, `sync` and `publish` land on the tab that now holds
+  them. Each read is generation-guarded, and a failed refresh clears its rows.
+  Save, delete and sync each have an in-flight guard, and the session lists
+  wait for both reads so Enrich cannot create a duplicate record. Behaviour
+  changes: the store is re-read after a partly failed sync, and event links
+  render only for http(s) URLs.
+
 - **Health Hub: tabs by duty instead of one long scroll (#569).**
   `/admin/health` now has four tabs on the shared `HubTabs` bar, deep-linked
   with `?tab=`:
