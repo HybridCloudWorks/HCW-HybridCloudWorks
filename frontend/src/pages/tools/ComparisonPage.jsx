@@ -6,8 +6,9 @@
  * / 16 GiB VM, a million serverless requests, a GB-month of hot object
  * storage — priced from each provider's public price list and cached
  * server-side once a day. It is a list price, not a bill: no reservations,
- * no committed use, no free tier, no egress beyond the CDN row. Scenarios
- * that turn these into a monthly estimate are Phase 2.
+ * no committed use, no free tier, no egress beyond the CDN row. The scenario
+ * card above the table (Phase 2, pages/tools/scenario/) turns these same
+ * rates into a monthly estimate for one shape, with extras itemised.
  *
  * THE REGION IS IN THE URL. `?region=` drives the fetch, so a comparison for
  * Western Europe is a link someone can send rather than a selection they
@@ -46,6 +47,7 @@ import {
   rowsByProvider,
 } from '@/lib/cloudPricing';
 import { pricingPageFor } from './pricingPages';
+import { ScenarioSection } from './scenario/ScenarioSection';
 
 const PAGE_TITLE = 'Cloud pricing comparison';
 
@@ -337,6 +339,8 @@ export default function ComparisonPage() {
         {error ? (
           <ErrorPanel message={error.message} onRetry={() => setAttempt((n) => n + 1)} />
         ) : null}
+
+        <ScenarioSection pricing={pricing} loading={loading} error={error} />
 
         <PricingTable services={services} loading={loading} error={error} />
       </div>

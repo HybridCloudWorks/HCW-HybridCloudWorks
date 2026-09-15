@@ -19,6 +19,31 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Cloud pricing comparison, Phase 2: scenarios and extras (#613).** A
+  "Price a scenario" card above the Phase 1 table on `/tools/comparison`:
+  pick a shape (Static site + API, Three-tier web app, Event-driven backend,
+  Data platform, Kubernetes platform), edit its quantities, and see a monthly
+  and yearly bill per provider as one stacked bar each — the base cost and
+  every extra as its own segment, the cheapest highlighted and the others
+  marked "+N% vs cheapest". Priced from the same cached list prices as the
+  table, in the same region.
+  - **Extras** from a pull-down: backup, zone redundancy, a DR level (pilot
+    light, warm standby, active-active — one at a time) and a 1- or 3-year
+    commitment (drawn as a dashed reduction at the end of the bar), plus an
+    egress select (100 GB to 20 TB). Every extra is priced off the same eight
+    meters, so nothing on the page comes from a number the price list did not
+    supply.
+  - **The maths is visible:** "Show breakdown" lists every line as quantity ×
+    factor × unit price, and "How this is calculated" renders each extra's
+    rule and the `ASSUMPTIONS` table — every multiplier per provider, with a
+    link to the provider page it was read from
+    (`frontend/src/lib/pricingScenarios/`).
+  - **Never silently zero:** a provider with no price for a service the
+    scenario uses shows "unavailable: <service>" instead of a total, and a
+    total with any catalogue line carries the "catalogue price" badge.
+  - **Shareable URL:** the scenario, extras, egress and edited quantities
+    live in the query string beside `?region=`, and **Copy link** copies it
+    (or shows it to copy by hand when the clipboard refuses).
 - **Cloud pricing comparison, Phase 1 (#613).** `/tools/comparison` — "Pricing
   Comparison" in the Tools menu, formerly "Pillar Comparison" and a Coming Soon
   page — is a real page: one row per service shape (VM, serverless, object
