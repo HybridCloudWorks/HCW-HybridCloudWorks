@@ -27,6 +27,12 @@ vi.mock('@/lib/adminSettings', () => ({
   DEFAULT_SESSIONIZE_SPEAKER_ID: 'default-speaker',
 }));
 vi.mock('@/hooks/useAuthReady', () => ({ useAuthReady: () => ({ authReady: true }) }));
+// The pricing cache's test reads the public API rather than a proxy (#613);
+// mocked so `fetch` below stays Sessionize's alone.
+const fetchCloudPricing = vi.fn();
+vi.mock('@/lib/publicApi', () => ({
+  fetchCloudPricing: (...args) => fetchCloudPricing(...args),
+}));
 
 const item = (overrides = {}) => ({
   secret: 'PUBLER-API-KEY',
@@ -60,6 +66,12 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue({ ok: true, json: async () => ({ events: [{ id: 1 }] }) });
   vi.stubGlobal('fetch', fetchMock);
+  fetchCloudPricing.mockReset().mockResolvedValue({
+    refreshedAt: '2026-09-14T06:00:00.000Z',
+    ageMinutes: 30,
+    stale: false,
+    counts: { live: 24, baseline: 0, unavailable: 0 },
+  });
 });
 
 afterEach(() => {
@@ -146,6 +158,8 @@ describe('Test all', () => {
     expect(probes).not.toContain('youtube');
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toContain('speaker-42');
+    // The pricing cache is in Test all too: it is a read, and spends nothing.
+    expect(fetchCloudPricing).toHaveBeenCalledTimes(1);
   });
 
   it('records a result and a time on each tile, and says YouTube was left out', async () => {

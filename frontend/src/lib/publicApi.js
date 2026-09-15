@@ -170,6 +170,42 @@ export async function fetchPublicSnapshot(id, { fresh = false } = {}) {
 }
 
 /**
+ * GET public/cloud-tools/pricing?region= — the cached price comparison for one
+ * region (#613, Phase 1): `{ region, regions, refreshedAt, ttlMinutes,
+ * ageMinutes, stale, counts, services }`, where each service carries one row
+ * per provider that answered and a provider missing from `rows` is
+ * "unavailable". Read by /tools/comparison and by the Integrations Hub's
+ * "Cloud pricing cache" card.
+ *
+ * Throws on failure like `fetchPublicSnapshot`, so the page can show the
+ * server's sentence — an unknown region is a 400 with one. A cache that has
+ * never been filled is NOT a failure: the server answers 200 with
+ * `refreshedAt: null` and no services, and the page renders that as its own
+ * state. Returns null only when the route itself is missing (404).
+ *
+ * `fresh` is the same escape hatch `fetchPublicSnapshot` has, and it exists
+ * for the same reason: the route answers with `Cache-Control: max-age=900`,
+ * so after "Refresh now" the card would otherwise read the browser's copy
+ * from before the refresh for up to fifteen minutes. The throwaway query
+ * value defeats that cache and this module's; the route ignores it.
+ *
+ * @param {string} [region]
+ * @param {{ fresh?: boolean }} [options]
+ * @returns {Promise<object|null>}
+ */
+export async function fetchCloudPricing(region = 'us-east-1', { fresh = false } = {}) {
+  const params = new URLSearchParams({ region: String(region || 'us-east-1') });
+  if (fresh) params.set('fresh', String(Date.now()));
+  const path = `public/cloud-tools/pricing?${params}`;
+  const body = fresh ? await fetchPublicJSON(path) : await publicGet(path);
+  if (!body) return null;
+  if (!body.pricing || typeof body.pricing !== 'object') {
+    throw new Error('Pricing response carried no pricing object');
+  }
+  return body.pricing;
+}
+
+/**
  * GET public/newsletter/signup-config — where the newsletter signup box shows
  * and its heading and blurb (#557): `{ placement, heading, blurb }`. The
  * server answers its defaults rather than failing, so a throw here is a

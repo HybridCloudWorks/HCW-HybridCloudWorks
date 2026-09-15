@@ -121,7 +121,7 @@ export default function Header() {
   const getToolsDropdownItems = () => [
     { label: 'Resource Comparison', path: staticRoutes.resources },
     { label: 'Decision Matrix', path: staticRoutes.decisions },
-    { label: 'Pillar Comparison', path: staticRoutes.comparison },
+    { label: 'Pricing Comparison', path: staticRoutes.comparison },
     { label: 'Migration Hub', path: staticRoutes.migration },
     ...(currentProvider === 'finops'
       ? [{ label: 'FinOps Tools', path: routes.tools('finops') }]

@@ -14,6 +14,10 @@ vi.mock('@/lib/api', () => ({
   sendJSON: vi.fn(),
   postJSON: (...args) => postJSON(...args),
 }));
+const fetchCloudPricing = vi.fn();
+vi.mock('@/lib/publicApi', () => ({
+  fetchCloudPricing: (...args) => fetchCloudPricing(...args),
+}));
 
 describe('the service registry', () => {
   it('still names every service the old Connections page did', () => {
@@ -42,6 +46,7 @@ describe('the service registry', () => {
       'Microsoft Learn',
       'AWS Skill Builder',
       'Google Developer',
+      'Cloud pricing cache',
       'Qlty',
     ]);
   });
@@ -177,6 +182,62 @@ describe('the service registry', () => {
     it('says what a YouTube press costs, because pressing it spends quota', async () => {
       postJSON.mockResolvedValueOnce({ ok: true, status: 200, data: { items: [] } });
       await expect(runnerFor('youtube')()).resolves.toMatch(/quota/i);
+    });
+  });
+
+  describe('the Cloud pricing cache card (#613)', () => {
+    const cloudPricing = () => SERVICES.find((service) => service.id === 'cloud-pricing');
+    const cached = (over = {}) => ({
+      region: 'us-east-1',
+      regions: [],
+      refreshedAt: '2026-09-14T06:00:00.000Z',
+      ttlMinutes: 1440,
+      ageMinutes: 95,
+      stale: false,
+      counts: { live: 22, baseline: 0, unavailable: 2 },
+      services: [],
+      ...over,
+    });
+
+    beforeEach(() => fetchCloudPricing.mockReset());
+
+    it('sits under Cloud with the two provider keys the refresh spends, and carries the Refresh action', () => {
+      const card = cloudPricing();
+      expect(card.group).toBe('cloud');
+      expect(card.secrets).toEqual([
+        'AWS-ACCESS-KEY-ID',
+        'AWS-SECRET-ACCESS-KEY',
+        'GCP-BILLING-API-KEY',
+      ]);
+      expect(card.action).toBe('refreshCloudPricing');
+      expect(card.url).toBe('https://hybridcloudworks.com/tools/comparison');
+    });
+
+    it('reads the default region FRESH and reports age and counts', async () => {
+      fetchCloudPricing.mockResolvedValueOnce(cached());
+      await expect(cloudPricing().test()).resolves.toBe(
+        'Fresh: refreshed 2 hours ago (22 live, 0 catalogue, 2 unavailable).'
+      );
+      // Fresh, or the card would read the browser's pre-refresh copy for
+      // fifteen minutes after Refresh now.
+      expect(fetchCloudPricing).toHaveBeenCalledWith('us-east-1', { fresh: true });
+    });
+
+    it('is red when the cache is stale, saying how late and what it holds', async () => {
+      fetchCloudPricing.mockResolvedValueOnce(cached({ stale: true, ageMinutes: 30 * 60 }));
+      await expect(cloudPricing().test()).rejects.toThrow(
+        'Stale: last refreshed 30 hours ago (22 live, 0 catalogue, 2 unavailable).'
+      );
+    });
+
+    it('is red before the first refresh, and says which button fills it', async () => {
+      fetchCloudPricing.mockResolvedValueOnce(cached({ refreshedAt: null, ageMinutes: null }));
+      await expect(cloudPricing().test()).rejects.toThrow(/Refresh now/);
+    });
+
+    it('is red when the route is missing rather than Connected to nothing', async () => {
+      fetchCloudPricing.mockResolvedValueOnce(null);
+      await expect(cloudPricing().test()).rejects.toThrow(/404/);
     });
   });
 
