@@ -11,6 +11,8 @@
 # =============================================================================
 
 resource "azurerm_service_plan" "hcw" {
+  #checkov:skip=CKV_AZURE_212:FC1 has no worker_count; failover instances mean always-ready instances, declined by the owner 2026-09-14 (ADR 0031) against the USD 150 budget. docs/security/scanner-triage.md#checkov
+  #checkov:skip=CKV_AZURE_225:Zone redundancy on Flex forces at least two always-ready instances; declined by the owner 2026-09-14, ADR 0031. docs/security/scanner-triage.md#checkov
   name                = "asp-${var.workload_name}-${var.environment}-${var.region_abbreviation}-${var.instance}"
   location            = azurerm_resource_group.app["web"].location
   resource_group_name = azurerm_resource_group.app["web"].name

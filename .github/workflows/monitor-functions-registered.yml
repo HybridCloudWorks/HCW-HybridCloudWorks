@@ -99,20 +99,11 @@ on:
   schedule:
     # Offset from the top of the hour, as heal-computed-properties.yml is.
     - cron: '41 * * * *'
+  # No inputs (checkov CKV_GHA_7). The app, its resource group and the
+  # threshold are fixed below: a manual run checks the same thing the schedule
+  # does, and raising the threshold against an observed count is a reviewed
+  # edit rather than a dispatch field.
   workflow_dispatch:
-    inputs:
-      function_app:
-        description: 'Function App to check'
-        required: false
-        default: 'func-site-prod-cus-01'
-      resource_group:
-        description: 'Resource group holding the Function App'
-        required: false
-        default: 'rg-web-site-prod-cus'
-      minimum_functions:
-        description: 'Fail below this many registered functions. 1 is the documented condition; raise it only against an observed count.'
-        required: false
-        default: '1'
 
 permissions:
   contents: read
@@ -138,9 +129,9 @@ jobs:
 
       - name: Are the functions registered?
         env:
-          APP: ${{ inputs.function_app || 'func-site-prod-cus-01' }}
-          RG: ${{ inputs.resource_group || 'rg-web-site-prod-cus' }}
-          MIN: ${{ inputs.minimum_functions || '1' }}
+          APP: func-site-prod-cus-01
+          RG: rg-web-site-prod-cus
+          MIN: '1'
           # Empty when the variable is unset, which skips the firewall probes
           # rather than failing the monitor on a missing name (T-713).
           STOR: ${{ vars.FUNCTIONS_STORAGE_ACCOUNT }}

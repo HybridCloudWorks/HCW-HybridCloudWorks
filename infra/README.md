@@ -78,10 +78,10 @@ Required-Inputs at the repository root.
 - **Stateful resources carry `prevent_destroy`** (Cosmos account, both storage
   accounts, Key Vault). Removing one of those guards is itself a reviewed,
   human-approved change.
-- Key Vault `purge_protection_enabled` is **off by accepted owner decision**
-  (2026-08-24) even though production secrets are written. It was raised as a
-  Go-Live blocker and knowingly declined to retain teardown-and-recreate; soft
-  delete at 90 days is the compensating control. See `variables.tf`.
+- Key Vault `purge_protection_enabled` is **on** by owner decision 2026-09-14
+  (ADR 0031, superseding ADR 0021). It is one-way: Azure cannot turn it off,
+  and a deleted vault stays unpurgeable with its name reserved for the 90-day
+  soft-delete window. A rebuild recovers the vault; it cannot recreate it.
 - Secret **values** are never managed by Terraform and never enter state.
   Seeding is a manual, windowed operation via `var.admin_ip_rules` — see the
   variable's description.

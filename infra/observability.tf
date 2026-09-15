@@ -163,6 +163,81 @@ resource "azurerm_monitor_diagnostic_setting" "content_blob" {
   }
 }
 
+# Content storage, queue service — read/write/delete, the categories checkov
+# CKV_AZURE_33 asks for. Measured 2026-09-14 at zero queue transactions a day on
+# this account (the job queues live on the host account below), so this costs
+# nothing today and records whatever starts using it.
+resource "azurerm_monitor_diagnostic_setting" "content_queue" {
+  name                       = "diag-content-queue-to-logs"
+  target_resource_id         = "${azurerm_storage_account.hcw.id}/queueServices/default"
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.hcw.id
+
+  enabled_log {
+    category = "StorageRead"
+  }
+
+  enabled_log {
+    category = "StorageWrite"
+  }
+
+  enabled_log {
+    category = "StorageDelete"
+  }
+}
+
+# Functions host storage, queue service — all three categories. The job queues
+# and the host's own queue polling. Measured 2026-09-14: about 8,700
+# transactions a day (8,500 of them GetQueueMetadata), roughly 10 MB/day at the
+# 1.08 KB average StorageBlobLogs row this workspace already holds.
+resource "azurerm_monitor_diagnostic_setting" "functions_queue" {
+  name                       = "diag-func-queue-to-logs"
+  target_resource_id         = "${azurerm_storage_account.functions.id}/queueServices/default"
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.hcw.id
+
+  enabled_log {
+    category = "StorageRead"
+  }
+
+  enabled_log {
+    category = "StorageWrite"
+  }
+
+  enabled_log {
+    category = "StorageDelete"
+  }
+}
+
+# Functions host storage, blob service — writes and deletes, NOT reads.
+#
+# Measured over one day on 2026-09-14 (Transactions by ApiName): GetBlob
+# 409,304, GetBlobProperties 139,323, ListContainers 24,966 — about 573,000
+# reads, all the host's own OAuth traffic — against about 20,000 writes and
+# deletes (RenewBlobLease 14,792, CreateContainer 2,856, PutBlob 877, lease
+# acquire/release 1,260). At 1.08 KB a row, reads alone would be ~0.6 GB/day
+# against a 0.25 GB/day workspace cap that ingested 0.107 GB/day that week. The
+# cap would trip daily, and a tripped cap stops the log alert rules
+# (function_http_5xx, function_response_time) along with everything else.
+#
+# Writes and deletes are the security-relevant half on this account: a new
+# release package, a container created or removed, a lease taken. About
+# 22 MB/day, which with the queue setting above leaves ingestion near 56% of
+# the cap, under the 80% logs_daily_cap alert. ADR 0031 records the trade; the
+# read logs need their own destination (an archive account) or a larger cap,
+# not this workspace.
+resource "azurerm_monitor_diagnostic_setting" "functions_blob" {
+  name                       = "diag-func-blob-to-logs"
+  target_resource_id         = "${azurerm_storage_account.functions.id}/blobServices/default"
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.hcw.id
+
+  enabled_log {
+    category = "StorageWrite"
+  }
+
+  enabled_log {
+    category = "StorageDelete"
+  }
+}
+
 # There is no Azure OpenAI diagnostic setting, because there is no Azure
 # OpenAI account: model calls go to external provider APIs (see the app
 # settings in main.tf). Their request logs live with the provider, not here.

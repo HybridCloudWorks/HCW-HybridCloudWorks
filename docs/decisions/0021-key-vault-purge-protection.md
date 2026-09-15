@@ -1,6 +1,6 @@
 # ADR 0021: Key Vault purge protection stays disabled
 
-**Status:** Accepted
+**Status:** Superseded by [ADR 0031](0031-security-scanner-owner-decisions.md) on 2026-09-14. Purge protection is now on.
 **Decision date:** 2026-08-24
 **Owners:** Workload owner
 

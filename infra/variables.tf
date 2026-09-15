@@ -492,18 +492,20 @@ variable "key_vault_name" {
   default = "kv-site-prod-cus-01"
 }
 
-# ACCEPTED RISK 2026-08-24, owner decision. The Go-Live review raised this as a
-# blocker: 18 production secrets are written and resolving while purge protection
-# is off, which contradicts the "must be true" wording this description carried.
-# The owner chose to keep it off to retain the ability to tear down and recreate
-# the vault. Compensating control: soft delete is on with a 90-day retention
-# window, so a deleted vault is recoverable unless someone deliberately purges it.
-# Recorded here rather than left implicit -- an accepted risk with no record is
-# indistinguishable from an unfixed finding, and the next reviewer re-raises it.
+# ON by owner decision 2026-09-14 (ADR 0031), reversing the 2026-08-24
+# acceptance recorded in ADR 0021. Purge protection is ONE-WAY: once an apply
+# sets it, Azure refuses to clear it, so setting this variable back to false
+# afterwards produces a failed apply, not a disabled vault. A deleted vault can
+# no longer be purged and its name stays reserved for the 90-day soft-delete
+# window — the teardown-and-recreate path ADR 0021 kept is given up on purpose.
+#
+# If a Terraform Cloud workspace variable of this name exists, it overrides this
+# default: the plan must show purge_protection_enabled changing to true on
+# azurerm_key_vault.hcw, and a plan that does not is the workspace variable.
 variable "purge_protection_enabled" {
-  description = "Enable Key Vault purge protection. Off by accepted owner decision (2026-08-24) despite production secrets being written; soft delete at 90 days is the compensating control."
+  description = "Enable Key Vault purge protection. On by owner decision 2026-09-14 (ADR 0031). One-way: Azure cannot turn it off once applied."
   type        = bool
-  default     = false
+  default     = true
 }
 
 # -----------------------------------------------------------------------------

@@ -18,6 +18,8 @@
 # Single-region: centralus, the same region as the rest of the estate.
 # =============================================================================
 resource "azurerm_cosmosdb_account" "hcw" {
+  #checkov:skip=CKV_AZURE_101:Public network access stays enabled because Disabled also refuses the subnet virtual_network_rule; the firewall admits only that subnet and operator IPs. Owner 2026-09-14, ADR 0031. docs/security/scanner-triage.md#checkov
+  #checkov:skip=CKV_AZURE_100:Microsoft-managed keys, owner decision 2026-09-14, ADR 0031; CMK is one-way on an existing account. docs/security/scanner-triage.md#checkov
   #checkov:skip=CKV_AZURE_140:Local auth is disabled; var.cosmos_local_auth_disabled defaults to true and checkov cannot evaluate the negation. docs/security/scanner-triage.md#checkov
   name = var.cosmos_db_account_name
   # Kept as its own variable rather than folded into azure_location: where a

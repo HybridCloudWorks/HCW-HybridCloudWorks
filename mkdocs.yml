@@ -121,6 +121,7 @@ nav:
       - 0028 Cosmos out-of-account export: decisions/0028-cosmos-out-of-account-export.md
       - 0029 Podcast hosting and audio surface: decisions/0029-podcast-hosting-and-audio-surface.md
       - 0030 Newsletter provider: decisions/0030-newsletter-provider.md
+      - 0031 Security scanner owner decisions: decisions/0031-security-scanner-owner-decisions.md
   - Runbooks:
       - Deployment: runbooks/deployment-runbook.md
       - Admin sign-in rollback: runbooks/admin-signin-rollback.md
