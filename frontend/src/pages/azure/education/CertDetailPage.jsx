@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { Suspense, memo } from 'react';
 import { useParams, Link } from 'react-router';
 import { Helmet } from 'react-helmet-async';
 import { getProviderPath, routes } from '@/lib/routeFactory';
 import ListenAndLearn from '@/components/education/ListenAndLearn';
 import EpisodePlaylist from '@/components/education/EpisodePlaylist';
-import { outlineFor, DATA_AS_OF as GUIDES_AS_OF } from '@/data/azure/study-guides';
+import { outlineKeyFor, DATA_AS_OF as GUIDES_AS_OF } from '@/data/azure/study-guides/index.js';
+import { useStudyGuideOutline } from '@/lib/studyGuideOutline';
 import { DATA_AS_OF, certifications } from '@/data/azure/certifications';
 import { deriveStatus, formatIsoDate, useToday } from '@/lib/certStatus';
 
@@ -105,6 +106,154 @@ function StatusNotice({ status, cert, replacement }) {
   );
 }
 
+/**
+ * The official study guide's "Skills measured" outline, area by area, each
+ * deep-linked to its heading on Microsoft Learn (#498).
+ *
+ * LOADED PER EXAM, AND HYDRATION MUST NOT NOTICE (#500). The outline is in the
+ * prerendered HTML, but its module is fetched on demand
+ * (src/lib/studyGuideOutline.js), so on the hydrating render it is not there
+ * yet. Rendering "no outline" then would be a hydration mismatch: React throws
+ * the server markup away and client-renders — the class of bug certStatus.js's
+ * `useToday` exists to prevent. So:
+ *
+ *   1. SkillsMeasuredOutline SUSPENDS instead of rendering nothing. Inside a
+ *      <Suspense> boundary, a component that suspends during hydration leaves
+ *      the boundary dehydrated: React keeps the server HTML on screen, as-is,
+ *      and hydrates that boundary when the module lands. No mismatch and no
+ *      flash — the outline is visible from first paint.
+ *   2. The boundary lives in a memo component whose only prop is a string.
+ *      A dehydrated boundary that receives NEW PROPS before it has hydrated
+ *      cannot be hydrated any more; React falls back to client-rendering it,
+ *      which deletes the server HTML and shows the fallback. The page does
+ *      re-render straight after hydration — `useToday` moves to the real date
+ *      — and without memo that re-render would hand the boundary fresh
+ *      element props and blank the outline until the chunk arrived. memo
+ *      bails out on an unchanged key, so the boundary is never touched.
+ *   3. The fallback is null, and only matters on a client-side navigation to
+ *      an exam whose chunk has not loaded: the section appears when it does.
+ *      The page renders this at all only for a key the index lists, so an
+ *      exam without a guide renders nothing on the server and the client alike.
+ *
+ * Keyed by exam at the call site, so navigating between exams mounts a fresh
+ * boundary rather than showing the previous exam's outline while the next loads.
+ */
+function SkillsMeasuredBoundary({ guideKey }) {
+  return (
+    <Suspense fallback={null}>
+      <SkillsMeasuredOutline guideKey={guideKey} />
+    </Suspense>
+  );
+}
+
+const SkillsMeasured = memo(SkillsMeasuredBoundary);
+
+function SkillsMeasuredOutline({ guideKey }) {
+  const outline = useStudyGuideOutline(guideKey);
+  if (!outline) return null;
+  return (
+    <section
+      className="bg-card/40 backdrop-blur-md border border-card/50 rounded-2xl p-6"
+      aria-labelledby="skills-measured-heading"
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
+        <h2
+          id="skills-measured-heading"
+          className="text-xl font-bold text-slate-950 dark:text-white flex items-center gap-2"
+        >
+          <span className="text-primary material-symbols-outlined text-[20px]" aria-hidden="true">
+            format_list_numbered
+          </span>
+          Skills measured
+        </h2>
+        <a
+          href={outline.sourceUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs text-foreground/60 hover:text-primary underline underline-offset-2"
+        >
+          Official study guide
+        </a>
+      </div>
+      <p className="text-sm text-foreground/70 mb-4">
+        Microsoft&apos;s own objectives, in the order the exam presents them. Each area links to its
+        section on Microsoft Learn. Checked {GUIDES_AS_OF}.
+      </p>
+
+      <ol className="space-y-3">
+        {outline.areas.map((area, i) => {
+          const href = area.anchor ? `${outline.sourceUrl}#${area.anchor}` : outline.sourceUrl;
+          const sections = area.sections.length
+            ? area.sections
+            : [{ title: null, objectives: area.objectives }];
+          return (
+            <li key={area.slug}>
+              <details open={i === 0} className="group bg-card/40 border border-card/30 rounded-xl">
+                <summary className="flex items-center gap-3 px-4 py-3 cursor-pointer list-none select-none">
+                  <span
+                    className="shrink-0 w-6 h-6 bg-primary/20 rounded-full flex items-center justify-center text-xs font-bold text-primary"
+                    aria-hidden="true"
+                  >
+                    {i + 1}
+                  </span>
+                  <span className="flex-1 min-w-0 text-sm font-semibold text-slate-950 dark:text-white">
+                    {area.name}
+                  </span>
+                  {area.weightLabel ? (
+                    <span
+                      className="shrink-0 px-2 py-0.5 rounded-full border border-primary/30 bg-primary/10 text-[11px] font-semibold text-primary"
+                      title="Share of the exam this area is worth"
+                    >
+                      {area.weightLabel}
+                    </span>
+                  ) : null}
+                  <span
+                    className="material-symbols-outlined text-[18px] text-foreground/50 transition-transform group-open:rotate-180"
+                    aria-hidden="true"
+                  >
+                    expand_more
+                  </span>
+                </summary>
+
+                <div className="px-4 pb-4 pt-1 space-y-3">
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-xs text-primary hover:underline underline-offset-2"
+                  >
+                    <span className="material-symbols-outlined text-[14px]" aria-hidden="true">
+                      open_in_new
+                    </span>
+                    {area.anchor ? 'This area on Microsoft Learn' : 'On Microsoft Learn'}
+                  </a>
+
+                  {sections.map((section, s) => (
+                    <div key={section.title || `flat-${s}`}>
+                      {section.title ? (
+                        <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1.5">
+                          {section.title}
+                        </h3>
+                      ) : null}
+                      <ul className="space-y-1 pl-4 list-disc marker:text-primary/60">
+                        {section.objectives.map((objective) => (
+                          <li key={objective} className="text-sm text-foreground/80 leading-snug">
+                            {objective}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
 // ── Component ────────────────────────────────────────────────────────────────
 
 export default function CertDetailPage() {
@@ -154,7 +303,8 @@ export default function CertDetailPage() {
   // The official study guide's "Skills measured" outline, joined by the
   // guide URL rather than the exam code — applied-skills entries share
   // site-assigned codes, and a URL tail can only name one guide (#498).
-  const outline = outlineFor(cert.studyGuideUrl);
+  // Known synchronously from the index; the outline itself loads per exam.
+  const outlineKey = outlineKeyFor(cert.studyGuideUrl);
 
   return (
     <>
@@ -280,124 +430,11 @@ export default function CertDetailPage() {
             {/* Skills measured — the official study guide's outline, area by
                 area, each deep-linked to its heading on Microsoft Learn (#498).
                 Rendered only when an outline was parsed for this exam: the
-                data ships with the site (src/data/azure/study-guides.js), so
-                this is in the prerendered HTML, and an exam with no guide
-                shows nothing rather than an empty heading. */}
-            {outline && (
-              <section
-                className="bg-card/40 backdrop-blur-md border border-card/50 rounded-2xl p-6"
-                aria-labelledby="skills-measured-heading"
-              >
-                <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
-                  <h2
-                    id="skills-measured-heading"
-                    className="text-xl font-bold text-slate-950 dark:text-white flex items-center gap-2"
-                  >
-                    <span
-                      className="text-primary material-symbols-outlined text-[20px]"
-                      aria-hidden="true"
-                    >
-                      format_list_numbered
-                    </span>
-                    Skills measured
-                  </h2>
-                  <a
-                    href={outline.sourceUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-foreground/60 hover:text-primary underline underline-offset-2"
-                  >
-                    Official study guide
-                  </a>
-                </div>
-                <p className="text-sm text-foreground/70 mb-4">
-                  Microsoft&apos;s own objectives, in the order the exam presents them. Each area
-                  links to its section on Microsoft Learn. Checked {GUIDES_AS_OF}.
-                </p>
-
-                <ol className="space-y-3">
-                  {outline.areas.map((area, i) => {
-                    const href = area.anchor
-                      ? `${outline.sourceUrl}#${area.anchor}`
-                      : outline.sourceUrl;
-                    const sections = area.sections.length
-                      ? area.sections
-                      : [{ title: null, objectives: area.objectives }];
-                    return (
-                      <li key={area.slug}>
-                        <details
-                          open={i === 0}
-                          className="group bg-card/40 border border-card/30 rounded-xl"
-                        >
-                          <summary className="flex items-center gap-3 px-4 py-3 cursor-pointer list-none select-none">
-                            <span
-                              className="shrink-0 w-6 h-6 bg-primary/20 rounded-full flex items-center justify-center text-xs font-bold text-primary"
-                              aria-hidden="true"
-                            >
-                              {i + 1}
-                            </span>
-                            <span className="flex-1 min-w-0 text-sm font-semibold text-slate-950 dark:text-white">
-                              {area.name}
-                            </span>
-                            {area.weightLabel ? (
-                              <span
-                                className="shrink-0 px-2 py-0.5 rounded-full border border-primary/30 bg-primary/10 text-[11px] font-semibold text-primary"
-                                title="Share of the exam this area is worth"
-                              >
-                                {area.weightLabel}
-                              </span>
-                            ) : null}
-                            <span
-                              className="material-symbols-outlined text-[18px] text-foreground/50 transition-transform group-open:rotate-180"
-                              aria-hidden="true"
-                            >
-                              expand_more
-                            </span>
-                          </summary>
-
-                          <div className="px-4 pb-4 pt-1 space-y-3">
-                            <a
-                              href={href}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 text-xs text-primary hover:underline underline-offset-2"
-                            >
-                              <span
-                                className="material-symbols-outlined text-[14px]"
-                                aria-hidden="true"
-                              >
-                                open_in_new
-                              </span>
-                              {area.anchor ? 'This area on Microsoft Learn' : 'On Microsoft Learn'}
-                            </a>
-
-                            {sections.map((section, s) => (
-                              <div key={section.title || `flat-${s}`}>
-                                {section.title ? (
-                                  <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1.5">
-                                    {section.title}
-                                  </h3>
-                                ) : null}
-                                <ul className="space-y-1 pl-4 list-disc marker:text-primary/60">
-                                  {section.objectives.map((objective) => (
-                                    <li
-                                      key={objective}
-                                      className="text-sm text-foreground/80 leading-snug"
-                                    >
-                                      {objective}
-                                    </li>
-                                  ))}
-                                </ul>
-                              </div>
-                            ))}
-                          </div>
-                        </details>
-                      </li>
-                    );
-                  })}
-                </ol>
-              </section>
-            )}
+                data ships with the site (src/data/azure/study-guides/, one
+                module per exam, #500), so this is in the prerendered HTML, and
+                an exam with no guide shows nothing rather than an empty
+                heading. SkillsMeasured explains how it hydrates. */}
+            {outlineKey && <SkillsMeasured key={outlineKey} guideKey={outlineKey} />}
 
             {/* Microsoft Learn Modules — only when the catalogue lists any; an
                 empty section under a heading reads as broken. */}
