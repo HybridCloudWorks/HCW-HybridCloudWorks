@@ -17,6 +17,7 @@ import {
   SCENARIOS,
   SERVICE_IDS,
   ZONE_FACTOR,
+  compareRegions,
   computeScenario,
   decodeScenario,
   effectiveQuantities,
@@ -24,7 +25,9 @@ import {
   formatAssumption,
   formatCost,
   formatDelta,
+  formatSignedDelta,
   groupChoice,
+  isRegionId,
   isScenarioParam,
   normalizeExtras,
   priceTable,
@@ -468,10 +471,11 @@ describe('the shareable URL', () => {
       scenarioId: 'data-platform',
       extras: ['backup', 'dr-active-active', 'zone-redundancy', 'commit-3y'],
       quantities: { 'compute-vm': 3650, 'edge-cdn': 5000, 'integration-messaging': 0 },
+      compare: 'westeurope',
     };
     const params = new URLSearchParams(encodeScenario(state));
     expect(params.toString()).toBe(
-      'scenario=data-platform&extras=backup%2Cdr-active-active%2Czone-redundancy%2Ccommit-3y&q.compute-vm=3650&q.integration-messaging=0&egress=5000'
+      'scenario=data-platform&extras=backup%2Cdr-active-active%2Czone-redundancy%2Ccommit-3y&q.compute-vm=3650&q.integration-messaging=0&egress=5000&compare=westeurope'
     );
     expect(decodeScenario(params)).toEqual(state);
     expect(decodeScenario(new URLSearchParams(encodeScenario(decodeScenario(params))))).toEqual(
@@ -489,17 +493,32 @@ describe('the shareable URL', () => {
       scenarioId: DEFAULT_SCENARIO_ID,
       extras: ['backup', 'dr-warm-standby'],
       quantities: { 'database-relational': 1000 },
+      compare: null,
     });
     expect(decodeScenario(null)).toEqual({
       scenarioId: DEFAULT_SCENARIO_ID,
       extras: [],
       quantities: {},
+      compare: null,
     });
     expect(decodeScenario(new URLSearchParams('q.compute-vm=1460'))).toEqual({
       scenarioId: DEFAULT_SCENARIO_ID,
       extras: [],
       quantities: {},
+      compare: null,
     });
+  });
+
+  it('carries a compare region only when it is shaped like one', () => {
+    expect(decodeScenario(new URLSearchParams('compare=us-west-2')).compare).toBe('us-west-2');
+    expect(decodeScenario(new URLSearchParams('compare=westeurope')).compare).toBe('westeurope');
+    for (const bad of ['', 'US-WEST-2', '1west', 'a', 'west europe', '<script>', 'x'.repeat(40)]) {
+      expect(decodeScenario(new URLSearchParams({ compare: bad })).compare, bad).toBeNull();
+      expect(encodeScenario({ compare: bad })).toEqual({});
+    }
+    expect(encodeScenario({ compare: 'us-west-2' })).toEqual({ compare: 'us-west-2' });
+    expect(isRegionId('us-east-1')).toBe(true);
+    expect(isRegionId(null)).toBe(false);
   });
 
   it('knows which keys are its own, leaving ?region= to the page', () => {
@@ -507,7 +526,49 @@ describe('the shareable URL', () => {
     expect(isScenarioParam('extras')).toBe(true);
     expect(isScenarioParam('egress')).toBe(true);
     expect(isScenarioParam('q.compute-vm')).toBe(true);
+    expect(isScenarioParam('compare')).toBe(true);
     expect(isScenarioParam('region')).toBe(false);
+  });
+});
+
+describe('the second region', () => {
+  it('sets each provider’s other-region total against the one on the page', () => {
+    const primary = run();
+    // Every price 10% higher in the second region: every total 10% higher.
+    const dearer = {
+      services: PRICING.services.map((s) => ({
+        ...s,
+        rows: s.rows.map((r) => ({ ...r, pricePerUnit: r.pricePerUnit * 1.1 })),
+      })),
+    };
+    const secondary = computeScenario({ pricing: dearer, scenarioId: 'three-tier-web' });
+    const comparison = compareRegions(primary, secondary);
+    expect(Object.keys(comparison.providers)).toEqual(['aws', 'azure', 'gcp']);
+    expect(comparison.providers.aws.total).toBeCloseTo(711 * 1.1, 6);
+    expect(comparison.providers.aws.delta).toBeCloseTo(0.1, 9);
+    expect(comparison.providers.gcp.delta).toBeCloseTo(0.1, 9);
+    expect(comparison.cheapest).toEqual(['gcp']);
+    expect(formatSignedDelta(comparison.providers.aws.delta)).toBe('+10%');
+  });
+
+  it('has no delta for a provider unpriced on either side', () => {
+    // static-site-api: GCP has no NoSQL price in the fixture.
+    const primary = run({ scenarioId: 'static-site-api' });
+    const secondary = run({ scenarioId: 'static-site-api' });
+    const comparison = compareRegions(primary, secondary);
+    expect(comparison.providers.gcp).toEqual({ total: null, delta: null });
+    expect(comparison.providers.aws.delta).toBe(0);
+    expect(comparison.cheapest).toEqual(['azure']);
+    // Nothing on the other side at all.
+    expect(compareRegions(primary, null)).toEqual({
+      providers: {
+        aws: { total: null, delta: null },
+        azure: { total: null, delta: null },
+        gcp: { total: null, delta: null },
+      },
+      cheapest: [],
+    });
+    expect(compareRegions(null, secondary).providers).toEqual({});
   });
 });
 
@@ -524,6 +585,13 @@ describe('formatting', () => {
     expect(formatDelta(27 / 684)).toBe('+4%');
     expect(formatDelta(0)).toBe('');
     expect(formatDelta(null)).toBe('');
+  });
+
+  it('formats a signed delta with a real minus sign, and 0% for no change', () => {
+    expect(formatSignedDelta(0.123)).toBe('+12%');
+    expect(formatSignedDelta(-0.08)).toBe('−8%');
+    expect(formatSignedDelta(0.001)).toBe('0%');
+    expect(formatSignedDelta(null)).toBe('');
   });
 
   it('formats an assumption in its declared shape', () => {

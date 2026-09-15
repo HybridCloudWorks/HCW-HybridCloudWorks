@@ -12,28 +12,35 @@
  *
  * TWO READINGS OF THE SAME NUMBERS. Each bar is `role="img"` with an
  * aria-label that reads the stack out, and "Show breakdown" reveals a real
- * <table> of every line item — the quantity, the factor, the unit price and
- * the product — which is what "the maths is visible" means here.
+ * <table> of every line item (ScenarioBreakdown.jsx).
+ *
+ * A SECOND REGION (Phase 3). `compare`, when set, is the same scenario priced
+ * in another region — see CompareRegion.jsx — and each provider's row gains a
+ * line "US West: $X (+N%)" under its total, with "Cheapest in US West" under
+ * the list. `actions` is a slot for the controls that belong beside "Show
+ * breakdown": the compare select and the Explain button. Both are the page's
+ * business; an article embed passes neither.
  */
 import React, { useId, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { PRICING_PROVIDERS, formatPrice } from '@/lib/cloudPricing';
+import { providerLabel } from '@/lib/cloudPricing';
 import {
   extraById,
   formatCost,
   formatDelta,
-  formatQuantity,
+  formatSignedDelta,
   serviceMeta,
 } from '@/lib/pricingScenarios';
+import { ScenarioBreakdown } from './ScenarioBreakdown';
 import { REDUCTION_CLASS, SEGMENT_CLASS, segmentClass } from './styles';
-
-const providerLabel = (id) => PRICING_PROVIDERS.find((p) => p.id === id)?.label ?? id;
 
 /** Explains the badge, as Phase 1's table does: it is not a live number. */
 const CATALOGUE_TITLE =
   'Catalogue price: at least one line of this total is priced from the site’s own catalogue figure because the provider’s price list could not be read on the last refresh — a fallback, not a live price.';
+
+const MUTED = 'text-slate-600 dark:text-slate-400';
 
 /** The gross bill: base plus every positive segment; what the bar's fill is scaled by. */
 const grossOf = (p) =>
@@ -81,7 +88,39 @@ function Bar({ p, maxGross }) {
   );
 }
 
-function ProviderRow({ p, cheapest, maxGross }) {
+/** "US West: $782.10 (+10%)" — the same provider's total in the compare region. */
+function CompareLine({ compare, provider }) {
+  if (!compare || compare.status !== 'ready') return null;
+  const other = compare.providers[provider];
+  let text = 'unavailable';
+  if (other && other.total !== null) {
+    text = formatCost(other.total);
+    if (other.delta !== null) text += ` (${formatSignedDelta(other.delta)})`;
+  }
+  return (
+    <p className={`text-xs tabular-nums ${MUTED}`} data-compare={provider}>
+      {compare.label}: {text}
+    </p>
+  );
+}
+
+function Total({ p }) {
+  return (
+    <span className="text-sm tabular-nums">
+      <span className="text-lg font-semibold text-slate-950 dark:text-white">
+        {formatCost(p.total)}
+      </span>
+      <span className={MUTED}> / month · {formatCost(p.yearly)} / year</span>
+      {p.deltaFromCheapest > 0 ? (
+        <span className="ml-2 font-medium text-amber-700 dark:text-amber-400" data-delta>
+          {formatDelta(p.deltaFromCheapest)} vs cheapest
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function ProviderRow({ p, cheapest, maxGross, compare }) {
   const label = providerLabel(p.provider);
   return (
     <li
@@ -113,29 +152,17 @@ function ProviderRow({ p, cheapest, maxGross }) {
             unavailable: {p.unavailable.map((id) => serviceMeta(id).label).join(', ')}
           </span>
         ) : (
-          <span className="text-sm tabular-nums">
-            <span className="text-lg font-semibold text-slate-950 dark:text-white">
-              {formatCost(p.total)}
-            </span>
-            <span className="text-slate-600 dark:text-slate-400">
-              {' '}
-              / month · {formatCost(p.yearly)} / year
-            </span>
-            {p.deltaFromCheapest > 0 ? (
-              <span className="ml-2 font-medium text-amber-700 dark:text-amber-400" data-delta>
-                {formatDelta(p.deltaFromCheapest)} vs cheapest
-              </span>
-            ) : null}
-          </span>
+          <Total p={p} />
         )}
       </div>
       {p.total === null ? (
-        <p className="text-xs text-slate-600 dark:text-slate-400">
+        <p className={`text-xs ${MUTED}`}>
           No price for that service on {label} in this region, so there is no total to compare.
         </p>
       ) : (
         <Bar p={p} maxGross={maxGross} />
       )}
+      <CompareLine compare={compare} provider={p.provider} />
     </li>
   );
 }
@@ -164,102 +191,26 @@ function Legend({ extras }) {
   );
 }
 
-function LineRow({ provider, item, line }) {
-  const unit = serviceMeta(line.serviceId).shortUnit;
-  const factor = line.factor === 1 ? '' : ` × ${line.factor}`;
+/** The one line under the list about the compare region: loading, failed, or who wins there. */
+function CompareSummary({ compare }) {
+  if (!compare) return null;
+  let text;
+  if (compare.status === 'loading') text = `Loading ${compare.label} prices…`;
+  else if (compare.status === 'error')
+    text = `${compare.label} prices could not be loaded: ${compare.error?.message ?? 'unknown error'}`;
+  else if (compare.cheapest.length === 0) text = `Nothing is priced in ${compare.label}.`;
+  else text = `Cheapest in ${compare.label}: ${compare.cheapest.map(providerLabel).join(', ')}`;
   return (
-    <tr data-line={`${provider}:${line.serviceId}`}>
-      <td className="p-2">{item}</td>
-      <td className="p-2">{line.label}</td>
-      <td className="p-2 text-right tabular-nums whitespace-nowrap">
-        {formatQuantity(line.quantity)} {unit}
-        {factor}
-      </td>
-      <td className="p-2 text-right tabular-nums whitespace-nowrap">
-        {line.unitPrice === null ? '—' : formatPrice(line.unitPrice)}
-        {line.source === 'baseline' ? ' (catalogue)' : ''}
-      </td>
-      <td className="p-2 text-right tabular-nums whitespace-nowrap">
-        {line.cost === null ? 'unavailable' : formatCost(line.cost)}
-      </td>
-    </tr>
-  );
-}
-
-function Breakdown({ providers, id }) {
-  return (
-    <div
-      id={id}
-      className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700"
+    <p
+      className={`flex items-center gap-2 text-sm ${compare.status === 'error' ? 'text-destructive' : MUTED}`}
+      data-testid="compare-summary"
+      data-status={compare.status}
     >
-      <table className="w-full min-w-[40rem] border-collapse text-left text-sm">
-        <caption className="sr-only">
-          Every line of the scenario, per provider: the quantity and factor, the unit price it was
-          multiplied by, and the product.
-        </caption>
-        <thead>
-          <tr className="text-xs uppercase tracking-wider text-slate-600 dark:text-slate-400">
-            <th scope="col" className="p-2">
-              Item
-            </th>
-            <th scope="col" className="p-2">
-              Line
-            </th>
-            <th scope="col" className="p-2 text-right">
-              Quantity
-            </th>
-            <th scope="col" className="p-2 text-right">
-              Unit price
-            </th>
-            <th scope="col" className="p-2 text-right">
-              Cost / month
-            </th>
-          </tr>
-        </thead>
-        {providers.map((p) => (
-          <tbody key={p.provider} data-breakdown={p.provider}>
-            <tr>
-              <th
-                scope="rowgroup"
-                colSpan={5}
-                className="border-t border-slate-200 bg-slate-50 p-2 text-sm font-bold text-slate-950 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
-              >
-                {providerLabel(p.provider)}
-                {p.total === null
-                  ? ` — unavailable: ${p.unavailable.map((id) => serviceMeta(id).label).join(', ')}`
-                  : ''}
-              </th>
-            </tr>
-            {p.base.lines.map((line) => (
-              <LineRow
-                key={`base:${line.serviceId}`}
-                provider={p.provider}
-                item="Base"
-                line={line}
-              />
-            ))}
-            {p.segments.map((s) =>
-              s.lines.map((line, index) => (
-                <LineRow
-                  key={`${s.extraId}:${index}`}
-                  provider={p.provider}
-                  item={s.label}
-                  line={line}
-                />
-              ))
-            )}
-            <tr className="font-semibold">
-              <td className="p-2" colSpan={4}>
-                Total
-              </td>
-              <td className="p-2 text-right tabular-nums">
-                {p.total === null ? 'unavailable' : formatCost(p.total)}
-              </td>
-            </tr>
-          </tbody>
-        ))}
-      </table>
-    </div>
+      {compare.status === 'loading' ? (
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+      ) : null}
+      {text}
+    </p>
   );
 }
 
@@ -268,10 +219,7 @@ function Status({ loading, error }) {
   if (loading) text = 'Loading prices for this scenario…';
   else if (error) text = 'No prices to build the scenario from until they load.';
   return (
-    <p
-      className="flex items-center gap-2 p-4 text-sm text-slate-600 dark:text-slate-400"
-      data-testid="scenario-status"
-    >
+    <p className={`flex items-center gap-2 p-4 text-sm ${MUTED}`} data-testid="scenario-status">
       {loading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
       {text}
     </p>
@@ -282,8 +230,10 @@ function Status({ loading, error }) {
  * @param {object} props
  * @param {ReturnType<typeof import('@/lib/pricingScenarios').computeScenario>|null} props.result
  *   null before any data has arrived
+ * @param {object|null} [props.compare]  see CompareRegion.jsx's useCompareRegion
+ * @param {React.ReactNode} [props.actions]  controls rendered beside "Show breakdown"
  */
-export function ScenarioResults({ result, loading, error }) {
+export function ScenarioResults({ result, loading, error, compare = null, actions = null }) {
   const [open, setOpen] = useState(false);
   const breakdownId = useId();
   if (!result) return <Status loading={loading} error={error} />;
@@ -299,10 +249,12 @@ export function ScenarioResults({ result, loading, error }) {
             p={p}
             cheapest={result.cheapest.includes(p.provider)}
             maxGross={maxGross}
+            compare={compare}
           />
         ))}
       </ul>
-      <div>
+      <CompareSummary compare={compare} />
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
         <Button
           type="button"
           variant="ghost"
@@ -313,8 +265,9 @@ export function ScenarioResults({ result, loading, error }) {
         >
           {open ? 'Hide breakdown' : 'Show breakdown'}
         </Button>
+        {actions}
       </div>
-      {open ? <Breakdown providers={result.providers} id={breakdownId} /> : null}
+      {open ? <ScenarioBreakdown providers={result.providers} id={breakdownId} /> : null}
     </div>
   );
 }
