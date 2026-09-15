@@ -9,8 +9,11 @@ import { postJSON } from '@/lib/api';
  * certifications and speakerevents content containers into _snapshots/
  * documents. The About page and speaking-events widget read from those
  * documents, so visitors see new content without a full site redeploy.
+ *
+ * `onPublished(result)` is called after a publish lands, so a page showing
+ * the snapshot (the Certifications Hub's Publishing tab) can re-read it.
  */
-export default function PublishSnapshotButton() {
+export default function PublishSnapshotButton({ onPublished } = {}) {
   const { toast } = useToast();
   const [state, setState] = useState('idle'); // idle | publishing | done
 
@@ -23,6 +26,7 @@ export default function PublishSnapshotButton() {
         title: 'Snapshot published',
         description: `Certifications: ${result.certifications} · Events: ${result.speakerevents}`,
       });
+      onPublished?.(result);
       setTimeout(() => setState('idle'), 3000);
     } catch (err) {
       setState('idle');

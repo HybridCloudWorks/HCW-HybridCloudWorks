@@ -146,6 +146,26 @@ export async function fetchPublicSnapshotItems(id) {
 }
 
 /**
+ * GET public/snapshots/{id} as a whole — `{ generatedAt, items }` — for the
+ * Certifications Hub's Publishing tab, which has to say when the snapshot was
+ * written and compare it with the admin rows. Unlike fetchPublicSnapshotItems
+ * it throws on failure (the tab shows the error) and returns null when no
+ * snapshot has been published. `fresh` adds a throwaway query value so neither
+ * this module's cache nor an HTTP cache answers with the copy from before a
+ * publish; the route ignores the value.
+ */
+export async function fetchPublicSnapshot(id, { fresh = false } = {}) {
+  const path = `public/snapshots/${encodeURIComponent(id)}`;
+  const body = await publicGet(fresh ? `${path}?fresh=${Date.now()}` : path);
+  const snapshot = body?.snapshot;
+  if (!snapshot) return null;
+  return {
+    generatedAt: typeof snapshot.generatedAt === 'string' ? snapshot.generatedAt : null,
+    items: Array.isArray(snapshot.items) ? snapshot.items : [],
+  };
+}
+
+/**
  * GET public/newsletter/signup-config — where the newsletter signup box shows
  * and its heading and blurb (#557): `{ placement, heading, blurb }`. The
  * server answers its defaults rather than failing, so a throw here is a

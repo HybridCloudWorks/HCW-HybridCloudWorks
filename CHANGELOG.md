@@ -19,6 +19,25 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Certifications Hub: tabs by duty (#572).** `/admin/certifications` moves
+  from one page (1,107 lines) to five tabs on the shared `HubTabs` bar,
+  deep-linked with `?tab=`:
+  - **Catalog:** stats, search, issuer filter and the card grid.
+  - **Featured:** featured certifications in display order.
+  - **Renewals:** expired certifications and those due within 180 days, soonest
+    first.
+  - **Publishing:** the Publish snapshot button, when the public snapshot was
+    last published, and what changed since.
+  - **Settings:** image rules, verification sources and hidden items.
+
+  Old ids such as `expiring`, `hidden` and `publish` land on the tab that now
+  holds them. The list loads once at page level with a generation guard, and a
+  read that raced a write is issued again. Writes have a per-certification
+  in-flight guard, and the editor's save and upload have their own. The
+  Publishing tab reads the public snapshot on its own, so a failure in either
+  read stays on its tab. `PublishSnapshotButton` gains an optional
+  `onPublished` callback, and `publicApi.js` gains `fetchPublicSnapshot`.
+
 - **Health Hub: tabs by duty instead of one long scroll (#569).**
   `/admin/health` now has four tabs on the shared `HubTabs` bar, deep-linked
   with `?tab=`:
