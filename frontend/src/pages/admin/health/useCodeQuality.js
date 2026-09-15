@@ -35,15 +35,16 @@ function acceptBody(body) {
 }
 
 export default function useCodeQuality(enabled) {
-  // Sticky: set once, during render, the first time the tab is enabled. An
-  // effect keyed on it then reads exactly once per mount.
-  const [requested, setRequested] = useState(false);
-  if (enabled && !requested) setRequested(true);
-
   const [result, setResult] = useState(null);
   const [pending, setPending] = useState(true);
   const [error, setError] = useState('');
   const generation = useRef(0);
+  // Whether the first read has started, and whether any read has answered
+  // (data, not-configured or an error). Refs, not state, so nothing is set
+  // during render: the first time `enabled` is true, the effect below starts
+  // the one read, and later toggles of `enabled` start nothing.
+  const started = useRef(false);
+  const answered = useRef(false);
 
   const read = useCallback(async (mine) => {
     const current = () => mine === generation.current;
@@ -52,12 +53,14 @@ export default function useCodeQuality(enabled) {
       const body = acceptBody(await getJSON(CODE_QUALITY_ROUTE));
       if (current()) {
         setResult(body);
+        answered.current = true;
         landed = true;
       }
     } catch (err) {
       if (current()) {
         setResult(null);
         setError(err?.message || 'The Code and Security summary could not be read.');
+        answered.current = true;
       }
     } finally {
       if (current()) setPending(false);
@@ -73,12 +76,24 @@ export default function useCodeQuality(enabled) {
   }, [read]);
 
   useEffect(() => {
-    if (!requested) return undefined;
-    read(++generation.current);
-    return () => {
+    if (enabled && !started.current) {
+      started.current = true;
+      read(++generation.current);
+    }
+  }, [enabled, read]);
+
+  // Unmount supersedes the read in flight. If nothing has answered yet, the
+  // next mount (including StrictMode's dev remount) must be free to start again.
+  useEffect(
+    () => () => {
       generation.current += 1;
-    };
-  }, [requested, read]);
+      if (!answered.current) started.current = false;
+    },
+    []
+  );
+
+  // "Asked for": the tab is open now, or an answer from an earlier open is held.
+  const requested = enabled || result !== null || error !== '';
 
   return {
     requested,

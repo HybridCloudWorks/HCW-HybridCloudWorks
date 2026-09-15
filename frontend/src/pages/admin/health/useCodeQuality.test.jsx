@@ -3,6 +3,7 @@
  * newest read must win, a failure must leave no stale grades, and "not
  * configured" is an answer rather than an error.
  */
+import { StrictMode } from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 
@@ -41,6 +42,13 @@ describe('useCodeQuality', () => {
     expect(result.current.requested).toBe(false);
     expect(result.current.loading).toBe(false);
     expect(result.current.data).toBeNull();
+  });
+
+  it('still loads under StrictMode, whose dev remount supersedes the first read', async () => {
+    getJSON.mockResolvedValue(FIRST);
+    const { result } = renderHook(() => useCodeQuality(true), { wrapper: StrictMode });
+    await waitFor(() => expect(result.current.data).toEqual(FIRST));
+    expect(result.current.loading).toBe(false);
   });
 
   it('reads once when enabled, and keeps the answer when disabled again', async () => {
