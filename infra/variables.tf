@@ -500,8 +500,11 @@ variable "key_vault_name" {
 # window — the teardown-and-recreate path ADR 0021 kept is given up on purpose.
 #
 # If a Terraform Cloud workspace variable of this name exists, it overrides this
-# default: the plan must show purge_protection_enabled changing to true on
-# azurerm_key_vault.hcw, and a plan that does not is the workspace variable.
+# default. On the FIRST apply after this change — while the live vault still has
+# purge protection off — the plan must show purge_protection_enabled changing to
+# true on azurerm_key_vault.hcw; a first plan that does not is the workspace
+# variable. Once it has been applied (or enabled out of band and seen by the
+# refresh), no change there is the expected steady state, not an override.
 variable "purge_protection_enabled" {
   description = "Enable Key Vault purge protection. On by owner decision 2026-09-14 (ADR 0031). One-way: Azure cannot turn it off once applied."
   type        = bool
