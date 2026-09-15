@@ -19,6 +19,18 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Linkie posts can carry an image (#501).** On `/admin/linkie`, Add a Post
+  has an optional image row. The image can be uploaded from the computer into
+  the public `covers` container (PNG, JPEG, WebP, GIF or AVIF, up to 15 MB), or
+  chosen from the image gallery, and shows a preview with a Remove button.
+  - **Push Published Content** sends the article's cover image.
+  - **Current posts** show their thumbnail.
+  - **The field is `thumbnail_url`,** confirmed from a real Linkie post
+    response. It is sent only when an image was chosen, so posts without one
+    are unchanged.
+  - **Shared upload code:** file reading and upload live in
+    `lib/imageUpload.js`, which the Image Gallery page now shares.
+
 - **Certifications Hub: tabs by duty (#572).** `/admin/certifications` moves
   from one page (1,107 lines) to five tabs on the shared `HubTabs` bar,
   deep-linked with `?tab=`:

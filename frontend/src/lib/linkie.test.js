@@ -18,15 +18,21 @@
 import { describe, it, expect } from 'vitest';
 
 import {
+  EMPTY_POST_FORM,
+  LINKIE_IMAGE_CONTAINER,
   LINKIE_NOT_CONFIGURED,
+  LINKIE_POST_IMAGE_FIELD,
   buildPostPayload,
   contentItemPostPayload,
   createPostsBody,
   describeLinkieFailure,
+  extractPostImage,
   extractPosts,
   extractProfiles,
   extractTrafficStats,
+  linkieImagePath,
   linkiePaths,
+  toPublicImageUrl,
   profileLabel,
   readLinkieBody,
   selectProfile,
@@ -213,6 +219,120 @@ describe('buildPostPayload', () => {
     });
     expect(payload).not.toHaveProperty('text');
   });
+
+  it('sends the image as thumbnail_url, the key Linkie returns it under (#501)', () => {
+    expect(LINKIE_POST_IMAGE_FIELD).toBe('thumbnail_url');
+  });
+
+  it('adds the image under LINKIE_POST_IMAGE_FIELD when one is set', () => {
+    const payload = buildPostPayload({
+      url: 'https://a.test',
+      provider: 'wordpress',
+      accountName: 'HybridCloudWorks',
+      postType: 'article',
+      imageUrl: '  https://cdn.test/cover.png  ',
+    });
+    expect(payload[LINKIE_POST_IMAGE_FIELD]).toBe('https://cdn.test/cover.png');
+  });
+
+  it('sends no image key at all when there is no image, blank or missing', () => {
+    // A post without an image must be byte-identical to what was sent before
+    // #501, and Linkie keeps deriving its own thumbnail for it.
+    const base = {
+      url: 'https://a.test',
+      provider: 'wordpress',
+      accountName: 'HybridCloudWorks',
+      postType: 'article',
+    };
+    const expected = {
+      url: 'https://a.test',
+      provider: 'wordpress',
+      account_name: 'HybridCloudWorks',
+      post_type: 'article',
+    };
+    expect(buildPostPayload(base)).toEqual(expected);
+    expect(buildPostPayload({ ...base, imageUrl: '   ' })).toEqual(expected);
+    expect(JSON.stringify(buildPostPayload({ ...EMPTY_POST_FORM, url: 'https://a.test' }))).toBe(
+      JSON.stringify({
+        url: 'https://a.test',
+        provider: 'wordpress',
+        account_name: 'HybridCloudWorks',
+        post_type: 'article',
+      })
+    );
+  });
+});
+
+describe('extractPostImage', () => {
+  it('reads thumbnail_url from a post shaped like a real Linkie response', () => {
+    const post = {
+      _id: '65b2d9e1c4a8f6b3d1c2e8a1',
+      url: 'https://www.instagram.com/p/Cx1aB2cDeFg/',
+      thumbnail_url: 'https://cdn.linkie.app/a/b/posts-65b2d9e1c4a8f6b3d1c2e8a1_1712345678.jpg',
+      provider: 'instagram',
+      account_name: 'janedoe',
+      text: 'New ceramics drop this Friday.',
+      post_type: 'photo',
+      options: null,
+    };
+    expect(extractPostImage(post)).toBe(post.thumbnail_url);
+  });
+
+  it('ignores other image-ish keys: thumbnail_url is the one Linkie uses', () => {
+    expect(extractPostImage({ thumbnail: 'https://cdn.test/x.png' })).toBe('');
+    expect(extractPostImage({ image_url: 'https://cdn.test/x.png' })).toBe('');
+  });
+
+  it('rejects non-https values and non-objects', () => {
+    expect(extractPostImage({ thumbnail_url: 'http://cdn.test/x.png' })).toBe('');
+    expect(extractPostImage({ thumbnail_url: 'javascript:alert(1)' })).toBe('');
+    expect(extractPostImage({ thumbnail_url: 'data:image/png;base64,AAAA' })).toBe('');
+    expect(extractPostImage({ thumbnail_url: '/relative.png' })).toBe('');
+    expect(extractPostImage({ thumbnail_url: { url: 'https://cdn.test/x.png' } })).toBe('');
+    expect(extractPostImage({ thumbnail_url: null })).toBe('');
+    expect(extractPostImage({})).toBe('');
+    expect(extractPostImage(null)).toBe('');
+  });
+});
+
+describe('toPublicImageUrl', () => {
+  const identity = (url) => url;
+
+  it('keeps an absolute https URL the resolver produced', () => {
+    const resolve = (url) => `https://api-azure.hybridcloudworks.com${url}`;
+    expect(toPublicImageUrl('/api/public/media/covers/a.png', { resolve })).toBe(
+      'https://api-azure.hybridcloudworks.com/api/public/media/covers/a.png'
+    );
+  });
+
+  it('prefixes the page origin when the path stays relative', () => {
+    expect(
+      toPublicImageUrl('/api/public/media/covers/a.png', {
+        resolve: identity,
+        origin: 'https://www.hybridcloudworks.com/',
+      })
+    ).toBe('https://www.hybridcloudworks.com/api/public/media/covers/a.png');
+  });
+
+  it('returns empty for anything Linkie could not fetch', () => {
+    expect(toPublicImageUrl('', { resolve: identity, origin: 'https://a.test' })).toBe('');
+    expect(toPublicImageUrl('/x.png', { resolve: identity, origin: 'http://localhost:3000' })).toBe(
+      ''
+    );
+    expect(toPublicImageUrl('/x.png', { resolve: identity })).toBe('');
+    expect(
+      toPublicImageUrl('//evil.test/x.png', { resolve: identity, origin: 'https://a.test' })
+    ).toBe('');
+  });
+});
+
+describe('linkieImagePath', () => {
+  it('stores under linkie/ with a timestamped, randomised name and the given extension', () => {
+    expect(linkieImagePath('webp', { now: 1700000000000, random: 'abc123' })).toBe(
+      'linkie/1700000000000-abc123.webp'
+    );
+    expect(LINKIE_IMAGE_CONTAINER).toBe('covers');
+  });
 });
 
 describe('createPostsBody', () => {
@@ -241,6 +361,17 @@ describe('contentItemPostPayload', () => {
       post_type: 'article',
       text: 'Landing zones without the theatre',
     });
+  });
+
+  it('sends the cover image under the image field when the item has one', () => {
+    const payload = contentItemPostPayload({
+      title: 'Landing zones',
+      url: 'https://hybridcloudworks.com/blog/landing-zones',
+      imageUrl: 'https://api-azure.hybridcloudworks.com/api/public/media/covers/a.png',
+    });
+    expect(payload[LINKIE_POST_IMAGE_FIELD]).toBe(
+      'https://api-azure.hybridcloudworks.com/api/public/media/covers/a.png'
+    );
   });
 
   it('still produces a valid post when the item has no title', () => {
