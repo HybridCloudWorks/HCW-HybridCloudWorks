@@ -306,7 +306,9 @@ export function extractPosts(response) {
  * @param {{ url?: string, provider?: string, accountName?: string,
  *           postType?: string, text?: string, imageUrl?: string }} fields
  * @returns {{ url: string, provider: string, account_name: string,
- *             post_type: string, text?: string }}
+ *             post_type: string, text?: string } & Record<string, string>}
+ *   plus, only when an image was chosen, one string under the key
+ *    (currently `thumbnail`, unconfirmed).
  */
 export function buildPostPayload({ url, provider, accountName, postType, text, imageUrl } = {}) {
   const payload = {
@@ -347,7 +349,9 @@ export function createPostsBody(post) {
  *
  * @param {{ title?: string, url?: string, imageUrl?: string }} item
  * @returns {{ url: string, provider: string, account_name: string,
- *             post_type: string, text?: string }}
+ *             post_type: string, text?: string } & Record<string, string>}
+ *   plus, only when an image was chosen, one string under the key
+ *    (currently `thumbnail`, unconfirmed).
  */
 export function contentItemPostPayload({ title, url, imageUrl } = {}) {
   return buildPostPayload({
