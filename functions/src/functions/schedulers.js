@@ -18,9 +18,11 @@
  * which instants moved.
  *
  * One timer from the upstream sixteen is not here:
- * `refreshToolServiceCacheScheduled` (demoted with Cloud Tools, T-322). Two
- * delete blobs — `cleanupTempStorage`, `cleanupUnusedCertImages` — and both
- * are dry-run until their own `*_DELETE=true` setting (T-302).
+ * `refreshToolServiceCacheScheduled`, demoted with Cloud Tools (T-322) and
+ * returned as `refreshToolServiceCache` in cloud-tools-jobs.js (#613), where
+ * it enqueues the refresh as a platform job rather than running it inline.
+ * Two delete blobs — `cleanupTempStorage`, `cleanupUnusedCertImages` — and
+ * both are dry-run until their own `*_DELETE=true` setting (T-302).
  *
  * Every handler builds its dependencies per invocation, not at module load:
  * this file is imported by index.js on every cold start, including for
@@ -51,42 +53,13 @@ import { recordKeyVerdict } from '../lib/key-verdict.js';
 import { createBlogListingsScrape } from '../lib/timers/blog-listings.js';
 import { createPodcastIngest, createPodcastParser } from '../lib/timers/podcasts.js';
 import { createNewsletterAutoBuild } from '../lib/timers/newsletter-autobuild.js';
-
-const masterDisabled = () => process.env.FEATURE_FLAG_SCHEDULERS === 'false';
-
-/** @param {string} name - env var suffix, e.g. 'PUBLISH_SCHEDULED_CONTENT' */
-const timerEnabled = (name) => !masterDisabled() && process.env[`FEATURE_FLAG_${name}`] === 'true';
-
-/**
- * Timers that have already logged a flag-disabled skip in this process.
- *
- * `host.json` holds the `Function` category at Warning, so an Information
- * line never reaches Log Analytics — and from 2026-09-02 a timer whose flag
- * was left off left no trace there beyond a suspiciously short `DurationMs`
- * (#461 item 12). The first skip after every restart is therefore logged at
- * Warning, which ships; every later skip in the same process drops back to
- * Information, so a timer that is deliberately off does not raise a Warning
- * on each schedule tick. Module-level on purpose: the set lives exactly as
- * long as the process, which is what "once per restart" means.
- */
-const skipWarned = new Set();
-
-/** @param {import('@azure/functions').InvocationContext} context */
-function logDisabledSkip(context, name) {
-  if (skipWarned.has(name)) {
-    context.log(`[${name}] disabled — skipping`);
-    return;
-  }
-  skipWarned.add(name);
-  context.warn(
-    `[${name}] disabled — skipping (first skip since this process started; later skips log at Information)`
-  );
-}
+import { logDisabledSkip, timerEnabled } from '../lib/timers/flag-gate.js';
 
 /**
  * Register a flag-gated timer. `run(context)` returns a small summary that is
  * logged; a thrown error is logged and rethrown so the host records the
- * failure.
+ * failure. The gate and the once-per-process skip log are
+ * lib/timers/flag-gate.js, shared with the pricing refresh timer.
  */
 function timer(name, flag, schedule, run) {
   app.timer(name, {

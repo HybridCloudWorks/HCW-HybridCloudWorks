@@ -8,8 +8,10 @@
 import { httpRoute } from '../lib/auth/http-route.js';
 import { queryDocs, readDoc } from '../lib/cosmos-client.js';
 import { createPublicReadHandlers } from '../lib/public-reads.js';
+import { createPublicPricingHandlers } from '../lib/cloud-tools/public-pricing.js';
 
 const handlers = () => createPublicReadHandlers({ store: { queryDocs, readDoc } });
+const pricing = () => createPublicPricingHandlers({ store: { readDoc } });
 
 httpRoute('publicListContent', {
   methods: ['GET'],
@@ -86,4 +88,14 @@ httpRoute('publicGetCuratedImages', {
   authLevel: 'anonymous',
   route: 'public/curated-images',
   handler: (request, context) => handlers().getCuratedImages(request, context),
+});
+
+// The pricing comparison's cache, one point read per region (#613). Reports
+// staleness and never refreshes — lib/cloud-tools/public-pricing.js says why
+// the handler is in its own module.
+httpRoute('publicGetCloudToolsPricing', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'public/cloud-tools/pricing',
+  handler: (request, context) => pricing().getPricing(request, context),
 });

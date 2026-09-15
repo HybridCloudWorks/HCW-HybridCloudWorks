@@ -23,6 +23,7 @@ import './inspect-jobs.js';
 import './forge-jobs.js';
 import './jobs-sweeper.js';
 import './change-feed.js';
+import './cloud-tools-jobs.js';
 import './cosmos-export.js';
 import './jobs-http.js';
 import './jobs-worker.js';
