@@ -33,6 +33,20 @@ function seededArticleRoutes() {
   return found;
 }
 
+/** The first pre-rendered `/azure/education/:certSlug` route, or undefined. */
+function firstAzureCertRoute() {
+  try {
+    const [slug] = readdirSync(join(DIST, 'azure', 'education')).filter((entry) =>
+      statSync(join(DIST, 'azure', 'education', entry, 'index.html'), {
+        throwIfNoEntry: false,
+      })?.isFile()
+    );
+    return slug ? `/azure/education/${slug}` : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Does hydration actually reuse the pre-rendered DOM? (T-714)
  *
@@ -52,6 +66,10 @@ function seededArticleRoutes() {
  *      markup; if React discarded and re-rendered, the element is replaced.
  *      Tagging a node and finding it still attached afterwards proves reuse
  *      rather than coincidental sameness of the HTML.
+ *
+ * Signal 2 is the only one that sees #604. When a still-dehydrated Suspense
+ * boundary receives an update, React 19 client-renders it WITHOUT calling
+ * onRecoverableError, so signal 1 stays quiet while the page is thrown away.
  */
 
 /** Console noise unrelated to hydration that must not fail this file. */
@@ -76,30 +94,51 @@ test.describe('pre-render hydration', () => {
     expect(errors.filter(isHydrationError)).toEqual([]);
   });
 
-  test('the pre-rendered DOM is reused, not replaced', async ({ page }) => {
-    // Tag a server-rendered node the instant the document exists and before
-    // the module script runs, then look for that exact node afterwards. If
-    // React discarded the markup the tagged element is gone from the document.
-    await page.addInitScript(() => {
-      const mark = () => {
-        const root = document.getElementById('root');
-        const node = root?.querySelector('*');
-        if (node) {
-          node.setAttribute('data-hydration-probe', '1');
-          window.__probePlanted = true;
-        }
-      };
-      document.addEventListener('readystatechange', mark, { once: true });
-      document.addEventListener('DOMContentLoaded', mark, { once: true });
+  // The home page, and an Azure certification detail page read from the build
+  // output for the same reason seededArticleRoutes is (#604).
+  for (const route of ['/', firstAzureCertRoute()]) {
+    test(`the pre-rendered page content is reused, not replaced: ${route}`, async ({ page }) => {
+      // Not a pinned slug and not test.skip — see seededArticleRoutes.
+      expect(route, 'the build produced an Azure certification detail page').toBeTruthy();
+
+      // THE PROBE GOES INSIDE <main>, UNDER THE ROUTE'S <Suspense>. It used to
+      // tag the first element in #root — the app shell, OUTSIDE that boundary
+      // — so it passed while React threw away every page's content (#604): the
+      // shell hydrates on its own, and the boundary is client-rendered
+      // separately when it receives an update before its lazy chunk arrives.
+      await page.addInitScript(() => {
+        const mark = () => {
+          const node = document.getElementById('main-content')?.firstElementChild;
+          if (node) {
+            node.setAttribute('data-hydration-probe', '1');
+            window.__probePlanted = true;
+          }
+        };
+        document.addEventListener('DOMContentLoaded', mark, { once: true });
+      });
+
+      // Hold every lazy chunk back. The failure is a race — something
+      // re-rendering the boundary's parent while the page chunk is still on
+      // the wire — which a fast local server usually, not always, loses.
+      // Delaying everything but the entry makes the slow network the default,
+      // so an update that lands during hydration is caught every run.
+      await page.route(/\/assets\/(?!index-)[^/]+\.js$/, async (request) => {
+        await new Promise((resolve) => setTimeout(resolve, 2500));
+        await request.continue();
+      });
+
+      await page.goto(route === '/' ? '/' : `${route}/`);
+      expect(await page.evaluate(() => window.__probePlanted === true)).toBe(true);
+
+      await page.waitForLoadState('networkidle');
+      // Past requestIdleCallback's 2 s timeout and DeferredChrome's 1.5 s
+      // fallback, so the deferred chrome has mounted and cannot still be
+      // pending.
+      await page.waitForTimeout(3000);
+      const survived = await page.locator('main [data-hydration-probe="1"]').count();
+      expect(survived, 'the server-rendered page content survived hydration').toBe(1);
     });
-
-    await page.goto('/');
-    expect(await page.evaluate(() => window.__probePlanted === true)).toBe(true);
-
-    await page.waitForLoadState('networkidle');
-    const survived = await page.locator('[data-hydration-probe="1"]').count();
-    expect(survived, 'a server-rendered node survived hydration').toBeGreaterThan(0);
-  });
+  }
 
   test('the mount point is stamped with the route it was rendered for', async ({ page }) => {
     await page.goto('/');

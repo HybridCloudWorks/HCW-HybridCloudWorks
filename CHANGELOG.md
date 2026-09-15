@@ -4907,6 +4907,21 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Prerendered pages were thrown away and re-rendered on load (#604).** `App`
+  held the idle flag (`requestIdleCallback`, or a 1500 ms fallback) that
+  defers the theme toggle and toaster. It usually flipped before the lazy page
+  chunk arrived, re-rendering `App` while the route `<Suspense>` was still
+  dehydrated. React 19 then client-rendered that boundary and discarded the
+  server HTML, without calling `onRecoverableError`, so nothing was logged.
+  Measured in Chromium, the first node inside `<main>` was replaced on AI-102,
+  `/azure`, `/aws`, `/` and `/about`, and on all six pages with a slow chunk.
+  The idle state now lives in a sibling `DeferredChrome` component that the
+  boundary cannot see, and the node survives on every page, with or without
+  the delay. `e2e/hydration.spec.js` now tags inside `<main>` rather than the
+  app wrapper, which is outside the boundary. It holds back lazy chunks and
+  covers a certification page; it fails on the old build and passes on this
+  one.
+
 - **Five published articles rendered broken hero images, and their link
   previews were broken too (#518).** The Firebase Storage bucket
   `hybridcloudworks-61e8d.appspot.com` is gone. Checked 2026-09-12: the bucket
