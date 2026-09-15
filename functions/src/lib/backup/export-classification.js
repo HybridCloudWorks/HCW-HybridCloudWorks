@@ -113,6 +113,12 @@ export const REGENERABLE = freeze([
   'homepage_feeds',
   'rss_cache',
   'tool_service_cache',
+  // Daily price snapshots (#613 Phase 3). Same disposition as the cache it
+  // is cut from: the refresh job is its only writer and refills it going
+  // forward. It is not backfilled — a lost container is a price-change feed
+  // that restarts from empty, which the owner accepted over exporting 400
+  // days of public list prices weekly.
+  'tool_price_history',
 ]);
 
 /** Excluded — a seeding script in this repository is the backup. */

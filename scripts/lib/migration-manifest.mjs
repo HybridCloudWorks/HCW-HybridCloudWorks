@@ -174,6 +174,10 @@ export const CONTAINER_TTL_SECONDS = Object.freeze({
   // floor against unbounded growth, not the freshness mechanism — freshness is
   // cacheFreshness() and it is deliberately independent of this.
   tool_service_cache: 604800, // 7 days
+  // One document per region per UTC day from the pricing refresh (#613 Phase
+  // 3). 400 days: a year of history plus the slack to compare a day against
+  // the same day last year, then gone. The TTL is the only reaper.
+  tool_price_history: 34560000, // 400 days
   rss_cache: 604800,
   // Transient job records. Long enough to debug a failure after the weekend.
   lab_jobs: 2592000, // 30 days
@@ -476,6 +480,18 @@ export const COLLECTIONS = [
     name: 'tool_service_cache',
     disposition: 'regenerate',
     note: 'Cache (~8 docs). The scheduled refresh rebuilds it.',
+  },
+  {
+    // Azure-only, no Firestore source. Written by the refresh-tool-pricing
+    // job (functions/src/lib/cloud-tools/history.js, #613 Phase 3): one
+    // document per region per UTC day, `history:<region>:<YYYY-MM-DD>`, read
+    // back by id only — the change detection walks day ids, never queries —
+    // so /id. `regenerate` because the daily refresh is its only writer and
+    // refills it going forward; what it does NOT do is backfill, so a lost
+    // container is a price-change feed that restarts from empty.
+    name: 'tool_price_history',
+    disposition: 'regenerate',
+    note: 'Daily price snapshots per region (#613 Phase 3), 400-day TTL. Written by the pricing refresh; the price-change feed diffs them. Azure-only, no Firestore source.',
   },
   { name: 'tool_workspaces', disposition: 'migrate' },
   { name: 'tool_migration_workspaces', disposition: 'migrate' },

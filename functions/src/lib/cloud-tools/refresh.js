@@ -24,14 +24,27 @@
  * The baseline handed to the library is `fallbackBaselineFor`, not
  * `baselineFor`: the two unit-mismatched services get null and a live miss
  * for them is an absent row (owner decision 2026-09-15, baseline.js header).
+ *
+ * After the cache document, and only after it, each region also gets a
+ * history snapshot and a price-change document (history.js, #613 Phase 3).
+ * Those are second-class on purpose: a failure there is logged and recorded
+ * in `summary.failed` as `history: …`, and the region still counts as
+ * refreshed, because the page's prices were already written and a feed of
+ * changes is not worth a day of stale prices.
  */
 
 import { fetchLivePricing as liveFetch, clearPricingCaches } from './pricing/index.js';
 import { BASELINE_COSTS, PROVIDERS, fallbackBaselineFor } from './pricing/baseline.js';
 import { REGION_OPTIONS, SERVICE_LABELS, pricingDocId, regionOption } from './pricing/regions.js';
 import { DEFAULT_CACHE_TTL_MINUTES } from './freshness.js';
+import {
+  CACHE_CONTAINER,
+  HISTORY_CONTAINER,
+  buildHistoryDoc,
+  computePriceChanges,
+} from './history.js';
 
-export const CACHE_CONTAINER = 'tool_service_cache';
+export { CACHE_CONTAINER, HISTORY_CONTAINER };
 export const REFRESH_JOB_TYPE = 'refresh-tool-pricing';
 
 /**
@@ -77,7 +90,8 @@ function countRows(rows) {
 
 /**
  * @param {object} deps
- * @param {{ upsertDoc: Function }} deps.store
+ * @param {{ upsertDoc: Function, readDoc: Function }} deps.store - `readDoc`
+ *   is the history lookup's; the cache write needs only `upsertDoc`
  * @param {typeof liveFetch} [deps.fetchLivePricing] - test seam
  * @param {() => void} [deps.clearCaches] - test seam; defaults to the library's
  * @param {() => Date} [deps.now]
@@ -128,7 +142,33 @@ export function createPricingRefresh({
       counts,
     };
     await store.upsertDoc(CACHE_CONTAINER, doc);
-    return { region: region.id, counts, refreshedAt };
+    return { region: region.id, counts, refreshedAt, services };
+  }
+
+  /**
+   * The day's snapshot and the change document for one region, from the
+   * services the cache write just stored. Throws on any failure; the caller
+   * decides that a throw here is a warning, not a failed region.
+   *
+   * @returns {Promise<{ '7d': number, '30d': number, sampleDays: number }>}
+   *   item counts per window, for the log line and the job summary
+   */
+  async function recordHistory({ region, refreshedAt, services }) {
+    const snapshot = buildHistoryDoc({ region, refreshedAt, services });
+    await store.upsertDoc(HISTORY_CONTAINER, snapshot);
+    const changes = await computePriceChanges({
+      store,
+      region,
+      cells: snapshot.cells,
+      refreshedAt,
+    });
+    await store.upsertDoc(CACHE_CONTAINER, changes);
+    return {
+      ...Object.fromEntries(
+        Object.entries(changes.windows).map(([name, w]) => [name, w.items.length])
+      ),
+      sampleDays: changes.sampleDays,
+    };
   }
 
   return {
@@ -136,8 +176,11 @@ export function createPricingRefresh({
 
     /**
      * @param {{ regions?: string[] }} [options] - defaults to every option
-     * @returns {Promise<{ regions: {region: string, counts: object, refreshedAt: string}[],
-     *   failed: {region: string, error: string}[], durationMs: number }>}
+     * @returns {Promise<{ regions: {region: string, counts: object, refreshedAt: string,
+     *   changes: object|null}[], failed: {region: string, error: string}[], durationMs: number }>}
+     *   `failed` carries a region that wrote no cache document (`error`), or
+     *   one that did but could not record history (`error: 'history: …'`);
+     *   the latter is ALSO in `regions`, with `changes: null`.
      */
     async run({ regions } = {}) {
       const started = now().getTime();
@@ -149,17 +192,35 @@ export function createPricingRefresh({
       const done = [];
       const failed = [];
       for (const regionId of ids) {
+        let summary;
         try {
-          const summary = await refreshRegion(regionId);
-          log.log?.(
-            `[refresh-tool-pricing] ${regionId}: live ${summary.counts.live}, baseline ${summary.counts.baseline}, unavailable ${summary.counts.unavailable}`
-          );
-          done.push(summary);
+          summary = await refreshRegion(regionId);
         } catch (error) {
           const message = error?.message || String(error);
           log.error?.(`[refresh-tool-pricing] ${regionId} FAILED: ${message}`);
           failed.push({ region: regionId, error: message });
+          continue;
         }
+        const { services, ...result } = summary;
+        let changes = null;
+        try {
+          changes = await recordHistory({
+            region: regionId,
+            refreshedAt: result.refreshedAt,
+            services,
+          });
+          log.log?.(
+            `[refresh-tool-pricing] ${regionId}: live ${result.counts.live}, baseline ${result.counts.baseline}, unavailable ${result.counts.unavailable}; changes 7d ${changes['7d']}, 30d ${changes['30d']} (${changes.sampleDays} comparison days)`
+          );
+        } catch (error) {
+          // The cache document is written and the page is served; what is
+          // missing is today's snapshot and the change feed. Say so, count
+          // it, and keep going.
+          const message = error?.message || String(error);
+          log.error?.(`[refresh-tool-pricing] ${regionId} history FAILED: ${message}`);
+          failed.push({ region: regionId, error: `history: ${message}` });
+        }
+        done.push({ ...result, changes });
       }
       return { regions: done, failed, durationMs: now().getTime() - started };
     },

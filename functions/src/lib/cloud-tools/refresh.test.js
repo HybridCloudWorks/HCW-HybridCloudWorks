@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   CACHE_CONTAINER,
+  HISTORY_CONTAINER,
   REFRESH_JOB_TYPE,
   createPricingRefresh,
   parseRefreshPayload,
@@ -13,16 +14,22 @@ import { DEFAULT_CACHE_TTL_MINUTES } from './freshness.js';
 const NOW = new Date('2026-09-15T02:00:00.000Z');
 const SERVICE_IDS = Object.keys(BASELINE_COSTS);
 
-const memStore = () => {
+const memStore = (seed = []) => {
   const docs = new Map();
+  for (const [container, doc] of seed) docs.set(`${container}/${doc.id}`, doc);
   return {
     docs,
     upsertDoc: vi.fn(async (container, doc) => {
       docs.set(`${container}/${doc.id}`, doc);
       return doc;
     }),
+    readDoc: vi.fn(async (container, id) => docs.get(`${container}/${id}`) ?? null),
   };
 };
+
+/** Every document written to a container, in write order. */
+const written = (store, container) =>
+  store.upsertDoc.mock.calls.filter(([c]) => c === container).map(([, doc]) => doc);
 
 const row = (provider, serviceId, region, model = 'retail') => ({
   provider,
@@ -73,7 +80,8 @@ describe('createPricingRefresh', () => {
 
     const summary = await refresh.run();
 
-    expect(store.upsertDoc).toHaveBeenCalledTimes(REGION_OPTIONS.length);
+    // Per region: the cache document, the day's snapshot, the change document.
+    expect(store.upsertDoc).toHaveBeenCalledTimes(REGION_OPTIONS.length * 3);
     for (const option of REGION_OPTIONS) {
       const doc = store.docs.get(`${CACHE_CONTAINER}/pricing:${option.id}`);
       expect(doc).toMatchObject({
@@ -94,6 +102,162 @@ describe('createPricingRefresh', () => {
     expect(summary.regions.map((r) => r.region)).toEqual(REGION_OPTIONS.map((r) => r.id));
     expect(summary.failed).toEqual([]);
     expect(summary.durationMs).toBe(0);
+    // The summary names the region, its counts, the stamp and the change
+    // counts — not the services, which are the document's, not the job's.
+    for (const region of summary.regions) {
+      expect(Object.keys(region).sort()).toEqual(['changes', 'counts', 'refreshedAt', 'region']);
+    }
+  });
+
+  describe('price history (#613 Phase 3)', () => {
+    it('writes the day snapshot after the cache document, then the change document from it', async () => {
+      const store = memStore();
+      const { regions } = await createPricingRefresh({
+        store,
+        fetchLivePricing: allLive(),
+        now: () => NOW,
+        log: quiet,
+      }).run({ regions: ['us-east-1'] });
+
+      expect(
+        store.upsertDoc.mock.calls.map(([container, doc]) => `${container}/${doc.id}`)
+      ).toEqual([
+        'tool_service_cache/pricing:us-east-1',
+        'tool_price_history/history:us-east-1:2026-09-15',
+        'tool_service_cache/price-changes:us-east-1',
+      ]);
+      const snapshot = store.docs.get(`${HISTORY_CONTAINER}/history:us-east-1:2026-09-15`);
+      expect(snapshot).toMatchObject({
+        region: 'us-east-1',
+        day: '2026-09-15',
+        refreshedAt: NOW.toISOString(),
+      });
+      expect(Object.keys(snapshot.cells)).toHaveLength(SERVICE_IDS.length * PROVIDERS.length);
+      expect(snapshot.cells['compute-vm:aws']).toEqual({
+        pricePerUnit: 1,
+        unit: 'hour',
+        sku: 'aws-sku',
+        currency: 'USD',
+        source: 'live',
+      });
+
+      // Nothing older to compare against yet: both windows empty, and the
+      // summary says so with sampleDays 0 rather than "no changes".
+      const changes = store.docs.get(`${CACHE_CONTAINER}/price-changes:us-east-1`);
+      expect(changes).toMatchObject({
+        region: 'us-east-1',
+        asOf: NOW.toISOString(),
+        sampleDays: 0,
+      });
+      expect(changes.windows['7d']).toEqual({ since: '2026-09-08', sampleDay: null, items: [] });
+      expect(regions[0].changes).toEqual({ '7d': 0, '30d': 0, sampleDays: 0 });
+    });
+
+    it('records a baseline row as baseline in the snapshot, so a later live price is not a "change" from it', async () => {
+      const fetchLivePricing = vi.fn(async (serviceId, region) => [
+        row('aws', serviceId, region, 'baseline-fallback'),
+        row('azure', serviceId, region),
+        row('gcp', serviceId, region),
+      ]);
+      const store = memStore();
+      await createPricingRefresh({ store, fetchLivePricing, now: () => NOW, log: quiet }).run({
+        regions: ['westeurope'],
+      });
+      const snapshot = store.docs.get(`${HISTORY_CONTAINER}/history:westeurope:2026-09-15`);
+      expect(snapshot.cells['compute-vm:aws'].source).toBe('baseline');
+      expect(snapshot.cells['compute-vm:azure'].source).toBe('live');
+    });
+
+    it('diffs today against the snapshot a week old and reports the moves', async () => {
+      const weekAgo = {
+        id: 'history:us-east-1:2026-09-08',
+        region: 'us-east-1',
+        day: '2026-09-08',
+        cells: Object.fromEntries(
+          SERVICE_IDS.flatMap((serviceId) =>
+            PROVIDERS.map((p) => [
+              `${serviceId}:${p}`,
+              // Azure's VM price was 0.8 a week ago; everything else 1, as today.
+              {
+                pricePerUnit: serviceId === 'compute-vm' && p === 'azure' ? 0.8 : 1,
+                unit: 'hour',
+                sku: `${p}-sku`,
+                currency: 'USD',
+                source: 'live',
+              },
+            ])
+          )
+        ),
+      };
+      const store = memStore([[HISTORY_CONTAINER, weekAgo]]);
+      const { regions } = await createPricingRefresh({
+        store,
+        fetchLivePricing: allLive(),
+        now: () => NOW,
+        log: quiet,
+      }).run({ regions: ['us-east-1'] });
+
+      const changes = store.docs.get(`${CACHE_CONTAINER}/price-changes:us-east-1`);
+      expect(changes.windows['7d']).toEqual({
+        since: '2026-09-08',
+        sampleDay: '2026-09-08',
+        items: [
+          {
+            serviceId: 'compute-vm',
+            label: SERVICE_LABELS['compute-vm'],
+            provider: 'azure',
+            unit: 'hour',
+            sku: 'azure-sku',
+            from: 0.8,
+            to: 1,
+            deltaPct: 25,
+          },
+        ],
+      });
+      expect(changes.windows['30d']).toEqual({ since: '2026-08-16', sampleDay: null, items: [] });
+      expect(changes.sampleDays).toBe(1);
+      expect(regions[0].changes).toEqual({ '7d': 1, '30d': 0, sampleDays: 1 });
+      // History is read by id, id as partition key, never queried.
+      for (const [container, id, pk] of store.readDoc.mock.calls) {
+        expect(container).toBe(HISTORY_CONTAINER);
+        expect(pk).toBe(id);
+      }
+    });
+
+    it('a history failure is logged and recorded, and the region still counts as refreshed', async () => {
+      const store = memStore();
+      store.upsertDoc.mockImplementation(async (container, doc) => {
+        if (container === HISTORY_CONTAINER) throw new Error('history container missing');
+        store.docs.set(`${container}/${doc.id}`, doc);
+        return doc;
+      });
+      const log = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
+      const summary = await createPricingRefresh({
+        store,
+        fetchLivePricing: allLive(),
+        now: () => NOW,
+        log,
+      }).run({ regions: ['us-east-1', 'us-west-2'] });
+
+      // Both cache documents stand; neither change document was written.
+      expect(store.docs.has(`${CACHE_CONTAINER}/pricing:us-east-1`)).toBe(true);
+      expect(store.docs.has(`${CACHE_CONTAINER}/pricing:us-west-2`)).toBe(true);
+      expect(written(store, CACHE_CONTAINER).map((d) => d.id)).toEqual([
+        'pricing:us-east-1',
+        'pricing:us-west-2',
+      ]);
+      expect(summary.regions.map((r) => [r.region, r.changes])).toEqual([
+        ['us-east-1', null],
+        ['us-west-2', null],
+      ]);
+      expect(summary.failed).toEqual([
+        { region: 'us-east-1', error: 'history: history container missing' },
+        { region: 'us-west-2', error: 'history: history container missing' },
+      ]);
+      expect(log.error).toHaveBeenCalledWith(
+        expect.stringContaining('us-east-1 history FAILED: history container missing')
+      );
+    });
   });
 
   it('fetches services one at a time, never in parallel', async () => {

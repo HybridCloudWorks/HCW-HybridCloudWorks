@@ -76,7 +76,7 @@ turns out to matter; it does not change the cost.
 
 ### 2. Scope: six classes of container, three of them exported
 
-The 73 provisioned containers are classified against
+The 74 provisioned containers are classified against
 `infra/cosmos-containers.json` and the dispositions in
 `scripts/lib/migration-manifest.mjs`. The list is code — a single exported
 array the exporter reads and a test asserts covers every provisioned container
@@ -87,14 +87,15 @@ exactly once — so a new container fails the build until someone classifies it.
 | **A — authored** | Written by a person or by an AI run a person reviewed; not recoverable from anywhere else | `content`, `content_versions`, `blogs`, `content_templates`, `certifications`, `certEvents`, `speakerevents`, `podcasts`, `episodes`, `youtubevideos`, `recordings`, `plaud_ingest`, `newsletters`, `roadmap_items`, `wiki_pages`, `listen_and_learn`, `listen_and_learn_episodes`, `podcast_transcripts`, `designs`, `frameworks`, `pillar_details`, `pillar_items`, `social_posts`, `prompts`, `prompt_keyword_synonyms`, `prompt_keyword_augmentations`, `image_prompts`, `image_prompts_sets`, `image_prompt_sets`, `image_prompt_sets_prompts`, `image_prompt_pages`, `generated_content_images`, `curated_article_images`, `character_profiles`, `character_modules`, `character_images`, `character_tag_adjectives`, `tool_workspaces`, `tool_migration_workspaces`, `tool_assessment_sessions`, `tool_architecture_plans`, `tool_exports`, `mcp_servers`, `lab_agents` | Weekly full + daily deltas |
 | **B — configuration** | Small, and the site does not run without it | `admins`, `admin_config`, `admin_settings`, `site_settings`, `system`, `config`, `config_providers`, `config_settings`, `config_tags`, `ai_providers` | Weekly full + daily deltas |
 | **C — operational record** | Rows the platform writes about itself; useful for forensics, not needed to run | `admin_audit_logs`, `audits`, `ai_usage`, `telegram_bot_activity`, `workflow_alerts`, `workflow_digests`, `content_stats_markers` | Weekly full only, no deltas |
-| **Excluded — regenerable** | Refilled by a scheduled job or a publish; the source is a class A container or the network | `_snapshots` (re-published from `content`), `homepage_feeds`, `rss_cache`, `tool_service_cache` | Not exported |
+| **Excluded — regenerable** | Refilled by a scheduled job or a publish; the source is a class A container or the network | `_snapshots` (re-published from `content`), `homepage_feeds`, `rss_cache`, `tool_service_cache`, `tool_price_history` (daily snapshots the pricing refresh writes; refilled going forward, not backfilled) | Not exported |
 | **Excluded — seed** | Re-created by a seeding script in this repository | `azure_landing_content`, `tool_service_catalog` | Not exported; the script is the backup |
 | **Excluded — transient** | TTL-bounded runtime state, worthless after the window | `jobs`, `lab_jobs`, `lab_public_quota`, `submission_quota`, `tool_ai_plan_quota`, `tool_export_quota` | Not exported |
 
-That is 44 + 10 + 7 = 61 exported, 12 excluded, 73 in all. (72 at this
+That is 44 + 10 + 7 = 61 exported, 13 excluded, 74 in all. (72 at this
 record's writing; `podcast_transcripts` joined class A on 2026-09-08 for #435 —
 the podcast's own container, kept apart from `listen_and_learn_episodes` by
-owner ruling.) Issue #231 reports the
+owner ruling — and `tool_price_history` joined the regenerable exclusions on
+2026-09-15 for #613 Phase 3.) Issue #231 reports the
 metric against 73 containers; the spec provisioned 72 at the time, so implementation starts
 with an inventory of the live account against `infra/cosmos-containers.json`,
 and an unprovisioned container is classified or removed before the first run.

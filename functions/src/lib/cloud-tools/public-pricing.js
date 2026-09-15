@@ -25,7 +25,10 @@
  */
 
 import { cacheFreshness } from './freshness.js';
-import { CACHE_CONTAINER } from './refresh.js';
+// From history.js, not refresh.js: the container name is the same constant
+// (refresh.js re-exports it), and this path does not load the three provider
+// SDKs behind the refresh on a public read's cold start.
+import { CACHE_CONTAINER } from './history.js';
 import {
   COMPARISON_CELLS,
   DEFAULT_REGION,

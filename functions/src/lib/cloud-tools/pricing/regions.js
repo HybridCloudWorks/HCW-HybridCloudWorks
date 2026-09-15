@@ -61,6 +61,16 @@ export const SERVICE_LABELS = Object.freeze({
   'edge-cdn': 'CDN egress',
 });
 
+/**
+ * Human names per provider, for prose that names one (the newsletter's price
+ * changes). The comparison page renders its own column headers.
+ */
+export const PROVIDER_LABELS = Object.freeze({
+  aws: 'AWS',
+  azure: 'Azure',
+  gcp: 'Google Cloud',
+});
+
 /** The region option for an id, or null. Exact match — no trimming, no case folding. */
 export function regionOption(id) {
   return REGION_OPTIONS.find((option) => option.id === id) ?? null;
