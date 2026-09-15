@@ -21,6 +21,7 @@ import {
   Rss,
   Send,
   Share2,
+  ShieldCheck,
 } from 'lucide-react';
 import { postJSON } from '@/lib/api';
 import { countList, unwrapProxy } from '@/lib/proxyEnvelope';
@@ -137,6 +138,16 @@ async function testResend() {
     : `Connected — ${count} sending domain(s).`;
 }
 
+async function testQlty() {
+  // GET https://api.qlty.sh/user, server-side. The envelope's `data` is Qlty's
+  // user object; its login says whose token this is.
+  const body = unwrapProxy(await postJSON('connectionProbe', { probe: 'qlty' }), 'Qlty');
+  const login = body?.login;
+  return typeof login === 'string' && login.trim()
+    ? `Connected as ${login.trim()}.`
+    : 'Connected to Qlty.';
+}
+
 // ── Groups and services ───────────────────────────────────────────────────────
 
 /**
@@ -186,6 +197,11 @@ export const SERVICE_GROUPS = Object.freeze([
     id: 'cloud',
     title: 'Cloud',
     blurb: 'Public price lists for the cost comparison tools. None of these bills this site.',
+  },
+  {
+    id: 'code-quality',
+    title: 'Code quality',
+    blurb: 'Read-only access to the repository’s scanner results, shown on the Health page.',
   },
   {
     id: 'platform',
@@ -374,5 +390,20 @@ export const SERVICES = Object.freeze([
     url: 'https://developers.google.com/profile/u/105048864698113573023',
     test: null,
     secrets: [],
+  },
+
+  // ── Code quality ─────────────────────────────────────────────────────────
+  {
+    id: 'qlty',
+    group: 'code-quality',
+    icon: ShieldCheck,
+    name: 'Qlty',
+    description:
+      'Scans the repository for maintainability and security issues. Its grades feed the Health page.',
+    // Where the access token is minted.
+    url: 'https://qlty.sh/user/settings/tokens',
+    // Server-side: GET /user with the stored token, which never reaches a browser.
+    test: testQlty,
+    secrets: ['QLTY-API-TOKEN'],
   },
 ]);
