@@ -179,3 +179,21 @@ resource names, variables and error codes.
 
 Never paste a secret, subscription id, tenant id, or token — not even a
 redacted one. Use the placeholder scheme above.
+
+### A pricing scenario in a post
+
+One fence language is not code. A block whose language is `pricing-scenario`
+and whose body is a scenario query string from `/tools/comparison` renders as
+that page's scenario card, read-only — the bars, the totals, the breakdown —
+with an "Open in the comparison tool" link, priced from the same daily cache
+the tool reads:
+
+````markdown
+```pricing-scenario
+scenario=three-tier-web&extras=backup,dr-warm-standby&egress=1000&region=us-east-1
+```
+````
+
+The body is what **Copy link** on the tool puts on the clipboard, minus the
+host and path. An unknown scenario or extra falls back the way the tool's URL
+does, and a region the tool does not know falls back to `us-east-1`.

@@ -9,10 +9,17 @@
  * its fetch resolves, produces exactly that markup, which is what lets React
  * adopt the server HTML. `computeScenario` is only called once `pricing`
  * exists, so no number is on the page until data is.
+ *
+ * PHASE 3 adds two things that exist only once there is a result: a "Compare
+ * with" select that prices the same scenario in a second region
+ * (CompareRegion.jsx, state in `?compare=`), and an "Explain this comparison"
+ * button (ExplainButton.jsx) that fires on a click and never otherwise.
  */
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { computeScenario, effectiveQuantities } from '@/lib/pricingScenarios';
+import { CompareSelect, useCompareRegion, validCompareRegion } from './CompareRegion';
+import { ExplainButton } from './ExplainButton';
 import {
   CopyLinkButton,
   EgressSelect,
@@ -24,15 +31,57 @@ import { ScenarioResults } from './ScenarioResults';
 import { ScenarioAssumptions } from './ScenarioAssumptions';
 import { useScenarioState } from './useScenarioState';
 
-export function ScenarioSection({ pricing, loading, error }) {
-  const [state, update] = useScenarioState();
-  const { scenarioId, extras, quantities } = state;
+/**
+ * @param {object} props
+ * @param {object|null} props.pricing  the page's region, from fetchCloudPricing
+ * @param {string} props.region  the page's `?region=`
+ * @param {Array<{id: string, label: string}>} props.regions  from the payload; [] before data
+ */
+export function ScenarioSection({ pricing, loading, error, region, regions = [] }) {
+  const [state, write] = useScenarioState();
+  const { scenarioId, extras, quantities, compare } = state;
+
+  // Every write re-checks `compare` against the regions the API listed, so a
+  // hand-typed or stale id leaves the URL on the next change. Only once the
+  // list exists: before data, a valid id must not be dropped for want of it.
+  const update = useCallback(
+    (patch, options) => {
+      const next = { ...patch };
+      if (regions.length > 0) {
+        const wanted = 'compare' in patch ? patch.compare : compare;
+        next.compare = validCompareRegion({ compare: wanted, region, regions });
+      }
+      write(next, options);
+    },
+    [write, regions, region, compare]
+  );
 
   const result = useMemo(
     () => (pricing ? computeScenario({ pricing, scenarioId, quantities, extras }) : null),
     [pricing, scenarioId, quantities, extras]
   );
   const egressGb = effectiveQuantities(scenarioId, quantities)['edge-cdn'];
+  const comparison = useCompareRegion({
+    compare,
+    region,
+    regions,
+    result,
+    scenarioId,
+    quantities,
+    extras,
+  });
+
+  const actions = result ? (
+    <>
+      <CompareSelect
+        compare={compare}
+        region={region}
+        regions={regions}
+        onChange={(id) => update({ compare: id })}
+      />
+      <ExplainButton region={region} result={result} />
+    </>
+  ) : null;
 
   return (
     <Card data-testid="scenario-card">
@@ -63,7 +112,13 @@ export function ScenarioSection({ pricing, loading, error }) {
           overrides={quantities}
           onChange={(next) => update({ quantities: next }, { replace: true })}
         />
-        <ScenarioResults result={result} loading={loading} error={error} />
+        <ScenarioResults
+          result={result}
+          loading={loading}
+          error={error}
+          compare={comparison}
+          actions={actions}
+        />
         <ScenarioAssumptions extras={extras} />
       </CardContent>
     </Card>

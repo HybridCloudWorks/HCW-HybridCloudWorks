@@ -89,6 +89,12 @@ const EMPTY = {
   },
 };
 
+/** The Phase 3 price-changes card fetches too; it is not under test here. */
+const NO_HISTORY = {
+  success: true,
+  changes: { region: 'us-east-1', asOf: null, windows: {}, sampleDays: 0 },
+};
+
 /** The query string as the router sees it, so a region change is asserted on the URL. */
 function SearchProbe() {
   const [params] = useSearchParams();
@@ -104,6 +110,16 @@ function renderPage(path = '/tools/comparison') {
   );
 }
 
+const isPricingUrl = (url) => String(url).includes('cloud-tools/pricing?');
+/** Answers the pricing read from `responses` in order; the price-changes read always gets no history. */
+const answerPricing = (...responses) => {
+  const queue = [...responses];
+  fetchMock.mockImplementation(async (url) => {
+    if (!isPricingUrl(url)) return jsonResponse(NO_HISTORY);
+    return queue.length > 1 ? queue.shift() : queue[0];
+  });
+};
+const pricingCalls = () => fetchMock.mock.calls.filter((call) => isPricingUrl(call[0]));
 const regionOf = (call) => new URL(String(call[0])).searchParams.get('region');
 const serviceRow = (id) => document.querySelector(`tr[data-service="${id}"]`);
 const cell = (id, provider) => serviceRow(id).querySelector(`td[data-provider="${provider}"]`);
@@ -111,7 +127,7 @@ const cell = (id, provider) => serviceRow(id).querySelector(`td[data-provider="$
 beforeEach(() => {
   clearPublicGetCache();
   fetchMock.mockReset();
-  fetchMock.mockResolvedValue(jsonResponse(PAYLOAD));
+  answerPricing(jsonResponse(PAYLOAD));
   vi.stubGlobal('fetch', fetchMock);
 });
 afterEach(() => {
@@ -184,7 +200,7 @@ describe('with prices', () => {
   });
 
   it('says how late a stale cache is, in hours', async () => {
-    fetchMock.mockResolvedValue(
+    answerPricing(
       jsonResponse({
         ...PAYLOAD,
         pricing: { ...PAYLOAD.pricing, stale: true, ageMinutes: 31 * 60 + 20 },
@@ -200,8 +216,8 @@ describe('with prices', () => {
 describe('the region', () => {
   it('reads ?region= for the fetch and fills the select from the payload', async () => {
     renderPage('/tools/comparison?region=westeurope');
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    expect(regionOf(fetchMock.mock.calls[0])).toBe('westeurope');
+    await waitFor(() => expect(pricingCalls()).toHaveLength(1));
+    expect(regionOf(pricingCalls()[0])).toBe('westeurope');
 
     const select = await screen.findByLabelText('Region');
     await waitFor(() => expect(select.disabled).toBe(false));
@@ -215,8 +231,8 @@ describe('the region', () => {
 
   it('defaults to us-east-1 when the URL names none', async () => {
     renderPage();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    expect(regionOf(fetchMock.mock.calls[0])).toBe('us-east-1');
+    await waitFor(() => expect(pricingCalls()).toHaveLength(1));
+    expect(regionOf(pricingCalls()[0])).toBe('us-east-1');
   });
 
   it('writes a change to ?region= and fetches the new region', async () => {
@@ -226,8 +242,8 @@ describe('the region', () => {
 
     fireEvent.change(select, { target: { value: 'us-west-2' } });
     expect(screen.getByTestId('search').textContent).toBe('region=us-west-2');
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    expect(regionOf(fetchMock.mock.calls[1])).toBe('us-west-2');
+    await waitFor(() => expect(pricingCalls()).toHaveLength(2));
+    expect(regionOf(pricingCalls()[1])).toBe('us-west-2');
 
     // Back to the default drops the parameter: the canonical URL has none.
     fireEvent.change(select, { target: { value: 'us-east-1' } });
@@ -246,10 +262,11 @@ describe('without prices', () => {
     expect(screen.getByText('Loading prices…')).toBeTruthy();
     expect(screen.getByLabelText('Region').disabled).toBe(true);
     expect(screen.queryByTestId('as-of')).toBeNull();
+    expect(screen.getByText('Loading price changes…')).toBeTruthy();
   });
 
   it('says the cache has never been filled when the API answers with no services', async () => {
-    fetchMock.mockResolvedValue(jsonResponse(EMPTY));
+    answerPricing(jsonResponse(EMPTY));
     renderPage();
     await waitFor(() =>
       expect(screen.getByText('Nothing to compare until the first refresh.')).toBeTruthy()
@@ -261,13 +278,15 @@ describe('without prices', () => {
   });
 
   it('shows the server sentence on a failure, and Try again fetches again', async () => {
-    fetchMock
-      .mockResolvedValueOnce(jsonResponse({ success: false, error: 'Unknown region: mars-1' }, 400))
-      .mockResolvedValueOnce(jsonResponse(PAYLOAD));
+    answerPricing(
+      jsonResponse({ success: false, error: 'Unknown region: mars-1' }, 400),
+      jsonResponse(PAYLOAD)
+    );
     const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       renderPage('/tools/comparison?region=mars-1');
-      const alert = await screen.findByRole('alert');
+      const alert = await screen.findByText(/Prices could not be loaded:/);
+      expect(alert.getAttribute('role') ?? alert.closest('[role="alert"]')).toBeTruthy();
       expect(alert.textContent).toContain('Unknown region: mars-1');
       expect(screen.getByText('Prices could not be loaded.')).toBeTruthy();
 
@@ -280,10 +299,12 @@ describe('without prices', () => {
         'mars-1',
       ]);
 
-      fireEvent.click(within(alert).getByRole('button', { name: /Try again/ }));
+      fireEvent.click(
+        within(alert.closest('[role="alert"]')).getByRole('button', { name: /Try again/ })
+      );
       await waitFor(() => expect(serviceRow('compute-vm')).toBeTruthy());
-      expect(fetchMock).toHaveBeenCalledTimes(2);
-      expect(screen.queryByRole('alert')).toBeNull();
+      expect(pricingCalls()).toHaveLength(2);
+      expect(screen.queryByText(/Prices could not be loaded:/)).toBeNull();
     } finally {
       quiet.mockRestore();
     }

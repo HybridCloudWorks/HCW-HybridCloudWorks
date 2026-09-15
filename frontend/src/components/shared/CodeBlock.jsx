@@ -21,6 +21,9 @@ import sql from 'react-syntax-highlighter/dist/esm/languages/prism/sql';
 import go from 'react-syntax-highlighter/dist/esm/languages/prism/go';
 import csharp from 'react-syntax-highlighter/dist/esm/languages/prism/csharp';
 import markdown from 'react-syntax-highlighter/dist/esm/languages/prism/markdown';
+import PricingScenarioEmbed, {
+  PRICING_SCENARIO_LANGUAGE,
+} from '@/components/content/PricingScenarioEmbed';
 
 const LANGUAGES = {
   bash,
@@ -121,7 +124,9 @@ export default function CodeBlock({ language, value }) {
 
 /**
  * ReactMarkdown `components` override wiring fenced blocks to CodeBlock while
- * leaving inline code styled by prose classes.
+ * leaving inline code styled by prose classes. One language is not code: a
+ * `pricing-scenario` fence is a scenario for the pricing comparison, and
+ * renders as that card (#613, Phase 3; components/content/PricingScenarioEmbed.jsx).
  */
 export const markdownCodeComponents = {
   code({ inline, className, children, ...props }) {
@@ -131,6 +136,7 @@ export const markdownCodeComponents = {
     // and no newlines. react-markdown v10 no longer passes `inline`.
     const isBlock = match || value.includes('\n');
     if (!inline && isBlock) {
+      if (match?.[1] === PRICING_SCENARIO_LANGUAGE) return <PricingScenarioEmbed query={value} />;
       return <CodeBlock language={match?.[1]} value={value} />;
     }
     return (

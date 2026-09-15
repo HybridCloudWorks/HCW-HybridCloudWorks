@@ -34,6 +34,18 @@ export function formatDelta(delta) {
   return `+${Math.round(delta * 100)}%`;
 }
 
+/**
+ * A difference with its sign: "+12%", "−8%", "0%". For the second-region
+ * comparison, where a cheaper region is as much the point as a dearer one.
+ */
+export function formatSignedDelta(delta) {
+  if (!Number.isFinite(delta)) return '';
+  const rounded = Math.round(delta * 100);
+  if (rounded > 0) return `+${rounded}%`;
+  if (rounded < 0) return `−${Math.abs(rounded)}%`;
+  return '0%';
+}
+
 /** An assumption's value in the format its row declares. */
 export function formatAssumption(value, format) {
   if (!Number.isFinite(Number(value))) return '—';
