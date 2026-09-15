@@ -50,7 +50,7 @@ This project has not cut a tagged release; entries are grouped under
     as the registry rule (#557) makes every new section; the Newsletter
     Hub's Content form lists it to turn off or cap.
   - **"Explain this number"**: `POST public/cloud-tools/explain`
-    (`lib/cloud-tools/explain.js`, `functions/cloud-tools-http.js`), anonymous,
+    (`lib/cloud-tools/explain/`, `functions/cloud-tools-http.js`), anonymous,
     takes the priced scenario the page already shows (`{ region, scenarioId,
     scenarioLabel, extras, egressGb, results: [{ provider, total, base,
     segments, unavailable }] }`, 8 KB, validated field by field, unknown keys

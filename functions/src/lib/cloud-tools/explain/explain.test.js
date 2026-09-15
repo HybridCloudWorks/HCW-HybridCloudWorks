@@ -14,7 +14,7 @@ import {
   stripUrls,
   takeDailyQuota,
   validateExplainRequest,
-} from './explain.js';
+} from './index.js';
 
 const NOW = Date.parse('2026-09-15T12:00:00Z');
 

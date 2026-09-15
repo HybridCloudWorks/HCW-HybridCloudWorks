@@ -191,7 +191,7 @@ const PUBLIC_ROUTES = new Set([
   // link costs one model call, ever), 5 per hour per Cloudflare-verified
   // client through the same counter as public/submissions, 200 per day across
   // everyone through a compare-and-increment, and an 8 KB body validated
-  // field by field before any of that — lib/cloud-tools/explain.js.
+  // field by field before any of that — lib/cloud-tools/explain/.
   'public/cloud-tools/explain',
 ]);
 

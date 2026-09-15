@@ -228,7 +228,9 @@ export function priceChangeTitle(item) {
   const from = formatPrice(item?.from, item?.currency);
   const to = formatPrice(item?.to, item?.currency);
   const delta = Number(item?.deltaPct);
-  if (!provider || !item?.label || !from || !to || !item?.unit || !Number.isFinite(delta)) return null;
+  const named = Boolean(provider && item?.label && item?.unit);
+  const priced = Boolean(from && to && Number.isFinite(delta));
+  if (!named || !priced) return null;
   const sign = delta > 0 ? '+' : '';
   return `${provider} · ${item.label}: ${from} → ${to} per ${item.unit} (${sign}${delta}%)`;
 }

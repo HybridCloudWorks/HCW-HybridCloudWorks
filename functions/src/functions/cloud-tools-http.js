@@ -2,7 +2,7 @@
  * cloud-tools-http.js — the one Cloud Tools route that is anonymous AND
  * spends money: POST public/cloud-tools/explain (#613 Phase 3). Semantics,
  * and the four bounds that make an anonymous AI call acceptable, in
- * lib/cloud-tools/explain.js.
+ * lib/cloud-tools/explain/ (handler.js carries the header).
  *
  * Identity-checked and rate-limited the way `public/submissions` and the
  * newsletter routes are: the same Cloudflare-verified hashed identity, the
@@ -20,7 +20,7 @@ import {
   upsertDoc,
 } from '../lib/cosmos-client.js';
 import * as ai from '../lib/ai/router.js';
-import { createExplainHandlers } from '../lib/cloud-tools/explain.js';
+import { createExplainHandlers } from '../lib/cloud-tools/explain/index.js';
 
 let handlers = null;
 const explain = () => {
