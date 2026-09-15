@@ -21,7 +21,6 @@ import {
   EMPTY_POST_FORM,
   LINKIE_IMAGE_CONTAINER,
   LINKIE_NOT_CONFIGURED,
-  LINKIE_POST_IMAGE_CANDIDATE_KEYS,
   LINKIE_POST_IMAGE_FIELD,
   buildPostPayload,
   contentItemPostPayload,
@@ -221,8 +220,8 @@ describe('buildPostPayload', () => {
     expect(payload).not.toHaveProperty('text');
   });
 
-  it('pins the unconfirmed image field name, so changing it is a deliberate edit (#501)', () => {
-    expect(LINKIE_POST_IMAGE_FIELD).toBe('thumbnail');
+  it('sends the image as thumbnail_url, the key Linkie returns it under (#501)', () => {
+    expect(LINKIE_POST_IMAGE_FIELD).toBe('thumbnail_url');
   });
 
   it('adds the image under LINKIE_POST_IMAGE_FIELD when one is set', () => {
@@ -238,7 +237,7 @@ describe('buildPostPayload', () => {
 
   it('sends no image key at all when there is no image, blank or missing', () => {
     // A post without an image must be byte-identical to what was sent before
-    // #501, so an unconfirmed field name never reaches Linkie by default.
+    // #501, and Linkie keeps deriving its own thumbnail for it.
     const base = {
       url: 'https://a.test',
       provider: 'wordpress',
@@ -265,34 +264,32 @@ describe('buildPostPayload', () => {
 });
 
 describe('extractPostImage', () => {
-  it.each(LINKIE_POST_IMAGE_CANDIDATE_KEYS)('reads an https URL from `%s`', (key) => {
-    expect(extractPostImage({ [key]: 'https://cdn.test/x.png' })).toBe('https://cdn.test/x.png');
+  it('reads thumbnail_url from a post shaped like a real Linkie response', () => {
+    const post = {
+      _id: '65b2d9e1c4a8f6b3d1c2e8a1',
+      url: 'https://www.instagram.com/p/Cx1aB2cDeFg/',
+      thumbnail_url: 'https://cdn.linkie.app/a/b/posts-65b2d9e1c4a8f6b3d1c2e8a1_1712345678.jpg',
+      provider: 'instagram',
+      account_name: 'janedoe',
+      text: 'New ceramics drop this Friday.',
+      post_type: 'photo',
+      options: null,
+    };
+    expect(extractPostImage(post)).toBe(post.thumbnail_url);
   });
 
-  it('reads media[0].url and media[0].path', () => {
-    expect(extractPostImage({ media: [{ url: 'https://cdn.test/u.png' }] })).toBe(
-      'https://cdn.test/u.png'
-    );
-    expect(extractPostImage({ media: [{ path: 'https://cdn.test/p.png' }] })).toBe(
-      'https://cdn.test/p.png'
-    );
-  });
-
-  it('takes the first candidate that is https, skipping ones that are not', () => {
-    expect(
-      extractPostImage({
-        thumbnail: 'http://cdn.test/insecure.png',
-        image: 'https://cdn.test/secure.png',
-      })
-    ).toBe('https://cdn.test/secure.png');
+  it('ignores other image-ish keys: thumbnail_url is the one Linkie uses', () => {
+    expect(extractPostImage({ thumbnail: 'https://cdn.test/x.png' })).toBe('');
+    expect(extractPostImage({ image_url: 'https://cdn.test/x.png' })).toBe('');
   });
 
   it('rejects non-https values and non-objects', () => {
-    expect(extractPostImage({ thumbnail: 'http://cdn.test/x.png' })).toBe('');
-    expect(extractPostImage({ image: 'javascript:alert(1)' })).toBe('');
-    expect(extractPostImage({ image: 'data:image/png;base64,AAAA' })).toBe('');
-    expect(extractPostImage({ picture: '/relative.png' })).toBe('');
-    expect(extractPostImage({ image: { url: 'https://cdn.test/x.png' } })).toBe('');
+    expect(extractPostImage({ thumbnail_url: 'http://cdn.test/x.png' })).toBe('');
+    expect(extractPostImage({ thumbnail_url: 'javascript:alert(1)' })).toBe('');
+    expect(extractPostImage({ thumbnail_url: 'data:image/png;base64,AAAA' })).toBe('');
+    expect(extractPostImage({ thumbnail_url: '/relative.png' })).toBe('');
+    expect(extractPostImage({ thumbnail_url: { url: 'https://cdn.test/x.png' } })).toBe('');
+    expect(extractPostImage({ thumbnail_url: null })).toBe('');
     expect(extractPostImage({})).toBe('');
     expect(extractPostImage(null)).toBe('');
   });

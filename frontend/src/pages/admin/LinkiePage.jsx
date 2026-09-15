@@ -164,8 +164,8 @@ function contentCoverImage(item) {
  * The Add-a-Post image row: upload from the computer, or pick from the site's
  * image gallery, then a preview with a remove button.
  *
- * Whatever is chosen is sent under LINKIE_POST_IMAGE_FIELD, whose name is
- * UNCONFIRMED (#501) — see lib/linkie.js before trusting that Linkie uses it.
+ * Whatever is chosen is sent as the post's `thumbnail_url`
+ * (LINKIE_POST_IMAGE_FIELD in lib/linkie.js).
  *
  * The image is uploaded as soon as it is chosen, not on Add Post, so the
  * preview shows the URL that will actually be sent — and a refused upload is

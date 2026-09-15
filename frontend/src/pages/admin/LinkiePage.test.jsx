@@ -306,7 +306,7 @@ describe('a post image, from the computer or the gallery (#501)', () => {
                 _id: 'x1',
                 url: 'https://a.test',
                 text: 'With image',
-                image_url: 'https://cdn.test/t.png',
+                thumbnail_url: 'https://cdn.test/t.png',
               },
             ],
           })

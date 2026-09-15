@@ -99,27 +99,17 @@ export const LINKIE_POST_TYPES = Object.freeze([
 export const TEXT_REQUIRED_POST_TYPES = Object.freeze(['text', 'poll']);
 
 /**
- * The request-body key a post's image is sent under.
+ * The key a post's image lives under, on the way in and on the way out.
  *
- * ***************************************************************************
- * UNCONFIRMED (#501). DO NOT READ THIS AS LINKIE'S SCHEMA.
- * ***************************************************************************
- * linkie.bio/docs/api-reference/posts answers non-browser clients with a
- * Cloudflare challenge, so the accepted post fields have not been read from a
- * source. `thumbnail` is a guess from Linkie's homepage copy ("Customize
- * thumbnails and card text"), nothing more. Linkie may ignore it, reject the
- * post with a 400 naming it, or derive the image from the URL's `og:image`
- * regardless.
- *
- * To settle it, the owner reads the create-post body in a browser (or copies
- * the payload from Linkie's dashboard network tab while editing a thumbnail)
- * and changes this one value; `linkie.test.js` pins whatever it is. The
- * thumbnails the Links tab renders via `extractPostImage` are the other half
- * of the evidence: they show which key Linkie RETURNS a post's image under.
+ * `thumbnail_url`, confirmed 2026-09-15 (#501) from a real Linkie post
+ * response the owner supplied: `data.thumbnail_url` holds the post image as
+ * an https CDN URL beside `url`, `provider`, `account_name`, `text` and
+ * `post_type` — the same snake_case keys `buildPostPayload` already sends. The
+ * earlier `thumbnail` was a guess made while Linkie's docs were unreadable.
  *
  * It is only sent when an image was actually chosen — see `buildPostPayload`.
  */
-export const LINKIE_POST_IMAGE_FIELD = 'thumbnail';
+export const LINKIE_POST_IMAGE_FIELD = 'thumbnail_url';
 
 /** What a post pushed from our own CMS is attributed to. */
 export const DEFAULT_ACCOUNT_NAME = 'HybridCloudWorks';
@@ -300,15 +290,14 @@ export function extractPosts(response) {
  * made a non-existent endpoint look plausible. `text` is omitted entirely when
  * blank rather than sent empty.
  *
- * `imageUrl`, when set, is sent under `LINKIE_POST_IMAGE_FIELD` — whose name
- * is UNCONFIRMED; see that constant.
+ * `imageUrl`, when set, is sent under `LINKIE_POST_IMAGE_FIELD`
+ * (`thumbnail_url`).
  *
  * @param {{ url?: string, provider?: string, accountName?: string,
  *           postType?: string, text?: string, imageUrl?: string }} fields
  * @returns {{ url: string, provider: string, account_name: string,
  *             post_type: string, text?: string } & Record<string, string>}
- *   plus, only when an image was chosen, one string under the key
- *   `LINKIE_POST_IMAGE_FIELD` (currently `thumbnail`, unconfirmed).
+ *   plus, only when an image was chosen, `thumbnail_url`.
  */
 export function buildPostPayload({ url, provider, accountName, postType, text, imageUrl } = {}) {
   const payload = {
@@ -320,8 +309,8 @@ export function buildPostPayload({ url, provider, accountName, postType, text, i
   const caption = String(text ?? '').trim();
   if (caption) payload.text = caption;
   // Absent, not empty, when there is no image — so a post without one is
-  // byte-identical to what was sent before #501, and an unconfirmed field
-  // name is only ever sent when an operator actually chose an image.
+  // byte-identical to what was sent before #501, and Linkie keeps deriving
+  // its own thumbnail for it.
   const image = String(imageUrl ?? '').trim();
   if (image) payload[LINKIE_POST_IMAGE_FIELD] = image;
   return payload;
@@ -350,8 +339,7 @@ export function createPostsBody(post) {
  * @param {{ title?: string, url?: string, imageUrl?: string }} item
  * @returns {{ url: string, provider: string, account_name: string,
  *             post_type: string, text?: string } & Record<string, string>}
- *   plus, only when an image was chosen, one string under the key
- *   `LINKIE_POST_IMAGE_FIELD` (currently `thumbnail`, unconfirmed).
+ *   plus, only when an image was chosen, `thumbnail_url`.
  */
 export function contentItemPostPayload({ title, url, imageUrl } = {}) {
   return buildPostPayload({
@@ -364,29 +352,10 @@ export function contentItemPostPayload({ title, url, imageUrl } = {}) {
   });
 }
 
-/**
- * The keys an existing post might carry its image under, checked in order.
- *
- * THIS LIST IS A PROBE, NOT A CONTRACT. Linkie's post schema is unread (see
- * `LINKIE_POST_IMAGE_FIELD`), so the Links tab renders a thumbnail from the
- * first of these that holds an https URL. Once the owner's real posts render,
- * whichever key lights up is the evidence for what Linkie calls the field —
- * and this list should then shrink to that one key.
- *
- * `media[0]` covers the other common shape: an array of media objects.
- */
-export const LINKIE_POST_IMAGE_CANDIDATE_KEYS = Object.freeze([
-  'thumbnail',
-  'thumbnail_url',
-  'image',
-  'image_url',
-  'picture',
-]);
-
 const isHttpsUrl = (value) => typeof value === 'string' && /^https:\/\/\S+$/i.test(value.trim());
 
 /**
- * The first https image URL on a post, or '' when it has none.
+ * A post's image URL from `thumbnail_url`, or '' when it has none.
  *
  * Non-https values are rejected rather than rendered: an `http:` thumbnail is
  * mixed content on an https admin page, and a `javascript:` or `data:` value
@@ -397,14 +366,8 @@ const isHttpsUrl = (value) => typeof value === 'string' && /^https:\/\/\S+$/i.te
  */
 export function extractPostImage(post) {
   if (!post || typeof post !== 'object') return '';
-  const firstMedia = Array.isArray(post.media) ? post.media[0] : null;
-  const candidates = [
-    ...LINKIE_POST_IMAGE_CANDIDATE_KEYS.map((key) => post[key]),
-    firstMedia?.url,
-    firstMedia?.path,
-  ];
-  const found = candidates.find(isHttpsUrl);
-  return found ? found.trim() : '';
+  const value = post[LINKIE_POST_IMAGE_FIELD];
+  return isHttpsUrl(value) ? value.trim() : '';
 }
 
 /** The public container a Linkie post image is uploaded to. */
