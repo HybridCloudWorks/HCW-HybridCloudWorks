@@ -28,6 +28,9 @@ describe('publicGet request dedupe', () => {
   });
   afterEach(() => {
     clearPublicGetCache();
+    // stubGlobal('fetch') is not undone by restoreAllMocks; without this the
+    // stub outlives the suite and later tests see a mock where fetch should be.
+    vi.unstubAllGlobals();
   });
 
   it('shares one in-flight request between concurrent callers', async () => {

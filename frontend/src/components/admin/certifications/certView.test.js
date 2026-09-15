@@ -121,6 +121,24 @@ describe('renewalRows', () => {
     ]);
     expect(rows[1].due).toBe(inDays(17));
   });
+
+  it('never reports 0 days for a cert that expired less than a day ago', () => {
+    // Expiry is a calendar date (midnight). At noon, a cert that expired at
+    // midnight is half a day past: it must read 1 day ago, not 0, and one due
+    // at the next midnight has 1 day left.
+    const noon = NOW + 12 * 3600000;
+    const rows = renewalRows(
+      [
+        cert({ id: 'todayMidnight', expDate: inDays(0) }),
+        cert({ id: 'tomorrow', expDate: inDays(1) }),
+      ],
+      noon
+    );
+    expect(rows.map((r) => [r.cert.id, r.daysLeft, r.expired])).toEqual([
+      ['todayMidnight', -1, true],
+      ['tomorrow', 1, false],
+    ]);
+  });
 });
 
 describe('verification source', () => {

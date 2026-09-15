@@ -128,6 +128,10 @@ export const hiddenCerts = (items) => items.filter((c) => c.display !== true);
 /**
  * Renewals: every cert that has expired, or expires within the renewal
  * window, soonest first, with whole days left (negative once expired).
+ *
+ * Both sides round AWAY from the expiry moment, so the count is never 0 for an
+ * expired cert: an hour past expiry is "1 day ago", not "0 days ago" beside an
+ * Expired badge. A cert still valid rounds up the same way (an hour left is 1).
  */
 export function renewalRows(items, nowMs) {
   const horizon = nowMs + RENEWAL_WINDOW_DAYS * DAY_MS;
@@ -135,12 +139,13 @@ export function renewalRows(items, nowMs) {
     .map((cert) => ({ cert, expMs: expiryMs(cert) }))
     .filter(({ expMs }) => expMs > 0 && expMs <= horizon)
     .sort((a, b) => a.expMs - b.expMs)
-    .map(({ cert, expMs }) => ({
-      cert,
-      due: toIso(cert.expDate),
-      daysLeft: Math.ceil((expMs - nowMs) / DAY_MS),
-      expired: expMs < nowMs,
-    }));
+    .map(({ cert, expMs }) => {
+      const expired = expMs < nowMs;
+      const daysLeft = expired
+        ? -Math.ceil((nowMs - expMs) / DAY_MS)
+        : Math.ceil((expMs - nowMs) / DAY_MS);
+      return { cert, due: toIso(cert.expDate), daysLeft, expired };
+    });
 }
 
 export function isCredlyUrl(value) {
