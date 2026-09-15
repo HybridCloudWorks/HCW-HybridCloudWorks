@@ -399,7 +399,7 @@ armed value is a deliberate workspace edit and the default is the rollback:
 
 | Value | Default | Why it is a workspace entry |
 | --- | --- | --- |
-| `schedulers_master_enabled` | `false` | Master kill switch for all 19 catalogued timers — it is what `FEATURE_FLAG_SCHEDULERS` is set from. A hardcoded literal until 2026-08-24, which meant no timer could be armed without a code change and nothing said so |
+| `schedulers_master_enabled` | `false` | Master kill switch for all 20 catalogued timers — it is what `FEATURE_FLAG_SCHEDULERS` is set from. A hardcoded literal until 2026-08-24, which meant no timer could be armed without a code change and nothing said so |
 | `newsletter_sending_enabled` | `false` | Whether approving a weekly newsletter issue sends it through Resend — it is what `NEWSLETTER_SENDING_ENABLED` is set from. Off, approval is refused before Resend is called ([ADR 0030](../decisions/0030-newsletter-provider.md) §2a) |
 | `enabled_timers` | `[]` | Which timers are armed, by flag suffix. Arming one needs **both** this and the master switch. An unrecognised name fails the plan rather than silently arming nothing |
 | `availability_test_enabled` | `false` | Runs the `/api/health` availability test. Off until the Cloudflare side is settled: Bot Fight Mode serves datacenter clients a 403, so arming it first would create a permanently-firing alert |
@@ -447,7 +447,7 @@ available. An entry that cannot answer both belongs in store 3 or nowhere.
 | --- | --- | --- |
 | `COSMOS_ENDPOINT`, `COSMOS_DATABASE`, `STORAGE_ACCOUNT_NAME`, `STORAGE_BLOB_ENDPOINT`, `STORAGE_QUEUE_ENDPOINT`, `AZURE_OPENAI_ENDPOINT` (app settings) | §2, §4 | Derived — set from resource attributes in `infra/main.tf` |
 | `NODE_ENV`, `REGION_NAME`, `WEBSITE_SITE_NAME` | §5 | Host-provided, or a literal in `main.tf` |
-| `FEATURE_FLAG_SCHEDULERS` and the per-timer flags | §5 | Derived from store 2 Terraform variables — `schedulers_master_enabled` for the master flag, `enabled_timers` for the nineteen per-timer flags via `local.timer_flags`. Both still resolve to `"false"` today. Until 2026-08-24 the master flag was a **literal** in `main.tf`, as this row used to say; that is what made all 18 timers permanent no-ops regardless of `enabled_timers` |
+| `FEATURE_FLAG_SCHEDULERS` and the per-timer flags | §5 | Derived from store 2 Terraform variables — `schedulers_master_enabled` for the master flag, `enabled_timers` for the twenty per-timer flags via `local.timer_flags`. Both still resolve to `"false"` today. Until 2026-08-24 the master flag was a **literal** in `main.tf`, as this row used to say; that is what made all 18 timers permanent no-ops regardless of `enabled_timers` |
 | `ENTRA_TENANT_ID`, `ENTRA_API_AUDIENCE` (app settings) | §1 | Derived from store 2 Terraform variables |
 | `STORAGE_ACCOUNT_KEY`, `STORAGE_CONNECTION_STRING`, `COSMOS_CONNECTION_STRING` | §2 | Deliberately absent; two are test-enforced |
 | `COSMOS_KEY` | §7 | Deliberately absent |

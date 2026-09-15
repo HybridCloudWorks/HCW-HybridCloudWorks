@@ -175,6 +175,11 @@ const PUBLIC_ROUTES = new Set([
   // visitor on the landing page; the reason it is safe is that its cache bounds
   // what it can be made to do to the upstream status APIs — lib/platform-health.js
   'public/platform-health',
+  // The pricing comparison's cache (#613): one point read of a document the
+  // scheduled refresh wrote from three PUBLIC price lists, region validated
+  // against a three-entry list, never a provider call on the request path —
+  // lib/cloud-tools/public-pricing.js.
+  'public/cloud-tools/pricing',
 ]);
 
 const ALLOWED_ORIGIN = 'https://hybridcloudworks.com';
@@ -347,10 +352,12 @@ describe('non-HTTP triggers', () => {
     // buildWeeklyNewsletter (#504); the nineteenth is platformJobSweeper
     // (jobs-sweeper.js), behind its own flag; the twentieth is
     // cosmosExportScheduler (cosmos-export.js, ADR 0028), behind
-    // FEATURE_FLAG_COSMOS_EXPORT.
-    expect(timerRegistrations.size).toBe(20);
+    // FEATURE_FLAG_COSMOS_EXPORT; the twenty-first is refreshToolServiceCache
+    // (cloud-tools-jobs.js, #613), behind FEATURE_FLAG_REFRESH_TOOL_SERVICE_CACHE.
+    expect(timerRegistrations.size).toBe(21);
     expect(timerRegistrations.has('platformJobSweeper')).toBe(true);
     expect(timerRegistrations.has('cosmosExportScheduler')).toBe(true);
+    expect(timerRegistrations.has('refreshToolServiceCache')).toBe(true);
     expect(timerRegistrations.has('buildWeeklyNewsletter')).toBe(true);
     for (const name of ['cleanupTempStorage', 'cleanupUnusedCertImages']) {
       // The two that delete blobs: registered, and their handlers are the

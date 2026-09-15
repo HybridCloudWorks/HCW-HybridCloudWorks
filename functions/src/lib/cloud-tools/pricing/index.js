@@ -144,4 +144,10 @@ export function clearPricingCaches() {
   resetGoogleCaches();
 }
 
-export { BASELINE_COSTS, baselineFor, PROVIDERS, KNOWN_UNIT_MISMATCHES } from './baseline.js';
+export {
+  BASELINE_COSTS,
+  baselineFor,
+  fallbackBaselineFor,
+  PROVIDERS,
+  KNOWN_UNIT_MISMATCHES,
+} from './baseline.js';

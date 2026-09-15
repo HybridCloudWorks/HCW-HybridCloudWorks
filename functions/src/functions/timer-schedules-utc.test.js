@@ -18,14 +18,14 @@
  * valid, the setting was valid, and only their combination was wrong.
  *
  * Re-adding the setting — or `TZ`, which does the same job — would silently
- * move **sixteen** of the twenty registered timers and make the same six
+ * move **seventeen** of the twenty-one registered timers and make the same six
  * sentences wrong again. There is no plan diff that reads as "every timer
  * moved five hours"; it reads as one app setting.
  *
- * Sixteen is the number this file enforces, and it is worth splitting because
- * the two halves matter differently to an operator:
+ * Seventeen is the number this file enforces, and it is worth splitting
+ * because the two halves matter differently to an operator:
  *
- *   - **Ten change the instant they run.** The fixed-hour and fixed-day
+ *   - **Eleven change the instant they run.** The fixed-hour and fixed-day
  *     schedules — a 07:00 digest becomes a 07:00 UTC digest, five hours
  *     earlier in wall-clock terms. This is the half that shows up as "the
  *     report arrived in the middle of the night".
@@ -101,6 +101,7 @@ vi.mock('@azure/functions', () => ({
 await import('./schedulers.js');
 await import('./jobs-sweeper.js');
 await import('./cosmos-export.js');
+await import('./cloud-tools-jobs.js');
 
 /**
  * Every schedule whose firing INSTANTS depend on the app clock, and the UTC
@@ -116,6 +117,7 @@ await import('./cosmos-export.js');
 const CLOCK_DEPENDENT = {
   // Fixed hour, every day.
   cleanupTempStorage: { schedule: '0 0 0 * * *', utc: 'daily 00:00' },
+  refreshToolServiceCache: { schedule: '0 0 2 * * *', utc: 'daily 02:00' },
   cosmosExportScheduler: { schedule: '0 0 3 * * *', utc: 'daily 03:00' },
   forgeScheduled: { schedule: '0 30 3 * * *', utc: 'daily 03:30' },
   cleanupRejectedContent: { schedule: '0 0 4 * * *', utc: 'daily 04:00' },
@@ -169,7 +171,7 @@ describe('timer schedules are UTC', () => {
     // Guards the guard. An empty read on either side would make every
     // assertion below pass by inspecting nothing.
     expect(terraformSource(INFRA).length).toBeGreaterThan(1000);
-    expect(timerRegistrations.size).toBe(20);
+    expect(timerRegistrations.size).toBe(21);
   });
 
   it('the app clock is UTC — no WEBSITE_TIME_ZONE or TZ app setting exists', () => {
