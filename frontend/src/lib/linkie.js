@@ -98,6 +98,29 @@ export const LINKIE_POST_TYPES = Object.freeze([
 /** Post types whose whole content IS the caption, so an empty one is meaningless. */
 export const TEXT_REQUIRED_POST_TYPES = Object.freeze(['text', 'poll']);
 
+/**
+ * The request-body key a post's image is sent under.
+ *
+ * ***************************************************************************
+ * UNCONFIRMED (#501). DO NOT READ THIS AS LINKIE'S SCHEMA.
+ * ***************************************************************************
+ * linkie.bio/docs/api-reference/posts answers non-browser clients with a
+ * Cloudflare challenge, so the accepted post fields have not been read from a
+ * source. `thumbnail` is a guess from Linkie's homepage copy ("Customize
+ * thumbnails and card text"), nothing more. Linkie may ignore it, reject the
+ * post with a 400 naming it, or derive the image from the URL's `og:image`
+ * regardless.
+ *
+ * To settle it, the owner reads the create-post body in a browser (or copies
+ * the payload from Linkie's dashboard network tab while editing a thumbnail)
+ * and changes this one value; `linkie.test.js` pins whatever it is. The
+ * thumbnails the Links tab renders via `extractPostImage` are the other half
+ * of the evidence: they show which key Linkie RETURNS a post's image under.
+ *
+ * It is only sent when an image was actually chosen — see `buildPostPayload`.
+ */
+export const LINKIE_POST_IMAGE_FIELD = 'thumbnail';
+
 /** What a post pushed from our own CMS is attributed to. */
 export const DEFAULT_ACCOUNT_NAME = 'HybridCloudWorks';
 export const CONTENT_PUSH_PROVIDER = 'wordpress';
@@ -110,6 +133,7 @@ export const EMPTY_POST_FORM = Object.freeze({
   accountName: DEFAULT_ACCOUNT_NAME,
   postType: CONTENT_PUSH_POST_TYPE,
   text: '',
+  imageUrl: '',
 });
 
 /**
@@ -276,12 +300,15 @@ export function extractPosts(response) {
  * made a non-existent endpoint look plausible. `text` is omitted entirely when
  * blank rather than sent empty.
  *
+ * `imageUrl`, when set, is sent under `LINKIE_POST_IMAGE_FIELD` — whose name
+ * is UNCONFIRMED; see that constant.
+ *
  * @param {{ url?: string, provider?: string, accountName?: string,
- *           postType?: string, text?: string }} fields
+ *           postType?: string, text?: string, imageUrl?: string }} fields
  * @returns {{ url: string, provider: string, account_name: string,
  *             post_type: string, text?: string }}
  */
-export function buildPostPayload({ url, provider, accountName, postType, text } = {}) {
+export function buildPostPayload({ url, provider, accountName, postType, text, imageUrl } = {}) {
   const payload = {
     url: String(url ?? '').trim(),
     provider: String(provider ?? '').trim(),
@@ -290,6 +317,11 @@ export function buildPostPayload({ url, provider, accountName, postType, text } 
   };
   const caption = String(text ?? '').trim();
   if (caption) payload.text = caption;
+  // Absent, not empty, when there is no image — so a post without one is
+  // byte-identical to what was sent before #501, and an unconfirmed field
+  // name is only ever sent when an operator actually chose an image.
+  const image = String(imageUrl ?? '').trim();
+  if (image) payload[LINKIE_POST_IMAGE_FIELD] = image;
   return payload;
 }
 
@@ -311,18 +343,110 @@ export function createPostsBody(post) {
  * The Push Published Content mapping: one of our own published pages as a
  * Linkie post. The article's title becomes the caption, for the reason above.
  *
- * @param {{ title?: string, url?: string }} item
+ * The cover image, when the item has a public one, rides along as `imageUrl`.
+ *
+ * @param {{ title?: string, url?: string, imageUrl?: string }} item
  * @returns {{ url: string, provider: string, account_name: string,
  *             post_type: string, text?: string }}
  */
-export function contentItemPostPayload({ title, url } = {}) {
+export function contentItemPostPayload({ title, url, imageUrl } = {}) {
   return buildPostPayload({
     url,
     provider: CONTENT_PUSH_PROVIDER,
     accountName: DEFAULT_ACCOUNT_NAME,
     postType: CONTENT_PUSH_POST_TYPE,
     text: title,
+    imageUrl,
   });
+}
+
+/**
+ * The keys an existing post might carry its image under, checked in order.
+ *
+ * THIS LIST IS A PROBE, NOT A CONTRACT. Linkie's post schema is unread (see
+ * `LINKIE_POST_IMAGE_FIELD`), so the Links tab renders a thumbnail from the
+ * first of these that holds an https URL. Once the owner's real posts render,
+ * whichever key lights up is the evidence for what Linkie calls the field —
+ * and this list should then shrink to that one key.
+ *
+ * `media[0]` covers the other common shape: an array of media objects.
+ */
+export const LINKIE_POST_IMAGE_CANDIDATE_KEYS = Object.freeze([
+  'thumbnail',
+  'thumbnail_url',
+  'image',
+  'image_url',
+  'picture',
+]);
+
+const isHttpsUrl = (value) => typeof value === 'string' && /^https:\/\/\S+$/i.test(value.trim());
+
+/**
+ * The first https image URL on a post, or '' when it has none.
+ *
+ * Non-https values are rejected rather than rendered: an `http:` thumbnail is
+ * mixed content on an https admin page, and a `javascript:` or `data:` value
+ * has no business in an `<img src>` built from a third party's response.
+ *
+ * @param {unknown} post
+ * @returns {string}
+ */
+export function extractPostImage(post) {
+  if (!post || typeof post !== 'object') return '';
+  const firstMedia = Array.isArray(post.media) ? post.media[0] : null;
+  const candidates = [
+    ...LINKIE_POST_IMAGE_CANDIDATE_KEYS.map((key) => post[key]),
+    firstMedia?.url,
+    firstMedia?.path,
+  ];
+  const found = candidates.find(isHttpsUrl);
+  return found ? found.trim() : '';
+}
+
+/** The public container a Linkie post image is uploaded to. */
+export const LINKIE_IMAGE_CONTAINER = 'covers';
+
+/**
+ * Where an uploaded Linkie post image is stored inside `covers`.
+ *
+ * `covers`, not `content` (which the Image Gallery uploads to): `content` is
+ * PRIVATE — the upload route returns an empty `url` for it — and Linkie's
+ * servers have to fetch this image anonymously. `covers` is in both
+ * `UPLOAD_CONTAINERS` and `PUBLIC_MEDIA_CONTAINERS` (functions/src/lib/
+ * blob-paths.js). Timestamped and randomised because the route refuses to
+ * overwrite an existing blob.
+ *
+ * @param {string} extension - from `PUBLIC_IMAGE_EXTENSIONS`, never the filename
+ * @param {{ now?: number, random?: string }} [seed] - injectable for tests
+ * @returns {string}
+ */
+export function linkieImagePath(extension, { now = Date.now(), random } = {}) {
+  const id = random ?? Math.random().toString(36).slice(2, 10);
+  return `linkie/${now}-${id}.${extension}`;
+}
+
+/**
+ * An image URL in the only form Linkie can use: absolute and https.
+ *
+ * Stored and uploaded images are usually SITE-RELATIVE
+ * (`/api/public/media/covers/…`, from `mediaUrlFor`). `resolveMediaUrl` makes
+ * that absolute when the Functions base is cross-origin — production's is
+ * `https://api-azure.hybridcloudworks.com/api` — and leaves it relative when
+ * the base is `/api`, in which case the page's own origin serves it. Anything
+ * that still is not https (an empty private-container URL, an http origin in
+ * local dev) returns '' so the caller can say so instead of sending Linkie a
+ * URL it cannot fetch.
+ *
+ * @param {string} url
+ * @param {{ resolve: (url: string) => string, origin?: string }} deps
+ * @returns {string}
+ */
+export function toPublicImageUrl(url, { resolve, origin = '' }) {
+  let value = resolve(String(url ?? '').trim());
+  if (value.startsWith('/') && !value.startsWith('//') && origin) {
+    value = `${origin.replace(/\/+$/, '')}${value}`;
+  }
+  return isHttpsUrl(value) ? value : '';
 }
 
 /**

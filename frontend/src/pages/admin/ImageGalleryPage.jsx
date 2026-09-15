@@ -20,6 +20,7 @@ import {
   Pencil,
 } from 'lucide-react';
 import { loadGalleryItems, getSourceLabel } from '@/lib/imageGallery';
+import { uploadImageFile } from '@/lib/imageUpload';
 import { normalizeContentProvider } from '@/lib/contentModel';
 import { resolveMediaUrl } from '../../lib/functionsBase';
 
@@ -230,16 +231,10 @@ async function uploadGalleryFile({
 
   // Upload into the 'content' container; the stored ref carries the container
   // prefix so the delete path (parseStorageRef) can find the blob later.
-  const dataBase64 = await new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
-    reader.onerror = () => reject(new Error('Could not read file'));
-    reader.readAsDataURL(file);
-  });
-  const uploaded = await postJSON('cms/uploads/content', {
+  const uploaded = await uploadImageFile({
+    container: 'content',
     path: uploadData.storagePath,
-    contentType: file.type || 'image/png',
-    dataBase64,
+    file,
   });
   const imageUrl = uploaded.url;
 
