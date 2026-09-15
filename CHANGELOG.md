@@ -19,6 +19,60 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Certifications Hub: tabs by duty (#572).** `/admin/certifications` moves
+  from one page (1,107 lines) to five tabs on the shared `HubTabs` bar,
+  deep-linked with `?tab=`:
+  - **Catalog:** stats, search, issuer filter and the card grid.
+  - **Featured:** featured certifications in display order.
+  - **Renewals:** expired certifications and those due within 180 days, soonest
+    first.
+  - **Publishing:** the Publish snapshot button, when the public snapshot was
+    last published, and what changed since.
+  - **Settings:** image rules, verification sources and hidden items.
+
+  Old ids such as `expiring`, `hidden` and `publish` land on the tab that now
+  holds them. The list loads once at page level with a generation guard, and a
+  read that raced a write is issued again. Writes have a per-certification
+  in-flight guard, and the editor's save and upload have their own. The
+  Publishing tab reads the public snapshot on its own, so a failure in either
+  read stays on its tab. `PublishSnapshotButton` gains an optional
+  `onPublished` callback, and `publicApi.js` gains `fetchPublicSnapshot`.
+
+- **Speaking Events Hub: tabs by duty (#573).** `/admin/speaking-events` is now
+  five tabs on the shared `HubTabs` bar, deep-linked with `?tab=`:
+  - **Upcoming:** future sessions, soonest first.
+  - **Past:** delivered sessions, newest first, with slide and event links.
+  - **Sources:** when Sessionize was last read, a preview of what a sync would
+    create or fill in, Sync from Sessionize, and manual entries.
+  - **Publishing:** the public snapshot and what a publish would write now.
+  - **Settings:** the Sessionize speaker ID, read-only, with a link to the
+    Integrations card that stays its only editor.
+
+  Old ids such as `events`, `sync` and `publish` land on the tab that now holds
+  them. Each read is generation-guarded, and a failed refresh clears its rows.
+  Save, delete and sync each have an in-flight guard, and the session lists
+  wait for both reads so Enrich cannot create a duplicate record. Behaviour
+  changes: the store is re-read after a partly failed sync, and event links
+  render only for http(s) URLs.
+
+- **Health Hub: Code and Security tab, and a Qlty card on Integrations
+  (#569).** A new Code and Security tab reads `GET /api/cms/code-quality`
+  (from #590) the first time it is opened, not on page load, and shows:
+  - Qlty's grade tiles: maintainability, security, coverage, duplication and
+    technical debt;
+  - open issues by level, and the security total with its split;
+  - categories, top rules and top files, linked to Qlty;
+  - an as-of time, and a warning when the summary was truncated.
+
+  Qlty not configured is a notice linking to the Integrations Keys tab, and a
+  refusal is a retryable error. The loader uses the Health Hub's generation
+  guard, so a slower read never overwrites a newer one and a failed refresh
+  clears the numbers. The copyable report gains a Code and Security section
+  once the tab has loaded. The Integrations Hub gains a Code quality group with
+  a Qlty card (`QLTY-API-TOKEN`) whose test calls the `qlty` connection probe
+  and names the account the token belongs to. `?tab=qlty`, `quality`,
+  `security` and `code-quality` open the tab.
+
 - **Health Hub: tabs by duty instead of one long scroll (#569).**
   `/admin/health` now has four tabs on the shared `HubTabs` bar, deep-linked
   with `?tab=`:
@@ -2398,6 +2452,21 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Azure certification detail pages download only their own study-guide
+  outline (#500).** `frontend/src/data/azure/study-guides.js` (491 KB source)
+  is now one module per guide plus `index.js` under
+  `frontend/src/data/azure/study-guides/`. `CertDetailPage` loads the exam's
+  module through `import.meta.glob` and `use()` inside a memoised `Suspense`
+  boundary, so hydration keeps the prerendered outline until the module
+  lands. The Azure detail chunk drops from 74.33 kB to 6.36 kB gzipped (AWS:
+  2.75 kB), plus about 1.8 kB for the one guide. Prerendered HTML is
+  unchanged: AZ-104 still carries its outline and all five deep links, and
+  all 50 guides render. `update-study-guides.mjs` writes the directory
+  through `scripts/study-guide-files.mjs`. Guide modules carry no date, so an
+  unchanged guide rewrites byte-identical. The weekly
+  `update-learn-catalogue.yml` stages and replaces the directory, and detects
+  new guides with `git status --porcelain`, since a new file is untracked.
+
 - **The admin sidebar stays put, reads cleanly, and calls the newsletter page
   Newsletter Hub (#566).** The admin shell is now exactly one viewport tall:
   the sidebar is pinned, its menu scrolls on its own when it outgrows the
@@ -4705,6 +4774,43 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Removed
 
+- **Unused files, scripts and tooling removed in a repository cleanup.**
+  Every removal was checked from `origin/main`: nothing imports, fetches, runs
+  or links to it. The frontend build, all 1,703 frontend tests, lint, the
+  format check and the three validators pass without them.
+  - **636 unused font files (about 66 MB of `frontend/public/fonts`).**
+    `index.css` loads 14 of 650. The rest were never requested, including all
+    of Aptos and Genos: `--font-aptos` names the family but no `@font-face`
+    loads it. The OFL licences beside Goldman and Turret Road stay.
+  - **20 public data files nothing fetched:** `frontend/public/frameworks/*.json`
+    (frameworks come from the API) and `frontend/public/finops/architectures.json`
+    with its one diagram.
+  - **11 orphaned components and helpers:**
+    - Firebase-era `lib/errorHandler.js`;
+    - `ui/alert`, `ui/alert-dialog` and `ui/scroll-area`, with their two Radix
+      packages;
+    - `news/ArticlesBentoGrid`;
+    - the `ContentHubTemplate`, `PatternLayouts` and `LandingPageTemplate`
+      templates;
+    - `performance/LazyImage` and `performance/SuspenseBoundary`, with their
+      index. `Skeleton` stays.
+  - **Five Firebase-era admin smoke scripts** and their `smoke:*` npm scripts.
+    They waited for Firebase Auth state and a heading that no longer exist.
+  - **`validate-keyboard-nav.js`,** which checked a page and route that no
+    longer exist. `a11y:audit` now runs the contrast scan.
+  - **Two `a11y:fix-*` npm scripts** that pointed at files that were never
+    committed.
+  - **Husky, commitlint and lint-staged.** The hooks were never installed:
+    there was no `prepare` script, and `.husky` sat in `frontend/` while `.git`
+    is at the root.
+  - **Wrong paths fixed in the docs:**
+    - the code-review skill's frontend reference (script paths and the
+      keyboard check);
+    - ADR 0030 (`content/digest.js`, removed in #541);
+    - the migration plan (`infra/scratch.tf` still exists, as the removal
+      record);
+    - the CommonJS marker in `frontend/scripts/package.json`.
+
 - **`useAuthRedirectLanding` is gone, and `App.jsx` is guarded against its
   return (#531).** The hook was mounted on **every route in the application** —
   including every anonymous visit to a provider news page — so that a regex
@@ -4891,6 +4997,21 @@ This project has not cut a tagged release; entries are grouped under
   rather than riding on the next timer apply.
 
 ### Fixed
+
+- **Prerendered pages were thrown away and re-rendered on load (#604).** `App`
+  held the idle flag (`requestIdleCallback`, or a 1500 ms fallback) that
+  defers the theme toggle and toaster. It usually flipped before the lazy page
+  chunk arrived, re-rendering `App` while the route `<Suspense>` was still
+  dehydrated. React 19 then client-rendered that boundary and discarded the
+  server HTML, without calling `onRecoverableError`, so nothing was logged.
+  Measured in Chromium, the first node inside `<main>` was replaced on AI-102,
+  `/azure`, `/aws`, `/` and `/about`, and on all six pages with a slow chunk.
+  The idle state now lives in a sibling `DeferredChrome` component that the
+  boundary cannot see, and the node survives on every page, with or without
+  the delay. `e2e/hydration.spec.js` now tags inside `<main>` rather than the
+  app wrapper, which is outside the boundary. It holds back lazy chunks and
+  covers a certification page; it fails on the old build and passes on this
+  one.
 
 - **Five published articles rendered broken hero images, and their link
   previews were broken too (#518).** The Firebase Storage bucket
@@ -6615,6 +6736,26 @@ This project has not cut a tagged release; entries are grouped under
   and more; it now returns full documents with internal fields stripped. (#61)
 
 ### Security
+
+- **Qlty security findings on Terraform and workflows cleared, by owner decision
+  (ADR 0031).** Qlty listed 19 open checkov and trivy findings on `main`, and
+  the owner decided each group on 2026-09-14.
+  - **Fixed in code:**
+    - Key Vault purge protection is on. It is one-way, and supersedes ADR 0021.
+    - Function host storage moves from LRS to GRS.
+    - The two remaining CKV_GHA_7 workflows lose their dispatch inputs.
+    - Storage resource logs reach Log Analytics through new diagnostic
+      settings: queues on both accounts, and host blob writes and deletes.
+  - **Host blob reads are not logged.** Measured at about 573,000 a day, they
+    would trip the 0.25 GB/day cap that the log alert rules depend on.
+  - **Recorded decisions, cited by inline skips:** Microsoft-managed keys, no
+    private endpoints, no infrastructure encryption, and no Flex zone
+    redundancy.
+  - **Public network access stays enabled.** `Disabled` would also refuse the
+    service-endpoint firewall rules, and every data service already defaults
+    to Deny.
+  - Local checkov now reports 0 failures on `infra/` and the workflows, and
+    trivy 0 on `infra/`.
 
 - **The 21 remaining zizmor template-injection findings are fixed, and Qlty's
   TODO noise is triaged (#588).** `ci.yml`, `codeql.yml`, `iac-validate.yml`,

@@ -44,12 +44,10 @@
 name: Verify Alert Rule State
 
 on:
+  # No inputs (checkov CKV_GHA_7): the estate has one workload resource group,
+  # and a dispatch that could point the check elsewhere could only make it
+  # report on the wrong rules. A new environment is a code change here.
   workflow_dispatch:
-    inputs:
-      resource_group:
-        description: 'Resource group holding the workload alert rules'
-        required: false
-        default: 'rg-web-site-prod-cus'
 
 permissions:
   contents: read
@@ -75,7 +73,7 @@ jobs:
 
       - name: Read the live scheduled query rules
         env:
-          RG: ${{ inputs.resource_group }}
+          RG: rg-web-site-prod-cus
         run: |
           set -uo pipefail
 

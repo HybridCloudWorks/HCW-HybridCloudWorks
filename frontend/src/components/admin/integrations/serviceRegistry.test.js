@@ -42,6 +42,7 @@ describe('the service registry', () => {
       'Microsoft Learn',
       'AWS Skill Builder',
       'Google Developer',
+      'Qlty',
     ]);
   });
 
@@ -91,7 +92,7 @@ describe('the service registry', () => {
     expect(untestable).toEqual([]);
   });
 
-  describe('the three server-side probes (#483)', () => {
+  describe('the server-side probes (#483, #569)', () => {
     // Exercised through SERVICES rather than by importing the runners, because
     // the field IS the contract: the card calls whatever sits in `test`.
     const runnerFor = (id) => SERVICES.find((service) => service.id === id).test;
@@ -106,6 +107,8 @@ describe('the service registry', () => {
         ['telegram', 'telegram'],
         ['rsscom', 'rsscom'],
         ['youtube', 'youtube'],
+        ['resend', 'resend'],
+        ['qlty', 'qlty'],
       ]) {
         postJSON.mockResolvedValueOnce({ ok: true, status: 200, data: {} });
         await runnerFor(id)();
@@ -118,7 +121,7 @@ describe('the service registry', () => {
       // so a runner that does not read `ok` says Connected for a 401. That
       // defect has now been written three times in this file's history, which
       // is why every new runner gets this test.
-      for (const id of ['telegram', 'rsscom', 'youtube']) {
+      for (const id of ['telegram', 'rsscom', 'youtube', 'qlty']) {
         postJSON.mockResolvedValueOnce({
           ok: false,
           status: 401,
@@ -151,10 +154,38 @@ describe('the service registry', () => {
       await expect(runnerFor('rsscom')()).resolves.toContain('2 show(s)');
     });
 
+    it('names the Qlty login a token belongs to, and says Connected without one', async () => {
+      postJSON.mockResolvedValueOnce({ ok: true, status: 200, data: { login: 'saulpatinojr' } });
+      await expect(runnerFor('qlty')()).resolves.toBe('Connected as saulpatinojr.');
+
+      // A login that is not a string is not echoed; the verdict still stands.
+      postJSON.mockResolvedValueOnce({ ok: true, status: 200, data: { login: { name: 'x' } } });
+      await expect(runnerFor('qlty')()).resolves.toBe('Connected to Qlty.');
+      postJSON.mockResolvedValueOnce({ ok: true, status: 200, data: {} });
+      await expect(runnerFor('qlty')()).resolves.toBe('Connected to Qlty.');
+    });
+
+    it('refuses a Qlty token Qlty rejected, naming Qlty and its status', async () => {
+      postJSON.mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        data: { message: 'Invalid token' },
+      });
+      await expect(runnerFor('qlty')()).rejects.toThrow('Qlty answered 401 - Invalid token');
+    });
+
     it('says what a YouTube press costs, because pressing it spends quota', async () => {
       postJSON.mockResolvedValueOnce({ ok: true, status: 200, data: { items: [] } });
       await expect(runnerFor('youtube')()).resolves.toMatch(/quota/i);
     });
+  });
+
+  it('files Qlty under Code quality, with the key the catalogue declares', () => {
+    expect(SERVICE_GROUPS.map((group) => group.id)).toContain('code-quality');
+    const qlty = SERVICES.find((service) => service.id === 'qlty');
+    expect(qlty.group).toBe('code-quality');
+    expect(qlty.secrets).toEqual(['QLTY-API-TOKEN']);
+    expect(qlty.url).toBe('https://qlty.sh/user/settings/tokens');
   });
 
   it('puts every service in a group that exists', () => {

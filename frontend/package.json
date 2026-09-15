@@ -27,13 +27,10 @@
     "validate:content-matrix": "node scripts/validate-content-matrix.cjs",
     "code:quality": "npm run lint && npm run format:check && npm run validate:routes && npm run validate:providers && npm run validate:content-matrix",
     "code:fix": "npm run lint:fix && npm run format",
-    "a11y:check-keyboard": "node scripts/validate-keyboard-nav.js",
     "a11y:contrast": "node scripts/axe-theme-scan.mjs",
     "a11y:contrast:report": "node scripts/axe-report-summary.mjs",
     "a11y:contrast:e2e": "playwright test contrast.spec.js",
-    "a11y:audit": "npm run a11y:check-keyboard && npm run a11y:contrast",
-    "a11y:fix-high-safety": "node scripts/high-safety-fixes.js",
-    "a11y:fix-inputs": "node scripts/high-safety-input-fixes.js",
+    "a11y:audit": "npm run a11y:contrast",
     "clean": "node -e \"const fs=require('fs');const rm=p=>{try{fs.rmSync(p,{recursive:true,force:true})}catch{}};rm('dist');rm('node_modules/.vite');\"",
     "clean:all": "node -e \"const fs=require('fs');const rm=p=>{try{fs.rmSync(p,{recursive:true,force:true})}catch{}};rm('dist');rm('node_modules');\"",
     "test": "vitest run",
@@ -43,20 +40,13 @@
     "test:e2e:debug": "playwright test --debug",
     "test:e2e:headed": "playwright test --headed",
     "verify:required": "npm run build && npm run test",
-    "verify:optional:release": "npm run test:e2e",
-    "smoke:auth:capture": "node scripts/capture-admin-storage-state-edge.mjs",
-    "smoke:auth:capture:cdp": "node scripts/capture-admin-storage-state-from-edge-cdp.mjs",
-    "smoke:priority2:edge": "node scripts/run-priority2-smoke-edge.mjs",
-    "smoke:priority2:flow": "node scripts/run-priority2-smoke-edge-flow.mjs",
-    "smoke:priority2:manual-login": "node scripts/run-priority2-smoke-with-manual-edge-login.mjs"
+    "verify:optional:release": "npm run test:e2e"
   },
   "dependencies": {
     "@azure/msal-browser": "^5.21.0",
     "@fontsource/ibm-plex-mono": "^5.2.7",
-    "@radix-ui/react-alert-dialog": "^1.1.23",
     "@radix-ui/react-dialog": "^1.0.5",
     "@radix-ui/react-label": "^2.1.15",
-    "@radix-ui/react-scroll-area": "^1.2.18",
     "@radix-ui/react-select": "^2.3.7",
     "@radix-ui/react-separator": "^1.1.15",
     "@radix-ui/react-slot": "^1.3.3",
@@ -86,7 +76,6 @@
     "tw-animate-css": "^1.4.0"
   },
   "devDependencies": {
-    "@commitlint/config-conventional": "^21.2.2",
     "@playwright/test": "^1.63.0",
     "@resvg/resvg-js": "^2.6.2",
     "@tailwindcss/typography": "^0.5.16",
@@ -100,7 +89,6 @@
     "@vitest/coverage-v8": "^5.0.0",
     "autoprefixer": "^10.5.6",
     "baseline-browser-mapping": "^2.11.22",
-    "commitlint": "^21.2.2",
     "dotenv": "^17.4.2",
     "esbuild": "^0.28.2",
     "eslint": "^10.10.0",
@@ -109,7 +97,6 @@
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.12.0",
-    "husky": "^9.1.7",
     "jsdom": "^30.0.1",
     "pdf-parse": "^2.4.5",
     "postcss": "^8.5.28",
@@ -150,14 +137,5 @@
     "eslint-plugin-react": {
       "eslint": "$eslint"
     }
-  },
-  "lint-staged": {
-    "*.{js,jsx,ts,tsx}": [
-      "node node_modules/eslint/bin/eslint.js --fix",
-      "node node_modules/prettier/bin/prettier.cjs --write"
-    ],
-    "*.{json,md}": [
-      "node node_modules/prettier/bin/prettier.cjs --write"
-    ]
   }
 }

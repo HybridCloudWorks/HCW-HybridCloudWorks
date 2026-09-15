@@ -17,15 +17,16 @@
 #        Key Vault Secrets Officer (write) for Terraform executor.
 # =============================================================================
 resource "azurerm_key_vault" "hcw" {
-  #checkov:skip=CKV_AZURE_110:Purge protection off by owner decision 2026-08-24, ADR 0021. docs/security/scanner-triage.md#checkov
-  #checkov:skip=CKV_AZURE_42:Same decision; soft delete at 90 days is the recovery control, ADR 0021. docs/security/scanner-triage.md#checkov
+  #checkov:skip=CKV2_AZURE_32:No private endpoints, owner decision 2026-09-14 (ADR 0031); network_acls default Deny with the subnet service-endpoint rule instead. docs/security/scanner-triage.md#checkov
   name                       = var.key_vault_name
   location                   = azurerm_resource_group.app["sec"].location
   resource_group_name        = azurerm_resource_group.app["sec"].name
   tenant_id                  = data.azurerm_client_config.current.tenant_id
   sku_name                   = "standard"
   soft_delete_retention_days = 90
-  #trivy:ignore:AVD-AZU-0016 ADR 0021, owner decision 2026-08-24. docs/security/scanner-triage.md#trivy
+  # ON since 2026-09-14, owner decision (ADR 0031, superseding ADR 0021).
+  # ONE-WAY: Azure refuses to turn it off again, and a deleted vault then stays
+  # soft-deleted, unpurgeable, with its name reserved, for the 90 days above.
   purge_protection_enabled   = var.purge_protection_enabled
   rbac_authorization_enabled = true
 

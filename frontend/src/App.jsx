@@ -253,37 +253,6 @@ function App() {
   const [, firstSegment] = location.pathname.split('/');
   const provider = VALID_PROVIDERS.includes(firstSegment) ? firstSegment : null;
   const isAdminRoute = firstSegment === 'admin';
-  // Derived rather than synced from the effect below. Admin routes need the
-  // deferred chrome immediately, and once idle time has been reached we keep it
-  // on; expressing that as `isAdminRoute || idleReached` avoids calling setState
-  // synchronously inside the effect, which triggers a cascading render.
-  const [idleReached, setIdleReached] = useState(isAdminRoute);
-  const showDeferredUi = isAdminRoute || idleReached;
-
-  useEffect(() => {
-    // Nothing to schedule on admin routes — showDeferredUi is already true.
-    if (isAdminRoute) return undefined;
-
-    let cancelled = false;
-    let timeoutId = null;
-    const activate = () => {
-      if (!cancelled) setIdleReached(true);
-    };
-
-    if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
-      const idleId = window.requestIdleCallback(activate, { timeout: 2000 });
-      return () => {
-        cancelled = true;
-        window.cancelIdleCallback?.(idleId);
-      };
-    }
-
-    timeoutId = window.setTimeout(activate, 1500);
-    return () => {
-      cancelled = true;
-      if (timeoutId !== null) window.clearTimeout(timeoutId);
-    };
-  }, [isAdminRoute]);
 
   return (
     <div
@@ -465,22 +434,78 @@ function App() {
 
       {!isAdminRoute && <Footer />}
 
-      {showDeferredUi && (
-        <Suspense fallback={null}>
-          <ThemeToggleButton
-            variant="outline"
-            size="icon"
-            className="fixed bottom-5 right-5 z-70 h-11 w-11 rounded-full border-border bg-background/90 text-foreground shadow-lg backdrop-blur supports-backdrop-filter:bg-background/75"
-          />
-        </Suspense>
-      )}
-
-      {showDeferredUi && (
-        <Suspense fallback={null}>
-          <Toaster />
-        </Suspense>
-      )}
+      <DeferredChrome immediate={isAdminRoute} />
     </div>
+  );
+}
+
+/**
+ * The theme toggle and the toaster, mounted once the browser is idle.
+ *
+ * ITS OWN COMPONENT SO THE IDLE UPDATE CANNOT REACH THE ROUTE (#604). This
+ * state used to live in `App`, and `setIdleReached` re-rendered `App` — the
+ * parent of the route-level `<Suspense>`. On a pre-rendered page that boundary
+ * is still dehydrated while its lazy page chunk is on the wire, and
+ * `requestIdleCallback` routinely fires first. React 19 answers an update to a
+ * dehydrated boundary it cannot hydrate yet by throwing the server HTML away
+ * and client-rendering it — silently, with no `onRecoverableError` — so every
+ * pre-rendered page, the home page included, lost its markup about 150 ms
+ * after load. Here the update lands on a sibling of `<main>`, which leaves the
+ * boundary's props untouched however slow the chunk is.
+ *
+ * Do not lift this state back into `App`, and do not add other mount-time
+ * state updates there: anything that re-renders `App` before the page chunk
+ * arrives has the same effect. e2e/hydration.spec.js tags a node inside
+ * `<main>` to catch it.
+ */
+function DeferredChrome({ immediate }) {
+  // Derived rather than synced from the effect below. Admin routes need the
+  // deferred chrome immediately, and once idle time has been reached we keep it
+  // on; expressing that as `immediate || idleReached` avoids calling setState
+  // synchronously inside the effect, which triggers a cascading render.
+  const [idleReached, setIdleReached] = useState(immediate);
+  const show = immediate || idleReached;
+
+  useEffect(() => {
+    // Nothing to schedule on admin routes — `show` is already true.
+    if (immediate) return undefined;
+
+    let cancelled = false;
+    let timeoutId = null;
+    const activate = () => {
+      if (!cancelled) setIdleReached(true);
+    };
+
+    if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+      const idleId = window.requestIdleCallback(activate, { timeout: 2000 });
+      return () => {
+        cancelled = true;
+        window.cancelIdleCallback?.(idleId);
+      };
+    }
+
+    timeoutId = window.setTimeout(activate, 1500);
+    return () => {
+      cancelled = true;
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+    };
+  }, [immediate]);
+
+  if (!show) return null;
+
+  return (
+    <>
+      <Suspense fallback={null}>
+        <ThemeToggleButton
+          variant="outline"
+          size="icon"
+          className="fixed bottom-5 right-5 z-70 h-11 w-11 rounded-full border-border bg-background/90 text-foreground shadow-lg backdrop-blur supports-backdrop-filter:bg-background/75"
+        />
+      </Suspense>
+      <Suspense fallback={null}>
+        <Toaster />
+      </Suspense>
+    </>
   );
 }
 

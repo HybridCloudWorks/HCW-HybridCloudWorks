@@ -110,7 +110,7 @@ nav:
       - 0018 As-built plan v0.2: decisions/0018-as-built-plan-v02.md
       - 0019 Single Function App: decisions/0019-single-function-app.md
       - 0020 Native Terraform root module: decisions/0020-native-terraform-root-module.md
-      - 0021 Key Vault purge protection: decisions/0021-key-vault-purge-protection.md
+      - 0021 Key Vault purge protection, superseded: decisions/0021-key-vault-purge-protection.md
       - 0021 (number reused) Container Apps CI runner, superseded: decisions/0021-container-apps-ci-runner.md
       - 0022 Alerting fabric: decisions/0022-alerting-fabric.md
       - 0023 Migration estate retirement: decisions/0023-migration-estate-retirement.md
@@ -121,6 +121,7 @@ nav:
       - 0028 Cosmos out-of-account export: decisions/0028-cosmos-out-of-account-export.md
       - 0029 Podcast hosting and audio surface: decisions/0029-podcast-hosting-and-audio-surface.md
       - 0030 Newsletter provider: decisions/0030-newsletter-provider.md
+      - 0031 Security scanner owner decisions: decisions/0031-security-scanner-owner-decisions.md
   - Runbooks:
       - Deployment: runbooks/deployment-runbook.md
       - Admin sign-in rollback: runbooks/admin-signin-rollback.md

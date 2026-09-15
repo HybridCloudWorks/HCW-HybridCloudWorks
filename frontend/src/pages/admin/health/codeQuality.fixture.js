@@ -1,0 +1,50 @@
+/** A `GET cms/code-quality` success body, shaped as `.azure/api-surface.json` documents it. */
+export const CODE_QUALITY = Object.freeze({
+  ok: true,
+  projectUrl: 'https://qlty.sh/gh/HybridCloudWorks/projects/HCW-HybridCloudWorks',
+  issuesUrl: 'https://qlty.sh/gh/HybridCloudWorks/projects/HCW-HybridCloudWorks/issues',
+  metrics: [
+    {
+      key: 'MNT',
+      name: 'Maintainability',
+      category: 'maintainability',
+      valueType: 'grade',
+      value: 'B',
+    },
+    { key: 'SEC', name: 'Security Rating', category: 'security', valueType: 'grade', value: 'F' },
+    {
+      key: 'LCOV',
+      name: 'Line Coverage',
+      category: 'coverage',
+      valueType: 'percentage',
+      value: 64.44,
+    },
+    { key: 'DUP', name: 'Duplication', category: 'duplication', valueType: 'percentage', value: 3 },
+  ],
+  total: 1353,
+  byLevel: { high: 12, medium: 340, low: 900, note: 100, fmt: 0 },
+  unclassified: 1,
+  byCategory: { structure: 800, security: 48, lint: 505 },
+  security: { total: 48, byLevel: { high: 10, medium: 30, low: 8, note: 0, fmt: 0 } },
+  topRules: [
+    {
+      tool: 'qlty',
+      rule: 'function-complexity',
+      category: 'structure',
+      level: 'medium',
+      count: 400,
+    },
+    { tool: 'semgrep', rule: 'detect-eval', category: 'security', level: 'high', count: 20 },
+    { tool: 'eslint', rule: 'no-unused-vars', category: 'lint', level: 'low', count: 15 },
+    { tool: 'qlty', rule: 'return-statements', category: 'structure', level: 'medium', count: 10 },
+    { tool: 'trivy', rule: 'CVE-1', category: 'security', level: 'high', count: 5 },
+    { tool: 'ruff', rule: 'E501', category: 'lint', level: 'fmt', count: 2 },
+  ],
+  topFiles: [
+    { path: 'functions/src/lib/big.js', level: 'high', count: 44 },
+    { path: 'frontend/src/pages/admin/HealthPage.jsx', level: 'medium', count: 12 },
+  ],
+  truncated: false,
+  fetchedAt: '2026-09-14T10:00:00.000Z',
+  cachedAt: '2026-09-14T10:00:00.000Z',
+});

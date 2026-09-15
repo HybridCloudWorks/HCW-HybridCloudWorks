@@ -77,7 +77,7 @@ Every ADR includes:
 | [0018](../decisions/0018-as-built-plan-v02.md) | Supersede plan v0.1 with the as-built v0.2 plan | Accepted; two debt rows closed by 0021 and 0022 | Make the approved plan describe the real system; disposition every deviation |
 | [0019](../decisions/0019-single-function-app.md) | One Function App execution boundary | Accepted | Ratify least-privilege-by-contract over process separation |
 | [0020](../decisions/0020-native-terraform-root-module.md) | Flat native-provider Terraform root module (no AVM) | Accepted | Keep resource addresses stable on a live state |
-| [0021](../decisions/0021-key-vault-purge-protection.md) | Key Vault purge protection stays disabled | Accepted | Keep teardown-and-recreate available on a single-environment estate |
+| [0021](../decisions/0021-key-vault-purge-protection.md) | Key Vault purge protection stays disabled | Superseded by [0031](../decisions/0031-security-scanner-owner-decisions.md) on 2026-09-14, which turned it on | Keep teardown-and-recreate available on a single-environment estate |
 | [0021 (number reused)](../decisions/0021-container-apps-ci-runner.md) | Container Apps self-hosted CI runner failover | Superseded — deferred 2026-08-18 before the number was reassigned to Key Vault purge protection | Kept as the record of why a self-hosted CI runner was rejected. Its own text says the gated-off resources remain in `infra/ci-runner.tf`; that file was deleted on 2026-08-24 and the record is now purely historical |
 | [0022](../decisions/0022-alerting-fabric.md) | The alerting fabric, and the signal it does not cover | Accepted | Make failure visible without competing with the telemetry that explains it |
 | [0023](../decisions/0023-migration-estate-retirement.md) | Retire the migration-era estate, grants and reverse path | Accepted | Close the decommission gate deliberately rather than by neglect |
@@ -88,6 +88,7 @@ Every ADR includes:
 | [0028](../decisions/0028-cosmos-out-of-account-export.md) | Cosmos recovery is a weekly full export plus daily change-feed deltas, run by the Function App, kept on the RA-GRS content account | Proposed | Survive account or region loss for about $4 a month, proven by a timed restore. Four points in the design still await the owner's approval on the issue that commissioned it |
 | [0029](../decisions/0029-podcast-hosting-and-audio-surface.md) | Podcast hosting is RSS.com, the podcast page is the one audio surface, and the media route serves byte ranges | Accepted | Replace the retired host, put both audio systems on one seekable page, and unblock a self-hosted feed for later |
 | [0030](../decisions/0030-newsletter-provider.md) | The newsletter provider is Resend, and the site owns the schedule | Accepted | Klaviyo's free plan cannot send a weekly newsletter past 115 subscribers; keep the cadence in the timer that already drafts it, and end the half-wired read-only integration |
+| [0031](../decisions/0031-security-scanner-owner-decisions.md) | Key Vault purge protection on, Microsoft-managed keys, no private endpoints, and storage resource logs within the log cap | Accepted | Clear the Qlty security findings with real changes where the owner chose them, and a recorded decision where not |
 
 ## Template
 

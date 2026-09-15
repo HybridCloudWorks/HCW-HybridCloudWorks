@@ -22,7 +22,8 @@ const WORKFLOW = join(
 );
 
 const CATALOGUE_PATH = 'frontend/src/data/azure/certifications.js';
-const GUIDES_PATH = 'frontend/src/data/azure/study-guides.js';
+// A directory since #500: one module per guide plus index.js.
+const GUIDES_PATH = 'frontend/src/data/azure/study-guides';
 
 /** Non-comment lines only, so prose about `git add -A` cannot trip it. */
 function commandLines(source) {
@@ -62,6 +63,26 @@ describe('the Learn catalogue workflow', () => {
       .sort();
 
     expect(staged).toEqual([CATALOGUE_PATH, GUIDES_PATH].sort());
+  });
+
+  /**
+   * #500 split the outlines into one module per guide, so a week can ADD a
+   * file. `git diff --quiet` does not see an untracked file, so a change check
+   * built on it would call a week whose only news is a new exam "unchanged"
+   * and open no pull request. Both jobs' checks must use `git status`, which
+   * does, and must name the directory rather than the old single file.
+   */
+  it('detects a new guide module, not just an edited one (#500)', () => {
+    const checks = lines.filter(
+      (l) =>
+        l.includes('frontend/src/data/azure/certifications.js') && /\bgit (diff|status)\b/.test(l)
+    );
+    expect(checks.length, 'one change check per job').toBe(2);
+    for (const check of checks) {
+      expect(check).toContain('git status --porcelain');
+      expect(check).toContain(GUIDES_PATH);
+    }
+    expect(lines.some((l) => l.includes('study-guides.js'))).toBe(false);
   });
 
   it('never stages with a wildcard', () => {
