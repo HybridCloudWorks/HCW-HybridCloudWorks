@@ -295,6 +295,18 @@ describe('each tab fails on its own', () => {
     fetchPublicSnapshot.mockRejectedValue(new Error('snapshot refused'));
     const { unmount } = render(<CertificationsPage />);
     expect((await panel().findByRole('alert')).textContent).toContain('snapshot refused');
+    // The changes card names the failure and can retry, instead of a generic line.
+    expect(
+      panel().getByText(/Can.t compare until the public snapshot is read: snapshot refused/)
+    ).toBeInTheDocument();
+    expect(panel().queryByText('Needs the public snapshot.')).not.toBeInTheDocument();
+    fetchPublicSnapshot.mockResolvedValue(SNAPSHOT);
+    const retries = panel().getAllByRole('button', { name: /Try again/ });
+    expect(retries).toHaveLength(2);
+    await act(async () => {
+      fireEvent.click(retries[1]);
+    });
+    expect(await panel().findByText('Certifications on the About page')).toBeInTheDocument();
     unmount();
 
     searchParams = 'tab=catalog';

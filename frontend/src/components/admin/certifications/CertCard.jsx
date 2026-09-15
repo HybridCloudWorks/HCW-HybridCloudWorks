@@ -89,7 +89,10 @@ function CertStatusBadges({ cert, isExpired, isExpiringSoon }) {
   );
 }
 
-/** Opens a stored URL only when it is http(s) or relative: CMS data could carry `javascript:`. */
+/**
+ * Opens a URL that `safeUrl()` has already approved (http, https, mailto, or a
+ * relative reference): CMS data could carry `javascript:` or `data:`.
+ */
 const openSafely = (url) => window.open(url, '_blank', 'noopener');
 
 function VerifyButton({ cert }) {

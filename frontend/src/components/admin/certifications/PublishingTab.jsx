@@ -12,6 +12,8 @@
  * re-reads the snapshot past every cache.
  */
 import React, { useMemo } from 'react';
+import { RefreshCw } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { TabError, TabLoading } from '@/components/admin/integrations/TabNotice';
 import PublishSnapshotButton from '@/components/admin/PublishSnapshotButton';
@@ -94,6 +96,29 @@ function ChangesSince({ certs, snapshot }) {
   );
 }
 
+/**
+ * The comparison needs the snapshot. While it is being read that is a loading
+ * line; when the read failed it says so and offers the retry here too, rather
+ * than a generic "needs the snapshot". It is not a second `role="alert"`: the
+ * summary card above already announces the failure once.
+ */
+function ChangesUnavailable({ published }) {
+  if (published.loading) return <TabLoading>Reading the public snapshot…</TabLoading>;
+  if (published.error) {
+    return (
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        <p className="min-w-0 flex-1 break-words">
+          Can&apos;t compare until the public snapshot is read: {published.error}
+        </p>
+        <Button variant="outline" size="sm" onClick={published.refresh}>
+          <RefreshCw className="mr-2 h-3.5 w-3.5" /> Try again
+        </Button>
+      </div>
+    );
+  }
+  return <p className="text-sm text-muted-foreground">Needs the public snapshot.</p>;
+}
+
 export default function PublishingTab({ certs }) {
   const published = usePublicSnapshot();
   return (
@@ -127,7 +152,7 @@ export default function PublishingTab({ certs }) {
           {published.loaded ? (
             <ChangesSince certs={certs} snapshot={published.snapshot} />
           ) : (
-            <p className="text-sm text-muted-foreground">Needs the public snapshot.</p>
+            <ChangesUnavailable published={published} />
           )}
         </CardContent>
       </Card>
