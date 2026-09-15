@@ -107,10 +107,16 @@ export function outlineKeyFor(studyGuideUrl) {
  * directory must get the same bytes the updater commits.
  */
 async function format(source, filepath) {
-  return prettier.format(source, {
-    ...(await prettier.resolveConfig(fileURLToPath(import.meta.url))),
-    filepath,
-  });
+  const config = await prettier.resolveConfig(fileURLToPath(import.meta.url));
+  // Spreading null would not throw, but it would format with Prettier's
+  // defaults, not the frontend's config, and the weekly refresh PR would then
+  // fail format:check for a reason nowhere in its log. Fail here instead.
+  if (!config) {
+    throw new Error(
+      'No Prettier config found for frontend/scripts; refusing to write study-guide modules with Prettier defaults'
+    );
+  }
+  return prettier.format(source, { ...config, filepath });
 }
 
 /**
