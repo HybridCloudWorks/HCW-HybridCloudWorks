@@ -19,6 +19,7 @@ import {
   mapSessionizeEvents,
   mergeEvents,
   safeString,
+  sessionizeUrl,
   splitByDate,
   syncDifferences,
   toInputDate,
@@ -195,5 +196,17 @@ describe('publishing and links', () => {
     expect(httpUrl(' https://slides.example/deck ')).toBe('https://slides.example/deck');
     expect(httpUrl('javascript:alert(1)')).toBeNull();
     expect(httpUrl(undefined)).toBeNull();
+  });
+});
+
+describe('sessionizeUrl', () => {
+  it('keeps a plain speaker ID as the last path segment', () => {
+    expect(sessionizeUrl('abc123')).toBe('https://sessionize.com/api/speaker/json/abc123');
+  });
+
+  it('encodes reserved characters so the ID cannot add a path or a query', () => {
+    expect(sessionizeUrl('a/b?c#d e')).toBe(
+      'https://sessionize.com/api/speaker/json/a%2Fb%3Fc%23d%20e'
+    );
   });
 });

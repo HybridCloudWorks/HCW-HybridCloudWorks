@@ -15,9 +15,13 @@ export const EMPTY_FORM = Object.freeze({
   display: true,
 });
 
-/** The public Sessionize read for one speaker. */
+/**
+ * The public Sessionize read for one speaker. The ID is a stored setting, so it
+ * is encoded as one path segment: a `/`, `?` or `#` in it cannot reach another
+ * path or turn into a query.
+ */
 export function sessionizeUrl(speakerId) {
-  return `https://sessionize.com/api/speaker/json/${speakerId}`;
+  return `https://sessionize.com/api/speaker/json/${encodeURIComponent(String(speakerId ?? ''))}`;
 }
 
 export function parseDateValue(dateValue) {

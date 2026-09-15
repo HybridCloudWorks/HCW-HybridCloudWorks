@@ -48,7 +48,8 @@ function StoredCard({ stored, snapshot }) {
   const { published, withheld } = countPublishable(stored.data);
   const canCompare = snapshot.loaded && stored.loaded && snapshot.data.length > 0;
   const differs = canCompare && snapshot.data.length !== published;
-  const comparisonUnknown = snapshot.loaded && stored.loaded && snapshot.data.length === 0 && published > 0;
+  const comparisonUnknown =
+    snapshot.loaded && stored.loaded && snapshot.data.length === 0 && published > 0;
   return (
     <Card>
       <CardContent className="pt-5 space-y-2">
