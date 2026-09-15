@@ -20,40 +20,92 @@
  *
  * `refresh` never throws: it resolves true when its read landed and false
  * when it failed or was superseded; the failure is in `error`.
+ *
+ * The hook only holds state. The read below and the writes in certWrites.js
+ * are module-level functions over one state bag, so each has a single exit.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { getJSON, sendJSON } from '@/lib/api';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { getJSON } from '@/lib/api';
 import { COLLECTION, sortByDisplayOrder } from './certView';
+import { patchCert, removeCert, upsertCert, useWriteGuard } from './certWrites';
 
 const EMPTY = Object.freeze([]);
 
 /** One GET of the collection, as `{ rows }` or `{ error }` — never throws. */
 async function fetchRows() {
+  let outcome;
   try {
     const res = await getJSON(`cms/${COLLECTION}`);
     const rows = (res?.items || []).map((item) => ({ _docId: item.id, ...item }));
-    return { rows: sortByDisplayOrder(rows) };
+    outcome = { rows: sortByDisplayOrder(rows) };
   } catch (error) {
-    return { error };
+    outcome = { error };
   }
+  return outcome;
 }
 
-function useWriteGuard() {
-  const inFlight = useRef(new Set());
-  const [busyIds, setBusyIds] = useState(() => new Set());
+/** Paint one current read: its rows, or an empty list and the error. True when rows landed. */
+function applyOutcome(state, outcome) {
+  state.setPending(false);
+  if (outcome.rows) {
+    state.setItems(outcome.rows);
+    state.setLoaded(true);
+  } else {
+    const err = outcome.error;
+    console.error('[Certifications] load failed', err);
+    state.setItems(EMPTY);
+    state.setLoaded(false);
+    state.setError(err?.message || String(err));
+    state.toastRef.current?.({
+      title: 'Failed to load',
+      description: err?.message,
+      variant: 'destructive',
+    });
+  }
+  return Boolean(outcome.rows);
+}
 
-  const claim = useCallback((id) => {
-    if (inFlight.current.has(id)) return false;
-    inFlight.current.add(id);
-    setBusyIds(new Set(inFlight.current));
-    return true;
-  }, []);
-  const release = useCallback((id) => {
-    inFlight.current.delete(id);
-    setBusyIds(new Set(inFlight.current));
-  }, []);
-  return { busyIds, claim, release };
+/**
+ * Read as generation `first`. A superseded read paints nothing; a read that a
+ * write overtook is re-issued as a new generation rather than painted.
+ */
+async function readList(state, first) {
+  let mine = first;
+  let landed = false;
+  let settled = false;
+  while (!settled) {
+    const epoch = state.writes.current;
+    const outcome = await fetchRows();
+    if (mine !== state.generation.current) {
+      settled = true;
+    } else if (epoch !== state.writes.current) {
+      mine = ++state.generation.current;
+    } else {
+      landed = applyOutcome(state, outcome);
+      settled = true;
+    }
+  }
+  return landed;
+}
+
+function refreshList(state) {
+  const mine = ++state.generation.current;
+  state.setPending(true);
+  state.setError('');
+  return readList(state, mine);
+}
+
+/** The first read once auth is ready; its cleanup supersedes whatever is in flight. */
+function startList(state, authReady) {
+  let cleanup;
+  if (authReady) {
+    readList(state, ++state.generation.current);
+    cleanup = () => {
+      state.generation.current += 1;
+    };
+  }
+  return cleanup;
 }
 
 export default function useCertifications(authReady, { toast } = {}) {
@@ -69,110 +121,27 @@ export default function useCertifications(authReady, { toast } = {}) {
   }, [toast]);
   const { busyIds, claim, release } = useWriteGuard();
 
-  const read = useCallback(async (first) => {
-    let mine = first;
-    for (;;) {
-      const epoch = writes.current;
-      const outcome = await fetchRows();
-      if (mine !== generation.current) return false;
-      // A write answered while this read was out: re-read rather than paint
-      // rows that may predate it.
-      if (epoch !== writes.current) {
-        mine = ++generation.current;
-        continue;
-      }
-      setPending(false);
-      if (outcome.rows) {
-        setItems(outcome.rows);
-        setLoaded(true);
-        return true;
-      }
-      const err = outcome.error;
-      console.error('[Certifications] load failed', err);
-      setItems(EMPTY);
-      setLoaded(false);
-      setError(err?.message || String(err));
-      toastRef.current?.({
-        title: 'Failed to load',
-        description: err?.message,
-        variant: 'destructive',
-      });
-      return false;
-    }
-  }, []);
-
-  const refresh = useCallback(() => {
-    const mine = ++generation.current;
-    setPending(true);
-    setError('');
-    return read(mine);
-  }, [read]);
-
-  useEffect(() => {
-    if (!authReady) return undefined;
-    read(++generation.current);
-    return () => {
-      generation.current += 1;
-    };
-  }, [authReady, read]);
-
-  /** Put a row the editor saved into the list: replace by id, else append. */
-  const upsertLocal = useCallback((saved) => {
-    writes.current += 1;
-    setItems((p) => {
-      const idx = p.findIndex((x) => x._docId === saved._docId);
-      if (idx === -1) return [...p, saved];
-      const copy = [...p];
-      copy[idx] = saved;
-      return copy;
-    });
-  }, []);
-
-  /** PATCH one cert. Resolves true when it landed, false when refused or already in flight. */
-  const patch = useCallback(
-    async (cert, changes) => {
-      if (!claim(cert._docId)) return false;
-      try {
-        await sendJSON(`cms/${COLLECTION}/${cert._docId}`, 'PATCH', changes);
-        writes.current += 1;
-        setItems((p) => p.map((c) => (c._docId === cert._docId ? { ...c, ...changes } : c)));
-        return true;
-      } catch (err) {
-        toastRef.current?.({
-          title: 'Update failed',
-          description: err.message,
-          variant: 'destructive',
-        });
-        return false;
-      } finally {
-        release(cert._docId);
-      }
-    },
+  const state = useMemo(
+    () => ({
+      setItems,
+      setLoaded,
+      setPending,
+      setError,
+      generation,
+      writes,
+      toastRef,
+      claim,
+      release,
+    }),
     [claim, release]
   );
 
-  const remove = useCallback(
-    async (cert) => {
-      if (!claim(cert._docId)) return false;
-      try {
-        await sendJSON(`cms/${COLLECTION}/${cert._docId}`, 'DELETE');
-        writes.current += 1;
-        setItems((p) => p.filter((c) => c._docId !== cert._docId));
-        toastRef.current?.({ title: 'Deleted' });
-        return true;
-      } catch (err) {
-        toastRef.current?.({
-          title: 'Delete failed',
-          description: err.message,
-          variant: 'destructive',
-        });
-        return false;
-      } finally {
-        release(cert._docId);
-      }
-    },
-    [claim, release]
-  );
+  useEffect(() => startList(state, authReady), [state, authReady]);
+
+  const refresh = useCallback(() => refreshList(state), [state]);
+  const upsertLocal = useCallback((saved) => upsertCert(state, saved), [state]);
+  const patch = useCallback((cert, changes) => patchCert(state, cert, changes), [state]);
+  const remove = useCallback((cert) => removeCert(state, cert), [state]);
 
   return {
     items,

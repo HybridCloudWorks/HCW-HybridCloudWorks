@@ -21,6 +21,7 @@ import {
   GraduationCap,
 } from 'lucide-react';
 import { getLearnUrl, getIssuerColor } from '@/lib/certIssuers';
+import { safeUrl } from '@/lib/safeUrl';
 import { expiryFlags, issuerOf, resolveImages, toIso } from './certView';
 
 /** Img with fallback chain. Renders Award placeholder when all URLs fail. */
@@ -88,8 +89,12 @@ function CertStatusBadges({ cert, isExpired, isExpiringSoon }) {
   );
 }
 
+/** Opens a stored URL only when it is http(s) or relative: CMS data could carry `javascript:`. */
+const openSafely = (url) => window.open(url, '_blank', 'noopener');
+
 function VerifyButton({ cert }) {
-  if (!cert.verifyUrl) {
+  const verifyUrl = safeUrl(cert.verifyUrl);
+  if (!verifyUrl) {
     return (
       <span
         className="inline-flex h-7 items-center justify-center rounded border border-slate-200 px-2 text-slate-400 dark:border-slate-700 dark:text-slate-400"
@@ -105,7 +110,7 @@ function VerifyButton({ cert }) {
       size="sm"
       variant="outline"
       className="h-7 px-2"
-      onClick={() => window.open(cert.verifyUrl, '_blank', 'noopener')}
+      onClick={() => openSafely(verifyUrl)}
       title="Verify"
     >
       <ExternalLink className="h-3 w-3" />
@@ -114,14 +119,14 @@ function VerifyButton({ cert }) {
 }
 
 function LearnButton({ cert, issuer }) {
-  const url = cert.learnUrl || getLearnUrl(issuer, cert.code);
+  const url = safeUrl(cert.learnUrl || getLearnUrl(issuer, cert.code));
   if (!url) return null;
   return (
     <Button
       size="sm"
       variant="outline"
       className="h-7 px-2"
-      onClick={() => window.open(url, '_blank', 'noopener')}
+      onClick={() => openSafely(url)}
       title="Open provider Learn page"
     >
       <GraduationCap className="h-3 w-3" />

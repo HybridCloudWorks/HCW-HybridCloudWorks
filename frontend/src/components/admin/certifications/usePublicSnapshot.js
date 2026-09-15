@@ -8,11 +8,49 @@
  * a failed read clears the snapshot rather than leaving the old one beside
  * its error. `refresh` always asks past every cache (after a publish, the
  * cached copy is the one that is now wrong) and never throws.
+ *
+ * The read is a module-level function over the hook's state bag, with one exit.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchPublicSnapshot } from '@/lib/publicApi';
 import { COLLECTION } from './certView';
+
+/** Read as generation `mine`; paints only if still current. True when a snapshot landed. */
+async function readSnapshot(state, mine, fresh) {
+  let outcome;
+  try {
+    outcome = { result: await fetchPublicSnapshot(COLLECTION, { fresh }) };
+  } catch (err) {
+    outcome = { err };
+  }
+  const current = mine === state.generation.current;
+  if (current) {
+    state.setPending(false);
+    if ('result' in outcome) {
+      state.setSnapshot(outcome.result);
+    } else {
+      state.setSnapshot(undefined);
+      state.setError(outcome.err?.message || 'Failed to read the public certifications snapshot.');
+    }
+  }
+  return current && 'result' in outcome;
+}
+
+function refreshSnapshot(state) {
+  const mine = ++state.generation.current;
+  state.setPending(true);
+  state.setError('');
+  return readSnapshot(state, mine, true);
+}
+
+/** The first read on mount; its cleanup supersedes whatever is in flight. */
+function startSnapshot(state) {
+  readSnapshot(state, ++state.generation.current, false);
+  return () => {
+    state.generation.current += 1;
+  };
+}
 
 export default function usePublicSnapshot() {
   // undefined: not read yet; null: no snapshot has ever been published.
@@ -21,36 +59,10 @@ export default function usePublicSnapshot() {
   const [error, setError] = useState('');
   const generation = useRef(0);
 
-  const read = useCallback(async (mine, fresh) => {
-    const current = () => mine === generation.current;
-    try {
-      const result = await fetchPublicSnapshot(COLLECTION, { fresh });
-      if (!current()) return false;
-      setSnapshot(result);
-      setPending(false);
-      return true;
-    } catch (err) {
-      if (!current()) return false;
-      setSnapshot(undefined);
-      setPending(false);
-      setError(err?.message || 'Failed to read the public certifications snapshot.');
-      return false;
-    }
-  }, []);
+  const state = useMemo(() => ({ setSnapshot, setPending, setError, generation }), []);
 
-  const refresh = useCallback(() => {
-    const mine = ++generation.current;
-    setPending(true);
-    setError('');
-    return read(mine, true);
-  }, [read]);
-
-  useEffect(() => {
-    read(++generation.current, false);
-    return () => {
-      generation.current += 1;
-    };
-  }, [read]);
+  useEffect(() => startSnapshot(state), [state]);
+  const refresh = useCallback(() => refreshSnapshot(state), [state]);
 
   return {
     snapshot,
