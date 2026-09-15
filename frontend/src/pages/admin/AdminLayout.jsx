@@ -226,14 +226,17 @@ export default function AdminLayout() {
   // the screen.
   //
   // Why not only `sticky top-0` on the aside with the window still scrolling,
-  // which would leave ScrollToTop untouched: it does not stick on this site.
-  // index.css gives `html` `overflow-y: scroll` and `body` `overflow-x:
-  // hidden`, and because the root's overflow is not `visible`, the body's is
-  // not propagated to the viewport — `body` becomes a scroll container that
-  // never scrolls, and a sticky element pins to that instead of the window.
-  // Measured in Chromium on 2026-09-14: after `scrollTo(0, 2000)` the aside's
-  // top was -2000 with that CSS and 0 without it. The sticky classes stay as
-  // a belt for the day that rule changes; they are not what holds it.
+  // which would leave ScrollToTop untouched: when this was written it did not
+  // stick on this site. index.css gave `html` `overflow-y: scroll` and `body`
+  // `overflow-x: hidden`, and because the root's overflow is not `visible`,
+  // the body's is not propagated to the viewport — `body` became a scroll
+  // container that never scrolls, and a sticky element pinned to that instead
+  // of the window. Measured in Chromium on 2026-09-14: after
+  // `scrollTo(0, 2000)` the aside's top was -2000 with that CSS and 0 without
+  // it. #580 changed the body rule to `overflow-x: clip`, which creates no
+  // scroll container, so sticky now works site-wide; the viewport-tall shell
+  // stays because it is what holds the sidebar, and the sticky classes remain
+  // a belt.
   //
   // `dvh`, not `vh`: on mobile browsers `100vh` is the height with the
   // toolbar hidden, which would push Sign Out under the toolbar.

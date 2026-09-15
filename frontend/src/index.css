@@ -373,7 +373,12 @@
 
   body {
     @apply bg-background text-foreground;
-    overflow-x: hidden;
+    /* `clip`, not `hidden` (#580). `html` has `overflow-y: scroll`, so body's
+       overflow is not propagated to the viewport; `hidden` would make body a
+       scroll container that never scrolls, and `sticky top-0` (the site
+       Header) would pin to it and scroll away with the window. `clip` guards
+       horizontal overflow without creating a scroll container. */
+    overflow-x: clip;
   }
 }
 
