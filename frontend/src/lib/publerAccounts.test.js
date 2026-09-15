@@ -16,6 +16,7 @@ import {
   describePublerFailure,
   publerAccountsStatus,
   unwrapPublerAccounts,
+  unwrapPublerPosts,
 } from './publerAccounts';
 
 describe('unwrapPublerAccounts', () => {
@@ -173,5 +174,60 @@ describe('describePublerFailure', () => {
     ).toBe('Publer request failed: fetch failed');
     expect(describePublerFailure({})).toBe('the request failed');
     expect(describePublerFailure()).toBe('the request failed');
+  });
+});
+
+describe('unwrapPublerPosts', () => {
+  const post = {
+    id: 'p-1',
+    text: 'Hello',
+    network: 'linkedin',
+    scheduled_at: '2026-09-20T10:00:00Z',
+  };
+
+  it('reads the posts out of the body Publer really sends: { posts, total } inside the envelope', () => {
+    // The shape that crashed the Scheduled Queue tab: `data` is an OBJECT, and
+    // the tab called `.map` on it.
+    expect(unwrapPublerPosts({ ok: true, status: 200, data: { posts: [post], total: 1 } })).toEqual(
+      {
+        posts: [post],
+        notConfigured: false,
+        failed: false,
+        status: 200,
+        reason: '',
+      }
+    );
+  });
+
+  it('accepts the other two shapes the server-side sync accepts, and drops non-objects', () => {
+    expect(unwrapPublerPosts({ ok: true, status: 200, data: [post, null, 'x'] }).posts).toEqual([
+      post,
+    ]);
+    expect(unwrapPublerPosts({ ok: true, status: 200, data: { data: [post] } }).posts).toEqual([
+      post,
+    ]);
+    expect(unwrapPublerPosts({ ok: true, status: 200, data: { total: 0 } }).posts).toEqual([]);
+  });
+
+  it("reports a refusal as a failure with Publer's sentence, and an unseeded key as not configured", () => {
+    const refused = unwrapPublerPosts({
+      ok: false,
+      status: 401,
+      data: { error: 'Invalid API key' },
+    });
+    expect(refused).toMatchObject({
+      posts: [],
+      failed: true,
+      notConfigured: false,
+      status: 401,
+      reason: 'Invalid API key',
+    });
+
+    const unseeded = unwrapPublerPosts({
+      ok: false,
+      code: PUBLER_NOT_CONFIGURED,
+      error: 'Publer is not configured: PUBLER_API_KEY is not set',
+    });
+    expect(unseeded).toMatchObject({ posts: [], failed: false, notConfigured: true });
   });
 });

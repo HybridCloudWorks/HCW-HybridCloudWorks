@@ -13,7 +13,7 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 
-import { ComposeTab, SettingsTab } from './SocialHubPage';
+import { ComposeTab, QueueTab, SettingsTab } from './SocialHubPage';
 
 const getJSON = vi.fn();
 const sendJSON = vi.fn();
@@ -184,5 +184,61 @@ describe('the Connection Settings tab', () => {
 
     await screen.findByText('HCW on LinkedIn');
     await waitFor(() => expect(postJSON).toHaveBeenCalledTimes(1));
+  });
+});
+
+describe('the Scheduled Queue tab', () => {
+  const scheduled = (overrides = {}) => ({
+    id: 'post-1',
+    text: 'New Azure article is live',
+    network: 'linkedin',
+    scheduled_at: '2026-09-20T10:00:00Z',
+    accounts: [{ id: 'acc-1', name: 'HCW on LinkedIn' }],
+    ...overrides,
+  });
+
+  it('renders Publer posts from { posts, total } instead of crashing on .map', async () => {
+    postJSON.mockResolvedValue({ ok: true, status: 200, data: { posts: [scheduled()], total: 1 } });
+    render(<QueueTab />);
+    expect(await screen.findByText('New Azure article is live')).toBeTruthy();
+    expect(screen.getByText('HCW on LinkedIn')).toBeTruthy();
+    expect(postJSON).toHaveBeenCalledWith(
+      'publerProxy',
+      expect.objectContaining({ method: 'GET' })
+    );
+  });
+
+  it('survives a malformed date and non-string fields in a Publer post', async () => {
+    postJSON.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: {
+        posts: [
+          scheduled({
+            scheduled_at: 'not a date',
+            text: { html: '<b>x</b>' },
+            network: 42,
+            accounts: [null],
+          }),
+        ],
+      },
+    });
+    render(<QueueTab />);
+    // No throw: the card renders with its fallbacks.
+    expect(await screen.findByText('Publer Queue')).toBeTruthy();
+    expect(screen.getAllByText('\u2014').length).toBeGreaterThan(0);
+  });
+
+  it('says Publer refused rather than showing an empty queue', async () => {
+    postJSON.mockResolvedValue(refused);
+    render(<QueueTab />);
+    expect(await screen.findByText(/Could not read Publer: Publer answered 401/)).toBeTruthy();
+    expect(screen.queryByText('No scheduled posts in Publer')).toBeNull();
+  });
+
+  it("says not configured, with the proxy's own sentence, for an unseeded key", async () => {
+    postJSON.mockResolvedValue(unseeded);
+    render(<QueueTab />);
+    expect(await screen.findByText(/PUBLER_WORKSPACE_ID is not set/)).toBeTruthy();
   });
 });

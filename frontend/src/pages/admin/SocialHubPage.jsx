@@ -49,6 +49,7 @@ import {
   publerAccountsStatus,
   readPublerErrors,
   unwrapPublerAccounts,
+  unwrapPublerPosts,
 } from '@/lib/publerAccounts';
 import { fetchPublicContentList } from '@/lib/publicApi';
 import { toMillis } from '@/lib/dateUtils';
@@ -448,9 +449,18 @@ async function listSocialPosts(statuses) {
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
+/** The first non-empty string among `values`, or `fallback`: Publer fields are not always strings. */
+const firstText = (values, fallback = '') =>
+  values.find((value) => typeof value === 'string' && value.trim()) ?? fallback;
+
+/**
+ * A readable date, or a dash. `Intl.DateTimeFormat#format` THROWS a RangeError
+ * on an invalid date, so one malformed timestamp took the whole page down.
+ */
 function fmtDate(value) {
   if (!value) return '—';
   const d = value?.toDate ? value.toDate() : new Date(value);
+  if (!(d instanceof Date) || Number.isNaN(d.getTime())) return '—';
   return new Intl.DateTimeFormat('en-US', {
     month: 'short',
     day: 'numeric',
@@ -460,7 +470,7 @@ function fmtDate(value) {
 }
 
 function PlatformBadge({ provider }) {
-  const meta = PLATFORM_META[provider?.toLowerCase()] || {};
+  const meta = PLATFORM_META[typeof provider === 'string' ? provider.toLowerCase() : ''] || {};
   const { Icon, color, label } = meta;
   return (
     <Badge variant="outline" className={`text-[10px] capitalize gap-1 ${color || ''}`}>
@@ -834,11 +844,30 @@ export function ComposeTab({ recentContent, initialContentId }) {
 
 // ── Scheduled Queue Tab ───────────────────────────────────────────────────────
 
-function QueueTab() {
+/**
+ * A Publer list response as `{ posts, notice }`: the posts and, when the proxy
+ * said not configured or Publer refused, the sentence to show in their place.
+ * A thrown call reads as a failure too, never as an empty queue.
+ */
+function readPublerPosts(response) {
+  const unwrapped = unwrapPublerPosts(response);
+  let notice = '';
+  if (unwrapped.notConfigured) {
+    notice =
+      unwrapped.reason || 'Publer is not configured — seed its keys on the Integrations page.';
+  } else if (unwrapped.failed) {
+    notice = `Could not read Publer: ${describePublerEnvelope(response)}`;
+  }
+  return { posts: unwrapped.posts, notice };
+}
+
+const publerCallFailed = (err) => ({ ok: false, error: err?.message || 'the request failed' });
+
+export function QueueTab() {
   const { toast } = useToast();
-  const ready = publerReady();
 
   const [publerPosts, setPublerPosts] = useState([]);
+  const [publerNotice, setPublerNotice] = useState('');
   const [localPosts, setLocalPosts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -848,34 +877,25 @@ function QueueTab() {
     setError('');
     try {
       const [publerRes, snap] = await Promise.all([
-        ready
-          ? publerListPosts('scheduled').catch(() => ({ data: [] }))
-          : Promise.resolve({ data: [] }),
+        publerListPosts('scheduled').catch(publerCallFailed),
         listSocialPosts(),
       ]);
-      setPublerPosts(publerRes?.data || []);
-      setLocalPosts(snap);
+      const { posts, notice } = readPublerPosts(publerRes);
+      setPublerPosts(posts);
+      setPublerNotice(notice);
+      setLocalPosts(Array.isArray(snap) ? snap : []);
     } catch (err) {
-      setError(err.message);
+      setError(err?.message || 'Could not load the queue.');
     } finally {
       setLoading(false);
     }
-  }, [ready]);
+  }, []);
 
   useEffect(() => {
-    Promise.all([
-      ready
-        ? publerListPosts('scheduled').catch(() => ({ data: [] }))
-        : Promise.resolve({ data: [] }),
-      listSocialPosts(),
-    ])
-      .then(([publerRes, snap]) => {
-        setPublerPosts(publerRes?.data || []);
-        setLocalPosts(snap);
-      })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, [ready]);
+    queueMicrotask(() => {
+      load();
+    });
+  }, [load]);
 
   const handleDeletePubler = async (postId) => {
     setDeletingId(postId);
@@ -959,26 +979,27 @@ function QueueTab() {
           </Button>
         </div>
 
-        {!ready && (
-          <p className="text-xs text-muted-foreground">
-            Publer not configured — connect it in the Connection Settings tab to see live queue.
+        {publerNotice && (
+          <p className="flex items-center gap-2 text-xs text-muted-foreground" role="status">
+            <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+            {publerNotice}
           </p>
         )}
 
-        {ready && totalPubler === 0 && (
+        {!publerNotice && totalPubler === 0 && (
           <div className="flex flex-col items-center py-8 gap-2 text-muted-foreground">
             <CheckCircle className="h-8 w-8 text-emerald-400" />
             <p className="text-sm font-medium">No scheduled posts in Publer</p>
           </div>
         )}
 
-        {publerPosts.map((post) => {
-          const text = post.caption || post.text || post.description || '—';
-          const provider = post.network || post.provider || '';
+        {publerPosts.map((post, index) => {
+          const text = firstText([post.caption, post.text, post.description], '—');
+          const provider = firstText([post.network, post.provider]);
           const accts = Array.isArray(post.accounts) ? post.accounts : [];
           const schedTime = post.scheduled_at;
           return (
-            <Card key={post.id} className="p-4">
+            <Card key={post.id ?? `publer-${index}`} className="p-4">
               <div className="flex items-start gap-3">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium line-clamp-2">{text}</p>
@@ -986,7 +1007,7 @@ function QueueTab() {
                     {provider && <PlatformBadge provider={provider} />}
                     {accts.map((a, i) => (
                       <Badge key={i} variant="outline" className="text-[10px]">
-                        {a.name || a.id}
+                        {firstText([a?.name, a?.id], 'account')}
                       </Badge>
                     ))}
                     <span className="text-xs text-muted-foreground flex items-center gap-1">
@@ -997,13 +1018,13 @@ function QueueTab() {
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <Badge variant="secondary" className="capitalize text-[10px]">
-                    {post.status || 'scheduled'}
+                    {firstText([post.status, post.state], 'scheduled')}
                   </Badge>
                   <Button
                     variant="ghost"
                     size="icon"
                     className="h-7 w-7 text-destructive hover:bg-destructive/10"
-                    disabled={deletingId === post.id}
+                    disabled={!post.id || deletingId === post.id}
                     onClick={() => handleDeletePubler(post.id)}
                   >
                     {deletingId === post.id ? (
@@ -1082,7 +1103,6 @@ function QueueTab() {
 // ── Published Tab ─────────────────────────────────────────────────────────────
 
 function PublishedTab({ recentContent }) {
-  const ready = publerReady();
   const [publerPosts, setPublerPosts] = useState([]);
   const [hubPosts, setHubPosts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1092,20 +1112,17 @@ function PublishedTab({ recentContent }) {
     setError('');
     try {
       const [publerRes, snap] = await Promise.all([
-        ready
-          ? publerListPosts('published').catch((e) => {
-              setError(e.message);
-              return { data: [] };
-            })
-          : Promise.resolve({ data: [] }),
+        publerListPosts('published').catch(publerCallFailed),
         listSocialPosts(['published']).catch(() => []),
       ]);
-      setPublerPosts(Array.isArray(publerRes?.data) ? publerRes.data : []);
-      setHubPosts(snap);
+      const { posts, notice } = readPublerPosts(publerRes);
+      setPublerPosts(posts);
+      setError(notice);
+      setHubPosts(Array.isArray(snap) ? snap : []);
     } finally {
       setLoading(false);
     }
-  }, [ready]);
+  }, []);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -1208,40 +1225,34 @@ function PublishedTab({ recentContent }) {
           </Button>
         </div>
 
-        {!ready && (
-          <p className="text-xs text-muted-foreground">
-            Publer not configured — connect it in the Connection Settings tab.
-          </p>
-        )}
-
-        {ready && loading && (
+        {loading && (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           </div>
         )}
 
-        {ready && !loading && error && (
+        {!loading && error && (
           <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-xs">
             <AlertCircle className="h-4 w-4 shrink-0" />
             <span>{error}</span>
           </div>
         )}
 
-        {ready && !loading && !error && publerPosts.length === 0 && (
+        {!loading && !error && publerPosts.length === 0 && (
           <p className="text-sm text-muted-foreground py-4 text-center">
             No published posts in Publer yet.
           </p>
         )}
 
-        {publerPosts.map((post) => {
-          const text = post.caption || post.text || post.description || '—';
-          const provider = post.network || post.provider || '';
+        {publerPosts.map((post, index) => {
+          const text = firstText([post.caption, post.text, post.description], '—');
+          const provider = firstText([post.network, post.provider]);
           const accts = Array.isArray(post.accounts) ? post.accounts : [];
           const publishedAt = post.published_at || post.scheduled_at || post.created_at;
           const fromHub = post.job_id ? hubJobIds.has(post.job_id) : false;
-          const permalink = post.permalink || post.public_url || post.url;
+          const permalink = firstText([post.permalink, post.public_url, post.url]);
           return (
-            <Card key={post.id} className="p-4">
+            <Card key={post.id ?? `published-${index}`} className="p-4">
               <div className="flex items-start gap-3">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium line-clamp-2">{text}</p>
@@ -1249,7 +1260,7 @@ function PublishedTab({ recentContent }) {
                     {provider && <PlatformBadge provider={provider} />}
                     {accts.map((a, i) => (
                       <Badge key={i} variant="outline" className="text-[10px]">
-                        {a.name || a.id}
+                        {firstText([a?.name, a?.id], 'account')}
                       </Badge>
                     ))}
                     <span className="text-xs text-muted-foreground flex items-center gap-1">

@@ -112,6 +112,41 @@ export function unwrapPublerAccounts(response) {
 }
 
 /**
+ * The posts list, from the same envelope `unwrapPublerAccounts` reads.
+ *
+ * Publer's `GET /posts` answers `{ posts: [...], total }` - an object, not an
+ * array - which `functions/src/lib/timers/publer-sync.js` (`extractPublerList`)
+ * already reads. The Scheduled Queue tab passed that object straight to
+ * `.map()` and the whole admin page crashed with "map is not a function"; the
+ * Published tab tested `Array.isArray` and so always showed an empty list.
+ * The same three shapes the server accepts are accepted here, and a refusal is
+ * a failure with Publer's own sentence rather than "no posts".
+ *
+ * @returns {{ posts: object[], notConfigured: boolean, failed: boolean, status: number|null, reason: string }}
+ */
+export function unwrapPublerPosts(response) {
+  const status = Number.isFinite(response?.status) ? response.status : null;
+  const reason =
+    (typeof response?.error === 'string' && response.error) || readPublerErrors(response?.data);
+
+  if (response && response.ok === false) {
+    const notConfigured = response.code === PUBLER_NOT_CONFIGURED;
+    return { posts: [], notConfigured, failed: !notConfigured, status, reason };
+  }
+
+  const body =
+    response && typeof response === 'object' && 'data' in response ? response.data : response;
+  const list = [body, body?.posts, body?.data].find(Array.isArray) ?? [];
+  return {
+    posts: list.filter((post) => post && typeof post === 'object'),
+    notConfigured: false,
+    failed: false,
+    status,
+    reason: '',
+  };
+}
+
+/**
  * The four-state machine both pages drive their copy from, derived once here so
  * the two cannot disagree about which envelope is which. `loading` is the
  * caller's own initial state; this names the three a response can produce.
