@@ -117,7 +117,7 @@ a switch and is here because it must match a Key Vault secret exactly:
 | `cosmos_export_enabled` | `false` | Arms the Cosmos exporter (`FEATURE_FLAG_COSMOS_EXPORT`) and creates `cosmos_export_daily_missing` and `cosmos_export_full_missing` (`alert-cosmos-export-daily-prod-cus`, `alert-cosmos-export-full-prod-cus`) together — ADR 0028. Arm only after the exporter is deployed and a `cosmosExportCompleted` event has been seen, and not on a Sunday after 03:00 UTC |
 | `functions_scm_lock_enabled` | `false` in code, **set `true` in the workspace 2026-08-25** | Denies SCM/Kudu by default; `deploy-functions.yml` opens a per-run window. Proven under `Deny` by run 32902534458 |
 | `functions_origin_lock_enabled` | `true` | Restricts the origin to Cloudflare ranges. Already on |
-| `purge_protection_enabled` | `false` | Key Vault purge protection. Off as an accepted risk — see [Accepted risks](../repo/todo.md#accepted-risks) |
+| `purge_protection_enabled` | `true` | Key Vault purge protection. On by owner decision 2026-09-14, and one-way. See [ADR 0031](../decisions/0031-security-scanner-owner-decisions.md). A workspace variable of this name set to `false` overrides it and must be deleted |
 | `cloudflare_origin_secret` | — (sensitive) | Must match Key Vault `CF-ORIGIN-SECRET` exactly; a mismatch throws on every anonymous request |
 
 ## 4.2 GitHub repository variables

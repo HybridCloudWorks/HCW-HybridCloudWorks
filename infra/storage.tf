@@ -46,11 +46,19 @@
 # where storage is a minor line next to telemetry — that is cheap insurance
 # for the only copy of every image the site serves.
 # =============================================================================
-# Resource logs for blob read/write/delete go to Log Analytics through
-# azurerm_monitor_diagnostic_setting.content_blob; trivy reads only classic
-# queue_properties logging. docs/security/scanner-triage.md#trivy
+# Resource logs for blob and queue read/write/delete go to Log Analytics
+# through azurerm_monitor_diagnostic_setting.content_blob and .content_queue;
+# trivy reads only classic queue_properties logging. Infrastructure
+# encryption is creation-only; the owner kept this account 2026-09-14 (ADR
+# 0031). Both ignores stay directly above the resource: trivy applies only a
+# contiguous run of ignore lines. docs/security/scanner-triage.md#trivy
 #trivy:ignore:AVD-AZU-0057
+#trivy:ignore:AVD-AZU-0061
 resource "azurerm_storage_account" "hcw" {
+  #checkov:skip=CKV_AZURE_33:Queue read/write/delete resource logs go to Log Analytics via azurerm_monitor_diagnostic_setting.content_queue; checkov reads only classic queue_properties.logging. docs/security/scanner-triage.md#checkov
+  #checkov:skip=CKV_AZURE_59:Public network access stays enabled because Disabled also refuses the subnet service-endpoint rule the app uses; network_rules default Deny. Owner 2026-09-14, ADR 0031. docs/security/scanner-triage.md#checkov
+  #checkov:skip=CKV2_AZURE_33:No private endpoints, owner decision 2026-09-14 (ADR 0031); service firewall with default Deny instead. docs/security/scanner-triage.md#checkov
+  #checkov:skip=CKV2_AZURE_1:Microsoft-managed keys, owner decision 2026-09-14, ADR 0031. docs/security/scanner-triage.md#checkov
   name                     = var.storage_account_name
   resource_group_name      = azurerm_resource_group.app["stor"].name
   location                 = azurerm_resource_group.app["stor"].location
@@ -372,14 +380,31 @@ resource "azurerm_storage_management_policy" "cleanup" {
 }
 
 
+# Queue logs and blob write/delete logs go to Log Analytics through the
+# functions_queue and functions_blob diagnostic settings; trivy reads only
+# classic queue_properties logging. Infrastructure encryption is creation-only;
+# the owner kept this account 2026-09-14 (ADR 0031). docs/security/scanner-triage.md#trivy
+#trivy:ignore:AVD-AZU-0057
+#trivy:ignore:AVD-AZU-0061
 resource "azurerm_storage_account" "functions" {
+  #checkov:skip=CKV_AZURE_33:Queue read/write/delete resource logs go to Log Analytics via azurerm_monitor_diagnostic_setting.functions_queue; checkov reads only classic queue_properties.logging. docs/security/scanner-triage.md#checkov
+  #checkov:skip=CKV2_AZURE_1:Microsoft-managed keys, owner decision 2026-09-14, ADR 0031. docs/security/scanner-triage.md#checkov
   #checkov:skip=CKV2_AZURE_33:ADR 0008 keeps Function host storage public-endpoint by accepted decision (default Deny network rules). docs/security/scanner-triage.md#checkov
   #checkov:skip=CKV_AZURE_59:ADR 0008, as above; the deploy firewall window needs the public endpoint with default Deny. docs/security/scanner-triage.md#checkov
-  name                     = var.functions_storage_account_name
-  resource_group_name      = azurerm_resource_group.app["web"].name
-  location                 = azurerm_resource_group.app["web"].location
-  account_tier             = "Standard"
-  account_replication_type = "LRS"
+  name                = var.functions_storage_account_name
+  resource_group_name = azurerm_resource_group.app["web"].name
+  location            = azurerm_resource_group.app["web"].location
+  account_tier        = "Standard"
+  # GRS since 2026-09-14, owner decision. It was LRS on the reasoning that a
+  # redeploy rebuilds host state — true of the release package, not of what
+  # the host keeps here between deploys: timer schedule status, singleton and
+  # listener leases, and the durable queue messages of jobs in flight. LRS
+  # loses those with the region; GRS keeps a copy in the paired region.
+  # LRS->GRS is an in-place settings update (no replacement, so
+  # prevent_destroy below is not in play). Plain GRS, not RA-GRS: nothing reads
+  # host state from the secondary. The account holds a few MB, so roughly
+  # doubling the per-GB rate is cents a month.
+  account_replication_type = "GRS"
   min_tls_version          = "TLS1_2"
   tags                     = local.tags
 
@@ -461,6 +486,7 @@ resource "azurerm_storage_account" "functions" {
 # else in this file provided one — the containers above are CONTENT containers
 # on the other storage account.
 resource "azurerm_storage_container" "function_releases" {
+  #checkov:skip=CKV2_AZURE_21:Host blob writes and deletes are logged (functions_blob); reads are excluded because the host makes ~550k a day, ~0.6 GB of logs against a 0.25 GB/day cap. Measured 2026-09-14, ADR 0031. docs/security/scanner-triage.md#checkov
   name                  = "function-releases"
   storage_account_id    = azurerm_storage_account.functions.id
   container_access_type = "private"

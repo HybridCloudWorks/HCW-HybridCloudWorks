@@ -6737,6 +6737,26 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Security
 
+- **Qlty security findings on Terraform and workflows cleared, by owner decision
+  (ADR 0031).** Qlty listed 19 open checkov and trivy findings on `main`, and
+  the owner decided each group on 2026-09-14.
+  - **Fixed in code:**
+    - Key Vault purge protection is on. It is one-way, and supersedes ADR 0021.
+    - Function host storage moves from LRS to GRS.
+    - The two remaining CKV_GHA_7 workflows lose their dispatch inputs.
+    - Storage resource logs reach Log Analytics through new diagnostic
+      settings: queues on both accounts, and host blob writes and deletes.
+  - **Host blob reads are not logged.** Measured at about 573,000 a day, they
+    would trip the 0.25 GB/day cap that the log alert rules depend on.
+  - **Recorded decisions, cited by inline skips:** Microsoft-managed keys, no
+    private endpoints, no infrastructure encryption, and no Flex zone
+    redundancy.
+  - **Public network access stays enabled.** `Disabled` would also refuse the
+    service-endpoint firewall rules, and every data service already defaults
+    to Deny.
+  - Local checkov now reports 0 failures on `infra/` and the workflows, and
+    trivy 0 on `infra/`.
+
 - **The 21 remaining zizmor template-injection findings are fixed, and Qlty's
   TODO noise is triaged (#588).** `ci.yml`, `codeql.yml`, `iac-validate.yml`,
   `repository-policy.yml`, `deploy-functions.yml` and `publish-content-manifest.yml`
