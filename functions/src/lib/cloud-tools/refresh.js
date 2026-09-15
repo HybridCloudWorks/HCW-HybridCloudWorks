@@ -1,0 +1,167 @@
+/**
+ * The scheduled pricing refresh — the writer of `tool_service_cache` (#613).
+ *
+ * This is the job the freshness RCA in freshness.js was waiting for: that
+ * module reports staleness and explicitly refuses to refresh on the request
+ * path, so something has to. This is it. One document per region option, the
+ * whole catalog in each, rewritten wholesale every run: the document is the
+ * unit of freshness, so a half-updated document is not a state that exists.
+ *
+ * Two shapes of caution, both deliberate:
+ *
+ *   - **Services are fetched one at a time**, not fanned out. Each
+ *     `fetchLivePricing` call already runs its three providers in parallel;
+ *     three regions by eight services on top of that is 72 concurrent calls
+ *     against two APIs that rate-limit (AWS GetProducts, Azure Retail
+ *     Prices) and one that pages 5,000 SKUs at a time. Sequential is slower
+ *     by a minute and never throttled. The job's timeout is sized for it.
+ *   - **A region failing does not stop the others.** The failure is logged,
+ *     recorded in the summary, and the loop continues, so an Azure outage in
+ *     one region cannot leave every region's document a day older than it
+ *     needs to be. Inside a region the library already isolates providers;
+ *     this is the same rule one level up.
+ *
+ * The baseline handed to the library is `fallbackBaselineFor`, not
+ * `baselineFor`: the two unit-mismatched services get null and a live miss
+ * for them is an absent row (owner decision 2026-09-15, baseline.js header).
+ */
+
+import { fetchLivePricing as liveFetch, clearPricingCaches } from './pricing/index.js';
+import { BASELINE_COSTS, PROVIDERS, fallbackBaselineFor } from './pricing/baseline.js';
+import { REGION_OPTIONS, SERVICE_LABELS, pricingDocId, regionOption } from './pricing/regions.js';
+import { DEFAULT_CACHE_TTL_MINUTES } from './freshness.js';
+
+export const CACHE_CONTAINER = 'tool_service_cache';
+export const REFRESH_JOB_TYPE = 'refresh-tool-pricing';
+
+/**
+ * Validate a `{ regions? }` job payload against the region options.
+ *
+ * Absent or empty means every region. Anything else must be an array of
+ * known ids: a typo is refused rather than silently refreshing nothing, for
+ * the same reason `enabled_timers` validates its names — a run that reports
+ * success over an empty list is the expensive kind of wrong.
+ *
+ * @param {unknown} payload
+ * @returns {{ regions: string[] }}
+ */
+export function parseRefreshPayload(payload) {
+  const raw = payload && typeof payload === 'object' ? payload.regions : undefined;
+  if (raw === undefined || raw === null) return { regions: REGION_OPTIONS.map((r) => r.id) };
+  if (!Array.isArray(raw)) throw new Error('payload.regions must be an array of region ids');
+  if (raw.length === 0) return { regions: REGION_OPTIONS.map((r) => r.id) };
+  const unknown = raw.filter((id) => !regionOption(id));
+  if (unknown.length) {
+    throw new Error(
+      `unknown region(s): ${unknown.map(String).join(', ')} — allowed: ${REGION_OPTIONS.map((r) => r.id).join(', ')}`
+    );
+  }
+  return { regions: [...new Set(raw)] };
+}
+
+/**
+ * Count the cells one service's rows fill, and the cells they leave empty.
+ * `unavailable` is a provider with no row at all — a live miss on a service
+ * that has no fallback, which after the 2026-09-15 decision is a state the
+ * page is expected to render.
+ */
+function countRows(rows) {
+  let live = 0;
+  let baseline = 0;
+  for (const row of rows) {
+    if (row.model === 'retail') live += 1;
+    else baseline += 1;
+  }
+  return { live, baseline, unavailable: PROVIDERS.length - rows.length };
+}
+
+/**
+ * @param {object} deps
+ * @param {{ upsertDoc: Function }} deps.store
+ * @param {typeof liveFetch} [deps.fetchLivePricing] - test seam
+ * @param {() => void} [deps.clearCaches] - test seam; defaults to the library's
+ * @param {() => Date} [deps.now]
+ * @param {{ log?: Function, warn?: Function, error?: Function }} [deps.log]
+ */
+export function createPricingRefresh({
+  store,
+  fetchLivePricing = liveFetch,
+  clearCaches = clearPricingCaches,
+  now = () => new Date(),
+  log = {},
+}) {
+  /** Build and write one region's document. */
+  async function refreshRegion(regionId) {
+    const region = regionOption(regionId);
+    if (!region) throw new Error(`unknown region ${regionId}`);
+
+    const services = [];
+    const counts = { live: 0, baseline: 0, unavailable: 0 };
+
+    for (const [serviceId, catalog] of Object.entries(BASELINE_COSTS)) {
+      const rows = await fetchLivePricing(serviceId, region.id, fallbackBaselineFor(serviceId), {
+        logger: log,
+      });
+      const c = countRows(rows);
+      counts.live += c.live;
+      counts.baseline += c.baseline;
+      counts.unavailable += c.unavailable;
+      services.push({
+        serviceId,
+        label: SERVICE_LABELS[serviceId],
+        // The unit the rows are actually in. For a service with rows that is
+        // the benchmark unit every provider converged on; with none, the
+        // catalog's, which is the only unit left to name.
+        unit: rows[0]?.unit ?? catalog.unit,
+        sku: rows[0]?.sku ?? catalog.sku,
+        rows,
+      });
+    }
+
+    const refreshedAt = now().toISOString();
+    const doc = {
+      id: pricingDocId(region.id),
+      region: region.id,
+      refreshedAt,
+      ttlMinutes: DEFAULT_CACHE_TTL_MINUTES,
+      services,
+      counts,
+    };
+    await store.upsertDoc(CACHE_CONTAINER, doc);
+    return { region: region.id, counts, refreshedAt };
+  }
+
+  return {
+    refreshRegion,
+
+    /**
+     * @param {{ regions?: string[] }} [options] - defaults to every option
+     * @returns {Promise<{ regions: {region: string, counts: object, refreshedAt: string}[],
+     *   failed: {region: string, error: string}[], durationMs: number }>}
+     */
+    async run({ regions } = {}) {
+      const started = now().getTime();
+      const ids = parseRefreshPayload({ regions }).regions;
+      // A stale GCP service list must not outlive one run (pricing/index.js
+      // clearPricingCaches).
+      clearCaches();
+
+      const done = [];
+      const failed = [];
+      for (const regionId of ids) {
+        try {
+          const summary = await refreshRegion(regionId);
+          log.log?.(
+            `[refresh-tool-pricing] ${regionId}: live ${summary.counts.live}, baseline ${summary.counts.baseline}, unavailable ${summary.counts.unavailable}`
+          );
+          done.push(summary);
+        } catch (error) {
+          const message = error?.message || String(error);
+          log.error?.(`[refresh-tool-pricing] ${regionId} FAILED: ${message}`);
+          failed.push({ region: regionId, error: message });
+        }
+      }
+      return { regions: done, failed, durationMs: now().getTime() - started };
+    },
+  };
+}

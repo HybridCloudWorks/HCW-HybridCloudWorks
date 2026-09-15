@@ -2,7 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { fetchLivePricing } from './index.js';
 import { AZURE_SERVICE_FILTERS } from './azure.js';
-import { BASELINE_COSTS, KNOWN_UNIT_MISMATCHES, PROVIDERS } from './baseline.js';
+import {
+  BASELINE_COSTS,
+  KNOWN_UNIT_MISMATCHES,
+  PROVIDERS,
+  baselineFor,
+  fallbackBaselineFor,
+} from './baseline.js';
 
 const ROW_KEYS = [
   'currency',
@@ -218,5 +224,33 @@ describe('baseline catalog', () => {
 
     expect(new Set(actual)).toEqual(KNOWN_UNIT_MISMATCHES);
     expect(actual.sort()).toEqual(['compute-serverless', 'database-nosql']);
+  });
+
+  it('offers no fallback for the two mismatched services (owner decision 2026-09-15)', () => {
+    // A live miss for these is an absent row, never a number in the wrong
+    // unit beside a live one. The catalog entry itself is untouched.
+    for (const id of KNOWN_UNIT_MISMATCHES) {
+      expect(fallbackBaselineFor(id), id).toBeNull();
+      expect(baselineFor(id), id).not.toBeNull();
+    }
+    for (const id of Object.keys(BASELINE_COSTS)) {
+      if (KNOWN_UNIT_MISMATCHES.has(id)) continue;
+      expect(fallbackBaselineFor(id), id).toBe(BASELINE_COSTS[id]);
+    }
+    expect(fallbackBaselineFor('unknown-service')).toBeNull();
+  });
+
+  it('a mismatched service with no live price yields no row at all', async () => {
+    // The decision, end to end: the refresh passes fallbackBaselineFor, so a
+    // miss on compute-serverless drops the provider rather than rendering
+    // 2.65 per million invocations beside a normalized-workload figure.
+    const rows = await fetchLivePricing(
+      'compute-serverless',
+      'us-east-1',
+      fallbackBaselineFor('compute-serverless'),
+      { logger: silent, loaders: loaders({ azure: async () => null }) }
+    );
+    expect(rows.map((r) => r.provider)).toEqual(['aws', 'gcp']);
+    expect(rows.every((r) => r.model === 'retail')).toBe(true);
   });
 });

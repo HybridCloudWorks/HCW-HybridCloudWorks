@@ -19,6 +19,41 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Cloud Tools pricing: the timer, the job and the public read (#613,
+  backend half).** The ported live-pricing library in
+  `functions/src/lib/cloud-tools/` had no caller; now it has three.
+  - **`refresh-tool-pricing` job** (`functions/src/functions/cloud-tools-jobs.js`,
+    `lib/cloud-tools/refresh.js`): for each of three region options
+    (`us-east-1`, `us-west-2`, `westeurope` — `pricing/regions.js`, asserted
+    against `PROVIDER_REGION_MATRIX`) fetches all eight catalog services
+    from AWS, Azure and GCP one service at a time and upserts one
+    `tool_service_cache` document per region: `{ id: 'pricing:<region>',
+    region, refreshedAt, ttlMinutes: 1440, services[], counts { live,
+    baseline, unavailable } }`. A region failing is logged and the others
+    continue. Editor-enqueueable (`{ type: 'refresh-tool-pricing', payload:
+    {} }`, optional `payload.regions`), ten-minute budget, failure to
+    Telegram like the export job.
+  - **`refreshToolServiceCache` timer**, daily 02:00 UTC, behind
+    `FEATURE_FLAG_REFRESH_TOOL_SERVICE_CACHE` and the schedulers master
+    switch; enqueues the job rather than running 24 lookups inside a timer.
+    Catalogued in `infra/functionapp.tf` and allowed by the `enabled_timers`
+    validation; the twentieth catalogued timer and the twenty-first
+    registration, and every prose count was moved with it. The once-per-
+    process "disabled — skipping" Warning is now `lib/timers/flag-gate.js`,
+    shared by `schedulers.js` and this timer.
+  - **`GET /api/public/cloud-tools/pricing?region=`**
+    (`lib/cloud-tools/public-pricing.js`): one point read of the region's
+    document, `Cache-Control: public, max-age=900`, freshness reported
+    through `cacheFreshness` and never repaired on the request path. No
+    document yet is a 200 with `refreshedAt: null`, `stale: true` and every
+    cell unavailable, so the page renders "not refreshed yet" rather than an
+    error. Unknown region is 400.
+  - **Owner decision 2026-09-15:** the two `KNOWN_UNIT_MISMATCHES` services
+    (`compute-serverless`, `database-nosql`) get no baseline fallback —
+    `fallbackBaselineFor` answers null for them, so a live miss is an absent
+    row counted as unavailable, never a number in the wrong unit. Recorded in
+    the `baseline.js` header and pinned by a test.
+
 - **Linkie posts can carry an image (#501).** On `/admin/linkie`, Add a Post
   has an optional image row. The image can be uploaded from the computer into
   the public `covers` container (PNG, JPEG, WebP, GIF or AVIF, up to 15 MB), or

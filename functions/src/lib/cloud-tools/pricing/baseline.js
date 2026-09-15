@@ -33,6 +33,15 @@
  * Picking replacement numbers for those is a pricing-catalog decision, not a
  * refactor. They are recorded in KNOWN_UNIT_MISMATCHES so the accompanying test
  * asserts exactly these two and fails if a third ever appears.
+ *
+ * OWNER DECISION 2026-09-15 (#613): the two mismatched services get NO
+ * baseline fallback on the served page. The scheduled refresh passes
+ * `fallbackBaselineFor(serviceId)` — null for these two — into
+ * `fetchLivePricing`, so a live miss for them is an ABSENT row (counted as
+ * unavailable), never a number in the wrong unit sitting beside a live one.
+ * The catalog entries themselves stay, unchanged: they are still the record
+ * of what the old site showed, and the test that pins the mismatch set still
+ * reads them. What changed is that nothing renders them.
  */
 
 /**
@@ -115,4 +124,15 @@ export const PROVIDERS = Object.freeze(['aws', 'azure', 'gcp']);
 /** Look up a baseline, or null when the service is not in the catalog. */
 export function baselineFor(serviceId) {
   return BASELINE_COSTS[serviceId] ?? null;
+}
+
+/**
+ * The baseline a live miss may fall back to on the served comparison: the
+ * catalog entry, or null for a service in KNOWN_UNIT_MISMATCHES (owner
+ * decision 2026-09-15, in the header). This is the ONLY baseline the refresh
+ * hands to `fetchLivePricing`; `baselineFor` stays for readers that want the
+ * catalog as data.
+ */
+export function fallbackBaselineFor(serviceId) {
+  return KNOWN_UNIT_MISMATCHES.has(serviceId) ? null : baselineFor(serviceId);
 }

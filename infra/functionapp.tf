@@ -50,9 +50,10 @@ resource "azurerm_service_plan" "hcw" {
 # The catalogue is the authority on which timers exist. It must match the
 # `timer(name, FLAG, ...)` registrations in
 # functions/src/functions/schedulers.js plus platformJobSweeper in
-# jobs-sweeper.js — route-inventory.test.js asserts the timer set, so a timer
-# added there without a flag here ships disarmed and one removed there leaves a
-# dead setting behind.
+# jobs-sweeper.js and refreshToolServiceCache in cloud-tools-jobs.js —
+# route-inventory.test.js asserts the timer set, so a timer added there
+# without a flag here ships disarmed and one removed there leaves a dead
+# setting behind.
 locals {
   # Flag suffix => the function it arms. The comment is the whole point of the
   # map: `SYNC_SOCIAL_CALENDAR` tells an operator nothing about what turning it
@@ -80,6 +81,11 @@ locals {
     CLEANUP_TEMP_STORAGE       = "cleanupTempStorage — daily 00:00 UTC, deletes temp blobs (dry-run unless TEMP_STORAGE_CLEANUP_DELETE)"
     CLEANUP_UNUSED_CERT_IMAGES = "cleanupUnusedCertImages — daily 05:00 UTC, deletes unused cert images (dry-run unless CERT_IMAGE_CLEANUP_DELETE)"
     PLATFORM_JOB_SWEEPER       = "platformJobSweeper — re-enqueues jobs left queued by a failed output binding (T-322)"
+    # #613: enqueues the refresh-tool-pricing job; the worker reads three
+    # public price lists and rewrites tool_service_cache. Azure needs no key;
+    # AWS and GCP rows fall back to baseline or go absent until their Key
+    # Vault secrets are seeded.
+    REFRESH_TOOL_SERVICE_CACHE = "refreshToolServiceCache — daily 02:00 UTC, enqueues the pricing cache refresh job"
   }
 
   timer_flags = {
@@ -621,8 +627,8 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     #
     # These are generated from `local.timer_flags` rather than written out here,
     # so turning a timer on is a WORKSPACE VARIABLE edit — add its name to
-    # `enabled_timers` — and not a code change. Nineteen timers turned on one at
-    # a time would otherwise be nineteen pull requests during a cutover window,
+    # `enabled_timers` — and not a code change. Twenty timers turned on one at
+    # a time would otherwise be twenty pull requests during a cutover window,
     # which is how a "one at a time, watch each one" procedure quietly becomes
     # "turn them all on and see what breaks".
     #
