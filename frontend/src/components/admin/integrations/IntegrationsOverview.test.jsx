@@ -141,6 +141,7 @@ describe('Test all', () => {
       'telegram',
       'rsscom',
       'mcpProxy',
+      'qlty',
     ]);
     expect(probes).not.toContain('youtube');
     expect(fetchMock).toHaveBeenCalledTimes(1);

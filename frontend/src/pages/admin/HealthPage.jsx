@@ -23,7 +23,11 @@
  *             Its own tab because answering one is a live action.
  *   Checks    the pipeline smoke tests, token claims, the admin registry and
  *             the Labs probes — checks that run on demand and do real work.
- *   Report    the Markdown summary of those checks, and Copy report.
+ *   Code and Security
+ *             Qlty's grades and open issues, condensed (health/CodeQualityTab).
+ *             Read the first time the tab opens, never on page load.
+ *   Report    the Markdown summary of those checks, plus the Code and
+ *             Security summary when that tab was read, and Copy report.
  *
  * Deep links are `?tab=`; an unknown or moved id lands where its content went
  * (health/tabs.js).
@@ -70,8 +74,11 @@ import {
   messageOf,
   useSmokeActions,
 } from './health/probes';
+import CodeQualityTab from './health/CodeQualityTab';
+import { withCodeQuality } from './health/codeQuality';
 import { TABS, resolveTab } from './health/tabs';
 import useAlertActions from './health/useAlertActions';
+import useCodeQuality from './health/useCodeQuality';
 import useHealthChecks from './health/useHealthChecks';
 import useOpsSnapshot from './health/useOpsSnapshot';
 
@@ -310,8 +317,9 @@ function ReportTab({ report, settling, copyReport }) {
         <div className="space-y-1.5">
           <CardTitle className="text-lg">Report</CardTitle>
           <CardDescription>
-            What Copy report puts on the clipboard: the checks on the Checks tab, as they stand.
-            Claim names, booleans, statuses and job ids only.
+            What Copy report puts on the clipboard: the checks on the Checks tab, as they stand, and
+            the Code and Security summary if that tab was read. Claim names, booleans, statuses, job
+            ids and Qlty counts only.
           </CardDescription>
         </div>
         <div className="flex flex-col items-end gap-1">
@@ -352,6 +360,7 @@ const PANELS = {
   overview: OverviewTab,
   alerts: AlertsTab,
   checks: ChecksTab,
+  code: CodeQualityTab,
   report: ReportTab,
 };
 
@@ -369,6 +378,9 @@ export default function HealthPage() {
   const ops = useOpsSnapshot(authReady);
   const alerts = useAlertActions(ops);
   const checks = useHealthChecks(authReady);
+  // Qlty is paged and cached server-side, so it is read only once the Code
+  // and Security tab has been opened, and then kept across tab switches.
+  const code = useCodeQuality(authReady && activeTab === 'code');
   const { identity, identityBusy, labs, labsBusy, unauth, unauthBusy } = checks;
 
   // A smoke action writes what the snapshot reads, so it re-reads it — through
@@ -394,13 +406,16 @@ export default function HealthPage() {
   // that is merely pending, and that is what would end up in the record.
   const settling = identity === null || identityBusy || labsBusy || unauthBusy;
 
-  const report = buildReport({
-    generatedAt: new Date().toISOString(),
-    identityPending: identity === null,
-    ...(identity || {}),
-    labs,
-    unauth,
-  });
+  const report = withCodeQuality(
+    buildReport({
+      generatedAt: new Date().toISOString(),
+      identityPending: identity === null,
+      ...(identity || {}),
+      labs,
+      unauth,
+    }),
+    code.data
+  );
 
   const copyReport = async () => {
     try {
@@ -453,6 +468,7 @@ export default function HealthPage() {
           report={report}
           settling={settling}
           copyReport={copyReport}
+          code={code}
         />
       </HubTabs>
     </div>

@@ -5,14 +5,15 @@
  * the lazily loaded page into the main bundle.
  *
  * A tab is one entry here plus its panel in HealthPage's `PANELS`; nothing
- * else keys on the list, so a new duty (the planned Code and Security tab) is
- * an addition rather than an edit.
+ * else keys on the list, so a new duty is an addition rather than an edit, as
+ * the Code and Security tab was.
  */
 
 export const TABS = Object.freeze([
   { id: 'overview', label: 'Overview' },
   { id: 'alerts', label: 'Alerts' },
   { id: 'checks', label: 'Checks' },
+  { id: 'code', label: 'Code and Security' },
   { id: 'report', label: 'Report' },
 ]);
 
@@ -37,6 +38,10 @@ export const MOVED_TABS = Object.freeze({
   verified: 'checks',
   diagnostics: 'checks',
   smoke: 'checks',
+  qlty: 'code',
+  quality: 'code',
+  'code-quality': 'code',
+  security: 'code',
   copy: 'report',
 });
 
