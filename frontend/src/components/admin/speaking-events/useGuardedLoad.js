@@ -55,16 +55,19 @@ export default function useGuardedLoad(load, { enabled = true, empty, describeEr
   );
 
   const refresh = useCallback(() => {
-    if (!enabled) return Promise.resolve(false);
-    const mine = ++generation.current;
-    setPending(true);
-    setError('');
-    return read(mine);
+    let settled = Promise.resolve(false);
+    if (enabled) {
+      const mine = ++generation.current;
+      setPending(true);
+      setError('');
+      settled = read(mine);
+    }
+    return settled;
   }, [enabled, read]);
 
   useEffect(() => {
-    if (!enabled) return undefined;
-    read(++generation.current);
+    if (enabled) read(++generation.current);
+    // Superseding also when disabled is harmless: nothing is in flight then.
     return () => {
       generation.current += 1;
     };
