@@ -112,14 +112,6 @@ export function unwrapPublerAccounts(response) {
 }
 
 /**
- * The four-state machine both pages drive their copy from, derived once here so
- * the two cannot disagree about which envelope is which. `loading` is the
- * caller's own initial state; this names the three a response can produce.
- *
- * @param {{ notConfigured?: boolean, failed?: boolean }} unwrapped
- * @returns {'not_configured' | 'error' | 'ready'}
- */
-/**
  * The posts list, from the same envelope `unwrapPublerAccounts` reads.
  *
  * Publer's `GET /posts` answers `{ posts: [...], total }` - an object, not an
@@ -154,6 +146,14 @@ export function unwrapPublerPosts(response) {
   };
 }
 
+/**
+ * The four-state machine both pages drive their copy from, derived once here so
+ * the two cannot disagree about which envelope is which. `loading` is the
+ * caller's own initial state; this names the three a response can produce.
+ *
+ * @param {{ notConfigured?: boolean, failed?: boolean }} unwrapped
+ * @returns {'not_configured' | 'error' | 'ready'}
+ */
 export function publerAccountsStatus({ notConfigured, failed } = {}) {
   if (failed) return 'error';
   if (notConfigured) return 'not_configured';
