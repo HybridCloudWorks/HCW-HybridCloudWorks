@@ -308,7 +308,7 @@ export function extractPosts(response) {
  * @returns {{ url: string, provider: string, account_name: string,
  *             post_type: string, text?: string } & Record<string, string>}
  *   plus, only when an image was chosen, one string under the key
- *    (currently `thumbnail`, unconfirmed).
+ *   `LINKIE_POST_IMAGE_FIELD` (currently `thumbnail`, unconfirmed).
  */
 export function buildPostPayload({ url, provider, accountName, postType, text, imageUrl } = {}) {
   const payload = {
@@ -351,7 +351,7 @@ export function createPostsBody(post) {
  * @returns {{ url: string, provider: string, account_name: string,
  *             post_type: string, text?: string } & Record<string, string>}
  *   plus, only when an image was chosen, one string under the key
- *    (currently `thumbnail`, unconfirmed).
+ *   `LINKIE_POST_IMAGE_FIELD` (currently `thumbnail`, unconfirmed).
  */
 export function contentItemPostPayload({ title, url, imageUrl } = {}) {
   return buildPostPayload({
