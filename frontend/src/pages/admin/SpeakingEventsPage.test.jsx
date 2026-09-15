@@ -250,8 +250,20 @@ describe('per-tab loading and error isolation', () => {
 });
 
 describe('Publishing and Settings', () => {
-  it('compares the public snapshot with what a publish would write', async () => {
+  it('does not assert snapshot/store drift when the public snapshot returns no rows', async () => {
     fetchPublicSnapshotItems.mockResolvedValue([]);
+    searchParams = 'tab=publishing';
+    render(<SpeakingEventsPage />);
+    expect(await panel().findByText(/Would publish 1 event; 1 stored row not shown/)).toBeTruthy();
+    expect(
+      await panel().findByText(/cannot confirm whether it differs from stored events/)
+    ).toBeTruthy();
+    expect(panel().queryByText(/The snapshot and the store differ/)).toBeNull();
+    expect(fetchPublicSnapshotItems).toHaveBeenCalledWith('speakerevents');
+  });
+
+  it('shows drift when both reads land and the snapshot count differs', async () => {
+    fetchPublicSnapshotItems.mockResolvedValue([{ id: 'one' }, { id: 'two' }]);
     searchParams = 'tab=publishing';
     render(<SpeakingEventsPage />);
     expect(await panel().findByText(/Would publish 1 event; 1 stored row not shown/)).toBeTruthy();

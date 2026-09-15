@@ -46,7 +46,9 @@ function SnapshotCard({ snapshot }) {
 
 function StoredCard({ stored, snapshot }) {
   const { published, withheld } = countPublishable(stored.data);
-  const differs = snapshot.loaded && stored.loaded && snapshot.data.length !== published;
+  const canCompare = snapshot.loaded && stored.loaded && snapshot.data.length > 0;
+  const differs = canCompare && snapshot.data.length !== published;
+  const comparisonUnknown = snapshot.loaded && stored.loaded && snapshot.data.length === 0 && published > 0;
   return (
     <Card>
       <CardContent className="pt-5 space-y-2">
@@ -61,6 +63,12 @@ function StoredCard({ stored, snapshot }) {
         {differs && (
           <p role="status" className="text-sm text-amber-700 dark:text-amber-400">
             The snapshot and the store differ — publish to bring the public page up to date.
+          </p>
+        )}
+        {comparisonUnknown && (
+          <p className="text-sm text-muted-foreground">
+            The snapshot returned no rows, so this page cannot confirm whether it differs from
+            stored events.
           </p>
         )}
       </CardContent>
