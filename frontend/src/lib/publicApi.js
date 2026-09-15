@@ -206,6 +206,67 @@ export async function fetchCloudPricing(region = 'us-east-1', { fresh = false } 
 }
 
 /**
+ * GET public/cloud-tools/price-changes?region= — what moved in the cached
+ * prices of one region over the last week and month (#613, Phase 3):
+ * `{ region, asOf, windows: { '7d': { since, sampleDay, items }, '30d': {…} },
+ * sampleDays }`, each item `{ serviceId, label, provider, unit, sku, from,
+ * to, deltaPct }` sorted by the size of the move. Until the daily refresh has
+ * written more than one sample there is no history: the server answers 200
+ * with `asOf: null` and empty windows, and the page renders that as its own
+ * state. Returns null only when the route itself is missing (404); throws
+ * with the server's sentence otherwise, as `fetchCloudPricing` does.
+ *
+ * @param {string} [region]
+ * @returns {Promise<object|null>}
+ */
+export async function fetchPriceChanges(region = 'us-east-1') {
+  const params = new URLSearchParams({ region: String(region || 'us-east-1') });
+  const body = await publicGet(`public/cloud-tools/price-changes?${params}`);
+  if (!body) return null;
+  if (!body.changes || typeof body.changes !== 'object') {
+    throw new Error('Price-changes response carried no changes object');
+  }
+  return body.changes;
+}
+
+/**
+ * POST public/cloud-tools/explain — two paragraphs from the AI provider about
+ * a scenario's numbers (#613, Phase 3). The body is the computed comparison
+ * the page already shows: `{ region, scenarioId, scenarioLabel, extras,
+ * egressGb, results: [{ provider, total, base, segments, unavailable }] }`;
+ * the server caps it at 8 KB and answers `{ text, model, generatedAt,
+ * cached }`.
+ *
+ * Never cached here and never deduplicated: it is a POST the reader asked for
+ * by pressing a button, and the server owns both the per-client quota (429,
+ * five an hour) and the "paused" state (503). The thrown Error carries
+ * `status` so the button can say "try again in a while" for one and the
+ * server's own sentence for the other, the way lib/api.js does for admin
+ * calls.
+ *
+ * @param {object} body
+ * @returns {Promise<{ text: string, model: string, generatedAt: string, cached: boolean }>}
+ */
+export async function requestPricingExplanation(body) {
+  const base = requireFunctionsBase('public/cloud-tools/explain');
+  const res = await fetch(`${base}/public/cloud-tools/explain`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const error = new Error(data.error || `Explanation request failed with HTTP ${res.status}`);
+    error.status = res.status;
+    throw error;
+  }
+  if (!data.explanation || typeof data.explanation.text !== 'string') {
+    throw new Error('Explanation response carried no text');
+  }
+  return data.explanation;
+}
+
+/**
  * GET public/newsletter/signup-config — where the newsletter signup box shows
  * and its heading and blurb (#557): `{ placement, heading, blurb }`. The
  * server answers its defaults rather than failing, so a throw here is a

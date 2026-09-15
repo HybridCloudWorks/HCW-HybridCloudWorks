@@ -8,7 +8,9 @@
  * server-side once a day. It is a list price, not a bill: no reservations,
  * no committed use, no free tier, no egress beyond the CDN row. The scenario
  * card above the table (Phase 2, pages/tools/scenario/) turns these same
- * rates into a monthly estimate for one shape, with extras itemised.
+ * rates into a monthly estimate for one shape, with extras itemised, and the
+ * "Price changes" card beneath it (Phase 3, PriceChanges.jsx) says what moved
+ * in this region's prices over the last week or month.
  *
  * THE REGION IS IN THE URL. `?region=` drives the fetch, so a comparison for
  * Western Europe is a link someone can send rather than a selection they
@@ -43,10 +45,12 @@ import {
   PRICING_PROVIDERS,
   asOfLine,
   cheapestProviders,
+  formatLocalDateTime,
   formatPrice,
   rowsByProvider,
 } from '@/lib/cloudPricing';
 import { pricingPageFor } from './pricingPages';
+import { PriceChanges } from './PriceChanges';
 import { ScenarioSection } from './scenario/ScenarioSection';
 
 const PAGE_TITLE = 'Cloud pricing comparison';
@@ -57,14 +61,6 @@ const CATALOGUE_TITLE =
 
 const UNAVAILABLE_TITLE =
   'Unavailable: neither a live price nor a catalogue figure exists for this provider and service in this region.';
-
-/** Browser-only. Never reached at pre-render, where there is no data. */
-const formatLocalDateTime = (iso) => {
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime())
-    ? String(iso)
-    : date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-};
 
 /** The native select, styled like SelectTrigger so the page has one look. */
 function RegionSelect({ region, regions, disabled, onChange }) {
@@ -340,9 +336,17 @@ export default function ComparisonPage() {
           <ErrorPanel message={error.message} onRetry={() => setAttempt((n) => n + 1)} />
         ) : null}
 
-        <ScenarioSection pricing={pricing} loading={loading} error={error} />
+        <ScenarioSection
+          pricing={pricing}
+          loading={loading}
+          error={error}
+          region={region}
+          regions={regions}
+        />
 
         <PricingTable services={services} loading={loading} error={error} />
+
+        <PriceChanges region={region} />
       </div>
     </>
   );

@@ -106,6 +106,18 @@ const PAYLOAD = {
   },
 };
 
+/** The Phase 3 price-changes card fetches too; it is not under test here. */
+const NO_HISTORY = {
+  success: true,
+  changes: { region: 'us-east-1', asOf: null, windows: {}, sampleDays: 0 },
+};
+const isPricingUrl = (url) => String(url).includes('cloud-tools/pricing?');
+const answerPricing = (response) =>
+  fetchMock.mockImplementation(async (url) =>
+    isPricingUrl(url) ? response : jsonResponse(NO_HISTORY)
+  );
+const pricingCalls = () => fetchMock.mock.calls.filter((call) => isPricingUrl(call[0]));
+
 function SearchProbe() {
   const [params] = useSearchParams();
   return <output data-testid="search">{params.toString()}</output>;
@@ -133,7 +145,7 @@ const extraInput = (label) =>
 beforeEach(() => {
   clearPublicGetCache();
   fetchMock.mockReset();
-  fetchMock.mockResolvedValue(jsonResponse(PAYLOAD));
+  answerPricing(jsonResponse(PAYLOAD));
   vi.stubGlobal('fetch', fetchMock);
 });
 afterEach(() => {
@@ -255,7 +267,7 @@ describe('the scenario card', () => {
     await waitFor(() => expect(totalText('aws')).toBe('$711.00'));
     expect(screen.getByLabelText('Virtual machine').value).toBe('1460');
     // Only the one region fetch: scenario changes never refetch.
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(pricingCalls()).toHaveLength(1);
   });
 
   it('reads the whole scenario from the URL and writes it back the same way', async () => {
@@ -428,6 +440,9 @@ describe('without prices', () => {
     );
     expect(html).toContain('Loading prices for this scenario…');
     expect(html).toContain('Price a scenario');
+    // Phase 3: the price-changes card is on the static page at its loading state.
+    expect(html).toContain('Price changes');
+    expect(html).toContain('Loading price changes…');
 
     const container = document.createElement('div');
     container.innerHTML = html;
@@ -453,13 +468,11 @@ describe('without prices', () => {
   });
 
   it('says there is nothing to price after a failure, and the controls stay usable', async () => {
-    fetchMock.mockResolvedValue(
-      jsonResponse({ success: false, error: 'Unknown region: mars-1' }, 400)
-    );
+    answerPricing(jsonResponse({ success: false, error: 'Unknown region: mars-1' }, 400));
     const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       renderPage('/tools/comparison?region=mars-1');
-      await screen.findByRole('alert');
+      await screen.findByText(/Prices could not be loaded:/);
       expect(screen.getByTestId('scenario-status').textContent).toBe(
         'No prices to build the scenario from until they load.'
       );

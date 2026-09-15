@@ -20,6 +20,25 @@ export const PRICING_PROVIDERS = Object.freeze([
   { id: 'gcp', label: 'Google Cloud' },
 ]);
 
+/** A provider's column heading from its id; the id itself for one not listed. */
+export function providerLabel(id) {
+  return PRICING_PROVIDERS.find((provider) => provider.id === id)?.label ?? id;
+}
+
+/**
+ * An ISO timestamp in the visitor's locale: "15 Sept 2026, 10:30". BROWSER
+ * ONLY, and the one deliberate exception to this module's no-locale rule:
+ * every caller renders it only after data has arrived, which never happens
+ * at pre-render, so it cannot reach the static HTML and cannot mismatch.
+ * An unparseable value is returned as it came.
+ */
+export function formatLocalDateTime(iso) {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime())
+    ? String(iso)
+    : date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
 /**
  * A price to four significant figures with its currency: $0.192, $2.65,
  * $0.085, $6.874. Significant figures rather than decimals because the rows

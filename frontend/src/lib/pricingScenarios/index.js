@@ -21,6 +21,7 @@
  *   extras.js       the rules that turn quantities into line items
  *   compute.js      pricing a scenario on every provider
  *   share.js        the scenario as a query string
+ *   compare.js      the same scenario in a second region (Phase 3)
  *   format.js       fixed en-US formatting
  */
 export { HOURS_PER_MONTH, PROVIDER_IDS, SERVICES, SERVICE_IDS, serviceMeta } from './services';
@@ -54,5 +55,12 @@ export {
   groupChoice,
 } from './extras';
 export { priceTable, computeScenario } from './compute';
-export { isScenarioParam, encodeScenario, decodeScenario } from './share';
-export { formatCost, formatDelta, formatAssumption, formatQuantity } from './format';
+export { isScenarioParam, isRegionId, encodeScenario, decodeScenario } from './share';
+export { compareRegions } from './compare';
+export {
+  formatCost,
+  formatDelta,
+  formatSignedDelta,
+  formatAssumption,
+  formatQuantity,
+} from './format';
