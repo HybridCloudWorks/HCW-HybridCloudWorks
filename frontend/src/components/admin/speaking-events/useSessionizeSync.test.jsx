@@ -21,8 +21,8 @@ const STORED = [
   { _docId: 'legacy-2', eventId: 2 },
 ];
 
-const sessionize = { data: EVENTS };
-const stored = { data: STORED, refresh: vi.fn() };
+const sessionize = { data: EVENTS, loaded: true };
+const stored = { data: STORED, loaded: true, refresh: vi.fn() };
 
 beforeEach(() => {
   postJSON.mockReset().mockResolvedValue({ ok: true });
@@ -78,13 +78,39 @@ describe('useSessionizeSync', () => {
     expect(result.current.syncing).toBe(false);
   });
 
-  it('refuses to sync before Sessionize has loaded', async () => {
-    const { result } = renderHook(() => useSessionizeSync({ data: [] }, stored));
+  it('refuses to sync before Sessionize or the store has loaded', async () => {
+    for (const [se, st] of [
+      [{ data: [], loaded: false }, stored],
+      [sessionize, { data: [], loaded: false, refresh: vi.fn() }],
+    ]) {
+      const { result } = renderHook(() => useSessionizeSync(se, st));
+      await act(async () => {
+        await result.current.sync();
+      });
+      expect(result.current.error).toBe(
+        'Sessionize and stored data are not loaded yet — hit Refresh first.'
+      );
+    }
+    expect(postJSON).not.toHaveBeenCalled();
+  });
+
+  it('syncs when Sessionize loaded with no events, instead of calling it not loaded', async () => {
+    const { result } = renderHook(() => useSessionizeSync({ data: [], loaded: true }, stored));
     await act(async () => {
       await result.current.sync();
     });
-    expect(postJSON).not.toHaveBeenCalled();
-    expect(result.current.error).toBe('Sessionize data not loaded yet — hit Refresh first.');
+    expect(result.current.error).toBe('');
+    expect(result.current.result).toEqual({ created: 0, patched: 0, skipped: 0 });
+  });
+
+  it('creates every event on the first sync into an empty store', async () => {
+    const empty = { data: [], loaded: true, refresh: vi.fn() };
+    const { result } = renderHook(() => useSessionizeSync(sessionize, empty));
+    await act(async () => {
+      await result.current.sync();
+    });
+    expect(result.current.error).toBe('');
+    expect(result.current.result.created).toBe(EVENTS.length);
   });
 
   it('reports a failure and still re-reads the store it may have partly written', async () => {

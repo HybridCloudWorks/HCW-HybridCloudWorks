@@ -55,8 +55,11 @@ export default function useSessionizeSync(sessionize, stored) {
 
   const sync = async () => {
     if (syncingRef.current) return;
-    if (sessionize.data.length === 0) {
-      setError('Sessionize data not loaded yet — hit Refresh first.');
+    // `loaded`, not a row count: Sessionize can answer with no events, and the
+    // store can be empty, and both are real answers a sync can act on. Syncing
+    // before the store has landed could create records that already exist.
+    if (!sessionize.loaded || !stored.loaded) {
+      setError('Sessionize and stored data are not loaded yet — hit Refresh first.');
       return;
     }
     syncingRef.current = true;

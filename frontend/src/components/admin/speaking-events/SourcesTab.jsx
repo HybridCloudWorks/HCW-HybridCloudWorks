@@ -87,7 +87,7 @@ function ManualSource({ rows, editor }) {
   );
 }
 
-function SourcesToolbar({ reads, sync, stored, editor }) {
+function SourcesToolbar({ reads, sync, editor }) {
   const busy = reads.some((read) => read.pending);
   return (
     <div className="flex flex-wrap justify-end gap-2">
@@ -96,7 +96,9 @@ function SourcesToolbar({ reads, sync, stored, editor }) {
         variant="outline"
         size="sm"
         onClick={sync.sync}
-        disabled={busy || sync.syncing || stored.data.length === 0}
+        // Gate on the reads having landed, not on rows existing: an empty store
+        // is exactly when the first sync has everything to create.
+        disabled={busy || sync.syncing || !allLanded(reads)}
         title="Create stored records for any new Sessionize events — existing records are never touched"
       >
         {sync.syncing ? (
@@ -119,7 +121,7 @@ export default function SourcesTab({ data, editor, sync }) {
   const reads = [sessionize, stored];
   return (
     <div className="space-y-6 pt-4">
-      <SourcesToolbar reads={reads} sync={sync} stored={stored} editor={editor} />
+      <SourcesToolbar reads={reads} sync={sync} editor={editor} />
       {sync.error && <Dismissible onDismiss={sync.dismissError}>{sync.error}</Dismissible>}
       {sync.result && <SyncResult result={sync.result} onDismiss={sync.dismissResult} />}
       {editor.error && <Dismissible onDismiss={editor.clearError}>{editor.error}</Dismissible>}

@@ -51,8 +51,9 @@ export function ReadsStatus({ reads, label }) {
   if (failed.length > 0) {
     return (
       <div className="space-y-2">
-        {failed.map((read) => (
-          <TabError key={read.error} message={read.error} onRetry={read.refresh} />
+        {failed.map((read, index) => (
+          // Index as well as message: two reads can fail with the same sentence.
+          <TabError key={`${index}-${read.error}`} message={read.error} onRetry={read.refresh} />
         ))}
       </div>
     );
