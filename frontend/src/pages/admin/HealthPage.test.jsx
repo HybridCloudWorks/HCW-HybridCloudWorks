@@ -15,6 +15,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 
 import HealthPage from './HealthPage';
 import { LABS_PROBE_JOB } from './health/probes';
+import { CODE_QUALITY } from './health/codeQuality.fixture';
 
 const authedFetch = vi.fn();
 const getJSON = vi.fn();
@@ -50,6 +51,12 @@ vi.mock('react-router', async () => {
       };
       return [params, set];
     },
+    // The Code and Security tab's not-configured notice links to Integrations.
+    Link: ({ to, children, ...rest }) => (
+      <a href={to} {...rest}>
+        {children}
+      </a>
+    ),
   };
 });
 
@@ -231,14 +238,14 @@ const verdictBadge = (pattern) => {
 // ── One hub, a tab per duty ──────────────────────────────────────────────────
 
 describe('the hub', () => {
-  it('always renders the header and the four tabs, Overview first', async () => {
+  it('always renders the header and the five tabs, Overview first', async () => {
     renderAt();
     expect(screen.getByRole('heading', { name: 'Health Hub' })).toBeTruthy();
     expect(
       hubTabs()
         .getAllByRole('tab')
         .map((tab) => tab.textContent)
-    ).toEqual(['Overview', 'Alerts', 'Checks', 'Report']);
+    ).toEqual(['Overview', 'Alerts', 'Checks', 'Code and Security', 'Report']);
     expect(selectedTab()).toBe('Overview');
     await screen.findByText('Queue SLA Breaches');
   });
@@ -699,6 +706,79 @@ describe('the Checks tab', () => {
     fireEvent.click(screen.getByText('Re-run identity checks'));
     expect(acquireApiToken).toHaveBeenCalledTimes(2);
     await waitFor(() => expect(rerun.disabled).toBe(false));
+  });
+});
+
+// ── Code and Security ────────────────────────────────────────────────────────
+
+const codeQualityReads = () => getJSON.mock.calls.filter(([name]) => name === 'cms/code-quality');
+
+/** Expectations for the identity run, and `body` (or a thrown error) for Qlty. */
+const qltyAnswers = (answer) =>
+  getJSON.mockImplementation(async (name) => {
+    if (name !== 'cms/code-quality') return EXPECTATIONS;
+    if (answer instanceof Error) throw answer;
+    return answer;
+  });
+
+describe('the Code and Security tab', () => {
+  it('is not read on page load, only when the tab is first opened, and once', async () => {
+    qltyAnswers(CODE_QUALITY);
+    renderAt();
+    await screen.findByText('Queue SLA Breaches');
+    expect(codeQualityReads()).toHaveLength(0);
+
+    openTab('Code and Security');
+    expect(await screen.findByRole('table', { name: 'Top rules' })).toBeTruthy();
+    for (const label of ['Overview', 'Code and Security']) openTab(label);
+    await screen.findByRole('table', { name: 'Top rules' });
+    expect(codeQualityReads()).toHaveLength(1);
+  });
+
+  it('opens from ?tab=code and from an alias', async () => {
+    qltyAnswers(CODE_QUALITY);
+    renderAt('qlty');
+    expect(selectedTab()).toBe('Code and Security');
+    expect(await screen.findByRole('list', { name: 'Qlty grades' })).toBeTruthy();
+  });
+
+  it('shows not configured as a notice, not an error', async () => {
+    qltyAnswers({
+      ok: false,
+      code: 'INTEGRATION_NOT_CONFIGURED',
+      error: 'Qlty is not configured: QLTY_API_TOKEN is not set',
+      projectUrl: CODE_QUALITY.projectUrl,
+    });
+    renderAt('code');
+    expect(await screen.findByText('Qlty is not configured.')).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('shows a refused read as this tab’s error and comes back on Try again', async () => {
+    qltyAnswers(Object.assign(new Error('Qlty answered 502'), { status: 502 }));
+    renderAt('code');
+    expect((await screen.findByRole('alert')).textContent).toContain('Qlty answered 502');
+
+    qltyAnswers(CODE_QUALITY);
+    fireEvent.click(screen.getByRole('button', { name: /Try again/ }));
+    expect(await screen.findByRole('table', { name: 'Top files' })).toBeTruthy();
+  });
+
+  it('adds its summary to the report only once it has loaded', async () => {
+    qltyAnswers(CODE_QUALITY);
+    renderAt('report');
+    await waitFor(() => expect(copyButton().disabled).toBe(false));
+    expect(reportText()).toContain('Code and Security: not loaded in this session.');
+    expect(reportText()).not.toContain('### Code and Security');
+
+    openTab('Code and Security');
+    await screen.findByRole('table', { name: 'Top rules' });
+    openTab('Report');
+    expect(reportText()).toContain('### Code and Security — Qlty');
+    expect(reportText()).toContain('- Security issues: 48');
+    expect(reportText()).toContain('  - qlty:function-complexity (medium) — 400');
+    expect(reportText()).not.toContain('not loaded in this session');
+    expectNoSecrets(reportText());
   });
 });
 
