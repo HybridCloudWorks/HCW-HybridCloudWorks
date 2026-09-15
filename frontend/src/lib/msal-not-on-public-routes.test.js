@@ -38,7 +38,6 @@ const PUBLIC_ENTRIES = [
   'pages/aws/BlogPage.jsx',
   'components/templates/BlogDetailTemplate.jsx',
   'components/templates/ContentListingTemplate.jsx',
-  'components/templates/LandingPageTemplate.jsx',
   'hooks/useGenerateCuratedImages.js',
   'hooks/useBlogData.js',
   'lib/publicApi.js',

@@ -4774,6 +4774,43 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Removed
 
+- **Unused files, scripts and tooling removed in a repository cleanup.**
+  Every removal was checked from `origin/main`: nothing imports, fetches, runs
+  or links to it. The frontend build, all 1,703 frontend tests, lint, the
+  format check and the three validators pass without them.
+  - **636 unused font files (about 66 MB of `frontend/public/fonts`).**
+    `index.css` loads 14 of 650. The rest were never requested, including all
+    of Aptos and Genos: `--font-aptos` names the family but no `@font-face`
+    loads it. The OFL licences beside Goldman and Turret Road stay.
+  - **20 public data files nothing fetched:** `frontend/public/frameworks/*.json`
+    (frameworks come from the API) and `frontend/public/finops/architectures.json`
+    with its one diagram.
+  - **11 orphaned components and helpers:**
+    - Firebase-era `lib/errorHandler.js`;
+    - `ui/alert`, `ui/alert-dialog` and `ui/scroll-area`, with their two Radix
+      packages;
+    - `news/ArticlesBentoGrid`;
+    - the `ContentHubTemplate`, `PatternLayouts` and `LandingPageTemplate`
+      templates;
+    - `performance/LazyImage` and `performance/SuspenseBoundary`, with their
+      index. `Skeleton` stays.
+  - **Five Firebase-era admin smoke scripts** and their `smoke:*` npm scripts.
+    They waited for Firebase Auth state and a heading that no longer exist.
+  - **`validate-keyboard-nav.js`,** which checked a page and route that no
+    longer exist. `a11y:audit` now runs the contrast scan.
+  - **Two `a11y:fix-*` npm scripts** that pointed at files that were never
+    committed.
+  - **Husky, commitlint and lint-staged.** The hooks were never installed:
+    there was no `prepare` script, and `.husky` sat in `frontend/` while `.git`
+    is at the root.
+  - **Wrong paths fixed in the docs:**
+    - the code-review skill's frontend reference (script paths and the
+      keyboard check);
+    - ADR 0030 (`content/digest.js`, removed in #541);
+    - the migration plan (`infra/scratch.tf` still exists, as the removal
+      record);
+    - the CommonJS marker in `frontend/scripts/package.json`.
+
 - **`useAuthRedirectLanding` is gone, and `App.jsx` is guarded against its
   return (#531).** The hook was mounted on **every route in the application** —
   including every anonymous visit to a provider news page — so that a regex
