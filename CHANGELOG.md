@@ -19,6 +19,26 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Cloud pricing comparison, Phase 1 (#613).** `/tools/comparison` — "Pricing
+  Comparison" in the Tools menu, formerly "Pillar Comparison" and a Coming Soon
+  page — is a real page: one row per service shape (VM, serverless, object
+  storage, relational and NoSQL databases, Kubernetes, messaging, CDN) with a
+  list price per provider on AWS, Azure and Google Cloud, read from the daily
+  server-side cache through `GET public/cloud-tools/pricing?region=`.
+  - **The region is in the URL** (`?region=`), so a comparison is a link.
+  - **Each cell says what it is:** the price to four significant figures, the
+    provider's SKU beneath it, a "catalogue price" badge when the provider's
+    price list could not be read and the site's own figure stands in, and
+    "unavailable" when there is neither. The cheapest cell on a row is
+    highlighted, and every cell links to the provider's pricing page.
+  - **An as-of line** says when the prices were refreshed, or that the cache
+    is stale, or that it has never been filled.
+  - **Integrations Hub → Cloud → Cloud pricing cache:** a card whose test
+    reads the cache and reports its age and its live / catalogue / unavailable
+    counts, and whose **Refresh now** enqueues the `refresh-tool-pricing` job
+    and re-reads once it finishes.
+  - Scenarios, monthly estimates and the remaining extras are Phase 2.
+
 - **Cloud Tools pricing: the timer, the job and the public read (#613,
   backend half).** The ported live-pricing library in
   `functions/src/lib/cloud-tools/` had no caller; now it has three.

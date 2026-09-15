@@ -32,6 +32,12 @@ vi.mock('@/lib/adminSettings', () => ({
 }));
 vi.mock('@/hooks/useAuthReady', () => ({ useAuthReady: () => ({ authReady: true }) }));
 vi.mock('@/components/ui/use-toast', () => ({ useToast: () => ({ toast }) }));
+const runJob = vi.fn();
+vi.mock('@/lib/jobs', () => ({ runJob: (...args) => runJob(...args) }));
+const fetchCloudPricing = vi.fn();
+vi.mock('@/lib/publicApi', () => ({
+  fetchCloudPricing: (...args) => fetchCloudPricing(...args),
+}));
 
 const item = (overrides = {}) => ({
   secret: 'RESEND-API-KEY',
@@ -76,6 +82,79 @@ beforeEach(() => {
   onOpenKeys.mockReset();
   getIntegrationSettings.mockReset().mockResolvedValue({ sessionizeSpeakerId: 'speaker-42' });
   saveIntegrationSettings.mockReset().mockResolvedValue({ success: true });
+  runJob.mockReset();
+  fetchCloudPricing.mockReset();
+});
+
+describe('the Cloud pricing cache card (#613)', () => {
+  const cached = (over = {}) => ({
+    region: 'us-east-1',
+    regions: [],
+    refreshedAt: '2026-09-14T06:00:00.000Z',
+    ttlMinutes: 1440,
+    ageMinutes: 30,
+    stale: false,
+    counts: { live: 22, baseline: 0, unavailable: 2 },
+    services: [],
+    ...over,
+  });
+
+  it('enqueues refresh-tool-pricing with an empty payload, then re-reads the cache', async () => {
+    let finish;
+    runJob.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+    fetchCloudPricing.mockResolvedValue(cached());
+    render(<Harness group="cloud" />);
+    await waitFor(() => expect(screen.getByText('Cloud pricing cache')).toBeTruthy());
+    const card = cardFor('Cloud pricing cache');
+
+    const refresh = within(card).getByRole('button', { name: /Refresh now/ });
+    fireEvent.click(refresh);
+    fireEvent.click(refresh);
+    await waitFor(() => expect(refresh.disabled).toBe(true));
+    // THE BODY THE SERVER SEES: `enqueueJob` is sent `{ type, payload }` by
+    // runJob, and this is the type and payload it is given.
+    expect(runJob).toHaveBeenCalledTimes(1);
+    expect(runJob.mock.calls[0][0]).toBe('refresh-tool-pricing');
+    expect(runJob.mock.calls[0][1]).toEqual({});
+
+    finish({ id: 'j1', status: 'succeeded', result: { regions: 3 } });
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Prices refreshed' }))
+    );
+    // The re-read is the card's own test, so its line is the refreshed cache.
+    await waitFor(() =>
+      expect(within(card).getByText(/Fresh: refreshed 30 minutes ago/)).toBeTruthy()
+    );
+    expect(fetchCloudPricing).toHaveBeenCalledWith('us-east-1', { fresh: true });
+    await waitFor(() => expect(refresh.disabled).toBe(false));
+  });
+
+  it('reports a job that ended failed as a failure, and does not re-read', async () => {
+    runJob.mockResolvedValue({ id: 'j2', status: 'failed', error: 'AWS refused the key' });
+    render(<Harness group="cloud" />);
+    await waitFor(() => expect(screen.getByText('Cloud pricing cache')).toBeTruthy());
+    fireEvent.click(
+      within(cardFor('Cloud pricing cache')).getByRole('button', { name: /Refresh now/ })
+    );
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'Refresh failed', description: 'AWS refused the key' })
+      )
+    );
+    expect(fetchCloudPricing).not.toHaveBeenCalled();
+  });
+
+  it('shows a stale cache as Failed with the age, from the beaker', async () => {
+    fetchCloudPricing.mockResolvedValue(cached({ stale: true, ageMinutes: 26 * 60 }));
+    render(<Harness group="cloud" />);
+    await waitFor(() => expect(screen.getByText('Cloud pricing cache')).toBeTruthy());
+    const card = cardFor('Cloud pricing cache');
+    fireEvent.click(within(card).getByRole('button', { name: /^Test Cloud pricing cache$/ }));
+    await waitFor(() =>
+      expect(within(card).getByText(/Stale: last refreshed 26 hours ago/)).toBeTruthy()
+    );
+    expect(within(card).getByText('Failed')).toBeTruthy();
+  });
 });
 
 describe('the service cards', () => {

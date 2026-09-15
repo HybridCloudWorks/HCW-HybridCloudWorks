@@ -13,6 +13,7 @@ import {
   Award,
   BookOpen,
   Cloud,
+  Coins,
   Globe,
   Link2,
   Mail,
@@ -24,6 +25,8 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { postJSON } from '@/lib/api';
+import { fetchCloudPricing } from '@/lib/publicApi';
+import { DEFAULT_PRICING_REGION, describeAge, describeCounts } from '@/lib/cloudPricing';
 import { countList, unwrapProxy } from '@/lib/proxyEnvelope';
 import { extractProfiles } from '@/lib/linkie';
 import { DEFAULT_SESSIONIZE_SPEAKER_ID } from '@/lib/adminSettings';
@@ -148,6 +151,25 @@ async function testQlty() {
     : 'Connected to Qlty.';
 }
 
+async function testCloudPricing() {
+  // The public read the comparison page makes, for the default region, and
+  // always FRESH: a diagnostic that could answer from the browser's copy would
+  // report the cache as it was before "Refresh now" for fifteen minutes.
+  const pricing = await fetchCloudPricing(DEFAULT_PRICING_REGION, { fresh: true });
+  if (!pricing) throw new Error('The pricing route is missing (HTTP 404).');
+  if (!pricing.refreshedAt) {
+    // Not a credential failure, but the public page shows no prices until
+    // the first refresh — which is the red light this card exists to show.
+    throw new Error('No prices cached yet. Press Refresh now to fill the cache.');
+  }
+  const age = describeAge(pricing.ageMinutes) ?? 'an unknown time ago';
+  const counts = describeCounts(pricing.counts);
+  if (pricing.stale) {
+    throw new Error(`Stale: last refreshed ${age} (${counts}). The daily refresh has missed.`);
+  }
+  return `Fresh: refreshed ${age} (${counts}).`;
+}
+
 // ── Groups and services ───────────────────────────────────────────────────────
 
 /**
@@ -236,6 +258,13 @@ export const SERVICE_GROUPS = Object.freeze([
  *           A test below holds it: such a service must point at a specific
  *           page rather than a bare host.
  *   `group` Which heading it sits under.
+ *
+ * Two optional fields put something the card can DO beneath the key lines,
+ * and IntegrationsServices maps each to a component: `setting` for the one
+ * service configured rather than credentialed (Sessionize’s speaker id), and
+ * `action` for the one the site fills itself (the pricing cache’s Refresh
+ * now). Both are names, not components, so this file stays free of React
+ * state and the registry test can read them as data.
  *
  * DESCRIPTIONS ARE FOR SOMEONE WHO HAS NEVER SEEN THIS REPOSITORY. One line,
  * saying what the service is and what it does for the site. No issue numbers,
@@ -390,6 +419,26 @@ export const SERVICES = Object.freeze([
     url: 'https://developers.google.com/profile/u/105048864698113573023',
     test: null,
     secrets: [],
+  },
+
+  // ── Cloud ────────────────────────────────────────────────────────────────
+  {
+    id: 'cloud-pricing',
+    group: 'cloud',
+    icon: Coins,
+    name: 'Cloud pricing cache',
+    description:
+      'The daily snapshot of AWS, Azure and Google Cloud list prices behind the public pricing comparison page.',
+    // Where the cache is shown, since nothing else "lives" anywhere: the keys
+    // below are minted at each provider and the Keys tab links there.
+    url: 'https://hybridcloudworks.com/tools/comparison',
+    // Reads what the public page reads and judges its age, not a credential.
+    test: testCloudPricing,
+    // The two provider keys the refresh spends. Azure's price list needs none.
+    secrets: ['AWS-ACCESS-KEY-ID', 'AWS-SECRET-ACCESS-KEY', 'GCP-BILLING-API-KEY'],
+    // The one service the site fills itself, so the card carries the button
+    // that fills it (CloudPricingRefresh), the way Sessionize carries its id.
+    action: 'refreshCloudPricing',
   },
 
   // ── Code quality ─────────────────────────────────────────────────────────

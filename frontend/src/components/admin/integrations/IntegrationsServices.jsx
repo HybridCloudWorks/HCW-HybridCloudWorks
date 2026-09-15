@@ -16,6 +16,7 @@ import React from 'react';
 import { buildIntegrationView } from './integrationView';
 import { SERVICES, SERVICE_GROUPS } from './serviceRegistry';
 import ServiceCard from './ServiceCard';
+import CloudPricingRefresh from './CloudPricingRefresh';
 import SessionizeSetting, { useSpeakerId } from './SessionizeSetting';
 import useSecretStatus from './useSecretStatus';
 import { TabError, TabLoading } from './TabNotice';
@@ -108,6 +109,11 @@ export default function IntegrationsServices({ group, onGroupChange, onOpenKeys,
                   setSpeakerId={setSpeakerId}
                   loading={loadingSpeaker}
                 />
+              ) : null}
+              {service.action === 'refreshCloudPricing' ? (
+                // Re-running the test after the job is what puts the new
+                // refreshed-at line on the card; the button itself only writes.
+                <CloudPricingRefresh onRefreshed={() => tests.runTest(service)} />
               ) : null}
             </ServiceCard>
           ))}

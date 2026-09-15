@@ -9,6 +9,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
+  fetchCloudPricing,
   fetchPublicContentList,
   fetchPublicSnapshot,
   clearPublicGetCache,
@@ -114,5 +115,58 @@ describe('publicGet request dedupe', () => {
       { id: 'recovered' },
     ]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('fetchCloudPricing (#613)', () => {
+  const pricing = (region) => ({
+    success: true,
+    pricing: { region, regions: [], refreshedAt: null, services: [] },
+  });
+
+  beforeEach(() => {
+    clearPublicGetCache();
+    vi.restoreAllMocks();
+  });
+  afterEach(() => {
+    clearPublicGetCache();
+    vi.unstubAllGlobals();
+  });
+
+  it('asks for the region, defaulting to us-east-1, and unwraps the pricing object', async () => {
+    const fetchMock = vi.fn(async (url) =>
+      okJson(pricing(new URL(String(url)).searchParams.get('region')))
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    expect((await fetchCloudPricing()).region).toBe('us-east-1');
+    expect((await fetchCloudPricing('westeurope')).region).toBe('westeurope');
+    expect(String(fetchMock.mock.calls[1][0])).toBe(
+      'https://api.test/public/cloud-tools/pricing?region=westeurope'
+    );
+  });
+
+  it('throws the server sentence on a 400, so an unknown region is shown, not swallowed', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: false,
+        status: 400,
+        json: async () => ({ success: false, error: 'Unknown region: mars-1' }),
+      }))
+    );
+    await expect(fetchCloudPricing('mars-1')).rejects.toThrow('Unknown region: mars-1');
+  });
+
+  it('keeps a fresh read out of the cache and adds the throwaway query value', async () => {
+    let n = 0;
+    const fetchMock = vi.fn(async () => okJson(pricing(`r${++n}`)));
+    vi.stubGlobal('fetch', fetchMock);
+
+    expect((await fetchCloudPricing('us-east-1')).region).toBe('r1');
+    expect((await fetchCloudPricing('us-east-1')).region).toBe('r1');
+    expect((await fetchCloudPricing('us-east-1', { fresh: true })).region).toBe('r2');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[1][0])).toMatch(/region=us-east-1&fresh=\d+$/);
   });
 });
