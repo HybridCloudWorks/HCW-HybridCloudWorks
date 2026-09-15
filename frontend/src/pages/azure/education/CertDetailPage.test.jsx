@@ -4,7 +4,7 @@
  * shows the Listen & Learn block only when published audio exists.
  */
 import React from 'react';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
 import CertDetailPage from './CertDetailPage';
@@ -36,14 +36,29 @@ const AB_100_EPISODES = {
   ],
 };
 
-function renderDetail(slug) {
-  return render(
-    <MemoryRouter initialEntries={[`/azure/education/${slug}`]}>
-      <Routes>
-        <Route path="/azure/education/:certSlug" element={<CertDetailPage />} />
-      </Routes>
-    </MemoryRouter>
-  );
+/**
+ * Render a detail page inside an AWAITED act (#500).
+ *
+ * The study-guide outline is loaded per exam, and the page's <Suspense> around
+ * it suspends the first time an exam is shown. Under a synchronous `act` React
+ * queues the retry for that boundary on act's own queue, which nothing then
+ * flushes: the outline never appears and React warns "A component suspended
+ * inside an `act` scope, but the `act` call was not awaited". Awaiting act is
+ * what lets the loaded module resolve the boundary, as the browser's scheduler
+ * does on its own.
+ */
+async function renderDetail(slug) {
+  let result;
+  await act(async () => {
+    result = render(
+      <MemoryRouter initialEntries={[`/azure/education/${slug}`]}>
+        <Routes>
+          <Route path="/azure/education/:certSlug" element={<CertDetailPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+  });
+  return result;
 }
 
 beforeEach(() => {
@@ -52,36 +67,36 @@ beforeEach(() => {
 });
 
 describe('CertDetailPage', () => {
-  it('resolves every landing-page slug to a detail page', () => {
+  it('resolves every landing-page slug to a detail page', async () => {
     // Before 2026-09-09 this page carried its own 15-entry copy of the data,
     // so 86 of the landing links opened "Certification Not Found".
     for (const cert of certifications) {
-      const { unmount } = renderDetail(cert.slug);
+      const { unmount } = await renderDetail(cert.slug);
       expect(screen.queryByText('Certification Not Found'), cert.slug).toBeNull();
       expect(screen.getByRole('heading', { level: 1 }).textContent, cert.slug).toBe(cert.title);
       unmount();
     }
   });
 
-  it('gives the document a title made of one string, so the pre-render keeps it', () => {
+  it('gives the document a title made of one string, so the pre-render keeps it', async () => {
     // react-helmet-async silently drops a <title> built from several JSX
     // children; the first pre-render of these routes wrote <title></title>.
     // Helmet is mocked to a fragment, and React 19 hoists a <title> rendered
     // anywhere into <head>, so the document title is the rendered string.
-    renderDetail('ab-100');
+    await renderDetail('ab-100');
     expect(document.title).toBe(
       'AB-100: Agentic AI Business Solutions Architect | Azure Education | HCW'
     );
   });
 
-  it('still says not found for a slug the catalogue does not have', () => {
-    renderDetail('dp-203');
+  it('still says not found for a slug the catalogue does not have', async () => {
+    await renderDetail('dp-203');
     expect(screen.getByText('Certification Not Found')).toBeInTheDocument();
   });
 
   it('renders the Listen & Learn block for azure/AB-100 when episodes are published', async () => {
     fetchPublishedEpisodes.mockResolvedValue(AB_100_EPISODES);
-    renderDetail('ab-100');
+    await renderDetail('ab-100');
     expect(fetchPublishedEpisodes).toHaveBeenCalledWith({ platform: 'azure', examCode: 'AB-100' });
     expect(await screen.findByText('Listen & Learn')).toBeInTheDocument();
     expect(screen.getAllByLabelText(/^Listen: /)).toHaveLength(3);
@@ -93,7 +108,7 @@ describe('CertDetailPage', () => {
     // reader never hears "Listen & Learn" twice and the per-episode players
     // below keep their own "Listen:" labels and count.
     fetchPublishedEpisodes.mockResolvedValue(AB_100_EPISODES);
-    renderDetail('ab-100');
+    await renderDetail('ab-100');
     expect(await screen.findByText('Study podcast')).toBeInTheDocument();
     expect(screen.getAllByLabelText(/^Play chapter: /)).toHaveLength(1);
     expect(screen.getAllByLabelText(/^Listen: /)).toHaveLength(3);
@@ -143,14 +158,18 @@ describe('CertDetailPage', () => {
         </button>
       );
     }
-    render(
-      <MemoryRouter initialEntries={['/azure/education/ab-100']}>
-        <GoNext />
-        <Routes>
-          <Route path="/azure/education/:certSlug" element={<CertDetailPage />} />
-        </Routes>
-      </MemoryRouter>
-    );
+    // Both the first render and the navigation load an outline module, so
+    // both go through an awaited act — see renderDetail.
+    await act(async () => {
+      render(
+        <MemoryRouter initialEntries={['/azure/education/ab-100']}>
+          <GoNext />
+          <Routes>
+            <Route path="/azure/education/:certSlug" element={<CertDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      );
+    });
 
     const firstList = await screen.findByRole('list', { name: /chapters, in study-guide order/i });
     const firstButtons = within(firstList).getAllByRole('button');
@@ -158,7 +177,9 @@ describe('CertDetailPage', () => {
     fireEvent.click(firstButtons[1]);
     expect(firstButtons[1]).toHaveAttribute('aria-current', 'true');
 
-    fireEvent.click(screen.getByRole('button', { name: 'go next' }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'go next' }));
+    });
 
     // The new exam's chapters, not the old exam's, and chapter 1 selected.
     // Queried by button role, not text: the area name also appears in the
@@ -173,14 +194,15 @@ describe('CertDetailPage', () => {
     expect(screen.queryByRole('button', { name: 'Build' })).toBeNull();
   });
 
-  it('renders the study-guide outline from the shipped data, area by area (#498)', () => {
+  it('renders the study-guide outline from the shipped data, area by area (#498)', async () => {
     // AZ-104 has an outline; every area links to its own heading on Learn.
     fetchPublishedEpisodes.mockResolvedValue(null);
-    renderDetail('az-104');
+    await renderDetail('az-104');
     // Scoped to the outline's own region: the catalogue's "Topics Covered"
     // grid above it lists the same area names for AZ-104, so an unscoped
     // text query finds two — which is the two sections doing their jobs.
-    const region = screen.getByRole('region', { name: /skills measured/i });
+    // Found, not got: the outline is its own module since #500.
+    const region = await screen.findByRole('region', { name: /skills measured/i });
     expect(within(region).getByText('Manage Azure identities and governance')).toBeInTheDocument();
     const deepLinks = within(region)
       .getAllByRole('link', { name: /this area on microsoft learn/i })
@@ -192,17 +214,16 @@ describe('CertDetailPage', () => {
 
   it('renders no audio control when nothing is published for the exam', async () => {
     fetchPublishedEpisodes.mockResolvedValue(null);
-    renderDetail('az-104');
+    await renderDetail('az-104');
     expect(fetchPublishedEpisodes).toHaveBeenCalledWith({ platform: 'azure', examCode: 'AZ-104' });
     // Let the resolved fetch settle before asserting the absence.
-    await screen.findByRole('heading', { level: 1 });
     await Promise.resolve();
     expect(screen.queryByText('Listen & Learn')).toBeNull();
     expect(screen.queryByLabelText(/^Listen: /)).toBeNull();
   });
 
-  it('tells the reader when an exam is retired, and where to go instead', () => {
-    renderDetail('ai-102');
+  it('tells the reader when an exam is retired, and where to go instead', async () => {
+    await renderDetail('ai-102');
     const notice = screen.getByTestId('cert-status-notice');
     expect(notice.dataset.status).toBe('retired');
     expect(notice.textContent).toMatch(/Retired by Microsoft on Jun 30, 2026/);
@@ -212,8 +233,8 @@ describe('CertDetailPage', () => {
     );
   });
 
-  it('tells the reader when an exam is retiring (AZ-800 → AZ-802)', () => {
-    renderDetail('az-800');
+  it('tells the reader when an exam is retiring (AZ-800 → AZ-802)', async () => {
+    await renderDetail('az-800');
     const notice = screen.getByTestId('cert-status-notice');
     expect(notice.dataset.status).toBe('expiring');
     expect(notice.textContent).toMatch(/Retires on Sep 30, 2026/);
@@ -223,9 +244,9 @@ describe('CertDetailPage', () => {
     );
   });
 
-  it('shows no status notice for an active exam', () => {
+  it('shows no status notice for an active exam', async () => {
     const active = certifications.find((c) => deriveStatus(c, todayIso()) === 'active');
-    renderDetail(active.slug);
+    await renderDetail(active.slug);
     expect(screen.queryByTestId('cert-status-notice')).toBeNull();
   });
 });

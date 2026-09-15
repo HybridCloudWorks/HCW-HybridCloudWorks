@@ -2398,6 +2398,21 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Azure certification detail pages download only their own study-guide
+  outline (#500).** `frontend/src/data/azure/study-guides.js` (491 KB source)
+  is now one module per guide plus `index.js` under
+  `frontend/src/data/azure/study-guides/`. `CertDetailPage` loads the exam's
+  module through `import.meta.glob` and `use()` inside a memoised `Suspense`
+  boundary, so hydration keeps the prerendered outline until the module
+  lands. The Azure detail chunk drops from 74.33 kB to 6.36 kB gzipped (AWS:
+  2.75 kB), plus about 1.8 kB for the one guide. Prerendered HTML is
+  unchanged: AZ-104 still carries its outline and all five deep links, and
+  all 50 guides render. `update-study-guides.mjs` writes the directory
+  through `scripts/study-guide-files.mjs`. Guide modules carry no date, so an
+  unchanged guide rewrites byte-identical. The weekly
+  `update-learn-catalogue.yml` stages and replaces the directory, and detects
+  new guides with `git status --porcelain`, since a new file is untracked.
+
 - **The admin sidebar stays put, reads cleanly, and calls the newsletter page
   Newsletter Hub (#566).** The admin shell is now exactly one viewport tall:
   the sidebar is pinned, its menu scrolls on its own when it outgrows the
