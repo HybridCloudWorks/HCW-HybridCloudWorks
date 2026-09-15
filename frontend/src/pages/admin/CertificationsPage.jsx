@@ -99,8 +99,9 @@ export default function CertificationsPage() {
 
   const confirm = useCallback(
     async (cert) => {
-      await remove(cert);
-      setConfirmDelete(null);
+      // Close only when the delete landed: a refused delete keeps the dialog
+      // open so it can be retried, and never reads as if it went through.
+      if (await remove(cert)) setConfirmDelete(null);
     },
     [remove]
   );

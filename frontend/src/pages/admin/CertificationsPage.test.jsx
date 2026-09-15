@@ -180,6 +180,20 @@ describe('Catalog', () => {
     expect(screen.queryByText('Solutions Architect')).not.toBeInTheDocument();
   });
 
+  it('keeps the confirmation open when the delete is refused, so it can be retried', async () => {
+    sendJSON.mockRejectedValueOnce(new Error('refused'));
+    render(<CertificationsPage />);
+    await screen.findByText('Solutions Architect');
+    fireEvent.click(within(cardFor('Solutions Architect')).getByTitle('Delete'));
+    const dialog = within(screen.getByRole('alertdialog'));
+    await act(async () => {
+      fireEvent.click(dialog.getByRole('button', { name: 'Delete' }));
+    });
+    expect(sendJSON).toHaveBeenCalledWith('cms/certifications/saa', 'DELETE');
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument();
+    expect(screen.getAllByText('Solutions Architect').length).toBeGreaterThan(0);
+  });
+
   it('opens the editor for a new cert and for an existing one', async () => {
     render(<CertificationsPage />);
     await screen.findByText('Azure Administrator');
