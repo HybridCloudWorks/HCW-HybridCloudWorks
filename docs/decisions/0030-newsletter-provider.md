@@ -347,7 +347,8 @@ changes the choice, but each changes a next step:
   self-hosted send would have taken, and the shape the broadcast job takes.
 - Issue #504 (the evaluation that commissioned this record, and the source of
   the failure-mode correction in the Context above).
-- `functions/src/lib/content/digest.js`,
+- `functions/src/lib/content/digest.js` (removed in #541; the digest is now
+  built in `functions/src/lib/newsletter/issue.js`),
   `functions/src/functions/integrations-http.js`,
   `frontend/src/components/shared/NewsletterSignup.jsx`,
   `frontend/src/components/shared/Footer.jsx`,

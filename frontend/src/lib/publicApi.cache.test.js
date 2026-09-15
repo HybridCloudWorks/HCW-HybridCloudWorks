@@ -8,7 +8,12 @@
  * in-flight request, and a repeat caller inside the TTL does not re-request.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { fetchPublicContentList, clearPublicGetCache, PUBLIC_CORPUS_LIMIT } from './publicApi.js';
+import {
+  fetchPublicContentList,
+  fetchPublicSnapshot,
+  clearPublicGetCache,
+  PUBLIC_CORPUS_LIMIT,
+} from './publicApi.js';
 
 vi.mock('@/lib/functionsBase', () => ({
   requireFunctionsBase: () => 'https://api.test',
@@ -23,6 +28,9 @@ describe('publicGet request dedupe', () => {
   });
   afterEach(() => {
     clearPublicGetCache();
+    // stubGlobal('fetch') is not undone by restoreAllMocks; without this the
+    // stub outlives the suite and later tests see a mock where fetch should be.
+    vi.unstubAllGlobals();
   });
 
   it('shares one in-flight request between concurrent callers', async () => {
@@ -66,6 +74,29 @@ describe('publicGet request dedupe', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(a).toEqual([{ id: 'content' }]);
     expect(b).toEqual([{ id: 'legacy' }]);
+  });
+
+  it('keeps fresh snapshot reads out of the cache, in both directions', async () => {
+    const snapshot = (n) => ({ snapshot: { generatedAt: `t${n}`, items: [] } });
+    let n = 0;
+    const fetchMock = vi.fn(async () => okJson(snapshot(++n)));
+    vi.stubGlobal('fetch', fetchMock);
+
+    // A cached plain read does not answer a fresh one.
+    expect((await fetchPublicSnapshot('certifications')).generatedAt).toBe('t1');
+    expect((await fetchPublicSnapshot('certifications', { fresh: true })).generatedAt).toBe('t2');
+    expect((await fetchPublicSnapshot('certifications', { fresh: true })).generatedAt).toBe('t3');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(String(fetchMock.mock.calls[1][0])).toMatch(/\?fresh=\d+$/);
+
+    // Fresh reads wrote nothing: once the plain entry is cleared, a plain read
+    // goes to the network rather than finding a fresh read's copy.
+    clearPublicGetCache();
+    const cacheProbe = vi.fn(async () => okJson(snapshot(99)));
+    vi.stubGlobal('fetch', cacheProbe);
+    await fetchPublicSnapshot('certifications', { fresh: true });
+    await fetchPublicSnapshot('certifications');
+    expect(cacheProbe).toHaveBeenCalledTimes(2);
   });
 
   it('does not cache a failure — the next caller can retry', async () => {

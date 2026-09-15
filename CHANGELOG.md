@@ -19,6 +19,42 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Certifications Hub: tabs by duty (#572).** `/admin/certifications` moves
+  from one page (1,107 lines) to five tabs on the shared `HubTabs` bar,
+  deep-linked with `?tab=`:
+  - **Catalog:** stats, search, issuer filter and the card grid.
+  - **Featured:** featured certifications in display order.
+  - **Renewals:** expired certifications and those due within 180 days, soonest
+    first.
+  - **Publishing:** the Publish snapshot button, when the public snapshot was
+    last published, and what changed since.
+  - **Settings:** image rules, verification sources and hidden items.
+
+  Old ids such as `expiring`, `hidden` and `publish` land on the tab that now
+  holds them. The list loads once at page level with a generation guard, and a
+  read that raced a write is issued again. Writes have a per-certification
+  in-flight guard, and the editor's save and upload have their own. The
+  Publishing tab reads the public snapshot on its own, so a failure in either
+  read stays on its tab. `PublishSnapshotButton` gains an optional
+  `onPublished` callback, and `publicApi.js` gains `fetchPublicSnapshot`.
+
+- **Speaking Events Hub: tabs by duty (#573).** `/admin/speaking-events` is now
+  five tabs on the shared `HubTabs` bar, deep-linked with `?tab=`:
+  - **Upcoming:** future sessions, soonest first.
+  - **Past:** delivered sessions, newest first, with slide and event links.
+  - **Sources:** when Sessionize was last read, a preview of what a sync would
+    create or fill in, Sync from Sessionize, and manual entries.
+  - **Publishing:** the public snapshot and what a publish would write now.
+  - **Settings:** the Sessionize speaker ID, read-only, with a link to the
+    Integrations card that stays its only editor.
+
+  Old ids such as `events`, `sync` and `publish` land on the tab that now holds
+  them. Each read is generation-guarded, and a failed refresh clears its rows.
+  Save, delete and sync each have an in-flight guard, and the session lists
+  wait for both reads so Enrich cannot create a duplicate record. Behaviour
+  changes: the store is re-read after a partly failed sync, and event links
+  render only for http(s) URLs.
+
 - **Health Hub: Code and Security tab, and a Qlty card on Integrations
   (#569).** A new Code and Security tab reads `GET /api/cms/code-quality`
   (from #590) the first time it is opened, not on page load, and shows:
@@ -4737,6 +4773,43 @@ This project has not cut a tagged release; entries are grouped under
   case variants of their filenames.
 
 ### Removed
+
+- **Unused files, scripts and tooling removed in a repository cleanup.**
+  Every removal was checked from `origin/main`: nothing imports, fetches, runs
+  or links to it. The frontend build, all 1,703 frontend tests, lint, the
+  format check and the three validators pass without them.
+  - **636 unused font files (about 66 MB of `frontend/public/fonts`).**
+    `index.css` loads 14 of 650. The rest were never requested, including all
+    of Aptos and Genos: `--font-aptos` names the family but no `@font-face`
+    loads it. The OFL licences beside Goldman and Turret Road stay.
+  - **20 public data files nothing fetched:** `frontend/public/frameworks/*.json`
+    (frameworks come from the API) and `frontend/public/finops/architectures.json`
+    with its one diagram.
+  - **11 orphaned components and helpers:**
+    - Firebase-era `lib/errorHandler.js`;
+    - `ui/alert`, `ui/alert-dialog` and `ui/scroll-area`, with their two Radix
+      packages;
+    - `news/ArticlesBentoGrid`;
+    - the `ContentHubTemplate`, `PatternLayouts` and `LandingPageTemplate`
+      templates;
+    - `performance/LazyImage` and `performance/SuspenseBoundary`, with their
+      index. `Skeleton` stays.
+  - **Five Firebase-era admin smoke scripts** and their `smoke:*` npm scripts.
+    They waited for Firebase Auth state and a heading that no longer exist.
+  - **`validate-keyboard-nav.js`,** which checked a page and route that no
+    longer exist. `a11y:audit` now runs the contrast scan.
+  - **Two `a11y:fix-*` npm scripts** that pointed at files that were never
+    committed.
+  - **Husky, commitlint and lint-staged.** The hooks were never installed:
+    there was no `prepare` script, and `.husky` sat in `frontend/` while `.git`
+    is at the root.
+  - **Wrong paths fixed in the docs:**
+    - the code-review skill's frontend reference (script paths and the
+      keyboard check);
+    - ADR 0030 (`content/digest.js`, removed in #541);
+    - the migration plan (`infra/scratch.tf` still exists, as the removal
+      record);
+    - the CommonJS marker in `frontend/scripts/package.json`.
 
 - **`useAuthRedirectLanding` is gone, and `App.jsx` is guarded against its
   return (#531).** The hook was mounted on **every route in the application** —
