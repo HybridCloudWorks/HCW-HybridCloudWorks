@@ -191,6 +191,17 @@ so it is recorded here, where every session reads it.
   recommends changes, or any review thread still unresolved on the head, is
   not that: fix, push, and wait for the next review of the new head. Ready
   for review on its own is still not permission to merge.
+
+  **Until 2026-10-01: all green is the merge.** Owner instruction 2026-09-15.
+  The GitHub Pro subscription that provides Copilot code review has lapsed
+  until 1 October 2026, so a review may never arrive. Until that date a
+  session merges as soon as every required status check is green on the
+  current head and no review thread is unresolved, without waiting for a
+  Copilot review. A review that DOES arrive still counts in full — a
+  "changes recommended" verdict or an open thread blocks exactly as above,
+  and every finding is answered on its thread before the merge. This is a
+  dated exception, not a new default: on 2026-10-01 delete this paragraph
+  and the rule above applies again unchanged.
 - **Every review conversation is resolved before the merge, including the
   ones that ask for nothing.** Owner instruction 2026-09-06, after a merge
   was blocked with `A conversation must be resolved before this pull request
