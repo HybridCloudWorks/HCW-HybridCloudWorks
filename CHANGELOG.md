@@ -19,6 +19,54 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Cloud pricing comparison, Phase 3 backend: price history, a newsletter
+  section and "Explain this number" (#613).** Three parts on the same
+  refresh.
+  - **Price history and change detection** (`lib/cloud-tools/history.js`).
+    After each region's cache document the `refresh-tool-pricing` job writes
+    one `tool_price_history` snapshot per region per UTC day
+    (`history:<region>:<YYYY-MM-DD>`, a map of `<serviceId>:<provider>` cells
+    with `pricePerUnit, unit, sku, currency, source: live|baseline`) and
+    diffs it against the newest snapshot at least 7 and at least 30 days old
+    — found by point reads of day ids N..N+6, never a query — into
+    `price-changes:<region>` in `tool_service_cache`: `{ region, asOf,
+    windows: { '7d': { since, sampleDay, items }, '30d': {…} }, sampleDays
+    }`, each item `{ serviceId, label, provider, unit, sku, from, to,
+    deltaPct }`, live-against-live only (a live/baseline flip, a unit change
+    and an unchanged price are not changes), largest move first. A history
+    failure is logged and recorded in the run summary; the cache document
+    stands. `GET public/cloud-tools/price-changes?region=` serves the
+    document as a four-field projection; before any comparison exists it
+    answers empty windows and `sampleDays: 0`, cached a minute. The
+    container is generated from the manifest (`regenerate`, `/id`, 400-day
+    TTL) and classified regenerable for the export.
+  - **Newsletter section "Cloud price changes"** (id `cloud-price-changes`,
+    `lib/newsletter/sections.js`): the 7-day window of
+    `price-changes:us-east-1` — region fixed, an email has no picker — as
+    "AWS · Virtual machines: $0.192 → $0.201 per hour (+4.7%)" linking to
+    `/tools/comparison?region=us-east-1`, rendered through the same item
+    shape and renderer as its siblings. With no moves the section is omitted
+    from the issue entirely; there is no "no changes" filler. On by default,
+    as the registry rule (#557) makes every new section; the Newsletter
+    Hub's Content form lists it to turn off or cap.
+  - **"Explain this number"**: `POST public/cloud-tools/explain`
+    (`lib/cloud-tools/explain.js`, `functions/cloud-tools-http.js`), anonymous,
+    takes the priced scenario the page already shows (`{ region, scenarioId,
+    scenarioLabel, extras, egressGb, results: [{ provider, total, base,
+    segments, unavailable }] }`, 8 KB, validated field by field, unknown keys
+    refused) and answers `{ explanation: { text, model, generatedAt, cached }
+    }` — two paragraphs from the AI router's default chain on which provider
+    is cheapest and by how much, what the extras add, and one thing that
+    could flip it, from the numbers given and nothing else. Bounded four
+    ways: cached by a hash of the canonical body for 7 days (a shared link
+    costs one model call), 5 per hour per Cloudflare-verified client on the
+    submission counter (429), 200 per UTC day across everyone through a
+    compare-and-increment counter (503 "paused for today"), and 503 "not
+    available" before any counter moves when the router cannot serve it — no
+    key, or the new **Pricing explanations** toggle on AI Engine → AI
+    features switched off, which is the owner's off switch for the one
+    anonymous AI call. Anything URL-shaped is stripped from the model's text
+    before it is stored.
 - **Cloud pricing comparison, Phase 2: scenarios and extras (#613).** A
   "Price a scenario" card above the Phase 1 table on `/tools/comparison`:
   pick a shape (Static site + API, Three-tier web app, Event-driven backend,

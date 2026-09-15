@@ -114,6 +114,13 @@ export const AI_FEATURES = Object.freeze({
     route:
       'The Podcast transcript action on the Publish page. Off means the job fails before the model is called; existing transcripts stay.',
   }),
+  pricingExplain: Object.freeze({
+    label: 'Pricing explanations',
+    description:
+      'Explains a priced scenario on the public cloud pricing comparison: which provider is cheapest and what could flip it.',
+    route:
+      'The "Explain this number" button on /tools/comparison — the one anonymous AI call. Off answers "Explanations are not available" before any quota is counted; cached explanations still serve (#613).',
+  }),
 });
 
 export const FEATURE_NAMES = Object.freeze(Object.keys(AI_FEATURES));

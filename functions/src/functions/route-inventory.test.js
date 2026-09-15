@@ -185,6 +185,14 @@ const PUBLIC_ROUTES = new Set([
   // no query and no provider call on the request path —
   // lib/cloud-tools/public-price-changes.js.
   'public/cloud-tools/price-changes',
+  // "Explain this number" (#613 Phase 3): an anonymous AI call, which is the
+  // one kind of public route that spends money. Acceptable because it is
+  // bounded four ways — cached by a hash of the validated input (a shared
+  // link costs one model call, ever), 5 per hour per Cloudflare-verified
+  // client through the same counter as public/submissions, 200 per day across
+  // everyone through a compare-and-increment, and an 8 KB body validated
+  // field by field before any of that — lib/cloud-tools/explain.js.
+  'public/cloud-tools/explain',
 ]);
 
 const ALLOWED_ORIGIN = 'https://hybridcloudworks.com';
