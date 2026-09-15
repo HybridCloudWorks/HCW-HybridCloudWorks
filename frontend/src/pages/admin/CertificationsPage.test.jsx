@@ -109,12 +109,23 @@ describe('the header and tabs', () => {
   });
 
   it('writes the tab to the URL on click, and not for the tab already open', () => {
-    render(<CertificationsPage />);
-    fireEvent.click(hubTabs().getByRole('tab', { name: 'Renewals' }));
-    expect(setSearchParams).toHaveBeenCalledWith({ tab: 'renewals' });
-    setSearchParams.mockReset();
+    const { rerender } = render(<CertificationsPage />);
+    // Catalog is open: clicking it again writes nothing.
     fireEvent.click(hubTabs().getByRole('tab', { name: 'Catalog' }));
     expect(setSearchParams).not.toHaveBeenCalled();
+    fireEvent.click(hubTabs().getByRole('tab', { name: 'Renewals' }));
+    expect(setSearchParams).toHaveBeenCalledWith({ tab: 'renewals' });
+
+    // Land the URL write, as the router would, so Renewals is the open tab.
+    searchParams = 'tab=renewals';
+    setSearchParams.mockReset();
+    rerender(<CertificationsPage />);
+    expect(selectedTab()).toBe('Renewals');
+    fireEvent.click(hubTabs().getByRole('tab', { name: 'Renewals' }));
+    expect(setSearchParams).not.toHaveBeenCalled();
+    // And switching back to Catalog from there does write.
+    fireEvent.click(hubTabs().getByRole('tab', { name: 'Catalog' }));
+    expect(setSearchParams).toHaveBeenCalledWith({ tab: 'catalog' });
   });
 
   it.each([
