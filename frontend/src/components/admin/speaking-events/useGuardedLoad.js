@@ -31,23 +31,25 @@ export default function useGuardedLoad(load, { enabled = true, empty, describeEr
   const read = useCallback(
     async (mine) => {
       const current = () => mine === generation.current;
+      let landed = false;
       try {
         const value = await load();
-        if (!current()) return false;
-        setData(value);
-        setLoaded(true);
-        setLoadedAt(new Date());
-        return true;
+        if (current()) {
+          setData(value);
+          setLoaded(true);
+          setLoadedAt(new Date());
+          landed = true;
+        }
       } catch (err) {
         if (current()) {
           setData(empty);
           setLoaded(false);
           setError(describeError(err));
         }
-        return false;
       } finally {
         if (current()) setPending(false);
       }
+      return landed;
     },
     [load, empty, describeError]
   );
