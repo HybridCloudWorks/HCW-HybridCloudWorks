@@ -47,6 +47,20 @@ export function clearPublicGetCache() {
   publicGetCache.clear();
 }
 
+/** One uncached GET: the JSON body, null for a 404, a thrown Error otherwise. */
+async function fetchPublicJSON(pathAndQuery) {
+  const base = requireFunctionsBase(pathAndQuery);
+  const res = await fetch(`${base}/${pathAndQuery}`, {
+    headers: { Accept: 'application/json' },
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.error || `Public API request failed with HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 async function publicGet(pathAndQuery) {
   const cached = publicGetCache.get(pathAndQuery);
   // A pending entry is reused regardless of age: two components mounting in the
@@ -55,18 +69,7 @@ async function publicGet(pathAndQuery) {
     return cached.promise;
   }
 
-  const base = requireFunctionsBase(pathAndQuery);
-  const promise = (async () => {
-    const res = await fetch(`${base}/${pathAndQuery}`, {
-      headers: { Accept: 'application/json' },
-    });
-    if (res.status === 404) return null;
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.error || `Public API request failed with HTTP ${res.status}`);
-    }
-    return res.json();
-  })();
+  const promise = fetchPublicJSON(pathAndQuery);
 
   const entry = { promise, pending: true, at: Date.now() };
   publicGetCache.set(pathAndQuery, entry);
@@ -150,13 +153,14 @@ export async function fetchPublicSnapshotItems(id) {
  * Certifications Hub's Publishing tab, which has to say when the snapshot was
  * written and compare it with the admin rows. Unlike fetchPublicSnapshotItems
  * it throws on failure (the tab shows the error) and returns null when no
- * snapshot has been published. `fresh` adds a throwaway query value so neither
- * this module's cache nor an HTTP cache answers with the copy from before a
- * publish; the route ignores the value.
+ * snapshot has been published. `fresh` bypasses this module's cache entirely
+ * (never read, never written, so repeated fresh reads cannot grow it) and adds
+ * a throwaway query value so an HTTP cache cannot answer with the copy from
+ * before a publish either; the route ignores the value.
  */
 export async function fetchPublicSnapshot(id, { fresh = false } = {}) {
   const path = `public/snapshots/${encodeURIComponent(id)}`;
-  const body = await publicGet(fresh ? `${path}?fresh=${Date.now()}` : path);
+  const body = fresh ? await fetchPublicJSON(`${path}?fresh=${Date.now()}`) : await publicGet(path);
   const snapshot = body?.snapshot;
   if (!snapshot) return null;
   return {
