@@ -37,7 +37,7 @@ This project has not cut a tagged release; entries are grouped under
     factor × unit price, and "How this is calculated" renders each extra's
     rule and the `ASSUMPTIONS` table — every multiplier per provider, with a
     link to the provider page it was read from
-    (`frontend/src/lib/pricingScenarios.js`).
+    (`frontend/src/lib/pricingScenarios/`).
   - **Never silently zero:** a provider with no price for a service the
     scenario uses shows "unavailable: <service>" instead of a total, and a
     total with any catalogue line carries the "catalogue price" badge.

@@ -286,7 +286,7 @@ export function CopyLinkButton() {
     `${typeof window === 'undefined' ? '' : window.location.origin}${location.pathname}${location.search}`;
 
   const copy = async () => {
-    let next = 'failed';
+    let next;
     try {
       await navigator.clipboard.writeText(href());
       next = 'copied';

@@ -31,7 +31,7 @@ import {
   scenarioQuantities,
   setExtra,
   setGroupChoice,
-} from './pricingScenarios';
+} from './index';
 
 const row = (provider, pricePerUnit, source = 'live') => ({
   provider,
