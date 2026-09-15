@@ -9,9 +9,11 @@ import { httpRoute } from '../lib/auth/http-route.js';
 import { queryDocs, readDoc } from '../lib/cosmos-client.js';
 import { createPublicReadHandlers } from '../lib/public-reads.js';
 import { createPublicPricingHandlers } from '../lib/cloud-tools/public-pricing.js';
+import { createPublicPriceChangesHandlers } from '../lib/cloud-tools/public-price-changes.js';
 
 const handlers = () => createPublicReadHandlers({ store: { queryDocs, readDoc } });
 const pricing = () => createPublicPricingHandlers({ store: { readDoc } });
+const priceChanges = () => createPublicPriceChangesHandlers({ store: { readDoc } });
 
 httpRoute('publicListContent', {
   methods: ['GET'],
@@ -98,4 +100,14 @@ httpRoute('publicGetCloudToolsPricing', {
   authLevel: 'anonymous',
   route: 'public/cloud-tools/pricing',
   handler: (request, context) => pricing().getPricing(request, context),
+});
+
+// The price-change feed the same refresh derives from its daily snapshots
+// (#613 Phase 3): one point read of price-changes:<region>, empty windows
+// before the second day of history exists — lib/cloud-tools/public-price-changes.js.
+httpRoute('publicGetCloudToolsPriceChanges', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'public/cloud-tools/price-changes',
+  handler: (request, context) => priceChanges().getPriceChanges(request, context),
 });

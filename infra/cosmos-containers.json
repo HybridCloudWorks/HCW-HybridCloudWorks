@@ -984,6 +984,17 @@
       "note": null
     },
     {
+      "name": "tool_price_history",
+      "partition_key_path": "/id",
+      "included_paths": [
+        "/*"
+      ],
+      "excluded_paths": [],
+      "composite_indexes": [],
+      "default_ttl": 34560000,
+      "note": "cache — refilled by a scheduled job, not migrated"
+    },
+    {
       "name": "tool_service_cache",
       "partition_key_path": "/id",
       "included_paths": [

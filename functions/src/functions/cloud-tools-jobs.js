@@ -97,7 +97,7 @@ registerJobType(REFRESH_JOB_TYPE, {
   // nothing and reads nothing an editor cannot already see.
   role: 'editor',
   description:
-    'Rebuild the Cloud Tools pricing cache: for each region option, fetch every catalog service from AWS, Azure and GCP (one service at a time) and upsert one tool_service_cache document per region. Payload { regions?: string[] } narrows the run; absent means all. Enqueued daily by refreshToolServiceCache (#613).',
+    "Rebuild the Cloud Tools pricing cache: for each region option, fetch every catalog service from AWS, Azure and GCP (one service at a time) and upsert one tool_service_cache document per region; then cut the day's tool_price_history snapshot (history:<region>:<YYYY-MM-DD>) and diff it against the snapshots 7 and 30 days old into price-changes:<region> (Phase 3). A history failure is recorded in the summary, never a failed region. Payload { regions?: string[] } narrows the run; absent means all. Enqueued daily by refreshToolServiceCache (#613).",
   maxPayloadBytes: 512,
   // Three regions × eight services, sequential, each service up to three
   // provider calls with GCP paging up to 30 pages: minutes, not seconds.
@@ -108,6 +108,8 @@ registerJobType(REFRESH_JOB_TYPE, {
     // Validated in the worker rather than at enqueue, like every other type:
     // enqueueJob checks role, size and serialisability only.
     const { regions } = parseRefreshPayload(payload);
+    // The whole client: upsertDoc for the three documents per region and
+    // readDoc for the history lookup (lib/cloud-tools/history.js).
     return createPricingRefresh({ store, log: context }).run({ regions });
   },
   // A failed refresh is a page reporting stale prices tomorrow; the phone

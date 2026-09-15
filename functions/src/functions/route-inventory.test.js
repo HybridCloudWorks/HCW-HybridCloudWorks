@@ -180,6 +180,11 @@ const PUBLIC_ROUTES = new Set([
   // against a three-entry list, never a provider call on the request path —
   // lib/cloud-tools/public-pricing.js.
   'public/cloud-tools/pricing',
+  // The price-change feed derived from that cache's daily snapshots (#613
+  // Phase 3): the same one-point-read shape, region validated the same way,
+  // no query and no provider call on the request path —
+  // lib/cloud-tools/public-price-changes.js.
+  'public/cloud-tools/price-changes',
 ]);
 
 const ALLOWED_ORIGIN = 'https://hybridcloudworks.com';

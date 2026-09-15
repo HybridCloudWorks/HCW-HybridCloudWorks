@@ -31,9 +31,10 @@ function provisioned() {
 }
 
 describe('export classification against infra/cosmos-containers.json', () => {
-  it('the spec provisions the 73 containers the ADR counted — a different number means the ADR table is stale', () => {
-    // 72 at the ADR's writing; podcast_transcripts (#435) made it 73.
-    expect(provisioned()).toHaveLength(73);
+  it('the spec provisions the 74 containers the ADR counted — a different number means the ADR table is stale', () => {
+    // 72 at the ADR's writing; podcast_transcripts (#435) made it 73 and
+    // tool_price_history (#613 Phase 3) 74.
+    expect(provisioned()).toHaveLength(74);
   });
 
   it('every provisioned container is classified exactly once', () => {
@@ -56,14 +57,14 @@ describe('export classification against infra/cosmos-containers.json', () => {
     expect(phantom, 'classified but not provisioned — remove it or provision it').toEqual([]);
   });
 
-  it('matches the ADR table: 44 authored, 10 configuration, 7 operational, 12 excluded', () => {
+  it('matches the ADR table: 44 authored, 10 configuration, 7 operational, 13 excluded', () => {
     expect(AUTHORED).toHaveLength(44);
     expect(CONFIGURATION).toHaveLength(10);
     expect(OPERATIONAL).toHaveLength(7);
     const excluded = ['regenerable', 'seed', 'transient'].flatMap(
       (k) => EXPORT_CLASSES[k].containers
     );
-    expect(excluded).toHaveLength(12);
+    expect(excluded).toHaveLength(13);
   });
 
   it('every class states both run modes, and no excluded class exports on either', () => {
