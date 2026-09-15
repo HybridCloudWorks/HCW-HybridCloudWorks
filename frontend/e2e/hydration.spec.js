@@ -122,9 +122,9 @@ test.describe('pre-render hydration', () => {
       // the wire — which a fast local server usually, not always, loses.
       // Delaying everything but the entry makes the slow network the default,
       // so an update that lands during hydration is caught every run.
-      await page.route(/\/assets\/(?!index-)[^/]+\.js$/, async (request) => {
+      await page.route(/\/assets\/(?!index-)[^/]+\.js$/, async (chunkRoute) => {
         await new Promise((resolve) => setTimeout(resolve, 2500));
-        await request.continue();
+        await chunkRoute.continue();
       });
 
       await page.goto(route === '/' ? '/' : `${route}/`);
