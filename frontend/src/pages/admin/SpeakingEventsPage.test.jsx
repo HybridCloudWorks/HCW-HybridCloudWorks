@@ -173,6 +173,14 @@ describe('Upcoming and Past', () => {
     expect(panel().getByText('New Override')).toBeTruthy();
     expect(panel().getByText(/Sessionize #101/)).toBeTruthy();
   });
+
+  it('titles a manual entry as one, not as an override of a Sessionize row', async () => {
+    searchParams = 'tab=sources';
+    render(<SpeakingEventsPage />);
+    fireEvent.click(await panel().findByRole('button', { name: /Manual Entry/ }));
+    expect(panel().getByText('New Manual Entry')).toBeTruthy();
+    expect(panel().queryByText('New Override')).toBeNull();
+  });
 });
 
 describe('Sources', () => {

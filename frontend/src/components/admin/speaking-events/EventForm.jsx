@@ -38,13 +38,22 @@ function TextField({ id, label, type = 'text', placeholder, value, onChange }) {
   );
 }
 
+/**
+ * An override enriches a Sessionize row, so it says so only when one is attached.
+ * A manual entry has none; editing an existing document without its Sessionize
+ * row cannot tell which it is, so that heading stays neutral.
+ */
+export function formTitle(editingId, editingEvent) {
+  const isNew = editingId === 'new';
+  if (editingEvent) return isNew ? 'New Override' : 'Edit Override';
+  return isNew ? 'New Manual Entry' : 'Edit Event';
+}
+
 function FormHeading({ editingId, editingEvent, onClose }) {
   return (
     <div className="flex items-start justify-between">
       <div>
-        <h3 className="font-semibold text-sm">
-          {editingId === 'new' ? 'New Override' : 'Edit Override'}
-        </h3>
+        <h3 className="font-semibold text-sm">{formTitle(editingId, editingEvent)}</h3>
         {editingEvent && (
           <p className="text-xs text-muted-foreground mt-0.5">
             Sessionize #{editingEvent.id} · {editingEvent.name}

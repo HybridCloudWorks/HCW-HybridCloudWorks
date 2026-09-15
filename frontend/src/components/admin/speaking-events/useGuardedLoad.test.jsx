@@ -40,6 +40,20 @@ describe('useGuardedLoad', () => {
     expect(load).not.toHaveBeenCalled();
   });
 
+  it('clears an earlier error when a read started by the effect lands', async () => {
+    const load = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce(['back']);
+    const { result, rerender } = setup(load);
+    await waitFor(() => expect(result.current.error).toBe('Failed: offline'));
+    // Disable and re-enable: the effect starts the second read, not refresh().
+    rerender({ ready: false });
+    rerender({ ready: true });
+    await waitFor(() => expect(result.current.data).toEqual(['back']));
+    expect(result.current.error).toBe('');
+  });
+
   it('loads and stamps when it landed', async () => {
     const load = vi.fn().mockResolvedValue(['a']);
     const { result } = setup(load);

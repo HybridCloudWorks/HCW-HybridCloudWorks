@@ -38,6 +38,9 @@ export default function useGuardedLoad(load, { enabled = true, empty, describeEr
           setData(value);
           setLoaded(true);
           setLoadedAt(new Date());
+          // A read started by the effect (not refresh) has not cleared an
+          // earlier failure; a landed answer means that error no longer holds.
+          setError('');
           landed = true;
         }
       } catch (err) {
