@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   COMPARISON_CELLS,
   DEFAULT_REGION,
+  PROVIDER_LABELS,
   REGION_OPTIONS,
   SERVICE_LABELS,
   pricingDocId,
@@ -69,6 +70,13 @@ describe('SERVICE_LABELS', () => {
   it('names every catalog service and nothing else', () => {
     expect(Object.keys(SERVICE_LABELS)).toEqual(Object.keys(BASELINE_COSTS));
     for (const label of Object.values(SERVICE_LABELS)) expect(label).toMatch(/\S/);
+  });
+});
+
+describe('PROVIDER_LABELS', () => {
+  it('names every provider and nothing else', () => {
+    expect(Object.keys(PROVIDER_LABELS)).toEqual([...PROVIDERS]);
+    expect(PROVIDER_LABELS).toEqual({ aws: 'AWS', azure: 'Azure', gcp: 'Google Cloud' });
   });
 });
 

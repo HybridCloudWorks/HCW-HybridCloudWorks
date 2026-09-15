@@ -22,10 +22,15 @@
  * as a link that goes nowhere.
  *
  * Every collector reads only what the public site already shows: published
- * articles, approved episodes, Microsoft's public feed. A newsletter is a
- * public surface, and nothing reaches it that the site itself would not render.
+ * articles, approved episodes, Microsoft's public feed, the comparison page's
+ * price-change feed. A newsletter is a public surface, and nothing reaches it
+ * that the site itself would not render.
  */
 import { publicUrlOf } from '../cms/publish.js';
+// history.js, not refresh.js: the document id and container name without
+// the three provider SDKs behind the refresh.
+import { CACHE_CONTAINER, priceChangesDocId } from '../cloud-tools/history.js';
+import { PROVIDER_LABELS, regionOption } from '../cloud-tools/pricing/regions.js';
 
 export const SITE_ORIGIN = 'https://hybridcloudworks.com';
 
@@ -190,8 +195,86 @@ export const episodesSection = Object.freeze({
   },
 });
 
+/**
+ * The region the newsletter's price changes are read for (#613 Phase 3). One
+ * region, fixed: an email has no region picker, and US East is the page's
+ * default and the region every link below opens on. The other two regions'
+ * feeds exist and the page serves them; the newsletter does not read them.
+ */
+export const NEWSLETTER_PRICE_REGION = 'us-east-1';
+
+/** The comparison window the section reports. The page also shows 30 days. */
+const NEWSLETTER_PRICE_WINDOW = '7d';
+
+/** Where every price-change item links: the comparison page, on the newsletter's region. */
+export const PRICE_COMPARISON_URL = `${SITE_ORIGIN}/tools/comparison?region=${NEWSLETTER_PRICE_REGION}`;
+
+/**
+ * A list price as prose: four significant figures with trailing zeros
+ * dropped, `$` for USD and the code after the number otherwise (Azure can
+ * quote another currency). Not a number the reader computes with; a number
+ * the reader recognises from the page.
+ */
+export function formatPrice(value, currency = 'USD') {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '';
+  const digits = String(Number(n.toPrecision(4)));
+  return currency === 'USD' ? `$${digits}` : `${digits} ${currency}`;
+}
+
+/** "AWS · Virtual machines: $0.192 → $0.201 per hour (+4.7%)", or null for a row that cannot be read. */
+export function priceChangeTitle(item) {
+  const provider = PROVIDER_LABELS[item?.provider];
+  const from = formatPrice(item?.from, item?.currency);
+  const to = formatPrice(item?.to, item?.currency);
+  const delta = Number(item?.deltaPct);
+  if (!provider || !item?.label || !from || !to || !item?.unit || !Number.isFinite(delta)) return null;
+  const sign = delta > 0 ? '+' : '';
+  return `${provider} · ${item.label}: ${from} → ${to} per ${item.unit} (${sign}${delta}%)`;
+}
+
+/**
+ * Cloud price changes (#613 Phase 3): the 7-day window of the price-change
+ * feed the pricing refresh derives from its daily snapshots
+ * (cloud-tools/history.js), read from the same document the comparison page
+ * shows. One point read; the refresh has already done the comparing.
+ *
+ * With no items — no comparison snapshot yet, or a week in which no live
+ * price moved — this returns an empty list, and `collectSections` leaves the
+ * section out of the issue entirely. There is deliberately no "no changes
+ * this week" filler: a section that says nothing is a heading the reader
+ * scrolls past, and issue.test.js asserts it is omitted.
+ *
+ * `since`/`until` are not used: the window is the feed's own, a fixed seven
+ * days ending at the last refresh, not the issue's lookback.
+ */
+export const cloudPriceChangesSection = Object.freeze({
+  id: 'cloud-price-changes',
+  title: 'Cloud price changes',
+  async collect({ store }) {
+    const id = priceChangesDocId(NEWSLETTER_PRICE_REGION);
+    const doc = await store.readDoc(CACHE_CONTAINER, id, id);
+    const items = doc?.windows?.[NEWSLETTER_PRICE_WINDOW]?.items;
+    if (!Array.isArray(items)) return [];
+    const regionLabel = regionOption(NEWSLETTER_PRICE_REGION)?.label ?? NEWSLETTER_PRICE_REGION;
+    return items
+      .map((item) => ({
+        title: plainText(priceChangeTitle(item), 160),
+        summary: plainText(item?.sku, 120),
+        url: PRICE_COMPARISON_URL,
+        label: plainText(`${regionLabel} · last 7 days`, 40),
+      }))
+      .filter((item) => item.title && item.url);
+  },
+});
+
 /** The registry, in the order sections appear in the email. */
-export const SECTIONS = Object.freeze([articlesSection, certificationNewsSection, episodesSection]);
+export const SECTIONS = Object.freeze([
+  articlesSection,
+  certificationNewsSection,
+  episodesSection,
+  cloudPriceChangesSection,
+]);
 
 /**
  * Collect the given sections, in the given order, for the window. A section

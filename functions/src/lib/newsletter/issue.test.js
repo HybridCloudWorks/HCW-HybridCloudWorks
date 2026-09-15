@@ -4,12 +4,17 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import {
+  NEWSLETTER_PRICE_REGION,
+  PRICE_COMPARISON_URL,
   absoluteUrl,
   articlesSection,
   certificationNewsSection,
+  cloudPriceChangesSection,
   collectSections,
   episodesSection,
+  formatPrice,
   plainText,
+  priceChangeTitle,
 } from './sections.js';
 import {
   INTRO_INSTRUCTION,
@@ -102,6 +107,124 @@ describe('sections', () => {
       ['Networking', 'https://hybridcloudworks.com/azure/education/az-104', 'Study episode · Azure Administrator'],
       ['IAM', 'https://hybridcloudworks.com/gcp/education', 'Study episode'],
     ]);
+  });
+
+  describe('cloud price changes (#613 Phase 3)', () => {
+    const change = (over = {}) => ({
+      serviceId: 'compute-vm',
+      label: 'Virtual machines',
+      provider: 'aws',
+      unit: 'hour',
+      sku: 'm5.xlarge',
+      from: 0.192,
+      to: 0.201,
+      deltaPct: 4.7,
+      ...over,
+    });
+    const feed = (items, over = {}) => ({
+      'tool_service_cache/price-changes:us-east-1': {
+        id: 'price-changes:us-east-1',
+        region: 'us-east-1',
+        asOf: '2026-09-14T02:00:00.000Z',
+        windows: {
+          '7d': { since: '2026-09-07', sampleDay: '2026-09-07', items },
+          '30d': { since: '2026-08-15', sampleDay: null, items: [] },
+        },
+        sampleDays: 1,
+        ...over,
+      },
+    });
+
+    it('reads the fixed region’s 7-day window from the page’s own document, by one point read', async () => {
+      expect(NEWSLETTER_PRICE_REGION).toBe('us-east-1');
+      expect(PRICE_COMPARISON_URL).toBe('https://hybridcloudworks.com/tools/comparison?region=us-east-1');
+      const store = makeStore({}, feed([change(), change({ provider: 'gcp', unit: 'GB-month', label: 'Object storage', serviceId: 'storage-object', sku: 'Standard', from: 0.02, to: 0.018, deltaPct: -10 })]));
+      const items = await cloudPriceChangesSection.collect({ store, since: SINCE, until: NOW });
+      expect(items).toEqual([
+        {
+          title: 'AWS · Virtual machines: $0.192 → $0.201 per hour (+4.7%)',
+          summary: 'm5.xlarge',
+          url: 'https://hybridcloudworks.com/tools/comparison?region=us-east-1',
+          label: 'US East · last 7 days',
+        },
+        {
+          title: 'Google Cloud · Object storage: $0.02 → $0.018 per GB-month (-10%)',
+          summary: 'Standard',
+          url: 'https://hybridcloudworks.com/tools/comparison?region=us-east-1',
+          label: 'US East · last 7 days',
+        },
+      ]);
+      expect(store.readDoc).toHaveBeenCalledWith('tool_service_cache', 'price-changes:us-east-1', 'price-changes:us-east-1');
+      expect(store.queryDocs).not.toHaveBeenCalled();
+    });
+
+    it('formats prices to four significant figures and names a non-USD currency after the number', () => {
+      expect(formatPrice(0.192)).toBe('$0.192');
+      expect(formatPrice(0.0855)).toBe('$0.0855');
+      expect(formatPrice(85)).toBe('$85');
+      expect(formatPrice(2.4)).toBe('$2.4');
+      expect(formatPrice(0.123456)).toBe('$0.1235');
+      expect(formatPrice(0.2, 'EUR')).toBe('0.2 EUR');
+      expect(formatPrice('n/a')).toBe('');
+      expect(priceChangeTitle(change({ deltaPct: 0 }))).toBe('AWS · Virtual machines: $0.192 → $0.201 per hour (0%)');
+      expect(priceChangeTitle(change({ provider: 'oracle' }))).toBeNull();
+      expect(priceChangeTitle(change({ from: undefined }))).toBeNull();
+    });
+
+    it('drops a row it cannot read rather than rendering a broken line', async () => {
+      const store = makeStore({}, feed([change({ provider: 'oracle' }), change({ label: '' }), change()]));
+      const items = await cloudPriceChangesSection.collect({ store, since: SINCE, until: NOW });
+      expect(items).toHaveLength(1);
+    });
+
+    it('is empty with no document, an empty window, or a malformed one', async () => {
+      for (const docs of [{}, feed([]), feed(null), { 'tool_service_cache/price-changes:us-east-1': { id: 'price-changes:us-east-1' } }]) {
+        const store = makeStore({}, docs);
+        expect(await cloudPriceChangesSection.collect({ store, since: SINCE, until: NOW })).toEqual([]);
+      }
+    });
+
+    it('is left out of the issue entirely when there are no changes — no heading, no filler', async () => {
+      const store = makeStore({ content: [article] }, feed([]));
+      const result = await createIssueBuilder({ store, drafter: null, now: () => NOW }).build({});
+      expect(result.success).toBe(true);
+      expect(result.sections).toEqual(['articles']);
+      const doc = store.written.get('newsletters/issue-2026-09-14');
+      expect(doc.sections.map((s) => s.id)).toEqual(['articles']);
+      expect(doc.problems).toEqual([]);
+      const { html, text } = renderIssue(doc, { postalAddress: 'x' });
+      expect(html).not.toContain('Cloud price changes');
+      expect(text).not.toContain('CLOUD PRICE CHANGES');
+      expect(html).not.toMatch(/no (price )?changes/i);
+    });
+
+    it('renders in the issue, HTML and text, as its siblings do when there are changes', async () => {
+      const store = makeStore({ content: [article] }, feed([change()]));
+      const result = await createIssueBuilder({ store, drafter: null, now: () => NOW }).build({});
+      expect(result.sections).toEqual(['articles', 'cloud-price-changes']);
+      const doc = store.written.get('newsletters/issue-2026-09-14');
+      expect(doc.itemCount).toBe(2);
+      const { html, text } = renderIssue(doc, { postalAddress: 'x' });
+      expect(html).toContain('<h2 style="margin:0 0 16px;font-size:20px;color:#111827">Cloud price changes</h2>');
+      expect(html).toContain('AWS · Virtual machines: $0.192 → $0.201 per hour (+4.7%)');
+      expect(html).toContain('href="https://hybridcloudworks.com/tools/comparison?region=us-east-1"');
+      expect(text).toContain('CLOUD PRICE CHANGES');
+      expect(text).toContain('- AWS · Virtual machines: $0.192 → $0.201 per hour (+4.7%)\n  US East · last 7 days\n  m5.xlarge\n  https://hybridcloudworks.com/tools/comparison?region=us-east-1');
+    });
+
+    it('is capped by the saved item count like any other section', async () => {
+      const many = Array.from({ length: 5 }, (_, i) => change({ sku: `sku-${i}`, to: 0.2 + i / 100 }));
+      const store = makeStore({ content: [article] }, {
+        ...feed(many),
+        'admin_config/newsletter_settings': {
+          id: 'newsletter_settings',
+          sections: [{ id: 'cloud-price-changes', enabled: true, maxItems: 2 }],
+        },
+      });
+      await createIssueBuilder({ store, drafter: null, now: () => NOW }).build({});
+      const doc = store.written.get('newsletters/issue-2026-09-14');
+      expect(doc.sections.find((s) => s.id === 'cloud-price-changes').items).toHaveLength(2);
+    });
   });
 
   it('keeps a failing section from sinking the issue, and reports it', async () => {
