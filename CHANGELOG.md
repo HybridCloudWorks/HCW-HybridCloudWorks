@@ -26,7 +26,7 @@ This project has not cut a tagged release; entries are grouped under
   - **Sources:** when Sessionize was last read, a preview of what a sync would
     create or fill in, Sync from Sessionize, and manual entries.
   - **Publishing:** the public snapshot and what a publish would write now.
-  - **Settings:** the Sessionize speaker id, read-only, with a link to the
+  - **Settings:** the Sessionize speaker ID, read-only, with a link to the
     Integrations card that stays its only editor.
 
   Old ids such as `events`, `sync` and `publish` land on the tab that now holds
