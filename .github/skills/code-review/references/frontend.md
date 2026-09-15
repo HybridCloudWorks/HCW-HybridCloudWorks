@@ -1,7 +1,7 @@
 # Frontend review — `frontend/`
 
 React 19 + Vite + TypeScript/JavaScript + Tailwind CSS 4 + React Router 8.
-Public pages are pre-rendered at build time (`scripts/prerender.mjs`) and
+Public pages are pre-rendered at build time (`frontend/scripts/prerender.mjs`) and
 hydrated client-side; the admin portal is Entra ID/MSAL-protected
 (`@azure/msal-browser`). Hosted on Azure Static Web Apps behind Cloudflare.
 
@@ -18,7 +18,7 @@ hydrated client-side; the admin portal is Entra ID/MSAL-protected
   prerender) or produces empty pre-rendered HTML — check
   `frontend/scripts/prerender.mjs` expectations.
 - `staticwebapp.config.json` changes: verify rewrites/headers don't open
-  admin routes to anonymous traffic and that `scripts/stage-swa-config.mjs`
+  admin routes to anonymous traffic and that `frontend/scripts/stage-swa-config.mjs`
   still stages it (it runs as `postbuild`).
 
 ### Auth and API boundary
@@ -42,8 +42,7 @@ hydrated client-side; the admin portal is Entra ID/MSAL-protected
 
 ### Accessibility
 - `eslint-plugin-jsx-a11y` runs in lint; interactive elements need keyboard
-  support (`npm run a11y:check-keyboard`) and theme-aware contrast
-  (`npm run a11y:contrast`). New interactive components built from divs
+  support and theme-aware contrast (`npm run a11y:contrast`). New interactive components built from divs
   instead of the existing Radix primitives are a maintainability and a11y
   flag — this codebase already has Radix dialog/select/tabs/toast/etc.
 

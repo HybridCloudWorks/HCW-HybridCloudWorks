@@ -702,7 +702,7 @@ COSMOS_ENDPOINT=… node verify-migration.mjs --from export/           # counts 
 
 > The estate served its purpose and was destroyed with owner authorisation: 92
 > resources, the destroy count matching the authorisation exactly
-> ([CHANGELOG.md](../repo/changelog.md)). `infra/scratch.tf` no longer exists. The
+> ([CHANGELOG.md](../repo/changelog.md)). `infra/scratch.tf` now holds only its removal record, no resources. The
 > reasoning below is the transferable part — a key-authenticated rehearsal
 > against an open account passes while proving nothing about the
 > `DefaultAzureCredential` + RBAC path production actually takes, and the
