@@ -8,7 +8,7 @@ import { DEFAULT_TAB, MOVED_TABS, TABS, resolveTab } from './tabs';
 
 describe('resolveTab', () => {
   it('opens each tab by its own id', () => {
-    expect(TABS.map((tab) => tab.id)).toEqual(['overview', 'alerts', 'checks', 'report']);
+    expect(TABS.map((tab) => tab.id)).toEqual(['overview', 'alerts', 'checks', 'code', 'report']);
     for (const { id } of TABS) expect(resolveTab(id)).toBe(id);
   });
 
@@ -21,6 +21,9 @@ describe('resolveTab', () => {
       expect(resolveTab(id)).toBe('checks');
     }
     expect(resolveTab('copy')).toBe('report');
+    for (const id of ['qlty', 'quality', 'security', 'code-quality']) {
+      expect(resolveTab(id)).toBe('code');
+    }
   });
 
   it('lands every moved id on a tab that exists', () => {

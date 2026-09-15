@@ -38,6 +38,24 @@ This project has not cut a tagged release; entries are grouped under
   read stays on its tab. `PublishSnapshotButton` gains an optional
   `onPublished` callback, and `publicApi.js` gains `fetchPublicSnapshot`.
 
+- **Health Hub: Code and Security tab, and a Qlty card on Integrations
+  (#569).** A new Code and Security tab reads `GET /api/cms/code-quality`
+  (from #590) the first time it is opened, not on page load, and shows:
+  - Qlty's grade tiles: maintainability, security, coverage, duplication and
+    technical debt;
+  - open issues by level, and the security total with its split;
+  - categories, top rules and top files, linked to Qlty;
+  - an as-of time, and a warning when the summary was truncated.
+
+  Qlty not configured is a notice linking to the Integrations Keys tab, and a
+  refusal is a retryable error. The loader uses the Health Hub's generation
+  guard, so a slower read never overwrites a newer one and a failed refresh
+  clears the numbers. The copyable report gains a Code and Security section
+  once the tab has loaded. The Integrations Hub gains a Code quality group with
+  a Qlty card (`QLTY-API-TOKEN`) whose test calls the `qlty` connection probe
+  and names the account the token belongs to. `?tab=qlty`, `quality`,
+  `security` and `code-quality` open the tab.
+
 - **Health Hub: tabs by duty instead of one long scroll (#569).**
   `/admin/health` now has four tabs on the shared `HubTabs` bar, deep-linked
   with `?tab=`:
