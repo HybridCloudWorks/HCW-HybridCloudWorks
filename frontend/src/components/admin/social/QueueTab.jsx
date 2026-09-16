@@ -24,6 +24,92 @@ import {
 import { firstText, fmtDate } from './socialView';
 import { PlatformBadge } from './shared';
 
+/** One post Publer is holding, with the delete that removes it there. */
+function PublerQueueCard({ post, deleting, onDelete }) {
+  const text = firstText([post.caption, post.text, post.description], '—');
+  const provider = firstText([post.network, post.provider]);
+  const accts = Array.isArray(post.accounts) ? post.accounts : [];
+  return (
+    <Card className="p-4">
+      <div className="flex items-start gap-3">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium line-clamp-2">{text}</p>
+          <div className="flex flex-wrap items-center gap-2 mt-2">
+            {provider && <PlatformBadge provider={provider} />}
+            {accts.map((a, i) => (
+              <Badge key={i} variant="outline" className="text-[10px]">
+                {firstText([a?.name, a?.id], 'account')}
+              </Badge>
+            ))}
+            <span className="text-xs text-muted-foreground flex items-center gap-1">
+              <Clock className="h-3 w-3" />
+              {fmtDate(post.scheduled_at)}
+            </span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <Badge variant="secondary" className="capitalize text-[10px]">
+            {firstText([post.status, post.state], 'scheduled')}
+          </Badge>
+          <DeleteButton disabled={!post.id} busy={deleting} onClick={() => onDelete(post.id)} />
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+/** One social_posts record this hub wrote when it scheduled something. */
+function LocalRecordCard({ post, deleting, onDelete }) {
+  return (
+    <Card className="p-4">
+      <div className="flex items-start gap-3">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium line-clamp-2">{post.caption || '—'}</p>
+          <div className="flex flex-wrap items-center gap-2 mt-2">
+            {(post.platforms || []).map((platform) => (
+              <PlatformBadge key={platform} provider={platform} />
+            ))}
+            {post.scheduledAt && (
+              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                <Clock className="h-3 w-3" />
+                {fmtDate(post.scheduledAt)}
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <Badge
+            variant="secondary"
+            className={`capitalize text-[10px] ${
+              post.status === 'published'
+                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                : ''
+            }`}
+          >
+            {post.status || 'scheduled'}
+          </Badge>
+          <DeleteButton busy={deleting} onClick={() => onDelete(post.id)} />
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+/** The trash button both cards use, spinner and all. */
+function DeleteButton({ busy, disabled = false, onClick }) {
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      className="h-7 w-7 text-destructive hover:bg-destructive/10"
+      disabled={disabled || busy}
+      onClick={onClick}
+    >
+      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+    </Button>
+  );
+}
+
 export default function QueueTab() {
   const { toast } = useToast();
 
@@ -152,50 +238,14 @@ export default function QueueTab() {
           </div>
         )}
 
-        {publerPosts.map((post, index) => {
-          const text = firstText([post.caption, post.text, post.description], '—');
-          const provider = firstText([post.network, post.provider]);
-          const accts = Array.isArray(post.accounts) ? post.accounts : [];
-          return (
-            <Card key={post.id ?? `publer-${index}`} className="p-4">
-              <div className="flex items-start gap-3">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium line-clamp-2">{text}</p>
-                  <div className="flex flex-wrap items-center gap-2 mt-2">
-                    {provider && <PlatformBadge provider={provider} />}
-                    {accts.map((a, i) => (
-                      <Badge key={i} variant="outline" className="text-[10px]">
-                        {firstText([a?.name, a?.id], 'account')}
-                      </Badge>
-                    ))}
-                    <span className="text-xs text-muted-foreground flex items-center gap-1">
-                      <Clock className="h-3 w-3" />
-                      {fmtDate(post.scheduled_at)}
-                    </span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <Badge variant="secondary" className="capitalize text-[10px]">
-                    {firstText([post.status, post.state], 'scheduled')}
-                  </Badge>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-destructive hover:bg-destructive/10"
-                    disabled={!post.id || deletingId === post.id}
-                    onClick={() => handleDeletePubler(post.id)}
-                  >
-                    {deletingId === post.id ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-3.5 w-3.5" />
-                    )}
-                  </Button>
-                </div>
-              </div>
-            </Card>
-          );
-        })}
+        {publerPosts.map((post, index) => (
+          <PublerQueueCard
+            key={post.id ?? `publer-${index}`}
+            post={post}
+            deleting={deletingId === post.id}
+            onDelete={handleDeletePubler}
+          />
+        ))}
       </div>
 
       {/* Local social-post records */}
@@ -208,49 +258,12 @@ export default function QueueTab() {
             </Badge>
           </h3>
           {localPosts.map((post) => (
-            <Card key={post.id} className="p-4">
-              <div className="flex items-start gap-3">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium line-clamp-2">{post.caption || '—'}</p>
-                  <div className="flex flex-wrap items-center gap-2 mt-2">
-                    {(post.platforms || []).map((p) => (
-                      <PlatformBadge key={p} provider={p} />
-                    ))}
-                    {post.scheduledAt && (
-                      <span className="text-xs text-muted-foreground flex items-center gap-1">
-                        <Clock className="h-3 w-3" />
-                        {fmtDate(post.scheduledAt)}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <Badge
-                    variant="secondary"
-                    className={`capitalize text-[10px] ${
-                      post.status === 'published'
-                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                        : ''
-                    }`}
-                  >
-                    {post.status || 'scheduled'}
-                  </Badge>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-destructive hover:bg-destructive/10"
-                    disabled={deletingId === post.id}
-                    onClick={() => handleDeleteLocal(post.id)}
-                  >
-                    {deletingId === post.id ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-3.5 w-3.5" />
-                    )}
-                  </Button>
-                </div>
-              </div>
-            </Card>
+            <LocalRecordCard
+              key={post.id}
+              post={post}
+              deleting={deletingId === post.id}
+              onDelete={handleDeleteLocal}
+            />
           ))}
         </div>
       )}

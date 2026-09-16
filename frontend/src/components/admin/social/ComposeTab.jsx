@@ -7,7 +7,7 @@
  * still leaves the page picker usable and a content read that fails still
  * leaves the accounts visible.
  */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -38,6 +38,190 @@ function composePostText(caption, selectedContent) {
   return { url, text: url ? `${caption.trim()}\n\n${url}` : caption.trim() };
 }
 
+/**
+ * Ask the model for a caption, and paint it.
+ *
+ * Module-level over one state bag, with a single exit — the shape
+ * `useCertifications` documents and the reason ComposeTab stays inside Qlty's
+ * function-complexity budget. Qlty counts a closure's branches into the
+ * function that holds it, so a handler defined inside the component is the
+ * component's complexity; defined here it is its own.
+ */
+async function runCaption(state, selectedContent, selectedAccountIds) {
+  if (!selectedContent) return;
+  state.setGeneratingCaption(true);
+  try {
+    const result = await postJSON('generateSocialCaption', {
+      contentId: selectedContent.id,
+      platforms: selectedAccountIds,
+      title: selectedContent.Title || selectedContent.title || '',
+      summary: selectedContent.Summary || selectedContent.summary || '',
+      sourceUrl: selectedContent.sourceUrl || '',
+    });
+    state.setCaption(result.caption || '');
+  } catch (err) {
+    state.toast({
+      title: 'Caption generation failed',
+      description: err.message,
+      variant: 'destructive',
+    });
+  } finally {
+    state.setGeneratingCaption(false);
+  }
+}
+
+/**
+ * Send the post to Publer, then record it.
+ *
+ * Unchanged from the one-page version in every respect that reaches Publer:
+ * `scheduled` either way, because publishing now is the other ENDPOINT rather
+ * than another state (#463 item 3), and a refused schedule RESOLVES, so the
+ * `ok === false` test below is what keeps a social-post record from being
+ * written for a job that never was.
+ */
+async function sendToPubler(form) {
+  const { caption, scheduledAt, selectedAccountIds, accounts, selectedContent } = form;
+  const { url, text } = composePostText(caption, selectedContent);
+  const scheduledTime = scheduledAt ? new Date(scheduledAt).toISOString() : null;
+  const bulk = {
+    state: 'scheduled',
+    posts: buildScheduledPosts({ selectedAccountIds, accounts, text, scheduledTime }),
+  };
+
+  const scheduleRes = await publerScheduleBulk(bulk, { immediate: !scheduledTime });
+  if (scheduleRes?.ok === false) throw new Error(describePublerEnvelope(scheduleRes));
+  return { scheduleRes, scheduledTime, url };
+}
+
+/**
+ * The hub's own record of a post Publer accepted.
+ *
+ * `status` is what the operator asked for, not what Publer has done yet: a post
+ * with a time is `scheduled` until the timer sweeps it, and one without is
+ * already `published` because the immediate endpoint sent it.
+ */
+async function recordPost(form, scheduleRes, scheduledTime, url) {
+  const platformOf = (id) => form.accounts.find((a) => a.id === id)?.provider || id;
+  return saveSocialPost({
+    contentId: form.selectedContent?.id || null,
+    caption: form.caption.trim(),
+    url: url || null,
+    accountIds: form.selectedAccountIds,
+    platforms: form.selectedAccountIds.map(platformOf),
+    scheduledAt: scheduledTime || null,
+    publerJobId: scheduleRes?.data?.job_id || null,
+    status: scheduledTime ? 'scheduled' : 'published',
+  });
+}
+
+/** Validate, send, record and report. One exit. */
+async function runSchedule(state, form) {
+  const validationError = getScheduleValidationError({
+    ready: publerReady(),
+    caption: form.caption,
+    selectedAccountIds: form.selectedAccountIds,
+  });
+  if (validationError) {
+    state.toast({
+      title: validationError,
+      description: getScheduleValidationDescription(validationError) || undefined,
+      variant: 'destructive',
+    });
+    return;
+  }
+
+  state.setSubmitting(true);
+  state.setJobStatus(null);
+  try {
+    const { scheduleRes, scheduledTime, url } = await sendToPubler(form);
+    if (scheduleRes?.data?.job_id) {
+      state.setJobStatus('polling');
+      await publerPollJob(scheduleRes.data.job_id);
+    }
+    await recordPost(form, scheduleRes, scheduledTime, url);
+    state.setJobStatus('done');
+    state.toast({
+      title: scheduledTime ? 'Scheduled via Publer!' : 'Published via Publer!',
+      description: `Sent to ${form.selectedAccountIds.length} account(s).`,
+    });
+    state.reset();
+  } catch (err) {
+    state.setJobStatus('error');
+    state.toast({ title: 'Failed to schedule', description: err.message, variant: 'destructive' });
+  } finally {
+    state.setSubmitting(false);
+  }
+}
+
+/** One published page in the picker. */
+function ContentRow({ item, selected, onSelect }) {
+  const provider = item['Cloud Provider'] || item.cloudProvider || '';
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(item)}
+      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border text-left transition-all ${
+        selected ? 'border-primary/40 bg-primary/5' : 'border-border hover:bg-muted/50'
+      }`}
+    >
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium truncate">{item.Title || item.title || 'Untitled'}</p>
+        {provider && <p className="text-xs text-muted-foreground">{provider}</p>}
+      </div>
+      {selected && <CheckCircle className="h-4 w-4 text-primary shrink-0" />}
+    </button>
+  );
+}
+
+/**
+ * Step 1 — the published pages this post can be about, with its own loading and
+ * error states. Its own component because the composer beside it is a separate
+ * duty: together they put ComposeTab over Qlty's function-complexity budget,
+ * and "pick a thing" and "write about the thing" are the natural seam.
+ */
+function ContentPicker({ items, loading, error, configured, selectedId, onSelect }) {
+  return (
+    <div className="space-y-4">
+      <Label className="text-sm font-semibold block">1. Pick published content</Label>
+
+      {!configured && (
+        <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 text-amber-700 dark:text-amber-300 text-xs">
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+          <span>
+            <strong>Publer not fully configured.</strong> Check the Settings tab.
+          </span>
+        </div>
+      )}
+
+      <div className="space-y-1.5 max-h-96 overflow-y-auto pr-1">
+        {loading && (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        )}
+        {!loading && error && (
+          <p className="text-sm text-destructive py-4 text-center" role="status">
+            {error} The list is empty because the read failed, not because nothing is published.
+          </p>
+        )}
+        {!loading && !error && items.length === 0 && (
+          <p className="text-sm text-muted-foreground py-4 text-center">
+            No published content found.
+          </p>
+        )}
+        {items.map((item) => (
+          <ContentRow
+            key={item.id}
+            item={item}
+            selected={selectedId === item.id}
+            onSelect={onSelect}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function ComposeTab({ ready = true, contentId = '' }) {
   const { toast } = useToast();
   const publerConfigured = publerReady();
@@ -55,6 +239,24 @@ export default function ComposeTab({ ready = true, contentId = '' }) {
   const [generatingCaption, setGeneratingCaption] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [jobStatus, setJobStatus] = useState(null); // null | 'polling' | 'done' | 'error'
+
+  // The setters the two module-level handlers write through. A bag rather than
+  // arguments so adding a field to the form does not re-thread every call.
+  const state = useMemo(
+    () => ({
+      setCaption,
+      setGeneratingCaption,
+      setSubmitting,
+      setJobStatus,
+      toast,
+      reset: () => {
+        setCaption('');
+        setScheduledAt('');
+        setSelectedAccountIds([]);
+      },
+    }),
+    [toast]
+  );
 
   // Preselect content when deep-linked from the publish flow
   // (?tab=compose&contentId=...).
@@ -79,151 +281,21 @@ export default function ComposeTab({ ready = true, contentId = '' }) {
     setJobStatus(null);
   };
 
-  const handleGenerateCaption = async () => {
-    if (!selectedContent) return;
-    setGeneratingCaption(true);
-    try {
-      const result = await postJSON('generateSocialCaption', {
-        contentId: selectedContent.id,
-        platforms: selectedAccountIds,
-        title: selectedContent.Title || selectedContent.title || '',
-        summary: selectedContent.Summary || selectedContent.summary || '',
-        sourceUrl: selectedContent.sourceUrl || '',
-      });
-      setCaption(result.caption || '');
-    } catch (err) {
-      toast({
-        title: 'Caption generation failed',
-        description: err.message,
-        variant: 'destructive',
-      });
-    } finally {
-      setGeneratingCaption(false);
-    }
-  };
+  const handleGenerateCaption = () => runCaption(state, selectedContent, selectedAccountIds);
 
-  const handleSchedule = async () => {
-    const validationError = getScheduleValidationError({
-      ready: publerConfigured,
-      caption,
-      selectedAccountIds,
-    });
-    if (validationError) {
-      toast({
-        title: validationError,
-        description: getScheduleValidationDescription(validationError) || undefined,
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    setSubmitting(true);
-    setJobStatus(null);
-    try {
-      const { url, text } = composePostText(caption, selectedContent);
-      const scheduledTime = scheduledAt ? new Date(scheduledAt).toISOString() : null;
-      // `scheduled` either way. Publishing now is the other ENDPOINT, not
-      // another state (#463 item 3).
-      const bulk = {
-        state: 'scheduled',
-        posts: buildScheduledPosts({ selectedAccountIds, accounts, text, scheduledTime }),
-      };
-
-      const scheduleRes = await publerScheduleBulk(bulk, { immediate: !scheduledTime });
-      // A refused schedule resolves rather than throwing, so without this the
-      // next lines would save a social post for a Publer job that never was.
-      if (scheduleRes?.ok === false) throw new Error(describePublerEnvelope(scheduleRes));
-
-      if (scheduleRes?.data?.job_id) {
-        setJobStatus('polling');
-        await publerPollJob(scheduleRes.data.job_id);
-      }
-
-      // Save to the social_posts content container
-      await saveSocialPost({
-        contentId: selectedContent?.id || null,
-        caption: caption.trim(),
-        url: url || null,
-        accountIds: selectedAccountIds,
-        platforms: selectedAccountIds.map(
-          (id) => accounts.find((a) => a.id === id)?.provider || id
-        ),
-        scheduledAt: scheduledTime || null,
-        publerJobId: scheduleRes?.data?.job_id || null,
-        status: scheduledTime ? 'scheduled' : 'published',
-      });
-
-      setJobStatus('done');
-      toast({
-        title: scheduledTime ? 'Scheduled via Publer!' : 'Published via Publer!',
-        description: `Sent to ${selectedAccountIds.length} account(s).`,
-      });
-      setCaption('');
-      setScheduledAt('');
-      setSelectedAccountIds([]);
-    } catch (err) {
-      setJobStatus('error');
-      toast({ title: 'Failed to schedule', description: err.message, variant: 'destructive' });
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  const handleSchedule = () =>
+    runSchedule(state, { caption, scheduledAt, selectedAccountIds, accounts, selectedContent });
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      {/* Left: Content Picker */}
-      <div className="space-y-4">
-        <Label className="text-sm font-semibold block">1. Pick published content</Label>
-
-        {!publerConfigured && (
-          <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 text-amber-700 dark:text-amber-300 text-xs">
-            <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-            <span>
-              <strong>Publer not fully configured.</strong> Check the Settings tab.
-            </span>
-          </div>
-        )}
-
-        <div className="space-y-1.5 max-h-96 overflow-y-auto pr-1">
-          {loadingContent && (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-            </div>
-          )}
-          {!loadingContent && contentError && (
-            <p className="text-sm text-destructive py-4 text-center" role="status">
-              {contentError} The list is empty because the read failed, not because nothing is
-              published.
-            </p>
-          )}
-          {!loadingContent && !contentError && recentContent.length === 0 && (
-            <p className="text-sm text-muted-foreground py-4 text-center">
-              No published content found.
-            </p>
-          )}
-          {recentContent.map((item) => {
-            const title = item.Title || item.title || 'Untitled';
-            const provider = item['Cloud Provider'] || item.cloudProvider || '';
-            const isSelected = selectedContent?.id === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => handleSelectContent(item)}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border text-left transition-all ${
-                  isSelected ? 'border-primary/40 bg-primary/5' : 'border-border hover:bg-muted/50'
-                }`}
-              >
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{title}</p>
-                  {provider && <p className="text-xs text-muted-foreground">{provider}</p>}
-                </div>
-                {isSelected && <CheckCircle className="h-4 w-4 text-primary shrink-0" />}
-              </button>
-            );
-          })}
-        </div>
-      </div>
+      <ContentPicker
+        items={recentContent}
+        loading={loadingContent}
+        error={contentError}
+        configured={publerConfigured}
+        selectedId={selectedContent?.id}
+        onSelect={handleSelectContent}
+      />
 
       {/* Right: Composer */}
       <div className="space-y-4">

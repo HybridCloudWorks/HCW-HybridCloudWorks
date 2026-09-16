@@ -64,16 +64,24 @@ export function getLiveTitle(item) {
   return item.Title || item.title || 'Untitled';
 }
 
+/**
+ * The fields that already carry a whole URL, in the order they are trusted.
+ * A list rather than a chain of `||`: the chain had a ternary with its own
+ * nested ternary hanging off the end of it, which is the one expression
+ * `qlty:boolean-logic` objects to in this file.
+ */
+const LIVE_URL_FIELDS = ['slugPageUrl', 'publishedUrl', 'blogUrl', 'publicUrl'];
+
+/** A curated path (with or without its leading slash) as an absolute URL. */
+function curatedUrl(path) {
+  if (!path) return '';
+  const rooted = String(path).startsWith('/') ? path : `/${path}`;
+  return `https://hybridcloudworks.com${rooted}`;
+}
+
 export function getLiveUrl(item) {
-  const explicit =
-    item.slugPageUrl ||
-    item.publishedUrl ||
-    item.blogUrl ||
-    item.publicUrl ||
-    (item.curatedSubpagePath
-      ? `https://hybridcloudworks.com${String(item.curatedSubpagePath).startsWith('/') ? item.curatedSubpagePath : `/${item.curatedSubpagePath}`}`
-      : '');
-  return explicit || '';
+  const explicit = LIVE_URL_FIELDS.map((field) => item[field]).find(Boolean);
+  return explicit || curatedUrl(item.curatedSubpagePath) || '';
 }
 
 export function getRecency(item) {
