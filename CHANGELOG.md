@@ -5175,6 +5175,45 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The editorconfig findings that are real: one BOM, six missing final
+  newlines, and one of them was being regenerated (#588).** `.editorconfig`
+  scoping is unchanged, because the diagnosis did not support changing it.
+
+  **What was actually wrong.** `frontend/src/pages/admin/SocialHubPage.jsx`
+  carried a UTF-8 BOM against `charset = utf-8`, and six tracked files ended
+  without the newline `insert_final_newline` requires — the four `.vscode/*.json`
+  files, `frontend/public/icons/certs/certification.svg`, and
+  `frontend/data/content-manifest.json`. #588 predicted "one UTF-8 BOM file and
+  5 missing final newlines"; the BOM is exact and the newlines are six.
+
+  **The sixth is the interesting one.** `content-manifest.json` is *generated*
+  by `scripts/build-content-manifest.mjs`, which wrote
+  `JSON.stringify(manifest, null, 2)` with no trailing newline — so fixing the
+  file alone would have been undone by the next manifest run, and the finding
+  would have come back looking like a regression. The newline is now part of
+  `next` rather than appended at the write, so the unchanged-corpus comparison
+  just above it sees the same bytes it writes and an unchanged corpus still
+  produces no diff. The committed file is fixed too, so the repository is clean
+  now and stays clean.
+
+  **The 221 count is not explained by the hypothesis in #588, and is measured
+  from a stale scan.** That issue expects the bulk to be "JSDoc ` * `
+  continuation lines and markdown list indentation measured against
+  `indent_size = 2`". Counted on `main`: **23,811** such JSDoc continuation
+  lines across 800 files, and 572 odd-indent markdown lines. If `indent_size`
+  were flagging those, the number would be two orders of magnitude larger than
+  221, so whatever produces 221 is not that, and rescoping `.editorconfig`
+  against that theory would have changed nothing while looking like a fix.
+  Per the 2026-09-15 note on #588, Qlty has analysed `main` exactly once
+  (`ccce064a`, before #565, #584 and #589), so 221 is a figure from before those
+  merges. The remaining count is worth re-reading after a fresh Qlty build
+  rather than chased now.
+
+  Verified with the repository's own tooling rather than the scanner, which
+  could not be installed here (its binary download is blocked): a tracked-file
+  sweep reports no BOM, no missing final newline and no CRLF. `frontend` 1902
+  tests, `scripts` 409 tests, eslint and `prettier --check` all pass.
+
 - **Two pointers to the timer catalogue and flags still named `main.tf`, which
   has not held them since the split.** `functionapp.tf` was split out of
   `main.tf` on 2026-08-29 (T-754) and `local.timer_catalogue` and
