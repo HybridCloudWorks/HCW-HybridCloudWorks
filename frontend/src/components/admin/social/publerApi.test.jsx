@@ -21,7 +21,7 @@ import {
   publerDeletePost,
   publerPollJob,
   publerScheduleBulk,
-} from './SocialHubPage';
+} from './publerApi';
 
 const postJSON = vi.fn();
 vi.mock('@/lib/api', () => ({

@@ -196,6 +196,60 @@ This project has not cut a tagged release; entries are grouped under
   - **Shared upload code:** file reading and upload live in
     `lib/imageUpload.js`, which the Image Gallery page now shares.
 
+- **Social Hub: tabs by duty, with an Accounts tab and a Published calendar
+  (#575).** `/admin/social` had four tabs already, but the page was one
+  1,551-line component holding the Publer client, the view helpers and every
+  tab's JSX. It is now five tabs at the Newsletter Hub standard — **Compose**,
+  **Queue**, **Published**, **Accounts**, **Settings** — and the page is 93
+  lines. The panels, the Publer client, the shared pieces and the pure helpers
+  live in `components/admin/social`.
+
+  **Accounts is its own tab, and Settings answers one question.** The connected
+  profiles were a card inside the Connection Settings tab, below the credential
+  tile; they are the list an operator checks before composing, not something set
+  once, so they have a tab. What is left on Settings is whether the proxy can
+  use its credentials — which is all the browser can honestly say, since the key
+  lives in Key Vault and the proxy never sends it back (FINDING-04) — plus where
+  each of the settings this hub does not own is actually set.
+
+  **Published groups by the day a post went out and reports per-account
+  outcomes.** A flat list of posts is not a history. Posts Publer returns with
+  no timestamp are kept in an `Undated` group rather than dropped: a post with
+  no stamp still published, and losing it from the record would be the worse
+  error. `postResults` reports only the state and error Publer actually sent —
+  an account it said nothing about is shown with no state rather than as a
+  success, which is the #463 mistake (a job whose every account failed reported
+  as a success) one layer up.
+
+  **Each tab reads its own data, so one failure cannot blank another.** The
+  accounts read and the live-pages read are separate hooks that Compose,
+  Published, Accounts and Settings call for themselves; a missing Publer key
+  leaves the content picker usable, and a failed content read leaves the account
+  list visible. There is nothing here for two tabs to disagree about — unlike
+  the Listen & Learn Hub, no tab writes state another tab shows — so this is the
+  right side of that trade. `useRecentContent` carries a generation, so a
+  superseded read paints nothing, and a failed read empties the list rather than
+  leaving rows beside an error saying they could not be read (#555). The Queue's
+  deletes are guarded in flight: a second click while the first is unanswered is
+  ignored rather than sent twice.
+
+  **Deep links are `?tab=`, and now they are validated.** The page read
+  `searchParams.get('tab') || 'compose'` and tested it against four literals, so
+  an unknown id rendered the header with no panel under it at all. `resolveTab`
+  reads own properties only, so `?tab=constructor` cannot reach
+  `Object.prototype` and hand a function to the panel lookup. `connection` —
+  the word on the old tab bar, which read "Connection Settings" over an id of
+  `settings` — lands on Settings, and `profiles`, `calendar` and `scheduled`
+  land where their content went. All four ids the page shipped with still
+  resolve to themselves.
+
+  **Composing and scheduling are unchanged.** The two endpoints, the delete
+  form, the job poll and the envelope reading are the #463 and #397 code moved
+  verbatim into `social/publerApi.js`; their tests moved with them and every
+  assertion is unchanged. The tab bar is now the shared `HubTabs`, so the Social
+  Hub gets the `role="tablist"` contract and arrow-key navigation the other hubs
+  have.
+
 - **Listen & Learn Hub: tabs by duty (#574).** `/admin/listen-and-learn` was
   one scroll — the generate form, the grounding panel, the list of sets and the
   chosen set's episodes, stacked — and is now a tab per duty at the Newsletter

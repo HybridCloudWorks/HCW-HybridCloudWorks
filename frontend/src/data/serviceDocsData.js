@@ -74,7 +74,7 @@ export const SERVICE_DOCS = {
         feature: 'Social Caption Generation',
         usage:
           'AI-generated social media captions via generateSocialCaption (backend function, to be implemented)',
-        files: ['src/pages/admin/SocialHubPage.jsx'],
+        files: ['src/components/admin/social/ComposeTab.jsx'],
         status: HCW_STATUS.PLANNED,
       },
     ],
