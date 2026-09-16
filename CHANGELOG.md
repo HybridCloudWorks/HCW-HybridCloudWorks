@@ -203,12 +203,23 @@ This project has not cut a tagged release; entries are grouped under
   went from 622 lines to 99; the panels, the episode card, the voice field and
   the view helpers live in `components/admin/listen-and-learn`.
 
-  **Review and Published are the same episodes filtered, not two lists.** They
-  share one `SetPicker` and one `EpisodeList`, so the approve and withdraw
-  buttons are one piece of code — #588 counts 61-line copies as real
-  duplication, and two tabs rendering the same card is exactly that shape.
-  Failed episodes sit on Review rather than Published: they are work needing a
-  decision, and the card already explains the failure.
+  **Review and Published are one component and two configurations of it.** The
+  first draft was two files differing in a filter, an empty-state sentence and
+  a doc comment, and identical for thirty-five lines either side — the
+  duplication #588 counts, and two places to change the approve button. They
+  are now `SetEpisodesTab` with a `keep` predicate. Failed episodes sit on
+  Review rather than Published: they are work needing a decision, and the card
+  already explains the failure.
+
+  **Three Qlty structure findings blocked the first push and are fixed at the
+  source rather than silenced.** `useListenAndLearn` came back at complexity 34
+  with 10 returns, so the reads and writes are now module-level functions over
+  one state bag, each with a single exit — the shape `useCertifications`
+  documents for exactly this reason, and the reason the hook stays inside the
+  budget as it grows. `queuedMessage` carried 6 returns; its two
+  no-provider reasons moved into a frozen table read through
+  `hasOwnProperty`, which drops it to 4 and means a `reason` of `constructor`
+  cannot reach a function. Every assertion on both is unchanged.
 
   **The reads are race-safe the way #555 hardened the Newsletter Hub.** Every
   episode read goes through one generation counter, so opening set B while set

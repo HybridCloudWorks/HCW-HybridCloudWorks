@@ -50,6 +50,30 @@ function voiceLabel(speech) {
 }
 
 /**
+ * Why a run will produce no audio, by the reason the server gave. The two
+ * causes need different fixes — seeding a key, or correcting
+ * `LISTEN_AND_LEARN_TTS_PROVIDER` — so they are worded separately, and a 202
+ * from an older server carries no reason at all, which `noProviderMessage`
+ * covers with wording true of both.
+ */
+const NO_PROVIDER = Object.freeze({
+  pin_unavailable:
+    'Queued — the pinned speech provider (LISTEN_AND_LEARN_TTS_PROVIDER) is not configured, so the audio step will fail and episodes will have transcripts only',
+  not_configured:
+    'Queued — no speech provider is configured, so episodes will have transcripts only',
+});
+
+const NO_PROVIDER_UNKNOWN =
+  'Queued — no usable speech provider (none configured, or the pinned one is not), so episodes will have transcripts only';
+
+/** Own properties only: a `reason` of "constructor" must not reach a function. */
+function noProviderMessage(reason) {
+  return Object.prototype.hasOwnProperty.call(NO_PROVIDER, reason ?? '')
+    ? NO_PROVIDER[reason]
+    : NO_PROVIDER_UNKNOWN;
+}
+
+/**
  * The progress line for a run that has just been accepted.
  *
  * The server's 202 says what the run is expected to spend on speech BEFORE it
@@ -66,13 +90,7 @@ function voiceLabel(speech) {
  */
 export function queuedMessage(speech) {
   if (!speech) return 'Queued…';
-  if (!speech.provider) {
-    if (speech.reason === 'pin_unavailable')
-      return 'Queued — the pinned speech provider (LISTEN_AND_LEARN_TTS_PROVIDER) is not configured, so the audio step will fail and episodes will have transcripts only';
-    if (speech.reason === 'not_configured')
-      return 'Queued — no speech provider is configured, so episodes will have transcripts only';
-    return 'Queued — no usable speech provider (none configured, or the pinned one is not), so episodes will have transcripts only';
-  }
+  if (!speech.provider) return noProviderMessage(speech.reason);
   const voice = voiceLabel(speech);
   if (typeof speech.estimatedCostUsd !== 'number') return `Queued — speech by ${voice}`;
   const perEpisode =

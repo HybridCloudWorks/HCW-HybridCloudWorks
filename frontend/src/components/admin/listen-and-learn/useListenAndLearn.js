@@ -17,8 +17,13 @@
  * The page owns this hook and hands it down, the way CertificationsPage owns
  * useCertifications: Review and Published must agree about what is approved
  * the moment either of them changes it.
+ *
+ * The hook only holds state. The reads and writes below are module-level
+ * functions over one state bag, each with a single exit — the same shape
+ * useCertifications uses, and the reason this stays inside Qlty's complexity
+ * and return-count budgets as it grows.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   fetchSetForReview,
   fetchSets,
@@ -27,6 +32,132 @@ import {
   reviewEpisode,
 } from '@/lib/listenAndLearn';
 import { queuedMessage, formatCost } from './episodeView';
+
+/** One GET of the set list, as `{ rows }` or `{ error }` — never throws. */
+async function fetchSetsOutcome() {
+  let outcome;
+  try {
+    outcome = { rows: await fetchSets() };
+  } catch (error) {
+    outcome = { error: error.message };
+  }
+  return outcome;
+}
+
+/** One GET of a set's episodes, as `{ episodes }` or `{ error }`. */
+async function fetchEpisodesOutcome(platform, examCode) {
+  let outcome;
+  try {
+    const { episodes } = await fetchSetForReview({ platform, examCode });
+    outcome = { episodes };
+  } catch (error) {
+    outcome = { error: error.message };
+  }
+  return outcome;
+}
+
+async function readSets(state) {
+  const outcome = await fetchSetsOutcome();
+  if (!state.alive.current) return;
+  if (outcome.error) state.setError(outcome.error);
+  else state.setSets(outcome.rows);
+}
+
+/**
+ * Read as generation `mine`. A superseded read paints nothing; a failed one
+ * empties the list rather than leaving the previous set's rows under the new
+ * set's heading.
+ */
+async function readEpisodes(state, platform, examCode) {
+  const mine = ++state.generation.current;
+  state.selected.current = { platform, examCode };
+  state.setSelected({ platform, examCode });
+  state.setLoading(true);
+  state.setError(null);
+  const outcome = await fetchEpisodesOutcome(platform, examCode);
+  if (mine !== state.generation.current) return;
+  if (outcome.error) {
+    state.setError(outcome.error);
+    state.setEpisodes([]);
+  } else {
+    state.setEpisodes(outcome.episodes);
+  }
+  state.setLoading(false);
+}
+
+/** Mark an episode busy, or release it, in the ref the guard reads. */
+function setBusy(state, slug, busy) {
+  const next = new Set(state.busy.current);
+  if (busy) next.add(slug);
+  else next.delete(slug);
+  state.busy.current = next;
+  state.setBusySlugs(next);
+}
+
+async function writeReview(state, episode, status) {
+  const slug = episode.areaSlug;
+  const set = state.selected.current;
+  // Ignore a second click while the first is unanswered rather than sending
+  // the approval twice.
+  if (!set || state.busy.current.has(slug)) return;
+  setBusy(state, slug, true);
+  state.setError(null);
+  let failure = null;
+  try {
+    await reviewEpisode({ platform: set.platform, examCode: set.examCode, areaSlug: slug, status });
+  } catch (error) {
+    failure = error.message;
+  }
+  if (!state.alive.current) return;
+  // Optimistic on the one field that changed, rather than refetching the whole
+  // set: approving five episodes in a row should not cost five round trips
+  // through a list that is not otherwise changing.
+  if (failure) state.setError(failure);
+  else
+    state.setEpisodes((rows) =>
+      rows.map((row) => (row.areaSlug === slug ? { ...row, status } : row))
+    );
+  setBusy(state, slug, false);
+}
+
+/**
+ * What a finished run says it did. The run's own spend is summed from the rows
+ * written to `ai_usage`; the same rows roll up under "Breakdown by Feature" on
+ * the AI Engine usage tab.
+ */
+function runSummary(report, jobStatus) {
+  if (!report) return `Job ${jobStatus}`;
+  const withoutAudio = report.withoutAudio ? `, ${report.withoutAudio} without audio` : '';
+  const cost = report.costUsd ? ` · ${formatCost(report.costUsd)}` : '';
+  return `${report.generated} drafted, ${report.failed} failed${withoutAudio}${cost}`;
+}
+
+async function runGenerate(state, form) {
+  state.setGenerating(true);
+  state.setError(null);
+  state.setProgress('Queued…');
+  try {
+    const job = await generateEpisodes({
+      ...form,
+      // "Stored default" is no model at all: the field is dropped, not sent
+      // blank, so the payload carries no ttsModel and the stored default reads.
+      ttsModel: form.ttsModel || undefined,
+      // The expected speech spend arrives with the 202 and is shown then —
+      // before the run starts is when it is worth knowing.
+      onAccepted: (accepted) => state.setProgress(queuedMessage(accepted?.speech)),
+      onUpdate: (j) => state.setProgress(`Job ${j.status}…`),
+    });
+    state.setProgress(runSummary(job?.result, job?.status));
+  } catch (error) {
+    // Episodes save as they complete, so even a timeout leaves work behind —
+    // reload rather than leaving the page showing a stale set.
+    state.setError(error.message);
+    state.setProgress(null);
+  }
+  await readSets(state);
+  if (form.examCode) await readEpisodes(state, form.platform, form.examCode);
+  if (state.alive.current) state.setGenerating(false);
+}
 
 export default function useListenAndLearn(ready) {
   const [sets, setSets] = useState([]);
@@ -44,6 +175,30 @@ export default function useListenAndLearn(ready) {
   // been superseded and must paint nothing.
   const generation = useRef(0);
   const alive = useRef(true);
+  // Mirrors of the state a write needs to read. Refs rather than deps: an
+  // approval must see the set and the busy list as they are when it is
+  // clicked, not as they were when its callback was built.
+  const selectedRef = useRef(null);
+  const busyRef = useRef(new Set());
+
+  const state = useMemo(
+    () => ({
+      setSets,
+      setSelected,
+      setEpisodes,
+      setLoading,
+      setError,
+      setBusySlugs,
+      setGenerating,
+      setProgress,
+      generation,
+      alive,
+      selected: selectedRef,
+      busy: busyRef,
+    }),
+    []
+  );
+
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -53,28 +208,17 @@ export default function useListenAndLearn(ready) {
     };
   }, []);
 
-  const loadSets = useCallback(async () => {
-    try {
-      const rows = await fetchSets();
-      if (alive.current) setSets(rows);
-    } catch (err) {
-      if (alive.current) setError(err.message);
-    }
-  }, []);
-
-  // The read is inlined rather than calling loadSets: a response that lands
+  // The read is inlined rather than calling readSets: a response that lands
   // after this page unmounts (or after auth flips) must not set state, and the
   // effect is the only place that knows when that is.
   useEffect(() => {
     if (!ready) return undefined;
     let cancelled = false;
     (async () => {
-      try {
-        const rows = await fetchSets();
-        if (!cancelled) setSets(rows);
-      } catch (err) {
-        if (!cancelled) setError(err.message);
-      }
+      const outcome = await fetchSetsOutcome();
+      if (cancelled) return;
+      if (outcome.error) setError(outcome.error);
+      else setSets(outcome.rows);
     })();
     return () => {
       cancelled = true;
@@ -95,104 +239,13 @@ export default function useListenAndLearn(ready) {
       .catch(() => {});
   }, [ready]);
 
-  const openSet = useCallback(async (platform, examCode) => {
-    const mine = ++generation.current;
-    setSelected({ platform, examCode });
-    setLoading(true);
-    setError(null);
-    try {
-      const { episodes: rows } = await fetchSetForReview({ platform, examCode });
-      if (mine !== generation.current) return;
-      setEpisodes(rows);
-    } catch (err) {
-      if (mine !== generation.current) return;
-      setError(err.message);
-      setEpisodes([]);
-    } finally {
-      if (mine === generation.current) setLoading(false);
-    }
-  }, []);
-
-  const review = useCallback(
-    async (episode, status) => {
-      const slug = episode.areaSlug;
-      // Ignore a second click while the first is unanswered rather than
-      // sending the approval twice.
-      if (busySlugs.has(slug) || !selected) return;
-      setBusySlugs((busy) => new Set(busy).add(slug));
-      setError(null);
-      try {
-        await reviewEpisode({
-          platform: selected.platform,
-          examCode: selected.examCode,
-          areaSlug: slug,
-          status,
-        });
-        // Optimistic on the one field that changed, rather than refetching the
-        // whole set: approving five episodes in a row should not cost five
-        // round trips through a list that is not otherwise changing.
-        if (alive.current) {
-          setEpisodes((rows) =>
-            rows.map((row) => (row.areaSlug === slug ? { ...row, status } : row))
-          );
-        }
-      } catch (err) {
-        if (alive.current) setError(err.message);
-      } finally {
-        if (alive.current) {
-          setBusySlugs((busy) => {
-            const next = new Set(busy);
-            next.delete(slug);
-            return next;
-          });
-        }
-      }
-    },
-    [busySlugs, selected]
+  const loadSets = useCallback(() => readSets(state), [state]);
+  const openSet = useCallback(
+    (platform, examCode) => readEpisodes(state, platform, examCode),
+    [state]
   );
-
-  const generate = useCallback(
-    async (form) => {
-      setGenerating(true);
-      setError(null);
-      setProgress('Queued…');
-      try {
-        const job = await generateEpisodes({
-          ...form,
-          // "Stored default" is no model at all: the field is dropped, not sent
-          // blank, so the payload carries no ttsModel and the stored default reads.
-          ttsModel: form.ttsModel || undefined,
-          // The expected speech spend arrives with the 202 and is shown then —
-          // before the run starts is when it is worth knowing.
-          onAccepted: (accepted) => setProgress(queuedMessage(accepted?.speech)),
-          onUpdate: (j) => setProgress(`Job ${j.status}…`),
-        });
-        const report = job?.result;
-        const withoutAudio = report?.withoutAudio ? `, ${report.withoutAudio} without audio` : '';
-        // The run's own spend, summed from the rows written to ai_usage. Shown
-        // here because this is the moment it is worth knowing; the same rows roll
-        // up under "Breakdown by Feature" on the AI Engine usage tab.
-        const cost = report?.costUsd ? ` · ${formatCost(report.costUsd)}` : '';
-        setProgress(
-          report
-            ? `${report.generated} drafted, ${report.failed} failed${withoutAudio}${cost}`
-            : `Job ${job?.status}`
-        );
-        await loadSets();
-        await openSet(form.platform, form.examCode);
-      } catch (err) {
-        // Episodes save as they complete, so even a timeout leaves work behind —
-        // reload rather than leaving the page showing a stale set.
-        setError(err.message);
-        setProgress(null);
-        await loadSets();
-        if (form.examCode) await openSet(form.platform, form.examCode);
-      } finally {
-        if (alive.current) setGenerating(false);
-      }
-    },
-    [loadSets, openSet]
-  );
+  const review = useCallback((episode, status) => writeReview(state, episode, status), [state]);
+  const generate = useCallback((form) => runGenerate(state, form), [state]);
 
   return {
     sets,
