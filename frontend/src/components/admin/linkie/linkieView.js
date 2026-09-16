@@ -1,36 +1,16 @@
 /**
  * The Linkie Hub's pure view helpers (#577).
  *
- * The rules for what counts as a live page and where it lives are the Social
- * Hub's, and deliberately so — both hubs push the same published pages
- * outward, so they must agree about which ones exist.
+ * `isLiveRecord` and `getLiveUrl` are re-exported from lib/livePages.js rather
+ * than defined here. Both hubs push the same published pages outward, so they
+ * must agree about which ones exist — and until #577 each carried its own copy
+ * with a comment claiming they matched.
  */
 import { resolveMediaUrl } from '@/lib/functionsBase';
 import { getOrderedContentImageUrls } from '@/lib/contentImages';
 import { toPublicImageUrl } from '@/lib/linkie';
+export { getLiveUrl, isLiveRecord } from '@/lib/livePages';
 
-export function isLiveRecord(item) {
-  const status = String(item?.contentStatus || '');
-  if (item?.softDeletedAt || item?.softDeleteExpiresAt) return false;
-  return item?.Live === true || item?.Status === 'Live' || status.startsWith('published_');
-}
-
-export function getLiveUrl(item) {
-  return (
-    item.slugPageUrl ||
-    item.publishedUrl ||
-    item.blogUrl ||
-    item.publicUrl ||
-    (item.curatedSubpagePath
-      ? `https://hybridcloudworks.com${String(item.curatedSubpagePath).startsWith('/') ? item.curatedSubpagePath : `/${item.curatedSubpagePath}`}`
-      : '')
-  );
-}
-
-/**
- * An image URL Linkie's servers can fetch, or ''. Uploads and gallery rows
- * store `/api/public/media/…` paths; see `toPublicImageUrl` for the rules.
- */
 export const publicImageUrl = (url) =>
   toPublicImageUrl(url, {
     resolve: resolveMediaUrl,
