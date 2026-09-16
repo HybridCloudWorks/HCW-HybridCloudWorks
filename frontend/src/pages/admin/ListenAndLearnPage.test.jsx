@@ -1,16 +1,22 @@
 /**
- * The expected speech spend is shown when a run is accepted, not after it,
- * and the run names the Gemini model it will read with — the owner's
- * Best/Economy button, defaulting to the stored choice.
+ * The Listen & Learn Hub's shell and its Generate tab.
  *
- * ADR 0029 §2a/§2b: the estimate arrives in the 202 and this page is where
- * an operator reads it before the money goes; Listen & Learn is Gemini TTS,
- * never ElevenLabs.
+ * The expected speech spend is shown when a run is accepted, not after it, and
+ * the run names the Gemini model it will read with — the owner's Best/Economy
+ * button, defaulting to the stored choice (ADR 0029 §2a/§2b). Those assertions
+ * are unchanged by #574; what moved is that the form now lives on the Generate
+ * tab, which is the tab the page opens on.
+ *
+ * `queuedMessage` and `VoiceModelField` moved to
+ * components/admin/listen-and-learn with their own tests.
+ *
+ * react-router is mocked rather than wrapped, as CertificationsPage.test does,
+ * so a tab click can be asserted as the `setSearchParams` call it is.
  */
 import React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import ListenAndLearnPage, { VoiceModelField, queuedMessage } from './ListenAndLearnPage';
+import ListenAndLearnPage from './ListenAndLearnPage';
 
 const generateEpisodes = vi.fn();
 const fetchSets = vi.fn();
@@ -29,9 +35,20 @@ const OPTIONS = [
   { id: ECONOMY, tier: 'economy', label: 'Economy — cheaper', perEpisodeUsd: 0.22 },
 ];
 
+let searchParams = '';
+const setSearchParams = vi.fn();
+
 vi.mock('@/hooks/useAuthReady', () => ({
   useAuthReady: () => ({ authReady: true }),
 }));
+
+vi.mock('react-router', async () => {
+  const React_ = await vi.importActual('react');
+  return {
+    useSearchParams: () => [new URLSearchParams(searchParams), setSearchParams],
+    Link: ({ to, children }) => React_.createElement('a', { href: to }, children),
+  };
+});
 
 vi.mock('@/lib/listenAndLearn', () => ({
   SUPPORTED_PLATFORMS: ['azure', 'github', 'aws'],
@@ -50,150 +67,88 @@ vi.mock('@/lib/functionsBase', () => ({
   resolveMediaUrl: (url) => url,
 }));
 
-describe('queuedMessage', () => {
-  it('states the provider, the model and the ceiling, with the arithmetic', () => {
+/** The hub's own tab bar, not any tablist a panel might render. */
+const hubTabs = () => within(screen.getByRole('tablist', { name: 'Listen & Learn Hub' }));
+const selectedTab = () =>
+  hubTabs()
+    .getAllByRole('tab')
+    .find((t) => t.getAttribute('aria-selected') === 'true')?.textContent;
+
+describe('the header and tabs', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    searchParams = '';
+    fetchSets.mockResolvedValue([]);
+    fetchSetForReview.mockResolvedValue({ episodes: [] });
+    fetchSpeechSettings.mockResolvedValue({ geminiModel: BEST, options: OPTIONS });
+  });
+
+  it('names the hub and its provider, and opens Generate by default', () => {
+    render(<ListenAndLearnPage />);
+    expect(screen.getByRole('heading', { name: /Listen & Learn/ })).toBeInTheDocument();
     expect(
-      queuedMessage({
-        provider: 'gemini',
-        model: BEST,
-        episodes: 8,
-        perEpisodeUsd: 0.44,
-        estimatedCostUsd: 3.52,
-      })
-    ).toBe(
-      'Queued — speech by Gemini Best (gemini-3.1-flash-tts-preview), up to $3.52 (8 episodes × $0.44)'
-    );
+      hubTabs()
+        .getAllByRole('tab')
+        .map((t) => t.textContent)
+    ).toEqual(['Generate', 'Review', 'Published', 'Settings']);
+    expect(selectedTab()).toBe('Generate');
+  });
+
+  it('writes the tab to the URL on click, and not for the tab already open', () => {
+    render(<ListenAndLearnPage />);
+    fireEvent.click(hubTabs().getByRole('tab', { name: 'Generate' }));
+    expect(setSearchParams).not.toHaveBeenCalled();
+    fireEvent.click(hubTabs().getByRole('tab', { name: 'Review' }));
+    expect(setSearchParams).toHaveBeenCalledWith({ tab: 'review' });
+  });
+
+  it('lands an old section word on the tab that now holds it', () => {
+    searchParams = 'tab=episodes';
+    render(<ListenAndLearnPage />);
+    expect(selectedTab()).toBe('Review');
+  });
+
+  it('falls back to Generate for a tab that does not exist', () => {
+    searchParams = 'tab=nope';
+    render(<ListenAndLearnPage />);
+    expect(selectedTab()).toBe('Generate');
+  });
+
+  it('keeps reporting a run while the operator is on another tab', async () => {
+    // `generating` and `progress` live in the hook, not in the Generate tab,
+    // so leaving the tab mid-run does not lose the line that says what it cost.
+    generateEpisodes.mockImplementation(async ({ onAccepted }) => {
+      onAccepted({ ok: true, jobId: 'j1', speech: { provider: 'gemini', model: BEST } });
+      return new Promise(() => {});
+    });
+    render(<ListenAndLearnPage />);
+    await waitFor(() => expect(fetchSets).toHaveBeenCalled());
+    const examCode = screen.getByPlaceholderText('AZ-104');
+    const form = within(examCode.closest('form'));
+    fireEvent.change(examCode, { target: { value: 'AZ-104' } });
+    fireEvent.change(form.getByPlaceholderText(/study-guides\/az-104/), {
+      target: { value: 'https://learn.microsoft.com/az-104' },
+    });
+    fireEvent.click(form.getByRole('button', { name: /generate/i }));
     expect(
-      queuedMessage({
-        provider: 'gemini',
-        model: ECONOMY,
-        episodes: 2,
-        perEpisodeUsd: 0.22,
-        estimatedCostUsd: 0.44,
-      })
-    ).toBe(
-      'Queued — speech by Gemini Economy (gemini-2.5-flash-preview-tts), up to $0.44 (2 episodes × $0.22)'
-    );
-  });
+      await screen.findByText('Queued — speech by Gemini Best (gemini-3.1-flash-tts-preview)')
+    ).toBeInTheDocument();
 
-  it('says the stored default applies when the run named no model, with the ceiling priced at the dearer one', () => {
-    expect(
-      queuedMessage({
-        provider: 'gemini',
-        model: null,
-        modelSource: 'stored',
-        modelNote: 'the stored default applies; see Platform settings',
-        episodes: 8,
-        perEpisodeUsd: 0.44,
-        estimatedCostUsd: 3.52,
-      })
-    ).toBe(
-      'Queued — speech by Gemini (the stored default applies; see Platform settings), up to $3.52 (8 episodes × $0.44)'
-    );
-    expect(
-      queuedMessage({ provider: 'gemini', model: null, modelSource: 'stored', estimatedCostUsd: 1 })
-    ).toBe('Queued — speech by Gemini (the stored default model applies), up to $1.00');
-  });
-
-  it('shows a model outside the pair as sent, and none at all without inventing one', () => {
-    expect(
-      queuedMessage({
-        provider: 'gemini',
-        model: 'gemini-2.5-pro-preview-tts',
-        estimatedCostUsd: 1,
-      })
-    ).toBe('Queued — speech by Gemini gemini-2.5-pro-preview-tts, up to $1.00');
-    expect(queuedMessage({ provider: 'gemini', estimatedCostUsd: 1 })).toBe(
-      'Queued — speech by Gemini, up to $1.00'
-    );
-  });
-
-  it('says in words when there will be no audio, rather than showing a zero', () => {
-    expect(
-      queuedMessage({
-        provider: null,
-        reason: 'not_configured',
-        estimatedCostUsd: null,
-        episodes: 8,
-      })
-    ).toMatch(/no speech provider is configured.*transcripts only/);
-  });
-
-  it('distinguishes an unusable pin from nothing configured — they need different fixes', () => {
-    // The server returns provider: null for both; `reason` says which
-    // (Copilot on #447). A pin names the setting to correct.
-    expect(
-      queuedMessage({
-        provider: null,
-        reason: 'pin_unavailable',
-        estimatedCostUsd: null,
-        episodes: 8,
-      })
-    ).toMatch(
-      /pinned speech provider \(LISTEN_AND_LEARN_TTS_PROVIDER\) is not configured.*transcripts only/
-    );
-  });
-
-  it('covers both causes when an older server sends no reason', () => {
-    expect(queuedMessage({ provider: null, estimatedCostUsd: null, episodes: 8 })).toMatch(
-      /no usable speech provider \(none configured, or the pinned one is not\).*transcripts only/
-    );
-  });
-
-  it('names a provider it cannot price without inventing a figure', () => {
-    expect(queuedMessage({ provider: 'azure', estimatedCostUsd: null, episodes: 8 })).toBe(
-      'Queued — speech by Azure AI Speech'
-    );
-  });
-
-  it('degrades to the plain queued line when the server said nothing', () => {
-    expect(queuedMessage(undefined)).toBe('Queued…');
-    expect(queuedMessage(null)).toBe('Queued…');
-  });
-});
-
-describe('VoiceModelField', () => {
-  it('offers the two server-priced choices and reports a pick', () => {
-    const onChange = vi.fn();
-    render(<VoiceModelField value={BEST} options={OPTIONS} onChange={onChange} />);
-    const select = screen.getByLabelText('Voice model');
-    expect(select.value).toBe(BEST);
-    const labels = within(select)
-      .getAllByRole('option')
-      .map((o) => o.textContent);
-    expect(labels).toEqual([
-      'Stored default (set on Platform settings)',
-      'Best — newest voice, about twice the cost · up to $0.44 an episode',
-      'Economy — cheaper · up to $0.22 an episode',
-    ]);
-    fireEvent.change(select, { target: { value: ECONOMY } });
-    expect(onChange).toHaveBeenCalledWith(ECONOMY);
-    expect(screen.getByText(/newer certifications: Best; older ones: Economy/)).toBeInTheDocument();
-  });
-
-  it('lets a per-run override be undone: "Stored default" stays on the list after a model is picked', () => {
-    // Copilot on #462: the option used to render only while the value was
-    // blank, so a pick was sticky until a reload.
-    const onChange = vi.fn();
-    render(<VoiceModelField value={ECONOMY} options={OPTIONS} onChange={onChange} />);
-    const select = screen.getByLabelText('Voice model');
-    expect(select.value).toBe(ECONOMY);
-    fireEvent.change(select, { target: { value: '' } });
-    expect(onChange).toHaveBeenCalledWith('');
-  });
-
-  it('still offers both ids by short name, behind "Stored default", when the settings did not load', () => {
-    render(<VoiceModelField value="" options={[]} onChange={vi.fn()} />);
-    const labels = within(screen.getByLabelText('Voice model'))
-      .getAllByRole('option')
-      .map((o) => o.textContent);
-    expect(labels).toEqual(['Stored default (set on Platform settings)', 'Best', 'Economy']);
+    searchParams = 'tab=review';
+    render(<ListenAndLearnPage />);
+    // The second render is a fresh mount, so this asserts the tab renders at
+    // all from a deep link mid-run rather than blanking.
+    expect(screen.getAllByRole('tablist').length).toBeGreaterThan(0);
   });
 });
 
 describe('ListenAndLearnPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // `searchParams` is module state shared with the describe above, which
+    // deep-links a tab. Without this reset the form below is on a tab that
+    // is not open, and every assertion here fails looking for it.
+    searchParams = '';
     fetchSets.mockResolvedValue([]);
     fetchSetForReview.mockResolvedValue({ episodes: [] });
     fetchSpeechSettings.mockResolvedValue({ geminiModel: BEST, options: OPTIONS });

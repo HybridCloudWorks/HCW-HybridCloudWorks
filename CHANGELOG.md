@@ -196,6 +196,66 @@ This project has not cut a tagged release; entries are grouped under
   - **Shared upload code:** file reading and upload live in
     `lib/imageUpload.js`, which the Image Gallery page now shares.
 
+- **Listen & Learn Hub: tabs by duty (#574).** `/admin/listen-and-learn` was
+  one scroll — the generate form, the grounding panel, the list of sets and the
+  chosen set's episodes, stacked — and is now a tab per duty at the Newsletter
+  Hub standard: **Generate**, **Review**, **Published**, **Settings**. The page
+  went from 622 lines to 99; the panels, the episode card, the voice field and
+  the view helpers live in `components/admin/listen-and-learn`.
+
+  **Review and Published are one component and two configurations of it.** The
+  first draft was two files differing in a filter, an empty-state sentence and
+  a doc comment, and identical for thirty-five lines either side — the
+  duplication #588 counts, and two places to change the approve button. They
+  are now `SetEpisodesTab` with a `keep` predicate. Failed episodes sit on
+  Review rather than Published: they are work needing a decision, and the card
+  already explains the failure.
+
+  **Three Qlty structure findings blocked the first push and are fixed at the
+  source rather than silenced.** `useListenAndLearn` came back at complexity 34
+  with 10 returns, so the reads and writes are now module-level functions over
+  one state bag, each with a single exit — the shape `useCertifications`
+  documents for exactly this reason, and the reason the hook stays inside the
+  budget as it grows. `queuedMessage` carried 6 returns; its two
+  no-provider reasons moved into a frozen table read through
+  `hasOwnProperty`, which drops it to 4 and means a `reason` of `constructor`
+  cannot reach a function. Every assertion on both is unchanged.
+
+  **The reads are race-safe the way #555 hardened the Newsletter Hub.** Every
+  episode read goes through one generation counter, so opening set B while set
+  A is still loading paints B — an A that answers late is dropped rather than
+  shown under B's heading. That is a bug a bare `cancelled` flag does not
+  catch, because both reads are on the same mount. A failed read empties the
+  list rather than leaving the previous set's episodes beside an error saying
+  they could not be read, and approvals are guarded per episode so a second
+  click while the first is unanswered is ignored rather than sent twice.
+
+  **A run keeps reporting while the operator is on another tab**, because
+  `generating` and `progress` live in the hook rather than in the Generate tab
+  — a run takes several minutes, and leaving the tab must not lose the line
+  that says what it cost.
+
+  **The stored voice default is derived, not copied into form state.** `null`
+  means "not chosen yet", so the default appears when the settings load; `''`
+  means the operator chose "Stored default" deliberately. Both send no model,
+  and keeping them distinct is what lets a late settings response fill an
+  untouched field without overriding a choice already made. The previous shape
+  wrote the default back into state from an effect, which is a second source of
+  truth for one value and is what `react-hooks/set-state-in-effect` objects to.
+
+  Deep links are `?tab=`; the old section words (`sets`, `episodes`, `voice`,
+  `grounding`) and anything unknown land where their content went. `resolveTab`
+  reads own properties only, so `?tab=constructor` cannot reach
+  `Object.prototype` and hand a function to the panel lookup — pinned by a test,
+  as it is on the Certifications Hub.
+
+  Settings links to Platform settings for the voice default rather than
+  offering a second editor over the same document, and records why
+  certification episodes are grounded on the official study guide alone: one
+  outdated video demonstrating a retired portal flow would otherwise be
+  laundered into an episode that sounds authoritative, and exam prep is exactly
+  where confidently wrong is worse than absent.
+
 - **Certifications Hub: tabs by duty (#572).** `/admin/certifications` moves
   from one page (1,107 lines) to five tabs on the shared `HubTabs` bar,
   deep-linked with `?tab=`:
