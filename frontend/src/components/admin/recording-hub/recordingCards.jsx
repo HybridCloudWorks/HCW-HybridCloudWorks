@@ -14,7 +14,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { Loader2, Sparkles, Clock, Zap, Mic, CalendarDays } from 'lucide-react';
 import { postJSON } from '@/lib/api';
 import { fmtDate, fmtDuration } from './recordingView';
-import { TranscriptToggleIcon } from './shared';
+import { ScriptThisButton, TranscriptToggleIcon } from './shared';
 
 /**
  * The card's three reads, module-level over one state bag.
@@ -159,21 +159,13 @@ export function PlaudRecordingCard({ recording, onCreateContent, onScriptThis, s
               <TranscriptToggleIcon loading={loadingTx} expanded={expanded} />
               Transcript
             </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 text-xs px-2 border-violet-300 text-violet-700 dark:text-violet-300"
-              onClick={() => onScriptThis({ recordingId: recording.id }, `plaud:${recording.id}`)}
-              disabled={busy}
-              aria-label={`Script this: ${recording.name || recording.id}`}
-            >
-              {busy ? (
-                <Loader2 className="h-3 w-3 animate-spin mr-1" />
-              ) : (
-                <Mic className="h-3 w-3 mr-1" />
-              )}
-              Script this
-            </Button>
+            <ScriptThisButton
+              label={recording.name || recording.id}
+              payload={{ recordingId: recording.id }}
+              busyKey={`plaud:${recording.id}`}
+              busy={busy}
+              onScriptThis={onScriptThis}
+            />
             <Button
               size="sm"
               className="h-7 text-xs px-2 bg-indigo-600 hover:bg-indigo-700 text-white"

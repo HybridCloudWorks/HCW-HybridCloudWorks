@@ -27,11 +27,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
-import { Loader2, Search, RefreshCw, Mic, Link } from 'lucide-react';
+import { Loader2, Search, RefreshCw, Link } from 'lucide-react';
 import { postJSON, getJSON } from '@/lib/api';
 import { aiEngine } from '@/lib/aiEngine';
 import { SCRIPT_QUEUED_TOAST, fmtDate, fmtDuration, sourceLabel } from './recordingView';
 import { PlaudRecordingCard, RouteModal } from './recordingCards';
+import { ScriptThisButton } from './shared';
 
 /**
  * `list_files` answers JSON text that is either the array itself or an object
@@ -124,26 +125,111 @@ export function StoredRecordings({ onScriptThis, scripting, reloadKey }) {
                     <span>{fmtDate(rec.createdAt)}</span>
                   </div>
                 </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs px-2 border-violet-300 text-violet-700 dark:text-violet-300 shrink-0"
-                  onClick={() => onScriptThis({ storedRecordingId: rec.id }, `stored:${rec.id}`)}
-                  disabled={busy}
-                  aria-label={`Script this: ${rec.title || rec.id}`}
-                >
-                  {busy ? (
-                    <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                  ) : (
-                    <Mic className="h-3 w-3 mr-1" />
-                  )}
-                  Script this
-                </Button>
+                <ScriptThisButton
+                  label={rec.title || rec.id}
+                  payload={{ storedRecordingId: rec.id }}
+                  busyKey={`stored:${rec.id}`}
+                  busy={busy}
+                  onScriptThis={onScriptThis}
+                  className="shrink-0"
+                />
               </CardContent>
             </Card>
           );
         })}
       </div>
+    </div>
+  );
+}
+
+/** The `list_files` arguments for one filter state. Paging only when unfiltered. */
+function listArgs({ search, dateFrom, dateTo, page }) {
+  const args = {};
+  if (search) args.query = search;
+  if (dateFrom) args.date_from = dateFrom;
+  if (dateTo) args.date_to = dateTo;
+  if (!search && !dateFrom && !dateTo) {
+    args.page = page;
+    args.page_size = 20;
+  }
+  return args;
+}
+
+/** What a refused list call should say. The unauthenticated case names the fix. */
+function listFailure(res) {
+  if (res.code === 'UNAUTHENTICATED') {
+    return {
+      title: 'Not connected',
+      description: 'Add your Plaud OAuth token on the Settings tab.',
+      variant: 'destructive',
+    };
+  }
+  return { title: 'Could not load recordings', description: res.error, variant: 'destructive' };
+}
+
+/**
+ * One read of the live Plaud library.
+ *
+ * Module-level over one state bag, because Qlty counts a closure's branches
+ * into the function that holds it and this one put `LibraryTab` at 19.
+ */
+async function listRecordings(state) {
+  state.setLoading(true);
+  try {
+    const res = await aiEngine.mcpTool('plaud', 'list_files', listArgs(state));
+    if (res.ok) state.setRecordings(readFileList(res.result));
+    else state.toast(listFailure(res));
+  } catch (err) {
+    state.toast({ title: 'Error', description: err.message, variant: 'destructive' });
+  } finally {
+    state.setLoading(false);
+  }
+}
+
+/** Keyword, date range and refresh for the live library. */
+function LibraryFilters({ search, dateFrom, dateTo, loading, onSearch, onFrom, onTo, onRefresh }) {
+  return (
+    <div className="flex flex-wrap gap-2 items-end">
+      <div className="flex-1 min-w-40">
+        <Label className="text-xs">Search recordings</Label>
+        <div className="relative mt-1">
+          <Search className="absolute left-2.5 top-2 h-4 w-4 text-slate-400" />
+          <Input
+            className="pl-8 h-8 text-xs"
+            placeholder="Keyword…"
+            value={search}
+            onChange={(e) => onSearch(e.target.value)}
+          />
+        </div>
+      </div>
+      <div>
+        <Label className="text-xs">From</Label>
+        <Input
+          type="date"
+          className="h-8 text-xs mt-1 w-36"
+          value={dateFrom}
+          onChange={(e) => onFrom(e.target.value)}
+        />
+      </div>
+      <div>
+        <Label className="text-xs">To</Label>
+        <Input
+          type="date"
+          className="h-8 text-xs mt-1 w-36"
+          value={dateTo}
+          onChange={(e) => onTo(e.target.value)}
+        />
+      </div>
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-8"
+        onClick={onRefresh}
+        disabled={loading}
+        aria-label="Refresh recordings"
+      >
+        {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+      </Button>
     </div>
   );
 }
@@ -164,41 +250,10 @@ function LibraryTab({ isConnected, reloadKey }) {
   const navigate = useNavigate();
   const { scripting, scriptThis } = useScriptThis();
 
-  const fetchRecordings = useCallback(async () => {
-    setLoading(true);
-    try {
-      const args = {};
-      if (search) args.query = search;
-      if (dateFrom) args.date_from = dateFrom;
-      if (dateTo) args.date_to = dateTo;
-      if (!search && !dateFrom && !dateTo) {
-        args.page = page;
-        args.page_size = 20;
-      }
-
-      const res = await aiEngine.mcpTool('plaud', 'list_files', args);
-      if (res.ok) {
-        // list_files returns JSON text; parse it
-        setRecordings(readFileList(res.result));
-      } else if (res.code === 'UNAUTHENTICATED') {
-        toast({
-          title: 'Not connected',
-          description: 'Add your Plaud OAuth token on the Settings tab.',
-          variant: 'destructive',
-        });
-      } else {
-        toast({
-          title: 'Could not load recordings',
-          description: res.error,
-          variant: 'destructive',
-        });
-      }
-    } catch (err) {
-      toast({ title: 'Error', description: err.message, variant: 'destructive' });
-    } finally {
-      setLoading(false);
-    }
-  }, [search, dateFrom, dateTo, page, toast]);
+  const fetchRecordings = useCallback(
+    () => listRecordings({ search, dateFrom, dateTo, page, setLoading, setRecordings, toast }),
+    [search, dateFrom, dateTo, page, toast]
+  );
 
   useEffect(() => {
     if (!isConnected) return undefined;
@@ -220,56 +275,19 @@ function LibraryTab({ isConnected, reloadKey }) {
         </div>
       ) : (
         <div className="space-y-4">
-          {/* Filters */}
-          <div className="flex flex-wrap gap-2 items-end">
-            <div className="flex-1 min-w-40">
-              <Label className="text-xs">Search recordings</Label>
-              <div className="relative mt-1">
-                <Search className="absolute left-2.5 top-2 h-4 w-4 text-slate-400" />
-                <Input
-                  className="pl-8 h-8 text-xs"
-                  placeholder="Keyword…"
-                  value={search}
-                  onChange={(e) => {
-                    setSearch(e.target.value);
-                    setPage(1);
-                  }}
-                />
-              </div>
-            </div>
-            <div>
-              <Label className="text-xs">From</Label>
-              <Input
-                type="date"
-                className="h-8 text-xs mt-1 w-36"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-              />
-            </div>
-            <div>
-              <Label className="text-xs">To</Label>
-              <Input
-                type="date"
-                className="h-8 text-xs mt-1 w-36"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-              />
-            </div>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-8"
-              onClick={fetchRecordings}
-              disabled={loading}
-              aria-label="Refresh recordings"
-            >
-              {loading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <RefreshCw className="h-4 w-4" />
-              )}
-            </Button>
-          </div>
+          <LibraryFilters
+            search={search}
+            dateFrom={dateFrom}
+            dateTo={dateTo}
+            loading={loading}
+            onSearch={(value) => {
+              setSearch(value);
+              setPage(1);
+            }}
+            onFrom={setDateFrom}
+            onTo={setDateTo}
+            onRefresh={fetchRecordings}
+          />
 
           {/* Results */}
           {loading && (

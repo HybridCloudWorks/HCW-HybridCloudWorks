@@ -16,6 +16,7 @@ import {
   ChevronRight,
   ExternalLink,
   Loader2,
+  Mic,
   RefreshCw,
 } from 'lucide-react';
 import { describeSkip, fmtDate, hostErrorMessage, hostState } from './recordingView';
@@ -173,4 +174,28 @@ export function ReadState({ loading, loadError, empty, emptyMessage }) {
     return <p className="text-sm text-slate-400 py-6 text-center">{emptyMessage}</p>;
   }
   return null;
+}
+
+/**
+ * "Script this" — queues a ContentForge job for one recording.
+ *
+ * The same button sits on a live Plaud recording and on a stored one, and they
+ * differ only in what identifies the recording: Qlty counted 16 duplicated
+ * lines across the two files. `payload` and `busyKey` are what the two callers
+ * genuinely disagree about, so they are the props.
+ */
+export function ScriptThisButton({ label, payload, busyKey, busy, onScriptThis, className = '' }) {
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      className={`h-7 text-xs px-2 border-violet-300 text-violet-700 dark:text-violet-300 ${className}`}
+      onClick={() => onScriptThis(payload, busyKey)}
+      disabled={busy}
+      aria-label={`Script this: ${label}`}
+    >
+      {busy ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Mic className="h-3 w-3 mr-1" />}
+      Script this
+    </Button>
+  );
 }
