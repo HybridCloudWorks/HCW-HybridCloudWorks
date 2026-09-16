@@ -11,7 +11,6 @@ the judgement, and report.py writes it down.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 
 try:
     import lizard
