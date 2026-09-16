@@ -19,6 +19,44 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **The Stop guard's blocking path is tested, and the lint config stops
+  measuring the wrong thing (#588).** PR B of the burn-down.
+
+  **`hooks/claude_event.py` had one assertion in CI: that it exits 0 with no
+  state.** That is the fail-open half. The blocking half — an armed workflow
+  with missing handoffs, where the hook is supposed to refuse the Stop — had no
+  coverage at all, so a regression there would have been silent in the only
+  direction that matters: the guard quietly never fires and the session ends on
+  a workflow whose audit trail claims work that never ran.
+  `hooks/test_claude_event.py` covers both halves in 13 cases, written and run
+  green against the old code before any of it was touched.
+
+  The nine-branch fail-open cascade inside `main` is now one function per
+  question — `read_event`, `audit`, `armed_workflow_id`, `validation_fails`,
+  `block_decision` — each answering "allow" for everything it cannot read, so
+  the contract is stated once rather than once per condition. `main` is six
+  lines. In `tooling/workflow.py`, the state tree's file names are four path
+  helpers instead of literals repeated at every call site (a rename could be
+  applied to the write and missed on the read, and the tool would report
+  "workflow not found" against a workflow it had just created), and `main` is a
+  dispatch table rather than a chain of seven returns.
+
+  **`.editorconfig` was measuring indentation in files where indentation is not
+  a style choice.** Of the findings counted on #588, 468 were Markdown — where
+  four spaces opens a code block, three continues an ordered-list item and two
+  nests a bullet — and 65 more were PowerShell comment-based help aligning its
+  continuation lines under `.SYNOPSIS`, which is what `Get-Help` renders. Both
+  now state no opinion on `indent_size`. `.vscode/` states none on
+  `indent_style` either: VS Code wrote `tasks.json` with tabs and the other
+  three with spaces, so asserting `tab` to clear the first simply moved the
+  same finding onto the rest.
+
+  Measured with a local reimplementation of the checker's rules (its own binary
+  cannot be fetched in this environment): 576 findings before, 13 after. The
+  13 that remain are aligned SQL inside template literals and aligned docstring
+  continuations — deliberate formatting in code that Prettier and ruff already
+  govern, and not worth a blanket exemption for every `.js` file.
+
 - **Workflow hygiene: the token is granted where it is used (#588).** `zizmor`
   at its pedantic persona reported 34 findings across the 20 workflows; it
   reports none now, at all three personas.

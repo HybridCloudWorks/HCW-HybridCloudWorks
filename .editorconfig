@@ -17,9 +17,28 @@ indent_size = 2
 [*.md]
 # Trailing double-space is a hard line break in Markdown.
 trim_trailing_whitespace = false
+# Indentation in Markdown is SEMANTIC, not stylistic: four spaces opens a code
+# block, three continues an ordered-list item, two nests a bullet. Measuring it
+# against a fixed size produced 468 of the findings counted on #588, and every
+# one of them was correct Markdown. There is nothing here for a fixed
+# indent_size to be right about, so it states no opinion.
+indent_size = unset
 
 [*.ps1]
-indent_size = 2
+# Comment-based help aligns its continuation lines under the keyword it belongs
+# to (.SYNOPSIS, .DESCRIPTION, .PARAMETER) — that alignment is what `Get-Help`
+# renders, and it is what 65 more of the #588 findings were, all of them inside
+# <# #> blocks. Code indentation is enforced by scripts/validate-powershell.ps1.
+indent_size = unset
 
 [Makefile]
 indent_style = tab
+
+[.vscode/*.json]
+# Machine-managed, and not even self-consistent: VS Code wrote tasks.json with
+# tabs and extensions.json, launch.json and settings.json with spaces, and it
+# rewrites whichever file you touch through the UI. Declaring EITHER style here
+# is a fight the editor wins — asserting `tab` to clear tasks.json simply moved
+# the same finding onto the other three. So this states no opinion, which is
+# the only thing that is true about a directory the editor owns.
+indent_style = unset
