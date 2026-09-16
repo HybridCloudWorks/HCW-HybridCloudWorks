@@ -176,8 +176,10 @@ describe('the Labs Hub uses the shared rules', () => {
 
   it('does not fabricate a job status from a transport error', () => {
     // `status: 'failed'` in the catch was indistinguishable from a real
-    // failure, and stopped the poll permanently.
+    // failure, and stopped the poll permanently. The invariant is that a
+    // failure to *read* the status lands in its own field — keyed on the field
+    // rather than on a setter's name, which a refactor is free to change.
     expect(LABS_HUB).not.toContain("status: 'failed'");
-    expect(LABS_HUB).toContain('setPollError');
+    expect(LABS_HUB).toContain('pollError');
   });
 });

@@ -9,44 +9,7 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { CheckCircle, ExternalLink, Loader2, Send } from 'lucide-react';
-import { getLiveUrl } from './linkieView';
-
-/**
- * `posts` and `loading` are both needed, and for one reason: `posts` is `[]`
- * while the fetch is in flight, so "already linked" cannot be told apart from
- * "not answered yet" without the flag. Pushing on a stale empty list creates
- * duplicates, which is what the disabled state prevents.
- */
-
-/**
- * One published page, with the Push that adds it.
- *
- * `posts` is `[]` while the fetch is in flight, so "already linked" cannot be
- * told apart from "not answered yet" without `loading` — and lighting up Push
- * on an article already in Linkie lets a fast operator create duplicates.
- * Caught in review on #429.
- */
-/**
- * Whether Push can run for one page, and what to say when it cannot.
- *
- * `posts` is `[]` while the fetch is in flight, so "already linked" cannot be
- * told apart from "not answered yet" without `loading` — and lighting up Push
- * on an article already in Linkie lets a fast operator create duplicates.
- * Caught in review on #429.
- */
-function pushState({ item, url, canWrite, posts, loading, profileNotice, pushingId }) {
-  const alreadyLinked = posts.some((post) => post.url === url);
-  const pushing = pushingId === item.id;
-  let title;
-  if (!canWrite) title = profileNotice || 'No Linkie profile selected';
-  else if (loading) title = 'Checking what is already linked…';
-  return {
-    alreadyLinked,
-    pushing,
-    title,
-    disabled: !url || !canWrite || loading || alreadyLinked || pushing,
-  };
-}
+import { getLiveUrl, pushBlocker } from './linkieView';
 
 /** The Push button's icon: in flight, already linked, or ready to send. */
 function PushIcon({ pushing, alreadyLinked }) {
@@ -58,7 +21,11 @@ function PushIcon({ pushing, alreadyLinked }) {
 function PushRow({ item, canWrite, posts, loading, profileNotice, pushingId, onPush }) {
   const title = item.Title || item.title || 'Untitled';
   const url = getLiveUrl(item);
-  const push = pushState({ item, url, canWrite, posts, loading, profileNotice, pushingId });
+  const alreadyLinked = posts.some((post) => post.url === url);
+  const pushing = pushingId === item.id;
+  // One named reason rather than a five-term disjunction, so the disabled
+  // button can say why it is disabled (linkieView.pushBlocker).
+  const blocked = pushBlocker({ url, canWrite, loading, alreadyLinked, pushing, profileNotice });
 
   return (
     <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg border hover:bg-muted/50">
@@ -75,14 +42,14 @@ function PushRow({ item, canWrite, posts, loading, profileNotice, pushingId, onP
       )}
       <Button
         size="sm"
-        variant={push.alreadyLinked ? 'outline' : 'default'}
+        variant={alreadyLinked ? 'outline' : 'default'}
         className="gap-1.5 shrink-0"
-        disabled={push.disabled}
-        title={push.title}
+        disabled={Boolean(blocked)}
+        title={blocked || undefined}
         onClick={() => onPush(item)}
       >
-        <PushIcon pushing={push.pushing} alreadyLinked={push.alreadyLinked} />
-        {push.alreadyLinked ? 'Linked' : 'Push'}
+        <PushIcon pushing={pushing} alreadyLinked={alreadyLinked} />
+        {alreadyLinked ? 'Linked' : 'Push'}
       </Button>
     </div>
   );

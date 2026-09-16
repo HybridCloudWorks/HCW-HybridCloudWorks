@@ -19,6 +19,47 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Linkie Hub and Labs Hub: finished to the Newsletter Hub standard (#577).**
+  The last two hubs in the series. `/admin/linkie` is 127 lines over Links /
+  Analytics / **Settings** (`components/admin/linkie`), and `/admin/labs` is 97
+  lines over Dashboard / **Jobs** / Console / **Agents** / Settings
+  (`components/admin/labs`), down from 1,076 and 693.
+
+  **Labs gains two tabs, and they are the point.** The job table was the bottom
+  third of Dashboard with its columns stopping at the exit code, so a job that
+  failed yesterday could be seen to have failed and *not why*: `job.output` was
+  rendered only for whichever job the Console had just submitted. **Jobs** rows
+  expand to it. And the live connection state was the top card of Setup, *under*
+  six install steps, so "the agent is disconnected" was answered with
+  provisioning instructions whether or not anything needed provisioning.
+  **Agents** separates the three states `fleetState` names: online, *stale* — an
+  agent that has connected and stopped, which wants `systemctl restart` and not
+  a reinstall — and none.
+
+  Linkie's Connection tab became **Settings** with `?tab=connection`
+  redirecting, and `?profile=` survives a tab change: every posts and analytics
+  path is profile-scoped, so a link naming a tab without its profile would land
+  on whichever profile sorts first.
+
+  **One live-page rule, shared by the three surfaces that must agree.**
+  `isLiveRecord` and `getLiveUrl` existed in LivePagesPage, the Social Hub and
+  Linkie. `isLiveRecord` genuinely matched byte for byte; `getLiveUrl` did not —
+  the Linkie copy was the `||`-chain-into-a-nested-ternary that Qlty flagged on
+  the Social Hub's copy in #623, carried unnoticed in a second file while the
+  first was fixed. They are `lib/livePages.js` now. One difference is
+  deliberately **not** resolved: LivePagesPage has a `getContentPublicPath`
+  fallback the hubs lack, which changes which pages an operator can post about,
+  so it keeps its own resolver and the module header records the divergence.
+
+  **Labs had no tests at all**, including the agent-staleness rendering T-309
+  was filed against; it has 12 page tests and 16 helper tests now. Writing them
+  found `labsView.js` calling `toMillis` without importing it, and found that
+  four structural guards in `labsPolling.test.js` had gone blind — they read
+  `LabsPage.jsx` as text, and this refactor moved their subject into
+  `components/admin/labs/`, so all four passed vacuously against the 97-line
+  page left behind. They read the whole hub directory now, and assert the glob
+  matched something.
+
 - **Recording Hub: organised by duty, not by provider (#576).**
   `/admin/recording-hub` had one tab per SERVICE — Podcast, and Plaud with
   three sub-tabs of its own — so "where do I approve a transcript" depended on
