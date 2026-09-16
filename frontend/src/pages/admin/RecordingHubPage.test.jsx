@@ -3,8 +3,8 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import RecordingHubPage from './RecordingHubPage';
-import { SCRIPT_QUEUED_TOAST } from '@/components/admin/recording-hub/PlaudTab';
-import { HostLine, describeSkip } from '@/components/admin/recording-hub/PodcastTab';
+import { SCRIPT_QUEUED_TOAST, describeSkip } from '@/components/admin/recording-hub/recordingView';
+import { HostLine } from '@/components/admin/recording-hub/shared';
 
 const postJSON = vi.fn();
 const getJSON = vi.fn();
@@ -152,14 +152,27 @@ function routeGets({ items = transcripts, connected = true, stored = [], plaudRe
   });
 }
 
-const renderPage = () =>
+/**
+ * #576 replaced the two provider tabs (and Plaud's three sub-tabs) with five
+ * duty tabs reached by `?tab=`. Rendering at a tab therefore means an initial
+ * entry rather than a click, and `openTab` is one click where the old suite
+ * needed two.
+ */
+const renderPage = (tab) =>
   render(
-    <MemoryRouter>
+    <MemoryRouter
+      initialEntries={[tab ? `/admin/recording-hub?tab=${tab}` : '/admin/recording-hub']}
+    >
       <RecordingHubPage />
     </MemoryRouter>
   );
 
-const openPlaudTab = () => fireEvent.click(screen.getByRole('tab', { name: 'Plaud' }));
+const openTab = (name) => fireEvent.click(screen.getByRole('tab', { name }));
+
+/** The Plaud library and the upload forms share one tab now. */
+const openRecordings = () => openTab('Recordings');
+/** The Connect sub-tab became the Settings tab. */
+const openSettings = () => openTab('Settings');
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -225,8 +238,7 @@ describe('Plaud connection check', () => {
     // from every surface, which is the T-766 defect in a different timer.
     routeGets({ connected: true, plaudRefresh: { lastTokenRefresh: '2026-09-10T12:00:00.000Z' } });
     renderPage();
-    openPlaudTab();
-    fireEvent.click(await screen.findByRole('tab', { name: 'Connect' }));
+    openSettings();
     expect(await screen.findByText(/Auto-refresh last ran/i)).toBeInTheDocument();
   });
 
@@ -236,8 +248,7 @@ describe('Plaud connection check', () => {
     // draw above.
     routeGets({ connected: true });
     renderPage();
-    openPlaudTab();
-    fireEvent.click(await screen.findByRole('tab', { name: 'Connect' }));
+    openSettings();
     expect(await screen.findByText(/not since this token was stored/i)).toBeInTheDocument();
   });
 
@@ -275,8 +286,7 @@ describe('Plaud connection check', () => {
 
     authReady = true;
     const { rerender } = renderPage();
-    openPlaudTab();
-    fireEvent.click(await screen.findByRole('tab', { name: 'Connect' }));
+    openSettings();
     expect(await screen.findByText(/Auto-refresh last ran/i)).toBeInTheDocument();
 
     authReady = false;
@@ -304,8 +314,7 @@ describe('Plaud connection check', () => {
       plaudRefresh: { lastTokenRefresh: 'not-a-date', oauthExpiresAt: 'not-a-date' },
     });
     renderPage();
-    openPlaudTab();
-    fireEvent.click(await screen.findByRole('tab', { name: 'Connect' }));
+    openSettings();
     expect(await screen.findByText(/timestamp could not be read/i)).toBeInTheDocument();
     expect(screen.queryByText(/Access token expires:/i)).toBeNull();
     expect(screen.queryByText(/not since this token was stored/i)).toBeNull();
@@ -335,8 +344,7 @@ describe('Plaud connection check', () => {
       throw new Error(`unexpected GET ${route}`);
     });
     renderPage();
-    openPlaudTab();
-    fireEvent.click(await screen.findByRole('tab', { name: 'Connect' }));
+    openSettings();
     // The expiry still shows, and matters more here than anywhere: it is when
     // the connection stops working.
     expect(await screen.findByText(/Access token expires:/i)).toBeInTheDocument();
@@ -349,14 +357,13 @@ describe('Plaud connection check', () => {
       plaudRefresh: { lastTokenRefreshError: 'refresh token revoked' },
     });
     renderPage();
-    openPlaudTab();
-    fireEvent.click(await screen.findByRole('tab', { name: 'Connect' }));
+    openSettings();
     expect(await screen.findByText(/refresh token revoked/i)).toBeInTheDocument();
   });
 });
 
 describe('Podcast tab', () => {
-  it('lists transcripts with their source chip, status, badges and player, then the episodes', async () => {
+  it('lists transcripts with their source chip, status, badges and player', async () => {
     renderPage();
 
     expect(await screen.findByText('State backends, spoken')).toBeInTheDocument();
@@ -380,12 +387,19 @@ describe('Podcast tab', () => {
     expect(screen.getByText('audio failed')).toBeInTheDocument();
     expect(screen.getAllByText('published')).toHaveLength(2);
 
-    // The show's episodes, read-only.
+    // The episodes moved to their own tab in #576, and are asserted there.
+    expect(screen.queryByText('Episode one')).not.toBeInTheDocument();
+  });
+
+  it('shows the show\u2019s episodes on the Episodes tab, read-only', async () => {
+    renderPage('episodes');
     expect(await screen.findByText('Episode one')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /RSS feed/ })).toHaveAttribute(
       'href',
       'https://media.rss.com/hcw/feed.xml'
     );
+    // Nothing to approve here: review lives on Transcripts.
+    expect(screen.queryByRole('button', { name: /approve/i })).not.toBeInTheDocument();
   });
 
   it('renders a skipped host publish as its reason sentence, never the bare code', async () => {
@@ -513,7 +527,7 @@ describe('Plaud tab', () => {
   it('lists the library through the MCP proxy and queues a script for one recording', async () => {
     renderPage();
     await screen.findByText('State backends, spoken');
-    openPlaudTab();
+    openRecordings();
 
     expect(await screen.findByText('Landing zone review')).toBeInTheDocument();
     expect(mcpTool).toHaveBeenCalledWith('plaud', 'list_files', { page: 1, page_size: 20 });
@@ -548,7 +562,7 @@ describe('Plaud tab', () => {
     });
     renderPage();
     await screen.findByText('State backends, spoken');
-    openPlaudTab();
+    openRecordings();
 
     expect(await screen.findByText('Uploaded stand-up')).toBeInTheDocument();
     expect(screen.getByText('Plaud Embedded')).toBeInTheDocument();
@@ -566,7 +580,7 @@ describe('Plaud tab', () => {
     );
     renderPage();
     await screen.findByText('State backends, spoken');
-    openPlaudTab();
+    openRecordings();
     fireEvent.click(
       await screen.findByRole('button', { name: 'Script this: Landing zone review' })
     );
@@ -588,7 +602,7 @@ describe('Plaud tab', () => {
     });
     renderPage();
     await screen.findByText('State backends, spoken');
-    openPlaudTab();
+    openRecordings();
     expect(await screen.findByText('Connect your Plaud account first.')).toBeInTheDocument();
     expect(await screen.findByText('Pasted notes')).toBeInTheDocument();
     expect(mcpTool).not.toHaveBeenCalled();
@@ -598,8 +612,7 @@ describe('Plaud tab', () => {
     postJSON.mockResolvedValueOnce({ ok: true, jobId: 'job-9', uploadPath: 'uploads/u.mp3' });
     renderPage();
     await screen.findByText('State backends, spoken');
-    openPlaudTab();
-    fireEvent.click(screen.getByRole('tab', { name: 'Upload' }));
+    openRecordings();
 
     const file = new File(['abc'], 'standup.mp3', { type: 'audio/mpeg' });
     fireEvent.change(screen.getByLabelText('Audio file'), { target: { files: [file] } });
@@ -624,9 +637,73 @@ describe('Plaud tab', () => {
   it('keeps the manual transcript paste as a sub-section of Upload', async () => {
     renderPage();
     await screen.findByText('State backends, spoken');
-    openPlaudTab();
-    fireEvent.click(screen.getByRole('tab', { name: 'Upload' }));
+    openRecordings();
     expect(screen.getByText('Paste a transcript')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Save Recording' })).toBeInTheDocument();
+  });
+});
+
+describe('the duty tabs (#576)', () => {
+  it('opens on Transcripts when there is no ?tab=', async () => {
+    renderPage();
+    expect(await screen.findByText('State backends, spoken')).toBeInTheDocument();
+    const selected = within(screen.getByRole('tablist', { name: 'Recording Hub' }))
+      .getAllByRole('tab')
+      .find((tab) => tab.getAttribute('aria-selected') === 'true');
+    expect(selected).toHaveTextContent('Transcripts');
+  });
+
+  it('shows the tab a deep link names', async () => {
+    renderPage('recordings');
+    expect(await screen.findByText('Landing zone review')).toBeInTheDocument();
+  });
+
+  it('sends the old provider ids to where their content went', async () => {
+    // `podcast` and `plaud` are the only two ids this page ever had, so every
+    // link written before #576 uses one of them.
+    renderPage('podcast');
+    expect(await screen.findByText('State backends, spoken')).toBeInTheDocument();
+  });
+
+  it('sends a Plaud sub-tab id to the duty that absorbed it', async () => {
+    renderPage('connect');
+    expect(await screen.findByText('How to connect')).toBeInTheDocument();
+    // And the Settings-only section that came with the move.
+    expect(screen.getByText('Where the rest is set')).toBeInTheDocument();
+  });
+
+  it('shows Transcripts for an unknown tab rather than a header with nothing under it', async () => {
+    renderPage('nope');
+    expect(await screen.findByText('State backends, spoken')).toBeInTheDocument();
+  });
+});
+
+describe('Distribution tab', () => {
+  it('groups the host records by state, failures first', async () => {
+    renderPage('distribution');
+    // The fixture carries a failed publish and a skipped one; both are named
+    // by their group heading rather than buried under a transcript row.
+    expect(await screen.findByRole('region', { name: 'Failed to publish' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Skipped' })).toBeInTheDocument();
+  });
+
+  it('carries the retry, and treats a 404 as "not deployed yet"', async () => {
+    postJSON.mockRejectedValueOnce(new Error('publish failed with HTTP 404'));
+    renderPage('distribution');
+    const failed = await screen.findByRole('region', { name: 'Failed to publish' });
+    fireEvent.click(within(failed).getByRole('button', { name: /retry/i }));
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'Host retry is not available yet' })
+      )
+    );
+  });
+
+  it('shows the feed link beside the records', async () => {
+    renderPage('distribution');
+    expect(await screen.findByRole('link', { name: /Feed/ })).toHaveAttribute(
+      'href',
+      'https://media.rss.com/hcw/feed.xml'
+    );
   });
 });

@@ -1,106 +1,86 @@
 /**
- * Recording Hub — one page, two tabs (#442, part of #432).
+ * Recording Hub (route `/admin/recording-hub`) — the podcast pipeline, from a
+ * recording to a published episode.
  *
- *   Podcast  — the transcripts the podcast pipeline produced from published
- *              articles (#435) and from recordings (#434), with review,
- *              the host record (#437) and the show's episodes.
- *   Plaud    — everything /admin/recordings used to do (Library, Upload,
- *              Connect), plus "Script this" on every recording and audio
- *              upload for Plaud Embedded to transcribe.
+ * Until #576 this had one tab per PROVIDER: Podcast, and Plaud with three
+ * sub-tabs of its own. That made "where do I approve a transcript" depend on
+ * which service produced it, and put the OAuth setup two clicks inside a
+ * working tab. It is a tab per duty now, at the Newsletter Hub's standard
+ * (components/admin/recording-hub):
  *
- * /admin/recordings redirects here. The Plaud MCP token rules and the
- * CLIENT_USER_AUTH_REVOKED remedy live in the Plaud tab's header
- * (components/admin/recording-hub/PlaudTab.jsx), where the Connect sub-tab
- * that applies them is.
+ *   Recordings    the live Plaud library, what is stored, and the two ways to
+ *                 add audio — with "Script this" on each
+ *   Transcripts   what the pipeline produced, with review and approval
+ *   Episodes      what is live on the show, read from the public feed
+ *   Distribution  what this hub sent to RSS.com and how it went, failures first
+ *   Settings      the Plaud connection, the refresh timer's record, and links
+ *                 to the settings this hub reads but does not own
+ *
+ * Providers are named in the header and inside the tabs, not as tabs.
+ *
+ * Deep links are `?tab=`, which this page did not have at all before — it held
+ * the selected tab in `useState`, so no link could name one and Back could not
+ * leave one. The two old provider ids and the Plaud sub-tab ids land where
+ * their content went (recording-hub/tabs.js).
+ *
+ * The transcript list is read once, here, because Transcripts and Distribution
+ * are two views of it: approving a transcript is exactly what creates the
+ * RSS.com record Distribution shows (useRecordingHub). /admin/recordings
+ * redirects here.
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React from 'react';
+import { useSearchParams } from 'react-router';
+import { Radio, RefreshCw } from 'lucide-react';
 import { useAuthReady } from '@/hooks/useAuthReady';
-import ServicePageHeader from '@/components/admin/ServicePageHeader';
+import { useToast } from '@/components/ui/use-toast';
 import { Button } from '@/components/ui/button';
-import { Mic, Radio, RefreshCw } from 'lucide-react';
-import { getJSON } from '@/lib/api';
-import PodcastTab from '@/components/admin/recording-hub/PodcastTab';
-import PlaudTab from '@/components/admin/recording-hub/PlaudTab';
-
-const TABS = [
-  { id: 'podcast', label: 'Podcast', icon: Mic },
-  { id: 'plaud', label: 'Plaud', icon: Radio },
-];
+import ServicePageHeader from '@/components/admin/ServicePageHeader';
+import HubTabs from '@/components/admin/HubTabs';
+import RecordingsTab from '@/components/admin/recording-hub/RecordingsTab';
+import TranscriptsTab from '@/components/admin/recording-hub/TranscriptsTab';
+import EpisodesTab from '@/components/admin/recording-hub/EpisodesTab';
+import DistributionTab from '@/components/admin/recording-hub/DistributionTab';
+import SettingsTab from '@/components/admin/recording-hub/SettingsTab';
+import useRecordingHub, { CONNECTION } from '@/components/admin/recording-hub/useRecordingHub';
+import { TABS, resolveTab } from '@/components/admin/recording-hub/tabs';
 
 /**
- * The Plaud connection as the page knows it. `unknown` is a check that
- * could not run (a thrown read) — not `disconnected`, which is a check that
- * ran and said so. Conflating the two pinned the tab to "not connected" for
- * a whole session when the first read raced the sign-in.
+ * Each tab's panel, by id. With TABS in recording-hub/tabs.js this is the whole
+ * of adding a tab: every panel receives the same hub state.
  */
-const CONNECTION = Object.freeze({
-  checking: 'checking',
-  connected: 'connected',
-  disconnected: 'disconnected',
-  unknown: 'unknown',
+/**
+ * What ServicePageHeader shows for each connection state. `checking` and
+ * `unknown` pass through as themselves: the header renders a third state for
+ * them, which is the whole reason the hub keeps them apart from `disconnected`.
+ */
+const HEADER_STATE = Object.freeze({
+  [CONNECTION.connected]: true,
+  [CONNECTION.disconnected]: false,
+  [CONNECTION.checking]: CONNECTION.checking,
+  [CONNECTION.unknown]: CONNECTION.unknown,
 });
+
+const PANELS = {
+  recordings: RecordingsTab,
+  transcripts: TranscriptsTab,
+  episodes: EpisodesTab,
+  distribution: DistributionTab,
+  settings: SettingsTab,
+};
 
 export default function RecordingHubPage() {
   const { authReady } = useAuthReady();
-  const [activeTab, setActiveTab] = useState('podcast');
-  const [connection, setConnection] = useState(CONNECTION.checking);
-  const [hasRefreshToken, setHasRefreshToken] = useState(false);
-  // null until the first read answers; the Connect tab renders nothing for it
-  // rather than claiming a rotation has never happened (#358).
-  const [refreshState, setRefreshState] = useState(null);
-  const [checkNonce, setCheckNonce] = useState(0);
+  const { toast } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = resolveTab(searchParams.get('tab'));
+  const hub = useRecordingHub(authReady, toast);
 
-  // Check the Plaud connection once auth has resolved, and again whenever
-  // readiness flips or the owner asks: a read fired before the token exists
-  // throws, and that throw must read as "unknown", not "disconnected".
-  const recheck = useCallback(() => setCheckNonce((n) => n + 1), []);
+  const setTab = (id) => {
+    if (id === activeTab) return;
+    setSearchParams({ tab: id });
+  };
 
-  useEffect(() => {
-    if (!authReady) return undefined;
-    let cancelled = false;
-    const timer = setTimeout(async () => {
-      try {
-        // If the Plaud MCP server doc reports connected and a stored token
-        // (the API returns hasOauthToken; the value itself is write-only).
-        const res = await getJSON('cms/config/mcp-servers');
-        if (cancelled) return;
-        const plaud = (res.items || []).find((d) => d.id === 'plaud');
-        const ok = plaud?.status === 'connected' && plaud?.hasOauthToken === true;
-        setConnection(ok ? CONNECTION.connected : CONNECTION.disconnected);
-        setHasRefreshToken(plaud?.hasOauthRefreshToken === true);
-        // What the 12-hour refresh timer has actually done, which nothing on
-        // this page could say before (#358). The fields were already on the
-        // document and already survived `stripOAuthToken` — only the token
-        // values are write-only — so this is a rendering gap rather than an
-        // API one. Without it the rotation has no witness at all: the timer
-        // logs its success at Information, and host verbosity was cut to
-        // Warning by T-719, so the trace is not ingested either.
-        setRefreshState({
-          lastTokenRefresh: plaud?.lastTokenRefresh ?? null,
-          expiresAt: plaud?.oauthExpiresAt ?? null,
-          error: plaud?.lastTokenRefreshError ?? null,
-        });
-      } catch {
-        if (cancelled) return;
-        setConnection(CONNECTION.unknown);
-        // Cleared with the status, not left behind. A thrown read would
-        // otherwise leave the Connect tab showing the LAST successful
-        // rotation as though it were current, under a banner that says the
-        // connection is unknown — one panel confident and the other not, about
-        // the same read (Copilot review of b5b4e304).
-        setRefreshState(null);
-      }
-    }, 0);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [authReady, checkNonce]);
-
-  const isConnected = connection === CONNECTION.connected;
-  const checkingConn = connection === CONNECTION.checking;
-  const headerState =
-    isConnected || (checkingConn || connection === CONNECTION.unknown ? connection : false);
+  const ActivePanel = PANELS[activeTab];
 
   return (
     <div className="space-y-6">
@@ -108,58 +88,37 @@ export default function RecordingHubPage() {
         icon={Radio}
         title="Recording Hub"
         service="Plaud"
-        connected={headerState}
-        description="Review the podcast transcripts generated from articles and recordings, and browse, transcribe and script your Plaud recordings."
+        connected={HEADER_STATE[hub.connection]}
+        description="Browse and transcribe your Plaud recordings, review the transcripts the podcast pipeline produced, and see what reached RSS.com."
         accent="violet"
       />
 
-      {connection === CONNECTION.unknown && (
+      {hub.connection === CONNECTION.unknown && (
         <p
           role="status"
           className="text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2 flex-wrap"
         >
           Could not check the Plaud connection; the Library may still work.
-          <Button size="sm" variant="outline" className="h-6 text-xs px-2" onClick={recheck}>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-6 text-xs px-2"
+            onClick={hub.recheckConnection}
+          >
             <RefreshCw className="h-3 w-3 mr-1" /> Check again
           </Button>
         </p>
       )}
 
-      <div className="flex gap-1 border-b border-slate-200 dark:border-slate-700" role="tablist">
-        {TABS.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            role="tab"
-            aria-selected={activeTab === id}
-            onClick={() => setActiveTab(id)}
-            className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
-              activeTab === id
-                ? 'border-violet-500 text-violet-600 dark:text-violet-400'
-                : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-            }`}
-          >
-            <Icon className="h-4 w-4" />
-            {label}
-            {id === 'plaud' && connection === CONNECTION.disconnected && (
-              <span className="w-2 h-2 rounded-full bg-amber-400 ml-0.5" />
-            )}
-          </button>
-        ))}
-      </div>
-
-      {activeTab === 'podcast' && <PodcastTab />}
-      {activeTab === 'plaud' && (
-        <PlaudTab
-          isConnected={isConnected}
-          hasRefreshToken={hasRefreshToken}
-          refreshState={refreshState}
-          checkingConn={checkingConn}
-          onConnected={({ refreshSupplied } = {}) => {
-            setConnection(CONNECTION.connected);
-            if (refreshSupplied) setHasRefreshToken(true);
-          }}
-        />
-      )}
+      <HubTabs
+        tabs={TABS}
+        active={activeTab}
+        onSelect={setTab}
+        idPrefix="recording-hub"
+        label="Recording Hub"
+      >
+        <ActivePanel hub={hub} />
+      </HubTabs>
     </div>
   );
 }
