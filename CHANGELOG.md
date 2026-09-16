@@ -57,16 +57,27 @@ This project has not cut a tagged release; entries are grouped under
 
   **Report-only by default**, so findings arrive as annotations on the changed
   lines and the check stays green; `COMPLEXITY_ENFORCE` arms it and
-  `COMPLEXITY_CCN` moves the threshold. The trigger is not path-filtered, for
+  `COMPLEXITY_THRESHOLD` moves it. The trigger is not path-filtered, for
   the reason ADR 0026 records.
 
   Two notes for whoever reads this next. `lizard . -C 8 -W` does not do what it
   reads like: `-W` is `--whitelist` and takes a filename, so that command exits
   2 from argparse before measuring anything — lowercase `-w` prints warnings,
-  and lizard already exits 1 on any. And the gate passes its own threshold:
-  `render` came back at CCN 20 and `compare` at 14 on the first draft, both are
-  split, and nothing in `scripts/complexity/` now exceeds 8. Nineteen unit tests
-  cover the comparison and run as a workflow step before it judges anything.
+  and lizard already exits 1 on any. And the gate is held to its own standards:
+  `render` came back at CCN 20 and `compare` at 14 on the first draft, and then
+  Qlty put the single module at `file-complexity` 72 — the gate's own file being
+  the thing the gate exists to prevent. It is now four modules (`model`,
+  `measure`, `compare`, `report`) behind the CLI, none over CCN 8. Nineteen unit
+  tests cover the comparison, now without needing lizard installed to import it,
+  and run as a workflow step before the gate judges anything.
+
+  CodeQL contributed the other half. It read the field named `ccn` as a credit
+  card number — its "private" heuristic covers card numbers, and the message
+  interpolating two of them produced two "clear-text logging of sensitive
+  information" alerts on one line. The field is now `complexity`, which is the
+  clearer name regardless, and the flag is `--threshold`. Its third finding was
+  real: a `print` in an `except ImportError` at module scope runs during import,
+  so the missing-dependency report moved into `main`.
 
   **`.py` joined the wiki-pointer guard's TEXT list** in the same change. That
   guard fails when a tracked extension carrying five or more files is neither

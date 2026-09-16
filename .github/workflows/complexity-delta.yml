@@ -42,7 +42,7 @@
 # setting the `COMPLEXITY_ENFORCE` repository variable to `true`
 # (Settings → Secrets and variables → Actions → Variables), at
 # https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/settings/variables/actions
-# Raise the threshold the same way with `COMPLEXITY_CCN`.
+# Raise the threshold the same way with `COMPLEXITY_THRESHOLD`.
 
 name: Complexity Delta
 
@@ -95,11 +95,11 @@ jobs:
       - name: Complexity delta against the merge base
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
-          CCN: ${{ vars.COMPLEXITY_CCN || '8' }}
+          THRESHOLD: ${{ vars.COMPLEXITY_THRESHOLD || '8' }}
           ENFORCE: ${{ vars.COMPLEXITY_ENFORCE }}
         run: |
           if [ "${ENFORCE}" = "true" ]; then MODE=""; else MODE="--report-only"; fi
           python3 scripts/complexity/check_complexity_delta.py \
             --base "origin/${BASE_REF}" \
-            --ccn "${CCN}" \
+            --threshold "${THRESHOLD}" \
             ${MODE}

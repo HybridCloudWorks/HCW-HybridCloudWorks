@@ -15,18 +15,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from check_complexity_delta import (  # noqa: E402
-    Func,
-    analysable,
-    compare,
-    totals,
-)
+from compare import compare, totals  # noqa: E402
+from measure import analysable  # noqa: E402
+from model import Func  # noqa: E402
 
 THRESHOLD = 8
 
 
-def fn(path, name, ccn, ordinal=0, line=1):
-    return Func(path=path, name=name, ordinal=ordinal, ccn=ccn, line=line, nloc=10)
+def fn(path, name, complexity, ordinal=0, line=1):
+    return Func(path=path, name=name, ordinal=ordinal, complexity=complexity, line=line, nloc=10)
 
 
 def index(*functions):
