@@ -117,18 +117,27 @@ export function describeSkip(host) {
 /**
  * Which of the four host states a transcript is in, as one word.
  *
- * Distribution groups by this, and HostLine renders by it, so the ordering of
- * the tests below is the same in both places rather than two `if` chains that
- * could drift apart. `none` means nothing has tried to publish it.
+ * Distribution groups by this and HostLine renders by it, so the order below
+ * is the one order — not two `if` chains that could drift apart. A table
+ * rather than that chain because the chain was six returns, over the budget
+ * `qlty:return-statements` enforces, and because the order being data is what
+ * makes "the same order in both places" checkable.
+ *
+ * `pending` outranks `episodeId`: a re-publish sets pending on a record that
+ * already carries the previous episode's id, and reporting that as published
+ * would hide the run in flight. `none` means nothing has tried to publish it.
  */
+const HOST_STATES = Object.freeze([
+  ['pending', (host) => Boolean(host.pending)],
+  ['published', (host) => Boolean(host.episodeId)],
+  ['error', (host) => Boolean(host.error)],
+  ['skipped', (host) => Boolean(host.skipped)],
+]);
+
 export function hostState(item) {
   const host = item?.host?.rsscom;
   if (!host || typeof host !== 'object') return 'none';
-  if (host.pending) return 'pending';
-  if (host.episodeId) return 'published';
-  if (host.error) return 'error';
-  if (host.skipped) return 'skipped';
-  return 'none';
+  return HOST_STATES.find(([, holds]) => holds(host))?.[0] ?? 'none';
 }
 
 /** The host error as a sentence; the record stores a string or an Error shape. */

@@ -29,6 +29,52 @@ import { tabHref } from './tabs';
 
 // ─── Connect sub-tab (OAuth setup) ───────────────────────────────────────────
 
+/**
+ * What the 12-hour timer has actually done (#358).
+ *
+ * The rotation had NO witness before this. It writes `lastTokenRefresh` to the
+ * document and logs its success at Information, and T-719 cut host verbosity
+ * to Warning — so the trace is not ingested and the document was never
+ * rendered. "The timer is armed" and "the timer has run" looked identical from
+ * every surface a person can reach, which is the T-766 defect in a different
+ * timer.
+ *
+ * Rendered only when the read has answered. `null` means not yet known, and
+ * printing "never" for that would be a claim rather than a measurement.
+ */
+function RotationRecord({ refreshState, hasRefreshToken }) {
+  if (!refreshState) return null;
+  return (
+    <div className="text-xs text-slate-500 dark:text-slate-400 space-y-1">
+      {/* Only where auto-refresh can actually run. With no refresh token the
+          banner above already says the access token expires on its own, and
+          "last ran: not since this token was stored" beside that implies a
+          refresh token exists and simply has not fired yet. The expiry row
+          below is kept in that case, and matters more there than anywhere: it
+          is when the connection stops working. */}
+      {hasRefreshToken ? (
+        <p>
+          Auto-refresh last ran:{' '}
+          <strong>{describeLastRefresh(refreshState.lastTokenRefresh)}</strong>
+        </p>
+      ) : null}
+      {/* Gated on the FORMATTED string, not the raw field. An unparseable value
+          formats to '' and would otherwise render the label with a blank after
+          it, which reads as a broken page rather than as a missing value. */}
+      {fmtWhen(refreshState.expiresAt) ? (
+        <p>
+          Access token expires: <strong>{fmtWhen(refreshState.expiresAt)}</strong>
+        </p>
+      ) : null}
+      {refreshState.error ? (
+        <p className="text-amber-700 dark:text-amber-400">
+          Last refresh failed: {refreshState.error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function ConnectTab({ isConnected, hasRefreshToken, refreshState, onConnected }) {
   const [token, setToken] = useState('');
   const [refreshToken, setRefreshToken] = useState('');
@@ -128,49 +174,7 @@ function ConnectTab({ isConnected, hasRefreshToken, refreshState, onConnected })
         )}
       </div>
 
-      {/* What the 12-hour timer has actually done (#358).
-
-          The rotation had NO witness before this. It writes `lastTokenRefresh`
-          to the document and logs its success at Information, and T-719 cut
-          host verbosity to Warning — so the trace is not ingested and the
-          document was never rendered. "The timer is armed" and "the timer has
-          run" looked identical from every surface a person can reach, which is
-          the T-766 defect in a different timer.
-
-          Rendered only when the read has answered. `null` means not yet known,
-          and printing "never" for that would be a claim rather than a
-          measurement. */}
-      {refreshState && (
-        <div className="text-xs text-slate-500 dark:text-slate-400 space-y-1">
-          {/* Only where auto-refresh can actually run. With no refresh token
-              the banner above already says the access token expires on its
-              own, and "last ran: not since this token was stored" beside that
-              implies a refresh token exists and simply has not fired yet
-              (Copilot review of 522ee0a9). The expiry row below is kept in
-              that case, and matters more there than anywhere: it is when the
-              connection stops working. */}
-          {hasRefreshToken ? (
-            <p>
-              Auto-refresh last ran:{' '}
-              <strong>{describeLastRefresh(refreshState.lastTokenRefresh)}</strong>
-            </p>
-          ) : null}
-          {/* Gated on the FORMATTED string, not the raw field. An unparseable
-              value formats to '' and would otherwise render the label with a
-              blank after it, which reads as a broken page rather than as a
-              missing value (Copilot review of b5b4e304). */}
-          {fmtWhen(refreshState.expiresAt) ? (
-            <p>
-              Access token expires: <strong>{fmtWhen(refreshState.expiresAt)}</strong>
-            </p>
-          ) : null}
-          {refreshState.error ? (
-            <p className="text-amber-700 dark:text-amber-400">
-              Last refresh failed: {refreshState.error}
-            </p>
-          ) : null}
-        </div>
-      )}
+      <RotationRecord refreshState={refreshState} hasRefreshToken={hasRefreshToken} />
 
       {/* Step-by-step setup */}
       <div className="space-y-4">

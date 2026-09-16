@@ -18,7 +18,7 @@ import {
   Loader2,
   RefreshCw,
 } from 'lucide-react';
-import { describeSkip, fmtDate, hostErrorMessage } from './recordingView';
+import { describeSkip, fmtDate, hostErrorMessage, hostState } from './recordingView';
 
 /** Where a transcript came from, as a chip and a link when there is one. */
 export function SourceChip({ item }) {
@@ -65,57 +65,73 @@ export function StatusBadge({ status }) {
   return <Badge variant="outline">{status || 'draft'}</Badge>;
 }
 
+/** Approval queued publish-podcast-transcript (#437 slice 2); it says so until the job writes. */
+function HostPending({ host }) {
+  return (
+    <p className="text-xs text-slate-600 dark:text-slate-300 flex items-center gap-1">
+      <Loader2 className="h-3 w-3 animate-spin" /> Host: publishing…
+      {host.jobId ? ` (job ${host.jobId})` : ''}
+    </p>
+  );
+}
+
+function HostPublished({ host }) {
+  return (
+    <p className="text-xs text-emerald-700 dark:text-emerald-300 flex items-center gap-1">
+      <CheckCircle className="h-3 w-3" /> Host: Published to RSS.com
+      {host.publishedAt ? ` (${fmtDate(host.publishedAt)})` : ''}
+    </p>
+  );
+}
+
+function HostError({ host, item, onRetry, retrying }) {
+  return (
+    <p className="text-xs text-red-700 dark:text-red-300 flex items-center gap-2 flex-wrap">
+      <span>Host: {hostErrorMessage(host)}</span>
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-6 text-xs px-2"
+        onClick={() => onRetry(item)}
+        disabled={retrying}
+      >
+        {retrying ? (
+          <Loader2 className="h-3 w-3 animate-spin mr-1" />
+        ) : (
+          <RefreshCw className="h-3 w-3 mr-1" />
+        )}
+        Retry
+      </Button>
+    </p>
+  );
+}
+
+function HostSkipped({ host }) {
+  return <p className="text-xs text-slate-500">Host: skipped — {describeSkip(host)}</p>;
+}
+
+/** One renderer per state `hostState` names. `none` has none, and renders nothing. */
+const HOST_LINES = Object.freeze({
+  pending: HostPending,
+  published: HostPublished,
+  error: HostError,
+  skipped: HostSkipped,
+});
+
 /**
  * The `host.rsscom` record as one line. Rendered only when the record exists,
  * so a transcript nothing has tried to publish shows no host line at all.
+ *
+ * The state is `hostState`'s, not a second `if` chain of its own: Distribution
+ * groups by that function, and two orderings of the same four tests would
+ * eventually disagree about one record. It also took this component from six
+ * returns to one.
  */
 export function HostLine({ item, onRetry, retrying }) {
-  const host = item.host?.rsscom;
-  if (!host || typeof host !== 'object') return null;
-  if (host.pending) {
-    // Approval queued the publish-podcast-transcript job (#437 slice 2);
-    // the record says so until the job writes its outcome.
-    return (
-      <p className="text-xs text-slate-600 dark:text-slate-300 flex items-center gap-1">
-        <Loader2 className="h-3 w-3 animate-spin" /> Host: publishing…
-        {host.jobId ? ` (job ${host.jobId})` : ''}
-      </p>
-    );
-  }
-  if (host.episodeId) {
-    return (
-      <p className="text-xs text-emerald-700 dark:text-emerald-300 flex items-center gap-1">
-        <CheckCircle className="h-3 w-3" /> Host: Published to RSS.com
-        {host.publishedAt ? ` (${fmtDate(host.publishedAt)})` : ''}
-      </p>
-    );
-  }
-  if (host.error) {
-    const message = hostErrorMessage(host);
-    return (
-      <p className="text-xs text-red-700 dark:text-red-300 flex items-center gap-2 flex-wrap">
-        <span>Host: {message}</span>
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-6 text-xs px-2"
-          onClick={() => onRetry(item)}
-          disabled={retrying}
-        >
-          {retrying ? (
-            <Loader2 className="h-3 w-3 animate-spin mr-1" />
-          ) : (
-            <RefreshCw className="h-3 w-3 mr-1" />
-          )}
-          Retry
-        </Button>
-      </p>
-    );
-  }
-  if (host.skipped) {
-    return <p className="text-xs text-slate-500">Host: skipped — {describeSkip(host)}</p>;
-  }
-  return null;
+  const Line = HOST_LINES[hostState(item)];
+  return Line ? (
+    <Line host={item.host.rsscom} item={item} onRetry={onRetry} retrying={retrying} />
+  ) : null;
 }
 
 /**
