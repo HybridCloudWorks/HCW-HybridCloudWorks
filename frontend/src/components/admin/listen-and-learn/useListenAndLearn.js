@@ -159,6 +159,47 @@ async function runGenerate(state, form) {
   if (state.alive.current) state.setGenerating(false);
 }
 
+/** Paint a set-list read, or its error. */
+function applySets(state, outcome) {
+  if (outcome.error) state.setError(outcome.error);
+  else state.setSets(outcome.rows);
+}
+
+/**
+ * Start the mount's set-list read and return the effect's cleanup.
+ *
+ * Inlined here rather than calling `readSets`: a response that lands after the
+ * page unmounts (or after auth flips) must not set state, and the effect is the
+ * only place that knows when that is.
+ */
+function startSetsRead(state) {
+  let cancelled = false;
+  (async () => {
+    const outcome = await fetchSetsOutcome();
+    if (!cancelled) applySets(state, outcome);
+  })();
+  return () => {
+    cancelled = true;
+  };
+}
+
+function applySpeechSettings(state, { geminiModel, options }) {
+  if (!state.alive.current) return;
+  state.setSpeechOptions(options);
+  if (geminiModel) state.setStoredModel(geminiModel);
+}
+
+/**
+ * The stored model default and the priced choices, best effort: a failed load
+ * leaves the field on "Stored default", which is what the server applies to a
+ * run that names no model, so nothing is lost but the price.
+ */
+function startSpeechRead(state) {
+  fetchSpeechSettings()
+    .then((settings) => applySpeechSettings(state, settings))
+    .catch(() => {});
+}
+
 export default function useListenAndLearn(ready) {
   const [sets, setSets] = useState([]);
   const [selected, setSelected] = useState(null); // { platform, examCode }
@@ -191,6 +232,8 @@ export default function useListenAndLearn(ready) {
       setBusySlugs,
       setGenerating,
       setProgress,
+      setSpeechOptions,
+      setStoredModel,
       generation,
       alive,
       selected: selectedRef,
@@ -208,36 +251,14 @@ export default function useListenAndLearn(ready) {
     };
   }, []);
 
-  // The read is inlined rather than calling readSets: a response that lands
-  // after this page unmounts (or after auth flips) must not set state, and the
-  // effect is the only place that knows when that is.
-  useEffect(() => {
-    if (!ready) return undefined;
-    let cancelled = false;
-    (async () => {
-      const outcome = await fetchSetsOutcome();
-      if (cancelled) return;
-      if (outcome.error) setError(outcome.error);
-      else setSets(outcome.rows);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [ready]);
+  // Both effect bodies are module-level functions above. Their early exits
+  // belong to those functions rather than to this one, which is what keeps the
+  // hook inside Qlty's return-count budget as it grows.
+  useEffect(() => (ready ? startSetsRead(state) : undefined), [ready, state]);
 
-  // The stored model default and the priced choices, best effort: a failed
-  // load leaves the field on "Stored default", which is what the server
-  // applies to a run that names no model, so nothing is lost but the price.
   useEffect(() => {
-    if (!ready) return;
-    fetchSpeechSettings()
-      .then(({ geminiModel, options }) => {
-        if (!alive.current) return;
-        setSpeechOptions(options);
-        if (geminiModel) setStoredModel(geminiModel);
-      })
-      .catch(() => {});
-  }, [ready]);
+    if (ready) startSpeechRead(state);
+  }, [ready, state]);
 
   const loadSets = useCallback(() => readSets(state), [state]);
   const openSet = useCallback(
