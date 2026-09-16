@@ -75,8 +75,16 @@ function trackedFiles() {
  *
  * Anything textual a person reads for instructions belongs here. If a file
  * type is added to the repository, add it.
+ *
+ * `.py` joined on 2026-09-16, when scripts/complexity/ took the repository's
+ * Python file count from four to six and tripped the coverage test below. It
+ * is prose, not an asset: `hooks/claude_event.py`, `check_redaction.py` and
+ * `check_complexity_delta.py` each open with a docstring that tells an
+ * operator what to do, and a pointer at the retired Wiki inside one would be
+ * as dead an instruction as a pointer in a runbook.
  */
-const TEXT = /\.(md|js|jsx|mjs|cjs|ts|tsx|yml|yaml|ps1|json|sh|tf|tfvars|hcl|txt|toml|env|bicep)$/i;
+const TEXT =
+  /\.(md|js|jsx|mjs|cjs|ts|tsx|yml|yaml|ps1|py|json|sh|tf|tfvars|hcl|txt|toml|env|bicep)$/i;
 
 /**
  * A reference to the retired folder.
