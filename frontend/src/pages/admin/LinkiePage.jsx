@@ -121,7 +121,7 @@ const ltDeletePost = (profileId, postId) =>
   linkieFetch(linkiePaths.post(profileId, postId), 'DELETE');
 const ltGetTrafficStats = (linkInBioId) => linkieFetch(linkiePaths.trafficStats(linkInBioId));
 
-// ── Published content helpers (same rule as SocialHubPage) ───────────────────
+// ── Published content helpers (same rule as the Social Hub's socialView.js) ──
 
 function isLiveRecord(item) {
   const status = String(item?.contentStatus || '');
