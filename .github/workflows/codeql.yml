@@ -41,9 +41,9 @@ jobs:
     permissions:
       # Uploading results to the code-scanning API is the only write this
       # workflow performs. It uses no secrets, no cloud credentials, no OIDC.
-      security-events: write
-      contents: read
-      actions: read
+      security-events: write # uploading the SARIF is this workflow's only write
+      contents: read # the checkout, nothing more
+      actions: read # reads this workflow's own run metadata
     strategy:
       # One language failing should not mask the state of the other.
       fail-fast: false

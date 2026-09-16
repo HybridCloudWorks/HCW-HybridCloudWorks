@@ -65,7 +65,12 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: read # the checkout, nothing more
+
+concurrency:
+  # Dispatch-only environment build; a newer run supersedes an older one.
+  group: copilot-setup-steps-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   # The job MUST be named copilot-setup-steps or Copilot does not pick it up.
@@ -78,8 +83,8 @@ jobs:
     permissions:
       # id-token: write is what lets the runner request a GitHub OIDC token.
       # Without it azure/login has nothing to exchange.
-      id-token: write
-      contents: read
+      id-token: write # the OIDC token azure/login exchanges, under `environment: copilot`
+      contents: read # the checkout, nothing more
     steps:
       # Federated OIDC — no stored credential. The three values are
       # IDENTIFIERS: they name the managed identity, tenant and subscription

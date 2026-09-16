@@ -17,6 +17,42 @@ This project has not cut a tagged release; entries are grouped under
 
 ## [Unreleased]
 
+### Changed
+
+- **Workflow hygiene: the token is granted where it is used (#588).** `zizmor`
+  at its pedantic persona reported 34 findings across the 20 workflows; it
+  reports none now, at all three personas.
+
+  **Five High `excessive-permissions`.** `deploy-functions`, `heal-computed-
+  properties`, `monitor-functions-registered`, `monitor-unresolved-secrets` and
+  `verify-alert-state` each granted `id-token: write` at workflow level. Each
+  has exactly one job, so moving the grant onto that job removes no privilege
+  that exists today — it stops a second job added later from silently
+  inheriting the OIDC token. Stated plainly because a "High" here is hygiene,
+  not a live hole.
+
+  **Seven workflows had no `concurrency` block.** The monitors and the healer
+  never cancel a run in flight: a cancelled six-hourly check is a skipped check
+  rather than a check done later, and `heal-computed-properties` writes
+  `cp_sortDate` onto documents, so an interrupted run stops partway through a
+  container. The two pull-request checks do cancel, since a new push supersedes
+  the run it replaced; `repository-policy` cancels on pull requests only,
+  because its run on `main` is the record that what landed satisfies the
+  policy.
+
+  **Eleven `undocumented-permissions` and five `anonymous-definition`.** The
+  permissions now carry a comment on each entry — zizmor reads a *trailing*
+  comment, so several blocks that already had a paragraph above them were still
+  reported. `dependency-review` gains `name: dependency-review`, deliberately
+  identical to its job id: that job runs on `pull_request`, so its check-run
+  name is a status context the ruleset can require, and renaming it would leave
+  every pull request waiting for a context that is never reported (ADR 0026,
+  T-523).
+
+  Six `secrets-outside-env` findings remain at the auditor persona only.
+  Binding those three workflows to a GitHub Environment is a deployment-
+  configuration change rather than workflow hygiene, so it stays on #588.
+
 ### Added
 
 - **Linkie Hub and Labs Hub: finished to the Newsletter Hub standard (#577).**

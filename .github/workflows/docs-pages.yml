@@ -34,7 +34,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: read # the checkout, nothing more
 
 concurrency:
   group: docs-pages-${{ github.ref }}
@@ -82,8 +82,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     permissions:
-      pages: write
-      id-token: write
+      pages: write # publishes the built site to GitHub Pages
+      id-token: write # the OIDC token deploy-pages exchanges for its Pages token
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

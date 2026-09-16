@@ -8,6 +8,12 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  # Cancel superseded pull request runs, but never a push to main: the main run
+  # is the record that what landed satisfies the policy.
+  group: repository-policy-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   validate-structure:
     name: Validate root and documentation policy
