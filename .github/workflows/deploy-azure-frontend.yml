@@ -63,7 +63,7 @@ on:
         default: ''
 
 permissions:
-  contents: read
+  contents: read # the SWA action reads app_location from the workspace
 
 # One deploy to the Static Web App at a time (T-729). `deploy-functions.yml`
 # has always had this; the frontend did not, so two overlapping dispatches
@@ -349,8 +349,8 @@ jobs:
     # Removing the environment key would break authentication with AADSTS700213,
     # not merely lose the deployment record.
     permissions:
-      contents: read
-      id-token: write
+      contents: read # the SWA action reads app_location from the workspace
+      id-token: write # the federated login that mints the deployment token (T-727)
     steps:
       # The SWA action reads `app_location` from the workspace, so the
       # repository still has to be present — but nothing here installs or runs

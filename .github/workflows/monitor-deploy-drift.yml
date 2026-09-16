@@ -88,8 +88,8 @@ on:
 
 # Reads the commit log and the run history. Writes nothing, anywhere.
 permissions:
-  contents: read
-  actions: read
+  contents: read # reads the commit log; writes nothing
+  actions: read # reads this repository's own run history
 
 concurrency:
   group: deploy-drift

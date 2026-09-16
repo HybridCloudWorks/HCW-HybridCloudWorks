@@ -25,8 +25,20 @@ permissions:
   # silently did not post there while the scope was granted everywhere. The
   # check status is what gates the merge; the comment was never the mechanism.
 
+concurrency:
+  # A pull request check: a new push supersedes the run it replaced.
+  group: dependency-review-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   dependency-review:
+    # The name matches the job id on purpose. This job runs on `pull_request`,
+    # so its check-run name is a status context the ruleset can require — and a
+    # required context that stops being reported leaves every pull request at
+    # "Expected — waiting for status to be reported" forever (ADR 0026, T-523).
+    # Naming it anything else would rename the check. Present only so the name
+    # is stated rather than inherited (zizmor anonymous-definition, #588).
+    name: dependency-review
     runs-on: ubuntu-latest
     steps:
       - name: 'Checkout repository'

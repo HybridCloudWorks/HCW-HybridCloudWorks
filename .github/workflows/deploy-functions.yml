@@ -15,11 +15,12 @@ name: Deploy Functions
 on:
   workflow_dispatch:
 
-# id-token: write is what lets the runner request a GitHub OIDC token. Without
-# it azure/login has nothing to exchange and fails before reaching Azure.
+# The workflow-level default. `id-token: write` is granted on the job that uses
+# it rather than here (zizmor excessive-permissions, #588): this workflow has
+# one job today, so the two are identical in effect — what a job-level grant
+# prevents is a second job added later silently inheriting the OIDC token.
 permissions:
-  contents: read
-  id-token: write
+  contents: read # the checkout, nothing more
 
 # One deploy at a time. Two overlapping runs would swap packages under each
 # other and race on SyncTriggers; never cancel one that is mid-flight, because
@@ -31,6 +32,9 @@ concurrency:
 jobs:
   deploy:
     name: Deploy to Azure Functions
+    permissions:
+      contents: read # the checkout, nothing more
+      id-token: write # exchanged by azure/login for an Azure access token
     runs-on: ubuntu-latest
     # Binding the job to an environment gives production deploys a deployment
     # history and a place to hang an approval gate. It does NOT create the gate
