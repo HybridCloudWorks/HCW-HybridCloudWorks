@@ -19,6 +19,75 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Complexity Delta: report the complexity a pull request adds, not the
+  complexity already here (#624).** A new `Complexity Delta` workflow and
+  `scripts/complexity/`.
+
+  **Why it is a delta gate.** Measured at the head of `main` on 2026-09-16,
+  lizard finds 479 functions over CCN 8 — 322 over 10, 117 over 15, 43 over 20,
+  9 over 40, with 253 of them in `frontend/` and 198 in `functions/`. A
+  whole-tree run at CCN 8 is therefore red 479 times over on its first pull
+  request and on every one after it, INCLUDING pull requests that remove
+  complexity. A check that cannot go green is a check nobody reads, and this
+  repository already has one of those in `monitor-unresolved-secrets.yml`. So
+  the question asked is the one with a green answer available every time — did
+  THIS pull request make it worse — and the 479 are left to be worked down
+  separately.
+
+  Every function in a changed file is compared against itself at the merge
+  base. A function that is new and over the threshold, or over it and higher
+  than it was, is reported; one that is over it but no higher is carried
+  without complaint; one that got simpler is reported as a win. Carrying is the
+  point — editing one line of a CCN 30 function must not be refused, or the
+  backlog becomes unfixable by the thing asking for it to be fixed. A total-CCN
+  line covers what per-function verdicts miss, since twenty new functions at
+  CCN 5 trip no verdict and are still 100 CCN of new branching.
+
+  **Functions are matched by (path, name), never by line number**, and one that
+  is new at its path is first paired with a same-named function that left
+  elsewhere in the same diff. That pairing is not polish: lizard's JavaScript
+  tokenizer drifts with file context, and `getLiveUrl` measures 7 inside the
+  1,551-line `SocialHubPage.jsx` against 10 as the byte-identical body in
+  `socialView.js` — the only textual difference being the `export` keyword.
+  Without it, splitting a large file reports every function in the new files as
+  newly added complexity, taxing the one refactor this repository most needs to
+  stay cheap. Anonymous functions never pair, because lizard names every arrow
+  function `(anonymous)` and matching on that pairs the 40th callback in one
+  file with the 3rd in another.
+
+  **Report-only by default**, so findings arrive as annotations on the changed
+  lines and the check stays green; `COMPLEXITY_ENFORCE` arms it and
+  `COMPLEXITY_THRESHOLD` moves it. The trigger is not path-filtered, for
+  the reason ADR 0026 records.
+
+  Two notes for whoever reads this next. `lizard . -C 8 -W` does not do what it
+  reads like: `-W` is `--whitelist` and takes a filename, so that command exits
+  2 from argparse before measuring anything — lowercase `-w` prints warnings,
+  and lizard already exits 1 on any. And the gate is held to its own standards:
+  `render` came back at CCN 20 and `compare` at 14 on the first draft, and then
+  Qlty put the single module at `file-complexity` 72 — the gate's own file being
+  the thing the gate exists to prevent. It is now four modules (`model`,
+  `measure`, `compare`, `report`) behind the CLI, none over CCN 8. Nineteen unit
+  tests cover the comparison, now without needing lizard installed to import it,
+  and run as a workflow step before the gate judges anything.
+
+  CodeQL contributed the other half. It read the field named `ccn` as a credit
+  card number — its "private" heuristic covers card numbers, and the message
+  interpolating two of them produced two "clear-text logging of sensitive
+  information" alerts on one line. The field is now `complexity`, which is the
+  clearer name regardless, and the flag is `--threshold`. Its third finding was
+  real: a `print` in an `except ImportError` at module scope runs during import,
+  so the missing-dependency report moved into `main`.
+
+  **`.py` joined the wiki-pointer guard's TEXT list** in the same change. That
+  guard fails when a tracked extension carrying five or more files is neither
+  scanned nor explicitly exempt, and `scripts/complexity/` took the repository
+  from four Python files to six — the test doing exactly the job its comment
+  claims, making the next language added a decision rather than an oversight.
+  Python here is prose: three of those six open with a docstring telling an
+  operator what to do, so a pointer at the retired Wiki inside one would be as
+  dead an instruction as a pointer in a runbook.
+
 - **Cloud pricing comparison, Phase 3 backend: price history, a newsletter
   section and "Explain this number" (#613).** Three parts on the same
   refresh.
