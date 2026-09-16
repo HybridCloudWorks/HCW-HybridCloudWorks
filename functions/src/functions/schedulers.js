@@ -5,7 +5,9 @@
  * **Each timer has its own flag.** A timer runs when the master switch
  * `FEATURE_FLAG_SCHEDULERS` is not explicitly "false" AND its own
  * `FEATURE_FLAG_<NAME>` is "true". Timers fire on schedule regardless — the
- * flags make them safe no-ops — and every flag is "false" in `infra/main.tf`
+ * flags make them safe no-ops — and every flag is "false" in
+ * `infra/functionapp.tf` (generated from `local.timer_flags`, so a timer is
+ * armed by adding its suffix to the `enabled_timers` workspace variable)
  * until that timer has been observed firing at the intended time (§6 step 7).
  *
  * **Every hour below is a UTC hour.** Owner decision 2026-09-07 (#416): all

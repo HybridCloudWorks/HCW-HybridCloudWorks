@@ -5175,6 +5175,29 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Two pointers to the timer catalogue and flags still named `main.tf`, which
+  has not held them since the split.** `functionapp.tf` was split out of
+  `main.tf` on 2026-08-29 (T-754) and `local.timer_catalogue` and
+  `local.timer_flags` went with it; two references did not follow.
+
+  The costly one is the `enabled_timers` validation's `error_message`. That is
+  the sentence an operator reads **at the moment a cutover apply has just
+  failed**, and it sent them to a file that does not contain the list they have
+  to edit — next to a validation whose own comment says "a typo here is
+  indistinguishable from a timer that does not fire, which is the single most
+  expensive way to be wrong during a cutover window". The other is
+  `schedulers.js`'s header, which claimed every flag is `"false"` in
+  `infra/main.tf`; it now also says the flags are generated from
+  `local.timer_flags`, so the reader learns that arming a timer is an
+  `enabled_timers` edit rather than a code change.
+
+  Deliberately unchanged: the many other `infra/main.tf` references across the
+  repository are correct — the split moved the Function App, observability,
+  OIDC, providers and variables out, and `main.tf` still holds Cosmos, storage,
+  Key Vault and the rest. So is the historical note in `variables.tf` about what
+  `main.tf` did before 2026-08-24. Only the two that point at moved locals were
+  wrong.
+
 - **Prerendered pages were thrown away and re-rendered on load (#604).** `App`
   held the idle flag (`requestIdleCallback`, or a 1500 ms fallback) that
   defers the theme toggle and toaster. It usually flipped before the lazy page
