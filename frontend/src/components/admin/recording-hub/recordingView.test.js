@@ -67,9 +67,7 @@ describe('describeLastRefresh', () => {
     // A field that is PRESENT but unparseable must not claim the timer never
     // ran — it did, we merely cannot read when.
     expect(describeLastRefresh(null)).toBe('not since this token was stored');
-    expect(describeLastRefresh('nonsense')).toBe(
-      'recorded, but its timestamp could not be read'
-    );
+    expect(describeLastRefresh('nonsense')).toBe('recorded, but its timestamp could not be read');
     expect(describeLastRefresh('2026-09-16T10:00:00Z')).toContain('2026');
   });
 });

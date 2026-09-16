@@ -53,29 +53,49 @@ const EMPTY = Object.freeze([]);
 
 // ── reads ────────────────────────────────────────────────────────────────────
 
-/** The Plaud MCP server document, as the four fields this hub renders. */
+/**
+ * The Plaud MCP server document as the fields this hub renders.
+ *
+ * Split from the read so the read is a try/catch and nothing else: the
+ * optional chaining below is one branch per field to a complexity counter, and
+ * together they put the read over the budget the repository's own gate
+ * enforces.
+ */
+function readPlaudDoc(plaud) {
+  return {
+    status: plaudStatus(plaud),
+    hasRefreshToken: plaud?.hasOauthRefreshToken === true,
+    refreshState: rotationRecord(plaud),
+  };
+}
+
+/** Connected only when the server says so AND a token is stored. */
+function plaudStatus(plaud) {
+  // The API returns hasOauthToken; the token value itself is write-only.
+  const ok = plaud?.status === 'connected' && plaud?.hasOauthToken === true;
+  return ok ? CONNECTION.connected : CONNECTION.disconnected;
+}
+
+/**
+ * What the 12-hour refresh timer has actually done, which nothing on this page
+ * could say before (#358). Without it the rotation has no witness at all: the
+ * timer logs its success at Information, and host verbosity was cut to Warning
+ * by T-719, so the trace is not ingested either.
+ */
+function rotationRecord(plaud) {
+  return {
+    lastTokenRefresh: plaud?.lastTokenRefresh ?? null,
+    expiresAt: plaud?.oauthExpiresAt ?? null,
+    error: plaud?.lastTokenRefreshError ?? null,
+  };
+}
+
+/** One read of the MCP server list, as the connection this hub shows. */
 async function fetchConnection() {
   let outcome;
   try {
-    // The API returns hasOauthToken; the token value itself is write-only.
     const res = await getJSON('cms/config/mcp-servers');
-    const plaud = (res.items || []).find((d) => d.id === 'plaud');
-    outcome = {
-      status:
-        plaud?.status === 'connected' && plaud?.hasOauthToken === true
-          ? CONNECTION.connected
-          : CONNECTION.disconnected,
-      hasRefreshToken: plaud?.hasOauthRefreshToken === true,
-      // What the 12-hour refresh timer has actually done, which nothing on
-      // this page could say before (#358). Without it the rotation has no
-      // witness at all: the timer logs its success at Information, and host
-      // verbosity was cut to Warning by T-719, so the trace is not ingested.
-      refreshState: {
-        lastTokenRefresh: plaud?.lastTokenRefresh ?? null,
-        expiresAt: plaud?.oauthExpiresAt ?? null,
-        error: plaud?.lastTokenRefreshError ?? null,
-      },
-    };
+    outcome = readPlaudDoc((res.items || []).find((d) => d.id === 'plaud'));
   } catch {
     // Unknown, not disconnected — and the rotation panel is cleared with it.
     // A thrown read would otherwise leave Settings showing the LAST successful
@@ -277,8 +297,13 @@ export default function useRecordingHub(ready, toast) {
   const generation = useRef(0);
   const alive = useRef(true);
   const busy = useRef('');
+  // The latest-ref pattern: `useToast` hands back a new function every render,
+  // and a write must reach the current one without that identity becoming a
+  // dependency of every read below. Assigned in an effect, never during render.
   const toastRef = useRef(toast);
-  toastRef.current = toast;
+  useEffect(() => {
+    toastRef.current = toast;
+  }, [toast]);
 
   const state = useMemo(
     () => ({

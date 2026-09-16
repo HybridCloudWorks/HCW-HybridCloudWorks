@@ -307,7 +307,7 @@ export const SERVICE_DOCS = {
           'Turns a Plaud transcript into a ContentForge draft through the shared drafter and the createContentItem write path, then marks the recording routed (issue #180).',
         files: [
           'functions/src/lib/content/draft-from-recording.js',
-          'frontend/src/components/admin/recording-hub/PlaudTab.jsx',
+          'frontend/src/components/admin/recording-hub/RecordingsTab.jsx',
         ],
         status: HCW_STATUS.ACTIVE,
       },
@@ -986,19 +986,19 @@ export const SERVICE_DOCS = {
         feature: 'Recording Hub — Plaud tab, Library',
         usage:
           'Live list of all recordings via list_files; load transcripts on demand via get_transcript',
-        files: ['src/components/admin/recording-hub/PlaudTab.jsx'],
+        files: ['src/components/admin/recording-hub/RecordingsTab.jsx'],
         status: HCW_STATUS.ACTIVE,
       },
       {
         feature: 'Recording Hub — Plaud tab, Connect',
         usage: 'OAuth token setup and connection test',
-        files: ['src/components/admin/recording-hub/PlaudTab.jsx'],
+        files: ['src/components/admin/recording-hub/RecordingsTab.jsx'],
         status: HCW_STATUS.ACTIVE,
       },
       {
         feature: 'ContentForge Pipeline',
         usage: 'Route a recording transcript into a content draft via createContentFromRecording',
-        files: ['src/components/admin/recording-hub/PlaudTab.jsx', 'functions/index.js'],
+        files: ['src/components/admin/recording-hub/RecordingsTab.jsx', 'functions/index.js'],
         status: HCW_STATUS.ACTIVE,
       },
       {

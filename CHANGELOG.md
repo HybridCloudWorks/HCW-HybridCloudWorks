@@ -19,6 +19,51 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Recording Hub: organised by duty, not by provider (#576).**
+  `/admin/recording-hub` had one tab per SERVICE — Podcast, and Plaud with
+  three sub-tabs of its own — so "where do I approve a transcript" depended on
+  which service produced it, and the OAuth setup sat two clicks inside a
+  working tab. It is five duties now at the Newsletter Hub standard:
+  **Recordings**, **Transcripts**, **Episodes**, **Distribution**,
+  **Settings**. Providers are named in the header and inside the tabs. The page
+  is 118 lines and the two provider components (1,350 and 598 lines) are gone,
+  re-cut into `components/admin/recording-hub`.
+
+  **The page had no `?tab=` at all.** It held the selected tab in `useState`,
+  so no link could name a tab and Back could not leave one — the first thing
+  `resolveTab` fixes. Both provider ids redirect: `podcast` to Transcripts, and
+  `plaud` to **Recordings** rather than Settings, because that tab opened on
+  its Library sub-tab and the recordings are what such a link was for, not the
+  OAuth setup two sub-tabs along. The Plaud sub-tab ids and the host/feed words
+  redirect too, and own-properties-only lookup keeps `?tab=constructor` from
+  reaching `Object.prototype`.
+
+  **Distribution is new, and is the reason the split was worth doing.** The
+  RSS.com host record was one line tucked under each transcript, so "did
+  anything fail to publish" meant scrolling the whole list and reading every
+  row. The same records are now grouped by state with failures first and the
+  retry beside them. `hostState` decides the grouping and `HostLine` renders
+  by the same four states, rather than two `if` chains that could drift.
+
+  **Transcripts and Distribution share one read**, because approving a
+  transcript is exactly what creates the record Distribution shows; two reads
+  could disagree about one transcript, and a publish that a stale list says
+  never happened is the worst thing that tab could say. The connection read
+  joins them because Settings connects what Recordings needs. Race-safe per
+  #555: a generation on reads, an in-flight guard on writes, and the `unknown`
+  versus `disconnected` distinction the page already documented — a check that
+  could not run is not a check that ran and said no.
+
+  **`fmtDate` was two functions.** Each provider tab carried its own copy,
+  identical except that only the Podcast one guarded `Number.isNaN`, so the
+  same malformed timestamp rendered as '' on one tab and "Invalid Date" on the
+  other. The guarding one won.
+
+  Plaud routing to ContentForge and transcript publishing are unchanged; the
+  24 existing end-to-end assertions are unchanged except where the split moved
+  what they read, and 33 more cover the tab resolver, the helpers, the new
+  navigation and Distribution.
+
 - **Complexity Delta: report the complexity a pull request adds, not the
   complexity already here (#624).** A new `Complexity Delta` workflow and
   `scripts/complexity/`.
