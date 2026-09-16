@@ -77,6 +77,72 @@ function Group({ group, items, onRetry, busyKey }) {
   );
 }
 
+/** The feed link and the reload, beside the heading. */
+function Header({ feedUrl, loading, onReload }) {
+  return (
+    <div className="flex items-baseline justify-between gap-4 flex-wrap">
+      <div>
+        <h3 className="font-semibold text-sm">RSS.com</h3>
+        <p className="text-xs text-slate-500">
+          Approving a transcript queues its publish; this is what happened next.
+        </p>
+      </div>
+      <div className="flex items-center gap-2">
+        {feedUrl && (
+          <a
+            href={feedUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-slate-500 hover:underline inline-flex items-center gap-1"
+          >
+            Feed <ExternalLink className="h-3 w-3" />
+          </a>
+        )}
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 text-xs"
+          onClick={onReload}
+          disabled={loading}
+        >
+          {loading ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : (
+            <RefreshCw className="h-3 w-3" />
+          )}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** Spinner, error or empty — whichever the read left, or nothing. */
+function ReadState({ loading, loadError, empty }) {
+  if (loading && empty) {
+    return (
+      <div className="flex justify-center py-8">
+        <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+      </div>
+    );
+  }
+  if (loadError) {
+    return (
+      <p className="text-xs text-red-700 dark:text-red-300 flex items-center gap-1" role="alert">
+        <AlertCircle className="h-3 w-3 shrink-0" />
+        Could not load transcripts: {loadError}
+      </p>
+    );
+  }
+  if (empty) {
+    return (
+      <p className="text-sm text-slate-400 py-6 text-center">
+        No transcripts yet, so nothing has been distributed.
+      </p>
+    );
+  }
+  return null;
+}
+
 export default function DistributionTab({ hub }) {
   const { items, loading, loadError, feedUrl, busyKey, reload, retryHost } = hub;
 
@@ -85,58 +151,8 @@ export default function DistributionTab({ hub }) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-baseline justify-between gap-4 flex-wrap">
-        <div>
-          <h3 className="font-semibold text-sm">RSS.com</h3>
-          <p className="text-xs text-slate-500">
-            Approving a transcript queues its publish; this is what happened next.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {feedUrl && (
-            <a
-              href={feedUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-slate-500 hover:underline inline-flex items-center gap-1"
-            >
-              Feed <ExternalLink className="h-3 w-3" />
-            </a>
-          )}
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-7 text-xs"
-            onClick={reload}
-            disabled={loading}
-          >
-            {loading ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
-            ) : (
-              <RefreshCw className="h-3 w-3" />
-            )}
-          </Button>
-        </div>
-      </div>
-
-      {loading && items.length === 0 && (
-        <div className="flex justify-center py-8">
-          <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
-        </div>
-      )}
-
-      {loadError && (
-        <p className="text-xs text-red-700 dark:text-red-300 flex items-center gap-1" role="alert">
-          <AlertCircle className="h-3 w-3 shrink-0" />
-          Could not load transcripts: {loadError}
-        </p>
-      )}
-
-      {!loading && !loadError && items.length === 0 && (
-        <p className="text-sm text-slate-400 py-6 text-center">
-          No transcripts yet, so nothing has been distributed.
-        </p>
-      )}
+      <Header feedUrl={feedUrl} loading={loading} onReload={reload} />
+      <ReadState loading={loading} loadError={loadError} empty={items.length === 0} />
 
       {GROUPS.map((group) => (
         <Group

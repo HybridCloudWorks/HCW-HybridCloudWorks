@@ -242,6 +242,33 @@ export function TranscriptDetail({ item, onBack }) {
   );
 }
 
+/** Spinner, error or empty — whichever the read left, or nothing. */
+function ReadState({ loading, loadError, empty }) {
+  if (loading && empty) {
+    return (
+      <div className="flex justify-center py-8">
+        <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+      </div>
+    );
+  }
+  if (loadError) {
+    return (
+      <p className="text-xs text-red-700 dark:text-red-300" role="alert">
+        Could not load transcripts: {loadError}
+      </p>
+    );
+  }
+  if (empty) {
+    return (
+      <p className="text-sm text-slate-400 py-6 text-center">
+        No transcripts yet. Generate one from a live article on the Publish page, or from a
+        recording on the Recordings tab.
+      </p>
+    );
+  }
+  return null;
+}
+
 export default function TranscriptsTab({ hub }) {
   const {
     items,
@@ -276,22 +303,7 @@ export default function TranscriptsTab({ hub }) {
           )}
         </Button>
       </div>
-      {loading && items.length === 0 && (
-        <div className="flex justify-center py-8">
-          <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
-        </div>
-      )}
-      {loadError && (
-        <p className="text-xs text-red-700 dark:text-red-300" role="alert">
-          Could not load transcripts: {loadError}
-        </p>
-      )}
-      {!loading && !loadError && items.length === 0 && (
-        <p className="text-sm text-slate-400 py-6 text-center">
-          No transcripts yet. Generate one from a live article on the Publish page, or from a
-          recording on the Recordings tab.
-        </p>
-      )}
+      <ReadState loading={loading} loadError={loadError} empty={items.length === 0} />
       <div className="space-y-2">
         {items.map((item) => (
           <TranscriptRow
