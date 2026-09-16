@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 import { safeUrl } from '@/lib/safeUrl';
 import { fmtDate } from './recordingView';
-import { HostLine, SourceChip, StatusBadge } from './shared';
+import { HostLine, ReadState, SourceChip, StatusBadge } from './shared';
 
 function TranscriptRow({ item, onOpen, onReview, onRetry, busy }) {
   const audio = safeUrl(item.audioUrl);
@@ -242,33 +242,6 @@ export function TranscriptDetail({ item, onBack }) {
   );
 }
 
-/** Spinner, error or empty — whichever the read left, or nothing. */
-function ReadState({ loading, loadError, empty }) {
-  if (loading && empty) {
-    return (
-      <div className="flex justify-center py-8">
-        <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
-      </div>
-    );
-  }
-  if (loadError) {
-    return (
-      <p className="text-xs text-red-700 dark:text-red-300" role="alert">
-        Could not load transcripts: {loadError}
-      </p>
-    );
-  }
-  if (empty) {
-    return (
-      <p className="text-sm text-slate-400 py-6 text-center">
-        No transcripts yet. Generate one from a live article on the Publish page, or from a
-        recording on the Recordings tab.
-      </p>
-    );
-  }
-  return null;
-}
-
 export default function TranscriptsTab({ hub }) {
   const {
     items,
@@ -303,7 +276,12 @@ export default function TranscriptsTab({ hub }) {
           )}
         </Button>
       </div>
-      <ReadState loading={loading} loadError={loadError} empty={items.length === 0} />
+      <ReadState
+        loading={loading}
+        loadError={loadError}
+        empty={items.length === 0}
+        emptyMessage="No transcripts yet. Generate one from a live article on the Publish page, or from a recording on the Recordings tab."
+      />
       <div className="space-y-2">
         {items.map((item) => (
           <TranscriptRow

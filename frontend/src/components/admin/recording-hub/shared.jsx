@@ -144,3 +144,33 @@ export function TranscriptToggleIcon({ loading, expanded }) {
   if (expanded) return <ChevronDown className="h-3 w-3" />;
   return <ChevronRight className="h-3 w-3" />;
 }
+
+/**
+ * Spinner, error or empty — whichever the read left, or nothing.
+ *
+ * Transcripts and Distribution render the same list from the same read, so
+ * they had the same three-branch block; Qlty counted it as 16 duplicated lines
+ * across two files before this became one component. `empty` is the caller's
+ * sentence because that is the only part that genuinely differs: one tab tells
+ * you where transcripts come from, the other that nothing has been sent.
+ */
+export function ReadState({ loading, loadError, empty, emptyMessage }) {
+  if (loading && empty) {
+    return (
+      <div className="flex justify-center py-8">
+        <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+      </div>
+    );
+  }
+  if (loadError) {
+    return (
+      <p className="text-xs text-red-700 dark:text-red-300" role="alert">
+        Could not load transcripts: {loadError}
+      </p>
+    );
+  }
+  if (empty) {
+    return <p className="text-sm text-slate-400 py-6 text-center">{emptyMessage}</p>;
+  }
+  return null;
+}

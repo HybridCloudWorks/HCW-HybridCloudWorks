@@ -16,82 +16,109 @@ import { postJSON } from '@/lib/api';
 import { fmtDate, fmtDuration } from './recordingView';
 import { TranscriptToggleIcon } from './shared';
 
+/**
+ * The card's three reads, module-level over one state bag.
+ *
+ * Qlty counts a closure's branches into the function that holds it, so
+ * defining these inside the component made them the component's complexity —
+ * `PlaudRecordingCard` came back at 19. This is the shape `useCertifications`
+ * documents and the fix #623 applied to ComposeTab for the same reason.
+ */
+async function loadTranscript(state, recording) {
+  // Already fetched: the button is a toggle from then on.
+  if (state.transcript) {
+    state.setExpanded((p) => !p);
+    return;
+  }
+  state.setLoadingTx(true);
+  state.setExpanded(true);
+  try {
+    const res = await aiEngine.mcpTool('plaud', 'get_transcript', { file_id: recording.id });
+    if (res.ok) state.setTranscript(res.result);
+    else
+      state.toast({
+        title: 'Could not load transcript',
+        description: res.error,
+        variant: 'destructive',
+      });
+  } catch (err) {
+    state.toast({ title: 'Error', description: err.message, variant: 'destructive' });
+  } finally {
+    state.setLoadingTx(false);
+  }
+}
+
+async function loadNote(state, recording) {
+  if (state.note) return;
+  state.setLoadingNote(true);
+  try {
+    const res = await aiEngine.mcpTool('plaud', 'get_note', { file_id: recording.id });
+    if (res.ok) state.setNote(res.result);
+  } catch {
+    /* silent: the note is an extra, and its absence is not an error */
+  } finally {
+    state.setLoadingNote(false);
+  }
+}
+
+/** The transcript this recording will be routed with, fetching it if needed. */
+async function ensureTranscript(state, recording) {
+  if (state.transcript) return state.transcript;
+  const res = await aiEngine.mcpTool('plaud', 'get_transcript', { file_id: recording.id });
+  if (!res.ok) throw new Error(res.error);
+  state.setTranscript(res.result);
+  return res.result;
+}
+
+async function createContent(state, recording, onCreateContent) {
+  state.setRouting(true);
+  try {
+    const tx = await ensureTranscript(state, recording);
+    // Save to the recordings container then route to pipeline (the server
+    // stamps createdAt).
+    const created = await postJSON('cms/recordings', {
+      title: recording.name,
+      transcript: tx,
+      duration: recording.duration,
+      recordedAt: recording.start_at || recording.created_at,
+      source: 'plaud_mcp',
+      plaudId: recording.id,
+      status: 'new',
+    });
+    onCreateContent({ id: created.id, title: recording.name, transcript: tx });
+  } catch (err) {
+    state.toast({ title: 'Error', description: err.message, variant: 'destructive' });
+  } finally {
+    state.setRouting(false);
+  }
+}
+
 export function PlaudRecordingCard({ recording, onCreateContent, onScriptThis, scripting }) {
   const [expanded, setExpanded] = useState(false);
   const [transcript, setTranscript] = useState(null);
   const [note, setNote] = useState(null);
   const [loadingTx, setLoadingTx] = useState(false);
   const [loadingNote, setLoadingNote] = useState(false);
+  // The transcript panel only once the fetch has settled and a note has not
+  // taken its place — named rather than inlined, so the condition reads.
+  const showTranscript = expanded && transcript && !note && !loadingNote;
   const [routing, setRouting] = useState(false);
   const { toast } = useToast();
 
-  const fetchTranscript = async () => {
-    if (transcript) {
-      setExpanded((p) => !p);
-      return;
-    }
-    setLoadingTx(true);
-    setExpanded(true);
-    try {
-      const res = await aiEngine.mcpTool('plaud', 'get_transcript', { file_id: recording.id });
-      if (res.ok) {
-        setTranscript(res.result);
-      } else {
-        toast({
-          title: 'Could not load transcript',
-          description: res.error,
-          variant: 'destructive',
-        });
-      }
-    } catch (err) {
-      toast({ title: 'Error', description: err.message, variant: 'destructive' });
-    } finally {
-      setLoadingTx(false);
-    }
+  const state = {
+    transcript,
+    note,
+    setTranscript,
+    setNote,
+    setExpanded,
+    setLoadingTx,
+    setLoadingNote,
+    setRouting,
+    toast,
   };
-
-  const fetchNote = async () => {
-    if (note) return;
-    setLoadingNote(true);
-    try {
-      const res = await aiEngine.mcpTool('plaud', 'get_note', { file_id: recording.id });
-      if (res.ok) setNote(res.result);
-    } catch {
-      /* silent */
-    } finally {
-      setLoadingNote(false);
-    }
-  };
-
-  const handleCreateContent = async () => {
-    setRouting(true);
-    try {
-      // Ensure we have the transcript first
-      let tx = transcript;
-      if (!tx) {
-        const res = await aiEngine.mcpTool('plaud', 'get_transcript', { file_id: recording.id });
-        if (!res.ok) throw new Error(res.error);
-        tx = res.result;
-        setTranscript(tx);
-      }
-      // Save to the recordings container then route to pipeline
-      // (the server stamps createdAt).
-      const created = await postJSON('cms/recordings', {
-        title: recording.name,
-        transcript: tx,
-        duration: recording.duration,
-        recordedAt: recording.start_at || recording.created_at,
-        source: 'plaud_mcp',
-        plaudId: recording.id,
-        status: 'new',
-      });
-      onCreateContent({ id: created.id, title: recording.name, transcript: tx });
-    } catch (err) {
-      toast({ title: 'Error', description: err.message, variant: 'destructive' });
-    } finally {
-      setRouting(false);
-    }
-  };
+  const fetchTranscript = () => loadTranscript(state, recording);
+  const fetchNote = () => loadNote(state, recording);
+  const handleCreateContent = () => createContent(state, recording, onCreateContent);
 
   const busy = scripting === `plaud:${recording.id}`;
 
@@ -164,7 +191,7 @@ export function PlaudRecordingCard({ recording, onCreateContent, onScriptThis, s
         </div>
 
         {/* AI Note preview (loads in background) */}
-        {expanded && !note && !loadingNote && transcript && (
+        {showTranscript && (
           <button className="text-xs text-indigo-500 mt-2 hover:underline" onClick={fetchNote}>
             Load AI summary & action items →
           </button>

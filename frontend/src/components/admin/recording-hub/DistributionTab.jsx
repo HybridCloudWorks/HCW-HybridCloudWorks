@@ -16,9 +16,9 @@ import React from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { AlertCircle, ExternalLink, Loader2, RefreshCw } from 'lucide-react';
+import { ExternalLink, Loader2, RefreshCw } from 'lucide-react';
 import { hostState } from './recordingView';
-import { HostLine } from './shared';
+import { HostLine, ReadState } from './shared';
 
 /**
  * The groups, worst first: a failure needs a decision, a pending publish needs
@@ -116,33 +116,6 @@ function Header({ feedUrl, loading, onReload }) {
   );
 }
 
-/** Spinner, error or empty — whichever the read left, or nothing. */
-function ReadState({ loading, loadError, empty }) {
-  if (loading && empty) {
-    return (
-      <div className="flex justify-center py-8">
-        <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
-      </div>
-    );
-  }
-  if (loadError) {
-    return (
-      <p className="text-xs text-red-700 dark:text-red-300 flex items-center gap-1" role="alert">
-        <AlertCircle className="h-3 w-3 shrink-0" />
-        Could not load transcripts: {loadError}
-      </p>
-    );
-  }
-  if (empty) {
-    return (
-      <p className="text-sm text-slate-400 py-6 text-center">
-        No transcripts yet, so nothing has been distributed.
-      </p>
-    );
-  }
-  return null;
-}
-
 export default function DistributionTab({ hub }) {
   const { items, loading, loadError, feedUrl, busyKey, reload, retryHost } = hub;
 
@@ -152,7 +125,12 @@ export default function DistributionTab({ hub }) {
   return (
     <div className="space-y-6">
       <Header feedUrl={feedUrl} loading={loading} onReload={reload} />
-      <ReadState loading={loading} loadError={loadError} empty={items.length === 0} />
+      <ReadState
+        loading={loading}
+        loadError={loadError}
+        empty={items.length === 0}
+        emptyMessage="No transcripts yet, so nothing has been distributed."
+      />
 
       {GROUPS.map((group) => (
         <Group

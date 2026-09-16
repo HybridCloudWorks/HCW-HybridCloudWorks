@@ -32,6 +32,26 @@ import { postJSON, getJSON } from '@/lib/api';
 import { aiEngine } from '@/lib/aiEngine';
 import { SCRIPT_QUEUED_TOAST, fmtDate, fmtDuration, sourceLabel } from './recordingView';
 import { PlaudRecordingCard, RouteModal } from './recordingCards';
+
+/**
+ * `list_files` answers JSON text that is either the array itself or an object
+ * wrapping it under one of four keys. A list rather than a chain of `||`
+ * feeding a ternary, which is the one expression `qlty:boolean-logic` objects
+ * to here; an unparseable body is an empty list, never a throw.
+ */
+const FILE_LIST_KEYS = ['data', 'files', 'recordings', 'items'];
+
+function readFileList(result) {
+  let parsed;
+  try {
+    parsed = JSON.parse(result);
+  } catch {
+    return [];
+  }
+  if (Array.isArray(parsed)) return parsed;
+  const wrapped = FILE_LIST_KEYS.map((key) => parsed?.[key]).find(Array.isArray);
+  return wrapped || [];
+}
 import { AudioUploadForm, ManualPaste } from './uploadForms';
 
 function useScriptThis() {
@@ -137,6 +157,8 @@ function LibraryTab({ isConnected, reloadKey }) {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [page, setPage] = useState(1);
+  // No filter set, so a full page means there is probably a next one.
+  const unfiltered = !search && !dateFrom && !dateTo;
   const [routingRec, setRoutingRec] = useState(null);
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -157,16 +179,7 @@ function LibraryTab({ isConnected, reloadKey }) {
       const res = await aiEngine.mcpTool('plaud', 'list_files', args);
       if (res.ok) {
         // list_files returns JSON text; parse it
-        let files = [];
-        try {
-          const parsed = JSON.parse(res.result);
-          files = Array.isArray(parsed)
-            ? parsed
-            : parsed?.data || parsed?.files || parsed?.recordings || parsed?.items || [];
-        } catch {
-          files = [];
-        }
-        setRecordings(files);
+        setRecordings(readFileList(res.result));
       } else if (res.code === 'UNAUTHENTICATED') {
         toast({
           title: 'Not connected',
@@ -286,7 +299,7 @@ function LibraryTab({ isConnected, reloadKey }) {
           )}
 
           {/* Pagination — only when no filters */}
-          {!search && !dateFrom && !dateTo && recordings.length === 20 && (
+          {unfiltered && recordings.length === 20 && (
             <div className="flex justify-center gap-2">
               <Button
                 variant="outline"
