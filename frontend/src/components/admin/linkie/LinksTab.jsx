@@ -16,34 +16,21 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/use-toast';
-import {
-  AlertCircle,
-  CheckCircle,
-  ExternalLink,
-  Loader2,
-  Pencil,
-  Plus,
-  RefreshCw,
-  Send,
-  Trash2,
-} from 'lucide-react';
+import { AlertCircle, Loader2, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import {
   EMPTY_POST_FORM,
   LINKIE_POST_TYPES,
   LINKIE_PROVIDERS,
-  buildPostPayload,
-  contentItemPostPayload,
   describeLinkieFailure,
   extractPostImage,
   extractPosts,
-  readLinkieBody,
   unwrapLinkie,
-  validatePostForm,
   visibleLinksState,
 } from '@/lib/linkie';
-import { ltCreatePost, ltDeletePost, ltListPosts, ltUpdatePostUrl } from './linkieApi';
-import { contentCoverImage, getLiveUrl } from './linkieView';
+import { ltListPosts } from './linkieApi';
 import PostImageField from './PostImageField';
+import PushContent from './PushContent';
+import { deletePost, pushContent, saveUrl, submitPost } from './linkWrites';
 
 export default function LinksTab({ recentContent, profileId, profileNotice }) {
   const { toast } = useToast();
@@ -94,78 +81,22 @@ export default function LinksTab({ recentContent, profileId, profileNotice }) {
 
   const reload = () => setReloadToken((n) => n + 1);
 
-  const handleSubmit = async () => {
-    const problem = validatePostForm(form);
-    if (problem) {
-      toast({ title: problem, variant: 'destructive' });
-      return;
-    }
-    setBusyId('new');
-    try {
-      readLinkieBody(await ltCreatePost(profileId, buildPostPayload(form)));
-      toast({ title: 'Added to Linkie' });
-      setForm(EMPTY_POST_FORM);
-      reload();
-    } catch (err) {
-      toast({ title: 'Save failed', description: err.message, variant: 'destructive' });
-    } finally {
-      setBusyId(null);
-    }
+  const state = {
+    toast,
+    form,
+    profileId,
+    reload,
+    setForm,
+    setBusyId,
+    setPushingId,
+    setEditingId,
+    dropPost: (postId) =>
+      setResult((prev) => ({ ...prev, posts: prev.posts.filter((post) => post._id !== postId) })),
   };
-
-  const handleSaveUrl = async (postId) => {
-    const url = editingUrl.trim();
-    if (!url) {
-      toast({ title: 'A URL is required', variant: 'destructive' });
-      return;
-    }
-    setBusyId(postId);
-    try {
-      readLinkieBody(await ltUpdatePostUrl(profileId, postId, url));
-      toast({ title: 'URL updated' });
-      setEditingId(null);
-      reload();
-    } catch (err) {
-      toast({ title: 'Update failed', description: err.message, variant: 'destructive' });
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const handleDelete = async (postId) => {
-    setBusyId(postId);
-    try {
-      readLinkieBody(await ltDeletePost(profileId, postId));
-      setResult((prev) => ({ ...prev, posts: prev.posts.filter((post) => post._id !== postId) }));
-      toast({ title: 'Removed from Linkie' });
-    } catch (err) {
-      toast({ title: 'Delete failed', description: err.message, variant: 'destructive' });
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const handlePushContent = async (item) => {
-    const url = getLiveUrl(item);
-    const title = item.Title || item.title || 'Untitled';
-    if (!url) {
-      toast({ title: 'No public URL for this item', variant: 'destructive' });
-      return;
-    }
-    setPushingId(item.id);
-    try {
-      const imageUrl = contentCoverImage(item);
-      readLinkieBody(
-        await ltCreatePost(profileId, contentItemPostPayload({ title, url, imageUrl }))
-      );
-      toast({ title: 'Pushed to Linkie', description: title });
-      reload();
-    } catch (err) {
-      toast({ title: 'Push failed', description: err.message, variant: 'destructive' });
-    } finally {
-      setPushingId(null);
-    }
-  };
+  const handleSubmit = () => submitPost(state, uploadingImage);
+  const handleSaveUrl = (postId) => saveUrl(state, postId, editingUrl);
+  const handleDelete = (postId) => deletePost(state, postId);
+  const handlePushContent = (item) => pushContent(state, item);
 
   const canWrite = Boolean(profileId);
 
@@ -305,7 +236,7 @@ export default function LinksTab({ recentContent, profileId, profileNotice }) {
         {canWrite && error && (
           <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-xs">
             <AlertCircle className="h-4 w-4 shrink-0" />
-            <span>{error} — check the Connection tab.</span>
+            <span>{error} — check the Settings tab.</span>
           </div>
         )}
         {canWrite && !loading && !error && posts.length === 0 && (
@@ -390,68 +321,15 @@ export default function LinksTab({ recentContent, profileId, profileNotice }) {
         })}
       </div>
 
-      <div className="space-y-3">
-        <h3 className="text-sm font-semibold">Push Published Content</h3>
-        <p className="text-xs text-muted-foreground">
-          Add the public URL of a recently published page as a Linkie post.
-        </p>
-        {recentContent.length === 0 && (
-          <p className="text-sm text-muted-foreground py-4 text-center">
-            No published content found.
-          </p>
-        )}
-        <div className="space-y-1.5 max-h-[32rem] overflow-y-auto pr-1">
-          {recentContent.map((item) => {
-            const title = item.Title || item.title || 'Untitled';
-            const url = getLiveUrl(item);
-            // `posts` is [] while the fetch is in flight, so alreadyLinked is
-            // false for EVERYTHING until it settles — which would light up
-            // Push on articles already in Linkie and let a fast operator
-            // create duplicates. "Not answered yet" is not "not linked", so
-            // the button waits for the answer. Caught in review on PR #429.
-            const alreadyLinked = posts.some((post) => post.url === url);
-            const cannotTellYet = loading;
-            let pushTitle;
-            if (!canWrite) pushTitle = profileNotice || 'No Linkie profile selected';
-            else if (cannotTellYet) pushTitle = 'Checking what is already linked…';
-            return (
-              <div
-                key={item.id}
-                className="flex items-center gap-3 px-3 py-2.5 rounded-lg border hover:bg-muted/50"
-              >
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{title}</p>
-                  <p className="text-xs text-muted-foreground truncate">{url || 'No public URL'}</p>
-                </div>
-                {url && (
-                  <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" asChild>
-                    <a href={url} target="_blank" rel="noopener noreferrer">
-                      <ExternalLink className="h-3.5 w-3.5" />
-                    </a>
-                  </Button>
-                )}
-                <Button
-                  size="sm"
-                  variant={alreadyLinked ? 'outline' : 'default'}
-                  className="gap-1.5 shrink-0"
-                  disabled={
-                    !url || !canWrite || cannotTellYet || alreadyLinked || pushingId === item.id
-                  }
-                  title={pushTitle}
-                  onClick={() => handlePushContent(item)}
-                >
-                  {pushingId === item.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                  {pushingId !== item.id && alreadyLinked && (
-                    <CheckCircle className="h-3.5 w-3.5" />
-                  )}
-                  {pushingId !== item.id && !alreadyLinked && <Send className="h-3.5 w-3.5" />}
-                  {alreadyLinked ? 'Linked' : 'Push'}
-                </Button>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      <PushContent
+        recentContent={recentContent}
+        canWrite={canWrite}
+        pushingId={pushingId}
+        posts={posts}
+        loading={loading}
+        profileNotice={profileNotice}
+        onPush={handlePushContent}
+      />
     </div>
   );
 }

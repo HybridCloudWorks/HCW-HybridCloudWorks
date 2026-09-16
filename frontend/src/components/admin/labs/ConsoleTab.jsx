@@ -26,6 +26,37 @@ function PollErrorNotice({ pollError }) {
   );
 }
 
+/** The one line of metadata above the output: id, status, agent, exit, cancel. */
+function JobHeader({ activeJobId, activeJob, cancelling, onCancel }) {
+  const exit = activeJob?.exitCode;
+  return (
+    <div className="flex items-center gap-2 flex-wrap text-xs">
+      <span className="font-mono text-muted-foreground">{activeJobId}</span>
+      <StatusBadge status={activeJob?.status || 'queued'} />
+      {activeJob?.agentId && <span className="text-muted-foreground">on {activeJob.agentId}</span>}
+      {exit !== null && exit !== undefined && (
+        <span className="font-mono text-muted-foreground">exit {exit}</span>
+      )}
+      {activeJob?.status === 'queued' && (
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={onCancel}
+          disabled={cancelling}
+          className="gap-1 ml-auto"
+        >
+          {cancelling ? <Loader2 className="h-3 w-3 animate-spin" /> : <Ban className="h-3 w-3" />}
+          Cancel
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * What the pane shows, split from the pane itself: Qlty counts the branches of
+ * a header, a body and a footer together, and this component came back at 19.
+ */
 function JobOutputPane({ activeJobId, activeJob, cancelling, onCancel, pollError }) {
   const isTerminal = isTerminalJobStatus(activeJob?.status);
   if (!activeJobId) {
@@ -37,32 +68,12 @@ function JobOutputPane({ activeJobId, activeJob, cancelling, onCancel, pollError
   }
   return (
     <>
-      <div className="flex items-center gap-2 flex-wrap text-xs">
-        <span className="font-mono text-muted-foreground">{activeJobId}</span>
-        <StatusBadge status={activeJob?.status || 'queued'} />
-        {activeJob?.agentId && (
-          <span className="text-muted-foreground">on {activeJob.agentId}</span>
-        )}
-        {activeJob?.exitCode !== null && activeJob?.exitCode !== undefined && (
-          <span className="font-mono text-muted-foreground">exit {activeJob.exitCode}</span>
-        )}
-        {activeJob?.status === 'queued' && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={onCancel}
-            disabled={cancelling}
-            className="gap-1 ml-auto"
-          >
-            {cancelling ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
-            ) : (
-              <Ban className="h-3 w-3" />
-            )}
-            Cancel
-          </Button>
-        )}
-      </div>
+      <JobHeader
+        activeJobId={activeJobId}
+        activeJob={activeJob}
+        cancelling={cancelling}
+        onCancel={onCancel}
+      />
       <PollErrorNotice pollError={pollError} />
       <pre className="bg-muted/60 border border-border rounded-md p-3 text-xs font-mono whitespace-pre-wrap break-words min-h-[200px] max-h-[400px] overflow-auto">
         {activeJob?.output ??
