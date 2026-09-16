@@ -41,6 +41,42 @@ ORCHESTRATOR_NAME = "claude-agentic-orchestrator"
 # hand-edited into "completed" while its own validation still listed 11 errors.
 TERMINAL_STATUSES = ("completed", "abandoned")
 
+# A node whose agent is absent and not required. Written by init and by
+# evaluate_workflow, read by close to decide "empty" -- three functions that
+# have to agree on the spelling, which is why it is named rather than typed
+# four times.
+STATUS_SKIPPED = "skipped_optional"
+
+# The state tree. These four are the only places that know its shape: the file
+# names were repeated at every call site, so a rename could be applied to the
+# write and missed on the read, and the tool would report "workflow not found"
+# against a workflow it had just created.
+AGENTIC = ".agentic"
+STATE_FILE = "WORKFLOW.json"
+ACTIVE_POINTER = "active-workflow.json"
+
+
+def agentic_dir(root: Path) -> Path:
+    return root / AGENTIC
+
+
+def workflow_dir(root: Path, workflow_id: str) -> Path:
+    return agentic_dir(root) / "workflows" / workflow_id
+
+
+def state_file(root: Path, workflow_id: str) -> Path:
+    return workflow_dir(root, workflow_id) / STATE_FILE
+
+
+def active_pointer(root: Path) -> Path:
+    return agentic_dir(root) / ACTIVE_POINTER
+
+
+def workflow_not_found(workflow_id: str) -> int:
+    """The same answer from validate, close and status, in one place."""
+    print(f"workflow not found: {workflow_id}", file=sys.stderr)
+    return 2
+
 
 def now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -222,13 +258,12 @@ def armed_workflow(root: Path) -> dict | None:
     """The active workflow, but only while it is still armed: enforce_stop set and
     not closed. init used to overwrite active-workflow.json unconditionally, so a
     second init silently orphaned the first workflow's Stop guard."""
-    active = root / ".agentic" / "active-workflow.json"
+    active = active_pointer(root)
     if not active.is_file():
         return None
     try:
         workflow_id = json.loads(active.read_text(encoding="utf-8"))["workflow_id"]
-        state_path = root / ".agentic" / "workflows" / workflow_id / "WORKFLOW.json"
-        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state = json.loads(state_file(root, workflow_id).read_text(encoding="utf-8"))
     except (OSError, KeyError, json.JSONDecodeError):
         return None
     if state.get("enforce_stop") and state.get("status") not in TERMINAL_STATUSES:
@@ -246,7 +281,7 @@ def init_workflow(args: argparse.Namespace, root: Path) -> int:
             f"or pass --force to open a new workflow anyway."
         )
     workflow_id = args.workflow_id or "wf-" + datetime.now().strftime("%Y%m%d-%H%M%S")
-    directory = root / ".agentic" / "workflows" / workflow_id
+    directory = workflow_dir(root, workflow_id)
     if directory.exists():
         raise SystemExit(f"workflow already exists: {workflow_id}")
     discovery = run_discovery(root, include_user=not args.no_user, out=".agentic/discovery.json")
@@ -256,11 +291,11 @@ def init_workflow(args: argparse.Namespace, root: Path) -> int:
         if args.mode == "all" and not args.require_all:
             node["required"] = bool(node["available"])
             if not node["available"]:
-                node["status"] = "skipped_optional"
+                node["status"] = STATUS_SKIPPED
         if node["id"] in optional:
             node["required"] = False
             if not node["available"]:
-                node["status"] = "skipped_optional"
+                node["status"] = STATUS_SKIPPED
     state = {
         "workflow_id": workflow_id,
         "created_at": now(),
@@ -274,8 +309,8 @@ def init_workflow(args: argparse.Namespace, root: Path) -> int:
     }
     (directory / "handoffs").mkdir(parents=True)
     (directory / "artifacts").mkdir()
-    (directory / "WORKFLOW.json").write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
-    (root / ".agentic" / "active-workflow.json").write_text(
+    (directory / STATE_FILE).write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+    active_pointer(root).write_text(
         json.dumps({"workflow_id": workflow_id, "path": str(directory)}, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(state, indent=2))
     return 0
@@ -311,8 +346,8 @@ def handoff_valid(path: Path, node_id: str, workflow_id: str) -> tuple[bool, lis
 
 
 def load_state(root: Path, workflow_id: str) -> tuple[Path, Path, dict] | None:
-    directory = root / ".agentic" / "workflows" / workflow_id
-    state_path = directory / "WORKFLOW.json"
+    directory = workflow_dir(root, workflow_id)
+    state_path = directory / STATE_FILE
     if not state_path.is_file():
         return None
     return directory, state_path, json.loads(state_path.read_text(encoding="utf-8"))
@@ -331,7 +366,7 @@ def evaluate_workflow(state: dict, directory: Path) -> tuple[list[str], list[dic
                 errors.append(f"required agent unavailable: {node['id']}")
                 node["status"] = "blocked"
             else:
-                node["status"] = "skipped_optional"
+                node["status"] = STATUS_SKIPPED
             results.append({"agent_id": node["id"], "valid": False, "reasons": [node["status"]]})
             continue
         valid, reasons = handoff_valid(handoff, node["id"], state["workflow_id"])
@@ -353,7 +388,7 @@ def evaluate_workflow(state: dict, directory: Path) -> tuple[list[str], list[dic
     # Report skipped nodes alongside the errors. A workflow whose agents are all
     # absent validates with zero errors and exits 0, which reads as "everything
     # ran" -- it means the opposite. Naming them makes an empty run visible.
-    skipped = [node["id"] for node in state.get("nodes", []) if node.get("status") == "skipped_optional"]
+    skipped = [node["id"] for node in state.get("nodes", []) if node.get("status") == STATUS_SKIPPED]
     state["validation"] = {
         "validated_at": now(),
         "errors": errors,
@@ -368,8 +403,7 @@ def evaluate_workflow(state: dict, directory: Path) -> tuple[list[str], list[dic
 def validate_workflow(args: argparse.Namespace, root: Path) -> int:
     loaded = load_state(root, args.workflow)
     if loaded is None:
-        print(f"workflow not found: {args.workflow}", file=sys.stderr)
-        return 2
+        return workflow_not_found(args.workflow)
     directory, state_path, state = loaded
     errors, _ = evaluate_workflow(state, directory)
     if not args.check:
@@ -389,8 +423,7 @@ def close_workflow(args: argparse.Namespace, root: Path) -> int:
     """
     loaded = load_state(root, args.workflow)
     if loaded is None:
-        print(f"workflow not found: {args.workflow}", file=sys.stderr)
-        return 2
+        return workflow_not_found(args.workflow)
     directory, state_path, state = loaded
     errors, _ = evaluate_workflow(state, directory)
     if errors and not args.abandon:
@@ -428,7 +461,7 @@ def close_workflow(args: argparse.Namespace, root: Path) -> int:
         state["outstanding_at_close"] = errors
     state["updated_at"] = now()
     state_path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
-    active = root / ".agentic" / "active-workflow.json"
+    active = active_pointer(root)
     if active.is_file():
         try:
             pointer = json.loads(active.read_text(encoding="utf-8")).get("workflow_id")
@@ -449,7 +482,40 @@ def close_workflow(args: argparse.Namespace, root: Path) -> int:
     return 0
 
 
-def main() -> int:
+def registry_command(args: argparse.Namespace, root: Path) -> int:
+    return write_registry(root, include_user=not args.no_user)
+
+
+def discover_command(args: argparse.Namespace, root: Path) -> int:
+    result = run_discovery(root, include_user=not args.no_user, out=args.out)
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def status_workflow(args: argparse.Namespace, root: Path) -> int:
+    """Print a workflow's WORKFLOW.json verbatim. Read-only: status must never
+    rewrite the state it reports, or reading it would change it."""
+    path = state_file(root, args.workflow)
+    if not path.is_file():
+        return workflow_not_found(args.workflow)
+    print(path.read_text(encoding="utf-8"))
+    return 0
+
+
+# Every subcommand takes (args, root) and returns an exit code, so dispatch is
+# a lookup rather than a chain of `if args.command ==`. add_subparsers is
+# required=True below, so no key here can be missing at the point of the call.
+COMMANDS = {
+    "registry": registry_command,
+    "discover": discover_command,
+    "init": init_workflow,
+    "validate": validate_workflow,
+    "close": close_workflow,
+    "status": status_workflow,
+}
+
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--root", default=None, help="repository root (default: CLAUDE_PROJECT_DIR, then git toplevel, then cwd)")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -478,26 +544,12 @@ def main() -> int:
     close_parser.add_argument("--abandon", action="store_true", help="close as abandoned when required handoffs are still missing")
     status_parser = sub.add_parser("status")
     status_parser.add_argument("--workflow", required=True)
-    args = parser.parse_args()
-    root = project_dir(args.root)
-    if args.command == "registry":
-        return write_registry(root, include_user=not args.no_user)
-    if args.command == "discover":
-        result = run_discovery(root, include_user=not args.no_user, out=args.out)
-        print(json.dumps(result, indent=2))
-        return 0
-    if args.command == "init":
-        return init_workflow(args, root)
-    if args.command == "validate":
-        return validate_workflow(args, root)
-    if args.command == "close":
-        return close_workflow(args, root)
-    state_path = root / ".agentic" / "workflows" / args.workflow / "WORKFLOW.json"
-    if not state_path.is_file():
-        print(f"workflow not found: {args.workflow}", file=sys.stderr)
-        return 2
-    print(state_path.read_text(encoding="utf-8"))
-    return 0
+    return parser
+
+
+def main() -> int:
+    args = build_parser().parse_args()
+    return COMMANDS[args.command](args, project_dir(args.root))
 
 
 if __name__ == "__main__":

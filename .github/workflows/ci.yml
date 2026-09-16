@@ -222,6 +222,16 @@ jobs:
         if: steps.changes.outputs.relevant == 'true'
         run: python -m compileall -q hooks tooling
 
+      # The Stop guard's BLOCKING path. Everything below this step drives the
+      # workflow tool; the only assertion this job ever made about the hook was
+      # the fail-open one at the end, so a regression that stopped it blocking
+      # would have been silent — and a guard that never fires is the failure
+      # mode the guard exists to prevent. Runs against throwaway roots, so it
+      # is safe here, before the steps that write and delete .agentic/.
+      - name: Stop guard unit tests
+        if: steps.changes.outputs.relevant == 'true'
+        run: python -m unittest discover -s hooks -p 'test_*.py' -v
+
       - name: Workflow round trip
         if: steps.changes.outputs.relevant == 'true'
         run: |
