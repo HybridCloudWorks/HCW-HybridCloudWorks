@@ -7,7 +7,7 @@
  * parameter rather than something read from inside a fetch.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
@@ -121,42 +121,65 @@ describe('isAgentOnline', () => {
   });
 });
 
-describe('the page uses the shared rules', () => {
+describe('the Labs Hub uses the shared rules', () => {
+  // Read the WHOLE hub, not one file.
+  //
+  // These guards used to read `pages/admin/LabsPage.jsx` alone. #577 moved the
+  // poll into components/admin/labs/useLabsLive.js and the job submission into
+  // ConsoleTab.jsx, and all four passed vacuously against the 97-line page that
+  // was left — a guard keyed to one path goes blind the moment the code it
+  // guards is moved, which is exactly the failure mode they exist to prevent.
+  // Globbing the hub means the next move cannot disarm them either.
+  //
   // Resolved from the package root, as functionsBase.test.js does — the suite
   // runs under jsdom, where `import.meta.url` is not a file: URL.
-  const LABS_PAGE_SOURCE = readFileSync(
+  const HUB_FILES = [
     join(process.cwd(), 'src', 'pages', 'admin', 'LabsPage.jsx'),
-    'utf8'
-  );
+    ...readdirSync(join(process.cwd(), 'src', 'components', 'admin', 'labs'))
+      .filter((name) => /\.jsx?$/.test(name) && !name.includes('.test.'))
+      .map((name) => join(process.cwd(), 'src', 'components', 'admin', 'labs', name)),
+  ];
 
-  // Comments explain what the file deliberately no longer does, and quoting
-  // the retired code there is the point. The guards below must read code only.
-  const LABS_PAGE = LABS_PAGE_SOURCE.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  const SOURCE = HUB_FILES.map((file) => readFileSync(file, 'utf8')).join('\n');
+
+  // Comments explain what the hub deliberately no longer does, and quoting the
+  // retired code there is the point. The guards below must read code only.
+  const LABS_HUB = SOURCE.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+
+  it('finds the files it is meant to guard', () => {
+    // A glob that matched nothing would make every assertion below vacuous,
+    // which is the bug this whole block just lived through.
+    expect(HUB_FILES.length).toBeGreaterThan(5);
+    expect(LABS_HUB).toContain('getLabsSnapshot');
+  });
 
   it('declares no terminal-status list of its own', () => {
     // The original defect was two inline lists in one file that disagreed.
-    expect(LABS_PAGE).not.toMatch(/\[\s*'succeeded'\s*,/);
-    expect(LABS_PAGE).toContain('isTerminalJobStatus');
+    expect(LABS_HUB).not.toMatch(/\[\s*'succeeded'\s*,/);
+    expect(LABS_HUB).toContain('isTerminalJobStatus');
   });
 
   it('advances the staleness clock outside the fetch', () => {
     // `setNow` must not appear inside the getLabsSnapshot handler. Asserting
     // on the interval is the closest structural proxy available without
-    // rendering the page.
-    expect(LABS_PAGE).toContain('setInterval(() => setNow(Date.now()), CLOCK_TICK_MS)');
-    const snapshotPoll = LABS_PAGE.slice(LABS_PAGE.indexOf("postJSON('getLabsSnapshot'"));
+    // rendering the page. (T-309: during an outage the clock froze, so
+    // `now - lastSeenAt` stopped growing and every agent stayed "connected".)
+    expect(LABS_HUB).toContain('setInterval(() => setNow(Date.now()), CLOCK_TICK_MS)');
+    const snapshotPoll = LABS_HUB.slice(LABS_HUB.indexOf("postJSON('getLabsSnapshot'"));
     expect(snapshotPoll.slice(0, 400)).not.toContain('setNow(');
   });
 
   it('guards against overlapping snapshot fetches', () => {
     // postJSON allows 20s against a 15s interval.
-    expect(LABS_PAGE).toContain('if (inFlight) return;');
+    expect(LABS_HUB).toContain('if (inFlight) return;');
   });
 
   it('does not fabricate a job status from a transport error', () => {
     // `status: 'failed'` in the catch was indistinguishable from a real
-    // failure, and stopped the poll permanently.
-    expect(LABS_PAGE).not.toContain("status: 'failed'");
-    expect(LABS_PAGE).toContain('setPollError');
+    // failure, and stopped the poll permanently. The invariant is that a
+    // failure to *read* the status lands in its own field — keyed on the field
+    // rather than on a setter's name, which a refactor is free to change.
+    expect(LABS_HUB).not.toContain("status: 'failed'");
+    expect(LABS_HUB).toContain('pollError');
   });
 });

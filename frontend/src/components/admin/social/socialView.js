@@ -7,6 +7,9 @@
  */
 import { brandIconFor } from '@/components/shared/BrandIcon';
 import { toMillis } from '@/lib/dateUtils';
+import { getLiveUrl, isLiveRecord } from '@/lib/livePages';
+
+export { getLiveUrl, isLiveRecord };
 
 // Real brand marks, not stand-ins (#498). lucide-react v1 dropped its brand
 // icons and this map had been using a chain link, an @, two heads and a
@@ -53,35 +56,8 @@ export const PLATFORM_META = {
   },
 };
 
-/** Same rule as LivePagesPage — content / blog is considered a published live page. */
-export function isLiveRecord(item) {
-  const status = String(item?.contentStatus || '');
-  if (item?.softDeletedAt || item?.softDeleteExpiresAt) return false;
-  return item?.Live === true || item?.Status === 'Live' || status.startsWith('published_');
-}
-
 export function getLiveTitle(item) {
   return item.Title || item.title || 'Untitled';
-}
-
-/**
- * The fields that already carry a whole URL, in the order they are trusted.
- * A list rather than a chain of `||`: the chain had a ternary with its own
- * nested ternary hanging off the end of it, which is the one expression
- * `qlty:boolean-logic` objects to in this file.
- */
-const LIVE_URL_FIELDS = ['slugPageUrl', 'publishedUrl', 'blogUrl', 'publicUrl'];
-
-/** A curated path (with or without its leading slash) as an absolute URL. */
-function curatedUrl(path) {
-  if (!path) return '';
-  const rooted = String(path).startsWith('/') ? path : `/${path}`;
-  return `https://hybridcloudworks.com${rooted}`;
-}
-
-export function getLiveUrl(item) {
-  const explicit = LIVE_URL_FIELDS.map((field) => item[field]).find(Boolean);
-  return explicit || curatedUrl(item.curatedSubpagePath) || '';
 }
 
 export function getRecency(item) {

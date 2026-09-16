@@ -13,6 +13,7 @@ import ConfirmModal from '@/components/admin/ConfirmModal';
 import { postJSON, getJSON } from '@/lib/api';
 import { toMillis } from '@/lib/dateUtils';
 import { safeUrl } from '@/lib/safeUrl';
+import { isLiveRecord } from '@/lib/livePages';
 
 function getProvider(item) {
   return item['Cloud Provider'] || item.cloudProvider || item.provider || 'Unknown';
@@ -37,12 +38,6 @@ function getTypeLabel(item) {
     default:
       return 'Blog';
   }
-}
-
-function isLiveRecord(item) {
-  const status = String(item?.contentStatus || '');
-  if (item?.softDeletedAt || item?.softDeleteExpiresAt) return false;
-  return item?.Live === true || item?.Status === 'Live' || status.startsWith('published_');
 }
 
 function getRecencyScore(item) {

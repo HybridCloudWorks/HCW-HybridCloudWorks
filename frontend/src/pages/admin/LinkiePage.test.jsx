@@ -34,9 +34,13 @@ vi.mock('@/lib/api', () => ({
 }));
 vi.mock('@/hooks/useAuthReady', () => ({ useAuthReady: () => ({ authReady: true }) }));
 vi.mock('@/components/ui/use-toast', () => ({ useToast: () => ({ toast }) }));
-// Rendered already on the Connection tab. The setter is a no-op here, so
-// clicking a tab would not move `activeTab` — starting there tests the same
-// thing without needing a stateful router mock.
+// Rendered already on the tab that holds the connection test. The setter is a
+// no-op here, so clicking a tab would not move `activeTab` — starting there
+// tests the same thing without needing a stateful router mock.
+//
+// `tab=connection` is deliberately the OLD id: #577 renamed that tab to
+// Settings, and every one of these tests reaching the Test Connection button
+// is the redirect working. The explicit assertions are at the end of the file.
 vi.mock('react-router', () => ({
   useSearchParams: () => [new URLSearchParams(searchParams), vi.fn()],
 }));
@@ -317,5 +321,38 @@ describe('a post image, from the computer or the gallery (#501)', () => {
     const { container } = render(<LinkiePage />);
     await screen.findByText('With image');
     expect(container.querySelector('img[src="https://cdn.test/t.png"]')).not.toBeNull();
+  });
+});
+
+describe('the duty tabs (#577)', () => {
+  const noProfilesYet = () => postJSON.mockResolvedValue(ONE_PROFILE);
+
+  it('opens on Links when there is no ?tab=', async () => {
+    searchParams = '';
+    noProfilesYet();
+    render(<LinkiePage />);
+    // The Links tab is the one with the composer.
+    expect(await screen.findByText(/Add a Post/i)).toBeInTheDocument();
+  });
+
+  it('sends the old `connection` id to Settings, where the test now lives', async () => {
+    searchParams = 'tab=connection';
+    noProfilesYet();
+    render(<LinkiePage />);
+    expect(await screen.findByRole('button', { name: /Test Connection/i })).toBeInTheDocument();
+  });
+
+  it('shows Links for an unknown tab rather than a header with nothing under it', async () => {
+    searchParams = 'tab=nope';
+    noProfilesYet();
+    render(<LinkiePage />);
+    expect(await screen.findByText(/Add a Post/i)).toBeInTheDocument();
+  });
+
+  it('names Linkie in the page header', async () => {
+    searchParams = '';
+    noProfilesYet();
+    render(<LinkiePage />);
+    await waitFor(() => expect(screen.getAllByText(/Linkie/).length).toBeGreaterThan(0));
   });
 });
