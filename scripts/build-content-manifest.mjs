@@ -418,7 +418,11 @@ async function main() {
 
   // Compare ignoring the timestamp, so an unchanged corpus does not produce a
   // commit whose only content is the time it ran.
-  const next = JSON.stringify(manifest, null, 2);
+  // Trailing newline so the committed file satisfies .editorconfig's
+  // insert_final_newline. It is part of `next` rather than appended at the
+  // write, so the unchanged-corpus comparison below sees the same bytes it
+  // writes and does not report a diff on every run (#588).
+  const next = `${JSON.stringify(manifest, null, 2)}\n`;
   // Read straight through instead of existsSync-then-read. The check-then-use
   // pair is a race the single read does not have, and a file that disappeared
   // between the two calls is the same "no previous manifest" outcome as one

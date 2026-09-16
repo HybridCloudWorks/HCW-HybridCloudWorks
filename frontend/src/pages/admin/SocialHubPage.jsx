@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Social Hub — Publer Integration
  *
  * Schedule HCW articles to LinkedIn, X (Twitter), Facebook, Instagram, and YouTube
