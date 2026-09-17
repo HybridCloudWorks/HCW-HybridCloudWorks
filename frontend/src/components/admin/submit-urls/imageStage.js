@@ -253,3 +253,78 @@ export function resolveSlotImage(state, slot) {
     return state.generatedImages[slot];
   return '';
 }
+
+/** The four slots, in the order they are offered and consumed. */
+export const IMAGE_SLOTS = [
+  { key: 'hero', label: 'Hero Image' },
+  { key: 'secondary1', label: 'Secondary Image 1' },
+  { key: 'secondary2', label: 'Secondary Image 2' },
+  { key: 'secondary3', label: 'Secondary Image 3' },
+];
+
+/** Where a slot's chosen image came from, for the operator-facing label. */
+export function getImageSourceLabel(uploadedUrl, generatedUrl) {
+  if (uploadedUrl) return 'uploaded';
+  if (generatedUrl) return 'generated';
+  return '';
+}
+
+/**
+ * Every slot that contributes an image, in slot order.
+ *
+ * Applies the same uploaded-wins-over-generated rule as resolveSlotImage
+ * above, and both halves require the slot to be SELECTED as well as present.
+ * That the rule is written twice in this file is not an improvement — the two
+ * agree today, and unifying them is a behaviour-adjacent change that belongs
+ * with the rest of #634 rather than in the middle of a move.
+ */
+export function collectSelectedSlotImages({
+  slotUrls,
+  selectedUploaded,
+  generatedImages,
+  selectedGenerated,
+}) {
+  return IMAGE_SLOTS.map(({ key, label }) => {
+    const uploadedUrl = selectedUploaded[key] ? slotUrls[key] : '';
+    const generatedUrl = selectedGenerated[key] ? generatedImages[key] : '';
+    const selectedUrl = uploadedUrl || generatedUrl || '';
+
+    return {
+      slot: key,
+      label,
+      url: selectedUrl,
+      source: getImageSourceLabel(uploadedUrl, generatedUrl),
+    };
+  }).filter((item) => Boolean(item.url));
+}
+
+/**
+ * The selection split the way the create payload wants it.
+ *
+ * The hero is simply the FIRST contributing slot, not necessarily the one
+ * named `hero` — so a draft with no hero image but a secondary one still gets
+ * a cover rather than none.
+ */
+export function buildPreviewImageSelection({
+  slotUrls,
+  selectedUploaded,
+  generatedImages,
+  selectedGenerated,
+}) {
+  const selectedImages = collectSelectedSlotImages({
+    slotUrls,
+    selectedUploaded,
+    generatedImages,
+    selectedGenerated,
+  });
+
+  const heroImageUrl = selectedImages[0]?.url || '';
+  const secondaryImageUrls = selectedImages.slice(1).map((item) => item.url);
+  const aiImageUrls = Object.fromEntries(
+    selectedImages
+      .filter((item) => item.source === 'generated')
+      .map((item) => [item.slot, item.url])
+  );
+
+  return { heroImageUrl, secondaryImageUrls, aiImageUrls, selectedImages };
+}
