@@ -1790,7 +1790,11 @@ const SLOT_IMAGE_ACCEPT = Object.keys(PUBLIC_IMAGE_EXTENSIONS).join(',');
  * (`if (!imageUrl) throw`) all along — which is why AI generation worked while
  * manual upload silently did not.
  */
-export async function uploadSlotImageFile(state, slot, file) {
+export async function uploadSlotImageFile(state, slot, explicitFile) {
+  // The picker hands the file straight over; the button falls back to whatever
+  // is queued for the slot. Resolved here rather than at the call site so the
+  // page component does not carry the branch.
+  const file = explicitFile || state.slotFiles?.[slot];
   if (!file) return;
   // `covers` is publicly served, so the route refuses SVG and anything outside
   // the five raster types. Naming the problem here beats a 415 that does not.
@@ -2357,11 +2361,11 @@ export default function SubmitUrlsPage() {
     [applyPromptSelection, promptLibraryPagePath, savePageAssignment, selectedPromptSet]
   );
 
-  const uploadSlotImage = (slot, explicitFile = null) =>
+  const uploadSlotImage = (slot, explicitFile) =>
     uploadSlotImageFile(
-      { setUploadingSlot, setError, setSlotUrls, setSelectedUploaded, setSlotFiles },
+      { slotFiles, setUploadingSlot, setError, setSlotUrls, setSelectedUploaded, setSlotFiles },
       slot,
-      explicitFile || slotFiles[slot]
+      explicitFile
     );
 
   const handleSupportingDocumentUpload = async (e) => {

@@ -24,8 +24,9 @@ vi.mock('@/lib/imageUpload', async (importOriginal) => ({
   uploadImageFile: (...args) => uploadImageFile(...args),
 }));
 
-function stateBag() {
+function stateBag(slotFiles = {}) {
   return {
+    slotFiles,
     setUploadingSlot: vi.fn(),
     setError: vi.fn(),
     setSlotUrls: vi.fn(),
@@ -96,6 +97,16 @@ describe('uploadSlotImageFile', () => {
     await uploadSlotImageFile(state, 'hero', null);
     expect(uploadImageFile).not.toHaveBeenCalled();
     expect(state.setUploadingSlot).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the file queued for the slot when none is handed over', async () => {
+    // The picker passes the file straight through; the Upload button does not,
+    // and relies on this. Resolving it inside keeps the branch out of the page.
+    const queued = file('queued.png', 'image/png');
+    const state = stateBag({ hero: queued });
+    await uploadSlotImageFile(state, 'hero', undefined);
+    const [[args]] = uploadImageFile.mock.calls;
+    expect(args.file).toBe(queued);
   });
 
   it('always clears the spinner, including when the upload throws', async () => {
