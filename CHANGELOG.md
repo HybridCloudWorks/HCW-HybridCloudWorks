@@ -19,6 +19,42 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Stage 3's "Upload Images" half had never worked (#630).** Article slot
+  images on `/admin/submit` went to the `content` blob container. Every
+  container is private in Terraform — "public" means reachable through the
+  media delivery route, and only the containers in `PUBLIC_MEDIA_CONTAINERS`
+  are — so the upload route answered 200 with `url: ''` **by design**, and the
+  page stored that empty string.
+
+  An empty string is **falsy**, so `{slotUrls[key] && …}` never rendered the
+  uploaded row. The operator pressed Upload, the spinner finished, and nothing
+  appeared: no error, no link, no confirmation. Downstream,
+  `collectSelectedSlotImages` drops the slot on `.filter(Boolean(item.url))`,
+  so `canPreview` and the article's hero were computed as though no image had
+  been uploaded at all. Only AI-*generated* images worked — and the reason is
+  instructive: that path has carried `if (!imageUrl) throw` all along, which is
+  exactly the guard the upload path lacked. It has one now.
+
+  Slot images go to `covers`, the container Terraform describes as "content
+  cover images, served via the media route". Nothing already in `content`
+  becomes reachable.
+
+  **SVG is no longer offered**, and nothing is lost by that. `admin-uploads.js`
+  recorded that this picker offered SVG because these went to a private
+  container; in a publicly served one it is refused, since served anonymously
+  an SVG is a scriptable document. An SVG slot upload produced `url: ''` like
+  every other type, so it never worked either. GIF and AVIF are newly offered.
+
+  The blob path's extension now comes from the file's **declared type** rather
+  than its name (`imageExtensionFor`), which is half of #631: the route
+  requires the two to agree, so `photo.jfif` — what Windows writes for a JPEG
+  saved from a browser — was a 415 on a perfectly valid file.
+
+  The write is module-level over a state bag, as `linkWrites.js` is, so it has
+  seven tests without mounting a 2,859-line page.
+
+### Fixed
+
 - **Gallery uploads produced images nothing could display (#602).** Manual
   uploads on `/admin/gallery` went to the `content` blob container. Every
   container is private in Terraform — "public" means reachable through the

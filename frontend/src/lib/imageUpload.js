@@ -67,6 +67,23 @@ export function readFileAsBase64(file) {
 }
 
 /**
+ * The extension to write into a blob path for a file, derived from its
+ * DECLARED TYPE rather than from its name.
+ *
+ * The upload route requires the path's extension to agree with the content
+ * type it is sent (`checkUploadMediaType`), so trusting the filename turns a
+ * perfectly valid file into a 415: Windows writes `.jfif` for JPEGs saved from
+ * a browser, and a PNG that someone named `.jpg` is refused the same way.
+ * (#631)
+ *
+ * @param {{type?: string} | null | undefined} file
+ * @returns {string} e.g. `jpg`; '' for a type this route does not accept
+ */
+export function imageExtensionFor(file) {
+  return PUBLIC_IMAGE_EXTENSIONS[String(file?.type || '').toLowerCase()] || '';
+}
+
+/**
  * Upload one file to an admin upload container.
  *
  * The response's `url` is SITE-RELATIVE (`/api/public/media/{container}/…`)
