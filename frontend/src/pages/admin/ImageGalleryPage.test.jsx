@@ -21,9 +21,17 @@ import ImageGalleryPage from './ImageGalleryPage';
 const postJSON = vi.fn();
 const uploadImageFile = vi.fn();
 
+const loadGalleryItems = vi.fn(() => Promise.resolve([]));
+
 vi.mock('@/lib/api', () => ({
   postJSON: (...args) => postJSON(...args),
   getJSON: vi.fn(() => Promise.resolve({ items: [] })),
+}));
+// Only the network read is replaced; the derived-list helpers stay real, so
+// the filter dropdowns below are rendered from the real code path.
+vi.mock('@/lib/imageGallery', async (importOriginal) => ({
+  ...(await importOriginal()),
+  loadGalleryItems: (...args) => loadGalleryItems(...args),
 }));
 vi.mock('react-router', () => ({ useNavigate: () => vi.fn() }));
 // The real module's validation is exercised as itself in imageUpload.test.js;
@@ -54,6 +62,7 @@ describe('a gallery upload', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     postJSON.mockResolvedValue({ items: [] });
+    loadGalleryItems.mockResolvedValue([]);
     uploadImageFile.mockResolvedValue({ url: '/api/public/media/covers/x/hero.png' });
   });
 
@@ -112,5 +121,31 @@ describe('a gallery upload', () => {
     expect(accept).not.toContain('image/*');
     expect(accept).toContain('image/png');
     expect(accept).not.toContain('svg');
+  });
+});
+
+describe('the filter dropdowns', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    postJSON.mockResolvedValue({ items: [] });
+    uploadImageFile.mockResolvedValue({ url: '/api/public/media/covers/x/hero.png' });
+  });
+
+  it('render the options derived from the loaded items', async () => {
+    // The derivations moved to lib/imageGallery to get the component's exits
+    // down. The move renamed the locals, and the three `<select>` blocks still
+    // referred to the OLD names — which now resolve to the imported FUNCTIONS,
+    // so `providerOptions.map` threw at render. Nothing in the suite noticed,
+    // because nothing rendered a filter. This does.
+    // `oracle` on purpose: the provider dropdown renders COMMON_PROVIDERS from
+    // a static list and appends only the providers NOT in it, so a common one
+    // would pass this test through the static path and prove nothing.
+    loadGalleryItems.mockResolvedValue([
+      { id: '1', provider: 'oracle', slot: 'hero', customTags: ['cloud'], folder: 'aws' },
+    ]);
+    render(<ImageGalleryPage />);
+    await waitFor(() => expect(screen.getByRole('option', { name: 'ORACLE' })).toBeInTheDocument());
+    expect(screen.getByRole('option', { name: 'hero' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'cloud' })).toBeInTheDocument();
   });
 });

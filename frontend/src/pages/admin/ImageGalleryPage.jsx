@@ -19,7 +19,18 @@ import {
   X,
   Pencil,
 } from 'lucide-react';
-import { loadGalleryItems, getSourceLabel } from '@/lib/imageGallery';
+import {
+  customTagOptions,
+  deleteFolderProblem,
+  folderOptions,
+  getSourceLabel,
+  loadGalleryItems,
+  newFolderProblem,
+  providerOptions,
+  slotOptions,
+  toggledSelection,
+  uniqueTags,
+} from '@/lib/imageGallery';
 import {
   PUBLIC_IMAGE_EXTENSIONS,
   publicImageFileProblem,
@@ -332,6 +343,64 @@ async function uploadGalleryBatch(files, options) {
   return { uploaded, rejected };
 }
 
+/** One tag in the update panel's toggle row. */
+function TagToggle({ tag, selected, onToggle }) {
+  return (
+    <Badge
+      variant={selected ? 'default' : 'outline'}
+      className="cursor-pointer gap-2"
+      onClick={onToggle}
+    >
+      <input
+        type="checkbox"
+        checked={selected}
+        readOnly
+        className="h-3 w-3 cursor-pointer pointer-events-none"
+      />
+      {tag}
+    </Badge>
+  );
+}
+
+/**
+ * Rename one gallery image.
+ *
+ * Module-level over a state bag, as linkWrites.js is: written inside the
+ * component its guard was one of the component's own exits, and the page
+ * already measured 16 of them.
+ */
+async function renameGalleryImage(state, itemId, newTitle) {
+  const title = String(newTitle || '').trim();
+  if (!title) {
+    state.setDeleteError('Title cannot be empty');
+    return;
+  }
+  state.setBusyId(itemId);
+  try {
+    const item = state.items.find((it) => it.id === itemId);
+    if (!item) throw new Error('Item not found');
+    await postJSON('updateGalleryImageMetadata', {
+      id: itemId,
+      galleryCollection: item.galleryCollection,
+      title,
+    });
+    state.setEditingItemId(null);
+    state.setEditingTitle('');
+    await state.fetchGallery();
+  } catch (error) {
+    console.error('Rename error:', error);
+    state.setDeleteError(`Rename failed: ${error.message || error}`);
+  } finally {
+    state.setBusyId('');
+  }
+}
+
+/** The visible items: everything matching the search term and the four filters. */
+function filterGalleryItems(items, searchTerm, filters) {
+  const term = searchTerm.trim().toLowerCase();
+  return (items || []).filter((item) => matchesGalleryItem(item, term, filters));
+}
+
 export default function ImageGalleryPage() {
   const navigate = useNavigate();
   const [items, setItems] = useState([]);
@@ -386,87 +455,24 @@ export default function ImageGalleryPage() {
     fetchGallery();
   }, [fetchGallery]);
 
-  const providerOptions = useMemo(() => {
-    const values = new Set(
-      (items || [])
-        .map((item) =>
-          String(item.provider || '')
-            .trim()
-            .toUpperCase()
-        )
-        .filter(Boolean)
-    );
-    return ['all', ...Array.from(values).sort()];
-  }, [items]);
-
-  const slotOptions = useMemo(() => {
-    const values = new Set(
-      (items || [])
-        .map((item) =>
-          String(item.slot || '')
-            .trim()
-            .toLowerCase()
-        )
-        .filter(Boolean)
-    );
-    return ['all', ...Array.from(values).sort()];
-  }, [items]);
-
-  const customTagOptions = useMemo(() => {
-    const values = new Set();
-    (items || []).forEach((item) => {
-      const tags = item.customTags || [];
-      if (Array.isArray(tags)) {
-        tags.forEach((tag) => {
-          const trimmed = String(tag || '')
-            .trim()
-            .toLowerCase();
-          if (trimmed) values.add(trimmed);
-        });
-      }
-    });
-    return ['all', ...Array.from(values).sort()];
-  }, [items]);
-
-  // Dynamically extract folders from database items + manual folders
-  const folders = useMemo(() => {
-    const folderSet = new Set(['default', 'aws', 'azure', 'gcp', 'finops', 'architecture']);
-    // Add folders from database items
-    items.forEach((item) => {
-      const folder = String(item.folder || 'default')
-        .trim()
-        .toLowerCase();
-      if (folder) folderSet.add(folder);
-    });
-    // Add manually created folders
-    manualFolders.forEach((f) => folderSet.add(f.toLowerCase()));
-    return Array.from(folderSet).sort();
-  }, [items, manualFolders]);
-
-  // Get all unique tags from gallery items for tag toggle subsection
-  const allUniqueTags = useMemo(() => {
-    const tagSet = new Set();
-    items.forEach((item) => {
-      if (item.customTags && Array.isArray(item.customTags)) {
-        item.customTags.forEach((tag) => {
-          if (tag && tag.trim()) tagSet.add(tag.toLowerCase());
-        });
-      }
-    });
-    return Array.from(tagSet).sort();
-  }, [items]);
-
-  const filtered = useMemo(() => {
-    const term = searchTerm.trim().toLowerCase();
-    return (items || []).filter((item) =>
-      matchesGalleryItem(item, term, {
+  // Each of these is a pure function of `items` (lib/imageGallery.js). Written
+  // as useMemo bodies they put their returns inside this component, which is
+  // what took it to 16 exits.
+  const providerFilterOptions = useMemo(() => providerOptions(items), [items]);
+  const slotFilterOptions = useMemo(() => slotOptions(items), [items]);
+  const customTagFilterOptions = useMemo(() => customTagOptions(items), [items]);
+  const folders = useMemo(() => folderOptions(items, manualFolders), [items, manualFolders]);
+  const allUniqueTags = useMemo(() => uniqueTags(items), [items]);
+  const filtered = useMemo(
+    () =>
+      filterGalleryItems(items, searchTerm, {
         providerFilter,
         slotFilter,
         customTagFilter,
         folderFilter,
-      })
-    );
-  }, [items, providerFilter, slotFilter, customTagFilter, folderFilter, searchTerm]);
+      }),
+    [items, providerFilter, slotFilter, customTagFilter, folderFilter, searchTerm]
+  );
 
   const updateSlot = async (item, newSlot) => {
     setBusyId(item.id);
@@ -495,8 +501,9 @@ export default function ImageGalleryPage() {
   };
 
   const handleReuse = (item) => {
-    if (!item?.imageUrl) return;
-    navigate(`/admin/submit?reuseImage=${encodeURIComponent(item.imageUrl)}`);
+    if (item?.imageUrl) {
+      navigate(`/admin/submit?reuseImage=${encodeURIComponent(item.imageUrl)}`);
+    }
   };
 
   const handleManualUpload = async () => {
@@ -579,26 +586,13 @@ export default function ImageGalleryPage() {
     );
   };
 
-  const handleToggleSelect = (itemId) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(itemId)) {
-        next.delete(itemId);
-      } else {
-        next.add(itemId);
-      }
-      return next;
-    });
-  };
+  const handleToggleSelect = (itemId) => setSelectedIds((prev) => toggledSelection(prev, itemId));
 
   const handleCreateFolder = () => {
     const folderName = newFolderName.trim().toLowerCase();
-    if (!folderName) {
-      setDeleteError('Folder name cannot be empty');
-      return;
-    }
-    if (folders.includes(folderName)) {
-      setDeleteError('Folder already exists');
+    const problem = newFolderProblem(folderName, folders);
+    if (problem) {
+      setDeleteError(problem);
       return;
     }
     setManualFolders([...manualFolders, folderName].sort());
@@ -609,18 +603,9 @@ export default function ImageGalleryPage() {
 
   const handleDeleteFolder = async (folderName) => {
     const lowerFolderName = folderName.toLowerCase();
-    if (lowerFolderName === 'default') {
-      setDeleteError('Cannot delete Default folder');
-      return;
-    }
-
-    const imagesInFolder = items.filter(
-      (item) => (item.folder || 'default').toLowerCase() === lowerFolderName
-    );
-    if (imagesInFolder.length > 0) {
-      setDeleteError(
-        `Cannot delete folder "${folderName}" - it contains ${imagesInFolder.length} image(s). Move or delete images first.`
-      );
+    const problem = deleteFolderProblem(folderName, items);
+    if (problem) {
+      setDeleteError(problem);
       return;
     }
 
@@ -690,33 +675,12 @@ export default function ImageGalleryPage() {
     }
   };
 
-  const handleRenameImage = async (itemId, newTitle) => {
-    if (!newTitle.trim()) {
-      setDeleteError('Title cannot be empty');
-      return;
-    }
-
-    setBusyId(itemId);
-    try {
-      const item = items.find((it) => it.id === itemId);
-      if (!item) throw new Error('Item not found');
-
-      await postJSON('updateGalleryImageMetadata', {
-        id: itemId,
-        galleryCollection: item.galleryCollection,
-        title: newTitle.trim(),
-      });
-
-      setEditingItemId(null);
-      setEditingTitle('');
-      await fetchGallery();
-    } catch (error) {
-      console.error('Rename error:', error);
-      setDeleteError(`Rename failed: ${error.message || error}`);
-    } finally {
-      setBusyId('');
-    }
-  };
+  const handleRenameImage = (itemId, newTitle) =>
+    renameGalleryImage(
+      { items, setBusyId, setDeleteError, setEditingItemId, setEditingTitle, fetchGallery },
+      itemId,
+      newTitle
+    );
 
   const handleMoveToFolder = async (itemId, newFolder) => {
     setBusyId(itemId);
@@ -1244,33 +1208,16 @@ export default function ImageGalleryPage() {
                 Select/deselect tags to attach or remove from the selected image
               </p>
               <div className="flex flex-wrap gap-2">
-                {allUniqueTags.map((tag) => {
-                  const isSelected = selectedTagsForUpdate.has(tag);
-                  return (
-                    <Badge
-                      key={tag}
-                      variant={isSelected ? 'default' : 'outline'}
-                      className="cursor-pointer gap-2"
-                      onClick={() => {
-                        const newSet = new Set(selectedTagsForUpdate);
-                        if (isSelected) {
-                          newSet.delete(tag);
-                        } else {
-                          newSet.add(tag);
-                        }
-                        setSelectedTagsForUpdate(newSet);
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        readOnly
-                        className="h-3 w-3 cursor-pointer pointer-events-none"
-                      />
-                      {tag}
-                    </Badge>
-                  );
-                })}
+                {allUniqueTags.map((tag) => (
+                  <TagToggle
+                    key={tag}
+                    tag={tag}
+                    selected={selectedTagsForUpdate.has(tag)}
+                    onToggle={() =>
+                      setSelectedTagsForUpdate(toggledSelection(selectedTagsForUpdate, tag))
+                    }
+                  />
+                ))}
               </div>
             </div>
           )}
@@ -1343,7 +1290,7 @@ export default function ImageGalleryPage() {
                   {option.label}
                 </option>
               ))}
-              {providerOptions
+              {providerFilterOptions
                 .filter(
                   (value) =>
                     value !== 'all' &&
@@ -1362,7 +1309,7 @@ export default function ImageGalleryPage() {
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
               title="Filter by Slot"
             >
-              {slotOptions.map((value) => (
+              {slotFilterOptions.map((value) => (
                 <option key={value} value={value}>
                   {value === 'all' ? 'All Slots' : value}
                 </option>
@@ -1377,7 +1324,7 @@ export default function ImageGalleryPage() {
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
               title="Filter by Custom Tag"
             >
-              {customTagOptions.map((value) => (
+              {customTagFilterOptions.map((value) => (
                 <option key={value} value={value}>
                   {value === 'all' ? 'All Custom Tags' : value}
                 </option>
