@@ -33,6 +33,7 @@ import {
 } from '@/lib/imageGallery';
 import {
   PUBLIC_IMAGE_EXTENSIONS,
+  imageExtensionFor,
   publicImageFileProblem,
   uploadImageFile,
 } from '@/lib/imageUpload';
@@ -71,10 +72,6 @@ function slugifyFilename(value = '') {
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, '-')
     .replace(/^-+|-+$/g, '');
-}
-
-function getGalleryFileExtension(file) {
-  return file.name.includes('.') ? file.name.split('.').pop() || 'png' : 'png';
 }
 
 function getGalleryBaseName(file) {
@@ -192,7 +189,18 @@ function buildGalleryUploadData({
   if (!String(file.type || '').startsWith('image/'))
     throw new Error(`"${file.name}" is not an image file.`);
 
-  const extension = getGalleryFileExtension(file);
+  // From the DECLARED TYPE, not the filename (#631). The upload route requires
+  // the path's extension to agree with the content type it is sent, so trusting
+  // the name turned valid files into a 415: Windows writes `.jfif` for a JPEG
+  // saved from a browser, and a PNG someone named `.jpg` was refused the same
+  // way. `handleManualUpload` has already gated the file through
+  // publicImageFileProblem, so this cannot be empty in practice — but an empty
+  // extension would build a path the route rejects for an unrelated-looking
+  // reason, which is worth naming rather than discovering.
+  const extension = imageExtensionFor(file);
+  if (!extension) {
+    throw new Error(`"${file.name}" is not a type this gallery can store.`);
+  }
   const baseName = getGalleryBaseName(file);
   const extractedTags = getGalleryExtractedTags(baseName, pullTagsFromFilename);
   const filenameBase = getGalleryFilenameBase({

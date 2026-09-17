@@ -76,6 +76,25 @@ describe('a gallery upload', () => {
     expect(uploadArgs.container).toBe('covers');
   });
 
+  it('builds the path from the declared type, not the filename', async () => {
+    // `.jfif` is what Windows writes for a JPEG saved from a browser. The
+    // upload route requires the path's extension to agree with the content
+    // type, so trusting the name made a perfectly valid file a 415 (#631).
+    render(<ImageGalleryPage />);
+    await upload([new File([new Uint8Array([1])], 'photo.jfif', { type: 'image/jpeg' })]);
+    await waitFor(() => expect(uploadImageFile).toHaveBeenCalled());
+    const [[args]] = uploadImageFile.mock.calls;
+    expect(args.path.endsWith('.jpg')).toBe(true);
+  });
+
+  it('trusts the type over a filename that contradicts it', async () => {
+    render(<ImageGalleryPage />);
+    await upload([new File([new Uint8Array([1])], 'screenshot.jpg', { type: 'image/png' })]);
+    await waitFor(() => expect(uploadImageFile).toHaveBeenCalled());
+    const [[args]] = uploadImageFile.mock.calls;
+    expect(args.path.endsWith('.png')).toBe(true);
+  });
+
   it('records the URL the route returned, and the ref that can delete the blob', async () => {
     render(<ImageGalleryPage />);
     await upload([png()]);
