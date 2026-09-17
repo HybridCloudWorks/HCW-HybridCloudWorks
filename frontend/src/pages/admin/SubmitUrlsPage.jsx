@@ -8,23 +8,46 @@ import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Upload, Loader2, CheckCircle, AlertCircle, Sparkles, Link2, X } from 'lucide-react';
 import { getJSON } from '@/lib/api';
-import { ensureTldrSectionAtEnd } from '@/lib/contentDraft';
 import { useImagePrompts } from '@/hooks/useImagePrompts';
 import {
   PROVIDER_OPTIONS_WITH_AUTO as PROVIDER_OPTIONS,
   BLOG_LANDING_ZONE_OPTIONS,
 } from '@/config/admin';
 import { resolveMediaUrl } from '@/lib/functionsBase';
-import * as imageStage from '@/components/admin/submit-urls/imageStage';
-import { IMAGE_SLOTS } from '@/components/admin/submit-urls/imageStage';
 import * as draftStage from '@/components/admin/submit-urls/draftStage';
+import {
+  DEFAULT_DRAFT_INSTRUCTION_PROMPT,
+  isSupportedDocumentUrl,
+  isValidHttpUrl,
+} from '@/components/admin/submit-urls/draftStage';
+import * as imageStage from '@/components/admin/submit-urls/imageStage';
+import {
+  EMPTY_SLOT_FILES,
+  EMPTY_SLOT_IDS,
+  EMPTY_SLOT_TEMPLATES,
+  EMPTY_SLOT_URLS,
+  IMAGE_SLOTS,
+} from '@/components/admin/submit-urls/imageStage';
 import * as persistStage from '@/components/admin/submit-urls/persistStage';
-import { parseLineItems } from '@/components/admin/submit-urls/persistStage';
+import * as promptStage from '@/components/admin/submit-urls/promptStage';
+import {
+  applyBuilderSnapshot,
+  readBuilderSnapshot,
+  writeBuilderSnapshot,
+} from '@/components/admin/submit-urls/builderSnapshot';
+import {
+  buildReadinessChecks,
+  canGenerateDraftImages,
+  getCurrentStep,
+  getPreviewSection,
+  getPromptLibraryPagePath,
+  getPublishTargetLabel,
+  getResolvedBlogLandingProvider,
+  getResolvedProvider,
+  inferProviderFromUrl,
+  slugifyTitle,
+} from '@/components/admin/submit-urls/pageMeta';
 import StageFourCard from '@/components/admin/submit-urls/StageFourCard';
-import { isSupportedDocumentUrl, isValidHttpUrl } from '@/components/admin/submit-urls/draftStage';
-
-const DEFAULT_DRAFT_INSTRUCTION_PROMPT =
-  'You are generating a high-quality technical draft article for Hybrid Cloud Works. Use the source URL as the primary source. If supporting documents are provided, incorporate them as additional context. Produce a publication-ready title, concise editorial summary, a structured markdown article draft around 2500-3200 words, and image prompts tailored to the article.';
 
 const CONTENT_TYPE_OPTIONS = [
   { value: 'blog', label: 'Blog' },
@@ -32,13 +55,6 @@ const CONTENT_TYPE_OPTIONS = [
   { value: 'architecture', label: 'Architecture' },
   { value: 'coder_corner', label: 'Coder Corner' },
 ];
-
-const EMPTY_SLOT_TEMPLATES = {
-  hero: '',
-  secondary1: '',
-  secondary2: '',
-  secondary3: '',
-};
 
 const SECTION_BLOCKS_BY_TYPE = {
   blog: [
@@ -209,158 +225,6 @@ const SECTION_BLOCKS_BY_TYPE = {
   ],
 };
 
-const EMPTY_SLOT_FILES = {
-  hero: null,
-  secondary1: null,
-  secondary2: null,
-  secondary3: null,
-};
-
-const EMPTY_SLOT_URLS = {
-  hero: '',
-  secondary1: '',
-  secondary2: '',
-  secondary3: '',
-};
-
-const EMPTY_SLOT_IDS = {
-  hero: '',
-  secondary1: '',
-  secondary2: '',
-  secondary3: '',
-};
-
-const BUILDER_SESSION_STORAGE_KEY = 'hcw-publish-ready-builder-draft';
-
-function toArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-function readBuilderSnapshot() {
-  try {
-    const raw = window.sessionStorage.getItem(BUILDER_SESSION_STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-function applyPrimaryBuilderSnapshot(saved, setters) {
-  const {
-    provider = '',
-    blogLandingProvider = '',
-    contentType = 'blog',
-    title = '',
-    publishedDate = '',
-    sourceUrl = '',
-    kbArticleUrls = [],
-    kbDocumentUrl = '',
-    kbDocumentUrls = [],
-    draftInstructionPrompt = DEFAULT_DRAFT_INSTRUCTION_PROMPT,
-    frameworkSourceUrls = '',
-    frameworkKnowledgePrompt = '',
-    frameworkDiagramPrompt = '',
-    frameworkImagePrompt = '',
-    frameworkConceptSeeds = '',
-  } = saved;
-
-  setters.setProvider(provider);
-  setters.setBlogLandingProvider(blogLandingProvider);
-  setters.setContentType(contentType);
-  setters.setTitle(title);
-  setters.setPublishedDate(publishedDate);
-  setters.setSourceUrl(sourceUrl);
-  setters.setKbArticleUrls(toArray(kbArticleUrls));
-  setters.setKbDocumentUrl(kbDocumentUrl);
-  setters.setKbDocumentUrls(toArray(kbDocumentUrls));
-  setters.setDraftInstructionPrompt(draftInstructionPrompt);
-  setters.setFrameworkSourceUrls(frameworkSourceUrls);
-  setters.setFrameworkKnowledgePrompt(frameworkKnowledgePrompt);
-  setters.setFrameworkDiagramPrompt(frameworkDiagramPrompt);
-  setters.setFrameworkImagePrompt(frameworkImagePrompt);
-  setters.setFrameworkConceptSeeds(frameworkConceptSeeds);
-}
-
-function applyDraftBuilderSnapshot(saved, setters) {
-  const {
-    draftTitle = '',
-    draftSummary = '',
-    draftContent = '',
-    draftTopics = [],
-    draftReady = false,
-    summaryPrompt = '',
-    detailsPrompt = '',
-  } = saved;
-
-  setters.setDraftTitle(draftTitle);
-  setters.setDraftSummary(draftSummary);
-  setters.setDraftContent(ensureTldrSectionAtEnd(draftContent));
-  setters.setDraftTopics(toArray(draftTopics));
-  setters.setDraftReady(Boolean(draftReady));
-  setters.setSummaryPrompt(summaryPrompt);
-  setters.setDetailsPrompt(detailsPrompt);
-}
-
-function applyImageBuilderSnapshot(saved, setters) {
-  const {
-    generatedImages = {},
-    generatedImageIds = {},
-    selectedUploaded = {},
-    selectedGenerated = {},
-    aiTargets = {},
-    slotUrls = {},
-  } = saved;
-
-  setters.setGeneratedImages({ ...EMPTY_SLOT_URLS, ...generatedImages });
-  setters.setGeneratedImageIds({ ...EMPTY_SLOT_IDS, ...generatedImageIds });
-  setters.setSelectedUploaded((prev) => ({ ...prev, ...selectedUploaded }));
-  setters.setSelectedGenerated((prev) => ({ ...prev, ...selectedGenerated }));
-  setters.setAiTargets((prev) => ({ ...prev, ...aiTargets }));
-  setters.setSlotUrls({ ...EMPTY_SLOT_URLS, ...slotUrls });
-}
-
-function applyBuilderSnapshot(saved, setters) {
-  applyPrimaryBuilderSnapshot(saved, setters);
-  applyDraftBuilderSnapshot(saved, setters);
-  applyImageBuilderSnapshot(saved, setters);
-}
-
-function _hasSelectedImage(urlsBySlot, selectedBySlot) {
-  return Object.entries(urlsBySlot).some(
-    ([slot, url]) => Boolean(url) && Boolean(selectedBySlot[slot])
-  );
-}
-
-function canGenerateDraftImages(summaryPrompt, detailsPrompt, draftReady) {
-  return summaryPrompt.trim().length > 0 && detailsPrompt.trim().length > 0 && draftReady;
-}
-
-function slugifyTitle(value = '') {
-  return String(value)
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9\s-]/g, '')
-    .replace(/\s+/g, '-')
-    .slice(0, 80);
-}
-
-function inferProviderFromUrl(url = '') {
-  const normalized = String(url).toLowerCase();
-  if (normalized.includes('azure') || normalized.includes('microsoft')) return 'Azure';
-  if (normalized.includes('aws') || normalized.includes('amazon')) return 'Aws';
-  if (
-    normalized.includes('gcp') ||
-    normalized.includes('google') ||
-    normalized.includes('cloud.google')
-  )
-    return 'Gcp';
-  if (normalized.includes('github')) return 'Github';
-  if (normalized.includes('terraform')) return 'Terraform';
-  if (normalized.includes('finops')) return 'Finops';
-  return '';
-}
-
 function renderGalleryContent({ galleryLoading, galleryItems, deleteGalleryItem }) {
   if (galleryLoading) {
     return <p className="text-xs text-muted-foreground">Loading saved gallery items...</p>;
@@ -404,163 +268,6 @@ function renderGalleryContent({ galleryLoading, galleryItems, deleteGalleryItem 
       Generate images to save them here for inline review and deletion.
     </p>
   );
-}
-
-function getResolvedProvider(provider, inferredProvider) {
-  return provider || inferredProvider || '';
-}
-
-function getResolvedBlogLandingProvider(contentType, blogLandingProvider, resolvedProvider) {
-  if (contentType !== 'blog') return resolvedProvider;
-  return blogLandingProvider || resolvedProvider;
-}
-
-function getPreviewSection(contentType) {
-  if (contentType === 'framework') return 'frameworks';
-  if (contentType === 'architecture') return 'architecture-designs';
-  if (contentType === 'coder_corner') return 'code';
-  return 'blog';
-}
-
-function getPromptLibraryPagePath(contentType, providerSegment) {
-  const normalizedProvider = String(providerSegment || '')
-    .trim()
-    .toLowerCase();
-  if (!normalizedProvider) return '';
-
-  if (contentType === 'framework') return `/${normalizedProvider}/frameworks`;
-  if (contentType === 'architecture') return `/${normalizedProvider}/architecture-designs`;
-  if (contentType === 'coder_corner') return `/${normalizedProvider}/code`;
-  return `/${normalizedProvider}/blog`;
-}
-
-function getCurrentStep({
-  hasSourceUrls,
-  draftReady,
-  hasUploadedImages,
-  hasSelectedGeneratedImages,
-}) {
-  if (!hasSourceUrls) return 1;
-  if (!draftReady) return 2;
-  if (!hasUploadedImages && !hasSelectedGeneratedImages) return 3;
-  return 4;
-}
-
-function getPublishTargetLabel(contentType) {
-  switch (contentType) {
-    case 'framework':
-      return 'Framework';
-    case 'architecture':
-      return 'Architecture';
-    case 'coder_corner':
-      return 'Coder Corner';
-    case 'blog':
-    default:
-      return 'Blog';
-  }
-}
-
-function buildReadinessChecks({
-  sourceUrl,
-  contentType,
-  frameworkSourceUrls,
-  resolvedProvider,
-  resolvedBlogLandingProvider,
-  inferredProvider,
-  previewSlug,
-  previewPath,
-  draftTitle,
-  title,
-  draftSummary,
-  draftContent,
-  hasHeroSelected,
-  sectionBlocks,
-}) {
-  const normalizedContent = draftContent.trim();
-  const presentHeadings = sectionBlocks.map((section) => ({
-    ...section,
-    present: normalizedContent.includes(section.heading),
-  }));
-  const requiredSectionsComplete = presentHeadings
-    .filter((section) => section.required)
-    .every((section) => section.present);
-
-  return [
-    {
-      key: 'url',
-      label: 'Valid source URL',
-      done: isValidHttpUrl(sourceUrl),
-      hint: 'Paste a full http(s) URL before generating draft content.',
-    },
-    {
-      key: 'framework-sources',
-      label: 'Framework source URLs captured',
-      done:
-        contentType !== 'framework' ||
-        parseLineItems(frameworkSourceUrls).filter((url) => isValidHttpUrl(url)).length > 0,
-      hint:
-        contentType !== 'framework'
-          ? 'Not required for non-framework content types.'
-          : 'Provide one or more official documentation URLs (one per line).',
-    },
-    {
-      key: 'provider',
-      label: 'Cloud provider selected',
-      done: Boolean(resolvedProvider),
-      hint: inferredProvider
-        ? `Detected provider from URL: ${inferredProvider}.`
-        : 'Select provider manually or keep auto-detect if unsure.',
-    },
-    {
-      key: 'landing-zone',
-      label: 'Blog landing zone selected',
-      done: contentType !== 'blog' || Boolean(resolvedBlogLandingProvider),
-      hint:
-        contentType !== 'blog'
-          ? 'Not required for non-blog content types.'
-          : `Target landing zone: /${(resolvedBlogLandingProvider || 'provider').toLowerCase()}/blog`,
-    },
-    {
-      key: 'slug',
-      label: 'Publication slug ready',
-      done: previewSlug.length >= 8,
-      hint: previewSlug ? previewPath : 'Add/adjust title to generate a clean slug.',
-    },
-    {
-      key: 'title',
-      label: 'Publishable title',
-      done: (draftTitle || title).trim().length >= 12,
-      hint: 'Aim for a descriptive title (12+ characters).',
-    },
-    {
-      key: 'summary',
-      label: 'Summary complete',
-      done: draftSummary.trim().length >= 80,
-      hint: 'Write a summary that clearly explains value and outcome.',
-    },
-    {
-      key: 'content',
-      label: 'Content body complete',
-      done: normalizedContent.length >= 700,
-      hint: 'Content should be substantial and publication-ready.',
-    },
-    {
-      key: 'schema-sections',
-      label: 'Required section blocks present',
-      done: requiredSectionsComplete,
-      hint:
-        presentHeadings
-          .filter((section) => section.required && !section.present)
-          .map((section) => section.title)
-          .join(', ') || 'All required sections are present.',
-    },
-    {
-      key: 'hero',
-      label: 'At least one image selected',
-      done: hasHeroSelected,
-      hint: 'Select one or more uploaded or AI-generated images to include in the draft.',
-    },
-  ];
 }
 
 function WorkflowHeader({ currentStep, readinessComplete, readinessScore, readinessTotal }) {
@@ -1523,11 +1230,7 @@ export default function SubmitUrlsPage() {
       slotUrls,
     };
 
-    try {
-      window.sessionStorage.setItem(BUILDER_SESSION_STORAGE_KEY, JSON.stringify(snapshot));
-    } catch {
-      // Ignore storage issues
-    }
+    writeBuilderSnapshot(snapshot);
   }, [
     builderStateLoaded,
     provider,
@@ -1721,165 +1424,71 @@ export default function SubmitUrlsPage() {
     return getPromptLibraryPagePath(contentType, providerSegment);
   }, [contentType, resolvedBlogLandingProvider, resolvedProvider]);
 
-  const applyPromptSelection = React.useCallback(
-    async (setName, promptName) => {
-      if (!setName) {
-        setSummaryPrompt('');
-        setDetailsPrompt('');
-        setSelectedSlotTemplates(EMPTY_SLOT_TEMPLATES);
-        return;
-      }
-
-      const [setData, promptData] = await Promise.all([
-        fetchPromptSet(setName),
-        promptName ? fetchPrompt(setName, promptName) : Promise.resolve(null),
-      ]);
-
-      setSummaryPrompt(setData?.primaryPrompt || '');
-      setDetailsPrompt(promptData?.additionalParameters || '');
-      setSelectedSlotTemplates({
-        ...EMPTY_SLOT_TEMPLATES,
-        ...(promptData?.slotTemplates || {}),
-      });
-    },
-    [fetchPrompt, fetchPromptSet]
-  );
+  /**
+   * The prompt library's machinery is in promptStage.js over this bag (#634).
+   * Built inside each hook below rather than once in the body, because the
+   * load is an effect and a bag rebuilt every render cannot be a dependency.
+   */
+  const promptBag = () => ({
+    promptLibraryPagePath,
+    selectedPromptSet,
+    fetchPageAssignment,
+    fetchPrompt,
+    fetchPromptNames,
+    fetchPromptSet,
+    fetchPromptSets,
+    savePageAssignment,
+    setDetailsPrompt,
+    setPromptLibraryError,
+    setPromptLibraryLoading,
+    setPromptLibraryStatus,
+    setPromptNames,
+    setPromptSets,
+    setSelectedPromptName,
+    setSelectedPromptSet,
+    setSelectedSlotTemplates,
+    setSummaryPrompt,
+  });
 
   React.useEffect(() => {
     let cancelled = false;
-
-    async function loadPromptLibrary() {
-      if (!promptLibraryPagePath) {
-        setPromptSets([]);
-        setPromptNames([]);
-        setSelectedPromptSet('');
-        setSelectedPromptName('');
-        setSelectedSlotTemplates(EMPTY_SLOT_TEMPLATES);
-        setPromptLibraryStatus('Select a provider/page target to load saved prompts.');
-        setPromptLibraryError('');
-        return;
-      }
-
-      setPromptLibraryLoading(true);
-      setPromptLibraryError('');
-      try {
-        const [allSets, assignment] = await Promise.all([
-          fetchPromptSets(),
-          fetchPageAssignment(promptLibraryPagePath),
-        ]);
-
-        if (cancelled) return;
-
-        setPromptSets(allSets);
-
-        const assignedSetName = String(assignment?.setName || '').trim();
-        const assignedPromptName = String(assignment?.promptName || '').trim();
-
-        if (!assignedSetName) {
-          setPromptNames([]);
-          setSelectedPromptSet('');
-          setSelectedPromptName('');
-          setSelectedSlotTemplates(EMPTY_SLOT_TEMPLATES);
-          setPromptLibraryStatus(
-            allSets.length > 0
-              ? `No Prompt Set assigned to ${promptLibraryPagePath} yet.`
-              : 'No saved Prompt Sets found yet.'
-          );
-          return;
-        }
-
-        const names = await fetchPromptNames(assignedSetName);
-        if (cancelled) return;
-
-        setPromptNames(names);
-        setSelectedPromptSet(assignedSetName);
-        setSelectedPromptName(assignedPromptName);
-        setPromptLibraryStatus(
-          assignedPromptName
-            ? `Assigned: ${assignedSetName} / ${assignedPromptName}`
-            : `Assigned: ${assignedSetName}`
-        );
-
-        await applyPromptSelection(assignedSetName, assignedPromptName);
-      } catch (err) {
-        if (cancelled) return;
-        setPromptLibraryError(err?.message || 'Failed to load saved prompts.');
-      } finally {
-        if (!cancelled) {
-          setPromptLibraryLoading(false);
-        }
-      }
-    }
-
-    loadPromptLibrary();
+    promptStage.loadPromptLibrary(
+      {
+        promptLibraryPagePath,
+        fetchPageAssignment,
+        fetchPrompt,
+        fetchPromptNames,
+        fetchPromptSet,
+        fetchPromptSets,
+        setDetailsPrompt,
+        setPromptLibraryError,
+        setPromptLibraryLoading,
+        setPromptLibraryStatus,
+        setPromptNames,
+        setPromptSets,
+        setSelectedPromptName,
+        setSelectedPromptSet,
+        setSelectedSlotTemplates,
+        setSummaryPrompt,
+      },
+      () => cancelled
+    );
 
     return () => {
       cancelled = true;
     };
   }, [
-    applyPromptSelection,
     fetchPageAssignment,
+    fetchPrompt,
     fetchPromptNames,
+    fetchPromptSet,
     fetchPromptSets,
     promptLibraryPagePath,
   ]);
 
-  const handleSelectPromptSet = React.useCallback(
-    async (setName) => {
-      setSelectedPromptSet(setName);
-      setSelectedPromptName('');
-      setPromptLibraryError('');
-
-      if (!promptLibraryPagePath) return;
-
-      if (!setName) {
-        setPromptNames([]);
-        await applyPromptSelection('', '');
-        setPromptLibraryStatus(`No Prompt Set assigned to ${promptLibraryPagePath} yet.`);
-        await savePageAssignment(promptLibraryPagePath, '', '');
-        return;
-      }
-
-      setPromptLibraryLoading(true);
-      try {
-        const names = await fetchPromptNames(setName);
-        setPromptNames(names);
-        await applyPromptSelection(setName, '');
-        setPromptLibraryStatus(`Assigned: ${setName}`);
-        await savePageAssignment(promptLibraryPagePath, setName, '');
-      } catch (err) {
-        setPromptLibraryError(err?.message || 'Failed to load Prompt Set.');
-      } finally {
-        setPromptLibraryLoading(false);
-      }
-    },
-    [applyPromptSelection, fetchPromptNames, promptLibraryPagePath, savePageAssignment]
-  );
-
-  const handleSelectPromptName = React.useCallback(
-    async (promptName) => {
-      setSelectedPromptName(promptName);
-      setPromptLibraryError('');
-
-      if (!promptLibraryPagePath || !selectedPromptSet) return;
-
-      setPromptLibraryLoading(true);
-      try {
-        await applyPromptSelection(selectedPromptSet, promptName);
-        await savePageAssignment(promptLibraryPagePath, selectedPromptSet, promptName);
-        setPromptLibraryStatus(
-          promptName
-            ? `Assigned: ${selectedPromptSet} / ${promptName}`
-            : `Assigned: ${selectedPromptSet}`
-        );
-      } catch (err) {
-        setPromptLibraryError(err?.message || 'Failed to load Prompt Name.');
-      } finally {
-        setPromptLibraryLoading(false);
-      }
-    },
-    [applyPromptSelection, promptLibraryPagePath, savePageAssignment, selectedPromptSet]
-  );
+  const handleSelectPromptSet = (setName) => promptStage.selectPromptSet(promptBag(), setName);
+  const handleSelectPromptName = (promptName) =>
+    promptStage.selectPromptName(promptBag(), promptName);
 
   const resetGeneratedDraftAssets = React.useCallback(() => {
     setGeneratedImages({ ...EMPTY_SLOT_URLS });

@@ -11,6 +11,15 @@
 import { postJSON } from '@/lib/api';
 import { ensureTldrSectionAtEnd } from '@/lib/contentDraft';
 
+/**
+ * What the generator is told when the operator has not said otherwise.
+ *
+ * Editable in Stage 2 and carried in the session snapshot, so changing it
+ * here changes only the default a fresh draft starts from.
+ */
+export const DEFAULT_DRAFT_INSTRUCTION_PROMPT =
+  'You are generating a high-quality technical draft article for Hybrid Cloud Works. Use the source URL as the primary source. If supporting documents are provided, incorporate them as additional context. Produce a publication-ready title, concise editorial summary, a structured markdown article draft around 2500-3200 words, and image prompts tailored to the article.';
+
 /** 4 MB, matched by the generate-draft function on the other side. */
 export const MAX_STAGE_TWO_FILE_BYTES = 4 * 1024 * 1024;
 

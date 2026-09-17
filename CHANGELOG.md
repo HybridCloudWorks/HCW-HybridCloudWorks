@@ -104,6 +104,42 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Stage 1's machinery moves out of SubmitUrlsPage (#634).** Last of the
+  machinery; only the Stage cards' markup is left.
+
+  Three modules: `pageMeta.js` for the pure derivations, `promptStage.js` for
+  the prompt library, and `builderSnapshot.js` for the sessionStorage draft.
+  `loadPromptLibrary` (CCN 16) and `inferProviderFromUrl` (CCN 11) are gone —
+  the first split so its four cancellation checks are no longer tangled with
+  its error handling, the second replaced by a table.
+
+  **Three parallel switches became one table.** `getPreviewSection`,
+  `getPublishTargetLabel` and `getPromptLibraryPagePath` each carried their own
+  copy of the content-type mapping, so adding a type meant three edits and
+  three chances to miss one.
+
+  **The prompt library's status lines were each built twice** — once in the
+  load effect, once in the matching change handler — so the wording could drift
+  between the page loading an assignment and an operator making the same one by
+  hand. One definition each now.
+
+  **The snapshot's read and write lived apart**, a module-level reader and an
+  inline effect, which is how two lists of the same fields end up out of sight
+  of each other. Both are in one module with a test that fails if a setter is
+  added to one list and forgotten in the other.
+
+  `_hasSelectedImage` was declared once and read nowhere. That is the second
+  dead declaration found in this file hiding behind a leading underscore, after
+  `_MAX_STAGE_TWO_SUPPORTING_FILES` in #636 — the `no-unused-vars` exemption
+  that makes the prefix useful also makes dead code invisible.
+
+  Also unified: the uploaded-wins-over-generated rule, which #637 left written
+  twice in `imageStage.js`. One `slotImageSources` now, read by both. All 31 of
+  that module's existing tests pass unchanged, which is the proof.
+
+  Tests 114 to 175. The page is 2,175 lines to 1,784, its total CCN 268 to 164,
+  and its returns 20 to 11.
+
 - **Stage 4's persist machinery and StageFourCard move out of SubmitUrlsPage
   (#634).** Third of four.
 
