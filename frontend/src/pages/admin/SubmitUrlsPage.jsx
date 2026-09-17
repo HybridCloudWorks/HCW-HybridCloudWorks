@@ -7,20 +7,20 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Upload, Loader2, CheckCircle, AlertCircle, Sparkles, Link2, X } from 'lucide-react';
-import { postJSON, getJSON } from '@/lib/api';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import { getPublishTargetForType, getPublicSectionForTarget } from '@/lib/contentModel';
+import { getJSON } from '@/lib/api';
 import { ensureTldrSectionAtEnd } from '@/lib/contentDraft';
 import { useImagePrompts } from '@/hooks/useImagePrompts';
 import {
   PROVIDER_OPTIONS_WITH_AUTO as PROVIDER_OPTIONS,
   BLOG_LANDING_ZONE_OPTIONS,
-  ADMIN_ROUTES,
 } from '@/config/admin';
 import { resolveMediaUrl } from '@/lib/functionsBase';
 import * as imageStage from '@/components/admin/submit-urls/imageStage';
+import { IMAGE_SLOTS } from '@/components/admin/submit-urls/imageStage';
 import * as draftStage from '@/components/admin/submit-urls/draftStage';
+import * as persistStage from '@/components/admin/submit-urls/persistStage';
+import { parseLineItems } from '@/components/admin/submit-urls/persistStage';
+import StageFourCard from '@/components/admin/submit-urls/StageFourCard';
 import { isSupportedDocumentUrl, isValidHttpUrl } from '@/components/admin/submit-urls/draftStage';
 
 const DEFAULT_DRAFT_INSTRUCTION_PROMPT =
@@ -31,13 +31,6 @@ const CONTENT_TYPE_OPTIONS = [
   { value: 'framework', label: 'Framework' },
   { value: 'architecture', label: 'Architecture' },
   { value: 'coder_corner', label: 'Coder Corner' },
-];
-
-const IMAGE_SLOTS = [
-  { key: 'hero', label: 'Hero Image' },
-  { key: 'secondary1', label: 'Secondary Image 1' },
-  { key: 'secondary2', label: 'Secondary Image 2' },
-  { key: 'secondary3', label: 'Secondary Image 3' },
 ];
 
 const EMPTY_SLOT_TEMPLATES = {
@@ -368,39 +361,6 @@ function inferProviderFromUrl(url = '') {
   return '';
 }
 
-function parseLineItems(value = '') {
-  return String(value)
-    .split(/\n|,|;/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function collectSelectedSlotImages({
-  slotUrls,
-  selectedUploaded,
-  generatedImages,
-  selectedGenerated,
-}) {
-  return IMAGE_SLOTS.map(({ key, label }) => {
-    const uploadedUrl = selectedUploaded[key] ? slotUrls[key] : '';
-    const generatedUrl = selectedGenerated[key] ? generatedImages[key] : '';
-    const selectedUrl = uploadedUrl || generatedUrl || '';
-
-    return {
-      slot: key,
-      label,
-      url: selectedUrl,
-      source: getImageSourceLabel(uploadedUrl, generatedUrl),
-    };
-  }).filter((item) => Boolean(item.url));
-}
-
-function getImageSourceLabel(uploadedUrl, generatedUrl) {
-  if (uploadedUrl) return 'uploaded';
-  if (generatedUrl) return 'generated';
-  return '';
-}
-
 function renderGalleryContent({ galleryLoading, galleryItems, deleteGalleryItem }) {
   if (galleryLoading) {
     return <p className="text-xs text-muted-foreground">Loading saved gallery items...</p>;
@@ -446,110 +406,6 @@ function renderGalleryContent({ galleryLoading, galleryItems, deleteGalleryItem 
   );
 }
 
-function buildPreviewImageSelection({
-  slotUrls,
-  selectedUploaded,
-  generatedImages,
-  selectedGenerated,
-}) {
-  const selectedImages = collectSelectedSlotImages({
-    slotUrls,
-    selectedUploaded,
-    generatedImages,
-    selectedGenerated,
-  });
-
-  const heroImageUrl = selectedImages[0]?.url || '';
-  const secondaryImageUrls = selectedImages.slice(1).map((item) => item.url);
-  const aiImageUrls = Object.fromEntries(
-    selectedImages
-      .filter((item) => item.source === 'generated')
-      .map((item) => [item.slot, item.url])
-  );
-
-  return { heroImageUrl, secondaryImageUrls, aiImageUrls, selectedImages };
-}
-
-function buildContentCreatePayload({
-  sourceUrl,
-  sourceUrls,
-  provider,
-  blogLandingProvider,
-  draftTitle,
-  title,
-  draftSummary,
-  draftContent,
-  draftTopics,
-  summaryPrompt,
-  detailsPrompt,
-  publishedDate,
-  heroImageUrl,
-  secondaryImageUrls,
-  aiImageUrls,
-  contentType,
-  frameworkSourceUrls,
-  frameworkKnowledgePrompt,
-  frameworkDiagramPrompt,
-  frameworkImagePrompt,
-  frameworkConceptSeeds,
-}) {
-  const normalizedContent = ensureTldrSectionAtEnd(draftContent || '');
-  const parsedFrameworkSources = parseLineItems(frameworkSourceUrls).filter((url) =>
-    isValidHttpUrl(url)
-  );
-  const parsedConceptSeeds = parseLineItems(frameworkConceptSeeds);
-  const publishTarget = getPublishTargetForType(contentType);
-
-  return {
-    url: sourceUrl.trim(),
-    sourceUrl: sourceUrl.trim(),
-    kbArticleUrls: Array.isArray(sourceUrls) ? sourceUrls : [],
-    'CD Url': sourceUrl.trim(),
-    source: 'manual_url',
-    contentStatus: 'inspected',
-    inspectTrigger: false,
-    storageCollection: 'content',
-    type: contentType,
-    publishTarget,
-    cloudProvider: provider || null,
-    ...(provider && { 'Cloud Provider': provider }),
-    ...(blogLandingProvider && {
-      landingProvider: blogLandingProvider,
-      targetLandingZone: `/${blogLandingProvider.toLowerCase()}/${getPublicSectionForTarget(publishTarget)}`,
-    }),
-    Title: draftTitle || title || '',
-    title: draftTitle || title || '',
-    Summary: draftSummary || '',
-    summary: draftSummary || '',
-    Content: normalizedContent,
-    content: normalizedContent,
-    postContent: normalizedContent,
-    keyTopics: draftTopics,
-    imagePromptSeed: summaryPrompt,
-    imagePromptDetails: detailsPrompt,
-    summaryPrompt,
-    detailsPrompt,
-    ...(publishedDate && { 'Published At': new Date(publishedDate) }),
-    ...(heroImageUrl && {
-      heroImageUrl,
-      contentImageUrl: heroImageUrl,
-      altCoverImage: heroImageUrl,
-    }),
-    ...(secondaryImageUrls.length > 0 && { secondaryImageUrls }),
-    aiImageUrls,
-    ...(contentType === 'framework' && {
-      frameworkSourceUrls: parsedFrameworkSources,
-      officialSources: parsedFrameworkSources,
-      frameworkKnowledgePrompt: frameworkKnowledgePrompt.trim(),
-      frameworkDiagramPrompt: frameworkDiagramPrompt.trim(),
-      frameworkImagePrompt: frameworkImagePrompt.trim(),
-      frameworkConceptSeeds: parsedConceptSeeds,
-    }),
-    Live: false,
-    approvedForBlog: false,
-  };
-}
-
 function getResolvedProvider(provider, inferredProvider) {
   return provider || inferredProvider || '';
 }
@@ -588,18 +444,6 @@ function getCurrentStep({
   if (!draftReady) return 2;
   if (!hasUploadedImages && !hasSelectedGeneratedImages) return 3;
   return 4;
-}
-
-function getQueueReviewPath(contentId) {
-  return `${ADMIN_ROUTES.REVIEW.replace(':id', contentId)}?source=content`;
-}
-
-function getEditorPath(contentId) {
-  return ADMIN_ROUTES.EDITOR.replace(':id', contentId);
-}
-
-function formatSaveLabel(contentType) {
-  return `${getPublishTargetLabel(contentType)} Draft`;
 }
 
 function getPublishTargetLabel(contentType) {
@@ -1476,221 +1320,6 @@ function StageThreeCard({
   );
 }
 
-function StageFourCard({
-  draftTitle,
-  setDraftTitle,
-  title,
-  draftSummary,
-  setDraftSummary,
-  sectionBlocks,
-  draftContent,
-  setDraftContent,
-  draftReady,
-  insertSectionBlock,
-  draftTopics,
-  resolveSlotImage,
-  previewPath,
-  readinessChecks,
-  savedContentId,
-  canPreview,
-  readinessComplete,
-  previewSaving,
-  createAndOpenSaving,
-  handleCreateAndOpenEditor,
-  contentType,
-}) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Stage 4: Content Draft</CardTitle>
-        <CardDescription>
-          Edit content with schema blocks, validate readiness, and preview using live-style layout.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="space-y-2">
-          <Label className="text-xs">Generated Title</Label>
-          <Input
-            value={draftTitle}
-            onChange={(e) => setDraftTitle(e.target.value)}
-            placeholder="Title will be generated after Stage 2 Submit"
-            disabled={!draftReady}
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label className="text-xs">Generated Summary</Label>
-          <Textarea
-            value={draftSummary}
-            onChange={(e) => setDraftSummary(e.target.value)}
-            rows={4}
-            placeholder="Summary will be generated after Stage 2 Submit"
-            disabled={!draftReady}
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label className="text-xs">Schema Section Blocks</Label>
-          <p className="text-xs text-muted-foreground">
-            Use these buttons to insert the required sections named in the readiness checklist.
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {sectionBlocks.map((section) => {
-              const exists = draftContent.includes(section.heading);
-              return (
-                <Button
-                  key={section.key}
-                  type="button"
-                  size="sm"
-                  variant={exists ? 'default' : 'outline'}
-                  onClick={() => insertSectionBlock(section)}
-                  disabled={!draftReady}
-                >
-                  {exists ? '✓ ' : ''}
-                  {section.title}
-                </Button>
-              );
-            })}
-          </div>
-        </div>
-
-        {draftTopics.length > 0 && (
-          <div className="flex flex-wrap gap-2">
-            {draftTopics.map((topic) => (
-              <Badge key={topic} variant="outline">
-                {topic}
-              </Badge>
-            ))}
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 border-t border-border pt-4">
-          <div className="space-y-2">
-            <Label className="text-xs">Editor (Markdown)</Label>
-            <Textarea
-              value={draftContent}
-              onChange={(e) => setDraftContent(e.target.value)}
-              rows={20}
-              placeholder="Article content will be generated after Stage 2 Submit"
-              disabled={!draftReady}
-              className="font-mono"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label className="text-xs">Final Page Preview (Live-style)</Label>
-            <Card className="overflow-hidden">
-              <CardContent className="p-0">
-                {resolveSlotImage('hero') && (
-                  <img src={resolveSlotImage('hero')} alt="" className="w-full h-48 object-cover" />
-                )}
-                <div className="p-4 space-y-3">
-                  <div className="text-xs text-muted-foreground">{previewPath}</div>
-                  <h3 className="text-xl font-bold">
-                    {draftTitle || title || 'Untitled content draft'}
-                  </h3>
-                  <p className="text-sm text-muted-foreground">
-                    {draftSummary || 'No summary yet.'}
-                  </p>
-                  {draftTopics.length > 0 && (
-                    <div className="flex flex-wrap gap-2">
-                      {draftTopics.slice(0, 6).map((topic) => (
-                        <Badge key={topic} variant="outline">
-                          {topic}
-                        </Badge>
-                      ))}
-                    </div>
-                  )}
-                  <div className="prose prose-sm dark:prose-invert max-w-none border-t border-border pt-3 max-h-105 overflow-y-auto">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {draftContent || '_Draft content preview appears here._'}
-                    </ReactMarkdown>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-
-        <Card className="border-border/60">
-          <CardHeader>
-            <CardTitle className="text-sm">Publish Readiness Checklist</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {readinessChecks.map((check) => (
-              <div key={check.key} className="flex items-start gap-2 text-sm">
-                {check.done ? (
-                  <CheckCircle className="h-4 w-4 text-green-600 mt-0.5" />
-                ) : (
-                  <AlertCircle className="h-4 w-4 text-amber-600 mt-0.5" />
-                )}
-                <div>
-                  <p className={check.done ? 'text-foreground' : 'text-muted-foreground'}>
-                    {check.label}
-                  </p>
-                  {!check.done && (
-                    <p className="text-xs text-muted-foreground">
-                      {check.key === 'schema-sections'
-                        ? `${check.hint}. Add them using the Schema Section Blocks buttons above.`
-                        : check.hint}
-                    </p>
-                  )}
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-
-        <div className="border-t border-border pt-4 flex items-center justify-between gap-3">
-          <div className="text-xs text-muted-foreground space-y-1">
-            <p>Draft ready: {draftReady ? 'Yes' : 'No'}</p>
-            <p>Images selected/uploaded: {canPreview ? 'Yes' : 'No'}</p>
-            <p>Readiness complete: {readinessComplete ? 'Yes' : 'No'}</p>
-            {savedContentId && (
-              <p>
-                Saved content:{' '}
-                <a
-                  href={getQueueReviewPath(savedContentId)}
-                  className="text-blue-600 hover:underline"
-                >
-                  {savedContentId.slice(0, 8)}
-                </a>
-              </p>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handleCreateAndOpenEditor}
-              disabled={createAndOpenSaving || previewSaving || !canPreview || !readinessComplete}
-              className="gap-1"
-            >
-              {createAndOpenSaving ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Link2 className="h-4 w-4" />
-              )}
-              Create + Open Editor
-            </Button>
-            <Button
-              type="submit"
-              disabled={previewSaving || createAndOpenSaving || !canPreview || !readinessComplete}
-              className="gap-1"
-            >
-              {previewSaving ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <CheckCircle className="h-4 w-4" />
-              )}
-              Save {formatSaveLabel(contentType)}
-            </Button>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
 function FeedbackCard({ variant, message, contentId }) {
   const isSuccess = variant === 'success';
   const borderClass = isSuccess
@@ -2356,86 +1985,45 @@ export default function SubmitUrlsPage() {
   const deleteGalleryItem = (item) => imageStage.deleteGalleryItem(imageState, item);
   const resolveSlotImage = (slot) => imageStage.resolveSlotImage(imageState, slot);
 
-  const persistContentItem = async () => {
-    if (!canPreview || !readinessComplete) return null;
-
-    const { heroImageUrl, secondaryImageUrls, aiImageUrls } = buildPreviewImageSelection({
-      slotUrls,
-      selectedUploaded,
-      generatedImages,
-      selectedGenerated,
-    });
-
-    try {
-      const payload = buildContentCreatePayload({
-        sourceUrl: kbArticleUrls[0] || sourceUrl,
-        sourceUrls: kbArticleUrls,
-        provider: resolvedProvider,
-        blogLandingProvider: resolvedBlogLandingProvider,
-        draftTitle,
-        title,
-        draftSummary,
-        draftContent,
-        draftTopics,
-        summaryPrompt,
-        detailsPrompt,
-        publishedDate,
-        heroImageUrl,
-        secondaryImageUrls,
-        aiImageUrls,
-        contentType,
-        frameworkSourceUrls,
-        frameworkKnowledgePrompt,
-        frameworkDiagramPrompt,
-        frameworkImagePrompt,
-        frameworkConceptSeeds,
-      });
-
-      const response = await postJSON('createContentItem', {
-        data: payload,
-      });
-
-      const contentId = response?.contentId || '';
-      setSavedContentId(contentId);
-      return contentId;
-    } catch (err) {
-      setError(err.message || 'Failed to save preview to content collection.');
-      return null;
-    }
+  /**
+   * Stage 4 is the only stage that writes anything durable; its machinery is
+   * in persistStage.js over this bag (#634).
+   */
+  const persistState = {
+    canPreview,
+    contentType,
+    draftContent,
+    draftSummary,
+    draftTitle,
+    draftTopics,
+    detailsPrompt,
+    frameworkConceptSeeds,
+    frameworkDiagramPrompt,
+    frameworkImagePrompt,
+    frameworkKnowledgePrompt,
+    frameworkSourceUrls,
+    generatedImages,
+    kbArticleUrls,
+    publishedDate,
+    readinessComplete,
+    resolvedBlogLandingProvider,
+    resolvedProvider,
+    selectedGenerated,
+    selectedUploaded,
+    slotUrls,
+    sourceUrl,
+    summaryPrompt,
+    title,
+    navigate,
+    setCreateAndOpenSaving,
+    setError,
+    setPreviewSaving,
+    setResult,
+    setSavedContentId,
   };
 
-  const handlePreviewSave = async (e) => {
-    e.preventDefault();
-    if (!canPreview || !readinessComplete) return;
-
-    setPreviewSaving(true);
-    setError('');
-    setResult(null);
-    try {
-      const contentId = await persistContentItem();
-      if (contentId) {
-        setResult({ stage: 4, message: 'Draft saved to content collection.', contentId });
-      }
-    } finally {
-      setPreviewSaving(false);
-    }
-  };
-
-  const handleCreateAndOpenEditor = async () => {
-    if (!canPreview || !readinessComplete) return;
-
-    setCreateAndOpenSaving(true);
-    setError('');
-    setResult(null);
-    try {
-      const contentId = await persistContentItem();
-      if (contentId) {
-        navigate(getEditorPath(contentId));
-      }
-    } finally {
-      setCreateAndOpenSaving(false);
-    }
-  };
+  const handlePreviewSave = (e) => persistStage.savePreview(persistState, e);
+  const handleCreateAndOpenEditor = () => persistStage.createAndOpenEditor(persistState);
 
   const generatedSlots = IMAGE_SLOTS.filter(({ key }) => generatedImages[key]);
 
@@ -2569,7 +2157,7 @@ export default function SubmitUrlsPage() {
           previewSaving={previewSaving}
           createAndOpenSaving={createAndOpenSaving}
           handleCreateAndOpenEditor={handleCreateAndOpenEditor}
-          contentType={contentType}
+          saveLabel={`${getPublishTargetLabel(contentType)} Draft`}
         />
       </form>
 

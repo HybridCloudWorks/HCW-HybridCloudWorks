@@ -104,6 +104,38 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Stage 4's persist machinery and StageFourCard move out of SubmitUrlsPage
+  (#634).** Third of four.
+
+  The create payload and the two ways to save are now in
+  `components/admin/submit-urls/persistStage.js`, and `StageFourCard` — at CCN
+  20 the single most complex function in the file — is its own module, split
+  into seven pieces. Its complexity was never one hard decision; it was
+  fourteen small JSX guards across 215 lines.
+
+  Stage 4 is the only stage that writes anything durable, and until now its
+  payload had **no test at all** — it was assembled inline in a click handler.
+  It has twenty-four, including one that pins `Live: false` and
+  `approvedForBlog: false`: saving is not publishing, and if those ever
+  default true a save silently becomes a publish.
+
+  **Nothing Stage 4 does has changed.** `persistContentItem` still returns
+  null on every failure path including the readiness gate, because both
+  callers branch on it — a falsy id must not produce a success message or
+  navigate away. Both save buttons are still disabled while either is in
+  flight, so the draft cannot be written twice. The duplicated `Title`/`title`
+  and `Content`/`content`/`postContent` casings are the stored schema's and
+  are kept, now with a test saying why.
+
+  Also moved: the image-selection helpers joined `imageStage.js`, where they
+  belong — which makes visible that the uploaded-wins-over-generated rule is
+  written twice in that file. The two agree today; unifying them is a
+  behaviour-adjacent change left for the last stage rather than slipped into a
+  move.
+
+  Tests 76 to 114. The page is 2,587 lines to 2,175, its total CCN 357 to
+  ~278, and its returns 25 to 20.
+
 - **Stage 2's draft machinery moves out of SubmitUrlsPage, with tests (#634).**
   Second of four.
 
