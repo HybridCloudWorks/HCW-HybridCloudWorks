@@ -19,6 +19,22 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Gallery uploads no longer refuse a file for having the wrong name (#631).**
+  `getGalleryFileExtension` took the blob path's extension from the *filename*
+  while the content type came from `file.type`. The upload route requires the
+  two to agree (`checkUploadMediaType`), so a valid file with a name that
+  disagreed was a 415: `photo.jfif` — what Windows has written for JPEGs saved
+  from a browser for years — and any PNG someone had named `.jpg`.
+
+  It uses `imageExtensionFor` now, as the submit page's slot uploads did in
+  #632, which derives the extension from the declared type. `imageUpload.js`
+  had documented this exact trap and carried `PUBLIC_IMAGE_EXTENSIONS` to avoid
+  it; both call sites were simply not using it. An unsupported type is named
+  outright rather than building a path the route then rejects for an
+  unrelated-looking reason.
+
+### Fixed
+
 - **Stage 3's "Upload Images" half had never worked (#630).** Article slot
   images on `/admin/submit` went to the `content` blob container. Every
   container is private in Terraform — "public" means reachable through the
