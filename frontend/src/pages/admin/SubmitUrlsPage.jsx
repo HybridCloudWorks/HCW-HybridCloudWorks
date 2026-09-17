@@ -19,6 +19,12 @@ import {
   ADMIN_ROUTES,
 } from '@/config/admin';
 import { resolveMediaUrl } from '@/lib/functionsBase';
+import {
+  PUBLIC_IMAGE_EXTENSIONS,
+  imageExtensionFor,
+  publicImageFileProblem,
+  uploadImageFile,
+} from '@/lib/imageUpload';
 
 const DEFAULT_DRAFT_INSTRUCTION_PROMPT =
   'You are generating a high-quality technical draft article for Hybrid Cloud Works. Use the source URL as the primary source. If supporting documents are provided, incorporate them as additional context. Produce a publication-ready title, concise editorial summary, a structured markdown article draft around 2500-3200 words, and image prompts tailored to the article.';
@@ -1253,7 +1259,7 @@ function StageThreeCard({
                 <div className="flex gap-2">
                   <Input
                     type="file"
-                    accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                    accept={SLOT_IMAGE_ACCEPT}
                     onChange={(e) => {
                       const nextFile = e.target.files?.[0] || null;
                       setSlotFiles((prev) => ({ ...prev, [key]: nextFile }));
@@ -1744,6 +1750,80 @@ function FeedbackCard({ variant, message, contentId }) {
       </CardContent>
     </Card>
   );
+}
+
+/**
+ * `covers`, not `content` (#630).
+ *
+ * Every container is private in Terraform; "public" means reachable through
+ * the media delivery route, and only the containers in PUBLIC_MEDIA_CONTAINERS
+ * are. `content` is not one, so the upload route returned url:'' BY DESIGN —
+ * and an empty string is falsy, so `{slotUrls[key] && …}` never rendered the
+ * uploaded row. The operator pressed Upload, the spinner finished, and nothing
+ * appeared: no error, no link, no confirmation. Downstream,
+ * collectSelectedSlotImages drops the slot on `.filter(Boolean(item.url))`, so
+ * `canPreview` and the article's hero were computed as though no image had
+ * been uploaded at all.
+ *
+ * `covers` is what Terraform calls "content cover images, served via the media
+ * route", which is exactly what a slot image is. Nothing already in `content`
+ * becomes reachable; only what is uploaded here from now on.
+ */
+const SLOT_IMAGE_CONTAINER = 'covers';
+
+/**
+ * What the picker offers, derived from what the route will accept.
+ *
+ * SVG was offered before, and `admin-uploads.js` records why: it was safe
+ * while these went to a private container. It is refused in a publicly served
+ * one, because served anonymously an SVG is a scriptable document. Nothing is
+ * lost by dropping it here — an SVG slot upload produced url:'' like every
+ * other type, so it never worked either. GIF and AVIF are newly offered.
+ */
+const SLOT_IMAGE_ACCEPT = Object.keys(PUBLIC_IMAGE_EXTENSIONS).join(',');
+
+/**
+ * Upload one slot image. Module-level over a state bag, as linkWrites.js is.
+ *
+ * The empty-URL guard is not a precaution: it is the defect above, and the
+ * generated-image path on this same page has carried the equivalent check
+ * (`if (!imageUrl) throw`) all along — which is why AI generation worked while
+ * manual upload silently did not.
+ */
+export async function uploadSlotImageFile(state, slot, explicitFile) {
+  // The picker hands the file straight over; the button falls back to whatever
+  // is queued for the slot. Resolved here rather than at the call site so the
+  // page component does not carry the branch.
+  const file = explicitFile || state.slotFiles?.[slot];
+  if (!file) return;
+  // `covers` is publicly served, so the route refuses SVG and anything outside
+  // the five raster types. Naming the problem here beats a 415 that does not.
+  const problem = publicImageFileProblem(file);
+  if (problem) {
+    state.setError(problem);
+    return;
+  }
+  state.setUploadingSlot(slot);
+  state.setError('');
+  try {
+    // The extension comes from the DECLARED TYPE, not the filename: the route
+    // requires the two to agree, so `photo.jfif` would otherwise be a 415 (#631).
+    const stamp = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const path = `content-submissions/${slot}/${stamp}.${imageExtensionFor(file)}`;
+    const uploaded = await uploadImageFile({ container: SLOT_IMAGE_CONTAINER, path, file });
+    if (!uploaded.url) {
+      throw new Error(
+        `Upload succeeded but returned no public URL (container '${SLOT_IMAGE_CONTAINER}').`
+      );
+    }
+    state.setSlotUrls((prev) => ({ ...prev, [slot]: uploaded.url }));
+    state.setSelectedUploaded((prev) => ({ ...prev, [slot]: true }));
+    state.setSlotFiles((prev) => ({ ...prev, [slot]: null }));
+  } catch (err) {
+    state.setError(err.message || 'Failed to upload image.');
+  } finally {
+    state.setUploadingSlot('');
+  }
 }
 
 export default function SubmitUrlsPage() {
@@ -2281,35 +2361,12 @@ export default function SubmitUrlsPage() {
     [applyPromptSelection, promptLibraryPagePath, savePageAssignment, selectedPromptSet]
   );
 
-  const uploadSlotImage = async (slot, explicitFile = null) => {
-    const file = explicitFile || slotFiles[slot];
-    if (!file) return;
-
-    setUploadingSlot(slot);
-    setError('');
-    try {
-      const ext = file.name.split('.').pop() || 'png';
-      const path = `content-submissions/${slot}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-      const dataBase64 = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
-        reader.onerror = () => reject(new Error('Could not read file'));
-        reader.readAsDataURL(file);
-      });
-      const uploaded = await postJSON('cms/uploads/content', {
-        path,
-        contentType: file.type || 'image/png',
-        dataBase64,
-      });
-      setSlotUrls((prev) => ({ ...prev, [slot]: uploaded.url }));
-      setSelectedUploaded((prev) => ({ ...prev, [slot]: true }));
-      setSlotFiles((prev) => ({ ...prev, [slot]: null }));
-    } catch (err) {
-      setError(err.message || 'Failed to upload image.');
-    } finally {
-      setUploadingSlot('');
-    }
-  };
+  const uploadSlotImage = (slot, explicitFile) =>
+    uploadSlotImageFile(
+      { slotFiles, setUploadingSlot, setError, setSlotUrls, setSelectedUploaded, setSlotFiles },
+      slot,
+      explicitFile
+    );
 
   const handleSupportingDocumentUpload = async (e) => {
     const files = Array.from(e.target.files || []);
