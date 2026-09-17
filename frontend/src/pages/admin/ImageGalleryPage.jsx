@@ -296,6 +296,42 @@ async function uploadGalleryFile({
   return file.name;
 }
 
+/**
+ * Upload every queued file, skipping the ones a publicly served container will
+ * not take.
+ *
+ * Returns what landed and what did not so the caller reports rather than
+ * branches — the loop's guards were counted into handleManualUpload, which the
+ * repository's own complexity gate flagged at 10.
+ *
+ * @returns {Promise<{uploaded: string[], rejected: string[]}>}
+ */
+async function uploadGalleryBatch(files, options) {
+  const uploaded = [];
+  const rejected = [];
+  for (let index = 0; index < files.length; index += 1) {
+    const file = files[index];
+    if (!file || !file.name) {
+      console.warn(`Skipping invalid file at index ${index}`);
+      continue;
+    }
+    // Named here rather than left to the route's 415, which would abort the
+    // whole batch on the first bad file without saying which one.
+    const problem = publicImageFileProblem(file);
+    if (problem) {
+      rejected.push(`${file.name}: ${problem}`);
+      continue;
+    }
+    // Sequential on purpose: each upload is a full base64 body, and the route
+    // caps a single one at 15 MB. Firing a queue of them at once is how a
+    // multi-file batch turns into a memory spike on a 2048 MB instance.
+    uploaded.push(
+      await uploadGalleryFile({ ...options, file, index, uploadFilesLength: files.length })
+    );
+  }
+  return { uploaded, rejected };
+}
+
 export default function ImageGalleryPage() {
   const navigate = useNavigate();
   const [items, setItems] = useState([]);
@@ -482,39 +518,15 @@ export default function ImageGalleryPage() {
         .map((tag) => tag.trim().toLowerCase())
         .filter(Boolean);
 
-      const uploadedCount = [];
-      const rejected = [];
-
-      for (let i = 0; i < uploadFiles.length; i++) {
-        const file = uploadFiles[i];
-        if (!file || !file.name) {
-          console.warn(`Skipping invalid file at index ${i}`);
-          continue;
-        }
-
-        // Named here rather than left to the route's 415, which would abort
-        // the whole batch on the first bad file without saying which one.
-        const problem = publicImageFileProblem(file);
-        if (problem) {
-          rejected.push(`${file.name}: ${problem}`);
-          continue;
-        }
-
-        uploadedCount.push(
-          await uploadGalleryFile({
-            file,
-            index: i,
-            normalizedProvider,
-            uploadSlot,
-            customTagsArray,
-            uploadRenameFilename,
-            pullTagsFromFilename,
-            uploadTitle,
-            uploadFolder,
-            uploadFilesLength: uploadFiles.length,
-          })
-        );
-      }
+      const { uploaded, rejected } = await uploadGalleryBatch(uploadFiles, {
+        normalizedProvider,
+        uploadSlot,
+        customTagsArray,
+        uploadRenameFilename,
+        pullTagsFromFilename,
+        uploadTitle,
+        uploadFolder,
+      });
 
       setUploadFiles([]);
       setUploadTitle('');
@@ -525,7 +537,7 @@ export default function ImageGalleryPage() {
         uploadInputRef.current.value = '';
       }
       setUploadMessage(
-        `${uploadedCount.length} image${uploadedCount.length === 1 ? '' : 's'} uploaded to ${uploadFolder || 'Default'} folder.`
+        `${uploaded.length} image${uploaded.length === 1 ? '' : 's'} uploaded to ${uploadFolder || 'Default'} folder.`
       );
       if (rejected.length > 0) {
         setUploadWarning(`Not uploaded — ${rejected.join('; ')}`);
