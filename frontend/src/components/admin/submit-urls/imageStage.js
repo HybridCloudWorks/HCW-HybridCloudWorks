@@ -242,17 +242,59 @@ export async function deleteGalleryItem(state, item) {
 }
 
 /**
- * Which image a slot contributes downstream: uploaded wins over generated.
+ * What a slot actually offers, after selection.
  *
- * Both halves require the slot to be SELECTED as well as present, which is why
- * this cannot be simplified to `slotUrls[slot] || generatedImages[slot]`.
+ * Presence is not selection: an image the operator has deselected contributes
+ * nothing even though it is still stored. This is the one place that rule is
+ * written — it used to be spelled out separately here and in
+ * collectSelectedSlotImages below, which agreed, but only by inspection.
  */
-export function resolveSlotImage(state, slot) {
-  if (state.slotUrls[slot] && state.selectedUploaded[slot]) return state.slotUrls[slot];
-  if (state.selectedGenerated[slot] && state.generatedImages[slot])
-    return state.generatedImages[slot];
-  return '';
+export function slotImageSources(selection, slot) {
+  return {
+    uploadedUrl: selection.selectedUploaded[slot] ? selection.slotUrls[slot] || '' : '',
+    generatedUrl: selection.selectedGenerated[slot] ? selection.generatedImages[slot] || '' : '',
+  };
 }
+
+/** Which image a slot contributes downstream: uploaded wins over generated. */
+export function resolveSlotImage(state, slot) {
+  const { uploadedUrl, generatedUrl } = slotImageSources(state, slot);
+  return uploadedUrl || generatedUrl || '';
+}
+
+/**
+ * The empty value for each per-slot map, one per thing a slot can hold.
+ *
+ * Spread rather than assigned when restoring a snapshot, so a saved draft
+ * missing a slot gets the blank rather than undefined.
+ */
+export const EMPTY_SLOT_TEMPLATES = {
+  hero: '',
+  secondary1: '',
+  secondary2: '',
+  secondary3: '',
+};
+
+export const EMPTY_SLOT_FILES = {
+  hero: null,
+  secondary1: null,
+  secondary2: null,
+  secondary3: null,
+};
+
+export const EMPTY_SLOT_URLS = {
+  hero: '',
+  secondary1: '',
+  secondary2: '',
+  secondary3: '',
+};
+
+export const EMPTY_SLOT_IDS = {
+  hero: '',
+  secondary1: '',
+  secondary2: '',
+  secondary3: '',
+};
 
 /** The four slots, in the order they are offered and consumed. */
 export const IMAGE_SLOTS = [
@@ -272,27 +314,16 @@ export function getImageSourceLabel(uploadedUrl, generatedUrl) {
 /**
  * Every slot that contributes an image, in slot order.
  *
- * Applies the same uploaded-wins-over-generated rule as resolveSlotImage
- * above, and both halves require the slot to be SELECTED as well as present.
- * That the rule is written twice in this file is not an improvement — the two
- * agree today, and unifying them is a behaviour-adjacent change that belongs
- * with the rest of #634 rather than in the middle of a move.
+ * Reads slotImageSources, so the uploaded-wins-over-generated rule lives in
+ * exactly one place rather than being restated here.
  */
-export function collectSelectedSlotImages({
-  slotUrls,
-  selectedUploaded,
-  generatedImages,
-  selectedGenerated,
-}) {
+export function collectSelectedSlotImages(selection) {
   return IMAGE_SLOTS.map(({ key, label }) => {
-    const uploadedUrl = selectedUploaded[key] ? slotUrls[key] : '';
-    const generatedUrl = selectedGenerated[key] ? generatedImages[key] : '';
-    const selectedUrl = uploadedUrl || generatedUrl || '';
-
+    const { uploadedUrl, generatedUrl } = slotImageSources(selection, key);
     return {
       slot: key,
       label,
-      url: selectedUrl,
+      url: uploadedUrl || generatedUrl || '',
       source: getImageSourceLabel(uploadedUrl, generatedUrl),
     };
   }).filter((item) => Boolean(item.url));
