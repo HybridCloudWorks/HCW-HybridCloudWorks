@@ -104,6 +104,35 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Stage 3's image machinery moves out of SubmitUrlsPage, with tests (#634).**
+  First of four; the stages are the seams, and the state block already named
+  them.
+
+  `SubmitUrlsPage.jsx` is a **1,088-line component holding 54 `useState`, 44
+  returns and nine functions over the repository's CCN gate** — and **eight
+  tests**, all covering the one function #632 had already pulled out. Two of
+  its features shipped broken and undetected under exactly that ratio: slot
+  uploads never worked at all (#630), and a valid `.jfif` was a 415 (#631).
+  Both were found by reading the code during an unrelated fix, not by a test
+  and not by a report.
+
+  Upload, generate, remove, resolve and gallery-delete now live in
+  `components/admin/submit-urls/imageStage.js` as module-level functions over a
+  state bag — the `linkWrites.js` shape the hub series established and that
+  `uploadSlotImageFile` already used here. The page keeps the state and five
+  one-line wrappers.
+
+  **Nothing Stage 3 does has changed.** The count in the "Generated N image
+  slot(s)" summary is still taken from what was collected rather than from what
+  was requested, so an abandoned run still reports what it actually stored;
+  `removeGeneratedImage` still refuses to clear a slot locally when the
+  server-side delete failed, which would otherwise leave an empty slot backed
+  by a live blob.
+
+  Tests went from 8 to 31. The page is 2,916 lines to 2,770, its total CCN 472
+  to 417, its worst function CCN 19 to 5, and its returns 44 to 37; the new
+  module has nothing over the gate.
+
 - **The Stop guard's blocking path is tested, and the lint config stops
   measuring the wrong thing (#588).** PR B of the burn-down.
 

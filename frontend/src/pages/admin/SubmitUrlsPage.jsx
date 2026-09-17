@@ -19,12 +19,7 @@ import {
   ADMIN_ROUTES,
 } from '@/config/admin';
 import { resolveMediaUrl } from '@/lib/functionsBase';
-import {
-  PUBLIC_IMAGE_EXTENSIONS,
-  imageExtensionFor,
-  publicImageFileProblem,
-  uploadImageFile,
-} from '@/lib/imageUpload';
+import * as imageStage from '@/components/admin/submit-urls/imageStage';
 
 const DEFAULT_DRAFT_INSTRUCTION_PROMPT =
   'You are generating a high-quality technical draft article for Hybrid Cloud Works. Use the source URL as the primary source. If supporting documents are provided, incorporate them as additional context. Produce a publication-ready title, concise editorial summary, a structured markdown article draft around 2500-3200 words, and image prompts tailored to the article.';
@@ -1259,7 +1254,7 @@ function StageThreeCard({
                 <div className="flex gap-2">
                   <Input
                     type="file"
-                    accept={SLOT_IMAGE_ACCEPT}
+                    accept={imageStage.SLOT_IMAGE_ACCEPT}
                     onChange={(e) => {
                       const nextFile = e.target.files?.[0] || null;
                       setSlotFiles((prev) => ({ ...prev, [key]: nextFile }));
@@ -1750,80 +1745,6 @@ function FeedbackCard({ variant, message, contentId }) {
       </CardContent>
     </Card>
   );
-}
-
-/**
- * `covers`, not `content` (#630).
- *
- * Every container is private in Terraform; "public" means reachable through
- * the media delivery route, and only the containers in PUBLIC_MEDIA_CONTAINERS
- * are. `content` is not one, so the upload route returned url:'' BY DESIGN —
- * and an empty string is falsy, so `{slotUrls[key] && …}` never rendered the
- * uploaded row. The operator pressed Upload, the spinner finished, and nothing
- * appeared: no error, no link, no confirmation. Downstream,
- * collectSelectedSlotImages drops the slot on `.filter(Boolean(item.url))`, so
- * `canPreview` and the article's hero were computed as though no image had
- * been uploaded at all.
- *
- * `covers` is what Terraform calls "content cover images, served via the media
- * route", which is exactly what a slot image is. Nothing already in `content`
- * becomes reachable; only what is uploaded here from now on.
- */
-const SLOT_IMAGE_CONTAINER = 'covers';
-
-/**
- * What the picker offers, derived from what the route will accept.
- *
- * SVG was offered before, and `admin-uploads.js` records why: it was safe
- * while these went to a private container. It is refused in a publicly served
- * one, because served anonymously an SVG is a scriptable document. Nothing is
- * lost by dropping it here — an SVG slot upload produced url:'' like every
- * other type, so it never worked either. GIF and AVIF are newly offered.
- */
-const SLOT_IMAGE_ACCEPT = Object.keys(PUBLIC_IMAGE_EXTENSIONS).join(',');
-
-/**
- * Upload one slot image. Module-level over a state bag, as linkWrites.js is.
- *
- * The empty-URL guard is not a precaution: it is the defect above, and the
- * generated-image path on this same page has carried the equivalent check
- * (`if (!imageUrl) throw`) all along — which is why AI generation worked while
- * manual upload silently did not.
- */
-export async function uploadSlotImageFile(state, slot, explicitFile) {
-  // The picker hands the file straight over; the button falls back to whatever
-  // is queued for the slot. Resolved here rather than at the call site so the
-  // page component does not carry the branch.
-  const file = explicitFile || state.slotFiles?.[slot];
-  if (!file) return;
-  // `covers` is publicly served, so the route refuses SVG and anything outside
-  // the five raster types. Naming the problem here beats a 415 that does not.
-  const problem = publicImageFileProblem(file);
-  if (problem) {
-    state.setError(problem);
-    return;
-  }
-  state.setUploadingSlot(slot);
-  state.setError('');
-  try {
-    // The extension comes from the DECLARED TYPE, not the filename: the route
-    // requires the two to agree, so `photo.jfif` would otherwise be a 415 (#631).
-    const stamp = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const path = `content-submissions/${slot}/${stamp}.${imageExtensionFor(file)}`;
-    const uploaded = await uploadImageFile({ container: SLOT_IMAGE_CONTAINER, path, file });
-    if (!uploaded.url) {
-      throw new Error(
-        `Upload succeeded but returned no public URL (container '${SLOT_IMAGE_CONTAINER}').`
-      );
-    }
-    state.setSlotUrls((prev) => ({ ...prev, [slot]: uploaded.url }));
-    state.setSelectedUploaded((prev) => ({ ...prev, [slot]: true }));
-    state.setSlotFiles((prev) => ({ ...prev, [slot]: null }));
-  } catch (err) {
-    state.setError(err.message || 'Failed to upload image.');
-  } finally {
-    state.setUploadingSlot('');
-  }
 }
 
 export default function SubmitUrlsPage() {
@@ -2361,13 +2282,6 @@ export default function SubmitUrlsPage() {
     [applyPromptSelection, promptLibraryPagePath, savePageAssignment, selectedPromptSet]
   );
 
-  const uploadSlotImage = (slot, explicitFile) =>
-    uploadSlotImageFile(
-      { slotFiles, setUploadingSlot, setError, setSlotUrls, setSelectedUploaded, setSlotFiles },
-      slot,
-      explicitFile
-    );
-
   const handleSupportingDocumentUpload = async (e) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
@@ -2578,112 +2492,52 @@ export default function SubmitUrlsPage() {
     }
   };
 
-  const handleGenerateImages = async () => {
-    if (!canGenerateImages) return;
-    setGeneratingImages(true);
-    setError('');
-    setGenerationError('');
-    setGenerationStatus('');
-    try {
-      const collectedUrls = {};
-
-      for (let index = 0; index < selectedAiTargets.length; index += 1) {
-        const slot = selectedAiTargets[index];
-        setGenerationStatus(
-          `Generating ${slot} image (${index + 1} of ${selectedAiTargets.length})...`
-        );
-
-        const response = await postJSON('generatePreviewImages', {
-          summaryPrompt,
-          detailsPrompt,
-          slotTemplates: selectedSlotTemplates,
-          aiImageTargets: [slot],
-          title: draftTitle,
-          summary: draftSummary,
-          provider: resolvedProvider,
-          contentType,
-          sourceUrl: kbArticleUrls[0] || sourceUrl.trim(),
-          articleId: previewSessionId,
-        });
-
-        const imageUrl = response?.imageUrls?.[slot] || '';
-        const imageId = response?.imageRecords?.[slot]?.imageId || '';
-        const promptLog = response?.promptLogs?.[slot] || null;
-        if (!imageUrl) {
-          throw new Error(`No image URL was returned for ${slot}.`);
-        }
-
-        collectedUrls[slot] = imageUrl;
-        setGeneratedImages((prev) => ({ ...prev, [slot]: imageUrl }));
-        setGeneratedImageIds((prev) => ({ ...prev, [slot]: imageId }));
-        if (promptLog) {
-          setGenerationPromptLogs((prev) => ({ ...prev, [slot]: promptLog }));
-        }
-        setSelectedGenerated((prev) => ({ ...prev, [slot]: true }));
-        setGenerationStatus(
-          `Generated ${slot} image (${index + 1} of ${selectedAiTargets.length}).`
-        );
-      }
-
-      setResult({
-        stage: 3,
-        message: `Generated ${Object.keys(collectedUrls).length} image slot(s). Review and select the ones to include.`,
-      });
-    } catch (err) {
-      setGenerationError(err.message || 'Failed to generate images.');
-      setError(err.message || 'Failed to generate images.');
-    } finally {
-      setGenerationStatus('');
-      setGeneratingImages(false);
-    }
+  /**
+   * Stage 3's machinery lives in imageStage.js as module-level functions over
+   * this bag (#634). Rebuilt every render, which is what keeps the reads
+   * current — the functions receive it per call and never hold on to it.
+   */
+  const imageState = {
+    canGenerateImages,
+    contentType,
+    detailsPrompt,
+    draftSummary,
+    draftTitle,
+    generatedImageIds,
+    generatedImages,
+    kbArticleUrls,
+    previewSessionId,
+    resolvedProvider,
+    selectedAiTargets,
+    selectedGenerated,
+    selectedSlotTemplates,
+    selectedUploaded,
+    slotFiles,
+    slotUrls,
+    sourceUrl,
+    summaryPrompt,
+    setError,
+    setGalleryItems,
+    setGeneratedImageIds,
+    setGeneratedImages,
+    setGeneratingImages,
+    setGenerationError,
+    setGenerationPromptLogs,
+    setGenerationStatus,
+    setResult,
+    setSelectedGenerated,
+    setSelectedUploaded,
+    setSlotFiles,
+    setSlotUrls,
+    setUploadingSlot,
   };
 
-  const clearGeneratedImageState = (slot) => {
-    setGeneratedImages((prev) => ({ ...prev, [slot]: '' }));
-    setGeneratedImageIds((prev) => ({ ...prev, [slot]: '' }));
-    setSelectedGenerated((prev) => ({ ...prev, [slot]: false }));
-    setGenerationPromptLogs((prev) => {
-      const next = { ...prev };
-      delete next[slot];
-      return next;
-    });
-  };
-
-  const removeGeneratedImage = async (slot) => {
-    const imageId = generatedImageIds[slot];
-
-    try {
-      if (imageId) {
-        await postJSON('deleteContentGeneratedImage', { imageId });
-      }
-    } catch (err) {
-      setError(err.message || `Failed to delete generated ${slot} image.`);
-      return;
-    }
-
-    clearGeneratedImageState(slot);
-    setGalleryItems((prev) => prev.filter((item) => item.id !== imageId));
-  };
-
-  const deleteGalleryItem = async (item) => {
-    if (!item?.id) return;
-
-    try {
-      await postJSON('deleteContentGeneratedImage', { imageId: item.id });
-      setGalleryItems((prev) => prev.filter((entry) => entry.id !== item.id));
-      if (item.slot && generatedImageIds[item.slot] === item.id) {
-        clearGeneratedImageState(item.slot);
-      }
-    } catch (err) {
-      setError(err.message || 'Failed to delete saved gallery image.');
-    }
-  };
-
-  const resolveSlotImage = (slot) => {
-    if (slotUrls[slot] && selectedUploaded[slot]) return slotUrls[slot];
-    if (selectedGenerated[slot] && generatedImages[slot]) return generatedImages[slot];
-    return '';
-  };
+  const uploadSlotImage = (slot, explicitFile) =>
+    imageStage.uploadSlotImageFile(imageState, slot, explicitFile);
+  const handleGenerateImages = () => imageStage.generateSlotImages(imageState);
+  const removeGeneratedImage = (slot) => imageStage.removeGeneratedImage(imageState, slot);
+  const deleteGalleryItem = (item) => imageStage.deleteGalleryItem(imageState, item);
+  const resolveSlotImage = (slot) => imageStage.resolveSlotImage(imageState, slot);
 
   const persistContentItem = async () => {
     if (!canPreview || !readinessComplete) return null;
