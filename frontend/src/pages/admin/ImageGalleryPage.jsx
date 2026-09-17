@@ -20,7 +20,11 @@ import {
   Pencil,
 } from 'lucide-react';
 import { loadGalleryItems, getSourceLabel } from '@/lib/imageGallery';
-import { uploadImageFile } from '@/lib/imageUpload';
+import {
+  PUBLIC_IMAGE_EXTENSIONS,
+  publicImageFileProblem,
+  uploadImageFile,
+} from '@/lib/imageUpload';
 import { normalizeContentProvider } from '@/lib/contentModel';
 import { resolveMediaUrl } from '../../lib/functionsBase';
 
@@ -204,6 +208,18 @@ function buildGalleryUploadData({
   };
 }
 
+/**
+ * The blob container gallery uploads go to.
+ *
+ * It must be one the media delivery route serves (PUBLIC_MEDIA_CONTAINERS in
+ * functions/src/lib/blob-paths.js), or the upload route returns no URL and
+ * there is nothing to put in the record. See the note in uploadGalleryFile.
+ */
+const GALLERY_CONTAINER = 'covers';
+
+/** What the file picker offers, derived from what the route will accept. */
+const GALLERY_ACCEPT = Object.keys(PUBLIC_IMAGE_EXTENSIONS).join(',');
+
 async function uploadGalleryFile({
   file,
   index,
@@ -229,14 +245,42 @@ async function uploadGalleryFile({
     uploadFilesLength,
   });
 
-  // Upload into the 'content' container; the stored ref carries the container
-  // prefix so the delete path (parseStorageRef) can find the blob later.
+  // `covers`, not `content` (#602).
+  //
+  // Every container is private in Terraform; "public" means reachable through
+  // the media delivery route, and only the containers in
+  // PUBLIC_MEDIA_CONTAINERS are. `content` is not one of them, so the upload
+  // route returned url:'' by design and this function wrote that empty string
+  // into the gallery record. The image stored fine and was then unusable: the
+  // card rendered no thumbnail, and "Use this image" handed an empty hero URL
+  // to the submit page.
+  //
+  // `covers` is the container Terraform describes as "content cover images,
+  // served via the media route" — which is exactly what a gallery image is
+  // used as. Nothing already in `content` becomes reachable by this change;
+  // only images uploaded here from now on.
+  //
+  // The stored ref keeps the container prefix so the delete path
+  // (parseStorageRef) can still find the blob; `covers` is in its
+  // KNOWN_STORAGE_CONTAINERS set already.
   const uploaded = await uploadImageFile({
-    container: 'content',
+    container: GALLERY_CONTAINER,
     path: uploadData.storagePath,
     file,
   });
   const imageUrl = uploaded.url;
+
+  // Refuse to record an image nothing can display. This is the defect itself,
+  // not a precaution: the route answers 200 with an empty `url` for a private
+  // container, so persisting it created a row that looked fine in the list and
+  // resolved to nothing everywhere it was used. Failing here is loud, and it
+  // stays correct if the container ever moves again.
+  if (!imageUrl) {
+    throw new Error(
+      `Upload succeeded but returned no public URL (container '${GALLERY_CONTAINER}'). ` +
+        'The gallery record was not created.'
+    );
+  }
 
   await postJSON('createManualGalleryImageRecord', {
     articleId: 'manual-upload',
@@ -244,7 +288,7 @@ async function uploadGalleryFile({
     provider: normalizedProvider,
     title: uploadData.title,
     slot: uploadSlot,
-    storagePath: `content/${uploadData.storagePath}`,
+    storagePath: `${GALLERY_CONTAINER}/${uploadData.storagePath}`,
     customTags: uploadData.allTags,
     folder: uploadData.folder,
   });
@@ -271,6 +315,10 @@ export default function ImageGalleryPage() {
   const [uploadCustomTags, setUploadCustomTags] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState('');
+  // Deliberately NOT `deleteError`: fetchGallery clears that on every refresh,
+  // and this message is set immediately before one, so it would be wiped
+  // before it could be read.
+  const [uploadWarning, setUploadWarning] = useState('');
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [manualFolders, setManualFolders] = useState([]);
   const [uploadFolder, setUploadFolder] = useState('default');
@@ -425,6 +473,7 @@ export default function ImageGalleryPage() {
     setUploading(true);
     setDeleteError('');
     setUploadMessage('');
+    setUploadWarning('');
 
     try {
       const normalizedProvider = normalizeContentProvider(uploadProvider);
@@ -434,11 +483,20 @@ export default function ImageGalleryPage() {
         .filter(Boolean);
 
       const uploadedCount = [];
+      const rejected = [];
 
       for (let i = 0; i < uploadFiles.length; i++) {
         const file = uploadFiles[i];
         if (!file || !file.name) {
           console.warn(`Skipping invalid file at index ${i}`);
+          continue;
+        }
+
+        // Named here rather than left to the route's 415, which would abort
+        // the whole batch on the first bad file without saying which one.
+        const problem = publicImageFileProblem(file);
+        if (problem) {
+          rejected.push(`${file.name}: ${problem}`);
           continue;
         }
 
@@ -469,6 +527,9 @@ export default function ImageGalleryPage() {
       setUploadMessage(
         `${uploadedCount.length} image${uploadedCount.length === 1 ? '' : 's'} uploaded to ${uploadFolder || 'Default'} folder.`
       );
+      if (rejected.length > 0) {
+        setUploadWarning(`Not uploaded — ${rejected.join('; ')}`);
+      }
       await fetchGallery();
     } catch (error) {
       setDeleteError(`Upload failed: ${error.message || error}`);
@@ -878,6 +939,7 @@ export default function ImageGalleryPage() {
           advanced filtering.
         </p>
         {deleteError && <p className="mt-1 text-sm text-destructive">{deleteError}</p>}
+        {uploadWarning && <p className="mt-1 text-sm text-destructive">{uploadWarning}</p>}
       </div>
 
       {/* SECTION 1: Upload Images */}
@@ -894,10 +956,16 @@ export default function ImageGalleryPage() {
             <div className="space-y-3">
               <div>
                 <p className="text-sm font-semibold mb-2">Select Files</p>
+                {/*
+                  `accept` is not `image/*`: `covers` is publicly served, so
+                  the upload route refuses SVG (a scriptable document) and
+                  anything outside the five raster types. Offering them in the
+                  picker would be offering a 415.
+                */}
                 <Input
                   ref={uploadInputRef}
                   type="file"
-                  accept="image/*"
+                  accept={GALLERY_ACCEPT}
                   multiple
                   onChange={handleAddFiles}
                   className="cursor-pointer"
