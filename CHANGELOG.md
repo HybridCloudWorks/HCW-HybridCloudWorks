@@ -126,7 +126,20 @@ This project has not cut a tagged release; entries are grouped under
   where a rename left three `<select>` blocks pointing at dead names while
   lint, build and every unit test passed because nothing rendered them.
 
-  Tests 175 to 187.
+  **Qlty raised four similar-code findings on the extracted
+  `contentBlocks.js`**, and they were right. Twenty section-block entries each
+  wrote their heading out three times — as `title`, as `heading`, and again at
+  the head of `template`. A `block` builder derives the last two now.
+
+  That closes a latent bug as well as the duplication: the readiness checklist
+  matches a section by its **heading** while the button that inserts it is
+  labelled by its **title**, so an edit to one that missed the other would
+  quietly stop the checklist finding a section visible in the draft, and the
+  draft could never be marked ready. All twenty already held the invariant;
+  it is now unbreakable and tested. The file is 182 lines to 65, and the
+  regenerated values were proved identical to the originals before the swap.
+
+  Tests 175 to 193.
 
 - **Stage 1's machinery moves out of SubmitUrlsPage (#634).** Last of the
   machinery; only the Stage cards' markup is left.
