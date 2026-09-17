@@ -20,13 +20,11 @@ import {
 } from '@/config/admin';
 import { resolveMediaUrl } from '@/lib/functionsBase';
 import * as imageStage from '@/components/admin/submit-urls/imageStage';
+import * as draftStage from '@/components/admin/submit-urls/draftStage';
+import { isSupportedDocumentUrl, isValidHttpUrl } from '@/components/admin/submit-urls/draftStage';
 
 const DEFAULT_DRAFT_INSTRUCTION_PROMPT =
   'You are generating a high-quality technical draft article for Hybrid Cloud Works. Use the source URL as the primary source. If supporting documents are provided, incorporate them as additional context. Produce a publication-ready title, concise editorial summary, a structured markdown article draft around 2500-3200 words, and image prompts tailored to the article.';
-
-const _MAX_STAGE_TWO_SUPPORTING_FILES = 5;
-const MAX_STAGE_TWO_FILE_BYTES = 4 * 1024 * 1024;
-const MAX_STAGE_TWO_SUPPORTING_SOURCES = 5;
 
 const CONTENT_TYPE_OPTIONS = [
   { value: 'blog', label: 'Blog' },
@@ -370,21 +368,6 @@ function inferProviderFromUrl(url = '') {
   return '';
 }
 
-function isValidHttpUrl(value = '') {
-  try {
-    const parsed = new URL(String(value).trim());
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
-
-function isSupportedDocumentUrl(value = '') {
-  if (!isValidHttpUrl(value)) return false;
-  const normalized = String(value).trim().toLowerCase();
-  return /\.pdf($|[?#])/.test(normalized) || /\.txt($|[?#])/.test(normalized);
-}
-
 function parseLineItems(value = '') {
   return String(value)
     .split(/\n|,|;/)
@@ -605,19 +588,6 @@ function getCurrentStep({
   if (!draftReady) return 2;
   if (!hasUploadedImages && !hasSelectedGeneratedImages) return 3;
   return 4;
-}
-
-function readFileAsBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = String(reader.result || '');
-      const base64Data = result.includes(',') ? result.split(',').pop() : result;
-      resolve(base64Data || '');
-    };
-    reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
-    reader.readAsDataURL(file);
-  });
 }
 
 function getQueueReviewPath(contentId) {
@@ -2282,128 +2252,6 @@ export default function SubmitUrlsPage() {
     [applyPromptSelection, promptLibraryPagePath, savePageAssignment, selectedPromptSet]
   );
 
-  const handleSupportingDocumentUpload = async (e) => {
-    const files = Array.from(e.target.files || []);
-    if (!files.length) return;
-
-    const availableSlots =
-      MAX_STAGE_TWO_SUPPORTING_SOURCES - (supportingDocuments.length + kbDocumentUrls.length);
-    if (availableSlots <= 0) {
-      setError(
-        `You can keep up to ${MAX_STAGE_TWO_SUPPORTING_SOURCES} total supporting documents in Stage 2.`
-      );
-      e.target.value = '';
-      return;
-    }
-
-    const nextFiles = files.slice(0, availableSlots);
-    setError('');
-
-    try {
-      const parsedDocuments = [];
-
-      for (const file of nextFiles) {
-        const extension = String(file.name.split('.').pop() || '').toLowerCase();
-        const isTxt = file.type === 'text/plain' || extension === 'txt';
-        const isPdf = file.type === 'application/pdf' || extension === 'pdf';
-
-        if (!isTxt && !isPdf) {
-          throw new Error('Only PDF and TXT files are supported in Stage 2.');
-        }
-        if (file.size > MAX_STAGE_TWO_FILE_BYTES) {
-          throw new Error(`${file.name} exceeds the 4 MB Stage 2 file limit.`);
-        }
-
-        if (isTxt) {
-          const textContent = String(await file.text()).slice(0, 20000);
-          parsedDocuments.push({
-            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            name: file.name,
-            size: file.size,
-            kind: 'txt',
-            mimeType: 'text/plain',
-            textContent,
-            base64Data: '',
-          });
-          continue;
-        }
-
-        const base64Data = await readFileAsBase64(file);
-        parsedDocuments.push({
-          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          name: file.name,
-          size: file.size,
-          kind: 'pdf',
-          mimeType: 'application/pdf',
-          textContent: '',
-          base64Data,
-        });
-      }
-
-      setSupportingDocuments((prev) => [...prev, ...parsedDocuments]);
-
-      if (files.length > availableSlots) {
-        setResult({
-          stage: 2,
-          message: `Only the first ${availableSlots} file(s) were added. Stage 2 supports up to ${MAX_STAGE_TWO_SUPPORTING_SOURCES} total supporting documents.`,
-        });
-      }
-    } catch (err) {
-      setError(err.message || 'Failed to load supporting documents.');
-    } finally {
-      e.target.value = '';
-    }
-  };
-
-  const removeSupportingDocument = React.useCallback((documentId) => {
-    setSupportingDocuments((prev) => prev.filter((doc) => doc.id !== documentId));
-  }, []);
-
-  const addKbDocumentUrl = React.useCallback(() => {
-    const normalizedUrl = kbDocumentUrl.trim();
-    if (!isSupportedDocumentUrl(normalizedUrl)) {
-      setError('Please enter a valid public PDF or TXT URL before adding it.');
-      return;
-    }
-
-    if (supportingDocuments.length + kbDocumentUrls.length >= MAX_STAGE_TWO_SUPPORTING_SOURCES) {
-      setError(
-        `Stage 2 supports up to ${MAX_STAGE_TWO_SUPPORTING_SOURCES} total supporting documents across uploads and document URLs.`
-      );
-      return;
-    }
-
-    setKbDocumentUrls((prev) => {
-      if (prev.includes(normalizedUrl)) return prev;
-      return [...prev, normalizedUrl];
-    });
-    setKbDocumentUrl('');
-    setError('');
-  }, [kbDocumentUrl, supportingDocuments.length, kbDocumentUrls]);
-
-  const removeKbDocumentUrl = React.useCallback((urlToRemove) => {
-    setKbDocumentUrls((prev) => prev.filter((entry) => entry !== urlToRemove));
-  }, []);
-
-  const addKbArticleUrl = React.useCallback(() => {
-    const normalizedUrl = sourceUrl.trim();
-    if (!isValidHttpUrl(normalizedUrl)) {
-      setError('Please enter a valid KB article URL before adding it.');
-      return;
-    }
-
-    setKbArticleUrls((prev) => {
-      if (prev.includes(normalizedUrl)) return prev;
-      return [...prev, normalizedUrl];
-    });
-    setSourceUrl('');
-    setError('');
-  }, [sourceUrl]);
-
-  const removeKbArticleUrl = React.useCallback((urlToRemove) => {
-    setKbArticleUrls((prev) => prev.filter((entry) => entry !== urlToRemove));
-  }, []);
-
   const resetGeneratedDraftAssets = React.useCallback(() => {
     setGeneratedImages({ ...EMPTY_SLOT_URLS });
     setGeneratedImageIds({ ...EMPTY_SLOT_IDS });
@@ -2417,80 +2265,49 @@ export default function SubmitUrlsPage() {
     setGalleryItems([]);
   }, []);
 
-  const insertSectionBlock = (section) => {
-    if (!draftReady) return;
-
-    const hasSection = draftContent.includes(section.heading);
-    if (hasSection) {
-      setResult({ stage: 4, message: `${section.title} already exists in the draft.` });
-      return;
-    }
-
-    const nextContent = ensureTldrSectionAtEnd(
-      `${draftContent.trim()}\n\n${section.template}`.trim()
-    );
-    setDraftContent(nextContent);
+  /**
+   * Stage 2's machinery lives in draftStage.js over this bag (#634), the same
+   * shape as imageState below. The useCallback wrappers these replace bought
+   * nothing: no consumer is memoized and none of them appears in a dependency
+   * array, so a stable identity was never read by anything.
+   */
+  const draftState = {
+    draftContent,
+    draftInstructionPrompt,
+    draftReady,
+    kbArticleUrls,
+    kbDocumentUrl,
+    kbDocumentUrls,
+    provider,
+    sourceUrl,
+    supportingDocuments,
+    title,
+    resetGeneratedDraftAssets,
+    setDetailsPrompt,
+    setDraftContent,
+    setDraftReady,
+    setDraftSummary,
+    setDraftTitle,
+    setDraftTopics,
+    setError,
+    setKbArticleUrls,
+    setKbDocumentUrl,
+    setKbDocumentUrls,
+    setResult,
+    setSourceUrl,
+    setSubmittingDraft,
+    setSummaryPrompt,
+    setSupportingDocuments,
   };
 
-  const handleSubmitDraft = async (e) => {
-    e.preventDefault();
-    const isRegeneration = draftReady;
-    setSubmittingDraft(true);
-    setError('');
-    setResult(null);
-
-    const effectiveSourceUrls = Array.from(
-      new Set([...kbArticleUrls, isValidHttpUrl(sourceUrl) ? sourceUrl.trim() : ''].filter(Boolean))
-    );
-
-    if (effectiveSourceUrls.length === 0) {
-      setSubmittingDraft(false);
-      setError('Please add at least one valid KB article URL for Stage 2.');
-      return;
-    }
-
-    try {
-      const response = await postJSON('generateArticleDraft', {
-        url: effectiveSourceUrls[0],
-        urls: effectiveSourceUrls,
-        cloudProvider: provider || null,
-        customInstructionPrompt: draftInstructionPrompt.trim(),
-        documentUrls: kbDocumentUrls,
-        supportingDocuments: supportingDocuments.map((doc) => ({
-          name: doc.name,
-          mimeType: doc.mimeType,
-          textContent: doc.textContent || '',
-          base64Data: doc.base64Data || '',
-        })),
-      });
-
-      const draft = response?.draft || {};
-      setKbArticleUrls(
-        Array.isArray(draft.sourceUrls) && draft.sourceUrls.length > 0
-          ? draft.sourceUrls
-          : effectiveSourceUrls
-      );
-      setSourceUrl('');
-      setDraftTitle(draft.title || title || 'Untitled');
-      setDraftSummary(draft.summary || '');
-      setDraftContent(ensureTldrSectionAtEnd(draft.postContent || ''));
-      setDraftTopics(Array.isArray(draft.keyTopics) ? draft.keyTopics : []);
-      setSummaryPrompt(draft.summaryPrompt || '');
-      setDetailsPrompt(draft.detailsPrompt || '');
-      setDraftReady(true);
-      resetGeneratedDraftAssets();
-      setResult({
-        stage: 2,
-        message: isRegeneration
-          ? 'Draft regenerated in memory with the latest KB articles, document URLs, files, and prompt. Review Stage 3 images before saving.'
-          : 'Draft generated in memory. Continue to Stages 3 and 4.',
-      });
-    } catch (err) {
-      setError(err.message || 'Submission failed.');
-    } finally {
-      setSubmittingDraft(false);
-    }
-  };
+  const handleSupportingDocumentUpload = (e) => draftStage.addSupportingDocuments(draftState, e);
+  const removeSupportingDocument = (id) => draftStage.removeSupportingDocument(draftState, id);
+  const addKbDocumentUrl = () => draftStage.addKbDocumentUrl(draftState);
+  const removeKbDocumentUrl = (url) => draftStage.removeKbDocumentUrl(draftState, url);
+  const addKbArticleUrl = () => draftStage.addKbArticleUrl(draftState);
+  const removeKbArticleUrl = (url) => draftStage.removeKbArticleUrl(draftState, url);
+  const insertSectionBlock = (section) => draftStage.insertSectionBlock(draftState, section);
+  const handleSubmitDraft = (e) => draftStage.submitDraft(draftState, e);
 
   /**
    * Stage 3's machinery lives in imageStage.js as module-level functions over

@@ -104,6 +104,33 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Stage 2's draft machinery moves out of SubmitUrlsPage, with tests (#634).**
+  Second of four.
+
+  Source URLs, supporting documents and the generate-draft call now live in
+  `components/admin/submit-urls/draftStage.js` as module-level functions over
+  a state bag, as Stage 3's did in #635. `handleSubmitDraft` (CCN 18) and
+  `handleSupportingDocumentUpload` (CCN 15) are gone, split into pure builders
+  (`effectiveSourceUrlsFor`, `draftRequestFor`, `normalizeDraft`) and thin
+  writers.
+
+  **Nothing Stage 2 does has changed.** The supporting-document read stays
+  all-or-nothing, so one unsupported or oversized file in a batch adds none of
+  them rather than a partial set the operator then has to reconcile; uploads
+  and document URLs still share one five-item budget rather than having one
+  each; and a URL still sitting unadded in the input still counts toward the
+  draft call, so typing one and pressing Generate works without pressing Add.
+
+  Two incidental removals. `_MAX_STAGE_TWO_SUPPORTING_FILES` was declared once
+  and read nowhere, surviving only because the leading underscore exempts it
+  from `no-unused-vars` — and it was a stale duplicate of the constant that
+  does the work. The six `useCallback` wrappers around these handlers bought
+  nothing either: no consumer in this file is memoized and none of the six
+  appears in a dependency array, so their stable identity was never read.
+
+  Tests 31 to 76. The page is 2,770 lines to 2,587, its total CCN 417 to 357,
+  its returns 37 to 25, and functions over the CCN gate 8 to 6.
+
 - **Stage 3's image machinery moves out of SubmitUrlsPage, with tests (#634).**
   First of four; the stages are the seams, and the state block already named
   them.
