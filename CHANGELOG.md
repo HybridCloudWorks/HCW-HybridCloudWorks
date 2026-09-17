@@ -17,6 +17,39 @@ This project has not cut a tagged release; entries are grouped under
 
 ## [Unreleased]
 
+### Fixed
+
+- **Gallery uploads produced images nothing could display (#602).** Manual
+  uploads on `/admin/gallery` went to the `content` blob container. Every
+  container is private in Terraform — "public" means reachable through the
+  media delivery route, and only the containers in `PUBLIC_MEDIA_CONTAINERS`
+  are — so the upload route answered 200 with `url: ''` **by design**, and the
+  page wrote that empty string into the gallery record. Nothing failed: the
+  image stored, the record saved, and the result was a row that rendered no
+  thumbnail and handed an empty hero URL to the submit page through "Use this
+  image".
+
+  Uploads go to `covers` now, which Terraform describes as "content cover
+  images, served via the media route" — exactly what a gallery image is used
+  as. **Nothing already in `content` becomes reachable**; the alternative of
+  adding `content` to `PUBLIC_MEDIA_CONTAINERS` would have exposed everything
+  already sitting in it, which is the disclosure decision `blob-paths.js` warns
+  about, and it is not taken here.
+
+  Two things stop this being silent again. The page now **refuses to create a
+  record when the route returns no URL**, so a container that cannot serve
+  fails loudly at the upload instead of persisting a broken row. And the file
+  picker offers only the five types a publicly served container accepts,
+  naming any rejected file rather than letting the route answer 415 for the
+  whole batch — `covers` refuses SVG, because served anonymously it is a
+  scriptable document.
+
+  `ImageGalleryPage` had no tests; it has six, including the empty-URL case
+  that is the defect itself. Writing them surfaced a second bug in the fix:
+  the rejection message was being set on `deleteError`, which `fetchGallery`
+  clears on every refresh — and the refresh runs immediately afterwards, so
+  the message was wiped before it could be read. It has its own state now.
+
 ### Changed
 
 - **The Stop guard's blocking path is tested, and the lint config stops

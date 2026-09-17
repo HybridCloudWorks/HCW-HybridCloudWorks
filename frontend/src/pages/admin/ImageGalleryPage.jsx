@@ -19,8 +19,23 @@ import {
   X,
   Pencil,
 } from 'lucide-react';
-import { loadGalleryItems, getSourceLabel } from '@/lib/imageGallery';
-import { uploadImageFile } from '@/lib/imageUpload';
+import {
+  customTagOptions,
+  deleteFolderProblem,
+  folderOptions,
+  getSourceLabel,
+  loadGalleryItems,
+  newFolderProblem,
+  providerOptions,
+  slotOptions,
+  toggledSelection,
+  uniqueTags,
+} from '@/lib/imageGallery';
+import {
+  PUBLIC_IMAGE_EXTENSIONS,
+  publicImageFileProblem,
+  uploadImageFile,
+} from '@/lib/imageUpload';
 import { normalizeContentProvider } from '@/lib/contentModel';
 import { resolveMediaUrl } from '../../lib/functionsBase';
 
@@ -204,6 +219,18 @@ function buildGalleryUploadData({
   };
 }
 
+/**
+ * The blob container gallery uploads go to.
+ *
+ * It must be one the media delivery route serves (PUBLIC_MEDIA_CONTAINERS in
+ * functions/src/lib/blob-paths.js), or the upload route returns no URL and
+ * there is nothing to put in the record. See the note in uploadGalleryFile.
+ */
+const GALLERY_CONTAINER = 'covers';
+
+/** What the file picker offers, derived from what the route will accept. */
+const GALLERY_ACCEPT = Object.keys(PUBLIC_IMAGE_EXTENSIONS).join(',');
+
 async function uploadGalleryFile({
   file,
   index,
@@ -229,14 +256,42 @@ async function uploadGalleryFile({
     uploadFilesLength,
   });
 
-  // Upload into the 'content' container; the stored ref carries the container
-  // prefix so the delete path (parseStorageRef) can find the blob later.
+  // `covers`, not `content` (#602).
+  //
+  // Every container is private in Terraform; "public" means reachable through
+  // the media delivery route, and only the containers in
+  // PUBLIC_MEDIA_CONTAINERS are. `content` is not one of them, so the upload
+  // route returned url:'' by design and this function wrote that empty string
+  // into the gallery record. The image stored fine and was then unusable: the
+  // card rendered no thumbnail, and "Use this image" handed an empty hero URL
+  // to the submit page.
+  //
+  // `covers` is the container Terraform describes as "content cover images,
+  // served via the media route" — which is exactly what a gallery image is
+  // used as. Nothing already in `content` becomes reachable by this change;
+  // only images uploaded here from now on.
+  //
+  // The stored ref keeps the container prefix so the delete path
+  // (parseStorageRef) can still find the blob; `covers` is in its
+  // KNOWN_STORAGE_CONTAINERS set already.
   const uploaded = await uploadImageFile({
-    container: 'content',
+    container: GALLERY_CONTAINER,
     path: uploadData.storagePath,
     file,
   });
   const imageUrl = uploaded.url;
+
+  // Refuse to record an image nothing can display. This is the defect itself,
+  // not a precaution: the route answers 200 with an empty `url` for a private
+  // container, so persisting it created a row that looked fine in the list and
+  // resolved to nothing everywhere it was used. Failing here is loud, and it
+  // stays correct if the container ever moves again.
+  if (!imageUrl) {
+    throw new Error(
+      `Upload succeeded but returned no public URL (container '${GALLERY_CONTAINER}'). ` +
+        'The gallery record was not created.'
+    );
+  }
 
   await postJSON('createManualGalleryImageRecord', {
     articleId: 'manual-upload',
@@ -244,12 +299,106 @@ async function uploadGalleryFile({
     provider: normalizedProvider,
     title: uploadData.title,
     slot: uploadSlot,
-    storagePath: `content/${uploadData.storagePath}`,
+    storagePath: `${GALLERY_CONTAINER}/${uploadData.storagePath}`,
     customTags: uploadData.allTags,
     folder: uploadData.folder,
   });
 
   return file.name;
+}
+
+/**
+ * Upload every queued file, skipping the ones a publicly served container will
+ * not take.
+ *
+ * Returns what landed and what did not so the caller reports rather than
+ * branches — the loop's guards were counted into handleManualUpload, which the
+ * repository's own complexity gate flagged at 10.
+ *
+ * @returns {Promise<{uploaded: string[], rejected: string[]}>}
+ */
+async function uploadGalleryBatch(files, options) {
+  const uploaded = [];
+  const rejected = [];
+  for (let index = 0; index < files.length; index += 1) {
+    const file = files[index];
+    if (!file || !file.name) {
+      console.warn(`Skipping invalid file at index ${index}`);
+      continue;
+    }
+    // Named here rather than left to the route's 415, which would abort the
+    // whole batch on the first bad file without saying which one.
+    const problem = publicImageFileProblem(file);
+    if (problem) {
+      rejected.push(`${file.name}: ${problem}`);
+      continue;
+    }
+    // Sequential on purpose: each upload is a full base64 body, and the route
+    // caps a single one at 15 MB. Firing a queue of them at once is how a
+    // multi-file batch turns into a memory spike on a 2048 MB instance.
+    uploaded.push(
+      await uploadGalleryFile({ ...options, file, index, uploadFilesLength: files.length })
+    );
+  }
+  return { uploaded, rejected };
+}
+
+/** One tag in the update panel's toggle row. */
+function TagToggle({ tag, selected, onToggle }) {
+  return (
+    <Badge
+      variant={selected ? 'default' : 'outline'}
+      className="cursor-pointer gap-2"
+      onClick={onToggle}
+    >
+      <input
+        type="checkbox"
+        checked={selected}
+        readOnly
+        className="h-3 w-3 cursor-pointer pointer-events-none"
+      />
+      {tag}
+    </Badge>
+  );
+}
+
+/**
+ * Rename one gallery image.
+ *
+ * Module-level over a state bag, as linkWrites.js is: written inside the
+ * component its guard was one of the component's own exits, and the page
+ * already measured 16 of them.
+ */
+async function renameGalleryImage(state, itemId, newTitle) {
+  const title = String(newTitle || '').trim();
+  if (!title) {
+    state.setDeleteError('Title cannot be empty');
+    return;
+  }
+  state.setBusyId(itemId);
+  try {
+    const item = state.items.find((it) => it.id === itemId);
+    if (!item) throw new Error('Item not found');
+    await postJSON('updateGalleryImageMetadata', {
+      id: itemId,
+      galleryCollection: item.galleryCollection,
+      title,
+    });
+    state.setEditingItemId(null);
+    state.setEditingTitle('');
+    await state.fetchGallery();
+  } catch (error) {
+    console.error('Rename error:', error);
+    state.setDeleteError(`Rename failed: ${error.message || error}`);
+  } finally {
+    state.setBusyId('');
+  }
+}
+
+/** The visible items: everything matching the search term and the four filters. */
+function filterGalleryItems(items, searchTerm, filters) {
+  const term = searchTerm.trim().toLowerCase();
+  return (items || []).filter((item) => matchesGalleryItem(item, term, filters));
 }
 
 export default function ImageGalleryPage() {
@@ -271,6 +420,10 @@ export default function ImageGalleryPage() {
   const [uploadCustomTags, setUploadCustomTags] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState('');
+  // Deliberately NOT `deleteError`: fetchGallery clears that on every refresh,
+  // and this message is set immediately before one, so it would be wiped
+  // before it could be read.
+  const [uploadWarning, setUploadWarning] = useState('');
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [manualFolders, setManualFolders] = useState([]);
   const [uploadFolder, setUploadFolder] = useState('default');
@@ -302,87 +455,24 @@ export default function ImageGalleryPage() {
     fetchGallery();
   }, [fetchGallery]);
 
-  const providerOptions = useMemo(() => {
-    const values = new Set(
-      (items || [])
-        .map((item) =>
-          String(item.provider || '')
-            .trim()
-            .toUpperCase()
-        )
-        .filter(Boolean)
-    );
-    return ['all', ...Array.from(values).sort()];
-  }, [items]);
-
-  const slotOptions = useMemo(() => {
-    const values = new Set(
-      (items || [])
-        .map((item) =>
-          String(item.slot || '')
-            .trim()
-            .toLowerCase()
-        )
-        .filter(Boolean)
-    );
-    return ['all', ...Array.from(values).sort()];
-  }, [items]);
-
-  const customTagOptions = useMemo(() => {
-    const values = new Set();
-    (items || []).forEach((item) => {
-      const tags = item.customTags || [];
-      if (Array.isArray(tags)) {
-        tags.forEach((tag) => {
-          const trimmed = String(tag || '')
-            .trim()
-            .toLowerCase();
-          if (trimmed) values.add(trimmed);
-        });
-      }
-    });
-    return ['all', ...Array.from(values).sort()];
-  }, [items]);
-
-  // Dynamically extract folders from database items + manual folders
-  const folders = useMemo(() => {
-    const folderSet = new Set(['default', 'aws', 'azure', 'gcp', 'finops', 'architecture']);
-    // Add folders from database items
-    items.forEach((item) => {
-      const folder = String(item.folder || 'default')
-        .trim()
-        .toLowerCase();
-      if (folder) folderSet.add(folder);
-    });
-    // Add manually created folders
-    manualFolders.forEach((f) => folderSet.add(f.toLowerCase()));
-    return Array.from(folderSet).sort();
-  }, [items, manualFolders]);
-
-  // Get all unique tags from gallery items for tag toggle subsection
-  const allUniqueTags = useMemo(() => {
-    const tagSet = new Set();
-    items.forEach((item) => {
-      if (item.customTags && Array.isArray(item.customTags)) {
-        item.customTags.forEach((tag) => {
-          if (tag && tag.trim()) tagSet.add(tag.toLowerCase());
-        });
-      }
-    });
-    return Array.from(tagSet).sort();
-  }, [items]);
-
-  const filtered = useMemo(() => {
-    const term = searchTerm.trim().toLowerCase();
-    return (items || []).filter((item) =>
-      matchesGalleryItem(item, term, {
+  // Each of these is a pure function of `items` (lib/imageGallery.js). Written
+  // as useMemo bodies they put their returns inside this component, which is
+  // what took it to 16 exits.
+  const providerFilterOptions = useMemo(() => providerOptions(items), [items]);
+  const slotFilterOptions = useMemo(() => slotOptions(items), [items]);
+  const customTagFilterOptions = useMemo(() => customTagOptions(items), [items]);
+  const folders = useMemo(() => folderOptions(items, manualFolders), [items, manualFolders]);
+  const allUniqueTags = useMemo(() => uniqueTags(items), [items]);
+  const filtered = useMemo(
+    () =>
+      filterGalleryItems(items, searchTerm, {
         providerFilter,
         slotFilter,
         customTagFilter,
         folderFilter,
-      })
-    );
-  }, [items, providerFilter, slotFilter, customTagFilter, folderFilter, searchTerm]);
+      }),
+    [items, providerFilter, slotFilter, customTagFilter, folderFilter, searchTerm]
+  );
 
   const updateSlot = async (item, newSlot) => {
     setBusyId(item.id);
@@ -411,8 +501,9 @@ export default function ImageGalleryPage() {
   };
 
   const handleReuse = (item) => {
-    if (!item?.imageUrl) return;
-    navigate(`/admin/submit?reuseImage=${encodeURIComponent(item.imageUrl)}`);
+    if (item?.imageUrl) {
+      navigate(`/admin/submit?reuseImage=${encodeURIComponent(item.imageUrl)}`);
+    }
   };
 
   const handleManualUpload = async () => {
@@ -425,6 +516,7 @@ export default function ImageGalleryPage() {
     setUploading(true);
     setDeleteError('');
     setUploadMessage('');
+    setUploadWarning('');
 
     try {
       const normalizedProvider = normalizeContentProvider(uploadProvider);
@@ -433,30 +525,15 @@ export default function ImageGalleryPage() {
         .map((tag) => tag.trim().toLowerCase())
         .filter(Boolean);
 
-      const uploadedCount = [];
-
-      for (let i = 0; i < uploadFiles.length; i++) {
-        const file = uploadFiles[i];
-        if (!file || !file.name) {
-          console.warn(`Skipping invalid file at index ${i}`);
-          continue;
-        }
-
-        uploadedCount.push(
-          await uploadGalleryFile({
-            file,
-            index: i,
-            normalizedProvider,
-            uploadSlot,
-            customTagsArray,
-            uploadRenameFilename,
-            pullTagsFromFilename,
-            uploadTitle,
-            uploadFolder,
-            uploadFilesLength: uploadFiles.length,
-          })
-        );
-      }
+      const { uploaded, rejected } = await uploadGalleryBatch(uploadFiles, {
+        normalizedProvider,
+        uploadSlot,
+        customTagsArray,
+        uploadRenameFilename,
+        pullTagsFromFilename,
+        uploadTitle,
+        uploadFolder,
+      });
 
       setUploadFiles([]);
       setUploadTitle('');
@@ -467,8 +544,11 @@ export default function ImageGalleryPage() {
         uploadInputRef.current.value = '';
       }
       setUploadMessage(
-        `${uploadedCount.length} image${uploadedCount.length === 1 ? '' : 's'} uploaded to ${uploadFolder || 'Default'} folder.`
+        `${uploaded.length} image${uploaded.length === 1 ? '' : 's'} uploaded to ${uploadFolder || 'Default'} folder.`
       );
+      if (rejected.length > 0) {
+        setUploadWarning(`Not uploaded — ${rejected.join('; ')}`);
+      }
       await fetchGallery();
     } catch (error) {
       setDeleteError(`Upload failed: ${error.message || error}`);
@@ -506,26 +586,13 @@ export default function ImageGalleryPage() {
     );
   };
 
-  const handleToggleSelect = (itemId) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(itemId)) {
-        next.delete(itemId);
-      } else {
-        next.add(itemId);
-      }
-      return next;
-    });
-  };
+  const handleToggleSelect = (itemId) => setSelectedIds((prev) => toggledSelection(prev, itemId));
 
   const handleCreateFolder = () => {
     const folderName = newFolderName.trim().toLowerCase();
-    if (!folderName) {
-      setDeleteError('Folder name cannot be empty');
-      return;
-    }
-    if (folders.includes(folderName)) {
-      setDeleteError('Folder already exists');
+    const problem = newFolderProblem(folderName, folders);
+    if (problem) {
+      setDeleteError(problem);
       return;
     }
     setManualFolders([...manualFolders, folderName].sort());
@@ -536,18 +603,9 @@ export default function ImageGalleryPage() {
 
   const handleDeleteFolder = async (folderName) => {
     const lowerFolderName = folderName.toLowerCase();
-    if (lowerFolderName === 'default') {
-      setDeleteError('Cannot delete Default folder');
-      return;
-    }
-
-    const imagesInFolder = items.filter(
-      (item) => (item.folder || 'default').toLowerCase() === lowerFolderName
-    );
-    if (imagesInFolder.length > 0) {
-      setDeleteError(
-        `Cannot delete folder "${folderName}" - it contains ${imagesInFolder.length} image(s). Move or delete images first.`
-      );
+    const problem = deleteFolderProblem(folderName, items);
+    if (problem) {
+      setDeleteError(problem);
       return;
     }
 
@@ -617,33 +675,12 @@ export default function ImageGalleryPage() {
     }
   };
 
-  const handleRenameImage = async (itemId, newTitle) => {
-    if (!newTitle.trim()) {
-      setDeleteError('Title cannot be empty');
-      return;
-    }
-
-    setBusyId(itemId);
-    try {
-      const item = items.find((it) => it.id === itemId);
-      if (!item) throw new Error('Item not found');
-
-      await postJSON('updateGalleryImageMetadata', {
-        id: itemId,
-        galleryCollection: item.galleryCollection,
-        title: newTitle.trim(),
-      });
-
-      setEditingItemId(null);
-      setEditingTitle('');
-      await fetchGallery();
-    } catch (error) {
-      console.error('Rename error:', error);
-      setDeleteError(`Rename failed: ${error.message || error}`);
-    } finally {
-      setBusyId('');
-    }
-  };
+  const handleRenameImage = (itemId, newTitle) =>
+    renameGalleryImage(
+      { items, setBusyId, setDeleteError, setEditingItemId, setEditingTitle, fetchGallery },
+      itemId,
+      newTitle
+    );
 
   const handleMoveToFolder = async (itemId, newFolder) => {
     setBusyId(itemId);
@@ -878,6 +915,7 @@ export default function ImageGalleryPage() {
           advanced filtering.
         </p>
         {deleteError && <p className="mt-1 text-sm text-destructive">{deleteError}</p>}
+        {uploadWarning && <p className="mt-1 text-sm text-destructive">{uploadWarning}</p>}
       </div>
 
       {/* SECTION 1: Upload Images */}
@@ -894,10 +932,16 @@ export default function ImageGalleryPage() {
             <div className="space-y-3">
               <div>
                 <p className="text-sm font-semibold mb-2">Select Files</p>
+                {/*
+                  `accept` is not `image/*`: `covers` is publicly served, so
+                  the upload route refuses SVG (a scriptable document) and
+                  anything outside the five raster types. Offering them in the
+                  picker would be offering a 415.
+                */}
                 <Input
                   ref={uploadInputRef}
                   type="file"
-                  accept="image/*"
+                  accept={GALLERY_ACCEPT}
                   multiple
                   onChange={handleAddFiles}
                   className="cursor-pointer"
@@ -1164,33 +1208,16 @@ export default function ImageGalleryPage() {
                 Select/deselect tags to attach or remove from the selected image
               </p>
               <div className="flex flex-wrap gap-2">
-                {allUniqueTags.map((tag) => {
-                  const isSelected = selectedTagsForUpdate.has(tag);
-                  return (
-                    <Badge
-                      key={tag}
-                      variant={isSelected ? 'default' : 'outline'}
-                      className="cursor-pointer gap-2"
-                      onClick={() => {
-                        const newSet = new Set(selectedTagsForUpdate);
-                        if (isSelected) {
-                          newSet.delete(tag);
-                        } else {
-                          newSet.add(tag);
-                        }
-                        setSelectedTagsForUpdate(newSet);
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        readOnly
-                        className="h-3 w-3 cursor-pointer pointer-events-none"
-                      />
-                      {tag}
-                    </Badge>
-                  );
-                })}
+                {allUniqueTags.map((tag) => (
+                  <TagToggle
+                    key={tag}
+                    tag={tag}
+                    selected={selectedTagsForUpdate.has(tag)}
+                    onToggle={() =>
+                      setSelectedTagsForUpdate(toggledSelection(selectedTagsForUpdate, tag))
+                    }
+                  />
+                ))}
               </div>
             </div>
           )}
@@ -1263,7 +1290,7 @@ export default function ImageGalleryPage() {
                   {option.label}
                 </option>
               ))}
-              {providerOptions
+              {providerFilterOptions
                 .filter(
                   (value) =>
                     value !== 'all' &&
@@ -1282,7 +1309,7 @@ export default function ImageGalleryPage() {
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
               title="Filter by Slot"
             >
-              {slotOptions.map((value) => (
+              {slotFilterOptions.map((value) => (
                 <option key={value} value={value}>
                   {value === 'all' ? 'All Slots' : value}
                 </option>
@@ -1297,7 +1324,7 @@ export default function ImageGalleryPage() {
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
               title="Filter by Custom Tag"
             >
-              {customTagOptions.map((value) => (
+              {customTagFilterOptions.map((value) => (
                 <option key={value} value={value}>
                   {value === 'all' ? 'All Custom Tags' : value}
                 </option>
