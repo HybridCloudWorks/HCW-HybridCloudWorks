@@ -42,7 +42,10 @@ This project has not cut a tagged release; entries are grouped under
   four full runs, against vitest's 5 s default.** One slow moment covers the
   rest of that distance, and this suite has them — `App.routes.test.jsx`'s
   un-mocked lazy route, the same shape, swung **1.05 s to 2.70 s between two
-  runs of the same suite on the same machine**.
+  runs of the same suite on the same machine**. Oversubscribing the CPU
+  reproduces it on demand: **4.75 s** in a full run, and, running that file
+  alone, `Error: Test timed out in 5000ms.` at **5,083 ms** — the failure mode
+  named, not inferred.
 
   Both tests now state the budget their own work needs: 30 s for the walk,
   which is the figure `test:coverage` had already settled on naming this exact

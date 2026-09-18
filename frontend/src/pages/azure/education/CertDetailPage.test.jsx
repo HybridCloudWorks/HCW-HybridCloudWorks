@@ -80,12 +80,15 @@ describe('CertDetailPage', () => {
    *
    * That margin is one slow moment wide, and the suite has slow moments:
    * App.routes.test.jsx's un-mocked lazy route — the same shape — swung 1.05 s
-   * to 2.70 s between two runs of this suite on this machine. The same swing
-   * here lands past 5 s, which is what happened on 2026-09-17: one failure, no
-   * second reproduction, and a green re-run. #640 filed it as cross-test
-   * interference; it is not. Vitest gives every test file a fresh module
-   * registry here (pool `forks`, `isolate` on, both defaults), so neither
-   * module state nor a mock can cross a file boundary — measured, not assumed.
+   * to 2.70 s between two runs of this suite on this machine. Oversubscribe the
+   * CPU and this walk reaches 4.75 s in a full run, and on its own it tips:
+   * `Error: Test timed out in 5000ms.` at 5,083 ms. That is the 2026-09-17
+   * failure, reproduced on demand.
+   *
+   * #640 filed it as cross-test interference; it is not. Vitest gives every
+   * test file a fresh module registry here (pool `forks`, `isolate` on, both
+   * defaults), so neither module state nor a mock can cross a file boundary —
+   * probed with two files, not assumed.
    *
    * WHY 30 s. Not a round number picked to make red go away: the
    * `test:coverage` script already passes --testTimeout=30000, and the comment
