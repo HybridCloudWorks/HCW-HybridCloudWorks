@@ -22,6 +22,53 @@ roles table.
 | Deployment identity | User-assigned managed identity + GitHub OIDC federated credentials (`infra/oidc.tf`) — no static credentials exist |
 | Working rules for the directory | `infra/README.md` |
 
+## Which directory holds the estate
+
+The four subscriptions — `sub-app-site-prod-cus`, `sub-plat-mgmt-prod-cus`,
+`sub-plat-conn-prod-cus`, `sub-plat-ident-prod-cus` — live in the Entra tenant
+named **Default Directory**, primary domain
+`saulpatinojrhotmail.onmicrosoft.com`. That is the tenant Azure created
+alongside the first subscription. It is **not** the `hybridcloudworks.com`
+tenant that the owner's work account calls home: that account is a guest in
+Default Directory, and Default Directory requires multi-factor authentication.
+
+So a plain `az login` from a fresh machine lands in `hybridcloudworks.com`,
+which holds no subscriptions, and ends with `No subscriptions found` followed by
+`The subscription of 'b9e02281…' doesn't exist in cloud 'AzureCloud'`. The
+second line reads as a missing subscription. It is a wrong-directory sign-in,
+and the `AADSTS50076` lines above it, one per other tenant, are the CLI failing
+to refresh silently into a tenant that wants MFA. Cost one round trip on
+2026-09-18.
+
+Name the tenant on every manual sign-in. This line is the same in PowerShell,
+Git Bash and macOS zsh, and it opens the browser to complete MFA:
+
+```powershell
+az login --tenant saulpatinojrhotmail.onmicrosoft.com
+```
+
+Success is a table listing all four `sub-*-prod-cus` subscriptions. Then
+select the one the command you are about to run targets, by name:
+
+```powershell
+az account set --subscription sub-app-site-prod-cus
+```
+
+The tenant is named here by its domain rather than its GUID because the docs
+redaction gate (`scripts/docs/check_redaction.py`) keeps real GUIDs out of
+published pages, per [Variables and secrets](../standards/variables-and-secrets.md).
+When a GUID is needed — `ARM_TENANT_ID` below, or a GitHub variable — read it
+back from the signed-in session rather than from a screenshot:
+
+```powershell
+az account show --query tenantId -o tsv
+```
+
+The bootstrap and variable-seeding scripts in section 0 do not need this: they
+run `az login --tenant` themselves after matching the tenant from
+`sub-plat-mgmt-*`. This section is for a hand-run `az` command, which is where
+the wrong directory bites.
+
 ## 0. Bootstrap — once per subscription, before anything else
 
 Everything below this section assumes HCP Terraform can already authenticate
