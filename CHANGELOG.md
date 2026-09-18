@@ -19,6 +19,19 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **The deployment runbook names the directory the estate lives in, and the
+  `az login --tenant` line that reaches it.** On 2026-09-18 a plain `az login`
+  from a fresh Mac landed in the owner's home tenant, `hybridcloudworks.com`,
+  which holds no subscriptions, and closed with `The subscription of
+  'b9e02281…' doesn't exist in cloud 'AzureCloud'` — a line that reads as a
+  missing subscription and is a wrong-directory sign-in. The four
+  subscriptions live in the tenant named Default Directory, where the work
+  account is a guest behind MFA, so only an explicit `--tenant` reaches them.
+  The runbook now says so, gives the sign-in line by the tenant's
+  `onmicrosoft.com` domain rather than its GUID (the docs redaction gate keeps
+  real GUIDs out of published pages), and shows how to read the GUID back from
+  the session when a variable needs it.
+
 - **The frontend suite runs on vitest's `vmThreads` pool, and three test files
   stopped depending on which pool they get (#645).** Building a jsdom per test
   file — 172 of them — was half the suite's tracked time. One V8 context per
