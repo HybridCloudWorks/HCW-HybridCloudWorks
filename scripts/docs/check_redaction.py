@@ -64,19 +64,33 @@ def files() -> list[Path]:
     return out
 
 
-def main() -> int:
+def line_findings(rel: str, n: int, line: str) -> list[str]:
+    """Every finding on one line, each as `file:line: what`."""
+    found: list[str] = []
+    if WIKI_LINK.search(line):
+        found.append(f"{rel}:{n}: link to the retired GitHub Wiki")
+    found.extend(
+        f"{rel}:{n}: non-placeholder GUID {guid}"
+        for guid in GUID.findall(line)
+        if not (PLACEHOLDER.match(guid) or guid.lower() in ALLOWED_GUIDS)
+    )
+    if LOCAL_PATH.search(line):
+        found.append(f"{rel}:{n}: contributor-local filesystem path")
+    return found
+
+
+def scan() -> list[str]:
+    """Every finding across every scanned file, in file order."""
     findings: list[str] = []
     for path in files():
         rel = path.relative_to(ROOT).as_posix()
         for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            if WIKI_LINK.search(line):
-                findings.append(f"{rel}:{n}: link to the retired GitHub Wiki")
-            for guid in GUID.findall(line):
-                if PLACEHOLDER.match(guid) or guid.lower() in ALLOWED_GUIDS:
-                    continue
-                findings.append(f"{rel}:{n}: non-placeholder GUID {guid}")
-            if LOCAL_PATH.search(line):
-                findings.append(f"{rel}:{n}: contributor-local filesystem path")
+            findings.extend(line_findings(rel, n, line))
+    return findings
+
+
+def main() -> int:
+    findings = scan()
     if findings:
         print("Docs redaction gate failed:")
         for f in findings:

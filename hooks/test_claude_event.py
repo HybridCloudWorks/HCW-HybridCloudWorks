@@ -54,6 +54,14 @@ def decision(result: subprocess.CompletedProcess) -> dict | None:
     return json.loads(out) if out else None
 
 
+def audit_records(root: Path) -> list[dict]:
+    """Every event the hook appended to the audit log under this root."""
+    log = root / ".agentic" / "audit" / "claude-events.jsonl"
+    if not log.is_file():
+        return []
+    return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line]
+
+
 class HookCase(unittest.TestCase):
     def setUp(self):
         self.root = Path(tempfile.mkdtemp(prefix="stop-guard-"))
@@ -82,12 +90,6 @@ class HookCase(unittest.TestCase):
             json.dumps({"workflow_id": workflow_id, "path": str(directory)}), encoding="utf-8"
         )
         return workflow_id
-
-    def audit_records(self) -> list[dict]:
-        log = self.root / ".agentic" / "audit" / "claude-events.jsonl"
-        if not log.is_file():
-            return []
-        return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line]
 
 
 class TheGuardBlocks(HookCase):
@@ -164,7 +166,7 @@ class TheAuditRecord(HookCase):
     def test_every_event_is_recorded_including_one_that_blocks(self):
         self.arm()
         run_hook(self.root, "Stop", json.dumps({"session_id": "abc"}))
-        records = self.audit_records()
+        records = audit_records(self.root)
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["event_argument"], "Stop")
         self.assertEqual(records[0]["event"]["session_id"], "abc")
@@ -172,7 +174,7 @@ class TheAuditRecord(HookCase):
     def test_unparseable_stdin_is_recorded_rather_than_dropped(self):
         result = run_hook(self.root, "SessionStart", "this is not json")
         self.assertEqual(result.returncode, 0)
-        records = self.audit_records()
+        records = audit_records(self.root)
         self.assertTrue(records[0]["event"]["raw_input_invalid"])
         self.assertIn("not json", records[0]["event"]["raw_input"])
 

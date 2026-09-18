@@ -31,6 +31,7 @@ SOURCES = {
     "TODO.md": "repo/todo.md",
 }
 LINK = re.compile(r"(?<!!)\[([^\]]*)\]\(([^)\s]+)\)")
+DOCS_PREFIX = "docs/"
 
 
 def _rewrite(markdown: str) -> str:
@@ -43,10 +44,10 @@ def _rewrite(markdown: str) -> str:
         base = base.lstrip("./")
         if base in SOURCES:
             return f"[{text}]({Path(SOURCES[base]).name}{fragment})"
-        if base == "docs" or base == "docs/":
+        if base in ("docs", DOCS_PREFIX):
             return f"[{text}](../index.md{fragment})"
-        if base.startswith("docs/"):
-            rest = base[len("docs/"):]
+        if base.startswith(DOCS_PREFIX):
+            rest = base[len(DOCS_PREFIX):]
             if rest.endswith("/"):
                 rest += "index.md"
             return f"[{text}](../{rest}{fragment})"
