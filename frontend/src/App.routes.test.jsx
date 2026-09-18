@@ -308,10 +308,18 @@ describe('public route contract', () => {
     // Unlike the provider routes above, PreviewPage is NOT mocked, so the
     // lazy chunk loads for real — under CI load that can outrun findByText's
     // default 1 s, so this lookup gets an explicit generous timeout.
+    //
+    // The TEST budget has to be the larger of the two, or the smaller one is
+    // the only one that ever applies (#640). Vitest's default is 5 s, so a
+    // findByText allowed 10 s could never spend more than half of it: the
+    // test would be killed at 5 s and report a timeout, never the wait it was
+    // actually given. This test is also among the suite's slowest — 1.05 s to
+    // 2.70 s across two runs of the same suite on the same machine — so the
+    // 10 s was granted against real variance, not hypothetical.
     renderRoute('/preview/some-id?t=token');
 
     expect(
       await screen.findByText(/Preview unavailable/i, {}, { timeout: 10000 })
     ).toBeInTheDocument();
-  });
+  }, 20_000);
 });

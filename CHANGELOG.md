@@ -19,6 +19,39 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The Azure detail page's catalogue walk no longer fails at random in a full
+  suite run (#640).** `CertDetailPage.test.jsx`'s *resolves every landing-page
+  slug to a detail page* failed once on 2026-09-17, passed on its own, and
+  passed on a re-run of the same suite — the shape that teaches everyone to
+  re-run rather than look.
+
+  **It was not cross-test interference**, which is what #640 assumed and wrote
+  down as the first thing to check. This suite runs on vitest's defaults (pool
+  `forks`, `isolate` on), so every test file gets a fresh module registry: a
+  probe that mutated a shared module object and set a global in one file found
+  both pristine in the next. Neither module state nor a stray mock can cross a
+  file boundary here, which leaves file ordering — the third hypothesis —
+  nothing to expose.
+
+  **It was a budget.** The walk renders all 101 Azure exam pages, and each one
+  suspends on a real dynamic import of that exam's study-guide module, so the
+  test goes through Vite's transform server ~51 times — while in a full run
+  that one server is serving four worker processes at once. None of that
+  contention exists when the file runs alone, which is exactly why it passed
+  alone. Measured on the 4-core container: **1.4 s alone, 1.67-2.19 s across
+  four full runs, against vitest's 5 s default.** One slow moment covers the
+  rest of that distance, and this suite has them — `App.routes.test.jsx`'s
+  un-mocked lazy route, the same shape, swung **1.05 s to 2.70 s between two
+  runs of the same suite on the same machine**.
+
+  Both tests now state the budget their own work needs: 30 s for the walk,
+  which is the figure `test:coverage` had already settled on naming this exact
+  test, and 20 s for the route. The route's was a second and quieter bug — it
+  asks `findByText` to wait up to 10 s, which under a 5 s test budget it could
+  never be given, so the generous timeout added for CI load had never once
+  applied.
+
+
 - **Gallery uploads no longer refuse a file for having the wrong name (#631).**
   `getGalleryFileExtension` took the blob path's extension from the *filename*
   while the content type came from `file.type`. The upload route requires the

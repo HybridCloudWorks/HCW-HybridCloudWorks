@@ -31,8 +31,12 @@ export default defineConfig({
     // together without per-package prefix fixing.
     // `test:coverage` passes --testTimeout=30000 --hookTimeout=60000: under V8
     // coverage on a loaded machine, CertDetailPage.test.jsx's walk over every
-    // landing-page slug passed the 5 s default locally (2026-09-14). The flags
-    // are on the coverage script only, so `npm test` keeps the defaults.
+    // landing-page slug ran past the 5 s default locally (2026-09-14). That
+    // walk now states its own 30 s budget on the test itself, because the same
+    // overrun reached a plain `npm test` run too (#640) — so these flags are a
+    // backstop for whatever else coverage slows down, not the only thing
+    // holding that one test up. They stay on the coverage script, so `npm test`
+    // keeps the 5 s default for every test that has not asked for more.
     coverage: {
       provider: 'v8',
       reporter: [
