@@ -372,3 +372,19 @@ jobs:
             --head "${branch}" \
             --title "chore: refresh the Azure Learn catalogue and study-guide outlines (checked ${AS_OF})" \
             --body-file "${RUNNER_TEMP}/pr-body.md"
+
+      # The token lives an hour; the work above takes seconds. Ending it here
+      # keeps a credential that can open pull requests on this repository from
+      # outliving the job that needed it (#641) — which is what
+      # `actions/create-github-app-token` does in its post step, and the one
+      # thing the in-repo minter did not do.
+      #
+      # `always()`, so a failed push or a failed `gh pr create` still cleans up
+      # — that is the case where a live token matters most. The step cannot
+      # fail the job: the script returns 0 whatever GitHub answers, because a
+      # run that did its work should not turn red over cleanup.
+      - name: Revoke the installation token
+        if: always() && steps.token.outputs.token != ''
+        env:
+          GITHUB_APP_TOKEN: ${{ steps.token.outputs.token }}
+        run: node scripts/github-app-token.mjs --revoke

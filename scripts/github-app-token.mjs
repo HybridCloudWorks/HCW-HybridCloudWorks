@@ -17,13 +17,21 @@
  * was none. Corrected here rather than deleted, because the wrong version is
  * what justified the stored private key below.
  *
- * The obvious way to get the token is the marketplace action. This repository
- * pins every action by commit SHA, and the SHA could not be resolved from the
- * environment this was written in — guessing one is not an option, and an
- * unpinned action in the job that holds the most powerful credential in the
- * pipeline is the wrong place to make an exception. Thirty lines of `node:crypto`
- * and two `fetch` calls need no pin, no dependency, and can be tested against a
- * key pair generated in the test itself.
+ * The obvious way to get the token is `actions/create-github-app-token`. An
+ * earlier version of this header said its commit SHA could not be resolved
+ * from the environment this was written in. That was a limitation of that
+ * session, not a reason, and it no longer holds — corrected under #641 rather
+ * than left to justify a decision it never supported.
+ *
+ * The real reason to keep this is narrower and still stands: the job that
+ * holds the most powerful credential in the pipeline runs no third-party code
+ * and installs nothing. Thirty lines of `node:crypto` and two `fetch` calls
+ * need no pin and no dependency, and can be tested against a key pair the test
+ * generates itself.
+ *
+ * The one thing the action did that this did not was revoke the token when the
+ * job ended. `revokeInstallationToken` below closes that, so the trade is now
+ * only third-party code against a file this repository owns and tests.
  *
  * ## What it grants
  *
@@ -43,6 +51,18 @@
  * The token is printed on stdout and nothing else is, so the caller can capture
  * it. **The caller must mask it before doing anything else with it** — the
  * workflow does this with `::add-mask::` on the line after it is read.
+ *
+ * ## Revoking
+ *
+ * `node scripts/github-app-token.mjs --revoke` with GITHUB_APP_TOKEN set ends
+ * the token immediately rather than leaving it live for the rest of its hour.
+ * Callers run it in a step with `if: always()`, so a failed job still cleans up.
+ *
+ * **copilot-setup-steps.yml must NOT revoke.** It writes the token to a file
+ * for Copilot's MCP server, which reads it AFTER that job has finished —
+ * revoking at the end of the job would leave code review with a dead
+ * credential. That workflow is the exception on purpose, and says so at its
+ * own mint step.
  */
 import { createSign } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
@@ -230,6 +250,48 @@ export async function mintInstallationToken({
   return parseTokenResponse(await tokenResponse.json());
 }
 
+/**
+ * End an installation token now, rather than letting it live out its hour.
+ *
+ * The token authenticates its own revocation — that is what
+ * `DELETE /installation/token` takes, not the App JWT. GitHub answers 204 with
+ * no body.
+ *
+ * Returns true when the token is gone, false when GitHub refused. It does not
+ * throw: this runs in an `if: always()` step after the work is done, and a job
+ * that succeeded should not turn red because cleanup could not reach GitHub.
+ * A 401 means the token was already invalid, which is the desired end state.
+ */
+export async function revokeInstallationToken({ token, fetchImpl = fetch }) {
+  if (!token) throw new Error('revokeInstallationToken needs a token');
+
+  const response = await fetchImpl(`${API}/installation/token`, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+  });
+
+  // 401 as well as 204: an already-invalid token is not a failure to revoke.
+  return response.status === 204 || response.status === 401;
+}
+
+async function revokeMain() {
+  const token = process.env.GITHUB_APP_TOKEN;
+  if (!token) {
+    // Not an error. The mint step is conditional, so a skipped run reaches
+    // here with nothing to revoke and should stay green.
+    console.error('GITHUB_APP_TOKEN is not set — nothing to revoke.');
+    return 0;
+  }
+  const revoked = await revokeInstallationToken({ token });
+  console.error(revoked ? 'Installation token revoked.' : 'GitHub refused the revocation.');
+  // Never non-zero: see revokeInstallationToken.
+  return 0;
+}
+
 async function main() {
   const appId = process.env.GITHUB_APP_ID;
   const privateKey = process.env.GITHUB_APP_PRIVATE_KEY;
@@ -267,7 +329,9 @@ async function main() {
 // having minted nothing. That exact defect was found in review on
 // check-unresolved-secrets.mjs and is not worth rediscovering here.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main()
+  // The token arrives by environment, never argv: an argument is visible to
+  // anything that can list processes on the runner.
+  (process.argv.includes('--revoke') ? revokeMain() : main())
     .then((code) => process.exit(code))
     .catch((error) => {
       console.error(`\n${error.message}`);

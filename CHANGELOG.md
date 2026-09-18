@@ -104,6 +104,34 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **The App installation token is revoked when the job ends (#641).** It was
+  living out its full hour after the work that needed it had finished.
+
+  `revokeInstallationToken` calls `DELETE /installation/token`, authenticated
+  by the token itself rather than the App JWT, and the two PR-opening
+  workflows call it in a step with `if: always()` — so a failed push or a
+  failed `gh pr create` still cleans up, which is the case where a live
+  credential matters most.
+
+  It cannot fail the job. The script returns 0 whatever GitHub answers, and
+  counts a 401 as success because an already-invalid token is the end state
+  wanted. A run that did its work should not turn red over cleanup.
+
+  **`copilot-setup-steps.yml` deliberately does not revoke**, and now says so
+  at its own mint step. It hands the token to Copilot's MCP server, which
+  reads it *after* that job finishes; revoking there would leave code review
+  holding a dead credential. Making all three consistent would have broken it.
+
+  This is what `actions/create-github-app-token` does in its post step and the
+  one thing the in-repo minter did not. The header's reason for preferring the
+  in-repo version is also corrected: it claimed the action's commit SHA could
+  not be resolved when it was written, which was a limitation of that session
+  rather than an argument. The real reason — no third-party code in the job
+  holding the most powerful credential in the pipeline — still stands and is
+  what the header says now.
+
+  Five tests, 29 in that file.
+
 - **Six `secrets-outside-env` findings fixed, and the triage record corrected
   (#567).** The three workflows that never adopted the repository's own
   convention now scope their secret-holding jobs to `environment: automation`.

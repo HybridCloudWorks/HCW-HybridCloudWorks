@@ -212,6 +212,10 @@ jobs:
       # issues, pull_requests, actions, security_events (code scanning),
       # vulnerability_alerts (Dependabot), discussions — on this repository
       # only, for one hour. It is masked before it is written anywhere.
+      # NOT revoked at the end of this job, unlike the two PR-opening
+      # workflows (#641). The token is handed to Copilot's MCP server below and
+      # read AFTER this job finishes, so ending it here would leave code review
+      # holding a dead credential. It expires on its own in an hour.
       - name: Mint a read-only App installation token
         id: token
         if: steps.app.outputs.armed == 'true'
