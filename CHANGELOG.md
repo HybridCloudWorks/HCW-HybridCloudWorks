@@ -50,10 +50,15 @@ This project has not cut a tagged release; entries are grouped under
   `Location` — a fabrication that had already caused two bugs of its own, both
   recorded in that file.
 
-  Checked rather than assumed: **2,272 tests under both pools**; coverage
-  identical to the same numerators and denominators, with `lcov.info` the same
-  682,268 bytes, so the Qlty upload carries what it did before; and peak Node
-  RSS **3,213 MB** across a full coverage run, which #645 had listed as
+  Checked rather than assumed: **2,272 tests under both pools**, and coverage
+  identical to the same numerators and denominators. The two `lcov.info` files
+  are not byte-identical — same 36,985 records, none missing from either, but
+  398 differ in *hit count* and **none flips covered to uncovered or back**,
+  which is why the percentages match exactly and why Qlty, which gates on
+  coverage status rather than on how often a covered line ran, reports what it
+  did before. Peak Node RSS is **3,213 MB** against `forks`' 1,154 MB across a
+  full coverage run — 2.8×, the real cost of reusing a context per worker, and
+  the number to watch as the suite grows. #645 had listed memory as
   unestablished.
 
 ### Fixed

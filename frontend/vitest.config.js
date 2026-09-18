@@ -44,10 +44,15 @@ export default defineConfig({
     // uses a real URL rather than a fabricated Location. None of the three is
     // a workaround for this pool.
     //
-    // Coverage was checked, not assumed: statements, branches, functions and
-    // lines come out identical under both pools, to the same numerators and
-    // denominators, and lcov.info is the same size — so the Qlty upload below
-    // carries the same data it did before.
+    // Coverage was checked, not assumed, and the check is worth stating
+    // precisely. Statements, branches, functions and lines come out identical
+    // under both pools, to the same numerators and denominators. The two
+    // lcov.info files are NOT byte-identical: they carry the same 36,985
+    // records, none present in one and missing from the other, but 398 differ
+    // in HIT COUNT — `DA:34,475` against `DA:34,476`. Not one record flips
+    // covered to uncovered or back, which is why the percentages match exactly
+    // and why the Qlty upload below reports what it did before: it gates on
+    // coverage status, not on how many times a covered line ran.
     pool: 'vmThreads',
     exclude: [
       '**/node_modules/**',
