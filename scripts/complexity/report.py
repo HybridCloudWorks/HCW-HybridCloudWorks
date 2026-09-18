@@ -70,13 +70,22 @@ def section_carried(findings: list[Finding]) -> list[str]:
     return lines + ["", "</details>", ""]
 
 
+def direction(delta: int) -> str:
+    """The glyph a total's movement reads as: up, down, or unchanged."""
+    if delta > 0:
+        return "▲"
+    if delta < 0:
+        return "▼"
+    return "—"
+
+
 def render(
     findings: list[Finding], threshold: int, files: int, total: tuple[int, int]
 ) -> str:
     """The job summary, as markdown. One section per thing worth knowing."""
     head_total, base_total = total
     delta = head_total - base_total
-    arrow = "▲" if delta > 0 else ("▼" if delta < 0 else "—")
+    arrow = direction(delta)
     lines = [
         "## Complexity delta",
         "",

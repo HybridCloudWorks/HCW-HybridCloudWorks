@@ -271,6 +271,21 @@ def armed_workflow(root: Path) -> dict | None:
     return None
 
 
+def apply_node_policy(nodes: list[dict], mode: str, require_all: bool, optional: set[str]) -> None:
+    """Decide, before the workflow is written, which nodes are required and
+    which are skipped. In `all` mode without --require-all an absent agent is
+    not required; a node named in --optional-agents is never required; and in
+    either case an absent node is recorded as skipped rather than blocked."""
+    relax_absent = mode == "all" and not require_all
+    for node in nodes:
+        if relax_absent:
+            node["required"] = bool(node["available"])
+        if node["id"] in optional:
+            node["required"] = False
+        if (relax_absent or node["id"] in optional) and not node["available"]:
+            node["status"] = STATUS_SKIPPED
+
+
 def init_workflow(args: argparse.Namespace, root: Path) -> int:
     armed = armed_workflow(root)
     if armed and not args.force:
@@ -287,15 +302,7 @@ def init_workflow(args: argparse.Namespace, root: Path) -> int:
     discovery = run_discovery(root, include_user=not args.no_user, out=".agentic/discovery.json")
     nodes = selected_nodes(discovery, args.mode, [x for x in args.agents.split(",") if x])
     optional = {x for x in args.optional_agents.split(",") if x}
-    for node in nodes:
-        if args.mode == "all" and not args.require_all:
-            node["required"] = bool(node["available"])
-            if not node["available"]:
-                node["status"] = STATUS_SKIPPED
-        if node["id"] in optional:
-            node["required"] = False
-            if not node["available"]:
-                node["status"] = STATUS_SKIPPED
+    apply_node_policy(nodes, args.mode, args.require_all, optional)
     state = {
         "workflow_id": workflow_id,
         "created_at": now(),
@@ -353,6 +360,35 @@ def load_state(root: Path, workflow_id: str) -> tuple[Path, Path, dict] | None:
     return directory, state_path, json.loads(state_path.read_text(encoding="utf-8"))
 
 
+def score_node(node: dict, directory: Path, workflow_id: str) -> tuple[dict, list[str]]:
+    """Set one node's status from its handoff. Returns the node's result row
+    and the errors it contributes, which is only ever non-empty for a
+    required node: an optional node's failings are recorded, never blocking."""
+    required = bool(node.get("required"))
+    if not node.get("available"):
+        node["status"] = "blocked" if required else STATUS_SKIPPED
+        errors = [f"required agent unavailable: {node['id']}"] if required else []
+        return {"agent_id": node["id"], "valid": False, "reasons": [node["status"]]}, errors
+    handoff = directory / "handoffs" / f"{node['id']}.yml"
+    valid, reasons = handoff_valid(handoff, node["id"], workflow_id)
+    if valid:
+        node["status"] = "completed"
+        return {"agent_id": node["id"], "valid": True, "reasons": reasons}, []
+    node["status"] = "blocked" if required else "partial"
+    errors = [f"{node['id']}: {reason}" for reason in reasons] if required else []
+    return {"agent_id": node["id"], "valid": False, "reasons": reasons}, errors
+
+
+def overall_status(errors: list[str], required: list[dict]) -> str:
+    """blocked on any error; completed only when every required node is;
+    partial otherwise — including the case of no required nodes at all."""
+    if errors:
+        return "blocked"
+    if required and all(node.get("status") == "completed" for node in required):
+        return "completed"
+    return "partial"
+
+
 def evaluate_workflow(state: dict, directory: Path) -> tuple[list[str], list[dict]]:
     """Score every node against its handoff and set state["status"] accordingly.
     Shared by validate and close so the two can never disagree about whether a
@@ -360,30 +396,11 @@ def evaluate_workflow(state: dict, directory: Path) -> tuple[list[str], list[dic
     errors: list[str] = []
     results = []
     for node in state.get("nodes", []):
-        handoff = directory / "handoffs" / f"{node['id']}.yml"
-        if not node.get("available"):
-            if node.get("required"):
-                errors.append(f"required agent unavailable: {node['id']}")
-                node["status"] = "blocked"
-            else:
-                node["status"] = STATUS_SKIPPED
-            results.append({"agent_id": node["id"], "valid": False, "reasons": [node["status"]]})
-            continue
-        valid, reasons = handoff_valid(handoff, node["id"], state["workflow_id"])
-        if valid:
-            node["status"] = "completed"
-        else:
-            node["status"] = "blocked" if node.get("required") else "partial"
-            if node.get("required"):
-                errors.extend(f"{node['id']}: {reason}" for reason in reasons)
-        results.append({"agent_id": node["id"], "valid": valid, "reasons": reasons})
+        result, node_errors = score_node(node, directory, state["workflow_id"])
+        results.append(result)
+        errors.extend(node_errors)
     required = [node for node in state.get("nodes", []) if node.get("required")]
-    if errors:
-        state["status"] = "blocked"
-    elif required and all(node.get("status") == "completed" for node in required):
-        state["status"] = "completed"
-    else:
-        state["status"] = "partial"
+    state["status"] = overall_status(errors, required)
     state["updated_at"] = now()
     # Report skipped nodes alongside the errors. A workflow whose agents are all
     # absent validates with zero errors and exits 0, which reads as "everything

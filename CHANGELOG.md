@@ -19,6 +19,30 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **The six radarlint-python findings left on `main` are fixed, not
+  silenced.** #588 counted nine on 2026-09-14 and closed with them
+  outstanding; three had gone with later changes, and `qlty check --all
+  --filter radarlint-python` on current `main` reported six, all in files no
+  suite exercises for style. Each is a small extraction, and each keeps the
+  behaviour a test or CI step pins:
+  `tooling/workflow.py` gains `apply_node_policy` (the required-or-skipped
+  decision `init` made inline) and `score_node` plus `overall_status` (the
+  per-node scoring `evaluate_workflow` did in one loop), which brings both
+  functions under the cognitive-complexity limit while the CI round trip —
+  smoke closes `empty`, dirty refuses then closes `abandoned`, the handoff
+  validator accepts real work and rejects a wrong `agent_id` and missing
+  evidence — passes unchanged. `scripts/docs/check_redaction.py`'s `main`
+  splits into `line_findings` and `scan` with the same output, and the gate
+  still passes over the same 72 files. `scripts/docs/hooks.py` names its
+  `docs/` prefix once, and its link rewriter computes the target in one
+  place and returns once — the six-return function Qlty flagged on this
+  very change, fixed in the same pull request rather than carried. `scripts/complexity/report.py` reads the delta arrow
+  from a `direction` function instead of a nested conditional. And the Stop
+  guard test's audit-log reader is a module function, which is what the
+  rule wanted from a `TestCase` method that is not a test. Qlty now reports
+  **no issues** for the plugin; ruff, `compileall`, the 13 hook tests and
+  the strict docs build are all green on the result.
+
 - **`TODO.md` indexes the one open issue, not the nine it had outlived.** Its
   "Where the open items live" table still pointed at #433, #434, #435, #436,
   #442, #349, #358 and #454, every one closed since 2026-09-09, beside the

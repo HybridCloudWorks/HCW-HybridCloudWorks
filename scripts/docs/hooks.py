@@ -31,26 +31,32 @@ SOURCES = {
     "TODO.md": "repo/todo.md",
 }
 LINK = re.compile(r"(?<!!)\[([^\]]*)\]\(([^)\s]+)\)")
+DOCS_PREFIX = "docs/"
+
+
+def _target(href: str) -> str:
+    """Where a link written against the repository root points once the page
+    lives on the site. External links pass through untouched."""
+    if href.startswith(("http://", "https://", "mailto:", "#")):
+        return href
+    base, _, fragment = href.partition("#")
+    fragment = f"#{fragment}" if fragment else ""
+    base = base.lstrip("./")
+    if base in SOURCES:
+        target = Path(SOURCES[base]).name
+    elif base in ("docs", DOCS_PREFIX):
+        target = "../index.md"
+    elif base.startswith(DOCS_PREFIX):
+        rest = base[len(DOCS_PREFIX):]
+        target = f"../{rest}index.md" if rest.endswith("/") else f"../{rest}"
+    else:
+        target = f"{BLOB}{base}"
+    return f"{target}{fragment}"
 
 
 def _rewrite(markdown: str) -> str:
     def sub(match: re.Match) -> str:
-        text, href = match.group(1), match.group(2)
-        if href.startswith(("http://", "https://", "mailto:", "#")):
-            return match.group(0)
-        base, _, fragment = href.partition("#")
-        fragment = f"#{fragment}" if fragment else ""
-        base = base.lstrip("./")
-        if base in SOURCES:
-            return f"[{text}]({Path(SOURCES[base]).name}{fragment})"
-        if base == "docs" or base == "docs/":
-            return f"[{text}](../index.md{fragment})"
-        if base.startswith("docs/"):
-            rest = base[len("docs/"):]
-            if rest.endswith("/"):
-                rest += "index.md"
-            return f"[{text}](../{rest}{fragment})"
-        return f"[{text}]({BLOB}{base}{fragment})"
+        return f"[{match.group(1)}]({_target(match.group(2))})"
 
     return LINK.sub(sub, markdown)
 
