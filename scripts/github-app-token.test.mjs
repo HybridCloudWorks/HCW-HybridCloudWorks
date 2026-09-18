@@ -18,7 +18,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { createVerify, generateKeyPairSync } from 'node:crypto';
-import { buildJwt, mintInstallationToken, parseInstallation, parseTokenResponse, parsePermissions, DEFAULT_PERMISSIONS } from './github-app-token.mjs';
+import { buildJwt, mintInstallationToken, parseInstallation, parseTokenResponse, parsePermissions, revokeInstallationToken, DEFAULT_PERMISSIONS } from './github-app-token.mjs';
 
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
 
@@ -222,5 +222,50 @@ describe('parsePermissions', () => {
     expect(Object.getPrototypeOf(parsed)).toBeNull();
     expect(JSON.stringify(parsed)).toBe('{"contents":"read"}');
     expect(({}).polluted).toBeUndefined();
+  });
+});
+
+describe('revokeInstallationToken', () => {
+  // The token that is being revoked is what authenticates the revocation --
+  // NOT the App JWT. Sending the JWT here is the obvious wrong turn and
+  // GitHub answers 401, which this test would catch as a false success were
+  // the 401 case not deliberate below.
+  it('authenticates with the token itself and calls DELETE /installation/token', async () => {
+    let seen;
+    const fetchImpl = async (url, init) => {
+      seen = { url, init };
+      return { status: 204 };
+    };
+    await revokeInstallationToken({ token: 'ghs_example', fetchImpl });
+    expect(seen.url).toBe('https://api.github.com/installation/token');
+    expect(seen.init.method).toBe('DELETE');
+    expect(seen.init.headers.Authorization).toBe('Bearer ghs_example');
+  });
+
+  it('reports success on 204', async () => {
+    const fetchImpl = async () => ({ status: 204 });
+    expect(await revokeInstallationToken({ token: 't', fetchImpl })).toBe(true);
+  });
+
+  it('counts 401 as revoked, because an invalid token is the end state wanted', async () => {
+    const fetchImpl = async () => ({ status: 401 });
+    expect(await revokeInstallationToken({ token: 't', fetchImpl })).toBe(true);
+  });
+
+  it('reports failure on anything else, without throwing', async () => {
+    // This runs in an `if: always()` step after the work is done. A job that
+    // succeeded must not turn red because cleanup could not reach GitHub.
+    const fetchImpl = async () => ({ status: 500 });
+    expect(await revokeInstallationToken({ token: 't', fetchImpl })).toBe(false);
+  });
+
+  it('refuses to call GitHub with no token', async () => {
+    let called = false;
+    const fetchImpl = async () => {
+      called = true;
+      return { status: 204 };
+    };
+    await expect(revokeInstallationToken({ token: '', fetchImpl })).rejects.toThrow(/needs a token/);
+    expect(called).toBe(false);
   });
 });
