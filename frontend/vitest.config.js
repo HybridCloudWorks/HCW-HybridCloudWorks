@@ -53,6 +53,14 @@ export default defineConfig({
     // covered to uncovered or back, which is why the percentages match exactly
     // and why the Qlty upload below reports what it did before: it gates on
     // coverage status, not on how many times a covered line ran.
+    //
+    // And the pool is not what causes even that. Two runs of the SAME pool,
+    // back to back, differ in 164 hit counts by the same measure — also with
+    // no flips and no record present in one file and missing from the other.
+    // Hit counts are run-to-run nondeterministic here whatever the pool;
+    // vmThreads roughly doubles the spread and changes nothing that is gated.
+    // Recorded so the next person to diff two lcov files does not go hunting
+    // for a vmThreads bug that is not there.
     pool: 'vmThreads',
     exclude: [
       '**/node_modules/**',

@@ -56,7 +56,9 @@ This project has not cut a tagged release; entries are grouped under
   398 differ in *hit count* and **none flips covered to uncovered or back**,
   which is why the percentages match exactly and why Qlty, which gates on
   coverage status rather than on how often a covered line ran, reports what it
-  did before. Peak Node RSS is **3,213 MB** against `forks`' 1,154 MB across a
+  did before. Nor is the pool the cause: two back-to-back runs of the *same*
+  pool differ in 164 hit counts, also with no flips. Hit counts are run-to-run
+  nondeterministic here whatever the pool. Peak Node RSS is **3,213 MB** against `forks`' 1,154 MB across a
   full coverage run — 2.8×, the real cost of reusing a context per worker, and
   the number to watch as the suite grows. #645 had listed memory as
   unestablished.
