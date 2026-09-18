@@ -34,7 +34,9 @@ This project has not cut a tagged release; entries are grouped under
   evidence — passes unchanged. `scripts/docs/check_redaction.py`'s `main`
   splits into `line_findings` and `scan` with the same output, and the gate
   still passes over the same 72 files. `scripts/docs/hooks.py` names its
-  `docs/` prefix once. `scripts/complexity/report.py` reads the delta arrow
+  `docs/` prefix once, and its link rewriter computes the target in one
+  place and returns once — the six-return function Qlty flagged on this
+  very change, fixed in the same pull request rather than carried. `scripts/complexity/report.py` reads the delta arrow
   from a `direction` function instead of a nested conditional. And the Stop
   guard test's audit-log reader is a module function, which is what the
   rule wanted from a `TestCase` method that is not a test. Qlty now reports
