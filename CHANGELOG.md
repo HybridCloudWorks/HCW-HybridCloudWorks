@@ -17,6 +17,45 @@ This project has not cut a tagged release; entries are grouped under
 
 ## [Unreleased]
 
+### Changed
+
+- **The frontend suite runs on vitest's `vmThreads` pool, and three test files
+  stopped depending on which pool they get (#645).** Building a jsdom per test
+  file — 172 of them — was half the suite's tracked time. One V8 context per
+  worker, reused, takes `npm test` from **84.6 s to 25.0 s** and
+  `npm run test:coverage` from **100 s to 57 s**, on the same 4-core machine.
+  CI pays that twice, in the `frontend` job and in `coverage (qlty)`.
+
+  **Not `isolate: false`, which vitest suggests in the same breath.** The two
+  are not the same trade. Two test files — one mutating a shared module object
+  and setting a global, the other reporting what it inherited — showed that
+  under `isolate: false`, once both land in the same worker, the second sees
+  the mutation and the global. Module state crosses file boundaries there,
+  which is exactly the bug #640 was filed as and could not reproduce: passing
+  alone, failing in a full run. It would be nondeterministic too, since whether
+  two files share a worker is a scheduling detail — with only two files they
+  usually do not, so a casual check of `isolate: false` looks clean. `vmThreads`
+  keeps per-file isolation; the same probe in the same worker saw a fresh
+  module registry and no global.
+
+  Three files had to stop leaning on the old pool first, and each was wrong
+  independently of it. `scripts/audit-published-pages.test.js` now declares the
+  node environment it always needed — it tests a Node CLI module, touches no
+  DOM, and was failing at *collection*, so its 15 tests silently did not run
+  while the suite still reported green. `setupTests.js` states the compression
+  streams a browser provides and jsdom does not implement, which the draw.io
+  parser uses and which only worked before because Node's globals leak into a
+  worker. And `AuthCallbackPage` reaches its one hard navigation through
+  `@/lib/hardNavigate`, so its test uses a real URL instead of a fabricated
+  `Location` — a fabrication that had already caused two bugs of its own, both
+  recorded in that file.
+
+  Checked rather than assumed: **2,272 tests under both pools**; coverage
+  identical to the same numerators and denominators, with `lcov.info` the same
+  682,268 bytes, so the Qlty upload carries what it did before; and peak Node
+  RSS **3,213 MB** across a full coverage run, which #645 had listed as
+  unestablished.
+
 ### Fixed
 
 - **The Azure detail page's catalogue walk no longer fails at random in a full
