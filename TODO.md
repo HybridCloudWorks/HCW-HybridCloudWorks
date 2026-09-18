@@ -29,15 +29,15 @@ issues list behind it: https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/
 
 | Item | Issue |
 | --- | --- |
-| Audio pipeline parent: sources, transcript, voice, RSS.com publish; owner steps after the 2026-09-09 merges | [#432](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/432) |
-| Listen & Learn grounded on owner-supplied pages and videos: owner-run live generation closes it | [#433](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/433) |
-| Plaud recording to episode script: owner-run "Script this" on a connected Plaud closes it | [#434](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/434) |
-| Published article to podcast transcript: article-side player still to come | [#435](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/435) |
-| ElevenLabs speech provider: seed the key, one-certification trial closes it | [#436](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/436) |
-| One Recording Hub: season and per-episode metadata editing still to come | [#442](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/442) |
-| Replace Podbean: RSS.com show live once the first pipeline episode publishes; Listen & Learn on the show still a decision | [#349](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/349) |
-| Live check: third-party webhooks after an approved mutation test (Publer blocked on a rotated key) | [#358](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/358) |
-| Functions deploy and Terraform apply race on the app-settings map; six settings lost 2026-09-09 | [#454](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/454) |
+| Audio pipeline parent: every component shipped and verified 2026-09-09; the three remaining secrets (`ELEVENLABS-API-KEY`, `RSSCOM-API-KEY`, `RSSCOM-PODCAST-ID`) wait on the ElevenLabs and RSS.com Max purchases, owner-gated | [#432](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/432) |
+
+**Owner decision 2026-09-18: #432 is the only issue that stays open.** The
+board was reduced to it on that date. The five other issues open at the time
+(#501, #567, #588, #611, #613) were closed with a comment on each recording
+what was still outstanding, so the residual — owner steps, one live check, the
+untouched host-storage read investigation on #611, the remaining Qlty rows on
+#588 — lives on those closing comments rather than in a tracker. Reopen the
+issue if any of it is picked up again; this file does not carry it.
 
 `GEMINI-API-KEY` already covers Listen & Learn speech; nothing to provide.
 

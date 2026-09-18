@@ -19,6 +19,17 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **`TODO.md` indexes the one open issue, not the nine it had outlived.** Its
+  "Where the open items live" table still pointed at #433, #434, #435, #436,
+  #442, #349, #358 and #454, every one closed since 2026-09-09, beside the
+  one row that was still true. Owner decision 2026-09-18: #432 is the only
+  issue that stays open — the audio pipeline's three remaining secrets wait
+  on the ElevenLabs and RSS.com Max purchases — and the five others open that
+  day (#501, #567, #588, #611, #613) were closed with a comment on each
+  recording what was outstanding. The table now carries #432 alone and says
+  where the residual went. Nothing else in the file changed: the accepted
+  risks and the handling rules stand as written.
+
 - **The deployment runbook names the directory the estate lives in, and the
   `az login --tenant` line that reaches it.** On 2026-09-18 a plain `az login`
   from a fresh Mac landed in the owner's home tenant, `hybridcloudworks.com`,
