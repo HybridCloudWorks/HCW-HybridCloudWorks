@@ -83,32 +83,74 @@ const IDENTITY_BY_CLIENT_ID_VAR = {
   COPILOT_REVIEW_CLIENT_ID: 'github_copilot_review',
 };
 
-/** Workflows that authenticate to Azure with OIDC: the identity they use, and the environment (if any) they name. */
-function azureLoginWorkflows() {
+/**
+ * Azure-login JOBS: the identity each uses, and the environment its own job
+ * names.
+ *
+ * ## Per job since #567
+ *
+ * This used to scan the whole FILE for `environment:` and for the client-id,
+ * without asking which job held either. That was sound while the only reason
+ * to name an environment was to gate the login job itself.
+ *
+ * It stopped being sound when #567 scoped the PR-opening jobs of
+ * publish-content-manifest.yml and update-learn-catalogue.yml to
+ * `environment: automation` for zizmor's secrets-outside-env. Those jobs hold
+ * a GitHub App key and never call azure/login; the login lives in a different
+ * job in the same file, with no environment. The file-level scan read the two
+ * as one and failed, claiming a subject change that GitHub does not make.
+ *
+ * GitHub composes the subject from the JOB: a job tied to an environment
+ * presents repo:<org>/<repo>:environment:<name>, and a job that is not
+ * presents the ref form, whatever a sibling job in the same file declares.
+ *
+ * Per job is also strictly stronger. The old shape could not see a file where
+ * one login job names an environment and another does not — it would check the
+ * environment form for both and miss a missing ref credential entirely.
+ */
+function azureLoginJobs() {
   return readdirSync(WORKFLOWS)
     .filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'))
-    .map((file) => ({ file, text: readFileSync(join(WORKFLOWS, file), 'utf8') }))
-    .filter(({ text }) => /uses:\s*azure\/login@/.test(text))
-    .map(({ file, text }) => {
-      const envs = [...text.matchAll(/^\s{4}environment:\s*([A-Za-z0-9._-]+)\s*$/gm)].map(
-        (m) => m[1]
-      );
-      // The variable may sit alone in the expression or after an Agents-secret
-      // fallback (`secrets.X || vars.X`, copilot-setup-steps.yml): only the
-      // `vars.` name is attributed, since it is what a manual run resolves and
-      // the secret carries the same identifier.
-      const vars = [
-        ...new Set(
-          [...text.matchAll(/client-id:\s*\$\{\{[^}]*?\bvars\.([A-Z0-9_]+)\b[^}]*\}\}/g)].map((m) => m[1])
-        ),
-      ];
-      return { file, environments: [...new Set(envs)], clientIdVars: vars };
+    .flatMap((file) => {
+      const text = readFileSync(join(WORKFLOWS, file), 'utf8');
+      if (!/uses:\s*azure\/login@/.test(text)) return [];
+
+      // Split on job headers: a name at two spaces under `jobs:`. Everything
+      // until the next such line belongs to that job.
+      const lines = text.split('\n');
+      const starts = [];
+      lines.forEach((line, i) => {
+        if (/^ {2}[A-Za-z0-9_-]+:\s*$/.test(line)) starts.push(i);
+      });
+
+      return starts
+        .map((start, n) => ({
+          job: lines[start].trim().replace(':', ''),
+          body: lines.slice(start, starts[n + 1] ?? lines.length).join('\n'),
+        }))
+        .filter(({ body }) => /uses:\s*azure\/login@/.test(body))
+        .map(({ job, body }) => ({
+          file,
+          job,
+          environments: [
+            ...new Set(
+              [...body.matchAll(/^\s{4}environment:\s*([A-Za-z0-9._-]+)\s*$/gm)].map((m) => m[1])
+            ),
+          ],
+          clientIdVars: [
+            ...new Set(
+              [
+                ...body.matchAll(/client-id:\s*\$\{\{[^}]*?\bvars\.([A-Z0-9_]+)\b[^}]*\}\}/g),
+              ].map((m) => m[1])
+            ),
+          ],
+        }));
     });
 }
 
 describe('OIDC federated credentials cover every Azure login', () => {
   const byIdentity = trustedSubjectsByIdentity();
-  const workflows = azureLoginWorkflows();
+  const workflows = azureLoginJobs();
   const allSubjects = Object.values(byIdentity).flat();
 
   it('finds the workflows and the credentials at all', () => {
@@ -119,12 +161,15 @@ describe('OIDC federated credentials cover every Azure login', () => {
     expect(Object.keys(byIdentity).length).toBeGreaterThan(0);
   });
 
-  it.each(workflows)('$file names exactly one known client-id variable', ({ file, clientIdVars }) => {
+  it.each(workflows)('$file:$job names exactly one known client-id variable', ({ file, job, clientIdVars }) => {
     // Two would mean two jobs authenticating as different identities in one
     // file, which nothing here does and which the per-workflow checks below
     // would then only half cover. An unknown one means a variable this test
     // cannot attribute to an identity — it would silently check nothing.
-    expect(clientIdVars.length, `${file} sends ${clientIdVars.length} client-id variables`).toBe(1);
+    expect(
+      clientIdVars.length,
+      `${file}:${job} sends ${clientIdVars.length} client-id variables`
+    ).toBe(1);
     expect(
       IDENTITY_BY_CLIENT_ID_VAR[clientIdVars[0]],
       `${file} authenticates with vars.${clientIdVars[0]}, which this test cannot map to an ` +
@@ -134,8 +179,8 @@ describe('OIDC federated credentials cover every Azure login', () => {
   });
 
   it.each(workflows)(
-    '$file presents a subject its own identity trusts',
-    ({ file, environments, clientIdVars }) => {
+    '$file:$job presents a subject its own identity trusts',
+    ({ file, job, environments, clientIdVars }) => {
       const identity = IDENTITY_BY_CLIENT_ID_VAR[clientIdVars[0]];
       const subjects = byIdentity[identity] ?? [];
       const held = `Trusted by ${identity} today:\n  ${subjects.join('\n  ') || '(none)'}`;
@@ -144,7 +189,7 @@ describe('OIDC federated credentials cover every Azure login', () => {
         // No environment named, so GitHub composes the ref form.
         expect(
           subjects.filter((s) => s.includes(':ref:')).length,
-          `${file} logs into Azure as ${identity} without an environment, so it presents a ` +
+          `${file}:${job} logs into Azure as ${identity} without an environment, so it presents a ` +
             `repo:<org>/<repo>:ref:<ref> subject, and that identity has no ref credential.\n${held}`
         ).toBeGreaterThan(0);
         return;
@@ -153,7 +198,7 @@ describe('OIDC federated credentials cover every Azure login', () => {
       for (const env of environments) {
         expect(
           subjects.filter((s) => s.endsWith(`:environment:${env}`)).length,
-          `${file} declares "environment: ${env}", so GitHub composes the subject ` +
+          `${file}:${job} declares "environment: ${env}", so GitHub composes the subject ` +
             `repo:<org>/<repo>:environment:${env} — NOT the ref form. Identity ${identity} ` +
             `trusts no such subject, so azure/login will fail with AADSTS700213. Add an ` +
             `azurerm_federated_identity_credential for it on THAT identity (both the name and ` +
