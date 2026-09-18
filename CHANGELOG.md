@@ -104,6 +104,47 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Six `secrets-outside-env` findings fixed, and the triage record corrected
+  (#567).** The three workflows that never adopted the repository's own
+  convention now scope their secret-holding jobs to `environment: automation`.
+
+  **These had been reported as resolved and were not.** The 2026-09-16
+  verification on #567 said zero zizmor findings at all three personas. Six
+  mediums stood at the **auditor** persona, untriaged. A persona is not a
+  severity filter — the counts table now reads 42, not 36.
+
+  It was never a new decision: `production` gates the two deploys, `copilot`
+  the Copilot setup, `github-pages` the docs. These three simply never
+  followed. It is also what Microsoft's MCSB v2 DS-3 asks for, at criticality
+  *Must have*.
+
+  **`automation` and not `production`, deliberately.** These jobs open pull
+  requests and read a Terraform plan rather than deploying, and two run on a
+  schedule. A required-reviewer rule would leave a scheduled run **waiting up
+  to 30 days**, not failing — so the environment must stay ungated, which the
+  triage record now says outright.
+
+  **The repository's own OIDC guard caught an imprecision, which is what it is
+  for.** `scripts/oidc-subjects.test.mjs` failed, claiming the Azure login in
+  `publish-content-manifest.yml` would now present an `:environment:` subject
+  and fail with `AADSTS700213`. It scanned the whole FILE for `environment:`
+  and for the client-id without asking which job held either. GitHub composes
+  the subject per **job**, and the login job declares no environment. The
+  scanner is per-job now, which is strictly stronger: the old shape could not
+  see a file where one login job names an environment and another does not.
+
+  Nothing in a job that calls `azure/login` was touched.
+
+  **Half of this is the owner's, and the order is load-bearing.** Declaring the
+  environment changes nothing by itself — a repository secret is still readable
+  from a job in any environment. The control arrives when the secret becomes an
+  environment secret, and that must happen *after* this lands: reverse the
+  order and the job resolves an empty secret, reports "not set — skipping" and
+  passes green while the automation is dead.
+
+  Also recorded so nobody re-researches it: `TFC_TOKEN` has no OIDC
+  alternative. HCP Terraform's API takes a bearer token and nothing else.
+
 - **The Stage cards move out of SubmitUrlsPage, finishing #634.** The page is
   **2,916 lines to 775** across five PRs, and **no function in it or its twelve
   modules is over the complexity gate** any more.

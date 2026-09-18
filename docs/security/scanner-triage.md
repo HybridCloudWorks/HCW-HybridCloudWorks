@@ -21,7 +21,7 @@ uvx zizmor --offline .github/workflows
 
 | Scanner | Before | Fixed | False positive | Accepted | Needs owner decision | After |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| zizmor | 36 | 36 | 0 | 0 | 0 | **0** |
+| zizmor | 42 | 42 | 0 | 0 | 0 | **0** |
 | checkov | 38 | 8 | 12 | 18 | 0 | **0** |
 | trivy | 6 | 2 | 2 | 2 | 0 | **0** |
 | bandit | 7 | 2 | 0 | 5 | 0 | **0** |
@@ -29,7 +29,13 @@ uvx zizmor --offline .github/workflows
 | radarlint-iac | 19 | 0 | 19 | 0 | 0 | **19** |
 | osv-scanner | 0 | 0 | 0 | 0 | 0 | **0** |
 | trufflehog | 0 | 0 | 0 | 0 | 0 | **0** |
-| **Total** | **115** | **48** | **42** | **25** | **0** | **19** |
+| **Total** | **121** | **54** | **42** | **25** | **0** | **19** |
+
+Corrected 2026-09-18: zizmor's "Before" was 36, counting only the regular and
+pedantic personas. Six medium `secrets-outside-env` findings stood at the
+**auditor** persona and had never been triaged, which the 2026-09-16
+verification comment on #567 missed. They are fixed and the row now reads 42.
+A persona is not a severity filter — run all three.
 
 What "After" still counts:
 
@@ -129,6 +135,119 @@ zizmor reports no `unpinned-uses`. All 62 `uses:` lines in every tracked YAML
 file are pinned to a 40-character commit SHA. That covers the workflows,
 `copilot-setup-steps.yml` and the rest of `.github/`. The repository has no
 composite actions (no `action.yml` or `action.yaml`). Closes #562.
+
+### secrets-outside-env (6, medium, auditor persona): fixed
+
+**These were missed until 2026-09-18.** The 2026-09-16 verification comment on
+#567 reported zero findings at all three personas; it was wrong about the
+auditor persona, where six mediums stood. The counts table below is corrected.
+
+| Workflow | Job | Secret | Verdict |
+| --- | --- | --- | --- |
+| `publish-content-manifest.yml` | `commit` | `MANIFEST_APP_PRIVATE_KEY` (×2) | fixed |
+| `update-learn-catalogue.yml` | `commit` | `MANIFEST_APP_PRIVATE_KEY` (×2) | fixed |
+| `tfc-plan-check.yml` | `check` | `TFC_TOKEN` (×2) | fixed |
+
+zizmor's auditor persona reports a secret read by a job that belongs to no
+GitHub Environment. The remediation is to declare one, and all three jobs now
+declare `environment: automation`.
+
+**This was never a new decision.** The estate already scopes every other
+secret-using job: `production` on `deploy-functions.yml` and
+`deploy-azure-frontend.yml`, `copilot` on `copilot-setup-steps.yml`,
+`github-pages` on `docs-pages.yml`. These three were the ones that never
+adopted the convention the owner had already applied four times.
+
+It is also what Microsoft asks for. **MCSB v2 DS-3** (*Secure the DevOps
+infrastructure*, criticality **Must have**) requires "repository-level service
+connection restrictions preventing pipelines from accessing secrets outside
+their intended scope", and the `azure/login` guidance states the property
+plainly: "use environment secrets instead of repository secrets. If the
+environment requires approval, a job cannot access environment secrets until
+one of the required reviewers approves it."
+
+**Why `automation` and not `production`.** These jobs open pull requests and
+read a Terraform plan; they do not deploy. Two of the three are scheduled, so
+inheriting a production approval gate would leave a scheduled run waiting on a
+human who is not there.
+
+**No OIDC subject changed.** `infra/oidc.tf` records that declaring an
+environment rewrites the OIDC subject, and that a stale federated credential
+fails with `AADSTS700213`. That hazard applies to jobs which exchange a token —
+none of these three calls `azure/login`. The one job in these files that does
+(`build` in `publish-content-manifest.yml`) was never flagged and is untouched.
+
+**The remaining half is the owner's, and the order is load-bearing.**
+Declaring the environment changes nothing by itself: a repository secret stays
+readable from a job in any environment. The control arrives when the secret
+becomes an *environment* secret on `automation`.
+
+Each of these three jobs self-arms — an absent secret makes it report "not set
+— skipping" and pass **green**. So the order is load-bearing, and only one
+order is safe:
+
+1. **This PR first.** A job that declares an environment can still read a
+   REPOSITORY secret — environment secrets *override* repository ones, which
+   is only meaningful because the repository one would otherwise be readable.
+   So declaring `automation` while the secret sits at repository level changes
+   nothing and breaks nothing.
+2. **The secret moves second.** By then the job names the environment, so it
+   resolves.
+
+The reverse is the trap: move the secret to `automation` while the job has no
+`environment:` key and it resolves EMPTY. The job then reports "not set —
+skipping" and passes green while the automation is dead — the #630 shape, a
+silent no-op behind a passing check.
+
+Stated explicitly because the opposite order is an easy and costly thing to
+assume. See [Owner follow-up](#owner-follow-up-2026-09-18).
+
+**On zizmor's own view of this rule.** Since 1.24.0 `secrets-outside-env` is
+auditor-persona only, because the remediation has platform sharp edges — most
+notably that environment secrets do not reach reusable workflows unless the
+caller passes `secrets: inherit`. That caveat does not apply here: none of
+these three workflows is called through `workflow_call`. zizmor also cannot
+see where a secret is actually stored, so it will report this clear once the
+`environment:` key exists whether or not step 2 ever happens. The key is the
+evidence that step 2 is possible, not that it was done.
+
+### TFC_TOKEN has no OIDC alternative
+
+Worth recording so nobody re-researches it. HCP Terraform's API accepts a
+bearer API token and nothing else — there is no GitHub-OIDC path to
+`app.terraform.io/api/v2`. Three things are mistaken for one and none replaces
+`TFC_TOKEN`: *dynamic provider credentials* federate a Terraform **run** into
+Azure (the other direction), *HCP workload identity federation* mints an HCP
+**platform** token for HCP services, and *VCS-driven runs* remove CI from the
+path rather than federating it.
+
+The controls that do apply are scope, expiry and placement, and they are owner
+actions:
+
+- A **team** token, not a user token (dies with the person) or an organization
+  token (owner-equivalent). `tfc-plan-check.yml`'s header already says a user
+  or team token with workspace admin is required.
+- An **expiration**, with rotation on it. HCP Terraform warns at 30 and 7 days
+  and allows concurrent team tokens, so rotation needs no outage window.
+- `deploy-functions.yml` reads `TFC_TOKEN` inside a job that already declares
+  `environment: production`, so an environment secret there would override the
+  repository one and put the deploy-path token behind that gate.
+
+## Owner follow-up 2026-09-18
+
+Nothing below is reachable from this repository; each is a change in GitHub or
+HCP Terraform settings.
+
+1. **Create the `automation` environment** — it is created implicitly the first
+   time a workflow referencing it runs, so this is only needed to set rules on
+   it. **Do not add required reviewers**: `publish-content-manifest.yml` and
+   `update-learn-catalogue.yml` are scheduled, and an approval gate would leave
+   those runs waiting rather than failing. A branch restriction is the useful
+   rule here.
+2. **Move `MANIFEST_APP_PRIVATE_KEY` and `TFC_TOKEN`** from repository secrets
+   to `automation` environment secrets — **after** this PR merges, never
+   before, for the silent-green reason above.
+3. **`TFC_TOKEN` hygiene** — team token, with an expiry, as above.
 
 ## checkov
 
