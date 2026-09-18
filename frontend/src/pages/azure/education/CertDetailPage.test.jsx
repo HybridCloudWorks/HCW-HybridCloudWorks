@@ -67,6 +67,36 @@ beforeEach(() => {
 });
 
 describe('CertDetailPage', () => {
+  /**
+   * The whole catalogue, one page at a time — and the most expensive test in
+   * the frontend suite, which is why it states its own budget (#640).
+   *
+   * WHY IT NEEDS ONE. Every iteration suspends on a real dynamic import of that
+   * exam's study-guide module (src/lib/studyGuideOutline.js), so the walk goes
+   * through Vite's transform server ~51 times; in a full run that one server is
+   * serving four worker processes at once, and none of that work happens when
+   * the file runs on its own. Measured on the 4-core container: 1.4 s alone,
+   * 1.7-2.2 s inside a full `npm test`, against vitest's 5 s default.
+   *
+   * That margin is one slow moment wide, and the suite has slow moments:
+   * App.routes.test.jsx's un-mocked lazy route — the same shape — swung 1.05 s
+   * to 2.70 s between two runs of this suite on this machine. Oversubscribe the
+   * CPU and this walk reaches 4.75 s in a full run, and on its own it tips:
+   * `Error: Test timed out in 5000ms.` at 5,083 ms. That is the 2026-09-17
+   * failure, reproduced on demand.
+   *
+   * #640 filed it as cross-test interference; it is not. Vitest gives every
+   * test file a fresh module registry here (pool `forks`, `isolate` on, both
+   * defaults), so neither module state nor a mock can cross a file boundary —
+   * probed with two files, not assumed.
+   *
+   * WHY 30 s. Not a round number picked to make red go away: the
+   * `test:coverage` script already passes --testTimeout=30000, and the comment
+   * in vitest.config.js that explains it names THIS test as the reason. Saying
+   * it on the test applies that same decision to every run rather than only to
+   * coverage runs, and keeps applying it as the catalogue grows — the cost
+   * scales with the number of exams, and the 5 s default never did.
+   */
   it('resolves every landing-page slug to a detail page', async () => {
     // Before 2026-09-09 this page carried its own 15-entry copy of the data,
     // so 86 of the landing links opened "Certification Not Found".
@@ -76,7 +106,7 @@ describe('CertDetailPage', () => {
       expect(screen.getByRole('heading', { level: 1 }).textContent, cert.slug).toBe(cert.title);
       unmount();
     }
-  });
+  }, 30_000);
 
   it('gives the document a title made of one string, so the pre-render keeps it', async () => {
     // react-helmet-async silently drops a <title> built from several JSX
