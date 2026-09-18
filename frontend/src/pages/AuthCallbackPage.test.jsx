@@ -5,6 +5,23 @@
  * path. The failure path is where it earns its tests: an authorization code
  * must not survive in the address bar, and MSAL's own error text must not reach
  * the screen.
+ *
+ * A REAL LOCATION AT A REAL URL, NOT A FABRICATED ONE (#645). This file used to
+ * redefine `window.location` with a hand-built object, because the page reads
+ * `pathname`, `search` and `hash` and calls `replace`. That cost two bugs — a
+ * spread that silently dropped `pathname` and `search`, since jsdom puts them
+ * on the prototype, and a redefinition left in place that leaked a crippled
+ * `location` into every later file in the same worker — and it only worked at
+ * all while `window.location` was configurable, which is true under vitest's
+ * `forks` pool and false under `vmThreads`.
+ *
+ * So the environment provides the URL instead, through the docblock below, and
+ * every read the page makes is a real `Location` parsing a real address. The
+ * one thing that still cannot be observed, `location.replace`, is reached
+ * through `@/lib/hardNavigate` and mocked there.
+ *
+ * @vitest-environment jsdom
+ * @vitest-environment-options { "url": "https://example.test/auth/callback#code=1.AUYA-secret-authorization-code&state=abc" }
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -15,55 +32,28 @@ import AuthCallbackPage from './AuthCallbackPage';
 const initializeAuth = vi.fn();
 vi.mock('@/lib/entraAuth', () => ({ initializeAuth: (...a) => initializeAuth(...a) }));
 
-const FRAGMENT = '#code=1.AUYA-secret-authorization-code&state=abc';
+const hardReplace = vi.fn();
+vi.mock('@/lib/hardNavigate', () => ({ hardReplace: (...a) => hardReplace(...a) }));
+
+// Captured before anything spies on it: the tests below stub `replaceState` to
+// watch what the page does with it, and still need the real one to move the
+// browser themselves when setting a scenario up.
+const navigate = window.history.replaceState.bind(window.history);
+const START = window.location.href;
 
 let replaceState;
-let locationReplace;
-let originalLocation;
 
 beforeEach(() => {
   vi.clearAllMocks();
   replaceState = vi.spyOn(window.history, 'replaceState').mockImplementation(() => {});
-  locationReplace = vi.fn();
-
-  // THE DESCRIPTOR IS SAVED BECAUSE vi.restoreAllMocks() DOES NOT UNDO THIS.
-  //
-  // jsdom's `window.location` is not writable, so the only way to stub
-  // `replace` is to redefine the property — and a redefinition is not a mock.
-  // Leaving it in place leaked a crippled `location` into every later file in
-  // the same worker, which surfaced as an unrelated route test failing in the
-  // full run and passing on its own. Restore it explicitly, below.
-  originalLocation = Object.getOwnPropertyDescriptor(window, 'location');
-  // EVERY FIELD NAMED, NOT SPREAD. jsdom's `Location` exposes `pathname` and
-  // `search` as accessors on the prototype, so `{ ...window.location }` drops
-  // them — and the code under test builds its replacement URL from exactly
-  // those two. The fragment assertion would then be checking
-  // `'undefinedundefined'` for a `code=` it could never contain, and passing
-  // for the wrong reason.
-  Object.defineProperty(window, 'location', {
-    configurable: true,
-    value: {
-      href: `https://example.test/auth/callback${FRAGMENT}`,
-      origin: 'https://example.test',
-      protocol: 'https:',
-      host: 'example.test',
-      hostname: 'example.test',
-      port: '',
-      pathname: '/auth/callback',
-      search: '',
-      hash: FRAGMENT,
-      replace: locationReplace,
-      assign: vi.fn(),
-      reload: vi.fn(),
-      toString: () => `https://example.test/auth/callback${FRAGMENT}`,
-    },
-  });
   vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 
 afterEach(() => {
-  if (originalLocation) Object.defineProperty(window, 'location', originalLocation);
   vi.restoreAllMocks();
+  // A test that moved the browser must put it back: the files each get their own
+  // jsdom, but the tests inside one file share it.
+  navigate(null, '', START);
 });
 
 describe('a completed sign-in', () => {
@@ -71,7 +61,7 @@ describe('a completed sign-in', () => {
     initializeAuth.mockResolvedValue(undefined);
     render(<AuthCallbackPage />);
 
-    await waitFor(() => expect(locationReplace).toHaveBeenCalledWith('/admin'));
+    await waitFor(() => expect(hardReplace).toHaveBeenCalledWith('/admin'));
     expect(replaceState).toHaveBeenCalled();
   });
 
@@ -80,14 +70,14 @@ describe('a completed sign-in', () => {
   // navigation, so this component's `.then()` still runs afterwards. Replacing
   // unconditionally would overwrite the destination they actually asked for.
   it('does not override the page MSAL already returned the user to', async () => {
-    initializeAuth.mockImplementation(async () => {
-      window.location.pathname = '/admin/queue';
-      window.location.hash = '';
-    });
+    // The real thing MSAL does, rather than a description of it: a history
+    // navigation, which moves `pathname` and drops the fragment together.
+    initializeAuth.mockImplementation(async () => navigate(null, '', '/admin/queue'));
     render(<AuthCallbackPage />);
 
     await waitFor(() => expect(initializeAuth).toHaveBeenCalled());
-    expect(locationReplace).not.toHaveBeenCalled();
+    expect(window.location.pathname).toBe('/admin/queue');
+    expect(hardReplace).not.toHaveBeenCalled();
   });
 });
 

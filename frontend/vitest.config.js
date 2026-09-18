@@ -15,6 +15,53 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: './src/setupTests.js',
+    // POOL: vmThreads, NOT THE DEFAULT forks (#645).
+    //
+    // A jsdom per test file, 172 of them, was half this suite's tracked time:
+    // 84.6 s wall clock with the environment at 50%. vmThreads builds one V8
+    // context per worker and reuses it, which runs the same 2,272 tests in
+    // 25.0 s on the same 4-core machine. CI pays this twice — the `frontend`
+    // job and `coverage (qlty)` — and coverage drops 100 s to 55 s.
+    //
+    // WHY NOT `isolate: false`, WHICH VITEST SUGGESTS IN THE SAME BREATH. The
+    // two are not the same trade, and the difference is the whole decision.
+    // Measured with two test files, one mutating a shared module object and
+    // setting a global, the other reporting what it inherited: under
+    // `isolate: false`, once both landed in one worker, the second file saw
+    // the mutation and the global. Module state crosses file boundaries there.
+    // That is exactly the bug #640 was filed as — passing alone, failing in a
+    // full run — and it would be nondeterministic, since whether two files
+    // share a worker is a scheduling detail. vmThreads keeps per-file
+    // isolation: the same probe in the same worker saw a fresh module registry
+    // and no global. Speed is not worth manufacturing the bug this repository
+    // has just finished proving it does not have.
+    //
+    // WHAT IT COST, and where it was paid. A VM context has no web-stream
+    // globals and its `window.location` is non-configurable. Both were handled
+    // in the places that were wrong anyway (#645): setupTests.js states the
+    // streams a browser provides, scripts/audit-published-pages.test.js asks
+    // for the node environment it always needed, and AuthCallbackPage.test.jsx
+    // uses a real URL rather than a fabricated Location. None of the three is
+    // a workaround for this pool.
+    //
+    // Coverage was checked, not assumed, and the check is worth stating
+    // precisely. Statements, branches, functions and lines come out identical
+    // under both pools, to the same numerators and denominators. The two
+    // lcov.info files are NOT byte-identical: they carry the same 36,985
+    // records, none present in one and missing from the other, but 398 differ
+    // in HIT COUNT — `DA:34,475` against `DA:34,476`. Not one record flips
+    // covered to uncovered or back, which is why the percentages match exactly
+    // and why the Qlty upload below reports what it did before: it gates on
+    // coverage status, not on how many times a covered line ran.
+    //
+    // And the pool is not what causes even that. Two runs of the SAME pool,
+    // back to back, differ in 164 hit counts by the same measure — also with
+    // no flips and no record present in one file and missing from the other.
+    // Hit counts are run-to-run nondeterministic here whatever the pool;
+    // vmThreads roughly doubles the spread and changes nothing that is gated.
+    // Recorded so the next person to diff two lcov files does not go hunting
+    // for a vmThreads bug that is not there.
+    pool: 'vmThreads',
     exclude: [
       '**/node_modules/**',
       '**/dist/**',

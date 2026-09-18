@@ -7,6 +7,14 @@
  * Soon" is a decision while a thin page with nothing is missing content, and
  * a full landing page whose podcast widget says "No episodes available yet."
  * is not an empty page.
+ *
+ * NODE ENVIRONMENT, NOT THE PROJECT'S jsdom DEFAULT. Nothing here touches a
+ * DOM: it imports a Node CLI module and checks pure functions. Building a
+ * jsdom for it was pure cost, and the import pulls in Playwright, whose module
+ * graph wants web-stream globals that a browser-shaped context does not owe it
+ * (#645).
+ *
+ * @vitest-environment node
  */
 import { describe, it, expect } from 'vitest';
 import { CANCELLED_REQUEST, decideEmptiness, parseOptions } from './audit-published-pages.mjs';
