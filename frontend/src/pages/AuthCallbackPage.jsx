@@ -49,6 +49,7 @@
 import React, { useEffect, useState } from 'react';
 
 import { AUTH_REDIRECT_PATH } from '@/lib/authRoutes';
+import { hardReplace } from '@/lib/hardNavigate';
 
 export default function AuthCallbackPage() {
   const [error, setError] = useState(false);
@@ -97,7 +98,9 @@ export default function AuthCallbackPage() {
         // sign-in had no request URL, or somebody opened this page directly.
         // `/admin` is the right answer only then.
         if (window.location.pathname === AUTH_REDIRECT_PATH) {
-          window.location.replace('/admin');
+          // A full page load, not a router navigation, and not reachable with
+          // Back — see hardNavigate.js for both reasons.
+          hardReplace('/admin');
         }
       })
       .catch((err) => {
