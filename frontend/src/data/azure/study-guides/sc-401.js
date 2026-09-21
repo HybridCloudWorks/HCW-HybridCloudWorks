@@ -43,7 +43,7 @@ export default {
             'Configure protection settings and content marking for sensitivity labels',
             'Configure and manage publishing policies for sensitivity labels',
             'Configure and manage auto-labeling policies for sensitivity labels',
-            'Apply a sensitivity label to containers, such as Microsoft Teams, Microsoft 365 Groups, Microsoft Power BI, and Microsoft SharePoint',
+            'Apply sensitivity labels to containers, such as Microsoft Teams, Microsoft 365 Groups, and Microsoft SharePoint sites, and to Power BI items',
             'Apply sensitivity labels by using Microsoft Defender for Cloud Apps',
           ],
         },
