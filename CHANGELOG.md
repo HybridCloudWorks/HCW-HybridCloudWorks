@@ -28,7 +28,7 @@ This project has not cut a tagged release; entries are grouped under
   file is read from its one home, the Azure CLI package string's `~bookworm`
   suffix is swapped for the base image's Ubuntu codename with the version
   number unchanged, and every download is checked against the pinned SHA256
-  — and installs `AGENTS.md` as `/home/agent/.claude/CLAUDE.md`: the folder
+  — and installs `AGENTS.md` as the agent user's `~/.claude/CLAUDE.md`: the folder
   is a landing zone generated for learning, run `terraform init
   -backend=false`, `fmt -check` and `validate`, explain the files, never
   `plan`, `apply` or reach a tenant. `README.md` beside it carries every
