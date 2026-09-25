@@ -47,10 +47,15 @@ caddy_site_names:
   - "*.coder.{{ lab_host_domain }}"
 
 # Coder (#679) is the learner identity boundary and signs learners in with
-# GitHub OAuth. Its role renders this list into CODER_OAUTH2_GITHUB_ALLOWED_ORGS;
-# empty means any GitHub account may sign in, so production MUST set it to the
-# organisation(s) whose members are allowed. Declared here so the contract
-# exists before the role does.
+# GitHub OAuth. Its role renders coder_oauth2_github_allowed_orgs into
+# CODER_OAUTH2_GITHUB_ALLOWED_ORGS. An EMPTY list is not a lock: Coder reads it
+# as "no organisation restriction" and lets ANY GitHub account sign in, so
+# site.yml refuses to run with coder_enabled true and this list empty. Set the
+# organisation(s) whose members are allowed before flipping coder_enabled. The
+# kill switches are CODER_OAUTH2_GITHUB_ALLOW_SIGNUPS=false (no new learners)
+# or stopping the coder compose service (everyone), never an emptied allowlist.
+# Declared here so the contract exists before the role does.
+coder_enabled: false
 coder_oauth2_github_allowed_orgs: []
 
 # vps-agent runs host-native as a systemd service (ADR 0032) from a checkout of

@@ -104,6 +104,14 @@ This project has not cut a tagged release; entries are grouped under
   now reads `.j2` files, the first tracked extension its coverage check had
   never seen.
 
+  One contract is declared ahead of its role. `group_vars/all.yml` carries
+  `coder_enabled: false` and `coder_oauth2_github_allowed_orgs: []` for
+  Coder (#679), and `site.yml` asserts the list is non-empty whenever the
+  flag is true — because an empty `CODER_OAUTH2_GITHUB_ALLOWED_ORGS` is not
+  a lock, it lets any GitHub account sign in. The README names the real
+  kill switches: `CODER_OAUTH2_GITHUB_ALLOW_SIGNUPS=false` for new learners,
+  stopping the `coder` Compose service for everyone.
+
 - **ADR 0032 records the learner labs platform, and the two documents that
   misdescribed the labs are corrected (#660).** Phase 0 of #656: the
   decisions every sub-issue in the four lab epics (#656, #657, #658, #659)
@@ -134,6 +142,7 @@ This project has not cut a tagged release; entries are grouped under
   - `.github/CONTRIBUTING.md` still said new work lands in `TODO.md`. It lands
     as an issue on org project 1 with a Priority set (owner decision
     2026-09-05, #362); `TODO.md` keeps the accepted risks and an index.
+
 
 - **The `hcw-lab` image: one Dockerfile with `runner` and `full` targets, a
   Terraform provider filesystem mirror, three vendored AVM pattern modules,

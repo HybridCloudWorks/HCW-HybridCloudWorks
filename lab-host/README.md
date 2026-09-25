@@ -124,6 +124,24 @@ host. That file is owner `root`, group `caddy`, mode `0640` (ADR 0032): the
 keep working, and nobody outside that group can read it. The play writes
 it with `no_log`.
 
+## Coder, before its role exists (#679)
+
+`ansible/group_vars/all.yml` already declares the two values the Coder role
+will read, so the contract is in place before the code: `coder_enabled`
+(default `false`) and `coder_oauth2_github_allowed_orgs` (default `[]`),
+which the role renders as `CODER_OAUTH2_GITHUB_ALLOWED_ORGS`. **An empty
+allowlist is not a lock.** Coder treats it as "no organisation restriction"
+and lets any GitHub account sign in, so `site.yml` asserts in `pre_tasks`
+that the list is non-empty whenever `coder_enabled` is true and fails the
+play otherwise; with `coder_enabled: false`, as today, the assert is
+skipped. Set the organisation(s) whose members may sign in before flipping
+the flag.
+
+To stop learners getting in, the kill switches are
+`CODER_OAUTH2_GITHUB_ALLOW_SIGNUPS=false` (no new learners; existing ones
+keep working) or stopping the `coder` Compose service (everyone, at once).
+Emptying the allowlist is neither: it opens the door.
+
 ## The agent identity
 
 The first run generates the agent's private key **on the host** and never
