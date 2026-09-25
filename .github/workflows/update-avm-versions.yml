@@ -1,0 +1,329 @@
+name: Update AVM Versions
+
+# Checks the Azure Verified Module pins in
+# frontend/src/lib/landingZone/avmVersions.js against the Terraform Registry
+# every week and opens one pull request when a module has a newer release
+# (#671, Phase 5 of #657).
+#
+# WHY A WORKFLOW. The Landing Zone Builder emits `module` blocks pinned to a
+# version, and avmVersions.js says every pin is "looked up, not remembered".
+# That was true on the day it was written (2026-09-25) and becomes less true
+# every week nobody looks. This is what looks. The same bump moves
+# lab-image/versions.env (#658), because the image vendors the same modules
+# at the same versions and the two files must not disagree about what
+# "avm-ptn-alz" means.
+#
+# THE SNAPSHOT TESTS ARE THE GATE, AND THIS RUN REFRESHES THEM. AVM input
+# names drift between versions. hcl.test.js snapshots every emitted file, and
+# the versions are in the snapshots, so a bump fails them by construction.
+# The `update` job runs `npx vitest run -u src/lib/landingZone` after a bump
+# and stages the refreshed .snap beside the pins, then runs the same suites
+# WITHOUT -u so the non-snapshot assertions (every module source pinned, the
+# providers map of every block, no archived module emitted) gate the pull
+# request here rather than on it. The pull request therefore carries the
+# Terraform diff a learner would download, and the reviewer reads it against
+# the module's release notes. A snapshot the bot refreshed is a diff to
+# review, not an approval; the body says so.
+#
+# THREE PATHS, ONE PULL REQUEST. The pins, the image's versions file and the
+# snapshot are staged by name — never `-A`, never `.` — because the branch
+# the App pushes is the one thing its write permission can reach, and what
+# goes on it is the boundary. scripts/avm-versions-workflow.test.mjs asserts
+# the exact list.
+#
+# NOTHING MOVED IS NOT A PULL REQUEST. Unlike update-learn-catalogue.yml,
+# whose DATA_AS_OF moves every run, this script writes nothing when every pin
+# is current, so most weeks end quietly at "no pin moved". AVM_VERIFIED_ON
+# moves only with a pin, because it documents when the pins were LAST
+# CHANGED against the registry, and index.test.js asserts it never moves
+# backwards.
+#
+# MODELLED ON update-learn-catalogue.yml, and for the same reasons. Two jobs,
+# so that no job holds both third-party packages and a credential that can
+# write to this repository. `update` runs `npm ci --ignore-scripts` on the
+# frontend tree and holds nothing but a checkout; it makes GET requests to
+# registry.terraform.io and, for a moved module, one to github.com for the
+# release tarball whose SHA256 versions.env records. `commit` installs nothing
+# and holds `contents: read`; the branch push and the pull request are done
+# with a GitHub App installation token minted for the length of a few API
+# calls — the same App the manifest and the catalogue use (MANIFEST_APP_ID /
+# MANIFEST_APP_PRIVATE_KEY), because a second stored non-expiring key for the
+# same ability would be a second credential to rotate and nothing more.
+#
+# WHY A PULL REQUEST AND NOT A PUSH. The ruleset's `pull_request` rule refuses
+# a direct push to main from anyone, this token included, and the checks run
+# on the pull request precisely because it is opened with an App token rather
+# than GITHUB_TOKEN (GitHub does not trigger workflows for events its own
+# token creates). Opened READY FOR REVIEW, not as a draft (owner decision
+# 2026-09-05, .claude/CLAUDE.md), and without auto-merge: a version bump the
+# builder hands to learners is a change a human reads first.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Tuesdays 06:30 UTC. Not Monday: audit-published-pages (06:00), codeql
+    # (04:31) and update-learn-catalogue (06:30) already share that morning,
+    # and a pull request from this workflow should not land in the same hour
+    # as the catalogue's.
+    - cron: '30 6 * * 2'
+
+# No workflow-level permissions: each job declares its own, and the whole
+# point of the split below is that no job holds both.
+permissions: {}
+
+concurrency:
+  group: avm-versions
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Check the pins against the Terraform Registry
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # checkout only — this job must never be able to push
+    outputs:
+      changed: ${{ steps.changed.outputs.changed }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      # `--ignore-scripts`: the updater needs prettier and the tests need
+      # vitest, neither of which has an install-time script.
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --ignore-scripts
+
+      # A registry document that cannot be fetched, or that lists a version
+      # that is not MAJOR.MINOR.PATCH, or a version GitHub has no tag for,
+      # ends this step with exit code 1 and one sentence; nothing is written.
+      - name: Run the updater
+        working-directory: frontend
+        run: node scripts/update-avm-versions.mjs --summary "${RUNNER_TEMP}/avm-versions-summary.md"
+
+      # The script writes only when a pin moved, so an unchanged tree here is
+      # the quiet week. `git status --porcelain`, as the catalogue workflow
+      # does, so a future path that is new rather than edited still counts.
+      - name: Did a pin move?
+        id: changed
+        run: |
+          set -euo pipefail
+          cat "${RUNNER_TEMP}/avm-versions-summary.md" >> "$GITHUB_STEP_SUMMARY"
+          if [ -z "$(git status --porcelain -- frontend/src/lib/landingZone/avmVersions.js lab-image/versions.env frontend/src/lib/landingZone/__snapshots__/hcl.test.js.snap)" ]; then
+            echo "No pin moved."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          cp "${RUNNER_TEMP}/avm-versions-summary.md" avm-versions-summary.md
+
+      # The versions are in the committed snapshots, so a bump fails
+      # hcl.test.js by construction. Refresh them here, so the pull request
+      # carries the Terraform diff for review, rather than leaving the
+      # reviewer to run -u and push a second commit from a phone.
+      - name: Refresh the HCL snapshots against the bumped pins
+        if: steps.changed.outputs.changed == 'true'
+        working-directory: frontend
+        run: npx vitest run -u src/lib/landingZone
+
+      # The same suites WITHOUT -u. This is the gate: every emitted module
+      # source is pinned with a version line, every block's providers map
+      # names every provider the module requires, the archived module never
+      # reaches the output, and the refreshed snapshot is stable. A drifted
+      # input name or a provider the emitter does not know about fails here,
+      # in this log, rather than on the pull request.
+      - name: Check the landing zone suites
+        if: steps.changed.outputs.changed == 'true'
+        working-directory: frontend
+        run: npx vitest run src/lib/landingZone
+
+      - name: Upload the bumped pins, versions file and snapshot
+        if: steps.changed.outputs.changed == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: avm-versions
+          path: |
+            frontend/src/lib/landingZone/avmVersions.js
+            lab-image/versions.env
+            frontend/src/lib/landingZone/__snapshots__/hcl.test.js.snap
+            avm-versions-summary.md
+          retention-days: 1
+          if-no-files-found: error
+
+  commit:
+    name: Open a pull request if a pin moved
+    needs: update
+    # Runs only when the check job reported a change. The upload above is
+    # conditional, so without this gate an unchanged week fails here at
+    # "Artifact not found" instead of ending quietly (learn catalogue run
+    # 34408439025).
+    if: needs.update.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    # Scoped to the `automation` environment so this job's secret is reachable
+    # only from a run GitHub has admitted into it (zizmor secrets-outside-env,
+    # #567), like the two other scheduled PR-opening jobs. `automation` and
+    # NOT `production`: this opens a pull request rather than deploying, it
+    # runs on a schedule, and a production approval gate would leave a
+    # scheduled run waiting for a human who is not there.
+    #
+    # ORDER MATTERS, and the wrong order is silent. This job self-arms: an
+    # absent secret makes it report "not set — skipping" and pass GREEN.
+    environment: automation
+    # `contents: read` for the checkout, and NOTHING ELSE. The writing is done
+    # by a GitHub App installation token, and this job cannot push to main
+    # with it either — the ruleset's `pull_request` rule has no bypass actor.
+    permissions:
+      contents: read # checkout only — this job cannot push anywhere on its own
+    steps:
+      # `persist-credentials: false`, or the push below authenticates as
+      # github-actions[bot] and is refused: checkout writes GITHUB_TOKEN into
+      # .git/config as an http.extraheader, which outranks the token in the
+      # remote URL (publish-content-manifest.yml, run 34092896715).
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Download the bumped files
+        id: download
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: avm-versions
+          path: ${{ runner.temp }}/avm-versions
+
+      - name: Did a pin move?
+        id: changed
+        run: |
+          set -euo pipefail
+          cp "${RUNNER_TEMP}/avm-versions/frontend/src/lib/landingZone/avmVersions.js" frontend/src/lib/landingZone/avmVersions.js
+          cp "${RUNNER_TEMP}/avm-versions/lab-image/versions.env" lab-image/versions.env
+          cp "${RUNNER_TEMP}/avm-versions/frontend/src/lib/landingZone/__snapshots__/hcl.test.js.snap" frontend/src/lib/landingZone/__snapshots__/hcl.test.js.snap
+          if [ -z "$(git status --porcelain -- frontend/src/lib/landingZone/avmVersions.js lab-image/versions.env frontend/src/lib/landingZone/__snapshots__/hcl.test.js.snap)" ]; then
+            echo "No pin moved."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          as_of=$(grep -o "AVM_VERIFIED_ON = '[0-9-]*'" frontend/src/lib/landingZone/avmVersions.js | grep -o '[0-9-]\{10\}')
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "as_of=${as_of}" >> "$GITHUB_OUTPUT"
+
+      # Self-arming, like the manifest and catalogue workflows: before the App
+      # exists this reports honestly that it did not open anything rather than
+      # failing every Tuesday. `secrets` is not available to a job-level `if`.
+      - name: Is the App configured?
+        id: app
+        if: steps.changed.outputs.changed == 'true'
+        env:
+          MANIFEST_APP_PRIVATE_KEY: ${{ secrets.MANIFEST_APP_PRIVATE_KEY }}
+          MANIFEST_APP_ID: ${{ vars.MANIFEST_APP_ID }}
+        run: |
+          set -euo pipefail
+          if [ -n "${MANIFEST_APP_PRIVATE_KEY}" ] && [ -n "${MANIFEST_APP_ID}" ]; then
+            echo "armed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "armed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::A pin moved but the App is not configured, so no pull request was opened. Set the MANIFEST_APP_ID variable and the MANIFEST_APP_PRIVATE_KEY secret (T-726)." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # No `npm ci`: the minter imports only node:crypto and node:url and uses
+      # global fetch. This job holds the most powerful credential in the
+      # pipeline for the length of a few API calls, so it installs nothing.
+      - name: Mint an App installation token
+        id: token
+        if: steps.app.outputs.armed == 'true'
+        env:
+          GITHUB_APP_ID: ${{ vars.MANIFEST_APP_ID }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.MANIFEST_APP_PRIVATE_KEY }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          token=$(node scripts/github-app-token.mjs)
+          # Masked BEFORE it is written anywhere, including to GITHUB_OUTPUT.
+          echo "::add-mask::${token}"
+          echo "token=${token}" >> "$GITHUB_OUTPUT"
+
+      # `git add <path>` and never `-A` or `.`: the branch this pushes is the
+      # one thing the App's write permission can reach, so what goes on it is
+      # the boundary. scripts/avm-versions-workflow.test.mjs asserts the exact
+      # three paths and the absence of the wildcard forms.
+      - name: Push the branch
+        if: steps.app.outputs.armed == 'true'
+        env:
+          TOKEN: ${{ steps.token.outputs.token }}
+          AS_OF: ${{ steps.changed.outputs.as_of }}
+        run: |
+          set -euo pipefail
+          # RUN_ATTEMPT as well as RUN_ID: a re-run keeps the id, and a branch
+          # that already exists on the remote fails the push.
+          branch="chore/avm-versions-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "branch=${branch}" >> "$GITHUB_ENV"
+          git config user.name  'hcw-manifest[bot]'
+          git config user.email 'hcw-manifest[bot]@users.noreply.github.com'
+          git checkout -b "${branch}"
+          git add frontend/src/lib/landingZone/avmVersions.js
+          git add lab-image/versions.env
+          git add frontend/src/lib/landingZone/__snapshots__/hcl.test.js.snap
+          git commit -m "chore: bump Azure Verified Module pins (checked ${AS_OF})"
+          git remote set-url origin "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin "${branch}"
+
+      # Ready for review, not a draft. The body is the updater's own summary —
+      # each module's old → new, its release notes, whether the image's
+      # versions file moved with it, and whether its required_providers
+      # drifted — followed by what the reviewer must do before merging.
+      - name: Open the pull request
+        if: steps.app.outputs.armed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          AS_OF: ${{ steps.changed.outputs.as_of }}
+          SUMMARY: ${{ runner.temp }}/avm-versions/avm-versions-summary.md
+        run: |
+          set -euo pipefail
+          {
+            echo "## Summary"
+            echo
+            echo "Weekly check of the Azure Verified Module pins in \`frontend/src/lib/landingZone/avmVersions.js\` against the Terraform Registry by \`.github/workflows/update-avm-versions.yml\` (#671, Phase 5 of #657). Opened by the App rather than pushed to \`main\`, so the required checks run on it. The pins, \`lab-image/versions.env\` and the HCL snapshot are the only three paths it may touch."
+            echo
+            cat "${SUMMARY}"
+            echo
+            echo "## Before merging"
+            echo
+            echo "1. **Read each module's release notes** (linked above) for renamed, removed or newly required inputs. AVM input names drift between versions, and the builder's emitters name inputs by hand; the snapshot suites passing means the emitter still produces what it produced, not that the module still accepts it."
+            echo "2. **Review the snapshot diff as Terraform, not as a test file.** The versions are in \`frontend/src/lib/landingZone/__snapshots__/hcl.test.js.snap\`, so this run refreshed it with \`npx vitest run -u src/lib/landingZone\` and then ran \`npx vitest run src/lib/landingZone\` without \`-u\`, which passed. The workflow runs \`-u\` itself, rather than leaving it to the reviewer, so the pull request carries the refreshed snapshot and the human reviews a diff instead of producing one; a bot-refreshed snapshot is evidence to read, not approval. If the release notes change what the emitter should say, fix the emitter on this branch and run the same two commands again (bash, from \`frontend/\`): \`npx vitest run -u src/lib/landingZone\` after reviewing the module's changelog, then \`npx vitest run src/lib/landingZone\`."
+            echo "3. **A HAND EDIT NEEDED line above is a blocker.** The script moves version strings and a checksum only; \`requiredProviders\`, \`PROVIDER_PINS\`, \`TERRAFORM_REQUIRED_VERSION\` and the docblocks that quote each module's constraints are edited by hand against the linked \`terraform.tf\`, in this pull request."
+            echo "4. **\`lab-image/versions.env\` moved with the pins where the image vendors the module**, so \`publish-lab-image.yml\` builds both targets on this pull request and \`smoke.sh\` inits the vendored module offline; a wrong sum fails at the download. The \`# The sums were resolved on\` prose in that file is not rewritten."
+            echo
+            echo "## Related issue or decision"
+            echo
+            echo "Refs #671 (Phase 5 of #657) and #658."
+            echo
+            echo "## Verification"
+            echo
+            echo "- Checks run: \`node scripts/update-avm-versions.mjs\` against registry.terraform.io and the GitHub release tarball; then on the result, \`npx vitest run -u src/lib/landingZone\` and \`npx vitest run src/lib/landingZone\` (run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})."
+            echo "- Evidence level: [x] CI"
+          } > "${RUNNER_TEMP}/pr-body.md"
+          gh pr create \
+            --repo "${GITHUB_REPOSITORY}" \
+            --base main \
+            --head "${branch}" \
+            --title "chore: bump Azure Verified Module pins (checked ${AS_OF})" \
+            --body-file "${RUNNER_TEMP}/pr-body.md"
+
+      # The token lives an hour; the work above takes seconds. Ending it here
+      # keeps a credential that can open pull requests on this repository from
+      # outliving the job that needed it (#641). `always()`, so a failed push
+      # or a failed `gh pr create` still cleans up; the step cannot fail the
+      # job, because a run that did its work should not turn red over cleanup.
+      - name: Revoke the installation token
+        if: always() && steps.token.outputs.token != ''
+        env:
+          GITHUB_APP_TOKEN: ${{ steps.token.outputs.token }}
+        run: node scripts/github-app-token.mjs --revoke
