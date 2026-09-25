@@ -127,7 +127,15 @@ describe('the catalogue', () => {
       'avm-ptn-alz-connectivity-hub-and-spoke-vnet',
       'avm-res-network-virtualnetwork',
     ]);
-    expect(AVM_VERIFIED_ON).toBe('2026-09-25');
+    // A real calendar date that never moves backwards from the first
+    // verification (2026-09-25). Not a fixed string: the weekly bump workflow
+    // (#671) restamps this line whenever a pin moves, and a test that named
+    // the day would fail every bump before the pull request was opened.
+    expect(AVM_VERIFIED_ON).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(new Date(`${AVM_VERIFIED_ON}T00:00:00Z`).toISOString().slice(0, 10)).toBe(
+      AVM_VERIFIED_ON
+    );
+    expect(AVM_VERIFIED_ON >= '2026-09-25').toBe(true);
     for (const m of Object.values(AVM_MODULES)) {
       expect(m.source).toBe(`Azure/${m.name}/azurerm`);
       expect(m.verifiedOn).toBe(AVM_VERIFIED_ON);
