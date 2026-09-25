@@ -49,6 +49,54 @@ This project has not cut a tagged release; entries are grouped under
   - `.github/CONTRIBUTING.md` still said new work lands in `TODO.md`. It lands
     as an issue on org project 1 with a Priority set (owner decision
     2026-09-05, #362); `TODO.md` keeps the accepted risks and an index.
+- **The `hcw-lab` image: one Dockerfile with `runner` and `full` targets, a
+  Terraform provider filesystem mirror, three vendored AVM pattern modules,
+  and a workflow that publishes both to GHCR with provenance attestations
+  (#674).** Phase 1 of #658. `lab-image/Dockerfile` builds from a
+  digest-pinned `debian:bookworm-slim` and installs terraform 1.16.4,
+  kubeconform 0.8.0, helm 4.3.0 and ansible-core 2.19.13 (the last line that
+  runs on bookworm's Python 3.11), every download checked against the SHA256
+  in `lab-image/versions.env` — the one file a version bump edits. The
+  `runner` target carries `/opt/terraform/mirror`, built with `terraform
+  providers mirror` for azurerm 5.7.0 and 4.81.0, azapi 2.12.0, alz 0.22.0,
+  random 3.9.1, modtm 0.4.0 and time 0.14.2, each zip re-verified against
+  the registry's published sum after mirroring, and a `TF_CLI_CONFIG_FILE`
+  that installs from the mirror only: `terraform init` under `--network
+  none` succeeds for anything the mirror holds and fails loudly for anything
+  it does not, instead of hanging on a registry it cannot reach. avm-ptn-alz
+  0.21.0, avm-ptn-alz-management 0.9.0 and
+  avm-ptn-alz-connectivity-hub-and-spoke-vnet 0.17.5 are vendored at
+  `/opt/avm/<name>@<version>` from their release tarballs; the fourth module
+  the issue names has no release yet (its repository is still the AVM
+  template) and is recorded as such in `versions.env`. The image runs as uid
+  65534 with `/workspace` read-only, everything it writes under `/tmp`. The
+  `full` target adds Azure CLI 2.90.0 from Microsoft's apt repository (key
+  verified by SHA256, package version pinned), kubectl 1.37.1, git, curl, jq
+  and code-server's three prerequisites.
+
+  What the offline init proves and what it does not, measured rather than
+  assumed: `lab-image/smoke.sh` first asserts there is no network, the mount
+  is read-only and the uid is 65534 — an init that passed with network would
+  prove nothing about the mirror — then compares every tool's reported
+  version with `versions.env`, and runs `terraform init -backend=false` on a
+  root using azurerm and random and on the vendored management module, both
+  with no network. The management module is the only one of the three whose
+  init needs nothing outside the mirror; avm-ptn-alz calls one registry
+  module (`Azure/avm-utl-interfaces/azure`) and the connectivity module
+  calls thirteen distinct ones across twenty-one `module` blocks, and
+  Terraform has no module mirror, so those two need a registry for their
+  child modules. `lab-image/README.md` says so, with the
+  measured sizes.
+
+  `.github/workflows/publish-lab-image.yml` builds both targets and runs the
+  smoke test in each on every pull request touching `lab-image/**` (loaded
+  locally, never pushed), and on a push to `main` pushes
+  `ghcr.io/hybridcloudworks/hcw-lab-runner` and
+  `ghcr.io/hybridcloudworks/hcw-lab` tagged with the commit sha and `latest`,
+  attaches an `actions/attest-build-provenance` attestation to each, and
+  writes the digests to the job summary for #675 to pin from. Every action
+  is pinned by commit sha; the permissions live on the job. The repository
+  structure policy admits the `lab-image` directory and its README.
 
 ### Changed
 
