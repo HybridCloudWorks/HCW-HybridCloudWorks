@@ -1,0 +1,18 @@
+The playbook runs on the lab host itself. bootstrap.sh clones this repository
+onto the host and runs site.yml against localhost over the local connection,
+which is why the only committed inventory is localhost.yml, and why the vault
+and its password live on the host under /etc/hcw/ansible and nowhere else.
+
+Running from a workstation is not a supported path in this repository: the
+vault file and its password are host-local, so a workstation run would need
+copies of both, and this repository deliberately gives no instructions for
+carrying a vault password off the host. To run the playbook, or to see what a
+run would change, do it on the host. Bash, as the hcwadmin user the hardening
+role created:
+
+    sudo /opt/hcw-src/lab-host/bootstrap.sh
+
+    sudo /opt/hcw-src/lab-host/bootstrap.sh --check --diff
+
+lab-host/README.md is the full account of both commands and of what a
+successful run prints.

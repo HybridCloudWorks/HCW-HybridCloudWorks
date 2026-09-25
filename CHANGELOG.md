@@ -19,6 +19,115 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The lab host is configured by Ansible, not by hand over SSH (#662).**
+  Phase 2 of #656. `lab-host/ansible/` holds `site.yml` and five roles that
+  replace the manual steps the admin Labs page's Setup tab has printed since
+  #577: `hardening` (a key-only `hcwadmin` with passwordless sudo whose keys
+  are copied from root's, so the first run cannot lock the host; an sshd
+  drop-in named `00-` so it sorts ahead of cloud-init's
+  `PasswordAuthentication yes`; ufw deny-in/allow-out with 22, 80 and 443;
+  unattended-upgrades rebooting at 04:30; a fail2ban sshd jail on the systemd
+  backend, because Ubuntu 24.04 has no `auth.log`), `docker` (Docker Engine
+  `5:29.8.1` with buildx and compose from Docker's repository, all held, with
+  10 MB x 3 `json-file` logs and `live-restore`; the install carries
+  `allow_change_held_packages` so a pin bump is not refused by the hold it
+  set last time), `node_exporter` (1.12.1, SHA256-verified, loopback only),
+  `caddy` and `labs_agent`. Every version, digest and checksum is in
+  `group_vars/all.yml` — including the SHA256 of the Docker and NodeSource
+  apt signing keys, because a pin on the versions with no pin on the key
+  that vouches for them is decorative — the collections are pinned in
+  `requirements.yml` down to `community.docker`'s one transitive dependency,
+  and every role carries `meta/argument_specs.yml` and a README.
+
+  **Caddy is host-native and built, not downloaded, because the download API
+  does not pin.** The stock apt package and the upstream image both lack the
+  Cloudflare DNS module, and `caddyserver.com/api/download` — the usual way
+  to add one — always builds the latest release: a request naming a version
+  that does not exist returned the identical 48,173,218-byte binary, so it
+  can be neither pinned nor checksummed. So the role runs `xcaddy build
+  v2.11.4 --with github.com/caddy-dns/cloudflare@v0.2.4` inside the official
+  `caddy:2.11.4-builder` image — pulled and run by its pinned digest, never
+  by tag, so Docker verifies the content and a bumped pin is a new
+  reference that gets pulled — refuses the result unless `caddy
+  version` names the pin and `caddy list-modules` lists
+  `dns.providers.cloudflare`, and writes a `.provenance` file beside the
+  binary naming the three inputs. The binary's filename carries all three —
+  Caddy tag, module tag, the first twelve hex of the builder's index digest
+  — so bumping any of them rebuilds rather than relabelling an old build.
+  The provenance in the repository is the `caddy_*` pins in
+  `group_vars/all.yml`. It runs as `caddy.service`
+  as the non-root `caddy` user reading `/etc/caddy/env` through
+  `EnvironmentFile=` (owner root, group `caddy`, mode 0640 — the group read
+  is what lets renewals work — holding the runtime Cloudflare token from an
+  Ansible Vault variable, distinct from Terraform's), serving the three
+  names ADR 0032 puts on the certificate: `lab.hybridcloudworks.com`,
+  `*.lab.hybridcloudworks.com` and `*.coder.lab.hybridcloudworks.com`,
+  DNS-01 answered through the CNAME delegation of the two `_acme-challenge`
+  names to the lab zone. The site block imports `conf.d/*.caddy`: the apex
+  placeholder is `00-apex.caddy`, and Coder (#679) adds a file rather than
+  editing the template. **Without the token the Caddyfile fails closed** —
+  an HTTP-only apex answering 503 that imports nothing from `conf.d` — so a
+  first bootstrap is green, the second turns TLS on, and a missing secret can
+  never put an application route on plaintext.
+
+  **`vps-agent` runs host-native as the systemd service the Setup tab
+  described**, which ADR 0032 settled. The agent's whole job is `docker
+  run`, so a containerised agent needs the Docker socket mounted and a Docker
+  CLI baked into an image the repository does not have, for no isolation gain
+  — socket access is host root either way — and the Agents tab's own
+  diagnostics already say `systemctl restart hcw-labs-agent` and `journalctl
+  -u hcw-labs-agent`. The role checks the repository out at a pinned sha,
+  runs `npm ci --omit=dev` once per ref (a stamp file, so a bump reinstalls
+  and a re-run does not), writes `/etc/hcw/labs-agent.env` with the exact
+  names from `vps-agent/.env.example`, and generates the key **on the host**
+  as that file asks. `/etc/hcw/labs-agent.pem` is `root:hcw-labs-agent`
+  0640, no ACLs — root owns it, the service reads it through its group,
+  nobody else can — and `.env.example`, the Setup tab's step 4 and
+  `docs/standards/variables-and-secrets.md` now all say exactly that instead
+  of the 0600 a non-root service could never have read. Only the public
+  half, `/etc/hcw/labs-agent.crt`, leaves the host. The certificate lasts
+  730 days and nothing renews it by itself, so every run checks it with
+  `openssl x509 -checkend` and warns within 60 days of expiry, and the
+  README carries the two-step rotation: register the next public
+  certificate first, then swap the PEM. The unit sets
+  `TMPDIR=/var/lib/hcw-labs-agent/tmp`, because `lib/docker-runner.js`
+  stages each payload under `os.tmpdir()` and bind-mounts it into the job
+  container, and the `PrivateTmp` `/tmp` the unit otherwise gets is one the
+  Docker daemon cannot see. Reviewing that surfaced a defect the runner has
+  carried since #577: `mkdtemp` creates the per-job directory 0700 as the
+  agent user while the container runs as 65534:65534, so `/workspace` was
+  untraversable and every job would have failed before its command ran.
+  `prepareJobDir` now makes the directory 0755 and the payload 0644 — the
+  directory is per job, holds only the payload copy the API already sent,
+  is bind-mounted read-only and is removed after the job — and
+  `docker-runner.test.js` asserts the modes. Until the vault holds the identity the unit is
+  installed, stopped and disabled and the env file is removed — explicitly,
+  so removing a value from the vault is a revocation on the next run, not a
+  file a manual `systemctl start` could reuse — and the play says which
+  values are missing. `bootstrap.sh` refuses to run when exactly one of the
+  vault file and its password file exists, rather than treating a
+  half-present vault as no vault and turning TLS off. The `hcw.lab-job`
+  label ADR 0032 requires on job containers is the agent's own change
+  (#675); this role sets no labels.
+
+  `lab-host/bootstrap.sh` — what #661's post-install script will call —
+  installs `ansible-core` 2.21.4 with pipx, clones the repository at the
+  pinned sha into `/opt/hcw-src`, installs the collections and runs
+  `site.yml` against localhost, passing the vault at `/etc/hcw/ansible/`
+  when it exists. CI gains an `ansible-lint (lab-host)` job on the
+  production profile plus a syntax check, gated in-job on `lab-host/**` the
+  way every other `ci.yml` job is. `scripts/validate-repository-structure.ps1`
+  allows the directory and its READMEs, and `scripts/no-wiki-pointers.test.mjs`
+  now reads `.j2` files, the first tracked extension its coverage check had
+  never seen.
+
+  One contract is declared ahead of its role. `group_vars/all.yml` carries
+  `coder_enabled: false` and `coder_oauth2_github_allowed_orgs: []` for
+  Coder (#679), and `site.yml` asserts the list is non-empty whenever the
+  flag is true — because an empty `CODER_OAUTH2_GITHUB_ALLOWED_ORGS` is not
+  a lock, it lets any GitHub account sign in. The README names the real
+  kill switches: `CODER_OAUTH2_GITHUB_ALLOW_SIGNUPS=false` for new learners,
+  stopping the `coder` Compose service for everyone.
 - **Landing Zone Builder, Phase 1: the pure module, with no page yet (#667).**
   `frontend/src/lib/landingZone/` is the logic behind the Landing Zone Builder
   (#657), built the way `pricingScenarios/` is: frozen catalogues, small pure
@@ -182,6 +291,8 @@ This project has not cut a tagged release; entries are grouped under
   - `.github/CONTRIBUTING.md` still said new work lands in `TODO.md`. It lands
     as an issue on org project 1 with a Priority set (owner decision
     2026-09-05, #362); `TODO.md` keeps the accepted risks and an index.
+
+
 - **The `hcw-lab` image: one Dockerfile with `runner` and `full` targets, a
   Terraform provider filesystem mirror, three vendored AVM pattern modules,
   and a workflow that publishes both to GHCR with provenance attestations

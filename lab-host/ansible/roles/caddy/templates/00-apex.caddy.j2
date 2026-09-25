@@ -1,0 +1,8 @@
+# {{ ansible_managed }}
+# Imported inside the wildcard site block. Later roles drop their own
+# NN-name.caddy here (Coder, #679) and this placeholder is what the apex
+# answers until one of them claims it.
+@apex host {{ caddy_site_domain }}
+handle @apex {
+  respond "{{ caddy_apex_response }}" 200
+}
