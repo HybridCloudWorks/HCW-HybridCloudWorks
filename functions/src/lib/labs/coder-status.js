@@ -50,7 +50,7 @@
 
 import { fetchWithTimeout } from '../http/fetch-with-timeout.js';
 import { isUnresolvedReference } from '../secrets-health.js';
-import { createMinuteCache, MINUTE_CACHE_SECONDS } from './minute-cache.js';
+import { createMinuteCache, jsonResponse, MINUTE_CACHE_SECONDS } from './minute-cache.js';
 
 export const CODER_STATUS_CACHE_ID = 'labs:coder-status';
 export const CODER_STATUS_CACHE_SECONDS = MINUTE_CACHE_SECONDS;
@@ -62,15 +62,6 @@ export const DEFAULT_CODER_MAX_WORKSPACES = 5;
 export const MAX_TEMPLATES = 10;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-const json = (status, body, cacheSeconds = 0) => ({
-  status,
-  headers: {
-    'Content-Type': 'application/json',
-    ...(cacheSeconds > 0 ? { 'Cache-Control': `public, max-age=${cacheSeconds}` } : {}),
-  },
-  body: JSON.stringify(body),
-});
 
 /**
  * An app setting that is actually set: non-empty, and not the literal an
@@ -260,10 +251,10 @@ export function createCoderStatusHandlers({
     async getCoderStatus(request, context) {
       try {
         const body = await readStatus(context);
-        return json(200, body, body.configured ? CODER_STATUS_CACHE_SECONDS : 0);
+        return jsonResponse(200, body, body.configured ? CODER_STATUS_CACHE_SECONDS : 0);
       } catch (error) {
         context.error('publicGetLabsCoderStatus failed:', error);
-        return json(500, { error: 'Failed to read Coder status' });
+        return jsonResponse(500, { error: 'Failed to read Coder status' });
       }
     },
   };

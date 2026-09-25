@@ -26,6 +26,26 @@ import { CACHE_CONTAINER } from '../cloud-tools/history.js';
 export const MINUTE_CACHE_SECONDS = 60;
 
 /**
+ * A JSON response, with `Cache-Control` only when the body may be shared.
+ * The one shape both labs routes answer with, kept here so the two modules
+ * agree on it.
+ *
+ * @param {number} status
+ * @param {object} body
+ * @param {number} [cacheSeconds] - 0 means no Cache-Control header
+ */
+export function jsonResponse(status, body, cacheSeconds = 0) {
+  return {
+    status,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(cacheSeconds > 0 ? { 'Cache-Control': `public, max-age=${cacheSeconds}` } : {}),
+    },
+    body: JSON.stringify(body),
+  };
+}
+
+/**
  * @param {object} deps
  * @param {{ readDoc: Function, upsertDoc: Function }} deps.store
  * @param {string} deps.id - the document id, doubling as partition key (`/id`)

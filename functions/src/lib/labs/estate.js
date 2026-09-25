@@ -62,10 +62,14 @@
  * (`policyresources`, `microsoft.policyinsights/policystates`,
  * `tostring(properties.complianceState)`). String literals are single-quoted
  * throughout, as KQL requires.
+ *
+ * Shaped like cloud-tools/explain/handler.js: each read is a module-scope
+ * step over a `deps` object, so the factory below only wires them. One place
+ * turns the built result into a response, one place turns a throw into 500.
  */
 
 import { isAgentOnline } from '../labs.js';
-import { createMinuteCache, MINUTE_CACHE_SECONDS } from './minute-cache.js';
+import { createMinuteCache, jsonResponse, MINUTE_CACHE_SECONDS } from './minute-cache.js';
 
 export const ESTATE_CACHE_ID = 'labs:estate';
 export const ESTATE_CACHE_SECONDS = MINUTE_CACHE_SECONDS;
@@ -87,16 +91,8 @@ export const POLICY_COMPLIANCE_QUERY = [
   '| summarize count() by complianceState = tostring(properties.complianceState)',
 ].join(' ');
 
-const json = (status, body, cacheSeconds = 0) => ({
-  status,
-  headers: {
-    'Content-Type': 'application/json',
-    ...(cacheSeconds > 0 ? { 'Cache-Control': `public, max-age=${cacheSeconds}` } : {}),
-  },
-  body: JSON.stringify(body),
-});
-
 const UNAVAILABLE = { status: 503, body: { error: 'Labs estate status is unavailable' } };
+const ABSENT = { status: 200, body: { configured: false } };
 
 const toIsoOrNull = (value) => {
   const ms = Date.parse(String(value ?? ''));
@@ -104,6 +100,7 @@ const toIsoOrNull = (value) => {
 };
 const toTextOrNull = (value) =>
   typeof value === 'string' && value.trim() ? value.trim() : null;
+const intOrNull = (value) => (Number.isInteger(value) ? value : null);
 
 /** The card's `arc` block from one Resource Graph row. */
 export function shapeArcRow(row) {
@@ -128,6 +125,87 @@ export function shapePolicyRows(rows) {
   return totals;
 }
 
+/** The estate's `coder` block from the status proxy's body; null when unconfigured. */
+export function shapeCoderStatus(status) {
+  if (!status?.configured) return null;
+  return {
+    reachable: status.reachable === true,
+    running: intOrNull(status.capacity?.running),
+    max: intOrNull(status.capacity?.max),
+  };
+}
+
+/**
+ * Run a side read; on failure log why and answer null, so one unavailable
+ * source is reported as unknown rather than as a number or as an outage.
+ */
+async function sideRead(label, context, read) {
+  try {
+    return await read();
+  } catch (error) {
+    context?.warn?.(`labs-estate: ${label} read failed: ${error?.message ?? error}`);
+    return null;
+  }
+}
+
+/**
+ * The steps, each `(deps, context)` at module scope. `deps` is
+ * `{ store, arm, coderStatus, now }` — see createEstateHandlers.
+ */
+
+/** { kind: 'present', arc } | { kind: 'absent' } | { kind: 'unavailable' } */
+async function readArc({ arm }, context) {
+  try {
+    const rows = await arm.query(ARC_MACHINE_QUERY);
+    if (!Array.isArray(rows) || rows.length === 0) return { kind: 'absent' };
+    return { kind: 'present', arc: shapeArcRow(rows[0]) };
+  } catch (error) {
+    // No subscription to scope the read to: a local or test process. There is
+    // no estate this process could see, and the reason is not an outage.
+    if (error?.code === 'ARG_UNSCOPED') return { kind: 'absent' };
+    context?.warn?.(`labs-estate: Arc read failed: ${error?.message ?? error}`);
+    return { kind: 'unavailable' };
+  }
+}
+
+const readPolicy = ({ arm }, context) =>
+  sideRead('policy', context, async () => shapePolicyRows(await arm.query(POLICY_COMPLIANCE_QUERY)));
+
+/** The same two reads getLabsSnapshot makes (lib/labs.js), reduced to a boolean and a count. */
+const readAgent = ({ store, now }, context) =>
+  sideRead('agent', context, async () => {
+    const [agents, queued] = await Promise.all([
+      store.queryDocs('lab_agents', 'SELECT TOP 200 c.lastSeenAt FROM c', []),
+      store.queryDocs('lab_jobs', "SELECT VALUE COUNT(1) FROM c WHERE c.status = 'queued'", []),
+    ]);
+    const nowMs = now();
+    return {
+      online: (Array.isArray(agents) ? agents : []).some((a) => isAgentOnline(a?.lastSeenAt, nowMs)),
+      queued: Number(queued?.[0]) || 0,
+    };
+  });
+
+const readCoder = ({ coderStatus }, context) =>
+  sideRead('Coder', context, async () => shapeCoderStatus(await coderStatus.readStatus(context)));
+
+/** The `{ status, body }` the route answers with, built live. */
+async function buildEstate(deps, context) {
+  const machine = await readArc(deps, context);
+  if (machine.kind === 'unavailable') return UNAVAILABLE;
+  if (machine.kind === 'absent') return ABSENT;
+
+  const [policy, agent, coder] = await Promise.all([
+    readPolicy(deps, context),
+    readAgent(deps, context),
+    readCoder(deps, context),
+  ]);
+
+  return {
+    status: 200,
+    body: { configured: true, arc: machine.arc, policy, agent, coder, asOf: new Date(deps.now()).toISOString() },
+  };
+}
+
 /**
  * @param {object} deps
  * @param {{ readDoc: Function, upsertDoc: Function, queryDocs: Function }} deps.store
@@ -136,6 +214,7 @@ export function shapePolicyRows(rows) {
  * @param {() => number} [deps.now] - epoch ms
  */
 export function createEstateHandlers({ store, arm, coderStatus, now = () => Date.now() }) {
+  const deps = { store, arm, coderStatus, now };
   const cache = createMinuteCache({
     store,
     id: ESTATE_CACHE_ID,
@@ -144,101 +223,19 @@ export function createEstateHandlers({ store, arm, coderStatus, now = () => Date
     seconds: ESTATE_CACHE_SECONDS,
   });
 
-  /** { kind: 'present', arc } | { kind: 'absent' } | { kind: 'unavailable' } */
-  async function readArc(context) {
-    try {
-      const rows = await arm.query(ARC_MACHINE_QUERY);
-      if (!Array.isArray(rows) || rows.length === 0) return { kind: 'absent' };
-      return { kind: 'present', arc: shapeArcRow(rows[0]) };
-    } catch (error) {
-      // No subscription to scope the read to: a local or test process. There is
-      // no estate this process could see, and the reason is not an outage.
-      if (error?.code === 'ARG_UNSCOPED') return { kind: 'absent' };
-      context?.warn?.(`labs-estate: Arc read failed: ${error?.message ?? error}`);
-      return { kind: 'unavailable' };
-    }
-  }
-
-  async function readPolicy(context) {
-    try {
-      return shapePolicyRows(await arm.query(POLICY_COMPLIANCE_QUERY));
-    } catch (error) {
-      context?.warn?.(`labs-estate: policy read failed: ${error?.message ?? error}`);
-      return null;
-    }
-  }
-
-  /** The same two reads getLabsSnapshot makes (lib/labs.js), reduced to a boolean and a count. */
-  async function readAgent(context) {
-    try {
-      const [agents, queued] = await Promise.all([
-        store.queryDocs('lab_agents', 'SELECT TOP 200 c.lastSeenAt FROM c', []),
-        store.queryDocs('lab_jobs', "SELECT VALUE COUNT(1) FROM c WHERE c.status = 'queued'", []),
-      ]);
-      const nowMs = now();
-      return {
-        online: (Array.isArray(agents) ? agents : []).some((a) => isAgentOnline(a?.lastSeenAt, nowMs)),
-        queued: Number(queued?.[0]) || 0,
-      };
-    } catch (error) {
-      context?.warn?.(`labs-estate: agent read failed: ${error?.message ?? error}`);
-      return null;
-    }
-  }
-
-  async function readCoder(context) {
-    try {
-      const status = await coderStatus.readStatus(context);
-      if (!status?.configured) return null;
-      return {
-        reachable: status.reachable === true,
-        running: Number.isInteger(status.capacity?.running) ? status.capacity.running : null,
-        max: Number.isInteger(status.capacity?.max) ? status.capacity.max : null,
-      };
-    } catch (error) {
-      context?.warn?.(`labs-estate: Coder read failed: ${error?.message ?? error}`);
-      return null;
-    }
-  }
-
-  /** The `{ status, body }` the route answers with, built live. */
-  async function buildEstate(context) {
-    const machine = await readArc(context);
-    if (machine.kind === 'unavailable') return UNAVAILABLE;
-    if (machine.kind === 'absent') return { status: 200, body: { configured: false } };
-
-    const [policy, agent, coder] = await Promise.all([
-      readPolicy(context),
-      readAgent(context),
-      readCoder(context),
-    ]);
-
-    return {
-      status: 200,
-      body: {
-        configured: true,
-        arc: machine.arc,
-        policy,
-        agent,
-        coder,
-        asOf: new Date(now()).toISOString(),
-      },
-    };
-  }
-
   return {
     /** GET /api/public/labs/estate */
     async getEstate(request, context) {
       try {
         let result = await cache.read(context);
         if (!result) {
-          result = await buildEstate(context);
+          result = await buildEstate(deps, context);
           await cache.write(result, context);
         }
-        return json(result.status, result.body, result.status === 200 ? ESTATE_CACHE_SECONDS : 0);
+        return jsonResponse(result.status, result.body, result.status === 200 ? ESTATE_CACHE_SECONDS : 0);
       } catch (error) {
         context.error('publicGetLabsEstate failed:', error);
-        return json(500, { error: 'Failed to read the labs estate' });
+        return jsonResponse(500, { error: 'Failed to read the labs estate' });
       }
     },
   };
