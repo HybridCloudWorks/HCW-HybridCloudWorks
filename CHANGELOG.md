@@ -19,6 +19,41 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Docker agentic sandbox recipe and the "Run an agent against your landing
+  zone" section on `/education/labs` (#676).** Phase 3 of #658.
+  `lab-image/sandbox-template/Dockerfile` extends Docker's Claude Code
+  sandbox template (`docker/sandbox-templates:claude-code`, pinned by image
+  index digest) with terraform and the Azure CLI at the versions
+  `lab-image/versions.env` pins — the build context is `lab-image/` so the
+  file is read from its one home, the Azure CLI package string's `~bookworm`
+  suffix is swapped for the base image's Ubuntu codename with the version
+  number unchanged, and every download is checked against the pinned SHA256
+  — and installs `AGENTS.md` as `/home/agent/.claude/CLAUDE.md`: the folder
+  is a landing zone generated for learning, run `terraform init
+  -backend=false`, `fmt -check` and `validate`, explain the files, never
+  `plan`, `apply` or reach a tenant. `README.md` beside it carries every
+  command, PowerShell then bash: build, `docker image save` and `sbx template
+  load`, the `sbx policy allow network --sandbox hcw-lz` line the deny-by-
+  default sandbox needs for the Terraform registry and GitHub, and `sbx run
+  --name hcw-lz --template hcw-lz-sandbox:v1 claude .`. On the page, the
+  `#676` slot is filled by `SandboxSection`: three numbered steps (build in
+  the Landing Zone Builder and download the zip, unzip it, create the
+  sandbox from that folder), the `sbx run` line under each shell through a
+  `CommandLine` component shared with the lab cards, the first prompt as one
+  quoted sentence, the sentence that local sandboxes are free and cloud ones
+  bill the learner's own Docker subscription and expire after an hour, and a
+  link to the recipe directory. Every `sbx` fact was read from the Docker
+  documentation on 2026-09-25 (`docker sandbox` is removed from Docker 29;
+  the CLI is `sbx`, custom templates are `--template <image>` on `sbx
+  create`/`sbx run`, cloud sandboxes need a Docker Agentic Platform
+  subscription, cannot mount a host workspace and expire after one hour by
+  default) and the page cites the URLs in its source. The image built
+  locally (3.38 GB) and `terraform init -backend=false`, `fmt -check` and
+  `validate` passed inside it against a full builder emission; the `sbx`
+  commands themselves are the documentation's shapes, not exercised, since
+  the CLI needs a hypervisor the build machine did not have enabled.
+  `validate-repository-structure.ps1` allowlists the recipe's `README.md`
+  and `AGENTS.md`.
 - **Public labs reads: the Hybrid Lab estate and Coder status, with no
   browser call to either (#664, #680).** Backend halves of Phase 4 of #656
   and Phase 2 of #659. `GET /api/public/labs/estate` reads the Arc-enabled

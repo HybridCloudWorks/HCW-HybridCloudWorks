@@ -10,8 +10,12 @@
  *     "Coder status" is `GET public/labs/coder-status` (#680), both through
  *     `usePublicData`, both answering `{ configured: false }` honestly until
  *     the host and Coder exist. The cards render those as sentences.
- *   - Two sections are slots: the agent section (#676) and the article list
- *     (#677) land later, in place, so the layout does not move under them.
+ *   - "Run an agent against your landing zone" is `SandboxSection` (#676):
+ *     static editorial — three steps, one `sbx run` line per shell, the
+ *     first prompt and the recipe link — read from the Docker docs on
+ *     2026-09-25 and carrying `live-check` because the `sbx` surface moves.
+ *   - One section is still a slot: the article list (#677) lands later, in
+ *     place, so the layout does not move under it.
  *
  * ROUTING. `/education/labs` is a static path declared beside `/education` in
  * App.jsx, so it outranks `/:provider/education` the same way — a static
@@ -20,8 +24,9 @@
  * there never produces it, and `routes-are-complete.test.js` fails if it is
  * declared in one place and not the other.
  *
- * PRE-RENDER. The catalogue is static, so the whole card grid is in the
- * built HTML; the two status cards pre-render their loading sentence, which
+ * PRE-RENDER. The catalogue and the agent section are static, so the card
+ * grid and the sandbox commands are in the built HTML; the two status cards
+ * pre-render their loading sentence, which
  * is also what the browser shows until the API answers. Nothing on the page
  * reads the clock until data has arrived, so hydration matches.
  */
@@ -33,6 +38,7 @@ import CoderStatusCard from '@/components/labs/CoderStatusCard';
 import LabCard from '@/components/labs/LabCard';
 import LabsEstateCard from '@/components/labs/LabsEstateCard';
 import LabsSlot from '@/components/labs/LabsSlot';
+import SandboxSection from '@/components/labs/SandboxSection';
 import { CODER_ORIGIN, labs } from '@/data/labs/catalogue';
 import { usePublicData } from '@/hooks/usePublicData';
 import { fetchCoderStatus, fetchLabsEstate } from '@/lib/publicApi';
@@ -120,7 +126,9 @@ export default function LabsLearnPage() {
           />
         </div>
 
-        <LabsSlot id="agent" title="Run an agent against your landing zone" issue={676} />
+        <LabsSlot id="agent" title="Run an agent against your landing zone" issue={676}>
+          <SandboxSection />
+        </LabsSlot>
         <LabsSlot id="articles" title="Articles for these labs" issue={677} />
       </div>
     </>

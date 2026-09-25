@@ -12,25 +12,16 @@
  * the current directory. Two lines, PowerShell then bash, each labelled with
  * its shell, because the quoting is the only difference and it is the one
  * that bites when pasted at the wrong prompt. The lines hold commands only —
- * explanation lives in the prose above them.
+ * explanation lives in the prose above them. `CommandLine` is shared with the
+ * agent section (#676), which prints the same shape.
  */
 import React from 'react';
 import { RUN_LOCALLY_COMMANDS, coderWorkspaceUrl } from '@/data/labs/catalogue';
 import { safeUrl } from '@/lib/safeUrl';
+import CommandLine from './CommandLine';
 import { plural } from './labsWords';
 
 const MUTED = 'text-slate-600 dark:text-slate-400';
-
-function CommandLine({ shell, command }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <span className={`text-[10px] uppercase tracking-wider ${MUTED}`}>{shell}</span>
-      <pre className="overflow-x-auto rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-950 text-slate-100 px-3 py-2 text-xs">
-        <code data-shell={shell}>{command}</code>
-      </pre>
-    </div>
-  );
-}
 
 export default function LabCard({ lab }) {
   const href = safeUrl(coderWorkspaceUrl(lab));
