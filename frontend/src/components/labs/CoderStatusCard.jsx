@@ -13,7 +13,7 @@
 import React from 'react';
 import { formatLocalDateTime } from '@/lib/cloudPricing';
 import { capacityWords } from './labsWords';
-import StatusCard, { MUTED, firstNotice } from './StatusCard';
+import StatusCard, { MUTED } from './StatusCard';
 
 export const CODER_NOT_PROVISIONED_SENTENCE = 'Coder is not yet provisioned.';
 export const CODER_UNREACHABLE_SENTENCE = 'Coder is unreachable right now.';
@@ -84,6 +84,18 @@ function CoderFacts({ status }) {
   );
 }
 
+/** The card's fixed words and ids; the shell renders them around the body. */
+const CARD = Object.freeze({
+  id: 'coder',
+  testId: 'coder-status-card',
+  title: 'Coder status',
+  intro:
+    'Coder runs on the lab host and is where you sign in with GitHub. This card is served by the site’s API from a read-only token, so what it shows is at most a minute old and your browser never contacts Coder until you open a workspace.',
+  errorPrefix: 'Coder status could not be read',
+  noticeTestId: 'coder-status',
+  notices: NOTICES,
+});
+
 /**
  * @param {object} props
  * @param {object|null|undefined} props.status `undefined` while nothing has
@@ -92,19 +104,9 @@ function CoderFacts({ status }) {
  * @param {Error|null} props.error
  */
 export default function CoderStatusCard({ status, loading, error }) {
-  const notice = firstNotice(NOTICES, status, loading);
   return (
-    <StatusCard
-      id="coder"
-      testId="coder-status-card"
-      title="Coder status"
-      intro="Coder runs on the lab host and is where you sign in with GitHub. This card is served by the site’s API from a read-only token, so what it shows is at most a minute old and your browser never contacts Coder until you open a workspace."
-      error={error}
-      errorPrefix="Coder status could not be read"
-      notice={notice}
-      noticeTestId="coder-status"
-    >
-      {notice ? null : <CoderFacts status={status} />}
+    <StatusCard {...CARD} subject={status} loading={loading} error={error}>
+      {(body) => <CoderFacts status={body} />}
     </StatusCard>
   );
 }

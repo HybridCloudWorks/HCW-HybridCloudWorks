@@ -3,10 +3,12 @@
  * section with an intro sentence, and a body that is exactly one of three
  * things — the server's error sentence, a notice for a state with nothing to
  * enumerate (loading, route not published, not provisioned, unreachable), or
- * the card's own facts. The cards decide WHICH notice applies from a table of
- * `{ when, text, muted }` rows read top to bottom by `firstNotice`; this
- * component only renders the answer. That keeps each card's decision in one
- * ordered list rather than a ladder of early returns.
+ * the card's own facts. A card supplies its notices as an ordered table of
+ * `{ when, text, muted }` rows, read top to bottom by `firstNotice`, and its
+ * facts as a render function of the subject; this component decides which of
+ * the three applies. That keeps each card's decision in one ordered list
+ * rather than a ladder of early returns, and keeps the two cards from
+ * carrying the same shell twice.
  */
 import React from 'react';
 
@@ -15,7 +17,7 @@ const PLAIN = 'text-slate-900 dark:text-slate-100';
 
 /**
  * The first notice whose `when(...args)` holds, as `{ text, muted }`, or null
- * when none does — which is the card's cue to render its facts.
+ * when none does — which is the cue to render the facts.
  * @param {ReadonlyArray<{when: Function, text: Function, muted?: boolean}>} notices
  */
 export function firstNotice(notices, ...args) {
@@ -47,23 +49,30 @@ function StatusBody({ error, errorPrefix, notice, noticeTestId, children }) {
  * @param {string} props.testId the section's data-testid
  * @param {string} props.title
  * @param {React.ReactNode} props.intro one or two sentences under the title
- * @param {Error|null} props.error
  * @param {string} props.errorPrefix the words before the server's sentence
- * @param {{text: string, muted: boolean}|null} props.notice
  * @param {string} props.noticeTestId data-testid the notice paragraph carries
- * @param {React.ReactNode} props.children the facts, when there is no notice
+ * @param {ReadonlyArray<object>} props.notices the card's `{ when, text, muted }` rows
+ * @param {unknown} props.subject the fetched body: `undefined` while nothing
+ *   has arrived, `null` when the route answered 404, otherwise the object
+ * @param {boolean} props.loading
+ * @param {Error|null} props.error
+ * @param {(subject: object) => React.ReactNode} props.children the facts,
+ *   called only when there is no error and no notice
  */
 export default function StatusCard({
   id,
   testId,
   title,
   intro,
-  error,
   errorPrefix,
-  notice,
   noticeTestId,
+  notices,
+  subject,
+  loading,
+  error,
   children,
 }) {
+  const notice = firstNotice(notices, subject, loading);
   return (
     <section
       aria-labelledby={`${id}-heading`}
@@ -80,7 +89,7 @@ export default function StatusCard({
         notice={notice}
         noticeTestId={noticeTestId}
       >
-        {children}
+        {error || notice ? null : children(subject)}
       </StatusBody>
     </section>
   );

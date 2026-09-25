@@ -25,7 +25,7 @@ import {
   heartbeatAgeWords,
   policyWords,
 } from './labsWords';
-import StatusCard, { MUTED, firstNotice } from './StatusCard';
+import StatusCard, { MUTED } from './StatusCard';
 
 export const NOT_PROVISIONED_SENTENCE = 'The lab host is not provisioned yet.';
 export const ESTATE_ROUTE_MISSING_SENTENCE = 'The lab estate endpoint is not published yet.';
@@ -93,6 +93,18 @@ function EstateFacts({ estate }) {
   );
 }
 
+/** The card's fixed words and ids; the shell renders them around the body. */
+const CARD = Object.freeze({
+  id: 'estate',
+  testId: 'labs-estate-card',
+  title: 'The Hybrid Lab right now',
+  intro:
+    'The lab host is a Hostinger VPS onboarded to Azure Arc, so it appears in the same tenant as the production estate. The Function App reads its Arc row and policy compliance from Azure Resource Graph with its managed identity; the browser never talks to Azure.',
+  errorPrefix: 'The lab host status could not be read',
+  noticeTestId: 'estate-status',
+  notices: NOTICES,
+});
+
 /**
  * @param {object} props
  * @param {object|null|undefined} props.estate `undefined` while nothing has
@@ -101,19 +113,9 @@ function EstateFacts({ estate }) {
  * @param {Error|null} props.error
  */
 export default function LabsEstateCard({ estate, loading, error }) {
-  const notice = firstNotice(NOTICES, estate, loading);
   return (
-    <StatusCard
-      id="estate"
-      testId="labs-estate-card"
-      title="The Hybrid Lab right now"
-      intro="The lab host is a Hostinger VPS onboarded to Azure Arc, so it appears in the same tenant as the production estate. The Function App reads its Arc row and policy compliance from Azure Resource Graph with its managed identity; the browser never talks to Azure."
-      error={error}
-      errorPrefix="The lab host status could not be read"
-      notice={notice}
-      noticeTestId="estate-status"
-    >
-      {notice ? null : <EstateFacts estate={estate} />}
+    <StatusCard {...CARD} subject={estate} loading={loading} error={error}>
+      {(body) => <EstateFacts estate={body} />}
     </StatusCard>
   );
 }
