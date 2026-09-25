@@ -89,6 +89,7 @@ Every ADR includes:
 | [0029](../decisions/0029-podcast-hosting-and-audio-surface.md) | Podcast hosting is RSS.com, the podcast page is the one audio surface, and the media route serves byte ranges | Accepted | Replace the retired host, put both audio systems on one seekable page, and unblock a self-hosted feed for later |
 | [0030](../decisions/0030-newsletter-provider.md) | The newsletter provider is Resend, and the site owns the schedule | Accepted | Klaviyo's free plan cannot send a weekly newsletter past 115 subscribers; keep the cadence in the timer that already drafts it, and end the half-wired read-only integration |
 | [0031](../decisions/0031-security-scanner-owner-decisions.md) | Key Vault purge protection on, Microsoft-managed keys, no private endpoints, and storage resource logs within the log cap | Accepted | Clear the Qlty security findings with real changes where the owner chose them, and a recorded decision where not |
+| [0032](../decisions/0032-learner-labs-platform.md) | The learner labs platform: a Terraform-managed Hostinger host in its own `hcw-lab` workspace, Ubuntu 24.04 with Docker only, Azure Arc as the hybrid control plane, Coder as the learner identity boundary, digest-pinned images from `lab-image/`, and public submission held Gated | Proposed | Record once the decisions the four lab epics (#656, #657, #658, #659) build on, so a lab experiment can never reach production state, secrets or sign-in |
 
 ## Template
 

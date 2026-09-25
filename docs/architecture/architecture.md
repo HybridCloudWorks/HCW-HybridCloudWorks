@@ -171,7 +171,7 @@ deployments, and scaling:
 | --- | --- | --- |
 | API | Public tools, admin reads and mutations, health endpoints | Internet-facing; admin routes require Entra; public routes explicitly allowlisted |
 | Worker | Schedules, change feed, queues, AI, media, publishing, notifications, third-party sync | No public business endpoints; privileged secrets and data access |
-| Labs broker | Job admission, quota, status, and Hostinger agent coordination | Narrow public surface; isolated Cosmos container permissions |
+| Labs broker | Job admission, quota, status, and Hostinger agent coordination | Admin-only submission today (§5.3); the agent's routes need its own Entra certificate; anonymous submission is Gated by ADR 0032 |
 
 Handlers are stateless, idempotent, and safe for at-least-once delivery. External side effects use an
 operation ID, bounded exponential retry, explicit terminal state, and poison queues. Synchronous HTTP
@@ -290,10 +290,14 @@ mutation tests require an explicitly disposable record and separate approval.
 
 ### 5.3 Labs flow
 
-The browser submits a bounded lab request to the labs broker. The broker validates content, enforces
-quota, creates a TTL-bound job, and returns an opaque ID. The Hostinger agent polls outbound, claims a
-job conditionally, runs it inside the existing Docker sandbox, and reports redacted output. No inbound
-VPS port or Cosmos account key is exposed.
+Submission is admin-only today. An editor signed in to `/admin/labs` calls `enqueueLabJob`, which
+checks the `editor` role, the job-type allowlist and the per-type payload cap, then writes a queued
+job and returns its ID. The Hostinger agent polls outbound with its own Entra certificate, claims a
+job conditionally, runs it inside the Docker sandbox with no network, and reports the result. No
+inbound VPS port or Cosmos account key is exposed. The browser never submits a lab request: the
+source repository's public path was not ported (`functions/src/lib/labs.js`), and
+[ADR 0032](../decisions/0032-learner-labs-platform.md) holds anonymous submission Gated with the
+bounds it would open under.
 
 ## 6. Reliability model
 
