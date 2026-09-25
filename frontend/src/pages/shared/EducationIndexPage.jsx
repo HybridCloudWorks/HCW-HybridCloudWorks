@@ -36,8 +36,9 @@ import React, { useMemo } from 'react';
 import { Helmet } from 'react-helmet-async';
 import { Link } from 'react-router';
 import CatalogueFreshness from '@/components/education/CatalogueFreshness';
+import SectionHeading from '@/components/education/SectionHeading';
 import { deriveStatus, isIsoDate, useToday } from '@/lib/certStatus';
-import { routes } from '@/lib/routeFactory';
+import { routes, staticRoutes } from '@/lib/routeFactory';
 
 import * as ansible from '@/data/ansible/education';
 import * as aws from '@/data/aws/certifications';
@@ -392,6 +393,23 @@ export default function EducationIndexPage() {
               <ProviderTile key={entry.provider} entry={entry} />
             ))}
           </ul>
+        </section>
+
+        <section aria-labelledby="labs-heading">
+          <SectionHeading id="labs-heading" className="mb-2">
+            Practise in a browser lab
+          </SectionHeading>
+          <p className="text-slate-600 dark:text-slate-400 max-w-3xl">
+            Reading about an exam is not the same as running the tools it covers. The{' '}
+            <Link
+              to={staticRoutes.labs}
+              className="font-semibold text-slate-900 dark:text-slate-100 underline underline-offset-4"
+            >
+              browser labs
+            </Link>{' '}
+            open VS Code in your browser with az, terraform, kubectl, helm and ansible installed, or
+            run the same image on your own machine with one docker command.
+          </p>
         </section>
 
         <section aria-labelledby="equivalence-heading">

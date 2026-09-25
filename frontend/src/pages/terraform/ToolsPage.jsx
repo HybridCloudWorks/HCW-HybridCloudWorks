@@ -1,8 +1,23 @@
 import React from 'react';
+import { useNavigate } from 'react-router';
 import { ContentListingTemplate } from '@/components/templates/ContentListingTemplate';
+import { staticRoutes } from '@/lib/routeFactory';
 
 export default function TerraformToolsPage() {
+  const navigate = useNavigate();
+
   const tools = [
+    // The site's own tool first: it is the one card here that opens a page on
+    // this site rather than describing a product (#668).
+    {
+      title: 'Landing Zone Builder',
+      description:
+        'Assemble an Azure landing zone component by component on this site, read what each part is for, and download the Terraform it becomes, built on the Azure Verified Modules HashiCorp’s validated pattern uses.',
+      category: 'Learn',
+      complexity: 'Beginner',
+      tags: ['Azure', 'AVM', 'Interactive'],
+      path: staticRoutes.landingZone,
+    },
     {
       title: 'Terraform CLI',
       description: 'Official Terraform command-line tool with init, plan, apply, and destroy operations.',
@@ -47,7 +62,7 @@ export default function TerraformToolsPage() {
     },
   ];
 
-  const categories = ['Core', 'Orchestration', 'Cost Management', 'Quality', 'Governance', 'Automation'];
+  const categories = ['Learn', 'Core', 'Orchestration', 'Cost Management', 'Quality', 'Governance', 'Automation'];
 
   return (
     <ContentListingTemplate
@@ -57,6 +72,9 @@ export default function TerraformToolsPage() {
       itemType="guide"
       categories={categories}
       icon="build"
+      onItemClick={(item) => {
+        if (item.path) navigate(item.path);
+      }}
     />
   );
 }

@@ -5,42 +5,125 @@ import { useProvider } from '@/context/ProviderContext';
 import { routes, staticRoutes, parseRoute } from '@/lib/routeFactory';
 import { SkipToMainContent } from '@/components/accessibility/SkipToMainContent';
 
+/**
+ * The two Learn entries: the cross-provider index and the browser labs (#681).
+ * Neither is a `/:provider/...` route, so neither could live in a provider's
+ * hub links — and until this menu existed the header had no way to reach
+ * `/education` at all.
+ */
+export const LEARN_MENU_ITEMS = Object.freeze([
+  { label: 'Learn any cloud', path: staticRoutes.education },
+  { label: 'Browser labs', path: staticRoutes.labs },
+]);
+
+/**
+ * One click-to-toggle menu in the primary nav: a button and, while open, a
+ * list of links. Closes on a click outside, on Escape (returning focus to
+ * the button), and when an item is chosen. Was the Tools dropdown inline in
+ * Header until the Learn menu needed the same behaviour (#681).
+ */
+function NavDropdown({ id, label, items, active, gridColumn }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+  const buttonRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const handleClickOutside = (event) => {
+      if (rootRef.current && !rootRef.current.contains(event.target)) setOpen(false);
+    };
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setOpen(false);
+        buttonRef.current?.focus();
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [open]);
+
+  const menuId = `${id}-dropdown-menu`;
+  return (
+    <div className="relative" style={{ gridColumn }} ref={rootRef}>
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-controls={menuId}
+        aria-label={`Toggle ${label.toLowerCase()} menu`}
+        className={cn(
+          'text-[11px] font-semibold uppercase tracking-wide transition-all px-2.5 py-2 rounded-full border whitespace-nowrap inline-flex items-center justify-center w-full gap-1',
+          active || open
+            ? 'text-(--dark-gray) dark:text-(--light-gray) bg-secondary/15 border-secondary/40 shadow-sm'
+            : 'text-slate-600 dark:text-slate-400 border-transparent hover:text-(--dark-gray) dark:hover:text-(--light-gray) hover:bg-secondary/15 hover:border-secondary/40'
+        )}
+      >
+        {label}
+        <span
+          className={cn(
+            'material-symbols-outlined text-[13px] transition-transform duration-200',
+            open && 'rotate-180'
+          )}
+          aria-hidden="true"
+        >
+          expand_more
+        </span>
+      </button>
+
+      {open && (
+        <div
+          id={menuId}
+          role="menu"
+          aria-label={label}
+          className="absolute top-[calc(100%+8px)] left-0 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl py-2 min-w-50 z-100 animate-in fade-in slide-in-from-top-2 duration-200"
+        >
+          {items.map((item) => (
+            <Link
+              key={item.path}
+              to={item.path}
+              role="menuitem"
+              onClick={() => setOpen(false)}
+              className="block px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-400 hover:bg-secondary/10 hover:text-(--dark-gray) dark:hover:text-(--light-gray) transition-colors"
+            >
+              {item.label}
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Header() {
   const location = useLocation();
   const _currentProvider = useProvider();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
-  const [toolsDropdownOpen, setToolsDropdownOpen] = useState(false);
-  const toolsRef = useRef(null);
-  const toolsButtonRef = useRef(null);
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 20);
-    const handleClickOutside = (event) => {
-      if (toolsRef.current && !toolsRef.current.contains(event.target)) {
-        setToolsDropdownOpen(false);
-      }
-    };
     const handleKeyDown = (event) => {
-      if (event.key === 'Escape') {
-        if (toolsDropdownOpen) {
-          setToolsDropdownOpen(false);
-          toolsButtonRef.current?.focus();
-        }
-        if (mobileMenuOpen) setMobileMenuOpen(false);
-      }
+      if (event.key === 'Escape' && mobileMenuOpen) setMobileMenuOpen(false);
     };
 
     window.addEventListener('scroll', handleScroll);
-    document.addEventListener('mousedown', handleClickOutside);
     document.addEventListener('keydown', handleKeyDown);
 
     return () => {
       window.removeEventListener('scroll', handleScroll);
-      document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [toolsDropdownOpen, mobileMenuOpen]);
+  }, [mobileMenuOpen]);
+
+  const onLearnPage =
+    location.pathname === staticRoutes.education ||
+    location.pathname.startsWith(`${staticRoutes.education}/`);
 
   // Parse route info for provider context
   const _routeInfo = parseRoute(location.pathname);
@@ -123,6 +206,7 @@ export default function Header() {
     { label: 'Decision Matrix', path: staticRoutes.decisions },
     { label: 'Pricing Comparison', path: staticRoutes.comparison },
     { label: 'Migration Hub', path: staticRoutes.migration },
+    { label: 'Landing Zone Builder', path: staticRoutes.landingZone },
     ...(currentProvider === 'finops'
       ? [{ label: 'FinOps Tools', path: routes.tools('finops') }]
       : []),
@@ -198,7 +282,7 @@ export default function Header() {
           <nav
             aria-label="Primary"
             className="grid gap-1 items-center"
-            style={{ gridTemplateColumns: `repeat(${hubLinks.length + 1}, 90px)` }}
+            style={{ gridTemplateColumns: `repeat(${hubLinks.length + 2}, 90px)` }}
           >
             {hubLinks.map((item, index) => (
               <Link
@@ -216,58 +300,22 @@ export default function Header() {
               </Link>
             ))}
 
-            {/* Tools Dropdown - repositioned and stabilized with Click-to-Toggle */}
-            {true && (
-              <div className="relative" style={{ gridColumn: hubLinks.length + 1 }} ref={toolsRef}>
-                <button
-                  ref={toolsButtonRef}
-                  onClick={() => setToolsDropdownOpen(!toolsDropdownOpen)}
-                  aria-expanded={toolsDropdownOpen}
-                  aria-haspopup="menu"
-                  aria-controls="tools-dropdown-menu"
-                  aria-label="Toggle tools menu"
-                  className={cn(
-                    'text-[11px] font-semibold uppercase tracking-wide transition-all px-2.5 py-2 rounded-full border whitespace-nowrap inline-flex items-center justify-center w-full gap-1',
-                    location.pathname.startsWith('/tools/') || toolsDropdownOpen
-                      ? 'text-(--dark-gray) dark:text-(--light-gray) bg-secondary/15 border-secondary/40 shadow-sm'
-                      : 'text-slate-600 dark:text-slate-400 border-transparent hover:text-(--dark-gray) dark:hover:text-(--light-gray) hover:bg-secondary/15 hover:border-secondary/40'
-                  )}
-                >
-                  Tools
-                  <span
-                    className={cn(
-                      'material-symbols-outlined text-[13px] transition-transform duration-200',
-                      toolsDropdownOpen && 'rotate-180'
-                    )}
-                    aria-hidden="true"
-                  >
-                    expand_more
-                  </span>
-                </button>
-
-                {/* Dropdown Menu - stabilized with higher z-index and click logic */}
-                {toolsDropdownOpen && (
-                  <div
-                    id="tools-dropdown-menu"
-                    role="menu"
-                    aria-label="Tools"
-                    className="absolute top-[calc(100%+8px)] left-0 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl py-2 min-w-50 z-100 animate-in fade-in slide-in-from-top-2 duration-200"
-                  >
-                    {getToolsDropdownItems().map((item) => (
-                      <Link
-                        key={item.path}
-                        to={item.path}
-                        role="menuitem"
-                        onClick={() => setToolsDropdownOpen(false)}
-                        className="block px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-400 hover:bg-secondary/10 hover:text-(--dark-gray) dark:hover:text-(--light-gray) transition-colors"
-                      >
-                        {item.label}
-                      </Link>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
+            {/* Learn and Tools menus, in the last two grid columns so the
+                provider links keep their positions across every hub. */}
+            <NavDropdown
+              id="learn"
+              label="Learn"
+              items={LEARN_MENU_ITEMS}
+              active={onLearnPage}
+              gridColumn={hubLinks.length + 1}
+            />
+            <NavDropdown
+              id="tools"
+              label="Tools"
+              items={getToolsDropdownItems()}
+              active={location.pathname.startsWith('/tools/')}
+              gridColumn={hubLinks.length + 2}
+            />
           </nav>
           {/* Divider - always in same position */}
           <div className="h-6 w-px bg-slate-300 dark:bg-slate-800 shrink-0"></div>
@@ -328,6 +376,18 @@ export default function Header() {
               {item.label}
             </Link>
           ))}
+          <div className="border-t border-slate-300 dark:border-slate-800 mt-2 pt-2">
+            {LEARN_MENU_ITEMS.map((item) => (
+              <Link
+                key={item.path}
+                to={item.path}
+                className="flex items-center h-11 px-4 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white text-sm transition-colors"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                {item.label}
+              </Link>
+            ))}
+          </div>
           <div className="border-t border-slate-300 dark:border-slate-800 mt-2 pt-2">
             {sharedLinks.map((item) => (
               <Link

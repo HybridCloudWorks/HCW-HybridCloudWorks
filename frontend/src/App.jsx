@@ -27,6 +27,7 @@ const HomePage = lazyPage(() => import('@/pages/shared/HomePage'));
 const AboutPage = lazyPage(() => import('@/pages/shared/AboutPage'));
 const ContactPage = lazyPage(() => import('@/pages/shared/ContactPage'));
 const EducationIndexPage = lazyPage(() => import('@/pages/shared/EducationIndexPage'));
+const LabsLearnPage = lazyPage(() => import('@/pages/shared/LabsLearnPage'));
 const NewsPage = lazyPage(() => import('@/pages/shared/NewsPage'));
 const SharedPodcastPage = lazyPage(() => import('@/pages/shared/PodcastPage'));
 const NotFoundPage = lazyPage(() => import('@/pages/NotFoundPage'));
@@ -117,6 +118,7 @@ const ToolsMigrationPage = lazyPage(() => import('@/pages/tools/MigrationPage'))
 const ToolsComparisonPage = lazyPage(() => import('@/pages/tools/ComparisonPage'));
 const ToolsResourcesPage = lazyPage(() => import('@/pages/tools/ResourcesPage'));
 const ToolsDecisionsPage = lazyPage(() => import('@/pages/tools/DecisionsPage'));
+const ToolsLandingZonePage = lazyPage(() => import('@/pages/tools/LandingZonePage'));
 
 // Templates
 const FrameworkSubmissionPage = lazyPage(
@@ -294,6 +296,9 @@ function App() {
                   `/:provider` in route ranking, so this wins over the provider
                   layout the same way `/preview/:id` and `/tools/*` do. */}
               <Route path="/education" element={<EducationIndexPage />} />
+              {/* The browser labs page (#681). Static like `/education`, and for
+                  the same reason: it must beat `/:provider/education`. */}
+              <Route path="/education/labs" element={<LabsLearnPage />} />
               {/* --- Provider Routes (Wrapped in ProviderLayout) --- */}
               <Route path="/:provider" element={<ProviderLayout />}>
                 <Route index element={<ProviderLandingDispatcher />} />
@@ -364,6 +369,7 @@ function App() {
               <Route path="/tools/comparison" element={<ToolsComparisonPage />} />
               <Route path="/tools/resources" element={<ToolsResourcesPage />} />
               <Route path="/tools/decisions" element={<ToolsDecisionsPage />} />
+              <Route path="/tools/landing-zone" element={<ToolsLandingZonePage />} />
               {/* --- Staging preview (T-606): signed-link view of unpublished
                   drafts. Static segment outranks /:provider in route ranking. --- */}
               <Route path="/preview/:id" element={<PreviewPage />} />

@@ -49,6 +49,103 @@ This project has not cut a tagged release; entries are grouped under
   edits and summary are the pure half in `frontend/scripts/avm-versions-edits.mjs`
   and are unit-tested beside the script; `index.test.js` now asserts `AVM_VERIFIED_ON`
   is a calendar date no earlier than 2026-09-25 instead of naming the day.
+
+- **`/education/labs`: the browser labs page, with the lab catalogue, Open in
+  Coder deep links, Run it locally, and the estate and Coder status cards
+  (#681).** Phase 3 of #659, carrying the frontend halves of #664 (the
+  "Hybrid Lab right now" card) and #680 (the Coder status card) against the
+  contracts those issues fix. `frontend/src/data/labs/catalogue.js` is pure
+  frozen data — one row per lab with `id`, `title`, `summary`, `tools`,
+  `template`, `params`, `articleSlugs` and `estimatedMinutes`, and a test
+  that every row carries every field and no two share an `id` — starting
+  with the Landing Zone Builder download, a `terraform validate` walkthrough
+  and an Ansible syntax-check walkthrough. Each card links to
+  `https://coder.lab.hybridcloudworks.com/templates/hcw-lab/workspace?mode=auto&param.lab=<id>`
+  through `safeUrl`, and carries the two `docker run` lines from #658,
+  PowerShell then bash, each labelled with its shell. `LabsEstateCard.jsx`
+  reads `GET /api/public/labs/estate` through the new `fetchLabsEstate()`
+  and renders "The lab host is not provisioned yet." for
+  `{ configured: false }` and, when configured, the Arc status word, the
+  heartbeat age in words, agent version, OS, policy counts, job-runner queue
+  and Coder capacity; `CoderStatusCard.jsx` reads `GET
+  /api/public/labs/coder-status` through `fetchCoderStatus()` and says "not
+  yet provisioned" or "unreachable" before it shows templates and capacity.
+  Every state on the page is a word, never a colour alone. Two slot sections
+  hold the layout for the agent section (#676) and the article list (#677).
+  Wired in App.jsx, `STANDALONE_ROUTES`, `staticRoutes.labs`, a new Learn
+  menu in the header (the first header link to `/education` as well) and a
+  section on `/education`, each enforced by a test.
+- **Landing Zone Builder, Phase 2: the page at `/tools/landing-zone` (#668).**
+  Phase 2 of #657, on the pure module #667 landed. `frontend/src/pages/tools/
+  LandingZonePage.jsx` is where a learner assembles an Azure landing zone
+  component by component: a build panel (`landingZone/LzControls.jsx`) with a
+  checkbox per component, grouped platform and application, a count of 0 to 5
+  for corp and online landing zones, and one knob per option (region, parent
+  management group, hub and spoke address spaces, private DNS zones, firewall
+  SKU); a teaches panel (`LzTeaches.jsx`) that follows whichever component was
+  last ticked, clicked in the diagram or asked about, with its hand-written
+  explanation, what it needs, the pinned module that deploys it and its knobs;
+  an inline SVG of the management group tree (`LzDiagram.jsx`) drawn from
+  `layoutDiagram`, every box a button that focuses its component, with zoom
+  and pan from the `react-zoom-pan-pinch` the site already shipped; and the
+  generated Terraform (`LzFiles.jsx`), one tab per emitted file rendered with
+  the site's `CodeBlock`, plus a Download zip button.
+
+  **The build is the URL.** `useLzState.js` is `useScenarioState.js` adapted
+  to `share.js`: every control writes `?lz=` and the option keys and reads
+  itself back, so a bare URL is the full default build, a shared link
+  reproduces a build exactly, and the pre-rendered page and the first client
+  render agree; a test renders the page to a string twice and hydrates the
+  result without a mismatch. The dependency rule is spoken, not just enforced:
+  a component says "Ticking it also adds Connectivity hub" before it is
+  ticked and "Unticking it also removes Azure Firewall" after, and a spoke
+  range the state moved off the hub is explained in a sentence, kept on the
+  page even once the URL carries only the moved value. An invalid range is
+  refused in the validator's own words and never reaches the URL.
+
+  **The zip holds exactly the files the tabs show.** `fflate` is the one new
+  dependency, imported inside the click handler so it is a lazy chunk a
+  reader who never downloads never fetches and the pre-render never
+  evaluates; the test mocks it and asserts the entry names equal the tab
+  names and each entry's bytes equal the file's content. Wiring, each held by
+  an existing test or the new one: the `lazyPage` route in `App.jsx`, the
+  standalone list in `scripts/prerender-entry.jsx`, `staticRoutes.landingZone`,
+  a Tools menu entry in `Header.jsx`, and a first card on `/terraform/tools`
+  that opens the page. The Azure education page has no tools list, so it got
+  no cross-link. The three placeholder tool slots are untouched. Helmet sets
+  the title and the canonical; the default build renders the management
+  groups' teaches text and a dozen file tabs, well past the prerender's
+  420-character floor.
+
+- **The explain route is generalised by kind, and the Landing Zone Builder
+  gets its "Explain this component" backend (#669).** Phase 3 of #657,
+  backend half. `POST public/cloud-tools/explain` reads an optional `kind`
+  from the body: omitted or `pricing` is the #613 contract byte for byte
+  (same validator, same canonical hash, same `pricingExplain` toggle, same
+  stored document — the existing tests are unchanged and the existing cached
+  texts keep serving); `landing-zone` dispatches to
+  `functions/src/lib/cloud-tools/explain/kinds/landingZone.js`, whose
+  validator accepts `{ kind, componentId, selected (<= 12), options, teaches
+  (<= 1200) }` against frozen copies of the catalogue's eight component ids
+  and eight option knobs, every string capped, unknown keys refused, and
+  whose prompt asks for two paragraphs — why this component matters for
+  exactly this selection and options, then what changes if it is deselected
+  — grounded in the page's own `teaches` text and the four Azure Verified
+  Module sources embedded per component, with no tenant and no prices. The
+  cache, the 8 KB cap, the 5 per hour per client and the 200 per day are the
+  same code and the same counters for both kinds: one anonymous AI budget.
+  The landing-zone canonical text starts with `kind`, so its cache ids
+  cannot collide with pricing's. `AI_FEATURES.landingZoneExplain` is the
+  kind's own off switch, with its call site in the kind module so
+  `ai-call-sites.test.js` can see the literal. The kind shape (`id`,
+  `feature`, `validate`, `canonical`, `cacheFields`, `generate`) is
+  documented on `kinds/pricing.js`; `.azure/api-surface.json` spells out the
+  `landing-zone` body for the frontend phase (#670). Tests: kind dispatch,
+  the unchanged default, an explicit `kind: "pricing"` hashing the same as
+  none, unknown kind 400, the landing-zone validator's refusals, quota and
+  daily pause shared across kinds, the toggle off for one kind while the
+  other serves, and the prompt naming the component and every selected id.
+
 - **The lab host is configured by Ansible, not by hand over SSH (#662).**
   Phase 2 of #656. `lab-host/ansible/` holds `site.yml` and five roles that
   replace the manual steps the admin Labs page's Setup tab has printed since
