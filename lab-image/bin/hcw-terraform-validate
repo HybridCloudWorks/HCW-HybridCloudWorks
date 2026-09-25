@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+"""
+The fixed command behind the `terraform-validate` capability
+(vps-agent/lib/capabilities.js; ADR 0032 decision 5; #675).
+
+Runs inside the runner image with the job's payload mounted read-only at
+/workspace and a writable tmpfs at /tmp/run. It copies the payload root to
+/tmp/run/src, rewrites every `module` block whose `source` names an Azure
+Verified Module that this image vendors under /opt/avm to the vendored copy,
+then runs `terraform init -backend=false` and `terraform validate` there.
+
+The rewrite is the whole reason this is a script and not a one-liner:
+
+  - The learner's files are never changed. The builder's zip and the
+    submitted payload keep `source = "Azure/<module>/azurerm"` and a
+    `version` constraint, so they init anywhere with network; only this
+    tmpfs copy is rewritten (ADR 0032, decision 5).
+  - A block is rewritten only when a vendored version SATISFIES its
+    constraint, evaluated with Terraform's own operators (`=`, `!=`, `>`,
+    `>=`, `<`, `<=`, `~>`, comma-separated). The highest satisfying vendored
+    version wins, as the registry would choose. Anything else is left exactly
+    as written, so `init` fails loudly with "registry.terraform.io ... no
+    such host" under --network none rather than validating against a module
+    the learner did not ask for.
+  - The new source is a RELATIVE path (`../../opt/avm/<name>@<version>` from
+    /tmp/run/src): Terraform uses `./` and `../` paths in place, while an
+    absolute path is a `file://` source it copies onto the tmpfs first.
+
+The constraint logic is lib/tf_constraints.py and the HCL rewrite is
+lib/tf_rewrite.py, both at /usr/local/lib/hcw in the image (HCW_LIB
+overrides that for a harness). Output is what the agent returns to the job:
+each rewrite, each registry module left alone and why, then Terraform's own
+output.
+"""
+
+import os
+import shutil
+import subprocess
+import sys
+
+sys.path.insert(0, os.environ.get("HCW_LIB", "/usr/local/lib/hcw"))
+
+from tf_constraints import vendored_modules  # noqa: E402
+from tf_rewrite import rewrite_tree  # noqa: E402
+
+WORKSPACE = os.environ.get("HCW_WORKSPACE", "/workspace")
+RUN_DIR = os.environ.get("HCW_RUN_DIR", "/tmp/run/src")
+
+
+def run_terraform(args, env):
+    return subprocess.run(
+        ["terraform", *args, "-no-color"],
+        cwd=RUN_DIR,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
+
+def print_report(report):
+    print(f"== module sources ({len(report)} registry module block(s) in the payload)")
+    for line in report:
+        print("  " + line)
+    if not report:
+        print("  none; nothing rewritten")
+
+
+def main():
+    if not os.path.isdir(WORKSPACE):
+        print(f"hcw-terraform-validate: {WORKSPACE} is not a directory", file=sys.stderr)
+        return 2
+    shutil.rmtree(RUN_DIR, ignore_errors=True)
+    shutil.copytree(
+        WORKSPACE,
+        RUN_DIR,
+        symlinks=False,
+        ignore=shutil.ignore_patterns(".terraform", ".terraform.lock.hcl", ".git"),
+    )
+    print_report(rewrite_tree(RUN_DIR, vendored_modules()))
+
+    env = dict(os.environ, TF_DATA_DIR=os.path.join(RUN_DIR, ".terraform"))
+    print("\n== terraform init -backend=false")
+    sys.stdout.flush()
+    init = run_terraform(["init", "-backend=false", "-input=false"], env)
+    if init.returncode != 0:
+        print(init.stdout)
+        return init.returncode
+    for line in init.stdout.splitlines():
+        if line.startswith("- ") or "has been successfully initialized" in line:
+            print(line)
+
+    print("\n== terraform validate")
+    sys.stdout.flush()
+    validate = run_terraform(["validate"], env)
+    print(validate.stdout, end="")
+    return validate.returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main())

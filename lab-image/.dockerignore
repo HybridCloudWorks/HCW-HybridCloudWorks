@@ -1,0 +1,8 @@
+# Keep the build context to what the Dockerfile reads. A local run of the
+# harness against lib/ leaves a __pycache__ that COPY lib/ would otherwise
+# ship (measured in #675); the runner stage asserts nothing but .py landed.
+**/__pycache__
+**/*.pyc
+.dockerignore
+README.md
+sandbox-check.mjs

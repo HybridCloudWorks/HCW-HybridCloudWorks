@@ -9,11 +9,16 @@
 # It checks the conditions the image is built for before it checks the tools:
 # that there is no network (an init that passed with network proves nothing
 # about the mirror), that /workspace is read-only, and that it runs as uid
-# 65534. Then each tool's version is compared with versions.env, and
-# `terraform init -backend=false` runs against two roots: smoke/providers-only
-# (azurerm and random) and the vendored avm-ptn-alz-management module, the one
-# vendored module whose init needs nothing outside the mirror. Every check
-# runs even after one fails, and the exit code is non-zero if any did.
+# 65534. Then each tool's version is compared with versions.env, the provider
+# mirror is checked for every pinned provider in the unpacked layout, every
+# vendored child module is re-hashed against its pin, and `terraform init
+# -backend=false` plus `terraform validate` run with no network against four
+# roots: smoke/providers-only (azurerm and random) and one generated root per
+# vendored AVM pattern module, calling it by relative path with its required
+# inputs. Each init must symlink its providers to the mirror and download no
+# module: the job sandbox is a read-only root with a 64 MB tmpfs, so a copy
+# of either would fail there (#675). Every check runs even after one fails,
+# and the exit code is non-zero if any did.
 set -euo pipefail
 
 target="${1:-runner}"
@@ -30,6 +35,7 @@ fail=0
 ok()   { printf 'ok:   %s\n' "$*"; }
 bad()  { printf 'FAIL: %s\n' "$*"; fail=1; }
 step() { printf '\n== %s\n' "$*"; }
+indent() { sed 's/^/      /'; }
 
 # expect_version <label> <needle> <command...>: the command's output must
 # contain the version versions.env names, so a binary that ran but is the
@@ -41,10 +47,10 @@ expect_version() {
     if grep -qF -- "$needle" <<<"$out"; then
       ok "$label $(head -n1 <<<"$out")"
     else
-      bad "$label ran but did not report $needle:"; printf '%s\n' "$out" | sed 's/^/      /'
+      bad "$label ran but did not report $needle:"; printf '%s\n' "$out" | indent
     fi
   else
-    bad "$label failed to run:"; printf '%s\n' "$out" | sed 's/^/      /'
+    bad "$label failed to run:"; printf '%s\n' "$out" | indent
   fi
 }
 
@@ -72,7 +78,7 @@ expect_version kubeconform "v${KUBECONFORM_VERSION}"         kubeconform -v
 expect_version helm        "Version:\"v${HELM_VERSION}\""     helm version
 expect_version ansible     "core ${ANSIBLE_CORE_VERSION}"     ansible --version
 
-step "provider mirror"
+step "provider mirror (unpacked layout)"
 mirror=/opt/terraform/mirror/registry.terraform.io
 for entry in \
   "hashicorp/azurerm ${PROVIDER_AZURERM_VERSION}" \
@@ -83,37 +89,60 @@ for entry in \
   "azure/modtm ${PROVIDER_MODTM_VERSION}" \
   "hashicorp/time ${PROVIDER_TIME_VERSION}"; do
   provider="${entry% *}"; version="${entry#* }"
-  zip="$mirror/$provider/terraform-provider-${provider#*/}_${version}_linux_amd64.zip"
-  if [ -f "$zip" ] && [ -f "$mirror/$provider/${version}.json" ]; then
+  dir="$mirror/$provider/$version/linux_amd64"
+  if [ -d "$dir" ] && [ -n "$(find "$dir" -maxdepth 1 -type f -name "terraform-provider-${provider#*/}_v${version}*" -perm -u+x | head -n1)" ]; then
     ok "$provider $version"
   else
-    bad "$provider $version is missing from the mirror"
+    bad "$provider $version is missing from the mirror at $dir"
   fi
 done
+zips="$(find /opt/terraform/mirror -name '*.zip' | wc -l)"
+if [ "$zips" -eq 0 ]; then ok "no packed archives left in the mirror"; else bad "$zips zip(s) still in the mirror; init would extract them onto the tmpfs"; fi
 
-# init_offline <label> <source dir>: copy the root to a writable place (init
-# writes .terraform.lock.hcl beside the configuration, which a read-only
-# /workspace refuses), give it its own data dir, init without a backend.
-init_offline() {
-  local label="$1" src="$2" work
-  work="/tmp/run/smoke/$label"
-  rm -rf "$work" && mkdir -p "$work" && cp -R "$src/." "$work/"
-  local out
-  if out="$(cd "$work" && TF_DATA_DIR="$work/.terraform" terraform init -backend=false -input=false -no-color 2>&1)"; then
+# init_validate <label> <root dir>: init without a backend, then validate,
+# both with the root's own data dir. A passing init must have symlinked every
+# provider to the mirror (no copy) and downloaded no module (every source
+# resolved to a directory that already exists).
+init_validate() {
+  local label="$1" root="$2" out data
+  data="$root/.terraform"
+  if out="$(cd "$root" && TF_DATA_DIR="$data" terraform init -backend=false -input=false -no-color 2>&1)"; then
     ok "terraform init -backend=false ($label)"
-    grep -E '^- (Installing|Using) ' <<<"$out" | sed 's/^/      /' || true
+    grep -E '^- (Installing|Using) ' <<<"$out" | indent || true
   else
-    bad "terraform init -backend=false ($label):"; printf '%s\n' "$out" | sed 's/^/      /'
+    bad "terraform init -backend=false ($label):"; printf '%s\n' "$out" | indent
+    return
+  fi
+  # .terraform/providers/registry.terraform.io/<ns>/<name>/<version>/linux_amd64
+  # is the symlink; a real directory at that depth is an extracted copy.
+  local copied linked
+  copied="$( (find "$data/providers" -mindepth 5 -maxdepth 5 -type d 2>/dev/null || true) | wc -l)"
+  linked="$( (find "$data/providers" -mindepth 5 -maxdepth 5 -type l 2>/dev/null || true) | wc -l)"
+  if [ "$copied" -eq 0 ] && [ "$linked" -gt 0 ]; then
+    ok "every provider is a symlink to the mirror ($label, $linked linked)"
+  else
+    bad "$copied provider director(y/ies) copied instead of symlinked, $linked linked ($label):"
+    (find "$data/providers" -mindepth 5 -maxdepth 5 2>/dev/null || true) | indent
+  fi
+  local downloaded
+  downloaded="$( (find "$data/modules" -mindepth 1 -maxdepth 1 -type d 2>/dev/null || true) | wc -l)"
+  if [ "$downloaded" -eq 0 ]; then
+    ok "no module was downloaded or copied ($label)"
+  else
+    bad "$downloaded module director(y/ies) under .terraform/modules ($label):"
+    (find "$data/modules" -mindepth 1 -maxdepth 1 -type d 2>/dev/null || true) | indent
+  fi
+  if out="$(cd "$root" && TF_DATA_DIR="$data" terraform validate -no-color 2>&1)"; then
+    ok "terraform validate ($label)"
+  else
+    bad "terraform validate ($label):"; printf '%s\n' "$out" | indent
   fi
 }
 
-step "terraform init with no network"
-init_offline providers-only "$here/smoke/providers-only"
-if out="$(cd /tmp/run/smoke/providers-only && TF_DATA_DIR=/tmp/run/smoke/providers-only/.terraform terraform validate -no-color 2>&1)"; then
-  ok "terraform validate (providers-only)"
-else
-  bad "terraform validate (providers-only):"; printf '%s\n' "$out" | sed 's/^/      /'
-fi
+step "terraform init and validate with no network"
+work=/tmp/run/smoke
+rm -rf "$work" && mkdir -p "$work/providers-only" && cp -R "$here/smoke/providers-only/." "$work/providers-only/"
+init_validate providers-only "$work/providers-only"
 
 step "vendored AVM modules"
 for entry in \
@@ -127,10 +156,87 @@ for entry in \
     bad "/opt/avm/${name}@${version}/main.tf is missing"
   fi
 done
-# The management module is the only one of the three with no registry module
-# of its own (README, "What works offline"), so it is the one whose offline
-# init the image can promise.
-init_offline avm-ptn-alz-management "/opt/avm/avm-ptn-alz-management@${AVM_PTN_ALZ_MANAGEMENT_VERSION}"
+
+# Every child vendor-avm.sh pinned is present and still hashes to its pin
+# (the same coreutils pipeline versions.env documents), and nothing in
+# /opt/avm still names a registry module in a file Terraform would load.
+children=0
+while read -r child pin; do
+  [ -n "$child" ] || continue
+  children=$((children + 1))
+  dir="/opt/avm/$child"
+  if [ ! -d "$dir" ]; then
+    bad "pinned child $child is not vendored"
+    continue
+  fi
+  actual="$(cd "$dir" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)"
+  if [ "$actual" = "$pin" ]; then ok "$child matches its pin"; else bad "$child hashes $actual, versions.env pins $pin"; fi
+done < <(printf '%s\n' "$AVM_CHILD_MODULES" | sed '/^[[:space:]]*$/d')
+if [ "$children" -gt 0 ]; then ok "$children vendored child modules pinned"; else bad "AVM_CHILD_MODULES is empty"; fi
+# One generated root per pattern module, calling it by a RELATIVE path (an
+# absolute path is a file:// source Terraform copies onto the tmpfs) with the
+# inputs it requires and nothing else. "no module was downloaded" on each is
+# the proof that no registry source survived the rewrite: a grep for
+# `source = "Azure/..."` would also match the worked example in avm-ptn-alz's
+# variables.tf, which Terraform never loads as a module block.
+avm_root() {
+  local label="$1" name="$2" version="$3"; shift 3
+  local root="$work/$label" rel
+  mkdir -p "$root"
+  rel="$(python3 -c 'import os,sys; print(os.path.relpath(sys.argv[1], sys.argv[2]))' "/opt/avm/${name}@${version}" "$root")"
+  {
+    printf 'module "m" {\n  source = "%s"\n' "$rel"
+    printf '  %s\n' "$@"
+    printf '}\n'
+  } > "$root/main.tf"
+  init_validate "$label" "$root"
+}
+avm_root avm-ptn-alz avm-ptn-alz "${AVM_PTN_ALZ_VERSION}" \
+  'architecture_name  = "alz"' \
+  'location           = "centralus"' \
+  'parent_resource_id = "root"'
+avm_root avm-ptn-alz-management avm-ptn-alz-management "${AVM_PTN_ALZ_MANAGEMENT_VERSION}" \
+  'location                = "centralus"' \
+  'resource_group_name     = "rg-alz-management"' \
+  'automation_account_name = "aa-alz-management"'
+avm_root avm-ptn-alz-connectivity-hub-and-spoke-vnet avm-ptn-alz-connectivity-hub-and-spoke-vnet "${AVM_PTN_ALZ_CONNECTIVITY_HUB_AND_SPOKE_VNET_VERSION}"
+
+# The three capability commands (bin/), each against the payload it would
+# receive from the agent, with HCW_WORKSPACE pointing at the fixture instead
+# of /workspace (which is this directory) and HCW_RUN_DIR under /tmp/run.
+step "capability commands with no network"
+tfv="$work/terraform-validate"
+if out="$(HCW_WORKSPACE="$here/smoke/terraform-validate-payload" HCW_RUN_DIR="$tfv" hcw-terraform-validate 2>&1)"; then
+  if grep -q 'Success! The configuration is valid.' <<<"$out" && [ "$(grep -c '^  rewrote ' <<<"$out")" -eq 3 ]; then
+    ok "hcw-terraform-validate rewrote 3 registry sources and validated the builder-shaped payload"
+    grep '^  rewrote ' <<<"$out" | indent
+  else
+    bad "hcw-terraform-validate exited 0 but did not report 3 rewrites and a valid configuration:"; printf '%s\n' "$out" | indent
+  fi
+else
+  bad "hcw-terraform-validate (builder-shaped payload):"; printf '%s\n' "$out" | indent
+fi
+if out="$(HCW_WORKSPACE="$here/smoke/helm-payload" hcw-helm-template 2>&1)"; then
+  if grep -q '^kind: Deployment' <<<"$out" && grep -q 'name: hcw-hcw-smoke' <<<"$out"; then
+    ok "hcw-helm-template rendered smoke/helm-payload/hcw-smoke"
+  else
+    bad "hcw-helm-template exited 0 without the expected Deployment:"; printf '%s\n' "$out" | indent
+  fi
+else
+  bad "hcw-helm-template:"; printf '%s\n' "$out" | indent
+fi
+if out="$(HCW_WORKSPACE="$here/smoke/kubeconform-payload/valid" hcw-kubeconform 2>&1)"; then
+  if grep -q 'Valid: 2, Invalid: 0, Errors: 0' <<<"$out"; then ok "hcw-kubeconform accepts the valid manifests"; else bad "hcw-kubeconform summary unexpected:"; printf '%s\n' "$out" | indent; fi
+else
+  bad "hcw-kubeconform (valid):"; printf '%s\n' "$out" | indent
+fi
+if out="$(HCW_WORKSPACE="$here/smoke/kubeconform-payload/invalid" hcw-kubeconform 2>&1)"; then
+  bad "hcw-kubeconform accepted an invalid manifest:"; printf '%s\n' "$out" | indent
+else
+  if grep -q "'replicaz' not allowed" <<<"$out"; then ok "hcw-kubeconform rejects the unknown field under -strict"; else bad "hcw-kubeconform failed for another reason:"; printf '%s\n' "$out" | indent; fi
+fi
+schemas="$(find /opt/kubeconform/schemas -mindepth 1 -maxdepth 1 -type d -name "${KUBERNETES_JSON_SCHEMA_DIR}" | wc -l)"
+if [ "$schemas" -eq 1 ]; then ok "/opt/kubeconform/schemas/${KUBERNETES_JSON_SCHEMA_DIR}"; else bad "/opt/kubeconform/schemas/${KUBERNETES_JSON_SCHEMA_DIR} is missing"; fi
 
 if [ "$target" = full ]; then
   step "full tools"
@@ -146,6 +252,24 @@ if [ "$target" = full ]; then
       bad "code-server prerequisite $pkg is not installed"
     fi
   done
+  # Coder runs the startup script, code-server and the terminal through the
+  # user's passwd shell (#693); uid 65534 must therefore have one, and a home
+  # it can write to. The runner target keeps nologin and is not checked here.
+  entry="$(getent passwd 65534 || true)"
+  case "$entry" in
+    *:/bin/bash) ok "uid 65534 has /bin/bash as its shell ($entry)" ;;
+    *) bad "uid 65534's passwd shell is not /bin/bash: ${entry:-no entry}" ;;
+  esac
+  case "$entry" in
+    *:/tmp/home:*) ok "uid 65534's home is /tmp/home" ;;
+    *) bad "uid 65534's home is not /tmp/home: ${entry:-no entry}" ;;
+  esac
+  if [ "$HOME" = /tmp/home ] && (: > /tmp/home/.smoke-write-probe) 2>/dev/null; then
+    rm -f /tmp/home/.smoke-write-probe
+    ok "HOME=/tmp/home exists and is writable"
+  else
+    bad "HOME is '$HOME' or /tmp/home is not writable"
+  fi
 fi
 
 printf '\n'

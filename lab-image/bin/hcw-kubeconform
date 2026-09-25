@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# The fixed command behind the `kubeconform` capability
+# (vps-agent/lib/capabilities.js, #675). Validates Kubernetes manifests
+# against the JSON schemas bundled in the image, with no network and no API
+# server: `kubectl --dry-run` in either mode reaches a cluster, which is why
+# it is not a capability (issue #675).
+#
+# The schemas are one release of yannh/kubernetes-json-schema, the same
+# repository kubeconform reads from GitHub by default, mirrored at
+# /opt/kubeconform/schemas/<version>-standalone-strict with the directory
+# name kubeconform's own template expects; the Kubernetes version is read
+# from that name so the pin lives in versions.env alone. `-strict` rejects
+# fields the schema does not know, which is the check a learner's manifest
+# needs most, and a kind with no schema (a CRD) is an error rather than a
+# skip, so the output says what was not checked.
+#
+# Arguments are the paths to validate; the default is the whole payload
+# mount, which kubeconform walks for .yaml, .yml and .json files.
+set -euo pipefail
+
+schemas="${HCW_KUBECONFORM_SCHEMAS:-/opt/kubeconform/schemas}"
+workspace="${HCW_WORKSPACE:-/workspace}"
+
+mapfile -t dirs < <(find "$schemas" -mindepth 1 -maxdepth 1 -type d -name 'v*-standalone-strict' | LC_ALL=C sort)
+if [ "${#dirs[@]}" -ne 1 ]; then
+  echo "hcw-kubeconform: expected exactly one v<version>-standalone-strict directory under $schemas, found ${#dirs[@]}" >&2
+  exit 2
+fi
+name="$(basename "${dirs[0]}")"
+version="${name#v}"
+version="${version%-standalone-strict}"
+
+if [ "$#" -eq 0 ]; then
+  set -- "$workspace"
+fi
+
+echo "== kubeconform -strict -kubernetes-version $version (schemas bundled, no network)"
+exec kubeconform \
+  -strict \
+  -summary \
+  -kubernetes-version "$version" \
+  -schema-location "$schemas/{{ .NormalizedKubernetesVersion }}-standalone{{ .StrictSuffix }}/{{ .ResourceKind }}{{ .KindSuffix }}.json" \
+  "$@"

@@ -1,0 +1,4 @@
+replicaCount: 1
+image:
+  repository: ghcr.io/hybridcloudworks/hcw-lab
+  tag: latest

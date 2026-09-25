@@ -28,11 +28,31 @@
 FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 AS fetch
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl unzip \
+ && apt-get install -y --no-install-recommends ca-certificates curl unzip git \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
 COPY versions.env /build/versions.env
+
+# Kubernetes JSON schemas for kubeconform (#675): one directory of
+# yannh/kubernetes-json-schema at a pinned commit, fetched as a sparse,
+# blobless checkout (the repository holds every Kubernetes release and is
+# far too large to take whole), then hashed with the same pipeline
+# versions.env documents for the vendored modules and compared with the pin.
+RUN set -eu; . /build/versions.env; \
+    mkdir -p /build/schemas /out/kubeconform/schemas; \
+    cd /build/schemas; \
+    git init -q; \
+    git remote add origin https://github.com/yannh/kubernetes-json-schema.git; \
+    git config core.sparseCheckout true; \
+    git sparse-checkout set --no-cone "/${KUBERNETES_JSON_SCHEMA_DIR}/"; \
+    git fetch -q --depth 1 --filter=blob:none origin "${KUBERNETES_JSON_SCHEMA_COMMIT}"; \
+    git checkout -q FETCH_HEAD; \
+    actual="$(cd "${KUBERNETES_JSON_SCHEMA_DIR}" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)"; \
+    echo "kubernetes-json-schema ${KUBERNETES_JSON_SCHEMA_DIR}: ${actual}"; \
+    test "${actual}" = "${KUBERNETES_JSON_SCHEMA_SHA256}"; \
+    mv "${KUBERNETES_JSON_SCHEMA_DIR}" "/out/kubeconform/schemas/${KUBERNETES_JSON_SCHEMA_DIR}"; \
+    cd /build && rm -rf /build/schemas
 
 # Tool binaries. `sha256sum -c` exits non-zero on a mismatch, and `set -e`
 # turns that into a failed build rather than an unverified binary.
@@ -80,11 +100,51 @@ RUN set -eu; . /build/versions.env; \
     vendor avm-ptn-alz-connectivity-hub-and-spoke-vnet "${AVM_PTN_ALZ_CONNECTIVITY_HUB_AND_SPOKE_VNET_VERSION}" "${AVM_PTN_ALZ_CONNECTIVITY_HUB_AND_SPOKE_VNET_SHA256}"
 
 # ---------------------------------------------------------------------------
+# vendor: the pattern modules' registry children, vendored beside them and
+# their `source` lines rewritten to relative local paths, so all three
+# pattern modules init with no network (#675). vendor-avm.sh explains the
+# mechanism; the short version is that Terraform has no module mirror, so the
+# only way a module that calls registry modules inits offline is for the
+# vendored copy to call local copies instead. Every child is pinned by tree
+# hash in versions.env (AVM_CHILD_MODULES) and the script fails the build on
+# a mismatch, an unpinned child or an unused pin. git is what Terraform uses
+# to fetch registry modules; python3 does the JSON and the rewrite. Neither
+# ships: the runner copies /out/avm out of this stage and nothing else.
+#
+# AVM_PRINT_PINS=1 prints the pins instead of checking them, for a bump:
+#   docker build --target vendor --build-arg AVM_PRINT_PINS=1 --progress=plain lab-image
+# ---------------------------------------------------------------------------
+FROM fetch AS vendor
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git python3 \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY vendor-avm.sh /build/vendor-avm.sh
+ARG AVM_PRINT_PINS=
+RUN set -eu; . /build/versions.env; \
+    export AVM_CHILD_MODULES; \
+    AVM_PRINT_PINS="${AVM_PRINT_PINS}" AVM_ROOT=/out/avm TERRAFORM=/out/bin/terraform SCRATCH=/build/get \
+      bash /build/vendor-avm.sh
+
+# ---------------------------------------------------------------------------
 # mirror: build the provider filesystem mirror with the terraform binary
-# verified above. `terraform providers mirror` writes the registry's own
-# layout (registry.terraform.io/<namespace>/<name>/<version>.json plus the
-# zip), and the zips are then checked against the sums in versions.env, so
-# the mirror is pinned by content and not only by version.
+# verified above. `terraform providers mirror` writes the packed layout
+# (registry.terraform.io/<namespace>/<name>/<version>.json plus the zip); the
+# zips are checked against the sums in versions.env, so the mirror is pinned
+# by content and not only by version, and are then UNPACKED into the
+# directory layout (<namespace>/<name>/<version>/linux_amd64/<binary>) and
+# deleted.
+#
+# Unpacked, because of how `terraform init` consumes each layout (#675).
+# From a packed mirror it extracts the provider into .terraform/providers,
+# a 225 MB copy of azurerm per job; from an unpacked mirror it symlinks
+# .terraform/providers/<...>/linux_amd64 to the mirror directory and copies
+# nothing (measured: a 40 KB .terraform). The job sandbox is a read-only root
+# with a 64 MB tmpfs, so the packed layout could not init any azurerm
+# configuration there at all. The cost is on-disk size, not pull size: the
+# binaries are 931 MB unpacked against 191 MB zipped, but the image layer is
+# compressed in transit either way.
 #
 # Two mirror roots because a required_providers block holds one constraint
 # per provider and azurerm is mirrored at both 4.x and 5.x; the second run
@@ -122,7 +182,21 @@ RUN set -eu; . /build/versions.env; \
     check "azure/alz/terraform-provider-alz_${PROVIDER_ALZ_VERSION}_linux_amd64.zip" "${PROVIDER_ALZ_SHA256}"; \
     check "hashicorp/random/terraform-provider-random_${PROVIDER_RANDOM_VERSION}_linux_amd64.zip" "${PROVIDER_RANDOM_SHA256}"; \
     check "azure/modtm/terraform-provider-modtm_${PROVIDER_MODTM_VERSION}_linux_amd64.zip" "${PROVIDER_MODTM_SHA256}"; \
-    check "hashicorp/time/terraform-provider-time_${PROVIDER_TIME_VERSION}_linux_amd64.zip" "${PROVIDER_TIME_SHA256}"
+    check "hashicorp/time/terraform-provider-time_${PROVIDER_TIME_VERSION}_linux_amd64.zip" "${PROVIDER_TIME_SHA256}"; \
+    unpack() { \
+      zip="/out/mirror/registry.terraform.io/$1/terraform-provider-${1#*/}_${2}_linux_amd64.zip"; \
+      dir="/out/mirror/registry.terraform.io/$1/$2/linux_amd64"; \
+      mkdir -p "$dir"; unzip -q "$zip" -d "$dir"; chmod 0755 "$dir"/*; rm -f "$zip"; \
+    }; \
+    unpack hashicorp/azurerm "${PROVIDER_AZURERM_VERSION}"; \
+    unpack hashicorp/azurerm "${PROVIDER_AZURERM_V4_VERSION}"; \
+    unpack azure/azapi "${PROVIDER_AZAPI_VERSION}"; \
+    unpack azure/alz "${PROVIDER_ALZ_VERSION}"; \
+    unpack hashicorp/random "${PROVIDER_RANDOM_VERSION}"; \
+    unpack azure/modtm "${PROVIDER_MODTM_VERSION}"; \
+    unpack hashicorp/time "${PROVIDER_TIME_VERSION}"; \
+    find /out/mirror -name '*.json' -delete; \
+    test "$(find /out/mirror -name '*.zip' | wc -l)" -eq 0
 
 # ---------------------------------------------------------------------------
 # runner
@@ -146,7 +220,21 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=fetch /out/bin/ /usr/local/bin/
-COPY --from=fetch /out/avm/ /opt/avm/
+# The fixed commands behind the vps-agent capabilities that run in this image
+# (hcw-terraform-validate, hcw-helm-template, hcw-kubeconform): each is one
+# argv entry in vps-agent/lib/capabilities.js, and what it does lives here,
+# where smoke.sh exercises it against a payload with no network.
+COPY --chmod=0755 bin/ /usr/local/bin/
+# hcw-terraform-validate's constraint and rewrite modules (lib/); the script
+# puts this directory on sys.path itself, so no PYTHONPATH is set image-wide.
+# Modes set explicitly and separately: COPY --chmod applies one mode to the
+# directory as well as the files, and 0644 on the directory made it
+# untraversable for uid 65534 (measured in #675: ModuleNotFoundError).
+COPY lib/ /usr/local/lib/hcw/
+RUN chmod 0755 /usr/local/lib/hcw && chmod 0644 /usr/local/lib/hcw/*.py \
+ && test "$(ls -A /usr/local/lib/hcw | grep -vc '\.py$')" -eq 0
+COPY --from=vendor /out/avm/ /opt/avm/
+COPY --from=fetch /out/kubeconform/ /opt/kubeconform/
 COPY --from=mirror /out/mirror/ /opt/terraform/mirror/
 COPY --from=fetch /out/wheels/ /tmp/wheels/
 
@@ -181,10 +269,20 @@ RUN mkdir -p /etc/terraform /workspace /tmp/home /tmp/run \
 # duplicate the mirror). CHECKPOINT_DISABLE stops Terraform's version check
 # call, which is the one network request `terraform init` would otherwise
 # still make.
+#
+# TMPDIR=/tmp/run, because in the job sandbox /tmp/run is the ONLY writable
+# path (vps-agent mounts a tmpfs there on a read-only root). A Terraform
+# provider is a go-plugin subprocess that listens on a Unix socket in TMPDIR
+# before it says anything on stdout; with TMPDIR on the read-only root every
+# provider died silently and `terraform validate` reported "Failed to read
+# any lines from plugin's stdout" for all six (measured in #675, after init
+# had succeeded). Outside the sandbox /tmp/run exists in the image, so the
+# setting is harmless there.
 ENV TF_CLI_CONFIG_FILE=/etc/terraform/terraformrc \
     TF_DATA_DIR=/tmp/run/.terraform \
     TF_IN_AUTOMATION=1 \
     CHECKPOINT_DISABLE=1 \
+    TMPDIR=/tmp/run \
     HOME=/tmp/home \
     ANSIBLE_LOCAL_TEMP=/tmp/run/ansible \
     HELM_CACHE_HOME=/tmp/run/helm/cache \
@@ -224,6 +322,17 @@ RUN set -eu; . /tmp/versions.env; \
     echo "${KUBECTL_SHA256}  /usr/local/bin/kubectl" | sha256sum -c -; \
     chmod 0755 /usr/local/bin/kubectl; \
     rm -rf /var/lib/apt/lists/* /tmp/versions.env
+
+# uid 65534 is Debian's `nobody`, whose passwd entry has /usr/sbin/nologin
+# and a home of /nonexistent. That is right for the runner, where nothing
+# ever opens a shell, and wrong for this target: Coder's agent runs the
+# workspace startup script, code-server and the terminal through the user's
+# passwd shell, so on the first published image all three failed (#693).
+# The shell becomes bash and the home the /tmp/home the runner stage already
+# creates for uid 65534 and that HOME already points at. The runner target
+# is untouched: it keeps nologin.
+RUN usermod -s /bin/bash -d /tmp/home nobody \
+ && test "$(getent passwd 65534 | cut -d: -f6,7)" = "/tmp/home:/bin/bash"
 
 USER 65534:65534
 WORKDIR /workspace

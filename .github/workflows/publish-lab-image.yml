@@ -8,7 +8,12 @@
 #
 #   build    every trigger. Builds both targets, loads them into the runner's
 #            Docker, runs lab-image/smoke.sh in each under --network none with
-#            the source mounted read-only. `contents: read` and nothing else,
+#            the source mounted read-only, then lab-image/sandbox-check.mjs,
+#            which runs the runner-image capabilities through the agent's own
+#            docker-runner.js under the full job sandbox (#675). That is why
+#            the two agent files it imports are in the path filter: a change
+#            to the sandbox flags is a change to what this image must pass.
+#            `contents: read` and nothing else,
 #            because a same-repository pull request can edit this file and run
 #            any shell step here; with only a read token that edit can prove
 #            nothing and publish nothing. This is the check a pull request
@@ -47,11 +52,15 @@ on:
   pull_request:
     paths:
       - 'lab-image/**'
+      - 'vps-agent/lib/docker-runner.js'
+      - 'vps-agent/lib/capabilities.js'
       - '.github/workflows/publish-lab-image.yml'
   push:
     branches: [main]
     paths:
       - 'lab-image/**'
+      - 'vps-agent/lib/docker-runner.js'
+      - 'vps-agent/lib/capabilities.js'
       - '.github/workflows/publish-lab-image.yml'
 
 permissions:
@@ -130,6 +139,15 @@ jobs:
       - name: Smoke full
         run: docker run --rm --network none -v "${GITHUB_WORKSPACE}/lab-image:/workspace:ro" hcw-lab:ci bash /workspace/smoke.sh full
 
+      # The smoke test runs inside a container with a network switch and
+      # nothing else. This runs each runner-image capability through the
+      # agent's own docker-runner.js (read-only root, cap-drop ALL, the 64 MB
+      # tmpfs, uid 65534, the memory limit, a tar payload) against the image
+      # just built, because two of #675's faults were invisible to the smoke
+      # test and fatal there. Node only; docker-runner.js has no dependency.
+      - name: Sandbox check
+        run: node lab-image/sandbox-check.mjs hcw-lab-runner:ci
+
       - name: Image sizes
         run: |
           set -euo pipefail
@@ -201,6 +219,15 @@ jobs:
 
       - name: Smoke full
         run: docker run --rm --network none -v "${GITHUB_WORKSPACE}/lab-image:/workspace:ro" hcw-lab:ci bash /workspace/smoke.sh full
+
+      # The smoke test runs inside a container with a network switch and
+      # nothing else. This runs each runner-image capability through the
+      # agent's own docker-runner.js (read-only root, cap-drop ALL, the 64 MB
+      # tmpfs, uid 65534, the memory limit, a tar payload) against the image
+      # just built, because two of #675's faults were invisible to the smoke
+      # test and fatal there. Node only; docker-runner.js has no dependency.
+      - name: Sandbox check
+        run: node lab-image/sandbox-check.mjs hcw-lab-runner:ci
 
       # `docker push` of the loaded image writes a plain single manifest whose
       # digest is the one `docker pull` reports — the value #675 pins. The

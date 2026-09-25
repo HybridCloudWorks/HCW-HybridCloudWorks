@@ -127,6 +127,9 @@ export function createLabAgentHandlers({ guard, store, now = () => new Date() })
             id: claimed.id,
             type: claimed.type,
             payload: typeof claimed.payload === 'string' ? claimed.payload : '',
+            // Written by enqueueLabJob from its allowlist; a document from
+            // before #675 has none and is a text payload.
+            payloadEncoding: claimed.payloadEncoding === 'tar' ? 'tar' : 'text',
           },
         });
       } catch (err) {

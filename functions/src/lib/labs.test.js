@@ -47,6 +47,56 @@ describe('enqueueLabJob', () => {
     expect(store.upsertDoc).not.toHaveBeenCalled();
   });
 
+  it('accepts only the payload encodings the type declares, and records the one used (#675)', async () => {
+    const store = makeStore();
+    const h = createLabHandlers({ guard: guardAs('editor'), store, ...fixed });
+
+    // shell-echo is text-only; helm-template is tar-only; a tar must be base64.
+    const tarEcho = await h.enqueueLabJob(
+      makeRequest({ type: 'shell-echo', payload: 'AAAA', payloadEncoding: 'tar' }),
+      context
+    );
+    expect(tarEcho.status).toBe(400);
+    expect(JSON.parse(tarEcho.body).error).toContain('payloadEncoding must be one of text');
+
+    const textChart = await h.enqueueLabJob(
+      makeRequest({ type: 'helm-template', payload: 'apiVersion: v2' }),
+      context
+    );
+    expect(textChart.status).toBe(400);
+    expect(JSON.parse(textChart.body).error).toContain('tar');
+
+    const notBase64 = await h.enqueueLabJob(
+      makeRequest({ type: 'helm-template', payload: 'not base64!', payloadEncoding: 'tar' }),
+      context
+    );
+    expect(notBase64.status).toBe(400);
+    expect(JSON.parse(notBase64.body).error).toContain('base64');
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+
+    const chart = await h.enqueueLabJob(
+      makeRequest({ type: 'helm-template', payload: 'AAAA\n', payloadEncoding: 'tar' }),
+      context
+    );
+    expect(chart.status).toBe(200);
+    expect(store.upsertDoc.mock.calls[0][1]).toMatchObject({ type: 'helm-template', payloadEncoding: 'tar' });
+
+    // Omitted means text, which is what every pre-#675 caller sends.
+    const plain = await h.enqueueLabJob(makeRequest({ type: 'kubeconform', payload: 'kind: Pod' }), context);
+    expect(plain.status).toBe(200);
+    expect(store.upsertDoc.mock.calls[1][1]).toMatchObject({ type: 'kubeconform', payloadEncoding: 'text' });
+  });
+
+  it('every job type names its encodings, and the five #675 types are all present', () => {
+    expect(Object.keys(LAB_JOB_TYPES).sort()).toEqual(
+      ['ansible-check', 'helm-template', 'kubeconform', 'shell-echo', 'terraform-validate']
+    );
+    for (const [type, spec] of Object.entries(LAB_JOB_TYPES)) {
+      expect(spec.payloadEncodings.length, type).toBeGreaterThan(0);
+      expect(spec.maxPayloadBytes, type).toBeLessThanOrEqual(64 * 1024);
+    }
+  });
+
   it('queues a valid job with the source doc shape', async () => {
     const store = makeStore();
     const h = createLabHandlers({ guard: guardAs('editor'), store, ...fixed });

@@ -1,0 +1,20 @@
+# A manifest hcw-kubeconform must REJECT: `replicaz` is not a field of
+# apps/v1 Deployment, which -strict turns from a typo into an error. The
+# smoke test expects a non-zero exit and this field named in the output.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smoke-invalid
+spec:
+  replicaz: 1
+  selector:
+    matchLabels:
+      app: smoke
+  template:
+    metadata:
+      labels:
+        app: smoke
+    spec:
+      containers:
+        - name: smoke
+          image: ghcr.io/hybridcloudworks/hcw-lab:latest

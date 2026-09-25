@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# The fixed command behind the `helm-template` capability
+# (vps-agent/lib/capabilities.js, #675). Renders a chart with `helm template`
+# and nothing else: no repository fetch, no cluster, no install.
+#
+# The payload is a tar the agent unpacked read-only at /workspace. A chart
+# archive usually carries its own top-level directory, so Chart.yaml is
+# accepted at /workspace/Chart.yaml or one directory down; exactly one, so a
+# payload holding two charts fails here with a list rather than rendering
+# whichever came first. Chart dependencies must be present under charts/:
+# `helm template` refuses a Chart.yaml that lists dependencies it cannot
+# find, which is the right answer with no network to fetch them.
+#
+# Everything Helm writes (its cache, config and data homes) is under
+# /tmp/run, set by the image's HELM_*_HOME; the root filesystem is read-only
+# in the job sandbox.
+set -euo pipefail
+
+workspace="${HCW_WORKSPACE:-/workspace}"
+release="${HCW_HELM_RELEASE:-hcw}"
+
+mapfile -t charts < <(find "$workspace" -mindepth 1 -maxdepth 2 -name Chart.yaml -type f | LC_ALL=C sort)
+case "${#charts[@]}" in
+  0)
+    echo "hcw-helm-template: no Chart.yaml at $workspace/Chart.yaml or $workspace/*/Chart.yaml" >&2
+    echo "hcw-helm-template: the payload must be a tar of one chart directory" >&2
+    exit 2
+    ;;
+  1) ;;
+  *)
+    echo "hcw-helm-template: the payload holds more than one chart; submit one:" >&2
+    printf '  %s\n' "${charts[@]}" >&2
+    exit 2
+    ;;
+esac
+
+chart="$(dirname "${charts[0]}")"
+echo "== helm template $release $(realpath --relative-to="$workspace" "$chart")"
+exec helm template "$release" "$chart"
