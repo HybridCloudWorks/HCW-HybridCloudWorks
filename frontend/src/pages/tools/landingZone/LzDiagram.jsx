@@ -30,17 +30,28 @@ import {
   SWATCH_CLASS,
 } from './styles';
 
+/** Diagram node id → the catalogue component it stands for, for the fixed ids. */
+const NODE_COMPONENT = Object.freeze({
+  policy: 'policy',
+  'sub:management': 'management',
+  hub: 'connectivity-hub',
+  dns: 'connectivity-hub',
+  firewall: 'firewall',
+  'spoke:identity': 'identity',
+});
+
+/** The same for the ids that carry a suffix: every management group, and numbered spokes. */
+const NODE_PREFIX_COMPONENT = Object.freeze([
+  ['mg:', 'management-groups'],
+  ['spoke:corp', 'corp'],
+  ['spoke:online', 'online'],
+]);
+
 /** The catalogue component a diagram node stands for, or null. */
 export function componentForNode(nodeId) {
-  if (nodeId.startsWith('mg:')) return 'management-groups';
-  if (nodeId === 'policy') return 'policy';
-  if (nodeId === 'sub:management') return 'management';
-  if (nodeId === 'hub' || nodeId === 'dns') return 'connectivity-hub';
-  if (nodeId === 'firewall') return 'firewall';
-  if (nodeId === 'spoke:identity') return 'identity';
-  if (nodeId.startsWith('spoke:corp')) return 'corp';
-  if (nodeId.startsWith('spoke:online')) return 'online';
-  return null;
+  if (NODE_COMPONENT[nodeId]) return NODE_COMPONENT[nodeId];
+  const match = NODE_PREFIX_COMPONENT.find(([prefix]) => nodeId.startsWith(prefix));
+  return match ? match[1] : null;
 }
 
 /** One sentence for the SVG's title: what is in the picture. */
