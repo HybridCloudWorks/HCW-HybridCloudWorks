@@ -46,7 +46,8 @@ a \`terraform plan\` you have read.
   with its tenant, client and subscription set as the workspace’s \`ARM_TENANT_ID\`,
   \`ARM_CLIENT_ID\`, \`ARM_CLIENT_SECRET\` and \`ARM_SUBSCRIPTION_ID\` variables.
 - One subscription per platform role and per application landing zone, whose ids go
-  into \`terraform.tfvars\` (see \`terraform.tfvars.example\`).
+  into \`terraform.tfvars\`. The ids in \`terraform.tfvars.example\` are placeholders, not
+  defaults: every one must be replaced with a real subscription id before any plan.
 - Terraform >= 1.12, < 2.0.
 
 ## How a landing zone is built
@@ -601,7 +602,8 @@ terraform {
 `;
 
 exports[`emitFiles > matches the committed snapshot of the default build > terraform.tfvars.example 1`] = `
-"# Copy to terraform.tfvars and replace every all-zero GUID with a real subscription id.
+"# Copy to terraform.tfvars. The subscription ids below are placeholders, not defaults:
+# every one must be replaced with a real subscription id before any plan.
 location                     = "centralus"
 hub_address_space            = "10.0.0.0/16"
 spoke_address_space          = "10.1.0.0/16"
@@ -769,7 +771,8 @@ a \`terraform plan\` you have read.
   with its tenant, client and subscription set as the workspace’s \`ARM_TENANT_ID\`,
   \`ARM_CLIENT_ID\`, \`ARM_CLIENT_SECRET\` and \`ARM_SUBSCRIPTION_ID\` variables.
 - One subscription per platform role and per application landing zone, whose ids go
-  into \`terraform.tfvars\` (see \`terraform.tfvars.example\`).
+  into \`terraform.tfvars\`. The ids in \`terraform.tfvars.example\` are placeholders, not
+  defaults: every one must be replaced with a real subscription id before any plan.
 - Terraform >= 1.12, < 2.0.
 
 ## How a landing zone is built
@@ -1316,7 +1319,8 @@ terraform {
 `;
 
 exports[`emitFiles > matches the committed snapshot of the tree-only build, baseline present and not enforced > tree-only terraform.tfvars.example 1`] = `
-"# Copy to terraform.tfvars and replace every all-zero GUID with a real subscription id.
+"# Copy to terraform.tfvars. The subscription ids below are placeholders, not defaults:
+# every one must be replaced with a real subscription id before any plan.
 location               = "centralus"
 security_contact_email = "security@example.com"
 "

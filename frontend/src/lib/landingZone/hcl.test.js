@@ -462,6 +462,12 @@ describe('emitFiles', () => {
     ).toBeUndefined();
 
     const example = full['terraform.tfvars.example'];
+    expect(example).toMatch(
+      /^# Copy to terraform\.tfvars\. The subscription ids below are placeholders, not defaults:\n# every one must be replaced with a real subscription id before any plan\.\n/
+    );
+    expect(example).not.toContain('all-zero');
+    expect(full['README.md']).toContain('placeholders, not');
+    expect(full['README.md']).toContain('replaced with a real subscription id before any plan');
     const ids = [...example.matchAll(/"(00000000-0000-0000-0000-\d{12})"/g)].map((m) => m[1]);
     expect(ids).toHaveLength(5);
     expect(new Set(ids).size).toBe(ids.length);

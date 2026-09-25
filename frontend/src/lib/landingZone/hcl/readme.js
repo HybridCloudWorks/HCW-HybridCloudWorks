@@ -34,7 +34,8 @@ const PREREQUISITES = [
   '  with its tenant, client and subscription set as the workspace’s `ARM_TENANT_ID`,',
   '  `ARM_CLIENT_ID`, `ARM_CLIENT_SECRET` and `ARM_SUBSCRIPTION_ID` variables.',
   '- One subscription per platform role and per application landing zone, whose ids go',
-  '  into `terraform.tfvars` (see `terraform.tfvars.example`).',
+  '  into `terraform.tfvars`. The ids in `terraform.tfvars.example` are placeholders, not',
+  '  defaults: every one must be replaced with a real subscription id before any plan.',
   `- Terraform ${TERRAFORM_REQUIRED_VERSION}.`,
   '',
 ];

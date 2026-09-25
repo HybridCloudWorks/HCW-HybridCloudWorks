@@ -219,7 +219,8 @@ export function variablesTf(state) {
 
 export function tfvarsExample(state) {
   const items = [
-    '# Copy to terraform.tfvars and replace every all-zero GUID with a real subscription id.',
+    '# Copy to terraform.tfvars. The subscription ids below are placeholders, not defaults:',
+    '# every one must be replaced with a real subscription id before any plan.',
   ];
   for (const spec of declared(state)) {
     const example = spec.example ? spec.example(state.options) : null;
