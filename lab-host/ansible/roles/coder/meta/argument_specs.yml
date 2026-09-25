@@ -1,0 +1,176 @@
+---
+argument_specs:
+  main:
+    short_description: Run Coder Community edition and its PostgreSQL under Docker Compose behind Caddy, with a nightly pg_dump
+    description:
+      - Installs lab-host/coder/docker-compose.yml to /etc/hcw/coder with a Compose .env carrying
+        the digest-pinned images and the host's docker group id, and writes Coder's secrets
+        (GitHub OAuth client id and secret, the PostgreSQL password) from vault variables into
+        two root-only env files, one per service, with no_log.
+      - With coder_enabled true it runs docker compose up, renders the Caddy route for
+        coder.<domain> and *.coder.<domain> into conf.d and starts a nightly pg_dump timer
+        keeping seven days under /var/backups/coder. With it false it runs docker compose down
+        (volumes kept), empties the secret files, removes the route and stops the timer.
+      - Fails closed when enabled without a non-empty GitHub organisation allowlist, without
+        all three secrets, with a password that needs URL escaping, or on a host whose memory
+        cannot hold coder_max_workspaces workspaces (ADR 0032).
+    author: HybridCloudWorks
+    options:
+      coder_enabled:
+        type: bool
+        required: true
+        description: Whether Coder runs. False stops and removes the containers and the Caddy route; the PostgreSQL volume stays.
+      coder_oauth2_github_allowed_orgs:
+        type: list
+        elements: str
+        required: true
+        description:
+          - GitHub organisations whose members may sign in, rendered comma-separated into
+            CODER_OAUTH2_GITHUB_ALLOWED_ORGS. Must be non-empty while coder_enabled is true; an
+            empty list would let any GitHub account in.
+      coder_oauth2_github_allow_signups:
+        type: bool
+        required: true
+        description:
+          - CODER_OAUTH2_GITHUB_ALLOW_SIGNUPS. True lets new members of the allowed
+            organisations create accounts; false is the "no new learners" kill switch and
+            leaves existing accounts working.
+      coder_domain:
+        type: str
+        required: true
+        description: The dashboard's host name, coder.lab.hybridcloudworks.com. Workspace apps are *.<coder_domain>.
+      coder_max_workspaces:
+        type: int
+        required: true
+        description:
+          - The number of concurrent workspaces the host is sized for. Coder Community does not
+            enforce a count; the role asserts that this many workspaces at
+            coder_workspace_memory_mib plus coder_server_memory_reserve_mib fit in the host's
+            memory, and the site's status card (#680) publishes it as capacity.
+      coder_workspace_memory_mib:
+        type: int
+        required: false
+        default: 2048
+        description: The memory limit the hcw-lab template sets per workspace (memory_mib in templates/hcw-lab/main.tf), for the capacity assertion.
+      coder_server_memory_reserve_mib:
+        type: int
+        required: false
+        default: 2560
+        description: Memory kept for the Coder server (1 GiB), PostgreSQL (512 MiB) and the OS (1 GiB) in the capacity assertion.
+      coder_image:
+        type: str
+        required: true
+        description: Coder image repository, ghcr.io/coder/coder.
+      coder_image_tag:
+        type: str
+        required: true
+        description: The release the digest was read from, for example v2.37.3. Recorded, not pulled.
+      coder_image_digest:
+        type: str
+        required: true
+        description: Image index digest of the Coder release; the container runs image@digest.
+      coder_postgres_image:
+        type: str
+        required: true
+        description: PostgreSQL image repository, postgres.
+      coder_postgres_image_tag:
+        type: str
+        required: true
+        description: The release the digest was read from, for example 16.15. Recorded, not pulled.
+      coder_postgres_image_digest:
+        type: str
+        required: true
+        description: Image index digest of the PostgreSQL release; the container runs image@digest.
+      coder_oauth2_github_client_id:
+        type: str
+        required: false
+        default: ""
+        description: CODER_OAUTH2_GITHUB_CLIENT_ID; defaults to vault_coder_oauth2_github_client_id. Required when enabled.
+      coder_oauth2_github_client_secret:
+        type: str
+        required: false
+        default: ""
+        description: CODER_OAUTH2_GITHUB_CLIENT_SECRET; defaults to vault_coder_oauth2_github_client_secret. Required when enabled.
+      coder_postgres_password:
+        type: str
+        required: false
+        default: ""
+        description:
+          - The coder database user's password, used in POSTGRES_PASSWORD and
+            CODER_PG_CONNECTION_URL; defaults to vault_coder_postgres_password. Required when
+            enabled, and limited to RFC 3986 unreserved characters because it is placed in the
+            URL unescaped.
+      coder_project_dir:
+        type: path
+        required: false
+        default: /etc/hcw/coder
+        description: The Compose project directory holding docker-compose.yml, .env, coder.env and coder-postgres.env.
+      coder_compose_file:
+        type: path
+        required: false
+        default: /etc/hcw/coder/docker-compose.yml
+        description: Where the Compose file is installed.
+      coder_compose_env_file:
+        type: path
+        required: false
+        default: /etc/hcw/coder/.env
+        description: Compose interpolation file with CODER_IMAGE, CODER_POSTGRES_IMAGE and DOCKER_GID. Not secret; root-only anyway.
+      coder_env_file:
+        type: path
+        required: false
+        default: /etc/hcw/coder/coder.env
+        description: env_file of the coder service, root:root 0600, written with no_log.
+      coder_postgres_env_file:
+        type: path
+        required: false
+        default: /etc/hcw/coder/coder-postgres.env
+        description: env_file of the coder-postgres service, root:root 0600, written with no_log.
+      coder_http_port:
+        type: int
+        required: false
+        default: 7080
+        description: The loopback port the Compose file publishes and the Caddy route proxies to.
+      coder_caddy_sites_dir:
+        type: path
+        required: false
+        default: /etc/caddy/conf.d
+        description: The caddy role's conf.d, imported inside the wildcard site block.
+      coder_caddy_group:
+        type: str
+        required: false
+        default: caddy
+        description: Group that owns the route file, so the caddy user can read it.
+      coder_caddy_route_file:
+        type: path
+        required: false
+        default: /etc/caddy/conf.d/10-coder.caddy
+        description: The route file; removed while Coder is disabled.
+      coder_unavailable_response:
+        type: str
+        required: false
+        description: Body Caddy returns with 503 for the coder names when the coder service is stopped.
+      coder_backup_dir:
+        type: path
+        required: false
+        default: /var/backups/coder
+        description: Where the nightly pg_dump writes coder-<UTC timestamp>.sql.gz, root-only.
+      coder_backup_keep_days:
+        type: int
+        required: false
+        default: 7
+        description: Dumps older than this are deleted by the next run.
+      coder_backup_on_calendar:
+        type: str
+        required: false
+        default: "*-*-* 03:30:00"
+        description: systemd OnCalendar for the timer, with up to ten minutes of jitter.
+      coder_backup_script_path:
+        type: path
+        required: false
+        default: /usr/local/sbin/coder-postgres-backup
+        description: The dump script the service runs.
+      coder_backup_unit_name:
+        type: str
+        required: false
+        default: coder-postgres-backup
+        description: Name of the .service and .timer units.
