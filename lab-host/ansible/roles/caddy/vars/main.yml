@@ -1,8 +1,10 @@
 ---
 # Derived names. Not meant to be overridden, which is why they are vars and not
 # defaults.
+# Pulled and run by digest, never by tag: Docker verifies the content against
+# the digest on pull, so a bumped pin is a new reference that gets pulled and a
+# moved tag is irrelevant.
 caddy_builder_image_ref: "{{ caddy_builder_image }}@{{ caddy_builder_image_digest }}"
-caddy_builder_image_platform_ref: "{{ caddy_builder_image }}@{{ caddy_builder_image_platform_digest }}"
 # The artifact's identity is everything that went into it: Caddy, the module
 # and the builder image. A bump to any of the three changes the name, so the
 # `creates` guard rebuilds instead of keeping a binary from the old inputs.

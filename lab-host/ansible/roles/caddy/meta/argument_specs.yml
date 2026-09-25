@@ -3,9 +3,9 @@ argument_specs:
   main:
     short_description: Build and run Caddy with the Cloudflare DNS module for the lab names, host-native under systemd
     description:
-      - Builds Caddy with xcaddy inside the official, digest-asserted builder image (Docker must
-        already be installed), verifies the version and the Cloudflare DNS module, records the
-        build's provenance next to the binary and installs it.
+      - Builds Caddy with xcaddy inside the official builder image, pulled and run by digest
+        (Docker must already be installed), verifies the version and the Cloudflare DNS module,
+        records the build's provenance next to the binary and installs it.
       - Renders a Caddyfile with one site block for the three certificate names, terminating TLS
         with DNS-01, and a conf.d directory later roles add routes to. Without a token the
         Caddyfile fails closed to an HTTP-only 503 apex that imports nothing.
@@ -28,21 +28,15 @@ argument_specs:
       caddy_builder_image_tag:
         type: str
         required: true
-        description: Builder image tag, for example 2.11.4-builder.
+        description: Builder image tag the digest was read from, for example 2.11.4-builder. Recorded, not pulled.
       caddy_builder_image_digest:
         type: str
         required: true
         description:
-          - Image index digest of the builder tag. The build runs against image@digest, and
-            the first twelve hex characters are part of the built binary's name, so a bump
-            here rebuilds.
-      caddy_builder_image_platform_digest:
-        type: str
-        required: true
-        description:
-          - The linux/amd64 manifest digest beneath that index. The pull assertion accepts
-            either this or the index digest in RepoDigests, since which one a daemon records
-            depends on its image store.
+          - Image index digest of the builder. The image is pulled and run as image@digest, so
+            Docker verifies the content and a bumped pin is pulled as a new reference; the
+            first twelve hex characters are part of the built binary's name, so a bump here
+            rebuilds.
       caddy_site_domain:
         type: str
         required: true

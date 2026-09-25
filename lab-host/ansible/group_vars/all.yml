@@ -33,18 +33,18 @@ docker_apt_key_checksum: sha256:1500c1f56fa9e26b9b8f42452a553675796ade0807cdce11
 # builder image, because the caddyserver.com download API always builds the
 # latest release and ignores a version parameter (verified 2026-09-25). These
 # lines are the build's provenance. caddy_builder_image_digest is the image
-# INDEX of caddy:2.11.4-builder from `docker buildx imagetools inspect`; the
-# platform digest is the linux/amd64 manifest beneath it. Which of the two a
-# daemon records in RepoDigests after `docker pull` by tag depends on its image
-# store, so the role's assertion accepts either, and the build itself always
-# runs against image@index. The first twelve hex characters of the index are
-# part of the built binary's filename, so bumping the builder rebuilds.
+# INDEX of caddy:2.11.4-builder from `docker buildx imagetools inspect` (its
+# linux/amd64 manifest beneath is sha256:7a05631b...). The role pulls and runs
+# caddy@<digest>, never the tag: Docker verifies the content against the digest
+# on pull, so a bumped pin is simply a new reference that gets pulled. The tag
+# is recorded for humans reading this file. The first twelve hex characters of
+# the digest are part of the built binary's filename, so bumping the builder
+# rebuilds.
 caddy_version: v2.11.4
 caddy_cloudflare_module_version: v0.2.4
 caddy_builder_image: caddy
 caddy_builder_image_tag: 2.11.4-builder
 caddy_builder_image_digest: sha256:401121e61853cb9c7df83cba43e532e49a68e30f32921c7bdcb7a4912168c067
-caddy_builder_image_platform_digest: sha256:7a05631b5e68fa24cfda0d4392b9c8577715c855b9b9da84b1b59be87e535405
 caddy_site_domain: "{{ lab_host_domain }}"
 # The three names ADR 0032 puts on the certificate. DNS-01 for each is answered
 # through the CNAME delegation of _acme-challenge.lab and _acme-challenge.coder.lab

@@ -16,31 +16,31 @@ latest Caddy release** and ignores a `version` parameter (checked
 2026-09-25: a request naming a nonexistent version returned the identical
 binary), so it cannot be pinned and has no checksum to record. This role
 builds with `xcaddy` inside the official `caddy:<version>-builder` image
-instead, pulled by tag and asserted against the image-index digest in
-`group_vars/all.yml`. Docker is already on the host, so nothing new is
-installed to do it; the build takes a few minutes the first time and is
-skipped once `/opt/caddy/bin/caddy-<version>-cloudflare-<module>-<first 12
-hex of the builder index digest>` exists. Bumping any of the three inputs
+instead, **pulled and run by digest** (`caddy@sha256:…` from
+`group_vars/all.yml`), never by tag: Docker verifies the content against the
+digest on pull, a moved tag cannot change what runs, and a bumped pin is a
+new reference that is simply pulled. Docker is already on the host, so
+nothing new is installed to do it; the build takes a few minutes the first
+time and is skipped once `/opt/caddy/bin/caddy-<version>-cloudflare-<module>-<first
+12 hex of the builder digest>` exists. Bumping any of the three inputs
 changes that filename and triggers a rebuild, so the binary on disk can
 never claim a builder it was not built with.
 
 The build's provenance is the `caddy_*` pins in `group_vars/all.yml` (Caddy
-tag, module tag, builder image tag, its index digest and the linux/amd64
-manifest beneath it), and the role writes the same facts to
-`<binary>.provenance` next to the binary it produced. The pull assertion
-accepts either the index or the platform digest in `RepoDigests`, because
-which one a daemon records after a pull by tag depends on its image store;
-the build itself always runs against `caddy@<index digest>`.
+tag, module tag, the builder image's tag for humans and its index digest for
+Docker), and the role writes the same facts to `<binary>.provenance` next to
+the binary it produced.
 
 ## What it does
 
 1. `caddy` system user and group, `/etc/caddy`, `/etc/caddy/conf.d`,
    `/opt/caddy/bin`, `/var/lib/caddy`.
-2. Pulls the builder image, asserts its `RepoDigests` contains the pinned
-   digest, runs `xcaddy build <caddy_version> --with
-   github.com/caddy-dns/cloudflare@<module version>`, then refuses the result
-   unless `caddy version` names the pinned version and `caddy list-modules`
-   shows `dns.providers.cloudflare`.
+2. Pulls `caddy@<pinned digest>` (`docker_image_pull`, `pull: not_present`,
+   so a new digest is fetched and an existing one is not re-downloaded),
+   runs `xcaddy build <caddy_version> --with
+   github.com/caddy-dns/cloudflare@<module version>` in it, then refuses the
+   result unless `caddy version` names the pinned version and `caddy
+   list-modules` shows `dns.providers.cloudflare`.
 3. Installs the binary to `/usr/local/bin/caddy`.
 4. Writes `/etc/caddy/env` as owner `root`, group `caddy`, mode `0640` with
    `CLOUDFLARE_API_TOKEN` from `vault_cloudflare_api_token`, with `no_log`
@@ -85,7 +85,7 @@ named matcher and a `handle` block, then notify `Reload caddy`. The
 | --- | --- | --- |
 | `caddy_version` | required | Caddy tag for `xcaddy build` |
 | `caddy_cloudflare_module_version` | required | `caddy-dns/cloudflare` tag |
-| `caddy_builder_image`, `caddy_builder_image_tag`, `caddy_builder_image_digest`, `caddy_builder_image_platform_digest` | required | Builder image pin (index and linux/amd64 manifest) |
+| `caddy_builder_image`, `caddy_builder_image_tag`, `caddy_builder_image_digest` | required | Builder image pin; pulled and run as `image@digest` |
 | `caddy_site_domain` | required | Apex; matcher and fail-closed placeholder |
 | `caddy_site_names` | required | Every name the site block serves |
 | `caddy_cloudflare_api_token` | `vault_cloudflare_api_token` or empty | DNS-01 credential |

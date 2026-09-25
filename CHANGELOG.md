@@ -46,8 +46,9 @@ This project has not cut a tagged release; entries are grouped under
   that does not exist returned the identical 48,173,218-byte binary, so it
   can be neither pinned nor checksummed. So the role runs `xcaddy build
   v2.11.4 --with github.com/caddy-dns/cloudflare@v0.2.4` inside the official
-  `caddy:2.11.4-builder` image, asserts the pulled tag's `RepoDigests`
-  against the pinned index digest first, refuses the result unless `caddy
+  `caddy:2.11.4-builder` image — pulled and run by its pinned digest, never
+  by tag, so Docker verifies the content and a bumped pin is a new
+  reference that gets pulled — refuses the result unless `caddy
   version` names the pin and `caddy list-modules` lists
   `dns.providers.cloudflare`, and writes a `.provenance` file beside the
   binary naming the three inputs. The binary's filename carries all three —

@@ -221,7 +221,7 @@ changes under `lab-host/`.
 | --- | --- | --- |
 | Docker, buildx, compose | `docker_version`, `docker_containerd_version`, `docker_buildx_version`, `docker_compose_version` | `roles/docker/README.md` |
 | apt signing keys | `docker_apt_key_checksum`, `labs_agent_node_apt_key_checksum` | `curl -sL <key URL> \| sha256sum` on the two URLs named beside them; a changed key is a decision, not a refresh |
-| Caddy, Cloudflare module, builder image digests | `caddy_*` | `roles/caddy/README.md`; both digests come from `docker buildx imagetools inspect caddy:2.11.4-builder` (the index, and the linux/amd64 manifest under it) |
+| Caddy, Cloudflare module, builder image digest | `caddy_*` | `roles/caddy/README.md`; the digest is the index from `docker buildx imagetools inspect caddy:2.11.4-builder`, and the image is pulled by that digest, not by tag |
 | node_exporter | `node_exporter_version`, `node_exporter_checksum` | `roles/node_exporter/README.md` |
 | Node.js | `labs_agent_node_version` | NodeSource `node_22.x` package index |
 | Repository ref | `labs_agent_repo_ref` and `HCW_REPO_REF` | `git rev-parse origin/main` |
