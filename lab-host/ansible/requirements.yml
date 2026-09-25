@@ -1,0 +1,11 @@
+---
+# Collections the roles use, pinned to an exact version. bootstrap.sh and the
+# ansible-lint CI job both install from this file, so a bump here is the one
+# place a collection version changes.
+collections:
+  - name: community.general
+    version: 13.4.0
+  - name: community.docker
+    version: 5.3.0
+  - name: ansible.posix
+    version: 2.2.2

@@ -1,0 +1,12 @@
+---
+# Derived values. Not meant to be overridden, which is why they are vars and
+# not defaults.
+labs_agent_configured: >-
+  {{ labs_agent_api_base | length > 0
+     and labs_agent_tenant_id | length > 0
+     and labs_agent_client_id | length > 0
+     and labs_agent_api_scope | length > 0 }}
+# Where systemd exposes the LoadCredential copy of the certificate to the
+# service, and therefore what LABS_AGENT_CERT_PATH is set to.
+labs_agent_credential_path: "/run/credentials/{{ labs_agent_service_name }}.service/labs-agent.pem"
+labs_agent_deps_stamp: "{{ labs_agent_state_dir }}/deps-installed-{{ labs_agent_repo_ref }}"

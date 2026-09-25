@@ -1,0 +1,98 @@
+---
+argument_specs:
+  main:
+    short_description: Build and run Caddy with the Cloudflare DNS module for a wildcard site
+    description:
+      - Builds Caddy with xcaddy inside the official, digest-pinned builder image (Docker must
+        already be installed), verifies the Cloudflare DNS module is present, and installs it.
+      - Renders a Caddyfile with one site block for the apex and its wildcard, terminating TLS
+        with a DNS-01 wildcard certificate, and a conf.d directory later roles add routes to.
+      - Writes the Cloudflare API token to a root-only environment file the systemd unit reads.
+    author: HybridCloudWorks
+    options:
+      caddy_version:
+        type: str
+        required: true
+        description: Caddy release tag passed to xcaddy build, for example v2.11.4.
+      caddy_cloudflare_module_version:
+        type: str
+        required: true
+        description: github.com/caddy-dns/cloudflare tag, for example v0.2.4.
+      caddy_builder_image:
+        type: str
+        required: true
+        description: Builder image repository, normally caddy.
+      caddy_builder_image_tag:
+        type: str
+        required: true
+        description: Builder image tag, for example 2.11.4-builder.
+      caddy_builder_image_digest:
+        type: str
+        required: true
+        description:
+          - sha256 digest the pulled tag must resolve to. The build runs against
+            image@digest, so a moved tag fails the assertion rather than building silently.
+      caddy_site_domain:
+        type: str
+        required: true
+        description: Apex domain. The site block covers it and *.domain.
+      caddy_cloudflare_api_token:
+        type: str
+        required: false
+        default: ""
+        description:
+          - Cloudflare API token with DNS edit on the zone; defaults to vault_cloudflare_api_token.
+          - Empty renders an HTTP-only placeholder instead of failing.
+      caddy_acme_email:
+        type: str
+        required: false
+        default: ""
+        description: ACME account contact, defaults to vault_caddy_acme_email. Omitted when empty.
+      caddy_apex_response:
+        type: str
+        required: false
+        description: Body the apex returns until a later role claims it.
+      caddy_unknown_host_response:
+        type: str
+        required: false
+        description: Body returned with 404 for a wildcard name no route claims.
+      caddy_user:
+        type: str
+        required: false
+        default: caddy
+        description: Service user.
+      caddy_group:
+        type: str
+        required: false
+        default: caddy
+        description: Service group.
+      caddy_home:
+        type: path
+        required: false
+        default: /var/lib/caddy
+        description: Home for the service user; Caddy keeps certificates under it.
+      caddy_config_dir:
+        type: path
+        required: false
+        default: /etc/caddy
+        description: Where the Caddyfile lives.
+      caddy_sites_dir:
+        type: path
+        required: false
+        default: /etc/caddy/conf.d
+        description: Snippets imported inside the site block; one file per route owner.
+      caddy_build_dir:
+        type: path
+        required: false
+        default: /opt/caddy/bin
+        description: Where xcaddy writes the versioned binary.
+      caddy_binary_path:
+        type: path
+        required: false
+        default: /usr/local/bin/caddy
+        description: Where the active binary is installed.
+      caddy_env_file:
+        type: path
+        required: false
+        default: /etc/caddy/env
+        description: Root-only file holding CLOUDFLARE_API_TOKEN for the unit.

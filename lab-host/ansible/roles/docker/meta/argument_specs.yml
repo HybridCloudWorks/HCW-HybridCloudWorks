@@ -1,0 +1,41 @@
+---
+argument_specs:
+  main:
+    short_description: Install Docker Engine at a pinned version from Docker's apt repository
+    description:
+      - Adds Docker's signed apt repository for the running Ubuntu release, installs
+        docker-ce, docker-ce-cli and containerd.io at the exact versions given, holds them,
+        writes /etc/docker/daemon.json and enables the service.
+    author: HybridCloudWorks
+    options:
+      docker_version:
+        type: str
+        required: true
+        description:
+          - Exact apt version string for docker-ce and docker-ce-cli, for example
+            "5:29.8.1-1~ubuntu.24.04~noble".
+      docker_containerd_version:
+        type: str
+        required: true
+        description: Exact apt version string for containerd.io.
+      docker_apt_key_url:
+        type: str
+        required: false
+        default: https://download.docker.com/linux/ubuntu/gpg
+        description: Where the repository signing key is fetched from.
+      docker_apt_key_path:
+        type: path
+        required: false
+        default: /etc/apt/keyrings/docker.asc
+        description: Where the signing key is stored; referenced by signed-by in the source line.
+      docker_apt_repository_url:
+        type: str
+        required: false
+        default: https://download.docker.com/linux/ubuntu
+        description: The apt repository base URL.
+      docker_daemon_config:
+        type: dict
+        required: false
+        description:
+          - Rendered verbatim as /etc/docker/daemon.json. The default sets the json-file
+            log driver with 10 MB x 3 rotation and live-restore.

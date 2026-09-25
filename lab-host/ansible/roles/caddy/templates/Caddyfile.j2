@@ -1,0 +1,29 @@
+# {{ ansible_managed }}
+{% if caddy_acme_email | length > 0 %}
+{
+  email {{ caddy_acme_email }}
+}
+
+{% endif %}
+{% if caddy_cloudflare_api_token | length > 0 %}
+{{ caddy_site_domain }}, *.{{ caddy_site_domain }} {
+  tls {
+    dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+    resolvers 1.1.1.1 1.0.0.1
+  }
+
+  import {{ caddy_sites_dir }}/*.caddy
+
+  handle {
+    respond "{{ caddy_unknown_host_response }}" 404
+  }
+}
+{% else %}
+http://{{ caddy_site_domain }}, http://*.{{ caddy_site_domain }} {
+  import {{ caddy_sites_dir }}/*.caddy
+
+  handle {
+    respond "{{ caddy_unknown_host_response }} TLS is off: vault_cloudflare_api_token is not set." 404
+  }
+}
+{% endif %}

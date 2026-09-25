@@ -1,0 +1,143 @@
+---
+- name: Create the caddy group
+  ansible.builtin.group:
+    name: "{{ caddy_group }}"
+    system: true
+    state: present
+
+- name: Create the caddy system user
+  ansible.builtin.user:
+    name: "{{ caddy_user }}"
+    group: "{{ caddy_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ caddy_home }}"
+    create_home: true
+    state: present
+
+- name: Create the Caddy directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ caddy_config_dir }}", owner: root, group: "{{ caddy_group }}", mode: "0750" }
+    - { path: "{{ caddy_sites_dir }}", owner: root, group: "{{ caddy_group }}", mode: "0750" }
+    - { path: "{{ caddy_build_dir }}", owner: root, group: root, mode: "0755" }
+    - { path: "{{ caddy_home }}", owner: "{{ caddy_user }}", group: "{{ caddy_group }}", mode: "0750" }
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Pull the Caddy builder image
+  community.docker.docker_image_pull:
+    name: "{{ caddy_builder_image }}"
+    tag: "{{ caddy_builder_image_tag }}"
+    pull: not_present
+
+- name: Read the pulled builder image
+  community.docker.docker_image_info:
+    name: "{{ caddy_builder_image }}:{{ caddy_builder_image_tag }}"
+  register: caddy_builder_image_info
+
+- name: Refuse a builder image that is not the pinned digest
+  ansible.builtin.assert:
+    that:
+      - caddy_builder_image_info.images | length == 1
+      - caddy_builder_image_ref in caddy_builder_image_info.images[0].RepoDigests
+    fail_msg: >-
+      {{ caddy_builder_image }}:{{ caddy_builder_image_tag }} resolved to
+      {{ caddy_builder_image_info.images | map(attribute='RepoDigests') | flatten | join(', ') }},
+      not {{ caddy_builder_image_ref }}. Either the tag moved or the pin is stale.
+  when: not ansible_check_mode or caddy_builder_image_info.images | length > 0
+
+- name: Build Caddy with the Cloudflare DNS module
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - --volume
+      - "{{ caddy_build_dir }}:/out"
+      - "{{ caddy_builder_image_ref }}"
+      - xcaddy
+      - build
+      - "{{ caddy_version }}"
+      - --with
+      - "github.com/caddy-dns/cloudflare@{{ caddy_cloudflare_module_version }}"
+      - --output
+      - "/out/{{ caddy_built_binary_name }}"
+    creates: "{{ caddy_built_binary }}"
+
+- name: Confirm the built binary carries the Cloudflare DNS module
+  ansible.builtin.command:
+    argv:
+      - "{{ caddy_built_binary }}"
+      - list-modules
+  register: caddy_modules
+  changed_when: false
+  failed_when: "'dns.providers.cloudflare' not in caddy_modules.stdout"
+
+- name: Install the built binary
+  ansible.builtin.copy:
+    src: "{{ caddy_built_binary }}"
+    dest: "{{ caddy_binary_path }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
+  notify: Restart caddy
+
+- name: Check whether a Caddy binary is installed
+  ansible.builtin.stat:
+    path: "{{ caddy_binary_path }}"
+  register: caddy_binary_stat
+
+- name: Write the Cloudflare API token for the DNS challenge
+  ansible.builtin.copy:
+    dest: "{{ caddy_env_file }}"
+    content: "CLOUDFLARE_API_TOKEN={{ caddy_cloudflare_api_token }}\n"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+  notify: Restart caddy
+
+- name: Render the apex placeholder route
+  ansible.builtin.template:
+    src: 00-apex.caddy.j2
+    dest: "{{ caddy_sites_dir }}/00-apex.caddy"
+    owner: root
+    group: "{{ caddy_group }}"
+    mode: "0640"
+  notify: Reload caddy
+
+- name: Render the Caddyfile
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: "{{ caddy_config_dir }}/Caddyfile"
+    owner: root
+    group: "{{ caddy_group }}"
+    mode: "0640"
+    validate: >-
+      {{ caddy_binary_stat.stat.exists
+         | ternary(caddy_binary_path ~ ' validate --adapter caddyfile --config %s', omit) }}
+  notify: Reload caddy
+
+- name: Install the Caddy systemd unit
+  ansible.builtin.template:
+    src: caddy.service.j2
+    dest: /etc/systemd/system/caddy.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart caddy
+
+- name: Enable and start Caddy
+  ansible.builtin.systemd_service:
+    name: caddy
+    enabled: true
+    state: started
+    daemon_reload: true

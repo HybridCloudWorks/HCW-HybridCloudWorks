@@ -1,0 +1,165 @@
+---
+- name: Create the agent group
+  ansible.builtin.group:
+    name: "{{ labs_agent_group }}"
+    system: true
+    state: present
+
+- name: Create the agent user and put it in the docker group
+  ansible.builtin.user:
+    name: "{{ labs_agent_user }}"
+    group: "{{ labs_agent_group }}"
+    groups:
+      - docker
+    append: true
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ labs_agent_home }}"
+    create_home: false
+    state: present
+
+- name: Install the packages the checkout and the Node.js repository need
+  ansible.builtin.apt:
+    name:
+      - git
+      - ca-certificates
+      - curl
+      - openssl
+      - python3-debian
+    state: present
+
+- name: Create the apt keyring directory
+  ansible.builtin.file:
+    path: "{{ labs_agent_node_apt_key_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the NodeSource apt signing key
+  ansible.builtin.get_url:
+    url: "{{ labs_agent_node_apt_key_url }}"
+    dest: "{{ labs_agent_node_apt_key_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Add the NodeSource Node.js 22 repository
+  ansible.builtin.deb822_repository:
+    name: nodesource
+    types:
+      - deb
+    uris: "{{ labs_agent_node_apt_repository_url }}"
+    suites:
+      - nodistro
+    components:
+      - main
+    architectures:
+      - amd64
+    signed_by: "{{ labs_agent_node_apt_key_path }}"
+    state: present
+
+- name: Install Node.js at the pinned version
+  ansible.builtin.apt:
+    name: "nodejs={{ labs_agent_node_version }}"
+    state: present
+    update_cache: true
+    install_recommends: false
+    allow_downgrade: true
+
+- name: Hold the pinned Node.js package so apt never moves it
+  ansible.builtin.dpkg_selections:
+    name: nodejs
+    selection: hold
+
+- name: Create the agent directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ labs_agent_home }}"
+    - "{{ labs_agent_state_dir }}"
+    - "{{ labs_agent_config_dir }}"
+
+- name: Check out the repository at the pinned ref
+  ansible.builtin.git:
+    repo: "{{ labs_agent_repo_url }}"
+    dest: "{{ labs_agent_home }}"
+    version: "{{ labs_agent_repo_ref }}"
+  notify: Restart hcw-labs-agent
+
+- name: Install the agent's production dependencies for this ref
+  ansible.builtin.shell:
+    cmd: npm ci --omit=dev && touch "{{ labs_agent_deps_stamp }}"
+    chdir: "{{ labs_agent_app_dir }}"
+    creates: "{{ labs_agent_deps_stamp }}"
+  notify: Restart hcw-labs-agent
+
+- name: Generate the agent's private key and self-signed certificate on this host
+  ansible.builtin.shell:
+    cmd: >-
+      umask 077
+      && openssl req -x509 -newkey rsa:4096 -sha256 -nodes
+      -days {{ labs_agent_certificate_days }}
+      -subj "/CN={{ labs_agent_id }}"
+      -keyout "{{ labs_agent_certificate_path }}"
+      -out "{{ labs_agent_public_certificate_path }}"
+      && cat "{{ labs_agent_public_certificate_path }}" >> "{{ labs_agent_certificate_path }}"
+    creates: "{{ labs_agent_certificate_path }}"
+
+- name: Keep the certificate and key root-owned and unreadable by anyone else
+  ansible.builtin.file:
+    path: "{{ labs_agent_certificate_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Make the public certificate readable so it can be uploaded to the app registration
+  ansible.builtin.file:
+    path: "{{ labs_agent_public_certificate_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Write the agent environment from the vault
+  ansible.builtin.template:
+    src: labs-agent.env.j2
+    dest: "{{ labs_agent_env_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+  when: labs_agent_configured | bool
+  notify: Restart hcw-labs-agent
+
+- name: Install the agent systemd unit
+  ansible.builtin.template:
+    src: hcw-labs-agent.service.j2
+    dest: "/etc/systemd/system/{{ labs_agent_service_name }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart hcw-labs-agent
+
+- name: Enable and start the agent
+  ansible.builtin.systemd_service:
+    name: "{{ labs_agent_service_name }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: labs_agent_configured | bool
+
+- name: Say why the agent is not running yet
+  ansible.builtin.debug:
+    msg: >-
+      {{ labs_agent_service_name }} is installed but not started: one or more of
+      vault_labs_agent_api_base, vault_labs_agent_tenant_id, vault_labs_agent_client_id
+      and vault_labs_agent_api_scope is unset. Provision the identity
+      (docs/standards/required-inputs.md section 4.7) using the public certificate at
+      {{ labs_agent_public_certificate_path }}, add the four values to the vault, and re-run
+      bootstrap.sh.
+  when: not labs_agent_configured | bool

@@ -1,0 +1,22 @@
+---
+# caddy_version, caddy_cloudflare_module_version, caddy_builder_image,
+# caddy_builder_image_tag, caddy_builder_image_digest and caddy_site_domain are
+# pins or host identity and live in group_vars/all.yml; meta/argument_specs.yml
+# marks them required.
+caddy_user: caddy
+caddy_group: caddy
+caddy_home: /var/lib/caddy
+caddy_config_dir: /etc/caddy
+caddy_sites_dir: /etc/caddy/conf.d
+caddy_build_dir: /opt/caddy/bin
+caddy_binary_path: /usr/local/bin/caddy
+caddy_env_file: /etc/caddy/env
+
+# Secrets come from the vault file bootstrap.sh passes with -e. With no token
+# the role still installs Caddy and serves the placeholder over plain HTTP, and
+# says so in the response, rather than failing the whole bootstrap.
+caddy_cloudflare_api_token: "{{ vault_cloudflare_api_token | default('') }}"
+caddy_acme_email: "{{ vault_caddy_acme_email | default('') }}"
+
+caddy_apex_response: "HCW lab host. Nothing is served at the apex yet."
+caddy_unknown_host_response: "No lab is served at this name."

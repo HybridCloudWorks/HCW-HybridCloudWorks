@@ -1,0 +1,13 @@
+---
+# docker_version and docker_containerd_version are pins and live in
+# group_vars/all.yml; meta/argument_specs.yml marks them required.
+docker_apt_key_url: https://download.docker.com/linux/ubuntu/gpg
+docker_apt_key_path: /etc/apt/keyrings/docker.asc
+docker_apt_repository_url: https://download.docker.com/linux/ubuntu
+
+docker_daemon_config:
+  log-driver: json-file
+  log-opts:
+    max-size: "10m"
+    max-file: "3"
+  live-restore: true

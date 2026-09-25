@@ -1,0 +1,6 @@
+---
+# Derived names. Not meant to be overridden, which is why they are vars and not
+# defaults.
+caddy_builder_image_ref: "{{ caddy_builder_image }}@{{ caddy_builder_image_digest }}"
+caddy_built_binary_name: "caddy-{{ caddy_version }}-cloudflare-{{ caddy_cloudflare_module_version }}"
+caddy_built_binary: "{{ caddy_build_dir }}/{{ caddy_built_binary_name }}"

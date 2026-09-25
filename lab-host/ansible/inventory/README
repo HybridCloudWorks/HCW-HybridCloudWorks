@@ -1,0 +1,12 @@
+The bootstrap runs on the lab host itself: bootstrap.sh clones this repository
+onto the host and runs site.yml against localhost over the local connection,
+which is why the only committed inventory is localhost.yml.
+
+To run the same playbook from a workstation instead, write an inventory that
+names the host and the SSH user the hardening role created (hcwadmin), and
+pass it with -i. The playbook targets `all`, so nothing else changes:
+
+    ansible-playbook -i inventory/remote.yml site.yml --vault-password-file /etc/hcw/ansible/vault-password -e @/etc/hcw/ansible/vault.yml
+
+A remote inventory belongs on the workstation, not in the repository: it names
+a real address, and this directory is committed.

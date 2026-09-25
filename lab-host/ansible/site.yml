@@ -1,0 +1,27 @@
+---
+- name: Bootstrap the HCW lab host
+  hosts: all
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Refuse to run on anything but Ubuntu 24.04
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] == 'Ubuntu'
+          - ansible_facts['distribution_version'] == '24.04'
+        fail_msg: >-
+          This playbook is written for Ubuntu 24.04 LTS and found
+          {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}.
+
+    - name: Refresh the apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+  roles:
+    - role: hardening
+    - role: docker
+    - role: node_exporter
+    - role: caddy
+    - role: labs_agent

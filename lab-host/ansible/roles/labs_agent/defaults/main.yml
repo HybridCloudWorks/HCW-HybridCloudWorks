@@ -1,0 +1,33 @@
+---
+# labs_agent_user, labs_agent_home, labs_agent_repo_url, labs_agent_repo_ref,
+# labs_agent_node_version and labs_agent_id are pins or host identity and live
+# in group_vars/all.yml; meta/argument_specs.yml marks them required.
+labs_agent_group: "{{ labs_agent_user }}"
+labs_agent_app_dir: "{{ labs_agent_home }}/vps-agent"
+labs_agent_state_dir: /var/lib/hcw-labs-agent
+labs_agent_config_dir: /etc/hcw
+labs_agent_env_file: /etc/hcw/labs-agent.env
+labs_agent_certificate_path: /etc/hcw/labs-agent.pem
+labs_agent_public_certificate_path: /etc/hcw/labs-agent.crt
+labs_agent_certificate_days: 730
+labs_agent_service_name: hcw-labs-agent
+
+labs_agent_node_apt_key_url: https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key
+labs_agent_node_apt_key_path: /etc/apt/keyrings/nodesource.asc
+labs_agent_node_apt_repository_url: https://deb.nodesource.com/node_22.x
+
+# Identity, from the vault file bootstrap.sh passes with -e. Until all four are
+# set the unit is installed and left stopped: the app registration is an owner
+# step (docs/standards/required-inputs.md section 4.7) and can land after the
+# first bootstrap.
+labs_agent_api_base: "{{ vault_labs_agent_api_base | default('') }}"
+labs_agent_tenant_id: "{{ vault_labs_agent_tenant_id | default('') }}"
+labs_agent_client_id: "{{ vault_labs_agent_client_id | default('') }}"
+labs_agent_api_scope: "{{ vault_labs_agent_api_scope | default('') }}"
+
+# Job limits, the defaults from vps-agent/.env.example.
+labs_agent_max_concurrent: 1
+labs_agent_poll_ms: 15000
+labs_agent_job_memory: 256m
+labs_agent_job_cpus: "0.5"
+labs_agent_job_pids: 128

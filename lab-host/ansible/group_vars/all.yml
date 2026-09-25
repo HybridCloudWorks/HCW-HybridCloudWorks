@@ -1,0 +1,48 @@
+---
+# Host-specific values and every version pin, in one place. Role defaults hold
+# behaviour knobs only; anything that names a version, digest or checksum is
+# here so a bump is one edit and one diff.
+
+lab_host_domain: lab.hybridcloudworks.com
+
+# Hardening. SSH and the two web ports are the only inbound ports: vps-agent is
+# pull-based and node_exporter listens on loopback. The admin user's keys
+# default to whatever the provisioner installed for root, so the first run
+# never locks the host; set the list to pin them explicitly.
+hardening_ufw_allowed_tcp_ports:
+  - 22
+  - 80
+  - 443
+hardening_admin_user: hcwadmin
+hardening_admin_authorized_keys: []
+hardening_unattended_reboot_time: "04:30"
+
+# Docker Engine from download.docker.com, Ubuntu 24.04 (noble) package strings.
+docker_version: "5:29.8.1-1~ubuntu.24.04~noble"
+docker_containerd_version: "2.3.5-1~ubuntu.24.04~noble"
+
+# Caddy is built with xcaddy inside the official builder image because the
+# caddyserver.com download API always builds the latest release and ignores a
+# version parameter (verified 2026-09-25). The digest is the image INDEX of
+# caddy:2.11.4-builder on Docker Hub (docker buildx imagetools inspect), which
+# is what `docker pull` by tag records in RepoDigests; the linux/amd64 manifest
+# beneath it is sha256:7a05631b5e68fa24cfda0d4392b9c8577715c855b9b9da84b1b59be87e535405.
+caddy_version: v2.11.4
+caddy_cloudflare_module_version: v0.2.4
+caddy_builder_image: caddy
+caddy_builder_image_tag: 2.11.4-builder
+caddy_builder_image_digest: sha256:401121e61853cb9c7df83cba43e532e49a68e30f32921c7bdcb7a4912168c067
+caddy_site_domain: "{{ lab_host_domain }}"
+
+# vps-agent runs as a systemd service from a checkout of this repository at a
+# pinned commit. The repository has no tagged release, so the pin is a sha.
+labs_agent_user: hcw-labs-agent
+labs_agent_home: /opt/hcw-labs-agent
+labs_agent_repo_url: https://github.com/HybridCloudWorks/HCW-HybridCloudWorks.git
+labs_agent_repo_ref: 04aa9e36a2c16813dcbabb838f5c2b86d3370d96
+labs_agent_node_version: "22.23.3-1nodesource1"
+labs_agent_id: vps-hostinger-01
+
+# node_exporter release tarball, linux-amd64, from the release's sha256sums.txt.
+node_exporter_version: 1.12.1
+node_exporter_checksum: sha256:b51d8a76aa2a9156a55d501aca6276fae09e262259a5e4e831d2c2222f084e63

@@ -619,6 +619,67 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The lab host is configured by Ansible, not by hand over SSH (#662).**
+  Phase 2 of #656. `lab-host/ansible/` holds `site.yml` and five roles that
+  replace the manual steps the admin Labs page's Setup tab has printed since
+  #577: `hardening` (a key-only `hcwadmin` with passwordless sudo whose keys
+  are copied from root's, so the first run cannot lock the host; an sshd
+  drop-in named `00-` so it sorts ahead of cloud-init's
+  `PasswordAuthentication yes`; ufw deny-in/allow-out with 22, 80 and 443;
+  unattended-upgrades rebooting at 04:30; a fail2ban sshd jail on the systemd
+  backend, because Ubuntu 24.04 has no `auth.log`), `docker` (Docker Engine
+  from Docker's repository at `5:29.8.1`, held, with 10 MB x 3 `json-file`
+  logs and `live-restore`), `node_exporter` (1.12.1, SHA256-verified,
+  loopback only), `caddy` and `labs_agent`. Every version, digest and
+  checksum is in `group_vars/all.yml`, the three collections are pinned in
+  `requirements.yml`, and every role carries `meta/argument_specs.yml` and a
+  README.
+
+  **Caddy is built, not downloaded, because the download API does not pin.**
+  The stock apt package lacks the Cloudflare DNS module, and
+  `caddyserver.com/api/download` — the usual way to add one — always builds
+  the latest release: a request naming a version that does not exist
+  returned the identical 48,173,218-byte binary. So the role runs `xcaddy
+  build v2.11.4 --with github.com/caddy-dns/cloudflare@v0.2.4` inside the
+  official `caddy:2.11.4-builder` image, asserts the pulled tag's
+  `RepoDigests` against the pinned index digest first, and refuses the
+  result unless `caddy list-modules` lists `dns.providers.cloudflare`. The
+  Caddyfile serves `lab.hybridcloudworks.com` and its wildcard under one
+  DNS-01 certificate and imports `conf.d/*.caddy` inside the site block: the
+  apex placeholder is `00-apex.caddy`, and Coder (#679) adds a file rather
+  than editing the template. The token sits in `/etc/caddy/env` (root, 0600)
+  from an Ansible Vault variable. With no vault yet the same routes are
+  served over plain HTTP and the response says so, so a first bootstrap is
+  green and the second turns TLS on.
+
+  **`vps-agent` runs as the systemd service the Setup tab described, not as
+  a container.** The issue said container; the deviation is deliberate. The
+  agent's whole job is `docker run`, so a containerised agent needs the
+  Docker socket mounted and a Docker CLI baked into an image the repository
+  does not have, for no isolation gain — socket access is host root either
+  way — and the Agents tab's own diagnostics already say `systemctl restart
+  hcw-labs-agent` and `journalctl -u hcw-labs-agent`. The role checks the
+  repository out at a pinned sha, runs `npm ci --omit=dev` once per ref (a
+  stamp file, so a bump reinstalls and a re-run does not), writes
+  `/etc/hcw/labs-agent.env` with the exact names from
+  `vps-agent/.env.example`, and generates the key **on the host** as that
+  file asks. `/etc/hcw/labs-agent.pem` stays `root:root` 0600 and the
+  service reads it through systemd `LoadCredential`, which hands the process
+  a private copy at `/run/credentials/hcw-labs-agent.service/labs-agent.pem`
+  — no group, no ACL, no relaxed mode. The public half is
+  `/etc/hcw/labs-agent.crt` for the app registration. Until the vault holds
+  the identity the unit is installed and not started, and the play says
+  which values are missing.
+
+  `lab-host/bootstrap.sh` — what #661's post-install script will call —
+  installs `ansible-core` 2.21.4 with pipx, clones the repository at the
+  pinned sha into `/opt/hcw-src`, installs the collections and runs
+  `site.yml` against localhost, passing the vault at `/etc/hcw/ansible/`
+  when it exists. CI gains an `ansible-lint (lab-host)` job on the
+  production profile plus a syntax check, gated in-job on `lab-host/**` the
+  way every other `ci.yml` job is. `scripts/validate-repository-structure.ps1`
+  allows the directory and its READMEs.
+
 - **Linkie Hub and Labs Hub: finished to the Newsletter Hub standard (#577).**
   The last two hubs in the series. `/admin/linkie` is 127 lines over Links /
   Analytics / **Settings** (`components/admin/linkie`), and `/admin/labs` is 97

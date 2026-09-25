@@ -1,0 +1,65 @@
+---
+argument_specs:
+  main:
+    short_description: Harden SSH, the firewall, patching and brute-force protection on an Ubuntu 24.04 host
+    description:
+      - Creates a key-only administrative user with passwordless sudo, then disables
+        password and root SSH login through a drop-in that sorts before cloud-init's.
+      - Sets ufw to deny inbound and allow outbound with an explicit inbound TCP allowlist.
+      - Turns on unattended-upgrades with an automatic reboot at a fixed hour.
+      - Enables a fail2ban sshd jail on the systemd backend.
+    author: HybridCloudWorks
+    options:
+      hardening_packages:
+        type: list
+        elements: str
+        required: false
+        default: [openssh-server, ufw, fail2ban, unattended-upgrades]
+        description: Packages installed before anything is configured.
+      hardening_admin_user:
+        type: str
+        required: false
+        default: hcwadmin
+        description: The administrative login. Root login is disabled, so this is the way in.
+      hardening_admin_authorized_keys:
+        type: list
+        elements: str
+        required: false
+        default: []
+        description:
+          - Public keys for the administrative user.
+          - When empty the role copies /root/.ssh/authorized_keys, so the key the provisioner
+            installed for root keeps working under the new user. The role refuses to continue
+            if neither source yields a key.
+      hardening_ufw_allowed_tcp_ports:
+        type: list
+        elements: int
+        required: false
+        default: [22, 80, 443]
+        description: Inbound TCP ports allowed through ufw. Everything else inbound is denied.
+      hardening_ufw_logging:
+        type: str
+        required: false
+        default: low
+        choices: ["on", "off", low, medium, high, full]
+        description: ufw logging level.
+      hardening_unattended_reboot_time:
+        type: str
+        required: false
+        default: "04:30"
+        description: Local time (HH:MM) at which unattended-upgrades may reboot the host.
+      hardening_fail2ban_maxretry:
+        type: int
+        required: false
+        default: 5
+        description: Failed SSH attempts within findtime before a ban.
+      hardening_fail2ban_findtime:
+        type: str
+        required: false
+        default: 10m
+        description: Window over which failures are counted.
+      hardening_fail2ban_bantime:
+        type: str
+        required: false
+        default: 1h
+        description: How long a banned address stays banned.
