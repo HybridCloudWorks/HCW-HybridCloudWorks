@@ -50,7 +50,7 @@ and retained only in the archived plans and historical Wiki pages.
 | `scripts/` | Container-spec generation, content-manifest tooling, smoke checks, and operator utilities |
 | `.github/workflows/` | CI, validation, the docs-site build and deploy, scheduled maintenance, and manual release workflows |
 | `docs/` | Documentation source, published to [docs.hybridcloudworks.com](https://docs.hybridcloudworks.com): decisions (ADRs), runbooks, standards (including the required-inputs inventory), architecture records, the historical migration plans and the Firebase-era archive. `mkdocs.yml` at the root builds it |
-| `TODO.md` | **All open work** — engineering, plus owner decisions, approvals, credentials and external access |
+| `TODO.md` | Accepted risks and an offline index of the open parent issues. **Open work itself is GitHub issues** on [org project 1](https://github.com/orgs/HybridCloudWorks/projects/1), each with a Priority (owner decision 2026-09-05, #362) |
 | `CHANGELOG.md` | Verified completed work |
 
 ## Local development
@@ -101,9 +101,15 @@ contains runbooks, ADRs, naming, cost, and operational guidance; its reviewed
 source is under [`docs/`](docs/). Read [CONTRIBUTING](.github/CONTRIBUTING.md)
 before changing repository structure, deployment, or documentation.
 
-Open work and completed work are kept apart; open work is one file:
+Open work and completed work are kept apart:
 
-- [TODO.md](TODO.md) — all open work, engineer-resolvable and owner-gated alike.
-  `REVIEW.md` held the owner-gated half until 2026-08-29 and restated what this
-  file already listed; its sections are now at the end of TODO.md.
+- Open work is a GitHub issue on the
+  [HCW Work Board](https://github.com/orgs/HybridCloudWorks/projects/1), with
+  a Priority of `P1 now`, `P2 next`, `P3 later` or `Gated` (owner decision
+  2026-09-05, #362). Engineer-resolvable and owner-gated work alike; the
+  `owner-gated` and `live-check` labels say which is which.
+- [TODO.md](TODO.md) — the accepted risks and an offline index of the open
+  parent issues, refreshed in the pull request that opens or closes one.
+  `REVIEW.md` held the owner-gated half until 2026-08-29; that role moved to
+  the issues.
 - [CHANGELOG.md](CHANGELOG.md) — verified completed work.

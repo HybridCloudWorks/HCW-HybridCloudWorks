@@ -137,6 +137,34 @@ export function buildDockerArgs(capability, { jobDir, containerName }, limits) {
 }
 
 /**
+ * Modes for the per-job staging directory and the payload copy inside it.
+ *
+ * The container runs as 65534:65534 (SANDBOX_FLAGS) while this process runs
+ * as the agent user, and `fs.mkdtemp` creates 0700 — a directory UID 65534
+ * cannot traverse, so every job failed before its command ran. World-readable
+ * is acceptable here and nowhere else: the directory exists for one job,
+ * holds only that job's payload copy (which already reached this host from
+ * the API and is bind-mounted read-only), and is removed in `finally`.
+ */
+export const JOB_DIR_MODE = 0o755;
+export const PAYLOAD_MODE = 0o644;
+
+/**
+ * Create the per-job staging directory under os.tmpdir() and write the
+ * payload into it, with modes the sandboxed container user can read.
+ * Exported so the test can assert the modes without Docker.
+ * @param {string} payloadFileName from the capability
+ * @param {string} payload         job payload string
+ * @returns {Promise<string>} the job directory path
+ */
+export async function prepareJobDir(payloadFileName, payload) {
+  const jobDir = await fs.mkdtemp(path.join(os.tmpdir(), 'labjob-'));
+  await fs.chmod(jobDir, JOB_DIR_MODE);
+  await fs.writeFile(path.join(jobDir, payloadFileName), payload, { encoding: 'utf8', mode: PAYLOAD_MODE });
+  return jobDir;
+}
+
+/**
  * Execute a job in a sandboxed container.
  * @param {object} capability entry from lib/capabilities.js
  * @param {string} payload   job payload string
@@ -144,12 +172,9 @@ export function buildDockerArgs(capability, { jobDir, containerName }, limits) {
  * @returns {Promise<{exitCode:number, output:string, timedOut:boolean}>}
  */
 export async function runInDocker(capability, payload, limits) {
-  const jobDir = await fs.mkdtemp(path.join(os.tmpdir(), 'labjob-'));
+  const jobDir = await prepareJobDir(capability.payloadFileName, payload);
   const containerName = `labjob-${crypto.randomBytes(6).toString('hex')}`;
   try {
-    const hostPayloadPath = path.join(jobDir, capability.payloadFileName);
-    await fs.writeFile(hostPayloadPath, payload, 'utf8');
-
     const dockerArgs = buildDockerArgs(capability, { jobDir, containerName }, limits);
 
     const timeoutMs = (capability.timeoutSeconds + 15) * 1000; // grace for image pull/start

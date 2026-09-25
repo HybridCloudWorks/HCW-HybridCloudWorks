@@ -1,0 +1,17 @@
+---
+galaxy_info:
+  role_name: node_exporter
+  namespace: hcw
+  author: HybridCloudWorks
+  description: Prometheus node_exporter from a checksum-verified release, bound to loopback under systemd
+  license: UNLICENSED
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+  galaxy_tags:
+    - monitoring
+    - prometheus
+
+dependencies: []

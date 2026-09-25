@@ -1,0 +1,10 @@
+---
+# node_exporter_version and node_exporter_checksum are pins and live in
+# group_vars/all.yml; meta/argument_specs.yml marks them required.
+node_exporter_user: node_exporter
+node_exporter_install_dir: /opt/node_exporter
+node_exporter_binary_path: /usr/local/bin/node_exporter
+# Loopback only. Azure Monitor Agent scrapes it locally in a later phase; nothing
+# outside the host should ever see it, and ufw does not open 9100.
+node_exporter_listen_address: 127.0.0.1:9100
+node_exporter_extra_args: []

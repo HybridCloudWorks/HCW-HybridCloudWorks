@@ -44,7 +44,7 @@ $harnessDirectories = @('.agents', '.claude', 'hooks', 'tooling', '.agentic')
 # convention, like mkdocs.yml below. A local `qlty check` also runs ruff, which
 # leaves .ruff_cache at the root; that cache ignores itself (it writes its own
 # .gitignore) and never reaches CI, but this check walks the filesystem.
-$allowedDirectories = @('.azure', '.github', '.qlty', '.ruff_cache', '.vscode', 'docs', 'edge', 'frontend', 'functions', 'infra', 'node_modules', 'scripts', 'site', 'vps-agent') + $harnessDirectories
+$allowedDirectories = @('.azure', '.github', '.qlty', '.ruff_cache', '.vscode', 'docs', 'edge', 'frontend', 'functions', 'infra', 'lab-host', 'lab-image', 'node_modules', 'scripts', 'site', 'vps-agent') + $harnessDirectories
 
 # The engineering plan documents are companions to the approved architecture and
 # are referenced from README.md and from each other; they stay at the root.
@@ -210,6 +210,16 @@ foreach ($markdownFile in $markdownFiles) {
     $relativePath -eq '.github/CONTRIBUTING.md' -or
     $relativePath -eq '.github/SECURITY.md' -or
     $relativePath -eq 'infra/README.md' -or
+    # lab-image/README.md is the same kind of file for the hcw-lab Dockerfile
+    # (#674): what the two build targets carry, their measured sizes, and how a
+    # version in versions.env is bumped, next to the files it describes.
+    $relativePath -eq 'lab-image/README.md' -or
+    # lab-host/ is the Ansible bootstrap for the Hostinger lab host (#662).
+    # Its README and one README per role are the same tooling-adjacent kind
+    # as infra/README.md: the Ansible convention keeps a role's README inside
+    # the role, next to the argument_specs it summarises.
+    $relativePath -eq 'lab-host/README.md' -or
+    $relativePath -match '^lab-host/ansible/roles/[a-z_]+/README\.md$' -or
     # Documentation source: pages here are reviewed via PR and published to
     # https://docs.hybridcloudworks.com by .github/workflows/docs-pages.yml on
     # merge to main (issue #360; replaced wiki/ on 2026-09-06). This is the one
