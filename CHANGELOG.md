@@ -139,8 +139,8 @@ This project has not cut a tagged release; entries are grouped under
   string of digits only, so a blank field or `corp=%20` falls back to the
   default instead of becoming zero and deselecting.
 
-  Two suites, 32 tests: every component has every field and a `teaches` of
-  the right length, the dependency closure, the carve, canonical-form and
+  Three suites, 209 tests, each emitted file and each module block its own
+  row: every component has every field and a `teaches` of the right length, the dependency closure, the carve, canonical-form and
   count validators, the overlap fallback and its warning (through
   `normalizeState`, `setOption` and a decoded URL), encode/decode round trips
   and default omission, decode tolerance, fmt shape on every emitted file,
@@ -150,7 +150,7 @@ This project has not cut a tagged release; entries are grouped under
   Policy is off, both `variables.tf` cross-checks emitted, committed
   snapshots of the default and the tree-only builds (the repository's first
   `__snapshots__`), and diagram determinism with no overlapping nodes. No
-  page, no route, no dependency; `frontend/` vitest goes from 2,272 to 2,305.
+  page, no route, no dependency; `frontend/` vitest goes from 2,272 to 2,481.
 
 - **ADR 0032 records the learner labs platform, and the two documents that
   misdescribed the labs are corrected (#660).** Phase 0 of #656: the

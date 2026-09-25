@@ -1,107 +1,24 @@
 /**
- * The Terraform the Landing Zone Builder emits (#667). The shape checks are
- * what `terraform fmt -check` would enforce, written out so CI without
- * terraform still fails on a tab or a trailing space; the snapshot is the
- * whole default build, so a change to any emitted line is reviewed as a diff
- * of the Terraform, not of the emitter.
+ * The Terraform the Landing Zone Builder emits (#667): what each file says
+ * for a given selection, and the committed snapshots of the default and
+ * tree-only builds, so a change to any emitted line is reviewed as a diff of
+ * the Terraform, not of the emitter. The file-by-file shape checks and the
+ * provider maps of every module block are in hcl.providers.test.js.
  */
 import { describe, it, expect } from 'vitest';
 import {
-  AVM_MODULES,
-  AVM_SOURCES,
   BASELINE_ASSIGNMENTS,
   DEFAULT_STATE,
   HUB_PREFIX_RANGE,
   groupsAssigning,
   POLICY_DEFAULTS,
-  PROVIDER_NAMES,
   SPOKE_PREFIX_RANGE,
-  SUBSCRIPTION_SCOPED_PROVIDERS,
   emitFiles,
-  normalizeState,
 } from './index';
-
-const ARCHIVED = 'avm-ptn-hubnetworking';
-const UNPUBLISHED = 'avm-ptn-alz-application-landing-zone-identity-and-access';
-
-/** Every module `source = "..."`; terraform.tf holds provider sources, which are not modules. */
-const sourcesIn = (files) =>
-  files
-    .filter((f) => f.path !== 'terraform.tf')
-    .flatMap((f) => [...f.content.matchAll(/^\s*source\s*=\s*"([^"]+)"/gm)].map((m) => m[1]));
 
 const byPath = (files) => Object.fromEntries(files.map((f) => [f.path, f.content]));
 
-const SOME_BUILDS = [
-  ['default', DEFAULT_STATE],
-  ['empty', normalizeState({ selected: [] })],
-  ['tree only', normalizeState({ selected: ['management-groups'] })],
-  ['policy without a hub', normalizeState({ selected: ['policy'] })],
-  [
-    'hub, no firewall, no dns',
-    normalizeState({ selected: ['connectivity-hub'], options: { privateDnsZones: false } }),
-  ],
-  ['firewall basic', normalizeState({ selected: ['firewall'], options: { firewallSku: 'Basic' } })],
-  ['identity only', normalizeState({ selected: ['identity'] })],
-  [
-    'five and five',
-    normalizeState({ options: { corpCount: 5, onlineCount: 5, firewallSku: 'Premium' } }),
-  ],
-  ['nested under contoso', normalizeState({ options: { rootParentId: 'contoso' } })],
-];
-
 describe('emitFiles', () => {
-  it('emits fmt-shaped files: no tabs, no trailing whitespace, one newline at EOF', () => {
-    for (const [name, state] of SOME_BUILDS) {
-      const files = emitFiles(state);
-      expect(files.length, name).toBeGreaterThan(0);
-      for (const f of files) {
-        const where = `${name} ${f.path}`;
-        expect(f.content, where).not.toMatch(/\t/);
-        expect(f.content, where).not.toMatch(/[ ]+$/m);
-        expect(f.content.endsWith('\n'), where).toBe(true);
-        expect(f.content.endsWith('\n\n'), where).toBe(false);
-        expect(f.content, where).not.toMatch(/\r/);
-        expect(f.content, where).not.toMatch(/\n\n\n/);
-        if (f.path.endsWith('.tf')) {
-          for (const line of f.content.split('\n')) {
-            const indent = /^ */.exec(line)[0].length;
-            expect(indent % 2, `${where}: "${line}"`).toBe(0);
-          }
-        }
-      }
-      const paths = files.map((f) => f.path);
-      expect(new Set(paths).size).toBe(paths.length);
-    }
-  });
-
-  it('pins every module source, always with a version, and never the archived or unpublished module', () => {
-    for (const [name, state] of SOME_BUILDS) {
-      const files = emitFiles(state);
-      for (const source of sourcesIn(files)) {
-        expect(AVM_SOURCES, `${name}: ${source}`).toContain(source);
-      }
-      for (const f of files) {
-        const lines = f.content.split('\n');
-        lines.forEach((line, i) => {
-          if (/^\s*source\s*=\s*"Azure\/avm-/.test(line)) {
-            expect(lines[i + 1], `${name} ${f.path}:${i + 1}`).toMatch(
-              /^\s*version = "\d+\.\d+\.\d+"$/
-            );
-          }
-        });
-      }
-      const all = files.map((f) => f.content).join('\n');
-      expect(all, name).not.toContain(ARCHIVED);
-      expect(all, name).not.toContain('hubnetworking');
-      expect(all, name).not.toContain(UNPUBLISHED);
-    }
-    const full = emitFiles(DEFAULT_STATE);
-    expect(new Set(sourcesIn(full))).toEqual(new Set(AVM_SOURCES));
-    const text = full.map((f) => f.content).join('\n');
-    for (const m of Object.values(AVM_MODULES)) expect(text).toContain(`version = "${m.version}"`);
-  });
-
   it('emits only the files whose components are selected', () => {
     const paths = (state) => emitFiles(state).map((f) => f.path);
     expect(paths(DEFAULT_STATE)).toEqual([
@@ -447,48 +364,6 @@ describe('emitFiles', () => {
     });
     expect(byPath(overlapping)['variables.tf']).toContain('default     = "10.2.0.0/16"');
     expect(byPath(overlapping)['application.tf']).toContain('online_1 = 10.2.128.0/24');
-  });
-
-  it('maps every provider each module requires at its pinned tag, and only those', () => {
-    const byName = Object.fromEntries(Object.values(AVM_MODULES).map((m) => [m.source, m]));
-    const seen = [];
-    for (const [name, state] of SOME_BUILDS) {
-      for (const f of emitFiles(state)) {
-        if (!f.path.endsWith('.tf')) continue;
-        const blocks = f.content.split(/^module "/m).slice(1);
-        for (const b of blocks) {
-          const label = b.slice(0, b.indexOf('"'));
-          const [, source] = /^\s*source\s*=\s*"([^"]+)"/m.exec(b);
-          const map = /^\s*providers = \{\n([\s\S]*?)\n\s*\}/m.exec(b);
-          expect(map, `${name} ${f.path} module ${label} has a providers map`).not.toBeNull();
-          const entries = map[1]
-            .trim()
-            .split('\n')
-            .map((line) => line.trim().split(/\s*=\s*/));
-          const keys = entries.map(([k]) => k).sort();
-          expect(keys, `${name} ${f.path} module ${label}`).toEqual(
-            [...byName[source].requiredProviders].sort()
-          );
-          for (const [k, v] of entries) {
-            if (SUBSCRIPTION_SCOPED_PROVIDERS.includes(k) && label !== 'alz') {
-              expect(v, `${label} ${k}`).toMatch(new RegExp(`^${k}\\.[a-z_0-9]+$`));
-            } else {
-              expect(v, `${label} ${k}`).toBe(k);
-            }
-          }
-          seen.push(label);
-        }
-      }
-    }
-    expect(seen).toContain('alz');
-    expect(seen).toContain('management');
-    expect(seen).toContain('connectivity');
-    expect(seen).toContain('spoke_identity');
-    expect(seen).toContain('spoke_corp_5');
-    for (const m of Object.values(AVM_MODULES)) {
-      for (const p of m.requiredProviders) expect(PROVIDER_NAMES, `${m.name} ${p}`).toContain(p);
-    }
-    expect(PROVIDER_NAMES).toEqual(['alz', 'azapi', 'azurerm', 'modtm', 'random', 'time']);
   });
 
   it('lists every placed subscription id once and refuses duplicates', () => {
