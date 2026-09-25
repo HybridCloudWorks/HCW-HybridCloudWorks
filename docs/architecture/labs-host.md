@@ -35,12 +35,15 @@ itself, never from a published page.
 | --- | --- | --- |
 | Caddy | TLS termination and reverse proxy for `lab.hybridcloudworks.com`; the only thing listening on 80 and 443 | Docker Compose |
 | Coder (Community edition) | Browser labs; learner sign-in by GitHub OAuth; Docker-based workspaces from the `lab-image/` images | Docker Compose, behind Caddy |
+| PostgreSQL (Coder's database) | Coder's metadata: users, templates, workspace records. Listens on the Compose network only, never on the host | Docker Compose, a named volume |
 | `vps-agent` | Pull-based lab job runner (`vps-agent/`); dials out to the Functions API, runs each job in `docker run --network none` | Docker Compose |
 | node-exporter | Host metrics for the lab status page | Docker Compose, host-local |
 | Azure Connected Machine agent and Azure Monitor Agent | Arc onboarding; heartbeat and `auth`/`authpriv` syslog only | Host services, installed by Ansible |
+| Coder workspaces and lab job containers | Transient. Workspaces carry Coder's `com.coder.resource=true` label and stop after an hour; job containers carry the `hcw.lab-job` label and live for one job | `docker run`, started by Coder and by `vps-agent` |
 
-Nothing else. A process that is not in this table is a finding, and the
-validation list in ADR 0032 checks `docker ps` against it.
+Nothing else. A container that is neither a named service above nor carries
+one of the two labels is a finding, and the validation list in ADR 0032 checks
+`docker ps` that way, by name and label rather than by count.
 
 ## Exposure
 
@@ -63,9 +66,19 @@ the Function App that reads `CODER_URL` and `CODER_STATUS_TOKEN` from Key Vault.
 recreated from the repository: Terraform provisions it, Ansible configures it,
 and every image it runs is published from `lab-image/` and pinned by digest.
 Lab job records live in Cosmos DB, not on the host. Coder workspaces are
-learner scratch space with no retention promise. There is no backup schedule,
-and a compromised or broken host is destroyed and re-applied. If the host ever
-acquires data of record, that is a revisit trigger in ADR 0032.
+learner scratch space with no retention promise.
+
+Coder's PostgreSQL is the one stateful service, and it is treated as
+**rebuildable metadata, not data of record**: learners are GitHub OAuth users
+and reappear on next sign-in, templates are pushed again from
+`lab-host/coder/templates/`, and workspace records describe containers that
+stop after an hour. Losing it costs a re-push and a re-sign-in. As a
+convenience, not a promise, the Ansible `coder` role runs a nightly `pg_dump`
+into a host directory that keeps seven days, so an operator error can be
+undone without a rebuild; that dump never leaves the host and is not restored
+anywhere else. There is no other backup schedule, and a compromised or broken
+host is destroyed and re-applied. If the host ever acquires data of record,
+that is a revisit trigger in ADR 0032.
 
 ## Identities the host holds
 

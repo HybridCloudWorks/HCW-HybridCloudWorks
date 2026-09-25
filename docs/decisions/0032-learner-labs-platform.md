@@ -182,8 +182,13 @@ are recorded once, here, before any of them is implemented.
   - After the owner applies, the host appears as **Connected** under Azure Arc
     > Machines in `rg-lab-hybrid-prod-cus`, and a `Heartbeat` query in the
     Management workspace returns rows for it.
-  - `docker ps` on the host lists Coder, Caddy, `vps-agent` and node-exporter
-    and nothing else; `which kubectl k3s` returns nothing.
+  - The control plane is checked by name, not by count: `docker ps` on the
+    host shows the Compose services `caddy`, `coder`, `coder-postgres`,
+    `vps-agent` and `node-exporter`. Every other container carries either the
+    Coder workspace label (`com.coder.resource=true`) or the `hcw.lab-job`
+    label the agent sets, and any container with neither is a finding. The
+    count is not asserted, because a running workspace or job legitimately
+    adds containers. `which kubectl k3s` returns nothing.
   - `/education/labs` shows the Arc status card, and shows an explicit absent
     state, not a fabricated one, when the host is down.
   - `enqueueLabJob` with no `Authorization` header still answers 401, which the
