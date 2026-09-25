@@ -64,7 +64,12 @@ the Function App that reads `CODER_URL` and `CODER_STATUS_TOKEN` from Key Vault.
 
 **Rebuildable, no data of record.** The host holds nothing that cannot be
 recreated from the repository: Terraform provisions it, Ansible configures it,
-and every image it runs is published from `lab-image/` and pinned by digest.
+and every image it runs is pinned by digest in the repository. Two kinds of
+image are pinned in two places: the learner and job toolchain (`hcw-lab`,
+`hcw-lab-runner`) is built and published from `lab-image/` and pinned in the
+Coder template and `vps-agent/lib/capabilities.js`; the infrastructure
+services (Caddy, Coder, PostgreSQL, node-exporter) run their upstream images,
+pinned by digest in the Compose file under `lab-host/`.
 Lab job records live in Cosmos DB, not on the host. Coder workspaces are
 learner scratch space with no retention promise.
 

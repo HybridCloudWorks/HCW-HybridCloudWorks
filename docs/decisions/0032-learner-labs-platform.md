@@ -85,11 +85,19 @@ are recorded once, here, before any of them is implemented.
    directory.** The images go to GHCR (and to Docker Hub once an organisation
    exists there) and are the single toolchain for the lab pages, the Coder
    template and `vps-agent`. They carry a Terraform provider **filesystem
-   mirror**, so `terraform init` succeeds under `--network none`. Today the
-   `terraform-validate` capability in `vps-agent/lib/capabilities.js` runs
-   `terraform init -backend=false` inside a network-less container, so it can
-   pass only for HCL that declares no provider; the mirror is what makes a real
-   landing-zone module validatable.
+   mirror** and the Azure Verified Modules the Landing Zone Builder emits,
+   **vendored** at pinned versions under `/opt/avm/<module>@<version>`, so
+   `terraform init` succeeds under `--network none`: `init` downloads both
+   providers and registry `module` sources, and a mirror alone still fails on
+   the modules. Today the `terraform-validate` capability in
+   `vps-agent/lib/capabilities.js` runs `terraform init -backend=false` inside
+   a network-less container, so it can pass only for HCL that declares neither
+   a provider nor a registry module; the mirror plus the vendored modules,
+   with the builder rewriting each `source` to the vendored path before
+   submission, is what makes a real landing-zone configuration validatable.
+   These images are the learner and job toolchain only. The host's
+   infrastructure services (Caddy, Coder, PostgreSQL, node-exporter) run their
+   upstream images, pinned by digest in the Compose file.
 6. **Anonymous public lab submission stays Gated.** Accepting this ADR does not
    open it. When a later revision does, the bounds are these and no wider:
    only the `terraform-validate` job type; a 64 KB payload; 2 submissions an
