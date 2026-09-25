@@ -220,7 +220,7 @@ changes under `lab-host/`.
 | Pin | Lives in | How to read the current value |
 | --- | --- | --- |
 | Docker, buildx, compose | `docker_version`, `docker_containerd_version`, `docker_buildx_version`, `docker_compose_version` | `roles/docker/README.md` |
-| apt signing keys | `docker_apt_key_checksum`, `labs_agent_node_apt_key_checksum` | `curl -sL <key URL> \| sha256sum` on the two URLs named beside them; a changed key is a decision, not a refresh |
+| apt signing keys | `docker_apt_key_checksum`, `labs_agent_node_apt_key_checksum` | The two bash lines below this table; a changed key is a decision, not a refresh |
 | Caddy, Cloudflare module, builder image digest | `caddy_*` | `roles/caddy/README.md`; the digest is the index from `docker buildx imagetools inspect caddy:2.11.4-builder`, and the image is pulled by that digest, not by tag |
 | node_exporter | `node_exporter_version`, `node_exporter_checksum` | `roles/node_exporter/README.md` |
 | Node.js | `labs_agent_node_version` | NodeSource `node_22.x` package index |
@@ -229,3 +229,17 @@ changes under `lab-host/`.
 | Ansible tooling | `ANSIBLE_CORE_VERSION` in `bootstrap.sh`; the pip pins in `ci.yml`; the image digest above | PyPI; the image's `RepoDigests` |
 
 All in `ansible/group_vars/all.yml` unless the table says otherwise.
+
+The apt signing key checksums are read with these two lines, bash, from
+anywhere with network access; each prints the hex that goes after `sha256:`
+in the matching variable. Docker's key first:
+
+```bash
+curl -sL https://download.docker.com/linux/ubuntu/gpg | sha256sum
+```
+
+NodeSource's key:
+
+```bash
+curl -sL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | sha256sum
+```

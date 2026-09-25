@@ -63,7 +63,11 @@ that made it the right call before the ADR said so:
 bind-mounts that path into the job container. With `PrivateTmp` the unit's
 `/tmp` is invisible to the Docker daemon, so the unit sets
 `TMPDIR=/var/lib/hcw-labs-agent/tmp`, a real host directory owned by the
-agent, and the role creates it.
+agent, and the role creates it (0750, so only the agent lists it). Inside
+it, the runner makes each per-job `labjob-*` directory 0755 and the payload
+copy 0644, because the container runs as 65534:65534 and could not traverse
+the 0700 directory `mkdtemp` creates; each directory exists for one job,
+holds only that job's payload copy, and is removed when the job ends.
 
 The role sets no Docker labels and passes nothing to the jobs the agent
 starts; the `hcw.lab-job` label ADR 0032 requires on every job container is

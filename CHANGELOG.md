@@ -93,7 +93,14 @@ This project has not cut a tagged release; entries are grouped under
   `TMPDIR=/var/lib/hcw-labs-agent/tmp`, because `lib/docker-runner.js`
   stages each payload under `os.tmpdir()` and bind-mounts it into the job
   container, and the `PrivateTmp` `/tmp` the unit otherwise gets is one the
-  Docker daemon cannot see. Until the vault holds the identity the unit is
+  Docker daemon cannot see. Reviewing that surfaced a defect the runner has
+  carried since #577: `mkdtemp` creates the per-job directory 0700 as the
+  agent user while the container runs as 65534:65534, so `/workspace` was
+  untraversable and every job would have failed before its command ran.
+  `prepareJobDir` now makes the directory 0755 and the payload 0644 — the
+  directory is per job, holds only the payload copy the API already sent,
+  is bind-mounted read-only and is removed after the job — and
+  `docker-runner.test.js` asserts the modes. Until the vault holds the identity the unit is
   installed, stopped and disabled and the env file is removed — explicitly,
   so removing a value from the vault is a revocation on the next run, not a
   file a manual `systemctl start` could reuse — and the play says which
