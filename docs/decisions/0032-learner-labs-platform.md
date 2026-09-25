@@ -75,7 +75,11 @@ are recorded once, here, before any of them is implemented.
    Servers stays **off** for cost. Arc itself is free.
 4. **Coder (Community edition) is the learner identity boundary.** It runs
    from Docker Compose on the host with Docker-based workspaces, and learners
-   sign in to it with **GitHub OAuth**. The site never signs learners in and
+   sign in to it with **GitHub OAuth**. The host's Docker socket is mounted
+   into the Coder **server** container only, which is how Coder's documented
+   Docker install creates workspaces; a workspace never receives the socket,
+   a privileged flag or a host path, and the template test in #679 asserts
+   that. The privilege boundary this leaves is recorded under consequences. The site never signs learners in and
    never embeds Coder: `frontend/staticwebapp.config.json` keeps `frame-src`
    at `'self'` plus the Entra sign-in origin and a closed `connect-src`. The
    site links out to `lab.hybridcloudworks.com` and shows lab status through a
@@ -134,6 +138,35 @@ are recorded once, here, before any of them is implemented.
   GitHub-backed Coder account and nothing on the site. Coder's own hardening —
   workspace resource limits, template review, upgrade cadence — belongs to
   #659 and is not covered here.
+- **The Coder server holds the Docker socket, and that is root on the host.
+  Accepted, with the blast radius kept small on purpose.** Whoever controls
+  the Coder server container controls the daemon, every workspace and every
+  job container, so `--network none` and the label checks protect learners
+  and jobs from each other, not the host from Coder. The mitigations are:
+  the socket goes to the server container only, never to a workspace
+  (asserted by the #679 template test); workspaces run on their own bridge
+  network with no route to the Compose network; the server runs as a
+  non-root user in the `docker` group; and the host deliberately holds no
+  data of record and no production credential, only the agent's certificate,
+  which reaches three API endpoints, and Caddy's DNS token, which is scoped
+  as narrowly as Cloudflare allows (next bullet). A compromise therefore
+  costs a rebuild, not data. Moving workspaces to a rootless or separate
+  daemon is a revisit trigger, not a prerequisite.
+- **Cloudflare API tokens are zone-scoped, and `lab.hybridcloudworks.com` is
+  a name in the production zone.** Cloudflare cannot scope a token to one
+  record, so any token with DNS edit on `hybridcloudworks.com` can change the
+  site's own records. Two tokens exist and neither is on the host in a form
+  that reaches production DNS more than it must: the `hcw-lab` workspace
+  token creates the `lab` records and lives only in HCP Terraform; Caddy's
+  renewal token lives on the host in `/etc/caddy/env` (root, 0600, from
+  Ansible Vault). The chosen shape for Caddy is **DNS-01 by CNAME
+  delegation**: `_acme-challenge.lab.hybridcloudworks.com` and
+  `_acme-challenge.*.lab` point at a dedicated lab zone that holds no
+  production record, and Caddy's token is scoped to that zone alone. Until
+  the owner has that zone (a small annual spend, tracked on #661), Caddy's
+  token has DNS edit on the production zone, and that interim is an accepted
+  risk recorded here rather than a surprise: the `hcw-azure` plan check and
+  the deploy-drift monitor would show any production record it altered.
 - **`lab-image/` is a new supply-chain surface.** Every image it publishes
   must be digest-pinned where consumed, and the existing
   `capabilities.test.js` assertion that every capability names a digest is the

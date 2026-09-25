@@ -95,12 +95,14 @@ that is a revisit trigger in ADR 0032.
 | Coder GitHub OAuth app secret | Coder's Docker Compose environment | Learner sign-in to Coder; nothing on the site | planned |
 | Coder status token | Issued by Coder; the value is held in Key Vault `kv-site-prod-cus-01` as `CODER_STATUS_TOKEN`, not on the host | Read-only Coder API for the site's status proxy | planned |
 | Caddy ACME account | Caddy's data volume | Certificate issuance for `lab.hybridcloudworks.com` | planned |
+| Caddy DNS-01 token (`CLOUDFLARE_API_TOKEN` in `/etc/caddy/env`, root, 0600, written by Ansible from Vault) | On the host, because renewals happen there | DNS edit on the dedicated lab zone that `_acme-challenge.lab` is delegated to; DNS edit on the production zone only in the interim ADR 0032 records | planned |
 
 Identities that are **not** on the host, by design: the Hostinger API token and
-the Cloudflare API token (HCP Terraform workspace variables in `hcw-lab`), the
-Arc onboarding service principal credential (Ansible Vault, used once at
-onboarding and not persisted), and any Cosmos DB key (the runner has never held
-one — see the header comment of `vps-agent/index.js`).
+the Terraform-side Cloudflare API token (HCP Terraform workspace variables in
+`hcw-lab`; the Caddy token above is a different, narrower token), the Arc
+onboarding service principal credential (Ansible Vault, used once at onboarding
+and not persisted), and any Cosmos DB key (the runner has never held one — see
+the header comment of `vps-agent/index.js`).
 
 ## Related
 
