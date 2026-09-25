@@ -1,9 +1,10 @@
 /**
  * `/education/labs` (#681): the cards come from the catalogue and nothing
  * else, every deep link carries its own lab id, the two "Run it locally"
- * lines are exactly the two from #658, and the two status cards say the two
+ * lines are exactly the two from #658, the two status cards say the two
  * explicit unprovisioned sentences when both routes answer
- * `{ configured: false }` — and render full data when they answer with it.
+ * `{ configured: false }` — and render full data when they answer with it —
+ * and the agent slot holds the sandbox section (#676) rather than a promise.
  */
 import React from 'react';
 import { render, screen, within } from '@testing-library/react';
@@ -13,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CODER_ORIGIN, RUN_LOCALLY_COMMANDS, labs } from '@/data/labs/catalogue';
 import { NOT_PROVISIONED_SENTENCE } from '@/components/labs/LabsEstateCard';
 import { CODER_NOT_PROVISIONED_SENTENCE } from '@/components/labs/CoderStatusCard';
+import { SANDBOX_COMMANDS } from '@/components/labs/SandboxSection';
 
 const fetchLabsEstate = vi.fn();
 const fetchCoderStatus = vi.fn();
@@ -159,7 +161,7 @@ describe('LabsLearnPage', () => {
     await screen.findByText(NOT_PROVISIONED_SENTENCE);
   });
 
-  it('holds the two later sections as headed slots that promise nothing', async () => {
+  it('fills the agent slot with the sandbox section: three steps and the two commands', async () => {
     fetchLabsEstate.mockResolvedValue({ configured: false });
     fetchCoderStatus.mockResolvedValue({ configured: false });
     renderPage();
@@ -168,7 +170,26 @@ describe('LabsLearnPage', () => {
     expect(within(agent).getByRole('heading', { level: 2 })).toHaveTextContent(
       'Run an agent against your landing zone'
     );
-    expect(agent).toHaveTextContent('#676');
+    expect(agent).not.toHaveTextContent('Coming soon');
+    expect(within(agent).getAllByTestId('sandbox-step')).toHaveLength(3);
+    const lines = [...agent.querySelectorAll('pre code')];
+    expect(lines.map((line) => line.dataset.shell)).toEqual(['PowerShell', 'bash']);
+    expect(lines.map((line) => line.textContent)).toEqual(
+      SANDBOX_COMMANDS.map((entry) => entry.command)
+    );
+    expect(within(agent).getByTestId('sandbox-first-prompt')).toBeInTheDocument();
+    expect(within(agent).getByTestId('sandbox-recipe-link')).toHaveAttribute(
+      'href',
+      'https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/tree/main/lab-image/sandbox-template'
+    );
+    await screen.findByText(NOT_PROVISIONED_SENTENCE);
+  });
+
+  it('holds the article list as a headed slot that promises nothing', async () => {
+    fetchLabsEstate.mockResolvedValue({ configured: false });
+    fetchCoderStatus.mockResolvedValue({ configured: false });
+    renderPage();
+
     const articles = screen.getByTestId('labs-slot-articles');
     expect(within(articles).getByRole('heading', { level: 2 })).toBeInTheDocument();
     expect(articles).toHaveTextContent('#677');

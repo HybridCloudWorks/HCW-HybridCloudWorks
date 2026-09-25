@@ -214,6 +214,11 @@ foreach ($markdownFile in $markdownFiles) {
     # (#674): what the two build targets carry, their measured sizes, and how a
     # version in versions.env is bumped, next to the files it describes.
     $relativePath -eq 'lab-image/README.md' -or
+    # lab-image/sandbox-template/ is the Docker Sandboxes recipe (#676): its
+    # README is the build, load and run procedure next to the Dockerfile, and
+    # AGENTS.md is a file the Dockerfile copies into the image — the agent's
+    # briefing, which has to be Markdown because that is what agents read.
+    $relativePath -match '^lab-image/sandbox-template/(README|AGENTS)\.md$' -or
     # lab-host/ is the Ansible bootstrap for the Hostinger lab host (#662).
     # Its README and one README per role are the same tooling-adjacent kind
     # as infra/README.md: the Ansible convention keeps a role's README inside
