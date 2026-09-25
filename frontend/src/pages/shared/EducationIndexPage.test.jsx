@@ -98,6 +98,14 @@ describe('the level table can describe every catalogue', () => {
 });
 
 describe('EducationIndexPage', () => {
+  it('links to the browser labs page (#681)', () => {
+    renderPage();
+    expect(screen.getByRole('link', { name: 'browser labs' })).toHaveAttribute(
+      'href',
+      '/education/labs'
+    );
+  });
+
   it('renders a tile and a table column for all eight providers', () => {
     const { container } = renderPage();
 

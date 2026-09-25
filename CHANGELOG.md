@@ -19,6 +19,31 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **`/education/labs`: the browser labs page, with the lab catalogue, Open in
+  Coder deep links, Run it locally, and the estate and Coder status cards
+  (#681).** Phase 3 of #659, carrying the frontend halves of #664 (the
+  "Hybrid Lab right now" card) and #680 (the Coder status card) against the
+  contracts those issues fix. `frontend/src/data/labs/catalogue.js` is pure
+  frozen data — one row per lab with `id`, `title`, `summary`, `tools`,
+  `template`, `params`, `articleSlugs` and `estimatedMinutes`, and a test
+  that every row carries every field and no two share an `id` — starting
+  with the Landing Zone Builder download, a `terraform validate` walkthrough
+  and an Ansible syntax-check walkthrough. Each card links to
+  `https://coder.lab.hybridcloudworks.com/templates/hcw-lab/workspace?mode=auto&param.lab=<id>`
+  through `safeUrl`, and carries the two `docker run` lines from #658,
+  PowerShell then bash, each labelled with its shell. `LabsEstateCard.jsx`
+  reads `GET /api/public/labs/estate` through the new `fetchLabsEstate()`
+  and renders "The lab host is not provisioned yet." for
+  `{ configured: false }` and, when configured, the Arc status word, the
+  heartbeat age in words, agent version, OS, policy counts, job-runner queue
+  and Coder capacity; `CoderStatusCard.jsx` reads `GET
+  /api/public/labs/coder-status` through `fetchCoderStatus()` and says "not
+  yet provisioned" or "unreachable" before it shows templates and capacity.
+  Every state on the page is a word, never a colour alone. Two slot sections
+  hold the layout for the agent section (#676) and the article list (#677).
+  Wired in App.jsx, `STANDALONE_ROUTES`, `staticRoutes.labs`, a new Learn
+  menu in the header (the first header link to `/education` as well) and a
+  section on `/education`, each enforced by a test.
 - **Landing Zone Builder, Phase 2: the page at `/tools/landing-zone` (#668).**
   Phase 2 of #657, on the pure module #667 landed. `frontend/src/pages/tools/
   LandingZonePage.jsx` is where a learner assembles an Azure landing zone
