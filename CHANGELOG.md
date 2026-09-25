@@ -19,6 +19,139 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Landing Zone Builder, Phase 1: the pure module, with no page yet (#667).**
+  `frontend/src/lib/landingZone/` is the logic behind the Landing Zone Builder
+  (#657), built the way `pricingScenarios/` is: frozen catalogues, small pure
+  functions, the state as a value and as a URL, and nothing that reads a
+  clock, a viewport or a tenant. `components.js` is the catalogue — six
+  platform components (`management-groups`, `policy`, `management`,
+  `connectivity-hub`, `firewall`, `identity`) and two application ones
+  (`corp`, `online`, each counted 0..5) — every one with a one-sentence
+  summary, a hand-written `teaches` of three to five sentences (what it is,
+  why a landing zone has it, what breaks without it), its `dependsOn`, the
+  module that deploys it, and its knobs: hub CIDR, spoke range, firewall SKU,
+  private DNS zones, region, the two counts and the parent management group,
+  each with a validator and a default.
+
+  **The module pins are looked up, not remembered.** `avmVersions.js` holds
+  exactly four modules with `verifiedOn: '2026-09-25'`, each read from the
+  registry's v1 API and the repository's latest GitHub release that day:
+  `Azure/avm-ptn-alz/azurerm` 0.21.0, `avm-ptn-alz-management` 0.9.0,
+  `avm-ptn-alz-connectivity-hub-and-spoke-vnet` 0.17.5 and
+  `avm-res-network-virtualnetwork` 0.22.2. The pattern module for
+  application landing zones,
+  `avm-ptn-alz-application-landing-zone-identity-and-access`, was on GitHub
+  that day as the unfilled AVM template with no tag, no release and no
+  registry listing, so the builder does not call it: a landing zone is a
+  `subscription_placement` entry in avm-ptn-alz plus a spoke from the virtual
+  network module instead, and a test asserts every emitted module `source` is
+  pinned with a `version` line. The provider constraints (`alz ~> 0.21`,
+  `azapi ~> 2.12`, `azurerm ~> 4.35`, `modtm ~> 0.3`, `random ~> 3.6`, `time
+  ~> 0.9`, Terraform `>= 1.12, < 2.0`), each module's `requiredProviders`
+  list, and the `platform/alz/2026.08.1` library ref come from the same
+  modules' `terraform.tf` files at their tags and the library's release
+  list; every emitted `module` block's `providers` map is generated from
+  that list, since a block with a `providers` argument inherits nothing for
+  the providers it leaves out.
+  `avm-ptn-hubnetworking` is archived; a test asserts the string never
+  reaches any emitted file.
+
+  **The build is a URL.** `share.js` encodes the state as
+  `?lz=mg,policy,mgmt,hub,fw,id&hub.cidr=10.0.0.0/16&spoke.cidr=10.1.0.0/16&fw.sku=Premium&dns=0&loc=westeurope&corp=2&online=1&root=contoso`:
+  `lz=` lists the selected platform components by short id, the application
+  components travel as their counts with 0 meaning not selected, `root=` is
+  the management group the `alz` root is created under (absent for the tenant
+  root group, wired to the module's `parent_resource_id`), and every default
+  is left out, so the default build — the whole landing zone with one corp
+  and one online — is a bare URL and an empty build is `?lz=&corp=0&online=0`.
+  Decoding drops unknown tokens, defaults any option that fails its
+  validator, and normalises through `state.js`, which closes the selection
+  over `dependsOn` (a firewall brings the hub; identity, corp and online each
+  bring the tree and the hub they peer to), keeps the counts and the
+  selection in step, and checks the two ranges against each other: a spoke
+  range that overlaps the hub is moved to the first free fallback
+  (`10.1.0.0/16`, `10.2.0.0/16`, then `172.16.0.0/16`) and the state carries
+  a `warnings` entry (`{ code: 'spoke-cidr-overlap', from, to }`) for the
+  page to show. `isLzParam` says which keys are the module's, as
+  `isScenarioParam` does for the pricing page.
+
+  **`hcl/` emits the Terraform the validated pattern would**, one module per
+  emitted file. `emitFiles` returns `{ path, content }` files, only for
+  selected components: `terraform.tf`, `providers.tf` (default providers from
+  the workspace's `ARM_*` variables, an azurerm and an azapi alias per
+  subscription), `alz.tf` (`architecture_name = "alz"`, one placement per
+  subscription, and when policy is selected **all fourteen
+  `policy_default_values` the pinned library declares** — the six AMA and
+  workspace ids from the management names, the three private-DNS values from
+  the hub, the location, two resource-group names and a validated
+  `security_contact_email` variable — with the one value the build never
+  creates a source for, the DDoS plan, and the DNS trio when zones are off,
+  handled by setting their assignments `DoNotEnforce` rather than leaving a
+  library placeholder; **when policy is not selected the tree is still the
+  `alz` architecture, which carries its baseline, so every one of the 123
+  assignments the twelve archetypes make at that ref is emitted with
+  `enforcement_mode = "DoNotEnforce"`** and the defaults the build can
+  supply are still passed, with a comment saying the baseline is present and
+  inert because Policy was not chosen), `management.tf`, `connectivity.tf`
+  (the firewall and
+  its policy as blocks of the hub object only when selected, the DNS resources
+  on the option), `identity.tf` and `application.tf` (one spoke per landing
+  zone: a resource group, a /24 carved from the spoke range with `cidrsubnet`,
+  a two-way peering to the hub through the connectivity module's
+  `virtual_network_resource_ids`, and for corp and identity a route table
+  whose default route is the firewall's private IP when the firewall is
+  selected; online spokes egress directly), `variables.tf` with GUID
+  validation on every subscription id, the range variables carrying the same
+  rules as the JS validators — a shape check (dotted quad, prefix within
+  `HUB_PREFIX_RANGE` /8–/24 or `SPOKE_PREFIX_RANGE` /8–/20, both generated
+  from the constants `isCidr` and `isSpokeCidr` use, and `cidrhost` able to
+  parse it) and, on the spoke range, the hub-versus-spoke overlap rule as a
+  second `validation` that reads `var.hub_address_space` (Terraform 1.9 lets
+  a validation read another variable) and is guarded so it never evaluates
+  on a string that does not parse; proven offline with `terraform plan` on
+  the emitted file: the apart pair plans, a `/25` spoke, a `/25` hub, a
+  garbage string and an octet of 256 each fail the shape check, and
+  identical, hub-inside-spoke and spoke-inside-hub each fail the overlap
+  message — and a non-empty, `/`-rejecting check on
+  `var.parent_management_group_id`, because avm-ptn-alz's
+  `parent_resource_id` is the parent group's name and the module itself
+  refuses a resource id, `subscriptions.tf` (every placed subscription id in
+  one list behind an output `precondition` that refuses duplicates, since a
+  subscription can sit under one management group only; a duplicated id
+  fails the offline plan on that message, a distinct set passes),
+  `terraform.tfvars.example` with distinct placeholder ids, and a
+  `README.md` carrying the pattern's prerequisites — HCP Terraform, Owner at
+  the tenant root, a service principal — the spoke pattern in two sentences,
+  and the line that the files were generated for learning and never applied
+  by HybridCloudWorks. `format.js` aligns `=` the way `terraform fmt` does,
+  across runs of single-line attributes and not across a multi-line value or
+  a comment; six builds (default, Basic firewall, hub without DNS, tree only,
+  five-and-five Premium, identity only) pass `terraform fmt -check
+  -recursive` under Terraform 1.15.8. `cidr.js` is the carve — corp from the
+  low half, online from the high half, identity at the top of the low half —
+  and `diagram.js` lays the same state out as a tidy tree of management
+  groups, hub and spokes with their /24s and peering edges, in fixed units so
+  pre-render and hydration agree.
+
+  Validators refuse what `Number` would quietly accept: a CIDR must be
+  canonical (`010.0.0.0/8`, `10.0.0.0/08`, `/+8`, `/8 ` and `/8.0` are all
+  rejected, not read as 10.0.0.0/8) and a landing-zone count is a number or a
+  string of digits only, so a blank field or `corp=%20` falls back to the
+  default instead of becoming zero and deselecting.
+
+  Three suites, 209 tests, each emitted file and each module block its own
+  row: every component has every field and a `teaches` of the right length, the dependency closure, the carve, canonical-form and
+  count validators, the overlap fallback and its warning (through
+  `normalizeState`, `setOption` and a decoded URL), encode/decode round trips
+  and default omission, decode tolerance, fmt shape on every emitted file,
+  every module `source` pinned with a version, the archived and the
+  unpublished module absent, all fourteen policy defaults supplied or their
+  assignment not enforced, all 123 baseline assignments `DoNotEnforce` when
+  Policy is off, both `variables.tf` cross-checks emitted, committed
+  snapshots of the default and the tree-only builds (the repository's first
+  `__snapshots__`), and diagram determinism with no overlapping nodes. No
+  page, no route, no dependency; `frontend/` vitest goes from 2,272 to 2,481.
+
 - **ADR 0032 records the learner labs platform, and the two documents that
   misdescribed the labs are corrected (#660).** Phase 0 of #656: the
   decisions every sub-issue in the four lab epics (#656, #657, #658, #659)
