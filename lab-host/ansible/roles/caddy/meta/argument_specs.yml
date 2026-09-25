@@ -33,8 +33,16 @@ argument_specs:
         type: str
         required: true
         description:
-          - Image index digest the pulled tag must resolve to. The build runs against
-            image@digest, so a moved tag fails the assertion rather than building silently.
+          - Image index digest of the builder tag. The build runs against image@digest, and
+            the first twelve hex characters are part of the built binary's name, so a bump
+            here rebuilds.
+      caddy_builder_image_platform_digest:
+        type: str
+        required: true
+        description:
+          - The linux/amd64 manifest digest beneath that index. The pull assertion accepts
+            either this or the index digest in RepoDigests, since which one a daemon records
+            depends on its image store.
       caddy_site_domain:
         type: str
         required: true

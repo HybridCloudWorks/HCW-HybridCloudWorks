@@ -6,4 +6,7 @@ labs_agent_configured: >-
      and labs_agent_tenant_id | length > 0
      and labs_agent_client_id | length > 0
      and labs_agent_api_scope | length > 0 }}
-labs_agent_deps_stamp: "{{ labs_agent_state_dir }}/deps-installed-{{ labs_agent_repo_ref }}"
+# The ref may be a tag with a slash in it, so the stamp carries its sha256
+# rather than the ref itself.
+labs_agent_deps_stamp: "{{ labs_agent_state_dir }}/deps-installed-{{ labs_agent_repo_ref | hash('sha256') }}"
+labs_agent_certificate_warn_seconds: "{{ labs_agent_certificate_warn_days | int * 86400 }}"

@@ -13,7 +13,10 @@ sh` step the Setup tab used to list.
    they come from the Ubuntu archive, which drops a superseded version the
    day a security update replaces it, so an exact pin there fails the play
    on the next patch day; unattended-upgrades owns them instead.
-2. Fetches Docker's signing key to `/etc/apt/keyrings/docker.asc` and adds the
+2. Fetches Docker's signing key to `/etc/apt/keyrings/docker.asc`, refusing
+   it unless its SHA256 matches `docker_apt_key_checksum` (the key is the
+   root of trust for every version pin, so a pin on the versions without a
+   pin on the key would be decorative), and adds the
    `stable` repository for the running release (`noble`) as a deb822 source
    (`/etc/apt/sources.list.d/docker.sources`) with `Signed-By`. The install
    step refreshes the cache itself, because the play-level refresh ran
@@ -43,6 +46,7 @@ sh` step the Setup tab used to list.
 | `docker_compose_version` | required | apt version string for `docker-compose-plugin` |
 | `docker_daemon_config` | log driver, limits, live-restore | Rendered as `daemon.json` |
 | `docker_apt_key_url` | Docker's gpg URL | Signing key source |
+| `docker_apt_key_checksum` | required | `sha256:<hex>` the fetched key must match |
 | `docker_apt_key_path` | `/etc/apt/keyrings/docker.asc` | Signing key location |
 | `docker_apt_repository_url` | `https://download.docker.com/linux/ubuntu` | Repository base |
 

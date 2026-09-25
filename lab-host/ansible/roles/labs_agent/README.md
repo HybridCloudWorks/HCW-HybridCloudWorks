@@ -26,19 +26,26 @@ that made it the right call before the ADR said so:
    `docker`.
 2. Node.js 22 from NodeSource at `labs_agent_node_version`, held; the
    install carries `allow_change_held_packages` so a pin bump on a re-run
-   moves the held package instead of failing.
+   moves the held package instead of failing. The NodeSource signing key
+   is refused unless its SHA256 matches `labs_agent_node_apt_key_checksum`,
+   since apt trusts that key for the pinned package.
 3. `git` checkout of `labs_agent_repo_url` at `labs_agent_repo_ref` into
    `/opt/hcw-labs-agent` (root-owned; the agent reads its own code and
    cannot change it), then `npm ci --omit=dev` in `vps-agent/`. A stamp in
-   `/var/lib/hcw-labs-agent/deps-installed-<ref>` records that the install
-   ran for this ref, so a re-run is a no-op and a bumped ref reinstalls.
+   `/var/lib/hcw-labs-agent/deps-installed-<sha256 of the ref>` records that
+   the install ran for this ref (hashed, because a tag may contain `/`), so
+   a re-run is a no-op and a bumped ref reinstalls.
 4. If `/etc/hcw/labs-agent.pem` does not exist, generates an RSA-4096 key and
    a self-signed certificate **on this host** (`CN=<labs_agent_id>`, 730
    days), as `.env.example` asks. The PEM is `root:hcw-labs-agent` mode
    `0640`: root owns it, the service's group can read it, nobody else can,
    and there are no ACLs. The certificate alone is written to
    `/etc/hcw/labs-agent.crt` (0644) for upload to the app registration;
-   the private key never leaves the host.
+   the private key never leaves the host. Every run checks the remaining
+   validity with `openssl x509 -checkend` and prints a warning within
+   `labs_agent_certificate_warn_days` (60) of expiry; the two-step rotation
+   — register the next public certificate first, then swap the PEM — is in
+   `lab-host/README.md` under "Rotating the agent certificate".
 5. Writes `/etc/hcw/labs-agent.env` (root, 0600, `no_log`) with exactly the
    names in `vps-agent/.env.example`; `LABS_AGENT_CERT_PATH` is
    `/etc/hcw/labs-agent.pem`.

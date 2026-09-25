@@ -45,11 +45,14 @@
   ansible.builtin.assert:
     that:
       - caddy_builder_image_info.images | length == 1
-      - caddy_builder_image_ref in caddy_builder_image_info.images[0].RepoDigests
+      - >-
+        caddy_builder_image_ref in caddy_builder_image_info.images[0].RepoDigests
+        or caddy_builder_image_platform_ref in caddy_builder_image_info.images[0].RepoDigests
     fail_msg: >-
       {{ caddy_builder_image }}:{{ caddy_builder_image_tag }} resolved to
       {{ caddy_builder_image_info.images | map(attribute='RepoDigests') | flatten | join(', ') }},
-      not {{ caddy_builder_image_ref }}. Either the tag moved or the pin is stale.
+      neither the pinned index {{ caddy_builder_image_ref }} nor its linux/amd64 manifest
+      {{ caddy_builder_image_platform_ref }}. Either the tag moved or the pin is stale.
   when: not ansible_check_mode or caddy_builder_image_info.images | length > 0
 
 - name: Build Caddy with the Cloudflare DNS module

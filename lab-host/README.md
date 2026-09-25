@@ -157,6 +157,38 @@ certificate to upload with bash, on the host:
 sudo cat /etc/hcw/labs-agent.crt
 ```
 
+## Rotating the agent certificate
+
+The generated certificate is valid for 730 days and nothing renews it by
+itself; every run of the play prints a warning once it is within 60 days of
+expiry (`labs_agent_certificate_warn_days`). Rotation is a two-step swap so
+the agent never holds a key whose certificate the app registration has not
+seen. Bash, on the host:
+
+```bash
+sudo sh -c 'umask 077 && openssl req -x509 -newkey rsa:4096 -sha256 -nodes -days 730 -subj "/CN=vps-hostinger-01" -keyout /etc/hcw/labs-agent.next.pem -out /etc/hcw/labs-agent.next.crt && cat /etc/hcw/labs-agent.next.crt >> /etc/hcw/labs-agent.next.pem'
+```
+
+```bash
+sudo cat /etc/hcw/labs-agent.next.crt
+```
+
+Upload that certificate to the agent's app registration (the same owner
+step as the first one, `docs/standards/required-inputs.md` section 4.7) and
+leave the old certificate in place there until the swap below has run. Then,
+bash, on the host:
+
+```bash
+sudo sh -c 'mv /etc/hcw/labs-agent.next.pem /etc/hcw/labs-agent.pem && mv /etc/hcw/labs-agent.next.crt /etc/hcw/labs-agent.crt && chown root:hcw-labs-agent /etc/hcw/labs-agent.pem && chmod 0640 /etc/hcw/labs-agent.pem && chmod 0644 /etc/hcw/labs-agent.crt && systemctl restart hcw-labs-agent'
+```
+
+Success looks like the agent back to Online on `/admin/labs` within a
+minute and `sudo journalctl -u hcw-labs-agent -n 20 --no-pager` showing a
+heartbeat rather than an authentication error. Only then remove the old
+certificate from the app registration. A re-run of the play afterwards
+reports the certificate task unchanged, because the file exists, and the
+expiry warning is gone.
+
 ## Validating without a host
 
 Neither `ansible-core` nor `ansible-lint` is installed on the Windows
@@ -188,11 +220,12 @@ changes under `lab-host/`.
 | Pin | Lives in | How to read the current value |
 | --- | --- | --- |
 | Docker, buildx, compose | `docker_version`, `docker_containerd_version`, `docker_buildx_version`, `docker_compose_version` | `roles/docker/README.md` |
-| Caddy, Cloudflare module, builder image digest | `caddy_*` | `roles/caddy/README.md`; the digest is the image index from `docker buildx imagetools inspect caddy:2.11.4-builder` |
+| apt signing keys | `docker_apt_key_checksum`, `labs_agent_node_apt_key_checksum` | `curl -sL <key URL> \| sha256sum` on the two URLs named beside them; a changed key is a decision, not a refresh |
+| Caddy, Cloudflare module, builder image digests | `caddy_*` | `roles/caddy/README.md`; both digests come from `docker buildx imagetools inspect caddy:2.11.4-builder` (the index, and the linux/amd64 manifest under it) |
 | node_exporter | `node_exporter_version`, `node_exporter_checksum` | `roles/node_exporter/README.md` |
 | Node.js | `labs_agent_node_version` | NodeSource `node_22.x` package index |
 | Repository ref | `labs_agent_repo_ref` and `HCW_REPO_REF` | `git rev-parse origin/main` |
-| Collections | `requirements.yml` | Galaxy |
+| Collections, including the one transitive dependency | `requirements.yml` | Galaxy |
 | Ansible tooling | `ANSIBLE_CORE_VERSION` in `bootstrap.sh`; the pip pins in `ci.yml`; the image digest above | PyPI; the image's `RepoDigests` |
 
 All in `ansible/group_vars/all.yml` unless the table says otherwise.

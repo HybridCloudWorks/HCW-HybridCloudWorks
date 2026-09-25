@@ -36,10 +36,11 @@
     group: root
     mode: "0755"
 
-- name: Install the NodeSource apt signing key
+- name: Install the NodeSource apt signing key and refuse one that does not match its pinned checksum
   ansible.builtin.get_url:
     url: "{{ labs_agent_node_apt_key_url }}"
     dest: "{{ labs_agent_node_apt_key_path }}"
+    checksum: "{{ labs_agent_node_apt_key_checksum }}"
     owner: root
     group: root
     mode: "0644"
@@ -132,6 +133,29 @@
     owner: root
     group: root
     mode: "0644"
+
+- name: Check how long the agent certificate remains valid
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - x509
+      - -checkend
+      - "{{ labs_agent_certificate_warn_seconds }}"
+      - -noout
+      - -in
+      - "{{ labs_agent_public_certificate_path }}"
+  register: labs_agent_certificate_check
+  changed_when: false
+  failed_when: labs_agent_certificate_check.rc not in [0, 1]
+
+- name: Warn when the agent certificate is close to expiry
+  ansible.builtin.debug:
+    msg: >-
+      {{ labs_agent_public_certificate_path }} expires within
+      {{ labs_agent_certificate_warn_days }} days. Rotate it now: generate the next key
+      pair, register the new public certificate on the app registration first, then swap
+      the PEM — the steps are in lab-host/README.md under "Rotating the agent certificate".
+  when: labs_agent_certificate_check.rc | default(0) == 1
 
 - name: Write the agent environment from the vault
   ansible.builtin.template:

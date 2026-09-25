@@ -14,6 +14,9 @@ labs_agent_env_file: /etc/hcw/labs-agent.env
 labs_agent_certificate_path: /etc/hcw/labs-agent.pem
 labs_agent_public_certificate_path: /etc/hcw/labs-agent.crt
 labs_agent_certificate_days: 730
+# Every run checks the certificate's remaining validity and prints a warning
+# inside this window, pointing at the rotation procedure in lab-host/README.md.
+labs_agent_certificate_warn_days: 60
 labs_agent_service_name: hcw-labs-agent
 
 labs_agent_node_apt_key_url: https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key

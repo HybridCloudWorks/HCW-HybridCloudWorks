@@ -33,9 +33,11 @@ This project has not cut a tagged release; entries are grouped under
   `allow_change_held_packages` so a pin bump is not refused by the hold it
   set last time), `node_exporter` (1.12.1, SHA256-verified, loopback only),
   `caddy` and `labs_agent`. Every version, digest and checksum is in
-  `group_vars/all.yml`, the three collections are pinned in
-  `requirements.yml`, and every role carries `meta/argument_specs.yml` and a
-  README.
+  `group_vars/all.yml` — including the SHA256 of the Docker and NodeSource
+  apt signing keys, because a pin on the versions with no pin on the key
+  that vouches for them is decorative — the collections are pinned in
+  `requirements.yml` down to `community.docker`'s one transitive dependency,
+  and every role carries `meta/argument_specs.yml` and a README.
 
   **Caddy is host-native and built, not downloaded, because the download API
   does not pin.** The stock apt package and the upstream image both lack the
@@ -48,8 +50,11 @@ This project has not cut a tagged release; entries are grouped under
   against the pinned index digest first, refuses the result unless `caddy
   version` names the pin and `caddy list-modules` lists
   `dns.providers.cloudflare`, and writes a `.provenance` file beside the
-  binary naming the three inputs. The provenance in the repository is the
-  four `caddy_*` pins in `group_vars/all.yml`. It runs as `caddy.service`
+  binary naming the three inputs. The binary's filename carries all three —
+  Caddy tag, module tag, the first twelve hex of the builder's index digest
+  — so bumping any of them rebuilds rather than relabelling an old build.
+  The provenance in the repository is the `caddy_*` pins in
+  `group_vars/all.yml`. It runs as `caddy.service`
   as the non-root `caddy` user reading `/etc/caddy/env` through
   `EnvironmentFile=` (owner root, group `caddy`, mode 0640 — the group read
   is what lets renewals work — holding the runtime Cloudflare token from an
@@ -79,7 +84,11 @@ This project has not cut a tagged release; entries are grouped under
   nobody else can — and `.env.example`, the Setup tab's step 4 and
   `docs/standards/variables-and-secrets.md` now all say exactly that instead
   of the 0600 a non-root service could never have read. Only the public
-  half, `/etc/hcw/labs-agent.crt`, leaves the host. The unit sets
+  half, `/etc/hcw/labs-agent.crt`, leaves the host. The certificate lasts
+  730 days and nothing renews it by itself, so every run checks it with
+  `openssl x509 -checkend` and warns within 60 days of expiry, and the
+  README carries the two-step rotation: register the next public
+  certificate first, then swap the PEM. The unit sets
   `TMPDIR=/var/lib/hcw-labs-agent/tmp`, because `lib/docker-runner.js`
   stages each payload under `os.tmpdir()` and bind-mounts it into the job
   container, and the `PrivateTmp` `/tmp` the unit otherwise gets is one the

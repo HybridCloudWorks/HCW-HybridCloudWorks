@@ -34,6 +34,12 @@ argument_specs:
         required: false
         default: https://download.docker.com/linux/ubuntu/gpg
         description: Where the repository signing key is fetched from.
+      docker_apt_key_checksum:
+        type: str
+        required: true
+        description:
+          - sha256:<hex> of the signing key. The key is the root of trust for every version
+            pin below, so get_url refuses one that does not match.
       docker_apt_key_path:
         type: path
         required: false

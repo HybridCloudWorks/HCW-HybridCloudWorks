@@ -19,14 +19,18 @@ builds with `xcaddy` inside the official `caddy:<version>-builder` image
 instead, pulled by tag and asserted against the image-index digest in
 `group_vars/all.yml`. Docker is already on the host, so nothing new is
 installed to do it; the build takes a few minutes the first time and is
-skipped once `/opt/caddy/bin/caddy-<version>-cloudflare-<module>` exists.
-Bumping either version changes that filename and triggers a rebuild.
+skipped once `/opt/caddy/bin/caddy-<version>-cloudflare-<module>-<first 12
+hex of the builder index digest>` exists. Bumping any of the three inputs
+changes that filename and triggers a rebuild, so the binary on disk can
+never claim a builder it was not built with.
 
-The build's provenance is the four `caddy_*` pins in `group_vars/all.yml`
-(Caddy tag, module tag, builder image tag and its index digest), and the
-role writes the same three facts to
-`/opt/caddy/bin/caddy-<version>-cloudflare-<module>.provenance` next to the
-binary it produced.
+The build's provenance is the `caddy_*` pins in `group_vars/all.yml` (Caddy
+tag, module tag, builder image tag, its index digest and the linux/amd64
+manifest beneath it), and the role writes the same facts to
+`<binary>.provenance` next to the binary it produced. The pull assertion
+accepts either the index or the platform digest in `RepoDigests`, because
+which one a daemon records after a pull by tag depends on its image store;
+the build itself always runs against `caddy@<index digest>`.
 
 ## What it does
 
@@ -81,7 +85,7 @@ named matcher and a `handle` block, then notify `Reload caddy`. The
 | --- | --- | --- |
 | `caddy_version` | required | Caddy tag for `xcaddy build` |
 | `caddy_cloudflare_module_version` | required | `caddy-dns/cloudflare` tag |
-| `caddy_builder_image`, `caddy_builder_image_tag`, `caddy_builder_image_digest` | required | Builder image pin |
+| `caddy_builder_image`, `caddy_builder_image_tag`, `caddy_builder_image_digest`, `caddy_builder_image_platform_digest` | required | Builder image pin (index and linux/amd64 manifest) |
 | `caddy_site_domain` | required | Apex; matcher and fail-closed placeholder |
 | `caddy_site_names` | required | Every name the site block serves |
 | `caddy_cloudflare_api_token` | `vault_cloudflare_api_token` or empty | DNS-01 credential |
