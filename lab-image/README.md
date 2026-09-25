@@ -33,6 +33,44 @@ them; see "What works offline". The pull size barely moved, because a layer
 is compressed in transit whichever form the binaries take on disk. The
 vendored module tree is 6 MB and the Kubernetes schemas 62 MB on disk.
 
+## Run the toolchain locally
+
+The `full` image is the follow-along toolchain for the lab pages. Pull it,
+then run it with the current directory mounted at `/workspace`; both
+commands drop into `bash` there as `nobody`. Anonymous pulls work once the
+owner has made both packages public at
+<https://github.com/orgs/HybridCloudWorks/packages> (the owner step in #674);
+until then `docker login ghcr.io` with a token holding `read:packages` is
+needed first.
+
+PowerShell:
+
+```powershell
+docker pull ghcr.io/hybridcloudworks/hcw-lab:latest
+```
+
+```powershell
+docker run --rm -it -v "${PWD}:/workspace" ghcr.io/hybridcloudworks/hcw-lab:latest
+```
+
+bash:
+
+```bash
+docker pull ghcr.io/hybridcloudworks/hcw-lab:latest
+```
+
+```bash
+docker run --rm -it -v "$PWD:/workspace" ghcr.io/hybridcloudworks/hcw-lab:latest
+```
+
+A successful run prints a `nobody@<container id>:/workspace$` prompt, and
+`terraform version` there reports the version in `versions.env`. Add `:ro`
+to the mount to run the way the job sandbox does. For anything automated,
+pin the digest rather than the tag, exactly as
+[`vps-agent/lib/capabilities.js`](../vps-agent/lib/capabilities.js) does:
+the publish workflow writes each pushed image's digest to its job summary,
+and that is the first-party place to copy it from.
+
 ## What works offline
 
 The runner is built so that a lab job needs no network at all, because

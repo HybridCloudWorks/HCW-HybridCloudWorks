@@ -107,6 +107,43 @@ onboarding service principal credential (Ansible Vault, used once at onboarding
 and not persisted), and any Cosmos DB key (the runner has never held one — see
 the header comment of `vps-agent/index.js`).
 
+## Run the toolchain locally
+
+The same image the host runs jobs in is the image a lab page tells a learner
+to pull: `ghcr.io/hybridcloudworks/hcw-lab` carries terraform, kubeconform,
+helm, ansible-core, the Azure CLI, kubectl and git, plus a Terraform provider
+mirror and the vendored Azure Verified Modules, so `terraform init` works in
+it with no network. Pull it, then run it with the current directory mounted
+at `/workspace`; both commands drop into `bash` there as `nobody`. The pull
+is anonymous once the owner has made the package public (#674); until then it
+needs `docker login ghcr.io` with a token holding `read:packages`.
+
+PowerShell:
+
+```powershell
+docker pull ghcr.io/hybridcloudworks/hcw-lab:latest
+```
+
+```powershell
+docker run --rm -it -v "${PWD}:/workspace" ghcr.io/hybridcloudworks/hcw-lab:latest
+```
+
+bash:
+
+```bash
+docker pull ghcr.io/hybridcloudworks/hcw-lab:latest
+```
+
+```bash
+docker run --rm -it -v "$PWD:/workspace" ghcr.io/hybridcloudworks/hcw-lab:latest
+```
+
+A successful run prints a `nobody@<container id>:/workspace$` prompt, and
+`terraform version` there reports the version pinned in
+[`lab-image/versions.env`](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/lab-image/versions.env).
+`lab-image/README.md` in the repository has the digest-pinned form, what
+works offline, and the smoke test.
+
 ## Related
 
 - [ADR 0032](../decisions/0032-learner-labs-platform.md): the decisions this
