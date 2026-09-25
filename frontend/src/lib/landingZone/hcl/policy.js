@@ -30,7 +30,13 @@ import { jsonValue, list, obj, q } from './format';
 
 const DCR = 'Microsoft.Insights/dataCollectionRules';
 
-/** A resource id built from a name in the management resource group, at plan time. */
+/**
+ * A resource id built from a name in the management resource group, at plan
+ * time. The fourth argument of `provider::azapi::resource_group_resource_id`
+ * is `resource_names list of string` (azapi 2.12 function docs), one element
+ * per level of the resource type, so a top-level resource is a one-element
+ * list; it is the shape avm-ptn-alz's own examples/management uses.
+ */
 const managementResourceId = (type, nameExpr) =>
   `provider::azapi::resource_group_resource_id(var.management_subscription_id, local.management_resource_group_name, ${q(type)}, [${nameExpr}])`;
 
@@ -88,11 +94,23 @@ export const POLICY_DEFAULTS = Object.freeze([
   entry('email_security_contact', null, 'var.security_contact_email'),
 ]);
 
-/** The assignment to keep but not enforce when a `needs` is not in the build, by management group. */
+/**
+ * The assignment to keep but not enforce when a `needs` is not in the build.
+ * Which management groups carry it comes from BASELINE_ASSIGNMENTS, so an
+ * assignment made by more than one archetype (Enable-DDoS-VNET is on both
+ * landingzones and connectivity) is disabled everywhere it appears.
+ */
 const NOT_ENFORCED_WITHOUT = Object.freeze({
-  dns: Object.freeze({ managementGroup: 'corp', assignment: 'Deploy-Private-DNS-Zones' }),
-  ddos: Object.freeze({ managementGroup: 'connectivity', assignment: 'Enable-DDoS-VNET' }),
+  dns: 'Deploy-Private-DNS-Zones',
+  ddos: 'Enable-DDoS-VNET',
 });
+
+/** Every management group whose archetype makes `assignment`, in baseline order. */
+export function groupsAssigning(assignment) {
+  return Object.entries(BASELINE_ASSIGNMENTS)
+    .filter(([, assignments]) => assignments.includes(assignment))
+    .map(([group]) => group);
+}
 
 const GUARDRAILS = [
   'Enforce-ASR',
@@ -223,10 +241,12 @@ export function policySources(state) {
 /** Group → assignments to stop enforcing when Policy is selected: only those with no source. */
 function missingSourceAssignments(sources) {
   const byGroup = new Map();
-  for (const [needs, target] of Object.entries(NOT_ENFORCED_WITHOUT)) {
+  for (const [needs, assignment] of Object.entries(NOT_ENFORCED_WITHOUT)) {
     if (sources[needs]) continue;
-    if (!byGroup.has(target.managementGroup)) byGroup.set(target.managementGroup, []);
-    byGroup.get(target.managementGroup).push(target.assignment);
+    for (const group of groupsAssigning(assignment)) {
+      if (!byGroup.has(group)) byGroup.set(group, []);
+      byGroup.get(group).push(assignment);
+    }
   }
   return byGroup;
 }

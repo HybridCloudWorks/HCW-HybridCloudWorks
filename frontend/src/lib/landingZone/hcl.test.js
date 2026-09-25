@@ -12,6 +12,7 @@ import {
   BASELINE_ASSIGNMENTS,
   DEFAULT_STATE,
   HUB_PREFIX_RANGE,
+  groupsAssigning,
   POLICY_DEFAULTS,
   SPOKE_PREFIX_RANGE,
   emitFiles,
@@ -325,8 +326,29 @@ describe('emitFiles', () => {
       'identity',
       'decommissioned',
     ]);
-    expect(notEnforced(full)).toBe(1);
-    expect(notEnforced(noDns)).toBe(2);
+    const ddosGroups = groupsAssigning('Enable-DDoS-VNET');
+    expect(ddosGroups).toEqual(['landingzones', 'connectivity']);
+    expect(groupsAssigning('Deploy-Private-DNS-Zones')).toEqual(['corp']);
+    expect(groupsAssigning('Nope')).toEqual([]);
+    expect(notEnforced(full)).toBe(ddosGroups.length);
+    expect((full.match(/Enable-DDoS-VNET = \{/g) ?? []).length).toBe(ddosGroups.length);
+    for (const group of ddosGroups) {
+      expect(full, group).toMatch(
+        new RegExp(
+          `^    ${group} = \\{\n      policy_assignments = \\{\n        Enable-DDoS-VNET = \\{`,
+          'm'
+        )
+      );
+    }
+    expect(notEnforced(noDns)).toBe(ddosGroups.length + 1);
+
+    const idCalls = full.match(/provider::azapi::resource_group_resource_id\(/g) ?? [];
+    const listShaped =
+      full.match(
+        /provider::azapi::resource_group_resource_id\([^,()]+, [^,()]+, "[^"]+", \[[^\]]+\]\)/g
+      ) ?? [];
+    expect(idCalls.length).toBe(5);
+    expect(listShaped.length).toBe(idCalls.length);
 
     const treeOnly = byPath(emitFiles({ selected: ['management-groups'] }));
     expect(treeOnly['alz.tf']).toContain('Policy was not selected');

@@ -133,6 +133,13 @@ module "alz" {
   # assignment whose value the build cannot supply is kept but not enforced, so
   # nothing is created from a library placeholder.
   policy_assignments_to_modify = {
+    landingzones = {
+      policy_assignments = {
+        Enable-DDoS-VNET = {
+          enforcement_mode = "DoNotEnforce"
+        }
+      }
+    }
     connectivity = {
       policy_assignments = {
         Enable-DDoS-VNET = {
