@@ -16,10 +16,15 @@
  * breaks without it. `avm` is the Azure Verified Module that deploys the
  * component, or null when the component is configuration of another
  * module's call (policy sits inside avm-ptn-alz; the firewall is a block of
- * the connectivity module). Every `avm` comes from avmVersions.js so the
- * catalogue and the pins cannot disagree.
+ * the connectivity module). A landing zone, identity included, is a
+ * subscription placed in the tree by avm-ptn-alz plus a spoke virtual
+ * network from the virtual network module, peered to the hub. Every `avm`
+ * comes from avmVersions.js so the catalogue and the pins cannot disagree.
  */
 import { AVM_MODULES } from './avmVersions';
+import { isCidr, isSpokeCidr } from './cidr';
+
+export { isCidr, isSpokeCidr };
 
 const pin = (name) =>
   Object.freeze({ source: AVM_MODULES[name].source, version: AVM_MODULES[name].version });
@@ -29,21 +34,6 @@ export const FIREWALL_SKUS = Object.freeze(['Basic', 'Standard', 'Premium']);
 
 /** How many application landing zones of one kind a build may hold. */
 export const MAX_LANDING_ZONES = 5;
-
-/**
- * An IPv4 CIDR with a prefix the hub can carve subnets from. /8 to /24: the
- * module places a firewall subnet, a Bastion subnet and a gateway subnet
- * inside it, and /26 is the smallest of those, so a /24 is the tightest hub
- * that still fits.
- */
-export function isCidr(value) {
-  if (typeof value !== 'string') return false;
-  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})$/.exec(value);
-  if (!match) return false;
-  const octets = match.slice(1, 5).map(Number);
-  const prefix = Number(match[5]);
-  return octets.every((octet) => octet <= 255) && prefix >= 8 && prefix <= 24;
-}
 
 export function isFirewallSku(value) {
   return FIREWALL_SKUS.includes(value);
@@ -73,75 +63,88 @@ export function isManagementGroupId(value) {
   return typeof value === 'string' && MANAGEMENT_GROUP_ID.test(value);
 }
 
+/** The parent of the alz root: a management group id, or '' for the tenant root group. */
+export function isRootParentId(value) {
+  return value === '' || isManagementGroupId(value);
+}
+
 export function isBoolean(value) {
   return typeof value === 'boolean';
 }
 
-const option = (id, label, kind, defaultValue, validate, help) =>
-  Object.freeze({ id, label, kind, default: defaultValue, validate, help });
-
 /**
- * Every knob, with its default and the predicate a value must pass. `kind`
- * is what a Phase 2 form renders: `text`, `choice` (see `choices`), `boolean`
- * or `count`.
+ * One knob. `kind` is what a Phase 2 form renders: `text`, `choice` (see
+ * OPTION_CHOICES), `boolean` or `count`; `validate` is the predicate a value
+ * must pass, and `default` is what an absent or failing value becomes.
  */
+const option = (spec) => Object.freeze({ ...spec });
+
+/** Every knob, with its default and validator. */
 export const OPTIONS = Object.freeze({
-  location: option(
-    'location',
-    'Azure region',
-    'text',
-    'centralus',
-    isLocation,
-    'Where every regional resource is created: the Log Analytics workspace, the hub network, the firewall. Management groups and policy are tenant-wide and have no region.'
-  ),
-  rootParentId: option(
-    'rootParentId',
-    'Root management group id',
-    'text',
-    'alz',
-    isManagementGroupId,
-    'The id of the management group at the top of the landing zone tree. The alz architecture names it "alz"; every other group in the tree hangs under it.'
-  ),
-  hubCidr: option(
-    'hubCidr',
-    'Hub address space',
-    'text',
-    '10.0.0.0/16',
-    isCidr,
-    'The IPv4 range the hub virtual network owns. Spokes peer into it, so it must not overlap any spoke or on-premises range.'
-  ),
-  privateDnsZones: option(
-    'privateDnsZones',
-    'Private DNS zones',
-    'boolean',
-    true,
-    isBoolean,
-    'Create the private DNS zones for Azure Private Link services in the hub, linked to the hub network, so private endpoints in spokes resolve by name.'
-  ),
-  firewallSku: option(
-    'firewallSku',
-    'Firewall SKU',
-    'choice',
-    'Standard',
-    isFirewallSku,
-    'Basic is for small deployments under 250 Mbps; Standard adds threat intelligence and scales; Premium adds TLS inspection and intrusion detection.'
-  ),
-  corpCount: option(
-    'corpCount',
-    'Corp landing zones',
-    'count',
-    1,
-    isLandingZoneCount,
-    'How many corp subscriptions to place. Each is a spoke peered to the hub with no public inbound path.'
-  ),
-  onlineCount: option(
-    'onlineCount',
-    'Online landing zones',
-    'count',
-    1,
-    isLandingZoneCount,
-    'How many online subscriptions to place. Each may expose services to the internet and still peers to the hub for shared services.'
-  ),
+  location: option({
+    id: 'location',
+    label: 'Azure region',
+    kind: 'text',
+    default: 'centralus',
+    validate: isLocation,
+    help: 'Where every regional resource is created: the Log Analytics workspace, the hub network, the firewall, the spokes. Management groups and policy are tenant-wide and have no region.',
+  }),
+  rootParentId: option({
+    id: 'rootParentId',
+    label: 'Parent management group',
+    kind: 'text',
+    default: '',
+    validate: isRootParentId,
+    help: 'The management group the "alz" root is created under. Leave empty for the tenant root group, which is where the validated pattern puts it; name an existing group to nest the whole tree beneath it.',
+  }),
+  hubCidr: option({
+    id: 'hubCidr',
+    label: 'Hub address space',
+    kind: 'text',
+    default: '10.0.0.0/16',
+    validate: isCidr,
+    help: 'The IPv4 range the hub virtual network owns. Spokes peer into it, so it must not overlap the spoke range or any on-premises range.',
+  }),
+  spokeCidr: option({
+    id: 'spokeCidr',
+    label: 'Spoke address range',
+    kind: 'text',
+    default: '10.1.0.0/16',
+    validate: isSpokeCidr,
+    help: 'The range every landing zone’s spoke is carved from, one /24 each: corp spokes from the low half, online spokes from the high half, identity at the top of the low half. /8 to /20, and it must not overlap the hub.',
+  }),
+  privateDnsZones: option({
+    id: 'privateDnsZones',
+    label: 'Private DNS zones',
+    kind: 'boolean',
+    default: true,
+    validate: isBoolean,
+    help: 'Create the private DNS zones for Azure Private Link services in the hub, linked to the hub network, so private endpoints in spokes resolve by name.',
+  }),
+  firewallSku: option({
+    id: 'firewallSku',
+    label: 'Firewall SKU',
+    kind: 'choice',
+    default: 'Standard',
+    validate: isFirewallSku,
+    help: 'Basic is for small deployments under 250 Mbps; Standard adds threat intelligence and scales; Premium adds TLS inspection and intrusion detection.',
+  }),
+  corpCount: option({
+    id: 'corpCount',
+    label: 'Corp landing zones',
+    kind: 'count',
+    default: 1,
+    validate: isLandingZoneCount,
+    help: 'How many corp subscriptions to place. Each is a spoke peered to the hub with no public inbound path and, when the firewall is selected, a default route through it.',
+  }),
+  onlineCount: option({
+    id: 'onlineCount',
+    label: 'Online landing zones',
+    kind: 'count',
+    default: 1,
+    validate: isLandingZoneCount,
+    help: 'How many online subscriptions to place. Each may expose services to the internet, egresses directly, and still peers to the hub for shared services.',
+  }),
 });
 
 /** The choices a `choice` option offers, by option id. */
@@ -149,17 +152,11 @@ export const OPTION_CHOICES = Object.freeze({ firewallSku: FIREWALL_SKUS });
 
 export const OPTION_IDS = Object.freeze(Object.keys(OPTIONS));
 
-const component = ({ id, group, label, summary, teaches, avm, dependsOn, options, shortId }) =>
+const component = (spec) =>
   Object.freeze({
-    id,
-    group,
-    label,
-    summary,
-    teaches,
-    avm,
-    dependsOn: Object.freeze(dependsOn),
-    options: Object.freeze(options),
-    shortId,
+    ...spec,
+    dependsOn: Object.freeze(spec.dependsOn),
+    options: Object.freeze(spec.options),
   });
 
 /**
@@ -177,7 +174,7 @@ export const COMPONENTS = Object.freeze([
     label: 'Management groups',
     summary: 'The tree of management groups every subscription is placed in.',
     teaches:
-      'A management group is a container above subscriptions, and the tree of them is the skeleton of a landing zone: an "alz" root, a Platform branch for the shared services and a Landing zones branch for the workloads. Policy and role assignments made on a group flow down to every subscription beneath it, so one decision at the root governs hundreds of subscriptions without being repeated. The avm-ptn-alz module reads the "alz" architecture definition and creates the whole tree in one call. Without the tree, each subscription is its own island: every guardrail has to be assigned again for each one, and nothing stops a new subscription from arriving with none.',
+      'A management group is a container above subscriptions, and the tree of them is the skeleton of a landing zone: an "alz" root, a Platform branch for the shared services and a Landing zones branch for the workloads. Policy and role assignments made on a group flow down to every subscription beneath it, so one decision at the root governs hundreds of subscriptions without being repeated. The avm-ptn-alz module reads the "alz" architecture definition and creates the whole tree in one call, and its subscription_placement input is how every other component’s subscription lands in the right group. Without the tree, each subscription is its own island: every guardrail has to be assigned again for each one, and nothing stops a new subscription from arriving with none.',
     avm: pin('avm-ptn-alz'),
     dependsOn: [],
     options: ['location', 'rootParentId'],
@@ -189,7 +186,7 @@ export const COMPONENTS = Object.freeze([
     label: 'Policy baseline',
     summary: 'The Azure Policy assignments the alz architecture makes on each management group.',
     teaches:
-      'Azure Policy evaluates every resource against rules and can audit, deny or fix what it finds. The alz architecture assigns a baseline of these rules at each level of the tree: deny public IPs in corp, require encryption, send diagnostics to the central workspace, install the monitoring agent. The baseline is configuration of the same avm-ptn-alz call that builds the tree, with default values that point the policies at the Log Analytics workspace from the management component. Without it the tree is only a filing system; nothing enforces where logs go or what a team may create, and drift starts on the first day.',
+      'Azure Policy evaluates every resource against rules and can audit, deny or fix what it finds. The alz architecture assigns a baseline of these rules at each level of the tree: deny public IPs in corp, require encryption, send diagnostics to the central workspace, install the monitoring agent. The baseline is configuration of the same avm-ptn-alz call that builds the tree, with default values that point the policies at the Log Analytics workspace from the management component, the private DNS zones from the hub, and a security contact. Without it the tree is only a filing system; nothing enforces where logs go or what a team may create, and drift starts on the first day.',
     avm: null,
     dependsOn: ['management-groups', 'management'],
     options: [],
@@ -224,9 +221,9 @@ export const COMPONENTS = Object.freeze([
     shortId: 'fw',
     group: 'platform',
     label: 'Azure Firewall',
-    summary: 'The firewall in the hub that every spoke’s traffic is routed through.',
+    summary: 'The firewall in the hub that every private spoke’s traffic is routed through.',
     teaches:
-      'Azure Firewall is a managed, stateful firewall that sits in its own subnet of the hub. The connectivity module creates it with a firewall policy and writes route tables that send spoke traffic to it, so traffic between spokes, to the internet and to on-premises passes one inspection point. It is a block of the hub’s configuration rather than a separate module, which is why it depends on the hub. The SKU sets the ceiling: Basic for small environments, Standard for most, Premium when TLS inspection and intrusion detection are required. Without it each spoke egresses to the internet directly and there is no central place for rules or logs.',
+      'Azure Firewall is a managed, stateful firewall that sits in its own subnet of the hub. The connectivity module creates it with a firewall policy, and each corp and identity spoke gets a route table whose default route points at the firewall’s private IP, so traffic between spokes, to the internet and to on-premises passes one inspection point. It is a block of the hub’s configuration rather than a separate module, which is why it depends on the hub. The SKU sets the ceiling: Basic for small environments, Standard for most, Premium when TLS inspection and intrusion detection are required. Without it each spoke egresses to the internet directly and there is no central place for rules or logs.',
     avm: null,
     dependsOn: ['connectivity-hub'],
     options: ['firewallSku'],
@@ -236,12 +233,12 @@ export const COMPONENTS = Object.freeze([
     shortId: 'id',
     group: 'platform',
     label: 'Identity',
-    summary: 'The identity subscription for domain controllers and directory services.',
+    summary: 'The identity subscription, placed under the Identity group, with its own spoke.',
     teaches:
-      'The identity subscription is where an organisation runs the services that authenticate everything else: Active Directory domain controllers, Entra Domain Services or the connectors that sync them. It sits under the Platform management group so it inherits the platform guardrails but is isolated from workloads, and it usually peers to the hub so every spoke can reach a domain controller. The avm-ptn-alz-application-landing-zone-identity-and-access module is the pattern module for this subscription. Without a dedicated identity subscription these services end up inside one team’s landing zone, and that team can outlive, delete or misconfigure what everyone depends on.',
-    avm: pin('avm-ptn-alz-application-landing-zone-identity-and-access'),
-    dependsOn: ['management-groups'],
-    options: [],
+      'The identity subscription is where an organisation runs the services that authenticate everything else: Active Directory domain controllers, Entra Domain Services, or the connectors that sync an on-premises directory to Entra ID. It is a subscription placed under the Identity management group, so it inherits the platform guardrails while being isolated from every workload team, plus a spoke virtual network peered to the hub so each corp spoke can reach a domain controller. Like a corp spoke it is private: when the firewall is selected its default route goes through the firewall. Without a dedicated identity subscription these services end up inside one team’s landing zone, and that team can outlive, delete or misconfigure what everyone depends on.',
+    avm: pin('avm-res-network-virtualnetwork'),
+    dependsOn: ['management-groups', 'connectivity-hub'],
+    options: ['spokeCidr'],
   }),
   component({
     id: 'corp',
@@ -250,10 +247,10 @@ export const COMPONENTS = Object.freeze([
     label: 'Corp landing zone',
     summary: 'An application subscription for internal workloads, reached only through the hub.',
     teaches:
-      'A corp landing zone is a subscription for workloads that are internal to the organisation: reached over the private network, through the hub, and never from the internet. It is placed under the Corp management group, so the corp policies apply, among them the ones that deny public IP addresses and require private endpoints. Its virtual network is a spoke peered to the hub, with routes that send outbound traffic through the firewall. Without the corp group there is no place to put a workload that must be private by policy, and a private application gets the same rules as a public one.',
-    avm: pin('avm-ptn-alz-application-landing-zone-identity-and-access'),
+      'An application landing zone is a subscription a team receives with the platform already wired in, and a corp landing zone is the private kind: reached over the private network, through the hub, and never from the internet. It is placed under the Corp management group by avm-ptn-alz, so the corp policies apply, among them the ones that deny public IP addresses and require private endpoints. Inside it the virtual network module creates a spoke, one /24 from the spoke range, peered to the hub in both directions, and when the firewall is selected a route table sends the spoke’s default route through the firewall. Without the corp group there is no place to put a workload that must be private by policy, and a private application gets the same rules as a public one.',
+    avm: pin('avm-res-network-virtualnetwork'),
     dependsOn: ['management-groups', 'connectivity-hub'],
-    options: ['corpCount'],
+    options: ['corpCount', 'spokeCidr'],
   }),
   component({
     id: 'online',
@@ -262,10 +259,10 @@ export const COMPONENTS = Object.freeze([
     label: 'Online landing zone',
     summary: 'An application subscription that may face the internet and still uses the hub.',
     teaches:
-      'An online landing zone is a subscription for workloads that serve the internet: a public website, an API, a customer portal. It is placed under the Online management group, whose policies allow public endpoints where corp’s deny them, while the root policies about logging, encryption and monitoring still apply. Its network is also a spoke, so it reaches shared services and DNS through the hub. Without a separate online group, either public workloads are blocked by the corp rules or the corp rules are loosened for everyone.',
-    avm: pin('avm-ptn-alz-application-landing-zone-identity-and-access'),
+      'An online landing zone is the internet-facing kind of application subscription: a public website, an API, a customer portal. It is placed under the Online management group, whose policies allow public endpoints where corp’s deny them, while the root policies about logging, encryption and monitoring still apply. Its spoke is also a /24 peered to the hub, so it reaches shared services and DNS there, but its default route is left alone: online traffic goes to the internet directly rather than through the firewall. Without a separate online group, either public workloads are blocked by the corp rules or the corp rules are loosened for everyone.',
+    avm: pin('avm-res-network-virtualnetwork'),
     dependsOn: ['management-groups', 'connectivity-hub'],
-    options: ['onlineCount'],
+    options: ['onlineCount', 'spokeCidr'],
   }),
 ]);
 

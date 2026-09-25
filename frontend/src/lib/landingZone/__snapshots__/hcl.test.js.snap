@@ -17,10 +17,10 @@ a \`terraform plan\` you have read.
 - **Policy baseline**: The Azure Policy assignments the alz architecture makes on each management group.
 - **Management**: The Log Analytics workspace and Automation account that collect every subscription’s telemetry. — \`Azure/avm-ptn-alz-management/azurerm\` 0.9.0
 - **Connectivity hub**: The hub virtual network, Bastion and DNS that every landing zone peers into. — \`Azure/avm-ptn-alz-connectivity-hub-and-spoke-vnet/azurerm\` 0.17.5
-- **Azure Firewall**: The firewall in the hub that every spoke’s traffic is routed through.
-- **Identity**: The identity subscription for domain controllers and directory services. — \`Azure/avm-ptn-alz-application-landing-zone-identity-and-access/azurerm\`
-- **Corp landing zone (1)**: An application subscription for internal workloads, reached only through the hub. — \`Azure/avm-ptn-alz-application-landing-zone-identity-and-access/azurerm\`
-- **Online landing zone (1)**: An application subscription that may face the internet and still uses the hub. — \`Azure/avm-ptn-alz-application-landing-zone-identity-and-access/azurerm\`
+- **Azure Firewall**: The firewall in the hub that every private spoke’s traffic is routed through.
+- **Identity**: The identity subscription, placed under the Identity group, with its own spoke. — \`Azure/avm-res-network-virtualnetwork/azurerm\` 0.22.2
+- **Corp landing zone (1)**: An application subscription for internal workloads, reached only through the hub. — \`Azure/avm-res-network-virtualnetwork/azurerm\` 0.22.2
+- **Online landing zone (1)**: An application subscription that may face the internet and still uses the hub. — \`Azure/avm-res-network-virtualnetwork/azurerm\` 0.22.2
 
 ## Files
 
@@ -29,6 +29,7 @@ a \`terraform plan\` you have read.
 - \`alz.tf\`
 - \`management.tf\`
 - \`connectivity.tf\`
+- \`identity.tf\`
 - \`application.tf\`
 - \`variables.tf\`
 - \`terraform.tfvars.example\`
@@ -47,6 +48,14 @@ a \`terraform plan\` you have read.
   into \`terraform.tfvars\` (see \`terraform.tfvars.example\`).
 - Terraform >= 1.12, < 2.0.
 
+## How a landing zone is built
+
+Each landing zone, identity included, is a subscription that \`alz.tf\` places under
+its management group and a spoke virtual network, one /24 carved from the spoke range,
+that the virtual network module peers to the hub in both directions. Corp and identity
+spokes carry a route table whose default route points at the firewall when it is
+selected; online spokes egress directly.
+
 ## Module versions
 
 Pinned to the versions the Terraform Registry listed on 2026-09-25:
@@ -54,7 +63,7 @@ Pinned to the versions the Terraform Registry listed on 2026-09-25:
 - \`Azure/avm-ptn-alz/azurerm\` 0.21.0
 - \`Azure/avm-ptn-alz-management/azurerm\` 0.9.0
 - \`Azure/avm-ptn-alz-connectivity-hub-and-spoke-vnet/azurerm\` 0.17.5
-- \`Azure/avm-ptn-alz-application-landing-zone-identity-and-access/azurerm\` — not yet on the registry on 2026-09-25
+- \`Azure/avm-res-network-virtualnetwork/azurerm\` 0.22.2
 
 ## Running it
 
@@ -72,16 +81,12 @@ Read the plan, and destroy what you built when the lesson is over.
 `;
 
 exports[`emitFiles > matches the committed snapshot of the default build > alz.tf 1`] = `
-"# Management groups: the "alz" architecture, a root with Platform and Landing zones
-# beneath it, created under the tenant root group. The policy baseline is part of the
-# same architecture, so selecting it adds parameters to this call rather than a module.
+"# Management groups: the "alz" architecture, a root named "alz" with Platform and
+# Landing zones beneath it. It is created under the tenant root group, or under the
+# management group named in var.parent_management_group_id. The policy baseline is
+# part of the same architecture, so selecting it adds parameters to this call rather
+# than a module.
 data "azapi_client_config" "current" {}
-
-locals {
-  # The architecture names its root "alz". A different id needs a copy of the
-  # architecture definition in a custom library referenced from providers.tf.
-  root_management_group_id = var.root_management_group_id
-}
 
 module "alz" {
   source  = "Azure/avm-ptn-alz/azurerm"
@@ -89,36 +94,39 @@ module "alz" {
 
   architecture_name  = "alz"
   location           = var.location
-  parent_resource_id = data.azapi_client_config.current.tenant_id
+  parent_resource_id = coalesce(var.parent_management_group_id, data.azapi_client_config.current.tenant_id)
   enable_telemetry   = var.enable_telemetry
 
   # Each subscription is moved under the management group whose policies it should
   # inherit. The keys are labels; the names are the groups the alz architecture creates.
   subscription_placement = {
     management = {
-      subscription_id       = var.subscription_id_management
+      subscription_id       = var.management_subscription_id
       management_group_name = "management"
     }
     connectivity = {
-      subscription_id       = var.subscription_id_connectivity
+      subscription_id       = var.connectivity_subscription_id
       management_group_name = "connectivity"
     }
     identity = {
-      subscription_id       = var.subscription_id_identity
+      subscription_id       = var.identity_subscription_id
       management_group_name = "identity"
     }
     corp_1 = {
-      subscription_id       = var.subscription_ids_corp[0]
+      subscription_id       = var.corp_subscription_ids[0]
       management_group_name = "corp"
     }
     online_1 = {
-      subscription_id       = var.subscription_ids_online[0]
+      subscription_id       = var.online_subscription_ids[0]
       management_group_name = "online"
     }
   }
 
-  # The DDoS policy would try to attach a protection plan the hub does not create;
-  # it is assigned but not enforced.
+  # The library declares fourteen policy default values. Every one the build has a
+  # source for is supplied below, built from the names management.tf and
+  # connectivity.tf use because the alz provider needs them at plan time; an
+  # assignment whose value the build cannot supply is kept but not enforced, so
+  # nothing is created from a library placeholder.
   policy_assignments_to_modify = {
     connectivity = {
       policy_assignments = {
@@ -129,75 +137,145 @@ module "alz" {
     }
   }
 
-  # The monitoring policies take the workspace, the data collection rules and the
-  # agent identity as parameters. The ids are built from the names management.tf
-  # uses, because the alz provider needs them at plan time, and the dependencies
-  # list makes Terraform create the resources before the assignments.
+  # Terraform creates the management resources before the assignments that name them.
   policy_assignments_dependencies = [
     module.management.data_collection_rule_ids,
     module.management.resource_id,
     module.management.user_assigned_identity_ids,
   ]
   policy_default_values = {
-    ama_change_tracking_data_collection_rule_id = jsonencode({ value = provider::azapi::resource_group_resource_id(var.subscription_id_management, local.management_resource_group_name, "Microsoft.Insights/dataCollectionRules", ["dcr-change-tracking"]) })
-    ama_mdfc_sql_data_collection_rule_id        = jsonencode({ value = provider::azapi::resource_group_resource_id(var.subscription_id_management, local.management_resource_group_name, "Microsoft.Insights/dataCollectionRules", ["dcr-defender-sql"]) })
-    ama_vm_insights_data_collection_rule_id     = jsonencode({ value = provider::azapi::resource_group_resource_id(var.subscription_id_management, local.management_resource_group_name, "Microsoft.Insights/dataCollectionRules", ["dcr-vm-insights"]) })
-    ama_user_assigned_managed_identity_id       = jsonencode({ value = provider::azapi::resource_group_resource_id(var.subscription_id_management, local.management_resource_group_name, "Microsoft.ManagedIdentity/userAssignedIdentities", [local.ama_user_assigned_identity_name]) })
+    private_dns_zone_subscription_id            = jsonencode({ value = var.connectivity_subscription_id })
+    private_dns_zone_resource_group_name        = jsonencode({ value = azurerm_resource_group.connectivity.name })
+    private_dns_zone_region                     = jsonencode({ value = var.location })
+    ama_user_assigned_managed_identity_id       = jsonencode({ value = provider::azapi::resource_group_resource_id(var.management_subscription_id, local.management_resource_group_name, "Microsoft.ManagedIdentity/userAssignedIdentities", [local.ama_user_assigned_identity_name]) })
     ama_user_assigned_managed_identity_name     = jsonencode({ value = local.ama_user_assigned_identity_name })
-    log_analytics_workspace_id                  = jsonencode({ value = provider::azapi::resource_group_resource_id(var.subscription_id_management, local.management_resource_group_name, "Microsoft.OperationalInsights/workspaces", [local.log_analytics_workspace_name]) })
+    ama_vm_insights_data_collection_rule_id     = jsonencode({ value = provider::azapi::resource_group_resource_id(var.management_subscription_id, local.management_resource_group_name, "Microsoft.Insights/dataCollectionRules", ["dcr-vm-insights"]) })
+    ama_mdfc_sql_data_collection_rule_id        = jsonencode({ value = provider::azapi::resource_group_resource_id(var.management_subscription_id, local.management_resource_group_name, "Microsoft.Insights/dataCollectionRules", ["dcr-defender-sql"]) })
+    ama_change_tracking_data_collection_rule_id = jsonencode({ value = provider::azapi::resource_group_resource_id(var.management_subscription_id, local.management_resource_group_name, "Microsoft.Insights/dataCollectionRules", ["dcr-change-tracking"]) })
+    log_analytics_workspace_id                  = jsonencode({ value = provider::azapi::resource_group_resource_id(var.management_subscription_id, local.management_resource_group_name, "Microsoft.OperationalInsights/workspaces", [local.log_analytics_workspace_name]) })
+    resource_group_location                     = jsonencode({ value = var.location })
+    resource_group_name_service_health_alerts   = jsonencode({ value = "rg-alz-service-health-\${var.location}" })
+    resource_group_name_mdfc                    = jsonencode({ value = "rg-alz-mdfc-export-\${var.location}" })
+    email_security_contact                      = jsonencode({ value = var.security_contact_email })
   }
 }
 
 output "root_management_group_resource_id" {
-  description = "The resource id of the management group at the top of the tree."
-  value       = module.alz.management_group_resource_ids[local.root_management_group_id]
+  description = "The resource id of the \\"alz\\" management group at the top of the tree."
+  value       = module.alz.management_group_resource_ids["alz"]
 }
 "
 `;
 
 exports[`emitFiles > matches the committed snapshot of the default build > application.tf 1`] = `
-"# Application landing zones: one module call per subscription, each through the
-# provider alias for that subscription. The subscription is placed under its
-# management group in alz.tf; this file creates what lives inside it.
-module "identity" {
-  source = "Azure/avm-ptn-alz-application-landing-zone-identity-and-access/azurerm"
-  # Not on the Terraform Registry on 2026-09-25; pin a version here once one is published.
-
-  location            = var.location
-  name                = "identity"
-  resource_group_name = "rg-alz-identity-\${var.location}"
-  enable_telemetry    = var.enable_telemetry
-
-  providers = {
-    azurerm = azurerm.identity
+"# Application landing zones: one spoke per subscription, through the provider alias
+# for that subscription. The subscription is placed under its management group in
+# alz.tf; this file creates the network inside it and peers it to the hub. Each spoke
+# is one /24 from the spoke range: corp from the low half, online from the high half.
+# For 10.1.0.0/16 that is corp_1 = 10.1.0.0/24, online_1 = 10.1.128.0/24.
+locals {
+  spoke_address_spaces = {
+    corp_1   = cidrsubnet(var.spoke_address_space, 8, 0)
+    online_1 = cidrsubnet(var.spoke_address_space, 8, 128)
   }
 }
 
-module "corp_1" {
-  source = "Azure/avm-ptn-alz-application-landing-zone-identity-and-access/azurerm"
-  # Not on the Terraform Registry on 2026-09-25; pin a version here once one is published.
+resource "azurerm_resource_group" "spoke_corp_1" {
+  provider = azurerm.corp_1
 
-  location            = var.location
-  name                = "corp-1"
-  resource_group_name = "rg-alz-corp-1-\${var.location}"
-  enable_telemetry    = var.enable_telemetry
+  location = var.location
+  name     = "rg-alz-corp-1-\${var.location}"
+}
 
-  providers = {
-    azurerm = azurerm.corp_1
+resource "azurerm_route_table" "spoke_corp_1" {
+  provider = azurerm.corp_1
+
+  location                      = var.location
+  name                          = "rt-alz-corp-1-\${var.location}"
+  resource_group_name           = azurerm_resource_group.spoke_corp_1.name
+  bgp_route_propagation_enabled = false
+
+  route {
+    name                   = "default-via-firewall"
+    address_prefix         = "0.0.0.0/0"
+    next_hop_type          = "VirtualAppliance"
+    next_hop_in_ip_address = module.connectivity.firewall_private_ip_addresses["primary"]
   }
 }
 
-module "online_1" {
-  source = "Azure/avm-ptn-alz-application-landing-zone-identity-and-access/azurerm"
-  # Not on the Terraform Registry on 2026-09-25; pin a version here once one is published.
+module "spoke_corp_1" {
+  source  = "Azure/avm-res-network-virtualnetwork/azurerm"
+  version = "0.22.2"
 
-  location            = var.location
-  name                = "online-1"
-  resource_group_name = "rg-alz-online-1-\${var.location}"
-  enable_telemetry    = var.enable_telemetry
+  location         = var.location
+  name             = "vnet-alz-corp-1-\${var.location}"
+  parent_id        = azurerm_resource_group.spoke_corp_1.id
+  address_space    = [local.spoke_address_spaces.corp_1]
+  enable_telemetry = var.enable_telemetry
+
+  subnets = {
+    workload = {
+      name             = "snet-workload"
+      address_prefixes = [local.spoke_address_spaces.corp_1]
+      route_table = {
+        id = azurerm_route_table.spoke_corp_1.id
+      }
+    }
+  }
+
+  peerings = {
+    hub = {
+      name                               = "peer-corp-1-to-hub"
+      remote_virtual_network_resource_id = module.connectivity.virtual_network_resource_ids["primary"]
+      allow_forwarded_traffic            = true
+      create_reverse_peering             = true
+      reverse_name                       = "peer-hub-to-corp-1"
+      reverse_allow_forwarded_traffic    = true
+    }
+  }
 
   providers = {
-    azurerm = azurerm.online_1
+    azapi = azapi.corp_1
+  }
+}
+
+resource "azurerm_resource_group" "spoke_online_1" {
+  provider = azurerm.online_1
+
+  location = var.location
+  name     = "rg-alz-online-1-\${var.location}"
+}
+
+module "spoke_online_1" {
+  source  = "Azure/avm-res-network-virtualnetwork/azurerm"
+  version = "0.22.2"
+
+  location         = var.location
+  name             = "vnet-alz-online-1-\${var.location}"
+  parent_id        = azurerm_resource_group.spoke_online_1.id
+  address_space    = [local.spoke_address_spaces.online_1]
+  enable_telemetry = var.enable_telemetry
+
+  subnets = {
+    workload = {
+      name             = "snet-workload"
+      address_prefixes = [local.spoke_address_spaces.online_1]
+    }
+  }
+
+  peerings = {
+    hub = {
+      name                               = "peer-online-1-to-hub"
+      remote_virtual_network_resource_id = module.connectivity.virtual_network_resource_ids["primary"]
+      allow_forwarded_traffic            = true
+      create_reverse_peering             = true
+      reverse_name                       = "peer-hub-to-online-1"
+      reverse_allow_forwarded_traffic    = true
+    }
+  }
+
+  providers = {
+    azapi = azapi.online_1
   }
 }
 "
@@ -206,7 +284,7 @@ module "online_1" {
 exports[`emitFiles > matches the committed snapshot of the default build > connectivity.tf 1`] = `
 "# Connectivity: one hub virtual network with a Bastion host, the gateway subnet for a
 # future ExpressRoute or VPN (the gateways themselves are off), route tables, and
-# an Azure Firewall (Standard) with its policy that every spoke routes through.
+# an Azure Firewall (Standard) with its policy that every private spoke routes through.
 # The private DNS zones for Private Link are created and linked to the hub.
 resource "azurerm_resource_group" "connectivity" {
   provider = azurerm.connectivity
@@ -260,6 +338,76 @@ module "connectivity" {
 "
 `;
 
+exports[`emitFiles > matches the committed snapshot of the default build > identity.tf 1`] = `
+"# Identity: the subscription for domain controllers and directory services, placed
+# under the Identity management group in alz.tf. Its spoke is the top /24 of the
+# spoke range’s low half (10.1.127.0/24 for 10.1.0.0/16), peered to the hub so
+# every corp spoke can reach a domain controller, and private like a corp spoke.
+locals {
+  identity_address_space = cidrsubnet(var.spoke_address_space, 8, 127)
+}
+
+resource "azurerm_resource_group" "spoke_identity" {
+  provider = azurerm.identity
+
+  location = var.location
+  name     = "rg-alz-identity-\${var.location}"
+}
+
+resource "azurerm_route_table" "spoke_identity" {
+  provider = azurerm.identity
+
+  location                      = var.location
+  name                          = "rt-alz-identity-\${var.location}"
+  resource_group_name           = azurerm_resource_group.spoke_identity.name
+  bgp_route_propagation_enabled = false
+
+  route {
+    name                   = "default-via-firewall"
+    address_prefix         = "0.0.0.0/0"
+    next_hop_type          = "VirtualAppliance"
+    next_hop_in_ip_address = module.connectivity.firewall_private_ip_addresses["primary"]
+  }
+}
+
+module "spoke_identity" {
+  source  = "Azure/avm-res-network-virtualnetwork/azurerm"
+  version = "0.22.2"
+
+  location         = var.location
+  name             = "vnet-alz-identity-\${var.location}"
+  parent_id        = azurerm_resource_group.spoke_identity.id
+  address_space    = [local.identity_address_space]
+  enable_telemetry = var.enable_telemetry
+
+  subnets = {
+    workload = {
+      name             = "snet-workload"
+      address_prefixes = [local.identity_address_space]
+      route_table = {
+        id = azurerm_route_table.spoke_identity.id
+      }
+    }
+  }
+
+  peerings = {
+    hub = {
+      name                               = "peer-identity-to-hub"
+      remote_virtual_network_resource_id = module.connectivity.virtual_network_resource_ids["primary"]
+      allow_forwarded_traffic            = true
+      create_reverse_peering             = true
+      reverse_name                       = "peer-hub-to-identity"
+      reverse_allow_forwarded_traffic    = true
+    }
+  }
+
+  providers = {
+    azapi = azapi.identity
+  }
+}
+"
+`;
+
 exports[`emitFiles > matches the committed snapshot of the default build > management.tf 1`] = `
 "# Management: the Log Analytics workspace every subscription reports to, the data
 # collection rules for the monitoring agent, the identity the agent runs as, and an
@@ -297,6 +445,7 @@ exports[`emitFiles > matches the committed snapshot of the default build > paths
   "alz.tf",
   "management.tf",
   "connectivity.tf",
+  "identity.tf",
   "application.tf",
   "variables.tf",
   "terraform.tfvars.example",
@@ -327,42 +476,57 @@ provider "alz" {
 
 provider "azurerm" {
   alias           = "management"
-  subscription_id = var.subscription_id_management
+  subscription_id = var.management_subscription_id
   features {}
 }
 
 provider "azapi" {
   alias           = "management"
-  subscription_id = var.subscription_id_management
+  subscription_id = var.management_subscription_id
 }
 
 provider "azurerm" {
   alias           = "connectivity"
-  subscription_id = var.subscription_id_connectivity
+  subscription_id = var.connectivity_subscription_id
   features {}
 }
 
 provider "azapi" {
   alias           = "connectivity"
-  subscription_id = var.subscription_id_connectivity
+  subscription_id = var.connectivity_subscription_id
 }
 
 provider "azurerm" {
   alias           = "identity"
-  subscription_id = var.subscription_id_identity
+  subscription_id = var.identity_subscription_id
   features {}
+}
+
+provider "azapi" {
+  alias           = "identity"
+  subscription_id = var.identity_subscription_id
 }
 
 provider "azurerm" {
   alias           = "corp_1"
-  subscription_id = var.subscription_ids_corp[0]
+  subscription_id = var.corp_subscription_ids[0]
   features {}
+}
+
+provider "azapi" {
+  alias           = "corp_1"
+  subscription_id = var.corp_subscription_ids[0]
 }
 
 provider "azurerm" {
   alias           = "online_1"
-  subscription_id = var.subscription_ids_online[0]
+  subscription_id = var.online_subscription_ids[0]
   features {}
+}
+
+provider "azapi" {
+  alias           = "online_1"
+  subscription_id = var.online_subscription_ids[0]
 }
 "
 `;
@@ -397,13 +561,14 @@ terraform {
 exports[`emitFiles > matches the committed snapshot of the default build > terraform.tfvars.example 1`] = `
 "# Copy to terraform.tfvars and replace every all-zero GUID with a real subscription id.
 location                     = "centralus"
-root_management_group_id     = "alz"
 hub_address_space            = "10.0.0.0/16"
-subscription_id_management   = "00000000-0000-0000-0000-000000000000"
-subscription_id_connectivity = "00000000-0000-0000-0000-000000000000"
-subscription_id_identity     = "00000000-0000-0000-0000-000000000000"
-subscription_ids_corp        = ["00000000-0000-0000-0000-000000000000"]
-subscription_ids_online      = ["00000000-0000-0000-0000-000000000000"]
+spoke_address_space          = "10.1.0.0/16"
+security_contact_email       = "security@example.com"
+management_subscription_id   = "00000000-0000-0000-0000-000000000000"
+connectivity_subscription_id = "00000000-0000-0000-0000-000000000000"
+identity_subscription_id     = "00000000-0000-0000-0000-000000000000"
+corp_subscription_ids        = ["00000000-0000-0000-0000-000000000000"]
+online_subscription_ids      = ["00000000-0000-0000-0000-000000000000"]
 "
 `;
 
@@ -420,10 +585,10 @@ variable "enable_telemetry" {
   description = "Whether the Azure Verified Modules send their usage telemetry to Microsoft."
 }
 
-variable "root_management_group_id" {
+variable "parent_management_group_id" {
   type        = string
-  default     = "alz"
-  description = "The id of the management group at the top of the landing zone tree."
+  default     = null
+  description = "The management group to create the \\"alz\\" root under; null for the tenant root group."
 }
 
 variable "hub_address_space" {
@@ -432,52 +597,68 @@ variable "hub_address_space" {
   description = "The IPv4 address space of the hub virtual network."
 }
 
-variable "subscription_id_management" {
+variable "spoke_address_space" {
+  type        = string
+  default     = "10.1.0.0/16"
+  description = "The IPv4 range every spoke is carved from, one /24 each; must not overlap the hub."
+}
+
+variable "security_contact_email" {
+  type        = string
+  description = "The address Microsoft Defender for Cloud notifies; the Deploy-MDFC-Config-H224 assignment requires one."
+
+  validation {
+    condition     = can(regex("^[^@ ]+@[^@ ]+[.][^@ ]+$", var.security_contact_email))
+    error_message = "An email address."
+  }
+}
+
+variable "management_subscription_id" {
   type        = string
   description = "The management subscription."
 
   validation {
-    condition     = can(regex("^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$", var.subscription_id_management))
+    condition     = can(regex("^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$", var.management_subscription_id))
     error_message = "A subscription id is a GUID."
   }
 }
 
-variable "subscription_id_connectivity" {
+variable "connectivity_subscription_id" {
   type        = string
   description = "The connectivity subscription."
 
   validation {
-    condition     = can(regex("^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$", var.subscription_id_connectivity))
+    condition     = can(regex("^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$", var.connectivity_subscription_id))
     error_message = "A subscription id is a GUID."
   }
 }
 
-variable "subscription_id_identity" {
+variable "identity_subscription_id" {
   type        = string
   description = "The identity subscription."
 
   validation {
-    condition     = can(regex("^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$", var.subscription_id_identity))
+    condition     = can(regex("^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$", var.identity_subscription_id))
     error_message = "A subscription id is a GUID."
   }
 }
 
-variable "subscription_ids_corp" {
+variable "corp_subscription_ids" {
   type        = list(string)
   description = "The corp landing zone subscriptions, one per landing zone."
 
   validation {
-    condition     = length(var.subscription_ids_corp) == 1 && alltrue([for id in var.subscription_ids_corp : can(regex("^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$", id))])
+    condition     = length(var.corp_subscription_ids) == 1 && alltrue([for id in var.corp_subscription_ids : can(regex("^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$", id))])
     error_message = "Exactly 1 subscription id, each a GUID."
   }
 }
 
-variable "subscription_ids_online" {
+variable "online_subscription_ids" {
   type        = list(string)
   description = "The online landing zone subscriptions, one per landing zone."
 
   validation {
-    condition     = length(var.subscription_ids_online) == 1 && alltrue([for id in var.subscription_ids_online : can(regex("^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$", id))])
+    condition     = length(var.online_subscription_ids) == 1 && alltrue([for id in var.online_subscription_ids : can(regex("^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$", id))])
     error_message = "Exactly 1 subscription id, each a GUID."
   }
 }

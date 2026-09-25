@@ -29,68 +29,87 @@ This project has not cut a tagged release; entries are grouped under
   (`corp`, `online`, each counted 0..5) — every one with a one-sentence
   summary, a hand-written `teaches` of three to five sentences (what it is,
   why a landing zone has it, what breaks without it), its `dependsOn`, the
-  module that deploys it, and its knobs: hub CIDR, firewall SKU, private DNS
-  zones, region, the two counts and the root management group id, each with
-  a validator and a default.
+  module that deploys it, and its knobs: hub CIDR, spoke range, firewall SKU,
+  private DNS zones, region, the two counts and the parent management group,
+  each with a validator and a default.
 
   **The module pins are looked up, not remembered.** `avmVersions.js` holds
-  exactly four modules with `verifiedOn: '2026-09-25'`, read from the
-  registry's v1 API and each repository's latest GitHub release that day:
-  `Azure/avm-ptn-alz/azurerm` 0.21.0, `avm-ptn-alz-management` 0.9.0 and
-  `avm-ptn-alz-connectivity-hub-and-spoke-vnet` 0.17.5. The fourth,
-  `avm-ptn-alz-application-landing-zone-identity-and-access`, is on GitHub as
-  the unfilled AVM template with no tag, no release and no registry listing,
-  so it carries `version: null` and a note saying so, and the emitter writes
-  a dated comment where the `version` line would go rather than a number
-  nobody published. The provider constraints (`alz ~> 0.21`, `azapi ~> 2.12`,
-  `azurerm ~> 4.35`, `random ~> 3.6`, Terraform `>= 1.12, < 2.0`) and the
-  `platform/alz/2026.08.1` library ref come from the same modules'
-  `terraform.tf` files and the library's release list. `avm-ptn-hubnetworking`
-  is archived; a test asserts the string never reaches any emitted file.
+  exactly four modules with `verifiedOn: '2026-09-25'`, each read from the
+  registry's v1 API and the repository's latest GitHub release that day:
+  `Azure/avm-ptn-alz/azurerm` 0.21.0, `avm-ptn-alz-management` 0.9.0,
+  `avm-ptn-alz-connectivity-hub-and-spoke-vnet` 0.17.5 and
+  `avm-res-network-virtualnetwork` 0.22.2. The pattern module for
+  application landing zones,
+  `avm-ptn-alz-application-landing-zone-identity-and-access`, was on GitHub
+  that day as the unfilled AVM template with no tag, no release and no
+  registry listing, so the builder does not call it: a landing zone is a
+  `subscription_placement` entry in avm-ptn-alz plus a spoke from the virtual
+  network module instead, and a test asserts every emitted module `source` is
+  pinned with a `version` line. The provider constraints (`alz ~> 0.21`,
+  `azapi ~> 2.12`, `azurerm ~> 4.35`, `random ~> 3.6`, Terraform `>= 1.12, <
+  2.0`) and the `platform/alz/2026.08.1` library ref come from the same
+  modules' `terraform.tf` files and the library's release list.
+  `avm-ptn-hubnetworking` is archived; a test asserts the string never
+  reaches any emitted file.
 
   **The build is a URL.** `share.js` encodes the state as
-  `?lz=mg,policy,mgmt,hub,fw,id&hub.cidr=10.0.0.0/16&fw.sku=Premium&dns=0&loc=westeurope&corp=2&online=1&root=alz`:
+  `?lz=mg,policy,mgmt,hub,fw,id&hub.cidr=10.0.0.0/16&spoke.cidr=10.1.0.0/16&fw.sku=Premium&dns=0&loc=westeurope&corp=2&online=1&root=contoso`:
   `lz=` lists the selected platform components by short id, the application
-  components travel as their counts with 0 meaning not selected, and every
-  default is left out, so the default build — the whole landing zone with one
-  corp and one online — is a bare URL and an empty build is
-  `?lz=&corp=0&online=0`. Decoding drops unknown tokens, defaults any option
-  that fails its validator, and normalises through `state.js`, which closes
-  the selection over `dependsOn` (a firewall brings the hub, a corp landing
-  zone brings the tree and the hub) and keeps the counts and the selection in
-  step. `isLzParam` says which keys are the module's, as `isScenarioParam`
-  does for the pricing page.
+  components travel as their counts with 0 meaning not selected, `root=` is
+  the management group the `alz` root is created under (absent for the tenant
+  root group, wired to the module's `parent_resource_id`), and every default
+  is left out, so the default build — the whole landing zone with one corp
+  and one online — is a bare URL and an empty build is `?lz=&corp=0&online=0`.
+  Decoding drops unknown tokens, defaults any option that fails its
+  validator, and normalises through `state.js`, which closes the selection
+  over `dependsOn` (a firewall brings the hub; identity, corp and online each
+  bring the tree and the hub they peer to) and keeps the counts and the
+  selection in step. `isLzParam` says which keys are the module's, as
+  `isScenarioParam` does for the pricing page.
 
-  **`hcl.js` emits the Terraform the validated pattern would.** `emitFiles`
-  returns `{ path, content }` files, only for selected components:
-  `terraform.tf`, `providers.tf` (default providers from the workspace's
-  `ARM_*` variables, an alias per subscription), `alz.tf` (`architecture_name
-  = "alz"`, subscription placement, and when policy is selected the DDoS
-  modification and `policy_default_values` built from the management names
-  with `policy_assignments_dependencies`, exactly as the module's own
-  management example does), `management.tf`, `connectivity.tf` (the firewall
-  and its policy as blocks of the hub object only when selected, the DNS
-  resources on the option), `application.tf` (one call per identity, corp and
-  online landing zone), `variables.tf` with GUID validation on every
-  subscription id, `terraform.tfvars.example`, and a `README.md` carrying the
-  pattern's prerequisites — HCP Terraform, Owner at the tenant root, a service
-  principal — and the line that the files were generated for learning and
-  never applied by HybridCloudWorks. The formatter aligns `=` the way
-  `terraform fmt` does, across runs of single-line attributes and not across
-  a multi-line value or a comment; six builds (default, Basic firewall, hub
-  without DNS, tree only, five-and-five Premium, identity only) pass
-  `terraform fmt -check -recursive` under Terraform 1.15.8. `diagram.js` lays
-  the same state out as a tidy tree of management groups, subscriptions, hub
-  and spokes with peering edges, in fixed units so pre-render and hydration
-  agree.
+  **`hcl/` emits the Terraform the validated pattern would**, one module per
+  emitted file. `emitFiles` returns `{ path, content }` files, only for
+  selected components: `terraform.tf`, `providers.tf` (default providers from
+  the workspace's `ARM_*` variables, an azurerm and an azapi alias per
+  subscription), `alz.tf` (`architecture_name = "alz"`, one placement per
+  subscription, and when policy is selected **all fourteen
+  `policy_default_values` the pinned library declares** — the six AMA and
+  workspace ids from the management names, the three private-DNS values from
+  the hub, the location, two resource-group names and a validated
+  `security_contact_email` variable — with the one value the build never
+  creates a source for, the DDoS plan, and the DNS trio when zones are off,
+  handled by setting their assignments `DoNotEnforce` rather than leaving a
+  library placeholder), `management.tf`, `connectivity.tf` (the firewall and
+  its policy as blocks of the hub object only when selected, the DNS resources
+  on the option), `identity.tf` and `application.tf` (one spoke per landing
+  zone: a resource group, a /24 carved from the spoke range with `cidrsubnet`,
+  a two-way peering to the hub through the connectivity module's
+  `virtual_network_resource_ids`, and for corp and identity a route table
+  whose default route is the firewall's private IP when the firewall is
+  selected; online spokes egress directly), `variables.tf` with GUID
+  validation on every subscription id, `terraform.tfvars.example`, and a
+  `README.md` carrying the pattern's prerequisites — HCP Terraform, Owner at
+  the tenant root, a service principal — the spoke pattern in two sentences,
+  and the line that the files were generated for learning and never applied
+  by HybridCloudWorks. `format.js` aligns `=` the way `terraform fmt` does,
+  across runs of single-line attributes and not across a multi-line value or
+  a comment; six builds (default, Basic firewall, hub without DNS, tree only,
+  five-and-five Premium, identity only) pass `terraform fmt -check
+  -recursive` under Terraform 1.15.8. `cidr.js` is the carve — corp from the
+  low half, online from the high half, identity at the top of the low half —
+  and `diagram.js` lays the same state out as a tidy tree of management
+  groups, hub and spokes with their /24s and peering edges, in fixed units so
+  pre-render and hydration agree.
 
-  Two suites, 26 tests: every component has every field and a `teaches` of
-  the right length, the dependency closure, encode/decode round trips and
-  default omission, decode tolerance, fmt shape on every emitted file, every
-  module `source` in `avmVersions.js`, the archived module absent, a
-  committed snapshot of the default build (the repository's first
-  `__snapshots__`), and diagram determinism with no overlapping nodes. No
-  page, no route, no dependency; `frontend/` vitest goes from 2,272 to 2,298.
+  Two suites, 29 tests: every component has every field and a `teaches` of
+  the right length, the dependency closure, the carve, encode/decode round
+  trips and default omission, decode tolerance, fmt shape on every emitted
+  file, every module `source` pinned with a version, the archived and the
+  unpublished module absent, all fourteen policy defaults supplied or their
+  assignment not enforced, a committed snapshot of the default build (the
+  repository's first `__snapshots__`), and diagram determinism with no
+  overlapping nodes. No page, no route, no dependency; `frontend/` vitest
+  goes from 2,272 to 2,301.
 
 ### Changed
 

@@ -3,7 +3,7 @@
  * knobs are set to, with the dependency rule enforced so the state can never
  * describe a firewall without a hub or a corp landing zone without a tree.
  *
- *   { selected: string[], options: { location, rootParentId, hubCidr,
+ *   { selected: string[], options: { location, rootParentId, hubCidr, spokeCidr,
  *     privateDnsZones, firewallSku, corpCount, onlineCount } }
  *
  * `selected` is in catalogue order. The application components are counted

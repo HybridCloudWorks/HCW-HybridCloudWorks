@@ -17,6 +17,7 @@ import {
   OPTION_IDS,
   PLATFORM_IDS,
   addComponent,
+  cidrsOverlap,
   componentById,
   componentByShortId,
   decodeLz,
@@ -29,10 +30,14 @@ import {
   isLocation,
   isLzParam,
   isManagementGroupId,
+  isRootParentId,
+  isSpokeCidr,
   layoutDiagram,
   normalizeState,
   removeWithDependents,
   setOption,
+  spokeAddressSpace,
+  spokeSlot,
   withDependencies,
 } from './index';
 
@@ -80,9 +85,12 @@ describe('the catalogue', () => {
     }
     expect(Object.isFrozen(COMPONENTS)).toBe(true);
     expect(Object.isFrozen(OPTIONS)).toBe(true);
+    for (const spec of Object.values(OPTIONS)) {
+      expect(spec.validate(spec.default), `${spec.id} default validates`).toBe(true);
+    }
   });
 
-  it('declares the dependencies the issue lists', () => {
+  it('declares the dependencies: every landing zone, identity included, peers to the hub', () => {
     const deps = Object.fromEntries(COMPONENTS.map((c) => [c.id, [...c.dependsOn]]));
     expect(deps).toEqual({
       'management-groups': [],
@@ -90,10 +98,14 @@ describe('the catalogue', () => {
       management: ['management-groups'],
       'connectivity-hub': ['management-groups'],
       firewall: ['connectivity-hub'],
-      identity: ['management-groups'],
+      identity: ['management-groups', 'connectivity-hub'],
       corp: ['management-groups', 'connectivity-hub'],
       online: ['management-groups', 'connectivity-hub'],
     });
+    for (const id of ['identity', 'corp', 'online']) {
+      expect(componentById(id).avm.source).toBe('Azure/avm-res-network-virtualnetwork/azurerm');
+      expect(componentById(id).teaches).toMatch(/spoke/);
+    }
   });
 
   it('finds a component by id and by short id', () => {
@@ -105,23 +117,25 @@ describe('the catalogue', () => {
     expect(isComponentId('Corp')).toBe(false);
   });
 
-  it('pins exactly the four modules, dated, and the archived one is not among them', () => {
+  it('pins exactly four published modules, dated; the archived and template ones are not among them', () => {
     expect(AVM_MODULE_NAMES).toEqual([
       'avm-ptn-alz',
       'avm-ptn-alz-management',
       'avm-ptn-alz-connectivity-hub-and-spoke-vnet',
-      'avm-ptn-alz-application-landing-zone-identity-and-access',
+      'avm-res-network-virtualnetwork',
     ]);
     expect(AVM_VERIFIED_ON).toBe('2026-09-25');
     for (const m of Object.values(AVM_MODULES)) {
       expect(m.source).toBe(`Azure/${m.name}/azurerm`);
       expect(m.verifiedOn).toBe(AVM_VERIFIED_ON);
-      if (m.version === null) expect(m.note).toMatch(/Not on the Terraform Registry/);
-      else expect(m.version).toMatch(/^\d+\.\d+\.\d+$/);
+      expect(m.version).toMatch(/^\d+\.\d+\.\d+$/);
       expect(Object.isFrozen(m)).toBe(true);
     }
     expect(AVM_SOURCES.join(' ')).not.toContain('hubnetworking');
     expect(isAvmSource('Azure/avm-ptn-hubnetworking/azurerm')).toBe(false);
+    expect(
+      isAvmSource('Azure/avm-ptn-alz-application-landing-zone-identity-and-access/azurerm')
+    ).toBe(false);
   });
 });
 
@@ -144,6 +158,42 @@ describe('the validators', () => {
     }
   });
 
+  it('accept a spoke range down to /20 and carve one /24 per landing zone from it', () => {
+    expect(isSpokeCidr('10.1.0.0/16')).toBe(true);
+    expect(isSpokeCidr('10.8.0.0/20')).toBe(true);
+    expect(isSpokeCidr('10.8.0.0/21')).toBe(false);
+    expect(isSpokeCidr('10.0.0.0/24')).toBe(false);
+    expect(isSpokeCidr(null)).toBe(false);
+
+    expect(spokeAddressSpace('10.1.0.0/16', 'corp', 1)).toBe('10.1.0.0/24');
+    expect(spokeAddressSpace('10.1.0.0/16', 'corp', 5)).toBe('10.1.4.0/24');
+    expect(spokeAddressSpace('10.1.0.0/16', 'online', 1)).toBe('10.1.128.0/24');
+    expect(spokeAddressSpace('10.1.0.0/16', 'online', 5)).toBe('10.1.132.0/24');
+    expect(spokeAddressSpace('10.1.0.0/16', 'identity')).toBe('10.1.127.0/24');
+    expect(spokeAddressSpace('10.1.7.9/16', 'corp', 1)).toBe('10.1.0.0/24');
+    expect(spokeAddressSpace('10.8.0.0/20', 'corp', 5)).toBe('10.8.4.0/24');
+    expect(spokeAddressSpace('10.8.0.0/20', 'identity')).toBe('10.8.7.0/24');
+    expect(spokeAddressSpace('10.8.0.0/20', 'online', 1)).toBe('10.8.8.0/24');
+    expect(spokeAddressSpace('10.8.0.0/20', 'online', 5)).toBe('10.8.12.0/24');
+    expect(spokeAddressSpace('10.0.0.0/8', 'online', 1)).toBe('10.128.0.0/24');
+    expect(spokeAddressSpace('10.1.0.0/16', 'sandbox', 1)).toBeNull();
+    expect(spokeAddressSpace('10.1.0.0/16', 'corp', 0)).toBeNull();
+    expect(spokeAddressSpace('10.1.0.0/24', 'corp', 1)).toBeNull();
+    expect(spokeSlot('10.1.0.0/16', 'online', 2)).toEqual({ newbits: 8, netnum: 129 });
+    expect(spokeSlot('10.8.0.0/20', 'identity')).toEqual({ newbits: 4, netnum: 7 });
+
+    const all = [];
+    for (let i = 1; i <= 5; i += 1) all.push(spokeAddressSpace('10.8.0.0/20', 'corp', i));
+    for (let i = 1; i <= 5; i += 1) all.push(spokeAddressSpace('10.8.0.0/20', 'online', i));
+    all.push(spokeAddressSpace('10.8.0.0/20', 'identity'));
+    expect(new Set(all).size).toBe(11);
+    for (const cidr of all) expect(cidrsOverlap(cidr, '10.8.0.0/20'), cidr).toBe(true);
+
+    expect(cidrsOverlap('10.0.0.0/16', '10.1.0.0/16')).toBe(false);
+    expect(cidrsOverlap('10.0.0.0/8', '10.1.0.0/16')).toBe(true);
+    expect(cidrsOverlap('10.1.0.0/16', 'nope')).toBe(false);
+  });
+
   it('accept a region id, a count in range and a management group id', () => {
     expect(isLocation('centralus')).toBe(true);
     expect(isLocation('westeurope')).toBe(true);
@@ -158,6 +208,10 @@ describe('the validators', () => {
     expect(isManagementGroupId('-alz')).toBe(false);
     expect(isManagementGroupId('a/b')).toBe(false);
     expect(isManagementGroupId('x'.repeat(91))).toBe(false);
+    expect(isRootParentId('')).toBe(true);
+    expect(isRootParentId('contoso')).toBe(true);
+    expect(isRootParentId('/contoso')).toBe(false);
+    expect(isRootParentId(null)).toBe(false);
   });
 });
 
@@ -166,8 +220,9 @@ describe('the state', () => {
     expect(DEFAULT_STATE.selected).toEqual(COMPONENT_IDS);
     expect(DEFAULT_STATE.options).toEqual({
       location: 'centralus',
-      rootParentId: 'alz',
+      rootParentId: '',
       hubCidr: '10.0.0.0/16',
+      spokeCidr: '10.1.0.0/16',
       privateDnsZones: true,
       firewallSku: 'Standard',
       corpCount: 1,
@@ -185,6 +240,11 @@ describe('the state', () => {
       'firewall',
     ]);
     expect(withDependencies(['policy'])).toEqual(['management-groups', 'policy', 'management']);
+    expect(withDependencies(['identity'])).toEqual([
+      'management-groups',
+      'connectivity-hub',
+      'identity',
+    ]);
     expect(withDependencies(['online', 'bogus', 'online'])).toEqual([
       'management-groups',
       'connectivity-hub',
@@ -192,7 +252,7 @@ describe('the state', () => {
     ]);
     expect(withDependencies([])).toEqual([]);
     expect(withDependencies(undefined)).toEqual([]);
-    expect(dependentsOf('connectivity-hub')).toEqual(['firewall', 'corp', 'online']);
+    expect(dependentsOf('connectivity-hub')).toEqual(['firewall', 'identity', 'corp', 'online']);
     expect(dependentsOf('management-groups')).toEqual(COMPONENT_IDS.slice(1));
     expect(dependentsOf('firewall')).toEqual([]);
   });
@@ -215,6 +275,7 @@ describe('the state', () => {
     const s = normalizeState({
       options: {
         hubCidr: '10.0.0.0/30',
+        spokeCidr: '10.1.0.0/22',
         firewallSku: 'Ultra',
         privateDnsZones: 'yes',
         location: 'West US',
@@ -235,7 +296,7 @@ describe('the state', () => {
     expect(addComponent(empty, 'bogus')).toEqual(empty);
 
     const noHub = removeWithDependents(DEFAULT_STATE, 'connectivity-hub');
-    expect(noHub.selected).toEqual(['management-groups', 'policy', 'management', 'identity']);
+    expect(noHub.selected).toEqual(['management-groups', 'policy', 'management']);
     expect(noHub.options.corpCount).toBe(0);
     expect(noHub.options.onlineCount).toBe(0);
     const nothing = removeWithDependents(DEFAULT_STATE, 'management-groups');
@@ -253,6 +314,9 @@ describe('the state', () => {
     const twoCorp = setOption(normalizeState({ selected: [] }), 'corpCount', '2');
     expect(twoCorp.selected).toEqual(['management-groups', 'connectivity-hub', 'corp']);
     expect(twoCorp.options.corpCount).toBe(2);
+    expect(setOption(DEFAULT_STATE, 'rootParentId', 'contoso').options.rootParentId).toBe(
+      'contoso'
+    );
   });
 });
 
@@ -272,6 +336,7 @@ describe('the shareable URL', () => {
         ],
         options: {
           hubCidr: '10.1.0.0/16',
+          spokeCidr: '10.2.0.0/16',
           firewallSku: 'Premium',
           privateDnsZones: false,
           location: 'westeurope',
@@ -283,6 +348,7 @@ describe('the shareable URL', () => {
     ).toEqual({
       lz: 'mg,policy,mgmt,hub,fw',
       'hub.cidr': '10.1.0.0/16',
+      'spoke.cidr': '10.2.0.0/16',
       'fw.sku': 'Premium',
       dns: '0',
       loc: 'westeurope',
@@ -311,7 +377,7 @@ describe('the shareable URL', () => {
   it('decodes the documented shape', () => {
     const decoded = decodeLz(
       new URLSearchParams(
-        'lz=mg,policy,mgmt,hub,fw,id&hub.cidr=10.0.0.0/16&fw.sku=Premium&dns=0&loc=westeurope&corp=2&online=1&root=alz'
+        'lz=mg,policy,mgmt,hub,fw,id&hub.cidr=10.0.0.0/16&spoke.cidr=10.1.0.0/16&fw.sku=Premium&dns=0&loc=westeurope&corp=2&online=1&root=contoso'
       )
     );
     expect(decoded).toEqual(
@@ -322,6 +388,7 @@ describe('the shareable URL', () => {
           privateDnsZones: false,
           location: 'westeurope',
           corpCount: 2,
+          rootParentId: 'contoso',
         },
       })
     );
@@ -330,7 +397,7 @@ describe('the shareable URL', () => {
   it('drops junk, applies dependencies and defaults the rest', () => {
     const decoded = decodeLz(
       new URLSearchParams(
-        'lz=fw,teleport,,id&hub.cidr=300.0.0.0/16&fw.sku=ultra&dns=maybe&loc=West%20Europe&corp=7&online=abc&root=/x&region=westeurope'
+        'lz=fw,teleport,,id&hub.cidr=300.0.0.0/16&spoke.cidr=10.1.0.0/28&fw.sku=ultra&dns=maybe&loc=West%20Europe&corp=7&online=abc&root=/x&region=westeurope'
       )
     );
     expect(decoded).toEqual(
@@ -362,10 +429,21 @@ describe('the shareable URL', () => {
     expect(decodeLz(new URLSearchParams('lz=corp&corp=0')).options.corpCount).toBe(1);
     expect(decodeLz(new URLSearchParams('dns=false')).options.privateDnsZones).toBe(false);
     expect(decodeLz(new URLSearchParams('dns=true')).options.privateDnsZones).toBe(true);
+    expect(decodeLz(new URLSearchParams('root=')).options.rootParentId).toBe('');
   });
 
   it('knows which keys are its own', () => {
-    for (const key of ['lz', 'hub.cidr', 'fw.sku', 'dns', 'loc', 'corp', 'online', 'root']) {
+    for (const key of [
+      'lz',
+      'hub.cidr',
+      'spoke.cidr',
+      'fw.sku',
+      'dns',
+      'loc',
+      'corp',
+      'online',
+      'root',
+    ]) {
       expect(isLzParam(key), key).toBe(true);
     }
     for (const key of ['region', 'scenario', 'q.compute-vm', 'tab', '']) {
@@ -422,7 +500,7 @@ describe('the diagram', () => {
     expect(kinds).toContain('vnet:hub');
     expect(kinds).toContain('firewall:firewall');
     expect(kinds).toContain('dns:dns');
-    expect(kinds).toContain('subscription:sub:identity');
+    expect(kinds).toContain('spoke:spoke:identity');
     expect(kinds).toContain('spoke:spoke:corp-1');
     expect(kinds).toContain('spoke:spoke:online-1');
     expect(
@@ -430,8 +508,14 @@ describe('the diagram', () => {
         .filter((e) => e.kind === 'peering')
         .map((e) => e.to)
         .sort()
-    ).toEqual(['spoke:corp-1', 'spoke:online-1', 'sub:identity']);
+    ).toEqual(['spoke:corp-1', 'spoke:identity', 'spoke:online-1']);
     expect(full.nodes.find((n) => n.id === 'hub').label).toBe('Hub VNet 10.0.0.0/16');
+    expect(full.nodes.find((n) => n.id === 'spoke:corp-1').label).toBe('Corp 1 10.1.0.0/24');
+    expect(full.nodes.find((n) => n.id === 'spoke:online-1').label).toBe('Online 1 10.1.128.0/24');
+    expect(full.nodes.find((n) => n.id === 'spoke:identity').label).toBe(
+      'Identity spoke 10.1.127.0/24'
+    );
+    expect(full.nodes[0].label).toBe('alz');
 
     const hubOnly = layoutDiagram(normalizeState({ selected: ['connectivity-hub'] }));
     expect(hubOnly.nodes.map((n) => n.id)).toEqual([
@@ -449,6 +533,8 @@ describe('the diagram', () => {
     ]);
 
     expect(layoutDiagram({ selected: [] })).toEqual({ width: 0, height: 0, nodes: [], edges: [] });
-    expect(layoutDiagram({ options: { rootParentId: 'contoso' } }).nodes[0].label).toBe('contoso');
+    expect(layoutDiagram({ options: { rootParentId: 'contoso' } }).nodes[0].label).toBe(
+      'alz under contoso'
+    );
   });
 });

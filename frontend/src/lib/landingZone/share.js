@@ -1,14 +1,16 @@
 /**
  * The build as a query string (#667), so a landing zone is a link:
- * `?lz=mg,policy,mgmt,hub,fw,id&hub.cidr=10.0.0.0/16&fw.sku=Premium&dns=0&loc=westeurope&corp=2&online=1&root=alz`.
+ * `?lz=mg,policy,mgmt,hub,fw,id&hub.cidr=10.0.0.0/16&spoke.cidr=10.1.0.0/16&fw.sku=Premium&dns=0&loc=westeurope&corp=2&online=1&root=contoso`.
  *
  * `lz=` lists the selected PLATFORM components by short id; the application
  * components travel as their counts, `corp=` and `online=`, where 0 means not
  * selected. Defaults are left out, so the canonical URL for the default build
  * (everything, one corp, one online) is bare, and an empty build is
- * `?lz=&corp=0&online=0`. Decoding is tolerant of anything a hand-edited URL
- * can carry: unknown tokens are dropped, an option that fails its validator
- * is its default, and the result is normalised, so dependencies hold.
+ * `?lz=&corp=0&online=0`. `root=` is the management group the alz root is
+ * created under, absent for the tenant root group. Decoding is tolerant of
+ * anything a hand-edited URL can carry: unknown tokens are dropped, an option
+ * that fails its validator is its default, and the result is normalised, so
+ * dependencies hold.
  *
  * Same contract as pricingScenarios/share.js: `encodeLz` returns plain
  * entries for URLSearchParams, `decodeLz` reads URLSearchParams or a plain
@@ -29,6 +31,7 @@ const SELECTION_KEY = 'lz';
 /** Option id → query key, in the order the documented URL lists them. */
 const OPTION_KEYS = Object.freeze({
   hubCidr: 'hub.cidr',
+  spokeCidr: 'spoke.cidr',
   firewallSku: 'fw.sku',
   privateDnsZones: 'dns',
   location: 'loc',
@@ -86,6 +89,17 @@ function decodeOption(id, raw) {
   return raw;
 }
 
+/** The platform ids an `lz=` value names; every platform id when the key is absent. */
+function decodeSelection(raw) {
+  if (raw === null || raw === undefined) return new Set(PLATFORM_IDS);
+  const selected = new Set();
+  for (const token of String(raw).split(',')) {
+    const c = componentByShortId(token.trim());
+    if (c) selected.add(c.id);
+  }
+  return selected;
+}
+
 /**
  * The inverse of `encodeLz`. An absent `lz=` means the full platform; a
  * present one, even empty, means exactly the platform components it names.
@@ -103,17 +117,7 @@ export function decodeLz(searchParams) {
     if (value !== undefined) options[id] = value;
   }
   const normalizedOptions = normalizeState({ options }).options;
-
-  const rawSelection = get(SELECTION_KEY);
-  const selected = new Set();
-  if (rawSelection === null || rawSelection === undefined) {
-    for (const id of PLATFORM_IDS) selected.add(id);
-  } else {
-    for (const token of String(rawSelection).split(',')) {
-      const c = componentByShortId(token.trim());
-      if (c) selected.add(c.id);
-    }
-  }
+  const selected = decodeSelection(get(SELECTION_KEY));
   for (const id of ['corp', 'online']) {
     if (normalizedOptions[countOptionFor(id)] > 0) selected.add(id);
   }

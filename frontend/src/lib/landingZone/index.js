@@ -12,9 +12,10 @@
  * One module per concern, this file the public surface:
  *   components.js   the eight components, what each teaches, its knobs
  *   avmVersions.js  the four Azure Verified Modules, pinned and dated
+ *   cidr.js         the address arithmetic behind hub and spokes
  *   state.js        normalisation and the dependency rule
  *   share.js        the build as a query string
- *   hcl.js          the build as Terraform files
+ *   hcl/            the build as Terraform files, one module per file
  *   diagram.js      the build as a laid-out tree
  */
 export {
@@ -31,6 +32,8 @@ export {
   componentByShortId,
   countOptionFor,
   isCidr,
+  isSpokeCidr,
+  isRootParentId,
   isFirewallSku,
   isLocation,
   isLandingZoneCount,
@@ -47,6 +50,7 @@ export {
   avmModule,
   isAvmSource,
 } from './avmVersions';
+export { SPOKE_MAX_PREFIX, cidrsOverlap, spokeAddressSpace, spokeSlot } from './cidr';
 export {
   DEFAULT_OPTIONS,
   DEFAULT_SELECTION,
@@ -63,5 +67,6 @@ export {
   withDependencies,
 } from './state';
 export { decodeLz, encodeLz, isLzParam } from './share';
-export { emitFiles } from './hcl';
+export { emitFiles } from './hcl/index';
+export { POLICY_DEFAULTS } from './hcl/policy';
 export { H_GAP, NODE_H, NODE_W, PAD, V_GAP, layoutDiagram } from './diagram';

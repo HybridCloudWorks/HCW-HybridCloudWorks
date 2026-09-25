@@ -4,10 +4,16 @@
  * EXACTLY THESE FOUR, and the versions are looked up, not remembered. Each
  * `version` is the latest the Terraform Registry listed on `verifiedOn`, read
  * from `https://registry.terraform.io/v1/modules/Azure/<name>/azurerm` and
- * cross-checked against the repository's GitHub release. A module with no
- * registry listing carries `version: null` and says why, rather than a
- * number nobody published. `avm-ptn-hubnetworking` is archived and is not
- * here on purpose; hcl.test.js asserts it never reaches the output.
+ * cross-checked against the repository's latest GitHub release the same day.
+ * Three are the ALZ pattern modules HashiCorp's validated pattern calls; the
+ * fourth is the virtual network resource module every spoke is built from.
+ * The pattern module for application landing zones,
+ * avm-ptn-alz-application-landing-zone-identity-and-access, was on GitHub as
+ * the unfilled AVM template with no release and no registry listing on the
+ * verification date, so the builder does not call it; a spoke is a resource
+ * module call plus a `subscription_placement` entry in avm-ptn-alz instead.
+ * `avm-ptn-hubnetworking` is archived and is not here on purpose;
+ * hcl.test.js asserts it never reaches the output.
  *
  * The provider constraints and the ALZ library ref come from the same
  * lookup: each module's `terraform.tf` on its default branch, and the
@@ -19,7 +25,7 @@ export const AVM_VERIFIED_ON = '2026-09-25';
 const registryUrl = (name) => `https://registry.terraform.io/modules/Azure/${name}/azurerm`;
 const repositoryUrl = (name) => `https://github.com/Azure/terraform-azurerm-${name}`;
 
-const avm = (name, version, note = null) =>
+const avm = (name, version) =>
   Object.freeze({
     name,
     source: `Azure/${name}/azurerm`,
@@ -27,14 +33,9 @@ const avm = (name, version, note = null) =>
     verifiedOn: AVM_VERIFIED_ON,
     registry: registryUrl(name),
     repository: repositoryUrl(name),
-    note,
   });
 
-/**
- * Keyed by module name. `version` is a string when the registry lists the
- * module, null when it does not; the emitter writes a `version` line only for
- * the former and a dated comment for the latter.
- */
+/** Keyed by module name; every `version` is a published release string. */
 export const AVM_MODULES = Object.freeze({
   'avm-ptn-alz': avm('avm-ptn-alz', '0.21.0'),
   'avm-ptn-alz-management': avm('avm-ptn-alz-management', '0.9.0'),
@@ -42,11 +43,7 @@ export const AVM_MODULES = Object.freeze({
     'avm-ptn-alz-connectivity-hub-and-spoke-vnet',
     '0.17.5'
   ),
-  'avm-ptn-alz-application-landing-zone-identity-and-access': avm(
-    'avm-ptn-alz-application-landing-zone-identity-and-access',
-    null,
-    'Not on the Terraform Registry on 2026-09-25: the GitHub repository exists but holds the unfilled AVM template, with no tag and no release. Its declared inputs are the template trio name, location and resource_group_name.'
-  ),
+  'avm-res-network-virtualnetwork': avm('avm-res-network-virtualnetwork', '0.22.2'),
 });
 
 export const AVM_MODULE_NAMES = Object.freeze(Object.keys(AVM_MODULES));
@@ -69,7 +66,8 @@ export function isAvmSource(source) {
  * What `terraform.tf` requires, chosen so every module above is satisfied:
  * avm-ptn-alz wants terraform >= 1.12 and alz ~> 0.21; the connectivity
  * module wants terraform ~> 1.12 and azapi ~> 2.12; management wants
- * azurerm ~> 4.35 and random ~> 3.6.
+ * azurerm ~> 4.35 and random ~> 3.6; the virtual network module wants
+ * azapi ~> 2.12 and random ~> 3.5.
  */
 export const TERRAFORM_REQUIRED_VERSION = '>= 1.12, < 2.0';
 
