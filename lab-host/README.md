@@ -14,6 +14,7 @@ every step.
 | `docker` | Docker Engine 29.8.1, buildx 0.37.1 and compose 5.5.1 from Docker's apt repository, held; `json-file` logs 10 MB x 3, `live-restore` | `/etc/docker/daemon.json` |
 | `node_exporter` | node_exporter 1.12.1, host-native, SHA256-verified, `127.0.0.1:9100` only | `/usr/local/bin/node_exporter`, `node_exporter.service` |
 | `caddy` | Caddy 2.11.4 built with `caddy-dns/cloudflare` 0.2.4, host-native under systemd; TLS for `lab.hybridcloudworks.com`, `*.lab.hybridcloudworks.com` and `*.coder.lab.hybridcloudworks.com` via DNS-01; placeholder response at the apex | `/usr/local/bin/caddy`, `/opt/caddy/bin/` (versioned binary and its `.provenance`), `/etc/caddy/Caddyfile`, `/etc/caddy/conf.d/`, `/etc/caddy/env` (root:caddy, 0640), `caddy.service` running as `caddy` |
+| `coder` | Coder Community edition v2.37.3 and PostgreSQL 16.15 under Docker Compose from `../coder/docker-compose.yml`, both by digest; the Caddy route for `coder.lab` and `*.coder.lab`; a nightly `pg_dump` keeping seven days. Down until `coder_enabled` is true | `/etc/hcw/coder/` (`docker-compose.yml`, `.env`, `coder.env` and `coder-postgres.env`, the last two root 0600), `/etc/caddy/conf.d/10-coder.caddy`, `/usr/local/sbin/coder-postgres-backup`, `coder-postgres-backup.timer`, `/var/backups/coder/` |
 | `labs_agent` | `vps-agent` host-native as `hcw-labs-agent.service` under user `hcw-labs-agent` (in `docker`), Node.js 22 from NodeSource, repository checkout at a pinned sha, certificate generated on the host | `/opt/hcw-labs-agent`, `/etc/hcw/labs-agent.env` (root, 0600), `/etc/hcw/labs-agent.pem` (root:hcw-labs-agent, 0640), `/etc/hcw/labs-agent.crt` |
 
 Each role's `README.md` explains its decisions; `meta/argument_specs.yml` is
@@ -21,11 +22,12 @@ its variable contract. Every version, digest and checksum is in
 `ansible/group_vars/all.yml`, and the collections are pinned in
 `ansible/requirements.yml`.
 
-`site.yml` runs the roles in that order. Azure Arc (#663) and Coder (#679)
-add a role each to the end of the list. Docker Compose on this host is for
-Coder and its PostgreSQL only (ADR 0032); Caddy and the agent are host
-services, and Coder's Caddy route is a file in `/etc/caddy/conf.d/`, the
-pattern `00-apex.caddy` shows.
+`site.yml` runs the roles in that order: `coder` after `caddy`, because its
+route is a file in Caddy's `conf.d`, and before `labs_agent`. Azure Arc
+(#663) adds a role to the end of the list. Docker Compose on this host is
+for Coder and its PostgreSQL only (ADR 0032); Caddy and the agent are host
+services, and Coder's Caddy route is `/etc/caddy/conf.d/10-coder.caddy`,
+the pattern `00-apex.caddy` shows.
 
 ## First run
 
@@ -35,8 +37,10 @@ this repository at the sha pinned in `HCW_REPO_REF` into `/opt/hcw-src`,
 installs the collections and runs `site.yml` against localhost. Without a
 vault it still completes: the host is hardened, Docker and node_exporter
 run, Caddy serves an HTTP-only apex answering 503 that says TLS is off (and
-imports no routes, so nothing can leak over plaintext), and the agent unit
-is installed but not started.
+imports no routes, so nothing can leak over plaintext), Coder's Compose
+project is installed under `/etc/hcw/coder` but down (`coder_enabled` is
+false until the owner flips it, below), and the agent unit is installed but
+not started.
 
 ## Re-running
 
@@ -95,10 +99,14 @@ with their values:
 | `vault_labs_agent_tenant_id` | `labs_agent` | `LABS_AGENT_TENANT_ID` |
 | `vault_labs_agent_client_id` | `labs_agent` | `LABS_AGENT_CLIENT_ID`: this agent's confidential app registration |
 | `vault_labs_agent_api_scope` | `labs_agent` | `LABS_AGENT_API_SCOPE`: `api://<API client id>/.default`, matching the app's `ENTRA_API_AUDIENCE` |
+| `vault_coder_oauth2_github_client_id` | `coder` | `CODER_OAUTH2_GITHUB_CLIENT_ID`: the GitHub OAuth app the owner creates in #682 |
+| `vault_coder_oauth2_github_client_secret` | `coder` | `CODER_OAUTH2_GITHUB_CLIENT_SECRET` |
+| `vault_coder_postgres_password` | `coder` | The `coder` database user's password. Letters, digits and `. _ ~ -` only (it sits unescaped in a URL); `openssl rand -hex 32` makes one |
 
-The four `vault_labs_agent_*` keys can be added later: until all four exist
-the agent stays stopped and the play says so. To edit later, bash, on the
-host:
+The four `vault_labs_agent_*` keys and the three `vault_coder_*` keys can be
+added later: until all four exist the agent stays stopped and the play says
+so, and the three are only read once `coder_enabled` is true. To edit later,
+bash, on the host:
 
 ```bash
 sudo /usr/local/bin/ansible-vault edit --vault-password-file /etc/hcw/ansible/vault-password /etc/hcw/ansible/vault.yml
@@ -124,23 +132,211 @@ host. That file is owner `root`, group `caddy`, mode `0640` (ADR 0032): the
 keep working, and nobody outside that group can read it. The play writes
 it with `no_log`.
 
-## Coder, before its role exists (#679)
+## Coder
 
-`ansible/group_vars/all.yml` already declares the two values the Coder role
-will read, so the contract is in place before the code: `coder_enabled`
-(default `false`) and `coder_oauth2_github_allowed_orgs` (default `[]`),
-which the role renders as `CODER_OAUTH2_GITHUB_ALLOWED_ORGS`. **An empty
-allowlist is not a lock.** Coder treats it as "no organisation restriction"
-and lets any GitHub account sign in, so `site.yml` asserts in `pre_tasks`
-that the list is non-empty whenever `coder_enabled` is true and fails the
-play otherwise; with `coder_enabled: false`, as today, the assert is
-skipped. Set the organisation(s) whose members may sign in before flipping
-the flag.
+The `coder` role (#679) runs Coder Community edition and its PostgreSQL from
+`../coder/docker-compose.yml` under `/etc/hcw/coder`, behind Caddy at
+`https://coder.lab.hybridcloudworks.com`. The files, the workspace template
+and the hardening test are described in
+[`../coder/README.md`](../coder/README.md); this section is the operating
+procedure. `ansible/group_vars/all.yml` holds the switches: `coder_enabled`
+(default `false`), `coder_oauth2_github_allowed_orgs` (default `[]`),
+`coder_oauth2_github_allow_signups` (default `true`) and
+`coder_max_workspaces` (`5`).
 
-To stop learners getting in, the kill switches are
-`CODER_OAUTH2_GITHUB_ALLOW_SIGNUPS=false` (no new learners; existing ones
-keep working) or stopping the `coder` Compose service (everyone, at once).
-Emptying the allowlist is neither: it opens the door.
+**An empty allowlist is not a lock.** Coder treats an empty
+`CODER_OAUTH2_GITHUB_ALLOWED_ORGS` as "no organisation restriction" and lets
+any GitHub account sign in, so `site.yml` asserts in `pre_tasks`, and the
+role asserts again, that the list is non-empty whenever `coder_enabled` is
+true and fails the play otherwise; with `coder_enabled: false` the asserts
+are skipped.
+
+### Enabling
+
+1. The owner creates the GitHub OAuth app (#682) at
+   `https://github.com/organizations/HybridCloudWorks/settings/applications/new`
+   with homepage `https://coder.lab.hybridcloudworks.com` and callback
+   `https://coder.lab.hybridcloudworks.com/api/v2/users/oauth2/github/callback`.
+2. Add the three `vault_coder_*` keys from the table above to the vault.
+   Bash, on the host; the first line prints a password to paste as
+   `vault_coder_postgres_password`, the second opens the editor:
+
+   ```bash
+   openssl rand -hex 32
+   ```
+
+   ```bash
+   sudo /usr/local/bin/ansible-vault edit --vault-password-file /etc/hcw/ansible/vault-password /etc/hcw/ansible/vault.yml
+   ```
+
+3. In a pull request, set `coder_enabled: true` and
+   `coder_oauth2_github_allowed_orgs: [HybridCloudWorks]` in
+   `ansible/group_vars/all.yml`, merge it, move `HCW_REPO_REF` to the merged
+   commit and re-run `bootstrap.sh` (above). The play refuses to continue
+   if any of the three vault keys is missing, if the password holds a
+   character outside `A-Za-z0-9._~-`, or if five workspaces at 2 GiB plus
+   2.5 GiB of headroom exceed the host's memory.
+
+Success looks like `docker ps` showing `coder` and `coder-postgres`
+(`sudo docker compose --project-directory /etc/hcw/coder ps` prints both
+with `running` and the database `healthy`), and
+`https://coder.lab.hybridcloudworks.com/login` showing a **Sign in with
+GitHub** button and no password form.
+
+### First admin sign-in
+
+There is no password account. Password authentication is off in the
+Compose file, and Coder makes the first GitHub sign-in on an empty
+deployment the **owner** (its `oauthLogin` allows the first user regardless
+of the sign-up setting and grants the owner role). So the owner signs in at
+`https://coder.lab.hybridcloudworks.com/login` with GitHub before anyone
+else does; success is the dashboard, and
+`https://coder.lab.hybridcloudworks.com/deployment/users` listing that
+account with the role **Owner**. Every later sign-in is a member.
+
+### Publishing the template
+
+The Coder CLI runs on the workstation, not on the host. PowerShell, once:
+
+```powershell
+winget install Coder.Coder
+```
+
+```powershell
+coder login https://coder.lab.hybridcloudworks.com
+```
+
+`coder login` opens the browser for a session token and asks for it back.
+Then, PowerShell, from the repository root on `main` after this change has
+merged (the template directory must exist in the working tree):
+
+```powershell
+coder templates push hcw-lab --directory lab-host/coder/templates/hcw-lab --yes
+```
+
+```powershell
+coder templates edit hcw-lab --default-ttl 1h --yes
+```
+
+`templates push` creates the template on the first run and publishes a new
+version after that. The one-hour autostop is a template setting, not part
+of `main.tf`, and `templates push` has no TTL flag in the current CLI
+reference — `templates edit --default-ttl` is where it lives (a
+`coder templates create --default-ttl 1h` exists too, but `push` is the
+same command for first and later publishes). Success: `coder templates
+list` shows `hcw-lab`, and
+`https://coder.lab.hybridcloudworks.com/templates/hcw-lab/settings/schedule`
+shows a default autostop of 1 hour. A workspace from it is then a browser
+visit to
+`https://coder.lab.hybridcloudworks.com/templates/hcw-lab/workspace?mode=auto&param.lab=terraform-validate-walkthrough`,
+which is the shape of the site's Open in Coder links (#681).
+
+### The status token for the site
+
+#680's status proxy reads Coder with a token that can list templates and
+workspaces and nothing else. PowerShell, signed in as the owner:
+
+```powershell
+coder tokens create --name hcw-status-proxy --lifetime 8760h --scope template:read --scope workspace:read
+```
+
+The command prints the token once. Copy it, then store it as
+`CODER-STATUS-TOKEN` in Key Vault with the command in #682, and put its
+expiry (one year) in the calendar: nothing renews it. If this Coder version
+rejects `--scope`, create the token without it from a member account that
+owns no workspaces rather than from the owner.
+
+### Kill switches
+
+Two, in ADR 0032's words, and emptying the allowlist is neither.
+
+**No new learners; existing ones keep working.** Durable: a pull request
+setting `coder_oauth2_github_allow_signups: false` in
+`ansible/group_vars/all.yml`, merged and applied with `bootstrap.sh`.
+Immediate, bash, on the host (the next `bootstrap.sh` run re-renders the
+file from `group_vars`, so land the pull request too):
+
+```bash
+sudo sed -i 's/^CODER_OAUTH2_GITHUB_ALLOW_SIGNUPS=.*/CODER_OAUTH2_GITHUB_ALLOW_SIGNUPS=false/' /etc/hcw/coder/coder.env && sudo docker compose --project-directory /etc/hcw/coder up -d
+```
+
+**Everyone, at once.** Immediate, bash, on the host:
+
+```bash
+sudo docker compose --project-directory /etc/hcw/coder stop coder
+```
+
+Caddy then answers **503** `Coder is stopped on this host.` for
+`coder.lab` and every `*.coder.lab` name; running workspaces lose their
+agent connection and stop themselves at their deadline. Durable: a pull
+request setting `coder_enabled: false`, which also removes the Caddy route
+(the names answer Caddy's 404) and stops the backup timer; the PostgreSQL
+volume stays, so re-enabling brings the same users and templates back. To
+resume after an immediate stop:
+
+```bash
+sudo docker compose --project-directory /etc/hcw/coder up -d
+```
+
+### Rotating the GitHub OAuth secret
+
+Regenerate the secret on the OAuth app's page under
+`https://github.com/organizations/HybridCloudWorks/settings/applications`,
+put it in the vault as `vault_coder_oauth2_github_client_secret` (the
+`ansible-vault edit` line above), re-run `bootstrap.sh`. The play rewrites
+`coder.env` and Compose recreates the `coder` container because its
+environment changed; the `PLAY RECAP` shows `changed` for those two tasks
+and the login page still offers GitHub. Learners already signed in keep
+their sessions.
+
+### Rotating the PostgreSQL password
+
+The database stores the password at first initialisation, so a vault edit
+alone would lock Coder out. Change it in the database first, then in the
+vault. Bash, on the host; the line generates the new value, sets it, and
+prints it once for the vault edit:
+
+```bash
+NEW="$(openssl rand -hex 32)" && sudo docker compose --project-directory /etc/hcw/coder exec -T coder-postgres psql -U coder -d coder -v ON_ERROR_STOP=1 -c "ALTER USER coder PASSWORD '$NEW'" && echo "$NEW"
+```
+
+Success prints `ALTER ROLE` and then the value. Put the value in the vault
+as `vault_coder_postgres_password` and re-run `bootstrap.sh` promptly:
+Coder's open connections keep working, new ones fail until the run
+recreates the container with the new URL.
+
+### Backups and restore
+
+The timer writes `/var/backups/coder/coder-<UTC timestamp>.sql.gz` nightly
+and keeps seven days; it is a convenience against operator error, not a
+backup promise (`docs/architecture/labs-host.md`). Bash, on the host, to
+see them and to take one now:
+
+```bash
+sudo ls -l /var/backups/coder
+```
+
+```bash
+sudo systemctl start coder-postgres-backup.service && sudo systemctl status coder-postgres-backup.service --no-pager
+```
+
+Restore the newest dump into an empty database — three lines, bash, on the
+host: stop Coder, recreate the database from the dump, start Coder.
+
+```bash
+sudo docker compose --project-directory /etc/hcw/coder stop coder
+```
+
+```bash
+sudo sh -c 'docker compose --project-directory /etc/hcw/coder exec -T coder-postgres psql -U coder -d postgres -v ON_ERROR_STOP=1 -c "DROP DATABASE coder" -c "CREATE DATABASE coder OWNER coder" && gunzip -c "$(ls -t /var/backups/coder/coder-*.sql.gz | head -1)" | docker compose --project-directory /etc/hcw/coder exec -T coder-postgres psql -U coder -d coder -v ON_ERROR_STOP=1 -q'
+```
+
+```bash
+sudo docker compose --project-directory /etc/hcw/coder start coder
+```
+
+Success is `DROP DATABASE`, `CREATE DATABASE`, no error from the third
+`psql`, and the login page back within a minute.
 
 ## The agent identity
 
@@ -215,6 +411,12 @@ ansible-core 2.21.4, the same pins CI installs with pip); when the pins in
 the `ansible-lint (lab-host)` job of `.github/workflows/ci.yml`, gated on
 changes under `lab-host/`.
 
+The Coder files have their own checks — the hardening test, the Compose
+parse and `terraform validate` — listed in
+[`../coder/README.md`](../coder/README.md) and run by the
+`coder (lab-host)` job of the same workflow on changes under
+`lab-host/coder/`.
+
 ## Bumping a pin
 
 | Pin | Lives in | How to read the current value |
@@ -222,6 +424,8 @@ changes under `lab-host/`.
 | Docker, buildx, compose | `docker_version`, `docker_containerd_version`, `docker_buildx_version`, `docker_compose_version` | `roles/docker/README.md` |
 | apt signing keys | `docker_apt_key_checksum`, `labs_agent_node_apt_key_checksum` | The two bash lines below this table; a changed key is a decision, not a refresh |
 | Caddy, Cloudflare module, builder image digest | `caddy_*` | `roles/caddy/README.md`; the digest is the index from `docker buildx imagetools inspect caddy:2.11.4-builder`, and the image is pulled by that digest, not by tag |
+| Coder, PostgreSQL | `coder_image_*`, `coder_postgres_image_*` | `roles/coder/README.md`; index digests from `docker buildx imagetools inspect`, run as `image@digest` |
+| Workspace image, Terraform providers, `code-server` module | `templates/hcw-lab/main.tf` under `../coder` | `../coder/README.md`, "Updating"; republished with `coder templates push` |
 | node_exporter | `node_exporter_version`, `node_exporter_checksum` | `roles/node_exporter/README.md` |
 | Node.js | `labs_agent_node_version` | NodeSource `node_22.x` package index |
 | Repository ref | `labs_agent_repo_ref` and `HCW_REPO_REF` | `git rev-parse origin/main` |

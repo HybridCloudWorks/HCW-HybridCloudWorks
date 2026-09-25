@@ -55,16 +55,33 @@ caddy_site_names:
   - "*.coder.{{ lab_host_domain }}"
 
 # Coder (#679) is the learner identity boundary and signs learners in with
-# GitHub OAuth. Its role renders coder_oauth2_github_allowed_orgs into
+# GitHub OAuth. The coder role renders coder_oauth2_github_allowed_orgs into
 # CODER_OAUTH2_GITHUB_ALLOWED_ORGS. An EMPTY list is not a lock: Coder reads it
 # as "no organisation restriction" and lets ANY GitHub account sign in, so
-# site.yml refuses to run with coder_enabled true and this list empty. Set the
-# organisation(s) whose members are allowed before flipping coder_enabled. The
-# kill switches are CODER_OAUTH2_GITHUB_ALLOW_SIGNUPS=false (no new learners)
-# or stopping the coder compose service (everyone), never an emptied allowlist.
-# Declared here so the contract exists before the role does.
+# site.yml and the role both refuse to run with coder_enabled true and this
+# list empty. Set the organisation(s) whose members are allowed before
+# flipping coder_enabled. The kill switches are
+# coder_oauth2_github_allow_signups: false (no new learners; existing ones keep
+# working) or stopping the coder compose service (everyone), never an emptied
+# allowlist. Enabling also needs three vault keys (lab-host/README.md, "Coder").
 coder_enabled: false
 coder_oauth2_github_allowed_orgs: []
+coder_oauth2_github_allow_signups: true
+coder_domain: "coder.{{ lab_host_domain }}"
+# Concurrent workspaces the host is sized for. Coder Community enforces no
+# count; the role asserts 5 x 2 GiB (the template's limit) + 2.5 GiB for
+# Coder, PostgreSQL and the OS fits the host's memory (12.5 of KVM 4's 16 GB),
+# and the site's status card (#680) publishes it as capacity.
+coder_max_workspaces: 5
+# Image INDEX digests from `docker buildx imagetools inspect`, read 2026-09-25;
+# the role runs image@digest and the tags are for humans. coder:latest and
+# v2.37.3 resolved to the same digest that day; postgres:16 and 16.15 likewise.
+coder_image: ghcr.io/coder/coder
+coder_image_tag: v2.37.3
+coder_image_digest: sha256:a48f82c2c437e032ce3f6970b4e937a7900cad3c76956956955099465b45e542
+coder_postgres_image: postgres
+coder_postgres_image_tag: "16.15"
+coder_postgres_image_digest: sha256:1a6ab3f5345eb6dbe04a1349529caabdb0ab09293a09590fad07b2246bfa4b54
 
 # vps-agent runs host-native as a systemd service (ADR 0032) from a checkout of
 # this repository at a pinned commit. The repository has no tagged release, so
