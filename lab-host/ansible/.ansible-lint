@@ -1,0 +1,12 @@
+---
+# ansible-lint reads this file from the directory it runs in, which is
+# lab-host/ansible for both the CI job and the container command in
+# lab-host/README.md.
+profile: production
+kinds:
+  - playbook: "site.yml"
+  - inventory: "inventory/*.yml"
+  - vars: "group_vars/*.yml"
+  - requirements: "requirements.yml"
+exclude_paths:
+  - .cache/

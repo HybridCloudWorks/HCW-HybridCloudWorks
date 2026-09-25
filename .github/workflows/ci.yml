@@ -169,6 +169,74 @@ jobs:
           COMMAND: ${{ matrix.test }}
         run: bash -eo pipefail -c "$COMMAND"
 
+  # lab-host/ansible/ is the configuration management for the Hostinger lab
+  # host (#662). ansible-lint's production profile is the gate, and the
+  # playbook syntax check runs beside it because they fail on different
+  # things: lint reads files, syntax-check loads the play with its roles and
+  # collections. Same in-job change detection as the matrix above; the tool
+  # versions are pinned to what lab-host/bootstrap.sh installs on the host.
+  ansible-lint:
+    name: ansible-lint (lab-host)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lab-host/ansible
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Detect lab-host changes
+        id: changes
+        working-directory: ${{ github.workspace }}
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_EVENT_NAME}" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "non-pull_request event — running all checks"
+            exit 0
+          fi
+          # Capture the diff first — same reasoning as the matrix job's
+          # detect step: a failed diff must fail toward running, not skipping.
+          changed="$(git diff --name-only "${BASE_SHA}" HEAD)" || {
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "could not compute the diff — running all checks rather than guessing"
+            exit 0
+          }
+          if grep -qE '^lab-host/|^\.github/workflows/ci\.yml$' <<<"$changed"; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "lab-host files changed — running all checks"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "no relevant change — skipping checks, still reporting this context"
+          fi
+
+      - name: Set up Python
+        if: steps.changes.outputs.relevant == 'true'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.12'
+
+      - name: Install ansible-lint and ansible-core
+        if: steps.changes.outputs.relevant == 'true'
+        run: python -m pip install --disable-pip-version-check 'ansible-lint==26.9.0' 'ansible-core==2.21.4'
+
+      - name: Install the pinned collections
+        if: steps.changes.outputs.relevant == 'true'
+        run: ansible-galaxy collection install -r requirements.yml
+
+      - name: ansible-lint (production profile)
+        if: steps.changes.outputs.relevant == 'true'
+        run: ansible-lint --profile production
+
+      - name: Playbook syntax check
+        if: steps.changes.outputs.relevant == 'true'
+        run: ansible-playbook --syntax-check -i inventory/localhost.yml site.yml
+
   # hooks/claude_event.py runs on every Claude Code session start and stop, and
   # tooling/workflow.py owns the state the Stop guard reads. Both were shipped
   # with nothing checking them. This is a smoke test rather than a linter on
