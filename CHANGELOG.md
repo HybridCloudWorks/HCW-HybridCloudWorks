@@ -19,6 +19,34 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Newsletter section "Lab this week" with a daily labs rollup timer
+  (#665).** Phase 5 of #656. A new flag-gated timer `labsWeeklyRollup`
+  (`functions/src/functions/labs-jobs.js`, `FEATURE_FLAG_LABS_WEEKLY_ROLLUP`,
+  daily 23:55 UTC, catalogued in `infra/functionapp.tf` and allowed by the
+  `enabled_timers` validation) writes one `labs:day:<YYYY-MM-DD>` document
+  per UTC day to `tool_service_cache` with a sixty-day TTL:
+  `{ arcConnected: boolean|null, jobsByType: { [type]: { succeeded, failed,
+  timeout } }, coderRunningMax: number|null }`, computed by
+  `functions/src/lib/labs/rollup.js` from three point reads (the
+  `labs:estate` and `labs:coder-status` minute-cache documents and any
+  earlier document for the same day) and ONE grouped count of `lab_jobs`
+  bounded on the indexed `createdAt` and the three terminal statuses — no
+  per-job read, no full scan, and never a call to Azure or Coder. Null means
+  not observed, not down: `arcConnected` is a boolean only when an estate
+  document stamped that day described a configured estate. A rerun for the
+  same day merges — connected once stays connected, the Coder peak keeps the
+  larger sample, job counts are recomputed. The newsletter section
+  `lab-this-week` (`functions/src/lib/newsletter/sections.js`, registered
+  last and on by default) point-reads the seven day documents before the
+  build day and renders Arc uptime as days connected out of days observed,
+  lab jobs by type with success counts, and the peak Coder workspace count,
+  every item linking to `https://hybridcloudworks.com/education/labs`; it
+  renders nothing, and the issue omits it, when no day document exists or
+  none observed the estate or a job. Tests beside each module cover the
+  rollup computation from fixture cache documents and grouped rows, the TTL,
+  the timer's flag gate and disabled skip, the section with data, and the
+  section omitted from a built issue without it; `route-inventory.test.js`
+  and `timer-schedules-utc.test.js` now count twenty-two timers.
 - **Landing Zone Builder, Phase 4: "Explain this component" and the
   `landing-zone` article embed (#670).** Phase 4 of #657, frontend half, on
   the #669 backend. `frontend/src/pages/tools/landingZone/LzExplainButton.jsx`

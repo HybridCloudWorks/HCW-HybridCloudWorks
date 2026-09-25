@@ -50,7 +50,8 @@ resource "azurerm_service_plan" "hcw" {
 # The catalogue is the authority on which timers exist. It must match the
 # `timer(name, FLAG, ...)` registrations in
 # functions/src/functions/schedulers.js plus platformJobSweeper in
-# jobs-sweeper.js and refreshToolServiceCache in cloud-tools-jobs.js —
+# jobs-sweeper.js, refreshToolServiceCache in cloud-tools-jobs.js and
+# labsWeeklyRollup in labs-jobs.js —
 # route-inventory.test.js asserts the timer set, so a timer added there
 # without a flag here ships disarmed and one removed there leaves a dead
 # setting behind.
@@ -86,6 +87,10 @@ locals {
     # AWS and GCP rows fall back to baseline or go absent until their Key
     # Vault secrets are seeded.
     REFRESH_TOOL_SERVICE_CACHE = "refreshToolServiceCache — daily 02:00 UTC, enqueues the pricing cache refresh job"
+    # #665: folds the labs minute-caches and the day's lab_jobs into one
+    # labs:day:<date> document the newsletter's "Lab this week" section reads.
+    # Point reads and one grouped count; never calls Azure or Coder.
+    LABS_WEEKLY_ROLLUP = "labsWeeklyRollup — daily 23:55 UTC, writes the day's labs rollup document for the newsletter"
   }
 
   timer_flags = {

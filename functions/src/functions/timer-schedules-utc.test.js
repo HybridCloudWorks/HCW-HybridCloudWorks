@@ -18,14 +18,14 @@
  * valid, the setting was valid, and only their combination was wrong.
  *
  * Re-adding the setting — or `TZ`, which does the same job — would silently
- * move **seventeen** of the twenty-one registered timers and make the same six
+ * move **eighteen** of the twenty-two registered timers and make the same six
  * sentences wrong again. There is no plan diff that reads as "every timer
  * moved five hours"; it reads as one app setting.
  *
- * Seventeen is the number this file enforces, and it is worth splitting
+ * Eighteen is the number this file enforces, and it is worth splitting
  * because the two halves matter differently to an operator:
  *
- *   - **Eleven change the instant they run.** The fixed-hour and fixed-day
+ *   - **Twelve change the instant they run.** The fixed-hour and fixed-day
  *     schedules — a 07:00 digest becomes a 07:00 UTC digest, five hours
  *     earlier in wall-clock terms. This is the half that shows up as "the
  *     report arrived in the middle of the night".
@@ -102,6 +102,7 @@ await import('./schedulers.js');
 await import('./jobs-sweeper.js');
 await import('./cosmos-export.js');
 await import('./cloud-tools-jobs.js');
+await import('./labs-jobs.js');
 
 /**
  * Every schedule whose firing INSTANTS depend on the app clock, and the UTC
@@ -123,6 +124,8 @@ const CLOCK_DEPENDENT = {
   cleanupRejectedContent: { schedule: '0 0 4 * * *', utc: 'daily 04:00' },
   cleanupUnusedCertImages: { schedule: '0 0 5 * * *', utc: 'daily 05:00' },
   generateReviewerDigest: { schedule: '0 0 7 * * *', utc: 'daily 07:00' },
+  // Late enough that the day it describes is nearly over (#665).
+  labsWeeklyRollup: { schedule: '0 55 23 * * *', utc: 'daily 23:55' },
   // Fixed hour on one weekday — the day moves too if the clock does.
   reVerifyCertifications: { schedule: '0 0 0 * * 0', utc: 'Sunday 00:00' },
   checkLiveLinks: { schedule: '0 0 6 * * 1', utc: 'Monday 06:00' },
@@ -171,7 +174,7 @@ describe('timer schedules are UTC', () => {
     // Guards the guard. An empty read on either side would make every
     // assertion below pass by inspecting nothing.
     expect(terraformSource(INFRA).length).toBeGreaterThan(1000);
-    expect(timerRegistrations.size).toBe(21);
+    expect(timerRegistrations.size).toBe(22);
   });
 
   it('the app clock is UTC — no WEBSITE_TIME_ZONE or TZ app setting exists', () => {

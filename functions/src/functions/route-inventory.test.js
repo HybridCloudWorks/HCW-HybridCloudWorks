@@ -382,11 +382,14 @@ describe('non-HTTP triggers', () => {
     // (jobs-sweeper.js), behind its own flag; the twentieth is
     // cosmosExportScheduler (cosmos-export.js, ADR 0028), behind
     // FEATURE_FLAG_COSMOS_EXPORT; the twenty-first is refreshToolServiceCache
-    // (cloud-tools-jobs.js, #613), behind FEATURE_FLAG_REFRESH_TOOL_SERVICE_CACHE.
-    expect(timerRegistrations.size).toBe(21);
+    // (cloud-tools-jobs.js, #613), behind FEATURE_FLAG_REFRESH_TOOL_SERVICE_CACHE;
+    // the twenty-second is labsWeeklyRollup (labs-jobs.js, #665), behind
+    // FEATURE_FLAG_LABS_WEEKLY_ROLLUP.
+    expect(timerRegistrations.size).toBe(22);
     expect(timerRegistrations.has('platformJobSweeper')).toBe(true);
     expect(timerRegistrations.has('cosmosExportScheduler')).toBe(true);
     expect(timerRegistrations.has('refreshToolServiceCache')).toBe(true);
+    expect(timerRegistrations.has('labsWeeklyRollup')).toBe(true);
     expect(timerRegistrations.has('buildWeeklyNewsletter')).toBe(true);
     for (const name of ['cleanupTempStorage', 'cleanupUnusedCertImages']) {
       // The two that delete blobs: registered, and their handlers are the
