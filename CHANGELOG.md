@@ -63,8 +63,12 @@ This project has not cut a tagged release; entries are grouped under
   Decoding drops unknown tokens, defaults any option that fails its
   validator, and normalises through `state.js`, which closes the selection
   over `dependsOn` (a firewall brings the hub; identity, corp and online each
-  bring the tree and the hub they peer to) and keeps the counts and the
-  selection in step. `isLzParam` says which keys are the module's, as
+  bring the tree and the hub they peer to), keeps the counts and the
+  selection in step, and checks the two ranges against each other: a spoke
+  range that overlaps the hub is moved to the first free fallback
+  (`10.1.0.0/16`, `10.2.0.0/16`, then `172.16.0.0/16`) and the state carries
+  a `warnings` entry (`{ code: 'spoke-cidr-overlap', from, to }`) for the
+  page to show. `isLzParam` says which keys are the module's, as
   `isScenarioParam` does for the pricing page.
 
   **`hcl/` emits the Terraform the validated pattern would**, one module per
@@ -87,7 +91,14 @@ This project has not cut a tagged release; entries are grouped under
   `virtual_network_resource_ids`, and for corp and identity a route table
   whose default route is the firewall's private IP when the firewall is
   selected; online spokes egress directly), `variables.tf` with GUID
-  validation on every subscription id, `terraform.tfvars.example`, and a
+  validation on every subscription id, the same hub-versus-spoke overlap rule
+  as a `validation` on `var.spoke_address_space` (Terraform 1.9 lets a
+  validation read another variable; proven offline with `terraform plan` on
+  the emitted file: the apart pair plans, identical, hub-inside-spoke and
+  spoke-inside-hub each fail with the message) and a `/`-rejecting check on
+  `var.parent_management_group_id`, because avm-ptn-alz's
+  `parent_resource_id` is the parent group's name and the module itself
+  refuses a resource id, `terraform.tfvars.example`, and a
   `README.md` carrying the pattern's prerequisites — HCP Terraform, Owner at
   the tenant root, a service principal — the spoke pattern in two sentences,
   and the line that the files were generated for learning and never applied
@@ -101,15 +112,17 @@ This project has not cut a tagged release; entries are grouped under
   groups, hub and spokes with their /24s and peering edges, in fixed units so
   pre-render and hydration agree.
 
-  Two suites, 29 tests: every component has every field and a `teaches` of
-  the right length, the dependency closure, the carve, encode/decode round
-  trips and default omission, decode tolerance, fmt shape on every emitted
-  file, every module `source` pinned with a version, the archived and the
-  unpublished module absent, all fourteen policy defaults supplied or their
-  assignment not enforced, a committed snapshot of the default build (the
+  Two suites, 31 tests: every component has every field and a `teaches` of
+  the right length, the dependency closure, the carve, the overlap fallback
+  and its warning (through `normalizeState`, `setOption` and a decoded URL),
+  encode/decode round trips and default omission, decode tolerance, fmt shape
+  on every emitted file, every module `source` pinned with a version, the
+  archived and the unpublished module absent, all fourteen policy defaults
+  supplied or their assignment not enforced, both `variables.tf`
+  cross-checks emitted, a committed snapshot of the default build (the
   repository's first `__snapshots__`), and diagram determinism with no
   overlapping nodes. No page, no route, no dependency; `frontend/` vitest
-  goes from 2,272 to 2,301.
+  goes from 2,272 to 2,303.
 
 ### Changed
 

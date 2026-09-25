@@ -92,6 +92,10 @@ module "alz" {
   source  = "Azure/avm-ptn-alz/azurerm"
   version = "0.21.0"
 
+  # parent_resource_id is the parent management group NAME, not its resource id: the
+  # module rejects a value containing "/" and prepends
+  # /providers/Microsoft.Management/managementGroups/ itself. The tenant root group is
+  # named after the tenant id, which is why that is the fallback.
   architecture_name  = "alz"
   location           = var.location
   parent_resource_id = coalesce(var.parent_management_group_id, data.azapi_client_config.current.tenant_id)
@@ -588,7 +592,12 @@ variable "enable_telemetry" {
 variable "parent_management_group_id" {
   type        = string
   default     = null
-  description = "The management group to create the \\"alz\\" root under; null for the tenant root group."
+  description = "The NAME of the management group to create the \\"alz\\" root under (a bare id such as contoso, never a resource id), or null for the tenant root group."
+
+  validation {
+    condition     = var.parent_management_group_id == null ? true : !strcontains(var.parent_management_group_id, "/")
+    error_message = "A management group name, without the /providers/Microsoft.Management/managementGroups/ prefix."
+  }
 }
 
 variable "hub_address_space" {
@@ -601,6 +610,15 @@ variable "spoke_address_space" {
   type        = string
   default     = "10.1.0.0/16"
   description = "The IPv4 range every spoke is carved from, one /24 each; must not overlap the hub."
+
+  validation {
+    condition = (
+      tonumber(split("/", var.hub_address_space)[1]) <= tonumber(split("/", var.spoke_address_space)[1])
+      ? cidrsubnet("\${cidrhost(var.spoke_address_space, 0)}/\${split("/", var.hub_address_space)[1]}", 0, 0) != cidrsubnet(var.hub_address_space, 0, 0)
+      : cidrsubnet("\${cidrhost(var.hub_address_space, 0)}/\${split("/", var.spoke_address_space)[1]}", 0, 0) != cidrsubnet(var.spoke_address_space, 0, 0)
+    )
+    error_message = "The spoke range must not overlap the hub address space."
+  }
 }
 
 variable "security_contact_email" {

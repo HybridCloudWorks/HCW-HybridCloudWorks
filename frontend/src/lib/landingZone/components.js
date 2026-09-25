@@ -111,7 +111,7 @@ export const OPTIONS = Object.freeze({
     kind: 'text',
     default: '10.1.0.0/16',
     validate: isSpokeCidr,
-    help: 'The range every landing zone’s spoke is carved from, one /24 each: corp spokes from the low half, online spokes from the high half, identity at the top of the low half. /8 to /20, and it must not overlap the hub.',
+    help: 'The range every landing zone’s spoke is carved from, one /24 each: corp spokes from the low half, online spokes from the high half, identity at the top of the low half. /8 to /20. It must not overlap the hub; a range that does is moved to the first free fallback (10.1.0.0/16, 10.2.0.0/16, then 172.16.0.0/16) and the build says so.',
   }),
   privateDnsZones: option({
     id: 'privateDnsZones',

@@ -318,6 +318,25 @@ describe('emitFiles', () => {
     );
   });
 
+  it('mirrors the two cross-checks in variables.tf: ranges apart, parent a bare name', () => {
+    const vars = byPath(emitFiles(DEFAULT_STATE))['variables.tf'];
+    expect(vars).toMatch(
+      /variable "spoke_address_space" \{[^}]*\n\n  validation \{\n    condition = \(\n      tonumber\(split\("\/", var\.hub_address_space\)\[1\]\) <= tonumber\(split\("\/", var\.spoke_address_space\)\[1\]\)\n      \? cidrsubnet\("\$\{cidrhost\(var\.spoke_address_space, 0\)\}\/\$\{split\("\/", var\.hub_address_space\)\[1\]\}", 0, 0\) != cidrsubnet\(var\.hub_address_space, 0, 0\)\n      : cidrsubnet\("\$\{cidrhost\(var\.hub_address_space, 0\)\}\/\$\{split\("\/", var\.spoke_address_space\)\[1\]\}", 0, 0\) != cidrsubnet\(var\.spoke_address_space, 0, 0\)\n    \)\n    error_message = "The spoke range must not overlap the hub address space\."/
+    );
+    expect(vars).toContain(
+      'condition     = var.parent_management_group_id == null ? true : !strcontains(var.parent_management_group_id, "/")'
+    );
+    expect(byPath(emitFiles(DEFAULT_STATE))['alz.tf']).toContain(
+      'parent_resource_id = coalesce(var.parent_management_group_id, data.azapi_client_config.current.tenant_id)'
+    );
+
+    const overlapping = emitFiles({
+      options: { hubCidr: '10.1.0.0/16', spokeCidr: '10.1.0.0/16' },
+    });
+    expect(byPath(overlapping)['variables.tf']).toContain('default     = "10.2.0.0/16"');
+    expect(byPath(overlapping)['application.tf']).toContain('online_1 = 10.2.128.0/24');
+  });
+
   it('matches the committed snapshot of the default build', () => {
     const files = emitFiles(DEFAULT_STATE);
     expect(files.map((f) => f.path)).toMatchSnapshot('paths');

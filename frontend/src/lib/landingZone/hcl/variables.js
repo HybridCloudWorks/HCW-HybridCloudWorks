@@ -4,6 +4,14 @@
  * value, so the tfvars can be empty for a default build), its description,
  * a validation when a wrong value would fail late, and the example value
  * the tfvars stub carries. Two files from one list, so they cannot disagree.
+ *
+ * The spoke range's validation mirrors state.js's cross-option rule in HCL,
+ * for a reader who edits the downloaded files: since Terraform 1.9 a
+ * `validation` may read another variable, so it compares the two ranges
+ * directly. Two prefixes overlap exactly when the one with the shorter
+ * prefix, applied as a mask to the other's first address, gives its own
+ * network; `cidrsubnet(x, 0, 0)` is the mask, `cidrhost(x, 0)` the first
+ * address, and `split("/", x)[1]` the prefix length.
  */
 import { isSelected } from '../state';
 import { block, body, file, joinBlocks, q } from './format';
@@ -15,6 +23,23 @@ const GUID = (ref) => `can(regex("^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F
 const has = (id) => (state) => isSelected(state, id);
 const anySpoke = (state) => ['identity', 'corp', 'online'].some((id) => isSelected(state, id));
 const guids = (n) => `[${Array.from({ length: n }, () => q(EXAMPLE_GUID)).join(', ')}]`;
+
+const HUB = 'var.hub_address_space';
+const SPOKE = 'var.spoke_address_space';
+const prefixOf = (ref) => `split("/", ${ref})[1]`;
+const networkOf = (ref) => `cidrsubnet(${ref}, 0, 0)`;
+/** `other`'s first address masked to `ref`'s prefix length, as a network. */
+const maskedBy = (other, ref) =>
+  `cidrsubnet("\${cidrhost(${other}, 0)}/\${${prefixOf(ref)}}", 0, 0)`;
+
+/** The multi-line condition: true when the hub and spoke ranges are apart. */
+const RANGES_APART = [
+  '(',
+  `tonumber(${prefixOf(HUB)}) <= tonumber(${prefixOf(SPOKE)})`,
+  `? ${maskedBy(SPOKE, HUB)} != ${networkOf(HUB)}`,
+  `: ${maskedBy(HUB, SPOKE)} != ${networkOf(SPOKE)}`,
+  ')',
+];
 
 const subscriptionId = (name, when, description) => ({
   name,
@@ -60,7 +85,13 @@ const VARIABLES = [
     type: 'string',
     default: (o) => (o.rootParentId ? q(o.rootParentId) : 'null'),
     description:
-      'The management group to create the "alz" root under; null for the tenant root group.',
+      'The NAME of the management group to create the "alz" root under (a bare id such as contoso, never a resource id), or null for the tenant root group.',
+    validation: {
+      condition:
+        'var.parent_management_group_id == null ? true : !strcontains(var.parent_management_group_id, "/")',
+      error:
+        'A management group name, without the /providers/Microsoft.Management/managementGroups/ prefix.',
+    },
     example: (o) => (o.rootParentId ? q(o.rootParentId) : null),
   },
   {
@@ -78,6 +109,10 @@ const VARIABLES = [
     default: (o) => q(o.spokeCidr),
     description:
       'The IPv4 range every spoke is carved from, one /24 each; must not overlap the hub.',
+    validation: {
+      condition: RANGES_APART,
+      error: 'The spoke range must not overlap the hub address space.',
+    },
     example: (o) => q(o.spokeCidr),
   },
   {

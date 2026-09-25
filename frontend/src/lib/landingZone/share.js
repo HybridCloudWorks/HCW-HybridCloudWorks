@@ -16,7 +16,7 @@
  * entries for URLSearchParams, `decodeLz` reads URLSearchParams or a plain
  * object, `isLzParam` says which keys are this module's.
  */
-import { DEFAULT_OPTIONS, normalizeState, selectedPlatform } from './state';
+import { DEFAULT_OPTIONS, normalizeOptions, normalizeState, selectedPlatform } from './state';
 import {
   OPTIONS,
   OPTION_IDS,
@@ -116,10 +116,11 @@ export function decodeLz(searchParams) {
     const value = decodeOption(id, get(OPTION_KEYS[id]));
     if (value !== undefined) options[id] = value;
   }
-  const normalizedOptions = normalizeState({ options }).options;
+  const counts = normalizeOptions(options);
   const selected = decodeSelection(get(SELECTION_KEY));
   for (const id of ['corp', 'online']) {
-    if (normalizedOptions[countOptionFor(id)] > 0) selected.add(id);
+    if (counts[countOptionFor(id)] > 0) selected.add(id);
   }
-  return normalizeState({ selected: [...selected], options: normalizedOptions });
+  // Normalised once, here, so the cross-option fallback's warning is the one returned.
+  return normalizeState({ selected: [...selected], options });
 }

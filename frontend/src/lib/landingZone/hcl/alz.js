@@ -46,6 +46,10 @@ export function alzTf(state) {
     ...block('module "alz"', [
       ...moduleSource('avm-ptn-alz'),
       '',
+      '# parent_resource_id is the parent management group NAME, not its resource id: the',
+      '# module rejects a value containing "/" and prepends',
+      '# /providers/Microsoft.Management/managementGroups/ itself. The tenant root group is',
+      '# named after the tenant id, which is why that is the fallback.',
       ['architecture_name', q('alz')],
       ['location', 'var.location'],
       [

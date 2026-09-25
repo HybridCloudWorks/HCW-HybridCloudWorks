@@ -4,13 +4,19 @@
  * describe a firewall without a hub or a corp landing zone without a tree.
  *
  *   { selected: string[], options: { location, rootParentId, hubCidr, spokeCidr,
- *     privateDnsZones, firewallSku, corpCount, onlineCount } }
+ *     privateDnsZones, firewallSku, corpCount, onlineCount },
+ *     warnings: [{ code, from, to }] }
  *
  * `selected` is in catalogue order. The application components are counted
  * as well as selected: `corp` is in `selected` exactly when `corpCount` is
  * above zero, and `normalizeState` keeps the two in step whichever one a
- * caller changed. Every function here is pure and returns a new state.
+ * caller changed. The two address ranges are checked against each other as
+ * well as on their own: a spoke range that overlaps the hub is replaced by
+ * the first fallback that does not, and `warnings` says so, so a page can
+ * tell the reader what changed and why. Every function here is pure and
+ * returns a new state.
  */
+import { cidrsOverlap } from './cidr';
 import {
   APPLICATION_IDS,
   COMPONENTS,
@@ -24,6 +30,28 @@ import {
 } from './components';
 
 export { isComponentId };
+
+/**
+ * Where the spoke range goes when it overlaps the hub, tried in order: the
+ * default first, then the next /16 up, then a range in a different private
+ * block for a hub that owns all of 10/8.
+ */
+export const SPOKE_CIDR_FALLBACKS = Object.freeze(['10.1.0.0/16', '10.2.0.0/16', '172.16.0.0/16']);
+
+/**
+ * The cross-option rule: the hub keeps its value, the spoke range moves.
+ * Mutates `options`; returns the warnings it raised (none when the pair
+ * was already apart).
+ */
+function separateSpokeFromHub(options) {
+  if (!cidrsOverlap(options.hubCidr, options.spokeCidr)) return [];
+  const to =
+    SPOKE_CIDR_FALLBACKS.find((candidate) => !cidrsOverlap(options.hubCidr, candidate)) ??
+    SPOKE_CIDR_FALLBACKS[SPOKE_CIDR_FALLBACKS.length - 1];
+  const from = options.spokeCidr;
+  options.spokeCidr = to;
+  return [{ code: 'spoke-cidr-overlap', from, to }];
+}
 
 /** Every option at its default. */
 export const DEFAULT_OPTIONS = Object.freeze(
@@ -90,10 +118,12 @@ export function normalizeOptions(partial) {
  * default, less any application component whose count is zero. With a
  * `selected` list, the list is authoritative: unknown ids are dropped,
  * dependencies are added, a counted component in the list has a count of at
- * least one and one absent from it has a count of zero.
+ * least one and one absent from it has a count of zero. A spoke range that
+ * overlaps the hub is moved to a fallback, with a warning.
  */
 export function normalizeState(partial) {
   const options = normalizeOptions(partial?.options);
+  const warnings = separateSpokeFromHub(options);
   let requested;
   if (Array.isArray(partial?.selected)) {
     requested = partial.selected;
@@ -109,7 +139,7 @@ export function normalizeState(partial) {
     if (selected.includes(id)) options[countId] = Math.max(1, options[countId]);
     else options[countId] = 0;
   }
-  return { selected, options };
+  return { selected, options, warnings };
 }
 
 export const DEFAULT_STATE = Object.freeze(normalizeState({}));

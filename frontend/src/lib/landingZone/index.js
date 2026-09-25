@@ -55,6 +55,7 @@ export {
   DEFAULT_OPTIONS,
   DEFAULT_SELECTION,
   DEFAULT_STATE,
+  SPOKE_CIDR_FALLBACKS,
   addComponent,
   dependentsOf,
   isComponentId,

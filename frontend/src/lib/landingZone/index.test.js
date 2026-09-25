@@ -16,6 +16,7 @@ import {
   OPTIONS,
   OPTION_IDS,
   PLATFORM_IDS,
+  SPOKE_CIDR_FALLBACKS,
   addComponent,
   cidrsOverlap,
   componentById,
@@ -302,6 +303,48 @@ describe('the state', () => {
     const nothing = removeWithDependents(DEFAULT_STATE, 'management-groups');
     expect(nothing.selected).toEqual([]);
     expect(removeWithDependents(DEFAULT_STATE, 'bogus')).toEqual(DEFAULT_STATE);
+  });
+
+  it('moves a spoke range that overlaps the hub to the first free fallback, with a warning', () => {
+    expect(DEFAULT_STATE.warnings).toEqual([]);
+    expect(normalizeState({ options: { hubCidr: '10.0.0.0/16' } }).warnings).toEqual([]);
+
+    const sameRange = normalizeState({
+      options: { hubCidr: '10.1.0.0/16', spokeCidr: '10.1.0.0/16' },
+    });
+    expect(sameRange.options.hubCidr).toBe('10.1.0.0/16');
+    expect(sameRange.options.spokeCidr).toBe('10.2.0.0/16');
+    expect(sameRange.warnings).toEqual([
+      { code: 'spoke-cidr-overlap', from: '10.1.0.0/16', to: '10.2.0.0/16' },
+    ]);
+
+    const hubInsideSpoke = normalizeState({
+      options: { hubCidr: '10.5.1.0/24', spokeCidr: '10.5.0.0/16' },
+    });
+    expect(hubInsideSpoke.options.spokeCidr).toBe('10.1.0.0/16');
+    expect(hubInsideSpoke.warnings[0]).toEqual({
+      code: 'spoke-cidr-overlap',
+      from: '10.5.0.0/16',
+      to: '10.1.0.0/16',
+    });
+
+    const wholeTen = normalizeState({ options: { hubCidr: '10.0.0.0/8' } });
+    expect(wholeTen.options.spokeCidr).toBe('172.16.0.0/16');
+    expect(wholeTen.warnings[0].to).toBe('172.16.0.0/16');
+    expect(SPOKE_CIDR_FALLBACKS).toEqual(['10.1.0.0/16', '10.2.0.0/16', '172.16.0.0/16']);
+
+    const moved = setOption(DEFAULT_STATE, 'hubCidr', '10.1.0.0/16');
+    expect(moved.options.spokeCidr).toBe('10.2.0.0/16');
+    expect(moved.warnings).toHaveLength(1);
+    const movedBack = setOption(moved, 'spokeCidr', '10.9.0.0/16');
+    expect(movedBack.options.spokeCidr).toBe('10.9.0.0/16');
+    expect(movedBack.warnings).toEqual([]);
+
+    const fromUrl = decodeLz(new URLSearchParams('hub.cidr=10.1.0.0/16&spoke.cidr=10.1.0.0/16'));
+    expect(fromUrl.options.spokeCidr).toBe('10.2.0.0/16');
+    expect(fromUrl.warnings).toHaveLength(1);
+    expect(encodeLz(fromUrl)).toEqual({ 'hub.cidr': '10.1.0.0/16', 'spoke.cidr': '10.2.0.0/16' });
+    expect(decodeLz(encodeLz(fromUrl)).warnings).toEqual([]);
   });
 
   it('sets an option, ignoring an invalid value, and counts drive selection', () => {
