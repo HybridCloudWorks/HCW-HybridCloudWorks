@@ -5,8 +5,8 @@
 }
 
 {% endif %}
-{% if caddy_cloudflare_api_token | length > 0 %}
-{{ caddy_site_domain }}, *.{{ caddy_site_domain }} {
+{% if caddy_tls_enabled | bool %}
+{{ caddy_site_names | join(', ') }} {
   tls {
     dns cloudflare {env.CLOUDFLARE_API_TOKEN}
     resolvers 1.1.1.1 1.0.0.1
@@ -19,11 +19,9 @@
   }
 }
 {% else %}
-http://{{ caddy_site_domain }}, http://*.{{ caddy_site_domain }} {
-  import {{ caddy_sites_dir }}/*.caddy
-
-  handle {
-    respond "{{ caddy_unknown_host_response }} TLS is off: vault_cloudflare_api_token is not set." 404
-  }
+# Fail closed. Without the DNS token nothing from conf.d is served, so a
+# missing secret can never expose an application route over plaintext.
+http://{{ caddy_site_domain }} {
+  respond "{{ caddy_apex_response }} TLS is off: vault_cloudflare_api_token is not set." 503
 }
 {% endif %}

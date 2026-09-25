@@ -6,9 +6,9 @@ argument_specs:
       - Creates the agent user (in the docker group, because the agent's job is docker run),
         installs Node.js 22 from NodeSource at a pinned version, checks the repository out at
         a pinned ref and runs npm ci --omit=dev once per ref.
-      - Generates the agent's private key and self-signed certificate on the host if absent,
-        keeps the PEM root-owned 0600 and hands the service a copy through systemd
-        LoadCredential.
+      - Generates the agent's private key and self-signed certificate on the host if absent and
+        keeps the PEM root-owned, group hcw-labs-agent, mode 0640, so the service can read it
+        and nothing else can. Only the public certificate leaves the host.
       - Writes /etc/hcw/labs-agent.env with the names from vps-agent/.env.example from vault
         variables and starts the unit only once all four identity values are present.
     author: HybridCloudWorks
@@ -105,7 +105,7 @@ argument_specs:
         type: path
         required: false
         default: /etc/hcw/labs-agent.pem
-        description: PEM with the private key and certificate, root-owned 0600.
+        description: PEM with the private key and certificate, root:hcw-labs-agent 0640.
       labs_agent_public_certificate_path:
         type: path
         required: false

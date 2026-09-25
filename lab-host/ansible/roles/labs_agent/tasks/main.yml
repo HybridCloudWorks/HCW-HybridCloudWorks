@@ -66,6 +66,7 @@
     update_cache: true
     install_recommends: false
     allow_downgrade: true
+    allow_change_held_packages: true
 
 - name: Hold the pinned Node.js package so apt never moves it
   ansible.builtin.dpkg_selections:
@@ -110,12 +111,12 @@
       && cat "{{ labs_agent_public_certificate_path }}" >> "{{ labs_agent_certificate_path }}"
     creates: "{{ labs_agent_certificate_path }}"
 
-- name: Keep the certificate and key root-owned and unreadable by anyone else
+- name: Keep the certificate and key root-owned, readable only by the agent's group
   ansible.builtin.file:
     path: "{{ labs_agent_certificate_path }}"
     owner: root
-    group: root
-    mode: "0600"
+    group: "{{ labs_agent_group }}"
+    mode: "0640"
 
 - name: Make the public certificate readable so it can be uploaded to the app registration
   ansible.builtin.file:
@@ -145,6 +146,11 @@
     mode: "0644"
   notify: Restart hcw-labs-agent
 
+- name: Check whether the agent unit is installed
+  ansible.builtin.stat:
+    path: "/etc/systemd/system/{{ labs_agent_service_name }}.service"
+  register: labs_agent_unit_stat
+
 - name: Enable and start the agent
   ansible.builtin.systemd_service:
     name: "{{ labs_agent_service_name }}"
@@ -152,6 +158,16 @@
     state: started
     daemon_reload: true
   when: labs_agent_configured | bool
+
+- name: Stop and disable the agent while its identity is missing
+  ansible.builtin.systemd_service:
+    name: "{{ labs_agent_service_name }}"
+    enabled: false
+    state: stopped
+    daemon_reload: true
+  when:
+    - not labs_agent_configured | bool
+    - labs_agent_unit_stat.stat.exists
 
 - name: Say why the agent is not running yet
   ansible.builtin.debug:

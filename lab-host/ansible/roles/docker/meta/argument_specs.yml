@@ -1,11 +1,14 @@
 ---
 argument_specs:
   main:
-    short_description: Install Docker Engine at a pinned version from Docker's apt repository
+    short_description: Install Docker Engine, buildx and compose at pinned versions from Docker's apt repository
     description:
       - Adds Docker's signed apt repository for the running Ubuntu release, installs
-        docker-ce, docker-ce-cli and containerd.io at the exact versions given, holds them,
-        writes /etc/docker/daemon.json and enables the service.
+        docker-ce, docker-ce-cli, containerd.io, docker-buildx-plugin and docker-compose-plugin
+        at the exact versions given, holds them, writes /etc/docker/daemon.json and enables
+        the service.
+      - Also installs python3-docker and python3-requests from Ubuntu, which the
+        community.docker modules the caddy role uses need on the target interpreter.
     author: HybridCloudWorks
     options:
       docker_version:
@@ -18,6 +21,14 @@ argument_specs:
         type: str
         required: true
         description: Exact apt version string for containerd.io.
+      docker_buildx_version:
+        type: str
+        required: true
+        description: Exact apt version string for docker-buildx-plugin.
+      docker_compose_version:
+        type: str
+        required: true
+        description: Exact apt version string for docker-compose-plugin, which Coder (#679) runs under.
       docker_apt_key_url:
         type: str
         required: false
@@ -27,7 +38,7 @@ argument_specs:
         type: path
         required: false
         default: /etc/apt/keyrings/docker.asc
-        description: Where the signing key is stored; referenced by signed-by in the source line.
+        description: Where the signing key is stored; referenced by Signed-By in the source.
       docker_apt_repository_url:
         type: str
         required: false

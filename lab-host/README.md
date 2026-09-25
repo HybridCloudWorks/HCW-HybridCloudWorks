@@ -1,19 +1,20 @@
 # lab-host
 
 Configuration management for the Hostinger lab host: the on-premises half of
-the hybrid estate in #656, Phase 2 (#662). Terraform (#661) creates the VPS
-and its DNS; everything on the host after that is here, so nothing is done by
-hand over SSH and a follower can read every step.
+the hybrid estate in #656, Phase 2 (#662), on the decisions in ADR 0032.
+Terraform (#661) creates the VPS and its DNS; everything on the host after
+that is here, so nothing is done by hand over SSH and a follower can read
+every step.
 
 ## What runs on the host
 
 | Role | Installs | Where |
 | --- | --- | --- |
 | `hardening` | `hcwadmin` key-only login with passwordless sudo, sshd drop-in (`PasswordAuthentication no`, `PermitRootLogin no`, `KbdInteractiveAuthentication no`), ufw deny-in/allow-out with TCP 22, 80, 443, unattended-upgrades rebooting at 04:30, fail2ban sshd jail | `/etc/ssh/sshd_config.d/00-hcw-hardening.conf`, `/etc/sudoers.d/90-hcw-admin`, `/etc/apt/apt.conf.d/52hcw-unattended-upgrades`, `/etc/fail2ban/jail.d/hcw-sshd.local` |
-| `docker` | Docker Engine 29.8.1 from Docker's apt repository, held; `json-file` logs 10 MB x 3, `live-restore` | `/etc/docker/daemon.json` |
-| `node_exporter` | node_exporter 1.12.1, SHA256-verified, `127.0.0.1:9100` only | `/usr/local/bin/node_exporter`, `node_exporter.service` |
-| `caddy` | Caddy 2.11.4 built with `caddy-dns/cloudflare` 0.2.4, wildcard TLS for `lab.hybridcloudworks.com` and `*.lab.hybridcloudworks.com` via DNS-01, placeholder response at the apex | `/usr/local/bin/caddy`, `/etc/caddy/Caddyfile`, `/etc/caddy/conf.d/`, `/etc/caddy/env` (root, 0600) |
-| `labs_agent` | `vps-agent` as `hcw-labs-agent.service` under user `hcw-labs-agent` (in `docker`), Node.js 22 from NodeSource, repository checkout at a pinned sha, certificate generated on the host | `/opt/hcw-labs-agent`, `/etc/hcw/labs-agent.env` (root, 0600), `/etc/hcw/labs-agent.pem` (root, 0600), `/etc/hcw/labs-agent.crt` |
+| `docker` | Docker Engine 29.8.1, buildx 0.37.1 and compose 5.5.1 from Docker's apt repository, held; `json-file` logs 10 MB x 3, `live-restore` | `/etc/docker/daemon.json` |
+| `node_exporter` | node_exporter 1.12.1, host-native, SHA256-verified, `127.0.0.1:9100` only | `/usr/local/bin/node_exporter`, `node_exporter.service` |
+| `caddy` | Caddy 2.11.4 built with `caddy-dns/cloudflare` 0.2.4, host-native under systemd; TLS for `lab.hybridcloudworks.com`, `*.lab.hybridcloudworks.com` and `*.coder.lab.hybridcloudworks.com` via DNS-01; placeholder response at the apex | `/usr/local/bin/caddy`, `/opt/caddy/bin/` (versioned binary and its `.provenance`), `/etc/caddy/Caddyfile`, `/etc/caddy/conf.d/`, `/etc/caddy/env` (root, 0600), `caddy.service` |
+| `labs_agent` | `vps-agent` host-native as `hcw-labs-agent.service` under user `hcw-labs-agent` (in `docker`), Node.js 22 from NodeSource, repository checkout at a pinned sha, certificate generated on the host | `/opt/hcw-labs-agent`, `/etc/hcw/labs-agent.env` (root, 0600), `/etc/hcw/labs-agent.pem` (root:hcw-labs-agent, 0640), `/etc/hcw/labs-agent.crt` |
 
 Each role's `README.md` explains its decisions; `meta/argument_specs.yml` is
 its variable contract. Every version, digest and checksum is in
@@ -21,8 +22,10 @@ its variable contract. Every version, digest and checksum is in
 `ansible/requirements.yml`.
 
 `site.yml` runs the roles in that order. Azure Arc (#663) and Coder (#679)
-add a role each to the end of the list; Coder's Caddy route is a file in
-`/etc/caddy/conf.d/`, the pattern `00-apex.caddy` shows.
+add a role each to the end of the list. Docker Compose on this host is for
+Coder and its PostgreSQL only (ADR 0032); Caddy and the agent are host
+services, and Coder's Caddy route is a file in `/etc/caddy/conf.d/`, the
+pattern `00-apex.caddy` shows.
 
 ## First run
 
@@ -31,8 +34,9 @@ runs it as root. The script installs `ansible-core` 2.21.4 with pipx, clones
 this repository at the sha pinned in `HCW_REPO_REF` into `/opt/hcw-src`,
 installs the collections and runs `site.yml` against localhost. Without a
 vault it still completes: the host is hardened, Docker and node_exporter
-run, Caddy serves the placeholder over plain HTTP and says TLS is off, and
-the agent unit is installed but not started.
+run, Caddy serves an HTTP-only apex answering 503 that says TLS is off (and
+imports no routes, so nothing can leak over plaintext), and the agent unit
+is installed but not started.
 
 ## Re-running
 
@@ -85,7 +89,7 @@ with their values:
 
 | Key | Read by | What it is |
 | --- | --- | --- |
-| `vault_cloudflare_api_token` | `caddy` | Cloudflare API token with `Zone:DNS:Edit` on the `hybridcloudworks.com` zone, for the DNS-01 challenge |
+| `vault_cloudflare_api_token` | `caddy` | The **runtime** Cloudflare API token Caddy uses for DNS-01, distinct from the one Terraform holds in #661. See the note below on its scope |
 | `vault_caddy_acme_email` | `caddy` | Optional. ACME account contact for expiry mail |
 | `vault_labs_agent_api_base` | `labs_agent` | `LABS_AGENT_API_BASE`: the Functions API base including `/api`. Today that is the `func-site-prod-cus-01` app's `azurewebsites.net` host |
 | `vault_labs_agent_tenant_id` | `labs_agent` | `LABS_AGENT_TENANT_ID` |
@@ -102,16 +106,30 @@ sudo /usr/local/bin/ansible-vault edit --vault-password-file /etc/hcw/ansible/va
 
 Then re-run `bootstrap.sh`.
 
+### The Cloudflare runtime token and its scope
+
+Caddy answers the DNS-01 challenge for all three names through CNAME
+delegation: `_acme-challenge.lab.hybridcloudworks.com` and
+`_acme-challenge.coder.lab.hybridcloudworks.com` point into a dedicated lab
+zone that #661 creates, and Caddy follows the CNAME to write the TXT record
+there. Once that zone exists, the runtime token needs `Zone:DNS:Edit` on the
+lab zone only. **Until it exists, the token has `Zone:DNS:Edit` on the
+production `hybridcloudworks.com` zone.** That is the interim risk ADR 0032
+accepts, and it is written here so the follow-up — re-issue the token scoped
+to the lab zone and rotate it in the vault — is a recorded step, not a
+forgotten one. The token is in `/etc/caddy/env` (root, 0600) and nowhere
+else on the host; the play writes it with `no_log`.
+
 ## The agent identity
 
 The first run generates the agent's private key **on the host** and never
-moves it: `/etc/hcw/labs-agent.pem` (key and certificate, root-owned 0600) is
-read by systemd and handed to the service through `LoadCredential`, so the
-process sees a private copy and the original keeps its mode. The certificate
-alone is `/etc/hcw/labs-agent.crt`. Provisioning the app registration that
-the certificate is uploaded to, and the `lab_agents` registry document, are
-the owner steps in `docs/standards/required-inputs.md` section 4.7; print
-the certificate to upload with bash, on the host:
+moves it: `/etc/hcw/labs-agent.pem` holds the key and certificate as
+`root:hcw-labs-agent` mode `0640`, so root owns it, the service reads it
+through its group, and nobody else can (no ACLs). The certificate alone is
+`/etc/hcw/labs-agent.crt`. Provisioning the app registration that the
+certificate is uploaded to, and the `lab_agents` registry document, are the
+owner steps in `docs/standards/required-inputs.md` section 4.7; print the
+certificate to upload with bash, on the host:
 
 ```bash
 sudo cat /etc/hcw/labs-agent.crt
@@ -120,29 +138,39 @@ sudo cat /etc/hcw/labs-agent.crt
 ## Validating without a host
 
 Neither `ansible-core` nor `ansible-lint` is installed on the Windows
-workstation; the checks run in the same container CI uses the pip
-equivalents of. PowerShell, from the repository root:
+workstation; the checks run in the container CI's pip pins match, pinned by
+digest so the result cannot change without a repository change. PowerShell,
+from the repository root:
 
 ```powershell
-docker run --rm -v "${PWD}\lab-host:/work" -w /work/ansible ghcr.io/ansible/community-ansible-dev-tools:latest sh -c "ansible-galaxy collection install -r requirements.yml >/dev/null && ansible-lint --profile production && ansible-playbook --syntax-check -i inventory/localhost.yml site.yml"
+docker run --rm -v "${PWD}\lab-host:/work" -w /work/ansible ghcr.io/ansible/community-ansible-dev-tools@sha256:775c81d53058009dd47b97872f4a86d3b0a9ce16ad9af3cc48514ce4197aa787 sh -c "ansible-galaxy collection install -r requirements.yml >/dev/null && ansible-lint --profile production && ansible-playbook --syntax-check -i inventory/localhost.yml site.yml"
 ```
 
-A passing result prints `Passed: 0 failure(s), 0 warning(s) on N files.
-Last profile that met the criteria: production.` followed by
-`playbook: site.yml`. CI runs the same two commands in the
-`ansible-lint (lab-host)` job of `.github/workflows/ci.yml`, gated on
+The same in bash (Git Bash or Linux), from the repository root:
+
+```bash
+MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd)/lab-host:/work" -w /work/ansible ghcr.io/ansible/community-ansible-dev-tools@sha256:775c81d53058009dd47b97872f4a86d3b0a9ce16ad9af3cc48514ce4197aa787 sh -c "ansible-galaxy collection install -r requirements.yml >/dev/null && ansible-lint --profile production && ansible-playbook --syntax-check -i inventory/localhost.yml site.yml"
+```
+
+A passing result prints `Passed: 0 failure(s), 0 warning(s) in N files
+processed of M encountered. Profile 'production' was required, and it
+passed.` followed by `playbook: site.yml`. That digest is
+`community-ansible-dev-tools:latest` as of 2026-09-23 (ansible-lint 26.9.0,
+ansible-core 2.21.4, the same pins CI installs with pip); when the pins in
+`ci.yml` move, move this digest with them. CI runs the same two commands in
+the `ansible-lint (lab-host)` job of `.github/workflows/ci.yml`, gated on
 changes under `lab-host/`.
 
 ## Bumping a pin
 
 | Pin | Lives in | How to read the current value |
 | --- | --- | --- |
-| Docker | `docker_version`, `docker_containerd_version` | `roles/docker/README.md` |
+| Docker, buildx, compose | `docker_version`, `docker_containerd_version`, `docker_buildx_version`, `docker_compose_version` | `roles/docker/README.md` |
 | Caddy, Cloudflare module, builder image digest | `caddy_*` | `roles/caddy/README.md`; the digest is the image index from `docker buildx imagetools inspect caddy:2.11.4-builder` |
 | node_exporter | `node_exporter_version`, `node_exporter_checksum` | `roles/node_exporter/README.md` |
 | Node.js | `labs_agent_node_version` | NodeSource `node_22.x` package index |
 | Repository ref | `labs_agent_repo_ref` and `HCW_REPO_REF` | `git rev-parse origin/main` |
 | Collections | `requirements.yml` | Galaxy |
-| Ansible tooling | `ANSIBLE_CORE_VERSION` in `bootstrap.sh`; the pip pins in `ci.yml` | PyPI |
+| Ansible tooling | `ANSIBLE_CORE_VERSION` in `bootstrap.sh`; the pip pins in `ci.yml`; the image digest above | PyPI; the image's `RepoDigests` |
 
 All in `ansible/group_vars/all.yml` unless the table says otherwise.

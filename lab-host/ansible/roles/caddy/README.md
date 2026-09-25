@@ -1,9 +1,12 @@
 # caddy
 
-TLS for `lab.hybridcloudworks.com` and `*.lab.hybridcloudworks.com` terminates
-in Caddy on the host, with one wildcard certificate obtained through the
-Cloudflare DNS-01 challenge. Everything behind it (Coder in #679, anything
-later) is a route added to this role's `conf.d`, never a second listener.
+TLS for the lab terminates in Caddy, host-native under systemd (ADR 0032).
+It holds certificates for three names — `lab.hybridcloudworks.com`,
+`*.lab.hybridcloudworks.com` and `*.coder.lab.hybridcloudworks.com` —
+obtained through the Cloudflare DNS-01 challenge. Everything behind it (Coder
+in #679, anything later) is a route added to this role's `conf.d`, never a
+second listener. Docker Compose on this host is for Coder and its PostgreSQL
+only; Caddy is not in it, because the upstream image lacks the module.
 
 ## Why a build and not a download
 
@@ -11,12 +14,19 @@ The stock `caddy` apt package has no Cloudflare module. The
 `caddyserver.com/api/download` endpoint adds modules but **always builds the
 latest Caddy release** and ignores a `version` parameter (checked
 2026-09-25: a request naming a nonexistent version returned the identical
-binary). So this role builds with `xcaddy` inside the official
-`caddy:<version>-builder` image, pulled by tag and then asserted against the
-digest in `group_vars/all.yml`. Docker is already on the host, so nothing new
-is installed to do it; the build takes a few minutes the first time and is
+binary), so it cannot be pinned and has no checksum to record. This role
+builds with `xcaddy` inside the official `caddy:<version>-builder` image
+instead, pulled by tag and asserted against the image-index digest in
+`group_vars/all.yml`. Docker is already on the host, so nothing new is
+installed to do it; the build takes a few minutes the first time and is
 skipped once `/opt/caddy/bin/caddy-<version>-cloudflare-<module>` exists.
 Bumping either version changes that filename and triggers a rebuild.
+
+The build's provenance is the four `caddy_*` pins in `group_vars/all.yml`
+(Caddy tag, module tag, builder image tag and its index digest), and the
+role writes the same three facts to
+`/opt/caddy/bin/caddy-<version>-cloudflare-<module>.provenance` next to the
+binary it produced.
 
 ## What it does
 
@@ -24,24 +34,37 @@ Bumping either version changes that filename and triggers a rebuild.
    `/opt/caddy/bin`, `/var/lib/caddy`.
 2. Pulls the builder image, asserts its `RepoDigests` contains the pinned
    digest, runs `xcaddy build <caddy_version> --with
-   github.com/caddy-dns/cloudflare@<module version>`, and refuses the result
-   unless `caddy list-modules` shows `dns.providers.cloudflare`.
+   github.com/caddy-dns/cloudflare@<module version>`, then refuses the result
+   unless `caddy version` names the pinned version and `caddy list-modules`
+   shows `dns.providers.cloudflare`.
 3. Installs the binary to `/usr/local/bin/caddy`.
 4. Writes `/etc/caddy/env` (root, 0600) with `CLOUDFLARE_API_TOKEN` from
    `vault_cloudflare_api_token`, with `no_log` so the value never reaches
-   output or diff.
+   output or diff. This is a **runtime** token, distinct from the one
+   Terraform uses in #661.
 5. Renders `/etc/caddy/conf.d/00-apex.caddy` (the placeholder `respond` for
    the apex) and `/etc/caddy/Caddyfile`, validated with `caddy validate`
-   before it replaces the live file. The site block imports
-   `conf.d/*.caddy` and ends in a catch-all 404 for wildcard names nothing
+   before it replaces the live file. The site block lists all three names,
+   imports `conf.d/*.caddy` and ends in a catch-all 404 for names nothing
    claims.
 6. Installs `caddy.service` with `EnvironmentFile=/etc/caddy/env`,
    `AmbientCapabilities=CAP_NET_BIND_SERVICE` and `Type=notify`, then
    enables and starts it.
 
-With no token in the vault the Caddyfile serves the same routes over plain
-HTTP and the catch-all says TLS is off. That keeps a first bootstrap green;
-the second run, after the vault exists, switches to TLS.
+**Fail closed.** With no token in the vault the Caddyfile serves a single
+HTTP-only apex that answers 503 and says TLS is off. It imports nothing from
+`conf.d`, so a missing secret can never put an application route (Coder's,
+later) on plaintext. The first bootstrap is still green; the second run,
+after the vault exists, switches to TLS.
+
+## DNS-01 through delegation
+
+`_acme-challenge.lab.hybridcloudworks.com` and
+`_acme-challenge.coder.lab.hybridcloudworks.com` are CNAMEs into a dedicated
+lab zone (#661); Caddy follows the CNAME and writes the TXT record there, so
+the runtime token only needs DNS edit on that zone. Until the lab zone exists
+the token has DNS edit on the production zone, the interim risk ADR 0032
+accepts, recorded in `lab-host/README.md`.
 
 ## Adding a route (how #679 slots in)
 
@@ -56,7 +79,8 @@ named matcher and a `handle` block, then notify `Reload caddy`. The
 | `caddy_version` | required | Caddy tag for `xcaddy build` |
 | `caddy_cloudflare_module_version` | required | `caddy-dns/cloudflare` tag |
 | `caddy_builder_image`, `caddy_builder_image_tag`, `caddy_builder_image_digest` | required | Builder image pin |
-| `caddy_site_domain` | required | Apex; the block also covers `*.` |
+| `caddy_site_domain` | required | Apex; matcher and fail-closed placeholder |
+| `caddy_site_names` | required | Every name the site block serves |
 | `caddy_cloudflare_api_token` | `vault_cloudflare_api_token` or empty | DNS-01 credential |
 | `caddy_acme_email` | `vault_caddy_acme_email` or empty | ACME contact, omitted when empty |
 | `caddy_apex_response` | placeholder text | Apex body |

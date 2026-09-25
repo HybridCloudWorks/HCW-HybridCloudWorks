@@ -12,7 +12,6 @@ User={{ labs_agent_user }}
 Group={{ labs_agent_group }}
 WorkingDirectory={{ labs_agent_app_dir }}
 EnvironmentFile={{ labs_agent_env_file }}
-LoadCredential=labs-agent.pem:{{ labs_agent_certificate_path }}
 Environment=NODE_ENV=production
 ExecStart=/usr/bin/node index.js
 Restart=on-failure

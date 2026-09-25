@@ -70,6 +70,26 @@
       - "/out/{{ caddy_built_binary_name }}"
     creates: "{{ caddy_built_binary }}"
 
+- name: Record what the binary was built from
+  ansible.builtin.copy:
+    dest: "{{ caddy_built_binary }}.provenance"
+    content: |
+      caddy_version={{ caddy_version }}
+      caddy_cloudflare_module_version={{ caddy_cloudflare_module_version }}
+      builder_image={{ caddy_builder_image_ref }}
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Confirm the built binary is the pinned Caddy version
+  ansible.builtin.command:
+    argv:
+      - "{{ caddy_built_binary }}"
+      - version
+  register: caddy_binary_version
+  changed_when: false
+  failed_when: caddy_version not in caddy_binary_version.stdout
+
 - name: Confirm the built binary carries the Cloudflare DNS module
   ansible.builtin.command:
     argv:

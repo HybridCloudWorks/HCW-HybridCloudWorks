@@ -1,12 +1,14 @@
 ---
 argument_specs:
   main:
-    short_description: Build and run Caddy with the Cloudflare DNS module for a wildcard site
+    short_description: Build and run Caddy with the Cloudflare DNS module for the lab names, host-native under systemd
     description:
-      - Builds Caddy with xcaddy inside the official, digest-pinned builder image (Docker must
-        already be installed), verifies the Cloudflare DNS module is present, and installs it.
-      - Renders a Caddyfile with one site block for the apex and its wildcard, terminating TLS
-        with a DNS-01 wildcard certificate, and a conf.d directory later roles add routes to.
+      - Builds Caddy with xcaddy inside the official, digest-asserted builder image (Docker must
+        already be installed), verifies the version and the Cloudflare DNS module, records the
+        build's provenance next to the binary and installs it.
+      - Renders a Caddyfile with one site block for the three certificate names, terminating TLS
+        with DNS-01, and a conf.d directory later roles add routes to. Without a token the
+        Caddyfile fails closed to an HTTP-only 503 apex that imports nothing.
       - Writes the Cloudflare API token to a root-only environment file the systemd unit reads.
     author: HybridCloudWorks
     options:
@@ -30,19 +32,24 @@ argument_specs:
         type: str
         required: true
         description:
-          - sha256 digest the pulled tag must resolve to. The build runs against
+          - Image index digest the pulled tag must resolve to. The build runs against
             image@digest, so a moved tag fails the assertion rather than building silently.
       caddy_site_domain:
         type: str
         required: true
-        description: Apex domain. The site block covers it and *.domain.
+        description: Apex domain, used for the apex matcher and the fail-closed placeholder.
+      caddy_site_names:
+        type: list
+        elements: str
+        required: true
+        description: Every name the site block serves and obtains a certificate for.
       caddy_cloudflare_api_token:
         type: str
         required: false
         default: ""
         description:
-          - Cloudflare API token with DNS edit on the zone; defaults to vault_cloudflare_api_token.
-          - Empty renders an HTTP-only placeholder instead of failing.
+          - Cloudflare API token with DNS edit on the zone holding the _acme-challenge records;
+            defaults to vault_cloudflare_api_token. Empty fails closed.
       caddy_acme_email:
         type: str
         required: false
@@ -55,7 +62,7 @@ argument_specs:
       caddy_unknown_host_response:
         type: str
         required: false
-        description: Body returned with 404 for a wildcard name no route claims.
+        description: Body returned with 404 for a name no route claims.
       caddy_user:
         type: str
         required: false
@@ -85,7 +92,7 @@ argument_specs:
         type: path
         required: false
         default: /opt/caddy/bin
-        description: Where xcaddy writes the versioned binary.
+        description: Where xcaddy writes the versioned binary and its provenance file.
       caddy_binary_path:
         type: path
         required: false

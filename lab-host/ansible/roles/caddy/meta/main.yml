@@ -3,7 +3,7 @@ galaxy_info:
   role_name: caddy
   namespace: hcw
   author: HybridCloudWorks
-  description: Caddy built with the Cloudflare DNS module, serving a wildcard site with DNS-01 TLS under systemd
+  description: Caddy built with the Cloudflare DNS module, serving the lab names with DNS-01 TLS host-native under systemd
   license: UNLICENSED
   min_ansible_version: "2.16"
   platforms:
