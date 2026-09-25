@@ -14,6 +14,14 @@ export const INDENT = '  ';
 /** A quoted HCL string. Values here are ours, so only the quote and backslash need care. */
 export const q = (value) => `"${String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 
+/**
+ * An object key: bare when it is a plain identifier (letters, digits,
+ * underscore), quoted otherwise. HCL identifiers may contain hyphens, so
+ * `Enable-DDoS-VNET = {` is valid; quoting it anyway means a reader does not
+ * have to know the grammar to trust the file.
+ */
+export const key = (name) => (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : q(name));
+
 const isAttr = (item) => Array.isArray(item) && typeof item[1] === 'string';
 const isNested = (item) => Array.isArray(item) && Array.isArray(item[1]);
 

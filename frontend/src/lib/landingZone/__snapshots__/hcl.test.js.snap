@@ -137,14 +137,14 @@ module "alz" {
   policy_assignments_to_modify = {
     landingzones = {
       policy_assignments = {
-        Enable-DDoS-VNET = {
+        "Enable-DDoS-VNET" = {
           enforcement_mode = "DoNotEnforce"
         }
       }
     }
     connectivity = {
       policy_assignments = {
-        Enable-DDoS-VNET = {
+        "Enable-DDoS-VNET" = {
           enforcement_mode = "DoNotEnforce"
         }
       }
@@ -838,405 +838,405 @@ module "alz" {
   policy_assignments_to_modify = {
     alz = {
       policy_assignments = {
-        Audit-ResourceRGLocation = {
+        "Audit-ResourceRGLocation" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Audit-TrustedLaunch = {
+        "Audit-TrustedLaunch" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Audit-UnusedResources = {
+        "Audit-UnusedResources" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Audit-ZoneResiliency = {
+        "Audit-ZoneResiliency" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deny-Classic-Resources = {
+        "Deny-Classic-Resources" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deny-UnmanagedDisk = {
+        "Deny-UnmanagedDisk" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deploy-ASC-Monitoring = {
+        "Deploy-ASC-Monitoring" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deploy-AzActivity-Log = {
+        "Deploy-AzActivity-Log" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deploy-Diag-LogsCat = {
+        "Deploy-Diag-LogsCat" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deploy-MCSB2-Monitoring = {
+        "Deploy-MCSB2-Monitoring" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deploy-MDEndpoints = {
+        "Deploy-MDEndpoints" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deploy-MDEndpointsAMA = {
+        "Deploy-MDEndpointsAMA" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deploy-MDFC-Config-H224 = {
+        "Deploy-MDFC-Config-H224" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deploy-MDFC-OssDb = {
+        "Deploy-MDFC-OssDb" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deploy-MDFC-SqlAtp = {
+        "Deploy-MDFC-SqlAtp" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deploy-SvcHealth-BuiltIn = {
+        "Deploy-SvcHealth-BuiltIn" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-ACSB = {
+        "Enforce-ACSB" = {
           enforcement_mode = "DoNotEnforce"
         }
       }
     }
     platform = {
       policy_assignments = {
-        DenyAction-DeleteUAMIAMA = {
+        "DenyAction-DeleteUAMIAMA" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deploy-GuestAttest = {
+        "Deploy-GuestAttest" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deploy-MDFC-DefSQL-AMA = {
+        "Deploy-MDFC-DefSQL-AMA" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deploy-VM-ChangeTrack = {
+        "Deploy-VM-ChangeTrack" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deploy-VM-Monitoring = {
+        "Deploy-VM-Monitoring" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deploy-vmArc-ChangeTrack = {
+        "Deploy-vmArc-ChangeTrack" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deploy-vmHybr-Monitoring = {
+        "Deploy-vmHybr-Monitoring" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deploy-VMSS-ChangeTrack = {
+        "Deploy-VMSS-ChangeTrack" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deploy-VMSS-Monitoring = {
+        "Deploy-VMSS-Monitoring" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enable-AUM-CheckUpdates = {
+        "Enable-AUM-CheckUpdates" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-ASR = {
+        "Enforce-ASR" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-Encrypt-CMK0 = {
+        "Enforce-Encrypt-CMK0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-APIM0 = {
+        "Enforce-GR-APIM0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-AppServices0 = {
+        "Enforce-GR-AppServices0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-Automation0 = {
+        "Enforce-GR-Automation0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-BotService0 = {
+        "Enforce-GR-BotService0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-CogServ0 = {
+        "Enforce-GR-CogServ0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-Compute0 = {
+        "Enforce-GR-Compute0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-ContApps0 = {
+        "Enforce-GR-ContApps0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-ContInst0 = {
+        "Enforce-GR-ContInst0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-ContReg0 = {
+        "Enforce-GR-ContReg0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-CosmosDb0 = {
+        "Enforce-GR-CosmosDb0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-DataExpl0 = {
+        "Enforce-GR-DataExpl0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-DataFactory0 = {
+        "Enforce-GR-DataFactory0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-EventGrid0 = {
+        "Enforce-GR-EventGrid0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-EventHub0 = {
+        "Enforce-GR-EventHub0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-KeyVault = {
+        "Enforce-GR-KeyVault" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-KeyVaultSup0 = {
+        "Enforce-GR-KeyVaultSup0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-Kubernetes0 = {
+        "Enforce-GR-Kubernetes0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-MachLearn0 = {
+        "Enforce-GR-MachLearn0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-MySQL0 = {
+        "Enforce-GR-MySQL0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-Network0 = {
+        "Enforce-GR-Network0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-OpenAI0 = {
+        "Enforce-GR-OpenAI0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-PostgreSQL0 = {
+        "Enforce-GR-PostgreSQL0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-ServiceBus0 = {
+        "Enforce-GR-ServiceBus0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-SQL0 = {
+        "Enforce-GR-SQL0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-Storage0 = {
+        "Enforce-GR-Storage0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-Synapse0 = {
+        "Enforce-GR-Synapse0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-VirtualDesk0 = {
+        "Enforce-GR-VirtualDesk0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-Subnet-Private = {
+        "Enforce-Subnet-Private" = {
           enforcement_mode = "DoNotEnforce"
         }
       }
     }
     landingzones = {
       policy_assignments = {
-        Audit-AppGW-WAF = {
+        "Audit-AppGW-WAF" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deny-IP-forwarding = {
+        "Deny-IP-forwarding" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deny-MgmtPorts-Internet = {
+        "Deny-MgmtPorts-Internet" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deny-Priv-Esc-AKS = {
+        "Deny-Priv-Esc-AKS" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deny-Privileged-AKS = {
+        "Deny-Privileged-AKS" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deny-Storage-http = {
+        "Deny-Storage-http" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deny-Subnet-Without-Nsg = {
+        "Deny-Subnet-Without-Nsg" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deploy-AzSqlDb-Auditing = {
+        "Deploy-AzSqlDb-Auditing" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deploy-GuestAttest = {
+        "Deploy-GuestAttest" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deploy-MDFC-DefSQL-AMA = {
+        "Deploy-MDFC-DefSQL-AMA" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deploy-SQL-TDE = {
+        "Deploy-SQL-TDE" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deploy-SQL-Threat = {
+        "Deploy-SQL-Threat" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deploy-VM-Backup = {
+        "Deploy-VM-Backup" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deploy-VM-ChangeTrack = {
+        "Deploy-VM-ChangeTrack" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deploy-VM-Monitoring = {
+        "Deploy-VM-Monitoring" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deploy-vmArc-ChangeTrack = {
+        "Deploy-vmArc-ChangeTrack" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deploy-vmHybr-Monitoring = {
+        "Deploy-vmHybr-Monitoring" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deploy-VMSS-ChangeTrack = {
+        "Deploy-VMSS-ChangeTrack" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deploy-VMSS-Monitoring = {
+        "Deploy-VMSS-Monitoring" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enable-AUM-CheckUpdates = {
+        "Enable-AUM-CheckUpdates" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enable-DDoS-VNET = {
+        "Enable-DDoS-VNET" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-AKS-HTTPS = {
+        "Enforce-AKS-HTTPS" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-ASR = {
+        "Enforce-ASR" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-Encrypt-CMK0 = {
+        "Enforce-Encrypt-CMK0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-APIM0 = {
+        "Enforce-GR-APIM0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-AppServices0 = {
+        "Enforce-GR-AppServices0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-Automation0 = {
+        "Enforce-GR-Automation0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-BotService0 = {
+        "Enforce-GR-BotService0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-CogServ0 = {
+        "Enforce-GR-CogServ0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-Compute0 = {
+        "Enforce-GR-Compute0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-ContApps0 = {
+        "Enforce-GR-ContApps0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-ContInst0 = {
+        "Enforce-GR-ContInst0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-ContReg0 = {
+        "Enforce-GR-ContReg0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-CosmosDb0 = {
+        "Enforce-GR-CosmosDb0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-DataExpl0 = {
+        "Enforce-GR-DataExpl0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-DataFactory0 = {
+        "Enforce-GR-DataFactory0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-EventGrid0 = {
+        "Enforce-GR-EventGrid0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-EventHub0 = {
+        "Enforce-GR-EventHub0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-KeyVault = {
+        "Enforce-GR-KeyVault" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-KeyVaultSup0 = {
+        "Enforce-GR-KeyVaultSup0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-Kubernetes0 = {
+        "Enforce-GR-Kubernetes0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-MachLearn0 = {
+        "Enforce-GR-MachLearn0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-MySQL0 = {
+        "Enforce-GR-MySQL0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-Network0 = {
+        "Enforce-GR-Network0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-OpenAI0 = {
+        "Enforce-GR-OpenAI0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-PostgreSQL0 = {
+        "Enforce-GR-PostgreSQL0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-ServiceBus0 = {
+        "Enforce-GR-ServiceBus0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-SQL0 = {
+        "Enforce-GR-SQL0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-Storage0 = {
+        "Enforce-GR-Storage0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-Synapse0 = {
+        "Enforce-GR-Synapse0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-GR-VirtualDesk0 = {
+        "Enforce-GR-VirtualDesk0" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-Subnet-Private = {
+        "Enforce-Subnet-Private" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Enforce-TLS-SSL-Q225 = {
+        "Enforce-TLS-SSL-Q225" = {
           enforcement_mode = "DoNotEnforce"
         }
       }
     }
     corp = {
       policy_assignments = {
-        Audit-PeDnsZones = {
+        "Audit-PeDnsZones" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deny-HybridNetworking = {
+        "Deny-HybridNetworking" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deny-Public-Endpoints = {
+        "Deny-Public-Endpoints" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deny-Public-IP-On-NIC = {
+        "Deny-Public-IP-On-NIC" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deploy-Private-DNS-Zones = {
+        "Deploy-Private-DNS-Zones" = {
           enforcement_mode = "DoNotEnforce"
         }
       }
     }
     local = {
       policy_assignments = {
-        Enforce-ALDO-Services = {
+        "Enforce-ALDO-Services" = {
           enforcement_mode = "DoNotEnforce"
         }
       }
     }
     sandbox = {
       policy_assignments = {
-        Enforce-ALZ-Sandbox = {
+        "Enforce-ALZ-Sandbox" = {
           enforcement_mode = "DoNotEnforce"
         }
       }
     }
     connectivity = {
       policy_assignments = {
-        Enable-DDoS-VNET = {
+        "Enable-DDoS-VNET" = {
           enforcement_mode = "DoNotEnforce"
         }
       }
     }
     identity = {
       policy_assignments = {
-        Deny-MgmtPorts-Internet = {
+        "Deny-MgmtPorts-Internet" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deny-Public-IP = {
+        "Deny-Public-IP" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deny-Subnet-Without-Nsg = {
+        "Deny-Subnet-Without-Nsg" = {
           enforcement_mode = "DoNotEnforce"
         }
-        Deploy-VM-Backup = {
+        "Deploy-VM-Backup" = {
           enforcement_mode = "DoNotEnforce"
         }
       }
     }
     decommissioned = {
       policy_assignments = {
-        Enforce-ALZ-Decomm = {
+        "Enforce-ALZ-Decomm" = {
           enforcement_mode = "DoNotEnforce"
         }
       }

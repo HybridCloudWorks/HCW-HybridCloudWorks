@@ -311,7 +311,7 @@ describe('emitFiles', () => {
     expect(noDns).toContain('Deploy-Private-DNS-Zones');
     expect(noDns).not.toContain('private_dns_zone_subscription_id');
     expect(noDns).toMatch(
-      /corp = \{\n      policy_assignments = \{\n        Deploy-Private-DNS-Zones = \{/
+      /corp = \{\n      policy_assignments = \{\n        "Deploy-Private-DNS-Zones" = \{/
     );
 
     const notEnforced = (text) => (text.match(/enforcement_mode = "DoNotEnforce"/g) ?? []).length;
@@ -336,11 +336,11 @@ describe('emitFiles', () => {
     expect(groupsAssigning('Deploy-Private-DNS-Zones')).toEqual(['corp']);
     expect(groupsAssigning('Nope')).toEqual([]);
     expect(notEnforced(full)).toBe(ddosGroups.length);
-    expect((full.match(/Enable-DDoS-VNET = \{/g) ?? []).length).toBe(ddosGroups.length);
+    expect((full.match(/"Enable-DDoS-VNET" = \{/g) ?? []).length).toBe(ddosGroups.length);
     for (const group of ddosGroups) {
       expect(full, group).toMatch(
         new RegExp(
-          `^    ${group} = \\{\n      policy_assignments = \\{\n        Enable-DDoS-VNET = \\{`,
+          `^    ${group} = \\{\n      policy_assignments = \\{\n        "Enable-DDoS-VNET" = \\{`,
           'm'
         )
       );
@@ -362,12 +362,16 @@ describe('emitFiles', () => {
       expect(treeOnly['alz.tf'], group).toMatch(new RegExp(`^    ${group} = \\{$`, 'm'));
       for (const a of assignments) {
         expect(treeOnly['alz.tf'], `${group}/${a}`).toMatch(
-          new RegExp(`^        ${a} = \\{$`, 'm')
+          new RegExp(`^        "${a}" = \\{$`, 'm')
         );
       }
     }
     expect(treeOnly['alz.tf']).not.toContain('policy_assignments_dependencies');
     expect(treeOnly['alz.tf']).not.toContain('module.management');
+    // Every hyphenated key is quoted; every plain-identifier key is bare.
+    expect(treeOnly['alz.tf']).not.toMatch(/^\s+[A-Za-z0-9_]*-[A-Za-z0-9_-]*\s+=/m);
+    expect((treeOnly['alz.tf'].match(/^\s+"[^"]+" = \{$/gm) ?? []).length).toBe(baselineCount);
+    expect(treeOnly['alz.tf']).not.toMatch(/^\s+"[a-z_0-9]+" = /m);
     expect(treeOnly['alz.tf']).toMatch(/policy_default_values = \{\n    resource_group_location/);
     for (const name of [
       'resource_group_location',

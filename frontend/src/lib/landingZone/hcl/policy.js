@@ -26,7 +26,7 @@
  * denies or remediates anything.
  */
 import { isSelected } from '../state';
-import { jsonValue, list, obj, q } from './format';
+import { jsonValue, key, list, obj, q } from './format';
 
 const DCR = 'Microsoft.Insights/dataCollectionRules';
 
@@ -255,11 +255,11 @@ function missingSourceAssignments(sources) {
 function notEnforced(byGroup) {
   return obj(
     [...byGroup.entries()].map(([group, assignments]) => [
-      group,
+      key(group),
       obj([
         [
           'policy_assignments',
-          obj(assignments.map((a) => [a, obj([['enforcement_mode', q('DoNotEnforce')]])])),
+          obj(assignments.map((a) => [key(a), obj([['enforcement_mode', q('DoNotEnforce')]])])),
         ],
       ]),
     ])
@@ -310,6 +310,9 @@ export function policyItems(state) {
       ]
     );
   }
-  items.push(['policy_default_values', obj(supplied.map((d) => [d.name, jsonValue(d.value)]))]);
+  items.push([
+    'policy_default_values',
+    obj(supplied.map((d) => [key(d.name), jsonValue(d.value)])),
+  ]);
   return items;
 }

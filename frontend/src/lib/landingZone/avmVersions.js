@@ -68,6 +68,12 @@ export function isAvmSource(source) {
  * module wants terraform ~> 1.12 and azapi ~> 2.12; management wants
  * azurerm ~> 4.35 and random ~> 3.6; the virtual network module wants
  * azapi ~> 2.12 and random ~> 3.5.
+ *
+ * The alz line is avm-ptn-alz 0.21.0's own (`terraform.tf`, tag v0.21.0):
+ * `~> 0.21` is Terraform's pessimistic constraint on a two-part version,
+ * so it means `>= 0.21, < 1.0`, not 0.21.x. The lab image's mirror
+ * (lab-image/versions.env, PROVIDER_ALZ_VERSION=0.22.0) satisfies it, as
+ * do its azapi 2.12.0, azurerm 4.81.0 and random 3.9.1.
  */
 export const TERRAFORM_REQUIRED_VERSION = '>= 1.12, < 2.0';
 
