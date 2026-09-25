@@ -19,6 +19,53 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **hcw-lab image Phase 2: transitive AVM vendoring, source rewrite, job
+  labels, helm-template and kubeconform capabilities (#675).** Phase 2 of
+  #658. All three vendored AVM pattern modules now `terraform init` under
+  `--network none`: `lab-image/vendor-avm.sh` runs `terraform get` on each
+  at build time, vendors every registry child once at
+  `/opt/avm/<name>@<version>` (sixteen `name@version` pairs across fourteen
+  modules), rewrites each `module` block inside the vendored copies to the
+  child's relative path with its `version` commented out, pins every child
+  by tree hash in `versions.env` (`AVM_CHILD_MODULES`; the build fails on a
+  mismatch, an unpinned child or an unused pin) and proves with a second
+  `terraform get` that nothing reaches the registry. The provider mirror is
+  now unpacked, so `init` symlinks providers instead of extracting 225 MB of
+  azurerm onto the job's 64 MB tmpfs, and `TMPDIR=/tmp/run`, because a
+  provider opens its socket in `TMPDIR` and every one died silently on the
+  read-only root; both were measured under the agent's exact sandbox flags,
+  where the Phase 1 image could not validate any azurerm configuration at
+  all. The `terraform-validate` capability now runs
+  `lab-image/bin/hcw-terraform-validate`, which copies the payload to the
+  tmpfs and rewrites `source = "Azure/<module>/azurerm"` blocks whose
+  version constraint a vendored copy satisfies (Terraform's own operators,
+  highest match wins) to that copy, leaving everything else untouched so
+  `init` fails loudly; the learner's files are never changed (ADR 0032,
+  decision 5). Jobs may carry `payloadEncoding: "tar"` (base64 of a tar,
+  gzip accepted) for multi-file inputs: the agent unpacks it with its own
+  parser, which accepts regular files and directories only and refuses
+  absolute paths, `..`, symlinks, hard links and every extension header,
+  under the unchanged 64 KB cap; the server validates the encoding per type
+  and the claim response carries it. Every job container carries
+  `--label hcw.lab-job=<jobId>`, asserted in `docker-runner.test.js`, and a
+  job with no plain identifier does not start. Two capabilities join in all
+  three places (`capabilities.js`, `LAB_JOB_TYPES`, `FALLBACK_JOB_TYPES`,
+  now held together by `scripts/lab-job-types.test.mjs`): `helm-template`
+  (`helm template` on a tar of one chart) and `kubeconform` (`-strict`
+  against one pinned release of `yannh/kubernetes-json-schema` bundled at
+  `/opt/kubeconform/schemas`, no API server). The tmpfs is mounted
+  `uid=65534,gid=65534,mode=0700`, because Docker mounts it root-owned and
+  the bare Phase 1 flag gave `Permission denied` on the first write.
+  `lab-image/sandbox-check.mjs` runs the five jobs through the agent's own
+  `docker-runner.js` under the full sandbox against the built image, in the
+  publish workflow after the smoke tests. The `full` target gives uid 65534
+  `/bin/bash` and `/tmp/home` in `/etc/passwd`, because Coder runs the
+  startup script, code-server and the terminal through the passwd shell
+  (#693). The pull and run commands for the toolchain, PowerShell and bash,
+  are in `lab-image/README.md` and `docs/architecture/labs-host.md` for
+  `/education/labs` (#681) to link. `IMAGES.hcwLabRunner` pins the Phase 1
+  publish; the digest that carries this phase's image is bumped in a
+  follow-up once `main` republishes.
 - **The lab host is configured by Ansible, not by hand over SSH (#662).**
   Phase 2 of #656. `lab-host/ansible/` holds `site.yml` and five roles that
   replace the manual steps the admin Labs page's Setup tab has printed since
