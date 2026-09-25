@@ -211,6 +211,7 @@ export const staticRoutes = {
   migration: '/tools/migration',
   resources: '/tools/resources',
   decisions: '/tools/decisions',
+  landingZone: '/tools/landing-zone',
 } as const;
 
 /**

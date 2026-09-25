@@ -206,6 +206,7 @@ export default function Header() {
     { label: 'Decision Matrix', path: staticRoutes.decisions },
     { label: 'Pricing Comparison', path: staticRoutes.comparison },
     { label: 'Migration Hub', path: staticRoutes.migration },
+    { label: 'Landing Zone Builder', path: staticRoutes.landingZone },
     ...(currentProvider === 'finops'
       ? [{ label: 'FinOps Tools', path: routes.tools('finops') }]
       : []),
