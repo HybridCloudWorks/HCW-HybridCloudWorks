@@ -99,7 +99,23 @@ describe('claimLabJob', () => {
     const body = parse(res);
     expect(body.job.id).toBe('older');
     // Not the whole document: no _etag, no internal status, no agentId.
-    expect(Object.keys(body.job).sort()).toEqual(['id', 'payload', 'type']);
+    expect(Object.keys(body.job).sort()).toEqual(['id', 'payload', 'payloadEncoding', 'type']);
+    // A document from before #675 carries no encoding and is text.
+    expect(body.job.payloadEncoding).toBe('text');
+  });
+
+  it('passes a tar payload encoding through to the agent, and nothing else', async () => {
+    const store = emptyStore();
+    store.queryDocs = vi.fn(async () => [
+      job({ id: 'chart', payloadEncoding: 'tar', payload: 'AAAA' }),
+    ]);
+    const h = make(allowGuard(), store);
+    const body = parse(await h.claimLabJob(req({ agentId: 'vps-1' }), context));
+    expect(body.job.payloadEncoding).toBe('tar');
+
+    store.queryDocs = vi.fn(async () => [job({ id: 'odd', payloadEncoding: 'zip' })]);
+    const odd = parse(await make(allowGuard(), store).claimLabJob(req({ agentId: 'vps-1' }), context));
+    expect(odd.job.payloadEncoding).toBe('text');
   });
 
   it('scopes the query to the registry capabilities, not the request', async () => {

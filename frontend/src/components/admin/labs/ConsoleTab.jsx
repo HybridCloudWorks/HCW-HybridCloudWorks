@@ -195,7 +195,15 @@ function ConsoleTab({ jobTypes }) {
   const handleSubmit = async () => {
     setSubmitting(true);
     try {
-      const res = await postJSON('enqueueLabJob', { type: effectiveType, payload });
+      // The textarea holds text; a type that accepts only `tar` (helm-template)
+      // takes the base64 of the archive pasted there, and says so in its hint.
+      const encodings = jobTypes.find((jt) => jt.type === effectiveType)?.payloadEncodings;
+      const payloadEncoding = !encodings || encodings.includes('text') ? 'text' : encodings[0];
+      const res = await postJSON('enqueueLabJob', {
+        type: effectiveType,
+        payload,
+        payloadEncoding,
+      });
       setActiveJobId(res.jobId);
       toast({ title: 'Job queued', description: `${type} → ${res.jobId}` });
     } catch (err) {

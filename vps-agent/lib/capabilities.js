@@ -125,4 +125,29 @@ export const CAPABILITIES = {
     payloadEncodings: ['text'],
     timeoutSeconds: 60,
   },
+
+  // Renders a Helm chart with `helm template`: no repository, no cluster.
+  // The payload is a tar of one chart directory (Chart.yaml at the top or
+  // one level down); dependencies must already be under charts/, since
+  // there is no network to fetch them.
+  'helm-template': {
+    image: IMAGES.hcwLabRunner,
+    buildCommand: () => ['hcw-helm-template'],
+    payloadEncodings: ['tar'],
+    timeoutSeconds: 60,
+    extraDockerArgs: RUN_TMPFS,
+  },
+
+  // Validates Kubernetes manifests against the JSON schemas bundled in the
+  // image (one pinned release of yannh/kubernetes-json-schema), strict, with
+  // no API server: `kubectl --dry-run` in either mode reaches a cluster and
+  // is deliberately not a capability. A `text` payload is one manifest
+  // file; a `tar` payload is a directory tree kubeconform walks.
+  kubeconform: {
+    image: IMAGES.hcwLabRunner,
+    buildCommand: () => ['hcw-kubeconform'],
+    payloadFileName: 'manifests.yaml',
+    payloadEncodings: ['text', 'tar'],
+    timeoutSeconds: 60,
+  },
 };

@@ -29,19 +29,50 @@ const json = (status, body) => ({
   body: JSON.stringify(body),
 });
 
-/** Verbatim — must stay in sync with vps-agent capability config. */
+/**
+ * Payload encodings a job may carry (#675). `text` is the payload as one
+ * file; `tar` is the base64 of a tar archive (optionally gzipped) that the
+ * agent unpacks into the job's workspace for multi-file inputs such as a
+ * Helm chart or a Terraform root. The byte cap applies to the encoded string
+ * either way, so a `tar` payload is bounded at the same 64 KB as before.
+ */
+export const PAYLOAD_ENCODINGS = Object.freeze(['text', 'tar']);
+
+/**
+ * Verbatim — must stay in sync with vps-agent/lib/capabilities.js
+ * (CAPABILITIES) and frontend/src/components/admin/labs/labsView.js
+ * (FALLBACK_JOB_TYPES). `payloadEncodings` lists what the agent's capability
+ * accepts; enqueue refuses anything else so a mismatch fails here, not on
+ * the host.
+ */
 export const LAB_JOB_TYPES = Object.freeze({
   'shell-echo': {
     description: 'Smoke test — echoes the payload back from the sandbox.',
     maxPayloadBytes: 4 * 1024,
+    payloadEncodings: ['text'],
   },
   'terraform-validate': {
-    description: 'Runs `terraform init -backend=false && terraform validate` on the payload HCL.',
+    description:
+      'Runs `terraform init -backend=false && terraform validate` on the payload HCL, with registry AVM sources rewritten to the vendored copies in the runner image. Text is one main.tf; tar is a whole root.',
     maxPayloadBytes: 64 * 1024,
+    payloadEncodings: ['text', 'tar'],
   },
   'ansible-check': {
     description: 'Runs `ansible-playbook --syntax-check` on the payload playbook YAML.',
     maxPayloadBytes: 64 * 1024,
+    payloadEncodings: ['text'],
+  },
+  'helm-template': {
+    description:
+      'Runs `helm template` on a chart: the payload is the base64 of a tar of one chart directory, dependencies already under charts/. No repository, no cluster.',
+    maxPayloadBytes: 64 * 1024,
+    payloadEncodings: ['tar'],
+  },
+  kubeconform: {
+    description:
+      'Validates Kubernetes manifests with kubeconform -strict against the schemas bundled in the runner image. Text is one manifest file; tar is a directory of them.',
+    maxPayloadBytes: 64 * 1024,
+    payloadEncodings: ['text', 'tar'],
   },
 });
 
@@ -80,7 +111,7 @@ export function createLabHandlers({ guard, store, now = () => new Date(), uuid =
 
       try {
         const body = (await request.json().catch(() => null)) || {};
-        const { type, payload = '' } = body;
+        const { type, payload = '', payloadEncoding = 'text' } = body;
         const spec = LAB_JOB_TYPES[type];
         if (!spec) {
           return json(400, {
@@ -89,6 +120,14 @@ export function createLabHandlers({ guard, store, now = () => new Date(), uuid =
         }
         if (typeof payload !== 'string') {
           return json(400, { error: 'payload must be a string' });
+        }
+        if (!spec.payloadEncodings.includes(payloadEncoding)) {
+          return json(400, {
+            error: `payloadEncoding must be one of ${spec.payloadEncodings.join(', ')} for ${type}`,
+          });
+        }
+        if (payloadEncoding === 'tar' && !/^[A-Za-z0-9+/=\s]*$/.test(payload)) {
+          return json(400, { error: 'a tar payload must be base64' });
         }
         const payloadBytes = Buffer.byteLength(payload, 'utf8');
         if (payloadBytes > spec.maxPayloadBytes) {
@@ -102,6 +141,7 @@ export function createLabHandlers({ guard, store, now = () => new Date(), uuid =
           id: jobId,
           type,
           payload,
+          payloadEncoding,
           status: 'queued',
           requestedBy: user.oid ?? user.sub,
           requestedByEmail: user.email || user.preferred_username || null,
@@ -220,6 +260,7 @@ export function createLabHandlers({ guard, store, now = () => new Date(), uuid =
             type,
             description: spec.description,
             maxPayloadBytes: spec.maxPayloadBytes,
+            payloadEncodings: spec.payloadEncodings,
           })),
           statuses: JOB_STATUSES,
           generatedAt: now().toISOString(),

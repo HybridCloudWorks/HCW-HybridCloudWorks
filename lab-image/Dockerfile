@@ -28,11 +28,31 @@
 FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 AS fetch
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl unzip \
+ && apt-get install -y --no-install-recommends ca-certificates curl unzip git \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
 COPY versions.env /build/versions.env
+
+# Kubernetes JSON schemas for kubeconform (#675): one directory of
+# yannh/kubernetes-json-schema at a pinned commit, fetched as a sparse,
+# blobless checkout (the repository holds every Kubernetes release and is
+# far too large to take whole), then hashed with the same pipeline
+# versions.env documents for the vendored modules and compared with the pin.
+RUN set -eu; . /build/versions.env; \
+    mkdir -p /build/schemas /out/kubeconform/schemas; \
+    cd /build/schemas; \
+    git init -q; \
+    git remote add origin https://github.com/yannh/kubernetes-json-schema.git; \
+    git config core.sparseCheckout true; \
+    git sparse-checkout set --no-cone "/${KUBERNETES_JSON_SCHEMA_DIR}/"; \
+    git fetch -q --depth 1 --filter=blob:none origin "${KUBERNETES_JSON_SCHEMA_COMMIT}"; \
+    git checkout -q FETCH_HEAD; \
+    actual="$(cd "${KUBERNETES_JSON_SCHEMA_DIR}" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)"; \
+    echo "kubernetes-json-schema ${KUBERNETES_JSON_SCHEMA_DIR}: ${actual}"; \
+    test "${actual}" = "${KUBERNETES_JSON_SCHEMA_SHA256}"; \
+    mv "${KUBERNETES_JSON_SCHEMA_DIR}" "/out/kubeconform/schemas/${KUBERNETES_JSON_SCHEMA_DIR}"; \
+    cd /build && rm -rf /build/schemas
 
 # Tool binaries. `sha256sum -c` exits non-zero on a mismatch, and `set -e`
 # turns that into a failed build rather than an unverified binary.
@@ -206,6 +226,7 @@ COPY --from=fetch /out/bin/ /usr/local/bin/
 # where smoke.sh exercises it against a payload with no network.
 COPY --chmod=0755 bin/ /usr/local/bin/
 COPY --from=vendor /out/avm/ /opt/avm/
+COPY --from=fetch /out/kubeconform/ /opt/kubeconform/
 COPY --from=mirror /out/mirror/ /opt/terraform/mirror/
 COPY --from=fetch /out/wheels/ /tmp/wheels/
 

@@ -9,18 +9,39 @@ import { isAgentOnline, toMillis } from '@/lib/labsPolling';
 
 export const CLOCK_TICK_MS = 5000;
 
-// Fallback mirror of LAB_JOB_TYPES in functions/labs-functions.js. The Console
+// Fallback mirror of LAB_JOB_TYPES in functions/src/lib/labs.js. The Console
 // prefers the live list returned by getLabsSnapshot; this keeps the select
 // usable if that call fails. The server re-validates on enqueue either way.
+// Mirrors LAB_JOB_TYPES in functions/src/lib/labs.js and CAPABILITIES in
+// vps-agent/lib/capabilities.js: a job type lands in all three or not at all.
 export const FALLBACK_JOB_TYPES = [
-  { type: 'shell-echo', description: 'Smoke test — echoes the payload back from the sandbox.' },
+  {
+    type: 'shell-echo',
+    description: 'Smoke test — echoes the payload back from the sandbox.',
+    payloadEncodings: ['text'],
+  },
   {
     type: 'terraform-validate',
-    description: 'terraform init -backend=false && terraform validate on the payload HCL.',
+    description:
+      'terraform init -backend=false && terraform validate on the payload HCL, with registry AVM sources rewritten to the vendored copies in the runner image. Text is one main.tf; tar is a whole root.',
+    payloadEncodings: ['text', 'tar'],
   },
   {
     type: 'ansible-check',
     description: 'ansible-playbook --syntax-check on the payload playbook YAML.',
+    payloadEncodings: ['text'],
+  },
+  {
+    type: 'helm-template',
+    description:
+      'helm template on a chart: the payload is the base64 of a tar of one chart directory, dependencies already under charts/. No repository, no cluster.',
+    payloadEncodings: ['tar'],
+  },
+  {
+    type: 'kubeconform',
+    description:
+      'kubeconform -strict on Kubernetes manifests against the schemas bundled in the runner image. Text is one manifest file; tar is a directory of them.',
+    payloadEncodings: ['text', 'tar'],
   },
 ];
 
@@ -59,6 +80,8 @@ export function formatTime(ts) {
 export const PAYLOAD_PLACEHOLDERS = {
   'terraform-validate': '# main.tf contents…',
   'ansible-check': '# playbook.yml contents…',
+  'helm-template': 'base64 of a tar of the chart directory (tar -cz mychart | base64)…',
+  kubeconform: '# manifests.yaml contents…',
 };
 
 /**

@@ -1,0 +1,33 @@
+# A manifest hcw-kubeconform must accept under -strict with no network:
+# every field below is in the bundled apps/v1 Deployment schema.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smoke
+  labels:
+    app: smoke
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: smoke
+  template:
+    metadata:
+      labels:
+        app: smoke
+    spec:
+      containers:
+        - name: smoke
+          image: ghcr.io/hybridcloudworks/hcw-lab:latest
+          command: ["terraform", "version"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: smoke
+spec:
+  selector:
+    app: smoke
+  ports:
+    - port: 80
+      targetPort: 8080

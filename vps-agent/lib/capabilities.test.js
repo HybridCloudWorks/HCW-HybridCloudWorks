@@ -97,6 +97,8 @@ describe('capability allowlist', () => {
     // and nothing else, so what the job does is versioned with the image.
     const expected = {
       'terraform-validate': ['hcw-terraform-validate'],
+      'helm-template': ['hcw-helm-template'],
+      kubeconform: ['hcw-kubeconform'],
     };
     for (const [type, argv] of Object.entries(expected)) {
       assert.equal(CAPABILITIES[type].image, IMAGES.hcwLabRunner, `${type} is not on the runner image`);
@@ -108,7 +110,7 @@ describe('capability allowlist', () => {
     // Docker mounts a tmpfs root-owned; the container runs as 65534. Measured
     // on Docker 29.8: without uid/gid the first write is Permission denied.
     assert.deepEqual(RUN_TMPFS, ['--tmpfs', '/tmp/run:rw,size=64m,uid=65534,gid=65534,mode=0700']);
-    for (const type of ['terraform-validate']) {
+    for (const type of ['terraform-validate', 'helm-template']) {
       assert.deepEqual(CAPABILITIES[type].extraDockerArgs, RUN_TMPFS, `${type} has no writable scratch`);
     }
   });

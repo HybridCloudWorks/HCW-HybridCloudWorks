@@ -201,6 +201,43 @@ avm_root avm-ptn-alz-management avm-ptn-alz-management "${AVM_PTN_ALZ_MANAGEMENT
   'automation_account_name = "aa-alz-management"'
 avm_root avm-ptn-alz-connectivity-hub-and-spoke-vnet avm-ptn-alz-connectivity-hub-and-spoke-vnet "${AVM_PTN_ALZ_CONNECTIVITY_HUB_AND_SPOKE_VNET_VERSION}"
 
+# The three capability commands (bin/), each against the payload it would
+# receive from the agent, with HCW_WORKSPACE pointing at the fixture instead
+# of /workspace (which is this directory) and HCW_RUN_DIR under /tmp/run.
+step "capability commands with no network"
+tfv="$work/terraform-validate"
+if out="$(HCW_WORKSPACE="$here/smoke/terraform-validate-payload" HCW_RUN_DIR="$tfv" hcw-terraform-validate 2>&1)"; then
+  if grep -q 'Success! The configuration is valid.' <<<"$out" && [ "$(grep -c '^  rewrote ' <<<"$out")" -eq 3 ]; then
+    ok "hcw-terraform-validate rewrote 3 registry sources and validated the builder-shaped payload"
+    grep '^  rewrote ' <<<"$out" | indent
+  else
+    bad "hcw-terraform-validate exited 0 but did not report 3 rewrites and a valid configuration:"; printf '%s\n' "$out" | indent
+  fi
+else
+  bad "hcw-terraform-validate (builder-shaped payload):"; printf '%s\n' "$out" | indent
+fi
+if out="$(HCW_WORKSPACE="$here/smoke/helm-payload" hcw-helm-template 2>&1)"; then
+  if grep -q '^kind: Deployment' <<<"$out" && grep -q 'name: hcw-hcw-smoke' <<<"$out"; then
+    ok "hcw-helm-template rendered smoke/helm-payload/hcw-smoke"
+  else
+    bad "hcw-helm-template exited 0 without the expected Deployment:"; printf '%s\n' "$out" | indent
+  fi
+else
+  bad "hcw-helm-template:"; printf '%s\n' "$out" | indent
+fi
+if out="$(HCW_WORKSPACE="$here/smoke/kubeconform-payload/valid" hcw-kubeconform 2>&1)"; then
+  if grep -q 'Valid: 2, Invalid: 0, Errors: 0' <<<"$out"; then ok "hcw-kubeconform accepts the valid manifests"; else bad "hcw-kubeconform summary unexpected:"; printf '%s\n' "$out" | indent; fi
+else
+  bad "hcw-kubeconform (valid):"; printf '%s\n' "$out" | indent
+fi
+if out="$(HCW_WORKSPACE="$here/smoke/kubeconform-payload/invalid" hcw-kubeconform 2>&1)"; then
+  bad "hcw-kubeconform accepted an invalid manifest:"; printf '%s\n' "$out" | indent
+else
+  if grep -q "'replicaz' not allowed" <<<"$out"; then ok "hcw-kubeconform rejects the unknown field under -strict"; else bad "hcw-kubeconform failed for another reason:"; printf '%s\n' "$out" | indent; fi
+fi
+schemas="$(find /opt/kubeconform/schemas -mindepth 1 -maxdepth 1 -type d -name "${KUBERNETES_JSON_SCHEMA_DIR}" | wc -l)"
+if [ "$schemas" -eq 1 ]; then ok "/opt/kubeconform/schemas/${KUBERNETES_JSON_SCHEMA_DIR}"; else bad "/opt/kubeconform/schemas/${KUBERNETES_JSON_SCHEMA_DIR} is missing"; fi
+
 if [ "$target" = full ]; then
   step "full tools"
   expect_version az      "\"azure-cli\": \"${AZURE_CLI_VERSION%%-*}\"" az version --output json

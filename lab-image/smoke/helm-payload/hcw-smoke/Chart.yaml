@@ -1,0 +1,6 @@
+apiVersion: v2
+name: hcw-smoke
+description: The chart smoke.sh renders with hcw-helm-template and no network. No dependencies, by design.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
