@@ -45,8 +45,9 @@ This project has not cut a tagged release; entries are grouped under
   request carries the Terraform diff a learner would download and a drifted
   input name fails in the run rather than on the PR. The branch stages exactly
   the pins, the versions file and the snapshot, asserted by
-  `scripts/avm-versions-workflow.test.mjs`; the comparison and text edits are
-  unit-tested beside the script; `index.test.js` now asserts `AVM_VERIFIED_ON`
+  `scripts/avm-versions-workflow.test.mjs`; the comparison, validation, text
+  edits and summary are the pure half in `frontend/scripts/avm-versions-edits.mjs`
+  and are unit-tested beside the script; `index.test.js` now asserts `AVM_VERIFIED_ON`
   is a calendar date no earlier than 2026-09-25 instead of naming the day.
 - **The lab host is configured by Ansible, not by hand over SSH (#662).**
   Phase 2 of #656. `lab-host/ansible/` holds `site.yml` and five roles that

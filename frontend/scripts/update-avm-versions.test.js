@@ -21,6 +21,8 @@ import {
   parseVersion,
   providerDrift,
   providersAt,
+  registryModuleUrl,
+  registryVersionsUrl,
   releaseNotesUrl,
   rewriteEnv,
   rewritePin,
@@ -305,13 +307,17 @@ describe('checkModules and applyChanges, with the registry and GitHub stubbed', 
     arrayBuffer: async () => new TextEncoder().encode(text).buffer,
   });
 
+  const notFound = { ok: false, status: 404, json: async () => ({}), text: async () => '' };
+
   /** avm-ptn-alz moved and gained a provider; the other two are current. */
-  const fetchImpl = async (url) => {
-    if (url.endsWith('/Azure/avm-ptn-alz/azurerm')) {
-      return json({ version: '0.22.0', tag: 'v0.22.0', published_at: '2026-10-01T09:00:00Z' });
-    }
-    if (url.endsWith('/Azure/avm-ptn-alz/azurerm/versions')) {
-      return json({
+  const responses = new Map([
+    [
+      registryModuleUrl('avm-ptn-alz'),
+      json({ version: '0.22.0', tag: 'v0.22.0', published_at: '2026-10-01T09:00:00Z' }),
+    ],
+    [
+      registryVersionsUrl('avm-ptn-alz'),
+      json({
         modules: [
           {
             versions: [
@@ -327,17 +333,16 @@ describe('checkModules and applyChanges, with the registry and GitHub stubbed', 
             ],
           },
         ],
-      });
-    }
-    if (url.endsWith('/Azure/avm-ptn-alz-management/azurerm')) {
-      return json({ version: '0.9.0', tag: 'v0.9.0' });
-    }
-    if (url.endsWith('/Azure/avm-ptn-alz-connectivity-hub-and-spoke-vnet/azurerm')) {
-      return json({ version: '0.17.5', tag: 'v0.17.5' });
-    }
-    if (url === tarballUrl('avm-ptn-alz', '0.22.0')) return bytes('abc');
-    return { ok: false, status: 404, json: async () => ({}), text: async () => '' };
-  };
+      }),
+    ],
+    [registryModuleUrl('avm-ptn-alz-management'), json({ version: '0.9.0', tag: 'v0.9.0' })],
+    [
+      registryModuleUrl('avm-ptn-alz-connectivity-hub-and-spoke-vnet'),
+      json({ version: '0.17.5', tag: 'v0.17.5' }),
+    ],
+    [tarballUrl('avm-ptn-alz', '0.22.0'), bytes('abc')],
+  ]);
+  const fetchImpl = async (url) => responses.get(url) ?? notFound;
 
   it('reports one result per module and marks only the one that moved', async () => {
     const results = await checkModules({ modules, fetchImpl });
