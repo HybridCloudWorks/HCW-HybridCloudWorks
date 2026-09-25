@@ -19,6 +19,48 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Landing Zone Builder, Phase 2: the page at `/tools/landing-zone` (#668).**
+  Phase 2 of #657, on the pure module #667 landed. `frontend/src/pages/tools/
+  LandingZonePage.jsx` is where a learner assembles an Azure landing zone
+  component by component: a build panel (`landingZone/LzControls.jsx`) with a
+  checkbox per component, grouped platform and application, a count of 0 to 5
+  for corp and online landing zones, and one knob per option (region, parent
+  management group, hub and spoke address spaces, private DNS zones, firewall
+  SKU); a teaches panel (`LzTeaches.jsx`) that follows whichever component was
+  last ticked, clicked in the diagram or asked about, with its hand-written
+  explanation, what it needs, the pinned module that deploys it and its knobs;
+  an inline SVG of the management group tree (`LzDiagram.jsx`) drawn from
+  `layoutDiagram`, every box a button that focuses its component, with zoom
+  and pan from the `react-zoom-pan-pinch` the site already shipped; and the
+  generated Terraform (`LzFiles.jsx`), one tab per emitted file rendered with
+  the site's `CodeBlock`, plus a Download zip button.
+
+  **The build is the URL.** `useLzState.js` is `useScenarioState.js` adapted
+  to `share.js`: every control writes `?lz=` and the option keys and reads
+  itself back, so a bare URL is the full default build, a shared link
+  reproduces a build exactly, and the pre-rendered page and the first client
+  render agree; a test renders the page to a string twice and hydrates the
+  result without a mismatch. The dependency rule is spoken, not just enforced:
+  a component says "Ticking it also adds Connectivity hub" before it is
+  ticked and "Unticking it also removes Azure Firewall" after, and a spoke
+  range the state moved off the hub is explained in a sentence, kept on the
+  page even once the URL carries only the moved value. An invalid range is
+  refused in the validator's own words and never reaches the URL.
+
+  **The zip holds exactly the files the tabs show.** `fflate` is the one new
+  dependency, imported inside the click handler so it is a lazy chunk a
+  reader who never downloads never fetches and the pre-render never
+  evaluates; the test mocks it and asserts the entry names equal the tab
+  names and each entry's bytes equal the file's content. Wiring, each held by
+  an existing test or the new one: the `lazyPage` route in `App.jsx`, the
+  standalone list in `scripts/prerender-entry.jsx`, `staticRoutes.landingZone`,
+  a Tools menu entry in `Header.jsx`, and a first card on `/terraform/tools`
+  that opens the page. The Azure education page has no tools list, so it got
+  no cross-link. The three placeholder tool slots are untouched. Helmet sets
+  the title and the canonical; the default build renders the management
+  groups' teaches text and a dozen file tabs, well past the prerender's
+  420-character floor.
+
 - **The lab host is configured by Ansible, not by hand over SSH (#662).**
   Phase 2 of #656. `lab-host/ansible/` holds `site.yml` and five roles that
   replace the manual steps the admin Labs page's Setup tab has printed since
