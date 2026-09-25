@@ -566,8 +566,12 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # anyway: the pair is then seeded through the one procedure and
     # monitor-unresolved-secrets.yml watches both. Until they resolve, the
     # route answers { configured: false } and the card reads "not yet
-    # provisioned". Seed the two secrets BEFORE the run that applies this
-    # (Required-Inputs §4.7) so the monitor never sees them unresolved.
+    # provisioned". CODER-URL is seeded as soon as this applies: its value
+    # is known. CODER-STATUS-TOKEN cannot be: Coder issues it, so it exists
+    # only after Coder runs on the lab host (#661) and the owner creates it
+    # (#682). Until then it is listed in EXPECTED_UNRESOLVED in
+    # scripts/check-unresolved-secrets.mjs, reported every run but not as a
+    # failure; remove it from that list in the PR after it is seeded.
     "CODER_URL"          = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/CODER-URL)"
     "CODER_STATUS_TOKEN" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/CODER-STATUS-TOKEN)"
     # Community edition's concurrency cap, the denominator on the card. Not a
