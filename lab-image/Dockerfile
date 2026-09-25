@@ -200,6 +200,11 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=fetch /out/bin/ /usr/local/bin/
+# The fixed commands behind the vps-agent capabilities that run in this image
+# (hcw-terraform-validate, hcw-helm-template, hcw-kubeconform): each is one
+# argv entry in vps-agent/lib/capabilities.js, and what it does lives here,
+# where smoke.sh exercises it against a payload with no network.
+COPY --chmod=0755 bin/ /usr/local/bin/
 COPY --from=vendor /out/avm/ /opt/avm/
 COPY --from=mirror /out/mirror/ /opt/terraform/mirror/
 COPY --from=fetch /out/wheels/ /tmp/wheels/

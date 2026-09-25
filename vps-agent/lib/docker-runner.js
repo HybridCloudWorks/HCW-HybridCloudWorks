@@ -14,6 +14,18 @@
  * The payload is written to a per-job temp dir on the host and mounted
  * read-only at /workspace. Commands come ONLY from the capability
  * allowlist (argv arrays — never shell-interpolated user strings).
+ *
+ * Two payload encodings (#675). `text` is the original: the payload string is
+ * written as one file named by the capability. `tar` is for multi-file
+ * inputs (a Helm chart, a Terraform root with several files): the payload is
+ * the base64 of a tar archive, optionally gzipped, which `prepareJobDir`
+ * unpacks into the job directory with the parser in this file. The parser is
+ * deliberately not a dependency and not the host's `tar`: it accepts regular
+ * files and directories only, refuses absolute paths, `..` segments,
+ * symlinks, hard links and every extension header, and bounds the entry
+ * count and the unpacked size, because the archive is untrusted input that
+ * reached this host from the API and the job directory is the one place on
+ * the host it may touch.
  */
 
 import { spawn } from 'node:child_process';
@@ -21,8 +33,16 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import zlib from 'node:zlib';
 
 export const OUTPUT_CAP_BYTES = 64 * 1024;
+
+/** Payload encodings the runner understands; a capability lists the ones it accepts. */
+export const PAYLOAD_ENCODINGS = Object.freeze(['text', 'tar']);
+
+/** Bounds on an unpacked `tar` payload. The API caps the encoded payload at 64 KB. */
+export const TAR_MAX_ENTRIES = 512;
+export const TAR_MAX_BYTES = 8 * 1024 * 1024;
 
 function runProcess(cmd, args, timeoutMs) {
   return new Promise((resolve) => {
@@ -96,6 +116,11 @@ const RESERVED_FLAGS = new Set([
   '--mount',
 ]);
 
+/** The in-container path handed to `buildCommand` for each encoding. */
+export function payloadPathFor(capability, encoding) {
+  return encoding === 'tar' ? '/workspace' : `/workspace/${capability.payloadFileName}`;
+}
+
 /**
  * Build the full `docker` argv for one job.
  *
@@ -104,11 +129,11 @@ const RESERVED_FLAGS = new Set([
  * intact — an edit dropping `--network none` shipped green.
  *
  * @param {object} capability entry from lib/capabilities.js
- * @param {object} ctx        { jobDir, containerName }
+ * @param {object} ctx        { jobDir, containerName, jobId, encoding }
  * @param {object} limits     { memory, cpus, pidsLimit }
  * @returns {string[]} argv after the `docker` executable itself
  */
-export function buildDockerArgs(capability, { jobDir, containerName }, limits) {
+export function buildDockerArgs(capability, { jobDir, containerName, jobId, encoding = 'text' }, limits) {
   const extra = capability.extraDockerArgs || [];
   const reserved = extra.filter((arg) => RESERVED_FLAGS.has(arg));
   if (reserved.length > 0) {
@@ -132,7 +157,7 @@ export function buildDockerArgs(capability, { jobDir, containerName }, limits) {
     '-v', `${jobDir}:/workspace:ro`,
     ...extra,
     capability.image,
-    ...capability.buildCommand(`/workspace/${capability.payloadFileName}`),
+    ...capability.buildCommand(payloadPathFor(capability, encoding)),
   ];
 }
 
@@ -149,33 +174,166 @@ export function buildDockerArgs(capability, { jobDir, containerName }, limits) {
 export const JOB_DIR_MODE = 0o755;
 export const PAYLOAD_MODE = 0o644;
 
+const readOctal = (buf, start, length) => {
+  const text = buf.toString('latin1', start, start + length).replace(/\0.*$/s, '').trim();
+  if (text === '') return 0;
+  if (!/^[0-7]+$/.test(text)) {
+    throw new Error('tar payload: a header field is not octal (base-256 sizes are not supported)');
+  }
+  return parseInt(text, 8);
+};
+
+const readString = (buf, start, length) =>
+  buf.toString('utf8', start, start + length).replace(/\0.*$/s, '');
+
+/**
+ * Normalise and vet one archive path. Returns the relative POSIX path, or
+ * throws. Anything that could name a location outside the job directory —
+ * an absolute path, a `..` segment, a backslash, a NUL — is refused outright
+ * rather than normalised away, because a payload that carries one is not a
+ * chart or a Terraform root, whatever else it is.
+ */
+export function vetTarPath(raw) {
+  if (typeof raw !== 'string' || raw.length === 0) throw new Error('tar payload: an entry has no name');
+  if (raw.includes('\0') || raw.includes('\\')) {
+    throw new Error(`tar payload: refusing entry with a NUL or backslash in its name`);
+  }
+  let p = raw;
+  while (p.startsWith('./')) p = p.slice(2);
+  p = p.replace(/\/+$/, '');
+  if (p === '' || p === '.') return '';
+  if (p.startsWith('/')) throw new Error(`tar payload: refusing absolute path ${JSON.stringify(raw)}`);
+  const segments = p.split('/');
+  if (segments.some((s) => s === '..' || s === '' || s === '.')) {
+    throw new Error(`tar payload: refusing path ${JSON.stringify(raw)}`);
+  }
+  return segments.join('/');
+}
+
+/**
+ * Parse a (ustar or GNU) tar buffer into regular files and directories.
+ * Every other entry type is an error: there is no legitimate reason for a
+ * lab payload to carry a symlink, a hard link, a device node, or a pax or
+ * GNU long-name extension, and each of those is a way to write somewhere
+ * other than the job directory or to smuggle a path past the check above.
+ *
+ * @returns {{ path: string, type: 'file'|'dir', data: Buffer }[]}
+ */
+export function parseTar(buf) {
+  const entries = [];
+  let offset = 0;
+  let total = 0;
+  while (offset + 512 <= buf.length) {
+    const header = buf.subarray(offset, offset + 512);
+    if (header.every((b) => b === 0)) break; // end-of-archive marker
+    const magic = header.toString('latin1', 257, 263);
+    const type = String.fromCharCode(header[156]);
+    const size = readOctal(header, 124, 12);
+    let name = readString(header, 0, 100);
+    if (magic === 'ustar\0') {
+      const prefix = readString(header, 345, 155);
+      if (prefix) name = `${prefix}/${name}`;
+    }
+    const dataStart = offset + 512;
+    const dataEnd = dataStart + size;
+    if (dataEnd > buf.length) throw new Error('tar payload: truncated archive');
+    offset = dataStart + Math.ceil(size / 512) * 512;
+
+    if (type !== '0' && type !== '\0' && type !== '5') {
+      throw new Error(
+        `tar payload: refusing entry ${JSON.stringify(name)} of type '${type === '\0' ? '\\0' : type}' (only regular files and directories are accepted)`
+      );
+    }
+    const vetted = vetTarPath(name);
+    if (vetted === '') continue; // the archive's own root, "./"
+    entries.push({
+      path: vetted,
+      type: type === '5' ? 'dir' : 'file',
+      data: type === '5' ? Buffer.alloc(0) : buf.subarray(dataStart, dataEnd),
+    });
+    total += size;
+    if (entries.length > TAR_MAX_ENTRIES) {
+      throw new Error(`tar payload: more than ${TAR_MAX_ENTRIES} entries`);
+    }
+    if (total > TAR_MAX_BYTES) {
+      throw new Error(`tar payload: unpacked size exceeds ${TAR_MAX_BYTES} bytes`);
+    }
+  }
+  return entries;
+}
+
+/** Decode a `tar` payload string: base64, then gunzip if it is gzipped. */
+export function decodeTarPayload(payload) {
+  if (typeof payload !== 'string' || !/^[A-Za-z0-9+/=\s]*$/.test(payload)) {
+    throw new Error('tar payload: expected base64');
+  }
+  let buf = Buffer.from(payload.replace(/\s+/g, ''), 'base64');
+  if (buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b) {
+    try {
+      buf = zlib.gunzipSync(buf, { maxOutputLength: TAR_MAX_BYTES });
+    } catch (err) {
+      throw new Error(`tar payload: gunzip failed (${err.code || err.message})`);
+    }
+  }
+  return buf;
+}
+
 /**
  * Create the per-job staging directory under os.tmpdir() and write the
  * payload into it, with modes the sandboxed container user can read.
- * Exported so the test can assert the modes without Docker.
- * @param {string} payloadFileName from the capability
+ * Exported so the test can assert the modes and the unpacking without Docker.
+ * @param {string} payloadFileName from the capability (used by `text`)
  * @param {string} payload         job payload string
+ * @param {'text'|'tar'} encoding  how to interpret the payload
  * @returns {Promise<string>} the job directory path
  */
-export async function prepareJobDir(payloadFileName, payload) {
+export async function prepareJobDir(payloadFileName, payload, encoding = 'text') {
   const jobDir = await fs.mkdtemp(path.join(os.tmpdir(), 'labjob-'));
   await fs.chmod(jobDir, JOB_DIR_MODE);
-  await fs.writeFile(path.join(jobDir, payloadFileName), payload, { encoding: 'utf8', mode: PAYLOAD_MODE });
+  try {
+    if (encoding === 'text') {
+      await fs.writeFile(path.join(jobDir, payloadFileName), payload, { encoding: 'utf8', mode: PAYLOAD_MODE });
+    } else if (encoding === 'tar') {
+      const root = path.resolve(jobDir);
+      for (const entry of parseTar(decodeTarPayload(payload))) {
+        const target = path.resolve(root, ...entry.path.split('/'));
+        if (!target.startsWith(root + path.sep)) {
+          throw new Error(`tar payload: ${JSON.stringify(entry.path)} resolves outside the job directory`);
+        }
+        if (entry.type === 'dir') {
+          await fs.mkdir(target, { recursive: true, mode: JOB_DIR_MODE });
+        } else {
+          await fs.mkdir(path.dirname(target), { recursive: true, mode: JOB_DIR_MODE });
+          await fs.writeFile(target, entry.data, { mode: PAYLOAD_MODE });
+        }
+      }
+    } else {
+      throw new Error(`unknown payload encoding ${JSON.stringify(encoding)}`);
+    }
+  } catch (err) {
+    await fs.rm(jobDir, { recursive: true, force: true }).catch(() => {});
+    throw err;
+  }
   return jobDir;
 }
 
 /**
  * Execute a job in a sandboxed container.
  * @param {object} capability entry from lib/capabilities.js
- * @param {string} payload   job payload string
- * @param {object} limits    { memory, cpus, pidsLimit } from env config
+ * @param {object} job        { id, payload, payloadEncoding? } as claimed from the API
+ * @param {object} limits     { memory, cpus, pidsLimit } from env config
  * @returns {Promise<{exitCode:number, output:string, timedOut:boolean}>}
  */
-export async function runInDocker(capability, payload, limits) {
-  const jobDir = await prepareJobDir(capability.payloadFileName, payload);
+export async function runInDocker(capability, job, limits) {
+  const encoding = job.payloadEncoding || 'text';
+  const accepted = capability.payloadEncodings || ['text'];
+  if (!PAYLOAD_ENCODINGS.includes(encoding) || !accepted.includes(encoding)) {
+    throw new Error(`payload encoding ${JSON.stringify(encoding)} is not accepted by this capability`);
+  }
+  const jobDir = await prepareJobDir(capability.payloadFileName, job.payload, encoding);
   const containerName = `labjob-${crypto.randomBytes(6).toString('hex')}`;
   try {
-    const dockerArgs = buildDockerArgs(capability, { jobDir, containerName }, limits);
+    const dockerArgs = buildDockerArgs(capability, { jobDir, containerName, jobId: job.id, encoding }, limits);
 
     const timeoutMs = (capability.timeoutSeconds + 15) * 1000; // grace for image pull/start
     const result = await runProcess('docker', dockerArgs, timeoutMs);

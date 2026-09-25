@@ -128,7 +128,10 @@ async function executeJob(job) {
   log(`running job ${job.id} (${job.type})`);
 
   try {
-    const result = await runInDocker(capability, job.payload, config.limits);
+    // The whole claimed job goes in: its id becomes the container's
+    // hcw.lab-job label and its payloadEncoding selects how the payload is
+    // staged (lib/docker-runner.js).
+    const result = await runInDocker(capability, job, config.limits);
     const status = result.timedOut ? 'timeout' : result.exitCode === 0 ? 'succeeded' : 'failed';
 
     await api.completeJob({

@@ -3,14 +3,17 @@
  *
  * Each capability maps a job `type` to a fixed Docker image + command
  * template. The job payload is NEVER interpolated into a shell string;
- * it is written to a file inside an isolated workspace directory which
- * is bind-mounted read-only into the container. The container command
- * is passed to Docker as an argv array (no shell parsing of user input).
+ * it is written into an isolated workspace directory (one file for a `text`
+ * payload, an unpacked tree for a `tar` payload — lib/docker-runner.js) which
+ * is bind-mounted read-only into the container. The container command is
+ * passed to Docker as an argv array (no shell parsing of user input).
  *
  * To add a capability: add an entry here AND to LAB_JOB_TYPES in
  * functions/src/lib/labs.js (LAB_JOB_TYPES, the server-side enqueue allowlist)
- * AND to the agent's `capabilities` array in its lab_agents registry document,
- * which is what the API actually authorizes claims against.
+ * AND to FALLBACK_JOB_TYPES in frontend/src/components/admin/labs/labsView.js
+ * (the admin console's list when the snapshot has not arrived) AND to the
+ * agent's `capabilities` array in its lab_agents registry document, which is
+ * what the API actually authorizes claims against.
  *
  * ===========================================================================
  * IMAGES ARE PINNED BY DIGEST, NOT BY TAG (T-759)
@@ -39,19 +42,46 @@
  *     -H "Accept: application/vnd.oci.image.index.v1+json" \
  *     https://registry-1.docker.io/v2/library/alpine/manifests/3.21 | grep -i docker-content-digest
  *
- * The digests below were resolved that way on 2026-08-28 and cross-checked
- * against the Docker Hub API, which is a second endpoint reporting the same
- * value.
+ * The alpine, terraform and ansible digests below were resolved that way on
+ * 2026-08-28 and cross-checked against the Docker Hub API, which is a second
+ * endpoint reporting the same value.
+ *
+ * **hcwLabRunner** is this repository's own image, built from lab-image/ and
+ * published by .github/workflows/publish-lab-image.yml, which prints the
+ * pushed digest in its job summary (`docker buildx imagetools inspect` of the
+ * pushed tag). The pin below is the first publish from main, recorded on
+ * issue #675. The three capabilities that use it run scripts the image
+ * carries at /usr/local/bin (lab-image/bin/), so the image and the commands
+ * move together: **#675's own changes to lab-image/ (transitive AVM
+ * vendoring, the unpacked provider mirror, those scripts, the kubeconform
+ * schemas) are not in this digest.** They land in the image on the next
+ * publish from main, and the follow-up that bumps this pin to that digest
+ * is the commit that turns these three capabilities on; until then the jobs
+ * fail with `executable file not found` rather than run something older.
  */
 
 /** Digest-pinned image references. Tag is documentation; the digest decides. */
 export const IMAGES = {
   alpine: 'alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc',
-  terraform:
-    'hashicorp/terraform:1.9@sha256:18f9986038bbaf02cf49db9c09261c778161c51dcc7fb7e355ae8938459428cd',
   ansible:
     'alpine/ansible:2.17.0@sha256:3cf35fbaecd3dba7c246191be1d46c0b4c051839294eb813677a7482c1fa1ced',
+  hcwLabRunner:
+    'ghcr.io/hybridcloudworks/hcw-lab-runner:80a62c350e9294aaea6d877975778e7dcb24fe84@sha256:3cc592730cfffd1633cd13495ea8c6108a7bf54b857a91088d35628a0cd48fbc',
 };
+
+/**
+ * The writable scratch space a runner-image job gets. The root filesystem is
+ * read-only (SANDBOX_FLAGS), so terraform's data dir, helm's homes and the
+ * payload copy all live on this tmpfs. Explicit uid/gid/mode because Docker
+ * mounts a tmpfs root-owned by default and the container runs as 65534:
+ * measured on Docker 29.8 (#675), the bare `--tmpfs /tmp/run:rw,size=64m`
+ * the first version of this file used gave `Permission denied` on the first
+ * write, before any tool ran. 64 MB is enough because the image's provider
+ * mirror is unpacked and vendored modules are called by relative path, so
+ * `terraform init` symlinks providers and references modules in place rather
+ * than copying either here (lab-image/Dockerfile, the `mirror` stage).
+ */
+export const RUN_TMPFS = ['--tmpfs', '/tmp/run:rw,size=64m,uid=65534,gid=65534,mode=0700'];
 
 export const CAPABILITIES = {
   // Smoke test — proves the whole pipeline (claim -> docker -> result).
@@ -60,22 +90,25 @@ export const CAPABILITIES = {
     // payloadFile is the path of the payload inside the container.
     buildCommand: (payloadFile) => ['cat', payloadFile],
     payloadFileName: 'payload.txt',
+    payloadEncodings: ['text'],
     timeoutSeconds: 30,
   },
 
   // Validates Terraform HCL without touching any backend or provider creds.
+  // hcw-terraform-validate (lab-image/bin/) copies /workspace to the tmpfs,
+  // rewrites each `source = "Azure/<module>/azurerm"` whose version
+  // constraint a vendored copy under /opt/avm satisfies to that copy's
+  // relative path, leaves every other registry source untouched so `init`
+  // fails loudly on it, then runs `init -backend=false` and `validate`.
+  // The learner's files are never changed (ADR 0032, decision 5). A `text`
+  // payload is one main.tf; a `tar` payload is a whole root.
   'terraform-validate': {
-    image: IMAGES.terraform,
-    buildCommand: () => [
-      'sh',
-      '-c',
-      // Fixed string — no user input. Workspace is mounted at /workspace (ro);
-      // copy to a writable tmpfs because init writes .terraform/.
-      'cp /workspace/main.tf /tmp/run/ && cd /tmp/run && terraform init -backend=false -input=false >/dev/null && terraform validate -no-color',
-    ],
+    image: IMAGES.hcwLabRunner,
+    buildCommand: () => ['hcw-terraform-validate'],
     payloadFileName: 'main.tf',
-    timeoutSeconds: 120,
-    extraDockerArgs: ['--tmpfs', '/tmp/run:rw,size=64m'],
+    payloadEncodings: ['text', 'tar'],
+    timeoutSeconds: 180,
+    extraDockerArgs: RUN_TMPFS,
   },
 
   // Syntax-checks an Ansible playbook. No inventory, no remote hosts.
@@ -89,6 +122,7 @@ export const CAPABILITIES = {
       payloadFile,
     ],
     payloadFileName: 'playbook.yml',
+    payloadEncodings: ['text'],
     timeoutSeconds: 60,
   },
 };
