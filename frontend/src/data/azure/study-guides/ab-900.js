@@ -54,7 +54,7 @@ export default {
             'Interpret Identity Secure Score in Microsoft Entra ID',
             'Use the appropriate tools to review audit logs for user and admin activity',
             'Identify the role of Privileged Identity Management (PIM) in an organization',
-            'Understand App registrations and Enterprise apps',
+            'Understand App registrations and Enterprise applications',
           ],
         },
       ],

@@ -81,7 +81,7 @@ export default {
         {
           title: 'Query and analyze data',
           objectives: [
-            'Select, filter, and aggregate data by using the Visual Query Editor',
+            'Select, filter, and aggregate data by using the Visual query editor',
             'Select, filter, and aggregate data by using SQL',
             'Select, filter, and aggregate data by using KQL',
             'Select, filter, and aggregate data by using DAX',
