@@ -17,6 +17,81 @@ This project has not cut a tagged release; entries are grouped under
 
 ## [Unreleased]
 
+### Added
+
+- **Landing Zone Builder, Phase 1: the pure module, with no page yet (#667).**
+  `frontend/src/lib/landingZone/` is the logic behind the Landing Zone Builder
+  (#657), built the way `pricingScenarios/` is: frozen catalogues, small pure
+  functions, the state as a value and as a URL, and nothing that reads a
+  clock, a viewport or a tenant. `components.js` is the catalogue — six
+  platform components (`management-groups`, `policy`, `management`,
+  `connectivity-hub`, `firewall`, `identity`) and two application ones
+  (`corp`, `online`, each counted 0..5) — every one with a one-sentence
+  summary, a hand-written `teaches` of three to five sentences (what it is,
+  why a landing zone has it, what breaks without it), its `dependsOn`, the
+  module that deploys it, and its knobs: hub CIDR, firewall SKU, private DNS
+  zones, region, the two counts and the root management group id, each with
+  a validator and a default.
+
+  **The module pins are looked up, not remembered.** `avmVersions.js` holds
+  exactly four modules with `verifiedOn: '2026-09-25'`, read from the
+  registry's v1 API and each repository's latest GitHub release that day:
+  `Azure/avm-ptn-alz/azurerm` 0.21.0, `avm-ptn-alz-management` 0.9.0 and
+  `avm-ptn-alz-connectivity-hub-and-spoke-vnet` 0.17.5. The fourth,
+  `avm-ptn-alz-application-landing-zone-identity-and-access`, is on GitHub as
+  the unfilled AVM template with no tag, no release and no registry listing,
+  so it carries `version: null` and a note saying so, and the emitter writes
+  a dated comment where the `version` line would go rather than a number
+  nobody published. The provider constraints (`alz ~> 0.21`, `azapi ~> 2.12`,
+  `azurerm ~> 4.35`, `random ~> 3.6`, Terraform `>= 1.12, < 2.0`) and the
+  `platform/alz/2026.08.1` library ref come from the same modules'
+  `terraform.tf` files and the library's release list. `avm-ptn-hubnetworking`
+  is archived; a test asserts the string never reaches any emitted file.
+
+  **The build is a URL.** `share.js` encodes the state as
+  `?lz=mg,policy,mgmt,hub,fw,id&hub.cidr=10.0.0.0/16&fw.sku=Premium&dns=0&loc=westeurope&corp=2&online=1&root=alz`:
+  `lz=` lists the selected platform components by short id, the application
+  components travel as their counts with 0 meaning not selected, and every
+  default is left out, so the default build — the whole landing zone with one
+  corp and one online — is a bare URL and an empty build is
+  `?lz=&corp=0&online=0`. Decoding drops unknown tokens, defaults any option
+  that fails its validator, and normalises through `state.js`, which closes
+  the selection over `dependsOn` (a firewall brings the hub, a corp landing
+  zone brings the tree and the hub) and keeps the counts and the selection in
+  step. `isLzParam` says which keys are the module's, as `isScenarioParam`
+  does for the pricing page.
+
+  **`hcl.js` emits the Terraform the validated pattern would.** `emitFiles`
+  returns `{ path, content }` files, only for selected components:
+  `terraform.tf`, `providers.tf` (default providers from the workspace's
+  `ARM_*` variables, an alias per subscription), `alz.tf` (`architecture_name
+  = "alz"`, subscription placement, and when policy is selected the DDoS
+  modification and `policy_default_values` built from the management names
+  with `policy_assignments_dependencies`, exactly as the module's own
+  management example does), `management.tf`, `connectivity.tf` (the firewall
+  and its policy as blocks of the hub object only when selected, the DNS
+  resources on the option), `application.tf` (one call per identity, corp and
+  online landing zone), `variables.tf` with GUID validation on every
+  subscription id, `terraform.tfvars.example`, and a `README.md` carrying the
+  pattern's prerequisites — HCP Terraform, Owner at the tenant root, a service
+  principal — and the line that the files were generated for learning and
+  never applied by HybridCloudWorks. The formatter aligns `=` the way
+  `terraform fmt` does, across runs of single-line attributes and not across
+  a multi-line value or a comment; six builds (default, Basic firewall, hub
+  without DNS, tree only, five-and-five Premium, identity only) pass
+  `terraform fmt -check -recursive` under Terraform 1.15.8. `diagram.js` lays
+  the same state out as a tidy tree of management groups, subscriptions, hub
+  and spokes with peering edges, in fixed units so pre-render and hydration
+  agree.
+
+  Two suites, 26 tests: every component has every field and a `teaches` of
+  the right length, the dependency closure, encode/decode round trips and
+  default omission, decode tolerance, fmt shape on every emitted file, every
+  module `source` in `avmVersions.js`, the archived module absent, a
+  committed snapshot of the default build (the repository's first
+  `__snapshots__`), and diagram determinism with no overlapping nodes. No
+  page, no route, no dependency; `frontend/` vitest goes from 2,272 to 2,298.
+
 ### Changed
 
 - **The six radarlint-python findings left on `main` are fixed, not
