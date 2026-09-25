@@ -21,7 +21,16 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildDockerArgs, SANDBOX_FLAGS, OUTPUT_CAP_BYTES } from './docker-runner.js';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import {
+  buildDockerArgs,
+  prepareJobDir,
+  SANDBOX_FLAGS,
+  OUTPUT_CAP_BYTES,
+  JOB_DIR_MODE,
+  PAYLOAD_MODE,
+} from './docker-runner.js';
 import { CAPABILITIES } from './capabilities.js';
 
 const LIMITS = { memory: '256m', cpus: '0.5', pidsLimit: 128 };
@@ -143,6 +152,40 @@ describe('buildDockerArgs — the sandbox boundary', () => {
     const argv = buildDockerArgs(CAPABILITIES['terraform-validate'], CTX, LIMITS);
     assert.ok(at(argv, '--tmpfs') > at(argv, '--cap-drop'));
     assert.ok(at(argv, '--tmpfs') < at(argv, CAPABILITIES['terraform-validate'].image));
+  });
+});
+
+describe('the job directory is readable by the container user', () => {
+  // The container runs as 65534:65534 and this process does not, so the
+  // per-job directory `fs.mkdtemp` creates (0700) was untraversable from
+  // inside and every job failed before its command ran. POSIX modes are not
+  // meaningful on Windows, so the assertion runs only where they are.
+  const posix = process.platform !== 'win32';
+
+  test('modes are world-readable and the directory is traversable', { skip: !posix }, async () => {
+    const jobDir = await prepareJobDir('payload.txt', 'hello');
+    try {
+      const dirMode = (await fs.stat(jobDir)).mode & 0o777;
+      const fileMode = (await fs.stat(path.join(jobDir, 'payload.txt'))).mode & 0o777;
+      assert.equal(dirMode, JOB_DIR_MODE);
+      assert.equal(fileMode, PAYLOAD_MODE);
+      assert.equal(dirMode & 0o005, 0o005, 'others can read and traverse the directory');
+      assert.equal(fileMode & 0o004, 0o004, 'others can read the payload');
+      assert.equal(fileMode & 0o022, 0, 'nobody but the owner can write the payload');
+      assert.equal(await fs.readFile(path.join(jobDir, 'payload.txt'), 'utf8'), 'hello');
+    } finally {
+      await fs.rm(jobDir, { recursive: true, force: true });
+    }
+  });
+
+  test('the payload lands in a fresh labjob- directory', async () => {
+    const jobDir = await prepareJobDir('payload.txt', 'x');
+    try {
+      assert.match(path.basename(jobDir), /^labjob-/);
+      assert.deepEqual(await fs.readdir(jobDir), ['payload.txt']);
+    } finally {
+      await fs.rm(jobDir, { recursive: true, force: true });
+    }
   });
 });
 

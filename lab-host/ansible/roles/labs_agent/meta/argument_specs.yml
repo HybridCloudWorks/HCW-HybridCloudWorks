@@ -1,0 +1,155 @@
+---
+argument_specs:
+  main:
+    short_description: Run vps-agent as a systemd service from a pinned checkout of the repository
+    description:
+      - Creates the agent user (in the docker group, because the agent's job is docker run),
+        installs Node.js 22 from NodeSource at a pinned version, checks the repository out at
+        a pinned ref and runs npm ci --omit=dev once per ref.
+      - Generates the agent's private key and self-signed certificate on the host if absent and
+        keeps the PEM root-owned, group hcw-labs-agent, mode 0640, so the service can read it
+        and nothing else can. Only the public certificate leaves the host.
+      - Writes /etc/hcw/labs-agent.env with the names from vps-agent/.env.example from vault
+        variables and starts the unit only once all four identity values are present.
+    author: HybridCloudWorks
+    options:
+      labs_agent_user:
+        type: str
+        required: true
+        description: Service user, hcw-labs-agent on the lab host.
+      labs_agent_group:
+        type: str
+        required: false
+        description: Primary group; defaults to the user name.
+      labs_agent_home:
+        type: path
+        required: true
+        description: Where the repository is checked out, /opt/hcw-labs-agent on the lab host.
+      labs_agent_repo_url:
+        type: str
+        required: true
+        description: Repository to clone.
+      labs_agent_repo_ref:
+        type: str
+        required: true
+        description: Tag or commit sha to check out. Changing it reinstalls dependencies and restarts the service.
+      labs_agent_node_version:
+        type: str
+        required: true
+        description: NodeSource apt version string for nodejs, for example 22.23.3-1nodesource1.
+      labs_agent_id:
+        type: str
+        required: true
+        description: LABS_AGENT_ID, the id of this agent's lab_agents registry document. Also the certificate CN.
+      labs_agent_api_base:
+        type: str
+        required: false
+        default: ""
+        description: LABS_AGENT_API_BASE; defaults to vault_labs_agent_api_base.
+      labs_agent_tenant_id:
+        type: str
+        required: false
+        default: ""
+        description: LABS_AGENT_TENANT_ID; defaults to vault_labs_agent_tenant_id.
+      labs_agent_client_id:
+        type: str
+        required: false
+        default: ""
+        description: LABS_AGENT_CLIENT_ID; defaults to vault_labs_agent_client_id.
+      labs_agent_api_scope:
+        type: str
+        required: false
+        default: ""
+        description: LABS_AGENT_API_SCOPE; defaults to vault_labs_agent_api_scope.
+      labs_agent_max_concurrent:
+        type: int
+        required: false
+        default: 1
+        description: LABS_AGENT_MAX_CONCURRENT.
+      labs_agent_poll_ms:
+        type: int
+        required: false
+        default: 15000
+        description: LABS_AGENT_POLL_MS.
+      labs_agent_job_memory:
+        type: str
+        required: false
+        default: 256m
+        description: LABS_AGENT_JOB_MEMORY.
+      labs_agent_job_cpus:
+        type: str
+        required: false
+        default: "0.5"
+        description: LABS_AGENT_JOB_CPUS.
+      labs_agent_job_pids:
+        type: int
+        required: false
+        default: 128
+        description: LABS_AGENT_JOB_PIDS.
+      labs_agent_state_dir:
+        type: path
+        required: false
+        default: /var/lib/hcw-labs-agent
+        description: Holds the per-ref stamp that records npm ci has run.
+      labs_agent_tmp_dir:
+        type: path
+        required: false
+        default: /var/lib/hcw-labs-agent/tmp
+        description:
+          - TMPDIR for the service. The runner stages each job payload here and bind-mounts it
+            into the job container, so it must be visible to the Docker daemon; the unit's
+            PrivateTmp /tmp is not.
+      labs_agent_config_dir:
+        type: path
+        required: false
+        default: /etc/hcw
+        description: Holds the env file and the certificate.
+      labs_agent_env_file:
+        type: path
+        required: false
+        default: /etc/hcw/labs-agent.env
+        description: EnvironmentFile for the unit, root-only.
+      labs_agent_certificate_path:
+        type: path
+        required: false
+        default: /etc/hcw/labs-agent.pem
+        description: PEM with the private key and certificate, root:hcw-labs-agent 0640.
+      labs_agent_public_certificate_path:
+        type: path
+        required: false
+        default: /etc/hcw/labs-agent.crt
+        description: The certificate alone, world-readable, for upload to the app registration.
+      labs_agent_certificate_days:
+        type: int
+        required: false
+        default: 730
+        description: Validity of a newly generated certificate.
+      labs_agent_certificate_warn_days:
+        type: int
+        required: false
+        default: 60
+        description: Every run warns when the certificate expires within this many days.
+      labs_agent_service_name:
+        type: str
+        required: false
+        default: hcw-labs-agent
+        description: systemd unit name.
+      labs_agent_node_apt_key_url:
+        type: str
+        required: false
+        default: https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key
+        description: NodeSource signing key.
+      labs_agent_node_apt_key_checksum:
+        type: str
+        required: true
+        description: sha256:<hex> of the NodeSource signing key; get_url refuses one that does not match.
+      labs_agent_node_apt_key_path:
+        type: path
+        required: false
+        default: /etc/apt/keyrings/nodesource.asc
+        description: Where the signing key is stored.
+      labs_agent_node_apt_repository_url:
+        type: str
+        required: false
+        default: https://deb.nodesource.com/node_22.x
+        description: NodeSource repository for the Node.js 22 line.

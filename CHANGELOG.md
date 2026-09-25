@@ -17,6 +17,331 @@ This project has not cut a tagged release; entries are grouped under
 
 ## [Unreleased]
 
+### Added
+
+- **The lab host is configured by Ansible, not by hand over SSH (#662).**
+  Phase 2 of #656. `lab-host/ansible/` holds `site.yml` and five roles that
+  replace the manual steps the admin Labs page's Setup tab has printed since
+  #577: `hardening` (a key-only `hcwadmin` with passwordless sudo whose keys
+  are copied from root's, so the first run cannot lock the host; an sshd
+  drop-in named `00-` so it sorts ahead of cloud-init's
+  `PasswordAuthentication yes`; ufw deny-in/allow-out with 22, 80 and 443;
+  unattended-upgrades rebooting at 04:30; a fail2ban sshd jail on the systemd
+  backend, because Ubuntu 24.04 has no `auth.log`), `docker` (Docker Engine
+  `5:29.8.1` with buildx and compose from Docker's repository, all held, with
+  10 MB x 3 `json-file` logs and `live-restore`; the install carries
+  `allow_change_held_packages` so a pin bump is not refused by the hold it
+  set last time), `node_exporter` (1.12.1, SHA256-verified, loopback only),
+  `caddy` and `labs_agent`. Every version, digest and checksum is in
+  `group_vars/all.yml` — including the SHA256 of the Docker and NodeSource
+  apt signing keys, because a pin on the versions with no pin on the key
+  that vouches for them is decorative — the collections are pinned in
+  `requirements.yml` down to `community.docker`'s one transitive dependency,
+  and every role carries `meta/argument_specs.yml` and a README.
+
+  **Caddy is host-native and built, not downloaded, because the download API
+  does not pin.** The stock apt package and the upstream image both lack the
+  Cloudflare DNS module, and `caddyserver.com/api/download` — the usual way
+  to add one — always builds the latest release: a request naming a version
+  that does not exist returned the identical 48,173,218-byte binary, so it
+  can be neither pinned nor checksummed. So the role runs `xcaddy build
+  v2.11.4 --with github.com/caddy-dns/cloudflare@v0.2.4` inside the official
+  `caddy:2.11.4-builder` image — pulled and run by its pinned digest, never
+  by tag, so Docker verifies the content and a bumped pin is a new
+  reference that gets pulled — refuses the result unless `caddy
+  version` names the pin and `caddy list-modules` lists
+  `dns.providers.cloudflare`, and writes a `.provenance` file beside the
+  binary naming the three inputs. The binary's filename carries all three —
+  Caddy tag, module tag, the first twelve hex of the builder's index digest
+  — so bumping any of them rebuilds rather than relabelling an old build.
+  The provenance in the repository is the `caddy_*` pins in
+  `group_vars/all.yml`. It runs as `caddy.service`
+  as the non-root `caddy` user reading `/etc/caddy/env` through
+  `EnvironmentFile=` (owner root, group `caddy`, mode 0640 — the group read
+  is what lets renewals work — holding the runtime Cloudflare token from an
+  Ansible Vault variable, distinct from Terraform's), serving the three
+  names ADR 0032 puts on the certificate: `lab.hybridcloudworks.com`,
+  `*.lab.hybridcloudworks.com` and `*.coder.lab.hybridcloudworks.com`,
+  DNS-01 answered through the CNAME delegation of the two `_acme-challenge`
+  names to the lab zone. The site block imports `conf.d/*.caddy`: the apex
+  placeholder is `00-apex.caddy`, and Coder (#679) adds a file rather than
+  editing the template. **Without the token the Caddyfile fails closed** —
+  an HTTP-only apex answering 503 that imports nothing from `conf.d` — so a
+  first bootstrap is green, the second turns TLS on, and a missing secret can
+  never put an application route on plaintext.
+
+  **`vps-agent` runs host-native as the systemd service the Setup tab
+  described**, which ADR 0032 settled. The agent's whole job is `docker
+  run`, so a containerised agent needs the Docker socket mounted and a Docker
+  CLI baked into an image the repository does not have, for no isolation gain
+  — socket access is host root either way — and the Agents tab's own
+  diagnostics already say `systemctl restart hcw-labs-agent` and `journalctl
+  -u hcw-labs-agent`. The role checks the repository out at a pinned sha,
+  runs `npm ci --omit=dev` once per ref (a stamp file, so a bump reinstalls
+  and a re-run does not), writes `/etc/hcw/labs-agent.env` with the exact
+  names from `vps-agent/.env.example`, and generates the key **on the host**
+  as that file asks. `/etc/hcw/labs-agent.pem` is `root:hcw-labs-agent`
+  0640, no ACLs — root owns it, the service reads it through its group,
+  nobody else can — and `.env.example`, the Setup tab's step 4 and
+  `docs/standards/variables-and-secrets.md` now all say exactly that instead
+  of the 0600 a non-root service could never have read. Only the public
+  half, `/etc/hcw/labs-agent.crt`, leaves the host. The certificate lasts
+  730 days and nothing renews it by itself, so every run checks it with
+  `openssl x509 -checkend` and warns within 60 days of expiry, and the
+  README carries the two-step rotation: register the next public
+  certificate first, then swap the PEM. The unit sets
+  `TMPDIR=/var/lib/hcw-labs-agent/tmp`, because `lib/docker-runner.js`
+  stages each payload under `os.tmpdir()` and bind-mounts it into the job
+  container, and the `PrivateTmp` `/tmp` the unit otherwise gets is one the
+  Docker daemon cannot see. Reviewing that surfaced a defect the runner has
+  carried since #577: `mkdtemp` creates the per-job directory 0700 as the
+  agent user while the container runs as 65534:65534, so `/workspace` was
+  untraversable and every job would have failed before its command ran.
+  `prepareJobDir` now makes the directory 0755 and the payload 0644 — the
+  directory is per job, holds only the payload copy the API already sent,
+  is bind-mounted read-only and is removed after the job — and
+  `docker-runner.test.js` asserts the modes. Until the vault holds the identity the unit is
+  installed, stopped and disabled and the env file is removed — explicitly,
+  so removing a value from the vault is a revocation on the next run, not a
+  file a manual `systemctl start` could reuse — and the play says which
+  values are missing. `bootstrap.sh` refuses to run when exactly one of the
+  vault file and its password file exists, rather than treating a
+  half-present vault as no vault and turning TLS off. The `hcw.lab-job`
+  label ADR 0032 requires on job containers is the agent's own change
+  (#675); this role sets no labels.
+
+  `lab-host/bootstrap.sh` — what #661's post-install script will call —
+  installs `ansible-core` 2.21.4 with pipx, clones the repository at the
+  pinned sha into `/opt/hcw-src`, installs the collections and runs
+  `site.yml` against localhost, passing the vault at `/etc/hcw/ansible/`
+  when it exists. CI gains an `ansible-lint (lab-host)` job on the
+  production profile plus a syntax check, gated in-job on `lab-host/**` the
+  way every other `ci.yml` job is. `scripts/validate-repository-structure.ps1`
+  allows the directory and its READMEs, and `scripts/no-wiki-pointers.test.mjs`
+  now reads `.j2` files, the first tracked extension its coverage check had
+  never seen.
+
+  One contract is declared ahead of its role. `group_vars/all.yml` carries
+  `coder_enabled: false` and `coder_oauth2_github_allowed_orgs: []` for
+  Coder (#679), and `site.yml` asserts the list is non-empty whenever the
+  flag is true — because an empty `CODER_OAUTH2_GITHUB_ALLOWED_ORGS` is not
+  a lock, it lets any GitHub account sign in. The README names the real
+  kill switches: `CODER_OAUTH2_GITHUB_ALLOW_SIGNUPS=false` for new learners,
+  stopping the `coder` Compose service for everyone.
+- **Landing Zone Builder, Phase 1: the pure module, with no page yet (#667).**
+  `frontend/src/lib/landingZone/` is the logic behind the Landing Zone Builder
+  (#657), built the way `pricingScenarios/` is: frozen catalogues, small pure
+  functions, the state as a value and as a URL, and nothing that reads a
+  clock, a viewport or a tenant. `components.js` is the catalogue — six
+  platform components (`management-groups`, `policy`, `management`,
+  `connectivity-hub`, `firewall`, `identity`) and two application ones
+  (`corp`, `online`, each counted 0..5) — every one with a one-sentence
+  summary, a hand-written `teaches` of three to five sentences (what it is,
+  why a landing zone has it, what breaks without it), its `dependsOn`, the
+  module that deploys it, and its knobs: hub CIDR, spoke range, firewall SKU,
+  private DNS zones, region, the two counts and the parent management group,
+  each with a validator and a default.
+
+  **The module pins are looked up, not remembered.** `avmVersions.js` holds
+  exactly four modules with `verifiedOn: '2026-09-25'`, each read from the
+  registry's v1 API and the repository's latest GitHub release that day:
+  `Azure/avm-ptn-alz/azurerm` 0.21.0, `avm-ptn-alz-management` 0.9.0,
+  `avm-ptn-alz-connectivity-hub-and-spoke-vnet` 0.17.5 and
+  `avm-res-network-virtualnetwork` 0.22.2. The pattern module for
+  application landing zones,
+  `avm-ptn-alz-application-landing-zone-identity-and-access`, was on GitHub
+  that day as the unfilled AVM template with no tag, no release and no
+  registry listing, so the builder does not call it: a landing zone is a
+  `subscription_placement` entry in avm-ptn-alz plus a spoke from the virtual
+  network module instead, and a test asserts every emitted module `source` is
+  pinned with a `version` line. The provider constraints (`alz ~> 0.21`,
+  `azapi ~> 2.12`, `azurerm ~> 4.35`, `modtm ~> 0.3`, `random ~> 3.6`, `time
+  ~> 0.9`, Terraform `>= 1.12, < 2.0`), each module's `requiredProviders`
+  list, and the `platform/alz/2026.08.1` library ref come from the same
+  modules' `terraform.tf` files at their tags and the library's release
+  list; every emitted `module` block's `providers` map is generated from
+  that list, since a block with a `providers` argument inherits nothing for
+  the providers it leaves out.
+  `avm-ptn-hubnetworking` is archived; a test asserts the string never
+  reaches any emitted file.
+
+  **The build is a URL.** `share.js` encodes the state as
+  `?lz=mg,policy,mgmt,hub,fw,id&hub.cidr=10.0.0.0/16&spoke.cidr=10.1.0.0/16&fw.sku=Premium&dns=0&loc=westeurope&corp=2&online=1&root=contoso`:
+  `lz=` lists the selected platform components by short id, the application
+  components travel as their counts with 0 meaning not selected, `root=` is
+  the management group the `alz` root is created under (absent for the tenant
+  root group, wired to the module's `parent_resource_id`), and every default
+  is left out, so the default build — the whole landing zone with one corp
+  and one online — is a bare URL and an empty build is `?lz=&corp=0&online=0`.
+  Decoding drops unknown tokens, defaults any option that fails its
+  validator, and normalises through `state.js`, which closes the selection
+  over `dependsOn` (a firewall brings the hub; identity, corp and online each
+  bring the tree and the hub they peer to), keeps the counts and the
+  selection in step, and checks the two ranges against each other: a spoke
+  range that overlaps the hub is moved to the first free fallback
+  (`10.1.0.0/16`, `10.2.0.0/16`, then `172.16.0.0/16`) and the state carries
+  a `warnings` entry (`{ code: 'spoke-cidr-overlap', from, to }`) for the
+  page to show. `isLzParam` says which keys are the module's, as
+  `isScenarioParam` does for the pricing page.
+
+  **`hcl/` emits the Terraform the validated pattern would**, one module per
+  emitted file. `emitFiles` returns `{ path, content }` files, only for
+  selected components: `terraform.tf`, `providers.tf` (default providers from
+  the workspace's `ARM_*` variables, an azurerm and an azapi alias per
+  subscription), `alz.tf` (`architecture_name = "alz"`, one placement per
+  subscription, and when policy is selected **all fourteen
+  `policy_default_values` the pinned library declares** — the six AMA and
+  workspace ids from the management names, the three private-DNS values from
+  the hub, the location, two resource-group names and a validated
+  `security_contact_email` variable — with the one value the build never
+  creates a source for, the DDoS plan, and the DNS trio when zones are off,
+  handled by setting their assignments `DoNotEnforce` rather than leaving a
+  library placeholder; **when policy is not selected the tree is still the
+  `alz` architecture, which carries its baseline, so every one of the 123
+  assignments the twelve archetypes make at that ref is emitted with
+  `enforcement_mode = "DoNotEnforce"`** and the defaults the build can
+  supply are still passed, with a comment saying the baseline is present and
+  inert because Policy was not chosen), `management.tf`, `connectivity.tf`
+  (the firewall and
+  its policy as blocks of the hub object only when selected, the DNS resources
+  on the option), `identity.tf` and `application.tf` (one spoke per landing
+  zone: a resource group, a /24 carved from the spoke range with `cidrsubnet`,
+  a two-way peering to the hub through the connectivity module's
+  `virtual_network_resource_ids`, and for corp and identity a route table
+  whose default route is the firewall's private IP when the firewall is
+  selected; online spokes egress directly), `variables.tf` with GUID
+  validation on every subscription id, the range variables carrying the same
+  rules as the JS validators — a shape check (dotted quad, prefix within
+  `HUB_PREFIX_RANGE` /8–/24 or `SPOKE_PREFIX_RANGE` /8–/20, both generated
+  from the constants `isCidr` and `isSpokeCidr` use, and `cidrhost` able to
+  parse it) and, on the spoke range, the hub-versus-spoke overlap rule as a
+  second `validation` that reads `var.hub_address_space` (Terraform 1.9 lets
+  a validation read another variable) and is guarded so it never evaluates
+  on a string that does not parse; proven offline with `terraform plan` on
+  the emitted file: the apart pair plans, a `/25` spoke, a `/25` hub, a
+  garbage string and an octet of 256 each fail the shape check, and
+  identical, hub-inside-spoke and spoke-inside-hub each fail the overlap
+  message — and a non-empty, `/`-rejecting check on
+  `var.parent_management_group_id`, because avm-ptn-alz's
+  `parent_resource_id` is the parent group's name and the module itself
+  refuses a resource id, `subscriptions.tf` (every placed subscription id in
+  one list behind an output `precondition` that refuses duplicates, since a
+  subscription can sit under one management group only; a duplicated id
+  fails the offline plan on that message, a distinct set passes),
+  `terraform.tfvars.example` with distinct placeholder ids, and a
+  `README.md` carrying the pattern's prerequisites — HCP Terraform, Owner at
+  the tenant root, a service principal — the spoke pattern in two sentences,
+  and the line that the files were generated for learning and never applied
+  by HybridCloudWorks. `format.js` aligns `=` the way `terraform fmt` does,
+  across runs of single-line attributes and not across a multi-line value or
+  a comment; six builds (default, Basic firewall, hub without DNS, tree only,
+  five-and-five Premium, identity only) pass `terraform fmt -check
+  -recursive` under Terraform 1.15.8. `cidr.js` is the carve — corp from the
+  low half, online from the high half, identity at the top of the low half —
+  and `diagram.js` lays the same state out as a tidy tree of management
+  groups, hub and spokes with their /24s and peering edges, in fixed units so
+  pre-render and hydration agree.
+
+  Validators refuse what `Number` would quietly accept: a CIDR must be
+  canonical (`010.0.0.0/8`, `10.0.0.0/08`, `/+8`, `/8 ` and `/8.0` are all
+  rejected, not read as 10.0.0.0/8) and a landing-zone count is a number or a
+  string of digits only, so a blank field or `corp=%20` falls back to the
+  default instead of becoming zero and deselecting.
+
+  Three suites, 209 tests, each emitted file and each module block its own
+  row: every component has every field and a `teaches` of the right length, the dependency closure, the carve, canonical-form and
+  count validators, the overlap fallback and its warning (through
+  `normalizeState`, `setOption` and a decoded URL), encode/decode round trips
+  and default omission, decode tolerance, fmt shape on every emitted file,
+  every module `source` pinned with a version, the archived and the
+  unpublished module absent, all fourteen policy defaults supplied or their
+  assignment not enforced, all 123 baseline assignments `DoNotEnforce` when
+  Policy is off, both `variables.tf` cross-checks emitted, committed
+  snapshots of the default and the tree-only builds (the repository's first
+  `__snapshots__`), and diagram determinism with no overlapping nodes. No
+  page, no route, no dependency; `frontend/` vitest goes from 2,272 to 2,481.
+
+- **ADR 0032 records the learner labs platform, and the two documents that
+  misdescribed the labs are corrected (#660).** Phase 0 of #656: the
+  decisions every sub-issue in the four lab epics (#656, #657, #658, #659)
+  builds on are written down once, as a Proposed record, before any of them
+  is implemented.
+  - `docs/decisions/0032-learner-labs-platform.md`: the Hostinger VPS is
+    Terraform-managed through `hostinger/hostinger` in its own `hcw-lab`
+    workspace so lab state never meets `hcw-azure`; Ubuntu 24.04 with Docker
+    Engine as the only runtime and no Kubernetes (owner decision 2026-09-24);
+    Azure Arc as the hybrid control plane with heartbeat and auth syslog only
+    and Defender for Servers off; Coder as the learner identity boundary the
+    site links to and never embeds; digest-pinned images from `lab-image/` as
+    the one toolchain; and anonymous public submission held Gated with its
+    bounds stated. Listed in the register and the site nav.
+  - `docs/architecture/labs-host.md` is the estate record for the host —
+    provider, plan, OS, what runs, exposure, backup posture and the identities
+    it holds — every row marked planned, with no addresses and no secrets.
+  - `docs/architecture/architecture.md` §5.3 said the browser submits a lab
+    request. It never has: `submitPublicLabJob` was deliberately not ported
+    (`functions/src/lib/labs.js`). The section now says submission is
+    admin-only through `/admin/labs` and `enqueueLabJob`, and points at ADR
+    0032 for the gated public path.
+  - `docs/standards/required-inputs.md` §4.7 gains the inputs the ADR names —
+    `hostinger_api_token` and `cloudflare_api_token` in `hcw-lab`, the Arc
+    onboarding credential in Ansible Vault, `CODER-URL` and
+    `CODER-STATUS-TOKEN` in Key Vault (read by the underscored app settings)
+    — all MISSING.
+  - `.github/CONTRIBUTING.md` still said new work lands in `TODO.md`. It lands
+    as an issue on org project 1 with a Priority set (owner decision
+    2026-09-05, #362); `TODO.md` keeps the accepted risks and an index.
+
+
+- **The `hcw-lab` image: one Dockerfile with `runner` and `full` targets, a
+  Terraform provider filesystem mirror, three vendored AVM pattern modules,
+  and a workflow that publishes both to GHCR with provenance attestations
+  (#674).** Phase 1 of #658. `lab-image/Dockerfile` builds from a
+  digest-pinned `debian:bookworm-slim` and installs terraform 1.16.4,
+  kubeconform 0.8.0, helm 4.3.0 and ansible-core 2.19.13 (the last line that
+  runs on bookworm's Python 3.11), every download checked against the SHA256
+  in `lab-image/versions.env` — the one file a version bump edits. The
+  `runner` target carries `/opt/terraform/mirror`, built with `terraform
+  providers mirror` for azurerm 5.7.0 and 4.81.0, azapi 2.12.0, alz 0.22.0,
+  random 3.9.1, modtm 0.4.0 and time 0.14.2, each zip re-verified against
+  the registry's published sum after mirroring, and a `TF_CLI_CONFIG_FILE`
+  that installs from the mirror only: `terraform init` under `--network
+  none` succeeds for anything the mirror holds and fails loudly for anything
+  it does not, instead of hanging on a registry it cannot reach. avm-ptn-alz
+  0.21.0, avm-ptn-alz-management 0.9.0 and
+  avm-ptn-alz-connectivity-hub-and-spoke-vnet 0.17.5 are vendored at
+  `/opt/avm/<name>@<version>` from their release tarballs; the fourth module
+  the issue names has no release yet (its repository is still the AVM
+  template) and is recorded as such in `versions.env`. The image runs as uid
+  65534 with `/workspace` read-only, everything it writes under `/tmp`. The
+  `full` target adds Azure CLI 2.90.0 from Microsoft's apt repository (key
+  verified by SHA256, package version pinned), kubectl 1.37.1, git, curl, jq
+  and code-server's three prerequisites.
+
+  What the offline init proves and what it does not, measured rather than
+  assumed: `lab-image/smoke.sh` first asserts there is no network, the mount
+  is read-only and the uid is 65534 — an init that passed with network would
+  prove nothing about the mirror — then compares every tool's reported
+  version with `versions.env`, and runs `terraform init -backend=false` on a
+  root using azurerm and random and on the vendored management module, both
+  with no network. The management module is the only one of the three whose
+  init needs nothing outside the mirror; avm-ptn-alz calls one registry
+  module (`Azure/avm-utl-interfaces/azure`) and the connectivity module
+  calls thirteen distinct ones across twenty-one `module` blocks, and
+  Terraform has no module mirror, so those two need a registry for their
+  child modules. `lab-image/README.md` says so, with the
+  measured sizes.
+
+  `.github/workflows/publish-lab-image.yml` builds both targets and runs the
+  smoke test in each on every pull request touching `lab-image/**` (loaded
+  locally, never pushed), and on a push to `main` pushes
+  `ghcr.io/hybridcloudworks/hcw-lab-runner` and
+  `ghcr.io/hybridcloudworks/hcw-lab` tagged with the commit sha and `latest`,
+  attaches an `actions/attest-build-provenance` attestation to each, and
+  writes the digests to the job summary for #675 to pin from. Every action
+  is pinned by commit sha; the permissions live on the job. The repository
+  structure policy admits the `lab-image` directory and its README.
+
 ### Changed
 
 - **The six radarlint-python findings left on `main` are fixed, not

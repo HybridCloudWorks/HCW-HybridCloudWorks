@@ -1,0 +1,10 @@
+# {{ ansible_managed }}
+# Ubuntu 24.04 ships no rsyslog, so there is no /var/log/auth.log to tail;
+# the systemd backend reads sshd's journal directly.
+[sshd]
+enabled = true
+backend = systemd
+mode = aggressive
+maxretry = {{ hardening_fail2ban_maxretry }}
+findtime = {{ hardening_fail2ban_findtime }}
+bantime = {{ hardening_fail2ban_bantime }}

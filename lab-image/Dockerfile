@@ -1,0 +1,230 @@
+# hcw-lab: the image the lab pages, the Coder template, the vps-agent runner
+# and the sandbox recipe all pull (issue #658, Phase 1 in #674).
+#
+# Two final targets:
+#
+#   runner  terraform, kubeconform, helm, ansible-core, a Terraform provider
+#           filesystem mirror at /opt/terraform/mirror and the AVM pattern
+#           modules at /opt/avm/<name>@<version>. Runs as uid 65534 with
+#           /workspace mounted read-only, and `terraform init` needs no
+#           network for any provider in the mirror.
+#   full    runner plus Azure CLI, kubectl, git, curl, jq and the three
+#           packages code-server needs. CMD is bash.
+#
+# Every version and checksum comes from versions.env, sourced at the top of
+# each RUN; nothing is downloaded without a SHA256 check. The base image is
+# pinned by digest on every FROM below. The tag beside it is documentation
+# (Docker resolves the digest and ignores the tag); the publish workflow
+# checks it matches DEBIAN_DIGEST in versions.env so the two cannot drift.
+#
+# Build:   docker build --target runner -t hcw-lab-runner:dev lab-image
+#          docker build --target full   -t hcw-lab:dev        lab-image
+# Verify:  see smoke.sh (mount lab-image at /workspace read-only, no network).
+
+# ---------------------------------------------------------------------------
+# fetch: download and verify every artefact. Nothing from this stage ships
+# except what later stages COPY out of /out.
+# ---------------------------------------------------------------------------
+FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 AS fetch
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl unzip \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+COPY versions.env /build/versions.env
+
+# Tool binaries. `sha256sum -c` exits non-zero on a mismatch, and `set -e`
+# turns that into a failed build rather than an unverified binary.
+RUN set -eu; . /build/versions.env; \
+    mkdir -p /out/bin; \
+    curl --proto '=https' --tlsv1.2 -fsSLo terraform.zip \
+      "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip"; \
+    echo "${TERRAFORM_SHA256}  terraform.zip" | sha256sum -c -; \
+    unzip -q terraform.zip terraform -d /out/bin; \
+    curl --proto '=https' --tlsv1.2 -fsSLo kubeconform.tgz \
+      "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"; \
+    echo "${KUBECONFORM_SHA256}  kubeconform.tgz" | sha256sum -c -; \
+    tar -xzf kubeconform.tgz -C /out/bin kubeconform; \
+    curl --proto '=https' --tlsv1.2 -fsSLo helm.tgz \
+      "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz"; \
+    echo "${HELM_SHA256}  helm.tgz" | sha256sum -c -; \
+    tar -xzf helm.tgz -C /build linux-amd64/helm; \
+    mv /build/linux-amd64/helm /out/bin/helm; \
+    chmod 0755 /out/bin/*; \
+    rm -rf /build/terraform.zip /build/kubeconform.tgz /build/helm.tgz /build/linux-amd64
+
+# ansible-core wheel. Pure Python, so the wheel is one file and one sum.
+RUN set -eu; . /build/versions.env; \
+    mkdir -p /out/wheels; \
+    curl --proto '=https' --tlsv1.2 -fsSLo "/out/wheels/ansible_core-${ANSIBLE_CORE_VERSION}-py3-none-any.whl" \
+      "https://files.pythonhosted.org/packages/py3/a/ansible_core/ansible_core-${ANSIBLE_CORE_VERSION}-py3-none-any.whl"; \
+    echo "${ANSIBLE_CORE_SHA256}  /out/wheels/ansible_core-${ANSIBLE_CORE_VERSION}-py3-none-any.whl" | sha256sum -c -
+
+# AVM pattern modules, vendored from the release source tarball of each
+# repository into /opt/avm/<name>@<version>, where <name> is the registry
+# module name (Azure/<name>/azurerm) so a `source = "Azure/avm-ptn-alz/azurerm"`
+# rewrites to `source = "/opt/avm/avm-ptn-alz@0.21.0"` mechanically.
+RUN set -eu; . /build/versions.env; \
+    vendor() { \
+      name="$1"; version="$2"; sum="$3"; \
+      curl --proto '=https' --tlsv1.2 -fsSLo "${name}.tgz" \
+        "https://github.com/Azure/terraform-azurerm-${name}/archive/refs/tags/v${version}.tar.gz"; \
+      echo "${sum}  ${name}.tgz" | sha256sum -c -; \
+      mkdir -p "/out/avm/${name}@${version}"; \
+      tar -xzf "${name}.tgz" -C "/out/avm/${name}@${version}" --strip-components=1; \
+      rm -f "${name}.tgz"; \
+    }; \
+    vendor avm-ptn-alz "${AVM_PTN_ALZ_VERSION}" "${AVM_PTN_ALZ_SHA256}"; \
+    vendor avm-ptn-alz-management "${AVM_PTN_ALZ_MANAGEMENT_VERSION}" "${AVM_PTN_ALZ_MANAGEMENT_SHA256}"; \
+    vendor avm-ptn-alz-connectivity-hub-and-spoke-vnet "${AVM_PTN_ALZ_CONNECTIVITY_HUB_AND_SPOKE_VNET_VERSION}" "${AVM_PTN_ALZ_CONNECTIVITY_HUB_AND_SPOKE_VNET_SHA256}"
+
+# ---------------------------------------------------------------------------
+# mirror: build the provider filesystem mirror with the terraform binary
+# verified above. `terraform providers mirror` writes the registry's own
+# layout (registry.terraform.io/<namespace>/<name>/<version>.json plus the
+# zip), and the zips are then checked against the sums in versions.env, so
+# the mirror is pinned by content and not only by version.
+#
+# Two mirror roots because a required_providers block holds one constraint
+# per provider and azurerm is mirrored at both 4.x and 5.x; the second run
+# merges into the same index.json.
+# ---------------------------------------------------------------------------
+FROM fetch AS mirror
+
+RUN set -eu; . /build/versions.env; \
+    mkdir -p /build/mirror-current /build/mirror-v4 /out/mirror; \
+    { \
+      echo 'terraform {'; \
+      echo '  required_providers {'; \
+      echo "    azurerm = { source = \"hashicorp/azurerm\", version = \"= ${PROVIDER_AZURERM_VERSION}\" }"; \
+      echo "    azapi   = { source = \"azure/azapi\",       version = \"= ${PROVIDER_AZAPI_VERSION}\" }"; \
+      echo "    alz     = { source = \"azure/alz\",         version = \"= ${PROVIDER_ALZ_VERSION}\" }"; \
+      echo "    random  = { source = \"hashicorp/random\",  version = \"= ${PROVIDER_RANDOM_VERSION}\" }"; \
+      echo "    modtm   = { source = \"azure/modtm\",       version = \"= ${PROVIDER_MODTM_VERSION}\" }"; \
+      echo "    time    = { source = \"hashicorp/time\",    version = \"= ${PROVIDER_TIME_VERSION}\" }"; \
+      echo '  }'; \
+      echo '}'; \
+    } > /build/mirror-current/main.tf; \
+    { \
+      echo 'terraform {'; \
+      echo '  required_providers {'; \
+      echo "    azurerm = { source = \"hashicorp/azurerm\", version = \"= ${PROVIDER_AZURERM_V4_VERSION}\" }"; \
+      echo '  }'; \
+      echo '}'; \
+    } > /build/mirror-v4/main.tf; \
+    /out/bin/terraform -chdir=/build/mirror-current providers mirror -platform=linux_amd64 /out/mirror; \
+    /out/bin/terraform -chdir=/build/mirror-v4 providers mirror -platform=linux_amd64 /out/mirror; \
+    check() { echo "$2  /out/mirror/registry.terraform.io/$1" | sha256sum -c -; }; \
+    check "hashicorp/azurerm/terraform-provider-azurerm_${PROVIDER_AZURERM_VERSION}_linux_amd64.zip" "${PROVIDER_AZURERM_SHA256}"; \
+    check "hashicorp/azurerm/terraform-provider-azurerm_${PROVIDER_AZURERM_V4_VERSION}_linux_amd64.zip" "${PROVIDER_AZURERM_V4_SHA256}"; \
+    check "azure/azapi/terraform-provider-azapi_${PROVIDER_AZAPI_VERSION}_linux_amd64.zip" "${PROVIDER_AZAPI_SHA256}"; \
+    check "azure/alz/terraform-provider-alz_${PROVIDER_ALZ_VERSION}_linux_amd64.zip" "${PROVIDER_ALZ_SHA256}"; \
+    check "hashicorp/random/terraform-provider-random_${PROVIDER_RANDOM_VERSION}_linux_amd64.zip" "${PROVIDER_RANDOM_SHA256}"; \
+    check "azure/modtm/terraform-provider-modtm_${PROVIDER_MODTM_VERSION}_linux_amd64.zip" "${PROVIDER_MODTM_SHA256}"; \
+    check "hashicorp/time/terraform-provider-time_${PROVIDER_TIME_VERSION}_linux_amd64.zip" "${PROVIDER_TIME_SHA256}"
+
+# ---------------------------------------------------------------------------
+# runner
+# ---------------------------------------------------------------------------
+FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 AS runner
+
+# python3 and the five Debian packages ansible-core depends on (jinja2 3.1.2,
+# PyYAML 6.0, cryptography 38.0.4, packaging 23.0, resolvelib 0.9.0 in
+# bookworm, each inside ansible-core 2.19's declared ranges). python3-venv
+# supplies ensurepip so the venv below is created without a network fetch.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates \
+      python3 \
+      python3-venv \
+      python3-jinja2 \
+      python3-yaml \
+      python3-cryptography \
+      python3-packaging \
+      python3-resolvelib \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY --from=fetch /out/bin/ /usr/local/bin/
+COPY --from=fetch /out/avm/ /opt/avm/
+COPY --from=mirror /out/mirror/ /opt/terraform/mirror/
+COPY --from=fetch /out/wheels/ /tmp/wheels/
+
+# ansible-core into a venv that sees the system packages above, with
+# `--no-index --no-deps` so pip can only install the verified wheel. pip and
+# setuptools are then removed from the venv: the image carries no installer,
+# and what runs is exactly what versions.env names.
+RUN python3 -m venv --system-site-packages /opt/ansible \
+ && /opt/ansible/bin/pip install --no-cache-dir --no-index --no-deps /tmp/wheels/*.whl \
+ && /opt/ansible/bin/pip uninstall -y pip setuptools \
+ && ln -s /opt/ansible/bin/ansible* /usr/local/bin/ \
+ && rm -rf /tmp/wheels
+
+# Provider installation is mirror-only, deliberately: `terraform init` under
+# --network none must fail loudly on a provider that is not mirrored, never
+# hang on a registry it cannot reach, and the same config online must not
+# pick a newer version from the registry than the one the image carries.
+# TF_CLI_CONFIG_FILE=/dev/null restores registry installation for a session.
+RUN mkdir -p /etc/terraform /workspace /tmp/home /tmp/run \
+ && chown 65534:65534 /tmp/home /tmp/run \
+ && printf '%s\n' \
+      'provider_installation {' \
+      '  filesystem_mirror {' \
+      '    path    = "/opt/terraform/mirror"' \
+      '    include = ["registry.terraform.io/*/*"]' \
+      '  }' \
+      '}' > /etc/terraform/terraformrc
+
+# /workspace is mounted read-only, so everything the tools write goes under
+# /tmp: Terraform's data dir, the tools' home directories, Ansible's temp.
+# TF_PLUGIN_CACHE_DIR is intentionally unset (a cache under /tmp would only
+# duplicate the mirror). CHECKPOINT_DISABLE stops Terraform's version check
+# call, which is the one network request `terraform init` would otherwise
+# still make.
+ENV TF_CLI_CONFIG_FILE=/etc/terraform/terraformrc \
+    TF_DATA_DIR=/tmp/run/.terraform \
+    TF_IN_AUTOMATION=1 \
+    CHECKPOINT_DISABLE=1 \
+    HOME=/tmp/home \
+    ANSIBLE_LOCAL_TEMP=/tmp/run/ansible \
+    HELM_CACHE_HOME=/tmp/run/helm/cache \
+    HELM_CONFIG_HOME=/tmp/run/helm/config \
+    HELM_DATA_HOME=/tmp/run/helm/data
+
+# A CLI image has no service to probe; NONE says so explicitly rather than
+# leaving the instruction absent for a scanner to report.
+HEALTHCHECK NONE
+
+USER 65534:65534
+WORKDIR /workspace
+CMD ["terraform", "version"]
+
+# ---------------------------------------------------------------------------
+# full: runner plus the interactive tooling. Azure CLI from Microsoft's apt
+# repository at a pinned package version, its signing key verified by SHA256
+# before apt trusts it (bookworm's apt reads an ASCII-armoured key from
+# signed-by directly, so no gnupg is installed). kubectl by version and sum.
+# ---------------------------------------------------------------------------
+FROM runner AS full
+
+USER root
+COPY versions.env /tmp/versions.env
+RUN set -eu; . /tmp/versions.env; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends curl git jq libatomic1 procps; \
+    mkdir -p /etc/apt/keyrings; \
+    curl --proto '=https' --tlsv1.2 -fsSLo /etc/apt/keyrings/microsoft.asc https://packages.microsoft.com/keys/microsoft.asc; \
+    echo "${MICROSOFT_APT_KEY_SHA256}  /etc/apt/keyrings/microsoft.asc" | sha256sum -c -; \
+    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/microsoft.asc] https://packages.microsoft.com/repos/azure-cli/ bookworm main" \
+      > /etc/apt/sources.list.d/azure-cli.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends "azure-cli=${AZURE_CLI_VERSION}"; \
+    curl --proto '=https' --tlsv1.2 -fsSLo /usr/local/bin/kubectl \
+      "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/amd64/kubectl"; \
+    echo "${KUBECTL_SHA256}  /usr/local/bin/kubectl" | sha256sum -c -; \
+    chmod 0755 /usr/local/bin/kubectl; \
+    rm -rf /var/lib/apt/lists/* /tmp/versions.env
+
+USER 65534:65534
+WORKDIR /workspace
+CMD ["bash"]

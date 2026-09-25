@@ -1,0 +1,24 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Caddy
+Documentation=https://caddyserver.com/docs/
+After=network.target network-online.target
+Requires=network-online.target
+
+[Service]
+Type=notify
+User={{ caddy_user }}
+Group={{ caddy_group }}
+EnvironmentFile={{ caddy_env_file }}
+ExecStart={{ caddy_binary_path }} run --config {{ caddy_config_dir }}/Caddyfile --adapter caddyfile
+ExecReload={{ caddy_binary_path }} reload --config {{ caddy_config_dir }}/Caddyfile --adapter caddyfile --force
+TimeoutStopSec=5s
+LimitNOFILE=1048576
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+NoNewPrivileges=true
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

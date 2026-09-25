@@ -1,0 +1,27 @@
+---
+# Behaviour knobs. The host's values live in group_vars/all.yml; these are the
+# role's own defaults so it also works on its own.
+hardening_packages:
+  - openssh-server
+  - sudo
+  - ufw
+  - fail2ban
+  - unattended-upgrades
+
+hardening_admin_user: hcwadmin
+# Public keys for the administrative user. Empty means: copy whatever the
+# provisioner installed in /root/.ssh/authorized_keys, so disabling root and
+# password login never removes the only way in.
+hardening_admin_authorized_keys: []
+
+hardening_ufw_allowed_tcp_ports:
+  - 22
+  - 80
+  - 443
+hardening_ufw_logging: "low"
+
+hardening_unattended_reboot_time: "04:30"
+
+hardening_fail2ban_maxretry: 5
+hardening_fail2ban_findtime: 10m
+hardening_fail2ban_bantime: 1h

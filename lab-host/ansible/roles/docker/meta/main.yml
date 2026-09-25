@@ -1,0 +1,17 @@
+---
+galaxy_info:
+  role_name: docker
+  namespace: hcw
+  author: HybridCloudWorks
+  description: Docker Engine from Docker's apt repository at a pinned version, with a size-limited json-file log driver
+  license: UNLICENSED
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+  galaxy_tags:
+    - docker
+    - containers
+
+dependencies: []
