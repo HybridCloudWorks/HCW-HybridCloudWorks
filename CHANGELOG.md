@@ -19,6 +19,34 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The explain route is generalised by kind, and the Landing Zone Builder
+  gets its "Explain this component" backend (#669).** Phase 3 of #657,
+  backend half. `POST public/cloud-tools/explain` reads an optional `kind`
+  from the body: omitted or `pricing` is the #613 contract byte for byte
+  (same validator, same canonical hash, same `pricingExplain` toggle, same
+  stored document — the existing tests are unchanged and the existing cached
+  texts keep serving); `landing-zone` dispatches to
+  `functions/src/lib/cloud-tools/explain/kinds/landingZone.js`, whose
+  validator accepts `{ kind, componentId, selected (<= 12), options, teaches
+  (<= 1200) }` against frozen copies of the catalogue's eight component ids
+  and eight option knobs, every string capped, unknown keys refused, and
+  whose prompt asks for two paragraphs — why this component matters for
+  exactly this selection and options, then what changes if it is deselected
+  — grounded in the page's own `teaches` text and the four Azure Verified
+  Module sources embedded per component, with no tenant and no prices. The
+  cache, the 8 KB cap, the 5 per hour per client and the 200 per day are the
+  same code and the same counters for both kinds: one anonymous AI budget.
+  The landing-zone canonical text starts with `kind`, so its cache ids
+  cannot collide with pricing's. `AI_FEATURES.landingZoneExplain` is the
+  kind's own off switch, with its call site in the kind module so
+  `ai-call-sites.test.js` can see the literal. The kind shape (`id`,
+  `feature`, `validate`, `canonical`, `cacheFields`, `generate`) is
+  documented on `kinds/pricing.js`; `.azure/api-surface.json` spells out the
+  `landing-zone` body for the frontend phase (#670). Tests: kind dispatch,
+  the unchanged default, an explicit `kind: "pricing"` hashing the same as
+  none, unknown kind 400, the landing-zone validator's refusals, quota and
+  daily pause shared across kinds, the toggle off for one kind while the
+  other serves, and the prompt naming the component and every selected id.
 - **The lab host is configured by Ansible, not by hand over SSH (#662).**
   Phase 2 of #656. `lab-host/ansible/` holds `site.yml` and five roles that
   replace the manual steps the admin Labs page's Setup tab has printed since
