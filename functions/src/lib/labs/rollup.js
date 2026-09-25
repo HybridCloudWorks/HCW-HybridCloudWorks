@@ -132,20 +132,35 @@ export function coderRunningFrom(estateDoc, coderDoc, day) {
   return samples.length ? Math.max(...samples) : null;
 }
 
-/** `{ [type]: { succeeded, failed, timeout } }` from the grouped rows; unknown statuses and unreadable rows are dropped. */
-export function jobsByTypeFrom(rows) {
-  const out = {};
-  for (const row of Array.isArray(rows) ? rows : []) {
-    const type = typeof row?.type === 'string' ? row.type.trim() : '';
-    const status = typeof row?.status === 'string' ? row.status : '';
-    const n = row?.n;
-    if (!type || !ROLLUP_STATUSES.includes(status) || !Number.isInteger(n) || n < 0) continue;
-    if (!Object.hasOwn(out, type)) {
-      if (Object.keys(out).length >= MAX_JOB_TYPES) continue;
-      out[type] = { succeeded: 0, failed: 0, timeout: 0 };
-    }
-    out[type][status] += n;
+const emptyCounts = () => ({ succeeded: 0, failed: 0, timeout: 0 });
+
+/**
+ * One grouped row as `{ type, status, n }`, or null when it cannot be counted:
+ * a blank type, a status the rollup does not count, or an `n` that is not a
+ * non-negative integer (Cosmos counts are numbers; anything else is not one).
+ */
+export function readJobRow(row) {
+  const type = typeof row?.type === 'string' ? row.type.trim() : '';
+  const status = typeof row?.status === 'string' ? row.status : '';
+  const n = row?.n;
+  if (!type || !ROLLUP_STATUSES.includes(status) || !Number.isInteger(n) || n < 0) return null;
+  return { type, status, n };
+}
+
+/** Add one readable row to the map, opening a new type only while there is room for it. */
+function foldJobRow(out, { type, status, n }) {
+  if (!Object.hasOwn(out, type)) {
+    if (Object.keys(out).length >= MAX_JOB_TYPES) return out;
+    out[type] = emptyCounts();
   }
+  out[type][status] += n;
+  return out;
+}
+
+/** `{ [type]: { succeeded, failed, timeout } }` from the grouped rows, sorted by type; unknown statuses and unreadable rows are dropped. */
+export function jobsByTypeFrom(rows) {
+  const readable = (Array.isArray(rows) ? rows : []).map(readJobRow).filter(Boolean);
+  const out = readable.reduce(foldJobRow, {});
   return Object.fromEntries(Object.keys(out).sort().map((type) => [type, out[type]]));
 }
 

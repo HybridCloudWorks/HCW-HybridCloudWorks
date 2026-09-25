@@ -14,6 +14,7 @@ import {
   labsDayDocId,
   mergeArc,
   mergeMax,
+  readJobRow,
   readLabsWeek,
   shiftDay,
 } from './rollup.js';
@@ -133,6 +134,13 @@ describe('jobsByTypeFrom', () => {
       'terraform-validate': { succeeded: 5, failed: 1, timeout: 0 },
     });
     expect(jobsByTypeFrom(undefined)).toEqual({});
+  });
+
+  it('reads one row, trimming the type, and refuses one it cannot count', () => {
+    expect(readJobRow({ type: ' shell-echo ', status: 'failed', n: 2 })).toEqual({ type: 'shell-echo', status: 'failed', n: 2 });
+    for (const bad of [null, {}, { type: 'x', status: 'queued', n: 1 }, { type: 'x', status: 'succeeded', n: '1' }, { type: 'x', status: 'succeeded', n: -1 }, { type: ' ', status: 'succeeded', n: 1 }]) {
+      expect(readJobRow(bad), JSON.stringify(bad)).toBeNull();
+    }
   });
 
   it('caps the number of types it keeps', () => {
