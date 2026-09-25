@@ -83,7 +83,11 @@ are recorded once, here, before any of them is implemented.
    Servers stays **off** for cost. Arc itself is free.
 4. **Coder (Community edition) is the learner identity boundary.** It runs
    from Docker Compose on the host with Docker-based workspaces, and learners
-   sign in to it with **GitHub OAuth**. Two things on the host may drive the
+   sign in to it with **GitHub OAuth**, and only members of a GitHub
+   organisation the owner names may sign in: `CODER_OAUTH2_GITHUB_ALLOWED_ORGS`
+   is a required setting, not an option, because without it any GitHub
+   account could consume the public VPS; emptying the list is the kill switch.
+   Two things on the host may drive the
    Docker daemon, and nothing else: the Coder **server** container, which has
    the socket mounted because that is how Coder's documented Docker install
    creates workspaces, and `vps-agent`, which runs **host-native** as the
@@ -184,8 +188,10 @@ are recorded once, here, before any of them is implemented.
   site's own records. Two tokens exist and neither is on the host in a form
   that reaches production DNS more than it must: the `hcw-lab` workspace
   token creates the `lab` records and lives only in HCP Terraform; Caddy's
-  renewal token lives on the host in `/etc/caddy/env` (root, 0600, from
-  Ansible Vault). Caddy holds one certificate whose names are
+  renewal token lives on the host in `/etc/caddy/env`, owner `root`, group
+  `caddy`, mode `0640`, written from Ansible Vault and read by the non-root
+  `caddy` service through its unit's `EnvironmentFile`, so the service can
+  renew and nothing else on the host can read it. Caddy holds one certificate whose names are
   `lab.hybridcloudworks.com`, `*.lab.hybridcloudworks.com` and
   `*.coder.lab.hybridcloudworks.com` (Coder's workspace apps are one label
   below `coder.lab`, and a wildcard covers one label only). The chosen shape

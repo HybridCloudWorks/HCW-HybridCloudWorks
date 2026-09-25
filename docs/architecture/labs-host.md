@@ -98,7 +98,7 @@ that is a revisit trigger in ADR 0032.
 | Coder GitHub OAuth app secret | Coder's Docker Compose environment | Learner sign-in to Coder; nothing on the site | planned |
 | Coder status token | Issued by Coder; the value is held in Key Vault `kv-site-prod-cus-01` as the secret `CODER-STATUS-TOKEN` (read by the Function App setting `CODER_STATUS_TOKEN`), not on the host | Read-only Coder API for the site's status proxy | planned |
 | Caddy ACME account | Caddy's data volume | Issuance and renewal of the one certificate covering `lab`, `*.lab` and `*.coder.lab` | planned |
-| Caddy DNS-01 token (`CLOUDFLARE_API_TOKEN` in `/etc/caddy/env`, root, 0600, written by Ansible from Vault) | On the host, because renewals happen there | DNS edit on the dedicated lab zone that `_acme-challenge.lab` is delegated to; DNS edit on the production zone only in the interim ADR 0032 records | planned |
+| Caddy DNS-01 token (`CLOUDFLARE_API_TOKEN` in `/etc/caddy/env`, owner `root`, group `caddy`, mode `0640`, written by Ansible from Vault; the `caddy` systemd unit runs as the non-root `caddy` user and reads it through `EnvironmentFile`) | On the host, because renewals happen there | DNS edit on the dedicated lab zone that `_acme-challenge.lab` is delegated to; DNS edit on the production zone only in the interim ADR 0032 records | planned |
 
 Identities that are **not** on the host, by design: the Hostinger API token and
 the Terraform-side Cloudflare API token (HCP Terraform workspace variables in
