@@ -10,6 +10,7 @@
  *   --cap-drop ALL
  *   non-root user (65534)
  *   wall-clock timeout      container is force-killed on expiry
+ *   --label hcw.lab-job     every container names the job it runs (ADR 0032)
  *
  * The payload is written to a per-job temp dir on the host and mounted
  * read-only at /workspace. Commands come ONLY from the capability
@@ -37,12 +38,18 @@ import zlib from 'node:zlib';
 
 export const OUTPUT_CAP_BYTES = 64 * 1024;
 
+/** The Docker label every job container carries, keyed by job id (ADR 0032). */
+export const JOB_LABEL = 'hcw.lab-job';
+
 /** Payload encodings the runner understands; a capability lists the ones it accepts. */
 export const PAYLOAD_ENCODINGS = Object.freeze(['text', 'tar']);
 
 /** Bounds on an unpacked `tar` payload. The API caps the encoded payload at 64 KB. */
 export const TAR_MAX_ENTRIES = 512;
 export const TAR_MAX_BYTES = 8 * 1024 * 1024;
+
+/** Server-issued job ids are UUIDs; anything else does not reach a docker argv. */
+const JOB_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
 function runProcess(cmd, args, timeoutMs) {
   return new Promise((resolve) => {
@@ -111,6 +118,8 @@ const RESERVED_FLAGS = new Set([
   '--memory',
   '--cpus',
   '--pids-limit',
+  '--label',
+  '-l',
   '-v',
   '--volume',
   '--mount',
@@ -145,11 +154,17 @@ export function buildDockerArgs(capability, { jobDir, containerName, jobId, enco
       `capability may not set sandbox-controlled docker flags: ${reserved.join(', ')}`
     );
   }
+  if (typeof jobId !== 'string' || !JOB_ID.test(jobId)) {
+    // The label is how the host tells a job container from anything else
+    // (ADR 0032 validation), so a job with no usable id does not run.
+    throw new Error('job id is missing or not a plain identifier; refusing to start a container');
+  }
 
   return [
     'run',
     '--rm',
     '--name', containerName,
+    '--label', `${JOB_LABEL}=${jobId}`,
     ...SANDBOX_FLAGS.flatMap(([flag, value]) => (value === null ? [flag] : [flag, value])),
     '--memory', limits.memory,
     '--cpus', limits.cpus,

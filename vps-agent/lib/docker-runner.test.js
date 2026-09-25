@@ -12,7 +12,8 @@
  * behaves — Docker is not installed in CI and must not be. The argv IS the
  * boundary: what this file pins is that the flags are present, that they carry
  * the right values, and that a capability cannot displace them. Since #675 it
- * also pins the `tar`
+ * also pins the `hcw.lab-job` label every container carries (ADR 0032
+ * identifies job containers by that label, not by count) and the `tar`
  * payload path: what the archive parser accepts, and everything it refuses.
  *
  * Node's built-in test runner deliberately: this package's one virtue as a CI
@@ -38,6 +39,7 @@ import {
   OUTPUT_CAP_BYTES,
   JOB_DIR_MODE,
   PAYLOAD_MODE,
+  JOB_LABEL,
   TAR_MAX_ENTRIES,
 } from './docker-runner.js';
 import { CAPABILITIES } from './capabilities.js';
@@ -121,6 +123,10 @@ describe('the sandbox contract', () => {
       'the sandbox flag set or one of its values changed — this is a security boundary, not a default'
     );
   });
+
+  test('the job label key is the one ADR 0032 names', () => {
+    assert.equal(JOB_LABEL, 'hcw.lab-job');
+  });
 });
 
 describe('buildDockerArgs — the sandbox boundary', () => {
@@ -137,6 +143,14 @@ describe('buildDockerArgs — the sandbox boundary', () => {
             assert.equal(argv[i + 1], value, `${flag} carries the wrong value`);
           }
         }
+      });
+
+      test('labels the container with the job id, before the image', () => {
+        const i = at(argv, '--label');
+        assert.notEqual(i, -1, '--label is missing; the host cannot tell this container from a stray');
+        assert.equal(argv[i + 1], `hcw.lab-job=${CTX.jobId}`);
+        assert.ok(i < at(argv, capability.image), '--label appears after the image and is inert');
+        assert.equal(argv.filter((a) => a === '--label').length, 1, 'exactly one label');
       });
 
       test('mounts the workspace read-only and nowhere else', () => {
@@ -176,7 +190,7 @@ describe('buildDockerArgs — the sandbox boundary', () => {
   }
 
   test('refuses a capability that tries to set a sandbox-controlled flag', () => {
-    for (const bad of ['--network', '--privileged', '--cap-add', '-v', '--user', '--pid']) {
+    for (const bad of ['--network', '--privileged', '--cap-add', '-v', '--user', '--pid', '--label']) {
       assert.throws(
         () =>
           buildDockerArgs(
@@ -186,6 +200,18 @@ describe('buildDockerArgs — the sandbox boundary', () => {
           ),
         /sandbox-controlled docker flags/,
         `${bad} was accepted from a capability`
+      );
+    }
+  });
+
+  test('refuses to start a container for a job with no usable id', () => {
+    // The label is how the host validation tells a job container from
+    // anything else; a container it cannot attribute must not exist.
+    for (const jobId of [undefined, '', 'has space', 'semi;colon', '-leading', 'x'.repeat(129)]) {
+      assert.throws(
+        () => buildDockerArgs(CAPABILITIES['shell-echo'], { ...CTX, jobId }, LIMITS),
+        /job id/,
+        `job id ${JSON.stringify(jobId)} reached docker`
       );
     }
   });
