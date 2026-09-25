@@ -80,7 +80,17 @@ are recorded once, here, before any of them is implemented.
    collection rule sends **heartbeat and `auth`/`authpriv` syslog only** into
    the existing Log Analytics workspace in `rg-mgmt-plat-prod-cus` (Management
    subscription). Machine configuration policy is **audit only**. Defender for
-   Servers stays **off** for cost. Arc itself is free.
+   Servers stays **off** for cost. Arc itself is free. The public lab page
+   reads the host's Arc state through the Function App, never from the
+   browser: the Function App's existing managed identity is granted
+   **Reader on `rg-lab-hybrid-prod-cus` only** (an `azurerm_role_assignment`
+   in `infra/`, #664) and queries Azure Resource Graph for the
+   `microsoft.hybridcompute/machines` row (status, last heartbeat, agent
+   version) and its policy compliance; the result is cached for a minute in
+   `tool_service_cache` and answers `{ configured: false }` when the resource
+   group does not exist, so the card shows an explicit absent state rather
+   than a fabricated one. No new credential is involved; the role assignment
+   is the whole grant.
 4. **Coder (Community edition) is the learner identity boundary.** It runs
    from Docker Compose on the host with Docker-based workspaces, and learners
    sign in to it with **GitHub OAuth**, and only members of a GitHub
@@ -188,10 +198,14 @@ are recorded once, here, before any of them is implemented.
   templates in `vps-agent/lib/capabilities.js`, never a shell string shaped
   by a payload, with the payload bind-mounted read-only, and the API
   authorises every claim against the agent's registry document; and the host
-  deliberately holds no data of record and no production credential, only
-  the agent's certificate, which reaches three API endpoints, and Caddy's
-  DNS token, which is scoped as narrowly as Cloudflare allows (next bullet).
-  A compromise therefore costs a rebuild, not data. Moving workspaces and
+  deliberately holds no data of record and no Azure or application
+  credential: only the agent's certificate, which reaches three API
+  endpoints, and Caddy's DNS token, which is scoped as narrowly as Cloudflare
+  allows and which, in the interim the next bullet records, can edit
+  production DNS records. That token is the one production-reaching
+  credential on the host, and it is why the dedicated lab zone is the
+  target shape. A compromise therefore costs a rebuild, plus a check of the
+  production zone's records until that zone exists, not data. Moving workspaces and
   jobs to a rootless or separate daemon is a revisit trigger, not a
   prerequisite.
 - **Cloudflare API tokens are zone-scoped, and `lab.hybridcloudworks.com` is
@@ -280,8 +294,10 @@ are recorded once, here, before any of them is implemented.
     label the agent sets, and any container with neither is a finding. The
     count is not asserted, because a running workspace or job legitimately
     adds containers. `which kubectl k3s` returns nothing.
-  - `/education/labs` shows the Arc status card, and shows an explicit absent
-    state, not a fabricated one, when the host is down.
+  - `/education/labs` shows the Arc status card fed by the Function App's
+    Resource Graph read under its Reader grant on `rg-lab-hybrid-prod-cus`
+    (decision 3), and shows an explicit absent state, not a fabricated one,
+    when the resource group is missing or the host is down.
   - `enqueueLabJob` with no `Authorization` header still answers 401, which the
     Health Hub labs probe already asserts.
   - Every image `lab-image/` publishes is referenced by digest in
