@@ -27,13 +27,23 @@
  *      the pause.
  *
  * The provider check sits between 2 and 3: the router's own selection for
- * the `pricingExplain` feature — key present, provider not disabled in the
- * portal, feature switched on — and when it refuses, nothing is counted
- * against anyone, because nothing could have been spent. The feature toggle
- * is the owner's off switch for the one anonymous AI call.
+ * the kind's feature (`pricingExplain`, or `landingZoneExplain` for the
+ * landing-zone kind) — key present, provider not disabled in the portal,
+ * feature switched on — and when it refuses, nothing is counted against
+ * anyone, because nothing could have been spent. The feature toggle is the
+ * owner's off switch for that kind of anonymous AI call.
  *
  * The model's text is stripped of anything that looks like a URL (prompt.js)
  * before it is stored or returned.
+ *
+ * **Kinds** (#669). The body may carry a `kind`: omitted or `pricing` is the
+ * contract above, byte for byte; `landing-zone` is the Landing Zone Builder's
+ * "Explain this component" (kinds/landingZone.js). The kind supplies the
+ * validator, the canonical text the cache id is hashed from, the feature the
+ * router is asked to serve, and the one model call; the four bounds, the
+ * cache and the counters are this pipeline's and are shared — one anonymous
+ * AI budget, however many kinds. A kind other than pricing puts `kind` into
+ * its canonical text, so its cache ids cannot collide with pricing's.
  *
  * The handler is a pipeline of module-scope steps over one `state`: each step either
  * answers (returns a reply) or fills in what the next step needs (returns
@@ -42,14 +52,10 @@
  */
 
 import { CACHE_CONTAINER, utcDay } from '../history.js';
-import { EXPLAIN_FEATURE, EXPLAIN_SYSTEM_PROMPT, stripUrls } from './prompt.js';
+import { selectExplainKind } from './kinds/index.js';
+import { stripUrls } from './prompt.js';
 import { takeClientQuota, takeDailyQuota } from './quota.js';
-import {
-  EXPLAIN_MAX_BODY_BYTES,
-  canonicalExplainRequest,
-  explainCacheId,
-  validateExplainRequest,
-} from './validate.js';
+import { EXPLAIN_MAX_BODY_BYTES, explainCacheId } from './validate.js';
 
 export const EXPLAIN_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60;
 /** Seconds a cache hit may be served from an HTTP cache: the text is a week old at most anyway. */
@@ -100,10 +106,12 @@ async function readRequest(_deps, state) {
     return reply(405, { error: 'POST only' });
   }
   const read = await parseBody(state.request);
-  const validated = read.error ? read : validateExplainRequest(read.body);
+  const picked = read.error ? read : selectExplainKind(read.body);
+  const validated = picked.error ? picked : picked.kind.validate(picked.body);
   if (validated.error) return reply(400, { error: validated.error });
+  state.kind = picked.kind;
   state.value = validated.value;
-  state.canonical = canonicalExplainRequest(validated.value);
+  state.canonical = state.kind.canonical(validated.value);
   state.id = explainCacheId(state.canonical);
   return null;
 }
@@ -119,11 +127,11 @@ async function serveCached({ store }, state) {
 }
 
 // Nothing could be spent, so nothing is counted: the router's own selection
-// before any counter moves. The same refusal at call time is handled in
-// `generate`.
+// for THIS kind's feature, before any counter moves. The same refusal at call
+// time is handled in `generate`.
 async function checkProvider({ ai }, state) {
   try {
-    await ai.resolveProvider(EXPLAIN_FEATURE);
+    await ai.resolveProvider(state.kind.feature);
     return null;
   } catch (error) {
     if (!isUnavailable(error)) throw error;
@@ -157,15 +165,12 @@ async function generate({ ai, store }, state) {
   const usageOut = [];
   let generated;
   try {
-    generated = await ai.generateTextResponse({
-      prompt: state.canonical,
-      systemPrompt: EXPLAIN_SYSTEM_PROMPT,
-      purpose: 'general',
+    // The kind's one model call, its feature declared as a literal there
+    // (kinds/*.js) so ai-call-sites.test.js can read it off the source.
+    generated = await state.kind.generate(ai, {
+      value: state.value,
+      canonical: state.canonical,
       usageOut,
-      // The literal, not EXPLAIN_FEATURE: ai-call-sites.test.js reads the
-      // feature off the call by source scan, and a constant here would read
-      // as an ungated call. The test pins the two agree.
-      feature: 'pricingExplain',
     });
   } catch (error) {
     if (!isUnavailable(error)) throw error;
@@ -177,8 +182,7 @@ async function generate({ ai, store }, state) {
   const doc = {
     id: state.id,
     kind: 'explain',
-    region: state.value.region,
-    scenarioId: state.value.scenarioId,
+    ...state.kind.cacheFields(state.value),
     text,
     model: usageOut[0]?.model ?? null,
     generatedAt: state.nowIso,

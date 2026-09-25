@@ -1,0 +1,11 @@
+---
+# Caddy belongs to the caddy role; this handler has its own name so a
+# notification from here is unambiguous about which role asked.
+- name: Reload caddy for the coder route
+  ansible.builtin.systemd_service:
+    name: caddy
+    state: reloaded
+
+- name: Reload systemd for the coder backup units
+  ansible.builtin.systemd_service:
+    daemon_reload: true

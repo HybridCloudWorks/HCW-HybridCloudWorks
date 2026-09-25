@@ -439,6 +439,7 @@ describe('newsletter settings', () => {
       { id: 'certification-news', enabled: true, maxItems: 12 },
       { id: 'episodes', enabled: true, maxItems: 12 },
       { id: 'cloud-price-changes', enabled: true, maxItems: 12 },
+      { id: 'lab-this-week', enabled: true, maxItems: 12 },
     ],
     windowDays: 7,
     introEnabled: true,
@@ -507,6 +508,7 @@ describe('newsletter settings', () => {
         { id: 'cloud-price-changes', enabled: false, maxItems: 4 },
         { id: 'articles', enabled: false, maxItems: 5 },
         { id: 'certification-news', enabled: true, maxItems: 20 },
+        { id: 'lab-this-week', enabled: true, maxItems: 12 },
       ],
       windowDays: 14,
       introEnabled: false,
@@ -529,6 +531,7 @@ describe('newsletter settings', () => {
       { id: 'articles', enabled: true, maxItems: 6 },
       { id: 'certification-news', enabled: true, maxItems: 12 },
       { id: 'cloud-price-changes', enabled: true, maxItems: 12 },
+      { id: 'lab-this-week', enabled: true, maxItems: 12 },
     ]);
   });
 
@@ -546,6 +549,7 @@ describe('newsletter settings', () => {
       { id: 'certification-news', enabled: true, maxItems: 12 },
       { id: 'episodes', enabled: true, maxItems: 12 },
       { id: 'cloud-price-changes', enabled: true, maxItems: 12 },
+      { id: 'lab-this-week', enabled: true, maxItems: 12 },
     ]);
   });
 
@@ -562,10 +566,11 @@ describe('newsletter settings', () => {
         { id: 'certification-news', enabled: true, maxItems: 99 },
         { id: 'episodes', enabled: true, maxItems: '7.8' },
         { id: 'cloud-price-changes', enabled: true, maxItems: 21 },
+        { id: 'lab-this-week', enabled: true, maxItems: 2 },
       ],
       windowDays: 400,
     });
-    expect(value.sections.map((s) => s.maxItems)).toEqual([1, 20, 7, 20]);
+    expect(value.sections.map((s) => s.maxItems)).toEqual([1, 20, 7, 20, 2]);
     expect(value.windowDays).toBe(31);
     expect(normalizeNewsletterSettings({ windowDays: -3 }).windowDays).toBe(1);
     expect(normalizeNewsletterSettings({ windowDays: '10' }).windowDays).toBe(10);
@@ -579,15 +584,16 @@ describe('newsletter settings', () => {
           { id: 'certification-news', enabled: false },
           { id: 'episodes', enabled: false },
           { id: 'cloud-price-changes', enabled: false },
+          { id: 'lab-this-week', enabled: false },
         ],
       })
     ).toThrow(/at least one section/);
-    // A list naming only one section, turned off, still has the other three appended on.
+    // A list naming only one section, turned off, still has the other four appended on.
     expect(
       normalizeNewsletterSettings({ sections: [{ id: 'articles', enabled: false }] }).sections.filter(
         (s) => s.enabled
       )
-    ).toHaveLength(3);
+    ).toHaveLength(4);
   });
 
   it('refuses content values that cannot be read', () => {

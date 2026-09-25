@@ -1,0 +1,21 @@
+# {{ ansible_managed }}
+# Imported inside the wildcard site block of /etc/caddy/Caddyfile, so TLS and
+# the certificate are the site's. Coder's dashboard is coder.lab and its
+# workspace apps are one label below (CODER_WILDCARD_ACCESS_URL), which is
+# why the matcher names both. reverse_proxy passes WebSockets through and
+# sets X-Forwarded-For, X-Forwarded-Proto and X-Forwarded-Host, which
+# docker-compose.yml tells Coder to trust from the Compose network's gateway.
+@coder host {{ coder_domain }} *.{{ coder_domain }}
+handle @coder {
+  reverse_proxy 127.0.0.1:{{ coder_http_port }}
+}
+
+# When the coder Compose service is stopped (the everyone-at-once kill
+# switch in ADR 0032), the proxy cannot dial and Caddy would answer 502.
+# Answer 503 with a sentence instead, so the state is legible from outside.
+handle_errors {
+  @coder_down host {{ coder_domain }} *.{{ coder_domain }}
+  handle @coder_down {
+    respond "{{ coder_unavailable_response }}" 503
+  }
+}

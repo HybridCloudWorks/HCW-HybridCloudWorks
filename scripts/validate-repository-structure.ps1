@@ -214,12 +214,22 @@ foreach ($markdownFile in $markdownFiles) {
     # (#674): what the two build targets carry, their measured sizes, and how a
     # version in versions.env is bumped, next to the files it describes.
     $relativePath -eq 'lab-image/README.md' -or
+    # lab-image/sandbox-template/ is the Docker Sandboxes recipe (#676): its
+    # README is the build, load and run procedure next to the Dockerfile, and
+    # AGENTS.md is a file the Dockerfile copies into the image — the agent's
+    # briefing, which has to be Markdown because that is what agents read.
+    $relativePath -match '^lab-image/sandbox-template/(README|AGENTS)\.md$' -or
     # lab-host/ is the Ansible bootstrap for the Hostinger lab host (#662).
     # Its README and one README per role are the same tooling-adjacent kind
     # as infra/README.md: the Ansible convention keeps a role's README inside
     # the role, next to the argument_specs it summarises.
     $relativePath -eq 'lab-host/README.md' -or
     $relativePath -match '^lab-host/ansible/roles/[a-z_]+/README\.md$' -or
+    # lab-host/coder/ holds the Coder Compose file and the hcw-lab workspace
+    # template (#679). Its README is the deploy and update procedure next to
+    # the files it describes, and the template's README is what Coder shows
+    # learners on the template page, so it has to sit in the template directory.
+    $relativePath -match '^lab-host/coder/(templates/[a-z-]+/)?README\.md$' -or
     # Documentation source: pages here are reviewed via PR and published to
     # https://docs.hybridcloudworks.com by .github/workflows/docs-pages.yml on
     # merge to main (issue #360; replaced wiki/ on 2026-09-06). This is the one

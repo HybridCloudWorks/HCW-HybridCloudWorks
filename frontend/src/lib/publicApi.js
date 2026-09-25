@@ -248,6 +248,28 @@ export async function fetchPriceChanges(region = 'us-east-1') {
  * @returns {Promise<{ text: string, model: string, generatedAt: string, cached: boolean }>}
  */
 export async function requestPricingExplanation(body) {
+  return postExplanation(body);
+}
+
+/**
+ * POST public/cloud-tools/explain with `kind: "landing-zone"` — two
+ * paragraphs about one component of a landing zone build (#670, Phase 4 of
+ * #657). The body is what the server's `kinds/landingZone.js` validates:
+ * `{ kind, componentId, selected, options, teaches }`, built by
+ * pages/tools/landingZone/LzExplainButton.jsx from the page's own state and
+ * catalogue text. Same route, same quota, same responses and the same error
+ * mapping as `requestPricingExplanation`; the `kind` in the body is what
+ * tells the two apart.
+ *
+ * @param {object} body
+ * @returns {Promise<{ text: string, model: string, generatedAt: string, cached: boolean }>}
+ */
+export async function requestLandingZoneExplanation(body) {
+  return postExplanation(body);
+}
+
+/** The one call both explanation kinds make; the body carries the kind. */
+async function postExplanation(body) {
   const base = requireFunctionsBase('public/cloud-tools/explain');
   const res = await fetch(`${base}/public/cloud-tools/explain`, {
     method: 'POST',
@@ -459,4 +481,56 @@ export async function fetchPublicListenAndLearn({ platform, examCode } = {}) {
   const body = await publicGet(`public/listen-and-learn?${params}`);
   if (!body) return null;
   return { set: body.set || null, episodes: body.episodes || [] };
+}
+
+/**
+ * A labs status body has a boolean `configured` or it is not one. The two
+ * routes below answer `{ configured: false }` when the thing they describe
+ * has not been provisioned, so the flag is the one field a caller can rely
+ * on; a body without it is a different route wearing the same path.
+ */
+function requireConfiguredFlag(body, what) {
+  if (!body || typeof body !== 'object' || typeof body.configured !== 'boolean') {
+    throw new Error(`${what} response carried no configured flag`);
+  }
+  return body;
+}
+
+/**
+ * GET public/labs/estate — the live view of the Hybrid Lab host (#664):
+ * `{ configured: false }` until the resource group exists, otherwise
+ * `{ configured: true, arc: { status, lastHeartbeatAt, agentVersion, osName },
+ * policy: { compliant, nonCompliant } | null, agent: { online, queued } | null,
+ * coder: { reachable, running, max } | null, asOf }`. Read through the
+ * Function App's managed identity and cached a minute server-side; the
+ * browser never talks to Azure.
+ *
+ * Returns null only when the route itself is missing (404), which the card
+ * renders as its own sentence rather than as "not provisioned" — the two are
+ * different facts. Throws with the server's sentence otherwise, like
+ * `fetchCloudPricing`.
+ *
+ * @returns {Promise<object|null>}
+ */
+export async function fetchLabsEstate() {
+  const body = await publicGet('public/labs/estate');
+  if (!body) return null;
+  return requireConfiguredFlag(body, 'Labs estate');
+}
+
+/**
+ * GET public/labs/coder-status — Coder's state through the server-side proxy
+ * (#680): `{ configured: false }` without a `CODER_URL`, otherwise
+ * `{ configured: true, reachable, templates: [{ name, activeVersion }],
+ * capacity: { running, max }, asOf }`. `reachable: false` is a cached
+ * failure and means the card must say "unreachable", not show numbers.
+ *
+ * Same null-on-404 and throw-otherwise contract as `fetchLabsEstate`.
+ *
+ * @returns {Promise<object|null>}
+ */
+export async function fetchCoderStatus() {
+  const body = await publicGet('public/labs/coder-status');
+  if (!body) return null;
+  return requireConfiguredFlag(body, 'Coder status');
 }

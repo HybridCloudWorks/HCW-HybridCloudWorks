@@ -4,8 +4,10 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import {
+  LABS_PAGE_URL,
   NEWSLETTER_PRICE_REGION,
   PRICE_COMPARISON_URL,
+  SECTIONS,
   absoluteUrl,
   articlesSection,
   certificationNewsSection,
@@ -13,6 +15,8 @@ import {
   collectSections,
   episodesSection,
   formatPrice,
+  labThisWeekSection,
+  labWeekItems,
   plainText,
   priceChangeTitle,
 } from './sections.js';
@@ -224,6 +228,121 @@ describe('sections', () => {
       await createIssueBuilder({ store, drafter: null, now: () => NOW }).build({});
       const doc = store.written.get('newsletters/issue-2026-09-14');
       expect(doc.sections.find((s) => s.id === 'cloud-price-changes').items).toHaveLength(2);
+    });
+  });
+
+  describe('lab this week (#665)', () => {
+    const dayDoc = (day, over = {}) => ({
+      id: `labs:day:${day}`,
+      kind: 'labs-day',
+      day,
+      arcConnected: true,
+      jobsByType: {},
+      coderRunningMax: null,
+      asOf: `${day}T23:55:00.000Z`,
+      ttl: 5184000,
+      ...over,
+    });
+    const week = (docs) => Object.fromEntries(docs.map((d) => [`tool_service_cache/${d.id}`, d]));
+
+    it('is registered last, on by default like every section', () => {
+      expect(SECTIONS.at(-1)).toBe(labThisWeekSection);
+      expect(labThisWeekSection.id).toBe('lab-this-week');
+      expect(LABS_PAGE_URL).toBe('https://hybridcloudworks.com/education/labs');
+    });
+
+    it('reads the seven days before the build day by point read, never a query, and never Azure', async () => {
+      const store = makeStore(
+        {},
+        week([
+          dayDoc('2026-09-13', { jobsByType: { 'terraform-validate': { succeeded: 4, failed: 1, timeout: 0 } }, coderRunningMax: 2 }),
+          dayDoc('2026-09-12', { arcConnected: false, jobsByType: { 'terraform-validate': { succeeded: 2, failed: 0, timeout: 1 }, 'shell-echo': { succeeded: 1, failed: 0, timeout: 0 } }, coderRunningMax: 3 }),
+          dayDoc('2026-09-10', { arcConnected: null }),
+          dayDoc('2026-09-07'),
+          // Today's document and one older than the week are not read.
+          dayDoc('2026-09-14', { arcConnected: false }),
+          dayDoc('2026-09-06', { arcConnected: false }),
+        ])
+      );
+      const items = await labThisWeekSection.collect({ store, since: SINCE, until: NOW });
+      expect(items).toEqual([
+        {
+          title: 'Azure Arc: connected 2 of 3 days observed',
+          summary: 'Days the lab host reported Connected to Azure Arc, out of the days the estate page saw it.',
+          url: 'https://hybridcloudworks.com/education/labs',
+          label: 'Hybrid lab host',
+        },
+        {
+          title: 'terraform-validate: 8 runs, 6 succeeded',
+          summary: '1 failed · 1 timed out',
+          url: 'https://hybridcloudworks.com/education/labs',
+          label: 'Lab jobs',
+        },
+        {
+          title: 'shell-echo: 1 run, 1 succeeded',
+          summary: '',
+          url: 'https://hybridcloudworks.com/education/labs',
+          label: 'Lab jobs',
+        },
+        {
+          title: 'Peak Coder workspaces: 3',
+          summary: 'The most browser lab workspaces running at once, as sampled each day.',
+          url: 'https://hybridcloudworks.com/education/labs',
+          label: 'Coder',
+        },
+      ]);
+      expect(store.queryDocs).not.toHaveBeenCalled();
+      expect(store.readDoc).toHaveBeenCalledTimes(7);
+      expect(store.readDoc.mock.calls.map(([c, id]) => `${c}/${id}`)).toEqual([
+        'tool_service_cache/labs:day:2026-09-13',
+        'tool_service_cache/labs:day:2026-09-12',
+        'tool_service_cache/labs:day:2026-09-11',
+        'tool_service_cache/labs:day:2026-09-10',
+        'tool_service_cache/labs:day:2026-09-09',
+        'tool_service_cache/labs:day:2026-09-08',
+        'tool_service_cache/labs:day:2026-09-07',
+      ]);
+    });
+
+    it('is empty with no day documents, and with days that observed nothing — even with a Coder sample', async () => {
+      expect(await labThisWeekSection.collect({ store: makeStore(), since: SINCE, until: NOW })).toEqual([]);
+      const unobserved = makeStore({}, week([dayDoc('2026-09-13', { arcConnected: null }), dayDoc('2026-09-12', { arcConnected: null, coderRunningMax: 2 })]));
+      expect(await labThisWeekSection.collect({ store: unobserved, since: SINCE, until: NOW })).toEqual([]);
+      expect(labWeekItems([])).toEqual([]);
+      expect(labWeekItems([{ arcConnected: null, jobsByType: { 'shell-echo': { succeeded: 0, failed: 0, timeout: 0 } } }])).toEqual([]);
+    });
+
+    it('carries the section on jobs alone, or on Arc alone', () => {
+      const jobsOnly = labWeekItems([{ arcConnected: null, jobsByType: { 'ansible-check': { succeeded: 1, failed: 0, timeout: 0 } } }]);
+      expect(jobsOnly.map((i) => i.label)).toEqual(['Lab jobs']);
+      const arcOnly = labWeekItems([{ arcConnected: false, jobsByType: {} }]);
+      expect(arcOnly.map((i) => i.title)).toEqual(['Azure Arc: connected 0 of 1 day observed']);
+    });
+
+    it('is left out of the issue entirely when there is nothing to say — no heading, no filler', async () => {
+      const store = makeStore({ content: [article] });
+      const result = await createIssueBuilder({ store, drafter: null, now: () => NOW }).build({});
+      expect(result.success).toBe(true);
+      expect(result.sections).toEqual(['articles']);
+      const doc = store.written.get('newsletters/issue-2026-09-14');
+      expect(doc.problems).toEqual([]);
+      const { html, text } = renderIssue(doc, { postalAddress: 'x' });
+      expect(html).not.toContain('Lab this week');
+      expect(text).not.toContain('LAB THIS WEEK');
+    });
+
+    it('renders in the issue, HTML and text, as its siblings do', async () => {
+      const store = makeStore({ content: [article] }, week([dayDoc('2026-09-13', { jobsByType: { 'terraform-validate': { succeeded: 3, failed: 0, timeout: 0 } } })]));
+      const result = await createIssueBuilder({ store, drafter: null, now: () => NOW }).build({});
+      expect(result.sections).toEqual(['articles', 'lab-this-week']);
+      const doc = store.written.get('newsletters/issue-2026-09-14');
+      expect(doc.itemCount).toBe(3);
+      const { html, text } = renderIssue(doc, { postalAddress: 'x' });
+      expect(html).toContain('<h2 style="margin:0 0 16px;font-size:20px;color:#111827">Lab this week</h2>');
+      expect(html).toContain('Azure Arc: connected 1 of 1 day observed');
+      expect(html).toContain('href="https://hybridcloudworks.com/education/labs"');
+      expect(text).toContain('LAB THIS WEEK');
+      expect(text).toContain('- terraform-validate: 3 runs, 3 succeeded\n  Lab jobs\n  https://hybridcloudworks.com/education/labs');
     });
   });
 

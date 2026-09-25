@@ -94,6 +94,21 @@ const toMs = (v) => {
 };
 const toIsoOrNull = (v) => (toMs(v) ? new Date(toMs(v)).toISOString() : null);
 
+/** An agent is offline after three missed 30 s heartbeats. */
+export const AGENT_STALE_AFTER_MS = 90 * 1000;
+
+/**
+ * The snapshot's online rule, exported so the public estate read
+ * (lib/labs/estate.js) says "online" by the same clock the admin page does.
+ *
+ * @param {unknown} lastSeenAt - ISO string, Date, or Firestore-style { toMillis }
+ * @param {number} nowMs
+ */
+export function isAgentOnline(lastSeenAt, nowMs) {
+  const lastSeenMs = toMs(lastSeenAt);
+  return lastSeenMs > 0 && nowMs - lastSeenMs < AGENT_STALE_AFTER_MS;
+}
+
 /**
  * @param {object} deps
  * @param {{ requireRole: Function }} deps.guard
@@ -211,7 +226,6 @@ export function createLabHandlers({ guard, store, now = () => new Date(), uuid =
       if (auth.error) return auth.error;
 
       try {
-        const STALE_AFTER_MS = 90 * 1000; // 3 missed 30s heartbeats
         const nowMs = now().getTime();
 
         const [agentRows, jobRows, queuedCount] = await Promise.all([
@@ -233,7 +247,7 @@ export function createLabHandlers({ guard, store, now = () => new Date(), uuid =
             capabilities: data.capabilities || [],
             status: data.status || 'unknown',
             lastSeenAt: lastSeenMs ? new Date(lastSeenMs).toISOString() : null,
-            online: lastSeenMs > 0 && nowMs - lastSeenMs < STALE_AFTER_MS,
+            online: isAgentOnline(data.lastSeenAt, nowMs),
           };
         });
 

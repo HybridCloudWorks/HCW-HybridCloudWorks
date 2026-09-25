@@ -1,0 +1,169 @@
+# Coder (Community edition) and its PostgreSQL: the only two Docker Compose
+# services on the lab host (ADR 0032, decision 2). Installed to
+# /etc/hcw/coder/ by the Ansible `coder` role in lab-host/ansible, which also
+# writes the three files this one reads and never commits:
+#
+#   .env                 Compose interpolation: CODER_IMAGE and
+#                        CODER_POSTGRES_IMAGE (image@digest, from the pins in
+#                        ansible/group_vars/all.yml) and DOCKER_GID (read from
+#                        the host with getent). Not secret.
+#   coder.env            Coder's secrets and the values that come from Vault or
+#                        group_vars: CODER_OAUTH2_GITHUB_CLIENT_ID,
+#                        CODER_OAUTH2_GITHUB_CLIENT_SECRET,
+#                        CODER_OAUTH2_GITHUB_ALLOWED_ORGS,
+#                        CODER_OAUTH2_GITHUB_ALLOW_SIGNUPS and
+#                        CODER_PG_CONNECTION_URL. root:root 0600.
+#   coder-postgres.env   POSTGRES_PASSWORD. root:root 0600, separate from
+#                        coder.env so the database container never sees the
+#                        OAuth secret.
+#
+# Every CODER_* name below was checked against
+# https://coder.com/docs/reference/cli/server on 2026-09-25: --access-url,
+# --wildcard-access-url, --http-address, --postgres-url,
+# --oauth2-github-client-id, --oauth2-github-client-secret,
+# --oauth2-github-allow-signups, --oauth2-github-allowed-orgs,
+# --oauth2-github-default-provider-enable, --disable-password-auth,
+# --secure-auth-cookie, --redirect-to-access-url, --proxy-trusted-headers and
+# --proxy-trusted-origins each list the CODER_ variable used here. The
+# group_add pattern is Coder's documented Docker install
+# (https://coder.com/docs/install/docker: "Coder runs as a non-root user" and
+# gets the socket through --group-add with the docker group's id).
+#
+# The privilege boundary (ADR 0032, decision 4 and its consequences): the
+# Docker socket is mounted into the `coder` service and nowhere else. A
+# workspace is a container the Coder server creates from
+# templates/hcw-lab/main.tf; the test beside that file asserts a workspace
+# never gets the socket, `privileged`, or a host path.
+#
+# To parse this file without the host: bash lab-host/coder/compose-config-check.sh
+# (creates empty stand-ins for the three files in a temporary directory and
+# runs `docker compose config`).
+
+name: coder
+
+services:
+  coder:
+    # Pinned by digest in ansible/group_vars/all.yml (coder_image_digest, the
+    # image index of ghcr.io/coder/coder:v2.37.3 on 2026-09-25). Docker
+    # verifies the content against the digest on pull, so the tag is recorded
+    # there for humans and never pulled.
+    image: ${CODER_IMAGE:?set by the coder role in .env from coder_image and coder_image_digest}
+    # Named so the ADR 0032 validation list (`docker ps` shows `coder` and
+    # `coder-postgres`) holds by name rather than by Compose's <project>-<service>-1.
+    container_name: coder
+    restart: unless-stopped
+    depends_on:
+      coder-postgres:
+        condition: service_healthy
+    # The image runs as the non-root `coder` user. group_add puts that user in
+    # the host's docker group so it can drive the daemon through the socket
+    # below; the GID differs per host, so the role reads it with getent and
+    # writes it to .env.
+    group_add:
+      - "${DOCKER_GID:?set by the coder role in .env from getent group docker}"
+    # Coder listens on every interface INSIDE the container (a 127.0.0.1 bind
+    # inside the container is unreachable from the host's port publish), and
+    # Docker publishes it on the host's loopback only. Caddy on the host
+    # reverse-proxies coder.lab and *.coder.lab to 127.0.0.1:7080; nothing
+    # else on the network can reach this port.
+    ports:
+      - "127.0.0.1:7080:7080"
+    environment:
+      CODER_HTTP_ADDRESS: "0.0.0.0:7080"
+      CODER_ACCESS_URL: "https://coder.lab.hybridcloudworks.com"
+      # Workspace apps (code-server) are served one label below coder.lab,
+      # which is why the Caddy certificate carries *.coder.lab (ADR 0032).
+      CODER_WILDCARD_ACCESS_URL: "*.coder.lab.hybridcloudworks.com"
+      CODER_REDIRECT_TO_ACCESS_URL: "true"
+      # TLS terminates in Caddy, so the session cookie is only ever sent over
+      # HTTPS from the browser's point of view.
+      CODER_SECURE_AUTH_COOKIE: "true"
+      # GitHub OAuth is the only way in (ADR 0032, decision 4). The first
+      # GitHub sign-in on an empty deployment becomes the owner
+      # (coderd/userauth.go, oauthLogin: "Allow the first user to sign up with
+      # OIDC, regardless of AllowSignups" and "If this is the first user, add
+      # the owner role"), so no password account is ever created.
+      CODER_DISABLE_PASSWORD_AUTH: "true"
+      # Coder ships a default GitHub app run by Coder the company; the docs
+      # warn that installing it grants them access to the organisation's
+      # data. Off, because coder.env carries our own app.
+      CODER_OAUTH2_GITHUB_DEFAULT_PROVIDER_ENABLE: "false"
+      # Caddy sets X-Forwarded-For. Connections from the host's loopback
+      # publish reach this container from the compose network's gateway, so
+      # trusting that subnet is what lets Coder's audit log and rate limits
+      # see the learner's address rather than the gateway's. The subnet is
+      # fixed below so this value cannot drift from it.
+      CODER_PROXY_TRUSTED_HEADERS: "X-Forwarded-For"
+      CODER_PROXY_TRUSTED_ORIGINS: "172.28.240.0/24"
+    env_file:
+      - path: ./coder.env
+        required: true
+    volumes:
+      # The one socket mount on the host that is not vps-agent's own docker
+      # group membership. Workspaces never receive it (templates/hcw-lab).
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - coder
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  coder-postgres:
+    # Pinned by digest in ansible/group_vars/all.yml (coder_postgres_image_digest,
+    # the image index that postgres:16 and postgres:16.15 both resolved to on
+    # 2026-09-25).
+    image: ${CODER_POSTGRES_IMAGE:?set by the coder role in .env from coder_postgres_image and coder_postgres_image_digest}
+    container_name: coder-postgres
+    restart: unless-stopped
+    env_file:
+      - path: ./coder-postgres.env
+        required: true
+    environment:
+      POSTGRES_USER: coder
+      POSTGRES_DB: coder
+    # Listens on the compose network only: no `ports`, so nothing on the host
+    # or the internet reaches 5432 (docs/architecture/labs-host.md).
+    volumes:
+      - coder-postgres-data:/var/lib/postgresql/data
+    networks:
+      - coder
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U coder -d coder"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+networks:
+  # The Compose network. Workspaces are NOT on it: each one gets its own
+  # bridge network from the template, with no route here or to 5432. The
+  # subnet is fixed so CODER_PROXY_TRUSTED_ORIGINS above stays true; Docker
+  # will not hand this range to any other network while it exists.
+  coder:
+    name: coder
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.240.0/24
+
+volumes:
+  # Rebuildable metadata, not data of record (docs/architecture/labs-host.md):
+  # the coder role's nightly pg_dump under /var/backups/coder is the only copy.
+  coder-postgres-data:
+    name: coder-postgres-data

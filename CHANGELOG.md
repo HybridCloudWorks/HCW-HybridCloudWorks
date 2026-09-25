@@ -66,6 +66,292 @@ This project has not cut a tagged release; entries are grouped under
   `/education/labs` (#681) to link. `IMAGES.hcwLabRunner` pins the Phase 1
   publish; the digest that carries this phase's image is bumped in a
   follow-up once `main` republishes.
+- **Docker agentic sandbox recipe and the "Run an agent against your landing
+  zone" section on `/education/labs` (#676).** Phase 3 of #658.
+  `lab-image/sandbox-template/Dockerfile` extends Docker's Claude Code
+  sandbox template (`docker/sandbox-templates:claude-code`, pinned by image
+  index digest) with terraform and the Azure CLI at the versions
+  `lab-image/versions.env` pins — the build context is `lab-image/` so the
+  file is read from its one home, the Azure CLI package string's `~bookworm`
+  suffix is swapped for the base image's Ubuntu codename with the version
+  number unchanged, and every download is checked against the pinned SHA256
+  — and installs `AGENTS.md` as the agent user's `~/.claude/CLAUDE.md`: the folder
+  is a landing zone generated for learning, run `terraform init
+  -backend=false`, `fmt -check` and `validate`, explain the files, never
+  `plan`, `apply` or reach a tenant. `README.md` beside it carries every
+  command, PowerShell then bash: build, `docker image save` and `sbx template
+  load`, the `sbx policy allow network --sandbox hcw-lz` line the deny-by-
+  default sandbox needs for the Terraform registry and GitHub, and `sbx run
+  --name hcw-lz --template hcw-lz-sandbox:v1 claude .`. On the page, the
+  `#676` slot is filled by `SandboxSection`: three numbered steps (build in
+  the Landing Zone Builder and download the zip, unzip it, create the
+  sandbox from that folder), the `sbx run` line under each shell through a
+  `CommandLine` component shared with the lab cards, the first prompt as one
+  quoted sentence, the sentence that local sandboxes are free and cloud ones
+  bill the learner's own Docker subscription and expire after an hour, and a
+  link to the recipe directory. Every `sbx` fact was read from the Docker
+  documentation on 2026-09-25 (`docker sandbox` is removed from Docker 29;
+  the CLI is `sbx`, custom templates are `--template <image>` on `sbx
+  create`/`sbx run`, cloud sandboxes need a Docker Agentic Platform
+  subscription, cannot mount a host workspace and expire after one hour by
+  default) and the page cites the URLs in its source. The image built
+  locally (3.38 GB) and `terraform init -backend=false`, `fmt -check` and
+  `validate` passed inside it against a full builder emission; the `sbx`
+  commands themselves are the documentation's shapes, not exercised, since
+  the CLI needs a hypervisor the build machine did not have enabled.
+  `validate-repository-structure.ps1` allowlists the recipe's `README.md`
+  and `AGENTS.md`.
+- **Newsletter section "Lab this week" with a daily labs rollup timer
+  (#665).** Phase 5 of #656. A new flag-gated timer `labsWeeklyRollup`
+  (`functions/src/functions/labs-jobs.js`, `FEATURE_FLAG_LABS_WEEKLY_ROLLUP`,
+  daily 23:55 UTC, catalogued in `infra/functionapp.tf` and allowed by the
+  `enabled_timers` validation) writes one `labs:day:<YYYY-MM-DD>` document
+  per UTC day to `tool_service_cache` with a sixty-day TTL:
+  `{ arcConnected: boolean|null, jobsByType: { [type]: { succeeded, failed,
+  timeout } }, coderRunningMax: number|null }`, computed by
+  `functions/src/lib/labs/rollup.js` from three point reads (the
+  `labs:estate` and `labs:coder-status` minute-cache documents and any
+  earlier document for the same day) and ONE grouped count of `lab_jobs`
+  bounded on the indexed `createdAt` and the three terminal statuses — no
+  per-job read, no full scan, and never a call to Azure or Coder. Null means
+  not observed, not down: `arcConnected` is a boolean only when an estate
+  document stamped that day described a configured estate. A rerun for the
+  same day merges — connected once stays connected, the Coder peak keeps the
+  larger sample, job counts are recomputed. The newsletter section
+  `lab-this-week` (`functions/src/lib/newsletter/sections.js`, registered
+  last and on by default) point-reads the seven day documents before the
+  build day and renders Arc uptime as days connected out of days observed,
+  lab jobs by type with success counts, and the peak Coder workspace count,
+  every item linking to `https://hybridcloudworks.com/education/labs`; it
+  renders nothing, and the issue omits it, when no day document exists or
+  none observed the estate or a job. Tests beside each module cover the
+  rollup computation from fixture cache documents and grouped rows, the TTL,
+  the timer's flag gate and disabled skip, the section with data, and the
+  section omitted from a built issue without it; `route-inventory.test.js`
+  and `timer-schedules-utc.test.js` now count twenty-two timers.
+- **Landing Zone Builder, Phase 4: "Explain this component" and the
+  `landing-zone` article embed (#670).** Phase 4 of #657, frontend half, on
+  the #669 backend. `frontend/src/pages/tools/landingZone/LzExplainButton.jsx`
+  sits in the teaches panel beside the focused component and, on a click and
+  never otherwise, sends `{ kind: "landing-zone", componentId, selected,
+  options, teaches }` — the five keys the server's validator allows and no
+  other, built from the normalised build and the catalogue's own text — to
+  `POST public/cloud-tools/explain` through `requestLandingZoneExplanation`
+  in `lib/publicApi.js` (the pricing call and it share one `postExplanation`;
+  the body's `kind` tells them apart). The answer is shown under a
+  "Generated by AI" label with the model, the time and "cached" in words, is
+  keyed to the exact body it explained so it goes away when the focus or the
+  build changes, and reads the quota (429) and the paused or off states
+  (503) as sentences with no retry, the way the pricing button does — the
+  button, the panels and the click-only rule now live once in
+  `pages/tools/explain/ExplainControl.jsx`, and `scenario/ExplainButton.jsx`
+  is what the pricing page sends and the words it uses, its tests unchanged.
+  A `landing-zone` code fence whose body is the build's share query string
+  (`lz=mg,policy,mgmt,hub,fw&corp=2`) renders a read-only card in an
+  article: `components/content/LandingZoneEmbed.jsx` is the lazy shell
+  (the frame and placeholder shared with the pricing embed through the new
+  `EmbedShell.jsx`) and `LandingZoneCard.jsx` the chunk, decoding with
+  `decodeLz`, drawing the diagram through the page's own SVG (moved into
+  `landingZone/LzSvg.jsx`, with a non-interactive mode that leaves the boxes
+  as plain groups), listing the selected components with a line each, and
+  linking to the same build in the tool. `markdownCodeComponents` in
+  `components/shared/CodeBlock.jsx`
+  now dispatches through an `EMBED_COMPONENTS` map, `{ language: Component }`,
+  so the next tool's fence is one line; the `pricing-scenario` entry and its
+  tests are unchanged. The fence is documented beside `pricing-scenario` in
+  `docs/content/blog-template.md`. Tests: the button's body against a copy of
+  the server's allowlist for every component, each response state, the
+  answer dropped on a focus change; the embed's decoding, card, link, junk
+  tolerance, pre-render and hydration; both fences dispatched by the map.
+
+- **Public labs reads: the Hybrid Lab estate and Coder status, with no
+  browser call to either (#664, #680).** Backend halves of Phase 4 of #656
+  and Phase 2 of #659. `GET /api/public/labs/estate` reads the Arc-enabled
+  lab host through Azure Resource Graph with the Function App's own managed
+  identity, under a new Reader grant scoped to `rg-lab-hybrid-prod-cus`
+  alone (`infra/lab-hybrid.tf` creates the group and the assignment; no new
+  credential exists): the machine's status, last status change, agent
+  version and OS name — never its name, which is the hostname — plus policy
+  compliance counts for the group, whether a `vps-agent` is heartbeating and
+  how many `lab_jobs` are queued, and Coder capacity. It answers
+  `{ configured: false }` when no machine exists and 503 when Azure cannot
+  be read, never an invented row, and a side read that fails is `null`, not
+  zero. `GET /api/public/labs/coder-status` is the server-side proxy the CSP
+  requires: `CODER_URL` and `CODER_STATUS_TOKEN` are Key Vault references to
+  `CODER-URL` and `CODER-STATUS-TOKEN` (catalogued for the API-keys page
+  under a new Hybrid Lab section), the token stays in the Function App, and
+  the route returns template names with their active version, the running
+  workspace count and `CODER_MAX_WORKSPACES` (default 5, the Community cap)
+  after `GET /api/v2/templates`, `/api/v2/workspaces?q=status:running` and
+  one `/api/v2/templateversions/{id}` per template with a 5 s timeout. Both
+  routes are anonymous and cache one document a minute in
+  `tool_service_cache`, so visitors cannot drive the management plane or
+  Coder; a failed Coder read is cached as unreachable so the card never shows
+  stale numbers. Listed in `PUBLIC_ROUTES` and `.azure/api-surface.json`. The
+  `hcw-azure` apply that creates the group, the grant and the three app
+  settings is the owner's run.
+- **Coder Phase 1: Docker Compose on the lab host, the Caddy route, the
+  hcw-lab workspace template with its hardening test, and the Ansible role
+  (#679).** Phase 1 of #659, on ADR 0032. `lab-host/coder/docker-compose.yml`
+  runs exactly two services, `coder` (ghcr.io/coder/coder v2.37.3) and
+  `coder-postgres` (postgres 16.15), both by image-index digest held once in
+  `group_vars/all.yml` and interpolated through a role-written `.env`; the
+  Docker socket is mounted into `coder` only, which runs as the image's
+  non-root user with `group_add` set to the host's docker GID, publishes 7080
+  on loopback only, disables password auth and Coder's default GitHub app,
+  and reads its secrets from `/etc/hcw/coder/coder.env` (root, 0600) with the
+  database password in a second file the database alone sees.
+  `templates/hcw-lab/main.tf` adapts Coder's Docker starter template: a
+  `lab` dropdown validated against the three catalogue ids, the
+  `hcw-lab` image by digest, `user = "65534:65534"`, hard limits of one CPU
+  and 2 GiB, all capabilities dropped, `no-new-privileges`, a per-workspace
+  named volume as the only mount, a per-workspace bridge network created and
+  removed with the container so it never joins the Compose network, and the
+  pinned `code-server` module on a `*.coder.lab` subdomain.
+  `template.test.mjs` (`node --test`) reads both files as text and fails when
+  the socket appears outside the `coder` service, anything is `privileged`,
+  a `host_path` or `mounts` block appears, `network_mode` or the Compose
+  network is referenced, or the user is not 65534; the new `coder (lab-host)`
+  CI job runs it with `docker compose config` and `terraform validate`. The
+  `coder` Ansible role installs the Compose project, fails closed without a
+  non-empty organisation allowlist, the three Vault keys or on a host too
+  small for `coder_max_workspaces`, brings the project up or down, renders
+  `/etc/caddy/conf.d/10-coder.caddy` (503 with a sentence when the service
+  is stopped, so the kill switch is legible), and keeps seven nightly
+  `pg_dump`s under `/var/backups/coder`. Found on the way: the Coder agent
+  runs every script through the user's `/etc/passwd` shell, and Debian's
+  `nobody` has `nologin`, so the template writes the image's passwd back
+  with a shell for uid 65534 until `lab-image/` does; and `coder templates
+  push` has no `--default-ttl` in the current CLI reference, so the one-hour
+  autostop is `coder templates edit hcw-lab --default-ttl 1h`.
+
+- **The Azure Verified Module pins are checked against the registry every
+  week, and a newer release opens a pull request (#671).** Phase 5 of #657.
+  `frontend/src/lib/landingZone/avmVersions.js` says its pins are "looked up,
+  not remembered"; `.github/workflows/update-avm-versions.yml` is what looks,
+  Tuesdays at 06:30 UTC and by hand, modelled on `update-learn-catalogue.yml`
+  down to the two-job split, the App token minted for a few API calls and
+  revoked, the `automation` environment, and the ready-for-review pull
+  request. `frontend/scripts/update-avm-versions.mjs` imports `AVM_MODULES`,
+  asks `registry.terraform.io/v1/modules/Azure/<name>/azurerm` for each
+  module's latest release, refuses anything that is not `MAJOR.MINOR.PATCH`
+  tagged `v<version>`, and for a module that moved rewrites exactly one
+  `avm('<name>', '<version>', …)` pin, restamps `AVM_VERIFIED_ON` with the UTC
+  date, downloads the release tarball from GitHub (the proof the tag exists)
+  and, where `lab-image/versions.env` vendors the module (#658), rewrites its
+  `_VERSION` and `_SHA256` lines with the tarball's sum so the image and the
+  builder cannot disagree. Exit 0 and no writes when nothing moved;
+  `--dry-run` prints without writing. The summary the pull request carries
+  tables every pin's old → new with its GitHub release notes and says whether
+  the release's `required_providers` drifted from the pinned
+  `requiredProviders` — the edit the script does not make, flagged as **HAND
+  EDIT NEEDED**. Because the versions are in the `hcl.test.js` snapshots, the
+  workflow refreshes them with `npx vitest run -u src/lib/landingZone` after a
+  bump and then runs the same suites without `-u` as the gate, so the pull
+  request carries the Terraform diff a learner would download and a drifted
+  input name fails in the run rather than on the PR. The branch stages exactly
+  the pins, the versions file and the snapshot, asserted by
+  `scripts/avm-versions-workflow.test.mjs`; the comparison, validation, text
+  edits and summary are the pure half in `frontend/scripts/avm-versions-edits.mjs`
+  and are unit-tested beside the script; `index.test.js` now asserts `AVM_VERIFIED_ON`
+  is a calendar date no earlier than 2026-09-25 instead of naming the day.
+
+- **`/education/labs`: the browser labs page, with the lab catalogue, Open in
+  Coder deep links, Run it locally, and the estate and Coder status cards
+  (#681).** Phase 3 of #659, carrying the frontend halves of #664 (the
+  "Hybrid Lab right now" card) and #680 (the Coder status card) against the
+  contracts those issues fix. `frontend/src/data/labs/catalogue.js` is pure
+  frozen data — one row per lab with `id`, `title`, `summary`, `tools`,
+  `template`, `params`, `articleSlugs` and `estimatedMinutes`, and a test
+  that every row carries every field and no two share an `id` — starting
+  with the Landing Zone Builder download, a `terraform validate` walkthrough
+  and an Ansible syntax-check walkthrough. Each card links to
+  `https://coder.lab.hybridcloudworks.com/templates/hcw-lab/workspace?mode=auto&param.lab=<id>`
+  through `safeUrl`, and carries the two `docker run` lines from #658,
+  PowerShell then bash, each labelled with its shell. `LabsEstateCard.jsx`
+  reads `GET /api/public/labs/estate` through the new `fetchLabsEstate()`
+  and renders "The lab host is not provisioned yet." for
+  `{ configured: false }` and, when configured, the Arc status word, the
+  heartbeat age in words, agent version, OS, policy counts, job-runner queue
+  and Coder capacity; `CoderStatusCard.jsx` reads `GET
+  /api/public/labs/coder-status` through `fetchCoderStatus()` and says "not
+  yet provisioned" or "unreachable" before it shows templates and capacity.
+  Every state on the page is a word, never a colour alone. Two slot sections
+  hold the layout for the agent section (#676) and the article list (#677).
+  Wired in App.jsx, `STANDALONE_ROUTES`, `staticRoutes.labs`, a new Learn
+  menu in the header (the first header link to `/education` as well) and a
+  section on `/education`, each enforced by a test.
+- **Landing Zone Builder, Phase 2: the page at `/tools/landing-zone` (#668).**
+  Phase 2 of #657, on the pure module #667 landed. `frontend/src/pages/tools/
+  LandingZonePage.jsx` is where a learner assembles an Azure landing zone
+  component by component: a build panel (`landingZone/LzControls.jsx`) with a
+  checkbox per component, grouped platform and application, a count of 0 to 5
+  for corp and online landing zones, and one knob per option (region, parent
+  management group, hub and spoke address spaces, private DNS zones, firewall
+  SKU); a teaches panel (`LzTeaches.jsx`) that follows whichever component was
+  last ticked, clicked in the diagram or asked about, with its hand-written
+  explanation, what it needs, the pinned module that deploys it and its knobs;
+  an inline SVG of the management group tree (`LzDiagram.jsx`) drawn from
+  `layoutDiagram`, every box a button that focuses its component, with zoom
+  and pan from the `react-zoom-pan-pinch` the site already shipped; and the
+  generated Terraform (`LzFiles.jsx`), one tab per emitted file rendered with
+  the site's `CodeBlock`, plus a Download zip button.
+
+  **The build is the URL.** `useLzState.js` is `useScenarioState.js` adapted
+  to `share.js`: every control writes `?lz=` and the option keys and reads
+  itself back, so a bare URL is the full default build, a shared link
+  reproduces a build exactly, and the pre-rendered page and the first client
+  render agree; a test renders the page to a string twice and hydrates the
+  result without a mismatch. The dependency rule is spoken, not just enforced:
+  a component says "Ticking it also adds Connectivity hub" before it is
+  ticked and "Unticking it also removes Azure Firewall" after, and a spoke
+  range the state moved off the hub is explained in a sentence, kept on the
+  page even once the URL carries only the moved value. An invalid range is
+  refused in the validator's own words and never reaches the URL.
+
+  **The zip holds exactly the files the tabs show.** `fflate` is the one new
+  dependency, imported inside the click handler so it is a lazy chunk a
+  reader who never downloads never fetches and the pre-render never
+  evaluates; the test mocks it and asserts the entry names equal the tab
+  names and each entry's bytes equal the file's content. Wiring, each held by
+  an existing test or the new one: the `lazyPage` route in `App.jsx`, the
+  standalone list in `scripts/prerender-entry.jsx`, `staticRoutes.landingZone`,
+  a Tools menu entry in `Header.jsx`, and a first card on `/terraform/tools`
+  that opens the page. The Azure education page has no tools list, so it got
+  no cross-link. The three placeholder tool slots are untouched. Helmet sets
+  the title and the canonical; the default build renders the management
+  groups' teaches text and a dozen file tabs, well past the prerender's
+  420-character floor.
+
+- **The explain route is generalised by kind, and the Landing Zone Builder
+  gets its "Explain this component" backend (#669).** Phase 3 of #657,
+  backend half. `POST public/cloud-tools/explain` reads an optional `kind`
+  from the body: omitted or `pricing` is the #613 contract byte for byte
+  (same validator, same canonical hash, same `pricingExplain` toggle, same
+  stored document — the existing tests are unchanged and the existing cached
+  texts keep serving); `landing-zone` dispatches to
+  `functions/src/lib/cloud-tools/explain/kinds/landingZone.js`, whose
+  validator accepts `{ kind, componentId, selected (<= 12), options, teaches
+  (<= 1200) }` against frozen copies of the catalogue's eight component ids
+  and eight option knobs, every string capped, unknown keys refused, and
+  whose prompt asks for two paragraphs — why this component matters for
+  exactly this selection and options, then what changes if it is deselected
+  — grounded in the page's own `teaches` text and the four Azure Verified
+  Module sources embedded per component, with no tenant and no prices. The
+  cache, the 8 KB cap, the 5 per hour per client and the 200 per day are the
+  same code and the same counters for both kinds: one anonymous AI budget.
+  The landing-zone canonical text starts with `kind`, so its cache ids
+  cannot collide with pricing's. `AI_FEATURES.landingZoneExplain` is the
+  kind's own off switch, with its call site in the kind module so
+  `ai-call-sites.test.js` can see the literal. The kind shape (`id`,
+  `feature`, `validate`, `canonical`, `cacheFields`, `generate`) is
+  documented on `kinds/pricing.js`; `.azure/api-surface.json` spells out the
+  `landing-zone` body for the frontend phase (#670). Tests: kind dispatch,
+  the unchanged default, an explicit `kind: "pricing"` hashing the same as
+  none, unknown kind 400, the landing-zone validator's refusals, quota and
+  daily pause shared across kinds, the toggle off for one kind while the
+  other serves, and the prompt naming the component and every selected id.
+
 - **The lab host is configured by Ansible, not by hand over SSH (#662).**
   Phase 2 of #656. `lab-host/ansible/` holds `site.yml` and five roles that
   replace the manual steps the admin Labs page's Setup tab has printed since

@@ -317,6 +317,12 @@ export default defineConfig(({ mode }) => {
               ) {
                 return 'vendor-utils';
               }
+              // fflate is reached only from the Landing Zone Builder's Download
+              // zip click (#668), behind a dynamic import, so it gets its own
+              // chunk rather than riding in the one every route downloads.
+              if (id.includes('node_modules/fflate/')) {
+                return 'vendor-zip';
+              }
               if (id.includes('react-router')) {
                 return 'vendor-router';
               }

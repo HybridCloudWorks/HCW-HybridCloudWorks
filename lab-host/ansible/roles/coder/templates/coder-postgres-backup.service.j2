@@ -1,0 +1,15 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Nightly pg_dump of Coder's PostgreSQL ({{ coder_backup_keep_days }} days under {{ coder_backup_dir }})
+Documentation=https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/tree/main/lab-host
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart={{ coder_backup_script_path }}
+Nice=10
+IOSchedulingClass=idle
+PrivateTmp=true
+ProtectHome=true
+NoNewPrivileges=true

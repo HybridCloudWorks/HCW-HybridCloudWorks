@@ -1,0 +1,13 @@
+{
+  "name": "hcw-lab-host-coder",
+  "description": "Hardening test for the Coder Compose file and the hcw-lab workspace template on the lab host",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

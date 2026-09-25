@@ -1189,6 +1189,7 @@ variable "enabled_timers" {
         "CHECK_AGENT_HEALTH", "FETCH_PODCAST_FEEDS", "FETCH_BLOG_LISTINGS",
         "SYNC_SOCIAL_CALENDAR", "CLEANUP_TEMP_STORAGE", "CLEANUP_UNUSED_CERT_IMAGES",
         "PLATFORM_JOB_SWEEPER", "BUILD_WEEKLY_NEWSLETTER", "REFRESH_TOOL_SERVICE_CACHE",
+        "LABS_WEEKLY_ROLLUP",
       ], name)
     ])
     error_message = "enabled_timers accepts only flag suffixes from local.timer_catalogue in functionapp.tf, e.g. SYNC_RSS_FEEDS — not the function name, and not the full FEATURE_FLAG_ prefix."

@@ -259,7 +259,13 @@ and attests. Where each sum comes from:
   `https://registry.terraform.io/v1/providers/<namespace>/<name>/<version>/download/linux/amd64`.
 - AVM pattern modules: `sha256sum` of the downloaded
   `https://github.com/Azure/terraform-azurerm-<name>/archive/refs/tags/v<version>.tar.gz`.
-  Then refresh the children: a bump usually changes what a pattern module
+  These lines are normally moved for you: `.github/workflows/update-avm-versions.yml`
+  (#671) checks the builder's pins in `frontend/src/lib/landingZone/avmVersions.js`
+  against the Terraform Registry every Tuesday and, when a module has a newer
+  release, opens one pull request that bumps the pin, these two lines and the
+  HCL snapshots together, with the sum computed from the same tarball.
+
+  The workflow does not refresh the child modules, so do that by hand: a bump usually changes what a pattern module
   calls, and the build fails until `AVM_CHILD_MODULES` matches. Print the
   new block and paste it over the old one. bash:
 

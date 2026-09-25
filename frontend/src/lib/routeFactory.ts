@@ -203,10 +203,15 @@ export const staticRoutes = {
   home: '/',
   about: '/about',
   contact: '/contact',
+  // The cross-provider Learn pages. A static first segment, so they outrank
+  // `/:provider/education` in App.jsx (#681).
+  education: '/education',
+  labs: '/education/labs',
   comparison: '/tools/comparison',
   migration: '/tools/migration',
   resources: '/tools/resources',
   decisions: '/tools/decisions',
+  landingZone: '/tools/landing-zone',
 } as const;
 
 /**

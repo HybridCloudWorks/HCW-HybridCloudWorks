@@ -193,6 +193,22 @@ const PUBLIC_ROUTES = new Set([
   // everyone through a compare-and-increment, and an 8 KB body validated
   // field by field before any of that — lib/cloud-tools/explain/.
   'public/cloud-tools/explain',
+  // "The Hybrid Lab right now" (#664, ADR 0032 decision 3): the Arc machine's
+  // status, policy counts, the lab agent's queue and Coder capacity, read by
+  // the Function App's own identity under Reader on rg-lab-hybrid-prod-cus.
+  // Public because it backs a card every visitor to /education/labs sees;
+  // safe because the read is one cached document rewritten at most once a
+  // minute (a visitor cannot make it call Azure), the queries never project
+  // the machine name, and the answer is { configured: false } rather than an
+  // invented row when the estate is absent — lib/labs/estate.js.
+  'public/labs/estate',
+  // Coder's templates and running-workspace count through a server-side proxy
+  // with a read-only token (#680, ADR 0032 decision 4), so the browser never
+  // calls Coder and the SPA's connect-src stays closed. Same one-minute cache;
+  // a failed read is cached as unreachable rather than serving stale numbers;
+  // the response carries names and counts, never the URL or the token —
+  // lib/labs/coder-status.js.
+  'public/labs/coder-status',
 ]);
 
 const ALLOWED_ORIGIN = 'https://hybridcloudworks.com';
@@ -366,11 +382,14 @@ describe('non-HTTP triggers', () => {
     // (jobs-sweeper.js), behind its own flag; the twentieth is
     // cosmosExportScheduler (cosmos-export.js, ADR 0028), behind
     // FEATURE_FLAG_COSMOS_EXPORT; the twenty-first is refreshToolServiceCache
-    // (cloud-tools-jobs.js, #613), behind FEATURE_FLAG_REFRESH_TOOL_SERVICE_CACHE.
-    expect(timerRegistrations.size).toBe(21);
+    // (cloud-tools-jobs.js, #613), behind FEATURE_FLAG_REFRESH_TOOL_SERVICE_CACHE;
+    // the twenty-second is labsWeeklyRollup (labs-jobs.js, #665), behind
+    // FEATURE_FLAG_LABS_WEEKLY_ROLLUP.
+    expect(timerRegistrations.size).toBe(22);
     expect(timerRegistrations.has('platformJobSweeper')).toBe(true);
     expect(timerRegistrations.has('cosmosExportScheduler')).toBe(true);
     expect(timerRegistrations.has('refreshToolServiceCache')).toBe(true);
+    expect(timerRegistrations.has('labsWeeklyRollup')).toBe(true);
     expect(timerRegistrations.has('buildWeeklyNewsletter')).toBe(true);
     for (const name of ['cleanupTempStorage', 'cleanupUnusedCertImages']) {
       // The two that delete blobs: registered, and their handlers are the

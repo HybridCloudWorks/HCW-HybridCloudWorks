@@ -50,7 +50,8 @@ resource "azurerm_service_plan" "hcw" {
 # The catalogue is the authority on which timers exist. It must match the
 # `timer(name, FLAG, ...)` registrations in
 # functions/src/functions/schedulers.js plus platformJobSweeper in
-# jobs-sweeper.js and refreshToolServiceCache in cloud-tools-jobs.js —
+# jobs-sweeper.js, refreshToolServiceCache in cloud-tools-jobs.js and
+# labsWeeklyRollup in labs-jobs.js —
 # route-inventory.test.js asserts the timer set, so a timer added there
 # without a flag here ships disarmed and one removed there leaves a dead
 # setting behind.
@@ -86,6 +87,10 @@ locals {
     # AWS and GCP rows fall back to baseline or go absent until their Key
     # Vault secrets are seeded.
     REFRESH_TOOL_SERVICE_CACHE = "refreshToolServiceCache — daily 02:00 UTC, enqueues the pricing cache refresh job"
+    # #665: folds the labs minute-caches and the day's lab_jobs into one
+    # labs:day:<date> document the newsletter's "Lab this week" section reads.
+    # Point reads and one grouped count; never calls Azure or Coder.
+    LABS_WEEKLY_ROLLUP = "labsWeeklyRollup — daily 23:55 UTC, writes the day's labs rollup document for the newsletter"
   }
 
   timer_flags = {
@@ -552,6 +557,22 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # vault procedure, readKey() sees the unresolved reference as unconfigured
     # and the preview route answers 404 — the loop arms itself when seeded.
     "PREVIEW_SIGNING_SECRET" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/PREVIEW-SIGNING-SECRET)"
+
+    # Hybrid Lab — Coder status proxy (ADR 0032 decision 4, #680). The public
+    # labs page shows Coder's templates and running-workspace count through
+    # lib/labs/coder-status.js, a server-side read with a read-only token, so
+    # the browser never calls Coder and the SPA's connect-src stays closed.
+    # CODER_URL is an address rather than a credential and is a vault reference
+    # anyway: the pair is then seeded through the one procedure and
+    # monitor-unresolved-secrets.yml watches both. Until they resolve, the
+    # route answers { configured: false } and the card reads "not yet
+    # provisioned". Seed the two secrets BEFORE the run that applies this
+    # (Required-Inputs §4.7) so the monitor never sees them unresolved.
+    "CODER_URL"          = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/CODER-URL)"
+    "CODER_STATUS_TOKEN" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/CODER-STATUS-TOKEN)"
+    # Community edition's concurrency cap, the denominator on the card. Not a
+    # secret. The code defaults to 5 when this is unset or unparseable.
+    "CODER_MAX_WORKSPACES" = "5"
 
     "NODE_ENV" = "production"
 
