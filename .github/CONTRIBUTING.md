@@ -9,7 +9,8 @@ review discipline — read this before your first pull request.
 | Content | Home |
 | --- | --- |
 | Narrative documentation (architecture, runbooks, ADRs, analysis) | [docs.hybridcloudworks.com](https://docs.hybridcloudworks.com) — source in `docs/`, built by MkDocs (`mkdocs build --strict` runs on every PR) and deployed to GitHub Pages on merge |
-| Review state (work, blockers, inputs, completed) | `TODO.md`, `CHANGELOG.md` at the root |
+| Open work (engineering and owner-gated alike) | GitHub issues on [org project 1](https://github.com/orgs/HybridCloudWorks/projects/1), each with a Priority; `TODO.md` at the root keeps only accepted risks and an index |
+| Completed work | `CHANGELOG.md` at the root |
 | Tooling-adjacent docs (this file, `infra/README.md`, templates) | Next to the tooling, allowlisted in `scripts/validate-repository-structure.ps1` |
 
 CI enforces this via the Repository Policy workflow. If you add a Markdown
@@ -20,8 +21,12 @@ not to extend the allowlist.
 
 1. Branch from `main`. No direct pushes to `main`.
 2. Keep the SOP documents true: all new work — engineering and owner-gated
-   alike — lands in `TODO.md`, completed work moves to `CHANGELOG.md`, and new
-   required inputs go to `docs/standards/required-inputs.md`.
+   alike — is a GitHub issue on the
+   [HCW Work Board](https://github.com/orgs/HybridCloudWorks/projects/1) (org
+   project 1) with its Priority set (owner decision 2026-09-05, #362);
+   `TODO.md` holds only the accepted risks and an index to the open issues;
+   completed work goes to `CHANGELOG.md`; and new required inputs go to
+   `docs/standards/required-inputs.md`.
 3. Open a PR using the template; fill the verification section with what you
    actually ran.
 4. CI must be green: build/test, CodeQL, repository policy, and — for
