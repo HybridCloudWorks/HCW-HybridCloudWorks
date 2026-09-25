@@ -36,8 +36,11 @@ const DD_CLASS = 'text-sm text-slate-700 dark:text-slate-300';
  * @param {object} props
  * @param {object} props.state  the normalised build
  * @param {string} props.componentId  the focused component; an unknown id shows the first
+ * @param {React.ReactNode} [props.explain]  the "Explain this component" control and its
+ *   answer (LzExplainButton.jsx), rendered under the catalogue text; the page passes it so
+ *   this panel stays the pure catalogue view it was
  */
-export function LzTeaches({ state, componentId }) {
+export function LzTeaches({ state, componentId, explain = null }) {
   const component = componentById(componentId) ?? componentById('management-groups');
   const selected = isSelected(state, component.id);
   const mod = moduleFor(component.avm);
@@ -93,6 +96,11 @@ export function LzTeaches({ state, componentId }) {
           <dt className={DT_CLASS}>Knobs</dt>
           <dd className={DD_CLASS}>{knobs.length ? `${listNames(knobs)}.` : 'None.'}</dd>
         </dl>
+        {explain ? (
+          <div className="flex flex-wrap items-center gap-3" data-testid="lz-teaches-explain">
+            {explain}
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   );

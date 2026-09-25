@@ -33,6 +33,7 @@ import './listen-and-learn-http.js';
 import './listen-and-learn-jobs.js';
 import './labs-http.js';
 import './labs-jobs.js';
+import './labs-public-http.js';
 import './legacy-blogs-telemetry-http.js';
 import './manual-images-http.js';
 import './newsletter-http.js';

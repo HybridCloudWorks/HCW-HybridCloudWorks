@@ -1,9 +1,8 @@
 /**
- * The build as a picture (#668): the tree `layoutDiagram` lays out, drawn as
- * inline SVG. The layout is pure and in fixed units, and this file adds
- * nothing that is not a function of it and the focused component, so the
- * pre-rendered SVG and the hydrated one agree byte for byte: no viewport
- * measurement, no random ids, no clock.
+ * The build as a picture (#668): the diagram card on the page. The SVG itself
+ * is LzSvg.jsx, a pure function of the layout and the focused component, so
+ * the pre-rendered SVG and the hydrated one agree byte for byte; this file
+ * adds what only the page wants around it.
  *
  * Every box is a button that focuses its component in the teaches panel, so
  * the diagram is a second way to ask "what is this". Zoom and pan come from
@@ -18,169 +17,13 @@ import { TransformComponent, TransformWrapper } from 'react-zoom-pan-pinch';
 import { RotateCcw, ZoomIn, ZoomOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { V_GAP, layoutDiagram } from '@/lib/landingZone';
-import {
-  CONTAINS_EDGE_CLASS,
-  HINT_CLASS,
-  KINDS,
-  KIND_LABEL,
-  NODE_CLASS,
-  NODE_TEXT_CLASS,
-  PEERING_EDGE_CLASS,
-  SWATCH_CLASS,
-} from './styles';
+import { layoutDiagram } from '@/lib/landingZone';
+import { LzSvg } from './LzSvg';
+import { HINT_CLASS, KINDS, KIND_LABEL, SWATCH_CLASS } from './styles';
 
-/** Diagram node id → the catalogue component it stands for, for the fixed ids. */
-const NODE_COMPONENT = Object.freeze({
-  policy: 'policy',
-  'sub:management': 'management',
-  hub: 'connectivity-hub',
-  dns: 'connectivity-hub',
-  firewall: 'firewall',
-  'spoke:identity': 'identity',
-});
-
-/** The same for the ids that carry a suffix: every management group, and numbered spokes. */
-const NODE_PREFIX_COMPONENT = Object.freeze([
-  ['mg:', 'management-groups'],
-  ['spoke:corp', 'corp'],
-  ['spoke:online', 'online'],
-]);
-
-/** The catalogue component a diagram node stands for, or null. */
-export function componentForNode(nodeId) {
-  if (NODE_COMPONENT[nodeId]) return NODE_COMPONENT[nodeId];
-  const match = NODE_PREFIX_COMPONENT.find(([prefix]) => nodeId.startsWith(prefix));
-  return match ? match[1] : null;
-}
-
-/** One sentence for the SVG's title: what is in the picture. */
-export function describeLayout(layout) {
-  const counts = new Map();
-  for (const n of layout.nodes) counts.set(n.kind, (counts.get(n.kind) ?? 0) + 1);
-  const parts = KINDS.filter((kind) => counts.has(kind)).map((kind) => {
-    const count = counts.get(kind);
-    const label = KIND_LABEL[kind].toLowerCase();
-    return count === 1 ? `1 ${label}` : `${count} ${label}s`;
-  });
-  return `Landing zone diagram: ${parts.join(', ')}.`;
-}
-
-const bottomCentre = (n) => [n.x + n.w / 2, n.y + n.h];
-const topCentre = (n) => [n.x + n.w / 2, n.y];
-
-/**
- * The SVG alone, for the page and for the determinism test. Peering edges
- * dip below the row the hub and spokes share, so the viewBox is one gap
- * taller when there are any.
- */
-export function LzSvg({ layout, focusedId, onFocus }) {
-  const byId = new Map(layout.nodes.map((n) => [n.id, n]));
-  const hasPeering = layout.edges.some((e) => e.kind === 'peering');
-  const height = layout.height + (hasPeering ? V_GAP : 0);
-
-  const activate = (nodeId) => {
-    const componentId = componentForNode(nodeId);
-    if (componentId && onFocus) onFocus(componentId);
-  };
-
-  return (
-    <svg
-      viewBox={`0 0 ${layout.width} ${height}`}
-      width="100%"
-      className="block h-auto w-full"
-      aria-labelledby="lz-diagram-title"
-      data-testid="lz-diagram"
-    >
-      <title id="lz-diagram-title">{describeLayout(layout)}</title>
-      <g data-edges="contains">
-        {layout.edges
-          .filter((e) => e.kind === 'contains')
-          .map((e) => {
-            const [x1, y1] = bottomCentre(byId.get(e.from));
-            const [x2, y2] = topCentre(byId.get(e.to));
-            return (
-              <line
-                key={`${e.from}>${e.to}`}
-                x1={x1}
-                y1={y1}
-                x2={x2}
-                y2={y2}
-                strokeWidth={1.5}
-                className={CONTAINS_EDGE_CLASS}
-              />
-            );
-          })}
-      </g>
-      <g data-edges="peering">
-        {layout.edges
-          .filter((e) => e.kind === 'peering')
-          .map((e) => {
-            const [hx, hy] = bottomCentre(byId.get(e.from));
-            const [sx, sy] = bottomCentre(byId.get(e.to));
-            const d = `M ${hx} ${hy} C ${hx} ${hy + V_GAP} ${sx} ${sy + V_GAP} ${sx} ${sy}`;
-            return (
-              <path
-                key={`${e.from}~${e.to}`}
-                d={d}
-                fill="none"
-                strokeWidth={1.5}
-                strokeDasharray="6 4"
-                className={PEERING_EDGE_CLASS}
-              />
-            );
-          })}
-      </g>
-      <g data-nodes="">
-        {layout.nodes.map((n) => {
-          const componentId = componentForNode(n.id);
-          const focused = componentId !== null && componentId === focusedId;
-          return (
-            <g
-              key={n.id}
-              role="button"
-              tabIndex={0}
-              aria-label={n.label}
-              aria-pressed={focused}
-              data-node={n.id}
-              data-kind={n.kind}
-              className="cursor-pointer outline-none focus-visible:opacity-80"
-              onClick={() => activate(n.id)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  activate(n.id);
-                }
-              }}
-            >
-              <title>{n.label}</title>
-              <rect
-                x={n.x}
-                y={n.y}
-                width={n.w}
-                height={n.h}
-                rx={8}
-                strokeWidth={focused ? 3 : 1.5}
-                className={NODE_CLASS[n.kind]}
-              />
-              <text
-                x={n.x + n.w / 2}
-                y={n.y + n.h / 2}
-                textAnchor="middle"
-                dominantBaseline="middle"
-                fontSize={11}
-                fontWeight={n.kind === 'management-group' ? 600 : 400}
-                className={NODE_TEXT_CLASS}
-              >
-                {n.label}
-              </text>
-            </g>
-          );
-        })}
-      </g>
-    </svg>
-  );
-}
+// The SVG and its helpers moved to LzSvg.jsx when the article embed (#670)
+// needed them without the zoom wrapper; the names stay importable from here.
+export { LzSvg, componentForNode, describeLayout } from './LzSvg';
 
 function Legend({ layout }) {
   const present = new Set(layout.nodes.map((n) => n.kind));

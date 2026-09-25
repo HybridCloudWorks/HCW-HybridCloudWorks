@@ -15,13 +15,12 @@
  * LAZY. The scenario arithmetic, its catalogue and the results component are
  * a chunk most articles never need, so this file — the one CodeBlock imports
  * — is a shell around `React.lazy`, and PricingScenarioCard.jsx is the chunk.
- * At pre-render, `prerenderToNodeStream` resolves the lazy import and the
- * static HTML carries the card at its loading state; in the browser, React
- * leaves that boundary as the server sent it until the chunk arrives, then
- * hydrates it against markup the card's first render reproduces exactly.
+ * The frame, the Suspense boundary and the placeholder are EmbedShell.jsx,
+ * shared with the other embeds; that file says how the pre-render and the
+ * hydration meet.
  */
-import React, { Suspense, lazy } from 'react';
-import { Loader2 } from 'lucide-react';
+import React, { lazy } from 'react';
+import { EmbedShell } from './EmbedShell';
 
 export const PRICING_SCENARIO_LANGUAGE = 'pricing-scenario';
 
@@ -30,28 +29,18 @@ export const loadPricingScenarioCard = () => import('./PricingScenarioCard');
 
 const PricingScenarioCard = lazy(loadPricingScenarioCard);
 
-function Placeholder() {
-  return (
-    <p
-      className="flex items-center gap-2 rounded-lg border border-slate-200 p-4 text-sm text-slate-600 dark:border-slate-700 dark:text-slate-400"
-      data-testid="pricing-scenario-placeholder"
-    >
-      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-      Loading the scenario…
-    </p>
-  );
-}
-
 /**
  * @param {object} props
  * @param {string} props.query  the fence body: a scenario query string
  */
 export default function PricingScenarioEmbed({ query }) {
   return (
-    <div className="not-prose my-6" data-testid="pricing-scenario-embed">
-      <Suspense fallback={<Placeholder />}>
-        <PricingScenarioCard query={query} />
-      </Suspense>
-    </div>
+    <EmbedShell
+      testId="pricing-scenario-embed"
+      placeholderTestId="pricing-scenario-placeholder"
+      loadingText="Loading the scenario…"
+    >
+      <PricingScenarioCard query={query} />
+    </EmbedShell>
   );
 }

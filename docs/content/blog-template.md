@@ -197,3 +197,26 @@ scenario=three-tier-web&extras=backup,dr-warm-standby&egress=1000&region=us-east
 The body is what **Copy link** on the tool puts on the clipboard, minus the
 host and path. An unknown scenario or extra falls back the way the tool's URL
 does, and a region the tool does not know falls back to `us-east-1`.
+
+### A landing zone in a post
+
+The same shape for the Landing Zone Builder. A block whose language is
+`landing-zone` and whose body is a build's query string from
+`/tools/landing-zone` renders as a read-only card: the diagram, the selected
+components with a line each, and an "Open in the Landing Zone Builder" link
+that carries the same build:
+
+````markdown
+```landing-zone
+lz=mg,policy,mgmt,hub,fw&corp=2
+```
+````
+
+The body is what **Copy link** on the builder puts on the clipboard, minus the
+host and path; a bare body is the full default build. `lz=` lists the platform
+components by short id (`mg`, `policy`, `mgmt`, `hub`, `fw`, `id`), `corp=` and
+`online=` count the landing zones, and the knobs travel as `hub.cidr`,
+`spoke.cidr`, `fw.sku`, `dns`, `loc` and `root`. The card normalises the way
+the tool does: a component named without what it needs brings its dependencies
+along, an unknown token is dropped, and a knob that fails its check is its
+default. Nothing is fetched; the card is drawn from the fence alone.

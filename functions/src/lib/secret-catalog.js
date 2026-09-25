@@ -78,6 +78,13 @@ export const SECRET_SECTIONS = Object.freeze([
       'Values the site itself runs on. Changing one of these takes effect immediately and is ' +
       'felt by visitors, so each says what it breaks.',
   },
+  {
+    id: 'labs',
+    title: 'Hybrid Lab',
+    blurb:
+      'The browser workspaces learners open from the labs page. Read-only values: the site ' +
+      'shows their status and links to them, and never signs anyone in or starts anything.',
+  },
 ]);
 
 /**
@@ -389,6 +396,35 @@ export const SECRET_CATALOG = Object.freeze([
     help:
       'Random value. Signs the private links used to preview unpublished pages. Changing it makes ' +
       'every preview link already shared stop working.',
+    probe: null,
+  },
+
+  // ── Hybrid Lab ───────────────────────────────────────────────────
+  // An address rather than a credential, kept in the vault so the pair is
+  // seeded through one procedure and watched by one monitor (ADR 0032
+  // decision 4). Read by lib/labs/coder-status.js, which requires https: the
+  // token beside it travels in a header.
+  {
+    setting: 'CODER_URL',
+    secret: 'CODER-URL',
+    section: 'labs',
+    label: 'Coder address',
+    help:
+      'Web address, starting https://. Where the lab’s browser workspaces run. The site reads ' +
+      'their status from it and links visitors to it; until it is set the labs page says the lab ' +
+      'is not yet provisioned.',
+    probe: null,
+  },
+  // Read-only in Coder: it can list templates and count running workspaces
+  // and nothing else. Never reaches the browser.
+  {
+    setting: 'CODER_STATUS_TOKEN',
+    secret: 'CODER-STATUS-TOKEN',
+    section: 'labs',
+    label: 'Coder status token',
+    help:
+      'Read-only API token. Lets the site list the lab’s templates and count running workspaces ' +
+      'for the labs page. It cannot start or change anything, and it is never shown to visitors.',
     probe: null,
   },
 ]);
