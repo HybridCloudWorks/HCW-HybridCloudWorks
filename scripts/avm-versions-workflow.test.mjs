@@ -1,0 +1,189 @@
+/**
+ * What the weekly AVM version-bump branch is allowed to contain (#671).
+ *
+ * The same tripwire as learn-catalogue-workflow.test.mjs, for the same
+ * reason: the `commit` job pushes a branch with a GitHub App installation
+ * token, and the pull request it opens is what a reviewer reads. Three
+ * `git add <path>` lines keep that to the pins, the image's versions file and
+ * the refreshed HCL snapshot; `-A` or `.` would sweep in whatever the earlier
+ * job left in the workspace, and the substitution is one character wide.
+ */
+import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const WORKFLOW = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '..',
+  '.github',
+  'workflows',
+  'update-avm-versions.yml'
+);
+
+const PINS_PATH = 'frontend/src/lib/landingZone/avmVersions.js';
+const ENV_PATH = 'lab-image/versions.env';
+const SNAPSHOT_PATH = 'frontend/src/lib/landingZone/__snapshots__/hcl.test.js.snap';
+const STAGED = [PINS_PATH, ENV_PATH, SNAPSHOT_PATH].sort();
+
+/** Non-comment lines only, so prose about `git add -A` cannot trip it. */
+function commandLines(source) {
+  return String(source)
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*#/.test(line));
+}
+
+describe('the AVM versions workflow', () => {
+  const source = readFileSync(WORKFLOW, 'utf8');
+  const lines = commandLines(source);
+  const updateJob = source.slice(source.indexOf('  update:'), source.indexOf('  commit:'));
+  const commitJob = source.slice(source.indexOf('  commit:'));
+
+  it('runs on Tuesdays at 06:30 UTC and by hand, not in the Monday hour the catalogue uses', () => {
+    expect(lines.some((l) => l.includes("cron: '30 6 * * 2'"))).toBe(true);
+    expect(lines.some((l) => /^\s*workflow_dispatch:/.test(l))).toBe(true);
+    expect(lines.filter((l) => /cron:/.test(l))).toHaveLength(1);
+    // A scheduled job, on purpose: not a path-filtered pull_request trigger.
+    expect(lines.some((l) => /^\s*pull_request:/.test(l))).toBe(false);
+  });
+
+  /**
+   * The three-path scope is the argument for what the App token is allowed
+   * to reach. Enumerating every `git add` argument makes a fourth output a
+   * deliberate edit here rather than a line that slips in with a feature.
+   */
+  it('stages exactly the pins, the versions file and the snapshot, and nothing else', () => {
+    const staged = lines
+      .filter((l) => /\bgit add\b/.test(l))
+      .map((l) => l.replace(/^.*\bgit add\s+/, '').trim())
+      .sort();
+    expect(staged).toEqual(STAGED);
+  });
+
+  it('never stages with a wildcard', () => {
+    const wildcards = lines.filter((l) => /\bgit add\s+(-A\b|--all\b|\.(\s|$)|:\/)/.test(l));
+    expect(wildcards, `wildcard staging found: ${wildcards.join(' | ')}`).toEqual([]);
+  });
+
+  it('never commits with -a, which stages every tracked change', () => {
+    const bare = lines.filter((l) => /\bgit commit\b[^\n]*\s-(a|am|-all)\b/.test(l));
+    expect(bare, `git commit -a found: ${bare.join(' | ')}`).toEqual([]);
+  });
+
+  /**
+   * Both jobs decide "did anything change" by the same three paths, with
+   * `git status --porcelain` rather than `git diff --quiet`, so a path that
+   * is new rather than edited still counts (the lesson of #500).
+   */
+  it('checks for a change on the same three paths in both jobs', () => {
+    const checks = lines.filter((l) => l.includes(PINS_PATH) && /\bgit (diff|status)\b/.test(l));
+    expect(checks.length, 'one change check per job').toBe(2);
+    for (const check of checks) {
+      expect(check).toContain('git status --porcelain');
+      expect(check).toContain(ENV_PATH);
+      expect(check).toContain(SNAPSHOT_PATH);
+    }
+  });
+
+  /**
+   * The snapshot is refreshed and then the suites are run WITHOUT -u, in that
+   * order, and only after a pin moved. The -u run is what puts the Terraform
+   * diff on the pull request; the plain run is the gate that fails a drifted
+   * emitter in this log rather than on the pull request. A -u run that is
+   * not followed by a plain one would let an unstable snapshot through, and
+   * a plain run before the -u one would fail by construction on every bump.
+   */
+  it('refreshes the HCL snapshots and then runs the landing zone suites plainly, gated on a change', () => {
+    const refreshAt = updateJob.indexOf('npx vitest run -u src/lib/landingZone');
+    const checkAt = updateJob.indexOf('npx vitest run src/lib/landingZone');
+    expect(refreshAt, 'the -u refresh step is gone').toBeGreaterThan(-1);
+    expect(checkAt, 'the plain check step is gone').toBeGreaterThan(-1);
+    expect(refreshAt).toBeLessThan(checkAt);
+
+    for (const at of [refreshAt, checkAt]) {
+      const stepStart = updateJob.lastIndexOf('      - name:', at);
+      const step = updateJob.slice(stepStart, at);
+      expect(step).toContain("if: steps.changed.outputs.changed == 'true'");
+      expect(step).toContain('working-directory: frontend');
+    }
+  });
+
+  it('masks the App token before writing it anywhere', () => {
+    const maskAt = source.indexOf('::add-mask::');
+    const writeAt = source.indexOf('token=${token}');
+    expect(maskAt).toBeGreaterThan(-1);
+    expect(writeAt).toBeGreaterThan(-1);
+    expect(maskAt).toBeLessThan(writeAt);
+  });
+
+  it('makes the branch name unique per attempt, not just per run', () => {
+    const branchLine = lines.find((l) => l.includes('branch="chore/avm-versions-'));
+    expect(branchLine, 'the branch name line moved or was renamed').toBeTruthy();
+    expect(branchLine).toContain('GITHUB_RUN_ID');
+    expect(branchLine).toContain('GITHUB_RUN_ATTEMPT');
+  });
+
+  it('titles the commit and the pull request the same way, with the verification date', () => {
+    const title = 'chore: bump Azure Verified Module pins (checked ${AS_OF})';
+    expect(lines.some((l) => l.includes(`git commit -m "${title}"`))).toBe(true);
+    expect(lines.some((l) => l.includes(`--title "${title}"`))).toBe(true);
+  });
+
+  it('opens the pull request ready for review, never as a draft', () => {
+    // Owner decision 2026-09-05 (.claude/CLAUDE.md): a draft costs a round
+    // trip from a phone. `gh pr create` is ready for review unless told
+    // otherwise, so the assertion is the absence of the flag.
+    expect(lines.some((l) => l.includes('gh pr create'))).toBe(true);
+    expect(lines.filter((l) => /--draft\b/.test(l))).toEqual([]);
+  });
+
+  it('tells the reviewer how to refresh the snapshots after reading the changelog', () => {
+    // The task's one hard requirement of the body: the exact command, and
+    // the order — release notes first, then -u.
+    const body = commitJob.slice(commitJob.indexOf('"## Summary"'));
+    expect(body).toContain('npx vitest run -u src/lib/landingZone');
+    expect(body).toContain('after reviewing the module');
+    expect(body).toContain('HAND EDIT NEEDED');
+  });
+
+  it('gives neither job a write permission of its own', () => {
+    expect(lines.some((l) => /contents:\s*write/.test(l))).toBe(false);
+    expect(lines.some((l) => /id-token:\s*write/.test(l))).toBe(false);
+    expect(commitJob).toContain('contents: read');
+    expect(updateJob).toContain('contents: read');
+  });
+
+  it('reuses the same App as the catalogue rather than a second credential', () => {
+    expect(lines.some((l) => l.includes('vars.MANIFEST_APP_ID'))).toBe(true);
+    expect(lines.some((l) => l.includes('secrets.MANIFEST_APP_PRIVATE_KEY'))).toBe(true);
+    expect(commitJob).toContain('environment: automation');
+    expect(lines.some((l) => l.includes('node scripts/github-app-token.mjs --revoke'))).toBe(true);
+  });
+
+  it('installs the frontend tree without lifecycle scripts', () => {
+    expect(lines.some((l) => l.includes('npm ci --ignore-scripts'))).toBe(true);
+  });
+
+  it('pins every action by full commit SHA with a version comment', () => {
+    const uses = lines.filter((l) => /^\s*uses:\s/.test(l));
+    expect(uses.length).toBeGreaterThan(3);
+    for (const line of uses) {
+      expect(line, `not pinned by SHA: ${line.trim()}`).toMatch(/@[0-9a-f]{40}\s+#\s*v\d/);
+    }
+  });
+
+  it('runs the commit job only when the check job reported a change', () => {
+    expect(updateJob).toContain('changed: ${{ steps.changed.outputs.changed }}');
+    expect(commitJob).toContain("if: needs.update.outputs.changed == 'true'");
+
+    const uploadAt = updateJob.indexOf('uses: actions/upload-artifact');
+    expect(uploadAt, 'the upload step is gone or no longer uses upload-artifact').toBeGreaterThan(
+      -1
+    );
+    const stepStart = updateJob.lastIndexOf('      - name:', uploadAt);
+    const nextStep = updateJob.indexOf('      - name:', uploadAt);
+    const uploadStep = updateJob.slice(stepStart, nextStep === -1 ? undefined : nextStep);
+    expect(uploadStep).toContain("if: steps.changed.outputs.changed == 'true'");
+    for (const path of STAGED) expect(uploadStep).toContain(path);
+  });
+});

@@ -220,6 +220,11 @@ foreach ($markdownFile in $markdownFiles) {
     # the role, next to the argument_specs it summarises.
     $relativePath -eq 'lab-host/README.md' -or
     $relativePath -match '^lab-host/ansible/roles/[a-z_]+/README\.md$' -or
+    # lab-host/coder/ holds the Coder Compose file and the hcw-lab workspace
+    # template (#679). Its README is the deploy and update procedure next to
+    # the files it describes, and the template's README is what Coder shows
+    # learners on the template page, so it has to sit in the template directory.
+    $relativePath -match '^lab-host/coder/(templates/[a-z-]+/)?README\.md$' -or
     # Documentation source: pages here are reviewed via PR and published to
     # https://docs.hybridcloudworks.com by .github/workflows/docs-pages.yml on
     # merge to main (issue #360; replaced wiki/ on 2026-09-06). This is the one

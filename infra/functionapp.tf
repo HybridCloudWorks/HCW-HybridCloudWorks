@@ -553,6 +553,22 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # and the preview route answers 404 — the loop arms itself when seeded.
     "PREVIEW_SIGNING_SECRET" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/PREVIEW-SIGNING-SECRET)"
 
+    # Hybrid Lab — Coder status proxy (ADR 0032 decision 4, #680). The public
+    # labs page shows Coder's templates and running-workspace count through
+    # lib/labs/coder-status.js, a server-side read with a read-only token, so
+    # the browser never calls Coder and the SPA's connect-src stays closed.
+    # CODER_URL is an address rather than a credential and is a vault reference
+    # anyway: the pair is then seeded through the one procedure and
+    # monitor-unresolved-secrets.yml watches both. Until they resolve, the
+    # route answers { configured: false } and the card reads "not yet
+    # provisioned". Seed the two secrets BEFORE the run that applies this
+    # (Required-Inputs §4.7) so the monitor never sees them unresolved.
+    "CODER_URL"          = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/CODER-URL)"
+    "CODER_STATUS_TOKEN" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/CODER-STATUS-TOKEN)"
+    # Community edition's concurrency cap, the denominator on the card. Not a
+    # secret. The code defaults to 5 when this is unset or unparseable.
+    "CODER_MAX_WORKSPACES" = "5"
+
     "NODE_ENV" = "production"
 
     # Timer clock: UTC, and there is deliberately NO app setting here.

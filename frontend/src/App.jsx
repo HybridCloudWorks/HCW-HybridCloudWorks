@@ -27,6 +27,7 @@ const HomePage = lazyPage(() => import('@/pages/shared/HomePage'));
 const AboutPage = lazyPage(() => import('@/pages/shared/AboutPage'));
 const ContactPage = lazyPage(() => import('@/pages/shared/ContactPage'));
 const EducationIndexPage = lazyPage(() => import('@/pages/shared/EducationIndexPage'));
+const LabsLearnPage = lazyPage(() => import('@/pages/shared/LabsLearnPage'));
 const NewsPage = lazyPage(() => import('@/pages/shared/NewsPage'));
 const SharedPodcastPage = lazyPage(() => import('@/pages/shared/PodcastPage'));
 const NotFoundPage = lazyPage(() => import('@/pages/NotFoundPage'));
@@ -295,6 +296,9 @@ function App() {
                   `/:provider` in route ranking, so this wins over the provider
                   layout the same way `/preview/:id` and `/tools/*` do. */}
               <Route path="/education" element={<EducationIndexPage />} />
+              {/* The browser labs page (#681). Static like `/education`, and for
+                  the same reason: it must beat `/:provider/education`. */}
+              <Route path="/education/labs" element={<LabsLearnPage />} />
               {/* --- Provider Routes (Wrapped in ProviderLayout) --- */}
               <Route path="/:provider" element={<ProviderLayout />}>
                 <Route index element={<ProviderLandingDispatcher />} />
