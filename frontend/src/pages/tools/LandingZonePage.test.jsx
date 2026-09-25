@@ -22,12 +22,18 @@ import LandingZonePage from './LandingZonePage';
 import { LzSvg, componentForNode, describeLayout } from './landingZone/LzDiagram';
 import { buildZip, languageFor } from './landingZone/LzFiles';
 import { listNames, warningText } from './landingZone/LzControls';
+import { explanationRequest } from './landingZone/LzExplainButton';
 import { DEFAULT_STATE, decodeLz, emitFiles, layoutDiagram } from '@/lib/landingZone';
 import { staticRoutes } from '@/lib/routeFactory';
 import { routes as prerenderRoutes } from '../../../scripts/prerender-entry.jsx';
 
 vi.mock('react-helmet-async', () => ({
   Helmet: ({ children }) => <>{children}</>,
+}));
+
+// The explain button (#670) posts through publicApi; the base is only read on a click.
+vi.mock('@/lib/functionsBase', () => ({
+  requireFunctionsBase: () => 'https://api.test/api',
 }));
 
 // The compressor is a lazy chunk; here it records what it was asked to zip.
@@ -401,6 +407,66 @@ describe('helpers', () => {
     const [[entries, options]] = zip.zipSync.mock.calls;
     expect(Object.keys(entries)).toEqual(files.map((f) => f.path));
     expect(options).toEqual({ level: 6 });
+  });
+});
+
+describe('the explain button (#670)', () => {
+  it('sits in the teaches panel, follows the focus, and sends the build only on a click', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        explanation: {
+          text: 'Two paragraphs.',
+          model: 'claude-sonnet-4-5',
+          generatedAt: '2026-09-25T10:30:00.000Z',
+          cached: false,
+        },
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const url = `${PATH}?lz=mg,hub,fw&corp=0&online=0`;
+      renderPage(url);
+      const button = () => screen.getByTestId('lz-explain-button');
+      expect(screen.getByTestId('lz-teaches').contains(button())).toBe(true);
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      // Focus the firewall from the diagram; the button now asks about it.
+      fireEvent.click(screen.getByTestId('lz-diagram').querySelector('[data-node="firewall"]'));
+      expect(teaches()).toBe('firewall');
+      fireEvent.click(button());
+      await screen.findByTestId('lz-explanation');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [[target, init]] = fetchMock.mock.calls;
+      expect(String(target)).toBe('https://api.test/api/public/cloud-tools/explain');
+      expect(JSON.parse(init.body)).toEqual(
+        explanationRequest({ state: decodeLz(paramsOf(url)), componentId: 'firewall' })
+      );
+      expect(JSON.parse(init.body)).toMatchObject({
+        kind: 'landing-zone',
+        componentId: 'firewall',
+        selected: ['management-groups', 'connectivity-hub', 'firewall'],
+      });
+
+      // Changing the build drops the answer and asks nothing new on its own.
+      fireEvent.click(checkbox('Azure Firewall'));
+      await waitFor(() => expect(screen.queryByTestId('lz-explanation')).toBeNull());
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('is on the pre-rendered page without an answer', () => {
+    const ssr = renderToString(
+      <StaticRouter location={PATH}>
+        <LandingZonePage />
+      </StaticRouter>
+    );
+    expect(ssr).toContain('Explain this component');
+    expect(ssr).not.toContain('data-testid="lz-explanation"');
   });
 });
 

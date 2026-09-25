@@ -248,6 +248,28 @@ export async function fetchPriceChanges(region = 'us-east-1') {
  * @returns {Promise<{ text: string, model: string, generatedAt: string, cached: boolean }>}
  */
 export async function requestPricingExplanation(body) {
+  return postExplanation(body);
+}
+
+/**
+ * POST public/cloud-tools/explain with `kind: "landing-zone"` — two
+ * paragraphs about one component of a landing zone build (#670, Phase 4 of
+ * #657). The body is what the server's `kinds/landingZone.js` validates:
+ * `{ kind, componentId, selected, options, teaches }`, built by
+ * pages/tools/landingZone/LzExplainButton.jsx from the page's own state and
+ * catalogue text. Same route, same quota, same responses and the same error
+ * mapping as `requestPricingExplanation`; the `kind` in the body is what
+ * tells the two apart.
+ *
+ * @param {object} body
+ * @returns {Promise<{ text: string, model: string, generatedAt: string, cached: boolean }>}
+ */
+export async function requestLandingZoneExplanation(body) {
+  return postExplanation(body);
+}
+
+/** The one call both explanation kinds make; the body carries the kind. */
+async function postExplanation(body) {
   const base = requireFunctionsBase('public/cloud-tools/explain');
   const res = await fetch(`${base}/public/cloud-tools/explain`, {
     method: 'POST',
