@@ -9,7 +9,8 @@ review discipline — read this before your first pull request.
 | Content | Home |
 | --- | --- |
 | Narrative documentation (architecture, runbooks, ADRs, analysis) | [docs.hybridcloudworks.com](https://docs.hybridcloudworks.com) — source in `docs/`, built by MkDocs (`mkdocs build --strict` runs on every PR) and deployed to GitHub Pages on merge |
-| Review state (work, blockers, inputs, completed) | `TODO.md`, `CHANGELOG.md` at the root |
+| Open work (engineering and owner-gated alike) | GitHub issues on [org project 1](https://github.com/orgs/HybridCloudWorks/projects/1), each with a Priority; `TODO.md` at the root keeps only accepted risks and an index |
+| Completed work | `CHANGELOG.md` at the root |
 | Tooling-adjacent docs (this file, `infra/README.md`, templates) | Next to the tooling, allowlisted in `scripts/validate-repository-structure.ps1` |
 
 CI enforces this via the Repository Policy workflow. If you add a Markdown

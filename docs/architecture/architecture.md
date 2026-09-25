@@ -171,7 +171,7 @@ deployments, and scaling:
 | --- | --- | --- |
 | API | Public tools, admin reads and mutations, health endpoints | Internet-facing; admin routes require Entra; public routes explicitly allowlisted |
 | Worker | Schedules, change feed, queues, AI, media, publishing, notifications, third-party sync | No public business endpoints; privileged secrets and data access |
-| Labs broker | Job admission, quota, status, and Hostinger agent coordination | Narrow public surface; isolated Cosmos container permissions |
+| Labs broker | Job admission, quota, status, and Hostinger agent coordination | Admin-only submission today (§5.3); the agent's routes need its own Entra certificate; anonymous submission is Gated by ADR 0032 |
 
 Handlers are stateless, idempotent, and safe for at-least-once delivery. External side effects use an
 operation ID, bounded exponential retry, explicit terminal state, and poison queues. Synchronous HTTP
