@@ -121,6 +121,13 @@ export const AI_FEATURES = Object.freeze({
     route:
       'The "Explain this number" button on /tools/comparison — the one anonymous AI call. Off answers "Explanations are not available" before any quota is counted; cached explanations still serve (#613).',
   }),
+  landingZoneExplain: Object.freeze({
+    label: 'Landing zone explanations',
+    description:
+      'Explains one Landing Zone Builder component for the learner’s selection and options: why it matters, and what changes without it.',
+    route:
+      'The "Explain this component" button on /tools/landing-zone — the same anonymous explain route, cache and quota as pricing explanations, as kind landing-zone. Off answers "Explanations are not available" before any quota is counted; cached explanations still serve (#669).',
+  }),
 });
 
 export const FEATURE_NAMES = Object.freeze(Object.keys(AI_FEATURES));
