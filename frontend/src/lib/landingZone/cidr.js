@@ -15,7 +15,15 @@
  * the diagram label and the HCL agree by construction.
  */
 
-const CIDR = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})$/;
+/**
+ * Canonical form only: each octet and the prefix are `0` or a number with no
+ * leading zero, so `010.0.0.0/8`, `10.0.0.0/08`, `10.0.0.0/+8`, `10.0.0.0/8 `
+ * and `10.0.0.0/8.0` are all refused rather than read as what `Number` would
+ * make of them. Anchored, no whitespace, no sign.
+ */
+const OCTET = '(0|[1-9][0-9]{0,2})';
+const PREFIX = '(0|[1-9][0-9]?)';
+const CIDR = new RegExp(`^${OCTET}\\.${OCTET}\\.${OCTET}\\.${OCTET}/${PREFIX}$`);
 
 /** `{ address, prefix }` with the address as an unsigned 32-bit integer, or null. */
 function parseCidr(value) {

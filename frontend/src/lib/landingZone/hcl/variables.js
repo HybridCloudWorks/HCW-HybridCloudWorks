@@ -151,10 +151,10 @@ const VARIABLES = [
   },
   {
     name: 'security_contact_email',
-    when: has('policy'),
+    when: has('management-groups'),
     type: 'string',
     description:
-      'The address Microsoft Defender for Cloud notifies; the Deploy-MDFC-Config-H224 assignment requires one.',
+      'The address Microsoft Defender for Cloud notifies; the Deploy-MDFC-Config-H224 assignment, part of the alz baseline whether enforced or not, requires one.',
     validations: [
       {
         condition: 'can(regex("^[^@ ]+@[^@ ]+[.][^@ ]+$", var.security_contact_email))',

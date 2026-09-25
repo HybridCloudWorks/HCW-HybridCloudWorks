@@ -143,8 +143,14 @@ describe('the catalogue', () => {
 });
 
 describe('the validators', () => {
-  it('accept a hub-sized CIDR and refuse the rest', () => {
-    for (const ok of ['10.0.0.0/16', '192.168.0.0/24', '172.16.0.0/12', '10.0.0.0/8']) {
+  it('accept a hub-sized CIDR in canonical form and refuse the rest', () => {
+    for (const ok of [
+      '10.0.0.0/16',
+      '192.168.0.0/24',
+      '172.16.0.0/12',
+      '10.0.0.0/8',
+      '0.0.0.0/8',
+    ]) {
       expect(isCidr(ok), ok).toBe(true);
     }
     for (const bad of [
@@ -153,11 +159,20 @@ describe('the validators', () => {
       '10.0.0.0/7',
       '256.0.0.0/16',
       '10.0.0/16',
+      '10.0.0.0/08',
+      '010.0.0.0/8',
+      '10.0.0.0/8.0',
+      '10.0.0.0/8 ',
+      ' 10.0.0.0/8',
+      '10.0.0.0/+8',
+      '10.00.0.0/16',
+      '10.0.0.0/016',
       'x',
       1,
       null,
     ]) {
-      expect(isCidr(bad), String(bad)).toBe(false);
+      expect(isCidr(bad), JSON.stringify(bad)).toBe(false);
+      expect(isSpokeCidr(bad), JSON.stringify(bad)).toBe(false);
     }
   });
 
@@ -207,10 +222,33 @@ describe('the validators', () => {
     expect(isLocation('westeurope')).toBe(true);
     expect(isLocation('West Europe')).toBe(false);
     expect(isLocation('')).toBe(false);
-    for (const ok of [0, 1, 5, '3']) expect(isLandingZoneCount(ok), String(ok)).toBe(true);
-    for (const bad of [-1, 6, 1.5, '', null, true, 'two']) {
-      expect(isLandingZoneCount(bad), String(bad)).toBe(false);
+    for (const ok of [0, 1, 5, '3', '0', '05'])
+      expect(isLandingZoneCount(ok), String(ok)).toBe(true);
+    for (const bad of [
+      -1,
+      6,
+      1.5,
+      '',
+      ' ',
+      '  ',
+      '\t',
+      '+1',
+      '-0',
+      '1.0',
+      '1e0',
+      null,
+      true,
+      'two',
+      '6',
+    ]) {
+      expect(isLandingZoneCount(bad), JSON.stringify(bad)).toBe(false);
     }
+    expect(setOption(DEFAULT_STATE, 'corpCount', ' ')).toEqual(DEFAULT_STATE);
+    expect(setOption(DEFAULT_STATE, 'corpCount', '')).toEqual(DEFAULT_STATE);
+    expect(decodeLz(new URLSearchParams('corp=%20')).options.corpCount).toBe(1);
+    expect(decodeLz(new URLSearchParams('corp=%20')).selected).toContain('corp');
+    expect(decodeLz(new URLSearchParams('corp=')).options.corpCount).toBe(1);
+    expect(decodeLz(new URLSearchParams('corp=0')).options.corpCount).toBe(0);
     expect(isManagementGroupId('alz')).toBe(true);
     expect(isManagementGroupId('contoso-root_1.0(a)')).toBe(true);
     expect(isManagementGroupId('-alz')).toBe(false);

@@ -83,7 +83,13 @@ This project has not cut a tagged release; entries are grouped under
   `security_contact_email` variable — with the one value the build never
   creates a source for, the DDoS plan, and the DNS trio when zones are off,
   handled by setting their assignments `DoNotEnforce` rather than leaving a
-  library placeholder), `management.tf`, `connectivity.tf` (the firewall and
+  library placeholder; **when policy is not selected the tree is still the
+  `alz` architecture, which carries its baseline, so every one of the 123
+  assignments the twelve archetypes make at that ref is emitted with
+  `enforcement_mode = "DoNotEnforce"`** and the defaults the build can
+  supply are still passed, with a comment saying the baseline is present and
+  inert because Policy was not chosen), `management.tf`, `connectivity.tf`
+  (the firewall and
   its policy as blocks of the hub object only when selected, the DNS resources
   on the option), `identity.tf` and `application.tf` (one spoke per landing
   zone: a resource group, a /24 carved from the spoke range with `cidrsubnet`,
@@ -119,17 +125,24 @@ This project has not cut a tagged release; entries are grouped under
   groups, hub and spokes with their /24s and peering edges, in fixed units so
   pre-render and hydration agree.
 
-  Two suites, 31 tests: every component has every field and a `teaches` of
-  the right length, the dependency closure, the carve, the overlap fallback
-  and its warning (through `normalizeState`, `setOption` and a decoded URL),
-  encode/decode round trips and default omission, decode tolerance, fmt shape
-  on every emitted file, every module `source` pinned with a version, the
-  archived and the unpublished module absent, all fourteen policy defaults
-  supplied or their assignment not enforced, both `variables.tf`
-  cross-checks emitted, a committed snapshot of the default build (the
-  repository's first `__snapshots__`), and diagram determinism with no
-  overlapping nodes. No page, no route, no dependency; `frontend/` vitest
-  goes from 2,272 to 2,303.
+  Validators refuse what `Number` would quietly accept: a CIDR must be
+  canonical (`010.0.0.0/8`, `10.0.0.0/08`, `/+8`, `/8 ` and `/8.0` are all
+  rejected, not read as 10.0.0.0/8) and a landing-zone count is a number or a
+  string of digits only, so a blank field or `corp=%20` falls back to the
+  default instead of becoming zero and deselecting.
+
+  Two suites, 32 tests: every component has every field and a `teaches` of
+  the right length, the dependency closure, the carve, canonical-form and
+  count validators, the overlap fallback and its warning (through
+  `normalizeState`, `setOption` and a decoded URL), encode/decode round trips
+  and default omission, decode tolerance, fmt shape on every emitted file,
+  every module `source` pinned with a version, the archived and the
+  unpublished module absent, all fourteen policy defaults supplied or their
+  assignment not enforced, all 123 baseline assignments `DoNotEnforce` when
+  Policy is off, both `variables.tf` cross-checks emitted, committed
+  snapshots of the default and the tree-only builds (the repository's first
+  `__snapshots__`), and diagram determinism with no overlapping nodes. No
+  page, no route, no dependency; `frontend/` vitest goes from 2,272 to 2,304.
 
 ### Changed
 

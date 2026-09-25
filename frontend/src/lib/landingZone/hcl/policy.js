@@ -1,9 +1,11 @@
 /**
  * The policy baseline's parameters (#667): every `policy_default_values`
- * name the pinned `platform/alz` library declares, and where the build gets
- * each value from.
+ * name the pinned `platform/alz` library declares, where the build gets each
+ * value from, and every assignment the architecture makes, so the tree can
+ * be deployed with the baseline present and not enforced when the learner
+ * has not selected Policy.
  *
- * THE LIST IS THE LIBRARY'S. `platform/alz/alz_policy_default_values.json`
+ * THE LISTS ARE THE LIBRARY'S. `platform/alz/alz_policy_default_values.json`
  * at the ref in avmVersions.js declares fourteen default names, in this
  * order; a value left unsupplied leaves the assignment on the library's
  * placeholder (`security_contact@replace_me`, an all-zeros subscription),
@@ -14,6 +16,14 @@
  * names the assignment to stop enforcing instead. A `needs` of `dns` is
  * supplied only when the hub is selected with private DNS zones on;
  * otherwise `Deploy-Private-DNS-Zones` is likewise kept but not enforced.
+ *
+ * `BASELINE_ASSIGNMENTS` is every `policy_assignments` entry of every
+ * archetype the `alz` architecture definition attaches to a management
+ * group at the same ref, keyed by the group's name. The `alz` architecture
+ * carries its baseline whether or not the learner selected Policy, so when
+ * Policy is off the emitter sets every one of these to `DoNotEnforce`: the
+ * assignments exist, so a learner can see them in the portal, and none
+ * denies or remediates anything.
  */
 import { isSelected } from '../state';
 import { jsonValue, list, obj, q } from './format';
@@ -84,7 +94,124 @@ const NOT_ENFORCED_WITHOUT = Object.freeze({
   ddos: Object.freeze({ managementGroup: 'connectivity', assignment: 'Enable-DDoS-VNET' }),
 });
 
-/** Which sources this build has. Policy depends on management, so that one is always true. */
+const GUARDRAILS = [
+  'Enforce-ASR',
+  'Enforce-Encrypt-CMK0',
+  'Enforce-GR-APIM0',
+  'Enforce-GR-AppServices0',
+  'Enforce-GR-Automation0',
+  'Enforce-GR-BotService0',
+  'Enforce-GR-CogServ0',
+  'Enforce-GR-Compute0',
+  'Enforce-GR-ContApps0',
+  'Enforce-GR-ContInst0',
+  'Enforce-GR-ContReg0',
+  'Enforce-GR-CosmosDb0',
+  'Enforce-GR-DataExpl0',
+  'Enforce-GR-DataFactory0',
+  'Enforce-GR-EventGrid0',
+  'Enforce-GR-EventHub0',
+  'Enforce-GR-KeyVault',
+  'Enforce-GR-KeyVaultSup0',
+  'Enforce-GR-Kubernetes0',
+  'Enforce-GR-MachLearn0',
+  'Enforce-GR-MySQL0',
+  'Enforce-GR-Network0',
+  'Enforce-GR-OpenAI0',
+  'Enforce-GR-PostgreSQL0',
+  'Enforce-GR-ServiceBus0',
+  'Enforce-GR-SQL0',
+  'Enforce-GR-Storage0',
+  'Enforce-GR-Synapse0',
+  'Enforce-GR-VirtualDesk0',
+  'Enforce-Subnet-Private',
+];
+
+const MONITORING = [
+  'Deploy-GuestAttest',
+  'Deploy-MDFC-DefSQL-AMA',
+  'Deploy-VM-ChangeTrack',
+  'Deploy-VM-Monitoring',
+  'Deploy-vmArc-ChangeTrack',
+  'Deploy-vmHybr-Monitoring',
+  'Deploy-VMSS-ChangeTrack',
+  'Deploy-VMSS-Monitoring',
+  'Enable-AUM-CheckUpdates',
+];
+
+/**
+ * Every policy assignment the `alz` architecture makes, by management group
+ * name, at the pinned library ref: the group's archetype's list, verbatim
+ * and in its order. Groups whose archetype assigns nothing (online, security,
+ * management) are absent.
+ */
+export const BASELINE_ASSIGNMENTS = Object.freeze({
+  alz: Object.freeze([
+    'Audit-ResourceRGLocation',
+    'Audit-TrustedLaunch',
+    'Audit-UnusedResources',
+    'Audit-ZoneResiliency',
+    'Deny-Classic-Resources',
+    'Deny-UnmanagedDisk',
+    'Deploy-ASC-Monitoring',
+    'Deploy-AzActivity-Log',
+    'Deploy-Diag-LogsCat',
+    'Deploy-MCSB2-Monitoring',
+    'Deploy-MDEndpoints',
+    'Deploy-MDEndpointsAMA',
+    'Deploy-MDFC-Config-H224',
+    'Deploy-MDFC-OssDb',
+    'Deploy-MDFC-SqlAtp',
+    'Deploy-SvcHealth-BuiltIn',
+    'Enforce-ACSB',
+  ]),
+  platform: Object.freeze(['DenyAction-DeleteUAMIAMA', ...MONITORING, ...GUARDRAILS]),
+  landingzones: Object.freeze([
+    'Audit-AppGW-WAF',
+    'Deny-IP-forwarding',
+    'Deny-MgmtPorts-Internet',
+    'Deny-Priv-Esc-AKS',
+    'Deny-Privileged-AKS',
+    'Deny-Storage-http',
+    'Deny-Subnet-Without-Nsg',
+    'Deploy-AzSqlDb-Auditing',
+    'Deploy-GuestAttest',
+    'Deploy-MDFC-DefSQL-AMA',
+    'Deploy-SQL-TDE',
+    'Deploy-SQL-Threat',
+    'Deploy-VM-Backup',
+    'Deploy-VM-ChangeTrack',
+    'Deploy-VM-Monitoring',
+    'Deploy-vmArc-ChangeTrack',
+    'Deploy-vmHybr-Monitoring',
+    'Deploy-VMSS-ChangeTrack',
+    'Deploy-VMSS-Monitoring',
+    'Enable-AUM-CheckUpdates',
+    'Enable-DDoS-VNET',
+    'Enforce-AKS-HTTPS',
+    ...GUARDRAILS,
+    'Enforce-TLS-SSL-Q225',
+  ]),
+  corp: Object.freeze([
+    'Audit-PeDnsZones',
+    'Deny-HybridNetworking',
+    'Deny-Public-Endpoints',
+    'Deny-Public-IP-On-NIC',
+    'Deploy-Private-DNS-Zones',
+  ]),
+  local: Object.freeze(['Enforce-ALDO-Services']),
+  sandbox: Object.freeze(['Enforce-ALZ-Sandbox']),
+  connectivity: Object.freeze(['Enable-DDoS-VNET']),
+  identity: Object.freeze([
+    'Deny-MgmtPorts-Internet',
+    'Deny-Public-IP',
+    'Deny-Subnet-Without-Nsg',
+    'Deploy-VM-Backup',
+  ]),
+  decommissioned: Object.freeze(['Enforce-ALZ-Decomm']),
+});
+
+/** Which sources this build has. */
 export function policySources(state) {
   return {
     management: isSelected(state, 'management'),
@@ -93,14 +220,19 @@ export function policySources(state) {
   };
 }
 
-/** `policy_assignments_to_modify`, grouped by management group. */
-function notEnforced(sources) {
+/** Group → assignments to stop enforcing when Policy is selected: only those with no source. */
+function missingSourceAssignments(sources) {
   const byGroup = new Map();
   for (const [needs, target] of Object.entries(NOT_ENFORCED_WITHOUT)) {
     if (sources[needs]) continue;
     if (!byGroup.has(target.managementGroup)) byGroup.set(target.managementGroup, []);
     byGroup.get(target.managementGroup).push(target.assignment);
   }
+  return byGroup;
+}
+
+/** `policy_assignments_to_modify`: every listed assignment set to DoNotEnforce, grouped. */
+function notEnforced(byGroup) {
   return obj(
     [...byGroup.entries()].map(([group, assignments]) => [
       group,
@@ -114,28 +246,50 @@ function notEnforced(sources) {
   );
 }
 
+const ENFORCED_NOTE = [
+  '# The library declares fourteen policy default values. Every one the build has a',
+  '# source for is supplied below, built from the names management.tf and',
+  '# connectivity.tf use because the alz provider needs them at plan time; an',
+  '# assignment whose value the build cannot supply is kept but not enforced, so',
+  '# nothing is created from a library placeholder.',
+];
+
+const NOT_ENFORCED_NOTE = [
+  '# Policy was not selected. The "alz" architecture carries its policy baseline',
+  '# regardless, so the assignments below are created, but every one of them is set to',
+  '# DoNotEnforce: the tree is deployed with the baseline present and inert, and a',
+  '# reader can inspect the assignments without any of them denying or remediating.',
+  '# The default values the build can supply are still passed, because the module',
+  '# evaluates them whether or not an assignment is enforced.',
+];
+
 /** The module items that configure the baseline; appended to the avm-ptn-alz call. */
 export function policyItems(state) {
+  const enforced = isSelected(state, 'policy');
   const sources = policySources(state);
   const supplied = POLICY_DEFAULTS.filter((d) => d.needs === null || sources[d.needs]);
-  return [
+  const byGroup = enforced
+    ? missingSourceAssignments(sources)
+    : new Map(Object.entries(BASELINE_ASSIGNMENTS).map(([g, a]) => [g, [...a]]));
+  const items = [
     '',
-    '# The library declares fourteen policy default values. Every one the build has a',
-    '# source for is supplied below, built from the names management.tf and',
-    '# connectivity.tf use because the alz provider needs them at plan time; an',
-    '# assignment whose value the build cannot supply is kept but not enforced, so',
-    '# nothing is created from a library placeholder.',
-    ['policy_assignments_to_modify', notEnforced(sources)],
-    '',
-    '# Terraform creates the management resources before the assignments that name them.',
-    [
-      'policy_assignments_dependencies',
-      list([
-        'module.management.data_collection_rule_ids',
-        'module.management.resource_id',
-        'module.management.user_assigned_identity_ids',
-      ]),
-    ],
-    ['policy_default_values', obj(supplied.map((d) => [d.name, jsonValue(d.value)]))],
+    ...(enforced ? ENFORCED_NOTE : NOT_ENFORCED_NOTE),
+    ['policy_assignments_to_modify', notEnforced(byGroup)],
   ];
+  if (sources.management) {
+    items.push(
+      '',
+      '# Terraform creates the management resources before the assignments that name them.',
+      [
+        'policy_assignments_dependencies',
+        list([
+          'module.management.data_collection_rule_ids',
+          'module.management.resource_id',
+          'module.management.user_assigned_identity_ids',
+        ]),
+      ]
+    );
+  }
+  items.push(['policy_default_values', obj(supplied.map((d) => [d.name, jsonValue(d.value)]))]);
+  return items;
 }

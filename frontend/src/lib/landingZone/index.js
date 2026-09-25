@@ -76,5 +76,5 @@ export {
 } from './state';
 export { decodeLz, encodeLz, isLzParam } from './share';
 export { emitFiles } from './hcl/index';
-export { POLICY_DEFAULTS } from './hcl/policy';
+export { BASELINE_ASSIGNMENTS, POLICY_DEFAULTS } from './hcl/policy';
 export { H_GAP, NODE_H, NODE_W, PAD, V_GAP, layoutDiagram } from './diagram';

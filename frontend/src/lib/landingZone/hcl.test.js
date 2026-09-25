@@ -9,6 +9,7 @@ import { describe, it, expect } from 'vitest';
 import {
   AVM_MODULES,
   AVM_SOURCES,
+  BASELINE_ASSIGNMENTS,
   DEFAULT_STATE,
   HUB_PREFIX_RANGE,
   POLICY_DEFAULTS,
@@ -207,7 +208,7 @@ describe('emitFiles', () => {
       'firewall                              = false'
     );
     expect(noFirewall['connectivity.tf']).not.toContain('sku_tier');
-    expect(noFirewall['alz.tf']).not.toContain('policy_default_values');
+    expect(noFirewall['alz.tf']).not.toContain('policy_assignments_dependencies');
   });
 
   it('builds a spoke per landing zone: a /24, a two-way hub peering, and a firewall route only where private', () => {
@@ -307,6 +308,56 @@ describe('emitFiles', () => {
       /corp = \{\n      policy_assignments = \{\n        Deploy-Private-DNS-Zones = \{/
     );
 
+    const notEnforced = (text) => (text.match(/enforcement_mode = "DoNotEnforce"/g) ?? []).length;
+    const baselineCount = Object.values(BASELINE_ASSIGNMENTS).reduce((n, a) => n + a.length, 0);
+    expect(baselineCount).toBe(123);
+    expect(BASELINE_ASSIGNMENTS.alz).toHaveLength(17);
+    expect(BASELINE_ASSIGNMENTS.platform).toHaveLength(40);
+    expect(BASELINE_ASSIGNMENTS.landingzones).toHaveLength(53);
+    expect(Object.keys(BASELINE_ASSIGNMENTS)).toEqual([
+      'alz',
+      'platform',
+      'landingzones',
+      'corp',
+      'local',
+      'sandbox',
+      'connectivity',
+      'identity',
+      'decommissioned',
+    ]);
+    expect(notEnforced(full)).toBe(1);
+    expect(notEnforced(noDns)).toBe(2);
+
+    const treeOnly = byPath(emitFiles({ selected: ['management-groups'] }));
+    expect(treeOnly['alz.tf']).toContain('Policy was not selected');
+    expect(notEnforced(treeOnly['alz.tf'])).toBe(baselineCount);
+    for (const [group, assignments] of Object.entries(BASELINE_ASSIGNMENTS)) {
+      expect(treeOnly['alz.tf'], group).toMatch(new RegExp(`^    ${group} = \\{$`, 'm'));
+      for (const a of assignments) {
+        expect(treeOnly['alz.tf'], `${group}/${a}`).toMatch(
+          new RegExp(`^        ${a} = \\{$`, 'm')
+        );
+      }
+    }
+    expect(treeOnly['alz.tf']).not.toContain('policy_assignments_dependencies');
+    expect(treeOnly['alz.tf']).not.toContain('module.management');
+    expect(treeOnly['alz.tf']).toMatch(/policy_default_values = \{\n    resource_group_location/);
+    for (const name of [
+      'resource_group_location',
+      'resource_group_name_service_health_alerts',
+      'resource_group_name_mdfc',
+      'email_security_contact',
+    ]) {
+      expect(treeOnly['alz.tf'], name).toMatch(new RegExp(`^    ${name}\\s+= jsonencode`, 'm'));
+    }
+    expect(treeOnly['alz.tf']).not.toContain('log_analytics_workspace_id');
+    expect(treeOnly['variables.tf']).toContain('variable "security_contact_email"');
+
+    const managementNoPolicy = byPath(emitFiles({ selected: ['management'] }))['alz.tf'];
+    expect(notEnforced(managementNoPolicy)).toBe(baselineCount);
+    expect(managementNoPolicy).toContain('policy_assignments_dependencies');
+    expect(managementNoPolicy).toContain('log_analytics_workspace_id');
+
     const policyNoHub = byPath(emitFiles({ selected: ['policy'] }));
     expect(policyNoHub['alz.tf']).toContain('Deploy-Private-DNS-Zones');
     expect(policyNoHub['alz.tf']).toContain('policy_default_values');
@@ -315,7 +366,7 @@ describe('emitFiles', () => {
     expect(policyNoHub['terraform.tfvars.example']).toContain(
       'security_contact_email     = "security@example.com"'
     );
-    expect(byPath(emitFiles({ selected: ['management-groups'] }))['variables.tf']).not.toContain(
+    expect(byPath(emitFiles({ selected: ['management-groups'] }))['variables.tf']).toContain(
       'security_contact_email'
     );
   });
@@ -358,6 +409,12 @@ describe('emitFiles', () => {
     });
     expect(byPath(overlapping)['variables.tf']).toContain('default     = "10.2.0.0/16"');
     expect(byPath(overlapping)['application.tf']).toContain('online_1 = 10.2.128.0/24');
+  });
+
+  it('matches the committed snapshot of the tree-only build, baseline present and not enforced', () => {
+    const files = emitFiles({ selected: ['management-groups'] });
+    expect(files.map((f) => f.path)).toMatchSnapshot('tree-only paths');
+    for (const f of files) expect(f.content).toMatchSnapshot(`tree-only ${f.path}`);
   });
 
   it('matches the committed snapshot of the default build', () => {

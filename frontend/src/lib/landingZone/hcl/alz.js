@@ -3,7 +3,6 @@
  * placements, and, when the policy component is selected, the baseline's
  * parameters from policy.js.
  */
-import { isSelected } from '../state';
 import { block, file, moduleSource, obj, q } from './format';
 import { policyItems } from './policy';
 import { placements } from './subscriptions';
@@ -12,8 +11,9 @@ const HEADER = [
   '# Management groups: the "alz" architecture, a root named "alz" with Platform and',
   '# Landing zones beneath it. It is created under the tenant root group, or under the',
   '# management group named in var.parent_management_group_id. The policy baseline is',
-  '# part of the same architecture, so selecting it adds parameters to this call rather',
-  '# than a module.',
+  '# part of the same architecture: selecting Policy supplies its parameters and lets it',
+  '# enforce; leaving it out deploys the same assignments with every one set to',
+  '# DoNotEnforce.',
 ];
 
 function placementItems(state) {
@@ -58,7 +58,7 @@ export function alzTf(state) {
       ],
       ['enable_telemetry', 'var.enable_telemetry'],
       ...placementItems(state),
-      ...(isSelected(state, 'policy') ? policyItems(state) : []),
+      ...policyItems(state),
     ]),
     '',
     ...block('output "root_management_group_resource_id"', [

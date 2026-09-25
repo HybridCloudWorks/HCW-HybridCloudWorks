@@ -46,11 +46,19 @@ export function isLocation(value) {
   return typeof value === 'string' && REGION_ID.test(value);
 }
 
-/** An integer count of landing zones, 0 to MAX_LANDING_ZONES. */
+/**
+ * An integer count of landing zones, 0 to MAX_LANDING_ZONES: a number, or a
+ * string of digits only. Whitespace, signs, an empty string and anything
+ * `Number` would quietly turn into 0 are refused, so a blank field or a
+ * `corp=%20` in the URL falls back to the default rather than deselecting.
+ */
 export function isLandingZoneCount(value) {
-  if (value === null || value === '' || typeof value === 'boolean') return false;
-  const n = Number(value);
-  return Number.isInteger(n) && n >= 0 && n <= MAX_LANDING_ZONES;
+  if (typeof value === 'string') {
+    return /^[0-9]+$/.test(value) && Number(value) <= MAX_LANDING_ZONES;
+  }
+  return (
+    typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= MAX_LANDING_ZONES
+  );
 }
 
 /**
@@ -174,7 +182,7 @@ export const COMPONENTS = Object.freeze([
     label: 'Management groups',
     summary: 'The tree of management groups every subscription is placed in.',
     teaches:
-      'A management group is a container above subscriptions, and the tree of them is the skeleton of a landing zone: an "alz" root, a Platform branch for the shared services and a Landing zones branch for the workloads. Policy and role assignments made on a group flow down to every subscription beneath it, so one decision at the root governs hundreds of subscriptions without being repeated. The avm-ptn-alz module reads the "alz" architecture definition and creates the whole tree in one call, and its subscription_placement input is how every other component’s subscription lands in the right group. Without the tree, each subscription is its own island: every guardrail has to be assigned again for each one, and nothing stops a new subscription from arriving with none.',
+      'A management group is a container above subscriptions, and the tree of them is the skeleton of a landing zone: an "alz" root, a Platform branch for the shared services and a Landing zones branch for the workloads. Policy and role assignments made on a group flow down to every subscription beneath it, so one decision at the root governs hundreds of subscriptions without being repeated. The avm-ptn-alz module reads the "alz" architecture definition and creates the whole tree in one call, and its subscription_placement input is how every other component’s subscription lands in the right group. The architecture carries the policy baseline with it, so selecting only this component deploys the tree with every assignment present but set to DoNotEnforce; selecting Policy is what turns them on. Without the tree, each subscription is its own island: every guardrail has to be assigned again for each one, and nothing stops a new subscription from arriving with none.',
     avm: pin('avm-ptn-alz'),
     dependsOn: [],
     options: ['location', 'rootParentId'],
@@ -186,7 +194,7 @@ export const COMPONENTS = Object.freeze([
     label: 'Policy baseline',
     summary: 'The Azure Policy assignments the alz architecture makes on each management group.',
     teaches:
-      'Azure Policy evaluates every resource against rules and can audit, deny or fix what it finds. The alz architecture assigns a baseline of these rules at each level of the tree: deny public IPs in corp, require encryption, send diagnostics to the central workspace, install the monitoring agent. The baseline is configuration of the same avm-ptn-alz call that builds the tree, with default values that point the policies at the Log Analytics workspace from the management component, the private DNS zones from the hub, and a security contact. Without it the tree is only a filing system; nothing enforces where logs go or what a team may create, and drift starts on the first day.',
+      'Azure Policy evaluates every resource against rules and can audit, deny or fix what it finds. The alz architecture assigns a baseline of these rules at each level of the tree: deny public IPs in corp, require encryption, send diagnostics to the central workspace, install the monitoring agent. The baseline is configuration of the same avm-ptn-alz call that builds the tree, with default values that point the policies at the Log Analytics workspace from the management component, the private DNS zones from the hub, and a security contact. Without this component the assignments still exist on the tree, because the architecture carries them, but every one is set to DoNotEnforce: nothing is denied or remediated, nothing decides where logs go or what a team may create, and drift starts on the first day.',
     avm: null,
     dependsOn: ['management-groups', 'management'],
     options: [],
