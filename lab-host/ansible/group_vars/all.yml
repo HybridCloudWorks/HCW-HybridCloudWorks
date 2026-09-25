@@ -1,0 +1,84 @@
+---
+# Host-specific values and every version pin, in one place. Role defaults hold
+# behaviour knobs only; anything that names a version, digest or checksum is
+# here so a bump is one edit and one diff.
+
+lab_host_domain: lab.hybridcloudworks.com
+
+# Hardening. SSH and the two web ports are the only inbound ports: vps-agent is
+# pull-based and node_exporter listens on loopback. The admin user's keys
+# default to whatever the provisioner installed for root, so the first run
+# never locks the host; set the list to pin them explicitly.
+hardening_ufw_allowed_tcp_ports:
+  - 22
+  - 80
+  - 443
+hardening_admin_user: hcwadmin
+hardening_admin_authorized_keys: []
+hardening_unattended_reboot_time: "04:30"
+
+# Docker Engine from download.docker.com, Ubuntu 24.04 (noble) package strings.
+# buildx and compose are pinned too rather than left as recommends: Coder and
+# its PostgreSQL (#679) are the Docker Compose services ADR 0032 names. The
+# signing key is the root of trust for every one of these pins, so its SHA256
+# is pinned as well (sha256sum of https://download.docker.com/linux/ubuntu/gpg,
+# read 2026-09-25) and get_url refuses a key that does not match.
+docker_version: "5:29.8.1-1~ubuntu.24.04~noble"
+docker_containerd_version: "2.3.5-1~ubuntu.24.04~noble"
+docker_buildx_version: "0.37.1-1~ubuntu.24.04~noble"
+docker_compose_version: "5.5.1-1~ubuntu.24.04~noble"
+docker_apt_key_checksum: sha256:1500c1f56fa9e26b9b8f42452a553675796ade0807cdce11975eb98170b3a570
+
+# Caddy is host-native (ADR 0032) and built with xcaddy inside the official
+# builder image, because the caddyserver.com download API always builds the
+# latest release and ignores a version parameter (verified 2026-09-25). These
+# lines are the build's provenance. caddy_builder_image_digest is the image
+# INDEX of caddy:2.11.4-builder from `docker buildx imagetools inspect` (its
+# linux/amd64 manifest beneath is sha256:7a05631b...). The role pulls and runs
+# caddy@<digest>, never the tag: Docker verifies the content against the digest
+# on pull, so a bumped pin is simply a new reference that gets pulled. The tag
+# is recorded for humans reading this file. The first twelve hex characters of
+# the digest are part of the built binary's filename, so bumping the builder
+# rebuilds.
+caddy_version: v2.11.4
+caddy_cloudflare_module_version: v0.2.4
+caddy_builder_image: caddy
+caddy_builder_image_tag: 2.11.4-builder
+caddy_builder_image_digest: sha256:401121e61853cb9c7df83cba43e532e49a68e30f32921c7bdcb7a4912168c067
+caddy_site_domain: "{{ lab_host_domain }}"
+# The three names ADR 0032 puts on the certificate. DNS-01 for each is answered
+# through the CNAME delegation of _acme-challenge.lab and _acme-challenge.coder.lab
+# to the dedicated lab zone (#661).
+caddy_site_names:
+  - "{{ lab_host_domain }}"
+  - "*.{{ lab_host_domain }}"
+  - "*.coder.{{ lab_host_domain }}"
+
+# Coder (#679) is the learner identity boundary and signs learners in with
+# GitHub OAuth. Its role renders coder_oauth2_github_allowed_orgs into
+# CODER_OAUTH2_GITHUB_ALLOWED_ORGS. An EMPTY list is not a lock: Coder reads it
+# as "no organisation restriction" and lets ANY GitHub account sign in, so
+# site.yml refuses to run with coder_enabled true and this list empty. Set the
+# organisation(s) whose members are allowed before flipping coder_enabled. The
+# kill switches are CODER_OAUTH2_GITHUB_ALLOW_SIGNUPS=false (no new learners)
+# or stopping the coder compose service (everyone), never an emptied allowlist.
+# Declared here so the contract exists before the role does.
+coder_enabled: false
+coder_oauth2_github_allowed_orgs: []
+
+# vps-agent runs host-native as a systemd service (ADR 0032) from a checkout of
+# this repository at a pinned commit. The repository has no tagged release, so
+# the pin is a sha.
+labs_agent_user: hcw-labs-agent
+labs_agent_home: /opt/hcw-labs-agent
+labs_agent_repo_url: https://github.com/HybridCloudWorks/HCW-HybridCloudWorks.git
+labs_agent_repo_ref: 04aa9e36a2c16813dcbabb838f5c2b86d3370d96
+labs_agent_node_version: "22.23.3-1nodesource1"
+# sha256sum of https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key, read
+# 2026-09-25; the key that apt trusts for the pinned nodejs package.
+labs_agent_node_apt_key_checksum: sha256:b42e0321dabdc24e892115da705cf061167eac12a317f23d329862d0aa0a271d
+labs_agent_id: vps-hostinger-01
+
+# node_exporter release tarball, linux-amd64, from the release's sha256sums.txt.
+node_exporter_version: 1.12.1
+node_exporter_checksum: sha256:b51d8a76aa2a9156a55d501aca6276fae09e262259a5e4e831d2c2222f084e63

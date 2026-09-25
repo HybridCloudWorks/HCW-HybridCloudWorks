@@ -1,0 +1,37 @@
+---
+- name: Bootstrap the HCW lab host
+  hosts: all
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Refuse to run on anything but Ubuntu 24.04
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] == 'Ubuntu'
+          - ansible_facts['distribution_version'] == '24.04'
+        fail_msg: >-
+          This playbook is written for Ubuntu 24.04 LTS and found
+          {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}.
+
+    - name: Refuse to enable Coder with an empty GitHub organisation allowlist
+      ansible.builtin.assert:
+        that:
+          - coder_oauth2_github_allowed_orgs | length > 0
+        fail_msg: >-
+          coder_enabled is true but coder_oauth2_github_allowed_orgs is empty. An empty
+          CODER_OAUTH2_GITHUB_ALLOWED_ORGS lets any GitHub account sign in; set the
+          organisation(s) whose members are allowed before enabling Coder.
+      when: coder_enabled | bool
+
+    - name: Refresh the apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+  roles:
+    - role: hardening
+    - role: docker
+    - role: node_exporter
+    - role: caddy
+    - role: labs_agent

@@ -1,0 +1,58 @@
+---
+argument_specs:
+  main:
+    short_description: Install Docker Engine, buildx and compose at pinned versions from Docker's apt repository
+    description:
+      - Adds Docker's signed apt repository for the running Ubuntu release, installs
+        docker-ce, docker-ce-cli, containerd.io, docker-buildx-plugin and docker-compose-plugin
+        at the exact versions given, holds them, writes /etc/docker/daemon.json and enables
+        the service.
+      - Also installs python3-docker and python3-requests from Ubuntu, which the
+        community.docker modules the caddy role uses need on the target interpreter.
+    author: HybridCloudWorks
+    options:
+      docker_version:
+        type: str
+        required: true
+        description:
+          - Exact apt version string for docker-ce and docker-ce-cli, for example
+            "5:29.8.1-1~ubuntu.24.04~noble".
+      docker_containerd_version:
+        type: str
+        required: true
+        description: Exact apt version string for containerd.io.
+      docker_buildx_version:
+        type: str
+        required: true
+        description: Exact apt version string for docker-buildx-plugin.
+      docker_compose_version:
+        type: str
+        required: true
+        description: Exact apt version string for docker-compose-plugin, which Coder (#679) runs under.
+      docker_apt_key_url:
+        type: str
+        required: false
+        default: https://download.docker.com/linux/ubuntu/gpg
+        description: Where the repository signing key is fetched from.
+      docker_apt_key_checksum:
+        type: str
+        required: true
+        description:
+          - sha256:<hex> of the signing key. The key is the root of trust for every version
+            pin below, so get_url refuses one that does not match.
+      docker_apt_key_path:
+        type: path
+        required: false
+        default: /etc/apt/keyrings/docker.asc
+        description: Where the signing key is stored; referenced by Signed-By in the source.
+      docker_apt_repository_url:
+        type: str
+        required: false
+        default: https://download.docker.com/linux/ubuntu
+        description: The apt repository base URL.
+      docker_daemon_config:
+        type: dict
+        required: false
+        description:
+          - Rendered verbatim as /etc/docker/daemon.json. The default sets the json-file
+            log driver with 10 MB x 3 rotation and live-restore.
