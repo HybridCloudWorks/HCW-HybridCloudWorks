@@ -26,181 +26,25 @@ The rewrite is the whole reason this is a script and not a one-liner:
     /tmp/run/src): Terraform uses `./` and `../` paths in place, while an
     absolute path is a `file://` source it copies onto the tmpfs first.
 
-Output is what the agent returns to the job: each rewrite, each registry
-module left alone and why, then Terraform's own output.
+The constraint logic is lib/tf_constraints.py and the HCL rewrite is
+lib/tf_rewrite.py, both at /usr/local/lib/hcw in the image (HCW_LIB
+overrides that for a harness). Output is what the agent returns to the job:
+each rewrite, each registry module left alone and why, then Terraform's own
+output.
 """
 
 import os
-import re
 import shutil
 import subprocess
 import sys
 
+sys.path.insert(0, os.environ.get("HCW_LIB", "/usr/local/lib/hcw"))
+
+from tf_constraints import vendored_modules  # noqa: E402
+from tf_rewrite import rewrite_tree  # noqa: E402
+
 WORKSPACE = os.environ.get("HCW_WORKSPACE", "/workspace")
 RUN_DIR = os.environ.get("HCW_RUN_DIR", "/tmp/run/src")
-AVM_ROOT = os.environ.get("HCW_AVM_ROOT", "/opt/avm")
-
-REGISTRY_SOURCE = re.compile(
-    r"^(?:registry\.terraform\.io/)?[Aa]zure/([A-Za-z0-9._-]+)/(azurerm|azure)(?://(.+))?$"
-)
-MODULE_HEADER = re.compile(r'^\s*module\s+"([^"]+)"\s*\{')
-SOURCE_LINE = re.compile(r'^(\s*)source(\s*)=(\s*)"([^"]+)"(.*)$')
-VERSION_LINE = re.compile(r'^(\s*)version\s*=\s*"([^"]*)"(.*)$')
-VERSION = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
-CLAUSE = re.compile(r"^(~>|>=|<=|!=|>|<|=)?\s*v?(\d+)(?:\.(\d+))?(?:\.(\d+))?$")
-
-# Terraform's constraint operators over (version, given, pessimistic upper).
-OPERATORS = {
-    "=": lambda v, g, _u: v == g,
-    "!=": lambda v, g, _u: v != g,
-    ">": lambda v, g, _u: v > g,
-    ">=": lambda v, g, _u: v >= g,
-    "<": lambda v, g, _u: v < g,
-    "<=": lambda v, g, _u: v <= g,
-    "~>": lambda v, g, u: g <= v < u,
-}
-
-
-def parse_version(text):
-    m = VERSION.match(text.strip())
-    return tuple(int(x) for x in m.groups()) if m else None
-
-
-def parse_clause(clause):
-    """One `<op> <version>` clause -> (op, given, upper), or None if malformed."""
-    m = CLAUSE.match(clause.strip())
-    if not m:
-        return None
-    parts = [int(m.group(2)), int(m.group(3) or 0), int(m.group(4) or 0)]
-    # ~> 1.2 means >= 1.2.0, < 2.0.0; ~> 1.2.3 means >= 1.2.3, < 1.3.0.
-    upper = (parts[0] + 1, 0, 0) if m.group(4) is None else (parts[0], parts[1] + 1, 0)
-    return m.group(1) or "=", tuple(parts), upper
-
-
-def satisfies(version, constraint):
-    """Terraform's version-constraint syntax over a (major, minor, patch) tuple."""
-    if not constraint.strip():
-        return True
-    clauses = [parse_clause(c) for c in constraint.split(",")]
-    return all(c is not None and OPERATORS[c[0]](version, c[1], c[2]) for c in clauses)
-
-
-def vendored_modules():
-    found = {}
-    if not os.path.isdir(AVM_ROOT):
-        return found
-    for entry in sorted(os.listdir(AVM_ROOT)):
-        name, sep, version = entry.rpartition("@")
-        parsed = parse_version(version) if sep else None
-        if parsed and os.path.isdir(os.path.join(AVM_ROOT, entry)):
-            found.setdefault(name, []).append((parsed, version))
-    return found
-
-
-def choose(vendored, name, constraint):
-    candidates = [(v, text) for v, text in vendored.get(name, []) if satisfies(v, constraint)]
-    return max(candidates)[1] if candidates else None
-
-
-def brace_delta(line):
-    return line.count("{") - line.count("}")
-
-
-def scan_block(lines, start):
-    """
-    Walk one `module` block from its header line. Returns (end index, index
-    of its `source` line, index of its `version` line); only depth-1 lines
-    are attributes of the block itself, so a `source` inside a nested block
-    or a `for_each = { ... }` value is not taken.
-    """
-    depth = brace_delta(lines[start])
-    j = start + 1
-    source_at = version_at = None
-    while j < len(lines) and depth > 0:
-        if depth == 1 and SOURCE_LINE.match(lines[j]):
-            source_at = j
-        elif depth == 1 and VERSION_LINE.match(lines[j]):
-            version_at = j
-        depth += brace_delta(lines[j])
-        j += 1
-    return j, source_at, version_at
-
-
-def module_blocks(lines):
-    """Yield (name, source index, version index) for every top-level module block."""
-    i = 0
-    while i < len(lines):
-        header = MODULE_HEADER.match(lines[i])
-        if not header:
-            i += 1
-            continue
-        end, source_at, version_at = scan_block(lines, i)
-        yield header.group(1), source_at, version_at
-        i = end
-
-
-def relative_target(module, version, sub, file_dir):
-    target = os.path.join(AVM_ROOT, f"{module}@{version}")
-    if sub:
-        target = os.path.join(target, sub)
-    rel = os.path.relpath(target, file_dir).replace(os.sep, "/")
-    return rel if rel.startswith(("./", "../")) else "./" + rel
-
-
-def resolve_block(lines, block, vendored, file_dir):
-    """
-    Decide one module block's fate. Returns None for a block that names no
-    registry AVM source, else (report line, {line index: new text}); the
-    edits are empty when no vendored version satisfies the constraint.
-    """
-    block_name, source_at, version_at = block
-    if source_at is None:
-        return None
-    src = SOURCE_LINE.match(lines[source_at])
-    reg = REGISTRY_SOURCE.match(src.group(4).strip())
-    if not reg:
-        return None
-    module, sub = reg.group(1), reg.group(3)
-    constraint = VERSION_LINE.match(lines[version_at]).group(2) if version_at is not None else ""
-    label = f'module "{block_name}" ({src.group(4)}{" " + constraint if constraint else ""})'
-    picked = choose(vendored, module, constraint)
-    if picked is None:
-        have = ", ".join(text for _v, text in vendored.get(module, [])) or "none vendored"
-        return f"left    {label}: no vendored version satisfies it (have: {have})", {}
-    rel = relative_target(module, picked, sub, file_dir)
-    edits = {source_at: f'{src.group(1)}source{src.group(2)}={src.group(3)}"{rel}"{src.group(5)}'}
-    if version_at is not None:
-        v = VERSION_LINE.match(lines[version_at])
-        edits[version_at] = f'{v.group(1)}# version = "{v.group(2)}"  # vendored: {picked}'
-    return f"rewrote {label} -> {rel}", edits
-
-
-def rewrite_file(path, vendored, report):
-    with open(path, encoding="utf-8") as fh:
-        lines = fh.read().split("\n")
-    edits = {}
-    for block in module_blocks(lines):
-        outcome = resolve_block(lines, block, vendored, os.path.dirname(path))
-        if outcome is None:
-            continue
-        report.append(outcome[0])
-        edits.update(outcome[1])
-    if not edits:
-        return
-    for index, text in edits.items():
-        lines[index] = text
-    with open(path, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write("\n".join(lines))
-
-
-def rewrite_tree(root, vendored):
-    report = []
-    for base, dirs, files in os.walk(root):
-        dirs[:] = sorted(d for d in dirs if d not in (".terraform", ".git"))
-        for fn in sorted(files):
-            if fn.endswith(".tf"):
-                rewrite_file(os.path.join(base, fn), vendored, report)
-    return report
 
 
 def run_terraform(args, env):
@@ -214,25 +58,26 @@ def run_terraform(args, env):
     )
 
 
+def print_report(report):
+    print(f"== module sources ({len(report)} registry module block(s) in the payload)")
+    for line in report:
+        print("  " + line)
+    if not report:
+        print("  none; nothing rewritten")
+
+
 def main():
     if not os.path.isdir(WORKSPACE):
         print(f"hcw-terraform-validate: {WORKSPACE} is not a directory", file=sys.stderr)
         return 2
-    if os.path.exists(RUN_DIR):
-        shutil.rmtree(RUN_DIR)
+    shutil.rmtree(RUN_DIR, ignore_errors=True)
     shutil.copytree(
         WORKSPACE,
         RUN_DIR,
         symlinks=False,
         ignore=shutil.ignore_patterns(".terraform", ".terraform.lock.hcl", ".git"),
     )
-
-    report = rewrite_tree(RUN_DIR, vendored_modules())
-    print(f"== module sources ({len(report)} registry module block(s) in the payload)")
-    for line in report:
-        print("  " + line)
-    if not report:
-        print("  none; nothing rewritten")
+    print_report(rewrite_tree(RUN_DIR, vendored_modules()))
 
     env = dict(os.environ, TF_DATA_DIR=os.path.join(RUN_DIR, ".terraform"))
     print("\n== terraform init -backend=false")

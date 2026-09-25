@@ -225,6 +225,14 @@ COPY --from=fetch /out/bin/ /usr/local/bin/
 # argv entry in vps-agent/lib/capabilities.js, and what it does lives here,
 # where smoke.sh exercises it against a payload with no network.
 COPY --chmod=0755 bin/ /usr/local/bin/
+# hcw-terraform-validate's constraint and rewrite modules (lib/); the script
+# puts this directory on sys.path itself, so no PYTHONPATH is set image-wide.
+# Modes set explicitly and separately: COPY --chmod applies one mode to the
+# directory as well as the files, and 0644 on the directory made it
+# untraversable for uid 65534 (measured in #675: ModuleNotFoundError).
+COPY lib/ /usr/local/lib/hcw/
+RUN chmod 0755 /usr/local/lib/hcw && chmod 0644 /usr/local/lib/hcw/*.py \
+ && test "$(ls -A /usr/local/lib/hcw | grep -vc '\.py$')" -eq 0
 COPY --from=vendor /out/avm/ /opt/avm/
 COPY --from=fetch /out/kubeconform/ /opt/kubeconform/
 COPY --from=mirror /out/mirror/ /opt/terraform/mirror/
