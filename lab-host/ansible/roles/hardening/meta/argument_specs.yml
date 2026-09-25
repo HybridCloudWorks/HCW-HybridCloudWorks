@@ -14,8 +14,11 @@ argument_specs:
         type: list
         elements: str
         required: false
-        default: [openssh-server, ufw, fail2ban, unattended-upgrades]
-        description: Packages installed before anything is configured.
+        default: [openssh-server, sudo, ufw, fail2ban, unattended-upgrades]
+        description:
+          - Packages installed before anything is configured. sudo is listed because the
+            administrative user's access and the play's own become depend on it, and a minimal
+            image may not ship it.
       hardening_admin_user:
         type: str
         required: false

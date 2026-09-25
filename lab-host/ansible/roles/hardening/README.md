@@ -5,8 +5,12 @@ the admin Labs page's Setup tab used to ask the owner to do by hand.
 
 ## What it does
 
-1. Creates `hcwadmin` with passwordless sudo (`/etc/sudoers.d/90-hcw-admin`,
-   validated with `visudo`) and installs its public keys. With
+1. Installs the packages it configures, `sudo` included: a minimal image may
+   not ship it, and both the administrative user's access and the play's own
+   `become` depend on it (`bootstrap.sh` installs it too, before Ansible
+   ever runs, for the same reason). Creates `hcwadmin` with passwordless
+   sudo (`/etc/sudoers.d/90-hcw-admin`, validated with `visudo`) and
+   installs its public keys. With
    `hardening_admin_authorized_keys` empty the keys are copied from
    `/root/.ssh/authorized_keys`, which is where the Hostinger provisioner
    puts the key Terraform passes it. The role **refuses to continue** if no

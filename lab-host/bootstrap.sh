@@ -39,7 +39,7 @@ fi
 
 log "installing prerequisites"
 apt-get update -q
-apt-get install -y -q --no-install-recommends git pipx python3-apt ca-certificates curl
+apt-get install -y -q --no-install-recommends git pipx python3-apt ca-certificates curl sudo
 
 if ! "${PIPX_BIN_DIR}/ansible-playbook" --version 2>/dev/null | grep -q "core ${ANSIBLE_CORE_VERSION}"; then
   log "installing ansible-core ${ANSIBLE_CORE_VERSION} with pipx"

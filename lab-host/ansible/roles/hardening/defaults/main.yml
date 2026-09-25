@@ -3,6 +3,7 @@
 # role's own defaults so it also works on its own.
 hardening_packages:
   - openssh-server
+  - sudo
   - ufw
   - fail2ban
   - unattended-upgrades
