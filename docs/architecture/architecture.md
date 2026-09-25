@@ -290,10 +290,14 @@ mutation tests require an explicitly disposable record and separate approval.
 
 ### 5.3 Labs flow
 
-The browser submits a bounded lab request to the labs broker. The broker validates content, enforces
-quota, creates a TTL-bound job, and returns an opaque ID. The Hostinger agent polls outbound, claims a
-job conditionally, runs it inside the existing Docker sandbox, and reports redacted output. No inbound
-VPS port or Cosmos account key is exposed.
+Submission is admin-only today. An editor signed in to `/admin/labs` calls `enqueueLabJob`, which
+checks the `editor` role, the job-type allowlist and the per-type payload cap, then writes a queued
+job and returns its ID. The Hostinger agent polls outbound with its own Entra certificate, claims a
+job conditionally, runs it inside the Docker sandbox with no network, and reports the result. No
+inbound VPS port or Cosmos account key is exposed. The browser never submits a lab request: the
+source repository's public path was not ported (`functions/src/lib/labs.js`), and
+[ADR 0032](../decisions/0032-learner-labs-platform.md) holds anonymous submission Gated with the
+bounds it would open under.
 
 ## 6. Reliability model
 

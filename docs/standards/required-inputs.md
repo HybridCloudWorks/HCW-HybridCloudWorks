@@ -316,6 +316,23 @@ row above.
 Status: **MISSING** as a set — no agent host is provisioned. The last four are
 resource limits with working defaults.
 
+**Lab host inputs named by [ADR 0032](../decisions/0032-learner-labs-platform.md).**
+Not observed: none of the stores below has been created, and the ADR is
+Proposed. Each row is here so the name is fixed before anything consumes it,
+and so a status can change in the pull request that provisions it. The
+placement follows [Variables and secrets](variables-and-secrets.md): a
+Terraform provider credential is a workspace variable, a value the Function
+App reads is a Key Vault secret, and a credential Ansible uses once is a vault
+entry that never reaches the repository.
+
+| Name | Store | Status | Notes |
+| --- | --- | --- | --- |
+| `hostinger_api_token` | HCP Terraform workspace `hcw/hcw-lab`, Terraform variable, sensitive | **MISSING** | `hostinger/hostinger` provider credential. Issued in the Hostinger panel; this workspace only, never `hcw-azure` |
+| `cloudflare_api_token` | HCP Terraform workspace `hcw/hcw-lab`, Terraform variable, sensitive | **MISSING** | Cloudflare provider, for the `lab.hybridcloudworks.com` record. Same name as the §4.1 variable and a different token: scoped to DNS edit on the one zone, so a lab run cannot touch the site's origin rules |
+| Arc onboarding service principal credential | Ansible Vault, never in the repository and never on the host after onboarding | **MISSING** | Holds only *Azure Connected Machine Onboarding* on `rg-lab-hybrid-prod-cus`. Used once by `azcmagent connect`; rotate after onboarding |
+| `CODER_URL` | Key Vault `kv-site-prod-cus-01`, referenced from a Terraform-managed app setting | **MISSING** | Base URL of the Coder deployment the Function App's status proxy reads; an address, not a credential, kept in the vault so its reference follows the same path as the token beside it |
+| `CODER_STATUS_TOKEN` | Key Vault `kv-site-prod-cus-01`, referenced from a Terraform-managed app setting | **MISSING** | Read-only Coder API token for the status proxy. Seed it before the Terraform run that adds its reference, so `monitor-unresolved-secrets.yml` never sees it unresolved |
+
 ## 4.8 Frontend build-time variables
 
 `VITE_*` is contractual to Vite and never renamed. These are **build-time

@@ -20,8 +20,12 @@ not to extend the allowlist.
 
 1. Branch from `main`. No direct pushes to `main`.
 2. Keep the SOP documents true: all new work — engineering and owner-gated
-   alike — lands in `TODO.md`, completed work moves to `CHANGELOG.md`, and new
-   required inputs go to `docs/standards/required-inputs.md`.
+   alike — is a GitHub issue on the
+   [HCW Work Board](https://github.com/orgs/HybridCloudWorks/projects/1) (org
+   project 1) with its Priority set (owner decision 2026-09-05, #362);
+   `TODO.md` holds only the accepted risks and an index to the open issues;
+   completed work goes to `CHANGELOG.md`; and new required inputs go to
+   `docs/standards/required-inputs.md`.
 3. Open a PR using the template; fill the verification section with what you
    actually ran.
 4. CI must be green: build/test, CodeQL, repository policy, and — for

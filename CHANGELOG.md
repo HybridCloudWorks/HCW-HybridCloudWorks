@@ -17,6 +17,38 @@ This project has not cut a tagged release; entries are grouped under
 
 ## [Unreleased]
 
+### Added
+
+- **ADR 0032 records the learner labs platform, and the two documents that
+  misdescribed the labs are corrected (#660).** Phase 0 of #656: the
+  decisions every sub-issue in the four lab epics (#656, #657, #658, #659)
+  builds on are written down once, as a Proposed record, before any of them
+  is implemented.
+  - `docs/decisions/0032-learner-labs-platform.md`: the Hostinger VPS is
+    Terraform-managed through `hostinger/hostinger` in its own `hcw-lab`
+    workspace so lab state never meets `hcw-azure`; Ubuntu 24.04 with Docker
+    Engine as the only runtime and no Kubernetes (owner decision 2026-09-24);
+    Azure Arc as the hybrid control plane with heartbeat and auth syslog only
+    and Defender for Servers off; Coder as the learner identity boundary the
+    site links to and never embeds; digest-pinned images from `lab-image/` as
+    the one toolchain; and anonymous public submission held Gated with its
+    bounds stated. Listed in the register and the site nav.
+  - `docs/architecture/labs-host.md` is the estate record for the host —
+    provider, plan, OS, what runs, exposure, backup posture and the identities
+    it holds — every row marked planned, with no addresses and no secrets.
+  - `docs/architecture/architecture.md` §5.3 said the browser submits a lab
+    request. It never has: `submitPublicLabJob` was deliberately not ported
+    (`functions/src/lib/labs.js`). The section now says submission is
+    admin-only through `/admin/labs` and `enqueueLabJob`, and points at ADR
+    0032 for the gated public path.
+  - `docs/standards/required-inputs.md` §4.7 gains the inputs the ADR names —
+    `hostinger_api_token` and `cloudflare_api_token` in `hcw-lab`, the Arc
+    onboarding credential in Ansible Vault, `CODER_URL` and
+    `CODER_STATUS_TOKEN` in Key Vault — all MISSING.
+  - `.github/CONTRIBUTING.md` still said new work lands in `TODO.md`. It lands
+    as an issue on org project 1 with a Priority set (owner decision
+    2026-09-05, #362); `TODO.md` keeps the accepted risks and an index.
+
 ### Changed
 
 - **The six radarlint-python findings left on `main` are fixed, not
