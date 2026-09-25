@@ -1,0 +1,220 @@
+# Build, smoke-test and publish the hcw-lab image (issue #658, Phase 1 in #674).
+#
+# Two images from one Dockerfile: ghcr.io/hybridcloudworks/hcw-lab-runner
+# (the `runner` target) and ghcr.io/hybridcloudworks/hcw-lab (the `full`
+# target). See lab-image/README.md for what each carries.
+#
+# Three triggers, one job, and the job decides how far to go:
+#
+#   pull_request        build both targets, load them into the runner's Docker,
+#                       run lab-image/smoke.sh in each under --network none
+#                       with the source mounted read-only. No registry login,
+#                       no push. This is the check a pull request waits on.
+#   push to main        the same build and smoke, then push both images tagged
+#                       with the commit sha and `latest`, and attach a
+#                       provenance attestation to each. The digests go to the
+#                       job summary so the follow-up that pins them
+#                       (vps-agent/lib/capabilities.js, #675) copies them from
+#                       a first-party source.
+#   workflow_dispatch   build and smoke on any ref; publish only from main.
+#                       A `latest` pushed from a branch would silently replace
+#                       what learners pull.
+#
+# Path-filtered on purpose, unlike ci.yml: this workflow is not a required
+# context on the main ruleset (a path-filtered required context is never
+# auto-satisfied and blocks unrelated pull requests forever — the T-523
+# doctrine in iac-validate.yml). If it is ever made required, remove `paths`
+# first and move the filtering inside the job as ci.yml does.
+#
+# Permissions are declared on the job, not the workflow, so the read-only
+# default applies to anything added later. `packages: write` pushes to GHCR,
+# `id-token: write` and `attestations: write` sign and store the provenance.
+# The push authenticates with the job's own GITHUB_TOKEN; no PAT, no secret.
+#
+# The base image's digest lives in two places by necessity — a FROM line
+# cannot read a file — so the first step fails the build when
+# lab-image/versions.env and lab-image/Dockerfile disagree about it.
+name: Publish lab image
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'lab-image/**'
+      - '.github/workflows/publish-lab-image.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'lab-image/**'
+      - '.github/workflows/publish-lab-image.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  # Cancel a superseded pull request build, never a publish from main: the
+  # main run is the record of what was pushed under a sha.
+  group: publish-lab-image-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  RUNNER_IMAGE: ghcr.io/hybridcloudworks/hcw-lab-runner
+  FULL_IMAGE: ghcr.io/hybridcloudworks/hcw-lab
+
+jobs:
+  build:
+    name: Build, smoke, publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: versions.env and the Dockerfile agree on the base image digest
+        working-directory: lab-image
+        run: |
+          set -euo pipefail
+          digest="$(sed -n 's/^DEBIAN_DIGEST=//p' versions.env)"
+          test -n "$digest"
+          froms="$(grep -c '^FROM debian:' Dockerfile)"
+          pinned="$(grep -c "^FROM debian:[a-z-]*@${digest} " Dockerfile)"
+          echo "FROM debian lines: ${froms}, pinned to ${digest}: ${pinned}"
+          test "$froms" -eq "$pinned"
+          test "$froms" -gt 0
+
+      - name: Decide whether this run publishes
+        id: mode
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "push" ] || { [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$REF" = "refs/heads/main" ]; }; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "publishing: ${EVENT_NAME} on ${REF}"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "build and smoke only: ${EVENT_NAME} on ${REF}"
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # `load: true` puts the image into the runner's Docker so smoke.sh can
+      # run it. `provenance: false` here and on the push below: the
+      # attestation is actions/attest-build-provenance's, stored in GHCR as
+      # a referrer, so the pushed image stays a plain single manifest whose
+      # digest is the one `docker pull` reports — the value #675 pins.
+      - name: Build runner
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: lab-image
+          target: runner
+          load: true
+          push: false
+          provenance: false
+          tags: hcw-lab-runner:ci
+
+      - name: Build full
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: lab-image
+          target: full
+          load: true
+          push: false
+          provenance: false
+          tags: hcw-lab:ci
+
+      - name: Smoke runner
+        run: docker run --rm --network none -v "${GITHUB_WORKSPACE}/lab-image:/workspace:ro" hcw-lab-runner:ci bash /workspace/smoke.sh runner
+
+      - name: Smoke full
+        run: docker run --rm --network none -v "${GITHUB_WORKSPACE}/lab-image:/workspace:ro" hcw-lab:ci bash /workspace/smoke.sh full
+
+      - name: Image sizes
+        run: |
+          set -euo pipefail
+          {
+            echo "## hcw-lab image sizes"
+            echo
+            echo '```'
+            docker image ls --format 'table {{.Repository}}\t{{.Tag}}\t{{.Size}}' hcw-lab-runner:ci hcw-lab:ci
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Log in to GHCR
+        if: steps.mode.outputs.publish == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # The same builder and layer cache as the smoke build, so what is pushed
+      # is what was tested.
+      - name: Push runner
+        if: steps.mode.outputs.publish == 'true'
+        id: push-runner
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: lab-image
+          target: runner
+          push: true
+          provenance: false
+          tags: |
+            ${{ env.RUNNER_IMAGE }}:${{ github.sha }}
+            ${{ env.RUNNER_IMAGE }}:latest
+
+      - name: Push full
+        if: steps.mode.outputs.publish == 'true'
+        id: push-full
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: lab-image
+          target: full
+          push: true
+          provenance: false
+          tags: |
+            ${{ env.FULL_IMAGE }}:${{ github.sha }}
+            ${{ env.FULL_IMAGE }}:latest
+
+      - name: Attest runner provenance
+        if: steps.mode.outputs.publish == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.RUNNER_IMAGE }}
+          subject-digest: ${{ steps.push-runner.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest full provenance
+        if: steps.mode.outputs.publish == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.FULL_IMAGE }}
+          subject-digest: ${{ steps.push-full.outputs.digest }}
+          push-to-registry: true
+
+      - name: Published digests
+        if: steps.mode.outputs.publish == 'true'
+        env:
+          RUNNER_DIGEST: ${{ steps.push-runner.outputs.digest }}
+          FULL_DIGEST: ${{ steps.push-full.outputs.digest }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Published"
+            echo
+            echo "Pin these as \`<tag>@<digest>\`; the tag is documentation, the digest decides."
+            echo
+            echo '```'
+            echo "${RUNNER_IMAGE}:${SHA}@${RUNNER_DIGEST}"
+            echo "${FULL_IMAGE}:${SHA}@${FULL_DIGEST}"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
