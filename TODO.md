@@ -30,14 +30,24 @@ issues list behind it: https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/
 | Item | Issue |
 | --- | --- |
 | Audio pipeline parent: every component shipped and verified 2026-09-09; the three remaining secrets (`ELEVENLABS-API-KEY`, `RSSCOM-API-KEY`, `RSSCOM-PODCAST-ID`) wait on the ElevenLabs and RSS.com Max purchases, owner-gated | [#432](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/432) |
+| The Hybrid Lab host: the Hostinger VPS as the on-premises half of a hybrid estate (Terraform via the Hostinger provider, Ansible, Azure Arc, live status page); seven sub-issues #660–#666, ADR 0032 is #660 | [#656](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/656) |
+| Landing Zone Builder: an interactive page that assembles an Azure landing zone component by component and emits AVM-based Terraform; seven sub-issues #667–#673 | [#657](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/657) |
+| `hcw-lab` image and the Docker agentic sandbox: one digest-pinned toolchain image for the lab pages, Coder and `vps-agent`, plus a sandbox recipe; five sub-issues #674–#678 | [#658](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/658) |
+| Browser labs on Coder: Docker Compose on the lab host, GitHub OAuth as the learner boundary, a status proxy and `/education/labs`; five sub-issues #679–#683 | [#659](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/659) |
 
-**Owner decision 2026-09-18: #432 is the only issue that stays open.** The
-board was reduced to it on that date. The five other issues open at the time
+This table lists parent issues only; their sub-issues are on the board and
+under each parent's "Sub-issues" section. It is refreshed in the pull request
+that opens or closes a parent, so a parent missing here is a documentation
+finding, not a sign the work was dropped.
+
+**Owner decision 2026-09-18: #432 was the only issue left open on that date.**
+The board was reduced to it then. The five other issues open at the time
 (#501, #567, #588, #611, #613) were closed with a comment on each recording
 what was still outstanding, so the residual — owner steps, one live check, the
 untouched host-storage read investigation on #611, the remaining Qlty rows on
 #588 — lives on those closing comments rather than in a tracker. Reopen the
-issue if any of it is picked up again; this file does not carry it.
+issue if any of it is picked up again; this file does not carry it. The four
+sponsor-integration parents above were opened on 2026-09-24.
 
 `GEMINI-API-KEY` already covers Listen & Learn speech; nothing to provide.
 

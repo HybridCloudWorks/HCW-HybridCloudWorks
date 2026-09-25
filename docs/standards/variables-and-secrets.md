@@ -76,7 +76,7 @@ record of that decision is the artefact.
 | --- | --- | --- |
 | **Derived** | Terraform computes it from a resource it already manages, or a workflow fetches it after OIDC login. Nobody types it anywhere | `COSMOS_ENDPOINT`, `STORAGE_BLOB_ENDPOINT`, `STORAGE_ACCOUNT_NAME`, `AZURE_OPENAI_ENDPOINT` — all set from resource attributes in `infra/main.tf` |
 | **Deliberately absent** | The value must *not* exist. Provisioning it changes behaviour for the worse | `COSMOS_KEY`, `AZURE_OPENAI_KEY`, `STORAGE_ACCOUNT_KEY`, `STORAGE_CONNECTION_STRING`, `COSMOS_CONNECTION_STRING` |
-| **Generated in place** | The value is created on the host that consumes it and never moves | `LABS_AGENT_CERT_PATH` — the agent's private key is generated on the VPS, root-owned, `0600`, and only the public certificate is uploaded |
+| **Generated in place** | The value is created on the host that consumes it and never moves | `LABS_AGENT_CERT_PATH` — the agent's private key is generated on the VPS by `lab-host/ansible` (role `labs_agent`), owned by root with group `hcw-labs-agent` and mode `0640` so the service user reads it and nobody else can, and only the public certificate is uploaded |
 
 "Deliberately absent" is a placement outcome, not a gap, and it needs to be
 written down as firmly as a real placement — otherwise the next person to see

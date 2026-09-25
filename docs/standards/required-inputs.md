@@ -316,6 +316,27 @@ row above.
 Status: **MISSING** as a set — no agent host is provisioned. The last four are
 resource limits with working defaults.
 
+**Lab host inputs named by [ADR 0032](../decisions/0032-learner-labs-platform.md).**
+Not observed: none of the stores below has been created, and the ADR is
+Proposed. Each row is here so the name is fixed before anything consumes it,
+and so a status can change in the pull request that provisions it. The
+placement follows [Variables and secrets](variables-and-secrets.md): a
+Terraform provider credential is a workspace variable, a value the Function
+App reads is a Key Vault secret, and a credential Ansible uses once is a vault
+entry that never reaches the repository.
+
+| Name | Store | Status | Notes |
+| --- | --- | --- | --- |
+| `hostinger_api_token` | HCP Terraform workspace `hcw/hcw-lab`, Terraform variable, sensitive | **MISSING** | `hostinger/hostinger` provider credential. Issued in the Hostinger panel; this workspace only, never `hcw-azure` |
+| `cloudflare_api_token` | HCP Terraform workspace `hcw/hcw-lab`, Terraform variable, sensitive | **MISSING** | Cloudflare provider, for the `lab` records. Same name as the §4.1 variable and a different token, with **Zone:Read + DNS:Edit** on the one zone and nothing else (the provider needs Zone:Read to resolve the zone, as `infra/variables.tf` records for the §4.1 token; the lab token omits the Transform Rules and Rulesets permissions that one carries), so it cannot touch origin rules or settings. Cloudflare scopes tokens to a zone, not a record, so this token can still edit any DNS record in `hybridcloudworks.com`; that is the accepted risk in ADR 0032, bounded by living only in HCP Terraform and by the `hcw-azure` plan check showing any production record it altered |
+| Caddy `CLOUDFLARE_API_TOKEN` | Ansible Vault, written to `/etc/caddy/env` on the host (owner `root`, group `caddy`, mode `0640`; the non-root `caddy` unit reads it through `EnvironmentFile`) | **MISSING** | Runtime DNS-01 token for certificate renewals. Scoped to the dedicated lab zone that `_acme-challenge.lab.hybridcloudworks.com` is delegated to; until that zone exists it has DNS edit on the production zone, the interim ADR 0032 records. Rotate on every host rebuild |
+| `cloudflare_zone_id` | HCP Terraform workspace `hcw/hcw-lab`, Terraform variable, not sensitive | **MISSING** | The `hybridcloudworks.com` zone identifier every `cloudflare_dns_record` needs (`infra/frontend.tf` uses `var.cloudflare_zone_id` for the same reason). Variables do not cross workspaces, so the same value is set here a second time. An identifier, not a credential; read it from the zone's Overview page in the Cloudflare dashboard |
+| Arc onboarding service principal credential | Ansible Vault, never in the repository and never on the host after onboarding | **MISSING** | Holds only *Azure Connected Machine Onboarding* on `rg-lab-hybrid-prod-cus`. Used once by `azcmagent connect`; rotate after onboarding |
+| `CODER_OAUTH2_GITHUB_ALLOWED_ORGS` | `lab-host/ansible/group_vars` (not a secret), rendered into Coder's Compose env file | **MISSING** | The GitHub organisations whose members may sign in to Coder. Required by ADR 0032 and **never empty while Coder runs**: an empty value removes the restriction and lets any GitHub account consume the VPS, so the Ansible role fails rather than render an empty list. Shutting learners out is an explicit action, not an emptied list: `CODER_OAUTH2_GITHUB_ALLOW_SIGNUPS=false` for new sign-ups, or stopping the `coder` Compose service for everyone. The owner names the organisation on #682 |
+| Coder GitHub OAuth app client id and secret (`CODER_OAUTH2_GITHUB_CLIENT_ID`, `CODER_OAUTH2_GITHUB_CLIENT_SECRET`) | Ansible Vault, written by the `coder` role to Coder's Compose env file on the host (root, 0600) | **MISSING** | Learner sign-in to Coder; nothing on the site reads it. Created by the owner in the GitHub organisation's OAuth apps (#682). Rotate on every host rebuild and whenever the app's callback URL changes; the Compose env file is regenerated from Vault on each Ansible run, so rotation is a Vault edit and a run |
+| `CODER-URL` | Key Vault `kv-site-prod-cus-01`; the Function App setting `CODER_URL` is a Key Vault reference to it | **MISSING** | Base URL of the Coder deployment the Function App's status proxy reads; an address, not a credential, kept in the vault so its reference follows the same path as the token beside it. Vault names are hyphenated and app settings underscored, per the naming table in [Variables and secrets](variables-and-secrets.md) |
+| `CODER-STATUS-TOKEN` | Key Vault `kv-site-prod-cus-01`; the Function App setting `CODER_STATUS_TOKEN` is a Key Vault reference to it | **MISSING** | Read-only Coder API token for the status proxy. Seed it before the Terraform run that adds its reference, so `monitor-unresolved-secrets.yml` never sees it unresolved |
+
 ## 4.8 Frontend build-time variables
 
 `VITE_*` is contractual to Vite and never renamed. These are **build-time

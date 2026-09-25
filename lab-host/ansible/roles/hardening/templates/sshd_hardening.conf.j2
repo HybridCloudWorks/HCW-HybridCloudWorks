@@ -1,0 +1,10 @@
+# {{ ansible_managed }}
+# Named 00- on purpose. sshd keeps the FIRST value it reads for a keyword and
+# includes sshd_config.d/*.conf in lexical order, so this file must sort before
+# the cloud image's 50-cloud-init.conf, which sets PasswordAuthentication yes.
+PasswordAuthentication no
+PermitRootLogin no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+X11Forwarding no
+MaxAuthTries 4

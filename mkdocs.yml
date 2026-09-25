@@ -122,6 +122,7 @@ nav:
       - 0029 Podcast hosting and audio surface: decisions/0029-podcast-hosting-and-audio-surface.md
       - 0030 Newsletter provider: decisions/0030-newsletter-provider.md
       - 0031 Security scanner owner decisions: decisions/0031-security-scanner-owner-decisions.md
+      - 0032 Learner labs platform: decisions/0032-learner-labs-platform.md
   - Runbooks:
       - Deployment: runbooks/deployment-runbook.md
       - Admin sign-in rollback: runbooks/admin-signin-rollback.md
@@ -144,6 +145,7 @@ nav:
       - Cost analysis: architecture/cost-analysis.md
       - Resource validation report: architecture/resource-validation-report.md
       - Published pages audit 2026-09-06: architecture/published-pages-audit-2026-09-06.md
+      - Labs host: architecture/labs-host.md
   - Content:
       - Blog machine: content/blog-machine.md
       - Blog template: content/blog-template.md

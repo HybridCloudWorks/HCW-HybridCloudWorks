@@ -1,0 +1,10 @@
+// {{ ansible_managed }}
+// Overrides for /etc/apt/apt.conf.d/50unattended-upgrades. Only the Ubuntu
+// security and updates origins that file already allows are upgraded; the
+// third-party repositories the docker and labs_agent roles add are pinned and
+// held, so nothing here can move them.
+Unattended-Upgrade::Automatic-Reboot "true";
+Unattended-Upgrade::Automatic-Reboot-WithUsers "true";
+Unattended-Upgrade::Automatic-Reboot-Time "{{ hardening_unattended_reboot_time }}";
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
