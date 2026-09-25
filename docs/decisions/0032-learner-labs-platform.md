@@ -60,10 +60,15 @@ are recorded once, here, before any of them is implemented.
    reads `hcw-azure` outputs, and nothing in `infra/` reads `hcw-lab`.
 2. **Ubuntu 24.04 LTS, and Docker Engine is the only runtime on the host.** No
    Kubernetes of any size (owner decision 2026-09-24; the earlier k3s idea is
-   dropped). Coder, its PostgreSQL and Caddy run as containers under Docker
-   Compose. `vps-agent` runs host-native as a systemd service, because it
-   drives the `docker` CLI itself and a container that drives the host daemon
-   is no more contained than a service that does; node-exporter is a
+   dropped). Coder and its PostgreSQL run as containers under Docker Compose.
+   Caddy runs host-native from a pinned build that includes the
+   `caddy-dns/cloudflare` module, because neither the stock package nor the
+   official image carries it and DNS-01 needs it; its version and checksum
+   are pinned in `lab-host/`. `vps-agent` runs host-native as a systemd
+   service, because it drives the `docker` CLI itself and a container that
+   drives the host daemon is no more contained than a service that does; its
+   certificate at `/etc/hcw/labs-agent.pem` is `root:hcw-labs-agent` `0640`,
+   readable by the service user and by nothing else. node-exporter is a
    host-native service too; the Arc agent runs as a host service because that
    is how Azure ships it.
 3. **Azure Arc-enabled servers is the hybrid control plane.** The host is
@@ -115,9 +120,9 @@ are recorded once, here, before any of them is implemented.
    command rewrites those sources to the vendored paths on its own tmpfs copy
    inside the job before `init`. These images are the learner and job
    toolchain only. The host's
-   infrastructure services (Caddy, Coder, PostgreSQL) run their upstream
-   images, pinned by digest in the Compose file; `vps-agent` and node-exporter
-   are host-native, installed by Ansible at pinned versions.
+   infrastructure services Coder and PostgreSQL run their upstream images,
+   pinned by digest in the Compose file; Caddy, `vps-agent` and node-exporter
+   are host-native, installed by Ansible at pinned versions with checksums.
 6. **Anonymous public lab submission stays Gated.** Accepting this ADR does not
    open it. When a later revision does, the bounds are these and no wider:
    only the `terraform-validate` job type; a 64 KB payload; 2 submissions an
@@ -250,8 +255,8 @@ are recorded once, here, before any of them is implemented.
     > Machines in `rg-lab-hybrid-prod-cus`, and a `Heartbeat` query in the
     Management workspace returns rows for it.
   - The control plane is checked by name, not by count: `docker ps` on the
-    host shows the Compose services `caddy`, `coder` and `coder-postgres`,
-    and `systemctl` shows `hcw-labs-agent` and `node-exporter` active as
+    host shows the Compose services `coder` and `coder-postgres`, and
+    `systemctl` shows `caddy`, `hcw-labs-agent` and `node-exporter` active as
     host-native units. Every other container carries either the
     Coder workspace label (`com.coder.resource=true`) or the `hcw.lab-job`
     label the agent sets, and any container with neither is a finding. The
