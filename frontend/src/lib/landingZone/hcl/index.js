@@ -6,8 +6,9 @@
  *
  * WHAT IS EMITTED. Only files whose components are selected: alz.tf for the
  * management groups (and, inside it, the policy configuration when policy
- * is selected), management.tf, connectivity.tf (the firewall and DNS as
- * blocks of the hub's object), identity.tf for the identity spoke,
+ * is selected), subscriptions.tf when any subscription is placed (the ids
+ * in one list, refused if not distinct), management.tf, connectivity.tf
+ * (the firewall and DNS as blocks of the hub's object), identity.tf for the identity spoke,
  * application.tf for the corp and online spokes, and always terraform.tf,
  * providers.tf, variables.tf, an example tfvars and a README. An empty build
  * is a README saying so. Every emission says it was generated for learning
@@ -21,6 +22,8 @@ import { identityTf } from './identity';
 import { managementTf } from './management';
 import { providersTf } from './providers';
 import { readmeMd } from './readme';
+import { subscriptionIdsTf } from './subscriptionIds';
+import { placements } from './subscriptions';
 import { terraformTf } from './terraform';
 import { tfvarsExample, variablesTf } from './variables';
 
@@ -50,6 +53,9 @@ export function emitFiles(state) {
     if (!isSelected(normalized, id) || emitted.has(emit)) continue;
     emitted.add(emit);
     files.push(emit(normalized));
+    if (id === 'management-groups' && placements(normalized).length) {
+      files.push(subscriptionIdsTf(normalized));
+    }
   }
   files.push(variablesTf(normalized), tfvarsExample(normalized));
   files.push(readmeMd(normalized, files));

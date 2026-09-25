@@ -106,6 +106,7 @@ describe('emitFiles', () => {
       'terraform.tf',
       'providers.tf',
       'alz.tf',
+      'subscriptions.tf',
       'management.tf',
       'connectivity.tf',
       'identity.tf',
@@ -127,6 +128,7 @@ describe('emitFiles', () => {
       'terraform.tf',
       'providers.tf',
       'alz.tf',
+      'subscriptions.tf',
       'connectivity.tf',
       'variables.tf',
       'terraform.tfvars.example',
@@ -201,7 +203,10 @@ describe('emitFiles', () => {
     expect(custom['application.tf']).not.toContain('spoke_online');
     expect(custom['terraform.tfvars.example']).toMatch(/parent_management_group_id\s+= "contoso"/);
     expect(custom['terraform.tfvars.example']).toContain(
-      'corp_subscription_ids        = ["00000000-0000-0000-0000-000000000000", "00000000-0000-0000-0000-000000000000"]'
+      'corp_subscription_ids        = ["00000000-0000-0000-0000-000000000011", "00000000-0000-0000-0000-000000000012"]'
+    );
+    expect(custom['terraform.tfvars.example']).toContain(
+      'management_subscription_id   = "00000000-0000-0000-0000-000000000001"'
     );
 
     const noFirewall = byPath(emitFiles({ selected: ['connectivity-hub'] }));
@@ -420,7 +425,7 @@ describe('emitFiles', () => {
     ).toBe(2);
     expect((hubBlock.match(/validation \{/g) ?? []).length).toBe(1);
     expect(vars).toContain(
-      'condition     = var.parent_management_group_id == null ? true : !strcontains(var.parent_management_group_id, "/")'
+      'condition     = var.parent_management_group_id == null ? true : (length(var.parent_management_group_id) > 0 && !strcontains(var.parent_management_group_id, "/"))'
     );
     expect(byPath(emitFiles(DEFAULT_STATE))['alz.tf']).toContain(
       'parent_resource_id = coalesce(var.parent_management_group_id, data.azapi_client_config.current.tenant_id)'
@@ -431,6 +436,35 @@ describe('emitFiles', () => {
     });
     expect(byPath(overlapping)['variables.tf']).toContain('default     = "10.2.0.0/16"');
     expect(byPath(overlapping)['application.tf']).toContain('online_1 = 10.2.128.0/24');
+  });
+
+  it('lists every placed subscription id once and refuses duplicates', () => {
+    const full = byPath(emitFiles(DEFAULT_STATE));
+    const subs = full['subscriptions.tf'];
+    expect(subs).toContain(
+      'placed_subscription_ids = concat(\n    [\n      var.management_subscription_id,\n      var.connectivity_subscription_id,\n      var.identity_subscription_id,\n    ],\n    var.corp_subscription_ids,\n    var.online_subscription_ids,\n  )'
+    );
+    expect(subs).toContain(
+      'condition     = length(distinct(local.placed_subscription_ids)) == length(local.placed_subscription_ids)'
+    );
+    expect(subs).toContain('output "placed_subscription_ids"');
+    expect(subs).toContain('precondition {');
+    expect(subs).toMatch(/error_message = "Every subscription id must be distinct/);
+
+    const corpOnly = byPath(emitFiles({ selected: ['corp'] }))['subscriptions.tf'];
+    expect(corpOnly).toContain(
+      'concat(\n    [\n      var.connectivity_subscription_id,\n    ],\n    var.corp_subscription_ids,\n  )'
+    );
+    expect(corpOnly).not.toContain('identity');
+    expect(corpOnly).not.toContain('online');
+    expect(
+      byPath(emitFiles({ selected: ['management-groups'] }))['subscriptions.tf']
+    ).toBeUndefined();
+
+    const example = full['terraform.tfvars.example'];
+    const ids = [...example.matchAll(/"(00000000-0000-0000-0000-\d{12})"/g)].map((m) => m[1]);
+    expect(ids).toHaveLength(5);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 
   it('matches the committed snapshot of the tree-only build, baseline present and not enforced', () => {

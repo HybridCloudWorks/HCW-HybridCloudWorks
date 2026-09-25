@@ -108,10 +108,14 @@ This project has not cut a tagged release; entries are grouped under
   the emitted file: the apart pair plans, a `/25` spoke, a `/25` hub, a
   garbage string and an octet of 256 each fail the shape check, and
   identical, hub-inside-spoke and spoke-inside-hub each fail the overlap
-  message — and a `/`-rejecting check on
+  message — and a non-empty, `/`-rejecting check on
   `var.parent_management_group_id`, because avm-ptn-alz's
   `parent_resource_id` is the parent group's name and the module itself
-  refuses a resource id, `terraform.tfvars.example`, and a
+  refuses a resource id, `subscriptions.tf` (every placed subscription id in
+  one list behind an output `precondition` that refuses duplicates, since a
+  subscription can sit under one management group only; a duplicated id
+  fails the offline plan on that message, a distinct set passes),
+  `terraform.tfvars.example` with distinct placeholder ids, and a
   `README.md` carrying the pattern's prerequisites — HCP Terraform, Owner at
   the tenant root, a service principal — the spoke pattern in two sentences,
   and the line that the files were generated for learning and never applied

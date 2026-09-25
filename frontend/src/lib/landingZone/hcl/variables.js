@@ -22,13 +22,21 @@ import { HUB_PREFIX_RANGE, SPOKE_PREFIX_RANGE } from '../cidr';
 import { isSelected } from '../state';
 import { block, body, file, joinBlocks, q } from './format';
 
-const EXAMPLE_GUID = '00000000-0000-0000-0000-000000000000';
+/**
+ * Placeholder subscription ids for the tfvars example, distinct from each
+ * other so a copied example fails on authentication, not on the rule in
+ * subscriptions.tf that every placed id be distinct: platform roles 1..3,
+ * corp landing zones 11.., online 21...
+ */
+const exampleGuid = (n) => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`;
+const EXAMPLE_GUIDS = { management: 1, connectivity: 2, identity: 3, corp: 10, online: 20 };
 
 const GUID = (ref) => `can(regex("^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$", ${ref}))`;
 
 const has = (id) => (state) => isSelected(state, id);
 const anySpoke = (state) => ['identity', 'corp', 'online'].some((id) => isSelected(state, id));
-const guids = (n) => `[${Array.from({ length: n }, () => q(EXAMPLE_GUID)).join(', ')}]`;
+const guids = (group, n) =>
+  `[${Array.from({ length: n }, (_, i) => q(exampleGuid(EXAMPLE_GUIDS[group] + i + 1))).join(', ')}]`;
 
 const HUB = 'var.hub_address_space';
 const SPOKE = 'var.spoke_address_space';
@@ -67,27 +75,29 @@ const RANGES_APART = [
   ')',
 ];
 
-const subscriptionId = (name, when, description) => ({
-  name,
+const subscriptionId = (role, when, description) => ({
+  name: `${role}_subscription_id`,
   when,
   type: 'string',
   description,
-  validations: [{ condition: GUID(`var.${name}`), error: 'A subscription id is a GUID.' }],
-  example: () => q(EXAMPLE_GUID),
+  validations: [
+    { condition: GUID(`var.${role}_subscription_id`), error: 'A subscription id is a GUID.' },
+  ],
+  example: () => q(exampleGuid(EXAMPLE_GUIDS[role])),
 });
 
-const subscriptionIds = (name, countId, description) => ({
-  name,
+const subscriptionIds = (group, countId, description) => ({
+  name: `${group}_subscription_ids`,
   when: (state) => state.options[countId] > 0,
   type: 'list(string)',
   description,
   validations: (options) => [
     {
-      condition: `length(var.${name}) == ${options[countId]} && alltrue([for id in var.${name} : ${GUID('id')}])`,
+      condition: `length(var.${group}_subscription_ids) == ${options[countId]} && alltrue([for id in var.${group}_subscription_ids : ${GUID('id')}])`,
       error: `Exactly ${options[countId]} subscription id${options[countId] === 1 ? '' : 's'}, each a GUID.`,
     },
   ],
-  example: (options) => guids(options[countId]),
+  example: (options) => guids(group, options[countId]),
 });
 
 /** Every variable the emitter can declare, in file order. */
@@ -117,9 +127,9 @@ const VARIABLES = [
     validations: [
       {
         condition:
-          'var.parent_management_group_id == null ? true : !strcontains(var.parent_management_group_id, "/")',
+          'var.parent_management_group_id == null ? true : (length(var.parent_management_group_id) > 0 && !strcontains(var.parent_management_group_id, "/"))',
         error:
-          'A management group name, without the /providers/Microsoft.Management/managementGroups/ prefix.',
+          'A management group name, non-empty and without the /providers/Microsoft.Management/managementGroups/ prefix; null for the tenant root group.',
       },
     ],
     example: (o) => (o.rootParentId ? q(o.rootParentId) : null),
@@ -163,20 +173,16 @@ const VARIABLES = [
     ],
     example: () => q('security@example.com'),
   },
-  subscriptionId('management_subscription_id', has('management'), 'The management subscription.'),
-  subscriptionId(
-    'connectivity_subscription_id',
-    has('connectivity-hub'),
-    'The connectivity subscription.'
-  ),
-  subscriptionId('identity_subscription_id', has('identity'), 'The identity subscription.'),
+  subscriptionId('management', has('management'), 'The management subscription.'),
+  subscriptionId('connectivity', has('connectivity-hub'), 'The connectivity subscription.'),
+  subscriptionId('identity', has('identity'), 'The identity subscription.'),
   subscriptionIds(
-    'corp_subscription_ids',
+    'corp',
     'corpCount',
     'The corp landing zone subscriptions, one per landing zone.'
   ),
   subscriptionIds(
-    'online_subscription_ids',
+    'online',
     'onlineCount',
     'The online landing zone subscriptions, one per landing zone.'
   ),
