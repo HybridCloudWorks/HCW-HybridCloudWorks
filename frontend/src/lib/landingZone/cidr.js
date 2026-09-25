@@ -37,27 +37,37 @@ const networkOf = ({ address, prefix }) =>
   prefix === 0 ? 0 : (address & (~0 << (32 - prefix))) >>> 0;
 
 /**
- * An IPv4 CIDR with a prefix the hub can carve subnets from. /8 to /24: the
- * module places a firewall subnet, a Bastion subnet and a gateway subnet
- * inside it, and /26 is the smallest of those, so a /24 is the tightest hub
- * that still fits.
+ * The prefix lengths a hub may have, inclusive. /8 to /24: the module places
+ * a firewall subnet, a Bastion subnet and a gateway subnet inside it, and
+ * /26 is the smallest of those, so a /24 is the tightest hub that still
+ * fits. The emitted `variables.tf` enforces the same bounds, from these
+ * numbers, so the two cannot drift apart.
  */
-export function isCidr(value) {
-  const parsed = parseCidr(value);
-  return parsed !== null && parsed.prefix >= 8 && parsed.prefix <= 24;
-}
+export const HUB_PREFIX_RANGE = Object.freeze([8, 24]);
 
 /** The longest spoke prefix that still holds five corp, five online and identity as /24s. */
 export const SPOKE_MAX_PREFIX = 20;
 
 /**
- * The range every spoke is carved from. /8 to /20: a /20 is sixteen /24s,
- * eight a half, which is what five corp spokes plus identity on one side and
- * five online spokes on the other need.
+ * The prefix lengths a spoke range may have, inclusive. /8 to /20: a /20 is
+ * sixteen /24s, eight a half, which is what five corp spokes plus identity
+ * on one side and five online spokes on the other need.
  */
-export function isSpokeCidr(value) {
+export const SPOKE_PREFIX_RANGE = Object.freeze([8, SPOKE_MAX_PREFIX]);
+
+const withinRange = (value, [min, max]) => {
   const parsed = parseCidr(value);
-  return parsed !== null && parsed.prefix >= 8 && parsed.prefix <= SPOKE_MAX_PREFIX;
+  return parsed !== null && parsed.prefix >= min && parsed.prefix <= max;
+};
+
+/** An IPv4 CIDR the hub can carve subnets from; see HUB_PREFIX_RANGE. */
+export function isCidr(value) {
+  return withinRange(value, HUB_PREFIX_RANGE);
+}
+
+/** The range every spoke is carved from; see SPOKE_PREFIX_RANGE. */
+export function isSpokeCidr(value) {
+  return withinRange(value, SPOKE_PREFIX_RANGE);
 }
 
 /** The 0-based /24 slot for a landing zone within a range of `blocks` /24s. */

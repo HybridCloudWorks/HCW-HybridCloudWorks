@@ -10,7 +10,9 @@ import {
   AVM_MODULES,
   AVM_SOURCES,
   DEFAULT_STATE,
+  HUB_PREFIX_RANGE,
   POLICY_DEFAULTS,
+  SPOKE_PREFIX_RANGE,
   emitFiles,
   normalizeState,
 } from './index';
@@ -318,11 +320,32 @@ describe('emitFiles', () => {
     );
   });
 
-  it('mirrors the two cross-checks in variables.tf: ranges apart, parent a bare name', () => {
+  it('mirrors the range rules in variables.tf: shape and prefix bounds, ranges apart, parent a bare name', () => {
     const vars = byPath(emitFiles(DEFAULT_STATE))['variables.tf'];
-    expect(vars).toMatch(
-      /variable "spoke_address_space" \{[^}]*\n\n  validation \{\n    condition = \(\n      tonumber\(split\("\/", var\.hub_address_space\)\[1\]\) <= tonumber\(split\("\/", var\.spoke_address_space\)\[1\]\)\n      \? cidrsubnet\("\$\{cidrhost\(var\.spoke_address_space, 0\)\}\/\$\{split\("\/", var\.hub_address_space\)\[1\]\}", 0, 0\) != cidrsubnet\(var\.hub_address_space, 0, 0\)\n      : cidrsubnet\("\$\{cidrhost\(var\.hub_address_space, 0\)\}\/\$\{split\("\/", var\.spoke_address_space\)\[1\]\}", 0, 0\) != cidrsubnet\(var\.spoke_address_space, 0, 0\)\n    \)\n    error_message = "The spoke range must not overlap the hub address space\."/
+    const alternation = ([min, max]) =>
+      `(${Array.from({ length: max - min + 1 }, (_, i) => min + i).join('|')})`;
+    expect(HUB_PREFIX_RANGE).toEqual([8, 24]);
+    expect(SPOKE_PREFIX_RANGE).toEqual([8, 20]);
+    expect(vars).toContain(
+      `condition     = can(regex("^([0-9]{1,3}[.]){3}[0-9]{1,3}/${alternation(HUB_PREFIX_RANGE)}$", var.hub_address_space)) && can(cidrhost(var.hub_address_space, 0))`
     );
+    expect(vars).toContain('error_message = "An IPv4 CIDR with a prefix from /8 to /24."');
+    expect(vars).toContain(
+      `condition     = can(regex("^([0-9]{1,3}[.]){3}[0-9]{1,3}/${alternation(SPOKE_PREFIX_RANGE)}$", var.spoke_address_space)) && can(cidrhost(var.spoke_address_space, 0))`
+    );
+    expect(vars).toContain('error_message = "An IPv4 CIDR with a prefix from /8 to /20."');
+    expect(vars).toMatch(
+      /validation \{\n    condition = \(\n      can\(cidrhost\(var\.hub_address_space, 0\)\) && can\(cidrhost\(var\.spoke_address_space, 0\)\)\n      \? \(\n        tonumber\(split\("\/", var\.hub_address_space\)\[1\]\) <= tonumber\(split\("\/", var\.spoke_address_space\)\[1\]\)\n        \? cidrsubnet\("\$\{cidrhost\(var\.spoke_address_space, 0\)\}\/\$\{split\("\/", var\.hub_address_space\)\[1\]\}", 0, 0\) != cidrsubnet\(var\.hub_address_space, 0, 0\)\n        : cidrsubnet\("\$\{cidrhost\(var\.hub_address_space, 0\)\}\/\$\{split\("\/", var\.spoke_address_space\)\[1\]\}", 0, 0\) != cidrsubnet\(var\.spoke_address_space, 0, 0\)\n      \)\n      : true\n    \)\n    error_message = "The spoke range must not overlap the hub address space\."/
+    );
+    const spokeBlock = vars.slice(vars.indexOf('variable "spoke_address_space"'));
+    const hubBlock = vars.slice(
+      vars.indexOf('variable "hub_address_space"'),
+      vars.indexOf('variable "spoke_address_space"')
+    );
+    expect(
+      (spokeBlock.slice(0, spokeBlock.indexOf('\n}\n')).match(/validation \{/g) ?? []).length
+    ).toBe(2);
+    expect((hubBlock.match(/validation \{/g) ?? []).length).toBe(1);
     expect(vars).toContain(
       'condition     = var.parent_management_group_id == null ? true : !strcontains(var.parent_management_group_id, "/")'
     );

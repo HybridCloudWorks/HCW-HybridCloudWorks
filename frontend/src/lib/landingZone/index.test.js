@@ -13,10 +13,12 @@ import {
   COMPONENT_IDS,
   DEFAULT_OPTIONS,
   DEFAULT_STATE,
+  HUB_PREFIX_RANGE,
   OPTIONS,
   OPTION_IDS,
   PLATFORM_IDS,
   SPOKE_CIDR_FALLBACKS,
+  SPOKE_PREFIX_RANGE,
   addComponent,
   cidrsOverlap,
   componentById,
@@ -160,6 +162,11 @@ describe('the validators', () => {
   });
 
   it('accept a spoke range down to /20 and carve one /24 per landing zone from it', () => {
+    expect(HUB_PREFIX_RANGE).toEqual([8, 24]);
+    expect(SPOKE_PREFIX_RANGE).toEqual([8, 20]);
+    expect(isCidr('10.0.0.0/24')).toBe(true);
+    expect(isCidr('10.0.0.0/25')).toBe(false);
+    expect(isSpokeCidr('10.1.0.0/20')).toBe(true);
     expect(isSpokeCidr('10.1.0.0/16')).toBe(true);
     expect(isSpokeCidr('10.8.0.0/20')).toBe(true);
     expect(isSpokeCidr('10.8.0.0/21')).toBe(false);

@@ -50,7 +50,14 @@ export {
   avmModule,
   isAvmSource,
 } from './avmVersions';
-export { SPOKE_MAX_PREFIX, cidrsOverlap, spokeAddressSpace, spokeSlot } from './cidr';
+export {
+  HUB_PREFIX_RANGE,
+  SPOKE_MAX_PREFIX,
+  SPOKE_PREFIX_RANGE,
+  cidrsOverlap,
+  spokeAddressSpace,
+  spokeSlot,
+} from './cidr';
 export {
   DEFAULT_OPTIONS,
   DEFAULT_SELECTION,

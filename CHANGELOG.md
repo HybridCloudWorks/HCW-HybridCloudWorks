@@ -91,11 +91,18 @@ This project has not cut a tagged release; entries are grouped under
   `virtual_network_resource_ids`, and for corp and identity a route table
   whose default route is the firewall's private IP when the firewall is
   selected; online spokes egress directly), `variables.tf` with GUID
-  validation on every subscription id, the same hub-versus-spoke overlap rule
-  as a `validation` on `var.spoke_address_space` (Terraform 1.9 lets a
-  validation read another variable; proven offline with `terraform plan` on
-  the emitted file: the apart pair plans, identical, hub-inside-spoke and
-  spoke-inside-hub each fail with the message) and a `/`-rejecting check on
+  validation on every subscription id, the range variables carrying the same
+  rules as the JS validators — a shape check (dotted quad, prefix within
+  `HUB_PREFIX_RANGE` /8–/24 or `SPOKE_PREFIX_RANGE` /8–/20, both generated
+  from the constants `isCidr` and `isSpokeCidr` use, and `cidrhost` able to
+  parse it) and, on the spoke range, the hub-versus-spoke overlap rule as a
+  second `validation` that reads `var.hub_address_space` (Terraform 1.9 lets
+  a validation read another variable) and is guarded so it never evaluates
+  on a string that does not parse; proven offline with `terraform plan` on
+  the emitted file: the apart pair plans, a `/25` spoke, a `/25` hub, a
+  garbage string and an octet of 256 each fail the shape check, and
+  identical, hub-inside-spoke and spoke-inside-hub each fail the overlap
+  message — and a `/`-rejecting check on
   `var.parent_management_group_id`, because avm-ptn-alz's
   `parent_resource_id` is the parent group's name and the module itself
   refuses a resource id, `terraform.tfvars.example`, and a
