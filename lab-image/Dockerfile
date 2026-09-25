@@ -315,6 +315,17 @@ RUN set -eu; . /tmp/versions.env; \
     chmod 0755 /usr/local/bin/kubectl; \
     rm -rf /var/lib/apt/lists/* /tmp/versions.env
 
+# uid 65534 is Debian's `nobody`, whose passwd entry has /usr/sbin/nologin
+# and a home of /nonexistent. That is right for the runner, where nothing
+# ever opens a shell, and wrong for this target: Coder's agent runs the
+# workspace startup script, code-server and the terminal through the user's
+# passwd shell, so on the first published image all three failed (#693).
+# The shell becomes bash and the home the /tmp/home the runner stage already
+# creates for uid 65534 and that HOME already points at. The runner target
+# is untouched: it keeps nologin.
+RUN usermod -s /bin/bash -d /tmp/home nobody \
+ && test "$(getent passwd 65534 | cut -d: -f6,7)" = "/tmp/home:/bin/bash"
+
 USER 65534:65534
 WORKDIR /workspace
 CMD ["bash"]

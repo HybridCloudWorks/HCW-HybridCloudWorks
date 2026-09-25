@@ -252,6 +252,24 @@ if [ "$target" = full ]; then
       bad "code-server prerequisite $pkg is not installed"
     fi
   done
+  # Coder runs the startup script, code-server and the terminal through the
+  # user's passwd shell (#693); uid 65534 must therefore have one, and a home
+  # it can write to. The runner target keeps nologin and is not checked here.
+  entry="$(getent passwd 65534 || true)"
+  case "$entry" in
+    *:/bin/bash) ok "uid 65534 has /bin/bash as its shell ($entry)" ;;
+    *) bad "uid 65534's passwd shell is not /bin/bash: ${entry:-no entry}" ;;
+  esac
+  case "$entry" in
+    *:/tmp/home:*) ok "uid 65534's home is /tmp/home" ;;
+    *) bad "uid 65534's home is not /tmp/home: ${entry:-no entry}" ;;
+  esac
+  if [ "$HOME" = /tmp/home ] && (: > /tmp/home/.smoke-write-probe) 2>/dev/null; then
+    rm -f /tmp/home/.smoke-write-probe
+    ok "HOME=/tmp/home exists and is writable"
+  else
+    bad "HOME is '$HOME' or /tmp/home is not writable"
+  fi
 fi
 
 printf '\n'
