@@ -80,11 +80,51 @@ RUN set -eu; . /build/versions.env; \
     vendor avm-ptn-alz-connectivity-hub-and-spoke-vnet "${AVM_PTN_ALZ_CONNECTIVITY_HUB_AND_SPOKE_VNET_VERSION}" "${AVM_PTN_ALZ_CONNECTIVITY_HUB_AND_SPOKE_VNET_SHA256}"
 
 # ---------------------------------------------------------------------------
+# vendor: the pattern modules' registry children, vendored beside them and
+# their `source` lines rewritten to relative local paths, so all three
+# pattern modules init with no network (#675). vendor-avm.sh explains the
+# mechanism; the short version is that Terraform has no module mirror, so the
+# only way a module that calls registry modules inits offline is for the
+# vendored copy to call local copies instead. Every child is pinned by tree
+# hash in versions.env (AVM_CHILD_MODULES) and the script fails the build on
+# a mismatch, an unpinned child or an unused pin. git is what Terraform uses
+# to fetch registry modules; python3 does the JSON and the rewrite. Neither
+# ships: the runner copies /out/avm out of this stage and nothing else.
+#
+# AVM_PRINT_PINS=1 prints the pins instead of checking them, for a bump:
+#   docker build --target vendor --build-arg AVM_PRINT_PINS=1 --progress=plain lab-image
+# ---------------------------------------------------------------------------
+FROM fetch AS vendor
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git python3 \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY vendor-avm.sh /build/vendor-avm.sh
+ARG AVM_PRINT_PINS=
+RUN set -eu; . /build/versions.env; \
+    export AVM_CHILD_MODULES; \
+    AVM_PRINT_PINS="${AVM_PRINT_PINS}" AVM_ROOT=/out/avm TERRAFORM=/out/bin/terraform SCRATCH=/build/get \
+      bash /build/vendor-avm.sh
+
+# ---------------------------------------------------------------------------
 # mirror: build the provider filesystem mirror with the terraform binary
-# verified above. `terraform providers mirror` writes the registry's own
-# layout (registry.terraform.io/<namespace>/<name>/<version>.json plus the
-# zip), and the zips are then checked against the sums in versions.env, so
-# the mirror is pinned by content and not only by version.
+# verified above. `terraform providers mirror` writes the packed layout
+# (registry.terraform.io/<namespace>/<name>/<version>.json plus the zip); the
+# zips are checked against the sums in versions.env, so the mirror is pinned
+# by content and not only by version, and are then UNPACKED into the
+# directory layout (<namespace>/<name>/<version>/linux_amd64/<binary>) and
+# deleted.
+#
+# Unpacked, because of how `terraform init` consumes each layout (#675).
+# From a packed mirror it extracts the provider into .terraform/providers,
+# a 225 MB copy of azurerm per job; from an unpacked mirror it symlinks
+# .terraform/providers/<...>/linux_amd64 to the mirror directory and copies
+# nothing (measured: a 40 KB .terraform). The job sandbox is a read-only root
+# with a 64 MB tmpfs, so the packed layout could not init any azurerm
+# configuration there at all. The cost is on-disk size, not pull size: the
+# binaries are 931 MB unpacked against 191 MB zipped, but the image layer is
+# compressed in transit either way.
 #
 # Two mirror roots because a required_providers block holds one constraint
 # per provider and azurerm is mirrored at both 4.x and 5.x; the second run
@@ -122,7 +162,21 @@ RUN set -eu; . /build/versions.env; \
     check "azure/alz/terraform-provider-alz_${PROVIDER_ALZ_VERSION}_linux_amd64.zip" "${PROVIDER_ALZ_SHA256}"; \
     check "hashicorp/random/terraform-provider-random_${PROVIDER_RANDOM_VERSION}_linux_amd64.zip" "${PROVIDER_RANDOM_SHA256}"; \
     check "azure/modtm/terraform-provider-modtm_${PROVIDER_MODTM_VERSION}_linux_amd64.zip" "${PROVIDER_MODTM_SHA256}"; \
-    check "hashicorp/time/terraform-provider-time_${PROVIDER_TIME_VERSION}_linux_amd64.zip" "${PROVIDER_TIME_SHA256}"
+    check "hashicorp/time/terraform-provider-time_${PROVIDER_TIME_VERSION}_linux_amd64.zip" "${PROVIDER_TIME_SHA256}"; \
+    unpack() { \
+      zip="/out/mirror/registry.terraform.io/$1/terraform-provider-${1#*/}_${2}_linux_amd64.zip"; \
+      dir="/out/mirror/registry.terraform.io/$1/$2/linux_amd64"; \
+      mkdir -p "$dir"; unzip -q "$zip" -d "$dir"; chmod 0755 "$dir"/*; rm -f "$zip"; \
+    }; \
+    unpack hashicorp/azurerm "${PROVIDER_AZURERM_VERSION}"; \
+    unpack hashicorp/azurerm "${PROVIDER_AZURERM_V4_VERSION}"; \
+    unpack azure/azapi "${PROVIDER_AZAPI_VERSION}"; \
+    unpack azure/alz "${PROVIDER_ALZ_VERSION}"; \
+    unpack hashicorp/random "${PROVIDER_RANDOM_VERSION}"; \
+    unpack azure/modtm "${PROVIDER_MODTM_VERSION}"; \
+    unpack hashicorp/time "${PROVIDER_TIME_VERSION}"; \
+    find /out/mirror -name '*.json' -delete; \
+    test "$(find /out/mirror -name '*.zip' | wc -l)" -eq 0
 
 # ---------------------------------------------------------------------------
 # runner
@@ -146,7 +200,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=fetch /out/bin/ /usr/local/bin/
-COPY --from=fetch /out/avm/ /opt/avm/
+COPY --from=vendor /out/avm/ /opt/avm/
 COPY --from=mirror /out/mirror/ /opt/terraform/mirror/
 COPY --from=fetch /out/wheels/ /tmp/wheels/
 
@@ -181,10 +235,20 @@ RUN mkdir -p /etc/terraform /workspace /tmp/home /tmp/run \
 # duplicate the mirror). CHECKPOINT_DISABLE stops Terraform's version check
 # call, which is the one network request `terraform init` would otherwise
 # still make.
+#
+# TMPDIR=/tmp/run, because in the job sandbox /tmp/run is the ONLY writable
+# path (vps-agent mounts a tmpfs there on a read-only root). A Terraform
+# provider is a go-plugin subprocess that listens on a Unix socket in TMPDIR
+# before it says anything on stdout; with TMPDIR on the read-only root every
+# provider died silently and `terraform validate` reported "Failed to read
+# any lines from plugin's stdout" for all six (measured in #675, after init
+# had succeeded). Outside the sandbox /tmp/run exists in the image, so the
+# setting is harmless there.
 ENV TF_CLI_CONFIG_FILE=/etc/terraform/terraformrc \
     TF_DATA_DIR=/tmp/run/.terraform \
     TF_IN_AUTOMATION=1 \
     CHECKPOINT_DISABLE=1 \
+    TMPDIR=/tmp/run \
     HOME=/tmp/home \
     ANSIBLE_LOCAL_TEMP=/tmp/run/ansible \
     HELM_CACHE_HOME=/tmp/run/helm/cache \
