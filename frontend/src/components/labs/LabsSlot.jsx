@@ -8,17 +8,14 @@
  * read as content that exists.
  */
 import React from 'react';
+import SectionHeading from '@/components/education/SectionHeading';
 
 export default function LabsSlot({ id, title, issue, children }) {
   return (
     <section aria-labelledby={`${id}-heading`} data-testid={`labs-slot-${id}`}>
-      <h2
-        id={`${id}-heading`}
-        className="text-xl font-bold text-slate-950 dark:text-white flex items-center gap-2 mb-3"
-      >
-        <span className="w-1 h-6 bg-primary rounded-full" aria-hidden="true"></span>
+      <SectionHeading id={`${id}-heading`} className="mb-3">
         {title}
-      </h2>
+      </SectionHeading>
       {children ?? (
         <p className="text-sm text-slate-600 dark:text-slate-400">
           Coming soon: this section is being built in issue #{issue}.

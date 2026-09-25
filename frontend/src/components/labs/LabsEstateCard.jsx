@@ -25,12 +25,22 @@ import {
   heartbeatAgeWords,
   policyWords,
 } from './labsWords';
+import StatusCard, { MUTED, firstNotice } from './StatusCard';
 
 export const NOT_PROVISIONED_SENTENCE = 'The lab host is not provisioned yet.';
 export const ESTATE_ROUTE_MISSING_SENTENCE = 'The lab estate endpoint is not published yet.';
 export const ESTATE_LOADING_SENTENCE = 'Reading the lab host status…';
 
-const MUTED = 'text-slate-600 dark:text-slate-400';
+/** The states with nothing to enumerate, first match wins (see CoderStatusCard). */
+const NOTICES = Object.freeze([
+  {
+    when: (estate, loading) => loading && estate === undefined,
+    text: () => ESTATE_LOADING_SENTENCE,
+    muted: true,
+  },
+  { when: (estate) => estate === null, text: () => ESTATE_ROUTE_MISSING_SENTENCE, muted: true },
+  { when: (estate) => !estate?.configured, text: () => NOT_PROVISIONED_SENTENCE },
+]);
 
 function Row({ label, value, testId }) {
   return (
@@ -43,42 +53,14 @@ function Row({ label, value, testId }) {
   );
 }
 
+/** "reachable, 1 of 5 workspaces running" / "unreachable" / "not configured". */
 function coderWords(coder) {
   if (!coder || typeof coder.reachable !== 'boolean') return 'not configured';
-  if (!coder.reachable) return 'unreachable';
-  return `reachable, ${capacityWords(coder)}`;
+  return coder.reachable ? `reachable, ${capacityWords(coder)}` : 'unreachable';
 }
 
-export function EstateBody({ estate, loading, error }) {
-  if (error) {
-    return (
-      <p role="alert" className="text-sm">
-        The lab host status could not be read: {error.message}
-      </p>
-    );
-  }
-  if (loading && estate === undefined) {
-    return (
-      <p className={`text-sm ${MUTED}`} data-testid="estate-status">
-        {ESTATE_LOADING_SENTENCE}
-      </p>
-    );
-  }
-  if (estate === null) {
-    return (
-      <p className={`text-sm ${MUTED}`} data-testid="estate-status">
-        {ESTATE_ROUTE_MISSING_SENTENCE}
-      </p>
-    );
-  }
-  if (!estate?.configured) {
-    return (
-      <p className="text-sm text-slate-900 dark:text-slate-100" data-testid="estate-status">
-        {NOT_PROVISIONED_SENTENCE}
-      </p>
-    );
-  }
-
+/** The configured host, every fact in words. */
+function EstateFacts({ estate }) {
   const arc = estate.arc ?? {};
   // The heartbeat age is measured from the server's snapshot time, `asOf`,
   // which is data, not a clock: a render that read `Date.now()` would be
@@ -119,21 +101,19 @@ export function EstateBody({ estate, loading, error }) {
  * @param {Error|null} props.error
  */
 export default function LabsEstateCard({ estate, loading, error }) {
+  const notice = firstNotice(NOTICES, estate, loading);
   return (
-    <section
-      aria-labelledby="estate-heading"
-      className="glass rounded-xl p-6 flex flex-col gap-3"
-      data-testid="labs-estate-card"
+    <StatusCard
+      id="estate"
+      testId="labs-estate-card"
+      title="The Hybrid Lab right now"
+      intro="The lab host is a Hostinger VPS onboarded to Azure Arc, so it appears in the same tenant as the production estate. The Function App reads its Arc row and policy compliance from Azure Resource Graph with its managed identity; the browser never talks to Azure."
+      error={error}
+      errorPrefix="The lab host status could not be read"
+      notice={notice}
+      noticeTestId="estate-status"
     >
-      <h2 id="estate-heading" className="text-xl font-bold text-slate-950 dark:text-white">
-        The Hybrid Lab right now
-      </h2>
-      <p className={`text-sm ${MUTED}`}>
-        The lab host is a Hostinger VPS onboarded to Azure Arc, so it appears in the same tenant as
-        the production estate. The Function App reads its Arc row and policy compliance from Azure
-        Resource Graph with its managed identity; the browser never talks to Azure.
-      </p>
-      <EstateBody estate={estate} loading={loading} error={error} />
-    </section>
+      {notice ? null : <EstateFacts estate={estate} />}
+    </StatusCard>
   );
 }

@@ -13,74 +13,68 @@
 import React from 'react';
 import { formatLocalDateTime } from '@/lib/cloudPricing';
 import { capacityWords } from './labsWords';
+import StatusCard, { MUTED, firstNotice } from './StatusCard';
 
 export const CODER_NOT_PROVISIONED_SENTENCE = 'Coder is not yet provisioned.';
 export const CODER_UNREACHABLE_SENTENCE = 'Coder is unreachable right now.';
 export const CODER_ROUTE_MISSING_SENTENCE = 'The Coder status endpoint is not published yet.';
 export const CODER_LOADING_SENTENCE = 'Reading Coder status…';
 
-const MUTED = 'text-slate-600 dark:text-slate-400';
+/** " Last checked 25 Sept 2026, 12:00." or nothing, for the unreachable line. */
+function lastChecked(asOf) {
+  return asOf ? ` Last checked ${formatLocalDateTime(asOf)}.` : '';
+}
 
-export function CoderStatusBody({ status, loading, error }) {
-  if (error) {
-    return (
-      <p role="alert" className="text-sm">
-        Coder status could not be read: {error.message}
-      </p>
-    );
-  }
-  if (loading && status === undefined) {
-    return (
-      <p className={`text-sm ${MUTED}`} data-testid="coder-status">
-        {CODER_LOADING_SENTENCE}
-      </p>
-    );
-  }
-  if (status === null) {
-    return (
-      <p className={`text-sm ${MUTED}`} data-testid="coder-status">
-        {CODER_ROUTE_MISSING_SENTENCE}
-      </p>
-    );
-  }
-  if (!status?.configured) {
-    return (
-      <p className="text-sm text-slate-900 dark:text-slate-100" data-testid="coder-status">
-        {CODER_NOT_PROVISIONED_SENTENCE}
-      </p>
-    );
-  }
-  if (!status.reachable) {
-    return (
-      <p className="text-sm text-slate-900 dark:text-slate-100" data-testid="coder-status">
-        {CODER_UNREACHABLE_SENTENCE}
-        {status.asOf ? ` Last checked ${formatLocalDateTime(status.asOf)}.` : ''}
-      </p>
-    );
-  }
+/**
+ * The states with nothing to enumerate, first match wins. `status` is
+ * `undefined` while nothing has arrived, `null` when the route answered 404,
+ * otherwise the body; the rows are ordered so each may assume the ones above
+ * it did not match.
+ */
+const NOTICES = Object.freeze([
+  {
+    when: (status, loading) => loading && status === undefined,
+    text: () => CODER_LOADING_SENTENCE,
+    muted: true,
+  },
+  { when: (status) => status === null, text: () => CODER_ROUTE_MISSING_SENTENCE, muted: true },
+  { when: (status) => !status?.configured, text: () => CODER_NOT_PROVISIONED_SENTENCE },
+  {
+    when: (status) => !status.reachable,
+    text: (status) => `${CODER_UNREACHABLE_SENTENCE}${lastChecked(status.asOf)}`,
+  },
+]);
 
-  const templates = Array.isArray(status.templates) ? status.templates : [];
+function TemplateList({ templates }) {
+  if (templates.length === 0) {
+    return (
+      <p className={`text-sm ${MUTED}`} data-testid="coder-templates">
+        No template is published yet.
+      </p>
+    );
+  }
+  return (
+    <ul className="flex flex-col gap-1" data-testid="coder-templates">
+      {templates.map((template) => (
+        <li key={template.name} className="text-sm flex items-baseline gap-2">
+          <span className="font-mono font-bold text-slate-900 dark:text-slate-100">
+            {template.name}
+          </span>
+          <span className={MUTED}>active version {template.activeVersion || 'unknown'}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** The healthy state: reachable, with templates and capacity. */
+function CoderFacts({ status }) {
   return (
     <>
       <p className="text-sm text-slate-900 dark:text-slate-100" data-testid="coder-status">
         Coder is reachable: {capacityWords(status.capacity)}.
       </p>
-      {templates.length > 0 ? (
-        <ul className="flex flex-col gap-1" data-testid="coder-templates">
-          {templates.map((template) => (
-            <li key={template.name} className="text-sm flex items-baseline gap-2">
-              <span className="font-mono font-bold text-slate-900 dark:text-slate-100">
-                {template.name}
-              </span>
-              <span className={MUTED}>active version {template.activeVersion || 'unknown'}</span>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className={`text-sm ${MUTED}`} data-testid="coder-templates">
-          No template is published yet.
-        </p>
-      )}
+      <TemplateList templates={Array.isArray(status.templates) ? status.templates : []} />
       {status.asOf ? (
         <p className={`text-xs ${MUTED}`} data-testid="coder-as-of">
           As of {formatLocalDateTime(status.asOf)}; refreshed about once a minute.
@@ -98,21 +92,19 @@ export function CoderStatusBody({ status, loading, error }) {
  * @param {Error|null} props.error
  */
 export default function CoderStatusCard({ status, loading, error }) {
+  const notice = firstNotice(NOTICES, status, loading);
   return (
-    <section
-      aria-labelledby="coder-heading"
-      className="glass rounded-xl p-6 flex flex-col gap-3"
-      data-testid="coder-status-card"
+    <StatusCard
+      id="coder"
+      testId="coder-status-card"
+      title="Coder status"
+      intro="Coder runs on the lab host and is where you sign in with GitHub. This card is served by the site’s API from a read-only token, so what it shows is at most a minute old and your browser never contacts Coder until you open a workspace."
+      error={error}
+      errorPrefix="Coder status could not be read"
+      notice={notice}
+      noticeTestId="coder-status"
     >
-      <h2 id="coder-heading" className="text-xl font-bold text-slate-950 dark:text-white">
-        Coder status
-      </h2>
-      <p className={`text-sm ${MUTED}`}>
-        Coder runs on the lab host and is where you sign in with GitHub. This card is served by the
-        site&rsquo;s API from a read-only token, so what it shows is at most a minute old and your
-        browser never contacts Coder until you open a workspace.
-      </p>
-      <CoderStatusBody status={status} loading={loading} error={error} />
-    </section>
+      {notice ? null : <CoderFacts status={status} />}
+    </StatusCard>
   );
 }

@@ -49,12 +49,26 @@ export function heartbeatAgeWords(iso, nowMs) {
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return 'unknown';
   const reference = Number.isFinite(nowMs) ? nowMs : Date.now();
-  const age = reference - then;
-  if (age < 45 * SECOND) return 'just now';
-  if (age < MINUTE) return `${plural(Math.round(age / SECOND), 'second')} ago`;
-  if (age < HOUR) return `${plural(Math.round(age / MINUTE), 'minute')} ago`;
-  if (age < DAY) return `${plural(Math.round(age / HOUR), 'hour')} ago`;
-  return `${plural(Math.round(age / DAY), 'day')} ago`;
+  return ageWords(reference - then);
+}
+
+/**
+ * The unit an age is spoken in: the first row whose `below` the age is under.
+ * Anything from a day up is days; there is no "weeks ago" because a heartbeat
+ * that old is an incident, not a duration worth rounding.
+ */
+const AGE_UNITS = Object.freeze([
+  { below: MINUTE, unit: SECOND, word: 'second' },
+  { below: HOUR, unit: MINUTE, word: 'minute' },
+  { below: DAY, unit: HOUR, word: 'hour' },
+  { below: Infinity, unit: DAY, word: 'day' },
+]);
+
+/** "just now" under 45 seconds, otherwise "<n> <unit>s ago". */
+export function ageWords(ageMs) {
+  if (ageMs < 45 * SECOND) return 'just now';
+  const { unit, word } = AGE_UNITS.find(({ below }) => ageMs < below);
+  return `${plural(Math.round(ageMs / unit), word)} ago`;
 }
 
 /** "1 of 5 workspaces running". Either count missing reads as unknown. */

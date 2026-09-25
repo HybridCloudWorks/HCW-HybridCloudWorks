@@ -36,6 +36,7 @@ import React, { useMemo } from 'react';
 import { Helmet } from 'react-helmet-async';
 import { Link } from 'react-router';
 import CatalogueFreshness from '@/components/education/CatalogueFreshness';
+import SectionHeading from '@/components/education/SectionHeading';
 import { deriveStatus, isIsoDate, useToday } from '@/lib/certStatus';
 import { routes, staticRoutes } from '@/lib/routeFactory';
 
@@ -395,13 +396,9 @@ export default function EducationIndexPage() {
         </section>
 
         <section aria-labelledby="labs-heading">
-          <h2
-            id="labs-heading"
-            className="text-xl font-bold text-slate-950 dark:text-white flex items-center gap-2 mb-2"
-          >
-            <span className="w-1 h-6 bg-primary rounded-full" aria-hidden="true"></span>
+          <SectionHeading id="labs-heading" className="mb-2">
             Practise in a browser lab
-          </h2>
+          </SectionHeading>
           <p className="text-slate-600 dark:text-slate-400 max-w-3xl">
             Reading about an exam is not the same as running the tools it covers. The{' '}
             <Link

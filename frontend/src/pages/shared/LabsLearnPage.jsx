@@ -28,6 +28,7 @@
 import React from 'react';
 import { Helmet } from 'react-helmet-async';
 import { Link } from 'react-router';
+import SectionHeading from '@/components/education/SectionHeading';
 import CoderStatusCard from '@/components/labs/CoderStatusCard';
 import LabCard from '@/components/labs/LabCard';
 import LabsEstateCard from '@/components/labs/LabsEstateCard';
@@ -98,13 +99,7 @@ export default function LabsLearnPage() {
         </header>
 
         <section aria-labelledby="labs-heading">
-          <h2
-            id="labs-heading"
-            className="text-xl font-bold text-slate-950 dark:text-white flex items-center gap-2 mb-6"
-          >
-            <span className="w-1 h-6 bg-primary rounded-full" aria-hidden="true"></span>
-            Pick a lab
-          </h2>
+          <SectionHeading id="labs-heading">Pick a lab</SectionHeading>
           <ul className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 list-none p-0">
             {labs.map((lab) => (
               <LabCard key={lab.id} lab={lab} />
