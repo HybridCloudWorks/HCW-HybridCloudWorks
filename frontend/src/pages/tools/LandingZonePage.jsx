@@ -16,7 +16,10 @@
  * share.js) carry the whole state, so a landing zone is a link an article or
  * the newsletter can carry, and a bare URL is the full default build. The
  * only React state on the page is which component is focused, which is a
- * reading position rather than part of the build.
+ * reading position rather than part of the build, and the answer the
+ * "Explain this component" button (landingZone/LzExplainButton.jsx, #670)
+ * holds for the focused component, which is asked for on a click and never
+ * otherwise.
  *
  * PRE-RENDER AND HYDRATION. The route is built to a static file and hydrated
  * (scripts/prerender-entry.jsx). Everything on it is a pure function of the
@@ -33,6 +36,7 @@ import { Helmet } from 'react-helmet-async';
 import { AVM_MODULES, AVM_VERIFIED_ON } from '@/lib/landingZone';
 import { LzControls } from './landingZone/LzControls';
 import { LzDiagram } from './landingZone/LzDiagram';
+import { LzExplainButton } from './landingZone/LzExplainButton';
 import { LzFiles } from './landingZone/LzFiles';
 import { LzTeaches } from './landingZone/LzTeaches';
 import { useLzState } from './landingZone/useLzState';
@@ -89,7 +93,11 @@ export default function LandingZonePage() {
         <div className="grid gap-8 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)] lg:items-start">
           <LzControls state={state} write={write} focusedId={focusedId} onFocus={setFocusedId} />
           <div className="flex flex-col gap-8 min-w-0">
-            <LzTeaches state={state} componentId={focusedId} />
+            <LzTeaches
+              state={state}
+              componentId={focusedId}
+              explain={<LzExplainButton state={state} componentId={focusedId} />}
+            />
             <LzDiagram state={state} focusedId={focusedId} onFocus={setFocusedId} />
           </div>
         </div>

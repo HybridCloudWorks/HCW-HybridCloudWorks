@@ -21,6 +21,7 @@ import sql from 'react-syntax-highlighter/dist/esm/languages/prism/sql';
 import go from 'react-syntax-highlighter/dist/esm/languages/prism/go';
 import csharp from 'react-syntax-highlighter/dist/esm/languages/prism/csharp';
 import markdown from 'react-syntax-highlighter/dist/esm/languages/prism/markdown';
+import LandingZoneEmbed, { LANDING_ZONE_LANGUAGE } from '@/components/content/LandingZoneEmbed';
 import PricingScenarioEmbed, {
   PRICING_SCENARIO_LANGUAGE,
 } from '@/components/content/PricingScenarioEmbed';
@@ -123,10 +124,26 @@ export default function CodeBlock({ language, value }) {
 }
 
 /**
+ * The fence languages that are not code, each rendered by a card rather than
+ * the highlighter: `pricing-scenario` is a scenario for the pricing comparison
+ * (#613, Phase 3; components/content/PricingScenarioEmbed.jsx) and
+ * `landing-zone` is a Landing Zone Builder build (#670;
+ * components/content/LandingZoneEmbed.jsx). The next tool is one more line.
+ * Each component takes the fence body as `query`. Looked up with `hasOwn`,
+ * so a fence named `constructor` is a code block and not a prototype method.
+ */
+export const EMBED_COMPONENTS = Object.freeze({
+  [PRICING_SCENARIO_LANGUAGE]: PricingScenarioEmbed,
+  [LANDING_ZONE_LANGUAGE]: LandingZoneEmbed,
+});
+
+const embedFor = (language) =>
+  language && Object.hasOwn(EMBED_COMPONENTS, language) ? EMBED_COMPONENTS[language] : null;
+
+/**
  * ReactMarkdown `components` override wiring fenced blocks to CodeBlock while
- * leaving inline code styled by prose classes. One language is not code: a
- * `pricing-scenario` fence is a scenario for the pricing comparison, and
- * renders as that card (#613, Phase 3; components/content/PricingScenarioEmbed.jsx).
+ * leaving inline code styled by prose classes, and the languages in
+ * EMBED_COMPONENTS to their cards.
  */
 export const markdownCodeComponents = {
   code({ inline, className, children, ...props }) {
@@ -136,7 +153,8 @@ export const markdownCodeComponents = {
     // and no newlines. react-markdown v10 no longer passes `inline`.
     const isBlock = match || value.includes('\n');
     if (!inline && isBlock) {
-      if (match?.[1] === PRICING_SCENARIO_LANGUAGE) return <PricingScenarioEmbed query={value} />;
+      const Embed = embedFor(match?.[1]);
+      if (Embed) return <Embed query={value} />;
       return <CodeBlock language={match?.[1]} value={value} />;
     }
     return (
