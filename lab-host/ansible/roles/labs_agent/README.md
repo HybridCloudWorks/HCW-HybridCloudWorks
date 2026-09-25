@@ -43,12 +43,20 @@ that made it the right call before the ADR said so:
    names in `vps-agent/.env.example`; `LABS_AGENT_CERT_PATH` is
    `/etc/hcw/labs-agent.pem`.
 6. Installs `hcw-labs-agent.service` (`Restart=on-failure`,
-   `Requires=docker.service`, `NoNewPrivileges`, `ProtectSystem=full`) and
-   starts it **only when all four identity values are set**. Otherwise it
-   explicitly stops and disables the unit — so removing a value from the
-   vault and re-running takes a previously running agent offline rather
-   than leaving it up — and prints what is missing. The identity is an
-   owner step recorded in `docs/standards/required-inputs.md` section 4.7.
+   `Requires=docker.service`, `NoNewPrivileges`, `ProtectSystem=full`,
+   `PrivateTmp`) and starts it **only when all four identity values are
+   set**. Otherwise it explicitly stops and disables the unit and deletes
+   `/etc/hcw/labs-agent.env` — so removing a value from the vault and
+   re-running is a revocation: the agent goes offline and a manual
+   `systemctl start` cannot bring it back on the old credentials — and
+   prints what is missing. The identity is an owner step recorded in
+   `docs/standards/required-inputs.md` section 4.7.
+
+`lib/docker-runner.js` stages each job's payload under `os.tmpdir()` and
+bind-mounts that path into the job container. With `PrivateTmp` the unit's
+`/tmp` is invisible to the Docker daemon, so the unit sets
+`TMPDIR=/var/lib/hcw-labs-agent/tmp`, a real host directory owned by the
+agent, and the role creates it.
 
 The role sets no Docker labels and passes nothing to the jobs the agent
 starts; the `hcw.lab-job` label ADR 0032 requires on every job container is

@@ -91,6 +91,14 @@ argument_specs:
         required: false
         default: /var/lib/hcw-labs-agent
         description: Holds the per-ref stamp that records npm ci has run.
+      labs_agent_tmp_dir:
+        type: path
+        required: false
+        default: /var/lib/hcw-labs-agent/tmp
+        description:
+          - TMPDIR for the service. The runner stages each job payload here and bind-mounts it
+            into the job container, so it must be visible to the Docker daemon; the unit's
+            PrivateTmp /tmp is not.
       labs_agent_config_dir:
         type: path
         required: false

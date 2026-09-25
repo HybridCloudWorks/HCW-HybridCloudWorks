@@ -5,6 +5,10 @@
 labs_agent_group: "{{ labs_agent_user }}"
 labs_agent_app_dir: "{{ labs_agent_home }}/vps-agent"
 labs_agent_state_dir: /var/lib/hcw-labs-agent
+# Where the agent stages each job's payload before bind-mounting it into the
+# job container (lib/docker-runner.js uses os.tmpdir()). It must be a path the
+# Docker daemon can see, so it is not the unit's private /tmp.
+labs_agent_tmp_dir: /var/lib/hcw-labs-agent/tmp
 labs_agent_config_dir: /etc/hcw
 labs_agent_env_file: /etc/hcw/labs-agent.env
 labs_agent_certificate_path: /etc/hcw/labs-agent.pem

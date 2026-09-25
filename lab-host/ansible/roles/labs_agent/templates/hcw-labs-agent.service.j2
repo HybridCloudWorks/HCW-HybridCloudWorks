@@ -13,6 +13,10 @@ Group={{ labs_agent_group }}
 WorkingDirectory={{ labs_agent_app_dir }}
 EnvironmentFile={{ labs_agent_env_file }}
 Environment=NODE_ENV=production
+# lib/docker-runner.js stages each payload under os.tmpdir() and bind-mounts
+# it into the job container. PrivateTmp below gives this unit a /tmp the
+# Docker daemon cannot see, so TMPDIR points at a real host directory instead.
+Environment=TMPDIR={{ labs_agent_tmp_dir }}
 ExecStart=/usr/bin/node index.js
 Restart=on-failure
 RestartSec=10

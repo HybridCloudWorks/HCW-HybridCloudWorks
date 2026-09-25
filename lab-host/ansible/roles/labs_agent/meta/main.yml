@@ -3,7 +3,7 @@ galaxy_info:
   role_name: labs_agent
   namespace: hcw
   author: HybridCloudWorks
-  description: The vps-agent job runner as a systemd service from a pinned checkout, with its certificate delivered through LoadCredential
+  description: The vps-agent job runner as a host-native systemd service from a pinned checkout, with its certificate generated on the host
   license: UNLICENSED
   min_ansible_version: "2.16"
   platforms:

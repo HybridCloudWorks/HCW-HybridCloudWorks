@@ -85,6 +85,14 @@
     - "{{ labs_agent_state_dir }}"
     - "{{ labs_agent_config_dir }}"
 
+- name: Create the job staging directory the Docker daemon can see
+  ansible.builtin.file:
+    path: "{{ labs_agent_tmp_dir }}"
+    state: directory
+    owner: "{{ labs_agent_user }}"
+    group: "{{ labs_agent_group }}"
+    mode: "0750"
+
 - name: Check out the repository at the pinned ref
   ansible.builtin.git:
     repo: "{{ labs_agent_repo_url }}"
@@ -168,6 +176,12 @@
   when:
     - not labs_agent_configured | bool
     - labs_agent_unit_stat.stat.exists
+
+- name: Remove the stale environment so removed credentials cannot be reused by a manual start
+  ansible.builtin.file:
+    path: "{{ labs_agent_env_file }}"
+    state: absent
+  when: not labs_agent_configured | bool
 
 - name: Say why the agent is not running yet
   ansible.builtin.debug:

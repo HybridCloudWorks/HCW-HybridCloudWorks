@@ -65,8 +65,12 @@ extra_args=()
 if [ -f "${HCW_VAULT_FILE}" ] && [ -f "${HCW_VAULT_PASSWORD_FILE}" ]; then
   log "using the vault at ${HCW_VAULT_FILE}"
   extra_args+=(--vault-password-file "${HCW_VAULT_PASSWORD_FILE}" -e "@${HCW_VAULT_FILE}")
+elif [ -f "${HCW_VAULT_FILE}" ] || [ -f "${HCW_VAULT_PASSWORD_FILE}" ]; then
+  echo "refusing to run: one of ${HCW_VAULT_FILE} and ${HCW_VAULT_PASSWORD_FILE} exists and the other does not" >&2
+  echo "a half-present vault would be treated as no vault, turning TLS off and stopping the agent; restore the missing file or remove both" >&2
+  exit 1
 else
-  log "no vault at ${HCW_VAULT_FILE}: Caddy will serve plain HTTP and the agent stays stopped until one exists"
+  log "no vault at ${HCW_VAULT_FILE}: Caddy answers 503 over plain HTTP and the agent stays stopped until one exists"
 fi
 
 log "running site.yml against localhost"

@@ -674,14 +674,22 @@ This project has not cut a tagged release; entries are grouped under
   names from `vps-agent/.env.example`, and generates the key **on the host**
   as that file asks. `/etc/hcw/labs-agent.pem` is `root:hcw-labs-agent`
   0640, no ACLs — root owns it, the service reads it through its group,
-  nobody else can — and `.env.example` now says exactly that instead of the
-  0600 a non-root service could never have read. Only the public half,
-  `/etc/hcw/labs-agent.crt`, leaves the host. Until the vault holds the
-  identity the unit is installed, stopped and disabled — explicitly, so
-  removing a value from the vault takes a running agent offline on the next
-  run — and the play says which values are missing. The `hcw.lab-job` label
-  ADR 0032 requires on job containers is the agent's own change (#675); this
-  role sets no labels.
+  nobody else can — and `.env.example`, the Setup tab's step 4 and
+  `docs/standards/variables-and-secrets.md` now all say exactly that instead
+  of the 0600 a non-root service could never have read. Only the public
+  half, `/etc/hcw/labs-agent.crt`, leaves the host. The unit sets
+  `TMPDIR=/var/lib/hcw-labs-agent/tmp`, because `lib/docker-runner.js`
+  stages each payload under `os.tmpdir()` and bind-mounts it into the job
+  container, and the `PrivateTmp` `/tmp` the unit otherwise gets is one the
+  Docker daemon cannot see. Until the vault holds the identity the unit is
+  installed, stopped and disabled and the env file is removed — explicitly,
+  so removing a value from the vault is a revocation on the next run, not a
+  file a manual `systemctl start` could reuse — and the play says which
+  values are missing. `bootstrap.sh` refuses to run when exactly one of the
+  vault file and its password file exists, rather than treating a
+  half-present vault as no vault and turning TLS off. The `hcw.lab-job`
+  label ADR 0032 requires on job containers is the agent's own change
+  (#675); this role sets no labels.
 
   `lab-host/bootstrap.sh` — what #661's post-install script will call —
   installs `ansible-core` 2.21.4 with pipx, clones the repository at the
