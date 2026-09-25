@@ -144,7 +144,8 @@ jobs:
             echo "## hcw-lab image sizes"
             echo
             echo '```'
-            docker image ls --format 'table {{.Repository}}\t{{.Tag}}\t{{.Size}}' hcw-lab-runner:ci hcw-lab:ci
+            docker image ls --format 'table {{.Repository}}\t{{.Tag}}\t{{.Size}}' hcw-lab-runner:ci
+            docker image ls --format '{{.Repository}}\t{{.Tag}}\t{{.Size}}' hcw-lab:ci
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
