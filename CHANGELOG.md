@@ -19,6 +19,15 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The Coder status token is an expected unresolved secret until Coder
+  can issue it (#682).** `CODER-STATUS-TOKEN` is created by Coder, so it
+  cannot exist before Coder runs on the lab host (#661); the Terraform comment
+  and Required-Inputs §4.7 had asked for it to be seeded before the apply.
+  It is now listed in `EXPECTED_UNRESOLVED` in
+  `scripts/check-unresolved-secrets.mjs`, reported every run but not as a
+  failure, and the labs page keeps reading "not yet provisioned".
+  `CODER-URL` is seeded now with its known value.
+
 - **hcw-lab image Phase 2: transitive AVM vendoring, source rewrite, job
   labels, helm-template and kubeconform capabilities (#675).** Phase 2 of
   #658. All three vendored AVM pattern modules now `terraform init` under

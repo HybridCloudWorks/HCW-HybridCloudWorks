@@ -63,6 +63,10 @@ export const EXPECTED_UNRESOLVED = new Map([
     'AZURE_SPEECH_KEY',
     'fallback TTS provider, deliberately unprovisioned — infra/functionapp.tf:444',
   ],
+  [
+    'CODER_STATUS_TOKEN',
+    'Coder status token, issued by Coder itself, so it cannot exist until Coder runs on the lab host (#661) and the owner creates it (#682) — infra/functionapp.tf CODER_STATUS_TOKEN comment',
+  ],
 ]);
 
 /**
