@@ -47,6 +47,18 @@ MODULE_HEADER = re.compile(r'^\s*module\s+"([^"]+)"\s*\{')
 SOURCE_LINE = re.compile(r'^(\s*)source(\s*)=(\s*)"([^"]+)"(.*)$')
 VERSION_LINE = re.compile(r'^(\s*)version\s*=\s*"([^"]*)"(.*)$')
 VERSION = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
+CLAUSE = re.compile(r"^(~>|>=|<=|!=|>|<|=)?\s*v?(\d+)(?:\.(\d+))?(?:\.(\d+))?$")
+
+# Terraform's constraint operators over (version, given, pessimistic upper).
+OPERATORS = {
+    "=": lambda v, g, _u: v == g,
+    "!=": lambda v, g, _u: v != g,
+    ">": lambda v, g, _u: v > g,
+    ">=": lambda v, g, _u: v >= g,
+    "<": lambda v, g, _u: v < g,
+    "<=": lambda v, g, _u: v <= g,
+    "~>": lambda v, g, u: g <= v < u,
+}
 
 
 def parse_version(text):
@@ -54,37 +66,23 @@ def parse_version(text):
     return tuple(int(x) for x in m.groups()) if m else None
 
 
+def parse_clause(clause):
+    """One `<op> <version>` clause -> (op, given, upper), or None if malformed."""
+    m = CLAUSE.match(clause.strip())
+    if not m:
+        return None
+    parts = [int(m.group(2)), int(m.group(3) or 0), int(m.group(4) or 0)]
+    # ~> 1.2 means >= 1.2.0, < 2.0.0; ~> 1.2.3 means >= 1.2.3, < 1.3.0.
+    upper = (parts[0] + 1, 0, 0) if m.group(4) is None else (parts[0], parts[1] + 1, 0)
+    return m.group(1) or "=", tuple(parts), upper
+
+
 def satisfies(version, constraint):
     """Terraform's version-constraint syntax over a (major, minor, patch) tuple."""
     if not constraint.strip():
         return True
-    for clause in constraint.split(","):
-        clause = clause.strip()
-        m = re.match(r"^(~>|>=|<=|!=|>|<|=)?\s*v?(\d+)(?:\.(\d+))?(?:\.(\d+))?$", clause)
-        if not m:
-            return False
-        op = m.group(1) or "="
-        parts = [int(m.group(2)), int(m.group(3) or 0), int(m.group(4) or 0)]
-        given = tuple(parts)
-        if op == "~>":
-            # ~> 1.2 means >= 1.2.0, < 2.0.0; ~> 1.2.3 means >= 1.2.3, < 1.3.0.
-            upper = (parts[0] + 1, 0, 0) if m.group(4) is None else (parts[0], parts[1] + 1, 0)
-            ok = given <= version < upper
-        elif op == ">=":
-            ok = version >= given
-        elif op == "<=":
-            ok = version <= given
-        elif op == ">":
-            ok = version > given
-        elif op == "<":
-            ok = version < given
-        elif op == "!=":
-            ok = version != given
-        else:
-            ok = version == given
-        if not ok:
-            return False
-    return True
+    clauses = [parse_clause(c) for c in constraint.split(",")]
+    return all(c is not None and OPERATORS[c[0]](version, c[1], c[2]) for c in clauses)
 
 
 def vendored_modules():
@@ -104,57 +102,116 @@ def choose(vendored, name, constraint):
     return max(candidates)[1] if candidates else None
 
 
-def rewrite_file(path, vendored, report):
-    with open(path, encoding="utf-8") as fh:
-        lines = fh.read().split("\n")
-    file_dir = os.path.dirname(path)
-    changed = False
+def brace_delta(line):
+    return line.count("{") - line.count("}")
+
+
+def scan_block(lines, start):
+    """
+    Walk one `module` block from its header line. Returns (end index, index
+    of its `source` line, index of its `version` line); only depth-1 lines
+    are attributes of the block itself, so a `source` inside a nested block
+    or a `for_each = { ... }` value is not taken.
+    """
+    depth = brace_delta(lines[start])
+    j = start + 1
+    source_at = version_at = None
+    while j < len(lines) and depth > 0:
+        if depth == 1 and SOURCE_LINE.match(lines[j]):
+            source_at = j
+        elif depth == 1 and VERSION_LINE.match(lines[j]):
+            version_at = j
+        depth += brace_delta(lines[j])
+        j += 1
+    return j, source_at, version_at
+
+
+def module_blocks(lines):
+    """Yield (name, source index, version index) for every top-level module block."""
     i = 0
     while i < len(lines):
         header = MODULE_HEADER.match(lines[i])
         if not header:
             i += 1
             continue
-        block_name = header.group(1)
-        depth = lines[i].count("{") - lines[i].count("}")
-        j = i + 1
-        source_at = version_at = None
-        while j < len(lines) and depth > 0:
-            if depth == 1:
-                if SOURCE_LINE.match(lines[j]):
-                    source_at = j
-                elif VERSION_LINE.match(lines[j]):
-                    version_at = j
-            depth += lines[j].count("{") - lines[j].count("}")
-            j += 1
-        if source_at is not None:
-            src = SOURCE_LINE.match(lines[source_at])
-            reg = REGISTRY_SOURCE.match(src.group(4).strip())
-            if reg:
-                name, sub = reg.group(1), reg.group(3)
-                constraint = VERSION_LINE.match(lines[version_at]).group(2) if version_at is not None else ""
-                picked = choose(vendored, name, constraint)
-                label = f'module "{block_name}" ({src.group(4)}{" " + constraint if constraint else ""})'
-                if picked is None:
-                    have = ", ".join(text for _v, text in vendored.get(name, [])) or "none vendored"
-                    report.append(f"left    {label}: no vendored version satisfies it (have: {have})")
-                else:
-                    target = os.path.join(AVM_ROOT, f"{name}@{picked}")
-                    if sub:
-                        target = os.path.join(target, sub)
-                    rel = os.path.relpath(target, file_dir)
-                    if not rel.startswith(("./", "../")):
-                        rel = "./" + rel
-                    lines[source_at] = f'{src.group(1)}source{src.group(2)}={src.group(3)}"{rel}"{src.group(5)}'
-                    if version_at is not None:
-                        v = VERSION_LINE.match(lines[version_at])
-                        lines[version_at] = f'{v.group(1)}# version = "{v.group(2)}"  # vendored: {picked}'
-                    report.append(f"rewrote {label} -> {rel}")
-                    changed = True
-        i = j
-    if changed:
-        with open(path, "w", encoding="utf-8", newline="\n") as fh:
-            fh.write("\n".join(lines))
+        end, source_at, version_at = scan_block(lines, i)
+        yield header.group(1), source_at, version_at
+        i = end
+
+
+def relative_target(module, version, sub, file_dir):
+    target = os.path.join(AVM_ROOT, f"{module}@{version}")
+    if sub:
+        target = os.path.join(target, sub)
+    rel = os.path.relpath(target, file_dir).replace(os.sep, "/")
+    return rel if rel.startswith(("./", "../")) else "./" + rel
+
+
+def resolve_block(lines, block, vendored, file_dir):
+    """
+    Decide one module block's fate. Returns None for a block that names no
+    registry AVM source, else (report line, {line index: new text}); the
+    edits are empty when no vendored version satisfies the constraint.
+    """
+    block_name, source_at, version_at = block
+    if source_at is None:
+        return None
+    src = SOURCE_LINE.match(lines[source_at])
+    reg = REGISTRY_SOURCE.match(src.group(4).strip())
+    if not reg:
+        return None
+    module, sub = reg.group(1), reg.group(3)
+    constraint = VERSION_LINE.match(lines[version_at]).group(2) if version_at is not None else ""
+    label = f'module "{block_name}" ({src.group(4)}{" " + constraint if constraint else ""})'
+    picked = choose(vendored, module, constraint)
+    if picked is None:
+        have = ", ".join(text for _v, text in vendored.get(module, [])) or "none vendored"
+        return f"left    {label}: no vendored version satisfies it (have: {have})", {}
+    rel = relative_target(module, picked, sub, file_dir)
+    edits = {source_at: f'{src.group(1)}source{src.group(2)}={src.group(3)}"{rel}"{src.group(5)}'}
+    if version_at is not None:
+        v = VERSION_LINE.match(lines[version_at])
+        edits[version_at] = f'{v.group(1)}# version = "{v.group(2)}"  # vendored: {picked}'
+    return f"rewrote {label} -> {rel}", edits
+
+
+def rewrite_file(path, vendored, report):
+    with open(path, encoding="utf-8") as fh:
+        lines = fh.read().split("\n")
+    edits = {}
+    for block in module_blocks(lines):
+        outcome = resolve_block(lines, block, vendored, os.path.dirname(path))
+        if outcome is None:
+            continue
+        report.append(outcome[0])
+        edits.update(outcome[1])
+    if not edits:
+        return
+    for index, text in edits.items():
+        lines[index] = text
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write("\n".join(lines))
+
+
+def rewrite_tree(root, vendored):
+    report = []
+    for base, dirs, files in os.walk(root):
+        dirs[:] = sorted(d for d in dirs if d not in (".terraform", ".git"))
+        for fn in sorted(files):
+            if fn.endswith(".tf"):
+                rewrite_file(os.path.join(base, fn), vendored, report)
+    return report
+
+
+def run_terraform(args, env):
+    return subprocess.run(
+        ["terraform", *args, "-no-color"],
+        cwd=RUN_DIR,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
 
 
 def main():
@@ -170,14 +227,7 @@ def main():
         ignore=shutil.ignore_patterns(".terraform", ".terraform.lock.hcl", ".git"),
     )
 
-    vendored = vendored_modules()
-    report = []
-    for base, dirs, files in os.walk(RUN_DIR):
-        dirs[:] = sorted(d for d in dirs if d not in (".terraform", ".git"))
-        for fn in sorted(files):
-            if fn.endswith(".tf"):
-                rewrite_file(os.path.join(base, fn), vendored, report)
-
+    report = rewrite_tree(RUN_DIR, vendored_modules())
     print(f"== module sources ({len(report)} registry module block(s) in the payload)")
     for line in report:
         print("  " + line)
@@ -187,14 +237,7 @@ def main():
     env = dict(os.environ, TF_DATA_DIR=os.path.join(RUN_DIR, ".terraform"))
     print("\n== terraform init -backend=false")
     sys.stdout.flush()
-    init = subprocess.run(
-        ["terraform", "init", "-backend=false", "-input=false", "-no-color"],
-        cwd=RUN_DIR,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+    init = run_terraform(["init", "-backend=false", "-input=false"], env)
     if init.returncode != 0:
         print(init.stdout)
         return init.returncode
@@ -204,7 +247,8 @@ def main():
 
     print("\n== terraform validate")
     sys.stdout.flush()
-    validate = subprocess.run(["terraform", "validate", "-no-color"], cwd=RUN_DIR, env=env)
+    validate = run_terraform(["validate"], env)
+    print(validate.stdout, end="")
     return validate.returncode
 
 

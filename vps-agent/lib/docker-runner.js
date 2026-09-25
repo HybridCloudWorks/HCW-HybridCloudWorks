@@ -225,12 +225,55 @@ export function vetTarPath(raw) {
   return segments.join('/');
 }
 
+/** The tar typeflags a payload may carry, and what each becomes. */
+const TAR_ENTRY_TYPES = { 0: 'file', '\0': 'file', 5: 'dir' };
+
 /**
- * Parse a (ustar or GNU) tar buffer into regular files and directories.
- * Every other entry type is an error: there is no legitimate reason for a
- * lab payload to carry a symlink, a hard link, a device node, or a pax or
- * GNU long-name extension, and each of those is a way to write somewhere
- * other than the job directory or to smuggle a path past the check above.
+ * Read one 512-byte tar header. Returns null at the end-of-archive marker,
+ * otherwise the entry's name (with the ustar prefix joined on), typeflag
+ * and data size.
+ */
+function readTarHeader(buf, offset) {
+  const header = buf.subarray(offset, offset + 512);
+  if (header.every((b) => b === 0)) return null;
+  let name = readString(header, 0, 100);
+  if (header.toString('latin1', 257, 263) === 'ustar\0') {
+    const prefix = readString(header, 345, 155);
+    if (prefix) name = `${prefix}/${name}`;
+  }
+  return { name, typeflag: String.fromCharCode(header[156]), size: readOctal(header, 124, 12) };
+}
+
+/**
+ * Map a typeflag to 'file' or 'dir', or throw. Every other entry type is an
+ * error: there is no legitimate reason for a lab payload to carry a symlink,
+ * a hard link, a device node, or a pax or GNU long-name extension, and each
+ * of those is a way to write somewhere other than the job directory or to
+ * smuggle a path past `vetTarPath`.
+ */
+function tarEntryType({ name, typeflag }) {
+  const type = TAR_ENTRY_TYPES[typeflag];
+  if (!type) {
+    const shown = typeflag === '\0' ? '\\0' : typeflag;
+    throw new Error(
+      `tar payload: refusing entry ${JSON.stringify(name)} of type '${shown}' (only regular files and directories are accepted)`
+    );
+  }
+  return type;
+}
+
+function assertTarBounds(entryCount, totalBytes) {
+  if (entryCount > TAR_MAX_ENTRIES) {
+    throw new Error(`tar payload: more than ${TAR_MAX_ENTRIES} entries`);
+  }
+  if (totalBytes > TAR_MAX_BYTES) {
+    throw new Error(`tar payload: unpacked size exceeds ${TAR_MAX_BYTES} bytes`);
+  }
+}
+
+/**
+ * Parse a (ustar or GNU) tar buffer into regular files and directories,
+ * each path vetted by `vetTarPath` and the whole bounded by `assertTarBounds`.
  *
  * @returns {{ path: string, type: 'file'|'dir', data: Buffer }[]}
  */
@@ -239,40 +282,23 @@ export function parseTar(buf) {
   let offset = 0;
   let total = 0;
   while (offset + 512 <= buf.length) {
-    const header = buf.subarray(offset, offset + 512);
-    if (header.every((b) => b === 0)) break; // end-of-archive marker
-    const magic = header.toString('latin1', 257, 263);
-    const type = String.fromCharCode(header[156]);
-    const size = readOctal(header, 124, 12);
-    let name = readString(header, 0, 100);
-    if (magic === 'ustar\0') {
-      const prefix = readString(header, 345, 155);
-      if (prefix) name = `${prefix}/${name}`;
-    }
+    const header = readTarHeader(buf, offset);
+    if (header === null) break;
     const dataStart = offset + 512;
-    const dataEnd = dataStart + size;
+    const dataEnd = dataStart + header.size;
     if (dataEnd > buf.length) throw new Error('tar payload: truncated archive');
-    offset = dataStart + Math.ceil(size / 512) * 512;
+    offset = dataStart + Math.ceil(header.size / 512) * 512;
 
-    if (type !== '0' && type !== '\0' && type !== '5') {
-      throw new Error(
-        `tar payload: refusing entry ${JSON.stringify(name)} of type '${type === '\0' ? '\\0' : type}' (only regular files and directories are accepted)`
-      );
-    }
-    const vetted = vetTarPath(name);
+    const type = tarEntryType(header);
+    const vetted = vetTarPath(header.name);
     if (vetted === '') continue; // the archive's own root, "./"
     entries.push({
       path: vetted,
-      type: type === '5' ? 'dir' : 'file',
-      data: type === '5' ? Buffer.alloc(0) : buf.subarray(dataStart, dataEnd),
+      type,
+      data: type === 'dir' ? Buffer.alloc(0) : buf.subarray(dataStart, dataEnd),
     });
-    total += size;
-    if (entries.length > TAR_MAX_ENTRIES) {
-      throw new Error(`tar payload: more than ${TAR_MAX_ENTRIES} entries`);
-    }
-    if (total > TAR_MAX_BYTES) {
-      throw new Error(`tar payload: unpacked size exceeds ${TAR_MAX_BYTES} bytes`);
-    }
+    total += header.size;
+    assertTarBounds(entries.length, total);
   }
   return entries;
 }
