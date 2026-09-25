@@ -43,8 +43,9 @@ This project has not cut a tagged release; entries are grouped under
     0032 for the gated public path.
   - `docs/standards/required-inputs.md` §4.7 gains the inputs the ADR names —
     `hostinger_api_token` and `cloudflare_api_token` in `hcw-lab`, the Arc
-    onboarding credential in Ansible Vault, `CODER_URL` and
-    `CODER_STATUS_TOKEN` in Key Vault — all MISSING.
+    onboarding credential in Ansible Vault, `CODER-URL` and
+    `CODER-STATUS-TOKEN` in Key Vault (read by the underscored app settings)
+    — all MISSING.
   - `.github/CONTRIBUTING.md` still said new work lands in `TODO.md`. It lands
     as an issue on org project 1 with a Priority set (owner decision
     2026-09-05, #362); `TODO.md` keeps the accepted risks and an index.

@@ -60,9 +60,12 @@ are recorded once, here, before any of them is implemented.
    reads `hcw-azure` outputs, and nothing in `infra/` reads `hcw-lab`.
 2. **Ubuntu 24.04 LTS, and Docker Engine is the only runtime on the host.** No
    Kubernetes of any size (owner decision 2026-09-24; the earlier k3s idea is
-   dropped). Coder, `vps-agent`, Caddy and node-exporter run as containers
-   under Docker Compose; the Arc agent runs as a host service because that is
-   how Azure ships it.
+   dropped). Coder, its PostgreSQL and Caddy run as containers under Docker
+   Compose. `vps-agent` runs host-native as a systemd service, because it
+   drives the `docker` CLI itself and a container that drives the host daemon
+   is no more contained than a service that does; node-exporter is a
+   host-native service too; the Arc agent runs as a host service because that
+   is how Azure ships it.
 3. **Azure Arc-enabled servers is the hybrid control plane.** The host is
    onboarded as an Arc machine in a new resource group,
    `rg-lab-hybrid-prod-cus`, in the application subscription. Onboarding uses a
@@ -75,16 +78,24 @@ are recorded once, here, before any of them is implemented.
    Servers stays **off** for cost. Arc itself is free.
 4. **Coder (Community edition) is the learner identity boundary.** It runs
    from Docker Compose on the host with Docker-based workspaces, and learners
-   sign in to it with **GitHub OAuth**. The host's Docker socket is mounted
-   into the Coder **server** container only, which is how Coder's documented
-   Docker install creates workspaces; a workspace never receives the socket,
+   sign in to it with **GitHub OAuth**. Two things on the host may drive the
+   Docker daemon, and nothing else: the Coder **server** container, which has
+   the socket mounted because that is how Coder's documented Docker install
+   creates workspaces, and `vps-agent`, which runs **host-native** as the
+   `hcw-labs-agent` systemd service with its user in the `docker` group,
+   because its runner executes the `docker` CLI
+   (`vps-agent/lib/docker-runner.js`). A workspace never receives the socket,
    a privileged flag or a host path, and the template test in #679 asserts
-   that. The privilege boundary this leaves is recorded under consequences. The site never signs learners in and
-   never embeds Coder: `frontend/staticwebapp.config.json` keeps `frame-src`
-   at `'self'` plus the Entra sign-in origin and a closed `connect-src`. The
-   site links out to `lab.hybridcloudworks.com` and shows lab status through a
-   server-side proxy in the Function App, which reads `CODER_URL` and a
-   read-only `CODER_STATUS_TOKEN` from Key Vault `kv-site-prod-cus-01`.
+   that. The privilege boundary this leaves is recorded under consequences.
+   The site never signs learners in and never embeds Coder:
+   `frontend/staticwebapp.config.json` keeps `frame-src` at `'self'` plus the
+   Entra sign-in origin and a closed `connect-src`. The site links out to
+   `lab.hybridcloudworks.com` and shows lab status through a server-side proxy
+   in the Function App, whose app settings `CODER_URL` and `CODER_STATUS_TOKEN`
+   are Key Vault references to the secrets `CODER-URL` and
+   `CODER-STATUS-TOKEN` in `kv-site-prod-cus-01` (vault names are hyphenated;
+   the naming table in
+   [Variables and secrets](../standards/variables-and-secrets.md) applies).
 5. **One toolchain, published as digest-pinned images from a new `lab-image/`
    directory.** The images go to GHCR (and to Docker Hub once an organisation
    exists there) and are the single toolchain for the lab pages, the Coder
@@ -96,12 +107,17 @@ are recorded once, here, before any of them is implemented.
    the modules. Today the `terraform-validate` capability in
    `vps-agent/lib/capabilities.js` runs `terraform init -backend=false` inside
    a network-less container, so it can pass only for HCL that declares neither
-   a provider nor a registry module; the mirror plus the vendored modules,
-   with the builder rewriting each `source` to the vendored path before
-   submission, is what makes a real landing-zone configuration validatable.
-   These images are the learner and job toolchain only. The host's
-   infrastructure services (Caddy, Coder, PostgreSQL, node-exporter) run their
-   upstream images, pinned by digest in the Compose file.
+   a provider nor a registry module; the mirror plus the vendored modules is
+   what makes a real landing-zone configuration validatable. The learner's
+   files are never changed for this: the builder's download and the submitted
+   payload keep registry `source` and `version` lines, so the zip initialises
+   anywhere with network, and the `terraform-validate` capability's fixed
+   command rewrites those sources to the vendored paths on its own tmpfs copy
+   inside the job before `init`. These images are the learner and job
+   toolchain only. The host's
+   infrastructure services (Caddy, Coder, PostgreSQL) run their upstream
+   images, pinned by digest in the Compose file; `vps-agent` and node-exporter
+   are host-native, installed by Ansible at pinned versions.
 6. **Anonymous public lab submission stays Gated.** Accepting this ADR does not
    open it. When a later revision does, the bounds are these and no wider:
    only the `terraform-validate` job type; a 64 KB payload; 2 submissions an
@@ -138,20 +154,25 @@ are recorded once, here, before any of them is implemented.
   GitHub-backed Coder account and nothing on the site. Coder's own hardening —
   workspace resource limits, template review, upgrade cadence — belongs to
   #659 and is not covered here.
-- **The Coder server holds the Docker socket, and that is root on the host.
-  Accepted, with the blast radius kept small on purpose.** Whoever controls
-  the Coder server container controls the daemon, every workspace and every
-  job container, so `--network none` and the label checks protect learners
-  and jobs from each other, not the host from Coder. The mitigations are:
-  the socket goes to the server container only, never to a workspace
-  (asserted by the #679 template test); workspaces run on their own bridge
-  network with no route to the Compose network; the server runs as a
-  non-root user in the `docker` group; and the host deliberately holds no
-  data of record and no production credential, only the agent's certificate,
-  which reaches three API endpoints, and Caddy's DNS token, which is scoped
-  as narrowly as Cloudflare allows (next bullet). A compromise therefore
-  costs a rebuild, not data. Moving workspaces to a rootless or separate
-  daemon is a revisit trigger, not a prerequisite.
+- **Two processes can drive the Docker daemon, and daemon access is root on
+  the host. Accepted, with the blast radius kept small on purpose.** The
+  Coder server container holds the socket; the `hcw-labs-agent` service is in
+  the `docker` group. Whoever controls either controls the daemon, every
+  workspace and every job container, so `--network none` and the label
+  checks protect learners and jobs from each other, not the host from those
+  two. The mitigations are: the socket goes to the Coder server only, never
+  to a workspace (asserted by the #679 template test); workspaces run on
+  their own bridge network with no route to the Compose network; the Coder
+  server runs as a non-root user; the agent runs only the fixed argv
+  templates in `vps-agent/lib/capabilities.js`, never a shell string shaped
+  by a payload, with the payload bind-mounted read-only, and the API
+  authorises every claim against the agent's registry document; and the host
+  deliberately holds no data of record and no production credential, only
+  the agent's certificate, which reaches three API endpoints, and Caddy's
+  DNS token, which is scoped as narrowly as Cloudflare allows (next bullet).
+  A compromise therefore costs a rebuild, not data. Moving workspaces and
+  jobs to a rootless or separate daemon is a revisit trigger, not a
+  prerequisite.
 - **Cloudflare API tokens are zone-scoped, and `lab.hybridcloudworks.com` is
   a name in the production zone.** Cloudflare cannot scope a token to one
   record, so any token with DNS edit on `hybridcloudworks.com` can change the
@@ -159,9 +180,14 @@ are recorded once, here, before any of them is implemented.
   that reaches production DNS more than it must: the `hcw-lab` workspace
   token creates the `lab` records and lives only in HCP Terraform; Caddy's
   renewal token lives on the host in `/etc/caddy/env` (root, 0600, from
-  Ansible Vault). The chosen shape for Caddy is **DNS-01 by CNAME
-  delegation**: `_acme-challenge.lab.hybridcloudworks.com` and
-  `_acme-challenge.*.lab` point at a dedicated lab zone that holds no
+  Ansible Vault). Caddy holds one certificate whose names are
+  `lab.hybridcloudworks.com`, `*.lab.hybridcloudworks.com` and
+  `*.coder.lab.hybridcloudworks.com` (Coder's workspace apps are one label
+  below `coder.lab`, and a wildcard covers one label only). The chosen shape
+  is **DNS-01 by CNAME delegation**: the two challenge names those SANs
+  resolve to, `_acme-challenge.lab.hybridcloudworks.com` (for the apex and
+  `*.lab`) and `_acme-challenge.coder.lab.hybridcloudworks.com` (for
+  `*.coder.lab`), are CNAMEs into a dedicated lab zone that holds no
   production record, and Caddy's token is scoped to that zone alone. Until
   the owner has that zone (a small annual spend, tracked on #661), Caddy's
   token has DNS edit on the production zone, and that interim is an accepted
@@ -224,8 +250,9 @@ are recorded once, here, before any of them is implemented.
     > Machines in `rg-lab-hybrid-prod-cus`, and a `Heartbeat` query in the
     Management workspace returns rows for it.
   - The control plane is checked by name, not by count: `docker ps` on the
-    host shows the Compose services `caddy`, `coder`, `coder-postgres`,
-    `vps-agent` and `node-exporter`. Every other container carries either the
+    host shows the Compose services `caddy`, `coder` and `coder-postgres`,
+    and `systemctl` shows `hcw-labs-agent` and `node-exporter` active as
+    host-native units. Every other container carries either the
     Coder workspace label (`com.coder.resource=true`) or the `hcw.lab-job`
     label the agent sets, and any container with neither is a finding. The
     count is not asserted, because a running workspace or job legitimately
