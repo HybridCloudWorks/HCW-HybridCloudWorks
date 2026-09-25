@@ -1,0 +1,206 @@
+---
+# Fail closed before touching the host. site.yml asserts the allowlist too;
+# repeated here so the role's contract does not depend on the play.
+- name: Refuse to enable Coder with an empty GitHub organisation allowlist
+  ansible.builtin.assert:
+    that:
+      - coder_oauth2_github_allowed_orgs | length > 0
+    fail_msg: >-
+      coder_enabled is true but coder_oauth2_github_allowed_orgs is empty. An empty
+      CODER_OAUTH2_GITHUB_ALLOWED_ORGS lets any GitHub account sign in (ADR 0032).
+    quiet: true
+  when: coder_enabled | bool
+
+- name: Refuse to enable Coder without its three vault secrets
+  ansible.builtin.assert:
+    that:
+      - coder_secrets_present | bool
+    fail_msg: >-
+      coder_enabled is true but one of vault_coder_oauth2_github_client_id,
+      vault_coder_oauth2_github_client_secret and vault_coder_postgres_password is
+      unset. Add all three to the vault (lab-host/README.md, "Coder") and re-run
+      bootstrap.sh.
+    quiet: true
+  when: coder_enabled | bool
+
+- name: Refuse a PostgreSQL password that cannot be spliced into the connection URL
+  ansible.builtin.assert:
+    that:
+      - coder_postgres_password is match(coder_postgres_password_pattern)
+    fail_msg: >-
+      vault_coder_postgres_password may only contain letters, digits and . _ ~ -
+      because it is placed unescaped in CODER_PG_CONNECTION_URL. Generate one with
+      `openssl rand -hex 32`.
+    quiet: true
+  when: coder_enabled | bool
+
+- name: Refuse a workspace capacity the host's memory cannot hold
+  ansible.builtin.assert:
+    that:
+      - (coder_max_workspaces | int * coder_workspace_memory_mib | int + coder_server_memory_reserve_mib | int) <= ansible_facts['memtotal_mb'] | int
+    fail_msg: >-
+      coder_max_workspaces is {{ coder_max_workspaces }} at {{ coder_workspace_memory_mib }} MiB each
+      plus {{ coder_server_memory_reserve_mib }} MiB for Coder, PostgreSQL and the OS, which is more
+      than this host's {{ ansible_facts['memtotal_mb'] }} MiB. Lower coder_max_workspaces or
+      resize the host.
+    quiet: true
+  when: coder_enabled | bool
+
+- name: Read the docker group's id for the coder container's group_add
+  ansible.builtin.getent:
+    database: group
+    key: docker
+
+- name: Record the docker group's id
+  ansible.builtin.set_fact:
+    coder_docker_gid: "{{ ansible_facts['getent_group']['docker'][1] }}"
+
+- name: Create the Compose project directory
+  ansible.builtin.file:
+    path: "{{ coder_project_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Install the Compose file from the repository checkout
+  ansible.builtin.copy:
+    src: "{{ coder_compose_source }}"
+    dest: "{{ coder_compose_file }}"
+    owner: root
+    group: root
+    mode: "0640"
+
+- name: Write the Compose interpolation values (image pins and docker gid)
+  ansible.builtin.template:
+    src: compose.env.j2
+    dest: "{{ coder_compose_env_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Write Coder's environment from the vault
+  ansible.builtin.template:
+    src: coder.env.j2
+    dest: "{{ coder_env_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+  when: coder_enabled | bool
+
+- name: Write the PostgreSQL password from the vault
+  ansible.builtin.template:
+    src: coder-postgres.env.j2
+    dest: "{{ coder_postgres_env_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+  when: coder_enabled | bool
+
+# While disabled the two secret files are emptied rather than removed: the
+# Compose file marks them required, so `docker compose down` below could not
+# even parse the project without them, and an empty file leaves no
+# credential behind for a manual `up` to reuse.
+- name: Empty the secret environment files while Coder is disabled
+  ansible.builtin.copy:
+    dest: "{{ item }}"
+    content: "# Coder is disabled (coder_enabled: false); no values are rendered.\n"
+    owner: root
+    group: root
+    mode: "0600"
+  loop:
+    - "{{ coder_env_file }}"
+    - "{{ coder_postgres_env_file }}"
+  when: not coder_enabled | bool
+
+- name: Start Coder and PostgreSQL
+  community.docker.docker_compose_v2:
+    project_src: "{{ coder_project_dir }}"
+    state: present
+    pull: missing
+    remove_orphans: true
+    wait: true
+    wait_timeout: 300
+  when: coder_enabled | bool
+
+- name: Stop and remove the Coder containers while Coder is disabled
+  community.docker.docker_compose_v2:
+    project_src: "{{ coder_project_dir }}"
+    state: absent
+    remove_orphans: true
+  when: not coder_enabled | bool
+
+- name: Render the Caddy route for the coder names
+  ansible.builtin.template:
+    src: 10-coder.caddy.j2
+    dest: "{{ coder_caddy_route_file }}"
+    owner: root
+    group: "{{ coder_caddy_group }}"
+    mode: "0640"
+  when: coder_enabled | bool
+  notify: Reload caddy for the coder route
+
+- name: Remove the Caddy route while Coder is disabled
+  ansible.builtin.file:
+    path: "{{ coder_caddy_route_file }}"
+    state: absent
+  when: not coder_enabled | bool
+  notify: Reload caddy for the coder route
+
+- name: Create the backup directory
+  ansible.builtin.file:
+    path: "{{ coder_backup_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install the PostgreSQL backup script
+  ansible.builtin.template:
+    src: coder-postgres-backup.sh.j2
+    dest: "{{ coder_backup_script_path }}"
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Install the backup service and timer units
+  ansible.builtin.template:
+    src: "coder-postgres-backup.{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ coder_backup_unit_name }}.{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - service
+    - timer
+  notify: Reload systemd for the coder backup units
+
+- name: Enable the nightly backup timer
+  ansible.builtin.systemd_service:
+    name: "{{ coder_backup_unit_name }}.timer"
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: coder_enabled | bool
+
+- name: Stop the backup timer while Coder is disabled
+  ansible.builtin.systemd_service:
+    name: "{{ coder_backup_unit_name }}.timer"
+    enabled: false
+    state: stopped
+    daemon_reload: true
+  when: not coder_enabled | bool
+
+- name: Say why Coder is not running
+  ansible.builtin.debug:
+    msg: >-
+      Coder is installed under {{ coder_project_dir }} but not running: coder_enabled is
+      false. To enable it, set coder_oauth2_github_allowed_orgs, add
+      vault_coder_oauth2_github_client_id, vault_coder_oauth2_github_client_secret and
+      vault_coder_postgres_password to the vault, set coder_enabled to true in
+      group_vars/all.yml and re-run bootstrap.sh (lab-host/README.md, "Coder").
+  when: not coder_enabled | bool

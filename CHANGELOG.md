@@ -19,6 +19,41 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Coder Phase 1: Docker Compose on the lab host, the Caddy route, the
+  hcw-lab workspace template with its hardening test, and the Ansible role
+  (#679).** Phase 1 of #659, on ADR 0032. `lab-host/coder/docker-compose.yml`
+  runs exactly two services, `coder` (ghcr.io/coder/coder v2.37.3) and
+  `coder-postgres` (postgres 16.15), both by image-index digest held once in
+  `group_vars/all.yml` and interpolated through a role-written `.env`; the
+  Docker socket is mounted into `coder` only, which runs as the image's
+  non-root user with `group_add` set to the host's docker GID, publishes 7080
+  on loopback only, disables password auth and Coder's default GitHub app,
+  and reads its secrets from `/etc/hcw/coder/coder.env` (root, 0600) with the
+  database password in a second file the database alone sees.
+  `templates/hcw-lab/main.tf` adapts Coder's Docker starter template: a
+  `lab` dropdown validated against the three catalogue ids, the
+  `hcw-lab` image by digest, `user = "65534:65534"`, hard limits of one CPU
+  and 2 GiB, all capabilities dropped, `no-new-privileges`, a per-workspace
+  named volume as the only mount, a per-workspace bridge network created and
+  removed with the container so it never joins the Compose network, and the
+  pinned `code-server` module on a `*.coder.lab` subdomain.
+  `template.test.mjs` (`node --test`) reads both files as text and fails when
+  the socket appears outside the `coder` service, anything is `privileged`,
+  a `host_path` or `mounts` block appears, `network_mode` or the Compose
+  network is referenced, or the user is not 65534; the new `coder (lab-host)`
+  CI job runs it with `docker compose config` and `terraform validate`. The
+  `coder` Ansible role installs the Compose project, fails closed without a
+  non-empty organisation allowlist, the three Vault keys or on a host too
+  small for `coder_max_workspaces`, brings the project up or down, renders
+  `/etc/caddy/conf.d/10-coder.caddy` (503 with a sentence when the service
+  is stopped, so the kill switch is legible), and keeps seven nightly
+  `pg_dump`s under `/var/backups/coder`. Found on the way: the Coder agent
+  runs every script through the user's `/etc/passwd` shell, and Debian's
+  `nobody` has `nologin`, so the template writes the image's passwd back
+  with a shell for uid 65534 until `lab-image/` does; and `coder templates
+  push` has no `--default-ttl` in the current CLI reference, so the one-hour
+  autostop is `coder templates edit hcw-lab --default-ttl 1h`.
+
 - **The Azure Verified Module pins are checked against the registry every
   week, and a newer release opens a pull request (#671).** Phase 5 of #657.
   `frontend/src/lib/landingZone/avmVersions.js` says its pins are "looked up,

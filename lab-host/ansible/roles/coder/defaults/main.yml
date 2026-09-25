@@ -1,0 +1,40 @@
+---
+# coder_enabled, coder_oauth2_github_allowed_orgs, coder_oauth2_github_allow_signups,
+# coder_domain, coder_max_workspaces and the image pins (coder_image,
+# coder_image_tag, coder_image_digest, coder_postgres_image,
+# coder_postgres_image_tag, coder_postgres_image_digest) live in
+# group_vars/all.yml; meta/argument_specs.yml marks them required.
+
+# Where the Compose project lives on the host. docker compose reads
+# docker-compose.yml, .env (interpolation), coder.env and coder-postgres.env
+# from this one directory.
+coder_project_dir: /etc/hcw/coder
+coder_compose_file: "{{ coder_project_dir }}/docker-compose.yml"
+coder_compose_env_file: "{{ coder_project_dir }}/.env"
+coder_env_file: "{{ coder_project_dir }}/coder.env"
+coder_postgres_env_file: "{{ coder_project_dir }}/coder-postgres.env"
+
+# The port docker-compose.yml publishes on the host's loopback and the Caddy
+# route proxies to.
+coder_http_port: 7080
+
+# The Caddy route. caddy_sites_dir and caddy_group in the caddy role default
+# to the same values; repeated here so this role's contract stands alone.
+coder_caddy_sites_dir: /etc/caddy/conf.d
+coder_caddy_group: caddy
+coder_caddy_route_file: "{{ coder_caddy_sites_dir }}/10-coder.caddy"
+coder_unavailable_response: "Coder is stopped on this host."
+
+# Secrets, from the vault file bootstrap.sh passes with -e. All three must be
+# set when coder_enabled is true; the role fails closed otherwise.
+coder_oauth2_github_client_id: "{{ vault_coder_oauth2_github_client_id | default('') }}"
+coder_oauth2_github_client_secret: "{{ vault_coder_oauth2_github_client_secret | default('') }}"
+coder_postgres_password: "{{ vault_coder_postgres_password | default('') }}"
+
+# Nightly pg_dump, the convenience docs/architecture/labs-host.md describes:
+# seven days on the host, never copied anywhere.
+coder_backup_dir: /var/backups/coder
+coder_backup_keep_days: 7
+coder_backup_on_calendar: "*-*-* 03:30:00"
+coder_backup_script_path: /usr/local/sbin/coder-postgres-backup
+coder_backup_unit_name: coder-postgres-backup

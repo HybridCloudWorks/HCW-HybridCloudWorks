@@ -1,0 +1,18 @@
+---
+galaxy_info:
+  role_name: coder
+  namespace: hcw
+  author: HybridCloudWorks
+  description: Coder Community edition and its PostgreSQL under Docker Compose, the Caddy route for the coder names, and a nightly pg_dump
+  license: UNLICENSED
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+  galaxy_tags:
+    - coder
+    - docker
+    - compose
+
+dependencies: []

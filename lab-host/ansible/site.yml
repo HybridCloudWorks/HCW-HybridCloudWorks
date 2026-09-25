@@ -34,4 +34,5 @@
     - role: docker
     - role: node_exporter
     - role: caddy
+    - role: coder
     - role: labs_agent

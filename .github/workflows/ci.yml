@@ -237,6 +237,85 @@ jobs:
         if: steps.changes.outputs.relevant == 'true'
         run: ansible-playbook --syntax-check -i inventory/localhost.yml site.yml
 
+  # lab-host/coder/ is the Coder deployment on the lab host (#679): the
+  # Compose file, the hcw-lab workspace template and the test that holds
+  # both to the ADR 0032 boundary (the socket in the server only, nothing
+  # privileged, no host path, a workspace network of its own, uid 65534).
+  # Four checks that fail on different things: node --test reads the two
+  # files as text, `docker compose config` parses the Compose file, and
+  # terraform fmt and validate parse the template with its pinned providers
+  # and module. No npm install: the test uses node:test and nothing else.
+  coder-template:
+    name: coder (lab-host)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lab-host/coder
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Detect lab-host/coder changes
+        id: changes
+        working-directory: ${{ github.workspace }}
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_EVENT_NAME}" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "non-pull_request event — running all checks"
+            exit 0
+          fi
+          changed="$(git diff --name-only "${BASE_SHA}" HEAD)" || {
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "could not compute the diff — running all checks rather than guessing"
+            exit 0
+          }
+          if grep -qE '^lab-host/coder/|^\.github/workflows/ci\.yml$' <<<"$changed"; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "lab-host/coder files changed — running all checks"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "no relevant change — skipping checks, still reporting this context"
+          fi
+
+      - name: Set up Node.js
+        if: steps.changes.outputs.relevant == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22'
+
+      - name: Template hardening test
+        if: steps.changes.outputs.relevant == 'true'
+        run: node --test
+
+      - name: Compose file parses
+        if: steps.changes.outputs.relevant == 'true'
+        run: bash compose-config-check.sh
+
+      - name: Setup Terraform
+        if: steps.changes.outputs.relevant == 'true'
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+
+      - name: Terraform fmt
+        if: steps.changes.outputs.relevant == 'true'
+        working-directory: lab-host/coder/templates/hcw-lab
+        run: terraform fmt -recursive -check -diff
+
+      - name: Terraform init (no backend)
+        if: steps.changes.outputs.relevant == 'true'
+        working-directory: lab-host/coder/templates/hcw-lab
+        run: terraform init -backend=false -input=false
+
+      - name: Terraform validate
+        if: steps.changes.outputs.relevant == 'true'
+        working-directory: lab-host/coder/templates/hcw-lab
+        run: terraform validate -no-color
+
   # hooks/claude_event.py runs on every Claude Code session start and stop, and
   # tooling/workflow.py owns the state the Stop guard reads. Both were shipped
   # with nothing checking them. This is a smoke test rather than a linter on

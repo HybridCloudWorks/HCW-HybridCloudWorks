@@ -1,0 +1,19 @@
+---
+# Derived values. Not meant to be overridden, which is why they are vars and
+# not defaults.
+# Pulled by digest, never by tag (the tags in group_vars are for humans).
+coder_image_ref: "{{ coder_image }}@{{ coder_image_digest }}"
+coder_postgres_image_ref: "{{ coder_postgres_image }}@{{ coder_postgres_image_digest }}"
+# The Compose file in this repository is the one source; the role copies it
+# rather than carrying a second copy under files/.
+coder_compose_source: "{{ role_path }}/../../../coder/docker-compose.yml"
+coder_secrets_present: >-
+  {{ coder_oauth2_github_client_id | length > 0
+     and coder_oauth2_github_client_secret | length > 0
+     and coder_postgres_password | length > 0 }}
+# The password is spliced into a URL, so the role only accepts characters that
+# need no escaping there (RFC 3986 unreserved). `openssl rand -hex 32` is the
+# documented way to make one.
+coder_postgres_password_pattern: '^[A-Za-z0-9._~-]+$'
+coder_pg_connection_url: "postgresql://coder:{{ coder_postgres_password }}@coder-postgres:5432/coder?sslmode=disable"
+coder_backup_keep_minutes: "{{ coder_backup_keep_days | int * 1440 }}"
