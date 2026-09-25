@@ -4,7 +4,7 @@
  * avm-ptn-alz-management. The names are locals because alz.tf builds policy
  * parameters from them.
  */
-import { block, file, moduleSource, obj, q } from './format';
+import { block, file, moduleSource, providersMap, q } from './format';
 
 /** The names alz.tf's policy defaults are built from; `uami-ama` is the module's own default. */
 export const MANAGEMENT_LOCALS = Object.freeze([
@@ -31,13 +31,7 @@ export function managementTf() {
       ['resource_group_name', 'local.management_resource_group_name'],
       ['enable_telemetry', 'var.enable_telemetry'],
       '',
-      [
-        'providers',
-        obj([
-          ['azurerm', 'azurerm.management'],
-          ['azapi', 'azapi.management'],
-        ]),
-      ],
+      ['providers', providersMap('avm-ptn-alz-management', 'management')],
     ]),
   ]);
 }

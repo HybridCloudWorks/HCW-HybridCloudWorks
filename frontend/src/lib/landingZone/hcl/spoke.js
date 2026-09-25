@@ -13,7 +13,7 @@
  * `virtual_network_resource_ids` and `firewall_private_ip_addresses`, both
  * keyed by hub, and the hub is `primary`.
  */
-import { block, moduleSource, obj, q } from './format';
+import { block, moduleSource, obj, providersMap, q } from './format';
 
 const HUB_VNET_ID = 'module.connectivity.virtual_network_resource_ids["primary"]';
 const FIREWALL_IP = 'module.connectivity.firewall_private_ip_addresses["primary"]';
@@ -85,7 +85,7 @@ function virtualNetwork(key, name, addressSpace, routeToFirewall) {
     '',
     ['peerings', hubPeering(name)],
     '',
-    ['providers', obj([['azapi', `azapi.${key}`]])],
+    ['providers', providersMap('avm-res-network-virtualnetwork', key)],
   ]);
 }
 

@@ -7,7 +7,7 @@
  * hcl.test.js checks the shape and, where terraform is installed,
  * `terraform fmt -check` is the referee.
  */
-import { AVM_MODULES } from '../avmVersions';
+import { AVM_MODULES, SUBSCRIPTION_SCOPED_PROVIDERS } from '../avmVersions';
 
 export const INDENT = '  ';
 
@@ -82,6 +82,23 @@ export function moduleSource(name) {
     ['source', q(pinned.source)],
     ['version', q(pinned.version)],
   ];
+}
+
+/**
+ * The `providers` map of a module block: every provider the module requires
+ * at its pinned tag, the subscription-scoped ones (azurerm, azapi) pointed
+ * at `alias`, the rest at their default configuration. With `alias` null
+ * everything maps to the defaults. Once a block has a `providers` argument
+ * Terraform inherits nothing for the providers it omits, which is why the
+ * map is generated from the module's list rather than written by hand.
+ */
+export function providersMap(name, alias) {
+  return obj(
+    AVM_MODULES[name].requiredProviders.map((p) => [
+      p,
+      alias && SUBSCRIPTION_SCOPED_PROVIDERS.includes(p) ? `${p}.${alias}` : p,
+    ])
+  );
 }
 
 /** A policy default value: the alz provider wants each as a JSON object with `value`. */

@@ -14,7 +14,9 @@ import {
   HUB_PREFIX_RANGE,
   groupsAssigning,
   POLICY_DEFAULTS,
+  PROVIDER_NAMES,
   SPOKE_PREFIX_RANGE,
+  SUBSCRIPTION_SCOPED_PROVIDERS,
   emitFiles,
   normalizeState,
 } from './index';
@@ -165,8 +167,11 @@ describe('emitFiles', () => {
     expect(full['providers.tf']).toContain('alias           = "corp_1"');
     expect(full['providers.tf']).toMatch(/provider "azapi" \{\n  alias           = "online_1"/);
     expect(full['terraform.tf']).toContain('required_version = ">= 1.12, < 2.0"');
-    for (const provider of ['alz', 'azapi', 'azurerm', 'random']) {
+    for (const provider of ['alz', 'azapi', 'azurerm', 'modtm', 'random', 'time']) {
       expect(full['terraform.tf']).toMatch(new RegExp(`^    ${provider} = \\{$`, 'm'));
+    }
+    for (const provider of ['random', 'modtm', 'time']) {
+      expect(full['providers.tf']).toContain(`\nprovider "${provider}" {}\n`);
     }
     expect(full['README.md']).toContain('never been applied by HybridCloudWorks');
     expect(full['README.md']).toContain('HCP Terraform');
@@ -241,7 +246,9 @@ describe('emitFiles', () => {
     );
     expect(app).toContain('create_reverse_peering             = true');
     expect(app).toContain('reverse_name                       = "peer-hub-to-online-1"');
-    expect(app).toMatch(/providers = \{\n    azapi = azapi\.corp_1\n  \}/);
+    expect(app).toMatch(
+      /providers = \{\n    azapi  = azapi\.corp_1\n    modtm  = modtm\n    random = random\n  \}/
+    );
     expect(app).not.toContain('resource_group_name = "');
 
     const identity = full['identity.tf'];
@@ -440,6 +447,48 @@ describe('emitFiles', () => {
     });
     expect(byPath(overlapping)['variables.tf']).toContain('default     = "10.2.0.0/16"');
     expect(byPath(overlapping)['application.tf']).toContain('online_1 = 10.2.128.0/24');
+  });
+
+  it('maps every provider each module requires at its pinned tag, and only those', () => {
+    const byName = Object.fromEntries(Object.values(AVM_MODULES).map((m) => [m.source, m]));
+    const seen = [];
+    for (const [name, state] of SOME_BUILDS) {
+      for (const f of emitFiles(state)) {
+        if (!f.path.endsWith('.tf')) continue;
+        const blocks = f.content.split(/^module "/m).slice(1);
+        for (const b of blocks) {
+          const label = b.slice(0, b.indexOf('"'));
+          const [, source] = /^\s*source\s*=\s*"([^"]+)"/m.exec(b);
+          const map = /^\s*providers = \{\n([\s\S]*?)\n\s*\}/m.exec(b);
+          expect(map, `${name} ${f.path} module ${label} has a providers map`).not.toBeNull();
+          const entries = map[1]
+            .trim()
+            .split('\n')
+            .map((line) => line.trim().split(/\s*=\s*/));
+          const keys = entries.map(([k]) => k).sort();
+          expect(keys, `${name} ${f.path} module ${label}`).toEqual(
+            [...byName[source].requiredProviders].sort()
+          );
+          for (const [k, v] of entries) {
+            if (SUBSCRIPTION_SCOPED_PROVIDERS.includes(k) && label !== 'alz') {
+              expect(v, `${label} ${k}`).toMatch(new RegExp(`^${k}\\.[a-z_0-9]+$`));
+            } else {
+              expect(v, `${label} ${k}`).toBe(k);
+            }
+          }
+          seen.push(label);
+        }
+      }
+    }
+    expect(seen).toContain('alz');
+    expect(seen).toContain('management');
+    expect(seen).toContain('connectivity');
+    expect(seen).toContain('spoke_identity');
+    expect(seen).toContain('spoke_corp_5');
+    for (const m of Object.values(AVM_MODULES)) {
+      for (const p of m.requiredProviders) expect(PROVIDER_NAMES, `${m.name} ${p}`).toContain(p);
+    }
+    expect(PROVIDER_NAMES).toEqual(['alz', 'azapi', 'azurerm', 'modtm', 'random', 'time']);
   });
 
   it('lists every placed subscription id once and refuses duplicates', () => {

@@ -5,7 +5,7 @@
  * DNS resources on the option.
  */
 import { isSelected } from '../state';
-import { block, file, moduleSource, obj, q } from './format';
+import { block, file, moduleSource, obj, providersMap, q } from './format';
 
 function header(firewall, dns, sku) {
   return [
@@ -74,13 +74,7 @@ export function connectivityTf(state) {
       '',
       ['hub_virtual_networks', obj([['primary', hubObject(firewall, dns, sku)]])],
       '',
-      [
-        'providers',
-        obj([
-          ['azurerm', 'azurerm.connectivity'],
-          ['azapi', 'azapi.connectivity'],
-        ]),
-      ],
+      ['providers', providersMap('avm-ptn-alz-connectivity-hub-and-spoke-vnet', 'connectivity')],
     ]),
   ]);
 }

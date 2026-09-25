@@ -3,7 +3,7 @@
  * placements, and, when the policy component is selected, the baseline's
  * parameters from policy.js.
  */
-import { block, file, moduleSource, obj, q } from './format';
+import { block, file, moduleSource, obj, providersMap, q } from './format';
 import { policyItems } from './policy';
 import { placements } from './subscriptions';
 
@@ -59,6 +59,9 @@ export function alzTf(state) {
       ['enable_telemetry', 'var.enable_telemetry'],
       ...placementItems(state),
       ...policyItems(state),
+      '',
+      '# The tree and its policies are tenant-scoped, so every provider is the default one.',
+      ['providers', providersMap('avm-ptn-alz', null)],
     ]),
     '',
     ...block('output "root_management_group_resource_id"', [

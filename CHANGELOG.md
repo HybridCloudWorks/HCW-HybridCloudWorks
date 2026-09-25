@@ -46,9 +46,13 @@ This project has not cut a tagged release; entries are grouped under
   `subscription_placement` entry in avm-ptn-alz plus a spoke from the virtual
   network module instead, and a test asserts every emitted module `source` is
   pinned with a `version` line. The provider constraints (`alz ~> 0.21`,
-  `azapi ~> 2.12`, `azurerm ~> 4.35`, `random ~> 3.6`, Terraform `>= 1.12, <
-  2.0`) and the `platform/alz/2026.08.1` library ref come from the same
-  modules' `terraform.tf` files and the library's release list.
+  `azapi ~> 2.12`, `azurerm ~> 4.35`, `modtm ~> 0.3`, `random ~> 3.6`, `time
+  ~> 0.9`, Terraform `>= 1.12, < 2.0`), each module's `requiredProviders`
+  list, and the `platform/alz/2026.08.1` library ref come from the same
+  modules' `terraform.tf` files at their tags and the library's release
+  list; every emitted `module` block's `providers` map is generated from
+  that list, since a block with a `providers` argument inherits nothing for
+  the providers it leaves out.
   `avm-ptn-hubnetworking` is archived; a test asserts the string never
   reaches any emitted file.
 

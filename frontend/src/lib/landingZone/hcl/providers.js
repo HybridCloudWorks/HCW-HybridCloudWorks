@@ -4,7 +4,11 @@
  * per placed subscription, which is how each module is pointed at the
  * subscription it deploys into.
  */
-import { ALZ_LIBRARY_REFERENCE } from '../avmVersions';
+import {
+  ALZ_LIBRARY_REFERENCE,
+  PROVIDER_NAMES,
+  SUBSCRIPTION_SCOPED_PROVIDERS,
+} from '../avmVersions';
 import { isSelected } from '../state';
 import { block, body, file, q } from './format';
 import { placements } from './subscriptions';
@@ -14,8 +18,14 @@ const HEADER = [
   '# ARM_TENANT_ID, ARM_SUBSCRIPTION_ID, ARM_CLIENT_ID and ARM_CLIENT_SECRET variables',
   '# of the HCP Terraform workspace. The aliases below point each module at the',
   '# subscription it deploys into, which is how a landing zone keeps management,',
-  '# connectivity, identity and every application apart.',
+  '# connectivity, identity and every application apart. random, modtm and time have',
+  '# no subscription; the modules that require them are given these defaults.',
 ];
+
+/** Providers with no subscription: one default block each, so the module maps have a target. */
+const DEFAULT_ONLY = PROVIDER_NAMES.filter(
+  (p) => p !== 'alz' && !SUBSCRIPTION_SCOPED_PROVIDERS.includes(p)
+);
 
 function alzProvider() {
   return [
@@ -60,6 +70,7 @@ export function providersTf(state) {
     ...block('provider "azurerm"', ['features {}']),
     '',
     'provider "azapi" {}',
+    ...DEFAULT_ONLY.flatMap((p) => ['', `provider "${p}" {}`]),
   ];
   if (isSelected(state, 'management-groups')) lines.push(...alzProvider());
   for (const placement of placements(state)) lines.push(...aliases(placement));

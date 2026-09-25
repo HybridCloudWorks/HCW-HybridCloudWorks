@@ -172,6 +172,15 @@ module "alz" {
     resource_group_name_mdfc                    = jsonencode({ value = "rg-alz-mdfc-export-\${var.location}" })
     email_security_contact                      = jsonencode({ value = var.security_contact_email })
   }
+
+  # The tree and its policies are tenant-scoped, so every provider is the default one.
+  providers = {
+    alz    = alz
+    azapi  = azapi
+    modtm  = modtm
+    random = random
+    time   = time
+  }
 }
 
 output "root_management_group_resource_id" {
@@ -249,7 +258,9 @@ module "spoke_corp_1" {
   }
 
   providers = {
-    azapi = azapi.corp_1
+    azapi  = azapi.corp_1
+    modtm  = modtm
+    random = random
   }
 }
 
@@ -289,7 +300,9 @@ module "spoke_online_1" {
   }
 
   providers = {
-    azapi = azapi.online_1
+    azapi  = azapi.online_1
+    modtm  = modtm
+    random = random
   }
 }
 "
@@ -345,8 +358,10 @@ module "connectivity" {
   }
 
   providers = {
-    azurerm = azurerm.connectivity
     azapi   = azapi.connectivity
+    azurerm = azurerm.connectivity
+    modtm   = modtm
+    random  = random
   }
 }
 "
@@ -416,7 +431,9 @@ module "spoke_identity" {
   }
 
   providers = {
-    azapi = azapi.identity
+    azapi  = azapi.identity
+    modtm  = modtm
+    random = random
   }
 }
 "
@@ -445,8 +462,10 @@ module "management" {
   enable_telemetry             = var.enable_telemetry
 
   providers = {
-    azurerm = azurerm.management
     azapi   = azapi.management
+    azurerm = azurerm.management
+    modtm   = modtm
+    random  = random
   }
 }
 "
@@ -473,12 +492,19 @@ exports[`emitFiles > matches the committed snapshot of the default build > provi
 # ARM_TENANT_ID, ARM_SUBSCRIPTION_ID, ARM_CLIENT_ID and ARM_CLIENT_SECRET variables
 # of the HCP Terraform workspace. The aliases below point each module at the
 # subscription it deploys into, which is how a landing zone keeps management,
-# connectivity, identity and every application apart.
+# connectivity, identity and every application apart. random, modtm and time have
+# no subscription; the modules that require them are given these defaults.
 provider "azurerm" {
   features {}
 }
 
 provider "azapi" {}
+
+provider "modtm" {}
+
+provider "random" {}
+
+provider "time" {}
 
 # The alz provider reads the "alz" architecture (the management group tree and
 # the policy baseline) from this release of the Azure Landing Zones library.
@@ -592,9 +618,17 @@ terraform {
       source  = "hashicorp/azurerm"
       version = "~> 4.35"
     }
+    modtm = {
+      source  = "azure/modtm"
+      version = "~> 0.3"
+    }
     random = {
       source  = "hashicorp/random"
       version = "~> 3.6"
+    }
+    time = {
+      source  = "hashicorp/time"
+      version = "~> 0.9"
     }
   }
 }
@@ -1248,6 +1282,15 @@ module "alz" {
     resource_group_name_mdfc                  = jsonencode({ value = "rg-alz-mdfc-export-\${var.location}" })
     email_security_contact                    = jsonencode({ value = var.security_contact_email })
   }
+
+  # The tree and its policies are tenant-scoped, so every provider is the default one.
+  providers = {
+    alz    = alz
+    azapi  = azapi
+    modtm  = modtm
+    random = random
+    time   = time
+  }
 }
 
 output "root_management_group_resource_id" {
@@ -1273,12 +1316,19 @@ exports[`emitFiles > matches the committed snapshot of the tree-only build, base
 # ARM_TENANT_ID, ARM_SUBSCRIPTION_ID, ARM_CLIENT_ID and ARM_CLIENT_SECRET variables
 # of the HCP Terraform workspace. The aliases below point each module at the
 # subscription it deploys into, which is how a landing zone keeps management,
-# connectivity, identity and every application apart.
+# connectivity, identity and every application apart. random, modtm and time have
+# no subscription; the modules that require them are given these defaults.
 provider "azurerm" {
   features {}
 }
 
 provider "azapi" {}
+
+provider "modtm" {}
+
+provider "random" {}
+
+provider "time" {}
 
 # The alz provider reads the "alz" architecture (the management group tree and
 # the policy baseline) from this release of the Azure Landing Zones library.
@@ -1309,9 +1359,17 @@ terraform {
       source  = "hashicorp/azurerm"
       version = "~> 4.35"
     }
+    modtm = {
+      source  = "azure/modtm"
+      version = "~> 0.3"
+    }
     random = {
       source  = "hashicorp/random"
       version = "~> 3.6"
+    }
+    time = {
+      source  = "hashicorp/time"
+      version = "~> 0.9"
     }
   }
 }
