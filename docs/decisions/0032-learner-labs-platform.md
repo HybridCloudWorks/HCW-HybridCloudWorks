@@ -85,9 +85,14 @@ are recorded once, here, before any of them is implemented.
    from Docker Compose on the host with Docker-based workspaces, and learners
    sign in to it with **GitHub OAuth**, and only members of a GitHub
    organisation the owner names may sign in: `CODER_OAUTH2_GITHUB_ALLOWED_ORGS`
-   is a required setting, not an option, because without it any GitHub
-   account could consume the public VPS; emptying the list is the kill switch.
-   Two things on the host may drive the
+   is a required setting, not an option, because an absent or empty value
+   lets any GitHub account consume the public VPS. It is therefore never
+   empty while Coder runs, and the Ansible role refuses to render an empty
+   value. The **kill switch is an explicit stop, not an emptied list**:
+   `CODER_OAUTH2_GITHUB_ALLOW_SIGNUPS=false` closes the door to new learners
+   while existing ones keep working, and stopping the `coder` Compose
+   service closes it to everyone (Caddy then answers 503 for the Coder
+   names). Two things on the host may drive the
    Docker daemon, and nothing else: the Coder **server** container, which has
    the socket mounted because that is how Coder's documented Docker install
    creates workspaces, and `vps-agent`, which runs **host-native** as the
@@ -121,9 +126,16 @@ are recorded once, here, before any of them is implemented.
    files are never changed for this: the builder's download and the submitted
    payload keep registry `source` and `version` lines, so the zip initialises
    anywhere with network, and the `terraform-validate` capability's fixed
-   command rewrites those sources to the vendored paths on its own tmpfs copy
-   inside the job before `init`. These images are the learner and job
-   toolchain only. The host's
+   command is to rewrite those sources to the vendored paths on its own tmpfs
+   copy inside the job before `init`. That rewrite does not exist yet: today
+   `vps-agent/lib/capabilities.js` copies `main.tf` alone and runs `init`, so
+   on the runner image it validates HCL whose providers are mirrored and
+   whose modules are absent or fully vendored. #675 lands the rewrite, the
+   multi-file payload and the transitive vendoring that `avm-ptn-alz` and the
+   connectivity module need (measured in #686: one and thirteen registry
+   child modules respectively); until then the full landing-zone output is
+   not validatable offline and this record does not claim it is. These
+   images are the learner and job toolchain only. The host's
    infrastructure services Coder and PostgreSQL run their upstream images,
    pinned by digest in the Compose file; Caddy, `vps-agent` and node-exporter
    are host-native, installed by Ansible at pinned versions with checksums.
