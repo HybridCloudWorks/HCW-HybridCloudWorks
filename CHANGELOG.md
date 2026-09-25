@@ -19,6 +19,32 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Public labs reads: the Hybrid Lab estate and Coder status, with no
+  browser call to either (#664, #680).** Backend halves of Phase 4 of #656
+  and Phase 2 of #659. `GET /api/public/labs/estate` reads the Arc-enabled
+  lab host through Azure Resource Graph with the Function App's own managed
+  identity, under a new Reader grant scoped to `rg-lab-hybrid-prod-cus`
+  alone (`infra/lab-hybrid.tf` creates the group and the assignment; no new
+  credential exists): the machine's status, last status change, agent
+  version and OS name — never its name, which is the hostname — plus policy
+  compliance counts for the group, whether a `vps-agent` is heartbeating and
+  how many `lab_jobs` are queued, and Coder capacity. It answers
+  `{ configured: false }` when no machine exists and 503 when Azure cannot
+  be read, never an invented row, and a side read that fails is `null`, not
+  zero. `GET /api/public/labs/coder-status` is the server-side proxy the CSP
+  requires: `CODER_URL` and `CODER_STATUS_TOKEN` are Key Vault references to
+  `CODER-URL` and `CODER-STATUS-TOKEN` (catalogued for the API-keys page
+  under a new Hybrid Lab section), the token stays in the Function App, and
+  the route returns template names with their active version, the running
+  workspace count and `CODER_MAX_WORKSPACES` (default 5, the Community cap)
+  after `GET /api/v2/templates`, `/api/v2/workspaces?q=status:running` and
+  one `/api/v2/templateversions/{id}` per template with a 5 s timeout. Both
+  routes are anonymous and cache one document a minute in
+  `tool_service_cache`, so visitors cannot drive the management plane or
+  Coder; a failed Coder read is cached as unreachable so the card never shows
+  stale numbers. Listed in `PUBLIC_ROUTES` and `.azure/api-surface.json`. The
+  `hcw-azure` apply that creates the group, the grant and the three app
+  settings is the owner's run.
 - **Coder Phase 1: Docker Compose on the lab host, the Caddy route, the
   hcw-lab workspace template with its hardening test, and the Ansible role
   (#679).** Phase 1 of #659, on ADR 0032. `lab-host/coder/docker-compose.yml`
