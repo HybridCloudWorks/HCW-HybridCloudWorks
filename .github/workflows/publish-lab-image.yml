@@ -14,11 +14,13 @@
 #            nothing and publish nothing. This is the check a pull request
 #            waits on.
 #   publish  only after `build` succeeds, and only on a push to main or a
-#            dispatch from main. Rebuilds from the same Dockerfile against the
-#            GitHub Actions layer cache the build job filled (so what is pushed
-#            is what was tested), pushes both images tagged with the commit sha
-#            and `latest`, and attaches a provenance attestation to each. This
-#            job alone holds `packages: write`, `id-token: write` and
+#            dispatch from main. Builds both targets again (a job cannot take
+#            another job's Docker state; the Actions layer cache only makes
+#            this fast), runs the same smoke tests on what it built, and then
+#            pushes exactly those images with `docker push`, tagged with the
+#            commit sha and `latest`, with a provenance attestation on each.
+#            The pushed bytes are the smoke-tested bytes by identity. This job
+#            alone holds `packages: write`, `id-token: write` and
 #            `attestations: write`. The digests go to the job summary so the
 #            follow-up that pins them (vps-agent/lib/capabilities.js, #675)
 #            copies them from a first-party source.
@@ -166,33 +168,70 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      # Same Dockerfile, same pinned inputs, layers from the cache the build
-      # job just filled, so what is pushed is what was smoke-tested.
-      - name: Push runner
-        id: push-runner
+      # This job builds its own images (a job cannot receive the build job's
+      # Docker state, and the Actions layer cache is a speed-up, not a
+      # guarantee), so it smoke-tests what it built and then pushes exactly
+      # those bytes with `docker push`: the image that passed the smoke test
+      # is the image that lands in GHCR, by identity rather than by
+      # reconstruction.
+      - name: Build runner
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: lab-image
           target: runner
-          push: true
+          load: true
+          push: false
           provenance: false
           cache-from: type=gha,scope=hcw-lab
-          tags: |
-            ${{ env.RUNNER_IMAGE }}:${{ github.sha }}
-            ${{ env.RUNNER_IMAGE }}:latest
+          tags: hcw-lab-runner:ci
 
-      - name: Push full
-        id: push-full
+      - name: Build full
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: lab-image
           target: full
-          push: true
+          load: true
+          push: false
           provenance: false
           cache-from: type=gha,scope=hcw-lab
-          tags: |
-            ${{ env.FULL_IMAGE }}:${{ github.sha }}
-            ${{ env.FULL_IMAGE }}:latest
+          tags: hcw-lab:ci
+
+      - name: Smoke runner
+        run: docker run --rm --network none -v "${GITHUB_WORKSPACE}/lab-image:/workspace:ro" hcw-lab-runner:ci bash /workspace/smoke.sh runner
+
+      - name: Smoke full
+        run: docker run --rm --network none -v "${GITHUB_WORKSPACE}/lab-image:/workspace:ro" hcw-lab:ci bash /workspace/smoke.sh full
+
+      # `docker push` of the loaded image writes a plain single manifest whose
+      # digest is the one `docker pull` reports — the value #675 pins. The
+      # digest is read back from the pushed reference, not computed locally.
+      - name: Push runner
+        id: push-runner
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          docker tag hcw-lab-runner:ci "${RUNNER_IMAGE}:${SHA}"
+          docker tag hcw-lab-runner:ci "${RUNNER_IMAGE}:latest"
+          docker push "${RUNNER_IMAGE}:${SHA}"
+          docker push "${RUNNER_IMAGE}:latest"
+          digest="$(docker buildx imagetools inspect "${RUNNER_IMAGE}:${SHA}" --format '{{.Manifest.Digest}}')"
+          test -n "$digest"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+
+      - name: Push full
+        id: push-full
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          docker tag hcw-lab:ci "${FULL_IMAGE}:${SHA}"
+          docker tag hcw-lab:ci "${FULL_IMAGE}:latest"
+          docker push "${FULL_IMAGE}:${SHA}"
+          docker push "${FULL_IMAGE}:latest"
+          digest="$(docker buildx imagetools inspect "${FULL_IMAGE}:${SHA}" --format '{{.Manifest.Digest}}')"
+          test -n "$digest"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
 
       - name: Attest runner provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
