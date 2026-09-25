@@ -1,0 +1,45 @@
+---
+argument_specs:
+  main:
+    short_description: Install a pinned, checksum-verified node_exporter as a loopback-only systemd service
+    description:
+      - Downloads the linux-amd64 release tarball for the given version, verifies its SHA256,
+        installs the binary and a hardened systemd unit, and starts it bound to loopback.
+    author: HybridCloudWorks
+    options:
+      node_exporter_version:
+        type: str
+        required: true
+        description: Release version without the leading v, for example 1.12.1.
+      node_exporter_checksum:
+        type: str
+        required: true
+        description:
+          - SHA256 of the linux-amd64 tarball in the form sha256:<hex>, taken from the
+            release's sha256sums.txt.
+      node_exporter_user:
+        type: str
+        required: false
+        default: node_exporter
+        description: System user the service runs as.
+      node_exporter_install_dir:
+        type: path
+        required: false
+        default: /opt/node_exporter
+        description: Where the tarball is downloaded and unpacked.
+      node_exporter_binary_path:
+        type: path
+        required: false
+        default: /usr/local/bin/node_exporter
+        description: Where the binary is installed.
+      node_exporter_listen_address:
+        type: str
+        required: false
+        default: 127.0.0.1:9100
+        description: Address passed to --web.listen-address. Keep it on loopback.
+      node_exporter_extra_args:
+        type: list
+        elements: str
+        required: false
+        default: []
+        description: Additional command-line flags appended to ExecStart.

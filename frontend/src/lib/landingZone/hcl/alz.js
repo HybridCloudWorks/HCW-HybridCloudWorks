@@ -1,0 +1,72 @@
+/**
+ * `alz.tf` (#667): the "alz" architecture from avm-ptn-alz, the subscription
+ * placements, and, when the policy component is selected, the baseline's
+ * parameters from policy.js.
+ */
+import { block, file, moduleSource, obj, providersMap, q } from './format';
+import { policyItems } from './policy';
+import { placements } from './subscriptions';
+
+const HEADER = [
+  '# Management groups: the "alz" architecture, a root named "alz" with Platform and',
+  '# Landing zones beneath it. It is created under the tenant root group, or under the',
+  '# management group named in var.parent_management_group_id. The policy baseline is',
+  '# part of the same architecture: selecting Policy supplies its parameters and lets it',
+  '# enforce; leaving it out deploys the same assignments with every one set to',
+  '# DoNotEnforce.',
+];
+
+function placementItems(state) {
+  const placed = placements(state);
+  if (!placed.length) return [];
+  return [
+    '',
+    '# Each subscription is moved under the management group whose policies it should',
+    '# inherit. The keys are labels; the names are the groups the alz architecture creates.',
+    [
+      'subscription_placement',
+      obj(
+        placed.map((sub) => [
+          sub.key,
+          obj([
+            ['subscription_id', sub.variable],
+            ['management_group_name', q(sub.mg)],
+          ]),
+        ])
+      ),
+    ],
+  ];
+}
+
+export function alzTf(state) {
+  return file('alz.tf', [
+    ...HEADER,
+    'data "azapi_client_config" "current" {}',
+    '',
+    ...block('module "alz"', [
+      ...moduleSource('avm-ptn-alz'),
+      '',
+      '# parent_resource_id is the parent management group NAME, not its resource id: the',
+      '# module rejects a value containing "/" and prepends',
+      '# /providers/Microsoft.Management/managementGroups/ itself. The tenant root group is',
+      '# named after the tenant id, which is why that is the fallback.',
+      ['architecture_name', q('alz')],
+      ['location', 'var.location'],
+      [
+        'parent_resource_id',
+        'coalesce(var.parent_management_group_id, data.azapi_client_config.current.tenant_id)',
+      ],
+      ['enable_telemetry', 'var.enable_telemetry'],
+      ...placementItems(state),
+      ...policyItems(state),
+      '',
+      '# The tree and its policies are tenant-scoped, so every provider is the default one.',
+      ['providers', providersMap('avm-ptn-alz', null)],
+    ]),
+    '',
+    ...block('output "root_management_group_resource_id"', [
+      ['description', q('The resource id of the "alz" management group at the top of the tree.')],
+      ['value', 'module.alz.management_group_resource_ids["alz"]'],
+    ]),
+  ]);
+}

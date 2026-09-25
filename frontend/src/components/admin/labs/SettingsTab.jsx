@@ -25,7 +25,7 @@ const SETUP_STEPS = [
   },
   {
     title: 'Install the Azure API agent',
-    body: 'Copy vps-agent/* to /opt/hcw-labs-agent, run npm ci --omit=dev, copy .env.example to .env, and set LABS_AGENT_API_BASE, LABS_AGENT_TENANT_ID, LABS_AGENT_CLIENT_ID, LABS_AGENT_CERT_PATH, LABS_AGENT_API_SCOPE, and LABS_AGENT_ID. Keep the PEM private key root-owned with chmod 600.',
+    body: 'Copy vps-agent/* to /opt/hcw-labs-agent, run npm ci --omit=dev, copy .env.example to .env, and set LABS_AGENT_API_BASE, LABS_AGENT_TENANT_ID, LABS_AGENT_CLIENT_ID, LABS_AGENT_CERT_PATH, LABS_AGENT_API_SCOPE, and LABS_AGENT_ID. Keep the PEM owned by root, group hcw-labs-agent, mode 0640 (chown root:hcw-labs-agent, chmod 640) so only the service user can read it. lab-host/ansible does all of this for the Hostinger host.',
   },
   {
     title: 'Enable the systemd service',

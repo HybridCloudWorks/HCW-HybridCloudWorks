@@ -84,7 +84,7 @@ function trackedFiles() {
  * as dead an instruction as a pointer in a runbook.
  */
 const TEXT =
-  /\.(md|js|jsx|mjs|cjs|ts|tsx|yml|yaml|ps1|py|json|sh|tf|tfvars|hcl|txt|toml|env|bicep)$/i;
+  /\.(md|js|jsx|mjs|cjs|ts|tsx|yml|yaml|ps1|py|json|sh|tf|tfvars|hcl|txt|toml|env|bicep|j2)$/i;
 
 /**
  * A reference to the retired folder.

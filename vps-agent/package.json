@@ -12,6 +12,6 @@
     "test": "node --test \"lib/*.test.js\""
   },
   "dependencies": {
-    "@azure/identity": "^4.13.2"
+    "@azure/identity": "^4.13.3"
   }
 }

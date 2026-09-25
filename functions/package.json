@@ -15,10 +15,10 @@
     "node": "^22.12.0"
   },
   "dependencies": {
-    "@aws-sdk/client-pricing": "^3.1131.0",
-    "@azure/cosmos": "^4.3.0",
-    "@azure/functions": "^4.7.0",
-    "@azure/identity": "^4.13.2",
+    "@aws-sdk/client-pricing": "^3.1136.0",
+    "@azure/cosmos": "^4.10.1",
+    "@azure/functions": "^4.16.5",
+    "@azure/identity": "^4.13.3",
     "@azure/storage-blob": "^12.27.0",
     "@breezystack/lamejs": "^1.2.7",
     "cheerio": "^1.2.0",
@@ -28,7 +28,7 @@
     "turndown": "^7.2.4"
   },
   "devDependencies": {
-    "@vitest/coverage-v8": "^5.0.0",
+    "@vitest/coverage-v8": "^5.0.1",
     "vitest": "^5.0.0"
   },
   "private": true,
