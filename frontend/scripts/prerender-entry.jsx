@@ -89,6 +89,7 @@ const STANDALONE_ROUTES = [
   '/tools/comparison',
   '/tools/resources',
   '/tools/decisions',
+  '/tools/landing-zone',
   '/templates/framework',
   '/templates/architecture',
   '/templates/blog',

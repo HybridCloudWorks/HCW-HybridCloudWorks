@@ -117,6 +117,7 @@ const ToolsMigrationPage = lazyPage(() => import('@/pages/tools/MigrationPage'))
 const ToolsComparisonPage = lazyPage(() => import('@/pages/tools/ComparisonPage'));
 const ToolsResourcesPage = lazyPage(() => import('@/pages/tools/ResourcesPage'));
 const ToolsDecisionsPage = lazyPage(() => import('@/pages/tools/DecisionsPage'));
+const ToolsLandingZonePage = lazyPage(() => import('@/pages/tools/LandingZonePage'));
 
 // Templates
 const FrameworkSubmissionPage = lazyPage(
@@ -364,6 +365,7 @@ function App() {
               <Route path="/tools/comparison" element={<ToolsComparisonPage />} />
               <Route path="/tools/resources" element={<ToolsResourcesPage />} />
               <Route path="/tools/decisions" element={<ToolsDecisionsPage />} />
+              <Route path="/tools/landing-zone" element={<ToolsLandingZonePage />} />
               {/* --- Staging preview (T-606): signed-link view of unpublished
                   drafts. Static segment outranks /:provider in route ranking. --- */}
               <Route path="/preview/:id" element={<PreviewPage />} />
