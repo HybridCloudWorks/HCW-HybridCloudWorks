@@ -146,7 +146,7 @@ This project has not cut a tagged release; entries are grouped under
   Policy is off, both `variables.tf` cross-checks emitted, committed
   snapshots of the default and the tree-only builds (the repository's first
   `__snapshots__`), and diagram determinism with no overlapping nodes. No
-  page, no route, no dependency; `frontend/` vitest goes from 2,272 to 2,304.
+  page, no route, no dependency; `frontend/` vitest goes from 2,272 to 2,305.
 
 - **ADR 0032 records the learner labs platform, and the two documents that
   misdescribed the labs are corrected (#660).** Phase 0 of #656: the
