@@ -46,6 +46,13 @@ caddy_site_names:
   - "*.{{ lab_host_domain }}"
   - "*.coder.{{ lab_host_domain }}"
 
+# Coder (#679) is the learner identity boundary and signs learners in with
+# GitHub OAuth. Its role renders this list into CODER_OAUTH2_GITHUB_ALLOWED_ORGS;
+# empty means any GitHub account may sign in, so production MUST set it to the
+# organisation(s) whose members are allowed. Declared here so the contract
+# exists before the role does.
+coder_oauth2_github_allowed_orgs: []
+
 # vps-agent runs host-native as a systemd service (ADR 0032) from a checkout of
 # this repository at a pinned commit. The repository has no tagged release, so
 # the pin is a sha.

@@ -9,7 +9,8 @@ argument_specs:
       - Renders a Caddyfile with one site block for the three certificate names, terminating TLS
         with DNS-01, and a conf.d directory later roles add routes to. Without a token the
         Caddyfile fails closed to an HTTP-only 503 apex that imports nothing.
-      - Writes the Cloudflare API token to a root-only environment file the systemd unit reads.
+      - Writes the Cloudflare API token to /etc/caddy/env (root:caddy, 0640), which the caddy
+        unit reads through EnvironmentFile as the non-root caddy user.
     author: HybridCloudWorks
     options:
       caddy_version:
@@ -102,4 +103,4 @@ argument_specs:
         type: path
         required: false
         default: /etc/caddy/env
-        description: Root-only file holding CLOUDFLARE_API_TOKEN for the unit.
+        description: File holding CLOUDFLARE_API_TOKEN, owner root, group caddy, mode 0640, read by the caddy unit through EnvironmentFile.

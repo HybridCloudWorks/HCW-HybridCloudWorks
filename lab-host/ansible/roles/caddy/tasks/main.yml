@@ -119,8 +119,8 @@
     dest: "{{ caddy_env_file }}"
     content: "CLOUDFLARE_API_TOKEN={{ caddy_cloudflare_api_token }}\n"
     owner: root
-    group: root
-    mode: "0600"
+    group: "{{ caddy_group }}"
+    mode: "0640"
   no_log: true
   diff: false
   notify: Restart caddy

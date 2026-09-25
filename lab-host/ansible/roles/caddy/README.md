@@ -38,18 +38,21 @@ binary it produced.
    unless `caddy version` names the pinned version and `caddy list-modules`
    shows `dns.providers.cloudflare`.
 3. Installs the binary to `/usr/local/bin/caddy`.
-4. Writes `/etc/caddy/env` (root, 0600) with `CLOUDFLARE_API_TOKEN` from
-   `vault_cloudflare_api_token`, with `no_log` so the value never reaches
-   output or diff. This is a **runtime** token, distinct from the one
-   Terraform uses in #661.
+4. Writes `/etc/caddy/env` as owner `root`, group `caddy`, mode `0640` with
+   `CLOUDFLARE_API_TOKEN` from `vault_cloudflare_api_token`, with `no_log`
+   so the value never reaches output or diff. The unit runs as the non-root
+   `caddy` user and reads the file through `EnvironmentFile=`, so the
+   group read is what lets renewals work; nobody outside that group can
+   read it. This is a **runtime** token, distinct from the one Terraform
+   uses in #661.
 5. Renders `/etc/caddy/conf.d/00-apex.caddy` (the placeholder `respond` for
    the apex) and `/etc/caddy/Caddyfile`, validated with `caddy validate`
    before it replaces the live file. The site block lists all three names,
    imports `conf.d/*.caddy` and ends in a catch-all 404 for names nothing
    claims.
-6. Installs `caddy.service` with `EnvironmentFile=/etc/caddy/env`,
-   `AmbientCapabilities=CAP_NET_BIND_SERVICE` and `Type=notify`, then
-   enables and starts it.
+6. Installs `caddy.service` running as `caddy:caddy` with
+   `EnvironmentFile=/etc/caddy/env`, `AmbientCapabilities=CAP_NET_BIND_SERVICE`
+   and `Type=notify`, then enables and starts it.
 
 **Fail closed.** With no token in the vault the Caddyfile serves a single
 HTTP-only apex that answers 503 and says TLS is off. It imports nothing from
