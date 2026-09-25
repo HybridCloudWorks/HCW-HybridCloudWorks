@@ -199,6 +199,11 @@ and attests. Where each sum comes from:
   `https://registry.terraform.io/v1/providers/<namespace>/<name>/<version>/download/linux/amd64`.
 - AVM modules: `sha256sum` of the downloaded
   `https://github.com/Azure/terraform-azurerm-<name>/archive/refs/tags/v<version>.tar.gz`.
+  These lines are normally moved for you: `.github/workflows/update-avm-versions.yml`
+  (#671) checks the builder's pins in `frontend/src/lib/landingZone/avmVersions.js`
+  against the Terraform Registry every Tuesday and, when a module has a newer
+  release, opens one pull request that bumps the pin, these two lines and the
+  HCL snapshots together, with the sum computed from the same tarball.
 - Base image: the `Docker-Content-Digest` header from the registry, by the
   method documented at the top of
   [`vps-agent/lib/capabilities.js`](../vps-agent/lib/capabilities.js); update

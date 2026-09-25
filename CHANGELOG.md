@@ -54,6 +54,62 @@ This project has not cut a tagged release; entries are grouped under
   push` has no `--default-ttl` in the current CLI reference, so the one-hour
   autostop is `coder templates edit hcw-lab --default-ttl 1h`.
 
+- **The Azure Verified Module pins are checked against the registry every
+  week, and a newer release opens a pull request (#671).** Phase 5 of #657.
+  `frontend/src/lib/landingZone/avmVersions.js` says its pins are "looked up,
+  not remembered"; `.github/workflows/update-avm-versions.yml` is what looks,
+  Tuesdays at 06:30 UTC and by hand, modelled on `update-learn-catalogue.yml`
+  down to the two-job split, the App token minted for a few API calls and
+  revoked, the `automation` environment, and the ready-for-review pull
+  request. `frontend/scripts/update-avm-versions.mjs` imports `AVM_MODULES`,
+  asks `registry.terraform.io/v1/modules/Azure/<name>/azurerm` for each
+  module's latest release, refuses anything that is not `MAJOR.MINOR.PATCH`
+  tagged `v<version>`, and for a module that moved rewrites exactly one
+  `avm('<name>', '<version>', …)` pin, restamps `AVM_VERIFIED_ON` with the UTC
+  date, downloads the release tarball from GitHub (the proof the tag exists)
+  and, where `lab-image/versions.env` vendors the module (#658), rewrites its
+  `_VERSION` and `_SHA256` lines with the tarball's sum so the image and the
+  builder cannot disagree. Exit 0 and no writes when nothing moved;
+  `--dry-run` prints without writing. The summary the pull request carries
+  tables every pin's old → new with its GitHub release notes and says whether
+  the release's `required_providers` drifted from the pinned
+  `requiredProviders` — the edit the script does not make, flagged as **HAND
+  EDIT NEEDED**. Because the versions are in the `hcl.test.js` snapshots, the
+  workflow refreshes them with `npx vitest run -u src/lib/landingZone` after a
+  bump and then runs the same suites without `-u` as the gate, so the pull
+  request carries the Terraform diff a learner would download and a drifted
+  input name fails in the run rather than on the PR. The branch stages exactly
+  the pins, the versions file and the snapshot, asserted by
+  `scripts/avm-versions-workflow.test.mjs`; the comparison, validation, text
+  edits and summary are the pure half in `frontend/scripts/avm-versions-edits.mjs`
+  and are unit-tested beside the script; `index.test.js` now asserts `AVM_VERIFIED_ON`
+  is a calendar date no earlier than 2026-09-25 instead of naming the day.
+
+- **`/education/labs`: the browser labs page, with the lab catalogue, Open in
+  Coder deep links, Run it locally, and the estate and Coder status cards
+  (#681).** Phase 3 of #659, carrying the frontend halves of #664 (the
+  "Hybrid Lab right now" card) and #680 (the Coder status card) against the
+  contracts those issues fix. `frontend/src/data/labs/catalogue.js` is pure
+  frozen data — one row per lab with `id`, `title`, `summary`, `tools`,
+  `template`, `params`, `articleSlugs` and `estimatedMinutes`, and a test
+  that every row carries every field and no two share an `id` — starting
+  with the Landing Zone Builder download, a `terraform validate` walkthrough
+  and an Ansible syntax-check walkthrough. Each card links to
+  `https://coder.lab.hybridcloudworks.com/templates/hcw-lab/workspace?mode=auto&param.lab=<id>`
+  through `safeUrl`, and carries the two `docker run` lines from #658,
+  PowerShell then bash, each labelled with its shell. `LabsEstateCard.jsx`
+  reads `GET /api/public/labs/estate` through the new `fetchLabsEstate()`
+  and renders "The lab host is not provisioned yet." for
+  `{ configured: false }` and, when configured, the Arc status word, the
+  heartbeat age in words, agent version, OS, policy counts, job-runner queue
+  and Coder capacity; `CoderStatusCard.jsx` reads `GET
+  /api/public/labs/coder-status` through `fetchCoderStatus()` and says "not
+  yet provisioned" or "unreachable" before it shows templates and capacity.
+  Every state on the page is a word, never a colour alone. Two slot sections
+  hold the layout for the agent section (#676) and the article list (#677).
+  Wired in App.jsx, `STANDALONE_ROUTES`, `staticRoutes.labs`, a new Learn
+  menu in the header (the first header link to `/education` as well) and a
+  section on `/education`, each enforced by a test.
 - **Landing Zone Builder, Phase 2: the page at `/tools/landing-zone` (#668).**
   Phase 2 of #657, on the pure module #667 landed. `frontend/src/pages/tools/
   LandingZonePage.jsx` is where a learner assembles an Azure landing zone
