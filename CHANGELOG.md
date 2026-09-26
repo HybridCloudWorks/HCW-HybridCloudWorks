@@ -19,6 +19,40 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **`scripts/lab/Connect-Lab.ps1`: one-command SSH and VS Code setup for the
+  lab host, and the corrected Hostinger read in `infra-lab`.** The script
+  (PowerShell 7, `-WhatIf`) sets up any desktop to reach the host as
+  `hcw-lab`: a per-machine ed25519 key at `$HOME\.ssh\hcw-lab_ed25519`,
+  created only if missing; exactly one `Host hcw-lab` block in
+  `$HOME\.ssh\config`, inserted ahead of any `Host *` or replaced in place,
+  every other line kept, a timestamped backup written first; the Windows
+  `ssh-agent` service started when it is present and stopped, and the key
+  loaded; then the public key and the step that authorizes it. The host name
+  comes from the `LAB_SSH_HOST` repository variable when `gh` can read it,
+  otherwise `lab.hybridcloudworks.com`; `-User root` covers the window
+  before the first `bootstrap.sh`, and `-Code` and `-Connect` open VS Code
+  Remote-SSH on `/opt/hcw-src` or a shell. The printed line for adding a key
+  from a machine that already connects writes root's `authorized_keys` as
+  well as the login user's, because the hardening role rebuilds `hcwadmin`'s
+  from root's on every run (`exclusive: true`) and a key only there would be
+  gone after the next one. The private key is never read, printed or sent,
+  and a second run changes nothing and says so. `Connect-Lab.Tests.ps1`
+  covers the config rewrite in 29 Pester cases, run by a new step in
+  `repository-policy.yml` that also fails on zero tests.
+  `docs/runbooks/labs-host.md` opens with "Connect from a desktop": the
+  Remote - SSH extension, the run with and without a checkout (saved to
+  Downloads and run, never piped to `iex`), the optional `LAB_SSH_HOST`
+  variable, the host-key check, and the Web Console as the browser
+  fallback. `infra-lab/README.md` step 1 printed blanks for every field but
+  the template, because `Invoke-RestMethod` passes the bare JSON array
+  Hostinger returns down the pipeline as one object (reproduced on
+  PowerShell 7.6 and 5.1); it now reads the token from the clipboard,
+  unwraps the list, prints `id`, `plan`, `data_center_id`, `template_id`,
+  `template_name` and `state`, prints status and body on failure, and blanks
+  the clipboard. `plan` follows the provider's import at v0.1.23, which
+  keeps the VM's `plan` field (such as `KVM 4`) unless the billing
+  subscription lookup returns an `item_id`. Steps 6 and 7 now use the
+  `hcw-lab_ed25519` key and the `hcw-lab` alias.
 - **Azure Arc onboarding for the lab host: onboarding identity, data
   collection rule, audit policy, Ansible arc role (#663).** Phase 3 of #656,
   the engineering half. `infra/lab-hybrid.tf` adds the data collection rule
