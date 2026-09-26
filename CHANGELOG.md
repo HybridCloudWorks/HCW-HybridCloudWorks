@@ -1089,6 +1089,14 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Coder no longer redirects to its access URL behind Caddy.**
+  `CODER_REDIRECT_TO_ACCESS_URL` is `false` in
+  `lab-host/coder/docker-compose.yml`: Caddy terminates TLS and forwards
+  plain HTTP, and Coder v2.37.3 answered every such request with a 307 to
+  the https access URL, a loop (measured in #722). A test in
+  `template.test.mjs` now holds the value. The Coder README's check command
+  uses a glob that works on Node 26, and its expected count is `pass 10`.
+
 - **The lab host runs the commit it is given, not a pin that lags one merge
   behind.** `lab-host/bootstrap.sh` pinned `HCW_REPO_REF` to `04aa9e36`, a
   commit from before `lab-host/` existed, so a first run checked it out and

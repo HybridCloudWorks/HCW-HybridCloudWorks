@@ -50,7 +50,7 @@ Written down so nobody rediscovers them (#659):
 From the repository root. PowerShell:
 
 ```powershell
-node --test lab-host/coder
+node --test "lab-host/coder/**/*.test.mjs"
 ```
 
 ```powershell
@@ -71,7 +71,7 @@ The Compose check is bash (Git Bash), because it is a shell script:
 bash lab-host/coder/compose-config-check.sh
 ```
 
-Success: `node --test` reports `pass 8`, `fail 0`; `fmt` prints nothing;
+Success: `node --test` reports `pass 10`, `fail 0`; `fmt` prints nothing;
 `validate` prints `Success! The configuration is valid.`; the compose check
 prints `coder-postgres` and `coder` (dependency order). The
 `coder (lab-host)` job in `.github/workflows/ci.yml` runs the same four on
