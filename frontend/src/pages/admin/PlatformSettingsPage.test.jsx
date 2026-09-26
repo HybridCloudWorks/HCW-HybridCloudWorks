@@ -30,6 +30,7 @@ vi.mock('@/lib/api', () => ({
   getJSON: (...args) => getJSON(...args),
   sendJSON: vi.fn(),
   postJSON: (...args) => postJSON(...args),
+  authedFetch: vi.fn(),
 }));
 vi.mock('@/hooks/useAuthReady', () => ({ useAuthReady: () => ({ authReady: true }) }));
 vi.mock('@/components/ui/use-toast', () => ({ useToast: () => ({ toast: vi.fn() }) }));
@@ -39,6 +40,7 @@ const empty = {
   'social-autopost': { enabled: false, accountIds: [], scheduleDelayMinutes: 60 },
   'podcast-feeds': { feeds: [] },
   'listen-and-learn-speech': { geminiModel: 'gemini-3.1-flash-tts-preview' },
+  'podcast-voices': { Maya: '', Elena: '' },
 };
 
 function LocationProbe() {
@@ -97,11 +99,14 @@ describe('tabs', () => {
     await screen.findByText('Podcast feeds');
     await screen.findByText('Listen & Learn voice');
     await screen.findByText('Not configured');
-    // Its two settings and the podcast voice's status (ElevenLabs, 2026-09-26).
+    // Its three settings and the podcast voice's status (ElevenLabs,
+    // 2026-09-26; the podcast voices, #725). No key, so no voice list.
+    await waitFor(() => expect(routesAsked()).toHaveLength(4));
     expect(routesAsked().sort()).toEqual(
       [
         settingRoute('listen-and-learn-speech'),
         settingRoute('podcast-feeds'),
+        settingRoute('podcast-voices'),
         ELEVENLABS_STATUS_ROUTE,
       ].sort()
     );

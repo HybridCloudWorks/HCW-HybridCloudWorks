@@ -23,6 +23,7 @@ import {
   normalizeListenAndLearnSpeech,
   normalizeNewsletterSettings,
   normalizePodcastFeeds,
+  normalizePodcastVoices,
   normalizeSocialAutopost,
   presentSetting,
   resolveSetting,
@@ -40,6 +41,7 @@ import {
   resolvePodcastFeeds,
 } from './timers/podcasts.js';
 import { ADMIN_CONFIG_PARTITION } from './cosmos-client.js';
+import { PODCAST_VOICES_CONFIG_ID, readStoredPodcastVoices } from './podcast/voice-settings.js';
 import { MAX_ITEMS_PER_SECTION, SECTIONS } from './newsletter/sections.js';
 
 const context = { log: vi.fn(), error: vi.fn() };
@@ -432,6 +434,94 @@ describe('listen & learn speech', () => {
   });
 });
 
+describe('podcast voices (#725)', () => {
+  const MAYA = 'MayaVoice00000000001';
+  const ELENA = 'ElenaVoice0000000002';
+
+  it('stores the two hosts’ ElevenLabs voice ids, trimmed', () => {
+    expect(normalizePodcastVoices({ Maya: ` ${MAYA} `, Elena: ELENA })).toEqual({ Maya: MAYA, Elena: ELENA });
+  });
+
+  it('refuses a missing host, a blank one, a non-id, the same voice twice and an unknown key', () => {
+    expectRejects(() => normalizePodcastVoices({ Maya: MAYA }), /Elena needs a voice/);
+    expectRejects(() => normalizePodcastVoices({ Maya: '  ', Elena: ELENA }), /Maya needs a voice/);
+    // A Gemini name, an Azure name, a URL: none is an ElevenLabs voice id.
+    for (const bad of ['Kore', 'en-US-AvaMultilingualNeural', 'https://evil.example/a.mp3', 42]) {
+      expect(() => normalizePodcastVoices({ Maya: bad, Elena: ELENA }), String(bad)).toThrow(
+        PlatformSettingValidationError
+      );
+    }
+    expectRejects(
+      () => normalizePodcastVoices({ Maya: 'Kore', Elena: ELENA }),
+      'Maya must be an ElevenLabs voice id, 20 letters and digits as the voice list shows it'
+    );
+    expectRejects(
+      () => normalizePodcastVoices({ Maya: MAYA, Elena: MAYA }),
+      'Maya and Elena must have different voices, so a listener can tell the hosts apart'
+    );
+    expectRejects(
+      () => normalizePodcastVoices({ Maya: MAYA, Elena: ELENA, Narrator: ELENA }),
+      /Unknown field\(s\) in body: Narrator/
+    );
+    expectRejects(() => normalizePodcastVoices(null), /Body must be a JSON object/);
+  });
+
+  it('produces exactly what every podcast render reads back', async () => {
+    const value = normalizePodcastVoices({ Maya: MAYA, Elena: ELENA });
+    const readDoc = vi.fn(async () => ({
+      id: PODCAST_VOICES_CONFIG_ID,
+      configScope: ADMIN_CONFIG_PARTITION,
+      ...value,
+    }));
+    expect(await readStoredPodcastVoices(readDoc)).toEqual({ Maya: MAYA, Elena: ELENA });
+  });
+
+  it('shows both hosts unset when nothing is stored: the code has no default voice', () => {
+    expect(presentSetting('podcast-voices', null)).toEqual({
+      value: { Maya: '', Elena: '' },
+      exists: false,
+      stored: null,
+      updatedAt: null,
+    });
+  });
+
+  it('PUT stores the choice at admin_config/podcast_voices and audits both ids', async () => {
+    const store = makeStore();
+    const h = createPlatformSettingsHandlers({ guard: allowGuard, store, ...fixed });
+    const res = await h.putSetting(
+      makeRequest({ params: { setting: 'podcast-voices' }, body: { Maya: MAYA, Elena: ELENA } }),
+      context
+    );
+    expect(res.status).toBe(200);
+    expect(parse(res)).toMatchObject({ value: { Maya: MAYA, Elena: ELENA }, stored: 'valid' });
+    const [configCall, auditCall] = store.upsertDoc.mock.calls;
+    expect(configCall).toEqual([
+      'admin_config',
+      {
+        id: PODCAST_VOICES_CONFIG_ID,
+        configScope: ADMIN_CONFIG_PARTITION,
+        Maya: MAYA,
+        Elena: ELENA,
+        updatedAt: '2026-09-07T12:00:00.000Z',
+        updatedBy: 'u1',
+      },
+    ]);
+    expect(auditCall[1].details).toEqual({ setting: 'podcast-voices', Maya: MAYA, Elena: ELENA });
+  });
+
+  it('PUT answers 400 for two identical voices and writes nothing', async () => {
+    const store = makeStore();
+    const h = createPlatformSettingsHandlers({ guard: allowGuard, store, ...fixed });
+    const res = await h.putSetting(
+      makeRequest({ params: { setting: 'podcast-voices' }, body: { Maya: MAYA, Elena: MAYA } }),
+      context
+    );
+    expect(res.status).toBe(400);
+    expect(parse(res).error).toMatch(/must have different voices/);
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+  });
+});
+
 describe('newsletter settings', () => {
   const DEFAULT_CONTENT = {
     sections: [
@@ -768,12 +858,13 @@ describe('newsletter settings', () => {
 });
 
 describe('presentSetting', () => {
-  it('names the five settings and nothing else', () => {
+  it('names the six settings and nothing else', () => {
     expect(PLATFORM_SETTING_NAMES).toEqual([
       'default-heroes',
       'social-autopost',
       'podcast-feeds',
       'listen-and-learn-speech',
+      'podcast-voices',
       'newsletter-settings',
     ]);
   });

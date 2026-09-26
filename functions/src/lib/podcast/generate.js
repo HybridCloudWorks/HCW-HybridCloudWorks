@@ -32,6 +32,7 @@
 import { isPublicDocument } from '../public-reads.js';
 import { generateArticleScript } from '../listen-and-learn/article-script.js';
 import { synthesizeDialogue } from '../listen-and-learn/speech/index.js';
+import { readStoredPodcastVoices } from './voice-settings.js';
 import {
   STATUS,
   describeArticleSource,
@@ -95,6 +96,7 @@ export function resolvePipelineDeps(deps = {}, { writeScript = generateArticleSc
   return {
     writeScript: deps.writeScript || writeScript,
     synthesize: deps.synthesize || synthesizeDialogue,
+    readVoices: deps.readVoices || ((store) => readStoredPodcastVoices(store.readDoc)),
     uploadAudio: deps.uploadAudio || uploadSourceAudio,
     persistTranscript: deps.persistTranscript || saveTranscriptFor,
     persistFailure: deps.persistFailure || markTranscriptFailedFor,
@@ -118,11 +120,24 @@ export function resolvePipelineDeps(deps = {}, { writeScript = generateArticleSc
  * `speechFreePlan`), taken from the account as the pre-flight read it. The
  * approval step decides from these, not from whatever plan the account is on
  * when someone clicks approve (podcast/speech-licence.js).
+ *
+ * The voices are the owner's stored choice (podcast/voice-settings.js, #725),
+ * read here and handed to the switch; with none chosen, the provider refuses
+ * before it sends anything and its "Choose the podcast voices first"
+ * sentence is the `audioError`. A failed read is an `audioError` too, never
+ * a render in voices nobody chose.
  */
-async function renderAudio({ script, source, storage, env, synthesize, uploadAudio }) {
+async function renderAudio({ script, source, store, storage, env, synthesize, readVoices, uploadAudio }) {
+  let voices;
+  try {
+    voices = await readVoices(store);
+  } catch (err) {
+    return { error: `The podcast voices could not be read: ${err?.message || err}` };
+  }
+
   let rendered;
   try {
-    rendered = await synthesize({ product: 'podcast', dialogue: script.dialogue, env });
+    rendered = await synthesize({ product: 'podcast', dialogue: script.dialogue, env, voices });
   } catch (err) {
     return { error: err?.message || String(err) };
   }
@@ -217,9 +232,18 @@ export async function finishTranscript({
   now,
   deps,
 }) {
-  const { synthesize, uploadAudio, persistTranscript, recordUsage } = deps;
+  const { synthesize, readVoices, uploadAudio, persistTranscript, recordUsage } = deps;
 
-  const audio = await renderAudio({ script, source, storage, env, synthesize, uploadAudio });
+  const audio = await renderAudio({
+    script,
+    source,
+    store,
+    storage,
+    env,
+    synthesize,
+    readVoices,
+    uploadAudio,
+  });
 
   const saved = await persistTranscript(store, { source, script, audio, now });
 

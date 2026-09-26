@@ -58,6 +58,7 @@ export const SETTING_LABELS = Object.freeze({
   'social-autopost': 'Social autoposting',
   'podcast-feeds': 'Podcast feeds',
   'listen-and-learn-speech': 'Listen & Learn voice',
+  'podcast-voices': 'Podcast voices',
   'newsletter-settings': 'Newsletter settings',
 });
 
@@ -193,12 +194,15 @@ export function StoredState({ meta }) {
   );
 }
 
-/** Sits inside each card's form: the submit is the form's, so one click is one save. */
-export function SaveRow({ saving, children }) {
+/**
+ * Sits inside each card's form: the submit is the form's, so one click is one
+ * save. `disabled` holds it back while the form cannot be saved as it stands.
+ */
+export function SaveRow({ saving, disabled = false, children }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
       <div className="flex flex-wrap items-center gap-2">{children}</div>
-      <Button type="submit" size="sm" disabled={saving}>
+      <Button type="submit" size="sm" disabled={saving || disabled}>
         {saving ? (
           <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
         ) : (

@@ -6,6 +6,9 @@
  *   Listen & Learn voice   admin_config/listen_and_learn_speech read by listen-and-learn-jobs.js
  *   Podcast voice          GET cms/podcast/elevenlabs           ElevenLabs plan, credits and
  *                                                               the live check (ElevenLabsCard)
+ *   Podcast voices         admin_config/podcast_voices          the two hosts' ElevenLabs voices,
+ *                                                               picked by ear (PodcastVoices,
+ *                                                               inside ElevenLabsCard, #725)
  *
  * Each card loads on its own, so one failing never hides the others.
  */

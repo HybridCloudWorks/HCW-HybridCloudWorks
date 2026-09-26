@@ -89,45 +89,49 @@
  *
  * ## Voices
  *
- * Two voices, both female, matching the Azure pair and the two hosts
- * script.js writes (DEFAULT_SPEAKERS):
+ * Two, one per host script.js writes (DEFAULT_SPEAKERS, Maya and Elena), and
+ * **the owner chooses them** (#725). Precedence, highest first:
  *
- *   Maya  → Sarah  (EXAVITQu4vr4xnSDxMaL) — the lead, who frames the area
- *   Elena → Aria   (9BWtsMINqrJLrRacOk9x) — the voice the official Text to
- *                                            Dialogue quickstart uses
+ *   1. `voices`, which every podcast caller passes: the choice stored in
+ *      `admin_config/podcast_voices` from the Audio tab's Podcast voices
+ *      picker (podcast/voice-settings.js), read by podcast/generate.js for an
+ *      episode and podcast/elevenlabs-admin.js for the live check;
+ *   2. `ELEVENLABS_DEFAULT_VOICES`, which is **empty**.
  *
- * Checked again on 2026-09-26, and both have moved since they were chosen:
+ * Empty on purpose. The first live check on the free plan, 2026-09-26, was
+ * refused with 402 `paid_plan_required`: "Free users cannot use library
+ * voices via the API". The defaults were Sarah (`EXAVITQu4vr4xnSDxMaL`), a
+ * Default voice "only available for accounts that were created before March
+ * 2026" and expiring 2026-12-31
+ * (https://elevenlabs.io/docs/help-center/product/voices/my-voices/what-are-default-voices),
+ * and Aria (`9BWtsMINqrJLrRacOk9x`), a Legacy voice the API routes to "Zoe"
+ * (https://elevenlabs.io/docs/help-center/product/voices/my-voices/what-are-legacy-voices).
+ * This account is newer, so to it both are library voices. The replacement
+ * table on the Default voices page names new voices (Talia for Sarah, and so
+ * on). It prints no ids, and its links open a Voice Library search, and
+ * Voice Library voices "are not available via the API to free tier users"
+ * (https://elevenlabs.io/docs/overview/capabilities/voices). Read on
+ * 2026-09-26, the docs therefore name no id a free account made after March
+ * 2026 is documented to be able to use. So there is no default to guess:
+ * with nothing chosen a render stops before it sends anything, with
+ * `code: 'voices_not_chosen'` and a sentence that says where to choose.
  *
- *   - Sarah is a Default voice. "All our Default voices will expire on
- *     December 31, 2026", and they "are only available for accounts that
- *     were created before March 2026"
- *     (https://elevenlabs.io/docs/help-center/product/voices/my-voices/what-are-default-voices).
- *     ElevenLabs suggests Talia as its replacement.
- *   - Aria is now a Legacy voice, "fully deprecated and removed from all
- *     products". Its id still works through the API because "Legacy voice
- *     IDs will automatically route to their replacement voice IDs", and its
- *     replacement is Zoe
- *     (https://elevenlabs.io/docs/help-center/product/voices/my-voices/what-are-legacy-voices).
- *
- * The ids are left as they are until the owner picks replacements by ear.
- * An account created in March 2026 or later should expect Sarah to be
- * refused. The live check on the Audio tab (about 300 characters) is how to
- * find out on the real account before an episode depends on it.
- *
- * Override per host with `LISTEN_AND_LEARN_VOICE_MAYA` / `…_ELENA`. These are
- * the same settings the Gemini and Azure providers read, so a value there
- * must suit BOTH products: a Gemini voice name in that setting would be sent
- * here as a voice id.
+ * `LISTEN_AND_LEARN_VOICE_MAYA` / `…_ELENA` are NOT read here any more. They
+ * are Gemini's and Azure's, for Listen & Learn, and a Gemini voice name in
+ * them was one step from being posted here as a `voice_id` (§2b, #725).
  */
 import {
   ElevenLabsSpeechError,
   PAID_PLAN_REQUIRED,
+  VOICE_PICKER_PAGE,
   assertCreditsCover,
   creditsNeeded as creditsNeededFor,
   dialogueRefusal,
   invalidateSubscription,
   isQuotaExceeded,
 } from './elevenlabs-account.js';
+import { isElevenLabsVoiceId } from './elevenlabs-voices.js';
+import { DEFAULT_SPEAKERS } from '../script.js';
 
 const DIALOGUE_URL = 'https://api.elevenlabs.io/v1/text-to-dialogue';
 
@@ -152,10 +156,17 @@ const CONTENT_TYPE = 'audio/mpeg';
 /** Documented ceiling on the summed `inputs[].text` length per request. */
 export const MAX_CHARACTERS_PER_REQUEST = 2000;
 
-export const ELEVENLABS_DEFAULT_VOICES = {
-  Maya: 'EXAVITQu4vr4xnSDxMaL',
-  Elena: '9BWtsMINqrJLrRacOk9x',
-};
+/** None: the owner chooses (see "Voices" in the header). */
+export const ELEVENLABS_DEFAULT_VOICES = Object.freeze({});
+
+/** The hosts a podcast script is written for; a turn by either needs a chosen voice. */
+const PODCAST_HOSTS = new Set(Object.values(DEFAULT_SPEAKERS));
+
+/** `code` for a render with no voice chosen for a host. Nothing is sent. */
+export const VOICES_NOT_CHOSEN = 'voices_not_chosen';
+
+/** `code` for a voice that is not an ElevenLabs voice id. Nothing is sent. */
+export const INVALID_VOICE = 'invalid_voice';
 
 /** Attempts per request. Which statuses are retried is `dialogueRefusal`'s call. */
 const MAX_ATTEMPTS = 3;
@@ -172,14 +183,13 @@ function readSetting(env, name) {
   return value;
 }
 
-/** `LISTEN_AND_LEARN_VOICE_MAYA` etc., so a voice can be changed by ear. */
-export function readVoiceOverrides(env = process.env) {
-  const overrides = {};
-  for (const speaker of Object.keys(ELEVENLABS_DEFAULT_VOICES)) {
-    const value = readSetting(env, `LISTEN_AND_LEARN_VOICE_${speaker.toUpperCase()}`);
-    if (value) overrides[speaker] = value;
-  }
-  return overrides;
+/** "Choose the podcast voices first: …", naming the hosts with no voice. */
+export function voicesNotChosenMessage(hosts) {
+  return (
+    `Choose the podcast voices first: no ElevenLabs voice is saved for ${hosts.join(' and ')}. ` +
+    `Pick two under Podcast voices at ${VOICE_PICKER_PAGE}, then run it again. ` +
+    'Nothing was sent, so no credits were spent.'
+  );
 }
 
 /** Characters as the API counts them: code points, not UTF-16 units. */
@@ -281,14 +291,30 @@ export function chunkTurnsByCharacters(turns, limit = MAX_CHARACTERS_PER_REQUEST
  *
  * Checked for every turn up front rather than lazily: the point of a hard
  * error here is that it happens before a byte is uploaded or a character is
- * billed.
+ * billed. Three refusals, each with its own sentence: a host with no voice
+ * chosen (`voices_not_chosen`, which says where to choose), a voice that is
+ * not an ElevenLabs id (`invalid_voice`, a Gemini or Azure name in the wrong
+ * place), and a speaker the script should never have written.
  */
 export function buildInputs(turns, voices) {
+  const unchosen = [
+    ...new Set(turns.filter((t) => !voices[t.speaker] && PODCAST_HOSTS.has(t.speaker)).map((t) => t.speaker)),
+  ];
+  if (unchosen.length > 0) {
+    throw new ElevenLabsSpeechError(voicesNotChosenMessage(unchosen), { code: VOICES_NOT_CHOSEN });
+  }
   return turns.map((turn) => {
     const voiceId = voices[turn.speaker];
     if (!voiceId) {
       throw new ElevenLabsSpeechError(
         `No voice configured for speaker "${turn.speaker}" (known: ${Object.keys(voices).join(', ') || 'none'})`
+      );
+    }
+    if (!isElevenLabsVoiceId(voiceId)) {
+      throw new ElevenLabsSpeechError(
+        `The voice for ${turn.speaker} is not an ElevenLabs voice id (20 letters and digits). ` +
+          `Choose the podcast voices at ${VOICE_PICKER_PAGE}. Nothing was sent, so no credits were spent.`,
+        { code: INVALID_VOICE }
       );
     }
     return { text: turn.text, voice_id: voiceId };
@@ -367,11 +393,11 @@ export async function synthesizeWithElevenLabs({
   const key = readSetting(env, 'ELEVENLABS_API_KEY');
   if (!key) throw new ElevenLabsSpeechError('ELEVENLABS_API_KEY is not configured');
 
-  // Precedence, lowest to highest: built-in default, environment override,
-  // explicit caller argument.
+  // Precedence, lowest to highest: the built-in default (none), then the
+  // caller's `voices`, which for the podcast is the owner's stored choice.
+  // No environment override: see "Voices" in the header.
   const resolvedVoices = {
     ...ELEVENLABS_DEFAULT_VOICES,
-    ...readVoiceOverrides(env),
     ...(voices || {}),
   };
 

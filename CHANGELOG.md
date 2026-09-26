@@ -19,6 +19,37 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Podcast voices: the owner picks two ElevenLabs voices the plan allows, by
+  ear, on the Audio tab (#725).** The first free-plan live check was refused
+  with 402 `paid_plan_required` ("Free users cannot use library voices via the
+  API"). The code's Sarah and Aria are library voices to an account created
+  after March 2026. The ElevenLabs card gains a **Podcast voices** section: a
+  select per host (Maya, Elena) and a list of every voice the key may use,
+  each with its gender, accent and age labels and a play button. A voice the
+  plan does not allow is shown disabled with the reason, never hidden. Two
+  new editor routes back it. `GET cms/podcast/elevenlabs/voices` lists
+  `GET /v2/voices` three times with the documented `voice_type` filter
+  (`default`, `non-community`, `community`), paginated and cached for five
+  minutes, and marks a library voice unusable on the free plan.
+  `GET cms/podcast/elevenlabs/voices/{voiceId}/preview` proxies one voice's
+  preview. It takes an id, never a URL; it fetches only
+  `https://storage.googleapis.com/eleven-public-prod/…` from the key's own
+  listing, without the key and without redirects; it stops at 2 MiB and
+  passes on only MP3 bytes. The page plays the preview with Web Audio, so the
+  CSP is not widened. The choice is stored as `admin_config/podcast_voices`
+  through the Platform settings store (`podcast-voices`), validated as two
+  different 20-character ElevenLabs ids, and every podcast render reads it
+  first: episodes and the live check. The podcast no longer reads
+  `LISTEN_AND_LEARN_VOICE_*`, and Listen & Learn is unchanged. The code has no
+  default voice, because ElevenLabs's docs name no id a free account made
+  after March 2026 can use through the API. So a render with nothing chosen
+  refuses before sending, with "Choose the podcast voices first", and the
+  live check waits for a saved pair. A 402 `paid_plan_required` now says
+  "Choose voices your plan allows" and names the picker. The key needs a
+  third permission, **Voices → Read** (`voices_read`), which the secret
+  catalogue and `docs/standards/required-inputs.md` now list. ADR 0029 §2a
+  carries a dated amendment.
+
 - **Portainer and HashiCorp Vault are on for the lab host (owner decision
   2026-09-26).** `portainer_enabled` and `vault_enabled` are `true` in
   `lab-host/ansible/group_vars/all.yml`, so the next `bootstrap.sh` run starts

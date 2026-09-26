@@ -15,9 +15,10 @@
  * publish is in flight. Nothing on this surface writes `podcasts`: the feed
  * is the ingest boundary and the timer reads it.
  *
- * The podcast voice's own two routes sit here too (#432, 2026-09-26): the
- * ElevenLabs plan and credits for the Audio tab, and the ~300-character live
- * check (lib/podcast/elevenlabs-admin.js).
+ * The podcast voice's own routes sit here too (#432, 2026-09-26): the
+ * ElevenLabs plan and credits for the Audio tab, the ~300-character live
+ * check, and (#725) the voice list and a voice's preview, which the Podcast
+ * voices picker plays (lib/podcast/elevenlabs-admin.js).
  */
 import { output } from '@azure/functions';
 import { httpRoute } from '../lib/auth/http-route.js';
@@ -95,7 +96,8 @@ httpRoute('getPodcastTranscript', {
 const elevenLabs = () =>
   createElevenLabsHandlers({
     guard: getDefaultGuard(),
-    store: { queryDocs, upsertDoc },
+    // readDoc: the saved podcast voices (admin_config/podcast_voices).
+    store: { queryDocs, upsertDoc, readDoc },
     storage: { uploadBlob },
     ai: { getCostEstimate },
   });
@@ -116,4 +118,23 @@ httpRoute('renderElevenLabsSample', {
   authLevel: 'anonymous',
   route: 'cms/podcast/elevenlabs/sample',
   handler: (request, context) => elevenLabs().renderSample(request, context),
+});
+
+// The Podcast voices picker (#725): every voice this key may list, each
+// marked usable on the plan or not, and why. Spends no credits.
+httpRoute('listElevenLabsVoices', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'cms/podcast/elevenlabs/voices',
+  handler: (request, context) => elevenLabs().listVoices(request, context),
+});
+
+// One voice's preview MP3, so the owner can pick by ear without the site's
+// CSP admitting a third-party media host. The caller names a voice id, never
+// a URL, and only ElevenLabs's preview host is fetched.
+httpRoute('previewElevenLabsVoice', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'cms/podcast/elevenlabs/voices/{voiceId}/preview',
+  handler: (request, context) => elevenLabs().previewVoice(request, context),
 });

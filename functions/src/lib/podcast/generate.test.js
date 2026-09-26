@@ -116,6 +116,54 @@ describe('refusalFor', () => {
   });
 });
 
+describe('the podcast voices (#725)', () => {
+  const VOICES = { Maya: 'MayaVoice00000000001', Elena: 'ElenaVoice0000000002' };
+
+  it('hands the owner’s stored choice to the speech switch', async () => {
+    const store = makeStore();
+    store.docs.admin_config = { podcast_voices: { id: 'podcast_voices', ...VOICES } };
+    const deps = happyDeps();
+    await generateTranscriptFromArticle({
+      articleId: 'content-1',
+      store,
+      storage: makeStorage(),
+      ai: makeAi(),
+      env: {},
+      now: NOW,
+      deps,
+    });
+    expect(deps.synthesize).toHaveBeenCalledWith(expect.objectContaining({ product: 'podcast', voices: VOICES }));
+    expect(store.readDoc).toHaveBeenCalledWith('admin_config', 'podcast_voices', 'admin_config');
+  });
+
+  it('records a failed read of the voices as the draft’s audioError and never renders', async () => {
+    const deps = happyDeps({
+      readVoices: vi.fn(async () => {
+        throw new Error('cosmos down');
+      }),
+    });
+    const store = makeStore();
+    const report = await run({ store, deps });
+    expect(deps.synthesize).not.toHaveBeenCalled();
+    expect(report.audioError).toBe('The podcast voices could not be read: cosmos down');
+    const saved = store.docs[TRANSCRIPT_CONTAINER]['article_picking-a-state-backend'];
+    expect(saved).toMatchObject({ status: STATUS.draft, audioError: 'The podcast voices could not be read: cosmos down' });
+  });
+
+  it('saves the draft with the provider’s "choose the voices first" sentence when none are chosen', async () => {
+    const sentence =
+      'Choose the podcast voices first: no ElevenLabs voice is saved for Maya and Elena. Pick two under Podcast voices at https://hybridcloudworks.com/admin/platform?tab=audio, then run it again. Nothing was sent, so no credits were spent.';
+    const deps = happyDeps({
+      synthesize: vi.fn(async () => {
+        throw Object.assign(new SpeechError(sentence), { code: 'voices_not_chosen' });
+      }),
+    });
+    const report = await run({ deps });
+    expect(report.audioError).toBe(sentence);
+    expect(report.status).toBe(STATUS.draft);
+  });
+});
+
 describe('a full run', () => {
   it('scripts, synthesises, uploads and saves one draft, then records both usage rows', async () => {
     const store = makeStore();
@@ -145,11 +193,14 @@ describe('a full run', () => {
       feature: 'podcastScript',
     });
     // The podcast product, by name: ElevenLabs and only ElevenLabs
-    // (speech/index.js), never the Listen & Learn voice.
+    // (speech/index.js), never the Listen & Learn voice. Nothing is stored
+    // in admin_config/podcast_voices here, so no voices are handed over and
+    // the provider would refuse with "Choose the podcast voices first".
     expect(deps.synthesize).toHaveBeenCalledWith({
       product: 'podcast',
       dialogue: [{ speaker: 'Maya', text: 'Hello' }],
       env: {},
+      voices: null,
     });
     expect(storage.uploadBlob.mock.calls[0].slice(0, 2)).toEqual([
       'podcast',

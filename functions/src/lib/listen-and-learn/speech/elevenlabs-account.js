@@ -58,10 +58,13 @@
  * (https://elevenlabs.io/docs/overview/capabilities/text-to-dialogue). So one
  * credit per character is exact for the default model and an upper bound for
  * any other, which is the safe direction for a figure that gates spending. A
- * Voice Library voice with a credit multiplier would bill more. The voices
- * this provider uses are not library voices, and a free-plan key cannot use
- * library voices through the API at all
- * (https://elevenlabs.io/docs/overview/capabilities/voices).
+ * Voice Library voice with a credit multiplier would bill more. A free-plan
+ * key cannot use library voices through the API at all
+ * (https://elevenlabs.io/docs/overview/capabilities/voices), and the voice
+ * picker offers none on that plan (elevenlabs-voices.js). On a paid plan the
+ * owner may choose one; if it carries a multiplier this figure under-counts,
+ * and the per-request out-of-credit error in elevenlabs.js is the backstop,
+ * as it is for two renders racing each other.
  *
  * ## Why a failed read fails CLOSED
  *
@@ -137,10 +140,28 @@ export const QUOTA_EXCEEDED = 'quota_exceeded';
  */
 export const PAID_PLAN_REQUIRED = 'paid_plan_required';
 
+/**
+ * Where the owner picks the podcast voices (#725). A 402 `paid_plan_required`
+ * names it, because the fix for a paid-only voice is choosing another one.
+ */
+export const VOICE_PICKER_PAGE = 'https://hybridcloudworks.com/admin/platform?tab=audio';
+
 const FREE_TIER = 'free';
 const FREE_STATUSES = new Set(['free', 'free_disabled']);
 const PERMISSION_CODES = new Set(['missing_permissions', 'insufficient_permissions']);
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
+
+/**
+ * Whether a refusal is about the key's permissions rather than the key: a
+ * named permission code, or a 403 that carries no code at all. Shared with
+ * the voice listing in elevenlabs-voices.js, which needs `voices_read`.
+ */
+export function isPermissionRefusal(status, code) {
+  return PERMISSION_CODES.has(code) || (status === 403 && !code);
+}
+
+/** Statuses a retry can change: rate limits and server faults. */
+export const isRetryableStatus = (status) => RETRYABLE_STATUSES.has(status);
 const MAX_ATTEMPTS = 3;
 const NOTHING_SENT = 'nothing was sent, so no credits were spent';
 
@@ -221,16 +242,20 @@ export function dialogueRefusal(status, bodyText) {
     };
   }
   if (status === 402) {
+    // The fix comes first and the raw body last: on the free plan this is
+    // almost always a Voice Library voice, and the answer is a different
+    // voice, chosen where the voices are listed with what the plan allows.
     return {
       retryable: false,
       error: new ElevenLabsSpeechError(
-        `ElevenLabs refused this on the current plan (HTTP 402 ${PAID_PLAN_REQUIRED}); a voice or feature it needs is paid-only: ${detail}`,
+        `ElevenLabs refused this on the current plan (HTTP 402 ${PAID_PLAN_REQUIRED}): a voice or feature it needs is paid-only. ` +
+          `Choose voices your plan allows under Podcast voices at ${VOICE_PICKER_PAGE}. ElevenLabs said: ${detail}`,
         { status, code: PAID_PLAN_REQUIRED }
       ),
     };
   }
   return {
-    retryable: RETRYABLE_STATUSES.has(status),
+    retryable: isRetryableStatus(status),
     error: new ElevenLabsSpeechError(`ElevenLabs HTTP ${status}: ${detail}`, { status }),
   };
 }
@@ -255,7 +280,7 @@ const snippet = (text) => String(text || '').slice(0, 300) || 'no detail';
 function refusalFor(status, text) {
   const code = errorCode(text);
   const label = `HTTP ${status}${code ? ` ${code}` : ''}`;
-  if (PERMISSION_CODES.has(code) || (status === 403 && !code)) {
+  if (isPermissionRefusal(status, code)) {
     return unavailable(
       `${label}: the key needs the User → Read permission (${SUBSCRIPTION_PERMISSION}), set at ${API_KEYS_PAGE}`,
       status
@@ -291,7 +316,7 @@ async function fetchSubscription({ key, fetchImpl, sleep }) {
       }
     }
     lastError = refusalFor(response.status, text);
-    if (!RETRYABLE_STATUSES.has(response.status) || attempt === MAX_ATTEMPTS) throw lastError;
+    if (!isRetryableStatus(response.status) || attempt === MAX_ATTEMPTS) throw lastError;
     await sleep(attempt * 500);
   }
 

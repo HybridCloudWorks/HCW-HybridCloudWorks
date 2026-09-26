@@ -22,18 +22,27 @@ import {
   ELEVENLABS_LIMITS,
   ELEVENLABS_OUTPUT_FORMAT,
   MAX_CHARACTERS_PER_REQUEST,
+  INVALID_VOICE,
   PAID_PLAN_REQUIRED,
+  VOICES_NOT_CHOSEN,
   buildInputs,
   characterCount,
   chunkTurnsByCharacters,
   dialogueCharacters,
   isQuotaExceeded,
-  readVoiceOverrides,
   synthesizeWithElevenLabs,
 } from './elevenlabs.js';
 import { SUBSCRIPTION_URL, clearSubscriptionCache } from './elevenlabs-account.js';
 
 const KEYED_ENV = { ELEVENLABS_API_KEY: 'xi-key' };
+
+/**
+ * The owner's choice, as podcast callers pass it (#725). The code has no
+ * default voice, so every render below is handed these unless a test is
+ * about what happens without them.
+ */
+const VOICES = Object.freeze({ Maya: 'MayaVoice00000000001', Elena: 'ElenaVoice0000000002' });
+const synthesize = (params) => synthesizeWithElevenLabs({ voices: VOICES, ...params });
 
 /** A free-plan account with the whole month left, as the subscription read returns it. */
 const FREE_ACCOUNT = {
@@ -103,35 +112,83 @@ const QUOTA_BODY = JSON.stringify({
 const noSleep = vi.fn(async () => {});
 
 describe('voices', () => {
-  it('pairs the two hosts the script writes with distinct premade voices', () => {
-    expect(Object.keys(ELEVENLABS_DEFAULT_VOICES)).toEqual(['Maya', 'Elena']);
-    const ids = Object.values(ELEVENLABS_DEFAULT_VOICES);
-    expect(new Set(ids).size).toBe(2); // a listener must tell them apart
-    // Voice ids are 20-character opaque strings; a name here would be sent
-    // verbatim as `voice_id` and rejected after the upload.
-    for (const id of ids) expect(id).toMatch(/^[A-Za-z0-9]{20}$/);
+  it('has no default voice: the owner chooses both (#725)', () => {
+    // Sarah and Aria were refused to a free account made after March 2026
+    // (402 paid_plan_required), and the docs name no id such an account is
+    // documented to be able to use. An empty default is the honest one.
+    expect(ELEVENLABS_DEFAULT_VOICES).toEqual({});
+    expect(Object.isFrozen(ELEVENLABS_DEFAULT_VOICES)).toBe(true);
+    // The fixture is shaped like real ids, or buildInputs would refuse it.
+    for (const id of Object.values(VOICES)) expect(id).toMatch(/^[A-Za-z0-9]{20}$/);
   });
 
-  it('reads per-host overrides from the environment', () => {
-    expect(readVoiceOverrides({ LISTEN_AND_LEARN_VOICE_MAYA: 'abc' })).toEqual({ Maya: 'abc' });
-    expect(readVoiceOverrides({})).toEqual({});
-    expect(
-      readVoiceOverrides({ LISTEN_AND_LEARN_VOICE_ELENA: '@Microsoft.KeyVault(SecretUri=x)' })
-    ).toEqual({});
+  it('with no voices chosen, says to choose them first and sends nothing', async () => {
+    const fetchImpl = vi.fn();
+    let caught;
+    try {
+      await synthesizeWithElevenLabs({ dialogue: DIALOGUE, env: KEYED_ENV, fetchImpl, sleep: noSleep });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toMatchObject({ name: 'SpeechError', provider: 'elevenlabs', code: VOICES_NOT_CHOSEN });
+    expect(caught.message).toBe(
+      'Choose the podcast voices first: no ElevenLabs voice is saved for Maya and Elena. ' +
+        'Pick two under Podcast voices at https://hybridcloudworks.com/admin/platform?tab=audio, then run it again. ' +
+        'Nothing was sent, so no credits were spent.'
+    );
+    // Not even the account read: the pre-flight comes after the voices.
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('names only the host still without a voice', async () => {
+    await expect(
+      synthesizeWithElevenLabs({
+        dialogue: DIALOGUE,
+        voices: { Maya: VOICES.Maya },
+        env: KEYED_ENV,
+        fetchImpl: vi.fn(),
+      })
+    ).rejects.toThrow(/^Choose the podcast voices first: no ElevenLabs voice is saved for Elena\./);
+  });
+
+  it('refuses a voice that is not an ElevenLabs id, a Gemini name say, before sending', async () => {
+    const fetchImpl = vi.fn();
+    await expect(
+      synthesizeWithElevenLabs({
+        dialogue: DIALOGUE,
+        voices: { Maya: 'Kore', Elena: VOICES.Elena },
+        env: KEYED_ENV,
+        fetchImpl,
+      })
+    ).rejects.toMatchObject({ code: INVALID_VOICE, message: expect.stringMatching(/voice for Maya is not an ElevenLabs voice id/) });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('no longer reads the Listen & Learn voice settings, which belong to Gemini and Azure', async () => {
+    const env = { ...KEYED_ENV, LISTEN_AND_LEARN_VOICE_MAYA: 'Kore', LISTEN_AND_LEARN_VOICE_ELENA: 'Aoede' };
+    // Without a choice they do not stand in for one ...
+    await expect(
+      synthesizeWithElevenLabs({ dialogue: DIALOGUE, env, fetchImpl: vi.fn() })
+    ).rejects.toMatchObject({ code: VOICES_NOT_CHOSEN });
+    // ... and with one they do not override it.
+    const dialogue = vi.fn(async () => okResponse());
+    await synthesize({ dialogue: DIALOGUE, env, fetchImpl: withAccount(dialogue), sleep: noSleep });
+    const body = JSON.parse(dialogue.mock.calls[0][1].body);
+    expect(body.inputs.map((i) => i.voice_id)).toEqual([VOICES.Maya, VOICES.Elena, VOICES.Maya]);
   });
 
   it('builds one input per turn carrying that speaker’s voice id', () => {
-    expect(buildInputs(DIALOGUE, ELEVENLABS_DEFAULT_VOICES)).toEqual([
-      { text: 'Hello there', voice_id: ELEVENLABS_DEFAULT_VOICES.Maya },
-      { text: 'Hi back', voice_id: ELEVENLABS_DEFAULT_VOICES.Elena },
-      { text: 'And so', voice_id: ELEVENLABS_DEFAULT_VOICES.Maya },
+    expect(buildInputs(DIALOGUE, VOICES)).toEqual([
+      { text: 'Hello there', voice_id: VOICES.Maya },
+      { text: 'Hi back', voice_id: VOICES.Elena },
+      { text: 'And so', voice_id: VOICES.Maya },
     ]);
   });
 
   it('fails a turn whose speaker has no voice BEFORE any request is sent', async () => {
     const fetchImpl = vi.fn();
     await expect(
-      synthesizeWithElevenLabs({
+      synthesize({
         dialogue: [turn('Maya', 'Hi'), turn('Narrator', 'Welcome')],
         env: KEYED_ENV,
         fetchImpl,
@@ -146,7 +203,7 @@ describe('voices', () => {
     const long = 'word '.repeat(300).trim(); // 1,499 chars → forces a second chunk
     const fetchImpl = withAccount(vi.fn(async () => okResponse()));
     await expect(
-      synthesizeWithElevenLabs({
+      synthesize({
         dialogue: [turn('Maya', long), turn('Elena', long), turn('Guest', 'Bye')],
         env: KEYED_ENV,
         fetchImpl,
@@ -155,28 +212,12 @@ describe('voices', () => {
     ).rejects.toThrow(/No voice configured for speaker "Guest"/);
     expect(fetchImpl).not.toHaveBeenCalled();
   });
-
-  it('lets an environment override outrank the default and a caller argument outrank both', async () => {
-    const dialogue = vi.fn(async () => okResponse());
-    await synthesizeWithElevenLabs({
-      dialogue: [turn('Maya', 'Hi'), turn('Elena', 'Hello')],
-      env: { ...KEYED_ENV, LISTEN_AND_LEARN_VOICE_MAYA: 'envMayaVoice000000000' },
-      voices: { Elena: 'callerElenaVoice00000' },
-      fetchImpl: withAccount(dialogue),
-      sleep: noSleep,
-    });
-    const body = JSON.parse(dialogue.mock.calls[0][1].body);
-    expect(body.inputs.map((i) => i.voice_id)).toEqual([
-      'envMayaVoice000000000',
-      'callerElenaVoice00000',
-    ]);
-  });
 });
 
 describe('the request', () => {
   it('posts the dialogue endpoint with the key header, the v3 model and the 64 kbps MP3 format', async () => {
     const dialogue = vi.fn(async () => okResponse());
-    await synthesizeWithElevenLabs({
+    await synthesize({
       dialogue: DIALOGUE,
       env: KEYED_ENV,
       fetchImpl: withAccount(dialogue),
@@ -193,7 +234,7 @@ describe('the request', () => {
     expect(init.headers['Content-Type']).toBe('application/json');
     expect(JSON.parse(init.body)).toEqual({
       model_id: ELEVENLABS_DEFAULT_MODEL,
-      inputs: buildInputs(DIALOGUE, ELEVENLABS_DEFAULT_VOICES),
+      inputs: buildInputs(DIALOGUE, VOICES),
     });
     expect(ELEVENLABS_DEFAULT_MODEL).toBe('eleven_v3');
   });
@@ -203,7 +244,7 @@ describe('the request', () => {
     // request's model_id the day the ElevenLabs key is seeded.
     const dialogue = vi.fn(async () => okResponse());
     const fetchImpl = withAccount(dialogue);
-    await synthesizeWithElevenLabs({
+    await synthesize({
       dialogue: DIALOGUE,
       env: {
         ...KEYED_ENV,
@@ -216,7 +257,7 @@ describe('the request', () => {
     expect(JSON.parse(dialogue.mock.calls[0][1].body).model_id).toBe('eleven_v4');
 
     dialogue.mockClear();
-    await synthesizeWithElevenLabs({
+    await synthesize({
       dialogue: DIALOGUE,
       env: { ...KEYED_ENV, LISTEN_AND_LEARN_TTS_MODEL: 'gemini-3.1-flash-tts-preview' },
       fetchImpl,
@@ -227,10 +268,10 @@ describe('the request', () => {
 
   it('refuses to run without a key, or with an unresolved Key Vault reference as one', async () => {
     await expect(
-      synthesizeWithElevenLabs({ dialogue: DIALOGUE, env: {}, fetchImpl: vi.fn() })
+      synthesize({ dialogue: DIALOGUE, env: {}, fetchImpl: vi.fn() })
     ).rejects.toThrow(/ELEVENLABS_API_KEY is not configured/);
     await expect(
-      synthesizeWithElevenLabs({
+      synthesize({
         dialogue: DIALOGUE,
         env: { ELEVENLABS_API_KEY: '@Microsoft.KeyVault(SecretUri=https://v/s/1)' },
         fetchImpl: vi.fn(),
@@ -240,7 +281,7 @@ describe('the request', () => {
 
   it('refuses an empty dialogue', async () => {
     await expect(
-      synthesizeWithElevenLabs({ dialogue: [turn('Maya', '  ')], env: KEYED_ENV, fetchImpl: vi.fn() })
+      synthesize({ dialogue: [turn('Maya', '  ')], env: KEYED_ENV, fetchImpl: vi.fn() })
     ).rejects.toThrow(/No dialogue turns/);
   });
 });
@@ -255,7 +296,7 @@ describe('chunking at the documented ceiling', () => {
     let call = 0;
     const posted = vi.fn(async () => okResponse([call++, 0xff]));
 
-    const result = await synthesizeWithElevenLabs({
+    const result = await synthesize({
       dialogue,
       env: KEYED_ENV,
       fetchImpl: withAccount(posted),
@@ -275,7 +316,7 @@ describe('chunking at the documented ceiling', () => {
 
   it('never splits a speaker change across a request when whole turns fit', async () => {
     const posted = vi.fn(async () => okResponse());
-    await synthesizeWithElevenLabs({
+    await synthesize({
       dialogue: [turn('Maya', 'a'.repeat(1200)), turn('Elena', 'b'.repeat(1200))],
       env: KEYED_ENV,
       fetchImpl: withAccount(posted),
@@ -284,12 +325,12 @@ describe('chunking at the documented ceiling', () => {
     expect(posted).toHaveBeenCalledTimes(2);
     const first = JSON.parse(posted.mock.calls[0][1].body).inputs;
     expect(first).toHaveLength(1);
-    expect(first[0].voice_id).toBe(ELEVENLABS_DEFAULT_VOICES.Maya);
+    expect(first[0].voice_id).toBe(VOICES.Maya);
   });
 
   it('splits one over-long turn rather than sending it whole and having it refused', async () => {
     const posted = vi.fn(async () => okResponse());
-    await synthesizeWithElevenLabs({
+    await synthesize({
       dialogue: [turn('Maya', 'A sentence. '.repeat(250).trim())], // 2,999 chars
       env: KEYED_ENV,
       fetchImpl: withAccount(posted),
@@ -300,7 +341,7 @@ describe('chunking at the documented ceiling', () => {
       const inputs = JSON.parse(init.body).inputs;
       for (const input of inputs) {
         expect(input.text.length).toBeLessThanOrEqual(MAX_CHARACTERS_PER_REQUEST);
-        expect(input.voice_id).toBe(ELEVENLABS_DEFAULT_VOICES.Maya);
+        expect(input.voice_id).toBe(VOICES.Maya);
       }
     }
   });
@@ -350,7 +391,7 @@ describe('chunking at the documented ceiling', () => {
 describe('usage and cost', () => {
   it('reports the billed character count from the character-cost header as the output unit', async () => {
     const fetchImpl = withAccount(vi.fn(async () => okResponse([1, 2, 3, 4], { characterCost: 27 })));
-    const result = await synthesizeWithElevenLabs({
+    const result = await synthesize({
       dialogue: DIALOGUE,
       env: KEYED_ENV,
       fetchImpl,
@@ -367,7 +408,7 @@ describe('usage and cost', () => {
 
   it('sums the header across chunks', async () => {
     const fetchImpl = withAccount(vi.fn(async () => okResponse([1], { characterCost: 1200 })));
-    const result = await synthesizeWithElevenLabs({
+    const result = await synthesize({
       dialogue: [turn('Maya', 'a'.repeat(1200)), turn('Elena', 'b'.repeat(1200))],
       env: KEYED_ENV,
       fetchImpl,
@@ -387,7 +428,7 @@ describe('usage and cost', () => {
     const fetchImpl = withAccount(
       vi.fn(async () => (call++ === 0 ? okResponse([1], { characterCost: 1150 }) : okResponse([2])))
     );
-    const result = await synthesizeWithElevenLabs({
+    const result = await synthesize({
       dialogue: [turn('Maya', 'a'.repeat(1200)), turn('Elena', 'b'.repeat(1200))],
       env: KEYED_ENV,
       fetchImpl,
@@ -400,7 +441,7 @@ describe('usage and cost', () => {
 
   it('falls back to its own count, flagged as estimated, when the header is absent', async () => {
     const fetchImpl = withAccount(vi.fn(async () => okResponse()));
-    const result = await synthesizeWithElevenLabs({
+    const result = await synthesize({
       dialogue: DIALOGUE,
       env: KEYED_ENV,
       fetchImpl,
@@ -418,7 +459,7 @@ describe('usage and cost', () => {
     const padded = [turn('Maya', '   Hello there \n'), turn('Elena', '\tHi back   ')];
 
     const noHeader = vi.fn(async () => okResponse());
-    const viaCount = await synthesizeWithElevenLabs({
+    const viaCount = await synthesize({
       dialogue: padded,
       env: KEYED_ENV,
       fetchImpl: withAccount(noHeader),
@@ -431,7 +472,7 @@ describe('usage and cost', () => {
 
     // The header still wins whenever it is present.
     const withHeader = vi.fn(async () => okResponse([1], { characterCost: 21 }));
-    const viaHeader = await synthesizeWithElevenLabs({
+    const viaHeader = await synthesize({
       dialogue: padded,
       env: KEYED_ENV,
       fetchImpl: withAccount(withHeader),
@@ -451,7 +492,7 @@ describe('usage and cost', () => {
   it('derives the duration from the byte count, because the stream is constant-bitrate', async () => {
     // 64 kbps → 8,000 bytes per second.
     const fetchImpl = withAccount(vi.fn(async () => okResponse(new Array(80_000).fill(0))));
-    const result = await synthesizeWithElevenLabs({
+    const result = await synthesize({
       dialogue: DIALOGUE,
       env: KEYED_ENV,
       fetchImpl,
@@ -500,7 +541,7 @@ describe('out of credit', () => {
     const sleep = vi.fn(async () => {});
     let caught;
     try {
-      await synthesizeWithElevenLabs({
+      await synthesize({
         dialogue: DIALOGUE,
         env: KEYED_ENV,
         fetchImpl: withAccount(posted),
@@ -523,7 +564,7 @@ describe('out of credit', () => {
     );
     let caught;
     try {
-      await synthesizeWithElevenLabs({
+      await synthesize({
         dialogue: DIALOGUE,
         env: KEYED_ENV,
         fetchImpl: withAccount(posted),
@@ -551,7 +592,7 @@ describe('out of credit', () => {
     );
     let caught;
     try {
-      await synthesizeWithElevenLabs({
+      await synthesize({
         dialogue: DIALOGUE,
         env: KEYED_ENV,
         fetchImpl: withAccount(posted),
@@ -562,7 +603,10 @@ describe('out of credit', () => {
     }
     expect(caught).toMatchObject({ provider: 'elevenlabs', status: 402, code: PAID_PLAN_REQUIRED });
     expect(caught.message).toMatch(/refused this on the current plan/);
-    expect(caught.message).toMatch(/Free users cannot use library voices/);
+    // The fix first, pointing at the picker; ElevenLabs's own words after it.
+    expect(caught.message).toMatch(
+      /Choose voices your plan allows under Podcast voices at https:\/\/hybridcloudworks\.com\/admin\/platform\?tab=audio\. ElevenLabs said: .*Free users cannot use library voices/
+    );
     expect(caught.message).not.toMatch(/out of credit/);
     expect(posted).toHaveBeenCalledTimes(1);
   });
@@ -574,7 +618,7 @@ describe('the credit pre-flight', () => {
   it('reads the subscription with the key before the first dialogue request', async () => {
     const posted = vi.fn(async () => okResponse());
     const fetchImpl = withAccount(posted);
-    await synthesizeWithElevenLabs({ dialogue: DIALOGUE, env: KEYED_ENV, fetchImpl, sleep: noSleep });
+    await synthesize({ dialogue: DIALOGUE, env: KEYED_ENV, fetchImpl, sleep: noSleep });
 
     const [url, init] = fetchImpl.mock.calls[0];
     expect(url).toBe('https://api.elevenlabs.io/v1/user/subscription');
@@ -589,7 +633,7 @@ describe('the credit pre-flight', () => {
     const posted = vi.fn(async () => okResponse());
     let caught;
     try {
-      await synthesizeWithElevenLabs({
+      await synthesize({
         dialogue: [turn('Maya', 'a'.repeat(1200)), turn('Elena', 'b'.repeat(1200))],
         env: KEYED_ENV,
         fetchImpl: withAccount(posted, account({ character_count: 9000 })),
@@ -617,7 +661,7 @@ describe('the credit pre-flight', () => {
     // 24 left renders: the boundary is exact, not padded.
     const tight = [turn('Maya', '  Hello there '), turn('Elena', 'Hi back'), turn('Maya', 'And so')];
     await expect(
-      synthesizeWithElevenLabs({
+      synthesize({
         dialogue: tight,
         env: KEYED_ENV,
         fetchImpl: withAccount(vi.fn(), account({ character_count: 10000 - 23 })),
@@ -627,7 +671,7 @@ describe('the credit pre-flight', () => {
 
     clearSubscriptionCache();
     const posted = vi.fn(async () => okResponse());
-    const result = await synthesizeWithElevenLabs({
+    const result = await synthesize({
       dialogue: tight,
       env: KEYED_ENV,
       fetchImpl: withAccount(posted, account({ character_count: 10000 - 24 })),
@@ -643,7 +687,7 @@ describe('the credit pre-flight', () => {
 
     // Entitled, and an admin set an extension of 5,000: 1,000 + 5,000 covers 2,400.
     const posted = vi.fn(async () => okResponse());
-    await synthesizeWithElevenLabs({
+    await synthesize({
       dialogue: job,
       env: KEYED_ENV,
       fetchImpl: withAccount(
@@ -657,7 +701,7 @@ describe('the credit pre-flight', () => {
     // Entitled but the extension is 0 ("usage-based billing is disabled").
     clearSubscriptionCache();
     await expect(
-      synthesizeWithElevenLabs({
+      synthesize({
         dialogue: job,
         env: KEYED_ENV,
         fetchImpl: withAccount(
@@ -681,7 +725,7 @@ describe('the credit pre-flight', () => {
     );
     let caught;
     try {
-      await synthesizeWithElevenLabs({ dialogue: DIALOGUE, env: KEYED_ENV, fetchImpl, sleep: noSleep });
+      await synthesize({ dialogue: DIALOGUE, env: KEYED_ENV, fetchImpl, sleep: noSleep });
     } catch (err) {
       caught = err;
     }
@@ -692,7 +736,7 @@ describe('the credit pre-flight', () => {
   });
 
   it('returns the plan the audio was rendered on, as the pre-flight read it', async () => {
-    const result = await synthesizeWithElevenLabs({
+    const result = await synthesize({
       dialogue: DIALOGUE,
       env: KEYED_ENV,
       fetchImpl: withAccount(vi.fn(async () => okResponse([1], { characterCost: 24 }))),
@@ -709,8 +753,8 @@ describe('the credit pre-flight', () => {
 
   it('reads the account again after a render, so the next pre-flight sees the spend', async () => {
     const fetchImpl = withAccount(vi.fn(async () => okResponse()));
-    await synthesizeWithElevenLabs({ dialogue: DIALOGUE, env: KEYED_ENV, fetchImpl, sleep: noSleep });
-    await synthesizeWithElevenLabs({ dialogue: DIALOGUE, env: KEYED_ENV, fetchImpl, sleep: noSleep });
+    await synthesize({ dialogue: DIALOGUE, env: KEYED_ENV, fetchImpl, sleep: noSleep });
+    await synthesize({ dialogue: DIALOGUE, env: KEYED_ENV, fetchImpl, sleep: noSleep });
     const reads = fetchImpl.mock.calls.filter(([url]) => String(url).startsWith(SUBSCRIPTION_URL));
     expect(reads).toHaveLength(2);
   });
@@ -721,7 +765,7 @@ describe('retries', () => {
     const responses = [errorResponse(429, 'slow down'), errorResponse(503, ''), okResponse([9])];
     const posted = vi.fn(async () => responses.shift());
     const sleep = vi.fn(async () => {});
-    const result = await synthesizeWithElevenLabs({
+    const result = await synthesize({
       dialogue: DIALOGUE,
       env: KEYED_ENV,
       fetchImpl: withAccount(posted),
@@ -735,7 +779,7 @@ describe('retries', () => {
   it('gives up after three attempts with the last status attached', async () => {
     const posted = vi.fn(async () => errorResponse(500, 'boom'));
     await expect(
-      synthesizeWithElevenLabs({
+      synthesize({
         dialogue: DIALOGUE,
         env: KEYED_ENV,
         fetchImpl: withAccount(posted),
@@ -748,7 +792,7 @@ describe('retries', () => {
   it('does not retry a 400', async () => {
     const posted = vi.fn(async () => errorResponse(400, 'bad inputs'));
     await expect(
-      synthesizeWithElevenLabs({
+      synthesize({
         dialogue: DIALOGUE,
         env: KEYED_ENV,
         fetchImpl: withAccount(posted),
@@ -763,7 +807,7 @@ describe('retries', () => {
       throw new Error('ECONNRESET');
     });
     await expect(
-      synthesizeWithElevenLabs({
+      synthesize({
         dialogue: DIALOGUE,
         env: KEYED_ENV,
         fetchImpl: withAccount(posted),

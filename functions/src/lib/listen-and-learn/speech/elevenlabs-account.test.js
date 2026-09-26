@@ -15,6 +15,7 @@ import {
   PAID_PLAN_REQUIRED,
   SUBSCRIPTION_CACHE_TTL_MS,
   SUBSCRIPTION_URL,
+  VOICE_PICKER_PAGE,
   assertCreditsCover,
   clearSubscriptionCache,
   creditShortfall,
@@ -24,6 +25,8 @@ import {
   errorCode,
   invalidateSubscription,
   isFreePlan,
+  isPermissionRefusal,
+  isRetryableStatus,
   normalizeSubscription,
   readSubscription,
 } from './elevenlabs-account.js';
@@ -142,6 +145,22 @@ describe('dialogueRefusal', () => {
     const paid = dialogueRefusal(402, JSON.stringify({ detail: { code: 'paid_plan_required' } }));
     expect(paid.retryable).toBe(false);
     expect(paid.error).toMatchObject({ status: 402, code: PAID_PLAN_REQUIRED });
+    // A paid-only voice is fixed by choosing another, so the sentence says
+    // where, before ElevenLabs's own body (#725).
+    expect(paid.error.message).toMatch(
+      new RegExp(`^ElevenLabs refused this on the current plan \\(HTTP 402 paid_plan_required\\): .*Choose voices your plan allows under Podcast voices at ${VOICE_PICKER_PAGE.replace(/[.?]/g, '\\$&')}\\. ElevenLabs said: `)
+    );
+    expect(VOICE_PICKER_PAGE).toBe('https://hybridcloudworks.com/admin/platform?tab=audio');
+  });
+
+  it('tells a permission refusal from a refused key', () => {
+    expect(isPermissionRefusal(401, 'missing_permissions')).toBe(true);
+    expect(isPermissionRefusal(403, 'insufficient_permissions')).toBe(true);
+    expect(isPermissionRefusal(403, '')).toBe(true);
+    expect(isPermissionRefusal(401, '')).toBe(false);
+    expect(isPermissionRefusal(401, 'invalid_api_key')).toBe(false);
+    expect([429, 500, 502, 503, 504].every(isRetryableStatus)).toBe(true);
+    expect([400, 401, 402, 403, 404].some(isRetryableStatus)).toBe(false);
   });
 
   it('retries 429 and 5xx only, and reports everything else as the API said it', () => {
