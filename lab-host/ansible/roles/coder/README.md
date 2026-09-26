@@ -108,7 +108,29 @@ Coder's releases are at <https://github.com/coder/coder/releases>;
 2026-09-25. Coder supports PostgreSQL 13 and later (its upstream
 `compose.yaml` runs 17).
 
-## PostgreSQL 18
+## PostgreSQL
+
+### Where it runs
+
+Owner decision 2026-09-26: Coder's database stays a PostgreSQL container on
+the lab host, the `coder-postgres` service beside Coder in this role's
+Docker Compose project. Coder stores its data in PostgreSQL and nothing
+else ("Postgres 13 is the minimum supported version",
+<https://coder.com/docs/admin/setup>), so the engine was never the choice;
+where it runs was. Two alternatives were shown and not taken:
+
+- **Coder's built-in PostgreSQL.** With `CODER_PG_CONNECTION_URL` unset,
+  Coder downloads PostgreSQL binaries from Maven when it starts and keeps
+  the data in its own config root. Those binaries would sit outside the
+  digest pins everything else on the host runs from (ADR 0032), and the
+  data would sit inside the Coder container, where this role's nightly
+  `pg_dump` of `coder-postgres` does not reach.
+- **Azure Database for PostgreSQL Flexible Server, Burstable B1ms.**
+  $0.01921 an hour in Central US at the retail price, about $14 a month for
+  compute alone (Azure retail prices API, read 2026-09-26), plus storage.
+  Every query from the VPS would also cross the internet to Azure.
+
+### The version: 18.6
 
 PostgreSQL moved from 16.15 to **18.6**, the newest release of the newest
 major, on 2026-09-26, while the host held no Coder data, so there was
@@ -119,6 +141,19 @@ API agreed. The 18 image keeps the cluster in a per-major directory,
 `PGDATA=/var/lib/postgresql/18/docker`, under a `VOLUME` at
 `/var/lib/postgresql`, so the Compose file mounts `coder-postgres-data`
 there. At the old `/var/lib/postgresql/data` the image refuses to start.
+
+The pin cannot fall behind unnoticed. Owner instruction 2026-09-26: the
+newest general release of PostgreSQL. `scripts/version-floors.json` holds
+`coder_postgres_image_tag` to the newest major, no more than two minor
+releases behind its newest, and `version-floors.test.mjs` fails CI on a tag
+below that, or on one that is not a general release written as MAJOR.MINOR
+(`18`, `19beta4`). The weekly `update-version-floors` job reads
+endoflife.date's `postgresql` product, which lists a major only from its
+general release. It proposes a new major once that major's `.2` exists,
+and never a beta or a release candidate. When a moved floor passes the
+pin, that pull request goes red on it. A new minor release is a new digest
+(the lines under "Bumping a pin" above), and a new major is "The next
+major" below.
 
 What was rehearsed that day, on Docker 29.8 with the committed Compose file
 unchanged, the pinned Coder v2.37.3 and postgres:18.6 digests, and

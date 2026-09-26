@@ -10,7 +10,7 @@
 import { afterAll, describe, it, expect } from 'vitest';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import {
   ENGINES_EXEMPT,
@@ -20,6 +20,7 @@ import {
   formatFindings,
   judge,
   loadFloors,
+  majorMinorFloor,
   meetsFloor,
   minorFloor,
   npmRangeAdmits,
@@ -27,6 +28,7 @@ import {
   parseNpmRange,
   patchFloor,
   readDockerfile,
+  readLabHost,
   readWorkflow,
   terraformConstraintAdmits,
 } from './version-floors.mjs';
@@ -59,6 +61,59 @@ describe('version arithmetic', () => {
     expect(patchFloor('1.16.1')).toBe('1.16.0');
     expect(minorFloor('26.10.0')).toBe('26.8.0');
     expect(minorFloor('28.1.3')).toBe('28.0.0');
+  });
+
+  it('derives the N-2 minor floor of a MAJOR.MINOR release, and refuses any other shape', () => {
+    expect(majorMinorFloor('18.6')).toBe('18.4');
+    expect(majorMinorFloor('19.1')).toBe('19.0');
+    expect(() => majorMinorFloor('18.6.0')).toThrow(/needs MAJOR\.MINOR, got 18\.6\.0/);
+    expect(() => majorMinorFloor('18')).toThrow(/needs MAJOR\.MINOR/);
+  });
+});
+
+describe("reading the lab host's PostgreSQL pin", () => {
+  const dir = mkdtempSync(join(tmpdir(), 'version-floors-lab-'));
+  mkdirSync(join(dir, 'lab-host', 'ansible', 'group_vars'), { recursive: true });
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  /** readLabHost on a group_vars holding `lines`, cut to the postgresql kind. */
+  const postgresqlOf = (lines) => {
+    writeFileSync(join(dir, 'lab-host', 'ansible', 'group_vars', 'all.yml'), `${['---', ...lines].join('\n')}\n`);
+    const { pins, problems } = readLabHost(dir);
+    const own = (p) => p.kind === 'postgresql';
+    return { pins: pins.filter(own), problems: problems.filter(own) };
+  };
+
+  it('reads coder_postgres_image_tag as MAJOR.MINOR, quoted or not', () => {
+    for (const value of ['"18.6"', "'18.6'", '18.6']) {
+      const { pins, problems } = postgresqlOf(['coder_postgres_image: postgres', `coder_postgres_image_tag: ${value}`]);
+      expect(problems).toEqual([]);
+      expect(pins).toEqual([
+        {
+          file: 'lab-host/ansible/group_vars/all.yml',
+          line: 3,
+          where: 'lab-host/ansible/group_vars/all.yml > coder_postgres_image_tag',
+          kind: 'postgresql',
+          raw: '18.6',
+          version: '18.6',
+        },
+      ]);
+    }
+  });
+
+  it('refuses a major-only tag, a beta and a release candidate, and says why', () => {
+    for (const value of ['"18"', '"19beta4"', '"19rc1"', '"18.6-trixie"']) {
+      const { pins, problems } = postgresqlOf([`coder_postgres_image_tag: ${value}`]);
+      expect(pins).toEqual([]);
+      expect(problems).toHaveLength(1);
+      expect(problems[0].message).toMatch(/is not a general release as MAJOR\.MINOR/);
+    }
+  });
+
+  it('reports a missing pin rather than passing on nothing', () => {
+    const { pins, problems } = postgresqlOf(['coder_postgres_image: postgres']);
+    expect(pins).toEqual([]);
+    expect(problems.map((p) => p.message)).toEqual(['coder_postgres_image_tag is missing']);
   });
 });
 
@@ -265,13 +320,21 @@ describe('the rules', () => {
     expect(judge(at({ kind: 'terraform', constraint: '~> 1.15.0' }), floors)).toMatch(/does not admit 1\.16\.4/);
     expect(judge(at({ kind: 'terraform', version: '1.16.1' }), floors)).toMatch(/below the floor 1\.16\.2/);
   });
+
+  it('holds the PostgreSQL pin to the newest major, at most two minor releases behind', () => {
+    expect(judge(at({ kind: 'postgresql', version: '18.6' }), floors)).toBe(null);
+    expect(judge(at({ kind: 'postgresql', version: '18.4' }), floors)).toBe(null);
+    expect(judge(at({ kind: 'postgresql', version: '18.3' }), floors)).toMatch(/18\.3 is below the floor 18\.4/);
+    expect(judge(at({ kind: 'postgresql', version: '17.11' }), floors)).toMatch(/below the floor 18\.4/);
+    expect(judge(at({ kind: 'postgresql', version: '16.15' }), floors)).toMatch(/below the floor 18\.4/);
+  });
 });
 
 describe('scripts/version-floors.json', () => {
   const kinds = floors.kinds;
 
   it('has one entry per kind, each dated and sourced', () => {
-    expect(Object.keys(kinds).sort()).toEqual(['debian', 'node', 'python', 'terraform', 'ubuntu']);
+    expect(Object.keys(kinds).sort()).toEqual(['debian', 'node', 'postgresql', 'python', 'terraform', 'ubuntu']);
     const entries = [...Object.values(kinds), ...Object.values(kinds.node.platformCeilings)];
     for (const entry of entries) {
       expect(entry.newest, JSON.stringify(entry)).toBeTruthy();
@@ -296,6 +359,8 @@ describe('scripts/version-floors.json', () => {
     }
     expect(kinds.ubuntu.floor).toBe(kinds.ubuntu.newest);
     expect(kinds.debian.floor).toBe(kinds.debian.newest);
+    expect(kinds.postgresql.floor).toBe(majorMinorFloor(kinds.postgresql.newest));
+    expect(kinds.postgresql.newest.split('.')[0]).toBe(kinds.postgresql.line);
   });
 
   it('is in the form the weekly updater writes, so its first bump is a diff of values only', () => {
@@ -332,6 +397,9 @@ describe('every pin in the repository meets its floor', () => {
     expect(labHost.some((p) => p.kind === 'node')).toBe(true);
     expect(labHost.some((p) => p.kind === 'python')).toBe(true);
     expect(labHost.filter((p) => p.kind === 'ubuntu').length).toBeGreaterThanOrEqual(2);
+    expect(labHost.filter((p) => p.kind === 'postgresql').map((p) => p.where)).toEqual([
+      'lab-host/ansible/group_vars/all.yml > coder_postgres_image_tag',
+    ]);
   });
 
   it('names a reason for every package that has no engines.node', () => {

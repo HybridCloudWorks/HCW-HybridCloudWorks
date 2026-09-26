@@ -19,6 +19,30 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **PostgreSQL has a version floor, and the weekly job proposes general
+  releases only (#715).** Owner instruction 2026-09-26: the newest general
+  release of PostgreSQL. `scripts/version-floors.json` gains a `postgresql`
+  kind: line 18, newest 18.6, floor 18.4 (N-2 minors; PostgreSQL numbers
+  releases MAJOR.MINOR), checked 2026-09-26. The pin reader checks
+  `coder_postgres_image_tag` in `lab-host/ansible/group_vars/all.yml`
+  against it. It accepts exactly MAJOR.MINOR and reports anything else,
+  such as a moving `18` or a `19beta4`, as a finding rather than a pass.
+  `update-version-floors` reads endoflife.date's `postgresql` product
+  rather than postgresql.org's `versions.json`. That keeps one source
+  format and keeps true the workflow's "endoflife.date's v1 API for each
+  kind"; both said 18.6 that day. It adopts a new major at its `.2`, and
+  skips any major whose latest release is not MAJOR.MINOR or is not yet
+  released, so a beta or release candidate is never proposed.
+  `majorMinorFloor` joins the floor arithmetic. Nine tests cover the
+  arithmetic, the reader (quoted and unquoted tags, `18`, `19beta4`,
+  `19rc1`, a missing pin), the rule, the file's shape and the updater
+  (minor move, major adoption at `.2`, five pre-release shapes, a
+  backwards source). Setting the pin back to `16.15`, then to `19beta4`,
+  turned the gate red with one line naming the file, the pin and the
+  floor. A live `--dry-run` printed `No floor moved`. Coder v2.37.3 was
+  checked the same day and is the newest release (`ghcr.io/coder/coder:latest`
+  resolves to its digest), so it is unchanged.
+
 - **The lab agent and the Coder template pull the Python 3.14 / Debian 13
   lab image.** `vps-agent/lib/capabilities.js` pins `hcw-lab-runner` and
   `lab-host/coder/templates/hcw-lab/main.tf` pins `hcw-lab` to the digests
@@ -921,7 +945,14 @@ This project has not cut a tagged release; entries are grouped under
   host commands were run against the Compose file: the 18 image refuses to
   initialise beside another major's cluster, and initialises a fresh
   cluster once that one is set aside. The backup and restore commands need
-  no path, so they are unchanged.
+  no path, so they are unchanged. Where the database runs is now recorded
+  as an owner decision (2026-09-26), in the role README's "Where it runs"
+  and as a one-line amendment to ADR 0032's decision 2: it stays this
+  container on the host. The two options not taken were Coder's built-in
+  PostgreSQL (binaries fetched from Maven at start, outside the host's
+  digest pins) and Azure Database for PostgreSQL Flexible Server B1ms
+  ($0.01921 an hour in Central US, about $14 a month in compute, plus
+  storage and internet latency from the VPS).
 
 - **The hcw-lab image runs Python 3.14.7 on Debian 13 trixie, with every
   tool at its newest release (#714, #715).** Owner rule 2026-09-26: every
