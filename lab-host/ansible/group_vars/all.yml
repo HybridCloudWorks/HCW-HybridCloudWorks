@@ -149,12 +149,20 @@ coder_postgres_image_tag: "16.15"
 coder_postgres_image_digest: sha256:1a6ab3f5345eb6dbe04a1349529caabdb0ab09293a09590fad07b2246bfa4b54
 
 # vps-agent runs host-native as a systemd service (ADR 0032) from a checkout of
-# this repository at a pinned commit. The repository has no tagged release, so
-# the pin is a sha.
+# this repository. Its commit is the one this playbook runs from: the lookup
+# reads the full sha of HEAD in the playbook's own checkout, on the controller,
+# which is the host itself. bootstrap.sh leaves that checkout detached at the
+# sha it resolved from HCW_REPO_REF (origin/main by default), so the playbook
+# and the agent move together and there is no second pin to bump; run by hand
+# from a checkout, site.yml gives the agent that checkout's commit.
+# `-e labs_agent_repo_ref=<sha>` holds the agent at another commit, because
+# extra vars win over group_vars (lab-host/README.md, "Re-running"). The role's
+# dependency stamp is keyed on the commit the checkout lands on, not on this
+# string, so a moved commit reinstalls either way.
 labs_agent_user: hcw-labs-agent
 labs_agent_home: /opt/hcw-labs-agent
 labs_agent_repo_url: https://github.com/HybridCloudWorks/HCW-HybridCloudWorks.git
-labs_agent_repo_ref: 04aa9e36a2c16813dcbabb838f5c2b86d3370d96
+labs_agent_repo_ref: "{{ lookup('ansible.builtin.pipe', 'git -C ' ~ (playbook_dir | quote) ~ ' rev-parse --verify HEAD') }}"
 # Node.js 26, the newest release line (owner direction 2026-09-26; it becomes
 # LTS on 2026-10-28). NodeSource publishes one codename-independent suite,
 # nodistro, so this pin is the same on 26.04 and 24.04; 26.10.0-1nodesource1

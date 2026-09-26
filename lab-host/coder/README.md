@@ -89,7 +89,7 @@ terraform -chdir=lab-host/coder/templates/hcw-lab plan -refresh=false
 
 | Change | Where | Then |
 | --- | --- | --- |
-| Coder or PostgreSQL version | `coder_image_*`, `coder_postgres_image_*` in `../ansible/group_vars/all.yml` (`../ansible/roles/coder/README.md` shows the `imagetools inspect` lines) | Merge, move `HCW_REPO_REF` in `../bootstrap.sh`, re-run `bootstrap.sh` on the host |
+| Coder or PostgreSQL version | `coder_image_*`, `coder_postgres_image_*` in `../ansible/group_vars/all.yml` (`../ansible/roles/coder/README.md` shows the `imagetools inspect` lines) | Merge, then re-run `bootstrap.sh` on the host, which checks out the merged `main` |
 | Workspace image | `image_tag` and `image_digest` in `templates/hcw-lab/main.tf`, from the `publish-lab-image.yml` job summary | `coder templates push` again (`../README.md`, "Coder") |
 | Providers or the `code-server` module | `required_providers` and `module "code-server"` in `main.tf`, then `terraform init -upgrade` to refresh `.terraform.lock.hcl` | `coder templates push` |
 | A new lab | `local.labs` in `main.tf` and the matching `option` and `validation` regex; the catalogue in `frontend/src/data/labs/catalogue.js` (#681) | `coder templates push` |

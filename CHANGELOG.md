@@ -948,6 +948,44 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The lab host runs the commit it is given, not a pin that lags one merge
+  behind.** `lab-host/bootstrap.sh` pinned `HCW_REPO_REF` to `04aa9e36`, a
+  commit from before `lab-host/` existed, so a first run checked it out and
+  stopped at `cd lab-host/ansible`. The deeper fault was structural: a pull
+  request cannot pin its own merge commit, so the documented "move
+  `HCW_REPO_REF` and `labs_agent_repo_ref` in the same pull request" always
+  named the commit before the change, and every lab-host change needed a
+  second pull request to take effect. `HCW_REPO_REF` now defaults to
+  `origin/main`. After the clone or fetch it is resolved once with
+  `git rev-parse --verify "${HCW_REPO_REF}^{commit}"`, and that full sha is
+  checked out detached and printed before the play and again as it starts.
+  `main`'s ruleset (a pull request for every change, no bypass actors,
+  strict required checks including `ansible-lint (lab-host)` and
+  `coder (lab-host)`) gives the trust the pin gave. `HCW_REPO_REF=<sha or
+  ref>` still holds or rolls back a host, and an unknown ref stops the run
+  before anything changes. When the resolved commit carries a different
+  `bootstrap.sh`, the running script hands over to it, so a uv, Python or
+  ansible-core bump takes effect on the run that fetches it rather than
+  the one after. `labs_agent_repo_ref` in `group_vars/all.yml` now reads
+  the full sha of the playbook's own checkout, so the agent runs the same
+  commit, including when `site.yml` is run by hand, and an explicit
+  `-e labs_agent_repo_ref=<sha>` still holds it back. The `npm ci` stamp is
+  keyed on the sha the checkout task lands on rather than on the ref
+  string. Stamps left by other commits are now removed first, so releasing
+  a hold reinstalls rather than keeping the held commit's `node_modules`.
+  Documented in `lab-host/README.md` ("Which commit runs", with runnable
+  hold and rollback lines), the `labs_agent` role README and argument spec,
+  `docs/runbooks/labs-host.md`, `lab-host/coder/README.md` and
+  `infra-lab/README.md` step 7. Verified in a privileged systemd
+  `ubuntu:26.04` container from a bundle of the branch, with coder and arc
+  off and no vault. The first run was `failed=0` and named the sha, and the
+  second was `changed=0`. After `main` moved in the bundle, the plain re-run
+  moved the playbook and the agent to the new sha and reinstalled
+  (`changed=3`). `-e labs_agent_repo_ref` held the agent at the previous
+  commit while the playbook moved, and releasing it reinstalled. A
+  `--check --diff` run and a further run were `changed=0`, an older
+  `bootstrap.sh` handed over, and an unknown ref was refused.
+
 - **The Azure detail page's catalogue walk no longer fails at random in a full
   suite run (#640).** `CertDetailPage.test.jsx`'s *resolves every landing-page
   slug to a detail page* failed once on 2026-09-17, passed on its own, and

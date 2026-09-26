@@ -239,7 +239,9 @@ ssh hcw-lab "apt-get update -q && apt-get install -y -q git && git clone https:/
 **Success looks like** a final `PLAY RECAP` line for `localhost` with
 `failed=0` and `unreachable=0`. After it, root login is off, so run
 `scripts/lab/Connect-Lab.ps1` again without `-User` to point the alias at
-`hcwadmin`. Every later run is as `hcwadmin`, the command
+`hcwadmin`. Each run checks out the current `main` commit and prints its
+sha, so a later run brings the host to whatever has merged since, with no
+pin to move. Every later run is as `hcwadmin`, the command
 `lab-host/README.md` documents:
 
 ```powershell
