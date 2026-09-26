@@ -56,8 +56,12 @@ variable "azure_resource_providers" {
     "Microsoft.App", # Flex Consumption subnet delegation (Microsoft.App/environments)
     # No Microsoft.CognitiveServices: AI runs on external provider APIs, so
     # this subscription hosts no Azure OpenAI account to register it for.
+    "Microsoft.Compute",             # automatic extension upgrade of the Arc machine's Azure Monitor Agent (#663)
     "Microsoft.DocumentDB",          # Cosmos DB
-    "Microsoft.Insights",            # Application Insights, diagnostic settings, action groups
+    "Microsoft.GuestConfiguration",  # machine configuration: the audit-only Linux baseline on the Arc machine (#663)
+    "Microsoft.HybridCompute",       # Arc-enabled servers: the lab host's machine resource (#663)
+    "Microsoft.HybridConnectivity",  # Arc-enabled servers: the Connected Machine agent's connectivity service (#663)
+    "Microsoft.Insights",            # Application Insights, diagnostic settings, action groups, data collection rules
     "Microsoft.KeyVault",            # Key Vault
     "Microsoft.ManagedIdentity",     # user-assigned identities
     "Microsoft.Network",             # virtual network and subnets
@@ -1265,4 +1269,38 @@ variable "bootstrap_admin_emails" {
   EOT
   type        = list(string)
   default     = []
+}
+
+# -----------------------------------------------------------------------------
+# Hybrid Lab: Azure Arc onboarding (#663, lab-hybrid.tf)
+# -----------------------------------------------------------------------------
+
+# The OBJECT id (not the application/client id) of the Arc onboarding service
+# principal, sp-arc-onboarding-lab-hybrid-prod-cus. The owner creates it with
+# no role as the first step of docs/runbooks/labs-host.md; Terraform then
+# grants it Azure Connected Machine Onboarding on rg-lab-hybrid-prod-cus and
+# nothing else. Null, the default, plans no grant. The two ids are easy to
+# swap and a swapped value fails only at apply, as PrincipalNotFound, so the
+# runbook reads the object id with `az ad sp show` rather than taking the
+# appId the create command prints.
+variable "arc_onboarding_principal_id" {
+  description = "Object id of the owner-created Arc onboarding service principal; null until it exists (lab-hybrid.tf, #663)"
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.arc_onboarding_principal_id == null || can(regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", var.arc_onboarding_principal_id))
+    error_message = "arc_onboarding_principal_id must be a lowercase GUID (the service principal's object id) or null."
+  }
+}
+
+# Posture switch for the audit-only Linux baseline assignment. Default false
+# because the run identity cannot write a policy assignment until the owner
+# has granted it Resource Policy Contributor on rg-lab-hybrid-prod-cus (the
+# runbook step), and true before that fails the apply with AuthorizationFailed
+# on Microsoft.Authorization/policyAssignments/write.
+variable "lab_hybrid_policy_enabled" {
+  description = "Create the audit-only Linux security baseline policy assignment on rg-lab-hybrid-prod-cus; needs the run identity's Resource Policy Contributor grant first (#663)"
+  type        = bool
+  default     = false
 }

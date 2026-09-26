@@ -397,6 +397,76 @@ describe('AI feature switches', () => {
     }
   });
 
+  describe('per-feature provider placement (#701)', () => {
+    it('GET resolves every feature, with the public ones locked off for nvidia', async () => {
+      const store = makeStore({
+        readDoc: vi.fn(async () => ({
+          features: {},
+          placement: { nvidia: { forgeDrafting: 'order', pricingExplain: 'first' } },
+        })),
+      });
+      const body = JSON.parse((await handlers(store).getAiFeatures(makeRequest(), context)).body);
+      expect(Object.keys(body.placement.nvidia).sort()).toEqual(Object.keys(body.features).sort());
+      expect(body.placement.nvidia.forgeDrafting).toBe('order');
+      expect(body.placement.nvidia.inspector).toBe('first');
+      // A stored 'first' on a locked feature is reported as what happens: off.
+      expect(body.placement.nvidia.pricingExplain).toBe('off');
+      expect(body.placement.nvidia.landingZoneExplain).toBe('off');
+      expect(body.placementDefaults.nvidia.pricingExplain).toBe('off');
+    });
+
+    it('PUT merges one placement without clearing the others or the switches', async () => {
+      const store = makeStore({
+        readDoc: vi.fn(async () => ({
+          features: { critique: false },
+          placement: { nvidia: { critique: 'off' } },
+        })),
+      });
+      const response = await handlers(store).putAiFeatures(
+        makeRequest({ body: { placement: { nvidia: { forgeDrafting: 'order' } } } }),
+        context
+      );
+      expect(response.status).toBe(200);
+      expect(store.patchDoc).toHaveBeenCalledWith('admin_settings', 'ai-features', {
+        features: { critique: false },
+        placement: { nvidia: { critique: 'off', forgeDrafting: 'order' } },
+        updatedAt: '2026-08-06T12:00:00.000Z',
+      });
+    });
+
+    it('PUT refuses to place nvidia in a locked feature — configuration cannot enable', async () => {
+      const store = makeStore();
+      for (const value of ['first', 'order']) {
+        const response = await handlers(store).putAiFeatures(
+          makeRequest({ body: { placement: { nvidia: { landingZoneExplain: value } } } }),
+          context
+        );
+        expect(response.status).toBe(400);
+        expect(JSON.parse(response.body).error).toMatch(/never used for landingZoneExplain/);
+      }
+      expect(store.upsertDoc).not.toHaveBeenCalled();
+      expect(store.patchDoc).not.toHaveBeenCalled();
+    });
+
+    it('PUT 400s an unknown provider, feature or value', async () => {
+      const store = makeStore();
+      for (const placement of [
+        { gemini: { forgeDrafting: 'first' } },
+        { nvidia: { forgeDraftin: 'first' } },
+        { nvidia: { forgeDrafting: 'always' } },
+        { nvidia: ['first'] },
+        [],
+      ]) {
+        const response = await handlers(store).putAiFeatures(
+          makeRequest({ body: { placement } }),
+          context
+        );
+        expect(response.status, JSON.stringify(placement)).toBe(400);
+      }
+      expect(store.upsertDoc).not.toHaveBeenCalled();
+    });
+  });
+
   it('both verbs require a role', async () => {
     const store = makeStore();
     const denied = createAdminIntegrationHandlers({ guard: denyGuard, store, ...fixed });

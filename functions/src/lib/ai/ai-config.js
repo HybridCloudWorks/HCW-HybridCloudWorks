@@ -16,6 +16,8 @@
  *
  *   1. Which providers, in which order?   resolveProviderOrder()
  *   2. May this feature call a model?     isFeatureEnabled()
+ *   3. Where does a per-feature provider  applyFeaturePlacement()  (#701)
+ *      go for this feature?
  *
  * THREE RULES DECIDE EVERY EDGE CASE HERE. They are worth stating plainly
  * because each one is the answer to "what happens when configuration and
@@ -134,7 +136,9 @@ export const FEATURE_NAMES = Object.freeze(Object.keys(AI_FEATURES));
 
 /**
  * Order used when configuration says nothing. Owner decision, 2026-08-23:
- * Gemini first, then OpenAI, then Claude.
+ * Gemini first, then OpenAI, then Claude. NVIDIA (#701) is appended last and
+ * is placed per feature — see PER_FEATURE_PROVIDERS below — so for content
+ * features it is moved to the front, and for the public ones it is removed.
  *
  * This is a cost ordering, not a quality one. Gemini Flash-Lite is roughly a
  * tenth of Claude Sonnet per token, and the work behind these calls — summarise
@@ -142,7 +146,132 @@ export const FEATURE_NAMES = Object.freeze(Object.keys(AI_FEATURES));
  * does correctly. `CONTENTFORGE_AI_PROVIDER` still pins a provider outright,
  * and per-provider `order` in the portal overrides this list.
  */
-export const DEFAULT_PROVIDER_ORDER = Object.freeze(['gemini', 'openai', 'anthropic']);
+export const DEFAULT_PROVIDER_ORDER = Object.freeze(['gemini', 'openai', 'anthropic', 'nvidia']);
+
+/**
+ * Providers whose place in the chain is decided PER FEATURE (#701).
+ *
+ * NVIDIA's API Catalog is a trial tier: free, about 40 requests a minute per
+ * account, and governed by trial terms rather than a production SLA. That is
+ * an excellent fit for owner-triggered content work — a slow or refused call
+ * there costs nothing visible, because the router hands it to the next
+ * provider — and a poor one for the anonymous public routes, where a trial
+ * ceiling and trial terms are weakest. One global position cannot express
+ * both, so for these providers each feature carries a placement:
+ *
+ *   'first'  ahead of the global order — the free model writes, the paid ones
+ *            are the failover.
+ *   'order'  wherever the global order puts it (last, by default): used only
+ *            when every provider above it cannot serve.
+ *   'off'    never in this feature's chain.
+ *
+ * Its global position still exists (it is last in DEFAULT_PROVIDER_ORDER, and
+ * the portal can move it and switch it off like any other provider); a
+ * placement then moves it or removes it for one feature.
+ */
+export const PER_FEATURE_PROVIDERS = Object.freeze(['nvidia']);
+
+export const PLACEMENTS = Object.freeze(['first', 'order', 'off']);
+
+/**
+ * The placement each feature gets when configuration says nothing, and the
+ * ceiling configuration can never lift.
+ *
+ * 'off' HERE IS A LOCK, not a default. The header's first rule is that
+ * configuration can reorder and disable, never enable, and a feature whose
+ * code-level placement is 'off' is one where routing to the trial tier is not
+ * a decision an administrator can make from a toggle:
+ *
+ *   pricingExplain, landingZoneExplain — the anonymous public explain route.
+ *     Unauthenticated traffic against a 40 RPM trial account, under trial
+ *     terms, is exactly the use the issue ruled out.
+ *   altText — sends images; the default NVIDIA models are chosen for text.
+ *   sourceGrounding — Gemini-only by construction (router.js header).
+ *
+ * A feature missing from this table is 'off' too, so a new feature arrives
+ * without the trial tier until someone decides otherwise — the opposite of
+ * rule 3, deliberately: rule 3 is about the feature running at all, this is
+ * about a trial-tier provider joining it.
+ *
+ * Content features the owner triggers are 'first'. The Telegram assistant is
+ * owner-only chat rather than content, so it keeps the global order.
+ */
+export const PROVIDER_PLACEMENT_DEFAULTS = Object.freeze({
+  nvidia: Object.freeze({
+    inspector: 'first',
+    critique: 'first',
+    forgeDrafting: 'first',
+    forgeGrading: 'first',
+    voiceCalibration: 'first',
+    socialCaption: 'first',
+    listenAndLearn: 'first',
+    podcastScript: 'first',
+    telegram: 'order',
+    altText: 'off',
+    sourceGrounding: 'off',
+    pricingExplain: 'off',
+    landingZoneExplain: 'off',
+  }),
+});
+
+/**
+ * Where a per-feature provider goes for one feature.
+ *
+ * A call with no feature (or an unknown one) gets 'off': an undeclared call is
+ * not one anybody chose to send to a trial tier. `ai-call-sites.test.js` makes
+ * sure every real call site declares one.
+ *
+ * @param {object|null} settings The `ai-features` document, or null.
+ * @param {string} provider      One of PER_FEATURE_PROVIDERS.
+ * @param {string|null} feature  A key of AI_FEATURES.
+ * @returns {'first'|'order'|'off'}
+ */
+export function placementFor(settings, provider, feature) {
+  const defaults = PROVIDER_PLACEMENT_DEFAULTS[provider];
+  if (!defaults || !feature) return 'off';
+  const fallback = defaults[feature] || 'off';
+  // The lock: nothing stored can put a provider into a feature it is off for.
+  if (fallback === 'off') return 'off';
+  const stored = settings?.placement?.[provider]?.[feature];
+  return PLACEMENTS.includes(stored) ? stored : fallback;
+}
+
+/** Can configuration place `provider` in `feature` at all? False means locked off. */
+export function isPlacementConfigurable(provider, feature) {
+  const fallback = PROVIDER_PLACEMENT_DEFAULTS[provider]?.[feature];
+  return Boolean(fallback) && fallback !== 'off';
+}
+
+/**
+ * Apply every per-feature placement to an already-resolved order.
+ *
+ * Runs AFTER resolveProviderOrder, so it only ever sees providers that hold a
+ * key and are enabled: it can move one to the front or remove it, never add
+ * one. That is rule 1 carried through.
+ *
+ * @param {string[]} order
+ * @param {object|null} settings
+ * @param {string|null} feature
+ * @returns {{order: string[], excluded: string[]}} `excluded` names providers
+ *          that were available but are not used for this feature, so an empty
+ *          chain can say why.
+ */
+export function applyFeaturePlacement(order, settings, feature) {
+  const first = [];
+  const rest = [];
+  const excluded = [];
+  for (const provider of order) {
+    if (!PER_FEATURE_PROVIDERS.includes(provider)) {
+      rest.push(provider);
+      continue;
+    }
+    const placement = placementFor(settings, provider, feature);
+    if (placement === 'off') excluded.push(provider);
+    else if (placement === 'first') first.push(provider);
+    else rest.push(provider);
+  }
+  return { order: [...first, ...rest], excluded };
+}
 
 export const PROVIDERS_CONTAINER = 'ai_providers';
 export const SETTINGS_CONTAINER = 'admin_settings';

@@ -152,6 +152,19 @@ export const SECRET_CATALOG = Object.freeze([
     probe: 'openai',
   },
   {
+    setting: 'NVIDIA_API_KEY',
+    secret: 'NVIDIA-API-KEY',
+    section: 'gen-ai',
+    label: 'NVIDIA API Catalog',
+    // #701. An `nvapi-` key from build.nvidia.com/settings/api-keys, trial
+    // tier (~40 requests a minute). The router puts it first for
+    // owner-triggered content features and never uses it for the anonymous
+    // public explain route (ai-config.js PROVIDER_PLACEMENT_DEFAULTS); its
+    // verdicts are reported by ai/router.js like the other three.
+    help: 'API key starting nvapi-. Free, rate-limited models that write drafts, summaries and scripts first; the paid models above take over when it is busy or down. Never used on the public pages.',
+    probe: 'nvidia',
+  },
+  {
     setting: 'PERPLEXITY_API_KEY',
     secret: 'PERPLEXITY-API-KEY',
     section: 'gen-ai',
