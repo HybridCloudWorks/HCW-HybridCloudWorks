@@ -241,9 +241,9 @@ HCP Terraform settings.
 1. **Create the `automation` environment** — it is created implicitly the first
    time a workflow referencing it runs, so this is only needed to set rules on
    it. **Do not add required reviewers**: `publish-content-manifest.yml`,
-   `update-learn-catalogue.yml` and `update-avm-versions.yml` (#671) are
-   scheduled, and an approval gate would leave those runs waiting rather than
-   failing. A branch restriction is the useful rule here.
+   `update-learn-catalogue.yml`, `update-avm-versions.yml` (#671) and
+   `update-version-floors.yml` (#715) are scheduled, and an approval gate
+   would leave those runs waiting rather than failing. A branch restriction is the useful rule here.
 2. **Move `MANIFEST_APP_PRIVATE_KEY` and `TFC_TOKEN`** from repository secrets
    to `automation` environment secrets — **after** this PR merges, never
    before, for the silent-green reason above.

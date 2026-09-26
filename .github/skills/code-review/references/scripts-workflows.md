@@ -1,6 +1,6 @@
 # Operational scripts and CI review — `scripts/`, `.github/workflows/`
 
-`scripts/` holds Node 22 ESM operational tooling (Vitest-tested, ESLint) and
+`scripts/` holds Node 26 ESM operational tooling (Vitest-tested, ESLint) and
 PowerShell operator scripts. `.github/workflows/` holds CI, validation,
 monitors, and manual release workflows — all on GitHub-hosted runners.
 
@@ -46,6 +46,11 @@ monitors, and manual release workflows — all on GitHub-hosted runners.
   A new `write` scope is a finding unless justified.
 - **Pinning**: third-party actions pinned per repository policy
   (dependency-review and repository-policy workflows enforce).
+- **Runtime versions**: `node-version:` is `'26'`, except where the job
+  builds, tests, deploys or runs `functions/` code, which is `'24'` (the
+  Flex Consumption ceiling). `scripts/version-floors.test.mjs` fails a pin
+  below its floor in `scripts/version-floors.json`; a new functions pin also
+  needs its selector added to `platformCeilings.functions.appliesTo`.
 - **No auto-apply/auto-deploy**: Azure releases are explicit manual
   dispatches (`deploy-azure-frontend.yml`, `deploy-functions.yml`);
   Terraform applies only via HCP Terraform review. A trigger change that

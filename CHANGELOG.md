@@ -19,6 +19,43 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Node.js on the newest supported line, and version floors enforced in CI
+  (#715, #714).** Owner direction 2026-09-25: the latest current release.
+  `functions/` moves from Node.js 22 to 24, the newest line Azure Functions
+  Flex Consumption supports (22 and 24 are GA; 26 is not offered): the
+  `engines` range (`^24.19.0`), `runtime_version` in `infra/functionapp.tf`
+  (an in-place update: the attribute is not ForceNew in azurerm 5.6.0), the
+  `functions (azure)` CI row, the functions half of `coverage.yml`,
+  `deploy-functions.yml`, and `update-learn-catalogue.yml`, which imports
+  `functions/src`. Everything else moves from 22 to 26: the `frontend/`,
+  `frontend/scripts/`, `scripts/` and `lab-host/coder/` `engines` ranges
+  (`>=26.8.0`), `frontend/.nvmrc`, and every other `node-version:` in
+  `.github/workflows/`. The CI matrix now gives each row its own line
+  (`matrix.node-version`, defaulting to 26) instead of one pin for all five.
+  `scripts/version-floors.json` records the newest release and the floor for
+  Python (3.14.7, floor 3.14.5; #714 asked for a separate
+  `python-floor.json`, folded in here), Node.js (26.10.0, floor 26.8.0; the
+  functions ceiling 24.21.0, floor 24.19.0), Ubuntu (26.04 LTS), Debian (13)
+  and Terraform (1.16.4, floor 1.16.2), each with its source and date.
+  `scripts/version-floors.test.mjs` reads every `node-version:`,
+  `python-version:` and `terraform_version:` in the workflows, `engines.node`
+  in every tracked `package.json`, every `.nvmrc`, `.node-version` and
+  `.python-version`, the python, node, debian and ubuntu `FROM` lines of
+  every tracked Dockerfile, `runtime_version`, the lab host's
+  `labs_agent_node_version`, Ubuntu target and `PYTHON_VERSION`,
+  `lab-image/versions.env`'s `TERRAFORM_VERSION` and every
+  `required_version`, and fails any below its floor naming the file, the
+  line and the floor. `update-version-floors.yml` re-reads endoflife.date
+  and the Flex Consumption table on Microsoft Learn every Wednesday and opens
+  one pull request when a floor moves; that pull request's CI then lists the
+  pins left behind. The `scripts (operations)` CI row now also runs on
+  changes to the files the floors test reads, and
+  `docs/standards/iac-repository-standard.md` names the rule.
+  `vps-agent/package.json` moves to `>=26.8.0` here, because the Ubuntu
+  26.04 change (#717) moved the lab host to Node.js 26.10.0 and left the
+  package range at `>=22`. On top of #717 and the Trixie lab image (#716),
+  the floors test finds no pin below its floor.
+
 - **Lab host targets Ubuntu 26.04 LTS, with release-derived apt suites,
   resolute package pins and every lab host pin at its newest release
   (#715).** The VPS was reinstalled with Ubuntu 26.04 LTS (owner decision

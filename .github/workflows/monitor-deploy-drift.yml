@@ -108,7 +108,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: '22'
+          node-version: '26'
 
       # No `npm ci`. The script imports node:url and uses global fetch, and a
       # monitor that installs third-party packages to check a commit log has
@@ -141,7 +141,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: '22'
+          node-version: '26'
 
       # No `npm ci`, for the same reason the job above gives: the script uses
       # global fetch and nothing else.

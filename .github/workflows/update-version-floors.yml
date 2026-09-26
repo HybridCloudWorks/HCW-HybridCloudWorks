@@ -1,0 +1,252 @@
+name: Update Version Floors
+
+# Re-reads the newest release of every runtime, OS and base image the
+# repository chooses and opens one pull request when a floor in
+# scripts/version-floors.json moves (#715, #714).
+#
+# WHY A WORKFLOW. version-floors.json records the newest Python, Node.js,
+# Ubuntu LTS, Debian and Terraform release on the day it was read, and
+# scripts/version-floors.test.mjs fails any pin below the floor derived from
+# it. That keeps the pins honest against the file; this keeps the file honest
+# against the world. Ubuntu 24.04 was named in ADR 0032 on 2026-09-25 without
+# a check against what was current, and seven files then pinned `noble`: this
+# is the check.
+#
+# THE PULL REQUEST IS MEANT TO GO RED. A bump moves the floors and nothing
+# else. The same pull request's CI then runs version-floors.test.mjs against
+# the new floors, and every pin now behind fails it by name — which is the
+# work list, printed where the reviewer is already looking. The body lists the
+# same pins. Move them on the branch, or split them into their own pull
+# requests; do not merge the floors ahead of the pins.
+#
+# ONE PATH, ONE PULL REQUEST. The branch carries scripts/version-floors.json
+# and nothing else, staged by name — never `-A`, never `.` — because the
+# branch the App pushes is the one thing its write permission can reach.
+# scripts/version-floors-workflow.test.mjs asserts it.
+#
+# NOTHING MOVED IS NOT A PULL REQUEST. checkedOn moves only with its entry
+# (the AVM_VERIFIED_ON convention), so most weeks end at "No floor moved".
+#
+# SOURCES. endoflife.date's v1 API for each kind, and the "Supported language
+# stack versions" table on Microsoft Learn's Flex Consumption page for the
+# Node.js line Azure Functions can run. A source that cannot be read, or that
+# lists an older release than the file records, ends the run with exit code 1
+# and nothing written. The Learn table is the exception: when it cannot be
+# read the functions ceiling stays put, the run carries on, and a warning in
+# the step summary says to check the page by hand.
+#
+# MODELLED ON update-avm-versions.yml, and for the same reasons. Two jobs, so
+# that no job holds both network input and a credential that can write to
+# this repository. `update` installs nothing (the scripts use node: built-ins
+# and global fetch) and holds a checkout only. `commit` installs nothing and
+# holds `contents: read`; the push and the pull request use a GitHub App
+# installation token minted for a few API calls, the same App the manifest,
+# the catalogue and the AVM bump use (MANIFEST_APP_ID /
+# MANIFEST_APP_PRIVATE_KEY). Opened ready for review, not as a draft (owner
+# decision 2026-09-05, .claude/CLAUDE.md), and without auto-merge.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Wednesdays 06:30 UTC. Monday carries the catalogue, the page audit and
+    # CodeQL, Tuesday the AVM bump; a floors pull request is a work list and
+    # should not land in the same hour as either.
+    - cron: '30 6 * * 3'
+
+# No workflow-level permissions: each job declares its own.
+permissions: {}
+
+concurrency:
+  group: version-floors
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Check the floors against endoflife.date and Microsoft Learn
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # checkout only — this job must never be able to push
+    outputs:
+      changed: ${{ steps.changed.outputs.changed }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      # No npm cache and no `npm ci`: the updater imports node: built-ins and
+      # its own sibling module, and nothing else.
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '26'
+          package-manager-cache: false
+
+      # Exit code 1 and one sentence when a source cannot be read or goes
+      # backwards; nothing is written. The summary also lists every pin in the
+      # tree that the (possibly new) floors leave behind.
+      - name: Run the updater
+        run: node scripts/update-version-floors.mjs --summary "${RUNNER_TEMP}/version-floors-summary.md"
+
+      - name: Did a floor move?
+        id: changed
+        run: |
+          set -euo pipefail
+          cat "${RUNNER_TEMP}/version-floors-summary.md" >> "$GITHUB_STEP_SUMMARY"
+          if [ -z "$(git status --porcelain -- scripts/version-floors.json)" ]; then
+            echo "No floor moved."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          cp "${RUNNER_TEMP}/version-floors-summary.md" version-floors-summary.md
+
+      - name: Upload the moved floors and the summary
+        if: steps.changed.outputs.changed == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: version-floors
+          path: |
+            scripts/version-floors.json
+            version-floors-summary.md
+          retention-days: 1
+          if-no-files-found: error
+
+  commit:
+    name: Open a pull request if a floor moved
+    needs: update
+    # Without this gate an unchanged week fails at "Artifact not found"
+    # instead of ending quietly (learn catalogue run 34408439025).
+    if: needs.update.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    # `automation` and not `production`, as in the other scheduled
+    # PR-opening jobs: this opens a pull request, runs on a schedule, and an
+    # approval gate would leave the run waiting for a human who is not there.
+    environment: automation
+    permissions:
+      contents: read # checkout only — this job cannot push anywhere on its own
+    steps:
+      # `persist-credentials: false`, or the push below authenticates as
+      # github-actions[bot] and is refused (publish-content-manifest.yml,
+      # run 34092896715).
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Download the moved floors
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: version-floors
+          path: ${{ runner.temp }}/version-floors
+
+      - name: Did a floor move?
+        id: changed
+        run: |
+          set -euo pipefail
+          cp "${RUNNER_TEMP}/version-floors/scripts/version-floors.json" scripts/version-floors.json
+          if [ -z "$(git status --porcelain -- scripts/version-floors.json)" ]; then
+            echo "No floor moved."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "as_of=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      # Self-arming, like the other App-token workflows: before the App exists
+      # this reports that it opened nothing rather than failing every week.
+      - name: Is the App configured?
+        id: app
+        if: steps.changed.outputs.changed == 'true'
+        env:
+          MANIFEST_APP_PRIVATE_KEY: ${{ secrets.MANIFEST_APP_PRIVATE_KEY }}
+          MANIFEST_APP_ID: ${{ vars.MANIFEST_APP_ID }}
+        run: |
+          set -euo pipefail
+          if [ -n "${MANIFEST_APP_PRIVATE_KEY}" ] && [ -n "${MANIFEST_APP_ID}" ]; then
+            echo "armed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "armed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::A floor moved but the App is not configured, so no pull request was opened. Set the MANIFEST_APP_ID variable and the MANIFEST_APP_PRIVATE_KEY secret (T-726)." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # No `npm ci`: the minter imports only node:crypto and node:url.
+      - name: Mint an App installation token
+        id: token
+        if: steps.app.outputs.armed == 'true'
+        env:
+          GITHUB_APP_ID: ${{ vars.MANIFEST_APP_ID }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.MANIFEST_APP_PRIVATE_KEY }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          token=$(node scripts/github-app-token.mjs)
+          # Masked BEFORE it is written anywhere, including to GITHUB_OUTPUT.
+          echo "::add-mask::${token}"
+          echo "token=${token}" >> "$GITHUB_OUTPUT"
+
+      # `git add <path>` and never `-A` or `.`: the branch this pushes is the
+      # one thing the App's write permission can reach.
+      - name: Push the branch
+        if: steps.app.outputs.armed == 'true'
+        env:
+          TOKEN: ${{ steps.token.outputs.token }}
+          AS_OF: ${{ steps.changed.outputs.as_of }}
+        run: |
+          set -euo pipefail
+          # RUN_ATTEMPT as well as RUN_ID: a re-run keeps the id, and a branch
+          # that already exists on the remote fails the push.
+          branch="chore/version-floors-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "branch=${branch}" >> "$GITHUB_ENV"
+          git config user.name  'hcw-manifest[bot]'
+          git config user.email 'hcw-manifest[bot]@users.noreply.github.com'
+          git checkout -b "${branch}"
+          git add scripts/version-floors.json
+          git commit -m "chore: move the version floors (checked ${AS_OF})"
+          git remote set-url origin "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin "${branch}"
+
+      - name: Open the pull request
+        if: steps.app.outputs.armed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          AS_OF: ${{ steps.changed.outputs.as_of }}
+          SUMMARY: ${{ runner.temp }}/version-floors/version-floors-summary.md
+        run: |
+          set -euo pipefail
+          {
+            echo "## Summary"
+            echo
+            echo "Weekly check of \`scripts/version-floors.json\` against endoflife.date and the Azure Functions Flex Consumption table on Microsoft Learn, by \`.github/workflows/update-version-floors.yml\` (#715). Opened by the App rather than pushed to \`main\`, so the required checks run on it. The floors file is the only path it touches."
+            echo
+            cat "${SUMMARY}"
+            echo
+            echo "## Before merging"
+            echo
+            echo "1. **This pull request is expected to fail \`scripts (operations)\` until the pins move.** \`scripts/version-floors.test.mjs\` fails every pin below the new floors by file and line; the list above is the same set. Move each pin on this branch, or in its own pull request first, and merge the floors last. A red floors test on this pull request is the work list, not a defect in it."
+            echo "2. **A moved functions ceiling is a production runtime change.** If a note above says the Flex Consumption ceiling moved, \`runtime_version\` in \`infra/functionapp.tf\` moves with it, which is an HCP Terraform run in \`hcw-azure\`, and the functions deploy that follows builds on the new line."
+            echo "3. **Read the release notes for a new line** (Node.js, Python or Terraform) before moving the pins it governs; a floor that moves within a line is a patch or minor bump."
+            echo
+            echo "## Related issue or decision"
+            echo
+            echo "Refs #715 and #714."
+            echo
+            echo "## Verification"
+            echo
+            echo "- Checks run: \`node scripts/update-version-floors.mjs\` against endoflife.date and learn.microsoft.com (run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})."
+            echo "- Evidence level: [x] CI"
+          } > "${RUNNER_TEMP}/pr-body.md"
+          gh pr create \
+            --repo "${GITHUB_REPOSITORY}" \
+            --base main \
+            --head "${branch}" \
+            --title "chore: move the version floors (checked ${AS_OF})" \
+            --body-file "${RUNNER_TEMP}/pr-body.md"
+
+      # The token lives an hour; the work above takes seconds. `always()`, so
+      # a failed push or `gh pr create` still cleans up.
+      - name: Revoke the installation token
+        if: always() && steps.token.outputs.token != ''
+        env:
+          GITHUB_APP_TOKEN: ${{ steps.token.outputs.token }}
+        run: node scripts/github-app-token.mjs --revoke
