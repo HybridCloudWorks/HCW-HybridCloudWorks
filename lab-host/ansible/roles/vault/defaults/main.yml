@@ -1,0 +1,47 @@
+---
+# vault_enabled, vault_version, vault_checksum and vault_pgp_key_checksum are
+# the switch and the pins, and live in group_vars/all.yml;
+# meta/argument_specs.yml marks them required.
+#
+# None of these is an Ansible Vault key. The vault_ prefix is this role's
+# name (ansible-lint's var-naming rule); the Ansible Vault file carries no
+# key for HashiCorp Vault, because nothing this role needs is a secret.
+vault_user: vault
+vault_group: vault
+
+# Downloads, one directory per release, and the verified keyring.
+vault_install_dir: /opt/vault
+vault_binary_path: /usr/local/bin/vault
+vault_config_dir: /etc/vault.d
+vault_config_file: /etc/vault.d/vault.hcl
+# Integrated storage (raft). Vault's own data, owned by the vault user, 0700.
+vault_data_dir: /var/lib/vault
+# The raft node id is recorded in the data directory at first start and must
+# not change afterwards, so it is a constant rather than the host name.
+vault_raft_node_id: lab-host-01
+
+# Loopback only: the API on 8200, raft's cluster port on 8201. Nothing else on
+# the host or the network can reach either; the owner uses the CLI over SSH.
+vault_api_port: 8200
+vault_cluster_port: 8201
+# The web UI. Off: the CLI over SSH is the interface, and an SSH tunnel to
+# 8200 would reach the UI when this is true.
+vault_ui: false
+
+# The listener's certificate, generated on this host the way the labs_agent
+# role generates the agent's: self-signed, for 127.0.0.1 and localhost.
+vault_tls_dir: /etc/vault.d/tls
+vault_tls_cert_file: /etc/vault.d/tls/vault.crt
+vault_tls_key_file: /etc/vault.d/tls/vault.key
+vault_certificate_days: 730
+vault_certificate_warn_days: 60
+
+# HashiCorp's release signing key. The bytes are pinned by
+# vault_pgp_key_checksum in group_vars; the fingerprint is written here for a
+# person to compare with https://www.hashicorp.com/en/trust/security.
+vault_pgp_key_url: https://www.hashicorp.com/.well-known/pgp-key.txt
+vault_pgp_key_fingerprint: C874011F0AB405110D02105534365D9472D7468F
+
+# VAULT_ADDR and VAULT_CACERT for login shells, so `vault status` works as
+# hcwadmin with no flags.
+vault_profile_file: /etc/profile.d/hcw-vault.sh

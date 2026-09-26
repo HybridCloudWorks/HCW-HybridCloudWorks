@@ -1,0 +1,131 @@
+---
+argument_specs:
+  main:
+    short_description: Run HashiCorp Vault host-native under systemd, raft storage, TLS on 127.0.0.1 only
+    description:
+      - With vault_enabled true it downloads the pinned release from releases.hashicorp.com,
+        verifies HashiCorp's GPG signature on the release's SHA256SUMS against a key pinned by
+        checksum, refuses a pinned archive checksum that SHA256SUMS does not list, verifies the
+        archive against it, and installs the binary. It generates a self-signed certificate for
+        127.0.0.1 on the host, writes a raft configuration listening on 127.0.0.1:8200 (cluster
+        port 127.0.0.1:8201), and runs the vault systemd unit as the vault system user.
+      - It never initialises or unseals Vault and never holds an unseal key or a token; both are
+        owner steps, and the keys go to the owner's password manager only. It reports the seal
+        status it reads with `vault status`.
+      - With vault_enabled false it installs nothing, and stops and disables a Vault an earlier
+        run installed, keeping its data.
+    author: HybridCloudWorks
+    options:
+      vault_enabled:
+        type: bool
+        required: true
+        description: Whether Vault runs. False stops the unit if it exists; the data directory stays.
+      vault_version:
+        type: str
+        required: true
+        description: Release version without the leading v, for example 2.1.1.
+      vault_checksum:
+        type: str
+        required: true
+        description:
+          - SHA256 of vault_<version>_linux_amd64.zip as sha256:<hex>, read from the release's
+            signed SHA256SUMS. The role refuses a value that file does not list.
+      vault_pgp_key_checksum:
+        type: str
+        required: true
+        description: SHA256 of HashiCorp's ASCII-armored release signing key at vault_pgp_key_url, as sha256:<hex>.
+      vault_user:
+        type: str
+        required: false
+        default: vault
+        description: System user the service runs as.
+      vault_group:
+        type: str
+        required: false
+        default: vault
+        description: The service's group, which can read the configuration and the listener's key.
+      vault_install_dir:
+        type: path
+        required: false
+        default: /opt/vault
+        description: Where the key, the keyring and each release's downloads are kept.
+      vault_binary_path:
+        type: path
+        required: false
+        default: /usr/local/bin/vault
+        description: Where the binary is installed.
+      vault_config_dir:
+        type: path
+        required: false
+        default: /etc/vault.d
+        description: The configuration directory.
+      vault_config_file:
+        type: path
+        required: false
+        default: /etc/vault.d/vault.hcl
+        description: The server configuration, root:vault 0640.
+      vault_data_dir:
+        type: path
+        required: false
+        default: /var/lib/vault
+        description: Integrated storage (raft) directory, vault:vault 0700.
+      vault_raft_node_id:
+        type: str
+        required: false
+        default: lab-host-01
+        description: The raft node id. Fixed at first start; do not change it on an initialised Vault.
+      vault_api_port:
+        type: int
+        required: false
+        default: 8200
+        description: The API port on 127.0.0.1.
+      vault_cluster_port:
+        type: int
+        required: false
+        default: 8201
+        description: Raft's cluster port on 127.0.0.1.
+      vault_ui:
+        type: bool
+        required: false
+        default: false
+        description: Whether the web UI is served on the listener (still on 127.0.0.1 only).
+      vault_tls_dir:
+        type: path
+        required: false
+        default: /etc/vault.d/tls
+        description: Where the listener's certificate and key live.
+      vault_tls_cert_file:
+        type: path
+        required: false
+        default: /etc/vault.d/tls/vault.crt
+        description: The self-signed certificate, 0644; VAULT_CACERT for the CLI.
+      vault_tls_key_file:
+        type: path
+        required: false
+        default: /etc/vault.d/tls/vault.key
+        description: Its private key, root:vault 0640, generated on the host and never moved.
+      vault_certificate_days:
+        type: int
+        required: false
+        default: 730
+        description: Validity of a generated certificate.
+      vault_certificate_warn_days:
+        type: int
+        required: false
+        default: 60
+        description: Every run warns once the certificate is this close to expiry.
+      vault_pgp_key_url:
+        type: str
+        required: false
+        default: https://www.hashicorp.com/.well-known/pgp-key.txt
+        description: HashiCorp's release signing key.
+      vault_pgp_key_fingerprint:
+        type: str
+        required: false
+        default: C874011F0AB405110D02105534365D9472D7468F
+        description: The key's primary fingerprint, for a person to compare; the checksum is what the role enforces.
+      vault_profile_file:
+        type: path
+        required: false
+        default: /etc/profile.d/hcw-vault.sh
+        description: Sets VAULT_ADDR and VAULT_CACERT for login shells.

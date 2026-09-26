@@ -1,0 +1,10 @@
+---
+# Derived values. Not meant to be overridden, which is why they are vars and
+# not defaults.
+# Pulled by digest, never by tag (the tag in group_vars is for humans).
+portainer_image_ref: "{{ portainer_image }}@{{ portainer_image_digest }}"
+# The host's loopback and nothing else. Docker writes its own iptables rules
+# for a published port, ahead of ufw's, so ufw would not stop a publish on
+# 0.0.0.0: the address here is the only thing between the internet and a UI
+# that holds the Docker socket. tasks/main.yml asserts it.
+portainer_published_port: "127.0.0.1:{{ portainer_https_port }}:9443"

@@ -1,0 +1,24 @@
+---
+# Derived values. Not meant to be overridden, which is why they are vars and
+# not defaults.
+vault_release_url: "https://releases.hashicorp.com/vault/{{ vault_version }}"
+vault_release_dir: "{{ vault_install_dir }}/{{ vault_version }}"
+vault_archive_name: "vault_{{ vault_version }}_linux_amd64.zip"
+vault_sums_name: "vault_{{ vault_version }}_SHA256SUMS"
+vault_sums_path: "{{ vault_release_dir }}/{{ vault_sums_name }}"
+vault_sums_signature_path: "{{ vault_release_dir }}/{{ vault_sums_name }}.sig"
+vault_pgp_key_path: "{{ vault_install_dir }}/hashicorp.asc"
+# gpgv reads a binary keyring only. The name carries the pinned key's
+# checksum, so a new pin dearmors a new file rather than reusing the old one.
+vault_pgp_keyring_path: "{{ vault_install_dir }}/hashicorp-{{ vault_pgp_key_checksum | regex_replace('^sha256:', '') | truncate(12, true, '') }}.gpg"
+vault_checksum_hex: "{{ vault_checksum | regex_replace('^sha256:', '') }}"
+# Loopback, fixed. Vault holds the lab host's secrets once unsealed, and the
+# host runs learner workloads (ADR 0032, amendment of 2026-09-26).
+vault_listen_address: 127.0.0.1
+vault_api_addr: "https://{{ vault_listen_address }}:{{ vault_api_port }}"
+vault_cluster_addr: "https://{{ vault_listen_address }}:{{ vault_cluster_port }}"
+vault_certificate_warn_seconds: "{{ vault_certificate_warn_days | int * 86400 }}"
+# The environment every CLI call in this role runs with.
+vault_cli_environment:
+  VAULT_ADDR: "{{ vault_api_addr }}"
+  VAULT_CACERT: "{{ vault_tls_cert_file }}"

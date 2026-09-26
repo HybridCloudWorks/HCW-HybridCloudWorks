@@ -1,0 +1,41 @@
+# {{ ansible_managed }}
+# HashiCorp's own unit (.release/linux/package/usr/lib/systemd/system/
+# vault.service in hashicorp/vault at v2.1.1) with four lines left out:
+# EnvironmentFile, because nothing is passed that way here, and
+# AmbientCapabilities=CAP_IPC_LOCK, SecureBits=keep-caps and
+# LimitMEMLOCK=infinity, which exist for mlock, off here (disable_mlock in
+# vault.hcl). The capability bounding set is therefore empty. A restart seals
+# Vault; unsealing is an owner step.
+[Unit]
+Description=HashiCorp Vault (lab-host secrets only)
+Documentation=https://developer.hashicorp.com/vault/docs
+Requires=network-online.target
+After=network-online.target
+ConditionFileNotEmpty={{ vault_config_file }}
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=notify
+User={{ vault_user }}
+Group={{ vault_group }}
+ExecStart={{ vault_binary_path }} server -config={{ vault_config_file }}
+ExecReload=/bin/kill --signal HUP $MAINPID
+KillMode=process
+KillSignal=SIGINT
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+LimitNOFILE=65536
+# No core dumps: a dump of an unsealed Vault holds its keys.
+LimitCORE=0
+ProtectSystem=full
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,92 @@
+---
+# Fail closed before touching the host: whatever the variables say, the UI is
+# published on the loopback only.
+- name: Refuse to publish Portainer anywhere but the host's loopback
+  ansible.builtin.assert:
+    that:
+      - portainer_published_port is match('^127\.0\.0\.1:[0-9]+:9443$')
+    fail_msg: >-
+      Portainer would be published as {{ portainer_published_port }}. It holds the Docker
+      socket, which is root on this host, so it is published on 127.0.0.1 only and reached
+      through an SSH tunnel (lab-host/README.md, "Portainer").
+    quiet: true
+
+- name: Create Portainer's data volume
+  community.docker.docker_volume:
+    name: "{{ portainer_volume_name }}"
+    state: present
+  when: portainer_enabled | bool
+
+# --http-disabled: Portainer serves its UI on 9443 (HTTPS, a certificate it
+# generates itself) and, unless told not to, on 9000 over plain HTTP too.
+# Nothing publishes 9000 or the Edge tunnel's 8000, and the flag means 9000
+# does not even listen inside the container.
+- name: Run Portainer, published on the host's loopback only
+  community.docker.docker_container:
+    name: "{{ portainer_container_name }}"
+    image: "{{ portainer_image_ref }}"
+    pull: missing
+    state: started
+    restart_policy: unless-stopped
+    command:
+      - --http-disabled
+    published_ports:
+      - "{{ portainer_published_port }}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - "{{ portainer_volume_name }}:/data"
+    memory: "{{ portainer_memory }}"
+    security_opts:
+      - no-new-privileges:true
+  register: portainer_container
+  when: portainer_enabled | bool
+
+# Until an administrator exists, Portainer stops serving five minutes after it
+# starts (measured 2026-09-26 on 2.45.1: the container stays running, so no
+# restart policy brings it back, and every request answers 303 with
+# "Administrator initialization timeout"). Both answers mean Portainer is up;
+# 303 is reported below rather than failing a run that happens to come later.
+# Redirects are not followed, because the 303 leads to a page that answers 200.
+- name: Wait for Portainer to answer on the loopback
+  ansible.builtin.uri:
+    url: "https://127.0.0.1:{{ portainer_https_port }}/api/system/status"
+    validate_certs: false
+    follow_redirects: none
+    status_code:
+      - 200
+      - 303
+  register: portainer_status
+  until: portainer_status.status in [200, 303]
+  retries: 30
+  delay: 2
+  when:
+    - portainer_enabled | bool
+    - not ansible_check_mode
+
+- name: Stop and remove the Portainer container while Portainer is disabled
+  community.docker.docker_container:
+    name: "{{ portainer_container_name }}"
+    state: absent
+  when: not portainer_enabled | bool
+
+- name: Say how to reach Portainer, and whether its first-administrator window is open
+  ansible.builtin.debug:
+    msg: >-
+      Portainer {{ portainer_image_tag }} answers on https://127.0.0.1:{{ portainer_https_port }} on
+      this host and nowhere else; from a workstation, ssh -L
+      {{ portainer_https_port }}:127.0.0.1:{{ portainer_https_port }} hcw-lab and then
+      https://localhost:{{ portainer_https_port }} (lab-host/README.md, "Portainer").
+      {% if portainer_status.status | default(200) == 303 %}Its first-administrator window has
+      closed (Administrator initialization timeout): if no administrator was created yet, run
+      sudo docker restart {{ portainer_container_name }} and create it within five minutes.
+      {% else %}Until an administrator exists, it stops serving five minutes after it starts;
+      sudo docker restart {{ portainer_container_name }} opens a new five minutes.{% endif %}
+  when: portainer_enabled | bool
+
+- name: Say why Portainer is not running
+  ansible.builtin.debug:
+    msg: >-
+      Portainer is not running: portainer_enabled is false. Its volume {{ portainer_volume_name }},
+      if it exists, is kept. To run it, set portainer_enabled to true in group_vars/all.yml and
+      re-run bootstrap.sh (lab-host/README.md, "Portainer").
+  when: not portainer_enabled | bool
