@@ -89,6 +89,15 @@
  * cache or no cache; the per-request out-of-credit error in elevenlabs.js is
  * the backstop there.
  *
+ * ## The error vocabulary lives here too
+ *
+ * `ElevenLabsSpeechError`, `isQuotaExceeded` and `dialogueRefusal` serve
+ * both this read and the dialogue requests in elevenlabs.js, which re-exports
+ * the public ones. They sit here, not in `./index.js`, because index.js
+ * imports elevenlabs.js and a cycle would leave one of them undefined at load.
+ *
+ * ## Cache keying
+ *
  * The cache is keyed by the key string itself, in this process's memory,
  * where `process.env` already holds it. Nothing here writes it anywhere else:
  * not a log, an error message, a response or a document. An earlier draft
@@ -120,6 +129,13 @@ export const SUBSCRIPTION_UNAVAILABLE = 'subscription_unavailable';
  * other. The pre-flight flavour is told apart by `details.preflight`.
  */
 export const QUOTA_EXCEEDED = 'quota_exceeded';
+
+/**
+ * `code` for a 402 that is about the plan, not the credit: a free-plan key
+ * asking for a Voice Library voice ("Free users cannot use library voices via
+ * the API", https://elevenlabs.io/docs/overview/capabilities/voices).
+ */
+export const PAID_PLAN_REQUIRED = 'paid_plan_required';
 
 const FREE_TIER = 'free';
 const FREE_STATUSES = new Set(['free', 'free_disabled']);
@@ -164,6 +180,59 @@ export function errorCode(bodyText) {
   } catch {
     return '';
   }
+}
+
+/**
+ * Whether a non-2xx response is the out-of-credit state.
+ *
+ * The documented shapes are 401 + `detail.status: "quota_exceeded"` and 402
+ * `insufficient_credits`. The body is JSON but is read as text first so a
+ * non-JSON error page cannot throw here. A 402 is out of credit unless its
+ * code says it is about the plan (`paid_plan_required`), which is not.
+ */
+export function isQuotaExceeded(status, bodyText) {
+  if (status === 402) return errorCode(bodyText) !== PAID_PLAN_REQUIRED;
+  if (status !== 401) return false;
+  try {
+    const detail = JSON.parse(bodyText)?.detail;
+    return String(detail?.status || detail?.code || '').toLowerCase() === QUOTA_EXCEEDED;
+  } catch {
+    return /quota_exceeded/i.test(String(bodyText || ''));
+  }
+}
+
+/**
+ * What a non-2xx Text to Dialogue answer means, and whether a retry could
+ * change it. Out of credit and a paid-only voice or feature are named and
+ * never retried, since a retry cannot add credit or change the plan. 429 and
+ * 5xx are retried. Anything else is reported as the API said it.
+ *
+ * @returns {{ error: ElevenLabsSpeechError, retryable: boolean }}
+ */
+export function dialogueRefusal(status, bodyText) {
+  const detail = snippet(bodyText);
+  if (isQuotaExceeded(status, bodyText)) {
+    return {
+      retryable: false,
+      error: new ElevenLabsSpeechError(
+        `ElevenLabs is out of credit (HTTP ${status} quota_exceeded): ${detail}`,
+        { status, code: QUOTA_EXCEEDED }
+      ),
+    };
+  }
+  if (status === 402) {
+    return {
+      retryable: false,
+      error: new ElevenLabsSpeechError(
+        `ElevenLabs refused this on the current plan (HTTP 402 ${PAID_PLAN_REQUIRED}); a voice or feature it needs is paid-only: ${detail}`,
+        { status, code: PAID_PLAN_REQUIRED }
+      ),
+    };
+  }
+  return {
+    retryable: RETRYABLE_STATUSES.has(status),
+    error: new ElevenLabsSpeechError(`ElevenLabs HTTP ${status}: ${detail}`, { status }),
+  };
 }
 
 /** Whether a plan is the free one, from what the subscription says. */

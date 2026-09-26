@@ -41,6 +41,12 @@
  * spent it. So the figure reported is the lower of a fresh read and "before,
  * minus what the response said it billed". A lagging read then cannot report
  * the credits as unspent.
+ *
+ * ## Shape
+ *
+ * Each route is a module-level function taking the resolved dependencies;
+ * `createElevenLabsHandlers` only binds them. Small functions, each doing one
+ * step, rather than one closure holding both routes.
  */
 import { readSetting, synthesizeDialogue } from '../listen-and-learn/speech/index.js';
 import {
@@ -89,6 +95,8 @@ export const SAMPLE_CHARACTERS = SAMPLE_DIALOGUE.reduce(
   0
 );
 
+const SAMPLE_INFO = Object.freeze({ characters: SAMPLE_CHARACTERS, turns: SAMPLE_DIALOGUE.length });
+
 /**
  * The newest ElevenLabs usage row, whatever wrote it: an episode or a live
  * check. `ai_usage` is partitioned on `/id` with every path indexed
@@ -112,189 +120,201 @@ function statusFor(error) {
   return 502;
 }
 
+/** A usage row as the card shows it. */
+const presentRender = (row) => ({
+  characters: Number(row.completionTokens) || 0,
+  estimated: row.estimatedTokens === true,
+  at: row.timestamp || null,
+  source: row.source || null,
+  model: row.model || null,
+});
+
+/** `{ lastRender, lastRenderError }`; a failed read is said, not shown as "none yet". */
+async function readLastRender({ store }, context) {
+  try {
+    const rows = await store.queryDocs(USAGE_CONTAINER, LAST_RENDER_QUERY, [
+      { name: '@provider', value: 'elevenlabs' },
+    ]);
+    return { lastRender: rows?.[0] ? presentRender(rows[0]) : null, lastRenderError: null };
+  } catch (error) {
+    context.warn?.(`elevenLabsStatus: usage read failed (${error?.code ?? 'unknown'})`);
+    return { lastRender: null, lastRenderError: 'The usage table could not be read.' };
+  }
+}
+
 /**
- * @param {object} deps
- * @param {{ requireRole: Function }} deps.guard
- * @param {{ queryDocs: Function, upsertDoc: Function }} deps.store
- * @param {{ uploadBlob: Function }} deps.storage
- * @param {{ getCostEstimate: Function }} deps.ai
- * @param {object} [deps.env]
- * @param {Function} [deps.fetchImpl]
- * @param {Function} [deps.synthesize] `synthesizeDialogue`; injected for tests
- * @param {Function} [deps.readAccount] `readSubscription`; injected for tests
- * @param {() => Date} [deps.now]
+ * `{ subscription, subscriptionError }`. The error sentence names the cause
+ * and the fix (a permission, a key); it never carries the key.
  */
-export function createElevenLabsHandlers({
-  guard,
-  store,
-  storage,
-  ai,
-  env = process.env,
-  fetchImpl = fetch,
-  synthesize = synthesizeDialogue,
-  readAccount = readSubscription,
-  now = () => new Date(),
-}) {
-  /** `{ lastRender, lastRenderError }`; a failed read is said, not shown as "none yet". */
-  async function readLastRender(context) {
-    try {
-      const rows = await store.queryDocs(USAGE_CONTAINER, LAST_RENDER_QUERY, [
-        { name: '@provider', value: 'elevenlabs' },
-      ]);
-      const row = rows?.[0];
-      if (!row) return { lastRender: null, lastRenderError: null };
-      return {
-        lastRender: {
-          characters: Number(row.completionTokens) || 0,
-          estimated: row.estimatedTokens === true,
-          at: row.timestamp || null,
-          source: row.source || null,
-          model: row.model || null,
-        },
-        lastRenderError: null,
-      };
-    } catch (error) {
-      context.warn?.(`elevenLabsStatus: usage read failed (${error?.code ?? 'unknown'})`);
-      return { lastRender: null, lastRenderError: 'The usage table could not be read.' };
+async function readAccountState({ readAccount, fetchImpl }, key) {
+  try {
+    return { subscription: await readAccount({ key, fetchImpl }), subscriptionError: null };
+  } catch (error) {
+    return { subscription: null, subscriptionError: error?.message || String(error) };
+  }
+}
+
+/** GET /api/cms/podcast/elevenlabs */
+async function getStatus(deps, request, context) {
+  const auth = await deps.guard.requireRole(request, 'editor');
+  if (auth.error) return auth.error;
+  try {
+    const usage = await readLastRender(deps, context);
+    const key = readSetting(deps.env, ELEVENLABS_KEY_SETTING);
+    const account = key
+      ? await readAccountState(deps, key)
+      : { subscription: null, subscriptionError: null };
+    return json(200, {
+      success: true,
+      configured: Boolean(key),
+      reason: key ? null : NOT_CONFIGURED_REASON,
+      ...account,
+      ...usage,
+      sample: SAMPLE_INFO,
+    });
+  } catch (error) {
+    context.error('elevenLabsStatus failed:', error);
+    return json(500, { error: 'Failed to read the ElevenLabs status' });
+  }
+}
+
+/** Store the sample's MP3; `{ audioUrl, audioError }`, never a throw. */
+async function storeSample({ storage, now }, rendered) {
+  try {
+    await storage.uploadBlob(
+      PODCAST_AUDIO_CONTAINER,
+      SAMPLE_AUDIO_PATH,
+      rendered.audio,
+      rendered.contentType,
+      { sourceKind: 'sample' }
+    );
+    return {
+      audioUrl: `${mediaUrlFor(PODCAST_AUDIO_CONTAINER, SAMPLE_AUDIO_PATH)}?v=${now().getTime()}`,
+      audioError: null,
+    };
+  } catch (error) {
+    return {
+      audioUrl: null,
+      audioError: `The sample was rendered and billed but not stored: ${error?.message || error}`,
+    };
+  }
+}
+
+/**
+ * The account after the check: `{ account, creditsLeft }`, where creditsLeft
+ * is the lower of a fresh read and "before minus billed" (see the header).
+ */
+async function creditsAfter({ readAccount, fetchImpl }, key, before, billed) {
+  const after = await readAccount({ key, fetchImpl, useCache: false }).catch(() => null);
+  const computed = before ? Math.max(0, before.creditsLeft - billed) : null;
+  const fresh = after ? after.creditsLeft : null;
+  const known = [computed, fresh].filter((n) => typeof n === 'number');
+  return { account: after || before, creditsLeft: known.length ? Math.min(...known) : null };
+}
+
+/** The live check's answer, from what was rendered, stored and read. */
+function sampleReport(rendered, stored, { account, creditsLeft }, before, billed) {
+  return {
+    ok: true,
+    ...stored,
+    contentType: rendered.contentType,
+    bytes: rendered.bytes ?? rendered.audio?.length ?? 0,
+    durationSeconds: rendered.estimatedSeconds ?? null,
+    requests: rendered.requests ?? null,
+    model: rendered.model ?? null,
+    characters: rendered.characters ?? SAMPLE_CHARACTERS,
+    charactersBilled: billed,
+    billedEstimated: rendered.estimatedTokens === true,
+    creditsLeftBefore: before?.creditsLeft ?? null,
+    creditsLeft,
+    creditLimit: account?.creditLimit ?? null,
+    tier: account?.tier ?? null,
+    freePlan: account?.freePlan ?? null,
+    resetAt: account?.resetAt ?? null,
+  };
+}
+
+/**
+ * Everything after a successful render: store the MP3, record the usage row
+ * (credits were spent whether or not the upload worked), read the account
+ * again, and report.
+ */
+async function reportSample(deps, key, rendered) {
+  const billed = Number(rendered.completionTokens) || 0;
+  const before = rendered.subscription || null;
+  const stored = await storeSample(deps, rendered);
+  await recordAiUsage(
+    { store: deps.store, ai: deps.ai },
+    {
+      provider: rendered.provider,
+      model: rendered.model,
+      promptTokens: 0,
+      completionTokens: billed,
+      estimatedTokens: rendered.estimatedTokens === true,
+      source: USAGE_SOURCES.podcastSample,
     }
+  );
+  const credits = await creditsAfter(deps, key, before, billed);
+  return sampleReport(rendered, stored, credits, before, billed);
+}
+
+/** POST /api/cms/podcast/elevenlabs/sample */
+async function renderSample(deps, request, context) {
+  const auth = await deps.guard.requireRole(request, 'editor');
+  if (auth.error) return auth.error;
+
+  const key = readSetting(deps.env, ELEVENLABS_KEY_SETTING);
+  if (!key) return json(503, { error: NOT_CONFIGURED_REASON, code: 'NOT_CONFIGURED' });
+
+  let rendered;
+  try {
+    rendered = await deps.synthesize({
+      product: 'podcast',
+      dialogue: SAMPLE_DIALOGUE,
+      env: deps.env,
+      fetchImpl: deps.fetchImpl,
+    });
+  } catch (error) {
+    context.log?.(`elevenLabsSample: refused (${error?.code || error?.name || 'error'})`);
+    return json(statusFor(error), {
+      error: error?.message || String(error),
+      code: error?.code || error?.name || null,
+    });
   }
 
+  try {
+    const report = await reportSample(deps, key, rendered);
+    context.log?.(`elevenLabsSample: rendered, ${report.charactersBilled} characters billed`);
+    return json(200, report);
+  } catch (error) {
+    context.error('elevenLabsSample failed after rendering:', error);
+    return json(500, { error: 'The sample was rendered but the result could not be reported' });
+  }
+}
+
+/**
+ * @param {object} options
+ * @param {{ requireRole: Function }} options.guard
+ * @param {{ queryDocs: Function, upsertDoc: Function }} options.store
+ * @param {{ uploadBlob: Function }} options.storage
+ * @param {{ getCostEstimate: Function }} options.ai
+ * @param {object} [options.env]
+ * @param {Function} [options.fetchImpl]
+ * @param {Function} [options.synthesize] `synthesizeDialogue`; injected for tests
+ * @param {Function} [options.readAccount] `readSubscription`; injected for tests
+ * @param {() => Date} [options.now]
+ */
+export function createElevenLabsHandlers(options) {
+  const deps = {
+    ...options,
+    env: options.env ?? process.env,
+    fetchImpl: options.fetchImpl ?? fetch,
+    synthesize: options.synthesize ?? synthesizeDialogue,
+    readAccount: options.readAccount ?? readSubscription,
+    now: options.now ?? (() => new Date()),
+  };
   return {
-    /** GET /api/cms/podcast/elevenlabs */
-    async getStatus(request, context) {
-      const auth = await guard.requireRole(request, 'editor');
-      if (auth.error) return auth.error;
-      try {
-        const sample = { characters: SAMPLE_CHARACTERS, turns: SAMPLE_DIALOGUE.length };
-        const usage = await readLastRender(context);
-        const key = readSetting(env, ELEVENLABS_KEY_SETTING);
-        if (!key) {
-          return json(200, {
-            success: true,
-            configured: false,
-            reason: NOT_CONFIGURED_REASON,
-            subscription: null,
-            subscriptionError: null,
-            ...usage,
-            sample,
-          });
-        }
-
-        let subscription = null;
-        let subscriptionError = null;
-        try {
-          subscription = await readAccount({ key, fetchImpl });
-        } catch (error) {
-          // The sentence names the cause and the fix (a permission, a key);
-          // it never carries the key.
-          subscriptionError = error?.message || String(error);
-        }
-        return json(200, {
-          success: true,
-          configured: true,
-          reason: null,
-          subscription,
-          subscriptionError,
-          ...usage,
-          sample,
-        });
-      } catch (error) {
-        context.error('elevenLabsStatus failed:', error);
-        return json(500, { error: 'Failed to read the ElevenLabs status' });
-      }
-    },
-
-    /** POST /api/cms/podcast/elevenlabs/sample */
-    async renderSample(request, context) {
-      const auth = await guard.requireRole(request, 'editor');
-      if (auth.error) return auth.error;
-
-      const key = readSetting(env, ELEVENLABS_KEY_SETTING);
-      if (!key) return json(503, { error: NOT_CONFIGURED_REASON, code: 'NOT_CONFIGURED' });
-
-      let rendered;
-      try {
-        rendered = await synthesize({
-          product: 'podcast',
-          dialogue: SAMPLE_DIALOGUE,
-          env,
-          fetchImpl,
-        });
-      } catch (error) {
-        context.log?.(`elevenLabsSample: refused (${error?.code || error?.name || 'error'})`);
-        return json(statusFor(error), {
-          error: error?.message || String(error),
-          code: error?.code || error?.name || null,
-        });
-      }
-
-      try {
-        const billed = Number(rendered.completionTokens) || 0;
-        let audioUrl = null;
-        let audioError = null;
-        try {
-          await storage.uploadBlob(
-            PODCAST_AUDIO_CONTAINER,
-            SAMPLE_AUDIO_PATH,
-            rendered.audio,
-            rendered.contentType,
-            { sourceKind: 'sample' }
-          );
-          audioUrl = `${mediaUrlFor(PODCAST_AUDIO_CONTAINER, SAMPLE_AUDIO_PATH)}?v=${now().getTime()}`;
-        } catch (error) {
-          audioError = `The sample was rendered and billed but not stored: ${error?.message || error}`;
-        }
-
-        // Credits were spent whether or not the upload worked, so the row is
-        // written either way. Best-effort, like every usage row.
-        await recordAiUsage(
-          { store, ai },
-          {
-            provider: rendered.provider,
-            model: rendered.model,
-            promptTokens: 0,
-            completionTokens: billed,
-            estimatedTokens: rendered.estimatedTokens === true,
-            source: USAGE_SOURCES.podcastSample,
-          }
-        );
-
-        const before = rendered.subscription || null;
-        let after = null;
-        try {
-          after = await readAccount({ key, fetchImpl, useCache: false });
-        } catch {
-          after = null;
-        }
-        const computed = before ? Math.max(0, before.creditsLeft - billed) : null;
-        let creditsLeft = computed;
-        if (after) creditsLeft = computed === null ? after.creditsLeft : Math.min(after.creditsLeft, computed);
-        const account = after || before;
-
-        context.log?.(`elevenLabsSample: rendered, ${billed} characters billed`);
-        return json(200, {
-          ok: true,
-          audioUrl,
-          audioError,
-          contentType: rendered.contentType,
-          bytes: rendered.bytes ?? rendered.audio?.length ?? 0,
-          durationSeconds: rendered.estimatedSeconds ?? null,
-          requests: rendered.requests ?? null,
-          model: rendered.model ?? null,
-          characters: rendered.characters ?? SAMPLE_CHARACTERS,
-          charactersBilled: billed,
-          billedEstimated: rendered.estimatedTokens === true,
-          creditsLeftBefore: before?.creditsLeft ?? null,
-          creditsLeft,
-          creditLimit: account?.creditLimit ?? null,
-          tier: account?.tier ?? null,
-          freePlan: account?.freePlan ?? null,
-          resetAt: account?.resetAt ?? null,
-        });
-      } catch (error) {
-        context.error('elevenLabsSample failed after rendering:', error);
-        return json(500, { error: 'The sample was rendered but the result could not be reported' });
-      }
-    },
+    getStatus: (request, context) => getStatus(deps, request, context),
+    renderSample: (request, context) => renderSample(deps, request, context),
   };
 }

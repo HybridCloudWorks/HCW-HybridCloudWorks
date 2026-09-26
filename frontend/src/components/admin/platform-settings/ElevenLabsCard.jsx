@@ -42,20 +42,16 @@ const RENDER_SOURCES = Object.freeze({
 });
 
 /**
- * The status read and the live check. Race-safe the way `useSetting` is: a
- * load only writes state while it is the newest, and a second click on the
- * check while one is running sends nothing.
+ * The status read. Race-safe the way `useSetting` is: a load only writes
+ * state while it is the newest, so a slow first load cannot land over a
+ * retry and an unmounted card's load writes nothing.
  */
-export function useElevenLabs(authReady) {
+function useElevenLabsStatus(authReady) {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [attempt, setAttempt] = useState(0);
-  const [sample, setSample] = useState(null);
-  const [running, setRunning] = useState(false);
   const generation = useRef(0);
-  const runningRef = useRef(false);
-  const { toast } = useToast();
 
   useEffect(() => {
     if (!authReady) return undefined;
@@ -63,14 +59,16 @@ export function useElevenLabs(authReady) {
     const current = () => mine === generation.current;
     getJSON(ELEVENLABS_STATUS_ROUTE)
       .then((response) => {
-        if (!current()) return;
-        setStatus(response ?? null);
-        setError(null);
+        if (current()) {
+          setStatus(response ?? null);
+          setError(null);
+        }
       })
       .catch((err) => {
-        if (!current()) return;
-        setStatus(null);
-        setError(err?.message ?? 'Could not load the ElevenLabs status.');
+        if (current()) {
+          setStatus(null);
+          setError(err?.message ?? 'Could not load the ElevenLabs status.');
+        }
       })
       .finally(() => {
         if (current()) setLoading(false);
@@ -87,6 +85,20 @@ export function useElevenLabs(authReady) {
     setAttempt((n) => n + 1);
   }, []);
 
+  return { status, loading, error, reload };
+}
+
+/**
+ * The live check, run on a click and never on load, because it spends
+ * credits. A second click while one is running sends nothing. `onRendered`
+ * re-reads the status so the figures above show the spend.
+ */
+function useLiveCheck(onRendered) {
+  const [sample, setSample] = useState(null);
+  const [running, setRunning] = useState(false);
+  const runningRef = useRef(false);
+  const { toast } = useToast();
+
   const runSample = useCallback(async () => {
     if (runningRef.current) return;
     runningRef.current = true;
@@ -98,7 +110,7 @@ export function useElevenLabs(authReady) {
         title: 'Live check rendered',
         description: `${count(result?.charactersBilled)} characters billed; ${count(result?.creditsLeft)} credits left.`,
       });
-      reload();
+      onRendered();
     } catch (err) {
       const message = err?.message ?? 'The live check failed.';
       setSample({ error: message });
@@ -107,9 +119,16 @@ export function useElevenLabs(authReady) {
       runningRef.current = false;
       setRunning(false);
     }
-  }, [reload, toast]);
+  }, [onRendered, toast]);
 
-  return { status, loading, error, reload, sample, running, runSample };
+  return { sample, running, runSample };
+}
+
+/** The status read and the live check, for the card. */
+export function useElevenLabs(authReady) {
+  const status = useElevenLabsStatus(authReady);
+  const check = useLiveCheck(status.reload);
+  return { ...status, ...check };
 }
 
 function PlanFigures({ subscription }) {

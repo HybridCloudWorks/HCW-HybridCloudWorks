@@ -121,11 +121,12 @@
  */
 import {
   ElevenLabsSpeechError,
-  QUOTA_EXCEEDED,
+  PAID_PLAN_REQUIRED,
   assertCreditsCover,
   creditsNeeded as creditsNeededFor,
-  errorCode,
+  dialogueRefusal,
   invalidateSubscription,
+  isQuotaExceeded,
 } from './elevenlabs-account.js';
 
 const DIALOGUE_URL = 'https://api.elevenlabs.io/v1/text-to-dialogue';
@@ -156,15 +157,14 @@ export const ELEVENLABS_DEFAULT_VOICES = {
   Elena: '9BWtsMINqrJLrRacOk9x',
 };
 
-/** Retried; anything else — a bad request, a rejected key, no credit — is not. */
-const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
+/** Attempts per request. Which statuses are retried is `dialogueRefusal`'s call. */
 const MAX_ATTEMPTS = 3;
 
-/** `code` for a 402 that is about the plan, not the credit (see the header). */
-export const PAID_PLAN_REQUIRED = 'paid_plan_required';
-
-// The error class lives in elevenlabs-account.js, not `./index.js`, which
-// imports this module: a cycle would make one of the two undefined at load.
+// The error class and the reading of a refusal live in elevenlabs-account.js,
+// not `./index.js`, which imports this module: a cycle would make one of the
+// two undefined at load. Re-exported here, where their callers and tests
+// have always imported them from.
+export { PAID_PLAN_REQUIRED, isQuotaExceeded };
 
 function readSetting(env, name) {
   const value = String(env?.[name] || '').trim();
@@ -295,25 +295,6 @@ export function buildInputs(turns, voices) {
   });
 }
 
-/**
- * Whether a non-2xx response is the out-of-credit state.
- *
- * The documented shapes are 401 + `detail.status: "quota_exceeded"` and 402
- * `insufficient_credits`. The body is JSON but is read as text first so a
- * non-JSON error page cannot throw here. A 402 is out of credit unless its
- * code says it is about the plan (`paid_plan_required`), which is not.
- */
-export function isQuotaExceeded(status, bodyText) {
-  if (status === 402) return errorCode(bodyText) !== PAID_PLAN_REQUIRED;
-  if (status !== 401) return false;
-  try {
-    const detail = JSON.parse(bodyText)?.detail;
-    return String(detail?.status || detail?.code || '').toLowerCase() === 'quota_exceeded';
-  } catch {
-    return /quota_exceeded/i.test(String(bodyText || ''));
-  }
-}
-
 async function synthesizeOne(inputs, { key, model, fetchImpl, sleep }) {
   let lastError = null;
 
@@ -345,27 +326,11 @@ async function synthesizeOne(inputs, { key, model, fetchImpl, sleep }) {
       return { audio, billedCharacters: Number.isFinite(billed) ? billed : null };
     }
 
-    const detail = await response.text().catch(() => '');
-    if (isQuotaExceeded(response.status, detail)) {
-      // Not retried, and reported by name: the draft's audioError says so.
-      throw new ElevenLabsSpeechError(
-        `ElevenLabs is out of credit (HTTP ${response.status} quota_exceeded): ${detail.slice(0, 300) || 'no detail'}`,
-        { status: response.status, code: QUOTA_EXCEEDED }
-      );
-    }
-    if (response.status === 402) {
-      // What is left of a 402 is the plan refusing a voice or a feature. Not
-      // retried either: a retry cannot change the plan.
-      throw new ElevenLabsSpeechError(
-        `ElevenLabs refused this on the current plan (HTTP 402 ${PAID_PLAN_REQUIRED}); a voice or feature it needs is paid-only: ${detail.slice(0, 300) || 'no detail'}`,
-        { status: 402, code: PAID_PLAN_REQUIRED }
-      );
-    }
-    lastError = new ElevenLabsSpeechError(
-      `ElevenLabs HTTP ${response.status}: ${detail.slice(0, 300) || 'no detail'}`,
-      { status: response.status }
-    );
-    if (!RETRYABLE_STATUSES.has(response.status) || attempt === MAX_ATTEMPTS) throw lastError;
+    // Out of credit and a paid-only voice are named and never retried; 429
+    // and 5xx are retried; anything else is reported as the API said it.
+    const refusal = dialogueRefusal(response.status, await response.text().catch(() => ''));
+    lastError = refusal.error;
+    if (!refusal.retryable || attempt === MAX_ATTEMPTS) throw lastError;
     await sleep(attempt * 500);
   }
 

@@ -12,6 +12,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   API_KEYS_PAGE,
   CREDITS_PER_CHARACTER,
+  PAID_PLAN_REQUIRED,
   SUBSCRIPTION_CACHE_TTL_MS,
   SUBSCRIPTION_URL,
   assertCreditsCover,
@@ -19,6 +20,7 @@ import {
   creditShortfall,
   creditsNeeded,
   describeShortfall,
+  dialogueRefusal,
   errorCode,
   invalidateSubscription,
   isFreePlan,
@@ -124,6 +126,32 @@ describe('isFreePlan and errorCode', () => {
     );
     expect(errorCode('<html>bad gateway</html>')).toBe('');
     expect(errorCode('')).toBe('');
+  });
+});
+
+describe('dialogueRefusal', () => {
+  it('names out of credit and a paid-only voice, never retrying either', () => {
+    const quota = dialogueRefusal(401, JSON.stringify({ detail: { status: 'quota_exceeded' } }));
+    expect(quota.retryable).toBe(false);
+    expect(quota.error).toMatchObject({ status: 401, code: 'quota_exceeded', provider: 'elevenlabs' });
+    expect(quota.error.message).toMatch(/^ElevenLabs is out of credit \(HTTP 401 quota_exceeded\)/);
+
+    const noCredit = dialogueRefusal(402, JSON.stringify({ detail: { code: 'insufficient_credits' } }));
+    expect(noCredit).toMatchObject({ retryable: false, error: { code: 'quota_exceeded' } });
+
+    const paid = dialogueRefusal(402, JSON.stringify({ detail: { code: 'paid_plan_required' } }));
+    expect(paid.retryable).toBe(false);
+    expect(paid.error).toMatchObject({ status: 402, code: PAID_PLAN_REQUIRED });
+  });
+
+  it('retries 429 and 5xx only, and reports everything else as the API said it', () => {
+    for (const status of [429, 500, 502, 503, 504]) {
+      expect(dialogueRefusal(status, 'busy').retryable).toBe(true);
+    }
+    const bad = dialogueRefusal(400, 'bad inputs');
+    expect(bad).toMatchObject({ retryable: false, error: { status: 400, code: null } });
+    expect(bad.error.message).toBe('ElevenLabs HTTP 400: bad inputs');
+    expect(dialogueRefusal(404, '').error.message).toBe('ElevenLabs HTTP 404: no detail');
   });
 });
 

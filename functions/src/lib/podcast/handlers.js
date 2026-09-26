@@ -87,6 +87,43 @@ const LIST_PROJECTION = TRANSCRIPT_LIST_FIELDS.map((field) => `c.${field}`).join
  */
 const LIST_QUERY = `SELECT TOP ${MAX_TRANSCRIPTS} ${LIST_PROJECTION} FROM c ORDER BY c.generatedAt DESC`;
 
+/** The 409 for ElevenLabs free-plan audio (speech-licence.js), or null. */
+function licenceRefusal(doc, context, route) {
+  const licence = freePlanRefusal(doc);
+  if (!licence) return null;
+  context.log?.(`${route}: refused (free_plan_licence)`);
+  return json(409, { error: licence, code: 'FREE_PLAN_LICENCE' });
+}
+
+/**
+ * Why a review may not proceed, as a response, or null. A missing transcript
+ * is 404. Approving free-plan audio is 409, checked before the status write
+ * so the refusal changes nothing and queues no host step. Withdrawing to
+ * draft is never refused.
+ */
+function reviewRefusal(existing, { id, status, context }) {
+  if (!existing) return json(404, { error: `No podcast transcript ${id}` });
+  if (status !== STATUS.published) return null;
+  return licenceRefusal(existing, context, 'reviewPodcastTranscript');
+}
+
+/**
+ * Why a publish retry may not proceed, as a response, or null: a missing
+ * transcript (404), one that is not approved (409 — approval is what
+ * publishes), or approved free-plan audio (409).
+ */
+function retryRefusal(doc, { id, context }) {
+  if (!doc) return json(404, { error: `No podcast transcript ${id}` });
+  if (doc.status !== STATUS.published) {
+    return json(409, {
+      error:
+        `Podcast transcript ${id} is ${doc.status || 'not published'}; ` +
+        'approve it first — publishing to RSS.com is what approval does.',
+    });
+  }
+  return licenceRefusal(doc, context, 'publishPodcastTranscript');
+}
+
 /**
  * @param {object} deps
  * @param {{ requireRole: Function }} deps.guard
@@ -265,15 +302,8 @@ export function createPodcastHandlers({
         id = parsedId.value;
 
         existing = await store.readDoc(TRANSCRIPT_CONTAINER, id, id);
-        if (!existing) return json(404, { error: `No podcast transcript ${id}` });
-
-        // Before the status write, so a refusal changes nothing: the
-        // transcript stays as it was and no host step is queued.
-        const licence = status === STATUS.published ? freePlanRefusal(existing) : null;
-        if (licence) {
-          context.log?.('reviewPodcastTranscript: refused (free_plan_licence)');
-          return json(409, { error: licence, code: 'FREE_PLAN_LICENCE' });
-        }
+        const refused = reviewRefusal(existing, { id, status, context });
+        if (refused) return refused;
 
         updated = await setTranscriptStatus(store, {
           id,
@@ -350,19 +380,8 @@ export function createPodcastHandlers({
         const id = parsedId.value;
 
         const doc = await store.readDoc(TRANSCRIPT_CONTAINER, id, id);
-        if (!doc) return json(404, { error: `No podcast transcript ${id}` });
-        if (doc.status !== STATUS.published) {
-          return json(409, {
-            error:
-              `Podcast transcript ${id} is ${doc.status || 'not published'}; ` +
-              'approve it first — publishing to RSS.com is what approval does.',
-          });
-        }
-        const licence = freePlanRefusal(doc);
-        if (licence) {
-          context.log?.('publishPodcastTranscript: refused (free_plan_licence)');
-          return json(409, { error: licence, code: 'FREE_PLAN_LICENCE' });
-        }
+        const refused = retryRefusal(doc, { id, context });
+        if (refused) return refused;
 
         const host = await runHostStep({ doc, enqueue, requestedBy: auth.user, context });
         if (host.outcome === 'in_flight') {
