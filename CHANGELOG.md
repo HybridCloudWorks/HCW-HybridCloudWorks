@@ -19,6 +19,32 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **infra-lab: adopt the existing Hostinger VPS by import and add the lab
+  DNS records (#661).** A new root module, `infra-lab/`, for the HCP
+  Terraform workspace `hcw/hcw-lab` (ADR 0032), pinned to
+  `hostinger/hostinger` 0.1.23 and `cloudflare/cloudflare` `~> 5.24`. The
+  owner already has the server, and in this provider creating a
+  `hostinger_vps` is a purchase and destroying one cancels the
+  subscription. So `hostinger_vps.lab` comes in through an `import` block
+  whose id is a workspace variable, has `prevent_destroy`, and ignores
+  changes to `plan`, `data_center_id` and `password` (ForceNew, so a change
+  would be cancel and re-purchase) and to `template_id` (a change
+  reinstalls the disk). Postconditions turn a mistyped identity variable
+  into a plan error that names the right value. `dns.tf` writes
+  `lab.hybridcloudworks.com` (A, the VPS's IPv4) and CNAMEs to it for
+  `*.lab`, `coder.lab` and `*.coder.lab`, all DNS-only. `coder.lab` needs
+  its own record because `*.coder.lab` makes it an empty non-terminal,
+  which Cloudflare's wildcard does not answer for. There are no
+  `_acme-challenge` delegations while there is no lab zone (the ADR 0032
+  interim). The provider cannot run a post-install script on an existing
+  server, so the first Ansible run is `bootstrap.sh` over SSH. The owner's
+  steps and the expected first plan,
+  `1 to import, 4 to add, 0 to change, 0 to destroy`, are in
+  `infra-lab/README.md`. Offline contract tests with mocked providers
+  (`infra-lab/tests/adopt.tftest.hcl`) and the fmt, validate, tflint,
+  test and Trivy steps run in the existing `iac-validate.yml` contexts,
+  and Dependabot watches the new lock file.
+
 - **The Coder status token is an expected unresolved secret until Coder
   can issue it (#682).** `CODER-STATUS-TOKEN` is created by Coder, so it
   cannot exist before Coder runs on the lab host (#661); the Terraform comment

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Bootstrap the HCW lab host. Re-runnable: the Hostinger post-install script
-# (#661) runs it once on a fresh Ubuntu 24.04 host, and the owner re-runs it
-# after changing the pinned ref or the vault. Everything the host ends up
+# Bootstrap the HCW lab host. Re-runnable: the owner runs it first as root over
+# SSH on the adopted Ubuntu 24.04 host (infra-lab/README.md, step 7; the
+# Hostinger provider cannot attach a post-install script to a server that
+# already exists), and re-runs it after changing the pinned ref or the vault. Everything the host ends up
 # running is declared under ansible/; this script only gets Ansible there.
 #
 # The vault is optional on purpose. Without /etc/hcw/ansible/vault.yml the
