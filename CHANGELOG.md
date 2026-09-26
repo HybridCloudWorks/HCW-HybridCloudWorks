@@ -19,6 +19,55 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Azure Arc onboarding for the lab host: onboarding identity, data
+  collection rule, audit policy, Ansible arc role (#663).** Phase 3 of #656,
+  the engineering half. `infra/lab-hybrid.tf` adds the data collection rule
+  `dcr-lab-hybrid-prod-cus` (heartbeat plus `auth`/`authpriv` syslog at Info
+  and above, into the Management workspace, in the workspace's own region),
+  the onboarding principal's only grant (Azure Connected Machine Onboarding
+  on `rg-lab-hybrid-prod-cus`, planned once the owner sets
+  `arc_onboarding_principal_id`, because the run identity has no Entra role
+  and a Terraform-minted secret would sit in state) and the audit-only Linux
+  security baseline assignment with `IncludeArcMachines` true (planned once
+  `lab_hybrid_policy_enabled` is set, because the run identity cannot write
+  a policy assignment until the owner grants it Resource Policy Contributor
+  on the group). The Arc resource providers join
+  `azure_resource_providers`; Defender for Servers stays off. The new
+  `lab-host/ansible/roles/arc` runs after `hardening`, off by default
+  (`arc_enabled: false`): `azcmagent` 1.68.03532.1399 from Microsoft's
+  repository, signing key pinned by SHA256 and held, then `azcmagent
+  connect` with the credential in a root-only temporary `--config` file
+  deleted in the same run; skipped once Connected, fail-closed without the
+  four `vault_arc_*` values otherwise. The Azure Monitor Agent and the
+  rule's association are the owner's two `az` commands after onboarding,
+  because both target a machine that does not exist before it.
+  [Labs host Arc onboarding](docs/runbooks/labs-host.md) is the owner
+  procedure, from the principal to Connected, the heartbeat, the compliance
+  state and the disconnect; Required-Inputs §4.1 and §4.7 carry the new
+  names, and the §4.1 variable count, which had drifted to 62 against 63,
+  now reads 65.
+- **NVIDIA API Catalog as a purpose-scoped AI provider for content
+  generation (#701).** A fourth router provider, `nvidia`, on the
+  OpenAI-compatible endpoint `https://integrate.api.nvidia.com/v1` with
+  `NVIDIA_API_KEY` as a Bearer token; available by key presence, and an
+  unseeded Key Vault reference counts as no key. Its purpose → model table
+  (`CONTENTFORGE_NVIDIA_*_MODEL` overridable) defaults to `z-ai/glm-5.3` for
+  drafts, `deepseek-ai/deepseek-v4.1-flash` for analysis and
+  `z-ai/glm-5.3-flash` for short calls, read from build.nvidia.com on
+  2026-09-25. It is placed per feature (`PROVIDER_PLACEMENT_DEFAULTS` in
+  `ai-config.js`): first for owner-triggered content (Forge drafting and
+  grading, inspector, critique, voice calibration, captions, Listen & Learn
+  and podcast scripts), after the others for the Telegram assistant, and
+  locked off for the anonymous public explain features, image alt text and
+  source grounding — configuration can demote or disable it, never place it
+  in a locked feature. A sliding-window pacing guard keeps each instance at
+  36 requests a minute (`NVIDIA_REQUESTS_PER_MINUTE`); a paced call is not
+  sent and fails over at once, as do NVIDIA 429/5xx/404/400 responses after
+  the existing retries. Usage is recorded at zero cost. The AI Engine page
+  lists and orders the provider and sets its placement per feature under
+  "Where AI is used". `NVIDIA-API-KEY` gains a Key Vault reference in
+  `infra/functionapp.tf`, a secret-catalogue entry and a Required-Inputs §4.6
+  row; the owner seeds it.
 - **infra-lab: adopt the existing Hostinger VPS by import and add the lab
   DNS records (#661).** A new root module, `infra-lab/`, for the HCP
   Terraform workspace `hcw/hcw-lab` (ADR 0032), pinned to
