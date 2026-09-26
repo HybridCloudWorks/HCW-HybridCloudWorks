@@ -19,6 +19,14 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Portainer and HashiCorp Vault are on for the lab host (owner decision
+  2026-09-26).** `portainer_enabled` and `vault_enabled` are `true` in
+  `lab-host/ansible/group_vars/all.yml`, so the next `bootstrap.sh` run starts
+  Portainer Business Edition 2.45.1 on `127.0.0.1:9443` and Vault 2.1.1 on
+  `127.0.0.1:8200`, both loopback-only. Vault comes up uninitialised and
+  sealed; the first administrator, the licence key and Vault's unseal keys
+  are the owner's steps in `docs/runbooks/labs-host.md`.
+
 - **The lab host refuses a host it was not prepared for; Portainer and
   HashiCorp Vault join it, loopback-only (owner decision 2026-09-26; #656).**
   The owner's first `bootstrap.sh` run on the VPS met a host that had never
