@@ -1,0 +1,5 @@
+# {{ ansible_managed }}
+# The Vault CLI's address and the certificate it trusts, for login shells on
+# the lab host (lab-host/README.md, "HashiCorp Vault").
+export VAULT_ADDR={{ vault_api_addr }}
+export VAULT_CACERT={{ vault_tls_cert_file }}

@@ -1,0 +1,291 @@
+---
+- name: Install the packages the download, its verification and the certificate need
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - gpg
+      - gpgv
+      - openssl
+      - unzip
+    state: present
+
+- name: Create the vault group
+  ansible.builtin.group:
+    name: "{{ vault_group }}"
+    system: true
+    state: present
+
+- name: Create the vault system user
+  ansible.builtin.user:
+    name: "{{ vault_user }}"
+    group: "{{ vault_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ vault_data_dir }}"
+    create_home: false
+    state: present
+
+- name: Create the Vault directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ vault_install_dir }}", owner: root, group: root, mode: "0755" }
+    - { path: "{{ vault_release_dir }}", owner: root, group: root, mode: "0755" }
+    - { path: "{{ vault_config_dir }}", owner: root, group: "{{ vault_group }}", mode: "0755" }
+    - { path: "{{ vault_tls_dir }}", owner: root, group: "{{ vault_group }}", mode: "0755" }
+    - { path: "{{ vault_data_dir }}", owner: "{{ vault_user }}", group: "{{ vault_group }}", mode: "0700" }
+  loop_control:
+    label: "{{ item.path }}"
+
+# The chain of trust, each link checked before the next is used: HashiCorp's
+# signing key (its bytes pinned by vault_pgp_key_checksum) signs the release's
+# SHA256SUMS; SHA256SUMS must list the pinned vault_checksum for the linux
+# amd64 archive; and the archive must hash to that same value. HashiCorp signs
+# only SHA256SUMS ("The archives themselves are not signed, but rather
+# hashed", https://www.hashicorp.com/en/trust/security).
+- name: Install HashiCorp's release signing key and refuse one that does not match its pinned checksum
+  ansible.builtin.get_url:
+    url: "{{ vault_pgp_key_url }}"
+    dest: "{{ vault_pgp_key_path }}"
+    checksum: "{{ vault_pgp_key_checksum }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Convert the key to the binary keyring gpgv reads
+  ansible.builtin.command:
+    argv:
+      - gpg
+      - --batch
+      - --yes
+      - --dearmor
+      - --output
+      - "{{ vault_pgp_keyring_path }}"
+      - "{{ vault_pgp_key_path }}"
+    creates: "{{ vault_pgp_keyring_path }}"
+
+- name: Download the release's SHA256SUMS and its signature
+  ansible.builtin.get_url:
+    url: "{{ vault_release_url }}/{{ item | basename }}"
+    dest: "{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - "{{ vault_sums_path }}"
+    - "{{ vault_sums_signature_path }}"
+
+# A command, so check mode skips it (and the two tasks after it) on a host
+# where the files above were never downloaded.
+- name: Verify HashiCorp's signature on SHA256SUMS
+  ansible.builtin.command:
+    argv:
+      - gpgv
+      - --keyring
+      - "{{ vault_pgp_keyring_path }}"
+      - "{{ vault_sums_signature_path }}"
+      - "{{ vault_sums_path }}"
+  register: vault_sums_verified
+  changed_when: false
+
+- name: Read the signed SHA256SUMS
+  ansible.builtin.slurp:
+    src: "{{ vault_sums_path }}"
+  register: vault_sums
+  when: vault_sums_verified is not skipped
+
+- name: Refuse a pinned checksum that the signed SHA256SUMS does not list for this archive
+  ansible.builtin.assert:
+    that:
+      - (vault_sums.content | b64decode) is search('^' ~ vault_checksum_hex ~ '  ' ~ (vault_archive_name | regex_escape) ~ '$', multiline=True)
+    fail_msg: >-
+      vault_checksum ({{ vault_checksum }}) is not the value HashiCorp's signed
+      {{ vault_sums_name }} lists for {{ vault_archive_name }}. Read the value from that file
+      (roles/vault/README.md, "Bumping the pin") rather than from anywhere else.
+    quiet: true
+  when: vault_sums_verified is not skipped
+
+- name: Download the pinned release and verify its checksum
+  ansible.builtin.get_url:
+    url: "{{ vault_release_url }}/{{ vault_archive_name }}"
+    dest: "{{ vault_release_dir }}/{{ vault_archive_name }}"
+    checksum: "{{ vault_checksum }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Unpack the release
+  ansible.builtin.unarchive:
+    src: "{{ vault_release_dir }}/{{ vault_archive_name }}"
+    dest: "{{ vault_release_dir }}"
+    remote_src: true
+    include:
+      - vault
+    creates: "{{ vault_release_dir }}/vault"
+
+- name: Install the binary
+  ansible.builtin.copy:
+    src: "{{ vault_release_dir }}/vault"
+    dest: "{{ vault_binary_path }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
+  register: vault_binary
+
+- name: Confirm the installed binary is the pinned release
+  ansible.builtin.command:
+    argv:
+      - "{{ vault_binary_path }}"
+      - version
+  register: vault_binary_version
+  changed_when: false
+  failed_when: ('Vault v' ~ vault_version ~ ' ') not in vault_binary_version.stdout
+
+# TLS on the loopback, with a certificate made here and never moved: the
+# shape of the agent certificate in the labs_agent role. Self-signed, because
+# nothing outside this host connects to 8200 and so there is no CA to chain
+# to; the CLI trusts this one certificate through VAULT_CACERT. Chosen over
+# tls_disable because every request carries a token and every answer from an
+# unsealed Vault is a secret, and plaintext would stay plaintext wherever the
+# port is later carried (a tunnel's far end, a proxy). The cost is one openssl
+# call and a file the CLI reads.
+- name: Generate the listener's private key and self-signed certificate on this host
+  ansible.builtin.shell:
+    cmd: >-
+      umask 077
+      && openssl req -x509 -newkey rsa:4096 -sha256 -nodes
+      -days {{ vault_certificate_days }}
+      -subj "/CN=localhost"
+      -addext "subjectAltName=IP:127.0.0.1,DNS:localhost"
+      -keyout "{{ vault_tls_key_file }}"
+      -out "{{ vault_tls_cert_file }}"
+    creates: "{{ vault_tls_key_file }}"
+  register: vault_certificate
+
+- name: Keep the key root-owned, readable only by the vault group
+  ansible.builtin.file:
+    path: "{{ vault_tls_key_file }}"
+    owner: root
+    group: "{{ vault_group }}"
+    mode: "0640"
+
+- name: Make the certificate readable, so the CLI can trust it through VAULT_CACERT
+  ansible.builtin.file:
+    path: "{{ vault_tls_cert_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Check how long the listener certificate remains valid
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - x509
+      - -checkend
+      - "{{ vault_certificate_warn_seconds }}"
+      - -noout
+      - -in
+      - "{{ vault_tls_cert_file }}"
+  register: vault_certificate_check
+  changed_when: false
+  failed_when: vault_certificate_check.rc not in [0, 1]
+
+- name: Warn when the listener certificate is close to expiry
+  ansible.builtin.debug:
+    msg: >-
+      {{ vault_tls_cert_file }} expires within {{ vault_certificate_warn_days }} days. Rotate it:
+      remove it and {{ vault_tls_key_file }} and re-run bootstrap.sh, which generates a new pair
+      and restarts Vault, sealed (roles/vault/README.md, "Rotating the certificate").
+  when: vault_certificate_check.rc | default(0) == 1
+
+- name: Write Vault's configuration
+  ansible.builtin.template:
+    src: vault.hcl.j2
+    dest: "{{ vault_config_file }}"
+    owner: root
+    group: "{{ vault_group }}"
+    mode: "0640"
+  register: vault_config
+
+- name: Point the Vault CLI at the loopback listener for login shells
+  ansible.builtin.template:
+    src: hcw-vault.sh.j2
+    dest: "{{ vault_profile_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install the Vault systemd unit
+  ansible.builtin.template:
+    src: vault.service.j2
+    dest: /etc/systemd/system/vault.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: vault_unit
+
+- name: Warn that swap is on, which Vault's documentation asks to turn off with disable_mlock
+  ansible.builtin.debug:
+    msg: >-
+      This host has {{ ansible_facts['swaptotal_mb'] }} MB of swap. Vault runs with
+      disable_mlock = true, as its documentation strongly recommends for integrated storage,
+      and the same documentation says swap should then be disabled (or encrypted) so that
+      Vault's in-memory secrets are never written to disk (roles/vault/README.md, "mlock").
+  when: ansible_facts['swaptotal_mb'] | int > 0
+
+- name: Enable and start Vault
+  ansible.builtin.systemd_service:
+    name: vault
+    enabled: true
+    state: started
+    daemon_reload: true
+  register: vault_started
+
+# Not a handler: the status read below must see the Vault this run
+# configured, and handlers run after it. A restart seals Vault, so it happens
+# only when the binary, the configuration, the certificate or the unit
+# actually changed, and never straight after the start above.
+- name: Restart Vault after its binary, configuration, certificate or unit changed (it comes back sealed)
+  ansible.builtin.systemd_service:
+    name: vault
+    state: restarted
+    daemon_reload: true
+  when:
+    - not vault_started.changed
+    - vault_binary.changed or vault_config.changed or vault_unit.changed or vault_certificate.changed
+
+- name: Wait for Vault's loopback listener
+  ansible.builtin.wait_for:
+    host: "{{ vault_listen_address }}"
+    port: "{{ vault_api_port }}"
+    timeout: 60
+  when: not ansible_check_mode
+
+# `vault status` exits 0 when unsealed, 2 when sealed (an uninitialised
+# Vault is sealed) and 1 on an error; only 1 fails the play.
+- name: Read Vault's seal status
+  ansible.builtin.command:
+    argv:
+      - "{{ vault_binary_path }}"
+      - status
+      - -format=json
+  environment: "{{ vault_cli_environment }}"
+  register: vault_status
+  changed_when: false
+  failed_when: vault_status.rc not in [0, 2]
+  when: not ansible_check_mode
+
+- name: Say what state Vault is in, and whose step is next
+  ansible.builtin.debug:
+    msg: "HashiCorp Vault {{ vault_version }} answers on {{ vault_api_addr }} only. {{ vault_state_advice }}"
+  vars:
+    vault_seal_status: "{{ vault_status.stdout | from_json }}"
+    vault_state_advice: >-
+      {{ vault_advice_uninitialised if not vault_seal_status.initialized
+         else (vault_advice_sealed if vault_seal_status.sealed else vault_advice_unsealed) }}
+  when: not ansible_check_mode

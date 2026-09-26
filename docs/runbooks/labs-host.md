@@ -1,7 +1,10 @@
 # Labs host — desktop access and Azure Arc onboarding
 
 How to reach the Hostinger lab host from a desktop over SSH and VS Code (the
-first section), and how the host becomes an Azure Arc-enabled server in
+first section); how to reinstall it, and what the first `bootstrap.sh` run
+checks before it changes anything; how the owner reaches Portainer and
+initialises and unseals HashiCorp Vault on it (owner decision 2026-09-26);
+and how the host becomes an Azure Arc-enabled server in
 `rg-lab-hybrid-prod-cus`, sends heartbeat and `auth`/`authpriv` syslog to the
 Management workspace, and is audited against the Linux security baseline
 (ADR 0032 decision 3, #663; the rest of the page). The shape of the host is
@@ -164,6 +167,291 @@ SSH from a desktop is the only shell. When SSH is not working, hPanel's
 **Manage** on the server, then **Web Console** on its overview. It usually
 signs in by itself; when it asks, Hostinger's instructions are `root` and
 the root password.
+
+## The first-run host check
+
+`lab-host/bootstrap.sh` configures only a host that was prepared for it. On
+2026-09-26 its first run met a VPS that had never been reinstalled: two
+self-hosted GitHub Actions runners, Portainer, an nginx site on port 80,
+k3s, Vault and an old install of the agent. Before failing, that run
+upgraded and restarted Docker, which killed a running Dependabot job,
+enabled ufw and rewrote sshd's settings. So on a host it has never
+accepted, the script now looks for other workloads before it changes
+anything, and stops if it finds one:
+
+- any Docker container, running or stopped;
+- an installed `actions.runner.*` systemd unit (a self-hosted runner);
+- Kubernetes: a `k3s`, `k0s`, `rke2`, `kubelet` or `microk8s` unit, or
+  `/usr/local/bin/k3s`, `/etc/rancher`, `/var/lib/rancher`,
+  `/etc/kubernetes`, `/var/lib/kubelet`;
+- `/opt/hcw-src` or `/opt/hcw-labs-agent` holding anything but a checkout of
+  this repository;
+- anything else under `/opt`;
+- a TCP listener other than sshd on 22 and systemd-resolved on
+  `127.0.0.53:53` and `127.0.0.54:53`.
+
+A refusal ends with exit code 3 and changes nothing. On a copy of the
+2026-09-26 host (Docker from Docker's repository, and stand-ins for each
+workload, in an Ubuntu 26.04 test container) the step-7 line printed:
+
+```text
+[bootstrap] host check: this host has not run bootstrap.sh before; looking for other workloads first
+[bootstrap] refusing to configure this host: it shows signs of other workloads, and bootstrap.sh has never run here (no /etc/hcw/bootstrap-host-accepted).
+[bootstrap] found:
+[bootstrap]   - Docker container old-nginx (busybox:1.37, Up 15 seconds)
+[bootstrap]   - Docker container old-portainer (busybox:1.37, Up 16 seconds)
+[bootstrap]   - systemd unit actions.runner.example-org-example-repo.runner-1.service (enabled): a GitHub Actions self-hosted runner
+[bootstrap]   - systemd unit actions.runner.example-org-example-repo.runner-2.service (enabled): a GitHub Actions self-hosted runner
+[bootstrap]   - systemd unit k3s.service (enabled): Kubernetes
+[bootstrap]   - /etc/rancher exists: Kubernetes
+[bootstrap]   - /opt/hcw-labs-agent exists and is not a checkout of https://github.com/HybridCloudWorks/HCW-HybridCloudWorks.git
+[bootstrap]   - /opt/actions-runner: not created by this repository
+[bootstrap]   - /opt/containerd: not created by this repository
+[bootstrap]   - TCP listener on 127.0.0.1:8200 (python3)
+[bootstrap]   - TCP listener on 0.0.0.0:80 (docker-proxy)
+[bootstrap]   - TCP listener on [::]:80 (docker-proxy)
+[bootstrap] nothing has been changed. A run would move Docker to its pinned version and restart it, enable ufw with only TCP 22, 80 and 443 open, and replace sshd's login settings, whatever the workloads above need.
+[bootstrap] either reinstall the server with Ubuntu 26.04 LTS and run this again (docs/runbooks/labs-host.md, "Reinstalling the host"),
+[bootstrap] or, only if every item above is meant to stay and may be disrupted, accept the host knowingly:
+[bootstrap]   HCW_ADOPT_NONEMPTY_HOST=1 /opt/hcw-src/lab-host/bootstrap.sh
+```
+
+The way on is the reinstall below. The other, for a host whose workloads
+are meant to stay, is the last line of the refusal, bash, on the host, as
+root:
+
+```bash
+HCW_ADOPT_NONEMPTY_HOST=1 /opt/hcw-src/lab-host/bootstrap.sh
+```
+
+The first run that passes writes `/etc/hcw/bootstrap-host-accepted` before
+its first change, and every run that finishes adds its commit and time.
+While the file exists, later runs print `host check: skipped` and do not
+look again, so a first run that fails half-way can simply be re-run.
+Success on a clean host is these three lines at the top of the first run:
+
+```text
+[bootstrap] host check: this host has not run bootstrap.sh before; looking for other workloads first
+[bootstrap] host check: no other workloads found
+[bootstrap] host check: recorded in /etc/hcw/bootstrap-host-accepted
+```
+
+## Reinstalling the host
+
+Owner decision 2026-09-26: the VPS is reinstalled clean, and nothing on it
+is exported, because nothing on it was production. The same procedure
+applies whenever the host check refuses or the host is compromised or broken:
+ADR 0032 rebuilds the host rather than repairing it.
+
+1. **Before wiping.** If the host is Connected to Azure Arc, delete its
+   machine resource first ("Re-onboarding a rebuilt host", below). If the
+   old host ran self-hosted GitHub Actions runners, remove their
+   registrations where they were registered, or GitHub keeps them as
+   offline runners. This repository's list is
+   `https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/settings/actions/runners`
+   and the organisation's is
+   `https://github.com/organizations/HybridCloudWorks/settings/actions/runners`;
+   both were empty on 2026-09-26.
+2. **Reinstall.** At https://hpanel.hostinger.com/vps, **Manage** on the
+   server, then **OS & Panel**, **Operating System**: choose plain **Ubuntu
+   26.04**, not a template that adds Docker, a control panel or an
+   application, because the host check refuses anything those leave in
+   `/opt` or running.
+   Give root your SSH key there (the key `scripts/lab/Connect-Lab.ps1`
+   printed; `infra-lab/README.md`, step 6). Reinstalling wipes the disk: the
+   Ansible vault on the host, Portainer's data and Vault's data go with it.
+3. **The workspace variable.** If the `hcw-lab` workspace exists, its
+   `hostinger_template_id` must match the new install, or its next plan stops
+   at the postcondition. Read the new value with the line in
+   `infra-lab/README.md`, step 1, and set it at
+   `https://app.terraform.io/app/hcw/workspaces/hcw-lab/variables`.
+4. **Forget the old host key**, on every desktop that connected before. A
+   reinstall gives the host new SSH host keys, and `ssh` refuses the new ones
+   with `REMOTE HOST IDENTIFICATION HAS CHANGED` until the old entries are
+   gone. PowerShell, by name:
+
+   ```powershell
+   ssh-keygen -R lab.hybridcloudworks.com
+   ```
+
+   And whatever `hcw-lab` points at, which is the server's address while
+   `LAB_SSH_HOST` holds it (this page carries no addresses), PowerShell:
+
+   ```powershell
+   ssh-keygen -R (ssh -G hcw-lab | Select-String -Pattern '^hostname (.+)$').Matches[0].Groups[1].Value
+   ```
+
+   Success for each is `found` and `updated` for a name that was known, or
+   `not found` for one that was not; both are fine.
+5. **Connect as root**, PowerShell, from the repository root:
+
+   ```powershell
+   pwsh -NoProfile -File scripts/lab/Connect-Lab.ps1 -User root
+   ```
+
+   ```powershell
+   ssh hcw-lab hostname
+   ```
+
+   Accept the new host key after comparing its fingerprint with the one the
+   Web Console shows ("Connect from a desktop", above). Success is the
+   server's host name.
+6. **First run**: `infra-lab/README.md`, step 7. Success is `host check: no
+   other workloads found` near the top (above) and a `PLAY RECAP` for
+   `localhost` with `failed=0`. Then run `Connect-Lab.ps1` again without
+   `-User root`, because root login is now off.
+7. **Everything the disk held, again.** Create the Ansible vault and its
+   password (`lab-host/README.md`, "The vault"), rotating the values marked
+   "rotate on every host rebuild" in
+   [Required inputs §4.7](../standards/required-inputs.md#47-vps-agent-hostinger-env-never-committed)
+   (the Caddy DNS token and the Coder GitHub OAuth secret). The agent's key
+   pair is new, so upload the new certificate (`lab-host/README.md`, "The
+   agent identity"). Re-onboard Arc ("Re-onboarding a rebuilt host", below).
+   Portainer gets a new administrator and its licence key (below). Vault is
+   new and uninitialised: initialise it (below), and delete the old unseal
+   keys and root token from the password manager, because they open nothing
+   now.
+
+## Portainer through an SSH tunnel
+
+Portainer Business Edition runs for the owner only (owner decision
+2026-09-26). It holds the Docker socket, which is root on the host, so it is
+published on the host's `127.0.0.1:9443` and nowhere else, with no Caddy
+route, and the way to it is an SSH tunnel. Whoever can open the tunnel
+already has an SSH login, which carries `sudo`.
+
+It is off until a pull request sets `portainer_enabled: true` in
+`lab-host/ansible/group_vars/all.yml` and `bootstrap.sh` runs after the
+merge. Success for that run is a `PLAY RECAP` with `failed=0` and the task
+`portainer : Say how to reach Portainer` printing `Portainer 2.45.1 answers
+on https://127.0.0.1:9443 on this host and nowhere else`.
+
+**The first sign-in.** Two guards stand in front of a fresh Portainer, and
+both were measured on the pinned 2.45.1 on 2026-09-26. Until an
+administrator exists it stops serving five minutes after it starts: the
+container stays up and every request answers `Administrator initialization
+timeout`. And creating the administrator needs a one-time **setup token**
+that Portainer prints in its log at every start; without it the setup
+screen is refused. So open the tunnel first, then restart Portainer and read
+the token from inside it. PowerShell, on the desktop; this opens a shell on
+the host and the tunnel together, and the tunnel lasts as long as that
+shell:
+
+```powershell
+ssh -L 9443:127.0.0.1:9443 hcw-lab
+```
+
+Bash, in that shell on the host; this opens a new five minutes:
+
+```bash
+sudo docker restart portainer
+```
+
+Bash, in the same shell; this prints the token of the start that line just
+made, as one `setup_token=` line:
+
+```bash
+sudo docker logs portainer 2>&1 | grep setup_token | tail -n 1
+```
+
+Then open https://localhost:9443 on the desktop. The browser warns about the
+certificate, which Portainer generated for itself; for this address that
+warning is expected. Paste the value after `setup_token=` where the setup
+screen asks for it. The token is good for this one start and is not kept
+anywhere. Create the administrator with a password from the password manager,
+at least 12 characters (an 11-character one was refused), and keep it there
+only. Business Edition then asks for its licence key: the 3 Nodes Free key
+Portainer issued. Until a key is entered it reports the licence as not
+valid. The key from the pre-reinstall server may be reused, because that
+server no longer runs it, and https://www.portainer.io/take-3 issues a new
+one. The key goes into this page only, never into the repository or the
+Ansible vault. Portainer then offers its environment wizard, where **Get
+Started** adds this host's Docker, through the socket, as the environment
+`local`; no environment exists before that.
+
+Success is Portainer's **Home** page listing `local`, **Docker Standalone**,
+**Up**, whose containers include `portainer`. If the page says the instance
+timed out, the five minutes passed first: run the restart line and the token
+line again, in the same shell, and use the new token. Once the administrator
+exists there is no timeout and no token, and later visits need only the
+tunnel line.
+
+## HashiCorp Vault: initialising and unsealing
+
+HashiCorp Vault runs host-native on `127.0.0.1:8200` (owner decision
+2026-09-26). **It holds lab-host secrets only.** This host runs learner
+workloads, and an escape from a workspace or a job container is root on the
+host, which can read an unsealed Vault's memory. So no production
+HybridCloudWorks secret is ever put in it: those stay in Azure Key Vault
+`kv-site-prod-cus-01`. Nor anything that exists nowhere else, because the
+host holds no data of record; every value in it must be one its issuer can
+issue again.
+
+It is off until a pull request sets `vault_enabled: true` in
+`lab-host/ansible/group_vars/all.yml` and `bootstrap.sh` runs after the
+merge. Success for that run is `failed=0` and the task `vault : Say what
+state Vault is in` printing `It is not initialised`. The role never
+initialises or unseals Vault. Both are the steps below, and the keys they
+produce go to the owner's password manager, never to the repository, a
+log, an issue, a chat or the Ansible vault.
+
+**Initialise, once.** PowerShell, on the desktop; an interactive login,
+because the login shell is what sets `VAULT_ADDR` and `VAULT_CACERT`:
+
+```powershell
+ssh hcw-lab
+```
+
+Bash, on the host:
+
+```bash
+vault status
+```
+
+Success is `Initialized false` and `Sealed true`, with exit code 2, which is
+what a sealed Vault returns. Then:
+
+```bash
+vault operator init -key-shares=5 -key-threshold=3
+```
+
+It prints `Unseal Key 1:` to `Unseal Key 5:` and `Initial Root Token:`
+once, and Vault keeps no copy: without three of the five keys it stays
+sealed for good. Copy each of the six values into the password manager as
+it is printed. Success is the line `Vault initialized with 5 key shares and
+a key threshold of 3.` Then clear the screen and the terminal's scrollback,
+bash, on the host:
+
+```bash
+clear && printf '\033[3J'
+```
+
+**Unseal, after initialising and after every restart or reboot.** A restart
+seals Vault, and so does every reboot, including the unattended-upgrades
+reboot at 04:30; until three keys are entered it serves nothing. Bash, on the
+host, three times, pasting a different key at each `Unseal Key (will be
+hidden):` prompt:
+
+```bash
+vault operator unseal
+```
+
+It takes no argument on purpose, so no key reaches the shell's history.
+Success is `Unseal Progress 1/3`, then `2/3`, then `Sealed false`; `vault
+status` then shows `Initialized true`, `Sealed false` and `HA Mode active`.
+Rehearsed on 2026-09-26 in a test container with Vault 2.1.1: exactly that
+sequence, raft's cluster port opening on `127.0.0.1:8201` only after the
+unseal, and `Sealed true` again after `systemctl restart vault`. Auto-unseal
+through Azure Key Vault and the Arc machine's identity would remove this
+step; it is
+[#726](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/726),
+not built.
+
+**The root token.** `vault login` prompts for it, hidden, and writes it to
+`~/.vault-token`. Use it for what the host needs, then remove that file with
+`rm ~/.vault-token`. Once another way in exists, revoke the root token with
+`vault token revoke -self`; a new one takes three unseal keys and `vault
+operator generate-root`.
 
 ## Arc onboarding
 

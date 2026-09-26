@@ -1,0 +1,32 @@
+---
+# Off by default (group_vars/all.yml), like Coder. While vault_enabled is
+# false the role installs nothing, and stops a Vault an earlier run installed;
+# its data under vault_data_dir stays, so turning it back on brings back the
+# same (sealed) Vault. The role never initialises or unseals Vault: both are
+# owner steps (lab-host/README.md, "HashiCorp Vault").
+- name: Install and run HashiCorp Vault
+  ansible.builtin.import_tasks: install.yml
+  when: vault_enabled | bool
+
+- name: Check whether a Vault unit is installed
+  ansible.builtin.stat:
+    path: /etc/systemd/system/vault.service
+  register: vault_unit_stat
+  when: not vault_enabled | bool
+
+- name: Stop and disable Vault while vault_enabled is false (its data stays)
+  ansible.builtin.systemd_service:
+    name: vault
+    enabled: false
+    state: stopped
+  when:
+    - not vault_enabled | bool
+    - vault_unit_stat.stat.exists
+
+- name: Say why Vault is not running
+  ansible.builtin.debug:
+    msg: >-
+      HashiCorp Vault is not running: vault_enabled is false. To run it, set vault_enabled to
+      true in group_vars/all.yml and re-run bootstrap.sh; initialising and unsealing it are
+      then owner steps (lab-host/README.md, "HashiCorp Vault").
+  when: not vault_enabled | bool

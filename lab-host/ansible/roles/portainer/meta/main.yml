@@ -1,0 +1,18 @@
+---
+galaxy_info:
+  role_name: portainer
+  namespace: hcw
+  author: HybridCloudWorks
+  description: Portainer Business Edition, digest-pinned, published on the host's loopback only and reached through an SSH tunnel
+  license: UNLICENSED
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - resolute
+        - noble
+  galaxy_tags:
+    - portainer
+    - docker
+
+dependencies: []

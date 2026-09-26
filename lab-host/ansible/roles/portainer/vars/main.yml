@@ -1,0 +1,22 @@
+---
+# Derived values. Not meant to be overridden, which is why they are vars and
+# not defaults.
+# Pulled by digest, never by tag (the tag in group_vars is for humans).
+portainer_image_ref: "{{ portainer_image }}@{{ portainer_image_digest }}"
+# The host's loopback and nothing else. Docker writes its own iptables rules
+# for a published port, ahead of ufw's, so ufw would not stop a publish on
+# 0.0.0.0: the address here is the only thing between the internet and a UI
+# that holds the Docker socket. tasks/main.yml asserts it.
+portainer_published_port: "127.0.0.1:{{ portainer_https_port }}:9443"
+# What the run says about the first-administrator window, by state.
+portainer_advice_timed_out: >-
+  Its first-administrator window has closed (Administrator initialization timeout): if no
+  administrator was created yet, run sudo docker restart {{ portainer_container_name }} and
+  create it within five minutes.
+portainer_advice_window: >-
+  Until an administrator exists, it stops serving five minutes after it starts; sudo docker
+  restart {{ portainer_container_name }} opens a new five minutes.
+portainer_advice_setup_token: >-
+  Creating the administrator needs the setup_token that sudo docker logs
+  {{ portainer_container_name }} prints for the current start (docs/runbooks/labs-host.md,
+  "Portainer through an SSH tunnel").

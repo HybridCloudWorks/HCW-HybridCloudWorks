@@ -53,3 +53,9 @@
     - role: caddy
     - role: coder
     - role: labs_agent
+    # The owner's tools, last: nothing above needs either, so a failure here
+    # leaves the lab services configured. Both are off until the owner turns
+    # them on, and both listen on the loopback only (ADR 0032, amendment of
+    # 2026-09-26).
+    - role: portainer
+    - role: vault

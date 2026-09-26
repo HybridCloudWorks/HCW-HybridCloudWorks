@@ -106,8 +106,10 @@ services:
       - path: ./coder.env
         required: true
     volumes:
-      # The one socket mount on the host that is not vps-agent's own docker
-      # group membership. Workspaces never receive it (templates/hcw-lab).
+      # One of two socket mounts on the host. The other is Portainer's, for
+      # the owner only, published on the loopback (ADR 0032, amendment of
+      # 2026-09-26); vps-agent reaches the daemon through its docker group
+      # membership instead. Workspaces never receive it (templates/hcw-lab).
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - coder

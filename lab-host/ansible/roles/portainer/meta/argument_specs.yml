@@ -1,0 +1,53 @@
+---
+argument_specs:
+  main:
+    short_description: Run Portainer Business Edition from a pinned digest, published on 127.0.0.1 only
+    description:
+      - With portainer_enabled true it creates a named data volume and runs the portainer
+        container from image@digest with the Docker socket, its HTTPS UI published on
+        127.0.0.1 only and plain HTTP turned off, then waits for it to answer. With it false
+        it removes the container and keeps the volume.
+      - Refuses to publish on any address but 127.0.0.1, because the container holds the
+        Docker socket (root on the host) and Docker's own iptables rules bypass ufw. There is
+        no Caddy route; the owner reaches the UI through an SSH tunnel.
+      - Creates no administrator and holds no licence key. The owner creates the first
+        administrator in the UI within five minutes of Portainer starting and enters the
+        licence key there; neither value is in the repository or the Ansible vault.
+    author: HybridCloudWorks
+    options:
+      portainer_enabled:
+        type: bool
+        required: true
+        description: Whether Portainer runs. False removes the container; the data volume stays.
+      portainer_image:
+        type: str
+        required: true
+        description: Portainer image repository, portainer/portainer-ee (Business Edition).
+      portainer_image_tag:
+        type: str
+        required: true
+        description: The release the digest was read from, for example 2.45.1. Recorded, not pulled.
+      portainer_image_digest:
+        type: str
+        required: true
+        description: Image index digest of the release; the container runs image@digest.
+      portainer_container_name:
+        type: str
+        required: false
+        default: portainer
+        description: The container's name, which the ADR 0032 validation list checks for.
+      portainer_volume_name:
+        type: str
+        required: false
+        default: portainer-data
+        description: Named volume mounted at /data; kept while Portainer is disabled.
+      portainer_https_port:
+        type: int
+        required: false
+        default: 9443
+        description: The port on 127.0.0.1 the HTTPS UI is published on. The address is fixed.
+      portainer_memory:
+        type: str
+        required: false
+        default: 512m
+        description: The container's memory limit.

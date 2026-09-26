@@ -19,6 +19,7 @@ export const PRODUCTS = {
   debian: 'debian',
   terraform: 'terraform',
   postgresql: 'postgresql',
+  vault: 'hashicorp-vault',
 };
 
 export class SourceError extends Error {}
@@ -140,6 +141,23 @@ function proposePostgresql(run) {
 }
 
 /**
+ * HashiCorp Vault: the newest released line, N-2 patches, adopted the day it
+ * is released. There is no N-2 wait as for Python, because HashiCorp ends the
+ * previous community line that day (endoflife.date dates 2.0's end of life
+ * 2026-08-31, the date it gives for 2.1's release), so waiting would hold the
+ * pin on an unsupported line. A line whose latest release is not
+ * MAJOR.MINOR.PATCH (a release candidate) is skipped.
+ */
+function proposeVault(run) {
+  const product = PRODUCTS.vault;
+  const newest = releasesOf(run.sources.eol.vault, product)
+    .filter((r) => released(r, run.today) && /^\d+\.\d+$/.test(r.name) && /^\d+\.\d+\.\d+$/.test(String(r.latest?.name ?? '')))
+    .sort(byCycleDesc)[0];
+  if (!newest) throw new SourceError(`endoflife.date ${product}: no released line with a MAJOR.MINOR.PATCH release`);
+  applyLine(run.record, 'vault', run.next.kinds.vault, { line: newest.name, newest: newest.latest.name }, patchFloor);
+}
+
+/**
  * Node.js: the newest line that is or will become LTS (a line with no
  * ltsFrom never gets long-term support and is skipped), N-2 minors.
  */
@@ -255,6 +273,7 @@ export function proposeFloors(current, sources, today) {
   proposeDistribution(run, 'ubuntu', newestLts(sources, today));
   proposeDistribution(run, 'debian', newestStable(sources, today));
   proposePostgresql(run);
+  proposeVault(run);
   return { next: run.next, changes: run.record.changes, notes: run.notes };
 }
 

@@ -49,6 +49,13 @@ function sourcesToday() {
       // As endoflife.date listed it on 2026-09-26: majors only from their
       // general release, so 19 (19beta4 on Docker Hub that day) is absent.
       postgresql: doc([rel('18', '18.6'), rel('17', '17.11'), rel('16', '16.15')]),
+      // As endoflife.date listed hashicorp-vault on 2026-09-26: 2.0 ended the
+      // day 2.1 was released.
+      vault: doc([
+        rel('2.1', '2.1.1', { releaseDate: '2026-08-31', isMaintained: true }),
+        rel('2.0', '2.0.4', { releaseDate: '2026-04-13', isMaintained: false, eolFrom: '2026-08-31' }),
+        rel('1.21', '1.21.4', { releaseDate: '2025-10-21', isMaintained: false, eolFrom: '2026-04-13' }),
+      ]),
     },
     flexNodeLines: [22, 24],
   };
@@ -184,6 +191,51 @@ describe('proposeFloors', () => {
     const sources = sourcesToday();
     sources.eol.postgresql.result.releases[0].latest.name = '18.5';
     expect(() => proposeFloors(current(), sources, TODAY)).toThrow(/18\.5 is older than the recorded 18\.6/);
+  });
+
+  it('moves Vault to a newer patch release with its N-2 floor', () => {
+    const sources = sourcesToday();
+    sources.eol.vault.result.releases[0].latest.name = '2.1.3';
+    const { changes, next } = proposeFloors(current(), sources, TODAY);
+    expect(changes).toEqual([
+      { kind: 'vault', field: 'newest', from: '2.1.1', to: '2.1.3' },
+      { kind: 'vault', field: 'floor', from: '2.1.0', to: '2.1.1' },
+    ]);
+    expect(next.kinds.vault.checkedOn).toBe(TODAY);
+  });
+
+  it('adopts a new Vault line the day it is released, because the previous one ends that day', () => {
+    const sources = sourcesToday();
+    sources.eol.vault.result.releases.unshift(rel('2.2', '2.2.0', { releaseDate: TODAY }));
+    const { changes, next } = proposeFloors(current(), sources, TODAY);
+    expect(changes).toEqual([
+      { kind: 'vault', field: 'line', from: '2.1', to: '2.2' },
+      { kind: 'vault', field: 'newest', from: '2.1.1', to: '2.2.0' },
+      { kind: 'vault', field: 'floor', from: '2.1.0', to: '2.2.0' },
+    ]);
+    expect(next.kinds.vault).toMatchObject({ line: '2.2', newest: '2.2.0', floor: '2.2.0' });
+  });
+
+  it('never proposes a Vault release candidate or an unreleased line', () => {
+    for (const pre of [rel('2.2', '2.2.0-rc1'), rel('2.2', null), rel('2.2', '2.2.0', { releaseDate: '2027-01-01' })]) {
+      const sources = sourcesToday();
+      sources.eol.vault.result.releases.unshift(pre);
+      const { changes, next } = proposeFloors(current(), sources, TODAY);
+      expect(changes, JSON.stringify(pre)).toEqual([]);
+      expect(next.kinds.vault.newest).toBe('2.1.1');
+    }
+  });
+
+  it('refuses a Vault newest release older than the recorded one', () => {
+    const sources = sourcesToday();
+    sources.eol.vault.result.releases.shift();
+    expect(() => proposeFloors(current(), sources, TODAY)).toThrow(/vault: the source's line 2\.0 is older than the recorded 2\.1/);
+  });
+
+  it('leaves the unsourced entries exactly as written', () => {
+    const sources = sourcesToday();
+    sources.eol.vault.result.releases[0].latest.name = '2.1.3';
+    expect(proposeFloors(current(), sources, TODAY).next.unsourced).toEqual(current().unsourced);
   });
 
   it('does not count a release dated in the future', () => {

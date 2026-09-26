@@ -1,0 +1,35 @@
+# {{ ansible_managed }}
+#
+# HashiCorp Vault on the lab host: lab-host secrets only, never production
+# HybridCloudWorks secrets, which stay in Azure Key Vault kv-site-prod-cus-01
+# (ADR 0032, amendment of 2026-09-26). This host runs learner workloads, and
+# an escape from one is root, which reads an unsealed Vault's memory.
+#
+# Every parameter below is described at
+# https://developer.hashicorp.com/vault/docs/configuration (read 2026-09-26).
+
+ui = {{ vault_ui | bool | lower }}
+
+# Required to be explicit with integrated storage, and "strongly recommended"
+# true there: mlock pulls raft's memory-mapped BoltDB file into resident
+# memory, so the whole dataset would have to fit in RAM. The role warns when
+# the host has swap, which the same page says should then be off.
+disable_mlock = true
+
+api_addr     = "{{ vault_api_addr }}"
+cluster_addr = "{{ vault_cluster_addr }}"
+
+storage "raft" {
+  path    = "{{ vault_data_dir }}"
+  node_id = "{{ vault_raft_node_id }}"
+}
+
+# The loopback only, for both the API and raft's cluster port (which would
+# otherwise default to the API address's port plus one on the same address).
+listener "tcp" {
+  address         = "{{ vault_listen_address }}:{{ vault_api_port }}"
+  cluster_address = "{{ vault_listen_address }}:{{ vault_cluster_port }}"
+  tls_cert_file   = "{{ vault_tls_cert_file }}"
+  tls_key_file    = "{{ vault_tls_key_file }}"
+  tls_min_version = "tls13"
+}

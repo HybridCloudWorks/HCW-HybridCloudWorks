@@ -21,9 +21,11 @@ switches, rotation, backups — are in [`../README.md`](../README.md) under
 
 ## The boundary, in one paragraph
 
-Two processes may drive the Docker daemon on the host and nothing else: the
+Three processes may drive the Docker daemon on the host and nothing else: the
 Coder **server** container, which has `/var/run/docker.sock` because that is
-how Coder's documented Docker install creates workspaces, and `vps-agent`.
+how Coder's documented Docker install creates workspaces, `vps-agent`, and,
+when the owner turns it on, Portainer, which only the owner reaches, through
+an SSH tunnel to the loopback (ADR 0032, amendment of 2026-09-26).
 A **workspace** is a container the server creates from the template with
 `user = "65534:65534"`, `privileged = false`, every capability dropped,
 `no-new-privileges`, hard memory and CPU limits, one named volume at

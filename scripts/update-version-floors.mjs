@@ -5,12 +5,14 @@
  * What it does, in order:
  *
  *   1. Reads https://endoflife.date/api/v1/products/<name>/ for python,
- *      nodejs, ubuntu, debian, terraform and postgresql, and the Azure
- *      Functions Flex Consumption page on Microsoft Learn for the Node.js
- *      lines Flex offers. endoflife.date rather than postgresql.org's
- *      versions.json for PostgreSQL, so every kind has one source format and
- *      the workflow's "endoflife.date's v1 API for each kind" stays true; it
- *      lists a major only from its general release.
+ *      nodejs, ubuntu, debian, terraform, postgresql and hashicorp-vault,
+ *      and the Azure Functions Flex Consumption page on Microsoft Learn for
+ *      the Node.js lines Flex offers. endoflife.date rather than
+ *      postgresql.org's versions.json for PostgreSQL, so every kind has one
+ *      source format and the workflow's "endoflife.date's v1 API for each
+ *      kind" stays true; it lists a major only from its general release.
+ *      Portainer is not a kind for the same reason: endoflife.date has no
+ *      product for it, and the file's "unsourced" section says so.
  *   2. Works out, per kind, the newest release the rule allows and the floor
  *      it implies (lib/version-floor-proposals.mjs, pure and tested).
  *   3. Writes version-floors.json when any value moved, and prints a Markdown

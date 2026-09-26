@@ -7,6 +7,11 @@
 # below). Everything the host ends up running is declared under ansible/; this
 # script only gets Ansible there.
 #
+# It configures only a host that was prepared for it. The first run on a host
+# refuses, before it changes anything, when the host shows another workload
+# (a container, a self-hosted runner, Kubernetes, a foreign /opt or listener);
+# "The first-run host check" below has the checks and the way past them.
+#
 # The vault is optional on purpose. Without /etc/hcw/ansible/vault.yml the
 # playbook still hardens the host, installs Docker, node_exporter and Caddy
 # (serving plain HTTP) and installs the agent unit without starting it. With
@@ -118,6 +123,191 @@ if [ "$(uname -m)" != "x86_64" ]; then
   exit 1
 fi
 
+# ---------------------------------------------------------------------------
+# The first-run host check. Never configure a host that was not prepared for
+# this repository.
+#
+# On 2026-09-26 the first run on the lab VPS met a host that had never been
+# reinstalled: two self-hosted GitHub Actions runners, Portainer, an nginx site
+# on :80, k3s, Vault and a July install of the old agent in
+# /opt/hcw-labs-agent. Before failing at the agent's checkout it upgraded and
+# restarted Docker (killing a running Dependabot job), enabled ufw and rewrote
+# sshd's configuration. So a host this script has never accepted is examined
+# first, before this script changes anything, and a host that shows another
+# workload is refused, with what was found and the two ways on: reinstall, or
+# HCW_ADOPT_NONEMPTY_HOST=1 to accept it knowingly.
+#
+# The first run that passes (or is told to adopt the host) writes
+# HCW_HOST_MARKER before its first change, and every run that finishes adds
+# its commit and time. While the marker exists the check is skipped, so a
+# re-run is never judged on this repository's own work: a first run that fails
+# half-way has already installed Docker, Caddy and uv, and the host was
+# accepted before any of that. Delete the marker only to make the next run
+# check again.
+#
+# Each check names a thing this repository never creates on a host it has not
+# accepted, and each would have caught the 2026-09-26 host:
+#
+#   - any Docker container, running or stopped: the Docker role upgrades and
+#     restarts the daemon, and a restart starts every stopped container whose
+#     restart policy is `always`, so a stopped one is as much in the way;
+#   - an installed actions.runner.* systemd unit (a self-hosted runner, which
+#     ADR 0025 and ADR 0032 reject on this public repository's hosts);
+#   - Kubernetes: a k3s, k0s, rke2, kubelet or microk8s unit, or k3s's and
+#     kubeadm's own directories (ADR 0032: no Kubernetes on this host);
+#   - labs_agent_home, or the repository checkout, holding anything but a
+#     checkout of this repository;
+#   - anything else under /opt, where the old agent, the runners and vendor
+#     installs live and where a fresh Ubuntu has nothing;
+#   - a TCP listener other than sshd's port 22 and systemd-resolved's
+#     127.0.0.53 and 127.0.0.54 port 53 (the old host's nginx held :80).
+#
+# docs/runbooks/labs-host.md, "Reinstalling the host", is the procedure the
+# refusal points at.
+# ---------------------------------------------------------------------------
+HCW_HOST_MARKER=/etc/hcw/bootstrap-host-accepted
+HCW_ADOPT_NONEMPTY_HOST="${HCW_ADOPT_NONEMPTY_HOST:-}"
+hcw_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# A top-level scalar from group_vars/all.yml beside this script, or the
+# fallback when the script runs from outside a checkout. Text, not YAML: the
+# two keys read here are plain `key: value` lines.
+group_var() {
+  local file="${hcw_script_dir}/ansible/group_vars/all.yml" value=""
+  if [ -f "${file}" ]; then
+    value="$(sed -n "s/^$1:[[:space:]]*//p" "${file}" | head -n 1 | tr -d "\"'")"
+  fi
+  printf '%s' "${value:-$2}"
+}
+
+labs_agent_home="$(group_var labs_agent_home /opt/hcw-labs-agent)"
+labs_agent_repo_url="$(group_var labs_agent_repo_url "${HCW_REPO_URL}")"
+
+# A URL without a trailing slash or .git, so the two spellings of one
+# repository compare equal.
+normalise_url() {
+  printf '%s' "$1" | sed -e 's#/*$##' -e 's#\.git$##'
+}
+
+# The origin URL recorded in a checkout's .git/config, read without git
+# (a fresh host may not have it yet). Prints nothing for a directory that is
+# not a checkout.
+checkout_origin() {
+  [ -f "$1/.git/config" ] || return 0
+  awk '/^\[remote "origin"\]/ { origin = 1; next }
+       /^\[/ { origin = 0 }
+       origin && $1 == "url" { sub(/^[^=]*=[[:space:]]*/, ""); print; exit }' "$1/.git/config"
+}
+
+# True when a directory is a checkout of this repository, under either URL
+# this script knows it by (HCW_REPO_URL for the playbook, labs_agent_repo_url
+# for the agent).
+is_this_repository() {
+  local origin
+  origin="$(normalise_url "$(checkout_origin "$1")")"
+  [ -n "${origin}" ] || return 1
+  [ "${origin}" = "$(normalise_url "${HCW_REPO_URL}")" ] || [ "${origin}" = "$(normalise_url "${labs_agent_repo_url}")" ]
+}
+
+# One line per sign of another workload. Prints nothing on an empty host.
+find_other_workloads() {
+  local line unit state path entry
+
+  if command -v docker >/dev/null 2>&1 && timeout 30 docker info >/dev/null 2>&1; then
+    while IFS= read -r line; do
+      [ -n "${line}" ] && printf 'Docker container %s\n' "${line}"
+    done < <(timeout 30 docker ps --all --format '{{.Names}} ({{.Image}}, {{.Status}})')
+  elif [ -d /var/lib/docker/containers ] && [ -n "$(ls -A /var/lib/docker/containers 2>/dev/null)" ]; then
+    printf '%s container directories under /var/lib/docker/containers, and the Docker daemon is not answering\n' \
+      "$(find /var/lib/docker/containers -mindepth 1 -maxdepth 1 -type d | wc -l)"
+  fi
+
+  if command -v systemctl >/dev/null 2>&1; then
+    while read -r unit state _; do
+      [ -n "${unit}" ] && printf 'systemd unit %s (%s): a GitHub Actions self-hosted runner\n' "${unit}" "${state}"
+    done < <(systemctl list-unit-files --no-legend --plain 'actions.runner.*' 2>/dev/null)
+    while read -r unit state _; do
+      [ -n "${unit}" ] && printf 'systemd unit %s (%s): Kubernetes\n' "${unit}" "${state}"
+    done < <(systemctl list-unit-files --no-legend --plain 'k3s*' 'k0s*' 'rke2*' 'kubelet.service' 'snap.microk8s.*' 2>/dev/null)
+  fi
+  for path in /usr/local/bin/k3s /etc/rancher /var/lib/rancher /etc/kubernetes /var/lib/kubelet; do
+    [ -e "${path}" ] && printf '%s exists: Kubernetes\n' "${path}"
+  done
+
+  # The checkout this script runs from, and the agent's, may exist already:
+  # infra-lab/README.md step 7 clones the repository to HCW_SRC_DIR before it
+  # runs this script. Either is fine when it is this repository, and a finding
+  # when it is anything else (the old agent's July install, on 2026-09-26).
+  for path in "${HCW_SRC_DIR}" "${labs_agent_home}"; do
+    if [ -e "${path}" ] && ! is_this_repository "${path}"; then
+      printf '%s exists and is not a checkout of %s\n' "${path}" "${HCW_REPO_URL}"
+    fi
+  done
+  # Everything else under /opt. /opt/uv is this script's own (uv, its Python
+  # and the ansible-core environment), present before the check only when an
+  # older bootstrap.sh, which had no check, hands over to this one.
+  for entry in /opt/* /opt/.[!.]*; do
+    [ -e "${entry}" ] || continue
+    case "${entry}" in
+      "${HCW_SRC_DIR}" | "${labs_agent_home}" | /opt/uv) continue ;;
+    esac
+    printf '%s: not created by this repository\n' "${entry}"
+  done
+
+  if command -v ss >/dev/null 2>&1; then
+    while read -r _ _ _ address _ process; do
+      case "${address}" in
+        *:22 | 127.0.0.53:53 | 127.0.0.53%*:53 | 127.0.0.54:53) continue ;;
+      esac
+      # users:(("nginx",pid=812,fd=6),...) -> nginx
+      process="$(printf '%s' "${process}" | sed -n 's/^users:(("\([^"]*\)".*/\1/p')"
+      printf 'TCP listener on %s (%s)\n' "${address}" "${process:-process not shown}"
+    done < <(ss -Hltnp 2>/dev/null)
+  fi
+  return 0
+}
+
+if [ -f "${HCW_HOST_MARKER}" ]; then
+  log "host check: skipped; ${HCW_HOST_MARKER} records that this host was accepted ($(sed -n 's/^accepted_as=//p' "${HCW_HOST_MARKER}") on $(sed -n 's/^accepted_on=//p' "${HCW_HOST_MARKER}"))"
+else
+  log "host check: this host has not run bootstrap.sh before; looking for other workloads first"
+  hcw_findings="$(find_other_workloads)"
+  if [ -n "${hcw_findings}" ] && [ "${HCW_ADOPT_NONEMPTY_HOST}" != "1" ]; then
+    {
+      echo "[bootstrap] refusing to configure this host: it shows signs of other workloads, and bootstrap.sh has never run here (no ${HCW_HOST_MARKER})."
+      echo "[bootstrap] found:"
+      printf '%s\n' "${hcw_findings}" | sed 's/^/[bootstrap]   - /'
+      echo "[bootstrap] nothing has been changed. A run would move Docker to its pinned version and restart it, enable ufw with only TCP 22, 80 and 443 open, and replace sshd's login settings, whatever the workloads above need."
+      echo "[bootstrap] either reinstall the server with Ubuntu 26.04 LTS and run this again (docs/runbooks/labs-host.md, \"Reinstalling the host\"),"
+      echo "[bootstrap] or, only if every item above is meant to stay and may be disrupted, accept the host knowingly:"
+      echo "[bootstrap]   HCW_ADOPT_NONEMPTY_HOST=1 ${hcw_script_dir}/bootstrap.sh"
+    } >&2
+    exit 3
+  fi
+  hcw_accepted_as=empty
+  if [ -n "${hcw_findings}" ]; then
+    hcw_accepted_as=adopted
+    log "host check: HCW_ADOPT_NONEMPTY_HOST=1, so adopting a host that shows other workloads:"
+    printf '%s\n' "${hcw_findings}" | sed 's/^/[bootstrap]   - /'
+  else
+    log "host check: no other workloads found"
+  fi
+  install -d -m 0755 -o root -g root "$(dirname "${HCW_HOST_MARKER}")"
+  {
+    echo "# Written by lab-host/bootstrap.sh (docs/runbooks/labs-host.md, \"The first-run host check\")."
+    echo "# While this file exists, bootstrap.sh does not check the host for other workloads again;"
+    echo "# delete it only to make the next run check again."
+    echo "accepted_on=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "accepted_as=${hcw_accepted_as}"
+    if [ -n "${hcw_findings}" ]; then
+      printf '%s\n' "${hcw_findings}" | sed 's/^/adopted_with=/'
+    fi
+  } >"${HCW_HOST_MARKER}.tmp"
+  chmod 0644 "${HCW_HOST_MARKER}.tmp"
+  mv "${HCW_HOST_MARKER}.tmp" "${HCW_HOST_MARKER}"
+  log "host check: recorded in ${HCW_HOST_MARKER}"
+fi
+
 log "installing prerequisites"
 apt-get update -q
 apt-get install -y -q --no-install-recommends git python3 python3-apt ca-certificates curl sudo
@@ -198,3 +388,23 @@ fi
 
 log "running site.yml from ${hcw_repo_sha} against localhost"
 "${UV_TOOL_BIN_DIR}/ansible-playbook" -i inventory/localhost.yml site.yml "${extra_args[@]}" "$@"
+
+# The play finished (set -e ends the script on a failed one). Record which
+# commit the host now runs in the host-check marker, unless this was a check
+# run, which changed nothing the marker should claim.
+hcw_check_mode=
+for arg in "$@"; do
+  case "${arg}" in
+    --check | -C) hcw_check_mode=1 ;;
+  esac
+done
+if [ -z "${hcw_check_mode}" ]; then
+  {
+    grep -v '^completed_' "${HCW_HOST_MARKER}" || true
+    echo "completed_on=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "completed_commit=${hcw_repo_sha}"
+  } >"${HCW_HOST_MARKER}.tmp"
+  chmod 0644 "${HCW_HOST_MARKER}.tmp"
+  mv "${HCW_HOST_MARKER}.tmp" "${HCW_HOST_MARKER}"
+  log "recorded ${hcw_repo_sha} as the last completed run in ${HCW_HOST_MARKER}"
+fi

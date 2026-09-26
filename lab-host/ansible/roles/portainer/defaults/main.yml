@@ -1,0 +1,16 @@
+---
+# portainer_enabled and the image pins (portainer_image, portainer_image_tag,
+# portainer_image_digest) live in group_vars/all.yml; meta/argument_specs.yml
+# marks them required.
+portainer_container_name: portainer
+# Portainer's database, settings, admin account and licence key. Kept while
+# Portainer is disabled, so turning it back on brings the same state back.
+portainer_volume_name: portainer-data
+# The port on the host's loopback that the HTTPS UI is published on. The
+# address is not a knob: vars/main.yml fixes it to 127.0.0.1, and the role
+# refuses anything else. The owner reaches it through an SSH tunnel
+# (lab-host/README.md, "Portainer").
+portainer_https_port: 9443
+# Portainer uses about 100 MB on one Docker host; the limit keeps it from
+# eating into the memory the coder role's capacity assertion counts on.
+portainer_memory: 512m
