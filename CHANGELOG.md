@@ -19,6 +19,30 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **PostgreSQL has a version floor, and the weekly job proposes general
+  releases only (#715).** Owner instruction 2026-09-26: the newest general
+  release of PostgreSQL. `scripts/version-floors.json` gains a `postgresql`
+  kind: line 18, newest 18.6, floor 18.4 (N-2 minors; PostgreSQL numbers
+  releases MAJOR.MINOR), checked 2026-09-26. The pin reader checks
+  `coder_postgres_image_tag` in `lab-host/ansible/group_vars/all.yml`
+  against it. It accepts exactly MAJOR.MINOR and reports anything else,
+  such as a moving `18` or a `19beta4`, as a finding rather than a pass.
+  `update-version-floors` reads endoflife.date's `postgresql` product
+  rather than postgresql.org's `versions.json`. That keeps one source
+  format and keeps true the workflow's "endoflife.date's v1 API for each
+  kind"; both said 18.6 that day. It adopts a new major at its `.2`, and
+  skips any major whose latest release is not MAJOR.MINOR or is not yet
+  released, so a beta or release candidate is never proposed.
+  `majorMinorFloor` joins the floor arithmetic. Nine tests cover the
+  arithmetic, the reader (quoted and unquoted tags, `18`, `19beta4`,
+  `19rc1`, a missing pin), the rule, the file's shape and the updater
+  (minor move, major adoption at `.2`, five pre-release shapes, a
+  backwards source). Setting the pin back to `16.15`, then to `19beta4`,
+  turned the gate red with one line naming the file, the pin and the
+  floor. A live `--dry-run` printed `No floor moved`. Coder v2.37.3 was
+  checked the same day and is the newest release (`ghcr.io/coder/coder:latest`
+  resolves to its digest), so it is unchanged.
+
 - **The lab agent and the Coder template pull the Python 3.14 / Debian 13
   lab image.** `vps-agent/lib/capabilities.js` pins `hcw-lab-runner` and
   `lab-host/coder/templates/hcw-lab/main.tf` pins `hcw-lab` to the digests
@@ -898,6 +922,38 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Coder's PostgreSQL moves from 16.15 to 18.6, with the move rehearsed
+  (#715).** 18.6 is the newest release of the newest major (18, supported
+  to November 2030; read 2026-09-26). It is pinned by index digest
+  `sha256:5a5a84b1...2da9722`, which `postgres:18` and `postgres:18.6` both
+  resolve to, and which the registry's `Docker-Content-Digest` and the
+  Docker Hub API confirm. The 18 image keeps its cluster in
+  `/var/lib/postgresql/18/docker` under a `VOLUME` at
+  `/var/lib/postgresql`, and refuses to start with a mount at the old
+  `/var/lib/postgresql/data`, so the Compose volume now mounts at
+  `/var/lib/postgresql`. The host holds no Coder data, so nothing is
+  migrated. Rehearsed on Docker 29.8 with the committed Compose file and
+  the pinned Coder v2.37.3. Coder applied its migrations to 585, the newest
+  v2.37.3 ships, and `/healthz` answered 200. An owner account was created
+  and dumped with the role's backup script, rendered from its template.
+  The dump was restored into a fresh 18.6 with the README's drop, create
+  and load, and a second dump matched it line for line. Coder then started
+  on the restored database, with `/api/v2/buildinfo` and
+  `/api/v2/users/first` answering 200. The coder role README's "stay on 16"
+  paragraph is replaced by that record and a procedure for the next major:
+  dump, set the old cluster aside inside the volume, bump, restore. Its two
+  host commands were run against the Compose file: the 18 image refuses to
+  initialise beside another major's cluster, and initialises a fresh
+  cluster once that one is set aside. The backup and restore commands need
+  no path, so they are unchanged. Where the database runs is now recorded
+  as an owner decision (2026-09-26), in the role README's "Where it runs"
+  and as a one-line amendment to ADR 0032's decision 2: it stays this
+  container on the host. The two options not taken were Coder's built-in
+  PostgreSQL (binaries fetched from Maven at start, outside the host's
+  digest pins) and Azure Database for PostgreSQL Flexible Server B1ms
+  ($0.01921 an hour in Central US, about $14 a month in compute, plus
+  storage and internet latency from the VPS).
+
 - **The hcw-lab image runs Python 3.14.7 on Debian 13 trixie, with every
   tool at its newest release (#714, #715).** Owner rule 2026-09-26: every
   runtime, OS and base image the repository chooses is on its newest
@@ -1032,6 +1088,44 @@ This project has not cut a tagged release; entries are grouped under
   unestablished.
 
 ### Fixed
+
+- **The lab host runs the commit it is given, not a pin that lags one merge
+  behind.** `lab-host/bootstrap.sh` pinned `HCW_REPO_REF` to `04aa9e36`, a
+  commit from before `lab-host/` existed, so a first run checked it out and
+  stopped at `cd lab-host/ansible`. The deeper fault was structural: a pull
+  request cannot pin its own merge commit, so the documented "move
+  `HCW_REPO_REF` and `labs_agent_repo_ref` in the same pull request" always
+  named the commit before the change, and every lab-host change needed a
+  second pull request to take effect. `HCW_REPO_REF` now defaults to
+  `origin/main`. After the clone or fetch it is resolved once with
+  `git rev-parse --verify "${HCW_REPO_REF}^{commit}"`, and that full sha is
+  checked out detached and printed before the play and again as it starts.
+  `main`'s ruleset (a pull request for every change, no bypass actors,
+  strict required checks including `ansible-lint (lab-host)` and
+  `coder (lab-host)`) gives the trust the pin gave. `HCW_REPO_REF=<sha or
+  ref>` still holds or rolls back a host, and an unknown ref stops the run
+  before anything changes. When the resolved commit carries a different
+  `bootstrap.sh`, the running script hands over to it, so a uv, Python or
+  ansible-core bump takes effect on the run that fetches it rather than
+  the one after. `labs_agent_repo_ref` in `group_vars/all.yml` now reads
+  the full sha of the playbook's own checkout, so the agent runs the same
+  commit, including when `site.yml` is run by hand, and an explicit
+  `-e labs_agent_repo_ref=<sha>` still holds it back. The `npm ci` stamp is
+  keyed on the sha the checkout task lands on rather than on the ref
+  string. Stamps left by other commits are now removed first, so releasing
+  a hold reinstalls rather than keeping the held commit's `node_modules`.
+  Documented in `lab-host/README.md` ("Which commit runs", with runnable
+  hold and rollback lines), the `labs_agent` role README and argument spec,
+  `docs/runbooks/labs-host.md`, `lab-host/coder/README.md` and
+  `infra-lab/README.md` step 7. Verified in a privileged systemd
+  `ubuntu:26.04` container from a bundle of the branch, with coder and arc
+  off and no vault. The first run was `failed=0` and named the sha, and the
+  second was `changed=0`. After `main` moved in the bundle, the plain re-run
+  moved the playbook and the agent to the new sha and reinstalled
+  (`changed=3`). `-e labs_agent_repo_ref` held the agent at the previous
+  commit while the playbook moved, and releasing it reinstalled. A
+  `--check --diff` run and a further run were `changed=0`, an older
+  `bootstrap.sh` handed over, and an unknown ref was refused.
 
 - **The Azure detail page's catalogue walk no longer fails at random in a full
   suite run (#640).** `CertDetailPage.test.jsx`'s *resolves every landing-page

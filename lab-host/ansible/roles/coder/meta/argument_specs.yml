@@ -76,7 +76,7 @@ argument_specs:
       coder_postgres_image_tag:
         type: str
         required: true
-        description: The release the digest was read from, for example 16.15. Recorded, not pulled.
+        description: The release the digest was read from, for example 18.6. Recorded, not pulled.
       coder_postgres_image_digest:
         type: str
         required: true

@@ -1,7 +1,8 @@
 ---
 # labs_agent_user, labs_agent_home, labs_agent_repo_url, labs_agent_repo_ref,
-# labs_agent_node_version and labs_agent_id are pins or host identity and live
-# in group_vars/all.yml; meta/argument_specs.yml marks them required.
+# labs_agent_node_version and labs_agent_id are pins, host identity or (for
+# labs_agent_repo_ref) the playbook's own commit, and live in
+# group_vars/all.yml; meta/argument_specs.yml marks them required.
 labs_agent_group: "{{ labs_agent_user }}"
 labs_agent_app_dir: "{{ labs_agent_home }}/vps-agent"
 labs_agent_state_dir: /var/lib/hcw-labs-agent

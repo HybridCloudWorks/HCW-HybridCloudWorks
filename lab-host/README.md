@@ -16,8 +16,8 @@ every step.
 | `docker` | Docker Engine 29.8.1, buildx 0.37.1 and compose 5.5.1 from Docker's apt repository, held; `json-file` logs 10 MB x 3, `live-restore` | `/etc/docker/daemon.json` |
 | `node_exporter` | node_exporter 1.12.1, host-native, SHA256-verified, `127.0.0.1:9100` only | `/usr/local/bin/node_exporter`, `node_exporter.service` |
 | `caddy` | Caddy 2.11.4 built with `caddy-dns/cloudflare` 0.2.4, host-native under systemd; TLS for `lab.hybridcloudworks.com`, `*.lab.hybridcloudworks.com` and `*.coder.lab.hybridcloudworks.com` via DNS-01; placeholder response at the apex | `/usr/local/bin/caddy`, `/opt/caddy/bin/` (versioned binary and its `.provenance`), `/etc/caddy/Caddyfile`, `/etc/caddy/conf.d/`, `/etc/caddy/env` (root:caddy, 0640), `caddy.service` running as `caddy` |
-| `coder` | Coder Community edition v2.37.3 and PostgreSQL 16.15 under Docker Compose from `../coder/docker-compose.yml`, both by digest; the Caddy route for `coder.lab` and `*.coder.lab`; a nightly `pg_dump` keeping seven days. Down until `coder_enabled` is true | `/etc/hcw/coder/` (`docker-compose.yml`, `.env`, `coder.env` and `coder-postgres.env`, the last two root 0600), `/etc/caddy/conf.d/10-coder.caddy`, `/usr/local/sbin/coder-postgres-backup`, `coder-postgres-backup.timer`, `/var/backups/coder/` |
-| `labs_agent` | `vps-agent` host-native as `hcw-labs-agent.service` under user `hcw-labs-agent` (in `docker`), Node.js 26.10.0 from NodeSource, repository checkout at a pinned sha, certificate generated on the host | `/opt/hcw-labs-agent`, `/etc/hcw/labs-agent.env` (root, 0600), `/etc/hcw/labs-agent.pem` (root:hcw-labs-agent, 0640), `/etc/hcw/labs-agent.crt` |
+| `coder` | Coder Community edition v2.37.3 and PostgreSQL 18.6 under Docker Compose from `../coder/docker-compose.yml`, both by digest; the Caddy route for `coder.lab` and `*.coder.lab`; a nightly `pg_dump` keeping seven days. Down until `coder_enabled` is true | `/etc/hcw/coder/` (`docker-compose.yml`, `.env`, `coder.env` and `coder-postgres.env`, the last two root 0600), `/etc/caddy/conf.d/10-coder.caddy`, `/usr/local/sbin/coder-postgres-backup`, `coder-postgres-backup.timer`, `/var/backups/coder/` |
+| `labs_agent` | `vps-agent` host-native as `hcw-labs-agent.service` under user `hcw-labs-agent` (in `docker`), Node.js 26.10.0 from NodeSource, repository checkout at the commit the playbook runs from, certificate generated on the host | `/opt/hcw-labs-agent`, `/etc/hcw/labs-agent.env` (root, 0600), `/etc/hcw/labs-agent.pem` (root:hcw-labs-agent, 0640), `/etc/hcw/labs-agent.crt` |
 
 Each role's `README.md` explains its decisions; `meta/argument_specs.yml` is
 its variable contract. Every version, digest and checksum is in
@@ -44,8 +44,10 @@ password login off. The script checks the host is Ubuntu 26.04 LTS (24.04
 LTS is accepted and says it is the fallback; anything else stops), installs
 `uv` 0.12.19 from its GitHub release after checking the archive's SHA256,
 has uv install CPython 3.14.7 and `ansible-core` 2.21.4 on it, clones
-this repository at the sha pinned in `HCW_REPO_REF` into `/opt/hcw-src`,
-installs the collections and runs `site.yml` against localhost. Without a
+this repository into `/opt/hcw-src` (or fetches, when the clone exists),
+checks out the current `main` commit detached and prints its full sha
+(`HCW_REPO_REF`, below), installs the collections and runs `site.yml`
+against localhost. Without a
 vault it still completes: the host is hardened, Docker and node_exporter
 run, Caddy serves an HTTP-only apex answering 503 that says TLS is off (and
 imports no routes, so nothing can leak over plaintext), Coder's Compose
@@ -90,11 +92,57 @@ through (bash, on the host):
 sudo /opt/hcw-src/lab-host/bootstrap.sh --check --diff
 ```
 
-To move the host to a newer commit, change `HCW_REPO_REF` in `bootstrap.sh`
-and `labs_agent_repo_ref` in `ansible/group_vars/all.yml` in the same pull
-request, then re-run once it is on `main`. They are two pins because they
-mean two things — which playbook runs, and which agent code runs — even
-though they will usually match.
+### Which commit runs
+
+Every run brings the host to the current `main`: to move the host to a
+change, merge it and re-run the line above. There is no pin to bump.
+`bootstrap.sh` fetches, resolves `HCW_REPO_REF` (default `origin/main`) to
+a full sha, checks that sha out detached in `/opt/hcw-src` and runs the
+playbook from it, and the agent runs the same commit, because
+`labs_agent_repo_ref` in `ansible/group_vars/all.yml` reads the playbook's
+own checkout. `main` is protected by the repository ruleset — every change
+arrives by pull request, nobody can bypass it, and the required checks
+include `ansible-lint (lab-host)` and `coder (lab-host)` — so a commit on
+`main` has passed the same checks a pinned sha had to. A pin could not do
+better: a pull request cannot name its own merge commit, so a pin always
+lagged one merge behind and every lab-host change needed a second pull
+request to take effect.
+
+A run prints the commit before anything changes, as
+`[bootstrap] checking out origin/main at <40-character sha>`, and again as
+`[bootstrap] running site.yml from <sha> against localhost`. When the
+commit carries a different `bootstrap.sh` from the one that started (a
+Python or ansible-core bump), the run says
+`carries a different bootstrap.sh; handing over to it` and continues as the
+new script, on the same sha.
+
+`HCW_REPO_REF` also takes any sha or ref the fetch can see, to hold a host
+back or roll it back. Because a plain run also applies whatever has merged
+since the last one, the first line below is the one to use when only the
+vault changed and nothing else should. Bash, on the host. Re-apply the
+commit the host runs now, without moving it:
+
+```bash
+sudo HCW_REPO_REF=HEAD /opt/hcw-src/lab-host/bootstrap.sh
+```
+
+Roll back to `main` as it was before the most recent merge:
+
+```bash
+sudo HCW_REPO_REF=origin/main~1 /opt/hcw-src/lab-host/bootstrap.sh
+```
+
+Move the playbook to current `main` but keep the agent on the commit it
+runs now (an explicit `-e` wins over `group_vars`, and the stamp that
+decides whether to reinstall its dependencies follows the commit the agent
+is checked out at):
+
+```bash
+sudo /opt/hcw-src/lab-host/bootstrap.sh -e labs_agent_repo_ref="$(sudo git -C /opt/hcw-labs-agent rev-parse HEAD)"
+```
+
+A hold lasts one run. The next plain run returns the playbook and the agent
+to current `main`.
 
 ## The vault
 
@@ -207,8 +255,8 @@ are skipped.
 
 3. In a pull request, set `coder_enabled: true` and
    `coder_oauth2_github_allowed_orgs: [HybridCloudWorks]` in
-   `ansible/group_vars/all.yml`, merge it, move `HCW_REPO_REF` to the merged
-   commit and re-run `bootstrap.sh` (above). The play refuses to continue
+   `ansible/group_vars/all.yml`, merge it and re-run `bootstrap.sh`
+   (above), which checks out the merged `main`. The play refuses to continue
    if any of the three vault keys is missing, if the password holds a
    character outside `A-Za-z0-9._~-`, or if five workspaces at 2 GiB plus
    2.5 GiB of headroom exceed the host's memory.
@@ -465,7 +513,7 @@ parse and `terraform validate` — listed in
 | Workspace image, Terraform providers, `code-server` module | `templates/hcw-lab/main.tf` under `../coder` | `../coder/README.md`, "Updating"; republished with `coder templates push` |
 | node_exporter | `node_exporter_version`, `node_exporter_checksum` | `roles/node_exporter/README.md` |
 | Node.js | `labs_agent_node_version`; the line is `labs_agent_node_apt_repository_url` in `roles/labs_agent/defaults/main.yml` | NodeSource `node_26.x` package index |
-| Repository ref | `labs_agent_repo_ref` and `HCW_REPO_REF` | `git rev-parse origin/main` |
+| Repository commit | Not pinned. `HCW_REPO_REF` in `bootstrap.sh` defaults to `origin/main`, and `labs_agent_repo_ref` reads the playbook's own checkout | Nothing to bump: merge, then re-run. The run prints the sha; holding or rolling back a host is under "Re-running" |
 | Collections, including the one transitive dependency | `requirements.yml` | Galaxy |
 | Ansible tooling | `ANSIBLE_CORE_VERSION` in `bootstrap.sh`; the pip pins in `ci.yml`; the image digest above | PyPI; the image's `RepoDigests` |
 | Python and uv | `PYTHON_VERSION`, `UV_VERSION` and `UV_SHA256` at the top of `bootstrap.sh` | https://www.python.org/downloads/ for the newest release; https://github.com/astral-sh/uv/releases for uv, whose `.sha256` asset beside `uv-x86_64-unknown-linux-gnu.tar.gz` is the value |

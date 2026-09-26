@@ -2,7 +2,7 @@
 
 Runs `vps-agent/` as the `hcw-labs-agent` systemd service the admin Labs
 page's Setup tab describes, host-native (ADR 0032), from a checkout of this
-repository at a pinned commit. It is the last role in `site.yml` because it
+repository at the commit the playbook itself runs from. It is the last role in `site.yml` because it
 needs Docker (the agent's job is `docker run`) and reads the same vault Caddy
 does.
 
@@ -32,11 +32,23 @@ that made it the right call before the ADR said so:
    since apt trusts that key for the pinned package.
 3. `git` checkout of `labs_agent_repo_url` at `labs_agent_repo_ref` into
    `/opt/hcw-labs-agent` (root-owned; the agent reads its own code and
-   cannot change it), then `npm ci --omit=dev` in `vps-agent/`. A stamp in
-   `/var/lib/hcw-labs-agent/deps-installed-<sha256 of the ref and the Node.js
-   pin>` records that the install ran for this ref on this Node.js (hashed,
-   because a tag may contain `/`), so a re-run is a no-op and a bumped ref
-   or a bumped Node.js reinstalls.
+   cannot change it), then `npm ci --omit=dev` in `vps-agent/`.
+   `labs_agent_repo_ref` is not a pin: `group_vars/all.yml` sets it to the
+   full sha of HEAD in the playbook's own checkout, which `bootstrap.sh`
+   leaves detached at the commit it resolved (`origin/main` by default), so
+   the agent runs the same commit as the playbook and moves when it does.
+   An explicit `-e labs_agent_repo_ref=<sha>` on the `bootstrap.sh` line
+   holds the agent at another commit (`lab-host/README.md`, "Re-running").
+   A stamp in `/var/lib/hcw-labs-agent/deps-installed-<sha256 of the
+   checked-out commit and the Node.js pin>` records that the install ran for
+   this commit on this Node.js. It is keyed on the commit the checkout task
+   reports landing on, not on the ref as written, so a ref that names a
+   moving target still reinstalls when the commit moves; a re-run on the same
+   commit is a no-op, and a new commit or a bumped Node.js reinstalls. Only
+   the current commit's stamp is kept: the role deletes any other before the
+   install, because `node_modules` holds one commit's dependencies, and a
+   stamp left from an earlier visit would otherwise skip the install on a
+   return to that commit (a hold released, a rollback undone).
 4. If `/etc/hcw/labs-agent.pem` does not exist, generates an RSA-4096 key and
    a self-signed certificate **on this host** (`CN=<labs_agent_id>`, 730
    days), as `.env.example` asks. The PEM is `root:hcw-labs-agent` mode
@@ -78,8 +90,9 @@ the agent's own code change (#675), not this role's.
 ## Variables
 
 Pins and identity (required, from `group_vars/all.yml`): `labs_agent_user`,
-`labs_agent_home`, `labs_agent_repo_url`, `labs_agent_repo_ref`,
-`labs_agent_node_version`, `labs_agent_id`.
+`labs_agent_home`, `labs_agent_repo_url`, `labs_agent_repo_ref` (derived
+there from the playbook's checkout, above), `labs_agent_node_version`,
+`labs_agent_id`.
 
 From the vault (each defaults to its `vault_` twin, empty when absent):
 `labs_agent_api_base`, `labs_agent_tenant_id`, `labs_agent_client_id`,

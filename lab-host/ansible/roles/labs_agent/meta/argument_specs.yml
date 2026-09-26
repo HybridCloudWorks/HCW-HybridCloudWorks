@@ -1,11 +1,12 @@
 ---
 argument_specs:
   main:
-    short_description: Run vps-agent as a systemd service from a pinned checkout of the repository
+    short_description: Run vps-agent as a systemd service from a checkout of the repository at a given commit
     description:
       - Creates the agent user (in the docker group, because the agent's job is docker run),
         installs Node.js 26 from NodeSource at a pinned version, checks the repository out at
-        a pinned ref and runs npm ci --omit=dev once per ref.
+        labs_agent_repo_ref (by default the commit the playbook runs from) and runs
+        npm ci --omit=dev once per commit and Node.js pin.
       - Generates the agent's private key and self-signed certificate on the host if absent and
         keeps the PEM root-owned, group hcw-labs-agent, mode 0640, so the service can read it
         and nothing else can. Only the public certificate leaves the host.
@@ -32,7 +33,13 @@ argument_specs:
       labs_agent_repo_ref:
         type: str
         required: true
-        description: Tag or commit sha to check out. Changing it reinstalls dependencies and restarts the service.
+        description:
+          - Commit sha (or tag) to check out. group_vars/all.yml sets it to the full sha of the
+            playbook's own checkout, which bootstrap.sh leaves at the commit it resolved from
+            HCW_REPO_REF (origin/main by default), so the agent runs the same commit as the
+            playbook. -e labs_agent_repo_ref=<sha> holds the agent at another commit.
+          - The dependency stamp is keyed on the commit the checkout lands on, so a change of
+            commit reinstalls dependencies and restarts the service.
       labs_agent_node_version:
         type: str
         required: true
@@ -90,7 +97,7 @@ argument_specs:
         type: path
         required: false
         default: /var/lib/hcw-labs-agent
-        description: Holds the per-ref stamp that records npm ci has run.
+        description: Holds the stamp that records npm ci has run for the checked-out commit and Node.js pin; stamps for any other are removed.
       labs_agent_tmp_dir:
         type: path
         required: false

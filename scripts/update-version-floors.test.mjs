@@ -46,6 +46,9 @@ function sourcesToday() {
       ]),
       debian: doc([rel('13', '13.7', { codename: 'Trixie' }), rel('12', '12.15', { codename: 'Bookworm' })]),
       terraform: doc([rel('1.16', '1.16.4'), rel('1.15', '1.15.9')]),
+      // As endoflife.date listed it on 2026-09-26: majors only from their
+      // general release, so 19 (19beta4 on Docker Hub that day) is absent.
+      postgresql: doc([rel('18', '18.6'), rel('17', '17.11'), rel('16', '16.15')]),
     },
     flexNodeLines: [22, 24],
   };
@@ -134,6 +137,53 @@ describe('proposeFloors', () => {
     const { next } = proposeFloors(current(), lts, TODAY);
     expect(next.kinds.ubuntu.newest).toBe('28.04');
     expect(next.kinds.ubuntu.codenames.future).toBe('28.04');
+  });
+
+  it('moves PostgreSQL to a newer minor release with its N-2 floor', () => {
+    const sources = sourcesToday();
+    sources.eol.postgresql.result.releases[0].latest.name = '18.8';
+    const { changes, next } = proposeFloors(current(), sources, TODAY);
+    expect(changes).toEqual([
+      { kind: 'postgresql', field: 'newest', from: '18.6', to: '18.8' },
+      { kind: 'postgresql', field: 'floor', from: '18.4', to: '18.6' },
+    ]);
+    expect(next.kinds.postgresql.checkedOn).toBe(TODAY);
+  });
+
+  it('adopts a new PostgreSQL major only at its N-2 minor release', () => {
+    const sources = sourcesToday();
+    sources.eol.postgresql.result.releases.unshift(rel('19', '19.1'));
+    expect(proposeFloors(current(), sources, TODAY).changes).toEqual([]);
+    sources.eol.postgresql.result.releases[0].latest.name = '19.2';
+    const { changes, next } = proposeFloors(current(), sources, TODAY);
+    expect(changes).toEqual([
+      { kind: 'postgresql', field: 'line', from: '18', to: '19' },
+      { kind: 'postgresql', field: 'newest', from: '18.6', to: '19.2' },
+      { kind: 'postgresql', field: 'floor', from: '18.4', to: '19.0' },
+    ]);
+    expect(next.kinds.postgresql).toMatchObject({ line: '19', newest: '19.2', floor: '19.0' });
+  });
+
+  it('never proposes a PostgreSQL beta, release candidate or unreleased major', () => {
+    for (const pre of [
+      rel('19', '19beta4'),
+      rel('19', '19rc1'),
+      rel('19', null),
+      rel('19', '19.2', { releaseDate: '2027-09-23' }),
+      rel('19beta4', '19beta4'),
+    ]) {
+      const sources = sourcesToday();
+      sources.eol.postgresql.result.releases.unshift(pre);
+      const { changes, next } = proposeFloors(current(), sources, TODAY);
+      expect(changes, JSON.stringify(pre)).toEqual([]);
+      expect(next.kinds.postgresql.newest).toBe('18.6');
+    }
+  });
+
+  it('refuses a PostgreSQL newest release older than the recorded one', () => {
+    const sources = sourcesToday();
+    sources.eol.postgresql.result.releases[0].latest.name = '18.5';
+    expect(() => proposeFloors(current(), sources, TODAY)).toThrow(/18\.5 is older than the recorded 18\.6/);
   });
 
   it('does not count a release dated in the future', () => {

@@ -36,9 +36,11 @@ export function meetsFloor(pin, floor) {
   return compareVersions(p, f.slice(0, Math.max(p.length, 1))) >= 0;
 }
 
-function exact(newest, name) {
+function exact(newest, name, length = 3) {
   const parts = parseVersion(newest);
-  if (!parts || parts.length !== 3) throw new Error(`${name} needs MAJOR.MINOR.PATCH, got ${newest}`);
+  if (!parts || parts.length !== length) {
+    throw new Error(`${name} needs ${length === 3 ? 'MAJOR.MINOR.PATCH' : 'MAJOR.MINOR'}, got ${newest}`);
+  }
   return parts;
 }
 
@@ -52,6 +54,16 @@ export function patchFloor(newest) {
 export function minorFloor(newest) {
   const [major, minor] = exact(newest, 'minorFloor');
   return `${major}.${Math.max(minor - 2, 0)}.0`;
+}
+
+/**
+ * Newest release N at MAJOR.MINOR → the floor two minor releases behind it.
+ * PostgreSQL has numbered its releases MAJOR.MINOR since 10: 18.6 is the
+ * sixth minor release of major 18, and 18.4 is two behind it.
+ */
+export function majorMinorFloor(newest) {
+  const [major, minor] = exact(newest, 'majorMinorFloor', 2);
+  return `${major}.${Math.max(minor - 2, 0)}`;
 }
 
 // ---------------------------------------------------------------------------

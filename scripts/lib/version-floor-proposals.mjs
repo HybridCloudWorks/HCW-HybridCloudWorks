@@ -10,9 +10,16 @@
  * one recorded. A floor that moves backwards is a source problem, never a
  * release, and it ends the run with nothing written.
  */
-import { compareVersions, minorFloor, parseVersion, patchFloor } from './version-math.mjs';
+import { compareVersions, majorMinorFloor, minorFloor, parseVersion, patchFloor } from './version-math.mjs';
 
-export const PRODUCTS = { python: 'python', node: 'nodejs', ubuntu: 'ubuntu', debian: 'debian', terraform: 'terraform' };
+export const PRODUCTS = {
+  python: 'python',
+  node: 'nodejs',
+  ubuntu: 'ubuntu',
+  debian: 'debian',
+  terraform: 'terraform',
+  postgresql: 'postgresql',
+};
 
 export class SourceError extends Error {}
 
@@ -111,6 +118,25 @@ function proposePatchKind(run, kind) {
   const product = PRODUCTS[kind];
   const picked = adoptLine(releasesOf(run.sources.eol[kind], product), { today: run.today, step: 'patch', product });
   applyLine(run.record, kind, run.next.kinds[kind], picked, patchFloor);
+}
+
+/**
+ * PostgreSQL: the newest major that has shipped its N-2 minor release, N-2
+ * minors, general releases only. endoflife.date lists a major from its
+ * general release, and a major whose latest release is not MAJOR.MINOR
+ * (19beta4, 19rc1) is skipped here as well, so a pre-release can never be
+ * proposed however the source changes. Until a new major reaches .2, the
+ * previous one stays and its own newest release still counts.
+ */
+function proposePostgresql(run) {
+  const product = PRODUCTS.postgresql;
+  const general = (r) => /^\d+$/.test(r.name) && /^\d+\.\d+$/.test(String(r.latest?.name ?? ''));
+  const adopted = releasesOf(run.sources.eol.postgresql, product)
+    .filter((r) => released(r, run.today) && general(r))
+    .sort(byCycleDesc)
+    .find((r) => parseVersion(r.latest.name)[1] >= 2);
+  if (!adopted) throw new SourceError(`endoflife.date ${product}: no released major has reached its N-2 minor release`);
+  applyLine(run.record, 'postgresql', run.next.kinds.postgresql, { line: adopted.name, newest: adopted.latest.name }, majorMinorFloor);
 }
 
 /**
@@ -228,6 +254,7 @@ export function proposeFloors(current, sources, today) {
   proposeCeilings(run);
   proposeDistribution(run, 'ubuntu', newestLts(sources, today));
   proposeDistribution(run, 'debian', newestStable(sources, today));
+  proposePostgresql(run);
   return { next: run.next, changes: run.record.changes, notes: run.notes };
 }
 

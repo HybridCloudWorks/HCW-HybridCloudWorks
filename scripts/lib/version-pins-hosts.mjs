@@ -1,7 +1,7 @@
 /**
  * The version pins of the things that run code (#715): the base images in
- * tracked Dockerfiles, and the lab host's Node.js package, Ubuntu target and
- * control-side Python.
+ * tracked Dockerfiles, and the lab host's Node.js package, Ubuntu target,
+ * control-side Python and Coder's PostgreSQL.
  */
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -123,6 +123,32 @@ function agentNode(lines) {
   return { pins: [], problems: [{ ...base, line: at + 1, raw, message: `labs_agent_node_version ${raw} does not start with MAJOR.MINOR.PATCH` }] };
 }
 
+/**
+ * coder_postgres_image_tag: the PostgreSQL release Coder's database digest
+ * was read from (the image runs by digest; the tag records which release that
+ * is). Exactly MAJOR.MINOR: a major-only tag (18) names whatever is newest
+ * that day, and a beta or release candidate (19beta4) is not a general
+ * release, so either is a problem rather than a pin.
+ */
+function coderPostgres(lines) {
+  const at = lines.findIndex((l) => /^coder_postgres_image_tag:/.test(l));
+  const base = { file: GROUP_VARS, where: `${GROUP_VARS} > coder_postgres_image_tag`, kind: 'postgresql' };
+  if (at === -1) return { pins: [], problems: [{ ...base, line: 0, raw: '', message: 'coder_postgres_image_tag is missing' }] };
+  const raw = clean(lines[at].replace(/^coder_postgres_image_tag:/, ''));
+  if (/^\d+\.\d+$/.test(raw)) return { pins: [{ ...base, line: at + 1, raw, version: raw }], problems: [] };
+  return {
+    pins: [],
+    problems: [
+      {
+        ...base,
+        line: at + 1,
+        raw,
+        message: `coder_postgres_image_tag ${raw} is not a general release as MAJOR.MINOR: a major-only tag moves, and a beta or release candidate is not a general release`,
+      },
+    ],
+  };
+}
+
 /** lab_host_ubuntu_releases in group_vars, or, before that map existed, site.yml's distribution_version check. */
 function playbookUbuntu(root, lines) {
   const mapAt = lines.findIndex((l) => /^lab_host_ubuntu_releases:\s*$/.test(l));
@@ -160,9 +186,9 @@ function bootstrap(root) {
   return merge([ubuntuTarget(BOOTSTRAP, 'accepted Ubuntu releases', accepted), bootstrapPython(lines)]);
 }
 
-/** The lab host's pins: its Node.js package, its Ubuntu target and its control-side Python. */
+/** The lab host's pins: its Node.js package, its Ubuntu target, its control-side Python and Coder's PostgreSQL. */
 export function readLabHost(root) {
   if (!existsSync(join(root, GROUP_VARS))) return bootstrap(root);
   const lines = linesOf(read(root, GROUP_VARS));
-  return merge([agentNode(lines), playbookUbuntu(root, lines), bootstrap(root)]);
+  return merge([agentNode(lines), playbookUbuntu(root, lines), bootstrap(root), coderPostgres(lines)]);
 }
