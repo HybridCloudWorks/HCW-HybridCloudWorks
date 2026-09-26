@@ -124,30 +124,34 @@ function agentNode(lines) {
 }
 
 /**
+ * One top-level `key: value` pin in group_vars whose whole value must match
+ * `shape`. A missing key, or any other value, is a problem rather than a pin,
+ * with `refusal(raw)` saying why.
+ */
+function exactGroupVar(lines, { key, kind, shape, refusal }) {
+  const at = lines.findIndex((l) => l.startsWith(`${key}:`));
+  const base = { file: GROUP_VARS, where: `${GROUP_VARS} > ${key}`, kind };
+  if (at === -1) return { pins: [], problems: [{ ...base, line: 0, raw: '', message: `${key} is missing` }] };
+  const raw = clean(lines[at].slice(key.length + 1));
+  if (shape.test(raw)) return { pins: [{ ...base, line: at + 1, raw, version: raw }], problems: [] };
+  return { pins: [], problems: [{ ...base, line: at + 1, raw, message: refusal(raw) }] };
+}
+
+/**
  * coder_postgres_image_tag: the PostgreSQL release Coder's database digest
  * was read from (the image runs by digest; the tag records which release that
  * is). Exactly MAJOR.MINOR: a major-only tag (18) names whatever is newest
  * that day, and a beta or release candidate (19beta4) is not a general
  * release, so either is a problem rather than a pin.
  */
-function coderPostgres(lines) {
-  const at = lines.findIndex((l) => /^coder_postgres_image_tag:/.test(l));
-  const base = { file: GROUP_VARS, where: `${GROUP_VARS} > coder_postgres_image_tag`, kind: 'postgresql' };
-  if (at === -1) return { pins: [], problems: [{ ...base, line: 0, raw: '', message: 'coder_postgres_image_tag is missing' }] };
-  const raw = clean(lines[at].replace(/^coder_postgres_image_tag:/, ''));
-  if (/^\d+\.\d+$/.test(raw)) return { pins: [{ ...base, line: at + 1, raw, version: raw }], problems: [] };
-  return {
-    pins: [],
-    problems: [
-      {
-        ...base,
-        line: at + 1,
-        raw,
-        message: `coder_postgres_image_tag ${raw} is not a general release as MAJOR.MINOR: a major-only tag moves, and a beta or release candidate is not a general release`,
-      },
-    ],
-  };
-}
+const coderPostgres = (lines) =>
+  exactGroupVar(lines, {
+    key: 'coder_postgres_image_tag',
+    kind: 'postgresql',
+    shape: /^\d+\.\d+$/,
+    refusal: (raw) =>
+      `coder_postgres_image_tag ${raw} is not a general release as MAJOR.MINOR: a major-only tag moves, and a beta or release candidate is not a general release`,
+  });
 
 /**
  * vault_version: the HashiCorp Vault release the vault role downloads.
@@ -155,17 +159,13 @@ function coderPostgres(lines) {
  * the SHA256SUMS name from it; a line-only value or a pre-release (2.2.0-rc1)
  * is a problem rather than a pin.
  */
-function vaultPin(lines) {
-  const at = lines.findIndex((l) => /^vault_version:/.test(l));
-  const base = { file: GROUP_VARS, where: `${GROUP_VARS} > vault_version`, kind: 'vault' };
-  if (at === -1) return { pins: [], problems: [{ ...base, line: 0, raw: '', message: 'vault_version is missing' }] };
-  const raw = clean(lines[at].replace(/^vault_version:/, ''));
-  if (/^\d+\.\d+\.\d+$/.test(raw)) return { pins: [{ ...base, line: at + 1, raw, version: raw }], problems: [] };
-  return {
-    pins: [],
-    problems: [{ ...base, line: at + 1, raw, message: `vault_version ${raw} is not a release as MAJOR.MINOR.PATCH` }],
-  };
-}
+const vaultPin = (lines) =>
+  exactGroupVar(lines, {
+    key: 'vault_version',
+    kind: 'vault',
+    shape: /^\d+\.\d+\.\d+$/,
+    refusal: (raw) => `vault_version ${raw} is not a release as MAJOR.MINOR.PATCH`,
+  });
 
 /** lab_host_ubuntu_releases in group_vars, or, before that map existed, site.yml's distribution_version check. */
 function playbookUbuntu(root, lines) {
