@@ -69,10 +69,16 @@
     allow_downgrade: true
     allow_change_held_packages: true
 
+# Retried: dpkg --set-selections does not wait for the dpkg lock (see the
+# docker role's hold task).
 - name: Hold the pinned Node.js package so apt never moves it
   ansible.builtin.dpkg_selections:
     name: nodejs
     selection: hold
+  register: labs_agent_node_hold
+  until: labs_agent_node_hold is succeeded
+  retries: 30
+  delay: 20
 
 - name: Create the agent directories
   ansible.builtin.file:

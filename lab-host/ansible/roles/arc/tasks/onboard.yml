@@ -59,10 +59,16 @@
     allow_downgrade: true
     allow_change_held_packages: true
 
+# Retried: dpkg --set-selections does not wait for the dpkg lock (see the
+# docker role's hold task).
 - name: Hold the pinned agent package so apt never moves it
   ansible.builtin.dpkg_selections:
     name: azcmagent
     selection: hold
+  register: arc_hold
+  until: arc_hold is succeeded
+  retries: 30
+  delay: 20
 
 # Read-only, so it runs in check mode too. A fresh install reports
 # Disconnected; anything that is not Connected goes on to connect, and an

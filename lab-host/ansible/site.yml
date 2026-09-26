@@ -3,7 +3,23 @@
   hosts: all
   become: true
   gather_facts: true
+  # A notified handler still runs when a later task fails. Without this, a
+  # run that changes a config file and then fails leaves the service on the
+  # old config, and the next run sees the file unchanged and never notifies
+  # again: that is how root login outlived the hardening on 2026-09-26.
+  force_handlers: true
 
+  # A freshly booted Ubuntu runs apt-daily and unattended-upgrades within
+  # minutes, and they hold the dpkg lock for as long as the upgrade takes.
+  # The module's own default wait is 60 s; the first run on the reinstalled
+  # VPS on 2026-09-26 lost that race. Fifteen minutes covers a first-boot
+  # security upgrade; a lock held longer than that is a real fault.
+  module_defaults:
+    ansible.builtin.apt:
+      lock_timeout: 900
+
+  # The dpkg_selections hold tasks take the same lock without waiting, so
+  # each retries on its own (roles/docker/tasks/main.yml).
   pre_tasks:
     # The per-release pins in group_vars/all.yml are keyed by codename, so
     # both the codename and the version it belongs to are checked: a release

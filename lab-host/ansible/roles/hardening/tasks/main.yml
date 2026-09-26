@@ -67,6 +67,14 @@
     validate: /usr/sbin/sshd -t -f %s
   notify: Restart ssh
 
+# Restart sshd now, not at the end of the play. On 2026-09-26 the first run
+# wrote this drop-in and then failed in the docker role, so the end-of-play
+# handler never ran; the next run found the file unchanged, notified
+# nothing, and root login stayed on until sshd was restarted by hand.
+# force_handlers in site.yml covers every other role the same way.
+- name: Apply the sshd drop-in before any later role can fail
+  ansible.builtin.meta: flush_handlers
+
 - name: Default to denying inbound traffic
   community.general.ufw:
     direction: incoming
