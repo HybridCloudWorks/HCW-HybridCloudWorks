@@ -845,11 +845,15 @@ This project has not cut a tagged release; entries are grouped under
   newest releases, each sum re-checked against its publisher's file. The
   sandbox template's Azure CLI comment now says what it installs, the
   `-1~resolute` build from its Ubuntu 26.04 base's own suite, and records
-  why the recipe adds no Python. The publish workflow's digest guard, which
-  grepped `^FROM debian:`, now checks every `FROM` in both Dockerfiles: an
-  earlier stage, or exactly the `image@digest` versions.env records for that
-  file (`BASE_IMAGE`/`BASE_DIGEST`, and the new
-  `SANDBOX_BASE_IMAGE`/`SANDBOX_BASE_DIGEST`), and fails on anything else.
+  why the recipe adds no Python. It also gains `HEALTHCHECK NONE`, as the
+  lab image has: the base defines no healthcheck, so nothing changes at run
+  time, and it clears the checkov CKV_DOCKER_2 / trivy DS-0026 finding that
+  Qlty reported as blocking once the file was touched. The publish
+  workflow's digest guard, which grepped `^FROM debian:`, now checks every
+  `FROM` in both Dockerfiles: an earlier stage, or exactly the
+  `image@digest` versions.env records for that file (`BASE_IMAGE`/
+  `BASE_DIGEST`, and the new `SANDBOX_BASE_IMAGE`/`SANDBOX_BASE_DIGEST`),
+  and fails on anything else.
   `smoke.sh` now also compares `python3 --version` with
   `BASE_PYTHON_VERSION`. Measured with Docker 29.8.0: runner 1.70 GB /
   319 MB to 1.71 GB / 319 MB, full 2.69 GB / 491 MB to 2.73 GB / 497 MB

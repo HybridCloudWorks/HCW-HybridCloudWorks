@@ -93,5 +93,12 @@ RUN set -eu; . /tmp/versions.env; . /etc/os-release; \
 COPY --chown=agent:agent sandbox-template/AGENTS.md /home/agent/AGENTS.md
 RUN install -o agent -g agent -m 0644 /home/agent/AGENTS.md /home/agent/.claude/CLAUDE.md
 
+# A sandbox runs an agent session, not a service with an endpoint to probe,
+# and the base image defines no healthcheck (its Config.Healthcheck was null
+# on 2026-09-25), so NONE changes nothing at run time. It says so explicitly,
+# as lab-image/Dockerfile does, rather than leaving the instruction absent
+# for a scanner to report (checkov CKV_DOCKER_2, trivy DS-0026).
+HEALTHCHECK NONE
+
 USER agent
 WORKDIR /home/agent/workspace
