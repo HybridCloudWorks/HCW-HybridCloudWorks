@@ -141,7 +141,7 @@ is checked out at):
 sudo /opt/hcw-src/lab-host/bootstrap.sh -e labs_agent_repo_ref="$(sudo git -C /opt/hcw-labs-agent rev-parse HEAD)"
 ```
 
-A hold lasts one run. The next run without `HCW_REPO_REF` returns the host
+A hold lasts one run. The next plain run returns the playbook and the agent
 to current `main`.
 
 ## The vault
