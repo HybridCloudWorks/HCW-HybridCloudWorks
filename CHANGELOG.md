@@ -41,6 +41,51 @@ This project has not cut a tagged release; entries are grouped under
   "Where AI is used". `NVIDIA-API-KEY` gains a Key Vault reference in
   `infra/functionapp.tf`, a secret-catalogue entry and a Required-Inputs §4.6
   row; the owner seeds it.
+- **infra-lab: adopt the existing Hostinger VPS by import and add the lab
+  DNS records (#661).** A new root module, `infra-lab/`, for the HCP
+  Terraform workspace `hcw/hcw-lab` (ADR 0032), pinned to
+  `hostinger/hostinger` 0.1.23 and `cloudflare/cloudflare` `~> 5.24`. The
+  owner already has the server, and in this provider creating a
+  `hostinger_vps` is a purchase and destroying one cancels the
+  subscription. So `hostinger_vps.lab` comes in through an `import` block
+  whose id is a workspace variable, has `prevent_destroy`, and ignores
+  changes to `plan`, `data_center_id` and `password` (ForceNew, so a change
+  would be cancel and re-purchase) and to `template_id` (a change
+  reinstalls the disk). Postconditions turn a mistyped identity variable
+  into a plan error that names the right value. `dns.tf` writes
+  `lab.hybridcloudworks.com` (A, the VPS's IPv4) and CNAMEs to it for
+  `*.lab`, `coder.lab` and `*.coder.lab`, all DNS-only. `coder.lab` needs
+  its own record because `*.coder.lab` makes it an empty non-terminal,
+  which Cloudflare's wildcard does not answer for. There are no
+  `_acme-challenge` delegations while there is no lab zone (the ADR 0032
+  interim). The provider cannot run a post-install script on an existing
+  server, so the first Ansible run is `bootstrap.sh` over SSH. The owner's
+  steps and the expected first plan,
+  `1 to import, 4 to add, 0 to change, 0 to destroy`, are in
+  `infra-lab/README.md`. Offline contract tests with mocked providers
+  (`infra-lab/tests/adopt.tftest.hcl`) and the fmt, validate, tflint,
+  test and Trivy steps run in the existing `iac-validate.yml` contexts,
+  and Dependabot watches the new lock file.
+- **The Phase 2 lab image digests are pinned, and the Coder template no
+  longer rewrites /etc/passwd (#698).** `IMAGES.hcwLabRunner` in
+  `vps-agent/lib/capabilities.js` and the `hcw-lab` pin in
+  `lab-host/coder/templates/hcw-lab/main.tf` now point at the digests main
+  published for 02dd9595 (#695), so the three runner-image capabilities
+  find the `hcw-terraform-validate`, `hcw-helm-template` and
+  `hcw-kubeconform` scripts instead of failing with
+  `executable file not found`. That `hcw-lab` image
+  gives uid 65534 `/bin/bash` and `/tmp/home`, so the template's temporary
+  `local.passwd` and `upload` block (#693) are gone.
+- **Deploy Functions smoke check polls until the temporary access rule has
+  propagated (#700).** The post-deploy smoke test waited a fixed 20 s after
+  adding its `ci-smoke-<run id>` access rule and made one request, so on run
+  36175776422 it got 403 "Web App - Unavailable" before the rule reached
+  every front end, and a healthy deploy went red. It now polls `/api/health`
+  every 10 s for up to 150 s, logs each attempt's status, passes on the first
+  200 and fails with the last body in the step summary if none arrives. The
+  rule add, the `always()` removal and the origin-lock check are unchanged.
+  The SCM window's `sleep 20` is left as it is: it is waited on by the deploy
+  action, not by a request of this workflow's own.
 
 - **The Coder status token is an expected unresolved secret until Coder
   can issue it (#682).** `CODER-STATUS-TOKEN` is created by Coder, so it

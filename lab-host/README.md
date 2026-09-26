@@ -2,8 +2,9 @@
 
 Configuration management for the Hostinger lab host: the on-premises half of
 the hybrid estate in #656, Phase 2 (#662), on the decisions in ADR 0032.
-Terraform (#661) creates the VPS and its DNS; everything on the host after
-that is here, so nothing is done by hand over SSH and a follower can read
+Terraform in `infra-lab/` (#661) adopts the existing VPS and writes its DNS;
+everything on the host after that is here, so nothing beyond the one
+bootstrap command below is done by hand over SSH and a follower can read
 every step.
 
 ## What runs on the host
@@ -31,8 +32,13 @@ the pattern `00-apex.caddy` shows.
 
 ## First run
 
-The Hostinger post-install script from #661 downloads `bootstrap.sh` and
-runs it as root. The script installs `ansible-core` 2.21.4 with pipx, clones
+The VPS already exists, and the `hostinger/hostinger` provider runs a
+post-install script only at purchase or at reinstall, so there is none: the
+owner clones this repository onto the host and runs `bootstrap.sh` as root
+over SSH, with the one line in `infra-lab/README.md`, step 7. It needs a key
+in `/root/.ssh/authorized_keys` first (step 6 there), because the
+`hardening` role copies that key to `hcwadmin` before it turns root and
+password login off. The script installs `ansible-core` 2.21.4 with pipx, clones
 this repository at the sha pinned in `HCW_REPO_REF` into `/opt/hcw-src`,
 installs the collections and runs `site.yml` against localhost. Without a
 vault it still completes: the host is hardened, Docker and node_exporter
@@ -72,9 +78,8 @@ though they will usually match.
 Secrets never enter the repository. They live on the host in
 `/etc/hcw/ansible/vault.yml`, encrypted with Ansible Vault, and the vault
 password is `/etc/hcw/ansible/vault-password`, root-only. `bootstrap.sh`
-passes both when they exist and runs without them when they do not. The
-post-install script from #661 may write them before calling `bootstrap.sh`;
-to create or edit them by hand, bash, on the host:
+passes both when they exist and runs without them when they do not. To
+create or edit them, bash, on the host:
 
 ```bash
 sudo install -d -m 0700 -o root -g root /etc/hcw/ansible
@@ -119,8 +124,9 @@ Then re-run `bootstrap.sh`.
 Caddy answers the DNS-01 challenge for all three names through CNAME
 delegation: `_acme-challenge.lab.hybridcloudworks.com` and
 `_acme-challenge.coder.lab.hybridcloudworks.com` point into a dedicated lab
-zone that #661 creates, and Caddy follows the CNAME to write the TXT record
-there. Once that zone exists, the runtime token needs `Zone:DNS:Edit` on the
+zone, and Caddy follows the CNAME to write the TXT record there. That zone
+does not exist yet (owner decision 2026-09-25), so `infra-lab/dns.tf`
+writes no delegation records; they are added there when it does. Once that zone exists, the runtime token needs `Zone:DNS:Edit` on the
 lab zone only. **Until it exists, the token has `Zone:DNS:Edit` on the
 production `hybridcloudworks.com` zone.** That is the interim risk ADR 0032
 accepts, and it is written here so the follow-up — re-issue the token scoped

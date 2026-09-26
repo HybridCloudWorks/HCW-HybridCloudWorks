@@ -6,10 +6,11 @@ in Azure. It is the on-premises half of the hybrid estate described in
 its shape is written down so that a change to it is a change to a document.
 
 **State: planned.** Nothing on this page is provisioned. The Hostinger account
-holds an empty VPS that no Terraform manages; `infra-lab/`, the `hcw-lab`
-workspace, the Arc resource group and every identity in the table below are
-work tracked under #656. When a row becomes real, its status changes here in
-the same pull request.
+holds an empty VPS that no Terraform manages yet. The Terraform that will
+adopt it is in [`infra-lab/`](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/tree/main/infra-lab)
+(#661). The `hcw-lab` workspace, the Arc resource group and every identity in
+the table below are work tracked under #656. When a row becomes real, its
+status changes here in the same pull request.
 
 This page carries no addresses. The host's IP, its Hostinger identifiers and
 its SSH host keys are read from the `hcw-lab` workspace and from the host
@@ -21,11 +22,11 @@ itself, never from a published page.
 | --- | --- | --- |
 | Provider | Hostinger, billed outside Azure ([cost analysis](cost-analysis.md)) | planned |
 | Plan | KVM 4 recommended (4 vCPU, 16 GB RAM, NVMe) — large enough for Coder workspaces beside the job runner | planned |
-| Provisioning | Terraform, `hostinger/hostinger` provider, HCP Terraform workspace `hcw/hcw-lab`, working directory `infra-lab/`, auto-apply off | planned |
+| Provisioning | Terraform in [`infra-lab/`](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/tree/main/infra-lab): `hostinger/hostinger` provider 0.1.23, HCP Terraform workspace `hcw/hcw-lab`, working directory `infra-lab/`, auto-apply off. The existing VPS is **adopted by an `import` block, never created**, because creating a `hostinger_vps` is a purchase and destroying one cancels it; `infra-lab/README.md` has the owner's steps and the plan counts to read before any apply | code in repository; workspace not yet created |
 | Configuration | Ansible, from a playbook in this repository | planned |
 | Operating system | Ubuntu 24.04 LTS | planned |
 | Runtime | Docker Engine only; no Kubernetes (owner decision 2026-09-24) | planned |
-| Public names | `lab.hybridcloudworks.com`, `*.lab.hybridcloudworks.com` and `*.coder.lab.hybridcloudworks.com`, Cloudflare DNS records managed from `hcw-lab`; one Caddy certificate carries all three, issued by DNS-01 through the `_acme-challenge.lab` and `_acme-challenge.coder.lab` delegations | planned |
+| Public names | `lab.hybridcloudworks.com`, `*.lab.hybridcloudworks.com` and `*.coder.lab.hybridcloudworks.com`, Cloudflare DNS records managed from `hcw-lab` (`infra-lab/dns.tf`: the `lab` A record and CNAMEs to it for `*.lab`, `coder.lab` and `*.coder.lab`, all DNS-only; `coder.lab` has its own record because `*.coder.lab` makes it an empty non-terminal that `*.lab` does not answer for). One Caddy certificate carries all three names, issued by DNS-01. The target is the `_acme-challenge.lab` and `_acme-challenge.coder.lab` delegations into a dedicated lab zone; until that zone exists (owner decision 2026-09-25: none yet) there are no delegation records and Caddy writes its challenges in the production zone, the interim ADR 0032 accepts | planned |
 | Hybrid control plane | Azure Arc-enabled server in `rg-lab-hybrid-prod-cus`; heartbeat and auth syslog to the Log Analytics workspace in `rg-mgmt-plat-prod-cus` | planned |
 | Owner | Workload owner | — |
 
