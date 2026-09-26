@@ -10,21 +10,39 @@ Phase 2 in #675).
 | `runner` | `ghcr.io/hybridcloudworks/hcw-lab-runner` | terraform, kubeconform, helm, ansible-core; a Terraform provider filesystem mirror at `/opt/terraform/mirror`; the AVM pattern modules and every registry module they call at `/opt/avm/<name>@<version>`; one release of the Kubernetes JSON schemas at `/opt/kubeconform/schemas`; the three capability commands in [`bin/`](bin/). Runs as uid 65534 (`nobody`) with `/workspace` mounted read-only. This is what `vps-agent` runs jobs in. |
 | `full`   | `ghcr.io/hybridcloudworks/hcw-lab`        | Everything in `runner`, plus Azure CLI, kubectl, git, curl, jq and the three packages code-server needs (`ca-certificates`, `libatomic1`, `procps`); uid 65534's shell is `bash` and its home `/tmp/home`, because Coder runs everything through the passwd shell (#693). `CMD` is `bash`. This is what a lab page tells a learner to pull, and the base of the Coder template.                                                            |
 
+Both targets are built on the official `python:3.14.7-slim-trixie` image,
+pinned by index digest: CPython 3.14.7 on Debian 13 (trixie). ansible-core,
+`hcw-terraform-validate` and the build-time vendoring all run on that
+Python; no Debian `python3` package is installed, and the image carries no
+`pip` command. [`versions.env`](versions.env) says why every stage, the
+build-only ones included, uses the one base.
+
 Every version and checksum is in [`versions.env`](versions.env); the
-Dockerfile repeats none of them except the base image digest, which a `FROM`
-line cannot read from a file (the workflow fails the build if the two copies
-disagree).
+Dockerfile repeats none of them except the base image reference, which a
+`FROM` line cannot read from a file. The workflow fails the build if any
+`FROM` that is not an earlier stage differs from `BASE_IMAGE@BASE_DIGEST`
+there, and checks the sandbox template's `FROM` against
+`SANDBOX_BASE_IMAGE@SANDBOX_BASE_DIGEST` the same way.
 
 ## Sizes
 
 Measured on 2026-09-25 with Docker 29.8.0 (`docker image ls`, which since
 Docker 29 reports both the unpacked size on disk and the compressed size a
-pull transfers):
+pull transfers), on the Python 3.14.7 / Debian 13 base:
 
 | Target   | On disk | Compressed (what a pull downloads) |
 | -------- | ------- | ---------------------------------- |
-| `runner` | 1.70 GB | 319 MB                             |
-| `full`   | 2.69 GB | 491 MB                             |
+| `runner` | 1.71 GB | 319 MB                             |
+| `full`   | 2.73 GB | 497 MB                             |
+
+On the Debian 12 base with its Python 3.11 the same day, the two measured
+1.70 GB / 319 MB and 2.69 GB / 491 MB. The runner stays level because the
+python image (135 MB) replaces both bookworm-slim and the apt layer that
+added Debian's python3 and ansible-core's dependencies (150 MB together);
+what grows is the ansible venv (52 MB against 22 MB), which now carries its
+own dependency wheels, cryptography's statically linked OpenSSL among them,
+instead of reusing Debian's packages. The wheels are bind-mounted into the
+one `RUN` that installs them, so they add no layer of their own.
 
 Phase 1 measured 880 MB / 311 MB and 1.88 GB / 484 MB. The on-disk growth is
 the provider mirror, now unpacked (931 MB of binaries where the zips were
@@ -249,12 +267,33 @@ and attests. Where each sum comes from:
 - helm: `https://get.helm.sh/helm-v<version>-linux-amd64.tar.gz.sha256sum`.
 - kubectl: `https://dl.k8s.io/release/v<version>/bin/linux/amd64/kubectl.sha256`.
 - ansible-core: the wheel's `sha256` digest in PyPI's JSON API
-  (`https://pypi.org/pypi/ansible-core/<version>/json`). Stay on 2.19.x while
-  the base is bookworm; 2.20 and later need Python 3.12.
-- Azure CLI: the package `Version` in
+  (`https://pypi.org/pypi/ansible-core/<version>/json`). Check the new
+  line's controller Python range in the
+  [ansible-core support matrix](https://docs.ansible.com/projects/ansible/latest/reference_appendices/release_and_maintenance.html)
+  covers `BASE_PYTHON_VERSION` (2.21 is 3.12 to 3.14).
+- ansible-core's dependencies (`ANSIBLE_CORE_DEPS`): one
+  `name==version --hash=sha256:<sum>` line each, the sum of the wheel pip
+  selects for CPython 3.14 on linux x86_64 from the same PyPI JSON API
+  (`https://pypi.org/pypi/<name>/<version>/json`). The build runs pip in
+  hash-checking mode, so a dependency a new ansible-core adds fails the
+  fetch stage with `In --require-hashes mode, all requirements must have
+  their versions pinned with ==. These do not:` and its name, and a wrong
+  sum fails with `THESE PACKAGES DO NOT MATCH THE HASHES FROM THE
+  REQUIREMENTS FILE` and the `Expected` and `Got` sums (both measured on
+  2026-09-25).
+- Azure CLI: `AZURE_CLI_VERSION` is the upstream release, the newest package
+  `Version` in
   `https://packages.microsoft.com/repos/azure-cli/dists/bookworm/main/binary-amd64/Packages`
-  (no sum; apt verifies the package against the signed repository, and the
-  signing key's own sum is `MICROSOFT_APT_KEY_SHA256`).
+  without its `-1~bookworm` suffix (no sum; apt verifies the package against
+  the signed repository, and the signing key's own sum is
+  `MICROSOFT_APT_KEY_SHA256`). `AZURE_CLI_SUITE` is `bookworm` because
+  packages.microsoft.com has no `trixie` suite and Microsoft's
+  [install page](https://learn.microsoft.com/cli/azure/install-azure-cli-linux?pivots=apt)
+  says to use the latest Debian suite when a distribution has no package;
+  move it to `trixie` once
+  <https://packages.microsoft.com/repos/azure-cli/dists/> lists one. The
+  sandbox template installs the same release from `dists/resolute`, its
+  base's own suite, so check the version is published there too.
 - Providers: `shasum` from
   `https://registry.terraform.io/v1/providers/<namespace>/<name>/<version>/download/linux/amd64`.
 - AVM pattern modules: `sha256sum` of the downloaded
@@ -280,10 +319,16 @@ and attests. Where each sum comes from:
   `yannh/kubernetes-json-schema` to take the directory from,
   `KUBERNETES_JSON_SCHEMA_DIR` the directory (bump it with
   `KUBECTL_VERSION`), and the SHA256 the same tree hash over that directory.
-- Base image: the `Docker-Content-Digest` header from the registry, by the
-  method documented at the top of
-  [`vps-agent/lib/capabilities.js`](../vps-agent/lib/capabilities.js); update
-  `DEBIAN_DIGEST` and every `FROM debian:` line in the Dockerfile together.
+- Base image: the image index digest from the registry's
+  `Docker-Content-Digest` header, by the method documented at the top of
+  [`vps-agent/lib/capabilities.js`](../vps-agent/lib/capabilities.js)
+  (repository `library/python`, tag `3.14-slim-trixie`), cross-checked with
+  `docker buildx imagetools inspect python:3.14-slim-trixie`, whose
+  `org.opencontainers.image.version` annotation names the patch release.
+  Update `BASE_IMAGE`, `BASE_DIGEST`, `BASE_PYTHON_VERSION` and every
+  external `FROM` line in the Dockerfile together; the sandbox template's
+  base is `SANDBOX_BASE_IMAGE` / `SANDBOX_BASE_DIGEST` and its one `FROM`
+  line, by the same method.
 
 The provider mirror and the vendored tree are rebuilt from scratch on every
 build (neither is cached between versions), so a provider bump is a version

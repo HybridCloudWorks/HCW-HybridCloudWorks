@@ -43,8 +43,10 @@
 # secret.
 #
 # The base image's digest lives in two places by necessity — a FROM line
-# cannot read a file — so the first step fails the build when
-# lab-image/versions.env and lab-image/Dockerfile disagree about it.
+# cannot read a file — so the first step fails the build when any FROM in
+# lab-image/Dockerfile or lab-image/sandbox-template/Dockerfile is neither an
+# earlier stage nor the image@digest lab-image/versions.env records for that
+# file, which also fails a FROM that is not pinned at all.
 name: Publish lab image
 
 on:
@@ -88,17 +90,40 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: versions.env and the Dockerfile agree on the base image digest
+      # Every FROM in each Dockerfile is either an earlier stage of the same
+      # file or exactly the image@digest versions.env records for that file
+      # (the tag included, so the documentation beside the digest cannot
+      # drift either). Anything else fails: a different digest, a bare tag,
+      # an unpinned image, or a `--platform` flag in front of any of them.
+      - name: Every FROM is an earlier stage or the base image digest in versions.env
         working-directory: lab-image
         run: |
           set -euo pipefail
-          digest="$(sed -n 's/^DEBIAN_DIGEST=//p' versions.env)"
-          test -n "$digest"
-          froms="$(grep -c '^FROM debian:' Dockerfile)"
-          pinned="$(grep -c "^FROM debian:[a-z-]*@${digest} " Dockerfile)"
-          echo "FROM debian lines: ${froms}, pinned to ${digest}: ${pinned}"
-          test "$froms" -eq "$pinned"
-          test "$froms" -gt 0
+          env_value() { sed -n "s/^$1=//p" versions.env; }
+          check() {
+            local file="$1" want="$2" stages=" " external=0 bad=0 n=0 line from as name
+            test -n "$want"
+            case "$want" in *@sha256:*) ;; *) echo "::error file=lab-image/versions.env::${want} is not image@sha256:digest"; return 1 ;; esac
+            while IFS= read -r line; do
+              n=$((n + 1))
+              read -r _ from as name _ <<<"$line"
+              if [[ "$stages" == *" ${from} "* ]]; then
+                echo "ok    ${file}: FROM ${from} (earlier stage)"
+              elif [ "$from" = "$want" ]; then
+                external=$((external + 1))
+                echo "ok    ${file}: FROM ${from}"
+              else
+                bad=1
+                echo "::error file=lab-image/${file}::FROM ${from} is neither an earlier stage nor ${want} from versions.env"
+              fi
+              if [ "${as,,}" = as ] && [ -n "$name" ]; then stages="${stages}${name} "; fi
+            done < <(grep -iE '^[[:space:]]*FROM[[:space:]]' "$file")
+            echo "${file}: ${n} FROM line(s), ${external} pinned to ${want}"
+            test "$bad" -eq 0
+            test "$external" -gt 0
+          }
+          check Dockerfile "$(env_value BASE_IMAGE)@$(env_value BASE_DIGEST)"
+          check sandbox-template/Dockerfile "$(env_value SANDBOX_BASE_IMAGE)@$(env_value SANDBOX_BASE_DIGEST)"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
