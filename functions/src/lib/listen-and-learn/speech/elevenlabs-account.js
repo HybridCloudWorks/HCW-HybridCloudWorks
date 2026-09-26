@@ -61,7 +61,7 @@
  * Voice Library voice with a credit multiplier would bill more. A free-plan
  * key cannot use library voices through the API at all
  * (https://elevenlabs.io/docs/overview/capabilities/voices), and the voice
- * picker offers none on that plan (elevenlabs-voices.js). On a paid plan the
+ * picker offers none on that plan (elevenlabs-voice-plan.js). On a paid plan the
  * owner may choose one; if it carries a multiplier this figure under-counts,
  * and the per-request out-of-credit error in elevenlabs.js is the backstop,
  * as it is for two renders racing each other.

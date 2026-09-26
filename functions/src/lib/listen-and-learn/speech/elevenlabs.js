@@ -130,7 +130,7 @@ import {
   invalidateSubscription,
   isQuotaExceeded,
 } from './elevenlabs-account.js';
-import { isElevenLabsVoiceId } from './elevenlabs-voices.js';
+import { isElevenLabsVoiceId } from './elevenlabs-voice-plan.js';
 import { DEFAULT_SPEAKERS } from '../script.js';
 
 const DIALOGUE_URL = 'https://api.elevenlabs.io/v1/text-to-dialogue';

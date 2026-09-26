@@ -360,7 +360,8 @@ describe('PodcastVoices', () => {
     expect(
       await screen.findByText(/None of these voices can be used through the API on this plan/)
     ).toBeTruthy();
-    expect(screen.getByText(new RegExp(MY_VOICES_PAGE.replace(/[.]/g, '\\.')))).toBeTruthy();
+    const note = screen.getByText(/None of these voices can be used through the API on this plan/);
+    expect(note.textContent).toContain(MY_VOICES_PAGE);
   });
 
   it('labels a voice by name and the traits a host is chosen by', () => {

@@ -20,7 +20,7 @@
  */
 import { ADMIN_CONFIG_PARTITION } from '../cosmos-client.js';
 import { DEFAULT_SPEAKERS } from '../listen-and-learn/script.js';
-import { isElevenLabsVoiceId } from '../listen-and-learn/speech/elevenlabs-voices.js';
+import { isElevenLabsVoiceId } from '../listen-and-learn/speech/elevenlabs-voice-plan.js';
 
 /** The `admin_config` document the choice lives in. */
 export const PODCAST_VOICES_CONFIG_ID = 'podcast_voices';

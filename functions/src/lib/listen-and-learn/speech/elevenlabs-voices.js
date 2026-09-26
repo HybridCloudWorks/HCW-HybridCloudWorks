@@ -1,7 +1,6 @@
 /**
- * The ElevenLabs voices this key may use, and their previews, for the owner
- * to pick the two podcast hosts by ear (#725; ADR 0029 §2a, amended
- * 2026-09-26 twice).
+ * The ElevenLabs voices this key may use, for the owner to pick the two
+ * podcast hosts by ear (#725; ADR 0029 §2a, amended 2026-09-26 twice).
  *
  * Written after the owner's first live check on the free plan was refused:
  * "Free users cannot use library voices via the API" (402
@@ -9,7 +8,8 @@
  * Legacy voices that an account created in March 2026 or later does not have,
  * so for that account they are library voices. Choosing voices by id from a
  * help page is what went wrong; this module lists what the account itself
- * says it has, and says which of those the plan allows.
+ * says it has. Which of those the plan allows is elevenlabs-voice-plan.js;
+ * fetching a preview safely is elevenlabs-preview.js.
  *
  * ## The listing
  *
@@ -21,58 +21,21 @@
  * `total_count`; `include_total_count=false` because that count "incurs a
  * performance cost" and nothing here shows it.
  *
- * **The rule.** "Voice Library voices are not available via the API to free
- * tier users" (https://elevenlabs.io/docs/overview/capabilities/voices, read
- * 2026-09-26). So on the free plan a key may use the account's own voices and
- * its default voices, and not library copies.
- *
- * **What tells them apart.** The voice object carries no single "type" field.
- * The listing's `voice_type` filter is the documented classifier: `default`,
- * `personal`, `workspace` and `community`, where "'non-community' is equal to
- * 'personal' and 'workspace' combined (excludes library copies)" (the search
- * reference above; the filter value was added 2026-04-13,
- * https://elevenlabs.io/docs/changelog/2026/4/13). So the account is listed
- * three times, `default`, `non-community` and `community`, and each voice is
- * labelled by the listing that returned it rather than guessed from
- * `category` or `is_owner`. A voice in the first two is usable on any plan;
- * one in the third needs a paid plan for API use.
- *
- * Two more fields narrow it: `is_legacy` (a Legacy id "will automatically
- * route to" a replacement,
- * https://elevenlabs.io/docs/help-center/product/voices/my-voices/what-are-legacy-voices,
- * so it would not sound like its preview) and `available_for_tiers`, "the
- * tiers the voice is available for", read as a restriction only when it
- * names some.
+ * **What tells default, own and library voices apart.** The voice object
+ * carries no single "type" field. The listing's `voice_type` filter is the
+ * documented classifier: `default`, `personal`, `workspace` and `community`,
+ * where "'non-community' is equal to 'personal' and 'workspace' combined
+ * (excludes library copies)" (the search reference above; the filter value
+ * was added 2026-04-13, https://elevenlabs.io/docs/changelog/2026/4/13). So
+ * the account is listed three times, `default`, `non-community` and
+ * `community`, and each voice is labelled by the listing that returned it
+ * rather than guessed from `category` or `is_owner`.
  *
  * **Permission.** A restricted key needs **Voices → Read** (`voices_read`,
  * named in https://elevenlabs.io/docs/api-reference/service-accounts/api-keys/list)
  * for the listing. It is a third permission beside the two the podcast
  * already needed; without it the listing answers 401 or 403 and the sentence
  * says which permission to add, and where.
- *
- * ## The preview
- *
- * Each voice has a `preview_url` on a third-party host. The site's CSP
- * (`frontend/staticwebapp.config.json`) allows media from 'self' only, and it
- * is not widened for this. So the preview is fetched here and handed to the
- * page by an editor route, and the page decodes it with Web Audio.
- *
- * That route must not be an open proxy, so a URL is fetched only when
- *
- *   - it came from the account's own listing, never from the caller: the
- *     route takes a voice id and looks its preview up;
- *   - it is `https://storage.googleapis.com/eleven-public-prod/…`, the host
- *     and bucket every `preview_url` in ElevenLabs's reference carries
- *     (https://elevenlabs.io/docs/api-reference/legacy/voices/get-all for a
- *     premade voice, https://elevenlabs.io/docs/api-reference/voices/voice-library/get-shared
- *     for a library one). The host alone would not do: that host serves every
- *     public bucket on Google Cloud, so the bucket prefix is part of the
- *     allowlist, checked on the parsed, dot-segment-normalised path;
- *   - it carries no port, credentials, query or fragment.
- *
- * The fetch sends no key (the preview host is public and is not ElevenLabs's
- * API), refuses redirects, stops reading past `MAX_PREVIEW_BYTES`, and hands
- * back the bytes only if they begin like an MP3.
  *
  * ## The cache
  *
@@ -90,6 +53,26 @@ import {
   isPermissionRefusal,
   isRetryableStatus,
 } from './elevenlabs-account.js';
+import { fetchListedPreview, isAllowedPreviewUrl } from './elevenlabs-preview.js';
+
+// One import surface for the routes and the picker's tests.
+export {
+  MAX_PREVIEW_BYTES,
+  PREVIEW_FAILED,
+  PREVIEW_HOST,
+  PREVIEW_PATH_PREFIX,
+  PREVIEW_UNAVAILABLE,
+  VOICE_NOT_LISTED,
+  isAllowedPreviewUrl,
+  looksLikeMp3,
+} from './elevenlabs-preview.js';
+export {
+  FREE_PLAN_RULE,
+  VOICE_ID_PATTERN,
+  isElevenLabsVoiceId,
+  voiceUsability,
+  voicesForPlan,
+} from './elevenlabs-voice-plan.js';
 
 export const VOICES_URL = 'https://api.elevenlabs.io/v2/voices';
 
@@ -115,43 +98,12 @@ export const VOICE_LISTINGS = Object.freeze([
   Object.freeze({ voiceType: 'community', type: 'library' }),
 ]);
 
-/**
- * An ElevenLabs voice id as every documented one is: twenty letters and
- * digits (`EXAVITQu4vr4xnSDxMaL`, `9BWtsMINqrJLrRacOk9x` in the Legacy
- * listing, `sB1b5zUrxQVAFl2PhZFp` in the shared-voice listing). A Gemini name
- * (`Kore`) or an Azure one (`en-US-AvaMultilingualNeural`) fails it, which is
- * the mistake the shared `LISTEN_AND_LEARN_VOICE_*` settings invited.
- */
-export const VOICE_ID_PATTERN = /^[A-Za-z0-9]{20}$/;
-
-export const isElevenLabsVoiceId = (value) =>
-  typeof value === 'string' && VOICE_ID_PATTERN.test(value);
-
-/** The preview allowlist: exactly this host, and inside this bucket. */
-export const PREVIEW_HOST = 'storage.googleapis.com';
-export const PREVIEW_PATH_PREFIX = '/eleven-public-prod/';
-
-/** A preview is a few seconds of MP3, a few hundred kilobytes. */
-export const MAX_PREVIEW_BYTES = 2 * 1024 * 1024;
-
-/** `code` values the routes map to statuses. */
+/** `code` for a listing that could not be read. */
 export const VOICES_UNAVAILABLE = 'voices_unavailable';
-export const VOICE_NOT_LISTED = 'voice_not_listed';
-export const PREVIEW_UNAVAILABLE = 'preview_unavailable';
-export const PREVIEW_FAILED = 'preview_failed';
-
-/** The rule, as the page states it above the list. */
-export const FREE_PLAN_RULE =
-  'On the free plan ElevenLabs lets the API use your own voices and its default voices, not Voice Library voices.';
 
 const MAX_ATTEMPTS = 3;
 const MAX_LABEL_LENGTH = 80;
 const MAX_DESCRIPTION_LENGTH = 300;
-const PREVIEW_CONTENT_TYPES = [
-  /^audio\//i,
-  /^application\/octet-stream/i,
-  /^binary\/octet-stream/i,
-];
 
 const voicesError = (reason, status = null) =>
   new ElevenLabsSpeechError(`Could not list the ElevenLabs voices (${reason}).`, {
@@ -185,6 +137,17 @@ function pageUrl(voiceType, pageToken) {
   return `${VOICES_URL}?${params.toString()}`;
 }
 
+/** A 2xx answer's JSON, or the refusal for one that is not. */
+async function pageBody(response) {
+  const text = await response.text().catch(() => '');
+  if (!response.ok) return { refusal: listingRefusal(response.status, text) };
+  try {
+    return { body: JSON.parse(text) };
+  } catch {
+    throw voicesError('the answer was not JSON', response.status);
+  }
+}
+
 /** One page, retried on 429 and 5xx as every other ElevenLabs read here is. */
 async function fetchPage({ key, voiceType, pageToken, fetchImpl, sleep }) {
   let lastError = null;
@@ -201,15 +164,9 @@ async function fetchPage({ key, voiceType, pageToken, fetchImpl, sleep }) {
       await sleep(attempt * 500);
       continue;
     }
-    const text = await response.text().catch(() => '');
-    if (response.ok) {
-      try {
-        return JSON.parse(text);
-      } catch {
-        throw voicesError('the answer was not JSON', response.status);
-      }
-    }
-    lastError = listingRefusal(response.status, text);
+    const { body, refusal } = await pageBody(response);
+    if (!refusal) return body;
+    lastError = refusal;
     if (!isRetryableStatus(response.status) || attempt === MAX_ATTEMPTS) throw lastError;
     await sleep(attempt * 500);
   }
@@ -236,19 +193,17 @@ const boundedText = (value, max) => {
   return text ? text.slice(0, max) : null;
 };
 
+const isPlainObject = (value) =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
 /**
  * The labels the page shows. ElevenLabs's labels are free-form strings; older
  * voices spell the use case `use case`, newer ones `use_case`.
  */
 function presentLabels(labels) {
-  const raw = labels && typeof labels === 'object' && !Array.isArray(labels) ? labels : {};
-  const read = (...names) => {
-    for (const name of names) {
-      const value = boundedText(raw[name], MAX_LABEL_LENGTH);
-      if (value) return value;
-    }
-    return null;
-  };
+  const raw = isPlainObject(labels) ? labels : {};
+  const read = (...names) =>
+    names.map((name) => boundedText(raw[name], MAX_LABEL_LENGTH)).find(Boolean) ?? null;
   return {
     gender: read('gender'),
     accent: read('accent'),
@@ -258,32 +213,11 @@ function presentLabels(labels) {
   };
 }
 
-/**
- * Whether `value` is a preview URL this module will fetch: https, exactly
- * PREVIEW_HOST on the default port, inside PREVIEW_PATH_PREFIX after the URL
- * parser has resolved `.` and `..` segments (percent-encoded ones included),
- * and nothing else — no credentials, no query, no fragment.
- */
-export function isAllowedPreviewUrl(value) {
-  if (typeof value !== 'string' || value.length === 0 || value.length > 2048) return false;
-  let url;
-  try {
-    url = new URL(value);
-  } catch {
-    return false;
-  }
-  return (
-    url.protocol === 'https:' &&
-    url.hostname === PREVIEW_HOST &&
-    url.port === '' &&
-    url.username === '' &&
-    url.password === '' &&
-    url.search === '' &&
-    url.hash === '' &&
-    url.pathname.startsWith(PREVIEW_PATH_PREFIX) &&
-    url.pathname.length > PREVIEW_PATH_PREFIX.length
-  );
-}
+/** `available_for_tiers` as trimmed, non-empty strings. */
+const presentTiers = (tiers) =>
+  (Array.isArray(tiers) ? tiers : [])
+    .filter((tier) => typeof tier === 'string' && tier.trim())
+    .map((tier) => tier.trim());
 
 /** One raw voice → what the page is told, plus the preview URL kept here. */
 function presentVoice(raw, type) {
@@ -298,15 +232,26 @@ function presentVoice(raw, type) {
       labels: presentLabels(raw?.labels),
       description: boundedText(raw?.description, MAX_DESCRIPTION_LENGTH),
       legacy: raw?.is_legacy === true,
-      tiers: Array.isArray(raw?.available_for_tiers)
-        ? raw.available_for_tiers
-            .filter((t) => typeof t === 'string' && t.trim())
-            .map((t) => t.trim())
-        : [],
+      tiers: presentTiers(raw?.available_for_tiers),
       hasPreview: previewUrl !== null,
     },
     previewUrl,
   };
+}
+
+/**
+ * Add one listing's voices to `collected`, labelled `type`. A voice already
+ * collected keeps its first label, and a voice with no id is dropped.
+ */
+function addVoices(collected, rawVoices, type) {
+  const seen = new Set(collected.voices.map((voice) => voice.voiceId));
+  for (const raw of rawVoices) {
+    const { voice, previewUrl } = presentVoice(raw, type);
+    if (!voice.voiceId || seen.has(voice.voiceId)) continue;
+    seen.add(voice.voiceId);
+    collected.voices.push(voice);
+    if (previewUrl) collected.previews.set(voice.voiceId, previewUrl);
+  }
 }
 
 /** key → { voices, previews, truncated, expiresAt }. */
@@ -330,201 +275,29 @@ export async function readVoices({
   useCache = true,
 } = {}) {
   if (!key) throw voicesError('ELEVENLABS_API_KEY is not configured');
-  if (useCache) {
-    const hit = cache.get(key);
-    if (hit && hit.expiresAt > now()) return hit;
-  }
+  const hit = useCache ? cache.get(key) : null;
+  if (hit && hit.expiresAt > now()) return hit;
 
-  const seen = new Set();
-  const voices = [];
-  const previews = new Map();
-  let truncated = false;
+  const collected = { voices: [], previews: new Map(), truncated: false };
   // Sequential, like the dialogue requests: three small reads, and a burst
   // is the reliable way to meet the per-account 429.
   for (const { voiceType, type } of VOICE_LISTINGS) {
     const listing = await fetchListing({ key, voiceType, fetchImpl, sleep });
-    truncated ||= listing.truncated;
-    for (const raw of listing.voices) {
-      const { voice, previewUrl } = presentVoice(raw, type);
-      if (!voice.voiceId || seen.has(voice.voiceId)) continue;
-      seen.add(voice.voiceId);
-      voices.push(voice);
-      if (previewUrl) previews.set(voice.voiceId, previewUrl);
-    }
+    collected.truncated ||= listing.truncated;
+    addVoices(collected, listing.voices, type);
   }
 
-  const value = { voices, previews, truncated, expiresAt: now() + VOICES_CACHE_TTL_MS };
+  const value = { ...collected, expiresAt: now() + VOICES_CACHE_TTL_MS };
   cache.set(key, value);
   return value;
 }
 
-const lower = (value) => String(value || '').toLowerCase();
-
 /**
- * Whether one voice can be used through the API on this plan, and if not,
- * why, in a sentence the page shows beside it. `subscription` is the
- * normalised account (elevenlabs-account.js) or null when it could not be
- * read, in which case a library voice is treated as the free plan treats it:
- * the pre-flight would refuse the render anyway, and the page must not offer
- * a voice it cannot vouch for.
- */
-export function voiceUsability(voice, subscription) {
-  if (!isElevenLabsVoiceId(voice.voiceId)) {
-    return { usable: false, reason: 'Its id is not the 20-character shape this page saves.' };
-  }
-  if (voice.legacy) {
-    return {
-      usable: false,
-      reason:
-        'Legacy voice: ElevenLabs routes its id to a replacement, so it would not sound like this preview.',
-    };
-  }
-  if (voice.type === 'library' && (!subscription || subscription.freePlan)) {
-    return {
-      usable: false,
-      reason: subscription
-        ? 'Voice Library voice: the free plan cannot use it through the API (HTTP 402 paid_plan_required).'
-        : 'Voice Library voice, and the plan could not be read: the free plan cannot use these through the API.',
-    };
-  }
-  const tiers = voice.tiers.map(lower);
-  if (tiers.length > 0 && !(subscription && tiers.includes(lower(subscription.tier)))) {
-    return {
-      usable: false,
-      reason: `ElevenLabs offers it on the ${voice.tiers.join(', ')} plan${voice.tiers.length > 1 ? 's' : ''} only.`,
-    };
-  }
-  return { usable: true, reason: null };
-}
-
-/**
- * The listing as the picker shows it: every voice, usable ones first, each
- * with `usable` and, when not, `unavailableReason`. Nothing is hidden: a
- * voice the plan does not allow is shown with the reason, because "why is my
- * voice not here" is the question this page exists to answer.
- */
-export function voicesForPlan(voices, subscription) {
-  const rank = { default: 0, own: 1, library: 2 };
-  return voices
-    .map((voice) => {
-      const { usable, reason } = voiceUsability(voice, subscription);
-      return { ...voice, usable, unavailableReason: reason };
-    })
-    .sort(
-      (a, b) =>
-        Number(b.usable) - Number(a.usable) ||
-        (rank[a.type] ?? 9) - (rank[b.type] ?? 9) ||
-        a.name.localeCompare(b.name, 'en')
-    );
-}
-
-const previewError = (message, code, status = null) =>
-  new ElevenLabsSpeechError(message, { status, code });
-
-/** Whether the first bytes are an ID3 tag or an MPEG audio frame sync. */
-export function looksLikeMp3(bytes) {
-  if (!bytes || bytes.length < 3) return false;
-  if (bytes[0] === 0x49 && bytes[1] === 0x44 && bytes[2] === 0x33) return true; // "ID3"
-  return bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0;
-}
-
-/** The body, read no further than `limit` bytes. */
-async function readCapped(response, limit) {
-  const declared = Number(response.headers?.get?.('content-length'));
-  if (Number.isFinite(declared) && declared > limit) {
-    throw previewError(
-      `The preview is ${declared} bytes, over the ${limit}-byte cap.`,
-      PREVIEW_FAILED,
-      502
-    );
-  }
-  const reader = response.body?.getReader?.();
-  if (!reader) {
-    const bytes = Buffer.from(await response.arrayBuffer());
-    if (bytes.length > limit) {
-      throw previewError(`The preview is over the ${limit}-byte cap.`, PREVIEW_FAILED, 502);
-    }
-    return bytes;
-  }
-  const parts = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > limit) {
-      await reader.cancel().catch(() => {});
-      throw previewError(`The preview is over the ${limit}-byte cap.`, PREVIEW_FAILED, 502);
-    }
-    parts.push(Buffer.from(value));
-  }
-  return Buffer.concat(parts);
-}
-
-/**
- * One voice's preview, as MP3 bytes. The voice must be in the account's
- * listing and its preview on the allowlisted host (see the header); the
- * caller supplies an id, never a URL.
+ * One voice's preview, as MP3 bytes, looked up in this key's listing (see
+ * `fetchListedPreview` in elevenlabs-preview.js). The caller supplies an id,
+ * never a URL.
  *
  * @returns {Promise<{ audio: Buffer, contentType: 'audio/mpeg' }>}
  */
-export async function fetchVoicePreview({
-  key,
-  voiceId,
-  fetchImpl = fetch,
-  sleep,
-  now,
-  listVoices = readVoices,
-}) {
-  if (!isElevenLabsVoiceId(voiceId)) {
-    throw previewError('That is not an ElevenLabs voice id.', VOICE_NOT_LISTED, 400);
-  }
-  const { voices, previews } = await listVoices({ key, fetchImpl, sleep, now });
-  if (!voices.some((voice) => voice.voiceId === voiceId)) {
-    throw previewError(
-      'That voice is not one this ElevenLabs key can list.',
-      VOICE_NOT_LISTED,
-      404
-    );
-  }
-  const previewUrl = previews.get(voiceId);
-  // Checked again at the point of use: the allowlist is the reason this is
-  // not an open proxy, and a cache entry is not where to trust it from.
-  if (!isAllowedPreviewUrl(previewUrl)) {
-    throw previewError(
-      'ElevenLabs has no preview for this voice on its preview host.',
-      PREVIEW_UNAVAILABLE,
-      404
-    );
-  }
-
-  let response;
-  try {
-    // No key: the preview host is public storage, not ElevenLabs's API, and
-    // the key must never travel anywhere else. No redirects: one could leave
-    // the allowlist.
-    response = await fetchImpl(previewUrl, {
-      method: 'GET',
-      redirect: 'error',
-      headers: { Accept: 'audio/mpeg' },
-    });
-  } catch (err) {
-    throw previewError(`Could not fetch the preview: ${err?.message || err}`, PREVIEW_FAILED, 502);
-  }
-  if (!response.ok) {
-    throw previewError(`The preview host answered HTTP ${response.status}.`, PREVIEW_FAILED, 502);
-  }
-  const type = String(response.headers?.get?.('content-type') || '');
-  if (type && !PREVIEW_CONTENT_TYPES.some((pattern) => pattern.test(type))) {
-    throw previewError(
-      `The preview host answered ${type.slice(0, 60)}, not audio.`,
-      PREVIEW_FAILED,
-      502
-    );
-  }
-  const audio = await readCapped(response, MAX_PREVIEW_BYTES);
-  if (!looksLikeMp3(audio)) {
-    throw previewError('The preview host answered something that is not MP3.', PREVIEW_FAILED, 502);
-  }
-  return { audio, contentType: 'audio/mpeg' };
-}
+export const fetchVoicePreview = (params) =>
+  fetchListedPreview({ listVoices: readVoices, ...params });

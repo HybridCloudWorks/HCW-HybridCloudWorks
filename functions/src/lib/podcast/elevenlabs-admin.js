@@ -20,7 +20,7 @@
  *                                        that voice's preview MP3, fetched
  *                                        from ElevenLabs's preview host only
  *                                        (#725; the allowlist is in
- *                                        speech/elevenlabs-voices.js)
+ *                                        speech/elevenlabs-preview.js)
  *
  * The two voice routes spend no credits: a listing and a preview are reads.
  * The owner picks two voices by ear with them and saves the choice through
@@ -297,25 +297,49 @@ async function reportSample(deps, key, rendered) {
 }
 
 /**
- * The voices the check will use, or the refusal to answer with. The saved
- * choice over the code's defaults (which are empty); a host still without a
+ * What the check needs before it may spend anything, or the refusal to
+ * answer with: the key (503 without it), then the voices. The saved choice
+ * wins over the code's defaults (which are empty); a host still without a
  * voice is a 409 that sends nothing, so the check never reaches ElevenLabs
  * to learn what this page already knows.
+ *
+ * @returns {Promise<{ key: string, voices: Record<string,string> } | { refusal: object }>}
  */
-async function sampleVoices(deps, context) {
+async function samplePreconditions(deps, context) {
+  const key = readSetting(deps.env, ELEVENLABS_KEY_SETTING);
+  if (!key) return { refusal: json(503, { error: NOT_CONFIGURED_REASON, code: 'NOT_CONFIGURED' }) };
   let stored;
   try {
     stored = await deps.readVoices(deps.store);
   } catch (error) {
     context.warn?.(`elevenLabsSample: podcast voices read failed (${error?.code ?? 'unknown'})`);
-    return { refusal: json(502, { error: 'The saved podcast voices could not be read.', code: 'VOICES_UNREADABLE' }) };
+    return {
+      refusal: json(502, {
+        error: 'The saved podcast voices could not be read.',
+        code: 'VOICES_UNREADABLE',
+      }),
+    };
   }
   const voices = { ...ELEVENLABS_DEFAULT_VOICES, ...(stored || {}) };
   const unchosen = PODCAST_HOSTS.filter((host) => !isElevenLabsVoiceId(voices[host]));
   if (unchosen.length > 0) {
-    return { refusal: json(409, { error: voicesNotChosenMessage(unchosen), code: VOICES_NOT_CHOSEN }) };
+    return {
+      refusal: json(409, { error: voicesNotChosenMessage(unchosen), code: VOICES_NOT_CHOSEN }),
+    };
   }
-  return { voices };
+  return { key, voices };
+}
+
+/** The 200 for a rendered sample, or a 500 if reporting it failed after the spend. */
+async function respondWithReport(deps, key, rendered, context) {
+  try {
+    const report = await reportSample(deps, key, rendered);
+    context.log?.(`elevenLabsSample: rendered, ${report.charactersBilled} characters billed`);
+    return json(200, report);
+  } catch (error) {
+    context.error('elevenLabsSample failed after rendering:', error);
+    return json(500, { error: 'The sample was rendered but the result could not be reported' });
+  }
 }
 
 /** POST /api/cms/podcast/elevenlabs/sample */
@@ -323,10 +347,7 @@ async function renderSample(deps, request, context) {
   const auth = await deps.guard.requireRole(request, 'editor');
   if (auth.error) return auth.error;
 
-  const key = readSetting(deps.env, ELEVENLABS_KEY_SETTING);
-  if (!key) return json(503, { error: NOT_CONFIGURED_REASON, code: 'NOT_CONFIGURED' });
-
-  const { voices, refusal } = await sampleVoices(deps, context);
+  const { key, voices, refusal } = await samplePreconditions(deps, context);
   if (refusal) return refusal;
 
   let rendered;
@@ -346,14 +367,7 @@ async function renderSample(deps, request, context) {
     });
   }
 
-  try {
-    const report = await reportSample(deps, key, rendered);
-    context.log?.(`elevenLabsSample: rendered, ${report.charactersBilled} characters billed`);
-    return json(200, report);
-  } catch (error) {
-    context.error('elevenLabsSample failed after rendering:', error);
-    return json(500, { error: 'The sample was rendered but the result could not be reported' });
-  }
+  return respondWithReport(deps, key, rendered, context);
 }
 
 /**
@@ -418,18 +432,47 @@ function previewStatus(error) {
   return 502;
 }
 
+const PREVIEW_REFUSALS = new Set([
+  VOICE_NOT_LISTED,
+  PREVIEW_UNAVAILABLE,
+  PREVIEW_FAILED,
+  VOICES_UNAVAILABLE,
+]);
+
+/** A failed preview as its answer: its own sentence by code, or a bare 500. */
+function previewRefusal(error, context) {
+  if (!PREVIEW_REFUSALS.has(error?.code)) {
+    context.error('elevenLabsPreview failed:', error?.message || error);
+    return json(500, { error: 'Failed to fetch the voice preview' });
+  }
+  context.log?.(`elevenLabsPreview: refused (${error.code})`);
+  return json(previewStatus(error), { error: error.message, code: error.code });
+}
+
+/**
+ * The key and the voice id, or the refusal: 503 without the key, 400 for an
+ * id that is not one. The id is checked here so a URL, a path or a name never
+ * reaches the listing lookup.
+ */
+function previewPreconditions(deps, request) {
+  const key = readSetting(deps.env, ELEVENLABS_KEY_SETTING);
+  if (!key) return { refusal: json(503, { error: NOT_CONFIGURED_REASON, code: 'NOT_CONFIGURED' }) };
+  const voiceId = String(request.params?.voiceId ?? '');
+  if (!isElevenLabsVoiceId(voiceId)) {
+    return {
+      refusal: json(400, { error: 'That is not an ElevenLabs voice id.', code: VOICE_NOT_LISTED }),
+    };
+  }
+  return { key, voiceId };
+}
+
 /** GET /api/cms/podcast/elevenlabs/voices/{voiceId}/preview */
 async function previewVoice(deps, request, context) {
   const auth = await deps.guard.requireRole(request, 'editor');
   if (auth.error) return auth.error;
 
-  const key = readSetting(deps.env, ELEVENLABS_KEY_SETTING);
-  if (!key) return json(503, { error: NOT_CONFIGURED_REASON, code: 'NOT_CONFIGURED' });
-
-  const voiceId = String(request.params?.voiceId ?? '');
-  if (!isElevenLabsVoiceId(voiceId)) {
-    return json(400, { error: 'That is not an ElevenLabs voice id.', code: VOICE_NOT_LISTED });
-  }
+  const { key, voiceId, refusal } = previewPreconditions(deps, request);
+  if (refusal) return refusal;
   try {
     const { audio, contentType } = await deps.fetchPreview({
       key,
@@ -449,13 +492,7 @@ async function previewVoice(deps, request, context) {
       body: audio,
     };
   } catch (error) {
-    const known = [VOICE_NOT_LISTED, PREVIEW_UNAVAILABLE, PREVIEW_FAILED, VOICES_UNAVAILABLE];
-    if (!known.includes(error?.code)) {
-      context.error('elevenLabsPreview failed:', error?.message || error);
-      return json(500, { error: 'Failed to fetch the voice preview' });
-    }
-    context.log?.(`elevenLabsPreview: refused (${error.code})`);
-    return json(previewStatus(error), { error: error.message, code: error.code });
+    return previewRefusal(error, context);
   }
 }
 

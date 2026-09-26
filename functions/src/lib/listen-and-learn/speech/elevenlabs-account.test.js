@@ -147,8 +147,12 @@ describe('dialogueRefusal', () => {
     expect(paid.error).toMatchObject({ status: 402, code: PAID_PLAN_REQUIRED });
     // A paid-only voice is fixed by choosing another, so the sentence says
     // where, before ElevenLabs's own body (#725).
-    expect(paid.error.message).toMatch(
-      new RegExp(`^ElevenLabs refused this on the current plan \\(HTTP 402 paid_plan_required\\): .*Choose voices your plan allows under Podcast voices at ${VOICE_PICKER_PAGE.replace(/[.?]/g, '\\$&')}\\. ElevenLabs said: `)
+    const { message } = paid.error;
+    expect(
+      message.startsWith('ElevenLabs refused this on the current plan (HTTP 402 paid_plan_required): ')
+    ).toBe(true);
+    expect(message).toContain(
+      `Choose voices your plan allows under Podcast voices at ${VOICE_PICKER_PAGE}. ElevenLabs said: `
     );
     expect(VOICE_PICKER_PAGE).toBe('https://hybridcloudworks.com/admin/platform?tab=audio');
   });

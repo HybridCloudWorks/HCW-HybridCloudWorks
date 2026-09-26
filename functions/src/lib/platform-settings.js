@@ -48,7 +48,7 @@ import {
   listenAndLearnModelOptions,
 } from './listen-and-learn/speech-settings.js';
 import { GEMINI_DEFAULT_MODEL } from './listen-and-learn/speech/gemini.js';
-import { isElevenLabsVoiceId } from './listen-and-learn/speech/elevenlabs-voices.js';
+import { isElevenLabsVoiceId } from './listen-and-learn/speech/elevenlabs-voice-plan.js';
 import { PODCAST_HOSTS, PODCAST_VOICES_CONFIG_ID } from './podcast/voice-settings.js';
 import {
   BUILT_IN_TEMPLATE_ID,

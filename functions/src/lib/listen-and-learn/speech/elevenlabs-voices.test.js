@@ -150,6 +150,7 @@ describe('the preview allowlist', () => {
       'https://evilstorage.googleapis.com/eleven-public-prod/a.mp3', // a subdomain look-alike
       'https://eleven-public-prod.storage.googleapis.com/a.mp3', // virtual-host style: not the allowlisted host
       'https://user:pw@storage.googleapis.com/eleven-public-prod/a.mp3', // credentials
+      'https://user@storage.googleapis.com/eleven-public-prod/a.mp3', // a user name alone
       'https://storage.googleapis.com:8443/eleven-public-prod/a.mp3', // a port
       'https://storage.googleapis.com/someone-elses-bucket/a.mp3', // same host, other bucket
       'https://storage.googleapis.com/eleven-public-prod-evil/a.mp3', // prefix look-alike
