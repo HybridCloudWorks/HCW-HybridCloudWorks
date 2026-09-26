@@ -17,6 +17,31 @@ hardening_admin_user: hcwadmin
 hardening_admin_authorized_keys: []
 hardening_unattended_reboot_time: "04:30"
 
+# Azure Arc (#663, ADR 0032 decision 3). Off until the owner has created the
+# onboarding service principal, applied its grant in hcw-azure and put its
+# credential in the vault (docs/runbooks/labs-host.md). The agent comes from
+# Microsoft's Ubuntu 24.04 repository; its signing key's SHA256 is pinned
+# (sha256sum of https://packages.microsoft.com/keys/microsoft.asc, read
+# 2026-09-25, the key that signs dists/noble/InRelease) and get_url refuses a
+# key that does not match. The resource name is fixed rather than left to the
+# hostname default because it cannot change without a disconnect, and the
+# runbook's az commands name it. The tags mirror infra/'s var.tags with
+# managedBy naming what actually creates the resource.
+arc_enabled: false
+arc_agent_version: "1.68.03532.1399"
+arc_apt_key_checksum: sha256:2fa9c05d591a1582a9aba276272478c262e95ad00acf60eaee1644d93941e3c6
+arc_resource_group: rg-lab-hybrid-prod-cus
+arc_location: centralus
+arc_resource_name: arcs-lab-hybrid-prod-cus-01
+arc_tags:
+  workload: hybridcloudworks
+  environment: prod
+  owner: platform
+  costCenter: content-platform
+  managedBy: ansible
+  criticality: high
+  dataClassification: internal
+
 # Docker Engine from download.docker.com, Ubuntu 24.04 (noble) package strings.
 # buildx and compose are pinned too rather than left as recommends: Coder and
 # its PostgreSQL (#679) are the Docker Compose services ADR 0032 names. The

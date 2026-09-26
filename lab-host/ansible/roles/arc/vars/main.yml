@@ -1,0 +1,27 @@
+---
+# Derived values. Not meant to be overridden, which is why they are vars and
+# not defaults.
+arc_identity_present: >-
+  {{ arc_service_principal_id | length > 0
+     and arc_service_principal_secret | length > 0
+     and arc_tenant_id | length > 0
+     and arc_subscription_id | length > 0 }}
+# Application, tenant and subscription ids are all GUIDs. A value that is not
+# one is a vault key pasted into the wrong slot, and azcmagent would report it
+# as an authentication failure that does not say which of the three it was.
+arc_guid_pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+# azcmagent --tags takes Name=Value pairs separated by commas.
+arc_tags_argument: "{{ arc_tags.items() | map('join', '=') | join(',') }}"
+# The --config file. Keys are azcmagent connect's long option names; Microsoft
+# recommends this over --service-principal-secret on the command line, which
+# would put the secret in the process table and in any console log.
+arc_connect_config:
+  service-principal-id: "{{ arc_service_principal_id }}"
+  service-principal-secret: "{{ arc_service_principal_secret }}"
+  tenant-id: "{{ arc_tenant_id }}"
+  subscription-id: "{{ arc_subscription_id }}"
+  resource-group: "{{ arc_resource_group }}"
+  location: "{{ arc_location }}"
+  resource-name: "{{ arc_resource_name }}"
+  cloud: "{{ arc_cloud }}"
+  tags: "{{ arc_tags_argument }}"

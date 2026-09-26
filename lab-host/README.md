@@ -11,6 +11,7 @@ every step.
 | Role | Installs | Where |
 | --- | --- | --- |
 | `hardening` | `hcwadmin` key-only login with passwordless sudo, sshd drop-in (`PasswordAuthentication no`, `PermitRootLogin no`, `KbdInteractiveAuthentication no`), ufw deny-in/allow-out with TCP 22, 80, 443, unattended-upgrades rebooting at 04:30, fail2ban sshd jail | `/etc/ssh/sshd_config.d/00-hcw-hardening.conf`, `/etc/sudoers.d/90-hcw-admin`, `/etc/apt/apt.conf.d/52hcw-unattended-upgrades`, `/etc/fail2ban/jail.d/hcw-sshd.local` |
+| `arc` | Azure Connected Machine agent 1.68.03532.1399 from Microsoft's apt repository, held, then `azcmagent connect` to `rg-lab-hybrid-prod-cus` as `arcs-lab-hybrid-prod-cus-01` with the onboarding service principal from the vault, skipped once Connected. Nothing until `arc_enabled` is true | `/opt/azcmagent/`, `/etc/apt/sources.list.d/microsoft-prod.sources`; the connect configuration is a temporary root-only file deleted in the same run |
 | `docker` | Docker Engine 29.8.1, buildx 0.37.1 and compose 5.5.1 from Docker's apt repository, held; `json-file` logs 10 MB x 3, `live-restore` | `/etc/docker/daemon.json` |
 | `node_exporter` | node_exporter 1.12.1, host-native, SHA256-verified, `127.0.0.1:9100` only | `/usr/local/bin/node_exporter`, `node_exporter.service` |
 | `caddy` | Caddy 2.11.4 built with `caddy-dns/cloudflare` 0.2.4, host-native under systemd; TLS for `lab.hybridcloudworks.com`, `*.lab.hybridcloudworks.com` and `*.coder.lab.hybridcloudworks.com` via DNS-01; placeholder response at the apex | `/usr/local/bin/caddy`, `/opt/caddy/bin/` (versioned binary and its `.provenance`), `/etc/caddy/Caddyfile`, `/etc/caddy/conf.d/`, `/etc/caddy/env` (root:caddy, 0640), `caddy.service` running as `caddy` |
@@ -22,9 +23,10 @@ its variable contract. Every version, digest and checksum is in
 `ansible/group_vars/all.yml`, and the collections are pinned in
 `ansible/requirements.yml`.
 
-`site.yml` runs the roles in that order: `coder` after `caddy`, because its
-route is a file in Caddy's `conf.d`, and before `labs_agent`. Azure Arc
-(#663) adds a role to the end of the list. Docker Compose on this host is
+`site.yml` runs the roles in that order: `arc` straight after `hardening`,
+because the agent needs nothing the later roles install and the host should
+appear in Azure even when a later role fails; `coder` after `caddy`, because
+its route is a file in Caddy's `conf.d`, and before `labs_agent`. Docker Compose on this host is
 for Coder and its PostgreSQL only (ADR 0032); Caddy and the agent are host
 services, and Coder's Caddy route is `/etc/caddy/conf.d/10-coder.caddy`,
 the pattern `00-apex.caddy` shows.
@@ -102,10 +104,17 @@ with their values:
 | `vault_coder_oauth2_github_client_id` | `coder` | `CODER_OAUTH2_GITHUB_CLIENT_ID`: the GitHub OAuth app the owner creates in #682 |
 | `vault_coder_oauth2_github_client_secret` | `coder` | `CODER_OAUTH2_GITHUB_CLIENT_SECRET` |
 | `vault_coder_postgres_password` | `coder` | The `coder` database user's password. Letters, digits and `. _ ~ -` only (it sits unescaped in a URL); `openssl rand -hex 32` makes one |
+| `vault_arc_service_principal_id` | `arc` | Application (client) id of `sp-arc-onboarding-lab-hybrid-prod-cus`, the Arc onboarding service principal |
+| `vault_arc_service_principal_secret` | `arc` | Its client secret. Used once by `azcmagent connect`; delete it from the vault and from Entra once the host is Connected |
+| `vault_arc_tenant_id` | `arc` | The Entra tenant id |
+| `vault_arc_subscription_id` | `arc` | The application subscription's id (`sub-app-site-prod-cus`) |
 
 The four `vault_labs_agent_*` keys and the three `vault_coder_*` keys can be
 added later: until all four exist the agent stays stopped and the play says
-so, and the three are only read once `coder_enabled` is true. To edit later,
+so, and the three are only read once `coder_enabled` is true. The four
+`vault_arc_*` keys are read only while `arc_enabled` is true and the host is
+not yet Connected; the procedure that creates and then removes them is
+[docs/runbooks/labs-host.md](../docs/runbooks/labs-host.md). To edit later,
 bash, on the host:
 
 ```bash
@@ -422,7 +431,8 @@ parse and `terraform validate` — listed in
 | Pin | Lives in | How to read the current value |
 | --- | --- | --- |
 | Docker, buildx, compose | `docker_version`, `docker_containerd_version`, `docker_buildx_version`, `docker_compose_version` | `roles/docker/README.md` |
-| apt signing keys | `docker_apt_key_checksum`, `labs_agent_node_apt_key_checksum` | The two bash lines below this table; a changed key is a decision, not a refresh |
+| Azure Connected Machine agent | `arc_agent_version` | `roles/arc/README.md` |
+| apt signing keys | `docker_apt_key_checksum`, `labs_agent_node_apt_key_checksum`, `arc_apt_key_checksum` | The bash lines below this table; a changed key is a decision, not a refresh |
 | Caddy, Cloudflare module, builder image digest | `caddy_*` | `roles/caddy/README.md`; the digest is the index from `docker buildx imagetools inspect caddy:2.11.4-builder`, and the image is pulled by that digest, not by tag |
 | Coder, PostgreSQL | `coder_image_*`, `coder_postgres_image_*` | `roles/coder/README.md`; index digests from `docker buildx imagetools inspect`, run as `image@digest` |
 | Workspace image, Terraform providers, `code-server` module | `templates/hcw-lab/main.tf` under `../coder` | `../coder/README.md`, "Updating"; republished with `coder templates push` |
@@ -434,7 +444,7 @@ parse and `terraform validate` — listed in
 
 All in `ansible/group_vars/all.yml` unless the table says otherwise.
 
-The apt signing key checksums are read with these two lines, bash, from
+The apt signing key checksums are read with these three lines, bash, from
 anywhere with network access; each prints the hex that goes after `sha256:`
 in the matching variable. Docker's key first:
 
@@ -446,4 +456,10 @@ NodeSource's key:
 
 ```bash
 curl -sL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | sha256sum
+```
+
+Microsoft's key, for the Arc agent:
+
+```bash
+curl -sL https://packages.microsoft.com/keys/microsoft.asc | sha256sum
 ```

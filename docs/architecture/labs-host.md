@@ -38,7 +38,7 @@ itself, never from a published page.
 | PostgreSQL (Coder's database) | Coder's metadata: users, templates, workspace records. Listens on the Compose network only, never on the host | Docker Compose, a named volume |
 | `vps-agent` | Pull-based lab job runner (`vps-agent/`); dials out to the Functions API, runs each job in `docker run --network none`, so its user is in the `docker` group | Host-native systemd service `hcw-labs-agent`, user `hcw-labs-agent`, `/opt/hcw-labs-agent` |
 | node-exporter | Host metrics for the lab status page; listens on localhost only | Host-native systemd service |
-| Azure Connected Machine agent and Azure Monitor Agent | Arc onboarding; heartbeat and `auth`/`authpriv` syslog only | Host services, installed by Ansible |
+| Azure Connected Machine agent and Azure Monitor Agent | Arc onboarding as `arcs-lab-hybrid-prod-cus-01`; heartbeat and `auth`/`authpriv` syslog only, by the data collection rule `dcr-lab-hybrid-prod-cus` | Host services. The Connected Machine agent is installed and connected by the Ansible `arc` role; the Azure Monitor Agent is an Arc extension the owner adds after onboarding ([runbook](../runbooks/labs-host.md), step 8) |
 | Coder workspaces and lab job containers | Transient. Workspaces carry Coder's `com.coder.resource=true` label and stop after an hour; job containers carry the `hcw.lab-job` label and live for one job | `docker run`, started by Coder and by `vps-agent` |
 
 Nothing else. A container that is neither a named service above nor carries
@@ -149,6 +149,8 @@ works offline, and the smoke test.
 - [ADR 0032](../decisions/0032-learner-labs-platform.md): the decisions this
   page records the shape of
 - [Target architecture §5.3](architecture.md#53-labs-flow): the labs flow
+- [Labs host Arc onboarding](../runbooks/labs-host.md): the owner procedure
+  that makes the hybrid control plane row real, and how to disconnect
 - [Required inputs §4.7](../standards/required-inputs.md#47-vps-agent-hostinger-env-never-committed):
   the inputs the host and its workspace need, with live status
 - [Cost analysis](cost-analysis.md): Hostinger is tracked outside Azure

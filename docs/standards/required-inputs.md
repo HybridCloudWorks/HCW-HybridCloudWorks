@@ -84,7 +84,7 @@ ignored and the run fails claiming no credentials were supplied.
 | `ARM_TENANT_ID` | **SET** (sensitive) | Same value as the `entra_tenant_id` Terraform variable — see the exceptions table in [Variables and secrets](variables-and-secrets.md) |
 | `ARM_SUBSCRIPTION_ID` | **SET** (sensitive) | Provider fallback only; every provider pins `subscription_id` in HCL, so it never decides where resources land |
 
-**Terraform variables — required.** Eight of the configuration's 62 variables
+**Terraform variables — required.** Eight of the configuration's 65 variables
 have no default, so an unset one fails the plan rather than picking something.
 That is deliberate for the subscriptions in particular: a wrong guess would
 silently deploy the workload into a platform landing zone.
@@ -100,12 +100,13 @@ silently deploy the workload into a platform landing zone.
 | `cloudflare_zone_id` | no | Cloudflare zone the rules attach to |
 | `budget_alert_email` | no | Budget alert action group |
 
-**Terraform variables — defaulted.** The other 54 carry defaults and need no
-workspace entry. The table below lists the eight that are posture switches
+**Terraform variables — defaulted.** The other 57 carry defaults and need no
+workspace entry. The table below lists the nine that are posture switches
 rather than settings — every one defaults to the estate as it stands or to the
 safer value, so an apply never changes behaviour without a workspace edit
-first — plus `cloudflare_origin_secret`, which is a defaulted input rather than
-a switch and is here because it must match a Key Vault secret exactly:
+first — plus two defaulted inputs that are not switches:
+`cloudflare_origin_secret`, which must match a Key Vault secret exactly, and
+`arc_onboarding_principal_id`, which names an owner-created principal:
 
 | Name | Default | What arming it does |
 | --- | --- | --- |
@@ -118,7 +119,9 @@ a switch and is here because it must match a Key Vault secret exactly:
 | `functions_scm_lock_enabled` | `false` in code, **set `true` in the workspace 2026-08-25** | Denies SCM/Kudu by default; `deploy-functions.yml` opens a per-run window. Proven under `Deny` by run 32902534458 |
 | `functions_origin_lock_enabled` | `true` | Restricts the origin to Cloudflare ranges. Already on |
 | `purge_protection_enabled` | `true` | Key Vault purge protection. On by owner decision 2026-09-14, and one-way. See [ADR 0031](../decisions/0031-security-scanner-owner-decisions.md). A workspace variable of this name set to `false` overrides it and must be deleted |
+| `lab_hybrid_policy_enabled` | `false` | Creates the audit-only Linux security baseline policy assignment on `rg-lab-hybrid-prod-cus` (#663). **MISSING** until the owner has granted the run identity Resource Policy Contributor on that group; true before then fails the apply with `AuthorizationFailed`. [Labs host runbook](../runbooks/labs-host.md), step 3 |
 | `cloudflare_origin_secret` | — (sensitive) | Must match Key Vault `CF-ORIGIN-SECRET` exactly; a mismatch throws on every anonymous request |
+| `arc_onboarding_principal_id` | `null` | **MISSING.** Object id (not the appId) of the owner-created `sp-arc-onboarding-lab-hybrid-prod-cus`; set, it plans the principal's only grant, Azure Connected Machine Onboarding on `rg-lab-hybrid-prod-cus` (#663). Not sensitive. [Labs host runbook](../runbooks/labs-host.md), step 2 |
 
 ## 4.2 GitHub repository variables
 
@@ -331,7 +334,9 @@ entry that never reaches the repository.
 | `cloudflare_api_token` | HCP Terraform workspace `hcw/hcw-lab`, Terraform variable, sensitive | **MISSING** | Cloudflare provider, for the `lab` records. Same name as the §4.1 variable and a different token, with **Zone:Read + DNS:Edit** on the one zone and nothing else (the provider needs Zone:Read to resolve the zone, as `infra/variables.tf` records for the §4.1 token; the lab token omits the Transform Rules and Rulesets permissions that one carries), so it cannot touch origin rules or settings. Cloudflare scopes tokens to a zone, not a record, so this token can still edit any DNS record in `hybridcloudworks.com`; that is the accepted risk in ADR 0032, bounded by living only in HCP Terraform and by the `hcw-azure` plan check showing any production record it altered |
 | Caddy `CLOUDFLARE_API_TOKEN` | Ansible Vault, written to `/etc/caddy/env` on the host (owner `root`, group `caddy`, mode `0640`; the non-root `caddy` unit reads it through `EnvironmentFile`) | **MISSING** | Runtime DNS-01 token for certificate renewals. Scoped to the dedicated lab zone that `_acme-challenge.lab.hybridcloudworks.com` is delegated to; until that zone exists it has DNS edit on the production zone, the interim ADR 0032 records. Rotate on every host rebuild |
 | `cloudflare_zone_id` | HCP Terraform workspace `hcw/hcw-lab`, Terraform variable, not sensitive | **MISSING** | The `hybridcloudworks.com` zone identifier every `cloudflare_dns_record` needs (`infra/frontend.tf` uses `var.cloudflare_zone_id` for the same reason). Variables do not cross workspaces, so the same value is set here a second time. An identifier, not a credential; read it from the zone's Overview page in the Cloudflare dashboard |
-| Arc onboarding service principal credential | Ansible Vault, never in the repository and never on the host after onboarding | **MISSING** | Holds only *Azure Connected Machine Onboarding* on `rg-lab-hybrid-prod-cus`. Used once by `azcmagent connect`; rotate after onboarding |
+| Arc onboarding service principal credential (`vault_arc_service_principal_id`, `vault_arc_service_principal_secret`) | Ansible Vault on the host, never in the repository; the `arc` role passes them to `azcmagent connect` in a root-only temporary `--config` file it deletes in the same run | **MISSING** | The application id and client secret of `sp-arc-onboarding-lab-hybrid-prod-cus`, which holds only *Azure Connected Machine Onboarding* on `rg-lab-hybrid-prod-cus` (`infra/lab-hybrid.tf`, granted through `arc_onboarding_principal_id` in §4.1). Used once. Once the host reads Connected, delete both keys from the vault and the secret from Entra ([Labs host runbook](../runbooks/labs-host.md), step 9); the role needs none of the four `vault_arc_*` keys on a Connected host. Re-onboarding mints a new secret |
+| `vault_arc_tenant_id`, `vault_arc_subscription_id` | Ansible Vault on the host, beside the credential | **MISSING** | The Entra tenant id and the `sub-app-site-prod-cus` subscription id `azcmagent connect` targets. Identifiers, not secrets; kept in the vault because nothing else in the repository commits them, and removed with the credential |
+| `arc_enabled`, `arc_agent_version`, `arc_apt_key_checksum`, `arc_resource_group`, `arc_location`, `arc_resource_name`, `arc_tags` | `lab-host/ansible/group_vars/all.yml` (not secrets) | **SET** (`arc_enabled: false`) | The `arc` role's switch, pins and target: agent `1.68.03532.1399`, Microsoft's signing key by SHA256, `rg-lab-hybrid-prod-cus` in `centralus`, machine name `arcs-lab-hybrid-prod-cus-01`. `arc_enabled` goes `true` in a pull request after the vault is seeded (runbook step 6) |
 | `CODER_OAUTH2_GITHUB_ALLOWED_ORGS` | `lab-host/ansible/group_vars` (not a secret), rendered into Coder's Compose env file | **MISSING** | The GitHub organisations whose members may sign in to Coder. Required by ADR 0032 and **never empty while Coder runs**: an empty value removes the restriction and lets any GitHub account consume the VPS, so the Ansible role fails rather than render an empty list. Shutting learners out is an explicit action, not an emptied list: `CODER_OAUTH2_GITHUB_ALLOW_SIGNUPS=false` for new sign-ups, or stopping the `coder` Compose service for everyone. The owner names the organisation on #682 |
 | Coder GitHub OAuth app client id and secret (`CODER_OAUTH2_GITHUB_CLIENT_ID`, `CODER_OAUTH2_GITHUB_CLIENT_SECRET`) | Ansible Vault as `vault_coder_oauth2_github_client_id` and `vault_coder_oauth2_github_client_secret`, written by the `coder` role to `/etc/hcw/coder/coder.env` on the host (root, 0600) | **MISSING** | Learner sign-in to Coder; nothing on the site reads it. Created by the owner in the GitHub organisation's OAuth apps (#682). Rotate on every host rebuild and whenever the app's callback URL changes; the env file is regenerated from Vault on each Ansible run and the `coder` container is recreated when it changes, so rotation is a Vault edit and a run |
 | Coder PostgreSQL password (`POSTGRES_PASSWORD`, and inside `CODER_PG_CONNECTION_URL`) | Ansible Vault as `vault_coder_postgres_password`, written by the `coder` role to `/etc/hcw/coder/coder-postgres.env` (the database) and `/etc/hcw/coder/coder.env` (Coder), both root 0600 | **MISSING** | The `coder` database user's password on the Compose network; never reachable from outside the host. Generate with `openssl rand -hex 32`: the role refuses any character outside RFC 3986 unreserved because the value sits unescaped in the connection URL. The database stores it at first initialisation, so rotation is `ALTER USER` first and then the Vault edit and run (`lab-host/README.md`, "Rotating the PostgreSQL password") |

@@ -1,0 +1,105 @@
+---
+argument_specs:
+  main:
+    short_description: Install the Azure Connected Machine agent at a pinned version and connect the host to Azure Arc
+    description:
+      - Adds Microsoft's signed Ubuntu apt repository, refusing a signing key whose SHA256 does
+        not match the pin, installs azcmagent at the exact version given and holds it.
+      - Runs azcmagent connect with a service principal that holds only Azure Connected Machine
+        Onboarding on the target resource group (infra/lab-hybrid.tf). The credential is passed
+        in a root-only temporary --config file that is deleted in the same run, never on the
+        command line.
+      - Idempotent. When azcmagent show already reports Connected, connect is skipped and the
+        vault values are not required, so the credential can be deleted after onboarding. When
+        it does not, the role fails closed unless all four vault values are present and the
+        three identifiers are GUIDs.
+      - Does nothing while arc_enabled is false, including never disconnecting a connected
+        machine. The Azure Monitor Agent is not installed here; it is an Azure extension the
+        owner adds after onboarding (docs/runbooks/labs-host.md).
+    author: HybridCloudWorks
+    options:
+      arc_enabled:
+        type: bool
+        required: true
+        description: Onboard the host. False, the default in group_vars/all.yml, skips every task.
+      arc_agent_version:
+        type: str
+        required: true
+        description:
+          - Exact apt version string for azcmagent, four-part, for example "1.68.03532.1399".
+      arc_apt_key_checksum:
+        type: str
+        required: true
+        description:
+          - sha256:<hex> of https://packages.microsoft.com/keys/microsoft.asc. The key is the root
+            of trust for the version pin, so get_url refuses one that does not match.
+      arc_apt_key_url:
+        type: str
+        required: false
+        default: https://packages.microsoft.com/keys/microsoft.asc
+        description: Where the repository signing key is fetched from.
+      arc_apt_key_path:
+        type: path
+        required: false
+        default: /etc/apt/keyrings/microsoft.asc
+        description: Where the signing key is stored; referenced by Signed-By in the source.
+      arc_apt_repository_url:
+        type: str
+        required: false
+        default: https://packages.microsoft.com/ubuntu/24.04/prod
+        description: The apt repository base URL.
+      arc_azcmagent_path:
+        type: path
+        required: false
+        default: /opt/azcmagent/bin/azcmagent
+        description: The CLI the package installs.
+      arc_resource_group:
+        type: str
+        required: true
+        description: Resource group the machine resource is created in, rg-lab-hybrid-prod-cus.
+      arc_location:
+        type: str
+        required: true
+        description: Azure region of the machine resource, centralus.
+      arc_resource_name:
+        type: str
+        required: true
+        description:
+          - Name of the Arc machine resource. Fixed rather than the hostname default, because it
+            cannot be changed without disconnecting and the runbook's az commands name it.
+      arc_tags:
+        type: dict
+        required: true
+        description:
+          - Tags applied to the machine resource. No name or value may contain a comma, an equals
+            sign or a space; the role asserts it.
+      arc_cloud:
+        type: str
+        required: false
+        default: AzureCloud
+        choices:
+          - AzureCloud
+          - AzureUSGovernment
+          - AzureChinaCloud
+        description: Azure cloud the machine connects to.
+      arc_service_principal_id:
+        type: str
+        required: false
+        default: ""
+        description: Application (client) id of the onboarding service principal; defaults to vault_arc_service_principal_id.
+      arc_service_principal_secret:
+        type: str
+        required: false
+        default: ""
+        no_log: true
+        description: Its client secret; defaults to vault_arc_service_principal_secret.
+      arc_tenant_id:
+        type: str
+        required: false
+        default: ""
+        description: Entra tenant id; defaults to vault_arc_tenant_id.
+      arc_subscription_id:
+        type: str
+        required: false
+        default: ""
+        description: Application subscription id; defaults to vault_arc_subscription_id.
