@@ -75,6 +75,19 @@ jobs:
         shell: pwsh
         run: ./scripts/validate-powershell.tests.ps1
 
+      # scripts/lab/Connect-Lab.ps1 rewrites a file on the owner's desktop,
+      # ~/.ssh/config, so its merge logic is tested against fixtures rather
+      # than trusted. The tests load the functions from the script's syntax
+      # tree and touch only Pester's TestDrive. Pester 5 ships on the
+      # ubuntu-latest image. The result check fails on zero tests as well as
+      # on a failure, because a sweep that found nothing is not a pass.
+      - name: Test the lab connect script
+        shell: pwsh
+        run: |
+          Import-Module Pester -MinimumVersion 5.0
+          $result = Invoke-Pester -Path scripts/lab -Output Detailed -PassThru
+          if ($result.Result -ne 'Passed' -or $result.PassedCount -eq 0) { exit 1 }
+
       # A step that ran ./scripts/cutover/workspace-query.tests.ps1 stood here
       # until 2026-09-08. It covered the KQL transport helpers used by
       # 05-verify-timer.ps1 — the multi-line-query-to-`az.cmd` truncation that

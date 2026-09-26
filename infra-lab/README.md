@@ -56,16 +56,47 @@ until the merge `infra-lab/` exists only on the pull request branch.
 
 The id is the number in the address bar on the server's hPanel page (the
 list is at https://hpanel.hostinger.com/vps). The other three need to be
-exact values from the API. This PowerShell line asks for your API token
-(create one at https://hpanel.hostinger.com/api), then prints them:
+exact values from the API. Create an API token at
+https://hpanel.hostinger.com/api and copy it. This PowerShell line reads the
+token from the clipboard, prints the four values and two checks, and then
+blanks the clipboard and forgets the token:
 
 ```powershell
-$s = Read-Host -AsSecureString 'Hostinger API token'; Invoke-RestMethod -Uri https://developers.hostinger.com/api/vps/v1/virtual-machines -Headers @{ Authorization = 'Bearer ' + [System.Net.NetworkCredential]::new('', $s).Password } | Select-Object id, plan, data_center_id, @{n='template_id';e={$_.template.id}}, @{n='template_name';e={$_.template.name}}, hostname, state | Format-List
+$t = (Get-Clipboard -Raw).Trim(); $h = @{ Authorization = 'Bearer ' + $t }; try { $r = Invoke-RestMethod -Uri https://developers.hostinger.com/api/vps/v1/virtual-machines -Headers $h; $vms = if ($r.PSObject.Properties.Name -contains 'data') { $r.data } else { $r }; $vms | ForEach-Object { $v = $_; $p = $v.plan; try { $s = Invoke-RestMethod -Uri ('https://developers.hostinger.com/api/billing/v1/subscriptions/' + $v.subscription_id) -Headers $h; if ($s.item_id) { $p = $s.item_id } elseif ($s.plan) { $p = $s.plan } } catch { }; [pscustomobject]@{ id = $v.id; plan = $p; data_center_id = $v.data_center_id; template_id = $v.template.id; template_name = $v.template.name; state = $v.state } } | Format-List } catch { $c = $_.Exception.Response.StatusCode; if ($c) { 'HTTP ' + [int]$c + ' ' + $c; if ($_.ErrorDetails) { $_.ErrorDetails.Message } elseif ($_.Exception.Response.PSObject.Methods['GetResponseStream']) { [IO.StreamReader]::new($_.Exception.Response.GetResponseStream()).ReadToEnd() } } else { $_.Exception.Message } } finally { Set-Clipboard -Value ' '; Remove-Variable -Name t, h -ErrorAction SilentlyContinue }
 ```
 
-**Success looks like** one block per server, with a whole number for `id`,
-`data_center_id` and `template_id`, text such as `KVM 4` for `plan`, and
-`running` for `state`. A `401` means the token was mistyped or has expired.
+**Success looks like** one block per server: a whole number for `id`,
+`data_center_id` and `template_id`, text such as `KVM 4` for `plan`, the
+operating system for `template_name`, and `running` for `state`. A failure
+prints `HTTP`, the status and Hostinger's response body instead. `HTTP 401`
+means the clipboard did not hold a valid token: it was mistyped, has
+expired, or something else was copied after it.
+
+The line it replaces printed blanks for everything but the two template
+fields. `GET /api/vps/v1/virtual-machines` returns a bare JSON array
+(`VPS.V1.VirtualMachine.VirtualMachineCollection` in Hostinger's OpenAPI
+document, version 1.54.2) whose elements carry `id`, `plan`,
+`data_center_id`, `hostname` and `state` at the top level and the OS as a
+nested `template` object. `Invoke-RestMethod` hands that array down the
+pipeline as one object, in PowerShell 7.6 and Windows PowerShell 5.1 alike,
+so `Select-Object id, plan` looked for those names on the array itself,
+while the `$_.template.id` expressions reached into its element. The line
+now takes the elements one at a time.
+
+`plan` is the value the provider's import stores, which is not always the
+field of that name. At v0.1.23 the import (`resourceHostingerVPSImport`,
+through `GetVirtualMachineWithFullDetails` in `hostinger/client.go`) starts
+from the virtual machine's own `plan` field, a display name such as
+`KVM 4`, and replaces it with the billing subscription's `item_id` (a
+catalogue id such as `hostingercom-vps-kvm4-usd-1m`), or failing that its
+`plan`, only when `GET /api/billing/v1/subscriptions/{subscription_id}`
+answers. Hostinger's published API has no such endpoint, so in practice the
+import stores the display name, as the provider's own import example
+(`plan = "KVM 8"`) shows. The line makes the same request and applies the
+same rule, so what it prints is what the import will store. It reads
+`data_center_id` from the top-level field and `template_id` from
+`template.id`, as the import does. If they ever disagree, the postcondition
+in `main.tf` stops the plan and names the stored value.
 
 **Stop here if `template_name` is not Ubuntu 24.04.** `lab-host/bootstrap.sh`
 refuses any other OS. Reinstalling wipes the disk, so it is an hPanel
@@ -166,11 +197,13 @@ before step 7. If you already added one in hPanel, skip this step.
 Otherwise, this prints your public key. Copy the one line it prints:
 
 ```powershell
-Get-Content $HOME\.ssh\id_ed25519.pub
+Get-Content $HOME\.ssh\hcw-lab_ed25519.pub
 ```
 
-If that file does not exist, `ssh-keygen -t ed25519` creates it. The
-provider refuses ECDSA keys.
+That is the per-machine key `scripts/lab/Connect-Lab.ps1` creates and points
+the `hcw-lab` alias at; if the file does not exist, run the script first
+(`docs/runbooks/labs-host.md`, "Connect from a desktop", with `-User root`
+for this window). The provider refuses ECDSA keys.
 
 Add it as `ssh_public_key` (not sensitive) on the variables page from step 3.
 Then queue a plan-only run as in step 4. **Success looks like**
@@ -183,19 +216,22 @@ stop. If it matches, apply it as in step 5.
 
 The provider cannot run a post-install script on a server that already
 exists. It only runs one at purchase or reinstall. So the first Ansible run
-happens over SSH. This PowerShell line clones the repository onto the host
-as root and runs the bootstrap:
+happens over SSH, through the `hcw-lab` alias that
+`scripts/lab/Connect-Lab.ps1 -User root` writes. This PowerShell line clones
+the repository onto the host as root and runs the bootstrap:
 
 ```powershell
-ssh root@lab.hybridcloudworks.com "apt-get update -q && apt-get install -y -q git && git clone https://github.com/HybridCloudWorks/HCW-HybridCloudWorks.git /opt/hcw-src && /opt/hcw-src/lab-host/bootstrap.sh"
+ssh hcw-lab "apt-get update -q && apt-get install -y -q git && git clone https://github.com/HybridCloudWorks/HCW-HybridCloudWorks.git /opt/hcw-src && /opt/hcw-src/lab-host/bootstrap.sh"
 ```
 
 **Success looks like** a final `PLAY RECAP` line for `localhost` with
-`failed=0` and `unreachable=0`. After it, root login is off. Every later run
-is as `hcwadmin`, the command `lab-host/README.md` documents:
+`failed=0` and `unreachable=0`. After it, root login is off, so run
+`scripts/lab/Connect-Lab.ps1` again without `-User` to point the alias at
+`hcwadmin`. Every later run is as `hcwadmin`, the command
+`lab-host/README.md` documents:
 
 ```powershell
-ssh hcwadmin@lab.hybridcloudworks.com sudo /opt/hcw-src/lab-host/bootstrap.sh
+ssh hcw-lab sudo /opt/hcw-src/lab-host/bootstrap.sh
 ```
 
 ## Local checks

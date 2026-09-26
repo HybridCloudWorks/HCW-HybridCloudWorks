@@ -1,11 +1,171 @@
-# Labs host — Azure Arc onboarding
+# Labs host — desktop access and Azure Arc onboarding
 
-How the Hostinger lab host becomes an Azure Arc-enabled server in
+How to reach the Hostinger lab host from a desktop over SSH and VS Code (the
+first section), and how the host becomes an Azure Arc-enabled server in
 `rg-lab-hybrid-prod-cus`, sends heartbeat and `auth`/`authpriv` syslog to the
 Management workspace, and is audited against the Linux security baseline
-(ADR 0032 decision 3, #663). The shape of the host is
+(ADR 0032 decision 3, #663; the rest of the page). The shape of the host is
 [Labs host](../architecture/labs-host.md); the decisions are
 [ADR 0032](../decisions/0032-learner-labs-platform.md).
+
+## Connect from a desktop
+
+`scripts/lab/Connect-Lab.ps1` sets up any desktop to reach the host by the
+name `hcw-lab`. It creates a per-machine key, `$HOME\.ssh\hcw-lab_ed25519`,
+if there is none; writes one `Host hcw-lab` block into `$HOME\.ssh\config`
+after a timestamped backup, leaving every other line alone; loads the key
+into `ssh-agent`; and prints the public key with the step that authorizes it.
+It never reads or sends the private key, and a second run changes nothing
+and says so. It needs PowerShell 7 (`pwsh`, installed by the `winget` line
+below) and the OpenSSH client, which Windows 10 and 11 include; on macOS and
+Linux it runs under `pwsh` with the same paths under `$HOME`.
+
+VS Code needs the **Remote - SSH** extension, `ms-vscode-remote.remote-ssh`.
+PowerShell:
+
+```powershell
+code --install-extension ms-vscode-remote.remote-ssh
+```
+
+Success prints that the extension was successfully installed, or that it is
+already installed. If `pwsh` is not on the machine, PowerShell:
+
+```powershell
+winget install --id Microsoft.PowerShell --source winget
+```
+
+### Optional: one host name for every desktop
+
+The script points `hcw-lab` at the repository variable `LAB_SSH_HOST` when
+`gh` is installed and signed in, and at `lab.hybridcloudworks.com`
+otherwise. That record does not exist until the `hcw-lab` apply
+(`infra-lab/README.md`, step 5), so until then the variable holds the
+server's IPv4 address. This site carries no addresses
+([Labs host](../architecture/labs-host.md)), so the command reads it from the
+clipboard: copy it from the server's page in hPanel
+(https://hpanel.hostinger.com/vps, then **Manage**), then, PowerShell:
+
+```powershell
+gh variable set LAB_SSH_HOST -R HybridCloudWorks/HCW-HybridCloudWorks -b (Get-Clipboard -Raw).Trim()
+```
+
+Once the record exists, switch the variable to the name, PowerShell:
+
+```powershell
+gh variable set LAB_SSH_HOST -R HybridCloudWorks/HCW-HybridCloudWorks -b lab.hybridcloudworks.com
+```
+
+Success for either is this printing the value; run the script again on each
+desktop afterwards so its block picks the value up:
+
+```powershell
+gh variable get LAB_SSH_HOST -R HybridCloudWorks/HCW-HybridCloudWorks
+```
+
+### Run it on a machine with the repository
+
+PowerShell, from the repository root on `main` once this change has merged
+(`Test-Path scripts/lab/Connect-Lab.ps1` prints `True` when the working tree
+has the script):
+
+```powershell
+pwsh -NoProfile -File scripts/lab/Connect-Lab.ps1
+```
+
+Until the first `bootstrap.sh` run, the host accepts `root` only. For that
+window add `-User root`, and run the line above again once bootstrap has
+finished and turned root login off:
+
+```powershell
+pwsh -NoProfile -File scripts/lab/Connect-Lab.ps1 -User root
+```
+
+### Run it on a machine without the repository
+
+PowerShell. This saves a copy of the script from `main` to Downloads, then
+runs that copy:
+
+```powershell
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/HybridCloudWorks/HCW-HybridCloudWorks/main/scripts/lab/Connect-Lab.ps1 -OutFile $HOME\Downloads\Connect-Lab.ps1; pwsh -NoProfile -File $HOME\Downloads\Connect-Lab.ps1
+```
+
+It is saved rather than piped to `iex` so that what runs is a file you can
+open and read first, run as a script with its parameters, where `iex` would
+run whatever the URL returned at that moment, unread, inside your current
+session. For the root window, run the saved copy again with `-User root`:
+
+```powershell
+pwsh -NoProfile -File $HOME\Downloads\Connect-Lab.ps1 -User root
+```
+
+### What success looks like
+
+The run that sets a machine up ends with the public key, the ways to
+authorize it, and `Changed:` naming what it did. Every later run ends with
+`No changes: this machine was already set up for hcw-lab.` To authorize the
+key:
+
+- **The first key for the server:** paste the printed line in hPanel at
+  https://hpanel.hostinger.com/vps, **Manage** on the server, **Settings**,
+  **SSH keys**, **Add SSH key**. hPanel installs it as a key for root, and
+  the first `bootstrap.sh` run copies root's keys to `hcwadmin`
+  (`infra-lab/README.md`, steps 6 and 7).
+- **Another desktop, once one already connects:** run the one line the
+  script printed on the machine that already connects. It adds the key for
+  the login user, which works at once, and for root, which is what lasts:
+  the hardening role rebuilds `hcwadmin`'s `authorized_keys` from root's on
+  every `bootstrap.sh` run, so a key only in `hcwadmin`'s file is gone after
+  the next one.
+
+Then this prints the server's host name, PowerShell:
+
+```powershell
+ssh hcw-lab hostname
+```
+
+The first connection asks you to accept the host key. Its fingerprint can be
+read from the host itself in the Web Console (below), bash, on the host; the
+`SHA256:` value must match the one `ssh` shows:
+
+```bash
+ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+```
+
+To open the repository checkout on the host in VS Code (it exists after the
+first `bootstrap.sh` run), PowerShell; the script's `-Code` switch does the
+same after setup, and `-Connect` opens a shell:
+
+```powershell
+code --remote ssh-remote+hcw-lab /opt/hcw-src
+```
+
+Windows ships the `ssh-agent` service disabled, and the script says so
+rather than changing it. Without the agent everything still works, and each
+connection asks for the key's passphrase. To turn it on, run this once in
+PowerShell opened with **Run as administrator**, then run the script again:
+
+```powershell
+Set-Service -Name ssh-agent -StartupType Automatic; Start-Service -Name ssh-agent
+```
+
+An OS reinstall gives the host a new host key, and `ssh` then refuses with
+`REMOTE HOST IDENTIFICATION HAS CHANGED`. This removes the old entry for
+whatever `hcw-lab` points at, PowerShell:
+
+```powershell
+ssh-keygen -R (ssh -G hcw-lab | Select-String -Pattern '^hostname (.+)$').Matches[0].Groups[1].Value
+```
+
+The site itself never tunnels into the host: under ADR 0032 the host
+accepts inbound 22, 80 and 443 only, and the site's one view of it is the read-only
+status proxy in the Function App ([Labs host, Exposure](../architecture/labs-host.md#exposure)).
+SSH from a desktop is the only shell. When SSH is not working, hPanel's
+**Web Console** is the browser fallback: https://hpanel.hostinger.com/vps,
+**Manage** on the server, then **Web Console** on its overview. It usually
+signs in by itself; when it asks, Hostinger's instructions are `root` and
+the root password.
+
+## Arc onboarding
 
 **State: not yet run.** The Terraform half is in `infra/lab-hybrid.tf` and the
 host half is the `arc` role in `lab-host/ansible/`, off by default. Every step
