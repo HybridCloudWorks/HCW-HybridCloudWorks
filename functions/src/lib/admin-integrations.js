@@ -24,7 +24,16 @@
  *     public-reads.js.
  */
 import { randomUUID } from 'node:crypto';
-import { AI_FEATURES, FEATURE_NAMES, FEATURES_DOC_ID } from './ai/ai-config.js';
+import {
+  AI_FEATURES,
+  FEATURE_NAMES,
+  FEATURES_DOC_ID,
+  PER_FEATURE_PROVIDERS,
+  PLACEMENTS,
+  PROVIDER_PLACEMENT_DEFAULTS,
+  isPlacementConfigurable,
+  placementFor,
+} from './ai/ai-config.js';
 
 const json = (status, body) => ({
   status,
@@ -67,6 +76,52 @@ const SETTINGS_CONTAINER = 'admin_settings';
 const SETTINGS_DOC_ID = 'integrations';
 /** Kept in step with the router's reader by ai-config.js exporting it. */
 const AI_FEATURES_DOC_ID = FEATURES_DOC_ID;
+
+/**
+ * Every per-feature provider's placement for every feature, as the router
+ * will apply it — lock included — so the portal renders what will happen
+ * rather than what was stored (#701).
+ */
+function resolvedPlacement(doc) {
+  return Object.fromEntries(
+    PER_FEATURE_PROVIDERS.map((provider) => [
+      provider,
+      Object.fromEntries(FEATURE_NAMES.map((name) => [name, placementFor(doc, provider, name)])),
+    ])
+  );
+}
+
+/**
+ * Validate a `placement` patch: `{ <provider>: { <feature>: 'first'|'order'|'off' } }`.
+ *
+ * Returns the error sentence, or null. A locked feature accepts only 'off':
+ * configuration can reorder and disable, never enable (ai-config.js), and
+ * storing a 'first' the router will ignore would leave a setting in the
+ * document that reads as working and governs nothing.
+ */
+function placementError(placement) {
+  if (!placement || typeof placement !== 'object' || Array.isArray(placement)) {
+    return 'placement must be { <provider>: { <feature>: "first" | "order" | "off" } }';
+  }
+  for (const [provider, byFeature] of Object.entries(placement)) {
+    if (!PER_FEATURE_PROVIDERS.includes(provider)) {
+      return `Unknown per-feature provider: ${provider}. Known: ${PER_FEATURE_PROVIDERS.join(', ')}`;
+    }
+    if (!byFeature || typeof byFeature !== 'object' || Array.isArray(byFeature)) {
+      return `placement.${provider} must be { <feature>: "first" | "order" | "off" }`;
+    }
+    for (const [feature, value] of Object.entries(byFeature)) {
+      if (!FEATURE_NAMES.includes(feature)) return `Unknown AI feature: ${feature}`;
+      if (!PLACEMENTS.includes(value)) {
+        return `placement.${provider}.${feature} must be one of ${PLACEMENTS.join(', ')}`;
+      }
+      if (value !== 'off' && !isPlacementConfigurable(provider, feature)) {
+        return `${provider} is never used for ${feature}; that cannot be changed from the portal.`;
+      }
+    }
+  }
+  return null;
+}
 
 /**
  * @param {object} deps
@@ -231,22 +286,42 @@ export function createAdminIntegrationHandlers({
         const features = Object.fromEntries(
           FEATURE_NAMES.map((name) => [name, stored[name] !== false])
         );
-        return json(200, { success: true, features, catalogue: AI_FEATURES });
+        return json(200, {
+          success: true,
+          features,
+          catalogue: AI_FEATURES,
+          // #701: where each per-feature provider goes, and the code-level
+          // defaults ('off' there is a lock the portal renders as such).
+          placement: resolvedPlacement(doc),
+          placementDefaults: PROVIDER_PLACEMENT_DEFAULTS,
+        });
       } catch (error) {
         context.error('getAiFeatures failed:', error);
         return json(500, { error: 'Failed to read AI feature settings' });
       }
     },
 
-    /** PUT /api/cms/ai-features — body { features: { <name>: boolean } }. */
+    /**
+     * PUT /api/cms/ai-features — body { features?: { <name>: boolean },
+     * placement?: { <provider>: { <name>: 'first'|'order'|'off' } } }, at
+     * least one of the two. Both merge; neither replaces.
+     */
     async putAiFeatures(request, context) {
       const auth = await guard.requireRole(request, 'editor');
       if (auth.error) return auth.error;
       try {
         const body = validBody(await request.json().catch(() => null));
-        const incoming = body?.features;
+        const hasPlacement = body?.placement !== undefined;
+        const incoming = body?.features ?? (hasPlacement ? {} : undefined);
         if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) {
-          return json(400, { error: 'Body must be { features: { <name>: boolean } }' });
+          return json(400, {
+            error:
+              'Body must be { features: { <name>: boolean } } and/or { placement: { <provider>: { <name>: "first" | "order" | "off" } } }',
+          });
+        }
+        if (hasPlacement) {
+          const problem = placementError(body.placement);
+          if (problem) return json(400, { error: problem });
         }
 
         // An unknown name is either a typo or a hand-made request, and silently
@@ -272,17 +347,35 @@ export function createAdminIntegrationHandlers({
           AI_FEATURES_DOC_ID
         );
         const merged = { ...(existing?.features || {}), ...features };
+        // Placement merges one level deeper: setting one feature's nvidia
+        // placement must not clear another's.
+        const placement = hasPlacement
+          ? Object.fromEntries(
+              [
+                ...new Set([
+                  ...Object.keys(existing?.placement || {}),
+                  ...Object.keys(body.placement),
+                ]),
+              ].map((provider) => [
+                provider,
+                { ...(existing?.placement?.[provider] || {}), ...(body.placement[provider] || {}) },
+              ])
+            )
+          : undefined;
+        const fields = {
+          features: merged,
+          ...(placement ? { placement } : {}),
+          updatedAt: nowIso,
+        };
         const saved = existing
-          ? await store.patchDoc(SETTINGS_CONTAINER, AI_FEATURES_DOC_ID, {
-              features: merged,
-              updatedAt: nowIso,
-            })
-          : await store.upsertDoc(SETTINGS_CONTAINER, {
-              id: AI_FEATURES_DOC_ID,
-              features: merged,
-              updatedAt: nowIso,
-            });
-        return json(200, { success: true, features: saved?.features || merged });
+          ? await store.patchDoc(SETTINGS_CONTAINER, AI_FEATURES_DOC_ID, fields)
+          : await store.upsertDoc(SETTINGS_CONTAINER, { id: AI_FEATURES_DOC_ID, ...fields });
+        const result = saved || { ...existing, ...fields };
+        return json(200, {
+          success: true,
+          features: result.features || merged,
+          placement: resolvedPlacement(result),
+        });
       } catch (error) {
         context.error('putAiFeatures failed:', error);
         return json(500, { error: 'Failed to save AI feature settings' });

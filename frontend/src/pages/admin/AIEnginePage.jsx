@@ -83,6 +83,7 @@ function ProviderIcon({ provider }) {
   const icons = {
     anthropic: '🟣',
     gemini: '🔵',
+    nvidia: '🟩',
     perplexity: '🔍',
     azure: '🪟',
     bedrock: '🟠',
@@ -272,10 +273,22 @@ function ProviderCard({ provider, onToggle, onModelChange, onTest }) {
  * providers the server had removed, and a switch that governs nothing is worse
  * than no switch at all — it reads as working.
  */
-function FeatureSwitches() {
+/** Display names for providers placed per feature (#701). */
+const PLACED_PROVIDER_LABELS = { nvidia: 'NVIDIA' };
+
+/** What each placement means, in the words the select shows. */
+const PLACEMENT_OPTIONS = [
+  { value: 'first', label: 'First — free, others take over' },
+  { value: 'order', label: 'After the others' },
+  { value: 'off', label: 'Off' },
+];
+
+export function FeatureSwitches() {
   const { toast } = useToast();
   const [features, setFeatures] = useState(null);
   const [catalogue, setCatalogue] = useState({});
+  const [placement, setPlacement] = useState({});
+  const [placementDefaults, setPlacementDefaults] = useState({});
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState(null);
 
@@ -283,10 +296,12 @@ function FeatureSwitches() {
     let cancelled = false;
     aiEngine
       .getAiFeatures()
-      .then(({ features: f, catalogue: c }) => {
+      .then(({ features: f, catalogue: c, placement: p, placementDefaults: d }) => {
         if (cancelled) return;
         setFeatures(f);
         setCatalogue(c);
+        setPlacement(p || {});
+        setPlacementDefaults(d || {});
       })
       .catch((err) => !cancelled && setError(err?.message || 'Could not load AI feature settings'));
     return () => {
@@ -314,6 +329,27 @@ function FeatureSwitches() {
     }
   };
 
+  // Same optimistic-then-reconciled pattern as the switch. The API refuses a
+  // placement in a locked feature, so the select is never offered there.
+  const handlePlacement = async (provider, name, next) => {
+    const previous = placement[provider]?.[name];
+    setBusy(`${provider}:${name}`);
+    setPlacement((prev) => ({ ...prev, [provider]: { ...prev[provider], [name]: next } }));
+    try {
+      const saved = await aiEngine.setAiPlacement(provider, name, next);
+      setPlacement((prev) => ({ ...prev, ...saved }));
+    } catch (err) {
+      setPlacement((prev) => ({ ...prev, [provider]: { ...prev[provider], [name]: previous } }));
+      toast({
+        title: 'Could not save',
+        description: err?.message || 'The placement has been put back.',
+        variant: 'destructive',
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   if (error) {
     return (
       <Card>
@@ -322,6 +358,7 @@ function FeatureSwitches() {
     );
   }
 
+  const placedProviders = Object.keys(placementDefaults);
   const names = Object.keys(catalogue);
   const offCount = features ? names.filter((n) => features[n] === false).length : 0;
 
@@ -362,6 +399,40 @@ function FeatureSwitches() {
                 <div className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
                   {catalogue[name]?.route}
                 </div>
+                {placedProviders.map((provider) => {
+                  const label = PLACED_PROVIDER_LABELS[provider] || provider;
+                  // 'off' as the code-level default is a lock: configuration
+                  // can disable, never enable. Say so instead of offering a
+                  // control the API would refuse.
+                  if (placementDefaults[provider]?.[name] === 'off') {
+                    return (
+                      <div key={provider} className="text-xs text-slate-400 mt-1">
+                        {label}: not used here
+                      </div>
+                    );
+                  }
+                  const id = `placement-${provider}-${name}`;
+                  return (
+                    <div key={provider} className="flex items-center gap-2 mt-1">
+                      <label htmlFor={id} className="text-xs text-slate-500">
+                        {label}
+                      </label>
+                      <select
+                        id={id}
+                        className="h-7 rounded-md border border-slate-200 dark:border-slate-700 bg-transparent px-2 text-xs"
+                        value={placement[provider]?.[name] || placementDefaults[provider]?.[name]}
+                        disabled={busy === `${provider}:${name}`}
+                        onChange={(e) => handlePlacement(provider, name, e.target.value)}
+                      >
+                        {PLACEMENT_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                })}
               </div>
               <Switch
                 checked={features[name] !== false}
@@ -451,6 +522,13 @@ function ServicesTab({ providers }) {
               </>
             ) : (
               'No provider is both enabled and holding an API key, so AI calls will fail.'
+            )}
+            {ordered.some((p) => p.id === 'nvidia') && (
+              <>
+                {' '}
+                NVIDIA is also placed per feature under “Where AI is used”: it goes first for
+                content features and is never used for the public explain buttons.
+              </>
             )}
           </CardDescription>
         </CardHeader>

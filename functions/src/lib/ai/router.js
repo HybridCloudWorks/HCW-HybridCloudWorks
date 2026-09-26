@@ -83,12 +83,33 @@
  *   is not stated on the reference page — if it does, the output count here
  *   over-reads by that amount.
  *
+ * NVIDIA API CATALOG (#701, 2026-09-25). A fourth provider, `nvidia`, on the
+ * OpenAI-compatible chat endpoint at https://integrate.api.nvidia.com/v1 with
+ * `NVIDIA_API_KEY` as a Bearer token. It is a trial tier — free, about 40
+ * requests a minute per account, trial terms — so it differs from the other
+ * three in four deliberate ways:
+ *
+ *   - Its place in the chain is set PER FEATURE (ai-config.js,
+ *     PER_FEATURE_PROVIDERS): first for owner-triggered content, never for
+ *     the anonymous public explain route. A call with no feature never uses it.
+ *   - A pacing guard keeps this instance under the account limit. A call the
+ *     guard refuses is not sent and fails over at once, so a burst of batch
+ *     drafts degrades to the paid providers instead of failing.
+ *   - A 400/422 from it fails over. "A bad request fails identically
+ *     everywhere" holds for three frontier APIs; it does not hold for a
+ *     catalogue of open-weight models with their own context and parameter
+ *     limits, where the next provider will very likely take the same request.
+ *     A part WE refused (AI_PART_REFUSED) still does not fail over.
+ *   - Its usage rows are priced at zero, so the Usage tab shows the calls and
+ *     the saving rather than an invented figure.
+ *
  * A Key Vault reference that did not resolve arrives as the literal
  * `@Microsoft.KeyVault(...)` string. That is not a key; `readKey` says so.
  */
 
 import {
   DEFAULT_PROVIDER_ORDER,
+  applyFeaturePlacement,
   createAiConfigLoader,
   configuredModelFor,
   isFeatureEnabled,
@@ -119,6 +140,7 @@ const KEY_ENV = Object.freeze({
   anthropic: 'ANTHROPIC_API_KEY',
   openai: 'OPENAI_API_KEY',
   gemini: 'GEMINI_API_KEY',
+  nvidia: 'NVIDIA_API_KEY',
 });
 
 // Provider × purpose → [env var, default model].
@@ -143,6 +165,25 @@ export const DEFAULT_MODEL_TABLE = Object.freeze({
     analysis: ['CONTENTFORGE_GEMINI_ANALYSIS_MODEL', 'gemini-3.6-flash'],
     multimodal: ['CONTENTFORGE_GEMINI_MULTIMODAL_MODEL', 'gemini-3.6-flash'],
     general: ['CONTENTFORGE_GEMINI_MODEL', 'gemini-3.5-flash-lite'],
+  },
+  // NVIDIA API Catalog (#701). Ids read from each model's page on
+  // https://build.nvidia.com on 2026-09-25 — the `model` value in the page's
+  // own curl sample, which is NOT always the URL slug (the page
+  // build.nvidia.com/z-ai/glm-5-3 serves `z-ai/glm-5.3`):
+  //   deepseek-ai/deepseek-v4.1-flash  build.nvidia.com/deepseek-ai/deepseek-v4.1-flash
+  //   z-ai/glm-5.3                     build.nvidia.com/z-ai/glm-5-3
+  //   z-ai/glm-5.3-flash               build.nvidia.com/z-ai/glm-5-3-flash
+  // GLM-5.3, the large text MoE, writes the long drafts; DeepSeek-V4.1-Flash
+  // does analysis and grading; GLM-5.3-Flash the short general calls. Kimi K3
+  // is on the catalogue too, but its page's sample left `model` blank on the
+  // day, so it is not a default — set CONTENTFORGE_NVIDIA_*_MODEL or pin a
+  // model in the portal once its id is confirmed. The catalogue changes
+  // often: a retired id is a 404, which fails over to the next provider.
+  nvidia: {
+    draft: ['CONTENTFORGE_NVIDIA_DRAFT_MODEL', 'z-ai/glm-5.3'],
+    analysis: ['CONTENTFORGE_NVIDIA_ANALYSIS_MODEL', 'deepseek-ai/deepseek-v4.1-flash'],
+    multimodal: ['CONTENTFORGE_NVIDIA_MULTIMODAL_MODEL', 'deepseek-ai/deepseek-v4.1-flash'],
+    general: ['CONTENTFORGE_NVIDIA_MODEL', 'z-ai/glm-5.3-flash'],
   },
 });
 
@@ -216,6 +257,17 @@ export const COST_TABLE = Object.freeze({
   elevenlabs: {
     eleven_v3: [0, 100.0],
     default: [0, 100.0],
+  },
+  // NVIDIA API Catalog trial tier (#701): free, so every row is zero — the
+  // Usage tab then shows these calls, and what they did not cost, instead of
+  // pricing them at a guessed rate. `default` covers a model the portal or an
+  // env override pins. If the owner ever moves to a paid NVIDIA plan, these
+  // rows are what change.
+  nvidia: {
+    'z-ai/glm-5.3': [0, 0],
+    'z-ai/glm-5.3-flash': [0, 0],
+    'deepseek-ai/deepseek-v4.1-flash': [0, 0],
+    default: [0, 0],
   },
   replicate: {
     'meta/llama-3.1-405b-instruct': [0.65, 2.75],
@@ -351,6 +403,21 @@ function toOpenAiContent(parts, prompt) {
       mime ? `{text} or image/* inline data, not ${mime}` : '{text} or {inlineData:{mimeType:image/*,data}}'
     );
   });
+}
+
+/**
+ * Parts → one plain string, for a text-only provider. Only text parts are
+ * possible here — `chainForParts` keeps anything else away — so any other
+ * shape is refused rather than dropped, as everywhere else.
+ */
+function toPlainText(parts, prompt) {
+  if (!Array.isArray(parts) || parts.length === 0) return prompt;
+  return parts
+    .map((part) => {
+      if (typeof part?.text === 'string') return part.text;
+      throw refusePart('nvidia', part, '{text}');
+    })
+    .join('\n\n');
 }
 
 /** Multimodal parts → Anthropic content blocks. */
@@ -593,6 +660,95 @@ function failedRetrievals(data) {
     .map((r) => `${r.url || 'a source'} (${r.status})`);
 }
 
+// ---------------------------------------------------------------------------
+// NVIDIA API Catalog (#701).
+
+export const NVIDIA_BASE_URL = 'https://integrate.api.nvidia.com/v1';
+
+/**
+ * Requests per rolling minute this instance will send to NVIDIA.
+ *
+ * The account limit is about 40 RPM (issue #701, checked 2026-09-25). 36 leaves
+ * headroom for the admin portal's Test button and for clock skew between our
+ * window and theirs. `NVIDIA_REQUESTS_PER_MINUTE` overrides it — lower, or
+ * higher once NVIDIA raises the account's limit.
+ *
+ * The guard is per Function App INSTANCE. Two instances can together exceed
+ * the account limit; when they do, NVIDIA answers 429, the router retries and
+ * then fails over, which is the same degradation by a longer road.
+ */
+export const NVIDIA_DEFAULT_RPM = 36;
+
+/** Reasoning models think before they answer; 60 s was sized for chat. */
+const NVIDIA_TIMEOUT_MS = 120_000;
+
+/**
+ * A draft is long. Without it some NIM endpoints apply a small default and
+ * truncate mid-article; a model whose cap is lower answers 400, which fails
+ * over (see the header).
+ */
+const NVIDIA_MAX_TOKENS = 8192;
+
+/**
+ * A sliding-window pacing guard: at most `limit` grants in any `windowMs`.
+ *
+ * Sliding rather than a refilling bucket so the bound is exact — a full bucket
+ * plus a minute of refill can pass nearly twice the limit inside one rolling
+ * minute, which is precisely what an RPM limit counts. `take()` never waits: a
+ * refusal is immediate, so the caller fails over instead of holding a request
+ * open for up to a minute.
+ */
+export function createRequestPacer({ limit, windowMs = 60_000, now = () => Date.now() }) {
+  const grants = [];
+  const prune = (t) => {
+    while (grants.length && t - grants[0] >= windowMs) grants.shift();
+  };
+  return {
+    take() {
+      const t = now();
+      prune(t);
+      if (grants.length >= limit) return false;
+      grants.push(t);
+      return true;
+    },
+    /** Grants inside the current window; for tests and diagnostics. */
+    used() {
+      prune(now());
+      return grants.length;
+    },
+  };
+}
+
+function nvidiaRpm(env) {
+  const n = Number.parseInt(String(env?.NVIDIA_REQUESTS_PER_MINUTE ?? ''), 10);
+  return Number.isInteger(n) && n > 0 ? n : NVIDIA_DEFAULT_RPM;
+}
+
+function pacedError(limit) {
+  const err = new Error(
+    `nvidia pacing guard: ${limit} requests in the last minute already sent from this instance; not sent.`
+  );
+  // 429 so it reads as what it is everywhere else; AI_PACED so withRetry does
+  // not sleep and try again against a window that is still full.
+  err.status = 429;
+  err.code = 'AI_PACED';
+  return err;
+}
+
+/** Providers that take text only, and are left out of a call carrying other parts. */
+const TEXT_ONLY_PROVIDERS = Object.freeze(['nvidia']);
+
+function hasNonTextParts(parts) {
+  return Array.isArray(parts) && parts.some((part) => typeof part?.text !== 'string');
+}
+
+/** Some reasoning models inline their thinking; the answer is what follows it. */
+function stripThinking(text) {
+  return String(text || '')
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .trim();
+}
+
 async function postJson(fetchImpl, url, { headers, body, timeoutMs = 60_000 }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -644,6 +800,7 @@ export function createAiRouter({
   store = null,
   configTtlMs = 60_000,
   onKeyVerdict = null,
+  now = () => Date.now(),
 } = {}) {
   // With no store the loader reports "no configuration", and every path below
   // falls back to exactly the environment-only behaviour this router had before
@@ -652,6 +809,11 @@ export function createAiRouter({
   const config = createAiConfigLoader({ store, ttlMs: configTtlMs, log });
 
   const availableProviders = () => PROVIDERS.filter((p) => readKey(env, KEY_ENV[p]));
+
+  // One guard per router, so the process-wide router paces every call site in
+  // this instance together. See NVIDIA_DEFAULT_RPM for the multi-instance note.
+  const nvidiaLimit = nvidiaRpm(env);
+  const nvidiaPacer = createRequestPacer({ limit: nvidiaLimit, now });
 
   /**
    * Tell the API-keys page whether a provider accepted its credential.
@@ -709,9 +871,14 @@ export function createAiRouter({
    * @returns {Promise<Array<{provider: string, model: string|null}>>}
    */
   async function resolveProviderChain(feature = null) {
-    const { chain, disabled } = await resolveChainDetails(feature);
+    const { chain, disabled, excluded } = await resolveChainDetails(feature);
 
     if (chain.length === 0) {
+      if (excluded.length > 0 && disabled.length === 0) {
+        throw new AiNotConfiguredError(
+          `The only configured AI provider (${excluded.join(', ')}) is not used for ${feature ? `'${feature}'` : 'calls that name no feature'}. Seed GEMINI_API_KEY, OPENAI_API_KEY or ANTHROPIC_API_KEY (Required-Inputs §4.6), or change its placement under AI Engine → Where AI is used where that is allowed.`
+        );
+      }
       throw new AiNotConfiguredError(
         disabled.length > 0
           ? `Every configured AI provider is disabled in the admin portal (${disabled.join(', ')}). Re-enable one under AI Engine → AI Services.`
@@ -729,7 +896,7 @@ export function createAiRouter({
    * chain is left to the callers, who have different sentences for it.
    *
    * @returns {Promise<{chain: Array<{provider: string, model: string|null}>,
-   *                    disabled: string[], pinned: string}>}
+   *                    disabled: string[], excluded: string[], pinned: string}>}
    */
   async function resolveChainDetails(feature = null) {
     const { providers: docs, features } = await config.load();
@@ -739,7 +906,13 @@ export function createAiRouter({
     }
 
     const available = availableProviders();
-    const { order, disabled } = resolveProviderOrder(docs, available);
+    const resolved = resolveProviderOrder(docs, available);
+    const { disabled } = resolved;
+    // Per-feature placement after the global order: it can move a provider
+    // or remove it, never add one (ai-config.js, rule 1). A pin below is
+    // checked against THIS order, so pinning nvidia cannot route a public
+    // feature to it.
+    const { order, excluded } = applyFeaturePlacement(resolved.order, features, feature);
 
     const pinned = pinnedProvider();
     let chain = order;
@@ -749,9 +922,9 @@ export function createAiRouter({
         // provider and does NOT fall through to the others.
         chain = [pinned];
       } else {
-        const why = disabled.includes(pinned)
-          ? 'it is disabled in the admin portal'
-          : 'its key is not present';
+        let why = 'its key is not present';
+        if (disabled.includes(pinned)) why = 'it is disabled in the admin portal';
+        else if (excluded.includes(pinned)) why = `it is not used for '${feature || 'no feature'}'`;
         log.warn?.(
           `[ai-router] CONTENTFORGE_AI_PROVIDER=${pinned} but ${why}; falling back to ${order[0] || 'none'}`
         );
@@ -761,6 +934,7 @@ export function createAiRouter({
     return {
       chain: chain.map((provider) => ({ provider, model: configuredModelFor(docs, provider) })),
       disabled,
+      excluded,
       pinned,
     };
   }
@@ -774,8 +948,14 @@ export function createAiRouter({
    * be malformed for all three, and walking the whole chain to prove it just
    * spends money and time on the same failure.
    */
-  function isProviderUnusable(error) {
+  function isProviderUnusable(error, provider = null) {
     const status = Number(error?.status);
+    // NVIDIA only: its models differ in context length and accepted
+    // parameters, so its 400 is not evidence the request is bad everywhere
+    // (header). A part we refused ourselves is, and stays put.
+    if (provider === 'nvidia' && [400, 422].includes(status) && error?.code !== 'AI_PART_REFUSED') {
+      return true;
+    }
     // 401/403 rejected key, 404 unknown model or endpoint.
     if ([401, 403, 404].includes(status)) return true;
     // Anything retryable that survived its retries: the provider is not coming
@@ -807,13 +987,16 @@ export function createAiRouter({
 
     for (const { provider, model: configuredModel } of chain) {
       try {
-        const result = await withRetry(() =>
-          callWith(provider, {
-            ...args,
-            // An explicit model from the call site wins; then the
-            // administrator's choice in the portal; then the purpose table.
-            model: explicitModel || configuredModel,
-          })
+        const result = await withRetry(
+          () =>
+            callWith(provider, {
+              ...args,
+              // An explicit model from the call site wins; then the
+              // administrator's choice in the portal; then the purpose table.
+              model: explicitModel || configuredModel,
+            }),
+          3,
+          provider
         );
         await reportKeyVerdict(provider, { ok: true });
         return result;
@@ -825,7 +1008,7 @@ export function createAiRouter({
         // them would turn the light red for something no rotation can fix.
         if ([401, 403].includes(status)) await reportKeyVerdict(provider, { ok: false, status });
         const last = chain[chain.length - 1].provider === provider;
-        if (last || !isProviderUnusable(error)) throw error;
+        if (last || !isProviderUnusable(error, provider)) throw error;
         log.warn?.(
           `[ai-router] ${provider} could not serve this call (${error?.message || error}); trying the next provider`
         );
@@ -853,13 +1036,23 @@ export function createAiRouter({
     return env[envVar] || fallback;
   }
 
-  async function withRetry(operation, maxAttempts = 3) {
+  /**
+   * Retry a retryable failure with backoff.
+   *
+   * Two exceptions, both about not waiting for nothing: a pacing refusal
+   * (AI_PACED) is never retried — the window is still full two seconds later
+   * — and NVIDIA's timeout is not either, because two more 120 s attempts
+   * would hold an owner's job for six minutes before failing over.
+   */
+  async function withRetry(operation, maxAttempts = 3, provider = null) {
     let lastError;
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       try {
         return await operation();
       } catch (error) {
         lastError = error;
+        if (error?.code === 'AI_PACED') break;
+        if (provider === 'nvidia' && Number(error?.status) === 408) break;
         if (attempt >= maxAttempts || !isRetryableError(error)) break;
         await sleep(2 ** attempt * 1000);
       }
@@ -917,26 +1110,74 @@ export function createAiRouter({
       .join('\n');
   }
 
-  async function callOpenAi({ prompt, parts, model, purpose, expectJson, systemPrompt, usageOut }) {
-    const apiKey = readKey(env, KEY_ENV.openai);
-    const selectedModel = model || defaultModelFor('openai', purpose);
+  /**
+   * The OpenAI chat-completions request path, shared by every provider that
+   * speaks it. OpenAI and NVIDIA differ only in the rows of this table.
+   *
+   * NVIDIA's differences, each for a reason: plain-string user content and
+   * the JSON rule as an instruction rather than `response_format`, because
+   * neither array content nor `json_object` is accepted by every model on the
+   * catalogue and an unaccepted field is a 400; an explicit `max_tokens`; a
+   * longer timeout; `<think>` stripped from the answer.
+   */
+  const OPENAI_COMPATIBLE = {
+    openai: {
+      url: 'https://api.openai.com/v1/chat/completions',
+      jsonAsResponseFormat: true,
+      content: toOpenAiContent,
+    },
+    nvidia: {
+      url: `${NVIDIA_BASE_URL}/chat/completions`,
+      jsonAsResponseFormat: false,
+      content: toPlainText,
+      maxTokens: NVIDIA_MAX_TOKENS,
+      timeoutMs: NVIDIA_TIMEOUT_MS,
+      clean: stripThinking,
+      pace: () => {
+        if (!nvidiaPacer.take()) throw pacedError(nvidiaLimit);
+      },
+    },
+  };
+
+  async function callOpenAiCompatible(
+    provider,
+    { prompt, parts, model, purpose, expectJson, systemPrompt, usageOut }
+  ) {
+    const spec = OPENAI_COMPATIBLE[provider];
+    const apiKey = readKey(env, KEY_ENV[provider]);
+    const selectedModel = model || defaultModelFor(provider, purpose);
     const messages = [];
-    if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
-    messages.push({ role: 'user', content: toOpenAiContent(parts, prompt) });
-    const data = await postJson(fetchImpl, 'https://api.openai.com/v1/chat/completions', {
+    const system =
+      expectJson && !spec.jsonAsResponseFormat
+        ? [systemPrompt, JSON_ONLY].filter(Boolean).join('\n\n')
+        : systemPrompt;
+    if (system) messages.push({ role: 'system', content: system });
+    messages.push({ role: 'user', content: spec.content(parts, prompt) });
+    // Last, after every refusal that could still happen locally: a request
+    // that is never sent must not spend a slot in the window.
+    spec.pace?.();
+    const data = await postJson(fetchImpl, spec.url, {
       headers: { Authorization: `Bearer ${apiKey}` },
       body: {
         model: selectedModel,
         messages,
         temperature: 0.2,
-        ...(expectJson ? { response_format: { type: 'json_object' } } : {}),
+        ...(spec.maxTokens ? { max_tokens: spec.maxTokens } : {}),
+        ...(expectJson && spec.jsonAsResponseFormat
+          ? { response_format: { type: 'json_object' } }
+          : {}),
       },
+      ...(spec.timeoutMs ? { timeoutMs: spec.timeoutMs } : {}),
     });
     const usage = data?.usage || {};
-    recordUsage(usageOut, 'openai', selectedModel, usage.prompt_tokens, usage.completion_tokens);
-    logUsage('openai', usage, selectedModel, purpose);
-    return data?.choices?.[0]?.message?.content || '';
+    recordUsage(usageOut, provider, selectedModel, usage.prompt_tokens, usage.completion_tokens);
+    logUsage(provider, usage, selectedModel, purpose);
+    const text = data?.choices?.[0]?.message?.content || '';
+    return spec.clean ? spec.clean(text) : text;
   }
+
+  const callOpenAi = (args) => callOpenAiCompatible('openai', args);
+  const callNvidia = (args) => callOpenAiCompatible('nvidia', args);
 
   async function callGemini({ prompt, parts, model, purpose, expectJson, systemPrompt, usageOut }) {
     const apiKey = readKey(env, KEY_ENV.gemini);
@@ -965,7 +1206,31 @@ export function createAiRouter({
       .join('');
   }
 
-  const CALLERS = { anthropic: callAnthropic, openai: callOpenAi, gemini: callGemini };
+  const CALLERS = {
+    anthropic: callAnthropic,
+    openai: callOpenAi,
+    gemini: callGemini,
+    nvidia: callNvidia,
+  };
+
+  /**
+   * The chain a call carrying these parts can use. A text-only provider is
+   * left out of a call with an image in it — sending it would be a refusal,
+   * and a refusal does not fail over. An empty result says so rather than
+   * reporting "not configured".
+   */
+  function chainForParts(chain, parts) {
+    if (!hasNonTextParts(parts)) return chain;
+    const usable = chain.filter(({ provider }) => !TEXT_ONLY_PROVIDERS.includes(provider));
+    if (usable.length === 0) {
+      throw new AiNotConfiguredError(
+        `This call carries non-text parts and the only provider in its chain (${chain
+          .map((c) => c.provider)
+          .join(', ')}) takes text only.`
+      );
+    }
+    return usable;
+  }
 
   function callWith(provider, args) {
     const caller = CALLERS[provider];
@@ -982,7 +1247,7 @@ export function createAiRouter({
     usageOut = null,
     feature = null,
   } = {}) {
-    const chain = await resolveProviderChain(feature);
+    const chain = chainForParts(await resolveProviderChain(feature), parts);
     return callWithFailover({
       chain,
       explicitModel: model,
@@ -1004,7 +1269,7 @@ export function createAiRouter({
     usageOut = null,
     feature = null,
   } = {}) {
-    const chain = await resolveProviderChain(feature);
+    const chain = chainForParts(await resolveProviderChain(feature), parts);
     const text = await callWithFailover({
       chain,
       explicitModel: model,

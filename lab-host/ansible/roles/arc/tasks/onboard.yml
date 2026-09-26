@@ -1,0 +1,178 @@
+---
+- name: Refuse tag names or values containing a comma, an equals sign or a space
+  ansible.builtin.assert:
+    that:
+      - (arc_tags.keys() | list + arc_tags.values() | list) | select('search', '[ ,=]') | list | length == 0
+    fail_msg: >-
+      arc_tags is passed to azcmagent as Name=Value pairs joined by commas, so
+      no tag name or value may contain a comma, an equals sign or a space.
+    quiet: true
+
+- name: Install the packages the Microsoft repository and the agent need
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+      - openssl
+      - python3-debian
+    state: present
+
+- name: Create the apt keyring directory
+  ansible.builtin.file:
+    path: "{{ arc_apt_key_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install Microsoft's apt signing key and refuse one that does not match its pinned checksum
+  ansible.builtin.get_url:
+    url: "{{ arc_apt_key_url }}"
+    dest: "{{ arc_apt_key_path }}"
+    checksum: "{{ arc_apt_key_checksum }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Add Microsoft's Ubuntu package repository
+  ansible.builtin.deb822_repository:
+    name: microsoft-prod
+    types:
+      - deb
+    uris: "{{ arc_apt_repository_url }}"
+    suites:
+      - "{{ ansible_facts['distribution_release'] }}"
+    components:
+      - main
+    architectures:
+      - amd64
+    signed_by: "{{ arc_apt_key_path }}"
+    state: present
+
+- name: Install the Azure Connected Machine agent at the pinned version
+  ansible.builtin.apt:
+    name: "azcmagent={{ arc_agent_version }}"
+    state: present
+    update_cache: true
+    install_recommends: false
+    allow_downgrade: true
+    allow_change_held_packages: true
+
+- name: Hold the pinned agent package so apt never moves it
+  ansible.builtin.dpkg_selections:
+    name: azcmagent
+    selection: hold
+
+# Read-only, so it runs in check mode too. A fresh install reports
+# Disconnected; anything that is not Connected goes on to connect, and an
+# unparseable status fails the play rather than being read as either.
+- name: Read the agent's connection state
+  ansible.builtin.command:
+    argv:
+      - "{{ arc_azcmagent_path }}"
+      - show
+      - --json
+  register: arc_show
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Record the agent's connection state
+  ansible.builtin.set_fact:
+    arc_status: "{{ (arc_show.stdout | from_json).status if arc_show.rc == 0 else 'NotInstalled' }}"
+
+# Fail closed, as the coder role does, but only where the credential is
+# needed. Once the machine is Connected the runbook deletes the secret from
+# the vault and from Entra (ADR 0032: never on the host after onboarding), so
+# a Connected host must keep converging without it.
+- name: Check the onboarding inputs before connecting
+  when: arc_status != 'Connected'
+  block:
+    - name: Refuse to onboard without the four Arc vault values
+      ansible.builtin.assert:
+        that:
+          - arc_identity_present | bool
+        fail_msg: >-
+          arc_enabled is true, the agent reports {{ arc_status }}, and one of
+          vault_arc_service_principal_id, vault_arc_service_principal_secret,
+          vault_arc_tenant_id and vault_arc_subscription_id is unset. Add all
+          four to the vault (docs/runbooks/labs-host.md, "Seed the vault") and
+          re-run bootstrap.sh.
+        quiet: true
+
+    - name: Refuse Arc identifiers that are not GUIDs
+      ansible.builtin.assert:
+        that:
+          - arc_service_principal_id is match(arc_guid_pattern)
+          - arc_tenant_id is match(arc_guid_pattern)
+          - arc_subscription_id is match(arc_guid_pattern)
+        fail_msg: >-
+          vault_arc_service_principal_id (the application id, not the object
+          id), vault_arc_tenant_id and vault_arc_subscription_id must each be a
+          GUID. One of them is not, which usually means two values were pasted
+          into each other's keys.
+        quiet: true
+
+- name: Connect to Azure Arc with the onboarding service principal
+  when:
+    - arc_status != 'Connected'
+    - not ansible_check_mode
+  block:
+    - name: Create a private file for the connect configuration
+      ansible.builtin.tempfile:
+        state: file
+        suffix: .arc-connect.json
+      register: arc_connect_config_file
+
+    # The secret goes into a root-only temporary file passed with --config,
+    # never onto the command line, and the always: below deletes the file
+    # whether connect succeeds or not.
+    - name: Write the connect configuration
+      ansible.builtin.copy:
+        dest: "{{ arc_connect_config_file.path }}"
+        content: "{{ arc_connect_config | to_nice_json(indent=2) }}\n"
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+
+    - name: Run azcmagent connect
+      ansible.builtin.command:
+        argv:
+          - "{{ arc_azcmagent_path }}"
+          - connect
+          - --config
+          - "{{ arc_connect_config_file.path }}"
+      register: arc_connect
+      changed_when: arc_connect.rc == 0
+
+  always:
+    - name: Delete the connect configuration
+      ansible.builtin.file:
+        path: "{{ arc_connect_config_file.path }}"
+        state: absent
+      when: arc_connect_config_file.path is defined
+
+- name: Read the agent's connection state after connecting
+  ansible.builtin.command:
+    argv:
+      - "{{ arc_azcmagent_path }}"
+      - show
+      - --json
+  register: arc_show_after
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Assert the agent reports Connected
+  ansible.builtin.assert:
+    that:
+      - (arc_show_after.stdout | from_json).status == 'Connected'
+    fail_msg: >-
+      azcmagent show reports {{ (arc_show_after.stdout | from_json).status }}
+      after connect. `sudo /opt/azcmagent/bin/azcmagent show` and
+      `sudo /opt/azcmagent/bin/azcmagent check --location {{ arc_location }}`
+      on the host say why.
+    success_msg: >-
+      Connected to Azure Arc as {{ arc_resource_name }} in {{ arc_resource_group }}.
+  when: not ansible_check_mode

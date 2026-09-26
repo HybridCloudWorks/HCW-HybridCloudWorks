@@ -31,6 +31,10 @@
 
   roles:
     - role: hardening
+    # Straight after hardening: the Arc agent is a host service that needs
+    # nothing the later roles install, so the host shows up in Azure even
+    # when a later role fails. It does nothing while arc_enabled is false.
+    - role: arc
     - role: docker
     - role: node_exporter
     - role: caddy

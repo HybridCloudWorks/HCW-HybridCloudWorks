@@ -130,6 +130,7 @@ nav:
       - Availability probe: runbooks/availability-probe.md
       - Cosmos restore: runbooks/cosmos-restore.md
       - Edge and DNS verification: runbooks/edge-dns-verification.md
+      - Labs host Arc onboarding: runbooks/labs-host.md
       - Copilot code review MCP servers: runbooks/copilot-code-review-mcp.md
   - Standards:
       - IaC repository standard: standards/iac-repository-standard.md
