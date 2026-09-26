@@ -38,8 +38,14 @@
  *     pending    true from enqueue until the job writes its outcome
  *     jobId      that job, so the hub can poll getJob
  *     queuedAt   when
- *     skipped    'not_configured' | 'no_audio' | 'not_published'
+ *     skipped    'not_configured' | 'no_audio' | 'not_published' | 'free_plan_licence'
  *     reason     the sentence for it
+ *
+ * `free_plan_licence` is the job's own guard for ElevenLabs free-plan audio
+ * (speech-licence.js, ADR 0029 §2a amended 2026-09-26). Approval and the
+ * retry route refuse such a transcript with 409 before they get here
+ * (handlers.js). The job checks again because it re-reads the document, and a
+ * document can become published by some path other than those two.
  *
  * `skipped` is not `error`. Nothing was attempted, so the hub says "not
  * configured" rather than "failed", and the operator's fix is seeding two
@@ -69,6 +75,7 @@
  */
 import { JOBS_CONTAINER, TERMINAL_JOB_STATUSES, newJobDoc } from '../jobs.js';
 import { DEFAULT_AUDIO_MIME, publishEpisodeToHost } from './host-publish.js';
+import { freePlanRefusal } from './speech-licence.js';
 import { PODCAST_AUDIO_CONTAINER, STATUS, TRANSCRIPT_CONTAINER } from './store.js';
 
 /** The platform job that runs the host step. Registered in functions/podcast-jobs.js. */
@@ -78,6 +85,7 @@ export const HOST_SKIP = Object.freeze({
   notConfigured: 'not_configured',
   noAudio: 'no_audio',
   notPublished: 'not_published',
+  freePlanLicence: 'free_plan_licence',
 });
 
 /**
@@ -131,7 +139,9 @@ export function stableHostRecord(host) {
  * Configuration first, then the document: until the two secrets are seeded
  * every transcript reads "not configured", which names the one fix; once
  * they are, a transcript without audio reads "no audio", which names the
- * other. Nothing is uploaded without audio.
+ * other. Nothing is uploaded without audio. Audio that ElevenLabs rendered
+ * on the free plan reads "free plan licence", and is never uploaded either
+ * (speech-licence.js).
  *
  * @param {object} doc the transcript document
  * @param {{ ok: boolean, reason?: string }} [configured] `isConfigured(env)` or `client.configured`
@@ -150,6 +160,8 @@ export function hostSkipFor(doc, configured) {
         'regenerate it once audio synthesis succeeds, then publish again.',
     };
   }
+  const refusal = freePlanRefusal(doc);
+  if (refusal) return { skipped: HOST_SKIP.freePlanLicence, reason: refusal };
   return null;
 }
 

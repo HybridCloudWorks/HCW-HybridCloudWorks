@@ -32,6 +32,13 @@
  * show's feed. The `host` record itself is read through the existing
  * detail and list routes: it is a stored field, in `TRANSCRIPT_LIST_FIELDS`
  * and in the full document.
+ *
+ * Approval refuses ElevenLabs free-plan audio (owner decision 2026-09-26,
+ * ADR 0029 §2a; speech-licence.js). A transcript whose audio was rendered on
+ * the free plan is answered 409 with the licence and the upgrade named, and
+ * nothing is written: the status stays draft, so no job is queued and nothing
+ * reaches RSS.com. The retry route refuses the same way. Withdrawing to
+ * draft is never refused.
  */
 import { JOBS_CONTAINER, newJobDoc } from '../jobs.js';
 import {
@@ -47,6 +54,7 @@ import {
   scheduleHostPublish,
 } from './publish-transcript.js';
 import { isConfigured as hostIsConfigured } from './rsscom.js';
+import { freePlanRefusal } from './speech-licence.js';
 import {
   STATUS,
   TRANSCRIPT_CONTAINER,
@@ -259,6 +267,14 @@ export function createPodcastHandlers({
         existing = await store.readDoc(TRANSCRIPT_CONTAINER, id, id);
         if (!existing) return json(404, { error: `No podcast transcript ${id}` });
 
+        // Before the status write, so a refusal changes nothing: the
+        // transcript stays as it was and no host step is queued.
+        const licence = status === STATUS.published ? freePlanRefusal(existing) : null;
+        if (licence) {
+          context.log?.('reviewPodcastTranscript: refused (free_plan_licence)');
+          return json(409, { error: licence, code: 'FREE_PLAN_LICENCE' });
+        }
+
         updated = await setTranscriptStatus(store, {
           id,
           status,
@@ -341,6 +357,11 @@ export function createPodcastHandlers({
               `Podcast transcript ${id} is ${doc.status || 'not published'}; ` +
               'approve it first — publishing to RSS.com is what approval does.',
           });
+        }
+        const licence = freePlanRefusal(doc);
+        if (licence) {
+          context.log?.('publishPodcastTranscript: refused (free_plan_licence)');
+          return json(409, { error: licence, code: 'FREE_PLAN_LICENCE' });
         }
 
         const host = await runHostStep({ doc, enqueue, requestedBy: auth.user, context });

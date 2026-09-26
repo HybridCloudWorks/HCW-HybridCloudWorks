@@ -109,7 +109,15 @@ export function resolvePipelineDeps(deps = {}, { writeScript = generateArticleSc
  * Always the `podcast` product: ElevenLabs, and only ElevenLabs
  * (speech/index.js, ADR 0029 §2b). With no `ELEVENLABS_API_KEY` the switch
  * reports itself not configured rather than reaching for Gemini, and that
- * sentence is the draft's `audioError`.
+ * sentence is the draft's `audioError`. So is the credit pre-flight's refusal
+ * ("ElevenLabs has N credits left of M, this episode needs K; …"): the draft
+ * is saved, nothing was spent on audio, and regenerating after the reset
+ * date voices it.
+ *
+ * The plan the audio was rendered on is recorded beside it (`speechTier`,
+ * `speechFreePlan`), taken from the account as the pre-flight read it. The
+ * approval step decides from these, not from whatever plan the account is on
+ * when someone clicks approve (podcast/speech-licence.js).
  */
 async function renderAudio({ script, source, storage, env, synthesize, uploadAudio }) {
   let rendered;
@@ -118,6 +126,7 @@ async function renderAudio({ script, source, storage, env, synthesize, uploadAud
   } catch (err) {
     return { error: err?.message || String(err) };
   }
+  const plan = renderedPlan(rendered);
 
   let uploaded;
   try {
@@ -132,6 +141,7 @@ async function renderAudio({ script, source, storage, env, synthesize, uploadAud
       error: `Audio was synthesised but not stored: ${err?.message || err}`,
       speechProvider: rendered.provider || null,
       speechModel: rendered.model || null,
+      ...plan,
       promptTokens: rendered.promptTokens ?? 0,
       completionTokens: rendered.completionTokens ?? 0,
       estimatedTokens: rendered.estimatedTokens === true,
@@ -142,10 +152,24 @@ async function renderAudio({ script, source, storage, env, synthesize, uploadAud
     ...uploaded,
     speechProvider: rendered.provider || null,
     speechModel: rendered.model || null,
+    ...plan,
     durationSeconds: rendered.estimatedSeconds ?? null,
     promptTokens: rendered.promptTokens ?? 0,
     completionTokens: rendered.completionTokens ?? 0,
     estimatedTokens: rendered.estimatedTokens === true,
+  };
+}
+
+/**
+ * `{ speechTier, speechFreePlan }` from what a provider returned. Null for
+ * both when it reported no account, which only ElevenLabs does; the licence
+ * rule treats an ElevenLabs render with no recorded plan as free.
+ */
+function renderedPlan(rendered) {
+  const subscription = rendered?.subscription;
+  return {
+    speechTier: typeof subscription?.tier === 'string' ? subscription.tier : null,
+    speechFreePlan: typeof subscription?.freePlan === 'boolean' ? subscription.freePlan : null,
   };
 }
 

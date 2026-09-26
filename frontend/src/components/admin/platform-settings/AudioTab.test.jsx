@@ -1,13 +1,16 @@
 /**
  * Audio: the podcast feeds card keeps the main feed and the provider rows
  * together on the way to a save, the voice card offers the server's priced
- * choices, and each card loads and fails on its own.
+ * choices, and each card loads and fails on its own. The podcast voice card
+ * (ElevenLabs, 2026-09-26) has its own tests in ElevenLabsCard.test.jsx; here
+ * it is one more card that loads beside the others.
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 import AudioTab, { ListenAndLearnSpeechCard, PodcastFeedsCard } from './AudioTab';
+import { ELEVENLABS_STATUS_ROUTE } from './ElevenLabsCard';
 import { PODCAST_PROVIDERS, settingRoute } from './settingShared';
 
 const BEST = 'gemini-3.1-flash-tts-preview';
@@ -25,13 +28,24 @@ const SPEECH_OPTIONS = [
 
 const getJSON = vi.fn();
 const sendJSON = vi.fn();
+const postJSON = vi.fn();
 const toast = vi.fn();
 
 vi.mock('@/lib/api', () => ({
   getJSON: (...args) => getJSON(...args),
   sendJSON: (...args) => sendJSON(...args),
-  postJSON: vi.fn(),
+  postJSON: (...args) => postJSON(...args),
 }));
+
+/** The podcast voice card's read: an unseeded key, which is a 200, not an error. */
+const ELEVENLABS_UNSEEDED = {
+  success: true,
+  configured: false,
+  reason: 'ELEVENLABS_API_KEY is not configured.',
+  subscription: null,
+  lastRender: null,
+  sample: { characters: 257, turns: 2 },
+};
 vi.mock('@/hooks/useAuthReady', () => ({ useAuthReady: () => ({ authReady: true }) }));
 vi.mock('@/components/ui/use-toast', () => ({ useToast: () => ({ toast }) }));
 
@@ -47,15 +61,20 @@ const optionsFor = (setting) =>
 const meta = { exists: false, stored: null, updatedAt: null, problem: null };
 
 beforeEach(() => {
-  getJSON.mockReset().mockImplementation(async (route) => ({
-    success: true,
-    setting: settingFor(route),
-    value: empty[settingFor(route)],
-    exists: false,
-    stored: null,
-    updatedAt: null,
-    ...optionsFor(settingFor(route)),
-  }));
+  getJSON.mockReset().mockImplementation(async (route) =>
+    route === ELEVENLABS_STATUS_ROUTE
+      ? ELEVENLABS_UNSEEDED
+      : {
+          success: true,
+          setting: settingFor(route),
+          value: empty[settingFor(route)],
+          exists: false,
+          stored: null,
+          updatedAt: null,
+          ...optionsFor(settingFor(route)),
+        }
+  );
+  postJSON.mockReset();
   sendJSON.mockReset().mockImplementation(async (route, _method, body) => ({
     success: true,
     setting: settingFor(route),
@@ -194,13 +213,17 @@ describe('ListenAndLearnSpeechCard', () => {
 });
 
 describe('the Audio tab', () => {
-  it('loads its two settings and nothing else', async () => {
+  it('loads its two settings and the podcast voice status, and nothing else', async () => {
     render(<AudioTab />);
     await screen.findByText('Podcast feeds');
     await screen.findByText('Listen & Learn voice');
-    expect(getJSON).toHaveBeenCalledTimes(2);
+    await screen.findByText('Not configured');
+    expect(getJSON).toHaveBeenCalledTimes(3);
     expect(getJSON).toHaveBeenCalledWith(settingRoute('podcast-feeds'));
     expect(getJSON).toHaveBeenCalledWith(settingRoute('listen-and-learn-speech'));
+    expect(getJSON).toHaveBeenCalledWith(ELEVENLABS_STATUS_ROUTE);
+    // The live check spends credits, so loading the tab never runs it.
+    expect(postJSON).not.toHaveBeenCalled();
   });
 
   it('PUTs the chosen Gemini model to the listen-and-learn-speech route, with the options from GET', async () => {
@@ -240,6 +263,7 @@ describe('the Audio tab', () => {
   it('shows a failed load for one card without hiding the other', async () => {
     getJSON.mockImplementation(async (route) => {
       if (settingFor(route) === 'podcast-feeds') throw new Error('HTTP 500');
+      if (route === ELEVENLABS_STATUS_ROUTE) return ELEVENLABS_UNSEEDED;
       return {
         success: true,
         value: empty[settingFor(route)],

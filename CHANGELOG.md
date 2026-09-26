@@ -19,6 +19,34 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **ElevenLabs on the free plan: a credit pre-flight, a non-commercial publish
+  guard, and the account on the Audio tab (#432).** Owner direction
+  2026-09-26: test the podcast voice on ElevenLabs's free plan, 10,000 credits a
+  month at one credit per character on Eleven v3, where one episode is nearly
+  the month. `speech/elevenlabs-account.js` reads `GET /v1/user/subscription`
+  (cached 15 s per key, keyed by a hash). Before the first dialogue request,
+  `synthesizeWithElevenLabs` refuses a job the credits left cannot cover in
+  full, sends nothing, and says "ElevenLabs has N credits left of M, this
+  episode needs K; the allowance resets on <date>" with the `quota_exceeded`
+  code. An unreadable account (a key without `user_read`) fails closed. A 402
+  `paid_plan_required` (a paid-only voice) is no longer reported as out of
+  credit. Owner decision the same day, "Test only, block publish": the podcast
+  records the plan each render ran on (`speechTier`, `speechFreePlan`), and
+  approving a transcript whose audio ElevenLabs rendered on the free plan
+  answers 409, naming the non-commercial licence and the upgrade, and writes
+  nothing. The retry route refuses the same way, and the publish job records a
+  `free_plan_licence` skip. Paid-plan renders publish as before. New editor
+  routes `GET cms/podcast/elevenlabs` (plan, credits used of limit, reset date,
+  the last render's billed characters, or "Not configured") and `POST
+  cms/podcast/elevenlabs/sample` (a fixed two-turn, 257-character live check
+  through the real provider, usage source `podcast:sample`) back a Podcast voice
+  card on the Audio tab. ADR 0029 §2a is amended with the date and the rule, and
+  `docs/standards/required-inputs.md` gives the key's two permissions, its
+  credit limit and where to seed it. The voices are unchanged, but their status
+  is recorded: Sarah is a Default voice that expires 2026-12-31 and exists only
+  on accounts created before March 2026, and Aria is a Legacy voice the API
+  reroutes to Zoe.
+
 - **The lab agent and the Coder template pull the Python 3.14 / Debian 13
   lab image.** `vps-agent/lib/capabilities.js` pins `hcw-lab-runner` and
   `lab-host/coder/templates/hcw-lab/main.tf` pins `hcw-lab` to the digests

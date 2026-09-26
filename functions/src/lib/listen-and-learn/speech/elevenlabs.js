@@ -1,11 +1,19 @@
 /**
- * Render a two-host dialogue to MP3 with ElevenLabs — the paid provider.
+ * Render a two-host dialogue to MP3 with ElevenLabs.
  *
  * Added when the owner approved a paid ElevenLabs plan on 2026-09-08 (ADR 0029
  * §2a, #436). It is the PODCAST voice — article and Plaud transcripts that go
  * to RSS.com — and only that (owner rule 2026-09-09, §2b): Listen & Learn is
  * read by Gemini TTS and never by this module, whatever keys are present.
  * The product switch in speech/index.js is what enforces that.
+ *
+ * **Started on the free plan (owner, 2026-09-26; §2a amended).** Before its
+ * first dialogue request a render reads the account and refuses a job the
+ * credits left cannot pay for in full, so a free month of 10,000 credits is
+ * never half-spent on an episode that cannot finish. The result also carries
+ * the plan the audio was rendered on, which is what the podcast's approval
+ * step checks: free-plan audio has no commercial licence and is not published.
+ * Both live in elevenlabs-account.js.
  *
  * Contract, verified against the Text to Dialogue API reference and capability
  * guide on 2026-09-08:
@@ -40,7 +48,9 @@
  *   - **Billing is per character**, USD 0.10 per 1,000 on the plans in
  *     question, and the API reports what it charged in a `character-cost`
  *     response header. That figure is preferred over our own count for the
- *     usage row: what was billed beats what was sent.
+ *     usage row: what was billed beats what was sent. On a plan's allowance
+ *     the same figure is credits: Eleven v3 costs one credit per character
+ *     (https://elevenlabs.io/pricing), which is what the pre-flight counts.
  *
  * ## How cost is recorded
  *
@@ -57,29 +67,67 @@
  *
  * ## Out of credit
  *
- * A paid provider has a state a free one does not. When the account's credits
- * are spent the API answers **401** with `detail.status === 'quota_exceeded'`
- * (ElevenLabs help centre, "API - Error Code 400 or 401"); a 402 would mean
- * the same thing. Neither improves on a retry, so neither is retried, and the
- * error carries `code: 'quota_exceeded'` and its HTTP status so the switch in
- * index.js can recognise it and fall back to the next configured provider.
+ * Two layers. The pre-flight above refuses a job the account cannot pay for,
+ * before anything is sent. Behind it, a request that still meets an empty
+ * account (a second render racing this one, or a key whose own credit limit
+ * is tighter than the account's) is refused by the API: **401** with
+ * `detail.status === 'quota_exceeded'` (ElevenLabs help centre, "API - Error
+ * Code 400 or 401"), or **402** `insufficient_credits`
+ * (https://elevenlabs.io/docs/eleven-api/resources/errors). Neither improves
+ * on a retry, so neither is retried, and both carry `code: 'quota_exceeded'`
+ * and the HTTP status. The pre-flight refusal carries the same code, with
+ * `details.preflight` set. Nothing falls back to another provider on it: the
+ * podcast has one provider (§2b), and generate.js records the sentence as
+ * the draft's `audioError`.
+ *
+ * A 402 is not always about credit. ElevenLabs also answers 402
+ * `paid_plan_required` when a free-plan key asks for a Voice Library voice
+ * ("Free users cannot use library voices via the API",
+ * https://elevenlabs.io/docs/overview/capabilities/voices). Reporting that as
+ * "out of credit" would send the owner to top up an account that has
+ * credits, so it is reported as its own code.
  *
  * ## Voices
  *
- * Two premade voices, both female, matching the Azure pair and the two hosts
- * script.js writes (DEFAULT_SPEAKERS). Premade voices are available on every
- * plan and need no library add step:
+ * Two voices, both female, matching the Azure pair and the two hosts
+ * script.js writes (DEFAULT_SPEAKERS):
  *
  *   Maya  → Sarah  (EXAVITQu4vr4xnSDxMaL) — the lead, who frames the area
  *   Elena → Aria   (9BWtsMINqrJLrRacOk9x) — the voice the official Text to
  *                                            Dialogue quickstart uses
  *
- * ElevenLabs has announced that its default voices are being replaced, with
- * the current set expiring on 2026-12-31. Override per host with
- * `LISTEN_AND_LEARN_VOICE_MAYA` / `…_ELENA` — the same settings the Gemini
- * and Azure providers read, so a value there must suit BOTH products: a
- * Gemini voice name in that setting would be sent here as a voice id.
+ * Checked again on 2026-09-26, and both have moved since they were chosen:
+ *
+ *   - Sarah is a Default voice. "All our Default voices will expire on
+ *     December 31, 2026", and they "are only available for accounts that
+ *     were created before March 2026"
+ *     (https://elevenlabs.io/docs/help-center/product/voices/my-voices/what-are-default-voices).
+ *     ElevenLabs suggests Talia as its replacement.
+ *   - Aria is now a Legacy voice, "fully deprecated and removed from all
+ *     products". Its id still works through the API because "Legacy voice
+ *     IDs will automatically route to their replacement voice IDs", and its
+ *     replacement is Zoe
+ *     (https://elevenlabs.io/docs/help-center/product/voices/my-voices/what-are-legacy-voices).
+ *
+ * The ids are left as they are until the owner picks replacements by ear.
+ * An account created in March 2026 or later should expect Sarah to be
+ * refused. The live check on the Audio tab (about 300 characters) is how to
+ * find out on the real account before an episode depends on it.
+ *
+ * Override per host with `LISTEN_AND_LEARN_VOICE_MAYA` / `…_ELENA`. These are
+ * the same settings the Gemini and Azure providers read, so a value there
+ * must suit BOTH products: a Gemini voice name in that setting would be sent
+ * here as a voice id.
  */
+import {
+  ElevenLabsSpeechError,
+  QUOTA_EXCEEDED,
+  assertCreditsCover,
+  creditsNeeded as creditsNeededFor,
+  errorCode,
+  invalidateSubscription,
+} from './elevenlabs-account.js';
+
 const DIALOGUE_URL = 'https://api.elevenlabs.io/v1/text-to-dialogue';
 
 /**
@@ -112,20 +160,11 @@ export const ELEVENLABS_DEFAULT_VOICES = {
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 const MAX_ATTEMPTS = 3;
 
-/**
- * A locally-defined error rather than an import from `./index.js`, which
- * imports this module — a cycle would make one of the two undefined at load.
- * `name`, `provider`, `status` and `code` are what callers key off.
- */
-class ElevenLabsSpeechError extends Error {
-  constructor(message, { status = null, code = null } = {}) {
-    super(message);
-    this.name = 'SpeechError';
-    this.status = status;
-    this.provider = 'elevenlabs';
-    this.code = code;
-  }
-}
+/** `code` for a 402 that is about the plan, not the credit (see the header). */
+export const PAID_PLAN_REQUIRED = 'paid_plan_required';
+
+// The error class lives in elevenlabs-account.js, not `./index.js`, which
+// imports this module: a cycle would make one of the two undefined at load.
 
 function readSetting(env, name) {
   const value = String(env?.[name] || '').trim();
@@ -259,11 +298,13 @@ export function buildInputs(turns, voices) {
 /**
  * Whether a non-2xx response is the out-of-credit state.
  *
- * The documented shape is 401 + `detail.status: "quota_exceeded"`; the body is
- * JSON but is read as text first so a non-JSON error page cannot throw here.
+ * The documented shapes are 401 + `detail.status: "quota_exceeded"` and 402
+ * `insufficient_credits`. The body is JSON but is read as text first so a
+ * non-JSON error page cannot throw here. A 402 is out of credit unless its
+ * code says it is about the plan (`paid_plan_required`), which is not.
  */
 export function isQuotaExceeded(status, bodyText) {
-  if (status === 402) return true;
+  if (status === 402) return errorCode(bodyText) !== PAID_PLAN_REQUIRED;
   if (status !== 401) return false;
   try {
     const detail = JSON.parse(bodyText)?.detail;
@@ -306,10 +347,18 @@ async function synthesizeOne(inputs, { key, model, fetchImpl, sleep }) {
 
     const detail = await response.text().catch(() => '');
     if (isQuotaExceeded(response.status, detail)) {
-      // Not retried and not a generic failure: the switch falls back on this.
+      // Not retried, and reported by name: the draft's audioError says so.
       throw new ElevenLabsSpeechError(
         `ElevenLabs is out of credit (HTTP ${response.status} quota_exceeded): ${detail.slice(0, 300) || 'no detail'}`,
-        { status: response.status, code: 'quota_exceeded' }
+        { status: response.status, code: QUOTA_EXCEEDED }
+      );
+    }
+    if (response.status === 402) {
+      // What is left of a 402 is the plan refusing a voice or a feature. Not
+      // retried either: a retry cannot change the plan.
+      throw new ElevenLabsSpeechError(
+        `ElevenLabs refused this on the current plan (HTTP 402 ${PAID_PLAN_REQUIRED}); a voice or feature it needs is paid-only: ${detail.slice(0, 300) || 'no detail'}`,
+        { status: 402, code: PAID_PLAN_REQUIRED }
       );
     }
     lastError = new ElevenLabsSpeechError(
@@ -335,7 +384,10 @@ async function synthesizeOne(inputs, { key, model, fetchImpl, sleep }) {
  * @param {Record<string,string>|null} [params.voices] speaker name → voice id
  * @param {object} [params.env]
  * @param {Function} [params.fetchImpl]
- * @returns {Promise<{audio: Buffer, contentType: string, bytes: number, requests: number, model: string, estimatedSeconds: number, promptTokens: number, completionTokens: number, estimatedTokens: boolean}>}
+ * @returns {Promise<{audio: Buffer, contentType: string, bytes: number, requests: number, model: string, estimatedSeconds: number, promptTokens: number, completionTokens: number, estimatedTokens: boolean, characters: number, creditsNeeded: number, subscription: ReturnType<typeof import('./elevenlabs-account.js').normalizeSubscription>}>}
+ *   `subscription` is the account as the pre-flight read it, before this
+ *   render spent anything. Its `tier` and `freePlan` are what the podcast
+ *   records on the transcript. `characters` is the code points posted.
  */
 export async function synthesizeWithElevenLabs({
   dialogue,
@@ -365,6 +417,16 @@ export async function synthesizeWithElevenLabs({
   const chunks = chunkTurnsByCharacters(turns, MAX_CHARACTERS_PER_REQUEST).map((chunk) =>
     buildInputs(chunk, resolvedVoices)
   );
+  const postedCharacters = (inputs) =>
+    inputs.reduce((total, input) => total + characterCount(input.text), 0);
+  const characters = chunks.reduce((total, inputs) => total + postedCharacters(inputs), 0);
+
+  // The pre-flight: read the account and refuse, before the first request,
+  // a job it cannot pay for in full. After the voice check, so a missing
+  // voice still fails with no network call at all; before any dialogue
+  // request, so a refusal spends nothing. A failed read refuses too — see
+  // "Why a failed read fails CLOSED" in elevenlabs-account.js.
+  const subscription = await assertCreditsCover({ key, characters, fetchImpl, sleep });
 
   const parts = [];
   // Per chunk: the API's own count when the `character-cost` header came
@@ -374,26 +436,32 @@ export async function synthesizeWithElevenLabs({
   // chunk had to be counted by us.
   let completionTokens = 0;
   let anyEstimated = false;
-  for (const inputs of chunks) {
-    // Sequential on purpose: the parts are concatenated in order, and a
-    // parallel burst is the reliable way to meet the per-account 429.
-    const { audio, billedCharacters } = await synthesizeOne(inputs, {
-      key,
-      model,
-      fetchImpl,
-      sleep,
-    });
-    parts.push(audio);
-    if (billedCharacters === null) {
-      // Counted over the inputs actually posted — after the chunker trimmed
-      // and split them — not over the dialogue as handed in. This is a
-      // billing row: what was sent is what counts, and a turn's surrounding
-      // whitespace was not sent.
-      completionTokens += inputs.reduce((total, input) => total + characterCount(input.text), 0);
-      anyEstimated = true;
-    } else {
-      completionTokens += billedCharacters;
+  try {
+    for (const inputs of chunks) {
+      // Sequential on purpose: the parts are concatenated in order, and a
+      // parallel burst is the reliable way to meet the per-account 429.
+      const { audio, billedCharacters } = await synthesizeOne(inputs, {
+        key,
+        model,
+        fetchImpl,
+        sleep,
+      });
+      parts.push(audio);
+      if (billedCharacters === null) {
+        // Counted over the inputs actually posted — after the chunker trimmed
+        // and split them — not over the dialogue as handed in. This is a
+        // billing row: what was sent is what counts, and a turn's surrounding
+        // whitespace was not sent.
+        completionTokens += postedCharacters(inputs);
+        anyEstimated = true;
+      } else {
+        completionTokens += billedCharacters;
+      }
     }
+  } finally {
+    // Spent or failed part-way, the cached account no longer says what is
+    // left; the next pre-flight must read it again.
+    invalidateSubscription(key);
   }
 
   const audio = Buffer.concat(parts);
@@ -409,6 +477,9 @@ export async function synthesizeWithElevenLabs({
     promptTokens: 0,
     completionTokens,
     estimatedTokens: anyEstimated,
+    characters,
+    creditsNeeded: creditsNeededFor(characters),
+    subscription,
   };
 }
 

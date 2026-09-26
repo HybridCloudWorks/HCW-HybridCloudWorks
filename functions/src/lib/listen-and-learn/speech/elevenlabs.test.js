@@ -7,8 +7,13 @@
  * usage row must carry what the API says it charged, not what we think we
  * sent; and an account that is out of credit must be reported as exactly
  * that, once, with no retry that would spend nothing and hide the state.
+ *
+ * Since the free plan (2026-09-26) every render reads the account first
+ * (elevenlabs-account.js). So every stub that reaches the network answers
+ * that read through `withAccount`, and the assertions about what was posted
+ * look at the dialogue stub alone. The pre-flight has its own section below.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { COST_TABLE, getCostEstimate } from '../../ai/router.js';
 import { chunkTurns } from './azure.js';
 import {
@@ -17,6 +22,7 @@ import {
   ELEVENLABS_LIMITS,
   ELEVENLABS_OUTPUT_FORMAT,
   MAX_CHARACTERS_PER_REQUEST,
+  PAID_PLAN_REQUIRED,
   buildInputs,
   characterCount,
   chunkTurnsByCharacters,
@@ -25,8 +31,41 @@ import {
   readVoiceOverrides,
   synthesizeWithElevenLabs,
 } from './elevenlabs.js';
+import { SUBSCRIPTION_URL, clearSubscriptionCache } from './elevenlabs-account.js';
 
 const KEYED_ENV = { ELEVENLABS_API_KEY: 'xi-key' };
+
+/** A free-plan account with the whole month left, as the subscription read returns it. */
+const FREE_ACCOUNT = {
+  tier: 'free',
+  status: 'free',
+  character_count: 0,
+  character_limit: 10000,
+  next_character_count_reset_unix: 1792972800, // 2026-10-26T00:00:00Z
+  can_extend_character_limit: false,
+  max_credit_limit_extension: 0,
+};
+
+const accountResponse = (body) => ({
+  ok: true,
+  status: 200,
+  headers: { get: () => null },
+  text: async () => JSON.stringify(body),
+});
+
+/**
+ * Answer the pre-flight's subscription read with `account` and hand every
+ * other call to `dialogue`, so a test's assertions see only what it posted.
+ */
+const withAccount = (dialogue, account = FREE_ACCOUNT) =>
+  vi.fn(async (url, init) =>
+    String(url).startsWith(SUBSCRIPTION_URL) ? accountResponse(account) : dialogue(url, init)
+  );
+
+beforeEach(() => {
+  // Module-level cache: without this one test's account is the next test's.
+  clearSubscriptionCache();
+});
 const isSpeechError = (err) => err?.name === 'SpeechError';
 
 const turn = (speaker, text) => ({ speaker, text });
@@ -105,7 +144,7 @@ describe('voices', () => {
   it('checks every chunk before the first request, so a late turn cannot bill an early one', async () => {
     // A missing voice on the LAST turn of a multi-request dialogue.
     const long = 'word '.repeat(300).trim(); // 1,499 chars → forces a second chunk
-    const fetchImpl = vi.fn(async () => okResponse());
+    const fetchImpl = withAccount(vi.fn(async () => okResponse()));
     await expect(
       synthesizeWithElevenLabs({
         dialogue: [turn('Maya', long), turn('Elena', long), turn('Guest', 'Bye')],
@@ -118,15 +157,15 @@ describe('voices', () => {
   });
 
   it('lets an environment override outrank the default and a caller argument outrank both', async () => {
-    const fetchImpl = vi.fn(async () => okResponse());
+    const dialogue = vi.fn(async () => okResponse());
     await synthesizeWithElevenLabs({
       dialogue: [turn('Maya', 'Hi'), turn('Elena', 'Hello')],
       env: { ...KEYED_ENV, LISTEN_AND_LEARN_VOICE_MAYA: 'envMayaVoice000000000' },
       voices: { Elena: 'callerElenaVoice00000' },
-      fetchImpl,
+      fetchImpl: withAccount(dialogue),
       sleep: noSleep,
     });
-    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    const body = JSON.parse(dialogue.mock.calls[0][1].body);
     expect(body.inputs.map((i) => i.voice_id)).toEqual([
       'envMayaVoice000000000',
       'callerElenaVoice00000',
@@ -136,10 +175,15 @@ describe('voices', () => {
 
 describe('the request', () => {
   it('posts the dialogue endpoint with the key header, the v3 model and the 64 kbps MP3 format', async () => {
-    const fetchImpl = vi.fn(async () => okResponse());
-    await synthesizeWithElevenLabs({ dialogue: DIALOGUE, env: KEYED_ENV, fetchImpl, sleep: noSleep });
+    const dialogue = vi.fn(async () => okResponse());
+    await synthesizeWithElevenLabs({
+      dialogue: DIALOGUE,
+      env: KEYED_ENV,
+      fetchImpl: withAccount(dialogue),
+      sleep: noSleep,
+    });
 
-    const [url, init] = fetchImpl.mock.calls[0];
+    const [url, init] = dialogue.mock.calls[0];
     expect(url).toBe(
       `https://api.elevenlabs.io/v1/text-to-dialogue?output_format=${ELEVENLABS_OUTPUT_FORMAT}`
     );
@@ -157,7 +201,8 @@ describe('the request', () => {
   it('honours its own model override and ignores the shared Gemini one', async () => {
     // A Gemini model id in LISTEN_AND_LEARN_TTS_MODEL must not become this
     // request's model_id the day the ElevenLabs key is seeded.
-    const fetchImpl = vi.fn(async () => okResponse());
+    const dialogue = vi.fn(async () => okResponse());
+    const fetchImpl = withAccount(dialogue);
     await synthesizeWithElevenLabs({
       dialogue: DIALOGUE,
       env: {
@@ -168,16 +213,16 @@ describe('the request', () => {
       fetchImpl,
       sleep: noSleep,
     });
-    expect(JSON.parse(fetchImpl.mock.calls[0][1].body).model_id).toBe('eleven_v4');
+    expect(JSON.parse(dialogue.mock.calls[0][1].body).model_id).toBe('eleven_v4');
 
-    fetchImpl.mockClear();
+    dialogue.mockClear();
     await synthesizeWithElevenLabs({
       dialogue: DIALOGUE,
       env: { ...KEYED_ENV, LISTEN_AND_LEARN_TTS_MODEL: 'gemini-3.1-flash-tts-preview' },
       fetchImpl,
       sleep: noSleep,
     });
-    expect(JSON.parse(fetchImpl.mock.calls[0][1].body).model_id).toBe('eleven_v3');
+    expect(JSON.parse(dialogue.mock.calls[0][1].body).model_id).toBe('eleven_v3');
   });
 
   it('refuses to run without a key, or with an unresolved Key Vault reference as one', async () => {
@@ -208,18 +253,18 @@ describe('chunking at the documented ceiling', () => {
       turn(i % 2 ? 'Elena' : 'Maya', `${String.fromCharCode(65 + i)}`.repeat(750))
     );
     let call = 0;
-    const fetchImpl = vi.fn(async () => okResponse([call++, 0xff]));
+    const posted = vi.fn(async () => okResponse([call++, 0xff]));
 
     const result = await synthesizeWithElevenLabs({
       dialogue,
       env: KEYED_ENV,
-      fetchImpl,
+      fetchImpl: withAccount(posted),
       sleep: noSleep,
     });
 
     // 750 × 2 = 1,500 fits; 750 × 3 = 2,250 does not — so two turns per request.
     expect(result.requests).toBe(6);
-    for (const [, init] of fetchImpl.mock.calls) {
+    for (const [, init] of posted.mock.calls) {
       const total = JSON.parse(init.body).inputs.reduce((n, i) => n + i.text.length, 0);
       expect(total).toBeLessThanOrEqual(MAX_CHARACTERS_PER_REQUEST);
     }
@@ -229,29 +274,29 @@ describe('chunking at the documented ceiling', () => {
   });
 
   it('never splits a speaker change across a request when whole turns fit', async () => {
-    const fetchImpl = vi.fn(async () => okResponse());
+    const posted = vi.fn(async () => okResponse());
     await synthesizeWithElevenLabs({
       dialogue: [turn('Maya', 'a'.repeat(1200)), turn('Elena', 'b'.repeat(1200))],
       env: KEYED_ENV,
-      fetchImpl,
+      fetchImpl: withAccount(posted),
       sleep: noSleep,
     });
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
-    const first = JSON.parse(fetchImpl.mock.calls[0][1].body).inputs;
+    expect(posted).toHaveBeenCalledTimes(2);
+    const first = JSON.parse(posted.mock.calls[0][1].body).inputs;
     expect(first).toHaveLength(1);
     expect(first[0].voice_id).toBe(ELEVENLABS_DEFAULT_VOICES.Maya);
   });
 
   it('splits one over-long turn rather than sending it whole and having it refused', async () => {
-    const fetchImpl = vi.fn(async () => okResponse());
+    const posted = vi.fn(async () => okResponse());
     await synthesizeWithElevenLabs({
       dialogue: [turn('Maya', 'A sentence. '.repeat(250).trim())], // 2,999 chars
       env: KEYED_ENV,
-      fetchImpl,
+      fetchImpl: withAccount(posted),
       sleep: noSleep,
     });
-    expect(fetchImpl.mock.calls.length).toBeGreaterThan(1);
-    for (const [, init] of fetchImpl.mock.calls) {
+    expect(posted.mock.calls.length).toBeGreaterThan(1);
+    for (const [, init] of posted.mock.calls) {
       const inputs = JSON.parse(init.body).inputs;
       for (const input of inputs) {
         expect(input.text.length).toBeLessThanOrEqual(MAX_CHARACTERS_PER_REQUEST);
@@ -304,7 +349,7 @@ describe('chunking at the documented ceiling', () => {
 
 describe('usage and cost', () => {
   it('reports the billed character count from the character-cost header as the output unit', async () => {
-    const fetchImpl = vi.fn(async () => okResponse([1, 2, 3, 4], { characterCost: 27 }));
+    const fetchImpl = withAccount(vi.fn(async () => okResponse([1, 2, 3, 4], { characterCost: 27 })));
     const result = await synthesizeWithElevenLabs({
       dialogue: DIALOGUE,
       env: KEYED_ENV,
@@ -321,7 +366,7 @@ describe('usage and cost', () => {
   });
 
   it('sums the header across chunks', async () => {
-    const fetchImpl = vi.fn(async () => okResponse([1], { characterCost: 1200 }));
+    const fetchImpl = withAccount(vi.fn(async () => okResponse([1], { characterCost: 1200 })));
     const result = await synthesizeWithElevenLabs({
       dialogue: [turn('Maya', 'a'.repeat(1200)), turn('Elena', 'b'.repeat(1200))],
       env: KEYED_ENV,
@@ -339,8 +384,8 @@ describe('usage and cost', () => {
     // and the row is flagged estimated because one chunk had to be (Copilot
     // on #447). Discarding the header would have thrown away a real figure.
     let call = 0;
-    const fetchImpl = vi.fn(async () =>
-      call++ === 0 ? okResponse([1], { characterCost: 1150 }) : okResponse([2])
+    const fetchImpl = withAccount(
+      vi.fn(async () => (call++ === 0 ? okResponse([1], { characterCost: 1150 }) : okResponse([2])))
     );
     const result = await synthesizeWithElevenLabs({
       dialogue: [turn('Maya', 'a'.repeat(1200)), turn('Elena', 'b'.repeat(1200))],
@@ -354,7 +399,7 @@ describe('usage and cost', () => {
   });
 
   it('falls back to its own count, flagged as estimated, when the header is absent', async () => {
-    const fetchImpl = vi.fn(async () => okResponse());
+    const fetchImpl = withAccount(vi.fn(async () => okResponse()));
     const result = await synthesizeWithElevenLabs({
       dialogue: DIALOGUE,
       env: KEYED_ENV,
@@ -376,7 +421,7 @@ describe('usage and cost', () => {
     const viaCount = await synthesizeWithElevenLabs({
       dialogue: padded,
       env: KEYED_ENV,
-      fetchImpl: noHeader,
+      fetchImpl: withAccount(noHeader),
       sleep: noSleep,
     });
     const posted = noHeader.mock.calls.flatMap(([, init]) => JSON.parse(init.body).inputs);
@@ -389,7 +434,7 @@ describe('usage and cost', () => {
     const viaHeader = await synthesizeWithElevenLabs({
       dialogue: padded,
       env: KEYED_ENV,
-      fetchImpl: withHeader,
+      fetchImpl: withAccount(withHeader),
       sleep: noSleep,
     });
     expect(viaHeader.completionTokens).toBe(21);
@@ -405,7 +450,7 @@ describe('usage and cost', () => {
 
   it('derives the duration from the byte count, because the stream is constant-bitrate', async () => {
     // 64 kbps → 8,000 bytes per second.
-    const fetchImpl = vi.fn(async () => okResponse(new Array(80_000).fill(0)));
+    const fetchImpl = withAccount(vi.fn(async () => okResponse(new Array(80_000).fill(0))));
     const result = await synthesizeWithElevenLabs({
       dialogue: DIALOGUE,
       env: KEYED_ENV,
@@ -427,24 +472,212 @@ describe('out of credit', () => {
     expect(isQuotaExceeded(500, QUOTA_BODY)).toBe(false);
   });
 
+  it('reads the current `code` field as well as the legacy `status`', () => {
+    // "status … is a legacy field that is no longer used, instead use the
+    // code property" (ElevenLabs, Errors).
+    expect(isQuotaExceeded(401, JSON.stringify({ detail: { code: 'quota_exceeded' } }))).toBe(true);
+    expect(
+      isQuotaExceeded(402, JSON.stringify({ detail: { type: 'payment_required', code: 'insufficient_credits' } }))
+    ).toBe(true);
+  });
+
+  it('does not read a 402 paid_plan_required as an empty account', () => {
+    // What a free-plan key gets for a Voice Library voice. The account has
+    // credits; telling the owner to top up would be wrong.
+    const body = JSON.stringify({
+      detail: {
+        type: 'payment_required',
+        code: 'paid_plan_required',
+        message: 'Free users cannot use library voices via the API.',
+        status: 'payment_required',
+      },
+    });
+    expect(isQuotaExceeded(402, body)).toBe(false);
+  });
+
   it('surfaces it once, with the status and a code, and does not retry', async () => {
-    const fetchImpl = vi.fn(async () => errorResponse(401, QUOTA_BODY));
+    const posted = vi.fn(async () => errorResponse(401, QUOTA_BODY));
+    const sleep = vi.fn(async () => {});
     let caught;
     try {
-      await synthesizeWithElevenLabs({ dialogue: DIALOGUE, env: KEYED_ENV, fetchImpl, sleep: noSleep });
+      await synthesizeWithElevenLabs({
+        dialogue: DIALOGUE,
+        env: KEYED_ENV,
+        fetchImpl: withAccount(posted),
+        sleep,
+      });
     } catch (err) {
       caught = err;
     }
     expect(isSpeechError(caught)).toBe(true);
     expect(caught).toMatchObject({ provider: 'elevenlabs', status: 401, code: 'quota_exceeded' });
     expect(caught.message).toMatch(/out of credit/);
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
-    expect(noSleep).not.toHaveBeenCalled();
+    expect(caught.details).toBeUndefined(); // the API's refusal, not the pre-flight's
+    expect(posted).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
   });
 
   it('does not mistake a rejected key for an empty account', async () => {
-    const fetchImpl = vi.fn(async () =>
+    const posted = vi.fn(async () =>
       errorResponse(401, JSON.stringify({ detail: { status: 'invalid_api_key' } }))
+    );
+    let caught;
+    try {
+      await synthesizeWithElevenLabs({
+        dialogue: DIALOGUE,
+        env: KEYED_ENV,
+        fetchImpl: withAccount(posted),
+        sleep: noSleep,
+      });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toMatchObject({ status: 401, code: null });
+    expect(caught.message).toMatch(/ElevenLabs HTTP 401/);
+    expect(posted).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a paid-only voice as the plan, once, not as out of credit', async () => {
+    const posted = vi.fn(async () =>
+      errorResponse(
+        402,
+        JSON.stringify({
+          detail: {
+            code: 'paid_plan_required',
+            message: 'Free users cannot use library voices via the API.',
+          },
+        })
+      )
+    );
+    let caught;
+    try {
+      await synthesizeWithElevenLabs({
+        dialogue: DIALOGUE,
+        env: KEYED_ENV,
+        fetchImpl: withAccount(posted),
+        sleep: noSleep,
+      });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toMatchObject({ provider: 'elevenlabs', status: 402, code: PAID_PLAN_REQUIRED });
+    expect(caught.message).toMatch(/refused this on the current plan/);
+    expect(caught.message).toMatch(/Free users cannot use library voices/);
+    expect(caught.message).not.toMatch(/out of credit/);
+    expect(posted).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('the credit pre-flight', () => {
+  const account = (over = {}) => ({ ...FREE_ACCOUNT, ...over });
+
+  it('reads the subscription with the key before the first dialogue request', async () => {
+    const posted = vi.fn(async () => okResponse());
+    const fetchImpl = withAccount(posted);
+    await synthesizeWithElevenLabs({ dialogue: DIALOGUE, env: KEYED_ENV, fetchImpl, sleep: noSleep });
+
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe('https://api.elevenlabs.io/v1/user/subscription');
+    expect(init.method).toBe('GET');
+    expect(init.headers['xi-api-key']).toBe('xi-key');
+    expect(String(fetchImpl.mock.calls[1][0])).toMatch(/text-to-dialogue/);
+  });
+
+  it('refuses a job the credits left cannot pay for in full, sending nothing', async () => {
+    // 1,000 credits left and a 2,400-character job: the render would run dry
+    // part-way. The sentence names all three figures and the reset date.
+    const posted = vi.fn(async () => okResponse());
+    let caught;
+    try {
+      await synthesizeWithElevenLabs({
+        dialogue: [turn('Maya', 'a'.repeat(1200)), turn('Elena', 'b'.repeat(1200))],
+        env: KEYED_ENV,
+        fetchImpl: withAccount(posted, account({ character_count: 9000 })),
+        sleep: noSleep,
+      });
+    } catch (err) {
+      caught = err;
+    }
+    expect(posted).not.toHaveBeenCalled();
+    expect(caught).toMatchObject({
+      name: 'SpeechError',
+      provider: 'elevenlabs',
+      status: null,
+      code: 'quota_exceeded',
+    });
+    expect(caught.details).toMatchObject({ preflight: true, needed: 2400, left: 1000, limit: 10000 });
+    expect(caught.message).toBe(
+      'ElevenLabs has 1,000 credits left of 10,000, this episode needs 2,400; ' +
+        'the allowance resets on 2026-10-26 (UTC). Nothing was sent, so no credits were spent.'
+    );
+  });
+
+  it('counts the characters actually posted, trimmed, at one credit each', async () => {
+    // 'Hello there' + 'Hi back' + 'And so' = 24 characters. 23 left refuses,
+    // 24 left renders: the boundary is exact, not padded.
+    const tight = [turn('Maya', '  Hello there '), turn('Elena', 'Hi back'), turn('Maya', 'And so')];
+    await expect(
+      synthesizeWithElevenLabs({
+        dialogue: tight,
+        env: KEYED_ENV,
+        fetchImpl: withAccount(vi.fn(), account({ character_count: 10000 - 23 })),
+        sleep: noSleep,
+      })
+    ).rejects.toMatchObject({ code: 'quota_exceeded' });
+
+    clearSubscriptionCache();
+    const posted = vi.fn(async () => okResponse());
+    const result = await synthesizeWithElevenLabs({
+      dialogue: tight,
+      env: KEYED_ENV,
+      fetchImpl: withAccount(posted, account({ character_count: 10000 - 24 })),
+      sleep: noSleep,
+    });
+    expect(posted).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ characters: 24, creditsNeeded: 24 });
+  });
+
+  it('counts usage-based billing as headroom only when the account has opted in', async () => {
+    const job = [turn('Maya', 'a'.repeat(1200)), turn('Elena', 'b'.repeat(1200))];
+    const nearlySpent = { tier: 'creator', status: 'active', character_count: 120_000, character_limit: 121_000 };
+
+    // Entitled, and an admin set an extension of 5,000: 1,000 + 5,000 covers 2,400.
+    const posted = vi.fn(async () => okResponse());
+    await synthesizeWithElevenLabs({
+      dialogue: job,
+      env: KEYED_ENV,
+      fetchImpl: withAccount(
+        posted,
+        account({ ...nearlySpent, can_extend_character_limit: true, max_credit_limit_extension: 5000 })
+      ),
+      sleep: noSleep,
+    });
+    expect(posted).toHaveBeenCalledTimes(2);
+
+    // Entitled but the extension is 0 ("usage-based billing is disabled").
+    clearSubscriptionCache();
+    await expect(
+      synthesizeWithElevenLabs({
+        dialogue: job,
+        env: KEYED_ENV,
+        fetchImpl: withAccount(
+          vi.fn(),
+          account({ ...nearlySpent, can_extend_character_limit: true, max_credit_limit_extension: 0 })
+        ),
+        sleep: noSleep,
+      })
+    ).rejects.toMatchObject({ code: 'quota_exceeded' });
+  });
+
+  it('fails closed, sending nothing, when the key cannot read the subscription', async () => {
+    const posted = vi.fn(async () => okResponse());
+    const fetchImpl = vi.fn(async (url, init) =>
+      String(url).startsWith(SUBSCRIPTION_URL)
+        ? errorResponse(
+            401,
+            JSON.stringify({ detail: { status: 'missing_permissions', message: 'user_read' } })
+          )
+        : posted(url, init)
     );
     let caught;
     try {
@@ -452,52 +685,92 @@ describe('out of credit', () => {
     } catch (err) {
       caught = err;
     }
-    expect(caught).toMatchObject({ status: 401, code: null });
-    expect(caught.message).toMatch(/ElevenLabs HTTP 401/);
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(posted).not.toHaveBeenCalled();
+    expect(caught).toMatchObject({ provider: 'elevenlabs', status: 401, code: 'subscription_unavailable' });
+    expect(caught.message).toMatch(/User → Read permission \(user_read\)/);
+    expect(caught.message).toMatch(/nothing was sent, so no credits were spent/);
+  });
+
+  it('returns the plan the audio was rendered on, as the pre-flight read it', async () => {
+    const result = await synthesizeWithElevenLabs({
+      dialogue: DIALOGUE,
+      env: KEYED_ENV,
+      fetchImpl: withAccount(vi.fn(async () => okResponse([1], { characterCost: 24 }))),
+      sleep: noSleep,
+    });
+    expect(result.subscription).toMatchObject({
+      tier: 'free',
+      freePlan: true,
+      creditsLeft: 10000,
+      creditLimit: 10000,
+      resetAt: '2026-10-26T00:00:00.000Z',
+    });
+  });
+
+  it('reads the account again after a render, so the next pre-flight sees the spend', async () => {
+    const fetchImpl = withAccount(vi.fn(async () => okResponse()));
+    await synthesizeWithElevenLabs({ dialogue: DIALOGUE, env: KEYED_ENV, fetchImpl, sleep: noSleep });
+    await synthesizeWithElevenLabs({ dialogue: DIALOGUE, env: KEYED_ENV, fetchImpl, sleep: noSleep });
+    const reads = fetchImpl.mock.calls.filter(([url]) => String(url).startsWith(SUBSCRIPTION_URL));
+    expect(reads).toHaveLength(2);
   });
 });
 
 describe('retries', () => {
   it('retries 429 and 5xx, then succeeds', async () => {
     const responses = [errorResponse(429, 'slow down'), errorResponse(503, ''), okResponse([9])];
-    const fetchImpl = vi.fn(async () => responses.shift());
+    const posted = vi.fn(async () => responses.shift());
     const sleep = vi.fn(async () => {});
     const result = await synthesizeWithElevenLabs({
       dialogue: DIALOGUE,
       env: KEYED_ENV,
-      fetchImpl,
+      fetchImpl: withAccount(posted),
       sleep,
     });
     expect([...result.audio]).toEqual([9]);
-    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(posted).toHaveBeenCalledTimes(3);
     expect(sleep).toHaveBeenCalledTimes(2);
   });
 
   it('gives up after three attempts with the last status attached', async () => {
-    const fetchImpl = vi.fn(async () => errorResponse(500, 'boom'));
+    const posted = vi.fn(async () => errorResponse(500, 'boom'));
     await expect(
-      synthesizeWithElevenLabs({ dialogue: DIALOGUE, env: KEYED_ENV, fetchImpl, sleep: noSleep })
+      synthesizeWithElevenLabs({
+        dialogue: DIALOGUE,
+        env: KEYED_ENV,
+        fetchImpl: withAccount(posted),
+        sleep: noSleep,
+      })
     ).rejects.toMatchObject({ name: 'SpeechError', status: 500, provider: 'elevenlabs' });
-    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(posted).toHaveBeenCalledTimes(3);
   });
 
   it('does not retry a 400', async () => {
-    const fetchImpl = vi.fn(async () => errorResponse(400, 'bad inputs'));
+    const posted = vi.fn(async () => errorResponse(400, 'bad inputs'));
     await expect(
-      synthesizeWithElevenLabs({ dialogue: DIALOGUE, env: KEYED_ENV, fetchImpl, sleep: noSleep })
+      synthesizeWithElevenLabs({
+        dialogue: DIALOGUE,
+        env: KEYED_ENV,
+        fetchImpl: withAccount(posted),
+        sleep: noSleep,
+      })
     ).rejects.toThrow(/HTTP 400/);
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(posted).toHaveBeenCalledTimes(1);
   });
 
   it('retries a network failure and reports it if it persists', async () => {
-    const fetchImpl = vi.fn(async () => {
+    const posted = vi.fn(async () => {
       throw new Error('ECONNRESET');
     });
     await expect(
-      synthesizeWithElevenLabs({ dialogue: DIALOGUE, env: KEYED_ENV, fetchImpl, sleep: noSleep })
+      synthesizeWithElevenLabs({
+        dialogue: DIALOGUE,
+        env: KEYED_ENV,
+        fetchImpl: withAccount(posted),
+        sleep: noSleep,
+      })
     ).rejects.toThrow(/Failed to reach ElevenLabs: ECONNRESET/);
-    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(posted).toHaveBeenCalledTimes(3);
   });
 });
 

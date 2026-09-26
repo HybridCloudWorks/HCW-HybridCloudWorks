@@ -242,6 +242,12 @@ export function toTranscriptDocFor({ source, script, audio, now }) {
     audioBytes: audio?.bytes || null,
     speechProvider: audio?.speechProvider || null,
     speechModel: audio?.speechModel || null,
+    // The ElevenLabs plan the audio was rendered on, as the pre-flight read
+    // it (ADR 0029 §2a, 2026-09-26). Approval decides from these: free-plan
+    // audio has no commercial licence and is not published
+    // (speech-licence.js). Null when no provider reported a plan.
+    speechTier: audio?.speechTier ?? null,
+    speechFreePlan: typeof audio?.speechFreePlan === 'boolean' ? audio.speechFreePlan : null,
     durationSeconds: audio?.durationSeconds ?? null,
     // Set when the script generated but the audio did not — no speech key,
     // a rejected one, or a blob container Terraform has not created yet. The

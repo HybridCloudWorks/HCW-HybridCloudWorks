@@ -143,6 +143,21 @@ describe('hostSkipFor', () => {
     // No configuration object at all is not "not configured".
     expect(hostSkipFor(doc(), undefined)).toBeNull();
   });
+
+  it('skips ElevenLabs free-plan audio as free_plan_licence, naming the licence (2026-09-26)', () => {
+    const free = doc({ speechProvider: 'elevenlabs', speechTier: 'free', speechFreePlan: true });
+    const skip = hostSkipFor(free, CONFIGURED);
+    expect(skip.skipped).toBe(HOST_SKIP.freePlanLicence);
+    expect(HOST_SKIP.freePlanLicence).toBe('free_plan_licence');
+    expect(skip.reason).toMatch(/no commercial licence/);
+    expect(skip.reason).toMatch(/Upgrade to a paid ElevenLabs plan/);
+    // Configuration and audio are still named first: they are the nearer fix.
+    expect(hostSkipFor(free, NOT_CONFIGURED).skipped).toBe(HOST_SKIP.notConfigured);
+    // A paid-plan render publishes as before.
+    expect(
+      hostSkipFor(doc({ speechProvider: 'elevenlabs', speechTier: 'creator', speechFreePlan: false }), CONFIGURED)
+    ).toBeNull();
+  });
 });
 
 describe('scheduleHostPublish', () => {
@@ -449,6 +464,46 @@ describe('runHostPublish', () => {
     store = makeStore({ readDoc: vi.fn(async () => doc({ audioPath: null })) });
     expect((await run(store, client)).skipped).toBe('no_audio');
     expect(client.createPresignedUpload).not.toHaveBeenCalled();
+  });
+
+  it('never uploads ElevenLabs free-plan audio, even for a transcript that is published', async () => {
+    // Approval refuses these (handlers.js); the job is the second guard, for
+    // a document that became published some other way.
+    const store = makeStore({
+      readDoc: vi.fn(async () =>
+        doc({
+          speechProvider: 'elevenlabs',
+          speechTier: 'free',
+          speechFreePlan: true,
+          host: { rsscom: { pending: true, jobId: 'j' } },
+        })
+      ),
+    });
+    const client = makeClient();
+    const untouched = vi.fn();
+    const record = await run(store, client, { readAudio: untouched });
+    expect(record).toEqual({
+      skipped: 'free_plan_licence',
+      reason: expect.stringMatching(/rendered on the ElevenLabs free plan/),
+      lastAttemptAt: AT,
+      error: null,
+    });
+    expect(untouched).not.toHaveBeenCalled();
+    expect(client.createPresignedUpload).not.toHaveBeenCalled();
+    expect(client.createEpisode).not.toHaveBeenCalled();
+    expect(Object.keys(hostPatch(store))).toEqual(['host']);
+  });
+
+  it('publishes ElevenLabs audio rendered on a paid plan exactly as before', async () => {
+    const store = makeStore({
+      readDoc: vi.fn(async () =>
+        doc({ speechProvider: 'elevenlabs', speechTier: 'creator', speechFreePlan: false })
+      ),
+    });
+    const client = makeClient();
+    const record = await run(store, client);
+    expect(client.createEpisode).toHaveBeenCalledTimes(1);
+    expect(record).toMatchObject({ episodeId: 9001, error: null });
   });
 
   it('throws when the transcript does not exist — there is nothing to record on — without naming it', async () => {

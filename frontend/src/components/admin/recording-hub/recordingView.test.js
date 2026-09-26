@@ -82,6 +82,10 @@ describe('describeSkip', () => {
   it('falls back to a readable phrase per code', () => {
     expect(describeSkip({ skipped: 'no_audio' })).toContain('no audio');
     expect(describeSkip({ skipped: 'not_configured' })).toContain('RSSCOM_API_KEY');
+    // The job's guard for ElevenLabs free-plan audio (2026-09-26).
+    expect(describeSkip({ skipped: 'free_plan_licence' })).toMatch(
+      /ElevenLabs free plan, which has no commercial licence/
+    );
   });
 
   it('never renders an object, and is empty for no host', () => {

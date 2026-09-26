@@ -183,8 +183,10 @@ export const SECRET_CATALOG = Object.freeze([
     label: 'ElevenLabs',
     // The podcast voice ONLY — article and Plaud transcripts to RSS.com
     // (ADR 0029 §2a, scoped by §2b); never Listen & Learn, which is Gemini
-    // TTS. A re-minted key needs an app restart to take effect.
-    help: 'API key. Reads podcast episodes aloud. Around $0.10 per 1,000 characters, so it is used for the podcast only.',
+    // TTS. A re-minted key needs an app restart to take effect. On the free
+    // plan from 2026-09-26 (§2a amended); the permissions are the two the
+    // podcast needs, see docs/standards/required-inputs.md.
+    help: 'API key. Reads podcast episodes aloud. Create it restricted to Text to Speech (Access) and User (Read), with a credit limit. Free plan: 10,000 credits a month, one per character, and free-plan episodes are not published.',
     probe: null,
   },
   {

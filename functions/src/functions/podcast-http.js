@@ -14,13 +14,20 @@
  * carry the queue output binding, and both answer 202 with the job id when a
  * publish is in flight. Nothing on this surface writes `podcasts`: the feed
  * is the ingest boundary and the timer reads it.
+ *
+ * The podcast voice's own two routes sit here too (#432, 2026-09-26): the
+ * ElevenLabs plan and credits for the Audio tab, and the ~300-character live
+ * check (lib/podcast/elevenlabs-admin.js).
  */
 import { output } from '@azure/functions';
 import { httpRoute } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
 import { queryDocs, readDoc, upsertDoc, patchDoc } from '../lib/cosmos-client.js';
+import { uploadBlob } from '../lib/blob-storage.js';
+import { getCostEstimate } from '../lib/ai/router.js';
 import { JOBS_QUEUE } from '../lib/jobs.js';
 import { createPodcastHandlers } from '../lib/podcast/handlers.js';
+import { createElevenLabsHandlers } from '../lib/podcast/elevenlabs-admin.js';
 
 const queueOutput = output.storageQueue({
   queueName: JOBS_QUEUE,
@@ -83,4 +90,30 @@ httpRoute('getPodcastTranscript', {
   authLevel: 'anonymous',
   route: 'cms/podcast/transcripts/{id}',
   handler: (request, context) => handlers().getTranscript(request, context),
+});
+
+const elevenLabs = () =>
+  createElevenLabsHandlers({
+    guard: getDefaultGuard(),
+    store: { queryDocs, upsertDoc },
+    storage: { uploadBlob },
+    ai: { getCostEstimate },
+  });
+
+// The Audio tab's ElevenLabs card: plan, credits used / limit, reset date,
+// what the last render billed. "Not configured" is a 200, not an error.
+httpRoute('getElevenLabsStatus', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'cms/podcast/elevenlabs',
+  handler: (request, context) => elevenLabs().getStatus(request, context),
+});
+
+// The owner's live check: a fixed two-turn sample under 300 characters,
+// through the same path an episode takes. The caller sends no text.
+httpRoute('renderElevenLabsSample', {
+  methods: ['POST'],
+  authLevel: 'anonymous',
+  route: 'cms/podcast/elevenlabs/sample',
+  handler: (request, context) => elevenLabs().renderSample(request, context),
 });
