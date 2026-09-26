@@ -68,10 +68,14 @@ jobs:
         with:
           persist-credentials: false
 
+      # Node.js 24: the line the Function App runs (runtime_version in
+      # infra/functionapp.tf), the newest Flex Consumption supports. The
+      # package is built and its dependencies installed here, so the two
+      # must agree; scripts/version-floors.json holds both at 24 (#715).
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: '22'
+          node-version: '24'
           # No npm cache here (#563). A production deploy must build from a clean
           # npm install, not restore a cache another workflow run could have
           # written: a poisoned cache would ship straight to production.

@@ -55,8 +55,11 @@ and retained only in the archived plans and historical Wiki pages.
 
 ## Local development
 
-Requirements: Node.js 22+, npm 10+, Git, and the relevant Azure Functions or
-Terraform CLI when working on those components.
+Requirements: Node.js 26 (26.8.0 or later) for `frontend/` and `scripts/`,
+Node.js 24 (24.19.0 or later) for `functions/`, the newest line Azure
+Functions Flex Consumption supports, npm 10+, Git, and the relevant Azure
+Functions or Terraform CLI when working on those components. The floors are
+in `scripts/version-floors.json`, and CI fails a pin below them.
 
 ```powershell
 cd frontend

@@ -144,7 +144,7 @@ jobs:
         if: steps.token.outputs.armed == 'true'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: '22'
+          node-version: '26'
 
       # No `npm ci`: check-tfc-plan.mjs imports only assert-expected-plan.mjs
       # and uses global fetch. Installing the package's Cosmos and Identity

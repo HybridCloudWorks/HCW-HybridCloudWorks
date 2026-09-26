@@ -8,6 +8,6 @@
     "test": "node --test"
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=26.8.0"
   }
 }

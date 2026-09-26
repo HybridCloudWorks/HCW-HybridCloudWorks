@@ -57,13 +57,22 @@ jobs:
             format: npm run format:check
             build: npm run build
             test: npm test
+          # Node.js 24, not 26: Azure Functions Flex Consumption runs 22 and
+          # 24 only, so the tests run on the line production runs. Every other
+          # row takes the step's default, the newest line. Both are held there
+          # by scripts/version-floors.json (#715).
           - name: functions (azure)
             dir: functions
+            node-version: '24'
             filter: '^(functions/|\.azure/api-surface\.json|infra/|docs/content/blog-machine\.md)'
             test: npm test
+          # The out-of-tree entries after infra/ are what
+          # version-floors.test.mjs reads (#715): every package.json and
+          # Dockerfile, the lab host's and the lab image's pins, and every
+          # Terraform root's required_version.
           - name: scripts (operations)
             dir: scripts
-            filter: '^(scripts/|\.github/workflows/|infra/)'
+            filter: '^(scripts/|\.github/workflows/|infra/|infra-lab/|lab-host/|lab-image/|([^/]+/)*package\.json$|([^/]+/)*Dockerfile|frontend/src/lib/landingZone/avmVersions\.js$)'
             lint: npm run lint
             test: npm test
           # vps-agent shells out to `docker run` with a payload that reached
@@ -127,11 +136,13 @@ jobs:
             echo "no relevant change — skipping checks, still reporting this context"
           fi
 
+      # A row's own node-version wins; a row without one gets the newest
+      # line, so a new row cannot fall back to whatever the runner ships.
       - name: Set up Node.js
         if: steps.changes.outputs.relevant == 'true'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: '22'
+          node-version: ${{ matrix.node-version || '26' }}
           cache: npm
           cache-dependency-path: ${{ matrix.dir }}/package-lock.json
 
@@ -287,7 +298,7 @@ jobs:
         if: steps.changes.outputs.relevant == 'true'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: '22'
+          node-version: '26'
 
       - name: Template hardening test
         if: steps.changes.outputs.relevant == 'true'
