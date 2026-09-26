@@ -193,6 +193,18 @@ enables it.
 
 - This change is merged to `main`, and the host has been provisioned and has
   run `bootstrap.sh` at least once (`lab-host/README.md`, "First run").
+- The host runs Ubuntu 26.04 LTS on x86-64 (owner decision 2026-09-26).
+  Microsoft Learn lists Ubuntu 26.04 on x86-64 (not Arm64) as supported for
+  [Arc-enabled servers](https://learn.microsoft.com/azure/azure-arc/servers/prerequisites#supported-operating-systems)
+  and Ubuntu 26.04 LTS as supported by the
+  [Azure Monitor Agent](https://learn.microsoft.com/azure/azure-monitor/agents/azure-monitor-agent-supported-operating-systems),
+  both read 2026-09-26, so there is no support gap for steps 6 to 10. The
+  `arc` role installs `azcmagent` from `packages.microsoft.com/ubuntu/26.04/prod`,
+  which Microsoft signs with `microsoft-2025.asc` rather than the older
+  `microsoft.asc`; the role picks the key, and its pinned checksum, by
+  release. On 2026-09-26 the role installed and held `azcmagent
+  1.68.03532.1399` on a systemd Ubuntu 26.04 container and failed closed on
+  the missing vault values, which is what step 6 does if step 5 was skipped.
 - Run the PowerShell steps in **one** PowerShell window: later steps reuse
   `$sp`, `$rgId` and the other values the earlier ones compute. If the window
   is closed, the step that needs a value says how to recompute it.

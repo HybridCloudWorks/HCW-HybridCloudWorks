@@ -16,7 +16,8 @@ argument_specs:
         required: true
         description:
           - Exact apt version string for docker-ce and docker-ce-cli, for example
-            "5:29.8.1-1~ubuntu.24.04~noble".
+            "5:29.8.1-1~ubuntu.26.04~resolute". The string names the Ubuntu release, so
+            group_vars/all.yml picks it from a per-release map, docker_release_pins.
       docker_containerd_version:
         type: str
         required: true

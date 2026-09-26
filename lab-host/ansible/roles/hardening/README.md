@@ -27,8 +27,9 @@ the admin Labs page's Setup tab used to ask the owner to do by hand.
    not.
 4. `unattended-upgrades` with `Automatic-Reboot` at
    `hardening_unattended_reboot_time`.
-5. A fail2ban `sshd` jail on the systemd backend (Ubuntu 24.04 has no
-   `/var/log/auth.log` by default).
+5. A fail2ban `sshd` jail on the systemd backend, which reads sshd's
+   journal directly, so the jail works on 26.04 and 24.04 whether or not
+   rsyslog is installed to write `/var/log/auth.log`.
 
 ## Variables
 
