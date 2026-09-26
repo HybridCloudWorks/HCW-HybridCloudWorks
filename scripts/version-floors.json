@@ -81,6 +81,24 @@
       "floor": "18.4",
       "checkedOn": "2026-09-26",
       "source": "https://endoflife.date/api/v1/products/postgresql/"
+    },
+    "vault": {
+      "rule": "HashiCorp Vault's newest release line, no more than two patch releases behind that line's newest (N-2 patches). A new line is adopted the day it is released, with no wait for its N-2 patch: HashiCorp ends the previous community line then (endoflife.date dates the end of life of 2.0 and 1.21 to 2026-08-31 and 2026-04-13, the dates it gives for the releases of 2.1 and 2.0), so waiting would hold the pin on an unsupported line. A line whose latest release is not MAJOR.MINOR.PATCH is skipped. The pin is vault_version in lab-host/ansible/group_vars/all.yml, which must be exactly MAJOR.MINOR.PATCH because the vault role builds the download and SHA256SUMS names from it. api.releases.hashicorp.com agreed on 2026-09-26 (2.1.1, 2026-09-16, the newest community release). Owner decision 2026-09-26: Vault on the lab host.",
+      "line": "2.1",
+      "newest": "2.1.1",
+      "floor": "2.1.0",
+      "checkedOn": "2026-09-26",
+      "source": "https://endoflife.date/api/v1/products/hashicorp-vault/"
+    }
+  },
+  "unsourced": {
+    "$comment": "Things the repository pins that no endoflife.date product covers. Each says so rather than borrowing another source: every floor under kinds comes from endoflife.date's v1 API, which is what the weekly workflow reads. Nothing here is judged or moved by a script; each pin moves by hand.",
+    "portainer": {
+      "pin": "lab-host/ansible/group_vars/all.yml > portainer_image_tag",
+      "rule": "The newest LTS release of Portainer Business Edition. Portainer publishes LTS and STS lines; an STS line is superseded within weeks and gets no patch releases after that, so the pin follows LTS. Owner decision 2026-09-26: Portainer on the lab host.",
+      "source": null,
+      "why": "endoflife.date has no Portainer product: https://endoflife.date/api/v1/products/portainer/ answered HTTP 404 on 2026-09-26. Releases are read by hand from https://github.com/portainer/portainer/releases, whose release titles say LTS or STS (2.45.1 LTS, 2026-09-17, was the newest on 2026-09-26); lab-host/ansible/roles/portainer/README.md, \"Bumping the pin\", has the lines.",
+      "checkedOn": "2026-09-26"
     }
   }
 }

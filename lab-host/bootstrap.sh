@@ -259,7 +259,9 @@ find_other_workloads() {
       case "${address}" in
         *:22 | 127.0.0.53:53 | 127.0.0.53%*:53 | 127.0.0.54:53) continue ;;
       esac
-      printf 'TCP listener on %s %s\n' "${address}" "${process:-(process not shown)}"
+      # users:(("nginx",pid=812,fd=6),...) -> nginx
+      process="$(printf '%s' "${process}" | sed -n 's/^users:(("\([^"]*\)".*/\1/p')"
+      printf 'TCP listener on %s (%s)\n' "${address}" "${process:-process not shown}"
     done < <(ss -Hltnp 2>/dev/null)
   fi
   return 0
@@ -275,7 +277,7 @@ else
       echo "[bootstrap] refusing to configure this host: it shows signs of other workloads, and bootstrap.sh has never run here (no ${HCW_HOST_MARKER})."
       echo "[bootstrap] found:"
       printf '%s\n' "${hcw_findings}" | sed 's/^/[bootstrap]   - /'
-      echo "[bootstrap] nothing has been changed. A run would upgrade and restart Docker, enable ufw with only TCP 22, 80 and 443 open, and replace sshd's login settings, whatever the workloads above need."
+      echo "[bootstrap] nothing has been changed. A run would move Docker to its pinned version and restart it, enable ufw with only TCP 22, 80 and 443 open, and replace sshd's login settings, whatever the workloads above need."
       echo "[bootstrap] either reinstall the server with Ubuntu 26.04 LTS and run this again (docs/runbooks/labs-host.md, \"Reinstalling the host\"),"
       echo "[bootstrap] or, only if every item above is meant to stay and may be disrupted, accept the host knowingly:"
       echo "[bootstrap]   HCW_ADOPT_NONEMPTY_HOST=1 ${hcw_script_dir}/bootstrap.sh"

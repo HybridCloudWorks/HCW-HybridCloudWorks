@@ -117,6 +117,52 @@ describe("reading the lab host's PostgreSQL pin", () => {
   });
 });
 
+describe("reading the lab host's HashiCorp Vault pin", () => {
+  const dir = mkdtempSync(join(tmpdir(), 'version-floors-vault-'));
+  mkdirSync(join(dir, 'lab-host', 'ansible', 'group_vars'), { recursive: true });
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  /** readLabHost on a group_vars holding `lines`, cut to the vault kind. */
+  const vaultOf = (lines) => {
+    writeFileSync(join(dir, 'lab-host', 'ansible', 'group_vars', 'all.yml'), `${['---', ...lines].join('\n')}\n`);
+    const { pins, problems } = readLabHost(dir);
+    const own = (p) => p.kind === 'vault';
+    return { pins: pins.filter(own), problems: problems.filter(own) };
+  };
+
+  it('reads vault_version as MAJOR.MINOR.PATCH, quoted or not, and not vault_enabled or the checksums', () => {
+    for (const value of ['"2.1.1"', "'2.1.1'", '2.1.1']) {
+      const { pins, problems } = vaultOf(['vault_enabled: false', `vault_version: ${value}`, 'vault_checksum: sha256:00']);
+      expect(problems).toEqual([]);
+      expect(pins).toEqual([
+        {
+          file: 'lab-host/ansible/group_vars/all.yml',
+          line: 3,
+          where: 'lab-host/ansible/group_vars/all.yml > vault_version',
+          kind: 'vault',
+          raw: '2.1.1',
+          version: '2.1.1',
+        },
+      ]);
+    }
+  });
+
+  it('refuses a line-only version, a release candidate and a tag, and says why', () => {
+    for (const value of ['"2.1"', '"2.2.0-rc1"', 'latest', '"v2.1.1"']) {
+      const { pins, problems } = vaultOf([`vault_version: ${value}`]);
+      expect(pins).toEqual([]);
+      expect(problems).toHaveLength(1);
+      expect(problems[0].message).toMatch(/is not a release as MAJOR\.MINOR\.PATCH/);
+    }
+  });
+
+  it('reports a missing pin rather than passing on nothing', () => {
+    const { pins, problems } = vaultOf(['vault_enabled: false']);
+    expect(pins).toEqual([]);
+    expect(problems.map((p) => p.message)).toEqual(['vault_version is missing']);
+  });
+});
+
 describe('npm engines ranges', () => {
   it('finds the lowest version a range admits', () => {
     expect(npmRangeMinimum('>=26.8.0')).toBe('26.8.0');
@@ -328,13 +374,24 @@ describe('the rules', () => {
     expect(judge(at({ kind: 'postgresql', version: '17.11' }), floors)).toMatch(/below the floor 18\.4/);
     expect(judge(at({ kind: 'postgresql', version: '16.15' }), floors)).toMatch(/below the floor 18\.4/);
   });
+
+  it('holds the Vault pin to the newest line, at most two patch releases behind', () => {
+    expect(judge(at({ kind: 'vault', version: '2.1.1' }), floors)).toBe(null);
+    expect(judge(at({ kind: 'vault', version: '2.1.0' }), floors)).toBe(null);
+    expect(judge(at({ kind: 'vault', version: '2.0.4' }), floors)).toMatch(/2\.0\.4 is below the floor 2\.1\.0/);
+    expect(judge(at({ kind: 'vault', version: '1.17.5' }), floors)).toMatch(/below the floor 2\.1\.0/);
+  });
+
+  it('has no floor for Portainer, because it has no source', () => {
+    expect(judge(at({ kind: 'portainer', version: '2.45.1' }), floors)).toMatch(/no floor is recorded for kind "portainer"/);
+  });
 });
 
 describe('scripts/version-floors.json', () => {
   const kinds = floors.kinds;
 
   it('has one entry per kind, each dated and sourced', () => {
-    expect(Object.keys(kinds).sort()).toEqual(['debian', 'node', 'postgresql', 'python', 'terraform', 'ubuntu']);
+    expect(Object.keys(kinds).sort()).toEqual(['debian', 'node', 'postgresql', 'python', 'terraform', 'ubuntu', 'vault']);
     const entries = [...Object.values(kinds), ...Object.values(kinds.node.platformCeilings)];
     for (const entry of entries) {
       expect(entry.newest, JSON.stringify(entry)).toBeTruthy();
@@ -361,6 +418,29 @@ describe('scripts/version-floors.json', () => {
     expect(kinds.debian.floor).toBe(kinds.debian.newest);
     expect(kinds.postgresql.floor).toBe(majorMinorFloor(kinds.postgresql.newest));
     expect(kinds.postgresql.newest.split('.')[0]).toBe(kinds.postgresql.line);
+    expect(kinds.vault.floor).toBe(patchFloor(kinds.vault.newest));
+    expect(kinds.vault.newest.startsWith(`${kinds.vault.line}.`)).toBe(true);
+  });
+
+  /**
+   * What the task said to do for a pin no endoflife.date product covers: say
+   * so, and read nothing else in its place. The pin it names must exist, so a
+   * rename cannot leave the entry describing nothing.
+   */
+  it('records each unsourced pin with no source, the reason, and a pin that exists', () => {
+    const { $comment, ...entries } = floors.unsourced;
+    expect($comment).toMatch(/endoflife\.date/);
+    expect(Object.keys(entries)).toEqual(['portainer']);
+    for (const [name, entry] of Object.entries(entries)) {
+      expect(Object.hasOwn(kinds, name), `${name} is not also a kind`).toBe(false);
+      expect(entry.source).toBe(null);
+      expect(entry.why).toMatch(new RegExp(`https://endoflife\\.date/api/v1/products/${name}/ answered HTTP 404`));
+      expect(entry.checkedOn).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(entry.rule.length).toBeGreaterThan(20);
+      const [file, key] = entry.pin.split(' > ');
+      const text = readFileSync(join(ROOT, file), 'utf8');
+      expect(text, `${entry.pin} exists`).toMatch(new RegExp(`^${key}:`, 'm'));
+    }
   });
 
   it('is in the form the weekly updater writes, so its first bump is a diff of values only', () => {
@@ -400,6 +480,7 @@ describe('every pin in the repository meets its floor', () => {
     expect(labHost.filter((p) => p.kind === 'postgresql').map((p) => p.where)).toEqual([
       'lab-host/ansible/group_vars/all.yml > coder_postgres_image_tag',
     ]);
+    expect(labHost.filter((p) => p.kind === 'vault').map((p) => p.where)).toEqual(['lab-host/ansible/group_vars/all.yml > vault_version']);
   });
 
   it('names a reason for every package that has no engines.node', () => {

@@ -287,7 +287,7 @@
       {% if (vault_status.stdout | from_json).initialized is false %}It is not initialised:
       initialising it is an owner step, over SSH, and the unseal keys and root token go to the
       owner's password manager and nowhere else (lab-host/README.md, "HashiCorp Vault").
-      {% elif (vault_status.stdout | from_json).sealed %}It is initialised and sealed: unseal it
+      {%- elif (vault_status.stdout | from_json).sealed %}It is initialised and sealed: unseal it
       with three of the owner's unseal keys (lab-host/README.md, "HashiCorp Vault").
-      {% else %}It is initialised and unsealed.{% endif %}
+      {%- else %}It is initialised and unsealed.{% endif %}
   when: not ansible_check_mode

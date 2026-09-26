@@ -1,7 +1,7 @@
 /**
  * The version pins of the things that run code (#715): the base images in
  * tracked Dockerfiles, and the lab host's Node.js package, Ubuntu target,
- * control-side Python and Coder's PostgreSQL.
+ * control-side Python, Coder's PostgreSQL and HashiCorp Vault.
  */
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -149,6 +149,24 @@ function coderPostgres(lines) {
   };
 }
 
+/**
+ * vault_version: the HashiCorp Vault release the vault role downloads.
+ * Exactly MAJOR.MINOR.PATCH, because the role builds the download URL and
+ * the SHA256SUMS name from it; a line-only value or a pre-release (2.2.0-rc1)
+ * is a problem rather than a pin.
+ */
+function vaultPin(lines) {
+  const at = lines.findIndex((l) => /^vault_version:/.test(l));
+  const base = { file: GROUP_VARS, where: `${GROUP_VARS} > vault_version`, kind: 'vault' };
+  if (at === -1) return { pins: [], problems: [{ ...base, line: 0, raw: '', message: 'vault_version is missing' }] };
+  const raw = clean(lines[at].replace(/^vault_version:/, ''));
+  if (/^\d+\.\d+\.\d+$/.test(raw)) return { pins: [{ ...base, line: at + 1, raw, version: raw }], problems: [] };
+  return {
+    pins: [],
+    problems: [{ ...base, line: at + 1, raw, message: `vault_version ${raw} is not a release as MAJOR.MINOR.PATCH` }],
+  };
+}
+
 /** lab_host_ubuntu_releases in group_vars, or, before that map existed, site.yml's distribution_version check. */
 function playbookUbuntu(root, lines) {
   const mapAt = lines.findIndex((l) => /^lab_host_ubuntu_releases:\s*$/.test(l));
@@ -186,9 +204,14 @@ function bootstrap(root) {
   return merge([ubuntuTarget(BOOTSTRAP, 'accepted Ubuntu releases', accepted), bootstrapPython(lines)]);
 }
 
-/** The lab host's pins: its Node.js package, its Ubuntu target, its control-side Python and Coder's PostgreSQL. */
+/**
+ * The lab host's pins: its Node.js package, its Ubuntu target, its
+ * control-side Python, Coder's PostgreSQL and HashiCorp Vault. Portainer's
+ * image tag is not read: endoflife.date has no Portainer product to hold it
+ * to (version-floors.json, "unsourced").
+ */
 export function readLabHost(root) {
   if (!existsSync(join(root, GROUP_VARS))) return bootstrap(root);
   const lines = linesOf(read(root, GROUP_VARS));
-  return merge([agentNode(lines), playbookUbuntu(root, lines), bootstrap(root), coderPostgres(lines)]);
+  return merge([agentNode(lines), playbookUbuntu(root, lines), bootstrap(root), coderPostgres(lines), vaultPin(lines)]);
 }
