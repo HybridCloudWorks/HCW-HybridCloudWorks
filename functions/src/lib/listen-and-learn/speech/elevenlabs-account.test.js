@@ -5,8 +5,8 @@
  * the key header and nothing else; its figures are normalised the same way
  * every time, including the free plan and usage-based billing; a read that
  * fails says why, in a sentence that names the fix, and is retried only when
- * a retry could help; and the cache shares one read between callers without
- * ever holding the key.
+ * a retry could help; the cache shares one read between callers for a few
+ * seconds, per key; and the key never reaches an error message.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {

@@ -24,7 +24,7 @@ This project has not cut a tagged release; entries are grouped under
   2026-09-26: test the podcast voice on ElevenLabs's free plan, 10,000 credits a
   month at one credit per character on Eleven v3, where one episode is nearly
   the month. `speech/elevenlabs-account.js` reads `GET /v1/user/subscription`
-  (cached 15 s per key, keyed by a hash). Before the first dialogue request,
+  (cached in memory for 15 s per key). Before the first dialogue request,
   `synthesizeWithElevenLabs` refuses a job the credits left cannot cover in
   full, sends nothing, and says "ElevenLabs has N credits left of M, this
   episode needs K; the allowance resets on <date>" with the `quota_exceeded`

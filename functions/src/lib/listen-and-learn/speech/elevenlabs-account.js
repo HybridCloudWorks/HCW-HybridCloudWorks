@@ -81,15 +81,21 @@
  *
  * ## The cache
  *
- * A successful read is kept for `SUBSCRIPTION_CACHE_TTL_MS` per key, keyed by
- * a SHA-256 of the key and never by the key itself. The Audio tab, the live
- * check and a job that start within the same few seconds then read the
- * account once. Every render drops the entry when it finishes, whether or not
- * it spent anything, so the next pre-flight sees what that render cost. Two
- * renders racing each other can both pass a pre-flight, cache or no cache;
- * the per-request out-of-credit error in elevenlabs.js is the backstop there.
+ * A successful read is kept for `SUBSCRIPTION_CACHE_TTL_MS` per key. The
+ * Audio tab, the live check and a job that start within the same few seconds
+ * then read the account once. Every render drops the entry when it finishes,
+ * whether or not it spent anything, so the next pre-flight sees what that
+ * render cost. Two renders racing each other can both pass a pre-flight,
+ * cache or no cache; the per-request out-of-credit error in elevenlabs.js is
+ * the backstop there.
+ *
+ * The cache is keyed by the key string itself, in this process's memory,
+ * where `process.env` already holds it. Nothing here writes it anywhere else:
+ * not a log, an error message, a response or a document. An earlier draft
+ * keyed it by a SHA-256 of the key, which protected nothing the environment
+ * does not already expose, and CodeQL rightly read a fast hash of a
+ * credential as a weak password hash (js/insufficient-password-hash).
  */
-import { createHash } from 'node:crypto';
 
 export const SUBSCRIPTION_URL = 'https://api.elevenlabs.io/v1/user/subscription';
 
@@ -277,10 +283,8 @@ export function normalizeSubscription(body) {
   };
 }
 
+/** key → { value, expiresAt }. One entry per key; a process holds one key. */
 const cache = new Map();
-
-/** A stable, non-reversible name for a key, so the cache never holds one. */
-const fingerprint = (key) => createHash('sha256').update(String(key)).digest('hex');
 
 /**
  * The account behind `key`, normalised. Throws an `ElevenLabsSpeechError`
@@ -304,21 +308,20 @@ export async function readSubscription({
   useCache = true,
 } = {}) {
   if (!key) throw unavailable('ELEVENLABS_API_KEY is not configured');
-  const name = fingerprint(key);
 
   if (useCache) {
-    const hit = cache.get(name);
+    const hit = cache.get(key);
     if (hit && hit.expiresAt > now()) return hit.value;
   }
 
   const value = normalizeSubscription(await fetchSubscription({ key, fetchImpl, sleep }));
-  cache.set(name, { value, expiresAt: now() + SUBSCRIPTION_CACHE_TTL_MS });
+  cache.set(key, { value, expiresAt: now() + SUBSCRIPTION_CACHE_TTL_MS });
   return value;
 }
 
 /** Drop the cached read for one key, so the next read sees what a render spent. */
 export function invalidateSubscription(key) {
-  if (key) cache.delete(fingerprint(key));
+  if (key) cache.delete(key);
 }
 
 /** Drop every cached read. For tests, which must not see each other's accounts. */
