@@ -1152,6 +1152,18 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The lab host's first run survives a freshly booted VPS, and SSH
+  hardening can no longer be lost to a failed run.** On the reinstalled VPS
+  on 2026-09-26 the first `bootstrap.sh` run failed when a first-boot
+  unattended-upgrade held the dpkg lock during the Docker role's package
+  hold, and the sshd drop-in it had already written never took effect:
+  the end-of-play restart handler did not run, and the next run found the
+  file unchanged. Now every `apt` task waits up to fifteen minutes for the
+  lock (`module_defaults` in `site.yml`, `DPkg::Lock::Timeout` in
+  `bootstrap.sh`), the three `dpkg_selections` holds retry for ten, the
+  hardening role flushes its handlers straight after the sshd drop-in, and
+  `force_handlers` runs notified handlers even when a later task fails.
+
 - **Coder no longer redirects to its access URL behind Caddy.**
   `CODER_REDIRECT_TO_ACCESS_URL` is `false` in
   `lab-host/coder/docker-compose.yml`: Caddy terminates TLS and forwards

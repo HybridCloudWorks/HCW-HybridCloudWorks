@@ -55,10 +55,18 @@
     allow_downgrade: true
     allow_change_held_packages: true
 
+# dpkg --set-selections takes the dpkg frontend lock and, unlike the apt
+# module, does not wait for it; a timer-started unattended-upgrade can hold
+# it at any point in the play (it did on 2026-09-26). Retried for up to ten
+# minutes, the same budget as the apt module's lock_timeout in site.yml.
 - name: Hold the pinned Docker packages so apt never moves them
   ansible.builtin.dpkg_selections:
     name: "{{ item }}"
     selection: hold
+  register: docker_hold
+  until: docker_hold is succeeded
+  retries: 30
+  delay: 20
   loop:
     - docker-ce
     - docker-ce-cli

@@ -309,8 +309,11 @@ else
 fi
 
 log "installing prerequisites"
-apt-get update -q
-apt-get install -y -q --no-install-recommends git python3 python3-apt ca-certificates curl sudo
+# A freshly booted host runs unattended-upgrades within minutes and holds the
+# dpkg lock while it does; wait for it (the playbook's apt tasks use the same
+# fifteen minutes) rather than failing on the first boot.
+apt-get -o DPkg::Lock::Timeout=900 update -q
+apt-get -o DPkg::Lock::Timeout=900 install -y -q --no-install-recommends git python3 python3-apt ca-certificates curl sudo
 
 if ! "${UV_BIN}" --version 2>/dev/null | grep -qx "uv ${UV_VERSION}\( .*\)\?"; then
   log "installing uv ${UV_VERSION} from its GitHub release, SHA256-verified"
