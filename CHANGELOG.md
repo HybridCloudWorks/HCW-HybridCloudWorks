@@ -19,6 +19,16 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The Phase 2 lab image digests are pinned, and the Coder template no
+  longer rewrites /etc/passwd (#698).** `IMAGES.hcwLabRunner` in
+  `vps-agent/lib/capabilities.js` and the `hcw-lab` pin in
+  `lab-host/coder/templates/hcw-lab/main.tf` now point at the digests main
+  published for 02dd9595 (#695), so the three runner-image capabilities
+  find the `hcw-terraform-validate`, `hcw-helm-template` and
+  `hcw-kubeconform` scripts instead of failing with
+  `executable file not found`. That `hcw-lab` image
+  gives uid 65534 `/bin/bash` and `/tmp/home`, so the template's temporary
+  `local.passwd` and `upload` block (#693) are gone.
 - **Deploy Functions smoke check polls until the temporary access rule has
   propagated (#700).** The post-deploy smoke test waited a fixed 20 s after
   adding its `ci-smoke-<run id>` access rule and made one request, so on run
