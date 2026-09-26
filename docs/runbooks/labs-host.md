@@ -253,9 +253,10 @@ ADR 0032 rebuilds the host rather than repairing it.
    `https://github.com/organizations/HybridCloudWorks/settings/actions/runners`;
    both were empty on 2026-09-26.
 2. **Reinstall.** At https://hpanel.hostinger.com/vps, **Manage** on the
-   server, then its operating system settings: choose plain **Ubuntu 26.04**,
-   not a template that adds Docker, a control panel or an application,
-   because the host check refuses anything those leave in `/opt` or running.
+   server, then **OS & Panel**, **Operating System**: choose plain **Ubuntu
+   26.04**, not a template that adds Docker, a control panel or an
+   application, because the host check refuses anything those leave in
+   `/opt` or running.
    Give root your SSH key there (the key `scripts/lab/Connect-Lab.ps1`
    printed; `infra-lab/README.md`, step 6). Reinstalling wipes the disk: the
    Ansible vault on the host, Portainer's data and Vault's data go with it.
