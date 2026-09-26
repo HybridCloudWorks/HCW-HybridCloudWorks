@@ -1,6 +1,6 @@
 # ADR 0029: Podcast hosting is RSS.com, the podcast page is the one audio surface, and the media route serves byte ranges
 
-**Status:** Accepted 2026-09-07; §1 and §2 amended 2026-09-08 (§1b, §2a); §2a scoped 2026-09-09 (§2b)
+**Status:** Accepted 2026-09-07; §1 and §2 amended 2026-09-08 (§1b, §2a); §2a scoped 2026-09-09 (§2b); §2a amended 2026-09-26 (free plan for testing, publish blocked)
 **Decision date:** 2026-09-07
 **Owners:** Workload owner
 
@@ -234,6 +234,61 @@ should see beforehand rather than find in the usage table afterwards.
 
 Tracked by #436.
 
+**Amended 2026-09-26: the free plan, for testing; publishing blocked.** The
+`ELEVENLABS-API-KEY` secret had never been seeded. The owner's direction on
+2026-09-26 was to start on ElevenLabs's free developer offer and test with its
+monthly credits. As published that day, the free plan is 10,000 credits a month
+with "full access to all APIs"
+([developer API](https://join.elevenlabs.io/api/developer-api),
+[pricing](https://elevenlabs.io/pricing)). Eleven v3, the only model Text to
+Dialogue serves, costs one credit per character. A roughly 9,000-character
+episode is therefore nearly the whole month in one run. Four things follow.
+
+- **A credit pre-flight.** Before a render sends its first request it reads the
+  account (`GET /v1/user/subscription`) and refuses a job the credits left
+  cannot cover in full: "ElevenLabs has N credits left of M, this episode needs
+  K; the allowance resets on <date>". A month is never half-spent on an episode
+  that cannot finish. The refusal carries the out-of-credit error's
+  `quota_exceeded` code. It falls back to nothing: the podcast has one provider
+  (§2b), so the draft is saved with the sentence as its `audioError`. An account
+  that cannot be read, for example a key without the User → Read permission,
+  **fails closed**: nothing is sent. The check exists for exactly the case where
+  the credits are unknown, and the plan it reads is what the publish rule below
+  is decided from.
+- **Test only, block publish.** Owner decision 2026-09-26. The free plan "does
+  not include a commercial license and cannot be used for any commercial
+  purpose", and publishing its output requires "elevenlabs.io" or "11.ai" in the
+  title
+  ([ElevenLabs help](https://help.elevenlabs.io/hc/en-us/articles/13313564601361)).
+  The site is moving toward sponsorships, so the show counts as commercial. The
+  attribution route was offered and declined, along with a setting to choose
+  between the two. Episodes whose audio ElevenLabs rendered on the free plan are
+  never pushed to RSS.com. Approval refuses them with 409, naming the licence
+  and the upgrade, and writes nothing. The retry route refuses the same way, and
+  the publish job records a `free_plan_licence` skip as a second guard. The
+  decision uses the plan **recorded on the transcript when the audio was
+  rendered** (`speechTier`, `speechFreePlan`), not the plan on the day someone
+  clicks approve. Upgrading does not license audio made before the upgrade;
+  regenerating on the paid plan does. An ElevenLabs render with no recorded plan
+  is refused like a free one, because its licence cannot be shown. A render on a
+  paid plan publishes as before.
+- **Visibility and a cheap first test.** The Audio tab of the Platform settings
+  page shows the plan, credits used of the limit, the reset date and what the
+  last render billed, or "Not configured". Its live check renders a fixed
+  two-turn, 257-character sample through the same path an episode takes. It
+  reports the characters billed and the credits left, so the owner's first test
+  spends about 257 credits and not the month.
+- **The voices have moved.** Sarah, the lead, is an ElevenLabs Default voice.
+  Default voices expire on 2026-12-31 and are "only available for accounts that
+  were created before March 2026"
+  ([Default voices](https://elevenlabs.io/docs/help-center/product/voices/my-voices/what-are-default-voices)).
+  Aria is already a Legacy voice whose id the API routes to "Zoe"
+  ([Legacy voices](https://elevenlabs.io/docs/help-center/product/voices/my-voices/what-are-legacy-voices)).
+  The ids are unchanged until the owner chooses replacements by ear. The live
+  check is how to find out whether the account can use them.
+
+Tracked by #432.
+
 #### 2b. ElevenLabs is the podcast voice only; Listen & Learn is Gemini TTS — amended 2026-09-09
 
 Owner rule, stated 2026-09-09 and fixed: **ElevenLabs is only the podcast
@@ -417,6 +472,12 @@ ever run, is a YouTube embed on a page, not an integration.
   (§2a, #436), **and scoped 2026-09-09** (§2b): the plan is for the podcast
   voice only, and the trial of one certification through both providers is
   withdrawn — Listen & Learn is Gemini by rule, so there is nothing to compare.
+- **Validated for the free plan (§2a, 2026-09-26)** when the seeded key's live
+  check on the Audio tab plays both voices, reports about 257 characters billed,
+  and reports credits left about 257 below the month's 10,000.
+- **Revisit the free-plan publish block** when a paid ElevenLabs plan is bought.
+  Nothing in code changes: a render on the paid plan records that plan and
+  publishes. Episodes voiced on the free plan must be regenerated first.
 - **Revisit the Best/Economy rule of thumb** if choosing by hand proves a
   chore: automating it by certification age is the follow-up §2b names, and
   it needs a definition of "newer" the certification documents do not carry

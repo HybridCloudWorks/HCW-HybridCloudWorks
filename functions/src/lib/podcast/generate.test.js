@@ -184,6 +184,69 @@ describe('a full run', () => {
     });
   });
 
+  it('records the ElevenLabs plan the audio was rendered on, for the approval step to decide from', async () => {
+    // ADR 0029 §2a, amended 2026-09-26: approval refuses free-plan audio, and
+    // decides from what rendered the audio, not from the plan on approval day.
+    const store = makeStore();
+    await run({
+      store,
+      deps: {
+        synthesize: vi.fn(async () => ({
+          audio: Buffer.from([1, 2, 3]),
+          contentType: 'audio/mpeg',
+          provider: 'elevenlabs',
+          model: 'eleven_v3',
+          estimatedSeconds: 3,
+          promptTokens: 0,
+          completionTokens: 5,
+          subscription: { tier: 'free', status: 'free', freePlan: true, creditsLeft: 9995 },
+        })),
+      },
+    });
+    const saved = store.docs[TRANSCRIPT_CONTAINER]['article_picking-a-state-backend'];
+    expect(saved).toMatchObject({
+      speechProvider: 'elevenlabs',
+      speechTier: 'free',
+      speechFreePlan: true,
+      audioPath: 'article/picking-a-state-backend.mp3',
+    });
+  });
+
+  it('records no plan when the provider reported none', async () => {
+    const store = makeStore();
+    await run({ store });
+    const saved = store.docs[TRANSCRIPT_CONTAINER]['article_picking-a-state-backend'];
+    expect(saved.speechTier).toBeNull();
+    expect(saved.speechFreePlan).toBeNull();
+  });
+
+  it('saves the draft with the pre-flight refusal as its audioError, spending nothing on audio', async () => {
+    const store = makeStore();
+    const storage = makeStorage();
+    const refusal =
+      'ElevenLabs has 1,000 credits left of 10,000, this episode needs 9,000; ' +
+      'the allowance resets on 2026-10-26 (UTC). Nothing was sent, so no credits were spent.';
+    const report = await run({
+      store,
+      storage,
+      deps: {
+        synthesize: vi.fn(async () => {
+          throw Object.assign(new SpeechError(refusal, { provider: 'elevenlabs' }), {
+            code: 'quota_exceeded',
+          });
+        }),
+      },
+    });
+    expect(report.audioError).toBe(refusal);
+    expect(storage.uploadBlob).not.toHaveBeenCalled();
+    const saved = store.docs[TRANSCRIPT_CONTAINER]['article_picking-a-state-backend'];
+    expect(saved).toMatchObject({ status: STATUS.draft, audioPath: null, audioError: refusal });
+    // Only the script's usage row: no audio was rendered, so none is billed.
+    expect(Object.values(store.docs.ai_usage).map((r) => r.source)).toEqual([
+      USAGE_SOURCES.podcastScript,
+    ]);
+  });
+
   it('records the usage rows only after the transcript is saved', async () => {
     const order = [];
     const store = makeStore();

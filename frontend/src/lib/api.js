@@ -39,6 +39,10 @@ const FUNCTION_TIMEOUT_MS = {
   // A batch of articles each fetching its body images (15 s per image, four
   // at a time) — sized with the Function host's 230 s cap, not the default.
   'cms/content/rehost-images': 200000,
+  // The ElevenLabs live check: an account read, one Text to Dialogue request
+  // with its own retries, an upload and a second read. Deliberately absent
+  // from SAFE_RETRY_FUNCTIONS: a client retry would render, and bill, twice.
+  'cms/podcast/elevenlabs/sample': 120000,
 };
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 const SAFE_RETRY_FUNCTIONS = new Set([

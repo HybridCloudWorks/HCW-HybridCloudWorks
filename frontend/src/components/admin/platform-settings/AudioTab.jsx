@@ -1,14 +1,18 @@
 /**
- * Audio — the shows the site ingests and the voice that reads study episodes.
+ * Audio — the shows the site ingests, the voice that reads study episodes,
+ * and the voice that reads podcast episodes.
  *
  *   Podcast feeds          admin_config/podcast_feeds           read by timers/podcasts.js
  *   Listen & Learn voice   admin_config/listen_and_learn_speech read by listen-and-learn-jobs.js
+ *   Podcast voice          GET cms/podcast/elevenlabs           ElevenLabs plan, credits and
+ *                                                               the live check (ElevenLabsCard)
  *
- * Each card loads on its own, so one failing never hides the other.
+ * Each card loads on its own, so one failing never hides the others.
  */
 
 import React, { useMemo } from 'react';
 import { useAuthReady } from '@/hooks/useAuthReady';
+import ElevenLabsCard from './ElevenLabsCard';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -228,6 +232,7 @@ export default function AudioTab() {
           />
         )}
       />
+      <ElevenLabsCard authReady={authReady} />
     </div>
   );
 }

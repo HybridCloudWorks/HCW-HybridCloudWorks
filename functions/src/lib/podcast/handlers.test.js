@@ -481,6 +481,53 @@ describe('reviewTranscript', () => {
     expect(store.patchDoc).toHaveBeenCalledTimes(2);
   });
 
+  describe('ElevenLabs free-plan audio (owner decision 2026-09-26)', () => {
+    const freePlan = (over = {}) =>
+      transcript({ speechProvider: 'elevenlabs', speechTier: 'free', speechFreePlan: true, ...over });
+
+    it('refuses approval with 409 naming the licence and the upgrade, and writes nothing', async () => {
+      const store = storeWith(freePlan());
+      const enqueue = vi.fn();
+      const res = await review({ id: 'article_x', status: 'published' }, store, { enqueue });
+
+      expect(res.status).toBe(409);
+      const body = JSON.parse(res.body);
+      expect(body.code).toBe('FREE_PLAN_LICENCE');
+      expect(body.error).toMatch(/rendered on the ElevenLabs free plan, which has no commercial licence/);
+      expect(body.error).toMatch(/not published to RSS\.com/);
+      expect(body.error).toMatch(/Upgrade to a paid ElevenLabs plan \(https:\/\/elevenlabs\.io\/pricing\)/);
+      // No status write, no job, no queue message: the transcript stays a draft.
+      expect(store.patchDoc).not.toHaveBeenCalled();
+      expect(store.upsertDoc).not.toHaveBeenCalled();
+      expect(enqueue).not.toHaveBeenCalled();
+    });
+
+    it('refuses an ElevenLabs render whose plan was never recorded, the same way', async () => {
+      const store = storeWith(freePlan({ speechTier: null, speechFreePlan: null }));
+      const res = await review({ id: 'article_x', status: 'published' }, store);
+      expect(res.status).toBe(409);
+      expect(JSON.parse(res.body).error).toMatch(/on a plan that was not recorded/);
+      expect(store.patchDoc).not.toHaveBeenCalled();
+    });
+
+    it('approves and publishes audio rendered on a paid plan as before', async () => {
+      const store = storeWith(freePlan({ speechTier: 'creator', speechFreePlan: false }));
+      const enqueue = vi.fn();
+      const res = await review({ id: 'article_x', status: 'published' }, store, { enqueue });
+      expect(res.status).toBe(202);
+      expect(enqueue).toHaveBeenCalledWith({ jobId: 'job-1', type: PUBLISH_JOB_TYPE });
+    });
+
+    it('still lets a reviewer withdraw a free-plan transcript to draft', async () => {
+      const store = storeWith(freePlan({ status: STATUS.published }));
+      const res = await review({ id: 'article_x', status: 'draft' }, store);
+      expect(res.status).toBe(200);
+      expect(transcriptPatches(store)).toEqual([
+        { status: 'draft', approvedAt: null, approvedBy: null },
+      ]);
+    });
+  });
+
   it('returns a transcript to draft, clearing the stamp, and runs no host step', async () => {
     const store = storeWith(transcript({ status: STATUS.published }));
     const enqueue = vi.fn();
@@ -591,6 +638,27 @@ describe('publishTranscript — the retry', () => {
     for (const [, , patch] of store.patchDoc.mock.calls) {
       expect(Object.keys(patch)).toEqual(['host']);
     }
+  });
+
+  it('refuses a published transcript whose audio ElevenLabs rendered on the free plan, queuing nothing', async () => {
+    const store = storeWith(
+      transcript({
+        status: STATUS.published,
+        speechProvider: 'elevenlabs',
+        speechTier: 'free',
+        speechFreePlan: true,
+      })
+    );
+    const enqueue = vi.fn();
+    const res = await retry(store, { enqueue });
+    expect(res.status).toBe(409);
+    expect(JSON.parse(res.body)).toMatchObject({
+      code: 'FREE_PLAN_LICENCE',
+      error: expect.stringMatching(/no commercial licence/),
+    });
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+    expect(store.patchDoc).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
   });
 
   it('answers 200 with the skip when RSS.com is not configured or the transcript has no audio', async () => {

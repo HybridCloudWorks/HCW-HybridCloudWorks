@@ -12,6 +12,7 @@ import { MemoryRouter, useLocation } from 'react-router';
 import PlatformSettingsPage, { TABS, resolveTab } from './PlatformSettingsPage';
 import { settingRoute } from '@/components/admin/platform-settings/settingShared';
 import { HISTORY_ROUTE } from '@/components/admin/platform-settings/ChangeHistoryTab';
+import { ELEVENLABS_STATUS_ROUTE } from '@/components/admin/platform-settings/ElevenLabsCard';
 
 // The Radix Switch measures its thumb with ResizeObserver, which jsdom lacks.
 if (typeof globalThis.ResizeObserver === 'undefined') {
@@ -58,6 +59,9 @@ const routesAsked = () => getJSON.mock.calls.map(([route]) => route.split('?')[0
 beforeEach(() => {
   getJSON.mockReset().mockImplementation(async (route) => {
     if (route.startsWith(HISTORY_ROUTE)) return { success: true, entries: [], nextAfter: null };
+    if (route === ELEVENLABS_STATUS_ROUTE) {
+      return { success: true, configured: false, reason: 'ELEVENLABS_API_KEY is not configured.' };
+    }
     const setting = route.replace('cms/platform-settings/', '');
     return { success: true, setting, value: empty[setting], exists: false };
   });
@@ -92,8 +96,14 @@ describe('tabs', () => {
     renderAt('/admin/platform?tab=audio');
     await screen.findByText('Podcast feeds');
     await screen.findByText('Listen & Learn voice');
+    await screen.findByText('Not configured');
+    // Its two settings and the podcast voice's status (ElevenLabs, 2026-09-26).
     expect(routesAsked().sort()).toEqual(
-      [settingRoute('listen-and-learn-speech'), settingRoute('podcast-feeds')].sort()
+      [
+        settingRoute('listen-and-learn-speech'),
+        settingRoute('podcast-feeds'),
+        ELEVENLABS_STATUS_ROUTE,
+      ].sort()
     );
     expect(screen.queryByText('Default covers')).toBeNull();
     expect(postJSON).not.toHaveBeenCalled();

@@ -41,6 +41,7 @@ export const SOURCE_LABELS = {
   'listen-and-learn:audio': 'Listen & Learn — audio',
   'podcast:script': 'Podcast transcript — script',
   'podcast:audio': 'Podcast transcript — audio',
+  'podcast:sample': 'Podcast voice — live check',
 };
 
 export default function AIEngineUsageTab() {

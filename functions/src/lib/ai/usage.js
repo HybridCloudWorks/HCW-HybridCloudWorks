@@ -34,6 +34,10 @@ export const USAGE_SOURCES = Object.freeze({
   // Learn's, so the cost of each product is attributable on its own.
   podcastScript: 'podcast:script',
   podcastAudio: 'podcast:audio',
+  // The ElevenLabs live check on the Audio tab (#432, 2026-09-26): a fixed
+  // two-turn sample of under 300 characters. Its own row so a check never
+  // reads as episode spend.
+  podcastSample: 'podcast:sample',
 });
 
 /**

@@ -11,9 +11,10 @@
  * governed the podcast. The tests of that order are replaced here by tests
  * of the product table, as §2b says they would be.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { getCostEstimate } from '../../ai/router.js';
 import { SPEECH_LIMITS } from './azure.js';
+import { SUBSCRIPTION_URL, clearSubscriptionCache } from './elevenlabs-account.js';
 import {
   CONTENT_TYPE,
   DEFAULT_VOICES,
@@ -67,8 +68,31 @@ const azureOk = () =>
     arrayBuffer: async () => Uint8Array.from([0xff, 0xfb, 1, 2]).buffer,
   }));
 
+/**
+ * ElevenLabs reads the account before it renders (elevenlabs-account.js), so
+ * an ElevenLabs stub answers that read with a free month and hands the
+ * dialogue request to `dialogue`. `dialogueCalls` is what was posted.
+ */
+const FREE_ACCOUNT = JSON.stringify({
+  tier: 'free',
+  status: 'free',
+  character_count: 0,
+  character_limit: 10000,
+  next_character_count_reset_unix: 1792972800,
+  can_extend_character_limit: false,
+  max_credit_limit_extension: 0,
+});
+const elevenLabs = (dialogue) =>
+  vi.fn(async (url) =>
+    String(url).startsWith(SUBSCRIPTION_URL)
+      ? { ok: true, status: 200, text: async () => FREE_ACCOUNT }
+      : dialogue()
+  );
+const dialogueCalls = (fetchImpl) =>
+  fetchImpl.mock.calls.filter(([url]) => String(url).includes('/v1/text-to-dialogue'));
+
 const elevenOk = () =>
-  vi.fn(async () => ({
+  elevenLabs(() => ({
     ok: true,
     status: 200,
     headers: { get: (n) => (n === 'character-cost' ? '7' : null) },
@@ -78,12 +102,16 @@ const elevenOk = () =>
 
 const QUOTA_BODY = JSON.stringify({ detail: { status: 'quota_exceeded', message: 'no credits' } });
 const elevenOutOfCredit = () =>
-  vi.fn(async () => ({
+  elevenLabs(() => ({
     ok: false,
     status: 401,
     headers: { get: () => null },
     text: async () => QUOTA_BODY,
   }));
+
+beforeEach(() => {
+  clearSubscriptionCache();
+});
 
 /** Route by host, so one fetch stub can prove which provider was reached. */
 const byHost = (handlers) =>
@@ -299,8 +327,12 @@ describe('synthesizeDialogue', () => {
 
     expect(result.provider).toBe('elevenlabs');
     expect(result.model).toBe('eleven_v3');
-    expect(eleven).toHaveBeenCalledTimes(1);
+    expect(dialogueCalls(eleven)).toHaveLength(1);
+    expect(eleven).toHaveBeenCalledTimes(2); // the pre-flight read, then the dialogue
     expect(gemini).not.toHaveBeenCalled();
+    // The plan the audio was rendered on rides out with it, for the podcast
+    // to record (ADR 0029 §2a, 2026-09-26).
+    expect(result.subscription).toMatchObject({ tier: 'free', freePlan: true });
   });
 
   it('routes Listen & Learn to Azure when that is the configured one', async () => {
@@ -392,7 +424,7 @@ describe('synthesizeDialogue', () => {
         fetchImpl,
       });
       expect(result.model).toBe('eleven_v3');
-      expect(JSON.parse(fetchImpl.mock.calls[0][1].body).model_id).toBe('eleven_v3');
+      expect(JSON.parse(dialogueCalls(fetchImpl)[0][1].body).model_id).toBe('eleven_v3');
     });
   });
 
@@ -412,14 +444,41 @@ describe('synthesizeDialogue', () => {
         status: 401,
         code: 'quota_exceeded',
       });
-      expect(eleven).toHaveBeenCalledTimes(1); // not retried
+      expect(dialogueCalls(eleven)).toHaveLength(1); // not retried
+      expect(gemini).not.toHaveBeenCalled();
+    });
+
+    it('does not fall back to Gemini when the ElevenLabs pre-flight refuses the job either', async () => {
+      // Too few credits for the job: refused before any dialogue request,
+      // and still not read with Gemini.
+      const eleven = vi.fn(async (url) =>
+        String(url).startsWith(SUBSCRIPTION_URL)
+          ? {
+              ok: true,
+              status: 200,
+              text: async () =>
+                JSON.stringify({ ...JSON.parse(FREE_ACCOUNT), character_count: 10000 }),
+            }
+          : { ok: true, status: 200 }
+      );
+      const gemini = geminiOk();
+      const fetchImpl = byHost({ 'elevenlabs.io': eleven, 'googleapis.com': gemini });
+
+      await expect(
+        synthesizeDialogue({ ...POD, dialogue: DIALOGUE, env: ALL, fetchImpl, sleep: noSleep })
+      ).rejects.toMatchObject({
+        provider: 'elevenlabs',
+        code: 'quota_exceeded',
+        details: expect.objectContaining({ preflight: true, left: 0 }),
+      });
+      expect(dialogueCalls(eleven)).toHaveLength(0);
       expect(gemini).not.toHaveBeenCalled();
     });
 
     it('does not fall back on any other failure either', async () => {
       // A rejected key or a 5xx elsewhere would hide a fault behind a
       // different voice.
-      const eleven = vi.fn(async () => ({
+      const eleven = elevenLabs(() => ({
         ok: false,
         status: 401,
         headers: { get: () => null },
@@ -554,7 +613,7 @@ describe('estimateSpeechCostUsd', () => {
 
     const fetchImpl = elevenOk();
     await synthesizeDialogue({ ...POD, dialogue: mixed, env: ELEVEN, fetchImpl });
-    const sent = JSON.parse(fetchImpl.mock.calls[0][1].body).inputs.map((i) => i.text);
+    const sent = JSON.parse(dialogueCalls(fetchImpl)[0][1].body).inputs.map((i) => i.text);
     expect(sent).toEqual(speakableTurns(mixed).map((t) => t.text));
   });
 
