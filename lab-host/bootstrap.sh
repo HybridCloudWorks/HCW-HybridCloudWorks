@@ -13,8 +13,9 @@
 # Python. Ansible's control side (ansible-playbook, templating, the vault)
 # runs on CPython from uv, not on the distribution's python3. Owner rule
 # 2026-09-26: Python is on the newest release line and no more than two patch
-# releases behind that line's newest, and Ubuntu 26.04 ships python3 3.14.3,
-# below that floor. uv comes from its GitHub release asset, checked against
+# releases behind that line's newest (3.14.7 then, so a 3.14.5 floor), and
+# Ubuntu 26.04's /usr/bin/python3 is 3.14.4 (python3.14 3.14.4, package
+# python3 3.14.3), below that floor. uv comes from its GitHub release asset, checked against
 # UV_SHA256 before it runs (no curl | sh), and uv checks the interpreter it
 # downloads against the SHA256 it carries for that build, so the two pins
 # below fix the interpreter's bytes too. The one recorded exception: modules
@@ -36,11 +37,13 @@ UV_SHA256=23bf5552d220e0842b65c862097b2ebaeba0064b74eda5e565e77fd25969d8c8
 # CPython 3.14.7, the newest release of the newest line. uv 0.12.19 pins its
 # python-build-standalone 20260924 build by SHA256.
 PYTHON_VERSION=3.14.7
-# ansible-core 2.21.4, the newest GA release (2.22.0b1 is a beta). It supports
-# Python 3.12 to 3.14 on the control side and runs modules on 26.04's 3.14 and
-# 24.04's 3.12 alike, so one pin serves both accepted releases. 2.22 needs
-# 3.13 or later on the TARGET too, which 24.04 does not have: when 2.22 is GA,
-# move this pin and drop 24.04 rather than hold 26.04 back.
+# ansible-core 2.21.4, the newest GA release (2.22.0b1 is a beta); it declares
+# Python 3.12 to 3.14 for the control side. The control side runs on the uv
+# interpreter above on either release, so the 24.04 fallback never holds this
+# pin back: it only decides which Python the modules run on (3.12.3 there,
+# 3.14.4 on 26.04), and 2.21.4 ran every module on both in the 2026-09-26
+# container runs. Before a future bump, check its module-side Python range
+# still includes 24.04's 3.12, or drop 24.04.
 ANSIBLE_CORE_VERSION=2.21.4
 
 HCW_REPO_URL="${HCW_REPO_URL:-https://github.com/HybridCloudWorks/HCW-HybridCloudWorks.git}"

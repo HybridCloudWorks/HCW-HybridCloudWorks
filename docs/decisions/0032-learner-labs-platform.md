@@ -58,7 +58,8 @@ are recorded once, here, before any of them is implemented.
    `cloudflare_api_token` it needs are workspace variables, never repository
    values. Lab state and `hcw-azure` state never meet: nothing in `infra-lab/`
    reads `hcw-azure` outputs, and nothing in `infra/` reads `hcw-lab`.
-2. **Ubuntu 24.04 LTS, and Docker Engine is the only runtime on the host.** No
+2. **Ubuntu 26.04 LTS, and Docker Engine is the only runtime on the host.**
+   (Owner decision 2026-09-26: the VPS was reinstalled with 26.04 LTS, the latest LTS, and stays on it; this line read 24.04 LTS until then.) No
    Kubernetes of any size (owner decision 2026-09-24; the earlier k3s idea is
    dropped). Coder and its PostgreSQL run as containers under Docker Compose.
    Caddy runs host-native from a pinned build that includes the
@@ -71,7 +72,10 @@ are recorded once, here, before any of them is implemented.
    readable by the service user and by nothing else. node-exporter is a
    host-native service too; the Arc agent runs as a host service because that
    is how Azure ships it.
-3. **Azure Arc-enabled servers is the hybrid control plane.** The host is
+3. **Azure Arc-enabled servers is the hybrid control plane.** Microsoft Learn
+   lists Ubuntu 26.04 on x86-64 as a supported Arc-enabled servers operating
+   system, and Ubuntu 26.04 LTS as supported by the Azure Monitor Agent (both
+   read 2026-09-26). The host is
    onboarded as an Arc machine in a new resource group,
    `rg-lab-hybrid-prod-cus`, in the application subscription. Onboarding uses a
    service principal holding only **Azure Connected Machine Onboarding** on

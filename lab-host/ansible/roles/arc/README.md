@@ -136,6 +136,14 @@ and the temporary file are skipped.
 
 ## Validated
 
+On 2026-09-26, against a systemd Ubuntu 26.04 container (and again on
+24.04): the role fetched `microsoft-2025.asc` on 26.04 and `microsoft.asc` on
+24.04, each matching its pinned checksum; apt accepted the 26.04
+repository's `InRelease` with the 2025 key; `azcmagent 1.68.03532.1399`
+installed and held on both; `azcmagent show --json` returned
+`Disconnected`; the role failed closed on the missing vault values; and a
+second run reported every install task unchanged (`changed=0`).
+
 On 2026-09-25, against a systemd Ubuntu 24.04 container: the key checksum
 matched, `azcmagent 1.68.03532.1399` installed and held, a second run
 reported the install tasks unchanged, `azcmagent show --json` returned

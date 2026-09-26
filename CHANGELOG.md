@@ -19,6 +19,39 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Lab host targets Ubuntu 26.04 LTS, with release-derived apt suites,
+  resolute package pins and every lab host pin at its newest release
+  (#715).** The VPS was reinstalled with Ubuntu 26.04 LTS (owner decision
+  2026-09-26). `lab-host/bootstrap.sh` and `site.yml` accept 26.04 and keep
+  24.04 as a stated fallback, refusing anything else;
+  `lab_host_ubuntu_releases` in `group_vars/all.yml` is the list. Docker's
+  version strings name the release, so the pins are now
+  `docker_release_pins`, one entry per codename: 29.8.1, containerd 2.3.6,
+  buildx 0.37.1 and compose 5.5.1 for both `resolute` and `noble`. The `arc`
+  role derives `packages.microsoft.com/ubuntu/<version>/prod` from the
+  running release, and because Microsoft signs the 26.04 repository with
+  `microsoft-2025.asc` (`AA86F75E...F748182B`) rather than `microsoft.asc`,
+  the key URL and its SHA256 are per-release maps, each checked with
+  `gpgv` against its release's `InRelease`; `azcmagent` stays at
+  1.68.03532.1399, the newest in both repositories. Microsoft Learn lists
+  Ubuntu 26.04 on x86-64 as supported for Arc-enabled servers and for the
+  Azure Monitor Agent (read 2026-09-26), so there is no support gap.
+  Ansible's control side now runs on CPython 3.14.7 installed by uv 0.12.19
+  (release asset SHA256-verified and attested, no `curl | sh`), because
+  26.04's `/usr/bin/python3` is 3.14.4, below the owner's two-patch floor;
+  modules still run on `/usr/bin/python3`, the one recorded exception, since
+  `python3-apt` and `python3-docker` are built for it. `ansible-core` stays
+  at 2.21.4, the newest GA release. `labs_agent` moves to Node.js
+  26.10.0 from NodeSource `node_26.x`, and its `npm ci` stamp now includes
+  the Node pin so a runtime bump reinstalls dependencies. The Coder
+  template's `code-server` moves from 4.106.3 to 4.139.1. `infra-lab/README.md`
+  step 1 now says to paste the token-reading line before copying the token,
+  because copying the line overwrites the token on the clipboard. Verified
+  in privileged systemd `ubuntu:26.04` and `ubuntu:24.04` containers: two
+  `bootstrap.sh` runs each, the second `changed=0`; the fail-closed state
+  (apex 503, agent stopped, Coder down); `azcmagent` installed and failing
+  closed without the vault; and `vps-agent`'s 81 tests passing on Node 26.
+
 - **`scripts/lab/Connect-Lab.ps1`: one-command SSH and VS Code setup for the
   lab host, and the corrected Hostinger read in `infra-lab`.** The script
   (PowerShell 7, `-WhatIf`) sets up any desktop to reach the host as

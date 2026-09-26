@@ -57,12 +57,13 @@ not started.
 
 Owner rule 2026-09-26: Python is on the newest release line and no more than
 two patch releases behind that line's newest. On 2026-09-26 that is 3.14.7,
-so the floor is 3.14.5, and Ubuntu 26.04's own `python3` is 3.14.3. So:
+so the floor is 3.14.5, and Ubuntu 26.04's own `/usr/bin/python3` is 3.14.4
+(the `python3.14` package; the `python3` package is 3.14.3). So:
 
 | Runs | Interpreter | Why |
 | --- | --- | --- |
 | `ansible-playbook`, `ansible-galaxy`, `ansible-vault` (the control side) | CPython 3.14.7 from uv, under `/opt/uv/python`, in the environment `/opt/uv/tools/ansible-core`, linked into `/usr/local/bin` | The rule. `PYTHON_VERSION` at the top of `bootstrap.sh` is the pin; uv checks the download against the SHA256 it carries for that build, and uv itself is checked against `UV_SHA256` |
-| Every module the play runs on the host | `/usr/bin/python3`, the distribution's (3.14.3 on 26.04) | **The one recorded exception.** `python3-apt`, `python3-debian` and `python3-docker`, which the `apt`, `deb822_repository` and `community.docker` modules import, are Ubuntu packages built for that interpreter and cannot be loaded by another. `ansible_python_interpreter` in `ansible/inventory/localhost.yml` says so |
+| Every module the play runs on the host | `/usr/bin/python3`, the distribution's (3.14.4 on 26.04, 3.12.3 on 24.04) | **The one recorded exception.** `python3-apt`, `python3-debian` and `python3-docker`, which the `apt`, `deb822_repository` and `community.docker` modules import, are Ubuntu packages built for that interpreter and cannot be loaded by another. `ansible_python_interpreter` in `ansible/inventory/localhost.yml` says so |
 
 A successful run prints, before the play starts, `ansible-playbook [core
 2.21.4]` and a `python version = 3.14.7` line. Moving Python is a change to
