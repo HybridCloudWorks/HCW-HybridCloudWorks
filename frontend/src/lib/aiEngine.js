@@ -43,8 +43,9 @@ export const PROVIDER_SCHEMA_VERSION = 2;
  * Perplexity, Bedrock and Replicate were offered though nothing routes text to
  * them. Reading this page told you the opposite of what the API would do.
  *
- * It is now the same three providers as `functions/src/lib/ai/router.js`, in the
- * same order, and `aiEngine.test.js` fails if the two lists diverge.
+ * It is now the same providers as `functions/src/lib/ai/router.js`, in the
+ * same order, and `aiEngine.test.js` fails if the two lists diverge. The
+ * fourth, NVIDIA (#701), is also placed per feature — see getAiFeatures.
  *
  * Order is cost, not quality — see DEFAULT_PROVIDER_ORDER in ai-config.js. These
  * are seed values only: `order` and `enabled` are the administrator's to change
@@ -107,6 +108,28 @@ export const DEFAULT_PROVIDERS = [
     order: 3,
     schemaVersion: PROVIDER_SCHEMA_VERSION,
     notes: 'Seed ANTHROPIC-API-KEY in Key Vault. Highest cost per token of the three.',
+  },
+  {
+    // #701. Last in the global order on purpose: its real position is set
+    // per feature under "Where AI is used" — first for owner-triggered
+    // content, never for the public explain route.
+    id: 'nvidia',
+    name: 'NVIDIA API Catalog',
+    description: 'GLM-5.3, DeepSeek-V4.1-Flash — free trial tier, ~40 requests a minute',
+    icon: '🟩',
+    enabled: true,
+    // Unset on purpose: with no pin the router picks a model per purpose
+    // (GLM-5.3 for drafts, DeepSeek-V4.1-Flash for analysis, GLM-5.3-Flash
+    // for short calls). Choosing one here pins it for every purpose.
+    defaultModel: null,
+    models: ['z-ai/glm-5.3', 'z-ai/glm-5.3-flash', 'deepseek-ai/deepseek-v4.1-flash'],
+    apiKeyEnvVar: 'NVIDIA_API_KEY',
+    docsUrl: 'https://build.nvidia.com/models',
+    status: 'untested',
+    order: 4,
+    schemaVersion: PROVIDER_SCHEMA_VERSION,
+    notes:
+      'Seed NVIDIA-API-KEY (an nvapi- key from build.nvidia.com/settings/api-keys). Free, so usage shows at $0. Trial terms and a ~40 requests/minute limit: the API paces itself and hands busy or failed calls to the next provider.',
   },
 ];
 
@@ -596,13 +619,33 @@ export async function setProviderOrder(orderedIds) {
  */
 export async function getAiFeatures() {
   const res = await getJSON('cms/ai-features');
-  return { features: res.features || {}, catalogue: res.catalogue || {} };
+  return {
+    features: res.features || {},
+    catalogue: res.catalogue || {},
+    // #701: { nvidia: { <feature>: 'first'|'order'|'off' } } as the router
+    // will apply it, and the code-level defaults — where a default is 'off'
+    // the feature is locked and the page shows it as such.
+    placement: res.placement || {},
+    placementDefaults: res.placementDefaults || {},
+  };
 }
 
 /** Turn one feature on or off. Merges server-side; other features are untouched. */
 export async function setAiFeature(name, enabled) {
   const res = await sendJSON('cms/ai-features', 'PUT', { features: { [name]: enabled } });
   return res.features || {};
+}
+
+/**
+ * Place a per-feature provider for one feature: 'first', 'order' or 'off'.
+ * Returns the resolved placement map. The API refuses anything but 'off' for
+ * a locked feature — configuration can disable, never enable.
+ */
+export async function setAiPlacement(provider, feature, placement) {
+  const res = await sendJSON('cms/ai-features', 'PUT', {
+    placement: { [provider]: { [feature]: placement } },
+  });
+  return res.placement || {};
 }
 
 // Named export bundle for convenience
@@ -619,6 +662,7 @@ export const aiEngine = {
   setProviderOrder,
   getAiFeatures,
   setAiFeature,
+  setAiPlacement,
   setMcpOAuthToken,
   addMcpServer,
   removeMcpServer,

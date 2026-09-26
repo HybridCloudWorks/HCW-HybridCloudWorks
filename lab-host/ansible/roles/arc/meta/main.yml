@@ -1,0 +1,18 @@
+---
+galaxy_info:
+  role_name: arc
+  namespace: hcw
+  author: HybridCloudWorks
+  description: Azure Connected Machine agent at a pinned version, connected to Azure Arc by a least-privilege onboarding service principal
+  license: UNLICENSED
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+  galaxy_tags:
+    - azure
+    - arc
+    - hybrid
+
+dependencies: []

@@ -12,8 +12,14 @@ import {
   AI_FEATURES,
   DEFAULT_PROVIDER_ORDER,
   FEATURE_NAMES,
+  PER_FEATURE_PROVIDERS,
+  PLACEMENTS,
+  PROVIDER_PLACEMENT_DEFAULTS,
+  applyFeaturePlacement,
   configuredModelFor,
   createAiConfigLoader,
+  isPlacementConfigurable,
+  placementFor,
   isFeatureEnabled,
   resolveProviderOrder,
 } from './ai-config.js';
@@ -194,5 +200,64 @@ describe('caching', () => {
     // not hand over a Cosmos client — on the pre-configuration behaviour.
     const loader = createAiConfigLoader({});
     await expect(loader.load()).resolves.toEqual({ providers: null, features: null });
+  });
+});
+
+describe('per-feature placement (#701)', () => {
+  it('has a default for every feature in the catalogue, and no stray ones', () => {
+    for (const provider of PER_FEATURE_PROVIDERS) {
+      expect(Object.keys(PROVIDER_PLACEMENT_DEFAULTS[provider]).sort()).toEqual(
+        [...FEATURE_NAMES].sort()
+      );
+      for (const value of Object.values(PROVIDER_PLACEMENT_DEFAULTS[provider])) {
+        expect(PLACEMENTS).toContain(value);
+      }
+    }
+  });
+
+  it('locks the anonymous public features off for nvidia', () => {
+    for (const feature of ['pricingExplain', 'landingZoneExplain']) {
+      expect(placementFor(null, 'nvidia', feature)).toBe('off');
+      expect(isPlacementConfigurable('nvidia', feature)).toBe(false);
+      // Configuration can disable, never enable: the lock holds against a stored 'first'.
+      expect(
+        placementFor({ placement: { nvidia: { [feature]: 'first' } } }, 'nvidia', feature)
+      ).toBe('off');
+    }
+  });
+
+  it('puts nvidia first for content features, and lets configuration demote it', () => {
+    expect(placementFor(null, 'nvidia', 'forgeDrafting')).toBe('first');
+    expect(isPlacementConfigurable('nvidia', 'forgeDrafting')).toBe(true);
+    const settings = { placement: { nvidia: { forgeDrafting: 'order', podcastScript: 'off' } } };
+    expect(placementFor(settings, 'nvidia', 'forgeDrafting')).toBe('order');
+    expect(placementFor(settings, 'nvidia', 'podcastScript')).toBe('off');
+  });
+
+  it('ignores a stored value that is not a placement', () => {
+    const settings = { placement: { nvidia: { forgeDrafting: 'always', critique: true } } };
+    expect(placementFor(settings, 'nvidia', 'forgeDrafting')).toBe('first');
+    expect(placementFor(settings, 'nvidia', 'critique')).toBe('first');
+  });
+
+  it('a call with no feature, or an unknown one, gets off', () => {
+    expect(placementFor(null, 'nvidia', null)).toBe('off');
+    expect(placementFor(null, 'nvidia', 'notAFeature')).toBe('off');
+    expect(placementFor(null, 'gemini', 'forgeDrafting')).toBe('off');
+  });
+
+  it('applyFeaturePlacement moves or removes, never adds', () => {
+    const order = ['gemini', 'openai', 'nvidia'];
+    expect(applyFeaturePlacement(order, null, 'forgeDrafting')).toEqual({
+      order: ['nvidia', 'gemini', 'openai'],
+      excluded: [],
+    });
+    expect(applyFeaturePlacement(order, null, 'telegram').order).toEqual(order);
+    expect(applyFeaturePlacement(order, null, 'pricingExplain')).toEqual({
+      order: ['gemini', 'openai'],
+      excluded: ['nvidia'],
+    });
+    // Not in the resolved order (no key, or disabled): placement cannot add it.
+    expect(applyFeaturePlacement(['gemini'], null, 'forgeDrafting').order).toEqual(['gemini']);
   });
 });

@@ -294,9 +294,9 @@ describe('cost table (ported from upstream ai-model-router.cost.test.js)', () =>
     expect(getCostEstimate('nope', 'x', 1_000_000, 1_000_000)).toBe(0);
   });
 
-  it('has an explicit row for every Anthropic and Gemini default (OpenAI gpt-5 rates are deliberately unpriced)', () => {
+  it('has an explicit row for every Anthropic, Gemini and NVIDIA default (OpenAI gpt-5 rates are deliberately unpriced)', () => {
     const r = createAiRouter({ env: {}, log: quiet });
-    for (const provider of ['anthropic', 'gemini']) {
+    for (const provider of ['anthropic', 'gemini', 'nvidia']) {
       for (const purpose of Object.keys(DEFAULT_MODEL_TABLE[provider])) {
         const model = r.defaultModelFor(provider, purpose);
         expect(
@@ -305,7 +305,7 @@ describe('cost table (ported from upstream ai-model-router.cost.test.js)', () =>
         ).toBeDefined();
       }
     }
-    expect(PROVIDERS).toEqual(['gemini', 'openai', 'anthropic']);
+    expect(PROVIDERS).toEqual(['gemini', 'openai', 'anthropic', 'nvidia']);
   });
 });
 
