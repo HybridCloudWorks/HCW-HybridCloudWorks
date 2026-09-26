@@ -22,7 +22,11 @@
  */
 import { describe, it, expect } from 'vitest';
 import { DEFAULT_PROVIDERS, aggregateByProvider, aggregateBySource } from './aiEngine.js';
-import { PROVIDERS } from '../../../functions/src/lib/ai/router.js';
+import {
+  DEFAULT_MODEL_TABLE,
+  PROVIDERS,
+  getCostEstimate,
+} from '../../../functions/src/lib/ai/router.js';
 import { USAGE_SOURCES } from '../../../functions/src/lib/ai/usage.js';
 import { SOURCE_LABELS } from '../pages/admin/AIEngineUsageTab.jsx';
 
@@ -46,6 +50,7 @@ describe('DEFAULT_PROVIDERS matches the API', () => {
       gemini: 'GEMINI_API_KEY',
       openai: 'OPENAI_API_KEY',
       anthropic: 'ANTHROPIC_API_KEY',
+      nvidia: 'NVIDIA_API_KEY',
     };
     for (const provider of DEFAULT_PROVIDERS) {
       expect(provider.apiKeyEnvVar, provider.id).toBe(expected[provider.id]);
@@ -66,8 +71,33 @@ describe('DEFAULT_PROVIDERS matches the API', () => {
 
   it('lists its defaultModel among its own models', () => {
     for (const provider of DEFAULT_PROVIDERS) {
+      // NVIDIA seeds no pin, so the router's per-purpose table decides (#701):
+      // a pin here would apply one model to drafting, grading and captions.
+      if (provider.id === 'nvidia') {
+        expect(provider.defaultModel).toBeNull();
+        continue;
+      }
       expect(provider.models, provider.id).toContain(provider.defaultModel);
     }
+  });
+
+  it('offers exactly the NVIDIA models the router defaults to, per purpose', () => {
+    const nvidia = DEFAULT_PROVIDERS.find((p) => p.id === 'nvidia');
+    const routerDefaults = [
+      ...new Set(Object.values(DEFAULT_MODEL_TABLE.nvidia).map(([, m]) => m)),
+    ];
+    expect([...nvidia.models].sort()).toEqual(routerDefaults.sort());
+  });
+
+  it('prices every NVIDIA call at zero, so the usage view shows the saving', () => {
+    const agg = aggregateByProvider([
+      {
+        provider: 'nvidia',
+        totalTokens: 3000,
+        estimatedCostUsd: getCostEstimate('nvidia', 'z-ai/glm-5.3', 900, 2100),
+      },
+    ]);
+    expect(agg.nvidia).toMatchObject({ calls: 1, tokens: 3000, costUsd: 0 });
   });
 });
 
