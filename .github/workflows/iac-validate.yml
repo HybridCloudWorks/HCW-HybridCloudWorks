@@ -1,4 +1,4 @@
-# Credential-free validation gate for infra/**.
+# Credential-free validation gate for infra/** and infra-lab/**.
 #
 # This is deliberately NOT a delivery workflow (same doctrine as ci.yml): no
 # secrets, no cloud credentials, no state access. `terraform init
@@ -8,6 +8,14 @@
 # It exists because the prototype deploy workflow is hard-disabled, which left
 # infra/** with no validation at all — a formatting error or invalid resource
 # block would only surface at the next human-driven TFC run.
+#
+# Two root modules, one set of contexts. infra/ is the hcw-azure workspace and
+# infra-lab/ is the hcw-lab workspace (#661, ADR 0032). They are checked by
+# the SAME two jobs, as extra steps, rather than by a matrix or a second pair
+# of jobs: a matrix renames the job context to "fmt, validate, tflint (infra)"
+# and a new job is a new context, and either way the names the `main` ruleset
+# requires would stop being reported. Each root module has its own change flag,
+# so a change to one does not run the other's init.
 #
 # WHY THE pull_request TRIGGER IS NOT PATH-FILTERED (T-523).
 #
@@ -19,10 +27,10 @@
 # them — a self-inflicted outage on the merge queue.
 #
 # So the trigger fires on every pull request and the FILTERING MOVED INSIDE:
-# each job checks out, decides whether infra/** actually changed, and skips its
-# expensive steps when it did not. The job itself still completes and posts its
-# context, which is what the ruleset needs. Cost when nothing infra changed is
-# a checkout and one `git diff` per job.
+# each job checks out, decides whether infra/** or infra-lab/** actually
+# changed, and skips its expensive steps when neither did. The job itself still
+# completes and posts its context, which is what the ruleset needs. Cost when
+# nothing infra changed is a checkout and one `git diff` per job.
 #
 # The `push` trigger keeps its path filter — required contexts are a pull
 # request concern, and there is nothing to satisfy on a branch push.
@@ -38,6 +46,7 @@ on:
     branches: [main]
     paths:
       - 'infra/**'
+      - 'infra-lab/**'
 
 permissions:
   contents: read
@@ -66,6 +75,8 @@ jobs:
 
       # Non-pull_request events reach here only through the path-filtered push
       # trigger, so they are infra changes by construction and run everything.
+      # A change to this workflow runs both root modules, since it can break
+      # either.
       - name: Detect infra changes
         id: changes
         working-directory: ${{ github.workspace }}
@@ -75,6 +86,7 @@ jobs:
           set -euo pipefail
           if [ "${GITHUB_EVENT_NAME}" != "pull_request" ]; then
             echo "infra=true" >> "$GITHUB_OUTPUT"
+            echo "lab=true" >> "$GITHUB_OUTPUT"
             echo "non-pull_request event — running all checks"
             exit 0
           fi
@@ -85,20 +97,33 @@ jobs:
           # review on #319, which copied this step's original form.)
           changed="$(git diff --name-only "${BASE_SHA}" HEAD)" || {
             echo "infra=true" >> "$GITHUB_OUTPUT"
+            echo "lab=true" >> "$GITHUB_OUTPUT"
             echo "could not compute the diff — running all checks rather than guessing"
             exit 0
           }
           if grep -qE '^(infra/|\.github/workflows/iac-validate\.yml$)' <<<"$changed"; then
             echo "infra=true" >> "$GITHUB_OUTPUT"
-            echo "infra/ changed — running all checks"
+            echo "infra/ changed — running its checks"
           else
             echo "infra=false" >> "$GITHUB_OUTPUT"
-            echo "no infra/ change — skipping checks, still reporting this context"
+            echo "no infra/ change — skipping its checks"
           fi
+          if grep -qE '^(infra-lab/|\.github/workflows/iac-validate\.yml$)' <<<"$changed"; then
+            echo "lab=true" >> "$GITHUB_OUTPUT"
+            echo "infra-lab/ changed — running its checks"
+          else
+            echo "lab=false" >> "$GITHUB_OUTPUT"
+            echo "no infra-lab/ change — skipping its checks"
+          fi
+          echo "this context is reported either way"
 
       - name: Setup Terraform
-        if: steps.changes.outputs.infra == 'true'
+        if: steps.changes.outputs.infra == 'true' || steps.changes.outputs.lab == 'true'
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+
+      - name: Setup tflint
+        if: steps.changes.outputs.infra == 'true' || steps.changes.outputs.lab == 'true'
+        uses: terraform-linters/setup-tflint@1cf010d3c7aef302051ccdb68c14c5dc2efa34ef # v6.3.1
 
       - name: Terraform fmt
         if: steps.changes.outputs.infra == 'true'
@@ -112,10 +137,6 @@ jobs:
         if: steps.changes.outputs.infra == 'true'
         run: terraform validate -no-color
 
-      - name: Setup tflint
-        if: steps.changes.outputs.infra == 'true'
-        uses: terraform-linters/setup-tflint@1cf010d3c7aef302051ccdb68c14c5dc2efa34ef # v6.3.1
-
       - name: tflint
         if: steps.changes.outputs.infra == 'true'
         run: |
@@ -124,6 +145,43 @@ jobs:
         env:
           # Raises the anonymous GitHub API rate limit for plugin download.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # infra-lab/ — the same four checks against the hcw-lab root module. Its
+      # own .tflint.hcl and .terraform.lock.hcl sit in that directory, and
+      # `-backend=false` means the `cloud` block naming hcw-lab is never
+      # contacted.
+      - name: Terraform fmt (infra-lab)
+        if: steps.changes.outputs.lab == 'true'
+        working-directory: infra-lab
+        run: terraform fmt -recursive -check -diff
+
+      - name: Terraform init (infra-lab, no backend)
+        if: steps.changes.outputs.lab == 'true'
+        working-directory: infra-lab
+        run: terraform init -backend=false -input=false
+
+      - name: Terraform validate (infra-lab)
+        if: steps.changes.outputs.lab == 'true'
+        working-directory: infra-lab
+        run: terraform validate -no-color
+
+      - name: tflint (infra-lab)
+        if: steps.changes.outputs.lab == 'true'
+        working-directory: infra-lab
+        run: |
+          tflint --init
+          tflint --format compact
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Offline contract tests (infra-lab/tests/): both providers mocked, no
+      # credential, no network call to Hostinger or Cloudflare. They assert
+      # the guards on the adopted VPS fire, the SSH key path is off by
+      # default, and the four lab names are the ones Caddy and Coder expect.
+      - name: Terraform test (infra-lab)
+        if: steps.changes.outputs.lab == 'true'
+        working-directory: infra-lab
+        run: terraform test -no-color
 
   trivy:
     name: Trivy IaC misconfiguration scan
@@ -161,6 +219,7 @@ jobs:
           set -euo pipefail
           if [ "${GITHUB_EVENT_NAME}" != "pull_request" ]; then
             echo "infra=true" >> "$GITHUB_OUTPUT"
+            echo "lab=true" >> "$GITHUB_OUTPUT"
             echo "non-pull_request event — running the scan"
             exit 0
           fi
@@ -168,19 +227,28 @@ jobs:
           # detect step: a failed diff must fail toward running, not skipping.
           changed="$(git diff --name-only "${BASE_SHA}" HEAD)" || {
             echo "infra=true" >> "$GITHUB_OUTPUT"
+            echo "lab=true" >> "$GITHUB_OUTPUT"
             echo "could not compute the diff — running the scan rather than guessing"
             exit 0
           }
           if grep -qE '^(infra/|\.github/workflows/iac-validate\.yml$)' <<<"$changed"; then
             echo "infra=true" >> "$GITHUB_OUTPUT"
-            echo "infra/ changed — running the scan"
+            echo "infra/ changed — scanning it"
           else
             echo "infra=false" >> "$GITHUB_OUTPUT"
-            echo "no infra/ change — skipping the scan, still reporting this context"
+            echo "no infra/ change — not scanning it"
           fi
+          if grep -qE '^(infra-lab/|\.github/workflows/iac-validate\.yml$)' <<<"$changed"; then
+            echo "lab=true" >> "$GITHUB_OUTPUT"
+            echo "infra-lab/ changed — scanning it"
+          else
+            echo "lab=false" >> "$GITHUB_OUTPUT"
+            echo "no infra-lab/ change — not scanning it"
+          fi
+          echo "this context is reported either way"
 
       - name: Install Trivy (pinned release binary)
-        if: steps.changes.outputs.infra == 'true'
+        if: steps.changes.outputs.infra == 'true' || steps.changes.outputs.lab == 'true'
         run: |
           set -euo pipefail
           base="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}"
@@ -205,3 +273,7 @@ jobs:
       - name: Scan infra/
         if: steps.changes.outputs.infra == 'true'
         run: trivy config --exit-code 1 --severity HIGH,CRITICAL infra
+
+      - name: Scan infra-lab/
+        if: steps.changes.outputs.lab == 'true'
+        run: trivy config --exit-code 1 --severity HIGH,CRITICAL infra-lab

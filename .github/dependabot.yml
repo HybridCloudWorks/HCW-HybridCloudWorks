@@ -142,3 +142,17 @@ updates:
       infra-terraform-major:
         update-types:
           - major
+
+  # infra-lab/ is the hcw-lab root module (#661) with its own committed lock.
+  # Deliberately ungrouped: hostinger/hostinger is pinned exactly and manages a
+  # paid server, so each bump arrives as its own pull request whose hcw-lab
+  # plan is read alone (infra-lab/README.md, "Changing the provider version").
+  - package-ecosystem: terraform
+    directory: /infra-lab
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 2
+    cooldown:
+      # Same constraint as the /infra entry: default-days only.
+      default-days: 3
