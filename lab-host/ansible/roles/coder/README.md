@@ -92,14 +92,94 @@ docker buildx imagetools inspect ghcr.io/coder/coder:v2.37.3 | head -3
 ```
 
 ```bash
-docker buildx imagetools inspect postgres:16 | head -3
+docker buildx imagetools inspect postgres:18.6 | head -3
 ```
 
-The `Digest:` line is the value. Coder's releases are at
-<https://github.com/coder/coder/releases>; `ghcr.io/coder/coder:latest`
-resolved to the same digest as `v2.37.3` on 2026-09-25. Stay on the
-PostgreSQL 16 line unless Coder's `pg_dump` and a restore have been
-rehearsed on the new major.
+The `Digest:` line is the value. Cross-check it against the registry's own
+`Docker-Content-Digest` for the same tag, which must print the same
+`sha256:`. Bash, anywhere with `curl`:
+
+```bash
+curl -fsSI -H "Authorization: Bearer $(curl -fsS 'https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/postgres:pull' | sed -E 's/.*"token":"([^"]+)".*/\1/')" -H 'Accept: application/vnd.oci.image.index.v1+json' https://registry-1.docker.io/v2/library/postgres/manifests/18.6 | grep -i docker-content-digest
+```
+
+Coder's releases are at <https://github.com/coder/coder/releases>;
+`ghcr.io/coder/coder:latest` resolved to the same digest as `v2.37.3` on
+2026-09-25. Coder supports PostgreSQL 13 and later (its upstream
+`compose.yaml` runs 17).
+
+## PostgreSQL 18
+
+PostgreSQL moved from 16.15 to **18.6**, the newest release of the newest
+major, on 2026-09-26, while the host held no Coder data, so there was
+nothing to migrate: the first `up` initialises an empty 18 cluster.
+`postgres:18` and `postgres:18.6` resolved to the same index
+(`sha256:5a5a84b1...2da9722`), and the registry header and the Docker Hub
+API agreed. The 18 image keeps the cluster in a per-major directory,
+`PGDATA=/var/lib/postgresql/18/docker`, under a `VOLUME` at
+`/var/lib/postgresql`, so the Compose file mounts `coder-postgres-data`
+there. At the old `/var/lib/postgresql/data` the image refuses to start.
+
+What was rehearsed that day, on Docker 29.8 with the committed Compose file
+unchanged, the pinned Coder v2.37.3 and postgres:18.6 digests, and
+stand-ins for the three role-written files:
+
+1. `docker compose up -d --wait`: both containers up in 27 seconds, Coder's
+   migrations at 585 (`000585_chat_search_english_config`, the newest
+   v2.37.3 ships) with `dirty` false, `/healthz` answering 200, and the
+   cluster at `/var/lib/postgresql/18/docker` on the named volume.
+2. An owner account created with `coder server create-admin-user`, then
+   this role's backup script, rendered from
+   `templates/coder-postgres-backup.sh.j2` with Ansible, wrote
+   `coder-<UTC timestamp>.sql.gz` (pg_dump 18.6 from server 18.6).
+3. That dump restored into a fresh `postgres:18.6` on a fresh volume with
+   the three-line procedure in `lab-host/README.md`, "Backups and
+   restore": `DROP DATABASE`, `CREATE DATABASE`, and the load with no
+   error. A second `pg_dump` of the restored database matched the first
+   line for line (13,615 lines each). The only difference is the random
+   `\restrict` key pg_dump writes on every run.
+4. Coder v2.37.3 started on the restored database: `/healthz` 200,
+   `/api/v2/buildinfo` 200 reporting `v2.37.3+3a24816` and the source's
+   deployment id, `/api/v2/users/first` 200 (the restored owner), the
+   schema still at 585, and no error lines in its log.
+
+### The next major
+
+Once the host holds Coder data, a new major is a dump and a restore, and it
+cannot happen by accident. The 18 image refuses to initialise while another
+major's cluster sits under `/var/lib/postgresql/<major>/docker` (the check
+is in its entrypoint, docker-library/postgres#1259). On 2026-09-26 that
+refusal was seen on this Compose file: exit 1 and a restart loop naming
+the path. So a bumped pin alone fails the play's `up --wait` and changes
+nothing. In order:
+
+1. Rehearse it as above with the new digest, across majors: dump from the
+   running major, restore into the new one, start Coder on the result.
+2. On the host, stop Coder, take a dump, then stop PostgreSQL, so nothing
+   writes after the dump. Bash:
+
+   ```bash
+   sudo docker compose --project-directory /etc/hcw/coder stop coder && sudo systemctl start coder-postgres-backup.service && sudo docker compose --project-directory /etc/hcw/coder stop coder-postgres
+   ```
+
+3. Set the 18 cluster aside inside the volume, under a name the check
+   does not match. It stays there, untouched, as the way back. Bash, still
+   on the 18 image:
+
+   ```bash
+   sudo docker compose --project-directory /etc/hcw/coder run --rm --no-deps --entrypoint mv coder-postgres /var/lib/postgresql/18/docker /var/lib/postgresql/18/docker.pre-upgrade
+   ```
+
+4. Merge the pin bump and re-run `bootstrap.sh`. The new image initialises
+   an empty cluster and Coder migrates it. Until the next step, the first
+   allowed GitHub account to sign in would own an empty deployment, so run
+   the next step straight after.
+5. Restore the step-2 dump with the three lines in `lab-host/README.md`,
+   "Backups and restore". They stop Coder, recreate the database from the
+   newest dump and start Coder again.
+
+To go back, stop both services, set the new cluster aside the same way,
+rename `docker.pre-upgrade` back to `docker`, and revert the pin.
 
 ## Handlers
 

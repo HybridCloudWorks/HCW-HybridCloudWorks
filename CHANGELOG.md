@@ -854,6 +854,31 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Coder's PostgreSQL moves from 16.15 to 18.6, with the move rehearsed
+  (#715).** 18.6 is the newest release of the newest major (18, supported
+  to November 2030; read 2026-09-26). It is pinned by index digest
+  `sha256:5a5a84b1...2da9722`, which `postgres:18` and `postgres:18.6` both
+  resolve to, and which the registry's `Docker-Content-Digest` and the
+  Docker Hub API confirm. The 18 image keeps its cluster in
+  `/var/lib/postgresql/18/docker` under a `VOLUME` at
+  `/var/lib/postgresql`, and refuses to start with a mount at the old
+  `/var/lib/postgresql/data`, so the Compose volume now mounts at
+  `/var/lib/postgresql`. The host holds no Coder data, so nothing is
+  migrated. Rehearsed on Docker 29.8 with the committed Compose file and
+  the pinned Coder v2.37.3. Coder applied its migrations to 585, the newest
+  v2.37.3 ships, and `/healthz` answered 200. An owner account was created
+  and dumped with the role's backup script, rendered from its template.
+  The dump was restored into a fresh 18.6 with the README's drop, create
+  and load, and a second dump matched it line for line. Coder then started
+  on the restored database, with `/api/v2/buildinfo` and
+  `/api/v2/users/first` answering 200. The coder role README's "stay on 16"
+  paragraph is replaced by that record and a procedure for the next major:
+  dump, set the old cluster aside inside the volume, bump, restore. Its two
+  host commands were run against the Compose file: the 18 image refuses to
+  initialise beside another major's cluster, and initialises a fresh
+  cluster once that one is set aside. The backup and restore commands need
+  no path, so they are unchanged.
+
 - **The six radarlint-python findings left on `main` are fixed, not
   silenced.** #588 counted nine on 2026-09-14 and closed with them
   outstanding; three had gone with later changes, and `qlty check --all

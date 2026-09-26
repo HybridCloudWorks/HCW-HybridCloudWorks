@@ -138,15 +138,22 @@ coder_domain: "coder.{{ lab_host_domain }}"
 # Coder, PostgreSQL and the OS fits the host's memory (12.5 of KVM 4's 16 GB),
 # and the site's status card (#680) publishes it as capacity.
 coder_max_workspaces: 5
-# Image INDEX digests from `docker buildx imagetools inspect`, read 2026-09-25;
-# the role runs image@digest and the tags are for humans. coder:latest and
-# v2.37.3 resolved to the same digest that day; postgres:16 and 16.15 likewise.
+# Image INDEX digests from `docker buildx imagetools inspect`; the role runs
+# image@digest and the tags are for humans. Coder read 2026-09-25, when
+# coder:latest and v2.37.3 resolved to the same digest. PostgreSQL read
+# 2026-09-26: 18.6 is the newest release of the newest major (18, supported to
+# November 2030), postgres:18 and postgres:18.6 resolved to the same index,
+# and the registry's Docker-Content-Digest and the Docker Hub API agreed. The
+# move from 16.15 was rehearsed that day with this Coder image: migrations,
+# pg_dump, restore into a fresh 18.6 (roles/coder/README.md). The 18 image
+# keeps its data under /var/lib/postgresql/18/docker, which is why the Compose
+# volume is mounted at /var/lib/postgresql.
 coder_image: ghcr.io/coder/coder
 coder_image_tag: v2.37.3
 coder_image_digest: sha256:a48f82c2c437e032ce3f6970b4e937a7900cad3c76956956955099465b45e542
 coder_postgres_image: postgres
-coder_postgres_image_tag: "16.15"
-coder_postgres_image_digest: sha256:1a6ab3f5345eb6dbe04a1349529caabdb0ab09293a09590fad07b2246bfa4b54
+coder_postgres_image_tag: "18.6"
+coder_postgres_image_digest: sha256:5a5a84b19854a9ffaa54082c166ff4ec27473a361e496e5ea167f298f2da9722
 
 # vps-agent runs host-native as a systemd service (ADR 0032) from a checkout of
 # this repository. Its commit is the one this playbook runs from: the lookup
