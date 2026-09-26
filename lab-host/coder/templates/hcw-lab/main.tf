@@ -7,6 +7,9 @@
 #     a host path; its one mount is a per-workspace named volume;
 #   - it runs as uid 65534 (`nobody`), which is what the hcw-lab image's
 #     `full` target already drops to (lab-image/Dockerfile, `USER 65534:65534`);
+#     the image gives that uid `/bin/bash` and home `/tmp/home` in its own
+#     /etc/passwd, which the Coder agent needs because it runs every script
+#     through the passwd shell (#693), so the template writes no passwd;
 #   - it joins its own bridge network, created and destroyed with the
 #     container, with no route to the Compose network Coder and PostgreSQL
 #     share;
@@ -47,8 +50,8 @@ locals {
   # the tag is the commit the workflow built it from and is documentation
   # only (ADR 0032, decision 5: every learner-facing image is digest-pinned
   # where consumed).
-  image_tag    = "80a62c350e9294aaea6d877975778e7dcb24fe84"
-  image_digest = "sha256:f27dbcd10f1d23e173b10d72e77884cd1677f9bcd2386f0a8a99144305e6e864"
+  image_tag    = "02dd959520108765a0b48432fcd5819e3a802545"
+  image_digest = "sha256:6dacca008c263b40cb04120c74036348d6cd0df1c38acc430bd6efca9901f820"
   image        = "ghcr.io/hybridcloudworks/hcw-lab@${local.image_digest}"
 
   # The image sets HOME=/tmp/home and owns it as 65534, so a named volume
@@ -108,38 +111,6 @@ locals {
 
   lab        = local.labs[data.coder_parameter.lab.value]
   lab_folder = local.lab.source == "" ? "${local.lab_root}/${data.coder_parameter.lab.value}" : "${local.lab_root}/${local.lab.source}"
-
-  # The Coder agent runs every script (startup, code-server, the terminal)
-  # through the user's login shell, read from /etc/passwd by name
-  # (github.com/coder/coder, agent/usershell/usershell_other.go). In
-  # debian:bookworm-slim, which the image builds on, that line is
-  # `nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin`, and
-  # `nologin -c <script>` refuses everything. Until lab-image/Dockerfile gives
-  # uid 65534 a shell (the permanent fix; then delete this local and the
-  # `upload` block below), the template writes the image's own passwd back
-  # with the shell and home of that one line changed. The daemon does the
-  # write before the container starts, so it needs no privilege inside the
-  # container and touches only the container's writable layer.
-  passwd = <<-EOT
-    root:x:0:0:root:/root:/bin/bash
-    daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
-    bin:x:2:2:bin:/bin:/usr/sbin/nologin
-    sys:x:3:3:sys:/dev:/usr/sbin/nologin
-    sync:x:4:65534:sync:/bin:/bin/sync
-    games:x:5:60:games:/usr/games:/usr/sbin/nologin
-    man:x:6:12:man:/var/cache/man:/usr/sbin/nologin
-    lp:x:7:7:lp:/var/spool/lpd:/usr/sbin/nologin
-    mail:x:8:8:mail:/var/mail:/usr/sbin/nologin
-    news:x:9:9:news:/var/spool/news:/usr/sbin/nologin
-    uucp:x:10:10:uucp:/var/spool/uucp:/usr/sbin/nologin
-    proxy:x:13:13:proxy:/bin:/usr/sbin/nologin
-    www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin
-    backup:x:34:34:backup:/var/backups:/usr/sbin/nologin
-    list:x:38:38:Mailing List Manager:/var/list:/usr/sbin/nologin
-    irc:x:39:39:ircd:/run/ircd:/usr/sbin/nologin
-    _apt:x:42:65534::/nonexistent:/usr/sbin/nologin
-    nobody:x:65534:65534:nobody:${local.home}:/bin/bash
-  EOT
 }
 
 data "coder_provisioner" "me" {}
@@ -382,13 +353,6 @@ resource "docker_container" "workspace" {
     container_path = local.home
     volume_name    = docker_volume.home.name
     read_only      = false
-  }
-
-  # See local.passwd.
-  upload {
-    file        = "/etc/passwd"
-    content     = local.passwd
-    permissions = "0644"
   }
 
   labels {

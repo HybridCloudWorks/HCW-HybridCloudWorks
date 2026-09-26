@@ -44,7 +44,11 @@ $harnessDirectories = @('.agents', '.claude', 'hooks', 'tooling', '.agentic')
 # convention, like mkdocs.yml below. A local `qlty check` also runs ruff, which
 # leaves .ruff_cache at the root; that cache ignores itself (it writes its own
 # .gitignore) and never reaches CI, but this check walks the filesystem.
-$allowedDirectories = @('.azure', '.github', '.qlty', '.ruff_cache', '.vscode', 'docs', 'edge', 'frontend', 'functions', 'infra', 'lab-host', 'lab-image', 'node_modules', 'scripts', 'site', 'vps-agent') + $harnessDirectories
+#
+# `infra-lab` is the second Terraform root module (#661, ADR 0032): the
+# Hostinger lab host and its DNS, in the hcw-lab HCP Terraform workspace. It
+# sits beside infra/ rather than inside it so the two states never meet.
+$allowedDirectories = @('.azure', '.github', '.qlty', '.ruff_cache', '.vscode', 'docs', 'edge', 'frontend', 'functions', 'infra', 'infra-lab', 'lab-host', 'lab-image', 'node_modules', 'scripts', 'site', 'vps-agent') + $harnessDirectories
 
 # The engineering plan documents are companions to the approved architecture and
 # are referenced from README.md and from each other; they stay at the root.
@@ -210,6 +214,10 @@ foreach ($markdownFile in $markdownFiles) {
     $relativePath -eq '.github/CONTRIBUTING.md' -or
     $relativePath -eq '.github/SECURITY.md' -or
     $relativePath -eq 'infra/README.md' -or
+    # infra-lab/README.md is the same Terraform-standard module doc for the
+    # hcw-lab root module (#661), and carries the owner's adoption steps and
+    # the plan counts that must be read before any apply.
+    $relativePath -eq 'infra-lab/README.md' -or
     # lab-image/README.md is the same kind of file for the hcw-lab Dockerfile
     # (#674): what the two build targets carry, their measured sizes, and how a
     # version in versions.env is bumped, next to the files it describes.

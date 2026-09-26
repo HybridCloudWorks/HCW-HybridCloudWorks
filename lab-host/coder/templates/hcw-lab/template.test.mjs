@@ -176,6 +176,14 @@ test('the workspace runs as uid 65534 with hard limits and no capabilities', () 
   assert.doesNotMatch(caps[0], /\badd\b/);
 });
 
+test('the workspace takes its passwd from the image, not an upload', () => {
+  // The hcw-lab image gives uid 65534 /bin/bash and /tmp/home (#693, #698),
+  // so the template writes no file into the container before it starts.
+  const [container] = containers;
+  assert.equal(nestedBlocks(container.body, 'upload').length, 0);
+  assert.doesNotMatch(mainTf, /^\s*passwd\s*=/m);
+});
+
 test('the workspace image is the hcw-lab digest and Coder itself binds to loopback only', () => {
   assert.match(mainTf, /ghcr\.io\/hybridcloudworks\/hcw-lab@\$\{local\.image_digest\}/);
   assert.match(mainTf, /image_digest\s*=\s*"sha256:[0-9a-f]{64}"/);

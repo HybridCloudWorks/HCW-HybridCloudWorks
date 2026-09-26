@@ -364,19 +364,43 @@ jobs:
             --rule-name "ci-smoke-${GITHUB_RUN_ID}" \
             --action Allow --ip-address "${RUNNER_IP}/32" --priority 300 \
             --output none
-          sleep 20
 
+      # No fixed wait after the rule add: the smoke test below polls instead.
+      # A fixed `sleep 20` here plus one request was not enough on run
+      # 36175776422 — the rule had not reached every front end, the request
+      # got 403 "Web App - Unavailable", and a healthy deploy went red (#700).
+      #
+      # The poll is bounded. POLL_BUDGET_S caps the elapsed time at which a
+      # further attempt may START (a slow final attempt can overrun it by at
+      # most its own curl timeout), and a budget with no 200 fails the step
+      # with the last body in the summary — so an app that is really down
+      # still fails, about two and a half minutes later than it used to.
       - name: Post-deploy smoke test
         env:
           APP_HOSTNAME: ${{ vars.APP_HOSTNAME }}
           FUNCTIONS_URL: ${{ vars.FUNCTIONS_URL }}
+          POLL_INTERVAL_S: '10'
+          POLL_BUDGET_S: '150'
         run: |
           URL="https://${APP_HOSTNAME}/api/health"
-          echo "GET $URL  (origin, via the temporary window)"
+          echo "GET $URL  (origin, via the temporary window; every ${POLL_INTERVAL_S} s for up to ${POLL_BUDGET_S} s)"
 
-          BODY=$(curl -sS -m 30 -w $'\n%{http_code}' "$URL" 2>&1 || true)
-          STATUS=$(printf '%s' "$BODY" | tail -n1)
-          BODY=$(printf '%s' "$BODY" | sed '$d')
+          started=$SECONDS
+          attempt=0
+          while :; do
+            attempt=$((attempt + 1))
+            RESP=$(curl -sS -m 30 -w $'\n%{http_code}' "$URL" 2>&1 || true)
+            STATUS=$(printf '%s' "$RESP" | tail -n1)
+            BODY=$(printf '%s' "$RESP" | sed '$d')
+            elapsed=$((SECONDS - started))
+            echo "attempt ${attempt} at +${elapsed} s: HTTP ${STATUS}"
+            [ "$STATUS" = "200" ] && break
+            if [ $((elapsed + POLL_INTERVAL_S)) -gt "$POLL_BUDGET_S" ]; then
+              echo "no 200 within ${POLL_BUDGET_S} s"
+              break
+            fi
+            sleep "$POLL_INTERVAL_S"
+          done
 
           echo "status: $STATUS"
           echo "body:   ${BODY:0:400}"
@@ -384,8 +408,8 @@ jobs:
           {
             echo "## 🚀 Azure Functions Deploy Complete"
             echo ""
-            echo "\`GET $URL\` → **HTTP $STATUS**"
-          } >> $GITHUB_STEP_SUMMARY
+            echo "\`GET $URL\` → **HTTP $STATUS** (attempt ${attempt}, +${elapsed} s)"
+          } >> "$GITHUB_STEP_SUMMARY"
 
           if [ "$STATUS" != "200" ]; then
             {
@@ -394,11 +418,11 @@ jobs:
               echo "\`\`\`"
               echo "${BODY:0:800}"
               echo "\`\`\`"
-            } >> $GITHUB_STEP_SUMMARY
+            } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
 
-          echo "✅ Health check: **PASSED**" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Health check: **PASSED**" >> "$GITHUB_STEP_SUMMARY"
 
           # The origin lock must still refuse everyone else. Without this the
           # window above would quietly become a way to pass the check while the
@@ -409,10 +433,10 @@ jobs:
           CF=$(curl -sS -m 30 -o /dev/null -w "%{http_code}" "${FUNCTIONS_URL}/health" || echo "000")
           echo "non-allowlisted path returned: $CF"
           if [ "$CF" = "200" ]; then
-            echo "❌ Origin lock: **NOT ENFORCING** — an unlisted caller got 200" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Origin lock: **NOT ENFORCING** — an unlisted caller got 200" >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          echo "✅ Origin lock: **enforcing** (unlisted caller got HTTP $CF)" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Origin lock: **enforcing** (unlisted caller got HTTP $CF)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Close origin firewall window
         if: ${{ always() && steps.appfw.outputs.runner_ip != '' }}
