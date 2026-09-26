@@ -50,12 +50,11 @@ This project has not cut a tagged release; entries are grouped under
   one pull request when a floor moves; that pull request's CI then lists the
   pins left behind. The `scripts (operations)` CI row now also runs on
   changes to the files the floors test reads, and
-  `docs/standards/iac-repository-standard.md` names the rule. The floors
-  test is red until the Trixie lab-image change (#716) merges: its only
-  findings are the two `FROM debian:bookworm-slim` lines in
-  `lab-image/Dockerfile`. `vps-agent/package.json` moves to `>=26.8.0` here,
-  because the Ubuntu 26.04 change (#717) moved the lab host to Node.js
-  26.10.0 and left the package range at `>=22`.
+  `docs/standards/iac-repository-standard.md` names the rule.
+  `vps-agent/package.json` moves to `>=26.8.0` here, because the Ubuntu
+  26.04 change (#717) moved the lab host to Node.js 26.10.0 and left the
+  package range at `>=22`. On top of #717 and the Trixie lab image (#716),
+  the floors test finds no pin below its floor.
 
 - **Lab host targets Ubuntu 26.04 LTS, with release-derived apt suites,
   resolute package pins and every lab host pin at its newest release
