@@ -19,6 +19,12 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **CI runs Python 3.14, the newest stable release.** Owner instruction
+  2026-09-26: always use the newest Python. The four `actions/setup-python`
+  pins (the ansible-lint and harness jobs in `ci.yml`, `complexity-delta.yml`
+  and `docs-pages.yml`) move from 3.12 to 3.14. The docs build was run
+  locally on 3.14.7 before the change.
+
 - **`scripts/lab/Connect-Lab.ps1`: one-command SSH and VS Code setup for the
   lab host, and the corrected Hostinger read in `infra-lab`.** The script
   (PowerShell 7, `-WhatIf`) sets up any desktop to reach the host as
