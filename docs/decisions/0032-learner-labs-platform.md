@@ -62,6 +62,7 @@ are recorded once, here, before any of them is implemented.
    (Owner decision 2026-09-26: the VPS was reinstalled with 26.04 LTS, the latest LTS, and stays on it; this line read 24.04 LTS until then.) No
    Kubernetes of any size (owner decision 2026-09-24; the earlier k3s idea is
    dropped). Coder and its PostgreSQL run as containers under Docker Compose.
+   (Owner decision 2026-09-26: Coder's database stays this PostgreSQL container on the host, not Coder's built-in PostgreSQL or Azure Database for PostgreSQL Flexible Server B1ms, about $14 a month in compute; `lab-host/ansible/roles/coder/README.md`, "Where it runs", records both.)
    Caddy runs host-native from a pinned build that includes the
    `caddy-dns/cloudflare` module, because neither the stock package nor the
    official image carries it and DNS-01 needs it; its version and checksum

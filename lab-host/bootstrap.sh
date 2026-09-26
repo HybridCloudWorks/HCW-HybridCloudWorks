@@ -2,8 +2,10 @@
 # Bootstrap the HCW lab host. Re-runnable: the owner runs it first as root over
 # SSH on the adopted Ubuntu 26.04 LTS host (infra-lab/README.md, step 7; the
 # Hostinger provider cannot attach a post-install script to a server that
-# already exists), and re-runs it after changing the pinned ref or the vault. Everything the host ends up
-# running is declared under ansible/; this script only gets Ansible there.
+# already exists), and re-runs it after a change merges to main or the vault
+# changes; each run brings the host to the current main commit (HCW_REPO_REF
+# below). Everything the host ends up running is declared under ansible/; this
+# script only gets Ansible there.
 #
 # The vault is optional on purpose. Without /etc/hcw/ansible/vault.yml the
 # playbook still hardens the host, installs Docker, node_exporter and Caddy
@@ -47,7 +49,21 @@ PYTHON_VERSION=3.14.7
 ANSIBLE_CORE_VERSION=2.21.4
 
 HCW_REPO_URL="${HCW_REPO_URL:-https://github.com/HybridCloudWorks/HCW-HybridCloudWorks.git}"
-HCW_REPO_REF="${HCW_REPO_REF:-04aa9e36a2c16813dcbabb838f5c2b86d3370d96}"
+# Which commit the host runs: origin/main unless HCW_REPO_REF says otherwise.
+# After the clone or fetch below it is resolved once to a full sha, that sha is
+# checked out detached and logged, and nothing after that reads the ref again,
+# so a push during the run cannot change what runs. main is protected by the
+# repository ruleset (a pull request for every change, no bypass actors, and
+# strict required checks that include ansible-lint (lab-host) and coder
+# (lab-host)), so every commit on it has passed those checks. That is the trust
+# a pinned sha here gave, without the lag: a pull request cannot pin its own
+# merge commit, so a pin always named the commit before the change that moved
+# it, and every lab-host change needed a second pull request to take effect.
+# HCW_REPO_REF=<sha or ref> still holds a host at, or rolls it back to, any
+# commit the fetch can see (lab-host/README.md, "Re-running"). The agent runs
+# the same commit by default: labs_agent_repo_ref in ansible/group_vars/all.yml
+# reads the playbook's own checkout.
+HCW_REPO_REF="${HCW_REPO_REF:-origin/main}"
 HCW_SRC_DIR="${HCW_SRC_DIR:-/opt/hcw-src}"
 HCW_ANSIBLE_STATE_DIR=/etc/hcw/ansible
 HCW_VAULT_FILE="${HCW_ANSIBLE_STATE_DIR}/vault.yml"
@@ -66,6 +82,10 @@ export DEBIAN_FRONTEND=noninteractive
 log() {
   printf '[bootstrap] %s\n' "$*"
 }
+
+# Read before the checkout below can replace this file, so the script can tell
+# whether the commit it checks out carries a different version of itself.
+self_digest="$(sha256sum "${BASH_SOURCE[0]}" 2>/dev/null | cut -d ' ' -f 1 || true)"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "bootstrap.sh must run as root" >&2
@@ -138,8 +158,26 @@ else
   log "cloning ${HCW_REPO_URL} into ${HCW_SRC_DIR}"
   git clone --quiet "${HCW_REPO_URL}" "${HCW_SRC_DIR}"
 fi
-log "checking out ${HCW_REPO_REF}"
-git -C "${HCW_SRC_DIR}" checkout --quiet --detach "${HCW_REPO_REF}"
+if ! hcw_repo_sha="$(git -C "${HCW_SRC_DIR}" rev-parse --verify --quiet "${HCW_REPO_REF}^{commit}")"; then
+  echo "refusing to run: HCW_REPO_REF=${HCW_REPO_REF} does not name a commit in ${HCW_SRC_DIR} after the fetch" >&2
+  exit 1
+fi
+log "checking out ${HCW_REPO_REF} at ${hcw_repo_sha}"
+git -C "${HCW_SRC_DIR}" checkout --quiet --detach "${hcw_repo_sha}"
+
+# The pins at the top of this file are part of the commit too. When the commit
+# just checked out carries a different bootstrap.sh (a uv, Python or
+# ansible-core bump, say), hand over to it rather than run the rest of the old
+# one, so a change to this file takes effect on the run that fetches it and not
+# one run later. HCW_REPO_REF is passed on as the resolved sha, so the second
+# pass checks out the same commit, and HCW_BOOTSTRAP_HANDED_OVER stops it
+# handing over again.
+hcw_checked_out_script="${HCW_SRC_DIR}/lab-host/bootstrap.sh"
+if [ -z "${HCW_BOOTSTRAP_HANDED_OVER:-}" ] && [ -f "${hcw_checked_out_script}" ] \
+  && [ "$(sha256sum "${hcw_checked_out_script}" | cut -d ' ' -f 1)" != "${self_digest}" ]; then
+  log "${hcw_repo_sha} carries a different bootstrap.sh; handing over to it"
+  HCW_BOOTSTRAP_HANDED_OVER=1 HCW_REPO_REF="${hcw_repo_sha}" exec bash "${hcw_checked_out_script}" "$@"
+fi
 
 cd "${HCW_SRC_DIR}/lab-host/ansible"
 
@@ -158,5 +196,5 @@ else
   log "no vault at ${HCW_VAULT_FILE}: Caddy answers 503 over plain HTTP and the agent stays stopped until one exists"
 fi
 
-log "running site.yml against localhost"
+log "running site.yml from ${hcw_repo_sha} against localhost"
 "${UV_TOOL_BIN_DIR}/ansible-playbook" -i inventory/localhost.yml site.yml "${extra_args[@]}" "$@"

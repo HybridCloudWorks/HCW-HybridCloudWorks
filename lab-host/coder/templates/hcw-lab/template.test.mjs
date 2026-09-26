@@ -192,3 +192,11 @@ test('the workspace image is the hcw-lab digest and Coder itself binds to loopba
   assert.match(ports[0], /"127\.0\.0\.1:7080:7080"/);
   assert.equal(services['coder-postgres'].filter((line) => /^\s*ports:/.test(line)).length, 0, 'postgres publishes nothing');
 });
+
+test('Coder does not redirect to its access URL behind the TLS-terminating proxy', () => {
+  // With this on, Coder answers every plain-HTTP request from Caddy with a
+  // redirect to the https access URL, and the browser loops (PR #722).
+  const redirect = services.coder.filter((line) => /^\s*CODER_REDIRECT_TO_ACCESS_URL:/.test(line));
+  assert.equal(redirect.length, 1);
+  assert.match(redirect[0], /CODER_REDIRECT_TO_ACCESS_URL:\s*"false"\s*$/);
+});

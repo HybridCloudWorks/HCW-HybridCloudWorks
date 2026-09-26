@@ -74,7 +74,14 @@ services:
       # Workspace apps (code-server) are served one label below coder.lab,
       # which is why the Caddy certificate carries *.coder.lab (ADR 0032).
       CODER_WILDCARD_ACCESS_URL: "*.coder.lab.hybridcloudworks.com"
-      CODER_REDIRECT_TO_ACCESS_URL: "true"
+      # Off, because Caddy terminates TLS and forwards plain HTTP. Coder
+      # v2.37.3 with this on redirects every request that did not reach it
+      # over TLS itself (all but /healthz) to the access URL, so behind Caddy
+      # each request loops: measured 2026-09-26 as a 307 even with the
+      # X-Forwarded-* headers set, and a 200 with it off (PR #722). Caddy
+      # already sends http:// to https:// and only routes the coder.lab and
+      # *.coder.lab hosts here, which is everything this setting would add.
+      CODER_REDIRECT_TO_ACCESS_URL: "false"
       # TLS terminates in Caddy, so the session cookie is only ever sent over
       # HTTPS from the browser's point of view.
       CODER_SECURE_AUTH_COOKIE: "true"
@@ -117,8 +124,8 @@ services:
 
   coder-postgres:
     # Pinned by digest in ansible/group_vars/all.yml (coder_postgres_image_digest,
-    # the image index that postgres:16 and postgres:16.15 both resolved to on
-    # 2026-09-25).
+    # the image index that postgres:18 and postgres:18.6 both resolved to on
+    # 2026-09-26).
     image: ${CODER_POSTGRES_IMAGE:?set by the coder role in .env from coder_postgres_image and coder_postgres_image_digest}
     container_name: coder-postgres
     restart: unless-stopped
@@ -130,8 +137,13 @@ services:
       POSTGRES_DB: coder
     # Listens on the compose network only: no `ports`, so nothing on the host
     # or the internet reaches 5432 (docs/architecture/labs-host.md).
+    # The PostgreSQL 18 image declares its VOLUME at /var/lib/postgresql and
+    # keeps the cluster in a per-major directory beneath it (PGDATA is
+    # /var/lib/postgresql/18/docker), so a later major's pg_upgrade --link can
+    # see both clusters on one mount. It refuses to start with a mount at the
+    # 16-and-earlier path /var/lib/postgresql/data (docker-library/postgres#1259).
     volumes:
-      - coder-postgres-data:/var/lib/postgresql/data
+      - coder-postgres-data:/var/lib/postgresql
     networks:
       - coder
     healthcheck:

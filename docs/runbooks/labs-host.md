@@ -378,10 +378,10 @@ it; use `create` in place of `edit`.
 ## 6. Enable the role and run the playbook
 
 In a pull request, set `arc_enabled: true` in
-`lab-host/ansible/group_vars/all.yml`, merge it, move `HCW_REPO_REF` in
-`lab-host/bootstrap.sh` to the merged commit the same way as for any other
-lab-host change (`lab-host/README.md`, "Re-running"), and re-run the
-playbook. Bash, on the host:
+`lab-host/ansible/group_vars/all.yml`, merge it, and re-run the playbook.
+The run checks out the merged `main` and prints its sha, the same as for
+any other lab-host change (`lab-host/README.md`, "Re-running"); there is no
+pin to move. Bash, on the host:
 
 ```bash
 sudo /opt/hcw-src/lab-host/bootstrap.sh
@@ -551,7 +551,7 @@ order, or the next playbook run fails closed looking for a credential that
 step 9 deleted.
 
 1. In a pull request, set `arc_enabled: false` in
-   `lab-host/ansible/group_vars/all.yml`, merge it and move `HCW_REPO_REF`
+   `lab-host/ansible/group_vars/all.yml`, merge it and re-run the playbook
    (step 6). With the switch off, the role touches nothing.
 2. Remove the agent extension, then the machine resource. PowerShell; each
    asks for confirmation:

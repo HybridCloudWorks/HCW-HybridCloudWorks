@@ -50,7 +50,7 @@ Written down so nobody rediscovers them (#659):
 From the repository root. PowerShell:
 
 ```powershell
-node --test lab-host/coder
+node --test "lab-host/coder/**/*.test.mjs"
 ```
 
 ```powershell
@@ -71,7 +71,7 @@ The Compose check is bash (Git Bash), because it is a shell script:
 bash lab-host/coder/compose-config-check.sh
 ```
 
-Success: `node --test` reports `pass 8`, `fail 0`; `fmt` prints nothing;
+Success: `node --test` reports `pass 10`, `fail 0`; `fmt` prints nothing;
 `validate` prints `Success! The configuration is valid.`; the compose check
 prints `coder-postgres` and `coder` (dependency order). The
 `coder (lab-host)` job in `.github/workflows/ci.yml` runs the same four on
@@ -89,7 +89,7 @@ terraform -chdir=lab-host/coder/templates/hcw-lab plan -refresh=false
 
 | Change | Where | Then |
 | --- | --- | --- |
-| Coder or PostgreSQL version | `coder_image_*`, `coder_postgres_image_*` in `../ansible/group_vars/all.yml` (`../ansible/roles/coder/README.md` shows the `imagetools inspect` lines) | Merge, move `HCW_REPO_REF` in `../bootstrap.sh`, re-run `bootstrap.sh` on the host |
+| Coder or PostgreSQL version | `coder_image_*`, `coder_postgres_image_*` in `../ansible/group_vars/all.yml` (`../ansible/roles/coder/README.md` shows the `imagetools inspect` lines) | Merge, then re-run `bootstrap.sh` on the host, which checks out the merged `main`. A new PostgreSQL major is a dump and a restore, not a pin bump alone: `../ansible/roles/coder/README.md`, "The next major" |
 | Workspace image | `image_tag` and `image_digest` in `templates/hcw-lab/main.tf`, from the `publish-lab-image.yml` job summary | `coder templates push` again (`../README.md`, "Coder") |
 | Providers or the `code-server` module | `required_providers` and `module "code-server"` in `main.tf`, then `terraform init -upgrade` to refresh `.terraform.lock.hcl` | `coder templates push` |
 | A new lab | `local.labs` in `main.tf` and the matching `option` and `validation` regex; the catalogue in `frontend/src/data/labs/catalogue.js` (#681) | `coder templates push` |

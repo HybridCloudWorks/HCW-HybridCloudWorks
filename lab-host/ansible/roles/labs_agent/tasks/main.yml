@@ -94,14 +94,34 @@
     group: "{{ labs_agent_group }}"
     mode: "0750"
 
-- name: Check out the repository at the pinned ref
+- name: Check out the repository at labs_agent_repo_ref
   ansible.builtin.git:
     repo: "{{ labs_agent_repo_url }}"
     dest: "{{ labs_agent_home }}"
     version: "{{ labs_agent_repo_ref }}"
+  register: labs_agent_checkout
   notify: Restart hcw-labs-agent
 
-- name: Install the agent's production dependencies for this ref
+# node_modules holds one commit's dependencies at a time, so only that
+# commit's stamp may exist. A stamp left by another commit would let the
+# install below be skipped on a return to that commit (a hold released, a
+# rollback undone) with the other commit's dependencies still installed.
+- name: Find dependency stamps written for another commit or Node.js pin
+  ansible.builtin.find:
+    paths: "{{ labs_agent_state_dir }}"
+    patterns: deps-installed-*
+    excludes: "{{ labs_agent_deps_stamp | basename }}"
+  register: labs_agent_stale_stamps
+
+- name: Remove them, so the install below runs for any commit it has not just run for
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ labs_agent_stale_stamps.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+
+- name: Install the agent's production dependencies for this commit
   ansible.builtin.shell:
     cmd: npm ci --omit=dev && touch "{{ labs_agent_deps_stamp }}"
     chdir: "{{ labs_agent_app_dir }}"
