@@ -242,7 +242,7 @@ module "code-server" {
   agent_id        = coder_agent.main.id
   folder          = local.lab_folder
   install_prefix  = "${local.home}/.code-server"
-  install_version = "4.106.3"
+  install_version = "4.139.1"
   use_cached      = true
   subdomain       = true
   order           = 1

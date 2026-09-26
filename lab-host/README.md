@@ -17,7 +17,7 @@ every step.
 | `node_exporter` | node_exporter 1.12.1, host-native, SHA256-verified, `127.0.0.1:9100` only | `/usr/local/bin/node_exporter`, `node_exporter.service` |
 | `caddy` | Caddy 2.11.4 built with `caddy-dns/cloudflare` 0.2.4, host-native under systemd; TLS for `lab.hybridcloudworks.com`, `*.lab.hybridcloudworks.com` and `*.coder.lab.hybridcloudworks.com` via DNS-01; placeholder response at the apex | `/usr/local/bin/caddy`, `/opt/caddy/bin/` (versioned binary and its `.provenance`), `/etc/caddy/Caddyfile`, `/etc/caddy/conf.d/`, `/etc/caddy/env` (root:caddy, 0640), `caddy.service` running as `caddy` |
 | `coder` | Coder Community edition v2.37.3 and PostgreSQL 16.15 under Docker Compose from `../coder/docker-compose.yml`, both by digest; the Caddy route for `coder.lab` and `*.coder.lab`; a nightly `pg_dump` keeping seven days. Down until `coder_enabled` is true | `/etc/hcw/coder/` (`docker-compose.yml`, `.env`, `coder.env` and `coder-postgres.env`, the last two root 0600), `/etc/caddy/conf.d/10-coder.caddy`, `/usr/local/sbin/coder-postgres-backup`, `coder-postgres-backup.timer`, `/var/backups/coder/` |
-| `labs_agent` | `vps-agent` host-native as `hcw-labs-agent.service` under user `hcw-labs-agent` (in `docker`), Node.js 22 from NodeSource, repository checkout at a pinned sha, certificate generated on the host | `/opt/hcw-labs-agent`, `/etc/hcw/labs-agent.env` (root, 0600), `/etc/hcw/labs-agent.pem` (root:hcw-labs-agent, 0640), `/etc/hcw/labs-agent.crt` |
+| `labs_agent` | `vps-agent` host-native as `hcw-labs-agent.service` under user `hcw-labs-agent` (in `docker`), Node.js 26.10.0 from NodeSource, repository checkout at a pinned sha, certificate generated on the host | `/opt/hcw-labs-agent`, `/etc/hcw/labs-agent.env` (root, 0600), `/etc/hcw/labs-agent.pem` (root:hcw-labs-agent, 0640), `/etc/hcw/labs-agent.crt` |
 
 Each role's `README.md` explains its decisions; `meta/argument_specs.yml` is
 its variable contract. Every version, digest and checksum is in
@@ -40,7 +40,10 @@ owner clones this repository onto the host and runs `bootstrap.sh` as root
 over SSH, with the one line in `infra-lab/README.md`, step 7. It needs a key
 in `/root/.ssh/authorized_keys` first (step 6 there), because the
 `hardening` role copies that key to `hcwadmin` before it turns root and
-password login off. The script installs `ansible-core` 2.21.4 with pipx, clones
+password login off. The script checks the host is Ubuntu 26.04 LTS (24.04
+LTS is accepted and says it is the fallback; anything else stops), installs
+`uv` 0.12.19 from its GitHub release after checking the archive's SHA256,
+has uv install CPython 3.14.7 and `ansible-core` 2.21.4 on it, clones
 this repository at the sha pinned in `HCW_REPO_REF` into `/opt/hcw-src`,
 installs the collections and runs `site.yml` against localhost. Without a
 vault it still completes: the host is hardened, Docker and node_exporter
@@ -49,6 +52,24 @@ imports no routes, so nothing can leak over plaintext), Coder's Compose
 project is installed under `/etc/hcw/coder` but down (`coder_enabled` is
 false until the owner flips it, below), and the agent unit is installed but
 not started.
+
+### Which Python runs what
+
+Owner rule 2026-09-26: Python is on the newest release line and no more than
+two patch releases behind that line's newest. On 2026-09-26 that is 3.14.7,
+so the floor is 3.14.5, and Ubuntu 26.04's own `/usr/bin/python3` is 3.14.4
+(the `python3.14` package; the `python3` package is 3.14.3). So:
+
+| Runs | Interpreter | Why |
+| --- | --- | --- |
+| `ansible-playbook`, `ansible-galaxy`, `ansible-vault` (the control side) | CPython 3.14.7 from uv, under `/opt/uv/python`, in the environment `/opt/uv/tools/ansible-core`, linked into `/usr/local/bin` | The rule. `PYTHON_VERSION` at the top of `bootstrap.sh` is the pin; uv checks the download against the SHA256 it carries for that build, and uv itself is checked against `UV_SHA256` |
+| Every module the play runs on the host | `/usr/bin/python3`, the distribution's (3.14.4 on 26.04, 3.12.3 on 24.04) | **The one recorded exception.** `python3-apt`, `python3-debian` and `python3-docker`, which the `apt`, `deb822_repository` and `community.docker` modules import, are Ubuntu packages built for that interpreter and cannot be loaded by another. `ansible_python_interpreter` in `ansible/inventory/localhost.yml` says so |
+
+A successful run prints, before the play starts, `ansible-playbook [core
+2.21.4]` and a `python version = 3.14.7` line. Moving Python is a change to
+`PYTHON_VERSION` (and `UV_VERSION`/`UV_SHA256` when the newer Python needs a
+newer uv); the script rebuilds the environment when either the Python or the
+ansible-core pin no longer matches what is installed.
 
 ## Re-running
 
@@ -436,17 +457,18 @@ parse and `terraform validate` — listed in
 
 | Pin | Lives in | How to read the current value |
 | --- | --- | --- |
-| Docker, buildx, compose | `docker_version`, `docker_containerd_version`, `docker_buildx_version`, `docker_compose_version` | `roles/docker/README.md` |
+| Docker, buildx, compose | `docker_release_pins`, one entry per Ubuntu codename (the version strings name the release) | `roles/docker/README.md` |
 | Azure Connected Machine agent | `arc_agent_version` | `roles/arc/README.md` |
-| apt signing keys | `docker_apt_key_checksum`, `labs_agent_node_apt_key_checksum`, `arc_apt_key_checksum` | The bash lines below this table; a changed key is a decision, not a refresh |
+| apt signing keys | `docker_apt_key_checksum`, `labs_agent_node_apt_key_checksum`, `arc_apt_key_checksums` (per codename: Microsoft signs the 26.04 and 24.04 repositories with different keys) | The bash lines below this table; a changed key is a decision, not a refresh |
 | Caddy, Cloudflare module, builder image digest | `caddy_*` | `roles/caddy/README.md`; the digest is the index from `docker buildx imagetools inspect caddy:2.11.4-builder`, and the image is pulled by that digest, not by tag |
 | Coder, PostgreSQL | `coder_image_*`, `coder_postgres_image_*` | `roles/coder/README.md`; index digests from `docker buildx imagetools inspect`, run as `image@digest` |
 | Workspace image, Terraform providers, `code-server` module | `templates/hcw-lab/main.tf` under `../coder` | `../coder/README.md`, "Updating"; republished with `coder templates push` |
 | node_exporter | `node_exporter_version`, `node_exporter_checksum` | `roles/node_exporter/README.md` |
-| Node.js | `labs_agent_node_version` | NodeSource `node_22.x` package index |
+| Node.js | `labs_agent_node_version`; the line is `labs_agent_node_apt_repository_url` in `roles/labs_agent/defaults/main.yml` | NodeSource `node_26.x` package index |
 | Repository ref | `labs_agent_repo_ref` and `HCW_REPO_REF` | `git rev-parse origin/main` |
 | Collections, including the one transitive dependency | `requirements.yml` | Galaxy |
 | Ansible tooling | `ANSIBLE_CORE_VERSION` in `bootstrap.sh`; the pip pins in `ci.yml`; the image digest above | PyPI; the image's `RepoDigests` |
+| Python and uv | `PYTHON_VERSION`, `UV_VERSION` and `UV_SHA256` at the top of `bootstrap.sh` | https://www.python.org/downloads/ for the newest release; https://github.com/astral-sh/uv/releases for uv, whose `.sha256` asset beside `uv-x86_64-unknown-linux-gnu.tar.gz` is the value |
 
 All in `ansible/group_vars/all.yml` unless the table says otherwise.
 
@@ -464,7 +486,13 @@ NodeSource's key:
 curl -sL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | sha256sum
 ```
 
-Microsoft's key, for the Arc agent:
+Microsoft's keys, for the Arc agent. The first is the `resolute` entry of
+`arc_apt_key_checksums` (it signs the 26.04 repository), the second the
+`noble` entry (it signs the 24.04 one):
+
+```bash
+curl -sL https://packages.microsoft.com/keys/microsoft-2025.asc | sha256sum
+```
 
 ```bash
 curl -sL https://packages.microsoft.com/keys/microsoft.asc | sha256sum

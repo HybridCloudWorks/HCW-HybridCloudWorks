@@ -56,10 +56,19 @@ until the merge `infra-lab/` exists only on the pull request branch.
 
 The id is the number in the address bar on the server's hPanel page (the
 list is at https://hpanel.hostinger.com/vps). The other three need to be
-exact values from the API. Create an API token at
-https://hpanel.hostinger.com/api and copy it. This PowerShell line reads the
-token from the clipboard, prints the four values and two checks, and then
-blanks the clipboard and forgets the token:
+exact values from the API. This PowerShell line reads an API token from the
+clipboard, prints the four values and two checks, and then blanks the
+clipboard and forgets the token.
+
+**Order matters, because the line and the token share one clipboard.**
+Copying the line from this page, or from anywhere, replaces whatever the
+clipboard held, so a token copied first is gone by the time the line runs.
+So:
+
+1. Copy the line below and paste it at the `PS` prompt. **Do not press
+   Enter yet.**
+2. Create an API token at https://hpanel.hostinger.com/api and copy it.
+3. Go back to the PowerShell window and press Enter.
 
 ```powershell
 $t = (Get-Clipboard -Raw).Trim(); $h = @{ Authorization = 'Bearer ' + $t }; try { $r = Invoke-RestMethod -Uri https://developers.hostinger.com/api/vps/v1/virtual-machines -Headers $h; $vms = if ($r.PSObject.Properties.Name -contains 'data') { $r.data } else { $r }; $vms | ForEach-Object { $v = $_; $p = $v.plan; try { $s = Invoke-RestMethod -Uri ('https://developers.hostinger.com/api/billing/v1/subscriptions/' + $v.subscription_id) -Headers $h; if ($s.item_id) { $p = $s.item_id } elseif ($s.plan) { $p = $s.plan } } catch { }; [pscustomobject]@{ id = $v.id; plan = $p; data_center_id = $v.data_center_id; template_id = $v.template.id; template_name = $v.template.name; state = $v.state } } | Format-List } catch { $c = $_.Exception.Response.StatusCode; if ($c) { 'HTTP ' + [int]$c + ' ' + $c; if ($_.ErrorDetails) { $_.ErrorDetails.Message } elseif ($_.Exception.Response.PSObject.Methods['GetResponseStream']) { [IO.StreamReader]::new($_.Exception.Response.GetResponseStream()).ReadToEnd() } } else { $_.Exception.Message } } finally { Set-Clipboard -Value ' '; Remove-Variable -Name t, h -ErrorAction SilentlyContinue }
@@ -70,7 +79,8 @@ $t = (Get-Clipboard -Raw).Trim(); $h = @{ Authorization = 'Bearer ' + $t }; try 
 operating system for `template_name`, and `running` for `state`. A failure
 prints `HTTP`, the status and Hostinger's response body instead. `HTTP 401`
 means the clipboard did not hold a valid token: it was mistyped, has
-expired, or something else was copied after it.
+expired, or something else was copied after it (most often the line itself,
+copied after the token). Run it again in the order above.
 
 The line it replaces printed blanks for everything but the two template
 fields. `GET /api/vps/v1/virtual-machines` returns a bare JSON array
@@ -98,8 +108,10 @@ same rule, so what it prints is what the import will store. It reads
 `template.id`, as the import does. If they ever disagree, the postcondition
 in `main.tf` stops the plan and names the stored value.
 
-**Stop here if `template_name` is not Ubuntu 24.04.** `lab-host/bootstrap.sh`
-refuses any other OS. Reinstalling wipes the disk, so it is an hPanel
+**Stop here if `template_name` is not Ubuntu 26.04.** The VPS was
+reinstalled with Ubuntu 26.04 LTS (owner decision 2026-09-26), and
+`lab-host/bootstrap.sh` refuses any OS but 26.04 LTS and the 24.04 LTS it
+still accepts as a fallback. Reinstalling wipes the disk, so it is an hPanel
 decision and never a Terraform change. After a reinstall, run the line again
 and use the new `template_id`.
 

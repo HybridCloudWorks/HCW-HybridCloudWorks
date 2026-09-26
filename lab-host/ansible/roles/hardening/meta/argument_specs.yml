@@ -1,7 +1,7 @@
 ---
 argument_specs:
   main:
-    short_description: Harden SSH, the firewall, patching and brute-force protection on an Ubuntu 24.04 host
+    short_description: Harden SSH, the firewall, patching and brute-force protection on an Ubuntu 26.04 or 24.04 host
     description:
       - Creates a key-only administrative user with passwordless sudo, then disables
         password and root SSH login through a drop-in that sorts before cloud-init's.

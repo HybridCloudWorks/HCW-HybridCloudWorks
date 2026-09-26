@@ -1,6 +1,6 @@
 # {{ ansible_managed }}
-# Ubuntu 24.04 ships no rsyslog, so there is no /var/log/auth.log to tail;
-# the systemd backend reads sshd's journal directly.
+# The systemd backend reads sshd's journal directly, so the jail does not
+# depend on rsyslog writing /var/log/auth.log, on Ubuntu 26.04 or 24.04.
 [sshd]
 enabled = true
 backend = systemd

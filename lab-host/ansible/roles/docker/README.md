@@ -17,7 +17,8 @@ sh` step the Setup tab used to list.
    it unless its SHA256 matches `docker_apt_key_checksum` (the key is the
    root of trust for every version pin, so a pin on the versions without a
    pin on the key would be decorative), and adds the
-   `stable` repository for the running release (`noble`) as a deb822 source
+   `stable` repository for the running release's codename (`resolute` on
+   26.04, `noble` on 24.04; one key signs both) as a deb822 source
    (`/etc/apt/sources.list.d/docker.sources`) with `Signed-By`. The install
    step refreshes the cache itself, because the play-level refresh ran
    before this source existed.
@@ -50,9 +51,19 @@ sh` step the Setup tab used to list.
 | `docker_apt_key_path` | `/etc/apt/keyrings/docker.asc` | Signing key location |
 | `docker_apt_repository_url` | `https://download.docker.com/linux/ubuntu` | Repository base |
 
-To bump, read the available versions from the repository's package index and
-change the pins in `group_vars/all.yml`. The bash line below prints the
-newest version string of each pinned package for Ubuntu 24.04:
+The version strings carry the Ubuntu release (`5:29.8.1-1~ubuntu.26.04~resolute`),
+so `group_vars/all.yml` holds them in `docker_release_pins`, one entry per
+codename, and sets the four inputs above from the running release's entry.
+The role itself takes plain strings and knows nothing about the map.
+
+To bump, read the available versions from each release's package index and
+change both entries of `docker_release_pins`. Bash, from anywhere with
+network access; the first line prints the newest version string of each
+pinned package for Ubuntu 26.04, the second for 24.04:
+
+```bash
+curl -s https://download.docker.com/linux/ubuntu/dists/resolute/stable/binary-amd64/Packages | awk '/^Package: (docker-ce|docker-ce-cli|containerd.io|docker-buildx-plugin|docker-compose-plugin)$/{p=$2} /^Version:/{if(p){print p, $2; p=""}}' | sort -k1,1 -k2,2V | awk '{v[$1]=$2} END{for(k in v) print k, v[k]}'
+```
 
 ```bash
 curl -s https://download.docker.com/linux/ubuntu/dists/noble/stable/binary-amd64/Packages | awk '/^Package: (docker-ce|docker-ce-cli|containerd.io|docker-buildx-plugin|docker-compose-plugin)$/{p=$2} /^Version:/{if(p){print p, $2; p=""}}' | sort -k1,1 -k2,2V | awk '{v[$1]=$2} END{for(k in v) print k, v[k]}'

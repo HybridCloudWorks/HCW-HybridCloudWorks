@@ -82,7 +82,7 @@ variable "hostinger_data_center_id" {
 }
 
 variable "hostinger_template_id" {
-  description = "The `template.id` field of the existing VM (the installed OS). The lab host expects Ubuntu 24.04."
+  description = "The `template.id` field of the existing VM (the installed OS). The lab host expects Ubuntu 26.04 LTS (24.04 LTS is still accepted)."
   type        = number
 
   validation {
