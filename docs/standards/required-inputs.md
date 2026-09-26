@@ -217,7 +217,7 @@ it, because a repair would hide a regression in that fix.
 
 **Not observed in this pass.** `az keyvault secret list` returned
 `ForbiddenByRbac` — the caller holds no data-plane role, which is itself the
-correct posture. The twenty-four names below are what the Terraform root module
+correct posture. The twenty-five names below are what the Terraform root module
 in `infra/` references — the app-settings map that holds them is in
 `infra/functionapp.tf`, and `functions/src/lib/secret-catalog.test.js` reads
 every `.tf` file in that directory as one module rather than any one file, so a
@@ -241,6 +241,7 @@ problem. The two cost very different amounts to diagnose.
 | `ELEVENLABS-API-KEY` | **Podcast TTS** | The podcast voice only — article and Plaud transcripts to RSS.com (ADR 0029 §2a, scoped by §2b); never Listen & Learn, and with no key the podcast saves a transcript-only draft rather than falling back to Gemini. About USD 0.10 per 1,000 characters. Versionless reference: a re-minted key needs an app restart to take effect |
 | `ANTHROPIC-API-KEY` | AI router | First in the router's provider order |
 | `OPENAI-API-KEY` | AI router | Second |
+| `NVIDIA-API-KEY` | AI router, **content features only** | **MISSING** — the owner seeds it (#701). An `nvapi-` key created at `https://build.nvidia.com/settings/api-keys` for the NVIDIA API Catalog, a free trial tier at about 40 requests a minute under NVIDIA's trial terms; read those terms before seeding. Placed per feature: first for owner-triggered content (Forge drafting and grading, inspector, captions, Listen & Learn and podcast scripts), never for the anonymous public explain route, and paced at 36 requests a minute per instance (`NVIDIA_REQUESTS_PER_MINUTE` overrides). Seed it on `https://hybridcloudworks.com/admin/integrations?tab=keys` before the Terraform run that adds its reference, so `monitor-unresolved-secrets.yml` never sees it unresolved; unseeded, the router treats the reference as no key and the paid providers serve as before |
 | `PERPLEXITY-API-KEY` | AI router | |
 | `REPLICATE-API-KEY` | AI router | |
 | `AZURE-SPEECH-KEY` | Listen & Learn fallback TTS | Inert until a Cognitive Services resource exists, which is a spend decision |

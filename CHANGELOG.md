@@ -19,6 +19,28 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **NVIDIA API Catalog as a purpose-scoped AI provider for content
+  generation (#701).** A fourth router provider, `nvidia`, on the
+  OpenAI-compatible endpoint `https://integrate.api.nvidia.com/v1` with
+  `NVIDIA_API_KEY` as a Bearer token; available by key presence, and an
+  unseeded Key Vault reference counts as no key. Its purpose → model table
+  (`CONTENTFORGE_NVIDIA_*_MODEL` overridable) defaults to `z-ai/glm-5.3` for
+  drafts, `deepseek-ai/deepseek-v4.1-flash` for analysis and
+  `z-ai/glm-5.3-flash` for short calls, read from build.nvidia.com on
+  2026-09-25. It is placed per feature (`PROVIDER_PLACEMENT_DEFAULTS` in
+  `ai-config.js`): first for owner-triggered content (Forge drafting and
+  grading, inspector, critique, voice calibration, captions, Listen & Learn
+  and podcast scripts), after the others for the Telegram assistant, and
+  locked off for the anonymous public explain features, image alt text and
+  source grounding — configuration can demote or disable it, never place it
+  in a locked feature. A sliding-window pacing guard keeps each instance at
+  36 requests a minute (`NVIDIA_REQUESTS_PER_MINUTE`); a paced call is not
+  sent and fails over at once, as do NVIDIA 429/5xx/404/400 responses after
+  the existing retries. Usage is recorded at zero cost. The AI Engine page
+  lists and orders the provider and sets its placement per feature under
+  "Where AI is used". `NVIDIA-API-KEY` gains a Key Vault reference in
+  `infra/functionapp.tf`, a secret-catalogue entry and a Required-Inputs §4.6
+  row; the owner seeds it.
 - **infra-lab: adopt the existing Hostinger VPS by import and add the lab
   DNS records (#661).** A new root module, `infra-lab/`, for the HCP
   Terraform workspace `hcw/hcw-lab` (ADR 0032), pinned to
