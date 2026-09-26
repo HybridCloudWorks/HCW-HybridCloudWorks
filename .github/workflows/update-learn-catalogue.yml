@@ -87,10 +87,16 @@ jobs:
         with:
           persist-credentials: false
 
+      # Node.js 24, not the newest line: the study-guide step below imports
+      # functions/src/lib/listen-and-learn/studyguide.js and resolves its
+      # dependencies from functions/node_modules, so this job runs functions
+      # code, and functions code runs on the line Azure Functions Flex
+      # Consumption supports. scripts/version-floors.json holds it there with
+      # every other functions pin (#715).
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: '22'
+          node-version: '24'
           cache: 'npm'
           # Both lockfiles, because #499 made this job install both trees. A
           # cache keyed on the frontend lockfile alone would go on being

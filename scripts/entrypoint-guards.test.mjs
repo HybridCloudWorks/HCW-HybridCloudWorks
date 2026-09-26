@@ -61,6 +61,15 @@ describe('entry-point guards fire when the script is invoked directly', () => {
     expect(got.stdout + got.stderr).toContain('Usage: node check-workflow-health.mjs');
   });
 
+  it('update-version-floors.mjs prints usage for --help and exits 0, and 2 for an unknown flag', () => {
+    const help = run('update-version-floors.mjs', ['--help'], process.env);
+    expect(help.code).toBe(0);
+    expect(help.stdout).toContain('Usage: node scripts/update-version-floors.mjs');
+    const bad = run('update-version-floors.mjs', ['--bogus'], process.env);
+    expect(bad.code).toBe(2);
+    expect(bad.stderr).toContain('Unknown argument: --bogus');
+  });
+
   it('build-content-manifest.mjs fails loudly without FUNCTION_ORIGIN', () => {
     const env = { ...process.env };
     delete env.FUNCTION_ORIGIN;

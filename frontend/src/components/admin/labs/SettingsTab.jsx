@@ -16,8 +16,8 @@ const SETUP_STEPS = [
     body: 'SSH key-only auth (PasswordAuthentication no, PermitRootLogin no), then enable the Hostinger firewall / ufw allowing only outbound traffic plus your SSH port. The agent is pull-based — it needs zero inbound ports.',
   },
   {
-    title: 'Install Docker + Node.js 22',
-    body: 'curl -fsSL https://get.docker.com | sh, then install Node 22 from NodeSource. Pre-pull the sandbox images: alpine:3.20, hashicorp/terraform:1.9, alpine/ansible:2.17.0.',
+    title: 'Install Docker + Node.js 26',
+    body: 'On the Hostinger lab host, lab-host/bootstrap.sh does this: its Ansible play installs Docker Engine from download.docker.com and Node.js 26 from NodeSource at the versions pinned in lab-host/ansible/group_vars/all.yml. On any other host, install the same two from those repositories. Pre-pull the sandbox images: alpine:3.20, hashicorp/terraform:1.9, alpine/ansible:2.17.0.',
   },
   {
     title: 'Provision the Entra agent identity',

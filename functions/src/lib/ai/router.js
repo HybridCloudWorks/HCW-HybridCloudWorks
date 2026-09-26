@@ -28,7 +28,7 @@
  *     identity the Function App cannot hold. Gemini is reached through the
  *     public Gemini API with an API key instead (same model names).
  *   - Azure OpenAI. Retired with the account (Migration-Plan note).
- *   - axios. `fetch` is global on Node 22; one less dependency.
+ *   - axios. `fetch` is global on Node 24 (and has been since 18); one less dependency.
  *
  * What is kept: the purpose → model table (env-overridable per provider), JSON
  * sanitising with a repair round trip, retry on 408/429/5xx, per-call usage

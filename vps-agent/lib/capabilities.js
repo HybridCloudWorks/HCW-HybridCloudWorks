@@ -49,14 +49,16 @@
  * **hcwLabRunner** is this repository's own image, built from lab-image/ and
  * published by .github/workflows/publish-lab-image.yml, which prints the
  * pushed digest in its job summary (`docker buildx imagetools inspect` of the
- * pushed tag). The pin below is the publish from main for 02dd9595 (#695,
- * recorded on issue #698), the first digest that carries #675's changes to
- * lab-image/: transitive AVM vendoring, the unpacked provider mirror, the
- * kubeconform schemas and the capability scripts the three runner-image
- * capabilities call at /usr/local/bin (lab-image/bin/). The image and those
- * commands move together, so a change to lab-image/bin/ is live only once
- * the digest main publishes for it is pinned here; before that the jobs fail
- * with `executable file not found` rather than run something older.
+ * pushed tag). The pin below is the publish from main for cd9e1af4 (#716,
+ * run 36221001115): the image rebased on python:3.14.7-slim-trixie (Debian
+ * 13, CPython 3.14.7) with ansible-core 2.21.4 (#714). It still carries
+ * #675's changes to lab-image/: transitive AVM vendoring, the unpacked
+ * provider mirror, the kubeconform schemas and the capability scripts the
+ * three runner-image capabilities call at /usr/local/bin (lab-image/bin/).
+ * The image and those commands move together, so a change to lab-image/bin/
+ * is live only once the digest main publishes for it is pinned here; before
+ * that the jobs fail with `executable file not found` rather than run
+ * something older.
  */
 
 /** Digest-pinned image references. Tag is documentation; the digest decides. */
@@ -65,7 +67,7 @@ export const IMAGES = {
   ansible:
     'alpine/ansible:2.17.0@sha256:3cf35fbaecd3dba7c246191be1d46c0b4c051839294eb813677a7482c1fa1ced',
   hcwLabRunner:
-    'ghcr.io/hybridcloudworks/hcw-lab-runner:02dd959520108765a0b48432fcd5819e3a802545@sha256:576e6120f225e0de7118fa35c65b0e338f8c9d6a8cdd569f76f35b91e349cef2',
+    'ghcr.io/hybridcloudworks/hcw-lab-runner:cd9e1af462ed966b5724d3c549633f6d08a15fa4@sha256:b9cd7d1bd1101040d8597d58dac4067629ae3bbc3ce6f94c533b75981fbd4bad',
 };
 
 /**

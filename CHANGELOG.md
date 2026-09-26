@@ -19,6 +19,50 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The lab agent and the Coder template pull the Python 3.14 / Debian 13
+  lab image.** `vps-agent/lib/capabilities.js` pins `hcw-lab-runner` and
+  `lab-host/coder/templates/hcw-lab/main.tf` pins `hcw-lab` to the digests
+  main's publish run 36221001115 pushed for cd9e1af4 (#716), both checked
+  with `docker buildx imagetools inspect`. `.vscode/mcp.json` is ignored:
+  it holds per-developer MCP servers and local paths.
+
+- **Node.js on the newest supported line, and version floors enforced in CI
+  (#715, #714).** Owner direction 2026-09-25: the latest current release.
+  `functions/` moves from Node.js 22 to 24, the newest line Azure Functions
+  Flex Consumption supports (22 and 24 are GA; 26 is not offered): the
+  `engines` range (`^24.19.0`), `runtime_version` in `infra/functionapp.tf`
+  (an in-place update: the attribute is not ForceNew in azurerm 5.6.0), the
+  `functions (azure)` CI row, the functions half of `coverage.yml`,
+  `deploy-functions.yml`, and `update-learn-catalogue.yml`, which imports
+  `functions/src`. Everything else moves from 22 to 26: the `frontend/`,
+  `frontend/scripts/`, `scripts/` and `lab-host/coder/` `engines` ranges
+  (`>=26.8.0`), `frontend/.nvmrc`, and every other `node-version:` in
+  `.github/workflows/`. The CI matrix now gives each row its own line
+  (`matrix.node-version`, defaulting to 26) instead of one pin for all five.
+  `scripts/version-floors.json` records the newest release and the floor for
+  Python (3.14.7, floor 3.14.5; #714 asked for a separate
+  `python-floor.json`, folded in here), Node.js (26.10.0, floor 26.8.0; the
+  functions ceiling 24.21.0, floor 24.19.0), Ubuntu (26.04 LTS), Debian (13)
+  and Terraform (1.16.4, floor 1.16.2), each with its source and date.
+  `scripts/version-floors.test.mjs` reads every `node-version:`,
+  `python-version:` and `terraform_version:` in the workflows, `engines.node`
+  in every tracked `package.json`, every `.nvmrc`, `.node-version` and
+  `.python-version`, the python, node, debian and ubuntu `FROM` lines of
+  every tracked Dockerfile, `runtime_version`, the lab host's
+  `labs_agent_node_version`, Ubuntu target and `PYTHON_VERSION`,
+  `lab-image/versions.env`'s `TERRAFORM_VERSION` and every
+  `required_version`, and fails any below its floor naming the file, the
+  line and the floor. `update-version-floors.yml` re-reads endoflife.date
+  and the Flex Consumption table on Microsoft Learn every Wednesday and opens
+  one pull request when a floor moves; that pull request's CI then lists the
+  pins left behind. The `scripts (operations)` CI row now also runs on
+  changes to the files the floors test reads, and
+  `docs/standards/iac-repository-standard.md` names the rule.
+  `vps-agent/package.json` moves to `>=26.8.0` here, because the Ubuntu
+  26.04 change (#717) moved the lab host to Node.js 26.10.0 and left the
+  package range at `>=22`. On top of #717 and the Trixie lab image (#716),
+  the floors test finds no pin below its floor.
+
 - **Lab host targets Ubuntu 26.04 LTS, with release-derived apt suites,
   resolute package pins and every lab host pin at its newest release
   (#715).** The VPS was reinstalled with Ubuntu 26.04 LTS (owner decision
@@ -878,6 +922,47 @@ This project has not cut a tagged release; entries are grouped under
   initialise beside another major's cluster, and initialises a fresh
   cluster once that one is set aside. The backup and restore commands need
   no path, so they are unchanged.
+
+- **The hcw-lab image runs Python 3.14.7 on Debian 13 trixie, with every
+  tool at its newest release (#714, #715).** Owner rule 2026-09-26: every
+  runtime, OS and base image the repository chooses is on its newest
+  supported release. Every stage of `lab-image/Dockerfile` moves from
+  `debian:bookworm-slim` (Debian 12, Python 3.11) to the official
+  `python:3.14.7-slim-trixie`, pinned by index digest; `versions.env`
+  records why one base serves every stage (the python image is
+  debian:trixie-slim plus CPython, and vendor-avm.sh then runs on the same
+  Python the runner ships). ansible-core moves from 2.19.13 to 2.21.4, the
+  newest line, whose controller range is Python 3.12 to 3.14; its
+  dependencies are no longer Debian packages built for another interpreter
+  but eight wheels pinned in `ANSIBLE_CORE_DEPS` and installed in pip's
+  hash-checking mode, which also fails the build on any dependency not
+  listed. No Debian `python3` package and no `pip` command remain in the
+  image. The Azure CLI stays at 2.90.0, the newest release, now written as
+  `AZURE_CLI_VERSION` plus `AZURE_CLI_SUITE=bookworm`: packages.microsoft.com
+  has no trixie suite and Microsoft's install page says to use the latest
+  Debian suite in that case, and the apt source is the deb822 form that page
+  documents. Terraform 1.16.4, kubeconform 0.8.0, helm 4.3.0, kubectl
+  1.37.1 and the mirrored providers (azurerm 5.7.0 and 4.81.0, azapi 2.12.0,
+  alz 0.22.0, random 3.9.1, modtm 0.4.0, time 0.14.2) were already the
+  newest releases, each sum re-checked against its publisher's file. The
+  sandbox template's Azure CLI comment now says what it installs, the
+  `-1~resolute` build from its Ubuntu 26.04 base's own suite, and records
+  why the recipe adds no Python. It also gains `HEALTHCHECK NONE`, as the
+  lab image has: the base defines no healthcheck, so nothing changes at run
+  time, and it clears the checkov CKV_DOCKER_2 / trivy DS-0026 finding that
+  Qlty reported as blocking once the file was touched. The publish
+  workflow's digest guard, which grepped `^FROM debian:`, now checks every
+  `FROM` in both Dockerfiles: an earlier stage, or exactly the
+  `image@digest` versions.env records for that file (`BASE_IMAGE`/
+  `BASE_DIGEST`, and the new `SANDBOX_BASE_IMAGE`/`SANDBOX_BASE_DIGEST`),
+  and fails on anything else.
+  `smoke.sh` now also compares `python3 --version` with
+  `BASE_PYTHON_VERSION`. Measured with Docker 29.8.0: runner 1.70 GB /
+  319 MB to 1.71 GB / 319 MB, full 2.69 GB / 491 MB to 2.73 GB / 497 MB
+  (on disk / compressed), sandbox template unchanged at 3.38 GB / 797 MB.
+  Both smoke tests and `sandbox-check.mjs` pass on the new images. The
+  pins in `vps-agent/lib/capabilities.js` and the Coder template move in a
+  follow-up, from the digests main's publish run reports.
 
 - **The six radarlint-python findings left on `main` are fixed, not
   silenced.** #588 counted nine on 2026-09-14 and closed with them

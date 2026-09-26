@@ -36,7 +36,7 @@ also needs `references/functions.md` for the contract check, even when
 | Touched path | Component | Reference to read |
 | --- | --- | --- |
 | `frontend/**` | Public site + admin portal (React 19, Vite, Tailwind 4, MSAL) | `references/frontend.md` |
-| `functions/**` | Azure Functions API, workers, timers (Node 22 ESM) | `references/functions.md` |
+| `functions/**` | Azure Functions API, workers, timers (Node 24 ESM, the Flex Consumption ceiling) | `references/functions.md` |
 | `infra/**` | Terraform root module — **live production**, HCP Terraform state | `references/infra.md` |
 | `scripts/**`, `.github/workflows/**` | Operational scripts and CI/CD | `references/scripts-workflows.md` |
 | `vps-agent/**`, `edge/**` | Labs job executor and Cloudflare availability probe | `references/agents-edge.md` |

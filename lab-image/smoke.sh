@@ -73,6 +73,7 @@ fi
 if [ "$(id -u)" = 65534 ]; then ok "running as uid 65534"; else bad "running as uid $(id -u), expected 65534"; fi
 
 step "runner tools"
+expect_version python3     "Python ${BASE_PYTHON_VERSION}"   python3 --version
 expect_version terraform   "Terraform v${TERRAFORM_VERSION}" terraform version
 expect_version kubeconform "v${KUBECONFORM_VERSION}"         kubeconform -v
 expect_version helm        "Version:\"v${HELM_VERSION}\""     helm version
@@ -240,7 +241,7 @@ if [ "$schemas" -eq 1 ]; then ok "/opt/kubeconform/schemas/${KUBERNETES_JSON_SCH
 
 if [ "$target" = full ]; then
   step "full tools"
-  expect_version az      "\"azure-cli\": \"${AZURE_CLI_VERSION%%-*}\"" az version --output json
+  expect_version az      "\"azure-cli\": \"${AZURE_CLI_VERSION}\""     az version --output json
   expect_version kubectl "Client Version: v${KUBECTL_VERSION}"          kubectl version --client
   expect_version git     "git version"                                   git --version
   expect_version jq      "jq-"                                           jq --version

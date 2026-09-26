@@ -18,12 +18,16 @@
 #   https://docs.docker.com/reference/cli/sbx/create/              (`sbx create [flags] AGENT [PATH...]`, -t/--template)
 #   https://docs.docker.com/ai/sandboxes/cloud/                    (cloud: subscription, no host mount, expires after 1 h)
 #
-# The base is pinned to the image index digest `docker buildx imagetools
-# inspect docker/sandbox-templates:claude-code` reported on 2026-09-25. The
-# tag beside it is documentation; Docker resolves the digest. The index
+# The base is pinned to the image index digest the registry's
+# Docker-Content-Digest header and `docker buildx imagetools inspect
+# docker/sandbox-templates:claude-code` both reported on 2026-09-25, and
+# recorded as SANDBOX_BASE_IMAGE / SANDBOX_BASE_DIGEST in versions.env; the
+# publish workflow fails if this FROM and those two lines disagree. The tag
+# beside it is documentation; Docker resolves the digest. On that date the
+# image was Ubuntu 26.04.1 LTS (resolute). The index
 # carries linux/amd64 and linux/arm64, but this recipe is linux/amd64 only:
 # versions.env carries the amd64 checksum for terraform and the Azure CLI
-# package line is `[arch=amd64]`, the same as lab-image/Dockerfile. The
+# apt source says `Architectures: amd64`, the same as lab-image/Dockerfile. The
 # build command therefore passes --platform (a constant --platform on the
 # FROM line is a BuildKit lint warning, FromPlatformFlagConstDisallowed).
 #
@@ -40,12 +44,26 @@ FROM docker/sandbox-templates:claude-code@sha256:868e3f5ef10579e06903d42e8644885
 # already carries curl, unzip and ca-certificates; terraform is one verified
 # binary, the Azure CLI is Microsoft's apt package.
 #
-# AZURE_CLI_VERSION in versions.env is the Debian bookworm package string
-# ("2.90.0-1~bookworm"). Microsoft publishes the same upload per distribution
-# codename, so the suffix is swapped for the base image's VERSION_CODENAME
-# from /etc/os-release and the version number itself stays the pinned one.
-# The signing key is verified by SHA256 before apt trusts it, as in
+# The Azure CLI comes from the base's own Ubuntu suite, resolute, which
+# packages.microsoft.com publishes (dists/resolute carries 2.90.0-1~resolute)
+# and Microsoft's install page lists as tested (Ubuntu 26.04). That is not
+# the lab image's line: lab-image/Dockerfile is Debian 13 and installs the
+# bookworm build (AZURE_CLI_SUITE), which on Ubuntu 26.04 would be a Debian
+# package on the wrong distribution. So the suite here is the base image's
+# VERSION_CODENAME from /etc/os-release, the version is AZURE_CLI_VERSION,
+# the same release as the lab image, and the package is
+# azure-cli=<version>-1~<codename> as Microsoft documents. Should a digest
+# bump move the base to a suite Microsoft does not publish, apt-get fails
+# the build on the missing version rather than installing another. The
+# signing key is verified by SHA256 before apt trusts it, as in
 # lab-image/Dockerfile.
+#
+# No Python is added. Nothing this recipe installs runs on the base's Python:
+# terraform is a Go binary, the Azure CLI package runs on the interpreter it
+# bundles under /opt/az, and the agent is Claude Code on Node. The python3
+# and uv the base image ships (Ubuntu's 3.14.4 and uv 0.9.26 on 2026-09-25)
+# are Docker's, used by nothing here, and a 3.14.7 beside them would change
+# no command the recipe or AGENTS.md runs.
 USER root
 COPY versions.env /tmp/versions.env
 RUN set -eu; . /tmp/versions.env; . /etc/os-release; \
@@ -57,10 +75,15 @@ RUN set -eu; . /tmp/versions.env; . /etc/os-release; \
     mkdir -p /etc/apt/keyrings; \
     curl --proto '=https' --tlsv1.2 -fsSLo /etc/apt/keyrings/microsoft.asc https://packages.microsoft.com/keys/microsoft.asc; \
     echo "${MICROSOFT_APT_KEY_SHA256}  /etc/apt/keyrings/microsoft.asc" | sha256sum -c -; \
-    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/microsoft.asc] https://packages.microsoft.com/repos/azure-cli/ ${VERSION_CODENAME} main" \
-      > /etc/apt/sources.list.d/azure-cli.list; \
+    printf '%s\n' \
+      'Types: deb' \
+      'URIs: https://packages.microsoft.com/repos/azure-cli/' \
+      "Suites: ${VERSION_CODENAME}" \
+      'Components: main' \
+      'Architectures: amd64' \
+      'Signed-By: /etc/apt/keyrings/microsoft.asc' > /etc/apt/sources.list.d/azure-cli.sources; \
     apt-get update; \
-    apt-get install -y --no-install-recommends "azure-cli=${AZURE_CLI_VERSION%~*}~${VERSION_CODENAME}"; \
+    apt-get install -y --no-install-recommends "azure-cli=${AZURE_CLI_VERSION}-1~${VERSION_CODENAME}"; \
     rm -rf /var/lib/apt/lists/* /tmp/terraform.zip /tmp/versions.env
 
 # The agent's briefing. Claude Code reads ~/.claude/CLAUDE.md in every
@@ -69,6 +92,13 @@ RUN set -eu; . /tmp/versions.env; . /etc/os-release; \
 # another agent) can open and read.
 COPY --chown=agent:agent sandbox-template/AGENTS.md /home/agent/AGENTS.md
 RUN install -o agent -g agent -m 0644 /home/agent/AGENTS.md /home/agent/.claude/CLAUDE.md
+
+# A sandbox runs an agent session, not a service with an endpoint to probe,
+# and the base image defines no healthcheck (its Config.Healthcheck was null
+# on 2026-09-25), so NONE changes nothing at run time. It says so explicitly,
+# as lab-image/Dockerfile does, rather than leaving the instruction absent
+# for a scanner to report (checkov CKV_DOCKER_2, trivy DS-0026).
+HEALTHCHECK NONE
 
 USER agent
 WORKDIR /home/agent/workspace

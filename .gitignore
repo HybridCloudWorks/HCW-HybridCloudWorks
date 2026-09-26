@@ -65,3 +65,7 @@ __pycache__/
 # Vitest coverage output (`npm run test:coverage`, #568). frontend/.gitignore
 # already covers frontend/coverage; this covers functions/ and any package.
 coverage/
+
+# Per-developer MCP servers for VS Code. .vscode/settings.json and the other
+# workspace files are shared; this one names local tools and local paths.
+.vscode/mcp.json

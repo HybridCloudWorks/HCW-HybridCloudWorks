@@ -1,0 +1,78 @@
+{
+  "$comment": [
+    "The newest supported release of every runtime, OS and base image the repository chooses, and the oldest release each pin may name (#715, #714).",
+    "scripts/version-floors.test.mjs reads every pin in the tree and fails any below its floor, naming the file, the pin and the floor.",
+    ".github/workflows/update-version-floors.yml re-reads the sources below every week and opens one pull request when a floor moves; that pull request's CI then shows which pins are behind.",
+    "Python's floor lives here rather than in a separate scripts/python-floor.json, which #714 first proposed: one file, one rule per kind.",
+    "checkedOn is the day an entry last moved against its source, not the day it was last read: the weekly job writes nothing in a week when nothing moved, the same convention as AVM_VERIFIED_ON."
+  ],
+  "kinds": {
+    "python": {
+      "rule": "The newest release line, no more than two patch releases behind that line's newest (N-2 patches). A new line is adopted once its N-2 patch exists (3.15.2 for 3.15). A pin that names the line only (actions/setup-python '3.14') resolves to the newest patch when it runs. Owner rule 2026-09-26 (#714).",
+      "line": "3.14",
+      "newest": "3.14.7",
+      "floor": "3.14.5",
+      "checkedOn": "2026-09-25",
+      "source": "https://endoflife.date/api/v1/products/python/"
+    },
+    "node": {
+      "rule": "The newest line the platform that runs it allows, among lines that are or will become LTS; within a line, no more than two minor releases behind that line's newest (N-2 minors), and a new line is adopted once its N-2 minor exists. A component whose platform caps the line is held exactly at that ceiling. A pin that names the line only (actions/setup-node '26') resolves to the newest release when it runs; an engines.node range's lowest admitted version must meet the floor and the range must admit the newest release. Owner direction 2026-09-25: the latest current release line.",
+      "line": "26",
+      "newest": "26.10.0",
+      "floor": "26.8.0",
+      "checkedOn": "2026-09-25",
+      "source": "https://endoflife.date/api/v1/products/nodejs/",
+      "platformCeilings": {
+        "functions": {
+          "platform": "Azure Functions Flex Consumption",
+          "rule": "Flex Consumption supports Node.js 22 and 24 (both GA) and does not offer 26, so functions/ runs the newest of those two, 24, and every pin that builds, tests, deploys or runs its code names 24 (update-learn-catalogue.yml imports functions/src and resolves functions/node_modules).",
+          "line": "24",
+          "newest": "24.21.0",
+          "floor": "24.19.0",
+          "checkedOn": "2026-09-25",
+          "source": "https://learn.microsoft.com/azure/azure-functions/flex-consumption-plan#supported-language-stack-versions",
+          "appliesTo": [
+            "functions/package.json",
+            "infra/functionapp.tf",
+            ".github/workflows/ci.yml > verify > functions (azure)",
+            ".github/workflows/coverage.yml > coverage > Set up Node.js 24 for functions",
+            ".github/workflows/deploy-functions.yml",
+            ".github/workflows/update-learn-catalogue.yml > update > Setup Node.js"
+          ]
+        }
+      }
+    },
+    "ubuntu": {
+      "rule": "The newest LTS release only; interim releases get nine months of support and are never used. A host's target (the newest release it accepts) must be the newest LTS; an older LTS it still accepts as a fallback is compatibility, not a target, and is not checked.",
+      "newest": "26.04",
+      "floor": "26.04",
+      "codenames": {
+        "jammy": "22.04",
+        "noble": "24.04",
+        "resolute": "26.04"
+      },
+      "checkedOn": "2026-09-25",
+      "source": "https://endoflife.date/api/v1/products/ubuntu/"
+    },
+    "debian": {
+      "rule": "The newest stable major, for a debian image or the Debian release under an official runtime image (python:3.14-slim-trixie).",
+      "newest": "13",
+      "floor": "13",
+      "codenames": {
+        "bullseye": "11",
+        "bookworm": "12",
+        "trixie": "13"
+      },
+      "checkedOn": "2026-09-25",
+      "source": "https://endoflife.date/api/v1/products/debian/"
+    },
+    "terraform": {
+      "rule": "The newest minor line, no more than two patch releases behind its newest (N-2 patches), for an exact pin; a new line is adopted once its N-2 patch exists. Every required_version constraint must admit the newest release.",
+      "line": "1.16",
+      "newest": "1.16.4",
+      "floor": "1.16.2",
+      "checkedOn": "2026-09-25",
+      "source": "https://endoflife.date/api/v1/products/terraform/"
+    }
+  }
+}
