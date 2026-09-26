@@ -441,9 +441,16 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # literal @Microsoft.KeyVault(...) string, which readKey() treats as no key
     # at all — so until GEMINI-API-KEY is seeded the router simply moves on to
     # OpenAI. Adding this reference does not switch anything on by itself.
+    #
+    # NVIDIA_API_KEY (#701) is the NVIDIA API Catalog: a free trial tier at
+    # ~40 requests a minute. The router places it per feature — first for
+    # owner-triggered content, never for the anonymous public explain route —
+    # and paces itself under the limit. Unseeded, it is the same literal
+    # reference readKey() treats as no key, so it too switches nothing on.
     "GEMINI_API_KEY"     = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/GEMINI-API-KEY)"
     "ANTHROPIC_API_KEY"  = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/ANTHROPIC-API-KEY)"
     "OPENAI_API_KEY"     = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/OPENAI-API-KEY)"
+    "NVIDIA_API_KEY"     = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/NVIDIA-API-KEY)"
     "PERPLEXITY_API_KEY" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/PERPLEXITY-API-KEY)"
     "REPLICATE_API_KEY"  = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/REPLICATE-API-KEY)"
 

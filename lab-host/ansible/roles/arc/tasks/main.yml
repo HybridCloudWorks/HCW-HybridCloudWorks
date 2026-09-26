@@ -1,0 +1,9 @@
+---
+# Off by default (group_vars/all.yml). While arc_enabled is false the role
+# changes nothing: it does not install the agent and it does not disconnect a
+# machine that is already connected, because disconnecting deletes the Azure
+# resource and is a runbook step (docs/runbooks/labs-host.md), never a side
+# effect of flipping a switch.
+- name: Onboard the host to Azure Arc
+  ansible.builtin.import_tasks: onboard.yml
+  when: arc_enabled | bool
