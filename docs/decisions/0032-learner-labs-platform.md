@@ -108,7 +108,8 @@ are recorded once, here, before any of them is implemented.
    while existing ones keep working, and stopping the `coder` Compose
    service closes it to everyone (Caddy then answers 503 for the Coder
    names). Two things on the host may drive the
-   Docker daemon, and nothing else: the Coder **server** container, which has
+   Docker daemon, and nothing else (a third, Portainer, owner-only and on the
+   loopback, since the amendment of 2026-09-26 below): the Coder **server** container, which has
    the socket mounted because that is how Coder's documented Docker install
    creates workspaces, and `vps-agent`, which runs **host-native** as the
    `hcw-labs-agent` systemd service with its user in the `docker` group,
@@ -162,6 +163,83 @@ are recorded once, here, before any of them is implemented.
    then, submission is `enqueueLabJob` from `/admin/labs` under the `editor`
    role, exactly as the code stands.
 
+## Amendment 2026-09-26: a clean reinstall; Portainer and Vault on the host, loopback-only
+
+**Context.** The owner's first `bootstrap.sh` run on the VPS failed at the
+agent's checkout, because `/opt/hcw-labs-agent` held a July install of the
+old agent. The host ran Ubuntu 26.04 but had never been reinstalled, which
+the note under decision 2 assumed it had. It ran two self-hosted
+GitHub Actions runners, Portainer EE 2.39.4, an nginx site on port 80, k3s,
+Vault 1.17.5 and that agent. Before failing, the run upgraded Docker from
+29.6.0 to 29.8.1 and restarted it, which killed a running Dependabot job,
+enabled ufw and wrote the sshd hardening. Nothing was deleted.
+
+**Owner decision 2026-09-26.** Reinstall the VPS clean. Nothing on it was
+production, so nothing is exported. Portainer and Vault are part of the
+clean deployment.
+
+1. **`bootstrap.sh` refuses a host it was not prepared for.** On a host it
+   has never accepted, it looks for other workloads before it changes
+   anything: any Docker container, an installed `actions.runner.*` unit,
+   Kubernetes units or directories, a foreign checkout at the repository or
+   agent path, anything else under `/opt`, and a TCP listener other than
+   sshd's and systemd-resolved's. It refuses with what it found, and names a
+   reinstall or `HCW_ADOPT_NONEMPTY_HOST=1` as the two ways on. The first run
+   that passes writes `/etc/hcw/bootstrap-host-accepted`, and later runs skip
+   the check. Each check would have caught the host above.
+2. **Portainer Business Edition, loopback only.** The `portainer` role runs
+   Portainer BE 2.45.1 (LTS) by index digest, with a named volume and the
+   Docker socket, published on `127.0.0.1:9443` and nowhere else, with plain
+   HTTP off and no Caddy route. The owner reaches it through an SSH tunnel.
+   It runs under Portainer's 3 Nodes Free licence (internal business use, one
+   server instance, up to three nodes; this is one of each). The licence key
+   and the administrator are entered in its UI and are in neither the
+   repository nor the Ansible vault. Off until `portainer_enabled` is true.
+   **This amends decision 4's "two things on the host may drive the Docker
+   daemon".** Portainer is a third, and holding the socket makes it root on
+   the host. That is bounded by who can reach it: only someone with an SSH
+   login, which already carries `sudo`, so it adds no one who is not already
+   root. A workspace or job container cannot reach it either: it listens on
+   the host's loopback, and neither has host networking.
+3. **HashiCorp Vault, loopback only, for lab-host secrets only.** The
+   `vault` role runs Vault 2.1.1 host-native under systemd as the `vault`
+   user, with integrated (raft) storage in `/var/lib/vault`, the API on
+   `127.0.0.1:8200` and raft's cluster port on `127.0.0.1:8201`, and TLS from
+   a certificate generated on the host. The download is checked against
+   HashiCorp's GPG signature on the release's SHA256SUMS. The role never
+   initialises or unseals Vault. `vault operator init` and every unseal are
+   owner steps over SSH, and the unseal keys and root token go to the owner's
+   password manager, never to the repository, a log or the Ansible vault. Off
+   until `vault_enabled` is true.
+   **The boundary.** This host runs untrusted learner workloads, and a
+   workspace escape is root, which can read an unsealed Vault's memory. So
+   this Vault holds lab-host secrets only and never a production
+   HybridCloudWorks secret. Those stay in Azure Key Vault
+   `kv-site-prod-cus-01`, which nothing on the host can read. It holds nothing
+   that exists nowhere else, so the host still holds no data of record.
+   **Follow-up, not built:** auto-unseal with an Azure Key Vault key, through
+   the Arc machine's managed identity, would end the owner step after every
+   restart. It must use a lab-only key vault and a grant on one key, never
+   `kv-site-prod-cus-01`. That is
+   [#726](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/726),
+   P3 on the board.
+
+Consequences of this amendment:
+
+- **Vault is sealed after every restart and every reboot**, including the
+  unattended-upgrades reboot at 04:30, until the owner enters three of the
+  five unseal keys. Anything on the host that reads from Vault must tolerate
+  a sealed Vault. #726 is the way out.
+- **The inbound policy is unchanged.** Both new services listen on the
+  loopback, and nothing listens on a public address but sshd on 22 and Caddy
+  on 80 and 443. Because Docker's rules for a published port come before
+  ufw's, the `portainer` role refuses any publish address but `127.0.0.1`.
+- **Portainer's licence is renewed yearly** at no cost while the use stays
+  within three nodes. Its terms forbid using it "to provide services to third
+  parties". Portainer is the owner's tool here and learners never reach it.
+  If that changes, the Community Edition image is the same release with no
+  key.
+
 ## Consequences and accepted risks
 
 - **Two Terraform workspaces, two lifecycles.** A change to the lab host is a
@@ -191,7 +269,9 @@ are recorded once, here, before any of them is implemented.
   workspace resource limits, template review, upgrade cadence — belongs to
   #659 and is not covered here.
 - **Two processes can drive the Docker daemon, and daemon access is root on
-  the host. Accepted, with the blast radius kept small on purpose.** The
+  the host. Accepted, with the blast radius kept small on purpose.** (Three
+  once the owner turns Portainer on; the amendment of 2026-09-26 bounds the
+  third by who can reach it.) The
   Coder server container holds the socket; the `hcw-labs-agent` service is in
   the `docker` group. Whoever controls either controls the daemon, every
   workspace and every job container, so `--network none` and the label
@@ -292,9 +372,10 @@ are recorded once, here, before any of them is implemented.
     > Machines in `rg-lab-hybrid-prod-cus`, and a `Heartbeat` query in the
     Management workspace returns rows for it.
   - The control plane is checked by name, not by count: `docker ps` on the
-    host shows the Compose services `coder` and `coder-postgres`, and
+    host shows the Compose services `coder` and `coder-postgres` (and the
+    container `portainer` while `portainer_enabled` is true), and
     `systemctl` shows `caddy`, `hcw-labs-agent` and `node-exporter` active as
-    host-native units. Every other container carries either the
+    host-native units (and `vault` while `vault_enabled` is true). Every other container carries either the
     Coder workspace label (`com.coder.resource=true`) or the `hcw.lab-job`
     label the agent sets, and any container with neither is a finding. The
     count is not asserted, because a running workspace or job legitimately

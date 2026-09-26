@@ -6,8 +6,8 @@
 lab_host_domain: lab.hybridcloudworks.com
 
 # The Ubuntu releases this playbook runs on, codename to version. 26.04 LTS is
-# the target: the VPS was reinstalled with it and stays on it (owner decision
-# 2026-09-26). 24.04 LTS is still accepted so the roles keep working on the
+# the target: the VPS runs it, is reinstalled clean with it and stays on it
+# (owner decisions 2026-09-26). 24.04 LTS is still accepted so the roles keep working on the
 # release they were first written for, but nothing waits on it. site.yml
 # refuses any other release, and every per-release map below (docker, arc)
 # has one entry per codename listed here. bootstrap.sh checks the same two

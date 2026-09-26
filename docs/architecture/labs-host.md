@@ -24,7 +24,7 @@ itself, never from a published page.
 | Plan | KVM 4 recommended (4 vCPU, 16 GB RAM, NVMe) — large enough for Coder workspaces beside the job runner | planned |
 | Provisioning | Terraform in [`infra-lab/`](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/tree/main/infra-lab): `hostinger/hostinger` provider 0.1.23, HCP Terraform workspace `hcw/hcw-lab`, working directory `infra-lab/`, auto-apply off. The existing VPS is **adopted by an `import` block, never created**, because creating a `hostinger_vps` is a purchase and destroying one cancels it; `infra-lab/README.md` has the owner's steps and the plan counts to read before any apply | code in repository; workspace not yet created |
 | Configuration | Ansible, from a playbook in this repository | planned |
-| Operating system | Ubuntu 26.04 LTS, x86-64 (owner decision 2026-09-26: the VPS was reinstalled with the latest LTS and stays on it). `lab-host/` still accepts 24.04 LTS as a stated fallback and refuses anything else | installed on the VPS |
+| Operating system | Ubuntu 26.04 LTS, x86-64 (owner decision 2026-09-26: the latest LTS, and the VPS stays on it). `lab-host/` still accepts 24.04 LTS as a stated fallback and refuses anything else | running on the VPS; a clean reinstall is pending (owner decision 2026-09-26, [ADR 0032](../decisions/0032-learner-labs-platform.md) amendment of that date) |
 | Runtime | Docker Engine only; no Kubernetes (owner decision 2026-09-24) | planned |
 | Public names | `lab.hybridcloudworks.com`, `*.lab.hybridcloudworks.com` and `*.coder.lab.hybridcloudworks.com`, Cloudflare DNS records managed from `hcw-lab` (`infra-lab/dns.tf`: the `lab` A record and CNAMEs to it for `*.lab`, `coder.lab` and `*.coder.lab`, all DNS-only; `coder.lab` has its own record because `*.coder.lab` makes it an empty non-terminal that `*.lab` does not answer for). One Caddy certificate carries all three names, issued by DNS-01. The target is the `_acme-challenge.lab` and `_acme-challenge.coder.lab` delegations into a dedicated lab zone; until that zone exists (owner decision 2026-09-25: none yet) there are no delegation records and Caddy writes its challenges in the production zone, the interim ADR 0032 accepts | planned |
 | Hybrid control plane | Azure Arc-enabled server in `rg-lab-hybrid-prod-cus`; heartbeat and auth syslog to the Log Analytics workspace in `rg-mgmt-plat-prod-cus` | planned |
@@ -41,10 +41,18 @@ itself, never from a published page.
 | node-exporter | Host metrics for the lab status page; listens on localhost only | Host-native systemd service |
 | Azure Connected Machine agent and Azure Monitor Agent | Arc onboarding as `arcs-lab-hybrid-prod-cus-01`; heartbeat and `auth`/`authpriv` syslog only, by the data collection rule `dcr-lab-hybrid-prod-cus` | Host services. The Connected Machine agent is installed and connected by the Ansible `arc` role; the Azure Monitor Agent is an Arc extension the owner adds after onboarding ([runbook](../runbooks/labs-host.md), step 8) |
 | Coder workspaces and lab job containers | Transient. Workspaces carry Coder's `com.coder.resource=true` label and stop after an hour; job containers carry the `hcw.lab-job` label and live for one job | `docker run`, started by Coder and by `vps-agent` |
+| Portainer Business Edition | The owner's view of the host's Docker: containers, images, volumes, logs. Holds the Docker socket, so it is root on the host; reachable only through an SSH tunnel. Off until the owner turns it on (owner decision 2026-09-26) | One container, `portainer`, with a named volume; HTTPS on `127.0.0.1:9443` only, no Caddy route |
+| HashiCorp Vault | Secrets for the lab host only, never production HybridCloudWorks secrets (those stay in Key Vault `kv-site-prod-cus-01`). Initialised and unsealed by the owner over SSH; sealed after every restart. Off until the owner turns it on (owner decision 2026-09-26) | Host-native systemd service `vault`, user `vault`, raft storage in `/var/lib/vault`; `127.0.0.1:8200` and `127.0.0.1:8201` only |
 
 Nothing else. A container that is neither a named service above nor carries
 one of the two labels is a finding, and the validation list in ADR 0032 checks
 `docker ps` that way, by name and label rather than by count.
+
+`bootstrap.sh` enforces the "nothing else" on the way in: its first run on a
+host refuses, before it changes anything, when the host already runs a
+container, a self-hosted runner, Kubernetes, anything under `/opt` or a
+listener this repository did not put there, and names a reinstall as the way
+on ([runbook](../runbooks/labs-host.md), "The first-run host check").
 
 ## Exposure
 
@@ -61,6 +69,14 @@ No inbound port is opened for the site, for Azure or for lab jobs. The site
 reaches the host in one direction only, through a server-side status proxy in
 the Function App that reads the `CODER-URL` and `CODER-STATUS-TOKEN` secrets
 from Key Vault through its `CODER_URL` and `CODER_STATUS_TOKEN` settings.
+
+On the host's loopback, and nowhere else: node-exporter (9100), Coder (7080,
+behind Caddy), Portainer (9443) and Vault (8200, and raft's 8201 once
+unsealed). Docker's iptables rules for a published port come before ufw's, so
+the two published through Docker name `127.0.0.1` in the publish itself, and
+the Portainer role refuses any other address. The owner reaches Portainer
+through an SSH tunnel and Vault through the CLI over SSH; neither has a Caddy
+route or a public name.
 
 ## Backup posture
 
@@ -89,6 +105,12 @@ anywhere else. There is no other backup schedule, and a compromised or broken
 host is destroyed and re-applied. If the host ever acquires data of record,
 that is a revisit trigger in ADR 0032.
 
+Portainer's volume and Vault's raft data are not backed up either. Portainer
+holds settings that are re-entered by hand. Vault holds lab-host secrets
+only, each of which its issuer can issue again, so it holds no data of
+record; storing in it anything that exists nowhere else would be the revisit
+trigger above.
+
 ## Identities the host holds
 
 | Identity | Where it lives | Scope | Status |
@@ -100,6 +122,9 @@ that is a revisit trigger in ADR 0032.
 | Coder status token | Issued by Coder; the value is held in Key Vault `kv-site-prod-cus-01` as the secret `CODER-STATUS-TOKEN` (read by the Function App setting `CODER_STATUS_TOKEN`), not on the host | Read-only Coder API for the site's status proxy | planned |
 | Caddy ACME account | Caddy's data volume | Issuance and renewal of the one certificate covering `lab`, `*.lab` and `*.coder.lab` | planned |
 | Caddy DNS-01 token (`CLOUDFLARE_API_TOKEN` in `/etc/caddy/env`, owner `root`, group `caddy`, mode `0640`, written by Ansible from Vault; the `caddy` systemd unit runs as the non-root `caddy` user and reads it through `EnvironmentFile`) | On the host, because renewals happen there | DNS edit on the dedicated lab zone that `_acme-challenge.lab` is delegated to; DNS edit on the production zone only in the interim ADR 0032 records | planned |
+| Portainer administrator and Business Edition licence key | Created and entered by the owner in Portainer's UI; the password is in the owner's password manager, and Portainer keeps its own copy in its volume. Neither is in the repository or Ansible Vault | Full control of the host's Docker daemon, through the loopback only | planned |
+| HashiCorp Vault unseal keys (five, three to unseal) and initial root token | The owner's password manager only, printed once by `vault operator init`. Never on the host, in the repository, in a log or in Ansible Vault | Unsealing and administering the lab host's Vault | planned |
+| Vault listener certificate | Generated on the host, `/etc/vault.d/tls/`, key `root:vault` `0640` | TLS for `127.0.0.1:8200`; trusted by the CLI through `VAULT_CACERT` | planned |
 
 Identities that are **not** on the host, by design: the Hostinger API token and
 the Terraform-side Cloudflare API token (HCP Terraform workspace variables in

@@ -18,6 +18,8 @@ every step.
 | `caddy` | Caddy 2.11.4 built with `caddy-dns/cloudflare` 0.2.4, host-native under systemd; TLS for `lab.hybridcloudworks.com`, `*.lab.hybridcloudworks.com` and `*.coder.lab.hybridcloudworks.com` via DNS-01; placeholder response at the apex | `/usr/local/bin/caddy`, `/opt/caddy/bin/` (versioned binary and its `.provenance`), `/etc/caddy/Caddyfile`, `/etc/caddy/conf.d/`, `/etc/caddy/env` (root:caddy, 0640), `caddy.service` running as `caddy` |
 | `coder` | Coder Community edition v2.37.3 and PostgreSQL 18.6 under Docker Compose from `../coder/docker-compose.yml`, both by digest; the Caddy route for `coder.lab` and `*.coder.lab`; a nightly `pg_dump` keeping seven days. Down until `coder_enabled` is true | `/etc/hcw/coder/` (`docker-compose.yml`, `.env`, `coder.env` and `coder-postgres.env`, the last two root 0600), `/etc/caddy/conf.d/10-coder.caddy`, `/usr/local/sbin/coder-postgres-backup`, `coder-postgres-backup.timer`, `/var/backups/coder/` |
 | `labs_agent` | `vps-agent` host-native as `hcw-labs-agent.service` under user `hcw-labs-agent` (in `docker`), Node.js 26.10.0 from NodeSource, repository checkout at the commit the playbook runs from, certificate generated on the host | `/opt/hcw-labs-agent`, `/etc/hcw/labs-agent.env` (root, 0600), `/etc/hcw/labs-agent.pem` (root:hcw-labs-agent, 0640), `/etc/hcw/labs-agent.crt` |
+| `portainer` | Portainer Business Edition 2.45.1 (LTS) by digest, one container with the Docker socket, HTTPS on **127.0.0.1:9443 only**, plain HTTP off, no Caddy route; reached through an SSH tunnel. Nothing until `portainer_enabled` is true | Container `portainer`, volume `portainer-data` |
+| `vault` | HashiCorp Vault 2.1.1 host-native as `vault.service` under user `vault`, the download checked against HashiCorp's signature on SHA256SUMS; raft storage; API on **127.0.0.1:8200** and cluster port on **127.0.0.1:8201**, TLS from a certificate generated on the host. For lab-host secrets only; never initialised or unsealed by the role. Nothing until `vault_enabled` is true | `/usr/local/bin/vault`, `/opt/vault/` (downloads, signing key), `/etc/vault.d/vault.hcl` (root:vault, 0640), `/etc/vault.d/tls/`, `/var/lib/vault` (vault, 0700), `/etc/profile.d/hcw-vault.sh` |
 
 Each role's `README.md` explains its decisions; `meta/argument_specs.yml` is
 its variable contract. Every version, digest and checksum is in
@@ -27,10 +29,19 @@ its variable contract. Every version, digest and checksum is in
 `site.yml` runs the roles in that order: `arc` straight after `hardening`,
 because the agent needs nothing the later roles install and the host should
 appear in Azure even when a later role fails; `coder` after `caddy`, because
-its route is a file in Caddy's `conf.d`, and before `labs_agent`. Docker Compose on this host is
-for Coder and its PostgreSQL only (ADR 0032); Caddy and the agent are host
+its route is a file in Caddy's `conf.d`, and before `labs_agent`; `portainer`
+and `vault` last, because nothing above needs either, so a failure there
+leaves the lab services configured. Docker Compose on this host is
+for Coder and its PostgreSQL only (ADR 0032); Portainer is a single
+container the role runs directly, Caddy, the agent and Vault are host
 services, and Coder's Caddy route is `/etc/caddy/conf.d/10-coder.caddy`,
 the pattern `00-apex.caddy` shows.
+
+Only sshd (22) and Caddy (80 and 443) listen on a public address.
+node_exporter, Coder, Portainer and Vault listen on `127.0.0.1`, and the
+two that publish through Docker (Coder, Portainer) name `127.0.0.1` in the
+publish itself, because Docker's iptables rules for a published port come
+before ufw's.
 
 ## First run
 
@@ -41,7 +52,8 @@ over SSH, with the one line in `infra-lab/README.md`, step 7. It needs a key
 in `/root/.ssh/authorized_keys` first (step 6 there), because the
 `hardening` role copies that key to `hcwadmin` before it turns root and
 password login off. The script checks the host is Ubuntu 26.04 LTS (24.04
-LTS is accepted and says it is the fallback; anything else stops), installs
+LTS is accepted and says it is the fallback; anything else stops), then
+checks the host is empty (below), installs
 `uv` 0.12.19 from its GitHub release after checking the archive's SHA256,
 has uv install CPython 3.14.7 and `ansible-core` 2.21.4 on it, clones
 this repository into `/opt/hcw-src` (or fetches, when the clone exists),
@@ -52,8 +64,50 @@ vault it still completes: the host is hardened, Docker and node_exporter
 run, Caddy serves an HTTP-only apex answering 503 that says TLS is off (and
 imports no routes, so nothing can leak over plaintext), Coder's Compose
 project is installed under `/etc/hcw/coder` but down (`coder_enabled` is
-false until the owner flips it, below), and the agent unit is installed but
-not started.
+false until the owner flips it, below), the agent unit is installed but
+not started, and Portainer and Vault are not installed.
+
+### The first-run host check
+
+`bootstrap.sh` configures only a host that was prepared for it. On a host
+it has never accepted it looks, before it changes anything, for signs of
+another workload, and refuses when it finds one. It exits 3, lists what it
+found, and names the two ways on. The checks, each something this
+repository never creates on a host it has not accepted:
+
+- any Docker container, running or stopped (the `docker` role restarts the
+  daemon, and a restart starts every stopped container whose restart policy
+  is `always`);
+- an installed `actions.runner.*` systemd unit (a self-hosted runner);
+- Kubernetes: a `k3s`, `k0s`, `rke2`, `kubelet` or `microk8s` unit,
+  `/usr/local/bin/k3s`, `/etc/rancher`, `/var/lib/rancher`,
+  `/etc/kubernetes` or `/var/lib/kubelet`;
+- `/opt/hcw-src` or `/opt/hcw-labs-agent` holding anything but a checkout of
+  this repository;
+- anything else under `/opt`;
+- a TCP listener other than sshd on 22 and systemd-resolved on
+  `127.0.0.53:53` and `127.0.0.54:53`.
+
+The first run that passes writes `/etc/hcw/bootstrap-host-accepted` before
+its first change, and every run that finishes records its commit there.
+While that file exists, runs skip the check, so a first run that fails
+half-way can be re-run: what it left behind is this repository's own, and
+the host was judged before any of it existed. The procedure the refusal
+points at, reinstalling the server, is
+[docs/runbooks/labs-host.md](../docs/runbooks/labs-host.md), "Reinstalling
+the host". The other way is to accept the host knowingly, only when every
+listed item is meant to stay and may be disrupted: the run then moves Docker
+to its pinned version and restarts it, enables ufw with only 22, 80 and 443
+open, and replaces sshd's login settings, whatever those workloads need.
+Bash, on the host, as root:
+
+```bash
+HCW_ADOPT_NONEMPTY_HOST=1 /opt/hcw-src/lab-host/bootstrap.sh
+```
+
+The marker then says `accepted_as=adopted`, with one `adopted_with=` line
+per item that was found. Delete the marker only to make the next run check
+again.
 
 ### Which Python runs what
 
@@ -182,6 +236,11 @@ with their values:
 | `vault_arc_service_principal_secret` | `arc` | Its client secret. Used once by `azcmagent connect`; delete it from the vault and from Entra once the host is Connected |
 | `vault_arc_tenant_id` | `arc` | The Entra tenant id |
 | `vault_arc_subscription_id` | `arc` | The application subscription's id (`sub-app-site-prod-cus`) |
+
+`vault_enabled`, `vault_version`, `vault_checksum` and
+`vault_pgp_key_checksum` in `ansible/group_vars/all.yml` are not keys of
+this file: they belong to the role that runs HashiCorp Vault (below), whose
+name is `vault`, and none of them is a secret.
 
 The four `vault_labs_agent_*` keys and the three `vault_coder_*` keys can be
 added later: until all four exist the agent stays stopped and the play says
@@ -422,6 +481,101 @@ sudo docker compose --project-directory /etc/hcw/coder start coder
 Success is `DROP DATABASE`, `CREATE DATABASE`, no error from the third
 `psql`, and the login page back within a minute.
 
+## Portainer
+
+The `portainer` role runs Portainer Business Edition for the owner
+(owner decision 2026-09-26; `ansible/roles/portainer/README.md` has the
+edition, its licence and the pin). It holds the Docker socket, which is root
+on this host, so it is published on `127.0.0.1:9443` and nowhere else, has
+no Caddy route, and is reached through an SSH tunnel: whoever can open the
+tunnel already has an SSH login, which is `sudo`.
+
+### Turning it on
+
+In a pull request, set `portainer_enabled: true` in
+`ansible/group_vars/all.yml`, merge it and re-run `bootstrap.sh` (above).
+Success is a `PLAY RECAP` with `failed=0` and the task `portainer : Say how
+to reach Portainer` printing `Portainer 2.45.1 answers on
+https://127.0.0.1:9443 on this host and nowhere else`.
+
+### The first sign-in, and every visit after it
+
+Every visit is one PowerShell line on the workstation, which opens a shell
+on the host and the tunnel together, then <https://localhost:9443>:
+
+```powershell
+ssh -L 9443:127.0.0.1:9443 hcw-lab
+```
+
+The first sign-in has two more steps, because a fresh Portainer stops
+serving five minutes after it starts and wants the one-time setup token it
+prints in its log: restart it and read the token from inside that shell,
+then create the administrator and enter the licence key. The steps, and
+what success looks like, are in
+[docs/runbooks/labs-host.md](../docs/runbooks/labs-host.md), "Portainer
+through an SSH tunnel". The administrator's password is in the owner's
+password manager and the licence key is entered in Portainer's UI; neither
+is in the repository or the Ansible vault.
+
+### Turning it off
+
+Durable: a pull request setting `portainer_enabled: false`, merged and
+applied. The container is removed and the `portainer-data` volume stays, so
+turning it back on brings back the same administrator, settings and
+licence. Immediate, bash, on the host (the next run starts it again while
+`portainer_enabled` is true):
+
+```bash
+sudo docker stop portainer
+```
+
+## HashiCorp Vault
+
+The `vault` role runs HashiCorp Vault host-native, for **lab-host secrets
+only** (owner decision 2026-09-26; `ansible/roles/vault/README.md` has the
+verification chain, TLS and mlock). Not the Ansible vault above: that one
+holds what the playbook needs and lives in `/etc/hcw/ansible`.
+
+**The boundary.** This host runs learner workloads, and an escape from a
+workspace or a job container is root on the host, which can read an
+unsealed Vault's memory. So this Vault never holds a production
+HybridCloudWorks secret: those stay in Azure Key Vault
+`kv-site-prod-cus-01`. Nor does it hold anything that exists nowhere else,
+because the host holds no data of record (ADR 0032); every value in it must
+be one its issuer can issue again.
+
+### Turning it on
+
+In a pull request, set `vault_enabled: true` in
+`ansible/group_vars/all.yml`, merge it and re-run `bootstrap.sh` (above).
+Success is a `PLAY RECAP` with `failed=0` and the task `vault : Say what
+state Vault is in` printing `It is not initialised`. The role never
+initialises or unseals Vault; the next section is the owner's.
+
+### Initialising, unsealing, and after every restart
+
+Owner steps, over SSH, in
+[docs/runbooks/labs-host.md](../docs/runbooks/labs-host.md), "HashiCorp
+Vault: initialising and unsealing": `vault operator init` once, whose five
+unseal keys and root token go to the owner's password manager and nowhere
+else, then `vault operator unseal` three times. **A restart seals Vault**,
+and so does every reboot, including the unattended-upgrades reboot at 04:30,
+so the three unseals are repeated after each. The login shell sets
+`VAULT_ADDR=https://127.0.0.1:8200` and `VAULT_CACERT`
+(`/etc/profile.d/hcw-vault.sh`), so `vault status` needs no flags; success
+before initialising is `Initialized false` and `Sealed true`, exit code 2.
+
+### Turning it off
+
+Durable: a pull request setting `vault_enabled: false`, merged and applied.
+The unit is stopped and disabled and `/var/lib/vault` stays, so turning it
+back on brings back the same Vault, sealed. Immediate, bash, on the host
+(the next run starts it again while `vault_enabled` is true):
+
+```bash
+sudo systemctl stop vault
+```
+
 ## The agent identity
 
 The first run generates the agent's private key **on the host** and never
@@ -512,6 +666,8 @@ parse and `terraform validate` — listed in
 | Coder, PostgreSQL | `coder_image_*`, `coder_postgres_image_*` | `roles/coder/README.md`; index digests from `docker buildx imagetools inspect`, run as `image@digest` |
 | Workspace image, Terraform providers, `code-server` module | `templates/hcw-lab/main.tf` under `../coder` | `../coder/README.md`, "Updating"; republished with `coder templates push` |
 | node_exporter | `node_exporter_version`, `node_exporter_checksum` | `roles/node_exporter/README.md` |
+| Portainer | `portainer_image_tag`, `portainer_image_digest` | `roles/portainer/README.md`, "Bumping the pin"; the newest LTS from Portainer's release list, the index digest from `docker buildx imagetools inspect`. No floor checks it: endoflife.date has no Portainer product |
+| HashiCorp Vault and its signing key | `vault_version`, `vault_checksum`, `vault_pgp_key_checksum` | `roles/vault/README.md`, "Bumping the pin"; the checksum is the `linux_amd64.zip` line of the release's signed SHA256SUMS, and `scripts/version-floors.json` holds the version to the newest line. A changed key is a decision, not a refresh |
 | Node.js | `labs_agent_node_version`; the line is `labs_agent_node_apt_repository_url` in `roles/labs_agent/defaults/main.yml` | NodeSource `node_26.x` package index |
 | Repository commit | Not pinned. `HCW_REPO_REF` in `bootstrap.sh` defaults to `origin/main`, and `labs_agent_repo_ref` reads the playbook's own checkout | Nothing to bump: merge, then re-run. The run prints the sha; holding or rolling back a host is under "Re-running" |
 | Collections, including the one transitive dependency | `requirements.yml` | Galaxy |

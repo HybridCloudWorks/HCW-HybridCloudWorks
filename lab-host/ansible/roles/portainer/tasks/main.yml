@@ -76,11 +76,8 @@
       this host and nowhere else; from a workstation, ssh -L
       {{ portainer_https_port }}:127.0.0.1:{{ portainer_https_port }} hcw-lab and then
       https://localhost:{{ portainer_https_port }} (lab-host/README.md, "Portainer").
-      {% if portainer_status.status | default(200) == 303 %}Its first-administrator window has
-      closed (Administrator initialization timeout): if no administrator was created yet, run
-      sudo docker restart {{ portainer_container_name }} and create it within five minutes.
-      {% else %}Until an administrator exists, it stops serving five minutes after it starts;
-      sudo docker restart {{ portainer_container_name }} opens a new five minutes.{% endif %}
+      {{ portainer_advice_timed_out if portainer_status.status | default(200) == 303 else portainer_advice_window }}
+      {{ portainer_advice_setup_token }}
   when: portainer_enabled | bool
 
 - name: Say why Portainer is not running

@@ -19,6 +19,41 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The lab host refuses a host it was not prepared for; Portainer and
+  HashiCorp Vault join it, loopback-only (owner decision 2026-09-26; #656).**
+  The owner's first `bootstrap.sh` run on the VPS met a host that had never
+  been reinstalled (two self-hosted runners, Portainer, nginx on :80, k3s,
+  Vault, an old agent install). Before it failed at the agent's checkout it
+  had upgraded and restarted Docker, killing a running Dependabot job,
+  enabled ufw and rewritten sshd's settings. The owner decided to reinstall
+  the VPS clean and to keep Portainer and Vault. `bootstrap.sh` now examines
+  a host it has never accepted, before it changes anything: any Docker
+  container, an installed `actions.runner.*` unit, Kubernetes units or
+  directories, a foreign checkout at `/opt/hcw-src` or `/opt/hcw-labs-agent`,
+  anything else under `/opt`, and any TCP listener but sshd's and
+  systemd-resolved's. On a finding it refuses with the list, exit code 3,
+  and the two ways on (reinstall, or `HCW_ADOPT_NONEMPTY_HOST=1`). The first
+  run that passes writes `/etc/hcw/bootstrap-host-accepted`, every completed
+  run records its commit there, and later runs skip the check. A new
+  `portainer` role runs Portainer Business Edition 2.45.1 (LTS, by index
+  digest) under the 3 Nodes Free licence. It has a named volume and the
+  Docker socket, and HTTPS on `127.0.0.1:9443` only, which the role refuses
+  to move; there is no Caddy route, and the owner reaches it through an SSH
+  tunnel. A new `vault` role runs HashiCorp Vault 2.1.1 host-native under
+  systemd, with raft storage, `127.0.0.1:8200` and `:8201` only, and TLS
+  from a host-generated certificate. Its download is checked against
+  HashiCorp's GPG signature on SHA256SUMS, with the key pinned by checksum.
+  It never initialises or unseals Vault; those are owner steps whose keys go
+  to the password manager only. This Vault holds lab-host secrets only;
+  production secrets stay in `kv-site-prod-cus-01`. Both roles are off by
+  default. `scripts/version-floors.json` gains a `vault` kind from
+  endoflife.date's `hashicorp-vault` product, and records Portainer as
+  unsourced (endoflife.date has no product for it). ADR 0032 carries a dated
+  amendment. The runbook gains the host check, the reinstall procedure, the
+  Portainer tunnel (including the setup token 2.45.1 prints) and Vault's
+  initialise and unseal steps. Auto-unseal through Azure Key Vault and the
+  Arc identity is the follow-up, #726.
+
 - **ElevenLabs on the free plan: a credit pre-flight, a non-commercial publish
   guard, and the account on the Audio tab (#432).** Owner direction
   2026-09-26: test the podcast voice on ElevenLabs's free plan, 10,000 credits a

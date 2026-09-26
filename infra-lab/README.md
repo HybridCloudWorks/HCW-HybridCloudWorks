@@ -108,8 +108,9 @@ same rule, so what it prints is what the import will store. It reads
 `template.id`, as the import does. If they ever disagree, the postcondition
 in `main.tf` stops the plan and names the stored value.
 
-**Stop here if `template_name` is not Ubuntu 26.04.** The VPS was
-reinstalled with Ubuntu 26.04 LTS (owner decision 2026-09-26), and
+**Stop here if `template_name` is not Ubuntu 26.04.** The VPS runs Ubuntu
+26.04 LTS and is reinstalled clean with it (owner decisions 2026-09-26; the
+procedure is `docs/runbooks/labs-host.md`, "Reinstalling the host"), and
 `lab-host/bootstrap.sh` refuses any OS but 26.04 LTS and the 24.04 LTS it
 still accepts as a fallback. Reinstalling wipes the disk, so it is an hPanel
 decision and never a Terraform change. After a reinstall, run the line again
@@ -236,7 +237,14 @@ the repository onto the host as root and runs the bootstrap:
 ssh hcw-lab "apt-get update -q && apt-get install -y -q git && git clone https://github.com/HybridCloudWorks/HCW-HybridCloudWorks.git /opt/hcw-src && /opt/hcw-src/lab-host/bootstrap.sh"
 ```
 
-**Success looks like** a final `PLAY RECAP` line for `localhost` with
+The first thing the script does on a host it has never run on, before it
+changes anything, is look for other workloads. If it finds any it stops
+with `refusing to configure this host`, the list, and exit code 3; the host
+then needs the reinstall in `docs/runbooks/labs-host.md`, "Reinstalling the
+host", before this line is run again.
+
+**Success looks like** `[bootstrap] host check: no other workloads found`
+near the top and a final `PLAY RECAP` line for `localhost` with
 `failed=0` and `unreachable=0`. After it, root login is off, so run
 `scripts/lab/Connect-Lab.ps1` again without `-User` to point the alias at
 `hcwadmin`. Each run checks out the current `main` commit and prints its

@@ -21,10 +21,12 @@ the admin Labs page's Setup tab used to ask the owner to do by hand.
    `KbdInteractiveAuthentication no`, validated with `sshd -t`. The `00-`
    prefix matters: sshd keeps the first value it reads and Ubuntu's cloud
    image ships `50-cloud-init.conf` with `PasswordAuthentication yes`.
-3. ufw: default deny inbound, allow outbound, allow TCP 22, 80, 443. Docker
-   publishes no ports on this host (jobs run with `--network none`, Caddy
-   binds directly), so Docker's iptables chains never open anything ufw did
-   not.
+3. ufw: default deny inbound, allow outbound, allow TCP 22, 80, 443.
+   Docker's iptables rules for a published port come before ufw's, so ufw
+   cannot close a port Docker publishes. That is why every publish on this
+   host names the loopback: Coder's `127.0.0.1:7080` in its Compose file and
+   Portainer's `127.0.0.1:9443`, which the `portainer` role refuses to move.
+   Jobs run with `--network none`, and Caddy binds 80 and 443 directly.
 4. `unattended-upgrades` with `Automatic-Reboot` at
    `hardening_unattended_reboot_time`.
 5. A fail2ban `sshd` jail on the systemd backend, which reads sshd's

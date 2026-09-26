@@ -22,3 +22,12 @@ vault_certificate_warn_seconds: "{{ vault_certificate_warn_days | int * 86400 }}
 vault_cli_environment:
   VAULT_ADDR: "{{ vault_api_addr }}"
   VAULT_CACERT: "{{ vault_tls_cert_file }}"
+# What the last task says for each state `vault status` reports.
+vault_advice_uninitialised: >-
+  It is not initialised: initialising it is an owner step, over SSH, and the unseal keys and
+  root token go to the owner's password manager and nowhere else (lab-host/README.md,
+  "HashiCorp Vault").
+vault_advice_sealed: >-
+  It is initialised and sealed: unseal it with three of the owner's unseal keys
+  (lab-host/README.md, "HashiCorp Vault").
+vault_advice_unsealed: It is initialised and unsealed.
