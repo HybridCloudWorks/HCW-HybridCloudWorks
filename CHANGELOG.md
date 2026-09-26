@@ -821,6 +821,43 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **The hcw-lab image runs Python 3.14.7 on Debian 13 trixie, with every
+  tool at its newest release (#714, #715).** Owner rule 2026-09-26: every
+  runtime, OS and base image the repository chooses is on its newest
+  supported release. Every stage of `lab-image/Dockerfile` moves from
+  `debian:bookworm-slim` (Debian 12, Python 3.11) to the official
+  `python:3.14.7-slim-trixie`, pinned by index digest; `versions.env`
+  records why one base serves every stage (the python image is
+  debian:trixie-slim plus CPython, and vendor-avm.sh then runs on the same
+  Python the runner ships). ansible-core moves from 2.19.13 to 2.21.4, the
+  newest line, whose controller range is Python 3.12 to 3.14; its
+  dependencies are no longer Debian packages built for another interpreter
+  but eight wheels pinned in `ANSIBLE_CORE_DEPS` and installed in pip's
+  hash-checking mode, which also fails the build on any dependency not
+  listed. No Debian `python3` package and no `pip` command remain in the
+  image. The Azure CLI stays at 2.90.0, the newest release, now written as
+  `AZURE_CLI_VERSION` plus `AZURE_CLI_SUITE=bookworm`: packages.microsoft.com
+  has no trixie suite and Microsoft's install page says to use the latest
+  Debian suite in that case, and the apt source is the deb822 form that page
+  documents. Terraform 1.16.4, kubeconform 0.8.0, helm 4.3.0, kubectl
+  1.37.1 and the mirrored providers (azurerm 5.7.0 and 4.81.0, azapi 2.12.0,
+  alz 0.22.0, random 3.9.1, modtm 0.4.0, time 0.14.2) were already the
+  newest releases, each sum re-checked against its publisher's file. The
+  sandbox template's Azure CLI comment now says what it installs, the
+  `-1~resolute` build from its Ubuntu 26.04 base's own suite, and records
+  why the recipe adds no Python. The publish workflow's digest guard, which
+  grepped `^FROM debian:`, now checks every `FROM` in both Dockerfiles: an
+  earlier stage, or exactly the `image@digest` versions.env records for that
+  file (`BASE_IMAGE`/`BASE_DIGEST`, and the new
+  `SANDBOX_BASE_IMAGE`/`SANDBOX_BASE_DIGEST`), and fails on anything else.
+  `smoke.sh` now also compares `python3 --version` with
+  `BASE_PYTHON_VERSION`. Measured with Docker 29.8.0: runner 1.70 GB /
+  319 MB to 1.71 GB / 319 MB, full 2.69 GB / 491 MB to 2.73 GB / 497 MB
+  (on disk / compressed), sandbox template unchanged at 3.38 GB / 797 MB.
+  Both smoke tests and `sandbox-check.mjs` pass on the new images. The
+  pins in `vps-agent/lib/capabilities.js` and the Coder template move in a
+  follow-up, from the digests main's publish run reports.
+
 - **The six radarlint-python findings left on `main` are fixed, not
   silenced.** #588 counted nine on 2026-09-14 and closed with them
   outstanding; three had gone with later changes, and `qlty check --all

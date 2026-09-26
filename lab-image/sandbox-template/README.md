@@ -154,7 +154,9 @@ and cloud differences are not a surprise.
 ## What was and was not verified on 2026-09-25
 
 - Verified: the Dockerfile builds; inside the image `terraform version`
-  prints the pinned version, `az version` prints the pinned version, the
+  prints the pinned version, `az version` prints the pinned version (the
+  `-1~resolute` build, from the base image's own Ubuntu 26.04 suite, not the
+  Debian build the lab image installs), the
   user is `agent` (uid 1000) with `/home/agent/.claude/CLAUDE.md` present,
   and `terraform init -backend=false`, `terraform fmt -check` and
   `terraform validate` succeed against a Landing Zone Builder emission with

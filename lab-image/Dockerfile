@@ -13,9 +13,12 @@
 #
 # Every version and checksum comes from versions.env, sourced at the top of
 # each RUN; nothing is downloaded without a SHA256 check. The base image is
-# pinned by digest on every FROM below. The tag beside it is documentation
-# (Docker resolves the digest and ignores the tag); the publish workflow
-# checks it matches DEBIAN_DIGEST in versions.env so the two cannot drift.
+# the official python:3.14.7-slim-trixie (CPython 3.14.7 on Debian 13
+# trixie), pinned by index digest on every FROM below; versions.env says why
+# every stage uses it. The tag beside the digest is documentation (Docker
+# resolves the digest and ignores the tag); the publish workflow checks that
+# every FROM that is not an earlier stage is exactly BASE_IMAGE@BASE_DIGEST
+# from versions.env, so the two cannot drift and no FROM can be unpinned.
 #
 # Build:   docker build --target runner -t hcw-lab-runner:dev lab-image
 #          docker build --target full   -t hcw-lab:dev        lab-image
@@ -23,12 +26,13 @@
 
 # ---------------------------------------------------------------------------
 # fetch: download and verify every artefact. Nothing from this stage ships
-# except what later stages COPY out of /out.
+# except what later stages COPY out of /out. The base already carries
+# ca-certificates and python3 with pip.
 # ---------------------------------------------------------------------------
-FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 AS fetch
+FROM python:3.14.7-slim-trixie@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d AS fetch
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl unzip git \
+ && apt-get install -y --no-install-recommends curl unzip git \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
@@ -74,12 +78,21 @@ RUN set -eu; . /build/versions.env; \
     chmod 0755 /out/bin/*; \
     rm -rf /build/terraform.zip /build/kubeconform.tgz /build/helm.tgz /build/linux-amd64
 
-# ansible-core wheel. Pure Python, so the wheel is one file and one sum.
+# ansible-core and every wheel it depends on, in pip's hash-checking mode:
+# the requirements file is ansible-core's line plus ANSIBLE_CORE_DEPS, each
+# `name==version --hash=sha256:...`. --require-hashes fails on a sum that
+# differs and on any dependency the resolver reaches that is not in the file,
+# and --only-binary=:all: means nothing is built from source. The runner
+# installs from exactly these files, with the same file, offline.
 RUN set -eu; . /build/versions.env; \
     mkdir -p /out/wheels; \
-    curl --proto '=https' --tlsv1.2 -fsSLo "/out/wheels/ansible_core-${ANSIBLE_CORE_VERSION}-py3-none-any.whl" \
-      "https://files.pythonhosted.org/packages/py3/a/ansible_core/ansible_core-${ANSIBLE_CORE_VERSION}-py3-none-any.whl"; \
-    echo "${ANSIBLE_CORE_SHA256}  /out/wheels/ansible_core-${ANSIBLE_CORE_VERSION}-py3-none-any.whl" | sha256sum -c -
+    { \
+      printf 'ansible-core==%s --hash=sha256:%s\n' "${ANSIBLE_CORE_VERSION}" "${ANSIBLE_CORE_SHA256}"; \
+      printf '%s\n' "${ANSIBLE_CORE_DEPS}" | sed '/^[[:space:]]*$/d'; \
+    } > /out/wheels/requirements.txt; \
+    python3 -m pip download --disable-pip-version-check --no-cache-dir \
+      --only-binary=:all: --require-hashes --dest /out/wheels -r /out/wheels/requirements.txt; \
+    test "$(find /out/wheels -name '*.whl' | wc -l)" -eq "$(wc -l < /out/wheels/requirements.txt)"
 
 # AVM pattern modules, vendored from the release source tarball of each
 # repository into /opt/avm/<name>@<version>, where <name> is the registry
@@ -107,18 +120,15 @@ RUN set -eu; . /build/versions.env; \
 # only way a module that calls registry modules inits offline is for the
 # vendored copy to call local copies instead. Every child is pinned by tree
 # hash in versions.env (AVM_CHILD_MODULES) and the script fails the build on
-# a mismatch, an unpinned child or an unused pin. git is what Terraform uses
-# to fetch registry modules; python3 does the JSON and the rewrite. Neither
-# ships: the runner copies /out/avm out of this stage and nothing else.
+# a mismatch, an unpinned child or an unused pin. git (installed in fetch) is
+# what Terraform uses to fetch registry modules; the base image's python3 does
+# the JSON and the rewrite. The runner copies /out/avm out of this stage and
+# nothing else.
 #
 # AVM_PRINT_PINS=1 prints the pins instead of checking them, for a bump:
 #   docker build --target vendor --build-arg AVM_PRINT_PINS=1 --progress=plain lab-image
 # ---------------------------------------------------------------------------
 FROM fetch AS vendor
-
-RUN apt-get update \
- && apt-get install -y --no-install-recommends git python3 \
- && rm -rf /var/lib/apt/lists/*
 
 COPY vendor-avm.sh /build/vendor-avm.sh
 ARG AVM_PRINT_PINS=
@@ -201,24 +211,13 @@ RUN set -eu; . /build/versions.env; \
 # ---------------------------------------------------------------------------
 # runner
 # ---------------------------------------------------------------------------
-FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 AS runner
+FROM python:3.14.7-slim-trixie@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d AS runner
 
-# python3 and the five Debian packages ansible-core depends on (jinja2 3.1.2,
-# PyYAML 6.0, cryptography 38.0.4, packaging 23.0, resolvelib 0.9.0 in
-# bookworm, each inside ansible-core 2.19's declared ranges). python3-venv
-# supplies ensurepip so the venv below is created without a network fetch.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      ca-certificates \
-      python3 \
-      python3-venv \
-      python3-jinja2 \
-      python3-yaml \
-      python3-cryptography \
-      python3-packaging \
-      python3-resolvelib \
- && rm -rf /var/lib/apt/lists/*
-
+# No apt layer: the base already carries python3 (3.14.7, at /usr/local/bin,
+# with ensurepip for the venv below), ca-certificates, bash and coreutils,
+# which is everything the runner needs. ansible-core's dependencies come from
+# the hash-pinned wheels the fetch stage verified, not from Debian packages,
+# because Debian's python3-* packages are built for trixie's own python3.13.
 COPY --from=fetch /out/bin/ /usr/local/bin/
 # The fixed commands behind the vps-agent capabilities that run in this image
 # (hcw-terraform-validate, hcw-helm-template, hcw-kubeconform): each is one
@@ -236,17 +235,25 @@ RUN chmod 0755 /usr/local/lib/hcw && chmod 0644 /usr/local/lib/hcw/*.py \
 COPY --from=vendor /out/avm/ /opt/avm/
 COPY --from=fetch /out/kubeconform/ /opt/kubeconform/
 COPY --from=mirror /out/mirror/ /opt/terraform/mirror/
-COPY --from=fetch /out/wheels/ /tmp/wheels/
 
-# ansible-core into a venv that sees the system packages above, with
-# `--no-index --no-deps` so pip can only install the verified wheel. pip and
-# setuptools are then removed from the venv: the image carries no installer,
-# and what runs is exactly what versions.env names.
-RUN python3 -m venv --system-site-packages /opt/ansible \
- && /opt/ansible/bin/pip install --no-cache-dir --no-index --no-deps /tmp/wheels/*.whl \
- && /opt/ansible/bin/pip uninstall -y pip setuptools \
+# ansible-core into its own venv from the verified wheels only: `--no-index
+# --find-links` so pip cannot reach an index, and the fetch stage's
+# requirements file with `--require-hashes`, so every wheel is checked a
+# second time and the resolver cannot pull in anything unlisted. `pip check`
+# proves the set is consistent. pip is then removed from the venv and from
+# the base image's Python: the image carries no pip command, and what runs
+# is exactly what versions.env names. The wheels are bind-mounted from the
+# fetch stage for this one RUN rather than copied in, so they leave no layer
+# behind (a COPY and a later rm kept 8.6 MB of them in the image).
+RUN --mount=type=bind,from=fetch,source=/out/wheels,target=/tmp/wheels \
+    python3 -m venv /opt/ansible \
+ && /opt/ansible/bin/pip install --disable-pip-version-check --no-cache-dir \
+      --no-index --find-links /tmp/wheels --require-hashes -r /tmp/wheels/requirements.txt \
+ && /opt/ansible/bin/pip check \
+ && /opt/ansible/bin/pip uninstall -y pip \
+ && python3 -m pip uninstall -y --root-user-action=ignore pip \
  && ln -s /opt/ansible/bin/ansible* /usr/local/bin/ \
- && rm -rf /tmp/wheels
+ && test -z "$(command -v pip pip3 || true)"
 
 # Provider installation is mirror-only, deliberately: `terraform init` under
 # --network none must fail loudly on a provider that is not mirrored, never
@@ -299,9 +306,14 @@ CMD ["terraform", "version"]
 
 # ---------------------------------------------------------------------------
 # full: runner plus the interactive tooling. Azure CLI from Microsoft's apt
-# repository at a pinned package version, its signing key verified by SHA256
-# before apt trusts it (bookworm's apt reads an ASCII-armoured key from
-# signed-by directly, so no gnupg is installed). kubectl by version and sum.
+# repository at a pinned package version. The suite is bookworm, on a trixie
+# base, because packages.microsoft.com publishes no trixie suite and
+# Microsoft's install page says to use the latest Debian suite when there is
+# no package for the distribution (AZURE_CLI_SUITE in versions.env has the
+# evidence). The signing key is verified by SHA256 before apt trusts it;
+# trixie's apt 3.0 reads an ASCII-armoured key named in Signed-By directly,
+# so no gnupg is installed. The source is written in the deb822 form
+# Microsoft's page documents. kubectl by version and sum.
 # ---------------------------------------------------------------------------
 FROM runner AS full
 
@@ -313,10 +325,15 @@ RUN set -eu; . /tmp/versions.env; \
     mkdir -p /etc/apt/keyrings; \
     curl --proto '=https' --tlsv1.2 -fsSLo /etc/apt/keyrings/microsoft.asc https://packages.microsoft.com/keys/microsoft.asc; \
     echo "${MICROSOFT_APT_KEY_SHA256}  /etc/apt/keyrings/microsoft.asc" | sha256sum -c -; \
-    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/microsoft.asc] https://packages.microsoft.com/repos/azure-cli/ bookworm main" \
-      > /etc/apt/sources.list.d/azure-cli.list; \
+    printf '%s\n' \
+      'Types: deb' \
+      'URIs: https://packages.microsoft.com/repos/azure-cli/' \
+      "Suites: ${AZURE_CLI_SUITE}" \
+      'Components: main' \
+      'Architectures: amd64' \
+      'Signed-By: /etc/apt/keyrings/microsoft.asc' > /etc/apt/sources.list.d/azure-cli.sources; \
     apt-get update; \
-    apt-get install -y --no-install-recommends "azure-cli=${AZURE_CLI_VERSION}"; \
+    apt-get install -y --no-install-recommends "azure-cli=${AZURE_CLI_VERSION}-1~${AZURE_CLI_SUITE}"; \
     curl --proto '=https' --tlsv1.2 -fsSLo /usr/local/bin/kubectl \
       "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/amd64/kubectl"; \
     echo "${KUBECTL_SHA256}  /usr/local/bin/kubectl" | sha256sum -c -; \
