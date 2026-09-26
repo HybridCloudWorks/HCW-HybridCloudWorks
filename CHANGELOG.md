@@ -19,6 +19,13 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The lab agent and the Coder template pull the Python 3.14 / Debian 13
+  lab image.** `vps-agent/lib/capabilities.js` pins `hcw-lab-runner` and
+  `lab-host/coder/templates/hcw-lab/main.tf` pins `hcw-lab` to the digests
+  main's publish run 36221001115 pushed for cd9e1af4 (#716), both checked
+  with `docker buildx imagetools inspect`. `.vscode/mcp.json` is ignored:
+  it holds per-developer MCP servers and local paths.
+
 - **Node.js on the newest supported line, and version floors enforced in CI
   (#715, #714).** Owner direction 2026-09-25: the latest current release.
   `functions/` moves from Node.js 22 to 24, the newest line Azure Functions
