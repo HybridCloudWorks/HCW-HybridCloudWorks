@@ -4,7 +4,7 @@ argument_specs:
     short_description: Run vps-agent as a systemd service from a pinned checkout of the repository
     description:
       - Creates the agent user (in the docker group, because the agent's job is docker run),
-        installs Node.js 22 from NodeSource at a pinned version, checks the repository out at
+        installs Node.js 26 from NodeSource at a pinned version, checks the repository out at
         a pinned ref and runs npm ci --omit=dev once per ref.
       - Generates the agent's private key and self-signed certificate on the host if absent and
         keeps the PEM root-owned, group hcw-labs-agent, mode 0640, so the service can read it
@@ -36,7 +36,7 @@ argument_specs:
       labs_agent_node_version:
         type: str
         required: true
-        description: NodeSource apt version string for nodejs, for example 22.23.3-1nodesource1.
+        description: NodeSource apt version string for nodejs, for example 26.10.0-1nodesource1.
       labs_agent_id:
         type: str
         required: true
@@ -151,5 +151,5 @@ argument_specs:
       labs_agent_node_apt_repository_url:
         type: str
         required: false
-        default: https://deb.nodesource.com/node_22.x
-        description: NodeSource repository for the Node.js 22 line.
+        default: https://deb.nodesource.com/node_26.x
+        description: NodeSource repository for the Node.js 26 line.

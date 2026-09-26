@@ -9,6 +9,7 @@ galaxy_info:
   platforms:
     - name: Ubuntu
       versions:
+        - resolute
         - noble
   galaxy_tags:
     - azure

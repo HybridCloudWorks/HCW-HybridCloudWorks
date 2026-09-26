@@ -6,7 +6,8 @@ labs_agent_configured: >-
      and labs_agent_tenant_id | length > 0
      and labs_agent_client_id | length > 0
      and labs_agent_api_scope | length > 0 }}
-# The ref may be a tag with a slash in it, so the stamp carries its sha256
-# rather than the ref itself.
-labs_agent_deps_stamp: "{{ labs_agent_state_dir }}/deps-installed-{{ labs_agent_repo_ref | hash('sha256') }}"
+# The ref may be a tag with a slash in it, so the stamp carries a sha256
+# rather than the ref itself. The Node.js pin is part of it, so moving Node
+# (22 to 26 on 2026-09-26) re-runs npm ci on the new runtime and npm.
+labs_agent_deps_stamp: "{{ labs_agent_state_dir }}/deps-installed-{{ (labs_agent_repo_ref ~ ' ' ~ labs_agent_node_version) | hash('sha256') }}"
 labs_agent_certificate_warn_seconds: "{{ labs_agent_certificate_warn_days | int * 86400 }}"

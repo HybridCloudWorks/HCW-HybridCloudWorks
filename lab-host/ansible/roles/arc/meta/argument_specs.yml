@@ -31,13 +31,23 @@ argument_specs:
         type: str
         required: true
         description:
-          - sha256:<hex> of https://packages.microsoft.com/keys/microsoft.asc. The key is the root
-            of trust for the version pin, so get_url refuses one that does not match.
+          - sha256:<hex> of the key at arc_apt_key_url for the running release. The key is the
+            root of trust for the version pin, so get_url refuses one that does not match.
+            group_vars/all.yml picks it from a per-release map, arc_apt_key_checksums.
+      arc_apt_key_urls:
+        type: dict
+        required: false
+        default:
+          resolute: https://packages.microsoft.com/keys/microsoft-2025.asc
+          noble: https://packages.microsoft.com/keys/microsoft.asc
+        description:
+          - Ubuntu codename to the key that signs that release's Microsoft repository. The 26.04
+            repository is signed by microsoft-2025.asc and the 24.04 one by microsoft.asc.
       arc_apt_key_url:
         type: str
         required: false
-        default: https://packages.microsoft.com/keys/microsoft.asc
-        description: Where the repository signing key is fetched from.
+        default: "{{ arc_apt_key_urls[ansible_facts['distribution_release']] }}"
+        description: Where the repository signing key is fetched from; the running release's entry of arc_apt_key_urls.
       arc_apt_key_path:
         type: path
         required: false
@@ -46,8 +56,10 @@ argument_specs:
       arc_apt_repository_url:
         type: str
         required: false
-        default: https://packages.microsoft.com/ubuntu/24.04/prod
-        description: The apt repository base URL.
+        default: "https://packages.microsoft.com/ubuntu/{{ ansible_facts['distribution_version'] }}/prod"
+        description:
+          - The apt repository base URL, for the running release's version (26.04 or 24.04). The
+            suite is the running release's codename.
       arc_azcmagent_path:
         type: path
         required: false

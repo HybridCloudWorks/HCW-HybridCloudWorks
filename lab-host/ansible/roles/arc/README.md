@@ -23,11 +23,23 @@ With `arc_enabled: true`:
 
 1. Asserts no `arc_tags` name or value contains a comma, an equals sign or a
    space, because `azcmagent` takes them as `Name=Value,Name=Value`.
-2. Fetches Microsoft's signing key to `/etc/apt/keyrings/microsoft.asc`,
-   refusing it unless its SHA256 matches `arc_apt_key_checksum` (the key that
-   signs `dists/noble/InRelease`, so it is the root of trust for the version
-   pin), and adds `https://packages.microsoft.com/ubuntu/24.04/prod` as a
-   deb822 source with `Signed-By`.
+2. Fetches the key that signs the running release's Microsoft repository to
+   `/etc/apt/keyrings/microsoft.asc`, refusing it unless its SHA256 matches
+   `arc_apt_key_checksum` (the key is the root of trust for the version pin),
+   and adds `https://packages.microsoft.com/ubuntu/<version>/prod`, suite
+   `<codename>`, as a deb822 source with `Signed-By`. Microsoft signs the two
+   repositories with different keys, so both the key and its checksum are
+   chosen by codename:
+
+   | Release | Repository | Key | Fingerprint |
+   | --- | --- | --- | --- |
+   | 26.04 `resolute` | `https://packages.microsoft.com/ubuntu/26.04/prod` | `microsoft-2025.asc` | `AA86F75E427A19DD33346403EE4D7792F748182B` |
+   | 24.04 `noble` | `https://packages.microsoft.com/ubuntu/24.04/prod` | `microsoft.asc` | `BC528686B50D79E339D3721CEB3E94ADBE1229CF` |
+
+   <https://packages.microsoft.com/keys/README> is Microsoft's account of
+   why: repositories created since spring 2025 are signed with the newer
+   key. `microsoft.asc` cannot verify the 26.04 repository's `InRelease`
+   at all.
 3. Installs `azcmagent` at `arc_agent_version` and holds it, the same pattern
    as the `docker` role; `allow_change_held_packages` lets a pin bump move it.
    The package drops `/etc/cron.d/azcmagent_autoupgrade`, which does nothing
@@ -61,14 +73,15 @@ machine is Connected.
 | --- | --- | --- |
 | `arc_enabled` | required (`false` in `group_vars`) | Onboard the host |
 | `arc_agent_version` | required | apt version of `azcmagent`, four-part |
-| `arc_apt_key_checksum` | required | `sha256:<hex>` the fetched key must match |
+| `arc_apt_key_checksum` | required | `sha256:<hex>` the fetched key must match; `group_vars` picks it from `arc_apt_key_checksums` by codename |
 | `arc_resource_group` | required | `rg-lab-hybrid-prod-cus` |
 | `arc_location` | required | `centralus` |
 | `arc_resource_name` | required | `arcs-lab-hybrid-prod-cus-01`; fixed, because it cannot change without a disconnect |
 | `arc_tags` | required | Tags on the machine resource; `infra/`'s tag set with `managedBy: ansible` |
-| `arc_apt_key_url` | `https://packages.microsoft.com/keys/microsoft.asc` | Signing key source |
-| `arc_apt_key_path` | `/etc/apt/keyrings/microsoft.asc` | Signing key location |
-| `arc_apt_repository_url` | `https://packages.microsoft.com/ubuntu/24.04/prod` | Repository base |
+| `arc_apt_key_urls` | `resolute`: `microsoft-2025.asc`, `noble`: `microsoft.asc` | Codename to signing key source |
+| `arc_apt_key_url` | the running release's entry of `arc_apt_key_urls` | Signing key source |
+| `arc_apt_key_path` | `/etc/apt/keyrings/microsoft.asc` | Signing key location, whichever key it is; `get_url` replaces a file whose checksum does not match |
+| `arc_apt_repository_url` | `https://packages.microsoft.com/ubuntu/<running version>/prod` | Repository base |
 | `arc_azcmagent_path` | `/opt/azcmagent/bin/azcmagent` | The CLI |
 | `arc_cloud` | `AzureCloud` | Azure cloud |
 | `arc_service_principal_id` | `vault_arc_service_principal_id` | Application (client) id of the onboarding principal |
@@ -77,18 +90,37 @@ machine is Connected.
 | `arc_subscription_id` | `vault_arc_subscription_id` | Application subscription id |
 
 To bump the agent, read the versions the repository offers and change
-`arc_agent_version` in `group_vars/all.yml`. Bash, from anywhere with
-network access; the last line printed is the newest:
+`arc_agent_version` in `group_vars/all.yml`. It is one pin because
+Microsoft publishes the same version string to both releases' repositories
+(1.68.03532.1399 was the newest in each on 2026-09-26); check both before
+moving it. Bash, from anywhere with network access; the last line each
+prints is the newest, 26.04 first:
+
+```bash
+curl -s https://packages.microsoft.com/ubuntu/26.04/prod/dists/resolute/main/binary-amd64/Packages | awk '/^Package: azcmagent$/{p=1} p&&/^Version:/{print $2; p=0}' | sort -V | tail -3
+```
 
 ```bash
 curl -s https://packages.microsoft.com/ubuntu/24.04/prod/dists/noble/main/binary-amd64/Packages | awk '/^Package: azcmagent$/{p=1} p&&/^Version:/{print $2; p=0}' | sort -V | tail -3
 ```
 
-The key checksum, bash:
+The key checksums, bash; the first is the `resolute` entry of
+`arc_apt_key_checksums`, the second the `noble` entry:
+
+```bash
+curl -sL https://packages.microsoft.com/keys/microsoft-2025.asc | sha256sum
+```
 
 ```bash
 curl -sL https://packages.microsoft.com/keys/microsoft.asc | sha256sum
 ```
+
+Microsoft Learn lists Ubuntu 26.04 as supported for Arc-enabled servers on
+x86-64 (not Arm64), and Ubuntu 26.04 LTS as supported by the Azure Monitor
+Agent, both read 2026-09-26:
+<https://learn.microsoft.com/azure/azure-arc/servers/prerequisites#supported-operating-systems>
+and
+<https://learn.microsoft.com/azure/azure-monitor/agents/azure-monitor-agent-supported-operating-systems>.
 
 Microsoft supports agent versions released in the last year, so a pin older
 than that is a finding.

@@ -5,14 +5,27 @@
   gather_facts: true
 
   pre_tasks:
-    - name: Refuse to run on anything but Ubuntu 24.04
+    # The per-release pins in group_vars/all.yml are keyed by codename, so
+    # both the codename and the version it belongs to are checked: a release
+    # that is not in lab_host_ubuntu_releases would otherwise fail later as
+    # an undefined dictionary key in the middle of a role.
+    - name: Refuse to run on anything but Ubuntu 26.04 LTS or 24.04 LTS
       ansible.builtin.assert:
         that:
           - ansible_facts['distribution'] == 'Ubuntu'
-          - ansible_facts['distribution_version'] == '24.04'
+          - lab_host_ubuntu_releases.get(ansible_facts['distribution_release']) == ansible_facts['distribution_version']
         fail_msg: >-
-          This playbook is written for Ubuntu 24.04 LTS and found
-          {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}.
+          This playbook is written for Ubuntu 26.04 LTS (and still accepts 24.04 LTS) and found
+          {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}
+          ({{ ansible_facts['distribution_release'] }}).
+        quiet: true
+
+    - name: Note that this host runs the accepted fallback release, not the target
+      ansible.builtin.debug:
+        msg: >-
+          Ubuntu {{ ansible_facts['distribution_version'] }} is accepted, but the lab host's
+          target is 26.04 LTS (ADR 0032). The roles converge here with the noble pins.
+      when: ansible_facts['distribution_release'] != 'resolute'
 
     - name: Refuse to enable Coder with an empty GitHub organisation allowlist
       ansible.builtin.assert:

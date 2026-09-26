@@ -21,7 +21,7 @@ labs_agent_service_name: hcw-labs-agent
 
 labs_agent_node_apt_key_url: https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key
 labs_agent_node_apt_key_path: /etc/apt/keyrings/nodesource.asc
-labs_agent_node_apt_repository_url: https://deb.nodesource.com/node_22.x
+labs_agent_node_apt_repository_url: https://deb.nodesource.com/node_26.x
 
 # Identity, from the vault file bootstrap.sh passes with -e. Until all four are
 # set the unit is installed and left stopped: the app registration is an owner

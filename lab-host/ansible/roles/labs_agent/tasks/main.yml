@@ -45,7 +45,7 @@
     group: root
     mode: "0644"
 
-- name: Add the NodeSource Node.js 22 repository
+- name: Add the NodeSource Node.js 26 repository
   ansible.builtin.deb822_repository:
     name: nodesource
     types:

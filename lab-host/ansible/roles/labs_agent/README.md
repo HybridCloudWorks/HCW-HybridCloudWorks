@@ -24,7 +24,8 @@ that made it the right call before the ADR said so:
 
 1. `hcw-labs-agent` system user, primary group of the same name, member of
    `docker`.
-2. Node.js 22 from NodeSource at `labs_agent_node_version`, held; the
+2. Node.js 26 from NodeSource's `node_26.x` repository at
+   `labs_agent_node_version`, held; the
    install carries `allow_change_held_packages` so a pin bump on a re-run
    moves the held package instead of failing. The NodeSource signing key
    is refused unless its SHA256 matches `labs_agent_node_apt_key_checksum`,
@@ -32,9 +33,10 @@ that made it the right call before the ADR said so:
 3. `git` checkout of `labs_agent_repo_url` at `labs_agent_repo_ref` into
    `/opt/hcw-labs-agent` (root-owned; the agent reads its own code and
    cannot change it), then `npm ci --omit=dev` in `vps-agent/`. A stamp in
-   `/var/lib/hcw-labs-agent/deps-installed-<sha256 of the ref>` records that
-   the install ran for this ref (hashed, because a tag may contain `/`), so
-   a re-run is a no-op and a bumped ref reinstalls.
+   `/var/lib/hcw-labs-agent/deps-installed-<sha256 of the ref and the Node.js
+   pin>` records that the install ran for this ref on this Node.js (hashed,
+   because a tag may contain `/`), so a re-run is a no-op and a bumped ref
+   or a bumped Node.js reinstalls.
 4. If `/etc/hcw/labs-agent.pem` does not exist, generates an RSA-4096 key and
    a self-signed certificate **on this host** (`CN=<labs_agent_id>`, 730
    days), as `.env.example` asks. The PEM is `root:hcw-labs-agent` mode
