@@ -89,11 +89,14 @@ const metaOf = (response) => ({
 
 /**
  * One setting's load/save cycle. `value` is the working copy the card edits;
- * `meta` is what the server said about the stored document; `options` is
- * what the server offers to choose from, where a setting is a choice.
+ * `saved` is the value as last stored (null when nothing is), which edits do
+ * not change until they are saved; `meta` is what the server said about the
+ * stored document; `options` is what the server offers to choose from, where
+ * a setting is a choice.
  */
 export function useSetting(name, authReady) {
   const [value, setValue] = useState(null);
+  const [saved, setSaved] = useState(null);
   const [meta, setMeta] = useState(EMPTY_META);
   const [options, setOptions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -112,6 +115,7 @@ export function useSetting(name, authReady) {
       .then((response) => {
         if (!current()) return;
         setValue(response?.value ?? null);
+        setSaved(response?.exists ? (response?.value ?? null) : null);
         setMeta(metaOf(response));
         setOptions(Array.isArray(response?.options) ? response.options : []);
         setError(null);
@@ -120,6 +124,7 @@ export function useSetting(name, authReady) {
         if (!current()) return;
         // Nothing from a previous load survives a failed one.
         setValue(null);
+        setSaved(null);
         setMeta(EMPTY_META);
         setOptions([]);
         setError(err?.message ?? 'Could not load this setting.');
@@ -150,6 +155,7 @@ export function useSetting(name, authReady) {
       try {
         const response = await sendJSON(settingRoute(name), 'PUT', next);
         setValue(response.value);
+        setSaved(response.value ?? null);
         setMeta({ ...metaOf(response), exists: true, stored: 'valid', problem: null });
         if (Array.isArray(response.options)) setOptions(response.options);
         toast({ title: 'Saved', description: `${name} is stored.` });
@@ -169,7 +175,7 @@ export function useSetting(name, authReady) {
     [name, toast]
   );
 
-  return { value, setValue, meta, options, loading, saving, error, save, reload };
+  return { value, setValue, saved, meta, options, loading, saving, error, save, reload };
 }
 
 export function StoredState({ meta }) {

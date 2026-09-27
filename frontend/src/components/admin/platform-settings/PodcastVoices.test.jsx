@@ -19,6 +19,7 @@ import PodcastVoices, {
   MY_VOICES_PAGE,
   PODCAST_HOSTS,
   previewRoute,
+  useVoiceList,
   voiceLabel,
 } from './PodcastVoices';
 import { settingRoute, useSetting } from './settingShared';
@@ -163,6 +164,27 @@ describe('PodcastVoices', () => {
     render(<Harness configured={false} />);
     expect(await screen.findByText(/Seed the ElevenLabs key first/)).toBeTruthy();
     expect(getJSON).not.toHaveBeenCalledWith(ELEVENLABS_VOICES_ROUTE);
+  });
+
+  it('says the previews cost no credits, so they are the first thing to reach for', async () => {
+    render(<Harness />);
+    expect(
+      await screen.findByText("Previews are ElevenLabs's samples and cost no credits.")
+    ).toBeTruthy();
+  });
+
+  it('uses a list its card holds instead of loading its own', async () => {
+    function Held() {
+      const setting = useSetting('podcast-voices', true);
+      const voiceList = useVoiceList(true);
+      return <PodcastVoices setting={setting} configured voiceList={voiceList} />;
+    }
+    render(<Held />);
+    const maya = await screen.findByLabelText('Maya');
+    await within(maya).findByText('Talia — female, american, young');
+    expect(getJSON.mock.calls.filter(([route]) => route === ELEVENLABS_VOICES_ROUTE)).toHaveLength(
+      1
+    );
   });
 
   it('offers the usable voices per host and shows the others disabled, with the reason', async () => {

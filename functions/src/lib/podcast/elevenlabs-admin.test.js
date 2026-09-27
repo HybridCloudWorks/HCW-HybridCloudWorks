@@ -12,14 +12,19 @@
  * Since #725 the check reads the saved podcast voices and, with none chosen,
  * refuses before sending; and two more routes list the key's voices (marked
  * usable on the plan or not) and proxy one voice's preview.
+ *
+ * Since 2026-09-27 a stored sample is recorded for a free replay, and the
+ * status route returns it as `lastSample` without reaching ElevenLabs.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
+  LAST_SAMPLE_CONFIG_ID,
   NOT_CONFIGURED_REASON,
   SAMPLE_AUDIO_PATH,
   SAMPLE_CHARACTERS,
   SAMPLE_DIALOGUE,
   SAMPLE_MAX_CHARACTERS,
+  SAMPLE_MEDIA_URL,
   SEED_KEY_PAGE,
   createElevenLabsHandlers,
 } from './elevenlabs-admin.js';
@@ -72,7 +77,12 @@ const makeStore = (over = {}) => ({
   readDoc: vi.fn(async (_c, id) => (id === PODCAST_VOICES_CONFIG_ID ? VOICES_DOC : null)),
   ...over,
 });
-const makeStorage = (over = {}) => ({ uploadBlob: vi.fn(async () => undefined), ...over });
+// No sample blob unless a test stores one.
+const makeStorage = (over = {}) => ({
+  uploadBlob: vi.fn(async () => undefined),
+  headBlobForDelivery: vi.fn(async () => null),
+  ...over,
+});
 const ai = { getCostEstimate: vi.fn(() => 0.0257) };
 
 const request = () => ({ json: vi.fn(async () => ({ dialogue: [{ speaker: 'Maya', text: 'x'.repeat(9000) }] })) });
@@ -87,6 +97,7 @@ const handlers = ({
   fetchImpl,
   listVoices,
   fetchPreview,
+  voiceNames,
 } = {}) =>
   createElevenLabsHandlers({
     guard,
@@ -100,6 +111,7 @@ const handlers = ({
     ...(fetchImpl ? { fetchImpl } : {}),
     ...(listVoices ? { listVoices } : {}),
     ...(fetchPreview ? { fetchPreview } : {}),
+    ...(voiceNames ? { voiceNames } : {}),
   });
 
 const body = (res) => JSON.parse(res.body);
@@ -162,6 +174,7 @@ describe('auth', () => {
     expect(listVoices).not.toHaveBeenCalled();
     expect(fetchPreview).not.toHaveBeenCalled();
     expect(storage.uploadBlob).not.toHaveBeenCalled();
+    expect(storage.headBlobForDelivery).not.toHaveBeenCalled();
   });
 
   it('gates all four at editor, the level of the routes that generate podcast audio', async () => {
@@ -230,6 +243,8 @@ describe('getStatus', () => {
         model: 'eleven_v3',
       },
       lastRenderError: null,
+      lastSample: null,
+      lastSampleError: null,
       sample: { characters: SAMPLE_CHARACTERS, turns: 2 },
     });
     expect(readAccount).toHaveBeenCalledWith(expect.objectContaining({ key: 'xi-test-key' }));
@@ -373,13 +388,27 @@ describe('renderSample', () => {
       tier: 'free',
       freePlan: true,
       resetAt: '2026-10-26T00:00:00.000Z',
+      lastSample: {
+        audioUrl: `/api/public/media/podcast/sample/elevenlabs-live-check.mp3?v=${NOW.getTime()}`,
+        renderedAt: NOW.toISOString(),
+        voices: {
+          Maya: { voiceId: VOICES.Maya, name: null },
+          Elena: { voiceId: VOICES.Elena, name: null },
+        },
+        charactersBilled: 257,
+        billedEstimated: false,
+        model: 'eleven_v3',
+        recorded: true,
+      },
     });
 
     const [container, path, audio, contentType] = storage.uploadBlob.mock.calls[0];
     expect([container, path, contentType]).toEqual(['podcast', SAMPLE_AUDIO_PATH, 'audio/mpeg']);
     expect(Buffer.isBuffer(audio)).toBe(true);
 
-    const [usageContainer, row] = store.upsertDoc.mock.calls[0];
+    const usageWrites = store.upsertDoc.mock.calls.filter(([c]) => c === USAGE_CONTAINER);
+    expect(usageWrites).toHaveLength(1);
+    const [usageContainer, row] = usageWrites[0];
     expect(usageContainer).toBe(USAGE_CONTAINER);
     expect(row).toMatchObject({
       provider: 'elevenlabs',
@@ -471,8 +500,275 @@ describe('renderSample', () => {
       audioUrl: null,
       audioError: expect.stringMatching(/rendered and billed but not stored: container missing/),
       charactersBilled: 257,
+      // Nothing new to replay: the blob still holds the previous sample.
+      lastSample: null,
     });
+    // The usage row only; no replay record for audio that was not stored.
     expect(store.upsertDoc).toHaveBeenCalledTimes(1);
+    expect(store.upsertDoc.mock.calls[0][0]).toBe(USAGE_CONTAINER);
+  });
+});
+
+/** The record a stored sample leaves (admin_config/podcast_last_sample). */
+const RECORD = Object.freeze({
+  id: LAST_SAMPLE_CONFIG_ID,
+  configScope: 'admin_config',
+  audioUrl: `${SAMPLE_MEDIA_URL}?v=1790000000000`,
+  voices: {
+    Maya: { voiceId: VOICES.Maya, name: 'Bella' },
+    Elena: { voiceId: VOICES.Elena, name: 'Jessica' },
+  },
+  charactersBilled: 257,
+  billedEstimated: false,
+  model: 'eleven_v3',
+  renderedAt: '2026-09-27T14:03:00.000Z',
+});
+
+/** A store whose admin_config holds `docs` by id, and whose usage query answers `rows`. */
+const storeWith = (docs, rows = [USAGE_ROW]) =>
+  makeStore({
+    readDoc: vi.fn(async (_c, id) => docs[id] ?? null),
+    queryDocs: vi.fn(async () => rows),
+  });
+const blobThere = () =>
+  makeStorage({
+    headBlobForDelivery: vi.fn(async () => ({
+      contentType: 'audio/mpeg',
+      etag: '"0x8DCDEADBEEF"',
+      contentLength: 135671,
+    })),
+  });
+
+describe('the last sample', () => {
+  it('records a stored sample for replay: the versioned URL, both voices with the names at hand, the billing and the time', async () => {
+    const store = makeStore();
+    const voiceNames = vi.fn(() => new Map([[VOICES.Maya, 'Bella'], [VOICES.Elena, 'Jessica']]));
+    const res = await handlers({
+      store,
+      synthesize: vi.fn(async () => rendered()),
+      readAccount: vi.fn(async () => FREE),
+      voiceNames,
+    }).renderSample(request(), context);
+
+    expect(res.status).toBe(200);
+    expect(voiceNames).toHaveBeenCalledWith('xi-test-key');
+    const records = store.upsertDoc.mock.calls.filter(([c]) => c === 'admin_config');
+    expect(records).toHaveLength(1);
+    expect(records[0][1]).toEqual({
+      id: 'podcast_last_sample',
+      configScope: 'admin_config',
+      audioUrl: `/api/public/media/podcast/sample/elevenlabs-live-check.mp3?v=${NOW.getTime()}`,
+      voices: {
+        Maya: { voiceId: VOICES.Maya, name: 'Bella' },
+        Elena: { voiceId: VOICES.Elena, name: 'Jessica' },
+      },
+      charactersBilled: 257,
+      billedEstimated: false,
+      model: 'eleven_v3',
+      renderedAt: NOW.toISOString(),
+    });
+    expect(body(res).lastSample).toMatchObject({
+      audioUrl: records[0][1].audioUrl,
+      voices: { Maya: { name: 'Bella' }, Elena: { name: 'Jessica' } },
+      recorded: true,
+    });
+  });
+
+  it('still answers 200 with the sample when the record cannot be written, and says so in the log', async () => {
+    context.warn.mockClear();
+    const store = makeStore({
+      upsertDoc: vi.fn(async (container, doc) => {
+        if (container === 'admin_config') throw Object.assign(new Error('cosmos down'), { code: 503 });
+        return doc;
+      }),
+    });
+    const res = await handlers({
+      store,
+      synthesize: vi.fn(async () => rendered()),
+      readAccount: vi.fn(async () => FREE),
+    }).renderSample(request(), context);
+    expect(res.status).toBe(200);
+    expect(body(res).lastSample).toMatchObject({ recorded: true, charactersBilled: 257 });
+    expect(context.warn).toHaveBeenCalledWith(expect.stringMatching(/not recorded for replay \(503\)/));
+    // The usage row was still written.
+    expect(store.upsertDoc.mock.calls.some(([c]) => c === USAGE_CONTAINER)).toBe(true);
+  });
+
+  it('returns the recorded sample on the status read once its blob is confirmed, and reaches ElevenLabs for nothing but the plan', async () => {
+    const store = storeWith({ [PODCAST_VOICES_CONFIG_ID]: VOICES_DOC, [LAST_SAMPLE_CONFIG_ID]: RECORD });
+    const storage = blobThere();
+    const readAccount = vi.fn(async () => FREE);
+    const fetchImpl = vi.fn();
+    const synthesize = vi.fn();
+    const listVoices = vi.fn();
+    const res = await handlers({ store, storage, readAccount, fetchImpl, synthesize, listVoices }).getStatus(
+      request(),
+      context
+    );
+    expect(res.status).toBe(200);
+    expect(body(res)).toMatchObject({
+      lastSample: {
+        audioUrl: '/api/public/media/podcast/sample/elevenlabs-live-check.mp3?v=1790000000000',
+        renderedAt: '2026-09-27T14:03:00.000Z',
+        voices: {
+          Maya: { voiceId: VOICES.Maya, name: 'Bella' },
+          Elena: { voiceId: VOICES.Elena, name: 'Jessica' },
+        },
+        charactersBilled: 257,
+        billedEstimated: false,
+        model: 'eleven_v3',
+        recorded: true,
+      },
+      lastSampleError: null,
+    });
+    expect(storage.headBlobForDelivery).toHaveBeenCalledWith('podcast', SAMPLE_AUDIO_PATH);
+    expect(store.readDoc).toHaveBeenCalledWith('admin_config', LAST_SAMPLE_CONFIG_ID, 'admin_config');
+    // Replay costs nothing: no render, no listing, no fetch of our own.
+    expect(synthesize).not.toHaveBeenCalled();
+    expect(listVoices).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(storage.uploadBlob).not.toHaveBeenCalled();
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+  });
+
+  it('returns the sample without a key too, calling nothing upstream, since replaying needs none', async () => {
+    const store = storeWith({ [LAST_SAMPLE_CONFIG_ID]: RECORD });
+    const readAccount = vi.fn();
+    const fetchImpl = vi.fn();
+    const res = await handlers({ env: {}, store, storage: blobThere(), readAccount, fetchImpl }).getStatus(
+      request(),
+      context
+    );
+    expect(body(res)).toMatchObject({ configured: false, lastSample: { recorded: true } });
+    expect(readAccount).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('offers nothing when the blob is gone, and the record as recorded when the blob cannot be checked', async () => {
+    const store = storeWith({ [LAST_SAMPLE_CONFIG_ID]: RECORD });
+    let res = await handlers({ store, storage: makeStorage(), readAccount: vi.fn(async () => FREE) }).getStatus(
+      request(),
+      context
+    );
+    expect(body(res)).toMatchObject({ lastSample: null, lastSampleError: null });
+
+    res = await handlers({
+      store,
+      storage: makeStorage({
+        headBlobForDelivery: vi.fn(async () => {
+          throw Object.assign(new Error('storage down'), { code: 'ECONNRESET' });
+        }),
+      }),
+      readAccount: vi.fn(async () => FREE),
+    }).getStatus(request(), context);
+    expect(body(res)).toMatchObject({
+      lastSample: { audioUrl: RECORD.audioUrl, recorded: true },
+      lastSampleError: null,
+    });
+    expect(res.body).not.toContain('storage down');
+  });
+
+  it('ignores a record whose URL is not the sample’s own, so the player cannot be pointed elsewhere', async () => {
+    for (const audioUrl of [
+      'https://evil.example/x.mp3',
+      `${SAMPLE_MEDIA_URL}`,
+      `${SAMPLE_MEDIA_URL}?v=1&x=https://evil.example`,
+      '/api/public/media/podcast/other.mp3?v=1',
+      null,
+    ]) {
+      const store = storeWith({ [LAST_SAMPLE_CONFIG_ID]: { ...RECORD, audioUrl } }, []);
+      const res = await handlers({ store, storage: blobThere(), readAccount: vi.fn(async () => FREE) }).getStatus(
+        request(),
+        context
+      );
+      // Not the record: the blob itself, at its own URL and version.
+      expect(body(res).lastSample).toMatchObject({
+        audioUrl: `${SAMPLE_MEDIA_URL}?v=0x8DCDEADBEEF`,
+        recorded: false,
+      });
+      expect(res.body).not.toContain('evil.example');
+      expect(res.body).not.toContain('other.mp3');
+    }
+  });
+
+  it('shows a record whose voices are not ids as voices unknown, not as invented ones', async () => {
+    const store = storeWith({
+      [LAST_SAMPLE_CONFIG_ID]: { ...RECORD, voices: { Maya: { voiceId: '../x', name: 'Bella' } } },
+    });
+    const res = await handlers({ store, storage: blobThere(), readAccount: vi.fn(async () => FREE) }).getStatus(
+      request(),
+      context
+    );
+    expect(body(res).lastSample).toMatchObject({ voices: null, recorded: true });
+  });
+
+  it('returns a sample stored before the record existed, with the voices saved before it was rendered', async () => {
+    const sampleRow = {
+      completionTokens: 257,
+      estimatedTokens: false,
+      timestamp: '2026-09-27T14:03:00.000Z',
+      model: 'eleven_v3',
+    };
+    const savedBefore = { ...VOICES_DOC, updatedAt: '2026-09-27T13:50:00.000Z' };
+    const store = storeWith({ [PODCAST_VOICES_CONFIG_ID]: savedBefore }, [sampleRow]);
+    const res = await handlers({ store, storage: blobThere(), readAccount: vi.fn(async () => FREE) }).getStatus(
+      request(),
+      context
+    );
+    expect(body(res).lastSample).toEqual({
+      // The version is the blob's etag, so a newer blob gets a new URL.
+      audioUrl: `${SAMPLE_MEDIA_URL}?v=0x8DCDEADBEEF`,
+      renderedAt: '2026-09-27T14:03:00.000Z',
+      voices: {
+        Maya: { voiceId: VOICES.Maya, name: null },
+        Elena: { voiceId: VOICES.Elena, name: null },
+      },
+      charactersBilled: 257,
+      billedEstimated: false,
+      model: 'eleven_v3',
+      recorded: false,
+    });
+    const sampleQuery = store.queryDocs.mock.calls.find(([, , params]) =>
+      params.some((p) => p.name === '@source')
+    );
+    expect(sampleQuery[1]).toMatch(/c\.provider = @provider AND c\.source = @source ORDER BY c\.timestamp DESC/);
+    expect(sampleQuery[2]).toEqual([
+      { name: '@provider', value: 'elevenlabs' },
+      { name: '@source', value: 'podcast:sample' },
+    ]);
+  });
+
+  it('does not claim the voices of an unrecorded sample when they were saved after it, or at no known time', async () => {
+    const sampleRow = { completionTokens: 257, timestamp: '2026-09-27T14:03:00.000Z' };
+    for (const updatedAt of ['2026-09-27T15:00:00.000Z', undefined]) {
+      const store = storeWith({ [PODCAST_VOICES_CONFIG_ID]: { ...VOICES_DOC, updatedAt } }, [sampleRow]);
+      const res = await handlers({ store, storage: blobThere(), readAccount: vi.fn(async () => FREE) }).getStatus(
+        request(),
+        context
+      );
+      expect(body(res).lastSample).toMatchObject({ voices: null, recorded: false });
+    }
+  });
+
+  it('says the last sample could not be read, rather than "none", when its record read fails', async () => {
+    const store = makeStore({
+      readDoc: vi.fn(async (_c, id) => {
+        if (id === LAST_SAMPLE_CONFIG_ID) throw Object.assign(new Error('cosmos down'), { code: 503 });
+        return null;
+      }),
+    });
+    const res = await handlers({ store, storage: blobThere(), readAccount: vi.fn(async () => FREE) }).getStatus(
+      request(),
+      context
+    );
+    expect(res.status).toBe(200);
+    expect(body(res)).toMatchObject({
+      lastSample: null,
+      lastSampleError: 'The last sample could not be read.',
+      subscription: { tier: 'free' },
+      lastRender: { characters: 8912 },
+    });
+    expect(res.body).not.toContain('cosmos down');
   });
 });
 

@@ -19,6 +19,29 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **ElevenLabs: the last sample replays free, and a new render asks first
+  (owner request 2026-09-27).** The owner spent two live checks (257 credits
+  each, 9,486 left on the free plan) only to test playback, because the
+  Audio tab showed a player only for a check run in the same session. Every
+  stored sample is now recorded in `admin_config/podcast_last_sample`: the
+  media URL with its `?v=` version, both voice ids (with names when the
+  voice listing is cached; nothing is listed to find them), the characters
+  billed and the time. `GET cms/podcast/elevenlabs` returns it as
+  `lastSample` (or `null`, with `lastSampleError` when the read fails), after
+  a HEAD confirms the blob is still there. A sample stored before the record
+  existed, such as the 2026-09-27 render, is still returned (`recorded:
+  false`), from the blob, the newest `podcast:sample` usage row, and the
+  saved voices when they were saved before it. The card's **Last sample**
+  section plays it on every load with its date and voices and says
+  "Replaying costs nothing"; a replay never reaches ElevenLabs. **Run live
+  check** is now **Render a new sample (about 257 credits)** and opens the
+  admin `ConfirmModal` first. The prompt names the credits left and the free
+  replay, and says when the last sample already used the saved voices.
+  Cancel sends nothing. The Podcast voices picker adds "Previews are
+  ElevenLabs's samples and cost no credits". `useSetting` also returns
+  `saved`, the stored value, which unsaved edits do not change. ADR 0029
+  §2a carries a dated note.
+
 - **Podcast voices: the owner picks two ElevenLabs voices the plan allows, by
   ear, on the Audio tab (#725).** The first free-plan live check was refused
   with 402 `paid_plan_required` ("Free users cannot use library voices via the
