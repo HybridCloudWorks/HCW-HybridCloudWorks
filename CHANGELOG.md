@@ -19,6 +19,31 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Lab article series: three how-to drafts for the owner's review (part of
+  #677).** `docs/content/blog-lab-01-landing-zone.md` builds management
+  groups, policy, management and a hub in the Landing Zone Builder and reads
+  what each is for; `blog-lab-02-one-container.md` pulls
+  `ghcr.io/hybridcloudworks/hcw-lab`, runs `terraform init` under `--network
+  none` and explains the provider mirror, the unpacked layout and the module
+  rewrite; `blog-lab-03-agent-explains.md` opens the zip in the
+  `lab-image/sandbox-template` Docker sandbox and reads why `AGENTS.md` forbids
+  `apply`. Each carries one `landing-zone` embed of the same build,
+  `lz=mg,policy,mgmt,hub&corp=0&online=0`, checked against `decodeLz` to
+  decode to exactly those four components and to be its own canonical
+  encoding, and each ends with "Explain this component" and a link to
+  `/education/labs`, with the Coder workspace described as coming. Every
+  output quoted was measured on 2026-09-27 with Docker 29.8.0 against the
+  builder's emission for that build: the public image pulled with no login,
+  `terraform version` (1.16.4), plain `init` failing at the module registry
+  offline, `hcw-terraform-validate` passing offline and under the job runner's
+  full sandbox flags (108 KB `.terraform` against 31 MB online), and the
+  sandbox template built and running `init`, `fmt -check` and `validate`. The
+  `sbx` commands are the recipe README's and were not run. Found while
+  measuring: a build with any landing zone does not init offline in the lab
+  image, because the spokes call `avm-res-network-virtualnetwork` 0.22.2 and
+  the image vendors only 0.15.0; part 2 says so. Listed in the docs nav marked
+  "(draft)"; publishing and the newsletter stay the owner's.
+
 - **ElevenLabs: the last sample replays free, and a new render asks first
   (owner request 2026-09-27).** The owner spent two live checks (257 credits
   each, 9,486 left on the free plan) only to test playback, because the
