@@ -61,6 +61,18 @@ export default defineConfig({
     // vmThreads roughly doubles the spread and changes nothing that is gated.
     // Recorded so the next person to diff two lcov files does not go hunting
     // for a vmThreads bug that is not there.
+    //
+    // THE WINDOWS CRASH WAS NOT THIS POOL (#720). On Windows, `npm test` died
+    // partway with 0xC0000005 under Node 24 and 26 alike, which looked like a
+    // vmThreads bug. `threads` crashed too, and more often; `forks` and
+    // `vmForks` never did. The cause was a native addon that pdf-parse loads,
+    // @napi-rs/canvas 0.1.80, which kills the process when a worker thread
+    // that loaded it exits. package.json overrides it, and
+    // scripts/pdf-parse-canvas-worker.test.js holds the override. If a Windows
+    // run dies that way again, run the same files with `--pool=vmForks`: it
+    // keeps these VM contexts but puts each worker in a child process, so a
+    // clean run there points at a native module loaded in a worker thread
+    // rather than at this pool.
     pool: 'vmThreads',
     exclude: [
       '**/node_modules/**',
