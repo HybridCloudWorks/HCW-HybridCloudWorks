@@ -329,11 +329,11 @@ stopped until the four vault keys exist. The last four are resource limits
 with working defaults.
 
 **Lab host inputs named by [ADR 0032](../decisions/0032-learner-labs-platform.md).**
-The ADR is Proposed, and each row's status is its own: the host exists and
-has been bootstrapped, so the host-side rows are observable, while a row
-for a store that has not been created stays **MISSING**. Each row is here so
-the name is fixed before anything consumes it, and so a status can change in
-the pull request that provisions it. The
+The ADR is Accepted (2026-09-27), and each row's status is its own: the
+host exists and has been bootstrapped, so the host-side rows are
+observable, while a row for a store that has not been created stays
+**MISSING**. Each row is here so the name is fixed before anything consumes
+it, and so a status can change in the pull request that provisions it. The
 placement follows [Variables and secrets](variables-and-secrets.md): a
 Terraform provider credential is a workspace variable, a value the Function
 App reads is a Key Vault secret, and a credential Ansible uses once is a vault
