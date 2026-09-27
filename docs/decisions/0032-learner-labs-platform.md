@@ -1,6 +1,6 @@
 # ADR 0032: The learner labs platform — a Terraform-managed Hostinger host under Azure Arc, Docker only, Coder as the learner boundary, and public submission held Gated
 
-**Status:** Proposed
+**Status:** Accepted 2026-09-27 (owner: "all have been approved to move forward"); amended 2026-09-26. Decision 6 is unchanged: anonymous public submission stays Gated until the owner revises it.
 **Decision date:** 2026-09-25
 **Owners:** Workload owner and architecture owner
 
