@@ -11,10 +11,12 @@
 # about the mirror), that /workspace is read-only, and that it runs as uid
 # 65534. Then each tool's version is compared with versions.env, the provider
 # mirror is checked for every pinned provider in the unpacked layout, every
-# vendored child module is re-hashed against its pin, and `terraform init
-# -backend=false` plus `terraform validate` run with no network against four
-# roots: smoke/providers-only (azurerm and random) and one generated root per
-# vendored AVM pattern module, calling it by relative path with its required
+# builder module (each AVM_<KEY>_VERSION in versions.env: every module the
+# Landing Zone Builder emits) and every child AVM_CHILD_CALLS records for it
+# is present, every vendored child module is re-hashed against its pin, and
+# `terraform init -backend=false` plus `terraform validate` run with no
+# network against smoke/providers-only (azurerm and random) and one generated
+# root per builder module, calling it by relative path with its required
 # inputs. Each init must symlink its providers to the mirror and download no
 # module: the job sandbox is a read-only root with a 64 MB tmpfs, so a copy
 # of either would fail there (#675). Every check runs even after one fails,
@@ -146,15 +148,47 @@ rm -rf "$work" && mkdir -p "$work/providers-only" && cp -R "$here/smoke/provider
 init_validate providers-only "$work/providers-only"
 
 step "vendored AVM modules"
-for entry in \
-  "avm-ptn-alz ${AVM_PTN_ALZ_VERSION}" \
-  "avm-ptn-alz-management ${AVM_PTN_ALZ_MANAGEMENT_VERSION}" \
-  "avm-ptn-alz-connectivity-hub-and-spoke-vnet ${AVM_PTN_ALZ_CONNECTIVITY_HUB_AND_SPOKE_VNET_VERSION}"; do
-  name="${entry% *}"; version="${entry#* }"
-  if [ -f "/opt/avm/${name}@${version}/main.tf" ]; then
-    ok "/opt/avm/${name}@${version}"
+# The builder modules, read the way the Dockerfile's fetch stage reads them:
+# every AVM_<KEY>_VERSION line in versions.env, which
+# scripts/lab-image-avm-vendoring.test.mjs holds equal to the modules the
+# Landing Zone Builder emits (frontend/src/lib/landingZone/avmVersions.js).
+builders=()
+while read -r key; do
+  [ -n "$key" ] || continue
+  version_var="AVM_${key}_VERSION"
+  builders+=("avm-$(tr 'A-Z_' 'a-z-' <<<"$key")@${!version_var}")
+done < <(sed -n 's/^AVM_\([A-Z0-9_]*\)_VERSION=.*$/\1/p' "$here/versions.env")
+for builder in "${builders[@]}"; do
+  if [ -f "/opt/avm/${builder}/main.tf" ]; then
+    ok "/opt/avm/${builder} (builder module)"
   else
-    bad "/opt/avm/${name}@${version}/main.tf is missing"
+    bad "/opt/avm/${builder}/main.tf is missing: the builder emits it and the image must carry it"
+  fi
+done
+if [ "${#builders[@]}" -gt 0 ]; then ok "${#builders[@]} builder modules vendored"; else bad "versions.env names no AVM_<KEY>_VERSION builder module"; fi
+
+# Every child each builder module's tree calls, as AVM_CHILD_CALLS records it,
+# is present, and every builder module has a record: this is the offline
+# half of the build's own check that the record matches what Terraform
+# resolved, so an image that lost a directory fails here, not in a job.
+declare -A recorded=()
+calls=0 missing=0
+while read -r builder child; do
+  [ -n "$builder" ] || continue
+  recorded["$builder"]=$(( ${recorded["$builder"]:-0} + ${child:+1} + 0 ))
+  [ -n "${child:-}" ] || continue
+  calls=$((calls + 1))
+  if [ ! -d "/opt/avm/$child" ]; then
+    missing=$((missing + 1))
+    bad "$builder calls $child, which is not vendored at /opt/avm/$child"
+  fi
+done < <(printf '%s\n' "$AVM_CHILD_CALLS" | sed '/^[[:space:]]*$/d')
+if [ "$missing" -eq 0 ]; then ok "all $calls recorded calls resolve to a vendored directory"; fi
+for builder in "${builders[@]}"; do
+  if [ -n "${recorded[$builder]:-}" ]; then
+    ok "$builder: ${recorded[$builder]} registry module(s) in its tree, recorded in AVM_CHILD_CALLS"
+  else
+    bad "$builder has no line in AVM_CHILD_CALLS"
   fi
 done
 
@@ -174,45 +208,55 @@ while read -r child pin; do
   if [ "$actual" = "$pin" ]; then ok "$child matches its pin"; else bad "$child hashes $actual, versions.env pins $pin"; fi
 done < <(printf '%s\n' "$AVM_CHILD_MODULES" | sed '/^[[:space:]]*$/d')
 if [ "$children" -gt 0 ]; then ok "$children vendored child modules pinned"; else bad "AVM_CHILD_MODULES is empty"; fi
-# One generated root per pattern module, calling it by a RELATIVE path (an
+# One generated root per builder module, calling it by a RELATIVE path (an
 # absolute path is a file:// source Terraform copies onto the tmpfs) with the
 # inputs it requires and nothing else. "no module was downloaded" on each is
 # the proof that no registry source survived the rewrite: a grep for
 # `source = "Azure/..."` would also match the worked example in avm-ptn-alz's
-# variables.tf, which Terraform never loads as a module block.
+# variables.tf, which Terraform never loads as a module block. A builder
+# module with no inputs listed below gets a root with none, so a new one that
+# requires an input fails `validate` loudly rather than being skipped.
+builder_inputs() {
+  case "$1" in
+    avm-ptn-alz)
+      printf '%s\n' 'architecture_name  = "alz"' 'location           = "centralus"' 'parent_resource_id = "root"' ;;
+    avm-ptn-alz-management)
+      printf '%s\n' 'location                = "centralus"' 'resource_group_name     = "rg-alz-management"' 'automation_account_name = "aa-alz-management"' ;;
+    avm-res-network-virtualnetwork)
+      printf '%s\n' 'location  = "centralus"' 'parent_id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-smoke"' ;;
+  esac
+}
 avm_root() {
-  local label="$1" name="$2" version="$3"; shift 3
-  local root="$work/$label" rel
+  local builder="$1" root="$work/$1" rel
   mkdir -p "$root"
-  rel="$(python3 -c 'import os,sys; print(os.path.relpath(sys.argv[1], sys.argv[2]))' "/opt/avm/${name}@${version}" "$root")"
+  rel="$(python3 -c 'import os,sys; print(os.path.relpath(sys.argv[1], sys.argv[2]))' "/opt/avm/${builder}" "$root")"
   {
     printf 'module "m" {\n  source = "%s"\n' "$rel"
-    printf '  %s\n' "$@"
+    builder_inputs "${builder%@*}" | sed 's/^/  /'
     printf '}\n'
   } > "$root/main.tf"
-  init_validate "$label" "$root"
+  init_validate "${builder%@*}" "$root"
 }
-avm_root avm-ptn-alz avm-ptn-alz "${AVM_PTN_ALZ_VERSION}" \
-  'architecture_name  = "alz"' \
-  'location           = "centralus"' \
-  'parent_resource_id = "root"'
-avm_root avm-ptn-alz-management avm-ptn-alz-management "${AVM_PTN_ALZ_MANAGEMENT_VERSION}" \
-  'location                = "centralus"' \
-  'resource_group_name     = "rg-alz-management"' \
-  'automation_account_name = "aa-alz-management"'
-avm_root avm-ptn-alz-connectivity-hub-and-spoke-vnet avm-ptn-alz-connectivity-hub-and-spoke-vnet "${AVM_PTN_ALZ_CONNECTIVITY_HUB_AND_SPOKE_VNET_VERSION}"
+for builder in "${builders[@]}"; do
+  avm_root "$builder"
+done
 
 # The three capability commands (bin/), each against the payload it would
 # receive from the agent, with HCW_WORKSPACE pointing at the fixture instead
-# of /workspace (which is this directory) and HCW_RUN_DIR under /tmp/run.
+# of /workspace (which is this directory) and HCW_RUN_DIR under /tmp/run. The
+# fixture calls each builder module once by registry source
+# (scripts/lab-image-avm-vendoring.test.mjs holds it to that), so every block
+# must be rewritten and none left for a registry the job cannot reach.
 step "capability commands with no network"
 tfv="$work/terraform-validate"
 if out="$(HCW_WORKSPACE="$here/smoke/terraform-validate-payload" HCW_RUN_DIR="$tfv" hcw-terraform-validate 2>&1)"; then
-  if grep -q 'Success! The configuration is valid.' <<<"$out" && [ "$(grep -c '^  rewrote ' <<<"$out")" -eq 3 ]; then
-    ok "hcw-terraform-validate rewrote 3 registry sources and validated the builder-shaped payload"
+  rewrote="$(grep -c '^  rewrote ' <<<"$out" || true)"
+  left="$(grep -c '^  left ' <<<"$out" || true)"
+  if grep -q 'Success! The configuration is valid.' <<<"$out" && [ "$rewrote" -eq "${#builders[@]}" ] && [ "$left" -eq 0 ]; then
+    ok "hcw-terraform-validate rewrote ${rewrote} registry sources, one per builder module, and validated the builder-shaped payload"
     grep '^  rewrote ' <<<"$out" | indent
   else
-    bad "hcw-terraform-validate exited 0 but did not report 3 rewrites and a valid configuration:"; printf '%s\n' "$out" | indent
+    bad "hcw-terraform-validate exited 0 but did not report ${#builders[@]} rewrites, no module left and a valid configuration:"; printf '%s\n' "$out" | indent
   fi
 else
   bad "hcw-terraform-validate (builder-shaped payload):"; printf '%s\n' "$out" | indent
