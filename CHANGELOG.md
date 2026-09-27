@@ -1214,6 +1214,37 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **`npm test` in `frontend/` runs on Windows again: the crash was
+  pdf-parse's canvas addon, not the pool or Node 26 (#720).** On Windows the
+  suite died partway with `0xC0000005` (access violation). It did so in 4 runs
+  of 11 under Node 26.10.0, 4 of 12 under 26.5.0 and 6 of 10 under Node
+  24.21.0, so it was never Node 26's. The pool looked guilty and was not:
+  `threads` crashed 9 runs of 10 and `vmThreads` about a third, while `forks`
+  and `vmForks` crashed none of 10 each. One file crashed on its own,
+  `scripts/update-applied-skills.test.js` (4 runs of 6 under `threads`); all
+  183 files in `src/` together crashed none of 5. It imports pdf-parse, whose
+  pdfjs-dist loads `@napi-rs/canvas` at import, and 0.1.80, the version
+  pdf-parse 2.4.5 pins, kills the whole process when a worker thread that
+  loaded it exits. A probe with no Vitest in it (one worker loads the addon
+  and exits) crashed 8 runs of 10, and loading it on the main thread only
+  crashed none of 12. Linux never crashes, which is why CI stayed green. Vitest
+  5.0.2 has no fix for this and needs none.
+
+  `package.json` overrides `@napi-rs/canvas` to `^1.0.9`. The lockfile changes
+  only its own platform packages, and pdf-parse's text for both catalogue
+  posters is byte-identical under either version. With the probe scaled to
+  ten rounds of eight workers, 0.1.80 crashed 17 runs of 17, 1.0.5 8 of 30 and
+  1.0.9 none of 90. A plain `npm test` then passed
+  on Windows 30 runs of 30 under Node 26.10.0 (11.0–13.6 s), where
+  `--pool=forks`, the only way through before, took 31.1–33.7 s. It also passed
+  10 of 10 under `threads`, the pool that had crashed 9 of 10, and 5 of 5 each
+  under 26.5.0 and 24.21.0. The pool stays `vmThreads` on every platform, so
+  CI's Linux run is unchanged. `scripts/pdf-parse-canvas-worker.test.js` holds
+  the override on every platform. It also runs the probe in a child process,
+  so on Windows a regression fails with its cause named. Against 0.1.80 both
+  of its tests fail. `vitest.config.js` records all of this beside the pool.
+  `frontend/`: 191 files, 2,669 tests.
+
 - **Audio from the API plays, and upstream failures reach the page.** Two
   site-wide faults found on the Audio tab on 2026-09-26. The CSP had no
   `media-src`, so `default-src 'self'` blocked every `<audio>` streaming from
