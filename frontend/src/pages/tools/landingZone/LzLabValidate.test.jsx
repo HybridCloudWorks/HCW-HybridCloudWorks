@@ -15,16 +15,18 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { renderToString } from 'react-dom/server';
 
+import { LzLabValidate } from './LzLabValidate';
 import {
   LINES,
-  LzLabValidate,
   afterPoll,
   disabledReason,
+  doorFromRefusal,
   failureLine,
   outcomeLine,
+  preparePayload,
   statusLine,
   unresolvedLine,
-} from './LzLabValidate';
+} from './labValidateRules';
 import { DEFAULT_STATE, decodeLz, emitFiles } from '@/lib/landingZone';
 import { decodeTarPayload, parseTar } from '../../../../../vps-agent/lib/docker-runner.js';
 import { clearPublicGetCache } from '@/lib/publicApi';
@@ -326,6 +328,33 @@ describe('the words', () => {
     expect(afterPoll({ error: new Error('reset') }, { ...clock, elapsed: 1000 }).update).toEqual({
       phase: 'stalled',
     });
+  });
+
+  it('shuts the door only for a 503 that names it', () => {
+    expect(doorFromRefusal(refusal(503, 'LAB_QUEUE_FULL', 'full'))).toEqual({
+      phase: 'known',
+      open: false,
+      code: 'LAB_QUEUE_FULL',
+      reason: 'full',
+    });
+    expect(doorFromRefusal(refusal(503, 'LAB_PAUSED_FOR_TODAY', 'paused'))).toBeNull();
+    expect(doorFromRefusal(refusal(429, 'LAB_RATE_LIMITED', 'slow down'))).toBeNull();
+    expect(doorFromRefusal(new Error('network'))).toBeNull();
+  });
+
+  it('refuses, before sending, a payload over the 64 KB the lab takes', async () => {
+    // Random text barely compresses, so 120 KB of it stays over the cap.
+    // getRandomValues fills at most 64 KiB a call, so two calls.
+    const random = () => Array.from(crypto.getRandomValues(new Uint8Array(60_000)));
+    const noise = [...random(), ...random()]
+      .map((byte) => String.fromCharCode(33 + (byte % 90)))
+      .join('');
+    const { error, body } = await preparePayload([{ path: 'main.tf', content: noise }]);
+    expect(body).toBeUndefined();
+    expect(error.status).toBe(413);
+    expect(error.message).toMatch(/bytes as a lab payload, and the lab takes at most 65,536\.$/);
+    const small = await preparePayload(NO_SPOKES);
+    expect(small.body.payloadEncoding).toBe('tar');
   });
 
   it('says where a run is while it is in flight', () => {

@@ -64,7 +64,7 @@ describe('LAB_IMAGE_AVM is what lab-image/ vendors', () => {
   });
 
   it('holds only name@version entries the image’s own parser accepts', () => {
-    const parsed = vendoredModules();
+    const parsed = vendoredModules(LAB_IMAGE_AVM);
     const count = Object.values(parsed).reduce((n, list) => n + list.length, 0);
     expect(count).toBe(LAB_IMAGE_AVM.length);
   });
@@ -104,7 +104,7 @@ describe('Terraform constraints, as tf_constraints.py reads them', () => {
   });
 
   it('picks the highest vendored version that satisfies, as the registry would', () => {
-    const vendored = vendoredModules();
+    const vendored = vendoredModules(LAB_IMAGE_AVM);
     expect(chooseVendored(vendored, 'avm-res-network-routetable', '>= 0.3')).toBe('0.5.0');
     expect(chooseVendored(vendored, 'avm-res-network-routetable', '~> 0.3.0')).toBe('0.3.1');
     expect(chooseVendored(vendored, 'avm-utl-interfaces', '')).toBe('0.5.0');

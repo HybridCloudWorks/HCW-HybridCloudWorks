@@ -27,192 +27,39 @@
  * than describing files no longer on the page, and polling stops.
  *
  * Two hooks carry the state: `useLabDoor` (the status read) and `useLabRun`
- * (one submission and its polling). Everything they decide with is a pure
- * function exported beside them, so the tests can hold each rule directly.
+ * (one submission and its polling). Every rule they decide by is a pure
+ * function in labValidateRules.js.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { FlaskConical, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { labModuleReport, labResolution } from '@/lib/landingZone';
-import { buildLabPayload } from '@/lib/landingZone/labPayload';
-import { isTerminalJobStatus, jobPollDelay } from '@/lib/labsPolling';
+import { jobPollDelay } from '@/lib/labsPolling';
 import { fetchLabSubmissionStatus, fetchPublicLabJob, submitLabValidation } from '@/lib/publicApi';
+import {
+  LINES,
+  POLL_DEADLINE_MS,
+  afterPoll,
+  buttonLabel,
+  disabledReason,
+  doorFromRefusal,
+  doorFromStatus,
+  doorTag,
+  failureLine,
+  filesKey,
+  isBusy,
+  outcomeLine,
+  preparePayload,
+  settle,
+  statusLine,
+} from './labValidateRules';
 import { HINT_CLASS } from './styles';
-
-/** The server's cap on the encoded payload (ADR 0032 decision 6). */
-export const MAX_LAB_PAYLOAD_BYTES = 64 * 1024;
-/** Past this the page stops asking; the job's output stays readable for a day. */
-export const POLL_DEADLINE_MS = 15 * 60 * 1000;
-
-/** The door codes the server answers with (functions/src/lib/labs/public-submit.js DOOR_CODES). */
-export const DOOR_CODES = Object.freeze([
-  'PUBLIC_SUBMISSION_CLOSED',
-  'LAB_AGENT_OFFLINE',
-  'LAB_QUEUE_FULL',
-  'LAB_STATUS_UNAVAILABLE',
-]);
-
-export const LINES = Object.freeze({
-  checking: 'Checking whether the lab is taking jobs…',
-  unreadable: "The lab's status could not be read, so Validate on the lab is unavailable.",
-  closedFallback: 'The lab is not taking public jobs yet.',
-  empty: 'Add a component first: an empty build has no Terraform to validate.',
-  ready:
-    "Runs terraform init and terraform validate on these files in the lab's sandbox, with no network. Two an hour per visitor.",
-  submitting: 'Sending the files to the lab…',
-  queued: 'Queued on the lab…',
-  running: 'Running on the lab…',
-  stalled: 'The lab has not finished this job yet. It may still run; its output is kept for a day.',
-});
 
 const DEFAULT_REQUESTS = Object.freeze({
   status: fetchLabSubmissionStatus,
   submit: submitLabValidation,
   job: fetchPublicLabJob,
 });
-
-/** The sentence for modules the runner image would leave for `init` to fail on. */
-export function unresolvedLine(unresolved) {
-  const names = unresolved.map((row) => `${row.module} ${row.constraint}`.trim()).join(', ');
-  return `The lab's runner image does not vendor ${names}, which this build calls, so terraform init would fail there. Remove the components that need it to validate the rest, or validate the download where there is network.`;
-}
-
-/**
- * Why the button may not be pressed, as one line, or null when it may.
- * The door comes first: a closed lab is the reason even for a build the
- * image could not validate anyway.
- *
- * @param {object} args
- * @param {{ phase: 'checking'|'known'|'unreadable', open?: boolean, reason?: string }} args.door
- * @param {boolean} args.hasTerraform
- * @param {{ ok: boolean, unresolved: object[] }} args.resolution
- */
-export function disabledReason({ door, hasTerraform, resolution }) {
-  if (door.phase === 'checking') return LINES.checking;
-  if (door.phase === 'unreadable') return LINES.unreadable;
-  if (door.open !== true) return door.reason || LINES.closedFallback;
-  if (!hasTerraform) return LINES.empty;
-  if (!resolution.ok) return unresolvedLine(resolution.unresolved);
-  return null;
-}
-
-/** The status read's answer as the door the button reads. */
-export function doorFromStatus(answer) {
-  return answer ? { phase: 'known', ...answer } : { phase: 'unreadable' };
-}
-
-/** A refusal that names the door shuts it with the server's sentence; any other leaves it. */
-export function doorFromRefusal(error) {
-  if (error?.status !== 503 || !DOOR_CODES.includes(error.code)) return null;
-  return { phase: 'known', open: false, code: error.code, reason: error.message };
-}
-
-/** The door as a data attribute: its phase, or `open`, or the code that shut it. */
-const doorTag = (door) => {
-  if (door.phase !== 'known') return door.phase;
-  return door.open ? 'open' : door.code;
-};
-
-const isBusy = (run) => run?.phase === 'submitting' || run?.phase === 'polling';
-
-/** A run's progress while one is in flight, or null. */
-function progressLine(run) {
-  if (run.phase === 'submitting') return LINES.submitting;
-  if (run.phase !== 'polling') return null;
-  return run.job && run.job.status === 'queued' ? LINES.queued : LINES.running;
-}
-
-/** The line beside the button: the run's progress while one is in flight, otherwise the reason or what it does. */
-export function statusLine(reason, run) {
-  const progress = run ? progressLine(run) : null;
-  return progress || reason || LINES.ready;
-}
-
-export function buttonLabel(run) {
-  if (run?.phase === 'submitting') return 'Sending…';
-  if (run?.phase === 'polling') return 'Validating…';
-  return 'Validate on the lab';
-}
-
-/** What a finished job says, in a sentence above its output. */
-export function outcomeLine(job) {
-  switch (job.status) {
-    case 'succeeded':
-      return `terraform validate passed on the lab (exit ${job.exitCode ?? 0}).`;
-    case 'failed':
-      return `terraform init or validate failed on the lab (exit ${job.exitCode ?? 'unknown'}). Its output is below.`;
-    case 'timeout':
-      return 'The job ran out of time on the lab before Terraform finished.';
-    case 'cancelled':
-      return 'The job was cancelled before it ran.';
-    default:
-      return `The job ended as ${job.status}.`;
-  }
-}
-
-/** What a refused or failed request says. The server's own sentence where it gave one. */
-export function failureLine(error) {
-  if ([400, 413, 429, 503].includes(error?.status)) return error.message;
-  if (error?.status === 404) return 'The lab no longer has this job. Its output is kept for a day.';
-  return `The job could not be sent to the lab: ${error?.message ?? 'unknown error'}`;
-}
-
-/**
- * What one poll of the job means for the run: the fields to record, whether
- * to stop, and how many transport failures in a row there have been (which
- * drives the backoff). A 404 or 503 is an answer, not a transient failure:
- * the job is gone, or the owner closed the path, and asking again will not
- * change either.
- *
- * @param {{ job?: object, error?: Error & { status?: number } }} step
- * @param {{ errors: number, elapsed: number, deadlineMs: number }} clock
- */
-export function afterPoll(step, { errors, elapsed, deadlineMs }) {
-  if (isAnswer(step.error)) {
-    return { update: { phase: 'error', error: step.error }, stop: true, errors };
-  }
-  if (step.job && isTerminalJobStatus(step.job.status)) {
-    return { update: { phase: 'done', job: step.job }, stop: true, errors: 0 };
-  }
-  return stillPending(step.job, { errors, overdue: elapsed >= deadlineMs });
-}
-
-/** A 404 or 503 while polling is the server's answer, not a transport failure. */
-const isAnswer = (error) => Boolean(error) && [404, 503].includes(error.status);
-
-/** A job still in flight, or a poll that failed in transit: stall at the deadline, else keep going. */
-function stillPending(job, { errors, overdue }) {
-  if (overdue)
-    return { update: job ? { phase: 'stalled', job } : { phase: 'stalled' }, stop: true, errors };
-  if (job) return { update: { job }, stop: false, errors: 0 };
-  return { update: null, stop: false, errors: errors + 1 };
-}
-
-/** The submission body for the files, or the error that stops it before it is sent. */
-export async function preparePayload(files) {
-  let built;
-  try {
-    built = await buildLabPayload(files);
-  } catch {
-    return { error: new Error('the payload could not be built in this browser') };
-  }
-  if (built.bytes <= MAX_LAB_PAYLOAD_BYTES) return { body: built.body };
-  const error = new Error(
-    `This build is ${built.bytes.toLocaleString('en-US')} bytes as a lab payload, and the lab takes at most ${MAX_LAB_PAYLOAD_BYTES.toLocaleString('en-US')}.`
-  );
-  error.status = 413;
-  return { error };
-}
-
-/** A key that changes whenever any file does, so a result is held against exactly the files it validated. */
-const filesKey = (files) => files.map((f) => `${f.path}\u0000${f.content}`).join('\u0001');
-
-/** A promise as `{ value }` or `{ error }`, so a step reads its outcome without a try. */
-const settle = (promise) =>
-  promise.then(
-    (value) => ({ value }),
-    (error) => ({ error })
-  );
 
 /** The door: `checking` until the status read answers, then what it said. */
 function useLabDoor(requests) {
@@ -260,11 +107,17 @@ function useLabRun({ files, key, requests, pollDelay, deadlineMs, now, onRefusal
   const watch = (runKey, jobId, errors, startedAt) => {
     timer.current = setTimeout(async () => {
       const { value: job, error } = await settle(requests.job(jobId));
-      if (!stillWatching(runKey)) return;
-      const next = afterPoll({ job, error }, { errors, elapsed: now() - startedAt, deadlineMs });
-      if (next.update) update(runKey, next.update);
-      if (!next.stop) watch(runKey, jobId, next.errors, startedAt);
+      if (stillWatching(runKey)) {
+        const clock = { errors, elapsed: now() - startedAt, deadlineMs };
+        follow(runKey, jobId, afterPoll({ job, error }, clock), startedAt);
+      }
     }, pollDelay(errors));
+  };
+
+  /** Record what a poll said, and ask again unless it was the end. */
+  const follow = (runKey, jobId, next, startedAt) => {
+    if (next.update) update(runKey, next.update);
+    if (!next.stop) watch(runKey, jobId, next.errors, startedAt);
   };
 
   const validate = async () => {
@@ -273,13 +126,12 @@ function useLabRun({ files, key, requests, pollDelay, deadlineMs, now, onRefusal
     const prepared = await preparePayload(files);
     const sent = prepared.error ? prepared : await settle(requests.submit(prepared.body));
     if (!mounted.current) return;
-    if (sent.error) {
-      if (!prepared.error) onRefusal(sent.error);
-      update(runKey, { phase: 'error', error: sent.error });
-      return;
+    if (sent.error && !prepared.error) onRefusal(sent.error);
+    if (sent.error) update(runKey, { phase: 'error', error: sent.error });
+    else {
+      update(runKey, { phase: 'polling', jobId: sent.value.jobId, job: { status: 'queued' } });
+      watch(runKey, sent.value.jobId, 0, now());
     }
-    update(runKey, { phase: 'polling', jobId: sent.value.jobId, job: { status: 'queued' } });
-    watch(runKey, sent.value.jobId, 0, now());
   };
 
   return { current: record?.key === key ? record : null, validate };
@@ -307,42 +159,47 @@ function LabModules({ report }) {
 
 const NOTICE_CLASS = 'text-sm text-amber-700 dark:text-amber-400';
 
+/** What a finished job said: the sentence, then Terraform's own output. */
+function LabOutput({ job }) {
+  return (
+    <div
+      className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-900"
+      data-testid="lz-lab-output"
+      data-status={job.status}
+    >
+      <p className="font-medium text-slate-900 dark:text-slate-100">{outcomeLine(job)}</p>
+      <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-slate-800 dark:text-slate-200">
+        {job.output || '(no output)'}
+      </pre>
+    </div>
+  );
+}
+
 /** How the run ended: the output, a stall, or a refusal. Nothing while one is in flight. */
 function LabOutcome({ run }) {
-  if (run?.phase === 'done') {
-    return (
-      <div
-        className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-900"
-        data-testid="lz-lab-output"
-        data-status={run.job.status}
-      >
-        <p className="font-medium text-slate-900 dark:text-slate-100">{outcomeLine(run.job)}</p>
-        <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-slate-800 dark:text-slate-200">
-          {run.job.output || '(no output)'}
-        </pre>
-      </div>
-    );
+  switch (run?.phase) {
+    case 'done':
+      return <LabOutput job={run.job} />;
+    case 'stalled':
+      return (
+        <p role="status" className={NOTICE_CLASS} data-testid="lz-lab-stalled">
+          {LINES.stalled}
+        </p>
+      );
+    case 'error':
+      return (
+        <p
+          role="alert"
+          className={NOTICE_CLASS}
+          data-testid="lz-lab-error"
+          data-status={run.error?.status ?? 'error'}
+        >
+          {failureLine(run.error)}
+        </p>
+      );
+    default:
+      return null;
   }
-  if (run?.phase === 'stalled') {
-    return (
-      <p role="status" className={NOTICE_CLASS} data-testid="lz-lab-stalled">
-        {LINES.stalled}
-      </p>
-    );
-  }
-  if (run?.phase === 'error') {
-    return (
-      <p
-        role="alert"
-        className={NOTICE_CLASS}
-        data-testid="lz-lab-error"
-        data-status={run.error?.status ?? 'error'}
-      >
-        {failureLine(run.error)}
-      </p>
-    );
-  }
-  return null;
 }
 
 /**

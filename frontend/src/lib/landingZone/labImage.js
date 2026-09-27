@@ -10,13 +10,14 @@
  *     the versions in lab-image/versions.env, and the sixteen registry
  *     modules they call, listed there as AVM_CHILD_MODULES. The test reads
  *     both files and fails when this list and the image drift.
- *   - `labModuleReport` is lab-image/lib/tf_rewrite.py and tf_constraints.py
- *     in JavaScript: the same regular expressions for a `module` block, its
- *     depth-1 `source` and `version` lines and a registry AVM source, the
- *     same Terraform constraint operators, and the same choice (the highest
- *     vendored version that satisfies the constraint). A block the image
- *     would leave alone, so that `terraform init` fails on it under
- *     `--network none`, is reported here with the versions the image has.
+ *   - `labModuleReport` is lab-image/lib/tf_rewrite.py in JavaScript, with
+ *     tf_constraints.py beside it as tfConstraints.js: the same regular
+ *     expressions for a `module` block, its depth-1 `source` and `version`
+ *     lines and a registry AVM source, the same Terraform constraint
+ *     operators, and the same choice (the highest vendored version that
+ *     satisfies the constraint). A block the image would leave alone, so
+ *     that `terraform init` fails on it under `--network none`, is reported
+ *     here with the versions the image has.
  *
  * NOTHING HERE CHANGES A FILE. ADR 0032 decision 5: the builder's download
  * and the submitted payload keep their registry `source` and `version`
@@ -33,6 +34,7 @@
  *
  * Pure: no React, no DOM, no network.
  */
+import { chooseVendored, vendoredModules } from './tfConstraints';
 
 /** Every vendored module in the runner image, as `<name>@<version>`. */
 export const LAB_IMAGE_AVM = Object.freeze([
@@ -60,10 +62,6 @@ export const LAB_IMAGE_AVM = Object.freeze([
 /** Where the image keeps them (tf_constraints.py AVM_ROOT). */
 export const LAB_IMAGE_AVM_ROOT = '/opt/avm';
 
-// tf_constraints.py, verbatim in meaning.
-const VERSION = /^v?(\d+)\.(\d+)\.(\d+)$/;
-const CLAUSE = /^(~>|>=|<=|!=|>|<|=)?\s*v?(\d+)(?:\.(\d+))?(?:\.(\d+))?$/;
-
 // tf_rewrite.py, verbatim in meaning.
 const REGISTRY_SOURCE =
   /^(?:registry\.terraform\.io\/)?[Aa]zure\/([A-Za-z0-9._-]+)\/(azurerm|azure)(?:\/\/(.+))?$/;
@@ -71,75 +69,6 @@ const MODULE_HEADER = /^\s*module\s+"([^"]+)"\s*\{/;
 const SOURCE_LINE = /^(\s*)source(\s*)=(\s*)"([^"]+)"(.*)$/;
 const VERSION_LINE = /^(\s*)version\s*=\s*"([^"]*)"(.*)$/;
 const SKIP_DIRS = new Set(['.terraform', '.git']);
-
-/** Lexicographic comparison of two `[major, minor, patch]` tuples. */
-function compare(a, b) {
-  for (let i = 0; i < 3; i += 1) {
-    if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1;
-  }
-  return 0;
-}
-
-/** '0.21.0' or 'v0.21.0' → [0, 21, 0]; anything else → null. */
-export function parseVersion(text) {
-  const m = VERSION.exec(String(text).trim());
-  return m ? m.slice(1, 4).map(Number) : null;
-}
-
-/** One `<op> <version>` clause → { op, given, upper }, or null when malformed. */
-function parseClause(clause) {
-  const m = CLAUSE.exec(clause.trim());
-  if (!m) return null;
-  const [major, minor, patch] = [m[2], m[3], m[4]].map((g) => (g ? Number(g) : 0));
-  // ~> 1.2 means >= 1.2.0, < 2.0.0; ~> 1.2.3 means >= 1.2.3, < 1.3.0.
-  const upper = m[4] ? [major, minor + 1, 0] : [major + 1, 0, 0];
-  return { op: m[1] || '=', given: [major, minor, patch], upper };
-}
-
-/** Each plain operator as the signs of `compare(version, given)` it accepts. */
-const ACCEPTED_SIGNS = Object.freeze({
-  '=': [0],
-  '!=': [-1, 1],
-  '>': [1],
-  '>=': [0, 1],
-  '<': [-1],
-  '<=': [-1, 0],
-});
-
-/** One parsed clause over a version: `~>` is the half-open range, the rest a sign test. */
-function clauseHolds(version, { op, given, upper }) {
-  if (op === '~>') return compare(version, given) >= 0 && compare(version, upper) === -1;
-  return ACCEPTED_SIGNS[op].includes(compare(version, given));
-}
-
-/** Terraform's constraint syntax (comma-separated clauses) over a version tuple. */
-export function satisfies(version, constraint) {
-  if (!String(constraint).trim()) return true;
-  return String(constraint)
-    .split(',')
-    .map(parseClause)
-    .every((clause) => clause !== null && clauseHolds(version, clause));
-}
-
-/** `{ name: [{ version, text }] }` for a list of `<name>@<version>` entries. */
-export function vendoredModules(entries = LAB_IMAGE_AVM) {
-  const found = {};
-  for (const entry of entries) {
-    const at = entry.lastIndexOf('@');
-    const name = entry.slice(0, at);
-    const text = entry.slice(at + 1);
-    const version = parseVersion(text);
-    if (at > 0 && version) (found[name] ??= []).push({ version, text });
-  }
-  return found;
-}
-
-/** The highest vendored version of `name` satisfying `constraint`, as text, or null. */
-export function chooseVendored(vendored, name, constraint) {
-  const candidates = (vendored[name] ?? []).filter((c) => satisfies(c.version, constraint));
-  if (!candidates.length) return null;
-  return candidates.reduce((best, c) => (compare(c.version, best.version) > 0 ? c : best)).text;
-}
 
 const braceDelta = (line) => (line.match(/\{/g) ?? []).length - (line.match(/\}/g) ?? []).length;
 

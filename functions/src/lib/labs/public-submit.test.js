@@ -315,6 +315,35 @@ describe('fails closed while no agent can run the job', () => {
     expect(res.headers['Cache-Control']).toBe('public, max-age=60');
   });
 
+  it('refuses a POST from a shut door in the minute cache without reading the lab', async () => {
+    const store = memStore({ agents: [] });
+    const { handlers } = build({ store });
+    await handlers.getSubmissionStatus(getRequest(), context);
+    store.queryDocs.mockClear();
+
+    const res = await handlers.submitJob(postRequest(body()), context);
+    expect(res.status).toBe(503);
+    expect(parse(res).code).toBe(DOOR_CODES.offline);
+    expect(store.queryDocs).not.toHaveBeenCalled();
+    expect(store.incrementIf).not.toHaveBeenCalled();
+  });
+
+  it('reads an open door live on a POST, so the queue ceiling sees a fresh count', async () => {
+    const store = memStore();
+    const { handlers } = build({ store });
+    expect(parse(await handlers.getSubmissionStatus(getRequest(), context)).open).toBe(true);
+    // The queue fills after the door was cached open.
+    for (let i = 0; i < PUBLIC_QUEUE_CEILING + 1; i += 1) {
+      store.docs.set(`lab_jobs/late-${i}`, { id: `late-${i}`, status: 'queued' });
+    }
+    store.queryDocs.mockClear();
+    const res = await handlers.submitJob(postRequest(body()), context);
+    expect(store.queryDocs).toHaveBeenCalledTimes(2);
+    expect(parse(res).code).toBe(DOOR_CODES.full);
+    // And the refusal is what the status read now says.
+    expect(parse(await handlers.getSubmissionStatus(getRequest(), context)).code).toBe(DOOR_CODES.full);
+  });
+
   it('never claims open on a failed read', async () => {
     const { handlers } = build({ store: memStore({ failQuery: true }) });
     const door = parse(await handlers.getSubmissionStatus(getRequest(), context));
@@ -396,6 +425,18 @@ describe('a 64 KB payload', () => {
     // 'é' is two bytes in UTF-8: 32,769 of them is 65,538 bytes.
     const res = validatePublicSubmission(body({ payload: 'é'.repeat(32_769) }));
     expect(res.status).toBe(413);
+  });
+
+  it('refuses a declared Content-Length over the cap before reading the body', async () => {
+    const { handlers, identity } = build();
+    const request = postRequest(body());
+    request.headers = {
+      get: (name) => (name.toLowerCase() === 'content-length' ? String(PUBLIC_MAX_BODY_BYTES + 1) : null),
+    };
+    const res = await handlers.submitJob(request, context);
+    expect(res.status).toBe(413);
+    expect(request.text).not.toHaveBeenCalled();
+    expect(identity.anonymousKey).not.toHaveBeenCalled();
   });
 
   it('refuses an oversized raw body before parsing it', async () => {
