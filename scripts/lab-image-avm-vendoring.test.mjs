@@ -12,9 +12,13 @@
  * disk and inits offline) and sandbox-check.mjs (the builder's real default
  * build validates offline under the job sandbox).
  *
- * The check itself is scripts/lib/avm-vendoring.mjs. The last group below
- * feeds it a bumped pin and a lost child and expects it to go red, so the
- * gate is shown to fire rather than assumed to.
+ * The check itself is scripts/lib/avm-vendoring.mjs. Which vendored copy a
+ * block resolves to is the builder's own port of the image's rule
+ * (frontend/src/lib/landingZone/labImage.js and tfConstraints.js), whose
+ * constraint table labImage.test.js holds to tf_constraints.py; it is not
+ * restated here. The last group below feeds the check a bumped pin and a
+ * lost child and expects it to go red, so the gate is shown to fire rather
+ * than assumed to.
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -22,13 +26,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { AVM_MODULES } from '../frontend/src/lib/landingZone/avmVersions.js';
+import { chooseVendored, vendoredModules } from '../frontend/src/lib/landingZone/tfConstraints.js';
 import {
   builderModules,
   childCalls,
   childPins,
-  choose,
-  satisfies,
-  vendoredVersions,
+  vendoredEntries,
   vendoringProblems,
 } from './lib/avm-vendoring.mjs';
 
@@ -67,34 +70,12 @@ describe('the lab image vendors what the Landing Zone Builder emits', () => {
   // exact pin resolves to its own.
   it("carries the spokes' virtual network module beside the connectivity module's older copy", () => {
     const { name, version } = AVM_MODULES['avm-res-network-virtualnetwork'];
-    const versions = vendoredVersions(ENV, name);
+    const vendored = vendoredModules(vendoredEntries(ENV));
+    const versions = vendored[name].map((v) => v.text);
     expect(versions).toContain(version);
     expect(versions.length).toBeGreaterThan(1);
-    expect(choose(versions, version)).toBe(version);
-  });
-});
-
-describe('the constraint reader agrees with lab-image/lib/tf_constraints.py', () => {
-  it.each([
-    ['0.22.2', '0.22.2', true],
-    ['0.22.2', '= 0.22.2', true],
-    ['0.15.0', '0.22.2', false],
-    ['0.9.0', '~> 0.9', true],
-    ['1.0.0', '~> 0.9', false],
-    ['0.17.5', '>= 0.17.0, < 0.18.0', true],
-    ['0.18.0', '>= 0.17.0, < 0.18.0', false],
-    ['0.17.9', '~> 0.17.5', true],
-    ['0.18.0', '~> 0.17.5', false],
-    ['0.21.0', '!= 0.21.0', false],
-    ['0.21.0', '', true],
-  ])('%s satisfies "%s": %s', (version, constraint, expected) => {
-    expect(satisfies(version, constraint)).toBe(expected);
-  });
-
-  it('chooses the highest satisfying version, as the rewrite does', () => {
-    expect(choose(['0.15.0', '0.22.2'], '>= 0.15.0')).toBe('0.22.2');
-    expect(choose(['0.15.0', '0.22.2'], '~> 0.15.0')).toBe('0.15.0');
-    expect(choose(['0.15.0'], '0.22.2')).toBeNull();
+    expect(chooseVendored(vendored, name, version)).toBe(version);
+    expect(chooseVendored(vendored, name, `>= ${versions[0]}`)).toBe(version);
   });
 });
 

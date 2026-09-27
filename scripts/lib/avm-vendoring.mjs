@@ -5,8 +5,7 @@
  * The builder emits exactly the modules in AVM_MODULES
  * (frontend/src/lib/landingZone/avmVersions.js), each at its pinned version:
  * every emitted `module` block takes its `source` and `version` from that
- * table. The image vendors what lab-image/versions.env says, read three ways
- * by three readers that must agree with this one:
+ * table. The image vendors what lab-image/versions.env says, read three ways:
  *
  *   - Builder modules: every `AVM_<KEY>_VERSION` line, with the
  *     `AVM_<KEY>_SHA256` of its release tarball beside it. The Dockerfile's
@@ -20,9 +19,17 @@
  *
  * The build (vendor-avm.sh) proves the last two against what `terraform get`
  * resolves, with network; this proves, with none, that the builder's pins
- * are what those records describe. Text scans, like every reader in
- * scripts/lib: nothing here parses HCL or shell.
+ * are what those records describe. Which vendored copy a `module` block
+ * resolves to is decided by labModuleReport, the builder's own port of
+ * lab-image/lib/tf_rewrite.py, which labImage.test.js holds to the Python
+ * case for case, so this file carries no third copy of that rule.
  */
+import { labModuleReport } from '../../frontend/src/lib/landingZone/labImage.js';
+
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+const CHILD_PIN = /^[^@\s]+@\d+\.\d+\.\d+$/;
+const PRINT =
+  'docker build --target vendor --build-arg AVM_PRINT_PINS=1 --progress=plain lab-image, then paste the AVM_CHILD_MODULES and AVM_CHILD_CALLS blocks it prints (lab-image/README.md, "Updating a version")';
 
 /** `avm-ptn-alz` -> `PTN_ALZ`, the <KEY> of its AVM_<KEY>_VERSION line. */
 export const envKeyFor = (name) => String(name).replace(/^avm-/, '').toUpperCase().replace(/-/g, '_');
@@ -30,9 +37,11 @@ export const envKeyFor = (name) => String(name).replace(/^avm-/, '').toUpperCase
 /** `PTN_ALZ` -> `avm-ptn-alz`, the Dockerfile's `tr 'A-Z_' 'a-z-'`. */
 export const nameForKey = (key) => `avm-${String(key).toLowerCase().replace(/_/g, '-')}`;
 
-const SHA256_HEX = /^[0-9a-f]{64}$/;
+const idOf = ({ name, version }) => `${name}@${version}`;
 
-/** The builder modules versions.env vendors: [{ name, version, sha256 }]. */
+// --- reading versions.env ---
+
+/** The builder modules versions.env vendors: [{ name, key, version, sha256 }]. */
 export function builderModules(env) {
   const text = String(env);
   return [...text.matchAll(/^AVM_([A-Z0-9_]+)_VERSION=(\S*)$/gm)].map(([, key, version]) => ({
@@ -69,155 +78,111 @@ export function childCalls(env) {
   return calls;
 }
 
-// --- Terraform version constraints, as lab-image/lib/tf_constraints.py reads them ---
-
-const VERSION = /^v?(\d+)\.(\d+)\.(\d+)$/;
-const CLAUSE = /^(~>|>=|<=|!=|>|<|=)?\s*v?(\d+)(?:\.(\d+))?(?:\.(\d+))?$/;
-
-const parseVersion = (text) => VERSION.exec(String(text).trim())?.slice(1).map(Number) ?? null;
-
-function compare(a, b) {
-  const at = a.findIndex((part, i) => part !== b[i]);
-  if (at === -1) return 0;
-  return a[at] < b[at] ? -1 : 1;
+/** Every `/opt/avm/<name>@<version>` the image carries: the builder modules and every pinned child. */
+export function vendoredEntries(env) {
+  return [...new Set([...builderModules(env).map(idOf), ...childPins(env).keys()])].sort();
 }
 
-const OPERATORS = {
-  '=': (c) => c === 0,
-  '!=': (c) => c !== 0,
-  '>': (c) => c > 0,
-  '>=': (c) => c >= 0,
-  '<': (c) => c < 0,
-  '<=': (c) => c <= 0,
-};
+// --- the checks, one question each ---
 
-function satisfiesClause(version, clause) {
-  const m = CLAUSE.exec(clause.trim());
-  if (!m) return false;
-  const [major, minor, patch] = [m[2], m[3], m[4]].map((part) => Number(part ?? 0));
-  const given = [major, minor, patch];
-  if (m[1] === '~>') {
-    const upper = m[4] === undefined ? [major + 1, 0, 0] : [major, minor + 1, 0];
-    return compare(version, given) >= 0 && compare(version, upper) < 0;
+/** A builder module versions.env does not vendor, or vendors at another version or without a sum. */
+function builderProblem({ name, version }, entry) {
+  const key = `AVM_${envKeyFor(name)}`;
+  if (!entry) {
+    return `the builder emits ${name} ${version}, and lab-image/versions.env has no ${key}_VERSION line, so the image does not vendor it`;
   }
-  return OPERATORS[m[1] ?? '='](compare(version, given));
-}
-
-/** Terraform's comma-separated constraint over a `MAJOR.MINOR.PATCH` string. */
-export function satisfies(version, constraint) {
-  const parsed = parseVersion(version);
-  if (!parsed) return false;
-  if (!String(constraint).trim()) return true;
-  return String(constraint)
-    .split(',')
-    .every((clause) => satisfiesClause(parsed, clause));
-}
-
-/** The highest of `versions` satisfying `constraint`, as hcw-terraform-validate chooses, or null. */
-export function choose(versions, constraint) {
-  const fits = versions.filter((v) => satisfies(v, constraint)).sort((a, b) => compare(parseVersion(a), parseVersion(b)));
-  return fits.at(-1) ?? null;
-}
-
-/** Every `module` block's `source` and `version` in some HCL text (top-level attributes only). */
-export function moduleCalls(hcl) {
-  const calls = [];
-  for (const block of String(hcl).matchAll(/^module\s+"([^"]+)"\s*\{([\s\S]*?)^\}/gm)) {
-    const source = /^\s*source\s*=\s*"([^"]*)"/m.exec(block[2])?.[1] ?? null;
-    const version = /^\s*version\s*=\s*"([^"]*)"/m.exec(block[2])?.[1] ?? '';
-    calls.push({ block: block[1], source, version });
+  if (entry.version !== version) {
+    return `the builder emits ${name} ${version}, and lab-image/versions.env vendors ${entry.version} (${key}_VERSION)`;
   }
-  return calls;
+  if (!SHA256_HEX.test(entry.sha256 ?? '')) {
+    return `lab-image/versions.env has ${key}_VERSION without a 64-hex ${key}_SHA256 beside it`;
+  }
+  return null;
 }
 
-// --- the check ---
-
-const PRINT =
-  'docker build --target vendor --build-arg AVM_PRINT_PINS=1 --progress=plain lab-image, then paste the AVM_CHILD_MODULES and AVM_CHILD_CALLS blocks it prints (lab-image/README.md, "Updating a version")';
-
+/** The builder's modules against versions.env's builder pairs, in both directions. */
 function builderProblems(modules, vendored) {
-  const problems = [];
   const byName = new Map(vendored.map((m) => [m.name, m]));
-  for (const { name, version } of modules) {
-    const entry = byName.get(name);
-    const key = `AVM_${envKeyFor(name)}`;
-    if (!entry) {
-      problems.push(`the builder emits ${name} ${version}, and lab-image/versions.env has no ${key}_VERSION line, so the image does not vendor it`);
-    } else if (entry.version !== version) {
-      problems.push(`the builder emits ${name} ${version}, and lab-image/versions.env vendors ${entry.version} (${key}_VERSION)`);
-    }
-    if (entry && !SHA256_HEX.test(entry.sha256 ?? '')) {
-      problems.push(`lab-image/versions.env has ${key}_VERSION without a 64-hex ${key}_SHA256 beside it`);
-    }
-  }
   const emitted = new Set(modules.map((m) => m.name));
-  for (const { name, version } of vendored) {
-    if (!emitted.has(name)) {
-      problems.push(`lab-image/versions.env vendors ${name} ${version} as a builder module, and the builder does not emit it, so nothing would ever bump it`);
-    }
-  }
-  return problems;
+  const extra = vendored
+    .filter((m) => !emitted.has(m.name))
+    .map(
+      (m) =>
+        `lab-image/versions.env vendors ${m.name} ${m.version} as a builder module, and the builder does not emit it, so nothing would ever bump it`
+    );
+  return [...modules.map((m) => builderProblem(m, byName.get(m.name))).filter(Boolean), ...extra];
+}
+
+/** A record for every builder version, and none for a version the builder does not emit. */
+function recordProblems(builders, calls) {
+  const unrecorded = [...builders]
+    .filter((builder) => !calls.has(builder))
+    .map(
+      (builder) =>
+        `lab-image/versions.env records nothing for ${builder} in AVM_CHILD_CALLS, so what it calls is unknown to the image; run ${PRINT}`
+    );
+  const stale = [...calls.keys()]
+    .filter((builder) => !builders.has(builder))
+    .map((builder) => `AVM_CHILD_CALLS records ${builder}, a version the builder does not emit; run ${PRINT}`);
+  return [...unrecorded, ...stale];
+}
+
+/** Every recorded child is pinned, or is itself a builder module. */
+function unpinnedCalls(builders, calls, pins) {
+  return [...calls].flatMap(([builder, children]) =>
+    [...children]
+      .filter((child) => !pins.has(child) && !builders.has(child))
+      .map(
+        (child) =>
+          `${builder} calls ${child}, and AVM_CHILD_MODULES does not pin it, so the image does not vendor it`
+      )
+  );
+}
+
+/** Every pin is well formed and called by some record. */
+function pinProblems(calls, pins) {
+  const called = new Set([...calls.values()].flatMap((children) => [...children]));
+  return [...pins].flatMap(([child, hash]) => [
+    ...(CHILD_PIN.test(child) && SHA256_HEX.test(hash ?? '')
+      ? []
+      : [`AVM_CHILD_MODULES line "${child} ${hash ?? ''}" is not <name>@<version> <sha256>`]),
+    ...(called.has(child) ? [] : [`AVM_CHILD_MODULES pins ${child}, which no AVM_CHILD_CALLS line calls`]),
+  ]);
 }
 
 function childProblems(modules, env) {
-  const problems = [];
   const calls = childCalls(env);
   const pins = childPins(env);
-  const builders = new Set(modules.map((m) => `${m.name}@${m.version}`));
-  if (blockLines(env, 'AVM_CHILD_CALLS') === null) problems.push('lab-image/versions.env has no AVM_CHILD_CALLS block');
-  for (const builder of builders) {
-    if (!calls.has(builder)) {
-      problems.push(`lab-image/versions.env records nothing for ${builder} in AVM_CHILD_CALLS, so what it calls is unknown to the image; run ${PRINT}`);
-    }
-  }
-  for (const [builder, children] of calls) {
-    if (!builders.has(builder)) {
-      problems.push(`AVM_CHILD_CALLS records ${builder}, a version the builder does not emit; run ${PRINT}`);
-    }
-    for (const child of children) {
-      if (!pins.has(child) && !builders.has(child)) {
-        problems.push(`${builder} calls ${child}, and AVM_CHILD_MODULES does not pin it, so the image does not vendor it`);
-      }
-    }
-  }
-  const called = new Set([...calls.values()].flatMap((set) => [...set]));
-  for (const [child, hash] of pins) {
-    if (!/^[^@\s]+@\d+\.\d+\.\d+$/.test(child) || !SHA256_HEX.test(hash ?? '')) {
-      problems.push(`AVM_CHILD_MODULES line "${child} ${hash ?? ''}" is not <name>@<version> <sha256>`);
-    }
-    if (!called.has(child)) problems.push(`AVM_CHILD_MODULES pins ${child}, which no AVM_CHILD_CALLS line calls`);
-  }
-  return problems;
+  const builders = new Set(modules.map(idOf));
+  const absent = blockLines(env, 'AVM_CHILD_CALLS') === null ? ['lab-image/versions.env has no AVM_CHILD_CALLS block'] : [];
+  return [
+    ...absent,
+    ...recordProblems(builders, calls),
+    ...unpinnedCalls(builders, calls, pins),
+    ...pinProblems(calls, pins),
+  ];
 }
 
-/** Every version of `name` the image carries: the builder module's and any child copies. */
-export function vendoredVersions(env, name) {
-  const versions = builderModules(env)
-    .filter((m) => m.name === name)
-    .map((m) => m.version);
-  for (const child of childPins(env).keys()) {
-    const [childName, version] = child.split('@');
-    if (childName === name) versions.push(version);
-  }
-  return versions;
-}
-
+/**
+ * The smoke payload calls each builder module once, and the image's rewrite
+ * (labModuleReport, as hcw-terraform-validate) sends that call to the
+ * builder's version, not an older copy beside it.
+ */
 function fixtureProblems(modules, env, fixture) {
-  const problems = [];
-  const calls = moduleCalls(fixture);
-  for (const { name, version } of modules) {
-    const source = `Azure/${name}/azurerm`;
-    const blocks = calls.filter((c) => c.source === source);
-    if (blocks.length !== 1) {
-      problems.push(`lab-image/smoke/terraform-validate-payload/main.tf calls ${source} ${blocks.length} times, not once; smoke.sh expects one rewrite per builder module`);
-      continue;
+  const report = labModuleReport([{ path: 'main.tf', content: fixture }], vendoredEntries(env));
+  return modules.flatMap(({ name, version }) => {
+    const rows = report.filter((row) => row.module === name);
+    if (rows.length !== 1) {
+      return [
+        `lab-image/smoke/terraform-validate-payload/main.tf calls Azure/${name}/azurerm ${rows.length} times, not once; smoke.sh expects one rewrite per builder module`,
+      ];
     }
-    const picked = choose(vendoredVersions(env, name), blocks[0].version);
-    if (picked !== version) {
-      problems.push(`the smoke payload's module "${blocks[0].block}" (${source} "${blocks[0].version}") resolves to ${picked ?? 'no vendored version'}, not the builder's ${version}`);
-    }
-  }
-  return problems;
+    const [row] = rows;
+    if (row.vendored === `${name}@${version}`) return [];
+    return [
+      `the smoke payload's module "${row.block}" (${row.source} "${row.constraint}") resolves to ${row.vendored ?? 'no vendored copy'}, not the builder's ${name}@${version}`,
+    ];
+  });
 }
 
 /**
