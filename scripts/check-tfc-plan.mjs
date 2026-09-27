@@ -53,7 +53,7 @@
 
 import { pathToFileURL } from 'node:url';
 
-import { EXPECTED, checkPlan } from './assert-expected-plan.mjs';
+import { EXPECTED, checkPlan, declarationLines } from './assert-expected-plan.mjs';
 
 const API = 'https://app.terraform.io/api/v2';
 const ORGANIZATION = 'hcw';
@@ -341,7 +341,17 @@ async function tfc(token, path, { raw = false } = {}) {
   if (!response.ok) {
     throw new Error(`HCP Terraform returned ${response.status} on ${path}`);
   }
-  return raw ? response.json() : (await response.json()).data;
+  // Parsed here rather than with response.json(), whose error quotes the text
+  // around the fault. On json-output that text is the plan, secrets included,
+  // and this output is a public job summary (#719).
+  const text = await response.text();
+  let body;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    throw new Error(`HCP Terraform returned a body that is not JSON on ${path}`);
+  }
+  return raw ? body : body.data;
 }
 
 async function main() {
@@ -403,7 +413,9 @@ async function main() {
 
   console.log(`run     : ${run.id}`);
   console.log(`status  : ${run.attributes.status}`);
-  console.log(`message : ${run.attributes.message ?? ''}`);
+  // First line only: a later line would start at column 0 of the log, where
+  // it could read as a workflow command or close the summary's code fence.
+  console.log(`message : ${String(run.attributes.message ?? '').split(/\r?\n/)[0]}`);
   console.log(`created : ${run.attributes['created-at']}`);
 
   // The question this tool is dispatched to answer is "is the plan I am about
@@ -466,16 +478,25 @@ async function main() {
     return 2;
   }
 
+  // Declared changes (#719) are listed on both paths: what a pull request said
+  // to expect is part of the verdict, and a declaration the plan no longer
+  // contains is a prompt to delete it, not a failure.
   if (result.ok) {
-    console.log('\nOK — the plan carries the known permanent diff and nothing else:');
+    console.log(
+      result.declared.length === 0
+        ? '\nOK — the plan carries the known permanent diff and nothing else:'
+        : '\nOK — the plan carries the known permanent diff, its declared changes, and nothing else:'
+    );
     for (const address of EXPECTED.replaced) console.log(`     replace  ${address}`);
     for (const { address, attribute } of EXPECTED.updated) {
       console.log(`     update   ${address} (${attribute})`);
     }
+    for (const line of declarationLines(result)) console.log(line);
     return 0;
   }
 
   console.error('');
+  for (const line of declarationLines(result)) console.error(line);
   for (const line of result.unexpected) console.error(`UNEXPECTED  ${line}`);
   for (const address of result.missing) {
     console.error(

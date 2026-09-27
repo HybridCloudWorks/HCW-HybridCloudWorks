@@ -1214,6 +1214,44 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **`tfc-plan-check` compares every attribute of an update, not only the
+  Function App's `app_settings` (#719).** `scripts/assert-expected-plan.mjs`
+  read `app_settings` alone, so #718's `runtime_version "22" -> "24"` passed
+  unexamined. Every update in the plan is now compared `before` against
+  `after`, leaf by leaf, by a new `scripts/lib/plan-diff.mjs`. Each
+  difference is named by its path (`runtime_version`,
+  `site_config[0].http2_enabled`, `app_settings["AzureWebJobs.x.Disabled"]`).
+  The allow-list is unchanged:
+  the per-apply `RUNTIME_CONFIG_WRITER` line and the three azapi
+  replacements. Any other difference fails the check. The repository is
+  public, so the job summary is too, while plan JSON carries secrets in
+  plaintext: a local Terraform 1.15.8 plan showed them in `before`, `after`
+  and `variables`, one left unmarked in `terraform_data`'s computed `output`.
+  So `scripts/lib/plan-report.mjs` prints only what is safe to publish.
+  Sensitive values print as `(sensitive)`, unknown ones as
+  `(known after apply)`, a recomputed list or object by its size, and
+  `app_settings` values as `(set)`. Any string of six or more characters the
+  plan marks sensitive (in resources, outputs or sensitive variables) is
+  masked wherever else it appears, and so are GUIDs and email addresses.
+  `runtime_version: "22" -> "24"` still prints in full. An update missing its
+  sensitivity markers, or a change with no action list, exits 2. An
+  unrecognised action such as `["forget"]`, an import and a move are now
+  UNEXPECTED; they used to pass as no-ops (`scripts/lib/plan-actions.mjs`).
+  The JSON parser's message, which
+  quotes the plan, is no longer printed, and only the first line of the run
+  message is. The job summary names the ref and sha the checker ran from, and
+  a green verdict from a branch other than main no longer says "Safe to
+  confirm". An intended change passes only when the pull request that makes
+  it adds an entry to `DECLARED` in `scripts/assert-expected-plan.mjs`, with
+  the exact before and after values. The entry then matches nothing once the
+  change has applied, and is reported as a NOTE to delete rather than a
+  failure. A sensitive or unknown change cannot be declared.
+  `check-tfc-plan.mjs` prints the declarations, and `tfc-plan-check.yml`'s
+  header says the declarations read are those on the dispatched ref. The
+  tests use a plan-JSON fixture, `scripts/fixtures/plan-permanent-diff.json`,
+  whose attribute names are held to `infra/functionapp.tf`. `DECLARED` ships
+  empty: the live app already runs Node.js 24.
+
 - **Audio from the API plays, and upstream failures reach the page.** Two
   site-wide faults found on the Audio tab on 2026-09-26. The CSP had no
   `media-src`, so `default-src 'self'` blocked every `<audio>` streaming from
