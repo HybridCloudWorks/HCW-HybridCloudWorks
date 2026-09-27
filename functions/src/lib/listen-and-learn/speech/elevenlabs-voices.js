@@ -294,6 +294,20 @@ export async function readVoices({
 }
 
 /**
+ * The voice names this key's cached listing holds, by id; empty when no
+ * listing is cached or it has expired. It reads the cache only and never
+ * lists, so it sends nothing to ElevenLabs. The live check's record keeps the
+ * names when they are at hand this way (podcast/elevenlabs-admin.js).
+ *
+ * @returns {Map<string, string>}
+ */
+export function cachedVoiceNames(key, now = Date.now) {
+  const hit = key ? cache.get(key) : null;
+  if (!hit || hit.expiresAt <= now()) return new Map();
+  return new Map(hit.voices.map((voice) => [voice.voiceId, voice.name]));
+}
+
+/**
  * One voice's preview, as MP3 bytes, looked up in this key's listing (see
  * `fetchListedPreview` in elevenlabs-preview.js). The caller supplies an id,
  * never a URL.

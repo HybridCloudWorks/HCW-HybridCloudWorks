@@ -1,6 +1,6 @@
 # ADR 0029: Podcast hosting is RSS.com, the podcast page is the one audio surface, and the media route serves byte ranges
 
-**Status:** Accepted 2026-09-07; §1 and §2 amended 2026-09-08 (§1b, §2a); §2a scoped 2026-09-09 (§2b); §2a amended 2026-09-26 (free plan for testing, publish blocked), and again 2026-09-26 (the owner picks the podcast voices by ear, #725)
+**Status:** Accepted 2026-09-07; §1 and §2 amended 2026-09-08 (§1b, §2a); §2a scoped 2026-09-09 (§2b); §2a amended 2026-09-26 (free plan for testing, publish blocked), and again 2026-09-26 (the owner picks the podcast voices by ear, #725); §2a noted 2026-09-27 (the last sample replays free; a render asks first)
 **Decision date:** 2026-09-07
 **Owners:** Workload owner
 
@@ -364,6 +364,28 @@ pre-flight would then under-count, and the per-request out-of-credit error
 is the backstop, as it already was for two renders racing each other.
 
 Tracked by #725.
+
+**Noted 2026-09-27: the last sample replays free, and a render asks
+first.** The owner pressed the live check twice (257 credits each, 9,486
+left) only to test playback, which the missing `media-src` had broken (#732
+fixes it on deploy). Every check already stored its MP3 at
+`podcast/sample/elevenlabs-live-check.mp3`, but the card showed a player only
+for a check run in the same session, so every reload looked like "run it
+again". A stored sample is now recorded in `admin_config/podcast_last_sample`:
+its versioned media URL, the two voice ids, their names when this instance
+has the voice listing cached (nothing is listed to find them), the characters
+billed and the time. Only the latest is kept, as only the latest blob is. The
+status route returns it as `lastSample` once a HEAD on our own storage finds
+the blob, and the Audio tab plays it under **Last sample** on every load,
+saying that replaying costs nothing. A replay never reaches ElevenLabs. A
+sample stored before the record existed is still offered, from the blob and
+the newest `podcast:sample` usage row, with the saved voices only if they
+were saved before that row. **Run live check** is now **Render a new sample
+(about 257 credits)**, and it asks first in the admin pages' `ConfirmModal`.
+The prompt names the credits left, says the last sample replays free, and
+says so when the last sample already used the saved voices. It asks; it never
+blocks. The picker says that voice previews are ElevenLabs's own samples and
+cost no credits, so they are the first thing to reach for.
 
 #### 2b. ElevenLabs is the podcast voice only; Listen & Learn is Gemini TTS — amended 2026-09-09
 

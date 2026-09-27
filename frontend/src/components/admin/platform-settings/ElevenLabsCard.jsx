@@ -5,8 +5,9 @@
  *
  *   GET  cms/podcast/elevenlabs          plan, credits used / limit, reset
  *                                        date, the last render's billed
- *                                        characters; "not configured" is a
- *                                        200, not an error
+ *                                        characters, the last sample to
+ *                                        replay; "not configured" is a 200,
+ *                                        not an error
  *   POST cms/podcast/elevenlabs/sample   a fixed two-turn sample of under 300
  *                                        characters through the real provider,
  *                                        in the saved podcast voices
@@ -19,19 +20,31 @@
  * The server does the work (functions/src/lib/podcast/elevenlabs-admin.js).
  * This card reads it, and runs the check on a click, never on load, because
  * the check spends credits.
+ *
+ * ## Replay first, spend on purpose (owner request 2026-09-27)
+ *
+ * Two checks were spent only to test playback, because the player showed
+ * only for a check run in the same session. Now the status read carries
+ * `lastSample`, the last stored sample, and the **Last sample** section plays
+ * it from the media route on every load: replaying costs nothing and never
+ * reaches ElevenLabs. **Render a new sample** asks first, in the admin
+ * ConfirmModal, naming the credits left, that the last sample replays free,
+ * and whether it already used the saved voices. It confirms; it does not
+ * block.
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
 import { AlertTriangle, Loader2, Mic, Play, RefreshCw } from 'lucide-react';
+import ConfirmModal from '@/components/admin/ConfirmModal';
 import { getJSON, postJSON } from '@/lib/api';
 import { resolveMediaUrl } from '@/lib/functionsBase';
 import { safeUrl } from '@/lib/safeUrl';
 import { relativeTime, useSetting } from './settingShared';
-import PodcastVoices, { PODCAST_HOSTS } from './PodcastVoices';
+import PodcastVoices, { PODCAST_HOSTS, useVoiceList } from './PodcastVoices';
 
 export const ELEVENLABS_STATUS_ROUTE = 'cms/podcast/elevenlabs';
 export const ELEVENLABS_SAMPLE_ROUTE = 'cms/podcast/elevenlabs/sample';
@@ -41,6 +54,10 @@ const count = (n) =>
 
 const day = (iso) =>
   typeof iso === 'string' && iso.length >= 10 ? `${iso.slice(0, 10)} (UTC)` : 'not reported';
+
+/** "about 257 credits", or "credits" before the sample's size is known. */
+const aboutCredits = (characters) =>
+  typeof characters === 'number' ? `about ${count(characters)} credits` : 'credits';
 
 /** What wrote the last ElevenLabs usage row, as a person reads it. */
 const RENDER_SOURCES = Object.freeze({
@@ -197,6 +214,65 @@ const VOICE_FIXES = Object.freeze({
     'Choose the voices again under Podcast voices above, Save, and run the check again.',
 });
 
+/** "Rendered 2026-09-27 14:03 (UTC), 257 characters billed then." */
+function sampleFacts(lastSample) {
+  const at = lastSample.renderedAt;
+  const when =
+    typeof at === 'string' && at.length >= 16
+      ? `Rendered ${at.slice(0, 10)} ${at.slice(11, 16)} (UTC)`
+      : 'Render time not recorded';
+  const billed =
+    typeof lastSample.charactersBilled === 'number'
+      ? `, ${count(lastSample.charactersBilled)} characters billed then`
+      : '';
+  return `${when}${billed}.`;
+}
+
+/** "Voices: Maya: Bella, Elena: Jessica.", each named by the record, else the list, else its id. */
+function sampleVoices(voices, names) {
+  if (!voices) return 'Voices: not recorded.';
+  const named = PODCAST_HOSTS.map((host) => {
+    const voice = voices[host];
+    return `${host}: ${voice?.name || names.get(voice?.voiceId) || voice?.voiceId || 'not recorded'}`;
+  });
+  return `Voices: ${named.join(', ')}.`;
+}
+
+/**
+ * The last stored sample, playable from the media route on every load.
+ * Replaying it reaches our own storage only, never ElevenLabs.
+ */
+function LastSample({ lastSample, lastSampleError, names, configured }) {
+  if (!lastSample && lastSampleError) {
+    return <p className="text-xs text-amber-700">Last sample: {lastSampleError}</p>;
+  }
+  if (!lastSample) {
+    return configured ? (
+      <p className="text-xs text-muted-foreground">
+        No sample yet. The next render is kept here, and replaying it costs nothing.
+      </p>
+    ) : null;
+  }
+  const src = safeUrl(resolveMediaUrl(lastSample.audioUrl));
+  return (
+    <section
+      aria-labelledby="elevenlabs-last-sample"
+      className="space-y-2 rounded-md border border-input p-3"
+    >
+      <p id="elevenlabs-last-sample" className="text-sm font-medium">
+        Last sample
+      </p>
+      {src ? (
+        // eslint-disable-next-line jsx-a11y/media-has-caption
+        <audio controls preload="metadata" src={src} className="h-8 w-full" />
+      ) : null}
+      <p className="text-xs text-muted-foreground">{sampleFacts(lastSample)}</p>
+      <p className="text-xs text-muted-foreground">{sampleVoices(lastSample.voices, names)}</p>
+      <p className="text-xs font-medium">Replaying costs nothing.</p>
+    </section>
+  );
+}
+
 function SampleResult({ sample }) {
   if (!sample) return null;
   if (sample.error) {
@@ -208,12 +284,12 @@ function SampleResult({ sample }) {
       </div>
     );
   }
-  const src = sample.audioUrl ? safeUrl(resolveMediaUrl(sample.audioUrl)) : undefined;
   return (
     <div className="space-y-1">
-      {src ? (
-        // eslint-disable-next-line jsx-a11y/media-has-caption
-        <audio controls preload="metadata" src={src} className="h-8 w-full" />
+      {sample.audioUrl ? (
+        <p className="text-xs text-muted-foreground">
+          Kept as the Last sample above, to replay for nothing.
+        </p>
       ) : (
         <p className="text-xs text-amber-700">{sample.audioError ?? 'No audio was returned.'}</p>
       )}
@@ -235,7 +311,8 @@ function LiveCheck({ characters, configured, voicesChosen, running, onRun, sampl
       <p className="text-xs text-muted-foreground">
         Renders a fixed two-turn sample of {count(characters)} characters through the real provider,
         about {count(characters)} credits, in the saved podcast voices. It proves the key, both
-        voices and the credit check without spending a month on an episode.
+        voices and the credit check without spending a month on an episode. It asks before it
+        spends.
       </p>
       {configured && !voicesChosen ? (
         <p className="text-xs text-amber-700">
@@ -253,10 +330,65 @@ function LiveCheck({ characters, configured, voicesChosen, running, onRun, sampl
         ) : (
           <Play className="mr-2 h-3.5 w-3.5" />
         )}
-        Run live check
+        {typeof characters === 'number'
+          ? `Render a new sample (${aboutCredits(characters)})`
+          : 'Render a new sample'}
       </Button>
       <SampleResult sample={sample} />
     </div>
+  );
+}
+
+/** Whether the saved pair is the pair the last sample used. */
+function sameVoices(saved, lastSample) {
+  const voices = lastSample?.voices;
+  if (!saved || !voices) return false;
+  return PODCAST_HOSTS.every(
+    (host) => Boolean(saved[host]) && voices[host]?.voiceId === saved[host]
+  );
+}
+
+/** What a render spends, of what is left, and that the last sample replays free. */
+function confirmDescription({ characters, creditsLeft, lastSample }) {
+  const spend =
+    typeof creditsLeft === 'number'
+      ? `This spends ${aboutCredits(characters)} of the ${count(creditsLeft)} left.`
+      : `This spends ${aboutCredits(characters)}; the credits left could not be read.`;
+  return lastSample
+    ? `${spend} The last sample can be replayed free under Last sample.`
+    : `${spend} There is no sample to replay yet.`;
+}
+
+/**
+ * The one step between the button and the spend, in the admin pages'
+ * ConfirmModal. It asks; it never blocks.
+ */
+function RenderConfirm({
+  open,
+  characters,
+  creditsLeft,
+  lastSample,
+  sameAsLast,
+  onConfirm,
+  onCancel,
+}) {
+  return (
+    <ConfirmModal
+      open={open}
+      title="Render a new sample?"
+      description={confirmDescription({ characters, creditsLeft, lastSample })}
+      preview={
+        sameAsLast ? (
+          <p className="text-sm font-medium text-amber-700">
+            The last sample already used these voices.
+          </p>
+        ) : null
+      }
+      confirmLabel={`Render (${aboutCredits(characters)})`}
+      destructive={false}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+    />
   );
 }
 
@@ -290,11 +422,29 @@ function savedVoicesChosen(setting) {
   return PODCAST_HOSTS.every((host) => Boolean(setting.value?.[host]));
 }
 
+/** Voice names by id, from the one listing the picker also shows. */
+function useVoiceNames(list) {
+  return useMemo(
+    () =>
+      new Map(
+        (Array.isArray(list?.voices) ? list.voices : []).map((voice) => [voice.voiceId, voice.name])
+      ),
+    [list]
+  );
+}
+
 export default function ElevenLabsCard({ authReady }) {
   const eleven = useElevenLabs(authReady);
   const voices = useSetting('podcast-voices', authReady);
   const { status, loading, error } = eleven;
   const configured = status?.configured === true;
+  const voiceList = useVoiceList(configured);
+  const names = useVoiceNames(voiceList.list);
+  const [confirming, setConfirming] = useState(false);
+  // A render in this session is newer than what the status read last said.
+  const fresh = eleven.sample?.lastSample ?? null;
+  const lastSample = fresh ?? status?.lastSample ?? null;
+  const characters = status?.sample?.characters;
 
   return (
     <Card>
@@ -325,14 +475,34 @@ export default function ElevenLabsCard({ authReady }) {
           </div>
         ) : null}
         {!loading && !error ? <StatusBody status={status} /> : null}
-        <PodcastVoices setting={voices} configured={configured} />
+        <PodcastVoices setting={voices} configured={configured} voiceList={voiceList} />
+        {fresh || (!loading && !error) ? (
+          <LastSample
+            lastSample={lastSample}
+            lastSampleError={status?.lastSampleError}
+            names={names}
+            configured={configured}
+          />
+        ) : null}
         <LiveCheck
-          characters={status?.sample?.characters}
+          characters={characters}
           configured={configured}
           voicesChosen={savedVoicesChosen(voices)}
           running={eleven.running}
-          onRun={eleven.runSample}
+          onRun={() => setConfirming(true)}
           sample={eleven.sample}
+        />
+        <RenderConfirm
+          open={confirming}
+          characters={characters}
+          creditsLeft={status?.subscription?.creditsLeft}
+          lastSample={lastSample}
+          sameAsLast={sameVoices(voices.saved, lastSample)}
+          onConfirm={() => {
+            setConfirming(false);
+            eleven.runSample();
+          }}
+          onCancel={() => setConfirming(false)}
         />
       </CardContent>
     </Card>

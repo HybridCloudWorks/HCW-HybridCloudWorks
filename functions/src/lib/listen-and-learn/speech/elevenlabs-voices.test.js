@@ -28,6 +28,7 @@ import {
   VOICES_UNAVAILABLE,
   VOICES_URL,
   VOICE_NOT_LISTED,
+  cachedVoiceNames,
   clearVoicesCache,
   fetchVoicePreview,
   isAllowedPreviewUrl,
@@ -277,6 +278,26 @@ describe('readVoices', () => {
     clock += VOICES_CACHE_TTL_MS + 1;
     await readVoices({ key: KEY, fetchImpl, sleep: noSleep, now });
     expect(fetchImpl).toHaveBeenCalledTimes(6);
+  });
+
+  it('gives the cached names by id without listing, and nothing once the listing expires', async () => {
+    let clock = 1_000;
+    const now = () => clock;
+    // Nothing cached yet: an empty map, and no request.
+    expect(cachedVoiceNames(KEY, now)).toEqual(new Map());
+    expect(cachedVoiceNames('', now)).toEqual(new Map());
+
+    const fetchImpl = listingFetch();
+    await readVoices({ key: KEY, fetchImpl, sleep: noSleep, now });
+    const names = cachedVoiceNames(KEY, now);
+    expect(names.get('DefaultVoice00000001')).toBe('Talia - Warm Soft Guide');
+    expect(names.get('OwnVoice000000000002')).toBe('Designed Host');
+    expect(cachedVoiceNames('another-key', now)).toEqual(new Map());
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+
+    clock += VOICES_CACHE_TTL_MS;
+    expect(cachedVoiceNames(KEY, now)).toEqual(new Map());
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
   });
 
   it('names the Voices → Read permission when the key lacks it, and never the key', async () => {

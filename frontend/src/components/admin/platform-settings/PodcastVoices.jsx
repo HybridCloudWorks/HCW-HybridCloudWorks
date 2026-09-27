@@ -49,9 +49,11 @@ export function voiceLabel(voice) {
  * The voice list. Loads only once the key is known to be configured, and is
  * race-safe the way `useSetting` is: only the newest load writes state.
  * "Loading" is derived (the attempt asked for has not settled) rather than
- * set in the effect, which would render twice for nothing.
+ * set in the effect, which would render twice for nothing. The ElevenLabs
+ * card holds it and passes it in, so the Last sample section can name the
+ * voices from the same one listing.
  */
-function useVoiceList(enabled) {
+export function useVoiceList(enabled) {
   const [list, setList] = useState(null);
   const [error, setError] = useState(null);
   const [attempt, setAttempt] = useState(0);
@@ -219,10 +221,13 @@ function ListNotes({ list, usableCount }) {
 /**
  * The picker, inside the ElevenLabs card. `setting` is the card's
  * `useSetting('podcast-voices')`, so the live check below it knows what is
- * saved; `configured` is whether the key is seeded.
+ * saved; `configured` is whether the key is seeded. `voiceList` is the
+ * card's `useVoiceList`, when it holds one; without it the picker loads its
+ * own, and never both.
  */
-export default function PodcastVoices({ setting, configured }) {
-  const voices = useVoiceList(configured);
+export default function PodcastVoices({ setting, configured, voiceList }) {
+  const own = useVoiceList(configured && !voiceList);
+  const voices = voiceList ?? own;
   const player = usePreviewPlayer();
   const all = useMemo(
     () => (Array.isArray(voices.list?.voices) ? voices.list.voices : []),
@@ -250,6 +255,9 @@ export default function PodcastVoices({ setting, configured }) {
         <p className="text-xs text-muted-foreground">
           Choose a voice for each host by ear, then Save. Episodes and the live check use the saved
           pair; there is no default. {voices.list?.rule ?? ''}
+        </p>
+        <p className="text-xs font-medium">
+          Previews are ElevenLabs&apos;s samples and cost no credits.
         </p>
       </div>
       <ListState configured={configured} voices={voices} />

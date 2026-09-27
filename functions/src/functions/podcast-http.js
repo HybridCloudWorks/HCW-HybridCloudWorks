@@ -24,7 +24,7 @@ import { output } from '@azure/functions';
 import { httpRoute } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
 import { queryDocs, readDoc, upsertDoc, patchDoc } from '../lib/cosmos-client.js';
-import { uploadBlob } from '../lib/blob-storage.js';
+import { headBlobForDelivery, uploadBlob } from '../lib/blob-storage.js';
 import { getCostEstimate } from '../lib/ai/router.js';
 import { JOBS_QUEUE } from '../lib/jobs.js';
 import { createPodcastHandlers } from '../lib/podcast/handlers.js';
@@ -96,14 +96,17 @@ httpRoute('getPodcastTranscript', {
 const elevenLabs = () =>
   createElevenLabsHandlers({
     guard: getDefaultGuard(),
-    // readDoc: the saved podcast voices (admin_config/podcast_voices).
+    // readDoc: the saved podcast voices (admin_config/podcast_voices) and the
+    // last sample's record (admin_config/podcast_last_sample).
     store: { queryDocs, upsertDoc, readDoc },
-    storage: { uploadBlob },
+    // headBlobForDelivery: whether the last sample's blob is still there.
+    storage: { uploadBlob, headBlobForDelivery },
     ai: { getCostEstimate },
   });
 
 // The Audio tab's ElevenLabs card: plan, credits used / limit, reset date,
-// what the last render billed. "Not configured" is a 200, not an error.
+// what the last render billed, and the last sample to replay for nothing.
+// "Not configured" is a 200, not an error.
 httpRoute('getElevenLabsStatus', {
   methods: ['GET'],
   authLevel: 'anonymous',

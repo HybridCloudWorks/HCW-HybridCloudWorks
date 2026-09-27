@@ -1,7 +1,7 @@
 /**
  * useSetting's race-safety: a double submit sends one PUT, a slow load cannot
  * land over a newer one, and a failed reload leaves nothing from the last
- * good load behind.
+ * good load behind. And `saved` is what is stored, not the working copy.
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -110,6 +110,27 @@ describe('useSetting', () => {
       await slow.promise;
     });
     expect(result.current.value).toEqual({ heroes: { AWS: '/new.png' } });
+  });
+
+  it('keeps `saved` as the stored value: edits do not move it, a save does, and nothing stored is null', async () => {
+    getJSON.mockResolvedValueOnce(loaded({ Maya: 'a', Elena: 'b' }));
+    const { result } = renderHook(() => useSetting('podcast-voices', true));
+    await waitFor(() => expect(result.current.saved).toEqual({ Maya: 'a', Elena: 'b' }));
+
+    act(() => result.current.setValue({ Maya: 'c', Elena: 'b' }));
+    expect(result.current.value).toEqual({ Maya: 'c', Elena: 'b' });
+    expect(result.current.saved).toEqual({ Maya: 'a', Elena: 'b' });
+
+    sendJSON.mockResolvedValueOnce(loaded({ Maya: 'c', Elena: 'b' }));
+    await act(async () => {
+      await result.current.save({ Maya: 'c', Elena: 'b' });
+    });
+    expect(result.current.saved).toEqual({ Maya: 'c', Elena: 'b' });
+
+    getJSON.mockResolvedValueOnce(loaded({ Maya: '', Elena: '' }, { exists: false, stored: null }));
+    act(() => result.current.reload());
+    await waitFor(() => expect(result.current.value).toEqual({ Maya: '', Elena: '' }));
+    expect(result.current.saved).toBeNull();
   });
 });
 
