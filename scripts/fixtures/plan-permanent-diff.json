@@ -115,8 +115,8 @@
           "service_plan_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-web-site-prod-cus/providers/Microsoft.Web/serverFarms/asp-site-prod-cus-01",
           "site_config": [
             {
-              "application_insights_connection_string": "InstrumentationKey=00000000-0000-0000-0000-000000000000;IngestionEndpoint=https://centralus-0.in.applicationinsights.azure.com/",
-              "application_insights_key": "00000000-0000-0000-0000-000000000000",
+              "application_insights_connection_string": "InstrumentationKey=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa;IngestionEndpoint=https://centralus-0.in.applicationinsights.azure.com/",
+              "application_insights_key": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
               "cors": [
                 {
                   "allowed_origins": [
@@ -173,8 +173,8 @@
           "service_plan_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-web-site-prod-cus/providers/Microsoft.Web/serverFarms/asp-site-prod-cus-01",
           "site_config": [
             {
-              "application_insights_connection_string": "InstrumentationKey=00000000-0000-0000-0000-000000000000;IngestionEndpoint=https://centralus-0.in.applicationinsights.azure.com/",
-              "application_insights_key": "00000000-0000-0000-0000-000000000000",
+              "application_insights_connection_string": "InstrumentationKey=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa;IngestionEndpoint=https://centralus-0.in.applicationinsights.azure.com/",
+              "application_insights_key": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
               "cors": [
                 {
                   "allowed_origins": [

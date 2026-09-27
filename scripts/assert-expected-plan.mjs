@@ -46,23 +46,23 @@
  * `DECLARED` below, with exactly the declared values. Every other difference
  * is UNEXPECTED, printed as `address: update path: before -> after`.
  *
- * VALUES ARE PRINTED ACCORDING TO THE PLAN'S MARKERS. `terraform show -json`
- * carries sensitive values in plaintext in `before` and `after`. That was
- * checked against Terraform 1.15.8 on 2026-09-27: a sensitive variable's
- * value sat in both, flagged only in `before_sensitive` and `after_sensitive`.
- * So a difference under either sensitive marker prints as `(sensitive)` on
- * both sides, as Terraform's own renderer does. A value under `after_unknown`
- * prints as `(known after apply)`. A block or map that differs as a whole
- * prints as `(sensitive)` if anything beneath it is marked sensitive.
+ * THE REPORT IS PUBLIC, AND THE PLAN IS NOT. This repository is public, and
+ * `tfc-plan-check.yml` writes the verdict to a job summary anyone can read.
+ * `terraform show -json` carries sensitive values in plaintext in `before`,
+ * `after` and `variables`, flagged only by `before_sensitive`,
+ * `after_sensitive` and the variable's `sensitive` (checked against Terraform
+ * 1.15.8 on 2026-09-27). So values are printed by the rules in
+ * `lib/plan-report.mjs`, not as Terraform's own renderer prints them behind
+ * workspace access. In short: sensitive values print as `(sensitive)`, unknown
+ * ones as `(known after apply)`, `app_settings` values as `(set)`, any string
+ * the plan marks sensitive anywhere is replaced wherever else it appears, and
+ * GUIDs and email addresses are masked. `runtime_version: "22" -> "24"` still
+ * reads in full. Before #719 this printed only app-setting names.
  *
- * The markers are Terraform's, and they are only as good as Terraform makes
- * them. A value Terraform does not mark is printed, as Terraform's own
- * renderer prints it. The same experiment found one that was missed: a
- * provider copied a sensitive input into a computed attribute it does not
- * declare sensitive (terraform_data's `output`), and the old value arrived
- * unmarked. So a list or object whose new value is unknown prints by its size,
- * not its contents. That was the case seen, and the finding does not need its
- * contents: the whole value will be recomputed.
+ * An update missing any of those markers is not guessed at: the check exits
+ * 2. So does a change with no action list. An action it does not recognise,
+ * such as `["forget"]`, and an import or a move, are UNEXPECTED even when the
+ * action is a no-op.
  *
  * ## Declaring an intended change
  *
@@ -122,11 +122,14 @@
 import { readFileSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 
-import { attributeChanges, describeDifference, formatPath, render } from './lib/plan-diff.mjs';
+import { attributeChanges, formatPath } from './lib/plan-diff.mjs';
+import { describeDifference, render, secretsOf } from './lib/plan-report.mjs';
 
-// The diff mechanics live in lib/plan-diff.mjs; this file keeps the policy.
-// Re-exported so callers and tests have one module to import.
-export { attributeChanges, describeDifference, formatPath } from './lib/plan-diff.mjs';
+// The diff mechanics live in lib/plan-diff.mjs and the printing rules in
+// lib/plan-report.mjs; this file keeps the policy. Re-exported so callers and
+// tests have one module to import.
+export { attributeChanges, formatPath } from './lib/plan-diff.mjs';
+export { describeDifference, redact, secretsOf } from './lib/plan-report.mjs';
 
 /**
  * The permanent diff, by resource address.
@@ -204,6 +207,80 @@ function matchesDeclaration(declaration, address, difference) {
   return sameBefore && isDeepStrictEqual(declaration.after, difference.after);
 }
 
+/** The keys an update must carry for its values to be printed safely. */
+const MARKERS = ['before', 'after', 'after_unknown', 'before_sensitive', 'after_sensitive'];
+
+/** The action lists that mean nothing happens to the resource. */
+const QUIET_ACTIONS = [['no-op'], ['read']];
+
+/** address -> the paths an update there may change, whatever the values. */
+function toleratedPaths() {
+  const tolerated = new Map();
+  for (const { address, attribute } of EXPECTED.updated) {
+    if (!tolerated.has(address)) tolerated.set(address, new Set());
+    tolerated.get(address).add(formatPath(['app_settings', attribute]));
+  }
+  return tolerated;
+}
+
+/**
+ * One resource change's action list. A missing list means the plan is not
+ * the shape this reads (exit 2), not that nothing happens.
+ */
+function actionsOf(change) {
+  const actions = change?.change?.actions;
+  if (!Array.isArray(actions)) {
+    throw new Error(`${change?.address ?? 'a resource change'} has no change.actions list`);
+  }
+  return actions;
+}
+
+/**
+ * What a change does that its action word does not say. `classify` reads
+ * anything it does not recognise as a no-op, so `["forget"]` (a `removed`
+ * block) used to pass silently. So did an import or a move, which a no-op
+ * action does not rule out.
+ */
+function sideEffects(change, actions) {
+  const notes = [];
+  const recognised =
+    classify(actions) !== 'no-op' || QUIET_ACTIONS.some((quiet) => isDeepStrictEqual(quiet, actions));
+  if (!recognised) notes.push(`actions ${JSON.stringify(actions)}, which this checker does not recognise`);
+  if (change.change.importing) notes.push('import');
+  if (change.previous_address) notes.push(`moved from ${change.previous_address}`);
+  return notes;
+}
+
+/**
+ * The UNEXPECTED lines for one update (#719): every difference that is
+ * neither tolerated nor declared.
+ */
+function checkUpdate(change, { tolerated, declared, matched, secrets }) {
+  const address = change.address;
+  const absent = MARKERS.filter((key) => !Object.hasOwn(change.change, key));
+  if (absent.length > 0) {
+    // Without the markers there is no telling which values are secret, and
+    // the report is published. So it stops rather than guessing.
+    throw new Error(`${address}: update has no ${absent.join(', ')}, so its values cannot be printed safely`);
+  }
+  const differences = attributeChanges(change.change);
+  if (differences.length === 0) {
+    // Terraform plans an update, and nothing this checker can see differs.
+    // That is not evidence of a harmless change, so it is not passed.
+    return [
+      `${address}: update, but no attribute differs between before and after. Read this change in the plan.`,
+    ];
+  }
+  const lines = [];
+  for (const difference of differences) {
+    if (tolerated.get(address)?.has(difference.path)) continue;
+    const declaration = declared.find((d) => matchesDeclaration(d, address, difference));
+    if (declaration) matched.add(declaration);
+    else lines.push(`${address}: update ${difference.path}: ${describeDifference(difference, secrets)}`);
+  }
+  return lines;
+}
+
 /**
  * Compare a parsed plan against EXPECTED and DECLARED.
  *
@@ -227,54 +304,28 @@ export function checkPlan(plan, { declared = DECLARED } = {}) {
   }
 
   const expectedReplaced = new Set(EXPECTED.replaced);
-  // address -> the paths an update there may change, whatever the values.
-  const tolerated = new Map();
-  for (const { address, attribute } of EXPECTED.updated) {
-    if (!tolerated.has(address)) tolerated.set(address, new Set());
-    tolerated.get(address).add(formatPath(['app_settings', attribute]));
-  }
+  const matched = new Set();
+  const context = { tolerated: toleratedPaths(), declared, matched, secrets: secretsOf(plan) };
 
   const unexpected = [];
   const seen = new Set();
-  const matched = new Set();
 
   for (const change of changes) {
-    const action = classify(change?.change?.actions);
+    const actions = actionsOf(change);
+    const action = classify(actions);
+    const address = change.address;
+    for (const note of sideEffects(change, actions)) unexpected.push(`${address}: ${note}`);
     if (action === 'no-op') continue;
 
-    const address = change.address;
     seen.add(address);
-
     if (action === 'replace' && expectedReplaced.has(address)) continue;
 
-    if (action === 'update') {
-      // Every attribute, not only app_settings (#719). An update is expected
-      // only for the one known app setting and for what a pull request has
-      // declared. Anything else changing, on the function app or anywhere, is
-      // exactly the drift that hides beside the trio, so it is named rather
-      // than waved through on the address alone.
-      const differences = attributeChanges(change.change);
-      if (differences.length === 0) {
-        // Terraform plans an update, and nothing this checker can see differs.
-        // That is not evidence of a harmless change, so it is not passed.
-        unexpected.push(
-          `${address}: update, but no attribute differs between before and after. Read this change in the plan.`
-        );
-        continue;
-      }
-      for (const difference of differences) {
-        if (tolerated.get(address)?.has(difference.path)) continue;
-        const declaration = declared.find((d) => matchesDeclaration(d, address, difference));
-        if (declaration) {
-          matched.add(declaration);
-          continue;
-        }
-        unexpected.push(`${address}: update ${difference.path}: ${describeDifference(difference)}`);
-      }
-      continue;
-    }
-
-    unexpected.push(`${address}: ${action}`);
+    // Every attribute of an update, not only app_settings (#719). Anything
+    // changing beyond the one known app setting and what a pull request has
+    // declared is exactly the drift that hides beside the trio, so it is
+    // named rather than waved through on the address alone.
+    if (action === 'update') unexpected.push(...checkUpdate(change, context));
+    else unexpected.push(`${address}: ${action}`);
   }
 
   // An expected change that has STOPPED appearing matters too: it means the
@@ -299,11 +350,20 @@ function main(argv) {
     return 2;
   }
 
-  let plan;
+  let text;
   try {
-    plan = JSON.parse(readFileSync(path, 'utf8'));
+    text = readFileSync(path, 'utf8');
   } catch (err) {
     console.error(`could not read a plan from ${path}: ${err.message}`);
+    return 2;
+  }
+  let plan;
+  try {
+    plan = JSON.parse(text);
+  } catch {
+    // The parser's own message quotes the text around the fault, and a plan
+    // holds secrets in plaintext, so it is not printed.
+    console.error(`${path} is not valid JSON, so no plan could be read from it.`);
     return 2;
   }
 

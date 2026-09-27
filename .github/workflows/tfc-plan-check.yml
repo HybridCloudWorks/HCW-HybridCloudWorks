@@ -12,8 +12,10 @@
 # `app_settings`. Until #719 that was all it read, so #718's
 # `runtime_version "22" -> "24"` passed unexamined. Anything outside the
 # RUNTIME_CONFIG_WRITER line and the three azapi replacements is UNEXPECTED,
-# named by path with both values, and a sensitive or recomputed value prints as
-# `(sensitive)` or `(known after apply)`, never the value itself.
+# named by path. THIS SUMMARY IS PUBLIC (the repository is), so values follow
+# the rules in scripts/lib/plan-report.mjs: sensitive and recomputed values,
+# app_settings values, any string the plan marks sensitive, GUIDs and email
+# addresses are masked, and ordinary values such as `runtime_version` print.
 #
 # AN INTENDED CHANGE PASSES ONLY WHEN IT IS DECLARED. The pull request that
 # makes it adds an entry to `DECLARED` in scripts/assert-expected-plan.mjs,
@@ -164,8 +166,8 @@ jobs:
           node-version: '26'
 
       # No `npm ci`: check-tfc-plan.mjs imports only assert-expected-plan.mjs
-      # (and through it lib/plan-diff.mjs, which needs only node:util) and
-      # uses global fetch. Installing the package's Cosmos and Identity
+      # (and through it lib/plan-diff.mjs and lib/plan-report.mjs, which need
+      # only node:util) and uses global fetch. Installing the package's Cosmos and Identity
       # dependencies to run it would pull a dependency tree this job never
       # touches, into a job holding a workspace-admin token.
       - name: Check the plan
@@ -213,8 +215,18 @@ jobs:
           {
             echo "## TFC plan check"
             echo ""
+            # The checker and its DECLARED list come from this checkout, so the
+            # verdict is only as good as the branch it was dispatched from (#719).
+            echo "Checker and declarations read from \`${GITHUB_REF}\` at \`${GITHUB_SHA}\`."
+            echo ""
             case "${CODE}" in
-              0) echo "**Expected.** The plan carries only the known permanent diff, plus any change declared in \`scripts/assert-expected-plan.mjs\`. Safe to confirm." ;;
+              0)
+                if [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+                  echo "**Expected.** The plan carries only the known permanent diff, plus any change declared in \`scripts/assert-expected-plan.mjs\`. Safe to confirm."
+                else
+                  echo "**Expected by \`${GITHUB_REF}\`, which is not main.** That branch's checker and declarations passed this plan. Dispatch from main before confirming it."
+                fi
+                ;;
               1)
                 if [ "${AWAITING}" = "yes" ]; then
                   echo "**UNEXPECTED.** The plan contains changes beyond the known permanent diff. Read it before confirming."

@@ -33,6 +33,8 @@ import {
   DECLARED,
   EXPECTED,
   formatPath,
+  redact,
+  secretsOf,
 } from './assert-expected-plan.mjs';
 // The module-reading helper moved to its own file when a second check needed
 // it (terraform-role-definitions.test.mjs). Same eight lines, one copy.
@@ -84,6 +86,11 @@ const expectedPlan = () => ({
         actions: ['update'],
         before: { app_settings: { RUNTIME_CONFIG_WRITER: 'azapi-strip', OTHER: 'same' } },
         after: { app_settings: { RUNTIME_CONFIG_WRITER: 'azurerm', OTHER: 'same' } },
+        // Every real update carries these, and since #719 one without them is
+        // refused rather than printed.
+        after_unknown: {},
+        before_sensitive: {},
+        after_sensitive: {},
       },
     },
   ],
@@ -139,10 +146,11 @@ describe('checkPlan', () => {
     plan.resource_changes[3].change.after.app_settings.OTHER = 'changed';
     const result = checkPlan(plan, { declared: [] });
     expect(result.ok).toBe(false);
-    // Named by path with both values since #719. The marker beside it is still
-    // tolerated, so it is the only line.
+    // Named by path since #719; an app setting's value is never printed,
+    // because the report is public. The marker beside it is still tolerated,
+    // so it is the only line.
     expect(result.unexpected).toEqual([
-      'azurerm_function_app_flex_consumption.hcw: update app_settings.OTHER: "same" -> "changed"',
+      'azurerm_function_app_flex_consumption.hcw: update app_settings.OTHER: (set) -> (set)',
     ]);
   });
 
@@ -297,7 +305,8 @@ describe('every attribute of an update is compared, not only app_settings (#719)
   it('fails a sensitive attribute change without printing either value', () => {
     const { plan, app } = fixture();
     const before = app.before.site_config[0].application_insights_connection_string;
-    const after = before.replace(/0{8}-0{4}-0{4}-0{4}-0{12}/, '11111111-1111-1111-1111-111111111111');
+    const after = before.replace(/a{8}-a{4}-a{4}-a{4}-a{12}/, '11111111-1111-1111-1111-111111111111');
+    expect(after).not.toBe(before);
     app.after.site_config[0].application_insights_connection_string = after;
 
     const result = checkPlan(plan, { declared: [] });
@@ -340,12 +349,14 @@ describe('every attribute of an update is compared, not only app_settings (#719)
   it('prints a value known only after apply as such', () => {
     // Terraform omits an unknown value from `after` and marks it in
     // after_unknown, so there is nothing to print but the fact.
+    // The subscription id inside it is masked too: the report is public.
     const { plan, app } = fixture();
-    const subnet = app.before.virtual_network_subnet_id;
     delete app.after.virtual_network_subnet_id;
     app.after_unknown.virtual_network_subnet_id = true;
     expect(unexpected(plan)).toEqual([
-      `${FUNCTION_APP}: update virtual_network_subnet_id: ${JSON.stringify(subnet)} -> (known after apply)`,
+      `${FUNCTION_APP}: update virtual_network_subnet_id: "/subscriptions/<guid>/resourceGroups/` +
+        'rg-net-site-prod-cus/providers/Microsoft.Network/virtualNetworks/vnet-site-prod-cus/' +
+        'subnets/snet-functions-integration" -> (known after apply)',
     ]);
   });
 
@@ -418,7 +429,7 @@ describe('every attribute of an update is compared, not only app_settings (#719)
     const { plan, app } = fixture();
     app.after.app_settings['AzureWebJobs.syncContent.Disabled'] = 'true';
     expect(unexpected(plan)).toEqual([
-      `${FUNCTION_APP}: update app_settings["AzureWebJobs.syncContent.Disabled"]: (absent) -> "true"`,
+      `${FUNCTION_APP}: update app_settings["AzureWebJobs.syncContent.Disabled"]: (absent) -> (set)`,
     ]);
   });
 
@@ -485,6 +496,218 @@ describe('formatPath', () => {
   });
 });
 
+/** An update to a resource outside the fixture, with every marker present. */
+const update = (address, change) => ({
+  address,
+  change: {
+    actions: ['update'],
+    after_unknown: {},
+    before_sensitive: {},
+    after_sensitive: {},
+    ...change,
+  },
+});
+
+describe('the report is public, so values the plan protects stay unprinted (#719 review)', () => {
+  // This repository is public and the verdict goes to a job summary. The
+  // security review of the first #719 commit found each case below printing a
+  // value that HCP Terraform keeps behind workspace access.
+  const unexpected = (plan) => checkPlan(plan, { declared: [] }).unexpected;
+
+  it('never prints an app setting value, such as a literal written on the live app', () => {
+    const { plan, app } = fixture();
+    app.before.app_settings.OPENAI_API_KEY = 'literal-value-aaaaaaaa';
+    const lines = unexpected(plan);
+    expect(lines).toEqual([`${FUNCTION_APP}: update app_settings.OPENAI_API_KEY: (set) -> (absent)`]);
+    expect(lines.join('\n')).not.toContain('literal-value');
+  });
+
+  it('prints a recomputed app_settings map by its size', () => {
+    const { plan, app } = fixture();
+    delete app.after.app_settings;
+    app.after_unknown.app_settings = true;
+    expect(unexpected(plan)).toEqual([
+      `${FUNCTION_APP}: update app_settings: (an object with 6 keys) -> (known after apply)`,
+    ]);
+  });
+
+  it('masks a sensitive string copied into an attribute Terraform left unmarked', () => {
+    // The scalar form of the terraform_data case: `input` is marked, and its
+    // computed copy `output` is not.
+    const { plan } = fixture();
+    plan.resource_changes.push(
+      update('terraform_data.recomputed', {
+        before: { id: 'x', input: 'copied-secret-aaaa', output: 'copied-secret-aaaa' },
+        after: { id: 'x', input: 'copied-secret-bbbb' },
+        after_unknown: { output: true },
+        before_sensitive: { input: true },
+        after_sensitive: { input: true },
+      }),
+      update('terraform_data.known', {
+        before: { id: 'y', input: 'copied-secret-cccc', output: 'copied-secret-cccc' },
+        after: { id: 'y', input: 'copied-secret-dddd', output: 'copied-secret-dddd' },
+        before_sensitive: { input: true },
+        after_sensitive: { input: true },
+      })
+    );
+    const lines = unexpected(plan);
+    expect(lines).toEqual([
+      'terraform_data.recomputed: update input: (sensitive) -> (sensitive)',
+      'terraform_data.recomputed: update output: "(sensitive)" -> (known after apply)',
+      'terraform_data.known: update input: (sensitive) -> (sensitive)',
+      'terraform_data.known: update output: "(sensitive)" -> "(sensitive)"',
+    ]);
+    expect(lines.join('\n')).not.toContain('copied-secret');
+  });
+
+  it('masks a sensitive variable value wherever it appears in a printed value', () => {
+    const { plan } = fixture();
+    plan.variables = { token: { value: 'variable-secret-aaaa' }, region: { value: 'centralus' } };
+    plan.configuration = { root_module: { variables: { token: { sensitive: true }, region: {} } } };
+    plan.resource_changes.push(
+      update('azurerm_monitor_action_group.webhook', {
+        before: { uri: 'https://hooks.example.com/old', location: 'eastus' },
+        after: { uri: 'https://hooks.example.com/variable-secret-aaaa', location: 'centralus' },
+      })
+    );
+    expect(unexpected(plan)).toEqual([
+      'azurerm_monitor_action_group.webhook: update location: "eastus" -> "centralus"',
+      'azurerm_monitor_action_group.webhook: update uri: "https://hooks.example.com/old" -> ' +
+        '"https://hooks.example.com/(sensitive)"',
+    ]);
+  });
+
+  it('masks GUIDs and email addresses, and nothing else of the value', () => {
+    const { plan } = fixture();
+    plan.resource_changes.push(
+      update('azurerm_monitor_action_group.owner', {
+        before: { email: 'someone@example.com', principal_id: '11111111-2222-3333-4444-555555555555' },
+        after: { email: 'another@example.org', principal_id: '66666666-7777-8888-9999-aaaaaaaaaaaa' },
+      })
+    );
+    expect(unexpected(plan)).toEqual([
+      'azurerm_monitor_action_group.owner: update email: "<email>" -> "<email>"',
+      'azurerm_monitor_action_group.owner: update principal_id: "<guid>" -> "<guid>"',
+    ]);
+  });
+
+  it('reads a malformed marker as set, so it masks rather than reveals', () => {
+    const { plan } = fixture();
+    plan.resource_changes.push(
+      update('azurerm_application_insights.malformed', {
+        before: { key: 'marker-value-aaaa' },
+        after: { key: 'marker-value-bbbb' },
+        before_sensitive: { key: 'true' },
+        after_sensitive: { key: 1 },
+      })
+    );
+    const lines = unexpected(plan);
+    expect(lines).toEqual(['azurerm_application_insights.malformed: update key: (sensitive) -> (sensitive)']);
+    expect(lines.join('\n')).not.toContain('marker-value');
+  });
+
+  it('refuses an update without its markers, rather than guess which values are secret', () => {
+    // checkPlan throws, which the entry points turn into exit 2.
+    const { plan } = fixture();
+    plan.resource_changes.push({
+      address: 'azurerm_application_insights.bare',
+      change: { actions: ['update'], before: { key: 'bare-aaaa' }, after: { key: 'bare-bbbb' } },
+    });
+    expect(() => checkPlan(plan, { declared: [] })).toThrow(
+      /azurerm_application_insights.bare: update has no after_unknown, before_sensitive, after_sensitive/
+    );
+  });
+
+  it('sees a map key named __proto__', () => {
+    // Read from the side that lacks it, `__proto__` is Object.prototype, which
+    // walked as an empty object and hid the key.
+    const { plan, app } = fixture();
+    app.after.tags = JSON.parse('{"environment":"prod","workload":"site","__proto__":{}}');
+    expect(unexpected(plan)).toEqual([
+      `${FUNCTION_APP}: update tags.__proto__: (absent) -> {}`,
+    ]);
+  });
+
+  it('collects sensitive strings from resources, outputs and variables, longest first', () => {
+    const plan = {
+      resource_changes: [
+        {
+          change: {
+            before: { a: 'resource-secret', b: 'plain-value' },
+            after: { a: ['listed-secret-value'] },
+            before_sensitive: { a: true },
+            after_sensitive: { a: [true] },
+          },
+        },
+      ],
+      output_changes: {
+        out: { before: 'output-secret', after: 'short', before_sensitive: true, after_sensitive: true },
+      },
+      variables: { v: { value: { nested: 'variable-secret' } }, w: { value: 'not-sensitive' } },
+      configuration: { root_module: { variables: { v: { sensitive: true }, w: {} } } },
+    };
+    // 'short' is under six characters: common short values are not redacted.
+    expect(secretsOf(plan)).toEqual([
+      'listed-secret-value',
+      'resource-secret',
+      'variable-secret',
+      'output-secret',
+    ]);
+  });
+
+  it('redacts a secret in its JSON-escaped form too', () => {
+    const secret = 'quote"secret';
+    expect(redact(JSON.stringify({ v: secret }), [secret])).toBe('{"v":"(sensitive)"}');
+  });
+});
+
+describe('every change is read, not only the ones classify names (#719 review)', () => {
+  const unexpected = (plan) => checkPlan(plan, { declared: [] }).unexpected;
+
+  it('reports an action it does not recognise instead of reading it as a no-op', () => {
+    // `forget` is what a `removed` block plans. It dropped a resource from
+    // state and passed silently.
+    const { plan } = fixture();
+    plan.resource_changes.push({
+      address: 'azurerm_cosmosdb_sql_container.hcw["content"]',
+      change: { actions: ['forget'] },
+    });
+    expect(unexpected(plan)).toEqual([
+      'azurerm_cosmosdb_sql_container.hcw["content"]: actions ["forget"], which this checker does not recognise',
+    ]);
+  });
+
+  it('reports an import and a move, even when the action is a no-op', () => {
+    const { plan } = fixture();
+    plan.resource_changes.push(
+      { address: 'azurerm_key_vault.imported', change: { actions: ['no-op'], importing: { id: 'x' } } },
+      {
+        address: 'azurerm_key_vault.renamed',
+        previous_address: 'azurerm_key_vault.old',
+        change: { actions: ['no-op'] },
+      }
+    );
+    expect(unexpected(plan)).toEqual([
+      'azurerm_key_vault.imported: import',
+      'azurerm_key_vault.renamed: moved from azurerm_key_vault.old',
+    ]);
+  });
+
+  it('keeps a data source read quiet', () => {
+    const { plan } = fixture();
+    plan.resource_changes.push({ address: 'data.azurerm_client_config.current', change: { actions: ['read'] } });
+    expect(checkPlan(plan, { declared: [] }).ok).toBe(true);
+  });
+
+  it('refuses a change with no action list', () => {
+    for (const change of [{ address: 'azurerm_key_vault.a' }, { address: 'azurerm_key_vault.b', change: {} }]) {
+      const { plan } = fixture();
+      plan.resource_changes.push(change);
+      expect(() => checkPlan(plan, { declared: [] })).toThrow(/has no change.actions list/);
+    }
+  });
+});
+
 describe('the command line never prints a sensitive value', () => {
   // End to end, because main() is what reaches the job summary, and the tests
   // above see only checkPlan's return value.
@@ -519,6 +742,7 @@ describe('the command line never prints a sensitive value', () => {
     app.before.runtime_version = '22';
     const key = app.before.site_config[0].application_insights_key;
     app.after.site_config[0].application_insights_key = '11111111-1111-1111-1111-111111111111';
+    app.after.app_settings.OPENAI_API_KEY = 'literal-value-aaaaaaaa';
 
     const got = run(plan);
     expect(got.code).toBe(1);
@@ -526,8 +750,34 @@ describe('the command line never prints a sensitive value', () => {
     expect(got.output).toContain(
       `UNEXPECTED  ${FUNCTION_APP}: update site_config[0].application_insights_key: (sensitive) -> (sensitive)`
     );
+    expect(got.output).toContain(`UNEXPECTED  ${FUNCTION_APP}: update app_settings.OPENAI_API_KEY: (absent) -> (set)`);
     expect(got.output).not.toContain(key);
     expect(got.output).not.toContain('11111111');
+    expect(got.output).not.toContain('literal-value');
+  });
+
+  it('exits 2 on a file that is not JSON, without quoting it', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'assert-expected-plan-'));
+    try {
+      const file = join(dir, 'plan.json');
+      writeFileSync(file, '{"variables":{"token":{"value":"unparsed-secret-aaaa"}} trailing');
+      let got;
+      try {
+        execFileSync(process.execPath, [join(HERE, 'assert-expected-plan.mjs'), file], {
+          encoding: 'utf8',
+          stdio: ['pipe', 'pipe', 'pipe'],
+          timeout: 30_000,
+        });
+        got = { code: 0, output: '' };
+      } catch (err) {
+        got = { code: err.status, output: `${err.stdout ?? ''}${err.stderr ?? ''}` };
+      }
+      expect(got.code).toBe(2);
+      expect(got.output).toContain('is not valid JSON');
+      expect(got.output).not.toContain('unparsed-secret');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
