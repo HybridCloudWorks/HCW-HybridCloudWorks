@@ -19,6 +19,46 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **`scripts/lab/Register-LabAgent.ps1`: the lab agent's go-live is one
+  owner command (#739).** It was several owner steps across three
+  documents, one of them pointing at a runbook row that no longer existed.
+  The script, run with `az` signed in to the tenant: checks the tenant and
+  prints the `az login` line when it is wrong; reads `/etc/hcw/labs-agent.crt` over
+  `ssh hcw-lab` into a temporary file, with the host checking it against the
+  private key and reporting only whether they match; creates or finds the
+  single-tenant app registration and service principal
+  `sp-labs-agent-lab-hybrid-prod-cus-01`; appends the certificate with
+  `az ad app credential reset --cert --append`, ending one second before the
+  certificate does (without `--end-date` az ends it a year from now, a year
+  before the 730-day certificate); assigns the `LabAgent` app role on the
+  HCWSite API, the one grant the agent guard checks; writes the four
+  `vault_labs_agent_*` keys into `/etc/hcw/ansible/vault.yml` on the host;
+  runs `bootstrap.sh`; and reads `systemctl is-active hcw-labs-agent` and the
+  journal to say whether the agent is heartbeating, or which gate refuses it.
+  The vault merge runs as root on the host: decrypt to a root-only temporary
+  directory, replace only those four keys, refuse unless every other key is
+  unchanged, re-encrypt with the existing password file, decrypt again and
+  compare, rename into place, shred. It creates `vault.yml` when there is
+  none and does not rewrite it when nothing changed; it prints key names,
+  never a value from the file. Re-running changes nothing, `-WhatIf` changes
+  nothing, and `-NextCertificate` registers a rotated certificate before the
+  swap. `LABS_AGENT_API_BASE` is now `https://api-azure.hybridcloudworks.com/api`
+  in `lab-host/README.md` and `vps-agent/.env.example`: the origin lock
+  refuses the lab host at the `azurewebsites.net` host, and the script
+  probes the Cloudflare path from the host first, naming a Bot Fight Mode
+  challenge if it meets one. The API's second gate, the
+  `lab_agents/vps-hostinger-01` registry document, has no write path (no
+  route, no admin page, a firewall that admits only the Function App), so the
+  script prints the document the API needs and says so. Pester tests cover
+  every path that needs no tenant or host, and run the vault merge under
+  bash in CI; `scripts/lab-job-types.test.mjs` keeps the document's job
+  types in step with the server and agent allowlists. Docs:
+  `lab-host/README.md` ("The vault", "The agent identity", "Rotating the
+  agent certificate"), [Required inputs §4.7](docs/standards/required-inputs.md)
+  (which also now records `portainer_enabled` and `vault_enabled` as `true`
+  since #729 and the host as provisioned) and the
+  [Labs host runbook](docs/runbooks/labs-host.md), "The lab agent's go-live".
+
 - **Lab article series: three how-to drafts for the owner's review (part of
   #677).** `docs/content/blog-lab-01-landing-zone.md` builds management
   groups, policy, management and a hub in the Landing Zone Builder and reads

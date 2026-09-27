@@ -2,7 +2,8 @@
 
 How to reach the Hostinger lab host from a desktop over SSH and VS Code (the
 first section); how to reinstall it, and what the first `bootstrap.sh` run
-checks before it changes anything; how the owner reaches Portainer and
+checks before it changes anything; how the lab agent goes live, which is one
+PowerShell line; how the owner reaches Portainer and
 initialises and unseals HashiCorp Vault on it (owner decision 2026-09-26);
 and how the host becomes an Azure Arc-enabled server in
 `rg-lab-hybrid-prod-cus`, sends heartbeat and `auth`/`authpriv` syslog to the
@@ -305,12 +306,161 @@ ADR 0032 rebuilds the host rather than repairing it.
    "rotate on every host rebuild" in
    [Required inputs §4.7](../standards/required-inputs.md#47-vps-agent-hostinger-env-never-committed)
    (the Caddy DNS token and the Coder GitHub OAuth secret). The agent's key
-   pair is new, so upload the new certificate (`lab-host/README.md`, "The
-   agent identity"). Re-onboard Arc ("Re-onboarding a rebuilt host", below).
+   pair is new, and the vault that held its four keys is gone, so run "The
+   lab agent's go-live" (below) again: it appends the new certificate and
+   writes the four keys back. Re-onboard Arc ("Re-onboarding a rebuilt host", below).
    Portainer gets a new administrator and its licence key (below). Vault is
    new and uninitialised: initialise it (below), and delete the old unseal
    keys and root token from the password manager, because they open nothing
    now.
+
+## The lab agent's go-live
+
+The agent (`vps-agent`, the `labs_agent` role) is installed by the first
+`bootstrap.sh` run and stays stopped until it has an identity: an Entra app
+registration holding its certificate and the `LabAgent` app role, and four
+values in the host's Ansible vault. `scripts/lab/Register-LabAgent.ps1` does
+all of it in one run, as the owner, on the workstation. The owner-created
+Entra objects are deliberate: this repository has no `azuread` Terraform
+provider (`infra/oidc.tf`, `infra/lab-hybrid.tf`).
+
+**Before you start.** The host has run `bootstrap.sh` at least once, so
+`/etc/hcw/labs-agent.crt` exists; this desktop reaches it
+(`ssh hcw-lab hostname` prints its name, "Connect from a desktop", above);
+`/etc/hcw/ansible/vault-password` exists on the host (`lab-host/README.md`,
+"The vault"; `vault.yml` itself may or may not exist yet); and you can
+create app registrations and assign app roles in the tenant (Application
+Administrator, Cloud Application Administrator or Global Administrator).
+Sign in, PowerShell; a browser opens:
+
+```powershell
+az login --tenant saulpatinojrhotmail.onmicrosoft.com
+```
+
+Then, PowerShell, from the repository root on `main` once this change has
+merged (`Test-Path scripts/lab/Register-LabAgent.ps1` prints `True` when the
+working tree has the script):
+
+```powershell
+pwsh -NoProfile -File scripts/lab/Register-LabAgent.ps1
+```
+
+Adding `-WhatIf` to that line shows what it would change and changes
+nothing: the vault merge runs in check mode on the host, and `bootstrap.sh`
+does not run.
+
+**What it does**, printing one line per step:
+
+1. Checks `az` is signed in to `saulpatinojrhotmail.onmicrosoft.com`, and
+   stops with the `az login` line above when it is not.
+2. Reads `/etc/hcw/labs-agent.crt` over `ssh hcw-lab` into a temporary file
+   on the desktop, deleted after step 3. It is the public certificate; the
+   host checks it against the private key in `labs-agent.pem` and reports
+   only whether they match, so the key never leaves the host. The
+   certificate's CN is the agent id, `vps-hostinger-01`.
+3. Finds or creates the single-tenant app registration and service
+   principal `sp-labs-agent-lab-hybrid-prod-cus-01`. Appends the
+   certificate to it with `az ad app credential reset --cert --append`,
+   ending one second before the certificate does, unless a credential with
+   its thumbprint is already there; every other credential is left alone.
+   Assigns the service principal the `LabAgent` app role on the HCWSite API
+   (the script's `-ApiAppId`, whose default is the same client id
+   `scripts/cutover/01-entra-api.ps1` names), which is gate 1 of the agent
+   guard (`functions/src/lib/auth/require-agent.js`) and, for an
+   application permission, the admin consent. Nothing else is granted: no
+   Azure role, no Microsoft Graph permission, no client secret.
+4. Prints the `lab_agents/vps-hostinger-01` registry document gate 2 reads
+   (below).
+5. Writes `vault_labs_agent_api_base`, `vault_labs_agent_tenant_id`,
+   `vault_labs_agent_client_id` and `vault_labs_agent_api_scope` into
+   `/etc/hcw/ansible/vault.yml`, as root on the host: decrypted into a
+   root-only temporary directory, only those four keys replaced, every
+   other key checked to be exactly as it was, re-encrypted with the
+   existing password file, decrypted again and compared, then moved into
+   place; the temporary files are shredded. When `vault.yml` does not exist
+   it is created with only those four keys, so add the rest afterwards with
+   `ansible-vault edit`, not `create`. When the four are already right the
+   file is not rewritten at all. It prints key names, never a value read
+   from the vault. Before the merge, the host sends one request without a
+   token to `https://api-azure.hybridcloudworks.com/api/agent/heartbeat`
+   (the probe, below).
+6. Runs `sudo /opt/hcw-src/lab-host/bootstrap.sh` when the vault changed or
+   the agent is not running (`-ForceBootstrap` runs it regardless), or
+   restarts the agent when only Entra changed, because a running agent
+   keeps a token issued before the grant for up to an hour. Then it reads
+   `systemctl is-active hcw-labs-agent` and the last journal lines, and
+   says what they mean.
+
+**What success looks like.** Near the end of the run:
+
+```text
+Agent: hcw-labs-agent is active and has logged no failure since it started: it is heartbeating.
+```
+
+The run exits 0, and https://hybridcloudworks.com/admin/labs?tab=agents
+lists `vps-hostinger-01` as Online within 30 seconds. A heartbeat that works
+logs nothing, which is why "no failure since it started" is the signal. A
+second run ends with `No changes: the identity, the vault and the agent were
+already set up.` A step that cannot finish stops there with its reason and
+exits 1, having changed nothing after it. When everything ran but the agent
+is not heartbeating at the end, the run exits 2 and says which of these it
+is:
+
+| The run says | What it means | What to do |
+| --- | --- | --- |
+| `Agent access required` | The token is accepted and the agent guard refuses it. Step 3 made the grant, so it is gate 2: the registry document is missing, inactive, or bound to another object id | Create the document (below). If step 3 assigned the role in this same run, wait two minutes and run `ssh hcw-lab sudo systemctl restart hcw-labs-agent` first |
+| `Authentication required` | The API rejected the token itself: its audience or tenant is not what `ENTRA_API_AUDIENCE` and `ENTRA_TENANT_ID` expect | The scope must be `api://<API client id>/.default` and the API must issue v2 tokens; step 3 checks both and stops if either is not so |
+| `HTTP 403 with no API error in the body` | Cloudflare answered, not the API. The probe line says the same thing before the merge | The probe, below |
+| `Entra refused the agent's certificate sign-in (AADSTS…)` | Usually a registration or certificate this run created that Entra has not replicated yet | Wait two minutes, run `ssh hcw-lab sudo systemctl restart hcw-labs-agent`, and run the script again |
+| `hcw-labs-agent is inactive` | `bootstrap.sh` starts it only when all four vault keys exist | The play's `Say why the agent is not running yet` task, in the output above, names what is missing |
+
+**The API base, and the probe.** The agent calls
+`https://api-azure.hybridcloudworks.com/api`, the Cloudflare hostname, and
+not the Function App's `azurewebsites.net` host: the origin lock
+(`functions_origin_lock_enabled`, on since 2026-08-20, `infra/functionapp.tf`)
+denies every address outside Cloudflare's ranges, and the lab host is
+outside them. The Cloudflare path has its own gate. Bot Fight Mode answers
+many clients on hosting networks with a 403 challenge page (it is why the
+availability probe is a Cloudflare Worker, [ADR 0024](../decisions/0024-edge-availability-probe.md)),
+and the lab host is on one. So the script asks first: without a token the
+API answers 401 with its own JSON, and the script says `the host reaches
+agent/heartbeat through Cloudflare`. A `403` with an HTML page, or a
+`cf-mitigated: challenge` header, means Cloudflare is refusing the host, and
+the agent will log `HTTP 403` on every heartbeat. Admitting it is an owner
+decision, not something this script changes: either admit the host's
+address at the origin (an `ip_restriction` allow rule in
+`infra/functionapp.tf`, and the Function App's own host name as
+`LABS_AGENT_API_BASE`, passed to this script with `-ApiBase`), or relax
+Bot Fight Mode for the zone. Each narrows a control, and a WAF skip rule
+does not work: Bot Fight Mode does not run on the Ruleset Engine
+([Alerting and support](alerting-and-support.md)).
+
+**The registry document, the one step the script cannot do.** Gate 2 of the
+agent guard reads `lab_agents/{agentId}` and requires its `oid` to be the
+agent's service principal object id (the `oid` claim of an app-only token)
+and `active` to be `true`; `capabilities` are the job types it may claim.
+The script prints the whole document as JSON, with the real object id
+filled in: `id` and `agentId` both `vps-hostinger-01`, `oid` the service
+principal's object id from step 3, `active` `true`, and `capabilities` the
+five job types (`shell-echo`, `terraform-validate`, `ansible-check`,
+`helm-template`, `kubeconform`), which `scripts/lab-job-types.test.mjs`
+keeps in step with the server and agent allowlists.
+It goes in Cosmos DB account `cosmos-site-prod-cus`, database `hcw`,
+container `lab_agents`, whose partition key is `/id`. Nothing writes that
+container today: `getLabsSnapshot` only reads it, the agent's heartbeat only
+patches a document that exists, and no admin page has a way to add one. And
+the account's firewall admits only the Function App's subnet, with no
+operator data-plane role standing. Until a registration route exists, the
+agent authenticates and is refused with `Agent access required`, which the
+script reports as above. Once the document exists, success is the line
+above and the agent Online on the Agents tab.
+
+**Certificate rotation** uses the same script with `-NextCertificate`
+(`lab-host/README.md`, "Rotating the agent certificate"): it appends
+`/etc/hcw/labs-agent.next.crt`, leaves the old one, touches neither the
+vault nor `bootstrap.sh`, and prints the swap as one PowerShell line. After
+the swap, a plain run finds the agent heartbeating on the new certificate
+and prints the `az ad app credential delete` line for the old one.
 
 ## Portainer through an SSH tunnel
 

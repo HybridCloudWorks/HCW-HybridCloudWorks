@@ -225,10 +225,10 @@ with their values:
 | --- | --- | --- |
 | `vault_cloudflare_api_token` | `caddy` | The **runtime** Cloudflare API token Caddy uses for DNS-01, distinct from the one Terraform holds in #661. See the note below on its scope |
 | `vault_caddy_acme_email` | `caddy` | Optional. ACME account contact for expiry mail |
-| `vault_labs_agent_api_base` | `labs_agent` | `LABS_AGENT_API_BASE`: the Functions API base including `/api`. Today that is the `func-site-prod-cus-01` app's `azurewebsites.net` host |
-| `vault_labs_agent_tenant_id` | `labs_agent` | `LABS_AGENT_TENANT_ID` |
-| `vault_labs_agent_client_id` | `labs_agent` | `LABS_AGENT_CLIENT_ID`: this agent's confidential app registration |
-| `vault_labs_agent_api_scope` | `labs_agent` | `LABS_AGENT_API_SCOPE`: `api://<API client id>/.default`, matching the app's `ENTRA_API_AUDIENCE` |
+| `vault_labs_agent_api_base` | `labs_agent` | `LABS_AGENT_API_BASE`: the Functions API base including `/api`, as the host reaches it: `https://api-azure.hybridcloudworks.com/api`, through Cloudflare. Not the `func-site-prod-cus-01` app's `azurewebsites.net` host: the Function App's origin lock (`functions_origin_lock_enabled`, on since 2026-08-20) denies every address outside Cloudflare's ranges, and this host is outside them, so that host answers it 403. Written by `scripts/lab/Register-LabAgent.ps1` (below) |
+| `vault_labs_agent_tenant_id` | `labs_agent` | `LABS_AGENT_TENANT_ID`. Written by the same script |
+| `vault_labs_agent_client_id` | `labs_agent` | `LABS_AGENT_CLIENT_ID`: this agent's confidential app registration, `sp-labs-agent-lab-hybrid-prod-cus-01`. Written by the same script |
+| `vault_labs_agent_api_scope` | `labs_agent` | `LABS_AGENT_API_SCOPE`: `api://<API client id>/.default`, matching the app's `ENTRA_API_AUDIENCE`. Written by the same script |
 | `vault_coder_oauth2_github_client_id` | `coder` | `CODER_OAUTH2_GITHUB_CLIENT_ID`: the GitHub OAuth app the owner creates in #682 |
 | `vault_coder_oauth2_github_client_secret` | `coder` | `CODER_OAUTH2_GITHUB_CLIENT_SECRET` |
 | `vault_coder_postgres_password` | `coder` | The `coder` database user's password. Letters, digits and `. _ ~ -` only (it sits unescaped in a URL); `openssl rand -hex 32` makes one |
@@ -244,7 +244,13 @@ name is `vault`, and none of them is a secret.
 
 The four `vault_labs_agent_*` keys and the three `vault_coder_*` keys can be
 added later: until all four exist the agent stays stopped and the play says
-so, and the three are only read once `coder_enabled` is true. The four
+so, and the three are only read once `coder_enabled` is true. The four agent
+keys are not typed in by hand: `scripts/lab/Register-LabAgent.ps1` writes
+them ("The agent identity", below), merging them into `vault.yml` and
+leaving every other key as it was, or creating the file with only those
+four when it does not exist yet. So if the script ran first, `vault.yml`
+exists: add the other keys with `ansible-vault edit` (below), because
+`ansible-vault create` refuses a file that exists. The four
 `vault_arc_*` keys are read only while `arc_enabled` is true and the host is
 not yet Connected; the procedure that creates and then removes them is
 [docs/runbooks/labs-host.md](../docs/runbooks/labs-host.md). To edit later,
@@ -582,14 +588,42 @@ The first run generates the agent's private key **on the host** and never
 moves it: `/etc/hcw/labs-agent.pem` holds the key and certificate as
 `root:hcw-labs-agent` mode `0640`, so root owns it, the service reads it
 through its group, and nobody else can (no ACLs). The certificate alone is
-`/etc/hcw/labs-agent.crt`. Provisioning the app registration that the
-certificate is uploaded to, and the `lab_agents` registry document, are the
-owner steps in `docs/standards/required-inputs.md` section 4.7; print the
-certificate to upload with bash, on the host:
+`/etc/hcw/labs-agent.crt`, and its CN is the agent id (`labs_agent_id`,
+`vps-hostinger-01`).
 
-```bash
-sudo cat /etc/hcw/labs-agent.crt
+Everything else the agent needs is one owner step, run once on the
+workstation: `scripts/lab/Register-LabAgent.ps1`. It checks `az` is signed
+in to the tenant; reads that certificate over `ssh hcw-lab` (the host checks
+it against the private key and only reports whether they match); creates or
+finds the app registration and service principal
+`sp-labs-agent-lab-hybrid-prod-cus-01`; appends the certificate to it,
+never replacing another credential; assigns it the one grant the API checks,
+the `LabAgent` app role on the HCWSite API; writes the four
+`vault_labs_agent_*` keys above into the vault; runs `bootstrap.sh`; and
+reads the agent's state and journal to say whether it is heartbeating. It
+never prints a secret: the certificate is public, the four values are
+identifiers, and the vault password never leaves the host. A second run
+changes nothing and says so, and `-WhatIf` shows what a run would change.
+PowerShell, from the repository root on `main` once this change has merged
+(`Test-Path scripts/lab/Register-LabAgent.ps1` prints `True` when the working
+tree has the script); when `az` is not signed in, the script stops and
+prints the `az login` line to run first:
+
+```powershell
+pwsh -NoProfile -File scripts/lab/Register-LabAgent.ps1
 ```
+
+Success is the line `Agent: hcw-labs-agent is active and has logged no
+failure since it started: it is heartbeating.` near the end of the run,
+which then exits 0, and `vps-hostinger-01` Online at
+https://hybridcloudworks.com/admin/labs?tab=agents. The one thing it cannot
+do is the API's second gate, the `lab_agents/vps-hostinger-01` registry
+document: no route or admin page writes that container yet, so the script
+prints the document the API needs and, until it exists, ends by saying the
+API refuses the agent with `Agent access required`. Every result it can end
+with, and what each means, is
+[docs/runbooks/labs-host.md](../docs/runbooks/labs-host.md), "The lab
+agent's go-live".
 
 ## Rotating the agent certificate
 
@@ -603,25 +637,32 @@ seen. Bash, on the host:
 sudo sh -c 'umask 077 && openssl req -x509 -newkey rsa:4096 -sha256 -nodes -days 730 -subj "/CN=vps-hostinger-01" -keyout /etc/hcw/labs-agent.next.pem -out /etc/hcw/labs-agent.next.crt && cat /etc/hcw/labs-agent.next.crt >> /etc/hcw/labs-agent.next.pem'
 ```
 
-```bash
-sudo cat /etc/hcw/labs-agent.next.crt
+Register the new certificate before the agent uses it, with the same script
+as the first time. PowerShell, on the workstation, from the repository root:
+
+```powershell
+pwsh -NoProfile -File scripts/lab/Register-LabAgent.ps1 -NextCertificate
 ```
 
-Upload that certificate to the agent's app registration (the same owner
-step as the first one, `docs/standards/required-inputs.md` section 4.7) and
-leave the old certificate in place there until the swap below has run. Then,
-bash, on the host:
+It reads `/etc/hcw/labs-agent.next.crt`, checks it against
+`labs-agent.next.pem` on the host, appends it to the app registration and
+leaves the old certificate there; it touches neither the vault nor
+`bootstrap.sh`. It ends by printing the swap below as one PowerShell line.
+The same swap, bash, on the host:
 
 ```bash
 sudo sh -c 'mv /etc/hcw/labs-agent.next.pem /etc/hcw/labs-agent.pem && mv /etc/hcw/labs-agent.next.crt /etc/hcw/labs-agent.crt && chown root:hcw-labs-agent /etc/hcw/labs-agent.pem && chmod 0640 /etc/hcw/labs-agent.pem && chmod 0644 /etc/hcw/labs-agent.crt && systemctl restart hcw-labs-agent'
 ```
 
-Success looks like the agent back to Online on `/admin/labs` within a
-minute and `sudo journalctl -u hcw-labs-agent -n 20 --no-pager` showing a
-heartbeat rather than an authentication error. Only then remove the old
-certificate from the app registration. A re-run of the play afterwards
-reports the certificate task unchanged, because the file exists, and the
-expiry warning is gone.
+Success looks like the agent back to Online on
+https://hybridcloudworks.com/admin/labs?tab=agents within a minute, and
+`sudo journalctl -u hcw-labs-agent -n 20 --no-pager` showing no `heartbeat
+failed` line after its `starting against` line (a heartbeat that works logs
+nothing). Only then remove the old certificate: run the script once more
+without `-NextCertificate`, and once it finds the agent heartbeating it
+prints the `az ad app credential delete` line for each other certificate on
+the registration. A re-run of the play afterwards reports the certificate
+task unchanged, because the file exists, and the expiry warning is gone.
 
 ## Validating without a host
 

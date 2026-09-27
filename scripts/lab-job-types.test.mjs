@@ -14,6 +14,13 @@
  * the frontend's vitest config cannot resolve, so its list is read from the
  * source text: the `type:` and `payloadEncodings:` of every entry between
  * `FALLBACK_JOB_TYPES = [` and the closing `];`.
+ *
+ * A fourth list is the capabilities of the lab_agents registry document that
+ * scripts/lab/Register-LabAgent.ps1 prints (`Get-LabJobTypes`). It decides
+ * what the agent may claim once the document exists, so a type missing there
+ * is a type the host never runs. PowerShell cannot be imported either, so it
+ * is read from the source text the same way: the quoted names in the
+ * `return [string[]]@(...)` line of that function.
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -28,6 +35,17 @@ const labsViewSource = readFileSync(
   path.join(here, '..', 'frontend', 'src', 'components', 'admin', 'labs', 'labsView.js'),
   'utf8'
 );
+const registerLabAgentSource = readFileSync(path.join(here, 'lab', 'Register-LabAgent.ps1'), 'utf8');
+
+function registrationJobTypes(source) {
+  const start = source.indexOf('function Get-LabJobTypes {');
+  const end = source.indexOf('\n}\n', start);
+  expect(start).toBeGreaterThan(-1);
+  expect(end).toBeGreaterThan(start);
+  const list = source.slice(start, end).match(/return \[string\[\]\]@\(([^)]*)\)/);
+  expect(list, 'Get-LabJobTypes has no return [string[]]@(...) line').not.toBeNull();
+  return [...list[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
+}
 
 function fallbackJobTypes(source) {
   const start = source.indexOf('FALLBACK_JOB_TYPES = [');
@@ -45,7 +63,7 @@ function fallbackJobTypes(source) {
   return entries;
 }
 
-describe('lab job types are declared in all three places', () => {
+describe('lab job types are declared in every place that lists them', () => {
   const server = Object.keys(LAB_JOB_TYPES).sort();
   const agent = Object.keys(CAPABILITIES).sort();
   const console = fallbackJobTypes(labsViewSource);
@@ -56,6 +74,12 @@ describe('lab job types are declared in all three places', () => {
 
   it('the admin console fallback names the same types', () => {
     expect(Object.keys(console).sort()).toEqual(server);
+  });
+
+  it('the registry document Register-LabAgent.ps1 prints names the same types, once each', () => {
+    const registered = registrationJobTypes(registerLabAgentSource);
+    expect(new Set(registered).size).toBe(registered.length);
+    expect([...registered].sort()).toEqual(server);
   });
 
   it('every type accepts the same payload encodings in all three', () => {
