@@ -1214,6 +1214,30 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **`tfc-plan-check` compares every attribute of an update, not only the
+  Function App's `app_settings` (#719).** `scripts/assert-expected-plan.mjs`
+  read `app_settings` alone, so #718's `runtime_version "22" -> "24"` passed
+  unexamined. Every update in the plan is now compared `before` against
+  `after`, leaf by leaf. Each difference is named by its path
+  (`runtime_version`, `site_config[0].http2_enabled`,
+  `app_settings["AzureWebJobs.x.Disabled"]`) with both values. The allow-list
+  is unchanged: the per-apply `RUNTIME_CONFIG_WRITER` line and the three azapi
+  replacements. Any other difference fails the check. Values follow the
+  plan's own markers. A sensitive one prints as `(sensitive)` on both sides,
+  and one in `after_unknown` as `(known after apply)`. A list or object about
+  to be recomputed prints by its size, because a local Terraform 1.15.8 plan
+  showed secrets reaching `before` in plaintext, and one of them unmarked
+  (`terraform_data`'s `output`). An intended change passes only when the pull
+  request that makes it adds an entry to `DECLARED` in the same file, with the
+  exact before and after values. The entry then matches nothing once the
+  change has applied, and is reported as a NOTE to delete rather than a
+  failure. A sensitive or unknown change cannot be declared.
+  `check-tfc-plan.mjs` prints the declarations, and `tfc-plan-check.yml`'s
+  header says the declarations read are those on the dispatched ref. The
+  tests use a plan-JSON fixture, `scripts/fixtures/plan-permanent-diff.json`,
+  whose attribute names are held to `infra/functionapp.tf`. `DECLARED` ships
+  empty: the live app already runs Node.js 24.
+
 - **Audio from the API plays, and upstream failures reach the page.** Two
   site-wide faults found on the Audio tab on 2026-09-26. The CSP had no
   `media-src`, so `default-src 'self'` blocked every `<audio>` streaming from

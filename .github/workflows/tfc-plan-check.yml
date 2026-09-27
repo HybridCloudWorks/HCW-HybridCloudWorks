@@ -7,6 +7,23 @@
 # summary below, because "the plan is wrong" and "I could not see the plan" are
 # opposite conclusions that a single red X would merge.
 #
+# EVERY ATTRIBUTE OF EVERY UPDATE (#719). An update is compared `before`
+# against `after`, leaf by leaf, not only on the Function App's
+# `app_settings`. Until #719 that was all it read, so #718's
+# `runtime_version "22" -> "24"` passed unexamined. Anything outside the
+# RUNTIME_CONFIG_WRITER line and the three azapi replacements is UNEXPECTED,
+# named by path with both values, and a sensitive or recomputed value prints as
+# `(sensitive)` or `(known after apply)`, never the value itself.
+#
+# AN INTENDED CHANGE PASSES ONLY WHEN IT IS DECLARED. The pull request that
+# makes it adds an entry to `DECLARED` in scripts/assert-expected-plan.mjs,
+# with the exact before and after values, in the same diff; that file's header
+# has the format. This job reads the declarations in its own checkout, which
+# is the ref it was dispatched on (normally main), NOT the `commit` input. So
+# dispatch from main after the pull request has merged. A declaration still
+# listed after its change has applied is printed as a NOTE, not a failure,
+# and should be deleted.
+#
 # WHY IT IS DISPATCH-ONLY, AND NOT A STEP IN iac-validate.yml.
 #
 # The obvious wiring — run this on every infra pull request — would produce a
@@ -196,7 +213,7 @@ jobs:
             echo "## TFC plan check"
             echo ""
             case "${CODE}" in
-              0) echo "**Expected.** The plan carries only the known permanent diff. Safe to confirm." ;;
+              0) echo "**Expected.** The plan carries only the known permanent diff, plus any change declared in \`scripts/assert-expected-plan.mjs\`. Safe to confirm." ;;
               1)
                 if [ "${AWAITING}" = "yes" ]; then
                   echo "**UNEXPECTED.** The plan contains changes beyond the known permanent diff. Read it before confirming."

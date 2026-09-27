@@ -1,0 +1,268 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.16.4",
+  "resource_changes": [
+    {
+      "address": "azapi_resource_action.function_app_settings",
+      "mode": "managed",
+      "type": "azapi_resource_action",
+      "name": "function_app_settings",
+      "provider_name": "registry.terraform.io/azure/azapi",
+      "change": {
+        "actions": ["delete", "create"],
+        "before": {
+          "action": "config/appsettings/list",
+          "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-web-site-prod-cus/providers/Microsoft.Web/sites/func-site-prod-cus-01",
+          "method": "POST",
+          "output": {},
+          "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-web-site-prod-cus/providers/Microsoft.Web/sites/func-site-prod-cus-01",
+          "type": "Microsoft.Web/sites@2024-04-01"
+        },
+        "after": {
+          "action": "config/appsettings/list",
+          "method": "POST",
+          "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-web-site-prod-cus/providers/Microsoft.Web/sites/func-site-prod-cus-01",
+          "type": "Microsoft.Web/sites@2024-04-01"
+        },
+        "after_unknown": { "id": true, "output": true },
+        "before_sensitive": { "output": true },
+        "after_sensitive": { "output": true }
+      },
+      "action_reason": "replace_by_triggers"
+    },
+    {
+      "address": "azapi_update_resource.function_app_settings_without_webjobs_storage",
+      "mode": "managed",
+      "type": "azapi_update_resource",
+      "name": "function_app_settings_without_webjobs_storage",
+      "provider_name": "registry.terraform.io/azure/azapi",
+      "change": {
+        "actions": ["delete", "create"],
+        "before": {
+          "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-web-site-prod-cus/providers/Microsoft.Web/sites/func-site-prod-cus-01/config/appsettings",
+          "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-web-site-prod-cus/providers/Microsoft.Web/sites/func-site-prod-cus-01/config/appsettings",
+          "type": "Microsoft.Web/sites/config@2024-04-01"
+        },
+        "after": {
+          "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-web-site-prod-cus/providers/Microsoft.Web/sites/func-site-prod-cus-01/config/appsettings",
+          "type": "Microsoft.Web/sites/config@2024-04-01"
+        },
+        "after_unknown": { "body": true, "id": true, "output": true },
+        "before_sensitive": { "body": true, "output": true },
+        "after_sensitive": { "body": true, "output": true }
+      },
+      "action_reason": "replace_by_triggers"
+    },
+    {
+      "address": "azapi_update_resource.function_app_ftp_basic_auth",
+      "mode": "managed",
+      "type": "azapi_update_resource",
+      "name": "function_app_ftp_basic_auth",
+      "provider_name": "registry.terraform.io/azure/azapi",
+      "change": {
+        "actions": ["delete", "create"],
+        "before": {
+          "body": { "properties": { "allow": false } },
+          "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-web-site-prod-cus/providers/Microsoft.Web/sites/func-site-prod-cus-01/basicPublishingCredentialsPolicies/ftp",
+          "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-web-site-prod-cus/providers/Microsoft.Web/sites/func-site-prod-cus-01/basicPublishingCredentialsPolicies/ftp",
+          "type": "Microsoft.Web/sites/basicPublishingCredentialsPolicies@2023-12-01"
+        },
+        "after": {
+          "body": { "properties": { "allow": false } },
+          "resource_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-web-site-prod-cus/providers/Microsoft.Web/sites/func-site-prod-cus-01/basicPublishingCredentialsPolicies/ftp",
+          "type": "Microsoft.Web/sites/basicPublishingCredentialsPolicies@2023-12-01"
+        },
+        "after_unknown": { "body": { "properties": {} }, "id": true, "output": true },
+        "before_sensitive": { "body": { "properties": {} } },
+        "after_sensitive": { "body": { "properties": {} } }
+      },
+      "action_reason": "replace_by_triggers"
+    },
+    {
+      "address": "azurerm_function_app_flex_consumption.hcw",
+      "mode": "managed",
+      "type": "azurerm_function_app_flex_consumption",
+      "name": "hcw",
+      "provider_name": "registry.terraform.io/hashicorp/azurerm",
+      "change": {
+        "actions": ["update"],
+        "before": {
+          "app_settings": {
+            "AzureWebJobsStorage__accountName": "stfuncsiteprodcus01",
+            "COSMOS_DATABASE": "hcw",
+            "ELEVENLABS_API_KEY": "@Microsoft.KeyVault(SecretUri=https://kv-site-prod-cus-01.vault.azure.net/secrets/ELEVENLABS-API-KEY)",
+            "NODE_ENV": "production",
+            "RUNTIME_CONFIG_GENERATION": "1",
+            "RUNTIME_CONFIG_WRITER": "azapi-strip"
+          },
+          "https_only": true,
+          "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-web-site-prod-cus/providers/Microsoft.Web/sites/func-site-prod-cus-01",
+          "identity": [
+            {
+              "identity_ids": [],
+              "principal_id": "00000000-0000-0000-0000-000000000000",
+              "tenant_id": "00000000-0000-0000-0000-000000000000",
+              "type": "SystemAssigned"
+            }
+          ],
+          "instance_memory_in_mb": 2048,
+          "location": "centralus",
+          "maximum_instance_count": 20,
+          "name": "func-site-prod-cus-01",
+          "resource_group_name": "rg-web-site-prod-cus",
+          "runtime_name": "node",
+          "runtime_version": "24",
+          "service_plan_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-web-site-prod-cus/providers/Microsoft.Web/serverFarms/asp-site-prod-cus-01",
+          "site_config": [
+            {
+              "application_insights_connection_string": "InstrumentationKey=00000000-0000-0000-0000-000000000000;IngestionEndpoint=https://centralus-0.in.applicationinsights.azure.com/",
+              "application_insights_key": "00000000-0000-0000-0000-000000000000",
+              "cors": [
+                {
+                  "allowed_origins": [
+                    "https://hybridcloudworks.com",
+                    "https://www.hybridcloudworks.com",
+                    "https://calm-ground-0d0e6a010.7.azurestaticapps.net"
+                  ],
+                  "support_credentials": false
+                }
+              ],
+              "http2_enabled": true,
+              "ip_restriction": [],
+              "ip_restriction_default_action": "Allow",
+              "scm_ip_restriction": [],
+              "scm_ip_restriction_default_action": "Allow"
+            }
+          ],
+          "site_credential": [{ "name": "$func-site-prod-cus-01", "password": "" }],
+          "storage_access_key": null,
+          "storage_authentication_type": "SystemAssignedIdentity",
+          "storage_container_endpoint": "https://stfuncsiteprodcus01.blob.core.windows.net/function-releases",
+          "storage_container_type": "blobContainer",
+          "tags": { "environment": "prod", "workload": "site" },
+          "timeouts": null,
+          "virtual_network_subnet_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-net-site-prod-cus/providers/Microsoft.Network/virtualNetworks/vnet-site-prod-cus/subnets/snet-functions-integration",
+          "webdeploy_publish_basic_authentication_enabled": false
+        },
+        "after": {
+          "app_settings": {
+            "AzureWebJobsStorage__accountName": "stfuncsiteprodcus01",
+            "COSMOS_DATABASE": "hcw",
+            "ELEVENLABS_API_KEY": "@Microsoft.KeyVault(SecretUri=https://kv-site-prod-cus-01.vault.azure.net/secrets/ELEVENLABS-API-KEY)",
+            "NODE_ENV": "production",
+            "RUNTIME_CONFIG_GENERATION": "1",
+            "RUNTIME_CONFIG_WRITER": "azurerm"
+          },
+          "https_only": true,
+          "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-web-site-prod-cus/providers/Microsoft.Web/sites/func-site-prod-cus-01",
+          "identity": [
+            {
+              "identity_ids": [],
+              "principal_id": "00000000-0000-0000-0000-000000000000",
+              "tenant_id": "00000000-0000-0000-0000-000000000000",
+              "type": "SystemAssigned"
+            }
+          ],
+          "instance_memory_in_mb": 2048,
+          "location": "centralus",
+          "maximum_instance_count": 20,
+          "name": "func-site-prod-cus-01",
+          "resource_group_name": "rg-web-site-prod-cus",
+          "runtime_name": "node",
+          "runtime_version": "24",
+          "service_plan_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-web-site-prod-cus/providers/Microsoft.Web/serverFarms/asp-site-prod-cus-01",
+          "site_config": [
+            {
+              "application_insights_connection_string": "InstrumentationKey=00000000-0000-0000-0000-000000000000;IngestionEndpoint=https://centralus-0.in.applicationinsights.azure.com/",
+              "application_insights_key": "00000000-0000-0000-0000-000000000000",
+              "cors": [
+                {
+                  "allowed_origins": [
+                    "https://hybridcloudworks.com",
+                    "https://www.hybridcloudworks.com",
+                    "https://calm-ground-0d0e6a010.7.azurestaticapps.net"
+                  ],
+                  "support_credentials": false
+                }
+              ],
+              "http2_enabled": true,
+              "ip_restriction": [],
+              "ip_restriction_default_action": "Allow",
+              "scm_ip_restriction": [],
+              "scm_ip_restriction_default_action": "Allow"
+            }
+          ],
+          "site_credential": [{ "name": "$func-site-prod-cus-01", "password": "" }],
+          "storage_access_key": null,
+          "storage_authentication_type": "SystemAssignedIdentity",
+          "storage_container_endpoint": "https://stfuncsiteprodcus01.blob.core.windows.net/function-releases",
+          "storage_container_type": "blobContainer",
+          "tags": { "environment": "prod", "workload": "site" },
+          "timeouts": null,
+          "virtual_network_subnet_id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-net-site-prod-cus/providers/Microsoft.Network/virtualNetworks/vnet-site-prod-cus/subnets/snet-functions-integration",
+          "webdeploy_publish_basic_authentication_enabled": false
+        },
+        "after_unknown": {
+          "app_settings": {},
+          "identity": [{ "identity_ids": [] }],
+          "site_config": [
+            {
+              "cors": [{ "allowed_origins": [false, false, false] }],
+              "ip_restriction": [],
+              "scm_ip_restriction": []
+            }
+          ],
+          "site_credential": [{}],
+          "tags": {}
+        },
+        "before_sensitive": {
+          "app_settings": {},
+          "identity": [{ "identity_ids": [] }],
+          "site_config": [
+            {
+              "application_insights_connection_string": true,
+              "application_insights_key": true,
+              "cors": [{ "allowed_origins": [false, false, false] }],
+              "ip_restriction": [],
+              "scm_ip_restriction": []
+            }
+          ],
+          "site_credential": true,
+          "storage_access_key": true,
+          "tags": {}
+        },
+        "after_sensitive": {
+          "app_settings": {},
+          "identity": [{ "identity_ids": [] }],
+          "site_config": [
+            {
+              "application_insights_connection_string": true,
+              "application_insights_key": true,
+              "cors": [{ "allowed_origins": [false, false, false] }],
+              "ip_restriction": [],
+              "scm_ip_restriction": []
+            }
+          ],
+          "site_credential": true,
+          "storage_access_key": true,
+          "tags": {}
+        }
+      }
+    },
+    {
+      "address": "azurerm_key_vault.hcw",
+      "mode": "managed",
+      "type": "azurerm_key_vault",
+      "name": "hcw",
+      "provider_name": "registry.terraform.io/hashicorp/azurerm",
+      "change": {
+        "actions": ["no-op"],
+        "before": { "name": "kv-site-prod-cus-01" },
+        "after": { "name": "kv-site-prod-cus-01" },
+        "after_unknown": {},
+        "before_sensitive": {},
+        "after_sensitive": {}
+      }
+    }
+  ]
+}

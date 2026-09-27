@@ -53,7 +53,7 @@
 
 import { pathToFileURL } from 'node:url';
 
-import { EXPECTED, checkPlan } from './assert-expected-plan.mjs';
+import { EXPECTED, checkPlan, declarationLines } from './assert-expected-plan.mjs';
 
 const API = 'https://app.terraform.io/api/v2';
 const ORGANIZATION = 'hcw';
@@ -466,16 +466,25 @@ async function main() {
     return 2;
   }
 
+  // Declared changes (#719) are listed on both paths: what a pull request said
+  // to expect is part of the verdict, and a declaration the plan no longer
+  // contains is a prompt to delete it, not a failure.
   if (result.ok) {
-    console.log('\nOK — the plan carries the known permanent diff and nothing else:');
+    console.log(
+      result.declared.length === 0
+        ? '\nOK — the plan carries the known permanent diff and nothing else:'
+        : '\nOK — the plan carries the known permanent diff, its declared changes, and nothing else:'
+    );
     for (const address of EXPECTED.replaced) console.log(`     replace  ${address}`);
     for (const { address, attribute } of EXPECTED.updated) {
       console.log(`     update   ${address} (${attribute})`);
     }
+    for (const line of declarationLines(result)) console.log(line);
     return 0;
   }
 
   console.error('');
+  for (const line of declarationLines(result)) console.error(line);
   for (const line of result.unexpected) console.error(`UNEXPECTED  ${line}`);
   for (const address of result.missing) {
     console.error(
