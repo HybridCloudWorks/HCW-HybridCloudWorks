@@ -4,10 +4,12 @@
 # Two final targets:
 #
 #   runner  terraform, kubeconform, helm, ansible-core, a Terraform provider
-#           filesystem mirror at /opt/terraform/mirror and the AVM pattern
-#           modules at /opt/avm/<name>@<version>. Runs as uid 65534 with
-#           /workspace mounted read-only, and `terraform init` needs no
-#           network for any provider in the mirror.
+#           filesystem mirror at /opt/terraform/mirror, and every Azure
+#           Verified Module the Landing Zone Builder emits plus every
+#           registry module those call, at /opt/avm/<name>@<version>. Runs as
+#           uid 65534 with /workspace mounted read-only, and `terraform init`
+#           needs no network for any provider in the mirror or any vendored
+#           module.
 #   full    runner plus Azure CLI, kubectl, git, curl, jq and the three
 #           packages code-server needs. CMD is bash.
 #
@@ -94,10 +96,17 @@ RUN set -eu; . /build/versions.env; \
       --only-binary=:all: --require-hashes --dest /out/wheels -r /out/wheels/requirements.txt; \
     test "$(find /out/wheels -name '*.whl' | wc -l)" -eq "$(wc -l < /out/wheels/requirements.txt)"
 
-# AVM pattern modules, vendored from the release source tarball of each
-# repository into /opt/avm/<name>@<version>, where <name> is the registry
-# module name (Azure/<name>/azurerm) so a `source = "Azure/avm-ptn-alz/azurerm"`
-# rewrites to `source = "/opt/avm/avm-ptn-alz@0.21.0"` mechanically.
+# The builder modules: every Azure Verified Module the Landing Zone Builder
+# emits (ADR 0032 decision 5), vendored from the release source tarball of
+# each repository into /opt/avm/<name>@<version>, where <name> is the
+# registry module name (Azure/<name>/azurerm), so hcw-terraform-validate maps
+# `source = "Azure/avm-ptn-alz/azurerm"` plus a version to that directory
+# mechanically. The list is not written here: it is every `AVM_<KEY>_VERSION`
+# line in versions.env, <KEY> being the name upper-cased with `-` as `_`,
+# each with its `AVM_<KEY>_SHA256` beside it, and
+# scripts/lab-image-avm-vendoring.test.mjs holds those lines equal to
+# frontend/src/lib/landingZone/avmVersions.js. A version with no sum fails
+# here, and a sum that does not match fails at `sha256sum -c`.
 RUN set -eu; . /build/versions.env; \
     vendor() { \
       name="$1"; version="$2"; sum="$3"; \
@@ -108,24 +117,30 @@ RUN set -eu; . /build/versions.env; \
       tar -xzf "${name}.tgz" -C "/out/avm/${name}@${version}" --strip-components=1; \
       rm -f "${name}.tgz"; \
     }; \
-    vendor avm-ptn-alz "${AVM_PTN_ALZ_VERSION}" "${AVM_PTN_ALZ_SHA256}"; \
-    vendor avm-ptn-alz-management "${AVM_PTN_ALZ_MANAGEMENT_VERSION}" "${AVM_PTN_ALZ_MANAGEMENT_SHA256}"; \
-    vendor avm-ptn-alz-connectivity-hub-and-spoke-vnet "${AVM_PTN_ALZ_CONNECTIVITY_HUB_AND_SPOKE_VNET_VERSION}" "${AVM_PTN_ALZ_CONNECTIVITY_HUB_AND_SPOKE_VNET_SHA256}"
+    keys="$(sed -n 's/^AVM_\([A-Z0-9_]*\)_VERSION=.*$/\1/p' /build/versions.env)"; \
+    test -n "${keys}"; \
+    for key in ${keys}; do \
+      eval "version=\${AVM_${key}_VERSION}; sum=\${AVM_${key}_SHA256:-}"; \
+      if [ -z "${sum}" ]; then echo "versions.env: AVM_${key}_VERSION has no AVM_${key}_SHA256 beside it" >&2; exit 1; fi; \
+      vendor "avm-$(printf '%s' "${key}" | tr 'A-Z_' 'a-z-')" "${version}" "${sum}"; \
+    done; \
+    ls /out/avm
 
 # ---------------------------------------------------------------------------
-# vendor: the pattern modules' registry children, vendored beside them and
-# their `source` lines rewritten to relative local paths, so all three
-# pattern modules init with no network (#675). vendor-avm.sh explains the
-# mechanism; the short version is that Terraform has no module mirror, so the
-# only way a module that calls registry modules inits offline is for the
-# vendored copy to call local copies instead. Every child is pinned by tree
-# hash in versions.env (AVM_CHILD_MODULES) and the script fails the build on
-# a mismatch, an unpinned child or an unused pin. git (installed in fetch) is
-# what Terraform uses to fetch registry modules; the base image's python3 does
-# the JSON and the rewrite. The runner copies /out/avm out of this stage and
-# nothing else.
+# vendor: the builder modules' registry children, vendored beside them and
+# their `source` lines rewritten to relative local paths, so every builder
+# module inits with no network (#675). vendor-avm.sh explains the mechanism;
+# the short version is that Terraform has no module mirror, so the only way a
+# module that calls registry modules inits offline is for the vendored copy
+# to call local copies instead. Every child is pinned by tree hash in
+# versions.env (AVM_CHILD_MODULES), what each builder module calls is recorded
+# there too (AVM_CHILD_CALLS), and the script fails the build on a mismatch,
+# an unpinned child, an unused pin or a call the record does not match. git
+# (installed in fetch) is what Terraform uses to fetch registry modules; the
+# base image's python3 does the JSON and the rewrite. The runner copies
+# /out/avm out of this stage and nothing else.
 #
-# AVM_PRINT_PINS=1 prints the pins instead of checking them, for a bump:
+# AVM_PRINT_PINS=1 prints both blocks instead of checking them, for a bump:
 #   docker build --target vendor --build-arg AVM_PRINT_PINS=1 --progress=plain lab-image
 # ---------------------------------------------------------------------------
 FROM fetch AS vendor
@@ -133,7 +148,7 @@ FROM fetch AS vendor
 COPY vendor-avm.sh /build/vendor-avm.sh
 ARG AVM_PRINT_PINS=
 RUN set -eu; . /build/versions.env; \
-    export AVM_CHILD_MODULES; \
+    export AVM_CHILD_MODULES AVM_CHILD_CALLS; \
     AVM_PRINT_PINS="${AVM_PRINT_PINS}" AVM_ROOT=/out/avm TERRAFORM=/out/bin/terraform SCRATCH=/build/get \
       bash /build/vendor-avm.sh
 

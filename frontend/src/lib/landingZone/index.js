@@ -82,7 +82,14 @@ export {
   withDependencies,
 } from './state';
 export { decodeLz, encodeLz, isLzParam } from './share';
-export { LAB_IMAGE_AVM, LAB_IMAGE_AVM_ROOT, labModuleReport, labResolution } from './labImage';
+export {
+  LAB_IMAGE_AVM,
+  LAB_IMAGE_AVM_ROOT,
+  LAB_IMAGE_BUILDER_AVM,
+  LAB_IMAGE_CHILD_AVM,
+  labModuleReport,
+  labResolution,
+} from './labImage';
 export { chooseVendored, parseVersion, satisfies, vendoredModules } from './tfConstraints';
 export { emitFiles } from './hcl/index';
 export { BASELINE_ASSIGNMENTS, POLICY_DEFAULTS, groupsAssigning } from './hcl/policy';

@@ -49,7 +49,7 @@ const OFFLINE = {
 };
 const OPEN = { configured: true, open: true, code: null, reason: null, queued: 0 };
 
-/** A build the runner image can initialise: no spoke, so no virtual network module. */
+/** A small build the runner image can initialise: the platform with no landing zone. */
 const NO_SPOKES = emitFiles(
   decodeLz(new URLSearchParams('lz=mg,policy,mgmt,hub,fw&corp=0&online=0'))
 );
@@ -141,12 +141,41 @@ describe('closed until the server says open', () => {
   });
 });
 
+/** One spoke pinned to a release the image does not carry. */
+const UNVENDORED = [
+  {
+    path: 'main.tf',
+    content:
+      'module "spoke" {\n  source  = "Azure/avm-res-network-virtualnetwork/azurerm"\n  version = "0.23.0"\n}\n',
+  },
+];
+
 describe('what the runner image can resolve', () => {
-  it('refuses the default build, naming the module the image does not vendor', async () => {
+  // The builder's full default build: every component, the identity, corp
+  // and online spokes among them. Until the image vendored the spokes'
+  // avm-res-network-virtualnetwork 0.22.2 (2026-09-27), this was refused.
+  it('accepts the full default build, spokes included, and sends it on a click', async () => {
+    const requests = requestsFor({
+      jobs: [{ id: 'job-1', status: 'succeeded', exitCode: 0, output: 'Success!' }],
+    });
+    renderControl({ files: DEFAULT_FILES, requests });
+    await waitFor(() => expect(button()).toBeEnabled());
+    expect(line().textContent).toBe(LINES.ready);
+
+    fireEvent.click(button());
+    await screen.findByTestId('lz-lab-output');
+    // Sent, so under the 64 KB payload cap as well as fully vendored.
+    expect(requests.submit).toHaveBeenCalledTimes(1);
+    const [[sent]] = requests.submit.mock.calls;
+    const unpacked = parseTar(decodeTarPayload(sent.payload)).map((e) => e.path);
+    expect(unpacked).toEqual(DEFAULT_FILES.map((f) => f.path));
+  });
+
+  it('still refuses a build calling a version the image does not vendor, naming it', async () => {
     const requests = requestsFor();
-    render(<LzLabValidate files={DEFAULT_FILES} requests={requests} />);
+    render(<LzLabValidate files={UNVENDORED} requests={requests} />);
     await waitFor(() =>
-      expect(line().textContent).toContain('avm-res-network-virtualnetwork 0.22.2')
+      expect(line().textContent).toContain('avm-res-network-virtualnetwork 0.23.0')
     );
     expect(button()).toBeDisabled();
     expect(requests.submit).not.toHaveBeenCalled();
@@ -161,8 +190,20 @@ describe('what the runner image can resolve', () => {
       'module "alz" (Azure/avm-ptn-alz/azurerm 0.21.0) → the vendored copy avm-ptn-alz@0.21.0',
     ]);
     expect(text).toContainEqual([
-      'false',
-      'module "spoke_identity" (Azure/avm-res-network-virtualnetwork/azurerm 0.22.2) → not vendored (the image has 0.15.0)',
+      'true',
+      'module "spoke_identity" (Azure/avm-res-network-virtualnetwork/azurerm 0.22.2) → the vendored copy avm-res-network-virtualnetwork@0.22.2',
+    ]);
+    expect(text.every(([vendored]) => vendored === 'true')).toBe(true);
+  });
+
+  it('names what the image has for a module it cannot resolve', async () => {
+    render(<LzLabValidate files={UNVENDORED} requests={requestsFor()} />);
+    const rows = screen.getByTestId('lz-lab-modules').querySelectorAll('li');
+    expect(Array.from(rows).map((li) => [li.dataset.vendored, li.textContent])).toEqual([
+      [
+        'false',
+        'module "spoke" (Azure/avm-res-network-virtualnetwork/azurerm 0.23.0) → not vendored (the image has 0.15.0, 0.22.2)',
+      ],
     ]);
   });
 

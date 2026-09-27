@@ -13,6 +13,13 @@
 #            docker-runner.js under the full job sandbox (#675). That is why
 #            the two agent files it imports are in the path filter: a change
 #            to the sandbox flags is a change to what this image must pass.
+#            It also validates the Landing Zone Builder's full default build,
+#            generated from frontend/src/lib/landingZone at run time, so that
+#            directory is in the pull_request filter for the same reason: a
+#            builder that starts emitting a module the image does not vendor
+#            fails here (ADR 0032 decision 5). It is not in the push filter,
+#            because a builder change alone changes nothing in the image and
+#            should not republish it.
 #            `contents: read` and nothing else,
 #            because a same-repository pull request can edit this file and run
 #            any shell step here; with only a read token that edit can prove
@@ -56,6 +63,7 @@ on:
       - 'lab-image/**'
       - 'vps-agent/lib/docker-runner.js'
       - 'vps-agent/lib/capabilities.js'
+      - 'frontend/src/lib/landingZone/**'
       - '.github/workflows/publish-lab-image.yml'
   push:
     branches: [main]

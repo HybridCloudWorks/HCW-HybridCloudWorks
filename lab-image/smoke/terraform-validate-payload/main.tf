@@ -4,6 +4,16 @@
 # hcw-terraform-validate with no network; the script rewrites each module
 # below to its vendored copy under /opt/avm and the init must then succeed.
 # Nothing here is changed by that: the rewrite happens on the tmpfs copy.
+#
+# One block per module the builder emits, each called once, and each
+# constraint satisfied by the version the builder pins:
+# scripts/lab-image-avm-vendoring.test.mjs holds this file to that, because
+# smoke.sh expects exactly one rewrite per builder module. The constraints
+# differ on purpose, to exercise the operators hcw-terraform-validate
+# evaluates; the spoke's is `>= 0.15.0` so that both vendored versions of
+# avm-res-network-virtualnetwork (0.15.0, a child of the connectivity
+# module, and 0.22.2) satisfy it and the highest must be chosen.
+# sandbox-check.mjs validates the builder's real default build as well.
 terraform {
   required_version = ">= 1.12"
 
@@ -48,4 +58,12 @@ module "alz" {
 module "connectivity" {
   source  = "Azure/avm-ptn-alz-connectivity-hub-and-spoke-vnet/azurerm"
   version = ">= 0.17.0, < 0.18.0"
+}
+
+module "spoke" {
+  source  = "Azure/avm-res-network-virtualnetwork/azurerm"
+  version = ">= 0.15.0"
+
+  location  = "centralus"
+  parent_id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-alz-spoke"
 }

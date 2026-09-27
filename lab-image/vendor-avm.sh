@@ -1,22 +1,34 @@
 #!/usr/bin/env bash
-# Transitive vendoring of the AVM pattern modules' registry children, run in
-# the Dockerfile's `vendor` stage with network (issue #675, Phase 2 of #658).
+# Transitive vendoring of the builder modules' registry children, run in the
+# Dockerfile's `vendor` stage with network (issue #675, Phase 2 of #658).
+#
+# The builder modules are the Azure Verified Modules the Landing Zone Builder
+# emits: one `<name>@<version>` directory each under $AVM_ROOT, put there by
+# the fetch stage from every `AVM_<KEY>_VERSION` pair in versions.env, which
+# scripts/lab-image-avm-vendoring.test.mjs holds equal to AVM_MODULES in
+# frontend/src/lib/landingZone/avmVersions.js. This script takes whatever
+# directories it finds, so it names none of them.
 #
 # Terraform has a provider mirror but no module mirror: a module that calls a
 # registry module needs the registry at `init`, however the providers arrive.
 # Measured in #686, avm-ptn-alz calls one registry child and the connectivity
 # module calls thirteen distinct ones (sixteen name@version pairs, since two
 # are called at two versions), some from inside its own nested modules. This
-# script makes all three pattern modules initialise under --network none:
+# script makes every builder module initialise under --network none:
 #
-#   1. `terraform get` each pattern module from a scratch root that calls it
+#   1. `terraform get` each builder module from a scratch root that calls it
 #      by relative path, so Terraform resolves and downloads the whole child
 #      tree and writes .terraform/modules/modules.json describing it.
 #   2. Copy each distinct registry child once to $AVM_ROOT/<name>@<version>,
-#      the same layout the pattern modules already use, pruned of examples,
+#      the same layout the builder modules already use, pruned of examples,
 #      tests and every dot-prefixed entry (see PRUNE_DIRS below for why the
 #      dotfiles matter). A child called with a `//modules/<sub>` suffix is
-#      vendored whole and referenced at its subdirectory.
+#      vendored whole and referenced at its subdirectory. Two versions of one
+#      module are two directories, so they coexist: the connectivity module
+#      calls avm-res-network-virtualnetwork@0.15.0 while the builder's spokes
+#      call 0.22.2. A child at exactly the name@version of a builder module
+#      is not copied a second time; its calls resolve to the builder module's
+#      own directory, which the fetch stage pinned by its tarball's SHA256.
 #   3. Inside the vendored copies, rewrite every `module` block that named a
 #      registry source to a RELATIVE local path (`../<name>@<version>`), and
 #      comment out its `version` argument, which Terraform rejects on a local
@@ -28,20 +40,25 @@
 #      block inside a nested module gets the `../../../` it needs.
 #   4. Verify. Every vendored child's tree hash must equal the one pinned in
 #      versions.env under AVM_CHILD_MODULES, every pinned child must have been
-#      used, and no unpinned child may appear: a pattern module bump that
-#      pulls a new child fails the build until the pin is written. Then a
-#      second `terraform get` of each pattern module against the rewritten
-#      tree must resolve every module to a local directory, and its output
-#      must not mention registry.terraform.io at all.
+#      used, and no unpinned child may appear: a builder module bump that
+#      pulls a new child fails the build until the pin is written. What each
+#      builder module's tree calls must equal its lines in AVM_CHILD_CALLS,
+#      and every builder module must have at least one: that record, keyed
+#      by the builder module's version, is what lets the static test check
+#      without a network that the children of the version avmVersions.js
+#      pins are vendored. Then a second `terraform get` of each builder
+#      module against the rewritten tree must resolve every module to a local
+#      directory, and its output must not mention registry.terraform.io.
 #
 # The tree hash is what coreutils computes with
 #   find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum
 # inside the vendored directory, reproduced in Python below so the same
 # definition serves the build and anyone checking a pin by hand.
 #
-# AVM_PRINT_PINS=1 prints the AVM_CHILD_MODULES value for versions.env instead
-# of verifying it (the procedure for bumping a pattern module, README
-# "Updating a version"), and exits 0 without the second-pass check.
+# AVM_PRINT_PINS=1 prints the AVM_CHILD_MODULES and AVM_CHILD_CALLS values for
+# versions.env instead of verifying them (the procedure for bumping a builder
+# module, README "Updating a version"), and exits 0 without the second-pass
+# check.
 set -euo pipefail
 
 : "${AVM_ROOT:=/out/avm}"
@@ -49,6 +66,7 @@ set -euo pipefail
 : "${SCRATCH:=/build/get}"
 : "${AVM_PRINT_PINS:=}"
 : "${AVM_CHILD_MODULES:?versions.env must define AVM_CHILD_MODULES (may be empty while printing pins)}"
+: "${AVM_CHILD_CALLS?versions.env must define AVM_CHILD_CALLS (may be empty while printing pins)}"
 
 export CHECKPOINT_DISABLE=1 TF_IN_AUTOMATION=1
 
@@ -70,25 +88,34 @@ terraform_get() {
   printf '%s\n' "$root"
 }
 
-mapfile -t patterns < <(cd "$AVM_ROOT" && ls -d -- *@* | LC_ALL=C sort)
-if [ "${#patterns[@]}" -eq 0 ]; then
+mapfile -t builders < <(cd "$AVM_ROOT" && ls -d -- *@* | LC_ALL=C sort)
+if [ "${#builders[@]}" -eq 0 ]; then
   echo "vendor-avm: no <name>@<version> directories under $AVM_ROOT" >&2
   exit 1
 fi
 
-echo "vendor-avm: pass 1, resolving children of: ${patterns[*]}"
+echo "vendor-avm: pass 1, resolving children of: ${builders[*]}"
 roots=()
-for p in "${patterns[@]}"; do
+for p in "${builders[@]}"; do
   roots+=("$(terraform_get "pass1-$p" "$AVM_ROOT/$p")")
 done
 
 # Everything that needs modules.json and file rewriting is Python: JSON, path
 # arithmetic and a brace-depth walk over HCL are all clearer there than in
-# awk, and python3 is in the vendor stage for exactly this.
-python3 - "$AVM_ROOT" "$AVM_PRINT_PINS" "${roots[@]}" <<'PY'
+# awk, and python3 is in the vendor stage for exactly this. Each root goes in
+# as `<builder module>=<scratch root>`, so the record of what it calls can be
+# kept per builder module.
+root_args=()
+for i in "${!builders[@]}"; do
+  root_args+=("${builders[$i]}=${roots[$i]}")
+done
+python3 - "$AVM_ROOT" "$AVM_PRINT_PINS" "${root_args[@]}" <<'PY'
 import hashlib, json, os, re, shutil, subprocess, sys
 
-avm_root, print_pins, roots = sys.argv[1], sys.argv[2] == "1", sys.argv[3:]
+avm_root, print_pins = sys.argv[1], sys.argv[2] == "1"
+roots = dict(arg.split("=", 1) for arg in sys.argv[3:])  # builder module -> scratch root
+builders = set(roots)
+calls = {}  # builder module -> sorted name@version of every registry module in its tree
 fetched_hash = {}  # "name@version" -> tree hash of the pruned download, before any rewrite
 REGISTRY = "registry.terraform.io/"
 # Dropped from every vendored copy: examples and tests (size), and every
@@ -234,10 +261,16 @@ def rewrite_call(parent_dir, child_name, entry, child_dir, version):
 
 vendored = {}  # "name@version" -> vendored dir
 rewrites = []
-for root in roots:
+for builder, root in sorted(roots.items()):
     with open(os.path.join(root, ".terraform", "modules", "modules.json")) as fh:
         modules = json.load(fh)["Modules"]
     by_key = {m["Key"]: m for m in modules}
+    reached = set()
+    for m in modules:
+        entry = parse_registry(m.get("Source", ""))
+        if entry:
+            reached.add(f"{entry[1]}@{m['Version']}")
+    calls[builder] = sorted(reached)
     abs_dir = lambda m: os.path.normpath(os.path.join(root, m["Dir"]))
 
     # Where each registry download landed -> where its vendored copy lives.
@@ -276,6 +309,9 @@ for root in roots:
         key = f"{name}@{m['Version']}"
         download_root = os.path.normpath(os.path.join(root, ".terraform", "modules", m["Key"]))
         dest = os.path.join(avm_root, key)
+        if key in builders:
+            print(f"vendor-avm: {m['Key']} calls {key}, a builder module; it resolves to that copy")
+            continue
         if key not in fetched_hash and not os.path.isdir(dest):
             shutil.copytree(download_root, dest, symlinks=False)
             prune(dest)
@@ -313,12 +349,25 @@ for root in roots:
 for parent, child, rel in sorted(set(rewrites)):
     print(f"vendor-avm: {parent}: module \"{child}\" -> {rel}")
 
-# Pins. In print mode, emit the value for versions.env and stop here.
+def call_lines():
+    """AVM_CHILD_CALLS: one `<builder> <child>` line per pair, a bare `<builder>` for none."""
+    for builder, children in sorted(calls.items()):
+        if not children:
+            yield builder
+        for child in children:
+            yield f"{builder} {child}"
+
+
+# Pins. In print mode, emit both values for versions.env and stop here.
 hashes = {key: tree_hash(path) for key, path in sorted(vendored.items())}
 if print_pins:
     print("AVM_CHILD_MODULES='")
     for key, digest in hashes.items():
         print(f"{key} {digest}")
+    print("'")
+    print("AVM_CHILD_CALLS='")
+    for line in call_lines():
+        print(line)
     print("'")
     sys.exit(0)
 
@@ -338,7 +387,27 @@ for key, digest in hashes.items():
         problems.append(f"{key} hashes {digest}, versions.env pins {pinned[key]}")
 for key in pinned:
     if key not in hashes:
-        problems.append(f"{key} is pinned in versions.env but no pattern module calls it")
+        problems.append(f"{key} is pinned in versions.env but no builder module calls it")
+
+# What each builder module's tree calls, against its AVM_CHILD_CALLS lines.
+recorded = {}
+for line in os.environ.get("AVM_CHILD_CALLS", "").splitlines():
+    fields = line.split()
+    if not fields or fields[0].startswith("#"):
+        continue
+    if len(fields) > 2:
+        problems.append(f"AVM_CHILD_CALLS line {line.strip()!r} has more than two fields")
+    recorded.setdefault(fields[0], set()).update(fields[1:2])
+for builder, children in sorted(calls.items()):
+    if builder not in recorded:
+        problems.append(f"{builder} has no line in AVM_CHILD_CALLS")
+        continue
+    for child in sorted(set(children) - recorded[builder]):
+        problems.append(f"{builder} calls {child}, which AVM_CHILD_CALLS does not record")
+    for child in sorted(recorded[builder] - set(children)):
+        problems.append(f"AVM_CHILD_CALLS records {builder} calling {child}, which it does not call")
+for builder in sorted(set(recorded) - builders):
+    problems.append(f"AVM_CHILD_CALLS records {builder}, which is not a builder module in versions.env")
 if problems:
     for p in problems:
         print(f"vendor-avm: {p}", file=sys.stderr)
@@ -346,16 +415,19 @@ if problems:
     sys.exit(1)
 for key, digest in hashes.items():
     print(f"vendor-avm: pinned {key} {digest}")
+for builder, children in sorted(calls.items()):
+    print(f"vendor-avm: {builder} calls {len(children)} registry module(s), as AVM_CHILD_CALLS records")
 PY
 
 if [ "$AVM_PRINT_PINS" = 1 ]; then
   exit 0
 fi
 
-# Pass 2: with the sources rewritten, every module Terraform resolves must be
-# a local directory and nothing may come from the registry.
+# Pass 2: with the sources rewritten, every module Terraform resolves from
+# each builder module must be a local directory and nothing may come from the
+# registry.
 echo "vendor-avm: pass 2, resolving the rewritten tree"
-for p in "${patterns[@]}"; do
+for p in "${builders[@]}"; do
   root="$(terraform_get "pass2-$p" "$AVM_ROOT/$p")"
   if grep -q 'registry.terraform.io' "$root/get.log"; then
     cat "$root/get.log" >&2
