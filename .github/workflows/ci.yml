@@ -50,9 +50,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # The lab-image and vps-agent paths are what the Landing Zone
+          # Builder's lab tests read (#672): labImage.test.js holds the
+          # builder's vendored-module list to lab-image's Dockerfile and
+          # versions.env, and labPayload.test.js unpacks the payload with the
+          # agent's own tar parser.
           - name: frontend
             dir: frontend
-            filter: '^(frontend/|\.azure/api-surface\.json)'
+            filter: '^(frontend/|\.azure/api-surface\.json|lab-image/(versions\.env|Dockerfile)$|vps-agent/lib/docker-runner\.js$)'
             lint: npm run lint
             format: npm run format:check
             build: npm run build

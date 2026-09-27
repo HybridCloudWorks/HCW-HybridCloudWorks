@@ -16,6 +16,11 @@
  *   state.js        normalisation and the dependency rule
  *   share.js        the build as a query string
  *   hcl/            the build as Terraform files, one module per file
+ *   labImage.js     which modules the lab's runner image can resolve (#672)
+ *   tfConstraints.js  Terraform version constraints, as the image reads them
+ *   labPayload.js   the files as a lab job payload (#672), imported by path
+ *                   rather than from here, as LzFiles imports the zip's
+ *                   compressor: only the button that sends one needs it
  *   diagram.js      the build as a laid-out tree
  */
 export {
@@ -77,6 +82,8 @@ export {
   withDependencies,
 } from './state';
 export { decodeLz, encodeLz, isLzParam } from './share';
+export { LAB_IMAGE_AVM, LAB_IMAGE_AVM_ROOT, labModuleReport, labResolution } from './labImage';
+export { chooseVendored, parseVersion, satisfies, vendoredModules } from './tfConstraints';
 export { emitFiles } from './hcl/index';
 export { BASELINE_ASSIGNMENTS, POLICY_DEFAULTS, groupsAssigning } from './hcl/policy';
 export { H_GAP, NODE_H, NODE_W, PAD, V_GAP, layoutDiagram } from './diagram';

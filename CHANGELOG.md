@@ -19,6 +19,50 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Landing Zone Builder: "Validate on the lab", and public lab submission
+  built inside ADR 0032 decision 6's bounds, closed (part of #672).** Three
+  anonymous routes in `functions/src/lib/labs/public-submit.js`, registered
+  in `labs-public-http.js`: `POST /api/public/labs/submit` queues one
+  `terraform-validate` job; `GET` on the same route says whether a POST
+  would be taken (`{ configured, open, code, reason, bounds }`, cached a
+  minute); `GET /api/public/labs/job?jobId=` returns one public job's
+  status and output. **All three are closed**: unless the Function App
+  setting `LABS_PUBLIC_SUBMISSION_ENABLED` is exactly `"true"`, which
+  nothing sets, they answer `PUBLIC_SUBMISSION_CLOSED` before reading the
+  body, the caller or the store. ADR 0032 still holds anonymous submission
+  Gated, and opening it is the owner's revision of decision 6, then that
+  one setting. Open, the bounds are decision 6's and no wider:
+  `terraform-validate` only (400 for any other type), a 64 KB payload
+  (413 above 65,536 bytes), 2 an hour per Cloudflare-verified client
+  through `enforceSubmissionQuota` (429), 50 a day globally through a
+  compare-and-increment counter in `tool_service_cache` (503 until the next
+  UTC day), refused while more than 20 jobs are queued (503
+  `LAB_QUEUE_FULL`), and jobs written `public: true` with a one-day `ttl`.
+  It also fails closed while no agent registered for `terraform-validate`
+  is heartbeating (503 `LAB_AGENT_OFFLINE`, nothing counted, nothing
+  queued) and when the lab cannot be read (503 `LAB_STATUS_UNAVAILABLE`).
+  The job read serves `public: true` documents only, with one identical
+  404 for a missing, admin or expired job, and never returns the payload,
+  the agent or the requester. The queue ceiling is a read before the
+  write, so simultaneous submissions can overshoot it by the ones in
+  flight together; both counters are exact. The explain route's daily
+  counter moved to `lib/daily-cap.js` so both routes share it, behaviour
+  unchanged. On `/tools/landing-zone`, "Validate on the lab" sits under
+  the generated files. It asks the status route on mount and stays
+  disabled, with one line saying why and no spinner, until the lab is
+  open. It sends the files unchanged, as a gzipped tar the agent's own
+  parser unpacks into exactly the download, because the capability
+  rewrites registry sources to the vendored copies inside the job (ADR 0032
+  decision 5). Before sending, it predicts that rewrite with the runner
+  image's own rule (`lib/landingZone/labImage.js`, held to
+  `lab-image/Dockerfile` and `versions.env` by a test) and refuses a build
+  calling a module the image does not vendor. Today that is
+  `avm-res-network-virtualnetwork` 0.22.2, which every spoke calls, so
+  only a build without the identity, corp and online spokes can be
+  validated on the lab until lab-image vendors it. The frontend CI row now
+  also runs on changes to `lab-image/Dockerfile`, `lab-image/versions.env`
+  and `vps-agent/lib/docker-runner.js`, which those tests read.
+
 - **`scripts/lab/Register-LabAgent.ps1`: the lab agent's go-live is one
   owner command (#739).** It was several owner steps across three
   documents, one of them pointing at a runbook row that no longer existed.
