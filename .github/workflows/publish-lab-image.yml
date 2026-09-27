@@ -13,6 +13,10 @@
 #            docker-runner.js under the full job sandbox (#675). That is why
 #            the two agent files it imports are in the path filter: a change
 #            to the sandbox flags is a change to what this image must pass.
+#            It runs every job at the agent's default limits, read from
+#            vps-agent/index.js, so that file is in the pull_request filter
+#            too: a lower job memory is a change to what the image must fit
+#            (a limit alone changes nothing in the image, so not on push).
 #            It also validates the Landing Zone Builder's full default build,
 #            generated from frontend/src/lib/landingZone at run time, so that
 #            directory is in the pull_request filter for the same reason: a
@@ -61,6 +65,7 @@ on:
   pull_request:
     paths:
       - 'lab-image/**'
+      - 'vps-agent/index.js'
       - 'vps-agent/lib/docker-runner.js'
       - 'vps-agent/lib/capabilities.js'
       - 'frontend/src/lib/landingZone/**'

@@ -21,10 +21,12 @@
  * a fixture here but `emitFiles(DEFAULT_STATE)` from
  * frontend/src/lib/landingZone, generated at run time, so a builder that
  * emits a module or a version the image does not vendor fails this check
- * (ADR 0032 decision 5). It runs with a higher memory limit than the agent's
- * default, and BUILDER_LIMITS says why. The builder imports its siblings without a `.js`
- * extension, as Vite allows; the one resolve hook below adds it, and it
- * applies to nothing but those relative imports.
+ * (ADR 0032 decision 5). It runs at the agent's own limits like every other
+ * case, which is what set those limits: at 256m of memory its `terraform
+ * validate` was OOM-killed, so the agent's default is 512m (vps-agent/index.js
+ * says why). The builder imports its siblings without a `.js` extension, as
+ * Vite allows; the one resolve hook below adds it, and it applies to nothing
+ * but those relative imports.
  *
  * No dependency beyond Node and Docker (the tar fixture is made with the
  * host's `tar --format=ustar`, present on ubuntu-latest and on Windows).
@@ -72,24 +74,27 @@ if (!image) {
   process.exit(2);
 }
 
-/** The agent's defaults (vps-agent/index.js config.limits). */
-const LIMITS = { memory: '256m', cpus: '0.5', pidsLimit: 128 };
-
 /**
- * The builder's full default build under every sandbox flag and every limit
- * above except memory, which it does not fit. Measured on 2026-09-27 with
- * Docker 29.8: at 256m `terraform validate` is OOM-killed (docker inspect:
- * OOMKilled true; hcw-terraform-validate exits 247, Terraform's -9) after an
- * offline init that succeeded, because the build declares sixteen provider
- * configurations, six of them azurerm aliases, and validate starts a plugin
- * process for each; at 320m it passes in 20 s. The host runs jobs at the
- * same 256m (lab-host labs_agent_job_memory), so on the lab this build
- * cannot validate until that limit moves, which is an owner decision this
- * file does not make. The override is here, named, rather than in LIMITS,
- * so that every other case still proves the agent's own limits, and so that
- * raising the host's limit is visibly the moment to delete it.
+ * The agent's own defaults, read from vps-agent/index.js `config.limits`
+ * rather than restated, so a change there is a change here. index.js cannot
+ * be imported (it starts the agent and exits without its configuration), so
+ * each `process.env.LABS_AGENT_JOB_* || <default>` is read from its source
+ * text. scripts/lab-job-limits.test.mjs holds the host's labs_agent role and
+ * vps-agent/.env.example to the same values. Every case runs at these; none
+ * has an override.
  */
-const BUILDER_LIMITS = { ...LIMITS, memory: '512m' };
+const agentSource = await fs.readFile(new URL('../vps-agent/index.js', import.meta.url), 'utf8');
+const agentDefault = (name) => {
+  const found = agentSource.match(new RegExp(`process\\.env\\.${name} \\|\\| '?([^')]+)'?\\)?,`));
+  if (!found) throw new Error(`vps-agent/index.js has no \`process.env.${name} || <default>\``);
+  return found[1];
+};
+const LIMITS = {
+  memory: agentDefault('LABS_AGENT_JOB_MEMORY'),
+  cpus: agentDefault('LABS_AGENT_JOB_CPUS'),
+  pidsLimit: Number(agentDefault('LABS_AGENT_JOB_PIDS')),
+};
+console.log(`limits (vps-agent/index.js defaults): memory ${LIMITS.memory}, cpus ${LIMITS.cpus}, pids ${LIMITS.pidsLimit}`);
 
 const fixture = (...p) => path.join(here, 'smoke', ...p);
 const readText = (...p) => fs.readFile(fixture(...p), 'utf8');
@@ -142,11 +147,10 @@ const cases = [
     terraform: true,
   },
   {
-    name: `terraform-validate, tar payload (the Landing Zone Builder's full default build: ${DEFAULT_STATE.selected.length} components, ${builderBlocks} registry module blocks; memory ${BUILDER_LIMITS.memory}, not the agent's ${LIMITS.memory})`,
+    name: `terraform-validate, tar payload (the Landing Zone Builder's full default build: ${DEFAULT_STATE.selected.length} components, ${builderBlocks} registry module blocks)`,
     type: 'terraform-validate',
     encoding: 'tar',
     payload: () => tarOf(builderDir),
-    limits: BUILDER_LIMITS,
     expectExit: 0,
     expectOutput: ['Success! The configuration is valid.', everyBlockRewritten(builderBlocks)],
     terraform: true,
@@ -194,7 +198,7 @@ for (const c of cases) {
     const argv = buildDockerArgs(
       capability,
       { jobDir, containerName: `labjob-${jobId}`, jobId, encoding: c.encoding },
-      c.limits ?? LIMITS
+      LIMITS
     );
     const started = Date.now();
     const run = spawnSync('docker', argv, {

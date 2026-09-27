@@ -54,7 +54,19 @@ const config = {
   pollIntervalMs: Number(process.env.LABS_AGENT_POLL_MS || 15000),
   maxConcurrentJobs: Number(process.env.LABS_AGENT_MAX_CONCURRENT || 1),
   limits: {
-    memory: process.env.LABS_AGENT_JOB_MEMORY || '256m',
+    // 512m, not the 256m this was until 2026-09-27 (owner decision that day).
+    // The Landing Zone Builder's full default build, both landing zones
+    // included, is OOM-killed by `terraform validate` at 256m: exit 247,
+    // docker inspect OOMKilled true, after an offline init that succeeded,
+    // because it declares sixteen provider configurations (azurerm and azapi
+    // six times each) and validate starts a plugin process for each.
+    // Measured on Docker 29.8 against the pinned hcw-lab-runner: 320m passes
+    // but erratically, in 20 to 86 s across four runs, and 512m in 15 to
+    // 19 s every time. The host runs one job at a time
+    // (LABS_AGENT_MAX_CONCURRENT=1, labs_agent_max_concurrent) on a 16 GB
+    // VPS, so 512m buys margin over the 320m floor for next to nothing.
+    // lab-image/sandbox-check.mjs runs every job at these limits.
+    memory: process.env.LABS_AGENT_JOB_MEMORY || '512m',
     cpus: process.env.LABS_AGENT_JOB_CPUS || '0.5',
     pidsLimit: Number(process.env.LABS_AGENT_JOB_PIDS || 128),
   },
@@ -167,8 +179,8 @@ async function poll() {
   // and claimJob's timeout (20s) is longer than the poll interval (15s), so a
   // slow claim let a second poll pass this guard with the counter still at its
   // old value. With the documented LABS_AGENT_MAX_CONCURRENT=1 and a
-  // 256 MB / 0.5 CPU budget, two concurrent Terraform containers is a real
-  // resource-exhaustion path on a small VPS.
+  // 512 MB / 0.5 CPU budget per job, two concurrent Terraform containers is a
+  // real resource-exhaustion path on a small VPS.
   //
   // pendingClaims covers exactly the window between "we decided to claim" and
   // "executeJob owns the slot", so the guard reflects work already committed

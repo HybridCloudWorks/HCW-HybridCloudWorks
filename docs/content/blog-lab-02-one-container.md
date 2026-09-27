@@ -30,7 +30,7 @@ lz=mg,policy,mgmt,hub&corp=0&online=0
 | --- | --- |
 | The `hcw-lab` image | terraform 1.16.4, Azure CLI 2.90.0, kubectl 1.37.1, helm 4.3.0, kubeconform 0.8.0 and ansible-core 2.21.4, on Python 3.14.7 and Debian 13 (trixie), in one pull |
 | A provider mirror | Seven provider releases at `/opt/terraform/mirror`, installed by symlink |
-| Vendored modules | The three ALZ pattern modules and every registry module they call, at `/opt/avm` |
+| Vendored modules | Every module the Landing Zone Builder emits, at the version it emits, and every registry module those call, at `/opt/avm` |
 | An offline init | The part 1 folder initialised and validated under `--network none`, your files untouched |
 
 ## What it costs
@@ -306,6 +306,16 @@ runner first used gave `Permission denied` on the first write.
 uses the `hcw-lab-runner` image and adds memory, CPU and process limits on top;
 the flags above are the rest of its sandbox.
 
+The builder's full default build, every platform component with one corp and
+one online landing zone, ends on the same line. Its report has six rewrites
+instead of three; the extra three are the spokes, each like this one:
+
+```text
+  rewrote module "spoke_corp_1" (Azure/avm-res-network-virtualnetwork/azurerm 0.22.2) -> ../../../opt/avm/avm-res-network-virtualnetwork@0.22.2
+```
+
+Its init prints 71 module lines, and none of them reads `Downloading`.
+
 ---
 
 ## How to know it worked
@@ -336,16 +346,19 @@ downloads everything, announces the lock file, and only then fails to write it
 beside your configuration, so the line that reads like success comes first. Use
 `hcw-terraform-validate`, which works on a copy, or mount without `:ro`.
 
-**`left module "spoke_corp_1" (Azure/avm-res-network-virtualnetwork/azurerm 0.22.2): no vendored version satisfies it (have: 0.15.0)`**,
+**`left    module "spoke_corp_1" (Azure/avm-res-network-virtualnetwork/azurerm 0.22.2): no vendored version satisfies it (have: 0.15.0)`**,
 then `Error accessing remote module registry` … `network is unreachable`. Your
-build has a landing zone in it. Every spoke calls the virtual network module at
-0.22.2, and the image vendors only 0.15.0, as a child of the connectivity
-module. The error at the bottom names the network; the cause is at the top, in
-the rewrite report, one `left` line per spoke. Use the
-part 1 build, or turn the network on: without `--network none`, on a writable
-mount, a plain `terraform init -backend=false` downloads the modules and still
-takes every provider from the mirror. The full default build validates that
-way.
+copy of the image is older than your files. Every spoke calls the virtual
+network module at 0.22.2; an `hcw-lab` published before 2026-09-27 vendors
+only 0.15.0, as a child of the connectivity module, and every image since
+carries both. The error at the bottom names the network; the cause is at
+the top, in the rewrite report, one `left` line per module block the image
+cannot serve. Pull again (step 1). The builder and the image take a new module
+release together, and a check in the repository fails when they disagree, but
+the copy on your machine moves only when you pull it. If you changed a version
+in the files yourself, turn the network on instead: without `--network none`,
+on a writable mount, a plain `terraform init -backend=false` downloads the
+modules and still takes every provider from the mirror.
 
 **`provider registry.terraform.io/hashicorp/azuread was not found in any of the search locations`**,
 followed by `- /opt/terraform/mirror`. You asked for a provider the mirror does

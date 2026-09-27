@@ -76,10 +76,12 @@ jobs:
           # Dockerfile, the lab host's and the lab image's pins, and every
           # Terraform root's required_version. The three landing zone files
           # are what lab-image-avm-vendoring.test.mjs imports: the builder's
-          # pins, and its port of the image's rewrite rule.
+          # pins, and its port of the image's rewrite rule. The vps-agent
+          # files are what lab-job-types.test.mjs imports (capabilities.js)
+          # and lab-job-limits.test.mjs reads (index.js, .env.example).
           - name: scripts (operations)
             dir: scripts
-            filter: '^(scripts/|\.github/workflows/|infra/|infra-lab/|lab-host/|lab-image/|([^/]+/)*package\.json$|([^/]+/)*Dockerfile|frontend/src/lib/landingZone/(avmVersions|labImage|tfConstraints)\.js$)'
+            filter: '^(scripts/|\.github/workflows/|infra/|infra-lab/|lab-host/|lab-image/|([^/]+/)*package\.json$|([^/]+/)*Dockerfile|frontend/src/lib/landingZone/(avmVersions|labImage|tfConstraints)\.js$|vps-agent/(index\.js|\.env\.example|lib/capabilities\.js)$)'
             lint: npm run lint
             test: npm test
           # vps-agent shells out to `docker run` with a payload that reached

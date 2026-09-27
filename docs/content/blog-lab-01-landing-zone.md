@@ -253,17 +253,19 @@ hour. Add it with the first corp landing zone.
 ### No landing zones, for now
 
 Corp, online and identity landing zones are what a platform exists for, and
-they are out of this build for two reasons.
+they are out of this build on purpose.
 
-The first is order. The tree, the policy, the logging and the hub are built
+The reason is order. The tree, the policy, the logging and the hub are built
 once; every landing zone after them is a subscription placed into the tree and
 a spoke peered to the hub. Read the platform first and the landing zones read
 as what they are: one placement and one spoke each.
 
-The second is practical, and belongs to part 2. Every spoke calls
-`Azure/avm-res-network-virtualnetwork/azurerm` 0.22.2, and the lab image does
-not carry that version, so a build with any landing zone in it fails the
-offline `terraform init` part 2 runs. This build passes it.
+It is not that part 2 cannot take them. Every spoke calls
+`Azure/avm-res-network-virtualnetwork/azurerm` 0.22.2, and the lab image
+carries that version beside the three pattern modules, so the builder's full
+default build, with all three spokes, passes the same offline `terraform init`
+and `validate` that part 2 runs on this one. Read the platform first, then
+open the full build.
 
 ---
 
