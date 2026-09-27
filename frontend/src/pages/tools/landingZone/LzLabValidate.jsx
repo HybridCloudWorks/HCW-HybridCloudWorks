@@ -30,7 +30,7 @@
  * (one submission and its polling). Every rule they decide by is a pure
  * function in labValidateRules.js.
  */
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlaskConical, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { labModuleReport, labResolution } from '@/lib/landingZone';
@@ -77,35 +77,51 @@ function useLabDoor(requests) {
 }
 
 /**
- * One submission and its polling, held against the files it sent.
- * `onRefusal` hears every refused submission, so the door can shut.
+ * The poll's timer, and the two facts a late callback checks before it
+ * writes: the control is still mounted, and the build is still the one the
+ * job was sent for. Unmounting, or a new build, clears the timer.
  */
-function useLabRun({ files, key, requests, pollDelay, deadlineMs, now, onRefusal }) {
-  const [record, setRecord] = useState(null);
+function useWatchState(key) {
   const timer = useRef(null);
   const liveKey = useRef(key);
   const mounted = useRef(true);
+  const cancel = useCallback(() => clearTimeout(timer.current), []);
+  const schedule = useCallback((callback, delayMs) => {
+    timer.current = setTimeout(callback, delayMs);
+  }, []);
 
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
-      clearTimeout(timer.current);
+      cancel();
     };
-  }, []);
+  }, [cancel]);
 
   // A new build stops watching the old one's job.
   useEffect(() => {
     liveKey.current = key;
-    return () => clearTimeout(timer.current);
-  }, [key]);
+    return cancel;
+  }, [key, cancel]);
+
+  const isMounted = () => mounted.current;
+  const stillWatching = (runKey) => mounted.current && liveKey.current === runKey;
+  return { schedule, isMounted, stillWatching };
+}
+
+/**
+ * One submission and its polling, held against the files it sent.
+ * `onRefusal` hears every refused submission, so the door can shut.
+ */
+function useLabRun({ files, key, requests, pollDelay, deadlineMs, now, onRefusal }) {
+  const [record, setRecord] = useState(null);
+  const { schedule, isMounted, stillWatching } = useWatchState(key);
 
   const update = (runKey, next) =>
     setRecord((prev) => (prev?.key === runKey ? { ...prev, ...next } : prev));
-  const stillWatching = (runKey) => mounted.current && liveKey.current === runKey;
 
   const watch = (runKey, jobId, errors, startedAt) => {
-    timer.current = setTimeout(async () => {
+    schedule(async () => {
       const { value: job, error } = await settle(requests.job(jobId));
       if (stillWatching(runKey)) {
         const clock = { errors, elapsed: now() - startedAt, deadlineMs };
@@ -125,7 +141,7 @@ function useLabRun({ files, key, requests, pollDelay, deadlineMs, now, onRefusal
     setRecord({ key: runKey, phase: 'submitting' });
     const prepared = await preparePayload(files);
     const sent = prepared.error ? prepared : await settle(requests.submit(prepared.body));
-    if (!mounted.current) return;
+    if (!isMounted()) return;
     if (sent.error && !prepared.error) onRefusal(sent.error);
     if (sent.error) update(runKey, { phase: 'error', error: sent.error });
     else {

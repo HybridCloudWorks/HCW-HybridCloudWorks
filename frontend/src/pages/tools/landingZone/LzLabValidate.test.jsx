@@ -343,12 +343,10 @@ describe('the words', () => {
   });
 
   it('refuses, before sending, a payload over the 64 KB the lab takes', async () => {
-    // Random text barely compresses, so 120 KB of it stays over the cap.
-    // getRandomValues fills at most 64 KiB a call, so two calls.
-    const random = () => Array.from(crypto.getRandomValues(new Uint8Array(60_000)));
-    const noise = [...random(), ...random()]
-      .map((byte) => String.fromCharCode(33 + (byte % 90)))
-      .join('');
+    // Random bytes as base64 barely compress, so 120 KB of it stays over the
+    // cap. getRandomValues fills at most 64 KiB a call, so two calls.
+    const random = () => Buffer.from(crypto.getRandomValues(new Uint8Array(45_000)));
+    const noise = Buffer.concat([random(), random()]).toString('base64');
     const { error, body } = await preparePayload([{ path: 'main.tf', content: noise }]);
     expect(body).toBeUndefined();
     expect(error.status).toBe(413);

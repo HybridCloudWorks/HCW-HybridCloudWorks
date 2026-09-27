@@ -40,10 +40,23 @@ export function unresolvedLine(unresolved) {
   return `The lab's runner image does not vendor ${names}, which this build calls, so terraform init would fail there. Remove the components that need it to validate the rest, or validate the download where there is network.`;
 }
 
+/** Why the lab will not take the job, or null when its door is open. */
+function doorReason(door) {
+  if (door.phase === 'checking') return LINES.checking;
+  if (door.phase === 'unreadable') return LINES.unreadable;
+  return door.open === true ? null : door.reason || LINES.closedFallback;
+}
+
+/** Why this build cannot be validated there, or null when it can. */
+function buildReason(hasTerraform, resolution) {
+  if (!hasTerraform) return LINES.empty;
+  return resolution.ok ? null : unresolvedLine(resolution.unresolved);
+}
+
 /**
- * Why the button may not be pressed, as one line, or null when it may. A
- * priority chain, one rule per line: the door comes first, because a closed
- * lab is the reason even for a build the image could not validate anyway.
+ * Why the button may not be pressed, as one line, or null when it may. The
+ * door comes first, because a closed lab is the reason even for a build the
+ * image could not validate anyway; then the build.
  *
  * @param {object} args
  * @param {{ phase: 'checking'|'known'|'unreadable', open?: boolean, reason?: string }} args.door
@@ -51,12 +64,7 @@ export function unresolvedLine(unresolved) {
  * @param {{ ok: boolean, unresolved: object[] }} args.resolution
  */
 export function disabledReason({ door, hasTerraform, resolution }) {
-  if (door.phase === 'checking') return LINES.checking;
-  if (door.phase === 'unreadable') return LINES.unreadable;
-  if (door.open !== true) return door.reason || LINES.closedFallback;
-  if (!hasTerraform) return LINES.empty;
-  if (!resolution.ok) return unresolvedLine(resolution.unresolved);
-  return null;
+  return doorReason(door) ?? buildReason(hasTerraform, resolution);
 }
 
 /** The status read's answer as the door the button reads. */
