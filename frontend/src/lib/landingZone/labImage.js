@@ -96,15 +96,21 @@ function parseClause(clause) {
   return { op: m[1] || '=', given: [major, minor, patch], upper };
 }
 
-const OPERATORS = {
-  '=': (v, g) => compare(v, g) === 0,
-  '!=': (v, g) => compare(v, g) !== 0,
-  '>': (v, g) => compare(v, g) > 0,
-  '>=': (v, g) => compare(v, g) >= 0,
-  '<': (v, g) => compare(v, g) < 0,
-  '<=': (v, g) => compare(v, g) <= 0,
-  '~>': (v, g, u) => compare(g, v) <= 0 && compare(v, u) < 0,
-};
+/** Each plain operator as the signs of `compare(version, given)` it accepts. */
+const ACCEPTED_SIGNS = Object.freeze({
+  '=': [0],
+  '!=': [-1, 1],
+  '>': [1],
+  '>=': [0, 1],
+  '<': [-1],
+  '<=': [-1, 0],
+});
+
+/** One parsed clause over a version: `~>` is the half-open range, the rest a sign test. */
+function clauseHolds(version, { op, given, upper }) {
+  if (op === '~>') return compare(version, given) >= 0 && compare(version, upper) === -1;
+  return ACCEPTED_SIGNS[op].includes(compare(version, given));
+}
 
 /** Terraform's constraint syntax (comma-separated clauses) over a version tuple. */
 export function satisfies(version, constraint) {
@@ -112,7 +118,7 @@ export function satisfies(version, constraint) {
   return String(constraint)
     .split(',')
     .map(parseClause)
-    .every((c) => c !== null && OPERATORS[c.op](version, c.given, c.upper));
+    .every((clause) => clause !== null && clauseHolds(version, clause));
 }
 
 /** `{ name: [{ version, text }] }` for a list of `<name>@<version>` entries. */

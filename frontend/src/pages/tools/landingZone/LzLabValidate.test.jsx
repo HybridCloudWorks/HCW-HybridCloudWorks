@@ -18,9 +18,11 @@ import { renderToString } from 'react-dom/server';
 import {
   LINES,
   LzLabValidate,
+  afterPoll,
   disabledReason,
   failureLine,
   outcomeLine,
+  statusLine,
   unresolvedLine,
 } from './LzLabValidate';
 import { DEFAULT_STATE, decodeLz, emitFiles } from '@/lib/landingZone';
@@ -296,6 +298,42 @@ describe('the words', () => {
         resolution: { ok: true, unresolved: [] },
       })
     ).toBeNull();
+  });
+
+  it('reads a poll: a 404 or 503 ends the run, a transport failure backs off, the deadline stalls', () => {
+    const clock = { errors: 2, elapsed: 0, deadlineMs: 1000 };
+    const gone = refusal(404, 'JOB_NOT_FOUND', 'Job not found');
+    expect(afterPoll({ error: gone }, clock)).toEqual({
+      update: { phase: 'error', error: gone },
+      stop: true,
+      errors: 2,
+    });
+    expect(afterPoll({ error: new Error('reset') }, clock)).toEqual({
+      update: null,
+      stop: false,
+      errors: 3,
+    });
+    expect(afterPoll({ job: { status: 'running' } }, clock)).toEqual({
+      update: { job: { status: 'running' } },
+      stop: false,
+      errors: 0,
+    });
+    expect(afterPoll({ job: { status: 'queued' } }, { ...clock, elapsed: 1000 })).toEqual({
+      update: { phase: 'stalled', job: { status: 'queued' } },
+      stop: true,
+      errors: 2,
+    });
+    expect(afterPoll({ error: new Error('reset') }, { ...clock, elapsed: 1000 }).update).toEqual({
+      phase: 'stalled',
+    });
+  });
+
+  it('says where a run is while it is in flight', () => {
+    expect(statusLine(null, { phase: 'submitting' })).toBe(LINES.submitting);
+    expect(statusLine(null, { phase: 'polling', job: { status: 'queued' } })).toBe(LINES.queued);
+    expect(statusLine(null, { phase: 'polling', job: { status: 'running' } })).toBe(LINES.running);
+    expect(statusLine('closed', { phase: 'done' })).toBe('closed');
+    expect(statusLine(null, null)).toBe(LINES.ready);
   });
 
   it('has a sentence for every terminal status', () => {

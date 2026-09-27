@@ -115,11 +115,17 @@ const doorTag = (door) => {
 
 const isBusy = (run) => run?.phase === 'submitting' || run?.phase === 'polling';
 
+/** A run's progress while one is in flight, or null. */
+function progressLine(run) {
+  if (run.phase === 'submitting') return LINES.submitting;
+  if (run.phase !== 'polling') return null;
+  return run.job && run.job.status === 'queued' ? LINES.queued : LINES.running;
+}
+
 /** The line beside the button: the run's progress while one is in flight, otherwise the reason or what it does. */
 export function statusLine(reason, run) {
-  if (run?.phase === 'submitting') return LINES.submitting;
-  if (run?.phase === 'polling') return run.job?.status === 'queued' ? LINES.queued : LINES.running;
-  return reason ?? LINES.ready;
+  const progress = run ? progressLine(run) : null;
+  return progress || reason || LINES.ready;
 }
 
 export function buttonLabel(run) {
@@ -162,15 +168,24 @@ export function failureLine(error) {
  * @param {{ errors: number, elapsed: number, deadlineMs: number }} clock
  */
 export function afterPoll(step, { errors, elapsed, deadlineMs }) {
-  if (step.error && [404, 503].includes(step.error.status)) {
+  if (isAnswer(step.error)) {
     return { update: { phase: 'error', error: step.error }, stop: true, errors };
   }
   if (step.job && isTerminalJobStatus(step.job.status)) {
     return { update: { phase: 'done', job: step.job }, stop: true, errors: 0 };
   }
-  const job = step.job ? { job: step.job } : {};
-  if (elapsed >= deadlineMs) return { update: { phase: 'stalled', ...job }, stop: true, errors };
-  return { update: step.job ? job : null, stop: false, errors: step.job ? 0 : errors + 1 };
+  return stillPending(step.job, { errors, overdue: elapsed >= deadlineMs });
+}
+
+/** A 404 or 503 while polling is the server's answer, not a transport failure. */
+const isAnswer = (error) => Boolean(error) && [404, 503].includes(error.status);
+
+/** A job still in flight, or a poll that failed in transit: stall at the deadline, else keep going. */
+function stillPending(job, { errors, overdue }) {
+  if (overdue)
+    return { update: job ? { phase: 'stalled', job } : { phase: 'stalled' }, stop: true, errors };
+  if (job) return { update: { job }, stop: false, errors: 0 };
+  return { update: null, stop: false, errors: errors + 1 };
 }
 
 /** The submission body for the files, or the error that stops it before it is sent. */
