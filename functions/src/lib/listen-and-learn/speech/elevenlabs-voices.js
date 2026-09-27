@@ -50,8 +50,9 @@ import {
   API_KEYS_PAGE,
   ElevenLabsSpeechError,
   errorCode,
-  isPermissionRefusal,
+  isPermissionAnswer,
   isRetryableStatus,
+  saidBy,
 } from './elevenlabs-account.js';
 import { fetchListedPreview, isAllowedPreviewUrl } from './elevenlabs-preview.js';
 
@@ -117,13 +118,13 @@ const snippet = (text) => String(text || '').slice(0, 300) || 'no detail';
 function listingRefusal(status, text) {
   const code = errorCode(text);
   const label = `HTTP ${status}${code ? ` ${code}` : ''}`;
-  if (isPermissionRefusal(status, code)) {
+  if (isPermissionAnswer(status, text)) {
     return voicesError(
-      `${label}: the key needs the Voices → Read permission (${VOICES_PERMISSION}), set at ${API_KEYS_PAGE}`,
+      `${label}: the key needs the Voices → Read permission (${VOICES_PERMISSION}), set at ${API_KEYS_PAGE}${saidBy(text)}`,
       status
     );
   }
-  if (status === 401) return voicesError(`${label}: ElevenLabs rejected the key`, status);
+  if (status === 401) return voicesError(`${label}: ElevenLabs rejected the key${saidBy(text)}`, status);
   return voicesError(`${label}: ${snippet(text)}`, status);
 }
 

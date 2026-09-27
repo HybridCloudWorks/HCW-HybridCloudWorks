@@ -1203,6 +1203,15 @@ This project has not cut a tagged release; entries are grouped under
   browser as "Failed to fetch"; `httpRoute` now sends those as 500 with
   `X-Upstream-Status`, and the handler's reason arrives intact.
 
+- **An ElevenLabs refusal now says why, in ElevenLabs's words.** The first live
+  voice listing on 2026-09-26 answered a key that had just read the
+  subscription with `401` and code `unauthorized`, which the Audio tab showed
+  as "ElevenLabs rejected the key". A permission refusal is now read from
+  `detail.code`, the legacy `detail.status`, or a 401/403 whose own sentence
+  names a permission, and every refusal appends `ElevenLabs said: "..."`
+  (one line, 300 characters, anything shaped like a key replaced with
+  `[key]`).
+
 - **The lab host's first run survives a freshly booted VPS, and SSH
   hardening can no longer be lost to a failed run.** On the reinstalled VPS
   on 2026-09-26 the first `bootstrap.sh` run failed when a first-boot
