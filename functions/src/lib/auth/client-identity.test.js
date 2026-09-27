@@ -157,6 +157,26 @@ describe('DECISION 6 — the origin must be verifiably Cloudflare', () => {
     expect(() => id.anonymousKey(fromCloudflare('203.0.113.7'))).toThrow(/unverified origin/i);
   });
 
+  // An unresolved Key Vault reference reaches process.env as its literal text,
+  // which is public in infra/functionapp.tf. As a "secret" anyone could present
+  // it (security review of #738, 2026-09-27).
+  it('treats an unresolved Key Vault reference as no secret, and refuses a request presenting it', () => {
+    const reference =
+      '@Microsoft.KeyVault(SecretUri=https://kv-site-prod-cus-01.vault.azure.net/secrets/CF-ORIGIN-SECRET)';
+    const id = createClientIdentity({ originSecret: reference, allowUnverifiedOrigin: false });
+    const request = makeRequest({ 'x-hcw-origin-secret': reference, 'cf-connecting-ip': '198.51.100.9' });
+    expect(id.viaCloudflare(request)).toBe(false);
+    expect(() => id.anonymousKey(request)).toThrow(/unverified origin/i);
+  });
+
+  it('does not salt with an unresolved Key Vault reference', () => {
+    const reference = '@Microsoft.KeyVault(SecretUri=https://kv-site-prod-cus-01.vault.azure.net/secrets/CLIENT-IP-SALT)';
+    const withReference = createClientIdentity({ originSecret: SECRET, ipSalt: reference });
+    const unsalted = createClientIdentity({ originSecret: SECRET, ipSalt: undefined });
+    const request = fromCloudflare('203.0.113.7');
+    expect(withReference.anonymousKey(request).key).toBe(unsalted.anonymousKey(request).key);
+  });
+
   it('allows an unverified origin in dev, marked untrusted', () => {
     const id = createClientIdentity({ originSecret: SECRET, allowUnverifiedOrigin: true });
     const result = id.anonymousKey(makeRequest({ 'cf-connecting-ip': '203.0.113.7' }));
