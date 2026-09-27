@@ -20,8 +20,9 @@ This project has not cut a tagged release; entries are grouped under
 ### Added
 
 - **`scripts/lab/Register-LabAgent.ps1`: the lab agent's go-live is one
-  owner command.** It was several owner steps across three documents, one of
-  them pointing at a runbook row that no longer existed. The script, run
+  owner command (#739).** It was several owner steps across three
+  documents, one of them pointing at a runbook row that no longer existed.
+  The script, run
   with `az` signed in to the tenant: checks the tenant and prints the
   `az login` line when it is wrong; reads `/etc/hcw/labs-agent.crt` over
   `ssh hcw-lab` into a temporary file, with the host checking it against the
