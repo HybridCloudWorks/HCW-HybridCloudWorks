@@ -10,16 +10,30 @@
  * belongs to the frontend auth-swap phase; see lib/labs.js. The anonymous
  * public/labs/submit route (#672) is registered in labs-public-http.js,
  * closed by default.
+ *
+ * The lab agent registry's write path (#740), semantics in
+ * lib/labs/agent-registry.js and agent-registry-rules.js: `cms/labs/agents`
+ * (POST registers an agent) and `cms/labs/agents/{agentId}` (PATCH activates
+ * or deactivates one). Two templates, so two registrations, each through
+ * httpRouteByMethod so that a later verb on either is a new key in
+ * `handlers`, never a second function on the same template (TODO.md T-510).
  */
-import { httpRoute } from '../lib/auth/http-route.js';
+import { httpRoute, httpRouteByMethod } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
-import { queryDocs, readDoc, upsertDoc, patchDoc } from '../lib/cosmos-client.js';
+import { createDoc, queryDocs, readDoc, upsertDoc, patchDoc } from '../lib/cosmos-client.js';
 import { createLabHandlers } from '../lib/labs.js';
+import { createAgentRegistryHandlers } from '../lib/labs/agent-registry.js';
 
 const handlers = () =>
   createLabHandlers({
     guard: getDefaultGuard(),
     store: { queryDocs, readDoc, upsertDoc, patchDoc },
+  });
+
+const registry = () =>
+  createAgentRegistryHandlers({
+    guard: getDefaultGuard(),
+    store: { readDoc, createDoc, patchDoc, upsertDoc },
   });
 
 httpRoute('enqueueLabJob', {
@@ -48,4 +62,20 @@ httpRoute('cancelLabJob', {
   authLevel: 'anonymous',
   route: 'cancelLabJob',
   handler: (request, context) => handlers().cancelLabJob(request, context),
+});
+
+httpRouteByMethod('cmsLabAgents', {
+  authLevel: 'anonymous',
+  route: 'cms/labs/agents',
+  handlers: {
+    POST: (request, context) => registry().registerAgent(request, context),
+  },
+});
+
+httpRouteByMethod('cmsLabAgent', {
+  authLevel: 'anonymous',
+  route: 'cms/labs/agents/{agentId}',
+  handlers: {
+    PATCH: (request, context) => registry().setAgentActive(request, context),
+  },
 });

@@ -16,12 +16,25 @@
  *
  * Collapsing `stale` into "not connected" is what sent an operator to
  * reinstall something already installed.
+ *
+ * #740 made this tab the registry's write path as well: **Register agent**
+ * (RegisterAgentForm.jsx) writes `lab_agents/{agentId}`, the record the API's
+ * agent guard admits an agent by, and each card carries **Deactivate** or
+ * **Activate**. Deactivating asks first, because the API refuses that agent
+ * from its next call; activating does not, because it only restores what an
+ * operator already set up. Both refresh the snapshot so the card changes when
+ * the toast appears.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { Card } from '@/components/ui/card';
-import { AlertTriangle, CheckCircle, Server } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/use-toast';
+import ConfirmModal from '@/components/admin/ConfirmModal';
+import { AlertTriangle, CheckCircle, Loader2, Power, PowerOff, Server } from 'lucide-react';
+import { sendJSON } from '@/lib/api';
 import { AgentCard } from './shared';
-import { fleetState } from './labsView';
+import { REGISTER_SCRIPT, fleetState } from './labsView';
+import RegisterAgentForm from './RegisterAgentForm';
 import { tabHref } from './tabs';
 
 /** The one command that restarts the agent, and the one that says why it stopped. */
@@ -85,8 +98,74 @@ function FleetBanner({ fleet }) {
   );
 }
 
+/**
+ * Deactivate or Activate one agent: `PATCH cms/labs/agents/{agentId}`.
+ *
+ * Nothing is offered when the snapshot carries no `active` (an API older than
+ * #740): the button would have to guess which of the two to show.
+ */
+function ActiveToggle({ agent, onChanged }) {
+  const { toast } = useToast();
+  const [confirming, setConfirming] = useState(false);
+  const [saving, setSaving] = useState(false);
+  if (typeof agent.active !== 'boolean') return null;
+  const id = agent.agentId || agent.id;
+
+  const apply = async (active) => {
+    setConfirming(false);
+    setSaving(true);
+    try {
+      await sendJSON(`cms/labs/agents/${encodeURIComponent(id)}`, 'PATCH', { active });
+      toast(
+        active
+          ? {
+              title: 'Agent activated',
+              description: `The API admits ${id} from its next heartbeat.`,
+            }
+          : { title: 'Agent deactivated', description: `The API refuses ${id} from its next call.` }
+      );
+      onChanged?.();
+    } catch (err) {
+      toast({
+        title: active ? 'Activate failed' : 'Deactivate failed',
+        description: err.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const Icon = agent.active ? PowerOff : Power;
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={saving}
+        className="gap-1"
+        aria-label={`${agent.active ? 'Deactivate' : 'Activate'} ${id}`}
+        onClick={() => (agent.active ? setConfirming(true) : apply(true))}
+      >
+        {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Icon className="h-3 w-3" />}
+        {agent.active ? 'Deactivate' : 'Activate'}
+      </Button>
+      <ConfirmModal
+        open={confirming}
+        title={`Deactivate ${id}?`}
+        description={
+          'The API refuses its next heartbeat and job claim with "Agent access required", so it stops taking work. Its object id and job types are kept, and Activate turns it back on.'
+        }
+        confirmLabel="Deactivate"
+        onConfirm={() => apply(false)}
+        onCancel={() => setConfirming(false)}
+      />
+    </>
+  );
+}
+
 export default function AgentsTab({ hub }) {
-  const { agents, now } = hub;
+  const { agents, now, jobTypes, refresh } = hub;
   const fleet = fleetState(agents, now);
 
   return (
@@ -96,7 +175,13 @@ export default function AgentsTab({ hub }) {
       {agents.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {agents.map((agent) => (
-            <AgentCard key={agent.id} agent={agent} now={now} />
+            <AgentCard
+              key={agent.agentId || agent.id}
+              agent={agent}
+              now={now}
+              registry
+              actions={<ActiveToggle agent={agent} onChanged={refresh} />}
+            />
           ))}
         </div>
       )}
@@ -108,14 +193,17 @@ export default function AgentsTab({ hub }) {
         <Card className="p-6 text-sm text-muted-foreground flex items-start gap-3">
           <Server className="h-4 w-4 shrink-0 mt-0.5" />
           <span>
-            Nothing has ever connected, so there is nothing to reconnect.{' '}
+            Nothing has ever connected, so there is nothing to reconnect. Register it below with the
+            two values <code>{REGISTER_SCRIPT}</code> prints;{' '}
             <a href={tabHref('settings')} className="underline">
-              The Settings tab
+              the Settings tab
             </a>{' '}
             has the six provisioning steps.
           </span>
         </Card>
       )}
+
+      <RegisterAgentForm jobTypes={jobTypes} onRegistered={refresh} />
     </div>
   );
 }

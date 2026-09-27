@@ -251,6 +251,15 @@ export function createLabHandlers({ guard, store, now = () => new Date(), uuid =
             status: data.status || 'unknown',
             lastSeenAt: lastSeenMs ? new Date(lastSeenMs).toISOString() : null,
             online: isAgentOnline(data.lastSeenAt, nowMs),
+            // The registry half of the document (#740): whether the agent
+            // guard admits it, and which service principal it is bound to.
+            // The Agents tab's Activate/Deactivate reads the first; the second
+            // is an object id, an identifier the go-live script prints, and
+            // it is how an operator tells "bound to another principal" apart
+            // from the other two ways the guard says "Agent access required".
+            active: data.active === true,
+            oid: typeof data.oid === 'string' ? data.oid : null,
+            registeredAt: toIsoOrNull(data.registeredAt),
           };
         });
 

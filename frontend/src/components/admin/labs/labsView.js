@@ -84,6 +84,66 @@ export const PAYLOAD_PLACEHOLDERS = {
   kubeconform: '# manifests.yaml contents…',
 };
 
+/** The owner script that prints the two values Register agent asks for. */
+export const REGISTER_SCRIPT = 'scripts/lab/Register-LabAgent.ps1';
+
+// The server's rules (functions/src/lib/labs/agent-registry.js), repeated so
+// the form can say what is wrong before a round trip. The server re-validates
+// either way; these only decide what the form refuses to send.
+export const AGENT_ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+export const OBJECT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * What is wrong with a registration, as one sentence, or null when the form
+ * may send it. Values are expected trimmed.
+ *
+ * @param {{agentId: string, oid: string, jobTypes: string[]}} registration
+ * @returns {string|null}
+ */
+export function validateAgentRegistration({ agentId, oid, jobTypes }) {
+  if (!AGENT_ID_PATTERN.test(agentId)) {
+    return 'The agent id is the certificate CN, such as vps-hostinger-01: lower-case letters, digits and hyphens.';
+  }
+  if (!OBJECT_ID_PATTERN.test(oid)) {
+    return 'The object id is a GUID: the object id of the agent service principal.';
+  }
+  if (jobTypes.length === 0) {
+    return 'Tick at least one job type. To stop an agent taking work, deactivate it instead.';
+  }
+  return null;
+}
+
+/** The sentence a deactivated agent's registration toast ends with. */
+const STILL_DEACTIVATED =
+  ' It is still deactivated, so the API refuses it: Activate it on its card to let it take work.';
+
+/**
+ * The toast for what `POST cms/labs/agents` answered: registered, updated, or
+ * already exactly this. A registration never reactivates an agent, so a
+ * deactivated one is told so rather than left to look registered and working.
+ *
+ * @param {{created?: boolean, changed?: boolean, agent?: object}} res
+ * @returns {{title: string, description: string}}
+ */
+export function registrationToast(res) {
+  const agent = res?.agent || {};
+  const id = agent.agentId || agent.id || 'The agent';
+  const tail = agent.active === false ? STILL_DEACTIVATED : '';
+  if (res?.created) {
+    return {
+      title: 'Agent registered',
+      description: `${id} is bound to ${agent.oid} and active: the API admits its next heartbeat.`,
+    };
+  }
+  if (res?.changed) {
+    return { title: 'Agent updated', description: `${id} is now bound to ${agent.oid}.${tail}` };
+  }
+  return {
+    title: 'Already registered',
+    description: `${id} already holds exactly this; nothing changed.${tail}`,
+  };
+}
+
 /**
  * How many agents are online, and the one sentence that describes the fleet.
  *

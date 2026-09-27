@@ -21,7 +21,10 @@ const setSearchParams = vi.fn();
 
 vi.mock('@/hooks/useAuthReady', () => ({ useAuthReady: () => ({ authReady: true }) }));
 vi.mock('@/components/ui/use-toast', () => ({ useToast: () => ({ toast: vi.fn() }) }));
-vi.mock('@/lib/api', () => ({ postJSON: (...args) => postJSON(...args) }));
+vi.mock('@/lib/api', () => ({
+  postJSON: (...args) => postJSON(...args),
+  sendJSON: vi.fn(),
+}));
 vi.mock('react-router', () => ({
   useSearchParams: () => [new URLSearchParams(searchParams), setSearchParams],
 }));
@@ -164,6 +167,29 @@ describe('the Agents tab (new in #577)', () => {
     expect(await screen.findByText(/1 agent\(s\) connected/)).toBeInTheDocument();
     expect(screen.queryByText(/systemctl restart/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Nothing has ever connected/)).not.toBeInTheDocument();
+  });
+
+  it('offers Register agent with the server job types ticked, and Deactivate on a registered agent (#740)', async () => {
+    postJSON.mockResolvedValue(
+      snapshot({
+        agents: [
+          {
+            agentId: 'vps-1',
+            active: true,
+            oid: '9f8e7d6c-5b4a-4938-8271-605f4e3d2c1b',
+            lastSeenAt: RECENT,
+          },
+        ],
+        jobTypes: [{ type: 'shell-echo' }, { type: 'kubeconform' }],
+      })
+    );
+    searchParams = 'tab=agents';
+    render(<LabsPage />);
+
+    const form = await screen.findByRole('form', { name: 'Register agent' });
+    await waitFor(() => expect(within(form).getByLabelText('kubeconform')).toBeChecked());
+    expect(within(form).getByLabelText('shell-echo')).toBeChecked();
+    expect(screen.getByRole('button', { name: 'Deactivate vps-1' })).toBeInTheDocument();
   });
 });
 

@@ -318,20 +318,23 @@ ADR 0032 rebuilds the host rather than repairing it.
 
 The agent (`vps-agent`, the `labs_agent` role) is installed by the first
 `bootstrap.sh` run and stays stopped until it has an identity: an Entra app
-registration holding its certificate and the `LabAgent` app role, and four
-values in the host's Ansible vault. `scripts/lab/Register-LabAgent.ps1` does
-all of it in one run, as the owner, on the workstation. The owner-created
-Entra objects are deliberate: this repository has no `azuread` Terraform
-provider (`infra/oidc.tf`, `infra/lab-hybrid.tf`).
+registration holding its certificate and the `LabAgent` app role, a
+`lab_agents` registry document binding it to that identity, and four values
+in the host's Ansible vault. `scripts/lab/Register-LabAgent.ps1` does all of
+it in one run, as the owner, on the workstation, with one paste in the
+browser for the registry document (step 4). The owner-created Entra objects
+are deliberate: this repository has no `azuread` Terraform provider
+(`infra/oidc.tf`, `infra/lab-hybrid.tf`).
 
 **Before you start.** The host has run `bootstrap.sh` at least once, so
 `/etc/hcw/labs-agent.crt` exists; this desktop reaches it
 (`ssh hcw-lab hostname` prints its name, "Connect from a desktop", above);
 `/etc/hcw/ansible/vault-password` exists on the host (`lab-host/README.md`,
-"The vault"; `vault.yml` itself may or may not exist yet); and you can
+"The vault"; `vault.yml` itself may or may not exist yet); you can
 create app registrations and assign app roles in the tenant (Application
-Administrator, Cloud Application Administrator or Global Administrator).
-Sign in, PowerShell; a browser opens:
+Administrator, Cloud Application Administrator or Global Administrator);
+and you can sign in to https://hybridcloudworks.com/admin as an editor or
+above, for step 4. Sign in to `az`, PowerShell; a browser opens:
 
 ```powershell
 az login --tenant saulpatinojrhotmail.onmicrosoft.com
@@ -346,8 +349,8 @@ pwsh -NoProfile -File scripts/lab/Register-LabAgent.ps1
 ```
 
 Adding `-WhatIf` to that line shows what it would change and changes
-nothing: the vault merge runs in check mode on the host, and `bootstrap.sh`
-does not run.
+nothing: step 4 prints what it would ask for without waiting, the vault
+merge runs in check mode on the host, and `bootstrap.sh` does not run.
 
 **What it does**, printing one line per step:
 
@@ -369,8 +372,16 @@ does not run.
    guard (`functions/src/lib/auth/require-agent.js`) and, for an
    application permission, the admin consent. Nothing else is granted: no
    Azure role, no Microsoft Graph permission, no client secret.
-4. Prints the `lab_agents/vps-hostinger-01` registry document gate 2 reads
-   (below).
+4. Has you register the agent on the site, which writes the
+   `lab_agents/vps-hostinger-01` document gate 2 reads (below). It prints
+   https://hybridcloudworks.com/admin/labs?tab=agents and the two values to
+   paste into **Register agent** there, the agent id `vps-hostinger-01` and
+   the service principal's object id from step 3, and waits for Enter. Leave
+   every job type ticked and press **Register agent**; success is a toast
+   reading `Agent registered` and a `vps-hostinger-01` card on that page.
+   Then press Enter in PowerShell. When the agent is already heartbeating
+   and step 3 did not create its service principal, the document is already
+   there and binds it, so the step says so and does not wait.
 5. Writes `vault_labs_agent_api_base`, `vault_labs_agent_tenant_id`,
    `vault_labs_agent_client_id` and `vault_labs_agent_api_scope` into
    `/etc/hcw/ansible/vault.yml`, as root on the host: decrypted into a
@@ -386,10 +397,12 @@ does not run.
    (the probe, below).
 6. Runs `sudo /opt/hcw-src/lab-host/bootstrap.sh` when the vault changed or
    the agent is not running (`-ForceBootstrap` runs it regardless), or
-   restarts the agent when only Entra changed, because a running agent
-   keeps a token issued before the grant for up to an hour. Then it reads
-   `systemctl is-active hcw-labs-agent` and the last journal lines, and
-   says what they mean.
+   restarts the agent when only Entra or the registration changed: a
+   running agent keeps a token issued before the grant for up to an hour,
+   and a heartbeat that starts working after a registration logs nothing,
+   so without a restart the journal would still end on the refusal. Then
+   it reads `systemctl is-active hcw-labs-agent` and the last journal
+   lines, and says what they mean.
 
 **What success looks like.** Near the end of the run:
 
@@ -408,7 +421,7 @@ is:
 
 | The run says | What it means | What to do |
 | --- | --- | --- |
-| `Agent access required` | The token is accepted and the agent guard refuses it. Step 3 made the grant, so it is gate 2: the registry document is missing, inactive, or bound to another object id | Create the document (below). If step 3 assigned the role in this same run, wait two minutes and run `ssh hcw-lab sudo systemctl restart hcw-labs-agent` first |
+| `Agent access required` | The token is accepted and the agent guard refuses it. Step 3 made the grant, so it is gate 2: the registry document is missing, deactivated, or bound to another object id | On https://hybridcloudworks.com/admin/labs?tab=agents: no `vps-hostinger-01` card, register it (step 4, the values the run prints); a card marked Deactivated, press Activate; a card showing another object id, register it again with the one the run prints, which rebinds it. Then run `ssh hcw-lab sudo systemctl restart hcw-labs-agent`. If step 3 assigned the role in this same run, wait two minutes before the restart |
 | `Authentication required` | The API rejected the token itself: its audience or tenant is not what `ENTRA_API_AUDIENCE` and `ENTRA_TENANT_ID` expect | The scope must be `api://<API client id>/.default` and the API must issue v2 tokens; step 3 checks both and stops if either is not so |
 | `HTTP 403 with no API error in the body` | Cloudflare answered, not the API. The probe line says the same thing before the merge | The probe, below |
 | `Entra refused the agent's certificate sign-in (AADSTS…)` | Usually a registration or certificate this run created that Entra has not replicated yet | Wait two minutes, run `ssh hcw-lab sudo systemctl restart hcw-labs-agent`, and run the script again |
@@ -435,25 +448,29 @@ Bot Fight Mode for the zone. Each narrows a control, and a WAF skip rule
 does not work: Bot Fight Mode does not run on the Ruleset Engine
 ([Alerting and support](alerting-and-support.md)).
 
-**The registry document, the one step the script cannot do.** Gate 2 of the
-agent guard reads `lab_agents/{agentId}` and requires its `oid` to be the
-agent's service principal object id (the `oid` claim of an app-only token)
-and `active` to be `true`; `capabilities` are the job types it may claim.
-The script prints the whole document as JSON, with the real object id
-filled in: `id` and `agentId` both `vps-hostinger-01`, `oid` the service
-principal's object id from step 3, `active` `true`, and `capabilities` the
-five job types (`shell-echo`, `terraform-validate`, `ansible-check`,
-`helm-template`, `kubeconform`), which `scripts/lab-job-types.test.mjs`
-keeps in step with the server and agent allowlists.
-It goes in Cosmos DB account `cosmos-site-prod-cus`, database `hcw`,
-container `lab_agents`, whose partition key is `/id`. Nothing writes that
-container today: `getLabsSnapshot` only reads it, the agent's heartbeat only
-patches a document that exists, and no admin page has a way to add one. And
-the account's firewall admits only the Function App's subnet, with no
-operator data-plane role standing. Until a registration route exists, the
-agent authenticates and is refused with `Agent access required`, which the
-script reports as above. Once the document exists, success is the line
-above and the agent Online on the Agents tab.
+**The registry document, and why it is a paste.** Gate 2 of the agent guard
+reads `lab_agents/{agentId}` and requires its `oid` to be the agent's
+service principal object id (the `oid` claim of an app-only token) and
+`active` to be `true`; `capabilities` are the job types it may claim. The
+only writer is the API (#740): **Register agent** on the Agents tab calls
+`POST /api/cms/labs/agents` with `{ agentId, oid, jobTypes }`, and each
+agent's card has **Deactivate** or **Activate**, which call
+`PATCH /api/cms/labs/agents/{agentId}` with `{ active }`. Both need an
+editor or above, write an audit row, and store only identifiers: `id` and
+`agentId` both `vps-hostinger-01`, `oid` lower-cased (the claim is lower
+case and the guard compares exactly), `active`, and `capabilities`, by
+default the five job types (`shell-echo`, `terraform-validate`,
+`ansible-check`, `helm-template`, `kubeconform`) that
+`scripts/lab-job-types.test.mjs` keeps in step with the server and agent
+allowlists. Registering again with the same values changes nothing; with a
+new object id it rebinds the agent. It never reactivates a deactivated
+agent: that is the card's Activate, so undoing a revocation is always its
+own act. A deactivation takes effect on the agent's next call, because the
+guard does not cache the registry. The script cannot make the call itself,
+because the route needs an admin's delegated token and no owner script
+acquires one; and nothing can write the container directly, because the
+Cosmos DB firewall admits only the Function App's subnet and no operator
+holds a data-plane role. So step 4 prints the values and waits.
 
 **Certificate rotation** uses the same script with `-NextCertificate`
 (`lab-host/README.md`, "Rotating the agent certificate"): it appends

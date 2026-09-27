@@ -144,6 +144,41 @@ describe('getLabsSnapshot', () => {
     expect(body.jobTypes.map((t) => t.type)).toEqual(Object.keys(LAB_JOB_TYPES));
     expect(body.statuses).toEqual(JOB_STATUSES);
   });
+
+  it('carries the registry half of each agent: active, its object id, when it was registered (#740)', async () => {
+    const store = makeStore({
+      queryDocs: vi.fn(async (container, query) => {
+        if (query.includes('VALUE COUNT')) return [0];
+        if (container === 'lab_agents') {
+          return [
+            {
+              id: 'vps-hostinger-01',
+              oid: '9f8e7d6c-5b4a-4938-8271-605f4e3d2c1b',
+              active: true,
+              registeredAt: '2026-09-27T12:00:00.000Z',
+            },
+            // Anything but a literal true is not active: the guard reads it so.
+            { id: 'revoked', oid: '12345678-90ab-4cde-8f01-23456789abcd', active: 'true' },
+            { id: 'legacy' },
+          ];
+        }
+        return [];
+      }),
+    });
+    const h = createLabHandlers({ guard: guardAs('viewer'), store, ...fixed });
+    const { agents } = JSON.parse((await h.getLabsSnapshot(makeRequest({}), context)).body);
+
+    expect(agents.map(({ agentId, active, oid, registeredAt }) => ({ agentId, active, oid, registeredAt }))).toEqual([
+      {
+        agentId: 'vps-hostinger-01',
+        active: true,
+        oid: '9f8e7d6c-5b4a-4938-8271-605f4e3d2c1b',
+        registeredAt: '2026-09-27T12:00:00.000Z',
+      },
+      { agentId: 'revoked', active: false, oid: '12345678-90ab-4cde-8f01-23456789abcd', registeredAt: null },
+      { agentId: 'legacy', active: false, oid: null, registeredAt: null },
+    ]);
+  });
 });
 
 describe('cancelLabJob', () => {

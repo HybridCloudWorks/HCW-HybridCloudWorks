@@ -19,6 +19,49 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Register a lab agent from the admin UI; `Register-LabAgent.ps1` finishes
+  the go-live (#740).** The API admits a lab agent only when
+  `lab_agents/{agentId}` binds it to its service principal, and nothing
+  could write that document: no route, a read-only Labs page, and a Cosmos
+  firewall that admits only the Function App. So a registered agent
+  authenticated and was refused with `Agent access required`. Two routes in
+  `functions/src/lib/labs/agent-registry.js`, registered in `labs-http.js`,
+  both editor or above (the level of the other Labs writes; gate 1, the
+  `LabAgent` app role, stays an Entra grant only a tenant administrator can
+  make): `POST /api/cms/labs/agents` takes exactly `{ agentId, oid,
+  jobTypes? }`, any other key a 400, with `agentId` the certificate CN
+  shape, `oid` a GUID stored lower-cased because the agent guard compares it
+  exactly with the token's lower-case claim, and `jobTypes` a non-empty
+  subset of `LAB_JOB_TYPES` (default all five). It creates the document the
+  guard and the claim path read, `{ id, agentId, oid, active: true,
+  capabilities, registeredAt, updatedAt, updatedBy }`, or patches only the
+  registry fields of one that exists, so a heartbeat is never rewound; the
+  same values again write nothing, and a deactivated agent stays
+  deactivated. `PATCH /api/cms/labs/agents/{agentId}` takes `{ active }`
+  and takes effect on the agent's next call, since the guard does not cache
+  the registry. Every write leaves an `admin_audit_logs` row
+  (`lab_agent_registered`, `_updated` with the previous object id,
+  `_activated`, `_deactivated`), and nothing secret is accepted or stored.
+  `getLabsSnapshot` now carries each agent's `active`, `oid` and
+  `registeredAt`. On Admin → Labs → Agents, **Register agent** takes the
+  agent id and the object id with every job type ticked, and says in one
+  line that `Register-LabAgent.ps1` prints both; each card shows its bound
+  object id and a Deactivated badge, and has **Deactivate** (which asks
+  first) or **Activate**. Tests prove a registered document passes
+  `require-agent` for a token carrying that object id, reaches the claim
+  path with its job types, and is refused once deactivated.
+  `Register-LabAgent.ps1` no longer prints JSON and exits 2: no owner
+  script can get the admin's delegated token the route needs, so step 4
+  prints https://hybridcloudworks.com/admin/labs?tab=agents with the two
+  values to paste and waits for Enter, then continues to the vault and
+  `bootstrap.sh` and restarts the agent so the verdict reads a clean
+  journal. It skips the wait when the agent is already heartbeating on a
+  service principal it did not just create, so a second run still changes
+  nothing without asking. Docs: the
+  [Labs host runbook](docs/runbooks/labs-host.md) ("The lab agent's
+  go-live"), `lab-host/README.md` ("The agent identity") and
+  [Required inputs §4.7](docs/standards/required-inputs.md).
+
 - **Landing Zone Builder: "Validate on the lab", and public lab submission
   built inside ADR 0032 decision 6's bounds, closed (part of #672).** Three
   anonymous routes in `functions/src/lib/labs/public-submit.js`, registered
