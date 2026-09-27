@@ -1204,6 +1204,44 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **The lab agent and the Coder template pull the image that vendors every
+  builder module; lab jobs get 512 MB; the lab articles match (follow-up to
+  #742).** `vps-agent/lib/capabilities.js` pins `hcw-lab-runner` to
+  `sha256:8cc69354...` and `lab-host/coder/templates/hcw-lab/main.tf` pins
+  `hcw-lab` to `sha256:014a81d6...`, the digests main's publish run
+  36320771780 pushed for 7c0a95b2 (#742), both checked with `docker buildx
+  imagetools inspect`. Those images carry
+  `avm-res-network-virtualnetwork@0.22.2`, the version every spoke calls,
+  so the Landing Zone Builder's full default build validates offline.
+
+  Job memory moves from 256m to 512m (owner decision 2026-09-27) in the
+  agent's default (`vps-agent/index.js`), `vps-agent/.env.example` and the
+  `labs_agent` role's `labs_agent_job_memory` and argument spec. Measured
+  on Docker 29.8 against the pinned runner, under the agent's own sandbox
+  argv: at 256m the full default build's `terraform validate` is OOM-killed
+  (exit 247) after an offline init that succeeds; 320m passes, but in 20 to
+  86 s across four runs, and 512m in 15 to 19 s every time. One job runs at
+  a time on a 16 GB host, so the margin is cheap; the reason is recorded
+  beside the default. `sandbox-check.mjs`
+  loses its `BUILDER_LIMITS` override and reads its limits from
+  `vps-agent/index.js`, so every job, the builder's included, runs at the
+  agent's own limits; it passes all six on the pinned digest.
+  `publish-lab-image.yml` now runs on pull requests that change
+  `vps-agent/index.js` for that reason. A new
+  `scripts/lab-job-limits.test.mjs` fails when the agent's defaults,
+  `.env.example`, the role defaults and the role's argument spec disagree
+  about any job limit; the `scripts (operations)` CI filter now covers
+  `vps-agent/index.js`, `.env.example` and `lib/capabilities.js`, which
+  `lab-job-types.test.mjs` already imported.
+
+  The lab article drafts no longer say a build with landing zones cannot
+  init offline. Part 1 keeps its platform-only build, with order as the
+  reason and a pointer to the full build. Part 2 lists every builder module
+  as vendored, shows the full default build's spoke rewrite and its 71
+  module lines with none downloaded, and turns the `left module
+  "spoke_corp_1"` entry into what it now means: an image published before
+  2026-09-27. Every quoted line was re-run against the new images.
+
 - **Coder's PostgreSQL moves from 16.15 to 18.6, with the move rehearsed
   (#715).** 18.6 is the newest release of the newest major (18, supported
   to November 2030; read 2026-09-26). It is pinned by index digest

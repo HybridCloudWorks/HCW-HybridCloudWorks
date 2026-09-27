@@ -200,14 +200,14 @@ one 64 MB tmpfs at `/tmp/run`. Precisely:
   rewrite per builder module and none left. `sandbox-check.mjs` validates
   the builder's real full default build (every component, both landing
   zones; `emitFiles(DEFAULT_STATE)`, generated at run time) the same way,
-  under the job sandbox. One limit is not the image's: at the agent's
-  default job memory of 256m that build is OOM-killed during `terraform
-  validate`, after an offline init that succeeds, because its sixteen
-  provider configurations (six `azurerm` aliases among them) each start a
-  plugin process; 320m is enough (measured 2026-09-27). The host's
-  `labs_agent_job_memory` is 256m, so `sandbox-check.mjs` runs that one case
-  at 512m and says so in its output, and raising the host's limit is an
-  owner decision.
+  under the job sandbox and at the agent's own limits. Those limits were
+  set by this build: at 256m of job memory it is OOM-killed during
+  `terraform validate`, after an offline init that succeeds, because its
+  sixteen provider configurations (`azurerm` and `azapi` six times each)
+  each start a plugin process. 320m passes, erratically, in 20 to 86 s and
+  512m in 15 to 19 s (measured 2026-09-27), so the agent's default and the
+  host's `labs_agent_job_memory` are 512m (owner decision that day; the
+  reason is beside the default in `vps-agent/index.js`).
 - **Helm and kubeconform: yes.** [`bin/hcw-helm-template`](bin/hcw-helm-template)
   renders one chart (its `Chart.yaml` at `/workspace` or one level down;
   dependencies must already be under `charts/`).
@@ -271,10 +271,11 @@ and it is what caught both the tmpfs ownership and the `TMPDIR` failures.
 One of its jobs is the Landing Zone Builder's full default build, generated
 from `frontend/src/lib/landingZone` when the script runs, so it needs that
 directory beside this one (a full checkout, as CI has) and fails on any
-module block the image would leave for the registry; that case runs at 512m
-of memory instead of the agent's 256m, for the reason under "What works
-offline". The workflow runs it after the smoke tests, and runs on pull
-requests that change the builder as well as this directory.
+module block the image would leave for the registry. Every case runs at the
+agent's limits, which the script reads from `vps-agent/index.js` rather than
+restating (512m of memory, for the reason under "What works offline"). The
+workflow runs it after the smoke tests, and runs on pull requests that
+change the builder as well as this directory.
 
 [`scripts/lab-image-avm-vendoring.test.mjs`](../scripts/lab-image-avm-vendoring.test.mjs)
 is the fast third check, with no Docker and no network, in the required

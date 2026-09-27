@@ -44,7 +44,7 @@ import {
 } from './docker-runner.js';
 import { CAPABILITIES } from './capabilities.js';
 
-const LIMITS = { memory: '256m', cpus: '0.5', pidsLimit: 128 };
+const LIMITS = { memory: '512m', cpus: '0.5', pidsLimit: 128 };
 const CTX = {
   jobDir: '/tmp/labjob-test',
   containerName: 'labjob-deadbeef',
