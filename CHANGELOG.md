@@ -19,6 +19,11 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **ADR 0032 (the learner labs platform) is Accepted, 2026-09-27.** Owner
+  approval: "all have been approved to move forward". Its decision 6 is
+  unchanged, so anonymous public lab submission stays Gated until the owner
+  revises that section; the status line and the decisions index say so.
+
 - **ElevenLabs: the last sample replays free, and a new render asks first
   (owner request 2026-09-27).** The owner spent two live checks (257 credits
   each, 9,486 left on the free plan) only to test playback, because the
