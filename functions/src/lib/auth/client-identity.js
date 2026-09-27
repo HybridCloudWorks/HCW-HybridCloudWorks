@@ -113,6 +113,29 @@ export function normalizeClientIp(raw) {
 const CF_ORIGIN_SECRET_HEADER = 'x-hcw-origin-secret';
 
 /**
+ * A setting's value, or '' when it is missing or is a Key Vault reference the
+ * platform did not resolve.
+ *
+ * An unresolved reference reaches `process.env` as the literal
+ * `@Microsoft.KeyVault(SecretUri=…)` text, and that text is public: it is in
+ * `infra/functionapp.tf`. Used as the origin secret, it would be a shared
+ * secret anyone can read, so a request carrying it from any Cloudflare-range
+ * address would pass as "via our Cloudflare" and choose its own client key
+ * through a spoofed `CF-Connecting-IP`. Treated as unset, the check fails
+ * closed instead, which is what an unseeded secret should do. The same rule
+ * the AI router, the speech providers and `admin-secrets.js` apply
+ * (security review of #738, 2026-09-27).
+ *
+ * @param {string|undefined} value
+ * @returns {string}
+ */
+export function resolvedSetting(value) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (!text || text.startsWith('@Microsoft.KeyVault(')) return '';
+  return text;
+}
+
+/**
  * @param {object} [options]
  * @param {string} [options.originSecret] Expected shared secret. When set, a
  *   request without it is treated as bypassing Cloudflare.
@@ -120,10 +143,14 @@ const CF_ORIGIN_SECRET_HEADER = 'x-hcw-origin-secret';
  * @param {boolean} [options.allowUnverifiedOrigin] Dev escape hatch.
  */
 export function createClientIdentity({
-  originSecret = process.env.CF_ORIGIN_SECRET,
-  ipSalt = process.env.CLIENT_IP_SALT,
+  originSecret: rawOriginSecret = process.env.CF_ORIGIN_SECRET,
+  ipSalt: rawIpSalt = process.env.CLIENT_IP_SALT,
   allowUnverifiedOrigin = process.env.NODE_ENV !== 'production',
 } = {}) {
+  // Both read through resolvedSetting: an unresolved Key Vault reference is
+  // public text, not a secret or a salt (see resolvedSetting).
+  const originSecret = resolvedSetting(rawOriginSecret);
+  const ipSalt = resolvedSetting(rawIpSalt);
   /**
    * Did this request actually arrive through Cloudflare?
    *
