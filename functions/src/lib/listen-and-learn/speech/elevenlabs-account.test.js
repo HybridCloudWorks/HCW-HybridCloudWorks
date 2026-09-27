@@ -23,8 +23,10 @@ import {
   describeShortfall,
   dialogueRefusal,
   errorCode,
+  errorMessage,
   invalidateSubscription,
   isFreePlan,
+  isPermissionAnswer,
   isPermissionRefusal,
   isRetryableStatus,
   normalizeSubscription,
@@ -155,6 +157,25 @@ describe('dialogueRefusal', () => {
       `Choose voices your plan allows under Podcast voices at ${VOICE_PICKER_PAGE}. ElevenLabs said: `
     );
     expect(VOICE_PICKER_PAGE).toBe('https://hybridcloudworks.com/admin/platform?tab=audio');
+  });
+
+  it('reads a permission refusal from the body when the code alone says unauthorized (live, 2026-09-26)', () => {
+    const body = (detail) => JSON.stringify({ detail });
+    const missing = 'The API key you used is missing the permission voices_read to execute this operation.';
+    expect(isPermissionAnswer(401, body({ code: 'unauthorized', message: missing }))).toBe(true);
+    expect(isPermissionAnswer(401, body({ code: 'unauthorized', status: 'missing_permissions' }))).toBe(true);
+    expect(isPermissionAnswer(403, body({}))).toBe(true);
+    expect(isPermissionAnswer(401, body({ code: 'invalid_api_key', message: 'Invalid API key' }))).toBe(false);
+    expect(isPermissionAnswer(401, 'not json')).toBe(false);
+    expect(isPermissionAnswer(500, body({ message: 'permission service down' }))).toBe(false);
+  });
+
+  it("keeps ElevenLabs's own sentence, on one line, capped, and never a key", () => {
+    const body = (message) => JSON.stringify({ detail: { code: 'unauthorized', message } });
+    expect(errorMessage(body('Invalid API key:\n sk_0123456789abcdef0123'))).toBe('Invalid API key: [key]');
+    expect(errorMessage(body('x'.repeat(400)))).toHaveLength(300);
+    expect(errorMessage(JSON.stringify({ detail: { code: 'unauthorized' } }))).toBe('');
+    expect(errorMessage('<html>gateway</html>')).toBe('');
   });
 
   it('tells a permission refusal from a refused key', () => {
