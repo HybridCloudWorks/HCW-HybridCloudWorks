@@ -1,6 +1,6 @@
 # ADR 0029: Podcast hosting is RSS.com, the podcast page is the one audio surface, and the media route serves byte ranges
 
-**Status:** Accepted 2026-09-07; §1 and §2 amended 2026-09-08 (§1b, §2a); §2a scoped 2026-09-09 (§2b); §2a amended 2026-09-26 (free plan for testing, publish blocked)
+**Status:** Accepted 2026-09-07; §1 and §2 amended 2026-09-08 (§1b, §2a); §2a scoped 2026-09-09 (§2b); §2a amended 2026-09-26 (free plan for testing, publish blocked), and again 2026-09-26 (the owner picks the podcast voices by ear, #725)
 **Decision date:** 2026-09-07
 **Owners:** Workload owner
 
@@ -285,9 +285,85 @@ episode is therefore nearly the whole month in one run. Four things follow.
   Aria is already a Legacy voice whose id the API routes to "Zoe"
   ([Legacy voices](https://elevenlabs.io/docs/help-center/product/voices/my-voices/what-are-legacy-voices)).
   The ids are unchanged until the owner chooses replacements by ear. The live
-  check is how to find out whether the account can use them.
+  check is how to find out whether the account can use them. *(Superseded the
+  same day by the amendment below.)*
 
 Tracked by #432.
+
+**Amended 2026-09-26, later the same day: the owner picks the podcast voices
+by ear (#725).** The seeded free-plan key passed the subscription read and its
+first live check was refused: HTTP 402 `paid_plan_required`, "Free users
+cannot use library voices via the API". The account was created after March
+2026, so the Default voice Sarah is not one of its defaults, and Aria is a
+Legacy voice. To this account both are library voices. Choosing ids from a
+help page was the mistake, so the account's own list now decides.
+
+- **The rule, from ElevenLabs.** "Voice Library voices are not available via
+  the API to free tier users"
+  ([Voices](https://elevenlabs.io/docs/overview/capabilities/voices), read
+  2026-09-26). On the free plan the API may use the account's own voices and
+  its default voices.
+- **A voice list.** `GET cms/podcast/elevenlabs/voices`, editor, reads
+  `GET /v2/voices` server-side with the key
+  ([List voices](https://elevenlabs.io/docs/api-reference/voices/search);
+  `/v1/voices` is filed under Legacy). The voice object has no single type
+  field, so the account is listed three times with the documented
+  `voice_type` filter: `default`, `non-community` ("'personal' and
+  'workspace' combined (excludes library copies)") and `community`. Each
+  voice is labelled by the listing that returned it. It is paginated with
+  `next_page_token` / `has_more` at 100 a page and cached for five minutes.
+  Each voice comes back with its name, category, gender, accent, age and
+  description labels, and whether the current plan allows it. When it does
+  not, the reason is given: a library voice on the free plan, a Legacy voice,
+  or a plan its `available_for_tiers` excludes. Nothing is hidden. Listing
+  needs a third key permission, **Voices → Read** (`voices_read`); without
+  it the list names the permission.
+- **Previews without widening the CSP.** Each voice's `preview_url` is on
+  `storage.googleapis.com/eleven-public-prod/`, the host and bucket in every
+  example in ElevenLabs's reference. `frontend/staticwebapp.config.json` has
+  no `media-src`, so media falls back to `'self'`, which admits neither that
+  host nor a `blob:` URL. It is not widened. An editor route,
+  `GET cms/podcast/elevenlabs/voices/{voiceId}/preview`, takes a voice id,
+  never a URL. It looks the preview up in the key's own listing and fetches
+  it only if it is on that exact host and inside that bucket, checked after
+  the URL parser has resolved any `..`. The fetch sends no key, refuses
+  redirects, stops at 2 MiB, and passes on only bytes that begin like an MP3.
+  The page fetches the bytes with its token and plays them with Web Audio
+  (`decodeAudioData`), which loads no URL. Tests pin the allowlist: look-alike
+  hosts, other buckets on the same host, `../` climbs, ports, credentials and
+  queries. The route is therefore not an open proxy.
+- **The choice is a podcast-only platform setting.** It is stored as
+  `admin_config/podcast_voices`, `{ Maya, Elena }`. It is written through the
+  same Platform settings route and store as the Listen & Learn voice
+  (`podcast-voices`), not through Function App settings, which would need a
+  Terraform apply for every change of ear. A save must name both hosts, each
+  a 20-character letters-and-digits ElevenLabs id, and they must differ.
+  Every podcast render reads it first: the episode pipeline and the live
+  check pass it to the speech switch. The podcast no longer reads
+  `LISTEN_AND_LEARN_VOICE_MAYA` / `…_ELENA`, which are Gemini's and Azure's
+  (§2b). Listen & Learn is untouched.
+- **No default voices.** The Default voices page's replacement table names
+  new voices (Talia for Sarah, and so on) but prints no ids. Its links open a
+  Voice Library search, and the Voice Library is the part the free tier
+  cannot use through the API. Read on 2026-09-26, the docs name no voice id a
+  free account made after March 2026 is documented to be able to use. So the
+  code default is empty, rather than a third guess. Without a saved pair, a
+  render refuses before it sends anything, with `voices_not_chosen` and
+  "Choose the podcast voices first". The live check waits for a saved pair.
+  An episode generated before the choice is saved is a transcript-only draft
+  with that sentence as its `audioError`.
+- **The 402 names the fix.** A `paid_plan_required` refusal now reads "Choose
+  voices your plan allows under Podcast voices at
+  `https://hybridcloudworks.com/admin/platform?tab=audio`", followed by
+  ElevenLabs's own body, and the card says the same beside it.
+
+The pre-flight's one-credit-per-character count assumes a voice with no
+credit multiplier. That holds for everything the free plan offers here. On a
+paid plan the owner may choose a library voice with a multiplier; the
+pre-flight would then under-count, and the per-request out-of-credit error
+is the backstop, as it already was for two renders racing each other.
+
+Tracked by #725.
 
 #### 2b. ElevenLabs is the podcast voice only; Listen & Learn is Gemini TTS — amended 2026-09-09
 
@@ -474,7 +550,13 @@ ever run, is a YouTube embed on a page, not an integration.
   withdrawn — Listen & Learn is Gemini by rule, so there is nothing to compare.
 - **Validated for the free plan (§2a, 2026-09-26)** when the seeded key's live
   check on the Audio tab plays both voices, reports about 257 characters billed,
-  and reports credits left about 257 below the month's 10,000.
+  and reports credits left about 257 below the month's 10,000. Since #725 that
+  check runs only after two voices are chosen and saved under Podcast voices.
+  Success is the list showing usable voices, two saved, "Characters billed:
+  257" and credits left about 9,743 of 10,000.
+- **Revisit the empty default voices (§2a, #725)** if ElevenLabs documents
+  voice ids that a free account made after March 2026 can use through the
+  API. Until then the owner's saved pair is the only source.
 - **Revisit the free-plan publish block** when a paid ElevenLabs plan is bought.
   Nothing in code changes: a render on the paid plan records that plan and
   publishes. Episodes voiced on the free plan must be regenerated first.

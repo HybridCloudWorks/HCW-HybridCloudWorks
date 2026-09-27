@@ -36,7 +36,14 @@ const AZURE = { AZURE_SPEECH_KEY: 'a', AZURE_SPEECH_REGION: 'eastus' };
 const ALL = { ...ELEVEN, ...GEMINI, ...AZURE };
 
 const LL = { product: 'listenAndLearn' };
-const POD = { product: 'podcast' };
+/**
+ * The podcast product, with the voices every podcast caller passes: the
+ * owner's stored choice (#725). ElevenLabs has no default voice, so a render
+ * without them refuses before sending. The other entry points ignore
+ * `voices`, so the same object serves resolveSpeechProvider and the estimate.
+ */
+const PODCAST_VOICES = Object.freeze({ Maya: 'MayaVoice00000000001', Elena: 'ElenaVoice0000000002' });
+const POD = { product: 'podcast', voices: PODCAST_VOICES };
 
 const DIALOGUE = [
   { speaker: 'Maya', text: 'Hello' },
@@ -544,12 +551,22 @@ describe('synthesizeDialogue', () => {
     ).rejects.toThrow(/No dialogue turns/);
   });
 
-  it('publishes a default voice map for every provider', () => {
+  it('publishes a default voice map for every provider, and none for ElevenLabs, whose voices the owner chooses', () => {
     expect(Object.keys(DEFAULT_VOICES).sort()).toEqual(['azure', 'elevenlabs', 'gemini']);
-    // All name the same two hosts the script writes.
-    for (const voices of Object.values(DEFAULT_VOICES)) {
-      expect(Object.keys(voices)).toEqual(['Maya', 'Elena']);
+    // The two Listen & Learn providers name the same two hosts the script writes.
+    for (const provider of ['gemini', 'azure']) {
+      expect(Object.keys(DEFAULT_VOICES[provider])).toEqual(['Maya', 'Elena']);
     }
+    // The podcast's come from admin_config/podcast_voices (#725).
+    expect(DEFAULT_VOICES.elevenlabs).toEqual({});
+  });
+
+  it('refuses a podcast render with no voices chosen, before anything is sent', async () => {
+    const fetchImpl = elevenOk();
+    await expect(
+      synthesizeDialogue({ product: 'podcast', dialogue: DIALOGUE, env: ALL, fetchImpl })
+    ).rejects.toMatchObject({ provider: 'elevenlabs', code: 'voices_not_chosen' });
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
 

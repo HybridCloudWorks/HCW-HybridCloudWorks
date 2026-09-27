@@ -1,6 +1,6 @@
 /**
  * platform-settings.js — the Admin → Platform settings page's read and write
- * of five `admin_config` documents, three of which until now could only be
+ * of six `admin_config` documents, three of which until now could only be
  * seeded by an operator holding a Cosmos data-plane role (#351, #352, and the
  * feed list from #348/#349):
  *
@@ -8,6 +8,8 @@
  *   social-autopost         → admin_config/social_autopost         read by triggers/social-caption-trigger.js
  *   podcast-feeds           → admin_config/podcast_feeds           read by timers/podcasts.js
  *   listen-and-learn-speech → admin_config/listen_and_learn_speech read by functions/listen-and-learn-jobs.js
+ *   podcast-voices          → admin_config/podcast_voices          read by podcast/voice-settings.js, for
+ *                             every podcast render (episodes and the live check, #725)
  *   newsletter-settings     → admin_config/newsletter_settings     read by lib/newsletter/admin-handlers.js
  *                             and lib/newsletter/issue.js (content: sections, window, intro)
  *                             and lib/newsletter/signup-config.js (the public signup box)
@@ -46,6 +48,8 @@ import {
   listenAndLearnModelOptions,
 } from './listen-and-learn/speech-settings.js';
 import { GEMINI_DEFAULT_MODEL } from './listen-and-learn/speech/gemini.js';
+import { isElevenLabsVoiceId } from './listen-and-learn/speech/elevenlabs-voice-plan.js';
+import { PODCAST_HOSTS, PODCAST_VOICES_CONFIG_ID } from './podcast/voice-settings.js';
 import {
   BUILT_IN_TEMPLATE_ID,
   DEFAULT_NEWSLETTER_SETTINGS,
@@ -355,6 +359,41 @@ export function normalizeListenAndLearnSpeech(body) {
   return { geminiModel: raw };
 }
 
+// ── podcast voices ─────────────────────────────────────────────────────────
+
+/**
+ * `{ Maya, Elena }` → the document every podcast render reads
+ * (podcast/voice-settings.js, #725). Both hosts are required, each must look
+ * like an ElevenLabs voice id, and the two must differ: a listener has to
+ * tell the hosts apart. The value is sent to a paid API as `voice_id`, so it
+ * is trimmed and nothing more; a near-miss is refused, not corrected.
+ *
+ * Whether the plan allows a voice is not checked here, because that is the
+ * account's answer and this has no network. The picker offers only voices
+ * the listing marks usable, and a render with any other meets ElevenLabs's
+ * own 402, whose sentence points back at the picker.
+ */
+export function normalizePodcastVoices(body) {
+  if (!isPlainObject(body)) fail('Body must be a JSON object');
+  assertOnlyKeys(body, PODCAST_HOSTS, 'body');
+  const voices = {};
+  for (const host of PODCAST_HOSTS) {
+    const raw = body[host];
+    if (typeof raw !== 'string' || raw.trim() === '') {
+      fail(`${host} needs a voice: choose one for each host`);
+    }
+    const id = raw.trim();
+    if (!isElevenLabsVoiceId(id)) {
+      fail(`${host} must be an ElevenLabs voice id, 20 letters and digits as the voice list shows it`);
+    }
+    voices[host] = id;
+  }
+  if (new Set(Object.values(voices)).size !== PODCAST_HOSTS.length) {
+    fail(`${PODCAST_HOSTS.join(' and ')} must have different voices, so a listener can tell the hosts apart`);
+  }
+  return voices;
+}
+
 // ── newsletter ─────────────────────────────────────────────────────────────
 
 /** More rows than any registry will hold: a bound on work, not on sections. */
@@ -572,6 +611,13 @@ export const PLATFORM_SETTINGS = Object.freeze({
     // choice selected rather than nothing, because that is what will run.
     empty: () => ({ geminiModel: GEMINI_DEFAULT_MODEL }),
     options: listenAndLearnModelOptions,
+  }),
+  'podcast-voices': Object.freeze({
+    docId: PODCAST_VOICES_CONFIG_ID,
+    normalize: normalizePodcastVoices,
+    // Nothing chosen: the code has no default voice (speech/elevenlabs.js),
+    // so the page shows both hosts unset and a render says to choose first.
+    empty: () => Object.fromEntries(PODCAST_HOSTS.map((host) => [host, ''])),
   }),
   'newsletter-settings': Object.freeze({
     docId: NEWSLETTER_SETTINGS_CONFIG_ID,
@@ -820,6 +866,10 @@ export function createPlatformSettingsHandlers({
         // A model id is a setting, not content, and which one was chosen is
         // the whole point of the row.
         return { geminiModel: value.geminiModel };
+      case 'podcast-voices':
+        // Voice ids are settings, not content, and which ones were chosen is
+        // the point of the row: a change of voice is what a listener hears.
+        return { ...value };
       case 'newsletter-settings':
         // Whether each is set, never the address or the inbox: those are
         // personal details, and the audit row records settings, not content.

@@ -2,8 +2,9 @@
  * Audio: the podcast feeds card keeps the main feed and the provider rows
  * together on the way to a save, the voice card offers the server's priced
  * choices, and each card loads and fails on its own. The podcast voice card
- * (ElevenLabs, 2026-09-26) has its own tests in ElevenLabsCard.test.jsx; here
- * it is one more card that loads beside the others.
+ * (ElevenLabs, 2026-09-26) has its own tests in ElevenLabsCard.test.jsx, and
+ * its Podcast voices picker (#725) in PodcastVoices.test.jsx; here it is one
+ * more card that loads beside the others.
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -35,6 +36,7 @@ vi.mock('@/lib/api', () => ({
   getJSON: (...args) => getJSON(...args),
   sendJSON: (...args) => sendJSON(...args),
   postJSON: (...args) => postJSON(...args),
+  authedFetch: vi.fn(),
 }));
 
 /** The podcast voice card's read: an unseeded key, which is a 200, not an error. */
@@ -53,6 +55,8 @@ const empty = {
   'podcast-feeds': { feeds: [] },
   // Nothing stored shows the module default selected — that is what runs.
   'listen-and-learn-speech': { geminiModel: BEST },
+  // No default podcast voice: both hosts unset until the owner chooses.
+  'podcast-voices': { Maya: '', Elena: '' },
 };
 const settingFor = (route) => route.replace('cms/platform-settings/', '');
 const optionsFor = (setting) =>
@@ -213,15 +217,17 @@ describe('ListenAndLearnSpeechCard', () => {
 });
 
 describe('the Audio tab', () => {
-  it('loads its two settings and the podcast voice status, and nothing else', async () => {
+  it('loads its three settings and the podcast voice status, and nothing else', async () => {
     render(<AudioTab />);
     await screen.findByText('Podcast feeds');
     await screen.findByText('Listen & Learn voice');
     await screen.findByText('Not configured');
-    expect(getJSON).toHaveBeenCalledTimes(3);
+    await waitFor(() => expect(getJSON).toHaveBeenCalledTimes(4));
     expect(getJSON).toHaveBeenCalledWith(settingRoute('podcast-feeds'));
     expect(getJSON).toHaveBeenCalledWith(settingRoute('listen-and-learn-speech'));
+    expect(getJSON).toHaveBeenCalledWith(settingRoute('podcast-voices'));
     expect(getJSON).toHaveBeenCalledWith(ELEVENLABS_STATUS_ROUTE);
+    // With no key the voice list is not asked for: it is the account's own.
     // The live check spends credits, so loading the tab never runs it.
     expect(postJSON).not.toHaveBeenCalled();
   });

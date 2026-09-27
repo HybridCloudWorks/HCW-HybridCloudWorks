@@ -8,6 +8,10 @@
  * path an episode takes; a refusal is reported with its own sentence and
  * spends nothing; and "credits left" can never read as unspent because a
  * fresh read lagged.
+ *
+ * Since #725 the check reads the saved podcast voices and, with none chosen,
+ * refuses before sending; and two more routes list the key's voices (marked
+ * usable on the plan or not) and proxy one voice's preview.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
@@ -26,6 +30,8 @@ import {
   normalizeSubscription,
 } from '../listen-and-learn/speech/elevenlabs-account.js';
 import { SpeechError, SpeechNotConfiguredError } from '../listen-and-learn/speech/index.js';
+import { VOICES_URL, clearVoicesCache } from '../listen-and-learn/speech/elevenlabs-voices.js';
+import { PODCAST_VOICES_CONFIG_ID } from './voice-settings.js';
 
 const NOW = new Date('2026-09-26T12:00:00.000Z');
 const KEY_ENV = { ELEVENLABS_API_KEY: 'xi-test-key' };
@@ -56,9 +62,14 @@ const USAGE_ROW = {
   model: 'eleven_v3',
 };
 
+/** The owner's saved choice (admin_config/podcast_voices, #725). */
+const VOICES = Object.freeze({ Maya: 'MayaVoice00000000001', Elena: 'ElenaVoice0000000002' });
+const VOICES_DOC = { id: PODCAST_VOICES_CONFIG_ID, configScope: 'admin_config', ...VOICES };
+
 const makeStore = (over = {}) => ({
   queryDocs: vi.fn(async () => [USAGE_ROW]),
   upsertDoc: vi.fn(async (_c, doc) => doc),
+  readDoc: vi.fn(async (_c, id) => (id === PODCAST_VOICES_CONFIG_ID ? VOICES_DOC : null)),
   ...over,
 });
 const makeStorage = (over = {}) => ({ uploadBlob: vi.fn(async () => undefined), ...over });
@@ -74,6 +85,8 @@ const handlers = ({
   synthesize,
   readAccount,
   fetchImpl,
+  listVoices,
+  fetchPreview,
 } = {}) =>
   createElevenLabsHandlers({
     guard,
@@ -85,9 +98,13 @@ const handlers = ({
     ...(synthesize ? { synthesize } : {}),
     ...(readAccount ? { readAccount } : {}),
     ...(fetchImpl ? { fetchImpl } : {}),
+    ...(listVoices ? { listVoices } : {}),
+    ...(fetchPreview ? { fetchPreview } : {}),
   });
 
 const body = (res) => JSON.parse(res.body);
+
+const previewRequest = (voiceId) => ({ params: { voiceId }, json: vi.fn() });
 
 /** What `synthesizeDialogue` returns for the sample on a fresh free month. */
 const rendered = (over = {}) => ({
@@ -108,7 +125,9 @@ const rendered = (over = {}) => ({
 
 beforeEach(() => {
   clearSubscriptionCache();
+  clearVoicesCache();
   context.log.mockClear();
+  context.error.mockClear();
 });
 
 describe('the sample', () => {
@@ -124,26 +143,40 @@ describe('the sample', () => {
 });
 
 describe('auth', () => {
-  it('passes a guard denial through on both routes, touching nothing', async () => {
+  it('passes a guard denial through on every route, touching nothing', async () => {
     const store = makeStore();
     const storage = makeStorage();
     const synthesize = vi.fn();
     const readAccount = vi.fn();
-    const h = handlers({ guard: denyGuard, store, storage, synthesize, readAccount });
+    const listVoices = vi.fn();
+    const fetchPreview = vi.fn();
+    const h = handlers({ guard: denyGuard, store, storage, synthesize, readAccount, listVoices, fetchPreview });
     expect((await h.getStatus(request(), context)).status).toBe(403);
     expect((await h.renderSample(request(), context)).status).toBe(403);
+    expect((await h.listVoices(request(), context)).status).toBe(403);
+    expect((await h.previewVoice(previewRequest(VOICES.Maya), context)).status).toBe(403);
     expect(store.queryDocs).not.toHaveBeenCalled();
+    expect(store.readDoc).not.toHaveBeenCalled();
     expect(readAccount).not.toHaveBeenCalled();
     expect(synthesize).not.toHaveBeenCalled();
+    expect(listVoices).not.toHaveBeenCalled();
+    expect(fetchPreview).not.toHaveBeenCalled();
     expect(storage.uploadBlob).not.toHaveBeenCalled();
   });
 
-  it('gates both at editor, the level of the routes that generate podcast audio', async () => {
+  it('gates all four at editor, the level of the routes that generate podcast audio', async () => {
     const guard = { requireRole: vi.fn(async () => ({ user: USER, error: null })) };
     const h = handlers({ guard, env: {} });
     await h.getStatus(request(), context);
     await h.renderSample(request(), context);
-    expect(guard.requireRole.mock.calls.map(([, role]) => role)).toEqual(['editor', 'editor']);
+    await h.listVoices(request(), context);
+    await h.previewVoice(previewRequest(VOICES.Maya), context);
+    expect(guard.requireRole.mock.calls.map(([, role]) => role)).toEqual([
+      'editor',
+      'editor',
+      'editor',
+      'editor',
+    ]);
   });
 });
 
@@ -264,8 +297,49 @@ describe('renderSample', () => {
     await handlers({ synthesize, readAccount: vi.fn(async () => FREE) }).renderSample(req, context);
     expect(req.json).not.toHaveBeenCalled();
     expect(synthesize).toHaveBeenCalledWith(
-      expect.objectContaining({ product: 'podcast', dialogue: SAMPLE_DIALOGUE, env: KEY_ENV })
+      expect.objectContaining({
+        product: 'podcast',
+        dialogue: SAMPLE_DIALOGUE,
+        env: KEY_ENV,
+        voices: VOICES,
+      })
     );
+  });
+
+  it('reads the saved podcast voices, and with none chosen says so as a 409 that sends nothing', async () => {
+    const synthesize = vi.fn();
+    const storage = makeStorage();
+    const store = makeStore({ readDoc: vi.fn(async () => null) });
+    const res = await handlers({ store, storage, synthesize }).renderSample(request(), context);
+    expect(res.status).toBe(409);
+    expect(body(res)).toEqual({
+      error:
+        'Choose the podcast voices first: no ElevenLabs voice is saved for Maya and Elena. ' +
+        'Pick two under Podcast voices at https://hybridcloudworks.com/admin/platform?tab=audio, then run it again. ' +
+        'Nothing was sent, so no credits were spent.',
+      code: 'voices_not_chosen',
+    });
+    expect(store.readDoc).toHaveBeenCalledWith('admin_config', PODCAST_VOICES_CONFIG_ID, 'admin_config');
+    expect(synthesize).not.toHaveBeenCalled();
+    expect(storage.uploadBlob).not.toHaveBeenCalled();
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+  });
+
+  it('answers 502 when the saved voices cannot be read, and sends nothing', async () => {
+    const synthesize = vi.fn();
+    const store = makeStore({
+      readDoc: vi.fn(async () => {
+        throw Object.assign(new Error('cosmos down'), { code: 503 });
+      }),
+    });
+    const res = await handlers({ store, synthesize }).renderSample(request(), context);
+    expect(res.status).toBe(502);
+    expect(body(res)).toEqual({
+      error: 'The saved podcast voices could not be read.',
+      code: 'VOICES_UNREADABLE',
+    });
+    expect(res.body).not.toContain('cosmos down');
+    expect(synthesize).not.toHaveBeenCalled();
   });
 
   it('stores the MP3, records a podcast:sample usage row and returns the audio, the billing and the credits', async () => {
@@ -362,6 +436,8 @@ describe('renderSample', () => {
   it('maps the other refusals: a paid-only voice 409, a pin 503, an unreadable account 502', async () => {
     const cases = [
       [Object.assign(new SpeechError('paid only'), { code: 'paid_plan_required' }), 409],
+      [Object.assign(new SpeechError('choose first'), { code: 'voices_not_chosen' }), 409],
+      [Object.assign(new SpeechError('not an id'), { code: 'invalid_voice' }), 409],
       [new SpeechNotConfiguredError('PODCAST_TTS_PROVIDER pins "elevenlabs", which is not configured'), 503],
       [Object.assign(new SpeechError('Could not read the ElevenLabs subscription'), { code: 'subscription_unavailable' }), 502],
       [new SpeechError('ElevenLabs HTTP 500: boom'), 502],
@@ -438,8 +514,203 @@ describe('end to end through the real provider, with fetch mocked', () => {
     expect(dialogueCalls).toHaveLength(1);
     const inputs = JSON.parse(dialogueCalls[0][1].body).inputs;
     expect(inputs.map((i) => i.text)).toEqual(SAMPLE_DIALOGUE.map((t) => t.text));
+    // In the owner's saved voices, one per host.
+    expect(inputs.map((i) => i.voice_id)).toEqual([VOICES.Maya, VOICES.Elena]);
     // The key travelled in the header only, and never came back out.
     expect(dialogueCalls[0][1].headers['xi-api-key']).toBe('xi-test-key');
     expect(res.body).not.toContain('xi-test-key');
+  });
+});
+
+/** Voices as the listing presents them (speech/elevenlabs-voices.js). */
+const listed = (over) => ({
+  voiceId: 'DefaultVoice00000001',
+  name: 'Talia',
+  category: 'premade',
+  type: 'default',
+  labels: { gender: 'female', accent: 'american', age: null, description: null, useCase: null },
+  description: null,
+  legacy: false,
+  tiers: [],
+  hasPreview: true,
+  ...over,
+});
+const LISTING = {
+  voices: [
+    listed(),
+    listed({ voiceId: 'LibraryVoice00000003', name: 'Emma', type: 'library', category: 'professional' }),
+  ],
+  previews: new Map(),
+  truncated: false,
+};
+
+describe('listVoices', () => {
+  it('answers "not configured" as a 200 with no voices, calling nothing upstream', async () => {
+    const listVoices = vi.fn();
+    const readAccount = vi.fn();
+    const res = await handlers({ env: {}, listVoices, readAccount }).listVoices(request(), context);
+    expect(res.status).toBe(200);
+    expect(body(res)).toMatchObject({ configured: false, reason: NOT_CONFIGURED_REASON, voices: [] });
+    expect(listVoices).not.toHaveBeenCalled();
+    expect(readAccount).not.toHaveBeenCalled();
+  });
+
+  it('lists every voice with whether the free plan allows it, and why not, usable first', async () => {
+    const listVoices = vi.fn(async () => LISTING);
+    const res = await handlers({ listVoices, readAccount: vi.fn(async () => FREE) }).listVoices(
+      request(),
+      context
+    );
+    expect(res.status).toBe(200);
+    const answer = body(res);
+    expect(answer).toMatchObject({
+      success: true,
+      configured: true,
+      plan: { tier: 'free', freePlan: true },
+      subscriptionError: null,
+      truncated: false,
+      voicesError: null,
+      rule: expect.stringMatching(/not Voice Library voices/),
+    });
+    expect(answer.voices.map((v) => [v.name, v.usable, v.unavailableReason])).toEqual([
+      ['Talia', true, null],
+      [
+        'Emma',
+        false,
+        'Voice Library voice: the free plan cannot use it through the API (HTTP 402 paid_plan_required).',
+      ],
+    ]);
+    expect(listVoices).toHaveBeenCalledWith(expect.objectContaining({ key: 'xi-test-key' }));
+    expect(res.body).not.toContain('xi-test-key');
+  });
+
+  it('still lists when the plan cannot be read, judging library voices as the free plan would', async () => {
+    const res = await handlers({
+      listVoices: vi.fn(async () => LISTING),
+      readAccount: vi.fn(async () => {
+        throw new SpeechError('Could not read the ElevenLabs subscription (…)');
+      }),
+    }).listVoices(request(), context);
+    expect(res.status).toBe(200);
+    const answer = body(res);
+    expect(answer.plan).toBeNull();
+    expect(answer.subscriptionError).toMatch(/Could not read the ElevenLabs subscription/);
+    expect(answer.voices.find((v) => v.name === 'Emma').usable).toBe(false);
+  });
+
+  it('reports a refused listing, a key without Voices → Read say, as a state with the fix', async () => {
+    const refusal = Object.assign(
+      new SpeechError(
+        'Could not list the ElevenLabs voices (HTTP 401 missing_permissions: the key needs the Voices → Read permission (voices_read), set at https://elevenlabs.io/app/developers/api-keys).'
+      ),
+      { code: 'voices_unavailable', status: 401 }
+    );
+    const res = await handlers({
+      listVoices: vi.fn(async () => {
+        throw refusal;
+      }),
+      readAccount: vi.fn(async () => FREE),
+    }).listVoices(request(), context);
+    // 200, not the upstream 401, which the page would read as its own session.
+    expect(res.status).toBe(200);
+    expect(body(res)).toMatchObject({ configured: true, voices: [], voicesError: refusal.message });
+  });
+
+  it('answers 500 for anything unexpected, without the detail', async () => {
+    const res = await handlers({
+      listVoices: vi.fn(async () => {
+        throw new Error('boom with xi-test-key');
+      }),
+      readAccount: vi.fn(async () => FREE),
+    }).listVoices(request(), context);
+    expect(res.status).toBe(500);
+    expect(res.body).not.toContain('xi-test-key');
+    expect(body(res)).toEqual({ error: 'Failed to list the ElevenLabs voices' });
+  });
+});
+
+describe('previewVoice', () => {
+  const MP3 = Buffer.from([0x49, 0x44, 0x33, 4, 0, 0]);
+
+  it('503s without a key, and 400s an id that is not one, fetching nothing', async () => {
+    const fetchPreview = vi.fn();
+    let res = await handlers({ env: {}, fetchPreview }).previewVoice(previewRequest(VOICES.Maya), context);
+    expect(res.status).toBe(503);
+    expect(body(res)).toMatchObject({ code: 'NOT_CONFIGURED' });
+    for (const id of ['', 'Kore', '../../x', 'https://evil.example/a.mp3']) {
+      res = await handlers({ fetchPreview }).previewVoice(previewRequest(id), context);
+      expect(res.status).toBe(400);
+    }
+    expect(fetchPreview).not.toHaveBeenCalled();
+  });
+
+  it('answers the MP3 as audio/mpeg, private to the user, never sniffed', async () => {
+    const fetchPreview = vi.fn(async () => ({ audio: MP3, contentType: 'audio/mpeg' }));
+    const res = await handlers({ fetchPreview }).previewVoice(previewRequest(VOICES.Maya), context);
+    expect(res.status).toBe(200);
+    expect(res.headers).toEqual({
+      'Content-Type': 'audio/mpeg',
+      'Content-Length': String(MP3.length),
+      'Cache-Control': 'private, max-age=3600',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    expect(res.body).toBe(MP3);
+    // The caller named an id; the URL is the module's to look up.
+    expect(fetchPreview).toHaveBeenCalledWith(
+      expect.objectContaining({ key: 'xi-test-key', voiceId: VOICES.Maya })
+    );
+    expect(Object.keys(fetchPreview.mock.calls[0][0])).not.toContain('url');
+  });
+
+  it('maps refusals to 404 and 502 by code, never passing an upstream status through', async () => {
+    const cases = [
+      [{ code: 'voice_not_listed', status: 404 }, 404],
+      [{ code: 'preview_unavailable', status: 404 }, 404],
+      [{ code: 'preview_failed', status: 502 }, 502],
+      // ElevenLabs's 401 for a key without Voices → Read must not read as a
+      // signed-out session to the page.
+      [{ code: 'voices_unavailable', status: 401 }, 502],
+    ];
+    for (const [fields, status] of cases) {
+      const error = Object.assign(new SpeechError(`refused: ${fields.code}`), fields);
+      const res = await handlers({
+        fetchPreview: vi.fn(async () => {
+          throw error;
+        }),
+      }).previewVoice(previewRequest(VOICES.Maya), context);
+      expect(res.status).toBe(status);
+      expect(body(res)).toEqual({ error: error.message, code: fields.code });
+    }
+    const res = await handlers({
+      fetchPreview: vi.fn(async () => {
+        throw new Error('unexpected');
+      }),
+    }).previewVoice(previewRequest(VOICES.Maya), context);
+    expect(res.status).toBe(500);
+  });
+
+  it('end to end with fetch mocked: lists the key’s voices, then fetches only the preview host', async () => {
+    const previewUrl = `https://storage.googleapis.com/eleven-public-prod/premade/voices/${VOICES.Maya}/p.mp3`;
+    const fetchImpl = vi.fn(async (url) => {
+      if (String(url).startsWith(VOICES_URL)) {
+        const type = new URL(url).searchParams.get('voice_type');
+        const voices =
+          type === 'default' ? [{ voice_id: VOICES.Maya, name: 'Talia', category: 'premade', preview_url: previewUrl }] : [];
+        return { ok: true, status: 200, text: async () => JSON.stringify({ voices, has_more: false }) };
+      }
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: (n) => (n.toLowerCase() === 'content-type' ? 'audio/mpeg' : null) },
+        arrayBuffer: async () => Uint8Array.from(MP3).buffer,
+      };
+    });
+    const res = await handlers({ fetchImpl }).previewVoice(previewRequest(VOICES.Maya), context);
+    expect(res.status).toBe(200);
+    expect([...res.body]).toEqual([...MP3]);
+    const hosts = fetchImpl.mock.calls.map(([url]) => new URL(url).host);
+    expect(new Set(hosts)).toEqual(new Set(['api.elevenlabs.io', 'storage.googleapis.com']));
+    const [, previewInit] = fetchImpl.mock.calls.find(([url]) => String(url) === previewUrl);
+    expect(JSON.stringify(previewInit)).not.toContain('xi-test-key');
   });
 });

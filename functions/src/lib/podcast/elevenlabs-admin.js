@@ -3,15 +3,29 @@
  * Platform settings page, and the owner's cheap live check (#432; ADR 0029
  * §2a, amended 2026-09-26).
  *
- * Two routes, both `editor`, the level of the routes that generate podcast
- * audio (which spend far more than either of these):
+ * Four routes, all `editor`, the level of the routes that generate podcast
+ * audio (which spend far more than any of these):
  *
  *   GET  cms/podcast/elevenlabs          the plan, credits used / limit, the
  *                                        reset date, and what the last render
  *                                        billed
  *   POST cms/podcast/elevenlabs/sample   renders SAMPLE_DIALOGUE, two turns
  *                                        and under 300 characters, through
- *                                        the real provider
+ *                                        the real provider, in the saved
+ *                                        podcast voices
+ *   GET  cms/podcast/elevenlabs/voices   the voices this key may list, each
+ *                                        marked usable on the current plan or
+ *                                        not, and why (#725)
+ *   GET  cms/podcast/elevenlabs/voices/{voiceId}/preview
+ *                                        that voice's preview MP3, fetched
+ *                                        from ElevenLabs's preview host only
+ *                                        (#725; the allowlist is in
+ *                                        speech/elevenlabs-preview.js)
+ *
+ * The two voice routes spend no credits: a listing and a preview are reads.
+ * The owner picks two voices by ear with them and saves the choice through
+ * the Platform settings route (`podcast-voices`); the live check and every
+ * episode read that choice (podcast/voice-settings.js).
  *
  * ## Not configured is an answer
  *
@@ -53,10 +67,28 @@ import {
   API_KEYS_PAGE,
   readSubscription,
 } from '../listen-and-learn/speech/elevenlabs-account.js';
-import { characterCount } from '../listen-and-learn/speech/elevenlabs.js';
+import {
+  ELEVENLABS_DEFAULT_VOICES,
+  INVALID_VOICE,
+  VOICES_NOT_CHOSEN,
+  characterCount,
+  voicesNotChosenMessage,
+} from '../listen-and-learn/speech/elevenlabs.js';
+import {
+  FREE_PLAN_RULE,
+  PREVIEW_FAILED,
+  PREVIEW_UNAVAILABLE,
+  VOICES_UNAVAILABLE,
+  VOICE_NOT_LISTED,
+  fetchVoicePreview,
+  isElevenLabsVoiceId,
+  readVoices,
+  voicesForPlan,
+} from '../listen-and-learn/speech/elevenlabs-voices.js';
 import { USAGE_CONTAINER, USAGE_SOURCES, recordAiUsage } from '../ai/usage.js';
 import { mediaUrlFor } from '../blob-paths.js';
 import { PODCAST_AUDIO_CONTAINER } from './store.js';
+import { PODCAST_HOSTS, readStoredPodcastVoices } from './voice-settings.js';
 
 export const ELEVENLABS_KEY_SETTING = 'ELEVENLABS_API_KEY';
 
@@ -113,10 +145,16 @@ const json = (status, body) => ({
   body: JSON.stringify(body),
 });
 
+/**
+ * Refusals the owner fixes on this page or in ElevenLabs, not by retrying:
+ * credit, a paid-only voice, no voice chosen, a voice that is not an id.
+ */
+const CONFLICT_CODES = new Set(['quota_exceeded', 'paid_plan_required', VOICES_NOT_CHOSEN, INVALID_VOICE]);
+
 /** The HTTP status for a speech failure on the sample route. */
 function statusFor(error) {
   if (error?.name === 'SpeechNotConfiguredError') return 503;
-  if (error?.code === 'quota_exceeded' || error?.code === 'paid_plan_required') return 409;
+  if (CONFLICT_CODES.has(error?.code)) return 409;
   return 502;
 }
 
@@ -258,19 +296,66 @@ async function reportSample(deps, key, rendered) {
   return sampleReport(rendered, stored, credits, before, billed);
 }
 
+/**
+ * What the check needs before it may spend anything, or the refusal to
+ * answer with: the key (503 without it), then the voices. The saved choice
+ * wins over the code's defaults (which are empty); a host still without a
+ * voice is a 409 that sends nothing, so the check never reaches ElevenLabs
+ * to learn what this page already knows.
+ *
+ * @returns {Promise<{ key: string, voices: Record<string,string> } | { refusal: object }>}
+ */
+async function samplePreconditions(deps, context) {
+  const key = readSetting(deps.env, ELEVENLABS_KEY_SETTING);
+  if (!key) return { refusal: json(503, { error: NOT_CONFIGURED_REASON, code: 'NOT_CONFIGURED' }) };
+  let stored;
+  try {
+    stored = await deps.readVoices(deps.store);
+  } catch (error) {
+    context.warn?.(`elevenLabsSample: podcast voices read failed (${error?.code ?? 'unknown'})`);
+    return {
+      refusal: json(502, {
+        error: 'The saved podcast voices could not be read.',
+        code: 'VOICES_UNREADABLE',
+      }),
+    };
+  }
+  const voices = { ...ELEVENLABS_DEFAULT_VOICES, ...(stored || {}) };
+  const unchosen = PODCAST_HOSTS.filter((host) => !isElevenLabsVoiceId(voices[host]));
+  if (unchosen.length > 0) {
+    return {
+      refusal: json(409, { error: voicesNotChosenMessage(unchosen), code: VOICES_NOT_CHOSEN }),
+    };
+  }
+  return { key, voices };
+}
+
+/** The 200 for a rendered sample, or a 500 if reporting it failed after the spend. */
+async function respondWithReport(deps, key, rendered, context) {
+  try {
+    const report = await reportSample(deps, key, rendered);
+    context.log?.(`elevenLabsSample: rendered, ${report.charactersBilled} characters billed`);
+    return json(200, report);
+  } catch (error) {
+    context.error('elevenLabsSample failed after rendering:', error);
+    return json(500, { error: 'The sample was rendered but the result could not be reported' });
+  }
+}
+
 /** POST /api/cms/podcast/elevenlabs/sample */
 async function renderSample(deps, request, context) {
   const auth = await deps.guard.requireRole(request, 'editor');
   if (auth.error) return auth.error;
 
-  const key = readSetting(deps.env, ELEVENLABS_KEY_SETTING);
-  if (!key) return json(503, { error: NOT_CONFIGURED_REASON, code: 'NOT_CONFIGURED' });
+  const { key, voices, refusal } = await samplePreconditions(deps, context);
+  if (refusal) return refusal;
 
   let rendered;
   try {
     rendered = await deps.synthesize({
       product: 'podcast',
       dialogue: SAMPLE_DIALOGUE,
+      voices,
       env: deps.env,
       fetchImpl: deps.fetchImpl,
     });
@@ -282,26 +367,148 @@ async function renderSample(deps, request, context) {
     });
   }
 
+  return respondWithReport(deps, key, rendered, context);
+}
+
+/**
+ * GET /api/cms/podcast/elevenlabs/voices
+ *
+ * The plan the list is judged against is the cached subscription read the
+ * status route shares. A failed read is reported beside the list, and the
+ * list is then judged as the free plan would judge it.
+ */
+async function listVoices(deps, request, context) {
+  const auth = await deps.guard.requireRole(request, 'editor');
+  if (auth.error) return auth.error;
+
+  const key = readSetting(deps.env, ELEVENLABS_KEY_SETTING);
+  const base = { success: true, rule: FREE_PLAN_RULE };
+  if (!key) {
+    return json(200, { ...base, configured: false, reason: NOT_CONFIGURED_REASON, voices: [] });
+  }
   try {
-    const report = await reportSample(deps, key, rendered);
-    context.log?.(`elevenLabsSample: rendered, ${report.charactersBilled} characters billed`);
-    return json(200, report);
+    const { subscription, subscriptionError } = await readAccountState(deps, key);
+    const plan = subscription ? { tier: subscription.tier, freePlan: subscription.freePlan } : null;
+    let listing;
+    try {
+      listing = await deps.listVoices({ key, fetchImpl: deps.fetchImpl });
+    } catch (error) {
+      if (error?.code !== VOICES_UNAVAILABLE) throw error;
+      // A refused listing (most often a key without Voices → Read) is a state
+      // the page shows with the fix, like a refused subscription read.
+      return json(200, {
+        ...base,
+        configured: true,
+        plan,
+        subscriptionError,
+        voices: [],
+        truncated: false,
+        voicesError: error.message,
+      });
+    }
+    return json(200, {
+      ...base,
+      configured: true,
+      plan,
+      subscriptionError,
+      voices: voicesForPlan(listing.voices, subscription),
+      truncated: listing.truncated === true,
+      voicesError: null,
+    });
   } catch (error) {
-    context.error('elevenLabsSample failed after rendering:', error);
-    return json(500, { error: 'The sample was rendered but the result could not be reported' });
+    context.error('elevenLabsVoices failed:', error?.message || error);
+    return json(500, { error: 'Failed to list the ElevenLabs voices' });
+  }
+}
+
+/**
+ * The HTTP status for a preview refusal, from its code alone. An upstream
+ * status is never passed through: ElevenLabs's 401 for a key without
+ * Voices → Read would read, to the page, as the owner's session expiring.
+ */
+function previewStatus(error) {
+  if (error?.code === VOICE_NOT_LISTED) return error.status === 400 ? 400 : 404;
+  if (error?.code === PREVIEW_UNAVAILABLE) return 404;
+  return 502;
+}
+
+const PREVIEW_REFUSALS = new Set([
+  VOICE_NOT_LISTED,
+  PREVIEW_UNAVAILABLE,
+  PREVIEW_FAILED,
+  VOICES_UNAVAILABLE,
+]);
+
+/** A failed preview as its answer: its own sentence by code, or a bare 500. */
+function previewRefusal(error, context) {
+  if (!PREVIEW_REFUSALS.has(error?.code)) {
+    context.error('elevenLabsPreview failed:', error?.message || error);
+    return json(500, { error: 'Failed to fetch the voice preview' });
+  }
+  context.log?.(`elevenLabsPreview: refused (${error.code})`);
+  return json(previewStatus(error), { error: error.message, code: error.code });
+}
+
+/**
+ * The key and the voice id, or the refusal: 503 without the key, 400 for an
+ * id that is not one. The id is checked here so a URL, a path or a name never
+ * reaches the listing lookup.
+ */
+function previewPreconditions(deps, request) {
+  const key = readSetting(deps.env, ELEVENLABS_KEY_SETTING);
+  if (!key) return { refusal: json(503, { error: NOT_CONFIGURED_REASON, code: 'NOT_CONFIGURED' }) };
+  const voiceId = String(request.params?.voiceId ?? '');
+  if (!isElevenLabsVoiceId(voiceId)) {
+    return {
+      refusal: json(400, { error: 'That is not an ElevenLabs voice id.', code: VOICE_NOT_LISTED }),
+    };
+  }
+  return { key, voiceId };
+}
+
+/** GET /api/cms/podcast/elevenlabs/voices/{voiceId}/preview */
+async function previewVoice(deps, request, context) {
+  const auth = await deps.guard.requireRole(request, 'editor');
+  if (auth.error) return auth.error;
+
+  const { key, voiceId, refusal } = previewPreconditions(deps, request);
+  if (refusal) return refusal;
+  try {
+    const { audio, contentType } = await deps.fetchPreview({
+      key,
+      voiceId,
+      fetchImpl: deps.fetchImpl,
+      listVoices: deps.listVoices,
+    });
+    return {
+      status: 200,
+      headers: {
+        'Content-Type': contentType,
+        'Content-Length': String(audio.length),
+        // Per user, for the length of a picking session; the bytes never change.
+        'Cache-Control': 'private, max-age=3600',
+        'X-Content-Type-Options': 'nosniff',
+      },
+      body: audio,
+    };
+  } catch (error) {
+    return previewRefusal(error, context);
   }
 }
 
 /**
  * @param {object} options
  * @param {{ requireRole: Function }} options.guard
- * @param {{ queryDocs: Function, upsertDoc: Function }} options.store
+ * @param {{ queryDocs: Function, upsertDoc: Function, readDoc: Function }} options.store
  * @param {{ uploadBlob: Function }} options.storage
  * @param {{ getCostEstimate: Function }} options.ai
  * @param {object} [options.env]
  * @param {Function} [options.fetchImpl]
  * @param {Function} [options.synthesize] `synthesizeDialogue`; injected for tests
  * @param {Function} [options.readAccount] `readSubscription`; injected for tests
+ * @param {Function} [options.readVoices] the stored podcast voices; injected for tests
+ * @param {Function} [options.listVoices] `readVoices` (the ElevenLabs listing); injected for tests
+ * @param {Function} [options.fetchPreview] `fetchVoicePreview`; injected for tests
  * @param {() => Date} [options.now]
  */
 export function createElevenLabsHandlers(options) {
@@ -311,10 +518,15 @@ export function createElevenLabsHandlers(options) {
     fetchImpl: options.fetchImpl ?? fetch,
     synthesize: options.synthesize ?? synthesizeDialogue,
     readAccount: options.readAccount ?? readSubscription,
+    readVoices: options.readVoices ?? ((store) => readStoredPodcastVoices(store.readDoc)),
+    listVoices: options.listVoices ?? readVoices,
+    fetchPreview: options.fetchPreview ?? fetchVoicePreview,
     now: options.now ?? (() => new Date()),
   };
   return {
     getStatus: (request, context) => getStatus(deps, request, context),
     renderSample: (request, context) => renderSample(deps, request, context),
+    listVoices: (request, context) => listVoices(deps, request, context),
+    previewVoice: (request, context) => previewVoice(deps, request, context),
   };
 }

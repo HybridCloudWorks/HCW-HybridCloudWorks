@@ -8,7 +8,13 @@
  *                                        characters; "not configured" is a
  *                                        200, not an error
  *   POST cms/podcast/elevenlabs/sample   a fixed two-turn sample of under 300
- *                                        characters through the real provider
+ *                                        characters through the real provider,
+ *                                        in the saved podcast voices
+ *
+ * Between the two, the Podcast voices picker (PodcastVoices.jsx, #725): the
+ * owner plays the voices the key may use and saves one per host. The code has
+ * no default voice, so the live check waits for a saved pair, and a 402
+ * `paid_plan_required` says to choose voices the plan allows.
  *
  * The server does the work (functions/src/lib/podcast/elevenlabs-admin.js).
  * This card reads it, and runs the check on a click, never on load, because
@@ -24,7 +30,8 @@ import { AlertTriangle, Loader2, Mic, Play, RefreshCw } from 'lucide-react';
 import { getJSON, postJSON } from '@/lib/api';
 import { resolveMediaUrl } from '@/lib/functionsBase';
 import { safeUrl } from '@/lib/safeUrl';
-import { relativeTime } from './settingShared';
+import { relativeTime, useSetting } from './settingShared';
+import PodcastVoices, { PODCAST_HOSTS } from './PodcastVoices';
 
 export const ELEVENLABS_STATUS_ROUTE = 'cms/podcast/elevenlabs';
 export const ELEVENLABS_SAMPLE_ROUTE = 'cms/podcast/elevenlabs/sample';
@@ -113,7 +120,7 @@ function useLiveCheck(onRendered) {
       onRendered();
     } catch (err) {
       const message = err?.message ?? 'The live check failed.';
-      setSample({ error: message });
+      setSample({ error: message, code: err?.code ?? null });
       toast({ title: 'Live check not rendered', description: message, variant: 'destructive' });
     } finally {
       runningRef.current = false;
@@ -180,9 +187,27 @@ function LastRender({ lastRender, lastRenderError }) {
   );
 }
 
+/** Refusals whose fix is in the Podcast voices section above, not a retry. */
+const VOICE_FIXES = Object.freeze({
+  paid_plan_required:
+    'Choose voices your plan allows under Podcast voices above (the ones listed as usable), Save, and run the check again.',
+  voices_not_chosen:
+    'Choose a voice for each host under Podcast voices above, Save, and run the check again.',
+  invalid_voice:
+    'Choose the voices again under Podcast voices above, Save, and run the check again.',
+});
+
 function SampleResult({ sample }) {
   if (!sample) return null;
-  if (sample.error) return <p className="text-sm text-destructive">{sample.error}</p>;
+  if (sample.error) {
+    const fix = VOICE_FIXES[sample.code];
+    return (
+      <div className="space-y-1">
+        <p className="text-sm text-destructive">{sample.error}</p>
+        {fix ? <p className="text-sm font-medium">{fix}</p> : null}
+      </div>
+    );
+  }
   const src = sample.audioUrl ? safeUrl(resolveMediaUrl(sample.audioUrl)) : undefined;
   return (
     <div className="space-y-1">
@@ -203,16 +228,26 @@ function SampleResult({ sample }) {
   );
 }
 
-function LiveCheck({ characters, configured, running, onRun, sample }) {
+function LiveCheck({ characters, configured, voicesChosen, running, onRun, sample }) {
   return (
     <div className="space-y-2 rounded-md border border-input p-3">
       <p className="text-sm font-medium">Live check</p>
       <p className="text-xs text-muted-foreground">
         Renders a fixed two-turn sample of {count(characters)} characters through the real provider,
-        about {count(characters)} credits. It proves the key, both voices and the credit check
-        without spending a month on an episode.
+        about {count(characters)} credits, in the saved podcast voices. It proves the key, both
+        voices and the credit check without spending a month on an episode.
       </p>
-      <Button type="button" size="sm" onClick={onRun} disabled={running || !configured}>
+      {configured && !voicesChosen ? (
+        <p className="text-xs text-amber-700">
+          Choose the podcast voices first: save a voice for each host above.
+        </p>
+      ) : null}
+      <Button
+        type="button"
+        size="sm"
+        onClick={onRun}
+        disabled={running || !configured || !voicesChosen}
+      >
         {running ? (
           <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
         ) : (
@@ -248,9 +283,18 @@ function StatusBody({ status }) {
   );
 }
 
+/** Whether a valid pair is saved: what the live check and every episode read. */
+function savedVoicesChosen(setting) {
+  if (setting.loading || setting.error) return false;
+  if (!setting.meta.exists || setting.meta.stored !== 'valid') return false;
+  return PODCAST_HOSTS.every((host) => Boolean(setting.value?.[host]));
+}
+
 export default function ElevenLabsCard({ authReady }) {
   const eleven = useElevenLabs(authReady);
+  const voices = useSetting('podcast-voices', authReady);
   const { status, loading, error } = eleven;
+  const configured = status?.configured === true;
 
   return (
     <Card>
@@ -281,9 +325,11 @@ export default function ElevenLabsCard({ authReady }) {
           </div>
         ) : null}
         {!loading && !error ? <StatusBody status={status} /> : null}
+        <PodcastVoices setting={voices} configured={configured} />
         <LiveCheck
           characters={status?.sample?.characters}
-          configured={status?.configured === true}
+          configured={configured}
+          voicesChosen={savedVoicesChosen(voices)}
           running={eleven.running}
           onRun={eleven.runSample}
           sample={eleven.sample}

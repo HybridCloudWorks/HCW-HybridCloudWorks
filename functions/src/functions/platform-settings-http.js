@@ -4,7 +4,7 @@
  * lib/platform-settings.js.
  *
  * The {setting} segment is allowlisted in the lib (default-heroes,
- * social-autopost, podcast-feeds, listen-and-learn-speech,
+ * social-autopost, podcast-feeds, listen-and-learn-speech, podcast-voices,
  * newsletter-settings) — anything else 404s before touching Cosmos, the same
  * pattern as cms/config/{collection}.
  *
