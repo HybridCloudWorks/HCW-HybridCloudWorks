@@ -5,7 +5,7 @@
  * one hook: written together they gave the hook seven exits, and Qlty counts a
  * closure's branches into the function that holds it.
  */
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { postJSON } from '@/lib/api';
 import { CLOCK_TICK_MS } from './labsView';
 
@@ -48,10 +48,12 @@ export function mergeSnapshot(prev, snap) {
 }
 
 /**
- * Poll `getLabsSnapshot` until cancelled, and return the canceller for it.
+ * Poll `getLabsSnapshot` until cancelled.
  *
  * @param {{onSnapshot: (snap: object) => void, onError: (message: string) => void}} sinks
- * @returns {() => void} stops the poll and clears its interval
+ * @returns {{load: () => Promise<void>, cancel: () => void}} `load` reads once
+ *   now (still behind the in-flight guard); `cancel` stops the poll and clears
+ *   its interval
  */
 function pollSnapshot({ onSnapshot, onError }) {
   let cancelled = false;
@@ -75,21 +77,29 @@ function pollSnapshot({ onSnapshot, onError }) {
 
   load();
   const ticker = setInterval(load, SNAPSHOT_POLL_MS);
-  return () => {
-    cancelled = true;
-    clearInterval(ticker);
+  return {
+    load,
+    cancel: () => {
+      cancelled = true;
+      clearInterval(ticker);
+    },
   };
 }
 
 /**
- * Polling view of lab_agents + recent lab_jobs (admin read-only) — the
- * getLabsSnapshot RPC every 15s replaces the two legacy subscription streams,
- * and also supplies the server's job-type allowlist.
+ * Polling view of lab_agents + recent lab_jobs — the getLabsSnapshot RPC
+ * every 15s replaces the two legacy subscription streams, and also supplies
+ * the server's job-type allowlist.
+ *
+ * `refresh` reads the snapshot now instead of at the next tick. The Agents
+ * tab calls it after a registry write (#740), so a newly registered agent's
+ * card, or a deactivated one's badge, appears when the toast does.
  */
 export default function useLabsLive(enabled) {
   const [snapshot, setSnapshot] = useState(EMPTY_SNAPSHOT);
   const [error, setError] = useState(null);
   const now = useStalenessClock(enabled);
+  const reload = useRef(null);
 
   useEffect(() => {
     if (!enabled) return undefined;
@@ -97,8 +107,15 @@ export default function useLabsLive(enabled) {
       setError(null);
       setSnapshot((prev) => mergeSnapshot(prev, snap));
     };
-    return pollSnapshot({ onSnapshot, onError: setError });
+    const poll = pollSnapshot({ onSnapshot, onError: setError });
+    reload.current = poll.load;
+    return () => {
+      reload.current = null;
+      poll.cancel();
+    };
   }, [enabled]);
 
-  return { ...snapshot, error, now };
+  const refresh = useCallback(() => reload.current?.(), []);
+
+  return { ...snapshot, error, now, refresh };
 }

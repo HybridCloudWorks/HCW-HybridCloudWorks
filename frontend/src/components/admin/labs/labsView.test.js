@@ -8,7 +8,15 @@
  * Collapsing them sent an operator to reinstall something already installed.
  */
 import { describe, expect, it } from 'vitest';
-import { fleetState, formatDuration, formatTime } from './labsView';
+import {
+  AGENT_ID_PATTERN,
+  OBJECT_ID_PATTERN,
+  fleetState,
+  formatDuration,
+  formatTime,
+  registrationToast,
+  validateAgentRegistration,
+} from './labsView';
 
 const NOW = Date.parse('2026-09-16T12:00:00Z');
 const online = (id) => ({ id, agentId: id, lastSeenAt: new Date(NOW - 5_000).toISOString() });
@@ -74,5 +82,65 @@ describe('formatTime', () => {
     expect(formatTime(null)).toBe('—');
     expect(formatTime(undefined)).toBe('—');
     expect(formatTime('')).toBe('—');
+  });
+});
+
+describe('validateAgentRegistration (#740)', () => {
+  const OID = '9f8e7d6c-5b4a-4938-8271-605f4e3d2c1b';
+  const ok = { agentId: 'vps-hostinger-01', oid: OID, jobTypes: ['shell-echo'] };
+
+  it('passes what the API accepts, including an upper-case GUID it lower-cases', () => {
+    expect(validateAgentRegistration(ok)).toBeNull();
+    expect(validateAgentRegistration({ ...ok, oid: OID.toUpperCase() })).toBeNull();
+  });
+
+  it.each([
+    ['capitals in the agent id', { agentId: 'VPS-01' }, /certificate CN/],
+    ['a leading hyphen', { agentId: '-vps' }, /certificate CN/],
+    ['a 64-character agent id', { agentId: 'a'.repeat(64) }, /certificate CN/],
+    ['an empty agent id', { agentId: '' }, /certificate CN/],
+    ['a GUID without hyphens', { oid: OID.replace(/-/g, '') }, /GUID/],
+    ['a GUID in braces', { oid: `{${OID}}` }, /GUID/],
+    ['no job type', { jobTypes: [] }, /at least one job type/],
+  ])('refuses %s', (_label, over, message) => {
+    expect(validateAgentRegistration({ ...ok, ...over })).toMatch(message);
+  });
+
+  it('holds the same patterns as the API, so the form never refuses what the API takes', () => {
+    // Mirrors functions/src/lib/labs/agent-registry.js. The API re-validates;
+    // a looser pattern here would only cost a round trip, a stricter one would
+    // make a valid id unregistrable from this page.
+    expect(AGENT_ID_PATTERN.source).toBe('^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$');
+    expect(OBJECT_ID_PATTERN.source).toBe(
+      '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    );
+    expect(OBJECT_ID_PATTERN.flags).toBe('i');
+  });
+});
+
+describe('registrationToast (#740)', () => {
+  const agent = { agentId: 'vps-hostinger-01', oid: '9f8e7d6c-5b4a-4938-8271-605f4e3d2c1b' };
+
+  it('names what happened: registered, updated, or nothing to change', () => {
+    expect(
+      registrationToast({ created: true, changed: true, agent: { ...agent, active: true } }).title
+    ).toBe('Agent registered');
+    expect(
+      registrationToast({ created: false, changed: true, agent: { ...agent, active: true } })
+    ).toEqual({
+      title: 'Agent updated',
+      description: `vps-hostinger-01 is now bound to ${agent.oid}.`,
+    });
+    expect(
+      registrationToast({ created: false, changed: false, agent: { ...agent, active: true } }).title
+    ).toBe('Already registered');
+  });
+
+  it('says so when the agent is still deactivated, because a registration never reactivates it', () => {
+    for (const changed of [true, false]) {
+      expect(
+        registrationToast({ changed, agent: { ...agent, active: false } }).description
+      ).toMatch(/still deactivated/);
+    }
   });
 });

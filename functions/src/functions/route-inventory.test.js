@@ -342,6 +342,33 @@ describe('property 1 — every route is guarded or explicitly public', () => {
   });
 });
 
+/**
+ * The lab agent registry's write path (#740). Property 1 already proves these
+ * reach *a* guard; this pins WHICH one. They write the record the agent guard
+ * trusts, so they must sit behind the admin guard at the Labs write level and
+ * must never be reachable with an agent's own credential — a VPS that could
+ * call them could grant itself job types or rebind its identity, which is
+ * exactly what lab-agent.js's heartbeat refuses to let it do.
+ */
+describe('the lab agent registry routes (#740)', () => {
+  it.each([
+    ['cms/labs/agents', 'POST'],
+    ['cms/labs/agents/{agentId}', 'PATCH'],
+  ])('%s answers %s through requireRole at editor, never requireAgent', async (route, method) => {
+    const registrations = [...httpRegistrations.values()].filter((o) => o.route === route);
+    expect(registrations).toHaveLength(1);
+    const [options] = registrations;
+    expect(PUBLIC_ROUTES.has(route)).toBe(false);
+    expect(options.methods).toEqual([method, 'OPTIONS']);
+
+    clearGuards();
+    await invoke(options, makeRequest({ method }));
+    expect(requireRole).toHaveBeenCalledTimes(1);
+    expect(requireRole.mock.calls[0][1]).toBe('editor');
+    expect(requireAgent).not.toHaveBeenCalled();
+  });
+});
+
 describe('property 2 — every route accepts OPTIONS', () => {
   it('so a preflight is not 404ed before any handler runs', () => {
     const missing = [...httpRegistrations.entries()]

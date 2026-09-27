@@ -597,13 +597,21 @@ in to the tenant; reads that certificate over `ssh hcw-lab` (the host checks
 it against the private key and only reports whether they match); creates or
 finds the app registration and service principal
 `sp-labs-agent-lab-hybrid-prod-cus-01`; appends the certificate to it,
-never replacing another credential; assigns it the one grant the API checks,
-the `LabAgent` app role on the HCWSite API; writes the four
+never replacing another credential; assigns it the one grant the Entra side
+of the API checks, the `LabAgent` app role on the HCWSite API; has you
+register the agent on the site, which writes the API's second gate, the
+`lab_agents/vps-hostinger-01` registry document; writes the four
 `vault_labs_agent_*` keys above into the vault; runs `bootstrap.sh`; and
-reads the agent's state and journal to say whether it is heartbeating. It
-never prints a secret: the certificate is public, the four values are
-identifiers, and the vault password never leaves the host. A second run
-changes nothing and says so, and `-WhatIf` shows what a run would change.
+reads the agent's state and journal to say whether it is heartbeating. The
+registration is the one step done in the browser, because the route that
+writes the document (`POST /api/cms/labs/agents`, #740) needs an admin's
+sign-in: the script prints
+https://hybridcloudworks.com/admin/labs?tab=agents with the agent id and the
+service principal's object id to paste into **Register agent**, and waits
+for Enter. It never prints a secret: the certificate is public, the four
+values and the object id are identifiers, and the vault password never
+leaves the host. A second run changes nothing and says so, without waiting,
+and `-WhatIf` shows what a run would change.
 PowerShell, from the repository root on `main` once this change has merged
 (`Test-Path scripts/lab/Register-LabAgent.ps1` prints `True` when the working
 tree has the script); when `az` is not signed in, the script stops and
@@ -616,12 +624,10 @@ pwsh -NoProfile -File scripts/lab/Register-LabAgent.ps1
 Success is the line `Agent: hcw-labs-agent is active and has logged no
 failure since it started: it is heartbeating.` near the end of the run,
 which then exits 0, and `vps-hostinger-01` Online at
-https://hybridcloudworks.com/admin/labs?tab=agents. The one thing it cannot
-do is the API's second gate, the `lab_agents/vps-hostinger-01` registry
-document: no route or admin page writes that container yet, so the script
-prints the document the API needs and, until it exists, ends by saying the
-API refuses the agent with `Agent access required`. Every result it can end
-with, and what each means, is
+https://hybridcloudworks.com/admin/labs?tab=agents. The same tab is where the
+agent is revoked: **Deactivate** on its card makes the API refuse it from its
+next call, and **Activate** undoes that; registering it again never does.
+Every result the script can end with, and what each means, is
 [docs/runbooks/labs-host.md](../docs/runbooks/labs-host.md), "The lab
 agent's go-live".
 

@@ -19,10 +19,17 @@
          the one grant the API checks: the LabAgent app role on the API's
          service principal (functions/src/lib/auth/require-agent.js, gate 1).
          For an application permission that assignment is the admin consent;
-      4. prints the lab_agents/{agentId} registry document the API's second
-         gate reads. No route or admin page writes that container today, so
-         this is the one step the script cannot do; step 6 says whether the
-         document is there;
+      4. has the owner register the agent on the site, which writes the
+         lab_agents/{agentId} document the API's second gate reads
+         (POST cms/labs/agents, #740): it prints the Agents tab's address and
+         the two values to paste into Register agent, the agent id and the
+         service principal's object id, and waits for Enter. It skips this
+         when the agent is already heartbeating and this run did not create
+         its service principal, because then the document is there and binds
+         it. The script cannot make that call itself: the route needs an
+         admin's delegated token (scp access_as_admin), which the site's
+         sign-in issues, and no owner script here acquires one
+         (Get-LabRegistrationPrompt says why az cannot either);
       5. writes vault_labs_agent_api_base, vault_labs_agent_tenant_id,
          vault_labs_agent_client_id and vault_labs_agent_api_scope into
          /etc/hcw/ansible/vault.yml on the host, creating the file when it
@@ -32,12 +39,14 @@
          file, and shreds the temporary files. It prints key names, never a
          value read from the file;
       6. runs bootstrap.sh when the vault changed or the agent is not running,
+         or restarts the agent when only Entra or the registration changed,
          then reads `systemctl is-active hcw-labs-agent` and the agent's last
          journal lines and says what they mean.
 
     A second run changes nothing and says so. Under -WhatIf nothing changes:
-    the Entra steps say what they would do, the vault merge runs in check mode
-    on the host, and bootstrap.sh does not run. No secret is involved: the
+    the Entra steps say what they would do, the registration step prints what
+    it would ask for without waiting, the vault merge runs in check mode on
+    the host, and bootstrap.sh does not run. No secret is involved: the
     certificate is public, the four vault values are identifiers, and the
     vault password stays on the host.
 
@@ -171,10 +180,12 @@ function Get-LabApiScope {
 function Get-LabJobTypes {
     <#
     .SYNOPSIS
-        The job types the registry document lets the agent claim: every type
-        the server allowlists and the agent has a recipe for. Kept in step
-        with LAB_JOB_TYPES (functions/src/lib/labs.js) and CAPABILITIES
-        (vps-agent/lib/capabilities.js) by scripts/lab-job-types.test.mjs.
+        The job types the agent is registered for: every type the server
+        allowlists and the agent has a recipe for, which is what Register
+        agent ticks by default and what the owner is asked to leave ticked.
+        Kept in step with LAB_JOB_TYPES (functions/src/lib/labs.js) and
+        CAPABILITIES (vps-agent/lib/capabilities.js) by
+        scripts/lab-job-types.test.mjs.
     #>
     [OutputType([string[]])]
     param()
@@ -430,29 +441,98 @@ function Get-LabCredentialResetArguments {
     )
 }
 
-function Get-LabRegistryDocument {
+function Get-LabRegistrationPrompt {
     <#
     .SYNOPSIS
-        The lab_agents/{agentId} document gate 2 of the agent guard reads:
-        its oid must be the agent's service principal object id (the oid
-        claim of an app-only token), active must be true, and capabilities
-        are the job types it may claim. The container's partition key is /id.
+        The lines that ask the owner to register the agent on the site: the
+        Agents tab's address, the two values to paste into Register agent,
+        and what success looks like there.
+
+    .DESCRIPTION
+        Register agent calls POST cms/labs/agents
+        (functions/src/lib/labs/agent-registry.js), which writes the
+        lab_agents/{agentId} document gate 2 of the agent guard reads: the
+        agent id, its service principal's object id (the oid claim of its
+        app-only token), active, and the job types it may claim. The object
+        id is printed in lower case, as the token carries it; the API stores
+        it that way whatever is pasted.
+
+        This script does not call the route itself. It needs an admin's
+        delegated token with the access_as_admin scope, which the site's own
+        sign-in issues. No owner script in this repository acquires one, and
+        az cannot without a consent nothing here grants: the API registration
+        (New-EntraApiRegistration, scripts/lib/deploy-console.ps1)
+        pre-authorizes no client, so Azure CLI would first have to be
+        consented to access_as_admin. So the one step is a paste in the
+        browser, and the run waits for it.
     #>
-    [OutputType([string])]
+    [OutputType([string[]])]
     param(
+        [Parameter(Mandatory)] [string] $Url,
         [Parameter(Mandatory)] [string] $AgentId,
         [Parameter(Mandatory)] [string] $ObjectId,
-        [Parameter(Mandatory)] [string[]] $Capabilities
+        [Parameter(Mandatory)] [string[]] $JobTypes
     )
 
-    $document = [ordered]@{
-        id           = $AgentId
-        agentId      = $AgentId
-        oid          = $ObjectId
-        active       = $true
-        capabilities = [string[]]$Capabilities
+    if (-not (Test-LabAgentId -Value $AgentId)) {
+        throw "'$AgentId' is not an agent id."
     }
-    return ($document | ConvertTo-Json -Depth 3)
+    if (-not (Test-LabGuid -Value $ObjectId)) {
+        throw "'$ObjectId' is not an object id."
+    }
+    return [string[]]@(
+        "Registry: the API admits the agent only once lab_agents/$AgentId binds it to this service principal. Register it on the site: in a browser signed in as an admin, open",
+        '',
+        "  $Url",
+        '',
+        'and under Register agent paste:',
+        '',
+        "  Agent id:   $AgentId",
+        "  Object id:  $($ObjectId.ToLowerInvariant())",
+        '',
+        "Leave every job type ticked ($($JobTypes -join ', ')) and press Register agent. Success is a toast reading ""Agent registered"" (or ""Already registered"") and a $AgentId card on that page. If the card says Deactivated, press Activate on it."
+    )
+}
+
+function Test-LabRegistrationNeeded {
+    <#
+    .SYNOPSIS
+        False only when the registration is already proven: the agent is
+        heartbeating, which passes gate 2, and its service principal is the
+        one it was registered with because this run did not create it.
+    #>
+    [OutputType([bool])]
+    param(
+        [AllowNull()] [AllowEmptyString()] [string] $VerdictState,
+        [switch] $ServicePrincipalCreated
+    )
+
+    return -not ($VerdictState -eq 'Healthy' -and -not $ServicePrincipalCreated)
+}
+
+function Read-LabEnter {
+    <#
+    .SYNOPSIS
+        Waits for Enter. The seam the tests mock.
+    #>
+    param([Parameter(Mandatory)] [string] $Prompt)
+
+    return Read-Host -Prompt $Prompt
+}
+
+function Wait-LabRegistration {
+    <#
+    .SYNOPSIS
+        Prints the registration lines and waits for Enter before the run
+        goes on to the vault and bootstrap.sh.
+    #>
+    param([Parameter(Mandatory)] [string[]] $Lines)
+
+    foreach ($line in $Lines) {
+        Write-Host $line
+    }
+    Write-Host ''
+    $null = Read-LabEnter -Prompt 'Press Enter once the page shows the agent registered'
 }
 
 function Get-LabVaultValues {
@@ -1570,17 +1650,36 @@ if ($NextCertificate) {
     exit 0
 }
 
-# 4. The registry document gate 2 reads.
-$registryDocument = $null
+# 4. The registry document gate 2 reads, written by Register agent on the site.
+# The agent's state is read here rather than in step 6 so that a healthy agent
+# is not made to wait for a registration it already has; nothing between here
+# and step 6 changes the unit.
+$registrationPrompt = $null
+$registrationAsked = $false
+$status = $null
 if ($agent.ServicePrincipalId) {
-    $registryDocument = Get-LabRegistryDocument -AgentId $agentId -ObjectId $agent.ServicePrincipalId -Capabilities (Get-LabJobTypes)
-    Write-Host "Registry: the API also needs lab_agents/$agentId with this content. Step 6 says whether it is there:"
-    foreach ($line in ($registryDocument -split "`n")) {
-        Write-Host "  $line"
+    $registrationPrompt = Get-LabRegistrationPrompt -Url $labsUrl -AgentId $agentId -ObjectId $agent.ServicePrincipalId -JobTypes (Get-LabJobTypes)
+    if ($WhatIfPreference) {
+        Write-Host 'Registry: would ask you to register the agent on the site and wait for Enter:'
+        foreach ($line in $registrationPrompt) {
+            Write-Host "  $line"
+        }
+    }
+    else {
+        $status = Read-LabAgentStatus -HostAlias $HostAlias
+        $before = Get-LabAgentVerdict -Active $status.Active -Journal $status.Journal
+        if (Test-LabRegistrationNeeded -VerdictState $before.State -ServicePrincipalCreated:$agent.ServicePrincipalCreated) {
+            Write-Host ''
+            Wait-LabRegistration -Lines $registrationPrompt
+            $registrationAsked = $true
+        }
+        else {
+            Write-Host "Registry: hcw-labs-agent is heartbeating with this service principal, so lab_agents/$agentId is registered and binds it; nothing to register."
+        }
     }
 }
 else {
-    Write-Host "Registry: lab_agents/$agentId needs the new service principal's object id as its oid, known once it exists."
+    Write-Host "Registry: lab_agents/$agentId binds the new service principal's object id, known once it exists; a run without -WhatIf asks you to register it at $labsUrl."
 }
 
 # 5. The vault on the host.
@@ -1639,7 +1738,9 @@ if ($WhatIfPreference) {
     exit 0
 }
 
-$status = Read-LabAgentStatus -HostAlias $HostAlias
+if ($null -eq $status) {
+    $status = Read-LabAgentStatus -HostAlias $HostAlias
+}
 $acted = $false
 if ($vaultChanged -or $ForceBootstrap -or $status.Active -ne 'active') {
     $why = if ($vaultChanged) { 'the vault changed' } elseif ($ForceBootstrap) { '-ForceBootstrap' } else { "hcw-labs-agent is $($status.Active)" }
@@ -1653,10 +1754,14 @@ if ($vaultChanged -or $ForceBootstrap -or $status.Active -ne 'active') {
     $changes.Add('ran bootstrap.sh')
     $acted = $true
 }
-elseif ($entraChanged) {
+elseif ($entraChanged -or $registrationAsked) {
     # A running agent keeps the token it already has for up to an hour, and
-    # a token issued before the grant carries no LabAgent role.
-    Write-Host "Agent: restarting hcw-labs-agent so it signs in again with what this run changed in Entra."
+    # a token issued before the grant carries no LabAgent role. After a
+    # registration the token is fine, but a heartbeat that now works logs
+    # nothing, so without a restart the journal's last line would still be
+    # the refusal from before it and the verdict below would repeat it.
+    $why = if ($entraChanged) { 'what this run changed in Entra' } else { 'the registration it now has' }
+    Write-Host "Agent: restarting hcw-labs-agent so it signs in again with $why."
     $restart = Invoke-LabSsh -HostAlias $HostAlias -Command 'sudo systemctl restart hcw-labs-agent'
     if ($restart.ExitCode -ne 0) {
         throw "Restarting hcw-labs-agent failed (exit $($restart.ExitCode)): $(($restart.Lines | Select-Object -Last 3) -join ' ')"
@@ -1696,14 +1801,14 @@ switch ($verdict.State) {
         }
     }
     'Registry' {
-        Write-Host "  Step 3 left the LabAgent grant in place, so it is gate 2: lab_agents/$agentId is missing, inactive, or bound to another object id. It must hold:"
-        foreach ($line in ($registryDocument -split "`n")) {
-            Write-Host "    $line"
-        }
-        Write-Host '  No route or admin page writes lab_agents today (functions/src/lib/labs.js only reads it, and the heartbeat only patches a document that exists), and the Cosmos DB firewall admits only the Function App''s subnet. The document goes in account cosmos-site-prod-cus, database hcw, container lab_agents, partition key /id.'
+        Write-Host "  Step 3 left the LabAgent grant in place, so it is gate 2: lab_agents/$agentId is missing, deactivated, or bound to another object id. Open $labsUrl and look at the $agentId card:"
+        Write-Host "    no card: register it under Register agent, agent id $agentId, object id $($agent.ServicePrincipalId.ToLowerInvariant());"
+        Write-Host '    a card marked Deactivated: press Activate on it;'
+        Write-Host "    a card for another object id: register it again with the object id above, which rebinds it."
+        Write-Host '  Then restart the agent so the journal starts clean, PowerShell:'
+        Write-Host "    $restartLine"
         if ($roleResult -and $roleResult.Action -eq 'Assigned') {
-            Write-Host "  If the document is there, the grant this run made may not have reached the agent's token yet. Wait two minutes, then, PowerShell:"
-            Write-Host "    $restartLine"
+            Write-Host "  If the card is there, active and bound to that object id, the grant this run made may not have reached the agent's token yet: wait two minutes before the restart."
         }
     }
     'Credential' {

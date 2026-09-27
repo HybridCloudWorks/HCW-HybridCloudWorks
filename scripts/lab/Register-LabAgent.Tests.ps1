@@ -249,18 +249,64 @@ Describe 'Get-LabKeyCredentialEndDate and Get-LabCredentialResetArguments' {
     }
 }
 
-Describe 'Get-LabRegistryDocument' {
-    It 'binds the agent id to the service principal, active, with its job types' {
-        $document = Get-LabRegistryDocument -AgentId 'vps-hostinger-01' -ObjectId $agentSpId -Capabilities (Get-LabJobTypes) | ConvertFrom-Json
-        $document.id | Should -BeExactly 'vps-hostinger-01'
-        $document.agentId | Should -BeExactly 'vps-hostinger-01'
-        $document.oid | Should -BeExactly $agentSpId
-        $document.active | Should -BeTrue
-        @($document.capabilities).Count | Should -Be 5
+Describe 'Get-LabRegistrationPrompt' {
+    BeforeAll {
+        $labsUrl = 'https://hybridcloudworks.com/admin/labs?tab=agents'
     }
 
-    It 'keeps a single job type a JSON list' {
-        Get-LabRegistryDocument -AgentId 'vps-hostinger-01' -ObjectId $agentSpId -Capabilities @('shell-echo') | Should -Match '"capabilities":\s*\[\s*"shell-echo"\s*\]'
+    It 'names the page and the two values to paste, the object id in lower case' {
+        $lines = Get-LabRegistrationPrompt -Url $labsUrl -AgentId 'vps-hostinger-01' -ObjectId $agentSpId.ToUpperInvariant() -JobTypes (Get-LabJobTypes)
+        $text = $lines -join "`n"
+        $lines | Should -Contain "  $labsUrl"
+        $lines | Should -Contain '  Agent id:   vps-hostinger-01'
+        $lines | Should -Contain "  Object id:  $agentSpId"
+        $text | Should -Match 'Register agent'
+        $text | Should -Match 'Agent registered'
+    }
+
+    It 'asks for every job type to stay ticked' {
+        $text = (Get-LabRegistrationPrompt -Url $labsUrl -AgentId 'vps-hostinger-01' -ObjectId $agentSpId -JobTypes (Get-LabJobTypes)) -join "`n"
+        foreach ($type in Get-LabJobTypes) {
+            $text | Should -Match ([regex]::Escape($type))
+        }
+    }
+
+    It 'leaves no placeholder in what the owner pastes' {
+        $text = (Get-LabRegistrationPrompt -Url $labsUrl -AgentId 'vps-hostinger-01' -ObjectId $agentSpId -JobTypes (Get-LabJobTypes)) -join "`n"
+        $text | Should -Not -Match '<[a-z -]+>|THE[A-Z_]{3,}'
+    }
+
+    It 'refuses <Label>' -ForEach @(
+        @{ Label = 'an agent id that is not the CN shape'; AgentId = 'VPS-01'; ObjectId = '9f8e7d6c-5b4a-4938-8271-605f4e3d2c1b' },
+        @{ Label = 'an object id that is not a GUID'; AgentId = 'vps-hostinger-01'; ObjectId = 'not-a-guid' }
+    ) {
+        { Get-LabRegistrationPrompt -Url $labsUrl -AgentId $AgentId -ObjectId $ObjectId -JobTypes (Get-LabJobTypes) } | Should -Throw
+    }
+}
+
+Describe 'Test-LabRegistrationNeeded' {
+    It 'skips the registration only for a heartbeating agent whose service principal this run did not create' {
+        Test-LabRegistrationNeeded -VerdictState 'Healthy' | Should -BeFalse
+    }
+
+    It 'asks when <Label>' -ForEach @(
+        @{ Label = 'the service principal is new, so no document can bind it yet'; State = 'Healthy'; Created = $true },
+        @{ Label = 'the agent guard refuses the agent'; State = 'Registry'; Created = $false },
+        @{ Label = 'the agent is not running, as before the first go-live'; State = 'Stopped'; Created = $false },
+        @{ Label = 'the state is unknown'; State = ''; Created = $false }
+    ) {
+        Test-LabRegistrationNeeded -VerdictState $State -ServicePrincipalCreated:$Created | Should -BeTrue
+    }
+}
+
+Describe 'Wait-LabRegistration' {
+    It 'prints every line, then waits for Enter once' {
+        Mock Write-Host { }
+        Mock Read-LabEnter { '' }
+        Wait-LabRegistration -Lines @('first line', 'second line')
+        Should -Invoke Write-Host -ParameterFilter { $Object -eq 'first line' } -Exactly 1
+        Should -Invoke Write-Host -ParameterFilter { $Object -eq 'second line' } -Exactly 1
+        Should -Invoke Read-LabEnter -Exactly 1
     }
 }
 

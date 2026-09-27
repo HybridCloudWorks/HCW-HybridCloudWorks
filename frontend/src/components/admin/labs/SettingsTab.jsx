@@ -21,7 +21,7 @@ const SETUP_STEPS = [
   },
   {
     title: 'Provision the Entra agent identity',
-    body: 'Create one confidential Entra app registration per VPS host, assign the LabAgent app role on the API app, upload only the public certificate, and register lab_agents/{agentId} with its object ID, active flag, and allowed capabilities. No Firebase/GCP project, service account, or database key is required.',
+    body: 'scripts/lab/Register-LabAgent.ps1 does this as the owner: one Entra app registration per VPS host holding only its public certificate, with the LabAgent app role on the API app. It then prints the agent id and the service principal object id for Register agent on the Agents tab, which writes lab_agents/{agentId}, and waits for Enter before the vault and bootstrap steps. No Firebase/GCP project, service account, or database key is required.',
   },
   {
     title: 'Install the Azure API agent',

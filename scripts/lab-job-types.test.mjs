@@ -15,12 +15,14 @@
  * source text: the `type:` and `payloadEncodings:` of every entry between
  * `FALLBACK_JOB_TYPES = [` and the closing `];`.
  *
- * A fourth list is the capabilities of the lab_agents registry document that
- * scripts/lab/Register-LabAgent.ps1 prints (`Get-LabJobTypes`). It decides
- * what the agent may claim once the document exists, so a type missing there
- * is a type the host never runs. PowerShell cannot be imported either, so it
- * is read from the source text the same way: the quoted names in the
- * `return [string[]]@(...)` line of that function.
+ * A fourth list is the job types scripts/lab/Register-LabAgent.ps1 asks the
+ * owner to leave ticked on Register agent (`Get-LabJobTypes`), which become
+ * the `capabilities` of the lab_agents registry document (#740). They decide
+ * what the agent may claim, so a type missing there is a type the host never
+ * runs. (The form itself ticks every type the snapshot's allowlist names, and
+ * the API's default is every LAB_JOB_TYPES entry.) PowerShell cannot be
+ * imported either, so it is read from the source text the same way: the
+ * quoted names in the `return [string[]]@(...)` line of that function.
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -76,7 +78,7 @@ describe('lab job types are declared in every place that lists them', () => {
     expect(Object.keys(console).sort()).toEqual(server);
   });
 
-  it('the registry document Register-LabAgent.ps1 prints names the same types, once each', () => {
+  it('the job types Register-LabAgent.ps1 asks to leave ticked are the same types, once each', () => {
     const registered = registrationJobTypes(registerLabAgentSource);
     expect(new Set(registered).size).toBe(registered.length);
     expect([...registered].sort()).toEqual(server);
