@@ -16,12 +16,24 @@
  * test, and spawns the argv the agent would spawn. If the agent's flags
  * change, this checks the new flags.
  *
+ * The same rule for the payload that matters most: the Landing Zone
+ * Builder's full default build (every component, both landing zones) is not
+ * a fixture here but `emitFiles(DEFAULT_STATE)` from
+ * frontend/src/lib/landingZone, generated at run time, so a builder that
+ * emits a module or a version the image does not vendor fails this check
+ * (ADR 0032 decision 5). It runs with a higher memory limit than the agent's
+ * default, and BUILDER_LIMITS says why. The builder imports its siblings without a `.js`
+ * extension, as Vite allows; the one resolve hook below adds it, and it
+ * applies to nothing but those relative imports.
+ *
  * No dependency beyond Node and Docker (the tar fixture is made with the
  * host's `tar --format=ustar`, present on ubuntu-latest and on Windows).
  */
 
 import { spawnSync, execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
+import * as nodeModule from 'node:module';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -30,6 +42,29 @@ const { prepareJobDir, buildDockerArgs } = await import(
   new URL('../vps-agent/lib/docker-runner.js', import.meta.url)
 );
 const { CAPABILITIES } = await import(new URL('../vps-agent/lib/capabilities.js', import.meta.url));
+
+/**
+ * `./format` -> `./format.js` for a relative import with no extension, and
+ * nothing else. registerHooks (Node 22.15 and later) runs in this thread;
+ * register is the older, off-thread form, kept for a runner whose default
+ * Node predates it.
+ */
+const EXTENSIONLESS = /^\.\.?\/(?:.*\/)?[^./]+$/;
+if (typeof nodeModule.registerHooks === 'function') {
+  nodeModule.registerHooks({
+    resolve: (specifier, context, next) =>
+      next(EXTENSIONLESS.test(specifier) ? `${specifier}.js` : specifier, context),
+  });
+} else {
+  nodeModule.register(
+    `data:text/javascript,${encodeURIComponent(
+      `export const resolve = (s, c, next) => next(${EXTENSIONLESS}.test(s) ? s + '.js' : s, c);`
+    )}`
+  );
+}
+const landingZone = (file) => new URL(`../frontend/src/lib/landingZone/${file}`, import.meta.url);
+const { emitFiles } = await import(landingZone('hcl/index.js'));
+const { DEFAULT_STATE } = await import(landingZone('state.js'));
 
 const image = process.argv[2];
 if (!image) {
@@ -40,12 +75,61 @@ if (!image) {
 /** The agent's defaults (vps-agent/index.js config.limits). */
 const LIMITS = { memory: '256m', cpus: '0.5', pidsLimit: 128 };
 
+/**
+ * The builder's full default build under every sandbox flag and every limit
+ * above except memory, which it does not fit. Measured on 2026-09-27 with
+ * Docker 29.8: at 256m `terraform validate` is OOM-killed (docker inspect:
+ * OOMKilled true; hcw-terraform-validate exits 247, Terraform's -9) after an
+ * offline init that succeeded, because the build declares sixteen provider
+ * configurations, six of them azurerm aliases, and validate starts a plugin
+ * process for each; at 320m it passes in 20 s. The host runs jobs at the
+ * same 256m (lab-host labs_agent_job_memory), so on the lab this build
+ * cannot validate until that limit moves, which is an owner decision this
+ * file does not make. The override is here, named, rather than in LIMITS,
+ * so that every other case still proves the agent's own limits, and so that
+ * raising the host's limit is visibly the moment to delete it.
+ */
+const BUILDER_LIMITS = { ...LIMITS, memory: '512m' };
+
 const fixture = (...p) => path.join(here, 'smoke', ...p);
 const readText = (...p) => fs.readFile(fixture(...p), 'utf8');
 const tarOf = (dir) =>
   execFileSync('tar', ['--format=ustar', '-cf', '-', '-C', dir, '.'], { maxBuffer: 16 * 1024 * 1024 }).toString(
     'base64'
   );
+
+/** How many `module` blocks name a registry source (`Azure/<name>/<system>`) in some HCL text. */
+const registryModuleBlocks = (text) =>
+  [...String(text).matchAll(/^\s*source\s*=\s*"(?:registry\.terraform\.io\/)?[Aa]zure\/[^/"]+\/[^/"]+"/gm)].length;
+
+/**
+ * hcw-terraform-validate prints one `rewrote` line per registry module block
+ * it pointed at a vendored copy and one `left` line per block it could not.
+ * Every block must be rewritten: a `left` line is a module or version the
+ * image does not vendor, and the init after it only passes with network.
+ */
+const everyBlockRewritten = (expected) => (output) => {
+  const rewrote = (output.match(/^\s+rewrote /gm) ?? []).length;
+  const left = output.match(/^\s+left .*$/gm) ?? [];
+  if (left.length > 0) return `${left.length} registry module(s) not vendored:\n${left.join('\n')}`;
+  if (rewrote !== expected) return `${rewrote} rewrote line(s), expected ${expected}`;
+  return null;
+};
+
+/** The builder's full default build, written to a temporary root; returns the directory. */
+async function builderDefaultBuild() {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'hcw-lz-default-'));
+  for (const file of emitFiles(DEFAULT_STATE)) {
+    await fs.writeFile(path.join(dir, file.path), file.content);
+  }
+  return dir;
+}
+
+const builderDir = await builderDefaultBuild();
+const builderBlocks = emitFiles(DEFAULT_STATE)
+  .filter((file) => file.path.endsWith('.tf'))
+  .reduce((sum, file) => sum + registryModuleBlocks(file.content), 0);
+const fixtureBlocks = registryModuleBlocks(await readText('terraform-validate-payload', 'main.tf'));
 
 const cases = [
   {
@@ -54,7 +138,18 @@ const cases = [
     encoding: 'text',
     payload: () => readText('terraform-validate-payload', 'main.tf'),
     expectExit: 0,
-    expectOutput: ['Success! The configuration is valid.', /(?:^|\n)\s+rewrote .*\n\s+rewrote .*\n\s+rewrote /],
+    expectOutput: ['Success! The configuration is valid.', everyBlockRewritten(fixtureBlocks)],
+    terraform: true,
+  },
+  {
+    name: `terraform-validate, tar payload (the Landing Zone Builder's full default build: ${DEFAULT_STATE.selected.length} components, ${builderBlocks} registry module blocks; memory ${BUILDER_LIMITS.memory}, not the agent's ${LIMITS.memory})`,
+    type: 'terraform-validate',
+    encoding: 'tar',
+    payload: () => tarOf(builderDir),
+    limits: BUILDER_LIMITS,
+    expectExit: 0,
+    expectOutput: ['Success! The configuration is valid.', everyBlockRewritten(builderBlocks)],
+    terraform: true,
   },
   {
     name: 'terraform-validate, tar payload (the same root as an archive)',
@@ -99,7 +194,7 @@ for (const c of cases) {
     const argv = buildDockerArgs(
       capability,
       { jobDir, containerName: `labjob-${jobId}`, jobId, encoding: c.encoding },
-      LIMITS
+      c.limits ?? LIMITS
     );
     const started = Date.now();
     const run = spawnSync('docker', argv, {
@@ -113,11 +208,19 @@ for (const c of cases) {
     if (run.error) problems.push(`docker did not run: ${run.error.message}`);
     if (run.status !== c.expectExit) problems.push(`exit ${run.status}, expected ${c.expectExit}`);
     for (const want of c.expectOutput) {
-      const found = typeof want === 'string' ? output.includes(want) : want.test(output);
-      if (!found) problems.push(`output lacks ${want}`);
+      if (typeof want === 'function') {
+        const problem = want(output);
+        if (problem) problems.push(problem);
+      } else if (!(typeof want === 'string' ? output.includes(want) : want.test(output))) {
+        problems.push(`output lacks ${want}`);
+      }
     }
     if (problems.length === 0) {
       console.log(`ok:   ${c.name} (exit ${run.status}, ${seconds}s)`);
+      if (c.terraform) {
+        const evidence = output.match(/^\s+rewrote .*$|^Success! .*$/gm) ?? [];
+        for (const line of evidence) console.log(`      ${line.trim()}`);
+      }
     } else {
       failed += 1;
       console.log(`FAIL: ${c.name}: ${problems.join('; ')}`);
@@ -128,6 +231,8 @@ for (const c of cases) {
     await fs.rm(jobDir, { recursive: true, force: true }).catch(() => {});
   }
 }
+
+await fs.rm(builderDir, { recursive: true, force: true }).catch(() => {});
 
 if (failed > 0) {
   console.log(`sandbox-check: FAILED (${failed} of ${cases.length})`);
