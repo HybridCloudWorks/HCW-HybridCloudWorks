@@ -294,10 +294,37 @@ describe('readVoices', () => {
     }
     expect(caught).toMatchObject({ code: VOICES_UNAVAILABLE, status: 401, provider: 'elevenlabs' });
     expect(caught.message).toBe(
-      `Could not list the ElevenLabs voices (HTTP 401 missing_permissions: the key needs the Voices → Read permission (voices_read), set at ${API_KEYS_PAGE}).`
+      `Could not list the ElevenLabs voices (HTTP 401 missing_permissions: the key needs the Voices → Read permission (voices_read), set at ${API_KEYS_PAGE}; ElevenLabs said: "voices_read").`
     );
     expect(caught.message).not.toContain(KEY);
     expect(fetchImpl).toHaveBeenCalledTimes(1); // a permission is not retried
+  });
+
+  // The live answer on 2026-09-26 was a 401 whose code was only
+  // `unauthorized`; read alone it said "rejected the key" to an owner whose
+  // key had just read the subscription.
+  it('names the permission when only the sentence says so, and passes that sentence on', async () => {
+    const sentence = 'The API key you used is missing the permission voices_read to execute this operation.';
+    const fetchImpl = vi.fn(async () =>
+      refusal(401, JSON.stringify({ detail: { code: 'unauthorized', message: sentence } }))
+    );
+    await expect(readVoices({ key: 'permission-key', fetchImpl, sleep: noSleep })).rejects.toThrow(
+      `HTTP 401 unauthorized: the key needs the Voices → Read permission (voices_read), set at ${API_KEYS_PAGE}; ElevenLabs said: "${sentence}"`
+    );
+  });
+
+  it("shows ElevenLabs's reason for a refused key, with anything shaped like a key masked", async () => {
+    const fetchImpl = vi.fn(async () =>
+      refusal(401, JSON.stringify({ detail: { code: 'invalid_api_key', message: 'Invalid API key: sk_0123456789abcdef0123' } }))
+    );
+    let caught;
+    try {
+      await readVoices({ key: 'masked-key', fetchImpl, sleep: noSleep });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught.message).toContain('HTTP 401 invalid_api_key: ElevenLabs rejected the key; ElevenLabs said: "Invalid API key: [key]"');
+    expect(caught.message).not.toContain('sk_0123456789abcdef0123');
   });
 
   it('retries a 429 and a 5xx, and reports a refused key and a non-JSON answer', async () => {

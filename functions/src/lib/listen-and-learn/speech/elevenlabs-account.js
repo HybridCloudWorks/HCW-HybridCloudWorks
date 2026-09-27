@@ -203,6 +203,51 @@ export function errorCode(bodyText) {
   }
 }
 
+/** An ElevenLabs key as it appears in text (`sk_` and its hex or base62 body). */
+const KEY_PATTERN = /sk_[A-Za-z0-9]{8,}/g;
+
+/**
+ * ElevenLabs's own sentence for a refusal (`detail.message`), on one line,
+ * capped at 300 characters, with anything shaped like a key replaced. The
+ * sentence is what names the missing permission: on 2026-09-26 the voice
+ * listing answered a key without Voices → Read with `401` and code
+ * `unauthorized`, which alone read as a rejected key.
+ */
+export function errorMessage(bodyText) {
+  try {
+    const message = JSON.parse(bodyText)?.detail?.message;
+    if (typeof message !== 'string') return '';
+    return message.replace(KEY_PATTERN, '[key]').replace(/\s+/g, ' ').trim().slice(0, 300);
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Whether a refusal body is about the key's permissions: a permission code
+ * in either `detail.code` or the legacy `detail.status` (an answer can carry
+ * `code: unauthorized` beside `status: missing_permissions`), a 403 with no
+ * code, or a 401/403 whose own sentence names a permission.
+ */
+export function isPermissionAnswer(status, bodyText) {
+  let detail = null;
+  try {
+    detail = JSON.parse(bodyText)?.detail ?? null;
+  } catch {
+    detail = null;
+  }
+  const codes = [detail?.code, detail?.status].map((value) => String(value || '').toLowerCase());
+  if (codes.some((value) => PERMISSION_CODES.has(value))) return true;
+  if (isPermissionRefusal(status, errorCode(bodyText))) return true;
+  return (status === 401 || status === 403) && /\bpermission/i.test(errorMessage(bodyText));
+}
+
+/** `; ElevenLabs said: "…"` when the body carries a sentence, else ''. */
+export function saidBy(bodyText) {
+  const message = errorMessage(bodyText);
+  return message ? `; ElevenLabs said: "${message}"` : '';
+}
+
 /**
  * Whether a non-2xx response is the out-of-credit state.
  *
@@ -280,13 +325,13 @@ const snippet = (text) => String(text || '').slice(0, 300) || 'no detail';
 function refusalFor(status, text) {
   const code = errorCode(text);
   const label = `HTTP ${status}${code ? ` ${code}` : ''}`;
-  if (isPermissionRefusal(status, code)) {
+  if (isPermissionAnswer(status, text)) {
     return unavailable(
-      `${label}: the key needs the User → Read permission (${SUBSCRIPTION_PERMISSION}), set at ${API_KEYS_PAGE}`,
+      `${label}: the key needs the User → Read permission (${SUBSCRIPTION_PERMISSION}), set at ${API_KEYS_PAGE}${saidBy(text)}`,
       status
     );
   }
-  if (status === 401) return unavailable(`${label}: ElevenLabs rejected the key`, status);
+  if (status === 401) return unavailable(`${label}: ElevenLabs rejected the key${saidBy(text)}`, status);
   return unavailable(`${label}: ${snippet(text)}`, status);
 }
 
