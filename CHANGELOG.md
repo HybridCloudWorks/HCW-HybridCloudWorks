@@ -1328,6 +1328,66 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **lab-image: the image vendors every module version the Landing Zone
+  Builder emits, and CI fails when it stops (ADR 0032 decision 5).** Found
+  while the lab article drafts were verified (#737). The builder's spokes
+  call `avm-res-network-virtualnetwork` 0.22.2, and the image carried only
+  0.15.0, as the connectivity module's child. So the full default build
+  failed `terraform init` under `--network none` and passed online.
+  Reproduced on 2026-09-27 against the image built from `main`:
+  `hcw-terraform-validate` left `spoke_identity`, `spoke_corp_1` and
+  `spoke_online_1` with `no vendored version satisfies it (have: 0.15.0)`,
+  and init failed reaching `registry.terraform.io`.
+
+  The list of builder modules is now written once. Each is an
+  `AVM_<KEY>_VERSION` / `AVM_<KEY>_SHA256` pair in `lab-image/versions.env`,
+  and the Dockerfile's fetch stage vendors every pair it finds instead of
+  three named calls. 0.22.2 joins the three pattern modules, verified by its
+  release tarball's SHA256, with its one new child,
+  `avm-utl-interfaces@0.6.0`, pinned by tree hash. 0.15.0 stays beside it,
+  so the two versions coexist as two `/opt/avm/<name>@<version>`
+  directories. A new `AVM_CHILD_CALLS` block records which builder module,
+  at which version, reaches which child. `vendor-avm.sh` prints it with
+  `AVM_PRINT_PINS=1` and fails the build when it differs from what
+  `terraform get` resolved. It also resolves a child at a builder module's
+  exact `name@version` to that builder copy rather than vendoring it twice.
+  The path layout `hcw-terraform-validate` reads is unchanged. All sixteen
+  existing child hashes came back identical.
+
+  Three checks enforce it. `scripts/lab-image-avm-vendoring.test.mjs` runs
+  in the required `scripts (operations)` job with no Docker and no network,
+  and fails when `versions.env` and `avmVersions.js` disagree about any
+  module, version or recorded child. Against `main`'s files it reports 23
+  problems, the first being the missing 0.22.2, and it feeds itself a
+  bumped pin to show that goes red. `smoke.sh` derives the builder modules
+  from `versions.env`, checks every recorded child is on disk, and inits
+  each builder module offline. `sandbox-check.mjs` now validates the
+  builder's real full default build, `emitFiles(DEFAULT_STATE)` generated
+  at run time, through the agent's own `docker-runner.js`. Every one of its
+  six registry module blocks must be rewritten, and it ends `Success! The
+  configuration is valid.` offline. `publish-lab-image.yml` runs on pull
+  requests that change `frontend/src/lib/landingZone/` for that reason. The
+  weekly `update-avm-versions.yml` pull request now says its `scripts` check
+  stays red until the child blocks are re-printed. That is by design,
+  because the children of a new release are unknown until the build
+  resolves them.
+
+  The builder's "Validate on the lab" prediction (`labImage.js`, #672) now
+  takes its builder modules from `AVM_MODULES` directly and holds its one
+  child list to `AVM_CHILD_MODULES`. The full default build, spokes
+  included, is accepted and sent. A module version the image lacks is still
+  refused, with the module named.
+
+  One limit is not the image's. At the agent's default job memory of 256m,
+  that build is OOM-killed during `terraform validate` (docker inspect:
+  `OOMKilled` true, exit 247), after an offline init that succeeds. Its
+  sixteen provider configurations each start a plugin process, and 320m
+  passes in 20 s. The host's `labs_agent_job_memory` is also 256m, and
+  raising it is an owner decision, so `sandbox-check.mjs` runs that one case
+  at 512m and names the override in its output. Image sizes are unchanged
+  at the README's precision (1.71 GB / 319 MB runner, 2.73 GB / 497 MB
+  full). `/opt/avm` grew from 5.7 MB to 7.5 MB and each image by 2.1 MB.
+
 - **`npm test` in `frontend/` runs on Windows again: the crash was
   pdf-parse's canvas addon, not the pool or Node 26 (#720).** On Windows the
   suite died partway with `0xC0000005` (access violation). It did so in 4 runs

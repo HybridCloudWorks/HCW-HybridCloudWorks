@@ -4,17 +4,20 @@
  * two cannot drift; the constraint evaluator is tf_constraints.py's, case for
  * case; the module scan is tf_rewrite.py's (top-level blocks, depth-1
  * `source` and `version` only, registry AVM sources only, `.tf` files only);
- * and against the builder's own output it says what the image will do: the
- * three pattern modules resolve, and the spoke module the image does not
- * vendor does not.
+ * and against the builder's own output it says what the image will do: every
+ * module the full default build calls resolves, the spokes' 0.22.2 included,
+ * and a version the image does not carry is named.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  AVM_MODULES,
   DEFAULT_STATE,
   LAB_IMAGE_AVM,
+  LAB_IMAGE_BUILDER_AVM,
+  LAB_IMAGE_CHILD_AVM,
   chooseVendored,
   decodeLz,
   emitFiles,
@@ -36,13 +39,24 @@ function readVersionsEnv() {
   return values;
 }
 
-/** What the image vendors: each `vendor <name> "${VAR}"` in the Dockerfile, plus every AVM_CHILD_MODULES line. */
+/**
+ * The line of lab-image/Dockerfile's fetch stage that lists the builder
+ * modules: every AVM_<KEY>_VERSION line of versions.env. vendoredByImage
+ * reads them the same way, so this test fails if the Dockerfile stops.
+ */
+const DOCKERFILE_BUILDER_LIST = String.raw`sed -n 's/^AVM_\([A-Z0-9_]*\)_VERSION=.*$/\1/p' /build/versions.env`;
+
+/**
+ * What the image vendors: the builder modules, each AVM_<KEY>_VERSION in
+ * versions.env as the Dockerfile's fetch stage reads it (`avm-` plus <KEY>
+ * lower-cased with `_` as `-`), plus every AVM_CHILD_MODULES line.
+ */
 function vendoredByImage() {
   const env = readVersionsEnv();
-  const dockerfile = readFileSync(join(LAB_IMAGE, 'Dockerfile'), 'utf8');
-  const top = [...dockerfile.matchAll(/vendor ([a-z0-9-]+) "\$\{([A-Z0-9_]+)\}"/g)].map(
-    ([, name, variable]) => `${name}@${env[variable]}`
-  );
+  const top = Object.entries(env)
+    .map(([variable, value]) => [/^AVM_([A-Z0-9_]+)_VERSION$/.exec(variable)?.[1], value])
+    .filter(([key]) => key)
+    .map(([key, version]) => `avm-${key.toLowerCase().replace(/_/g, '-')}@${version}`);
   const children = env.AVM_CHILD_MODULES.split('\n')
     .map((line) => line.trim().split(/\s+/)[0])
     .filter(Boolean);
@@ -52,15 +66,23 @@ function vendoredByImage() {
 const state = (query) => decodeLz(new URLSearchParams(query));
 
 describe('LAB_IMAGE_AVM is what lab-image/ vendors', () => {
-  it('lists the three pattern modules and every child, and nothing else', () => {
+  it('reads the builder modules from versions.env the way the Dockerfile does', () => {
+    const dockerfile = readFileSync(join(LAB_IMAGE, 'Dockerfile'), 'utf8');
+    expect(dockerfile).toContain(DOCKERFILE_BUILDER_LIST);
+  });
+
+  it('vendors every module the builder emits, at the version it emits, as a builder module', () => {
+    const { top } = vendoredByImage();
+    const emitted = Object.values(AVM_MODULES).map((m) => `${m.name}@${m.version}`);
+    expect([...top].sort()).toEqual([...emitted].sort());
+    expect([...LAB_IMAGE_BUILDER_AVM].sort()).toEqual([...emitted].sort());
+  });
+
+  it('lists every builder module and every child, and nothing else', () => {
     const { top, children } = vendoredByImage();
-    expect(top).toEqual([
-      'avm-ptn-alz@0.21.0',
-      'avm-ptn-alz-management@0.9.0',
-      'avm-ptn-alz-connectivity-hub-and-spoke-vnet@0.17.5',
-    ]);
     expect(children.length).toBeGreaterThan(0);
-    expect([...LAB_IMAGE_AVM].sort()).toEqual([...top, ...children].sort());
+    expect([...LAB_IMAGE_CHILD_AVM].sort()).toEqual([...children].sort());
+    expect([...LAB_IMAGE_AVM].sort()).toEqual([...new Set([...top, ...children])].sort());
   });
 
   it('holds only name@version entries the image’s own parser accepts', () => {
@@ -107,8 +129,14 @@ describe('Terraform constraints, as tf_constraints.py reads them', () => {
     const vendored = vendoredModules(LAB_IMAGE_AVM);
     expect(chooseVendored(vendored, 'avm-res-network-routetable', '>= 0.3')).toBe('0.5.0');
     expect(chooseVendored(vendored, 'avm-res-network-routetable', '~> 0.3.0')).toBe('0.3.1');
-    expect(chooseVendored(vendored, 'avm-utl-interfaces', '')).toBe('0.5.0');
-    expect(chooseVendored(vendored, 'avm-res-network-virtualnetwork', '0.22.2')).toBeNull();
+    expect(chooseVendored(vendored, 'avm-utl-interfaces', '~> 0.5.0')).toBe('0.5.0');
+    expect(chooseVendored(vendored, 'avm-utl-interfaces', '')).toBe('0.6.0');
+    // Two versions of the spoke module, side by side: the builder's and the
+    // connectivity module's own child.
+    expect(chooseVendored(vendored, 'avm-res-network-virtualnetwork', '0.22.2')).toBe('0.22.2');
+    expect(chooseVendored(vendored, 'avm-res-network-virtualnetwork', '~> 0.15.0')).toBe('0.15.0');
+    expect(chooseVendored(vendored, 'avm-res-network-virtualnetwork', '>= 0.15.0')).toBe('0.22.2');
+    expect(chooseVendored(vendored, 'avm-res-network-virtualnetwork', '0.23.0')).toBeNull();
     expect(chooseVendored(vendored, 'avm-not-vendored', '')).toBeNull();
   });
 });
@@ -182,26 +210,31 @@ describe('the module scan, as tf_rewrite.py does it', () => {
 });
 
 describe('against the builder’s own output', () => {
-  it('resolves the three pattern modules and names the spoke module it cannot', () => {
+  it('resolves every module the full default build calls, each spoke included', () => {
     const files = emitFiles(DEFAULT_STATE);
     const report = labModuleReport(files);
     const byModule = Object.fromEntries(report.map((r) => [r.module, r.vendored]));
-    expect(byModule).toEqual({
-      'avm-ptn-alz': 'avm-ptn-alz@0.21.0',
-      'avm-ptn-alz-management': 'avm-ptn-alz-management@0.9.0',
-      'avm-ptn-alz-connectivity-hub-and-spoke-vnet':
-        'avm-ptn-alz-connectivity-hub-and-spoke-vnet@0.17.5',
-      'avm-res-network-virtualnetwork': null,
-    });
+    expect(byModule).toEqual(
+      Object.fromEntries(Object.values(AVM_MODULES).map((m) => [m.name, `${m.name}@${m.version}`]))
+    );
+    // Every spoke, not one of them: three blocks call the virtual network module.
+    expect(report.filter((r) => r.module === 'avm-res-network-virtualnetwork')).toHaveLength(3);
+    expect(labResolution(files)).toEqual({ ok: true, unresolved: [] });
+  });
 
-    const { ok, unresolved } = labResolution(files);
+  it('names a module version the image does not carry, once however many blocks call it', () => {
+    const spoke = (name) =>
+      `module "${name}" {\n  source  = "Azure/avm-res-network-virtualnetwork/azurerm"\n  version = "0.23.0"\n}\n`;
+    const { ok, unresolved } = labResolution([
+      { path: 'a.tf', content: spoke('one') },
+      { path: 'b.tf', content: spoke('two') },
+    ]);
     expect(ok).toBe(false);
-    // One row per distinct module and constraint, however many spokes call it.
     expect(unresolved).toHaveLength(1);
     expect(unresolved[0]).toMatchObject({
       module: 'avm-res-network-virtualnetwork',
-      constraint: '0.22.2',
-      have: ['0.15.0'],
+      constraint: '0.23.0',
+      have: ['0.15.0', '0.22.2'],
     });
   });
 

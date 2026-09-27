@@ -7,7 +7,7 @@ Phase 2 in #675).
 
 | Target   | Image                                     | Carries                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | -------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `runner` | `ghcr.io/hybridcloudworks/hcw-lab-runner` | terraform, kubeconform, helm, ansible-core; a Terraform provider filesystem mirror at `/opt/terraform/mirror`; the AVM pattern modules and every registry module they call at `/opt/avm/<name>@<version>`; one release of the Kubernetes JSON schemas at `/opt/kubeconform/schemas`; the three capability commands in [`bin/`](bin/). Runs as uid 65534 (`nobody`) with `/workspace` mounted read-only. This is what `vps-agent` runs jobs in. |
+| `runner` | `ghcr.io/hybridcloudworks/hcw-lab-runner` | terraform, kubeconform, helm, ansible-core; a Terraform provider filesystem mirror at `/opt/terraform/mirror`; every Azure Verified Module the Landing Zone Builder emits, at the version it emits, and every registry module those call, at `/opt/avm/<name>@<version>`; one release of the Kubernetes JSON schemas at `/opt/kubeconform/schemas`; the three capability commands in [`bin/`](bin/). Runs as uid 65534 (`nobody`) with `/workspace` mounted read-only. This is what `vps-agent` runs jobs in. |
 | `full`   | `ghcr.io/hybridcloudworks/hcw-lab`        | Everything in `runner`, plus Azure CLI, kubectl, git, curl, jq and the three packages code-server needs (`ca-certificates`, `libatomic1`, `procps`); uid 65534's shell is `bash` and its home `/tmp/home`, because Coder runs everything through the passwd shell (#693). `CMD` is `bash`. This is what a lab page tells a learner to pull, and the base of the Coder template.                                                            |
 
 Both targets are built on the official `python:3.14.7-slim-trixie` image,
@@ -26,7 +26,7 @@ there, and checks the sandbox template's `FROM` against
 
 ## Sizes
 
-Measured on 2026-09-25 with Docker 29.8.0 (`docker image ls`, which since
+Measured on 2026-09-27 with Docker 29.8.0 (`docker image ls`, which since
 Docker 29 reports both the unpacked size on disk and the compressed size a
 pull transfers), on the Python 3.14.7 / Debian 13 base:
 
@@ -34,6 +34,12 @@ pull transfers), on the Python 3.14.7 / Debian 13 base:
 | -------- | ------- | ---------------------------------- |
 | `runner` | 1.71 GB | 319 MB                             |
 | `full`   | 2.73 GB | 497 MB                             |
+
+Vendoring the fourth builder module that day (avm-res-network-virtualnetwork
+0.22.2 and its one new child, avm-utl-interfaces 0.6.0) grew `/opt/avm` from
+5.7 MB to 7.5 MB and each image by 2.1 MB (`docker image inspect`: the
+runner 1,708,013,228 to 1,710,127,612 bytes), which the table's precision
+does not show. The 2026-09-25 measurement was the same two rows.
 
 On the Debian 12 base with its Python 3.11 the same day, the two measured
 1.70 GB / 319 MB and 2.69 GB / 491 MB. The runner stays level because the
@@ -49,7 +55,7 @@ the provider mirror, now unpacked (931 MB of binaries where the zips were
 191 MB) so that `terraform init` symlinks providers instead of extracting
 them; see "What works offline". The pull size barely moved, because a layer
 is compressed in transit whichever form the binaries take on disk. The
-vendored module tree is 6 MB and the Kubernetes schemas 62 MB on disk.
+vendored module tree is 7.5 MB and the Kubernetes schemas 62 MB on disk.
 
 ## Run the toolchain locally
 
@@ -110,30 +116,72 @@ one 64 MB tmpfs at `/tmp/run`. Precisely:
   locations: /opt/terraform/mirror` instead of hanging on a registry that is
   unreachable. azurerm is mirrored twice because the vendored AVM modules
   still constrain to `~> 4.0` / `~> 4.35` while new code targets 5.x.
-- **The three AVM pattern modules and everything they call: yes.**
-  `/opt/avm/avm-ptn-alz@0.21.0`, `/opt/avm/avm-ptn-alz-management@0.9.0` and
-  `/opt/avm/avm-ptn-alz-connectivity-hub-and-spoke-vnet@0.17.5` are the
-  release source tarballs of the three `Azure/terraform-azurerm-avm-ptn-alz*`
-  repositories. Terraform has a provider mirror but no module mirror, and
-  measured in #686 `avm-ptn-alz` calls one registry module and the
-  connectivity module thirteen, some from inside its own nested modules, so
-  Phase 1 could init only the management module offline. Phase 2 (#675)
-  vendors those children too: [`vendor-avm.sh`](vendor-avm.sh) runs
-  `terraform get` on each pattern module at build time, copies each distinct
-  child once to `/opt/avm/<name>@<version>` (sixteen `name@version` pairs
-  across fourteen modules; two are called at two versions), and rewrites
-  every `module` block inside the vendored copies from
-  `source = "Azure/<name>/azurerm"` plus a `version` to the child's
-  **relative** path, `../<name>@<version>`, with the `version` line
+- **Every module the Landing Zone Builder emits, and everything those call:
+  yes** (ADR 0032 decision 5). The builder modules are the four in
+  `AVM_MODULES` in
+  [`avmVersions.js`](../frontend/src/lib/landingZone/avmVersions.js), each at
+  the version the builder pins: `/opt/avm/avm-ptn-alz@0.21.0`,
+  `/opt/avm/avm-ptn-alz-management@0.9.0`,
+  `/opt/avm/avm-ptn-alz-connectivity-hub-and-spoke-vnet@0.17.5` and
+  `/opt/avm/avm-res-network-virtualnetwork@0.22.2`, the module every spoke is
+  built from. Each is the release source tarball of its
+  `Azure/terraform-azurerm-<name>` repository, verified by SHA256.
+
+  **How the list is derived.** It is written once, as one
+  `AVM_<KEY>_VERSION` / `AVM_<KEY>_SHA256` pair per builder module in
+  [`versions.env`](versions.env) (<KEY> is the name upper-cased with `-` as
+  `_`), and nothing else names it: the Dockerfile's fetch stage vendors every
+  pair it finds, `vendor-avm.sh` resolves whatever directories that leaves,
+  and `smoke.sh` reads the same lines. The pairs are held equal to
+  `avmVersions.js` in both directions by
+  [`scripts/lab-image-avm-vendoring.test.mjs`](../scripts/lab-image-avm-vendoring.test.mjs),
+  which runs in the `scripts (operations)` CI job on any change to either,
+  and the weekly `update-avm-versions.yml` moves a pair in the same pull
+  request as the builder's pin. Until 2026-09-27 the image carried only the
+  three pattern modules, so the spokes' 0.22.2 was left for the registry and
+  the full default build could not init offline (#737); nothing compared the
+  two lists then.
+
+  **The children.** Terraform has a provider mirror but no module mirror,
+  and measured in #686 `avm-ptn-alz` calls one registry module and the
+  connectivity module thirteen, some from inside its own nested modules.
+  [`vendor-avm.sh`](vendor-avm.sh) runs `terraform get` on each builder
+  module at build time, copies each distinct child once to
+  `/opt/avm/<name>@<version>` (seventeen `name@version` pairs across
+  fourteen modules), and rewrites every `module` block inside the vendored
+  copies from `source = "Azure/<name>/azurerm"` plus a `version` to the
+  child's **relative** path, `../<name>@<version>`, with the `version` line
   commented out. Relative because Terraform uses `./` and `../` paths in
-  place and treats an absolute path as a `file://` source it copies onto
-  the tmpfs. Each child is pinned by a tree hash in `versions.env`
-  (`AVM_CHILD_MODULES`); the build fails on a mismatch, an unpinned child or
-  an unused pin, and then proves with a second `terraform get` that nothing
-  in the rewritten tree reaches the registry. `smoke.sh` inits and validates
-  each of the three from a generated root with no network. The fourth
-  module the issue names,
-  `avm-ptn-alz-application-landing-zone-identity-and-access`, is still not
+  place and treats an absolute path as a `file://` source it copies onto the
+  tmpfs. Two blocks in `versions.env` record the result. `AVM_CHILD_MODULES`
+  pins each child by a tree hash. `AVM_CHILD_CALLS` records which builder
+  module, at which version, reaches which child, so the static test can
+  check with no network that the children of the version `avmVersions.js`
+  pins are vendored; a pin bump leaves the new version unrecorded and the
+  test red until the blocks are re-printed. The build fails on a hash
+  mismatch, an unpinned child, an unused pin, or any difference between
+  `AVM_CHILD_CALLS` and what `terraform get` resolved, and then proves with a
+  second `terraform get` that nothing in the rewritten tree reaches the
+  registry. `smoke.sh` checks every recorded child is on disk and inits and
+  validates each builder module from a generated root with no network.
+
+  **Two versions of one module coexist**, as two directories:
+  `avm-res-network-virtualnetwork@0.15.0` is the connectivity module's own
+  child (its hub network) and `@0.22.2` is the builder's spokes', and
+  `avm-utl-interfaces` is vendored at 0.2.0, 0.5.0 and 0.6.0. A child at
+  exactly a builder module's `name@version` is not copied twice: its calls
+  resolve to the builder module's directory.
+
+  **The path layout is the contract** `hcw-terraform-validate` and the
+  builder's "Validate on the lab" prediction
+  ([`labImage.js`](../frontend/src/lib/landingZone/labImage.js), #672) both
+  read, and it has not changed: one `/opt/avm/<name>@<version>` directory
+  per vendored module, `<name>` being the registry module name. `labImage.js`
+  takes its builder modules from `AVM_MODULES` directly and keeps one copy
+  of the child list, which its test holds to `AVM_CHILD_MODULES`.
+
+  `avm-ptn-alz-application-landing-zone-identity-and-access`, the
+  application landing zone module #658 names, is neither emitted nor
   vendored: on 2026-09-25 its repository had no release and no tag.
 - **A learner's or the builder's root: yes, through the rewrite.** The
   `terraform-validate` job runs [`bin/hcw-terraform-validate`](bin/hcw-terraform-validate),
@@ -147,8 +195,19 @@ one 64 MB tmpfs at `/tmp/run`. Precisely:
   changed (ADR 0032, decision 5): the zip and the payload keep their
   registry sources and init anywhere with network.
   [`smoke/terraform-validate-payload`](smoke/terraform-validate-payload/main.tf)
-  is a root shaped like the builder's output, calling all three pattern
-  modules by registry source, and the smoke test validates it offline.
+  is a root shaped like the builder's output, calling each builder module
+  once by registry source, and the smoke test validates it offline with one
+  rewrite per builder module and none left. `sandbox-check.mjs` validates
+  the builder's real full default build (every component, both landing
+  zones; `emitFiles(DEFAULT_STATE)`, generated at run time) the same way,
+  under the job sandbox. One limit is not the image's: at the agent's
+  default job memory of 256m that build is OOM-killed during `terraform
+  validate`, after an offline init that succeeds, because its sixteen
+  provider configurations (six `azurerm` aliases among them) each start a
+  plugin process; 320m is enough (measured 2026-09-27). The host's
+  `labs_agent_job_memory` is 256m, so `sandbox-check.mjs` runs that one case
+  at 512m and says so in its output, and raising the host's limit is an
+  owner decision.
 - **Helm and kubeconform: yes.** [`bin/hcw-helm-template`](bin/hcw-helm-template)
   renders one chart (its `Chart.yaml` at `/workspace` or one level down;
   dependencies must already be under `charts/`).
@@ -192,14 +251,15 @@ TF_CLI_CONFIG_FILE=/dev/null terraform init
 reachable or the mount is writable, because an offline init that had network
 would prove nothing; then it checks each tool's version against
 `versions.env`, that every mirrored provider is present in the unpacked
-layout, that every vendored child hashes to its pin, that `terraform init
--backend=false` and `terraform validate` succeed with no network for
-[`smoke/providers-only`](smoke/providers-only/main.tf) and for a generated
-root per pattern module (symlinking every provider and downloading no
-module), that the three capability commands succeed on their fixtures under
-[`smoke/`](smoke/) and that kubeconform rejects an unknown field, and, for
-the `full` target, the extra tools and uid 65534's shell. The workflow runs
-it on every pull request.
+layout, that every builder module and every child `AVM_CHILD_CALLS` records
+for it is on disk, that every vendored child hashes to its pin, that
+`terraform init -backend=false` and `terraform validate` succeed with no
+network for [`smoke/providers-only`](smoke/providers-only/main.tf) and for a
+generated root per builder module (symlinking every provider and
+downloading no module), that the three capability commands succeed on their
+fixtures under [`smoke/`](smoke/) and that kubeconform rejects an unknown
+field, and, for the `full` target, the extra tools and uid 65534's shell.
+The workflow runs it on every pull request.
 
 [`sandbox-check.mjs`](sandbox-check.mjs) is the second half: it runs each
 runner-image capability the way the agent does, through
@@ -208,7 +268,21 @@ so the exact sandbox flags, the tmpfs, the label and a `tar` payload), against
 a locally built image, and expects the exit codes the job would report. The
 smoke test runs inside a container that is not `--read-only`; this one is,
 and it is what caught both the tmpfs ownership and the `TMPDIR` failures.
-The workflow runs it after the smoke tests.
+One of its jobs is the Landing Zone Builder's full default build, generated
+from `frontend/src/lib/landingZone` when the script runs, so it needs that
+directory beside this one (a full checkout, as CI has) and fails on any
+module block the image would leave for the registry; that case runs at 512m
+of memory instead of the agent's 256m, for the reason under "What works
+offline". The workflow runs it after the smoke tests, and runs on pull
+requests that change the builder as well as this directory.
+
+[`scripts/lab-image-avm-vendoring.test.mjs`](../scripts/lab-image-avm-vendoring.test.mjs)
+is the fast third check, with no Docker and no network, in the required
+`scripts (operations)` CI job: `versions.env` must vendor exactly the
+modules and versions `avmVersions.js` pins, record what each of those
+versions calls, and pin every child it records; and the smoke payload must
+call each builder module once with a constraint that resolves to the
+builder's version.
 
 Locally, from the repository root. PowerShell:
 
@@ -296,25 +370,36 @@ and attests. Where each sum comes from:
   base's own suite, so check the version is published there too.
 - Providers: `shasum` from
   `https://registry.terraform.io/v1/providers/<namespace>/<name>/<version>/download/linux/amd64`.
-- AVM pattern modules: `sha256sum` of the downloaded
+- Builder modules (the `AVM_<KEY>_VERSION` / `AVM_<KEY>_SHA256` pairs):
+  `sha256sum` of the downloaded
   `https://github.com/Azure/terraform-azurerm-<name>/archive/refs/tags/v<version>.tar.gz`.
   These lines are normally moved for you: `.github/workflows/update-avm-versions.yml`
   (#671) checks the builder's pins in `frontend/src/lib/landingZone/avmVersions.js`
   against the Terraform Registry every Tuesday and, when a module has a newer
   release, opens one pull request that bumps the pin, these two lines and the
-  HCL snapshots together, with the sum computed from the same tarball.
+  HCL snapshots together, with the sum computed from the same tarball. A
+  module added to `avmVersions.js` needs its pair added here by hand, once;
+  the static test names the missing line.
 
-  The workflow does not refresh the child modules, so do that by hand: a bump usually changes what a pattern module
-  calls, and the build fails until `AVM_CHILD_MODULES` matches. Print the
-  new block and paste it over the old one. bash:
+  The workflow does not refresh the child modules, so do that by hand on its
+  pull request, which is red until you do: `AVM_CHILD_CALLS` is keyed by
+  each builder module's version, so the new version has no record, and a
+  bump often changes what the module calls, so the build fails until
+  `AVM_CHILD_MODULES` matches as well. Print both blocks and paste them over
+  the old two. bash, from the repository root:
 
   ```bash
-  docker build --target vendor --build-arg AVM_PRINT_PINS=1 --progress=plain lab-image 2>&1 | sed -n "/^#[0-9]* [0-9.]* AVM_CHILD_MODULES='/,/^#[0-9]* [0-9.]* '$/p" | sed -E 's/^#[0-9]+ [0-9.]+ //'
+  docker build --target vendor --build-arg AVM_PRINT_PINS=1 --progress=plain lab-image 2>&1 | sed -n "/^#[0-9]* [0-9.]* AVM_CHILD_[A-Z]*='/,/^#[0-9]* [0-9.]* '$/p" | sed -E 's/^#[0-9]+ [0-9.]+ //'
   ```
 
-  Each line is `<name>@<version> <tree hash>`; the hash is what
-  `find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum`
-  prints inside the vendored directory.
+  It prints `AVM_CHILD_MODULES='`, one `<name>@<version> <tree hash>` line
+  per child and a closing `'`, then `AVM_CHILD_CALLS='`, one
+  `<builder>@<version> <child>@<version>` line per pair (a builder module
+  that calls nothing stands alone on its line) and a closing `'`. The hash is
+  what `find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum`
+  prints inside the vendored directory. If the child list changed, update
+  `LAB_IMAGE_CHILD_AVM` in `frontend/src/lib/landingZone/labImage.js` to
+  match; its test fails until you do.
 - Kubernetes schemas: `KUBERNETES_JSON_SCHEMA_COMMIT` is the commit of
   `yannh/kubernetes-json-schema` to take the directory from,
   `KUBERNETES_JSON_SCHEMA_DIR` the directory (bump it with

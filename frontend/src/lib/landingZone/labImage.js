@@ -3,13 +3,19 @@
  * and the rule it decides that by, so the builder can say before anything is
  * submitted which of its modules the lab will resolve.
  *
- * TWO MIRRORS, EACH HELD TO ITS SOURCE BY labImage.test.js:
+ * ONE LIST AND TWO MIRRORS, EACH HELD TO ITS SOURCE BY labImage.test.js:
  *
  *   - `LAB_IMAGE_AVM` is every `/opt/avm/<name>@<version>` the runner image
- *     carries: the three pattern modules lab-image/Dockerfile vendors from
- *     the versions in lab-image/versions.env, and the sixteen registry
- *     modules they call, listed there as AVM_CHILD_MODULES. The test reads
- *     both files and fails when this list and the image drift.
+ *     carries, in two parts. The builder modules are not copied here at all:
+ *     they are AVM_MODULES from avmVersions.js, because the image vendors
+ *     exactly the modules the builder emits at the versions it emits them
+ *     (ADR 0032 decision 5), every `AVM_<KEY>_VERSION` pair in
+ *     lab-image/versions.env, which the Dockerfile's fetch stage reads and
+ *     scripts/lab-image-avm-vendoring.test.mjs holds equal to avmVersions.js.
+ *     A builder pin therefore moves this list with it. The registry modules
+ *     those call, `LAB_IMAGE_CHILD_AVM`, are the one copy: AVM_CHILD_MODULES
+ *     in versions.env, where each carries the tree hash the build checks.
+ *     The test reads versions.env and fails when either part drifts from it.
  *   - `labModuleReport` is lab-image/lib/tf_rewrite.py in JavaScript, with
  *     tf_constraints.py beside it as tfConstraints.js: the same regular
  *     expressions for a `module` block, its depth-1 `source` and `version`
@@ -26,21 +32,25 @@
  * own tmpfs copy inside the job (lab-image/bin/hcw-terraform-validate). This
  * module predicts that rewrite; it does not perform it.
  *
- * The builder's fourth module, avm-res-network-virtualnetwork 0.22.2 (every
- * spoke), is not in the image: 0.15.0 is, as a child of the connectivity
- * pattern, and `version = "0.22.2"` is satisfied by nothing else. So a
- * build with a spoke cannot be validated on the lab until lab-image vendors
- * it, and the builder says so instead of spending a job on the failure.
+ * Until 2026-09-27 the builder's fourth module, avm-res-network-virtualnetwork
+ * 0.22.2 (every spoke), was not in the image, only the connectivity
+ * module's child copy at 0.15.0, so a build with a spoke was refused here.
+ * The image now vendors every builder module; a build that calls any other
+ * module or version is still refused, with the module named, by the same
+ * rule.
  *
  * Pure: no React, no DOM, no network.
  */
+import { AVM_MODULES } from './avmVersions';
 import { chooseVendored, vendoredModules } from './tfConstraints';
 
-/** Every vendored module in the runner image, as `<name>@<version>`. */
-export const LAB_IMAGE_AVM = Object.freeze([
-  'avm-ptn-alz@0.21.0',
-  'avm-ptn-alz-management@0.9.0',
-  'avm-ptn-alz-connectivity-hub-and-spoke-vnet@0.17.5',
+/** The builder modules, as `<name>@<version>`: what the builder emits is what the image vendors. */
+export const LAB_IMAGE_BUILDER_AVM = Object.freeze(
+  Object.values(AVM_MODULES).map((module) => `${module.name}@${module.version}`)
+);
+
+/** The registry modules the builder modules call, transitively (versions.env AVM_CHILD_MODULES). */
+export const LAB_IMAGE_CHILD_AVM = Object.freeze([
   'avm-ptn-network-private-link-private-dns-zones@0.23.2',
   'avm-res-network-azurefirewall@0.4.0',
   'avm-res-network-bastionhost@0.6.0',
@@ -55,9 +65,20 @@ export const LAB_IMAGE_AVM = Object.freeze([
   'avm-res-network-virtualnetwork@0.15.0',
   'avm-utl-interfaces@0.2.0',
   'avm-utl-interfaces@0.5.0',
+  'avm-utl-interfaces@0.6.0',
   'avm-utl-network-ip-addresses@0.1.0',
   'avm-utl-regions@0.12.0',
 ]);
+
+/**
+ * Every vendored module in the runner image, as `<name>@<version>`, each
+ * once (a child at a builder module's exact name@version is that builder
+ * module's directory, as lab-image/vendor-avm.sh resolves it), in the
+ * code-point order of the image's own `sorted(os.listdir("/opt/avm"))`.
+ */
+export const LAB_IMAGE_AVM = Object.freeze(
+  [...new Set([...LAB_IMAGE_BUILDER_AVM, ...LAB_IMAGE_CHILD_AVM])].sort()
+);
 
 /** Where the image keeps them (tf_constraints.py AVM_ROOT). */
 export const LAB_IMAGE_AVM_ROOT = '/opt/avm';
