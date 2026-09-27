@@ -8,8 +8,8 @@
  * against a description of the shape.
  */
 import { describe, expect, it, vi } from 'vitest';
+import { createAgentRegistryHandlers } from './agent-registry.js';
 import {
-  createAgentRegistryHandlers,
   DEFAULT_AGENT_JOB_TYPES,
   LAB_AGENT_ID_PATTERN,
   LAB_AGENT_REGISTRY_ROLE,
@@ -18,7 +18,7 @@ import {
   parseJobTypes,
   parseObjectId,
   presentAgent,
-} from './agent-registry.js';
+} from './agent-registry-rules.js';
 import { LAB_JOB_TYPES } from '../labs.js';
 import { createAgentGuard, ENTRA_LAB_AGENT_APP_ROLE } from '../auth/require-agent.js';
 import { createRoleGuard } from '../auth/require-role.js';
@@ -60,44 +60,58 @@ const patch = (agentId, body, headers = {}) => ({ ...post(body, headers), method
  * and fails 404 on a missing document, and every stored document carries the
  * system fields Cosmos adds.
  */
-function memoryStore(seed = {}) {
-  const containers = new Map();
-  const table = (name) => {
-    if (!containers.has(name)) containers.set(name, new Map());
-    return containers.get(name);
-  };
-  for (const [name, docs] of Object.entries(seed)) {
-    for (const doc of docs) table(name).set(doc.id, { ...doc });
+class MemoryContainers {
+  constructor(seed) {
+    this.containers = new Map();
+    for (const [name, docs] of Object.entries(seed)) {
+      for (const doc of docs) this.table(name).set(doc.id, { ...doc });
+    }
   }
-  const stamp = (doc) => ({ ...doc, _rid: 'rid', _etag: '"etag"', _ts: 1 });
+
+  table(name) {
+    if (!this.containers.has(name)) this.containers.set(name, new Map());
+    return this.containers.get(name);
+  }
+
+  get(name, id) {
+    return this.table(name).get(id) ?? null;
+  }
+
+  async read(name, id) {
+    const doc = this.get(name, id);
+    return doc && structuredClone(doc);
+  }
+
+  async create(name, doc) {
+    if (this.table(name).has(doc.id)) throw Object.assign(new Error('Conflict'), { code: 409 });
+    this.table(name).set(doc.id, { ...doc, _rid: 'rid', _etag: '"etag"', _ts: 1 });
+    return this.read(name, doc.id);
+  }
+
+  async patch(name, id, updates) {
+    const doc = this.get(name, id);
+    if (!doc) throw Object.assign(new Error('Not found'), { code: 404 });
+    this.table(name).set(id, { ...doc, ...updates });
+    return this.read(name, id);
+  }
+
+  async upsert(name, doc) {
+    this.table(name).set(doc.id, { ...doc, _rid: 'rid', _etag: '"etag"', _ts: 1 });
+    return doc;
+  }
+}
+
+function memoryStore(seed = {}) {
+  const db = new MemoryContainers(seed);
   const store = {
-    readDoc: vi.fn(async (name, id) => {
-      const doc = table(name).get(id);
-      return doc ? structuredClone(doc) : null;
-    }),
-    createDoc: vi.fn(async (name, doc) => {
-      if (table(name).has(doc.id)) throw Object.assign(new Error('Conflict'), { code: 409 });
-      table(name).set(doc.id, stamp(doc));
-      return structuredClone(table(name).get(doc.id));
-    }),
-    patchDoc: vi.fn(async (name, id, updates) => {
-      const doc = table(name).get(id);
-      if (!doc) throw Object.assign(new Error('Not found'), { code: 404 });
-      table(name).set(id, { ...doc, ...updates });
-      return structuredClone(table(name).get(id));
-    }),
-    upsertDoc: vi.fn(async (name, doc) => {
-      table(name).set(doc.id, stamp(doc));
-      return doc;
-    }),
+    readDoc: vi.fn((name, id) => db.read(name, id)),
+    createDoc: vi.fn((name, doc) => db.create(name, doc)),
+    patchDoc: vi.fn((name, id, updates) => db.patch(name, id, updates)),
+    upsertDoc: vi.fn((name, doc) => db.upsert(name, doc)),
     queryDocs: vi.fn(async () => []),
     replaceDocIfMatch: vi.fn(async (_name, doc) => doc),
   };
-  return {
-    store,
-    doc: (name, id) => table(name).get(id) ?? null,
-    all: (name) => [...table(name).values()],
-  };
+  return { store, doc: (name, id) => db.get(name, id), all: (name) => [...db.table(name).values()] };
 }
 
 function handlersOver(memory, { guard = allowGuard(), now = () => NOW } = {}) {
