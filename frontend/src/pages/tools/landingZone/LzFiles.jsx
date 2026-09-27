@@ -10,6 +10,11 @@
  * evaluates it. The entries are exactly the emitted files under exactly their
  * paths, which is what the test checks against the tab names: a learner who
  * unzips gets what the tabs showed, nothing renamed and nothing extra.
+ *
+ * Below the files, "Validate on the lab" (LzLabValidate.jsx, #672) sends the
+ * same files, unchanged, to the Hybrid Lab's terraform-validate job, and is
+ * disabled with its reason while the lab is not taking public jobs, which
+ * is the default.
  */
 import React, { useMemo, useState } from 'react';
 import { Download, Loader2 } from 'lucide-react';
@@ -17,6 +22,7 @@ import CodeBlock from '@/components/shared/CodeBlock';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { emitFiles } from '@/lib/landingZone';
+import { LzLabValidate } from './LzLabValidate';
 import { HINT_CLASS } from './styles';
 
 export const ZIP_NAME = 'landing-zone.zip';
@@ -166,6 +172,7 @@ export function LzFiles({ state }) {
           {files.length} {files.length === 1 ? 'file' : 'files'}. Generated for learning and never
           applied here: this page touches no tenant, and the README in the zip says the same.
         </p>
+        <LzLabValidate files={files} />
       </CardContent>
     </Card>
   );

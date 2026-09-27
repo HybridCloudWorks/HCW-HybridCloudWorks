@@ -24,9 +24,12 @@
  * PRE-RENDER AND HYDRATION. The route is built to a static file and hydrated
  * (scripts/prerender-entry.jsx). Everything on it is a pure function of the
  * URL and the catalogue: no fetch, no clock, no viewport, so the first client
- * render is the server markup and React adopts it. The default build carries
- * the management groups' teaches text and a dozen file tabs, which is well
- * past the prerender's 420-character floor for a real page.
+ * render is the server markup and React adopts it. The one request the page
+ * makes unasked is "Validate on the lab" (landingZone/LzLabValidate.jsx,
+ * #672) asking whether the lab is taking jobs, in an effect after hydration;
+ * both renders show its "checking" line until the answer. The default build
+ * carries the management groups' teaches text and a dozen file tabs, which is
+ * well past the prerender's 420-character floor for a real page.
  *
  * NOTHING HERE TOUCHES A TENANT. There is no Azure call anywhere on this
  * page; the emitted README says the same.

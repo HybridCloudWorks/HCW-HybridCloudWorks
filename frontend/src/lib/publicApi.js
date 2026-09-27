@@ -534,3 +534,86 @@ export async function fetchCoderStatus() {
   if (!body) return null;
   return requireConfiguredFlag(body, 'Coder status');
 }
+
+/**
+ * GET public/labs/submit — whether the lab would take a public job now
+ * (#672): `{ configured, open, code, reason, bounds }`. `open` is false while
+ * public submission is switched off (`code: 'PUBLIC_SUBMISSION_CLOSED'`,
+ * which is the default), while no lab agent is online, while the queue is
+ * full, and when the server could not tell; `reason` is the one line the
+ * Validate on the lab button shows. Through the same short-lived GET cache
+ * as the other public reads, so a page that mounts twice asks once.
+ *
+ * Returns null only when the route itself is missing (404); throws when the
+ * body carries no boolean `open`, so a caller can never read "open" out of
+ * a response that did not say it.
+ *
+ * @returns {Promise<{ configured: boolean, open: boolean, code: string|null, reason: string|null, bounds?: object }|null>}
+ */
+export async function fetchLabSubmissionStatus() {
+  const body = await publicGet('public/labs/submit');
+  if (!body) return null;
+  const checked = requireConfiguredFlag(body, 'Lab submission status');
+  if (typeof checked.open !== 'boolean') {
+    throw new Error('Lab submission status response carried no open flag');
+  }
+  return checked;
+}
+
+/** A failed lab call as an Error carrying the server's status, code and sentence. */
+async function labError(res, what) {
+  const data = await res.json().catch(() => ({}));
+  const error = new Error(data.error || `${what} failed with HTTP ${res.status}`);
+  error.status = res.status;
+  error.code = typeof data.code === 'string' ? data.code : null;
+  return error;
+}
+
+/**
+ * POST public/labs/submit — queue one `terraform-validate` job on the lab
+ * (#672). The body is `{ type: 'terraform-validate', payload, payloadEncoding
+ * }`, built by lib/landingZone/labPayload.js from the builder's own files;
+ * the server caps the payload at 64 KB and owns every other bound (two an
+ * hour per visitor, fifty a day, the queue ceiling, the switch). Resolves to
+ * `{ jobId, type, status }`; throws with `status` and `code` so the button
+ * can say which bound refused it. Never cached and never retried here.
+ *
+ * @param {{ type: string, payload: string, payloadEncoding: string }} body
+ * @returns {Promise<{ ok: true, jobId: string, type: string, status: string }>}
+ */
+export async function submitLabValidation(body) {
+  const base = requireFunctionsBase('public/labs/submit');
+  const res = await fetch(`${base}/public/labs/submit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw await labError(res, 'Lab submission');
+  const data = await res.json();
+  if (typeof data.jobId !== 'string' || !data.jobId) {
+    throw new Error('Lab submission response carried no job id');
+  }
+  return data;
+}
+
+/**
+ * GET public/labs/job?jobId= — one public job's status and output (#672):
+ * `{ id, type, status, exitCode, output, createdAt, claimedAt, finishedAt }`.
+ * Uncached, because the point of the call is to see the status move. A job
+ * the server does not know, or no longer keeps (a day after it finished), is
+ * a 404 and throws like any other refusal.
+ *
+ * @param {string} jobId
+ * @returns {Promise<object>}
+ */
+export async function fetchPublicLabJob(jobId) {
+  const path = `public/labs/job?${new URLSearchParams({ jobId })}`;
+  const base = requireFunctionsBase(path);
+  const res = await fetch(`${base}/${path}`, { headers: { Accept: 'application/json' } });
+  if (!res.ok) throw await labError(res, 'Lab job read');
+  const data = await res.json();
+  if (!data.job || typeof data.job.status !== 'string') {
+    throw new Error('Lab job response carried no job');
+  }
+  return data.job;
+}

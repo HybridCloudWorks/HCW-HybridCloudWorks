@@ -294,10 +294,20 @@ Submission is admin-only today. An editor signed in to `/admin/labs` calls `enqu
 checks the `editor` role, the job-type allowlist and the per-type payload cap, then writes a queued
 job and returns its ID. The Hostinger agent polls outbound with its own Entra certificate, claims a
 job conditionally, runs it inside the Docker sandbox with no network, and reports the result. No
-inbound VPS port or Cosmos account key is exposed. The browser never submits a lab request: the
-source repository's public path was not ported (`functions/src/lib/labs.js`), and
-[ADR 0032](../decisions/0032-learner-labs-platform.md) holds anonymous submission Gated with the
-bounds it would open under.
+inbound VPS port or Cosmos account key is exposed. The source repository's public path was not
+ported (`functions/src/lib/labs.js`), and [ADR 0032](../decisions/0032-learner-labs-platform.md)
+holds anonymous submission Gated with the bounds it would open under.
+
+The anonymous path is built and closed (#672). `POST /api/public/labs/submit`
+(`functions/src/lib/labs/public-submit.js`) is the Landing Zone Builder's "Validate on the lab": it
+enforces decision 6's bounds and no wider (`terraform-validate` only, a 64 KB payload, 2 an hour per
+Cloudflare-verified client, 50 a day globally, refused while more than 20 jobs are queued, jobs
+written `public: true` with a one-day TTL), and it refuses while no agent registered for the type is
+heartbeating, so it never queues a job nobody will run. It answers `PUBLIC_SUBMISSION_CLOSED` before
+reading anything unless the Function App setting `LABS_PUBLIC_SUBMISSION_ENABLED` is exactly
+`"true"`, which nothing sets. Opening it is the owner's revision of ADR 0032 decision 6, and then
+that one setting. Until then the browser never submits a lab request, and the builder's button says
+why it is disabled.
 
 ## 6. Reliability model
 
