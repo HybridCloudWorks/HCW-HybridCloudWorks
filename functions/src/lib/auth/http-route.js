@@ -200,6 +200,39 @@ export function mergeCorsHeaders(result, corsHeaders) {
   return { ...result, headers: { ...corsHeaders, ...(result.headers || {}) } };
 }
 
+/** Statuses Cloudflare replaces with its own page when the origin sends them. */
+const CLOUDFLARE_BRANDED = new Set([502, 504]);
+
+/**
+ * Keep an upstream failure readable through Cloudflare.
+ *
+ * "Cloudflare returns a Cloudflare-branded HTTP 502 or 504 error when your
+ * origin web server responds with a standard HTTP 502 bad gateway or 504
+ * gateway timeout error"
+ * (https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-5xx-errors/error-502-504/).
+ * That page carries none of this response's headers, so the browser sees no
+ * `Access-Control-Allow-Origin` and reports only "Failed to fetch": the reason
+ * the handler wrote, and the status, never reach the page. It hid the ElevenLabs
+ * voice preview's failure on 2026-09-26, and it hides every handler that
+ * answers 502 for a failed upstream (Resend, the AI router, Qlty, …).
+ *
+ * So a 502 or 504 leaves as a 500, which Cloudflare passes through and which
+ * stays a server error for alerting, with the handler's status kept in
+ * `X-Upstream-Status`. 503 is not used: the Newsletter Hub reads 503 as "not
+ * configured". Handlers keep answering 502; only the wire status changes.
+ *
+ * @param {object|undefined} result
+ * @returns {object|undefined}
+ */
+export function throughCloudflare(result) {
+  if (!result || typeof result !== 'object' || !CLOUDFLARE_BRANDED.has(result.status)) return result;
+  return {
+    ...result,
+    status: 500,
+    headers: { ...(result.headers || {}), 'X-Upstream-Status': String(result.status) },
+  };
+}
+
 /**
  * Register an HTTP route with CORS and preflight handling applied.
  *
@@ -229,7 +262,7 @@ export function httpRoute(name, options, { cors, register = app } = {}) {
       if (evaluation.response) return { ...evaluation.response };
 
       const result = await handler(request, context);
-      return mergeCorsHeaders(result, evaluation.headers);
+      return mergeCorsHeaders(throughCloudflare(result), evaluation.headers);
     },
   });
 }

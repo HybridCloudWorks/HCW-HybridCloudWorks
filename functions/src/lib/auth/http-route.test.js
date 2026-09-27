@@ -13,6 +13,7 @@ import {
   parseExtraOrigins,
   resetHttpRouteCors,
   readConfigStamp,
+  throughCloudflare,
 } from './http-route.js';
 import { createCors } from './cors.js';
 
@@ -68,6 +69,30 @@ describe('mergeCorsHeaders', () => {
   });
 });
 
+describe('throughCloudflare', () => {
+  it('sends a 502 or 504 as a 500 with the original status kept, and leaves the body alone', () => {
+    for (const status of [502, 504]) {
+      const out = throughCloudflare({
+        status,
+        headers: { 'Content-Type': 'application/json' },
+        jsonBody: { error: 'Resend refused it' },
+      });
+      expect(out.status).toBe(500);
+      expect(out.headers).toEqual({ 'Content-Type': 'application/json', 'X-Upstream-Status': String(status) });
+      expect(out.jsonBody).toEqual({ error: 'Resend refused it' });
+    }
+  });
+
+  it('leaves every other status and a missing result as they are', () => {
+    for (const status of [200, 204, 400, 401, 403, 404, 409, 429, 500, 503]) {
+      const result = { status, headers: { A: 'b' } };
+      expect(throughCloudflare(result)).toBe(result);
+    }
+    expect(throughCloudflare(undefined)).toBeUndefined();
+    expect(throughCloudflare({ headers: {} })).toEqual({ headers: {} });
+  });
+});
+
 describe('parseExtraOrigins', () => {
   it('is empty by default', () => {
     expect(parseExtraOrigins({})).toEqual([]);
@@ -113,6 +138,23 @@ describe('httpRoute', () => {
     expect(handler).not.toHaveBeenCalled();
     expect(res.headers['Access-Control-Allow-Methods']).toContain('PATCH');
     expect(res.headers['Access-Control-Allow-Methods']).toContain('DELETE');
+  });
+
+  // Cloudflare replaces an origin 502/504 with its own page, which has no CORS
+  // headers, so the browser saw only "Failed to fetch" (2026-09-26).
+  it('answers a handler 502 as a 500 that still carries CORS and the reason', async () => {
+    const { routes, register } = recorder();
+    const handler = vi.fn(async () => ({ status: 502, jsonBody: { error: 'The preview host answered HTTP 403.' } }));
+    httpRoute('r', { methods: ['GET'], route: 'x', handler }, { cors: cors(), register });
+
+    const res = await routes
+      .get('r')
+      .handler(makeRequest({ method: 'GET', origin: 'https://hybridcloudworks.com' }), context);
+
+    expect(res.status).toBe(500);
+    expect(res.headers['X-Upstream-Status']).toBe('502');
+    expect(res.headers['Access-Control-Allow-Origin']).toBe('https://hybridcloudworks.com');
+    expect(res.jsonBody).toEqual({ error: 'The preview host answered HTTP 403.' });
   });
 
   it('refuses a disallowed origin before the handler runs', async () => {
