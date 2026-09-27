@@ -19,7 +19,10 @@
  *     online/staleness math parses them (Timestamp .toMillis in the source).
  *   - submitPublicLabJob is deliberately NOT ported here: it authenticates
  *     plain Firebase users (not admins), which belongs to the frontend auth
- *     swap phase; it is also outside the api-surface RPC contract.
+ *     swap phase; it is also outside the api-surface RPC contract. The
+ *     anonymous path that replaces it is lib/labs/public-submit.js (#672):
+ *     terraform-validate only, inside ADR 0032 decision 6's bounds, and
+ *     closed unless LABS_PUBLIC_SUBMISSION_ENABLED is exactly "true".
  */
 import { randomUUID } from 'node:crypto';
 

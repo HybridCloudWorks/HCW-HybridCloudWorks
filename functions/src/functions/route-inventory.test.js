@@ -209,6 +209,24 @@ const PUBLIC_ROUTES = new Set([
   // the response carries names and counts, never the URL or the token —
   // lib/labs/coder-status.js.
   'public/labs/coder-status',
+  // Anonymous lab submission (#672, ADR 0032 decision 6): the one public
+  // route that queues work on the lab host. CLOSED unless the owner sets
+  // LABS_PUBLIC_SUBMISSION_ENABLED to exactly "true" after revising decision
+  // 6; closed, all three verbs answer PUBLIC_SUBMISSION_CLOSED before reading
+  // the body, the caller or the store. Open, POST is bounded by decision 6
+  // and no wider: terraform-validate only, 64 KB, 2 an hour per
+  // Cloudflare-verified client through the same counter as
+  // public/submissions, 50 a day across everyone through a compare-and-
+  // increment, refused while more than 20 jobs are queued, and refused
+  // outright while no agent registered for the type is heartbeating; jobs
+  // are written public: true with a one-day ttl. GET is whether a POST would
+  // be taken, from a one-minute cache — lib/labs/public-submit.js.
+  'public/labs/submit',
+  // One public job's status and output for the page that queued it: public:
+  // true documents only, an identical 404 for a missing, admin or expired
+  // job, a UUID check before any read, and never the payload, the agent or
+  // the requester. Behind the same switch — lib/labs/public-submit.js.
+  'public/labs/job',
 ]);
 
 const ALLOWED_ORIGIN = 'https://hybridcloudworks.com';

@@ -7,7 +7,9 @@
  * a validation-free write path must not coexist with the real one (the same
  * rule as the retired cms/content raw-upsert save). submitPublicLabJob is
  * deliberately not registered — it authenticates plain (non-admin) users and
- * belongs to the frontend auth-swap phase; see lib/labs.js.
+ * belongs to the frontend auth-swap phase; see lib/labs.js. The anonymous
+ * public/labs/submit route (#672) is registered in labs-public-http.js,
+ * closed by default.
  */
 import { httpRoute } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';

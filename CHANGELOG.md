@@ -19,6 +19,90 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Landing Zone Builder: "Validate on the lab", and public lab submission
+  built inside ADR 0032 decision 6's bounds, closed (part of #672).** Three
+  anonymous routes in `functions/src/lib/labs/public-submit.js`, registered
+  in `labs-public-http.js`: `POST /api/public/labs/submit` queues one
+  `terraform-validate` job; `GET` on the same route says whether a POST
+  would be taken (`{ configured, open, code, reason, bounds }`, cached a
+  minute); `GET /api/public/labs/job?jobId=` returns one public job's
+  status and output. **All three are closed**: unless the Function App
+  setting `LABS_PUBLIC_SUBMISSION_ENABLED` is exactly `"true"`, which
+  nothing sets, they answer `PUBLIC_SUBMISSION_CLOSED` before reading the
+  body, the caller or the store. ADR 0032 still holds anonymous submission
+  Gated, and opening it is the owner's revision of decision 6, then that
+  one setting. Open, the bounds are decision 6's and no wider:
+  `terraform-validate` only (400 for any other type), a 64 KB payload
+  (413 above 65,536 bytes), 2 an hour per Cloudflare-verified client
+  through `enforceSubmissionQuota` (429), 50 a day globally through a
+  compare-and-increment counter in `tool_service_cache` (503 until the next
+  UTC day), refused while more than 20 jobs are queued (503
+  `LAB_QUEUE_FULL`), and jobs written `public: true` with a one-day `ttl`.
+  It also fails closed while no agent registered for `terraform-validate`
+  is heartbeating (503 `LAB_AGENT_OFFLINE`, nothing counted, nothing
+  queued) and when the lab cannot be read (503 `LAB_STATUS_UNAVAILABLE`).
+  The job read serves `public: true` documents only, with one identical
+  404 for a missing, admin or expired job, and never returns the payload,
+  the agent or the requester. The queue ceiling is a read before the
+  write, so simultaneous submissions can overshoot it by the ones in
+  flight together; both counters are exact. The explain route's daily
+  counter moved to `lib/daily-cap.js` so both routes share it, behaviour
+  unchanged. On `/tools/landing-zone`, "Validate on the lab" sits under
+  the generated files. It asks the status route on mount and stays
+  disabled, with one line saying why and no spinner, until the lab is
+  open. It sends the files unchanged, as a gzipped tar the agent's own
+  parser unpacks into exactly the download, because the capability
+  rewrites registry sources to the vendored copies inside the job (ADR 0032
+  decision 5). Before sending, it predicts that rewrite with the runner
+  image's own rule (`lib/landingZone/labImage.js`, held to
+  `lab-image/Dockerfile` and `versions.env` by a test) and refuses a build
+  calling a module the image does not vendor. Today that is
+  `avm-res-network-virtualnetwork` 0.22.2, which every spoke calls, so
+  only a build without the identity, corp and online spokes can be
+  validated on the lab until lab-image vendors it. The frontend CI row now
+  also runs on changes to `lab-image/Dockerfile`, `lab-image/versions.env`
+  and `vps-agent/lib/docker-runner.js`, which those tests read.
+
+- **`scripts/lab/Register-LabAgent.ps1`: the lab agent's go-live is one
+  owner command (#739).** It was several owner steps across three
+  documents, one of them pointing at a runbook row that no longer existed.
+  The script, run with `az` signed in to the tenant: checks the tenant and
+  prints the `az login` line when it is wrong; reads `/etc/hcw/labs-agent.crt` over
+  `ssh hcw-lab` into a temporary file, with the host checking it against the
+  private key and reporting only whether they match; creates or finds the
+  single-tenant app registration and service principal
+  `sp-labs-agent-lab-hybrid-prod-cus-01`; appends the certificate with
+  `az ad app credential reset --cert --append`, ending one second before the
+  certificate does (without `--end-date` az ends it a year from now, a year
+  before the 730-day certificate); assigns the `LabAgent` app role on the
+  HCWSite API, the one grant the agent guard checks; writes the four
+  `vault_labs_agent_*` keys into `/etc/hcw/ansible/vault.yml` on the host;
+  runs `bootstrap.sh`; and reads `systemctl is-active hcw-labs-agent` and the
+  journal to say whether the agent is heartbeating, or which gate refuses it.
+  The vault merge runs as root on the host: decrypt to a root-only temporary
+  directory, replace only those four keys, refuse unless every other key is
+  unchanged, re-encrypt with the existing password file, decrypt again and
+  compare, rename into place, shred. It creates `vault.yml` when there is
+  none and does not rewrite it when nothing changed; it prints key names,
+  never a value from the file. Re-running changes nothing, `-WhatIf` changes
+  nothing, and `-NextCertificate` registers a rotated certificate before the
+  swap. `LABS_AGENT_API_BASE` is now `https://api-azure.hybridcloudworks.com/api`
+  in `lab-host/README.md` and `vps-agent/.env.example`: the origin lock
+  refuses the lab host at the `azurewebsites.net` host, and the script
+  probes the Cloudflare path from the host first, naming a Bot Fight Mode
+  challenge if it meets one. The API's second gate, the
+  `lab_agents/vps-hostinger-01` registry document, has no write path (no
+  route, no admin page, a firewall that admits only the Function App), so the
+  script prints the document the API needs and says so. Pester tests cover
+  every path that needs no tenant or host, and run the vault merge under
+  bash in CI; `scripts/lab-job-types.test.mjs` keeps the document's job
+  types in step with the server and agent allowlists. Docs:
+  `lab-host/README.md` ("The vault", "The agent identity", "Rotating the
+  agent certificate"), [Required inputs §4.7](docs/standards/required-inputs.md)
+  (which also now records `portainer_enabled` and `vault_enabled` as `true`
+  since #729 and the host as provisioned) and the
+  [Labs host runbook](docs/runbooks/labs-host.md), "The lab agent's go-live".
+
 - **Lab article series: three how-to drafts for the owner's review (part of
   #677).** `docs/content/blog-lab-01-landing-zone.md` builds management
   groups, policy, management and a hub in the Landing Zone Builder and reads

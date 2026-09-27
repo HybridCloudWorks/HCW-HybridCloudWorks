@@ -11,6 +11,7 @@
  * read-then-write its way past it.
  */
 
+import { takeDailyCap } from '../../daily-cap.js';
 import { enforceSubmissionQuota } from '../../submissions.js';
 import { CACHE_CONTAINER } from '../history.js';
 
@@ -41,55 +42,23 @@ export async function takeClientQuota(
 }
 
 /**
- * Take one of today's 200, or say no. `incrementIf` is the compare-and-
- * increment cosmos-client.js documents: 404 means today's counter does not
- * exist yet and `createDoc` races to make it (409: someone else did, go
- * round); 412 means the predicate failed, which for `count < limit` is the
- * cap. Anything else is a fault and propagates.
+ * Take one of today's 200, or say no. The counter is the shared daily cap in
+ * lib/daily-cap.js (extracted from this file for the public lab submission,
+ * #672, with its behaviour unchanged): `explain-quota:<day>` in
+ * tool_service_cache, taken with `incrementIf` and created with `createDoc`
+ * on the first call of the day. 404 means no counter yet, 412 is the cap,
+ * 409 is a lost race to create it, and anything else propagates.
  *
  * @returns {Promise<boolean>} true when the call may proceed
  */
 export async function takeDailyQuota(store, { day, nowIso, limit = EXPLAIN_PER_DAY }) {
-  const id = explainQuotaId(day);
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const incremented = await increment(store, id, limit);
-    if (incremented !== 'missing') return incremented;
-    if (await create(store, { id, day, nowIso })) return true;
-  }
-  return false;
-}
-
-/** true: counted; false: at the cap; 'missing': no counter yet. */
-async function increment(store, id, limit) {
-  try {
-    await store.incrementIf(CACHE_CONTAINER, id, {
-      path: '/count',
-      value: 1,
-      condition: 'FROM c WHERE c.count < @limit',
-      conditionValues: { limit },
-    });
-    return true;
-  } catch (error) {
-    if (error?.code === 412) return false;
-    if (error?.code === 404) return 'missing';
-    throw error;
-  }
-}
-
-/** true: created with count 1; false: another instance created it first. */
-async function create(store, { id, day, nowIso }) {
-  try {
-    await store.createDoc(CACHE_CONTAINER, {
-      id,
-      kind: 'explain-quota',
-      day,
-      count: 1,
-      createdAt: nowIso,
-      ttl: EXPLAIN_QUOTA_TTL_SECONDS,
-    });
-    return true;
-  } catch (error) {
-    if (error?.code !== 409) throw error;
-    return false;
-  }
+  return takeDailyCap(store, {
+    container: CACHE_CONTAINER,
+    id: explainQuotaId(day),
+    kind: 'explain-quota',
+    day,
+    nowIso,
+    limit,
+    ttlSeconds: EXPLAIN_QUOTA_TTL_SECONDS,
+  });
 }

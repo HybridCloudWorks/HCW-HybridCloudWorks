@@ -8,8 +8,9 @@
  * URL; a moved spoke range is explained in a sentence; the zip holds exactly
  * the files the tabs show; the diagram is a pure function of the build, so
  * two renders are identical and the pre-rendered page hydrates without a
- * mismatch; and the route is wired into the prerender list and the route
- * table.
+ * mismatch; "Validate on the lab" sits under the files and is closed by
+ * default (#672); and the route is wired into the prerender list and the
+ * route table.
  */
 import React, { act } from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -34,6 +35,22 @@ vi.mock('react-helmet-async', () => ({
 // The explain button (#670) posts through publicApi; the base is only read on a click.
 vi.mock('@/lib/functionsBase', () => ({
   requireFunctionsBase: () => 'https://api.test/api',
+}));
+
+// "Validate on the lab" (#672) asks whether the lab is open when it mounts.
+// Answered here with the default, closed, so the explain tests' fetch counts
+// stay about the explain route; LzLabValidate.test.jsx covers the real call.
+const labDoor = vi.hoisted(() => ({
+  closed: {
+    configured: false,
+    open: false,
+    code: 'PUBLIC_SUBMISSION_CLOSED',
+    reason: 'The lab is not taking public jobs yet: public submission is switched off.',
+  },
+}));
+vi.mock('@/lib/publicApi', async (importOriginal) => ({
+  ...(await importOriginal()),
+  fetchLabSubmissionStatus: vi.fn(async () => labDoor.closed),
 }));
 
 // The compressor is a lazy chunk; here it records what it was asked to zip.
@@ -467,6 +484,36 @@ describe('the explain button (#670)', () => {
     );
     expect(ssr).toContain('Explain this component');
     expect(ssr).not.toContain('data-testid="lz-explanation"');
+  });
+});
+
+describe('validate on the lab (#672)', () => {
+  it('sits under the files, closed by default with the reason, and sends nothing', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      renderPage();
+      const button = screen.getByTestId('lz-lab-validate');
+      expect(screen.getByTestId('lz-files').contains(button)).toBe(true);
+      await waitFor(() =>
+        expect(screen.getByTestId('lz-lab-line').textContent).toBe(labDoor.closed.reason)
+      );
+      expect(button).toBeDisabled();
+      fireEvent.click(button);
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('is on the pre-rendered page as the checking line, not a spinner', () => {
+    const ssr = renderToString(
+      <StaticRouter location={PATH}>
+        <LandingZonePage />
+      </StaticRouter>
+    );
+    expect(ssr).toContain('Validate on the lab');
+    expect(ssr).toContain('Checking whether the lab is taking jobs');
   });
 });
 
