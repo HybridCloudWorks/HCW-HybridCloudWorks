@@ -122,12 +122,14 @@
 import { readFileSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 
+import { actionsOf, classify, sideEffects } from './lib/plan-actions.mjs';
 import { attributeChanges, formatPath } from './lib/plan-diff.mjs';
 import { describeDifference, render, secretsOf } from './lib/plan-report.mjs';
 
-// The diff mechanics live in lib/plan-diff.mjs and the printing rules in
-// lib/plan-report.mjs; this file keeps the policy. Re-exported so callers and
-// tests have one module to import.
+// What a change does is read in lib/plan-actions.mjs, what differs in
+// lib/plan-diff.mjs, and how it is printed in lib/plan-report.mjs; this file
+// keeps the policy. Re-exported so callers and tests have one module to import.
+export { classify } from './lib/plan-actions.mjs';
 export { attributeChanges, formatPath } from './lib/plan-diff.mjs';
 export { describeDifference, redact, secretsOf } from './lib/plan-report.mjs';
 
@@ -165,16 +167,6 @@ export const EXPECTED = {
  */
 export const DECLARED = [];
 
-/** Terraform's action lists, normalised to a single word. */
-export function classify(actions = []) {
-  const set = new Set(actions);
-  if (set.has('create') && set.has('delete')) return 'replace';
-  if (set.has('create')) return 'create';
-  if (set.has('delete')) return 'delete';
-  if (set.has('update')) return 'update';
-  return 'no-op';
-}
-
 /** One `DECLARED` entry, for the report. */
 export function describeDeclaration({ address, path, before, after, reason }) {
   return `${address} ${path}: ${render(before)} -> ${render(after)}${reason ? ` (${reason})` : ''}`;
@@ -210,9 +202,6 @@ function matchesDeclaration(declaration, address, difference) {
 /** The keys an update must carry for its values to be printed safely. */
 const MARKERS = ['before', 'after', 'after_unknown', 'before_sensitive', 'after_sensitive'];
 
-/** The action lists that mean nothing happens to the resource. */
-const QUIET_ACTIONS = [['no-op'], ['read']];
-
 /** address -> the paths an update there may change, whatever the values. */
 function toleratedPaths() {
   const tolerated = new Map();
@@ -221,34 +210,6 @@ function toleratedPaths() {
     tolerated.get(address).add(formatPath(['app_settings', attribute]));
   }
   return tolerated;
-}
-
-/**
- * One resource change's action list. A missing list means the plan is not
- * the shape this reads (exit 2), not that nothing happens.
- */
-function actionsOf(change) {
-  const actions = change?.change?.actions;
-  if (!Array.isArray(actions)) {
-    throw new Error(`${change?.address ?? 'a resource change'} has no change.actions list`);
-  }
-  return actions;
-}
-
-/**
- * What a change does that its action word does not say. `classify` reads
- * anything it does not recognise as a no-op, so `["forget"]` (a `removed`
- * block) used to pass silently. So did an import or a move, which a no-op
- * action does not rule out.
- */
-function sideEffects(change, actions) {
-  const notes = [];
-  const recognised =
-    classify(actions) !== 'no-op' || QUIET_ACTIONS.some((quiet) => isDeepStrictEqual(quiet, actions));
-  if (!recognised) notes.push(`actions ${JSON.stringify(actions)}, which this checker does not recognise`);
-  if (change.change.importing) notes.push('import');
-  if (change.previous_address) notes.push(`moved from ${change.previous_address}`);
-  return notes;
 }
 
 /**
@@ -342,6 +303,23 @@ export function checkPlan(plan, { declared = DECLARED } = {}) {
   };
 }
 
+/** The plan in a file, or why there is none. */
+function readPlan(path) {
+  let text;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch (err) {
+    return { problem: `could not read a plan from ${path}: ${err.message}` };
+  }
+  try {
+    return { plan: JSON.parse(text) };
+  } catch {
+    // The parser's own message quotes the text around the fault, and a plan
+    // holds secrets in plaintext, so it is not printed.
+    return { problem: `${path} is not valid JSON, so no plan could be read from it.` };
+  }
+}
+
 function main(argv) {
   const path = argv[2];
   if (!path) {
@@ -350,20 +328,9 @@ function main(argv) {
     return 2;
   }
 
-  let text;
-  try {
-    text = readFileSync(path, 'utf8');
-  } catch (err) {
-    console.error(`could not read a plan from ${path}: ${err.message}`);
-    return 2;
-  }
-  let plan;
-  try {
-    plan = JSON.parse(text);
-  } catch {
-    // The parser's own message quotes the text around the fault, and a plan
-    // holds secrets in plaintext, so it is not printed.
-    console.error(`${path} is not valid JSON, so no plan could be read from it.`);
+  const { plan, problem } = readPlan(path);
+  if (problem) {
+    console.error(problem);
     return 2;
   }
 

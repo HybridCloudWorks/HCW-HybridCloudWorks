@@ -166,8 +166,8 @@ jobs:
           node-version: '26'
 
       # No `npm ci`: check-tfc-plan.mjs imports only assert-expected-plan.mjs
-      # (and through it lib/plan-diff.mjs and lib/plan-report.mjs, which need
-      # only node:util) and uses global fetch. Installing the package's Cosmos and Identity
+      # (and through it lib/plan-actions.mjs, lib/plan-diff.mjs and
+      # lib/plan-report.mjs, which need only node:util) and uses global fetch. Installing the package's Cosmos and Identity
       # dependencies to run it would pull a dependency tree this job never
       # touches, into a job holding a workspace-admin token.
       - name: Check the plan

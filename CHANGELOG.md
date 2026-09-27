@@ -1236,7 +1236,8 @@ This project has not cut a tagged release; entries are grouped under
   `runtime_version: "22" -> "24"` still prints in full. An update missing its
   sensitivity markers, or a change with no action list, exits 2. An
   unrecognised action such as `["forget"]`, an import and a move are now
-  UNEXPECTED; they used to pass as no-ops. The JSON parser's message, which
+  UNEXPECTED; they used to pass as no-ops (`scripts/lib/plan-actions.mjs`).
+  The JSON parser's message, which
   quotes the plan, is no longer printed, and only the first line of the run
   message is. The job summary names the ref and sha the checker ran from, and
   a green verdict from a branch other than main no longer says "Safe to
