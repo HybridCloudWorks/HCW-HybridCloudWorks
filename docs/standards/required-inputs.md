@@ -308,22 +308,32 @@ both sides.
 ## 4.7 VPS agent (Hostinger) — `.env`, never committed
 
 Names from `vps-agent/.env.example`. The agent holds no database credential; it
-reaches the API with a certificate-backed Entra client. Provisioning the
-identity and approving deployment are owner actions — see the *VPS Labs agent*
-row above.
+reaches the API with a certificate-backed Entra client. On the lab host the
+`labs_agent` role writes them to `/etc/hcw/labs-agent.env` (root, 0600): the
+first four from the Ansible vault keys in the table below, the rest from the
+role's defaults and `labs_agent_id`. Provisioning the identity and writing
+those four keys is one owner step, `scripts/lab/Register-LabAgent.ps1`
+([Labs host runbook](../runbooks/labs-host.md), "The lab agent's go-live").
 
 `LABS_AGENT_API_BASE` · `LABS_AGENT_API_SCOPE` · `LABS_AGENT_CLIENT_ID` ·
 `LABS_AGENT_TENANT_ID` · `LABS_AGENT_CERT_PATH` · `LABS_AGENT_ID` ·
 `LABS_AGENT_MAX_CONCURRENT` · `LABS_AGENT_POLL_MS` · `LABS_AGENT_JOB_CPUS` ·
 `LABS_AGENT_JOB_MEMORY` · `LABS_AGENT_JOB_PIDS`
 
-Status: **MISSING** as a set — no agent host is provisioned. The last four are
-resource limits with working defaults.
+Status: **MISSING** until `Register-LabAgent.ps1` has run and the
+`lab_agents/vps-hostinger-01` registry document exists (rows below). The
+host is provisioned and has run `bootstrap.sh` (as of 2026-09-27), so
+`LABS_AGENT_CERT_PATH` (`/etc/hcw/labs-agent.pem`, generated on the host) and
+`LABS_AGENT_ID` (`vps-hostinger-01`) are set by the role; the agent stays
+stopped until the four vault keys exist. The last four are resource limits
+with working defaults.
 
 **Lab host inputs named by [ADR 0032](../decisions/0032-learner-labs-platform.md).**
-Not observed: none of the stores below has been created, and the ADR is
-Proposed. Each row is here so the name is fixed before anything consumes it,
-and so a status can change in the pull request that provisions it. The
+The ADR is Proposed, and each row's status is its own: the host exists and
+has been bootstrapped, so the host-side rows are observable, while a row
+for a store that has not been created stays **MISSING**. Each row is here so
+the name is fixed before anything consumes it, and so a status can change in
+the pull request that provisions it. The
 placement follows [Variables and secrets](variables-and-secrets.md): a
 Terraform provider credential is a workspace variable, a value the Function
 App reads is a Key Vault secret, and a credential Ansible uses once is a vault
@@ -349,10 +359,13 @@ entry that never reaches the repository.
 | Coder PostgreSQL password (`POSTGRES_PASSWORD`, and inside `CODER_PG_CONNECTION_URL`) | Ansible Vault as `vault_coder_postgres_password`, written by the `coder` role to `/etc/hcw/coder/coder-postgres.env` (the database) and `/etc/hcw/coder/coder.env` (Coder), both root 0600 | **MISSING** | The `coder` database user's password on the Compose network; never reachable from outside the host. Generate with `openssl rand -hex 32`: the role refuses any character outside RFC 3986 unreserved because the value sits unescaped in the connection URL. The database stores it at first initialisation, so rotation is `ALTER USER` first and then the Vault edit and run (`lab-host/README.md`, "Rotating the PostgreSQL password") |
 | `CODER-URL` | Key Vault `kv-site-prod-cus-01`; the Function App setting `CODER_URL` is a Key Vault reference to it | **MISSING** | Base URL of the Coder deployment the Function App's status proxy reads; an address, not a credential, kept in the vault so its reference follows the same path as the token beside it. Its value is known before the host exists: `https://coder.lab.hybridcloudworks.com`, so seed it as soon as the reference is applied. Vault names are hyphenated and app settings underscored, per the naming table in [Variables and secrets](variables-and-secrets.md) |
 | `CODER-STATUS-TOKEN` | Key Vault `kv-site-prod-cus-01`; the Function App setting `CODER_STATUS_TOKEN` is a Key Vault reference to it | **MISSING** | Read-only Coder API token for the status proxy. Coder issues it, so it can only be seeded after Coder runs on the lab host (#661) and the owner creates it (#682). Until then it is an expected unresolved reference (`EXPECTED_UNRESOLVED` in `scripts/check-unresolved-secrets.mjs`): the monitor reports it every run but does not fail, and the labs page reads "not yet provisioned". Remove it from that list in the PR after it is seeded |
-| `portainer_enabled`, `portainer_image`, `portainer_image_tag`, `portainer_image_digest` | `lab-host/ansible/group_vars/all.yml` (not secrets) | **SET** (`portainer_enabled: false`) | The `portainer` role's switch and pin: Portainer Business Edition 2.45.1 (LTS) by index digest, published on `127.0.0.1:9443` only (ADR 0032, amendment of 2026-09-26). `portainer_enabled` goes `true` in a pull request when the owner wants it |
+| `vault_labs_agent_api_base`, `vault_labs_agent_tenant_id`, `vault_labs_agent_client_id`, `vault_labs_agent_api_scope` | Ansible Vault on the host (`/etc/hcw/ansible/vault.yml`); the `labs_agent` role writes them to `/etc/hcw/labs-agent.env` as `LABS_AGENT_API_BASE`, `LABS_AGENT_TENANT_ID`, `LABS_AGENT_CLIENT_ID` and `LABS_AGENT_API_SCOPE` | **MISSING** | Identifiers, not secrets. Written by `scripts/lab/Register-LabAgent.ps1`, which merges only these four into the vault, or creates it with only these four when it does not exist, and never prints another key. The API base is the Cloudflare hostname `https://api-azure.hybridcloudworks.com/api`, because the origin lock (`functions_origin_lock_enabled`, §4.1) refuses the lab host at the `azurewebsites.net` host. The scope is `api://<HCWSite API client id>/.default` |
+| Agent app registration and service principal `sp-labs-agent-lab-hybrid-prod-cus-01` | Entra, owner-created by `Register-LabAgent.ps1`; `infra/` has no `azuread` provider | **MISSING** | Single tenant, no client secret, the lab host's public certificate as its credential (appended, never replacing another), and one grant: the `LabAgent` app role on the HCWSite API, gate 1 of the agent guard. One registration per agent host |
+| `lab_agents/vps-hostinger-01` | Cosmos DB `cosmos-site-prod-cus`, database `hcw`, container `lab_agents` (partition key `/id`) | **MISSING**, and nothing writes it | Gate 2 of the agent guard: `oid` the agent's service principal object id, `active: true`, `capabilities` the job types it may claim. No route or admin page writes the container, and its firewall admits only the Function App's subnet; `Register-LabAgent.ps1` prints the document the API needs. Until it exists the agent authenticates and is refused with `Agent access required` |
+| `portainer_enabled`, `portainer_image`, `portainer_image_tag`, `portainer_image_digest` | `lab-host/ansible/group_vars/all.yml` (not secrets) | **SET** (`portainer_enabled: true`, #729) | The `portainer` role's switch and pin: Portainer Business Edition 2.45.1 (LTS) by index digest, published on `127.0.0.1:9443` only (ADR 0032, amendment of 2026-09-26). `portainer_enabled` went `true` in #729 (owner decision 2026-09-26); `false` in a pull request turns it off and keeps its volume |
 | Portainer administrator password | The owner's password manager; Portainer keeps its own copy in the `portainer-data` volume on the host. Never in the repository or Ansible Vault | **MISSING** (created at the first sign-in) | Created by the owner in Portainer's setup screen through the SSH tunnel, with the one-time setup token Portainer prints in its log ([Labs host runbook](../runbooks/labs-host.md), "Portainer through an SSH tunnel"). At least 12 characters. A host rebuild wipes the volume, so a new one is created after every rebuild |
 | Portainer Business Edition licence key | Entered in Portainer's UI and kept in its volume; the owner keeps the key as Portainer issued it. Never in the repository or Ansible Vault | **MISSING** on the host | Portainer's 3 Nodes Free licence: one server instance, up to three nodes, internal business use, renewed yearly at no cost. The key the pre-reinstall server used may be reused, since that server no longer runs it; https://www.portainer.io/take-3 issues a new one |
-| `vault_enabled`, `vault_version`, `vault_checksum`, `vault_pgp_key_checksum` | `lab-host/ansible/group_vars/all.yml` (not secrets, and not Ansible Vault keys despite the prefix, which is the role's name) | **SET** (`vault_enabled: false`) | The `vault` role's switch and pins: HashiCorp Vault 2.1.1, the SHA256 of its linux amd64 archive from the signed SHA256SUMS, and the SHA256 of HashiCorp's signing key (ADR 0032, amendment of 2026-09-26). `vault_enabled` goes `true` in a pull request when the owner wants it |
+| `vault_enabled`, `vault_version`, `vault_checksum`, `vault_pgp_key_checksum` | `lab-host/ansible/group_vars/all.yml` (not secrets, and not Ansible Vault keys despite the prefix, which is the role's name) | **SET** (`vault_enabled: true`, #729) | The `vault` role's switch and pins: HashiCorp Vault 2.1.1, the SHA256 of its linux amd64 archive from the signed SHA256SUMS, and the SHA256 of HashiCorp's signing key (ADR 0032, amendment of 2026-09-26). `vault_enabled` went `true` in #729 (owner decision 2026-09-26); `false` in a pull request stops it and keeps `/var/lib/vault` |
 | HashiCorp Vault unseal keys (five, three to unseal) and initial root token | The owner's password manager only. Never on the host, in the repository, in a log, in an issue or chat, or in Ansible Vault | **MISSING** (Vault not initialised) | Printed once by `vault operator init` over SSH ([Labs host runbook](../runbooks/labs-host.md), "HashiCorp Vault: initialising and unsealing"); Vault keeps no copy, and without three keys it stays sealed for good. Three are needed after every restart and reboot until auto-unseal (#726) exists. A host rebuild makes them useless: delete them then and initialise the new Vault. This Vault holds lab-host secrets only; production secrets stay in `kv-site-prod-cus-01` |
 
 ## 4.8 Frontend build-time variables
