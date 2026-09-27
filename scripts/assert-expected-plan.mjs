@@ -24,6 +24,74 @@
  *
  * So the assertion moves out of a comment and into a program.
  *
+ * ## Every attribute, not only app_settings (#719)
+ *
+ * Until #719 an update to the Function App was compared on `app_settings`
+ * alone. #718 moved `runtime_version` from "22" to "24" and this reported the
+ * plan as expected without reading that attribute, and a stray change to
+ * `instance_memory_in_mb`, `https_only`, `virtual_network_subnet_id` or the
+ * storage settings would have passed the same way.
+ *
+ * Every update in the plan is now compared `before` against `after`, leaf by
+ * leaf, and each difference is named by its path:
+ *
+ *     runtime_version
+ *     site_config[0].cors[0].allowed_origins[2]
+ *     app_settings.RUNTIME_CONFIG_WRITER
+ *     app_settings["AzureWebJobs.syncContent.Disabled"]
+ *
+ * On an update, two kinds of difference are tolerated and nothing else. The
+ * first is the `EXPECTED.updated` app setting, whatever its values, which is
+ * the T-724 allow-list unchanged. The second is a change declared in
+ * `DECLARED` below, with exactly the declared values. Every other difference
+ * is UNEXPECTED, printed as `address: update path: before -> after`.
+ *
+ * THE REPORT IS PUBLIC, AND THE PLAN IS NOT. This repository is public, and
+ * `tfc-plan-check.yml` writes the verdict to a job summary anyone can read.
+ * `terraform show -json` carries sensitive values in plaintext in `before`,
+ * `after` and `variables`, flagged only by `before_sensitive`,
+ * `after_sensitive` and the variable's `sensitive` (checked against Terraform
+ * 1.15.8 on 2026-09-27). So values are printed by the rules in
+ * `lib/plan-report.mjs`, not as Terraform's own renderer prints them behind
+ * workspace access. In short: sensitive values print as `(sensitive)`, unknown
+ * ones as `(known after apply)`, `app_settings` values as `(set)`, any string
+ * the plan marks sensitive anywhere is replaced wherever else it appears, and
+ * GUIDs and email addresses are masked. `runtime_version: "22" -> "24"` still
+ * reads in full. Before #719 this printed only app-setting names.
+ *
+ * An update missing any of those markers is not guessed at: the check exits
+ * 2. So does a change with no action list. An action it does not recognise,
+ * such as `["forget"]`, and an import or a move, are UNEXPECTED even when the
+ * action is a no-op.
+ *
+ * ## Declaring an intended change
+ *
+ * The pull request that makes a change declares it by adding an entry to
+ * `DECLARED`, in this file, in the same diff:
+ *
+ *     {
+ *       address: 'azurerm_function_app_flex_consumption.hcw',
+ *       path: 'runtime_version',
+ *       before: '22',
+ *       after: '24',
+ *       reason: '#718: Node.js 24 on Flex Consumption',
+ *     }
+ *
+ * `path` is written as this script prints it. The entry matches that address,
+ * that path and exactly those two values, so a reviewer reads the expectation
+ * beside the change it permits. Once the change has applied, the entry matches
+ * nothing, and a later drift of the same attribute is caught again rather than
+ * waved through by a stale line. A declaration the plan does not contain is
+ * printed as a NOTE, not a failure. Usually its change has applied, and the
+ * note is the prompt to delete the entry.
+ *
+ * A sensitive or unknown difference cannot be declared. Matching one would
+ * mean writing its value here, so such an entry never matches, and the plan
+ * waits for a person to read it.
+ *
+ * `tfc-plan-check.yml` reads the declarations on the ref it was dispatched
+ * from (normally `main`), not those at the commit the run was planned for.
+ *
  * ## Usage
  *
  *     terraform show -json tfplan > plan.json
@@ -35,14 +103,14 @@
  * read the plan" call for different responses, and collapsing them is how a
  * broken checker gets read as a clean estate.
  *
- * ## Not wired into CI, and why
+ * ## Where it runs
  *
- * The plan runs in HCP Terraform through its VCS integration; `iac-validate.yml`
- * runs `terraform init -backend=false` and has no workspace token, so there is
- * no plan JSON in CI to check. Wiring this up needs a TFC API token as a
- * repository secret — an owner action, tracked in TODO.md. Until then this is
- * run by hand against a saved plan, which is still strictly better than reading
- * the same shape off a screen.
+ * `.github/workflows/tfc-plan-check.yml` runs this, through
+ * `check-tfc-plan.mjs`, against a plan HCP Terraform is holding for
+ * confirmation. It is dispatched rather than triggered, and that workflow's
+ * header says why. Run by hand against a saved plan, it is the same check.
+ * (This section said "not wired into CI" until #719; `tfc-plan-check.yml`
+ * had wired it since #284.)
  *
  * ## When #29149 closes
  *
@@ -52,6 +120,18 @@
  */
 
 import { readFileSync } from 'node:fs';
+import { isDeepStrictEqual } from 'node:util';
+
+import { actionsOf, classify, sideEffects } from './lib/plan-actions.mjs';
+import { attributeChanges, formatPath } from './lib/plan-diff.mjs';
+import { describeDifference, render, secretsOf } from './lib/plan-report.mjs';
+
+// What a change does is read in lib/plan-actions.mjs, what differs in
+// lib/plan-diff.mjs, and how it is printed in lib/plan-report.mjs; this file
+// keeps the policy. Re-exported so callers and tests have one module to import.
+export { classify } from './lib/plan-actions.mjs';
+export { attributeChanges, formatPath } from './lib/plan-diff.mjs';
+export { describeDifference, redact, secretsOf } from './lib/plan-report.mjs';
 
 /**
  * The permanent diff, by resource address.
@@ -77,23 +157,104 @@ export const EXPECTED = {
   ],
 };
 
-/** Terraform's action lists, normalised to a single word. */
-export function classify(actions = []) {
-  const set = new Set(actions);
-  if (set.has('create') && set.has('delete')) return 'replace';
-  if (set.has('create')) return 'create';
-  if (set.has('delete')) return 'delete';
-  if (set.has('update')) return 'update';
-  return 'no-op';
+/**
+ * Intended one-off changes, each declared by the pull request that makes it
+ * (#719).
+ *
+ * Empty is the normal state. An entry is `{ address, path, before, after,
+ * reason }` and matches only those exact values. Delete it once its change
+ * has applied. "Declaring an intended change" in the header has the rest.
+ */
+export const DECLARED = [];
+
+/** One `DECLARED` entry, for the report. */
+export function describeDeclaration({ address, path, before, after, reason }) {
+  return `${address} ${path}: ${render(before)} -> ${render(after)}${reason ? ` (${reason})` : ''}`;
 }
 
 /**
- * Compare a parsed plan against EXPECTED.
+ * The report lines about declarations, shared by both entry points. DECLARED
+ * names what the plan matched; NOTE names what it did not. Neither fails the
+ * check: a declaration the plan lacks has usually applied already.
+ */
+export function declarationLines({ declared = [], unused = [] }) {
+  return [
+    ...declared.map((d) => `DECLARED    ${describeDeclaration(d)}`),
+    ...unused.map(
+      (d) =>
+        `NOTE        declared, not in this plan: ${describeDeclaration(d)}. Once it has ` +
+        'applied, delete it from DECLARED in scripts/assert-expected-plan.mjs.'
+    ),
+  ];
+}
+
+/**
+ * Whether one declaration covers one difference. A sensitive or unknown
+ * difference never matches: declaring it would mean writing its value here.
+ */
+function matchesDeclaration(declaration, address, difference) {
+  if (difference.sensitive || difference.unknown) return false;
+  if (declaration?.address !== address || declaration.path !== difference.path) return false;
+  const sameBefore = isDeepStrictEqual(declaration.before, difference.before);
+  return sameBefore && isDeepStrictEqual(declaration.after, difference.after);
+}
+
+/** The keys an update must carry for its values to be printed safely. */
+const MARKERS = ['before', 'after', 'after_unknown', 'before_sensitive', 'after_sensitive'];
+
+/** address -> the paths an update there may change, whatever the values. */
+function toleratedPaths() {
+  const tolerated = new Map();
+  for (const { address, attribute } of EXPECTED.updated) {
+    if (!tolerated.has(address)) tolerated.set(address, new Set());
+    tolerated.get(address).add(formatPath(['app_settings', attribute]));
+  }
+  return tolerated;
+}
+
+/**
+ * The UNEXPECTED lines for one update (#719): every difference that is
+ * neither tolerated nor declared.
+ */
+function checkUpdate(change, { tolerated, declared, matched, secrets }) {
+  const address = change.address;
+  const absent = MARKERS.filter((key) => !Object.hasOwn(change.change, key));
+  if (absent.length > 0) {
+    // Without the markers there is no telling which values are secret, and
+    // the report is published. So it stops rather than guessing.
+    throw new Error(`${address}: update has no ${absent.join(', ')}, so its values cannot be printed safely`);
+  }
+  const differences = attributeChanges(change.change);
+  if (differences.length === 0) {
+    // Terraform plans an update, and nothing this checker can see differs.
+    // That is not evidence of a harmless change, so it is not passed.
+    return [
+      `${address}: update, but no attribute differs between before and after. Read this change in the plan.`,
+    ];
+  }
+  const lines = [];
+  for (const difference of differences) {
+    if (tolerated.get(address)?.has(difference.path)) continue;
+    const declaration = declared.find((d) => matchesDeclaration(d, address, difference));
+    if (declaration) matched.add(declaration);
+    else lines.push(`${address}: update ${difference.path}: ${describeDifference(difference, secrets)}`);
+  }
+  return lines;
+}
+
+/**
+ * Compare a parsed plan against EXPECTED and DECLARED.
+ *
+ * `declared` defaults to `DECLARED` and is a parameter so the tests can supply
+ * their own.
  *
  * @param {object} plan `terraform show -json` output
- * @returns {{ok: boolean, unexpected: string[], missing: string[]}}
+ * @returns {{ok: boolean, unexpected: string[], missing: string[],
+ *            declared: object[], unused: object[]}}
+ *   `declared` lists the declarations this plan matched. `unused` lists those
+ *   it did not, which the caller reports without failing.
  */
-export function checkPlan(plan) {
+export function checkPlan(plan, { declared = DECLARED } = {}) {
   if (!plan || typeof plan !== 'object') {
     throw new Error('plan is not an object');
   }
@@ -104,40 +265,28 @@ export function checkPlan(plan) {
   }
 
   const expectedReplaced = new Set(EXPECTED.replaced);
-  const expectedUpdated = new Map(EXPECTED.updated.map((e) => [e.address, e.attribute]));
+  const matched = new Set();
+  const context = { tolerated: toleratedPaths(), declared, matched, secrets: secretsOf(plan) };
 
   const unexpected = [];
   const seen = new Set();
 
   for (const change of changes) {
-    const action = classify(change?.change?.actions);
+    const actions = actionsOf(change);
+    const action = classify(actions);
+    const address = change.address;
+    for (const note of sideEffects(change, actions)) unexpected.push(`${address}: ${note}`);
     if (action === 'no-op') continue;
 
-    const address = change.address;
     seen.add(address);
-
     if (action === 'replace' && expectedReplaced.has(address)) continue;
 
-    if (action === 'update' && expectedUpdated.has(address)) {
-      // An update to an expected address is only expected for the ONE known
-      // attribute. Anything else changing on the function app is exactly the
-      // drift that hides beside the trio, so it is reported rather than waved
-      // through on the address alone.
-      const attribute = expectedUpdated.get(address);
-      const before = change.change?.before?.app_settings ?? {};
-      const after = change.change?.after?.app_settings ?? {};
-      const differing = [
-        ...new Set([...Object.keys(before), ...Object.keys(after)]),
-      ].filter((key) => before[key] !== after[key]);
-
-      if (differing.length === 1 && differing[0] === attribute) continue;
-      unexpected.push(
-        `${address}: update touches ${JSON.stringify(differing)}, expected only ["${attribute}"]`
-      );
-      continue;
-    }
-
-    unexpected.push(`${address}: ${action}`);
+    // Every attribute of an update, not only app_settings (#719). Anything
+    // changing beyond the one known app setting and what a pull request has
+    // declared is exactly the drift that hides beside the trio, so it is
+    // named rather than waved through on the address alone.
+    if (action === 'update') unexpected.push(...checkUpdate(change, context));
+    else unexpected.push(`${address}: ${action}`);
   }
 
   // An expected change that has STOPPED appearing matters too: it means the
@@ -145,7 +294,30 @@ export function checkPlan(plan) {
   // stands between the app and a connection string it must not have (T-511).
   const missing = [...expectedReplaced].filter((address) => !seen.has(address));
 
-  return { ok: unexpected.length === 0 && missing.length === 0, unexpected, missing };
+  return {
+    ok: unexpected.length === 0 && missing.length === 0,
+    unexpected,
+    missing,
+    declared: declared.filter((d) => matched.has(d)),
+    unused: declared.filter((d) => !matched.has(d)),
+  };
+}
+
+/** The plan in a file, or why there is none. */
+function readPlan(path) {
+  let text;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch (err) {
+    return { problem: `could not read a plan from ${path}: ${err.message}` };
+  }
+  try {
+    return { plan: JSON.parse(text) };
+  } catch {
+    // The parser's own message quotes the text around the fault, and a plan
+    // holds secrets in plaintext, so it is not printed.
+    return { problem: `${path} is not valid JSON, so no plan could be read from it.` };
+  }
 }
 
 function main(argv) {
@@ -156,11 +328,9 @@ function main(argv) {
     return 2;
   }
 
-  let plan;
-  try {
-    plan = JSON.parse(readFileSync(path, 'utf8'));
-  } catch (err) {
-    console.error(`could not read a plan from ${path}: ${err.message}`);
+  const { plan, problem } = readPlan(path);
+  if (problem) {
+    console.error(problem);
     return 2;
   }
 
@@ -173,10 +343,16 @@ function main(argv) {
   }
 
   if (result.ok) {
-    console.log('plan matches the expected permanent diff and nothing else.');
+    console.log(
+      result.declared.length === 0
+        ? 'plan matches the expected permanent diff and nothing else.'
+        : 'plan matches the expected permanent diff and its declared changes, and nothing else.'
+    );
+    for (const line of declarationLines(result)) console.log(line);
     return 0;
   }
 
+  for (const line of declarationLines(result)) console.error(line);
   for (const line of result.unexpected) {
     console.error(`UNEXPECTED  ${line}`);
   }
