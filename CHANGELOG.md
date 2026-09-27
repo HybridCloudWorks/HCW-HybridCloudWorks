@@ -1191,6 +1191,18 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Audio from the API plays, and upstream failures reach the page.** Two
+  site-wide faults found on the Audio tab on 2026-09-26. The CSP had no
+  `media-src`, so `default-src 'self'` blocked every `<audio>` streaming from
+  `https://api-azure.hybridcloudworks.com` (Listen & Learn episodes, the
+  Recording Hub, the ElevenLabs live check), which showed `0:00`; the CSP now
+  has `media-src 'self' https://api-azure.hybridcloudworks.com`, held by
+  `csp.test.js`. And Cloudflare replaces an origin 502 or 504 with its own
+  page, which has no CORS headers, so every handler answering 502 for a
+  failed upstream (Resend, the AI router, the voice preview, ...) reached the
+  browser as "Failed to fetch"; `httpRoute` now sends those as 500 with
+  `X-Upstream-Status`, and the handler's reason arrives intact.
+
 - **The lab host's first run survives a freshly booted VPS, and SSH
   hardening can no longer be lost to a failed run.** On the reinstalled VPS
   on 2026-09-26 the first `bootstrap.sh` run failed when a first-boot
