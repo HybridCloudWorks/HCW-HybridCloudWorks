@@ -122,6 +122,12 @@
 import { readFileSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 
+import { attributeChanges, describeDifference, formatPath, render } from './lib/plan-diff.mjs';
+
+// The diff mechanics live in lib/plan-diff.mjs; this file keeps the policy.
+// Re-exported so callers and tests have one module to import.
+export { attributeChanges, describeDifference, formatPath } from './lib/plan-diff.mjs';
+
 /**
  * The permanent diff, by resource address.
  *
@@ -166,141 +172,6 @@ export function classify(actions = []) {
   return 'no-op';
 }
 
-/** A map key that prints bare after a dot. Anything else is quoted. */
-const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
-
-/**
- * An attribute path, written the way Terraform writes one:
- * `site_config[0].http2_enabled`, `app_settings["AzureWebJobs.x.Disabled"]`.
- * A key holding a dot is quoted, because printed bare it would read as two
- * levels.
- */
-export function formatPath(segments) {
-  let text = '';
-  for (const segment of segments) {
-    if (typeof segment === 'number') text += `[${segment}]`;
-    else if (IDENTIFIER.test(segment)) text += text ? `.${segment}` : segment;
-    else text += `[${JSON.stringify(segment)}]`;
-  }
-  return text || '(the whole resource)';
-}
-
-const isPlainObject = (value) =>
-  value !== null && typeof value === 'object' && !Array.isArray(value);
-
-/** One level down a marker tree (`before_sensitive`, `after_sensitive`, `after_unknown`). */
-const markerAt = (marker, key) =>
-  marker !== null && typeof marker === 'object' ? marker[key] : undefined;
-
-/** Whether anything at or beneath this point of a marker tree is set. */
-function marked(marker) {
-  if (marker === true) return true;
-  if (marker === null || typeof marker !== 'object') return false;
-  return Object.values(marker).some(marked);
-}
-
-/**
- * Every difference between one change's `before` and `after`, leaf by leaf.
- *
- * Returns `{ path, before, after, sensitive, unknown }` for each. The raw
- * values are kept for matching against `DECLARED`; they are printed only
- * through `describeDifference`, which reads the two flags first.
- *
- * The walk stops at the first sensitive or unknown point rather than
- * descending past it. Below a sensitive marker the keys of a map can be as
- * telling as its values. Below an unknown one there is nothing to compare,
- * because Terraform omits an unknown value from `after`.
- */
-export function attributeChanges(change) {
-  const found = [];
-
-  const walk = (before, after, markers, path) => {
-    const { beforeSensitive, afterSensitive, afterUnknown } = markers;
-    const record = (unknown) =>
-      found.push({
-        path: formatPath(path),
-        before,
-        after,
-        sensitive: marked(beforeSensitive) || marked(afterSensitive),
-        unknown,
-      });
-    const down = (key) => ({
-      beforeSensitive: markerAt(beforeSensitive, key),
-      afterSensitive: markerAt(afterSensitive, key),
-      afterUnknown: markerAt(afterUnknown, key),
-    });
-
-    if (afterUnknown === true) {
-      record(true);
-      return;
-    }
-    if (beforeSensitive === true || afterSensitive === true) {
-      if (!isDeepStrictEqual(before, after) || marked(afterUnknown)) record(false);
-      return;
-    }
-    if (isPlainObject(before) && isPlainObject(after)) {
-      const keys = new Set([
-        ...Object.keys(before),
-        ...Object.keys(after),
-        ...(isPlainObject(afterUnknown) ? Object.keys(afterUnknown) : []),
-      ]);
-      for (const key of [...keys].sort()) walk(before[key], after[key], down(key), [...path, key]);
-      return;
-    }
-    if (Array.isArray(before) && Array.isArray(after)) {
-      const length = Math.max(
-        before.length,
-        after.length,
-        Array.isArray(afterUnknown) ? afterUnknown.length : 0
-      );
-      for (let i = 0; i < length; i += 1) walk(before[i], after[i], down(i), [...path, i]);
-      return;
-    }
-    // A leaf, or a block that appeared, vanished or changed type. If anything
-    // beneath it is unknown, `after` is missing that part, so printing it
-    // would misstate what the apply will write.
-    if (marked(afterUnknown)) record(true);
-    else if (!isDeepStrictEqual(before, after)) record(false);
-  };
-
-  walk(
-    change?.before,
-    change?.after,
-    {
-      beforeSensitive: change?.before_sensitive,
-      afterSensitive: change?.after_sensitive,
-      afterUnknown: change?.after_unknown,
-    },
-    []
-  );
-  return found;
-}
-
-const SENSITIVE = '(sensitive)';
-const UNKNOWN = '(known after apply)';
-
-const render = (value) => (value === undefined ? '(absent)' : JSON.stringify(value));
-
-/** A list or object by its size, for a value that is about to be recomputed. */
-function sizeOf(value) {
-  if (Array.isArray(value)) return `(a list of ${value.length} item${value.length === 1 ? '' : 's'})`;
-  const keys = Object.keys(value).length;
-  return `(an object with ${keys} key${keys === 1 ? '' : 's'})`;
-}
-
-/**
- * `before -> after` for one difference, masked by its flags. A list or object
- * whose new value is unknown prints by size; the header says why.
- */
-export function describeDifference({ before, after, sensitive, unknown }) {
-  if (sensitive) return `${SENSITIVE} -> ${unknown ? UNKNOWN : SENSITIVE}`;
-  if (unknown) {
-    const composite = before !== null && typeof before === 'object';
-    return `${composite ? sizeOf(before) : render(before)} -> ${UNKNOWN}`;
-  }
-  return `${render(before)} -> ${render(after)}`;
-}
-
 /** One `DECLARED` entry, for the report. */
 export function describeDeclaration({ address, path, before, after, reason }) {
   return `${address} ${path}: ${render(before)} -> ${render(after)}${reason ? ` (${reason})` : ''}`;
@@ -322,15 +193,15 @@ export function declarationLines({ declared = [], unused = [] }) {
   ];
 }
 
+/**
+ * Whether one declaration covers one difference. A sensitive or unknown
+ * difference never matches: declaring it would mean writing its value here.
+ */
 function matchesDeclaration(declaration, address, difference) {
-  return (
-    declaration?.address === address &&
-    declaration.path === difference.path &&
-    !difference.sensitive &&
-    !difference.unknown &&
-    isDeepStrictEqual(declaration.before, difference.before) &&
-    isDeepStrictEqual(declaration.after, difference.after)
-  );
+  if (difference.sensitive || difference.unknown) return false;
+  if (declaration?.address !== address || declaration.path !== difference.path) return false;
+  const sameBefore = isDeepStrictEqual(declaration.before, difference.before);
+  return sameBefore && isDeepStrictEqual(declaration.after, difference.after);
 }
 
 /**

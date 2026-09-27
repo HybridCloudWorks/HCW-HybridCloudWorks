@@ -1218,7 +1218,8 @@ This project has not cut a tagged release; entries are grouped under
   Function App's `app_settings` (#719).** `scripts/assert-expected-plan.mjs`
   read `app_settings` alone, so #718's `runtime_version "22" -> "24"` passed
   unexamined. Every update in the plan is now compared `before` against
-  `after`, leaf by leaf. Each difference is named by its path
+  `after`, leaf by leaf, by a new `scripts/lib/plan-diff.mjs`. Each
+  difference is named by its path
   (`runtime_version`, `site_config[0].http2_enabled`,
   `app_settings["AzureWebJobs.x.Disabled"]`) with both values. The allow-list
   is unchanged: the per-apply `RUNTIME_CONFIG_WRITER` line and the three azapi
