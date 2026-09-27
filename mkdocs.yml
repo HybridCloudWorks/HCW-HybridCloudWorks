@@ -155,6 +155,9 @@ nav:
       - FinOps 01 CI refund: content/blog-finops-01-ci-refund.md
       - How-to 01 infrastructure: content/blog-how-to-01-infrastructure.md
       - How-to 02 application: content/blog-how-to-02-application.md
+      - Lab 01 landing zone (draft): content/blog-lab-01-landing-zone.md
+      - Lab 02 one container (draft): content/blog-lab-02-one-container.md
+      - Lab 03 agent explains (draft): content/blog-lab-03-agent-explains.md
   - Repository:
       - README: repo/readme.md
       - CHANGELOG: repo/changelog.md
