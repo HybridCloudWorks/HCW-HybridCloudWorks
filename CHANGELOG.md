@@ -1328,6 +1328,15 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **An unresolved Key Vault reference is never the Cloudflare origin secret.**
+  If `CF_ORIGIN_SECRET`'s Key Vault reference failed to resolve, the app
+  read the literal `@Microsoft.KeyVault(...)` text, which is public in
+  `infra/functionapp.tf`, and `client-identity.js` accepted it as proof a
+  request came through Cloudflare, so any Cloudflare-range caller could pick
+  its own rate-limit key. Now that value (and `CLIENT_IP_SALT` the same way)
+  counts as unset and anonymous routes fail closed. Found by the security
+  review of #738.
+
 - **`npm test` in `frontend/` runs on Windows again: the crash was
   pdf-parse's canvas addon, not the pool or Node 26 (#720).** On Windows the
   suite died partway with `0xC0000005` (access violation). It did so in 4 runs
