@@ -124,9 +124,15 @@
     owner: root
     group: "{{ caddy_group }}"
     mode: "0640"
+    # --envfile loads the same file the unit reads through EnvironmentFile=,
+    # so {env.CLOUDFLARE_API_TOKEN} resolves during validation as it does at
+    # run time. Without it the check saw an empty token and refused the TLS
+    # Caddyfile ("API token '' appears invalid"), which first happened on
+    # 2026-09-27, the first run with a vault; every earlier run was TLS-off.
+    # The file is written by the task above on every run, so it always exists.
     validate: >-
       {{ caddy_binary_stat.stat.exists
-         | ternary(caddy_binary_path ~ ' validate --adapter caddyfile --config %s', omit) }}
+         | ternary(caddy_binary_path ~ ' validate --adapter caddyfile --envfile ' ~ caddy_env_file ~ ' --config %s', omit) }}
   notify: Reload caddy
 
 - name: Install the Caddy systemd unit
