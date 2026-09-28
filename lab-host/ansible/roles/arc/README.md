@@ -8,9 +8,16 @@ It runs straight after `hardening` in `site.yml`, because the agent needs
 nothing the later roles install and the host should appear in Azure even when
 a later role fails.
 
-Off by default: `arc_enabled` is `false` in `group_vars/all.yml`. The owner's
-procedure, from creating the service principal to reading back **Connected**,
-is [docs/runbooks/labs-host.md](../../../../docs/runbooks/labs-host.md).
+Off until the host says otherwise: `arc_enabled` in `group_vars/all.yml` reads
+the local fact `/etc/ansible/facts.d/hcw_arc.fact` and is true only when that
+file is JSON whose `enabled` is `true`. Nothing in the repository sets it;
+`scripts/lab/Register-LabArc.ps1 -Connect` writes it once the onboarding
+grant is applied and the credential is in the vault, so a rebuilt host, which
+has no such file, never stops at this role's fail-closed check on its first
+run. The owner's procedure, two runs of that script with one `hcw-azure` run
+between them, is
+[docs/runbooks/labs-host.md](../../../../docs/runbooks/labs-host.md), "Arc
+onboarding".
 
 ## What it does
 
@@ -64,14 +71,14 @@ With `arc_enabled: true`:
 What it does **not** do: install the Azure Monitor Agent, or associate the
 data collection rule. Both are Azure-side operations on the machine resource,
 which exists only after step 5, and the onboarding role cannot install an
-extension. The owner runs the two `az` commands in the runbook once the
-machine is Connected.
+extension. `Register-LabArc.ps1 -Connect` does both once the machine is
+Connected, and then deletes the credential from Entra and the vault.
 
 ## Variables
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `arc_enabled` | required (`false` in `group_vars`) | Onboard the host |
+| `arc_enabled` | required (`group_vars`: the host's `hcw_arc` local fact, false without it) | Onboard the host |
 | `arc_agent_version` | required | apt version of `azcmagent`, four-part |
 | `arc_apt_key_checksum` | required | `sha256:<hex>` the fetched key must match; `group_vars` picks it from `arc_apt_key_checksums` by codename |
 | `arc_resource_group` | required | `rg-lab-hybrid-prod-cus` |

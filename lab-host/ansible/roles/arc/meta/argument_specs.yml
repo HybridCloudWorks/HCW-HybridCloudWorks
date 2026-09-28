@@ -14,14 +14,17 @@ argument_specs:
         it does not, the role fails closed unless all four vault values are present and the
         three identifiers are GUIDs.
       - Does nothing while arc_enabled is false, including never disconnecting a connected
-        machine. The Azure Monitor Agent is not installed here; it is an Azure extension the
-        owner adds after onboarding (docs/runbooks/labs-host.md).
+        machine. The Azure Monitor Agent is not installed here; it is an Azure extension that
+        scripts/lab/Register-LabArc.ps1 -Connect adds after onboarding (docs/runbooks/labs-host.md).
     author: HybridCloudWorks
     options:
       arc_enabled:
         type: bool
         required: true
-        description: Onboard the host. False, the default in group_vars/all.yml, skips every task.
+        description:
+          - Onboard the host. group_vars/all.yml reads it from the local fact
+            /etc/ansible/facts.d/hcw_arc.fact, which scripts/lab/Register-LabArc.ps1 -Connect
+            writes; without that file it is false and every task is skipped.
       arc_agent_version:
         type: str
         required: true

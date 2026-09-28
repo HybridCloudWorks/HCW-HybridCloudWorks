@@ -102,9 +102,10 @@
         fail_msg: >-
           arc_enabled is true, the agent reports {{ arc_status }}, and one of
           vault_arc_service_principal_id, vault_arc_service_principal_secret,
-          vault_arc_tenant_id and vault_arc_subscription_id is unset. Add all
-          four to the vault (docs/runbooks/labs-host.md, "Seed the vault") and
-          re-run bootstrap.sh.
+          vault_arc_tenant_id and vault_arc_subscription_id is unset. Run
+          scripts/lab/Register-LabArc.ps1, which writes all four, then its
+          -Connect run (docs/runbooks/labs-host.md, "Arc onboarding"); or
+          remove /etc/ansible/facts.d/hcw_arc.fact to turn Arc off here.
         quiet: true
 
     - name: Refuse Arc identifiers that are not GUIDs
