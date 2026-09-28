@@ -8,7 +8,7 @@
  * against a description of the shape.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { createAgentRegistryHandlers } from './agent-registry.js';
+import { createAgentRegistryHandlers, HELD_JOBS_QUERY } from './agent-registry.js';
 import {
   DEFAULT_AGENT_JOB_TYPES,
   LAB_AGENT_ID_PATTERN,
@@ -18,12 +18,13 @@ import {
   parseJobTypes,
   parseObjectId,
   presentAgent,
+  removalDetails,
 } from './agent-registry-rules.js';
 import { LAB_JOB_TYPES } from '../labs.js';
 import { createAgentGuard, ENTRA_LAB_AGENT_APP_ROLE } from '../auth/require-agent.js';
 import { createRoleGuard } from '../auth/require-role.js';
 import { ENTRA_ADMIN_APP_ROLE, ENTRA_API_DELEGATED_SCOPE } from '../auth/roles.js';
-import { createLabAgentHandlers } from '../lab-agent.js';
+import { CLAIM_LEASE_MS, createLabAgentHandlers } from '../lab-agent.js';
 
 const AGENT_ID = 'vps-hostinger-01';
 const AGENT_OID = '9f8e7d6c-5b4a-4938-8271-605f4e3d2c1b';
@@ -52,13 +53,23 @@ const post = (body, headers = {}) => ({
   json: async () => body,
 });
 const patch = (agentId, body, headers = {}) => ({ ...post(body, headers), method: 'PATCH', params: { agentId } });
+// A DELETE carries no body, and one that tried to read it would throw here.
+const remove = (agentId, headers = {}) => ({
+  ...post(undefined, headers),
+  method: 'DELETE',
+  params: { agentId },
+  json: async () => {
+    throw new Error('DELETE has no body to read');
+  },
+});
 
 /**
- * An in-memory `lab_agents` + `admin_audit_logs` with the cosmos-client
- * semantics the handlers rely on: readDoc resolves null when absent, createDoc
- * fails with code 409 on a taken id, patchDoc sets only the fields it is given
- * and fails 404 on a missing document, and every stored document carries the
- * system fields Cosmos adds.
+ * An in-memory `lab_agents` + `lab_jobs` + `admin_audit_logs` with the
+ * cosmos-client semantics the handlers rely on: readDoc resolves null when
+ * absent, createDoc fails with code 409 on a taken id, patchDoc sets only the
+ * fields it is given and fails 404 on a missing document, deleteDoc fails 404
+ * on a missing document (the SDK's answer), and every stored document carries
+ * the system fields Cosmos adds.
  */
 class MemoryContainers {
   constructor(seed) {
@@ -99,6 +110,29 @@ class MemoryContainers {
     this.table(name).set(doc.id, { ...doc, _rid: 'rid', _etag: '"etag"', _ts: 1 });
     return doc;
   }
+
+  async delete(name, id) {
+    if (!this.table(name).delete(id)) throw Object.assign(new Error('Not found'), { code: 404 });
+  }
+
+  /**
+   * HELD_JOBS_QUERY, answered from `lab_jobs` by what its WHERE says: this
+   * agent's, and `running`, or `claimed` with a claimedAt no older than
+   * @staleBefore (ISO strings, compared as strings, as Cosmos does). Any
+   * other query finds nothing, which is what the claim path's scan finds in
+   * these tests.
+   */
+  query(name, sql, parameters = []) {
+    if (name !== 'lab_jobs' || sql !== HELD_JOBS_QUERY) return [];
+    const arg = Object.fromEntries(parameters.map((p) => [p.name, p.value]));
+    const held = (job) =>
+      job.status === 'running' ||
+      (job.status === 'claimed' && typeof job.claimedAt === 'string' && job.claimedAt >= arg['@staleBefore']);
+    return [...this.table(name).values()]
+      .filter((job) => job.agentId === arg['@agentId'] && held(job))
+      .slice(0, 5)
+      .map(({ id, status }) => ({ id, status }));
+  }
 }
 
 function memoryStore(seed = {}) {
@@ -108,7 +142,8 @@ function memoryStore(seed = {}) {
     createDoc: vi.fn((name, doc) => db.create(name, doc)),
     patchDoc: vi.fn((name, id, updates) => db.patch(name, id, updates)),
     upsertDoc: vi.fn((name, doc) => db.upsert(name, doc)),
-    queryDocs: vi.fn(async () => []),
+    deleteDoc: vi.fn((name, id) => db.delete(name, id)),
+    queryDocs: vi.fn(async (name, sql, parameters) => db.query(name, sql, parameters)),
     replaceDocIfMatch: vi.fn(async (_name, doc) => doc),
   };
   return { store, doc: (name, id) => db.get(name, id), all: (name) => [...db.table(name).values()] };
@@ -120,7 +155,10 @@ function handlersOver(memory, { guard = allowGuard(), now = () => NOW } = {}) {
 }
 
 const bodyOf = (res) => JSON.parse(res.body);
-const writes = (memory) => memory.store.createDoc.mock.calls.length + memory.store.patchDoc.mock.calls.length;
+const writes = (memory) =>
+  memory.store.createDoc.mock.calls.length +
+  memory.store.patchDoc.mock.calls.length +
+  memory.store.deleteDoc.mock.calls.length;
 
 describe('the validators', () => {
   it('take the agent id the way the certificate CN spells it', () => {
@@ -433,23 +471,174 @@ describe('PATCH cms/labs/agents/{agentId}', () => {
   });
 });
 
+describe('DELETE cms/labs/agents/{agentId}', () => {
+  // The record the owner asked about: the pre-reinstall host's agent,
+  // deactivated, last heard from on 2026-08-20.
+  const OLD_ID = 'srv939861';
+  const OLD = {
+    id: OLD_ID,
+    agentId: OLD_ID,
+    oid: OTHER_OID,
+    active: false,
+    capabilities: ['shell-echo'],
+    hostname: 'srv939861',
+    version: '0.1.0',
+    status: 'idle',
+    lastSeenAt: '2026-08-20T09:30:00.000Z',
+  };
+  const minutesAgo = (m) => new Date(NOW.getTime() - m * 60_000).toISOString();
+  const job = (id, over) => ({ id, type: 'shell-echo', agentId: OLD_ID, claimedAt: null, ...over });
+  const seeded = ({ agent = {}, jobs = [] } = {}) =>
+    memoryStore({ lab_agents: [{ ...OLD, ...agent }], lab_jobs: jobs });
+
+  it('removes a deactivated agent that holds no job, and audits what it was', async () => {
+    const memory = seeded({
+      jobs: [
+        // None of these is held: finished, another agent's, or a claim the
+        // claim path would already hand to the next agent that polls.
+        job('done', { status: 'succeeded', claimedAt: minutesAgo(1) }),
+        job('theirs', { status: 'claimed', agentId: AGENT_ID, claimedAt: minutesAgo(1) }),
+        job('lapsed', { status: 'claimed', claimedAt: minutesAgo(16) }),
+        job('queued', { status: 'queued', agentId: null }),
+      ],
+    });
+    const res = await handlersOver(memory).removeAgent(remove(OLD_ID), context());
+
+    expect(res.status).toBe(200);
+    expect(bodyOf(res)).toEqual({ ok: true, removed: true, agentId: OLD_ID });
+    expect(memory.doc('lab_agents', OLD_ID)).toBeNull();
+    expect(memory.store.deleteDoc).toHaveBeenCalledWith('lab_agents', OLD_ID, OLD_ID);
+
+    const audit = memory.all('admin_audit_logs');
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({
+      action: 'lab_agent_removed',
+      userId: USER.oid,
+      userEmail: USER.email,
+      timestamp: NOW.toISOString(),
+      details: { agentId: OLD_ID, oid: OTHER_OID, lastSeenAt: OLD.lastSeenAt, version: '0.1.0' },
+      compliance: { schemaVersion: 1, detailsSanitized: true, identityVerified: true },
+    });
+    // The jobs are untouched: removal deletes one registry document.
+    expect(memory.all('lab_jobs')).toHaveLength(4);
+  });
+
+  it('asks lab_jobs by the agent id, with the claim lease measured from now', async () => {
+    const memory = seeded();
+    await handlersOver(memory).removeAgent(remove(OLD_ID), context());
+
+    const [container, sql, parameters] = memory.store.queryDocs.mock.calls[0];
+    expect(container).toBe('lab_jobs');
+    expect(sql).toBe(HELD_JOBS_QUERY);
+    expect(parameters).toEqual([
+      { name: '@agentId', value: OLD_ID },
+      { name: '@staleBefore', value: new Date(NOW.getTime() - CLAIM_LEASE_MS).toISOString() },
+    ]);
+  });
+
+  it('refuses an active agent with 409 "Deactivate it first", touching nothing', async () => {
+    const memory = seeded({ agent: { active: true } });
+    const res = await handlersOver(memory).removeAgent(remove(OLD_ID), context());
+
+    expect(res.status).toBe(409);
+    expect(bodyOf(res).error).toMatch(/Deactivate it first/);
+    expect(memory.doc('lab_agents', OLD_ID)).not.toBeNull();
+    expect(memory.store.queryDocs).not.toHaveBeenCalled();
+    expect(writes(memory)).toBe(0);
+    expect(memory.all('admin_audit_logs')).toHaveLength(0);
+  });
+
+  it.each([
+    ['a job it claimed inside the lease', job('j-claimed', { status: 'claimed', claimedAt: minutesAgo(14) }), /j-claimed \(claimed\)/],
+    ['a running job', job('j-running', { status: 'running', claimedAt: minutesAgo(60) }), /j-running \(running\)/],
+  ])('refuses an agent that holds %s with 409, naming the job', async (_label, held, named) => {
+    const memory = seeded({ jobs: [held] });
+    const res = await handlersOver(memory).removeAgent(remove(OLD_ID), context());
+
+    expect(res.status).toBe(409);
+    expect(bodyOf(res).error).toMatch(named);
+    expect(bodyOf(res).error).toMatch(/15 minutes/);
+    expect(memory.doc('lab_agents', OLD_ID)).not.toBeNull();
+    expect(writes(memory)).toBe(0);
+    expect(memory.all('admin_audit_logs')).toHaveLength(0);
+  });
+
+  it('answers 404 to a second DELETE, writing no second audit row', async () => {
+    const memory = seeded();
+    const handlers = handlersOver(memory);
+
+    expect((await handlers.removeAgent(remove(OLD_ID), context())).status).toBe(200);
+    const again = await handlers.removeAgent(remove(OLD_ID), context());
+
+    expect(again.status).toBe(404);
+    expect(bodyOf(again).error).toBe(`No lab agent ${OLD_ID} is registered`);
+    expect(memory.store.deleteDoc).toHaveBeenCalledTimes(1);
+    expect(memory.all('admin_audit_logs')).toHaveLength(1);
+  });
+
+  it('answers 404 when another request removed it between the read and the delete', async () => {
+    const memory = seeded();
+    memory.store.deleteDoc.mockRejectedValueOnce(Object.assign(new Error('Not found'), { code: 404 }));
+    const res = await handlersOver(memory).removeAgent(remove(OLD_ID), context());
+
+    expect(res.status).toBe(404);
+    expect(memory.all('admin_audit_logs')).toHaveLength(0);
+  });
+
+  it('refuses a path that is not an agent id with 400, reading nothing', async () => {
+    const memory = seeded();
+    const res = await handlersOver(memory).removeAgent(remove('SRV939861'), context());
+
+    expect(res.status).toBe(400);
+    expect(bodyOf(res).error).toMatch(/agentId must be the CN/);
+    expect(memory.store.readDoc).not.toHaveBeenCalled();
+    expect(writes(memory)).toBe(0);
+  });
+
+  it('answers 500 without a store message when the delete fails', async () => {
+    const memory = seeded();
+    memory.store.deleteDoc.mockRejectedValueOnce(new Error('cosmos said something internal'));
+    const ctx = context();
+    const res = await handlersOver(memory).removeAgent(remove(OLD_ID), ctx);
+
+    expect(res.status).toBe(500);
+    expect(bodyOf(res).error).toBe('Failed to remove the lab agent');
+    expect(res.body).not.toContain('internal');
+    expect(ctx.error).toHaveBeenCalledWith(expect.stringContaining(`removeLabAgent(${OLD_ID})`));
+    expect(memory.all('admin_audit_logs')).toHaveLength(0);
+  });
+
+  it('reads the audit fields as null when the document never heartbeat', () => {
+    expect(removalDetails({ id: 'vps-new-01', active: false })).toEqual({
+      agentId: 'vps-new-01',
+      oid: null,
+      lastSeenAt: null,
+      version: null,
+    });
+  });
+});
+
 describe('auth', () => {
   it('requires the level of the other Labs writes', () => {
     expect(LAB_AGENT_REGISTRY_ROLE).toBe('editor');
   });
 
-  it('a refused caller gets the 403 of the guard and reaches no store call, on both routes', async () => {
-    const memory = memoryStore();
+  it('a refused caller gets the 403 of the guard and reaches no store call, on every verb', async () => {
+    const memory = memoryStore({ lab_agents: [{ id: AGENT_ID, agentId: AGENT_ID, oid: AGENT_OID, active: false }] });
     const guard = denyGuard();
     const handlers = handlersOver(memory, { guard });
 
     const registered = await handlers.registerAgent(post({ agentId: AGENT_ID, oid: AGENT_OID }), context());
     const toggled = await handlers.setAgentActive(patch(AGENT_ID, { active: false }), context());
+    const removed = await handlers.removeAgent(remove(AGENT_ID), context());
 
     expect(registered.status).toBe(403);
     expect(toggled.status).toBe(403);
-    expect(guard.requireRole).toHaveBeenCalledWith(expect.anything(), 'editor');
+    expect(removed.status).toBe(403);
+    expect(guard.requireRole).toHaveBeenCalledTimes(3);
+    for (const call of guard.requireRole.mock.calls) expect(call[1]).toBe('editor');
     for (const fn of Object.values(memory.store)) expect(fn).not.toHaveBeenCalled();
+    expect(memory.doc('lab_agents', AGENT_ID)).not.toBeNull();
   });
 
   describe('through the real admin guard', () => {
@@ -481,15 +670,18 @@ describe('auth', () => {
       ['a viewer', as('viewer'), 403],
       ['the agent itself', as('agent'), 401],
     ])('refuses %s, writing nothing', async (_label, headers, status) => {
-      const memory = memoryStore();
+      const memory = memoryStore({ lab_agents: [{ id: AGENT_ID, agentId: AGENT_ID, oid: AGENT_OID, active: false }] });
       const handlers = handlersOver(memory, { guard });
       const res = await handlers.registerAgent(post({ agentId: AGENT_ID, oid: AGENT_OID }, headers), context());
       const off = await handlers.setAgentActive(patch(AGENT_ID, { active: false }, headers), context());
+      const removed = await handlers.removeAgent(remove(AGENT_ID, headers), context());
 
       expect(res.status).toBe(status);
       expect(off.status).toBe(status);
+      expect(removed.status).toBe(status);
       expect(memory.store.readDoc).not.toHaveBeenCalled();
       expect(writes(memory)).toBe(0);
+      expect(memory.doc('lab_agents', AGENT_ID)).not.toBeNull();
     });
 
     it('admits an editor', async () => {
@@ -499,6 +691,14 @@ describe('auth', () => {
         context()
       );
       expect(res.status).toBe(201);
+    });
+
+    it('lets an editor remove a deactivated agent', async () => {
+      const memory = memoryStore({ lab_agents: [{ id: AGENT_ID, agentId: AGENT_ID, oid: AGENT_OID, active: false }] });
+      const res = await handlersOver(memory, { guard }).removeAgent(remove(AGENT_ID, as('editor')), context());
+      expect(res.status).toBe(200);
+      expect(memory.doc('lab_agents', AGENT_ID)).toBeNull();
+      expect(memory.all('admin_audit_logs')[0]).toMatchObject({ action: 'lab_agent_removed', userId: 'editor-1' });
     });
   });
 });
@@ -551,6 +751,25 @@ describe('what the agent guard and the claim path read', () => {
     expect(same.auditDenial).toHaveBeenCalledWith(expect.objectContaining({ reason: 'inactive' }));
 
     await handlers.setAgentActive(patch(AGENT_ID, { active: true }), context());
+    expect((await agentGuardOver(memory).guard.requireAgent(agentRequest({}), AGENT_ID)).error).toBeNull();
+  });
+
+  it('a removed agent is refused as unregistered, its heartbeat cannot bring the document back, and it can be registered again', async () => {
+    const memory = memoryStore();
+    const handlers = handlersOver(memory);
+    await handlers.registerAgent(post({ agentId: AGENT_ID, oid: AGENT_OID }), context());
+    await handlers.setAgentActive(patch(AGENT_ID, { active: false }), context());
+    expect((await handlers.removeAgent(remove(AGENT_ID), context())).status).toBe(200);
+
+    const { guard, auditDenial } = agentGuardOver(memory);
+    const agent = createLabAgentHandlers({ guard, store: memory.store, now: () => LATER });
+    expect((await agent.heartbeatAgent(agentRequest({ agentId: AGENT_ID, hostname: 'srv1' }), context())).status).toBe(403);
+    expect(auditDenial).toHaveBeenCalledWith(expect.objectContaining({ reason: 'no-agent-record' }));
+    expect(memory.doc('lab_agents', AGENT_ID)).toBeNull();
+
+    // What the confirmation promises: Register agent adds it back, active.
+    const again = await handlers.registerAgent(post({ agentId: AGENT_ID, oid: AGENT_OID }), context());
+    expect(again.status).toBe(201);
     expect((await agentGuardOver(memory).guard.requireAgent(agentRequest({}), AGENT_ID)).error).toBeNull();
   });
 

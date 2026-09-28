@@ -14,13 +14,14 @@
  * The lab agent registry's write path (#740), semantics in
  * lib/labs/agent-registry.js and agent-registry-rules.js: `cms/labs/agents`
  * (POST registers an agent) and `cms/labs/agents/{agentId}` (PATCH activates
- * or deactivates one). Two templates, so two registrations, each through
+ * or deactivates one; DELETE removes a deactivated one, owner request
+ * 2026-09-28). Two templates, so two registrations, each through
  * httpRouteByMethod so that a later verb on either is a new key in
  * `handlers`, never a second function on the same template (TODO.md T-510).
  */
 import { httpRoute, httpRouteByMethod } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
-import { createDoc, queryDocs, readDoc, upsertDoc, patchDoc } from '../lib/cosmos-client.js';
+import { createDoc, deleteDoc, queryDocs, readDoc, upsertDoc, patchDoc } from '../lib/cosmos-client.js';
 import { createLabHandlers } from '../lib/labs.js';
 import { createAgentRegistryHandlers } from '../lib/labs/agent-registry.js';
 
@@ -33,7 +34,7 @@ const handlers = () =>
 const registry = () =>
   createAgentRegistryHandlers({
     guard: getDefaultGuard(),
-    store: { readDoc, createDoc, patchDoc, upsertDoc },
+    store: { readDoc, createDoc, patchDoc, upsertDoc, queryDocs, deleteDoc },
   });
 
 httpRoute('enqueueLabJob', {
@@ -77,5 +78,6 @@ httpRouteByMethod('cmsLabAgent', {
   route: 'cms/labs/agents/{agentId}',
   handlers: {
     PATCH: (request, context) => registry().setAgentActive(request, context),
+    DELETE: (request, context) => registry().removeAgent(request, context),
   },
 });

@@ -351,25 +351,35 @@ describe('property 1 — every route is guarded or explicitly public', () => {
  * trusts, so they must sit behind the admin guard at the Labs write level and
  * must never be reachable with an agent's own credential — a VPS that could
  * call them could grant itself job types or rebind its identity, which is
- * exactly what lab-agent.js's heartbeat refuses to let it do.
+ * exactly what lab-agent.js's heartbeat refuses to let it do. DELETE (owner
+ * request 2026-09-28) removes a record, which an agent must no more be able to
+ * do than write one: it could erase another agent's registration.
  */
 describe('the lab agent registry routes (#740)', () => {
-  it.each([
-    ['cms/labs/agents', 'POST'],
-    ['cms/labs/agents/{agentId}', 'PATCH'],
-  ])('%s answers %s through requireRole at editor, never requireAgent', async (route, method) => {
+  const VERBS = {
+    'cms/labs/agents': ['POST'],
+    'cms/labs/agents/{agentId}': ['PATCH', 'DELETE'],
+  };
+
+  it.each(Object.entries(VERBS))('%s is one registration answering exactly %j', (route, verbs) => {
     const registrations = [...httpRegistrations.values()].filter((o) => o.route === route);
     expect(registrations).toHaveLength(1);
-    const [options] = registrations;
     expect(PUBLIC_ROUTES.has(route)).toBe(false);
-    expect(options.methods).toEqual([method, 'OPTIONS']);
-
-    clearGuards();
-    await invoke(options, makeRequest({ method }));
-    expect(requireRole).toHaveBeenCalledTimes(1);
-    expect(requireRole.mock.calls[0][1]).toBe('editor');
-    expect(requireAgent).not.toHaveBeenCalled();
+    expect(registrations[0].methods).toEqual([...verbs, 'OPTIONS']);
   });
+
+  it.each(Object.entries(VERBS).flatMap(([route, verbs]) => verbs.map((verb) => [route, verb])))(
+    '%s answers %s through requireRole at editor, never requireAgent',
+    async (route, method) => {
+      const options = [...httpRegistrations.values()].find((o) => o.route === route);
+
+      clearGuards();
+      await invoke(options, makeRequest({ method }));
+      expect(requireRole).toHaveBeenCalledTimes(1);
+      expect(requireRole.mock.calls[0][1]).toBe('editor');
+      expect(requireAgent).not.toHaveBeenCalled();
+    }
+  );
 });
 
 /**

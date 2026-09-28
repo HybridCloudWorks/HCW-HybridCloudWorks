@@ -19,6 +19,38 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Admin → Labs: remove a deactivated agent's registration.** Owner
+  request 2026-09-28: the VPS reinstalled on 2026-09-26 came back as
+  `vps-hostinger-01`, and the old host's record, `srv939861` (v0.1.0, last
+  seen 2026-08-20), stayed on the Agents tab, Offline and Deactivated, with
+  no way to take it off: #740 built register and activate/deactivate only,
+  and the owner holds no data-plane role. `DELETE
+  /api/cms/labs/agents/{agentId}` joins the PATCH on that template's one
+  `httpRouteByMethod` registration in `labs-http.js`, at the same editor
+  role (`lib/labs/agent-registry.js`). It reads no body; answers 404 for an
+  unregistered id, so a second DELETE is a 404; refuses an active agent
+  with 409 "Deactivate it first"; and refuses with 409, naming the jobs, an
+  agent that still holds one in `lab_jobs` (by `agentId`, which the claim
+  writes): `running`, or `claimed` inside `CLAIM_LEASE_MS`. A claim older
+  than the 15-minute lease is not counted, because the claim path already
+  hands it to the next agent and a deactivated agent could never finish it;
+  counting it would let one stranded job block the removal forever. Then it
+  deletes the `lab_agents` document and writes one `admin_audit_logs` row,
+  `lab_agent_removed`, with the removed document's `agentId`, `oid`,
+  `lastSeenAt` and `version`. Without a document the agent guard refuses the
+  agent as `no-agent-record`, the state before its first registration, and
+  Register agent adds it back. On a deactivated card only, **Remove** opens
+  the repository's `ConfirmModal` naming the agent and saying its
+  registration is deleted and it can be registered again later; confirming
+  sends the DELETE, toasts and refreshes. The Labs snapshot's `refresh` no
+  longer drops a request that arrives while a poll is in flight: it reads
+  once more after it, so the card goes when the toast appears rather than
+  coming back from a read sent before the delete. The route inventory now
+  pins both verbs on `cms/labs/agents/{agentId}` to `requireRole` at editor
+  and never `requireAgent`; `.azure/api-surface.json` carries the route; the
+  [Labs host runbook](docs/runbooks/labs-host.md) gains step 8 of
+  "Reinstalling the host", retiring the old agent record.
+
 - **"Validate on the lab" opens to the public, locked to the site's pane by
   origin and Cloudflare Turnstile (ADR 0032 decision 6 revised).** Owner
   decision 2026-09-28: "The lab should only be accessible through 'panes'

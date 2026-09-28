@@ -313,6 +313,16 @@ ADR 0032 rebuilds the host rather than repairing it.
    new and uninitialised: initialise it (below), and delete the old unseal
    keys and root token from the password manager, because they open nothing
    now.
+8. **Retire the old agent record.** If the go-live registered the rebuilt
+   host under a new agent id, the old id's card stays on
+   https://hybridcloudworks.com/admin/labs?tab=agents, Offline, until it is
+   removed: the 2026-09-26 reinstall left `srv939861` beside
+   `vps-hostinger-01`. **Deactivate** it if it is still active, then
+   **Remove** and confirm. Success is the old card gone and the new agent
+   still Online. The API refuses an active agent, and one still holding a
+   job claimed in the last 15 minutes; the removal is audited as
+   `lab_agent_removed`. If the host came back under the same agent id, there
+   is nothing to retire: the go-live re-bound that record.
 
 ## The lab agent's go-live
 
@@ -455,8 +465,11 @@ service principal object id (the `oid` claim of an app-only token) and
 only writer is the API (#740): **Register agent** on the Agents tab calls
 `POST /api/cms/labs/agents` with `{ agentId, oid, jobTypes }`, and each
 agent's card has **Deactivate** or **Activate**, which call
-`PATCH /api/cms/labs/agents/{agentId}` with `{ active }`. Both need an
-editor or above, write an audit row, and store only identifiers: `id` and
+`PATCH /api/cms/labs/agents/{agentId}` with `{ active }`; a deactivated card
+also has **Remove**, which calls `DELETE` on the same address and deletes the
+record (step 8 of "Reinstalling the host", above). All three need an
+editor or above and write an audit row, and the record holds only
+identifiers: `id` and
 `agentId` both `vps-hostinger-01`, `oid` lower-cased (the claim is lower
 case and the guard compares exactly), `active`, and `capabilities`, by
 default the five job types (`shell-echo`, `terraform-validate`,
