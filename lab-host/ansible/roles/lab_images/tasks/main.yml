@@ -1,0 +1,81 @@
+---
+# The plan's helper and the playbook's checkout are paths on the machine the
+# play runs from (vars/main.yml), so the role runs only where that is also the
+# host: a local connection, the one inventory/localhost.yml and bootstrap.sh
+# use.
+- name: Refuse to plan the lab images anywhere but on the host the playbook is checked out on
+  ansible.builtin.assert:
+    that:
+      - ansible_connection | default('') == 'local'
+    fail_msg: >-
+      The lab_images role reads its helper and the playbook's checkout from the machine the play
+      runs from, so it needs a local connection (inventory/localhost.yml); this host's connection
+      is {{ ansible_connection | default('unset') }}.
+    quiet: true
+
+- name: Read the images and containers Docker holds
+  community.docker.docker_host_info:
+    images: true
+    containers: true
+    containers_all: true
+    verbose_output: true
+  register: lab_images_docker
+
+# Read-only, so it runs in check mode too: the pins come from capabilities.js
+# and the Coder template in each checkout, and the plan from what Docker holds
+# (files/lab-images.mjs says how). A pin that is not a digest reference, or a
+# template the helper cannot read the image from, fails the play here with
+# the entry named.
+- name: Plan the lab images from the pins in each checkout
+  ansible.builtin.command:
+    argv: "{{ lab_images_helper_argv }}"
+    stdin: "{{ {'images': lab_images_docker.images, 'containers': lab_images_docker.containers} | to_json }}"
+  register: lab_images_plan_run
+  changed_when: false
+  check_mode: false
+
+- name: Record the plan
+  ansible.builtin.set_fact:
+    lab_images_plan: "{{ lab_images_plan_run.stdout | from_json }}"
+
+# By repository@digest, never by tag: Docker verifies the content against the
+# digest, and a digest already present is `ok` with no registry call. A pull
+# that fails fails the play with the image in the item label: a job on that
+# image would fail anyway, and setup is the better place to find out.
+- name: Pull every pinned lab image that is not on the host yet
+  community.docker.docker_image_pull:
+    name: "{{ item }}"
+    pull: not_present
+  loop: "{{ lab_images_plan.pull }}"
+
+# Removed with the CLI, by reference. community.docker 5.3.0's
+# docker_image_remove (and docker_image's state: absent) rebuild a digest
+# reference as `name:sha256:...`, which the daemon refuses with `invalid
+# reference format` (measured on Docker 29.8), and removing by image id would
+# also drop references in other repositories. The plan lists only references
+# Docker reported a moment ago, so each removal is a real change. One that
+# vanished in between, or that a container started on since, is left alone
+# rather than failing the run; the next run removes it once it is free.
+- name: Remove the lab images no pin names any more
+  ansible.builtin.command:
+    argv:
+      - docker
+      - image
+      - rm
+      - "{{ item }}"
+  loop: "{{ lab_images_plan.remove }}"
+  register: lab_images_removed
+  changed_when: lab_images_removed.rc == 0
+  failed_when:
+    - lab_images_removed.rc != 0
+    - "'No such image' not in lab_images_removed.stderr"
+    - "'is using its referenced image' not in lab_images_removed.stderr"
+
+- name: Say which superseded lab images are kept because a container still uses them
+  ansible.builtin.debug:
+    msg: >-
+      {{ item.references | join(', ') }} is no longer pinned but is kept while
+      {{ item.containers | join(', ') }} uses it; the next run removes it once no container does.
+  loop: "{{ lab_images_plan.in_use }}"
+  loop_control:
+    label: "{{ item.image }}"

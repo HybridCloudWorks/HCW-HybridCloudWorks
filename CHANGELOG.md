@@ -19,6 +19,45 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The lab host holds every pinned job image before a job needs it, and
+  removes the digests no pin names.** The first public "Validate on the
+  lab" job on the live host (2026-09-28) spent its opening seconds pulling
+  the `hcw-lab-runner` image, about 320 MB, while the visitor waited and
+  the job log filled with pull lines. A new `lab_images` role runs straight
+  after `labs_agent` in `lab-host/ansible/site.yml`. Its plan,
+  `roles/lab_images/files/lab-images.mjs`, runs on the host's Node.js and
+  imports `IMAGES` from `vps-agent/lib/capabilities.js` in the playbook's
+  checkout and the agent's, so the list is the module itself and a pin bump
+  needs no second edit. It also reads the Coder workspace image from the
+  template's `image` and `image_digest` locals, which is pulled while
+  `coder_enabled` is true and kept either way. A pin that is not
+  `name[:tag]@sha256:<hex>` fails the play naming the entry, and so does a
+  pull that fails. Pulls are `community.docker.docker_image_pull` by
+  `repository@digest` with `pull: not_present`, so a present digest is
+  `ok`; the tag is dropped because the module splits `name:tag@digest` at
+  the `@` and would pull on every run. Removal is `docker image rm` by
+  reference, because that module's `docker_image_remove` and `docker_image`
+  rebuild a digest reference as `name:sha256:...`, which Docker 29.8
+  refuses with `invalid reference format`. It covers only the pins'
+  repositories and `ghcr.io/hybridcloudworks/hcw-lab*`, never lists a
+  reference in any other repository, and keeps an image a container still
+  uses until a later run. The runner passes no `--pull`, so `docker run`
+  uses a present digest without a registry call.
+  `scripts/lab-images.test.mjs` (19 tests) holds the helper to both files
+  as they are and the plan to those rules. Verified in a privileged systemd
+  `ubuntu:26.04` container, from a bundle of the branch, on Docker 29.8.1's
+  containerd image store: the first run pulled both capability images and
+  the second was `changed=0`, with exactly the two pinned digests in the
+  lab repositories. A test commit then moved `IMAGES.alpine` to 3.24.1.
+  `--check --diff` reported the one pull and changed nothing. The real run
+  pulled the new digest and kept the old one, which a stopped container
+  used. Once that container was gone, the next run removed the old
+  digest's lab references and left an unrelated tag on the same image in
+  place, and the run after was `changed=0`. With the test host cut off
+  from the network, a `shell-echo` and a `terraform-validate` job run
+  through the agent's own `runInDocker` passed in 403 ms and 577 ms, while
+  a pull of an image the host did not hold failed as unreachable.
+
 - **Admin → Labs: remove a deactivated agent's registration.** Owner
   request 2026-09-28: the VPS reinstalled on 2026-09-26 came back as
   `vps-hostinger-01`, and the old host's record, `srv939861` (v0.1.0, last

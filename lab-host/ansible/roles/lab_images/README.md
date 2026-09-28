@@ -1,0 +1,101 @@
+# lab_images
+
+Holds every digest-pinned lab image on the host before a job needs it, and
+removes the digests no pin names any more. It runs straight after
+`labs_agent` in `site.yml`, because the plan runs on the Node.js that role
+installs and reads the checkout it makes.
+
+## Why
+
+The first public "Validate on the lab" job on the live host, on 2026-09-28,
+spent its opening seconds pulling the `hcw-lab-runner` image (about 320 MB):
+the visitor waited for a first-time download and the job log filled with
+pull lines. `docker run` pulls a missing image implicitly, and the runner's
+timeout (`timeoutSeconds` plus a 15-second grace, `lib/docker-runner.js`)
+covers that pull too. Every image is pinned by digest in the repository, so
+the host can hold them before any job asks.
+
+## What it does
+
+1. **Reads the pins, never a copy of them.** `files/lab-images.mjs` runs on
+   the host's `node` and, for each checkout in `lab_images_checkouts`,
+   imports `vps-agent/lib/capabilities.js` and takes every value of
+   `IMAGES`, so Node itself parses the file and whatever the module exports
+   is what the host holds. It also reads the Coder workspace image,
+   `local.image` in `lab-host/coder/templates/hcw-lab/main.tf`, from its
+   `image` and `image_digest` locals. A pin bump in either file reaches the
+   host on the next `bootstrap.sh` run with no edit here.
+   `scripts/lab-images.test.mjs` holds the helper to both files as they are
+   in the repository, so a change of shape that the helper cannot read fails
+   CI rather than the host.
+2. **Refuses a pin that is not a digest.** Every pin must be
+   `name[:tag]@sha256:<64 hex>`; anything else fails the play at the plan
+   step, naming the entry (`IMAGES.alpine in .../capabilities.js is ...`).
+3. **Pulls by `repository@digest`**, with
+   `community.docker.docker_image_pull` and `pull: not_present`: every
+   capability image, and the workspace image while
+   `lab_images_pull_workspace` is true (it defaults to `coder_enabled`). A
+   digest already on the host is `ok`, with no registry call. The tag is
+   dropped from the pull because Docker ignores the tag of a reference that
+   carries a digest, and because the module splits `name:tag@digest` at the
+   `@` and then looks for a repository literally named `name:tag`, so the
+   tagged form would pull on every run. A pull that fails fails the play
+   with the image as the item label.
+4. **Removes what no pin names**, in the lab's own repositories only: the
+   repositories the pins name (today `alpine`,
+   `ghcr.io/hybridcloudworks/hcw-lab-runner` and
+   `ghcr.io/hybridcloudworks/hcw-lab`) and anything else under
+   `ghcr.io/hybridcloudworks/hcw-lab*`. An image is removed when none of its
+   references is a pin: each of its references in those repositories goes,
+   tags before digests, with `docker image rm`. A reference in any other
+   repository is never listed, so an image that also carries one keeps its
+   data, and no image outside those repositories is touched. The pinned
+   workspace image is kept while Coder is off, because it is still a pin.
+5. **Keeps an image a container still uses**, running or stopped (a job in
+   flight on the old digest, a Coder workspace on an older template
+   version), and prints which container holds it. The next run removes it.
+
+The removal is the Docker CLI rather than a module because community.docker
+5.3.0's `docker_image_remove` and `docker_image` rebuild a digest reference
+as `name:sha256:...`, which Docker 29.8 refuses with `invalid reference
+format`, and removing by image id would also drop references in other
+repositories. The plan lists only references Docker reported a moment
+before, so each removal is a real change; one that has vanished since
+(`No such image`) or that a container started on since (`is using its
+referenced image`) is left for the next run instead of failing this one.
+
+## Two checkouts
+
+`lab_images_checkouts` defaults to the playbook's own checkout
+(`/opt/hcw-src`) and the agent's (`labs_agent_home`, `/opt/hcw-labs-agent`).
+They are the same commit on every plain run. While `-e
+labs_agent_repo_ref=<sha>` holds the agent at another commit
+(`lab-host/README.md`, "Re-running"), both commits' pins are pulled and
+kept, so the held agent keeps its images; the next plain run returns the
+agent to the playbook's commit and removes what only the hold needed.
+
+## Does the runner use a present image without a registry call?
+
+Yes. `buildDockerArgs` in `vps-agent/lib/docker-runner.js` passes no
+`--pull`, so `docker run` takes Docker's default, `--pull=missing`, and a
+digest reference already on the host runs without contacting the registry.
+The runner names the image exactly as `IMAGES` writes it
+(`name:tag@sha256:...`), and Docker resolves that by the digest, which is
+the reference this role pulled. The container run for this role checked it
+with the test host's network cut off (`CHANGELOG.md`).
+
+## Check mode
+
+Safe. The Docker listing and the plan are read-only and run in check mode;
+`docker_image_pull` reports what it would pull without pulling, and the
+removal, a command, is skipped. Check mode reads the playbook's checkout at
+the commit the run would apply, so a bumped pin shows as a pull. It cannot
+show the removal of the digest that pin replaces while the agent's checkout
+is still at the old commit, because that checkout still pins it; the real
+run moves the checkout first and then removes it.
+
+## Variables
+
+`lab_images_checkouts`, `lab_images_pull_workspace` and `lab_images_node`,
+in `defaults/main.yml`; `meta/argument_specs.yml` is the contract. Nothing
+here is a pin: the pins are the two files above.
