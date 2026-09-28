@@ -92,6 +92,33 @@ describe('capability allowlist', () => {
     }
   });
 
+  test('every IMAGES entry is used by a capability', () => {
+    // An entry nothing runs is still held to a floor by
+    // scripts/version-floors.test.mjs and still reads as something the host
+    // pulls; `ansible` stayed in the map neither way once ansible-check moved.
+    const used = new Set(Object.values(CAPABILITIES).map((capability) => capability.image));
+    for (const [key, image] of Object.entries(IMAGES)) {
+      assert.ok(used.has(image), `IMAGES.${key} is used by no capability; remove it`);
+    }
+  });
+
+  test('ansible-check syntax-checks the payload with the runner image ansible-core', () => {
+    // alpine/ansible:2.17.0, the image before 2026-09-28, stopped every job
+    // at `Unable to create local directories(/.ansible/tmp)` under the
+    // read-only root. The runner's ansible-core needs the tmpfs for its
+    // ANSIBLE_LOCAL_TEMP, and ANSIBLE_HOME there so it writes nothing to HOME.
+    const capability = CAPABILITIES['ansible-check'];
+    assert.equal(capability.image, IMAGES.hcwLabRunner);
+    assert.deepEqual(capability.buildCommand('/workspace/playbook.yml'), [
+      'ansible-playbook',
+      '--syntax-check',
+      '-i',
+      'localhost,',
+      '/workspace/playbook.yml',
+    ]);
+    assert.deepEqual(capability.extraDockerArgs, [...RUN_TMPFS, '--env', 'ANSIBLE_HOME=/tmp/run/ansible-home']);
+  });
+
   test('the runner-image capabilities run the scripts the image carries', () => {
     // lab-image/bin/ holds one script per capability; the argv is its name
     // and nothing else, so what the job does is versioned with the image.
@@ -110,8 +137,9 @@ describe('capability allowlist', () => {
     // Docker mounts a tmpfs root-owned; the container runs as 65534. Measured
     // on Docker 29.8: without uid/gid the first write is Permission denied.
     assert.deepEqual(RUN_TMPFS, ['--tmpfs', '/tmp/run:rw,size=64m,uid=65534,gid=65534,mode=0700']);
-    for (const type of ['terraform-validate', 'helm-template']) {
-      assert.deepEqual(CAPABILITIES[type].extraDockerArgs, RUN_TMPFS, `${type} has no writable scratch`);
+    for (const type of ['terraform-validate', 'helm-template', 'ansible-check']) {
+      const extra = CAPABILITIES[type].extraDockerArgs ?? [];
+      assert.deepEqual(extra.slice(0, RUN_TMPFS.length), RUN_TMPFS, `${type} has no writable scratch`);
     }
   });
 });

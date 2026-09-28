@@ -1,0 +1,32 @@
+---
+# A small valid playbook for the ansible-check job: ansible.builtin modules
+# only, because the runner image carries ansible-core and no collections.
+- name: Configure a web host
+  hosts: all
+  gather_facts: false
+  vars:
+    site_root: /var/www/hcw
+  tasks:
+    - name: Install nginx
+      ansible.builtin.package:
+        name: nginx
+        state: present
+
+    - name: Create the site root
+      ansible.builtin.file:
+        path: "{{ site_root }}"
+        state: directory
+        mode: "0755"
+
+    - name: Write the index page
+      ansible.builtin.copy:
+        dest: "{{ site_root }}/index.html"
+        content: "hello from {{ inventory_hostname }}\n"
+        mode: "0644"
+      notify: Reload nginx
+
+  handlers:
+    - name: Reload nginx
+      ansible.builtin.service:
+        name: nginx
+        state: reloaded

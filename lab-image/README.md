@@ -229,7 +229,11 @@ Three consequences of the sandbox:
   "Failed to read any lines from plugin's stdout" for all six, after `init`
   had succeeded (measured in #675). Everything else that writes to a home
   directory (`az`, `helm`, `ansible`) is pointed at `/tmp/home` or
-  `/tmp/run` through `HOME`, `HELM_*_HOME` and `ANSIBLE_LOCAL_TEMP`.
+  `/tmp/run` through `HOME`, `HELM_*_HOME` and `ANSIBLE_LOCAL_TEMP`. In the
+  job sandbox `/tmp/home` is on the read-only root too, so the
+  `ansible-check` capability also sets `ANSIBLE_HOME=/tmp/run/ansible-home`:
+  without it ansible-core prints a warning into the job output for each
+  directory under `~/.ansible` it cannot create.
 - The tmpfs the agent mounts is `uid=65534,gid=65534,mode=0700`
   (`RUN_TMPFS` in `capabilities.js`): Docker mounts a tmpfs root-owned by
   default, and the bare `--tmpfs /tmp/run:rw,size=64m` Phase 1 used gave
@@ -261,13 +265,21 @@ fixtures under [`smoke/`](smoke/) and that kubeconform rejects an unknown
 field, and, for the `full` target, the extra tools and uid 65534's shell.
 The workflow runs it on every pull request.
 
-[`sandbox-check.mjs`](sandbox-check.mjs) is the second half: it runs each
-runner-image capability the way the agent does, through
+[`sandbox-check.mjs`](sandbox-check.mjs) is the second half: it runs every
+capability the way the agent does, through
 `vps-agent/lib/docker-runner.js` itself (`prepareJobDir`, `buildDockerArgs`,
-so the exact sandbox flags, the tmpfs, the label and a `tar` payload), against
-a locally built image, and expects the exit codes the job would report. The
-smoke test runs inside a container that is not `--read-only`; this one is,
-and it is what caught both the tmpfs ownership and the `TMPDIR` failures.
+so the exact sandbox flags, the tmpfs, the label and a `tar` payload), and
+expects the exit codes the job would report. The runner-image capabilities
+run against a locally built image; `shell-echo` runs on the `alpine` digest
+`capabilities.js` pins, pulled first as the host would, and must print its
+payload and nothing else. A capability with no case fails the script. The
+three `ansible-check` fixtures are under
+[`smoke/ansible-check-payload/`](smoke/ansible-check-payload/): a valid
+playbook, which must print its `playbook:` line and nothing else, and an
+unknown play keyword and a collection module, both refused with exit 4
+(the runner carries ansible-core and no collections). The smoke test runs
+inside a container that is not `--read-only`; this one is, and it is what
+caught both the tmpfs ownership and the `TMPDIR` failures.
 One of its jobs is the Landing Zone Builder's full default build, generated
 from `frontend/src/lib/landingZone` when the script runs, so it needs that
 directory beside this one (a full checkout, as CI has) and fails on any
@@ -325,7 +337,8 @@ node lab-image/sandbox-check.mjs hcw-lab-runner:dev
 A passing run ends with `smoke: passed (runner)` or `smoke: passed (full)`
 and exits 0; any failing check prints `FAIL:` with the tool's output beneath
 it and the script exits 1 after running every remaining check.
-`sandbox-check.mjs` ends with `sandbox-check: passed` and exits 0, or prints
+`sandbox-check.mjs` ends with a `sandbox-check: passed` line naming how many
+jobs ran and the image the runner-image ones ran on, and exits 0, or prints
 the job's output and exits 1.
 
 ## Updating a version

@@ -5,7 +5,8 @@ name: Update Version Floors
 # scripts/version-floors.json moves (#715, #714).
 #
 # WHY A WORKFLOW. version-floors.json records the newest Python, Node.js,
-# Ubuntu LTS, Debian and Terraform release on the day it was read, and
+# Ubuntu LTS, Debian, Alpine, Terraform, PostgreSQL and HashiCorp Vault
+# release on the day it was read, and
 # scripts/version-floors.test.mjs fails any pin below the floor derived from
 # it. That keeps the pins honest against the file; this keeps the file honest
 # against the world. Ubuntu 24.04 was named in ADR 0032 on 2026-09-25 without

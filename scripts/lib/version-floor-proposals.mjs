@@ -17,6 +17,7 @@ export const PRODUCTS = {
   node: 'nodejs',
   ubuntu: 'ubuntu',
   debian: 'debian',
+  alpine: 'alpine-linux',
   terraform: 'terraform',
   postgresql: 'postgresql',
   vault: 'hashicorp-vault',
@@ -114,7 +115,7 @@ function applyLine(record, label, entry, picked, floorOf) {
   record.set(label, entry, 'floor', floorOf(picked.newest));
 }
 
-/** Python and Terraform: newest line, N-2 patches. */
+/** Python, Terraform and Alpine: newest line, N-2 patches. */
 function proposePatchKind(run, kind) {
   const product = PRODUCTS[kind];
   const picked = adoptLine(releasesOf(run.sources.eol[kind], product), { today: run.today, step: 'patch', product });
@@ -268,6 +269,7 @@ export function proposeFloors(current, sources, today) {
   };
   proposePatchKind(run, 'python');
   proposePatchKind(run, 'terraform');
+  proposePatchKind(run, 'alpine');
   proposeNode(run);
   proposeCeilings(run);
   proposeDistribution(run, 'ubuntu', newestLts(sources, today));

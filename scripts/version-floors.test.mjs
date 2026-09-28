@@ -12,8 +12,11 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { IMAGES } from '../vps-agent/lib/capabilities.js';
 import {
+  BUILT_HERE,
   ENGINES_EXEMPT,
+  JOB_IMAGES_FILE,
   collectPins,
   compareVersions,
   findViolations,
@@ -28,6 +31,7 @@ import {
   parseNpmRange,
   patchFloor,
   readDockerfile,
+  readJobImages,
   readLabHost,
   readWorkflow,
   terraformConstraintAdmits,
@@ -290,6 +294,111 @@ describe('reading a Dockerfile', () => {
   });
 });
 
+/**
+ * The lab job images (IMAGES in vps-agent/lib/capabilities.js) are what the
+ * agent pulls and runs on the lab host, and until 2026-09-28 nothing read
+ * them: shell-echo ran alpine:3.20, past its end of life, and ansible-check a
+ * third-party image. Every entry must now be governed by a kind, be built
+ * here, or be named in `unsourced`.
+ */
+describe('reading the lab job images', () => {
+  const source = readFileSync(join(ROOT, JOB_IMAGES_FILE), 'utf8');
+  const today = readJobImages(JOB_IMAGES_FILE, source, floors);
+
+  /** A capabilities.js holding only the given IMAGES entries. */
+  const imagesFile = (entries) =>
+    ['// header', 'export const IMAGES = {', ...entries.map(([key, ref]) => `  ${key}:\n    '${ref}',`), '};', 'export const CAPABILITIES = {};'].join('\n');
+
+  /** The IMAGES map main carried until 2026-09-28, digests as they were. */
+  const MAIN_BEFORE = [
+    ['alpine', 'alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc'],
+    ['ansible', 'alpine/ansible:2.17.0@sha256:3cf35fbaecd3dba7c246191be1d46c0b4c051839294eb813677a7482c1fa1ced'],
+    ['hcwLabRunner', IMAGES.hcwLabRunner],
+  ];
+
+  it("reads today's map: an alpine pin at its exact release, and nothing for the image built here", () => {
+    expect(today.problems).toEqual([]);
+    expect(today.pins.map((p) => [p.where, p.kind, p.version])).toEqual([
+      [`${JOB_IMAGES_FILE} > IMAGES.alpine`, 'alpine', '3.24.2'],
+    ]);
+    const line = today.pins[0].line;
+    expect(source.split('\n')[line - 1]).toContain(IMAGES.alpine);
+  });
+
+  /**
+   * The gate this issue asked for: an image in IMAGES that no floor covers
+   * fails here by name. It imports the map rather than trusting the text
+   * scan, so a reformatted entry the scan misses fails too.
+   */
+  it('covers every image the agent exports, by a kind, by being built here, or by an unsourced entry', () => {
+    const unsourced = new Set(Object.values(floors.unsourced).map((entry) => entry?.pin));
+    const uncovered = Object.entries(IMAGES).filter(([key, ref]) => {
+      const where = `${JOB_IMAGES_FILE} > IMAGES.${key}`;
+      const pinned = today.pins.some((p) => p.where === where && p.raw === ref);
+      const builtHere = Object.keys(BUILT_HERE).some((image) => ref.startsWith(`${image}:`) || ref.startsWith(`${image}@`));
+      return !pinned && !builtHere && !unsourced.has(where);
+    });
+    expect(uncovered.map(([key, ref]) => `IMAGES.${key} = ${ref}`)).toEqual([]);
+  });
+
+  it('fails the map main carried until 2026-09-28: alpine:3.20 behind its floor, alpine/ansible uncovered', () => {
+    // Cut to this file: the ceiling selectors match no pin in a one-file read.
+    const findings = findViolations(floors, readJobImages(JOB_IMAGES_FILE, imagesFile(MAIN_BEFORE), floors)).filter(
+      (f) => f.file === JOB_IMAGES_FILE
+    );
+    expect(findings.map((f) => [f.where, f.message])).toEqual([
+      [`${JOB_IMAGES_FILE} > IMAGES.alpine`, '3.20 is below the floor 3.24.0'],
+      [
+        `${JOB_IMAGES_FILE} > IMAGES.alpine`,
+        'alpine:3.20 is pinned by digest but names only the line 3.20; name the exact release the digest is (MAJOR.MINOR.PATCH), because a digest does not float',
+      ],
+      [
+        `${JOB_IMAGES_FILE} > IMAGES.ansible`,
+        `alpine/ansible has no floor: no kind in scripts/version-floors.json governs it, this repository does not build it, and no "unsourced" entry has the pin "${JOB_IMAGES_FILE} > IMAGES.ansible"`,
+      ],
+    ]);
+    // The line of each reference itself, beneath its key.
+    expect(findings.map((f) => f.line)).toEqual([4, 4, 6]);
+  });
+
+  it('refuses a line-only tag on a digest even when the line is current', () => {
+    const { pins, problems } = readJobImages(JOB_IMAGES_FILE, imagesFile([['alpine', `alpine:3.24@sha256:${'0'.repeat(64)}`]]), floors);
+    expect(pins.map((p) => p.version)).toEqual(['3.24']);
+    expect(problems.map((p) => p.message)).toEqual([expect.stringMatching(/names only the line 3\.24/)]);
+  });
+
+  it('accepts a third-party image that an unsourced entry names by its pin', () => {
+    const withEntry = structuredClone(floors);
+    withEntry.unsourced.ansible = { pin: `${JOB_IMAGES_FILE} > IMAGES.ansible`, source: null };
+    const { pins, problems } = readJobImages(JOB_IMAGES_FILE, imagesFile(MAIN_BEFORE.slice(1)), withEntry);
+    expect([pins, problems]).toEqual([[], []]);
+  });
+
+  it('reports a file with no IMAGES map rather than passing on nothing', () => {
+    const { pins, problems } = readJobImages(JOB_IMAGES_FILE, 'export const CAPABILITIES = {};\n', floors);
+    expect(pins).toEqual([]);
+    expect(problems.map((p) => p.message)).toEqual([expect.stringMatching(/entries found, so the job images cannot be checked/)]);
+  });
+
+  it('reads FROM alpine in a Dockerfile by the same rule', () => {
+    const dockerfile = [`FROM alpine:3.24.2@sha256:${'0'.repeat(64)}`, 'FROM alpine:3.23', `FROM alpine:3.24@sha256:${'0'.repeat(64)}`].join('\n');
+    const { pins, problems } = readDockerfile('x/Dockerfile', dockerfile, floors);
+    expect(pins.map((p) => [p.line, p.version, judge(p, floors)])).toEqual([
+      [1, '3.24.2', null],
+      [2, '3.23', '3.23 is below the floor 3.24.0'],
+      [3, '3.24', null],
+    ]);
+    expect(problems.map((p) => p.line)).toEqual([3]);
+  });
+
+  it('judges each image this repository builds where it is built', () => {
+    const collected = collectPins(ROOT, floors);
+    for (const dockerfile of Object.values(BUILT_HERE)) {
+      expect(collected.pins.filter((p) => p.file === dockerfile && p.where.includes('FROM')).length, dockerfile).toBeGreaterThanOrEqual(1);
+    }
+  });
+});
+
 describe('reading version files and Terraform', () => {
   const dir = mkdtempSync(join(tmpdir(), 'version-floors-'));
   writeFileSync(join(dir, '.nvmrc'), 'v24\n');
@@ -382,6 +491,13 @@ describe('the rules', () => {
     expect(judge(at({ kind: 'vault', version: '1.17.5' }), floors)).toMatch(/below the floor 2\.1\.0/);
   });
 
+  it('holds an Alpine pin to the newest line, at most two patch releases behind', () => {
+    expect(judge(at({ kind: 'alpine', version: '3.24.2' }), floors)).toBe(null);
+    expect(judge(at({ kind: 'alpine', version: '3.24.0' }), floors)).toBe(null);
+    expect(judge(at({ kind: 'alpine', version: '3.23.6' }), floors)).toMatch(/3\.23\.6 is below the floor 3\.24\.0/);
+    expect(judge(at({ kind: 'alpine', version: '3.20' }), floors)).toMatch(/3\.20 is below the floor 3\.24\.0/);
+  });
+
   it('has no floor for Portainer, because it has no source', () => {
     expect(judge(at({ kind: 'portainer', version: '2.45.1' }), floors)).toMatch(/no floor is recorded for kind "portainer"/);
   });
@@ -391,7 +507,7 @@ describe('scripts/version-floors.json', () => {
   const kinds = floors.kinds;
 
   it('has one entry per kind, each dated and sourced', () => {
-    expect(Object.keys(kinds).sort()).toEqual(['debian', 'node', 'postgresql', 'python', 'terraform', 'ubuntu', 'vault']);
+    expect(Object.keys(kinds).sort()).toEqual(['alpine', 'debian', 'node', 'postgresql', 'python', 'terraform', 'ubuntu', 'vault']);
     const entries = [...Object.values(kinds), ...Object.values(kinds.node.platformCeilings)];
     for (const entry of entries) {
       expect(entry.newest, JSON.stringify(entry)).toBeTruthy();
@@ -420,6 +536,8 @@ describe('scripts/version-floors.json', () => {
     expect(kinds.postgresql.newest.split('.')[0]).toBe(kinds.postgresql.line);
     expect(kinds.vault.floor).toBe(patchFloor(kinds.vault.newest));
     expect(kinds.vault.newest.startsWith(`${kinds.vault.line}.`)).toBe(true);
+    expect(kinds.alpine.floor).toBe(patchFloor(kinds.alpine.newest));
+    expect(kinds.alpine.newest.startsWith(`${kinds.alpine.line}.`)).toBe(true);
   });
 
   /**
@@ -438,6 +556,11 @@ describe('scripts/version-floors.json', () => {
       expect(entry.checkedOn).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       expect(entry.rule.length).toBeGreaterThan(20);
       const [file, key] = entry.pin.split(' > ');
+      if (file === JOB_IMAGES_FILE) {
+        // A third-party lab job image: `IMAGES.<key>` in capabilities.js.
+        expect(Object.hasOwn(IMAGES, key.replace(/^IMAGES\./, '')), `${entry.pin} exists`).toBe(true);
+        continue;
+      }
       const text = readFileSync(join(ROOT, file), 'utf8');
       expect(text, `${entry.pin} exists`).toMatch(new RegExp(`^${key}:`, 'm'));
     }
@@ -473,6 +596,7 @@ describe('every pin in the repository meets its floor', () => {
     expect(count((p) => p.where === 'infra/functionapp.tf > runtime_version')).toBe(1);
     expect(count((p) => p.file === 'frontend/.nvmrc')).toBe(1);
     expect(count((p) => p.file.startsWith('lab-image/') && p.where.includes('FROM'))).toBeGreaterThanOrEqual(1);
+    expect(count((p) => p.file === JOB_IMAGES_FILE && p.kind === 'alpine')).toBe(1);
     const labHost = [...collected.pins, ...collected.problems].filter((p) => p.file.startsWith('lab-host/'));
     expect(labHost.some((p) => p.kind === 'node')).toBe(true);
     expect(labHost.some((p) => p.kind === 'python')).toBe(true);

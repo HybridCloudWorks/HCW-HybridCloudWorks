@@ -17,7 +17,7 @@ const SETUP_STEPS = [
   },
   {
     title: 'Install Docker + Node.js 26',
-    body: 'On the Hostinger lab host, lab-host/bootstrap.sh does this: its Ansible play installs Docker Engine from download.docker.com and Node.js 26 from NodeSource at the versions pinned in lab-host/ansible/group_vars/all.yml. On any other host, install the same two from those repositories. Pre-pull the sandbox images: alpine:3.20, hashicorp/terraform:1.9, alpine/ansible:2.17.0.',
+    body: 'On the Hostinger lab host, lab-host/bootstrap.sh does this: its Ansible play installs Docker Engine from download.docker.com and Node.js 26 from NodeSource at the versions pinned in lab-host/ansible/group_vars/all.yml. On any other host, install the same two from those repositories. Pre-pull the two sandbox images by the digests IMAGES pins in vps-agent/lib/capabilities.js: alpine for shell-echo, and ghcr.io/hybridcloudworks/hcw-lab-runner for the other four job types. A job whose image is not on the host pulls it first, and the pull adds its progress lines to the output of that job.',
   },
   {
     title: 'Provision the Entra agent identity',
