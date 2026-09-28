@@ -1409,6 +1409,15 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The lab's HTTPS turns on: Caddy's config check loads the token.** The
+  `caddy` role validated the Caddyfile without the environment file the unit
+  reads, so the Cloudflare token was empty during the check and the TLS
+  Caddyfile was refused ("API token '' appears invalid") on 2026-09-27, the
+  first run with a vault. `validate` now passes `--envfile`. Proven on the VPS
+  from the branch before merge: `failed=0`, and `https://lab.hybridcloudworks.com`
+  serves a Let's Encrypt certificate (valid to 2026-12-26) with HTTP
+  redirecting to it.
+
 - **lab-image: the image vendors every module version the Landing Zone
   Builder emits, and CI fails when it stops (ADR 0032 decision 5).** Found
   while the lab article drafts were verified (#737). The builder's spokes
