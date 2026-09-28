@@ -1206,7 +1206,7 @@ This project has not cut a tagged release; entries are grouped under
 
 - **Lab jobs on the newest images: `shell-echo` on Alpine 3.24,
   `ansible-check` on `hcw-lab-runner`; every job image held to a floor
-  (#715).** The first real lab job (2026-09-28, `shell-echo` on
+  (#747, #715).** The first real lab job (2026-09-28, `shell-echo` on
   `vps-hostinger-01`) pulled `alpine:3.20`, past its end of life on
   2026-04-01. `vps-agent/lib/capabilities.js` now pins `alpine:3.24.2` by
   its index digest `sha256:294b683c...`, the value the registry's
