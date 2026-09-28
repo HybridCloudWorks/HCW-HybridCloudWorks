@@ -501,12 +501,12 @@ lands on https://hybridcloudworks.com/education/labs, where every top-level
 visit to the lab ends, and the panes there are signed in. That landing is
 the success; a Coder page in the tab would mean the panes-only rule is not
 applied. To confirm the account is the owner, make a token of yours in a
-pane (step 1 of "The status token for the site", below) and run Coder's CLI
-inside the `coder` container with it, PowerShell, with the token on the
-clipboard:
+pane and hold it in `$t` (step 1 of "The status token for the site",
+below), then run Coder's CLI inside the `coder` container with it,
+PowerShell:
 
 ```powershell
-(Get-Clipboard -Raw) | ssh hcw-lab "sudo -n docker exec -i -e CODER_URL=http://127.0.0.1:7080 coder sh -c 'tr -d \\r | { read -r CODER_SESSION_TOKEN; export CODER_SESSION_TOKEN; coder users show me; }'"
+$t | ssh hcw-lab "sudo -n docker exec -i -e CODER_URL=http://127.0.0.1:7080 coder sh -c 'tr -d \\r | { read -r CODER_SESSION_TOKEN; export CODER_SESSION_TOKEN; coder users show me; }'"
 ```
 
 Success is a `Roles` row reading `Owner`. Every later sign-in is a member.
@@ -543,11 +543,11 @@ The helper reads the token from standard input and nowhere else, so it is
 never on a command line on the host, never printed and never written to a
 file.
 
-**The line.** PowerShell, in the order "Setting a key" gives above: paste
-the line and do not press Enter, copy the token, then press Enter.
+**The line.** PowerShell, with the token held in `$t` as step 1 of "The
+status token for the site" shows, not on the clipboard:
 
 ```powershell
-(Get-Clipboard -Raw) | ssh hcw-lab "sudo -n /usr/local/sbin/hcw-coder-template-push"
+$t | ssh hcw-lab "sudo -n /usr/local/sbin/hcw-coder-template-push"
 ```
 
 It publishes what `/opt/hcw-src` holds, which is the commit the last
@@ -679,9 +679,21 @@ appears on a command line.
       **Cancel**. The page stays, now as Coder's create form, with Coder's
       account menu at its top right.
    3. Open that menu, choose **Account**, then **Tokens** (Coder's path is
-      `/settings/tokens`), then **Add token**. Name it `hcw-setup`, choose
-      the shortest expiry the form offers, create it and copy the token,
-      which Coder shows once.
+      `/settings/tokens`), then **Add token**. Name it `hcw-setup` (delete
+      an older `hcw-setup` first: names are unique), choose the shortest
+      expiry the form offers, and create it. Keep the page open: Coder
+      shows the token once.
+   4. Hold it in PowerShell. Paste this line, press Enter, then paste the
+      token at the masked prompt and press Enter:
+
+      ```powershell
+      $t = [Net.NetworkCredential]::new('', (Read-Host 'hcw-setup token' -AsSecureString)).Password
+      ```
+
+      A variable, not the clipboard, because every later line is itself
+      copied from this page: on 2026-09-28 copying step 3's line replaced
+      the token on the clipboard, and Coder answered `You are signed out`
+      to the line's own text.
 
    Do it within ten minutes of opening the pane: after that the pane stops
    waiting for the workspace and says the workspaces are unavailable, and
@@ -695,39 +707,45 @@ appears on a command line.
    session would be renewed, and copying it does not copy the browser's
    whole signed-in session.
 
-2. **The user and its role.** PowerShell, with that token on the clipboard:
+2. **The user and its role.** PowerShell, with that token in `$t`:
 
    ```powershell
-   (Get-Clipboard -Raw) | ssh hcw-lab "sudo -n docker exec -i -e CODER_URL=http://127.0.0.1:7080 coder sh -c 'tr -d \\r | { read -r CODER_SESSION_TOKEN; export CODER_SESSION_TOKEN; coder users show hcw-status >/dev/null 2>&1 || coder users create --username hcw-status --email coder-status@hybridcloudworks.invalid --login-type github; coder users edit-roles hcw-status --roles template-admin --yes && coder users show hcw-status; }'"
+   $t | ssh hcw-lab "sudo -n docker exec -i -e CODER_URL=http://127.0.0.1:7080 coder sh -c 'tr -d \\r | { read -r CODER_SESSION_TOKEN; export CODER_SESSION_TOKEN; coder users show hcw-status >/dev/null 2>&1 || coder users create --username hcw-status --email coder-status@hybridcloudworks.invalid --login-type github; coder users edit-roles hcw-status --roles template-admin --yes && coder users show hcw-status; }'"
    ```
 
    Success is the user's table with `Username` `hcw-status`, `Status`
    `dormant` and `Roles` `Template Admin`. The first run prints `A new user
    has been created!` above it, with a note about GitHub sign-in that does
    not apply to this user. A second run changes nothing. `You are signed
-   out or your session has expired` means the clipboard did not hold the
-   step 1 token.
+   out or your session has expired` means `$t` does not hold the step 1
+   token: repeat step 1's last line.
 
-3. **The status token, straight to the clipboard.** PowerShell, with the
-   step 1 token still on the clipboard. The output replaces it, so the new
-   token is never on the screen:
+3. **The status token, into `$s`.** PowerShell. The token is captured, so
+   it is never on the screen, and success prints nothing:
 
    ```powershell
-   (Get-Clipboard -Raw) | ssh hcw-lab "sudo -n docker exec -i -e CODER_URL=http://127.0.0.1:7080 coder sh -c 'tr -d \\r | { read -r CODER_SESSION_TOKEN; export CODER_SESSION_TOKEN; coder tokens create --user hcw-status --lifetime 1y --scope template:read --scope workspace:read; }'" | Set-Clipboard
+   $s = $t | ssh hcw-lab "sudo -n docker exec -i -e CODER_URL=http://127.0.0.1:7080 coder sh -c 'tr -d \\r | { read -r CODER_SESSION_TOKEN; export CODER_SESSION_TOKEN; coder tokens create --user hcw-status --lifetime 1y --scope template:read --scope workspace:read; }'"
    ```
 
-   Success prints nothing. Check what the clipboard now holds, PowerShell:
+   Check what `$s` holds, PowerShell:
 
    ```powershell
-   Invoke-RestMethod 'https://coder.lab.hybridcloudworks.com/api/v2/workspaces?q=status:running' -Headers @{ 'Coder-Session-Token' = (Get-Clipboard -Raw).Trim() } | Select-Object count
+   Invoke-RestMethod 'https://coder.lab.hybridcloudworks.com/api/v2/workspaces?q=status:running' -Headers @{ 'Coder-Session-Token' = "$s".Trim() } | Select-Object count
    ```
 
    Success is a `count` row (`0` until someone starts a workspace). A `401`
-   means the clipboard does not hold a new token, because step 3 printed an
-   error instead of one. Make another token in step 1 and run step 3 again.
+   means `$s` holds no token, because step 3 printed an error instead of
+   one; repeat step 1's last line and step 3.
 
-4. **Seed it.** At https://hybridcloudworks.com/admin/integrations?tab=keys,
-   in the Hybrid Lab section, paste into **Coder status token** and save.
+4. **Seed it.** Put it on the clipboard. Nothing is copied from this page
+   after this line, so it stays there. PowerShell:
+
+   ```powershell
+   "$s".Trim() | Set-Clipboard
+   ```
+
+   Then at https://hybridcloudworks.com/admin/integrations?tab=keys, in the
+   Hybrid Lab section, paste into **Coder status token** and save.
    Success is the row's light turning green. A minute later (the card's read
    is cached for one), PowerShell:
 
@@ -742,18 +760,26 @@ appears on a command line.
    token, and the check in step 3 tells why. `reachable` `False` means Coder
    did not answer at all, token or not.
 
-5. **Retire the step 1 token.** In a pane, as in step 1: **Account**,
-   **Tokens**, then delete `hcw-setup`.
+5. **Clean up.** Clear both variables and the clipboard, PowerShell:
 
-Then, in a pull request, take `CODER_STATUS_TOKEN` off `EXPECTED_UNRESOLVED`
-in `scripts/check-unresolved-secrets.mjs`, which `infra/functionapp.tf` asks
-for once it is seeded, so from then on an unresolved reference fails the
-monitor like any other.
+   ```powershell
+   Remove-Variable t, s; Set-Clipboard -Value ' '
+   ```
 
-The token expires a year after step 3, and nothing renews it: put the date
-in the calendar. If it lapses first, the panes keep opening and the card
-stops listing templates and counting workspaces until it is renewed. To
-renew, run steps 1, 3, 4 and 5 again. Step 3 makes a
+   Then retire the step 1 token. In a pane, as in step 1: **Account**,
+   **Tokens**, then delete `hcw-setup`. It would expire on its own after
+   the form's shortest lifetime (seven days), but nothing needs it once
+   this section is done.
+
+`CODER_STATUS_TOKEN` was first seeded on 2026-09-28 and came off
+`EXPECTED_UNRESOLVED` in `scripts/check-unresolved-secrets.mjs` the same
+day, so an unresolved reference now fails the monitor like any other.
+
+The token expires a year after step 3, and nothing renews it: the one
+seeded on 2026-09-28 expires on 2027-09-28, and #763 is the reminder,
+due a month before. If it lapses first, the panes keep opening and the
+card stops listing templates and counting workspaces until it is renewed.
+To renew, run steps 1, 3, 4 and 5 again. Step 3 makes a
 new token each time (Coder names each one, which is why the line gives no
 `--name`), and the old one stops working at its own expiry.
 `coder tokens list --all` lists both, with `hcw-status` as their owner.

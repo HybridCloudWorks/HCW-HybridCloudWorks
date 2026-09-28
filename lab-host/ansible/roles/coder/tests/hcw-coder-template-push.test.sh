@@ -74,7 +74,7 @@ check "the helper's container is the Compose file's container_name" \
 check "the helper's Coder URL is the port Coder listens on inside its container" \
   "grep -qx 'coder_url=http://127.0.0.1:7080' '${helper}' && grep -qx '      CODER_HTTP_ADDRESS: \"0.0.0.0:7080\"' '${compose}'"
 check "the owner's line in lab-host/README.md runs the installed path" \
-  "grep -qxF '(Get-Clipboard -Raw) | ssh hcw-lab \"sudo -n /usr/local/sbin/hcw-coder-template-push\"' '${readme}'"
+  "grep -qxF '\$t | ssh hcw-lab \"sudo -n /usr/local/sbin/hcw-coder-template-push\"' '${readme}'"
 installed="$("${python}" - "${tasks}" <<'PY'
 import sys, yaml
 for task in yaml.safe_load(open(sys.argv[1], encoding="utf-8")):
