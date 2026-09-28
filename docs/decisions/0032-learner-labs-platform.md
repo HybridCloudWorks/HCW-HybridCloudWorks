@@ -257,7 +257,11 @@ answer: which client identifier the rate limits count.
 
 **Owner decision 2026-09-28.** "The lab should only be accessible through
 'panes' from my site, lock to that." Of the shapes put to the owner, the one
-chosen is **the site's origin plus Cloudflare Turnstile**.
+chosen is **the site's origin plus Cloudflare Turnstile**. The same decision
+has a lab-host half, recorded under decision 4 and in
+[Labs host, "Panes only"](../architecture/labs-host.md#panes-only) (#750):
+Caddy lets only the site frame the lab and turns a direct visit away. This
+amendment is the API half, for the one public route that queues work.
 
 1. **Public submission is open, and only from the builder's pane on the
    site.** Decision 6's Gate is replaced by a lock, and nothing else about
