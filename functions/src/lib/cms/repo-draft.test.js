@@ -1,0 +1,395 @@
+/**
+ * The pure half of the repository draft import: which paths may be imported,
+ * how a draft's front matter is read, and the document it becomes.
+ *
+ * The three lab articles (#737/#744) are read from disk rather than copied
+ * into a fixture, so this fails when one of them stops being importable —
+ * which is the claim the import makes about them. CI's `functions` row
+ * watches docs/content/blog-*.md for exactly that reason.
+ */
+import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import {
+  CONTRACT_DOC_PATHS,
+  RAW_ORIGIN,
+  RAW_PATH_PREFIX,
+  REPO_DRAFT_ID_NAMESPACE,
+  blobUrlFor,
+  buildRepoDraftData,
+  buildRepoDraftRefresh,
+  checkRepoDraftPath,
+  countEmbedFences,
+  findRepoRelativeLinks,
+  inferProviderFromTags,
+  parseFrontMatter,
+  parseInlineList,
+  parseRepoDraft,
+  rawUrlFor,
+  repoDraftContentId,
+  sha256Hex,
+} from './repo-draft.js';
+import { createContentDocument } from './content-create.js';
+
+const LAB_DRAFTS = Object.freeze([
+  'docs/content/blog-lab-01-landing-zone.md',
+  'docs/content/blog-lab-02-one-container.md',
+  'docs/content/blog-lab-03-agent-explains.md',
+]);
+
+const readRepoFile = (path) => readFileSync(join(process.cwd(), '..', ...path.split('/')), 'utf8');
+
+/** The fence every lab article embeds, as written in the files. */
+const LAB_FENCE = '```landing-zone\nlz=mg,policy,mgmt,hub&corp=0&online=0\n```';
+
+const SOURCE = Object.freeze({
+  commitSha: '2fb230c9ac7118c4f87d4cf8031e0571d47e74d8',
+  rawUrl: 'https://raw.githubusercontent.com/HybridCloudWorks/HCW-HybridCloudWorks/main/docs/content/blog-lab-01-landing-zone.md',
+  contentSha256: 'a'.repeat(64),
+});
+const FIXED_NOW = () => new Date('2026-09-28T12:00:00.000Z');
+
+describe('checkRepoDraftPath — the allow-list', () => {
+  it.each(LAB_DRAFTS)('admits %s', (path) => {
+    expect(checkRepoDraftPath(path)).toEqual({ ok: true, path });
+  });
+
+  it.each([
+    ['a traversal out of the directory', 'docs/content/../../infra/main.tf'],
+    ['a traversal that lands back on a blog name', 'docs/content/../content/blog-lab-01-landing-zone.md'],
+    ['a leading traversal', '../docs/content/blog-lab-01-landing-zone.md'],
+    ['an encoded traversal', 'docs/content/%2e%2e/blog-x.md'],
+    ['a Windows separator', 'docs\\content\\blog-x.md'],
+    ['an absolute path', '/docs/content/blog-lab-01-landing-zone.md'],
+    ['a URL', 'https://raw.githubusercontent.com/x/y/main/docs/content/blog-x.md'],
+    ['another directory', 'docs/architecture/blog-x.md'],
+    ['a subdirectory', 'docs/content/drafts/blog-x.md'],
+    ['a file that is not a blog post', 'docs/content/index.md'],
+    ['another extension', 'docs/content/blog-x.mdx'],
+    ['an upper-case name', 'docs/content/blog-Lab-01.md'],
+    ['an upper-case extension', 'docs/content/blog-x.MD'],
+    ['a trailing newline', 'docs/content/blog-x.md\n'],
+    ['a query string', 'docs/content/blog-x.md?ref=dev'],
+    ['the empty string', ''],
+  ])('refuses %s', (_label, path) => {
+    expect(checkRepoDraftPath(path).ok).toBe(false);
+  });
+
+  it.each(CONTRACT_DOC_PATHS)('refuses the contract document %s by name', (path) => {
+    const check = checkRepoDraftPath(path);
+    expect(check.ok).toBe(false);
+    expect(check.reason).toMatch(/contract/);
+  });
+
+  it.each([[undefined], [null], [42], [['docs/content/blog-x.md']], [{ path: 'x' }]])(
+    'refuses a non-string (%j)',
+    (value) => {
+      expect(checkRepoDraftPath(value).ok).toBe(false);
+    }
+  );
+
+  it('refuses an over-long path before the pattern runs', () => {
+    expect(checkRepoDraftPath(`docs/content/blog-${'a'.repeat(200)}.md`).ok).toBe(false);
+  });
+
+  it('builds the one raw URL a checked path may come from, and the GitHub page', () => {
+    const url = new URL(rawUrlFor(LAB_DRAFTS[0]));
+    expect(url.origin).toBe(RAW_ORIGIN);
+    expect(url.pathname.startsWith(RAW_PATH_PREFIX)).toBe(true);
+    expect(url.href).toBe(
+      'https://raw.githubusercontent.com/HybridCloudWorks/HCW-HybridCloudWorks/main/docs/content/blog-lab-01-landing-zone.md'
+    );
+    expect(blobUrlFor(LAB_DRAFTS[0])).toBe(
+      'https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/docs/content/blog-lab-01-landing-zone.md'
+    );
+  });
+});
+
+describe('parseFrontMatter — the tooling/workflow.py frontmatter() port', () => {
+  it('reads key: value lines from an anchored block and returns the text after it', () => {
+    const { fields, body } = parseFrontMatter('---\ntitle: One\nreading: 9\n---\n\nBody here.\n');
+    expect(fields).toEqual({ title: 'One', reading: '9' });
+    expect(body).toBe('\nBody here.\n');
+  });
+
+  it('drops a trailing " #" comment, skips a value that is only a comment, strips quotes', () => {
+    const { fields } = parseFrontMatter(
+      "---\ntitle: 'Quoted'\nsubtitle: plain text # a comment\ntrack: # how-to | build-log\n---\nx"
+    );
+    expect(fields).toEqual({ title: 'Quoted', subtitle: 'plain text' });
+  });
+
+  it('takes a quoted value whole, so a quoted title may contain " #"', () => {
+    const { fields } = parseFrontMatter('---\ntitle: "Closing issue #400"\n---\nx');
+    expect(fields.title).toBe('Closing issue #400');
+  });
+
+  it('keeps everything after the first colon in the value', () => {
+    expect(parseFrontMatter('---\ntitle: Terraform: the plan\n---\nx').fields.title).toBe(
+      'Terraform: the plan'
+    );
+  });
+
+  it('reads CRLF files and a byte-order mark the same as LF ones', () => {
+    const { fields, body } = parseFrontMatter('﻿---\r\ntitle: One\r\n---\r\nBody\r\n');
+    expect(fields).toEqual({ title: 'One' });
+    expect(body).toBe('Body\n');
+  });
+
+  it('returns null fields when the file does not open with a block', () => {
+    expect(parseFrontMatter('# Title\n\n---\ntitle: late\n---\n').fields).toBeNull();
+    expect(parseFrontMatter('').fields).toBeNull();
+  });
+
+  it('reads the inline tag list every post writes', () => {
+    expect(parseInlineList('[azure, terraform, iac, landing-zone]')).toEqual([
+      'azure',
+      'terraform',
+      'iac',
+      'landing-zone',
+    ]);
+    expect(parseInlineList("['a', \"b\", , c]")).toEqual(['a', 'b', 'c']);
+    expect(parseInlineList('')).toEqual([]);
+    expect(parseInlineList(Array.from({ length: 20 }, (_, i) => `t${i}`).join(','))).toHaveLength(12);
+  });
+});
+
+describe('parseRepoDraft — refusals and warnings', () => {
+  it.each([
+    ['NO_FRONT_MATTER', '# Just a heading\n\nText.'],
+    ['NO_TITLE', '---\nsubtitle: no title\n---\nText.'],
+    ['EMPTY_BODY', '---\ntitle: Only front matter\n---\n\n\n'],
+    ['TITLE_TOO_LONG', `---\ntitle: ${'x'.repeat(301)}\n---\nText.`],
+  ])('refuses with %s', (code, text) => {
+    const parsed = parseRepoDraft(text);
+    expect(parsed).toMatchObject({ ok: false, code });
+    expect(parsed.error).toEqual(expect.any(String));
+  });
+
+  it('ignores a malformed date or reading with a warning instead of refusing the article', () => {
+    const parsed = parseRepoDraft('---\ntitle: T\ndate: 2026-13-45\nreading: soon\n---\nText.');
+    expect(parsed.ok).toBe(true);
+    expect(parsed.draft.date).toBeNull();
+    expect(parsed.draft.reading).toBeNull();
+    expect(parsed.draft.warnings).toEqual([
+      'date "2026-13-45" is not YYYY-MM-DD and was ignored',
+      'reading "soon" is not a number of minutes and was ignored',
+    ]);
+  });
+
+  it('finds repository-relative links and leaves site and external links alone', () => {
+    expect(
+      findRepoRelativeLinks(
+        '[a](blog-lab-02-one-container.md) [b](../content/x.md#part) [c](https://example.com/y.md) [d](/tools/landing-zone) [e](#local)'
+      )
+    ).toEqual(['blog-lab-02-one-container.md', '../content/x.md']);
+  });
+
+  it('counts embed fences by language', () => {
+    expect(countEmbedFences(`${LAB_FENCE}\n\n\`\`\`pricing-scenario\nscenario=x\n\`\`\``)).toEqual({
+      'landing-zone': 1,
+      'pricing-scenario': 1,
+    });
+  });
+
+  it('takes the provider from the first tag that names one the CMS knows', () => {
+    expect(inferProviderFromTags(['iac', 'azure', 'terraform'])).toBe('Azure');
+    expect(inferProviderFromTags(['terraform', 'docker'])).toBe('Terraform');
+    expect(inferProviderFromTags(['docker', 'ai-agents'])).toBeNull();
+  });
+});
+
+describe('repoDraftContentId', () => {
+  it('is a deterministic RFC 9562 version-5 UUID per path', () => {
+    const id = repoDraftContentId(LAB_DRAFTS[0]);
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(repoDraftContentId(LAB_DRAFTS[0])).toBe(id);
+    expect(new Set(LAB_DRAFTS.map(repoDraftContentId)).size).toBe(3);
+  });
+
+  it('keeps its namespace — changing it re-keys every imported draft', () => {
+    expect(REPO_DRAFT_ID_NAMESPACE).toBe('8bccdb11-a980-4071-bc3a-805c389b371b');
+  });
+});
+
+describe('the three lab drafts, read from disk', () => {
+  const expected = {
+    'docs/content/blog-lab-01-landing-zone.md': {
+      title: 'Build a landing zone you can read',
+      slug: 'build-a-landing-zone-you-can-read',
+      provider: 'Azure',
+      part: '1 of 3',
+    },
+    'docs/content/blog-lab-02-one-container.md': {
+      title: 'Follow along in one container',
+      slug: 'follow-along-in-one-container',
+      provider: 'Terraform',
+      part: '2 of 3',
+    },
+    'docs/content/blog-lab-03-agent-explains.md': {
+      title: 'Let an agent explain it',
+      slug: 'let-an-agent-explain-it',
+      provider: 'Terraform',
+      part: '3 of 3',
+    },
+  };
+
+  it.each(LAB_DRAFTS)('%s parses into a titled, slugged article with its embed intact', (path) => {
+    const text = readRepoFile(path);
+    const parsed = parseRepoDraft(text);
+    expect(parsed.ok).toBe(true);
+    const { draft } = parsed;
+    expect(draft).toMatchObject({
+      ...expected[path],
+      date: '2026-09-27',
+      track: 'how-to',
+      embeds: { 'landing-zone': 1, 'pricing-scenario': 0 },
+    });
+    expect(draft.subtitle.length).toBeGreaterThan(40);
+    expect(draft.tags).toContain('landing-zone');
+    expect(draft.reading).toBeGreaterThan(0);
+    // The body is the file after its front matter, untouched: no `---` block,
+    // the embed fence byte for byte, and every fence still paired.
+    expect(draft.body.startsWith('---')).toBe(false);
+    expect(draft.body).not.toMatch(/^title:/m);
+    expect(draft.body).toContain(LAB_FENCE);
+    expect(text.replace(/\r\n/g, '\n')).toContain(draft.body);
+    expect((draft.body.match(/^```/gm) || []).length % 2).toBe(0);
+    // Written for GitHub, where the sibling links work; the import says so.
+    expect(draft.warnings.join(' ')).toMatch(/links to repository files will not resolve/);
+  });
+
+  it.each(LAB_DRAFTS)(
+    '%s becomes an in_review, never-published document through createContentDocument',
+    async (path) => {
+      const parsed = parseRepoDraft(readRepoFile(path));
+      const data = buildRepoDraftData({
+        path,
+        draft: parsed.draft,
+        source: { ...SOURCE, rawUrl: rawUrlFor(path) },
+        editor: 'editor@hcw.dev',
+        now: FIXED_NOW,
+      });
+      const written = [];
+      const store = { queryDocs: async () => [], upsertDoc: async (c, doc) => written.push([c, doc]) };
+      const result = await createContentDocument({
+        store,
+        user: { email: 'editor@hcw.dev' },
+        data,
+        runEditorialCritique: false,
+        now: FIXED_NOW,
+        uuid: () => repoDraftContentId(path),
+      });
+
+      expect(result).toEqual({ status: 200, body: { success: true, contentId: repoDraftContentId(path) } });
+      expect(written).toHaveLength(1);
+      const [container, doc] = written[0];
+      expect(container).toBe('content');
+      expect(doc).toMatchObject({
+        id: repoDraftContentId(path),
+        contentStatus: 'in_review',
+        Live: false,
+        Status: 'Draft',
+        type: 'blog',
+        publishTarget: 'blog',
+        storageCollection: 'content',
+        Title: expected[path].title,
+        title: expected[path].title,
+        'Cloud Provider': expected[path].provider,
+        source: 'repo',
+        inspectTrigger: false,
+        sourceUrl: blobUrlFor(path),
+        repoPath: path,
+        repoRef: 'main',
+        repoCommitSha: SOURCE.commitSha,
+        repoRawUrl: rawUrlFor(path),
+        repoContentSha256: SOURCE.contentSha256,
+        createdBy: 'editor@hcw.dev',
+        frontMatter: { title: expected[path].title, part: expected[path].part, date: '2026-09-27' },
+      });
+      // Every body field the readers use carries the article, embed intact.
+      for (const field of ['Content', 'content', 'postContent']) {
+        expect(doc[field]).toContain(LAB_FENCE);
+        expect(doc[field]).toBe(parsed.draft.body);
+      }
+      // Never published, never dated for publishing, never holding a URL.
+      for (const key of ['publishedAt', 'Published At', 'publishedDate', 'datePublished', 'slug', 'Slug', 'curatedSubpagePath', 'publicUrl']) {
+        expect(doc, key).not.toHaveProperty(key);
+      }
+      expect(doc.contentQuality).toEqual(expect.objectContaining({ ready: expect.any(Boolean) }));
+    }
+  );
+});
+
+describe('buildRepoDraftRefresh — what a re-import may touch', () => {
+  const draft = parseRepoDraft(readRepoFile(LAB_DRAFTS[0])).draft;
+  const refresh = (current = {}) =>
+    buildRepoDraftRefresh({
+      path: LAB_DRAFTS[0],
+      draft,
+      source: SOURCE,
+      editor: 'editor@hcw.dev',
+      current,
+      now: FIXED_NOW,
+    });
+
+  it('rewrites what the file says and the provenance, and nothing a reviewer decides', () => {
+    const update = refresh();
+    expect(Object.keys(update).sort()).toEqual(
+      [
+        'Content',
+        'Summary',
+        'Tags',
+        'Title',
+        'content',
+        'frontMatter',
+        'normalizedTitle',
+        'postContent',
+        'readTime',
+        'repoCommitSha',
+        'repoContentSha256',
+        'repoPath',
+        'repoRawUrl',
+        'repoRef',
+        'repoRefreshedAt',
+        'repoRefreshedBy',
+        'summary',
+        'title',
+        'updatedAt',
+        'updatedBy',
+      ].sort()
+    );
+    expect(update.content).toContain(LAB_FENCE);
+    expect(update.readTime).toBe(`${draft.reading} min`);
+  });
+
+  it('cannot move the document through the state machine or publish it', () => {
+    const update = refresh({ blogDraft: 'old' });
+    for (const key of [
+      'contentStatus',
+      'Status',
+      'Live',
+      'publishedAt',
+      'Published At',
+      'slug',
+      'Slug',
+      'Cloud Provider',
+      'cloudProvider',
+      'keyTopics',
+      'approvedForBlog',
+      'scheduledPublishDate',
+    ]) {
+      expect(update, key).not.toHaveProperty(key);
+    }
+  });
+
+  it('rewrites blogDraft only when the document already has one', () => {
+    expect(refresh()).not.toHaveProperty('blogDraft');
+    expect(refresh({ blogDraft: 'stale text' }).blogDraft).toBe(draft.body);
+  });
+
+  it('hashes bytes and strings alike', () => {
+    expect(sha256Hex('abc')).toBe(sha256Hex(Buffer.from('abc')));
+    expect(sha256Hex('abc')).toMatch(/^[0-9a-f]{64}$/);
+  });
+});

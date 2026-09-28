@@ -65,11 +65,14 @@ jobs:
           # Node.js 24, not 26: Azure Functions Flex Consumption runs 22 and
           # 24 only, so the tests run on the line production runs. Every other
           # row takes the step's default, the newest line. Both are held there
-          # by scripts/version-floors.json (#715).
+          # by scripts/version-floors.json (#715). docs/content/blog-*.md is
+          # here because tests read those files: content-modules.test.js reads
+          # blog-machine.md, and repo-draft.test.js requires the lab articles
+          # to stay importable into the review queue.
           - name: functions (azure)
             dir: functions
             node-version: '24'
-            filter: '^(functions/|\.azure/api-surface\.json|infra/|docs/content/blog-machine\.md)'
+            filter: '^(functions/|\.azure/api-surface\.json|infra/|docs/content/blog-[a-z0-9-]+\.md$)'
             test: npm test
           # The out-of-tree entries after infra/ are what
           # version-floors.test.mjs reads (#715): every package.json and
