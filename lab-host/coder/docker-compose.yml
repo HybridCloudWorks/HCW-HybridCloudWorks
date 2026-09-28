@@ -25,7 +25,8 @@
 # --oauth2-github-default-provider-enable, --disable-password-auth,
 # --secure-auth-cookie, --redirect-to-access-url, --proxy-trusted-headers and
 # --proxy-trusted-origins each list the CODER_ variable used here, and
-# --disable-path-apps lists CODER_DISABLE_PATH_APPS in the v2.37.3 binary's
+# --disable-path-apps lists CODER_DISABLE_PATH_APPS and --telemetry lists
+# CODER_TELEMETRY_ENABLE in the v2.37.3 binary's
 # `coder server --help` (2026-09-28). The
 # group_add pattern is Coder's documented Docker install
 # (https://coder.com/docs/install/docker: "Coder runs as a non-root user" and
@@ -98,6 +99,13 @@ services:
       # code-server sets subdomain = true, so nothing here needs path apps.
       # The web terminal is a separate route and keeps working.
       CODER_DISABLE_PATH_APPS: "true"
+      # Owner decision 2026-09-28: no usage data to Coder. v2.37.3's
+      # `coder server --help` reads "--telemetry bool, $CODER_TELEMETRY_ENABLE
+      # (default: true) ... Coder collects anonymized usage data". The site's
+      # privacy policy names no such processor, and the data would come from
+      # learners' sessions, so it is off. /api/v2/buildinfo reports the
+      # result as "telemetry": false.
+      CODER_TELEMETRY_ENABLE: "false"
       # TLS terminates in Caddy, so the session cookie is only ever sent over
       # HTTPS from the browser's point of view.
       CODER_SECURE_AUTH_COOKIE: "true"

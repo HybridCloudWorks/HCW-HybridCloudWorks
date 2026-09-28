@@ -2039,6 +2039,14 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Coder sends no usage telemetry.** Owner decision 2026-09-28. Coder
+  v2.37.3 ships with `--telemetry` on by default ("Coder collects anonymized
+  usage data"). `lab-host/coder/docker-compose.yml` now sets
+  `CODER_TELEMETRY_ENABLE: "false"`: the site's privacy policy names no such
+  processor, and the data would come from learners' sessions.
+  `template.test.mjs` pins it, and `/api/v2/buildinfo` reports
+  `"telemetry": false` after the lab host's next `bootstrap.sh` run. The lab
+  editor's own telemetry was already off (#764).
 - **Coder token steps hold the token in a variable, not on the clipboard.**
   In `lab-host/README.md`, the owner-check, template-publish and status-token
   lines all read a Coder token with `Get-Clipboard`. Each of those lines is

@@ -218,6 +218,10 @@ test('workspace apps are served on their own names only, never on the dashboard 
   const pathApps = services.coder.filter((line) => /^\s*CODER_DISABLE_PATH_APPS:/.test(line));
   assert.equal(pathApps.length, 1);
   assert.match(pathApps[0], /CODER_DISABLE_PATH_APPS:\s*"true"\s*$/);
+  // Owner decision 2026-09-28: Coder's anonymized usage telemetry is off.
+  const telemetry = services.coder.filter((line) => /^\s*CODER_TELEMETRY_ENABLE:/.test(line));
+  assert.equal(telemetry.length, 1, 'telemetry is set exactly once');
+  assert.match(telemetry[0], /CODER_TELEMETRY_ENABLE:\s*"false"\s*$/);
   const appModules = hclBlocks(mainTf, 'module "code-server"');
   assert.equal(appModules.length, 1);
   assert.match(appModules[0].body, /^\s*subdomain\s*=\s*true\s*$/m, 'code-server is a subdomain app');
