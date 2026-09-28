@@ -1409,6 +1409,14 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **`Register-LabAgent.ps1` pauses for the registration instead of failing.**
+  The owner's first live run (2026-09-27) created the Entra app, its service
+  principal, the certificate and the `LabAgent` grant, then stopped with
+  "Cannot bind argument to parameter 'Lines' because it is an empty string":
+  the registration prompt has blank lines, and `Wait-LabRegistration`'s
+  mandatory `[string[]]` refused them. It is now `[AllowEmptyString()]`, with
+  a test that feeds it the real prompt.
+
 - **The lab's HTTPS turns on: Caddy's config check loads the token.** The
   `caddy` role validated the Caddyfile without the environment file the unit
   reads, so the Cloudflare token was empty during the check and the TLS
