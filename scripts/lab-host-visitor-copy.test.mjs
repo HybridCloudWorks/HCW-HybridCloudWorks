@@ -194,10 +194,8 @@ describe('what the lab launcher can show', () => {
     expect(end).toBe('unavailable');
     expect(frames, 'a Coder page was framed, and a missing template shows Coder’s own error there').toEqual([]);
     expect(says.at(-1)).toBe(sentence);
-    for (const text of says) {
-      expect(termsIn(text)).toEqual([]);
-      for (const words of CODER_ERROR_BOX) expect(text).not.toContain(words);
-    }
+    expect(says.flatMap(termsIn)).toEqual([]);
+    expect(says.filter((text) => CODER_ERROR_BOX.some((words) => text.includes(words)))).toEqual([]);
   });
 
   it('points a visitor with no session at the site’s own sign-in button', () => {

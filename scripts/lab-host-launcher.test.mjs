@@ -445,12 +445,14 @@ describe('runLauncher', () => {
     expect(run.calls.map((c) => c.url)).toContain(TEMPLATE_API_PATH);
   });
 
-  it('never reads the template for a workspace that exists', async () => {
-    for (const reads of [[workspace()], [workspace({ status: 'stopped' }), workspace()], [workspace({ status: 'starting' }), workspace()]]) {
-      const run = await launch({ reads, templates: [404] });
-      expect(run.end).toBe('ready');
-      expect(run.calls.map((c) => c.url)).not.toContain(TEMPLATE_API_PATH);
-    }
+  it.each([
+    ['running', [workspace()]],
+    ['stopped', [workspace({ status: 'stopped' }), workspace()]],
+    ['starting', [workspace({ status: 'starting' }), workspace()]],
+  ])('never reads the template for a workspace that exists (%s)', async (_label, reads) => {
+    const run = await launch({ reads, templates: [404] });
+    expect(run.end).toBe('ready');
+    expect(run.calls.map((c) => c.url)).not.toContain(TEMPLATE_API_PATH);
   });
 
   it('retries a template read that fails, and counts it toward giving up', async () => {

@@ -51,7 +51,7 @@ This project has not cut a tagged release; entries are grouped under
   page makes first, once before it frames that page; a 404, a deprecated
   template or another template's body ends the visit with the site's
   sentence, `Lab workspaces aren't available right now.`, and no Coder page
-  is loaded. `scripts/lab-host-launcher.test.mjs` (97 tests) and
+  is loaded. `scripts/lab-host-launcher.test.mjs` (99 tests) and
   `lab-host-visitor-copy.test.mjs` cover it. The workspace template gives
   code-server four User settings through the pinned module's `settings`
   input, checked against module 1.6.0 and VS Code 1.139.1 in code-server
