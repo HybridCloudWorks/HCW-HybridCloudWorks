@@ -31,6 +31,17 @@ coder_oauth2_github_client_id: "{{ vault_coder_oauth2_github_client_id | default
 coder_oauth2_github_client_secret: "{{ vault_coder_oauth2_github_client_secret | default('') }}"
 coder_postgres_password: "{{ vault_coder_postgres_password | default('') }}"
 
+# The capacity assertion's two inputs (tasks/main.yml): the memory limit the
+# hcw-lab template gives each workspace (memory_mib in
+# lab-host/coder/templates/hcw-lab/main.tf), and the headroom kept for the
+# Coder server (1 GiB), PostgreSQL (512 MiB) and the OS (1 GiB). They were in
+# meta/argument_specs.yml only until 2026-09-28, and Ansible does not turn an
+# argument spec's default into a variable, so the first run with
+# coder_enabled true stopped at that assertion with
+# "'coder_workspace_memory_mib' is undefined".
+coder_workspace_memory_mib: 2048
+coder_server_memory_reserve_mib: 2560
+
 # Nightly pg_dump, the convenience docs/architecture/labs-host.md describes:
 # seven days on the host, never copied anywhere.
 coder_backup_dir: /var/backups/coder
