@@ -81,8 +81,12 @@ jobs:
       # than trusted. scripts/lab/Register-LabAgent.ps1 creates Entra objects
       # and rewrites the lab host's Ansible vault, so its az calls are tested
       # against a mocked seam and its vault merge runs under bash against a
-      # stand-in ansible-vault. The tests load the functions from each
-      # script's syntax tree and touch only Pester's TestDrive. Pester 5 ships
+      # stand-in ansible-vault. scripts/lab/Register-LabArc.ps1 does the same
+      # for Azure Arc and also handles a client secret, so its tests add runs
+      # of the whole script, with and without -WhatIf, against stand-in az and
+      # ssh executables that refuse every write. The tests load the functions
+      # from each script's syntax tree and touch only Pester's TestDrive (the
+      # whole-script runs put their stand-ins there too). Pester 5 ships
       # on the ubuntu-latest image. The result check fails on zero tests as
       # well as on a failure, because a sweep that found nothing is not a pass.
       - name: Test the lab scripts

@@ -13,7 +13,7 @@ every step.
 | --- | --- | --- |
 | `hardening` | `hcwadmin` key-only login with passwordless sudo, sshd drop-in (`PasswordAuthentication no`, `PermitRootLogin no`, `KbdInteractiveAuthentication no`), ufw deny-in/allow-out with TCP 22, 80, 443, unattended-upgrades rebooting at 04:30, fail2ban sshd jail | `/etc/ssh/sshd_config.d/00-hcw-hardening.conf`, `/etc/sudoers.d/90-hcw-admin`, `/etc/apt/apt.conf.d/52hcw-unattended-upgrades`, `/etc/fail2ban/jail.d/hcw-sshd.local` |
 | `vault_tools` | `hcw-vault-set`, which sets one key of the Ansible vault from stdin and prints no value ("The vault", below), and the vault's directory, root-only. The Ansible vault the playbook reads, not HashiCorp Vault, which is the `vault` role | `/usr/local/sbin/hcw-vault-set` (root:root, 0750), `/etc/hcw/ansible` (root:root, 0700) |
-| `arc` | Azure Connected Machine agent 1.68.03532.1399 from Microsoft's apt repository, held, then `azcmagent connect` to `rg-lab-hybrid-prod-cus` as `arcs-lab-hybrid-prod-cus-01` with the onboarding service principal from the vault, skipped once Connected. Nothing until `arc_enabled` is true | `/opt/azcmagent/`, `/etc/apt/sources.list.d/microsoft-prod.sources`; the connect configuration is a temporary root-only file deleted in the same run |
+| `arc` | Azure Connected Machine agent 1.68.03532.1399 from Microsoft's apt repository, held, then `azcmagent connect` to `rg-lab-hybrid-prod-cus` as `arcs-lab-hybrid-prod-cus-01` with the onboarding service principal from the vault, skipped once Connected. Nothing until `arc_enabled` is true, which is the host's own switch: the arc fact `scripts/lab/Register-LabArc.ps1 -Connect` writes ("Azure Arc", below) | `/opt/azcmagent/`, `/etc/apt/sources.list.d/microsoft-prod.sources`; the connect configuration is a temporary root-only file deleted in the same run; the switch is `/etc/ansible/facts.d/hcw_arc.fact` |
 | `docker` | Docker Engine 29.8.1, buildx 0.37.1 and compose 5.5.1 from Docker's apt repository, held; `json-file` logs 10 MB x 3, `live-restore` | `/etc/docker/daemon.json` |
 | `node_exporter` | node_exporter 1.12.1, host-native, SHA256-verified, `127.0.0.1:9100` only | `/usr/local/bin/node_exporter`, `node_exporter.service` |
 | `caddy` | Caddy 2.11.4 built with `caddy-dns/cloudflare` 0.2.4, host-native under systemd; TLS for `lab.hybridcloudworks.com`, `*.lab.hybridcloudworks.com` and `*.coder.lab.hybridcloudworks.com` via DNS-01; placeholder response at the apex. Panes only (owner decision 2026-09-28): every name can be framed by the site alone, and a top-level browser visit is redirected to `https://hybridcloudworks.com/education/labs` (`roles/caddy/README.md`, "Panes only") | `/usr/local/bin/caddy`, `/opt/caddy/bin/` (versioned binary and its `.provenance`), `/etc/caddy/Caddyfile`, `/etc/caddy/conf.d/`, `/etc/caddy/env` (root:caddy, 0640), `caddy.service` running as `caddy` |
@@ -275,10 +275,10 @@ The keys:
 | `vault_coder_oauth2_github_client_id` | `coder` | `CODER_OAUTH2_GITHUB_CLIENT_ID`: the GitHub OAuth app the owner creates in #682 |
 | `vault_coder_oauth2_github_client_secret` | `coder` | `CODER_OAUTH2_GITHUB_CLIENT_SECRET` |
 | `vault_coder_postgres_password` | `coder` | The `coder` database user's password. Letters, digits and `. _ ~ -` only (it sits unescaped in a URL); `openssl rand -hex 32` makes one |
-| `vault_arc_service_principal_id` | `arc` | Application (client) id of `sp-arc-onboarding-lab-hybrid-prod-cus`, the Arc onboarding service principal |
-| `vault_arc_service_principal_secret` | `arc` | Its client secret. Used once by `azcmagent connect`; delete it from the vault and from Entra once the host is Connected |
-| `vault_arc_tenant_id` | `arc` | The Entra tenant id |
-| `vault_arc_subscription_id` | `arc` | The application subscription's id (`sub-app-site-prod-cus`) |
+| `vault_arc_service_principal_id` | `arc` | Application (client) id of `sp-arc-onboarding-lab-hybrid-prod-cus`, the Arc onboarding service principal. Written by `scripts/lab/Register-LabArc.ps1` ("Azure Arc", below) |
+| `vault_arc_service_principal_secret` | `arc` | Its client secret, valid for 24 hours. Used once by `azcmagent connect`; written by the same script and deleted, from the vault and from Entra, by its `-Connect` run once the host is Connected |
+| `vault_arc_tenant_id` | `arc` | The Entra tenant id. Written and removed by the same script |
+| `vault_arc_subscription_id` | `arc` | The application subscription's id (`sub-app-site-prod-cus`), resolved by name. Written and removed by the same script |
 
 PowerShell, one line per key set by hand, each with the order above:
 
@@ -307,10 +307,9 @@ changed with "Rotating the PostgreSQL password", below. PowerShell:
 ssh hcw-lab "openssl rand -hex 32 | sudo -n /usr/local/sbin/hcw-vault-set vault_coder_postgres_password"
 ```
 
-The four `vault_arc_*` lines are in
-[docs/runbooks/labs-host.md](../docs/runbooks/labs-host.md), "Seed the
-vault", and the four `vault_labs_agent_*` keys are written by
-`scripts/lab/Register-LabAgent.ps1` (below). Once the keys are in, re-run
+The four `vault_arc_*` keys are written by `scripts/lab/Register-LabArc.ps1`
+and the four `vault_labs_agent_*` keys by `scripts/lab/Register-LabAgent.ps1`
+(both below). Once the keys are in, re-run
 `bootstrap.sh` ("Re-running", above); `HCW_REPO_REF=HEAD` applies the vault
 without moving the host to a newer commit.
 
@@ -330,9 +329,11 @@ on). The four agent keys are not typed in by hand:
 below), merging them into `vault.yml` and leaving every other key as it
 was, or creating the file with only those four when it does not exist yet.
 Either order works with `hcw-vault-set`. The four `vault_arc_*` keys are
-read only while `arc_enabled` is true and the host is not yet Connected;
-the procedure that creates and then removes them is
-[docs/runbooks/labs-host.md](../docs/runbooks/labs-host.md).
+read only while `arc_enabled` is true and the host is not yet Connected,
+and they are not typed in by hand either: `scripts/lab/Register-LabArc.ps1`
+writes them through the host's `/usr/local/sbin/hcw-vault-set` and its
+`-Connect` run removes them once the host is Connected ("Azure Arc",
+below).
 
 `hcw-vault-set` only adds and replaces. To remove a key, or to read the
 vault, open it in an editor. Bash, on the host:
@@ -944,6 +945,45 @@ without `-NextCertificate`, and once it finds the agent heartbeating it
 prints the `az ad app credential delete` line for each other certificate on
 the registration. A re-run of the play afterwards reports the certificate
 task unchanged, because the file exists, and the expiry warning is gone.
+
+## Azure Arc
+
+The `arc` role (#663) onboards the host to Azure Arc, and it does nothing
+until the host says so: `arc_enabled` in `ansible/group_vars/all.yml` reads
+the local fact `/etc/ansible/facts.d/hcw_arc.fact` and is true only when
+that file is JSON whose `enabled` is `true`. Arc membership belongs to the
+host installation, not the repository: a rebuilt host has no fact, so its
+first run leaves Arc alone and completes instead of stopping at the role's
+fail-closed vault check before any later role runs.
+
+Onboarding is two runs of `scripts/lab/Register-LabArc.ps1` on the
+workstation, with one `hcw-azure` run between them. PowerShell, from the
+repository root on `main` once this change has merged
+(`Test-Path scripts/lab/Register-LabArc.ps1` prints `True` when the working
+tree has the script). The first run creates the onboarding service
+principal, lets the Terraform run identity write the audit policy, puts a
+24-hour client secret and its three identifiers into the vault through
+`/usr/local/sbin/hcw-vault-set`, and prints the workspace variables and the
+plan to expect:
+
+```powershell
+pwsh -NoProfile -File scripts/lab/Register-LabArc.ps1
+```
+
+After the apply, the second run writes the fact, runs `bootstrap.sh`, waits
+for Connected, deletes the secret from Entra and the four `vault_arc_*` keys
+from the vault, and installs the Azure Monitor Agent with its data
+collection rule:
+
+```powershell
+pwsh -NoProfile -File scripts/lab/Register-LabArc.ps1 -Connect
+```
+
+The secret is never printed or written to the desktop: it goes from `az`'s
+output to `ssh`'s standard input. Each run is idempotent and takes
+`-WhatIf`. What each step prints, what success looks like and how to
+disconnect is [docs/runbooks/labs-host.md](../docs/runbooks/labs-host.md),
+"Arc onboarding".
 
 ## Validating without a host
 

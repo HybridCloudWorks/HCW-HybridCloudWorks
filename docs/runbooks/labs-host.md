@@ -7,8 +7,9 @@ PowerShell line; how the owner reaches Portainer and
 initialises and unseals HashiCorp Vault on it (owner decision 2026-09-26);
 and how the host becomes an Azure Arc-enabled server in
 `rg-lab-hybrid-prod-cus`, sends heartbeat and `auth`/`authpriv` syslog to the
-Management workspace, and is audited against the Linux security baseline
-(ADR 0032 decision 3, #663; the rest of the page). The shape of the host is
+Management workspace, and is audited against the Linux security baseline,
+which is two runs of one PowerShell script with one `hcw-azure` run between
+them (ADR 0032 decision 3, #663; the rest of the page). The shape of the host is
 [Labs host](../architecture/labs-host.md); the decisions are
 [ADR 0032](../decisions/0032-learner-labs-platform.md).
 
@@ -771,10 +772,16 @@ operator generate-root`.
 ## Arc onboarding
 
 **State: not yet run.** The Terraform half is in `infra/lab-hybrid.tf` and the
-host half is the `arc` role in `lab-host/ansible/`, off by default. Every step
-below is an owner step. When the read-back in step 7 first returns Connected,
-change the Arc rows in [Labs host](../architecture/labs-host.md) and the Arc
-rows of [Required inputs §4.7](../standards/required-inputs.md#47-vps-agent-hostinger-env-never-committed)
+host half is the `arc` role in `lab-host/ansible/`, which does nothing until
+the host's arc fact is set (below). Onboarding is two runs of one script,
+`scripts/lab/Register-LabArc.ps1`, on the workstation, with one `hcw-azure`
+run between them: the first run (step 2) prepares the identity and the
+secret and prints what to set in the workspace, the owner sets it and
+confirms the run (step 3), and the second run, with `-Connect` (step 4),
+connects the host, removes the credential and adds the monitoring. When the
+read-back in step 4 first returns Connected, change the Arc rows in
+[Labs host](../architecture/labs-host.md) and the Arc rows of
+[Required inputs §4.7](../standards/required-inputs.md#47-vps-agent-hostinger-env-never-committed)
 in the same pull request.
 
 ## What each side owns
@@ -783,36 +790,65 @@ in the same pull request.
 | --- | --- | --- |
 | Resource group `rg-lab-hybrid-prod-cus` | `infra/lab-hybrid.tf` | `hcw-azure` apply |
 | Data collection rule `dcr-lab-hybrid-prod-cus`: heartbeat, `auth`/`authpriv` syslog at Info and above, into `log-plat-prod-cus-01` | `infra/lab-hybrid.tf` | `hcw-azure` apply |
-| Onboarding service principal `sp-arc-onboarding-lab-hybrid-prod-cus` | Entra | The owner, step 2 (the run identity has no Entra role) |
-| Its only grant, Azure Connected Machine Onboarding on the group | `infra/lab-hybrid.tf`, once `arc_onboarding_principal_id` is set | `hcw-azure` apply, step 4 |
-| Audit-only Linux baseline assignment `audit-linux-baseline-lab-hybrid` | `infra/lab-hybrid.tf`, once `lab_hybrid_policy_enabled` is true | `hcw-azure` apply, step 4 |
-| Arc machine `arcs-lab-hybrid-prod-cus-01` | Azure, created by `azcmagent connect` | The `arc` role, step 6 |
-| Azure Monitor Agent extension and the rule's association to the machine | Azure | The owner, step 8 (neither can exist before the machine does) |
+| Onboarding service principal `sp-arc-onboarding-lab-hybrid-prod-cus`: single tenant, no role of its own | Entra | The first run, step 2 (the run identity has no Entra role) |
+| Its client secret | Entra, and the host's Ansible vault as `vault_arc_service_principal_secret` beside the three identifiers | Minted by the first run, valid 24 hours; deleted from both by `-Connect` once the host is Connected |
+| Its only grant, Azure Connected Machine Onboarding on the group | `infra/lab-hybrid.tf`, once `arc_onboarding_principal_id` is set | `hcw-azure` apply, step 3 |
+| The run identity's Resource Policy Contributor on the group, so Terraform can write the policy assignment | Azure RBAC | The first run, step 2 (Terraform does not grant itself rights) |
+| Audit-only Linux baseline assignment `audit-linux-baseline-lab-hybrid` | `infra/lab-hybrid.tf`, once `lab_hybrid_policy_enabled` is true | `hcw-azure` apply, step 3 |
+| The arc fact `/etc/ansible/facts.d/hcw_arc.fact` | The host | `-Connect`, step 4 |
+| Arc machine `arcs-lab-hybrid-prod-cus-01` | Azure, created by `azcmagent connect` | The `arc` role, in the `bootstrap.sh` run `-Connect` starts |
+| Azure Monitor Agent extension and the rule's association to the machine | Azure | `-Connect`, step 4 (neither can exist before the machine does) |
 
 Defender for Servers stays off. Nothing here, in Terraform or on the host,
 enables it.
 
+## Why the switch is on the host
+
+`arc_enabled` in `lab-host/ansible/group_vars/all.yml` is not a literal: it
+is true exactly when `/etc/ansible/facts.d/hcw_arc.fact` on the host is JSON
+whose `enabled` is `true`, which Ansible reads as the local fact
+`ansible_local.hcw_arc` whenever it gathers facts. `-Connect` writes that
+file, and nothing else does. The switch belongs to the host installation
+because Arc membership does. A rebuilt host is not onboarded whatever the
+repository says, and a repository-wide `arc_enabled: true` would stop every
+rebuilt host's first `bootstrap.sh` run at the role's fail-closed check,
+before any role after `arc` had run. Kept on the host, the flag can go on
+from the one command that also connects, with no pull request, and a
+rebuilt host comes up without it. The file stays, so every later run keeps
+the Connected host's agent at the pin in `group_vars`. A file that is
+missing, is not JSON, or says anything but `"enabled": true` reads as off,
+which was checked on Ubuntu 26.04 with the pinned ansible-core 2.21.4: with
+no file every `arc` task is skipped, and with it the role installs the agent
+and stops at its vault check when the vault is empty.
+
 ## Before you start
 
 - This change is merged to `main`, and the host has been provisioned and has
-  run `bootstrap.sh` at least once (`lab-host/README.md`, "First run").
+  run `bootstrap.sh` at least once (`lab-host/README.md`, "First run"), so
+  the vault password `/etc/hcw/ansible/vault-password` exists.
+- The host has the vault helper `/usr/local/sbin/hcw-vault-set`, which
+  `bootstrap.sh` installs (the `vault_tools` role): it takes a value on
+  standard input and sets one key in the Ansible vault, printing no value.
+  The script writes the four `vault_arc_*` keys only through it, and stops
+  before minting anything when it is missing.
+- This desktop reaches the host: `ssh hcw-lab hostname` prints its name
+  ("Connect from a desktop", above).
+- You can create app registrations in the tenant (Application
+  Administrator, Cloud Application Administrator or Global Administrator)
+  and grant roles on `rg-lab-hybrid-prod-cus` (Owner, User Access
+  Administrator or Role Based Access Control Administrator there).
 - The host runs Ubuntu 26.04 LTS on x86-64 (owner decision 2026-09-26).
   Microsoft Learn lists Ubuntu 26.04 on x86-64 (not Arm64) as supported for
   [Arc-enabled servers](https://learn.microsoft.com/azure/azure-arc/servers/prerequisites#supported-operating-systems)
   and Ubuntu 26.04 LTS as supported by the
   [Azure Monitor Agent](https://learn.microsoft.com/azure/azure-monitor/agents/azure-monitor-agent-supported-operating-systems),
-  both read 2026-09-26, so there is no support gap for steps 6 to 10. The
-  `arc` role installs `azcmagent` from `packages.microsoft.com/ubuntu/26.04/prod`,
-  which Microsoft signs with `microsoft-2025.asc` rather than the older
+  both read 2026-09-26, so there is no support gap. The `arc` role installs
+  `azcmagent` from `packages.microsoft.com/ubuntu/26.04/prod`, which
+  Microsoft signs with `microsoft-2025.asc` rather than the older
   `microsoft.asc`; the role picks the key, and its pinned checksum, by
-  release. On 2026-09-26 the role installed and held `azcmagent
-  1.68.03532.1399` on a systemd Ubuntu 26.04 container and failed closed on
-  the missing vault values, which is what step 6 does if step 5 was skipped.
-- Run the PowerShell steps in **one** PowerShell window: later steps reuse
-  `$sp`, `$rgId` and the other values the earlier ones compute. If the window
-  is closed, the step that needs a value says how to recompute it.
-- Every `az` step starts by signing in to the tenant. Run it once per window;
-  a browser opens:
+  release.
+- `az` is signed in to the tenant. The script checks, and prints this line
+  when it is not; a browser opens:
 
 ```powershell
 az login --tenant saulpatinojrhotmail.onmicrosoft.com
@@ -840,149 +876,169 @@ Then check the group exists; success prints `true`:
 az group exists -n rg-lab-hybrid-prod-cus --subscription sub-app-site-prod-cus
 ```
 
-## 2. Create the onboarding service principal
+The script checks the same and stops, pointing here, when the group is
+missing.
 
-With no role: the grant is Terraform's, in step 4, so it is reviewed and
-scoped to the one group. The secret lasts a year and is deleted in step 9 in
-any case.
+## 2. The first run
 
-```powershell
-$sp = az ad sp create-for-rbac --name sp-arc-onboarding-lab-hybrid-prod-cus --years 1 -o json | ConvertFrom-Json
-```
-
-```powershell
-$spObjectId = (az ad sp show --id $sp.appId -o json | ConvertFrom-Json).id
-```
+PowerShell, from the repository root on `main` once this change has merged
+(`Test-Path scripts/lab/Register-LabArc.ps1` prints `True` when the working
+tree has the script):
 
 ```powershell
-$spObjectId
+pwsh -NoProfile -File scripts/lab/Register-LabArc.ps1
 ```
 
-Success is one GUID. That is the **object id**, the value Terraform needs;
-`$sp.appId` is a different GUID and is the one `azcmagent` needs in step 5.
-Swapping them fails only at apply, as `PrincipalNotFound`. `create-for-rbac`
-prints a warning about protecting the credential; it has created no role
-assignment, which this line confirms by printing nothing:
+Adding `-WhatIf` to that line shows what it would do and changes nothing:
+Entra, Azure and the host are only read.
 
-```powershell
-az role assignment list --assignee $sp.appId --all -o json | ConvertFrom-Json | Select-Object roleDefinitionName, scope
-```
+**What it does**, printing one line per step:
 
-## 3. Let the run identity write the policy assignment
+1. Checks `az` is signed in to the tenant, resolves `sub-app-site-prod-cus`
+   to its id by name, and checks `rg-lab-hybrid-prod-cus` exists there.
+2. Reads the host over `ssh hcw-lab`: whether `azcmagent` is installed and
+   Connected, whether the arc fact is set, whether the vault helper is
+   there, and which `vault_arc_*` keys the vault holds. Names only: the
+   three identifiers are GUIDs and are compared, and the secret is only
+   checked against the first characters Entra shows for it, on the host.
+3. Finds or creates the app registration and service principal
+   `sp-arc-onboarding-lab-hybrid-prod-cus`: single tenant, no credential, no
+   role. It prints the service principal's **object id**, the value
+   Terraform needs; the application id is a different GUID, the one
+   `azcmagent` signs in with.
+4. Grants the Terraform run identity `id-plat-terraform-prod-cus-01`
+   **Resource Policy Contributor** on `rg-lab-hybrid-prod-cus` only, unless
+   it holds it or the audit policy assignment already exists. Contributor
+   excludes `Microsoft.Authorization/*/Write`, so without this the apply in
+   step 3 fails on `policyAssignments/write`. Never on the subscription,
+   where the IaC repository standard forbids a workload repository
+   assigning policy.
+5. Unless the host is already Connected, mints a client secret valid for 24
+   hours (`az ad app credential reset --append --end-date`, so no other
+   credential is touched) and writes it into the vault through
+   `hcw-vault-set` as `vault_arc_service_principal_secret`, with
+   `vault_arc_service_principal_id`, `vault_arc_tenant_id` and
+   `vault_arc_subscription_id`. The secret goes from `az`'s output into a
+   variable and from there to `ssh`'s standard input, and the variable is
+   cleared: it is never shown, never written to a file on the desktop and
+   never on a command line. It then reads the vault back, and deletes the
+   secret from Entra again if the vault does not hold it. A second run
+   keeps a secret it finds in the vault while it has an hour left, and
+   deletes any other secret on the registration before it mints.
+6. Checks whether `hcw-azure` has applied the onboarding grant and the
+   audit policy assignment, and for each that is missing prints the
+   workspace variable to set, the address to set it at, and the plan to
+   expect (step 3).
 
-The Terraform run identity, `id-plat-terraform-prod-cus-01`, is Contributor
-plus Role Based Access Control Administrator. Neither can write a policy
-assignment (Contributor excludes `Microsoft.Authorization/*/Write`), and
-Terraform does not grant itself one. Grant **Resource Policy Contributor** on
-this group only; never on the subscription, where the IaC repository standard
-forbids a workload repository assigning policy.
+**Should `lab_hybrid_policy_enabled` be on? Yes.** ADR 0032 decision 3 makes
+machine configuration audit only, not absent; #663 is done only when "the
+policy assignment shows a compliance state"; and the labs page reads the
+machine's compliance. The script prints the variable whenever the
+assignment is missing and the run identity can write it.
 
-```powershell
-$rgId = (az group show -n rg-lab-hybrid-prod-cus --subscription sub-app-site-prod-cus -o json | ConvertFrom-Json).id
-```
+**What success looks like.** The run ends with the two variables, the plan
+to expect and the `-Connect` line, then `Changed:` naming what it did, and
+exits 0. A second run changes nothing and says `No changes:`. If
+`id-plat-terraform-prod-cus-01` cannot be found by its exact name, the run
+says so, leaves the policy variable out, and onboarding goes ahead without
+it; grant the role on the group by hand later and run the script again, and
+it prints the variable then.
 
-```powershell
-$tfObjectId = (az ad sp list --display-name id-plat-terraform-prod-cus-01 -o json | ConvertFrom-Json).id
-```
+## 3. Set the workspace variables and apply
 
-```powershell
-az role assignment create --assignee-object-id $tfObjectId --assignee-principal-type ServicePrincipal --role "Resource Policy Contributor" --scope $rgId -o none
-```
-
-Read back; success is exactly one row, `Resource Policy Contributor`, with a
-scope ending `/resourceGroups/rg-lab-hybrid-prod-cus`:
-
-```powershell
-az role assignment list --assignee $tfObjectId --scope $rgId -o json | ConvertFrom-Json | Select-Object roleDefinitionName, scope
-```
-
-## 4. Set the two workspace variables and apply
-
-At `https://app.terraform.io/app/hcw/workspaces/hcw-azure/variables`, add two
-**Terraform** variables (not environment variables), neither sensitive:
+The first run prints the values; they go at
+`https://app.terraform.io/app/hcw/workspaces/hcw-azure/variables`, each with
+**+ Add variable**, category **Terraform variable** (not Environment
+variable), **Sensitive** unticked. If one already exists, edit it to the
+printed value.
 
 | Key | Value | HCL |
 | --- | --- | --- |
-| `arc_onboarding_principal_id` | the GUID step 2 printed (`$spObjectId`) | off |
+| `arc_onboarding_principal_id` | the **object id** the first run prints, lower case | off |
 | `lab_hybrid_policy_enabled` | `true` | on |
 
 Then start a run from `https://app.terraform.io/app/hcw/workspaces/hcw-azure`
 with **New run**, type **Plan and apply**.
 
-- Expected: **`Plan: 5 to add, 1 to change, 3 to destroy`**. The two real
-  lines are `azurerm_role_assignment.arc_onboarding[0] will be created` and
-  `azurerm_resource_group_policy_assignment.lab_hybrid_linux_baseline[0] will
-  be created`.
+- Expected: **`Plan: 5 to add, 1 to change, 3 to destroy`**, or 4 to add if
+  the run printed only one variable. The real lines are
+  `azurerm_role_assignment.arc_onboarding[0] will be created` and
+  `azurerm_resource_group_policy_assignment.lab_hybrid_linux_baseline[0]
+  will be created`; the rest is the permanent diff.
 
-Confirm and apply. An apply that fails with `AuthorizationFailed` on
-`policyAssignments/write` means step 3 has not replicated yet or was scoped
-elsewhere; re-run the step 3 read-back, wait a minute, and start another run.
+Anything else is not this change: discard the run and read the plan.
+Otherwise confirm and apply. An apply that fails with `AuthorizationFailed`
+on `policyAssignments/write` means the grant from step 2 has not reached
+Azure yet: wait a minute and start another run.
 
-Read back the grant; success is one row, `Azure Connected Machine
-Onboarding`, scoped to the group:
+Read back: run the first run's line again. Success is
+`Azure: sp-arc-onboarding-lab-hybrid-prod-cus holds Azure Connected Machine
+Onboarding on rg-lab-hybrid-prod-cus, applied by hcw-azure. Nothing to set
+there.` and `No changes:`.
 
-```powershell
-az role assignment list --assignee $sp.appId --scope $rgId -o json | ConvertFrom-Json | Select-Object roleDefinitionName, scope
-```
+## 4. The second run: connect, remove the credential, add the monitoring
 
-And the assignment; success is one row, `audit-linux-baseline-lab-hybrid`,
-`Default`:
-
-```powershell
-az policy assignment list -g rg-lab-hybrid-prod-cus --subscription sub-app-site-prod-cus -o json | ConvertFrom-Json | Select-Object name, enforcementMode
-```
-
-`Default` enforcement on an `AuditIfNotExists` definition still changes
-nothing on the host: the effect only reports.
-
-## 5. Seed the vault
-
-The vault is `/etc/hcw/ansible/vault.yml` on the host, encrypted with the
-password in `/etc/hcw/ansible/vault-password`, which is root-only on the host
-and nowhere else (`lab-host/README.md`, "The vault"). The four values go
-straight from the PowerShell window of step 2 into it, one line each, through
-`/usr/local/sbin/hcw-vault-set` on the host, which reads the value from its
-standard input and never prints it. So none of them is shown on screen or put
-on the clipboard. PowerShell, in the same window:
+PowerShell, from the repository root:
 
 ```powershell
-$sp.appId | ssh hcw-lab "sudo -n /usr/local/sbin/hcw-vault-set vault_arc_service_principal_id"
+pwsh -NoProfile -File scripts/lab/Register-LabArc.ps1 -Connect
 ```
+
+`-WhatIf` works here too: the vault removal runs in check mode on the host
+and `bootstrap.sh` does not run.
+
+**What it does:**
+
+1. The first run's checks, then, read only, that the service principal
+   holds Azure Connected Machine Onboarding on the group. Without it, it
+   prints step 3's variables and stops.
+2. When the host is not Connected: stops if a machine resource
+   `arcs-lab-hybrid-prod-cus-01` is left from an earlier host (it prints the
+   `az resource delete` line that removes it); makes sure a live secret is
+   in the vault, minting a new one if the first run's has expired or has
+   less than an hour left; writes the arc fact; runs
+   `sudo /opt/hcw-src/lab-host/bootstrap.sh`, whose output it shows; and
+   waits for `azcmagent` to report Connected. If the host does not connect,
+   it removes the fact it wrote, so later `bootstrap.sh` runs are not
+   stopped at the `arc` role, and stops with the reason.
+3. Once Connected, deletes every client secret on the registration and the
+   four `vault_arc_*` keys from the vault (decrypted into a root-only
+   temporary directory, those keys dropped, every other key checked to be
+   exactly as it was, re-encrypted, decrypted again and compared, moved into
+   place), and reads both back empty. ADR 0032: the credential is never on
+   the host after onboarding. The principal and its grant stay; without a
+   credential they cannot be used, and re-onboarding needs only a new
+   secret. The `arc` role needs none of the four keys on a Connected host.
+4. Installs the Azure Monitor Agent extension (`AzureMonitorLinuxAgent`,
+   publisher `Microsoft.Azure.Monitor`, automatic upgrade on) and waits for
+   it to succeed, then associates `dcr-lab-hybrid-prod-cus` with the
+   machine as `dcra-lab-hybrid-prod-cus`. Both are Azure-side and need the
+   machine, which is why neither is in Terraform; both are needed, because
+   an association made outside the portal's rule wizard does not install
+   the agent, and an agent with no rule collects nothing. Each is left alone
+   when it is already there. Both use `az rest`, so no `az` extension is
+   installed.
+
+**What success looks like.** The run ends with
+
+```text
+Arc: arcs-lab-hybrid-prod-cus-01 is Connected in rg-lab-hybrid-prod-cus, the onboarding secret is gone from Entra and the vault, and the Azure Monitor Agent sends to dcr-lab-hybrid-prod-cus.
+```
+
+and exits 0. A second run changes nothing and says `No changes:`. Exit 2
+means the host is Connected and the credential is gone, but the extension or
+the association is not finished; the run says which, and `-Connect` again
+picks up from there. Exit 1 is a stop with its reason, before anything after
+it changed. Read back from Azure, PowerShell:
 
 ```powershell
-$sp.password | ssh hcw-lab "sudo -n /usr/local/sbin/hcw-vault-set vault_arc_service_principal_secret"
+az connectedmachine list -g rg-lab-hybrid-prod-cus --subscription sub-app-site-prod-cus -o json | ConvertFrom-Json | Select-Object name, status, agentVersion, osName
 ```
 
-```powershell
-$sp.tenant | ssh hcw-lab "sudo -n /usr/local/sbin/hcw-vault-set vault_arc_tenant_id"
-```
-
-```powershell
-(az account show --subscription sub-app-site-prod-cus -o json | ConvertFrom-Json).id | ssh hcw-lab "sudo -n /usr/local/sbin/hcw-vault-set vault_arc_subscription_id"
-```
-
-Success for each is one line, `hcw-vault-set: set <the key> (value not
-shown). Keys in the vault:` and the key names, with no value. `the value
-on stdin was empty; nothing changed` means `$sp` is gone: the window from
-step 2 was closed, and that step has to run again for a new secret. The
-helper creates the vault when there is none; the vault password must exist
-first (`lab-host/README.md`, "The vault").
-
-## 6. Enable the role and run the playbook
-
-In a pull request, set `arc_enabled: true` in
-`lab-host/ansible/group_vars/all.yml`, merge it, and re-run the playbook.
-The run checks out the merged `main` and prints its sha, the same as for
-any other lab-host change (`lab-host/README.md`, "Re-running"); there is no
-pin to move. Bash, on the host:
-
-```bash
-sudo /opt/hcw-src/lab-host/bootstrap.sh
-```
-
-Success is a `PLAY RECAP` for `localhost` with `failed=0`, and the task
-`arc : Assert the agent reports Connected` printing
-`Connected to Azure Arc as arcs-lab-hybrid-prod-cus-01 in rg-lab-hybrid-prod-cus.`
+Success is **one row**: `arcs-lab-hybrid-prod-cus-01`, `status`
+**Connected**, `agentVersion` `1.68.03532.1399` (the pin in
+`group_vars/all.yml`), `osName` `linux`. The first `az connectedmachine`
+command offers to install the `connectedmachine` CLI extension; accept it.
 On the host, bash:
 
 ```bash
@@ -992,106 +1048,17 @@ sudo /opt/azcmagent/bin/azcmagent show
 prints `Agent Status : Connected`, `Resource Name : arcs-lab-hybrid-prod-cus-01`
 and `Resource Group Name : rg-lab-hybrid-prod-cus`.
 
-The play refuses to continue, before connecting, if any of the four vault
-keys is missing or if the application, tenant or subscription id is not a
-GUID. A connect that fails prints `azcmagent`'s own reason; `AZCM0041` with
-`invalid_client` is a wrong secret or appId, `AuthorizationFailed` is a grant
-that step 4 has not applied.
+| The run says | What it means | What to do |
+| --- | --- | --- |
+| `does not hold Azure Connected Machine Onboarding` | Step 3 has not been applied | Step 3, then `-Connect` again |
+| `a machine resource arcs-lab-hybrid-prod-cus-01 already exists` | It is left from an earlier host, and `azcmagent connect` cannot take it over | Run the `az resource delete` line it prints, then `-Connect` again |
+| `hcw-vault-set is not on hcw-lab` | The helper is missing, so nothing was minted | Run `bootstrap.sh`: its `vault_tools` role installs the helper (`lab-host/README.md`, "The vault"). Then run again |
+| `The arc role did not run: azcmagent is not installed` | The play stopped before `arc`, or the commit `bootstrap.sh` ran predates `arc_enabled` reading the fact | The `PLAY RECAP` above names the task; `bootstrap.sh` runs current `main` |
+| `AZCM0041` with `invalid_client` in the role's output | A wrong secret or application id in the vault | Run the first run (it replaces the secret), then `-Connect` |
+| `AuthorizationFailed` in the role's output | The grant has not reached Azure yet | Wait two minutes, then `-Connect` again |
+| `did not reach Succeeded` for the extension | The Azure Monitor Agent failed to install | The portal address it prints shows the extension's status message; fix, then `-Connect` again |
 
-## 7. Read back Connected
-
-PowerShell:
-
-```powershell
-az account set --subscription sub-app-site-prod-cus
-```
-
-```powershell
-az connectedmachine list -g rg-lab-hybrid-prod-cus -o json | ConvertFrom-Json | Select-Object name, status, agentVersion, osName
-```
-
-Success is **one row**: `arcs-lab-hybrid-prod-cus-01`, `status` **Connected**,
-`agentVersion` `1.68.03532.1399` (the pin in `group_vars/all.yml`), `osName`
-`linux`. The first `az connectedmachine` command offers to install the
-`connectedmachine` CLI extension; accept it. No rows means connect did not
-run or targeted another group; `Disconnected` or `Expired` means the agent
-has stopped reaching Azure (see "Troubleshooting" below).
-
-## 8. Install the Azure Monitor Agent and associate the rule
-
-Both are Azure-side operations on the machine, which is why neither is in
-Terraform: the machine did not exist when the rule was applied. Both are
-needed. Associating a rule from the CLI does not install the agent (only the
-portal's rule wizard does both), and an agent with no associated rule
-collects nothing.
-
-```powershell
-az connectedmachine extension create --name AzureMonitorLinuxAgent --publisher Microsoft.Azure.Monitor --type AzureMonitorLinuxAgent --machine-name arcs-lab-hybrid-prod-cus-01 --resource-group rg-lab-hybrid-prod-cus --location centralus --enable-auto-upgrade true
-```
-
-```powershell
-$dcrId = (az monitor data-collection rule show -g rg-lab-hybrid-prod-cus -n dcr-lab-hybrid-prod-cus -o json | ConvertFrom-Json).id
-```
-
-```powershell
-$machineId = (az connectedmachine show -g rg-lab-hybrid-prod-cus -n arcs-lab-hybrid-prod-cus-01 -o json | ConvertFrom-Json).id
-```
-
-```powershell
-az monitor data-collection rule association create --name dcra-lab-hybrid-prod-cus --rule-id $dcrId --resource $machineId -o none
-```
-
-The first `az monitor data-collection` command offers to install the
-`monitor-control-service` extension; accept it. Read back the extension;
-success is one row, `AzureMonitorLinuxAgent`, `Succeeded`:
-
-```powershell
-az connectedmachine extension list -g rg-lab-hybrid-prod-cus --machine-name arcs-lab-hybrid-prod-cus-01 -o json | ConvertFrom-Json | Select-Object name, provisioningState
-```
-
-And the association; success is one row, `dcra-lab-hybrid-prod-cus`:
-
-```powershell
-az monitor data-collection rule association list --resource $machineId -o json | ConvertFrom-Json | Select-Object name
-```
-
-## 9. Remove the onboarding secret
-
-The credential is used once (ADR 0032: never on the host after onboarding).
-The `arc` role does not need it on a Connected host, so remove it from both
-places. Bash, on the host; delete the four `vault_arc_*` lines and save:
-
-```bash
-sudo /usr/local/bin/ansible-vault edit --vault-password-file /etc/hcw/ansible/vault-password /etc/hcw/ansible/vault.yml
-```
-
-Then the secret itself, PowerShell. If the window from step 2 is gone, the
-first line recomputes the appId from the principal's name:
-
-```powershell
-$appId = (az ad sp list --display-name sp-arc-onboarding-lab-hybrid-prod-cus -o json | ConvertFrom-Json).appId
-```
-
-```powershell
-$keyId = (az ad app credential list --id $appId -o json | ConvertFrom-Json).keyId
-```
-
-```powershell
-az ad app credential delete --id $appId --key-id $keyId
-```
-
-Success is this printing nothing:
-
-```powershell
-az ad app credential list --id $appId -o json | ConvertFrom-Json | Select-Object keyId, endDateTime
-```
-
-The principal and its grant stay: without a credential they cannot be used,
-and re-onboarding (below) needs only a new secret. A re-run of
-`bootstrap.sh` afterwards still reports `failed=0`, because the role checks
-Connected before it looks for the vault values.
-
-## 10. Confirm the heartbeat, the syslog and the compliance state
+## 5. Confirm the heartbeat, the syslog and the compliance state
 
 The Management workspace is read by its customer id, computed here:
 
@@ -1105,7 +1072,7 @@ az monitor log-analytics query --workspace $wsId --analytics-query "Heartbeat | 
 
 Success is one row, `Category` `Azure Monitor Agent`, with `beats` near 15:
 the agent writes one a minute to every workspace an associated rule names.
-Allow ten minutes after step 8 for the first. The syslog, allowing an hour
+Allow ten minutes after step 4 for the first. The syslog, allowing an hour
 for an SSH login to have happened:
 
 ```powershell
@@ -1133,19 +1100,24 @@ failing baseline rules at
 `https://portal.azure.com/#view/Microsoft_Azure_Policy/PolicyMenuBlade/~/Compliance`
 under that assignment. No row yet means the evaluation has not run.
 
-**Done when** step 7 shows one Connected row, the Heartbeat query returns the
-host, and the compliance query shows a state for it (the #663 acceptance).
+**Done when** step 4's read-back shows one Connected row, the Heartbeat
+query returns the host, and the compliance query shows a state for it (the
+#663 acceptance).
 
 ## Disconnecting
 
 Disconnecting deletes the machine resource, and with it the rule
 association and the guest assignment the policy created. Do it in this
 order, or the next playbook run fails closed looking for a credential that
-step 9 deleted.
+step 4 deleted.
 
-1. In a pull request, set `arc_enabled: false` in
-   `lab-host/ansible/group_vars/all.yml`, merge it and re-run the playbook
-   (step 6). With the switch off, the role touches nothing.
+1. Turn the switch off on the host by removing the arc fact. Bash, on the
+   host; with the file gone, the `arc` role touches nothing on the next run:
+
+   ```bash
+   sudo rm -f /etc/ansible/facts.d/hcw_arc.fact
+   ```
+
 2. Remove the agent extension, then the machine resource. PowerShell; each
    asks for confirmation:
 
@@ -1165,7 +1137,7 @@ step 9 deleted.
    sudo /opt/azcmagent/bin/azcmagent disconnect --force-local-only
    ```
 
-Success: the step 7 read-back returns no rows, and
+Success: step 4's read-back returns no rows, and
 `sudo /opt/azcmagent/bin/azcmagent show` on the host prints
 `Agent Status : Disconnected`. The package stays installed and held; remove
 it with `sudo apt-mark unhold azcmagent && sudo apt-get purge -y azcmagent`
@@ -1173,31 +1145,30 @@ it with `sudo apt-mark unhold azcmagent && sudo apt-get purge -y azcmagent`
 
 ## Re-onboarding a rebuilt host
 
-A rebuilt host has a new agent identity, and a machine resource of the same
-name blocks it. Delete the old resource first (step 2 of "Disconnecting"),
-then mint a new secret for the existing principal, PowerShell:
-
-```powershell
-$appId = (az ad sp list --display-name sp-arc-onboarding-lab-hybrid-prod-cus -o json | ConvertFrom-Json).appId
-```
-
-```powershell
-$sp = az ad app credential reset --id $appId --years 1 -o json | ConvertFrom-Json
-```
-
-`$sp.appId`, `$sp.password` and `$sp.tenant` now hold the values for step 5;
-continue from step 5 and finish with step 9.
+A rebuilt host has no arc fact and no Arc identity, so its first
+`bootstrap.sh` run leaves Arc alone and completes. The machine resource of
+the old host blocks the new one: delete it first (step 2 of
+"Disconnecting"), or let `-Connect` stop and print the one line that does.
+Then run step 2 and step 4 again. The principal and its grant are still
+there, so the first run only mints a new secret and says `Nothing to set
+there`, and `-Connect` onboards the new host.
 
 ## Troubleshooting
 
-- **`Expired`** in step 7: the agent has not reached Azure for 45 days and its
-  identity certificate is gone. Disconnect ("Disconnecting", all three
-  steps) and re-onboard.
-- **`Disconnected`** in step 7 with the agent running: outbound 443 to Azure
-  is blocked somewhere. Bash, on the host:
+- **`Expired`** in step 4's read-back: the agent has not reached Azure for
+  45 days and its identity certificate is gone. Disconnect
+  ("Disconnecting", all three steps) and re-onboard.
+- **`Disconnected`** in step 4's read-back with the agent running: outbound
+  443 to Azure is blocked somewhere. Bash, on the host:
   `sudo /opt/azcmagent/bin/azcmagent check --location centralus` names the
   endpoint that fails.
 - **No Heartbeat rows** with the extension `Succeeded`: the association is
-  missing (re-run the step 8 association read-back), or the rule and the
-  workspace are in different regions. Both are `centralus` by construction:
-  the rule takes the workspace's location in `infra/lab-hybrid.tf`.
+  missing (run `-Connect` again; it adds one that is not there), or the rule
+  and the workspace are in different regions. Both are `centralus` by
+  construction: the rule takes the workspace's location in
+  `infra/lab-hybrid.tf`.
+- **A later `bootstrap.sh` run stops at `arc : Refuse to onboard without the
+  four Arc vault values`**: the arc fact is set but the host is not
+  Connected, which a failed `-Connect` does not leave behind (it removes the
+  fact it wrote). Run `-Connect` again, or turn the switch off (step 1 of
+  "Disconnecting").
