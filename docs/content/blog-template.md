@@ -172,6 +172,13 @@ tags:       # azure, terraform, github-actions, iac
 reading:    # minutes
 ```
 
+To review a draft on the site, import it from **Admin → Content Queue →
+Import drafts from the repository** (`/admin/queue`). The import reads the
+file from `main`, takes the title, summary and tags from this front matter,
+and lands the article **In Review**; it never publishes it. Importing again
+refreshes the draft while it is still in review. Once it is approved, the
+site owns it and the import leaves it alone.
+
 ## Code blocks
 
 Real output, trimmed but never invented. Inline `code` for identifiers,

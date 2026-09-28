@@ -4,7 +4,16 @@ import {
   sortQueueItemsBy,
   getForgeGradeForSort,
   forgedTodayFromStats,
+  getSourceBadge,
 } from './itemHelpers';
+
+describe('getSourceBadge', () => {
+  it('labels a repository import, and says nothing for an unknown source', () => {
+    expect(getSourceBadge({ source: 'repo' }).props.children).toBe('Repository');
+    expect(getSourceBadge({ source: 'forge-url' }).props.children).toBe('Forged URL');
+    expect(getSourceBadge({ source: 'somewhere-else' })).toBeNull();
+  });
+});
 
 describe('grade sort (T-607)', () => {
   it('descending puts the best-graded staged items first and ungraded last', () => {

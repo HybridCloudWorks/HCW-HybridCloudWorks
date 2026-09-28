@@ -39,6 +39,10 @@ const FUNCTION_TIMEOUT_MS = {
   // A batch of articles each fetching its body images (15 s per image, four
   // at a time) — sized with the Function host's 230 s cap, not the default.
   'cms/content/rehost-images': 200000,
+  // Up to ten drafts, each a raw fetch and a commit lookup under an 8 s
+  // deadline apiece, run in parallel, then the writes. Not retried: the
+  // import is idempotent, but a retry would audit every path twice.
+  'cms/content/import-repo': 60000,
   // The ElevenLabs live check: an account read, one Text to Dialogue request
   // with its own retries, an upload and a second read. Deliberately absent
   // from SAFE_RETRY_FUNCTIONS: a client retry would render, and bill, twice.

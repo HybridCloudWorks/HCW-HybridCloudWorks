@@ -260,6 +260,15 @@ export function getSourceBadge(item) {
     );
   }
 
+  // Imported from docs/content by the queue's repository panel.
+  if (item.source === 'repo') {
+    return (
+      <Badge variant="outline" className="text-[10px] uppercase tracking-wide">
+        Repository
+      </Badge>
+    );
+  }
+
   return null;
 }
 

@@ -5,6 +5,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import QueuePage from './QueuePage';
 
 const postJSON = vi.fn();
+const getJSON = vi.fn();
 const logAdminAction = vi.fn();
 
 vi.mock('@/hooks/useAuthReady', () => ({
@@ -13,6 +14,7 @@ vi.mock('@/hooks/useAuthReady', () => ({
 
 vi.mock('@/lib/api', () => ({
   postJSON: (...args) => postJSON(...args),
+  getJSON: (...args) => getJSON(...args),
 }));
 
 vi.mock('@/lib/auditLog', () => ({
@@ -22,6 +24,7 @@ vi.mock('@/lib/auditLog', () => ({
 describe('QueuePage', () => {
   beforeEach(() => {
     postJSON.mockReset();
+    getJSON.mockReset();
     logAdminAction.mockReset();
   });
 
@@ -143,6 +146,88 @@ describe('QueuePage', () => {
     );
     expect(await screen.findByText(/Forge queued \(job job-77\)/)).toBeInTheDocument();
     expect(input.value).toBe('');
+  });
+
+  it('shows imported repository drafts by switching to In Review and reloading', async () => {
+    const path = 'docs/content/blog-lab-01-landing-zone.md';
+    getJSON.mockResolvedValue({
+      ok: true,
+      candidates: [
+        {
+          path,
+          name: 'blog-lab-01-landing-zone.md',
+          size: 1,
+          imported: null,
+          importable: true,
+        },
+      ],
+    });
+    postJSON.mockImplementation(async (endpoint, body) => {
+      if (endpoint === 'getQueueSnapshot' && body.statusFilter === 'in_review') {
+        return {
+          success: true,
+          totalCount: 1,
+          items: [
+            {
+              id: 'lab-1',
+              Title: 'Build a landing zone you can read',
+              contentStatus: 'in_review',
+              source: 'repo',
+              cloudProvider: 'Azure',
+            },
+          ],
+        };
+      }
+      if (endpoint === 'getQueueSnapshot') return { success: true, totalCount: 0, items: [] };
+      if (endpoint === 'cms/content/import-repo') {
+        return {
+          ok: true,
+          results: [
+            {
+              path,
+              outcome: 'created',
+              contentId: 'lab-1',
+              contentStatus: 'in_review',
+              title: 'Build a landing zone you can read',
+            },
+          ],
+          counts: { created: 1 },
+        };
+      }
+      return {};
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/admin/queue']}>
+        <QueuePage />
+      </MemoryRouter>
+    );
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Import drafts from the repository' })
+    );
+    fireEvent.click(
+      await screen.findByRole('checkbox', { name: 'Select blog-lab-01-landing-zone.md' })
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Import selected as In Review (1)' }));
+
+    await waitFor(() =>
+      expect(postJSON).toHaveBeenCalledWith('cms/content/import-repo', { paths: [path] })
+    );
+    await waitFor(() =>
+      expect(postJSON).toHaveBeenCalledWith('getQueueSnapshot', {
+        statusFilter: 'in_review',
+        contentTypeFilter: 'all',
+        itemLimit: 100,
+      })
+    );
+    // The card in the queue itself, not the panel's result line.
+    expect(await screen.findByText('Showing 1 of 1 matching items.')).toBeInTheDocument();
+    expect(screen.getByText('Repository')).toBeInTheDocument();
+    // Nothing on this path asks for a publish.
+    const endpoints = postJSON.mock.calls.map(([endpoint]) => endpoint);
+    expect(endpoints).not.toContain('publishContent');
+    expect(endpoints).not.toContain('transitionContentStatus');
   });
 
   it('rejects a non-http paste without calling the backend', async () => {

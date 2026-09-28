@@ -23,9 +23,9 @@
  */
 import React, { useCallback, useMemo, useState } from 'react';
 import { Images, Loader2, RefreshCw } from 'lucide-react';
+import CollapsiblePanel, { PanelLoading } from '@/components/admin/CollapsiblePanel';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { getJSON, postJSON } from '@/lib/api';
 import { logAdminAction } from '@/lib/auditLog';
 
@@ -183,178 +183,149 @@ export default function RehostImagesPanel() {
   };
 
   return (
-    <Card>
-      <CardContent className="p-4 space-y-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="font-medium">Hotlinked images</p>
-            <p className="text-xs text-muted-foreground">
-              Published articles whose body still loads images from another site. Re-hosting copies
-              each image to this site and rewrites the article; nothing else about it changes.
+    <CollapsiblePanel
+      title="Hotlinked images"
+      description="Published articles whose body still loads images from another site. Re-hosting copies each image to this site and rewrites the article; nothing else about it changes."
+      icon={Images}
+      toggleLabel="Images: re-host hotlinked"
+      open={open}
+      onToggle={toggleOpen}
+      error={error}
+    >
+      {loading && <PanelLoading>Scanning published articles…</PanelLoading>}
+      {!loading && candidates.length === 0 && (
+        <p className="text-sm text-muted-foreground">
+          Every published article&apos;s body images are already served from hybridcloudworks.com (
+          {scanned} scanned).
+        </p>
+      )}
+      {!loading && candidates.length > 0 && (
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm">
+              {candidates.length} of {scanned} published articles hotlink third-party images.
             </p>
+            <div className="flex gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSelected(new Set(candidates.map((row) => row.id)))}
+                disabled={running}
+              >
+                Select all
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSelected(new Set())}
+                disabled={running}
+              >
+                Select none
+              </Button>
+              <Button variant="ghost" size="sm" onClick={load} disabled={running}>
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Refresh
+              </Button>
+            </div>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={toggleOpen}
-            aria-expanded={open}
-            className="shrink-0"
-          >
-            <Images className="h-4 w-4 mr-2" />
-            Images: re-host hotlinked
-          </Button>
-        </div>
 
-        {open && (
-          <div className="space-y-3 border-t pt-3">
-            {error && <p className="text-sm text-destructive">{error}</p>}
-
-            {loading && (
-              <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Scanning published articles…
-              </p>
-            )}
-            {!loading && candidates.length === 0 && (
-              <p className="text-sm text-muted-foreground">
-                Every published article&apos;s body images are already served from
-                hybridcloudworks.com ({scanned} scanned).
-              </p>
-            )}
-            {!loading && candidates.length > 0 && (
-              <>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm">
-                    {candidates.length} of {scanned} published articles hotlink third-party images.
-                  </p>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setSelected(new Set(candidates.map((row) => row.id)))}
-                      disabled={running}
-                    >
-                      Select all
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setSelected(new Set())}
-                      disabled={running}
-                    >
-                      Select none
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={load} disabled={running}>
-                      <RefreshCw className="h-4 w-4 mr-2" />
-                      Refresh
-                    </Button>
-                  </div>
-                </div>
-
-                <ul className="space-y-2">
-                  {candidates.map((row) => (
-                    <li
-                      key={row.id}
-                      className="flex items-start gap-3 rounded-lg border p-2 text-sm hover:bg-muted/40"
-                    >
-                      <input
-                        id={`rehost-${row.id}`}
-                        type="checkbox"
-                        checked={selected.has(row.id)}
-                        onChange={() => toggle(row.id)}
-                        disabled={running}
-                        aria-label={`Select ${row.title}`}
-                        className="mt-1 h-4 w-4 rounded border-border accent-primary"
-                      />
-                      {/* The label covers the title and its facts only: a link
+          <ul className="space-y-2">
+            {candidates.map((row) => (
+              <li
+                key={row.id}
+                className="flex items-start gap-3 rounded-lg border p-2 text-sm hover:bg-muted/40"
+              >
+                <input
+                  id={`rehost-${row.id}`}
+                  type="checkbox"
+                  checked={selected.has(row.id)}
+                  onChange={() => toggle(row.id)}
+                  disabled={running}
+                  aria-label={`Select ${row.title}`}
+                  className="mt-1 h-4 w-4 rounded border-border accent-primary"
+                />
+                {/* The label covers the title and its facts only: a link
                           inside it would toggle the checkbox on every click. */}
-                      <label htmlFor={`rehost-${row.id}`} className="flex-1 min-w-0 cursor-pointer">
-                        <span className="block font-medium truncate">{row.title}</span>
-                        <span className="block text-xs text-muted-foreground">
-                          {row.urlCount} {row.urlCount === 1 ? 'image' : 'images'} ·{' '}
-                          {(row.hosts || []).join(', ')} · in {(row.fields || []).join(', ')}
-                        </span>
-                        {row.lastRun && (
-                          <span className="block text-xs text-muted-foreground">
-                            Last run {shortDate(row.lastRun.at)}: {row.lastRun.rewritten} re-hosted,{' '}
-                            {row.lastRun.failed} failed
-                            {row.lastRun.failedHosts?.length
-                              ? ` (${row.lastRun.failedHosts.join(', ')})`
-                              : ''}
-                          </span>
-                        )}
-                      </label>
-                      {row.live ? (
-                        <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300">
-                          Live
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline">Staged</Badge>
-                      )}
-                      {row.publicUrl && (
-                        <a
-                          href={row.publicUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          aria-label={`View ${row.title}`}
-                          className="text-xs underline shrink-0"
-                        >
-                          View
-                        </a>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-
-                <div className="flex items-center gap-3">
-                  <Button
-                    size="sm"
-                    onClick={runSelected}
-                    disabled={running || selectedIds.length === 0}
+                <label htmlFor={`rehost-${row.id}`} className="flex-1 min-w-0 cursor-pointer">
+                  <span className="block font-medium truncate">{row.title}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {row.urlCount} {row.urlCount === 1 ? 'image' : 'images'} ·{' '}
+                    {(row.hosts || []).join(', ')} · in {(row.fields || []).join(', ')}
+                  </span>
+                  {row.lastRun && (
+                    <span className="block text-xs text-muted-foreground">
+                      Last run {shortDate(row.lastRun.at)}: {row.lastRun.rewritten} re-hosted,{' '}
+                      {row.lastRun.failed} failed
+                      {row.lastRun.failedHosts?.length
+                        ? ` (${row.lastRun.failedHosts.join(', ')})`
+                        : ''}
+                    </span>
+                  )}
+                </label>
+                {row.live ? (
+                  <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300">
+                    Live
+                  </Badge>
+                ) : (
+                  <Badge variant="outline">Staged</Badge>
+                )}
+                {row.publicUrl && (
+                  <a
+                    href={row.publicUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label={`View ${row.title}`}
+                    className="text-xs underline shrink-0"
                   >
-                    {running && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                    Re-host selected ({selectedIds.length})
-                  </Button>
-                  {progress && <span className="text-xs text-muted-foreground">{progress}</span>}
-                </div>
-              </>
-            )}
+                    View
+                  </a>
+                )}
+              </li>
+            ))}
+          </ul>
 
-            {results.length > 0 && (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm" aria-label="Re-host results">
-                  <thead>
-                    <tr className="text-left text-xs text-muted-foreground border-b">
-                      <th className="py-1 pr-3 font-medium">Article</th>
-                      <th className="py-1 pr-3 font-medium">Rewritten</th>
-                      <th className="py-1 pr-3 font-medium">Failed</th>
-                      <th className="py-1 pr-3 font-medium">Failed hosts</th>
-                      <th className="py-1 font-medium">Outcome</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {results.map((row) => (
-                      <tr key={row.contentId} className="border-b last:border-0 align-top">
-                        <td className="py-1 pr-3 max-w-[20rem] truncate">{row.title}</td>
-                        <td className="py-1 pr-3">{row.rewritten ?? '—'}</td>
-                        <td className="py-1 pr-3">{row.failed ?? '—'}</td>
-                        <td className="py-1 pr-3">
-                          {row.failedHosts.length ? row.failedHosts.join(', ') : '—'}
-                        </td>
-                        <td
-                          className={`py-1 ${row.outcome.startsWith('Error') ? 'text-destructive' : ''}`}
-                        >
-                          {row.outcome}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+          <div className="flex items-center gap-3">
+            <Button size="sm" onClick={runSelected} disabled={running || selectedIds.length === 0}>
+              {running && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Re-host selected ({selectedIds.length})
+            </Button>
+            {progress && <span className="text-xs text-muted-foreground">{progress}</span>}
           </div>
-        )}
-      </CardContent>
-    </Card>
+        </>
+      )}
+
+      {results.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm" aria-label="Re-host results">
+            <thead>
+              <tr className="text-left text-xs text-muted-foreground border-b">
+                <th className="py-1 pr-3 font-medium">Article</th>
+                <th className="py-1 pr-3 font-medium">Rewritten</th>
+                <th className="py-1 pr-3 font-medium">Failed</th>
+                <th className="py-1 pr-3 font-medium">Failed hosts</th>
+                <th className="py-1 font-medium">Outcome</th>
+              </tr>
+            </thead>
+            <tbody>
+              {results.map((row) => (
+                <tr key={row.contentId} className="border-b last:border-0 align-top">
+                  <td className="py-1 pr-3 max-w-[20rem] truncate">{row.title}</td>
+                  <td className="py-1 pr-3">{row.rewritten ?? '—'}</td>
+                  <td className="py-1 pr-3">{row.failed ?? '—'}</td>
+                  <td className="py-1 pr-3">
+                    {row.failedHosts.length ? row.failedHosts.join(', ') : '—'}
+                  </td>
+                  <td
+                    className={`py-1 ${row.outcome.startsWith('Error') ? 'text-destructive' : ''}`}
+                  >
+                    {row.outcome}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </CollapsiblePanel>
   );
 }

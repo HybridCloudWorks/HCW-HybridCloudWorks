@@ -73,6 +73,35 @@ This project has not cut a tagged release; entries are grouped under
   Validate on the lab is available, linking Cloudflare's Turnstile Privacy
   Addendum.
 
+- **Import `docs/content` drafts into the CMS review queue, never
+  published (#749).** Nothing imported a repository draft into the CMS, so reviewing
+  the three lab articles (#737/#744) on the site meant pasting each one by
+  hand. On Admin → Content Queue, **Import drafts from the repository** lists
+  the `blog-*.md` files on `main` (`GET /api/cms/content/import-repo/candidates`,
+  the public GitHub contents API, the two contract docs excluded) with what
+  each already is on the site; ticking some and importing
+  (`POST /api/cms/content/import-repo`, `{ paths }`, editor) lands each one
+  **In Review** with a toast, and the queue switches to that filter. Paths
+  must match `^docs/content/blog-[a-z0-9-]+\.md$` or the whole request is a
+  400 before any fetch; files are read only from
+  `raw.githubusercontent.com/HybridCloudWorks/HCW-HybridCloudWorks/main/`
+  with `redirect: 'error'`, one 8 s deadline over headers and body, and a
+  256 KB cap. The front matter is read by a port of `tooling/workflow.py`'s
+  `frontmatter()` over the seven keys `blog-template.md` defines, and the body
+  goes in untouched, so the `landing-zone` embeds survive. New drafts are
+  written through `createContentDocument` (the `createContentItem` path) with
+  `contentStatus: 'in_review'`, `Live: false`, `source: 'repo'` and
+  `repoPath`/`repoCommitSha`/`repoContentSha256`, under an id derived from
+  the path and create-only, so a double import cannot duplicate. Re-importing
+  refreshes the same document only while it is in review (an unchanged file
+  writes nothing), under the read's ETag; an approved, edited, rejected or
+  live article is refused and not touched, as is a new draft whose title a
+  published article already carries. One `admin_audit_logs` row per path.
+  `slug` is deliberately not stored: the slug-holders probe is not
+  status-filtered, and a first publish assigns `slugify(title)` anyway. The
+  three lab drafts are read from disk by the tests and must parse, and CI's
+  `functions` row now watches `docs/content/blog-*.md`.
+
 - **Register a lab agent from the admin UI; `Register-LabAgent.ps1` finishes
   the go-live (#740).** The API admits a lab agent only when
   `lab_agents/{agentId}` binds it to its service principal, and nothing

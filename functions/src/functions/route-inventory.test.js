@@ -372,6 +372,36 @@ describe('the lab agent registry routes (#740)', () => {
   });
 });
 
+/**
+ * The repository draft import (owner request 2026-09-28). Property 1 proves
+ * these reach a guard; this pins the role. They make outbound calls to GitHub
+ * and write content documents, so they sit behind requireRole at editor — the
+ * role that creates and reviews content everywhere else — and are never public:
+ * an anonymous caller could otherwise spend the Function App's GitHub rate
+ * limit or push drafts into the review queue. One registration per template
+ * (property 4), each answering exactly one verb.
+ */
+describe('the repository draft import routes', () => {
+  it.each([
+    ['cms/content/import-repo', 'POST'],
+    ['cms/content/import-repo/candidates', 'GET'],
+  ])('%s answers %s through requireRole at editor', async (route, method) => {
+    const registrations = [...httpRegistrations.values()].filter((o) => o.route === route);
+    expect(registrations).toHaveLength(1);
+    const [options] = registrations;
+    expect(PUBLIC_ROUTES.has(route)).toBe(false);
+    expect(options.methods).toEqual([method, 'OPTIONS']);
+
+    clearGuards();
+    const res = await invoke(options, makeRequest({ method }));
+    expect(requireRole).toHaveBeenCalledTimes(1);
+    expect(requireRole.mock.calls[0][1]).toBe('editor');
+    // The guard's refusal is the answer: nothing ran behind it, including the
+    // fetch that the network stub above would have rejected.
+    expect(res?.status).toBe(403);
+  });
+});
+
 describe('property 2 — every route accepts OPTIONS', () => {
   it('so a preflight is not 404ed before any handler runs', () => {
     const missing = [...httpRegistrations.entries()]

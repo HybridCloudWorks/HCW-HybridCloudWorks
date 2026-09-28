@@ -19,6 +19,7 @@ import {
 import { QueueList } from './queue/QueueList';
 import { CONTENT_TYPE_OPTIONS, STATUS_FILTERS } from './queue/constants';
 import { useQueueActions } from './queue/useQueueActions';
+import RepoDraftImportPanel from './RepoDraftImportPanel';
 import { XCircle, RefreshCw, Loader2, Filter, Trash2, Flame } from 'lucide-react';
 
 function isValidHttpUrl(value = '') {
@@ -159,6 +160,9 @@ export default function QueuePage() {
   });
   const [loadError, setLoadError] = useState(null);
   const [forgeMeter, setForgeMeter] = useState(null);
+  // Bumped after a repository import so the list reloads even when the In
+  // Review filter it switches to is already the selected one.
+  const [reloadKey, setReloadKey] = useState(0);
   const [pageSize, setPageSize] = useState(() => {
     const fromUrl = Number(searchParams.get('pageSize'));
     return [50, 100, 200].includes(fromUrl) ? fromUrl : 100;
@@ -259,7 +263,13 @@ export default function QueuePage() {
       }
     }
     loadItems();
-  }, [authReady, statusFilter, contentTypeFilter, pageSize]);
+  }, [authReady, statusFilter, contentTypeFilter, pageSize, reloadKey]);
+
+  // Imported drafts land In Review; show them there.
+  const handleRepoImported = () => {
+    setStatusFilter('in_review');
+    setReloadKey((key) => key + 1);
+  };
 
   useEffect(() => {
     const next = new URLSearchParams();
@@ -369,6 +379,8 @@ export default function QueuePage() {
       </div>
 
       <ForgeFromUrlCard />
+
+      <RepoDraftImportPanel onImported={handleRepoImported} />
 
       {/* Rejected decay-countdown explanation banner */}
       {statusFilter === 'rejected' && (
