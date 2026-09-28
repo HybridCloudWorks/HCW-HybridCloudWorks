@@ -530,7 +530,8 @@ the Function App, never the browser. `functions/src/lib/labs/coder-status.js`
 makes three calls: `GET /api/v2/templates`, `GET
 /api/v2/templateversions/{id}` for each template's active version, and `GET
 /api/v2/workspaces?q=status:running`, whose `count` is the running figure
-on the card. It sends no browser headers, so the panes-only rule passes it.
+on the card. Its requests carry no `Sec-Fetch-Dest`, so the panes-only
+rule passes them.
 
 **What the token is, and why.** On Coder Community v2.37.3 the least
 privilege that answers all three correctly is a token scoped to
@@ -670,9 +671,15 @@ sudo docker compose --project-directory /etc/hcw/coder up -d
 ### Rotating the GitHub OAuth secret
 
 Regenerate the secret on the OAuth app's page under
-`https://github.com/organizations/HybridCloudWorks/settings/applications`,
-put it in the vault as `vault_coder_oauth2_github_client_secret` (the
-`ansible-vault edit` line above), re-run `bootstrap.sh`. The play rewrites
+https://github.com/organizations/HybridCloudWorks/settings/applications
+and put it in the vault. PowerShell, pasted first, then copy the secret,
+then Enter ("Setting a key", above):
+
+```powershell
+(Get-Clipboard -Raw) | ssh hcw-lab "sudo -n /usr/local/sbin/hcw-vault-set vault_coder_oauth2_github_client_secret"
+```
+
+Then re-run `bootstrap.sh`. The play rewrites
 `coder.env` and Compose recreates the `coder` container because its
 environment changed; the `PLAY RECAP` shows `changed` for those two tasks
 and the login page, in a pane, still offers GitHub. Learners already
@@ -682,17 +689,18 @@ signed in keep their sessions.
 
 The database stores the password at first initialisation, so a vault edit
 alone would lock Coder out. Change it in the database first, then in the
-vault. Bash, on the host; the line generates the new value, sets it, and
-prints it once for the vault edit:
+vault. Bash, on the host; the line generates the new value, sets it in the
+database and then in the vault, and never prints it:
 
 ```bash
-NEW="$(openssl rand -hex 32)" && sudo docker compose --project-directory /etc/hcw/coder exec -T coder-postgres psql -U coder -d coder -v ON_ERROR_STOP=1 -c "ALTER USER coder PASSWORD '$NEW'" && echo "$NEW"
+NEW="$(openssl rand -hex 32)" && sudo docker compose --project-directory /etc/hcw/coder exec -T coder-postgres psql -U coder -d coder -v ON_ERROR_STOP=1 -c "ALTER USER coder PASSWORD '$NEW'" && printf '%s\n' "$NEW" | sudo -n /usr/local/sbin/hcw-vault-set vault_coder_postgres_password; unset NEW
 ```
 
-Success prints `ALTER ROLE` and then the value. Put the value in the vault
-as `vault_coder_postgres_password` and re-run `bootstrap.sh` promptly:
-Coder's open connections keep working, new ones fail until the run
-recreates the container with the new URL.
+Success prints `ALTER ROLE` and then `hcw-vault-set: set
+vault_coder_postgres_password (value not shown)` with the vault's key
+names. Re-run `bootstrap.sh` promptly, with `HCW_REPO_REF=HEAD`
+("Re-running", above): Coder's open connections keep working, new ones fail
+until the run recreates the container with the new URL.
 
 ### Backups and restore
 
