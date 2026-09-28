@@ -89,37 +89,40 @@
     arc_status: "{{ (arc_show.stdout | from_json).status if arc_show.rc == 0 else 'NotInstalled' }}"
 
 # Fail closed, as the coder role does, but only where the credential is
-# needed. Once the machine is Connected the runbook deletes the secret from
-# the vault and from Entra (ADR 0032: never on the host after onboarding), so
-# a Connected host must keep converging without it.
-- name: Check the onboarding inputs before connecting
+# needed. Once the machine is Connected, scripts/lab/Register-LabArc.ps1
+# -Connect deletes the secret from the vault and from Entra (ADR 0032: never
+# on the host after onboarding), so a Connected host must keep converging
+# without it. Two tasks with the same condition rather than a block: a block
+# here would only group them, and checkov's CKV2_ANSIBLE_3 reads a block
+# without a rescue as unhandled errors, where a rescue would swallow exactly
+# the failures these exist to raise.
+- name: Refuse to onboard without the four Arc vault values
+  ansible.builtin.assert:
+    that:
+      - arc_identity_present | bool
+    fail_msg: >-
+      arc_enabled is true, the agent reports {{ arc_status }}, and one of
+      vault_arc_service_principal_id, vault_arc_service_principal_secret,
+      vault_arc_tenant_id and vault_arc_subscription_id is unset. Run
+      scripts/lab/Register-LabArc.ps1, which writes all four, then its
+      -Connect run (docs/runbooks/labs-host.md, "Arc onboarding"); or
+      remove /etc/ansible/facts.d/hcw_arc.fact to turn Arc off here.
+    quiet: true
   when: arc_status != 'Connected'
-  block:
-    - name: Refuse to onboard without the four Arc vault values
-      ansible.builtin.assert:
-        that:
-          - arc_identity_present | bool
-        fail_msg: >-
-          arc_enabled is true, the agent reports {{ arc_status }}, and one of
-          vault_arc_service_principal_id, vault_arc_service_principal_secret,
-          vault_arc_tenant_id and vault_arc_subscription_id is unset. Run
-          scripts/lab/Register-LabArc.ps1, which writes all four, then its
-          -Connect run (docs/runbooks/labs-host.md, "Arc onboarding"); or
-          remove /etc/ansible/facts.d/hcw_arc.fact to turn Arc off here.
-        quiet: true
 
-    - name: Refuse Arc identifiers that are not GUIDs
-      ansible.builtin.assert:
-        that:
-          - arc_service_principal_id is match(arc_guid_pattern)
-          - arc_tenant_id is match(arc_guid_pattern)
-          - arc_subscription_id is match(arc_guid_pattern)
-        fail_msg: >-
-          vault_arc_service_principal_id (the application id, not the object
-          id), vault_arc_tenant_id and vault_arc_subscription_id must each be a
-          GUID. One of them is not, which usually means two values were pasted
-          into each other's keys.
-        quiet: true
+- name: Refuse Arc identifiers that are not GUIDs
+  ansible.builtin.assert:
+    that:
+      - arc_service_principal_id is match(arc_guid_pattern)
+      - arc_tenant_id is match(arc_guid_pattern)
+      - arc_subscription_id is match(arc_guid_pattern)
+    fail_msg: >-
+      vault_arc_service_principal_id (the application id, not the object
+      id), vault_arc_tenant_id and vault_arc_subscription_id must each be a
+      GUID. One of them is not, which usually means two values were pasted
+      into each other's keys.
+    quiet: true
+  when: arc_status != 'Connected'
 
 - name: Connect to Azure Arc with the onboarding service principal
   when:
