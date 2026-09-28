@@ -144,20 +144,17 @@ function sectionOf(line) {
   return null;
 }
 
-const trimBlankLines = (lines) => {
-  let start = 0;
-  let end = lines.length;
-  while (start < end && !lines[start].trim()) start += 1;
-  while (end > start && !lines[end - 1].trim()) end -= 1;
-  return lines.slice(start, end);
-};
-
-/** Collects one Terraform section's diagnostics, line by line. */
+/**
+ * Collects one Terraform section's diagnostics, line by line. A diagnostic
+ * opens on its `Error:` or `Warning:` line, so only its end can be blank;
+ * each kept line loses its trailing space, and the text its trailing blank
+ * lines.
+ */
 function diagnosticCollector() {
   const done = [];
   let open = null;
   const close = () => {
-    if (open) done.push({ ...open, text: trimBlankLines(open.lines).join('\n') });
+    if (open) done.push({ severity: open.severity, text: open.lines.join('\n').trimEnd() });
     open = null;
   };
   return {
@@ -186,43 +183,60 @@ const pushUnique = (list, value) => {
   if (!list.includes(value)) list.push(value);
 };
 
+/** Ends the section being read, keeping its diagnostics. */
+function closeSection(reading) {
+  if (reading.collector) reading.diagnostics.push(...reading.collector.finish());
+  reading.collector = null;
+}
+
+/** Starts a section; the two Terraform sections collect diagnostics. */
+function openSection(reading, section) {
+  closeSection(reading);
+  reading.section = section;
+  reading.reached.add(section);
+  if (section !== 'modules') reading.collector = diagnosticCollector();
+}
+
+/** A module-sources line: a rewrite's `<name>@<version>`, or nothing. */
+function readModuleLine(reading, line) {
+  const dir = line.match(REWRITE)?.[1].match(VENDORED_DIR);
+  if (dir) pushUnique(reading.modules, `${dir[1]}@${dir[2]}`);
+}
+
+/** A Terraform line: an installed provider (init only), else a diagnostic's line or nothing. */
+function readTerraformLine(reading, line) {
+  const provider = reading.section === 'init' ? line.match(PROVIDER) : null;
+  if (provider) pushUnique(reading.providers, `${provider[1]} v${provider[2]}`);
+  else reading.collector.line(line);
+}
+
+/** How each section reads a line. Before the first section there is no reader, so the line is dropped. */
+const LINE_READERS = Object.freeze({
+  modules: readModuleLine,
+  init: readTerraformLine,
+  validate: readTerraformLine,
+});
+
 /**
  * What the raw output shows, by the allow-list above: the sections reached,
  * the modules and providers, and every diagnostic in the Terraform sections.
  */
 export function parseValidateOutput(output) {
-  const lines = String(output ?? '').replace(/\r\n?/g, '\n').split('\n');
-  const reached = new Set();
-  const modules = [];
-  const providers = [];
-  const diagnostics = [];
-  let section = null;
-  let collector = null;
-  const endSection = () => {
-    if (collector) diagnostics.push(...collector.finish());
-    collector = null;
+  const reading = {
+    section: null,
+    collector: null,
+    reached: new Set(),
+    modules: [],
+    providers: [],
+    diagnostics: [],
   };
-
-  for (const line of lines) {
-    const next = sectionOf(line);
-    if (next) {
-      endSection();
-      section = next;
-      reached.add(next);
-      if (next !== 'modules') collector = diagnosticCollector();
-      continue;
-    }
-    if (section === 'modules') {
-      const rewrite = line.match(REWRITE);
-      const dir = rewrite?.[1].match(VENDORED_DIR);
-      if (dir) pushUnique(modules, `${dir[1]}@${dir[2]}`);
-    } else if (collector) {
-      const provider = section === 'init' ? line.match(PROVIDER) : null;
-      if (provider) pushUnique(providers, `${provider[1]} v${provider[2]}`);
-      else collector.line(line);
-    }
+  for (const line of String(output ?? '').replace(/\r\n?/g, '\n').split('\n')) {
+    const section = sectionOf(line);
+    if (section) openSection(reading, section);
+    else LINE_READERS[reading.section]?.(reading, line);
   }
-  endSection();
+  closeSection(reading);
+  const { reached, modules, providers, diagnostics } = reading;
   return { reached, modules, providers, diagnostics };
 }
 
