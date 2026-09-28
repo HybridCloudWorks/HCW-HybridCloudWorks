@@ -17,8 +17,8 @@ why each call looks the way it does, not only what it is.
 This part builds it one component at a time in the
 [Landing Zone Builder](https://hybridcloudworks.com/tools/landing-zone), reads
 what each component is for, and downloads the zip.
-[Part 2](blog-lab-02-one-container.md) initialises that zip with the network
-switched off, inside one container. [Part 3](blog-lab-03-agent-explains.md)
+[Part 2](https://hybridcloudworks.com/terraform/blog/follow-along-in-one-container) initialises that zip with the network
+switched off, inside one container. [Part 3](https://hybridcloudworks.com/terraform/blog/let-an-agent-explain-it)
 hands it to an agent.
 
 Nothing in this series is applied to a tenant. The builder makes no Azure call,
@@ -427,7 +427,7 @@ browser. Copy each file from its tab instead."
 
 ## What's next
 
-[Part 2](blog-lab-02-one-container.md) takes this folder into the `hcw-lab`
+[Part 2](https://hybridcloudworks.com/terraform/blog/follow-along-in-one-container) takes this folder into the `hcw-lab`
 container, runs `terraform init` with the network switched off, and reads what
 the provider mirror is and why the site's lab runner cannot work without it.
 
