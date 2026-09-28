@@ -63,10 +63,11 @@ export const EXPECTED_UNRESOLVED = new Map([
     'AZURE_SPEECH_KEY',
     'fallback TTS provider, deliberately unprovisioned — infra/functionapp.tf:444',
   ],
-  [
-    'CODER_STATUS_TOKEN',
-    'Coder status token, issued by Coder itself, so it cannot exist until Coder runs on the lab host (#661) and the owner creates it (#682) — infra/functionapp.tf CODER_STATUS_TOKEN comment',
-  ],
+  // CODER_STATUS_TOKEN was here from its Terraform run until the owner
+  // created it in Coder and seeded CODER-STATUS-TOKEN on 2026-09-28 (#682),
+  // when the site's Coder card first listed hcw-lab and a running count. It
+  // must resolve from now on. It lapses on 2027-09-28 unless renewed (#763);
+  // a lapsed token still resolves here, and only Coder refuses it.
   // TURNSTILE_SECRET_KEY was here from its Terraform run until the owner
   // seeded TURNSTILE-SECRET-KEY on 2026-09-28, when "Validate on the lab"
   // started working end to end. It must resolve from now on, so an

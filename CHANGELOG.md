@@ -2007,6 +2007,21 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Coder token steps hold the token in a variable, not on the clipboard.**
+  In `lab-host/README.md`, the owner-check, template-publish and status-token
+  lines all read a Coder token with `Get-Clipboard`. Each of those lines is
+  itself copied from the README, so on 2026-09-28 copying the status-token
+  line replaced the token, and Coder answered `You are signed out` to the
+  line's own text. The token is now read once into `$t` at a masked
+  `Read-Host` prompt. The new status token is captured in `$s` and goes to
+  the clipboard only for the paste into the keys page, after which nothing
+  else is copied. The `hcw-coder-template-push` test pins the new line.
+- **`CODER_STATUS_TOKEN` must resolve.** The owner seeded
+  `CODER-STATUS-TOKEN` on 2026-09-28 (#682). The site's Coder card then
+  listed `hcw-lab` and a running count, so the token came off
+  `EXPECTED_UNRESOLVED` in `scripts/check-unresolved-secrets.mjs`, and an
+  unresolved reference is a failure again. The token expires on 2027-09-28,
+  and #763 is the renewal reminder.
 - **The runbook's "Validate on the lab" table matches what visitors see.**
   `docs/runbooks/labs-host.md` keyed its troubleshooting table on the
   button's old wording, such as *its browser check (Cloudflare Turnstile)
