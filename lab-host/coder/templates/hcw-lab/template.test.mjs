@@ -64,50 +64,8 @@ function composeServices(text) {
   return services;
 }
 
-// Top-level HCL blocks as { header, body } so a `volumes {` inside the
-// container can be inspected without a parser.
-function hclBlocks(text, header) {
-  const blocks = [];
-  const lines = codeLines(text);
-  for (let i = 0; i < lines.length; i += 1) {
-    if (!lines[i].startsWith(header)) continue;
-    let depth = 0;
-    const body = [];
-    for (let j = i; j < lines.length; j += 1) {
-      depth += (lines[j].match(/\{/g) || []).length;
-      depth -= (lines[j].match(/\}/g) || []).length;
-      body.push(lines[j]);
-      if (depth === 0) break;
-    }
-    blocks.push({ header: lines[i], body: body.join('\n') });
-  }
-  return blocks;
-}
-
-// Nested blocks of one name inside a body, by brace matching.
-function nestedBlocks(body, name) {
-  const found = [];
-  const lines = body.split('\n');
-  for (let i = 0; i < lines.length; i += 1) {
-    if (!new RegExp(`^\\s*${name}\\s*\\{`).test(lines[i])) continue;
-    let depth = 0;
-    const block = [];
-    for (let j = i; j < lines.length; j += 1) {
-      depth += (lines[j].match(/\{/g) || []).length;
-      depth -= (lines[j].match(/\}/g) || []).length;
-      block.push(lines[j]);
-      if (depth === 0) break;
-    }
-    found.push(block.join('\n'));
-  }
-  return found;
-}
-
-// The body of `name = { ... }` inside a block's body, by brace matching.
-function assignedObject(body, name) {
-  const lines = body.split('\n');
-  const start = lines.findIndex((line) => new RegExp(`^\\s*${name}\\s*=\\s*\\{\\s*$`).test(line));
-  if (start === -1) return null;
+// The lines of the block that opens on lines[start], by brace matching.
+function blockFrom(lines, start) {
   let depth = 0;
   const block = [];
   for (let j = start; j < lines.length; j += 1) {
@@ -116,7 +74,32 @@ function assignedObject(body, name) {
     block.push(lines[j]);
     if (depth === 0) break;
   }
-  return block.slice(1, -1).join('\n');
+  return block;
+}
+
+// Every block whose opening line passes `opens`, each as its lines.
+const blocksWhere = (lines, opens) => lines.flatMap((line, i) => (opens(line) ? [blockFrom(lines, i)] : []));
+
+// Top-level HCL blocks as { header, body } so a `volumes {` inside the
+// container can be inspected without a parser.
+function hclBlocks(text, header) {
+  return blocksWhere(codeLines(text), (line) => line.startsWith(header)).map((block) => ({
+    header: block[0],
+    body: block.join('\n'),
+  }));
+}
+
+// Nested blocks of one name inside a body, by brace matching.
+function nestedBlocks(body, name) {
+  const opens = new RegExp(`^\\s*${name}\\s*\\{`);
+  return blocksWhere(body.split('\n'), (line) => opens.test(line)).map((block) => block.join('\n'));
+}
+
+// The body of `name = { ... }` inside a block's body, by brace matching.
+function assignedObject(body, name) {
+  const opens = new RegExp(`^\\s*${name}\\s*=\\s*\\{\\s*$`);
+  const [block] = blocksWhere(body.split('\n'), (line) => opens.test(line));
+  return block ? block.slice(1, -1).join('\n') : null;
 }
 
 const services = composeServices(compose);
