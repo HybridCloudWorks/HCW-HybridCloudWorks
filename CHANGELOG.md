@@ -2007,6 +2007,13 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The runbook's "Validate on the lab" table matches what visitors see.**
+  `docs/runbooks/labs-host.md` keyed its troubleshooting table on the
+  button's old wording, such as *its browser check (Cloudflare Turnstile)
+  is not configured*, which #755 took off the public pages. It is now keyed
+  on the API `code` in the network response, with the exact visitor
+  sentence for each, what it means and what to do, and rows for the states
+  with no code, told apart by the page's `data-door` and `data-check`.
 - **The lab article drafts link to each other on the site, not to repository
   files.** The six sibling links in `docs/content/blog-lab-0*.md` pointed at
   `blog-lab-0N-*.md`, which works on GitHub only; they now name each
