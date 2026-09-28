@@ -88,3 +88,73 @@ describe('Header Learn menu', () => {
     );
   });
 });
+
+describe('Header provider links (Docker, 2026-09-28)', () => {
+  const primaryLabels = () =>
+    within(screen.getByRole('navigation', { name: 'Primary' }))
+      .getAllByRole('link')
+      .map((link) => link.textContent.trim());
+
+  it('puts Docker between Terraform and Ansible on the all-providers list', () => {
+    renderAt('/');
+    expect(primaryLabels()).toEqual([
+      'Azure',
+      'AWS',
+      'Google Cloud',
+      'VMware',
+      'GitHub',
+      'FinOps',
+      'Terraform',
+      'Docker',
+      'Ansible',
+    ]);
+    expect(screen.getByRole('link', { name: 'Docker' })).toHaveAttribute('href', '/docker');
+  });
+
+  it('shows the Docker hub its own pages, like Terraform without Modules', () => {
+    renderAt('/docker');
+    expect(primaryLabels()).toEqual(['News', 'Blogs', 'Code', 'Tools', 'Learning']);
+    const hrefs = within(screen.getByRole('navigation', { name: 'Primary' }))
+      .getAllByRole('link')
+      .map((link) => link.getAttribute('href'));
+    expect(hrefs).toEqual([
+      '/docker/rss',
+      '/docker/blog',
+      '/docker/code',
+      '/docker/tools',
+      '/docker/education',
+    ]);
+    fireEvent.click(screen.getByRole('button', { name: /toggle tools menu/i }));
+    expect(
+      within(screen.getByRole('menu', { name: 'Tools' })).getByRole('menuitem', {
+        name: 'Docker Tools',
+      })
+    ).toHaveAttribute('href', '/docker/tools');
+  });
+
+  it('sizes the all-providers columns to their labels', () => {
+    // The all-providers list does not fit fixed 90px columns beside the logo:
+    // with eight providers it was 936px and squeezed the logo to zero width
+    // at every desktop width; nine would be 1030px.
+    renderAt('/');
+    expect(screen.getByRole('navigation', { name: 'Primary' }).style.gridTemplateColumns).toBe(
+      'repeat(11, max-content)'
+    );
+  });
+
+  it('keeps 90px columns on a hub, so its links line up from one hub to the next', () => {
+    renderAt('/terraform');
+    expect(screen.getByRole('navigation', { name: 'Primary' }).style.gridTemplateColumns).toBe(
+      'repeat(8, 90px)'
+    );
+  });
+
+  it('lets the mobile menu scroll rather than run off a short screen', () => {
+    renderAt('/');
+    fireEvent.click(screen.getByRole('button', { name: /toggle menu/i }));
+    const mobile = screen.getByRole('navigation', { name: 'Mobile' });
+    expect(mobile.className).toMatch(/overflow-y-auto/);
+    expect(mobile.className).toMatch(/max-h-\[calc\(100dvh-4rem\)\]/);
+    expect(within(mobile).getByRole('link', { name: 'Docker' })).toHaveAttribute('href', '/docker');
+  });
+});

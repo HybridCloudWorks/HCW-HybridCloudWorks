@@ -115,6 +115,16 @@ describe('inferProviderFromText', () => {
     // Order is load-bearing, so it is pinned rather than left to chance.
     expect(inferProviderFromText('migrating from aws to github actions')).toBe('github');
   });
+
+  it('files a text under Docker only when it names no other provider', () => {
+    // Docker is last in the table: container writing about Azure, GitHub or
+    // Terraform stays with that provider rather than moving to Docker.
+    expect(inferProviderFromText('Docker images on Azure Container Apps')).toBe('azure');
+    expect(inferProviderFromText('a GitHub workflow that builds a Docker image')).toBe('github');
+    expect(inferProviderFromText('Terraform and the Docker provider')).toBe('terraform');
+    expect(inferProviderFromText('Docker Desktop, day to day')).toBe('docker');
+    expect(PROVIDER_ALIASES.at(-1).provider).toBe('docker');
+  });
 });
 
 describe('squashProvider', () => {

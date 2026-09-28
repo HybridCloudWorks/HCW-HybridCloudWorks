@@ -93,6 +93,7 @@ const PROVIDER_NAMES = {
   finops: ['FinOps'],
   vmware: ['VMware'],
   ansible: ['Ansible'],
+  docker: ['Docker'],
 };
 
 /** The site's own empty-state copy (grep of frontend/src, 2026-09-06). */

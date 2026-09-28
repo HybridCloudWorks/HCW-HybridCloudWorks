@@ -76,6 +76,14 @@ const NEWS_META = {
     glowColor: 'rgba(var(--primary-rgb,238,0,0),0.3)',
     bgGlow: 'bg-red-500/10',
   },
+  docker: {
+    title: 'Docker News',
+    subtitle: 'Docker updates — images, Docker Desktop, sandboxes, and container practice.',
+    gradientFrom: 'from-docker-primary',
+    gradientTo: 'to-docker-primary',
+    glowColor: 'rgba(var(--primary-rgb,29,99,237),0.3)',
+    bgGlow: 'bg-blue-500/10',
+  },
 };
 
 /** Deliberately generic. See the comment at the call site. */

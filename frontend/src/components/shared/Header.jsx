@@ -149,6 +149,7 @@ export default function Header() {
     { label: 'GitHub', path: routes.landing('github') },
     { label: 'FinOps', path: routes.landing('finops') },
     { label: 'Terraform', path: routes.landing('terraform') },
+    { label: 'Docker', path: routes.landing('docker') },
     { label: 'Ansible', path: routes.landing('ansible') },
   ];
 
@@ -200,6 +201,16 @@ export default function Header() {
     { label: 'Learning', path: routes.education('ansible') },
   ];
 
+  // Docker page navigation (service-provider pattern, mirrors Terraform
+  // without Modules)
+  const getDockerPageLinks = () => [
+    { label: 'News', path: routes.rss('docker') },
+    { label: 'Blogs', path: routes.blog('docker') },
+    { label: 'Code', path: routes.code('docker') },
+    { label: 'Tools', path: routes.tools('docker') },
+    { label: 'Learning', path: routes.education('docker') },
+  ];
+
   // Tools dropdown menu items (global standalone tools + provider-specific tools)
   const getToolsDropdownItems = () => [
     { label: 'Resource Comparison', path: staticRoutes.resources },
@@ -215,6 +226,9 @@ export default function Header() {
       : []),
     ...(currentProvider === 'terraform'
       ? [{ label: 'Terraform Tools', path: routes.tools('terraform') }]
+      : []),
+    ...(currentProvider === 'docker'
+      ? [{ label: 'Docker Tools', path: routes.tools('docker') }]
       : []),
   ];
 
@@ -244,10 +258,22 @@ export default function Header() {
   } else if (currentProvider === 'ansible') {
     // Ansible pages - service-provider navigation like Terraform
     hubLinks = getAnsiblePageLinks();
+  } else if (currentProvider === 'docker') {
+    // Docker pages - service-provider navigation like Terraform
+    hubLinks = getDockerPageLinks();
   } else {
     // Fallback to all providers
     hubLinks = allProviders;
   }
+
+  // The all-providers list (nine of them, plus Learn and Tools) does not fit
+  // the fixed 90px grid. Even with eight providers that nav was 936px, which
+  // squeezed the logo to zero width at every desktop width and pushed the row
+  // past its container; nine would make it 1030px. So the longest list sizes
+  // its columns to their labels (838px measured). Every hub list is six links
+  // or fewer and keeps the fixed columns that line its links up from one hub
+  // to the next.
+  const compactNav = hubLinks.length > 8;
 
   return (
     <header
@@ -262,7 +288,10 @@ export default function Header() {
       <div className="max-w-[1400px] mx-auto h-full px-4 md:px-8 flex items-center">
         {/* Logo - use brand logo image in top-left */}
         <div className="flex items-center w-60">
-          <Link to="/" className="flex items-center group h-full py-0">
+          {/* shrink-0: the logo is never the thing that gives way when the
+              nav is long. Without it the image, being max-width: 100%, was
+              compressed to zero width on the home page. */}
+          <Link to="/" className="flex items-center group h-full py-0 shrink-0">
             <img
               src="/icons/hcw-logo.png"
               alt="HybridCloudWorks logo"
@@ -282,7 +311,9 @@ export default function Header() {
           <nav
             aria-label="Primary"
             className="grid gap-1 items-center"
-            style={{ gridTemplateColumns: `repeat(${hubLinks.length + 2}, 90px)` }}
+            style={{
+              gridTemplateColumns: `repeat(${hubLinks.length + 2}, ${compactNav ? 'max-content' : '90px'})`,
+            }}
           >
             {hubLinks.map((item, index) => (
               <Link
@@ -340,8 +371,12 @@ export default function Header() {
           </nav>
         </div>
 
-        {/* Right Controls - fixed width to prevent shifts */}
-        <div className="flex items-center gap-2 ml-auto min-w-41 justify-end">
+        {/* Right Controls. The box only ever holds the menu button, which is
+            hidden from lg up, so from lg it keeps its width while there is
+            room and gives it back when the nav needs it. Held at a fixed
+            minimum instead, it forced the logo to give way: on the hubs at
+            1024-1280px the logo was squeezed to a few pixels. */}
+        <div className="flex items-center gap-2 ml-auto w-41 min-w-41 lg:min-w-0 justify-end">
           <button
             className="lg:hidden text-slate-900 dark:text-white h-11 w-11 inline-flex items-center justify-center rounded-md hover:bg-slate-200/60 dark:hover:bg-slate-800/60 transition-colors"
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
@@ -354,12 +389,17 @@ export default function Header() {
         </div>
       </div>
 
-      {/* Mobile Nav */}
+      {/* Mobile Nav. Scrolls inside itself when taller than the screen: it
+          hangs from a sticky header, so scrolling the page never brings its
+          last links into view. The home list of nine providers makes it
+          787px tall, past a 740px phone. `*:shrink-0` keeps each link at its
+          44px touch height; without it the column squeezes them to fit
+          instead of scrolling. */}
       {mobileMenuOpen && (
         <nav
           id="mobile-nav"
           aria-label="Mobile"
-          className="lg:hidden absolute left-0 right-0 top-16 bg-background/98 backdrop-blur-xl border-b border-glass-border z-50 px-4 py-4 flex flex-col gap-1 shadow-xl"
+          className="lg:hidden absolute left-0 right-0 top-16 max-h-[calc(100dvh-4rem)] overflow-y-auto overscroll-contain bg-background/98 backdrop-blur-xl border-b border-glass-border z-50 px-4 py-4 flex flex-col gap-1 *:shrink-0 shadow-xl"
         >
           {hubLinks.map((item) => (
             <Link

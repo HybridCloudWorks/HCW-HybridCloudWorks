@@ -10,7 +10,7 @@
  */
 import { test, expect } from '@playwright/test';
 
-const PROVIDERS = ['aws', 'azure', 'gcp', 'github', 'terraform', 'finops'];
+const PROVIDERS = ['aws', 'azure', 'gcp', 'github', 'terraform', 'finops', 'docker'];
 
 // Every provider that `ProviderEducationDispatcher` in App.jsx routes to its
 // own hub. Covering one of them was not enough: `/aws/education` was the only
@@ -26,6 +26,7 @@ const EDUCATION_PROVIDERS = [
   'finops',
   'vmware',
   'ansible',
+  'docker',
 ];
 
 // Smaller route set than the full scan: covers each layout/template once.

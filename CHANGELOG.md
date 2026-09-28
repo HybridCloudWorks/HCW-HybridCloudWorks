@@ -19,6 +19,47 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Home: the providers in two rows with a guide under them; Docker as a
+  service provider, with placeholder pages.** Owner request 2026-09-28.
+  The home page strip is two evenly spaced rows, Azure, AWS, GCP and
+  VMware, then GitHub and FinOps, a pipe, and Terraform, Docker and Ansible;
+  each label still links to its hub. On a phone row 2 wraps into its two
+  groups (two over three) and the pipe is dropped, with no horizontal
+  scroll at 360 to 414px. Pointing at a provider, focusing it or tapping it
+  shows a frame one blank line below the rows: a paragraph that says what
+  kind of provider it is (cloud, framework or service) and how this site
+  uses it, checked against the repository, with an icon at the
+  bottom-right that opens the provider's website in a new tab
+  (`rel="noopener noreferrer"`, named "... website (opens in a new tab)").
+  The frame never changes height: every text it can show is rendered into
+  it invisibly, so it is as tall as the longest at any width, and at
+  768px and up that is exactly four lines, measured for all nine at 768,
+  1024 and 1440px in both themes, with the next section's position
+  unchanged. The last provider shown stays shown, a 90ms hover intent
+  keeps a pointer passing over another label on its way to the icon from
+  taking the frame over, the first tap shows and the second follows the
+  link, and the text is a polite live region that neither moves nor holds
+  focus. The copy and types are data in
+  `frontend/src/components/home/providerGuide.js`, where
+  `providerGuide.test.js` pins the nine providers, rows, types, websites
+  and a 320-character ceiling. Docker joins the provider registry
+  (`providers.js`, with `docker` last so container writing about another
+  provider stays with it; `VALID_PROVIDERS`, `routeFactory.ts`,
+  `App.jsx`, the pre-render list, the header, `--docker-blue` #1D63ED and
+  a `theme-docker`, and a Simple Icons mark, CC0) with a landing page on
+  the Terraform template and three focus areas marked coming soon
+  (building images with `hcw-lab` as the example, the Docker Desktop app,
+  and running an agent in a sandbox, which links to the recipe on
+  `/education/labs` for now), plus static Blog, Code, Learning, News and
+  Tools placeholders that read nothing from the API. Eight Docker pages
+  pre-render (196 documents, from 188). The header needed room for a
+  ninth provider: the all-providers list now sizes its columns to their
+  labels, the logo can no longer be squeezed out (it was zero pixels wide
+  on the home page at every desktop width, and a few pixels on the hubs
+  at 1024 to 1280px), the empty box beside the menu button gives its
+  width back from `lg`, and the mobile menu scrolls inside itself instead
+  of running its last links off a 740px screen.
+
 - **Labs page: Coder is credited beside the intro, with its cursor
   blinking; the intro no longer says the host is onboarded to Azure Arc.**
   Owner request 2026-09-28. On `/education/labs` the column to the right of

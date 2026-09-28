@@ -15,6 +15,7 @@ export const VALID_PROVIDERS = [
   'finops',
   'vmware',
   'ansible',
+  'docker',
 ];
 
 /**
@@ -164,6 +165,19 @@ export function useProviderConfig() {
         { name: 'Red Hat Blog', url: 'https://www.redhat.com/en/rss/blog' },
       ],
       blogSource: 'https://www.ansible.com/blog',
+    },
+    docker: {
+      name: 'Docker',
+      // Not plain 'Docker': the landing template titles a page "<displayName>
+      // Hub", and "Docker Hub" is the name of Docker's own image registry.
+      displayName: 'Docker Containers',
+      theme: 'theme-docker',
+      blogPath: 'foundational-posts',
+      color: 'hsl(var(--primary))',
+      // Empty until Docker has a news source: the feeds the news timer reads
+      // are in functions/src/lib/rss/feeds.js, and Docker is not there yet.
+      rssFeeds: [],
+      blogSource: 'https://www.docker.com/blog/',
     },
   };
 

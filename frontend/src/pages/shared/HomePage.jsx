@@ -7,6 +7,7 @@ import { useTheme } from '@/context/ThemeContext';
 import Eyebrow from '@/components/shared/Eyebrow';
 import NumberedSection from '@/components/shared/NumberedSection';
 import StatBlock from '@/components/shared/StatBlock';
+import ProviderStrip from '@/components/home/ProviderStrip';
 
 const getProviderLogoSrc = (provider, theme) => {
   if (provider === 'github') {
@@ -18,18 +19,6 @@ const getProviderLogoSrc = (provider, theme) => {
   if (provider === 'vmware') return '/icons/providers/vmware.svg';
   return `/icons/providers/${provider}.png`;
 };
-
-/* Provider logo strip (marquee-style row) — reuses the Quick Access Hubs data */
-const PROVIDER_LOGOS = [
-  { provider: 'azure', label: 'Azure', src: '/icons/providers/azure.png' },
-  { provider: 'aws', label: 'AWS', src: '/icons/providers/aws.png' },
-  { provider: 'gcp', label: 'GCP', src: '/icons/providers/gcp.png' },
-  { provider: 'terraform', label: 'Terraform', src: '/icons/providers/terraform.svg' },
-  { provider: 'github', label: 'GitHub', src: '/icons/providers/github.svg' },
-  { provider: 'finops', label: 'FinOps', src: '/icons/providers/FinOps.svg' },
-  { provider: 'vmware', label: 'VMware', src: '/icons/providers/vmware.svg' },
-  { provider: 'ansible', label: 'Ansible', src: '/icons/providers/ansible.svg' },
-];
 
 const vendorDesigns = [
   {
@@ -455,41 +444,8 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Provider logo strip (marquee-style row) */}
-      <section aria-label="Provider hubs" className="relative">
-        <div className="flex flex-wrap items-center justify-between gap-6 border-y border-glass-border py-6 px-2">
-          {PROVIDER_LOGOS.map((logo) => (
-            <Link
-              key={logo.provider}
-              to={routes.landing(logo.provider)}
-              className="flex items-center gap-2 opacity-60 grayscale transition-all hover:opacity-100 hover:grayscale-0"
-              aria-label={`${logo.label} hub`}
-            >
-              {logo.provider === 'github' ? (
-                <img
-                  src={getProviderLogoSrc('github', theme)}
-                  alt=""
-                  loading="lazy"
-                  decoding="async"
-                  className="h-7 w-auto object-contain"
-                />
-              ) : (
-                <img
-                  src={logo.src}
-                  alt=""
-                  loading="lazy"
-                  decoding="async"
-                  className="h-7 w-auto object-contain"
-                  onError={(e) => {
-                    e.target.style.display = 'none';
-                  }}
-                />
-              )}
-              <span className="eyebrow-label text-slate-600 dark:text-slate-400">{logo.label}</span>
-            </Link>
-          ))}
-        </div>
-      </section>
+      {/* Provider strip: two rows of hubs, and a frame that says what each one is */}
+      <ProviderStrip />
 
       {/* Value Pillars */}
       <NumberedSection number={1} eyebrow="Capabilities" title="Build. Learn. Scale.">
