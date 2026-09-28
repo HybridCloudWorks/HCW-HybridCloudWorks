@@ -27,31 +27,45 @@ def load(path):
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
+def optional(path):
+    """A YAML mapping, or an empty one when the file does not exist."""
+    return load(path) if path.exists() else {}
+
+
+def default_problem(option, contract, defaults, set_anywhere):
+    """What is wrong with one option's default, or None."""
+    if "default" not in (contract or {}):
+        return None
+    if option not in set_anywhere:
+        return (
+            f"{option} has a default only in meta/argument_specs.yml; "
+            "Ansible never applies it, so set it in defaults/main.yml"
+        )
+    value = defaults.get(option, contract["default"])
+    templated = isinstance(value, str) and "{{" in value
+    if templated or value == contract["default"]:
+        return None
+    return f"{option} is {value!r} in defaults/main.yml but {contract['default']!r} in meta/argument_specs.yml"
+
+
+def role_problems(spec, group_vars):
+    """Every problem in one role's argument spec, prefixed with the role and entry point."""
+    role = spec.parent.parent
+    defaults = optional(role / "defaults" / "main.yml")
+    set_anywhere = set(defaults) | set(optional(role / "vars" / "main.yml")) | set(group_vars)
+    problems = []
+    for entry, body in (load(spec).get("argument_specs") or {}).items():
+        for option, contract in ((body or {}).get("options") or {}).items():
+            problem = default_problem(option, contract, defaults, set_anywhere)
+            if problem:
+                problems.append(f"{role.name} ({entry}): {problem}")
+    return problems
+
+
 def main():
     group_vars = load(HERE / "group_vars" / "all.yml")
     specs = sorted(HERE.glob("roles/*/meta/argument_specs.yml"))
-    problems = []
-    for spec in specs:
-        role = spec.parent.parent
-        defaults = load(role / "defaults" / "main.yml") if (role / "defaults" / "main.yml").exists() else {}
-        role_vars = load(role / "vars" / "main.yml") if (role / "vars" / "main.yml").exists() else {}
-        for entry, body in (load(spec).get("argument_specs") or {}).items():
-            for option, contract in ((body or {}).get("options") or {}).items():
-                if "default" not in (contract or {}):
-                    continue
-                if option not in defaults and option not in role_vars and option not in group_vars:
-                    problems.append(
-                        f"{role.name}: {option} has a default only in meta/argument_specs.yml ({entry}); "
-                        "Ansible never applies it, so set it in defaults/main.yml"
-                    )
-                elif option in defaults:
-                    value = defaults[option]
-                    templated = isinstance(value, str) and "{{" in value
-                    if not templated and value != contract["default"]:
-                        problems.append(
-                            f"{role.name}: {option} is {value!r} in defaults/main.yml but "
-                            f"{contract['default']!r} in meta/argument_specs.yml ({entry})"
-                        )
+    problems = [problem for spec in specs for problem in role_problems(spec, group_vars)]
     for problem in problems:
         print(problem)
     if problems:
