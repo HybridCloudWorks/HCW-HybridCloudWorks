@@ -134,11 +134,13 @@ describe('Content-Security-Policy', () => {
     ]);
     expect(directive('connect-src')).not.toContain('https://challenges.cloudflare.com');
     expect(CSP).not.toMatch(/\*\.cloudflare\.com/);
-    // Every directive that lists the origin, by exact source token (a
-    // substring match on the policy text would also count a look-alike host).
+    // Every directive that lists the origin, by exact source token compared
+    // with ===. A substring match on the policy text would also count a
+    // look-alike host, and CodeQL rightly flags one.
+    const TURNSTILE_ORIGIN = 'https://challenges.cloudflare.com';
     const granting = CSP.split(';')
       .map((part) => part.trim().split(/\s+/))
-      .filter(([, ...sources]) => sources.includes('https://challenges.cloudflare.com'))
+      .filter(([, ...sources]) => sources.some((source) => source === TURNSTILE_ORIGIN))
       .map(([name]) => name);
     expect(granting.sort()).toEqual(['frame-src', 'script-src']);
   });
