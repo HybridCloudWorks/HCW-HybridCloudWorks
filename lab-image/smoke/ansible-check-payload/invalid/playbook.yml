@@ -1,0 +1,11 @@
+---
+# Valid YAML, not a valid play: `taskz` is not a play keyword, so the syntax
+# check must fail on it (the file stays YAML so no other linter trips on it).
+- name: Configure a web host
+  hosts: all
+  gather_facts: false
+  taskz:
+    - name: Install nginx
+      ansible.builtin.package:
+        name: nginx
+        state: present

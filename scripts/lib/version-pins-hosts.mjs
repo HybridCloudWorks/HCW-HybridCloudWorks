@@ -1,7 +1,8 @@
 /**
  * The version pins of the things that run code (#715): the base images in
- * tracked Dockerfiles, and the lab host's Node.js package, Ubuntu target,
- * control-side Python, Coder's PostgreSQL and HashiCorp Vault.
+ * tracked Dockerfiles, the lab job images in vps-agent/lib/capabilities.js,
+ * and the lab host's Node.js package, Ubuntu target, control-side Python,
+ * Coder's PostgreSQL and HashiCorp Vault.
  */
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -53,11 +54,28 @@ function distroImage(kind, numeric, tag, at, floors) {
   return { pins: [], problems: [{ ...at, kind, message }] };
 }
 
+/**
+ * alpine:3.24.2 → an alpine pin. A reference pinned by digest must name the
+ * exact release the digest is, MAJOR.MINOR.PATCH: a digest does not float the
+ * way a tag does, so alpine:3.24@sha256:… would meet the floor at line
+ * precision whichever 3.24 patch release the digest holds. The line-only pin
+ * is still reported, so an old line is named as below the floor as well.
+ */
+function releaseImage(kind, tag, at, { pinned }) {
+  const version = /^(\d+(?:\.\d+){0,2})(?:-|$)/.exec(tag)?.[1];
+  if (!version) return { pins: [], problems: [{ ...at, kind, message: `${kind}:${tag} names no release` }] };
+  const pins = [{ ...at, kind, version }];
+  if (!pinned || version.split('.').length === 3) return { pins, problems: [] };
+  const message = `${kind}:${tag} is pinned by digest but names only the line ${version}; name the exact release the digest is (MAJOR.MINOR.PATCH), because a digest does not float`;
+  return { pins, problems: [{ ...at, kind, message }] };
+}
+
 const IMAGE_READERS = {
   python: (tag, at, floors) => runtimeImage('python', tag, at, floors),
   node: (tag, at, floors) => runtimeImage('node', tag, at, floors),
   debian: (tag, at, floors) => distroImage('debian', /^(\d+)/, tag, at, floors),
   ubuntu: (tag, at, floors) => distroImage('ubuntu', /^(\d+\.\d+)/, tag, at, floors),
+  alpine: (tag, at, floors, ref) => releaseImage('alpine', tag, at, ref),
 };
 
 const FROM = /^\s*FROM\s+(?:--\S+\s+)*(\S+)(?:\s+AS\s+(\S+))?\s*$/i;
@@ -68,7 +86,7 @@ function readImage(ref, at, floors) {
     return { pins: [], problems: [{ ...at, kind: 'image', message: `FROM ${ref} is computed; the floors check reads literal images only` }] };
   }
   const { image, tag } = splitImage(ref);
-  return IMAGE_READERS[image]?.(tag, at, floors) ?? empty();
+  return IMAGE_READERS[image]?.(tag, at, floors, { pinned: ref.includes('@') }) ?? empty();
 }
 
 /** A Dockerfile's governed `FROM` images: python, node, debian and ubuntu tags. Build stages are skipped. */
@@ -82,6 +100,62 @@ export function readDockerfile(file, source, floors) {
     if (alias) stages.add(alias.toLowerCase());
     if (isStage) return [];
     return [readImage(ref, { file, line: i + 1, where: `${file} > FROM ${ref.split('@')[0]}`, raw: ref }, floors)];
+  });
+  return merge(results);
+}
+
+// ---------------------------------------------------------------------------
+// Lab job images
+// ---------------------------------------------------------------------------
+
+export const JOB_IMAGES_FILE = 'vps-agent/lib/capabilities.js';
+
+/**
+ * Images this repository builds, each with the Dockerfile it is built from.
+ * Such an image has no release line of its own: what it runs on is that
+ * Dockerfile's FROM lines, which readDockerfile judges like any other.
+ */
+export const BUILT_HERE = {
+  'ghcr.io/hybridcloudworks/hcw-lab-runner': 'lab-image/Dockerfile',
+};
+
+/** Each `key: 'ref'` of `export const IMAGES = { ... };`, with the line its reference is on, or null with no map. */
+function imagesMap(source) {
+  const start = source.search(/^export const IMAGES = \{/m);
+  if (start === -1) return null;
+  const end = source.indexOf('\n};', start);
+  const block = source.slice(start, end === -1 ? undefined : end);
+  const firstLine = linesOf(source.slice(0, start)).length;
+  return [...block.matchAll(/^\s*([A-Za-z_$][\w$]*):\s*'([^']+)'/gm)].map((m) => ({
+    key: m[1],
+    ref: m[2],
+    line: firstLine + linesOf(block.slice(0, m.index + m[0].length)).length - 1,
+  }));
+}
+
+/**
+ * The lab job images: IMAGES in vps-agent/lib/capabilities.js, the images the
+ * agent pulls and runs on the lab host. Each is read like a FROM line, with
+ * one difference: an image no kind governs is a problem here rather than
+ * nothing, unless this repository builds it (BUILT_HERE) or the floors
+ * file's `unsourced` section has an entry whose `pin` is its `where`. Two job
+ * images went stale that way, alpine:3.20 past its end of life and a
+ * third-party ansible image, because nothing read this map.
+ */
+export function readJobImages(file, source, floors) {
+  const entries = imagesMap(source);
+  if (!entries?.length) {
+    const message = 'no `export const IMAGES = { key: \'ref\' }` entries found, so the job images cannot be checked';
+    return { pins: [], problems: [{ file, line: 0, where: `${file} > IMAGES`, kind: 'image', raw: '', message }] };
+  }
+  const unsourced = new Set(Object.values(floors.unsourced ?? {}).map((entry) => entry?.pin).filter(Boolean));
+  const results = entries.map(({ key, ref, line }) => {
+    const at = { file, line, where: `${file} > IMAGES.${key}`, raw: ref };
+    const { image } = splitImage(ref);
+    if (Object.hasOwn(IMAGE_READERS, image)) return readImage(ref, at, floors);
+    if (Object.hasOwn(BUILT_HERE, image) || unsourced.has(at.where)) return empty();
+    const message = `${image} has no floor: no kind in scripts/version-floors.json governs it, this repository does not build it, and no "unsourced" entry has the pin "${at.where}"`;
+    return { pins: [], problems: [{ ...at, kind: 'image', message }] };
   });
   return merge(results);
 }

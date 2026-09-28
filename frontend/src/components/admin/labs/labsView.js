@@ -28,7 +28,8 @@ export const FALLBACK_JOB_TYPES = [
   },
   {
     type: 'ansible-check',
-    description: 'ansible-playbook --syntax-check on the payload playbook YAML.',
+    description:
+      'ansible-playbook --syntax-check on the payload playbook YAML, with the ansible-core in the runner image and no collections: a module outside ansible.builtin does not resolve.',
     payloadEncodings: ['text'],
   },
   {

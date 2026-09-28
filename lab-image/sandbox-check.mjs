@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
- * Run each runner-image capability exactly the way vps-agent does, against a
- * locally built image, and expect the exit codes the job would report.
+ * Run every capability exactly the way vps-agent does and expect the exit
+ * codes the job would report: each runner-image capability against a locally
+ * built image, and shell-echo on the alpine image capabilities.js pins.
  *
  *   node lab-image/sandbox-check.mjs hcw-lab-runner:dev
  *
@@ -12,9 +13,13 @@
  * were invisible to smoke.sh and fatal here. So this script does not restate
  * the sandbox: it imports `prepareJobDir` and `buildDockerArgs` from
  * vps-agent/lib/docker-runner.js and the capability table from
- * vps-agent/lib/capabilities.js, swaps only the image for the one under
- * test, and spawns the argv the agent would spawn. If the agent's flags
- * change, this checks the new flags.
+ * vps-agent/lib/capabilities.js, swaps only the runner image for the one
+ * under test, and spawns the argv the agent would spawn. If the agent's flags
+ * change, this checks the new flags. A capability on another image runs on
+ * the digest capabilities.js pins, pulled like the agent pulls it: every
+ * capability then has a case, so an image that cannot serve its job under
+ * the sandbox (alpine/ansible:2.17.0 never could, its HOME being `/` on the
+ * read-only root) fails here rather than on the host.
  *
  * The same rule for the payload that matters most: the Landing Zone
  * Builder's full default build (every component, both landing zones) is not
@@ -43,7 +48,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const { prepareJobDir, buildDockerArgs } = await import(
   new URL('../vps-agent/lib/docker-runner.js', import.meta.url)
 );
-const { CAPABILITIES } = await import(new URL('../vps-agent/lib/capabilities.js', import.meta.url));
+const { CAPABILITIES, IMAGES } = await import(new URL('../vps-agent/lib/capabilities.js', import.meta.url));
 
 /**
  * `./format` -> `./format.js` for a relative import with no extension, and
@@ -187,11 +192,87 @@ const cases = [
     expectExit: 1,
     expectOutput: ["'replicaz' not allowed"],
   },
+  {
+    name: 'ansible-check, text payload (valid playbook, ansible.builtin only)',
+    type: 'ansible-check',
+    encoding: 'text',
+    payload: () => readText('ansible-check-payload', 'valid', 'playbook.yml'),
+    expectExit: 0,
+    // The one line and nothing else (ansible-playbook prints a blank line
+    // before it): a warning about a directory ansible-core could not create
+    // on the read-only root would be in the job's output too.
+    expectOutput: [exactly('playbook: /workspace/playbook.yml')],
+  },
+  {
+    name: 'ansible-check, text payload (unknown play keyword is rejected)',
+    type: 'ansible-check',
+    encoding: 'text',
+    payload: () => readText('ansible-check-payload', 'invalid', 'playbook.yml'),
+    expectExit: 4,
+    expectOutput: ["'taskz' is not a valid attribute for a Play"],
+  },
+  {
+    name: 'ansible-check, text payload (a collection module does not resolve: ansible-core only)',
+    type: 'ansible-check',
+    encoding: 'text',
+    payload: () => readText('ansible-check-payload', 'collection', 'playbook.yml'),
+    expectExit: 4,
+    expectOutput: ["couldn't resolve module/action 'community.general.ufw'"],
+  },
+  {
+    name: 'shell-echo, text payload (the admin console smoke test)',
+    type: 'shell-echo',
+    encoding: 'text',
+    payload: () => 'hello vps',
+    expectExit: 0,
+    expectOutput: [exactly('hello vps')],
+  },
 ];
 
-let failed = 0;
-for (const c of cases) {
-  const capability = { ...CAPABILITIES[c.type], image };
+/** A check that the whole job output, surrounding whitespace aside, is `want` and nothing else. */
+function exactly(want) {
+  return (output) => (output.trim() === want ? null : `output is ${JSON.stringify(output)}, expected exactly ${JSON.stringify(want)}`);
+}
+
+/** A check that the job output contains `want`. */
+const contains = (want) => (output) => (output.includes(want) ? null : `output lacks ${want}`);
+
+/** Every capability has a case, so one added later cannot ship unchecked. */
+const uncovered = Object.keys(CAPABILITIES).filter((type) => !cases.some((c) => c.type === type));
+if (uncovered.length > 0) {
+  console.log(`sandbox-check: FAILED (no case for ${uncovered.join(', ')})`);
+  process.exit(1);
+}
+
+/**
+ * The image a case runs on: the image under test for a runner-image
+ * capability, the pinned digest for any other. Those are pulled first, as
+ * the host pre-pulls them, so a pull's progress lines are not job output;
+ * a failed pull prints Docker's own error above the FAILED line.
+ */
+const imageFor = (type) => (CAPABILITIES[type].image === IMAGES.hcwLabRunner ? image : CAPABILITIES[type].image);
+for (const pinned of new Set(cases.map((c) => imageFor(c.type)).filter((ref) => ref !== image))) {
+  const pull = spawnSync('docker', ['pull', '--quiet', pinned], { stdio: ['ignore', 'ignore', 'inherit'] });
+  if (pull.status !== 0) {
+    console.log(`sandbox-check: FAILED (docker pull ${pinned} exited ${pull.status})`);
+    process.exit(1);
+  }
+  console.log(`pulled: ${pinned}`);
+}
+
+/** What is wrong with one finished job, one sentence each; empty when it did what its case expects. */
+function problemsOf(c, run, output) {
+  const checks = c.expectOutput.map((want) => (typeof want === 'function' ? want : contains(want)));
+  return [
+    run.error && `docker did not run: ${run.error.message}`,
+    run.status !== c.expectExit && `exit ${run.status}, expected ${c.expectExit}`,
+    ...checks.map((check) => check(output)),
+  ].filter(Boolean);
+}
+
+/** Run one case exactly as the agent runs a job, and print the verdict. Resolves true when it passed. */
+async function runCase(c) {
+  const capability = { ...CAPABILITIES[c.type], image: imageFor(c.type) };
   const jobId = `check-${c.type}-${Date.now().toString(36)}`;
   const jobDir = await prepareJobDir(capability.payloadFileName, await c.payload(), c.encoding);
   try {
@@ -208,32 +289,26 @@ for (const c of cases) {
     });
     const output = `${run.stdout ?? ''}${run.stderr ?? ''}`;
     const seconds = ((Date.now() - started) / 1000).toFixed(1);
-    const problems = [];
-    if (run.error) problems.push(`docker did not run: ${run.error.message}`);
-    if (run.status !== c.expectExit) problems.push(`exit ${run.status}, expected ${c.expectExit}`);
-    for (const want of c.expectOutput) {
-      if (typeof want === 'function') {
-        const problem = want(output);
-        if (problem) problems.push(problem);
-      } else if (!(typeof want === 'string' ? output.includes(want) : want.test(output))) {
-        problems.push(`output lacks ${want}`);
-      }
-    }
-    if (problems.length === 0) {
-      console.log(`ok:   ${c.name} (exit ${run.status}, ${seconds}s)`);
-      if (c.terraform) {
-        const evidence = output.match(/^\s+rewrote .*$|^Success! .*$/gm) ?? [];
-        for (const line of evidence) console.log(`      ${line.trim()}`);
-      }
-    } else {
-      failed += 1;
+    const problems = problemsOf(c, run, output);
+    if (problems.length > 0) {
       console.log(`FAIL: ${c.name}: ${problems.join('; ')}`);
       console.log(`      docker ${argv.join(' ')}`);
       console.log(output.replace(/^/gm, '      '));
+      return false;
     }
+    const on = capability.image === image ? '' : `, on ${capability.image}`;
+    console.log(`ok:   ${c.name} (exit ${run.status}, ${seconds}s${on})`);
+    const evidence = c.terraform ? (output.match(/^\s+rewrote .*$|^Success! .*$/gm) ?? []) : [];
+    for (const line of evidence) console.log(`      ${line.trim()}`);
+    return true;
   } finally {
     await fs.rm(jobDir, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+let failed = 0;
+for (const c of cases) {
+  if (!(await runCase(c))) failed += 1;
 }
 
 await fs.rm(builderDir, { recursive: true, force: true }).catch(() => {});
@@ -242,4 +317,4 @@ if (failed > 0) {
   console.log(`sandbox-check: FAILED (${failed} of ${cases.length})`);
   process.exit(1);
 }
-console.log(`sandbox-check: passed (${cases.length} jobs on ${image})`);
+console.log(`sandbox-check: passed (${cases.length} jobs, the runner-image ones on ${image})`);

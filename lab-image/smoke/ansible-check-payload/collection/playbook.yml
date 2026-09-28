@@ -1,0 +1,11 @@
+---
+# Valid YAML and a valid play, calling a module from a collection. The runner
+# image carries ansible-core alone, so the syntax check cannot resolve it.
+- name: Open the SSH port
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Allow SSH
+      community.general.ufw:
+        rule: allow
+        port: "22"

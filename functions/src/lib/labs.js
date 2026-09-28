@@ -61,7 +61,8 @@ export const LAB_JOB_TYPES = Object.freeze({
     payloadEncodings: ['text', 'tar'],
   },
   'ansible-check': {
-    description: 'Runs `ansible-playbook --syntax-check` on the payload playbook YAML.',
+    description:
+      'Runs `ansible-playbook --syntax-check` on the payload playbook YAML, with the ansible-core in the runner image and no collections: a module outside ansible.builtin does not resolve.',
     maxPayloadBytes: 64 * 1024,
     payloadEncodings: ['text'],
   },

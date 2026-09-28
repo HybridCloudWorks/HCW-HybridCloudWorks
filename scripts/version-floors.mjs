@@ -25,7 +25,8 @@ import { join } from 'node:path';
 import { meetsFloor, npmRangeAdmits, npmRangeMinimum, parseVersion, terraformConstraintAdmits } from './lib/version-math.mjs';
 
 export * from './lib/version-math.mjs';
-export { collectPins, readDockerfile, readLabHost, readWorkflow, trackedFiles } from './lib/version-pins.mjs';
+export { collectPins, readDockerfile, readJobImages, readLabHost, readWorkflow, trackedFiles } from './lib/version-pins.mjs';
+export { BUILT_HERE, JOB_IMAGES_FILE } from './lib/version-pins-hosts.mjs';
 
 /**
  * Packages with no engines.node, each with the reason. A package.json that

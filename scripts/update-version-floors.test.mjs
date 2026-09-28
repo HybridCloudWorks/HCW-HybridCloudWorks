@@ -45,6 +45,13 @@ function sourcesToday() {
         rel('24.04', '24.04.3', { codename: 'Noble Numbat', isLts: true }),
       ]),
       debian: doc([rel('13', '13.7', { codename: 'Trixie' }), rel('12', '12.15', { codename: 'Bookworm' })]),
+      // As endoflife.date listed alpine-linux on 2026-09-28: 3.20 ended on
+      // 2026-04-01, and 3.24 is supported to 2028-06-01.
+      alpine: doc([
+        rel('3.24', '3.24.2', { releaseDate: '2026-06-09', eolFrom: '2028-06-01' }),
+        rel('3.23', '3.23.6', { releaseDate: '2025-12-04', eolFrom: '2027-11-01' }),
+        rel('3.20', '3.20.10', { releaseDate: '2024-05-22', isEol: true, eolFrom: '2026-04-01' }),
+      ]),
       terraform: doc([rel('1.16', '1.16.4'), rel('1.15', '1.15.9')]),
       // As endoflife.date listed it on 2026-09-26: majors only from their
       // general release, so 19 (19beta4 on Docker Hub that day) is absent.
@@ -92,6 +99,36 @@ describe('proposeFloors', () => {
     ready.eol.python.result.releases.unshift(rel('3.15', '3.15.2'));
     const { next } = proposeFloors(current(), ready, TODAY);
     expect([next.kinds.python.line, next.kinds.python.newest, next.kinds.python.floor]).toEqual(['3.15', '3.15.2', '3.15.0']);
+  });
+
+  it('moves Alpine to a newer patch release with its N-2 floor, and dates only that entry', () => {
+    const sources = sourcesToday();
+    sources.eol.alpine.result.releases[0].latest.name = '3.24.4';
+    const { changes, next } = proposeFloors(current(), sources, TODAY);
+    expect(changes).toEqual([
+      { kind: 'alpine', field: 'newest', from: '3.24.2', to: '3.24.4' },
+      { kind: 'alpine', field: 'floor', from: '3.24.0', to: '3.24.2' },
+    ]);
+    expect(next.kinds.alpine.checkedOn).toBe(TODAY);
+    expect(next.kinds.debian.checkedOn).toBe(current().kinds.debian.checkedOn);
+  });
+
+  it('adopts a new Alpine line only once its N-2 patch exists', () => {
+    const early = sourcesToday();
+    early.eol.alpine.result.releases.unshift(rel('3.25', '3.25.1', { releaseDate: '2026-12-01' }));
+    expect(proposeFloors(current(), early, '2027-01-15').next.kinds.alpine.line).toBe('3.24');
+
+    const ready = sourcesToday();
+    ready.eol.alpine.result.releases.unshift(rel('3.25', '3.25.2', { releaseDate: '2026-12-01' }));
+    const { next } = proposeFloors(current(), ready, '2027-01-15');
+    expect([next.kinds.alpine.line, next.kinds.alpine.newest, next.kinds.alpine.floor]).toEqual(['3.25', '3.25.2', '3.25.0']);
+  });
+
+  it('refuses an Alpine source that goes backwards, and writes nothing', () => {
+    // 3.24.1 is below 3.24's N-2 patch, so the pick falls back a line.
+    const sources = sourcesToday();
+    sources.eol.alpine.result.releases[0].latest.name = '3.24.1';
+    expect(() => proposeFloors(current(), sources, TODAY)).toThrow(/alpine: the source's line 3\.23 is older than the recorded 3\.24/);
   });
 
   it('skips a Node.js line that never becomes LTS, and adopts the next one at its N-2 minor', () => {

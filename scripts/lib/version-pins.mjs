@@ -13,8 +13,8 @@
  * or `missing: true` for a package.json with no engines.node. `where` is
  * `file > job > step` for a workflow, so a platform ceiling can name one.
  *
- * The workflow reader is in version-pins-workflows.mjs, the Dockerfile and
- * lab host readers in version-pins-hosts.mjs; this file holds the manifests,
+ * The workflow reader is in version-pins-workflows.mjs, the Dockerfile, lab
+ * job image and lab host readers in version-pins-hosts.mjs; this file holds the manifests,
  * version files and Terraform, and the table that sends each tracked file to
  * its reader. scripts/version-floors.mjs re-exports what the tests use.
  */
@@ -25,9 +25,9 @@ import { join, posix } from 'node:path';
 import { parseVersion } from './version-math.mjs';
 import { empty, linesOf, merge, read } from './pin-text.mjs';
 import { readWorkflow } from './version-pins-workflows.mjs';
-import { readDockerfile, readLabHost } from './version-pins-hosts.mjs';
+import { JOB_IMAGES_FILE, readDockerfile, readJobImages, readLabHost } from './version-pins-hosts.mjs';
 
-export { readDockerfile, readLabHost, readWorkflow };
+export { readDockerfile, readJobImages, readLabHost, readWorkflow };
 
 /** engines.node of one package.json, or a `missing` marker the rules check against the exemptions. */
 function readPackageJson(root, file) {
@@ -91,6 +91,7 @@ const DOCKERFILE = /^Dockerfile(\..+)?$|\.Dockerfile$/;
 const FILE_READERS = [
   { owns: (file) => /^\.github\/workflows\/[^/]+\.ya?ml$/.test(file), read: (root, file) => readWorkflow(file, read(root, file)) },
   { owns: (file, base) => DOCKERFILE.test(base), read: (root, file, floors) => readDockerfile(file, read(root, file), floors) },
+  { owns: (file) => file === JOB_IMAGES_FILE, read: (root, file, floors) => readJobImages(file, read(root, file), floors) },
   { owns: (file, base) => Object.hasOwn(VERSION_FILES, base), read: readVersionFile },
   { owns: (file, base) => base === 'package.json', read: readPackageJson },
   { owns: (file) => file.endsWith('.tf'), read: readTerraform },

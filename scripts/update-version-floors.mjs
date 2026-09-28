@@ -5,9 +5,9 @@
  * What it does, in order:
  *
  *   1. Reads https://endoflife.date/api/v1/products/<name>/ for python,
- *      nodejs, ubuntu, debian, terraform, postgresql and hashicorp-vault,
- *      and the Azure Functions Flex Consumption page on Microsoft Learn for
- *      the Node.js lines Flex offers. endoflife.date rather than
+ *      nodejs, ubuntu, debian, alpine-linux, terraform, postgresql and
+ *      hashicorp-vault, and the Azure Functions Flex Consumption page on
+ *      Microsoft Learn for the Node.js lines Flex offers. endoflife.date rather than
  *      postgresql.org's versions.json for PostgreSQL, so every kind has one
  *      source format and the workflow's "endoflife.date's v1 API for each
  *      kind" stays true; it lists a major only from its general release.

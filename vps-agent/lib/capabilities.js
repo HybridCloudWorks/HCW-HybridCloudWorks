@@ -25,13 +25,24 @@
  * This matters more here than in most places. `docker run` pulls implicitly,
  * and `--network none` applies to the *container*, not to the pull: the image
  * is fetched over the network before any sandbox flag takes effect. A tag is
- * mutable, so with `alpine:3.20` alone, whoever can repush that tag changes
+ * mutable, so with `alpine:3.24.2` alone, whoever can repush that tag changes
  * what executes on the VPS with no commit, no review and no signal anywhere in
  * this repository. A digest is content-addressed — a repushed tag simply stops
  * matching, and the pull fails loudly instead of succeeding quietly.
  *
  * `capabilities.test.js` asserts every entry carries one, so a capability
  * added without a digest fails the gate rather than shipping.
+ *
+ * **Every image here has a floor** (#715). scripts/version-floors.test.mjs
+ * reads this IMAGES map and holds each entry to scripts/version-floors.json:
+ * `alpine` to the newest Alpine release line, at most two patch releases
+ * behind (endoflife.date `alpine-linux`), and `hcwLabRunner` through
+ * lab-image/Dockerfile, whose base image that check already reads. An image
+ * that no kind governs, that this repository does not build and that the
+ * floors file's `unsourced` section does not name fails that test, so a new
+ * entry cannot go stale unwatched the way `alpine:3.20` (end of life
+ * 2026-04-01) and `alpine/ansible:2.17.0` did. Because a digest does not float,
+ * the tag must name the exact release the digest is (`3.24.2`, not `3.24`).
  *
  * **To update an image:** resolve the new digest from the registry's
  * `Docker-Content-Digest` header (NOT from a mirror or a search result), and
@@ -40,11 +51,24 @@
  *   tok=$(curl -s "https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/alpine:pull" | jq -r .token)
  *   curl -sI -H "Authorization: Bearer $tok" \
  *     -H "Accept: application/vnd.oci.image.index.v1+json" \
- *     https://registry-1.docker.io/v2/library/alpine/manifests/3.21 | grep -i docker-content-digest
+ *     https://registry-1.docker.io/v2/library/alpine/manifests/3.24.2 | grep -i docker-content-digest
  *
- * The alpine, terraform and ansible digests below were resolved that way on
- * 2026-08-28 and cross-checked against the Docker Hub API, which is a second
- * endpoint reporting the same value.
+ * and cross-check it with `docker buildx imagetools inspect alpine:3.24.2`,
+ * whose `Digest:` line is the index digest and whose linux/amd64 manifest's
+ * `org.opencontainers.image.version` annotation names the release.
+ *
+ * The alpine digest below was resolved that way on 2026-09-28: the registry
+ * header, `docker buildx imagetools inspect` and the Docker Hub API
+ * (`/v2/repositories/library/alpine/tags/3.24.2`) all reported the same
+ * index digest, and `alpine:3.24` resolved to it too that day. Alpine 3.24.2
+ * was the newest release on endoflife.date, 3.24 supported to 2028-06-01.
+ *
+ * `ansible-check` ran on `alpine/ansible:2.17.0` until 2026-09-28, a
+ * third-party image on ansible-core 2.17 and Python 3.12. Under the sandbox
+ * flags it never ran a job: its HOME is `/`, so ansible-core stopped at
+ * `Unable to create local directories(/.ansible/tmp): [Errno 30] Read-only
+ * file system` before reading the playbook. It now runs on hcwLabRunner,
+ * whose ansible-core is versioned with the image.
  *
  * **hcwLabRunner** is this repository's own image, built from lab-image/ and
  * published by .github/workflows/publish-lab-image.yml, which prints the
@@ -59,7 +83,7 @@
  * index.js). It is still the python:3.14.7-slim-trixie base with
  * ansible-core 2.21.4 (#714), and still carries #675's changes to
  * lab-image/: transitive AVM vendoring, the unpacked provider mirror, the
- * kubeconform schemas and the capability scripts the three runner-image
+ * kubeconform schemas and the capability scripts three of the runner-image
  * capabilities call at /usr/local/bin (lab-image/bin/). The image and those
  * commands move together, so a change to lab-image/bin/ is live only once
  * the digest main publishes for it is pinned here; before that the jobs
@@ -68,9 +92,7 @@
 
 /** Digest-pinned image references. Tag is documentation; the digest decides. */
 export const IMAGES = {
-  alpine: 'alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc',
-  ansible:
-    'alpine/ansible:2.17.0@sha256:3cf35fbaecd3dba7c246191be1d46c0b4c051839294eb813677a7482c1fa1ced',
+  alpine: 'alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6',
   hcwLabRunner:
     'ghcr.io/hybridcloudworks/hcw-lab-runner:7c0a95b2ac8d48f77d8c01f71a187b02e2cd284b@sha256:8cc6935466abc0958d7d3f6f85f14931e23604e401097eb2cab0eb431af1c746',
 };
@@ -118,8 +140,16 @@ export const CAPABILITIES = {
   },
 
   // Syntax-checks an Ansible playbook. No inventory, no remote hosts.
+  // ansible-core 2.21 on the runner image (lab-image/versions.env), which
+  // carries ansible-core alone and no collections: a task naming a module
+  // outside ansible.builtin fails with `couldn't resolve module/action`.
+  // ansible-core creates ANSIBLE_LOCAL_TEMP (/tmp/run/ansible in the image)
+  // before it reads anything, so the job needs the tmpfs; ANSIBLE_HOME moves
+  // ~/.ansible there too, because the image's HOME is on the read-only root
+  // and ansible-core prints a warning into the job output for each directory
+  // it cannot create there (measured on Docker 29.8 with the pinned image).
   'ansible-check': {
-    image: IMAGES.ansible,
+    image: IMAGES.hcwLabRunner,
     buildCommand: (payloadFile) => [
       'ansible-playbook',
       '--syntax-check',
@@ -130,6 +160,7 @@ export const CAPABILITIES = {
     payloadFileName: 'playbook.yml',
     payloadEncodings: ['text'],
     timeoutSeconds: 60,
+    extraDockerArgs: [...RUN_TMPFS, '--env', 'ANSIBLE_HOME=/tmp/run/ansible-home'],
   },
 
   // Renders a Helm chart with `helm template`: no repository, no cluster.

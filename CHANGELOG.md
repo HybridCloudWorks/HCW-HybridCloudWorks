@@ -1204,6 +1204,46 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Lab jobs on the newest images: `shell-echo` on Alpine 3.24,
+  `ansible-check` on `hcw-lab-runner`; every job image held to a floor
+  (#747, #715).** The first real lab job (2026-09-28, `shell-echo` on
+  `vps-hostinger-01`) pulled `alpine:3.20`, past its end of life on
+  2026-04-01. `vps-agent/lib/capabilities.js` now pins `alpine:3.24.2` by
+  its index digest `sha256:294b683c...`, the value the registry's
+  `Docker-Content-Digest` header, `docker buildx imagetools inspect` and the
+  Docker Hub API all reported on 2026-09-28 (3.24.2 was endoflife.date's
+  newest release, 3.24 supported to 2028-06-01).
+
+  `ansible-check` moves off `alpine/ansible:2.17.0`, a third-party image on
+  ansible-core 2.17 and Python 3.12 that never ran a job under the sandbox:
+  its HOME is `/`, so ansible-core stopped at `Unable to create local
+  directories(/.ansible/tmp): [Errno 30] Read-only file system` before
+  reading the playbook. It runs the same argv on the pinned
+  `hcw-lab-runner` (ansible-core 2.21.4 on Python 3.14.7), with the job
+  tmpfs for `ANSIBLE_LOCAL_TEMP` and `ANSIBLE_HOME=/tmp/run/ansible-home`
+  so no warning about `~/.ansible` reaches the output. The runner carries
+  ansible-core and no collections, so a module outside `ansible.builtin`
+  is refused with `couldn't resolve module/action`, as the job type's
+  description now says. `IMAGES.ansible` is removed, and
+  `capabilities.test.js` fails an `IMAGES` entry no capability uses.
+
+  The floors check now reads `IMAGES`. `scripts/version-floors.json` gains
+  an `alpine` kind (endoflife.date `alpine-linux`, newest line, N-2
+  patches: 3.24.2, floor 3.24.0), which the weekly updater moves like
+  Python's; a digest-pinned Alpine reference must name its exact release,
+  because a digest does not float. An `IMAGES` entry that no kind governs,
+  that the repository does not build (`hcw-lab-runner` is judged through
+  `lab-image/Dockerfile`) and that no `unsourced` entry names fails
+  `version-floors.test.mjs` by name; against main's map it reports
+  `3.20 is below the floor 3.24.0` and `alpine/ansible has no floor`.
+  `lab-image/sandbox-check.mjs` now runs every capability, with a case per
+  capability enforced: `shell-echo` on its pinned `alpine` digest, and
+  `ansible-check` on three new fixtures under
+  `lab-image/smoke/ansible-check-payload/` (a valid playbook, an unknown
+  play keyword, a collection module). The admin Labs Settings tab no longer
+  tells the owner to pre-pull `alpine:3.20`, `hashicorp/terraform:1.9` and
+  `alpine/ansible:2.17.0`.
+
 - **The lab agent and the Coder template pull the image that vendors every
   builder module; lab jobs get 512 MB; the lab articles match (follow-up to
   #742).** `vps-agent/lib/capabilities.js` pins `hcw-lab-runner` to
