@@ -426,11 +426,14 @@ exceed the host's memory. Nothing creates a Coder user: the first person to
 sign in becomes the owner ("First admin sign-in", below), so the owner signs
 in before anyone else is told the lab is open.
 
-On the run that turns it on, the `PLAY RECAP` shows `failed=0`, and the
-changed tasks are Coder's: both environment files, `Start Coder and
-PostgreSQL`, the Caddy route and its reload, the backup timer, and the pull
-of the workspace image (`lab_images`, about 2.7 GB, so that task takes
-minutes). Success then looks like `docker ps` showing `coder` and `coder-postgres`
+On the run that turns it on, the `PLAY RECAP` shows `failed=0`. The
+changed tasks are Coder's: the Compose file, both environment files,
+`Start Coder and PostgreSQL`, the Caddy route and its reload, and the
+backup timer. The pull of the workspace image (`lab_images`, about 2.7 GB)
+also changes, and takes minutes. The same run from 2026-09-28's `main` also
+changes `vault_tools : Install hcw-vault-set` once, the Caddyfile and the
+apex route (their visitor wording), and the agent's checkout, as after any
+merge. Success then looks like `docker ps` showing `coder` and `coder-postgres`
 (`sudo docker compose --project-directory /etc/hcw/coder ps` prints both
 with `running` and the database `healthy`), and Coder answering through
 Caddy. PowerShell, on the workstation:
