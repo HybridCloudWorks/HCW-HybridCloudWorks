@@ -11,6 +11,10 @@ argument_specs:
         Caddyfile fails closed to an HTTP-only 503 apex that imports nothing.
       - Writes the Cloudflare API token to /etc/caddy/env (root:caddy, 0640), which the caddy
         unit reads through EnvironmentFile as the non-root caddy user.
+      - Panes only (owner decision 2026-09-28). Every response for every name carries
+        Content-Security-Policy frame-ancestors with caddy_frame_ancestors. A top-level browser
+        visit (Sec-Fetch-Dest document, or navigate with no destination) is redirected with 302
+        to caddy_direct_visit_redirect, unless a conf.d route set lab_top_level_allowed for it.
     author: HybridCloudWorks
     options:
       caddy_version:
@@ -46,6 +50,19 @@ argument_specs:
         elements: str
         required: true
         description: Every name the site block serves and obtains a certificate for.
+      caddy_frame_ancestors:
+        type: list
+        elements: str
+        required: true
+        description:
+          - Sources allowed to frame every name the site block serves, joined with spaces into
+            Content-Security-Policy frame-ancestors on every response. The site's origins, and
+            'self' for code-server's same-origin webviews.
+      caddy_direct_visit_redirect:
+        type: str
+        required: true
+        description:
+          - Where a top-level browser visit to any lab name is sent with 302, the site's labs page.
       caddy_cloudflare_api_token:
         type: str
         required: false
