@@ -322,12 +322,14 @@ Describe 'Wait-LabRegistration' {
         Should -Invoke Read-LabEnter -Exactly 1
     }
 
-    It 'prints a blank line as a blank line' {
+    It 'prints every line of a prompt with a blank line in it' {
         Mock Write-Host { }
         Mock Read-LabEnter { '' }
         Wait-LabRegistration -Lines @('first line', '', 'third line')
-        Should -Invoke Write-Host -ParameterFilter { $Object -eq '' } -Scope It
-        Should -Invoke Read-LabEnter -Exactly 1
+        # Three prompt lines, then the function's own spacer before the pause.
+        Should -Invoke Write-Host -Exactly 4 -Scope It
+        Should -Invoke Write-Host -ParameterFilter { $Object -eq 'third line' } -Exactly 1 -Scope It
+        Should -Invoke Read-LabEnter -Exactly 1 -Scope It
     }
 }
 
