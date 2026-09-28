@@ -25,6 +25,15 @@ import {
 const NOW = Date.parse('2026-09-28T12:00:00Z');
 const LAB = 'terraform-validate-walkthrough';
 
+/**
+ * A `storage` event as another tab's write delivers it: an Event carrying
+ * the two fields the listener reads. Not `new StorageEvent(type, init)`,
+ * which CodeQL's DOM model takes for a one-argument constructor and flags
+ * as js/superfluous-trailing-arguments (#758).
+ */
+const storageEvent = (key, newValue = null) =>
+  Object.assign(new Event('storage'), { key, newValue });
+
 beforeEach(() => {
   window.localStorage.clear();
 });
@@ -77,15 +86,15 @@ describe('a completed sign-in', () => {
     const onChange = vi.fn();
     const unsubscribe = subscribeSignedIn(onChange);
 
-    window.dispatchEvent(new StorageEvent('storage', { key: SIGNED_IN_KEY, newValue: '1' }));
-    window.dispatchEvent(new StorageEvent('storage', { key: 'theme', newValue: 'dark' }));
-    window.dispatchEvent(new StorageEvent('storage', { key: null }));
+    window.dispatchEvent(storageEvent(SIGNED_IN_KEY, '1'));
+    window.dispatchEvent(storageEvent('theme', 'dark'));
+    window.dispatchEvent(storageEvent(null));
     markSignedIn(NOW);
     expect(onChange).toHaveBeenCalledTimes(3);
 
     unsubscribe();
     markSignedIn(NOW + 1);
-    window.dispatchEvent(new StorageEvent('storage', { key: SIGNED_IN_KEY, newValue: '2' }));
+    window.dispatchEvent(storageEvent(SIGNED_IN_KEY, '2'));
     expect(onChange).toHaveBeenCalledTimes(3);
   });
 });

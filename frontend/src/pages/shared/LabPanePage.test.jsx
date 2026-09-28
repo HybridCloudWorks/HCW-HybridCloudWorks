@@ -67,11 +67,20 @@ function visibleWords(container) {
   return [container.textContent, ...named].join(' ');
 }
 
-/** Another tab of the site recording a completed sign-in, as the browser delivers it here. */
+/**
+ * Another tab of the site recording a completed sign-in, as the browser
+ * delivers it here: a `storage` event with the key and value the listener
+ * reads. Built on Event rather than `new StorageEvent(type, init)`, which
+ * CodeQL's DOM model takes for a one-argument constructor (#758).
+ */
 function anotherTabSignsIn(at) {
   window.localStorage.setItem(SIGNED_IN_KEY, String(at));
+  const event = Object.assign(new Event('storage'), {
+    key: SIGNED_IN_KEY,
+    newValue: String(at),
+  });
   act(() => {
-    window.dispatchEvent(new StorageEvent('storage', { key: SIGNED_IN_KEY, newValue: String(at) }));
+    window.dispatchEvent(event);
   });
 }
 
