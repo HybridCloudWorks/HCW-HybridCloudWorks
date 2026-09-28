@@ -18,6 +18,51 @@ switches, rotation, backups — are in [`../README.md`](../README.md) under
 | `templates/hcw-lab/README.md` | Shown to learners on the template's page in Coder |
 | `templates/hcw-lab/template.test.mjs` | The hardening test (`node --test`). Fails when the socket appears outside the `coder` service, anything is `privileged`, the workspace maps a host path, joins the Compose network or does not run as 65534, or when workspace apps could be served by path on the dashboard's origin (`CODER_DISABLE_PATH_APPS` not `"true"`, or an app that is not a subdomain app) |
 | `package.json` | `npm test` runs `node --test`; no dependencies, no lockfile |
+| `launcher/` | The lab launcher: `index.html`, `main.js`, `launcher.js` and `launcher.css`, static, with no build step and no third-party code. The `coder` role installs them and Caddy serves them at `https://coder.lab.hybridcloudworks.com/_hcw/lab/` (below). `scripts/lab-host-launcher.test.mjs` tests the logic in `launcher.js` with a mocked Coder, the files and the route |
+
+## The lab launcher
+
+The site's panes load this, not a Coder page (owner decision 2026-09-28:
+the lab is reached only through panes on the site). Coder's dashboard opens
+code-server in a new window or tab, `open_in` has no same-frame value, and
+the panes-only rule turns a new window into the labs page, so the editor
+could never open in a pane from the dashboard. The launcher, on the
+dashboard's own name so it has the learner's session and Coder's API:
+
+1. Takes `?lab=<id>` and maps it, through `LAB_WORKSPACES`, to the learner's
+   workspace for that lab: `lab-lzb`, `lab-tfv` or `lab-asc`. Anything else
+   gets `There's no lab at this address.` The names are the site
+   catalogue's `workspaceName`s, and tests on both sides fail when they
+   differ. At most 16 characters, because code-server's address,
+   `code-server--<workspace>--<owner>`, is one DNS label of 63 and a Coder
+   username can be 32.
+2. `GET /api/v2/users/me`. A 401 says to use **Sign in with GitHub** above
+   the pane, which is the site's button.
+3. `GET /api/v2/users/me/workspace/<name>`. None yet: Coder's own create
+   page, `/templates/hcw-lab/workspace?mode=auto&name=<name>&param.lab=<id>`,
+   in a frame of the same origin, where the learner confirms Coder's
+   dialog. Stopped, failed or cancelled: Coder's own workspace page,
+   `/@me/<name>`, where Start is. It never creates or starts anything
+   itself, sends no POST and reads no CSRF token.
+4. Waits, from one second between reads up to five, until the latest build
+   is running, the agent is connected and ready, and the `code-server`
+   app's `health` is `healthy`. Ten minutes, or six failed reads in a row,
+   end it with `Lab workspaces aren't available right now.`
+5. Checks `subdomain_name` against `^code-server--[a-z0-9-]+--[a-z0-9-]+$`
+   and against this workspace's name, then
+   `location.replace('https://' + name + '.coder.lab.hybridcloudworks.com/')`.
+   The suffix is a constant. code-server stays on its own name, away from
+   Coder's API.
+6. Posts its state to the site, `{ type: 'hcw-lab', state }`, once to
+   `https://hybridcloudworks.com` and once to
+   `https://www.hybridcloudworks.com`; the browser delivers the one that
+   matches the page holding the pane.
+
+Text reaches the page only through `textContent`, never from the query
+string. Caddy sends it with `default-src 'none'`, scripts, styles, fetches
+and frames from `coder.lab` only, `base-uri 'none'` and `form-action
+'none'`, beside the panes-only `frame-ancestors`, and `Cache-Control:
+no-store`. It has no top-level exemption.
 
 ## The boundary, in one paragraph
 

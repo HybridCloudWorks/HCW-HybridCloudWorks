@@ -71,10 +71,17 @@ export function ageWords(ageMs) {
   return `${plural(Math.round(ageMs / unit), word)} ago`;
 }
 
+/**
+ * A count as the API sent it, or NaN when it sent none. Not `Number(value)`
+ * alone: `Number(null)` is 0, and the status read sends `running: null` for a
+ * count it does not know, which must never read as nobody running.
+ */
+const countOf = (value) => (value === null || value === undefined ? Number.NaN : Number(value));
+
 /** "1 of 5 workspaces running". Either count missing reads as unknown. */
 export function capacityWords(capacity) {
-  const running = Number(capacity?.running);
-  const max = Number(capacity?.max);
+  const running = countOf(capacity?.running);
+  const max = countOf(capacity?.max);
   if (!Number.isFinite(running) || !Number.isFinite(max)) return 'capacity unknown';
   return `${running} of ${plural(max, 'workspace')} running`;
 }

@@ -47,7 +47,10 @@ function coderFetch(routes, calls = []) {
   return fetchImpl;
 }
 
+const BUILD_INFO = { version: 'v2.37.3+b1d2e3f', external_url: 'https://github.com/coder/coder/commit/b1d2e3f' };
+
 const HEALTHY = {
+  '/api/v2/buildinfo': BUILD_INFO,
   '/api/v2/templates': [
     { name: 'hcw-lab', active_version_id: V1, display_name: 'HCW Lab' },
     { name: 'scratch', active_version_id: V2 },
@@ -90,11 +93,16 @@ describe('readMaxWorkspaces', () => {
 });
 
 describe('readCoderConfig', () => {
-  it('needs both the URL and the token', () => {
+  it('needs the URL, and only the URL: the token is optional', () => {
     expect(readCoderConfig({})).toBeNull();
-    expect(readCoderConfig({ CODER_URL: ENV.CODER_URL })).toBeNull();
     expect(readCoderConfig({ CODER_STATUS_TOKEN: 't' })).toBeNull();
-    expect(readCoderConfig({ ...ENV, CODER_STATUS_TOKEN: '@Microsoft.KeyVault(x)' })).toBeNull();
+    expect(readCoderConfig({ ...ENV, CODER_URL: '@Microsoft.KeyVault(x)' })).toBeNull();
+    expect(readCoderConfig({ CODER_URL: ENV.CODER_URL })).toEqual({
+      base: 'https://coder.lab.example',
+      token: '',
+      max: 5,
+    });
+    expect(readCoderConfig({ ...ENV, CODER_STATUS_TOKEN: '@Microsoft.KeyVault(x)' }).token).toBe('');
   });
 
   it('refuses a URL that is not https, because the token travels in a header', () => {
@@ -121,14 +129,21 @@ describe('GET /api/public/labs/coder-status', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it('unconfigured with a warning when both settings exist but the URL is not https', async () => {
-    const warn = vi.fn();
-    const res = await handlers({ env: { ...ENV, CODER_URL: 'http://coder.lab.example' } }).getCoderStatus(
-      request(),
-      { ...context, warn }
-    );
-    expect(body(res)).toEqual({ configured: false });
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('https'));
+  it('unconfigured with a warning when the URL is set but is not https, token or not', async () => {
+    for (const env of [{ ...ENV, CODER_URL: 'http://coder.lab.example' }, { CODER_URL: 'http://coder.lab.example' }]) {
+      const warn = vi.fn();
+      const res = await handlers({ env }).getCoderStatus(request(), { ...context, warn });
+      expect(body(res)).toEqual({ configured: false });
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('https'));
+    }
+  });
+
+  it('asks whether Coder answers with no token at all', async () => {
+    const fetchImpl = coderFetch(HEALTHY);
+    await handlers({ fetchImpl }).getCoderStatus(request(), context);
+    const buildinfo = fetchImpl.calls.find(({ url }) => url.endsWith('/api/v2/buildinfo'));
+    expect(buildinfo).toBeDefined();
+    expect(buildinfo.options.headers).not.toHaveProperty('Coder-Session-Token');
   });
 
   it('healthy: templates with their active version names, the running count, the cap, cached a minute', async () => {
@@ -149,11 +164,12 @@ describe('GET /api/public/labs/coder-status', () => {
       asOf: new Date(NOW).toISOString(),
     });
 
-    // Every call carried the session token header and went to the configured base.
-    expect(fetchImpl.calls.length).toBe(4);
+    // Every call went to the configured base, and every one but the build
+    // info carried the session token header.
+    expect(fetchImpl.calls.length).toBe(5);
     for (const { url, options } of fetchImpl.calls) {
       expect(url.startsWith('https://coder.lab.example/api/v2/')).toBe(true);
-      expect(options.headers['Coder-Session-Token']).toBe('read-only-token');
+      if (!url.endsWith('/buildinfo')) expect(options.headers['Coder-Session-Token']).toBe('read-only-token');
     }
 
     expect(store.upsertDoc).toHaveBeenCalledWith(
@@ -236,18 +252,75 @@ describe('GET /api/public/labs/coder-status', () => {
     );
   });
 
-  it('unreachable: a non-200 from Coder, or a malformed body, is not guessed at', async () => {
-    const refused = coderFetch({
-      ...HEALTHY,
-      '/api/v2/templates': () => ({ ok: false, status: 401, json: async () => ({}) }),
+  it('unreachable: a build info that is not a 200 with a version is not guessed at, and nothing else is asked', async () => {
+    for (const buildinfo of [
+      () => ({ ok: false, status: 503, json: async () => ({}) }),
+      () => ({ ok: false, status: 502, json: async () => ({}) }),
+      { not: 'build info' },
+      { version: '' },
+    ]) {
+      const fetchImpl = coderFetch({ ...HEALTHY, '/api/v2/buildinfo': buildinfo });
+      const answer = body(await handlers({ fetchImpl }).getCoderStatus(request(), context));
+      expect(answer).toMatchObject({ configured: true, reachable: false, templates: [], capacity: { running: null } });
+      expect(fetchImpl.calls).toHaveLength(1);
+    }
+  });
+
+  describe('reachable with the detail unknown: the panes open, the card lists nothing', () => {
+    const UNKNOWN = {
+      configured: true,
+      reachable: true,
+      templates: [],
+      capacity: { running: null, max: 5 },
+      asOf: new Date(NOW).toISOString(),
+    };
+
+    it.each([
+      ['no token', { CODER_URL: ENV.CODER_URL, CODER_MAX_WORKSPACES: '5' }],
+      ['an unresolved token reference', { ...ENV, CODER_STATUS_TOKEN: '@Microsoft.KeyVault(SecretUri=https://kv/secrets/CODER-STATUS-TOKEN)' }],
+    ])('%s: asks only the build info, and warns naming the setting', async (_label, env) => {
+      const warn = vi.fn();
+      const store = makeStore();
+      const fetchImpl = coderFetch(HEALTHY);
+      const res = await handlers({ env, store, fetchImpl }).getCoderStatus(request(), { ...context, warn });
+
+      expect(body(res)).toEqual(UNKNOWN);
+      expect(res.headers['Cache-Control']).toBe(`public, max-age=${CODER_STATUS_CACHE_SECONDS}`);
+      expect(fetchImpl.calls.map(({ url }) => new URL(url).pathname)).toEqual(['/api/v2/buildinfo']);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('CODER_STATUS_TOKEN'));
+      expect(store.upsertDoc).toHaveBeenCalledWith(
+        CACHE_CONTAINER,
+        expect.objectContaining({ value: expect.objectContaining({ reachable: true }) })
+      );
     });
-    expect(body(await handlers({ fetchImpl: refused }).getCoderStatus(request(), context)).reachable).toBe(false);
 
-    const odd = coderFetch({ ...HEALTHY, '/api/v2/templates': { not: 'a list' } });
-    expect(body(await handlers({ fetchImpl: odd }).getCoderStatus(request(), context)).reachable).toBe(false);
+    it.each([[401], [403]])('a token Coder refuses with %i: warns naming the setting, never its value', async (status) => {
+      const warn = vi.fn();
+      const refused = () => ({ ok: false, status, json: async () => ({}) });
+      const fetchImpl = coderFetch({
+        ...HEALTHY,
+        '/api/v2/templates': refused,
+        '/api/v2/workspaces?q=status%3Arunning': refused,
+      });
+      const res = await handlers({ fetchImpl }).getCoderStatus(request(), { ...context, warn });
 
-    const noCount = coderFetch({ ...HEALTHY, '/api/v2/workspaces?q=status%3Arunning': { count: 'two' } });
-    expect(body(await handlers({ fetchImpl: noCount }).getCoderStatus(request(), context)).reachable).toBe(false);
+      expect(body(res)).toEqual(UNKNOWN);
+      const lines = warn.mock.calls.map(([line]) => String(line));
+      expect(lines.some((line) => line.includes('CODER_STATUS_TOKEN') && line.includes(String(status)))).toBe(true);
+      expect(lines.join('\n')).not.toContain(ENV.CODER_STATUS_TOKEN);
+    });
+
+    it.each([
+      ['a templates answer that is not a list', { '/api/v2/templates': { not: 'a list' } }],
+      ['a workspaces answer with no count', { '/api/v2/workspaces?q=status%3Arunning': { count: 'two' } }],
+      ['a failing workspaces read', { '/api/v2/workspaces?q=status%3Arunning': () => ({ ok: false, status: 500, json: async () => ({}) }) }],
+    ])('%s: the detail is unknown, never guessed at', async (_label, routes) => {
+      const warn = vi.fn();
+      const fetchImpl = coderFetch({ ...HEALTHY, ...routes });
+      const res = await handlers({ fetchImpl }).getCoderStatus(request(), { ...context, warn });
+      expect(body(res)).toEqual(UNKNOWN);
+      expect(warn).toHaveBeenCalled();
+    });
   });
 
   it('unreachable: a Coder that does not answer within the timeout', async () => {

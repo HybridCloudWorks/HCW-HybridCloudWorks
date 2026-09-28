@@ -40,7 +40,14 @@ starts or stops it, adds the Caddy route and keeps a week of nightly dumps.
    with the volume kept when not. A changed `coder.env` recreates the
    `coder` container on the next run, which is how a rotated secret takes
    effect.
-6. Renders `/etc/caddy/conf.d/10-coder.caddy` (`root:caddy` `0640`): a host
+6. Installs the lab launcher, `lab-host/coder/launcher/` from the repository
+   checkout, in `/etc/caddy/hcw-lab-launcher` (`coder_launcher_dir`; the
+   directory `root:caddy` `0750`, its four files `0640`). It is the page the
+   site's panes load, and it opens code-server inside the pane
+   (`lab-host/coder/README.md`, "The lab launcher"). Caddy reads the files
+   on every request, so a changed file needs no reload. Removed while
+   disabled.
+7. Renders `/etc/caddy/conf.d/10-coder.caddy` (`root:caddy` `0640`): a host
    matcher for `coder.lab.hybridcloudworks.com` and
    `*.coder.lab.hybridcloudworks.com`, `reverse_proxy 127.0.0.1:7080`, and a
    `handle_errors` that answers **503** with a sentence when the `coder`
@@ -59,8 +66,13 @@ starts or stops it, adds the Caddy route and keeps a week of nightly dumps.
    level (`lab_top_level_allowed`). GitHub cannot be framed, so sign-in has
    to run in a window of its own. That path only redirects, and the
    redirect that ends sign-in is itself a top-level visit, which lands on
-   the site's labs page.
-7. Installs `/usr/local/sbin/coder-postgres-backup` and the
+   the site's labs page. And it serves the lab launcher at `/_hcw/lab/` on
+   `coder.lab`, before Coder's own handle, from `coder_launcher_dir`, with a
+   strict policy of its own added beside the panes-only `frame-ancestors`
+   (scripts, styles, fetches and frames from `coder.lab` only, nothing
+   inline) and `Cache-Control: no-store`. The launcher has no top-level
+   exemption.
+8. Installs `/usr/local/sbin/coder-postgres-backup` and the
    `coder-postgres-backup.service` and `.timer` units: nightly at 03:30 UTC
    (ten minutes of jitter, `Persistent=true`), `pg_dump` through `docker
    compose exec` into `/var/backups/coder/coder-<UTC timestamp>.sql.gz`
@@ -91,6 +103,7 @@ workspace may and may not have.
 | `coder_workspace_memory_mib` | `2048` | Per-workspace limit the template sets, for the capacity assertion |
 | `coder_server_memory_reserve_mib` | `2560` | Coder, PostgreSQL and OS headroom in the same assertion |
 | `coder_backup_keep_days`, `coder_backup_on_calendar` | `7`, `*-*-* 03:30:00` | The dump schedule |
+| `coder_launcher_dir` | `/etc/caddy/hcw-lab-launcher` | Where the lab launcher's files are installed and served from |
 
 Paths, the port and the unit names are in `defaults/main.yml`;
 `meta/argument_specs.yml` is the contract.

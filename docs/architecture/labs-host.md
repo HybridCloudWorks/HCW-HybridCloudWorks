@@ -69,8 +69,11 @@ No inbound port is opened for the site, for Azure or for lab jobs. The site's
 servers reach the host in one direction only, through a server-side status
 proxy in the Function App that reads the `CODER-URL` and `CODER-STATUS-TOKEN`
 secrets from Key Vault through its `CODER_URL` and `CODER_STATUS_TOKEN`
-settings. A visitor's browser reaches the lab only inside the site's pages,
-as described under [panes only](#panes-only).
+settings. Whether Coder answers comes from its unauthenticated
+`/api/v2/buildinfo`, and that alone opens the site's panes; the token adds
+only the labs card's templates and running count. A visitor's browser
+reaches the lab only inside the site's pages, as described under
+[panes only](#panes-only).
 
 On the host's loopback, and nowhere else: node-exporter (9100), Coder (7080,
 behind Caddy), Portainer (9443) and Vault (8200, and raft's 8201 once
@@ -115,6 +118,21 @@ What keeps working, and why:
   ends sign-in lands on the labs page. Anything Coder opens in a new tab or
   window, such as a workspace app, is a top-level visit and lands on the
   labs page, so a pane has to show it instead.
+- **The lab launcher** (2026-09-28) is how a pane shows code-server. Coder's
+  dashboard opens it in a new window or tab, so the site's panes load a
+  small static page on Coder's own name instead,
+  `https://coder.lab.hybridcloudworks.com/_hcw/lab/?lab=<id>`
+  (`lab-host/coder/launcher/`), which Caddy serves from disk before any
+  request reaches Coder. With the learner's session it reads their
+  workspace for that lab (GET only, same origin), shows Coder's own create
+  or workspace page in a frame of its own when the learner has to confirm
+  or press Start, and once code-server is healthy replaces itself with
+  code-server's own name, which it checks against the shape Coder builds.
+  code-server stays on its own origin. The launcher's route adds its own
+  policy beside `frame-ancestors`: `default-src 'none'`, scripts, styles,
+  fetches, images and frames from `coder.lab` only, `base-uri 'none'`,
+  `form-action 'none'`, and `Cache-Control: no-store`. It has no top-level
+  exemption, so a direct visit to it goes to the labs page like any other.
 
 Limits, stated so they are not mistaken for more:
 
@@ -128,9 +146,10 @@ Limits, stated so they are not mistaken for more:
   `frontend/staticwebapp.config.json` decides what its pages may frame
   (`frame-src`), and since #751 it admits exactly Coder's name and its
   workspace apps' wildcard. Each lab card opens the lab's page on the site,
-  `/education/labs/<id>`, which frames the workspace in a pane and opens
-  GitHub sign-in at the callback path above in a tab of its own
-  (`frontend/src/pages/shared/LabPanePage.jsx`;
+  `/education/labs/<id>`, which frames the lab launcher in a pane, hears its
+  state through `postMessage` (only from Coder's origin and the pane's own
+  window), and opens GitHub sign-in at the callback path above in a tab of
+  its own (`frontend/src/pages/shared/LabPanePage.jsx`;
   [ADR 0032, amendment "Coder in the site's panes"](../decisions/0032-learner-labs-platform.md#amendment-2026-09-28-coder-in-the-sites-panes)).
 
 The lab side is in `lab-host/` and is applied by the next `bootstrap.sh`
@@ -178,7 +197,7 @@ trigger above.
 | `vps-agent` Entra confidential client (certificate) | Private key generated on the host, `/etc/hcw/labs-agent.pem`, owner `root`, group `hcw-labs-agent`, mode `0640`, so the non-root service reads it and nothing else does; only the public certificate goes to the app registration | The `LabAgent` app role on the Functions API — three endpoints, no database access | planned |
 | Arc machine identity | System-assigned by Azure at onboarding, held by the Connected Machine agent | Whatever roles `infra/` grants it; none beyond the data collection rule today | planned |
 | Coder GitHub OAuth app secret | Coder's Docker Compose environment | Learner sign-in to Coder; nothing on the site | planned |
-| Coder status token | Issued by Coder; the value is held in Key Vault `kv-site-prod-cus-01` as the secret `CODER-STATUS-TOKEN` (read by the Function App setting `CODER_STATUS_TOKEN`), not on the host | Read-only Coder API for the site's status proxy: scoped `template:read` and `workspace:read`, for a Coder user of its own, `hcw-status`, that holds Template Admin so the running count covers every learner (`lab-host/README.md`, "The status token for the site") | planned |
+| Coder status token | Issued by Coder; the value is held in Key Vault `kv-site-prod-cus-01` as the secret `CODER-STATUS-TOKEN` (read by the Function App setting `CODER_STATUS_TOKEN`), not on the host | Read-only Coder API for the site's status proxy: scoped `template:read` and `workspace:read`, for a Coder user of its own, `hcw-status`, that holds Template Admin so the running count covers every learner (`lab-host/README.md`, "The status token for the site"). It adds the labs card's templates and running count only; the panes open without it | planned |
 | Caddy ACME account | Caddy's data volume | Issuance and renewal of the one certificate covering `lab`, `*.lab` and `*.coder.lab` | planned |
 | Caddy DNS-01 token (`CLOUDFLARE_API_TOKEN` in `/etc/caddy/env`, owner `root`, group `caddy`, mode `0640`, written by Ansible from Vault; the `caddy` systemd unit runs as the non-root `caddy` user and reads it through `EnvironmentFile`) | On the host, because renewals happen there | DNS edit on the dedicated lab zone that `_acme-challenge.lab` is delegated to; DNS edit on the production zone only in the interim ADR 0032 records | planned |
 | Portainer administrator and Business Edition licence key | Created and entered by the owner in Portainer's UI; the password is in the owner's password manager, and Portainer keeps its own copy in its volume. Neither is in the repository or Ansible Vault | Full control of the host's Docker daemon, through the loopback only | planned |

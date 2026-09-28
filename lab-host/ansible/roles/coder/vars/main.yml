@@ -7,6 +7,10 @@ coder_postgres_image_ref: "{{ coder_postgres_image }}@{{ coder_postgres_image_di
 # The Compose file in this repository is the one source; the role copies it
 # rather than carrying a second copy under files/.
 coder_compose_source: "{{ role_path }}/../../../coder/docker-compose.yml"
+# The launcher's files, the same way: the repository's lab-host/coder/launcher/
+# is the one source. The trailing slash makes copy install the directory's
+# contents rather than the directory itself.
+coder_launcher_source: "{{ role_path }}/../../../coder/launcher/"
 coder_secrets_present: >-
   {{ coder_oauth2_github_client_id | length > 0
      and coder_oauth2_github_client_secret | length > 0

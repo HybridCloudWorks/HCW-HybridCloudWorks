@@ -134,6 +134,33 @@
     remove_orphans: true
   when: not coder_enabled | bool
 
+# The lab launcher, before the route that serves it. Caddy's file_server reads
+# the files on every request, so a changed file needs no reload.
+- name: Create the lab launcher's directory, readable by Caddy
+  ansible.builtin.file:
+    path: "{{ coder_launcher_dir }}"
+    state: directory
+    owner: root
+    group: "{{ coder_caddy_group }}"
+    mode: "0750"
+  when: coder_enabled | bool
+
+- name: Install the lab launcher from the repository checkout
+  ansible.builtin.copy:
+    src: "{{ coder_launcher_source }}"
+    dest: "{{ coder_launcher_dir }}/"
+    owner: root
+    group: "{{ coder_caddy_group }}"
+    mode: "0640"
+    directory_mode: "0750"
+  when: coder_enabled | bool
+
+- name: Remove the lab launcher while Coder is disabled
+  ansible.builtin.file:
+    path: "{{ coder_launcher_dir }}"
+    state: absent
+  when: not coder_enabled | bool
+
 - name: Render the Caddy route for the coder names
   ansible.builtin.template:
     src: 10-coder.caddy.j2

@@ -2,11 +2,14 @@
  * `/education/labs/:labId` (#751): the pane opens only when the status read
  * says the workspaces are reachable; it asks for GitHub sign-in in a new tab
  * first, and opens (and later reloads) when another tab finishes it; the
- * frame loads the lab's workspace deep link with exactly the sandbox and
- * `allow` lists the page states; full screen is the pane itself; and every
- * way the workspaces can be missing reads as one sentence, never an error.
+ * frame loads the lab launcher for the lab with exactly the sandbox and
+ * `allow` lists the page states; the page hears the launcher's state and
+ * nothing else; full screen is the pane itself; and every way the
+ * workspaces can be missing reads as one sentence, never an error.
  */
 import React from 'react';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { HelmetProvider } from 'react-helmet-async';
@@ -28,9 +31,13 @@ vi.mock('@/lib/publicApi', () => ({
 import LabPanePage, {
   OPENING_SENTENCE,
   PANE_LOAD_TIMEOUT_MS,
+  PANE_MESSAGE_TYPE,
+  PANE_STATES,
+  PANE_STATE_WORDS,
   SIGN_IN_HEADING,
   SIGN_IN_PENDING_SENTENCE,
   UNAVAILABLE_SENTENCE,
+  paneMessageState,
   workspaceService,
 } from './LabPanePage';
 
@@ -87,6 +94,28 @@ function anotherTabSignsIn(at) {
 /** Let React run the effects of a commit that arrived outside `act` (the status read resolving). */
 async function flushEffects() {
   await act(async () => {});
+}
+
+/**
+ * A `message` event as the browser delivers one to this page. Built on Event
+ * for the same reason as `anotherTabSignsIn`: the fields the listener reads
+ * are set directly.
+ */
+function messageFrom({ origin = CODER_ORIGIN, source, data }) {
+  return Object.assign(new Event('message'), { origin, source, data });
+}
+
+/** The launcher in the pane posting its state, as it does (lab-host/coder/launcher/main.js). */
+function launcherSays(state, overrides = {}) {
+  const frame = document.querySelector('iframe');
+  const event = messageFrom({
+    source: frame.contentWindow,
+    data: { type: PANE_MESSAGE_TYPE, state },
+    ...overrides,
+  });
+  act(() => {
+    window.dispatchEvent(event);
+  });
 }
 
 /** jsdom would try to follow a target=_blank link; the page's own click handler is what is tested. */
@@ -219,22 +248,23 @@ describe('LabPanePage, the pane', () => {
     markSignedIn();
   });
 
-  it('loads the lab’s workspace deep link, titled for the lab', async () => {
+  it('loads the lab launcher for the lab, titled for the lab', async () => {
     renderPane();
     await screen.findByTestId('lab-pane');
     const frame = screen.getByTitle(`Lab workspace: ${LAB.title}`);
     expect(frame.tagName).toBe('IFRAME');
     expect(frame.getAttribute('src')).toBe(
-      'https://coder.lab.hybridcloudworks.com/templates/hcw-lab/workspace?mode=auto&param.lab=terraform-validate-walkthrough'
+      'https://coder.lab.hybridcloudworks.com/_hcw/lab/?lab=terraform-validate-walkthrough'
     );
   });
 
-  it.each(labs.map((lab) => [lab.id]))('gives %s its own workspace parameter', async (id) => {
+  it.each(labs.map((lab) => [lab.id]))('tells the launcher %s, and nothing else', async (id) => {
     renderPane(id);
     await screen.findByTestId('lab-pane');
-    const frame = document.querySelector('iframe');
-    expect(new URL(frame.src).searchParams.get('param.lab')).toBe(id);
-    expect(new URL(frame.src).origin).toBe(CODER_ORIGIN);
+    const url = new URL(document.querySelector('iframe').src);
+    expect(url.origin).toBe(CODER_ORIGIN);
+    expect(url.pathname).toBe('/_hcw/lab/');
+    expect([...url.searchParams]).toEqual([['lab', id]]);
   });
 
   it('sandboxes the frame to scripts, its own origin, forms and popups, and nothing more', async () => {
@@ -355,6 +385,120 @@ describe('LabPanePage, the pane', () => {
     });
     expect(screen.queryByTestId('lab-unavailable')).toBeNull();
     expect(again.container.querySelector('iframe')).not.toBeNull();
+  });
+});
+
+describe('paneMessageState', () => {
+  const frame = { contentWindow: { name: 'the pane' } };
+  const good = {
+    origin: CODER_ORIGIN,
+    source: frame.contentWindow,
+    data: { type: 'hcw-lab', state: 'starting' },
+  };
+
+  it('takes the launcher’s state from the pane’s own window on Coder’s origin', () => {
+    expect(paneMessageState(good, frame)).toBe('starting');
+    for (const state of PANE_STATES) {
+      expect(paneMessageState({ ...good, data: { type: 'hcw-lab', state } }, frame)).toBe(state);
+    }
+  });
+
+  it.each([
+    ['the site itself', { ...good, origin: 'https://hybridcloudworks.com' }],
+    [
+      'a workspace app’s own name',
+      { ...good, origin: 'https://code-server--lab-tfv--someone.coder.lab.hybridcloudworks.com' },
+    ],
+    ['a look-alike name', { ...good, origin: 'https://coder.lab.hybridcloudworks.com.example' }],
+    ['plain http', { ...good, origin: 'http://coder.lab.hybridcloudworks.com' }],
+    ['a frame inside the pane', { ...good, source: { name: 'nested' } }],
+    ['no source', { ...good, source: null }],
+    ['another type', { ...good, data: { type: 'other', state: 'starting' } }],
+    ['an unknown state', { ...good, data: { type: 'hcw-lab', state: 'owned' } }],
+    ['a string', { ...good, data: 'hcw-lab starting' }],
+    ['no data', { ...good, data: null }],
+  ])('ignores %s', (_label, event) => {
+    expect(paneMessageState(event, frame)).toBeNull();
+  });
+
+  it('ignores everything while there is no frame', () => {
+    expect(paneMessageState(good, null)).toBeNull();
+  });
+
+  it('knows exactly the states the launcher reports', () => {
+    const launcher = readFileSync(
+      join(process.cwd(), '..', 'lab-host/coder/launcher/launcher.js'),
+      'utf8'
+    );
+    const block = launcher.match(/export const STATES = Object\.freeze\(\[([^\]]*)\]\);/);
+    expect(block, 'lab-host/coder/launcher/launcher.js no longer declares STATES').not.toBeNull();
+    const states = [...block[1].matchAll(/'([a-z-]+)'/g)].map(([, state]) => state);
+    expect([...PANE_STATES].sort()).toEqual([...states].sort());
+    expect(launcher).toContain(`export const MESSAGE_TYPE = '${PANE_MESSAGE_TYPE}';`);
+  });
+
+  it('words every state for a visitor', () => {
+    for (const words of Object.values(PANE_STATE_WORDS)) {
+      expect(words).not.toMatch(BEHIND_THE_SITE);
+    }
+  });
+});
+
+describe('LabPanePage, what the launcher says', () => {
+  beforeEach(() => {
+    fetchCoderStatus.mockResolvedValue(REACHABLE);
+    markSignedIn();
+  });
+
+  it('shows the launcher’s state on the toolbar', async () => {
+    renderPane();
+    await screen.findByTestId('lab-pane');
+    expect(screen.getByTestId('lab-pane-state')).toHaveTextContent('');
+    launcherSays('create');
+    expect(screen.getByTestId('lab-pane-state')).toHaveTextContent(PANE_STATE_WORDS.create);
+    launcherSays('starting');
+    expect(screen.getByTestId('lab-pane-state')).toHaveTextContent(PANE_STATE_WORDS.starting);
+  });
+
+  it('counts a message as the frame loading, so the watchdog does not fire', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    renderPane();
+    await screen.findByTestId('lab-pane');
+    await flushEffects();
+    launcherSays('checking');
+    act(() => {
+      vi.advanceTimersByTime(PANE_LOAD_TIMEOUT_MS * 2);
+    });
+    expect(screen.queryByTestId('lab-unavailable')).toBeNull();
+    expect(document.querySelector('iframe')).not.toBeNull();
+  });
+
+  it('makes Sign in with GitHub the toolbar’s main action when the launcher finds no session', async () => {
+    renderPane();
+    const pane = await screen.findByTestId('lab-pane');
+    const signIn = within(pane).getByTestId('lab-pane-sign-in');
+    expect(signIn.className).not.toContain('bg-primary');
+    launcherSays('signed-out');
+    expect(signIn.className).toContain('bg-primary');
+    expect(screen.getByTestId('lab-pane-state')).toHaveTextContent(PANE_STATE_WORDS['signed-out']);
+  });
+
+  it('shows the unavailable section when the launcher gives up', async () => {
+    const { container } = renderPane();
+    await screen.findByTestId('lab-pane');
+    launcherSays('unavailable');
+    expect(screen.getByTestId('lab-unavailable')).toHaveTextContent(UNAVAILABLE_SENTENCE);
+    expect(container.querySelector('iframe')).toBeNull();
+  });
+
+  it('ignores a message from anywhere but the launcher in this pane', async () => {
+    renderPane();
+    await screen.findByTestId('lab-pane');
+    launcherSays('unavailable', { origin: 'https://example.com' });
+    launcherSays('unavailable', { source: window });
+    launcherSays('unavailable', { data: { type: 'other', state: 'unavailable' } });
+    expect(screen.queryByTestId('lab-unavailable')).toBeNull();
+    expect(screen.getByTestId('lab-pane-state')).toHaveTextContent('');
   });
 });
 

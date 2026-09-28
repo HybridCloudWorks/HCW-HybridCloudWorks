@@ -56,10 +56,14 @@ jobs:
           # versions.env, and labPayload.test.js unpacks the payload with the
           # agent's own tar parser. The two functions paths are the visitor
           # report: LzLabValidate.test.jsx renders what the server's own
-          # builder makes of the owner's real job logs.
+          # builder makes of the owner's real job logs. The two lab-host
+          # files are what the lab pane's tests read: catalogue.test.js holds
+          # the sign-in path and the launcher's path to the coder route and
+          # the workspace names to the launcher's map, and
+          # LabPanePage.test.jsx holds its states to the launcher's.
           - name: frontend
             dir: frontend
-            filter: '^(frontend/|\.azure/api-surface\.json|lab-image/(versions\.env|Dockerfile)$|vps-agent/lib/docker-runner\.js$|functions/src/lib/labs/(visitor-report\.js|fixtures/[^/]+\.log)$)'
+            filter: '^(frontend/|\.azure/api-surface\.json|lab-image/(versions\.env|Dockerfile)$|vps-agent/lib/docker-runner\.js$|functions/src/lib/labs/(visitor-report\.js|fixtures/[^/]+\.log)$|lab-host/(coder/launcher/launcher\.js|ansible/roles/coder/templates/10-coder\.caddy\.j2)$)'
             lint: npm run lint
             format: npm run format:check
             build: npm run build
@@ -88,10 +92,13 @@ jobs:
           # files are what lab-job-types.test.mjs imports (capabilities.js)
           # and lab-job-limits.test.mjs reads (index.js, .env.example).
           # LabPanePage.jsx is what lab-host-visitor-copy.test.mjs reads: the
-          # lab host's "Coder stopped" answer is the pane's own sentence.
+          # lab host's "Coder stopped" answer, and the lab launcher's, is the
+          # pane's own sentence. catalogue.js is what
+          # lab-host-launcher.test.mjs reads: the launcher's workspace names
+          # are the catalogue's.
           - name: scripts (operations)
             dir: scripts
-            filter: '^(scripts/|\.github/workflows/|infra/|infra-lab/|lab-host/|lab-image/|([^/]+/)*package\.json$|([^/]+/)*Dockerfile|frontend/src/lib/landingZone/(avmVersions|labImage|tfConstraints)\.js$|frontend/src/pages/shared/LabPanePage\.jsx$|vps-agent/(index\.js|\.env\.example|lib/capabilities\.js)$)'
+            filter: '^(scripts/|\.github/workflows/|infra/|infra-lab/|lab-host/|lab-image/|([^/]+/)*package\.json$|([^/]+/)*Dockerfile|frontend/src/lib/landingZone/(avmVersions|labImage|tfConstraints)\.js$|frontend/src/(pages/shared/LabPanePage\.jsx|data/labs/catalogue\.js)$|vps-agent/(index\.js|\.env\.example|lib/capabilities\.js)$)'
             lint: npm run lint
             test: npm test
           # vps-agent shells out to `docker run` with a payload that reached

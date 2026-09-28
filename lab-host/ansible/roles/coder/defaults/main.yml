@@ -29,6 +29,11 @@ coder_caddy_route_file: "{{ coder_caddy_sites_dir }}/10-coder.caddy"
 # frontend/src/pages/shared/LabPanePage.jsx). scripts/lab-host-visitor-copy.test.mjs
 # holds both.
 coder_unavailable_response: "Lab workspaces aren't available right now."
+# The lab launcher (lab-host/coder/launcher/): the static page the site's
+# panes load at https://<coder_domain>/_hcw/lab/, which opens code-server
+# inside the pane. Caddy serves it from this directory, so the files are
+# root-owned and readable by the caddy group only.
+coder_launcher_dir: /etc/caddy/hcw-lab-launcher
 
 # Secrets, from the vault file bootstrap.sh passes with -e. All three must be
 # set when coder_enabled is true; the role fails closed otherwise.

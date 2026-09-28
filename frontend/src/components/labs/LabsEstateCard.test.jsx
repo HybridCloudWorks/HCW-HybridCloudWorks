@@ -109,4 +109,17 @@ describe('LabsEstateCard', () => {
     expect(screen.getByTestId('estate-coder')).toHaveTextContent('unreachable');
     expect(screen.queryByTestId('estate-as-of')).not.toBeInTheDocument();
   });
+
+  it('says a running count it does not know is unknown, never zero', () => {
+    // What the estate read folds in from the status read when that read
+    // could see Coder answer but not count its workspaces.
+    render(
+      <LabsEstateCard
+        estate={{ ...CONFIGURED, coder: { reachable: true, running: null, max: 5 } }}
+        loading={false}
+        error={null}
+      />
+    );
+    expect(screen.getByTestId('estate-coder')).toHaveTextContent('reachable, capacity unknown');
+  });
 });
