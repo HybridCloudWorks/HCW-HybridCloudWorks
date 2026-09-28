@@ -54,7 +54,7 @@ export default {
             'Configure collection of Windows Security events by using Windows Security Events via AMA, including data collection rules',
             'Plan and configure collection of Windows Security events by using Windows Event Forwarding (WEF)',
             'Plan and configure Syslog via AMA and Common Event Format (CEF) via AMA connectors',
-            'Configure collection of Azure activities by using Azure Policy and resource diagnostic settings',
+            'Configure collection of Azure activity logs by using Azure Policy and resource diagnostic settings',
             'Ingest threat indicators into Microsoft Sentinel',
             'Create custom log tables in the workspace to store ingested data',
           ],

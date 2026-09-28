@@ -90,7 +90,7 @@ export default {
             'Implement object-level encryption',
             'Configure server- and database-level firewall rules',
             'Implement Always Encrypted',
-            'Implement Always Encrypted with VBS enclaves',
+            'Implement Always Encrypted with secure enclaves',
             'Configure private links and service endpoints',
           ],
         },

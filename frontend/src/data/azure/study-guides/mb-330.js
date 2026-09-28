@@ -75,12 +75,12 @@ export default {
         {
           title: 'Manage and process inventory activities',
           objectives: [
-            'Create and process journals, including BOMs, item arrival, output order, transfer, movement, inventory adjustment, and counting journals',
+            'Create and process journals, including BOM, item arrival, transfer, movement, inventory adjustment, and counting journals',
             'Create and process transfer orders',
             'Configure and manage the inventory closing and adjustment process',
             'Apply and remove inventory blocking manually',
             'Create batch disposition codes',
-            'Configure and run inventory reports including ABC classification',
+            'Configure and run inventory reports, including ABC classification',
           ],
         },
         {
@@ -145,9 +145,9 @@ export default {
           title: 'Implement landed cost',
           objectives: [
             'Configure landed cost parameters and voyage statuses',
-            'Create and process voyage with purchase orders or transfer orders',
+            'Create and process voyages with purchase orders or transfer orders',
             'Configure cost estimations, tracking control center, over/under tolerance setup, and journey templates',
-            'Configure cost type codes and auto-costs',
+            'Configure cost type codes and auto costs',
             'Track inbound voyages and shipping container journeys',
           ],
         },
@@ -160,7 +160,7 @@ export default {
             'Configure sales groups and commissions',
             'Configure and process intercompany orders',
             'Configure and process customer rebates',
-            'Configure and manage delivery schedule, available-to-promise (ATP), and capable-to-promise (CTP)',
+            'Configure and manage delivery schedules, available-to-promise (ATP), and capable-to-promise (CTP)',
             'Configure and use product bundles',
           ],
         },
@@ -193,7 +193,7 @@ export default {
           title: 'Perform warehouse management processes',
           objectives: [
             'Configure and process replenishment',
-            'Manage inbound and outbound load planning workbench',
+            'Manage inbound and outbound load planning workbenches',
             'Configure and process inventory movements via warehouse work',
             'Create cycle counting work and perform cycle counting',
             'Process inbound and outbound orders by using the Warehouse Management mobile app',
@@ -246,9 +246,9 @@ export default {
         {
           title: 'Manage master plans',
           objectives: [
-            'Run master planning and analyze the results',
+            'Run Planning Optimization and analyze the results',
             'Evaluate and process planned purchase and transfer orders',
-            'Set up and use the Supply Schedule form',
+            'Set up and use the Supply schedule page',
             'Configure safety margins',
             'Configure and process safety stock journals',
           ],

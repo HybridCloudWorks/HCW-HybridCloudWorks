@@ -26,7 +26,7 @@ export default {
           title: 'Plan network settings for Teams',
           objectives: [
             'Calculate network bandwidth capacity for Teams voice, video, meetings, and events',
-            'Analyze network impact by using Network planner',
+            'Analyze network impact by using Teams Network planner',
             'Specify network ports and protocols used by Teams',
             'Assess network readiness and connectivity by using the Microsoft Teams Network Assessment Tool and Microsoft 365 network connectivity test tool',
           ],
@@ -68,10 +68,10 @@ export default {
           objectives: [
             'Identify licensing requirements for external collaboration',
             'Configure SharePoint Online and OneDrive external sharing settings',
-            'Configure External access in the Microsoft Teams admin center',
+            'Configure External access in the Teams admin center',
             'Control External Access by Domain for Specific Users and Groups',
             'Configure External collaboration settings in Microsoft Entra ID for guest access',
-            'Configure guest access and sharing in the Microsoft Teams admin center, Microsoft 365 admin center, Microsoft Entra admin center, or the SharePoint admin center',
+            'Configure guest access and sharing in the Teams admin center, Microsoft 365 admin center, Microsoft Entra admin center, or the SharePoint admin center',
             'Control guest access to a specific team by using Microsoft Purview and Microsoft Entra ID',
             'Remove guests from Teams, including from a team or a tenant',
             'Configure shared channels for external access',
@@ -106,13 +106,13 @@ export default {
         {
           title: 'Create and manage teams',
           objectives: [
-            'Plan for a Teams rollout by using Advisor for Teams',
-            'Create a team by using the Microsoft Teams admin center, Teams client, the Teams PowerShell module, or Microsoft Graph',
+            'Plan for a Teams rollout by using Teams Advisor',
+            'Create a team by using the Teams admin center, Teams client, the Teams PowerShell module, or Microsoft Graph',
             'Create a team from an existing Microsoft 365 group, SharePoint site, or team',
             'Create a team from a template',
             'Create and manage templates and template policies for teams',
             'Manage the membership and roles for a team',
-            'Manage a team in the Microsoft Teams admin center',
+            'Manage a team in the Teams admin center',
             'Manage Teams environment settings',
             'Configure privacy and sensitivity settings for a team',
             'Create and manage frontline teams and experiences',
@@ -132,7 +132,7 @@ export default {
         {
           title: 'Manage apps for Teams',
           objectives: [
-            'Manage Org-wide app settings in the Microsoft Teams admin center',
+            'Manage Org-wide app settings in the Teams admin center',
             'Create and manage app assignments and app setup policies',
             'Manage permissions and consent for apps, including blocking apps',
             'Recommend appropriate extensibility options, including apps, tabs, meetings, messaging extensions, and workflows',
@@ -206,7 +206,7 @@ export default {
             'Clear the Teams client cache',
             'Troubleshoot issues by using self-help diagnostics for Teams',
             'Troubleshoot Teams client installation and update issues',
-            'Troubleshoot Teams client health and issues in the Microsoft Teams admin center',
+            'Troubleshoot Teams client health and issues in the Teams admin center',
             'Troubleshoot sign-in issues to Teams',
             'Troubleshoot Microsoft 365 Copilot and AI experiences in Teams',
             'Troubleshoot issues with joining meetings and accessing features in meetings',
