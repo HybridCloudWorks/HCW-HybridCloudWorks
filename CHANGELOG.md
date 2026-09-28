@@ -65,7 +65,27 @@ This project has not cut a tagged release; entries are grouped under
   template; scoped, it got 403. The owner runs the steps from the
   workstation through `ssh hcw-lab` and the `coder` container's CLI, and
   the token goes to the clipboard, never the screen, before it is seeded
-  at https://hybridcloudworks.com/admin/integrations?tab=keys.
+  at https://hybridcloudworks.com/admin/integrations?tab=keys. The site's
+  panes open only once the card reads reachable (#758), so the owner's own
+  first token is the GitHub sign-in's session, copied from the browser's
+  developer tools. Turning Coder on in the container rehearsal also
+  surfaced a latent defect. `coder_workspace_memory_mib` and
+  `coder_server_memory_reserve_mib` had defaults only in the role's
+  argument spec, which Ansible never applies, so the first run with
+  `coder_enabled: true` stopped at the capacity assertion with
+  `'coder_workspace_memory_mib' is undefined`. Both are in the role's
+  defaults now. `lab-host/ansible/check-argument-spec-defaults.py`, in
+  the same CI job, fails on any option across the 11 roles whose default
+  is written only in its spec, or whose default disagrees with it. What a
+  pane can show from the lab host now speaks to visitors. Coder stopped
+  answers `Lab workspaces aren't available right now.`, the site's own
+  `UNAVAILABLE_SENTENCE`, and the apex and unclaimed names answer
+  `There's no lab at this address.` The fail-closed HTTP-only 503 keeps
+  naming the missing vault key for the operator, because an `http://`
+  page cannot render in the site's pane. `scripts/lab-host-visitor-copy.test.mjs`
+  scans every `respond` body in the three Caddy templates for tool, host
+  and setting names. It pins the Coder answer to the pane's sentence and
+  keeps the operator body on the HTTP-only site.
 
 - **Lab workspaces open as panes on the site (#751).** Owner decision
   2026-09-28: the lab is reached only through panes on the site. #750 made

@@ -467,6 +467,12 @@ coder users show me
 
 Success is a `Roles` row reading `Owner`. Every later sign-in is a member.
 
+The site's panes stay closed until the status token is seeded ("The status
+token for the site", below), and that needs this sign-in's session. So
+before opening the address above, open the browser's developer tools as in
+step 1 there, and take the session from this sign-in rather than signing in
+twice.
+
 If the tab shows `You aren't a member of the authorized Github
 organizations!` instead of the labs page, GitHub did not report the account
 as a member of `HybridCloudWorks` to the app. Either the account is not a
@@ -488,8 +494,9 @@ A plain `coder login` opens Coder's `/cli-auth` page in a browser tab. That
 is a direct visit, so it lands on the labs page and never shows the token.
 Sign the CLI in with a token instead. Create one in the Coder dashboard in a
 pane on the site (the account menu, then **Account**, then **Tokens**; Coder's
-path is `/settings/tokens`) and copy it. Then, PowerShell, with the token on
-the clipboard:
+path is `/settings/tokens`) and copy it. The panes open only once the
+status token is seeded (below); before that, the sign-in session from its
+step 1 works here too. Then, PowerShell, with the token on the clipboard:
 
 ```powershell
 coder login https://coder.lab.hybridcloudworks.com --token (Get-Clipboard)
@@ -561,18 +568,35 @@ belonged to another user:
 | Template Admin, no scope | 200, 200, `count` 1 | **200, changed** | **200, deleted** | 403 |
 | Member, Auditor or User Admin | 200, 200, `count` **0** | Refused | not tried | Refused |
 
-**Before you start.** Coder is on, you have signed in as its owner
-("First admin sign-in", above), and the Coder dashboard opens in a pane on
-the site. The steps run Coder's CLI inside the `coder` container on the host,
-over `ssh hcw-lab`, so nothing is installed on the workstation and nothing
-is a top-level visit. The CLI needs one token of yours to act as the owner,
-which it reads from standard input, so it never appears on a command line.
+**Before you start.** Coder is on and you have signed in as its owner
+("First admin sign-in", above). The steps run Coder's CLI inside the `coder`
+container on the host, over `ssh hcw-lab`, so nothing is installed on the
+workstation and nothing is a top-level visit. The CLI needs one token of
+yours to act as the owner, which it reads from standard input, so it never
+appears on a command line.
 
-1. **A token of yours, in a pane.** In the Coder dashboard in a pane: the
-   account menu, **Account**, then **Tokens** (Coder's path is
-   `/settings/tokens`), then **Add token**. Name it `hcw-setup`, choose the
-   shortest expiry the form offers, create it and copy it. Step 5 deletes
-   it.
+1. **A token of yours.** The site's panes open only once the Coder card's
+   read answers reachable (`frontend/src/pages/shared/LabPanePage.jsx`),
+   and that read needs the token these steps make. So the first time there
+   is no pane to make a token in. Use the session your GitHub sign-in makes
+   instead:
+
+   1. Open a new browser tab, open the developer tools (F12), choose
+      **Network**, and tick **Preserve log**.
+   2. In that tab, open
+      https://coder.lab.hybridcloudworks.com/api/v2/users/oauth2/github/callback
+      and sign in with GitHub, as in "First admin sign-in". The tab ends on
+      the labs page.
+   3. In the Network list, choose the request whose name starts
+      `callback?code=`, open its **Cookies** tab, and copy the **Value** of
+      `coder_session_token` under **Response Cookies**.
+
+   That is your owner session. It lasts 24 hours (Coder's default
+   `--session-duration`), and it is only ever piped into the two lines
+   below. Once the panes open (after step 4), a renewal can use a token
+   made in a pane instead: the account menu, **Account**, then **Tokens**
+   (Coder's path is `/settings/tokens`), then **Add token**, named
+   `hcw-setup`, with the shortest expiry the form offers.
 
 2. **The user and its role.** PowerShell, with that token on the clipboard:
 
@@ -620,7 +644,8 @@ which it reads from standard input, so it never appears on a command line.
    `reachable` `False` means Coder refused the token or did not answer, and
    the check in step 3 tells which.
 
-5. **Delete the step 1 token**, in the same pane: **Account**, **Tokens**,
+5. **Retire the step 1 token.** A sign-in session ends by itself after 24
+   hours. A pane token is deleted in the pane: **Account**, **Tokens**,
    then delete `hcw-setup`.
 
 Then, in a pull request, take `CODER_STATUS_TOKEN` off `EXPECTED_UNRESOLVED`
@@ -654,7 +679,8 @@ sudo sed -i 's/^CODER_OAUTH2_GITHUB_ALLOW_SIGNUPS=.*/CODER_OAUTH2_GITHUB_ALLOW_S
 sudo docker compose --project-directory /etc/hcw/coder stop coder
 ```
 
-Caddy then answers **503** `Coder is stopped on this host.` for
+Caddy then answers **503** `Lab workspaces aren't available right now.`,
+the site's own sentence for the same state, for
 `coder.lab` and every `*.coder.lab` name; running workspaces lose their
 agent connection and stop themselves at their deadline. Durable: a pull
 request setting `coder_enabled: false`, which also removes the Caddy route

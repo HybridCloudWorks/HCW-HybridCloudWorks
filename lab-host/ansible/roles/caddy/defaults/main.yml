@@ -18,5 +18,9 @@ caddy_env_file: /etc/caddy/env
 caddy_cloudflare_api_token: "{{ vault_cloudflare_api_token | default('') }}"
 caddy_acme_email: "{{ vault_caddy_acme_email | default('') }}"
 
-caddy_apex_response: "HCW lab host. Nothing is served at the apex yet."
-caddy_unknown_host_response: "No lab is served at this name."
+# Every name here can be framed by the site (lab_panes_only), so these two
+# bodies can render inside a pane, where a visitor reads them. They name no
+# tool, no host and no setting, like the site's own pages;
+# scripts/lab-host-visitor-copy.test.mjs holds them to that.
+caddy_apex_response: "There's no lab at this address."
+caddy_unknown_host_response: "There's no lab at this address."

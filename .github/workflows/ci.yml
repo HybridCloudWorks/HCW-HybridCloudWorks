@@ -87,9 +87,11 @@ jobs:
           # pins, and its port of the image's rewrite rule. The vps-agent
           # files are what lab-job-types.test.mjs imports (capabilities.js)
           # and lab-job-limits.test.mjs reads (index.js, .env.example).
+          # LabPanePage.jsx is what lab-host-visitor-copy.test.mjs reads: the
+          # lab host's "Coder stopped" answer is the pane's own sentence.
           - name: scripts (operations)
             dir: scripts
-            filter: '^(scripts/|\.github/workflows/|infra/|infra-lab/|lab-host/|lab-image/|([^/]+/)*package\.json$|([^/]+/)*Dockerfile|frontend/src/lib/landingZone/(avmVersions|labImage|tfConstraints)\.js$|vps-agent/(index\.js|\.env\.example|lib/capabilities\.js)$)'
+            filter: '^(scripts/|\.github/workflows/|infra/|infra-lab/|lab-host/|lab-image/|([^/]+/)*package\.json$|([^/]+/)*Dockerfile|frontend/src/lib/landingZone/(avmVersions|labImage|tfConstraints)\.js$|frontend/src/pages/shared/LabPanePage\.jsx$|vps-agent/(index\.js|\.env\.example|lib/capabilities\.js)$)'
             lint: npm run lint
             test: npm test
           # vps-agent shells out to `docker run` with a payload that reached

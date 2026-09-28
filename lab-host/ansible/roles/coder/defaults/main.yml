@@ -23,7 +23,12 @@ coder_http_port: 7080
 coder_caddy_sites_dir: /etc/caddy/conf.d
 coder_caddy_group: caddy
 coder_caddy_route_file: "{{ coder_caddy_sites_dir }}/10-coder.caddy"
-coder_unavailable_response: "Coder is stopped on this host."
+# Answered with 503 while the coder service is stopped. It renders inside the
+# site's pane, where a visitor reads it, so it names no tool and no host, and
+# it is the site's own sentence for the same state (UNAVAILABLE_SENTENCE in
+# frontend/src/pages/shared/LabPanePage.jsx). scripts/lab-host-visitor-copy.test.mjs
+# holds both.
+coder_unavailable_response: "Lab workspaces aren't available right now."
 
 # Secrets, from the vault file bootstrap.sh passes with -e. All three must be
 # set when coder_enabled is true; the role fails closed otherwise.
