@@ -35,14 +35,9 @@ handle @coder {
   #    is written and leaves the rest of Coder's policy as it is, so the
   #    Caddyfile's frame-ancestors is the one that decides. Only the default
   #    is matched: Coder's OAuth2 consent page sends frame-ancestors 'none'
-  #    and keeps it. Coder writes each directive as "<name> <values>; " in
-  #    an order that changes from one response to the next, and the last
-  #    one has no trailing space. So the find, which Caddy reads as a
-  #    regular expression, makes the space optional. With it required, 7 of
-  #    40 pane loads of /login on v2.37.3 kept Coder's frame-ancestors
-  #    'self' (measured 2026-09-28), and a browser would have refused to
-  #    show those in the pane.
-  header >Content-Security-Policy "frame-ancestors 'self'; ?" ""
+  #    and keeps it. Coder writes each directive as "<name> <values>; ",
+  #    which is the text matched here.
+  header >Content-Security-Policy "frame-ancestors 'self'; " ""
   reverse_proxy 127.0.0.1:{{ coder_http_port }}
 }
 
