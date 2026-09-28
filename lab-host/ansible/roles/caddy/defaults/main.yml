@@ -1,8 +1,8 @@
 ---
 # caddy_version, caddy_cloudflare_module_version, caddy_builder_image,
-# caddy_builder_image_tag, caddy_builder_image_digest, caddy_site_domain and
-# caddy_site_names live in group_vars/all.yml; meta/argument_specs.yml marks
-# them required.
+# caddy_builder_image_tag, caddy_builder_image_digest, caddy_site_domain,
+# caddy_site_names, caddy_frame_ancestors and caddy_direct_visit_redirect
+# live in group_vars/all.yml; meta/argument_specs.yml marks them required.
 caddy_user: caddy
 caddy_group: caddy
 caddy_home: /var/lib/caddy

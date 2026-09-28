@@ -126,6 +126,7 @@ are recorded once, here, before any of them is implemented.
    `CODER-STATUS-TOKEN` in `kv-site-prod-cus-01` (vault names are hyphenated;
    the naming table in
    [Variables and secrets](../standards/variables-and-secrets.md) applies).
+   (Owner decision 2026-09-28: the lab is reached only through panes on the site, which reverses "never embeds Coder" above and the iframe alternative rejected below; the lab side is recorded in [Labs host, "Panes only"](../architecture/labs-host.md#panes-only).)
 5. **One toolchain, published as digest-pinned images from a new `lab-image/`
    directory.** The images go to GHCR (and to Docker Hub once an organisation
    exists there) and are the single toolchain for the lab pages, the Coder

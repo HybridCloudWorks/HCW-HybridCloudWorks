@@ -118,6 +118,21 @@ caddy_site_names:
   - "{{ lab_host_domain }}"
   - "*.{{ lab_host_domain }}"
   - "*.coder.{{ lab_host_domain }}"
+# Panes only. Owner decision 2026-09-28: "The lab should only be accessible
+# through 'panes' from my site, lock to that", and a direct visit goes to the
+# labs page. Caddy sends frame-ancestors with this list on every response for
+# the names above, and redirects a top-level browser visit to the address
+# below (roles/caddy/templates/Caddyfile.j2, lab_panes_only). Both site
+# hostnames are listed: www.hybridcloudworks.com is the Static Web App's
+# second custom domain and serves the site with a 200 instead of redirecting
+# to the apex (checked 2026-09-28). 'self' is for code-server's webviews,
+# which are iframes of its own origin. frame-ancestors checks every ancestor
+# up to the top window, so 'self' admits no other site.
+caddy_frame_ancestors:
+  - "'self'"
+  - https://hybridcloudworks.com
+  - https://www.hybridcloudworks.com
+caddy_direct_visit_redirect: https://hybridcloudworks.com/education/labs
 
 # Coder (#679) is the learner identity boundary and signs learners in with
 # GitHub OAuth. The coder role renders coder_oauth2_github_allowed_orgs into
