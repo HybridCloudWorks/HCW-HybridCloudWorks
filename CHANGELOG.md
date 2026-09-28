@@ -20,7 +20,7 @@ This project has not cut a tagged release; entries are grouped under
 ### Added
 
 - **Import `docs/content` drafts into the CMS review queue, never
-  published.** Nothing imported a repository draft into the CMS, so reviewing
+  published (#749).** Nothing imported a repository draft into the CMS, so reviewing
   the three lab articles (#737/#744) on the site meant pasting each one by
   hand. On Admin → Content Queue, **Import drafts from the repository** lists
   the `blog-*.md` files on `main` (`GET /api/cms/content/import-repo/candidates`,
