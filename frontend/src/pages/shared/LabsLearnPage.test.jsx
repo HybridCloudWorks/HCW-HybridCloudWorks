@@ -192,7 +192,9 @@ describe('LabsLearnPage', () => {
 
     const articles = screen.getByTestId('labs-slot-articles');
     expect(within(articles).getByRole('heading', { level: 2 })).toBeInTheDocument();
-    expect(articles).toHaveTextContent('#677');
+    expect(articles).toHaveTextContent('Coming soon.');
+    // The issue that builds it is the team's to-do, not the visitor's.
+    expect(articles).not.toHaveTextContent(/#\d|issue/i);
     await screen.findByText(NOT_PROVISIONED_SENTENCE);
   });
 

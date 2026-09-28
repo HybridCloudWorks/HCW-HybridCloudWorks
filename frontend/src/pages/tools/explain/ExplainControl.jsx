@@ -13,15 +13,18 @@
  * away rather than describing something no longer on the page — and that key
  * is compared during render, so there is no effect and no setState in one.
  *
- * FAILURES IN WORDS. 429 says to try again in a while and 503 shows the
- * server's own sentence (the kind's toggle off, no provider, or paused for
- * the day); neither offers a retry, because retrying would not help. Any
- * other failure names its message and offers Retry.
+ * VISITOR WORDS ONLY (owner direction 2026-09-28). The panel says the text is
+ * AI-generated and to check it, and nothing about which model wrote it or
+ * when: those are the server's to log. A failure is one of four sentences
+ * chosen here from the response's `code` (or its status when it carries
+ * none), never the server's text, so no future server message can reach the
+ * page: the hourly limit, the daily limit and "not available right now"
+ * offer no retry, because retrying would not help; anything else says
+ * something went wrong and offers Retry.
  */
 import React, { useState } from 'react';
 import { Loader2, RefreshCw, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { formatLocalDateTime } from '@/lib/cloudPricing';
 
 const paragraphs = (text) =>
   String(text)
@@ -29,14 +32,41 @@ const paragraphs = (text) =>
     .map((s) => s.trim())
     .filter(Boolean);
 
+/** The failures a visitor can meet, and the words for each. */
+export const FAILURE_LINES = Object.freeze({
+  rateLimited: "You've reached the limit for explanations for now. Try again in about an hour.",
+  paused: "Explanations have reached today's limit. Try again tomorrow.",
+  unavailable: "Explanations aren't available right now.",
+  failed: 'Something went wrong. Please try again.',
+});
+
+/**
+ * Which failure an error is, from the route's code (functions/src/lib/
+ * cloud-tools/explain/handler.js EXPLAIN_CODES), else from its status.
+ * `retry` is whether asking again could help.
+ *
+ * @param {Error & { status?: number, code?: string|null }} error
+ * @returns {{ text: string, retry: boolean }}
+ */
+export function failureFor(error) {
+  if (error?.code === 'EXPLAIN_RATE_LIMITED' || error?.status === 429) {
+    return { text: FAILURE_LINES.rateLimited, retry: false };
+  }
+  if (error?.code === 'EXPLAIN_PAUSED_FOR_TODAY')
+    return { text: FAILURE_LINES.paused, retry: false };
+  if (error?.code === 'EXPLAIN_UNAVAILABLE' || error?.status === 503) {
+    return { text: FAILURE_LINES.unavailable, retry: false };
+  }
+  return { text: FAILURE_LINES.failed, retry: true };
+}
+
 /**
  * @param {object} props
- * @param {{ text: string, model: string, generatedAt: string, cached: boolean }} props.explanation
- * @param {string} props.generatedLabel  the line above the text that says it is generated
- * @param {string} props.cachedNote  appended to the model line when the answer was cached
+ * @param {{ text: string, cached: boolean }} props.explanation
+ * @param {string} props.generatedLabel  the line above the text that says it is AI-generated
  * @param {string} props.testId
  */
-export function Explanation({ explanation, generatedLabel, cachedNote, testId }) {
+export function Explanation({ explanation, generatedLabel, testId }) {
   return (
     <div
       className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm dark:border-slate-700 dark:bg-slate-900"
@@ -51,25 +81,17 @@ export function Explanation({ explanation, generatedLabel, cachedNote, testId })
           {paragraph}
         </p>
       ))}
-      <p className="text-xs text-slate-600 dark:text-slate-400">
-        {explanation.model} · {formatLocalDateTime(explanation.generatedAt)}
-        {explanation.cached ? ` · ${cachedNote}` : ''}
-      </p>
     </div>
   );
 }
 
 /**
  * @param {object} props
- * @param {Error & { status?: number }} props.error
+ * @param {Error & { status?: number, code?: string|null }} props.error
  * @param {() => void} props.onRetry
  */
 export function Failure({ error, onRetry }) {
-  let text;
-  if (error.status === 429)
-    text = 'Explanations are limited to a few an hour. Try again in a while.';
-  else if (error.status === 503) text = error.message;
-  else text = `The explanation could not be generated: ${error.message}`;
+  const { text, retry } = failureFor(error);
   return (
     <div
       role="alert"
@@ -77,11 +99,11 @@ export function Failure({ error, onRetry }) {
       data-status={error.status ?? 'error'}
     >
       <p className="min-w-0 flex-1 break-words">{text}</p>
-      {error.status === 429 || error.status === 503 ? null : (
+      {retry ? (
         <Button variant="outline" size="sm" onClick={onRetry}>
           <RefreshCw className="mr-2 h-3.5 w-3.5" /> Retry
         </Button>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -90,8 +112,8 @@ export function Failure({ error, onRetry }) {
  * @param {object} props
  * @param {object} props.body  the request body; its JSON is the key the answer is held under
  * @param {(body: object) => Promise<object>} props.request  the publicApi call for this kind
- * @param {{ idle: string, busy: string, generated: string, cached: string }} props.labels
- *   the button's text at rest and while loading, the generated-by line, and the cached note
+ * @param {{ idle: string, busy: string, generated: string }} props.labels
+ *   the button's text at rest and while loading, and the AI-generated line
  * @param {string} props.title  the button's tooltip
  * @param {boolean} [props.disabled]  when there is nothing to explain yet
  * @param {{ button: string, panel: string }} props.testIds
@@ -135,7 +157,6 @@ export function ExplainControl({ body, request, labels, title, disabled = false,
           <Explanation
             explanation={current.explanation}
             generatedLabel={labels.generated}
-            cachedNote={labels.cached}
             testId={testIds.panel}
           />
         </div>

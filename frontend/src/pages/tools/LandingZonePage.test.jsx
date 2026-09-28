@@ -24,6 +24,7 @@ import { LzSvg, componentForNode, describeLayout } from './landingZone/LzDiagram
 import { buildZip, languageFor } from './landingZone/LzFiles';
 import { listNames, warningText } from './landingZone/LzControls';
 import { explanationRequest } from './landingZone/LzExplainButton';
+import { LINES as LAB_LINES } from './landingZone/labValidateRules';
 import { DEFAULT_STATE, decodeLz, emitFiles, layoutDiagram } from '@/lib/landingZone';
 import { staticRoutes } from '@/lib/routeFactory';
 import { routes as prerenderRoutes } from '../../../scripts/prerender-entry.jsx';
@@ -488,7 +489,7 @@ describe('the explain button (#670)', () => {
 });
 
 describe('validate on the lab (#672)', () => {
-  it('sits under the files, closed by default with the reason, and sends nothing', async () => {
+  it('sits under the files, closed by default in the visitor’s words, and sends nothing', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     try {
@@ -496,8 +497,9 @@ describe('validate on the lab (#672)', () => {
       const button = screen.getByTestId('lz-lab-validate');
       expect(screen.getByTestId('lz-files').contains(button)).toBe(true);
       await waitFor(() =>
-        expect(screen.getByTestId('lz-lab-line').textContent).toBe(labDoor.closed.reason)
+        expect(screen.getByTestId('lz-lab-line').textContent).toBe(LAB_LINES.unavailable)
       );
+      expect(screen.getByTestId('lz-lab-line').textContent).not.toContain('switched off');
       expect(button).toBeDisabled();
       fireEvent.click(button);
       expect(fetchMock).not.toHaveBeenCalled();
@@ -513,7 +515,7 @@ describe('validate on the lab (#672)', () => {
       </StaticRouter>
     );
     expect(ssr).toContain('Validate on the lab');
-    expect(ssr).toContain('Checking whether the lab is taking jobs');
+    expect(ssr).toContain(LAB_LINES.checking);
   });
 });
 

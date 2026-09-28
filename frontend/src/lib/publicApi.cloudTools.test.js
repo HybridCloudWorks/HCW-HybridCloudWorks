@@ -2,7 +2,8 @@
  * The two Phase 3 cloud-tools calls (#613): the price-changes read, which is a
  * cached GET like the pricing read, and the explanation POST, which is
  * neither cached nor deduplicated and has to tell a quota (429) from a
- * paused service (503) — so the thrown Error carries the status.
+ * paused service (503) — so the thrown Error carries the status and the
+ * route's code, which is what the page words its failure from.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { clearPublicGetCache, fetchPriceChanges, requestPricingExplanation } from './publicApi.js';
@@ -75,7 +76,6 @@ describe('requestPricingExplanation', () => {
   it('POSTs the body as JSON and returns the explanation', async () => {
     const explanation = {
       text: 'Two paragraphs.',
-      model: 'claude-x',
       generatedAt: '2026-09-15T10:00:00.000Z',
       cached: false,
     };
@@ -92,22 +92,24 @@ describe('requestPricingExplanation', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('throws with the status and the server sentence on 429 and 503', async () => {
+  it('throws with the status and the code on 429 and 503', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => jsonResponse({ error: 'Rate limit: 5 an hour' }, 429))
     );
     await expect(requestPricingExplanation(body)).rejects.toMatchObject({
       status: 429,
-      message: 'Rate limit: 5 an hour',
+      code: null,
     });
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => jsonResponse({ error: 'Explanations are paused.' }, 503))
+      vi.fn(async () =>
+        jsonResponse({ code: 'EXPLAIN_PAUSED_FOR_TODAY', error: 'Explanations are paused.' }, 503)
+      )
     );
     await expect(requestPricingExplanation(body)).rejects.toMatchObject({
       status: 503,
-      message: 'Explanations are paused.',
+      code: 'EXPLAIN_PAUSED_FOR_TODAY',
     });
   });
 

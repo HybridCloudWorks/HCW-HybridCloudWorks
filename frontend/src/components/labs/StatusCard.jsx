@@ -1,9 +1,11 @@
 /**
  * The shell both status cards on `/education/labs` share (#681): a headed
  * section with an intro sentence, and a body that is exactly one of three
- * things — the server's error sentence, a notice for a state with nothing to
- * enumerate (loading, route not published, not provisioned, unreachable), or
- * the card's own facts. A card supplies its notices as an ordered table of
+ * things — the card's own sentence for a failed read (never the error's
+ * message, which may name what is behind the site: owner direction
+ * 2026-09-28), a notice for a state with nothing to enumerate (loading,
+ * route not published, not provisioned, unreachable), or the card's own
+ * facts. A card supplies its notices as an ordered table of
  * `{ when, text, muted }` rows, read top to bottom by `firstNotice`, and its
  * facts as a render function of the subject; this component decides which of
  * the three applies. That keeps each card's decision in one ordered list
@@ -25,11 +27,11 @@ export function firstNotice(notices, ...args) {
   return hit ? { text: hit.text(...args), muted: Boolean(hit.muted) } : null;
 }
 
-function StatusBody({ error, errorPrefix, notice, noticeTestId, children }) {
+function StatusBody({ error, errorText, notice, noticeTestId, children }) {
   if (error) {
     return (
       <p role="alert" className="text-sm">
-        {errorPrefix}: {error.message}
+        {errorText}
       </p>
     );
   }
@@ -49,7 +51,7 @@ function StatusBody({ error, errorPrefix, notice, noticeTestId, children }) {
  * @param {string} props.testId the section's data-testid
  * @param {string} props.title
  * @param {React.ReactNode} props.intro one or two sentences under the title
- * @param {string} props.errorPrefix the words before the server's sentence
+ * @param {string} props.errorText the sentence for a failed read
  * @param {string} props.noticeTestId data-testid the notice paragraph carries
  * @param {ReadonlyArray<object>} props.notices the card's `{ when, text, muted }` rows
  * @param {unknown} props.subject the fetched body: `undefined` while nothing
@@ -64,7 +66,7 @@ export default function StatusCard({
   testId,
   title,
   intro,
-  errorPrefix,
+  errorText,
   noticeTestId,
   notices,
   subject,
@@ -83,12 +85,7 @@ export default function StatusCard({
         {title}
       </h2>
       <p className={`text-sm ${MUTED}`}>{intro}</p>
-      <StatusBody
-        error={error}
-        errorPrefix={errorPrefix}
-        notice={notice}
-        noticeTestId={noticeTestId}
-      >
+      <StatusBody error={error} errorText={errorText} notice={notice} noticeTestId={noticeTestId}>
         {error || notice ? null : children(subject)}
       </StatusBody>
     </section>

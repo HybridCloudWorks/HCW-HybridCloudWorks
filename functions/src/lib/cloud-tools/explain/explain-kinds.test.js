@@ -9,10 +9,12 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_EXPLAIN_KIND,
   EXPLAIN_CACHE_TTL_SECONDS,
+  EXPLAIN_CODES,
   EXPLAIN_KIND_IDS,
   EXPLAIN_KINDS,
   EXPLAIN_PER_CLIENT_PER_HOUR,
   EXPLAIN_PER_DAY,
+  EXPLAIN_REASONS,
   EXPLAIN_SYSTEM_PROMPT,
   LANDING_ZONE_KIND,
   LANDING_ZONE_SYSTEM_PROMPT,
@@ -108,6 +110,9 @@ const request = (body) => ({
   text: async () => JSON.stringify(body),
 });
 const parse = (res) => JSON.parse(res.body);
+
+/** A refusal's body: the machine code and the visitor's sentence for it, nothing else. */
+const refused = (code) => ({ code, error: EXPLAIN_REASONS[code] });
 
 const handler = ({ store = memStore(), ai = fakeAi() } = {}) =>
   createExplainHandlers({ identity, store, ai, now: () => NOW });
@@ -232,7 +237,6 @@ describe('POST /api/public/cloud-tools/explain — kinds', () => {
       success: true,
       explanation: {
         text: 'Policy matters here. Without it nothing is enforced.',
-        model: 'gemini-3.5-flash-lite',
         generatedAt: '2026-09-25T12:00:00.000Z',
         cached: false,
       },
@@ -291,7 +295,7 @@ describe('POST /api/public/cloud-tools/explain — kinds', () => {
       const h = handler({ store, ai });
       const off = await h.explain(request(landingZoneBody()), context);
       expect(off.status, refuse).toBe(503);
-      expect(parse(off)).toEqual({ error: 'Explanations are not available' });
+      expect(parse(off)).toEqual(refused(EXPLAIN_CODES.unavailable));
       expect(ai.generateTextResponse).not.toHaveBeenCalled();
       expect(store.incrementIf).not.toHaveBeenCalled();
       expect(store.createDoc).not.toHaveBeenCalled();
@@ -310,7 +314,7 @@ describe('POST /api/public/cloud-tools/explain — kinds', () => {
     });
     const res = await handler({ store, ai }).explain(request(landingZoneBody()), context);
     expect(res.status).toBe(503);
-    expect(parse(res)).toEqual({ error: 'Explanations are not available' });
+    expect(parse(res)).toEqual(refused(EXPLAIN_CODES.unavailable));
     expect(store.upsertDoc).not.toHaveBeenCalled();
   });
 
@@ -359,7 +363,7 @@ describe('POST /api/public/cloud-tools/explain — kinds', () => {
     for (const body of [landingZoneBody(), pricingBody()]) {
       const res = await handler({ store, ai }).explain(request(body), context);
       expect(res.status, body.kind ?? 'pricing').toBe(503);
-      expect(parse(res)).toEqual({ error: 'Explanations are paused for today' });
+      expect(parse(res)).toEqual(refused(EXPLAIN_CODES.paused));
     }
     expect(ai.generateTextResponse).not.toHaveBeenCalled();
   });

@@ -87,9 +87,9 @@ export function policyWords(policy) {
   return `${compliant} compliant, ${nonCompliant} non-compliant`;
 }
 
-/** "online, 2 jobs queued" for the vps-agent job runner. */
+/** "online, 2 jobs queued" for the lab's job runner; "unavailable" when there is none. */
 export function agentWords(agent) {
-  if (!agent || typeof agent.online !== 'boolean') return 'not registered';
+  if (!agent || typeof agent.online !== 'boolean') return 'unavailable';
   const queued = Number(agent.queued);
   const queue = Number.isFinite(queued) ? `${plural(queued, 'job')} queued` : 'queue unknown';
   return `${agent.online ? 'online' : 'offline'}, ${queue}`;

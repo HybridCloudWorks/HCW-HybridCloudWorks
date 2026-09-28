@@ -263,12 +263,10 @@ describe('Compare with', () => {
       renderPage('/tools/comparison?compare=us-west-2');
       await awaitResults();
       await waitFor(() => expect(summary()?.dataset.status).toBe('error'));
-      expect(summary().textContent).toBe(
-        'US West prices could not be loaded: Region offline: us-west-2'
-      );
+      expect(summary().textContent).toBe('US West prices could not be loaded. Please try again.');
       expect(compareLine('aws')).toBeNull();
       expect(providerRow('aws').querySelector('.text-lg').textContent).toBe('$711.00');
-      expect(screen.queryByText(/Prices could not be loaded:/)).toBeNull();
+      expect(screen.queryByText('Prices could not be loaded. Please try again.')).toBeNull();
     } finally {
       quiet.mockRestore();
     }

@@ -79,7 +79,7 @@ export default function ProviderLatestContentPanel({
           </div>
           <h4 className="text-base font-bold leading-snug text-foreground">{currentItem.title}</h4>
           <p className="flex-1 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
-            {currentItem.summary || 'Published from the HCW ContentForge workflow.'}
+            {currentItem.summary || 'Newly published on Hybrid Cloud Works.'}
           </p>
           <div className="flex items-center justify-between gap-3 border-t border-glass-border pt-2">
             <div className="flex gap-1 flex-wrap">

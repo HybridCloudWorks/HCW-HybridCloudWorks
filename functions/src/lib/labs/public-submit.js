@@ -116,6 +116,8 @@ import { createMinuteCache, jsonResponse, MINUTE_CACHE_SECONDS } from './minute-
 import {
   CLOSED_DOOR,
   DOOR_CODES,
+  LIMIT_CODES,
+  LIMIT_REASONS,
   PUBLIC_BOUNDS,
   PUBLIC_LAB_JOB_TYPE,
   PUBLIC_MAX_BODY_BYTES,
@@ -228,10 +230,17 @@ function readContentLength(request) {
  * fills in what the next needs (returns null).
  */
 
-/** The switch, then the Turnstile secret: a shut door for everyone, from settings alone. */
-async function checkSettings({ env }) {
+/**
+ * The switch, then the Turnstile secret: a shut door for everyone, from
+ * settings alone. The visitor reads the door's sentence; which setting shut it
+ * is the code, and the log line says it in words for whoever fixes it.
+ */
+async function checkSettings({ env }, state) {
   const shut = settingsDoor(env);
   if (!shut) return null;
+  state.context.warn?.(
+    `labs public submit refused: ${shut.code === DOOR_CODES.closed ? 'the public submission switch is off' : 'the Turnstile secret is not configured'}`
+  );
   return reply(503, { ok: false, configured: false, code: shut.code, error: shut.reason });
 }
 
@@ -330,12 +339,9 @@ async function checkClientQuota({ store, now }, state) {
     return null;
   } catch (error) {
     if (error?.code !== 'SUBMISSION_RATE_LIMIT') throw error;
-    return refusal(
-      429,
-      'LAB_RATE_LIMITED',
-      `Validation on the lab is limited to ${PUBLIC_PER_CLIENT_PER_HOUR} an hour for each visitor. Try again in an hour.`,
-      { 'Retry-After': '3600' }
-    );
+    return refusal(429, LIMIT_CODES.client, LIMIT_REASONS[LIMIT_CODES.client], {
+      'Retry-After': '3600',
+    });
   }
 }
 
@@ -352,11 +358,10 @@ async function checkDailyCap({ store, now }, state) {
     ttlSeconds: PUBLIC_QUOTA_TTL_SECONDS,
   });
   if (allowed) return null;
-  return refusal(
-    503,
-    'LAB_PAUSED_FOR_TODAY',
-    `Validation on the lab is paused until tomorrow (UTC): today's ${PUBLIC_PER_DAY} public jobs have been used.`
+  state.context.warn?.(
+    `labs public submit refused: today's ${PUBLIC_PER_DAY} public jobs are used`
   );
+  return refusal(503, LIMIT_CODES.daily, LIMIT_REASONS[LIMIT_CODES.daily]);
 }
 
 async function enqueue({ store, uuid }, state) {

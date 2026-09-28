@@ -277,7 +277,7 @@ describe('without prices', () => {
     expect(document.querySelector('tr[data-service]')).toBeNull();
   });
 
-  it('shows the server sentence on a failure, and Try again fetches again', async () => {
+  it('says the prices could not be loaded, not what the server said, and Try again fetches again', async () => {
     answerPricing(
       jsonResponse({ success: false, error: 'Unknown region: mars-1' }, 400),
       jsonResponse(PAYLOAD)
@@ -285,9 +285,9 @@ describe('without prices', () => {
     const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       renderPage('/tools/comparison?region=mars-1');
-      const alert = await screen.findByText(/Prices could not be loaded:/);
+      const alert = await screen.findByText('Prices could not be loaded. Please try again.');
       expect(alert.getAttribute('role') ?? alert.closest('[role="alert"]')).toBeTruthy();
-      expect(alert.textContent).toContain('Unknown region: mars-1');
+      expect(alert.closest('[role="alert"]').textContent).not.toContain('Unknown region');
       expect(screen.getByText('Prices could not be loaded.')).toBeTruthy();
 
       // The select stays usable after a failure, offering the default as the
@@ -304,7 +304,7 @@ describe('without prices', () => {
       );
       await waitFor(() => expect(serviceRow('compute-vm')).toBeTruthy());
       expect(pricingCalls()).toHaveLength(2);
-      expect(screen.queryByText(/Prices could not be loaded:/)).toBeNull();
+      expect(screen.queryByText('Prices could not be loaded. Please try again.')).toBeNull();
     } finally {
       quiet.mockRestore();
     }

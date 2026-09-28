@@ -122,7 +122,7 @@ const normalizeConcepts = (doc = {}) => {
       id: 'problem-statement',
       label: 'Problem Statement',
       summary: 'Define the challenge and desired outcomes before implementation.',
-      details: 'Add framework concepts from Framework Studio to drive this page dynamically.',
+      details: 'Detailed framework concepts are coming soon.',
       recommendation: '',
       sources: [],
     },

@@ -472,7 +472,7 @@ describe('without prices', () => {
     const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       renderPage('/tools/comparison?region=mars-1');
-      await screen.findByText(/Prices could not be loaded:/);
+      await screen.findByText('Prices could not be loaded. Please try again.');
       expect(screen.getByTestId('scenario-status').textContent).toBe(
         'No prices to build the scenario from until they load.'
       );

@@ -13,7 +13,7 @@ export default function GitHubCodePage() {
   return (
     <ContentListingTemplate
       title="GitHub Coder Corner"
-      description="Curated GitHub automation patterns and workflow snippets managed through ContentForge."
+      description="Curated GitHub automation patterns and workflow snippets, reviewed before they are published."
       items={items}
       itemType="guide"
       loading={loading}

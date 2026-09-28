@@ -4,11 +4,12 @@
  *
  * EVERY STATE IS A SENTENCE. Loading, a failed read, a route that is not
  * published yet, a host that is not provisioned yet, and a live host are five
- * different facts and each gets its own words; nothing is inferred from an
- * absence. In particular `{ configured: false }` renders the exact sentence
- * "The lab host is not provisioned yet." and no field — a card that showed
- * "Unknown" for a status and "—" for a version would be describing a host
- * that does not exist.
+ * different facts, and each gets words a visitor can read (owner direction
+ * 2026-09-28: no vendor, no setting, nothing an admin fixes). Nothing is
+ * inferred from an absence. In particular `{ configured: false }` renders
+ * the exact sentence "The lab host isn't available yet." and no field — a
+ * card that showed "Unknown" for a status and "—" for a version would be
+ * describing a host that does not exist.
  *
  * NOTHING HERE IS PRE-RENDERED WITH DATA. The estate arrives through
  * `usePublicData` in an effect, so the build and the first client render both
@@ -27,8 +28,8 @@ import {
 } from './labsWords';
 import StatusCard, { MUTED } from './StatusCard';
 
-export const NOT_PROVISIONED_SENTENCE = 'The lab host is not provisioned yet.';
-export const ESTATE_ROUTE_MISSING_SENTENCE = 'The lab estate endpoint is not published yet.';
+export const NOT_PROVISIONED_SENTENCE = "The lab host isn't available yet.";
+export const ESTATE_ROUTE_MISSING_SENTENCE = "The lab host's status isn't available right now.";
 export const ESTATE_LOADING_SENTENCE = 'Reading the lab host status…';
 
 /** The states with nothing to enumerate, first match wins (see CoderStatusCard). */
@@ -53,9 +54,9 @@ function Row({ label, value, testId }) {
   );
 }
 
-/** "reachable, 1 of 5 workspaces running" / "unreachable" / "not configured". */
+/** "reachable, 1 of 5 workspaces running" / "unreachable" / "unavailable". */
 function coderWords(coder) {
-  if (!coder || typeof coder.reachable !== 'boolean') return 'not configured';
+  if (!coder || typeof coder.reachable !== 'boolean') return 'unavailable';
   return coder.reachable ? `reachable, ${capacityWords(coder)}` : 'unreachable';
 }
 
@@ -85,8 +86,8 @@ function EstateFacts({ estate }) {
       </dl>
       {estate.asOf ? (
         <p className={`mt-3 text-xs ${MUTED}`} data-testid="estate-as-of">
-          Read from Azure Resource Graph {formatLocalDateTime(estate.asOf)}; the heartbeat age is
-          measured from that moment, and the reading is refreshed about once a minute.
+          As of {formatLocalDateTime(estate.asOf)}; the heartbeat age is measured from that moment,
+          and the reading is refreshed about once a minute.
         </p>
       ) : null}
     </>
@@ -99,8 +100,8 @@ const CARD = Object.freeze({
   testId: 'labs-estate-card',
   title: 'The Hybrid Lab right now',
   intro:
-    'The lab host is a Hostinger VPS onboarded to Azure Arc, so it appears in the same tenant as the production estate. The Function App reads its Arc row and policy compliance from Azure Resource Graph with its managed identity; the browser never talks to Azure.',
-  errorPrefix: 'The lab host status could not be read',
+    'The lab host is a server onboarded to Azure Arc. This card shows what Azure reports for it right now: its connection, its Arc agent and its policy compliance.',
+  errorText: "The lab host's status couldn't be loaded. Please try again later.",
   noticeTestId: 'estate-status',
   notices: NOTICES,
 });

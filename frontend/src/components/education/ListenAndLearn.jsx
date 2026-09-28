@@ -184,8 +184,7 @@ export default function ListenAndLearn({ platform, examCode, studyGuideUrl }) {
     return (
       <SectionShell accent={accent}>
         <p className="text-sm text-foreground/70 mt-2">
-          Study podcasts are live for Azure and AWS certifications. This platform is next — its exam
-          guides are published in a different format and need their own parser.
+          Study podcasts are live for Azure and AWS certifications. This platform is coming next.
         </p>
       </SectionShell>
     );

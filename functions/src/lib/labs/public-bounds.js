@@ -46,14 +46,37 @@ export const DOOR_CODES = Object.freeze({
   unavailable: 'LAB_STATUS_UNAVAILABLE',
 });
 
-/** The one line the builder shows under a disabled button, per code. */
+/**
+ * The visitor's sentence for a shut door, per code (owner direction
+ * 2026-09-28: public text speaks to visitors only). A visitor cannot act on
+ * why the lab is closed, so every closed reason reads the same and points at
+ * the download; only a full queue, which clears by itself, says to wait. The
+ * code says which it is, for logs and the admin pages; the builder maps the
+ * code to its own copy of these words and never renders this field.
+ */
+export const LAB_UNAVAILABLE_REASON =
+  "Validation on the lab isn't available right now. You can still download the files and validate locally.";
+export const LAB_BUSY_REASON =
+  'The lab is busy right now. Try again in a few minutes, or download the files and validate locally.';
+
 export const DOOR_REASONS = Object.freeze({
-  [DOOR_CODES.closed]: 'The lab is not taking public jobs yet: public submission is switched off.',
-  [DOOR_CODES.unconfigured]:
-    'The lab is not taking public jobs yet: its browser check (Cloudflare Turnstile) is not configured.',
-  [DOOR_CODES.offline]: 'The lab is not taking jobs yet: no lab agent is online to run them.',
-  [DOOR_CODES.full]: `The lab's queue is full (more than ${PUBLIC_QUEUE_CEILING} jobs waiting). Try again in a few minutes.`,
-  [DOOR_CODES.unavailable]: "The lab's status could not be read, so it is not taking jobs right now.",
+  [DOOR_CODES.closed]: LAB_UNAVAILABLE_REASON,
+  [DOOR_CODES.unconfigured]: LAB_UNAVAILABLE_REASON,
+  [DOOR_CODES.offline]: LAB_UNAVAILABLE_REASON,
+  [DOOR_CODES.full]: LAB_BUSY_REASON,
+  [DOOR_CODES.unavailable]: LAB_UNAVAILABLE_REASON,
+});
+
+/** The two limits a visitor can reach, as codes and the visitor's sentence for each. */
+export const LIMIT_CODES = Object.freeze({
+  client: 'LAB_RATE_LIMITED',
+  daily: 'LAB_PAUSED_FOR_TODAY',
+});
+
+export const LIMIT_REASONS = Object.freeze({
+  [LIMIT_CODES.client]: `You've reached the limit for validation on the lab for now (${PUBLIC_PER_CLIENT_PER_HOUR} an hour). Try again in about an hour.`,
+  [LIMIT_CODES.daily]:
+    "Validation on the lab has reached today's limit. Try again tomorrow, or download the files and validate locally.",
 });
 
 /** Every bound, as the status read reports them, so the page can say them. */

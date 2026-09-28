@@ -60,7 +60,7 @@ export default function NewsletterSignup({
     setErrorMessage('');
     try {
       const base = getFunctionsBase();
-      if (!base) throw new Error('Newsletter is not configured.');
+      if (!base) throw new Error('Newsletter signup is temporarily unavailable.');
       const res = await fetch(`${base}/public/newsletter/subscribe`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

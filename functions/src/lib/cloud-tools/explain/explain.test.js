@@ -2,11 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   EXPLAIN_CACHE_TTL_SECONDS,
+  EXPLAIN_CODES,
   EXPLAIN_FEATURE,
   EXPLAIN_MAX_BODY_BYTES,
   EXPLAIN_PER_CLIENT_PER_HOUR,
   EXPLAIN_PER_DAY,
   EXPLAIN_QUOTA_TTL_SECONDS,
+  EXPLAIN_REASONS,
   EXPLAIN_SYSTEM_PROMPT,
   canonicalExplainRequest,
   createExplainHandlers,
@@ -107,6 +109,9 @@ const fakeAi = ({
 });
 
 const context = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+/** A refusal's body: the machine code and the visitor's sentence for it, nothing else. */
+const refused = (code) => ({ code, error: EXPLAIN_REASONS[code] });
 const request = (body, { method = 'POST' } = {}) => ({
   method,
   headers: { get: () => null },
@@ -407,7 +412,6 @@ describe('POST /api/public/cloud-tools/explain', () => {
       success: true,
       explanation: {
         text: 'Cached text.',
-        model: 'gemini-3.5-flash-lite',
         generatedAt: '2026-09-14T00:00:00.000Z',
         cached: true,
       },
@@ -423,7 +427,7 @@ describe('POST /api/public/cloud-tools/explain', () => {
       const ai = fakeAi({ refuse });
       const res = await handler({ store, ai }).explain(request(validBody()), context);
       expect(res.status, refuse).toBe(503);
-      expect(parse(res)).toEqual({ error: 'Explanations are not available' });
+      expect(parse(res)).toEqual(refused(EXPLAIN_CODES.unavailable));
       // The router's own selection for THIS feature, so the portal toggle is
       // the off switch for the one anonymous AI call.
       expect(ai.resolveProvider).toHaveBeenCalledWith('pricingExplain');
@@ -453,7 +457,7 @@ describe('POST /api/public/cloud-tools/explain', () => {
     });
     const res = await handler({ store, ai }).explain(request(validBody()), context);
     expect(res.status).toBe(503);
-    expect(parse(res)).toEqual({ error: 'Explanations are not available' });
+    expect(parse(res)).toEqual(refused(EXPLAIN_CODES.unavailable));
     expect(store.upsertDoc).not.toHaveBeenCalled();
   });
 
@@ -478,7 +482,7 @@ describe('POST /api/public/cloud-tools/explain', () => {
     }
     const res = await h.explain(request({ ...validBody(), egressGb: 99 }), context);
     expect(res.status).toBe(429);
-    expect(parse(res)).toEqual({ error: 'Too many requests' });
+    expect(parse(res)).toEqual(refused(EXPLAIN_CODES.rateLimited));
     expect(res.headers['Retry-After']).toBe('3600');
     expect(ai.generateTextResponse).toHaveBeenCalledTimes(EXPLAIN_PER_CLIENT_PER_HOUR);
     expect(store.docs.get('submission_quota/explain-caller:client-hash')).toMatchObject({
@@ -500,7 +504,7 @@ describe('POST /api/public/cloud-tools/explain', () => {
     const ai = fakeAi();
     const res = await handler({ store, ai }).explain(request(validBody()), context);
     expect(res.status).toBe(503);
-    expect(parse(res)).toEqual({ error: 'Explanations are paused for today' });
+    expect(parse(res)).toEqual(refused(EXPLAIN_CODES.paused));
     expect(ai.generateTextResponse).not.toHaveBeenCalled();
     expect(store.docs.get('tool_service_cache/explain-quota:2026-09-15').count).toBe(
       EXPLAIN_PER_DAY
@@ -518,7 +522,6 @@ describe('POST /api/public/cloud-tools/explain', () => {
     const { explanation } = parse(res);
     expect(explanation).toEqual({
       text: 'Azure is cheapest by $14 a month. Compare at — extras add $112.',
-      model: 'gemini-3.5-flash-lite',
       generatedAt: '2026-09-15T12:00:00.000Z',
       cached: false,
     });
@@ -548,6 +551,12 @@ describe('POST /api/public/cloud-tools/explain', () => {
       ttl: EXPLAIN_CACHE_TTL_SECONDS,
     });
 
+    // The model is named in the log, never in the response.
+    expect(context.log).toHaveBeenCalledWith(
+      'explain generated: pricing, model gemini-3.5-flash-lite'
+    );
+    expect(JSON.stringify(parse(res))).not.toContain('gemini');
+
     // And the next identical request is a cache hit.
     const again = await handler({ store, ai }).explain(request(validBody()), context);
     expect(parse(again).explanation.cached).toBe(true);
@@ -561,6 +570,7 @@ describe('POST /api/public/cloud-tools/explain', () => {
       context
     );
     expect(res.status).toBe(502);
+    expect(parse(res)).toEqual(refused(EXPLAIN_CODES.empty));
     expect(store.upsertDoc).not.toHaveBeenCalled();
   });
 
@@ -571,7 +581,7 @@ describe('POST /api/public/cloud-tools/explain', () => {
     });
     const res = await handler({ store }).explain(request(validBody()), context);
     expect(res.status).toBe(500);
-    expect(parse(res)).toEqual({ error: 'Failed to explain' });
+    expect(parse(res)).toEqual(refused(EXPLAIN_CODES.failed));
     expect(context.error).toHaveBeenCalled();
   });
 

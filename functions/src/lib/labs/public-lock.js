@@ -109,18 +109,21 @@ export const LOCK_CODES = Object.freeze({
   unavailable: 'TURNSTILE_UNAVAILABLE',
 });
 
-/** The sentence for each, which the builder shows as the server's own words. */
+/**
+ * The visitor's sentence for each (owner direction 2026-09-28: public text
+ * names no vendor and no setting). The builder maps the code to its own copy
+ * of these words; the log line keeps the detail (`verdict.detail`).
+ */
 export const LOCK_REASONS = Object.freeze({
   [LOCK_CODES.origin]:
-    'Validate on the lab takes jobs only from the Landing Zone Builder on hybridcloudworks.com.',
+    'Validate on the lab works only from the Landing Zone Builder on hybridcloudworks.com.',
   [LOCK_CODES.required]:
-    'The request carried no Cloudflare Turnstile token, so the lab did not take the job. Reload the page and try again.',
+    "The browser check didn't finish, so the lab didn't take the job. Reload the page and try again.",
   [LOCK_CODES.attempts]:
-    "Too many tries at Cloudflare's browser check from this address in the last few minutes, so the lab did not take the job. Try again in ten minutes.",
-  [LOCK_CODES.failed]:
-    "Cloudflare's browser check did not pass, or its token had expired or was already used, so the lab did not take the job. Try again.",
+    'Too many attempts from this browser in the last few minutes. Try again in about ten minutes.',
+  [LOCK_CODES.failed]: "The browser check didn't pass, so the lab didn't take the job. Try again.",
   [LOCK_CODES.unavailable]:
-    "Cloudflare's browser check could not be confirmed just now, so the lab did not take the job. Try again in a minute.",
+    "The browser check couldn't be completed just now. Try again in a minute.",
 });
 
 /**

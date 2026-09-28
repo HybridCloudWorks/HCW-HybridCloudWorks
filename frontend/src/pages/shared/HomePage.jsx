@@ -329,7 +329,7 @@ export default function HomePage() {
       const functionsBase = getFunctionsBase();
 
       if (!shouldFetchPlatformHealth(functionsBase)) {
-        setLastVerified('Health API unavailable');
+        setLastVerified('Health check unavailable');
         return;
       }
 

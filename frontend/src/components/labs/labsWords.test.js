@@ -70,6 +70,6 @@ describe('the other words', () => {
     expect(policyWords(null)).toBe('not evaluated');
     expect(agentWords({ online: true, queued: 2 })).toBe('online, 2 jobs queued');
     expect(agentWords({ online: false, queued: 0 })).toBe('offline, 0 jobs queued');
-    expect(agentWords(null)).toBe('not registered');
+    expect(agentWords(null)).toBe('unavailable');
   });
 });

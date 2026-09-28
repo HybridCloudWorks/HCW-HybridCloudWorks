@@ -63,7 +63,7 @@ export default function VMwareArchitecturePage() {
   return (
     <ContentListingTemplate
       title="VMware Reference Architectures"
-      description="Production-ready VMware Cloud Foundation, vSphere, and NSX blueprints managed through ContentForge."
+      description="Production-ready VMware Cloud Foundation, vSphere, and NSX blueprints, reviewed before they are published."
       items={items}
       itemType="architecture"
       loading={loading}

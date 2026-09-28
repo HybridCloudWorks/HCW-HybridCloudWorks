@@ -7,7 +7,12 @@
  * landing-zone. Everything a caller or a test needs is re-exported here.
  */
 
-export { createExplainHandlers, EXPLAIN_CACHE_TTL_SECONDS } from './handler.js';
+export {
+  createExplainHandlers,
+  EXPLAIN_CACHE_TTL_SECONDS,
+  EXPLAIN_CODES,
+  EXPLAIN_REASONS,
+} from './handler.js';
 export {
   DEFAULT_EXPLAIN_KIND,
   EXPLAIN_KIND_IDS,

@@ -279,8 +279,8 @@ export default function ArchitectureSubmissionPage() {
             Submit an Architecture Blueprint
           </h2>
           <p className="text-muted-foreground text-sm max-w-2xl">
-            Create your own cloud architecture blueprint. Once submitted it enters the admin review
-            queue before being published to the provider&apos;s Architecture Designs page.
+            Create your own cloud architecture blueprint. Once submitted it is reviewed before being
+            published to the provider&apos;s Architecture Designs page.
           </p>
         </div>
 
@@ -290,15 +290,12 @@ export default function ArchitectureSubmissionPage() {
               <CheckCircle className="h-12 w-12 text-green-500 mx-auto" />
               <h3 className="text-xl font-bold">Blueprint Submitted!</h3>
               <p className="text-muted-foreground text-sm">
-                Your architecture blueprint has been added to the review queue. An admin will review
-                and publish it shortly.
+                Your architecture blueprint has been submitted for review. It will be published once
+                it has been reviewed.
               </p>
               <div className="flex gap-3 justify-center pt-2">
                 <Button onClick={() => setSubmitted(false)} variant="outline">
                   Submit Another
-                </Button>
-                <Button asChild>
-                  <Link to="/admin/queue">View Queue</Link>
                 </Button>
               </div>
             </CardContent>
@@ -522,8 +519,8 @@ export default function ArchitectureSubmissionPage() {
                       />
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Rough cost estimate for this architecture. Detailed cost breakdown can be
-                      added after review in the admin board.
+                      Rough cost estimate for this architecture. A detailed cost breakdown can be
+                      added after review.
                     </p>
                   </TabsContent>
                 </Tabs>
@@ -551,7 +548,7 @@ export default function ArchitectureSubmissionPage() {
                 )}
               </Button>
               <p className="text-xs text-muted-foreground">
-                Submits to the admin review queue with status <code>ingested</code>.
+                Your blueprint is reviewed before it is published.
               </p>
             </div>
           </form>

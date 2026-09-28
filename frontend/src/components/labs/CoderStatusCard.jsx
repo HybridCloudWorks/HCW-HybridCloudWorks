@@ -4,20 +4,21 @@
  * answers from a read-only Coder token. The browser never calls Coder, so
  * the CSP's `connect-src` stays closed (ADR 0032 §4).
  *
- * Three honest absences, each its own sentence: the route is not published,
- * Coder is not yet provisioned (`configured: false`), and Coder is
- * unreachable (`reachable: false`, a cached failure). The last one is the
- * important one — the server caches the failed state on purpose so this card
- * says "unreachable" rather than showing numbers from before the outage.
+ * Three honest absences, each its own sentence in a visitor's words (owner
+ * direction 2026-09-28): the route is not published, Coder is not yet
+ * provisioned (`configured: false`), and Coder is unreachable
+ * (`reachable: false`, a cached failure). The last one is the important one —
+ * the server caches the failed state on purpose so this card says
+ * "unavailable" rather than showing numbers from before the outage.
  */
 import React from 'react';
 import { formatLocalDateTime } from '@/lib/cloudPricing';
 import { capacityWords } from './labsWords';
 import StatusCard, { MUTED } from './StatusCard';
 
-export const CODER_NOT_PROVISIONED_SENTENCE = 'Coder is not yet provisioned.';
-export const CODER_UNREACHABLE_SENTENCE = 'Coder is unreachable right now.';
-export const CODER_ROUTE_MISSING_SENTENCE = 'The Coder status endpoint is not published yet.';
+export const CODER_NOT_PROVISIONED_SENTENCE = "Coder isn't available yet.";
+export const CODER_UNREACHABLE_SENTENCE = 'Coder is unavailable right now.';
+export const CODER_ROUTE_MISSING_SENTENCE = "Coder's status isn't available right now.";
 export const CODER_LOADING_SENTENCE = 'Reading Coder status…';
 
 /** " Last checked 25 Sept 2026, 12:00." or nothing, for the unreachable line. */
@@ -49,7 +50,7 @@ function TemplateList({ templates }) {
   if (templates.length === 0) {
     return (
       <p className={`text-sm ${MUTED}`} data-testid="coder-templates">
-        No template is published yet.
+        No lab template is available yet.
       </p>
     );
   }
@@ -90,8 +91,8 @@ const CARD = Object.freeze({
   testId: 'coder-status-card',
   title: 'Coder status',
   intro:
-    'Coder runs on the lab host and is where you sign in with GitHub. This card is served by the site’s API from a read-only token, so what it shows is at most a minute old and your browser never contacts Coder until you open a workspace.',
-  errorPrefix: 'Coder status could not be read',
+    'Coder is where you sign in with GitHub and open a lab workspace. This card shows whether it is up and how many workspaces are running, at most a minute old; your browser does not contact Coder until you open a workspace.',
+  errorText: "Coder's status couldn't be loaded. Please try again later.",
   noticeTestId: 'coder-status',
   notices: NOTICES,
 });

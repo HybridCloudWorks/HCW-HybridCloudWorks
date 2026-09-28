@@ -49,7 +49,7 @@ describe('LabsEstateCard', () => {
     expect(screen.queryByText(NOT_PROVISIONED_SENTENCE)).not.toBeInTheDocument();
   });
 
-  it('shows the server sentence on a failure', () => {
+  it('says the status could not be loaded on a failure, never what the error said', () => {
     render(
       <LabsEstateCard
         estate={undefined}
@@ -57,7 +57,19 @@ describe('LabsEstateCard', () => {
         error={new Error('Resource Graph timed out')}
       />
     );
-    expect(screen.getByRole('alert')).toHaveTextContent('Resource Graph timed out');
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      "The lab host's status couldn't be loaded. Please try again later."
+    );
+    expect(screen.getByRole('alert')).not.toHaveTextContent('Resource Graph');
+  });
+
+  it('names nothing the site runs on, in any state', () => {
+    const { container } = render(
+      <LabsEstateCard estate={CONFIGURED} loading={false} error={null} />
+    );
+    expect(container.textContent).not.toMatch(
+      /hostinger|vps|function app|managed identity|resource graph|production estate|not configured|not provisioned/i
+    );
   });
 
   it('renders every fact of a configured host in words', () => {
@@ -93,7 +105,7 @@ describe('LabsEstateCard', () => {
     expect(screen.getByTestId('estate-arc-status')).toHaveTextContent('disconnected');
     expect(screen.getByTestId('estate-heartbeat')).toHaveTextContent('no heartbeat recorded');
     expect(screen.getByTestId('estate-policy')).toHaveTextContent('not evaluated');
-    expect(screen.getByTestId('estate-agent')).toHaveTextContent('not registered');
+    expect(screen.getByTestId('estate-agent')).toHaveTextContent('unavailable');
     expect(screen.getByTestId('estate-coder')).toHaveTextContent('unreachable');
     expect(screen.queryByTestId('estate-as-of')).not.toBeInTheDocument();
   });
