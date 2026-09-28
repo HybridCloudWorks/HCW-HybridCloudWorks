@@ -55,6 +55,16 @@
  * contradicts it rather than merely stops repeating it. Both are worth a
  * second look the next time this file is opened.
  *
+ * 2026-09-28, the last English test day for MLA-C01: re-read its exam page
+ * (updated 2026-09-25), which still says "MLA-C01 in English is available
+ * through September 28, 2026" and "MLA-C01 in Korean, Japanese, and
+ * Simplified Chinese remains available until general availability of
+ * MLA-C02". The row is now `retired` with `retiredDate` 2026-09-28, the last
+ * day it could be taken in English. This catalogue and the site are in
+ * English; its text names the three languages that continue. MLA-C02's GA is
+ * still 2027-01-14 in the blog and still "TBD" on the exam page, so the
+ * decision above stands.
+ *
  * `status` and the dates are read through `@/lib/certStatus` at render time,
  * so a card says "Retired" the day after its last test date without anyone
  * editing this file; `src/data/education-catalogues.test.js` then fails until
@@ -396,13 +406,13 @@ export const certifications = [
     code: 'MLA-C01',
     title: 'AWS Certified Machine Learning Engineer – Associate',
     level: 'Associate',
-    status: 'expiring',
-    expiryDate: '2026-09-28',
+    status: 'retired',
+    retiredDate: '2026-09-28',
     replacement: { code: 'MLA-C02', slug: 'mla-c02' },
     description:
       'Implement ML solutions on AWS including model deployment, automation, and MLOps practices.',
     longDescription:
-      'Validate your ability to implement, operationalize, and maintain ML solutions on AWS. Covers SageMaker, model deployment, MLOps pipelines, automation, and monitoring of production ML workloads. The last day to take MLA-C01 in English is September 28, 2026; it remains available in Japanese, Korean and Simplified Chinese until MLA-C02 reaches GA on January 14, 2027.',
+      'Validate your ability to implement, operationalize, and maintain ML solutions on AWS. Covers SageMaker, model deployment, MLOps pipelines, automation, and monitoring of production ML workloads. The last day to take MLA-C01 in English was September 28, 2026, and MLA-C02 is its successor. MLA-C01 remains available in Japanese, Korean and Simplified Chinese until MLA-C02 reaches general availability. Certifications already earned stay valid for their full three years.',
     topics: ['Amazon SageMaker', 'MLOps', 'Model Deployment', 'Automation', 'Monitoring'],
     hours: 40,
     prepTime: '~3 months',
