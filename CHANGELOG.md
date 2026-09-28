@@ -56,7 +56,7 @@ This project has not cut a tagged release; entries are grouped under
   `catalogue.test.js` and the new `scripts/lab-host-launcher.test.mjs` both
   fail when it and the launcher's map differ; the CI filters now run each
   side's test when the other side's file changes.
-  `scripts/lab-host-launcher.test.mjs` (68 tests) drives the logic with a
+  `scripts/lab-host-launcher.test.mjs` (66 tests) drives the logic with a
   mocked fetch, clock and navigation: the allowlist, the 401 path, create,
   stopped, starting, the healthy redirect, malformed names, the backoff and
   the cap. It also holds the files (one module script, nothing inline, text
