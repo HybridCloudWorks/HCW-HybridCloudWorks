@@ -201,7 +201,7 @@ const cases = [
     // The one line and nothing else (ansible-playbook prints a blank line
     // before it): a warning about a directory ansible-core could not create
     // on the read-only root would be in the job's output too.
-    expectOutput: [exactly('playbook: /workspace/playbook.yml', { trim: true })],
+    expectOutput: [exactly('playbook: /workspace/playbook.yml')],
   },
   {
     name: 'ansible-check, text payload (unknown play keyword is rejected)',
@@ -229,11 +229,13 @@ const cases = [
   },
 ];
 
-/** A check that the whole job output is `want` and nothing else, with its surrounding whitespace ignored under `trim`. */
-function exactly(want, { trim = false } = {}) {
-  return (output) =>
-    (trim ? output.trim() : output) === want ? null : `output is ${JSON.stringify(output)}, expected exactly ${JSON.stringify(want)}`;
+/** A check that the whole job output, surrounding whitespace aside, is `want` and nothing else. */
+function exactly(want) {
+  return (output) => (output.trim() === want ? null : `output is ${JSON.stringify(output)}, expected exactly ${JSON.stringify(want)}`);
 }
+
+/** A check that the job output contains `want`. */
+const contains = (want) => (output) => (output.includes(want) ? null : `output lacks ${want}`);
 
 /** Every capability has a case, so one added later cannot ship unchecked. */
 const uncovered = Object.keys(CAPABILITIES).filter((type) => !cases.some((c) => c.type === type));
@@ -245,20 +247,31 @@ if (uncovered.length > 0) {
 /**
  * The image a case runs on: the image under test for a runner-image
  * capability, the pinned digest for any other. Those are pulled first, as
- * the host pre-pulls them, so a pull's progress lines are not job output.
+ * the host pre-pulls them, so a pull's progress lines are not job output;
+ * a failed pull prints Docker's own error above the FAILED line.
  */
 const imageFor = (type) => (CAPABILITIES[type].image === IMAGES.hcwLabRunner ? image : CAPABILITIES[type].image);
 for (const pinned of new Set(cases.map((c) => imageFor(c.type)).filter((ref) => ref !== image))) {
-  const pull = spawnSync('docker', ['pull', '--quiet', pinned], { encoding: 'utf8' });
+  const pull = spawnSync('docker', ['pull', '--quiet', pinned], { stdio: ['ignore', 'ignore', 'inherit'] });
   if (pull.status !== 0) {
-    console.log(`sandbox-check: FAILED (docker pull ${pinned}: ${`${pull.stdout ?? ''}${pull.stderr ?? ''}`.trim()})`);
+    console.log(`sandbox-check: FAILED (docker pull ${pinned} exited ${pull.status})`);
     process.exit(1);
   }
   console.log(`pulled: ${pinned}`);
 }
 
-let failed = 0;
-for (const c of cases) {
+/** What is wrong with one finished job, one sentence each; empty when it did what its case expects. */
+function problemsOf(c, run, output) {
+  const checks = c.expectOutput.map((want) => (typeof want === 'function' ? want : contains(want)));
+  return [
+    run.error && `docker did not run: ${run.error.message}`,
+    run.status !== c.expectExit && `exit ${run.status}, expected ${c.expectExit}`,
+    ...checks.map((check) => check(output)),
+  ].filter(Boolean);
+}
+
+/** Run one case exactly as the agent runs a job, and print the verdict. Resolves true when it passed. */
+async function runCase(c) {
   const capability = { ...CAPABILITIES[c.type], image: imageFor(c.type) };
   const jobId = `check-${c.type}-${Date.now().toString(36)}`;
   const jobDir = await prepareJobDir(capability.payloadFileName, await c.payload(), c.encoding);
@@ -276,32 +289,26 @@ for (const c of cases) {
     });
     const output = `${run.stdout ?? ''}${run.stderr ?? ''}`;
     const seconds = ((Date.now() - started) / 1000).toFixed(1);
-    const problems = [];
-    if (run.error) problems.push(`docker did not run: ${run.error.message}`);
-    if (run.status !== c.expectExit) problems.push(`exit ${run.status}, expected ${c.expectExit}`);
-    for (const want of c.expectOutput) {
-      if (typeof want === 'function') {
-        const problem = want(output);
-        if (problem) problems.push(problem);
-      } else if (!(typeof want === 'string' ? output.includes(want) : want.test(output))) {
-        problems.push(`output lacks ${want}`);
-      }
-    }
-    if (problems.length === 0) {
-      console.log(`ok:   ${c.name} (exit ${run.status}, ${seconds}s${capability.image === image ? '' : `, on ${capability.image}`})`);
-      if (c.terraform) {
-        const evidence = output.match(/^\s+rewrote .*$|^Success! .*$/gm) ?? [];
-        for (const line of evidence) console.log(`      ${line.trim()}`);
-      }
-    } else {
-      failed += 1;
+    const problems = problemsOf(c, run, output);
+    if (problems.length > 0) {
       console.log(`FAIL: ${c.name}: ${problems.join('; ')}`);
       console.log(`      docker ${argv.join(' ')}`);
       console.log(output.replace(/^/gm, '      '));
+      return false;
     }
+    const on = capability.image === image ? '' : `, on ${capability.image}`;
+    console.log(`ok:   ${c.name} (exit ${run.status}, ${seconds}s${on})`);
+    const evidence = c.terraform ? (output.match(/^\s+rewrote .*$|^Success! .*$/gm) ?? []) : [];
+    for (const line of evidence) console.log(`      ${line.trim()}`);
+    return true;
   } finally {
     await fs.rm(jobDir, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+let failed = 0;
+for (const c of cases) {
+  if (!(await runCase(c))) failed += 1;
 }
 
 await fs.rm(builderDir, { recursive: true, force: true }).catch(() => {});
