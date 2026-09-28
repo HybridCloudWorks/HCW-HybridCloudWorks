@@ -67,7 +67,7 @@ export default function EducationTracks({
                 aria-pressed={level === option}
                 className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${
                   level === option
-                    ? 'bg-primary text-black border-primary'
+                    ? 'bg-primary text-primary-foreground border-primary'
                     : 'border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-primary/60'
                 }`}
               >

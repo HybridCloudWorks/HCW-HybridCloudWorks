@@ -503,7 +503,7 @@ export default function GCPEducationPage() {
                       href={featuredCert.learnUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="block w-full h-11 px-4 bg-primary hover:opacity-90 text-white font-bold rounded-lg transition-colors text-center leading-11"
+                      className="block w-full h-11 px-4 bg-primary hover:opacity-90 text-primary-foreground font-bold rounded-lg transition-colors text-center leading-11"
                     >
                       Start Preparation
                     </a>
@@ -597,7 +597,7 @@ export default function GCPEducationPage() {
                 href="https://cloud.google.com/certification/cloud-digital-leader"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="block w-full h-11 px-4 bg-primary hover:opacity-90 text-white font-bold rounded-lg transition-colors text-sm text-center leading-11"
+                className="block w-full h-11 px-4 bg-primary hover:opacity-90 text-primary-foreground font-bold rounded-lg transition-colors text-sm text-center leading-11"
               >
                 Start with CDL
               </a>
@@ -689,7 +689,7 @@ export default function GCPEducationPage() {
                   href={selectedPath.certUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex-1 h-11 px-4 bg-primary hover:opacity-90 text-white font-bold rounded-lg transition-colors flex items-center justify-center gap-2"
+                  className="flex-1 h-11 px-4 bg-primary hover:opacity-90 text-primary-foreground font-bold rounded-lg transition-colors flex items-center justify-center gap-2"
                 >
                   <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
                     open_in_new

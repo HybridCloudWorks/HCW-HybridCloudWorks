@@ -191,7 +191,7 @@ export default function ArchitecturePage() {
                   {featuredArch.slug && (
                     <button
                       onClick={() => navigate(`/finops/architecture-designs/${featuredArch.slug}`)}
-                      className="inline-flex items-center gap-2 px-6 py-3 bg-primary hover:bg-emerald-600 text-slate-900 font-bold rounded-lg transition-colors w-fit"
+                      className="inline-flex items-center gap-2 px-6 py-3 bg-primary hover:bg-emerald-600 text-primary-foreground font-bold rounded-lg transition-colors w-fit"
                     >
                       <span className="text-[18px] material-symbols-outlined">arrow_forward</span>
                       Read Full Blueprint
@@ -281,7 +281,7 @@ export default function ArchitecturePage() {
                       {arch.slug ? (
                         <button
                           onClick={() => navigate(`/finops/architecture-designs/${arch.slug}`)}
-                          className="w-full py-2 px-4 bg-slate-700/50 hover:bg-primary hover:text-slate-900 text-slate-300 rounded-lg text-sm font-medium transition-colors border border-slate-600 flex items-center justify-center gap-2 group/btn"
+                          className="w-full py-2 px-4 bg-slate-700/50 hover:bg-primary hover:text-primary-foreground text-slate-300 rounded-lg text-sm font-medium transition-colors border border-slate-600 flex items-center justify-center gap-2 group/btn"
                         >
                           <span className="text-[16px] material-symbols-outlined">
                             arrow_forward

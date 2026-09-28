@@ -149,7 +149,7 @@ export default function ArchitecturePage() {
             </div>
             <div className="mt-8 pt-6 border-t border-border-dark">
               <button
-                className="w-full h-11 bg-primary hover:bg-primary/90 text-foreground text-sm font-bold uppercase rounded border border-primary/80 transition-colors"
+                className="w-full h-11 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-bold uppercase rounded border border-primary/80 transition-colors"
                 aria-label="Reset all filters"
               >
                 Reset Filters
@@ -254,7 +254,7 @@ export default function ArchitecturePage() {
                       </div>
                     </div>
                     <button
-                      className="w-full mt-auto h-11 rounded-lg bg-primary text-foreground hover:bg-primary/90 hover:text-black font-medium text-sm transition-all flex items-center justify-center gap-2 group/btn"
+                      className="w-full mt-auto h-11 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 font-medium text-sm transition-all flex items-center justify-center gap-2 group/btn"
                       aria-label={`Start deep dive for ${blueprint.title}`}
                     >
                       Start Deep Dive

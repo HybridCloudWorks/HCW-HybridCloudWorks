@@ -282,7 +282,7 @@ export default function CertDetailPage() {
           </p>
           <Link
             to={routes.education('azure')}
-            className="px-6 h-11 bg-primary hover:bg-blue-800 text-white font-bold rounded-lg transition-colors inline-flex items-center gap-2"
+            className="px-6 h-11 bg-primary hover:bg-blue-800 text-primary-foreground font-bold rounded-lg transition-colors inline-flex items-center gap-2"
           >
             <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
               arrow_back
@@ -575,7 +575,7 @@ export default function CertDetailPage() {
                 href={cert.learnUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center justify-start px-4 gap-2 w-full h-11 bg-primary hover:bg-blue-800 text-white font-bold rounded-lg transition-colors"
+                className="flex items-center justify-start px-4 gap-2 w-full h-11 bg-primary hover:bg-blue-800 text-primary-foreground font-bold rounded-lg transition-colors"
               >
                 <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
                   open_in_new
