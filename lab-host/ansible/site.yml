@@ -69,6 +69,11 @@
     - role: caddy
     - role: coder
     - role: labs_agent
+    # Straight after the agent: it runs its plan on the Node.js labs_agent
+    # installs and reads the agent's checkout, and it pulls every image a job
+    # or a workspace runs, so none of them is first downloaded while a
+    # visitor waits.
+    - role: lab_images
     # The owner's tools, last: nothing above needs either, so a failure here
     # leaves the lab services configured. Both are off until the owner turns
     # them on, and both listen on the loopback only (ADR 0032, amendment of

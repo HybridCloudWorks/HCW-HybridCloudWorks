@@ -1,0 +1,19 @@
+---
+# The checkouts of this repository whose pins this host holds: the playbook's
+# own (the commit this run applies) and the agent's (the commit the agent
+# runs). They are the same commit unless `-e labs_agent_repo_ref` holds the
+# agent back, and then both sets are pulled and kept, so the held agent keeps
+# its images and the next plain run removes whichever the released hold left
+# behind. Check mode reads the playbook's checkout at the new commit, so it
+# shows the pulls that commit needs even though it cannot move the agent's.
+lab_images_checkouts:
+  - "{{ lab_images_playbook_checkout }}"
+  - "{{ labs_agent_home }}"
+
+# Pull the Coder workspace image as well. Coder pulls it itself on the first
+# workspace start; pulled here, that start does not wait for it. It is kept
+# once present whatever this says, because it is still a pin.
+lab_images_pull_workspace: "{{ coder_enabled }}"
+
+# NodeSource's node, which the labs_agent role installs, runs the plan.
+lab_images_node: /usr/bin/node

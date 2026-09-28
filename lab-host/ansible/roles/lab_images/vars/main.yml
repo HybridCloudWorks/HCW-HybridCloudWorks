@@ -1,0 +1,14 @@
+---
+# Derived values. Not meant to be overridden, which is why they are vars and
+# not defaults.
+#
+# Both are paths in the playbook's own checkout, read where the modules run.
+# That is the same place: the play runs against localhost with a local
+# connection (inventory/localhost.yml), which is the only way bootstrap.sh
+# runs it, and tasks/main.yml refuses any other connection before using them.
+lab_images_helper: "{{ role_path }}/files/lab-images.mjs"
+lab_images_playbook_checkout: "{{ role_path | dirname | dirname | dirname | dirname }}"
+lab_images_helper_argv: >-
+  {{ [lab_images_node, lab_images_helper]
+     + (['--pull-workspace'] if lab_images_pull_workspace | bool else [])
+     + lab_images_checkouts }}
