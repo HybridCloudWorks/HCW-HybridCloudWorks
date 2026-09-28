@@ -38,9 +38,9 @@
   #      (Chromium 76 to 79), so nothing shows it is inside a pane.
   #    Everything else passes:
   #    - iframe and frame: the site's panes.
-  #    - empty and websocket: fetch, XHR and WebSockets from a page in a
-  #      pane, which is how Coder's dashboard, terminal and code-server
-  #      reach Coder's API.
+  #    - empty: fetch, XHR and WebSockets from a page in a pane, which is
+  #      how Coder's dashboard, terminal and code-server reach Coder's API.
+  #      A browser that labels a WebSocket websocket instead passes too.
   #    - script, style, image, font, worker and the rest: subresources of a
   #      page in a pane.
   #    - No Sec-Fetch-Dest and no navigate: Coder's workspace agents and its
