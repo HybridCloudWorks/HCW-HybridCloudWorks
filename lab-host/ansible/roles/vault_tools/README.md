@@ -51,9 +51,8 @@ vault". On the host, as root:
 
 Nothing it prints contains a value, and the value is never an argument, so
 it is not in `ps`, a shell history or a log. `HCW_VAULT_DIR` points it at
-another directory; the test uses that. Over `sudo` the variable does not
-pass unless it is named on the `sudo` line itself, which only root-capable
-users can do anyway.
+another directory, which is how the test runs it. `sudo` resets the
+environment, so through the owner's line it is always `/etc/hcw/ansible`.
 
 ### What changed from the hand-installed copy
 
