@@ -19,6 +19,38 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Labs page: Coder is credited beside the intro, with its cursor
+  blinking; the intro no longer says the host is onboarded to Azure Arc.**
+  Owner request 2026-09-28. On `/education/labs` the column to the right of
+  the intro was empty on desktop; `CoderCredit`
+  (`frontend/src/components/labs/CoderCredit.jsx`) now fills it from `xl`,
+  top-aligned, with the intro kept at its 48rem, and stacks under the intro
+  at full width below that (a row on a tablet, a column on a phone; no
+  horizontal scroll at 390 px). It shows Coder's wordmark as inline SVG in
+  the theme's text colour and says "We provide these browser labs using
+  Coder, the open-source platform for self-hosted development environments.
+  Every lab workspace is a Coder workspace built from our lab template.",
+  with **Coder** linking to `https://coder.com/` (the site's canonical) in a
+  new tab, `rel="noopener noreferrer"`, named "Coder (opens in a new tab)".
+  No sponsorship is claimed. The square that ends the wordmark blinks like a
+  terminal cursor (`.coder-cursor` in `src/index.css`): a 1 s step blink,
+  five times after load and again while the pointer or focus is on the
+  credit, never under `prefers-reduced-motion: reduce`; five and not
+  forever because WCAG 2.2.2 asks for a pause control on blinking past five
+  seconds. `CoderCreditMedia` is the one place to swap in a looping mp4 if
+  the owner supplies one. The owner's two logos, cleaned, are kept in
+  `frontend/src/assets/brands/coder/`, each opening with a comment saying it
+  is Coder's mark, kept only to credit Coder (a comment rather than a
+  README, which the repository policy keeps under `docs/`); the test fails
+  if the inline wordmark differs from the file. The intro's "a single server onboarded to Azure
+  Arc" became "a single server whose Azure Arc status is on the live card
+  further down this page", and the estate card's intro stopped asserting
+  onboarding too, since #663 has not run yet; both stay true after it does.
+  `CoderCredit.test.jsx` (11 tests) covers the link, the names, the cursor
+  class, the two files' attribution and the stylesheet's finite blink and
+  reduced-motion rules;
+  `public-copy.test.js` scans the new file and passes the new sentences.
+
 - **The lab template is published from the host; lab workspaces open
   trusted, without the AI chat; a missing template no longer shows Coder's
   error in a pane.** Three things from the first live workspace on

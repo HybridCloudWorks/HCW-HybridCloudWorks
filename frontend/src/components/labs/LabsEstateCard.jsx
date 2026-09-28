@@ -100,7 +100,7 @@ const CARD = Object.freeze({
   testId: 'labs-estate-card',
   title: 'The Hybrid Lab right now',
   intro:
-    'The lab host is a server onboarded to Azure Arc. This card shows what Azure reports for it right now: its connection, its Arc agent and its policy compliance.',
+    'This card shows what Azure Arc reports for the lab host right now: its connection, its Arc agent and its policy compliance.',
   errorText: "The lab host's status couldn't be loaded. Please try again later.",
   noticeTestId: 'estate-status',
   notices: NOTICES,

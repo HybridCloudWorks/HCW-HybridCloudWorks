@@ -1596,3 +1596,36 @@ html[data-theme='light'] .blog-detail-article .prose li,
 html[data-theme='light'] .blog-detail-article .prose blockquote {
   color: #1f2937 !important;
 }
+
+/* ============================================================
+   Coder credit on /education/labs (components/labs/CoderCredit.jsx).
+   The square that ends Coder's wordmark blinks like a terminal
+   cursor: a 1 s step blink, five times after the page loads, and
+   again while the pointer or keyboard focus is on the credit.
+   Five, not forever: WCAG 2.2.2 asks for a pause control on
+   anything that blinks for more than five seconds beside other
+   content. Never under prefers-reduced-motion: reduce.
+   CoderCredit.test.jsx reads these rules.
+   ============================================================ */
+.coder-cursor {
+  animation: coder-cursor-blink 1s steps(1, end) 5;
+}
+
+.coder-credit:hover .coder-cursor,
+.coder-credit:focus-within .coder-cursor {
+  animation-iteration-count: infinite;
+}
+
+@keyframes coder-cursor-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .coder-cursor,
+  .coder-credit:hover .coder-cursor,
+  .coder-credit:focus-within .coder-cursor {
+    animation: none;
+  }
+}

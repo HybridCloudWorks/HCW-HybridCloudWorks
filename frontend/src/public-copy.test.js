@@ -235,6 +235,12 @@ describe('the scan itself', () => {
     'Sign in with GitHub to open your lab workspace',
     "Finish signing in with GitHub in the new tab. Your workspace opens here when you're done; if it doesn't, choose I've already signed in.",
     'Lab workspaces are for members of the HybridCloudWorks organization on GitHub.',
+    // The Coder credit on the labs page (owner request 2026-09-28; the owner
+    // confirmed Coder may be named there), and the intro's Arc sentence.
+    ', the open-source platform for self-hosted development environments. Every lab workspace is a Coder workspace built from our lab template.',
+    'Coder (opens in a new tab)',
+    'a single server whose Azure Arc status is on the live card further down this page.',
+    'This card shows what Azure Arc reports for the lab host right now: its connection, its Arc agent and its policy compliance.',
   ])('passes %j', (text) => {
     expect(termsIn(text)).toEqual([]);
   });
@@ -250,6 +256,8 @@ describe('public pages, components and hooks', () => {
     // The lab pane page and its sign-in step (#751).
     expect(files).toContain('pages/shared/LabPanePage.jsx');
     expect(files).toContain('components/labs/labSignIn.js');
+    // The Coder credit beside the labs intro (2026-09-28).
+    expect(files).toContain('components/labs/CoderCredit.jsx');
     expect(files.filter((f) => ADMIN.test(f))).toEqual([]);
   });
 

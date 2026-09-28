@@ -4,8 +4,10 @@
  * locally" lines are exactly the two from #658, the two status cards say the
  * two explicit unprovisioned sentences when both routes answer
  * `{ configured: false }` — and render full data when they answer with it —
- * the agent slot holds the sandbox section (#676) rather than a promise, and
- * a tab returning from GitHub sign-in goes on to the pane it came from.
+ * the agent slot holds the sandbox section (#676) rather than a promise, a
+ * tab returning from GitHub sign-in goes on to the pane it came from, Coder
+ * is credited beside the intro, and nothing claims the host is onboarded to
+ * Azure Arc before it is (#663).
  */
 import React from 'react';
 import { render, screen, within } from '@testing-library/react';
@@ -227,6 +229,42 @@ describe('LabsLearnPage', () => {
     expect(articles).toHaveTextContent('Coming soon.');
     // The issue that builds it is the team's to-do, not the visitor's.
     expect(articles).not.toHaveTextContent(/#\d|issue/i);
+    await screen.findByText(NOT_PROVISIONED_SENTENCE);
+  });
+
+  it('credits Coder beside the intro, in the header, after the intro paragraphs', async () => {
+    fetchLabsEstate.mockResolvedValue({ configured: false });
+    fetchCoderStatus.mockResolvedValue({ configured: false });
+    const { container } = renderPage();
+
+    const header = container.querySelector('header');
+    const credit = within(header).getByTestId('coder-credit');
+    const link = within(credit).getByRole('link', { name: 'Coder (opens in a new tab)' });
+    expect(link).toHaveAttribute('href', 'https://coder.com/');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(within(credit).getByRole('img', { name: 'Coder' })).toBeInTheDocument();
+    expect(credit.querySelector('.coder-cursor')).not.toBeNull();
+
+    // The intro and the credit share one row; the intro comes first, so it
+    // reads first and sits in the left column.
+    const intro = within(header).getByText(/Each lab below opens in VS Code/);
+    expect(intro.parentElement.nextElementSibling).toBe(credit);
+    expect(intro).toHaveClass('max-w-3xl');
+    await screen.findByText(NOT_PROVISIONED_SENTENCE);
+  });
+
+  it('points to the estate card for the Arc state rather than asserting the host is onboarded', async () => {
+    fetchLabsEstate.mockResolvedValue({ configured: false });
+    fetchCoderStatus.mockResolvedValue({ configured: false });
+    const { container } = renderPage();
+
+    const header = container.querySelector('header');
+    expect(header).toHaveTextContent(
+      'a single server whose Azure Arc status is on the live card further down this page.'
+    );
+    // Onboarding (#663) has not run: nothing on the page may say it has.
+    expect(container).not.toHaveTextContent(/onboarded/i);
     await screen.findByText(NOT_PROVISIONED_SENTENCE);
   });
 
