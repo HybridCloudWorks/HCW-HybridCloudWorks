@@ -70,7 +70,7 @@ export default {
             'Design a solution for detection and response that includes extended detection and response (XDR) and security information and event management (SIEM)',
             'Design a solution for centralized logging and auditing, including Microsoft Purview Audit',
             'Design monitoring to support hybrid and multicloud environments',
-            'Design a solution for security orchestration and automated response (SOAR), including Microsoft Sentinel and Microsoft Defender XDR',
+            'Design a solution for security orchestration, automation, and response (SOAR), including Microsoft Sentinel and Microsoft Defender XDR',
             'Design and evaluate security workflows, including incident response, threat hunting, and incident management',
             'Design and evaluate threat detection coverage by using MITRE ATT&CK matrices, including Enterprise, Mobile, and industrial control systems (ICS)',
           ],
@@ -182,7 +182,7 @@ export default {
             'Evaluate solutions that include Microsoft Defender for Office 365 and Microsoft Defender for Cloud Apps',
             'Evaluate device management solutions that include Microsoft Intune',
             'Evaluate solutions for securing data in Microsoft 365 by using Microsoft Purview',
-            'Evaluate data security and compliance controls in Microsoft Copilot for Microsoft 365 services',
+            'Evaluate data security and compliance controls in Microsoft 365 Copilot',
           ],
         },
         {

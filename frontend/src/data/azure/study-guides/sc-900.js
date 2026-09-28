@@ -58,7 +58,7 @@ export default {
           title: 'Describe function and identity types of Microsoft Entra ID',
           objectives: [
             'Describe Microsoft Entra ID',
-            'Describe types of identities, including agent ID',
+            'Describe types of identities, including workload identities',
             'Describe hybrid identity',
           ],
         },
@@ -134,7 +134,7 @@ export default {
             'Describe Microsoft Defender for Cloud Apps',
             'Describe Microsoft Defender for Identity',
             'Describe Microsoft Defender Vulnerability Management',
-            'Describe Microsoft Defender Threat Intelligence (Defender TI)',
+            'Describe Microsoft Threat Intelligence',
             'Describe the Microsoft Defender portal',
           ],
         },
