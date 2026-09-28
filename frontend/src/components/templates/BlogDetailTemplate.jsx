@@ -504,7 +504,7 @@ export default function BlogDetailTemplate({
               draft
             </span>
             <p className="text-slate-700 dark:text-slate-400">
-              Full article content will appear here once the pipeline processes this article.
+              The full article is not available yet. Check back soon.
             </p>
           </div>
         )}

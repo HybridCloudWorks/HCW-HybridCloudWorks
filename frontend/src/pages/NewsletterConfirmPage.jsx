@@ -49,7 +49,11 @@ export default function NewsletterConfirmPage() {
     setMessage('');
     try {
       const base = getFunctionsBase();
-      if (!base) throw new Error('The newsletter is not configured.');
+      if (!base) {
+        throw new Error(
+          'We could not confirm your subscription right now. Please try again in a few minutes.'
+        );
+      }
       const res = await fetch(`${base}/public/newsletter/confirm`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

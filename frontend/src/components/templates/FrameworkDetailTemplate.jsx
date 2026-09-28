@@ -239,7 +239,7 @@ export default function FrameworkDetailTemplate({ provider = 'aws' }) {
               <Card className="bg-card/40">
                 <CardContent className="pt-6">
                   <p className="text-muted-foreground text-sm">
-                    Framework pillars will be populated from the review board.
+                    Framework pillars are coming soon.
                   </p>
                 </CardContent>
               </Card>
@@ -283,7 +283,7 @@ export default function FrameworkDetailTemplate({ provider = 'aws' }) {
             <CardContent>
               <pre className="bg-slate-950 text-slate-50 p-4 rounded-lg overflow-x-auto">
                 <code className="text-sm font-mono">
-                  {framework.terraformCode || '# IaC example will be added via the review board.'}
+                  {framework.terraformCode || '# An infrastructure-as-code example is coming soon.'}
                 </code>
               </pre>
             </CardContent>
@@ -312,9 +312,7 @@ export default function FrameworkDetailTemplate({ provider = 'aws' }) {
           ) : (
             <Card className="bg-card/40">
               <CardContent className="pt-6">
-                <p className="text-muted-foreground text-sm">
-                  No resources linked yet. Add via the review board.
-                </p>
+                <p className="text-muted-foreground text-sm">No resources linked yet.</p>
               </CardContent>
             </Card>
           )}

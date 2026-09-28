@@ -109,14 +109,19 @@ function AsOfLine({ pricing }) {
   );
 }
 
-function ErrorPanel({ message, onRetry }) {
+/**
+ * The failed read, in the visitor's words: never the error's message, which
+ * may carry an HTTP status or what is behind the site (owner direction
+ * 2026-09-28). The browser console still has the detail.
+ */
+function ErrorPanel({ onRetry }) {
   return (
     <div
       role="alert"
       className="flex flex-wrap items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm"
     >
       <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
-      <p className="min-w-0 flex-1 break-words">Prices could not be loaded: {message}</p>
+      <p className="min-w-0 flex-1 break-words">Prices could not be loaded. Please try again.</p>
       <Button variant="outline" size="sm" onClick={onRetry}>
         <RefreshCw className="mr-2 h-3.5 w-3.5" /> Try again
       </Button>
@@ -332,9 +337,7 @@ export default function ComparisonPage() {
           <AsOfLine pricing={pricing} />
         </div>
 
-        {error ? (
-          <ErrorPanel message={error.message} onRetry={() => setAttempt((n) => n + 1)} />
-        ) : null}
+        {error ? <ErrorPanel onRetry={() => setAttempt((n) => n + 1)} /> : null}
 
         <ScenarioSection
           pricing={pricing}

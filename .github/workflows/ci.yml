@@ -68,11 +68,14 @@ jobs:
           # by scripts/version-floors.json (#715). docs/content/blog-*.md is
           # here because tests read those files: content-modules.test.js reads
           # blog-machine.md, and repo-draft.test.js requires the lab articles
-          # to stay importable into the review queue.
+          # to stay importable into the review queue. The three frontend files
+          # are the pages that word the public routes' codes themselves:
+          # public-visitor-copy.test.js and public-lock.test.js read them, so a
+          # code the server answers can never go unmapped on the page.
           - name: functions (azure)
             dir: functions
             node-version: '24'
-            filter: '^(functions/|\.azure/api-surface\.json|infra/|docs/content/blog-[a-z0-9-]+\.md$)'
+            filter: '^(functions/|\.azure/api-surface\.json|infra/|docs/content/blog-[a-z0-9-]+\.md$|frontend/src/pages/tools/landingZone/labValidateRules\.js$|frontend/src/pages/tools/explain/ExplainControl\.jsx$|frontend/src/lib/turnstile\.js$)'
             test: npm test
           # The out-of-tree entries after infra/ are what
           # version-floors.test.mjs reads (#715): every package.json and

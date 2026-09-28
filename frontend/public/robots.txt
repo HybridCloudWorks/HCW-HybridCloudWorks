@@ -1,6 +1,6 @@
-# Static Web Apps' navigationFallback has excluded /robots.txt since it was
-# written, but the file never existed — so every crawler asking for it got a
-# 404. Found 2026-08-23 while verifying the canonical work.
+# Crawlers asking for this file used to get a 404: the site's fallback
+# routing excluded /robots.txt, but the file never existed. Found 2026-08-23
+# while verifying the canonical work.
 User-agent: *
 Allow: /
 

@@ -61,8 +61,34 @@ export const EXPLAIN_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60;
 /** Seconds a cache hit may be served from an HTTP cache: the text is a week old at most anyway. */
 const HIT_CACHE_SECONDS = 3600;
 
+/**
+ * The refusals a visitor can meet, as codes and the visitor's sentence for
+ * each (owner direction 2026-09-28: public text names no provider, model or
+ * setting). The page maps the code to its own copy of these words; why the
+ * route is unavailable (no key, provider disabled, feature off) goes to the
+ * log, not the body.
+ */
+export const EXPLAIN_CODES = Object.freeze({
+  unavailable: 'EXPLAIN_UNAVAILABLE',
+  rateLimited: 'EXPLAIN_RATE_LIMITED',
+  paused: 'EXPLAIN_PAUSED_FOR_TODAY',
+  empty: 'EXPLAIN_EMPTY',
+  failed: 'EXPLAIN_FAILED',
+});
+
+export const EXPLAIN_REASONS = Object.freeze({
+  [EXPLAIN_CODES.unavailable]: "Explanations aren't available right now.",
+  [EXPLAIN_CODES.rateLimited]:
+    "You've reached the limit for explanations for now. Try again in about an hour.",
+  [EXPLAIN_CODES.paused]: "Explanations have reached today's limit. Try again tomorrow.",
+  [EXPLAIN_CODES.empty]: 'Something went wrong. Please try again.',
+  [EXPLAIN_CODES.failed]: 'Something went wrong. Please try again.',
+});
+
 const reply = (status, body, headers = {}) => ({ status, body, headers });
-const unavailable = () => reply(503, { error: 'Explanations are not available' });
+const refusal = (status, code, headers) =>
+  reply(status, { code, error: EXPLAIN_REASONS[code] }, headers);
+const unavailable = () => refusal(503, EXPLAIN_CODES.unavailable);
 
 const toResponse = ({ status, body, headers }) => ({
   status,
@@ -74,9 +100,13 @@ const toResponse = ({ status, body, headers }) => ({
 const isUnavailable = (error) =>
   error?.code === 'AI_NOT_CONFIGURED' || error?.code === 'AI_FEATURE_DISABLED';
 
+/**
+ * What the page is given: the text, when it was written, and whether it came
+ * from the cache. Not the model: the stored document keeps it, and the log
+ * line in `generate` names it, but a public response names no model.
+ */
 const explanation = (doc, cached) => ({
   text: doc.text,
-  model: doc.model ?? null,
   generatedAt: doc.generatedAt ?? null,
   cached,
 });
@@ -152,13 +182,15 @@ async function checkIdentity({ identity }, state) {
 
 async function checkClientQuota({ store, now }, state) {
   const allowed = await takeClientQuota(store, { clientKey: state.clientKey, now: now() });
-  return allowed ? null : reply(429, { error: 'Too many requests' }, { 'Retry-After': '3600' });
+  return allowed ? null : refusal(429, EXPLAIN_CODES.rateLimited, { 'Retry-After': '3600' });
 }
 
 async function checkDailyQuota({ store, now }, state) {
   state.nowIso = new Date(now()).toISOString();
   const allowed = await takeDailyQuota(store, { day: utcDay(state.nowIso), nowIso: state.nowIso });
-  return allowed ? null : reply(503, { error: 'Explanations are paused for today' });
+  if (allowed) return null;
+  state.context.warn?.('explain paused: the daily cap is used');
+  return refusal(503, EXPLAIN_CODES.paused);
 }
 
 async function generate({ ai, store }, state) {
@@ -178,7 +210,10 @@ async function generate({ ai, store }, state) {
     return unavailable();
   }
   const text = stripUrls(generated);
-  if (!text) return reply(502, { error: 'The model returned nothing' });
+  if (!text) {
+    state.context.warn?.('explain failed: the model returned nothing');
+    return refusal(502, EXPLAIN_CODES.empty);
+  }
   const doc = {
     id: state.id,
     kind: 'explain',
@@ -189,6 +224,7 @@ async function generate({ ai, store }, state) {
     ttl: EXPLAIN_CACHE_TTL_SECONDS,
   };
   await store.upsertDoc(CACHE_CONTAINER, doc);
+  state.context.log?.(`explain generated: ${state.kind.id}, model ${doc.model ?? 'unknown'}`);
   return reply(200, { success: true, explanation: explanation(doc, false) });
 }
 
@@ -226,7 +262,7 @@ export function createExplainHandlers({ identity, store, ai, now = Date.now }) {
         throw new Error('explain pipeline ended without a reply');
       } catch (error) {
         context.error?.('publicCloudToolsExplain failed:', error);
-        return toResponse(reply(500, { error: 'Failed to explain' }));
+        return toResponse(refusal(500, EXPLAIN_CODES.failed));
       }
     },
   };

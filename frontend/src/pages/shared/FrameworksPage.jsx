@@ -92,7 +92,7 @@ export default function FrameworksPage({ provider = 'aws' }) {
         <title>{`${providerLabel} Frameworks | Hybrid Cloud Works`}</title>
         <meta
           name="description"
-          content={`${providerLabel} framework explorer with dynamic concepts and architecture recommendations from ContentForge.`}
+          content={`${providerLabel} framework explorer: compare framework concepts, implementation guidance and architecture recommendations.`}
         />
       </Helmet>
 
@@ -104,8 +104,8 @@ export default function FrameworksPage({ provider = 'aws' }) {
                 {providerLabel} Frameworks
               </h1>
               <p className="text-slate-700 dark:text-slate-400 mt-2 max-w-3xl">
-                Dynamic framework concepts sourced from ContentForge. Select one or two framework
-                concepts to compare implementation guidance and architecture recommendations.
+                Select one or two framework concepts to compare implementation guidance and
+                architecture recommendations.
               </p>
             </div>
             {activeFramework?.slug && (
@@ -144,8 +144,7 @@ export default function FrameworksPage({ provider = 'aws' }) {
         {!loading && frameworks.length === 0 && (
           <Card className="bg-slate-900/40 border-slate-700">
             <CardContent className="py-8 text-slate-400">
-              No published frameworks found for {providerLabel}. Publish framework content from
-              ContentForge to populate this page.
+              No frameworks are published for {providerLabel} yet. Check back soon.
             </CardContent>
           </Card>
         )}
@@ -214,8 +213,7 @@ export default function FrameworksPage({ provider = 'aws' }) {
                       <CardContent className="space-y-3">
                         <p className="text-slate-300">{concept.summary || 'No summary yet.'}</p>
                         <p className="text-slate-400 text-sm">
-                          {concept.details ||
-                            'Detailed implementation guidance can be added in Framework Studio.'}
+                          {concept.details || 'Detailed implementation guidance is coming soon.'}
                         </p>
                         {concept.sources.length > 0 && (
                           <div className="space-y-2">
@@ -251,8 +249,7 @@ export default function FrameworksPage({ provider = 'aws' }) {
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <p className="text-slate-300">
-                    {architectureRecommendation ||
-                      'Add architecture recommendations in Framework Studio to populate this pane.'}
+                    {architectureRecommendation || 'Architecture recommendations are coming soon.'}
                   </p>
 
                   {activeFramework.officialSources.length > 0 && (

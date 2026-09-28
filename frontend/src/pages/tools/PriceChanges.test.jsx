@@ -190,7 +190,7 @@ describe('PriceChanges', () => {
     );
   });
 
-  it('shows the server sentence on a failure, and Try again fetches again', async () => {
+  it('says the changes could not be loaded, not what the server said, and Try again fetches again', async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ success: false, error: 'Unknown region: mars-1' }, 400))
       .mockResolvedValueOnce(jsonResponse(CHANGES));
@@ -198,9 +198,8 @@ describe('PriceChanges', () => {
     try {
       render(<PriceChanges region="us-east-1" />);
       const alert = await screen.findByRole('alert');
-      expect(alert.textContent).toContain(
-        'Price changes could not be loaded: Unknown region: mars-1'
-      );
+      expect(alert.textContent).toContain('Price changes could not be loaded. Please try again.');
+      expect(alert.textContent).not.toContain('Unknown region');
       fireEvent.click(within(alert).getByRole('button', { name: /Try again/ }));
       await waitFor(() => expect(rows()).toHaveLength(2));
       expect(fetchMock).toHaveBeenCalledTimes(2);

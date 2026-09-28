@@ -85,14 +85,14 @@ export default function BlogSubmissionPage() {
         <title>Blog Templates | HCW</title>
         <meta
           name="description"
-          content="Submit draft blog content into the HCW review and publish workflow."
+          content="Submit draft blog content for review before it is published."
         />
       </Helmet>
 
       <div className="mb-8">
         <h1 className="text-3xl sm:text-4xl font-bold mb-2">Blog Template Submission</h1>
         <p className="text-muted-foreground">
-          Create a blog draft and send it to the admin review queue before publishing.
+          Create a blog draft and send it for review before publishing.
         </p>
       </div>
 
@@ -102,7 +102,7 @@ export default function BlogSubmissionPage() {
             <CheckCircle className="h-12 w-12 text-green-500 mx-auto" />
             <h2 className="text-xl font-semibold">Blog draft submitted</h2>
             <p className="text-muted-foreground text-sm">
-              The draft is now in the content review queue with status ingested.
+              The draft has been submitted for review.
             </p>
             <Button onClick={() => setSubmitted(false)}>Submit another</Button>
           </CardContent>

@@ -27,7 +27,7 @@ export default function ProviderCoderCornerPage({ provider }) {
   return (
     <ContentListingTemplate
       title={`${providerName} Coder Corner`}
-      description={`Community scripts, code reviews, and implementation patterns for ${providerName} — curated through the ContentForge pipeline.`}
+      description={`Community scripts, code reviews, and implementation patterns for ${providerName}, curated and reviewed before they are published.`}
       items={items}
       itemType="guide"
       loading={loading}

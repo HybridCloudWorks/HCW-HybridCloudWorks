@@ -1,19 +1,24 @@
 /**
  * "Validate on the lab" (#672). What must hold: the button is disabled with
  * one line, and no spinner, until the server says the lab is open, which by
- * default it does not (public submission switched off); a lab with no agent,
- * a full queue or an unreadable status reads the same way with its own line;
- * a build calling a module the runner image does not vendor is refused here
- * with the module named; when open, one click sends the build's files
- * unchanged and polls the job to its output; the server's refusals read in
- * its own words, and a refusal naming the door shuts the button; a changed
- * build drops the output; and the pre-rendered markup is the "checking"
- * line, which hydration adopts.
+ * default it does not (public submission switched off); a lab with no agent
+ * or an unreadable status reads the same way, and a full queue says to try
+ * again shortly; a build calling a module the lab does not have is refused
+ * here with the module named; when open, one click sends the build's files
+ * unchanged and polls the job to its output; a refusal naming the door shuts
+ * the button; a changed build drops the output; and the pre-rendered markup
+ * is the "checking" line, which hydration adopts.
+ *
+ * VISITOR WORDS ONLY (owner direction 2026-09-28). Every line is the page's
+ * own, picked by the server's code. The fixtures below give the server's
+ * `reason` and `error` the words the owner found on the live page — a
+ * vendor, a setting, "not configured" — and the tests hold that none of it
+ * is rendered, and that no code reaches the DOM either.
  *
  * Locked to this pane (ADR 0032 decision 6, revised 2026-09-28): the
  * Turnstile widget loads only once the lab is open and the build has a site
  * key, the button waits for its token, each submission carries one token and
- * asks for the next, and the lock's refusals read in the server's words.
+ * asks for the next, and the lock's refusals read in the page's words.
  */
 import React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -22,14 +27,21 @@ import { renderToString } from 'react-dom/server';
 
 import { LzLabValidate } from './LzLabValidate';
 import {
+  DOOR_CODES,
   LINES,
+  LOCAL_CODES,
+  REFUSAL_LINES,
   afterPoll,
   disabledReason,
   doorFromRefusal,
+  doorFromStatus,
+  doorTag,
   failureLine,
+  localError,
   outcomeLine,
   preparePayload,
   statusLine,
+  tooLargeLine,
   unresolvedLine,
 } from './labValidateRules';
 import { DEFAULT_STATE, decodeLz, emitFiles } from '@/lib/landingZone';
@@ -39,6 +51,9 @@ import { clearPublicGetCache } from '@/lib/publicApi';
 vi.mock('@/lib/functionsBase', () => ({
   requireFunctionsBase: () => 'https://api.test/api',
 }));
+
+/** What a server message must never put on the page. */
+const BACKEND_WORDS = /cloudflare|turnstile|not configured|agent|switched off|queue ceiling|owner/i;
 
 const CLOSED = {
   configured: false,
@@ -52,9 +67,15 @@ const OFFLINE = {
   code: 'LAB_AGENT_OFFLINE',
   reason: 'The lab is not taking jobs yet: no lab agent is online to run them.',
 };
+const FULL = {
+  configured: true,
+  open: false,
+  code: 'LAB_QUEUE_FULL',
+  reason: "The lab's queue is full (queue ceiling 20).",
+};
 const OPEN = { configured: true, open: true, code: null, reason: null, queued: 0 };
 
-/** A small build the runner image can initialise: the platform with no landing zone. */
+/** A small build the lab can initialise: the platform with no landing zone. */
 const NO_SPOKES = emitFiles(
   decodeLz(new URLSearchParams('lz=mg,policy,mgmt,hub,fw&corp=0&online=0'))
 );
@@ -108,7 +129,15 @@ const renderControl = ({ turnstile = fakeTurnstile(), ...props } = {}) =>
 
 const button = () => screen.getByTestId('lz-lab-validate');
 const line = () => screen.getByTestId('lz-lab-line');
-const hasSpinner = () => Boolean(screen.getByTestId('lz-lab').querySelector('.animate-spin'));
+const control = () => screen.getByTestId('lz-lab');
+const hasSpinner = () => Boolean(control().querySelector('.animate-spin'));
+
+/** The control's whole DOM, text and attributes, holds no backend word and no server code. */
+function expectNoBackendWords() {
+  const html = control().outerHTML;
+  expect(html).not.toMatch(BACKEND_WORDS);
+  for (const code of DOOR_CODES) expect(html).not.toContain(code);
+}
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -123,31 +152,43 @@ describe('closed until the server says open', () => {
     expect(hasSpinner()).toBe(false);
   });
 
-  it('shows the switched-off line by default and sends nothing', async () => {
+  it('says validation is unavailable when switched off, points at the download, and sends nothing', async () => {
     const requests = requestsFor({ door: CLOSED });
     renderControl({ requests });
-    await waitFor(() => expect(line().textContent).toBe(CLOSED.reason));
-    expect(line().dataset.door).toBe('PUBLIC_SUBMISSION_CLOSED');
+    await waitFor(() => expect(line().textContent).toBe(LINES.unavailable));
+    expect(line().textContent).toContain('download the files and validate locally');
+    expect(line().dataset.door).toBe('closed');
     expect(button()).toBeDisabled();
     expect(hasSpinner()).toBe(false);
+    expectNoBackendWords();
     fireEvent.click(button());
     expect(requests.submit).not.toHaveBeenCalled();
   });
 
-  it('says no agent is online, in the server’s words', async () => {
+  it('says the same, not the server’s words, when no runner is online', async () => {
     renderControl({ requests: requestsFor({ door: OFFLINE }) });
-    await waitFor(() => expect(line().textContent).toBe(OFFLINE.reason));
+    await waitFor(() => expect(line().textContent).toBe(LINES.unavailable));
     expect(button()).toBeDisabled();
+    expectNoBackendWords();
   });
 
-  it('stays closed when the status cannot be read', async () => {
+  it('says the lab is busy, to try again shortly, when the queue is full', async () => {
+    renderControl({ requests: requestsFor({ door: FULL }) });
+    await waitFor(() => expect(line().textContent).toBe(LINES.busy));
+    expect(line().dataset.door).toBe('busy');
+    expect(button()).toBeDisabled();
+    expectNoBackendWords();
+  });
+
+  it('stays closed, and says unavailable, when the status cannot be read', async () => {
     renderControl({
       requests: {
         ...requestsFor(),
         status: vi.fn(async () => Promise.reject(new Error('offline'))),
       },
     });
-    await waitFor(() => expect(line().textContent).toBe(LINES.unreadable));
+    await waitFor(() => expect(line().textContent).toBe(LINES.unavailable));
+    expect(line().dataset.door).toBe('unreadable');
     expect(button()).toBeDisabled();
   });
 
@@ -155,7 +196,7 @@ describe('closed until the server says open', () => {
     const fetchMock = vi.fn(async () => ({ ok: true, status: 200, json: async () => CLOSED }));
     vi.stubGlobal('fetch', fetchMock);
     render(<LzLabValidate files={NO_SPOKES} />);
-    await waitFor(() => expect(line().textContent).toBe(CLOSED.reason));
+    await waitFor(() => expect(line().textContent).toBe(LINES.unavailable));
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [[url, init]] = fetchMock.mock.calls;
     expect(String(url)).toBe('https://api.test/api/public/labs/submit');
@@ -168,10 +209,11 @@ describe('closed until the server says open', () => {
     expect(html).toContain('Validate on the lab');
     expect(html).toContain('disabled=""');
     expect(html).not.toContain('animate-spin');
+    expect(html).not.toMatch(BACKEND_WORDS);
   });
 });
 
-/** One spoke pinned to a release the image does not carry. */
+/** One spoke pinned to a release the lab does not carry. */
 const UNVENDORED = [
   {
     path: 'main.tf',
@@ -180,7 +222,7 @@ const UNVENDORED = [
   },
 ];
 
-describe('what the runner image can resolve', () => {
+describe('what the lab can resolve', () => {
   // The builder's full default build: every component, the identity, corp
   // and online spokes among them. Until the image vendored the spokes'
   // avm-res-network-virtualnetwork 0.22.2 (2026-09-27), this was refused.
@@ -201,11 +243,14 @@ describe('what the runner image can resolve', () => {
     expect(unpacked).toEqual(DEFAULT_FILES.map((f) => f.path));
   });
 
-  it('still refuses a build calling a version the image does not vendor, naming it', async () => {
+  it('still refuses a build calling a version the lab does not have, naming it', async () => {
     const requests = requestsFor();
     renderControl({ files: UNVENDORED, requests });
     await waitFor(() =>
       expect(line().textContent).toContain('avm-res-network-virtualnetwork 0.23.0')
+    );
+    expect(line().textContent).toBe(
+      unresolvedLine([{ module: 'avm-res-network-virtualnetwork', constraint: '0.23.0' }])
     );
     expect(button()).toBeDisabled();
     expect(requests.submit).not.toHaveBeenCalled();
@@ -217,22 +262,22 @@ describe('what the runner image can resolve', () => {
     const text = Array.from(rows).map((li) => [li.dataset.vendored, li.textContent]);
     expect(text).toContainEqual([
       'true',
-      'module "alz" (Azure/avm-ptn-alz/azurerm 0.21.0) → the vendored copy avm-ptn-alz@0.21.0',
+      'module "alz" (Azure/avm-ptn-alz/azurerm 0.21.0) → the lab\'s copy, avm-ptn-alz@0.21.0',
     ]);
     expect(text).toContainEqual([
       'true',
-      'module "spoke_identity" (Azure/avm-res-network-virtualnetwork/azurerm 0.22.2) → the vendored copy avm-res-network-virtualnetwork@0.22.2',
+      'module "spoke_identity" (Azure/avm-res-network-virtualnetwork/azurerm 0.22.2) → the lab\'s copy, avm-res-network-virtualnetwork@0.22.2',
     ]);
     expect(text.every(([vendored]) => vendored === 'true')).toBe(true);
   });
 
-  it('names what the image has for a module it cannot resolve', async () => {
+  it('names what the lab has for a module it cannot resolve', async () => {
     render(<LzLabValidate files={UNVENDORED} requests={requestsFor()} />);
     const rows = screen.getByTestId('lz-lab-modules').querySelectorAll('li');
     expect(Array.from(rows).map((li) => [li.dataset.vendored, li.textContent])).toEqual([
       [
         'false',
-        'module "spoke" (Azure/avm-res-network-virtualnetwork/azurerm 0.23.0) → not vendored (the image has 0.15.0, 0.22.2)',
+        'module "spoke" (Azure/avm-res-network-virtualnetwork/azurerm 0.23.0) → not on the lab (it has 0.15.0, 0.22.2)',
       ],
     ]);
   });
@@ -297,17 +342,20 @@ describe('when the lab is open', () => {
     expect(output.textContent).toContain('Error: Unsupported argument');
   });
 
-  it('shows the per-visitor limit in the server’s words and sends no second request', async () => {
-    const message =
-      'Validation on the lab is limited to 2 an hour for each visitor. Try again in an hour.';
+  it('shows the per-visitor limit in the page’s words and sends no second request', async () => {
     const requests = requestsFor({
-      submit: vi.fn(async () => Promise.reject(refusal(429, 'LAB_RATE_LIMITED', message))),
+      submit: vi.fn(async () =>
+        Promise.reject(
+          refusal(429, 'LAB_RATE_LIMITED', 'per-client counter lab-caller:abc exhausted')
+        )
+      ),
     });
     renderControl({ requests });
     await waitFor(() => expect(button()).toBeEnabled());
     fireEvent.click(button());
     const alert = await screen.findByTestId('lz-lab-error');
-    expect(alert.textContent).toBe(message);
+    expect(alert.textContent).toBe(REFUSAL_LINES.LAB_RATE_LIMITED);
+    expect(alert.textContent).toContain('Try again in about an hour');
     expect(alert.dataset.status).toBe('429');
     expect(requests.job).not.toHaveBeenCalled();
   });
@@ -319,9 +367,11 @@ describe('when the lab is open', () => {
     renderControl({ requests });
     await waitFor(() => expect(button()).toBeEnabled());
     fireEvent.click(button());
-    await screen.findByTestId('lz-lab-error');
-    expect(line().textContent).toBe(OFFLINE.reason);
+    const alert = await screen.findByTestId('lz-lab-error');
+    expect(alert.textContent).toBe(LINES.unavailable);
+    expect(line().textContent).toBe(LINES.unavailable);
     expect(button()).toBeDisabled();
+    expectNoBackendWords();
   });
 
   it('stops asking at the deadline and says the job may still run', async () => {
@@ -356,7 +406,7 @@ describe('when the lab is open', () => {
   });
 });
 
-describe('locked to this pane: the Turnstile check', () => {
+describe('locked to this pane: the browser check', () => {
   const TURNSTILE_UNCONFIGURED = {
     configured: false,
     open: false,
@@ -368,27 +418,29 @@ describe('locked to this pane: the Turnstile check', () => {
   it('loads nothing from Cloudflare while the lab is closed', async () => {
     const turnstile = fakeTurnstile();
     renderControl({ requests: requestsFor({ door: CLOSED }), turnstile });
-    await waitFor(() => expect(line().textContent).toBe(CLOSED.reason));
+    await waitFor(() => expect(line().textContent).toBe(LINES.unavailable));
     expect(turnstile.load).not.toHaveBeenCalled();
-    expect(screen.queryByTestId('lz-lab-turnstile')).toBeNull();
+    expect(screen.queryByTestId('lz-lab-check')).toBeNull();
   });
 
-  it('says the server has no Turnstile secret, in its words, and loads nothing', async () => {
+  it('with no browser-check secret on the server, says only that validation is unavailable, and loads nothing', async () => {
     const turnstile = fakeTurnstile();
     renderControl({ requests: requestsFor({ door: TURNSTILE_UNCONFIGURED }), turnstile });
-    await waitFor(() => expect(line().textContent).toBe(TURNSTILE_UNCONFIGURED.reason));
-    expect(line().dataset.door).toBe('TURNSTILE_NOT_CONFIGURED');
+    await waitFor(() => expect(line().textContent).toBe(LINES.unavailable));
+    expect(line().dataset.door).toBe('closed');
     expect(button()).toBeDisabled();
     expect(turnstile.load).not.toHaveBeenCalled();
+    expectNoBackendWords();
   });
 
-  it('keeps the button disabled on a build with no site key, and says so', async () => {
+  it('keeps the button disabled on a build with no site key, and says validation is unavailable', async () => {
     const turnstile = fakeTurnstile({ siteKey: '' });
     const requests = requestsFor();
     renderControl({ requests, turnstile });
-    await waitFor(() => expect(line().textContent).toBe(LINES.noSiteKey));
+    await waitFor(() => expect(line().textContent).toBe(LINES.unavailable));
     expect(button()).toBeDisabled();
     expect(turnstile.load).not.toHaveBeenCalled();
+    expectNoBackendWords();
     fireEvent.click(button());
     expect(requests.submit).not.toHaveBeenCalled();
   });
@@ -400,7 +452,7 @@ describe('locked to this pane: the Turnstile check', () => {
     expect(turnstile.load).toHaveBeenCalledTimes(1);
     expect(turnstile.api.render).toHaveBeenCalledTimes(1);
     const [[element, options]] = turnstile.api.render.mock.calls;
-    expect(element).toBe(screen.getByTestId('lz-lab-turnstile'));
+    expect(element).toBe(screen.getByTestId('lz-lab-check'));
     expect(options).toMatchObject({
       sitekey: 'site-key-test',
       action: 'lab-validate',
@@ -422,7 +474,7 @@ describe('locked to this pane: the Turnstile check', () => {
     expect(line().textContent).toBe(LINES.ready);
   });
 
-  it('says when Cloudflare wants the visitor, and when the check failed', async () => {
+  it('says when the check wants the visitor, and when it failed, without naming its vendor', async () => {
     const turnstile = fakeTurnstile({ solve: false });
     renderControl({ requests: requestsFor(), turnstile });
     await waitFor(() => expect(turnstile.api.render).toHaveBeenCalled());
@@ -431,9 +483,10 @@ describe('locked to this pane: the Turnstile check', () => {
     act(() => turnstile.options()['error-callback']('300010'));
     expect(line().textContent).toBe(LINES.browserError);
     expect(button()).toBeDisabled();
+    expectNoBackendWords();
   });
 
-  it('says the check could not run when Cloudflare’s script does not load', async () => {
+  it('says the check could not run when its script does not load', async () => {
     renderControl({ requests: requestsFor(), turnstile: fakeTurnstile({ loadFails: true }) });
     await waitFor(() => expect(line().textContent).toBe(LINES.browserError));
     expect(button()).toBeDisabled();
@@ -456,7 +509,7 @@ describe('locked to this pane: the Turnstile check', () => {
     expect(tokens).toEqual(['turnstile-token-1', 'turnstile-token-2']);
   });
 
-  it('shows the lock’s refusal in the server’s words and renews the check', async () => {
+  it('shows the lock’s refusal in the page’s words and renews the check', async () => {
     const message =
       "Cloudflare's browser check did not pass, or its token had expired or was already used, so the lab did not take the job. Try again.";
     const turnstile = fakeTurnstile();
@@ -467,13 +520,14 @@ describe('locked to this pane: the Turnstile check', () => {
     await waitFor(() => expect(button()).toBeEnabled());
     fireEvent.click(button());
     const alert = await screen.findByTestId('lz-lab-error');
-    expect(alert.textContent).toBe(message);
+    expect(alert.textContent).toBe(REFUSAL_LINES.TURNSTILE_FAILED);
     expect(alert.dataset.status).toBe('403');
     expect(turnstile.api.reset).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(button()).toBeEnabled());
+    expectNoBackendWords();
   });
 
-  it('shuts the door and removes the widget when the server says Turnstile is not configured', async () => {
+  it('shuts the door and removes the widget when the server has no browser-check secret', async () => {
     const turnstile = fakeTurnstile();
     const requests = requestsFor({
       submit: vi.fn(async () =>
@@ -484,10 +538,13 @@ describe('locked to this pane: the Turnstile check', () => {
     await waitFor(() => expect(button()).toBeEnabled());
     fireEvent.click(button());
     await screen.findByTestId('lz-lab-error');
-    expect(line().textContent).toBe(TURNSTILE_UNCONFIGURED.reason);
+    expect(line().textContent).toBe(LINES.unavailable);
     expect(button()).toBeDisabled();
-    expect(turnstile.api.remove).toHaveBeenCalledWith('widget-1');
-    expect(screen.queryByTestId('lz-lab-turnstile')).toBeNull();
+    // The widget goes in the effect's cleanup, which runs after the commit
+    // that shows the error, so it is waited for rather than assumed.
+    await waitFor(() => expect(turnstile.api.remove).toHaveBeenCalledWith('widget-1'));
+    expect(screen.queryByTestId('lz-lab-check')).toBeNull();
+    expectNoBackendWords();
   });
 
   it('removes the widget when the control goes away', async () => {
@@ -503,19 +560,22 @@ describe('the words', () => {
   it('puts the door first, then the site key, then the build, then the browser check', () => {
     const resolution = { ok: false, unresolved: [{ module: 'm', constraint: '1.0.0' }] };
     const resolved = { ok: true, unresolved: [] };
-    const open = { phase: 'known', ...OPEN };
+    const open = doorFromStatus(OPEN);
     const ready = { siteKey: 'k', check: 'ready' };
     expect(
       disabledReason({
-        door: { phase: 'known', ...CLOSED },
+        door: doorFromStatus(CLOSED),
         hasTerraform: false,
         resolution,
         ...ready,
       })
-    ).toBe(CLOSED.reason);
+    ).toBe(LINES.unavailable);
+    expect(
+      disabledReason({ door: doorFromStatus(FULL), hasTerraform: false, resolution, ...ready })
+    ).toBe(LINES.busy);
     expect(
       disabledReason({ door: open, hasTerraform: false, resolution, siteKey: '', check: 'idle' })
-    ).toBe(LINES.noSiteKey);
+    ).toBe(LINES.unavailable);
     expect(
       disabledReason({ door: open, hasTerraform: true, resolution, siteKey: 'k', check: 'loading' })
     ).toBe(unresolvedLine(resolution.unresolved));
@@ -526,7 +586,7 @@ describe('the words', () => {
         resolution,
         ...ready,
       })
-    ).toBe(LINES.closedFallback);
+    ).toBe(LINES.unavailable);
     expect(
       disabledReason({ door: open, hasTerraform: true, resolution: resolved, ...ready })
     ).toBeNull();
@@ -554,6 +614,26 @@ describe('the words', () => {
           check,
         })
       ).toBe(expected);
+    }
+  });
+
+  it('keeps the open flag and the code from the status read, and drops the server’s sentence', () => {
+    expect(doorFromStatus(CLOSED)).toEqual({
+      phase: 'known',
+      open: false,
+      code: 'PUBLIC_SUBMISSION_CLOSED',
+    });
+    expect(doorFromStatus(OPEN)).toEqual({ phase: 'known', open: true, code: null });
+    expect(doorFromStatus(null)).toEqual({ phase: 'unreadable' });
+  });
+
+  it('tags the door without its code', () => {
+    expect(doorTag({ phase: 'checking' })).toBe('checking');
+    expect(doorTag({ phase: 'unreadable' })).toBe('unreadable');
+    expect(doorTag(doorFromStatus(OPEN))).toBe('open');
+    expect(doorTag(doorFromStatus(FULL))).toBe('busy');
+    for (const code of DOOR_CODES.filter((c) => c !== 'LAB_QUEUE_FULL')) {
+      expect(doorTag({ phase: 'known', open: false, code }), code).toBe('closed');
     }
   });
 
@@ -585,12 +665,11 @@ describe('the words', () => {
     });
   });
 
-  it('shuts the door only for a 503 that names it', () => {
+  it('shuts the door only for a 503 that names it, keeping no sentence', () => {
     expect(doorFromRefusal(refusal(503, 'LAB_QUEUE_FULL', 'full'))).toEqual({
       phase: 'known',
       open: false,
       code: 'LAB_QUEUE_FULL',
-      reason: 'full',
     });
     expect(doorFromRefusal(refusal(503, 'LAB_PAUSED_FOR_TODAY', 'paused'))).toBeNull();
     expect(doorFromRefusal(refusal(429, 'LAB_RATE_LIMITED', 'slow down'))).toBeNull();
@@ -605,7 +684,11 @@ describe('the words', () => {
     const { error, body } = await preparePayload([{ path: 'main.tf', content: noise }]);
     expect(body).toBeUndefined();
     expect(error.status).toBe(413);
-    expect(error.message).toMatch(/bytes as a lab payload, and the lab takes at most 65,536\.$/);
+    expect(error.code).toBe(LOCAL_CODES.tooLarge);
+    expect(failureLine(error)).toBe(tooLargeLine(error.bytes));
+    expect(failureLine(error)).toMatch(
+      /^This build is too large for the lab \([\d,]+ bytes; the limit is 65,536\)\. /
+    );
     const small = await preparePayload(NO_SPOKES);
     expect(small.body.payloadEncoding).toBe('tar');
   });
@@ -624,18 +707,29 @@ describe('the words', () => {
     expect(outcomeLine({ status: 'odd' })).toBe('The job ended as odd.');
   });
 
-  it('keeps the server’s sentence for its refusals and names anything else', () => {
-    expect(failureLine(refusal(503, 'LAB_QUEUE_FULL', 'full'))).toBe('full');
-    expect(failureLine(refusal(413, 'PAYLOAD_TOO_LARGE', 'too big'))).toBe('too big');
-    for (const code of ['ORIGIN_NOT_ALLOWED', 'TURNSTILE_REQUIRED', 'TURNSTILE_FAILED']) {
-      expect(failureLine(refusal(403, code, `lock: ${code}`))).toBe(`lock: ${code}`);
+  it('words every refusal itself, from the code, and never repeats the server', () => {
+    const leaky = 'Cloudflare Turnstile is not configured; ask the owner to seed the secret';
+    for (const code of Object.keys(REFUSAL_LINES)) {
+      const text = failureLine(refusal(503, code, leaky));
+      expect(text, code).toBe(REFUSAL_LINES[code]);
+      expect(text, code).not.toMatch(BACKEND_WORDS);
     }
-    expect(failureLine(refusal(403, 'FORBIDDEN', 'Forbidden'))).toBe(
-      'The job could not be sent to the lab: Forbidden'
-    );
-    expect(failureLine(refusal(404, 'JOB_NOT_FOUND', 'x'))).toContain('no longer has this job');
-    expect(failureLine(new Error('socket hang up'))).toBe(
-      'The job could not be sent to the lab: socket hang up'
-    );
+    expect(failureLine(refusal(413, 'PAYLOAD_TOO_LARGE', leaky))).toBe(tooLargeLine(undefined));
+    expect(failureLine(refusal(403, 'FORBIDDEN', leaky))).toBe(LINES.failed);
+    expect(failureLine(refusal(400, 'INVALID_BODY', leaky))).toBe(LINES.failed);
+    expect(failureLine(refusal(404, undefined, leaky))).toBe(LINES.jobGone);
+    expect(failureLine(refusal(429, undefined, leaky))).toBe(REFUSAL_LINES.LAB_RATE_LIMITED);
+    expect(failureLine(refusal(503, undefined, leaky))).toBe(LINES.unavailable);
+    expect(failureLine(new Error('socket hang up'))).toBe(LINES.failed);
+    expect(failureLine(localError(LOCAL_CODES.notBuilt))).toBe(LINES.notBuilt);
+    expect(failureLine(localError(LOCAL_CODES.checkPending))).toBe(LINES.browserMissing);
+  });
+
+  it('has a line for every door code, and every closed door but a full queue reads the same', () => {
+    for (const code of DOOR_CODES) {
+      expect(REFUSAL_LINES[code], code).toBe(
+        code === 'LAB_QUEUE_FULL' ? LINES.busy : LINES.unavailable
+      );
+    }
   });
 });

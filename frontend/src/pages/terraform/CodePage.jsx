@@ -12,7 +12,7 @@ export default function TerraformCodePage() {
   return (
     <ContentListingTemplate
       title="Terraform Code Patterns"
-      description="Production-ready Terraform snippets and implementation notes managed through ContentForge."
+      description="Production-ready Terraform snippets and implementation notes, reviewed before they are published."
       items={items}
       itemType="guide"
       loading={loading}

@@ -12,7 +12,7 @@ export default function AnsibleCodePage() {
   return (
     <ContentListingTemplate
       title="Ansible Code Patterns"
-      description="Production-ready playbooks, roles, and automation snippets managed through ContentForge."
+      description="Production-ready playbooks, roles, and automation snippets, reviewed before they are published."
       items={items}
       itemType="guide"
       loading={loading}

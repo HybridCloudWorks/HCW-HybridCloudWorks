@@ -1319,6 +1319,44 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Public pages speak to visitors only: no vendor names, no admin-side
+  messages (owner direction 2026-09-28).** The owner's words: "Scrub all
+  user-facing pages; remove references to backend workings. The user only
+  knows the front end and doesn't know about tools we use (i.e. Cloudflare,
+  etc.), or when you mention items that the admin needs to resolve." On the
+  Landing Zone Builder the AI explanation's label now reads "AI-generated
+  summary. Check the module documentation before relying on it." (the
+  pricing comparison's, "…Check the sources…"), and the model name, time
+  and cache note under it are gone; `POST public/cloud-tools/explain` no
+  longer returns `model` (the stored document and a log line keep it), and
+  every refusal carries a code (`EXPLAIN_UNAVAILABLE`,
+  `EXPLAIN_RATE_LIMITED`, `EXPLAIN_PAUSED_FOR_TODAY`, `EXPLAIN_EMPTY`,
+  `EXPLAIN_FAILED`) with a visitor sentence. "Validate on the lab" says
+  "Validation on the lab isn't available right now. You can still download
+  the files and validate locally." for every closed door, "The lab is busy
+  right now…" for a full queue, and words the browser check, the limits and
+  every refusal without naming Cloudflare or a setting; the server's
+  `DOOR_REASONS`, `LOCK_REASONS` and the new `LIMIT_REASONS` say the same,
+  the machine codes (`TURNSTILE_NOT_CONFIGURED` and the rest) stay for logs
+  and the admin pages, and the frontend maps each code to its own words and
+  never renders `reason` or `error`, nor the code (`data-door` is now
+  `closed`/`busy`/`open`). The labs page drops the host's vendor, the API
+  host, "not provisioned", "endpoint is not published" and the issue
+  numbers of unbuilt sections; the pricing, price-changes and labs status
+  cards say a read failed without the error's text; the submission pages
+  lose the "View Queue" link into `/admin` and the admin-queue wording,
+  and `submitPublicContent` throws only visitor sentences; the frameworks,
+  code and coder-corner pages stop naming ContentForge and Framework
+  Studio; and `robots.txt` stops naming the host. Two tests keep it that
+  way: `frontend/src/public-copy.test.js` parses every public page,
+  component and hook (admin excluded) and the static files, and fails on a
+  vendor or admin-to-do term outside a per-file allow-list of subject
+  matter and the legal pages; `functions/src/lib/public-visitor-copy.test.js`
+  does the same for the visitor-facing strings of every module behind a
+  `public/*` route and drives the lab and explain refusals through the
+  handlers. CI's functions row now also runs when the three frontend files
+  it reads change.
+
 - **Only the site can frame the lab; a direct visit goes to
   `/education/labs` (owner decision 2026-09-28).** The owner's words: "The
   lab should only be accessible through 'panes' from my site, lock to

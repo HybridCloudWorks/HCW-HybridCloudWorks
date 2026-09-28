@@ -6,13 +6,16 @@
  *
  * CLOSED UNTIL THE SERVER SAYS OPEN. On mount the control asks
  * `GET public/labs/submit` whether a job would be taken, and until the
- * answer is `open: true` the button is disabled with one line saying why:
- * public submission is switched off, the server's browser check (Cloudflare
- * Turnstile) is not configured, no lab agent is online, the queue is full,
- * or the status could not be read. That line is text, never a spinner: a
- * spinner says "wait", and waiting would not open a door the owner has
- * closed. The pre-rendered page carries the "checking" line, which is the
- * same markup the first client render produces, so hydration adopts it.
+ * answer is `open: true` the button is disabled with one line saying why.
+ * The server's code picks the line (labValidateRules.js), in the visitor's
+ * words only (owner direction 2026-09-28): a full queue says to try again in
+ * a few minutes, and every other closed door — switched off, no browser-check
+ * secret, no runner online, status unreadable — says validation is not
+ * available right now and points at the download, because a visitor can do
+ * nothing about which it is. That line is text, never a spinner: a spinner
+ * says "wait", and waiting would not open a closed door. The pre-rendered page
+ * carries the "checking" line, which is the same markup the first client
+ * render produces, so hydration adopts it.
  *
  * LOCKED TO THIS PANE (ADR 0032 decision 6, revised 2026-09-28). The server
  * takes a job only from the site's origin with a Turnstile token for the
@@ -21,7 +24,7 @@
  * wants the visitor to act) and the button waits for its token. Each
  * submission spends one token and asks for the next. A build of the site
  * with no `VITE_TURNSTILE_SITE_KEY` never loads the widget, and the button
- * says so.
+ * reads as unavailable.
  *
  * THE FILES ARE SENT UNCHANGED. The payload is the download (labPayload.js):
  * registry `source` and `version` lines stay, and the lab rewrites them to
@@ -48,6 +51,7 @@ import { fetchLabSubmissionStatus, fetchPublicLabJob, submitLabValidation } from
 import { loadTurnstile, turnstileSiteKey } from '@/lib/turnstile';
 import {
   LINES,
+  LOCAL_CODES,
   POLL_DEADLINE_MS,
   afterPoll,
   buttonLabel,
@@ -58,6 +62,7 @@ import {
   failureLine,
   filesKey,
   isBusy,
+  localError,
   outcomeLine,
   preparePayload,
   settle,
@@ -167,7 +172,7 @@ function useLabRun({
   /** The payload with this pane's one-use token, sent; the widget renewed after. */
   const submit = async (payloadBody) => {
     const turnstileToken = takeToken();
-    if (!turnstileToken) return { error: new Error(LINES.browserMissing) };
+    if (!turnstileToken) return { error: localError(LOCAL_CODES.checkPending) };
     const outcome = await settle(requests.submit({ ...payloadBody, turnstileToken }));
     renewCheck();
     return outcome;
@@ -190,7 +195,7 @@ function useLabRun({
   return { current: record?.key === key ? record : null, validate };
 }
 
-/** The image's decision for each module block, under a disclosure. */
+/** Whether the lab has each module block's module, under a disclosure. */
 function LabModules({ report }) {
   if (!report.length) return null;
   return (
@@ -201,8 +206,8 @@ function LabModules({ report }) {
           <li key={`${row.path}:${row.block}`} data-vendored={row.vendored ? 'true' : 'false'}>
             {`module "${row.block}" (${row.source} ${row.constraint}) → `}
             {row.vendored
-              ? `the vendored copy ${row.vendored}`
-              : `not vendored (the image has ${row.have.join(', ') || 'none'})`}
+              ? `the lab's copy, ${row.vendored}`
+              : `not on the lab (it has ${row.have.join(', ') || 'no version'})`}
           </li>
         ))}
       </ul>
@@ -343,7 +348,7 @@ export function LzLabValidate({
         </p>
       </div>
       {widgetActive ? (
-        <div ref={turnstileRef} data-testid="lz-lab-turnstile" data-check={checkPhase} />
+        <div ref={turnstileRef} data-testid="lz-lab-check" data-check={checkPhase} />
       ) : null}
       <LabModules report={report} />
       <LabOutcome run={current} />

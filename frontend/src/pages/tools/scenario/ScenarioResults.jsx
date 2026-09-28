@@ -197,7 +197,7 @@ function CompareSummary({ compare }) {
   let text;
   if (compare.status === 'loading') text = `Loading ${compare.label} prices…`;
   else if (compare.status === 'error')
-    text = `${compare.label} prices could not be loaded: ${compare.error?.message ?? 'unknown error'}`;
+    text = `${compare.label} prices could not be loaded. Please try again.`;
   else if (compare.cheapest.length === 0) text = `Nothing is priced in ${compare.label}.`;
   else text = `Cheapest in ${compare.label}: ${compare.cheapest.map(providerLabel).join(', ')}`;
   return (

@@ -91,8 +91,8 @@ export default function LabsLearnPage() {
             Each lab below opens in VS Code in your browser with az, terraform, kubectl, helm and
             ansible already installed, or runs on your own machine from the same container image.
             Nothing here installs anything on your computer beyond Docker, and nothing you do in a
-            lab can reach the production estate: the workspaces run on the Hybrid Lab host, a single
-            VPS onboarded to Azure Arc, whose live state is further down this page.
+            lab reaches anything else: the workspaces run on the Hybrid Lab host, a single server
+            onboarded to Azure Arc, whose live state is further down this page.
           </p>
           <p className="text-slate-600 dark:text-slate-400 max-w-3xl mt-3">
             <strong className="text-slate-900 dark:text-slate-100">Open in Coder</strong> takes you
@@ -126,10 +126,10 @@ export default function LabsLearnPage() {
           />
         </div>
 
-        <LabsSlot id="agent" title="Run an agent against your landing zone" issue={676}>
+        <LabsSlot id="agent" title="Run an agent against your landing zone">
           <SandboxSection />
         </LabsSlot>
-        <LabsSlot id="articles" title="Articles for these labs" issue={677} />
+        <LabsSlot id="articles" title="Articles for these labs" />
       </div>
     </>
   );

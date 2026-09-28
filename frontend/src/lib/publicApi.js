@@ -234,18 +234,17 @@ export async function fetchPriceChanges(region = 'us-east-1') {
  * a scenario's numbers (#613, Phase 3). The body is the computed comparison
  * the page already shows: `{ region, scenarioId, scenarioLabel, extras,
  * egressGb, results: [{ provider, total, base, segments, unavailable }] }`;
- * the server caps it at 8 KB and answers `{ text, model, generatedAt,
- * cached }`.
+ * the server caps it at 8 KB and answers `{ text, generatedAt, cached }`.
  *
  * Never cached here and never deduplicated: it is a POST the reader asked for
  * by pressing a button, and the server owns both the per-client quota (429,
- * five an hour) and the "paused" state (503). The thrown Error carries
- * `status` so the button can say "try again in a while" for one and the
- * server's own sentence for the other, the way lib/api.js does for admin
- * calls.
+ * five an hour) and the "paused" and "unavailable" states (503). The thrown
+ * Error carries `status` and the response's `code`, and
+ * pages/tools/explain/ExplainControl.jsx picks the visitor's sentence from
+ * those; the server's own text is never shown.
  *
  * @param {object} body
- * @returns {Promise<{ text: string, model: string, generatedAt: string, cached: boolean }>}
+ * @returns {Promise<{ text: string, generatedAt: string, cached: boolean }>}
  */
 export async function requestPricingExplanation(body) {
   return postExplanation(body);
@@ -262,7 +261,7 @@ export async function requestPricingExplanation(body) {
  * tells the two apart.
  *
  * @param {object} body
- * @returns {Promise<{ text: string, model: string, generatedAt: string, cached: boolean }>}
+ * @returns {Promise<{ text: string, generatedAt: string, cached: boolean }>}
  */
 export async function requestLandingZoneExplanation(body) {
   return postExplanation(body);
@@ -280,6 +279,7 @@ async function postExplanation(body) {
   if (!res.ok) {
     const error = new Error(data.error || `Explanation request failed with HTTP ${res.status}`);
     error.status = res.status;
+    error.code = typeof data.code === 'string' ? data.code : null;
     throw error;
   }
   if (!data.explanation || typeof data.explanation.text !== 'string') {
@@ -303,23 +303,37 @@ export async function fetchNewsletterSignupConfig() {
  * POST public/submissions — anonymous content submission. The server owns
  * validation, document composition, and the per-client hourly quota (429),
  * replacing the pages' direct addDoc writes into the content collection.
- * Resolves to { ok, id }; throws with the server's message on rejection.
+ * Resolves to { ok, id }.
+ *
+ * The submission pages show the thrown message, so it is always a visitor's
+ * sentence (owner direction 2026-09-28): the server's own words only for a
+ * 400, which names the form field at fault; the hourly limit in plain words
+ * for a 429; and "please try again" for everything else, a build with no API
+ * base and a network failure included. Never an HTTP status, and never
+ * requireFunctionsBase's message, which names the deployment.
  */
+export const SUBMISSION_FAILED = 'Submission failed. Please try again.';
+export const SUBMISSION_LIMITED =
+  "You've reached the limit for submissions for now. Try again in about an hour.";
+
 export async function submitPublicContent(body) {
-  const base = requireFunctionsBase('public/submissions');
-  const res = await fetch(`${base}/public/submissions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify(body),
-  });
+  let res;
+  try {
+    const base = requireFunctionsBase('public/submissions');
+    res = await fetch(`${base}/public/submissions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch (error) {
+    console.error('Public submission could not be sent:', error);
+    throw new Error(SUBMISSION_FAILED);
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(
-      data.error ||
-        (res.status === 429
-          ? 'Submission rate limit exceeded — try again later.'
-          : `Submission failed with HTTP ${res.status}`)
-    );
+    if (res.status === 429) throw new Error(SUBMISSION_LIMITED);
+    const fieldError = res.status === 400 && typeof data.error === 'string' ? data.error : '';
+    throw new Error(fieldError || SUBMISSION_FAILED);
   }
   return data;
 }
@@ -538,10 +552,10 @@ export async function fetchCoderStatus() {
 /**
  * GET public/labs/submit — whether the lab would take a public job now
  * (#672): `{ configured, open, code, reason, bounds }`. `open` is false while
- * public submission is switched off (`code: 'PUBLIC_SUBMISSION_CLOSED'`,
- * which is the default), while no lab agent is online, while the queue is
- * full, and when the server could not tell; `reason` is the one line the
- * Validate on the lab button shows. Through the same short-lived GET cache
+ * public submission is switched off (`code: 'PUBLIC_SUBMISSION_CLOSED'`),
+ * while no lab agent is online, while the queue is full, and when the server
+ * could not tell; the Validate on the lab button maps `code` to its own line
+ * (labValidateRules.js) and never shows `reason`. Through the same short-lived GET cache
  * as the other public reads, so a page that mounts twice asks once.
  *
  * Returns null only when the route itself is missing (404); throws when the
@@ -560,7 +574,7 @@ export async function fetchLabSubmissionStatus() {
   return checked;
 }
 
-/** A failed lab call as an Error carrying the server's status, code and sentence. */
+/** A failed lab call as an Error carrying the server's status and code; the page words it from the code. */
 async function labError(res, what) {
   const data = await res.json().catch(() => ({}));
   const error = new Error(data.error || `${what} failed with HTTP ${res.status}`);

@@ -599,7 +599,7 @@ describe('the estate matches the lock', () => {
     expect(LAB_TURNSTILE_ACTION).toMatch(/^[A-Za-z0-9_-]{1,32}$/);
   });
 
-  it('gives the builder every door code, so each shut door says its own reason', () => {
+  it('gives the builder every door code, so it words each shut door itself', () => {
     const rules = readFileSync(
       join(REPO, 'frontend', 'src', 'pages', 'tools', 'landingZone', 'labValidateRules.js'),
       'utf8'

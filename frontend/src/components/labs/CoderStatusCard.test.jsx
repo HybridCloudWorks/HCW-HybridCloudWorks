@@ -52,10 +52,10 @@ describe('CoderStatusCard', () => {
     expect(screen.getByTestId('coder-as-of')).toBeInTheDocument();
   });
 
-  it('says when no template is published yet', () => {
+  it('says when no template is available yet', () => {
     render(<CoderStatusCard status={{ ...HEALTHY, templates: [] }} loading={false} error={null} />);
     expect(screen.getByTestId('coder-templates')).toHaveTextContent(
-      'No template is published yet.'
+      'No lab template is available yet.'
     );
   });
 
@@ -67,6 +67,9 @@ describe('CoderStatusCard', () => {
     expect(screen.getByText(CODER_ROUTE_MISSING_SENTENCE)).toBeInTheDocument();
 
     rerender(<CoderStatusCard status={undefined} loading={false} error={new Error('HTTP 502')} />);
-    expect(screen.getByRole('alert')).toHaveTextContent('HTTP 502');
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      "Coder's status couldn't be loaded. Please try again later."
+    );
+    expect(screen.getByRole('alert')).not.toHaveTextContent('HTTP');
   });
 });

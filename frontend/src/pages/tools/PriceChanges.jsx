@@ -91,7 +91,7 @@ function Body({ changes, range, loading, error, onRetry }) {
     return (
       <div role="alert" className="flex flex-wrap items-center gap-3 text-sm">
         <p className="min-w-0 flex-1 break-words">
-          Price changes could not be loaded: {error.message}
+          Price changes could not be loaded. Please try again.
         </p>
         <Button variant="outline" size="sm" onClick={onRetry}>
           <RefreshCw className="mr-2 h-3.5 w-3.5" /> Try again
