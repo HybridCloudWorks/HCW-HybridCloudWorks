@@ -233,7 +233,7 @@ describe('the scan itself', () => {
     // The lab pane (#751): what the page says in place of the tools behind it.
     "Lab workspaces aren't available right now.",
     'Sign in with GitHub to open your lab workspace',
-    "Finish signing in with GitHub in the new tab. Your workspace opens here when you're done.",
+    "Finish signing in with GitHub in the new tab. Your workspace opens here when you're done; if it doesn't, choose I've already signed in.",
     'Lab workspaces are for members of the HybridCloudWorks organization on GitHub.',
   ])('passes %j', (text) => {
     expect(termsIn(text)).toEqual([]);

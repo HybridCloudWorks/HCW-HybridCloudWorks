@@ -75,6 +75,11 @@ function anotherTabSignsIn(at) {
   });
 }
 
+/** Let React run the effects of a commit that arrived outside `act` (the status read resolving). */
+async function flushEffects() {
+  await act(async () => {});
+}
+
 /** jsdom would try to follow a target=_blank link; the page's own click handler is what is tested. */
 const preventNavigation = (event) => {
   if (event.target.closest?.('a[target="_blank"]')) event.preventDefault();
@@ -322,6 +327,9 @@ describe('LabPanePage, the pane', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const { container, unmount } = renderPane();
     await screen.findByTestId('lab-pane');
+    // The frame can be in the DOM before its effects have run; the watchdog
+    // is set in one, so let it run before moving the clock.
+    await flushEffects();
     act(() => {
       vi.advanceTimersByTime(PANE_LOAD_TIMEOUT_MS + 1);
     });
@@ -331,6 +339,7 @@ describe('LabPanePage, the pane', () => {
 
     const again = renderPane();
     await screen.findByTestId('lab-pane');
+    await flushEffects();
     fireEvent.load(again.container.querySelector('iframe'));
     act(() => {
       vi.advanceTimersByTime(PANE_LOAD_TIMEOUT_MS * 2);

@@ -104,11 +104,19 @@ import { safeUrl } from '@/lib/safeUrl';
 export const UNAVAILABLE_SENTENCE = "Lab workspaces aren't available right now.";
 export const SIGN_IN_HEADING = 'Sign in with GitHub to open your lab workspace';
 export const OPENING_SENTENCE = 'Opening your lab workspace…';
+/**
+ * The fallback clause is for a return this page cannot hear: storage that
+ * is blocked, or a visit on www, whose storage the returning tab (always on
+ * the apex, where #750 redirects) does not share.
+ */
 export const SIGN_IN_PENDING_SENTENCE =
-  "Finish signing in with GitHub in the new tab. Your workspace opens here when you're done.";
+  "Finish signing in with GitHub in the new tab. Your workspace opens here when you're done; if it doesn't, choose I've already signed in.";
 
 /** A frame that has not loaded in this long is treated as unavailable. */
 export const PANE_LOAD_TIMEOUT_MS = 30_000;
+
+/** The canonical origin, as scripts/prerender.mjs writes it. */
+const SITE_ORIGIN = 'https://hybridcloudworks.com';
 
 /** `usePublicData` key for the status read, as this page asks it. */
 export const WORKSPACE_STATUS_KEY = 'labs:workspace-status';
@@ -143,7 +151,14 @@ export const PANE_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-p
  * Each is granted to Coder's name and to the workspace apps' names by
  * origin, not with the default `'src'`, because `'src'` is the origin of the
  * frame's first URL (Coder's dashboard) and would not follow the frame to
- * code-server's own name.
+ * code-server's own name. A Permissions Policy origin can only wildcard a
+ * whole label, so the grant also covers any other app or forwarded port the
+ * learner opens under their workspace's names. Those run the learner's own
+ * code, and the pane reaches them only by navigating within Coder's names
+ * (`frame-src`); a page from anywhere else never gets the clipboard. Accepted
+ * for code-server's paste (security review of #751). Dropping
+ * clipboard-read would leave Ctrl+V working, which needs no permission, and
+ * lose the context menu's Paste.
  */
 const PANE_ORIGINS = `${CODER_ORIGIN} ${CODER_APPS_ORIGIN}`;
 export const PANE_ALLOW = [
@@ -182,9 +197,11 @@ export default function LabPanePage() {
   return <LabPane key={lab.id} lab={lab} />;
 }
 
+/** "I've already signed in": record it, which shows the pane. No argument, so the click event is not taken for a time. */
+const alreadySignedIn = () => markSignedIn();
+
 function LabPane({ lab }) {
   const status = usePublicData(() => fetchCoderStatus(), WORKSPACE_STATUS_KEY);
-  const service = workspaceService(status);
   const signedInAt = useSyncExternalStore(subscribeSignedIn, readSignedInAt, serverSignedInAt);
   const [pending, setPending] = useState(false);
 
@@ -194,57 +211,59 @@ function LabPane({ lab }) {
     setPending(true);
   };
 
-  let body;
-  if (service === 'checking') {
-    body = (
-      <p role="status" className={`text-sm ${MUTED}`} data-testid="lab-opening">
-        {OPENING_SENTENCE}
-      </p>
-    );
-  } else if (service === 'unavailable') {
-    body = <Unavailable />;
-  } else if (!signedInAt) {
-    body = (
-      <SignInStep
-        signInHref={signInHref}
-        pending={pending}
-        onStart={startSignIn}
-        onAlreadySignedIn={() => markSignedIn()}
-      />
-    );
-  } else {
-    body = <Pane key={signedInAt} lab={lab} signInHref={signInHref} onStartSignIn={startSignIn} />;
-  }
-
   return (
     <>
       <Helmet>
         <title>{`${lab.title} — Browser labs | Hybrid Cloud Works`}</title>
         <meta name="description" content={lab.summary} />
-        <link rel="canonical" href={`https://hybridcloudworks.com${labPanePath(lab.id)}`} />
+        <link rel="canonical" href={`${SITE_ORIGIN}${labPanePath(lab.id)}`} />
       </Helmet>
 
       <div className="relative z-10 max-w-[1400px] mx-auto w-full px-4 md:px-8 py-8 flex flex-col gap-6">
         <header>
-          <p className="text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
+          <p className="flex flex-wrap gap-x-1.5 text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
             <Link to={staticRoutes.education} className="underline-offset-4 hover:underline">
               Learn any cloud
-            </Link>{' '}
-            <span aria-hidden="true">/</span>{' '}
+            </Link>
+            <span aria-hidden="true">/</span>
             <Link to={staticRoutes.labs} className="underline-offset-4 hover:underline">
               Labs
-            </Link>{' '}
-            <span aria-hidden="true">/</span> {lab.title}
+            </Link>
+            <span aria-hidden="true">/</span>
+            <span>{lab.title}</span>
           </p>
           <h1 className="display-heading text-2xl sm:text-3xl text-slate-950 dark:text-white mb-2">
             {lab.title}
           </h1>
           <p className={`${MUTED} max-w-3xl`}>{lab.summary}</p>
         </header>
-        {body}
+        <PaneBody
+          service={workspaceService(status)}
+          signedInAt={signedInAt}
+          lab={lab}
+          pending={pending}
+          signInHref={signInHref}
+          onStartSignIn={startSignIn}
+        />
       </div>
     </>
   );
+}
+
+/** Exactly one of: opening, unavailable, the sign-in step, or the pane. */
+function PaneBody({ service, signedInAt, lab, pending, signInHref, onStartSignIn }) {
+  if (service === 'checking') {
+    return (
+      <p role="status" className={`text-sm ${MUTED}`} data-testid="lab-opening">
+        {OPENING_SENTENCE}
+      </p>
+    );
+  }
+  if (service === 'unavailable') return <Unavailable />;
+  if (!signedInAt) {
+    return <SignInStep signInHref={signInHref} pending={pending} onStart={onStartSignIn} />;
+  }
+  return <Pane key={signedInAt} lab={lab} signInHref={signInHref} onStartSignIn={onStartSignIn} />;
 }
 
 function Unavailable() {
@@ -267,7 +286,7 @@ function Unavailable() {
   );
 }
 
-function SignInStep({ signInHref, pending, onStart, onAlreadySignedIn }) {
+function SignInStep({ signInHref, pending, onStart }) {
   return (
     <section
       aria-labelledby="lab-sign-in-heading"
@@ -302,7 +321,7 @@ function SignInStep({ signInHref, pending, onStart, onAlreadySignedIn }) {
             Sign in with GitHub <span className="sr-only">(opens in a new tab)</span>
           </a>
         ) : null}
-        <button type="button" onClick={onAlreadySignedIn} className={SECONDARY}>
+        <button type="button" onClick={alreadySignedIn} className={SECONDARY}>
           I&apos;ve already signed in
         </button>
         <Link to={staticRoutes.labs} className={SECONDARY}>
