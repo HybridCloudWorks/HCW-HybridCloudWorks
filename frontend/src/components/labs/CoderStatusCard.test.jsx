@@ -52,6 +52,25 @@ describe('CoderStatusCard', () => {
     expect(screen.getByTestId('coder-as-of')).toBeInTheDocument();
   });
 
+  it('says only that Coder is reachable when the read could not see what it holds', () => {
+    // The status read without its token, or with one Coder refused: it knows
+    // Coder answers and nothing else, so nothing is counted or listed.
+    const { container } = render(
+      <CoderStatusCard
+        status={{ ...HEALTHY, templates: [], capacity: { running: null, max: 5 } }}
+        loading={false}
+        error={null}
+      />
+    );
+    expect(screen.getByTestId('coder-status')).toHaveTextContent(/^Coder is reachable\.$/);
+    expect(screen.queryByTestId('coder-templates')).not.toBeInTheDocument();
+    expect(container.textContent).not.toMatch(/\b0 of\b|No lab template|unknown/);
+    expect(container.textContent).not.toMatch(
+      /token|not configured|provision|\bseed|\badmin\b|\bowner\b|setting/i
+    );
+    expect(screen.getByTestId('coder-as-of')).toBeInTheDocument();
+  });
+
   it('says when no template is available yet', () => {
     render(<CoderStatusCard status={{ ...HEALTHY, templates: [] }} loading={false} error={null} />);
     expect(screen.getByTestId('coder-templates')).toHaveTextContent(

@@ -9,9 +9,24 @@
  * page, and this is that page. The site's `frame-src` admits Coder's origin
  * and its workspace apps' wildcard and nothing else new (csp.test.js).
  *
- * WHAT THE PANE LOADS. The catalogue's deep link (`coderWorkspaceUrl`):
- * `/templates/hcw-lab/workspace?mode=auto&param.lab=<id>`, checked against
- * the template's name and its one parameter, `lab`.
+ * WHAT THE PANE LOADS. The lab launcher on Coder's name (`labLauncherUrl`):
+ * `https://coder.lab.hybridcloudworks.com/_hcw/lab/?lab=<id>`
+ * (lab-host/coder/launcher/). Coder's dashboard opens code-server in a new
+ * window or tab, which #750 turns into the labs page, so from the dashboard
+ * the editor never opened in the pane. The launcher reads the learner's
+ * workspace with their session, shows Coder's own create or start page in a
+ * frame of its own when the learner has to confirm something, and when
+ * code-server is healthy replaces itself with code-server's own name. Both
+ * are Coder's names, so `frame-src`, the sandbox and `allow` below are
+ * unchanged by it.
+ *
+ * WHAT THE PANE SAYS. The launcher posts its state to this page
+ * (`{ type: 'hcw-lab', state }`), the one thing a cross-origin frame can
+ * tell it. The page takes a message only from the launcher's origin, only
+ * from this pane's own window, and only with a type and a state it knows
+ * (`paneMessageState`). A message means the frame loaded, so it stops the
+ * load watchdog; the state is shown on the toolbar; and `unavailable` shows
+ * the page's own unavailable section.
  *
  * SIGN-IN RUNS IN A TAB OF ITS OWN, because GitHub refuses to be framed and
  * the site's `frame-src` does not admit it either. Worked out from Coder
@@ -48,29 +63,31 @@
  * The session reaches the pane because coder.lab.hybridcloudworks.com and
  * hybridcloudworks.com are one site (the registrable domain), so the frame's
  * requests are same-site and send Coder's Lax cookie; no third-party cookie
- * is involved. The same button inside the pane cannot work: Coder's login
- * page there links to the same callback, which redirects the FRAME to
- * GitHub, and GitHub will not load in it. Hence the note under the pane.
+ * is involved. Sign-in cannot happen inside the pane: GitHub will not load
+ * in a frame. The launcher, finding no session, says to use Sign in with
+ * GitHub above, and tells this page, which marks that button on the toolbar.
  *
- * What this page cannot know: whether the visitor is signed in, since the
- * pane is another origin. It shows the sign-in step until this browser has
- * come back from a sign-in (for Coder's default 24-hour session), with "I've
- * already signed in" for a visitor who has, and keeps Sign in with GitHub on
- * the toolbar for a session that has expired. A visitor GitHub signs in but
- * Coder refuses (outside the organisation) is sent to Coder's `/login`,
- * which #750 also turns into `/education/labs`, so the return looks the same
- * and the pane shows the sign-in page again; the step says who may sign in.
+ * What this page cannot know before the pane opens: whether the visitor is
+ * signed in, since the pane is another origin. It shows the sign-in step
+ * until this browser has come back from a sign-in (for Coder's default
+ * 24-hour session), with "I've already signed in" for a visitor who has, and
+ * keeps Sign in with GitHub on the toolbar for a session that has expired;
+ * once the pane is open, the launcher's `signed-out` says so. A visitor
+ * GitHub signs in but Coder refuses (outside the organisation) is sent to
+ * Coder's `/login`, which #750 also turns into `/education/labs`, so the
+ * return looks the same and the launcher reports no session again; the step
+ * says who may sign in.
  *
- * UNAVAILABLE. A cross-origin frame cannot tell the page what it shows: the
- * frame fires `load` for an error page too, and the lab host answers a
- * stopped Coder with a sentence of its own that would load like any page. So
- * the page asks the one source it may: the status read the labs page's card
- * shows (`GET public/labs/coder-status`, at most a minute old). The pane
- * opens only when that read says configured and reachable. Anything else
- * (not configured, unreachable, the route missing, the read failing), and a
- * frame that has not fired `load` within PANE_LOAD_TIMEOUT_MS (a frame fires
- * no `error` event, so the wait is the only failure it can signal), all show
- * one sentence, never the error.
+ * UNAVAILABLE. Before the pane opens, the page asks the status read the labs
+ * page's card shows (`GET public/labs/coder-status`, at most a minute old).
+ * The pane opens only when that read says configured and reachable, which
+ * needs Coder's address and Coder answering and nothing else (not the status
+ * token, since 2026-09-28). Anything else (not configured, unreachable, the
+ * route missing, the read failing), a frame that has not loaded within
+ * PANE_LOAD_TIMEOUT_MS (a frame fires no `error` event, so the wait is the
+ * only failure it can signal without the launcher), and the launcher
+ * reporting `unavailable` all show one sentence, never the error. The lab
+ * host's own answer for a stopped Coder is the same sentence.
  *
  * PRE-RENDER. One page per catalogue row, like the Azure certification
  * pages (scripts/prerender-entry.jsx). The first render reads no storage and
@@ -86,8 +103,8 @@ import {
   CODER_APPS_ORIGIN,
   CODER_ORIGIN,
   coderSignInUrl,
-  coderWorkspaceUrl,
   labById,
+  labLauncherUrl,
   labPanePath,
 } from '@/data/labs/catalogue';
 import {
@@ -122,17 +139,53 @@ const SITE_ORIGIN = 'https://hybridcloudworks.com';
 export const WORKSPACE_STATUS_KEY = 'labs:workspace-status';
 
 /**
- * The pane's sandbox: what code-server and Coder's dashboard need, and
- * nothing more.
- *   - allow-scripts: both are JavaScript applications.
+ * The states the launcher reports (STATES in
+ * lab-host/coder/launcher/launcher.js), and the words the toolbar shows for
+ * each. `unavailable` has no words here: it shows the unavailable section.
+ */
+export const PANE_STATE_WORDS = Object.freeze({
+  checking: 'Opening your workspace…',
+  'signed-out': 'Sign in to open your workspace',
+  create: 'Confirm to create your workspace',
+  stopped: 'Start your workspace to continue',
+  starting: 'Starting your workspace…',
+  ready: 'Workspace ready',
+});
+export const PANE_STATES = Object.freeze([...Object.keys(PANE_STATE_WORDS), 'unavailable']);
+
+/** The `type` the launcher puts on every message it posts. */
+export const PANE_MESSAGE_TYPE = 'hcw-lab';
+
+/**
+ * The launcher's state from a `message` event, or null for anything else: a
+ * message from another origin (code-server's own name included, once the
+ * pane has moved there), from a window that is not this pane's frame (a
+ * frame inside it, or another tab), or without the launcher's type and one
+ * of its states. Nothing else in the message is read.
+ */
+export function paneMessageState(event, frame) {
+  if (event?.origin !== CODER_ORIGIN) return null;
+  if (!frame || event.source !== frame.contentWindow) return null;
+  const { data } = event;
+  if (data === null || typeof data !== 'object' || data.type !== PANE_MESSAGE_TYPE) return null;
+  return PANE_STATES.includes(data.state) ? data.state : null;
+}
+
+/**
+ * The pane's sandbox: what code-server, the launcher and Coder's own pages
+ * need, and nothing more. The launcher (lab-host/coder/launcher/) changed
+ * none of it: it is a page on Coder's name, the frame it shows Coder's pages
+ * in is Coder's name too and inherits this sandbox, and code-server is where
+ * it was before.
+ *   - allow-scripts: all three are JavaScript applications.
  *   - allow-same-origin: keeps the frame its own origin (Coder's name, or
  *     the workspace app's), so it can send its session cookie, keep its
  *     storage and open its WebSockets. Without it the frame is an opaque
- *     origin and is signed out. Paired with allow-scripts this only unlocks
- *     a frame that is SAME-origin with the page, which could then remove its
- *     own sandbox; the pane is always another origin, and cannot reach the
- *     site's page.
- *   - allow-forms: Coder's sign-in and workspace forms submit through
+ *     origin and is signed out, and the launcher cannot read the learner's
+ *     workspace. Paired with allow-scripts this only unlocks a frame that is
+ *     SAME-origin with the page, which could then remove its own sandbox;
+ *     the pane is always another origin, and cannot reach the site's page.
+ *   - allow-forms: Coder's create and workspace forms submit through
  *     `onSubmit` handlers, and a sandboxed frame without this flag never
  *     fires `submit` at all.
  *   - allow-popups: code-server opens links in a new tab, for example the
@@ -150,8 +203,8 @@ export const PANE_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-p
  * copy and paste use, and fullscreen, which its own full-screen view uses.
  * Each is granted to Coder's name and to the workspace apps' names by
  * origin, not with the default `'src'`, because `'src'` is the origin of the
- * frame's first URL (Coder's dashboard) and would not follow the frame to
- * code-server's own name. A Permissions Policy origin can only wildcard a
+ * frame's first URL (the launcher, on Coder's name) and would not follow the
+ * frame to code-server's own name, where the launcher sends it. A Permissions Policy origin can only wildcard a
  * whole label, so the grant also covers any other app or forwarded port the
  * learner opens under their workspace's names. Those run the learner's own
  * code, and the pane reaches them only by navigating within Coder's names
@@ -333,13 +386,32 @@ function SignInStep({ signInHref, pending, onStart }) {
 }
 
 /**
+ * The launcher's latest state, from the messages the pane's frame posts
+ * (`paneMessageState` decides which count); null until it says anything.
+ */
+function useLauncherState(frameRef) {
+  const [state, setState] = useState(null);
+  useEffect(() => {
+    const onMessage = (event) => {
+      const next = paneMessageState(event, frameRef.current);
+      if (next !== null) setState(next);
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [frameRef]);
+  return state;
+}
+
+/**
  * The toolbar and the frame. Keyed by the sign-in time above it, so a new
  * sign-in in another tab mounts a new one: that is the reload.
  */
 function Pane({ lab, signInHref, onStartSignIn }) {
   const paneRef = useRef(null);
+  const frameRef = useRef(null);
   const [loaded, setLoaded] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [timedOut, setTimedOut] = useState(false);
+  const paneState = useLauncherState(frameRef);
   const fullscreenEnabled = useSyncExternalStore(
     noSubscription,
     readFullscreenEnabled,
@@ -347,12 +419,14 @@ function Pane({ lab, signInHref, onStartSignIn }) {
   );
   const fullscreen = useSyncExternalStore(subscribeFullscreen, readFullscreen, serverFalse);
 
-  // A frame that never loads says nothing; the watchdog says it for it.
+  // A frame that never loads says nothing; the watchdog says it for it. Any
+  // state the launcher sends means the frame loaded.
+  const heard = paneState !== null;
   useEffect(() => {
-    if (loaded || failed) return undefined;
-    const timer = window.setTimeout(() => setFailed(true), PANE_LOAD_TIMEOUT_MS);
+    if (loaded || heard || timedOut) return undefined;
+    const timer = window.setTimeout(() => setTimedOut(true), PANE_LOAD_TIMEOUT_MS);
     return () => window.clearTimeout(timer);
-  }, [loaded, failed]);
+  }, [loaded, heard, timedOut]);
 
   // Full screen is the pane, this page's own element: never Coder's page on
   // its own, which #750 would redirect.
@@ -364,9 +438,10 @@ function Pane({ lab, signInHref, onStartSignIn }) {
     }
   };
 
-  if (failed) return <Unavailable />;
+  if (timedOut || paneState === 'unavailable') return <Unavailable />;
 
-  const src = safeUrl(coderWorkspaceUrl(lab));
+  const src = safeUrl(labLauncherUrl(lab));
+  const signedOut = paneState === 'signed-out';
   return (
     <div className="flex flex-col gap-2">
       <section
@@ -376,8 +451,13 @@ function Pane({ lab, signInHref, onStartSignIn }) {
         className="flex flex-col rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 h-[calc(100dvh-14rem)] min-h-[32rem]"
       >
         <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-slate-200 dark:border-slate-700">
-          <span className="mr-auto text-sm font-semibold text-slate-900 dark:text-slate-100">
+          <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
             {lab.title}
+          </span>
+          {/* Not a live region: the launcher's own status line in the pane is
+              announced, and this would say the same thing a second time. */}
+          <span data-testid="lab-pane-state" className={`mr-auto text-xs ${MUTED}`}>
+            {paneState ? PANE_STATE_WORDS[paneState] : ''}
           </span>
           {fullscreenEnabled ? (
             <button type="button" onClick={toggleFullscreen} className={SECONDARY}>
@@ -390,7 +470,8 @@ function Pane({ lab, signInHref, onStartSignIn }) {
               target="_blank"
               rel="noopener noreferrer"
               onClick={onStartSignIn}
-              className={SECONDARY}
+              data-testid="lab-pane-sign-in"
+              className={signedOut ? PRIMARY : SECONDARY}
             >
               Sign in with GitHub <span className="sr-only">(opens in a new tab)</span>
             </a>
@@ -401,6 +482,7 @@ function Pane({ lab, signInHref, onStartSignIn }) {
         </div>
         {src ? (
           <iframe
+            ref={frameRef}
             src={src}
             title={`Lab workspace: ${lab.title}`}
             sandbox={PANE_SANDBOX}
@@ -411,8 +493,8 @@ function Pane({ lab, signInHref, onStartSignIn }) {
         ) : null}
       </section>
       <p className={`text-xs ${MUTED}`}>
-        If your workspace asks you to sign in again, use Sign in with GitHub above: it opens in a
-        new tab and brings you back here.
+        If your workspace says you&apos;re not signed in, use Sign in with GitHub above: it opens in
+        a new tab and brings you back here.
       </p>
     </div>
   );

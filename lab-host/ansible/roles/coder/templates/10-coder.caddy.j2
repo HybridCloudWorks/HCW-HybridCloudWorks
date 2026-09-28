@@ -10,7 +10,8 @@
 # covers these names like every other, and runs before the routes below. A
 # top-level visit goes to the site's labs page, and every response carries
 # the site-only frame-ancestors. Coder then needs two things to work under
-# it, both in this file.
+# it, both in this file, and the lab launcher between them opens the editor
+# inside the pane.
 @coder host {{ coder_domain }} *.{{ coder_domain }}
 
 # 1. GitHub sign-in is the one Coder request that must work at the top
@@ -26,6 +27,39 @@
   path /api/v2/users/oauth2/github/callback
 }
 vars @coder_github_sign_in lab_top_level_allowed true
+
+# The lab launcher, which the site's panes load instead of a Coder page
+# (lab-host/coder/launcher/, installed by the coder role). Coder's dashboard
+# opens code-server in a new window or tab, a top-level visit that
+# lab_panes_only sends away, so the editor could never open in a pane from
+# there. The launcher reads the learner's workspace with their own session
+# (GET only, same origin), and replaces itself with code-server's own name
+# once it is healthy. It is on the dashboard name because that is where the
+# session cookie and the API are. It gets no top-level exemption: opened in
+# a tab, it is redirected like any other Coder page.
+# Its policy is added beside lab_panes_only's frame-ancestors, not in place
+# of it, so the framing rule stays the Caddyfile's alone and the browser
+# enforces both. Scripts, styles, fetches and frames from this name only,
+# and nothing inline. This handle comes before handle @coder, so these
+# paths never reach Coder; handle blocks with matchers keep the order they
+# are written in (`caddy adapt` shows this route's subroute first). A file
+# that is not there is an error, which handle_errors below answers with the
+# same 503 sentence as Coder stopped, and the pane says the workspaces are
+# unavailable.
+@coder_lab_launcher {
+  host {{ coder_domain }}
+  path /_hcw/lab/*
+}
+handle @coder_lab_launcher {
+  header {
+    +Content-Security-Policy "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'self'; frame-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'"
+    Cache-Control "no-store"
+    X-Content-Type-Options "nosniff"
+  }
+  uri strip_prefix /_hcw/lab
+  root * {{ coder_launcher_dir }}
+  file_server
+}
 
 handle @coder {
   # 2. Coder's pages send their own Content-Security-Policy. Its default

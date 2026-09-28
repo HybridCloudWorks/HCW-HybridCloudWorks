@@ -33,26 +33,48 @@ vault". On the host, as root:
 
 1. It refuses a key that is not `vault_` followed by `[a-z0-9_]`, with exit
    code 2, before reading anything.
-2. It refuses with exit code 2 when `vault-password` is missing or empty.
-3. It reads the value from stdin into a root-only temporary directory,
+2. It refuses, with exit code 2 and before reading the value, a key the
+   playbook itself defines as a variable. `bootstrap.sh` passes `vault.yml`
+   with `-e`, and an extra var outranks every other variable, so such a key
+   would silently replace it: `vault_enabled` or `vault_api_port`, say,
+   which belong to the `vault` role that runs HashiCorp Vault. The names
+   are read at run time from the checkout the host runs, `/opt/hcw-src`
+   (`HCW_SRC_DIR` overrides it, which is how the test runs it), in
+   `lab-host/ansible/`, `.yml` or `.yaml`:
+   - every top-level key of the files under `group_vars/`, `host_vars/`
+     and each role's `defaults/` and `vars/`, `main/` directories included;
+   - every name the playbooks at the top, the inventory, and each role's
+     `tasks/` and `handlers/` (subdirectories included) set as they run: a
+     play's, block's or task's `vars`, a `register`, a `set_fact` in any of
+     its spellings (`set_fact`, `ansible.builtin.`, `ansible.legacy.`, and
+     the free-form `name=value`), and an inventory host's own variables.
+
+   The error names the file. With no checkout there, with no role in it, or
+   with a file in it that does not parse, it refuses every key rather than
+   guess. A variable loaded from a file named only at run time
+   (`include_vars`, `vars_files`) is not seen; the playbook uses neither.
+   None of the keys the playbook reads from the vault today is refused.
+3. It refuses with exit code 2 when `vault-password` is missing or empty.
+4. It reads the value from stdin into a root-only temporary directory,
    dropping carriage returns. A leading byte order mark and surrounding
    whitespace are removed too, and an empty value is refused.
-4. It decrypts `vault.yml` when it exists, sets the key in the parsed
+5. It decrypts `vault.yml` when it exists, sets the key in the parsed
    mapping and writes it back as YAML (sorted keys; comments are not kept).
    Every value it writes is a string, so `true` or `0123` stays the text it
    was.
-5. It encrypts the result with the existing password, then decrypts it
+6. It encrypts the result with the existing password, then decrypts it
    again to check the key is there.
-6. It installs the result beside `vault.yml` as `root:root` `0600` and
+7. It installs the result beside `vault.yml` as `root:root` `0600` and
    renames it over `vault.yml`.
-7. It prints `hcw-vault-set: set KEY (value not shown). Keys in the vault:`
+8. It prints `hcw-vault-set: set KEY (value not shown). Keys in the vault:`
    followed by the key names. The temporary files are shredded on every
    exit.
 
 Nothing it prints contains a value, and the value is never an argument, so
 it is not in `ps`, a shell history or a log. `HCW_VAULT_DIR` points it at
-another directory, which is how the test runs it. `sudo` resets the
-environment, so through the owner's line it is always `/etc/hcw/ansible`.
+another directory and `HCW_SRC_DIR` at another checkout, which is how the
+test runs it. `sudo` resets the environment, so through the owner's line
+they are always `/etc/hcw/ansible` and `/opt/hcw-src`.
 
 ### What changed from the hand-installed copy
 
@@ -78,14 +100,38 @@ Everything else is byte for byte the hand-installed copy, so the first run
 after this role lands reports its copy task `changed` and every run after
 that `ok`.
 
+### Since then
+
+- **Names the playbook defines are refused** (step 2 above; 2026-09-28,
+  with the lab launcher). Until then the helper took any `vault_*` name,
+  and this README and `lab-host/README.md` could only ask the owner never
+  to set `vault_enabled` and its kind. The run after it lands reports the
+  copy task `changed` once more.
+- **Python runs isolated** (`-I`), in all four places the helper starts it.
+  `python -` and `python -c` otherwise put the current directory first on
+  `sys.path`, so a `yaml.py` wherever the owner ran `sudo` from would have
+  run as root, the value-carrying step included. Found in the security
+  review of the lab launcher's pull request; the test plants a `yaml.py` in
+  the working directory and fails without `-I`.
+
 ## Tests
 
 `tests/hcw-vault-set.test.sh` runs `files/hcw-vault-set` as it ships, as
 root, against a scratch `HCW_VAULT_DIR` and a real `ansible-vault`. It
 checks:
 
-- the helper's two tool paths are where `bootstrap.sh` installs them;
+- the helper's two tool paths are where `bootstrap.sh` installs them, and
+  its checkout is where `bootstrap.sh` keeps it;
 - bad key names are refused (exit 2) and create nothing;
+- against this repository's own playbook, `vault_enabled`, `vault_api_port`
+  and the `vault` role's task vars `vault_seal_status` and
+  `vault_state_advice` are refused, and every key the playbook reads from
+  the vault passes;
+- in a checkout made for the test, every kind of definition step 2 lists is
+  refused with its file named, a name that is only a value passes, and a
+  file that does not parse, a checkout with no role, or no checkout refuses
+  every key;
+- a `yaml.py` in the working directory is never imported;
 - empty values are refused, before and after the vault exists;
 - a missing password and a wrong one are refused;
 - two keys can be set and one replaced, with CR, LF, BOM and spaces
@@ -106,9 +152,11 @@ a host, see `lab-host/README.md`, "Validating without a host".
 
 ## Variables
 
-None. `files/hcw-vault-set` names `/etc/hcw/ansible` itself, and the
-documentation and the owner's one-liners name `/usr/local/sbin/hcw-vault-set`,
-so neither path can move alone. `meta/argument_specs.yml` says so.
+None. `files/hcw-vault-set` names `/etc/hcw/ansible` and `/opt/hcw-src`
+itself (the second is `bootstrap.sh`'s `HCW_SRC_DIR` default, which the
+test holds it to), and the documentation and the owner's one-liners name
+`/usr/local/sbin/hcw-vault-set`, so no path can move alone.
+`meta/argument_specs.yml` says so.
 
 ## Check mode
 

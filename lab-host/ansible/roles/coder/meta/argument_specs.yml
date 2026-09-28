@@ -7,10 +7,11 @@ argument_specs:
         the digest-pinned images and the host's docker group id, and writes Coder's secrets
         (GitHub OAuth client id and secret, the PostgreSQL password) from vault variables into
         two root-only env files, one per service, with no_log.
-      - With coder_enabled true it runs docker compose up, renders the Caddy route for
-        coder.<domain> and *.coder.<domain> into conf.d and starts a nightly pg_dump timer
-        keeping seven days under /var/backups/coder. With it false it runs docker compose down
-        (volumes kept), empties the secret files, removes the route and stops the timer.
+      - With coder_enabled true it runs docker compose up, installs the lab launcher's static
+        files, renders the Caddy route for coder.<domain> and *.coder.<domain> into conf.d and
+        starts a nightly pg_dump timer keeping seven days under /var/backups/coder. With it false
+        it runs docker compose down (volumes kept), empties the secret files, removes the
+        launcher and the route and stops the timer.
       - Fails closed when enabled without a non-empty GitHub organisation allowlist, without
         all three secrets, with a password that needs URL escaping, or on a host whose memory
         cannot hold coder_max_workspaces workspaces (ADR 0032).
@@ -149,6 +150,16 @@ argument_specs:
         type: str
         required: false
         description: Body Caddy returns with 503 for the coder names when the coder service is stopped.
+      coder_launcher_dir:
+        type: path
+        required: false
+        default: /etc/caddy/hcw-lab-launcher
+        description:
+          - Where the lab launcher's static files (lab-host/coder/launcher/) are installed, root-owned
+            and readable by coder_caddy_group. The Caddy route serves them at /_hcw/lab/ on
+            coder_domain, the page the site's panes load. Anything else in it is removed, and so is
+            the directory while Coder is disabled, so the role refuses any path but a directory of
+            its own, /etc/caddy/hcw-<name>.
       coder_backup_dir:
         type: path
         required: false

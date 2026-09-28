@@ -432,6 +432,35 @@ Consequences of this amendment:
   organisation) also lands back on the pane, which shows Coder's sign-in
   page again.
 
+**Note, 2026-09-28: the lab launcher closes the code-server blocker.** The
+third consequence above, code-server opening nothing a learner can use, is
+resolved without loosening #750's lock. The pane now loads a small static
+page on Coder's own name, `https://coder.lab.hybridcloudworks.com/_hcw/lab/?lab=<id>`
+(`lab-host/coder/launcher/`, served by Caddy with a strict policy of its
+own, `Cache-Control: no-store` and no top-level exemption, so a direct
+visit still goes to `/education/labs`). With the learner's own Coder
+session, GET only and same origin, it reads their workspace for that lab,
+named from a fixed map the site's catalogue shares (`lab-lzb`, `lab-tfv`,
+`lab-asc`). It shows Coder's own create page, with Coder's consent dialog,
+or Coder's own workspace page, where Start is, in a frame of its own when
+the learner must act. When the build is running, the agent ready and
+code-server healthy, it checks that code-server's `subdomain_name` is
+exactly the name Coder builds for that workspace and the signed-in
+learner, and replaces itself with that name under a fixed suffix. code-server stays on its own
+origin, and path apps stay off (`CODER_DISABLE_PATH_APPS`, #760).
+`frame-src`, the sandbox and `allow` are unchanged. The launcher posts its
+state to the site, which accepts it only from Coder's origin and the pane's
+own window, and shows it on the toolbar. On the same day the pane stopped
+depending on the status token: point 5's status read now says configured
+with `CODER_URL` alone and reachable from Coder's unauthenticated
+`/api/v2/buildinfo`, and the token adds only the card's templates and
+running count, so the second consequence above no longer holds. Rejected on
+the way (research against Coder v2.37.3): POSTs with a scraped CSRF token
+(undocumented, and it skips Coder's consent), a launcher served as a path
+app (a workspace's JavaScript on the dashboard's origin), rewriting Coder's
+HTML in Caddy, and exempting same-site top-level visits (which would end
+panes-only).
+
 ## Consequences and accepted risks
 
 - **Two Terraform workspaces, two lifecycles.** A change to the lab host is a
@@ -609,6 +638,9 @@ Consequences of this amendment:
     the tab the pane opens, and comes back to the lab's page with the
     workspace in the pane; a direct visit to
     `https://coder.lab.hybridcloudworks.com` still lands on
+    `/education/labs`. Since the launcher note under it: after Coder's
+    **Confirm and Create**, code-server opens inside the pane, and a direct
+    visit to `https://coder.lab.hybridcloudworks.com/_hcw/lab/` also lands on
     `/education/labs`.
 - **Revisit when:**
   - the owner decides to open public submission, which is a revision of §6 of
@@ -625,7 +657,8 @@ Consequences of this amendment:
   - a second lab host is wanted, which reopens the single-workspace and
     single-Compose assumptions;
   - code-server is to open inside the pane rather than from Coder's app
-    button, which leaves it (the amendment "Coder in the site's panes");
+    button, which leaves it (the amendment "Coder in the site's panes";
+    done 2026-09-28 by the lab launcher, the note under that amendment);
   - the `hostinger/hostinger` provider changes its `hostinger_vps` resource
     incompatibly or is abandoned.
 

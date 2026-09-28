@@ -8,7 +8,8 @@ argument_specs:
         vault").
       - Installs files/hcw-vault-set as /usr/local/sbin/hcw-vault-set, root:root 0750. The helper
         sets one vault_* key of /etc/hcw/ansible/vault.yml from stdin, never printing a value, and
-        replaces the file by rename.
+        replaces the file by rename. It refuses a key the playbook in /opt/hcw-src defines as a
+        variable, which the vault, passed with -e, would otherwise override.
       - This is the Ansible vault the playbook reads, not HashiCorp Vault; the vault role runs
         that. The role takes no variables, because the helper and the documentation name both
         paths.

@@ -256,8 +256,8 @@ hcw-vault-set: set vault_cloudflare_api_token (value not shown). Keys in the vau
 
 `the value on stdin was empty; nothing changed` means the clipboard was
 empty, and `refusing key name` means the last word is not `vault_` followed
-by lower-case letters, digits and underscores. In both cases the vault is
-exactly as it was. `no vault password at /etc/hcw/ansible/vault-password`
+by lower-case letters, digits and underscores, or is a name the playbook
+itself defines (below). In both cases the vault is exactly as it was. `no vault password at /etc/hcw/ansible/vault-password`
 means the two lines above have not run. `-n` makes `sudo` fail at once
 rather than wait at a password prompt nobody can see; `hcwadmin`'s sudo
 asks for none.
@@ -316,10 +316,25 @@ without moving the host to a newer commit.
 `vault_enabled`, `vault_version`, `vault_checksum` and
 `vault_pgp_key_checksum` in `ansible/group_vars/all.yml` are not keys of
 this file: they belong to the role that runs HashiCorp Vault (below), whose
-name is `vault`, and none of them is a secret. `hcw-vault-set` accepts any
-`vault_` name, so it cannot tell them apart; never set one there, because
-`bootstrap.sh` passes `vault.yml` with `-e`, and a key in it overrides
-`group_vars`.
+name is `vault`, and none of them is a secret. Neither are that role's own
+`vault_*` defaults and vars, such as `vault_api_port`. `bootstrap.sh`
+passes `vault.yml` with `-e`, and an extra var outranks every other
+variable, so a key there with one of those names would silently replace
+it. `hcw-vault-set` refuses any key the playbook defines: a top-level
+variable of `ansible/group_vars/`, `host_vars/` or any role's `defaults/`
+or `vars/`, or a name a play, the inventory, or a role's task or handler
+sets as it runs (`vars`, `register`, `set_fact`). It reads those from the
+checkout the host runs, `/opt/hcw-src`, each time, so a variable added
+later is refused without a change to the helper
+(`ansible/roles/vault_tools/README.md` has the exact list).
+Refused, it prints the file that defines the name, for example:
+
+```text
+hcw-vault-set: refusing key name 'vault_enabled': lab-host/ansible/group_vars/all.yml defines it, and vault.yml is passed with -e, so the key would override that variable; nothing changed
+```
+
+None of the keys in the table above is refused (the helper's test checks
+each one against the checkout).
 
 The four `vault_labs_agent_*` keys and the three `vault_coder_*` keys can be
 added later: until all four exist the agent stays stopped and the play says
@@ -386,6 +401,23 @@ level is the GitHub sign-in, because GitHub's pages cannot be framed. The
 CLI, the workspace agents and the site's status proxy send no browser
 navigation headers, so they are unaffected.
 
+**What a pane opens is the lab launcher**, not a Coder page:
+`https://coder.lab.hybridcloudworks.com/_hcw/lab/?lab=<id>`, four static
+files from `../coder/launcher/` that the `coder` role installs in
+`/etc/caddy/hcw-lab-launcher` and Caddy serves
+(`ansible/roles/coder/templates/10-coder.caddy.j2`). Coder's dashboard opens code-server in a new window or tab, which the
+panes-only rule turns into the labs page, so from the dashboard the editor
+never opened in a pane. The launcher reads the learner's workspace with
+their own session, GET only. A workspace that does not exist yet gets
+Coder's own create page, and a stopped one Coder's own workspace page, in a
+frame inside the pane, where the learner confirms or presses Start. Once
+code-server is healthy the launcher replaces itself with code-server's own
+name, `code-server--<workspace>--<owner>.coder.lab.hybridcloudworks.com`.
+Each learner has one workspace per lab, named in the launcher's
+`LAB_WORKSPACES` (`lab-lzb`, `lab-tfv` and `lab-asc`, the same names as the
+site's catalogue). The launcher has no top-level exemption: opened in a tab,
+it is redirected like any other Coder page.
+
 **An empty allowlist is not a lock.** Coder treats an empty
 `CODER_OAUTH2_GITHUB_ALLOWED_ORGS` as "no organisation restriction" and lets
 any GitHub account sign in, so `site.yml` asserts in `pre_tasks`, and the
@@ -442,9 +474,12 @@ Caddy. PowerShell, on the workstation:
 Invoke-RestMethod https://coder.lab.hybridcloudworks.com/api/v2/buildinfo | Select-Object version
 ```
 
-That prints `v2.37.3` followed by a build suffix. In a pane on the site,
-Coder's login page shows a **Sign in with GitHub** button and no password
-form.
+That prints `v2.37.3` followed by a build suffix. That answer is also what
+opens the site's panes: the site's status read asks the same address, with
+no token, and a lab's pane opens once it answers. Signed out, a pane shows
+`You're not signed in. Use Sign in with GitHub above to open your lab
+workspace here.`, and the page's **Sign in with GitHub** button is the way
+in.
 
 ### First admin sign-in
 
@@ -471,11 +506,11 @@ coder users show me
 
 Success is a `Roles` row reading `Owner`. Every later sign-in is a member.
 
-The site's panes stay closed until the status token is seeded ("The status
-token for the site", below), and that needs this sign-in's session. So
-before opening the address above, open the browser's developer tools as in
-step 1 there, and take the session from this sign-in rather than signing in
-twice.
+The site's panes do not wait for the status token ("The status token for
+the site", below): they open as soon as Coder answers, and this sign-in is
+what they then use. The **Sign in with GitHub** button on any lab's page on
+the site starts the same sign-in in a tab of its own, and brings that tab
+back to the lab.
 
 If the tab shows `You aren't a member of the authorized Github
 organizations!` instead of the labs page, GitHub did not report the account
@@ -496,11 +531,9 @@ winget install Coder.Coder
 
 A plain `coder login` opens Coder's `/cli-auth` page in a browser tab. That
 is a direct visit, so it lands on the labs page and never shows the token.
-Sign the CLI in with a token instead. Create one in the Coder dashboard in a
-pane on the site (the account menu, then **Account**, then **Tokens**; Coder's
-path is `/settings/tokens`) and copy it. The panes open only once the
-status token is seeded (below); before that, the sign-in session from its
-step 1 works here too. Then, PowerShell, with the token on the clipboard:
+Sign the CLI in with a token instead, made in a pane: step 1 of "The status
+token for the site", below, has where to find Coder's **Tokens** page in
+one. Then, PowerShell, with the token on the clipboard:
 
 ```powershell
 coder login https://coder.lab.hybridcloudworks.com --token (Get-Clipboard)
@@ -528,21 +561,31 @@ reference — `templates edit --default-ttl` is where it lives (a
 same command for first and later publishes). Success: `coder templates
 list` shows `hcw-lab`, and the template's schedule page
 (`/templates/hcw-lab/settings/schedule`, in a pane) shows a default
-autostop of 1 hour. A workspace from it is
-`https://coder.lab.hybridcloudworks.com/templates/hcw-lab/workspace?mode=auto&param.lab=terraform-validate-walkthrough`
-loaded in a pane. That is the shape of the site's Open in Coder links
-(#681). Those links open the address at the top level, which since
-2026-09-28 lands on the labs page, so they have to open it in a pane.
+autostop of 1 hour. A workspace from it is what a lab's pane on the site
+creates, through the lab launcher: for example
+https://hybridcloudworks.com/education/labs/terraform-validate-walkthrough,
+signed in, shows Coder's `Warning: Automatic Workspace Creation` dialog
+with `lab: terraform-validate-walkthrough` under Parameters. **Confirm and
+Create** creates the workspace `lab-tfv`, and once code-server is healthy
+the pane opens it with that lab's folder.
 
 ### The status token for the site
 
 The site's Coder card (#680) reads Coder with `CODER-STATUS-TOKEN`, from
 the Function App, never the browser. `functions/src/lib/labs/coder-status.js`
-makes three calls: `GET /api/v2/templates`, `GET
+makes three calls with it: `GET /api/v2/templates`, `GET
 /api/v2/templateversions/{id}` for each template's active version, and `GET
 /api/v2/workspaces?q=status:running`, whose `count` is the running figure
 on the card. Its requests carry no `Sec-Fetch-Dest`, so the panes-only
 rule passes them.
+
+**The token is not what opens the panes.** Whether Coder answers comes from
+`GET /api/v2/buildinfo`, which needs no token, and a lab's pane opens on
+that alone, with only `CODER-URL` set. Without the token, or with one Coder
+refuses (expired or revoked), the card says only that Coder is reachable,
+lists no templates and counts nothing, and the Function App logs a warning
+naming `CODER_STATUS_TOKEN`. So the panes work before this section is done,
+and keep working if the token lapses.
 
 **What the token is, and why.** On Coder Community v2.37.3 the least
 privilege that answers all three correctly is a token scoped to
@@ -579,28 +622,34 @@ workstation and nothing is a top-level visit. The CLI needs one token of
 yours to act as the owner, which it reads from standard input, so it never
 appears on a command line.
 
-1. **A token of yours.** The site's panes open only once the Coder card's
-   read answers reachable (`frontend/src/pages/shared/LabPanePage.jsx`),
-   and that read needs the token these steps make. So the first time there
-   is no pane to make a token in. Use the session your GitHub sign-in makes
-   instead:
+1. **A token of yours, made in a pane.** The panes open as soon as Coder
+   answers, before this token exists, so the token the CLI needs is made
+   in Coder's own **Tokens** page inside one:
 
-   1. Open a new browser tab, open the developer tools (F12), choose
-      **Network**, and tick **Preserve log**.
-   2. In that tab, open
-      https://coder.lab.hybridcloudworks.com/api/v2/users/oauth2/github/callback
-      and sign in with GitHub, as in "First admin sign-in". The tab ends on
-      the labs page.
-   3. In the Network list, choose the request whose name starts
-      `callback?code=`, open its **Cookies** tab, and copy the **Value** of
-      `coder_session_token` under **Response Cookies**.
+   1. Signed in (the **Sign in with GitHub** button on the page below does
+      it), open the pane of a lab you have no workspace for yet. The first
+      time, that is any of them, for example
+      https://hybridcloudworks.com/education/labs/landing-zone-builder-output.
+   2. The pane shows Coder's own page for creating that workspace, with a
+      dialog titled `Warning: Automatic Workspace Creation`. Choose
+      **Cancel**. The page stays, now as Coder's create form, with Coder's
+      account menu at its top right.
+   3. Open that menu, choose **Account**, then **Tokens** (Coder's path is
+      `/settings/tokens`), then **Add token**. Name it `hcw-setup`, choose
+      the shortest expiry the form offers, create it and copy the token,
+      which Coder shows once.
 
-   That is your owner session. It lasts 24 hours (Coder's default
-   `--session-duration`), and it is only ever piped into the two lines
-   below. Once the panes open (after step 4), a renewal can use a token
-   made in a pane instead: the account menu, **Account**, then **Tokens**
-   (Coder's path is `/settings/tokens`), then **Add token**, named
-   `hcw-setup`, with the shortest expiry the form offers.
+   Do it within ten minutes of opening the pane: after that the pane stops
+   waiting for the workspace and says the workspaces are unavailable, and
+   reloading the page starts it again. A lab whose workspace is stopped
+   shows Coder's workspace page instead, with the same menu, which works
+   too; one whose workspace is running opens the editor, which has no menu.
+
+   A named token rather than the sign-in session, which this step used to
+   take out of the browser's developer tools: it is created and deleted
+   (step 5) in Coder's own page, it expires on its own well before the
+   session would be renewed, and copying it does not copy the browser's
+   whole signed-in session.
 
 2. **The user and its role.** PowerShell, with that token on the clipboard:
 
@@ -643,14 +692,14 @@ appears on a command line.
    ```
 
    Success is `configured` `True` and `reachable` `True`, with `capacity`
-   showing `running` and `max` 5, and `templates` listing `hcw-lab` once it
-   is published ("Publishing the template", above; empty before that).
-   `reachable` `False` means Coder refused the token or did not answer, and
-   the check in step 3 tells which.
+   showing `running` as a number and `max` 5, and `templates` listing
+   `hcw-lab` once it is published ("Publishing the template", above; empty
+   before that). `running` still empty (no number) means Coder refused the
+   token, and the check in step 3 tells why. `reachable` `False` means Coder
+   did not answer at all, token or not.
 
-5. **Retire the step 1 token.** A sign-in session ends by itself after 24
-   hours. A pane token is deleted in the pane: **Account**, **Tokens**,
-   then delete `hcw-setup`.
+5. **Retire the step 1 token.** In a pane, as in step 1: **Account**,
+   **Tokens**, then delete `hcw-setup`.
 
 Then, in a pull request, take `CODER_STATUS_TOKEN` off `EXPECTED_UNRESOLVED`
 in `scripts/check-unresolved-secrets.mjs`, which `infra/functionapp.tf` asks
@@ -658,7 +707,9 @@ for once it is seeded, so from then on an unresolved reference fails the
 monitor like any other.
 
 The token expires a year after step 3, and nothing renews it: put the date
-in the calendar. To renew, run steps 1, 3, 4 and 5 again. Step 3 makes a
+in the calendar. If it lapses first, the panes keep opening and the card
+stops listing templates and counting workspaces until it is renewed. To
+renew, run steps 1, 3, 4 and 5 again. Step 3 makes a
 new token each time (Coder names each one, which is why the line gives no
 `--name`), and the old one stops working at its own expiry.
 `coder tokens list --all` lists both, with `hcw-status` as their owner.
@@ -686,7 +737,11 @@ sudo docker compose --project-directory /etc/hcw/coder stop coder
 Caddy then answers **503** `Lab workspaces aren't available right now.`,
 the site's own sentence for the same state, for
 `coder.lab` and every `*.coder.lab` name; running workspaces lose their
-agent connection and stop themselves at their deadline. Durable: a pull
+agent connection and stop themselves at their deadline. The lab launcher's
+files are Caddy's own, so a pane opened after the stop still loads the
+launcher; its reads of Coder then get that 503, and within about fifteen
+seconds it says the same sentence. Within a minute the site's status read
+sees Coder gone too, and the lab pages stop opening panes at all. Durable: a pull
 request setting `coder_enabled: false`, which also removes the Caddy route
 (the names answer Caddy's 404) and stops the backup timer; the PostgreSQL
 volume stays, so re-enabling brings the same users and templates back.

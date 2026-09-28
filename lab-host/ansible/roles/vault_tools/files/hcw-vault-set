@@ -2,15 +2,74 @@
 # hcw-vault-set KEY  (value on stdin)
 # Sets one key in the lab host's Ansible vault without printing any value.
 # The value comes on stdin so it never appears in argv, a shell history or a log.
+# Python runs isolated (-I): no current directory on sys.path, so a stray
+# yaml.py where the owner happens to be cannot run as root, and no PYTHON*
+# environment.
 set -euo pipefail
 key="${1:?usage: hcw-vault-set <vault_key>   (the value is read from stdin)}"
 [[ "$key" =~ ^vault_[a-z0-9_]+$ ]] || { echo "hcw-vault-set: refusing key name '$key' (expected vault_[a-z0-9_]+)" >&2; exit 2; }
 dir="${HCW_VAULT_DIR:-/etc/hcw/ansible}"
+src="${HCW_SRC_DIR:-/opt/hcw-src}"
 vault="$dir/vault.yml"
 pass="$dir/vault-password"
 next="$dir/.vault.yml.hcw-vault-set.$$"
 py=/opt/uv/tools/ansible-core/bin/python
 av=/usr/local/bin/ansible-vault
+# bootstrap.sh passes vault.yml with -e, and an extra var outranks every other
+# variable, so a key the playbook also defines would silently replace it:
+# vault_enabled or vault_api_port, say, which belong to the role that runs
+# HashiCorp Vault. The playbook the host runs is the checkout bootstrap.sh
+# keeps at /opt/hcw-src, read now rather than a list kept here.
+"$py" -I - "$src" "$key" <<'PY' || exit 2
+import pathlib, sys, yaml
+src, key = pathlib.Path(sys.argv[1]), sys.argv[2]
+ansible = src / "lab-host" / "ansible"
+override = "and vault.yml is passed with -e, so the key would override that variable"
+def refuse(why):
+    print(f"hcw-vault-set: refusing key name '{key}': {why}; nothing changed", file=sys.stderr)
+    sys.exit(2)
+def load(path):
+    try:
+        return yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as error:
+        refuse(f"cannot read {path} to check it ({type(error).__name__})")
+def yaml_under(*patterns):
+    return sorted({p for pattern in patterns for suffix in ("yml", "yaml") for p in ansible.glob(f"{pattern}.{suffix}")})
+SET_FACT = {"set_fact", "ansible.builtin.set_fact", "ansible.legacy.set_fact"}
+def names_set_in(node):
+    # Every name a play, a task at any depth, a handler or the inventory sets:
+    # vars, register, set_fact (either form) and an inventory host's own vars.
+    if isinstance(node, list):
+        for item in node:
+            yield from names_set_in(item)
+    elif isinstance(node, dict):
+        for name, value in node.items():
+            if name == "vars" and isinstance(value, dict):
+                yield from value
+            elif name == "register" and isinstance(value, str):
+                yield value
+            elif name in SET_FACT and isinstance(value, dict):
+                yield from value
+            elif name in SET_FACT and isinstance(value, str):
+                yield from (token.split("=", 1)[0] for token in value.split() if "=" in token)
+            elif name == "hosts" and isinstance(value, dict):
+                for host in value.values():
+                    if isinstance(host, dict):
+                        yield from host
+            yield from names_set_in(value)
+if not (ansible / "group_vars" / "all.yml").is_file() or not yaml_under("roles/*/tasks/main"):
+    refuse(f"cannot check it against the playbook, because there is no checkout at {src}")
+# Files whose top-level keys are variables.
+for path in yaml_under("group_vars/**/*", "host_vars/**/*", "roles/*/defaults/**/*", "roles/*/vars/**/*"):
+    data = load(path)
+    if isinstance(data, dict) and key in data:
+        refuse(f"{path.relative_to(src)} defines it, {override}")
+# Files that set variables as they run: the playbooks, the inventory, and
+# every role's tasks and handlers.
+for path in yaml_under("*", "inventory/**/*", "roles/*/tasks/**/*", "roles/*/handlers/**/*"):
+    if key in set(names_set_in(load(path))):
+        refuse(f"{path.relative_to(src)} sets it, {override}")
+PY
 [ -s "$pass" ] || { echo "hcw-vault-set: no vault password at $pass" >&2; exit 2; }
 tmp="$(mktemp -d)"; chmod 700 "$tmp"
 cleanup() { find "$tmp" -type f -exec shred -u {} + 2>/dev/null || true; rm -rf "$tmp"; rm -f "$next"; }
@@ -18,7 +77,7 @@ trap cleanup EXIT
 umask 077
 tr -d '\r' > "$tmp/value"
 if [ -f "$vault" ]; then "$av" view --vault-password-file "$pass" "$vault" > "$tmp/plain"; else : > "$tmp/plain"; fi
-"$py" - "$tmp/plain" "$tmp/value" "$key" <<'PY'
+"$py" -I - "$tmp/plain" "$tmp/value" "$key" <<'PY'
 import sys, yaml
 plain, value_file, key = sys.argv[1:4]
 # utf-8-sig: a leading byte order mark, which Windows tools can put on piped
@@ -34,11 +93,11 @@ with open(plain, "w", encoding="utf-8") as fh:
     yaml.safe_dump(data, fh, default_flow_style=False, sort_keys=True)
 PY
 "$av" encrypt --vault-password-file "$pass" --output "$tmp/new" "$tmp/plain" >/dev/null 2>&1
-"$av" view --vault-password-file "$pass" "$tmp/new" | "$py" -c "import sys,yaml; d=yaml.safe_load(sys.stdin); assert isinstance(d,dict) and d.get(sys.argv[1]), 'verify failed'" "$key"
+"$av" view --vault-password-file "$pass" "$tmp/new" | "$py" -I -c "import sys,yaml; d=yaml.safe_load(sys.stdin); assert isinstance(d,dict) and d.get(sys.argv[1]), 'verify failed'" "$key"
 # Written beside the vault and renamed over it, so vault.yml is always the old
 # file or the new one. install alone unlinks vault.yml before it writes the
 # copy, and a run that stopped in between (a full disk) would lose the vault.
 install -m 0600 -o root -g root "$tmp/new" "$next"
 mv -f "$next" "$vault"
-names="$("$av" view --vault-password-file "$pass" "$vault" | "$py" -c "import sys,yaml; print(', '.join(sorted(yaml.safe_load(sys.stdin))))")"
+names="$("$av" view --vault-password-file "$pass" "$vault" | "$py" -I -c "import sys,yaml; print(', '.join(sorted(yaml.safe_load(sys.stdin))))")"
 echo "hcw-vault-set: set $key (value not shown). Keys in the vault: $names"

@@ -66,6 +66,9 @@ describe('the other words', () => {
     expect(capacityWords({ running: 1, max: 5 })).toBe('1 of 5 workspaces running');
     expect(capacityWords({ running: 0, max: 1 })).toBe('0 of 1 workspace running');
     expect(capacityWords(null)).toBe('capacity unknown');
+    // The status read's "count unknown" is null, and Number(null) is 0.
+    expect(capacityWords({ running: null, max: 5 })).toBe('capacity unknown');
+    expect(capacityWords({ running: 2 })).toBe('capacity unknown');
     expect(policyWords({ compliant: 12, nonCompliant: 1 })).toBe('12 compliant, 1 non-compliant');
     expect(policyWords(null)).toBe('not evaluated');
     expect(agentWords({ online: true, queued: 2 })).toBe('online, 2 jobs queued');

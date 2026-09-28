@@ -20,6 +20,12 @@
  * `{{ variable }}` taken from the role's defaults/main.yml, so a new
  * `respond` in any of them is scanned too.
  *
+ * The lab launcher (lab-host/coder/launcher/) is the page every pane opens
+ * on, so everything it can put in front of a visitor is scanned the same
+ * way: each of its messages, and the words in its page. It says "your lab
+ * workspace", never the tool behind it, and its `unavailable` is the site's
+ * sentence too.
+ *
  * In the CI matrix this runs in the `scripts (operations)` row, whose filter
  * covers lab-host/ and LabPanePage.jsx.
  */
@@ -27,6 +33,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { MESSAGES as LAUNCHER_MESSAGES } from '../lab-host/coder/launcher/launcher.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (relative) => readFileSync(path.join(repoRoot, relative), 'utf8');
@@ -131,6 +138,40 @@ describe('what a pane can show from the lab host', () => {
     expect(sentence, `${PANE_PAGE} no longer exports UNAVAILABLE_SENTENCE`).not.toBeNull();
     expect(DEFAULTS.coder_unavailable_response).toBe(sentence[1]);
     expect(responds(read(CODER_ROUTE))).toEqual([{ body: sentence[1], status: 503 }]);
+  });
+});
+
+describe('what the lab launcher can show', () => {
+  const LAUNCHER_PAGE = 'lab-host/coder/launcher/index.html';
+
+  /** The words in the launcher's page: its title, its first status line and its no-script note. */
+  const pageWords = read(LAUNCHER_PAGE)
+    .replace(/<script\b[\s\S]*?<\/script\b[^>]*>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  it('scans the words in its page', () => {
+    expect(pageWords).toContain('Your lab workspace');
+    expect(pageWords).toContain(LAUNCHER_MESSAGES.checking);
+    expect(termsIn(pageWords)).toEqual([]);
+  });
+
+  it.each(Object.entries(LAUNCHER_MESSAGES))('its "%s" message names no tool, host or setting', (_key, text) => {
+    expect(text.trim()).not.toBe('');
+    expect(termsIn(text)).toEqual([]);
+    expect(text).not.toMatch(/code-server|\bvps\b|coder/i);
+  });
+
+  it('says "unavailable" with the site’s own sentence for the same state', () => {
+    const sentence = read(PANE_PAGE).match(/export const UNAVAILABLE_SENTENCE = "([^"]+)";/);
+    expect(sentence, `${PANE_PAGE} no longer exports UNAVAILABLE_SENTENCE`).not.toBeNull();
+    expect(LAUNCHER_MESSAGES.unavailable).toBe(sentence[1]);
+  });
+
+  it('points a visitor with no session at the site’s own sign-in button', () => {
+    expect(LAUNCHER_MESSAGES['signed-out']).toContain('Sign in with GitHub');
+    expect(read(PANE_PAGE)).toContain('Sign in with GitHub <span className="sr-only">(opens in a new tab)</span>');
   });
 });
 

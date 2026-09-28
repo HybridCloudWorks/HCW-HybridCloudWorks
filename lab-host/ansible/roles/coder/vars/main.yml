@@ -7,6 +7,19 @@ coder_postgres_image_ref: "{{ coder_postgres_image }}@{{ coder_postgres_image_di
 # The Compose file in this repository is the one source; the role copies it
 # rather than carrying a second copy under files/.
 coder_compose_source: "{{ role_path }}/../../../coder/docker-compose.yml"
+# The launcher's files, the same way: the repository's lab-host/coder/launcher/
+# is the one source. They are named, so the role can remove anything else from
+# the directory Caddy serves; scripts/lab-host-launcher.test.mjs fails when
+# this list and the directory differ.
+coder_launcher_source: "{{ role_path }}/../../../coder/launcher"
+coder_launcher_files:
+  - index.html
+  - launcher.css
+  - launcher.js
+  - main.js
+# The role removes coder_launcher_dir, and everything in it, while Coder is
+# disabled, so it must be a directory of the launcher's own.
+coder_launcher_dir_pattern: '^/etc/caddy/hcw-[a-z0-9-]+$'
 coder_secrets_present: >-
   {{ coder_oauth2_github_client_id | length > 0
      and coder_oauth2_github_client_secret | length > 0

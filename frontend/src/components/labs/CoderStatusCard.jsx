@@ -10,6 +10,12 @@
  * (`reachable: false`, a cached failure). The last one is the important one —
  * the server caches the failed state on purpose so this card says
  * "unavailable" rather than showing numbers from before the outage.
+ *
+ * Reachable comes in two forms. With the server's read-only token it carries
+ * the templates and the running count. Without one, or with one Coder
+ * refused, it carries `running: null` and no templates, and the card says
+ * only that Coder is reachable: counting nobody or listing no template would
+ * both be claims the read cannot make.
  */
 import React from 'react';
 import { formatLocalDateTime } from '@/lib/cloudPricing';
@@ -68,14 +74,25 @@ function TemplateList({ templates }) {
   );
 }
 
-/** The healthy state: reachable, with templates and capacity. */
+/**
+ * Whether the read knows what Coder holds. It sends `running: null` on a
+ * reachable answer when it could not read the detail, and a number whenever
+ * it could (functions/src/lib/labs/coder-status.js), so an empty template
+ * list then means "not known", not "none yet".
+ */
+const detailKnown = (status) => typeof status.capacity?.running === 'number';
+
+/** The reachable state: with templates and capacity when they are known, and nothing invented when not. */
 function CoderFacts({ status }) {
+  const known = detailKnown(status);
   return (
     <>
       <p className="text-sm text-slate-900 dark:text-slate-100" data-testid="coder-status">
-        Coder is reachable: {capacityWords(status.capacity)}.
+        {known ? `Coder is reachable: ${capacityWords(status.capacity)}.` : 'Coder is reachable.'}
       </p>
-      <TemplateList templates={Array.isArray(status.templates) ? status.templates : []} />
+      {known ? (
+        <TemplateList templates={Array.isArray(status.templates) ? status.templates : []} />
+      ) : null}
       {status.asOf ? (
         <p className={`text-xs ${MUTED}`} data-testid="coder-as-of">
           As of {formatLocalDateTime(status.asOf)}; refreshed about once a minute.

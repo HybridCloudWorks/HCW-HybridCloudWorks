@@ -34,6 +34,18 @@
     quiet: true
   when: coder_enabled | bool
 
+# Enabled or not: the launcher's directory is removed, with everything in it,
+# while Coder is disabled.
+- name: Refuse a lab launcher directory that is not one of its own
+  ansible.builtin.assert:
+    that:
+      - coder_launcher_dir is match(coder_launcher_dir_pattern)
+    fail_msg: >-
+      coder_launcher_dir is {{ coder_launcher_dir }}. It must be a directory of the lab
+      launcher's own, /etc/caddy/hcw-<name>, because the role serves everything in it and
+      removes it, with everything in it, while Coder is disabled.
+    quiet: true
+
 - name: Refuse a workspace capacity the host's memory cannot hold
   ansible.builtin.assert:
     that:
@@ -132,6 +144,53 @@
     project_src: "{{ coder_project_dir }}"
     state: absent
     remove_orphans: true
+  when: not coder_enabled | bool
+
+# The lab launcher, before the route that serves it. Caddy's file_server reads
+# the files on every request, so a changed file needs no reload.
+- name: Create the lab launcher's directory, readable by Caddy
+  ansible.builtin.file:
+    path: "{{ coder_launcher_dir }}"
+    state: directory
+    owner: root
+    group: "{{ coder_caddy_group }}"
+    mode: "0750"
+  when: coder_enabled | bool
+
+- name: Install the lab launcher's files from the repository checkout
+  ansible.builtin.copy:
+    src: "{{ coder_launcher_source }}/{{ item }}"
+    dest: "{{ coder_launcher_dir }}/{{ item }}"
+    owner: root
+    group: "{{ coder_caddy_group }}"
+    mode: "0640"
+  loop: "{{ coder_launcher_files }}"
+  when: coder_enabled | bool
+
+# Caddy serves whatever is in the directory, so a file the repository no
+# longer has must not stay behind.
+- name: Find anything in the lab launcher's directory that is not one of its files
+  ansible.builtin.find:
+    paths: "{{ coder_launcher_dir }}"
+    file_type: any
+    hidden: true
+    excludes: "{{ coder_launcher_files }}"
+  register: coder_launcher_extra
+  when: coder_enabled | bool
+
+- name: Remove it
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ coder_launcher_extra.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+  when: coder_enabled | bool
+
+- name: Remove the lab launcher while Coder is disabled
+  ansible.builtin.file:
+    path: "{{ coder_launcher_dir }}"
+    state: absent
   when: not coder_enabled | bool
 
 - name: Render the Caddy route for the coder names

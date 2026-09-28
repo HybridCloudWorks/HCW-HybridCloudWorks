@@ -10,27 +10,51 @@
  * `tool_service_cache`, refreshed at most once a minute however many visitors
  * open the page (minute-cache.js).
  *
- * Three answers, all 200, the last two cached for a minute:
+ * THE PANES OPEN ON THIS READ. `/education/labs/<id>` shows a lab's pane only
+ * when this answers configured and reachable (LabPanePage.jsx), so those two
+ * depend on nothing but Coder's address and Coder answering. Before the lab
+ * launcher (2026-09-28) both also needed the status token: the owner's first
+ * sign-in could not happen in a pane, because the token that opened the
+ * panes was made from that sign-in, and the token's one-year expiry would
+ * have closed every pane on the day it lapsed. The token now adds the
+ * card's templates and running count, and nothing else.
+ *
+ * Four answers, all 200, the last three cached for a minute:
  *
  *   { configured: false }
- *       CODER_URL or CODER_STATUS_TOKEN is absent, or still the unresolved
+ *       CODER_URL is absent, not an https URL, or still the unresolved
  *       `@Microsoft.KeyVault(…)` literal an unseeded reference arrives as. The
  *       card reads "not yet provisioned". No store read, no network.
  *   { configured: true, reachable: false, templates: [], capacity: { running: null, max }, asOf }
- *       Coder refused, timed out, or answered something that was not the
- *       documented shape.
+ *       `GET /api/v2/buildinfo` refused, timed out, or answered something
+ *       that was not the documented shape.
+ *   { configured: true, reachable: true, templates: [], capacity: { running: null, max }, asOf }
+ *       Coder answers, and the detail is unknown: CODER_STATUS_TOKEN is
+ *       absent or unresolved, Coder refused it (401 or 403, an expired or
+ *       revoked token), or the detail calls failed. A warning names the
+ *       setting, never its value.
  *   { configured: true, reachable: true, templates: [{ name, activeVersion }], capacity: { running, max }, asOf }
+ *
+ * `running: null` on a reachable answer is how the card tells "detail
+ * unknown" from "no templates yet": with the token working, `running` is
+ * always a number (readDetail throws on a missing count). An unknown count is
+ * reported as unknown, never as zero.
  *
  * A FAILURE IS CACHED TOO, and it replaces whatever healthy entry was there.
  * A stale-but-healthy document served through a Coder outage would show
  * numbers that are no longer true, so the card says "unreachable" until the
- * next minute's attempt succeeds. `running` is null on that path: an unknown
- * count is reported as unknown, never as zero.
+ * next minute's attempt succeeds.
  *
- * Coder endpoints, from https://coder.com/docs/reference/api (Templates and
- * Workspaces pages, retrieved 2026-09-25). Every call carries the
- * `Coder-Session-Token` header, which is how the reference authenticates
- * each of them:
+ * Coder endpoints, from https://coder.com/docs/reference/api (retrieved
+ * 2026-09-25) and Coder v2.37.3's router (coderd/coderd.go, read
+ * 2026-09-28):
+ *
+ *   GET /api/v2/buildinfo
+ *       Unauthenticated (registered outside the API-key middleware), and so
+ *       sent with no token at all. `version` is a string.
+ *
+ * The detail calls carry the `Coder-Session-Token` header, which is how the
+ * reference authenticates each of them:
  *
  *   GET /api/v2/templates
  *       codersdk.Template[] — `name`, `active_version_id`, … ; deprecated
@@ -43,8 +67,8 @@
  *       `status` among its keys; `count` is the number matching.
  *
  * What the response carries and what it does not: template names are the
- * slugs the page's "Open in Coder" links use, and version names are what an
- * operator would say aloud. No URL, no workspace name, no owner, no id —
+ * slugs the labs card lists, and version names are what an operator would
+ * say aloud. No URL, no workspace name, no owner, no id —
  * nothing that describes the deployment beyond those names and two numbers.
  */
 
@@ -82,7 +106,9 @@ export function readMaxWorkspaces(env) {
 }
 
 /**
- * The proxy's configuration, or null when it has none.
+ * The proxy's configuration, or null when it has none. Only the address
+ * decides: `token` is '' when CODER_STATUS_TOKEN is absent or unresolved,
+ * and the read then reports reachability without the detail.
  *
  * `CODER_URL` must be an `https:` URL: the token travels in a header, and a
  * plain-http address would send it in the clear to whatever answers. A URL
@@ -93,8 +119,7 @@ export function readMaxWorkspaces(env) {
  */
 export function readCoderConfig(env = process.env) {
   const rawUrl = readSetting(env, 'CODER_URL');
-  const token = readSetting(env, 'CODER_STATUS_TOKEN');
-  if (!rawUrl || !token) return null;
+  if (!rawUrl) return null;
 
   let url;
   try {
@@ -106,19 +131,27 @@ export function readCoderConfig(env = process.env) {
 
   return {
     base: `${url.origin}${url.pathname.replace(/\/+$/, '')}`,
-    token,
+    token: readSetting(env, 'CODER_STATUS_TOKEN'),
     max: readMaxWorkspaces(env),
   };
 }
 
-/** Both settings present but the pair still unusable — worth one warning line. */
-const hasCoderSettings = (env) =>
-  Boolean(readSetting(env, 'CODER_URL') && readSetting(env, 'CODER_STATUS_TOKEN'));
+/** The address is set but unusable — worth one warning line. */
+const hasCoderUrl = (env) => Boolean(readSetting(env, 'CODER_URL'));
 
-async function coderGet(fetchImpl, config, path) {
+/**
+ * A GET to Coder, with the token only when one is given. Throws on anything
+ * but 2xx, a redirect included: Coder's API does not redirect, and fetch
+ * following one to another origin would carry `Coder-Session-Token` along,
+ * because it drops only Authorization, Cookie and Proxy-Authorization.
+ */
+async function coderGet(fetchImpl, config, path, token) {
+  const headers = { Accept: 'application/json' };
+  if (token) headers['Coder-Session-Token'] = token;
   const response = await fetchWithTimeout(fetchImpl, `${config.base}${path}`, {
     method: 'GET',
-    headers: { Accept: 'application/json', 'Coder-Session-Token': config.token },
+    headers,
+    redirect: 'error',
     timeoutMs: CODER_TIMEOUT_MS,
   });
   if (!response.ok) {
@@ -129,6 +162,14 @@ async function coderGet(fetchImpl, config, path) {
   return response.json();
 }
 
+/** Whether Coder answers: the unauthenticated build info, in its documented shape. Throws otherwise. */
+async function readReachable(fetchImpl, config) {
+  const info = await coderGet(fetchImpl, config, '/api/v2/buildinfo', '');
+  if (typeof info?.version !== 'string' || !info.version) {
+    throw new Error('Coder build info carried no version');
+  }
+}
+
 /** The active version's name, or null when it cannot be resolved — never the uuid. */
 async function resolveVersionName(fetchImpl, config, versionId, context) {
   if (typeof versionId !== 'string' || !UUID.test(versionId)) return null;
@@ -136,7 +177,8 @@ async function resolveVersionName(fetchImpl, config, versionId, context) {
     const version = await coderGet(
       fetchImpl,
       config,
-      `/api/v2/templateversions/${encodeURIComponent(versionId)}`
+      `/api/v2/templateversions/${encodeURIComponent(versionId)}`,
+      config.token
     );
     return typeof version?.name === 'string' && version.name ? version.name : null;
   } catch (error) {
@@ -146,14 +188,15 @@ async function resolveVersionName(fetchImpl, config, versionId, context) {
 }
 
 /**
- * Coder's answer, shaped for the card. Throws on anything but the documented
- * shape, so the caller records "unreachable" rather than guessing at fields.
+ * The token's detail, shaped for the card. Throws on anything but the
+ * documented shape, so the caller reports the detail as unknown rather than
+ * guessing at fields.
  */
-async function readLive({ fetchImpl, config, context }) {
+async function readDetail({ fetchImpl, config, context }) {
   const running = new URLSearchParams({ q: 'status:running' });
   const [templates, workspaces] = await Promise.all([
-    coderGet(fetchImpl, config, '/api/v2/templates'),
-    coderGet(fetchImpl, config, `/api/v2/workspaces?${running}`),
+    coderGet(fetchImpl, config, '/api/v2/templates', config.token),
+    coderGet(fetchImpl, config, `/api/v2/workspaces?${running}`, config.token),
   ]);
 
   if (!Array.isArray(templates)) throw new Error('Coder templates response was not a list');
@@ -179,6 +222,34 @@ async function readLive({ fetchImpl, config, context }) {
     templates: shown.map((t, i) => ({ name: t.name.trim(), activeVersion: versions[i] })),
     running: count,
   };
+}
+
+/**
+ * The card's templates and capacity: the token's detail, or unknown with a
+ * warning that names the setting and why. Never throws, because Coder has
+ * already answered by the time this runs, and missing detail must not close
+ * the panes.
+ */
+async function readDetailOrUnknown({ fetchImpl, config, context }) {
+  const unknown = { templates: [], capacity: { running: null, max: config.max } };
+  if (!config.token) {
+    context?.warn?.(
+      'coder-status: CODER_STATUS_TOKEN is not set or does not resolve; templates and running workspaces are reported as unknown'
+    );
+    return unknown;
+  }
+  try {
+    const detail = await readDetail({ fetchImpl, config, context });
+    return { templates: detail.templates, capacity: { running: detail.running, max: config.max } };
+  } catch (error) {
+    const refused = error?.status === 401 || error?.status === 403;
+    context?.warn?.(
+      refused
+        ? `coder-status: Coder refused CODER_STATUS_TOKEN (${error.status}), so it has expired or been revoked; templates and running workspaces are reported as unknown`
+        : `coder-status: the templates and workspaces read failed, and both are reported as unknown: ${error?.message ?? error}`
+    );
+    return unknown;
+  }
 }
 
 /**
@@ -209,7 +280,7 @@ export function createCoderStatusHandlers({
   async function readStatus(context) {
     const config = readCoderConfig(env);
     if (!config) {
-      if (hasCoderSettings(env)) {
+      if (hasCoderUrl(env)) {
         context?.warn?.('coder-status: CODER_URL is not an https URL; reporting unconfigured');
       }
       return { configured: false };
@@ -221,14 +292,9 @@ export function createCoderStatusHandlers({
     const asOf = new Date(now()).toISOString();
     let body;
     try {
-      const live = await readLive({ fetchImpl, config, context });
-      body = {
-        configured: true,
-        reachable: true,
-        templates: live.templates,
-        capacity: { running: live.running, max: config.max },
-        asOf,
-      };
+      await readReachable(fetchImpl, config);
+      const detail = await readDetailOrUnknown({ fetchImpl, config, context });
+      body = { configured: true, reachable: true, ...detail, asOf };
     } catch (error) {
       context?.warn?.(`coder-status: Coder unreachable: ${error?.message ?? error}`);
       body = {

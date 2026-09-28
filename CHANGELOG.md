@@ -19,6 +19,91 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Lab workspaces: the editor opens inside the site's pane.** Owner
+  decision 2026-09-28: the lab is reached only through panes on the site,
+  and the panes-only lock is not loosened. Coder's dashboard opens
+  code-server in a new window or tab (`open_in` has no same-frame value in
+  v2.37.3), which the lock turns into the labs page, so the editor could
+  never open in a pane. A lab's pane now loads the **lab launcher**,
+  `https://coder.lab.hybridcloudworks.com/_hcw/lab/?lab=<id>`: four static
+  files in `lab-host/coder/launcher/` (no build step, no third-party code)
+  that the `coder` role installs in `/etc/caddy/hcw-lab-launcher` and Caddy
+  serves before `handle @coder`. With the learner's own session, GET only
+  and same origin, it maps the lab through a fixed allowlist to one
+  workspace per learner (`lab-lzb`, `lab-tfv`, `lab-asc`; 16 characters at
+  most, so `code-server--<workspace>--<owner>` fits one DNS label with a
+  32-character username), reads `/api/v2/users/me` (a 401 asks the visitor
+  to use Sign in with GitHub above the pane) and their workspace. A missing
+  workspace gets Coder's own create page with its consent dialog, and a
+  stopped one Coder's own workspace page, in a frame of the same origin; no
+  POST, no CSRF token. It waits (one to five seconds apart, ten minutes or
+  six failed reads at most) for the build to run, the agent to be connected
+  and ready, and code-server's `health` to be `healthy`, checks
+  `subdomain_name` against `^code-server--[a-z0-9-]+--[a-z0-9-]+$` and
+  requires it to be exactly this workspace's name for the signed-in
+  username (`/api/v2/users/me`), so it can only open the learner's own
+  editor, and `location.replace`s itself to that name under a fixed
+  suffix, so code-server keeps its own origin. It posts `{ type:
+  'hcw-lab', state }` to both site names. Caddy adds a strict policy beside
+  the panes-only `frame-ancestors` (`default-src 'none'`; scripts, styles,
+  fetches, images and frames from `coder.lab` only; `base-uri 'none'`;
+  `form-action 'none'`), `Cache-Control: no-store` and `nosniff`, and no
+  top-level exemption, so a direct visit still redirects. The role copies
+  the four files by name, removes anything else from the directory Caddy
+  serves, and refuses a launcher directory that is not
+  `/etc/caddy/hcw-<name>`, since it removes that directory whole while
+  Coder is disabled. On the site,
+  `LabPanePage.jsx` frames the launcher (`frame-src`, `sandbox` and `allow`
+  unchanged), takes a message only from Coder's origin, the pane's own
+  window and a known type and state, shows the state on the toolbar, makes
+  Sign in with GitHub the main action when the launcher finds no session,
+  and treats any message as the frame loading; `unavailable` shows the
+  page's own unavailable section. The catalogue gains `workspaceName`, and
+  `catalogue.test.js` and the new `scripts/lab-host-launcher.test.mjs` both
+  fail when it and the launcher's map differ; the CI filters now run each
+  side's test when the other side's file changes.
+  `scripts/lab-host-launcher.test.mjs` (81 tests) drives the logic with a
+  mocked fetch, clock and navigation: the allowlist, the 401 path, create,
+  stopped, starting, the healthy redirect, malformed names and another
+  learner's, the backoff and the cap. It also holds the files (one module script, nothing inline, text
+  only through `textContent`) and the route. `lab-host-visitor-copy.test.mjs`
+  scans every launcher message and the page's words, and holds its
+  `unavailable` to the site's sentence.
+- **The lab panes no longer depend on the status token.** `coder-status`
+  now says `configured` with a valid `CODER_URL` alone and `reachable` from
+  Coder's unauthenticated `GET /api/v2/buildinfo`. `CODER_STATUS_TOKEN` adds
+  only the templates and the running count; missing, or refused with 401 or
+  403, the answer is `templates: []` and `capacity.running: null`, and the
+  Function App logs a warning naming the setting, never its value. So the
+  owner's first sign-in works in a pane, and the token's one-year expiry
+  can no longer close every lab. The response shape is unchanged. Every
+  call to Coder now refuses to follow a redirect, which Node's fetch would
+  have followed to another origin with `Coder-Session-Token` still on it.
+  `CoderStatusCard` then says only "Coder is reachable." and lists nothing;
+  it had been about to print "0 of 5 workspaces running" and "No lab
+  template is available yet", because `capacityWords` read `Number(null)`
+  as zero, which also affected the estate card and is fixed there too.
+  `lab-host/README.md`, "The status token for the site", now makes the
+  owner's CLI token in Coder's own **Tokens** page inside a pane, named
+  `hcw-setup` with the shortest expiry, instead of copying the session
+  cookie out of the browser's developer tools; the `hcw-status` Template
+  Admin user and its scoped one-year token are unchanged.
+- **`hcw-vault-set` refuses a key the playbook defines.** `bootstrap.sh`
+  passes `vault.yml` with `-e`, which outranks every other variable, and the
+  helper took any `vault_*` name, including the `vault` role's own
+  (`vault_enabled`, `vault_api_port` and so on). It now reads
+  `/opt/hcw-src` at run time (`HCW_SRC_DIR` in tests) and refuses, with exit
+  code 2 and the defining file named, any top-level variable of
+  `group_vars/`, `host_vars/` or a role's `defaults/` or `vars/`, and any
+  name a play, the inventory, or a role's task or handler sets (`vars`,
+  `register`, `set_fact` in every spelling); with no checkout, no role, or
+  a file that does not parse, it refuses every key. That catches the
+  `vault` role's task vars `vault_seal_status` and `vault_state_advice`
+  too. None of the thirteen keys in use collides. Its Python now runs
+  isolated (`-I`), so a `yaml.py` in the directory `sudo` ran from can no
+  longer be imported as root. `hcw-vault-set.test.sh` grows from 39 to 80
+  checks, and fails without `-I`.
+
 - **Coder is on for members of the HybridCloudWorks GitHub organisation
   only, and the vault helper is under Ansible.** Owner decisions
   2026-09-28: turn Coder on; only members of `HybridCloudWorks` may sign
