@@ -57,6 +57,13 @@
  * whose `Digest:` line is the index digest and whose linux/amd64 manifest's
  * `org.opencontainers.image.version` annotation names the release.
  *
+ * **The lab host follows with no second edit.** Every `bootstrap.sh` run
+ * imports this map on the host (lab-host/ansible/roles/lab_images), pulls
+ * each digest before a job needs it and removes the digest a bump replaced,
+ * so no visitor's job waits on a first download. Keep IMAGES a plain export
+ * of `name[:tag]@sha256:` strings: that role refuses anything else, and
+ * scripts/lab-images.test.mjs holds it to this file.
+ *
  * The alpine digest below was resolved that way on 2026-09-28: the registry
  * header, `docker buildx imagetools inspect` and the Docker Hub API
  * (`/v2/repositories/library/alpine/tags/3.24.2`) all reported the same
