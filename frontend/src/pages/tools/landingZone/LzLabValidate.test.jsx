@@ -19,8 +19,18 @@
  * Turnstile widget loads only once the lab is open and the build has a site
  * key, the button waits for its token, each submission carries one token and
  * asks for the next, and the lock's refusals read in the page's words.
+ *
+ * A REPORT, NOT THE JOB LOG (owner request 2026-09-28). A finished job shows
+ * the visitor report, and the fixtures here are what the server's own
+ * builder (functions/src/lib/labs/visitor-report.js) makes of the owner's
+ * real job logs, which each job also carries as `output`, as a server from
+ * before the report would. The tests hold that the verdict, Terraform's
+ * errors, the modules and the providers are shown, and that nothing of the
+ * log is: no image, registry, digest, runner path or host.
  */
 import React from 'react';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { renderToString } from 'react-dom/server';
@@ -43,9 +53,11 @@ import {
   statusLine,
   tooLargeLine,
   unresolvedLine,
+  visitorReport,
 } from './labValidateRules';
 import { DEFAULT_STATE, decodeLz, emitFiles } from '@/lib/landingZone';
 import { decodeTarPayload, parseTar } from '../../../../../vps-agent/lib/docker-runner.js';
+import { buildVisitorReport } from '../../../../../functions/src/lib/labs/visitor-report.js';
 import { clearPublicGetCache } from '@/lib/publicApi';
 
 vi.mock('@/lib/functionsBase', () => ({
@@ -137,6 +149,30 @@ function expectNoBackendWords() {
   const html = control().outerHTML;
   expect(html).not.toMatch(BACKEND_WORDS);
   for (const code of DOOR_CODES) expect(html).not.toContain(code);
+}
+
+/** What the job log carries and a visitor must never read. */
+const RUNNER_WORDS =
+  /ghcr\.io|sha256:|docker|pulling|\/opt\/|\.\.\/\.\.\/\.\.\/|hcw-lab-runner|\bimage\b|registry|unauthenticated|hostinger|\bvps\b|Status: Downloaded|Digest:/i;
+
+function expectNoRunnerWords() {
+  expect(control().outerHTML).not.toMatch(RUNNER_WORDS);
+}
+
+/** The owner's real job logs (functions/src/lib/labs/fixtures). */
+const LOGS = join(process.cwd(), '..', 'functions', 'src', 'lib', 'labs', 'fixtures');
+const jobLog = (name) => readFileSync(join(LOGS, name), 'utf8');
+
+/** A finished job as the server answers it: its report, and the raw log a server should not send. */
+function finishedJob(status, exitCode, logName) {
+  const output = jobLog(logName);
+  return {
+    id: 'job-1',
+    status,
+    exitCode,
+    output,
+    report: buildVisitorReport({ status, exitCode, output }),
+  };
 }
 
 afterEach(() => {
@@ -290,18 +326,10 @@ describe('what the lab can resolve', () => {
 });
 
 describe('when the lab is open', () => {
-  it('sends the files unchanged on a click, polls the job and shows the output', async () => {
+  it('sends the files unchanged on a click, polls the job and shows the report', async () => {
+    const done = finishedJob('succeeded', 0, 'validate-valid.log');
     const requests = requestsFor({
-      jobs: [
-        { id: 'job-1', status: 'queued' },
-        { id: 'job-1', status: 'running' },
-        {
-          id: 'job-1',
-          status: 'succeeded',
-          exitCode: 0,
-          output: '== terraform validate\nSuccess! The configuration is valid.\n',
-        },
-      ],
+      jobs: [{ id: 'job-1', status: 'queued' }, { id: 'job-1', status: 'running' }, done],
     });
     renderControl({ requests });
     await waitFor(() => expect(button()).toBeEnabled());
@@ -311,8 +339,22 @@ describe('when the lab is open', () => {
     fireEvent.click(button());
     const output = await screen.findByTestId('lz-lab-output');
     expect(output.dataset.status).toBe('succeeded');
-    expect(output.textContent).toContain('terraform validate passed on the lab (exit 0).');
-    expect(output.textContent).toContain('Success! The configuration is valid.');
+    expect(output.dataset.verdict).toBe('valid');
+    expect(screen.getByTestId('lz-lab-verdict').textContent).toBe(done.report.headline);
+    const modules = screen.getByTestId('lz-lab-report-modules');
+    expect([...modules.querySelectorAll('li')].map((li) => li.textContent)).toEqual([
+      'avm-ptn-alz@0.21.0',
+      'avm-res-network-virtualnetwork@0.22.2',
+      'avm-ptn-alz-connectivity-hub-and-spoke-vnet@0.17.5',
+      'avm-ptn-alz-management@0.9.0',
+    ]);
+    expect(modules.textContent).toContain(done.report.modulesNote);
+    const providers = screen.getByTestId('lz-lab-report-providers');
+    expect([...providers.querySelectorAll('li')].map((li) => li.textContent)).toContain(
+      'hashicorp/azurerm v4.81.0'
+    );
+    expect(screen.queryByTestId('lz-lab-report-errors')).toBeNull();
+    expectNoRunnerWords();
 
     expect(requests.submit).toHaveBeenCalledTimes(1);
     const [[sent]] = requests.submit.mock.calls;
@@ -329,17 +371,48 @@ describe('when the lab is open', () => {
     expect(button()).toBeEnabled();
   });
 
-  it('says a failed validation failed, with the output', async () => {
-    const requests = requestsFor({
-      jobs: [{ id: 'job-1', status: 'failed', exitCode: 1, output: 'Error: Unsupported argument' }],
-    });
-    renderControl({ requests });
+  it('shows Terraform’s errors with the learner’s file and line, and none of the log', async () => {
+    const done = finishedJob('failed', 1, 'validate-invalid.log');
+    renderControl({ requests: requestsFor({ jobs: [done] }) });
     await waitFor(() => expect(button()).toBeEnabled());
     fireEvent.click(button());
     const output = await screen.findByTestId('lz-lab-output');
     expect(output.dataset.status).toBe('failed');
-    expect(output.textContent).toContain('failed on the lab (exit 1)');
-    expect(output.textContent).toContain('Error: Unsupported argument');
+    expect(output.dataset.verdict).toBe('invalid');
+    expect(screen.getByTestId('lz-lab-verdict').textContent).toBe(done.report.headline);
+    const errors = [...screen.getByTestId('lz-lab-report-errors').querySelectorAll('pre')];
+    expect(errors.map((pre) => pre.textContent)).toEqual(done.report.errors);
+    expect(errors[0].textContent).toContain('on alz.tf line 14, in module "alz":');
+    expect(errors[2].textContent).toContain('on avm-ptn-alz-management@0.9.0/main.tf line 40');
+    expectNoRunnerWords();
+  });
+
+  it('says the lab could not run the check when it failed before Terraform, showing nothing of the log', async () => {
+    const done = finishedJob('failed', 125, 'validate-not-run.log');
+    renderControl({ requests: requestsFor({ jobs: [done] }) });
+    await waitFor(() => expect(button()).toBeEnabled());
+    fireEvent.click(button());
+    const output = await screen.findByTestId('lz-lab-output');
+    expect(output.dataset.verdict).toBe('error');
+    expect(output.textContent).toBe(done.report.headline);
+    expectNoRunnerWords();
+  });
+
+  it('never renders a raw output field, even when a job carries one and no report', async () => {
+    const logOnly = {
+      id: 'job-1',
+      status: 'succeeded',
+      exitCode: 0,
+      output: jobLog('validate-valid.log'),
+    };
+    renderControl({ requests: requestsFor({ jobs: [logOnly] }) });
+    await waitFor(() => expect(button()).toBeEnabled());
+    fireEvent.click(button());
+    const output = await screen.findByTestId('lz-lab-output');
+    expect(output.dataset.verdict).toBe('none');
+    expect(output.textContent).toBe(outcomeLine(logOnly));
+    expect(output.textContent).not.toContain('Success!');
+    expectNoRunnerWords();
   });
 
   it('shows the per-visitor limit in the page’s words and sends no second request', async () => {
@@ -389,10 +462,8 @@ describe('when the lab is open', () => {
     expect(requests.job).toHaveBeenCalledTimes(2);
   });
 
-  it('drops the output when the build changes', async () => {
-    const requests = requestsFor({
-      jobs: [{ id: 'job-1', status: 'succeeded', exitCode: 0, output: 'ok' }],
-    });
+  it('drops the report when the build changes', async () => {
+    const requests = requestsFor({ jobs: [finishedJob('succeeded', 0, 'validate-valid.log')] });
     const turnstile = fakeTurnstile();
     const { rerender } = renderControl({ requests, turnstile });
     await waitFor(() => expect(button()).toBeEnabled());
@@ -702,9 +773,49 @@ describe('the words', () => {
   });
 
   it('has a sentence for every terminal status', () => {
+    expect(outcomeLine({ status: 'succeeded' })).toContain('valid');
+    expect(outcomeLine({ status: 'failed' })).toContain('terraform validate');
     expect(outcomeLine({ status: 'timeout' })).toContain('ran out of time');
     expect(outcomeLine({ status: 'cancelled' })).toContain('cancelled');
     expect(outcomeLine({ status: 'odd' })).toBe('The job ended as odd.');
+  });
+
+  it('reads the report defensively: a known verdict, entries shaped as such, no runner text', () => {
+    const leaky = {
+      status: 'failed',
+      output: 'Pulling from hybridcloudworks/hcw-lab-runner',
+      report: {
+        verdict: 'invalid',
+        headline: 'Pulled ghcr.io/hybridcloudworks/hcw-lab-runner@sha256:abc',
+        errors: [
+          'Error: Unsupported argument\n\n  on main.tf line 2:',
+          'Error: x\n\n  on ../../../opt/avm/avm-ptn-alz@0.21.0/main.tf line 1:',
+          7,
+        ],
+        modules: ['avm-ptn-alz@0.21.0', '../../../opt/avm/avm-ptn-alz@0.21.0', null],
+        modulesNote: 'Copied from the image registry.',
+        providers: ['hashicorp/azurerm v4.81.0', 'hashicorp/azurerm v4.81.0 (unauthenticated)'],
+      },
+    };
+    expect(visitorReport(leaky)).toEqual({
+      verdict: 'invalid',
+      headline: outcomeLine(leaky),
+      errors: ['Error: Unsupported argument\n\n  on main.tf line 2:'],
+      modules: ['avm-ptn-alz@0.21.0'],
+      modulesNote: null,
+      providers: ['hashicorp/azurerm v4.81.0'],
+    });
+    expect(visitorReport({ status: 'succeeded', report: { verdict: 'odd' } })).toBeNull();
+    expect(visitorReport({ status: 'succeeded', report: 'valid' })).toBeNull();
+    expect(visitorReport({ status: 'succeeded', output: 'Success!' })).toBeNull();
+    expect(visitorReport({ status: 'succeeded', report: { verdict: 'valid' } })).toEqual({
+      verdict: 'valid',
+      headline: outcomeLine({ status: 'succeeded' }),
+      errors: [],
+      modules: [],
+      modulesNote: null,
+      providers: [],
+    });
   });
 
   it('words every refusal itself, from the code, and never repeats the server', () => {

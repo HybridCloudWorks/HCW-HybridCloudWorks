@@ -1,0 +1,79 @@
+Unable to find image 'ghcr.io/hybridcloudworks/hcw-lab-runner:7c0a95b2ac8d48f77d8c01f71a187b02e2cd284b@sha256:8cc6935466abc0958d7d3f6f85f14931e23604e401097eb2cab0eb431af1c746' locally
+ghcr.io/hybridcloudworks/hcw-lab-runner@sha256:8cc6935466abc0958d7d3f6f85f14931e23604e401097eb2cab0eb431af1c746: Pulling from hybridcloudworks/hcw-lab-runner
+2d35ebdb57d9: Already exists
+7c1f5b8e3a92: Pulling fs layer
+b4a6f0c2d1e8: Pulling fs layer
+e91d3c7a5f40: Pulling fs layer
+0f8a2b6c4d13: Pulling fs layer
+b4a6f0c2d1e8: Download complete
+7c1f5b8e3a92: Download complete
+e91d3c7a5f40: Download complete
+0f8a2b6c4d13: Download complete
+7c1f5b8e3a92: Pull complete
+b4a6f0c2d1e8: Pull complete
+e91d3c7a5f40: Pull complete
+0f8a2b6c4d13: Pull complete
+Digest: sha256:8cc6935466abc0958d7d3f6f85f14931e23604e401097eb2cab0eb431af1c746
+Status: Downloaded newer image for ghcr.io/hybridcloudworks/hcw-lab-runner:7c0a95b2ac8d48f77d8c01f71a187b02e2cd284b@sha256:8cc6935466abc0958d7d3f6f85f14931e23604e401097eb2cab0eb431af1c746
+== module sources (6 registry module block(s) in the payload)
+  rewrote module "alz" (Azure/avm-ptn-alz/azurerm 0.21.0) -> ../../../opt/avm/avm-ptn-alz@0.21.0
+  rewrote module "spoke_corp_1" (Azure/avm-res-network-virtualnetwork/azurerm 0.22.2) -> ../../../opt/avm/avm-res-network-virtualnetwork@0.22.2
+  rewrote module "spoke_corp_2" (Azure/avm-res-network-virtualnetwork/azurerm 0.22.2) -> ../../../opt/avm/avm-res-network-virtualnetwork@0.22.2
+  rewrote module "spoke_online_1" (Azure/avm-res-network-virtualnetwork/azurerm 0.22.2) -> ../../../opt/avm/avm-res-network-virtualnetwork@0.22.2
+  rewrote module "connectivity" (Azure/avm-ptn-alz-connectivity-hub-and-spoke-vnet/azurerm 0.17.5) -> ../../../opt/avm/avm-ptn-alz-connectivity-hub-and-spoke-vnet@0.17.5
+  rewrote module "management" (Azure/avm-ptn-alz-management/azurerm 0.9.0) -> ../../../opt/avm/avm-ptn-alz-management@0.9.0
+
+== terraform init -backend=false
+- alz in ../../../opt/avm/avm-ptn-alz@0.21.0
+- connectivity in ../../../opt/avm/avm-ptn-alz-connectivity-hub-and-spoke-vnet@0.17.5
+- connectivity.hub_and_spoke_vnet in ../../../opt/avm/avm-ptn-alz-connectivity-hub-and-spoke-vnet@0.17.5/modules/hub-virtual-network
+- connectivity.hub_and_spoke_vnet.firewall in ../../../opt/avm/avm-res-network-azurefirewall@0.4.0
+- connectivity.hub_and_spoke_vnet.firewall_policy in ../../../opt/avm/avm-res-network-firewallpolicy@0.3.3
+- connectivity.private_dns_zones in ../../../opt/avm/avm-ptn-network-private-link-private-dns-zones@0.23.2
+- management in ../../../opt/avm/avm-ptn-alz-management@0.9.0
+- spoke_corp_1 in ../../../opt/avm/avm-res-network-virtualnetwork@0.22.2
+- spoke_corp_2 in ../../../opt/avm/avm-res-network-virtualnetwork@0.22.2
+- spoke_online_1 in ../../../opt/avm/avm-res-network-virtualnetwork@0.22.2
+- Finding azure/azapi versions matching "~> 2.4"...
+- Finding hashicorp/azurerm versions matching ">= 4.0.0, < 5.0.0"...
+- Finding azure/modtm versions matching "~> 0.3"...
+- Finding hashicorp/random versions matching "~> 3.5"...
+- Finding hashicorp/time versions matching "~> 0.9"...
+- Finding azure/alz versions matching "~> 0.20"...
+- Installing azure/azapi v2.12.0...
+- Installed azure/azapi v2.12.0 (unauthenticated)
+- Installing hashicorp/azurerm v4.81.0...
+- Installed hashicorp/azurerm v4.81.0 (unauthenticated)
+- Installing azure/modtm v0.4.0...
+- Installed azure/modtm v0.4.0 (unauthenticated)
+- Installing hashicorp/random v3.9.1...
+- Installed hashicorp/random v3.9.1 (unauthenticated)
+- Installing hashicorp/time v0.14.2...
+- Installed hashicorp/time v0.14.2 (unauthenticated)
+- Installing azure/alz v0.22.0...
+- Installed azure/alz v0.22.0 (unauthenticated)
+Terraform has been successfully initialized!
+
+== terraform validate
+
+Error: Unsupported argument
+
+  on alz.tf line 14, in module "alz":
+  14:   enable_telemetry_typo = var.enable_telemetry
+
+An argument named "enable_telemetry_typo" is not expected here.
+
+Error: Reference to undeclared input variable
+
+  on management.tf line 9, in module "management":
+   9:   location = var.primary_locaton
+
+An input variable with the name "primary_locaton" has not been declared. This
+variable can be declared with a variable "primary_locaton" {} block.
+
+Error: Unsupported argument
+
+  on ../../../opt/avm/avm-ptn-alz-management@0.9.0/main.tf line 40, in resource "azurerm_log_analytics_workspace" "this":
+  40:   daily_quota_gb_typo = var.log_analytics_workspace_daily_quota_gb
+
+An argument named "daily_quota_gb_typo" is not expected here.

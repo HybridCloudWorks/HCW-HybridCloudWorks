@@ -611,8 +611,10 @@ export async function submitLabValidation(body) {
 }
 
 /**
- * GET public/labs/job?jobId= — one public job's status and output (#672):
- * `{ id, type, status, exitCode, output, createdAt, claimedAt, finishedAt }`.
+ * GET public/labs/job?jobId= — one public job's status and visitor report
+ * (#672): `{ id, type, status, exitCode, report, createdAt, claimedAt,
+ * finishedAt }`, `report` null until the job ends (never the job's raw
+ * output; labValidateRules.js `visitorReport` reads it).
  * Uncached, because the point of the call is to see the status move. A job
  * the server does not know, or no longer keeps (a day after it finished), is
  * a 404 and throws like any other refusal.

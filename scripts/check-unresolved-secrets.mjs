@@ -67,10 +67,10 @@ export const EXPECTED_UNRESOLVED = new Map([
     'CODER_STATUS_TOKEN',
     'Coder status token, issued by Coder itself, so it cannot exist until Coder runs on the lab host (#661) and the owner creates it (#682) — infra/functionapp.tf CODER_STATUS_TOKEN comment',
   ],
-  [
-    'TURNSTILE_SECRET_KEY',
-    'Cloudflare Turnstile secret key for Validate on the lab (ADR 0032 decision 6, revised 2026-09-28): the API-keys page can seed it only after the functions deploy that lists it, and that deploy refuses to start until the Terraform run adding this reference has applied, so it is unresolved in between. Remove this entry in the PR after it is seeded — infra/functionapp.tf TURNSTILE_SECRET_KEY comment',
-  ],
+  // TURNSTILE_SECRET_KEY was here from its Terraform run until the owner
+  // seeded TURNSTILE-SECRET-KEY on 2026-09-28, when "Validate on the lab"
+  // started working end to end. It must resolve from now on, so an
+  // unresolved one is a real finding again.
 ]);
 
 /**

@@ -4,6 +4,16 @@
  * -backend=false` and `terraform validate` in the runner image with no
  * network, and show what Terraform said.
  *
+ * A REPORT FOR LEARNERS, NOT THE JOB LOG (owner request 2026-09-28). What a
+ * finished job shows is the report the server builds for visitors
+ * (functions/src/lib/labs/visitor-report.js, read here through
+ * `visitorReport`): the verdict in plain words, Terraform's own errors with
+ * the learner's file names and line numbers, the modules the lab used as
+ * `name@version` with one line on why it has offline copies, and the
+ * providers. The first public run printed the raw log instead, image pull,
+ * digests and runner paths included; the control no longer reads `output`,
+ * even when a job carries one.
+ *
  * CLOSED UNTIL THE SERVER SAYS OPEN. On mount the control asks
  * `GET public/labs/submit` whether a job would be taken, and until the
  * answer is `open: true` the button is disabled with one line saying why.
@@ -35,7 +45,7 @@
  * on an `init` that cannot succeed.
  *
  * ONLY ON A CLICK, and the answer is keyed to the files it validated, as the
- * explain button's is: change the build and the output goes away rather
+ * explain button's is: change the build and the report goes away rather
  * than describing files no longer on the page, and polling stops.
  *
  * Two hooks carry the state: `useLabDoor` (the status read) and `useLabRun`
@@ -68,6 +78,7 @@ import {
   settle,
   statusLine,
   turnstileActive,
+  visitorReport,
 } from './labValidateRules';
 import { HINT_CLASS } from './styles';
 import { useLabTurnstile } from './useLabTurnstile';
@@ -216,28 +227,82 @@ function LabModules({ report }) {
 }
 
 const NOTICE_CLASS = 'text-sm text-amber-700 dark:text-amber-400';
+const REPORT_HEADING_CLASS =
+  'text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400';
 
-/** What a finished job said: the sentence, then Terraform's own output. */
-function LabOutput({ job }) {
+/** One titled list in the report, or nothing when it is empty. */
+function ReportList({ title, items, testId, children = null }) {
+  if (!items.length) return null;
   return (
-    <div
-      className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-900"
-      data-testid="lz-lab-output"
-      data-status={job.status}
-    >
-      <p className="font-medium text-slate-900 dark:text-slate-100">{outcomeLine(job)}</p>
-      <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-slate-800 dark:text-slate-200">
-        {job.output || '(no output)'}
-      </pre>
+    <div data-testid={testId}>
+      <p className={REPORT_HEADING_CLASS}>{title}</p>
+      <ul className="mt-1 flex flex-col gap-0.5 font-mono text-xs text-slate-800 dark:text-slate-200">
+        {items.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+      {children}
     </div>
   );
 }
 
-/** How the run ended: the output, a stall, or a refusal. Nothing while one is in flight. */
+/** Terraform's errors, each in its own block as Terraform wrote it. */
+function ReportErrors({ errors }) {
+  if (!errors.length) return null;
+  return (
+    <div className="flex flex-col gap-2" data-testid="lz-lab-report-errors">
+      {errors.map((text, index) => (
+        <pre
+          // Terraform can report the same error twice; the position tells them apart.
+          key={`${index}:${text}`}
+          className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded border border-red-200 bg-white p-2 font-mono text-xs text-slate-800 dark:border-red-900 dark:bg-slate-950 dark:text-slate-200"
+        >
+          {text}
+        </pre>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * What a finished job said, as the visitor report: the verdict, Terraform's
+ * errors, then the modules and providers the lab used. Never the job log,
+ * which this control does not read.
+ */
+function LabReport({ job }) {
+  const report = visitorReport(job);
+  return (
+    <div
+      className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-900"
+      data-testid="lz-lab-output"
+      data-status={job.status}
+      data-verdict={report?.verdict ?? 'none'}
+    >
+      <p className="font-medium text-slate-900 dark:text-slate-100" data-testid="lz-lab-verdict">
+        {report ? report.headline : outcomeLine(job)}
+      </p>
+      {report ? (
+        <>
+          <ReportErrors errors={report.errors} />
+          <ReportList title="Modules used" items={report.modules} testId="lz-lab-report-modules">
+            {report.modulesNote ? (
+              <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+                {report.modulesNote}
+              </p>
+            ) : null}
+          </ReportList>
+          <ReportList title="Providers" items={report.providers} testId="lz-lab-report-providers" />
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+/** How the run ended: the report, a stall, or a refusal. Nothing while one is in flight. */
 function LabOutcome({ run }) {
   switch (run?.phase) {
     case 'done':
-      return <LabOutput job={run.job} />;
+      return <LabReport job={run.job} />;
     case 'stalled':
       return (
         <p role="status" className={NOTICE_CLASS} data-testid="lz-lab-stalled">

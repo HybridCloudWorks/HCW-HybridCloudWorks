@@ -54,10 +54,12 @@ jobs:
           # Builder's lab tests read (#672): labImage.test.js holds the
           # builder's vendored-module list to lab-image's Dockerfile and
           # versions.env, and labPayload.test.js unpacks the payload with the
-          # agent's own tar parser.
+          # agent's own tar parser. The two functions paths are the visitor
+          # report: LzLabValidate.test.jsx renders what the server's own
+          # builder makes of the owner's real job logs.
           - name: frontend
             dir: frontend
-            filter: '^(frontend/|\.azure/api-surface\.json|lab-image/(versions\.env|Dockerfile)$|vps-agent/lib/docker-runner\.js$)'
+            filter: '^(frontend/|\.azure/api-surface\.json|lab-image/(versions\.env|Dockerfile)$|vps-agent/lib/docker-runner\.js$|functions/src/lib/labs/(visitor-report\.js|fixtures/[^/]+\.log)$)'
             lint: npm run lint
             format: npm run format:check
             build: npm run build

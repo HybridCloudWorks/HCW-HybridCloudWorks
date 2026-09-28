@@ -10,7 +10,7 @@
  * The public lab submission (api-surface.json rest.publicLabs; #672),
  * semantics in lib/labs/public-submit.js: `public/labs/submit` (GET is
  * whether a submission would be taken, POST submits one terraform-validate
- * job) and `public/labs/job` (one public job's status and output). CLOSED
+ * job) and `public/labs/job` (one public job's status and visitor report). CLOSED
  * unless LABS_PUBLIC_SUBMISSION_ENABLED is exactly "true", which Terraform
  * sets from labs_public_submission_enabled since the owner revised ADR 0032
  * decision 6 on 2026-09-28. Open, a POST is taken only from the site's pane:
