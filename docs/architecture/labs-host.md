@@ -34,7 +34,7 @@ itself, never from a published page.
 
 | Component | Role | How it runs |
 | --- | --- | --- |
-| Caddy | TLS termination and reverse proxy for the lab names; the only thing listening on 80 and 443. A build that includes the `caddy-dns/cloudflare` module, because the stock package and the official image do not and DNS-01 needs it | Host-native systemd service; pinned version and SHA256 in `lab-host/ansible/group_vars` |
+| Caddy | TLS termination and reverse proxy for the lab names; the only thing listening on 80 and 443. A build that includes the `caddy-dns/cloudflare` module, because the stock package and the official image do not and DNS-01 needs it. It also enforces [panes only](#panes-only) | Host-native systemd service; pinned version and SHA256 in `lab-host/ansible/group_vars` |
 | Coder (Community edition) | Browser labs; learner sign-in by GitHub OAuth; Docker-based workspaces from the `lab-image/` images | Docker Compose, behind Caddy |
 | PostgreSQL (Coder's database) | Coder's metadata: users, templates, workspace records. Listens on the Compose network only, never on the host | Docker Compose, a named volume |
 | `vps-agent` | Pull-based lab job runner (`vps-agent/`); dials out to the Functions API, runs each job in `docker run --network none`, so its user is in the `docker` group | Host-native systemd service `hcw-labs-agent`, user `hcw-labs-agent`, `/opt/hcw-labs-agent` |
@@ -65,10 +65,12 @@ outbound:
 - Coder reaches GitHub for OAuth over 443;
 - Docker pulls digest-pinned images from GHCR over 443.
 
-No inbound port is opened for the site, for Azure or for lab jobs. The site
-reaches the host in one direction only, through a server-side status proxy in
-the Function App that reads the `CODER-URL` and `CODER-STATUS-TOKEN` secrets
-from Key Vault through its `CODER_URL` and `CODER_STATUS_TOKEN` settings.
+No inbound port is opened for the site, for Azure or for lab jobs. The site's
+servers reach the host in one direction only, through a server-side status
+proxy in the Function App that reads the `CODER-URL` and `CODER-STATUS-TOKEN`
+secrets from Key Vault through its `CODER_URL` and `CODER_STATUS_TOKEN`
+settings. A visitor's browser reaches the lab only inside the site's pages,
+as described under [panes only](#panes-only).
 
 On the host's loopback, and nowhere else: node-exporter (9100), Coder (7080,
 behind Caddy), Portainer (9443) and Vault (8200, and raft's 8201 once
@@ -77,6 +79,60 @@ the two published through Docker name `127.0.0.1` in the publish itself, and
 the Portainer role refuses any other address. The owner reaches Portainer
 through an SSH tunnel and Vault through the CLI over SSH; neither has a Caddy
 route or a public name.
+
+### Panes only
+
+**Owner decision 2026-09-28:** "The lab should only be accessible through
+'panes' from my site, lock to that." A direct visit goes to the labs page.
+Caddy enforces this for every name it serves (`lab`, every `*.lab`,
+`coder.lab` and `*.coder.lab`) and on every response, including the 404 for
+a name nothing claims. It sits in the site block ahead of every route, so a
+route added later is covered without doing anything
+(`lab-host/ansible/roles/caddy/templates/Caddyfile.j2`, `lab_panes_only`).
+
+| Rule | What Caddy does |
+| --- | --- |
+| Only the site may frame the lab | Every response carries `Content-Security-Policy: frame-ancestors 'self' https://hybridcloudworks.com https://www.hybridcloudworks.com`. `www` is listed because it serves the site with a 200 rather than redirecting to the apex (checked 2026-09-28). `'self'` is for code-server, whose webviews are iframes of its own origin. It admits no other site, because the browser checks every ancestor up to the top window. There is no `X-Frame-Options`, because it cannot name an allowed origin |
+| No direct browsing | A request with `Sec-Fetch-Dest: document`, a top-level navigation, gets `302` to `https://hybridcloudworks.com/education/labs`. So does a request with `Sec-Fetch-Mode: navigate` and no `Sec-Fetch-Dest`, which is a navigation from a browser that sends fetch metadata without the destination |
+| Everything else passes | `iframe` (the panes); `empty` (fetch, XHR and WebSockets from a page in a pane, such as Coder's API calls); subresources; and requests with no fetch metadata at all: Coder's workspace agents and CLI, and the Function App's status proxy (Node's `fetch` sends `Sec-Fetch-Mode: cors` and no destination) |
+
+What keeps working, and why:
+
+- **Certificates.** Caddy obtains them by DNS-01, so no challenge request
+  arrives over HTTP, and Caddy would answer one before any route in any
+  case.
+- **Caddy's admin API and metrics** listen on `127.0.0.1:2019`, not on the
+  lab names.
+- **The lab agent** dials out to the Functions API and receives nothing
+  inbound. Nothing else on the host takes a connection through Caddy apart
+  from Coder, and Coder's own clients send no fetch metadata.
+- **Coder** (once `coder_enabled` is true). Its route removes Coder's
+  default `frame-ancestors 'self'`, because the browser enforces every
+  policy it receives and that one would keep Coder out of the panes. It
+  lets Coder's GitHub sign-in callback through at the top level, because
+  GitHub cannot be framed. That path only redirects, and the redirect that
+  ends sign-in lands on the labs page. Anything Coder opens in a new tab or
+  window, such as a workspace app, is a top-level visit and lands on the
+  labs page, so a pane has to show it instead.
+
+Limits, stated so they are not mistaken for more:
+
+- **This is a browsing rule, not access control.** Any script can send
+  `Sec-Fetch-Dest: iframe`. Coder's GitHub sign-in is the access control
+  for anything that matters.
+- **A browser too old to send fetch metadata** (Safari before 16.4) cannot
+  be told apart from the platform's own clients, so its top-level visits
+  pass. `frame-ancestors` still applies to it.
+- **The site's own side is separate.** The site's
+  `frontend/staticwebapp.config.json` decides what its pages may frame
+  (`frame-src`). The site's current Open in Coder links are plain external
+  links (`frontend/src/components/labs/LabCard.jsx`), so they open Coder at
+  the top level and land back on the labs page. They have to open in a
+  pane instead.
+
+The lab side is in `lab-host/` and is applied by the next `bootstrap.sh`
+run on the host. It reverses ADR 0032's "never embeds Coder" (decision 4)
+on the lab side.
 
 ## Backup posture
 

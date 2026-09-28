@@ -5,7 +5,8 @@ It holds certificates for three names — `lab.hybridcloudworks.com`,
 `*.lab.hybridcloudworks.com` and `*.coder.lab.hybridcloudworks.com` —
 obtained through the Cloudflare DNS-01 challenge. Everything behind it (Coder
 in #679, anything later) is a route added to this role's `conf.d`, never a
-second listener. Docker Compose on this host is for Coder and its PostgreSQL
+second listener. Every name can be reached only through panes on the site
+("Panes only", below). Docker Compose on this host is for Coder and its PostgreSQL
 only; Caddy is not in it, because the upstream image lacks the module.
 
 ## Why a build and not a download
@@ -52,8 +53,8 @@ the binary it produced.
 5. Renders `/etc/caddy/conf.d/00-apex.caddy` (the placeholder `respond` for
    the apex) and `/etc/caddy/Caddyfile`, validated with `caddy validate`
    before it replaces the live file. The site block lists all three names,
-   imports `conf.d/*.caddy` and ends in a catch-all 404 for names nothing
-   claims.
+   imports the `lab_panes_only` snippet (below) and then `conf.d/*.caddy`,
+   and ends in a catch-all 404 for names nothing claims.
 6. Installs `caddy.service` running as `caddy:caddy` with
    `EnvironmentFile=/etc/caddy/env`, `AmbientCapabilities=CAP_NET_BIND_SERVICE`
    and `Type=notify`, then enables and starts it.
@@ -63,6 +64,43 @@ HTTP-only apex that answers 503 and says TLS is off. It imports nothing from
 `conf.d`, so a missing secret can never put an application route (Coder's,
 later) on plaintext. The first bootstrap is still green; the second run,
 after the vault exists, switches to TLS.
+
+## Panes only
+
+Owner decision 2026-09-28: "The lab should only be accessible through
+'panes' from my site, lock to that", and a direct visit goes to the site's
+labs page. The Caddyfile's `lab_panes_only` snippet does both, and it is
+imported into the site block ahead of every route. So it covers every lab
+name and every response: the apex, a name nothing claims, Coder's names,
+and any route added later. A route does not have to repeat it.
+
+- **Only the site may frame the lab.** Every response carries
+  `Content-Security-Policy: frame-ancestors` with `caddy_frame_ancestors`:
+  `'self' https://hybridcloudworks.com https://www.hybridcloudworks.com`.
+  There is no `X-Frame-Options`, because it cannot name an allowed origin.
+  Both site hostnames are listed because `www` serves the site rather than
+  redirecting to the apex. `'self'` is there for code-server, whose
+  webviews are iframes of its own origin, and it admits no other site,
+  because the browser checks every ancestor up to the top window. The
+  header is set when the request arrives, so a proxied upstream's own
+  policy is sent beside it and the browser enforces both. That is why
+  Coder's route removes Coder's default `frame-ancestors 'self'`.
+- **No direct browsing.** The named matcher `@lab_direct_visit` selects a
+  top-level visit: `Sec-Fetch-Dest: document`, or no `Sec-Fetch-Dest` with
+  `Sec-Fetch-Mode: navigate`. It answers with `302` to
+  `caddy_direct_visit_redirect`, `https://hybridcloudworks.com/education/labs`.
+  Everything else passes. That covers panes (`iframe`); fetch, XHR and
+  WebSockets from a page in a pane (`empty`); subresources; and clients
+  that send no fetch metadata, which are Coder's agents and CLI, curl, and
+  the site's status proxy. `Vary: Sec-Fetch-Dest, Sec-Fetch-Mode` keeps a
+  cache from answering one with the other's response.
+
+A script can send any of these headers, so this is a browsing rule, not
+access control. Coder's GitHub sign-in is the access control. ACME is
+unaffected (DNS-01, and Caddy answers an HTTP challenge before routes run),
+and so are Caddy's admin API and metrics on `127.0.0.1:2019`. The comments
+in `templates/Caddyfile.j2` go through each case, and
+`docs/architecture/labs-host.md`, "Panes only", records the decision.
 
 ## DNS-01 through delegation
 
@@ -77,7 +115,15 @@ accepts, recorded in `lab-host/README.md`.
 
 Drop a file in `/etc/caddy/conf.d/` named `NN-<owner>.caddy` containing a
 named matcher and a `handle` block, then notify `Reload caddy`. The
-`00-apex.caddy` file is the example to copy.
+`00-apex.caddy` file is the example to copy. The route is panes-only with
+nothing more to write.
+
+A request that has to work at the top level can be let through with
+`vars <matcher> lab_top_level_allowed true`. This is only for a request
+that shows no page there, such as a redirect in a sign-in flow, because
+anything it returns is a direct visit. Coder's GitHub callback is the one
+use (`roles/coder/templates/10-coder.caddy.j2`). Searching the repository
+for `lab_top_level_allowed` lists every exemption.
 
 ## Variables
 
@@ -88,6 +134,8 @@ named matcher and a `handle` block, then notify `Reload caddy`. The
 | `caddy_builder_image`, `caddy_builder_image_tag`, `caddy_builder_image_digest` | required | Builder image pin; pulled and run as `image@digest` |
 | `caddy_site_domain` | required | Apex; matcher and fail-closed placeholder |
 | `caddy_site_names` | required | Every name the site block serves |
+| `caddy_frame_ancestors` | required | `frame-ancestors` sources on every response: `'self'` and the site's two origins |
+| `caddy_direct_visit_redirect` | required | Where a top-level browser visit is sent with `302`: the site's labs page |
 | `caddy_cloudflare_api_token` | `vault_cloudflare_api_token` or empty | DNS-01 credential |
 | `caddy_acme_email` | `vault_caddy_acme_email` or empty | ACME contact, omitted when empty |
 | `caddy_apex_response` | placeholder text | Apex body |
