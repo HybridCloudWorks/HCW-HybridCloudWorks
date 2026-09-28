@@ -37,10 +37,11 @@
  *
  * THE LOCK COMES BEFORE ANY STORE READ OR COUNTER. A POST whose `Origin` is
  * not exactly the site's is 403 ORIGIN_NOT_ALLOWED before its body is read;
- * one without a Turnstile token is 403 TURNSTILE_REQUIRED; one Cloudflare's
- * siteverify does not pass for the site's hostname and the `lab-validate`
- * action is 403 TURNSTILE_FAILED; and siteverify out of reach is 503
- * TURNSTILE_UNAVAILABLE. All four happen before the lab is read, so a
+ * one without a Turnstile token is 403 TURNSTILE_REQUIRED; a client past ten
+ * checks in ten minutes on this instance is 429 TURNSTILE_RATE_LIMITED; one
+ * Cloudflare's siteverify does not pass for the site's hostname and the
+ * `lab-validate` action is 403 TURNSTILE_FAILED; and siteverify out of reach
+ * is 503 TURNSTILE_UNAVAILABLE. All five happen before the lab is read, so a
  * refused request costs the store nothing and spends no one's quota.
  *
  * ===========================================================================
@@ -131,8 +132,10 @@ import {
 } from './public-bounds.js';
 import { getPublicJob } from './public-job.js';
 import {
+  CHECK_WINDOW_MS,
   LOCK_CODES,
   LOCK_REASONS,
+  createCheckLimiter,
   isSiteOrigin,
   turnstileConfigured,
   turnstileSecret,
@@ -279,11 +282,21 @@ async function checkIdentity({ identity }, state) {
   }
 }
 
-/** The Turnstile token, checked with Cloudflare. Before the lab, so no store read and no counter. */
-async function checkTurnstile({ env, fetch }, state) {
+/**
+ * The Turnstile token, checked with Cloudflare. Before the lab, so no store
+ * read and no quota counter; the only count is the in-memory check limiter,
+ * which caps how many siteverify calls one client can cause.
+ */
+async function checkTurnstile({ env, fetch, now, checkLimiter }, state) {
   const token = state.turnstileToken;
   if (typeof token !== 'string' || !token.trim()) {
     return refusal(403, LOCK_CODES.required, LOCK_REASONS[LOCK_CODES.required]);
+  }
+  if (!checkLimiter.take(state.clientKey, now())) {
+    state.context.warn?.('labs public submit refused: too many Turnstile checks from one client');
+    return refusal(429, LOCK_CODES.attempts, LOCK_REASONS[LOCK_CODES.attempts], {
+      'Retry-After': String(CHECK_WINDOW_MS / 1000),
+    });
   }
   const verdict = await verifyTurnstileToken({
     fetch,
@@ -421,7 +434,10 @@ export function createPublicSubmitHandlers({
     now,
     seconds: MINUTE_CACHE_SECONDS,
   });
-  const deps = { identity, store, env, now, uuid, cache, fetch };
+  // One per handler set, which is one per worker process (labs-public-http.js
+  // builds the handlers once), so the limit is per instance.
+  const checkLimiter = createCheckLimiter();
+  const deps = { identity, store, env, now, uuid, cache, fetch, checkLimiter };
 
   return {
     getSubmissionStatus: (request, context) => getSubmissionStatus(deps, request, context),

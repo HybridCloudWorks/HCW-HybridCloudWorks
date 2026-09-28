@@ -40,7 +40,11 @@ This project has not cut a tagged release; entries are grouped under
   `success: true` for one of the site's hostnames and the `lab-validate`
   action is `403 TURNSTILE_FAILED`, which is how a replayed single-use token
   fails; siteverify unreachable, past 5 seconds, non-2xx, non-JSON or
-  refusing the secret is `503 TURNSTILE_UNAVAILABLE`. With no secret, or an
+  refusing the secret is `503 TURNSTILE_UNAVAILABLE`. Before siteverify, an
+  in-memory limiter per instance allows one client ten checks in ten
+  minutes and answers the next `429 TURNSTILE_RATE_LIMITED`, so junk tokens
+  cannot drive a Cloudflare call per request (from the change's security
+  review, which found nothing above Low). With no secret, or an
   unresolved Key Vault reference, the POST and the status read answer
   `TURNSTILE_NOT_CONFIGURED`, so the status read now says which of switch,
   Turnstile or agent is missing. The token, the address and the secret are

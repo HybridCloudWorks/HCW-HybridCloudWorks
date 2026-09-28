@@ -288,7 +288,14 @@ amendment is the API half, for the one public route that queues work.
    `success: true` for one of the site's two hostnames and the action
    `lab-validate`. Tokens are single use and live five minutes, so a replay
    fails at siteverify. Siteverify out of reach, or refusing the secret, is
-   `503 TURNSTILE_UNAVAILABLE`, never a pass.
+   `503 TURNSTILE_UNAVAILABLE`, never a pass. Because the per-client quota
+   needs the store and so comes after the lock, an in-memory limit per
+   Function App instance allows one client ten checks in ten minutes and
+   answers the next `429 TURNSTILE_RATE_LIMITED`, so junk tokens cannot drive
+   a siteverify call per request (security review of this change). The two
+   reads, the status and one job's output, stay anonymous and are not locked
+   to the origin: they queue nothing, and a job is readable only by the
+   random id its submission returned, for a day.
 4. **The client identifier is the one #738 already uses.** The per-client
    bound counts the Cloudflare-verified, salted hash of `CF-Connecting-IP`,
    trusted only on a request carrying the origin secret, the identity every
@@ -333,7 +340,11 @@ Consequences of this amendment:
   can solve challenges for someone else. The bounds are what cap the
   damage: 2 an hour per verified address and 50 a day in total, against a
   `terraform-validate` job with no network, and decision 6 needs no change
-  for that reason.
+  for that reason. The same bounds give one denial of service: about 50
+  bought tokens from 25 addresses can use up the day's global cap and pause
+  the button for everyone until midnight UTC. That costs availability, not
+  data, and a per-network sub-cap is the answer if it is seen (revisit
+  triggers).
 - **One more owner-held secret, one more public value.** The secret key
   lives in Key Vault only and rotates by creating a new one in the dashboard
   and pasting it on the API-keys page. The site key rotates with it and needs

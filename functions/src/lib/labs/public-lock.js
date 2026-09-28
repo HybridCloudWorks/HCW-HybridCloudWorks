@@ -26,6 +26,12 @@
  *      one fails at siteverify (`timeout-or-duplicate`) and a token minted
  *      for another action or on another site is refused here.
  *
+ * A FLOOD OF JUNK TOKENS IS DAMPED BEFORE CLOUDFLARE IS ASKED. The per-client
+ * quota needs the store, so it sits after the lock; before siteverify, an
+ * in-memory limiter per Function App instance (`createCheckLimiter`) allows
+ * one client key ten checks in ten minutes and answers the eleventh 429
+ * TURNSTILE_RATE_LIMITED, still without a store read.
+ *
  * FAIL CLOSED. No secret (unset, or a Key Vault reference the platform did
  * not resolve, which `resolvedSetting` reads as unset) closes the door for
  * everyone, before the body is read: the status read and the POST both say
@@ -78,10 +84,27 @@ export const TURNSTILE_SITEVERIFY_URL = 'https://challenges.cloudflare.com/turns
 /** Past this, siteverify is treated as unreachable rather than waited on. */
 export const SITEVERIFY_TIMEOUT_MS = 5000;
 
+/**
+ * Siteverify calls one client may cause, per Function App instance, in a
+ * ten-minute window (security review of this change, 2026-09-28). The
+ * per-client quota of two jobs an hour needs the store, so it comes after
+ * the lock; without this, a script sending the site's Origin and junk tokens
+ * could make one Cloudflare call, and up to five seconds of function time,
+ * per request. Held in memory, not in the store, so the lock still reads
+ * nothing before it decides. Ten is well above what a person pressing the
+ * button needs; per instance, so the fleet-wide ceiling is this times the
+ * instance count, which bounds a flood rather than metering a visitor.
+ */
+export const CHECK_ATTEMPTS_PER_WINDOW = 10;
+export const CHECK_WINDOW_MS = 10 * 60 * 1000;
+/** Clients tracked at once; past this, expired windows go first, then the oldest. */
+export const CHECK_LIMITER_MAX_KEYS = 5000;
+
 /** The lock's refusals, as the codes a response carries. */
 export const LOCK_CODES = Object.freeze({
   origin: 'ORIGIN_NOT_ALLOWED',
   required: 'TURNSTILE_REQUIRED',
+  attempts: 'TURNSTILE_RATE_LIMITED',
   failed: 'TURNSTILE_FAILED',
   unavailable: 'TURNSTILE_UNAVAILABLE',
 });
@@ -92,6 +115,8 @@ export const LOCK_REASONS = Object.freeze({
     'Validate on the lab takes jobs only from the Landing Zone Builder on hybridcloudworks.com.',
   [LOCK_CODES.required]:
     'The request carried no Cloudflare Turnstile token, so the lab did not take the job. Reload the page and try again.',
+  [LOCK_CODES.attempts]:
+    "Too many tries at Cloudflare's browser check from this address in the last few minutes, so the lab did not take the job. Try again in ten minutes.",
   [LOCK_CODES.failed]:
     "Cloudflare's browser check did not pass, or its token had expired or was already used, so the lab did not take the job. Try again.",
   [LOCK_CODES.unavailable]:
@@ -120,6 +145,44 @@ export function isSiteOrigin(origin) {
   return typeof origin === 'string' && LAB_SITE_ORIGINS.includes(origin);
 }
 
+/**
+ * The per-instance limit on siteverify calls: `take(key, nowMs)` is true
+ * while `key` (the hashed client key) is under `limit` in its current window,
+ * and counts the call. A fixed window per key, opened at the key's first
+ * call. Memory is bounded: when a new key would pass `maxKeys`, expired
+ * windows are dropped first, then the oldest keys.
+ */
+export function createCheckLimiter({
+  limit = CHECK_ATTEMPTS_PER_WINDOW,
+  windowMs = CHECK_WINDOW_MS,
+  maxKeys = CHECK_LIMITER_MAX_KEYS,
+} = {}) {
+  const windows = new Map();
+  const expired = (window, nowMs) => nowMs - window.start >= windowMs;
+  const makeRoom = (nowMs) => {
+    for (const [key, window] of windows) if (expired(window, nowMs)) windows.delete(key);
+    // Map iterates in insertion order, so what is left goes oldest first.
+    for (const key of windows.keys()) {
+      if (windows.size < maxKeys) break;
+      windows.delete(key);
+    }
+  };
+  return {
+    take(key, nowMs) {
+      let window = windows.get(key);
+      if (!window || expired(window, nowMs)) {
+        if (!window && windows.size >= maxKeys) makeRoom(nowMs);
+        window = { start: nowMs, count: 0 };
+        windows.set(key, window);
+      }
+      if (window.count >= limit) return false;
+      window.count += 1;
+      return true;
+    },
+    size: () => windows.size,
+  };
+}
+
 const failed = (detail) => ({ ok: false, kind: 'failed', detail });
 const unavailable = (detail) => ({ ok: false, kind: 'unavailable', detail });
 /** A value from Cloudflare's answer, short and quoted, for a log line. */
@@ -134,12 +197,17 @@ const quoted = (value) => JSON.stringify(String(value ?? '').slice(0, 100));
  * @param {unknown} answer the parsed JSON siteverify returned
  */
 export function judgeSiteverify(answer) {
-  const codes = Array.isArray(answer?.['error-codes']) ? answer['error-codes'].map(String) : [];
+  // Siteverify always answers a JSON object. Anything else is Cloudflare or
+  // the network misbehaving, not a visitor failing the check.
+  if (!answer || typeof answer !== 'object' || Array.isArray(answer)) {
+    return unavailable('siteverify answered with something other than a JSON object');
+  }
+  const codes = Array.isArray(answer['error-codes']) ? answer['error-codes'].map(String) : [];
   const listed = codes.join(', ') || 'none';
   if (codes.some((code) => OUR_SIDE.has(code))) {
     return unavailable(`siteverify refused the request itself (error codes: ${listed})`);
   }
-  if (answer?.success !== true) return failed(`siteverify said no (error codes: ${listed})`);
+  if (answer.success !== true) return failed(`siteverify said no (error codes: ${listed})`);
   if (!LAB_SITE_HOSTNAMES.includes(answer.hostname)) {
     return failed(`the token was solved on ${quoted(answer.hostname)}, not on the site`);
   }
@@ -185,7 +253,9 @@ export async function verifyTurnstileToken({
   } catch (error) {
     return unavailable(`siteverify was not reached (${error?.name ?? 'error'})`);
   }
-  if (!response.ok) return unavailable(`siteverify answered HTTP ${response.status}`);
+  if (!response?.ok) {
+    return unavailable(`siteverify answered HTTP ${response?.status ?? '(no response)'}`);
+  }
   let answer;
   try {
     answer = await response.json();

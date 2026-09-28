@@ -26,6 +26,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { terraformSource } from '../../../test/terraform-source.js';
 import { PRODUCTION_ORIGINS } from '../auth/cors.js';
 import {
+  CHECK_ATTEMPTS_PER_WINDOW,
+  CHECK_WINDOW_MS,
   DOOR_CODES,
   DOOR_REASONS,
   LAB_SITE_HOSTNAMES,
@@ -37,6 +39,7 @@ import {
   PUBLIC_SUBMISSION_SWITCH,
   TURNSTILE_SECRET_SETTING,
   TURNSTILE_SITEVERIFY_URL,
+  createCheckLimiter,
   createPublicSubmitHandlers,
   isSiteOrigin,
   judgeSiteverify,
@@ -404,6 +407,9 @@ describe('fails closed when siteverify cannot say yes', () => {
       'an answer that is not JSON',
       vi.fn(async () => ({ ok: true, status: 200, json: async () => Promise.reject(new SyntaxError('x')) })),
     ],
+    ['a fetch that resolves to no response at all', vi.fn(async () => undefined)],
+    ['a JSON null', answering(null)],
+    ['a JSON array', answering([])],
     ['a secret Cloudflare refuses', answering({ success: false, 'error-codes': ['invalid-input-secret'] })],
     ['a secret Cloudflare did not get', answering({ success: false, 'error-codes': ['missing-input-secret'] })],
     ["Cloudflare's own failure", answering({ success: false, 'error-codes': ['internal-error'] })],
@@ -434,6 +440,63 @@ describe('fails closed when siteverify cannot say yes', () => {
   });
 });
 
+describe('a flood of junk tokens is damped before Cloudflare is asked', () => {
+  // Security review 2026-09-28: the per-client quota needs the store, so it
+  // comes after the lock. This in-memory limit is what stops one client
+  // making a siteverify call, and up to five seconds of function time, per
+  // request.
+  it(`allows ${CHECK_ATTEMPTS_PER_WINDOW} checks a client in ten minutes, then answers 429 without asking Cloudflare`, async () => {
+    const context = newContext();
+    const refusing = answering({ success: false, 'error-codes': ['invalid-input-response'] });
+    const { handlers, store } = build({ fetch: refusing });
+    for (let i = 0; i < CHECK_ATTEMPTS_PER_WINDOW; i += 1) {
+      expect((await handlers.submitJob(post(body({ turnstileToken: `junk-${i}` })), context)).status).toBe(403);
+    }
+    const over = await handlers.submitJob(post(body({ turnstileToken: 'junk-over' })), context);
+    expect(over.status).toBe(429);
+    expect(over.headers['Retry-After']).toBe('600');
+    expect(parse(over)).toEqual({
+      ok: false,
+      code: 'TURNSTILE_RATE_LIMITED',
+      error: LOCK_REASONS[LOCK_CODES.attempts],
+    });
+    expect(refusing).toHaveBeenCalledTimes(CHECK_ATTEMPTS_PER_WINDOW);
+    expect(storeCalls(store)).toBe(0);
+  });
+
+  it('does not count a request refused before the check, such as one with no token', async () => {
+    const { handlers, fetch } = build();
+    for (let i = 0; i < CHECK_ATTEMPTS_PER_WINDOW + 5; i += 1) {
+      await handlers.submitJob(post(body({ turnstileToken: undefined })), newContext());
+    }
+    expect(fetch).not.toHaveBeenCalled();
+    expect((await handlers.submitJob(post(), newContext())).status).toBe(202);
+  });
+
+  it('counts each client on its own, and opens a new window after ten minutes', () => {
+    const limiter = createCheckLimiter({ limit: 2, windowMs: CHECK_WINDOW_MS });
+    expect([limiter.take('a', 0), limiter.take('a', 1), limiter.take('a', 2)]).toEqual([true, true, false]);
+    expect(limiter.take('b', 2)).toBe(true);
+    expect(limiter.take('a', CHECK_WINDOW_MS - 1)).toBe(false);
+    expect(limiter.take('a', CHECK_WINDOW_MS)).toBe(true);
+  });
+
+  it('holds a bounded number of clients, dropping expired windows first and then the oldest', () => {
+    const limiter = createCheckLimiter({ limit: 1, windowMs: 1000, maxKeys: 3 });
+    limiter.take('old', 0);
+    limiter.take('k1', 900);
+    limiter.take('k2', 900);
+    // 'old' has expired by 1500, so it is the one that goes.
+    limiter.take('k3', 1500);
+    expect(limiter.size()).toBe(3);
+    expect(limiter.take('k1', 1500)).toBe(false);
+    // Nothing has expired at 1600, so the oldest key makes room.
+    limiter.take('k4', 1600);
+    expect(limiter.size()).toBe(3);
+    expect(limiter.take('k1', 1600)).toBe(true);
+  });
+});
+
 describe('what siteverify said, judged', () => {
   it('passes only success for the site and the action', () => {
     expect(judgeSiteverify({ ...PASS })).toEqual({ ok: true });
@@ -442,6 +505,11 @@ describe('what siteverify said, judged', () => {
 
   it.each([null, undefined, 'yes', [], {}])('does not pass %j', (answer) => {
     expect(judgeSiteverify(answer).ok).toBe(false);
+  });
+
+  it('reads an answer that is not an object as Cloudflare misbehaving, not the visitor failing', () => {
+    for (const answer of [null, undefined, 'yes', []]) expect(judgeSiteverify(answer).kind).toBe('unavailable');
+    expect(judgeSiteverify({}).kind).toBe('failed');
   });
 
   it('names the reason for the log, and quotes what Cloudflare reported', () => {
