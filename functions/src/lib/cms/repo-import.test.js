@@ -12,15 +12,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { MAX_IMPORT_PATHS, createRepoImportHandlers, parseImportRequest } from './repo-import.js';
 import {
   GITHUB_FETCH_TIMEOUT_MS,
   MAX_DRAFT_BYTES,
-  MAX_IMPORT_PATHS,
   createRepoDraftSource,
-  createRepoImportHandlers,
   isPinnedUrl,
-  parseImportRequest,
-} from './repo-import.js';
+} from './repo-draft-source.js';
 import { repoDraftContentId, sha256Hex } from './repo-draft.js';
 import { createContentDocument } from './content-create.js';
 
@@ -35,7 +33,8 @@ const LAB_TEXT = Object.fromEntries(
 );
 const SHA = '2fb230c9ac7118c4f87d4cf8031e0571d47e74d8';
 
-const RAW_PREFIX = 'https://raw.githubusercontent.com/HybridCloudWorks/HCW-HybridCloudWorks/main/docs/content/';
+const RAW_PREFIX =
+  'https://raw.githubusercontent.com/HybridCloudWorks/HCW-HybridCloudWorks/main/docs/content/';
 const API_PREFIX = 'https://api.github.com/repos/HybridCloudWorks/HCW-HybridCloudWorks/';
 
 const USER = { oid: 'u1', email: 'editor@hcw.dev' };
@@ -80,100 +79,125 @@ function listing(paths) {
   ]);
 }
 
+/** One raw file, or GitHub's 404 for a path the repository does not hold. */
+function rawFile(files, url) {
+  const text = files[`docs/content/${url.slice(RAW_PREFIX.length)}`];
+  return text === undefined
+    ? textResponse('404: Not Found', { status: 404, url })
+    : textResponse(text, { url });
+}
+
+/** URL prefix → canned answer, the three GitHub calls the source makes. */
+function githubRoutes({ files, commitSha }) {
+  const listed = [
+    ...Object.keys(files),
+    'docs/content/blog-template.md',
+    'docs/content/blog-machine.md',
+    'docs/content/README.md',
+  ];
+  const commits = JSON.stringify(commitSha ? [{ sha: commitSha }] : []);
+  return [
+    [`${API_PREFIX}contents/docs/content`, (url) => textResponse(listing(listed), { url })],
+    [`${API_PREFIX}commits?`, (url) => textResponse(commits, { url })],
+    [RAW_PREFIX, (url) => rawFile(files, url)],
+  ];
+}
+
 /** Routes a URL to a canned response; records every call. */
 function githubFetch({ files = LAB_TEXT, commitSha = SHA, overrides = {} } = {}) {
   const calls = [];
+  const routes = githubRoutes({ files, commitSha });
   const fetchImpl = vi.fn(async (url, init) => {
     calls.push({ url, init });
-    if (overrides[url]) return overrides[url](url, init);
-    if (url.startsWith(`${API_PREFIX}contents/docs/content`)) {
-      return textResponse(
-        listing([
-          ...Object.keys(files),
-          'docs/content/blog-template.md',
-          'docs/content/blog-machine.md',
-          'docs/content/README.md',
-        ]),
-        { url }
-      );
-    }
-    if (url.startsWith(`${API_PREFIX}commits?`)) {
-      return textResponse(JSON.stringify(commitSha ? [{ sha: commitSha }] : []), { url });
-    }
-    if (url.startsWith(RAW_PREFIX)) {
-      const path = `docs/content/${url.slice(RAW_PREFIX.length)}`;
-      if (files[path] === undefined) return textResponse('404: Not Found', { status: 404, url });
-      return textResponse(files[path], { url });
-    }
-    throw new Error(`unexpected fetch ${url}`);
+    const answer = overrides[url] || routes.find(([prefix]) => url.startsWith(prefix))?.[1];
+    if (!answer) throw new Error(`unexpected fetch ${url}`);
+    return answer(url, init);
   });
   return { fetchImpl, calls };
 }
 
 // ── an in-memory content store that answers the queries the code runs ─────
 
+/** Query text → filter; the field-equality form the dedup gate runs is the fallback. */
+const QUERY_FILTERS = [
+  ['c.repoPath = @repoPath', (param) => (doc) => doc.repoPath === param('@repoPath')],
+  [
+    'ARRAY_CONTAINS(@paths, c.repoPath)',
+    (param) => (doc) => param('@paths').includes(doc.repoPath),
+  ],
+  ['c.normalizedTitle = @title', (param) => (doc) => doc.normalizedTitle === param('@title')],
+];
+
+function queryIn(docs) {
+  return async (container, query, parameters = []) => {
+    if (container !== 'content') throw new Error(`unexpected container ${container}`);
+    const param = (name) => parameters.find((p) => p.name === name)?.value;
+    const named = QUERY_FILTERS.find(([text]) => query.includes(text));
+    const field = /c\["([^"]+)"\] = @value/.exec(query)?.[1];
+    if (!named && !field) throw new Error(`unexpected query ${query}`);
+    const all = [...docs.values()];
+    return named
+      ? all.filter(named[1](param))
+      : all.filter((doc) => doc[field] === param('@value')).slice(0, 1);
+  };
+}
+
+function applyUpdates(doc, updates) {
+  const next = { ...doc };
+  for (const [key, value] of Object.entries(updates)) {
+    if (value === undefined) delete next[key];
+    else next[key] = value;
+  }
+  return next;
+}
+
+const conflict = (code, message) => Object.assign(new Error(message), { code });
+
+/** patchDoc with the real client's ifMatch semantics: a moved ETag is a 412. */
+function patchIn(docs, nextEtag) {
+  return async (container, id, updates, options = {}) => {
+    const doc = docs.get(id);
+    if (!doc) throw conflict(404, 'missing');
+    if (options.ifMatch && options.ifMatch !== doc._etag) throw conflict(412, 'changed');
+    const next = { ...applyUpdates(doc, updates), _etag: nextEtag() };
+    docs.set(id, next);
+    return next;
+  };
+}
+
 function memoryStore(seed = []) {
   const docs = new Map(seed.map((doc) => [doc.id, { _etag: '"e0"', ...doc }]));
   const audits = [];
   let etag = 1;
   const nextEtag = () => `"e${etag++}"`;
-  const store = {
+  return {
     docs,
     audits,
-    queryDocs: vi.fn(async (container, query, parameters = []) => {
-      if (container !== 'content') throw new Error(`unexpected container ${container}`);
-      const param = (name) => parameters.find((p) => p.name === name)?.value;
-      const all = [...docs.values()];
-      if (query.includes('c.repoPath = @repoPath')) {
-        return all.filter((d) => d.repoPath === param('@repoPath'));
-      }
-      if (query.includes('ARRAY_CONTAINS(@paths, c.repoPath)')) {
-        return all.filter((d) => param('@paths').includes(d.repoPath));
-      }
-      if (query.includes('c.normalizedTitle = @title')) {
-        return all.filter((d) => d.normalizedTitle === param('@title'));
-      }
-      const field = /c\["([^"]+)"\] = @value/.exec(query)?.[1];
-      if (field) return all.filter((d) => d[field] === param('@value')).slice(0, 1);
-      throw new Error(`unexpected query ${query}`);
-    }),
-    readDoc: vi.fn(async (container, id) => {
-      const doc = docs.get(id);
-      return doc ? structuredClone(doc) : null;
-    }),
+    queryDocs: vi.fn(queryIn(docs)),
+    readDoc: vi.fn(async (container, id) => (docs.has(id) ? structuredClone(docs.get(id)) : null)),
     createDoc: vi.fn(async (container, doc) => {
-      if (docs.has(doc.id)) throw Object.assign(new Error('Conflict'), { code: 409 });
+      if (docs.has(doc.id)) throw conflict(409, 'Conflict');
       docs.set(doc.id, { ...doc, _etag: nextEtag() });
       return doc;
     }),
-    patchDoc: vi.fn(async (container, id, updates, options = {}) => {
-      const doc = docs.get(id);
-      if (!doc) throw Object.assign(new Error('missing'), { code: 404 });
-      if (options.ifMatch && options.ifMatch !== doc._etag) {
-        throw Object.assign(new Error('changed'), { code: 412 });
-      }
-      const next = { ...doc };
-      for (const [key, value] of Object.entries(updates)) {
-        if (value === undefined) delete next[key];
-        else next[key] = value;
-      }
-      next._etag = nextEtag();
-      docs.set(id, next);
-      return next;
-    }),
+    patchDoc: vi.fn(patchIn(docs, nextEtag)),
+    // The import must never upsert content: create-only or conditioned patch.
     upsertDoc: vi.fn(async (container, doc) => {
-      if (container === 'admin_audit_logs') {
-        audits.push(doc);
-        return doc;
+      if (container !== 'admin_audit_logs') {
+        throw new Error(`upsertDoc on ${container} — the import must not replace documents`);
       }
-      // The import must never upsert content: create-only or conditioned patch.
-      throw new Error(`upsertDoc on ${container} — the import must not replace documents`);
+      audits.push(doc);
+      return doc;
     }),
   };
-  return store;
 }
 
-function handlersWith({ store = memoryStore(), fetch = githubFetch(), guard = allowGuard(), ...rest } = {}) {
+function handlersWith({
+  store = memoryStore(),
+  fetch = githubFetch(),
+  guard = allowGuard(),
+  ...rest
+} = {}) {
   const handlers = createRepoImportHandlers({
     guard,
     store,
@@ -211,7 +235,11 @@ describe('parseImportRequest', () => {
     [{}],
     [{ paths: 'docs/content/blog-lab-01-landing-zone.md' }],
     [{ paths: [] }],
-    [{ paths: Array.from({ length: MAX_IMPORT_PATHS + 1 }, (_, i) => `docs/content/blog-x${i}.md`) }],
+    [
+      {
+        paths: Array.from({ length: MAX_IMPORT_PATHS + 1 }, (_, i) => `docs/content/blog-x${i}.md`),
+      },
+    ],
   ])('refuses a malformed body (%j)', (body) => {
     expect(parseImportRequest(body).ok).toBe(false);
   });
@@ -258,17 +286,47 @@ describe('isPinnedUrl', () => {
   });
 
   it.each([
-    ['another host', 'https://evil.test/HybridCloudWorks/HCW-HybridCloudWorks/main/docs/content/blog-x.md'],
-    ['a look-alike suffix', 'https://raw.githubusercontent.com.evil.test/HybridCloudWorks/HCW-HybridCloudWorks/main/docs/content/blog-x.md'],
-    ['userinfo before another host', 'https://raw.githubusercontent.com@evil.test/HybridCloudWorks/HCW-HybridCloudWorks/main/docs/content/blog-x.md'],
-    ['userinfo on the right host', 'https://user:pw@raw.githubusercontent.com/HybridCloudWorks/HCW-HybridCloudWorks/main/docs/content/blog-x.md'],
-    ['a port', 'https://raw.githubusercontent.com:8443/HybridCloudWorks/HCW-HybridCloudWorks/main/docs/content/blog-x.md'],
-    ['plain http', 'http://raw.githubusercontent.com/HybridCloudWorks/HCW-HybridCloudWorks/main/docs/content/blog-x.md'],
-    ['another repository', 'https://raw.githubusercontent.com/someone/else/main/docs/content/blog-x.md'],
-    ['another branch', 'https://raw.githubusercontent.com/HybridCloudWorks/HCW-HybridCloudWorks/dev/docs/content/blog-x.md'],
-    ['outside docs/content', 'https://raw.githubusercontent.com/HybridCloudWorks/HCW-HybridCloudWorks/main/infra/main.tf'],
+    [
+      'another host',
+      'https://evil.test/HybridCloudWorks/HCW-HybridCloudWorks/main/docs/content/blog-x.md',
+    ],
+    [
+      'a look-alike suffix',
+      'https://raw.githubusercontent.com.evil.test/HybridCloudWorks/HCW-HybridCloudWorks/main/docs/content/blog-x.md',
+    ],
+    [
+      'userinfo before another host',
+      'https://raw.githubusercontent.com@evil.test/HybridCloudWorks/HCW-HybridCloudWorks/main/docs/content/blog-x.md',
+    ],
+    [
+      'userinfo on the right host',
+      'https://user:pw@raw.githubusercontent.com/HybridCloudWorks/HCW-HybridCloudWorks/main/docs/content/blog-x.md',
+    ],
+    [
+      'a port',
+      'https://raw.githubusercontent.com:8443/HybridCloudWorks/HCW-HybridCloudWorks/main/docs/content/blog-x.md',
+    ],
+    [
+      'plain http',
+      'http://raw.githubusercontent.com/HybridCloudWorks/HCW-HybridCloudWorks/main/docs/content/blog-x.md',
+    ],
+    [
+      'another repository',
+      'https://raw.githubusercontent.com/someone/else/main/docs/content/blog-x.md',
+    ],
+    [
+      'another branch',
+      'https://raw.githubusercontent.com/HybridCloudWorks/HCW-HybridCloudWorks/dev/docs/content/blog-x.md',
+    ],
+    [
+      'outside docs/content',
+      'https://raw.githubusercontent.com/HybridCloudWorks/HCW-HybridCloudWorks/main/infra/main.tf',
+    ],
     ['another repository on the API', 'https://api.github.com/repos/someone/else/contents/docs'],
-    ['a GitHub page', 'https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/docs/content/blog-x.md'],
+    [
+      'a GitHub page',
+      'https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/docs/content/blog-x.md',
+    ],
     ['not a URL', 'docs/content/blog-x.md'],
   ])('refuses %s', (_label, url) => {
     expect(isPinnedUrl(url)).toBe(false);
@@ -320,7 +378,8 @@ describe('createRepoDraftSource — two hosts, no redirects, a cap and a deadlin
     const url = `${RAW_PREFIX}blog-lab-01-landing-zone.md`;
     const fetch = githubFetch({
       overrides: {
-        [url]: () => textResponse('', { status: 302, headers: { location: 'https://evil.test/x' } }),
+        [url]: () =>
+          textResponse('', { status: 302, headers: { location: 'https://evil.test/x' } }),
       },
     });
     await expect(
@@ -332,7 +391,9 @@ describe('createRepoDraftSource — two hosts, no redirects, a cap and a deadlin
   it('refuses a response that says it came from another URL', async () => {
     const url = `${RAW_PREFIX}blog-lab-01-landing-zone.md`;
     const fetch = githubFetch({
-      overrides: { [url]: () => textResponse('---\ntitle: x\n---\nx', { url: 'https://evil.test/x.md' }) },
+      overrides: {
+        [url]: () => textResponse('---\ntitle: x\n---\nx', { url: 'https://evil.test/x.md' }),
+      },
     });
     await expect(
       createRepoDraftSource({ fetch: fetch.fetchImpl }).fetchDraft(LAB_01)
@@ -343,7 +404,9 @@ describe('createRepoDraftSource — two hosts, no redirects, a cap and a deadlin
     const fetchImpl = vi.fn(async () => {
       throw new TypeError('fetch failed', { cause: new Error('unexpected redirect') });
     });
-    await expect(createRepoDraftSource({ fetch: fetchImpl }).fetchDraft(LAB_01)).rejects.toMatchObject({
+    await expect(
+      createRepoDraftSource({ fetch: fetchImpl }).fetchDraft(LAB_01)
+    ).rejects.toMatchObject({
       code: 'REDIRECTED',
     });
   });
@@ -352,7 +415,8 @@ describe('createRepoDraftSource — two hosts, no redirects, a cap and a deadlin
     const url = `${RAW_PREFIX}blog-lab-01-landing-zone.md`;
     const declared = githubFetch({
       overrides: {
-        [url]: () => textResponse('small', { headers: { 'content-length': String(MAX_DRAFT_BYTES + 1) } }),
+        [url]: () =>
+          textResponse('small', { headers: { 'content-length': String(MAX_DRAFT_BYTES + 1) } }),
       },
     });
     await expect(
@@ -377,7 +441,9 @@ describe('createRepoDraftSource — two hosts, no redirects, a cap and a deadlin
       headers: new Headers(),
       body: stream,
     }));
-    await expect(createRepoDraftSource({ fetch: streamed }).fetchDraft(LAB_01)).rejects.toMatchObject({
+    await expect(
+      createRepoDraftSource({ fetch: streamed }).fetchDraft(LAB_01)
+    ).rejects.toMatchObject({
       code: 'TOO_LARGE',
     });
     expect(cancel).toHaveBeenCalled();
@@ -428,7 +494,9 @@ describe('createRepoDraftSource — two hosts, no redirects, a cap and a deadlin
     ).rejects.toMatchObject({ code: 'RATE_LIMITED', resetAt: '2026-09-21T14:13:20.000Z' });
 
     await expect(
-      createRepoDraftSource({ fetch: githubFetch().fetchImpl }).fetchDraft('docs/content/blog-gone.md')
+      createRepoDraftSource({ fetch: githubFetch().fetchImpl }).fetchDraft(
+        'docs/content/blog-gone.md'
+      )
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 
@@ -437,7 +505,11 @@ describe('createRepoDraftSource — two hosts, no redirects, a cap and a deadlin
     const bytes = Buffer.from([0xff, 0xfe, 0xfd]);
     const fetch = githubFetch({
       overrides: {
-        [url]: () => ({ ...textResponse(''), headers: new Headers(), arrayBuffer: async () => bytes }),
+        [url]: () => ({
+          ...textResponse(''),
+          headers: new Headers(),
+          arrayBuffer: async () => bytes,
+        }),
       },
     });
     await expect(
@@ -447,7 +519,9 @@ describe('createRepoDraftSource — two hosts, no redirects, a cap and a deadlin
 
   it('treats the commit lookup as best-effort: a failure is null, never a throw', async () => {
     const failing = vi.fn(async () => textResponse('nope', { status: 500 }));
-    await expect(createRepoDraftSource({ fetch: failing }).lastCommitSha(LAB_01)).resolves.toBeNull();
+    await expect(
+      createRepoDraftSource({ fetch: failing }).lastCommitSha(LAB_01)
+    ).resolves.toBeNull();
     const garbage = githubFetch({ commitSha: 'not-a-sha' });
     await expect(
       createRepoDraftSource({ fetch: garbage.fetchImpl }).lastCommitSha(LAB_01)
@@ -458,14 +532,20 @@ describe('createRepoDraftSource — two hosts, no redirects, a cap and a deadlin
 // ── the role ───────────────────────────────────────────────────────────────
 
 describe('the role', () => {
-  it.each(['importDrafts', 'listCandidates'])('%s asks for editor and stops at a refusal', async (name) => {
-    const { handlers, guard, store, fetch } = handlersWith({ guard: denyGuard() });
-    const res = await handlers[name](makeRequest(name === 'importDrafts' ? { paths: [LAB_01] } : undefined), context);
-    expect(res.status).toBe(403);
-    expect(guard.requireRole).toHaveBeenCalledWith(expect.anything(), 'editor');
-    expect(fetch.fetchImpl).not.toHaveBeenCalled();
-    expect(store.queryDocs).not.toHaveBeenCalled();
-  });
+  it.each(['importDrafts', 'listCandidates'])(
+    '%s asks for editor and stops at a refusal',
+    async (name) => {
+      const { handlers, guard, store, fetch } = handlersWith({ guard: denyGuard() });
+      const res = await handlers[name](
+        makeRequest(name === 'importDrafts' ? { paths: [LAB_01] } : undefined),
+        context
+      );
+      expect(res.status).toBe(403);
+      expect(guard.requireRole).toHaveBeenCalledWith(expect.anything(), 'editor');
+      expect(fetch.fetchImpl).not.toHaveBeenCalled();
+      expect(store.queryDocs).not.toHaveBeenCalled();
+    }
+  );
 });
 
 // ── creating: in_review, never published ───────────────────────────────────
@@ -505,7 +585,9 @@ describe('POST import — a new path', () => {
     // Content was only ever created — never upserted, never patched.
     expect(store.createDoc).toHaveBeenCalledTimes(3);
     expect(store.patchDoc).not.toHaveBeenCalled();
-    expect(store.upsertDoc.mock.calls.every(([container]) => container === 'admin_audit_logs')).toBe(true);
+    expect(
+      store.upsertDoc.mock.calls.every(([container]) => container === 'admin_audit_logs')
+    ).toBe(true);
 
     expect(store.audits).toHaveLength(3);
     expect(store.audits[0]).toMatchObject({
@@ -513,7 +595,13 @@ describe('POST import — a new path', () => {
       userId: 'u1',
       userEmail: 'editor@hcw.dev',
       contentId: repoDraftContentId(LAB_01),
-      details: { repoPath: LAB_01, repoRef: 'main', repoCommitSha: SHA, outcome: 'created', contentStatus: 'in_review' },
+      details: {
+        repoPath: LAB_01,
+        repoRef: 'main',
+        repoCommitSha: SHA,
+        outcome: 'created',
+        contentStatus: 'in_review',
+      },
     });
   });
 
@@ -644,10 +732,15 @@ describe('POST import — a path already imported', () => {
     expect(store.docs.get(id)._etag).toBe(firstEtag);
 
     // The owner edits the draft on main; a reviewer has set the topics meanwhile.
-    files[LAB_01] = LAB_TEXT[LAB_01]
-      .replace('title: Build a landing zone you can read', 'title: Build a landing zone you can read twice')
-      .replace('The platform half', 'The whole platform half');
-    store.docs.set(id, { ...store.docs.get(id), keyTopics: ['chosen by the reviewer'], 'Cloud Provider': 'Terraform' });
+    files[LAB_01] = LAB_TEXT[LAB_01].replace(
+      'title: Build a landing zone you can read',
+      'title: Build a landing zone you can read twice'
+    ).replace('The platform half', 'The whole platform half');
+    store.docs.set(id, {
+      ...store.docs.get(id),
+      keyTopics: ['chosen by the reviewer'],
+      'Cloud Provider': 'Terraform',
+    });
 
     const updated = parse(await handlers.importDrafts(makeRequest({ paths: [LAB_01] }), context));
     expect(updated.body.results[0]).toMatchObject({
@@ -692,7 +785,11 @@ describe('POST import — a path already imported', () => {
     };
     const { handlers, store, fetch } = handlersWith({ store: memoryStore([published]) });
     const res = parse(await handlers.importDrafts(makeRequest({ paths: [LAB_01] }), context));
-    expect(res.body.results[0]).toMatchObject({ outcome: 'refused', code, contentId: published.id });
+    expect(res.body.results[0]).toMatchObject({
+      outcome: 'refused',
+      code,
+      contentId: published.id,
+    });
     expect(store.patchDoc).not.toHaveBeenCalled();
     expect(store.createDoc).not.toHaveBeenCalled();
     expect(fetch.fetchImpl).not.toHaveBeenCalled();
@@ -719,8 +816,14 @@ describe('POST import — a path already imported', () => {
     });
     const { handlers } = handlersWith({ store, fetch });
     const res = parse(await handlers.importDrafts(makeRequest({ paths: [LAB_01] }), context));
-    expect(res.body.results[0]).toMatchObject({ outcome: 'refused', code: 'CHANGED_DURING_IMPORT' });
-    expect(store.docs.get(inReview.id)).toMatchObject({ contentStatus: 'approved', repoContentSha256: 'old' });
+    expect(res.body.results[0]).toMatchObject({
+      outcome: 'refused',
+      code: 'CHANGED_DURING_IMPORT',
+    });
+    expect(store.docs.get(inReview.id)).toMatchObject({
+      contentStatus: 'approved',
+      repoContentSha256: 'old',
+    });
   });
 
   it('refuses a path two documents claim', async () => {
@@ -730,7 +833,11 @@ describe('POST import — a path already imported', () => {
     ]);
     const { handlers, fetch } = handlersWith({ store });
     const res = parse(await handlers.importDrafts(makeRequest({ paths: [LAB_01] }), context));
-    expect(res.body.results[0]).toMatchObject({ outcome: 'refused', code: 'AMBIGUOUS', contentIds: ['a', 'b'] });
+    expect(res.body.results[0]).toMatchObject({
+      outcome: 'refused',
+      code: 'AMBIGUOUS',
+      contentIds: ['a', 'b'],
+    });
     expect(fetch.fetchImpl).not.toHaveBeenCalled();
   });
 });
@@ -748,14 +855,26 @@ describe('GET candidates', () => {
         repoCommitSha: SHA,
         repoImportedAt: '2026-09-28T10:00:00.000Z',
       },
-      { id: 'live', repoPath: LAB_02, contentStatus: 'published', Live: true, repoImportedAt: '2026-09-27T10:00:00.000Z' },
+      {
+        id: 'live',
+        repoPath: LAB_02,
+        contentStatus: 'published',
+        Live: true,
+        repoImportedAt: '2026-09-27T10:00:00.000Z',
+      },
       { id: 'unrelated', contentStatus: 'in_review' },
     ]);
     const { handlers } = handlersWith({ store });
     const res = parse(await handlers.listCandidates(makeRequest(), context));
     expect(res.status).toBe(200);
-    expect(res.body.repo).toEqual({ owner: 'HybridCloudWorks', name: 'HCW-HybridCloudWorks', ref: 'main' });
-    expect(res.body.candidates.map((c) => [c.path, c.importable, c.imported?.contentStatus ?? null])).toEqual([
+    expect(res.body.repo).toEqual({
+      owner: 'HybridCloudWorks',
+      name: 'HCW-HybridCloudWorks',
+      ref: 'main',
+    });
+    expect(
+      res.body.candidates.map((c) => [c.path, c.importable, c.imported?.contentStatus ?? null])
+    ).toEqual([
       [LAB_01, true, 'in_review'],
       [LAB_02, false, 'published'],
       [LAB_03, true, null],
@@ -779,13 +898,21 @@ describe('GET candidates', () => {
         })
       ),
     };
-    const limitedRes = parse(await handlersWith({ fetch: limited }).handlers.listCandidates(makeRequest(), context));
+    const limitedRes = parse(
+      await handlersWith({ fetch: limited }).handlers.listCandidates(makeRequest(), context)
+    );
     expect(limitedRes.status).toBe(503);
     expect(limitedRes.body).toMatchObject({ ok: false, code: 'RATE_LIMITED' });
     expect(limitedRes.body.error).toMatch(/2026-09-21T14:13:20.000Z/);
 
-    const down = { fetchImpl: vi.fn(async () => { throw new TypeError('fetch failed'); }) };
-    const downRes = parse(await handlersWith({ fetch: down }).handlers.listCandidates(makeRequest(), context));
+    const down = {
+      fetchImpl: vi.fn(async () => {
+        throw new TypeError('fetch failed');
+      }),
+    };
+    const downRes = parse(
+      await handlersWith({ fetch: down }).handlers.listCandidates(makeRequest(), context)
+    );
     expect(downRes.status).toBe(502);
     expect(downRes.body.code).toBe('FETCH_FAILED');
   });

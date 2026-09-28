@@ -44,7 +44,8 @@ const LAB_FENCE = '```landing-zone\nlz=mg,policy,mgmt,hub&corp=0&online=0\n```';
 
 const SOURCE = Object.freeze({
   commitSha: '2fb230c9ac7118c4f87d4cf8031e0571d47e74d8',
-  rawUrl: 'https://raw.githubusercontent.com/HybridCloudWorks/HCW-HybridCloudWorks/main/docs/content/blog-lab-01-landing-zone.md',
+  rawUrl:
+    'https://raw.githubusercontent.com/HybridCloudWorks/HCW-HybridCloudWorks/main/docs/content/blog-lab-01-landing-zone.md',
   contentSha256: 'a'.repeat(64),
 });
 const FIXED_NOW = () => new Date('2026-09-28T12:00:00.000Z');
@@ -56,7 +57,10 @@ describe('checkRepoDraftPath — the allow-list', () => {
 
   it.each([
     ['a traversal out of the directory', 'docs/content/../../infra/main.tf'],
-    ['a traversal that lands back on a blog name', 'docs/content/../content/blog-lab-01-landing-zone.md'],
+    [
+      'a traversal that lands back on a blog name',
+      'docs/content/../content/blog-lab-01-landing-zone.md',
+    ],
     ['a leading traversal', '../docs/content/blog-lab-01-landing-zone.md'],
     ['an encoded traversal', 'docs/content/%2e%2e/blog-x.md'],
     ['a Windows separator', 'docs\\content\\blog-x.md'],
@@ -148,9 +152,11 @@ describe('parseFrontMatter — the tooling/workflow.py frontmatter() port', () =
       'iac',
       'landing-zone',
     ]);
-    expect(parseInlineList("['a', \"b\", , c]")).toEqual(['a', 'b', 'c']);
+    expect(parseInlineList('[\'a\', "b", , c]')).toEqual(['a', 'b', 'c']);
     expect(parseInlineList('')).toEqual([]);
-    expect(parseInlineList(Array.from({ length: 20 }, (_, i) => `t${i}`).join(','))).toHaveLength(12);
+    expect(parseInlineList(Array.from({ length: 20 }, (_, i) => `t${i}`).join(','))).toHaveLength(
+      12
+    );
   });
 });
 
@@ -271,7 +277,10 @@ describe('the three lab drafts, read from disk', () => {
         now: FIXED_NOW,
       });
       const written = [];
-      const store = { queryDocs: async () => [], upsertDoc: async (c, doc) => written.push([c, doc]) };
+      const store = {
+        queryDocs: async () => [],
+        upsertDoc: async (c, doc) => written.push([c, doc]),
+      };
       const result = await createContentDocument({
         store,
         user: { email: 'editor@hcw.dev' },
@@ -281,7 +290,10 @@ describe('the three lab drafts, read from disk', () => {
         uuid: () => repoDraftContentId(path),
       });
 
-      expect(result).toEqual({ status: 200, body: { success: true, contentId: repoDraftContentId(path) } });
+      expect(result).toEqual({
+        status: 200,
+        body: { success: true, contentId: repoDraftContentId(path) },
+      });
       expect(written).toHaveLength(1);
       const [container, doc] = written[0];
       expect(container).toBe('content');
@@ -313,7 +325,16 @@ describe('the three lab drafts, read from disk', () => {
         expect(doc[field]).toBe(parsed.draft.body);
       }
       // Never published, never dated for publishing, never holding a URL.
-      for (const key of ['publishedAt', 'Published At', 'publishedDate', 'datePublished', 'slug', 'Slug', 'curatedSubpagePath', 'publicUrl']) {
+      for (const key of [
+        'publishedAt',
+        'Published At',
+        'publishedDate',
+        'datePublished',
+        'slug',
+        'Slug',
+        'curatedSubpagePath',
+        'publicUrl',
+      ]) {
         expect(doc, key).not.toHaveProperty(key);
       }
       expect(doc.contentQuality).toEqual(expect.objectContaining({ ready: expect.any(Boolean) }));

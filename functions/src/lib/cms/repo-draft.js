@@ -256,17 +256,23 @@ export function parseRepoDraft(text) {
   const title = String(fields.title || '').trim();
   if (!title) return refuse('NO_TITLE', 'The front matter has no title.');
   if (title.length > MAX_TITLE_CHARS) {
-    return refuse('TITLE_TOO_LONG', `The title is ${title.length} characters; at most ${MAX_TITLE_CHARS}.`);
+    return refuse(
+      'TITLE_TOO_LONG',
+      `The title is ${title.length} characters; at most ${MAX_TITLE_CHARS}.`
+    );
   }
   const articleBody = body.replace(/^\n+/, '').trimEnd();
   if (!articleBody.trim()) return refuse('EMPTY_BODY', 'The file has front matter and no article.');
 
   const warnings = [];
   const date = String(fields.date || '').trim();
-  if (date && !isCalendarDate(date)) warnings.push(`date "${date}" is not YYYY-MM-DD and was ignored`);
+  if (date && !isCalendarDate(date))
+    warnings.push(`date "${date}" is not YYYY-MM-DD and was ignored`);
   const readingRaw = String(fields.reading || '').trim();
-  const reading = /^\d{1,3}$/.test(readingRaw) && Number(readingRaw) > 0 ? Number(readingRaw) : null;
-  if (readingRaw && reading === null) warnings.push(`reading "${readingRaw}" is not a number of minutes and was ignored`);
+  const reading =
+    /^\d{1,3}$/.test(readingRaw) && Number(readingRaw) > 0 ? Number(readingRaw) : null;
+  if (readingRaw && reading === null)
+    warnings.push(`reading "${readingRaw}" is not a number of minutes and was ignored`);
   const relativeLinks = findRepoRelativeLinks(articleBody);
   if (relativeLinks.length) {
     warnings.push(
@@ -279,7 +285,9 @@ export function parseRepoDraft(text) {
     ok: true,
     draft: {
       title,
-      subtitle: String(fields.subtitle || '').trim().slice(0, MAX_SUBTITLE_CHARS),
+      subtitle: String(fields.subtitle || '')
+        .trim()
+        .slice(0, MAX_SUBTITLE_CHARS),
       date: date && isCalendarDate(date) ? date : null,
       track: String(fields.track || '').trim() || null,
       part: String(fields.part || '').trim() || null,
@@ -402,7 +410,14 @@ export function buildRepoDraftData({ path, draft, source, editor, now = () => ne
  * now called. `readTime` undefined is a deletion (patchDoc's convention): the
  * file no longer states a reading time.
  */
-export function buildRepoDraftRefresh({ path, draft, source, editor, current = {}, now = () => new Date() }) {
+export function buildRepoDraftRefresh({
+  path,
+  draft,
+  source,
+  editor,
+  current = {},
+  now = () => new Date(),
+}) {
   const stamp = now().toISOString();
   const bodies = normalizeContentBodyFields({
     Content: draft.body,

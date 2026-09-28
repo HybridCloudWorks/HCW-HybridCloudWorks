@@ -22,9 +22,9 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { FileInput, Loader2, RefreshCw } from 'lucide-react';
+import CollapsiblePanel, { PanelLoading } from '@/components/admin/CollapsiblePanel';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { useToast } from '@/components/ui/use-toast';
 import { getJSON, postJSON } from '@/lib/api';
 import { logAdminAction } from '@/lib/auditLog';
@@ -188,6 +188,55 @@ function ResultList({ lines }) {
 }
 
 /**
+ * What the body shows: the spinner, the list, or the empty line. An error
+ * alone shows only the error (CollapsiblePanel's first line); an error beside
+ * a list — a failed import — keeps the list.
+ * @returns {'loading'|'list'|'empty'|'error'}
+ */
+export function listStateOf({ loading, error, count }) {
+  if (loading) return 'loading';
+  if (count > 0) return 'list';
+  return error ? 'error' : 'empty';
+}
+
+function CandidateList({
+  candidates,
+  selected,
+  selectedCount,
+  running,
+  onToggle,
+  onRefresh,
+  onImport,
+}) {
+  return (
+    <>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm">{candidates.length} drafts on main.</p>
+        <Button variant="ghost" size="sm" onClick={onRefresh} disabled={running}>
+          <RefreshCw className="h-4 w-4 mr-2" />
+          Refresh
+        </Button>
+      </div>
+      <ul className="space-y-2">
+        {candidates.map((candidate) => (
+          <CandidateRow
+            key={candidate.path}
+            candidate={candidate}
+            checked={selected.has(candidate.path)}
+            disabled={running}
+            onToggle={onToggle}
+          />
+        ))}
+      </ul>
+      <Button size="sm" onClick={onImport} disabled={running || selectedCount === 0}>
+        {running && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+        Import selected as In Review ({selectedCount})
+      </Button>
+    </>
+  );
+}
+
+/**
  * @param {{ onImported?: (response: object) => void }} props — called after an
  *   import in which at least one draft landed In Review, so the queue can
  *   switch to that filter and show them.
@@ -262,75 +311,34 @@ export default function RepoDraftImportPanel({ onImported }) {
     }
   };
 
-  return (
-    <Card>
-      <CardContent className="p-4 space-y-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="font-medium">Drafts in the repository</p>
-            <p className="text-xs text-muted-foreground">
-              Articles written in docs/content on main. Importing puts each one In Review here;
-              nothing is published.
-            </p>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={toggleOpen}
-            aria-expanded={open}
-            className="shrink-0"
-          >
-            <FileInput className="h-4 w-4 mr-2" />
-            Import drafts from the repository
-          </Button>
-        </div>
+  const listState = listStateOf({ loading, error, count: candidates.length });
 
-        {open && (
-          <div className="space-y-3 border-t pt-3">
-            {error && <p className="text-sm text-destructive">{error}</p>}
-            {loading && (
-              <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Listing docs/content on GitHub…
-              </p>
-            )}
-            {!loading && !error && candidates.length === 0 && (
-              <p className="text-sm text-muted-foreground">No blog drafts in docs/content.</p>
-            )}
-            {!loading && candidates.length > 0 && (
-              <>
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm">{candidates.length} drafts on main.</p>
-                  <Button variant="ghost" size="sm" onClick={load} disabled={running}>
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Refresh
-                  </Button>
-                </div>
-                <ul className="space-y-2">
-                  {candidates.map((candidate) => (
-                    <CandidateRow
-                      key={candidate.path}
-                      candidate={candidate}
-                      checked={selected.has(candidate.path)}
-                      disabled={running}
-                      onToggle={toggle}
-                    />
-                  ))}
-                </ul>
-                <Button
-                  size="sm"
-                  onClick={runImport}
-                  disabled={running || selectedPaths.length === 0}
-                >
-                  {running && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                  Import selected as In Review ({selectedPaths.length})
-                </Button>
-              </>
-            )}
-            <ResultList lines={lines} />
-          </div>
-        )}
-      </CardContent>
-    </Card>
+  return (
+    <CollapsiblePanel
+      title="Drafts in the repository"
+      description="Articles written in docs/content on main. Importing puts each one In Review here; nothing is published."
+      icon={FileInput}
+      toggleLabel="Import drafts from the repository"
+      open={open}
+      onToggle={toggleOpen}
+      error={error}
+    >
+      {listState === 'loading' && <PanelLoading>Listing docs/content on GitHub…</PanelLoading>}
+      {listState === 'empty' && (
+        <p className="text-sm text-muted-foreground">No blog drafts in docs/content.</p>
+      )}
+      {listState === 'list' && (
+        <CandidateList
+          candidates={candidates}
+          selected={selected}
+          selectedCount={selectedPaths.length}
+          running={running}
+          onToggle={toggle}
+          onRefresh={load}
+          onImport={runImport}
+        />
+      )}
+      <ResultList lines={lines} />
+    </CollapsiblePanel>
   );
 }

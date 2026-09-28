@@ -6,6 +6,7 @@ import RepoDraftImportPanel, {
   CANDIDATES_ROUTE,
   IMPORT_ROUTE,
   describeCandidate,
+  listStateOf,
   summarizeImport,
   toResultLine,
 } from './RepoDraftImportPanel';
@@ -70,6 +71,13 @@ const openPanel = () =>
   fireEvent.click(screen.getByRole('button', { name: 'Import drafts from the repository' }));
 
 describe('pure helpers', () => {
+  it('keeps the list beside an error, and says "empty" only when nothing went wrong', () => {
+    expect(listStateOf({ loading: true, error: '', count: 3 })).toBe('loading');
+    expect(listStateOf({ loading: false, error: 'Import failed', count: 3 })).toBe('list');
+    expect(listStateOf({ loading: false, error: 'Could not list', count: 0 })).toBe('error');
+    expect(listStateOf({ loading: false, error: '', count: 0 })).toBe('empty');
+  });
+
   it('describes each state a candidate can be in', () => {
     expect(describeCandidate(candidate(LAB[0]))).toEqual({ label: 'Not imported', tone: 'new' });
     expect(
