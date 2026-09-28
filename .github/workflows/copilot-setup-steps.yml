@@ -109,6 +109,14 @@ jobs:
       # Agents store is the only one Copilot's runner reads; the values are
       # still not credentials.
       #
+      # The VS Code GitHub Actions extension marks every `secrets.COPILOT_REVIEW_*`
+      # below "Context access might be invalid". It checks names against the
+      # Actions and environment stores only and cannot see the Agents store, so
+      # the warning is about the editor, not this file (checked 2026-09-28: the
+      # Agents store holds the four identifiers; the App private key is listed
+      # in docs/standards/required-inputs.md). Copying the secrets into a store
+      # the extension can see would only double every rotation.
+      #
       # Self-arming, like the App step below and the reader workflows: while
       # any of the three is unresolved in the runner that is executing this
       # file, the login is skipped with a notice instead of failing the setup

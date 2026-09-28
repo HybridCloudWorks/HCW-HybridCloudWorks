@@ -84,8 +84,12 @@ def audit(root: Path, event_argument: str, event: dict) -> None:
         }
         with (directory / "claude-events.jsonl").open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, sort_keys=True) + "\n")
-    except OSError:
-        pass
+    except OSError as error:
+        # Never fatal: a lost log line must not break the session. Said on
+        # stderr, which the harness shows without treating it as a decision
+        # (stdout is the Stop hook's decision channel), so a silently missing
+        # audit trail cannot happen either (CodeQL py/empty-except, #363).
+        print(f"claude_event: audit record not written: {error}", file=sys.stderr)
 
 
 def armed_workflow_id(root: Path) -> str | None:
