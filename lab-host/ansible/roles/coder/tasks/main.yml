@@ -34,6 +34,18 @@
     quiet: true
   when: coder_enabled | bool
 
+# Enabled or not: the launcher's directory is removed, with everything in it,
+# while Coder is disabled.
+- name: Refuse a lab launcher directory that is not one of its own
+  ansible.builtin.assert:
+    that:
+      - coder_launcher_dir is match(coder_launcher_dir_pattern)
+    fail_msg: >-
+      coder_launcher_dir is {{ coder_launcher_dir }}. It must be a directory of the lab
+      launcher's own, /etc/caddy/hcw-<name>, because the role serves everything in it and
+      removes it, with everything in it, while Coder is disabled.
+    quiet: true
+
 - name: Refuse a workspace capacity the host's memory cannot hold
   ansible.builtin.assert:
     that:
@@ -145,14 +157,34 @@
     mode: "0750"
   when: coder_enabled | bool
 
-- name: Install the lab launcher from the repository checkout
+- name: Install the lab launcher's files from the repository checkout
   ansible.builtin.copy:
-    src: "{{ coder_launcher_source }}"
-    dest: "{{ coder_launcher_dir }}/"
+    src: "{{ coder_launcher_source }}/{{ item }}"
+    dest: "{{ coder_launcher_dir }}/{{ item }}"
     owner: root
     group: "{{ coder_caddy_group }}"
     mode: "0640"
-    directory_mode: "0750"
+  loop: "{{ coder_launcher_files }}"
+  when: coder_enabled | bool
+
+# Caddy serves whatever is in the directory, so a file the repository no
+# longer has must not stay behind.
+- name: Find anything in the lab launcher's directory that is not one of its files
+  ansible.builtin.find:
+    paths: "{{ coder_launcher_dir }}"
+    file_type: any
+    hidden: true
+    excludes: "{{ coder_launcher_files }}"
+  register: coder_launcher_extra
+  when: coder_enabled | bool
+
+- name: Remove it
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ coder_launcher_extra.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
   when: coder_enabled | bool
 
 - name: Remove the lab launcher while Coder is disabled

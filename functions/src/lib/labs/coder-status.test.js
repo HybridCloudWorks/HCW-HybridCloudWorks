@@ -164,11 +164,12 @@ describe('GET /api/public/labs/coder-status', () => {
       asOf: new Date(NOW).toISOString(),
     });
 
-    // Every call went to the configured base, and every one but the build
-    // info carried the session token header.
+    // Every call went to the configured base and follows no redirect, and
+    // every one but the build info carried the session token header.
     expect(fetchImpl.calls.length).toBe(5);
     for (const { url, options } of fetchImpl.calls) {
       expect(url.startsWith('https://coder.lab.example/api/v2/')).toBe(true);
+      expect(options.redirect).toBe('error');
       if (!url.endsWith('/buildinfo')) expect(options.headers['Coder-Session-Token']).toBe('read-only-token');
     }
 

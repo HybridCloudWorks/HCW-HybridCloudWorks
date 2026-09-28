@@ -42,11 +42,14 @@ starts or stops it, adds the Caddy route and keeps a week of nightly dumps.
    effect.
 6. Installs the lab launcher, `lab-host/coder/launcher/` from the repository
    checkout, in `/etc/caddy/hcw-lab-launcher` (`coder_launcher_dir`; the
-   directory `root:caddy` `0750`, its four files `0640`). It is the page the
-   site's panes load, and it opens code-server inside the pane
-   (`lab-host/coder/README.md`, "The lab launcher"). Caddy reads the files
-   on every request, so a changed file needs no reload. Removed while
-   disabled.
+   directory `root:caddy` `0750`, its four files `0640`, copied by name from
+   `coder_launcher_files`). It is the page the site's panes load, and it
+   opens code-server inside the pane (`lab-host/coder/README.md`, "The lab
+   launcher"). Caddy serves whatever is in the directory, so anything else
+   found there is removed. Caddy reads the files on every request, so a
+   changed file needs no reload. The directory is removed, with everything
+   in it, while disabled, so the role refuses, enabled or not, a
+   `coder_launcher_dir` that is not `/etc/caddy/hcw-<name>`.
 7. Renders `/etc/caddy/conf.d/10-coder.caddy` (`root:caddy` `0640`): a host
    matcher for `coder.lab.hybridcloudworks.com` and
    `*.coder.lab.hybridcloudworks.com`, `reverse_proxy 127.0.0.1:7080`, and a

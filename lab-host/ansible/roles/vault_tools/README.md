@@ -39,13 +39,21 @@ vault". On the host, as root:
    would silently replace it: `vault_enabled` or `vault_api_port`, say,
    which belong to the `vault` role that runs HashiCorp Vault. The names
    are read at run time from the checkout the host runs, `/opt/hcw-src`
-   (`HCW_SRC_DIR` overrides it, which is how the test runs it): every
-   top-level variable of `lab-host/ansible/group_vars/all.yml` and of each
-   role's `defaults/main.yml` and `vars/main.yml`, and every name a role's
-   task registers or sets with `set_fact`, including inside blocks. The
-   error names the file. With no checkout there, or a file in it that does
-   not parse, it refuses every key rather than guess. None of the keys the
-   playbook reads from the vault today is refused.
+   (`HCW_SRC_DIR` overrides it, which is how the test runs it), in
+   `lab-host/ansible/`, `.yml` or `.yaml`:
+   - every top-level key of the files under `group_vars/`, `host_vars/`
+     and each role's `defaults/` and `vars/`, `main/` directories included;
+   - every name the playbooks at the top, the inventory, and each role's
+     `tasks/` and `handlers/` (subdirectories included) set as they run: a
+     play's, block's or task's `vars`, a `register`, a `set_fact` in any of
+     its spellings (`set_fact`, `ansible.builtin.`, `ansible.legacy.`, and
+     the free-form `name=value`), and an inventory host's own variables.
+
+   The error names the file. With no checkout there, with no role in it, or
+   with a file in it that does not parse, it refuses every key rather than
+   guess. A variable loaded from a file named only at run time
+   (`include_vars`, `vars_files`) is not seen; the playbook uses neither.
+   None of the keys the playbook reads from the vault today is refused.
 3. It refuses with exit code 2 when `vault-password` is missing or empty.
 4. It reads the value from stdin into a root-only temporary directory,
    dropping carriage returns. A leading byte order mark and surrounding
@@ -99,6 +107,12 @@ that `ok`.
   and this README and `lab-host/README.md` could only ask the owner never
   to set `vault_enabled` and its kind. The run after it lands reports the
   copy task `changed` once more.
+- **Python runs isolated** (`-I`), in all four places the helper starts it.
+  `python -` and `python -c` otherwise put the current directory first on
+  `sys.path`, so a `yaml.py` wherever the owner ran `sudo` from would have
+  run as root, the value-carrying step included. Found in the security
+  review of the lab launcher's pull request; the test plants a `yaml.py` in
+  the working directory and fails without `-I`.
 
 ## Tests
 
@@ -109,13 +123,15 @@ checks:
 - the helper's two tool paths are where `bootstrap.sh` installs them, and
   its checkout is where `bootstrap.sh` keeps it;
 - bad key names are refused (exit 2) and create nothing;
-- `vault_enabled` is refused against this repository's own playbook, and
-  every key the playbook reads from the vault passes;
-- in a checkout made for the test, a name in `group_vars/all.yml`, a role's
-  `defaults/main.yml` or `vars/main.yml`, a task's `register` inside a block
-  and a `set_fact` are each refused with the file named, another name
-  passes, and a file that does not parse or a missing checkout refuses
+- against this repository's own playbook, `vault_enabled`, `vault_api_port`
+  and the `vault` role's task vars `vault_seal_status` and
+  `vault_state_advice` are refused, and every key the playbook reads from
+  the vault passes;
+- in a checkout made for the test, every kind of definition step 2 lists is
+  refused with its file named, a name that is only a value passes, and a
+  file that does not parse, a checkout with no role, or no checkout refuses
   every key;
+- a `yaml.py` in the working directory is never imported;
 - empty values are refused, before and after the vault exists;
 - a missing password and a wrong one are refused;
 - two keys can be set and one replaced, with CR, LF, BOM and spaces

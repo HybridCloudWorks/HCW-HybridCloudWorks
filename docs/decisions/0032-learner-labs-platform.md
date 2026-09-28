@@ -444,8 +444,9 @@ named from a fixed map the site's catalogue shares (`lab-lzb`, `lab-tfv`,
 `lab-asc`). It shows Coder's own create page, with Coder's consent dialog,
 or Coder's own workspace page, where Start is, in a frame of its own when
 the learner must act. When the build is running, the agent ready and
-code-server healthy, it checks code-server's `subdomain_name` and replaces
-itself with that name under a fixed suffix. code-server stays on its own
+code-server healthy, it checks that code-server's `subdomain_name` is
+exactly the name Coder builds for that workspace and the signed-in
+learner, and replaces itself with that name under a fixed suffix. code-server stays on its own
 origin, and path apps stay off (`CODER_DISABLE_PATH_APPS`, #760).
 `frame-src`, the sandbox and `allow` are unchanged. The launcher posts its
 state to the site, which accepts it only from Coder's origin and the pane's

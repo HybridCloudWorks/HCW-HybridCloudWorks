@@ -139,13 +139,19 @@ export function readCoderConfig(env = process.env) {
 /** The address is set but unusable — worth one warning line. */
 const hasCoderUrl = (env) => Boolean(readSetting(env, 'CODER_URL'));
 
-/** A GET to Coder, with the token only when one is given. Throws on anything but 2xx. */
+/**
+ * A GET to Coder, with the token only when one is given. Throws on anything
+ * but 2xx, a redirect included: Coder's API does not redirect, and fetch
+ * following one to another origin would carry `Coder-Session-Token` along,
+ * because it drops only Authorization, Cookie and Proxy-Authorization.
+ */
 async function coderGet(fetchImpl, config, path, token) {
   const headers = { Accept: 'application/json' };
   if (token) headers['Coder-Session-Token'] = token;
   const response = await fetchWithTimeout(fetchImpl, `${config.base}${path}`, {
     method: 'GET',
     headers,
+    redirect: 'error',
     timeoutMs: CODER_TIMEOUT_MS,
   });
   if (!response.ok) {

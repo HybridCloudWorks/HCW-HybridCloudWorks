@@ -320,11 +320,13 @@ name is `vault`, and none of them is a secret. Neither are that role's own
 `vault_*` defaults and vars, such as `vault_api_port`. `bootstrap.sh`
 passes `vault.yml` with `-e`, and an extra var outranks every other
 variable, so a key there with one of those names would silently replace
-it. `hcw-vault-set` refuses any key that is a top-level variable of
-`ansible/group_vars/all.yml` or of any role's `defaults/main.yml` or
-`vars/main.yml`, or that a role's task registers or sets with `set_fact`.
-It reads those from the checkout the host runs, `/opt/hcw-src`, each time,
-so a variable added later is refused without a change to the helper.
+it. `hcw-vault-set` refuses any key the playbook defines: a top-level
+variable of `ansible/group_vars/`, `host_vars/` or any role's `defaults/`
+or `vars/`, or a name a play, the inventory, or a role's task or handler
+sets as it runs (`vars`, `register`, `set_fact`). It reads those from the
+checkout the host runs, `/opt/hcw-src`, each time, so a variable added
+later is refused without a change to the helper
+(`ansible/roles/vault_tools/README.md` has the exact list).
 Refused, it prints the file that defines the name, for example:
 
 ```text

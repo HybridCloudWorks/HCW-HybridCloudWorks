@@ -37,7 +37,9 @@ dashboard's own name so it has the learner's session and Coder's API:
    `code-server--<workspace>--<owner>`, is one DNS label of 63 and a Coder
    username can be 32.
 2. `GET /api/v2/users/me`. A 401 says to use **Sign in with GitHub** above
-   the pane, which is the site's button.
+   the pane, which is the site's button. Otherwise its `username`,
+   lowercased and held to Coder's rule for a name, is the owner in
+   code-server's name below.
 3. `GET /api/v2/users/me/workspace/<name>`. None yet: Coder's own create
    page, `/templates/hcw-lab/workspace?mode=auto&name=<name>&param.lab=<id>`,
    in a frame of the same origin, where the learner confirms Coder's
@@ -48,8 +50,10 @@ dashboard's own name so it has the learner's session and Coder's API:
    is running, the agent is connected and ready, and the `code-server`
    app's `health` is `healthy`. Ten minutes, or six failed reads in a row,
    end it with `Lab workspaces aren't available right now.`
-5. Checks `subdomain_name` against `^code-server--[a-z0-9-]+--[a-z0-9-]+$`
-   and against this workspace's name, then
+5. Checks `subdomain_name`, lowercased, against
+   `^code-server--[a-z0-9-]+--[a-z0-9-]+$` and 63 characters, and requires
+   it to be exactly `code-server--<workspace>--<username>`, so the pane can
+   only ever open the learner's own editor for this lab. Then
    `location.replace('https://' + name + '.coder.lab.hybridcloudworks.com/')`.
    The suffix is a constant. code-server stays on its own name, away from
    Coder's API.

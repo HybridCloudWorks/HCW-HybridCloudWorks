@@ -146,7 +146,7 @@ describe('what the lab launcher can show', () => {
 
   /** The words in the launcher's page: its title, its first status line and its no-script note. */
   const pageWords = read(LAUNCHER_PAGE)
-    .replace(/<script\b[\s\S]*?<\/script>/g, ' ')
+    .replace(/<script\b[\s\S]*?<\/script\b[^>]*>/gi, ' ')
     .replace(/<[^>]+>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();

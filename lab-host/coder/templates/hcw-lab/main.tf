@@ -233,8 +233,9 @@ resource "coder_agent" "main" {
 # pinned to a module version and a code-server release. install_prefix is on
 # the persistent volume with use_cached, so a restart does not re-download
 # code-server. subdomain = true serves it at
-# <app>--<agent>--<workspace>--<owner>.coder.lab.hybridcloudworks.com, the
-# name the wildcard certificate exists for.
+# code-server--<workspace>--<owner>.coder.lab.hybridcloudworks.com (Coder
+# v2.37.3 leaves the agent out of a named app's name), the name the wildcard
+# certificate exists for and the one the lab launcher opens in the site's pane.
 module "code-server" {
   count           = data.coder_workspace.me.start_count
   source          = "registry.coder.com/coder/code-server/coder"

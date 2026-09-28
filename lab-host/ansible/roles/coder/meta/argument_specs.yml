@@ -157,7 +157,9 @@ argument_specs:
         description:
           - Where the lab launcher's static files (lab-host/coder/launcher/) are installed, root-owned
             and readable by coder_caddy_group. The Caddy route serves them at /_hcw/lab/ on
-            coder_domain, the page the site's panes load. Removed while Coder is disabled.
+            coder_domain, the page the site's panes load. Anything else in it is removed, and so is
+            the directory while Coder is disabled, so the role refuses any path but a directory of
+            its own, /etc/caddy/hcw-<name>.
       coder_backup_dir:
         type: path
         required: false

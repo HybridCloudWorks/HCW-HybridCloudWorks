@@ -386,6 +386,23 @@ function SignInStep({ signInHref, pending, onStart }) {
 }
 
 /**
+ * The launcher's latest state, from the messages the pane's frame posts
+ * (`paneMessageState` decides which count); null until it says anything.
+ */
+function useLauncherState(frameRef) {
+  const [state, setState] = useState(null);
+  useEffect(() => {
+    const onMessage = (event) => {
+      const next = paneMessageState(event, frameRef.current);
+      if (next !== null) setState(next);
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [frameRef]);
+  return state;
+}
+
+/**
  * The toolbar and the frame. Keyed by the sign-in time above it, so a new
  * sign-in in another tab mounts a new one: that is the reload.
  */
@@ -393,8 +410,8 @@ function Pane({ lab, signInHref, onStartSignIn }) {
   const paneRef = useRef(null);
   const frameRef = useRef(null);
   const [loaded, setLoaded] = useState(false);
-  const [failed, setFailed] = useState(false);
-  const [paneState, setPaneState] = useState(null);
+  const [timedOut, setTimedOut] = useState(false);
+  const paneState = useLauncherState(frameRef);
   const fullscreenEnabled = useSyncExternalStore(
     noSubscription,
     readFullscreenEnabled,
@@ -402,25 +419,14 @@ function Pane({ lab, signInHref, onStartSignIn }) {
   );
   const fullscreen = useSyncExternalStore(subscribeFullscreen, readFullscreen, serverFalse);
 
-  // A frame that never loads says nothing; the watchdog says it for it.
+  // A frame that never loads says nothing; the watchdog says it for it. Any
+  // state the launcher sends means the frame loaded.
+  const heard = paneState !== null;
   useEffect(() => {
-    if (loaded || failed) return undefined;
-    const timer = window.setTimeout(() => setFailed(true), PANE_LOAD_TIMEOUT_MS);
+    if (loaded || heard || timedOut) return undefined;
+    const timer = window.setTimeout(() => setTimedOut(true), PANE_LOAD_TIMEOUT_MS);
     return () => window.clearTimeout(timer);
-  }, [loaded, failed]);
-
-  // What the launcher says. Any state it sends means the frame loaded.
-  useEffect(() => {
-    const onMessage = (event) => {
-      const state = paneMessageState(event, frameRef.current);
-      if (state === null) return;
-      setLoaded(true);
-      if (state === 'unavailable') setFailed(true);
-      else setPaneState(state);
-    };
-    window.addEventListener('message', onMessage);
-    return () => window.removeEventListener('message', onMessage);
-  }, []);
+  }, [loaded, heard, timedOut]);
 
   // Full screen is the pane, this page's own element: never Coder's page on
   // its own, which #750 would redirect.
@@ -432,7 +438,7 @@ function Pane({ lab, signInHref, onStartSignIn }) {
     }
   };
 
-  if (failed) return <Unavailable />;
+  if (timedOut || paneState === 'unavailable') return <Unavailable />;
 
   const src = safeUrl(labLauncherUrl(lab));
   const signedOut = paneState === 'signed-out';
@@ -448,7 +454,9 @@ function Pane({ lab, signInHref, onStartSignIn }) {
           <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
             {lab.title}
           </span>
-          <span role="status" data-testid="lab-pane-state" className={`mr-auto text-xs ${MUTED}`}>
+          {/* Not a live region: the launcher's own status line in the pane is
+              announced, and this would say the same thing a second time. */}
+          <span data-testid="lab-pane-state" className={`mr-auto text-xs ${MUTED}`}>
             {paneState ? PANE_STATE_WORDS[paneState] : ''}
           </span>
           {fullscreenEnabled ? (

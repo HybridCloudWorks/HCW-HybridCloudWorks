@@ -42,6 +42,7 @@ import {
   assess,
   codeServerUrl,
   createPagePath,
+  ownerName,
   resolveLab,
   runLauncher,
   workspaceApiPath,
@@ -58,6 +59,8 @@ const ROUTE = 'lab-host/ansible/roles/coder/templates/10-coder.caddy.j2';
 // only the fields the launcher reads.
 
 const OWNER = 'saulpatinojr';
+/** `GET /api/v2/users/me` for that learner, capitals and all, as GitHub gave the name. */
+const ME = { id: '3f1c6a2e-5f0b-4b7e-9d1a-0c2b4e6f8a10', username: 'SaulPatinoJr' };
 const TFV = 'terraform-validate-walkthrough';
 
 function workspace({
@@ -98,12 +101,20 @@ function workspace({
 const json = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => body });
 
 /**
- * A launcher run against a scripted Coder. `me` answers /users/me; `reads`
- * answers the workspace reads in order, the last repeating. Each answer is a
- * workspace body (200), a number (that status, no body), an Error (the fetch
- * rejects), or `'bad-json'`.
+ * One scripted answer: a body (200), a number (that status, no body), an
+ * Error (the fetch rejects), or `'bad-json'` (a 200 whose body does not parse).
  */
-async function launch({ search = `?lab=${TFV}`, me = 200, reads = [404], poll = POLL } = {}) {
+function answer(spec) {
+  if (spec instanceof Error) throw spec;
+  if (spec === 'bad-json') return { ok: true, status: 200, json: async () => JSON.parse('{') };
+  return typeof spec === 'number' ? json(spec, {}) : json(200, spec);
+}
+
+/**
+ * A launcher run against a scripted Coder. `me` answers /users/me; `reads`
+ * answers the workspace reads in order, the last repeating (see `answer`).
+ */
+async function launch({ search = `?lab=${TFV}`, me = ME, reads = [404], poll = POLL } = {}) {
   let clock = 0;
   const calls = [];
   const says = [];
@@ -112,13 +123,6 @@ async function launch({ search = `?lab=${TFV}`, me = 200, reads = [404], poll = 
   const navigations = [];
   const sleeps = [];
   let index = 0;
-
-  const answer = (spec) => {
-    if (spec instanceof Error) throw spec;
-    if (spec === 'bad-json') return { ok: true, status: 200, json: async () => JSON.parse('{') };
-    if (typeof spec === 'number') return json(spec, {});
-    return json(200, spec);
-  };
 
   const fetch = async (url, init) => {
     calls.push({ url, init });
@@ -193,42 +197,74 @@ describe('the allowlist', () => {
   });
 });
 
+describe('ownerName', () => {
+  it('is the signed-in username, lowercased', () => {
+    expect(ownerName(ME)).toBe(OWNER);
+    expect(ownerName({ username: 'a-b-9' })).toBe('a-b-9');
+  });
+
+  it.each([
+    ['no body', null],
+    ['no username', {}],
+    ['a number', { username: 42 }],
+    ['nothing', { username: '' }],
+    ['a double hyphen, which Coder never makes', { username: 'a--b' }],
+    ['a leading hyphen', { username: '-a' }],
+    ['a dot', { username: 'a.b' }],
+    ['a non-ASCII letter', { username: 'sömeone' }],
+  ])('refuses %s', (_label, me) => {
+    expect(ownerName(me)).toBeNull();
+  });
+});
+
 describe('codeServerUrl', () => {
   const app = (subdomain_name, extra = {}) => ({ slug: 'code-server', subdomain: true, subdomain_name, ...extra });
 
-  it('is code-server’s own name for this workspace, under the fixed suffix', () => {
+  it('is the learner’s own code-server for this workspace, under the fixed suffix', () => {
     expect(APPS_HOST_SUFFIX).toBe('.coder.lab.hybridcloudworks.com');
-    expect(codeServerUrl(app(`code-server--lab-tfv--${OWNER}`), 'lab-tfv')).toBe(
+    expect(codeServerUrl(app(`code-server--lab-tfv--${OWNER}`), 'lab-tfv', OWNER)).toBe(
       `https://code-server--lab-tfv--${OWNER}.coder.lab.hybridcloudworks.com/`
     );
     // A Coder username may carry capitals; a host name is case-insensitive.
-    expect(codeServerUrl(app('code-server--lab-tfv--SaulPatinoJr'), 'lab-tfv')).toBe(
+    expect(codeServerUrl(app('code-server--lab-tfv--SaulPatinoJr'), 'lab-tfv', OWNER)).toBe(
       'https://code-server--lab-tfv--saulpatinojr.coder.lab.hybridcloudworks.com/'
     );
   });
 
   it.each([
-    ['another workspace', 'code-server--lab-lzb--someone'],
-    ['another app', 'terminal--lab-tfv--someone'],
-    ['a longer workspace name that starts the same', 'code-server--lab-tfvx--someone'],
-    ['an agent segment, which v2.37.3 does not build for a named app', 'code-server--main--lab-tfv--someone'],
-    ['a dot, which would leave the suffix', 'code-server--lab-tfv--someone.evil.example'],
-    ['a slash', 'code-server--lab-tfv--someone/x'],
-    ['a port', 'code-server--lab-tfv--someone:8443'],
-    ['an at sign', 'code-server--lab-tfv--someone@evil.example'],
-    ['a space', 'code-server--lab-tfv--some one'],
+    ['another learner’s code-server for the same lab', 'code-server--lab-tfv--someone'],
+    ['an owner that only ends with the learner’s name', `code-server--lab-tfv--x--${OWNER}`],
+    ['another workspace', `code-server--lab-lzb--${OWNER}`],
+    ['another app', `terminal--lab-tfv--${OWNER}`],
+    ['a longer workspace name that starts the same', `code-server--lab-tfvx--${OWNER}`],
+    ['an agent segment, which v2.37.3 does not build for a named app', `code-server--main--lab-tfv--${OWNER}`],
+    ['a dot, which would leave the suffix', `code-server--lab-tfv--${OWNER}.evil.example`],
+    ['a slash', `code-server--lab-tfv--${OWNER}/x`],
+    ['a port', `code-server--lab-tfv--${OWNER}:8443`],
+    ['an at sign', `code-server--lab-tfv--${OWNER}@evil.example`],
+    ['a space', `code-server--lab-tfv--${OWNER} `],
     ['no owner', 'code-server--lab-tfv--'],
     ['nothing', ''],
-    ['a label over 63 characters', `code-server--lab-tfv--${'a'.repeat(42)}`],
     ['a non-ASCII letter', 'code-server--lab-tfv--sömeone'],
   ])('refuses %s', (_label, name) => {
-    expect(codeServerUrl(app(name), 'lab-tfv')).toBeNull();
+    expect(codeServerUrl(app(name), 'lab-tfv', OWNER)).toBeNull();
+  });
+
+  it('refuses a label over 63 characters even for the learner’s own name', () => {
+    const long = 'a'.repeat(42);
+    expect(codeServerUrl(app(`code-server--lab-tfv--${long}`), 'lab-tfv', long)).toBeNull();
+  });
+
+  it('refuses everything without a learner to match', () => {
+    for (const owner of [null, undefined, '', 'a--b', 'Saul']) {
+      expect(codeServerUrl(app(`code-server--lab-tfv--${owner}`), 'lab-tfv', owner)).toBeNull();
+    }
   });
 
   it('refuses an app that is not a subdomain app, or has no name', () => {
-    expect(codeServerUrl(app(`code-server--lab-tfv--${OWNER}`, { subdomain: false }), 'lab-tfv')).toBeNull();
-    expect(codeServerUrl({ slug: 'code-server', subdomain: true, subdomain_name: 42 }, 'lab-tfv')).toBeNull();
-    expect(codeServerUrl(null, 'lab-tfv')).toBeNull();
+    expect(codeServerUrl(app(`code-server--lab-tfv--${OWNER}`, { subdomain: false }), 'lab-tfv', OWNER)).toBeNull();
+    expect(codeServerUrl({ slug: 'code-server', subdomain: true, subdomain_name: 42 }, 'lab-tfv', OWNER)).toBeNull();
+    expect(codeServerUrl(null, 'lab-tfv', OWNER)).toBeNull();
   });
 });
 
@@ -245,7 +281,7 @@ describe('assess', () => {
     ['canceled', 'stopped'],
     ['deleted', 'create'],
   ])('a latest build %s is %s', (status, state) => {
-    expect(assess(workspace({ status }), 'lab-tfv')).toEqual({ state });
+    expect(assess(workspace({ status }), 'lab-tfv', OWNER)).toEqual({ state });
   });
 
   it.each([
@@ -257,29 +293,29 @@ describe('assess', () => {
     ['code-server with no health check', { health: 'disabled' }],
     ['no code-server app yet', { apps: [] }],
   ])('running with %s is still starting', (_label, over) => {
-    expect(assess(workspace(over), 'lab-tfv')).toEqual({ state: 'starting' });
+    expect(assess(workspace(over), 'lab-tfv', OWNER)).toEqual({ state: 'starting' });
   });
 
   it('sends a startup script that failed to the workspace page, where Restart is', () => {
-    expect(assess(workspace({ lifecycle: 'start_error' }), 'lab-tfv')).toEqual({ state: 'stopped' });
+    expect(assess(workspace({ lifecycle: 'start_error' }), 'lab-tfv', OWNER)).toEqual({ state: 'stopped' });
   });
 
   it('is ready only when all three hold, with the checked address', () => {
-    expect(assess(workspace(), 'lab-tfv')).toEqual({
+    expect(assess(workspace(), 'lab-tfv', OWNER)).toEqual({
       state: 'ready',
       url: `https://code-server--lab-tfv--${OWNER}.coder.lab.hybridcloudworks.com/`,
     });
   });
 
   it('is unavailable, not ready, when Coder’s name for code-server is not the shape it builds', () => {
-    expect(assess(workspace({ subdomainName: 'code-server--lab-tfv--x.evil.example' }), 'lab-tfv')).toEqual({
+    expect(assess(workspace({ subdomainName: 'code-server--lab-tfv--x.evil.example' }), 'lab-tfv', OWNER)).toEqual({
       state: 'unavailable',
     });
   });
 
   it('waits on a body that is not a workspace, rather than guessing', () => {
     for (const body of [null, {}, { latest_build: null }, { latest_build: { status: 'running', resources: 'x' } }]) {
-      expect(assess(body, 'lab-tfv')).toEqual({ state: 'starting' });
+      expect(assess(body, 'lab-tfv', OWNER)).toEqual({ state: 'starting' });
     }
   });
 });
@@ -393,6 +429,21 @@ describe('runLauncher', () => {
     expect(run.end).toBe('ready');
   });
 
+  it('opens only the signed-in learner’s own editor, never another learner’s', async () => {
+    const run = await launch({ reads: [workspace({ subdomainName: 'code-server--lab-tfv--someone' })] });
+    expect(run.end).toBe('unavailable');
+    expect(run.navigations).toEqual([]);
+  });
+
+  it('counts a session whose username it cannot use as a failed read, and reads no workspace', async () => {
+    for (const me of [{}, { username: 'a--b' }, 'bad-json']) {
+      const run = await launch({ me, reads: [workspace()] });
+      expect(run.end).toBe('unavailable');
+      expect(run.calls.map((c) => c.url)).toEqual(Array(POLL.maxErrors).fill(ME_PATH));
+      expect(run.navigations).toEqual([]);
+    }
+  });
+
   it('stops at once when the session ends while it waits', async () => {
     const run = await launch({ reads: [workspace({ status: 'starting' }), 401] });
     expect(run.end).toBe('signed-out');
@@ -416,8 +467,22 @@ describe('the files Caddy serves', () => {
     expect(files).toEqual(['index.html', 'launcher.css', 'launcher.js', 'main.js']);
   });
 
+  it('are the files the role installs by name, and the role removes anything else', () => {
+    const vars = read('lab-host/ansible/roles/coder/vars/main.yml');
+    const listed = vars.match(/^coder_launcher_files:\n((?: {2}- \S+\n)+)/m);
+    expect(listed, 'coder_launcher_files is not a plain list in vars/main.yml').not.toBeNull();
+    expect(listed[1].trim().split('\n').map((line) => line.trim().replace(/^- /, '')).sort()).toEqual(files);
+    const tasks = read('lab-host/ansible/roles/coder/tasks/main.yml');
+    expect(tasks).toContain('excludes: "{{ coder_launcher_files }}"');
+    // The directory is removed whole while Coder is disabled, so it must be the launcher's own.
+    expect(vars).toContain("coder_launcher_dir_pattern: '^/etc/caddy/hcw-[a-z0-9-]+$'");
+    expect(tasks).toContain('coder_launcher_dir is match(coder_launcher_dir_pattern)');
+  });
+
   it('load one module script from this origin, and nothing inline', () => {
-    const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)];
+    // Any case, and any end tag (`</script >`, `</SCRIPT foo>`), as a browser reads them.
+    const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\b[^>]*>/gi)];
+    expect(html.match(/<script\b/gi)).toHaveLength(1);
     expect(scripts).toHaveLength(1);
     expect(scripts[0][1].trim()).toBe('type="module" src="main.js"');
     expect(scripts[0][2]).toBe('');
@@ -505,7 +570,7 @@ describe('the route', () => {
       /^coder_launcher_dir: \/etc\/caddy\/hcw-lab-launcher$/m
     );
     expect(read('lab-host/ansible/roles/coder/vars/main.yml')).toContain(
-      'coder_launcher_source: "{{ role_path }}/../../../coder/launcher/"'
+      'coder_launcher_source: "{{ role_path }}/../../../coder/launcher"'
     );
   });
 

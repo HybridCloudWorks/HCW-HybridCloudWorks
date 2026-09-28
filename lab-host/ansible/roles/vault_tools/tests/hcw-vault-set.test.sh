@@ -166,6 +166,12 @@ refused_because() {
 
 check "vault_enabled, the HashiCorp Vault role's switch in group_vars, is refused" \
   "refused_because vault_enabled 'lab-host/ansible/group_vars/all.yml defines it, and vault.yml is passed with -e'"
+check "vault_api_port, a default of the role that runs HashiCorp Vault, is refused" \
+  "refused_because vault_api_port 'lab-host/ansible/roles/vault/defaults/main.yml defines it'"
+# The two names a task's own vars set in the vault role, which a scan of
+# defaults, vars, register and set_fact alone let through (security review).
+check "vault_seal_status and vault_state_advice, a task's own vars in the vault role, are refused" \
+  "refused_because vault_seal_status 'lab-host/ansible/roles/vault/tasks/install.yml sets it' && refused_because vault_state_advice 'lab-host/ansible/roles/vault/tasks/install.yml sets it'"
 
 # Every key the playbook reads from the vault today, each still read by a
 # role's defaults (`{{ vault_x | default('') }}`), and none of them a name
@@ -192,13 +198,19 @@ done
 
 # Each place a variable can be defined, in a checkout made for the test.
 fake="${work}/fake-src/lab-host/ansible"
-mkdir -p "${fake}/group_vars" "${fake}/roles/r/defaults" "${fake}/roles/r/vars" "${fake}/roles/r/tasks"
+mkdir -p "${fake}/group_vars/extra" "${fake}/host_vars" "${fake}/inventory" "${fake}/roles/r/defaults/main" \
+  "${fake}/roles/r/vars" "${fake}/roles/r/tasks/sub" "${fake}/roles/r/handlers"
 printf -- '---\nvault_fake_group: x\n' > "${fake}/group_vars/all.yml"
+printf -- '---\nvault_fake_group_dir: x\n' > "${fake}/group_vars/extra/more.yaml"
+printf -- '---\nvault_fake_host_var: x\n' > "${fake}/host_vars/localhost.yml"
 printf -- '---\nvault_fake_default: x\n' > "${fake}/roles/r/defaults/main.yml"
+printf -- '---\nvault_fake_default_dir: x\n' > "${fake}/roles/r/defaults/main/extra.yml"
 printf -- '---\nvault_fake_var: x\n' > "${fake}/roles/r/vars/main.yml"
 cat > "${fake}/roles/r/tasks/main.yml" <<'YAML'
 ---
-- name: A block, whose tasks set two more
+- name: A block, whose tasks set more
+  vars:
+    vault_fake_block_var: x
   block:
     - name: Registered
       ansible.builtin.command: "true"
@@ -206,23 +218,64 @@ cat > "${fake}/roles/r/tasks/main.yml" <<'YAML'
     - name: A fact
       ansible.builtin.set_fact:
         vault_fake_fact: x
+    - name: A free-form fact
+      ansible.legacy.set_fact: vault_fake_free_form=x other=vault_fake_value_only
+    - name: A task's own vars
+      ansible.builtin.debug:
+        msg: "{{ vault_fake_task_var }}"
+      vars:
+        vault_fake_task_var: x
 YAML
+printf -- '---\n- name: In a subdirectory\n  ansible.builtin.set_fact:\n    vault_fake_sub: x\n' > "${fake}/roles/r/tasks/sub/more.yaml"
+printf -- '---\n- name: A handler\n  ansible.builtin.command: "true"\n  register: vault_fake_handler\n' > "${fake}/roles/r/handlers/main.yml"
+printf -- '---\n- name: A play\n  hosts: all\n  vars:\n    vault_fake_play_var: x\n  roles:\n    - role: r\n' > "${fake}/site.yml"
+printf -- '---\nall:\n  hosts:\n    localhost:\n      vault_fake_inventory_host: x\n  vars:\n    vault_fake_inventory_group: x\n' > "${fake}/inventory/localhost.yml"
 export HCW_SRC_DIR="${work}/fake-src"
-check "a key in group_vars/all.yml is refused" \
-  "refused_because vault_fake_group 'lab-host/ansible/group_vars/all.yml defines it'"
-check "a key in a role's defaults/main.yml is refused" \
-  "refused_because vault_fake_default 'lab-host/ansible/roles/r/defaults/main.yml defines it'"
-check "a key in a role's vars/main.yml is refused" \
-  "refused_because vault_fake_var 'lab-host/ansible/roles/r/vars/main.yml defines it'"
-check "a key a task registers, inside a block, is refused" \
-  "refused_because vault_fake_registered 'a task in lab-host/ansible/roles/r/tasks/main.yml sets it'"
-check "a key a task sets with set_fact is refused" \
-  "refused_because vault_fake_fact 'a task in lab-host/ansible/roles/r/tasks/main.yml sets it'"
+for defined in \
+  "vault_fake_group:group_vars/all.yml" \
+  "vault_fake_group_dir:group_vars/extra/more.yaml" \
+  "vault_fake_host_var:host_vars/localhost.yml" \
+  "vault_fake_default:roles/r/defaults/main.yml" \
+  "vault_fake_default_dir:roles/r/defaults/main/extra.yml" \
+  "vault_fake_var:roles/r/vars/main.yml"; do
+  check "a key in ${defined#*:} is refused" \
+    "refused_because ${defined%%:*} 'lab-host/ansible/${defined#*:} defines it'"
+done
+for set_by in \
+  "vault_fake_block_var:roles/r/tasks/main.yml:a block's vars" \
+  "vault_fake_registered:roles/r/tasks/main.yml:a task's register, inside a block" \
+  "vault_fake_fact:roles/r/tasks/main.yml:ansible.builtin.set_fact" \
+  "vault_fake_free_form:roles/r/tasks/main.yml:a free-form ansible.legacy.set_fact" \
+  "vault_fake_task_var:roles/r/tasks/main.yml:a task's own vars" \
+  "vault_fake_sub:roles/r/tasks/sub/more.yaml:a task file in a subdirectory, .yaml" \
+  "vault_fake_handler:roles/r/handlers/main.yml:a handler's register" \
+  "vault_fake_play_var:site.yml:a play's vars" \
+  "vault_fake_inventory_host:inventory/localhost.yml:an inventory host's var" \
+  "vault_fake_inventory_group:inventory/localhost.yml:an inventory group's vars"; do
+  name="${set_by%%:*}"; rest="${set_by#*:}"; file="${rest%%:*}"; what="${rest#*:}"
+  check "a key set by ${what} is refused" "refused_because ${name} 'lab-host/ansible/${file} sets it'"
+done
 check "a key the fake checkout does not define passes the name check" \
   "passes_the_name_check vault_fake_other"
+check "a key that is only a free-form fact's value passes (it is not a name the fact sets)" \
+  "passes_the_name_check vault_fake_value_only"
+# A yaml.py where the helper is run from: Python runs isolated, so it is
+# never imported. Without -I, `python -` puts the current directory first on
+# sys.path, this file runs as root, and the check fails on both counts.
+mkdir "${work}/cwd"
+printf 'open(%s, "w").write("imported")\n' "'${work}/cwd/marker'" > "${work}/cwd/yaml.py"
+cd "${work}/cwd"
+check "a yaml.py in the current directory is not imported" \
+  "passes_the_name_check vault_fake_other && [ ! -e '${work}/cwd/marker' ]"
+cd "${work}"
+rm -rf "${work}/cwd"
 printf 'vault_fake_group: [unclosed\n' > "${fake}/group_vars/all.yml"
 check "a checkout file that does not parse refuses every key" \
   "refused_because vault_fake_other 'cannot read ${fake}/group_vars/all.yml to check it (' "
+printf -- '---\n{}\n' > "${fake}/group_vars/all.yml"
+rm -rf "${fake}/roles"
+check "a checkout with no roles refuses every key" \
+  "refused_because vault_fake_other 'cannot check it against the playbook, because there is no checkout at ${work}/fake-src'"
 export HCW_SRC_DIR="${work}/no-checkout"
 check "no checkout refuses every key" \
   "refused_because vault_fake_other 'cannot check it against the playbook, because there is no checkout at ${work}/no-checkout'"

@@ -39,14 +39,20 @@ This project has not cut a tagged release; entries are grouped under
   POST, no CSRF token. It waits (one to five seconds apart, ten minutes or
   six failed reads at most) for the build to run, the agent to be connected
   and ready, and code-server's `health` to be `healthy`, checks
-  `subdomain_name` against `^code-server--[a-z0-9-]+--[a-z0-9-]+$` and the
-  workspace's own name, and `location.replace`s itself to that name under a
-  fixed suffix, so code-server keeps its own origin. It posts `{ type:
+  `subdomain_name` against `^code-server--[a-z0-9-]+--[a-z0-9-]+$` and
+  requires it to be exactly this workspace's name for the signed-in
+  username (`/api/v2/users/me`), so it can only open the learner's own
+  editor, and `location.replace`s itself to that name under a fixed
+  suffix, so code-server keeps its own origin. It posts `{ type:
   'hcw-lab', state }` to both site names. Caddy adds a strict policy beside
   the panes-only `frame-ancestors` (`default-src 'none'`; scripts, styles,
   fetches, images and frames from `coder.lab` only; `base-uri 'none'`;
   `form-action 'none'`), `Cache-Control: no-store` and `nosniff`, and no
-  top-level exemption, so a direct visit still redirects. On the site,
+  top-level exemption, so a direct visit still redirects. The role copies
+  the four files by name, removes anything else from the directory Caddy
+  serves, and refuses a launcher directory that is not
+  `/etc/caddy/hcw-<name>`, since it removes that directory whole while
+  Coder is disabled. On the site,
   `LabPanePage.jsx` frames the launcher (`frame-src`, `sandbox` and `allow`
   unchanged), takes a message only from Coder's origin, the pane's own
   window and a known type and state, shows the state on the toolbar, makes
@@ -56,10 +62,10 @@ This project has not cut a tagged release; entries are grouped under
   `catalogue.test.js` and the new `scripts/lab-host-launcher.test.mjs` both
   fail when it and the launcher's map differ; the CI filters now run each
   side's test when the other side's file changes.
-  `scripts/lab-host-launcher.test.mjs` (66 tests) drives the logic with a
+  `scripts/lab-host-launcher.test.mjs` (81 tests) drives the logic with a
   mocked fetch, clock and navigation: the allowlist, the 401 path, create,
-  stopped, starting, the healthy redirect, malformed names, the backoff and
-  the cap. It also holds the files (one module script, nothing inline, text
+  stopped, starting, the healthy redirect, malformed names and another
+  learner's, the backoff and the cap. It also holds the files (one module script, nothing inline, text
   only through `textContent`) and the route. `lab-host-visitor-copy.test.mjs`
   scans every launcher message and the page's words, and holds its
   `unavailable` to the site's sentence.
@@ -70,7 +76,9 @@ This project has not cut a tagged release; entries are grouped under
   403, the answer is `templates: []` and `capacity.running: null`, and the
   Function App logs a warning naming the setting, never its value. So the
   owner's first sign-in works in a pane, and the token's one-year expiry
-  can no longer close every lab. The response shape is unchanged.
+  can no longer close every lab. The response shape is unchanged. Every
+  call to Coder now refuses to follow a redirect, which Node's fetch would
+  have followed to another origin with `Coder-Session-Token` still on it.
   `CoderStatusCard` then says only "Coder is reachable." and lists nothing;
   it had been about to print "0 of 5 workspaces running" and "No lab
   template is available yet", because `capacityWords` read `Number(null)`
@@ -86,11 +94,15 @@ This project has not cut a tagged release; entries are grouped under
   (`vault_enabled`, `vault_api_port` and so on). It now reads
   `/opt/hcw-src` at run time (`HCW_SRC_DIR` in tests) and refuses, with exit
   code 2 and the defining file named, any top-level variable of
-  `group_vars/all.yml` or of a role's `defaults/main.yml` or `vars/main.yml`,
-  and any name a role's task registers or sets with `set_fact`; with no
-  checkout, or a file that does not parse, it refuses every key. None of
-  the thirteen keys in use collides. `hcw-vault-set.test.sh` grows from 39
-  to 64 checks.
+  `group_vars/`, `host_vars/` or a role's `defaults/` or `vars/`, and any
+  name a play, the inventory, or a role's task or handler sets (`vars`,
+  `register`, `set_fact` in every spelling); with no checkout, no role, or
+  a file that does not parse, it refuses every key. That catches the
+  `vault` role's task vars `vault_seal_status` and `vault_state_advice`
+  too. None of the thirteen keys in use collides. Its Python now runs
+  isolated (`-I`), so a `yaml.py` in the directory `sudo` ran from can no
+  longer be imported as root. `hcw-vault-set.test.sh` grows from 39 to 80
+  checks, and fails without `-I`.
 
 - **Coder is on for members of the HybridCloudWorks GitHub organisation
   only, and the vault helper is under Ansible.** Owner decisions

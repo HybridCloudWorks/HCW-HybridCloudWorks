@@ -23,10 +23,11 @@
  *     workspace name from LAB_WORKSPACES, the template name, and the host
  *     suffix it navigates to. The query string only selects a key of
  *     LAB_WORKSPACES, and no text from it reaches the page.
- *   - The one value it takes from Coder is code-server's `subdomain_name`,
- *     and only after it matches the shape Coder v2.37.3 builds
- *     (`code-server--<workspace>--<owner>`, coderd/database/db2sdk
- *     AppSubdomain: no agent segment for a named app) for this workspace.
+ *   - The one address it takes from Coder is code-server's
+ *     `subdomain_name`, and only when it is exactly the name Coder v2.37.3
+ *     builds (`code-server--<workspace>--<owner>`, coderd/database/db2sdk
+ *     AppSubdomain: no agent segment for a named app) for this workspace
+ *     and the signed-in learner's own username (`/api/v2/users/me`).
  *
  * Pure: no DOM, no globals. main.js wires it to the page, and
  * scripts/lab-host-launcher.test.mjs drives it with a mocked fetch, clock and
@@ -160,64 +161,85 @@ export function resolveLab(search) {
 
 const SUBDOMAIN = /^code-server--[a-z0-9-]+--[a-z0-9-]+$/;
 const DNS_LABEL_MAX = 63;
+/** Coder's rule for a username (codersdk/name.go), lowercased: letters, digits and single hyphens. */
+const OWNER = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /**
- * code-server's address, or null when Coder's `subdomain_name` is not the
- * shape it builds for this workspace. Lowercased first: a Coder username may
- * carry capitals, and a host name is case-insensitive. The suffix is fixed
- * here and never read from anywhere.
+ * The signed-in learner's username from `GET /api/v2/users/me`, lowercased,
+ * or null when it is not a Coder username. Lowercased because a Coder
+ * username may carry capitals and a host name is case-insensitive.
  */
-export function codeServerUrl(app, workspace) {
+export function ownerName(me) {
+  const name = typeof me?.username === 'string' ? me.username.toLowerCase() : '';
+  return OWNER.test(name) ? name : null;
+}
+
+/**
+ * code-server's address, or null unless Coder's `subdomain_name` is exactly
+ * the name v2.37.3 builds for this workspace of this learner:
+ * `code-server--<workspace>--<owner>`, one DNS label. So the pane can only
+ * ever move to the learner's own editor for this lab, never another
+ * learner's. The suffix is fixed here and never read from anywhere.
+ */
+export function codeServerUrl(app, workspace, owner) {
   if (app?.subdomain !== true || typeof app.subdomain_name !== 'string') return null;
   const name = app.subdomain_name.toLowerCase();
-  if (name.length > DNS_LABEL_MAX || !SUBDOMAIN.test(name)) return null;
-  if (!name.startsWith(`${APP_SLUG}--${workspace}--`)) return null;
-  return `https://${name}${APPS_HOST_SUFFIX}/`;
+  const own = typeof owner === 'string' && OWNER.test(owner) && name === `${APP_SLUG}--${workspace}--${owner}`;
+  return own && name.length <= DNS_LABEL_MAX && SUBDOMAIN.test(name) ? `https://${name}${APPS_HOST_SUFFIX}/` : null;
 }
+
+/** An array, or an empty one for anything else a response might carry. */
+const list = (value) => (Array.isArray(value) ? value : []);
+const isCodeServer = (app) => app?.slug === APP_SLUG;
 
 /** code-server's app and the agent that serves it, from a workspace's latest build. */
 export function findCodeServer(workspace) {
-  const resources = workspace?.latest_build?.resources;
-  if (!Array.isArray(resources)) return null;
-  for (const resource of resources) {
-    for (const agent of Array.isArray(resource?.agents) ? resource.agents : []) {
-      for (const app of Array.isArray(agent?.apps) ? agent.apps : []) {
-        if (app?.slug === APP_SLUG) return { agent, app };
-      }
-    }
-  }
-  return null;
+  const agents = list(workspace?.latest_build?.resources).flatMap((resource) => list(resource?.agents));
+  const agent = agents.find((candidate) => list(candidate?.apps).some(isCodeServer));
+  return agent ? { agent, app: agent.apps.find(isCodeServer) } : null;
 }
 
-/** Build states where the learner acts on Coder's workspace page (Start, or Retry after a failure). */
-const NEEDS_THE_LEARNER = new Set(['stopped', 'failed', 'canceled']);
+/**
+ * A latest build that is not running, and what the learner sees for it: a
+ * workspace deleted is created again, and a stopped, failed or cancelled one
+ * gets Coder's workspace page, where Start (or Retry) is. Any other status is
+ * waited on.
+ */
+const NOT_RUNNING = new Map([
+  ['deleted', 'create'],
+  ['stopped', 'stopped'],
+  ['failed', 'stopped'],
+  ['canceled', 'stopped'],
+]);
+
+const isReady = ({ agent, app }) =>
+  agent.status === 'connected' && agent.lifecycle_state === 'ready' && app.health === 'healthy';
 
 /**
  * What a workspace read means: `{ state }`, plus `url` when it is ready.
  * Anything this does not recognise is waited on, and the poll cap ends a
  * wait that never resolves.
  */
-export function assess(workspace, workspaceName) {
+export function assess(workspace, workspaceName, owner) {
   const status = workspace?.latest_build?.status;
-  if (status === 'deleted') return { state: 'create' };
-  if (NEEDS_THE_LEARNER.has(status)) return { state: 'stopped' };
-  if (status !== 'running') return { state: 'starting' };
-
+  if (status !== 'running') return { state: NOT_RUNNING.get(status) ?? 'starting' };
   const found = findCodeServer(workspace);
-  if (!found) return { state: 'starting' };
-  const { agent, app } = found;
   // A startup script that failed never becomes ready; the workspace page
   // shows why and has Restart.
-  if (agent.lifecycle_state === 'start_error') return { state: 'stopped' };
-  if (agent.status !== 'connected' || agent.lifecycle_state !== 'ready') return { state: 'starting' };
-  if (app.health !== 'healthy') return { state: 'starting' };
-
-  const url = codeServerUrl(app, workspaceName);
+  if (found?.agent.lifecycle_state === 'start_error') return { state: 'stopped' };
+  if (!found || !isReady(found)) return { state: 'starting' };
+  const url = codeServerUrl(found.app, workspaceName, owner);
   return url ? { state: 'ready', url } : { state: 'unavailable' };
 }
 
+/** What a response's status means, where it is not simply ok or an error. */
+const STATUS_KIND = new Map([
+  [401, 'signed-out'],
+  [404, 'missing'],
+]);
+
 /** One GET: `{ kind: 'ok', body }`, `'signed-out'` (401), `'missing'` (404) or `'error'`. */
-async function read(fetchImpl, path, wantBody) {
+async function read(fetchImpl, path) {
   try {
     const response = await fetchImpl(path, {
       method: 'GET',
@@ -226,12 +248,83 @@ async function read(fetchImpl, path, wantBody) {
       redirect: 'error',
       headers: { Accept: 'application/json' },
     });
-    if (response.status === 401) return { kind: 'signed-out' };
-    if (response.status === 404) return { kind: 'missing' };
-    if (!response.ok) return { kind: 'error' };
-    return { kind: 'ok', body: wantBody ? await response.json() : null };
+    const kind = STATUS_KIND.get(response.status) ?? (response.ok ? 'ok' : 'error');
+    return kind === 'ok' ? { kind, body: await response.json() } : { kind };
   } catch {
     return { kind: 'error' };
+  }
+}
+
+/** The page's text, frame and messages to the site, each changed only when it changes. */
+function createView({ ui, post }) {
+  let reported = null;
+  let framePath = null;
+  const view = {
+    report(state, text = MESSAGES[state]) {
+      ui.say(text);
+      if (state !== reported) {
+        reported = state;
+        post(state);
+      }
+    },
+    frame(path) {
+      if (path === framePath) return;
+      framePath = path;
+      ui.frame(path);
+    },
+    end(state, text) {
+      view.frame(null);
+      view.report(state, text);
+      return state;
+    },
+  };
+  return view;
+}
+
+/** The Coder page a state shows in the launcher's frame; states not listed keep whatever is there. */
+const FRAMES = new Map([
+  ['create', (target) => createPagePath(target.lab, target.workspace)],
+  ['stopped', (target) => workspacePagePath(target.workspace)],
+]);
+
+/**
+ * What one read of the learner's workspace does to the page. Answers how
+ * the wait goes on: `'wait'` (poll again), `'error'`, or an end
+ * (`'ready'`, `'signed-out'`, `'unavailable'`).
+ */
+function onWorkspace(result, { target, owner, view, navigate }) {
+  if (result.kind === 'signed-out' || result.kind === 'error') return result.kind;
+  const verdict =
+    result.kind === 'missing' ? { state: 'create' } : assess(result.body, target.workspace, owner);
+  if (verdict.state === 'unavailable') return 'unavailable';
+  if (FRAMES.has(verdict.state)) view.frame(FRAMES.get(verdict.state)(target));
+  view.report(verdict.state);
+  if (verdict.state !== 'ready') return 'wait';
+  navigate(verdict.url);
+  return 'ready';
+}
+
+/** What goes on after a step: `'wait'` sleeps and backs off, `'again'` goes straight on, `'error'` counts toward giving up. */
+const CONTINUES = new Set(['wait', 'again', 'error']);
+
+/**
+ * Run `step` until it ends, with the backoff and both caps in POLL. A step
+ * that gives anything outside CONTINUES ends the run with that; running out
+ * of time or of retries ends it with `'unavailable'`.
+ */
+async function pollUntilDone(step, { sleep, now, poll }) {
+  const started = now();
+  let delay = poll.firstDelayMs;
+  let errors = 0;
+  for (;;) {
+    const outcome = await step();
+    if (!CONTINUES.has(outcome)) return outcome;
+    errors = outcome === 'error' ? errors + 1 : 0;
+    if (errors >= poll.maxErrors || now() - started >= poll.capMs) return 'unavailable';
+    if (outcome !== 'again') {
+      await sleep(delay);
+      delay = Math.min(delay * poll.factor, poll.maxDelayMs);
+    }
   }
 }
 
@@ -250,67 +343,21 @@ async function read(fetchImpl, path, wantBody) {
  * @param {typeof POLL} [deps.poll]
  */
 export async function runLauncher({ search, fetch: fetchImpl, ui, post, navigate, sleep, now, poll = POLL }) {
-  let reported = null;
-  let framePath = null;
-
-  const report = (state, text = MESSAGES[state]) => {
-    ui.say(text);
-    if (state !== reported) {
-      reported = state;
-      post(state);
-    }
-  };
-  const showFrame = (path) => {
-    if (path === framePath) return;
-    framePath = path;
-    ui.frame(path);
-  };
-  const end = (state, text) => {
-    showFrame(null);
-    report(state, text);
-    return state;
-  };
-
+  const view = createView({ ui, post });
   const target = resolveLab(search);
-  if (!target) return end('unavailable', MESSAGES['unknown-lab']);
-  report('checking');
+  if (!target) return view.end('unavailable', MESSAGES['unknown-lab']);
+  view.report('checking');
 
-  const started = now();
-  let delay = poll.firstDelayMs;
-  let errors = 0;
-  let signedIn = false;
-
-  for (;;) {
-    const result = signedIn
-      ? await read(fetchImpl, workspaceApiPath(target.workspace), true)
-      : await read(fetchImpl, ME_PATH, false);
-
-    if (result.kind === 'signed-out') return end('signed-out');
-
-    if (result.kind === 'error' || (!signedIn && result.kind === 'missing')) {
-      errors += 1;
-      if (errors >= poll.maxErrors) return end('unavailable');
-    } else if (!signedIn) {
-      errors = 0;
-      signedIn = true;
-      continue;
-    } else {
-      errors = 0;
-      const verdict =
-        result.kind === 'missing' ? { state: 'create' } : assess(result.body, target.workspace);
-      if (verdict.state === 'unavailable') return end('unavailable');
-      if (verdict.state === 'ready') {
-        report('ready');
-        navigate(verdict.url);
-        return 'ready';
-      }
-      if (verdict.state === 'create') showFrame(createPagePath(target.lab, target.workspace));
-      if (verdict.state === 'stopped') showFrame(workspacePagePath(target.workspace));
-      report(verdict.state);
-    }
-
-    if (now() - started >= poll.capMs) return end('unavailable');
-    await sleep(delay);
-    delay = Math.min(delay * poll.factor, poll.maxDelayMs);
-  }
+  // First who is signed in (their username is the owner in code-server's
+  // name), then their workspace for this lab, until it ends.
+  let owner = null;
+  const step = async () => {
+    if (owner) return onWorkspace(await read(fetchImpl, workspaceApiPath(target.workspace)), { target, owner, view, navigate });
+    const me = await read(fetchImpl, ME_PATH);
+    if (me.kind === 'signed-out') return 'signed-out';
+    owner = me.kind === 'ok' ? ownerName(me.body) : null;
+    return owner ? 'again' : 'error';
+  };
+  const ending = await pollUntilDone(step, { sleep, now, poll });
+  return ending === 'ready' ? ending : view.end(ending);
 }

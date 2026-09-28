@@ -127,7 +127,8 @@ What keeps working, and why:
   workspace for that lab (GET only, same origin), shows Coder's own create
   or workspace page in a frame of its own when the learner has to confirm
   or press Start, and once code-server is healthy replaces itself with
-  code-server's own name, which it checks against the shape Coder builds.
+  code-server's own name, which it checks is exactly the name Coder builds
+  for that workspace and the signed-in learner.
   code-server stays on its own origin. The launcher's route adds its own
   policy beside `frame-ancestors`: `default-src 'none'`, scripts, styles,
   fetches, images and frames from `coder.lab` only, `base-uri 'none'`,
