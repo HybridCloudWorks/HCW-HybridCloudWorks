@@ -17,6 +17,13 @@
  *   - One section is still a slot: the article list (#677) lands later, in
  *     place, so the layout does not move under it.
  *
+ * EACH CARD OPENS ITS LAB'S PANE, `/education/labs/<id>` (LabPanePage.jsx,
+ * #751). This page is also where GitHub sign-in ends: the lab host sends
+ * every top-level visit here (#750), including the tab a pane's sign-in
+ * opened, and `useLabSignInReturn` sends that tab on to the pane it came
+ * from. It runs in an effect and only for a page entered from outside the
+ * site, so the pre-rendered HTML and hydration are unaffected.
+ *
  * ROUTING. `/education/labs` is a static path declared beside `/education` in
  * App.jsx, so it outranks `/:provider/education` the same way — a static
  * first segment beats a parameter in React Router's ranking. It is in
@@ -39,7 +46,8 @@ import LabCard from '@/components/labs/LabCard';
 import LabsEstateCard from '@/components/labs/LabsEstateCard';
 import LabsSlot from '@/components/labs/LabsSlot';
 import SandboxSection from '@/components/labs/SandboxSection';
-import { CODER_ORIGIN, labs } from '@/data/labs/catalogue';
+import { useLabSignInReturn } from '@/components/labs/labSignIn';
+import { labs } from '@/data/labs/catalogue';
 import { usePublicData } from '@/hooks/usePublicData';
 import { fetchCoderStatus, fetchLabsEstate } from '@/lib/publicApi';
 import { staticRoutes } from '@/lib/routeFactory';
@@ -64,6 +72,7 @@ function settle({ data, loading }) {
 export default function LabsLearnPage() {
   const estateQuery = usePublicData(() => fetchLabsEstate(), ESTATE_KEY);
   const coderQuery = usePublicData(() => fetchCoderStatus(), CODER_STATUS_KEY);
+  useLabSignInReturn();
 
   return (
     <>
@@ -95,12 +104,11 @@ export default function LabsLearnPage() {
             onboarded to Azure Arc, whose live state is further down this page.
           </p>
           <p className="text-slate-600 dark:text-slate-400 max-w-3xl mt-3">
-            <strong className="text-slate-900 dark:text-slate-100">Open in Coder</strong> takes you
-            to <span className="font-mono text-sm">{CODER_ORIGIN.replace('https://', '')}</span>,
-            where you sign in with GitHub, approve the workspace Coder proposes, and land in the lab
-            folder. Workspaces stop after an hour of inactivity and are limited to one CPU and two
-            gigabytes of memory, so treat them as scratch space and keep anything you want in your
-            own repository.
+            <strong className="text-slate-900 dark:text-slate-100">Open lab workspace</strong> opens
+            the lab in a pane on its own page here. The first time, you sign in with GitHub in a new
+            tab that brings you back, approve the workspace, and land in the lab folder. Workspaces
+            stop after an hour of inactivity and are limited to one CPU and two gigabytes of memory,
+            so treat them as scratch space and keep anything you want in your own repository.
           </p>
         </header>
 
