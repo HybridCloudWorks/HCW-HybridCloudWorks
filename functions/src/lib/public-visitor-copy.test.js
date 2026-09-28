@@ -139,22 +139,24 @@ const CODE = /^[A-Z][A-Z0-9_]+$/;
 const keyName = (property) =>
   property.key?.type === 'Identifier' ? property.key.name : property.key?.value;
 
+/** Both sides of a `&&`, `||`, `??` or `+`. */
+const bothSides = (node) => [...literalText(node.left), ...literalText(node.right)];
+
+/** How each kind of expression yields text; anything not listed yields none. */
+const TEXT_OF = Object.freeze({
+  Literal: (node) => (typeof node.value === 'string' ? [node.value] : []),
+  TemplateLiteral: (node) => [node.quasis.map((q) => q.value.cooked ?? q.value.raw).join('…')],
+  ConditionalExpression: (node) => [
+    ...literalText(node.consequent),
+    ...literalText(node.alternate),
+  ],
+  LogicalExpression: bothSides,
+  BinaryExpression: bothSides,
+});
+
 /** The literal text an expression can evaluate to: literals, template text, both arms of a choice. */
 function literalText(node) {
-  if (!node) return [];
-  switch (node.type) {
-    case 'Literal':
-      return typeof node.value === 'string' ? [node.value] : [];
-    case 'TemplateLiteral':
-      return [node.quasis.map((q) => q.value.cooked ?? q.value.raw).join('…')];
-    case 'ConditionalExpression':
-      return [...literalText(node.consequent), ...literalText(node.alternate)];
-    case 'LogicalExpression':
-    case 'BinaryExpression':
-      return [...literalText(node.left), ...literalText(node.right)];
-    default:
-      return [];
-  }
+  return TEXT_OF[node?.type]?.(node) ?? [];
 }
 
 /** Walk every node of an ESTree tree. */

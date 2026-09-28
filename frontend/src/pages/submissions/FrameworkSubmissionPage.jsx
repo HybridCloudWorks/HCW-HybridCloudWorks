@@ -19,9 +19,9 @@ import {
   ExternalLink,
   ArrowRight,
   Loader2,
-  CheckCircle,
 } from 'lucide-react';
 import { submitPublicContent } from '@/lib/publicApi';
+import SubmissionReceived from './SubmissionReceived';
 
 const REFERENCE_FRAMEWORKS = [
   {
@@ -237,21 +237,11 @@ export default function FrameworkSubmissionPage() {
         </div>
 
         {submitted ? (
-          <Card className="bg-card/40 border-green-500/30 max-w-lg">
-            <CardContent className="pt-8 pb-8 text-center space-y-4">
-              <CheckCircle className="h-12 w-12 text-green-500 mx-auto" />
-              <h3 className="text-xl font-bold">Framework Submitted!</h3>
-              <p className="text-muted-foreground text-sm">
-                Your framework has been submitted for review. It will be published once it has been
-                reviewed.
-              </p>
-              <div className="flex gap-3 justify-center pt-2">
-                <Button onClick={() => setSubmitted(false)} variant="outline">
-                  Submit Another
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+          <SubmissionReceived
+            title="Framework Submitted!"
+            message="Your framework has been submitted for review. It will be published once it has been reviewed."
+            onAnother={() => setSubmitted(false)}
+          />
         ) : (
           <form onSubmit={handleSubmit} className="max-w-4xl space-y-6">
             {/* Basic Info */}

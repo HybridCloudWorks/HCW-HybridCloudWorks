@@ -122,13 +122,17 @@ const isConsoleCall = (node) =>
   node.callee?.type === 'MemberExpression' &&
   node.callee.object?.name === 'console';
 
+/** Nodes that name a module path rather than saying anything. */
+const MODULE_PATH_NODES = new Set([
+  'ImportDeclaration',
+  'ImportExpression',
+  'ExportAllDeclaration',
+]);
+const isReExport = (node) => node.type === 'ExportNamedDeclaration' && Boolean(node.source);
+
 /** Nodes whose strings are not copy: module paths and console output. */
 const skipsSubtree = (node) =>
-  isConsoleCall(node) ||
-  node.type === 'ImportDeclaration' ||
-  node.type === 'ImportExpression' ||
-  (node.type === 'ExportNamedDeclaration' && node.source) ||
-  node.type === 'ExportAllDeclaration';
+  MODULE_PATH_NODES.has(node.type) || isReExport(node) || isConsoleCall(node);
 
 /** A property key, which names a field rather than saying anything. */
 const isKey = (node, parent) =>
