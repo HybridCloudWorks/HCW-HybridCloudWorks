@@ -185,6 +185,8 @@ class TheAuditRecord(HookCase):
         result = run_hook(self.root, "Stop")
         self.assertEqual(result.returncode, 0)
         self.assertIsNone(decision(result))
+        # ...and the lost record is said, on stderr, not swallowed.
+        self.assertIn("audit record not written", result.stderr)
 
 
 if __name__ == "__main__":

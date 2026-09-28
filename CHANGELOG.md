@@ -1449,6 +1449,19 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The editor's Problems panel matches CI, and the one open code-scanning
+  alert is fixed.** `.vscode/settings.json` excludes `.claude/worktrees/`
+  (agents' temporary checkouts, which fed stale `tsconfig.json` and workflow
+  diagnostics) and runs flake8 with ruff's default rule families
+  (`E4,E7,E9,F`), the rules Qlty's ruff enforces; without it the editor
+  flagged 79-column `E501` on every Python file CI accepts. `hooks/claude_event.py`
+  reports a lost audit record on stderr instead of `except OSError: pass`
+  (CodeQL `py/empty-except`, alert 363), with the test asserting it.
+  `required-inputs.md` now records `COPILOT_REVIEW_APP_PRIVATE_KEY` as
+  MISSING (found absent from the Agents store 2026-09-28), and
+  `copilot-setup-steps.yml` explains why the Actions extension flags its
+  Agents-store secrets.
+
 - **`Register-LabAgent.ps1` pauses for the registration instead of failing.**
   The owner's first live run (2026-09-27) created the Entra app, its service
   principal, the certificate and the `LabAgent` grant, then stopped with
