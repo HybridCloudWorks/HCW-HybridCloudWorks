@@ -15,7 +15,7 @@ every step.
 | `arc` | Azure Connected Machine agent 1.68.03532.1399 from Microsoft's apt repository, held, then `azcmagent connect` to `rg-lab-hybrid-prod-cus` as `arcs-lab-hybrid-prod-cus-01` with the onboarding service principal from the vault, skipped once Connected. Nothing until `arc_enabled` is true | `/opt/azcmagent/`, `/etc/apt/sources.list.d/microsoft-prod.sources`; the connect configuration is a temporary root-only file deleted in the same run |
 | `docker` | Docker Engine 29.8.1, buildx 0.37.1 and compose 5.5.1 from Docker's apt repository, held; `json-file` logs 10 MB x 3, `live-restore` | `/etc/docker/daemon.json` |
 | `node_exporter` | node_exporter 1.12.1, host-native, SHA256-verified, `127.0.0.1:9100` only | `/usr/local/bin/node_exporter`, `node_exporter.service` |
-| `caddy` | Caddy 2.11.4 built with `caddy-dns/cloudflare` 0.2.4, host-native under systemd; TLS for `lab.hybridcloudworks.com`, `*.lab.hybridcloudworks.com` and `*.coder.lab.hybridcloudworks.com` via DNS-01; placeholder response at the apex | `/usr/local/bin/caddy`, `/opt/caddy/bin/` (versioned binary and its `.provenance`), `/etc/caddy/Caddyfile`, `/etc/caddy/conf.d/`, `/etc/caddy/env` (root:caddy, 0640), `caddy.service` running as `caddy` |
+| `caddy` | Caddy 2.11.4 built with `caddy-dns/cloudflare` 0.2.4, host-native under systemd; TLS for `lab.hybridcloudworks.com`, `*.lab.hybridcloudworks.com` and `*.coder.lab.hybridcloudworks.com` via DNS-01; placeholder response at the apex. Panes only (owner decision 2026-09-28): every name can be framed by the site alone, and a top-level browser visit is redirected to `https://hybridcloudworks.com/education/labs` (`roles/caddy/README.md`, "Panes only") | `/usr/local/bin/caddy`, `/opt/caddy/bin/` (versioned binary and its `.provenance`), `/etc/caddy/Caddyfile`, `/etc/caddy/conf.d/`, `/etc/caddy/env` (root:caddy, 0640), `caddy.service` running as `caddy` |
 | `coder` | Coder Community edition v2.37.3 and PostgreSQL 18.6 under Docker Compose from `../coder/docker-compose.yml`, both by digest; the Caddy route for `coder.lab` and `*.coder.lab`; a nightly `pg_dump` keeping seven days. Down until `coder_enabled` is true | `/etc/hcw/coder/` (`docker-compose.yml`, `.env`, `coder.env` and `coder-postgres.env`, the last two root 0600), `/etc/caddy/conf.d/10-coder.caddy`, `/usr/local/sbin/coder-postgres-backup`, `coder-postgres-backup.timer`, `/var/backups/coder/` |
 | `labs_agent` | `vps-agent` host-native as `hcw-labs-agent.service` under user `hcw-labs-agent` (in `docker`), Node.js 26.10.0 from NodeSource, repository checkout at the commit the playbook runs from, certificate generated on the host | `/opt/hcw-labs-agent`, `/etc/hcw/labs-agent.env` (root, 0600), `/etc/hcw/labs-agent.pem` (root:hcw-labs-agent, 0640), `/etc/hcw/labs-agent.crt` |
 | `portainer` | Portainer Business Edition 2.45.1 (LTS) by digest, one container with the Docker socket, HTTPS on **127.0.0.1:9443 only**, plain HTTP off, no Caddy route; reached through an SSH tunnel. Nothing until `portainer_enabled` is true | Container `portainer`, volume `portainer-data` |
@@ -293,6 +293,15 @@ procedure. `ansible/group_vars/all.yml` holds the switches: `coder_enabled`
 `coder_oauth2_github_allow_signups` (default `true`) and
 `coder_max_workspaces` (`5`).
 
+**Coder is reached through panes on the site, never directly** (owner
+decision 2026-09-28). Opened in a browser tab, any Coder page, dashboard or
+workspace app, is redirected to https://hybridcloudworks.com/education/labs.
+Inside a pane on the site it works as usual. So the steps below check Coder
+from the command line or in a pane, and the one browser step at the top
+level is the GitHub sign-in, because GitHub's pages cannot be framed. The
+CLI, the workspace agents and the site's status proxy send no browser
+navigation headers, so they are unaffected.
+
 **An empty allowlist is not a lock.** Coder treats an empty
 `CODER_OAUTH2_GITHUB_ALLOWED_ORGS` as "no organisation restriction" and lets
 any GitHub account sign in, so `site.yml` asserts in `pre_tasks`, and the
@@ -328,20 +337,41 @@ are skipped.
 
 Success looks like `docker ps` showing `coder` and `coder-postgres`
 (`sudo docker compose --project-directory /etc/hcw/coder ps` prints both
-with `running` and the database `healthy`), and
-`https://coder.lab.hybridcloudworks.com/login` showing a **Sign in with
-GitHub** button and no password form.
+with `running` and the database `healthy`), and Coder answering through
+Caddy. PowerShell, on the workstation:
+
+```powershell
+Invoke-RestMethod https://coder.lab.hybridcloudworks.com/api/v2/buildinfo | Select-Object version
+```
+
+That prints `v2.37.3` followed by a build suffix. In a pane on the site,
+Coder's login page shows a **Sign in with GitHub** button and no password
+form.
 
 ### First admin sign-in
 
 There is no password account. Password authentication is off in the
 Compose file, and Coder makes the first GitHub sign-in on an empty
 deployment the **owner** (its `oauthLogin` allows the first user regardless
-of the sign-up setting and grants the owner role). So the owner signs in at
-`https://coder.lab.hybridcloudworks.com/login` with GitHub before anyone
-else does; success is the dashboard, and
-`https://coder.lab.hybridcloudworks.com/deployment/users` listing that
-account with the role **Owner**. Every later sign-in is a member.
+of the sign-up setting and grants the owner role). So the owner signs in
+with GitHub before anyone else does. GitHub's pages cannot be framed, so
+this is the one Coder step taken at the top level: open this address in
+the browser, which starts Coder's GitHub sign-in:
+
+https://coder.lab.hybridcloudworks.com/api/v2/users/oauth2/github/callback
+
+GitHub asks the first time whether to authorize the app. The browser then
+lands on https://hybridcloudworks.com/education/labs, where every top-level
+visit to the lab ends, and the panes there are signed in. That landing is
+the success; a Coder page in the tab would mean the panes-only rule is not
+applied. To confirm the account is the owner, sign the CLI in (next section)
+and run, PowerShell:
+
+```powershell
+coder users show me
+```
+
+Success is a `Roles` row reading `Owner`. Every later sign-in is a member.
 
 ### Publishing the template
 
@@ -351,11 +381,20 @@ The Coder CLI runs on the workstation, not on the host. PowerShell, once:
 winget install Coder.Coder
 ```
 
+A plain `coder login` opens Coder's `/cli-auth` page in a browser tab. That
+is a direct visit, so it lands on the labs page and never shows the token.
+Sign the CLI in with a token instead. Create one in the Coder dashboard in a
+pane on the site (the account menu, then **Account**, then **Tokens**; Coder's
+path is `/settings/tokens`) and copy it. Then, PowerShell, with the token on
+the clipboard:
+
 ```powershell
-coder login https://coder.lab.hybridcloudworks.com
+coder login https://coder.lab.hybridcloudworks.com --token (Get-Clipboard)
 ```
 
-`coder login` opens the browser for a session token and asks for it back.
+Success prints `Welcome to Coder, <your username>! You're authenticated.`
+`coder login` saves a session of its own, so the token copied from the pane
+can be deleted there afterwards.
 Then, PowerShell, from the repository root on `main` after this change has
 merged (the template directory must exist in the working tree):
 
@@ -373,12 +412,13 @@ of `main.tf`, and `templates push` has no TTL flag in the current CLI
 reference — `templates edit --default-ttl` is where it lives (a
 `coder templates create --default-ttl 1h` exists too, but `push` is the
 same command for first and later publishes). Success: `coder templates
-list` shows `hcw-lab`, and
-`https://coder.lab.hybridcloudworks.com/templates/hcw-lab/settings/schedule`
-shows a default autostop of 1 hour. A workspace from it is then a browser
-visit to
-`https://coder.lab.hybridcloudworks.com/templates/hcw-lab/workspace?mode=auto&param.lab=terraform-validate-walkthrough`,
-which is the shape of the site's Open in Coder links (#681).
+list` shows `hcw-lab`, and the template's schedule page
+(`/templates/hcw-lab/settings/schedule`, in a pane) shows a default
+autostop of 1 hour. A workspace from it is
+`https://coder.lab.hybridcloudworks.com/templates/hcw-lab/workspace?mode=auto&param.lab=terraform-validate-walkthrough`
+loaded in a pane. That is the shape of the site's Open in Coder links
+(#681). Those links open the address at the top level, which since
+2026-09-28 lands on the labs page, so they have to open it in a pane.
 
 ### The status token for the site
 
@@ -420,8 +460,10 @@ Caddy then answers **503** `Coder is stopped on this host.` for
 agent connection and stop themselves at their deadline. Durable: a pull
 request setting `coder_enabled: false`, which also removes the Caddy route
 (the names answer Caddy's 404) and stops the backup timer; the PostgreSQL
-volume stays, so re-enabling brings the same users and templates back. To
-resume after an immediate stop:
+volume stays, so re-enabling brings the same users and templates back.
+Those two answers, the 503 and the 404, are what a pane or a command-line
+client sees. A top-level browser visit is still redirected to the labs page
+first, as it is while Coder runs. To resume after an immediate stop:
 
 ```bash
 sudo docker compose --project-directory /etc/hcw/coder up -d
@@ -435,8 +477,8 @@ put it in the vault as `vault_coder_oauth2_github_client_secret` (the
 `ansible-vault edit` line above), re-run `bootstrap.sh`. The play rewrites
 `coder.env` and Compose recreates the `coder` container because its
 environment changed; the `PLAY RECAP` shows `changed` for those two tasks
-and the login page still offers GitHub. Learners already signed in keep
-their sessions.
+and the login page, in a pane, still offers GitHub. Learners already
+signed in keep their sessions.
 
 ### Rotating the PostgreSQL password
 
@@ -485,7 +527,8 @@ sudo docker compose --project-directory /etc/hcw/coder start coder
 ```
 
 Success is `DROP DATABASE`, `CREATE DATABASE`, no error from the third
-`psql`, and the login page back within a minute.
+`psql`, and the `buildinfo` line under "Enabling" answering again within a
+minute.
 
 ## Portainer
 

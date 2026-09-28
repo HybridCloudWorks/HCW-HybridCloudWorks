@@ -5,8 +5,39 @@
 # why the matcher names both. reverse_proxy passes WebSockets through and
 # sets X-Forwarded-For, X-Forwarded-Proto and X-Forwarded-Host, which
 # docker-compose.yml tells Coder to trust from the Compose network's gateway.
+#
+# Panes only (owner decision 2026-09-28). The Caddyfile's lab_panes_only
+# covers these names like every other, and runs before the routes below. A
+# top-level visit goes to the site's labs page, and every response carries
+# the site-only frame-ancestors. Coder then needs two things to work under
+# it, both in this file.
 @coder host {{ coder_domain }} *.{{ coder_domain }}
+
+# 1. GitHub sign-in is the one Coder request that must work at the top
+#    level. github.com refuses to be framed, so sign-in cannot run inside a
+#    pane, and the site opens it in a window of its own. This path shows no
+#    page at the top level. Going out, it redirects to GitHub. Coming back,
+#    it sets the session and redirects into Coder, and that redirect is
+#    itself a top-level visit, which lab_panes_only sends to the labs page.
+#    The panes there are then signed in. The exemption is for the dashboard
+#    name only, never a workspace app name.
+@coder_github_sign_in {
+  host {{ coder_domain }}
+  path /api/v2/users/oauth2/github/callback
+}
+vars @coder_github_sign_in lab_top_level_allowed true
+
 handle @coder {
+  # 2. Coder's pages send their own Content-Security-Policy. Its default
+  #    frame-ancestors 'self' (coderd/httpmw/csp.go, v2.37.3) would keep
+  #    them out of the site's panes, because a browser enforces every
+  #    policy it receives. This removes that one directive as the response
+  #    is written and leaves the rest of Coder's policy as it is, so the
+  #    Caddyfile's frame-ancestors is the one that decides. Only the default
+  #    is matched: Coder's OAuth2 consent page sends frame-ancestors 'none'
+  #    and keeps it. Coder writes each directive as "<name> <values>; ",
+  #    which is the text matched here.
+  header >Content-Security-Policy "frame-ancestors 'self'; " ""
   reverse_proxy 127.0.0.1:{{ coder_http_port }}
 }
 

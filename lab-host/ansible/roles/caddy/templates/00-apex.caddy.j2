@@ -2,6 +2,11 @@
 # Imported inside the wildcard site block. Later roles drop their own
 # NN-name.caddy here (Coder, #679) and this placeholder is what the apex
 # answers until one of them claims it.
+# Panes only: the site block's lab_panes_only (Caddyfile) runs before this
+# route and every other in conf.d. So a top-level visit to the apex is
+# redirected to the site's labs page before it gets here, and this answer
+# carries the site-only frame-ancestors. A route needs nothing of its own
+# to be covered.
 @apex host {{ caddy_site_domain }}
 handle @apex {
   respond "{{ caddy_apex_response }}" 200

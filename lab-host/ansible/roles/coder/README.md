@@ -47,6 +47,19 @@ starts or stops it, adds the Caddy route and keeps a week of nightly dumps.
    service is stopped, which is the everyone-at-once kill switch in ADR
    0032. Removed while disabled, so Caddy's catch-all 404 answers instead.
    Caddy is reloaded either way through this role's own handler.
+   The Caddyfile's panes-only rule (owner decision 2026-09-28; the caddy
+   role's README, "Panes only") covers these names like every other, so
+   Coder can be reached only through panes on the site. The route adds two
+   things for Coder. It removes Coder's default `frame-ancestors 'self'`
+   from Coder's own `Content-Security-Policy`, because the browser enforces
+   every policy it receives, and that one would keep Coder out of the
+   site's panes. The rest of Coder's policy stays, and so does the
+   `frame-ancestors 'none'` on Coder's OAuth2 consent page. It also lets
+   `/api/v2/users/oauth2/github/callback` on `coder.lab` through at the top
+   level (`lab_top_level_allowed`). GitHub cannot be framed, so sign-in has
+   to run in a window of its own. That path only redirects, and the
+   redirect that ends sign-in is itself a top-level visit, which lands on
+   the site's labs page.
 7. Installs `/usr/local/sbin/coder-postgres-backup` and the
    `coder-postgres-backup.service` and `.timer` units: nightly at 03:30 UTC
    (ten minutes of jitter, `Persistent=true`), `pg_dump` through `docker

@@ -1232,6 +1232,36 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Only the site can frame the lab; a direct visit goes to
+  `/education/labs` (owner decision 2026-09-28).** The owner's words: "The
+  lab should only be accessible through 'panes' from my site, lock to
+  that." A new `lab_panes_only` snippet in the caddy role's Caddyfile is
+  imported into the site block ahead of every route. It covers
+  `lab.hybridcloudworks.com`, every `*.lab` name, `coder.lab` and
+  `*.coder.lab`, and every response, including the 404 and any route added
+  later. Each response carries `Content-Security-Policy: frame-ancestors
+  'self' https://hybridcloudworks.com https://www.hybridcloudworks.com`,
+  with no `X-Frame-Options`. `www` is listed because it serves the site with
+  a 200, and `'self'` is there for code-server's same-origin webviews. The
+  named matcher `@lab_direct_visit` sends a top-level browser visit to
+  `https://hybridcloudworks.com/education/labs` with a `302`. That is
+  `Sec-Fetch-Dest: document`, or `Sec-Fetch-Mode: navigate` with no
+  destination. Panes (`iframe`), fetch, XHR and WebSockets (`empty`), and
+  subresources pass. So do clients that send no fetch metadata: Coder's
+  agents and CLI, curl, and the Function App's status proxy, whose Node
+  `fetch` sends `Sec-Fetch-Mode: cors` alone. The Coder route
+  (`10-coder.caddy.j2`) removes Coder's default `frame-ancestors 'self'`,
+  which would otherwise keep Coder out of the panes. It also lets
+  `/api/v2/users/oauth2/github/callback` through at the top level, because
+  GitHub cannot be framed. That path only redirects, and the redirect that
+  ends sign-in lands on the labs page. The values are `caddy_frame_ancestors`
+  and `caddy_direct_visit_redirect` in `group_vars/all.yml`. The Coder
+  owner steps in `lab-host/README.md` now check from the CLI or in a pane,
+  and `coder login` takes a token. The decision is recorded in
+  `docs/architecture/labs-host.md`, "Panes only", with a one-line pointer in
+  ADR 0032 decision 4. It takes effect on the host with the next
+  `bootstrap.sh` run.
+
 - **Lab jobs on the newest images: `shell-echo` on Alpine 3.24,
   `ansible-check` on `hcw-lab-runner`; every job image held to a floor
   (#747, #715).** The first real lab job (2026-09-28, `shell-echo` on
