@@ -223,7 +223,7 @@ export const PANE_ALLOW = [
 const MUTED = 'text-slate-600 dark:text-slate-400';
 const BUTTON =
   'inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary';
-const PRIMARY = `${BUTTON} bg-primary text-white hover:opacity-90`;
+const PRIMARY = `${BUTTON} bg-primary text-primary-foreground hover:opacity-90`;
 const SECONDARY = `${BUTTON} border border-slate-300 dark:border-slate-600 text-slate-900 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800`;
 
 /** What the status read says about the workspaces: 'checking', 'available' or 'unavailable'. */

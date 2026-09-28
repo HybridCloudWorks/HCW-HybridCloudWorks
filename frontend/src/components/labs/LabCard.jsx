@@ -51,7 +51,7 @@ export default function LabCard({ lab }) {
       <Link
         to={labPanePath(lab.id)}
         data-testid="open-lab-workspace"
-        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-bold text-white hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary self-start"
+        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-bold text-primary-foreground hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary self-start"
       >
         Open lab workspace <span className="sr-only">for {lab.title}; GitHub sign-in required</span>
       </Link>
