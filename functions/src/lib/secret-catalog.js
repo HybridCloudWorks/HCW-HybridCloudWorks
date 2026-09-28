@@ -82,8 +82,9 @@ export const SECRET_SECTIONS = Object.freeze([
     id: 'labs',
     title: 'Hybrid Lab',
     blurb:
-      'The browser workspaces learners open from the labs page. Read-only values: the site ' +
-      'shows their status and links to them, and never signs anyone in or starts anything.',
+      'The browser workspaces learners open from the labs page, and the check that lets the ' +
+      'Landing Zone Builder send the lab a job. The site shows the workspaces’ status and links ' +
+      'to them, and never signs anyone in to them.',
   },
 ]);
 
@@ -441,6 +442,24 @@ export const SECRET_CATALOG = Object.freeze([
     help:
       'Read-only API token. Lets the site list the lab’s templates and count running workspaces ' +
       'for the labs page. It cannot start or change anything, and it is never shown to visitors.',
+    probe: null,
+  },
+  // The secret half of the Turnstile widget the owner creates in the
+  // Cloudflare dashboard (ADR 0032 decision 6, revised 2026-09-28). Read by
+  // lib/labs/public-lock.js, which sends it to Cloudflare's siteverify and
+  // nowhere else. The site key is public and is a build variable, not here.
+  // The widget is not a Terraform resource because its secret would sit in
+  // state (infra/frontend.tf).
+  {
+    setting: 'TURNSTILE_SECRET_KEY',
+    secret: 'TURNSTILE-SECRET-KEY',
+    section: 'labs',
+    label: 'Cloudflare Turnstile — secret key',
+    help:
+      'Secret key of the lab’s Turnstile widget, from the Cloudflare dashboard (Turnstile, then ' +
+      'the widget’s settings). It proves a real browser on this site pressed Validate on the lab ' +
+      'in the Landing Zone Builder. Until it is set the builder says the lab’s browser check is ' +
+      'not configured, and the lab takes no public jobs.',
     probe: null,
   },
 ]);

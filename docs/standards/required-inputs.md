@@ -84,7 +84,7 @@ ignored and the run fails claiming no credentials were supplied.
 | `ARM_TENANT_ID` | **SET** (sensitive) | Same value as the `entra_tenant_id` Terraform variable — see the exceptions table in [Variables and secrets](variables-and-secrets.md) |
 | `ARM_SUBSCRIPTION_ID` | **SET** (sensitive) | Provider fallback only; every provider pins `subscription_id` in HCL, so it never decides where resources land |
 
-**Terraform variables — required.** Eight of the configuration's 65 variables
+**Terraform variables — required.** Eight of the configuration's 66 variables
 have no default, so an unset one fails the plan rather than picking something.
 That is deliberate for the subscriptions in particular: a wrong guess would
 silently deploy the workload into a platform landing zone.
@@ -100,19 +100,23 @@ silently deploy the workload into a platform landing zone.
 | `cloudflare_zone_id` | no | Cloudflare zone the rules attach to |
 | `budget_alert_email` | no | Budget alert action group |
 
-**Terraform variables — defaulted.** The other 57 carry defaults and need no
-workspace entry. The table below lists the nine that are posture switches
-rather than settings — every one defaults to the estate as it stands or to the
-safer value, so an apply never changes behaviour without a workspace edit
-first — plus two defaulted inputs that are not switches:
-`cloudflare_origin_secret`, which must match a Key Vault secret exactly, and
-`arc_onboarding_principal_id`, which names an owner-created principal:
+**Terraform variables — defaulted.** The other 58 carry defaults and need no
+workspace entry. The table below lists the eleven that are posture switches
+rather than settings — every one but `labs_public_submission_enabled` defaults
+to the estate as it stands or to the safer value, so an apply never changes
+behaviour without a workspace edit first; that one defaults to the posture the
+owner chose on 2026-09-28, stays closed until its Key Vault secret resolves, and
+is closed again by a workspace edit — plus two defaulted inputs that are not
+switches: `cloudflare_origin_secret`, which must match a Key Vault secret
+exactly, and `arc_onboarding_principal_id`, which names an owner-created
+principal:
 
 | Name | Default | What arming it does |
 | --- | --- | --- |
 | `schedulers_master_enabled` | `false` | Master switch for all 20 catalogued timers. Both this and a name in `enabled_timers` are required — TODO.md T-518 |
 | `enabled_timers` | `[]` | Per-timer allow-list, armed one name at a time |
 | `newsletter_sending_enabled` | `false` | Lets a publisher's approval send the weekly newsletter through Resend. Set it only after the postal address and reply-to are saved in Newsletter settings |
+| `labs_public_submission_enabled` | `true` (owner decision 2026-09-28, [ADR 0032](../decisions/0032-learner-labs-platform.md) decision 6 revised) | Sets `LABS_PUBLIC_SUBMISSION_ENABLED`, which lets the Landing Zone Builder's "Validate on the lab" queue a public `terraform-validate` job, only from the site's pane (its origin and a Cloudflare Turnstile token) and within decision 6's bounds. Stays closed until `TURNSTILE-SECRET-KEY` (§4.6) resolves and an agent is online. **`false` in the workspace is the kill switch**: every public lab route then answers `PUBLIC_SUBMISSION_CLOSED` before reading anything |
 | `availability_test_enabled` | `false` | Standard web test and its alert. Stays `false`: Bot Fight Mode still 403s Azure's availability agents, and the reachability signal is served by the ADR 0024 Worker probe instead |
 | `availability_probe_alert_enabled` | `false` in code, **set `true` in the workspace 2026-09-01 (T-519 closed)** | Arms `edge_probe_availability` (`alert-api-reachability-prod-cus`) on the Worker probe's `availabilityResults` rows. Armed only after a full 30-minute window held 6 healthy rows |
 | `cosmos_export_enabled` | `false` | Arms the Cosmos exporter (`FEATURE_FLAG_COSMOS_EXPORT`) and creates `cosmos_export_daily_missing` and `cosmos_export_full_missing` (`alert-cosmos-export-daily-prod-cus`, `alert-cosmos-export-full-prod-cus`) together — ADR 0028. Arm only after the exporter is deployed and a `cosmosExportCompleted` event has been seen, and not on a Sunday after 03:00 UTC |
@@ -131,9 +135,10 @@ day (T-525). `READER_CLIENT_ID` was added to the table on 2026-08-29 (T-728) and
 is **not yet set**, so a reader comparing this against `gh variable list` should
 find exactly that one difference until the split is applied. Seeded from
 Terraform outputs by `scripts/set-github-variables.ps1` — never written by
-hand, with one exception: `COPILOT_REVIEW_APP_ID` identifies a GitHub App that
-Terraform does not manage, so it is set by hand from the App page (runbook
-step 4) and its row says so.
+hand, with two exceptions, each for a value Terraform does not manage:
+`COPILOT_REVIEW_APP_ID` identifies a GitHub App, so it is set by hand from the
+App page (runbook step 4), and `VITE_TURNSTILE_SITE_KEY` is the site key of a
+Turnstile widget created in the Cloudflare dashboard. Each row says so.
 
 | Name | Status | Consumer |
 | --- | --- | --- |
@@ -160,6 +165,7 @@ step 4) and its row says so.
 | `VITE_SOCIAL_GITHUB_URL` | **SET** | Frontend build — footer links |
 | `VITE_SOCIAL_LINKEDIN_URL` | **SET** | Frontend build |
 | `VITE_SOCIAL_X_URL` | **SET** | Frontend build |
+| `VITE_TURNSTILE_SITE_KEY` | **MISSING** until the owner creates the widget ([ADR 0032](../decisions/0032-learner-labs-platform.md), amendment of 2026-09-28) | Frontend build: the **site key** of the Cloudflare Turnstile widget for the Landing Zone Builder's "Validate on the lab". Public by construction, since Cloudflare puts it in the page, so a variable and never a secret. Set by hand, not by `scripts/set-github-variables.ps1`: the widget is created in the Cloudflare dashboard at `https://dash.cloudflare.com/?to=/:account/turnstile` (hostname `hybridcloudworks.com`, Managed mode), not by Terraform, whose `cloudflare_turnstile_widget` would hold the secret key in state. Unset, the build succeeds and the button stays disabled saying the build has no site key; a change needs a frontend deploy to reach the site |
 
 ## 4.3 GitHub repository secrets
 
@@ -220,8 +226,10 @@ it, because a repair would hide a regression in that fix.
 
 **Not observed in this pass.** `az keyvault secret list` returned
 `ForbiddenByRbac` — the caller holds no data-plane role, which is itself the
-correct posture. The twenty-five names below are what the Terraform root module
-in `infra/` references — the app-settings map that holds them is in
+correct posture. The names below are among the thirty the Terraform root module
+in `infra/` references (the Hybrid Lab's `CODER-URL` and `CODER-STATUS-TOKEN`
+are in §4.7, and `functions/src/lib/secret-catalog.js` lists every one) — the
+app-settings map that holds them is in
 `infra/functionapp.tf`, and `functions/src/lib/secret-catalog.test.js` reads
 every `.tf` file in that directory as one module rather than any one file, so a
 reference is found wherever it is declared. Each name therefore has a named
@@ -261,6 +269,7 @@ problem. The two cost very different amounts to diagnose.
 | `QLTY-API-TOKEN` | Health Hub Code and Security tab | #569. A personal access token from `https://qlty.sh/user/settings/tokens`, read-only use: the project's open issues and metrics. Seed it on the Integrations Keys tab before the Terraform run that adds its reference, so `monitor-unresolved-secrets.yml` never sees it unresolved. Unseeded, the tab says Qlty is not configured |
 | `TELEGRAM-BOT-TOKEN` | Notifications | |
 | `TELEGRAM-CHAT-ID` | Notifications | |
+| `TURNSTILE-SECRET-KEY` | Landing Zone Builder's "Validate on the lab" | **MISSING** until the owner creates the widget ([ADR 0032](../decisions/0032-learner-labs-platform.md), amendment of 2026-09-28). The **secret key** of the Cloudflare Turnstile widget whose site key is `VITE_TURNSTILE_SITE_KEY` (§4.2); the Function App setting `TURNSTILE_SECRET_KEY` is a Key Vault reference to it, and `functions/src/lib/labs/public-lock.js` sends it to Cloudflare's siteverify and nowhere else. The widget is created in the Cloudflare dashboard at `https://dash.cloudflare.com/?to=/:account/turnstile`, not by Terraform, because `cloudflare_turnstile_widget` would hold this secret in state. **Seed it** at `https://hybridcloudworks.com/admin/integrations?tab=keys` (Hybrid Lab section, *Cloudflare Turnstile — secret key*) once the functions deploy that lists it has run. It cannot go first, as `RESEND-API-KEY` did: that page offers only what the deployed catalogue lists, and `deploy-functions.yml` will not start until the Terraform run adding the reference has applied. So between that run and the seed it is an expected unresolved reference (`EXPECTED_UNRESOLVED` in `scripts/check-unresolved-secrets.mjs`), reported every run but not as a failure; remove it from that list in the PR after it is seeded. Unseeded, the builder says the lab's browser check is not configured and the lab takes no public job. Rotate by rotating it in the widget's settings and pasting the new value here |
 
 ## 4.6b Custom role definitions — owner-created, once
 
@@ -374,9 +383,10 @@ entry that never reaches the repository.
 `VITE_*` is contractual to Vite and never renamed. These are **build-time
 substitutions, not runtime configuration**: whatever value is present when the
 Static Web App is built is baked into the bundle, so nothing sensitive may ever
-be one. All are non-sensitive by construction — client IDs and public URLs.
+be one. All are non-sensitive by construction — client IDs, public URLs, and
+the Turnstile site key, which Cloudflare itself puts in the page.
 
-Six of the seven are repository variables (§4.2). The exception:
+Seven of the eight are repository variables (§4.2). The exception:
 
 | Name | Status | Notes |
 | --- | --- | --- |

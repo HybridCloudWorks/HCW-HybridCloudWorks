@@ -171,7 +171,7 @@ deployments, and scaling:
 | --- | --- | --- |
 | API | Public tools, admin reads and mutations, health endpoints | Internet-facing; admin routes require Entra; public routes explicitly allowlisted |
 | Worker | Schedules, change feed, queues, AI, media, publishing, notifications, third-party sync | No public business endpoints; privileged secrets and data access |
-| Labs broker | Job admission, quota, status, and Hostinger agent coordination | Admin-only submission today (§5.3); the agent's routes need its own Entra certificate; anonymous submission is Gated by ADR 0032 |
+| Labs broker | Job admission, quota, status, and Hostinger agent coordination | Admin submission, plus the Landing Zone Builder's public "Validate on the lab" locked to the site's pane by origin and Cloudflare Turnstile (§5.3, ADR 0032 decision 6 as revised 2026-09-28); the agent's routes need its own Entra certificate |
 
 Handlers are stateless, idempotent, and safe for at-least-once delivery. External side effects use an
 operation ID, bounded exponential retry, explicit terminal state, and poison queues. Synchronous HTTP
@@ -290,24 +290,29 @@ mutation tests require an explicitly disposable record and separate approval.
 
 ### 5.3 Labs flow
 
-Submission is admin-only today. An editor signed in to `/admin/labs` calls `enqueueLabJob`, which
-checks the `editor` role, the job-type allowlist and the per-type payload cap, then writes a queued
-job and returns its ID. The Hostinger agent polls outbound with its own Entra certificate, claims a
-job conditionally, runs it inside the Docker sandbox with no network, and reports the result. No
-inbound VPS port or Cosmos account key is exposed. The source repository's public path was not
-ported (`functions/src/lib/labs.js`), and [ADR 0032](../decisions/0032-learner-labs-platform.md)
-holds anonymous submission Gated with the bounds it would open under.
+Two ways in. An editor signed in to `/admin/labs` calls `enqueueLabJob`, which checks the `editor`
+role, the job-type allowlist and the per-type payload cap, then writes a queued job and returns its
+ID. The Hostinger agent polls outbound with its own Entra certificate, claims a job conditionally,
+runs it inside the Docker sandbox with no network, and reports the result. No inbound VPS port or
+Cosmos account key is exposed. The source repository's public path was not ported
+(`functions/src/lib/labs.js`).
 
-The anonymous path is built and closed (#672). `POST /api/public/labs/submit`
-(`functions/src/lib/labs/public-submit.js`) is the Landing Zone Builder's "Validate on the lab": it
-enforces decision 6's bounds and no wider (`terraform-validate` only, a 64 KB payload, 2 an hour per
-Cloudflare-verified client, 50 a day globally, refused while more than 20 jobs are queued, jobs
-written `public: true` with a one-day TTL), and it refuses while no agent registered for the type is
-heartbeating, so it never queues a job nobody will run. It answers `PUBLIC_SUBMISSION_CLOSED` before
-reading anything unless the Function App setting `LABS_PUBLIC_SUBMISSION_ENABLED` is exactly
-`"true"`, which nothing sets. Opening it is the owner's revision of ADR 0032 decision 6, and then
-that one setting. Until then the browser never submits a lab request, and the builder's button says
-why it is disabled.
+The second way is the Landing Zone Builder's "Validate on the lab", `POST /api/public/labs/submit`
+(`functions/src/lib/labs/public-submit.js`, #672), open since the owner revised
+[ADR 0032](../decisions/0032-learner-labs-platform.md) decision 6 on 2026-09-28 and taken **only
+from the builder's pane on the site**. Before any store read or counter, the request's `Origin` must
+be exactly `https://hybridcloudworks.com` or `https://www.hybridcloudworks.com`, and its body must
+carry a Cloudflare Turnstile token that Cloudflare's siteverify passes for one of those hostnames and
+the `lab-validate` action (`public-lock.js`). The builder loads the Turnstile widget only once the
+status read says the lab is open. Past the lock, the path enforces decision 6's bounds and no wider
+(`terraform-validate` only, a 64 KB payload, 2 an hour per Cloudflare-verified client, 50 a day
+globally, refused while more than 20 jobs are queued, jobs written `public: true` with a one-day
+TTL), and it refuses while no agent registered for the type is heartbeating, so it never queues a job
+nobody will run. Three things fail it closed, and the status read names whichever is missing: the
+Function App setting `LABS_PUBLIC_SUBMISSION_ENABLED` must be exactly `"true"` (Terraform
+`labs_public_submission_enabled`, the kill switch), the Key Vault secret `TURNSTILE-SECRET-KEY` must
+resolve, and an agent must be online. The Turnstile widget itself is created in the Cloudflare
+dashboard rather than by Terraform, so its secret key never enters state.
 
 ## 6. Reliability model
 

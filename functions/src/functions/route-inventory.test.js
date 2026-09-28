@@ -210,11 +210,14 @@ const PUBLIC_ROUTES = new Set([
   // lib/labs/coder-status.js.
   'public/labs/coder-status',
   // Anonymous lab submission (#672, ADR 0032 decision 6): the one public
-  // route that queues work on the lab host. CLOSED unless the owner sets
-  // LABS_PUBLIC_SUBMISSION_ENABLED to exactly "true" after revising decision
-  // 6; closed, all three verbs answer PUBLIC_SUBMISSION_CLOSED before reading
-  // the body, the caller or the store. Open, POST is bounded by decision 6
-  // and no wider: terraform-validate only, 64 KB, 2 an hour per
+  // route that queues work on the lab host. CLOSED unless
+  // LABS_PUBLIC_SUBMISSION_ENABLED is exactly "true" (the owner revised
+  // decision 6 on 2026-09-28 and Terraform now sets it); closed, all three
+  // verbs answer PUBLIC_SUBMISSION_CLOSED before reading the body, the caller
+  // or the store. Open, a POST is taken only from the site's pane, by its
+  // exact Origin and a Cloudflare Turnstile token siteverify passes, both
+  // before any store read (lib/labs/public-lock.js); then it is bounded by
+  // decision 6 and no wider: terraform-validate only, 64 KB, 2 an hour per
   // Cloudflare-verified client through the same counter as
   // public/submissions, 50 a day across everyone through a compare-and-
   // increment, refused while more than 20 jobs are queued, and refused

@@ -194,6 +194,36 @@ moved {
 }
 
 # =============================================================================
+# Cloudflare Turnstile widget — deliberately NOT managed here
+#
+# The public "Validate on the lab" (ADR 0032 decision 6, revised 2026-09-28)
+# needs a Turnstile widget for hybridcloudworks.com in Managed mode. The
+# pinned provider has `cloudflare_turnstile_widget` (5.25.0 in
+# .terraform.lock.hcl), and it is not used, for three reasons in order:
+#
+#   1. Its `secret` is a read-only attribute, so managing the widget writes
+#      the secret key into HCP Terraform state on every refresh. Secret
+#      values never transit state (docs/standards/variables-and-secrets.md);
+#      this configuration holds no secret value anywhere, and that is the
+#      property worth keeping.
+#   2. It needs `account_id` and an account-level Turnstile permission.
+#      cloudflare_api_token is scoped to this zone (DNS, Transform Rules and
+#      Rulesets:Read); widening the one production-DNS credential to account
+#      scope for a resource created once is the wrong trade.
+#   3. The widget is created once and then left alone. The dashboard is one
+#      form, and its site key is public.
+#
+# So the owner creates it at https://dash.cloudflare.com/?to=/:account/turnstile
+# (name `hcw-lab-validate`, hostname `hybridcloudworks.com`, which covers www,
+# Managed mode, no pre-clearance). The site key becomes the repository
+# variable VITE_TURNSTILE_SITE_KEY, which deploy-azure-frontend.yml builds
+# in; the secret key goes to Key Vault as TURNSTILE-SECRET-KEY through the
+# API-keys page, read by the TURNSTILE_SECRET_KEY reference in
+# functionapp.tf. functions/src/lib/labs/public-lock.test.js fails if a
+# cloudflare_turnstile_widget resource appears in this directory.
+# =============================================================================
+
+# =============================================================================
 # Origin lock, Cloudflare half (DECISION 6)
 #
 # Stamps x-hcw-origin-secret onto every request Cloudflare proxies to the

@@ -9,10 +9,15 @@
  * its own words, and a refusal naming the door shuts the button; a changed
  * build drops the output; and the pre-rendered markup is the "checking"
  * line, which hydration adopts.
+ *
+ * Locked to this pane (ADR 0032 decision 6, revised 2026-09-28): the
+ * Turnstile widget loads only once the lab is open and the build has a site
+ * key, the button waits for its token, each submission carries one token and
+ * asks for the next, and the lock's refusals read in the server's words.
  */
 import React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { renderToString } from 'react-dom/server';
 
 import { LzLabValidate } from './LzLabValidate';
@@ -73,8 +78,33 @@ function requestsFor({ door = OPEN, submit, jobs = [] } = {}) {
   };
 }
 
-const renderControl = (props) =>
-  render(<LzLabValidate files={NO_SPOKES} pollDelay={() => 0} {...props} />);
+/**
+ * Cloudflare's `turnstile` API, faked. A widget solves on render and again
+ * on every reset, issuing turnstile-token-1, -2, … unless `solve` is false,
+ * when the test drives the callbacks itself.
+ */
+function fakeTurnstile({ siteKey = 'site-key-test', solve = true, loadFails = false } = {}) {
+  let issued = 0;
+  const widgets = new Map();
+  const nextToken = () => `turnstile-token-${(issued += 1)}`;
+  const api = {
+    render: vi.fn((element, options) => {
+      const id = `widget-${widgets.size + 1}`;
+      widgets.set(id, options);
+      if (solve) options.callback(nextToken());
+      return id;
+    }),
+    reset: vi.fn((id) => {
+      if (solve) widgets.get(id)?.callback(nextToken());
+    }),
+    remove: vi.fn((id) => widgets.delete(id)),
+  };
+  const load = vi.fn(async () => (loadFails ? Promise.reject(new Error('blocked')) : api));
+  return { siteKey, load, api, options: () => [...widgets.values()][0] };
+}
+
+const renderControl = ({ turnstile = fakeTurnstile(), ...props } = {}) =>
+  render(<LzLabValidate files={NO_SPOKES} pollDelay={() => 0} turnstile={turnstile} {...props} />);
 
 const button = () => screen.getByTestId('lz-lab-validate');
 const line = () => screen.getByTestId('lz-lab-line');
@@ -173,7 +203,7 @@ describe('what the runner image can resolve', () => {
 
   it('still refuses a build calling a version the image does not vendor, naming it', async () => {
     const requests = requestsFor();
-    render(<LzLabValidate files={UNVENDORED} requests={requests} />);
+    renderControl({ files: UNVENDORED, requests });
     await waitFor(() =>
       expect(line().textContent).toContain('avm-res-network-virtualnetwork 0.23.0')
     );
@@ -208,7 +238,7 @@ describe('what the runner image can resolve', () => {
   });
 
   it('refuses an empty build with its own line', async () => {
-    render(<LzLabValidate files={emitFiles({ selected: [] })} requests={requestsFor()} />);
+    renderControl({ files: emitFiles({ selected: [] }), requests: requestsFor() });
     await waitFor(() => expect(line().textContent).toBe(LINES.empty));
     expect(screen.queryByTestId('lz-lab-modules')).toBeNull();
   });
@@ -243,6 +273,7 @@ describe('when the lab is open', () => {
     const [[sent]] = requests.submit.mock.calls;
     expect(sent.type).toBe('terraform-validate');
     expect(sent.payloadEncoding).toBe('tar');
+    expect(sent.turnstileToken).toBe('turnstile-token-1');
     const unpacked = parseTar(decodeTarPayload(sent.payload)).map((e) => ({
       path: e.path,
       content: new TextDecoder().decode(e.data),
@@ -312,35 +343,218 @@ describe('when the lab is open', () => {
     const requests = requestsFor({
       jobs: [{ id: 'job-1', status: 'succeeded', exitCode: 0, output: 'ok' }],
     });
-    const { rerender } = renderControl({ requests });
+    const turnstile = fakeTurnstile();
+    const { rerender } = renderControl({ requests, turnstile });
     await waitFor(() => expect(button()).toBeEnabled());
     fireEvent.click(button());
     await screen.findByTestId('lz-lab-output');
     const fewer = emitFiles(decodeLz(new URLSearchParams('lz=mg&corp=0&online=0')));
-    rerender(<LzLabValidate files={fewer} requests={requests} pollDelay={() => 0} />);
+    rerender(
+      <LzLabValidate files={fewer} requests={requests} pollDelay={() => 0} turnstile={turnstile} />
+    );
     expect(screen.queryByTestId('lz-lab-output')).toBeNull();
   });
 });
 
+describe('locked to this pane: the Turnstile check', () => {
+  const TURNSTILE_UNCONFIGURED = {
+    configured: false,
+    open: false,
+    code: 'TURNSTILE_NOT_CONFIGURED',
+    reason:
+      'The lab is not taking public jobs yet: its browser check (Cloudflare Turnstile) is not configured.',
+  };
+
+  it('loads nothing from Cloudflare while the lab is closed', async () => {
+    const turnstile = fakeTurnstile();
+    renderControl({ requests: requestsFor({ door: CLOSED }), turnstile });
+    await waitFor(() => expect(line().textContent).toBe(CLOSED.reason));
+    expect(turnstile.load).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('lz-lab-turnstile')).toBeNull();
+  });
+
+  it('says the server has no Turnstile secret, in its words, and loads nothing', async () => {
+    const turnstile = fakeTurnstile();
+    renderControl({ requests: requestsFor({ door: TURNSTILE_UNCONFIGURED }), turnstile });
+    await waitFor(() => expect(line().textContent).toBe(TURNSTILE_UNCONFIGURED.reason));
+    expect(line().dataset.door).toBe('TURNSTILE_NOT_CONFIGURED');
+    expect(button()).toBeDisabled();
+    expect(turnstile.load).not.toHaveBeenCalled();
+  });
+
+  it('keeps the button disabled on a build with no site key, and says so', async () => {
+    const turnstile = fakeTurnstile({ siteKey: '' });
+    const requests = requestsFor();
+    renderControl({ requests, turnstile });
+    await waitFor(() => expect(line().textContent).toBe(LINES.noSiteKey));
+    expect(button()).toBeDisabled();
+    expect(turnstile.load).not.toHaveBeenCalled();
+    fireEvent.click(button());
+    expect(requests.submit).not.toHaveBeenCalled();
+  });
+
+  it('renders the widget once the lab is open, for the lab-validate action, seen only when needed', async () => {
+    const turnstile = fakeTurnstile();
+    renderControl({ requests: requestsFor(), turnstile });
+    await waitFor(() => expect(button()).toBeEnabled());
+    expect(turnstile.load).toHaveBeenCalledTimes(1);
+    expect(turnstile.api.render).toHaveBeenCalledTimes(1);
+    const [[element, options]] = turnstile.api.render.mock.calls;
+    expect(element).toBe(screen.getByTestId('lz-lab-turnstile'));
+    expect(options).toMatchObject({
+      sitekey: 'site-key-test',
+      action: 'lab-validate',
+      appearance: 'interaction-only',
+    });
+  });
+
+  it('waits for the token before the button can be pressed', async () => {
+    const turnstile = fakeTurnstile({ solve: false });
+    renderControl({ requests: requestsFor(), turnstile });
+    // The line reads "checking" from the moment the door opens, before the
+    // script has loaded, so wait for the widget itself before solving it.
+    await waitFor(() => expect(turnstile.api.render).toHaveBeenCalledTimes(1));
+    expect(line().textContent).toBe(LINES.browserCheck);
+    expect(button()).toBeDisabled();
+    expect(hasSpinner()).toBe(false);
+    act(() => turnstile.options().callback('token-late'));
+    await waitFor(() => expect(button()).toBeEnabled());
+    expect(line().textContent).toBe(LINES.ready);
+  });
+
+  it('says when Cloudflare wants the visitor, and when the check failed', async () => {
+    const turnstile = fakeTurnstile({ solve: false });
+    renderControl({ requests: requestsFor(), turnstile });
+    await waitFor(() => expect(turnstile.api.render).toHaveBeenCalled());
+    act(() => turnstile.options()['before-interactive-callback']());
+    expect(line().textContent).toBe(LINES.browserInteractive);
+    act(() => turnstile.options()['error-callback']('300010'));
+    expect(line().textContent).toBe(LINES.browserError);
+    expect(button()).toBeDisabled();
+  });
+
+  it('says the check could not run when Cloudflare’s script does not load', async () => {
+    renderControl({ requests: requestsFor(), turnstile: fakeTurnstile({ loadFails: true }) });
+    await waitFor(() => expect(line().textContent).toBe(LINES.browserError));
+    expect(button()).toBeDisabled();
+  });
+
+  it('spends one token per submission and asks for the next', async () => {
+    const turnstile = fakeTurnstile();
+    const requests = requestsFor({
+      jobs: [{ id: 'job-1', status: 'succeeded', exitCode: 0, output: 'ok' }],
+    });
+    renderControl({ requests, turnstile });
+    await waitFor(() => expect(button()).toBeEnabled());
+    fireEvent.click(button());
+    await screen.findByTestId('lz-lab-output');
+    expect(turnstile.api.reset).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(button()).toBeEnabled());
+    fireEvent.click(button());
+    await waitFor(() => expect(requests.submit).toHaveBeenCalledTimes(2));
+    const tokens = requests.submit.mock.calls.map(([sent]) => sent.turnstileToken);
+    expect(tokens).toEqual(['turnstile-token-1', 'turnstile-token-2']);
+  });
+
+  it('shows the lock’s refusal in the server’s words and renews the check', async () => {
+    const message =
+      "Cloudflare's browser check did not pass, or its token had expired or was already used, so the lab did not take the job. Try again.";
+    const turnstile = fakeTurnstile();
+    const requests = requestsFor({
+      submit: vi.fn(async () => Promise.reject(refusal(403, 'TURNSTILE_FAILED', message))),
+    });
+    renderControl({ requests, turnstile });
+    await waitFor(() => expect(button()).toBeEnabled());
+    fireEvent.click(button());
+    const alert = await screen.findByTestId('lz-lab-error');
+    expect(alert.textContent).toBe(message);
+    expect(alert.dataset.status).toBe('403');
+    expect(turnstile.api.reset).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(button()).toBeEnabled());
+  });
+
+  it('shuts the door and removes the widget when the server says Turnstile is not configured', async () => {
+    const turnstile = fakeTurnstile();
+    const requests = requestsFor({
+      submit: vi.fn(async () =>
+        Promise.reject(refusal(503, 'TURNSTILE_NOT_CONFIGURED', TURNSTILE_UNCONFIGURED.reason))
+      ),
+    });
+    renderControl({ requests, turnstile });
+    await waitFor(() => expect(button()).toBeEnabled());
+    fireEvent.click(button());
+    await screen.findByTestId('lz-lab-error');
+    expect(line().textContent).toBe(TURNSTILE_UNCONFIGURED.reason);
+    expect(button()).toBeDisabled();
+    expect(turnstile.api.remove).toHaveBeenCalledWith('widget-1');
+    expect(screen.queryByTestId('lz-lab-turnstile')).toBeNull();
+  });
+
+  it('removes the widget when the control goes away', async () => {
+    const turnstile = fakeTurnstile();
+    const { unmount } = renderControl({ requests: requestsFor(), turnstile });
+    await waitFor(() => expect(button()).toBeEnabled());
+    unmount();
+    expect(turnstile.api.remove).toHaveBeenCalledWith('widget-1');
+  });
+});
+
 describe('the words', () => {
-  it('puts the door ahead of the build', () => {
+  it('puts the door first, then the site key, then the build, then the browser check', () => {
     const resolution = { ok: false, unresolved: [{ module: 'm', constraint: '1.0.0' }] };
-    expect(
-      disabledReason({ door: { phase: 'known', ...CLOSED }, hasTerraform: false, resolution })
-    ).toBe(CLOSED.reason);
-    expect(
-      disabledReason({ door: { phase: 'known', ...OPEN }, hasTerraform: true, resolution })
-    ).toBe(unresolvedLine(resolution.unresolved));
-    expect(
-      disabledReason({ door: { phase: 'known', open: false }, hasTerraform: true, resolution })
-    ).toBe(LINES.closedFallback);
+    const resolved = { ok: true, unresolved: [] };
+    const open = { phase: 'known', ...OPEN };
+    const ready = { siteKey: 'k', check: 'ready' };
     expect(
       disabledReason({
-        door: { phase: 'known', ...OPEN },
+        door: { phase: 'known', ...CLOSED },
+        hasTerraform: false,
+        resolution,
+        ...ready,
+      })
+    ).toBe(CLOSED.reason);
+    expect(
+      disabledReason({ door: open, hasTerraform: false, resolution, siteKey: '', check: 'idle' })
+    ).toBe(LINES.noSiteKey);
+    expect(
+      disabledReason({ door: open, hasTerraform: true, resolution, siteKey: 'k', check: 'loading' })
+    ).toBe(unresolvedLine(resolution.unresolved));
+    expect(
+      disabledReason({
+        door: { phase: 'known', open: false },
         hasTerraform: true,
-        resolution: { ok: true, unresolved: [] },
+        resolution,
+        ...ready,
+      })
+    ).toBe(LINES.closedFallback);
+    expect(
+      disabledReason({ door: open, hasTerraform: true, resolution: resolved, ...ready })
+    ).toBeNull();
+    expect(
+      disabledReason({
+        door: open,
+        hasTerraform: true,
+        resolution: resolved,
+        siteKey: 'k',
+        check: 'spent',
       })
     ).toBeNull();
+    for (const [check, expected] of [
+      ['idle', LINES.browserCheck],
+      ['loading', LINES.browserCheck],
+      ['interactive', LINES.browserInteractive],
+      ['error', LINES.browserError],
+    ]) {
+      expect(
+        disabledReason({
+          door: open,
+          hasTerraform: true,
+          resolution: resolved,
+          siteKey: 'k',
+          check,
+        })
+      ).toBe(expected);
+    }
   });
 
   it('reads a poll: a 404 or 503 ends the run, a transport failure backs off, the deadline stalls', () => {
@@ -413,6 +627,12 @@ describe('the words', () => {
   it('keeps the server’s sentence for its refusals and names anything else', () => {
     expect(failureLine(refusal(503, 'LAB_QUEUE_FULL', 'full'))).toBe('full');
     expect(failureLine(refusal(413, 'PAYLOAD_TOO_LARGE', 'too big'))).toBe('too big');
+    for (const code of ['ORIGIN_NOT_ALLOWED', 'TURNSTILE_REQUIRED', 'TURNSTILE_FAILED']) {
+      expect(failureLine(refusal(403, code, `lock: ${code}`))).toBe(`lock: ${code}`);
+    }
+    expect(failureLine(refusal(403, 'FORBIDDEN', 'Forbidden'))).toBe(
+      'The job could not be sent to the lab: Forbidden'
+    );
     expect(failureLine(refusal(404, 'JOB_NOT_FOUND', 'x'))).toContain('no longer has this job');
     expect(failureLine(new Error('socket hang up'))).toBe(
       'The job could not be sent to the lab: socket hang up'

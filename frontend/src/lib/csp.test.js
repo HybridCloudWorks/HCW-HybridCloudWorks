@@ -113,6 +113,34 @@ describe('Content-Security-Policy', () => {
     expect(connect).toContain('https://nominatim.openstreetmap.org');
   });
 
+  // The Landing Zone Builder's "Validate on the lab" is locked to the site's
+  // pane by a Cloudflare Turnstile token (ADR 0032 decision 6, revised
+  // 2026-09-28). The widget is a script from challenges.cloudflare.com that
+  // draws an iframe from the same origin, so it needs exactly script-src and
+  // frame-src there, and Cloudflare's CSP reference asks for nothing else
+  // (connect-src only for pre-clearance, which is off). One exact origin: no
+  // *.cloudflare.com, and nothing in connect-src, where it would let code
+  // send the page's data to Cloudflare.
+  it('lets Turnstile load its script and frame from its one origin, and nothing broader', () => {
+    expect(directive('script-src')).toEqual([
+      "'self'",
+      'https://static.cloudflareinsights.com',
+      'https://challenges.cloudflare.com',
+    ]);
+    expect(directive('frame-src')).toEqual([
+      "'self'",
+      'https://login.microsoftonline.com',
+      'https://challenges.cloudflare.com',
+    ]);
+    expect(directive('connect-src')).not.toContain('https://challenges.cloudflare.com');
+    expect(CSP).not.toMatch(/\*\.cloudflare\.com/);
+    const elsewhere = CSP.split(';')
+      .map((part) => part.trim())
+      .filter((part) => part.includes('challenges.cloudflare.com'))
+      .map((part) => part.split(/\s+/)[0]);
+    expect(elsewhere.sort()).toEqual(['frame-src', 'script-src']);
+  });
+
   it('still refuses framing and defaults closed', () => {
     expect(directive('default-src')).toEqual(["'self'"]);
     expect(directive('frame-ancestors')).toEqual(["'none'"]);

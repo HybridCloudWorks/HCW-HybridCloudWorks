@@ -1161,6 +1161,39 @@ variable "newsletter_sending_enabled" {
   default     = false
 }
 
+# The public lab submission's switch (ADR 0032 decision 6, revised
+# 2026-09-28). Default TRUE, because the owner opened the path on that date,
+# the same way functions_origin_lock_enabled carries the posture the owner
+# chose as its default: the decision is reviewed in the pull request and read
+# in the plan, rather than living only as a workspace edit.
+#
+# True does not open anything on its own. The lab takes a job only when this
+# is on, the TURNSTILE-SECRET-KEY vault secret resolves, and a lab agent
+# registered for terraform-validate is heartbeating, and each of the three
+# fails closed with the builder saying which one is missing. Every POST must
+# also come from the site's origin with a Turnstile token Cloudflare passes.
+#
+# Set false in the hcw-azure workspace to close it in one step: the builder's
+# button then says public submission is switched off, and the three routes
+# answer PUBLIC_SUBMISSION_CLOSED before reading anything.
+variable "labs_public_submission_enabled" {
+  description = <<-EOT
+    Lets the Landing Zone Builder's "Validate on the lab" queue a public
+    terraform-validate job on the lab host (LABS_PUBLIC_SUBMISSION_ENABLED),
+    within ADR 0032 decision 6's bounds: 64 KB, 2 an hour per visitor, 50 a
+    day, refused while more than 20 jobs are queued or no agent is online.
+
+    Locked to the site's pane: every submission needs the site's Origin and a
+    Cloudflare Turnstile token, checked against TURNSTILE-SECRET-KEY in Key
+    Vault. Without that secret the path stays closed however this is set.
+
+    False is the kill switch: every public lab route answers
+    PUBLIC_SUBMISSION_CLOSED before it reads the body, the caller or the store.
+  EOT
+  type        = bool
+  default     = true
+}
+
 variable "enabled_timers" {
   description = <<-EOT
     Timers to arm, by flag suffix — e.g. ["SYNC_RSS_FEEDS"] sets

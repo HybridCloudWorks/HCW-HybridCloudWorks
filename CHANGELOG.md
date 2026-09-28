@@ -19,6 +19,52 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **"Validate on the lab" opens to the public, locked to the site's pane by
+  origin and Cloudflare Turnstile (ADR 0032 decision 6 revised).** Owner
+  decision 2026-09-28: "The lab should only be accessible through 'panes'
+  from my site, lock to that." ADR 0032 gains a dated amendment replacing
+  decision 6's Gate with a lock, and every bound #672 built stays exactly as
+  it was: `terraform-validate` only, 64 KB, 2 an hour per client, 50 a day,
+  refused while more than 20 are queued or no agent is heartbeating, jobs
+  `public: true` with a one-day TTL. The lock, in
+  `functions/src/lib/labs/public-lock.js`, runs before any store read or
+  counter: a `POST /api/public/labs/submit` whose `Origin` is not exactly
+  `https://hybridcloudworks.com` or `https://www.hybridcloudworks.com` (the
+  CORS allowlist's production origins, now exported from
+  `lib/auth/cors.js`; both serve the site) is `403 ORIGIN_NOT_ALLOWED`
+  before its body is read, a missing Origin included; one without a
+  `turnstileToken` is `403 TURNSTILE_REQUIRED`; the token goes to
+  Cloudflare's siteverify with the secret and the address
+  `client-identity.js` trusts (new `trustedClientIp`: `CF-Connecting-IP`
+  only on a request carrying the origin secret), and anything but
+  `success: true` for one of the site's hostnames and the `lab-validate`
+  action is `403 TURNSTILE_FAILED`, which is how a replayed single-use token
+  fails; siteverify unreachable, past 5 seconds, non-2xx, non-JSON or
+  refusing the secret is `503 TURNSTILE_UNAVAILABLE`. With no secret, or an
+  unresolved Key Vault reference, the POST and the status read answer
+  `TURNSTILE_NOT_CONFIGURED`, so the status read now says which of switch,
+  Turnstile or agent is missing. The token, the address and the secret are
+  never logged or written to the job. On the builder, the Turnstile widget
+  (Managed mode, shown only when Cloudflare wants the visitor to act) loads
+  only once the lab is open (`frontend/src/lib/turnstile.js`,
+  `landingZone/useLabTurnstile.js`); each submission spends one token and
+  asks for the next, and a build without `VITE_TURNSTILE_SITE_KEY` keeps the
+  button disabled with its reason. The CSP grants
+  `https://challenges.cloudflare.com` in `script-src` and `frame-src` and
+  nowhere else, which `csp.test.js` holds exactly. Terraform adds
+  `labs_public_submission_enabled` (default `true`, the kill switch when set
+  `false`) as `LABS_PUBLIC_SUBMISSION_ENABLED`, and `TURNSTILE_SECRET_KEY` as
+  a Key Vault reference to `TURNSTILE-SECRET-KEY`, catalogued on the API-keys
+  page and listed in `EXPECTED_UNRESOLVED` until it is seeded. The widget is
+  **not** a Terraform resource: the pinned provider's
+  `cloudflare_turnstile_widget` keeps its secret as a read-only attribute in
+  state and needs an account-scoped token, so the owner creates it in the
+  Cloudflare dashboard, and a test fails if the resource appears. Both plan
+  differences are declared in `scripts/assert-expected-plan.mjs`. Required
+  inputs, Variables and secrets, architecture §5.3, the API surface and the
+  labs-host runbook ("Opening 'Validate on the lab' to the public") carry
+  the new values and the owner's four steps.
+
 - **Register a lab agent from the admin UI; `Register-LabAgent.ps1` finishes
   the go-live (#740).** The API admits a lab agent only when
   `lab_agents/{agentId}` binds it to its service principal, and nothing

@@ -362,8 +362,9 @@ Seeded by hand; referenced from `infra/functionapp.tf` app settings as
 | `GITHUB-APP-INSTALLATION-ID`, `HOSTINGER-API-TOKEN` | not inventoried | Site rebuild trigger and VPS control |
 | `GCP-BILLING-API-KEY` | not inventoried | Cloud Billing Catalog API key for the public GCP price list — Google's documented auth for it. Replaced a ~2.3 KB service-account JSON on 2026-08-29 |
 | `GITHUB-APP-PRIVATE-KEY` | not inventoried | Multi-line PEM. **Not referenced by `main.tf` and read by nothing** — it has no app setting and no seeding path, deliberately |
+| `TURNSTILE-SECRET-KEY` | not inventoried | Cloudflare Turnstile secret key for the Landing Zone Builder's "Validate on the lab" ([ADR 0032](../decisions/0032-learner-labs-platform.md), amendment of 2026-09-28), sent only to Cloudflare's siteverify. Its site key is public and is store 3 (`VITE_TURNSTILE_SITE_KEY`). The widget is created in the Cloudflare dashboard rather than as `cloudflare_turnstile_widget`, because that resource's read-only `secret` attribute would put this value in state, the rule in the next section |
 
-`infra/functionapp.tf` declares **25** `@Microsoft.KeyVault` references and no
+`infra/functionapp.tf` declares **30** `@Microsoft.KeyVault` references and no
 run-time reads. CHECKLIST §1–§8 inventories a handful of them. That gap is
 recorded below rather than papered over.
 
@@ -393,14 +394,18 @@ dictated by HashiCorp and Microsoft and are contractual.
 | `admin_ip_rules`, `cosmos_admin_ip_rules`, `functions_storage_admin_ip_rules` | Populated only for a seeding or inspection window; empty is the steady state | no |
 
 Most of the rest of `infra/variables.tf` has a default and needs no workspace
-entry. Six are the exception, and they are the ones an operator actually
-reaches for. Each carries the *safe* value as its default, so the unsafe or
-armed value is a deliberate workspace edit and the default is the rollback:
+entry. Eight are the exception, and they are the ones an operator actually
+reaches for. Each but one carries the *safe* value as its default, so the
+unsafe or armed value is a deliberate workspace edit and the default is the
+rollback. The one is `labs_public_submission_enabled`, which carries the
+posture the owner decided, the way `functions_origin_lock_enabled` does; its
+rollback is `false` in the workspace:
 
 | Value | Default | Why it is a workspace entry |
 | --- | --- | --- |
 | `schedulers_master_enabled` | `false` | Master kill switch for all 20 catalogued timers — it is what `FEATURE_FLAG_SCHEDULERS` is set from. A hardcoded literal until 2026-08-24, which meant no timer could be armed without a code change and nothing said so |
 | `newsletter_sending_enabled` | `false` | Whether approving a weekly newsletter issue sends it through Resend — it is what `NEWSLETTER_SENDING_ENABLED` is set from. Off, approval is refused before Resend is called ([ADR 0030](../decisions/0030-newsletter-provider.md) §2a) |
+| `labs_public_submission_enabled` | `true` | Whether the Landing Zone Builder's "Validate on the lab" may queue a public job — it is what `LABS_PUBLIC_SUBMISSION_ENABLED` is set from ([ADR 0032](../decisions/0032-learner-labs-platform.md) decision 6, revised 2026-09-28). Even on, nothing is taken until `TURNSTILE-SECRET-KEY` resolves, and only from the site's pane. `false` is the kill switch |
 | `enabled_timers` | `[]` | Which timers are armed, by flag suffix. Arming one needs **both** this and the master switch. An unrecognised name fails the plan rather than silently arming nothing |
 | `availability_test_enabled` | `false` | Runs the `/api/health` availability test. Off until the Cloudflare side is settled: Bot Fight Mode serves datacenter clients a 403, so arming it first would create a permanently-firing alert |
 | `availability_probe_alert_enabled` | `false` | The alert on the Cloudflare Worker reachability probe ([ADR 0024](../decisions/0024-edge-availability-probe.md)). It fires on *missing* probe successes, so flipping it before the Worker is deployed and observed writing `success == 1` rows creates a rule that fires immediately and permanently |
@@ -424,6 +429,7 @@ Everything else there is a default nobody is expected to override.
 | `VITE_ENTRA_CLIENT_ID`, `VITE_ENTRA_TENANT_ID` | §6, §7 | Public-client registration values that ship in the bundle |
 | `VITE_SOCIAL_X_URL`, `VITE_SOCIAL_LINKEDIN_URL`, `VITE_SOCIAL_GITHUB_URL` | §6, §7 | Public URLs |
 | `VITE_TRANSLATIONS`, `VITE_DEFAULT_LANGUAGE` | §6 | Feature flags in a public bundle (`VITE_NEWS_ENABLE_INSIGHTS` was retired with the insights panel on 2026-09-05, T-765) |
+| `VITE_TURNSTILE_SITE_KEY` | — | The Cloudflare Turnstile site key for "Validate on the lab". Public by construction (Cloudflare renders it into the page), so store 3 by the rule above; the matching secret key is store 1, `TURNSTILE-SECRET-KEY`. Set by hand from the Cloudflare dashboard, since Terraform does not manage the widget |
 
 ### Store 4 — GitHub Actions secrets, with justification
 

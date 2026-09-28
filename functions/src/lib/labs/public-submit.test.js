@@ -13,6 +13,11 @@
  *     public: true and a one-day ttl, and the agent's claim and completion
  *     keep both.
  *   - The job read serves public jobs only, one identical 404 otherwise.
+ *
+ * The lock to the site's pane (ADR 0032 decision 6 as revised 2026-09-28,
+ * public-lock.js) has its own file, public-lock.test.js. Here every request
+ * comes from the site's origin with a token a stubbed siteverify passes, so
+ * each block tests the bound it names and nothing else.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -33,6 +38,7 @@ import {
   PUBLIC_QUOTA_TTL_SECONDS,
   PUBLIC_STATUS_CACHE_ID,
   PUBLIC_SUBMISSION_SWITCH,
+  TURNSTILE_SECRET_SETTING,
   createPublicSubmitHandlers,
   isLivePublicJob,
   projectPublicJob,
@@ -43,8 +49,23 @@ import {
 } from './public-submit.js';
 
 const NOW = Date.parse('2026-09-27T12:00:00Z');
-const OPEN = { [PUBLIC_SUBMISSION_SWITCH]: 'true' };
+const OPEN = { [PUBLIC_SUBMISSION_SWITCH]: 'true', [TURNSTILE_SECRET_SETTING]: 'turnstile-secret' };
 const JOB_UUID = '3f2b8c1e-9d4a-4c5b-8e7f-0a1b2c3d4e5f';
+const SITE = 'https://hybridcloudworks.com';
+const TOKEN = 'turnstile-token-1';
+
+/** A siteverify that passes every token, as Cloudflare answers one solved on the site. */
+const siteverifyPasses = () =>
+  vi.fn(async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      success: true,
+      hostname: 'hybridcloudworks.com',
+      action: 'lab-validate',
+      'error-codes': [],
+    }),
+  }));
 
 const onlineAgent = (over = {}) => ({
   id: 'vps-1',
@@ -114,11 +135,13 @@ const storeCalls = (store) =>
 
 const identityFor = (key = 'client-a') => ({
   anonymousKey: vi.fn(() => ({ key, trusted: true })),
+  trustedClientIp: vi.fn(() => '203.0.113.7'),
 });
 const refusingIdentity = () => ({
   anonymousKey: vi.fn(() => {
     throw new Error('unverified origin');
   }),
+  trustedClientIp: vi.fn(() => null),
 });
 
 const context = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
@@ -127,12 +150,20 @@ const body = (over = {}) => ({
   type: 'terraform-validate',
   payload: 'terraform {}\n',
   payloadEncoding: 'text',
+  turnstileToken: TOKEN,
   ...over,
 });
 
-const postRequest = (value) => {
+/** Headers as the Functions host presents them: `get` by case-insensitive name. */
+const headersOf = (map) => {
+  const lower = Object.fromEntries(Object.entries(map).map(([k, v]) => [k.toLowerCase(), v]));
+  return { get: (name) => lower[String(name).toLowerCase()] ?? null };
+};
+
+/** A POST from the builder's pane: the site's Origin, unless the test says otherwise. */
+const postRequest = (value, headers = { origin: SITE }) => {
   const text = vi.fn(async () => (typeof value === 'string' ? value : JSON.stringify(value)));
-  return { method: 'POST', headers: { get: () => null }, text, query: new Map() };
+  return { method: 'POST', headers: headersOf(headers), text, query: new Map() };
 };
 const getRequest = (query = {}) => ({
   method: 'GET',
@@ -153,9 +184,10 @@ function build({
   identity = identityFor(),
   now = () => NOW,
   uuid = nextUuid,
+  fetch = siteverifyPasses(),
 } = {}) {
-  const handlers = createPublicSubmitHandlers({ identity, store, env, now, uuid });
-  return { handlers, store, identity };
+  const handlers = createPublicSubmitHandlers({ identity, store, env, now, uuid, fetch });
+  return { handlers, store, identity, fetch };
 }
 
 describe('the bounds are ADR 0032 decision 6, and no wider', () => {
@@ -367,7 +399,7 @@ describe('only terraform-validate', () => {
   it('refuses unknown keys rather than ignoring them', () => {
     expect(validatePublicSubmission(body({ agentId: 'vps-1' }))).toEqual({
       status: 400,
-      error: 'Unknown field(s): agentId. Allowed: type, payload, payloadEncoding',
+      error: 'Unknown field(s): agentId. Allowed: type, payload, payloadEncoding, turnstileToken',
     });
   });
 
@@ -429,10 +461,10 @@ describe('a 64 KB payload', () => {
 
   it('refuses a declared Content-Length over the cap before reading the body', async () => {
     const { handlers, identity } = build();
-    const request = postRequest(body());
-    request.headers = {
-      get: (name) => (name.toLowerCase() === 'content-length' ? String(PUBLIC_MAX_BODY_BYTES + 1) : null),
-    };
+    const request = postRequest(body(), {
+      origin: SITE,
+      'content-length': String(PUBLIC_MAX_BODY_BYTES + 1),
+    });
     const res = await handlers.submitJob(request, context);
     expect(res.status).toBe(413);
     expect(request.text).not.toHaveBeenCalled();
@@ -609,6 +641,8 @@ describe('public: true with a one-day ttl', () => {
       output: null,
     });
     expect(JSON.stringify(job)).not.toContain('client-a');
+    // The token is the lock's, and is never written with the job.
+    expect(JSON.stringify(job)).not.toContain(TOKEN);
     expect(store.createDoc).toHaveBeenCalledWith('lab_jobs', job);
   });
 

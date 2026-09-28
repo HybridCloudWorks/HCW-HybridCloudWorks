@@ -4,7 +4,9 @@
  * each, the request body's checks, and the shape of the job document. Pure,
  * so each piece is a test of its own. The routes that apply it are
  * public-submit.js (the door and the submission) and public-job.js (the job
- * read); public-submit.js carries the header that explains the whole path.
+ * read); public-submit.js carries the header that explains the whole path,
+ * and public-lock.js the lock to the site's pane (decision 6 as revised
+ * 2026-09-28: the site's origin and a Cloudflare Turnstile token).
  */
 
 import { LAB_JOB_TYPES } from '../labs.js';
@@ -20,15 +22,25 @@ export const PUBLIC_PER_DAY = 50;
 export const PUBLIC_QUEUE_CEILING = 20;
 export const PUBLIC_JOB_TTL_SECONDS = 24 * 60 * 60;
 
-/** The JSON envelope around the payload: three short keys and their quotes. */
-export const PUBLIC_MAX_BODY_BYTES = PUBLIC_MAX_PAYLOAD_BYTES + 1024;
+/** The longest token Turnstile issues (Cloudflare's siteverify reference). */
+export const TURNSTILE_TOKEN_MAX_CHARS = 2048;
+/**
+ * The JSON envelope around the payload: four short keys, their quotes, and a
+ * Turnstile token of at most 2,048 characters.
+ */
+export const PUBLIC_MAX_BODY_BYTES = PUBLIC_MAX_PAYLOAD_BYTES + 1024 + TURNSTILE_TOKEN_MAX_CHARS;
 /** The daily counter outlives its day, so a late request still finds it. */
 export const PUBLIC_QUOTA_TTL_SECONDS = 2 * 24 * 60 * 60;
-export const PUBLIC_BODY_KEYS = Object.freeze(['type', 'payload', 'payloadEncoding']);
+/**
+ * `turnstileToken` is the lock's (public-lock.js), not the job's: it is read
+ * off the body and never reaches the job document.
+ */
+export const PUBLIC_BODY_KEYS = Object.freeze(['type', 'payload', 'payloadEncoding', 'turnstileToken']);
 
 /** Why the door is shut, as the codes a response carries. */
 export const DOOR_CODES = Object.freeze({
   closed: 'PUBLIC_SUBMISSION_CLOSED',
+  unconfigured: 'TURNSTILE_NOT_CONFIGURED',
   offline: 'LAB_AGENT_OFFLINE',
   full: 'LAB_QUEUE_FULL',
   unavailable: 'LAB_STATUS_UNAVAILABLE',
@@ -37,6 +49,8 @@ export const DOOR_CODES = Object.freeze({
 /** The one line the builder shows under a disabled button, per code. */
 export const DOOR_REASONS = Object.freeze({
   [DOOR_CODES.closed]: 'The lab is not taking public jobs yet: public submission is switched off.',
+  [DOOR_CODES.unconfigured]:
+    'The lab is not taking public jobs yet: its browser check (Cloudflare Turnstile) is not configured.',
   [DOOR_CODES.offline]: 'The lab is not taking jobs yet: no lab agent is online to run them.',
   [DOOR_CODES.full]: `The lab's queue is full (more than ${PUBLIC_QUEUE_CEILING} jobs waiting). Try again in a few minutes.`,
   [DOOR_CODES.unavailable]: "The lab's status could not be read, so it is not taking jobs right now.",
@@ -69,6 +83,8 @@ export const shutDoor = (code, configured = true) => ({
   reason: DOOR_REASONS[code],
 });
 export const CLOSED_DOOR = Object.freeze(shutDoor(DOOR_CODES.closed, false));
+/** Switched on, but with no Turnstile secret the lock cannot check anyone, so nothing is taken. */
+export const UNCONFIGURED_DOOR = Object.freeze(shutDoor(DOOR_CODES.unconfigured, false));
 
 const BASE64 = /^[A-Za-z0-9+/=\s]*$/;
 const PUBLIC_ENCODINGS = LAB_JOB_TYPES[PUBLIC_LAB_JOB_TYPE].payloadEncodings;

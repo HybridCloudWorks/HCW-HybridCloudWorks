@@ -479,6 +479,131 @@ vault nor `bootstrap.sh`, and prints the swap as one PowerShell line. After
 the swap, a plain run finds the agent heartbeating on the new certificate
 and prints the `az ad app credential delete` line for the old one.
 
+## Opening "Validate on the lab" to the public
+
+The Landing Zone Builder's **Validate on the lab** sends the build's files to
+this host as a `terraform-validate` job. Since the owner revised
+[ADR 0032](../decisions/0032-learner-labs-platform.md) decision 6 on
+2026-09-28 it is open to anyone, but only from the builder's pane on the
+site: the API takes a job only with the site's `Origin` and a Cloudflare
+Turnstile token, and within decision 6's bounds (64 KB, 2 an hour per
+visitor, 50 a day, no more than 20 queued). It needs the agent above to be
+heartbeating, and three owner values, which this section sets once.
+
+The order is not a preference. `deploy-functions.yml` will not start while an
+`hcw-azure` run is unfinished, and fails a deploy whose live settings lack a
+reference Terraform declares, so the Terraform run goes first. The API-keys
+page offers only the secrets the deployed code lists, so the secret goes after
+the functions deploy. In between, `TURNSTILE_SECRET_KEY` is an expected
+unresolved reference, and the path answers `TURNSTILE_NOT_CONFIGURED`.
+
+**1. Confirm the Terraform run.** Open the run the merge queued at
+https://app.terraform.io/app/hcw/workspaces/hcw-azure/runs. Success is
+`Plan: 3 to add, 1 to change, 3 to destroy`, the permanent diff, where the
+one change, `azurerm_function_app_flex_consumption.hcw`, also adds
+`LABS_PUBLIC_SUBMISSION_ENABLED = "true"` and `TURNSTILE_SECRET_KEY`, a
+`@Microsoft.KeyVault(...)` reference. Anything else is a finding. The machine
+check, PowerShell:
+
+```powershell
+gh workflow run tfc-plan-check.yml --repo HybridCloudWorks/HCW-HybridCloudWorks --ref main
+```
+
+Its summary reads expected, with two `DECLARED` lines for those two settings.
+Then confirm and apply the run in the UI.
+
+**2. Create the Turnstile widget and set the site-key variable.** Terraform
+does not create it: `cloudflare_turnstile_widget` would hold its secret key in
+state (`infra/frontend.tf`). At https://dash.cloudflare.com/?to=/:account/turnstile
+choose **Add widget** and set:
+
+| Field | Value |
+| --- | --- |
+| Widget name | `hcw-lab-validate` |
+| Hostname management | `hybridcloudworks.com` (a hostname covers its subdomains, so www too) |
+| Widget mode | Managed |
+| Pre-clearance | No |
+
+Create it, and copy the **Site Key** it shows (it starts with `0x4`). With the
+site key on the clipboard, PowerShell:
+
+```powershell
+gh variable set VITE_TURNSTILE_SITE_KEY --repo HybridCloudWorks/HCW-HybridCloudWorks --body (Get-Clipboard)
+```
+
+```powershell
+gh variable get VITE_TURNSTILE_SITE_KEY --repo HybridCloudWorks/HCW-HybridCloudWorks
+```
+
+Success is the second line printing the same `0x4…` value. Keep the widget's
+page open: step 4 needs its **Secret Key**.
+
+**3. Deploy the functions and the site.** Both are dispatch-only, from
+`main`, PowerShell. The functions deploy refuses while step 1's run is
+unfinished, so run it after the apply:
+
+```powershell
+gh workflow run deploy-functions.yml --repo HybridCloudWorks/HCW-HybridCloudWorks --ref main
+```
+
+```powershell
+gh workflow run deploy-azure-frontend.yml --repo HybridCloudWorks/HCW-HybridCloudWorks --ref main
+```
+
+Success is both runs green at
+https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions. The site
+build reads the variable from step 2, so a site deployed before it has no site
+key and its button says so.
+
+**4. Seed the Turnstile secret.** At
+https://hybridcloudworks.com/admin/integrations?tab=keys, in the Hybrid Lab
+section, paste the widget's **Secret Key** into **Cloudflare Turnstile — secret
+key** and save. Success is the row's light turning green.
+
+**What success looks like.** A minute after step 4 (the status read is cached
+for one), the status read answers open, PowerShell:
+
+```powershell
+Invoke-RestMethod https://api-azure.hybridcloudworks.com/api/public/labs/submit | Select-Object open, code, reason, queued
+```
+
+Success is `open` `True` with `code` and `reason` empty. `False` names the
+missing piece in `code`: `TURNSTILE_NOT_CONFIGURED` is step 4,
+`LAB_AGENT_OFFLINE` is the agent ("The lab agent's go-live", above), and
+`PUBLIC_SUBMISSION_CLOSED` is `labs_public_submission_enabled` set `false` in
+the workspace. The lock refuses a caller that is not the site, PowerShell:
+
+```powershell
+try { Invoke-RestMethod -Method Post -Uri https://api-azure.hybridcloudworks.com/api/public/labs/submit -ContentType 'application/json' -Body '{}' } catch { $_.ErrorDetails.Message }
+```
+
+Success is a body with `"code":"ORIGIN_NOT_ALLOWED"`, since PowerShell sends
+no `Origin`. Then the real thing: at
+https://hybridcloudworks.com/tools/landing-zone, open the files and press
+**Validate on the lab**. The line beside it goes from *Queued on the lab…* to
+*Running on the lab…*, and the output ends in
+`terraform validate passed on the lab (exit 0).` above Terraform's own
+output. The job is at https://hybridcloudworks.com/admin/labs?tab=jobs,
+claimed by `vps-hostinger-01`. Last, remove `TURNSTILE_SECRET_KEY` from
+`EXPECTED_UNRESOLVED` in `scripts/check-unresolved-secrets.mjs` in a pull
+request; the next `monitor-unresolved-secrets.yml` run says the entry has
+gone stale until it is removed.
+
+| The button says | What it means | What to do |
+| --- | --- | --- |
+| *public submission is switched off* | `labs_public_submission_enabled` is `false` in the workspace | Delete the workspace variable (the default is `true`) or set it `true`, and apply |
+| *its browser check (Cloudflare Turnstile) is not configured* | `TURNSTILE-SECRET-KEY` is not seeded, or its reference did not resolve | Step 4 |
+| *this build of the site … has no Cloudflare Turnstile site key* | The site was built without `VITE_TURNSTILE_SITE_KEY` | Step 2, then the site deploy in step 3 |
+| *no lab agent is online* | `vps-hostinger-01` has not heartbeated in the last 90 seconds | "The lab agent's go-live", above |
+| *Cloudflare's browser check could not run here* | The Turnstile script did not load in that browser (an extension or network blocking `challenges.cloudflare.com`) | Reload, or try another browser; nothing on the server is wrong |
+| *Cloudflare's browser check did not pass…* after a press | Siteverify refused the token, or its hostname or action was not the site's | Press again: the widget fetches a new token. If it repeats, check the widget's hostname is `hybridcloudworks.com` |
+
+**Closing it again** is one workspace edit: set the Terraform variable
+`labs_public_submission_enabled` to `false` (HCL off) at
+https://app.terraform.io/app/hcw/workspaces/hcw-azure/variables and apply.
+Every public lab route then answers `PUBLIC_SUBMISSION_CLOSED` before reading
+anything, and the button says so.
+
 ## Portainer through an SSH tunnel
 
 Portainer Business Edition runs for the owner only (owner decision

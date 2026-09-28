@@ -232,6 +232,14 @@ jobs:
           VITE_SOCIAL_X_URL: ${{ vars.VITE_SOCIAL_X_URL }}
           VITE_SOCIAL_LINKEDIN_URL: ${{ vars.VITE_SOCIAL_LINKEDIN_URL }}
           VITE_SOCIAL_GITHUB_URL: ${{ vars.VITE_SOCIAL_GITHUB_URL }}
+          # The site key of the lab's Cloudflare Turnstile widget, for the
+          # Landing Zone Builder's "Validate on the lab" (ADR 0032 decision 6,
+          # revised 2026-09-28). Public by construction: Cloudflare puts it in
+          # the page. A repository variable, never a secret (variables-and-
+          # secrets.md, "not secret but needed at build time"). The secret key
+          # is the Function App's, in Key Vault. Unset, the build still
+          # succeeds and the button says this build has no site key.
+          VITE_TURNSTILE_SITE_KEY: ${{ vars.VITE_TURNSTILE_SITE_KEY }}
           # NOTE: VITE_COSMOS_* vars are intentionally absent.
           # The frontend never accesses Cosmos directly — all data goes through the API.
 

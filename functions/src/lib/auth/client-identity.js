@@ -167,6 +167,28 @@ export function createClientIdentity({
     viaCloudflare,
 
     /**
+     * The caller's address, only when it can be believed: the request came
+     * through our Cloudflare (it carries the origin secret) and
+     * `CF-Connecting-IP` is a well-formed address. Otherwise null, never the
+     * header's text, because without the secret that header is whatever the
+     * caller chose to send.
+     *
+     * For one consumer, the public lab submission's Turnstile check
+     * (lib/labs/public-lock.js), which passes it to Cloudflare's siteverify as
+     * `remoteip`. That field is optional, so null means "omit it", which is
+     * what the dev escape hatch below gets. Never stored and never logged: the
+     * hash from `anonymousKey` is what the quotas count.
+     *
+     * @param {object} request
+     * @returns {string|null}
+     */
+    trustedClientIp(request) {
+      if (!viaCloudflare(request)) return null;
+      const address = String(request?.headers?.get?.(CF_CLIENT_IP_HEADER) ?? '').trim();
+      return isIP(address) ? address : null;
+    },
+
+    /**
      * A stable, pseudonymous key for an anonymous caller.
      *
      * The hash is deliberate: the raw address is a GDPR-relevant identifier and

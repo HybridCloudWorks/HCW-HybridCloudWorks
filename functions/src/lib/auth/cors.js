@@ -37,8 +37,21 @@
  * and buy nothing.
  */
 
-/** Production origins. */
-const PRODUCTION_ORIGINS = ['https://hybridcloudworks.com', 'https://www.hybridcloudworks.com'];
+/**
+ * Production origins: the site itself, on the apex and on www, both of which
+ * serve it (www answers 200 rather than redirecting, checked 2026-09-28).
+ *
+ * Exported because the public lab submission is locked to exactly these two
+ * (lib/labs/public-lock.js, ADR 0032 decision 6 as revised 2026-09-28): the
+ * preview hostname below is a break-glass path, not the site's pane, and is
+ * deliberately not one of them.
+ *
+ * Written as a plain array literal and frozen on the next line because
+ * cors-platform-origins.test.js text-reads this file for
+ * `const PRODUCTION_ORIGINS = [`.
+ */
+export const PRODUCTION_ORIGINS = ['https://hybridcloudworks.com', 'https://www.hybridcloudworks.com'];
+Object.freeze(PRODUCTION_ORIGINS);
 
 /**
  * The Static Web App's own hostname — RETAINED DELIBERATELY, not a leftover.
