@@ -341,6 +341,39 @@ function show(verdict, { target, view, navigate }) {
   return 'ready';
 }
 
+/** Who is signed in: their username becomes `session.owner`, the owner in code-server's name. */
+async function readOwner(session, fetchImpl) {
+  const me = await read(fetchImpl, ME_PATH);
+  if (me.kind === 'signed-out') return 'signed-out';
+  session.owner = me.kind === 'ok' ? ownerName(me.body) : null;
+  return session.owner ? 'again' : 'error';
+}
+
+/**
+ * The template, read once, before Coder's create page is ever framed. Null
+ * to go on; otherwise how the step ends (`'unavailable'`, `'signed-out'`,
+ * `'error'`). A template Coder does not have ends the visit with the site's
+ * sentence, so Coder's page, with its own error, is never loaded.
+ */
+async function templateGate(verdict, session, fetchImpl) {
+  if (verdict.state !== 'create' || session.templateFound) return null;
+  const template = templateVerdict(await read(fetchImpl, TEMPLATE_API_PATH));
+  session.templateFound = template === 'ok';
+  return session.templateFound ? null : template;
+}
+
+/**
+ * One step of the wait: who is signed in, then their workspace for this lab,
+ * with the template read before a create. `session` carries what the steps
+ * learn: `{ owner, templateFound }`.
+ */
+async function launcherStep(session, { fetchImpl, target, view, navigate }) {
+  if (!session.owner) return readOwner(session, fetchImpl);
+  const verdict = workspaceVerdict(await read(fetchImpl, workspaceApiPath(target.workspace)), target, session.owner);
+  if (verdict.end) return verdict.end;
+  return (await templateGate(verdict, session, fetchImpl)) ?? show(verdict, { target, view, navigate });
+}
+
 /** What goes on after a step: `'wait'` sleeps and backs off, `'again'` goes straight on, `'error'` counts toward giving up. */
 const CONTINUES = new Set(['wait', 'again', 'error']);
 
@@ -385,29 +418,8 @@ export async function runLauncher({ search, fetch: fetchImpl, ui, post, navigate
   if (!target) return view.end('unavailable', MESSAGES['unknown-lab']);
   view.report('checking');
 
-  // First who is signed in (their username is the owner in code-server's
-  // name), then their workspace for this lab, until it ends. Before Coder's
-  // create page is framed, the template is read once: a template Coder does
-  // not have ends the visit with the site's sentence, and Coder's page, with
-  // its own error, is never loaded.
-  let owner = null;
-  let templateFound = false;
-  const step = async () => {
-    if (!owner) {
-      const me = await read(fetchImpl, ME_PATH);
-      if (me.kind === 'signed-out') return 'signed-out';
-      owner = me.kind === 'ok' ? ownerName(me.body) : null;
-      return owner ? 'again' : 'error';
-    }
-    const verdict = workspaceVerdict(await read(fetchImpl, workspaceApiPath(target.workspace)), target, owner);
-    if (verdict.end) return verdict.end;
-    if (verdict.state === 'create' && !templateFound) {
-      const template = templateVerdict(await read(fetchImpl, TEMPLATE_API_PATH));
-      if (template !== 'ok') return template;
-      templateFound = true;
-    }
-    return show(verdict, { target, view, navigate });
-  };
+  const session = { owner: null, templateFound: false };
+  const step = () => launcherStep(session, { fetchImpl, target, view, navigate });
   const ending = await pollUntilDone(step, { sleep, now, poll });
   return ending === 'ready' ? ending : view.end(ending);
 }
