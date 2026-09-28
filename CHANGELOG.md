@@ -67,6 +67,45 @@ This project has not cut a tagged release; entries are grouped under
   the token goes to the clipboard, never the screen, before it is seeded
   at https://hybridcloudworks.com/admin/integrations?tab=keys.
 
+- **Lab workspaces open as panes on the site (#751).** Owner decision
+  2026-09-28: the lab is reached only through panes on the site. #750 made
+  the lab host send every top-level visit, Coder's included, back to
+  `/education/labs`, so the cards' "Open in Coder" links had become a loop.
+  Each lab now has a page, `/education/labs/<id>`
+  (`frontend/src/pages/shared/LabPanePage.jsx`), that frames the workspace
+  deep link `/templates/hcw-lab/workspace?mode=auto&param.lab=<id>`, checked
+  against the `hcw-lab` template's name and its `lab` parameter. The card
+  button, now "Open lab workspace", is an in-site link to it. The frame's
+  `sandbox` is `allow-scripts allow-same-origin allow-forms allow-popups`
+  and its `allow` grants clipboard read, clipboard write and fullscreen to
+  Coder's name and its workspace apps' wildcard, each justified in the page.
+  The toolbar makes the pane itself full screen and goes back to the labs
+  page. `staticwebapp.config.json`'s `frame-src` gains exactly
+  `https://coder.lab.hybridcloudworks.com` and
+  `https://*.coder.lab.hybridcloudworks.com`; `connect-src` is unchanged,
+  and `csp.test.js` holds both. GitHub cannot be framed, so sign-in runs in
+  a tab of its own: "Sign in with GitHub" opens Coder's
+  `/api/v2/users/oauth2/github/callback`, the one path #750 lets through at
+  the top level and where Coder v2.37.3 starts sign-in when no `code` is
+  present. Coder's closing redirect is a top-level visit that #750 sends to
+  `/education/labs`, which sends the tab on to the lab's pane
+  (`components/labs/labSignIn.js`) and, through a `storage` event, reloads
+  the pane in the first tab. The site records only that a sign-in started
+  and finished, in localStorage, never a credential. The pane opens only
+  when `GET public/labs/coder-status` says Coder is configured and
+  reachable, because a cross-origin frame cannot report an error page; every
+  other answer, and a frame that has not loaded in 30 seconds, reads "Lab
+  workspaces aren't available right now." Visitor wording names no tool
+  behind the site, and #755's guard now scans the new files and passes the
+  new sentences. The three pane pages are pre-rendered from the catalogue,
+  like the certification pages. ADR 0032 records embedding Coder, rejected
+  when it was accepted, as the chosen approach (amendment "Coder in the
+  site's panes"), and `docs/architecture/labs-host.md` says what the site
+  side now does. Found while building it and recorded there: Coder opens a
+  workspace app such as code-server in a new window or tab, which #750
+  redirects, so code-server does not yet open inside the pane. Frontend
+  tests 3,058 to 3,111 (201 to 204 files), on Node 26.
+
 - **The lab host holds every pinned job image before a job needs it, and
   removes the digests no pin names.** The first public "Validate on the
   lab" job on the live host (2026-09-28) spent its opening seconds pulling

@@ -18,6 +18,7 @@ import { App, AppProviders } from '@/App';
 import { VALID_PROVIDERS } from '@/context/ProviderContext';
 import { PrerenderDataContext } from '@/hooks/prerenderData';
 import { certifications as azureCertifications } from '@/data/azure/certifications';
+import { labPanePath, labs } from '@/data/labs/catalogue';
 
 /**
  * Sections that exist under every provider, as declared by App.jsx's
@@ -109,6 +110,16 @@ const STANDALONE_ROUTES = [
  */
 const AZURE_CERT_ROUTES = azureCertifications.map((cert) => `/azure/education/${cert.slug}`);
 
+/**
+ * One lab's pane page per catalogue row (`/education/labs/:labId`, #751),
+ * for the same reason as the certification pages: the rows are a repository
+ * file, so every build knows them. The built page is the lab's heading and
+ * summary with the pane's opening sentence; the status read and the pane
+ * itself start in the browser, and nothing in the first render reads
+ * storage or the clock, so hydration matches.
+ */
+const LAB_PANE_ROUTES = labs.map((lab) => labPanePath(lab.id));
+
 export function routes(manifest = null) {
   return [
     '/',
@@ -120,6 +131,7 @@ export function routes(manifest = null) {
     ]),
     ...STANDALONE_ROUTES,
     ...AZURE_CERT_ROUTES,
+    ...LAB_PANE_ROUTES,
     ...(manifest?.routes || []),
   ];
 }

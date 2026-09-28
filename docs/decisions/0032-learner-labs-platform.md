@@ -1,6 +1,6 @@
 # ADR 0032: The learner labs platform — a Terraform-managed Hostinger host under Azure Arc, Docker only, Coder as the learner boundary, and public submission locked to the site's pane
 
-**Status:** Accepted 2026-09-27 (owner: "all have been approved to move forward"); amended 2026-09-26 and 2026-09-28. Decision 6 was revised on 2026-09-28: public submission is open, only from the Landing Zone Builder's pane on the site, locked by the request's origin and a Cloudflare Turnstile token, within decision 6's original bounds, which are unchanged.
+**Status:** Accepted 2026-09-27 (owner: "all have been approved to move forward"); amended 2026-09-26 and 2026-09-28. Decision 6 was revised on 2026-09-28: public submission is open, only from the Landing Zone Builder's pane on the site, locked by the request's origin and a Cloudflare Turnstile token, within decision 6's original bounds, which are unchanged. Also on 2026-09-28 the site began embedding Coder, in a pane on each lab's page, which decision 4 had ruled out and the alternatives had rejected ([amendment of that date](#amendment-2026-09-28-coder-in-the-sites-panes), #750 and #751).
 **Decision date:** 2026-09-25
 **Owners:** Workload owner and architecture owner
 
@@ -126,7 +126,7 @@ are recorded once, here, before any of them is implemented.
    `CODER-STATUS-TOKEN` in `kv-site-prod-cus-01` (vault names are hyphenated;
    the naming table in
    [Variables and secrets](../standards/variables-and-secrets.md) applies).
-   (Owner decision 2026-09-28: the lab is reached only through panes on the site, which reverses "never embeds Coder" above and the iframe alternative rejected below; the lab side is recorded in [Labs host, "Panes only"](../architecture/labs-host.md#panes-only).)
+   (Owner decision 2026-09-28: the lab is reached only through panes on the site, which reverses "never embeds Coder" above and the iframe alternative rejected below; the lab side is recorded in [Labs host, "Panes only"](../architecture/labs-host.md#panes-only), and the site side in the [amendment of that date](#amendment-2026-09-28-coder-in-the-sites-panes). `frame-src` now admits Coder's two names; `connect-src` stays closed and the status proxy is unchanged.)
 5. **One toolchain, published as digest-pinned images from a new `lab-image/`
    directory.** The images go to GHCR (and to Docker Hub once an organisation
    exists there) and are the single toolchain for the lab pages, the Coder
@@ -352,6 +352,86 @@ Consequences of this amendment:
 - **This amendment answers the client-identifier question that the
   "public path stays closed" consequence below left for the revision.**
 
+## Amendment 2026-09-28: Coder in the site's panes
+
+**Context.** Decision 4 said the site never embeds Coder, and "Embedding
+Coder in the site" is listed below as a rejected alternative. The owner's
+decision of 2026-09-28, "The lab should only be accessible through 'panes'
+from my site, lock to that", reverses both. #750 applied the lab-host half:
+Caddy answers every top-level visit to a lab name, Coder's included, with a
+302 to `/education/labs`, and lets only the site frame the lab
+([Labs host, "Panes only"](../architecture/labs-host.md#panes-only)). From
+then on the site's "Open in Coder" links led straight back to the labs page.
+This amendment is the site half (#751).
+
+**Owner decision 2026-09-28.** Embedding Coder in the site, rejected when
+this record was accepted, is now the chosen approach: a learner reaches Coder
+only in a pane on the site.
+
+1. **Each lab has a page that holds its pane.** `/education/labs/<id>`
+   (`frontend/src/pages/shared/LabPanePage.jsx`) frames the lab's workspace
+   deep link, `/templates/hcw-lab/workspace?mode=auto&param.lab=<id>`, and
+   the cards on `/education/labs` link there. Its toolbar makes the pane
+   itself full screen and goes back to the labs page. Nothing on the site
+   links to Coder at the top level.
+2. **`frame-src` gains exactly Coder's two names**,
+   `https://coder.lab.hybridcloudworks.com` and
+   `https://*.coder.lab.hybridcloudworks.com` (the workspace apps, where
+   code-server runs). `connect-src` is unchanged. The rejected alternative
+   assumed the site would have to open it, and it does not, because the site
+   still reads Coder's status through the Function App (decision 4).
+   `frontend/src/lib/csp.test.js` holds both.
+3. **The frame gets what code-server needs and nothing more:**
+   `sandbox="allow-scripts allow-same-origin allow-forms allow-popups"`, and
+   `allow` for clipboard read, clipboard write and fullscreen, granted to
+   those two origins by name. Scripts plus same-origin would let a frame of
+   the page's own origin lift its sandbox; the pane is always another
+   origin. There is no top-navigation flag, so the pane cannot navigate the
+   site, and `frame-src` stops it navigating anywhere but Coder's names.
+4. **GitHub sign-in runs in a tab of its own.** GitHub refuses to be
+   framed. The pane page's "Sign in with GitHub" opens, in a new tab, the
+   one Coder path #750 lets through at the top level,
+   `/api/v2/users/oauth2/github/callback`. Coder v2.37.3 starts sign-in
+   there when the request carries no `code`: it sets its state cookie and
+   redirects to GitHub. After GitHub, Coder sets its session and redirects
+   to a path of its own; that is a top-level visit, which #750 sends to
+   `/education/labs`, and that page sends the tab on to the lab's pane. The
+   first tab hears of it through a `storage` event and reloads its pane. The
+   site holds no credential: it records in localStorage only that a sign-in
+   was started and that one finished. The session is Coder's cookie on its
+   own name, which reaches the pane because the site and the lab are one
+   site (the same registrable domain), so it is not a third-party cookie.
+   The page comment in `LabPanePage.jsx` has every step and its source.
+5. **The pane opens only when the status read says Coder is reachable.** A
+   frame from another origin cannot tell the page what it shows, so the page
+   asks `GET /api/public/labs/coder-status`. Anything but configured and
+   reachable, or a frame that has not loaded in 30 seconds, shows "Lab
+   workspaces aren't available right now." and never the error.
+
+Consequences of this amendment:
+
+- **Two trust boundaries share a browser window, not an origin.** The frame
+  is sandboxed and cross-origin, and Coder's GitHub sign-in stays the access
+  control; #750's lock is a browsing rule.
+- **The pane depends on the status read.** Until `CODER_URL` and
+  `CODER_STATUS_TOKEN` resolve in the Function App, every pane says the
+  workspaces are unavailable, even when Coder is up.
+- **A workspace app that Coder opens in a new window or tab leaves the
+  pane.** Found while building #751, from Coder v2.37.3's dashboard source:
+  an app opens with `window.open` when its `open_in` is `slim-window`, the
+  code-server module's default, or in a new tab when it is `tab`. Both are
+  top-level visits, which #750 sends to the labs page. So in the pane a
+  learner can sign in and create the workspace, and code-server's button
+  opens nothing they can use. Opening code-server inside the pane is a
+  lab-host change and is not made here (revisit triggers).
+- **The site cannot tell whether a visitor is signed in**, because it cannot
+  read the pane. The page shows the sign-in step until this browser has come
+  back from one (for Coder's default 24-hour session), offers "I've already
+  signed in", and keeps the sign-in button on the toolbar for an expired
+  session. A visitor GitHub signs in but Coder refuses (outside the
+  organisation) also lands back on the pane, which shows Coder's sign-in
+  page again.
+
 ## Consequences and accepted risks
 
 - **Two Terraform workspaces, two lifecycles.** A change to the lab host is a
@@ -468,7 +548,9 @@ Consequences of this amendment:
 - **Embedding Coder in the site** through an iframe. Rejected. It requires
   opening `frame-src` and `connect-src` to the lab origin, joins the two trust
   boundaries in the browser, and gives the learner a worse editor than the one
-  Coder serves directly.
+  Coder serves directly. (Chosen 2026-09-28, owner decision, #750 and #751:
+  see the [amendment of that date](#amendment-2026-09-28-coder-in-the-sites-panes).
+  Only `frame-src` had to open; `connect-src` did not.)
 - **Defender for Servers Plan 1 on the Arc machine.** Rejected for now on
   cost (a per-server monthly charge for one host with no data of record). See
   the revisit triggers.
@@ -522,6 +604,12 @@ Consequences of this amendment:
     shows Terraform's output.
   - Every image `lab-image/` publishes is referenced by digest in
     `vps-agent/lib/capabilities.js` and the Coder template.
+  - Since the amendment "Coder in the site's panes": with Coder enabled, a
+    learner opens a lab from `/education/labs`, signs in with GitHub once in
+    the tab the pane opens, and comes back to the lab's page with the
+    workspace in the pane; a direct visit to
+    `https://coder.lab.hybridcloudworks.com` still lands on
+    `/education/labs`.
 - **Revisit when:**
   - the owner decides to open public submission, which is a revision of §6 of
     this record and nothing else (done 2026-09-28, the amendment of that
@@ -536,6 +624,8 @@ Consequences of this amendment:
     for Servers and the inbound policy;
   - a second lab host is wanted, which reopens the single-workspace and
     single-Compose assumptions;
+  - code-server is to open inside the pane rather than from Coder's app
+    button, which leaves it (the amendment "Coder in the site's panes");
   - the `hostinger/hostinger` provider changes its `hostinger_vps` resource
     incompatibly or is abandoned.
 

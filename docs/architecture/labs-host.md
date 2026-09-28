@@ -126,10 +126,12 @@ Limits, stated so they are not mistaken for more:
   pass. `frame-ancestors` still applies to it.
 - **The site's own side is separate.** The site's
   `frontend/staticwebapp.config.json` decides what its pages may frame
-  (`frame-src`). The site's current Open in Coder links are plain external
-  links (`frontend/src/components/labs/LabCard.jsx`), so they open Coder at
-  the top level and land back on the labs page. They have to open in a
-  pane instead.
+  (`frame-src`), and since #751 it admits exactly Coder's name and its
+  workspace apps' wildcard. Each lab card opens the lab's page on the site,
+  `/education/labs/<id>`, which frames the workspace in a pane and opens
+  GitHub sign-in at the callback path above in a tab of its own
+  (`frontend/src/pages/shared/LabPanePage.jsx`;
+  [ADR 0032, amendment "Coder in the site's panes"](../decisions/0032-learner-labs-platform.md#amendment-2026-09-28-coder-in-the-sites-panes)).
 
 The lab side is in `lab-host/` and is applied by the next `bootstrap.sh`
 run on the host. It reverses ADR 0032's "never embeds Coder" (decision 4)

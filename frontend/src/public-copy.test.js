@@ -230,6 +230,11 @@ describe('the scan itself', () => {
     'The lab host is a server onboarded to Azure Arc.',
     'The lab uses offline copies of the Azure Verified Modules, so validation needs no internet.',
     'ghcr.io/hybridcloudworks/hcw-lab:latest',
+    // The lab pane (#751): what the page says in place of the tools behind it.
+    "Lab workspaces aren't available right now.",
+    'Sign in with GitHub to open your lab workspace',
+    "Finish signing in with GitHub in the new tab. Your workspace opens here when you're done; if it doesn't, choose I've already signed in.",
+    'Lab workspaces are for members of the HybridCloudWorks organization on GitHub.',
   ])('passes %j', (text) => {
     expect(termsIn(text)).toEqual([]);
   });
@@ -242,6 +247,9 @@ describe('public pages, components and hooks', () => {
     expect(files).toContain('pages/tools/landingZone/labValidateRules.js');
     expect(files).toContain('pages/tools/explain/ExplainControl.jsx');
     expect(files).toContain('components/labs/LabsEstateCard.jsx');
+    // The lab pane page and its sign-in step (#751).
+    expect(files).toContain('pages/shared/LabPanePage.jsx');
+    expect(files).toContain('components/labs/labSignIn.js');
     expect(files.filter((f) => ADMIN.test(f))).toEqual([]);
   });
 
