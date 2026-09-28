@@ -153,9 +153,9 @@ describe('the rows dated 2026-09-30 (#494)', () => {
       .sort();
 
     // AZ-800 is the one #494 did not list. MLA-C01 (expiryDate 2026-09-28)
-    // fires two days earlier and belongs to the AWS rows #494 left for later.
+    // fired two days earlier; it was re-verified that day and is now stored
+    // as `retired`, so it is no longer in this list.
     expect(named).toEqual([
-      "aws: MLA-C01: status 'expiring' but expiryDate 2026-09-28 has passed",
       "azure: AZ-800: status 'expiring' but expiryDate 2026-09-30 has passed",
       "azure: AZ-801: status 'expiring' but expiryDate 2026-09-30 has passed",
       "gcp: PAA: status 'beta' but betaEndDate 2026-09-30 has passed",
@@ -275,7 +275,8 @@ describe('the facts the 2026-09-09 audit asked for (#461 items 5–9)', () => {
     const a = byCode(aws);
     expect(a['SOA-C02']).toBeUndefined();
     expect(a['SOA-C03']?.title).toContain('CloudOps');
-    expect(a['MLA-C01']).toMatchObject({ status: 'expiring', expiryDate: '2026-09-28' });
+    expect(a['MLA-C01']).toMatchObject({ status: 'retired', retiredDate: '2026-09-28' });
+    expect(a['MLA-C01'].expiryDate).toBeUndefined();
     expect(a['MLA-C02']).toMatchObject({ status: 'beta', gaDate: '2027-01-14' });
     expect(a['SAP-C02']).toMatchObject({ status: 'expiring', expiryDate: '2026-11-16' });
     expect(a['SAP-C03']).toMatchObject({ status: 'upcoming', availableDate: '2026-11-17' });
