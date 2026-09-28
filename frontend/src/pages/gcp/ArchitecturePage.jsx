@@ -176,7 +176,7 @@ export default function ArchitecturePage() {
                       <p className="text-xl font-bold text-white">{featuredArch.rto}</p>
                     </div>
                   </div>
-                  <button className="inline-flex items-center gap-2 px-6 h-11 bg-primary hover:bg-[hsl(var(--secondary))] text-white font-bold rounded-lg transition-colors w-fit">
+                  <button className="inline-flex items-center gap-2 px-6 h-11 bg-primary hover:bg-[hsl(var(--secondary))] text-primary-foreground font-bold rounded-lg transition-colors w-fit">
                     <span className="text-[18px] material-symbols-outlined">arrow_forward</span>
                     Read Full Blueprint
                   </button>
@@ -261,7 +261,7 @@ export default function ArchitecturePage() {
                       </div>
 
                       {/* Action Button */}
-                      <button className="w-full h-11 px-4 bg-slate-700/50 hover:bg-primary hover:text-white text-slate-300 rounded-lg text-sm font-medium transition-colors border border-slate-600 flex items-center justify-center gap-2 group/btn">
+                      <button className="w-full h-11 px-4 bg-slate-700/50 hover:bg-primary hover:text-primary-foreground text-slate-300 rounded-lg text-sm font-medium transition-colors border border-slate-600 flex items-center justify-center gap-2 group/btn">
                         <span className="text-[16px] material-symbols-outlined">arrow_forward</span>
                         View Details
                       </button>

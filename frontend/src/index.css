@@ -508,7 +508,9 @@
       Use a slightly darker primary for UI surfaces to meet WCAG contrast */
   --primary: 36 100% 32%; /* slightly darker hsl for improved contrast */
   --primary-rgb: 255, 153, 0;
-  --primary-foreground: 0 0% 0%;
+  /* White, not black: on this darkened orange black is 4.31:1, under AA, and
+     white is 4.88:1. src/primary-foreground.test.js holds every scope's pair. */
+  --primary-foreground: 0 0% 100%;
   --link-hover: #e68000;
   --header-bg: #fff4e0cc;
   --header-blur: 6px;
@@ -612,7 +614,9 @@
   --accent-dark: #059669;
   --primary: 159 74% 38%;
   --primary-rgb: 30, 164, 130;
-  --primary-foreground: 0 0% 100%;
+  /* The site's dark ink, not white: white on this green is 3.02:1, under AA;
+     this is 5.67:1. src/primary-foreground.test.js holds every scope's pair. */
+  --primary-foreground: 222 20% 12%;
   --link-hover: #047857;
   --header-bg: #ecfdf5cc;
   --header-blur: 6px;

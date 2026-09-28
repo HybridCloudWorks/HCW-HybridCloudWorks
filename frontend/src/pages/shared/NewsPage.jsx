@@ -138,7 +138,7 @@ export default function NewsPage({ provider: providerProp } = {}) {
               className="bg-primary p-3 rounded-xl flex items-center justify-center"
               style={{ boxShadow: `0 0 20px ${meta.glowColor}` }}
             >
-              <span className="material-symbols-outlined text-black dark:text-white text-2xl font-bold">
+              <span className="material-symbols-outlined text-primary-foreground text-2xl font-bold">
                 newspaper
               </span>
             </div>

@@ -45,7 +45,8 @@ export interface AccessibleButtonProps extends ButtonHTMLAttributes<HTMLButtonEl
 }
 
 const variantStyles = {
-  primary: 'bg-primary text-white hover:bg-primary/90 active:bg-primary/80 disabled:bg-slate-300',
+  primary:
+    'bg-primary text-primary-foreground hover:bg-primary/90 active:bg-primary/80 disabled:bg-slate-300',
   secondary:
     'bg-slate-200 text-slate-900 hover:bg-slate-300 active:bg-slate-400 disabled:bg-slate-100',
   ghost:

@@ -67,7 +67,6 @@ export const PROVIDER_GUIDE = Object.freeze([
     type: 'cloud',
     row: 1,
     website: 'https://azure.microsoft.com',
-    logo: '/icons/providers/azure.png',
     description:
       'Microsoft Azure is the cloud provider this site calls home: every page you read is served from it. We teach it the way we run it, with reference blueprints, study guides built from Microsoft’s exam outlines, and a Landing Zone Builder that assembles an Azure landing zone for you to download.',
   }),
@@ -78,7 +77,6 @@ export const PROVIDER_GUIDE = Object.freeze([
     type: 'cloud',
     row: 1,
     website: 'https://aws.amazon.com',
-    logo: '/icons/providers/aws.png',
     description:
       'We teach Amazon Web Services rather than run on it. This cloud provider earns its place through reference blueprints such as a serverless API and multi-region disaster recovery, a catalogue of AWS certifications with learning paths, and a news feed that follows what AWS releases.',
   }),
@@ -89,7 +87,6 @@ export const PROVIDER_GUIDE = Object.freeze([
     type: 'cloud',
     row: 1,
     website: 'https://cloud.google.com',
-    logo: '/icons/providers/gcp.png',
     description:
       'Where does Google Cloud fit? As the third hyperscale cloud provider on this site, it is taught through blueprints for workloads like a BigQuery data lake, Cloud Run microservices and zero trust security, a catalogue of Google’s certifications with learning paths, and a news feed.',
   }),
@@ -100,7 +97,6 @@ export const PROVIDER_GUIDE = Object.freeze([
     type: 'cloud',
     row: 1,
     website: 'https://www.vmware.com',
-    logo: '/icons/providers/vmware.svg',
     description:
       'Private cloud has a cloud provider of its own in VMware by Broadcom. Our VMware pages cover private and hybrid designs on VMware Cloud Foundation with vSphere, vSAN and NSX, the validated designs and frameworks behind them, and certification tracks from associate to advanced professional.',
   }),
@@ -111,8 +107,6 @@ export const PROVIDER_GUIDE = Object.freeze([
     type: 'framework',
     row: 2,
     website: 'https://github.com',
-    logo: '/icons/providers/GitHub_Invertocat_Black_Clearspace.svg',
-    logoDark: '/icons/providers/GitHub_Invertocat_White_Clearspace.svg',
     description:
       'Every line of this site lives on GitHub, the framework provider behind how we build. Its workflows test every change and deploy the site, you sign in with GitHub to open a lab workspace, and the lab image is published to its container registry. Our GitHub pages teach those same workflows.',
   }),
@@ -123,7 +117,6 @@ export const PROVIDER_GUIDE = Object.freeze([
     type: 'framework',
     row: 2,
     website: 'https://www.finops.org',
-    logo: '/icons/providers/FinOps.svg',
     description:
       'Money is where FinOps comes in. The FinOps Foundation is the framework provider behind everything we say about cloud cost: its framework and the FOCUS billing specification shape our cost pages, from allocation and anomaly blueprints to the maturity model and the FinOps tools.',
   }),
@@ -135,7 +128,6 @@ export const PROVIDER_GUIDE = Object.freeze([
     row: 2,
     // www.terraform.io redirects here, and this is the canonical URL it names.
     website: 'https://developer.hashicorp.com/terraform',
-    logo: '/icons/providers/terraform.svg',
     description:
       'Terraform, HashiCorp’s infrastructure-as-code tool, is the service provider we lean on most. It declares this site’s cloud infrastructure, defines the lab workspaces, and powers the Landing Zone Builder, whose download is Terraform built on Azure Verified Modules. Two browser labs teach you to validate it.',
   }),
@@ -146,7 +138,6 @@ export const PROVIDER_GUIDE = Object.freeze([
     type: 'service',
     row: 2,
     website: 'https://www.docker.com',
-    logo: '/icons/providers/docker.svg',
     description:
       'Think of Docker as the service provider that packages our labs. A multi-stage Dockerfile builds the hcw-lab image with every tool a lab needs, each lab workspace runs as a container from that image, and Docker Sandboxes let you run a coding agent against your landing zone on your own machine.',
   }),
@@ -157,7 +148,6 @@ export const PROVIDER_GUIDE = Object.freeze([
     type: 'service',
     row: 2,
     website: 'https://www.ansible.com',
-    logo: '/icons/providers/ansible.svg',
     description:
       'A bare server becomes the Hybrid Lab host because of Red Hat Ansible, the service provider behind its setup. Ansible roles harden the machine, install the container runtime and bring up the workspace service, and one browser lab has you syntax-check and lint that same playbook until it passes.',
   }),

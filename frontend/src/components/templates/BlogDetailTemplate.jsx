@@ -173,7 +173,7 @@ export default function BlogDetailTemplate({
         </p>
         <Link
           to={backPath}
-          className="inline-flex items-center gap-2 px-5 py-2.5 bg-primary hover:bg-primary/80 text-white font-bold rounded-lg transition-colors"
+          className="inline-flex items-center gap-2 px-5 py-2.5 bg-primary hover:bg-primary/80 text-primary-foreground font-bold rounded-lg transition-colors"
         >
           <ArrowLeft className="h-4 w-4" />
           {backLabel}

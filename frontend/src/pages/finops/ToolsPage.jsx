@@ -30,11 +30,11 @@ export default function ToolsPage() {
               </p>
             </div>
             <div className="flex gap-3">
-              <button className="px-4 h-11 bg-primary text-foreground text-sm font-semibold rounded-lg border border-slate-700 hover:border-primary/50 hover:text-white transition-colors flex items-center gap-2">
+              <button className="px-4 h-11 bg-primary text-primary-foreground text-sm font-semibold rounded-lg border border-slate-700 hover:border-primary/50 transition-colors flex items-center gap-2">
                 <span className="material-symbols-outlined text-[18px]">history</span> Request
                 History
               </button>
-              <button className="px-4 h-11 bg-primary text-slate-900 text-sm font-bold rounded-lg shadow-glow hover:bg-emerald-300 transition-colors flex items-center gap-2">
+              <button className="px-4 h-11 bg-primary text-primary-foreground text-sm font-bold rounded-lg shadow-glow hover:bg-emerald-300 transition-colors flex items-center gap-2">
                 <span className="material-symbols-outlined text-[18px]">add</span> New Project
               </button>
             </div>
@@ -72,7 +72,7 @@ export default function ToolsPage() {
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <button className="flex items-center justify-center gap-2 h-11 rounded-lg bg-primary hover:bg-primary-dark text-slate-900 font-bold text-sm transition-all">
+                  <button className="flex items-center justify-center gap-2 h-11 rounded-lg bg-primary hover:bg-primary-dark text-primary-foreground font-bold text-sm transition-all">
                     <span className="material-symbols-outlined text-[18px]">rocket_launch</span>{' '}
                     Launch Tool
                   </button>
@@ -114,11 +114,11 @@ export default function ToolsPage() {
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <button className="flex items-center justify-center gap-2 h-11 rounded-lg bg-primary hover:bg-primary-dark text-foreground font-bold text-sm transition-all">
+                  <button className="flex items-center justify-center gap-2 h-11 rounded-lg bg-primary hover:bg-primary-dark text-primary-foreground font-bold text-sm transition-all">
                     <span className="material-symbols-outlined text-[18px]">rocket_launch</span>{' '}
                     Launch Tool
                   </button>
-                  <button className="flex items-center justify-center gap-2 h-11 rounded-lg bg-primary text-foreground hover:bg-primary-dark font-semibold text-sm transition-all border border-slate-700">
+                  <button className="flex items-center justify-center gap-2 h-11 rounded-lg bg-primary text-primary-foreground hover:bg-primary-dark font-semibold text-sm transition-all border border-slate-700">
                     <span className="material-symbols-outlined text-[18px]">api</span> API Docs
                   </button>
                 </div>
@@ -159,11 +159,11 @@ export default function ToolsPage() {
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <button className="flex items-center justify-center gap-2 h-11 rounded-lg bg-primary hover:bg-primary-dark text-foreground font-bold text-sm transition-all">
+                  <button className="flex items-center justify-center gap-2 h-11 rounded-lg bg-primary hover:bg-primary-dark text-primary-foreground font-bold text-sm transition-all">
                     <span className="material-symbols-outlined text-[18px]">rocket_launch</span>{' '}
                     Launch Tool
                   </button>
-                  <button className="flex items-center justify-center gap-2 h-11 rounded-lg bg-primary text-foreground hover:bg-primary-dark font-semibold text-sm transition-all border border-slate-700">
+                  <button className="flex items-center justify-center gap-2 h-11 rounded-lg bg-primary text-primary-foreground hover:bg-primary-dark font-semibold text-sm transition-all border border-slate-700">
                     <span className="material-symbols-outlined text-[18px]">api</span> API Docs
                   </button>
                 </div>
@@ -201,11 +201,11 @@ export default function ToolsPage() {
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <button className="flex items-center justify-center gap-2 py-2.5 rounded-lg bg-primary hover:bg-primary-dark text-foreground font-bold text-sm transition-all">
+                  <button className="flex items-center justify-center gap-2 py-2.5 rounded-lg bg-primary hover:bg-primary-dark text-primary-foreground font-bold text-sm transition-all">
                     <span className="material-symbols-outlined text-[18px]">rocket_launch</span>{' '}
                     Launch Tool
                   </button>
-                  <button className="flex items-center justify-center gap-2 py-2.5 rounded-lg bg-primary text-foreground hover:bg-primary-dark font-semibold text-sm transition-all border border-slate-700">
+                  <button className="flex items-center justify-center gap-2 py-2.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary-dark font-semibold text-sm transition-all border border-slate-700">
                     <span className="material-symbols-outlined text-[18px]">api</span> API Docs
                   </button>
                 </div>

@@ -132,7 +132,7 @@ export default function EpisodePlaylist({ platform, examCode, className = '' }) 
               >
                 <span
                   className={`shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                    active ? 'bg-primary text-white' : 'bg-card/80 text-foreground/70'
+                    active ? 'bg-primary text-primary-foreground' : 'bg-card/80 text-foreground/70'
                   }`}
                   aria-hidden="true"
                 >

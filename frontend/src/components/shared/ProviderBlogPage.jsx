@@ -303,7 +303,7 @@ function HeroCarousel({ posts, provider, accentColor, accentBorder }) {
             </div>
             <Link
               to={`/${provider}/blog/${post.slug}`}
-              className="px-5 h-11 bg-primary hover:bg-primary/80 text-white font-bold rounded-lg transition-colors text-sm flex items-center gap-2"
+              className="px-5 h-11 bg-primary hover:bg-primary/80 text-primary-foreground font-bold rounded-lg transition-colors text-sm flex items-center gap-2"
             >
               Read Article
               <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
@@ -358,7 +358,7 @@ function BlogCard({ post, provider, accentHover }) {
           </div>
           <Link
             to={`/${provider}/blog/${post.slug}`}
-            className="px-3 py-1.5 bg-card/60 hover:bg-primary hover:text-white text-foreground rounded text-xs font-semibold transition-colors flex items-center gap-1"
+            className="px-3 py-1.5 bg-card/60 hover:bg-primary hover:text-primary-foreground text-foreground rounded text-xs font-semibold transition-colors flex items-center gap-1"
           >
             Read
             <span className="material-symbols-outlined text-[12px]">arrow_forward</span>
@@ -523,7 +523,7 @@ export default function ProviderBlogPage({
                 onClick={() => setSelectedCategory(cat)}
                 className={`px-4 h-11 rounded-lg font-semibold transition-all text-sm ${
                   selectedCategory === cat
-                    ? 'bg-primary text-white shadow-lg shadow-primary/25'
+                    ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/25'
                     : 'bg-card/40 border border-card/50 text-foreground hover:border-primary/50'
                 }`}
               >

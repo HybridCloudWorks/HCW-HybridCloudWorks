@@ -595,7 +595,7 @@ function HorizontalTimeline({ events }) {
         {canScrollLeft && (
           <button
             onClick={scrollLeft}
-            className="absolute left-2 top-1/2 -translate-y-1/2 z-30 bg-primary/90 hover:bg-primary text-white rounded-full p-2 shadow-lg transition-all duration-200 hover:scale-110"
+            className="absolute left-2 top-1/2 -translate-y-1/2 z-30 bg-primary/90 hover:bg-primary text-primary-foreground rounded-full p-2 shadow-lg transition-all duration-200 hover:scale-110"
             aria-label="Scroll left"
           >
             <span className="material-symbols-outlined text-[20px]" aria-hidden="true">
@@ -608,7 +608,7 @@ function HorizontalTimeline({ events }) {
         {canScrollRight && (
           <button
             onClick={scrollRight}
-            className="absolute right-2 top-1/2 -translate-y-1/2 z-30 bg-primary/90 hover:bg-primary text-white rounded-full p-2 shadow-lg transition-all duration-200 hover:scale-110"
+            className="absolute right-2 top-1/2 -translate-y-1/2 z-30 bg-primary/90 hover:bg-primary text-primary-foreground rounded-full p-2 shadow-lg transition-all duration-200 hover:scale-110"
             aria-label="Scroll right"
           >
             <span className="material-symbols-outlined text-[20px]" aria-hidden="true">
@@ -1147,7 +1147,7 @@ export default function AzureEducationPage() {
                     <div className="mt-auto flex gap-2">
                       <Link
                         to={`/azure/education/${cert.slug}`}
-                        className="flex-1 h-9 bg-card/50 hover:bg-primary text-foreground rounded text-xs font-semibold transition-colors flex items-center justify-center"
+                        className="flex-1 h-9 bg-card/50 hover:bg-primary hover:text-primary-foreground text-foreground rounded text-xs font-semibold transition-colors flex items-center justify-center"
                       >
                         View Details
                       </Link>
@@ -1260,7 +1260,7 @@ export default function AzureEducationPage() {
                     </div>
                     <Link
                       to={`/azure/education/${featuredCert.slug}`}
-                      className="block w-full h-11 px-4 bg-primary hover:bg-blue-800 text-white font-bold rounded-lg transition-colors text-center leading-11"
+                      className="block w-full h-11 px-4 bg-primary hover:bg-blue-800 text-primary-foreground font-bold rounded-lg transition-colors text-center leading-11"
                     >
                       Start Preparation
                     </Link>
@@ -1376,7 +1376,7 @@ export default function AzureEducationPage() {
               </p>
               <Link
                 to={getProviderPath('azure', 'education/az-900')}
-                className="block w-full h-11 px-4 bg-primary hover:bg-blue-800 text-white font-bold rounded-lg transition-colors text-sm text-center leading-11"
+                className="block w-full h-11 px-4 bg-primary hover:bg-blue-800 text-primary-foreground font-bold rounded-lg transition-colors text-sm text-center leading-11"
               >
                 Start with AZ-900
               </Link>
@@ -1558,7 +1558,7 @@ export default function AzureEducationPage() {
                       href={selectedPath.certUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="w-full h-11 px-4 bg-primary hover:bg-blue-800 text-white font-bold rounded-lg transition-colors flex items-center justify-center gap-2"
+                      className="w-full h-11 px-4 bg-primary hover:bg-blue-800 text-primary-foreground font-bold rounded-lg transition-colors flex items-center justify-center gap-2"
                     >
                       <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
                         open_in_new

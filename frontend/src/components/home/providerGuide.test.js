@@ -15,6 +15,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { CANONICAL_PROVIDERS } from '@/lib/providers';
+import { PROVIDER_LOGOS } from '@/lib/providerLogos';
 import {
   DESCRIPTION_MAX_CHARS,
   PROVIDER_GUIDE,
@@ -95,9 +96,13 @@ describe('the providers on the strip', () => {
     }
   });
 
-  it('has a logo for every provider, from the site’s own icon folder', () => {
+  it('has a logo for every provider on both themes', () => {
+    // The files themselves are checked in lib/providerLogos.test.js.
     for (const entry of PROVIDER_GUIDE) {
-      expect(entry.logo, entry.provider).toMatch(/^\/icons\/providers\/[\w.-]+\.(png|svg)$/);
+      expect(PROVIDER_LOGOS[entry.provider], entry.provider).toEqual({
+        light: expect.stringMatching(/^\/icons\/providers\//),
+        dark: expect.stringMatching(/^\/icons\/providers\//),
+      });
     }
   });
 });

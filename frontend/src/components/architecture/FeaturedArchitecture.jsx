@@ -42,7 +42,7 @@ export default function FeaturedArchitecture({
   return (
     <div className="glass-panel rounded-2xl overflow-hidden relative group">
       <div className="absolute top-0 right-0 p-4 z-20">
-        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary text-black text-xs font-bold uppercase tracking-wide shadow-lg shadow-primary/20">
+        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary text-primary-foreground text-xs font-bold uppercase tracking-wide shadow-lg shadow-primary/20">
           <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
             star
           </span>
@@ -95,7 +95,7 @@ export default function FeaturedArchitecture({
           {design.slug && onOpen && (
             <button
               type="button"
-              className="bg-primary hover:bg-primary/90 text-black font-bold px-6 h-11 rounded-lg transition-all shadow-lg shadow-primary/20 flex items-center gap-2 w-fit"
+              className="bg-primary hover:bg-primary/90 text-primary-foreground font-bold px-6 h-11 rounded-lg transition-all shadow-lg shadow-primary/20 flex items-center gap-2 w-fit"
               onClick={() => onOpen(design)}
             >
               {actionLabel}

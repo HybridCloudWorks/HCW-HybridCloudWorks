@@ -219,7 +219,7 @@ export function ContentListingTemplate({
       <div className="flex items-center gap-4 mb-4">
         {icon && (
           <div className="bg-primary p-3 rounded-xl flex items-center justify-center shadow-[0_0_15px_rgba(var(--primary-rgb),0.3)]">
-            <span className="material-symbols-outlined text-black dark:text-white text-2xl font-bold">
+            <span className="material-symbols-outlined text-primary-foreground text-2xl font-bold">
               {icon}
             </span>
           </div>
