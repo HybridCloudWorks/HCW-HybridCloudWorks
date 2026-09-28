@@ -12,13 +12,16 @@
  * setting, something an admin has to fix — it cannot reach the page. Every
  * closed door reads the same, because a visitor can do nothing about which
  * setting closed it; the code stays on the error and in the server's log.
+ * The one server text shown is a finished job's visitor report, which the
+ * server builds for exactly this (`visitorReport` below), and never the job
+ * log.
  */
 import { buildLabPayload } from '@/lib/landingZone/labPayload';
 import { isTerminalJobStatus } from '@/lib/labsPolling';
 
 /** The server's cap on the encoded payload (ADR 0032 decision 6). */
 export const MAX_LAB_PAYLOAD_BYTES = 64 * 1024;
-/** Past this the page stops asking; the job's output stays readable for a day. */
+/** Past this the page stops asking; the job's report stays readable for a day. */
 export const POLL_DEADLINE_MS = 15 * 60 * 1000;
 
 /**
@@ -60,10 +63,10 @@ export const LINES = Object.freeze({
   submitting: 'Sending the files to the lab…',
   queued: 'Queued on the lab…',
   running: 'Running on the lab…',
-  stalled: 'The lab has not finished this job yet. It may still run; its output is kept for a day.',
+  stalled: 'The lab has not finished this job yet. It may still run; its result is kept for a day.',
   notBuilt:
     "The files couldn't be packaged in this browser. Download them and validate locally instead.",
-  jobGone: 'The lab no longer has this job. Its output is kept for a day.',
+  jobGone: 'The lab no longer has this job. Its result is kept for a day.',
   failed: 'Something went wrong. Please try again.',
 });
 
@@ -214,13 +217,16 @@ export function buttonLabel(run) {
   return 'Validate on the lab';
 }
 
-/** What a finished job says, in a sentence above its output. */
+/**
+ * What a finished job says when it carries no usable report (a server from
+ * before the report, or one whose headline this page would not show).
+ */
 export function outcomeLine(job) {
   switch (job.status) {
     case 'succeeded':
-      return `terraform validate passed on the lab (exit ${job.exitCode ?? 0}).`;
+      return 'The configuration is valid: Terraform found no errors.';
     case 'failed':
-      return `terraform init or validate failed on the lab (exit ${job.exitCode ?? 'unknown'}). Its output is below.`;
+      return "Terraform didn't pass this configuration on the lab. Download the files and run terraform validate to see why.";
     case 'timeout':
       return 'The job ran out of time on the lab before Terraform finished.';
     case 'cancelled':
@@ -228,6 +234,53 @@ export function outcomeLine(job) {
     default:
       return `The job ended as ${job.status}.`;
   }
+}
+
+/**
+ * THE REPORT, NEVER THE LOG (owner request 2026-09-28). A finished job's
+ * answer carries `report`, built for visitors on the server
+ * (functions/src/lib/labs/visitor-report.js): the verdict in plain words,
+ * Terraform's own errors, and the modules and providers the lab used. The
+ * job log stays on the admin side, and this page never reads an `output`
+ * field, even when one is present.
+ *
+ * The report is still read defensively, the way the rest of this file
+ * treats server text: the verdict must be one of three, a module or a
+ * provider must have the shape of one, and any text naming the runner (its
+ * image, registry, paths or host) is dropped, so a server fault cannot put
+ * the job log back on the page.
+ */
+export const VERDICTS = Object.freeze(['valid', 'invalid', 'error']);
+
+const MODULE_ENTRY = /^[a-z0-9][a-z0-9-]*@\d[0-9A-Za-z.+-]*$/;
+const PROVIDER_ENTRY = /^[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]* v\d[0-9A-Za-z.+-]*$/;
+const RUNNER_TEXT =
+  /ghcr\.io|sha256:|\bdocker\b|\bpulling\b|\/opt\/|\.\.\/\.\.\/\.\.\/|hcw-lab-runner|\bimage\b|\bregistry\b|hostinger|\bvps\b|\(unauthenticated\)/i;
+
+const isShowable = (value) =>
+  typeof value === 'string' && value.trim() !== '' && !RUNNER_TEXT.test(value);
+const showable = (value) => (isShowable(value) ? value : null);
+const entriesShaped = (list, shape) =>
+  Array.isArray(list) ? list.filter((item) => typeof item === 'string' && shape.test(item)) : [];
+
+/**
+ * The finished job's report as this page shows it, or null when there is
+ * none it can use.
+ *
+ * @param {{ status: string, report?: unknown }} job
+ * @returns {null | { verdict: string, headline: string, errors: string[], modules: string[], modulesNote: string|null, providers: string[] }}
+ */
+export function visitorReport(job) {
+  const report = job?.report;
+  if (!report || typeof report !== 'object' || !VERDICTS.includes(report.verdict)) return null;
+  return {
+    verdict: report.verdict,
+    headline: showable(report.headline) ?? outcomeLine(job),
+    errors: Array.isArray(report.errors) ? report.errors.filter(isShowable) : [],
+    modules: entriesShaped(report.modules, MODULE_ENTRY),
+    modulesNote: showable(report.modulesNote),
+    providers: entriesShaped(report.providers, PROVIDER_ENTRY),
+  };
 }
 
 /** The sentence for a refusal the code does not name, by its status. */

@@ -48,6 +48,10 @@ const BACKEND_TERMS = Object.freeze({
   vendors: /elevenlabs|rss\.com|publer|\bresend\b|hostinger/i,
   pipeline: /github app\b|github actions|\bTFC\b|hcp terraform/i,
   labHost: /\bvps\b/i,
+  // The runner behind "Validate on the lab" and what its job log shows: never
+  // page copy (owner request 2026-09-28). The learner image, hcw-lab, is
+  // subject matter and is not this.
+  labRunner: /hcw-lab-runner|sha256:|\/opt\/avm\b|\(unauthenticated\)/i,
   cms: /contentforge|framework studio|review board|admin board/i,
   limits: /queue ceiling|\bTTL\b/,
   adminTodo:
@@ -209,6 +213,12 @@ describe('the scan itself', () => {
     ['Coming soon: this section is being built in issue #677.', 'issue'],
     ['Coming soon: this section is being built in issue #', 'issue'],
     ['Publish framework content from ContentForge to populate this page.', 'cms'],
+    [
+      "Unable to find image 'ghcr.io/hybridcloudworks/hcw-lab-runner:x@sha256:y' locally",
+      'labRunner',
+    ],
+    ['- connectivity in ../../../opt/avm/avm-ptn-alz@0.21.0', 'labRunner'],
+    ['- Installed hashicorp/azurerm v4.81.0 (unauthenticated)', 'labRunner'],
   ])('catches %j', (text, term) => {
     expect(termsIn(text).map(([t]) => t)).toContain(term);
   });
@@ -218,6 +228,8 @@ describe('the scan itself', () => {
     'AI-generated summary. Check the module documentation before relying on it.',
     "You've reached the limit for explanations for now. Try again in about an hour.",
     'The lab host is a server onboarded to Azure Arc.',
+    'The lab uses offline copies of the Azure Verified Modules, so validation needs no internet.',
+    'ghcr.io/hybridcloudworks/hcw-lab:latest',
   ])('passes %j', (text) => {
     expect(termsIn(text)).toEqual([]);
   });

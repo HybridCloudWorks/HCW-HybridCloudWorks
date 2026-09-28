@@ -196,6 +196,19 @@ describe('evaluate', () => {
     const got = evaluate(shapeA({ AZURE_SPEECH_KEY: { status: 'SecretNotFound' } }));
     expect(got.staleAllowlist).toEqual([]);
   });
+
+  // Seeded 2026-09-28 and resolving since: an unresolved Turnstile secret now
+  // closes "Validate on the lab" for everyone, so it pages like any other.
+  it('flags an unresolved Turnstile secret, which is seeded and must resolve', () => {
+    const got = evaluate(
+      shapeA({
+        TURNSTILE_SECRET_KEY: { status: 'SecretNotFound' },
+        APPSETTING_TURNSTILE_SECRET_KEY: { status: 'SecretNotFound' },
+      }),
+    );
+    expect(got.unexpected.map((s) => s.name)).toEqual(['TURNSTILE_SECRET_KEY']);
+    expect(got.expected).toEqual([]);
+  });
 });
 
 describe('EXPECTED_UNRESOLVED', () => {

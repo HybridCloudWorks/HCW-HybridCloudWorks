@@ -1,16 +1,24 @@
 /**
- * GET /api/public/labs/job?jobId= — one public lab job's status and output,
- * for the page that queued it (#672). Behind the same switch as the
- * submission (public-bounds.js), and closed the same way.
+ * GET /api/public/labs/job?jobId= — one public lab job's status and its
+ * visitor report, for the page that queued it (#672). Behind the same switch
+ * as the submission (public-bounds.js), and closed the same way.
  *
  * `public: true` documents only. A missing job, an admin job, a job of
  * another type and a job past its day all answer the identical 404, so the
  * route is not an oracle for which ids exist, and a `jobId` that is not a
  * UUID (the only ids the server issues) is refused before any read. The
- * answer is the status, the exit code, the agent's output and the three
- * timestamps: never the payload, the agent id or anything about who
- * submitted it. `Cache-Control: no-store`, because the point of the call is
- * to see the status move.
+ * answer is the status, the exit code, the report and the three timestamps:
+ * never the payload, the agent id or anything about who submitted it.
+ * `Cache-Control: no-store`, because the point of the call is to see the
+ * status move.
+ *
+ * THE REPORT, NEVER THE OUTPUT (owner request 2026-09-28). The agent's raw
+ * output is the job log: the image pull, the capability's module rewrites to
+ * paths on the runner, Terraform's own lines. It stays on the document for
+ * the admin Jobs view, which reads it through the admin snapshot, and is
+ * never answered here. What a visitor gets is `report` (visitor-report.js):
+ * the verdict in plain words, Terraform's errors, the modules and providers
+ * the lab used, and nothing about the runner; null until the job has ended.
  *
  * Cosmos deletes a document after its `ttl` asynchronously, so a job is
  * refused here by its `_ts` (the last write) once a day has passed, rather
@@ -25,6 +33,7 @@ import {
   publicSubmissionEnabled,
 } from './public-bounds.js';
 import { LAB_JOBS_CONTAINER } from './rollup.js';
+import { buildVisitorReport } from './visitor-report.js';
 
 /** `randomUUID()` output, the only job id the server issues. */
 const JOB_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -44,14 +53,14 @@ export function isLivePublicJob(doc, nowMs) {
   return !(Number.isFinite(writtenAt) && nowMs / 1000 - writtenAt >= PUBLIC_JOB_TTL_SECONDS);
 }
 
-/** What the job read discloses: never the payload, the agent or the requester. */
+/** What the job read discloses: never the payload, the agent, the requester or the raw output. */
 export function projectPublicJob(doc) {
   return {
     id: doc.id,
     type: doc.type,
     status: doc.status,
     exitCode: Number.isInteger(doc.exitCode) ? doc.exitCode : null,
-    output: typeof doc.output === 'string' ? doc.output : null,
+    report: buildVisitorReport(doc),
     createdAt: toIsoOrNull(doc.createdAt),
     claimedAt: toIsoOrNull(doc.claimedAt),
     finishedAt: toIsoOrNull(doc.finishedAt),

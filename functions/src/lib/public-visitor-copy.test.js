@@ -30,6 +30,14 @@
  *   3. THE RESPONSES. The lab status read in every door state, a refused lab
  *      submission, and every explain refusal, driven through the handlers,
  *      with every string in the body scanned except `code`.
+ *   4. THE LAB REPORT. The public job read, driven through its handler with
+ *      the owner's real job log (lib/labs/fixtures: the run that passed, the
+ *      same run with Terraform errors injected, and a job that failed before
+ *      Terraform ran). The log is the runner's: the image pull with its
+ *      registry and digests, module paths under /opt/avm, the host. The
+ *      answer must carry none of it (LAB_TOKENS below, this file's own list,
+ *      not the module's), and never the raw `output` (owner request
+ *      2026-09-28).
  *
  * The parser is Vite's (`parseSync`, rolldown's oxc parser), which vitest
  * brings with it; nothing is added to package.json for it.
@@ -56,6 +64,7 @@ import {
   TURNSTILE_SECRET_SETTING,
   createPublicSubmitHandlers,
 } from './labs/public-submit.js';
+import { REPORT_LINES } from './labs/visitor-report.js';
 
 const SRC = fileURLToPath(new URL('..', import.meta.url));
 const FRONTEND_SRC = join(SRC, '..', '..', 'frontend', 'src');
@@ -93,6 +102,31 @@ function backendTermsIn(text) {
 }
 
 /**
+ * What the lab's job log carries that a visitor must never read: the runner's
+ * image, its registry and digests, the pull, its paths and the host. Kept
+ * here rather than imported from visitor-report.js, so loosening the
+ * module's own filter cannot loosen this guard. `ghcr` is matched as a word,
+ * which covers ghcr.io, because a host-shaped pattern reads to CodeQL as an
+ * unanchored URL check.
+ */
+const LAB_TOKENS = Object.freeze([
+  /\bghcr\b/i,
+  /sha256:/i,
+  /\bdocker\b/i,
+  /\bpulling\b/i,
+  /\/opt\//,
+  /\.\.\/\.\.\/\.\.\//,
+  /hcw-lab-runner/i,
+  /\bimage\b/i,
+  /\bregistry\b/i,
+  /vps-hostinger|srv939861|hostinger/i,
+  /\(unauthenticated\)/i,
+]);
+
+const labTokensIn = (text) =>
+  LAB_TOKENS.map((pattern) => String(text).match(pattern)?.[0]).filter(Boolean);
+
+/**
  * Every file that registers a `public/*` route, and the modules its handlers'
  * words come from. The registration file itself is always scanned too.
  */
@@ -112,6 +146,7 @@ const PUBLIC_ROUTE_MODULES = Object.freeze({
     'lib/labs/public-bounds.js',
     'lib/labs/public-lock.js',
     'lib/labs/public-job.js',
+    'lib/labs/visitor-report.js',
   ],
   'functions/newsletter-http.js': ['lib/newsletter/handlers.js', 'lib/newsletter/signup-config.js'],
   'functions/platform-health-http.js': ['lib/platform-health.js'],
@@ -237,14 +272,15 @@ describe('the backend-terms check itself', () => {
   });
 });
 
-describe('the sentence tables the lab and explain routes refuse with', () => {
-  const tables = { DOOR_REASONS, LOCK_REASONS, LIMIT_REASONS, EXPLAIN_REASONS };
+describe('the sentence tables the lab and explain routes answer with', () => {
+  const tables = { DOOR_REASONS, LOCK_REASONS, LIMIT_REASONS, EXPLAIN_REASONS, REPORT_LINES };
   const rows = Object.entries(tables).flatMap(([table, sentences]) =>
     Object.entries(sentences).map(([code, sentence]) => [`${table}.${code}`, sentence])
   );
 
   it.each(rows)('%s names nothing behind the site', (_row, sentence) => {
     expect(backendTermsIn(sentence)).toEqual([]);
+    expect(labTokensIn(sentence)).toEqual([]);
   });
 
   it('gives every closed door the same sentence, which points at the download', () => {
@@ -415,6 +451,68 @@ describe('what the lab routes answer', () => {
     );
     expect(res.status).toBe(403);
     expectVisitorOnly(res);
+  });
+});
+
+describe('what the lab job read answers: a report, never the job log', () => {
+  const log = (name) => readFileSync(new URL(`./labs/fixtures/${name}`, import.meta.url), 'utf8');
+  const JOB_ID = '3f2b8c1e-9d4a-4c5b-8e7f-0a1b2c3d4e5f';
+  const jobRequest = {
+    method: 'GET',
+    headers: headersOf({}),
+    query: new URLSearchParams({ jobId: JOB_ID }),
+  };
+
+  /** A finished public job as the agent leaves it, with the raw log on the document. */
+  const finishedJob = (status, exitCode, output) => ({
+    id: JOB_ID,
+    type: 'terraform-validate',
+    public: true,
+    status,
+    exitCode,
+    output,
+    agentId: 'vps-hostinger-01',
+    createdAt: '2026-09-28T11:58:00.000Z',
+    claimedAt: '2026-09-28T11:58:05.000Z',
+    finishedAt: '2026-09-28T11:59:00.000Z',
+    _ts: Math.floor(NOW / 1000) - 60,
+  });
+
+  it('the fixtures carry every token the scan is for, bar the host, so a clean answer means something', () => {
+    const raw = ['validate-valid.log', 'validate-invalid.log', 'validate-not-run.log']
+      .map(log)
+      .join('\n');
+    for (const pattern of LAB_TOKENS.filter((p) => !/hostinger/.test(p.source))) {
+      expect(raw, String(pattern)).toMatch(pattern);
+    }
+  });
+
+  it.each([
+    ['the run that passed', 'succeeded', 0, 'validate-valid.log', 'valid'],
+    ['the run with Terraform errors injected', 'failed', 1, 'validate-invalid.log', 'invalid'],
+    ['a job that failed before Terraform ran', 'failed', 125, 'validate-not-run.log', 'error'],
+    ['a run that ran out of time', 'timeout', -1, 'validate-valid.log', 'error'],
+  ])('%s: the verdict and visitor words only', async (_label, status, exitCode, file, verdict) => {
+    const store = { ...labStore(), readDoc: vi.fn(async () => finishedJob(status, exitCode, log(file))) };
+    const res = await labHandlers({ env: OPEN, store }).getJob(jobRequest, newContext());
+    expect(res.status).toBe(200);
+    const { job } = JSON.parse(res.body);
+    expect(job).not.toHaveProperty('output');
+    expect(job.report.verdict).toBe(verdict);
+    expect(labTokensIn(res.body)).toEqual([]);
+    expectVisitorOnly(res);
+  });
+
+  it('keeps the teaching value: Terraform’s errors with the learner’s file and line', async () => {
+    const store = {
+      ...labStore(),
+      readDoc: vi.fn(async () => finishedJob('failed', 1, log('validate-invalid.log'))),
+    };
+    const res = await labHandlers({ env: OPEN, store }).getJob(jobRequest, newContext());
+    const { report } = JSON.parse(res.body).job;
+    expect(report.errors[0]).toContain('on alz.tf line 14, in module "alz":');
+    expect(report.modules).toContain('avm-ptn-alz@0.21.0');
+    expect(report.providers).toContain('hashicorp/azurerm v4.81.0');
   });
 });
 

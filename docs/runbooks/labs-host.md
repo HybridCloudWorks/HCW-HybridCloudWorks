@@ -507,8 +507,11 @@ The order is not a preference. `deploy-functions.yml` will not start while an
 `hcw-azure` run is unfinished, and fails a deploy whose live settings lack a
 reference Terraform declares, so the Terraform run goes first. The API-keys
 page offers only the secrets the deployed code lists, so the secret goes after
-the functions deploy. In between, `TURNSTILE_SECRET_KEY` is an expected
-unresolved reference, and the path answers `TURNSTILE_NOT_CONFIGURED`.
+the functions deploy. In between, `TURNSTILE_SECRET_KEY` is unresolved and
+the path answers `TURNSTILE_NOT_CONFIGURED`. It was on the
+`EXPECTED_UNRESOLVED` allowlist for that window the first time and came off
+it once seeded on 2026-09-28, so on a rebuild `monitor-unresolved-secrets.yml`
+reports it until step 4 is done.
 
 **1. Confirm the Terraform run.** Open the run the merge queued at
 https://app.terraform.io/app/hcw/workspaces/hcw-azure/runs. Success is
@@ -594,13 +597,16 @@ Success is a body with `"code":"ORIGIN_NOT_ALLOWED"`, since PowerShell sends
 no `Origin`. Then the real thing: at
 https://hybridcloudworks.com/tools/landing-zone, open the files and press
 **Validate on the lab**. The line beside it goes from *Queued on the lab…* to
-*Running on the lab…*, and the output ends in
-`terraform validate passed on the lab (exit 0).` above Terraform's own
-output. The job is at https://hybridcloudworks.com/admin/labs?tab=jobs,
-claimed by `vps-hostinger-01`. Last, remove `TURNSTILE_SECRET_KEY` from
-`EXPECTED_UNRESOLVED` in `scripts/check-unresolved-secrets.mjs` in a pull
-request; the next `monitor-unresolved-secrets.yml` run says the entry has
-gone stale until it is removed.
+*Running on the lab…*, and the report under it reads *The configuration is
+valid: Terraform found no errors.*, then **Modules used** (the default build
+lists four, such as `avm-ptn-alz@0.21.0`) and **Providers** (six, such as
+`hashicorp/azurerm v4.81.0`). The visitor never sees the job log: no image
+pull, no `/opt/avm` path, no `(unauthenticated)`. The log itself is on the
+job at https://hybridcloudworks.com/admin/labs?tab=jobs, claimed by
+`vps-hostinger-01`. The first run on 2026-09-28 got that far, and
+`TURNSTILE_SECRET_KEY` came off `EXPECTED_UNRESOLVED` in
+`scripts/check-unresolved-secrets.mjs` in the same change that replaced the
+log with the report.
 
 | The button says | What it means | What to do |
 | --- | --- | --- |

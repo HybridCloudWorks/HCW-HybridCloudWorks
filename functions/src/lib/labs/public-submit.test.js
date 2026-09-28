@@ -12,7 +12,9 @@
  *     across everyone; refused while more than 20 are queued; written with
  *     public: true and a one-day ttl, and the agent's claim and completion
  *     keep both.
- *   - The job read serves public jobs only, one identical 404 otherwise.
+ *   - The job read serves public jobs only, one identical 404 otherwise,
+ *     and answers the visitor report, never the raw output (the report
+ *     itself is visitor-report.test.js).
  *
  * The lock to the site's pane (ADR 0032 decision 6 as revised 2026-09-28,
  * public-lock.js) has its own file, public-lock.test.js. Here every request
@@ -24,6 +26,7 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import { LAB_JOB_TYPES } from '../labs.js';
+import { REPORT_LINES } from './visitor-report.js';
 import { createLabAgentHandlers } from '../lab-agent.js';
 import {
   DOOR_CODES,
@@ -721,7 +724,7 @@ describe('the job read', () => {
     return build({ store });
   };
 
-  it('answers a public job with its status and output, and nothing else', async () => {
+  it('answers a public job with its status and visitor report, and nothing else', async () => {
     const { handlers } = seeded(publicJob());
     const res = await handlers.getJob(getRequest({ jobId: JOB_UUID }), context);
     expect(res.status).toBe(200);
@@ -733,7 +736,14 @@ describe('the job read', () => {
         type: 'terraform-validate',
         status: 'succeeded',
         exitCode: 0,
-        output: 'Success! The configuration is valid.\n',
+        report: {
+          verdict: 'valid',
+          headline: REPORT_LINES.valid,
+          errors: [],
+          modules: [],
+          modulesNote: null,
+          providers: [],
+        },
         createdAt: '2026-09-27T11:59:00.000Z',
         claimedAt: '2026-09-27T11:59:10.000Z',
         finishedAt: '2026-09-27T11:59:40.000Z',
@@ -741,6 +751,21 @@ describe('the job read', () => {
     });
     expect(res.body).not.toContain('vps-1');
     expect(res.body).not.toContain('terraform {}');
+  });
+
+  it('never answers the raw output, which stays on the document for the admin view', async () => {
+    const output = "Unable to find image 'ghcr.io/x@sha256:abc' locally\n== terraform validate\nSuccess!\n";
+    const { handlers, store } = seeded(publicJob({ output }));
+    const res = await handlers.getJob(getRequest({ jobId: JOB_UUID }), context);
+    expect(parse(res).job).not.toHaveProperty('output');
+    expect(res.body).not.toContain('ghcr.io');
+    expect(store.docs.get(`lab_jobs/${JOB_UUID}`).output).toBe(output);
+  });
+
+  it('has no report while the job is still in flight', async () => {
+    const { handlers } = seeded(publicJob({ status: 'running', exitCode: null, output: null }));
+    const res = await handlers.getJob(getRequest({ jobId: JOB_UUID }), context);
+    expect(parse(res).job).toMatchObject({ status: 'running', report: null });
   });
 
   it.each([
@@ -776,6 +801,9 @@ describe('the job read', () => {
   it('keeps a job without _ts live, and projects odd fields to null', () => {
     const doc = publicJob({ _ts: undefined, exitCode: '0', output: 7, claimedAt: 'garbage' });
     expect(isLivePublicJob(doc, NOW)).toBe(true);
-    expect(projectPublicJob(doc)).toMatchObject({ exitCode: null, output: null, claimedAt: null });
+    const projected = projectPublicJob(doc);
+    expect(projected).toMatchObject({ exitCode: null, claimedAt: null });
+    expect(projected.report).toMatchObject({ verdict: 'valid', modules: [], providers: [] });
+    expect(projected).not.toHaveProperty('output');
   });
 });

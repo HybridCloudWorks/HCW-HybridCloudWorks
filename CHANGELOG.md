@@ -1358,6 +1358,44 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Validate on the lab: a report for learners, not the job log (owner
+  request 2026-09-28).** The owner's first public run from
+  `/tools/landing-zone` ended `Success! The configuration is valid.`, but the
+  page printed the raw job log under it: the image pull with its registry,
+  digests and layers, the capability's `rewrote module … ->
+  ../../../opt/avm/…` block, `terraform init` listing those paths again, and
+  every provider ending `(unauthenticated)`. `GET public/labs/job` no longer
+  answers `output`; it answers `report`, built by the new
+  `functions/src/lib/labs/visitor-report.js`: the verdict first (`valid`,
+  `invalid` or `error`, with a plain-words `headline`), Terraform's own
+  error text for an invalid configuration with the learner's file names and
+  line numbers kept (a path into the lab's copy of a module is cut back to
+  `<module>@<version>/<file>`), **Modules used** as `name@version` from the
+  rewrite lines with one line saying the lab uses offline copies of the
+  Azure Verified Modules so validation needs no internet, and **Providers**
+  as `namespace/name vX.Y.Z`. The log is read by allow-list, so a line
+  nobody has seen yet is dropped rather than shown, and a Terraform error
+  that still names the runner after scrubbing is dropped whole and the
+  headline says some detail could not be shown. The raw output stays on the
+  job document, so the admin Jobs view is unchanged. The builder renders
+  the report and never an `output` field, even when one is present, and
+  reads the report defensively (a known verdict, entries shaped as modules
+  and providers, no runner text). Tests: `visitor-report.test.js` over three
+  fixtures made from the owner's log (the passing run, the same run with
+  Terraform errors injected, and a job that failed before Terraform ran),
+  plus noise injected at every line; `public-visitor-copy.test.js` drives
+  those logs through the job route and fails on `ghcr.io`, `sha256:`,
+  `docker`, `Pulling`, `/opt/`, `../../../`, `hcw-lab-runner`, `image`,
+  `registry`, the host's names or `(unauthenticated)`, with its own token
+  list; `public-copy.test.js` gains a `labRunner` term; and
+  `LzLabValidate.test.jsx` renders what the server's builder makes of the
+  same logs, so the frontend row of CI also runs when those two functions
+  paths change. Also: the owner seeded `TURNSTILE-SECRET-KEY` on
+  2026-09-28 and it resolves, so `TURNSTILE_SECRET_KEY` is off
+  `EXPECTED_UNRESOLVED` in `scripts/check-unresolved-secrets.mjs` (an
+  unresolved one now pages like any other), and Required-Inputs marks it
+  SET.
+
 - **Public pages speak to visitors only: no vendor names, no admin-side
   messages (owner direction 2026-09-28).** The owner's words: "Scrub all
   user-facing pages; remove references to backend workings. The user only

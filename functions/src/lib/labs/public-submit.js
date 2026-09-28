@@ -4,7 +4,7 @@
  *
  *   GET  /api/public/labs/submit        whether a submission would be taken now
  *   POST /api/public/labs/submit        queue one terraform-validate job
- *   GET  /api/public/labs/job?jobId=    that job's status and output
+ *   GET  /api/public/labs/job?jobId=    that job's status and visitor report
  *
  * Four modules: the contract (public-bounds.js: the switch, the bounds, the
  * door codes, the body's checks, the job document), the lock to the site's
