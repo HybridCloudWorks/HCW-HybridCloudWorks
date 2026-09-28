@@ -33,11 +33,12 @@ describe('PROVIDER_LOGOS', () => {
   });
 
   it.each([
-    ['aws', 'light', /aws\.amazon\.com/],
-    ['ansible', 'dark', /Simple Icons 16\.33\.0.*CC0-1\.0/],
-  ])('the %s %s variant names where it came from', (provider, theme, source) => {
+    ['aws', 'light', ['aws.amazon.com', 'trademark']],
+    ['ansible', 'dark', ['Simple Icons 16.33.0', 'CC0-1.0', 'trademark']],
+  ])('the %s %s variant names where it came from', (provider, theme, phrases) => {
     const svg = readFileSync(join(PUBLIC, PROVIDER_LOGOS[provider][theme]), 'utf8');
     expect(svg.startsWith('<!--'), 'the source note comes first').toBe(true);
-    expect(svg.slice(0, svg.indexOf('-->'))).toMatch(source);
+    const note = svg.slice(0, svg.indexOf('-->'));
+    for (const phrase of phrases) expect(note).toContain(phrase);
   });
 });
