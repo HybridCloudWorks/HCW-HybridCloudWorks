@@ -1,7 +1,8 @@
 /**
- * The lab agent registry's write path (#740): `POST cms/labs/agents` and
- * `PATCH cms/labs/agents/{agentId}`. What they accept, and the document they
- * write, are agent-registry-rules.js; this file applies them.
+ * The lab agent registry's write path (#740): `POST cms/labs/agents`,
+ * `PATCH cms/labs/agents/{agentId}` and `DELETE cms/labs/agents/{agentId}`.
+ * What they accept, and the document they write, are
+ * agent-registry-rules.js; this file applies them.
  *
  * The agent guard's second gate (auth/require-agent.js) admits a lab agent
  * only when `lab_agents/{agentId}` names it, and until this module nothing
@@ -63,19 +64,53 @@
  * back on is always its own audited act. A POST that changes nothing writes
  * nothing, document or audit row, and answers `changed: false`.
  *
+ * ===========================================================================
+ * REMOVING ONE (owner request 2026-09-28)
+ * ===========================================================================
+ * A host rebuild can leave the old agent id behind: the VPS reinstalled on
+ * 2026-09-26 came back as vps-hostinger-01, and srv939861's record stayed on
+ * the Agents tab, offline and deactivated, with no way to take it off. DELETE
+ * deletes the document, and refuses two cases first:
+ *
+ *   - an ACTIVE agent (409, "Deactivate it first"). The guard admits it, so
+ *     deleting it would revoke it without the audited deactivation, and the
+ *     page offers Remove only on a deactivated card anyway.
+ *   - an agent that still HOLDS a job (409): a `running` one, or a `claimed`
+ *     one inside lab-agent.js's CLAIM_LEASE_MS. That is how jobs reference an
+ *     agent, `lab_jobs.agentId`, written by the claim. A claim older than the
+ *     lease is not held: the claim path hands it to the next agent that polls
+ *     for its type, and a deactivated agent could never report it anyway
+ *     (the guard refuses its completeLabJob). Counting it would let one
+ *     stranded job block the removal forever, with nothing on the page able
+ *     to clear it, since cancelLabJob cancels only queued jobs.
+ *
+ * The deletion is audited as `lab_agent_removed` with the removed document's
+ * agentId, oid, lastSeenAt and version, because the row is then the only
+ * record the agent existed. A second DELETE answers 404, the same answer as
+ * PATCH on an unknown id. Nothing about the host changes: its certificate and
+ * app registration stay, and without a document gate 2 refuses it, which is
+ * the state before its first registration. Register agent adds it back.
+ *
+ * Between the read and the delete another editor could activate the agent.
+ * That race only ever errs towards revocation, since a deleted agent is
+ * refused, and a registration restores it; so the delete is not ETag-guarded.
+ *
  * The handlers are module-scope functions over one `deps` object and the
  * factory only wires them, the shape public-submit.js uses: written as
  * closures inside the factory, every branch of every handler counted into the
  * factory's own complexity.
  */
 import { randomUUID } from 'node:crypto';
+import { CLAIM_LEASE_MS } from '../lab-agent.js';
 import {
   LAB_AGENT_REGISTRY_ROLE,
   newAgentDocument,
   presentAgent,
   readActivation,
   readRegistration,
+  readRemoval,
   registryChanges,
+  removalDetails,
 } from './agent-registry-rules.js';
 
 const json = (status, body) => ({
@@ -87,6 +122,8 @@ const json = (status, body) => ({
 const CONTAINER = 'lab_agents';
 
 const actorOf = (user) => user?.oid || user?.sub || null;
+
+const notRegistered = (agentId) => json(404, { ok: false, error: `No lab agent ${agentId} is registered` });
 
 /**
  * One admin_audit_logs row, the shape platform-settings.js writes. Best
@@ -164,7 +201,7 @@ async function upsertAgent(deps, call, value) {
 /** Set `active`, or say it already is; 404 for an agent nobody registered. */
 async function applyActivation(deps, call, { agentId, active }) {
   const existing = await deps.store.readDoc(CONTAINER, agentId, agentId);
-  if (!existing) return json(404, { ok: false, error: `No lab agent ${agentId} is registered` });
+  if (!existing) return notRegistered(agentId);
   if (existing.active === active) {
     return json(200, { ok: true, changed: false, agent: presentAgent(existing) });
   }
@@ -180,6 +217,58 @@ async function applyActivation(deps, call, { agentId, active }) {
     active,
   });
   return json(200, { ok: true, changed: true, agent: presentAgent(stored) });
+}
+
+const LEASE_MINUTES = CLAIM_LEASE_MS / 60_000;
+
+/**
+ * The jobs an agent still holds: every `running` one, and every `claimed`
+ * one inside the lease. The second clause is the exact complement of the
+ * claim path's takeover clause (lab-agent.js: `claimed AND (NOT
+ * IS_DEFINED(claimedAt) OR claimedAt < @staleBefore)`), compared as the same
+ * ISO strings. Five are enough to name; the answer is "not yet" either way.
+ */
+export const HELD_JOBS_QUERY = `SELECT TOP 5 c.id, c.status FROM c
+  WHERE c.agentId = @agentId
+    AND (c.status = 'running'
+         OR (c.status = 'claimed' AND IS_DEFINED(c.claimedAt) AND c.claimedAt >= @staleBefore))`;
+
+/** A 409 naming the jobs the agent still holds, or null when it holds none. */
+async function heldJobsRefusal(deps, agentId) {
+  const staleBefore = new Date(deps.now().getTime() - CLAIM_LEASE_MS).toISOString();
+  const held = await deps.store.queryDocs('lab_jobs', HELD_JOBS_QUERY, [
+    { name: '@agentId', value: agentId },
+    { name: '@staleBefore', value: staleBefore },
+  ]);
+  if (held.length === 0) return null;
+  const jobs = held.map((job) => `${job.id} (${job.status})`).join(', ');
+  return json(409, {
+    ok: false,
+    error: `${agentId} still holds ${jobs}. A deactivated agent cannot finish a job, and another agent may take each one over ${LEASE_MINUTES} minutes after it was claimed; remove ${agentId} after that.`,
+  });
+}
+
+/**
+ * Delete a deactivated agent's document that holds no job, then audit it.
+ * 404 for an agent nobody registered, including one another request removed
+ * between this read and this delete.
+ */
+async function removeAgent(deps, call, { agentId }) {
+  const existing = await deps.store.readDoc(CONTAINER, agentId, agentId);
+  if (!existing) return notRegistered(agentId);
+  if (existing.active === true) {
+    return json(409, { ok: false, error: `${agentId} is active. Deactivate it first, then remove it.` });
+  }
+  const refusal = await heldJobsRefusal(deps, agentId);
+  if (refusal) return refusal;
+  try {
+    await deps.store.deleteDoc(CONTAINER, agentId, agentId);
+  } catch (error) {
+    if (error?.code !== 404) throw error;
+    return notRegistered(agentId);
+  }
+  await audit(deps, call, 'lab_agent_removed', removalDetails(existing));
+  return json(200, { ok: true, removed: true, agentId });
 }
 
 /**
@@ -218,10 +307,17 @@ const ACTIVATE = Object.freeze({
   failure: 'Failed to update the lab agent',
 });
 
+const REMOVE = Object.freeze({
+  read: readRemoval,
+  write: removeAgent,
+  what: 'removeLabAgent',
+  failure: 'Failed to remove the lab agent',
+});
+
 /**
  * @param {object} deps
  * @param {{ requireRole: Function }} deps.guard
- * @param {{ readDoc: Function, createDoc: Function, patchDoc: Function, upsertDoc: Function }} deps.store
+ * @param {{ readDoc: Function, createDoc: Function, patchDoc: Function, upsertDoc: Function, queryDocs: Function, deleteDoc: Function }} deps.store
  * @param {() => Date} [deps.now]
  * @param {() => string} [deps.uuid]
  */
@@ -232,5 +328,7 @@ export function createAgentRegistryHandlers({ guard, store, now = () => new Date
     registerAgent: (request, context) => guarded(deps, request, context, REGISTER),
     /** PATCH /api/cms/labs/agents/{agentId} — { active }. */
     setAgentActive: (request, context) => guarded(deps, request, context, ACTIVATE),
+    /** DELETE /api/cms/labs/agents/{agentId} — no body; deactivated and holding no job. */
+    removeAgent: (request, context) => guarded(deps, request, context, REMOVE),
   };
 }

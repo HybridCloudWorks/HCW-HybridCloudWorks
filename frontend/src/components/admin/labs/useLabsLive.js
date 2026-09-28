@@ -51,13 +51,14 @@ export function mergeSnapshot(prev, snap) {
  * Poll `getLabsSnapshot` until cancelled.
  *
  * @param {{onSnapshot: (snap: object) => void, onError: (message: string) => void}} sinks
- * @returns {{load: () => Promise<void>, cancel: () => void}} `load` reads once
- *   now (still behind the in-flight guard); `cancel` stops the poll and clears
- *   its interval
+ * @returns {{refresh: () => void, cancel: () => void}} `refresh` reads once
+ *   now, or once more after the read in flight when there is one; `cancel`
+ *   stops the poll and clears its interval
  */
 function pollSnapshot({ onSnapshot, onError }) {
   let cancelled = false;
   let inFlight = false;
+  let readAgain = false;
 
   const load = async () => {
     // postJSON allows 20 s against a 15 s interval, so ticks can overlap.
@@ -73,12 +74,24 @@ function pollSnapshot({ onSnapshot, onError }) {
     } finally {
       inFlight = false;
     }
+    if (readAgain && !cancelled) {
+      readAgain = false;
+      load();
+    }
+  };
+
+  // A refresh follows a write. Dropped behind the in-flight guard, the read
+  // that answered it would be one sent before the write, so a removed agent's
+  // card would come back after its toast and stay until the next tick.
+  const refresh = () => {
+    if (inFlight) readAgain = true;
+    else load();
   };
 
   load();
   const ticker = setInterval(load, SNAPSHOT_POLL_MS);
   return {
-    load,
+    refresh,
     cancel: () => {
       cancelled = true;
       clearInterval(ticker);
@@ -93,7 +106,9 @@ function pollSnapshot({ onSnapshot, onError }) {
  *
  * `refresh` reads the snapshot now instead of at the next tick. The Agents
  * tab calls it after a registry write (#740), so a newly registered agent's
- * card, or a deactivated one's badge, appears when the toast does.
+ * card, a deactivated one's badge, or a removed one's absence, appears when
+ * the toast does. A refresh during a read in flight is a second read after
+ * it, never dropped: that read began before the write it would miss.
  */
 export default function useLabsLive(enabled) {
   const [snapshot, setSnapshot] = useState(EMPTY_SNAPSHOT);
@@ -108,7 +123,7 @@ export default function useLabsLive(enabled) {
       setSnapshot((prev) => mergeSnapshot(prev, snap));
     };
     const poll = pollSnapshot({ onSnapshot, onError: setError });
-    reload.current = poll.load;
+    reload.current = poll.refresh;
     return () => {
       reload.current = null;
       poll.cancel();

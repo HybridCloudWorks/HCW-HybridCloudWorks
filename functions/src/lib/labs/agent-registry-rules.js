@@ -130,6 +130,29 @@ export async function readActivation(request) {
     : { error: 'active must be true or false' };
 }
 
+/**
+ * DELETE cms/labs/agents/{agentId}: `{ value: { agentId } }`, or `{ error }`.
+ * The agent id is the whole request; no body is read.
+ */
+export async function readRemoval(request) {
+  const agentId = parseAgentId(request.params?.agentId);
+  return agentId ? { value: { agentId } } : { error: AGENT_ID_RULE };
+}
+
+/**
+ * The audit row's details for a removed document: enough to say which agent
+ * it was and when it was last heard from, since the document itself is gone.
+ * `agentId || id` because that is how timers/agent-health.js reads it.
+ */
+export function removalDetails(doc) {
+  return {
+    agentId: doc.agentId || doc.id,
+    oid: doc.oid ?? null,
+    lastSeenAt: doc.lastSeenAt ?? null,
+    version: doc.version ?? null,
+  };
+}
+
 const sameList = (a, b) =>
   Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => v === b[i]);
 

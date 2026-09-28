@@ -24,13 +24,21 @@
  * from its next call; activating does not, because it only restores what an
  * operator already set up. Both refresh the snapshot so the card changes when
  * the toast appears.
+ *
+ * A deactivated card also carries **Remove** (owner request 2026-09-28): a
+ * host rebuild can come back under a new agent id and leave the old one's
+ * card here for good, as srv939861 did when the VPS returned as
+ * vps-hostinger-01. Remove asks first, naming the agent, then calls `DELETE
+ * cms/labs/agents/{agentId}` and refreshes so the card goes when the toast
+ * appears. It is never offered on an active card, and the API refuses one
+ * anyway ("Deactivate it first"), or one still holding a job.
  */
 import React, { useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import ConfirmModal from '@/components/admin/ConfirmModal';
-import { AlertTriangle, CheckCircle, Loader2, Power, PowerOff, Server } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Loader2, Power, PowerOff, Server, Trash2 } from 'lucide-react';
 import { sendJSON } from '@/lib/api';
 import { AgentCard } from './shared';
 import { REGISTER_SCRIPT, fleetState } from './labsView';
@@ -164,6 +172,71 @@ function ActiveToggle({ agent, onChanged }) {
   );
 }
 
+/**
+ * Remove one deactivated agent's registration: `DELETE cms/labs/agents/{agentId}`.
+ *
+ * Only for `active === false`, not for an absent `active`: an API older than
+ * #740 cannot say the agent is deactivated, and the route refuses an active
+ * one, so offering it there would be a button that can only fail.
+ */
+function RemoveAgent({ agent, onChanged }) {
+  const { toast } = useToast();
+  const [confirming, setConfirming] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  if (agent.active !== false) return null;
+  const id = agent.agentId || agent.id;
+
+  const remove = async () => {
+    setConfirming(false);
+    setRemoving(true);
+    try {
+      await sendJSON(`cms/labs/agents/${encodeURIComponent(id)}`, 'DELETE');
+      toast({
+        title: 'Agent removed',
+        description: `${id}'s registration is deleted. Register agent adds it back if it is needed again.`,
+      });
+      onChanged?.();
+    } catch (err) {
+      toast({ title: 'Remove failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setRemoving(false);
+    }
+  };
+
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={removing}
+        className="gap-1"
+        aria-label={`Remove ${id}`}
+        onClick={() => setConfirming(true)}
+      >
+        {removing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+        Remove
+      </Button>
+      <ConfirmModal
+        open={confirming}
+        title={`Remove ${id}?`}
+        description={`${id}'s registration is deleted: its card leaves this tab, and the API refuses that agent id until it is registered again. The host, its certificate and its job history are not touched, and Register agent can add it back later.`}
+        confirmLabel="Remove"
+        onConfirm={remove}
+        onCancel={() => setConfirming(false)}
+      />
+    </>
+  );
+}
+
+function AgentActions({ agent, onChanged }) {
+  return (
+    <div className="flex flex-col items-end gap-2">
+      <ActiveToggle agent={agent} onChanged={onChanged} />
+      <RemoveAgent agent={agent} onChanged={onChanged} />
+    </div>
+  );
+}
+
 export default function AgentsTab({ hub }) {
   const { agents, now, jobTypes, refresh } = hub;
   const fleet = fleetState(agents, now);
@@ -180,7 +253,7 @@ export default function AgentsTab({ hub }) {
               agent={agent}
               now={now}
               registry
-              actions={<ActiveToggle agent={agent} onChanged={refresh} />}
+              actions={<AgentActions agent={agent} onChanged={refresh} />}
             />
           ))}
         </div>
