@@ -15,6 +15,10 @@ argument_specs:
       - Fails closed when enabled without a non-empty GitHub organisation allowlist, without
         all three secrets, with a password that needs URL escaping, or on a host whose memory
         cannot hold coder_max_workspaces workspaces (ADR 0032).
+      - Installs /usr/local/sbin/hcw-coder-template-push, root:root 0750, enabled or not. It
+        takes a Coder token on stdin and publishes the hcw-lab template from the checkout in
+        /opt/hcw-src with the CLI inside the coder container, then sets its default autostop to
+        coder_template_default_ttl.
     author: HybridCloudWorks
     options:
       coder_enabled:
@@ -160,6 +164,15 @@ argument_specs:
             coder_domain, the page the site's panes load. Anything else in it is removed, and so is
             the directory while Coder is disabled, so the role refuses any path but a directory of
             its own, /etc/caddy/hcw-<name>.
+      coder_template_default_ttl:
+        type: str
+        required: false
+        default: 1h
+        description:
+          - The hcw-lab template's default autostop, which hcw-coder-template-push sets with
+            `coder templates edit --default-ttl` after every publish and is rendered with. Whole
+            hours, <n>h; the role refuses any other shape, because the helper checks that Coder
+            reports the value back as <n>h0m0s.
       coder_backup_dir:
         type: path
         required: false

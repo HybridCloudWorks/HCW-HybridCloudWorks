@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+# hcw-coder-template-push   (a Coder token on stdin)
+#
+# Publishes the hcw-lab workspace template from the checkout this host runs
+# to the Coder on this host, and sets the template's default autostop. The
+# owner's one line, from the workstation, is in lab-host/README.md,
+# "Publishing the template"; roles/coder/README.md, "hcw-coder-template-push",
+# has each step.
+#
+# Rendered by the coder role from roles/coder/templates/hcw-coder-template-push.j2
+# to /usr/local/sbin/hcw-coder-template-push, root:root 0750. Edit it there.
+#
+# The token is the first line of stdin: the owner's, or a Template Admin's.
+# It is never an argument of any process on this host, never printed and
+# never written to a file. bash's own printf hands it to `docker exec -i` on
+# stdin, and inside the container a fixed script reads it into
+# CODER_SESSION_TOKEN, the variable Coder's CLI reads, for the commands that
+# need it.
+set -euo pipefail
+export LC_ALL=C
+
+# The one templated value, from coder_template_default_ttl in the coder role's
+# defaults/main.yml, which the role asserts is whole hours (<n>h).
+default_ttl='{{ coder_template_default_ttl }}'
+{% raw %}
+name=hcw-lab
+# container_name in lab-host/coder/docker-compose.yml.
+container=coder
+# Coder inside its own container: CODER_HTTP_ADDRESS in the same file. The
+# CLI talks to it there, so nothing here goes through Caddy or the internet.
+coder_url=http://127.0.0.1:7080
+# The checkout bootstrap.sh keeps (its HCW_SRC_DIR); the test points
+# HCW_SRC_DIR at a checkout of its own. sudo resets the environment, so
+# through the owner's line it is always /opt/hcw-src.
+src="${HCW_SRC_DIR:-/opt/hcw-src}"
+template_dir="${src}/lab-host/coder/templates/${name}"
+me=hcw-coder-template-push
+
+say() { printf '%s: %s\n' "${me}" "$*"; }
+# refuse CODE MESSAGE: says why on stderr and exits with CODE.
+refuse() { local code="$1"; shift; printf '%s: %s\n' "${me}" "$*" >&2; exit "${code}"; }
+
+# --- Refusals before anything is read from stdin or asked of Docker (exit 2).
+[[ "${default_ttl}" =~ ^[1-9][0-9]*h$ ]] ||
+  refuse 2 "the default autostop '${default_ttl}' is not whole hours (<n>h); nothing published"
+[ -d "${template_dir}" ] ||
+  refuse 2 "no template at ${template_dir}; nothing published"
+
+# Only what Coder's provisioner reads: every *.tf, the provider lock file and
+# the README Coder shows on the template's page. template.test.mjs, and
+# anything else in the directory, stays out of Coder.
+shopt -s nullglob
+files=()
+tf_files=0
+for path in "${template_dir}"/*.tf "${template_dir}/.terraform.lock.hcl" "${template_dir}/README.md"; do
+  if [ -L "${path}" ]; then
+    refuse 2 "refusing ${path}: it is a symbolic link; nothing published"
+  fi
+  [ -f "${path}" ] || continue
+  files+=("${path##*/}")
+  case "${path}" in *.tf) tf_files=$((tf_files + 1)) ;; esac
+done
+shopt -u nullglob
+[ "${tf_files}" -gt 0 ] ||
+  refuse 2 "no *.tf file in ${template_dir}; nothing published"
+
+# A token typed or pasted at a terminal would be echoed on the screen.
+[ ! -t 0 ] ||
+  refuse 2 "pipe the token in on stdin (lab-host/README.md, \"Publishing the template\"); it is not read from a terminal"
+
+# --- The token: the first line of stdin, with a carriage return (Windows),
+# a leading byte order mark and surrounding blanks removed. A v2.37.3 token
+# is <10 letters and digits>-<22 letters and digits> (coderd/apikey); the
+# check is looser than that, and exists so that a clipboard holding anything
+# else (this line itself, a sentence) is refused before Coder sees it. What
+# was refused is never shown.
+token=''
+IFS= read -r token || true
+token="${token%$'\r'}"
+token="${token#$'\xef\xbb\xbf'}"
+token="${token#"${token%%[![:space:]]*}"}"
+token="${token%"${token##*[![:space:]]}"}"
+[ -n "${token}" ] ||
+  refuse 2 "the token on stdin was empty; nothing published"
+if ! [[ "${token}" =~ ^[A-Za-z0-9]+-[A-Za-z0-9]+$ ]] || [ "${#token}" -gt 128 ]; then
+  refuse 2 "the first line on stdin is not a Coder token (letters and digits either side of one hyphen); it is not shown, and nothing was published"
+fi
+
+# --- A directory of its own inside the container, removed on every exit.
+dest=''
+cleanup() {
+  local status=$?
+  if [ -n "${dest}" ]; then
+    if ! docker exec "${container}" rm -rf -- "${dest}"; then
+      printf '%s: could not remove %s from the %s container\n' "${me}" "${dest}" "${container}" >&2
+      status=1
+    fi
+  fi
+  exit "${status}"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+made="$(docker exec "${container}" mktemp -d /tmp/hcw-lab.XXXXXX)" ||
+  refuse 1 "cannot make a directory in the ${container} container, so Coder is probably not running (sudo docker compose --project-directory /etc/hcw/coder ps); nothing published"
+# Only a path of the shape asked for is ever removed.
+[[ "${made}" =~ ^/tmp/hcw-lab\.[A-Za-z0-9]+$ ]] ||
+  refuse 1 "mktemp in the ${container} container answered '${made}', not a /tmp/hcw-lab.* path; nothing published"
+dest="${made}"
+
+say "copying ${files[*]} from ${template_dir} to ${dest} in the ${container} container"
+# Extracted by the container's own user, so its files are that user's and the
+# cleanup above needs no root inside the container.
+tar -C "${template_dir}" --format=ustar -cf - -- "${files[@]}" |
+  docker exec -i "${container}" tar -xf - -C "${dest}" ||
+  refuse 1 "copying the template into the ${container} container failed; nothing published"
+
+# --- Coder's CLI, inside the container. $1 is the template's name, $2 the
+# directory, $3 the default autostop. The push and the edit write their own
+# output to stderr, which reaches the owner's terminal as it happens; stdout
+# carries only the two read-backs, each line tagged so the parse below cannot
+# mistake one table for the other.
+script='set -eu
+IFS= read -r CODER_SESSION_TOKEN
+export CODER_SESSION_TOKEN
+coder templates push "$1" --directory "$2" --yes >&2
+coder templates edit "$1" --default-ttl "$3" --yes >&2
+versions="$(coder templates versions list "$1" --column name,active)"
+templates="$(coder templates list --column "name,default ttl")"
+printf "%s\n" "${versions}" | sed "s/^/version /"
+printf "%s\n" "${templates}" | sed "s/^/template /"'
+
+summary="$(printf '%s\n' "${token}" |
+  docker exec -i -e CODER_URL="${coder_url}" -e NO_COLOR=1 "${container}" sh -c "${script}" "${me}" "${name}" "${dest}" "${default_ttl}")" ||
+  refuse 1 "publishing ${name} failed; Coder's message is above. Re-running is safe: each run publishes a new version and sets the autostop again"
+unset token
+
+# Colour codes, should Coder's CLI ever send them without a terminal.
+summary="$(printf '%s\n' "${summary}" | sed 's/\x1b\[[0-9;]*m//g')"
+active="$(printf '%s\n' "${summary}" | awk '$1 == "version" && NF == 3 && $3 == "Active" { print $2 }')"
+ttl_now="$(printf '%s\n' "${summary}" | awk -v n="${name}" '$1 == "template" && $2 == n { print $3 }')"
+
+[ -n "${active}" ] && [ "$(printf '%s\n' "${active}" | wc -l)" -eq 1 ] ||
+  refuse 1 "${name} was pushed, but Coder listed no single active version of it"
+# Coder reports the autostop as a Go duration: 1h is 1h0m0s.
+[ "${ttl_now}" = "${default_ttl}0m0s" ] ||
+  refuse 1 "${name} was pushed, but Coder reports a default autostop of '${ttl_now}', not ${default_ttl}0m0s"
+
+say "published ${name} from ${template_dir}. Active version: ${active}. Default autostop: ${ttl_now}."
+{% endraw %}

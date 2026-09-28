@@ -293,6 +293,16 @@ jobs:
         if: steps.changes.outputs.relevant == 'true'
         run: sudo env "PATH=$PATH" bash roles/vault_tools/tests/hcw-vault-set.test.sh
 
+      # /usr/local/sbin/hcw-coder-template-push is handed a token that can
+      # publish templates, so the helper the coder role renders is rendered
+      # here with the role's defaults (this job's Jinja2) and run against a
+      # stub docker: the token in no argument and no output, only *.tf, the
+      # lock file and the README copied, the copy removed, every failure
+      # non-zero. Needs neither root nor Docker.
+      - name: hcw-coder-template-push test
+        if: steps.changes.outputs.relevant == 'true'
+        run: bash roles/coder/tests/hcw-coder-template-push.test.sh
+
   # lab-host/coder/ is the Coder deployment on the lab host (#679): the
   # Compose file, the hcw-lab workspace template and the test that holds
   # both to the ADR 0032 boundary (the socket in the server only, nothing

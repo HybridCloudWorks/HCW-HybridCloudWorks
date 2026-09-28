@@ -83,11 +83,87 @@ starts or stops it, adds the Caddy route and keeps a week of nightly dumps.
    until the dump completes so a failed run never looks like a backup. The
    timer runs only while enabled. This is the convenience
    `docs/architecture/labs-host.md` describes, not a backup promise.
+9. Renders `templates/hcw-coder-template-push.j2` to
+   `/usr/local/sbin/hcw-coder-template-push`, `root:root` `0750`, enabled or
+   not (below). The one templated value is `coder_template_default_ttl`,
+   which the role first asserts is whole hours.
 
 The privilege boundary is the Compose file's and the template's, not this
 role's: the socket goes to the `coder` service only, and
 `lab-host/coder/templates/hcw-lab/template.test.mjs` asserts what a
 workspace may and may not have.
+
+## hcw-coder-template-push
+
+```text
+hcw-coder-template-push   (a Coder token on stdin)
+```
+
+The owner's line, from the workstation, is in `lab-host/README.md`,
+"Publishing the template". It replaced a Coder CLI on the workstation
+(`winget install Coder.Coder` reported success on 2026-09-28 and installed
+nothing) and the two commands run by hand that day instead, `docker cp` of
+the template into the container and the push through `docker exec`. On the
+host, as root:
+
+1. It refuses, with exit code 2 and before it reads stdin or asks Docker
+   anything: a default autostop that is not whole hours; no
+   `lab-host/coder/templates/hcw-lab` under the checkout (`/opt/hcw-src`,
+   where `bootstrap.sh` keeps it; `HCW_SRC_DIR` overrides it for the test,
+   and `sudo` resets it); a symbolic link among the files it would copy; no
+   `*.tf` there; and a terminal on stdin, where a pasted token would be
+   echoed.
+2. It reads the first line of stdin as the token, drops a carriage return,
+   a leading byte order mark and surrounding blanks, and refuses (exit 2)
+   an empty one or one that is not letters and digits either side of one
+   hyphen, the shape of a v2.37.3 token, without showing what it got.
+3. It makes a directory with `mktemp -d /tmp/hcw-lab.XXXXXX` inside the
+   `coder` container, as the container's own user, accepts only a path of
+   that shape back, and removes it on every exit; a removal that fails makes
+   the run fail.
+4. It copies every `*.tf`, `.terraform.lock.hcl` and `README.md` there, as
+   a tar stream into `docker exec -i coder tar -x`, so the files belong to
+   the container's user. `template.test.mjs` and anything else in the
+   directory stay out of Coder.
+5. It runs one fixed script in the container with `CODER_URL` set to
+   `http://127.0.0.1:7080` (Coder inside its own container) and `NO_COLOR`,
+   and hands it the token on stdin with bash's builtin `printf`. The script
+   reads it into `CODER_SESSION_TOKEN`, runs `coder templates push hcw-lab
+   --directory <dir> --yes` and `coder templates edit hcw-lab --default-ttl
+   <coder_template_default_ttl> --yes`, whose output goes to stderr as it
+   happens, and then reads back `coder templates versions list hcw-lab
+   --column name,active` and `coder templates list --column "name,default
+   ttl"`, each line tagged, on stdout.
+6. It fails (exit 1) unless exactly one version is `Active` and Coder
+   reports the default autostop as `<n>h0m0s`, then prints
+   `hcw-coder-template-push: published hcw-lab from <dir>. Active version:
+   <name>. Default autostop: <n>h0m0s.`
+
+The token is never an argument of a process on the host, never printed,
+and never written to a file, on the host or in the container. Inside the
+container it is in the environment of the one `sh` and the `coder`
+commands it starts, for as long as they run, which is how Coder's CLI reads
+a token. Everything the helper asks Docker is `docker exec` into `coder`;
+it never pulls, starts or stops a container.
+
+Installed enabled or not, like the backup script: with Coder disabled it
+stops at step 3 and says Coder is probably not running.
+
+### Why the owner runs it, and bootstrap does not
+
+A publish by `bootstrap.sh` would need a token stored in the vault, and on
+this host a token that can publish a template is as good as root. The
+template runs in Coder's provisioner, inside the `coder` container, which
+holds the Docker socket; a template version that asks the Docker provider
+for a privileged container with the host's `/` mounted gets one.
+`template.test.mjs` keeps this repository's template from doing that, but a
+token pushes whatever it is given, and Coder's API answers it from anywhere
+on the internet through Caddy. The narrowest v2.37.3 token that could
+publish still carries template write (`template:update`, with
+`file:create` for the upload; the exact set `templates push` needs has not
+been measured), and `--allow template:<id>` can hold it to the one template,
+but no scope holds it to this host. So the token the helper uses is the
+owner's, made in a pane for the one run and expiring on its own.
 
 ## Variables
 
@@ -107,6 +183,7 @@ workspace may and may not have.
 | `coder_server_memory_reserve_mib` | `2560` | Coder, PostgreSQL and OS headroom in the same assertion |
 | `coder_backup_keep_days`, `coder_backup_on_calendar` | `7`, `*-*-* 03:30:00` | The dump schedule |
 | `coder_launcher_dir` | `/etc/caddy/hcw-lab-launcher` | Where the lab launcher's files are installed and served from |
+| `coder_template_default_ttl` | `1h` | The `hcw-lab` template's default autostop, which `hcw-coder-template-push` sets after every publish; whole hours only |
 
 Paths, the port and the unit names are in `defaults/main.yml`;
 `meta/argument_specs.yml` is the contract.
@@ -249,6 +326,39 @@ rename `docker.pre-upgrade` back to `docker`, and revert the pin.
 
 `Reload caddy for the coder route` (route file added or removed), `Reload
 systemd for the coder backup units` (unit files).
+
+## Tests
+
+`tests/hcw-coder-template-push.test.sh` renders
+`templates/hcw-coder-template-push.j2` with this role's `defaults/main.yml`
+(Jinja2, `trim_blocks`, undefined names fail), then runs it against a stub
+`docker` that answers only the four `docker exec` shapes the helper uses,
+over a scratch directory standing in for the container, and a fake `coder`
+that answers as v2.37.3's CLI does. No root, no Docker. It checks:
+
+- the helper's checkout, container and URL are the ones `bootstrap.sh` and
+  `lab-host/coder/docker-compose.yml` name, its autostop is the role's, the
+  role installs it `root:root` `0750` whatever `coder_enabled` is, and the
+  owner's line in `lab-host/README.md` runs that path;
+- a publish copies `main.tf`, the lock file and the README and not
+  `template.test.mjs`, runs push, edit and the two read-backs in that order
+  and nothing else, and ends with the active version and `1h0m0s`;
+- the token reaches every `coder` command with a BOM, blanks and a carriage
+  return removed, and is in no `docker` or `coder` argument and in no output;
+- Coder's output goes to stderr, and the copy is made at a fresh path and
+  removed;
+- empty stdin, and a first line that is not a token (the owner's line itself
+  among them), are refused before Docker is asked anything, without being
+  shown;
+- a token Coder refuses, a failed push or edit, no active version, a
+  different autostop, no container and a copy that cannot be removed all
+  fail, with the copy removed; a coloured `Active` still reads;
+- every `*.tf` is copied and nothing else is, and no `*.tf`, a symbolic
+  link, no checkout or an autostop that is not whole hours is refused.
+
+The `ansible-lint (lab-host)` job in `.github/workflows/ci.yml` runs it with
+the job's Python, which has Jinja2 and PyYAML from ansible-core. To run it
+without a host, see `lab-host/README.md`, "Validating without a host".
 
 ## Check mode
 

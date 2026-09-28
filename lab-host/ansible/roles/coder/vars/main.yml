@@ -28,5 +28,8 @@ coder_secrets_present: >-
 # need no escaping there (RFC 3986 unreserved). `openssl rand -hex 32` is the
 # documented way to make one.
 coder_postgres_password_pattern: '^[A-Za-z0-9._~-]+$'
+# Whole hours: hcw-coder-template-push compares Coder's read-back (a Go
+# duration, 1h0m0s) with this value, and refuses any other shape itself.
+coder_template_default_ttl_pattern: '^[1-9][0-9]*h$'
 coder_pg_connection_url: "postgresql://coder:{{ coder_postgres_password }}@coder-postgres:5432/coder?sslmode=disable"
 coder_backup_keep_minutes: "{{ coder_backup_keep_days | int * 1440 }}"

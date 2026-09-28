@@ -6,9 +6,11 @@
  * this holds it there:
  *
  *   1. THE LOGIC, driven with a mocked fetch, clock, frame and navigation:
- *      only allowlisted labs, GET only, only two API paths; a visitor with
+ *      only allowlisted labs, GET only, only three API paths; a visitor with
  *      no session is told to sign in above; a missing workspace shows
- *      Coder's own create page and a stopped one Coder's own workspace page;
+ *      Coder's own create page once the template is known to exist, a
+ *      missing template the site's sentence and never Coder's page, and a
+ *      stopped workspace Coder's own workspace page;
  *      the pane moves to code-server only when the build is running, the
  *      agent connected and ready, and code-server healthy, and only to the
  *      one name Coder builds for this workspace, under a fixed suffix; the
@@ -39,12 +41,15 @@ import {
   POLL,
   SITE_ORIGINS,
   STATES,
+  TEMPLATE,
+  TEMPLATE_API_PATH,
   assess,
   codeServerUrl,
   createPagePath,
   ownerName,
   resolveLab,
   runLauncher,
+  templateVerdict,
   workspaceApiPath,
   workspacePagePath,
 } from '../lab-host/coder/launcher/launcher.js';
@@ -98,6 +103,9 @@ function workspace({
   };
 }
 
+/** `GET /api/v2/organizations/default/templates/hcw-lab`, shaped as codersdk.Template, with the fields the launcher reads. */
+const HCW_LAB = { id: '6b0e2f4c-2d7a-4c1e-9a53-1f0d2c3b4a59', name: 'hcw-lab', organization_name: 'coder', deprecated: false };
+
 const json = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => body });
 
 /**
@@ -112,9 +120,10 @@ function answer(spec) {
 
 /**
  * A launcher run against a scripted Coder. `me` answers /users/me; `reads`
- * answers the workspace reads in order, the last repeating (see `answer`).
+ * answers the workspace reads in order, and `templates` the template reads,
+ * the last of each repeating (see `answer`).
  */
-async function launch({ search = `?lab=${TFV}`, me = ME, reads = [404], poll = POLL } = {}) {
+async function launch({ search = `?lab=${TFV}`, me = ME, reads = [404], templates = [HCW_LAB], poll = POLL } = {}) {
   let clock = 0;
   const calls = [];
   const says = [];
@@ -122,20 +131,33 @@ async function launch({ search = `?lab=${TFV}`, me = ME, reads = [404], poll = P
   const posts = [];
   const navigations = [];
   const sleeps = [];
-  let index = 0;
+  // Requests and frame changes in the order they happened.
+  const events = [];
+  const next = { reads: 0, templates: 0 };
+  const scripted = (list, key) => {
+    const spec = list[Math.min(next[key], list.length - 1)];
+    next[key] += 1;
+    return answer(spec);
+  };
 
   const fetch = async (url, init) => {
     calls.push({ url, init });
+    events.push(['GET', url]);
     if (url === ME_PATH) return answer(me);
-    const spec = reads[Math.min(index, reads.length - 1)];
-    index += 1;
-    return answer(spec);
+    if (url === TEMPLATE_API_PATH) return scripted(templates, 'templates');
+    return scripted(reads, 'reads');
   };
 
   const end = await runLauncher({
     search,
     fetch,
-    ui: { say: (text) => says.push(text), frame: (p) => frames.push(p) },
+    ui: {
+      say: (text) => says.push(text),
+      frame: (p) => {
+        frames.push(p);
+        events.push(['frame', p]);
+      },
+    },
     post: (state) => posts.push(state),
     navigate: (url) => navigations.push(url),
     sleep: async (ms) => {
@@ -145,7 +167,7 @@ async function launch({ search = `?lab=${TFV}`, me = ME, reads = [404], poll = P
     now: () => clock,
     poll,
   });
-  return { end, calls, says, frames, posts, navigations, sleeps, clock };
+  return { end, calls, events, says, frames, posts, navigations, sleeps, clock };
 }
 
 // ---------------------------------------------------------------------------
@@ -194,6 +216,33 @@ describe('the allowlist', () => {
       `/templates/hcw-lab/workspace?mode=auto&name=lab-tfv&param.lab=${TFV}`
     );
     expect(workspacePagePath('lab-tfv')).toBe('/@me/lab-tfv');
+  });
+
+  it('reads the template where Coder’s create page reads it: the default organization, by name', () => {
+    // site/src/pages/CreateWorkspacePage (v2.37.3): organization defaults to "default".
+    expect(TEMPLATE_API_PATH).toBe('/api/v2/organizations/default/templates/hcw-lab');
+    expect(createPagePath(TFV, 'lab-tfv')).toMatch(new RegExp(`^/templates/${TEMPLATE}/workspace\\?`));
+  });
+});
+
+describe('templateVerdict', () => {
+  it('is ok for the template, when Coder takes new workspaces from it', () => {
+    expect(templateVerdict({ kind: 'ok', body: HCW_LAB })).toBe('ok');
+  });
+
+  it.each([
+    ['missing, or not the learner’s to read (404)', { kind: 'missing' }],
+    ['another template', { kind: 'ok', body: { ...HCW_LAB, name: 'docker' } }],
+    ['deprecated', { kind: 'ok', body: { ...HCW_LAB, deprecated: true } }],
+    ['a body that is not a template', { kind: 'ok', body: null }],
+    ['an empty body', { kind: 'ok', body: {} }],
+  ])('is unavailable when the template is %s', (_label, result) => {
+    expect(templateVerdict(result)).toBe('unavailable');
+  });
+
+  it('passes a lost session and a failed read through', () => {
+    expect(templateVerdict({ kind: 'signed-out' })).toBe('signed-out');
+    expect(templateVerdict({ kind: 'error' })).toBe('error');
   });
 });
 
@@ -340,10 +389,10 @@ describe('runLauncher', () => {
     expect(run.frames).toEqual([]);
   });
 
-  it('sends only GETs, same origin, to the two API paths', async () => {
+  it('sends only GETs, same origin, to the three API paths', async () => {
     const run = await launch({ reads: [404, workspace({ status: 'starting' }), workspace()] });
     const paths = new Set(run.calls.map((c) => c.url));
-    expect([...paths].sort()).toEqual([ME_PATH, workspaceApiPath('lab-tfv')].sort());
+    expect([...paths].sort()).toEqual([ME_PATH, workspaceApiPath('lab-tfv'), TEMPLATE_API_PATH].sort());
     for (const { init } of run.calls) {
       expect(init).toMatchObject({ method: 'GET', credentials: 'same-origin', cache: 'no-store', redirect: 'error' });
       expect(init).not.toHaveProperty('body');
@@ -359,6 +408,67 @@ describe('runLauncher', () => {
     expect(run.says).toContain(MESSAGES.starting);
     expect(run.says.at(-1)).toBe(MESSAGES.ready);
     expect(run.navigations).toEqual([`https://code-server--lab-tfv--${OWNER}.coder.lab.hybridcloudworks.com/`]);
+  });
+
+  it('reads the template once, after the workspace read and before Coder’s create page is framed', async () => {
+    const run = await launch({ reads: [404, 404, 404, workspace()] });
+    expect(run.events.slice(0, 4)).toEqual([
+      ['GET', ME_PATH],
+      ['GET', workspaceApiPath('lab-tfv')],
+      ['GET', TEMPLATE_API_PATH],
+      ['frame', createPagePath(TFV, 'lab-tfv')],
+    ]);
+    expect(run.calls.filter((c) => c.url === TEMPLATE_API_PATH)).toHaveLength(1);
+    expect(run.frames).toEqual([createPagePath(TFV, 'lab-tfv')]);
+    expect(run.end).toBe('ready');
+  });
+
+  it.each([
+    ['missing (404)', 404],
+    ['another template', { ...HCW_LAB, name: 'docker' }],
+    ['deprecated', { ...HCW_LAB, deprecated: true }],
+  ])('says the site’s sentence and never loads Coder’s page when the template is %s', async (_label, template) => {
+    const run = await launch({ reads: [404], templates: [template] });
+    expect(run.end).toBe('unavailable');
+    // Coder's create page, with its red "Resource not found" box, is never framed.
+    expect(run.frames).toEqual([]);
+    expect(run.says).toEqual([MESSAGES.checking, MESSAGES.unavailable]);
+    expect(run.posts).toEqual(['checking', 'unavailable']);
+    expect(run.navigations).toEqual([]);
+    expect(run.sleeps).toEqual([]);
+  });
+
+  it('checks the template for a workspace whose last build deleted it too', async () => {
+    const run = await launch({ reads: [workspace({ status: 'deleted' })], templates: [404] });
+    expect(run.end).toBe('unavailable');
+    expect(run.frames).toEqual([]);
+    expect(run.calls.map((c) => c.url)).toContain(TEMPLATE_API_PATH);
+  });
+
+  it('never reads the template for a workspace that exists', async () => {
+    for (const reads of [[workspace()], [workspace({ status: 'stopped' }), workspace()], [workspace({ status: 'starting' }), workspace()]]) {
+      const run = await launch({ reads, templates: [404] });
+      expect(run.end).toBe('ready');
+      expect(run.calls.map((c) => c.url)).not.toContain(TEMPLATE_API_PATH);
+    }
+  });
+
+  it('retries a template read that fails, and counts it toward giving up', async () => {
+    const recovered = await launch({ reads: [404, 404, 404, workspace()], templates: [500, new TypeError('Failed to fetch'), HCW_LAB] });
+    expect(recovered.end).toBe('ready');
+    expect(recovered.frames).toEqual([createPagePath(TFV, 'lab-tfv')]);
+    expect(recovered.calls.filter((c) => c.url === TEMPLATE_API_PATH)).toHaveLength(3);
+    const outage = await launch({ reads: [404], templates: [502] });
+    expect(outage.end).toBe('unavailable');
+    expect(outage.frames).toEqual([]);
+    expect(outage.calls.filter((c) => c.url === TEMPLATE_API_PATH)).toHaveLength(POLL.maxErrors);
+  });
+
+  it('stops at once when the session ends at the template read', async () => {
+    const run = await launch({ reads: [404], templates: [401] });
+    expect(run.end).toBe('signed-out');
+    expect(run.frames).toEqual([]);
+    expect(run.says.at(-1)).toBe(MESSAGES['signed-out']);
   });
 
   it('shows Coder’s own workspace page for a stopped workspace, where Start is', async () => {

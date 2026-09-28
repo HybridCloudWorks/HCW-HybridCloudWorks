@@ -46,6 +46,17 @@
       removes it, with everything in it, while Coder is disabled.
     quiet: true
 
+# Enabled or not, because the helper is installed either way.
+- name: Refuse a template default autostop that is not whole hours
+  ansible.builtin.assert:
+    that:
+      - coder_template_default_ttl is match(coder_template_default_ttl_pattern)
+    fail_msg: >-
+      coder_template_default_ttl is {{ coder_template_default_ttl }}. It must be whole hours,
+      <n>h such as 1h, because hcw-coder-template-push checks that Coder reports it back as
+      <n>h0m0s.
+    quiet: true
+
 - name: Refuse a workspace capacity the host's memory cannot hold
   ansible.builtin.assert:
     that:
@@ -222,6 +233,20 @@
   ansible.builtin.template:
     src: coder-postgres-backup.sh.j2
     dest: "{{ coder_backup_script_path }}"
+    owner: root
+    group: root
+    mode: "0750"
+
+# The owner's way to publish the hcw-lab template: a token on stdin, the
+# checkout's template copied into the coder container, Coder's own CLI run
+# there (README.md beside this role, "hcw-coder-template-push"). The path is
+# written here, not a variable, because the owner's line in lab-host/README.md
+# names it. Installed while disabled too, like the backup script; it then
+# stops at the missing container and says so.
+- name: Install hcw-coder-template-push, which publishes the hcw-lab template
+  ansible.builtin.template:
+    src: hcw-coder-template-push.j2
+    dest: /usr/local/sbin/hcw-coder-template-push
     owner: root
     group: root
     mode: "0750"

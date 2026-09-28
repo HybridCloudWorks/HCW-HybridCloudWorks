@@ -20,10 +20,11 @@
 # socket (lab-host/coder/docker-compose.yml) and is the only process that
 # does.
 #
-# Publish and set the one-hour autostop with the two commands in
-# lab-host/coder/README.md (`coder templates push`, then `coder templates
-# edit hcw-lab --default-ttl 1h`; the push subcommand has no TTL flag in the
-# current CLI reference).
+# Published from the host by /usr/local/sbin/hcw-coder-template-push, which
+# pushes this directory's *.tf, lock file and README and then sets the
+# one-hour default autostop (`coder templates push` has no TTL flag): the one
+# line in lab-host/README.md, "Publishing the template", run again whenever
+# this file changes on main.
 
 terraform {
   required_version = ">= 1.9.0"
@@ -247,6 +248,33 @@ module "code-server" {
   use_cached      = true
   subdomain       = true
   order           = 1
+
+  # The editor's User settings. The module (1.6.0, `settings`) merges them
+  # into ~/.local/share/code-server/User/settings.json before code-server
+  # starts, on every start, with jq or python3 (the image has python3). Each
+  # is checked against VS Code 1.139.1, the release code-server 4.139.1
+  # carries; template.test.mjs pins them and both versions.
+  settings = {
+    # Workspace Trust off. With it on, the lab folder opened in Restricted
+    # Mode (2026-09-28), and the learner had to trust it before extensions
+    # and tasks ran. The folder is this repository's, checked out by the
+    # startup script, in a workspace that is disposable and isolated (uid
+    # 65534, no socket, no host path, no capabilities), so trust guards
+    # nothing here. Application scope, so it is read from User settings.
+    "security.workspace.trust.enabled" = false
+    # The built-in AI features off and hidden, the Chat panel with them. It
+    # opened on the right ("Build with Agent") and asked for a sign-in the
+    # site does not offer. VS Code 1.139.1 describes it as "Disable and hide
+    # built-in AI features provided by GitHub Copilot, including chat and
+    # inline suggestions".
+    "chat.disableAIFeatures" = true
+    # The lab folder's README first, where the folder has one (the Landing
+    # Zone Builder lab's startup script writes one); VS Code falls back to
+    # its Welcome page where there is none. Read only as a User setting.
+    "workbench.startupEditor" = "readme"
+    # No usage data leaves a learner's editor.
+    "telemetry.telemetryLevel" = "off"
+  }
 }
 
 # The image, by digest. keep_locally so a workspace delete does not remove the

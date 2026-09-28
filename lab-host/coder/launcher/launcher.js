@@ -15,8 +15,10 @@
  * from Coder's API.
  *
  * WHAT IT MAY DO, and nothing more:
- *   - GET only, same origin, with the learner's session cookie. No request
- *     here changes anything in Coder, so it needs no CSRF token. Creating or
+ *   - GET only, same origin, with the learner's session cookie, to three
+ *     paths: who is signed in, their workspace for this lab, and, before
+ *     Coder's create page is ever framed, the template. No request here
+ *     changes anything in Coder, so it needs no CSRF token. Creating or
  *     starting a workspace is Coder's own UI in a frame of the same origin,
  *     with Coder's own consent dialog and buttons.
  *   - Everything it builds comes from constants below: the lab id and the
@@ -125,6 +127,22 @@ export const POLL = Object.freeze({
 });
 
 export const ME_PATH = '/api/v2/users/me';
+
+/**
+ * The template, read before Coder's create page is ever loaded. It is the
+ * same read that page makes first (Coder v2.37.3, site CreateWorkspacePage:
+ * `templateByName(organization ?? "default", template)`), and `default` is
+ * Coder's name for the default organization (codersdk.DefaultOrganization,
+ * resolved by httpmw.ExtractOrganizationParam), which is the one this
+ * deployment has. Coder answers 404 when the template does not exist, and
+ * also when the learner cannot read it (templateByOrganizationAndName,
+ * httpapi.ResourceNotFound). Loaded in the pane, that 404 is Coder's own red
+ * "Resource not found or you do not have access to this resource" box with
+ * its response data and stack trace (2026-09-28, before the template was
+ * published), so the launcher reads it first and says the site's sentence
+ * instead.
+ */
+export const TEMPLATE_API_PATH = `/api/v2/organizations/default/templates/${TEMPLATE}`;
 
 /** Coder's API for one of the signed-in learner's workspaces, by name. */
 export function workspaceApiPath(workspace) {
@@ -288,14 +306,33 @@ const FRAMES = new Map([
 ]);
 
 /**
- * What one read of the learner's workspace does to the page. Answers how
- * the wait goes on: `'wait'` (poll again), `'error'`, or an end
- * (`'ready'`, `'signed-out'`, `'unavailable'`).
+ * What one read of the learner's workspace means: `{ end }` for a read that
+ * ends or fails the step (`'signed-out'`, `'error'`), otherwise the verdict
+ * of `assess`, where a workspace that does not exist yet is `create`.
  */
-function onWorkspace(result, { target, owner, view, navigate }) {
-  if (result.kind === 'signed-out' || result.kind === 'error') return result.kind;
-  const verdict =
-    result.kind === 'missing' ? { state: 'create' } : assess(result.body, target.workspace, owner);
+function workspaceVerdict(result, target, owner) {
+  if (result.kind === 'signed-out' || result.kind === 'error') return { end: result.kind };
+  return result.kind === 'missing' ? { state: 'create' } : assess(result.body, target.workspace, owner);
+}
+
+/**
+ * What the template read means: `'ok'` when Coder has the template and it
+ * takes new workspaces; `'unavailable'` when it is missing, or not the
+ * template asked for, or deprecated (Coder's create page refuses a
+ * deprecated template with a notice of its own); otherwise the read's own
+ * `'signed-out'` or `'error'`.
+ */
+export function templateVerdict(result) {
+  if (result.kind === 'missing') return 'unavailable';
+  if (result.kind !== 'ok') return result.kind;
+  return result.body?.name === TEMPLATE && result.body.deprecated !== true ? 'ok' : 'unavailable';
+}
+
+/**
+ * What a workspace verdict does to the page. Answers how the wait goes on:
+ * `'wait'` (poll again), or an end (`'ready'`, `'unavailable'`).
+ */
+function show(verdict, { target, view, navigate }) {
   if (verdict.state === 'unavailable') return 'unavailable';
   if (FRAMES.has(verdict.state)) view.frame(FRAMES.get(verdict.state)(target));
   view.report(verdict.state);
@@ -349,14 +386,27 @@ export async function runLauncher({ search, fetch: fetchImpl, ui, post, navigate
   view.report('checking');
 
   // First who is signed in (their username is the owner in code-server's
-  // name), then their workspace for this lab, until it ends.
+  // name), then their workspace for this lab, until it ends. Before Coder's
+  // create page is framed, the template is read once: a template Coder does
+  // not have ends the visit with the site's sentence, and Coder's page, with
+  // its own error, is never loaded.
   let owner = null;
+  let templateFound = false;
   const step = async () => {
-    if (owner) return onWorkspace(await read(fetchImpl, workspaceApiPath(target.workspace)), { target, owner, view, navigate });
-    const me = await read(fetchImpl, ME_PATH);
-    if (me.kind === 'signed-out') return 'signed-out';
-    owner = me.kind === 'ok' ? ownerName(me.body) : null;
-    return owner ? 'again' : 'error';
+    if (!owner) {
+      const me = await read(fetchImpl, ME_PATH);
+      if (me.kind === 'signed-out') return 'signed-out';
+      owner = me.kind === 'ok' ? ownerName(me.body) : null;
+      return owner ? 'again' : 'error';
+    }
+    const verdict = workspaceVerdict(await read(fetchImpl, workspaceApiPath(target.workspace)), target, owner);
+    if (verdict.end) return verdict.end;
+    if (verdict.state === 'create' && !templateFound) {
+      const template = templateVerdict(await read(fetchImpl, TEMPLATE_API_PATH));
+      if (template !== 'ok') return template;
+      templateFound = true;
+    }
+    return show(verdict, { target, view, navigate });
   };
   const ending = await pollUntilDone(step, { sleep, now, poll });
   return ending === 'ready' ? ending : view.end(ending);
