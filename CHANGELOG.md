@@ -63,7 +63,11 @@ This project has not cut a tagged release; entries are grouped under
   differences are declared in `scripts/assert-expected-plan.mjs`. Required
   inputs, Variables and secrets, architecture §5.3, the API surface and the
   labs-host runbook ("Opening 'Validate on the lab' to the public") carry
-  the new values and the owner's four steps.
+  the new values and the owner's four steps. The privacy policy
+  (`frontend/public/privacy-policy.html`, effective date now 28 September
+  2026) gains one line saying the builder runs Cloudflare Turnstile while
+  Validate on the lab is available, linking Cloudflare's Turnstile Privacy
+  Addendum.
 
 - **Register a lab agent from the admin UI; `Register-LabAgent.ps1` finishes
   the go-live (#740).** The API admits a lab agent only when

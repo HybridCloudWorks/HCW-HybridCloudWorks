@@ -326,8 +326,9 @@ Consequences of this amendment:
 - **Cloudflare sees the builder's visitors.** Turnstile runs Cloudflare's
   browser challenge on the page and receives the visitor's address from
   siteverify. The site already sits behind Cloudflare's proxy, so no new
-  party receives the address, but the challenge is new processing, and the
-  site's privacy text should say so.
+  party receives the address, but the challenge is new processing, so the
+  site's privacy policy (`frontend/public/privacy-policy.html`) says so and
+  links Cloudflare's Turnstile Privacy Addendum.
 - **Turnstile raises the cost of automation; it does not end it.** A person
   can solve challenges for someone else. The bounds are what cap the
   damage: 2 an hour per verified address and 50 a day in total, against a
