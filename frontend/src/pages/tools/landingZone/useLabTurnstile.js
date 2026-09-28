@@ -30,6 +30,70 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { LAB_TURNSTILE_ACTION } from '@/lib/turnstile';
 
+/** The render options: the site key, the fixed action, and a callback per phase. */
+const widgetOptions = (siteKey, set) => ({
+  sitekey: siteKey,
+  action: LAB_TURNSTILE_ACTION,
+  appearance: 'interaction-only',
+  'response-field': false,
+  callback: (token) => set('ready', token),
+  'expired-callback': () => set('loading'),
+  'before-interactive-callback': () => set('interactive'),
+  'timeout-callback': () => set('interactive'),
+  'error-callback': () => set('error'),
+});
+
+/**
+ * Load Cloudflare's script and draw the widget into the container; the
+ * returned function removes it. `held` is the hook's widget record (the API,
+ * the widget id, the current token), shared with `takeToken` and
+ * `renewWidget` below. Nothing is written once the cleanup has run.
+ */
+function mountWidget({ held, siteKey, load, containerRef, setPhase }) {
+  let live = true;
+  const set = (next, token = null) => {
+    if (live) {
+      held.token = token;
+      setPhase(next);
+    }
+  };
+  load().then(
+    (api) => {
+      if (live && containerRef.current) {
+        held.api = api;
+        held.id = api.render(containerRef.current, widgetOptions(siteKey, set));
+      }
+    },
+    () => set('error')
+  );
+  return () => {
+    live = false;
+    if (held.api && held.id) held.api.remove(held.id);
+    held.api = null;
+    held.id = null;
+    held.token = null;
+    // A later activation starts from "checking", not from this one's end.
+    setPhase('loading');
+  };
+}
+
+/** The token, handed over once; null when none is held. */
+function takeToken(held, setPhase) {
+  const { token } = held;
+  held.token = null;
+  if (token) setPhase('spent');
+  return token;
+}
+
+/** A fresh check, after a submission answered. A no-op once the widget is gone. */
+function renewWidget(held, setPhase) {
+  if (held.api && held.id) {
+    held.token = null;
+    setPhase('loading');
+    held.api.reset(held.id);
+  }
+}
+
 /**
  * @param {object} args
  * @param {boolean} args.active  the lab is open and this build has a site key
@@ -44,61 +108,14 @@ export function useLabTurnstile({ active, siteKey, load }) {
   const [phase, setPhase] = useState('loading');
   const on = Boolean(active && siteKey);
 
-  useEffect(() => {
-    if (!on) return undefined;
-    let live = true;
-    const held = widget.current;
-    const set = (next, token = null) => {
-      if (!live) return;
-      held.token = token;
-      setPhase(next);
-    };
-    load().then(
-      (api) => {
-        if (!live || !containerRef.current) return;
-        held.api = api;
-        held.id = api.render(containerRef.current, {
-          sitekey: siteKey,
-          action: LAB_TURNSTILE_ACTION,
-          appearance: 'interaction-only',
-          'response-field': false,
-          callback: (token) => set('ready', token),
-          'expired-callback': () => set('loading'),
-          'before-interactive-callback': () => set('interactive'),
-          'timeout-callback': () => set('interactive'),
-          'error-callback': () => set('error'),
-        });
-      },
-      () => set('error')
-    );
-    return () => {
-      live = false;
-      if (held.api && held.id) held.api.remove(held.id);
-      held.api = null;
-      held.id = null;
-      held.token = null;
-      // A later activation starts from "checking", not from this one's end.
-      setPhase('loading');
-    };
-  }, [on, siteKey, load]);
+  useEffect(
+    () =>
+      on ? mountWidget({ held: widget.current, siteKey, load, containerRef, setPhase }) : undefined,
+    [on, siteKey, load]
+  );
 
-  /** The token, handed over once; null when none is held. */
-  const take = useCallback(() => {
-    const held = widget.current;
-    const { token } = held;
-    held.token = null;
-    if (token) setPhase('spent');
-    return token;
-  }, []);
-
-  /** A fresh check, after a submission answered. A no-op once the widget is gone. */
-  const renew = useCallback(() => {
-    const held = widget.current;
-    if (!held.api || !held.id) return;
-    held.token = null;
-    setPhase('loading');
-    held.api.reset(held.id);
-  }, []);
+  const take = useCallback(() => takeToken(widget.current, setPhase), []);
+  const renew = useCallback(() => renewWidget(widget.current, setPhase), []);
 
   return { containerRef, phase: on ? phase : 'idle', take, renew };
 }

@@ -188,6 +188,37 @@ const unavailable = (detail) => ({ ok: false, kind: 'unavailable', detail });
 /** A value from Cloudflare's answer, short and quoted, for a log line. */
 const quoted = (value) => JSON.stringify(String(value ?? '').slice(0, 100));
 
+const isObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+const errorCodes = (answer) =>
+  Array.isArray(answer['error-codes']) ? answer['error-codes'].map(String) : [];
+const listedCodes = (answer) => errorCodes(answer).join(', ') || 'none';
+
+/**
+ * The rules a siteverify answer must pass, in order, each a verdict or null
+ * to pass (the shape of BODY_CHECKS in public-bounds.js). The first is what
+ * lets the others read fields: siteverify always answers a JSON object, and
+ * anything else is Cloudflare or the network misbehaving, not a visitor
+ * failing the check.
+ */
+const SITEVERIFY_RULES = Object.freeze([
+  (answer) =>
+    isObject(answer) ? null : unavailable('siteverify answered with something other than a JSON object'),
+  (answer) =>
+    errorCodes(answer).some((code) => OUR_SIDE.has(code))
+      ? unavailable(`siteverify refused the request itself (error codes: ${listedCodes(answer)})`)
+      : null,
+  (answer) =>
+    answer.success === true ? null : failed(`siteverify said no (error codes: ${listedCodes(answer)})`),
+  (answer) =>
+    LAB_SITE_HOSTNAMES.includes(answer.hostname)
+      ? null
+      : failed(`the token was solved on ${quoted(answer.hostname)}, not on the site`),
+  (answer) =>
+    answer.action === LAB_TURNSTILE_ACTION
+      ? null
+      : failed(`the token is for the action ${quoted(answer.action)}, not ${LAB_TURNSTILE_ACTION}`),
+]);
+
 /**
  * What a siteverify answer means for the job: `{ ok: true }`, or
  * `{ ok: false, kind: 'failed' | 'unavailable', detail }` where `detail` is
@@ -197,22 +228,9 @@ const quoted = (value) => JSON.stringify(String(value ?? '').slice(0, 100));
  * @param {unknown} answer the parsed JSON siteverify returned
  */
 export function judgeSiteverify(answer) {
-  // Siteverify always answers a JSON object. Anything else is Cloudflare or
-  // the network misbehaving, not a visitor failing the check.
-  if (!answer || typeof answer !== 'object' || Array.isArray(answer)) {
-    return unavailable('siteverify answered with something other than a JSON object');
-  }
-  const codes = Array.isArray(answer['error-codes']) ? answer['error-codes'].map(String) : [];
-  const listed = codes.join(', ') || 'none';
-  if (codes.some((code) => OUR_SIDE.has(code))) {
-    return unavailable(`siteverify refused the request itself (error codes: ${listed})`);
-  }
-  if (answer.success !== true) return failed(`siteverify said no (error codes: ${listed})`);
-  if (!LAB_SITE_HOSTNAMES.includes(answer.hostname)) {
-    return failed(`the token was solved on ${quoted(answer.hostname)}, not on the site`);
-  }
-  if (answer.action !== LAB_TURNSTILE_ACTION) {
-    return failed(`the token is for the action ${quoted(answer.action)}, not ${LAB_TURNSTILE_ACTION}`);
+  for (const rule of SITEVERIFY_RULES) {
+    const verdict = rule(answer);
+    if (verdict) return verdict;
   }
   return { ok: true };
 }

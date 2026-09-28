@@ -134,11 +134,13 @@ describe('Content-Security-Policy', () => {
     ]);
     expect(directive('connect-src')).not.toContain('https://challenges.cloudflare.com');
     expect(CSP).not.toMatch(/\*\.cloudflare\.com/);
-    const elsewhere = CSP.split(';')
-      .map((part) => part.trim())
-      .filter((part) => part.includes('challenges.cloudflare.com'))
-      .map((part) => part.split(/\s+/)[0]);
-    expect(elsewhere.sort()).toEqual(['frame-src', 'script-src']);
+    // Every directive that lists the origin, by exact source token (a
+    // substring match on the policy text would also count a look-alike host).
+    const granting = CSP.split(';')
+      .map((part) => part.trim().split(/\s+/))
+      .filter(([, ...sources]) => sources.includes('https://challenges.cloudflare.com'))
+      .map(([name]) => name);
+    expect(granting.sort()).toEqual(['frame-src', 'script-src']);
   });
 
   it('still refuses framing and defaults closed', () => {
