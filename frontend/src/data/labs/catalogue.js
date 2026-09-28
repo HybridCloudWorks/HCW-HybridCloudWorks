@@ -5,7 +5,8 @@
  * card from these rows and `catalogue.test.js` asserts each row carries every
  * field below and that no two share an `id`. Adding a lab is adding a row.
  *
- * `id` doubles as the Coder template parameter: "Open in Coder" deep-links to
+ * `id` doubles as the Coder template parameter: the lab's pane
+ * (`/education/labs/<id>`, #751) loads
  * `/templates/<template>/workspace?mode=auto&param.lab=<id>`, and the `hcw-lab`
  * template (#679) opens `/workspace/<id>` in code-server. So an `id` is a path
  * segment and a Terraform variable value at once — lowercase, hyphenated,
@@ -16,6 +17,7 @@
  * publishes the walkthroughs; the page renders no article link for an empty
  * list rather than a placeholder.
  */
+import { staticRoutes } from '@/lib/routeFactory';
 
 /** Every tool a lab may name; the test refuses anything outside this set. */
 export const LAB_TOOLS = Object.freeze(['az', 'terraform', 'kubectl', 'helm', 'ansible']);
@@ -23,8 +25,31 @@ export const LAB_TOOLS = Object.freeze(['az', 'terraform', 'kubectl', 'helm', 'a
 /** The one Coder template every lab runs on today (#679). */
 export const LAB_TEMPLATE = 'hcw-lab';
 
-/** Coder's public origin. Learners sign in there with GitHub; the site never does. */
+/**
+ * Coder's public origin. Learners sign in there with GitHub; the site never
+ * does. Since #750 it answers a top-level visit with a redirect to
+ * `/education/labs`, so the site only ever frames it (#751).
+ */
 export const CODER_ORIGIN = 'https://coder.lab.hybridcloudworks.com';
+
+/**
+ * Where a workspace's apps are served: one label below Coder's own name
+ * (`CODER_WILDCARD_ACCESS_URL` in lab-host/coder/docker-compose.yml), which
+ * is where code-server runs (`subdomain = true` in the `hcw-lab` template).
+ * The site's `frame-src` and the pane's `allow` name exactly this and
+ * `CODER_ORIGIN`, and `csp.test.js` holds the CSP to the same two strings.
+ */
+export const CODER_APPS_ORIGIN = 'https://*.coder.lab.hybridcloudworks.com';
+
+/**
+ * The one Coder path #750 lets through at the top level
+ * (lab-host/ansible/roles/coder/templates/10-coder.caddy.j2), and the path
+ * Coder's own "GitHub" button links to. Coder v2.37.3 serves the start and
+ * the end of GitHub sign-in from it: without a `code` it sets its state
+ * cookie and redirects to GitHub (coderd/httpmw/oauth2.go, ExtractOAuth2),
+ * and GitHub sends the visitor back to it with one.
+ */
+export const CODER_GITHUB_SIGN_IN_PATH = '/api/v2/users/oauth2/github/callback';
 
 /**
  * The image the labs run in, as the learner pulls it. `latest` on purpose:
@@ -104,9 +129,12 @@ export const labs = Object.freeze([
 ]);
 
 /**
- * The "Open in Coder" deep link for a lab: Coder shows its consent screen
+ * The workspace deep link a lab's pane loads: Coder shows its consent screen
  * after GitHub sign-in, then creates the workspace with `param.lab` set, so
- * the learner lands in code-server with the lab folder open (#659).
+ * the learner lands in code-server with the lab folder open (#659, #751).
+ * Checked against lab-host/coder/templates/hcw-lab/main.tf on 2026-09-28:
+ * the template is `hcw-lab`, and its one parameter is `lab`, whose options
+ * are exactly these ids.
  *
  * `mode=auto` is Coder's own parameter and is not encoded; the template and
  * lab id are, because they are path and query values built from data.
@@ -115,6 +143,27 @@ export function coderWorkspaceUrl(lab, origin = CODER_ORIGIN) {
   const template = encodeURIComponent(lab.template);
   const labId = encodeURIComponent(lab.params.lab);
   return `${origin}/templates/${template}/workspace?mode=auto&param.lab=${labId}`;
+}
+
+/**
+ * Where the pane page's "Sign in with GitHub" opens, in a tab of its own
+ * (#751; the whole flow is in LabPanePage.jsx). `redirect` is where Coder
+ * sends the tab once signed in. Any path on Coder lands the tab on
+ * `/education/labs`, because #750 redirects every top-level visit there
+ * except this path, so `/`, Coder's own default, is as good as any.
+ */
+export function coderSignInUrl(origin = CODER_ORIGIN) {
+  return `${origin}${CODER_GITHUB_SIGN_IN_PATH}?redirect=${encodeURIComponent('/')}`;
+}
+
+/** The site page that holds one lab's pane: `/education/labs/<id>` (#751). */
+export function labPanePath(labId) {
+  return `${staticRoutes.labs}/${encodeURIComponent(labId)}`;
+}
+
+/** The catalogue row with this id, or null for an id the catalogue does not have. */
+export function labById(labId) {
+  return labs.find((lab) => lab.id === labId) ?? null;
 }
 
 export default labs;

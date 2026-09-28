@@ -1,17 +1,23 @@
 /**
  * `/education/labs` (#681): the cards come from the catalogue and nothing
- * else, every deep link carries its own lab id, the two "Run it locally"
- * lines are exactly the two from #658, the two status cards say the two
- * explicit unprovisioned sentences when both routes answer
+ * else, every card opens its own lab's pane page (#751), the two "Run it
+ * locally" lines are exactly the two from #658, the two status cards say the
+ * two explicit unprovisioned sentences when both routes answer
  * `{ configured: false }` — and render full data when they answer with it —
- * and the agent slot holds the sandbox section (#676) rather than a promise.
+ * the agent slot holds the sandbox section (#676) rather than a promise, and
+ * a tab returning from GitHub sign-in goes on to the pane it came from.
  */
 import React from 'react';
 import { render, screen, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, Route, Routes } from 'react-router';
 import { HelmetProvider } from 'react-helmet-async';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CODER_ORIGIN, RUN_LOCALLY_COMMANDS, labs } from '@/data/labs/catalogue';
+import { RUN_LOCALLY_COMMANDS, labs } from '@/data/labs/catalogue';
+import {
+  SIGN_IN_PENDING_KEY,
+  markSignInStarted,
+  readSignedInAt,
+} from '@/components/labs/labSignIn';
 import { NOT_PROVISIONED_SENTENCE } from '@/components/labs/LabsEstateCard';
 import { CODER_NOT_PROVISIONED_SENTENCE } from '@/components/labs/CoderStatusCard';
 import { SANDBOX_COMMANDS } from '@/components/labs/SandboxSection';
@@ -63,6 +69,7 @@ function renderPage() {
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   vi.setSystemTime(new Date(NOW));
+  window.localStorage.clear();
   fetchLabsEstate.mockReset();
   fetchCoderStatus.mockReset();
 });
@@ -120,22 +127,47 @@ describe('LabsLearnPage', () => {
     await screen.findByText(NOT_PROVISIONED_SENTENCE);
   });
 
-  it('deep-links each card to Coder with its own param.lab', async () => {
+  it('sends each card to its own lab’s pane page on the site', async () => {
     fetchLabsEstate.mockResolvedValue({ configured: false });
     fetchCoderStatus.mockResolvedValue({ configured: false });
     const { container } = renderPage();
 
     for (const lab of labs) {
       const card = container.querySelector(`li[data-lab="${lab.id}"]`);
-      const link = within(card).getByRole('link', { name: /open in coder/i });
-      expect(link).toHaveAttribute(
-        'href',
-        `${CODER_ORIGIN}/templates/hcw-lab/workspace?mode=auto&param.lab=${lab.id}`
-      );
-      expect(link).toHaveAttribute('target', '_blank');
-      expect(link.getAttribute('rel')).toMatch(/noopener/);
+      const link = within(card).getByRole('link', { name: /open lab workspace/i });
+      expect(link).toHaveAttribute('href', `/education/labs/${lab.id}`);
+      expect(link).not.toHaveAttribute('target');
     }
+    // Since #750 a top-level visit to the workspace host lands back here, so
+    // the page offers no link to it, in a card or in the prose.
+    const labHosts = [...container.querySelectorAll('a[href]')]
+      .map((a) => new URL(a.getAttribute('href'), 'https://hybridcloudworks.com').hostname)
+      .filter(
+        (host) => host === 'lab.hybridcloudworks.com' || host.endsWith('.lab.hybridcloudworks.com')
+      );
+    expect(labHosts).toEqual([]);
+    expect(container.querySelector('header')).toHaveTextContent(/Open lab workspace opens the lab/);
     await screen.findByText(NOT_PROVISIONED_SENTENCE);
+  });
+
+  it('sends a tab returning from GitHub sign-in on to the pane it started from', async () => {
+    fetchLabsEstate.mockResolvedValue({ configured: false });
+    fetchCoderStatus.mockResolvedValue({ configured: false });
+    const [, lab] = labs;
+    markSignInStarted(lab.id);
+    render(
+      <HelmetProvider>
+        <MemoryRouter initialEntries={['/education/labs']}>
+          <Routes>
+            <Route path="/education/labs" element={<LabsLearnPage />} />
+            <Route path="/education/labs/:labId" element={<p>pane for the lab</p>} />
+          </Routes>
+        </MemoryRouter>
+      </HelmetProvider>
+    );
+    expect(await screen.findByText('pane for the lab')).toBeInTheDocument();
+    expect(window.localStorage.getItem(SIGN_IN_PENDING_KEY)).toBeNull();
+    expect(readSignedInAt()).toBeGreaterThanOrEqual(NOW);
   });
 
   it('prints the two Run it locally lines on every card, PowerShell then bash', async () => {

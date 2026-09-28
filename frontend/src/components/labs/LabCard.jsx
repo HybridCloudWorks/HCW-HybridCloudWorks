@@ -2,11 +2,11 @@
  * One lab from the catalogue (#681): what it is, what it exercises, how long
  * it takes, and the two ways to run it.
  *
- * "Open in Coder" is a plain external link to the workspace deep link: Coder
- * shows its consent screen after GitHub sign-in, then creates the workspace
- * with `param.lab` set. Through `safeUrl` like every other data-fed `href` in
- * this app, even though the origin is a constant — the sink is guarded on its
- * own terms (see lib/safeUrl.js).
+ * "Open lab workspace" goes to the lab's own page on the site,
+ * `/education/labs/<id>`, which opens the workspace in a pane (#751). It is
+ * an in-site link, not a link to the workspace host: since #750 that host
+ * sends a top-level visit straight back to `/education/labs`, so the pane is
+ * the only way in (owner decision 2026-09-28).
  *
  * "Run it locally" is the same image on the learner's own machine, mounting
  * the current directory. Two lines, PowerShell then bash, each labelled with
@@ -16,15 +16,14 @@
  * agent section (#676), which prints the same shape.
  */
 import React from 'react';
-import { RUN_LOCALLY_COMMANDS, coderWorkspaceUrl } from '@/data/labs/catalogue';
-import { safeUrl } from '@/lib/safeUrl';
+import { Link } from 'react-router';
+import { RUN_LOCALLY_COMMANDS, labPanePath } from '@/data/labs/catalogue';
 import CommandLine from './CommandLine';
 import { plural } from './labsWords';
 
 const MUTED = 'text-slate-600 dark:text-slate-400';
 
 export default function LabCard({ lab }) {
-  const href = safeUrl(coderWorkspaceUrl(lab));
   return (
     <li
       data-lab={lab.id}
@@ -49,21 +48,13 @@ export default function LabCard({ lab }) {
         </span>
       </p>
 
-      {href ? (
-        <a
-          href={href}
-          target="_blank"
-          rel="noopener noreferrer"
-          data-testid="open-in-coder"
-          className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-bold text-white hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary self-start"
-        >
-          Open in Coder
-          <span className="sr-only">
-            {' '}
-            (opens {lab.title} in a new tab; GitHub sign-in required)
-          </span>
-        </a>
-      ) : null}
+      <Link
+        to={labPanePath(lab.id)}
+        data-testid="open-lab-workspace"
+        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-bold text-white hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary self-start"
+      >
+        Open lab workspace <span className="sr-only">for {lab.title}; GitHub sign-in required</span>
+      </Link>
 
       <details className="mt-auto">
         <summary
