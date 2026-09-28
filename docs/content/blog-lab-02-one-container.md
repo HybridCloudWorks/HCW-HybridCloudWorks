@@ -9,7 +9,7 @@ reading: 9
 ---
 
 With the network on, `terraform init` on the landing zone from
-[part 1](blog-lab-01-landing-zone.md) downloads 31 MB of modules before it will
+[part 1](https://hybridcloudworks.com/azure/blog/build-a-landing-zone-you-can-read) downloads 31 MB of modules before it will
 validate a line. Inside the `hcw-lab` image with the network off, the same
 folder initialises and validates, and the `.terraform` directory it leaves
 behind is **108 KB**.
@@ -377,7 +377,7 @@ install these providers".
 
 ## What's next
 
-[Part 3](blog-lab-03-agent-explains.md) opens the same folder in a Docker
+[Part 3](https://hybridcloudworks.com/terraform/blog/let-an-agent-explain-it) opens the same folder in a Docker
 sandbox with an agent in it, lets the agent run `init` with a network, and
 reads the file that tells it never to run `apply`.
 
