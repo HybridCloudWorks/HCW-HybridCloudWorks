@@ -265,6 +265,16 @@ jobs:
         if: steps.changes.outputs.relevant == 'true'
         run: ansible-playbook --syntax-check -i inventory/localhost.yml site.yml
 
+      # /usr/local/sbin/hcw-vault-set rewrites the host's Ansible vault, so
+      # the file the vault_tools role installs is run here against a scratch
+      # vault with this job's ansible-vault: two keys set, an empty value and
+      # bad key names refused, the file left encrypted and root 0600. As root,
+      # because the helper installs the vault root:root; env keeps this job's
+      # Python on PATH past sudo's secure_path.
+      - name: hcw-vault-set test
+        if: steps.changes.outputs.relevant == 'true'
+        run: sudo env "PATH=$PATH" bash roles/vault_tools/tests/hcw-vault-set.test.sh
+
   # lab-host/coder/ is the Coder deployment on the lab host (#679): the
   # Compose file, the hcw-lab workspace template and the test that holds
   # both to the ADR 0032 boundary (the socket in the server only, nothing

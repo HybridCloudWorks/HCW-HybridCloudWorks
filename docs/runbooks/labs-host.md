@@ -298,14 +298,18 @@ ADR 0032 rebuilds the host rather than repairing it.
    Web Console shows ("Connect from a desktop", above). Success is the
    server's host name.
 6. **First run**: `infra-lab/README.md`, step 7. Success is `host check: no
-   other workloads found` near the top (above) and a `PLAY RECAP` for
-   `localhost` with `failed=0`. Then run `Connect-Lab.ps1` again without
-   `-User root`, because root login is now off.
-7. **Everything the disk held, again.** Create the Ansible vault and its
-   password (`lab-host/README.md`, "The vault"), rotating the values marked
-   "rotate on every host rebuild" in
+   other workloads found` near the top (above), and, because there is no
+   vault yet and Coder is on (since 2026-09-28), a `PLAY RECAP` for
+   `localhost` with `failed=1` at `coder : Refuse to enable Coder without
+   its three vault secrets`. Every role before it has run, so root login is
+   off and `hcw-vault-set` is installed; the re-run in step 7 finishes the
+   rest. Run `Connect-Lab.ps1` again without `-User root`.
+7. **Everything the disk held, again.** Create the Ansible vault's
+   password and set its keys (`lab-host/README.md`, "The vault"), rotating
+   the values marked "rotate on every host rebuild" in
    [Required inputs §4.7](../standards/required-inputs.md#47-vps-agent-hostinger-env-never-committed)
-   (the Caddy DNS token and the Coder GitHub OAuth secret). The agent's key
+   (the Caddy DNS token and the Coder GitHub OAuth secret). Then re-run
+   `bootstrap.sh`, which now ends with `failed=0`. The agent's key
    pair is new, and the vault that held its four keys is gone, so run "The
    lab agent's go-live" (below) again: it appends the new certificate and
    writes the four keys back. Re-onboard Arc ("Re-onboarding a rebuilt host", below).
@@ -933,46 +937,36 @@ nothing on the host: the effect only reports.
 
 ## 5. Seed the vault
 
-The four values, printed in the PowerShell window. They are shown on screen
-once; copy each into the vault in the next command and do not paste them
-anywhere else.
-
-```powershell
-$sp.appId
-```
-
-```powershell
-$sp.password
-```
-
-```powershell
-$sp.tenant
-```
-
-```powershell
-(az account show --subscription sub-app-site-prod-cus -o json | ConvertFrom-Json).id
-```
-
 The vault is `/etc/hcw/ansible/vault.yml` on the host, encrypted with the
 password in `/etc/hcw/ansible/vault-password`, which is root-only on the host
-and nowhere else (`lab-host/README.md`, "The vault"). Bash, on the host, as
-`hcwadmin`:
+and nowhere else (`lab-host/README.md`, "The vault"). The four values go
+straight from the PowerShell window of step 2 into it, one line each, through
+`/usr/local/sbin/hcw-vault-set` on the host, which reads the value from its
+standard input and never prints it. So none of them is shown on screen or put
+on the clipboard. PowerShell, in the same window:
 
-```bash
-sudo /usr/local/bin/ansible-vault edit --vault-password-file /etc/hcw/ansible/vault-password /etc/hcw/ansible/vault.yml
+```powershell
+$sp.appId | ssh hcw-lab "sudo -n /usr/local/sbin/hcw-vault-set vault_arc_service_principal_id"
 ```
 
-Add four keys, one per line, in the order printed above:
+```powershell
+$sp.password | ssh hcw-lab "sudo -n /usr/local/sbin/hcw-vault-set vault_arc_service_principal_secret"
+```
 
-| Key | Value |
-| --- | --- |
-| `vault_arc_service_principal_id` | `$sp.appId` |
-| `vault_arc_service_principal_secret` | `$sp.password` |
-| `vault_arc_tenant_id` | `$sp.tenant` |
-| `vault_arc_subscription_id` | the subscription id |
+```powershell
+$sp.tenant | ssh hcw-lab "sudo -n /usr/local/sbin/hcw-vault-set vault_arc_tenant_id"
+```
 
-If the vault does not exist yet, `lab-host/README.md`, "The vault", creates
-it; use `create` in place of `edit`.
+```powershell
+(az account show --subscription sub-app-site-prod-cus -o json | ConvertFrom-Json).id | ssh hcw-lab "sudo -n /usr/local/sbin/hcw-vault-set vault_arc_subscription_id"
+```
+
+Success for each is one line, `hcw-vault-set: set <the key> (value not
+shown). Keys in the vault:` and the key names, with no value. `the value
+on stdin was empty; nothing changed` means `$sp` is gone: the window from
+step 2 was closed, and that step has to run again for a new secret. The
+helper creates the vault when there is none; the vault password must exist
+first (`lab-host/README.md`, "The vault").
 
 ## 6. Enable the role and run the playbook
 

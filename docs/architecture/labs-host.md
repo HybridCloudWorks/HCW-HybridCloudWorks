@@ -106,7 +106,8 @@ What keeps working, and why:
 - **The lab agent** dials out to the Functions API and receives nothing
   inbound. Nothing else on the host takes a connection through Caddy apart
   from Coder, and Coder's own clients send no fetch metadata.
-- **Coder** (once `coder_enabled` is true). Its route removes Coder's
+- **Coder** (on since 2026-09-28, for members of the `HybridCloudWorks`
+  GitHub organisation only). Its route removes Coder's
   default `frame-ancestors 'self'`, because the browser enforces every
   policy it receives and that one would keep Coder out of the panes. It
   lets Coder's GitHub sign-in callback through at the top level, because
@@ -175,7 +176,7 @@ trigger above.
 | `vps-agent` Entra confidential client (certificate) | Private key generated on the host, `/etc/hcw/labs-agent.pem`, owner `root`, group `hcw-labs-agent`, mode `0640`, so the non-root service reads it and nothing else does; only the public certificate goes to the app registration | The `LabAgent` app role on the Functions API — three endpoints, no database access | planned |
 | Arc machine identity | System-assigned by Azure at onboarding, held by the Connected Machine agent | Whatever roles `infra/` grants it; none beyond the data collection rule today | planned |
 | Coder GitHub OAuth app secret | Coder's Docker Compose environment | Learner sign-in to Coder; nothing on the site | planned |
-| Coder status token | Issued by Coder; the value is held in Key Vault `kv-site-prod-cus-01` as the secret `CODER-STATUS-TOKEN` (read by the Function App setting `CODER_STATUS_TOKEN`), not on the host | Read-only Coder API for the site's status proxy | planned |
+| Coder status token | Issued by Coder; the value is held in Key Vault `kv-site-prod-cus-01` as the secret `CODER-STATUS-TOKEN` (read by the Function App setting `CODER_STATUS_TOKEN`), not on the host | Read-only Coder API for the site's status proxy: scoped `template:read` and `workspace:read`, for a Coder user of its own, `hcw-status`, that holds Template Admin so the running count covers every learner (`lab-host/README.md`, "The status token for the site") | planned |
 | Caddy ACME account | Caddy's data volume | Issuance and renewal of the one certificate covering `lab`, `*.lab` and `*.coder.lab` | planned |
 | Caddy DNS-01 token (`CLOUDFLARE_API_TOKEN` in `/etc/caddy/env`, owner `root`, group `caddy`, mode `0640`, written by Ansible from Vault; the `caddy` systemd unit runs as the non-root `caddy` user and reads it through `EnvironmentFile`) | On the host, because renewals happen there | DNS edit on the dedicated lab zone that `_acme-challenge.lab` is delegated to; DNS edit on the production zone only in the interim ADR 0032 records | planned |
 | Portainer administrator and Business Edition licence key | Created and entered by the owner in Portainer's UI; the password is in the owner's password manager, and Portainer keeps its own copy in its volume. Neither is in the repository or Ansible Vault | Full control of the host's Docker daemon, through the loopback only | planned |

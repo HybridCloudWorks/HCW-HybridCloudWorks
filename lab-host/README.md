@@ -12,11 +12,12 @@ every step.
 | Role | Installs | Where |
 | --- | --- | --- |
 | `hardening` | `hcwadmin` key-only login with passwordless sudo, sshd drop-in (`PasswordAuthentication no`, `PermitRootLogin no`, `KbdInteractiveAuthentication no`), ufw deny-in/allow-out with TCP 22, 80, 443, unattended-upgrades rebooting at 04:30, fail2ban sshd jail | `/etc/ssh/sshd_config.d/00-hcw-hardening.conf`, `/etc/sudoers.d/90-hcw-admin`, `/etc/apt/apt.conf.d/52hcw-unattended-upgrades`, `/etc/fail2ban/jail.d/hcw-sshd.local` |
+| `vault_tools` | `hcw-vault-set`, which sets one key of the Ansible vault from stdin and prints no value ("The vault", below), and the vault's directory, root-only. The Ansible vault the playbook reads, not HashiCorp Vault, which is the `vault` role | `/usr/local/sbin/hcw-vault-set` (root:root, 0750), `/etc/hcw/ansible` (root:root, 0700) |
 | `arc` | Azure Connected Machine agent 1.68.03532.1399 from Microsoft's apt repository, held, then `azcmagent connect` to `rg-lab-hybrid-prod-cus` as `arcs-lab-hybrid-prod-cus-01` with the onboarding service principal from the vault, skipped once Connected. Nothing until `arc_enabled` is true | `/opt/azcmagent/`, `/etc/apt/sources.list.d/microsoft-prod.sources`; the connect configuration is a temporary root-only file deleted in the same run |
 | `docker` | Docker Engine 29.8.1, buildx 0.37.1 and compose 5.5.1 from Docker's apt repository, held; `json-file` logs 10 MB x 3, `live-restore` | `/etc/docker/daemon.json` |
 | `node_exporter` | node_exporter 1.12.1, host-native, SHA256-verified, `127.0.0.1:9100` only | `/usr/local/bin/node_exporter`, `node_exporter.service` |
 | `caddy` | Caddy 2.11.4 built with `caddy-dns/cloudflare` 0.2.4, host-native under systemd; TLS for `lab.hybridcloudworks.com`, `*.lab.hybridcloudworks.com` and `*.coder.lab.hybridcloudworks.com` via DNS-01; placeholder response at the apex. Panes only (owner decision 2026-09-28): every name can be framed by the site alone, and a top-level browser visit is redirected to `https://hybridcloudworks.com/education/labs` (`roles/caddy/README.md`, "Panes only") | `/usr/local/bin/caddy`, `/opt/caddy/bin/` (versioned binary and its `.provenance`), `/etc/caddy/Caddyfile`, `/etc/caddy/conf.d/`, `/etc/caddy/env` (root:caddy, 0640), `caddy.service` running as `caddy` |
-| `coder` | Coder Community edition v2.37.3 and PostgreSQL 18.6 under Docker Compose from `../coder/docker-compose.yml`, both by digest; the Caddy route for `coder.lab` and `*.coder.lab`; a nightly `pg_dump` keeping seven days. Down until `coder_enabled` is true | `/etc/hcw/coder/` (`docker-compose.yml`, `.env`, `coder.env` and `coder-postgres.env`, the last two root 0600), `/etc/caddy/conf.d/10-coder.caddy`, `/usr/local/sbin/coder-postgres-backup`, `coder-postgres-backup.timer`, `/var/backups/coder/` |
+| `coder` | Coder Community edition v2.37.3 and PostgreSQL 18.6 under Docker Compose from `../coder/docker-compose.yml`, both by digest; the Caddy route for `coder.lab` and `*.coder.lab`; a nightly `pg_dump` keeping seven days. On since 2026-09-28, for members of the `HybridCloudWorks` GitHub organisation only | `/etc/hcw/coder/` (`docker-compose.yml`, `.env`, `coder.env` and `coder-postgres.env`, the last two root 0600), `/etc/caddy/conf.d/10-coder.caddy`, `/usr/local/sbin/coder-postgres-backup`, `coder-postgres-backup.timer`, `/var/backups/coder/` |
 | `labs_agent` | `vps-agent` host-native as `hcw-labs-agent.service` under user `hcw-labs-agent` (in `docker`), Node.js 26.10.0 from NodeSource, repository checkout at the commit the playbook runs from, certificate generated on the host | `/opt/hcw-labs-agent`, `/etc/hcw/labs-agent.env` (root, 0600), `/etc/hcw/labs-agent.pem` (root:hcw-labs-agent, 0640), `/etc/hcw/labs-agent.crt` |
 | `lab_images` | Every image a lab job runs, pulled by digest before any job needs it: each value of `IMAGES` in `vps-agent/lib/capabilities.js`, and the Coder workspace image from `../coder/templates/hcw-lab/main.tf` while `coder_enabled` is true. Read from the checkouts, never copied, so a pin bump needs no edit here; digests no pin names are removed from the lab's own repositories and nothing else is touched (`roles/lab_images/README.md`) | Docker's image store; the plan is `roles/lab_images/files/lab-images.mjs`, run from the playbook's checkout |
 | `portainer` | Portainer Business Edition 2.45.1 (LTS) by digest, one container with the Docker socket, HTTPS on **127.0.0.1:9443 only**, plain HTTP off, no Caddy route; reached through an SSH tunnel. Nothing until `portainer_enabled` is true | Container `portainer`, volume `portainer-data` |
@@ -27,7 +28,9 @@ its variable contract. Every version, digest and checksum is in
 `ansible/group_vars/all.yml`, and the collections are pinned in
 `ansible/requirements.yml`.
 
-`site.yml` runs the roles in that order: `arc` straight after `hardening`,
+`site.yml` runs the roles in that order: `vault_tools` straight after
+`hardening`, because `hcw-vault-set` is how a missing vault key is added and
+a later role that stops on one should find it installed; `arc` next,
 because the agent needs nothing the later roles install and the host should
 appear in Azure even when a later role fails; `coder` after `caddy`, because
 its route is a file in Caddy's `conf.d`, and before `labs_agent`;
@@ -63,12 +66,15 @@ this repository into `/opt/hcw-src` (or fetches, when the clone exists),
 checks out the current `main` commit detached and prints its full sha
 (`HCW_REPO_REF`, below), installs the collections and runs `site.yml`
 against localhost. Without a
-vault it still completes: the host is hardened, Docker and node_exporter
-run, Caddy serves an HTTP-only apex answering 503 that says TLS is off (and
-imports no routes, so nothing can leak over plaintext), Coder's Compose
-project is installed under `/etc/hcw/coder` but down (`coder_enabled` is
-false until the owner flips it, below), the agent unit is installed but
-not started, and Portainer and Vault are not installed.
+vault the play stops at the `coder` role, on purpose: Coder is on (since
+2026-09-28) and the role will not start it without its three vault keys.
+Every role before it has run by then, so the host is hardened,
+`hcw-vault-set` is installed, Docker and node_exporter run, and Caddy
+serves an HTTP-only apex answering 503 that says TLS is off (and imports no
+routes, so nothing can leak over plaintext). The `PLAY RECAP` shows
+`failed=1`, and the failed task is `coder : Refuse to enable Coder without
+its three vault secrets`. Create the vault and add its keys ("The vault",
+below), then re-run; that run configures the rest and ends with `failed=0`.
 
 ### The first-run host check
 
@@ -206,8 +212,11 @@ to current `main`.
 Secrets never enter the repository. They live on the host in
 `/etc/hcw/ansible/vault.yml`, encrypted with Ansible Vault, and the vault
 password is `/etc/hcw/ansible/vault-password`, root-only. `bootstrap.sh`
-passes both when they exist and runs without them when they do not. To
-create or edit them, bash, on the host:
+passes both when they exist and runs without them when they do not.
+
+The password comes first, once per host. Bash, on the host (the
+`vault_tools` role creates the directory too, root-only, so the first line
+matters only before the first `bootstrap.sh` run has finished):
 
 ```bash
 sudo install -d -m 0700 -o root -g root /etc/hcw/ansible
@@ -217,12 +226,43 @@ sudo install -d -m 0700 -o root -g root /etc/hcw/ansible
 sudo sh -c 'umask 077 && openssl rand -base64 32 > /etc/hcw/ansible/vault-password'
 ```
 
-```bash
-sudo /usr/local/bin/ansible-vault create --vault-password-file /etc/hcw/ansible/vault-password /etc/hcw/ansible/vault.yml
+### Setting a key
+
+`/usr/local/sbin/hcw-vault-set`, installed by the `vault_tools` role, sets
+one key from the value on its standard input. The value never appears on a
+command line, in a shell history or in any output. It creates `vault.yml` when
+there is none, keeps every other key, and replaces the file by rename, so
+the file is always the old vault or the new one. It is one line from the
+workstation, and the line is the same for every key except its last word,
+the key's name. PowerShell, for the Cloudflare token:
+
+```powershell
+(Get-Clipboard -Raw) | ssh hcw-lab "sudo -n /usr/local/sbin/hcw-vault-set vault_cloudflare_api_token"
 ```
 
-`ansible-vault create` opens an editor. Write these YAML keys, one per line,
-with their values:
+The line reads the clipboard when you press Enter, and copying the line
+itself fills the clipboard. So the order is:
+
+1. Paste the line at the prompt, and do not press Enter.
+2. Copy the value.
+3. Press Enter.
+
+Success is one line naming the key and every key now in the vault, with no
+value:
+
+```text
+hcw-vault-set: set vault_cloudflare_api_token (value not shown). Keys in the vault: vault_caddy_acme_email, vault_cloudflare_api_token, ...
+```
+
+`the value on stdin was empty; nothing changed` means the clipboard was
+empty, and `refusing key name` means the last word is not `vault_` followed
+by lower-case letters, digits and underscores. In both cases the vault is
+exactly as it was. `no vault password at /etc/hcw/ansible/vault-password`
+means the two lines above have not run. `-n` makes `sudo` fail at once
+rather than wait at a password prompt nobody can see; `hcwadmin`'s sudo
+asks for none.
+
+The keys:
 
 | Key | Read by | What it is |
 | --- | --- | --- |
@@ -240,30 +280,70 @@ with their values:
 | `vault_arc_tenant_id` | `arc` | The Entra tenant id |
 | `vault_arc_subscription_id` | `arc` | The application subscription's id (`sub-app-site-prod-cus`) |
 
+PowerShell, one line per key set by hand, each with the order above:
+
+```powershell
+(Get-Clipboard -Raw) | ssh hcw-lab "sudo -n /usr/local/sbin/hcw-vault-set vault_cloudflare_api_token"
+```
+
+```powershell
+(Get-Clipboard -Raw) | ssh hcw-lab "sudo -n /usr/local/sbin/hcw-vault-set vault_caddy_acme_email"
+```
+
+```powershell
+(Get-Clipboard -Raw) | ssh hcw-lab "sudo -n /usr/local/sbin/hcw-vault-set vault_coder_oauth2_github_client_id"
+```
+
+```powershell
+(Get-Clipboard -Raw) | ssh hcw-lab "sudo -n /usr/local/sbin/hcw-vault-set vault_coder_oauth2_github_client_secret"
+```
+
+The PostgreSQL password is made on the host and goes straight into the
+vault, so it is never on a screen or a clipboard. Only for a database that
+does not exist yet, which is a new or rebuilt host; a running one is
+changed with "Rotating the PostgreSQL password", below. PowerShell:
+
+```powershell
+ssh hcw-lab "openssl rand -hex 32 | sudo -n /usr/local/sbin/hcw-vault-set vault_coder_postgres_password"
+```
+
+The four `vault_arc_*` lines are in
+[docs/runbooks/labs-host.md](../docs/runbooks/labs-host.md), "Seed the
+vault", and the four `vault_labs_agent_*` keys are written by
+`scripts/lab/Register-LabAgent.ps1` (below). Once the keys are in, re-run
+`bootstrap.sh` ("Re-running", above); `HCW_REPO_REF=HEAD` applies the vault
+without moving the host to a newer commit.
+
 `vault_enabled`, `vault_version`, `vault_checksum` and
 `vault_pgp_key_checksum` in `ansible/group_vars/all.yml` are not keys of
 this file: they belong to the role that runs HashiCorp Vault (below), whose
-name is `vault`, and none of them is a secret.
+name is `vault`, and none of them is a secret. `hcw-vault-set` accepts any
+`vault_` name, so it cannot tell them apart; never set one there, because
+`bootstrap.sh` passes `vault.yml` with `-e`, and a key in it overrides
+`group_vars`.
 
 The four `vault_labs_agent_*` keys and the three `vault_coder_*` keys can be
 added later: until all four exist the agent stays stopped and the play says
-so, and the three are only read once `coder_enabled` is true. The four agent
-keys are not typed in by hand: `scripts/lab/Register-LabAgent.ps1` writes
-them ("The agent identity", below), merging them into `vault.yml` and
-leaving every other key as it was, or creating the file with only those
-four when it does not exist yet. So if the script ran first, `vault.yml`
-exists: add the other keys with `ansible-vault edit` (below), because
-`ansible-vault create` refuses a file that exists. The four
-`vault_arc_*` keys are read only while `arc_enabled` is true and the host is
-not yet Connected; the procedure that creates and then removes them is
-[docs/runbooks/labs-host.md](../docs/runbooks/labs-host.md). To edit later,
-bash, on the host:
+so, and until the three exist the play stops at the `coder` role (Coder is
+on). The four agent keys are not typed in by hand:
+`scripts/lab/Register-LabAgent.ps1` writes them ("The agent identity",
+below), merging them into `vault.yml` and leaving every other key as it
+was, or creating the file with only those four when it does not exist yet.
+Either order works with `hcw-vault-set`. The four `vault_arc_*` keys are
+read only while `arc_enabled` is true and the host is not yet Connected;
+the procedure that creates and then removes them is
+[docs/runbooks/labs-host.md](../docs/runbooks/labs-host.md).
+
+`hcw-vault-set` only adds and replaces. To remove a key, or to read the
+vault, open it in an editor. Bash, on the host:
 
 ```bash
 sudo /usr/local/bin/ansible-vault edit --vault-password-file /etc/hcw/ansible/vault-password /etc/hcw/ansible/vault.yml
 ```
 
-Then re-run `bootstrap.sh`.
+`hcw-vault-set` writes the file back from its parsed keys, sorted, so a
+comment added in the editor does not survive its next run. Re-run
+`bootstrap.sh` after either.
 
 ### The Cloudflare runtime token and its scope
 
@@ -292,9 +372,9 @@ The `coder` role (#679) runs Coder Community edition and its PostgreSQL from
 and the hardening test are described in
 [`../coder/README.md`](../coder/README.md); this section is the operating
 procedure. `ansible/group_vars/all.yml` holds the switches: `coder_enabled`
-(default `false`), `coder_oauth2_github_allowed_orgs` (default `[]`),
-`coder_oauth2_github_allow_signups` (default `true`) and
-`coder_max_workspaces` (`5`).
+(`true` since 2026-09-28), `coder_oauth2_github_allowed_orgs`
+(`[HybridCloudWorks]` since the same day), `coder_oauth2_github_allow_signups`
+(`true`) and `coder_max_workspaces` (`5`).
 
 **Coder is reached through panes on the site, never directly** (owner
 decision 2026-09-28). Opened in a browser tab, any Coder page, dashboard or
@@ -312,33 +392,44 @@ role asserts again, that the list is non-empty whenever `coder_enabled` is
 true and fails the play otherwise; with `coder_enabled: false` the asserts
 are skipped.
 
-### Enabling
+### Turning it on
 
-1. The owner creates the GitHub OAuth app (#682) at
-   `https://github.com/organizations/HybridCloudWorks/settings/applications/new`
-   with homepage `https://coder.lab.hybridcloudworks.com` and callback
+Owner decision 2026-09-28: Coder runs, and only members of the
+`HybridCloudWorks` GitHub organisation may sign in. The change that
+recorded it set `coder_enabled: true` and
+`coder_oauth2_github_allowed_orgs: [HybridCloudWorks]`; the other two
+things Coder needs were in place that day. The same three are what a
+rebuilt host needs:
+
+1. The GitHub OAuth app (#682), owned by the organisation, with homepage
+   `https://coder.lab.hybridcloudworks.com` and callback
    `https://coder.lab.hybridcloudworks.com/api/v2/users/oauth2/github/callback`.
-2. Add the three `vault_coder_*` keys from the table above to the vault.
-   Bash, on the host; the first line prints a password to paste as
-   `vault_coder_postgres_password`, the second opens the editor:
+   It is listed at
+   https://github.com/organizations/HybridCloudWorks/settings/applications;
+   a new one is made at
+   https://github.com/organizations/HybridCloudWorks/settings/applications/new.
+2. The three `vault_coder_*` keys, with the lines under "Setting a key"
+   above: the client id and secret from the app's page, and the PostgreSQL
+   password made on the host.
+3. The two switches in `ansible/group_vars/all.yml`, then a `bootstrap.sh`
+   run (above), which checks out the merged `main`. Bash, on the host:
 
    ```bash
-   openssl rand -hex 32
+   sudo /opt/hcw-src/lab-host/bootstrap.sh
    ```
 
-   ```bash
-   sudo /usr/local/bin/ansible-vault edit --vault-password-file /etc/hcw/ansible/vault-password /etc/hcw/ansible/vault.yml
-   ```
+The play refuses to continue if the allowlist is empty, if any of the three
+vault keys is missing, if the password holds a character outside
+`A-Za-z0-9._~-`, or if five workspaces at 2 GiB plus 2.5 GiB of headroom
+exceed the host's memory. Nothing creates a Coder user: the first person to
+sign in becomes the owner ("First admin sign-in", below), so the owner signs
+in before anyone else is told the lab is open.
 
-3. In a pull request, set `coder_enabled: true` and
-   `coder_oauth2_github_allowed_orgs: [HybridCloudWorks]` in
-   `ansible/group_vars/all.yml`, merge it and re-run `bootstrap.sh`
-   (above), which checks out the merged `main`. The play refuses to continue
-   if any of the three vault keys is missing, if the password holds a
-   character outside `A-Za-z0-9._~-`, or if five workspaces at 2 GiB plus
-   2.5 GiB of headroom exceed the host's memory.
-
-Success looks like `docker ps` showing `coder` and `coder-postgres`
+On the run that turns it on, the `PLAY RECAP` shows `failed=0`, and the
+changed tasks are Coder's: both environment files, `Start Coder and
+PostgreSQL`, the Caddy route and its reload, the backup timer, and the pull
+of the workspace image (`lab_images`, about 2.7 GB, so that task takes
+minutes). Success then looks like `docker ps` showing `coder` and `coder-postgres`
 (`sudo docker compose --project-directory /etc/hcw/coder ps` prints both
 with `running` and the database `healthy`), and Coder answering through
 Caddy. PowerShell, on the workstation:
@@ -375,6 +466,15 @@ coder users show me
 ```
 
 Success is a `Roles` row reading `Owner`. Every later sign-in is a member.
+
+If the tab shows `You aren't a member of the authorized Github
+organizations!` instead of the labs page, GitHub did not report the account
+as a member of `HybridCloudWorks` to the app. Either the account is not a
+member, or the organisation restricts OAuth app access and has not approved
+this app; that policy is at
+https://github.com/organizations/HybridCloudWorks/settings/oauth_application_policy.
+No Coder account was created, so the next successful sign-in is still the
+first.
 
 ### Publishing the template
 
@@ -425,18 +525,113 @@ loaded in a pane. That is the shape of the site's Open in Coder links
 
 ### The status token for the site
 
-#680's status proxy reads Coder with a token that can list templates and
-workspaces and nothing else. PowerShell, signed in as the owner:
+The site's Coder card (#680) reads Coder with `CODER-STATUS-TOKEN`, from
+the Function App, never the browser. `functions/src/lib/labs/coder-status.js`
+makes three calls: `GET /api/v2/templates`, `GET
+/api/v2/templateversions/{id}` for each template's active version, and `GET
+/api/v2/workspaces?q=status:running`, whose `count` is the running figure
+on the card. It sends no browser headers, so the panes-only rule passes it.
 
-```powershell
-coder tokens create --name hcw-status-proxy --lifetime 8760h --scope template:read --scope workspace:read
-```
+**What the token is, and why.** On Coder Community v2.37.3 the least
+privilege that answers all three correctly is a token scoped to
+`template:read` and `workspace:read`, belonging to a user of its own,
+`hcw-status`, that holds the Template Admin role. Each part was measured on
+2026-09-28 against the pinned image, with one workspace running that
+belonged to another user:
 
-The command prints the token once. Copy it, then store it as
-`CODER-STATUS-TOKEN` in Key Vault with the command in #682, and put its
-expiry (one year) in the calendar: nothing renews it. If this Coder version
-rejects `--scope`, create the token without it from a member account that
-owns no workspaces rather than from the owner.
+- **A user of its own**, so the token is not the owner's, and its calls
+  show in Coder's logs as `hcw-status`. Community cannot make a user that
+  has no sign-in: `--login-type none` needs a service account, and the
+  server answers `Service Accounts is a Premium feature`. A password user is
+  refused while password sign-in is off (`Password based authentication is
+  disabled!`). So `hcw-status` is a GitHub user whose address,
+  `coder-status@hybridcloudworks.invalid`, is on a domain that cannot
+  receive mail. GitHub cannot verify it for any account, so no GitHub
+  sign-in can ever become this user; only the token can act as it.
+- **Template Admin**, because it is the only role below Owner that can read
+  every user's workspaces. As Member, Auditor or User Admin, the running
+  count answered `0` while the workspace ran, and the card would have shown
+  an idle lab.
+- **The two scopes**, because they cap Template Admin at reading.
+
+| `hcw-status`'s role, and the token's scope | The three calls | Change a template | Delete a template | Stop a workspace |
+| --- | --- | --- | --- | --- |
+| Template Admin, `template:read` and `workspace:read` | 200, 200, `count` 1 | Refused (`rbac: forbidden`; nothing changed) | 403 | 403 |
+| Template Admin, no scope | 200, 200, `count` 1 | **200, changed** | **200, deleted** | 403 |
+| Member, Auditor or User Admin | 200, 200, `count` **0** | Refused | not tried | Refused |
+
+**Before you start.** Coder is on, you have signed in as its owner
+("First admin sign-in", above), and the Coder dashboard opens in a pane on
+the site. The steps run Coder's CLI inside the `coder` container on the host,
+over `ssh hcw-lab`, so nothing is installed on the workstation and nothing
+is a top-level visit. The CLI needs one token of yours to act as the owner,
+which it reads from standard input, so it never appears on a command line.
+
+1. **A token of yours, in a pane.** In the Coder dashboard in a pane: the
+   account menu, **Account**, then **Tokens** (Coder's path is
+   `/settings/tokens`), then **Add token**. Name it `hcw-setup`, choose the
+   shortest expiry the form offers, create it and copy it. Step 5 deletes
+   it.
+
+2. **The user and its role.** PowerShell, with that token on the clipboard:
+
+   ```powershell
+   (Get-Clipboard -Raw) | ssh hcw-lab "sudo -n docker exec -i -e CODER_URL=http://127.0.0.1:7080 coder sh -c 'tr -d \\r | { read -r CODER_SESSION_TOKEN; export CODER_SESSION_TOKEN; coder users show hcw-status >/dev/null 2>&1 || coder users create --username hcw-status --email coder-status@hybridcloudworks.invalid --login-type github; coder users edit-roles hcw-status --roles template-admin --yes && coder users show hcw-status; }'"
+   ```
+
+   Success is the user's table with `Username` `hcw-status`, `Status`
+   `dormant` and `Roles` `Template Admin`. The first run prints `A new user
+   has been created!` above it, with a note about GitHub sign-in that does
+   not apply to this user. A second run changes nothing. `You are signed
+   out or your session has expired` means the clipboard did not hold the
+   step 1 token.
+
+3. **The status token, straight to the clipboard.** PowerShell, with the
+   step 1 token still on the clipboard. The output replaces it, so the new
+   token is never on the screen:
+
+   ```powershell
+   (Get-Clipboard -Raw) | ssh hcw-lab "sudo -n docker exec -i -e CODER_URL=http://127.0.0.1:7080 coder sh -c 'tr -d \\r | { read -r CODER_SESSION_TOKEN; export CODER_SESSION_TOKEN; coder tokens create --user hcw-status --lifetime 1y --scope template:read --scope workspace:read; }'" | Set-Clipboard
+   ```
+
+   Success prints nothing. Check what the clipboard now holds, PowerShell:
+
+   ```powershell
+   Invoke-RestMethod 'https://coder.lab.hybridcloudworks.com/api/v2/workspaces?q=status:running' -Headers @{ 'Coder-Session-Token' = (Get-Clipboard -Raw).Trim() } | Select-Object count
+   ```
+
+   Success is a `count` row (`0` until someone starts a workspace). A `401`
+   means the clipboard does not hold a new token, because step 3 printed an
+   error instead of one. Make another token in step 1 and run step 3 again.
+
+4. **Seed it.** At https://hybridcloudworks.com/admin/integrations?tab=keys,
+   in the Hybrid Lab section, paste into **Coder status token** and save.
+   Success is the row's light turning green. A minute later (the card's read
+   is cached for one), PowerShell:
+
+   ```powershell
+   Invoke-RestMethod https://api-azure.hybridcloudworks.com/api/public/labs/coder-status | Select-Object configured, reachable, templates, capacity
+   ```
+
+   Success is `configured` `True` and `reachable` `True`, with `capacity`
+   showing `running` and `max` 5, and `templates` listing `hcw-lab` once it
+   is published ("Publishing the template", above; empty before that).
+   `reachable` `False` means Coder refused the token or did not answer, and
+   the check in step 3 tells which.
+
+5. **Delete the step 1 token**, in the same pane: **Account**, **Tokens**,
+   then delete `hcw-setup`.
+
+Then, in a pull request, take `CODER_STATUS_TOKEN` off `EXPECTED_UNRESOLVED`
+in `scripts/check-unresolved-secrets.mjs`, which `infra/functionapp.tf` asks
+for once it is seeded, so from then on an unresolved reference fails the
+monitor like any other.
+
+The token expires a year after step 3, and nothing renews it: put the date
+in the calendar. To renew, run steps 1, 3, 4 and 5 again. Step 3 makes a
+new token each time (Coder names each one, which is why the line gives no
+`--name`), and the old one stops working at its own expiry.
+`coder tokens list --all` lists both, with `hcw-status` as their owner.
 
 ### Kill switches
 
@@ -741,6 +936,23 @@ ansible-core 2.21.4, the same pins CI installs with pip); when the pins in
 `ci.yml` move, move this digest with them. CI runs the same two commands in
 the `ansible-lint (lab-host)` job of `.github/workflows/ci.yml`, gated on
 changes under `lab-host/`.
+
+The same job runs the test of `hcw-vault-set`
+(`ansible/roles/vault_tools/README.md`, "Tests"). It runs as root, which
+the image is, against a scratch vault. PowerShell, from the repository root:
+
+```powershell
+docker run --rm -v "${PWD}\lab-host:/work:ro" -w /work/ansible --entrypoint bash ghcr.io/ansible/community-ansible-dev-tools@sha256:775c81d53058009dd47b97872f4a86d3b0a9ce16ad9af3cc48514ce4197aa787 roles/vault_tools/tests/hcw-vault-set.test.sh
+```
+
+The same in bash (Git Bash or Linux), from the repository root:
+
+```bash
+MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd)/lab-host:/work:ro" -w /work/ansible --entrypoint bash ghcr.io/ansible/community-ansible-dev-tools@sha256:775c81d53058009dd47b97872f4a86d3b0a9ce16ad9af3cc48514ce4197aa787 roles/vault_tools/tests/hcw-vault-set.test.sh
+```
+
+A passing result has no `not ok` line and ends with
+`hcw-vault-set.test.sh: all` and the number of checks, then `checks passed`.
 
 The Coder files have their own checks — the hardening test, the Compose
 parse and `terraform validate` — listed in
