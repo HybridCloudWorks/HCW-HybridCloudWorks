@@ -1,12 +1,14 @@
 /**
  * The Agents tab's registry writes (#740): Register agent, and Deactivate /
- * Activate on each card.
+ * Activate on each card; and Remove on a deactivated card (owner request
+ * 2026-09-28).
  *
  * What these pin is what the go-live depends on. The form starts with every
  * job type ticked and sends exactly what is ticked; it refuses a value the
  * API would refuse, before the round trip; deactivating asks first and
- * activating does not; and every write refreshes the snapshot so the card
- * changes when the toast appears.
+ * activating does not; removing is offered only on a deactivated card and
+ * always asks; and every write refreshes the snapshot so the card changes
+ * when the toast appears.
  */
 import React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -266,5 +268,98 @@ describe('Deactivate and Activate', () => {
       title: 'Activate failed',
       variant: 'destructive',
     });
+  });
+});
+
+describe('Remove', () => {
+  // The card the owner asked about: the pre-reinstall host's agent.
+  const OLD_ID = 'srv939861';
+  const old = () =>
+    agent({
+      agentId: OLD_ID,
+      active: false,
+      version: '0.1.0',
+      lastSeenAt: '2026-08-20T09:30:00.000Z',
+    });
+
+  const openRemove = async () => {
+    fireEvent.click(screen.getByRole('button', { name: `Remove ${OLD_ID}` }));
+    return screen.findByRole('dialog');
+  };
+
+  it('is offered on a deactivated card only: not on an active one, nor one that does not say', () => {
+    render(
+      <AgentsTab
+        hub={hub({
+          agents: [agent(), old(), agent({ agentId: 'vps-legacy-01', active: undefined })],
+        })}
+      />
+    );
+
+    const removes = screen.getAllByRole('button', { name: /^Remove / });
+    expect(removes).toHaveLength(1);
+    expect(removes[0]).toHaveAccessibleName(`Remove ${OLD_ID}`);
+    expect(screen.queryByRole('button', { name: `Remove ${AGENT_ID}` })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Remove vps-legacy-01' })).not.toBeInTheDocument();
+  });
+
+  it('asks first, naming the agent and saying it can be registered again; Cancel sends nothing', async () => {
+    const state = hub({ agents: [agent(), old()] });
+    render(<AgentsTab hub={state} />);
+
+    const dialog = await openRemove();
+    expect(within(dialog).getByText(`Remove ${OLD_ID}?`)).toBeInTheDocument();
+    expect(within(dialog).getByText(/registration is deleted/)).toHaveTextContent(OLD_ID);
+    expect(within(dialog).getByText(/Register agent can add it back later/)).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(sendJSON).not.toHaveBeenCalled();
+    expect(state.refresh).not.toHaveBeenCalled();
+    expect(toast).not.toHaveBeenCalled();
+    // Still there, still offered.
+    expect(screen.getByRole('button', { name: `Remove ${OLD_ID}` })).toBeEnabled();
+  });
+
+  it('sends DELETE with no body on confirm, then toasts and refreshes', async () => {
+    sendJSON.mockResolvedValue({ ok: true, removed: true, agentId: OLD_ID });
+    const state = hub({ agents: [agent(), old()] });
+    render(<AgentsTab hub={state} />);
+
+    const dialog = await openRemove();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }));
+
+    await waitFor(() => expect(sendJSON).toHaveBeenCalledTimes(1));
+    expect(sendJSON.mock.calls[0]).toEqual([`cms/labs/agents/${OLD_ID}`, 'DELETE']);
+    await waitFor(() => expect(state.refresh).toHaveBeenCalledTimes(1));
+    expect(toast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Agent removed',
+        description: expect.stringContaining(OLD_ID),
+      })
+    );
+    // The other agent was never touched.
+    expect(sendJSON).not.toHaveBeenCalledWith(
+      expect.stringContaining(AGENT_ID),
+      expect.anything(),
+      expect.anything()
+    );
+  });
+
+  it('shows what the API said when it refuses, and does not refresh', async () => {
+    sendJSON.mockRejectedValue(new Error(`${OLD_ID} still holds job-1 (claimed).`));
+    const state = hub({ agents: [old()] });
+    render(<AgentsTab hub={state} />);
+
+    const dialog = await openRemove();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }));
+
+    await waitFor(() => expect(toast).toHaveBeenCalled());
+    expect(toast.mock.calls[0][0]).toMatchObject({
+      title: 'Remove failed',
+      description: `${OLD_ID} still holds job-1 (claimed).`,
+      variant: 'destructive',
+    });
+    expect(state.refresh).not.toHaveBeenCalled();
   });
 });
