@@ -261,8 +261,9 @@ describe('the three lab drafts, read from disk', () => {
     expect(draft.body).toContain(LAB_FENCE);
     expect(text.replace(/\r\n/g, '\n')).toContain(draft.body);
     expect((draft.body.match(/^```/gm) || []).length % 2).toBe(0);
-    // Written for GitHub, where the sibling links work; the import says so.
-    expect(draft.warnings.join(' ')).toMatch(/links to repository files will not resolve/);
+    // The sibling links point at the articles' site URLs now (2026-09-28), so
+    // the drafts are publishable as imported: no repository-file link left.
+    expect(draft.warnings.join(' ')).not.toMatch(/links to repository files will not resolve/);
   });
 
   it.each(LAB_DRAFTS)(

@@ -1562,6 +1562,14 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The lab article drafts link to each other on the site, not to repository
+  files.** The six sibling links in `docs/content/blog-lab-0*.md` pointed at
+  `blog-lab-0N-*.md`, which works on GitHub only; they now name each
+  article's site URL, `/<provider>/blog/<slugified title>` (Azure for part 1,
+  Terraform for parts 2 and 3). A title changed before publishing changes the
+  slug, so change these links with it. The importer's test now asserts the
+  drafts carry no repository-link warning.
+
 - **The editor's Problems panel matches CI, and the one open code-scanning
   alert is fixed.** `.vscode/settings.json` excludes `.claude/worktrees/`
   (agents' temporary checkouts, which fed stale `tsconfig.json` and workflow

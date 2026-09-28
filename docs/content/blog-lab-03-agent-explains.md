@@ -19,7 +19,7 @@ should now work.
 ```
 
 That is real output, from the terraform inside the sandbox template this part
-builds, run against the landing zone from [part 1](blog-lab-01-landing-zone.md).
+builds, run against the landing zone from [part 1](https://hybridcloudworks.com/azure/blog/build-a-landing-zone-you-can-read).
 It is also the one suggestion the agent in that sandbox is told never to take,
 and never to pass on to you.
 
