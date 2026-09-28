@@ -16,6 +16,11 @@
  *     2026-09-25 and carrying `live-check` because the `sbx` surface moves.
  *   - One section is still a slot: the article list (#677) lands later, in
  *     place, so the layout does not move under it.
+ *   - Beside the intro, `CoderCredit` says the labs are provided using
+ *     Coder and links Coder's name to its site (owner request 2026-09-28).
+ *     The intro names Azure Arc only as what the estate card reports, and
+ *     does not say the host is onboarded: the card is where that is true or
+ *     not, today and after onboarding (#663).
  *
  * EACH CARD OPENS ITS LAB'S PANE, `/education/labs/<id>` (LabPanePage.jsx,
  * #751). This page is also where GitHub sign-in ends: the lab host sends
@@ -41,6 +46,7 @@ import React from 'react';
 import { Helmet } from 'react-helmet-async';
 import { Link } from 'react-router';
 import SectionHeading from '@/components/education/SectionHeading';
+import CoderCredit from '@/components/labs/CoderCredit';
 import CoderStatusCard from '@/components/labs/CoderStatusCard';
 import LabCard from '@/components/labs/LabCard';
 import LabsEstateCard from '@/components/labs/LabsEstateCard';
@@ -96,20 +102,29 @@ export default function LabsLearnPage() {
           <h1 className="display-heading text-3xl sm:text-4xl text-slate-950 dark:text-white mb-3">
             {PAGE_TITLE}
           </h1>
-          <p className="text-slate-600 dark:text-slate-400 max-w-3xl">
-            Each lab below opens in VS Code in your browser with az, terraform, kubectl, helm and
-            ansible already installed, or runs on your own machine from the same container image.
-            Nothing here installs anything on your computer beyond Docker, and nothing you do in a
-            lab reaches anything else: the workspaces run on the Hybrid Lab host, a single server
-            onboarded to Azure Arc, whose live state is further down this page.
-          </p>
-          <p className="text-slate-600 dark:text-slate-400 max-w-3xl mt-3">
-            <strong className="text-slate-900 dark:text-slate-100">Open lab workspace</strong> opens
-            the lab in a pane on its own page here. The first time, you sign in with GitHub in a new
-            tab that brings you back, approve the workspace, and land in the lab folder. Workspaces
-            stop after an hour of inactivity and are limited to one CPU and two gigabytes of memory,
-            so treat them as scratch space and keep anything you want in your own repository.
-          </p>
+          {/* The intro keeps its width (max-w-3xl, 48rem) at every size. From
+              xl the credit takes the column beside it, top-aligned; below xl
+              it stacks under the intro at full width. */}
+          <div className="flex flex-col gap-6 xl:grid xl:grid-cols-[48rem_minmax(0,1fr)] xl:items-start xl:gap-10">
+            <div>
+              <p className="text-slate-600 dark:text-slate-400 max-w-3xl">
+                Each lab below opens in VS Code in your browser with az, terraform, kubectl, helm
+                and ansible already installed, or runs on your own machine from the same container
+                image. Nothing here installs anything on your computer beyond Docker, and nothing
+                you do in a lab reaches anything else: the workspaces run on the Hybrid Lab host, a
+                single server whose Azure Arc status is on the live card further down this page.
+              </p>
+              <p className="text-slate-600 dark:text-slate-400 max-w-3xl mt-3">
+                <strong className="text-slate-900 dark:text-slate-100">Open lab workspace</strong>{' '}
+                opens the lab in a pane on its own page here. The first time, you sign in with
+                GitHub in a new tab that brings you back, approve the workspace, and land in the lab
+                folder. Workspaces stop after an hour of inactivity and are limited to one CPU and
+                two gigabytes of memory, so treat them as scratch space and keep anything you want
+                in your own repository.
+              </p>
+            </div>
+            <CoderCredit />
+          </div>
         </header>
 
         <section aria-labelledby="labs-heading">
