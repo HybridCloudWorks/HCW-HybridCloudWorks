@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { cn } from '@/lib/utils';
 import { routes } from '@/lib/routeFactory';
-import { useTheme } from '@/context/ThemeContext';
+import ProviderLogo from '@/components/shared/ProviderLogo';
 import {
   PROVIDER_GUIDE,
   PROVIDER_GUIDE_DEFAULT,
@@ -55,7 +55,6 @@ const ROW_TWO_SPAN = {
 };
 
 export default function ProviderStrip() {
-  const { theme } = useTheme();
   const [selected, setSelected] = useState(null);
   const hoverTimer = useRef(null);
   // The provider whose next click a touch or pen press has claimed, so the
@@ -128,8 +127,8 @@ export default function ProviderStrip() {
                     className="group/provider flex flex-col items-center gap-2 rounded-lg px-2 py-1 lg:flex-row focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
                     {...handlersFor(entry.provider)}
                   >
-                    <img
-                      src={theme === 'dark' && entry.logoDark ? entry.logoDark : entry.logo}
+                    <ProviderLogo
+                      provider={entry.provider}
                       alt=""
                       loading="lazy"
                       decoding="async"

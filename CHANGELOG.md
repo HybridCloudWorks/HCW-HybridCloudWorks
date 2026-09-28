@@ -2080,6 +2080,43 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Primary buttons use `text-primary-foreground`, every scope's pair reads,
+  and provider logos read on both themes.** `--primary` is near-black on the
+  light theme, white on the dark one, and the provider's own colour inside a
+  provider's pages, so `bg-primary text-white` is a blank white box on any
+  dark page outside a provider scope (the two in `components/labs` were,
+  until #767), and `bg-primary text-foreground` is unreadable in one theme or
+  both. 37 class strings in 15 files now put `text-primary-foreground` on a
+  solid `bg-primary`, `hover:` pairs included, among them the icon tile on
+  the news and listing pages, whose `text-black dark:text-white` icon sat in a
+  child element a grep does not see. Measured in Chromium, most were readable
+  where they render today, because a provider scope set a saturated primary;
+  the switch renders the same there and stops being wrong the day the
+  component renders anywhere else. Two scopes' own pairs were under WCAG AA,
+  and changing the class alone would have made them worse: AWS put black on
+  its darkened orange (4.31:1, now white, 4.88:1) and FinOps white on its
+  green (3.02:1, now the site's dark ink, 5.67:1), so the FinOps tools page's
+  "Launch Tool" buttons, 3.01:1 on the dark theme, are 5.67:1 on both.
+  `src/primary-foreground.test.js` holds both halves: every scope's
+  `--primary-foreground` on `--primary` meets 4.5:1 on both themes, and a
+  scan of the parsed source (string and template literals, each branch of a
+  conditional, every `cn`/`clsx` combination, each variant state, and the
+  JSX inside a primary surface) fails on any other text colour on solid
+  `bg-primary`; translucent tints such as `bg-primary/10` are allowed, and
+  the allowlist is empty. On the home page, `aws.png`'s white lettering
+  vanished on the light theme and `ansible.svg`'s near-black disc on the
+  dark one; the light theme now shows AWS's one-colour logo as AWS draws it
+  in its own header (`aws-on-light.svg`; its trademark guidelines forbid
+  recolouring) and the dark theme the reversed Ansible mark
+  (`ansible-on-dark.svg`, the Simple Icons path, CC0), each with its source
+  noted in the file. The GitHub mark was nearly invisible on the dark theme
+  for a different reason: the pre-renderer resolves the theme as light, and
+  hydration keeps the server's `src`, so the black Invertocat stayed on a
+  near-black page. `ProviderLogo` now renders both variants and lets `.dark`
+  hide one, so the static HTML is right for both themes and the hidden file
+  is never fetched. One table, `lib/providerLogos.js`, replaces the strip's
+  `logo`/`logoDark` fields and the home page's `getProviderLogoSrc`, whose
+  design cards had been asking for a `terraform.png` that never existed.
 - **Coder sends no usage telemetry.** Owner decision 2026-09-28. Coder
   v2.37.3 ships with `--telemetry` on by default ("Coder collects anonymized
   usage data"). `lab-host/coder/docker-compose.yml` now sets

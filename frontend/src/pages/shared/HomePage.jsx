@@ -3,22 +3,11 @@ import { Helmet } from 'react-helmet-async';
 import { Link } from 'react-router';
 import { routes } from '@/lib/routeFactory';
 import { getFunctionsBase } from '@/lib/functionsBase';
-import { useTheme } from '@/context/ThemeContext';
 import Eyebrow from '@/components/shared/Eyebrow';
 import NumberedSection from '@/components/shared/NumberedSection';
 import StatBlock from '@/components/shared/StatBlock';
+import ProviderLogo from '@/components/shared/ProviderLogo';
 import ProviderStrip from '@/components/home/ProviderStrip';
-
-const getProviderLogoSrc = (provider, theme) => {
-  if (provider === 'github') {
-    return theme === 'dark'
-      ? '/icons/providers/GitHub_Invertocat_White_Clearspace.svg'
-      : '/icons/providers/GitHub_Invertocat_Black_Clearspace.svg';
-  }
-  if (provider === 'finops') return '/icons/providers/FinOps.svg';
-  if (provider === 'vmware') return '/icons/providers/vmware.svg';
-  return `/icons/providers/${provider}.png`;
-};
 
 const vendorDesigns = [
   {
@@ -294,7 +283,6 @@ const shouldFetchPlatformHealth = (functionsBase) => {
 };
 
 export default function HomePage() {
-  const { theme } = useTheme();
   const [startIndex, setStartIndex] = useState(0);
   const [healthStatuses, setHealthStatuses] = useState({
     aws: 'CHECKING',
@@ -697,16 +685,16 @@ export default function HomePage() {
                   </h3>
                   <div className="absolute bottom-0 left-2 h-6 w-6 flex items-center">
                     {design.provider === 'github' ? (
-                      <img
-                        src={getProviderLogoSrc('github', theme)}
+                      <ProviderLogo
+                        provider="github"
                         alt="GitHub logo"
                         loading="lazy"
                         decoding="async"
                         className="h-4 w-auto object-contain"
                       />
                     ) : (
-                      <img
-                        src={getProviderLogoSrc(design.provider, theme)}
+                      <ProviderLogo
+                        provider={design.provider}
                         alt={`${design.provider} logo`}
                         loading="lazy"
                         decoding="async"
