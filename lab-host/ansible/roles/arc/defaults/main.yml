@@ -27,7 +27,8 @@ arc_cloud: AzureCloud
 # Onboarding identity and target, from the vault file bootstrap.sh passes with
 # -e. All four must be set when arc_enabled is true and the agent is not yet
 # Connected; the role fails closed otherwise. Once it is Connected they are
-# not needed, and the runbook deletes the secret. The service principal holds
+# not needed, and scripts/lab/Register-LabArc.ps1 -Connect, which writes them,
+# deletes all four and the secret in Entra. The service principal holds
 # only Azure Connected Machine Onboarding on arc_resource_group
 # (infra/lab-hybrid.tf). The tenant and subscription are identifiers rather
 # than secrets, but they are kept in the vault beside the credential because

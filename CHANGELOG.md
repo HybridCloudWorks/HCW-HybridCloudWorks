@@ -19,6 +19,64 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Azure Arc onboarding of the lab host is two owner commands:
+  `scripts/lab/Register-LabArc.ps1`, then the same with `-Connect`** (#663).
+  The runbook's ten manual steps (a year-long secret from
+  `create-for-rbac`, a hand-edited vault, a pull request to flip
+  `arc_enabled`, four `az` commands for the monitoring, and a manual
+  deletion afterwards) become one run before the `hcw-azure` apply and one
+  after it. The first run resolves `sub-app-site-prod-cus` by name and
+  checks `rg-lab-hybrid-prod-cus` exists. It reads the host over ssh (agent
+  state, arc fact, the vault helper, and which `vault_arc_*` keys the vault
+  holds, by name only), finds or creates the single-tenant
+  `sp-arc-onboarding-lab-hybrid-prod-cus` with no role and no credential, and
+  grants `id-plat-terraform-prod-cus-01` Resource Policy Contributor on the
+  group only, so the audit policy can be applied. Then it mints a 24-hour
+  client secret with `az ad app credential reset --append --end-date` and
+  pipes it from a variable into `/usr/local/sbin/hcw-vault-set` over ssh's
+  standard input with its three identifiers. The value is never printed,
+  written to disk on the desktop, or put on a command line, and it is
+  written as exact bytes with a bare line feed, because a PowerShell pipe on
+  Windows would add a carriage return. The run reads the vault back and
+  deletes the new secret from Entra again if the vault does not hold it.
+  Finally it prints the service principal's object id, the two `hcw-azure`
+  variables (`arc_onboarding_principal_id`, HCL off;
+  `lab_hybrid_policy_enabled`, HCL on, which ADR 0032 decision 3 and #663's
+  acceptance both need) at the workspace's variables page, and the plan to
+  expect, `Plan: 5 to add, 1 to change, 3 to destroy`. The onboarding role
+  assignment stays Terraform's; the script only reads it. `-Connect` checks
+  that grant (read only) and stops if a machine resource from an earlier host
+  is in the way. It keeps or re-mints the secret, writes the host's arc
+  fact, runs `bootstrap.sh`, and waits for Connected. It then deletes every
+  client secret on the registration and all four `vault_arc_*` keys, with a
+  decrypt, drop, verify, re-encrypt and compare rewrite on the host that
+  leaves every other key byte for byte, and reads both back empty. Last, it
+  installs the Azure Monitor Agent extension and associates
+  `dcr-lab-hybrid-prod-cus` through `az rest` (Hybrid Compute API
+  2025-01-13, Monitor 2022-06-01), so no CLI extension is needed. When
+  connect fails it removes the fact it wrote, so later runs are not stopped
+  at the role. Both runs are idempotent and take `-WhatIf`. **`arc_enabled`
+  now comes from the host, not the repository:** `group_vars/all.yml` reads
+  the local fact `/etc/ansible/facts.d/hcw_arc.fact` and is true only for
+  `"enabled": true`. A rebuilt host is not onboarded whatever the repository
+  says, and a repository-wide `true` would stop its first `bootstrap.sh` run
+  at the role's fail-closed vault check, before every later role. Checked on
+  a systemd Ubuntu 26.04 container with the pinned ansible-core 2.21.4. With
+  no fact, the argument spec validated and all 17 `arc` tasks were skipped.
+  With the fact, the role installed and held `azcmagent 1.68.03532.1399`,
+  read `Disconnected` and stopped at its vault check. A missing, non-JSON,
+  `"enabled": "yes"` or list-shaped fact reads as false.
+  `scripts/lab/Register-LabArc.Tests.ps1` adds 126 Pester tests. They test
+  the Entra, Azure and host steps against mocked seams, the secret never
+  appearing in output or errors, and the vault helper receiving exactly the
+  value and one line feed. The host scripts run under bash against stand-in
+  `ansible-vault` and `azcmagent`, and the whole script runs, with and
+  without `-WhatIf`, against stand-in `az` and `ssh` that refuse every
+  write. `docs/runbooks/labs-host.md` "Arc onboarding", `lab-host/README.md`,
+  the `arc` role, and Required inputs §4.1 and §4.7 now describe this
+  procedure. The script has not yet run against the tenant or the host.
+  That is the owner's step.
+
 - **Lab workspaces open as panes on the site (#751).** Owner decision
   2026-09-28: the lab is reached only through panes on the site. #750 made
   the lab host send every top-level visit, Coder's included, back to
