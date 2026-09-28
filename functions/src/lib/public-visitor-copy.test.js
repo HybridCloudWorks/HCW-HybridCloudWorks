@@ -105,10 +105,12 @@ function backendTermsIn(text) {
  * What the lab's job log carries that a visitor must never read: the runner's
  * image, its registry and digests, the pull, its paths and the host. Kept
  * here rather than imported from visitor-report.js, so loosening the
- * module's own filter cannot loosen this guard.
+ * module's own filter cannot loosen this guard. `ghcr` is matched as a word,
+ * which covers ghcr.io, because a host-shaped pattern reads to CodeQL as an
+ * unanchored URL check.
  */
 const LAB_TOKENS = Object.freeze([
-  /ghcr\.io/i,
+  /\bghcr\b/i,
   /sha256:/i,
   /\bdocker\b/i,
   /\bpulling\b/i,

@@ -48,7 +48,9 @@
 
 /** The terms the report must never carry: the runner, its image, its paths and the host. */
 export const LAB_INTERNALS = Object.freeze([
-  ['the image registry', /ghcr\.io/i],
+  // The word, not the host: this scans text, and a host-shaped pattern here
+  // reads to CodeQL as an unanchored URL check (js/regex/missing-regexp-anchor).
+  ['the image registry', /\bghcr\b/i],
   ['an image digest', /sha256:/i],
   ['the container runtime', /\bdocker\b/i],
   ['an image pull', /\bpulling\b|\bpull complete\b|\bdownload complete\b|\bfs layer\b/i],
@@ -123,17 +125,19 @@ const FRAME_END = /^╵/;
 /**
  * The lab's paths inside a diagnostic, cut back to what a learner can read:
  * a path into a vendored module keeps `<module>@<version>/<file>`, and the
- * run directory and the provider registry's host drop out.
+ * run directory and the provider registry's host drop out. The host is a
+ * plain string, replaced wherever it appears, rather than a host-shaped
+ * pattern.
  */
 const SCRUBS = Object.freeze([
   [/(?:\.\.\/)+opt\/avm\//g, ''],
   [/\/opt\/avm\//g, ''],
   [/\/tmp\/run\/src\//g, ''],
   [/\/workspace\//g, ''],
-  [/registry\.terraform\.io\//g, ''],
+  ['registry.terraform.io/', ''],
 ]);
 
-const scrub = (text) => SCRUBS.reduce((out, [pattern, to]) => out.replace(pattern, to), text);
+const scrub = (text) => SCRUBS.reduce((out, [pattern, to]) => out.replaceAll(pattern, to), text);
 
 function sectionOf(line) {
   for (const [pattern, name] of SECTION_HEADERS) if (pattern.test(line)) return name;
