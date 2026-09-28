@@ -24,7 +24,9 @@
  * on, so everything it can put in front of a visitor is scanned the same
  * way: each of its messages, and the words in its page. It says "your lab
  * workspace", never the tool behind it, and its `unavailable` is the site's
- * sentence too.
+ * sentence too. That includes a template Coder does not have: the launcher
+ * says the sentence and never frames Coder's create page, whose own error
+ * box is what a visitor saw on 2026-09-28.
  *
  * In the CI matrix this runs in the `scripts (operations)` row, whose filter
  * covers lab-host/ and LabPanePage.jsx.
@@ -33,7 +35,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MESSAGES as LAUNCHER_MESSAGES } from '../lab-host/coder/launcher/launcher.js';
+import { ME_PATH, MESSAGES as LAUNCHER_MESSAGES, runLauncher } from '../lab-host/coder/launcher/launcher.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (relative) => readFileSync(path.join(repoRoot, relative), 'utf8');
@@ -167,6 +169,33 @@ describe('what the lab launcher can show', () => {
     const sentence = read(PANE_PAGE).match(/export const UNAVAILABLE_SENTENCE = "([^"]+)";/);
     expect(sentence, `${PANE_PAGE} no longer exports UNAVAILABLE_SENTENCE`).not.toBeNull();
     expect(LAUNCHER_MESSAGES.unavailable).toBe(sentence[1]);
+  });
+
+  // 2026-09-28, before the template was published: the pane loaded Coder's
+  // create page, and Coder answered with its own red box, these words and a
+  // stack trace. The launcher now reads the template first.
+  const CODER_ERROR_BOX = ['Resource not found or you do not have access to this resource', 'Response data', 'Stack Trace'];
+
+  it('shows only the site’s sentence when the template is missing, and never Coder’s error page', async () => {
+    const reply = (status, body = {}) => ({ ok: status >= 200 && status < 300, status, json: async () => body });
+    const says = [];
+    const frames = [];
+    const end = await runLauncher({
+      search: '?lab=landing-zone-builder-output',
+      // Signed in, no workspace yet, and Coder has no template: 404 for all but /users/me.
+      fetch: async (url) => (url === ME_PATH ? reply(200, { username: 'learner' }) : reply(404)),
+      ui: { say: (text) => says.push(text), frame: (framePath) => frames.push(framePath) },
+      post: () => {},
+      navigate: () => {},
+      sleep: async () => {},
+      now: () => 0,
+    });
+    const sentence = read(PANE_PAGE).match(/export const UNAVAILABLE_SENTENCE = "([^"]+)";/)[1];
+    expect(end).toBe('unavailable');
+    expect(frames, 'a Coder page was framed, and a missing template shows Coder’s own error there').toEqual([]);
+    expect(says.at(-1)).toBe(sentence);
+    expect(says.flatMap(termsIn)).toEqual([]);
+    expect(says.filter((text) => CODER_ERROR_BOX.some((words) => text.includes(words)))).toEqual([]);
   });
 
   it('points a visitor with no session at the site’s own sign-in button', () => {

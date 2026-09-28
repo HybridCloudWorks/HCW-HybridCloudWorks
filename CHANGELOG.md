@@ -19,6 +19,48 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The lab template is published from the host; lab workspaces open
+  trusted, without the AI chat; a missing template no longer shows Coder's
+  error in a pane.** Three things from the first live workspace on
+  2026-09-28. The publishing steps began with `winget install Coder.Coder`,
+  which reported success and installed nothing, so that day the template
+  was published by hand from the `coder` container. The `coder` role now
+  installs `/usr/local/sbin/hcw-coder-template-push` (root:root 0750), and
+  publishing is one PowerShell line with the owner's short-lived token on
+  the clipboard (`lab-host/README.md`, "Publishing the template"); nothing
+  is installed on the workstation. The helper takes the token from stdin
+  only (never an argument, never printed, never written to a file), copies
+  every `*.tf`, `.terraform.lock.hcl` and `README.md` from the checkout in
+  `/opt/hcw-src`, and not the test beside them, into a fresh `mktemp`
+  directory in the container, runs `coder templates push hcw-lab` and
+  `coder templates edit hcw-lab --default-ttl 1h` there against
+  `http://127.0.0.1:7080`, checks that one version is active and that Coder
+  reports `1h0m0s`, prints both, removes the copy on every exit and exits
+  non-zero on any failure. The autostop is `coder_template_default_ttl` in
+  the role's defaults, whole hours, asserted by the role and rendered into
+  the helper. `roles/coder/tests/hcw-coder-template-push.test.sh` renders
+  the helper with the role's defaults and runs it against a stub `docker`
+  and a fake `coder` in the `ansible-lint (lab-host)` job. `bootstrap.sh`
+  does not publish by itself: a token that can publish is as good as root
+  on this host, because the provisioner runs beside the Docker socket, and
+  Coder's API answers it from anywhere (the role's README has the reasoning).
+  Before the template existed, a lab's pane loaded Coder's create page,
+  which answered with Coder's own red "Resource not found" box and a stack
+  trace. The lab launcher now reads `GET
+  /api/v2/organizations/default/templates/hcw-lab`, the read Coder's create
+  page makes first, once before it frames that page; a 404, a deprecated
+  template or another template's body ends the visit with the site's
+  sentence, `Lab workspaces aren't available right now.`, and no Coder page
+  is loaded. `scripts/lab-host-launcher.test.mjs` (99 tests) and
+  `lab-host-visitor-copy.test.mjs` cover it. The workspace template gives
+  code-server four User settings through the pinned module's `settings`
+  input, checked against module 1.6.0 and VS Code 1.139.1 in code-server
+  4.139.1: `security.workspace.trust.enabled: false` (the first workspace
+  opened in Restricted Mode), `chat.disableAIFeatures: true` (the Chat
+  panel opened asking for a sign-in the site does not offer),
+  `workbench.startupEditor: "readme"` and `telemetry.telemetryLevel:
+  "off"`; `template.test.mjs` pins them and both versions. The owner check
+  in "First admin sign-in" runs the CLI in the container as well.
 - **Lab workspaces: the editor opens inside the site's pane.** Owner
   decision 2026-09-28: the lab is reached only through panes on the site,
   and the panes-only lock is not loosened. Coder's dashboard opens
@@ -1965,6 +2007,13 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The runbook's "Validate on the lab" table matches what visitors see.**
+  `docs/runbooks/labs-host.md` keyed its troubleshooting table on the
+  button's old wording, such as *its browser check (Cloudflare Turnstile)
+  is not configured*, which #755 took off the public pages. It is now keyed
+  on the API `code` in the network response, with the exact visitor
+  sentence for each, what it means and what to do, and rows for the states
+  with no code, told apart by the page's `data-door` and `data-check`.
 - **The lab article drafts link to each other on the site, not to repository
   files.** The six sibling links in `docs/content/blog-lab-0*.md` pointed at
   `blog-lab-0N-*.md`, which works on GitHub only; they now name each

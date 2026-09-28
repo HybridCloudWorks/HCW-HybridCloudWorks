@@ -574,7 +574,8 @@ gh workflow run deploy-azure-frontend.yml --repo HybridCloudWorks/HCW-HybridClou
 Success is both runs green at
 https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions. The site
 build reads the variable from step 2, so a site deployed before it has no site
-key and its button says so.
+key, and its button says the lab isn't available while the status read says
+open (the table below).
 
 **4. Seed the Turnstile secret.** At
 https://hybridcloudworks.com/admin/integrations?tab=keys, in the Hybrid Lab
@@ -613,20 +614,54 @@ job at https://hybridcloudworks.com/admin/labs?tab=jobs, claimed by
 `scripts/check-unresolved-secrets.mjs` in the same change that replaced the
 log with the report.
 
-| The button says | What it means | What to do |
-| --- | --- | --- |
-| *public submission is switched off* | `labs_public_submission_enabled` is `false` in the workspace | Delete the workspace variable (the default is `true`) or set it `true`, and apply |
-| *its browser check (Cloudflare Turnstile) is not configured* | `TURNSTILE-SECRET-KEY` is not seeded, or its reference did not resolve | Step 4 |
-| *this build of the site … has no Cloudflare Turnstile site key* | The site was built without `VITE_TURNSTILE_SITE_KEY` | Step 2, then the site deploy in step 3 |
-| *no lab agent is online* | `vps-hostinger-01` has not heartbeated in the last 90 seconds | "The lab agent's go-live", above |
-| *Cloudflare's browser check could not run here* | The Turnstile script did not load in that browser (an extension or network blocking `challenges.cloudflare.com`) | Reload, or try another browser; nothing on the server is wrong |
-| *Cloudflare's browser check did not pass…* after a press | Siteverify refused the token, or its hostname or action was not the site's | Press again: the widget fetches a new token. If it repeats, check the widget's hostname is `hybridcloudworks.com` |
+**When the button will not take a job.** The line beside the button speaks
+to visitors only (#755): it names no setting and no vendor, and every closed
+door reads the same sentence, so the sentence alone does not say which door
+is closed. The `code` does. In the browser's developer tools, **Network**
+tab, it is in the JSON answer of `GET
+https://api-azure.hybridcloudworks.com/api/public/labs/submit`, the status
+read the page makes when it loads (the same `code` the PowerShell line above
+prints), or, after a press, of the `POST` to the same address; a job's
+progress is `GET /api/public/labs/job?jobId=`. In the **Elements** tab, the
+line beside the button carries `data-door` (`open`, `busy`, `closed`,
+`checking` or `unreadable`) and the browser check's box carries
+`data-check` (`idle`, `loading`, `interactive`, `ready`, `spent` or
+`error`), which tell the rows without a code apart. The sentences are
+`frontend/src/pages/tools/landingZone/labValidateRules.js`; the codes are
+`functions/src/lib/labs/public-bounds.js`, `public-lock.js`,
+`public-submit.js` and `public-job.js`.
+
+| `code` | Where it shows | The visitor reads | What it means | What to do |
+| --- | --- | --- | --- | --- |
+| `PUBLIC_SUBMISSION_CLOSED` | Status read (`open` false, `data-door="closed"`); POST 503; job read 503 | *Validation on the lab isn't available right now. You can still download the files and validate locally.* | `LABS_PUBLIC_SUBMISSION_ENABLED` is not exactly `true`: `labs_public_submission_enabled` is `false` in the workspace | Delete the workspace variable (the default is `true`) or set it `true`, and apply |
+| `TURNSTILE_NOT_CONFIGURED` | Status read (`data-door="closed"`); POST 503 | The same sentence | `TURNSTILE-SECRET-KEY` is not seeded, or its Key Vault reference did not resolve | Step 4 |
+| `LAB_AGENT_OFFLINE` | Status read (`data-door="closed"`); POST 503 | The same sentence | No agent registered for `terraform-validate` has heartbeated in the last 90 seconds (`vps-hostinger-01`) | "The lab agent's go-live", above |
+| `LAB_STATUS_UNAVAILABLE` | Status read (`data-door="closed"`); POST 503 | The same sentence | The Function App could not read the agents or the queued count from Cosmos DB, and logs `labs public submit: readiness read failed:` | The Function App's log for that line |
+| `LAB_QUEUE_FULL` | Status read (`data-door="busy"`); POST 503 with `Retry-After: 300` | *The lab is busy right now. Try again in a few minutes, or download the files and validate locally.* | More than 20 jobs are queued | Nothing if it clears. If it stays, the agent is not claiming: the jobs at https://hybridcloudworks.com/admin/labs?tab=jobs |
+| `ORIGIN_NOT_ALLOWED` | POST 403 | *Validate on the lab works only from the Landing Zone Builder on hybridcloudworks.com.* | The request's `Origin` is not exactly `https://hybridcloudworks.com` or `https://www.hybridcloudworks.com` | Nothing, from the site. It is the expected answer to the PowerShell check above |
+| `TURNSTILE_REQUIRED` | POST 403 | *The browser check didn't finish, so the lab didn't take the job. Reload the page and try again.* | The POST carried no browser-check token | Reload. If it repeats, read `data-check` (the rows at the end) |
+| `TURNSTILE_RATE_LIMITED` | POST 429 with `Retry-After: 600` | *Too many attempts from this browser in the last few minutes. Try again in about ten minutes.* | One client asked for more than ten checks in ten minutes on one Function App instance | Wait ten minutes |
+| `TURNSTILE_FAILED` | POST 403 | *The browser check didn't pass, so the lab didn't take the job. Try again.* | Siteverify refused the token, or the token's hostname is not the site's or its action is not `lab-validate`. The log line `labs public submit refused by the Turnstile check:` has Cloudflare's error codes | Press again: the widget fetches a new token. If it repeats, check the widget's hostname is `hybridcloudworks.com` |
+| `TURNSTILE_UNAVAILABLE` | POST 503 with `Retry-After: 60` | *The browser check couldn't be completed just now. Try again in a minute.* | Siteverify was out of reach, slower than five seconds, answered something other than JSON, or refused the request itself. The same log line says which | If it lasts, read the log line. `invalid-input-secret` means the seeded secret is not this widget's: step 4 again with its **Secret Key** |
+| `LAB_RATE_LIMITED` | POST 429 with `Retry-After: 3600` | *You've reached the limit for validation on the lab for now (two an hour). Try again in about an hour.* | This client has submitted twice in its current hour | Nothing: the window resets an hour after the client's first submission |
+| `LAB_PAUSED_FOR_TODAY` | POST 503 | *Validation on the lab has reached today's limit. Try again tomorrow, or download the files and validate locally.* | Fifty public jobs today, UTC | Nothing until 00:00 UTC |
+| `PAYLOAD_TOO_LARGE` | POST 413, or the page before it sends | *This build is too large for the lab. Remove some components, or download the files and validate locally.* When the page measured it before sending, the size comes after *for the lab*, as in *(70,112 bytes; the limit is 65,536)* | The encoded files are over 64 KB | Nothing on the server: the build is too big for the public path |
+| `INVALID_BODY` | POST 400 | *Something went wrong. Please try again.* | The body failed the server's checks, which the site's own page never sends | The site and the functions are from different commits: both deploys in step 3, from `main` |
+| `FORBIDDEN` | POST 403 | *Something went wrong. Please try again.* | The request reached the Function App without Cloudflare's origin secret, and it logs `labs public submit rejected: unverified origin` | Check `CF_ORIGIN_SECRET` resolves on the Function App and Cloudflare still adds the origin-secret header |
+| `JOB_NOT_FOUND` | Job read 404 | *The lab no longer has this job. Its result is kept for a day.* | The job is past its day, or never existed | Nothing |
+| None | Status read `open` true; `data-door="open"`, `data-check="idle"` | *Validation on the lab isn't available right now. You can still download the files and validate locally.* | This build of the site has no `VITE_TURNSTILE_SITE_KEY` | Step 2, then the site deploy in step 3 |
+| None | The status read failed; `data-door="unreadable"` | The same sentence | The status read did not answer: the network, or a 500 the Function App logs as `publicLabsSubmit status failed:` | The Function App's log |
+| None | `data-check="error"` | *The browser check couldn't run here, so Validate on the lab is unavailable. Reload the page to try again.* | The check's script did not load, or the widget failed, in that browser: an extension or network blocking `challenges.cloudflare.com`, or a host the widget does not list | Reload, or another browser. If every browser shows it, check the widget's hostname list |
+| None | `data-check="interactive"` | *Please complete the check below, then validate.* | The widget wants an interaction, which Managed mode asks for now and then | The visitor completes it |
+| None | POST 500 | *Something went wrong. Please try again.* | The submission failed inside the Function App, which logs `publicLabsSubmit failed:` | The Function App's log |
 
 **Closing it again** is one workspace edit: set the Terraform variable
 `labs_public_submission_enabled` to `false` (HCL off) at
 https://app.terraform.io/app/hcw/workspaces/hcw-azure/variables and apply.
 Every public lab route then answers `PUBLIC_SUBMISSION_CLOSED` before reading
-anything, and the button says so.
+anything, and the line beside the button reads *Validation on the lab isn't
+available right now. You can still download the files and validate
+locally.*
 
 ## Portainer through an SSH tunnel
 

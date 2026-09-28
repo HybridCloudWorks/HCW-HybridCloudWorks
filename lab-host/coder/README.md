@@ -3,10 +3,11 @@
 Coder Community edition on the lab host: the Compose file, the `hcw-lab`
 workspace template and the test that holds both to the boundary ADR 0032
 draws (#679, Phase 1 of #659). The Ansible `coder` role in `../ansible`
-deploys the Compose file; the template is published from a workstation with
-the Coder CLI. Operating procedures — enabling, first sign-in, the kill
-switches, rotation, backups — are in [`../README.md`](../README.md) under
-"Coder".
+deploys the Compose file, and the template is published from the host with
+`/usr/local/sbin/hcw-coder-template-push`, which that role installs.
+Operating procedures — enabling, first sign-in, publishing the template, the
+kill switches, rotation, backups — are in [`../README.md`](../README.md)
+under "Coder".
 
 ## Files
 
@@ -14,9 +15,9 @@ switches, rotation, backups — are in [`../README.md`](../README.md) under
 | --- | --- |
 | `docker-compose.yml` | `coder` and `coder-postgres`, the only two Compose services on the host. Images are interpolated from a role-written `.env` so the digests live once, in `../ansible/group_vars/all.yml`. Every `CODER_*` name is checked against <https://coder.com/docs/reference/cli/server> (comment at the top) |
 | `compose-config-check.sh` | Proves the Compose file parses without the host: stand-ins for the three role-written files in a temporary directory, then `docker compose config`. Prints the two service names on success |
-| `templates/hcw-lab/main.tf` | The workspace template: Coder's Docker starter adapted to uid 65534, one CPU, 2 GiB, no socket, no host path, no capabilities, a per-workspace volume and a per-workspace bridge network, `code-server` on `*.coder.lab`. Providers and the module are pinned; `.terraform.lock.hcl` is committed |
+| `templates/hcw-lab/main.tf` | The workspace template: Coder's Docker starter adapted to uid 65534, one CPU, 2 GiB, no socket, no host path, no capabilities, a per-workspace volume and a per-workspace bridge network, `code-server` on `*.coder.lab` with the editor's User settings (below). Providers and the module are pinned; `.terraform.lock.hcl` is committed |
 | `templates/hcw-lab/README.md` | Shown to learners on the template's page in Coder |
-| `templates/hcw-lab/template.test.mjs` | The hardening test (`node --test`). Fails when the socket appears outside the `coder` service, anything is `privileged`, the workspace maps a host path, joins the Compose network or does not run as 65534, or when workspace apps could be served by path on the dashboard's origin (`CODER_DISABLE_PATH_APPS` not `"true"`, or an app that is not a subdomain app) |
+| `templates/hcw-lab/template.test.mjs` | The hardening test (`node --test`). Fails when the socket appears outside the `coder` service, anything is `privileged`, the workspace maps a host path, joins the Compose network or does not run as 65534, or when workspace apps could be served by path on the dashboard's origin (`CODER_DISABLE_PATH_APPS` not `"true"`, or an app that is not a subdomain app). Also pins the editor's User settings and the two versions they were checked against. Never published: `hcw-coder-template-push` copies only `*.tf`, the lock file and the README |
 | `package.json` | `npm test` runs `node --test`; no dependencies, no lockfile |
 | `launcher/` | The lab launcher: `index.html`, `main.js`, `launcher.js` and `launcher.css`, static, with no build step and no third-party code. The `coder` role installs them and Caddy serves them at `https://coder.lab.hybridcloudworks.com/_hcw/lab/` (below). `scripts/lab-host-launcher.test.mjs` tests the logic in `launcher.js` with a mocked Coder, the files and the route |
 
@@ -40,8 +41,17 @@ dashboard's own name so it has the learner's session and Coder's API:
    the pane, which is the site's button. Otherwise its `username`,
    lowercased and held to Coder's rule for a name, is the owner in
    code-server's name below.
-3. `GET /api/v2/users/me/workspace/<name>`. None yet: Coder's own create
-   page, `/templates/hcw-lab/workspace?mode=auto&name=<name>&param.lab=<id>`,
+3. `GET /api/v2/users/me/workspace/<name>`. None yet: first `GET
+   /api/v2/organizations/default/templates/hcw-lab`, once, the read Coder's
+   create page makes first (`default` is Coder's name for the default
+   organization). A 404 there, which Coder answers both for a template it
+   does not have and for one the learner cannot read, or a deprecated
+   template, ends it with `Lab workspaces aren't available right now.`, and
+   Coder's page is never loaded: loaded, it shows Coder's own red `Resource
+   not found or you do not have access to this resource` box with a stack
+   trace, as it did on 2026-09-28 before the template was published. With
+   the template there: Coder's own create page,
+   `/templates/hcw-lab/workspace?mode=auto&name=<name>&param.lab=<id>`,
    in a frame of the same origin, where the learner confirms Coder's
    dialog. Stopped, failed or cancelled: Coder's own workspace page,
    `/@me/<name>`, where Start is. It never creates or starts anything
@@ -67,6 +77,25 @@ string. Caddy sends it with `default-src 'none'`, scripts, styles, fetches
 and frames from `coder.lab` only, `base-uri 'none'` and `form-action
 'none'`, beside the panes-only `frame-ancestors`, and `Cache-Control:
 no-store`. It has no top-level exemption.
+
+## The editor's settings
+
+`module "code-server"` in `templates/hcw-lab/main.tf` passes four User
+settings through the module's `settings` input (module 1.6.0), which merges
+them into `~/.local/share/code-server/User/settings.json` before
+code-server starts, on every start. Each name was checked against VS Code
+1.139.1, the release code-server 4.139.1 carries:
+
+| Setting | Why |
+| --- | --- |
+| `security.workspace.trust.enabled: false` | The first workspace opened in Restricted Mode (2026-09-28), and extensions and tasks waited for the learner to trust the folder. The folder is this repository's, in a disposable, isolated workspace, so trust guards nothing here |
+| `chat.disableAIFeatures: true` | Hides VS Code's built-in AI features, the Chat panel ("Build with Agent") with them, which opened on the right and asked for a sign-in the site does not offer |
+| `workbench.startupEditor: "readme"` | The lab folder's README first. The Landing Zone Builder lab's startup script writes one; the other two lab folders have none today, and VS Code shows its Welcome page there instead |
+| `telemetry.telemetryLevel: "off"` | No usage data from a learner's editor |
+
+A workspace picks them up from the template version it is built from, so
+one built before they were published gets them once it is updated (Coder's
+**Update and start…**).
 
 ## The boundary, in one paragraph
 
@@ -95,7 +124,8 @@ Written down so nobody rediscovers them (#659):
   providers, not the GitHub OAuth login; #682's live check confirms which.
 - **Five concurrent AI agents.** Not used by this template.
 - Autostop requirement, dormancy and failure cleanup are Premium; the
-  one-hour default TTL is Community and is set with `coder templates edit`.
+  one-hour default TTL is Community and is set with `coder templates edit`,
+  which `hcw-coder-template-push` runs after every publish.
 - No enforced workspace count. `coder_max_workspaces` in `group_vars` is the
   number the host is sized for and the role asserts it against the host's
   memory; it is not a Coder setting.
@@ -131,7 +161,7 @@ The Compose check is bash (Git Bash), because it is a shell script:
 bash lab-host/coder/compose-config-check.sh
 ```
 
-Success: `node --test` reports `pass 11`, `fail 0`; `fmt` prints nothing;
+Success: `node --test` reports `pass 12`, `fail 0`; `fmt` prints nothing;
 `validate` prints `Success! The configuration is valid.`; the compose check
 prints `coder-postgres` and `coder` (dependency order). The
 `coder (lab-host)` job in `.github/workflows/ci.yml` runs the same four on
@@ -150,10 +180,12 @@ terraform -chdir=lab-host/coder/templates/hcw-lab plan -refresh=false
 | Change | Where | Then |
 | --- | --- | --- |
 | Coder or PostgreSQL version | `coder_image_*`, `coder_postgres_image_*` in `../ansible/group_vars/all.yml` (`../ansible/roles/coder/README.md` shows the `imagetools inspect` lines) | Merge, then re-run `bootstrap.sh` on the host, which checks out the merged `main`. A new PostgreSQL major is a dump and a restore, not a pin bump alone: `../ansible/roles/coder/README.md`, "The next major" |
-| Workspace image | `image_tag` and `image_digest` in `templates/hcw-lab/main.tf`, from the `publish-lab-image.yml` job summary | `coder templates push` again (`../README.md`, "Coder") |
-| Providers or the `code-server` module | `required_providers` and `module "code-server"` in `main.tf`, then `terraform init -upgrade` to refresh `.terraform.lock.hcl` | `coder templates push` |
-| A new lab | `local.labs` in `main.tf` and the matching `option` and `validation` regex; the catalogue in `frontend/src/data/labs/catalogue.js` (#681) | `coder templates push` |
-| Workspace limits | `memory_mib`, `cpu_quota` in `main.tf`; `coder_workspace_memory_mib` in the role's defaults if the memory changes, so the capacity assertion stays true | `coder templates push` |
+| Workspace image | `image_tag` and `image_digest` in `templates/hcw-lab/main.tf`, from the `publish-lab-image.yml` job summary | Merge, re-run `bootstrap.sh`, then publish with `hcw-coder-template-push` (`../README.md`, "Publishing the template") |
+| Providers or the `code-server` module | `required_providers` and `module "code-server"` in `main.tf`, then `terraform init -upgrade` to refresh `.terraform.lock.hcl`. A new module or code-server version means checking the editor settings against it ("The editor's settings", above); `template.test.mjs` pins both versions so the bump says so | The same: merge, `bootstrap.sh`, publish |
+| The editor's settings | `settings` in `module "code-server"` in `main.tf`, and the list in `template.test.mjs` | The same: merge, `bootstrap.sh`, publish |
+| A new lab | `local.labs` in `main.tf` and the matching `option` and `validation` regex; the catalogue in `frontend/src/data/labs/catalogue.js` (#681) | The same: merge, `bootstrap.sh`, publish |
+| Workspace limits | `memory_mib`, `cpu_quota` in `main.tf`; `coder_workspace_memory_mib` in the role's defaults if the memory changes, so the capacity assertion stays true | The same: merge, `bootstrap.sh`, publish |
+| The one-hour autostop | `coder_template_default_ttl` in `../ansible/roles/coder/defaults/main.yml`, whole hours | Merge, `bootstrap.sh` (it renders the helper), then publish |
 
 Every one of those is caught by `template.test.mjs` if it loosens the
 boundary, which is the point of running it in CI.

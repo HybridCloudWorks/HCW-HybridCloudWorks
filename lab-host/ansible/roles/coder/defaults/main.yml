@@ -52,6 +52,14 @@ coder_postgres_password: "{{ vault_coder_postgres_password | default('') }}"
 coder_workspace_memory_mib: 2048
 coder_server_memory_reserve_mib: 2560
 
+# The hcw-lab template's default autostop, set by /usr/local/sbin/hcw-coder-template-push
+# (`coder templates edit hcw-lab --default-ttl`) after every publish; this is the
+# one place it is written, and the helper is rendered with it. Whole hours
+# (<n>h), which the role asserts: Coder's template settings take the default
+# autostop in hours, and the helper checks that Coder reports it back as
+# <n>h0m0s. lab-host/README.md, "Publishing the template".
+coder_template_default_ttl: 1h
+
 # Nightly pg_dump, the convenience docs/architecture/labs-host.md describes:
 # seven days on the host, never copied anywhere.
 coder_backup_dir: /var/backups/coder

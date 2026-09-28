@@ -10,6 +10,11 @@
 //   6. workspace apps are served on their own names only, never by path on
 //      the dashboard's origin (CODER_DISABLE_PATH_APPS, added 2026-09-28).
 //
+// And one thing that is not the boundary but is easy to lose in an edit: the
+// editor's User settings (Workspace Trust off, the built-in AI chat off, the
+// README first, telemetry off), with the two versions they were checked
+// against.
+//
 // Text-level on purpose: no YAML or HCL parser is a dependency of this
 // directory, and the assertions are about what a reviewer would grep for.
 // Run with `node --test` from lab-host/coder (npm test does the same).
@@ -59,43 +64,42 @@ function composeServices(text) {
   return services;
 }
 
+// The lines of the block that opens on lines[start], by brace matching.
+function blockFrom(lines, start) {
+  let depth = 0;
+  const block = [];
+  for (let j = start; j < lines.length; j += 1) {
+    depth += (lines[j].match(/\{/g) || []).length;
+    depth -= (lines[j].match(/\}/g) || []).length;
+    block.push(lines[j]);
+    if (depth === 0) break;
+  }
+  return block;
+}
+
+// Every block whose opening line passes `opens`, each as its lines.
+const blocksWhere = (lines, opens) => lines.flatMap((line, i) => (opens(line) ? [blockFrom(lines, i)] : []));
+
 // Top-level HCL blocks as { header, body } so a `volumes {` inside the
 // container can be inspected without a parser.
 function hclBlocks(text, header) {
-  const blocks = [];
-  const lines = codeLines(text);
-  for (let i = 0; i < lines.length; i += 1) {
-    if (!lines[i].startsWith(header)) continue;
-    let depth = 0;
-    const body = [];
-    for (let j = i; j < lines.length; j += 1) {
-      depth += (lines[j].match(/\{/g) || []).length;
-      depth -= (lines[j].match(/\}/g) || []).length;
-      body.push(lines[j]);
-      if (depth === 0) break;
-    }
-    blocks.push({ header: lines[i], body: body.join('\n') });
-  }
-  return blocks;
+  return blocksWhere(codeLines(text), (line) => line.startsWith(header)).map((block) => ({
+    header: block[0],
+    body: block.join('\n'),
+  }));
 }
 
 // Nested blocks of one name inside a body, by brace matching.
 function nestedBlocks(body, name) {
-  const found = [];
-  const lines = body.split('\n');
-  for (let i = 0; i < lines.length; i += 1) {
-    if (!new RegExp(`^\\s*${name}\\s*\\{`).test(lines[i])) continue;
-    let depth = 0;
-    const block = [];
-    for (let j = i; j < lines.length; j += 1) {
-      depth += (lines[j].match(/\{/g) || []).length;
-      depth -= (lines[j].match(/\}/g) || []).length;
-      block.push(lines[j]);
-      if (depth === 0) break;
-    }
-    found.push(block.join('\n'));
-  }
-  return found;
+  const opens = new RegExp(`^\\s*${name}\\s*\\{`);
+  return blocksWhere(body.split('\n'), (line) => opens.test(line)).map((block) => block.join('\n'));
+}
+
+// The body of `name = { ... }` inside a block's body, by brace matching.
+function assignedObject(body, name) {
+  const opens = new RegExp(`^\\s*${name}\\s*=\\s*\\{\\s*$`);
+  const [block] = blocksWhere(body.split('\n'), (line) => opens.test(line));
+  return block ? block.slice(1, -1).join('\n') : null;
 }
 
 const services = composeServices(compose);
@@ -219,4 +223,28 @@ test('workspace apps are served on their own names only, never on the dashboard 
   assert.match(appModules[0].body, /^\s*subdomain\s*=\s*true\s*$/m, 'code-server is a subdomain app');
   const pathApp = codeLines(mainTf).filter((line) => /^\s*subdomain\s*=\s*false\b/.test(line));
   assert.equal(pathApp.length, 0, 'no app in the template asks to be served by path');
+});
+
+test('code-server opens trusted, without the AI chat, on the README, with telemetry off', () => {
+  // 2026-09-28: the first workspace opened in Restricted Mode with the
+  // built-in Chat panel asking for a sign-in. The settings are the fix; each
+  // name was checked against VS Code 1.139.1, which code-server 4.139.1
+  // carries, and the `settings` input against the module at 1.6.0. A bump
+  // of either pin means checking them again, which is why both are here.
+  const [codeServer] = hclBlocks(mainTf, 'module "code-server"');
+  assert.match(codeServer.body, /^\s*version\s*=\s*"1\.6\.0"\s*$/m, 'the module the settings input was read from');
+  assert.match(codeServer.body, /^\s*install_version\s*=\s*"4\.139\.1"\s*$/m, 'the code-server the setting names were read from');
+  const settings = assignedObject(codeServer.body, 'settings');
+  assert.ok(settings !== null, 'the module is given User settings');
+  const entries = settings
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .map((line) => line.match(/^\s*"([^"]+)"\s*=\s*(\S.*?)\s*$/));
+  assert.ok(entries.every(Boolean), `every line of settings is one "name" = value:\n${settings}`);
+  assert.deepEqual(Object.fromEntries(entries.map(([, name, value]) => [name, value])), {
+    'security.workspace.trust.enabled': 'false',
+    'chat.disableAIFeatures': 'true',
+    'workbench.startupEditor': '"readme"',
+    'telemetry.telemetryLevel': '"off"',
+  });
 });

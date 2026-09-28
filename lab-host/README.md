@@ -17,7 +17,7 @@ every step.
 | `docker` | Docker Engine 29.8.1, buildx 0.37.1 and compose 5.5.1 from Docker's apt repository, held; `json-file` logs 10 MB x 3, `live-restore` | `/etc/docker/daemon.json` |
 | `node_exporter` | node_exporter 1.12.1, host-native, SHA256-verified, `127.0.0.1:9100` only | `/usr/local/bin/node_exporter`, `node_exporter.service` |
 | `caddy` | Caddy 2.11.4 built with `caddy-dns/cloudflare` 0.2.4, host-native under systemd; TLS for `lab.hybridcloudworks.com`, `*.lab.hybridcloudworks.com` and `*.coder.lab.hybridcloudworks.com` via DNS-01; placeholder response at the apex. Panes only (owner decision 2026-09-28): every name can be framed by the site alone, and a top-level browser visit is redirected to `https://hybridcloudworks.com/education/labs` (`roles/caddy/README.md`, "Panes only") | `/usr/local/bin/caddy`, `/opt/caddy/bin/` (versioned binary and its `.provenance`), `/etc/caddy/Caddyfile`, `/etc/caddy/conf.d/`, `/etc/caddy/env` (root:caddy, 0640), `caddy.service` running as `caddy` |
-| `coder` | Coder Community edition v2.37.3 and PostgreSQL 18.6 under Docker Compose from `../coder/docker-compose.yml`, both by digest; the Caddy route for `coder.lab` and `*.coder.lab`; a nightly `pg_dump` keeping seven days. On since 2026-09-28, for members of the `HybridCloudWorks` GitHub organisation only | `/etc/hcw/coder/` (`docker-compose.yml`, `.env`, `coder.env` and `coder-postgres.env`, the last two root 0600), `/etc/caddy/conf.d/10-coder.caddy`, `/usr/local/sbin/coder-postgres-backup`, `coder-postgres-backup.timer`, `/var/backups/coder/` |
+| `coder` | Coder Community edition v2.37.3 and PostgreSQL 18.6 under Docker Compose from `../coder/docker-compose.yml`, both by digest; the Caddy route for `coder.lab` and `*.coder.lab`; a nightly `pg_dump` keeping seven days; `hcw-coder-template-push`, which publishes the workspace template from the checkout ("Publishing the template", below). On since 2026-09-28, for members of the `HybridCloudWorks` GitHub organisation only | `/etc/hcw/coder/` (`docker-compose.yml`, `.env`, `coder.env` and `coder-postgres.env`, the last two root 0600), `/etc/caddy/conf.d/10-coder.caddy`, `/usr/local/sbin/coder-postgres-backup`, `/usr/local/sbin/hcw-coder-template-push` (root:root, 0750), `coder-postgres-backup.timer`, `/var/backups/coder/` |
 | `labs_agent` | `vps-agent` host-native as `hcw-labs-agent.service` under user `hcw-labs-agent` (in `docker`), Node.js 26.10.0 from NodeSource, repository checkout at the commit the playbook runs from, certificate generated on the host | `/opt/hcw-labs-agent`, `/etc/hcw/labs-agent.env` (root, 0600), `/etc/hcw/labs-agent.pem` (root:hcw-labs-agent, 0640), `/etc/hcw/labs-agent.crt` |
 | `lab_images` | Every image a lab job runs, pulled by digest before any job needs it: each value of `IMAGES` in `vps-agent/lib/capabilities.js`, and the Coder workspace image from `../coder/templates/hcw-lab/main.tf` while `coder_enabled` is true. Read from the checkouts, never copied, so a pin bump needs no edit here; digests no pin names are removed from the lab's own repositories and nothing else is touched (`roles/lab_images/README.md`) | Docker's image store; the plan is `roles/lab_images/files/lab-images.mjs`, run from the playbook's checkout |
 | `portainer` | Portainer Business Edition 2.45.1 (LTS) by digest, one container with the Docker socket, HTTPS on **127.0.0.1:9443 only**, plain HTTP off, no Caddy route; reached through an SSH tunnel. Nothing until `portainer_enabled` is true | Container `portainer`, volume `portainer-data` |
@@ -409,8 +409,11 @@ files from `../coder/launcher/` that the `coder` role installs in
 panes-only rule turns into the labs page, so from the dashboard the editor
 never opened in a pane. The launcher reads the learner's workspace with
 their own session, GET only. A workspace that does not exist yet gets
-Coder's own create page, and a stopped one Coder's own workspace page, in a
-frame inside the pane, where the learner confirms or presses Start. Once
+Coder's own create page, once the launcher has read that the `hcw-lab`
+template exists (without it, the pane says `Lab workspaces aren't available
+right now.` rather than show Coder's own error), and a stopped one Coder's
+own workspace page, in a frame inside the pane, where the learner confirms
+or presses Start. Once
 code-server is healthy the launcher replaces itself with code-server's own
 name, `code-server--<workspace>--<owner>.coder.lab.hybridcloudworks.com`.
 Each learner has one workspace per lab, named in the launcher's
@@ -497,11 +500,13 @@ GitHub asks the first time whether to authorize the app. The browser then
 lands on https://hybridcloudworks.com/education/labs, where every top-level
 visit to the lab ends, and the panes there are signed in. That landing is
 the success; a Coder page in the tab would mean the panes-only rule is not
-applied. To confirm the account is the owner, sign the CLI in (next section)
-and run, PowerShell:
+applied. To confirm the account is the owner, make a token of yours in a
+pane (step 1 of "The status token for the site", below) and run Coder's CLI
+inside the `coder` container with it, PowerShell, with the token on the
+clipboard:
 
 ```powershell
-coder users show me
+(Get-Clipboard -Raw) | ssh hcw-lab "sudo -n docker exec -i -e CODER_URL=http://127.0.0.1:7080 coder sh -c 'tr -d \\r | { read -r CODER_SESSION_TOKEN; export CODER_SESSION_TOKEN; coder users show me; }'"
 ```
 
 Success is a `Roles` row reading `Owner`. Every later sign-in is a member.
@@ -523,51 +528,90 @@ first.
 
 ### Publishing the template
 
-The Coder CLI runs on the workstation, not on the host. PowerShell, once:
+`/usr/local/sbin/hcw-coder-template-push`, which the `coder` role installs,
+publishes the template from the host with the Coder CLI that is already
+inside the `coder` container, so nothing is installed on the workstation
+and the `winget install Coder.Coder` this section used to start with is not
+needed.
+
+**The token.** Yours, short-lived, made in a pane: step 1 of "The status
+token for the site", below, has where Coder's **Tokens** page is and how to
+make `hcw-setup` with the shortest expiry the form offers. Publishing needs
+the Owner or Template Admin role, and the owner's account is Owner. The
+site's `hcw-status` token cannot publish, by design: its scopes only read.
+The helper reads the token from standard input and nowhere else, so it is
+never on a command line on the host, never printed and never written to a
+file.
+
+**The line.** PowerShell, in the order "Setting a key" gives above: paste
+the line and do not press Enter, copy the token, then press Enter.
 
 ```powershell
-winget install Coder.Coder
+(Get-Clipboard -Raw) | ssh hcw-lab "sudo -n /usr/local/sbin/hcw-coder-template-push"
 ```
 
-A plain `coder login` opens Coder's `/cli-auth` page in a browser tab. That
-is a direct visit, so it lands on the labs page and never shows the token.
-Sign the CLI in with a token instead, made in a pane: step 1 of "The status
-token for the site", below, has where to find Coder's **Tokens** page in
-one. Then, PowerShell, with the token on the clipboard:
+It publishes what `/opt/hcw-src` holds, which is the commit the last
+`bootstrap.sh` run checked out ("Which commit runs", above). So when a
+change to the template merges, re-run `bootstrap.sh` first, then this line.
+The helper copies `main.tf`, `.terraform.lock.hcl` and `README.md` (every
+`*.tf`, the lock file and the README, never the test beside them) from
+`/opt/hcw-src/lab-host/coder/templates/hcw-lab` into a new temporary
+directory in the `coder` container, runs `coder templates push hcw-lab
+--directory <that directory> --yes` and then `coder templates edit hcw-lab
+--default-ttl 1h --yes` there, reads the active version and the default
+autostop back, and removes the directory. `templates push` creates the
+template the first time and publishes a new version after that; it has no
+TTL flag, which is why the edit follows it. `1h` is
+`coder_template_default_ttl` in `ansible/roles/coder/defaults/main.yml`,
+the one place it is set. `ansible/roles/coder/README.md`,
+"hcw-coder-template-push", has each step.
 
-```powershell
-coder login https://coder.lab.hybridcloudworks.com --token (Get-Clipboard)
+**Success** starts with a line naming the three files, then Coder's own
+output: the provisioner's log of the template's resources, `Updated version
+at <time>!` (the first publish prints `The hcw-lab template has been
+created at <time>!` above it) and `Updated template metadata at <time>!`.
+The last line is the helper's, with the version name Coder chose:
+
+```text
+hcw-coder-template-push: published hcw-lab from /opt/hcw-src/lab-host/coder/templates/hcw-lab. Active version: <version name>. Default autostop: 1h0m0s.
 ```
 
-Success prints `Welcome to Coder, <your username>! You're authenticated.`
-`coder login` saves a session of its own, so the token copied from the pane
-can be deleted there afterwards.
-Then, PowerShell, from the repository root on `main` after this change has
-merged (the template directory must exist in the working tree):
+Anything else ends with a non-zero exit and says why:
 
-```powershell
-coder templates push hcw-lab --directory lab-host/coder/templates/hcw-lab --yes
-```
+| Message | Means |
+| --- | --- |
+| `the token on stdin was empty` | The clipboard was empty. Nothing was published |
+| `the first line on stdin is not a Coder token` | The clipboard held something else, usually the line itself: paste the line first, then copy the token. What it held is not shown. Nothing was published |
+| `You are signed out or your session has expired` | Coder's answer to a token that has expired or been deleted. Make another in the pane |
+| `Coder is probably not running` | The `coder` container is not up (`sudo docker compose --project-directory /etc/hcw/coder ps`, bash, on the host) |
+| `publishing hcw-lab failed` | Coder refused a step; its own message is above this line |
 
-```powershell
-coder templates edit hcw-lab --default-ttl 1h --yes
-```
+Re-running is safe: every run publishes a new version and sets the
+autostop again, so a run that failed after the push is settled by the next
+one that succeeds. Afterwards, delete `hcw-setup` in the pane (step 5 of
+"The status token for the site") or let it expire.
 
-`templates push` creates the template on the first run and publishes a new
-version after that. The one-hour autostop is a template setting, not part
-of `main.tf`, and `templates push` has no TTL flag in the current CLI
-reference — `templates edit --default-ttl` is where it lives (a
-`coder templates create --default-ttl 1h` exists too, but `push` is the
-same command for first and later publishes). Success: `coder templates
-list` shows `hcw-lab`, and the template's schedule page
-(`/templates/hcw-lab/settings/schedule`, in a pane) shows a default
-autostop of 1 hour. A workspace from it is what a lab's pane on the site
-creates, through the lab launcher: for example
+**When.** Once, to create the template, and again whenever `main.tf`, its
+lock file or the template's README changes on `main`, after the
+`bootstrap.sh` run that checks the change out. `../coder/README.md`,
+"Updating", lists the changes that need it.
+
+**What a workspace from it looks like.** It is what a lab's pane on the
+site creates, through the lab launcher: for example
 https://hybridcloudworks.com/education/labs/terraform-validate-walkthrough,
 signed in, shows Coder's `Warning: Automatic Workspace Creation` dialog
 with `lab: terraform-validate-walkthrough` under Parameters. **Confirm and
 Create** creates the workspace `lab-tfv`, and once code-server is healthy
-the pane opens it with that lab's folder.
+the pane opens it with that lab's folder: trusted, so with no Restricted
+Mode banner; with no Chat panel; on the folder's README where it has one
+(the Landing Zone Builder lab's does), on VS Code's Welcome page where it
+has none. Those are the template's editor settings (`settings` in
+`main.tf`). A workspace built before a publish keeps the version it was
+built from: when the pane shows Coder's page for it, as it does while the
+workspace is stopped, **Update and start…** starts it on the new version
+and **Start** on the old one. Before the template exists at all, a lab's
+pane says `Lab workspaces aren't available right now.` and never opens
+Coder's create page.
 
 ### The status token for the site
 
@@ -1086,6 +1130,25 @@ MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd)/lab-host:/work:ro" -w /work/ansibl
 A passing result has no `not ok` line and ends with
 `hcw-vault-set.test.sh: all` and the number of checks, then `checks passed`.
 
+The same job runs the test of `hcw-coder-template-push`
+(`ansible/roles/coder/README.md`, "Tests"): the helper rendered with the
+role's defaults, run against a stub `docker`. It needs neither root nor
+Docker. PowerShell, from the repository root:
+
+```powershell
+docker run --rm -v "${PWD}\lab-host:/work:ro" -w /work/ansible --entrypoint bash ghcr.io/ansible/community-ansible-dev-tools@sha256:775c81d53058009dd47b97872f4a86d3b0a9ce16ad9af3cc48514ce4197aa787 roles/coder/tests/hcw-coder-template-push.test.sh
+```
+
+The same in bash (Git Bash or Linux), from the repository root:
+
+```bash
+MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd)/lab-host:/work:ro" -w /work/ansible --entrypoint bash ghcr.io/ansible/community-ansible-dev-tools@sha256:775c81d53058009dd47b97872f4a86d3b0a9ce16ad9af3cc48514ce4197aa787 roles/coder/tests/hcw-coder-template-push.test.sh
+```
+
+A passing result has no `not ok` line and ends with
+`hcw-coder-template-push.test.sh: all` and the number of checks, then
+`checks passed`.
+
 The Coder files have their own checks — the hardening test, the Compose
 parse and `terraform validate` — listed in
 [`../coder/README.md`](../coder/README.md) and run by the
@@ -1101,7 +1164,7 @@ parse and `terraform validate` — listed in
 | apt signing keys | `docker_apt_key_checksum`, `labs_agent_node_apt_key_checksum`, `arc_apt_key_checksums` (per codename: Microsoft signs the 26.04 and 24.04 repositories with different keys) | The bash lines below this table; a changed key is a decision, not a refresh |
 | Caddy, Cloudflare module, builder image digest | `caddy_*` | `roles/caddy/README.md`; the digest is the index from `docker buildx imagetools inspect caddy:2.11.4-builder`, and the image is pulled by that digest, not by tag |
 | Coder, PostgreSQL | `coder_image_*`, `coder_postgres_image_*` | `roles/coder/README.md`; index digests from `docker buildx imagetools inspect`, run as `image@digest` |
-| Workspace image, Terraform providers, `code-server` module | `templates/hcw-lab/main.tf` under `../coder` | `../coder/README.md`, "Updating"; republished with `coder templates push`. While `coder_enabled` is true, the next run also pulls the new workspace digest (`lab_images`) |
+| Workspace image, Terraform providers, `code-server` module | `templates/hcw-lab/main.tf` under `../coder` | `../coder/README.md`, "Updating"; republished with `hcw-coder-template-push` after the `bootstrap.sh` run that checks it out ("Publishing the template", above). While `coder_enabled` is true, that run also pulls the new workspace digest (`lab_images`) |
 | Job images | `IMAGES` in `vps-agent/lib/capabilities.js` | The comment above `IMAGES` there. Nothing to bump here: the next run pulls the new digest and removes the one it replaced (`roles/lab_images/README.md`) |
 | node_exporter | `node_exporter_version`, `node_exporter_checksum` | `roles/node_exporter/README.md` |
 | Portainer | `portainer_image_tag`, `portainer_image_digest` | `roles/portainer/README.md`, "Bumping the pin"; the newest LTS from Portainer's release list, the index digest from `docker buildx imagetools inspect`. No floor checks it: endoflife.date has no Portainer product |
