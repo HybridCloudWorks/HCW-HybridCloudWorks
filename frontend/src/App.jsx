@@ -28,6 +28,7 @@ const AboutPage = lazyPage(() => import('@/pages/shared/AboutPage'));
 const ContactPage = lazyPage(() => import('@/pages/shared/ContactPage'));
 const EducationIndexPage = lazyPage(() => import('@/pages/shared/EducationIndexPage'));
 const LabsLearnPage = lazyPage(() => import('@/pages/shared/LabsLearnPage'));
+const LabPanePage = lazyPage(() => import('@/pages/shared/LabPanePage'));
 const NewsPage = lazyPage(() => import('@/pages/shared/NewsPage'));
 const SharedPodcastPage = lazyPage(() => import('@/pages/shared/PodcastPage'));
 const NotFoundPage = lazyPage(() => import('@/pages/NotFoundPage'));
@@ -299,6 +300,11 @@ function App() {
               {/* The browser labs page (#681). Static like `/education`, and for
                   the same reason: it must beat `/:provider/education`. */}
               <Route path="/education/labs" element={<LabsLearnPage />} />
+              {/* One lab's workspace, in a pane (#751). Two static segments
+                  outrank `/:provider/*`; an id the catalogue does not have
+                  goes back to `/education/labs`. Pre-rendered per catalogue
+                  row in scripts/prerender-entry.jsx. */}
+              <Route path="/education/labs/:labId" element={<LabPanePage />} />
               {/* --- Provider Routes (Wrapped in ProviderLayout) --- */}
               <Route path="/:provider" element={<ProviderLayout />}>
                 <Route index element={<ProviderLandingDispatcher />} />

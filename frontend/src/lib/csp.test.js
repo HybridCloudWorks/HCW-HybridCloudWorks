@@ -11,6 +11,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { CODER_APPS_ORIGIN, CODER_ORIGIN } from '@/data/labs/catalogue';
 
 const config = JSON.parse(readFileSync(join(process.cwd(), 'staticwebapp.config.json'), 'utf8'));
 const CSP = config.globalHeaders['Content-Security-Policy'];
@@ -127,9 +128,9 @@ describe('Content-Security-Policy', () => {
       'https://static.cloudflareinsights.com',
       'https://challenges.cloudflare.com',
     ]);
-    expect(directive('frame-src')).toEqual([
-      "'self'",
-      'https://login.microsoftonline.com',
+    expect(directive('frame-src')).toContain('https://challenges.cloudflare.com');
+    // The whole frame-src list is pinned in the lab panes test below.
+    expect(directive('frame-src').filter((source) => source.endsWith('.cloudflare.com'))).toEqual([
       'https://challenges.cloudflare.com',
     ]);
     expect(directive('connect-src')).not.toContain('https://challenges.cloudflare.com');
@@ -143,6 +144,51 @@ describe('Content-Security-Policy', () => {
       .filter(([, ...sources]) => sources.some((source) => source === TURNSTILE_ORIGIN))
       .map(([name]) => name);
     expect(granting.sort()).toEqual(['frame-src', 'script-src']);
+  });
+
+  // The lab workspaces open in panes on the site (#751; owner decision
+  // 2026-09-28, ADR 0032). The pane frames Coder's dashboard, and code-server
+  // is a workspace app one label below it (CODER_WILDCARD_ACCESS_URL), so
+  // frame-src needs exactly those two sources. Nothing broader: not
+  // *.lab.hybridcloudworks.com, which would admit every other lab name, and
+  // not *.hybridcloudworks.com. And nothing in connect-src: the site reads
+  // the workspaces' status through the Function App, never from Coder.
+  it('lets the site frame the lab workspaces from exactly their two sources', () => {
+    const LAB_SOURCES = [CODER_ORIGIN, CODER_APPS_ORIGIN];
+    expect(LAB_SOURCES).toEqual([
+      'https://coder.lab.hybridcloudworks.com',
+      'https://*.coder.lab.hybridcloudworks.com',
+    ]);
+    expect(directive('frame-src')).toEqual([
+      "'self'",
+      'https://login.microsoftonline.com',
+      'https://challenges.cloudflare.com',
+      ...LAB_SOURCES,
+    ]);
+    // Every directive that lists either source, compared token by token with
+    // ===, like the Turnstile check above.
+    const granting = CSP.split(';')
+      .map((part) => part.trim().split(/\s+/))
+      .filter(([, ...sources]) => sources.some((source) => LAB_SOURCES.includes(source)))
+      .map(([name]) => name);
+    expect(granting).toEqual(['frame-src']);
+    // No broader lab or site wildcard, and no scheme-only source, anywhere.
+    const everySource = CSP.split(';').flatMap((part) => part.trim().split(/\s+/).slice(1));
+    for (const broad of [
+      'https://*.lab.hybridcloudworks.com',
+      'https://*.hybridcloudworks.com',
+      '*.hybridcloudworks.com',
+      'https:',
+      '*',
+    ]) {
+      expect(directive('frame-src')).not.toContain(broad);
+    }
+    const labNames = everySource.filter(
+      (source) =>
+        source === 'https://lab.hybridcloudworks.com' ||
+        source.endsWith('.lab.hybridcloudworks.com')
+    );
+    expect(labNames).toEqual(LAB_SOURCES);
   });
 
   it('still refuses framing and defaults closed', () => {
