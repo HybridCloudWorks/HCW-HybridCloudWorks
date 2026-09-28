@@ -16,7 +16,7 @@ switches, rotation, backups — are in [`../README.md`](../README.md) under
 | `compose-config-check.sh` | Proves the Compose file parses without the host: stand-ins for the three role-written files in a temporary directory, then `docker compose config`. Prints the two service names on success |
 | `templates/hcw-lab/main.tf` | The workspace template: Coder's Docker starter adapted to uid 65534, one CPU, 2 GiB, no socket, no host path, no capabilities, a per-workspace volume and a per-workspace bridge network, `code-server` on `*.coder.lab`. Providers and the module are pinned; `.terraform.lock.hcl` is committed |
 | `templates/hcw-lab/README.md` | Shown to learners on the template's page in Coder |
-| `templates/hcw-lab/template.test.mjs` | The hardening test (`node --test`). Fails when the socket appears outside the `coder` service, anything is `privileged`, the workspace maps a host path, joins the Compose network or does not run as 65534 |
+| `templates/hcw-lab/template.test.mjs` | The hardening test (`node --test`). Fails when the socket appears outside the `coder` service, anything is `privileged`, the workspace maps a host path, joins the Compose network or does not run as 65534, or when workspace apps could be served by path on the dashboard's origin (`CODER_DISABLE_PATH_APPS` not `"true"`, or an app that is not a subdomain app) |
 | `package.json` | `npm test` runs `node --test`; no dependencies, no lockfile |
 
 ## The boundary, in one paragraph
@@ -30,9 +30,13 @@ A **workspace** is a container the server creates from the template with
 `user = "65534:65534"`, `privileged = false`, every capability dropped,
 `no-new-privileges`, hard memory and CPU limits, one named volume at
 `/tmp/home` and its own `coder-ws-<id>` bridge network with no route to the
-Compose network. Whoever controls the server controls the daemon; a learner
-inside a workspace controls 2 GiB of `nobody`. The test is what keeps the
-second sentence true when the template changes.
+Compose network. Its one app, code-server, is served on a name of its own
+under `*.coder.lab`, and path-based apps are off (`CODER_DISABLE_PATH_APPS`,
+2026-09-28), so no workspace's JavaScript runs on the dashboard's origin,
+where it could call the Coder API as the learner. Whoever controls the
+server controls the daemon; a learner inside a workspace controls 2 GiB of
+`nobody`. The test is what keeps those sentences true when either file
+changes.
 
 ## Community edition caps
 
@@ -46,6 +50,11 @@ Written down so nobody rediscovers them (#659):
 - No enforced workspace count. `coder_max_workspaces` in `group_vars` is the
   number the host is sized for and the role asserts it against the host's
   memory; it is not a Coder setting.
+- No user without a sign-in. In v2.37.3, `--login-type none` needs a
+  service account, and service accounts are Premium (the server answers
+  `Service Accounts is a Premium feature`; measured 2026-09-28). The site's
+  status token therefore belongs to a GitHub user that no GitHub account can
+  become ([`../README.md`](../README.md), "The status token for the site").
 
 ## Checking without the host
 
@@ -73,7 +82,7 @@ The Compose check is bash (Git Bash), because it is a shell script:
 bash lab-host/coder/compose-config-check.sh
 ```
 
-Success: `node --test` reports `pass 10`, `fail 0`; `fmt` prints nothing;
+Success: `node --test` reports `pass 11`, `fail 0`; `fmt` prints nothing;
 `validate` prints `Success! The configuration is valid.`; the compose check
 prints `coder-postgres` and `coder` (dependency order). The
 `coder (lab-host)` job in `.github/workflows/ci.yml` runs the same four on

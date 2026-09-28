@@ -13,9 +13,11 @@
 # "The first-run host check" below has the checks and the way past them.
 #
 # The vault is optional on purpose. Without /etc/hcw/ansible/vault.yml the
-# playbook still hardens the host, installs Docker, node_exporter and Caddy
-# (serving plain HTTP) and installs the agent unit without starting it. With
-# it, Caddy holds the wildcard certificate and the agent runs.
+# playbook still hardens the host and installs hcw-vault-set, Docker,
+# node_exporter and Caddy (serving plain HTTP), then stops at the coder role:
+# Coder is on, and the role will not start it without its three vault keys
+# (lab-host/README.md, "First run"). With the vault, Caddy holds the wildcard
+# certificate, Coder runs and the agent runs.
 #
 # Python. Ansible's control side (ansible-playbook, templating, the vault)
 # runs on CPython from uv, not on the distribution's python3. Owner rule

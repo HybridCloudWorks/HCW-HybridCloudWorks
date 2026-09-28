@@ -85,6 +85,10 @@
 http://{{ caddy_site_domain }} {
   import lab_panes_only
 
-  respond "{{ caddy_apex_response }} TLS is off: vault_cloudflare_api_token is not set." 503
+  # The one body here that names a setting: it is for the operator, and only
+  # a command-line client reads it. The site's https pages cannot frame an
+  # http:// address (a browser blocks mixed content in a frame), and
+  # lab_panes_only sends a top-level visit to the labs page first.
+  respond "TLS is off: vault_cloudflare_api_token is not set." 503
 }
 {% endif %}

@@ -6,7 +6,9 @@
 //   2. nothing is `privileged`;
 //   3. the workspace mounts no host path, only its own named volume;
 //   4. the workspace joins its own bridge network, not the Compose network;
-//   5. the workspace runs as uid 65534.
+//   5. the workspace runs as uid 65534;
+//   6. workspace apps are served on their own names only, never by path on
+//      the dashboard's origin (CODER_DISABLE_PATH_APPS, added 2026-09-28).
 //
 // Text-level on purpose: no YAML or HCL parser is a dependency of this
 // directory, and the assertions are about what a reviewer would grep for.
@@ -199,4 +201,22 @@ test('Coder does not redirect to its access URL behind the TLS-terminating proxy
   const redirect = services.coder.filter((line) => /^\s*CODER_REDIRECT_TO_ACCESS_URL:/.test(line));
   assert.equal(redirect.length, 1);
   assert.match(redirect[0], /CODER_REDIRECT_TO_ACCESS_URL:\s*"false"\s*$/);
+});
+
+test('workspace apps are served on their own names only, never on the dashboard origin', () => {
+  // Path-based apps (/@<owner>/<workspace>/apps/<app>/) run a workspace's
+  // JavaScript on the dashboard's origin, where it can call the Coder API as
+  // the learner, and Coder v2.37.3 enables them unless told not to. Coder's
+  // own guidance is to disable them whenever a wildcard access URL exists,
+  // and every app this template declares is a subdomain app.
+  const wildcard = services.coder.filter((line) => /^\s*CODER_WILDCARD_ACCESS_URL:/.test(line));
+  assert.equal(wildcard.length, 1, 'a wildcard access URL is configured');
+  const pathApps = services.coder.filter((line) => /^\s*CODER_DISABLE_PATH_APPS:/.test(line));
+  assert.equal(pathApps.length, 1);
+  assert.match(pathApps[0], /CODER_DISABLE_PATH_APPS:\s*"true"\s*$/);
+  const appModules = hclBlocks(mainTf, 'module "code-server"');
+  assert.equal(appModules.length, 1);
+  assert.match(appModules[0].body, /^\s*subdomain\s*=\s*true\s*$/m, 'code-server is a subdomain app');
+  const pathApp = codeLines(mainTf).filter((line) => /^\s*subdomain\s*=\s*false\b/.test(line));
+  assert.equal(pathApp.length, 0, 'no app in the template asks to be served by path');
 });

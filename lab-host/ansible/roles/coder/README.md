@@ -78,8 +78,8 @@ workspace may and may not have.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `coder_enabled` | required (`false` in `group_vars`) | Run or stop Coder |
-| `coder_oauth2_github_allowed_orgs` | required (`[]` in `group_vars`) | `CODER_OAUTH2_GITHUB_ALLOWED_ORGS`; non-empty while enabled |
+| `coder_enabled` | required (`true` in `group_vars` since 2026-09-28) | Run or stop Coder |
+| `coder_oauth2_github_allowed_orgs` | required (`[HybridCloudWorks]` in `group_vars` since 2026-09-28) | `CODER_OAUTH2_GITHUB_ALLOWED_ORGS`; non-empty while enabled |
 | `coder_oauth2_github_allow_signups` | required (`true` in `group_vars`) | `CODER_OAUTH2_GITHUB_ALLOW_SIGNUPS`; `false` is the no-new-learners switch |
 | `coder_domain` | required | `coder.lab.hybridcloudworks.com` |
 | `coder_max_workspaces` | required | Capacity the host is sized for; asserted against memory |

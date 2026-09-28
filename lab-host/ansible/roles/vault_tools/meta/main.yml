@@ -1,0 +1,18 @@
+---
+galaxy_info:
+  role_name: vault_tools
+  namespace: hcw
+  author: HybridCloudWorks
+  description: The Ansible vault's root-only directory and hcw-vault-set, which sets one vault key from stdin
+  license: UNLICENSED
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - resolute
+        - noble
+  galaxy_tags:
+    - secrets
+    - vault
+
+dependencies: []

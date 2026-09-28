@@ -1,0 +1,26 @@
+---
+# The paths are written here rather than as variables: files/hcw-vault-set
+# names /etc/hcw/ansible itself, and lab-host/README.md and the owner's
+# one-liners name /usr/local/sbin/hcw-vault-set, so neither can move alone.
+
+# bootstrap.sh reads vault.yml and vault-password from this directory when
+# both exist. Root-only, which is what the install -d line in
+# lab-host/README.md ("The vault") makes, so on a host where the owner ran
+# that line this task is ok.
+- name: Create the Ansible vault's directory, root-only
+  ansible.builtin.file:
+    path: /etc/hcw/ansible
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+# The owner's way to set one vault key without an editor: the value arrives
+# on stdin and is never printed (README.md beside this role).
+- name: Install hcw-vault-set, which sets one vault key from stdin
+  ansible.builtin.copy:
+    src: hcw-vault-set
+    dest: /usr/local/sbin/hcw-vault-set
+    owner: root
+    group: root
+    mode: "0750"

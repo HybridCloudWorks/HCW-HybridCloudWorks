@@ -87,9 +87,11 @@ jobs:
           # pins, and its port of the image's rewrite rule. The vps-agent
           # files are what lab-job-types.test.mjs imports (capabilities.js)
           # and lab-job-limits.test.mjs reads (index.js, .env.example).
+          # LabPanePage.jsx is what lab-host-visitor-copy.test.mjs reads: the
+          # lab host's "Coder stopped" answer is the pane's own sentence.
           - name: scripts (operations)
             dir: scripts
-            filter: '^(scripts/|\.github/workflows/|infra/|infra-lab/|lab-host/|lab-image/|([^/]+/)*package\.json$|([^/]+/)*Dockerfile|frontend/src/lib/landingZone/(avmVersions|labImage|tfConstraints)\.js$|vps-agent/(index\.js|\.env\.example|lib/capabilities\.js)$)'
+            filter: '^(scripts/|\.github/workflows/|infra/|infra-lab/|lab-host/|lab-image/|([^/]+/)*package\.json$|([^/]+/)*Dockerfile|frontend/src/lib/landingZone/(avmVersions|labImage|tfConstraints)\.js$|frontend/src/pages/shared/LabPanePage\.jsx$|vps-agent/(index\.js|\.env\.example|lib/capabilities\.js)$)'
             lint: npm run lint
             test: npm test
           # vps-agent shells out to `docker run` with a payload that reached
@@ -264,6 +266,25 @@ jobs:
       - name: Playbook syntax check
         if: steps.changes.outputs.relevant == 'true'
         run: ansible-playbook --syntax-check -i inventory/localhost.yml site.yml
+
+      # Ansible never applies a default written only in a role's
+      # meta/argument_specs.yml, and two coder options had theirs only
+      # there, so the first run with coder_enabled true stopped undefined.
+      # This fails on any option like that, or one whose defaults/main.yml
+      # value disagrees with the spec.
+      - name: Argument spec defaults are set
+        if: steps.changes.outputs.relevant == 'true'
+        run: python check-argument-spec-defaults.py
+
+      # /usr/local/sbin/hcw-vault-set rewrites the host's Ansible vault, so
+      # the file the vault_tools role installs is run here against a scratch
+      # vault with this job's ansible-vault: two keys set, an empty value and
+      # bad key names refused, the file left encrypted and root 0600. As root,
+      # because the helper installs the vault root:root; env keeps this job's
+      # Python on PATH past sudo's secure_path.
+      - name: hcw-vault-set test
+        if: steps.changes.outputs.relevant == 'true'
+        run: sudo env "PATH=$PATH" bash roles/vault_tools/tests/hcw-vault-set.test.sh
 
   # lab-host/coder/ is the Coder deployment on the lab host (#679): the
   # Compose file, the hcw-lab workspace template and the test that holds

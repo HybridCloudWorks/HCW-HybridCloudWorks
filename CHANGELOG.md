@@ -19,6 +19,80 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Coder is on for members of the HybridCloudWorks GitHub organisation
+  only, and the vault helper is under Ansible.** Owner decisions
+  2026-09-28: turn Coder on; only members of `HybridCloudWorks` may sign
+  in; the owner signs in first and becomes Coder's owner, and nothing here
+  creates a Coder user. `lab-host/ansible/group_vars/all.yml` sets
+  `coder_enabled: true` and `coder_oauth2_github_allowed_orgs:
+  [HybridCloudWorks]`; the three `vault_coder_*` keys were already in the
+  host's vault (checked by name). The Compose file already held what the
+  live host needs (PostgreSQL 18.6 at `/var/lib/postgresql`, Coder v2.37.3
+  by digest, `CODER_REDIRECT_TO_ACCESS_URL=false` from #723, password
+  sign-in off, no `CODER_FIRST_USER_*`), as did #750's route. One setting
+  is added: `CODER_DISABLE_PATH_APPS: "true"`. Coder v2.37.3 otherwise
+  serves every workspace app on the dashboard's origin too, at
+  `/@<owner>/<workspace>/apps/<app>/`, where a workspace's JavaScript can
+  call the Coder API. Coder's own guidance is to turn that off whenever a
+  wildcard access URL exists, and the template's code-server is a
+  subdomain app. `template.test.mjs` now fails without it (11 tests). A new
+  `vault_tools` role, straight after `hardening`, makes `/etc/hcw/ansible`
+  root:root 0700 and installs `/usr/local/sbin/hcw-vault-set` (root:root
+  0750), which had been put on the host by hand. The helper sets one
+  `vault_*` key from stdin without printing it. The role's copy fixes two
+  defects in the hand-installed one. `install` unlinked `vault.yml` before
+  writing its replacement (seen with strace on 26.04's uutils `install`),
+  so a run stopped in between lost the vault; the copy is now written
+  beside it and renamed over it. And a leading byte order mark on the
+  piped value was kept, because `str.strip()` leaves U+FEFF. The first run
+  after merge reports that task `changed`.
+  `roles/vault_tools/tests/hcw-vault-set.test.sh` (39 checks, run as root
+  in the `ansible-lint (lab-host)` job against a scratch `HCW_VAULT_DIR`
+  with the job's own `ansible-vault`) sets two keys and replaces one. It
+  refuses an empty value, seven bad key names, a missing password and a
+  wrong one, each time leaving the vault byte for byte. It checks the file
+  is `$ANSIBLE_VAULT;1.1;AES256` ciphertext, root:root 0600, that YAML-like
+  values come back as the same strings, and that nothing temporary
+  remains. Against the hand-installed copy it fails the two BOM checks.
+  `lab-host/README.md`, "The vault", now sets keys with one PowerShell line
+  per key. You paste the line, copy the value, then press Enter; the
+  PostgreSQL password is made on the host and never shown. With Coder on, a
+  first run without a vault now stops at the `coder` role, after
+  `hcw-vault-set` is installed. The README, the reinstall runbook and
+  `bootstrap.sh`'s header say so. The Coder section's status-token steps
+  were measured on Coder Community v2.37.3. The token is scoped
+  `template:read` and `workspace:read`, minted by the owner with `coder
+  tokens create --user` for a user of its own, `hcw-status`. That user holds
+  Template Admin, the only role below Owner that counts other users'
+  running workspaces (Member, Auditor and User Admin answered `count` 0).
+  It is a GitHub user at a `.invalid` address, because `--login-type none`
+  needs Premium service accounts in v2.37 and password users are refused
+  while password sign-in is off. Unscoped, the same user's token deleted a
+  template; scoped, it got 403. The owner runs the steps from the
+  workstation through `ssh hcw-lab` and the `coder` container's CLI, and
+  the token goes to the clipboard, never the screen, before it is seeded
+  at https://hybridcloudworks.com/admin/integrations?tab=keys. The site's
+  panes open only once the card reads reachable (#758), so the owner's own
+  first token is the GitHub sign-in's session, copied from the browser's
+  developer tools. Turning Coder on in the container rehearsal also
+  surfaced a latent defect. `coder_workspace_memory_mib` and
+  `coder_server_memory_reserve_mib` had defaults only in the role's
+  argument spec, which Ansible never applies, so the first run with
+  `coder_enabled: true` stopped at the capacity assertion with
+  `'coder_workspace_memory_mib' is undefined`. Both are in the role's
+  defaults now. `lab-host/ansible/check-argument-spec-defaults.py`, in
+  the same CI job, fails on any option across the 11 roles whose default
+  is written only in its spec, or whose default disagrees with it. What a
+  pane can show from the lab host now speaks to visitors. Coder stopped
+  answers `Lab workspaces aren't available right now.`, the site's own
+  `UNAVAILABLE_SENTENCE`, and the apex and unclaimed names answer
+  `There's no lab at this address.` The fail-closed HTTP-only 503 keeps
+  naming the missing vault key for the operator, because an `http://`
+  page cannot render in the site's pane. `scripts/lab-host-visitor-copy.test.mjs`
+  scans every `respond` body in the three Caddy templates for tool, host
+  and setting names. It pins the Coder answer to the pane's sentence and
+  keeps the operator body on the HTTP-only site.
+
 - **Azure Arc onboarding of the lab host is two owner commands:
   `scripts/lab/Register-LabArc.ps1`, then the same with `-Connect`** (#663).
   The runbook's ten manual steps (a year-long secret from

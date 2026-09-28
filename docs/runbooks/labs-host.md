@@ -299,14 +299,18 @@ ADR 0032 rebuilds the host rather than repairing it.
    Web Console shows ("Connect from a desktop", above). Success is the
    server's host name.
 6. **First run**: `infra-lab/README.md`, step 7. Success is `host check: no
-   other workloads found` near the top (above) and a `PLAY RECAP` for
-   `localhost` with `failed=0`. Then run `Connect-Lab.ps1` again without
-   `-User root`, because root login is now off.
-7. **Everything the disk held, again.** Create the Ansible vault and its
-   password (`lab-host/README.md`, "The vault"), rotating the values marked
-   "rotate on every host rebuild" in
+   other workloads found` near the top (above), and, because there is no
+   vault yet and Coder is on (since 2026-09-28), a `PLAY RECAP` for
+   `localhost` with `failed=1` at `coder : Refuse to enable Coder without
+   its three vault secrets`. Every role before it has run, so root login is
+   off and `hcw-vault-set` is installed; the re-run in step 7 finishes the
+   rest. Run `Connect-Lab.ps1` again without `-User root`.
+7. **Everything the disk held, again.** Create the Ansible vault's
+   password and set its keys (`lab-host/README.md`, "The vault"), rotating
+   the values marked "rotate on every host rebuild" in
    [Required inputs §4.7](../standards/required-inputs.md#47-vps-agent-hostinger-env-never-committed)
-   (the Caddy DNS token and the Coder GitHub OAuth secret). The agent's key
+   (the Caddy DNS token and the Coder GitHub OAuth secret). Then re-run
+   `bootstrap.sh`, which now ends with `failed=0`. The agent's key
    pair is new, and the vault that held its four keys is gone, so run "The
    lab agent's go-live" (below) again: it appends the new certificate and
    writes the four keys back. Re-onboard Arc ("Re-onboarding a rebuilt host", below).
@@ -822,10 +826,11 @@ and stops at its vault check when the vault is empty.
 - This change is merged to `main`, and the host has been provisioned and has
   run `bootstrap.sh` at least once (`lab-host/README.md`, "First run"), so
   the vault password `/etc/hcw/ansible/vault-password` exists.
-- The host has the vault helper `/usr/local/sbin/hcw-vault-set`: it takes a
-  value on standard input and sets one key in the Ansible vault, printing no
-  value. The script writes the four `vault_arc_*` keys only through it, and
-  stops before minting anything when it is missing.
+- The host has the vault helper `/usr/local/sbin/hcw-vault-set`, which
+  `bootstrap.sh` installs (the `vault_tools` role): it takes a value on
+  standard input and sets one key in the Ansible vault, printing no value.
+  The script writes the four `vault_arc_*` keys only through it, and stops
+  before minting anything when it is missing.
 - This desktop reaches the host: `ssh hcw-lab hostname` prints its name
   ("Connect from a desktop", above).
 - You can create app registrations in the tenant (Application
@@ -1047,7 +1052,7 @@ and `Resource Group Name : rg-lab-hybrid-prod-cus`.
 | --- | --- | --- |
 | `does not hold Azure Connected Machine Onboarding` | Step 3 has not been applied | Step 3, then `-Connect` again |
 | `a machine resource arcs-lab-hybrid-prod-cus-01 already exists` | It is left from an earlier host, and `azcmagent connect` cannot take it over | Run the `az resource delete` line it prints, then `-Connect` again |
-| `hcw-vault-set is not on hcw-lab` | The helper is missing, so nothing was minted | Install it, then run again |
+| `hcw-vault-set is not on hcw-lab` | The helper is missing, so nothing was minted | Run `bootstrap.sh`: its `vault_tools` role installs the helper (`lab-host/README.md`, "The vault"). Then run again |
 | `The arc role did not run: azcmagent is not installed` | The play stopped before `arc`, or the commit `bootstrap.sh` ran predates `arc_enabled` reading the fact | The `PLAY RECAP` above names the task; `bootstrap.sh` runs current `main` |
 | `AZCM0041` with `invalid_client` in the role's output | A wrong secret or application id in the vault | Run the first run (it replaces the secret), then `-Connect` |
 | `AuthorizationFailed` in the role's output | The grant has not reached Azure yet | Wait two minutes, then `-Connect` again |

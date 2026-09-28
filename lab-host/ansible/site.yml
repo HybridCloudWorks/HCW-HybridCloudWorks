@@ -60,9 +60,13 @@
 
   roles:
     - role: hardening
-    # Straight after hardening: the Arc agent is a host service that needs
-    # nothing the later roles install, so the host shows up in Azure even
-    # when a later role fails. It does nothing while arc_enabled is false.
+    # Straight after hardening: hcw-vault-set is how the owner adds a vault
+    # key, and a later role that stops on a missing key should find it already
+    # installed. It needs nothing the later roles install.
+    - role: vault_tools
+    # Then the Arc agent, a host service that needs nothing the later roles
+    # install, so the host shows up in Azure even when a later role fails.
+    # It does nothing while arc_enabled is false.
     - role: arc
     - role: docker
     - role: node_exporter

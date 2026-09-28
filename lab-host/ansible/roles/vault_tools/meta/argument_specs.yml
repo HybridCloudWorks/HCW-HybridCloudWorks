@@ -1,0 +1,16 @@
+---
+argument_specs:
+  main:
+    short_description: The Ansible vault's directory, root-only, and /usr/local/sbin/hcw-vault-set
+    description:
+      - Makes /etc/hcw/ansible root:root 0700, the directory bootstrap.sh reads vault.yml and
+        vault-password from. It creates neither file; the owner does (lab-host/README.md, "The
+        vault").
+      - Installs files/hcw-vault-set as /usr/local/sbin/hcw-vault-set, root:root 0750. The helper
+        sets one vault_* key of /etc/hcw/ansible/vault.yml from stdin, never printing a value, and
+        replaces the file by rename.
+      - This is the Ansible vault the playbook reads, not HashiCorp Vault; the vault role runs
+        that. The role takes no variables, because the helper and the documentation name both
+        paths.
+    author: HybridCloudWorks
+    options: {}

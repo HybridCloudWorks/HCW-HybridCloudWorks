@@ -95,6 +95,18 @@ and any route added later. A route does not have to repeat it.
   the site's status proxy. `Vary: Sec-Fetch-Dest, Sec-Fetch-Mode` keeps a
   cache from answering one with the other's response.
 
+- **What a pane shows speaks to visitors.** Because every name can be
+  framed by the site, every body Caddy answers on the TLS site can render
+  inside a pane: the apex placeholder, the 404 for a name nothing claims,
+  and the coder role's 503 while Coder is stopped. Like the site's own pages
+  (`frontend/src/public-copy.test.js`), none names a tool, the host or a
+  setting, and the 503 is the site's own sentence for the same state.
+  `scripts/lab-host-visitor-copy.test.mjs` holds all three. The fail-closed
+  HTTP-only 503 is the exception, and says which vault key is missing: a
+  browser will not show an `http://` page inside the site's `https://` pane,
+  and a top-level visit is redirected first, so only a command-line client
+  reads it.
+
 A script can send any of these headers, so this is a browsing rule, not
 access control. Coder's GitHub sign-in is the access control. ACME is
 unaffected (DNS-01, and Caddy answers an HTTP challenge before routes run),
@@ -138,8 +150,8 @@ for `lab_top_level_allowed` lists every exemption.
 | `caddy_direct_visit_redirect` | required | Where a top-level browser visit is sent with `302`: the site's labs page |
 | `caddy_cloudflare_api_token` | `vault_cloudflare_api_token` or empty | DNS-01 credential |
 | `caddy_acme_email` | `vault_caddy_acme_email` or empty | ACME contact, omitted when empty |
-| `caddy_apex_response` | placeholder text | Apex body |
-| `caddy_unknown_host_response` | placeholder text | 404 body |
+| `caddy_apex_response` | `There's no lab at this address.` | Apex body; visitor wording ("Panes only") |
+| `caddy_unknown_host_response` | `There's no lab at this address.` | 404 body; visitor wording ("Panes only") |
 
 Paths and the service user are in `defaults/main.yml`;
 `meta/argument_specs.yml` is the contract.
