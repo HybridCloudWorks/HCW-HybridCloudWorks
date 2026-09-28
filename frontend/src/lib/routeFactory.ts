@@ -12,7 +12,7 @@
  * Supported cloud provider types
  */
 export type ProviderType =
-  'aws' | 'azure' | 'gcp' | 'github' | 'terraform' | 'finops' | 'vmware' | 'ansible';
+  'aws' | 'azure' | 'gcp' | 'github' | 'terraform' | 'finops' | 'vmware' | 'ansible' | 'docker';
 
 /**
  * All available page routes in the application
@@ -87,6 +87,7 @@ function isValidProvider(provider: string): provider is ProviderType {
     'finops',
     'vmware',
     'ansible',
+    'docker',
   ];
   return validProviders.includes(provider as ProviderType);
 }

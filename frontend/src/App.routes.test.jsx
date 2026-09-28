@@ -239,6 +239,37 @@ describe('public route contract', () => {
     expect(screen.queryByText(/PAGES Not Found/i)).not.toBeInTheDocument();
   });
 
+  // Docker's pages are rendered for real rather than mocked: they are static
+  // placeholders that fetch nothing, so the route and the page are checked
+  // together. `/docker/tools` is a static route, like `/terraform/tools`.
+  it.each([
+    ['/docker', 'Container intelligence with Docker'],
+    ['/docker/blog', 'Docker Blog'],
+    ['/docker/code', 'Docker Code'],
+    ['/docker/education', 'Docker Learning'],
+    ['/docker/news', 'Docker News'],
+    ['/docker/rss', 'Docker News'],
+    ['/docker/tools', 'Docker Tools'],
+  ])('renders the Docker route %s', async (pathname, heading) => {
+    renderRoute(pathname);
+
+    expect(
+      await screen.findByRole('heading', { level: 1, name: heading }, { timeout: 5000 })
+    ).toBeInTheDocument();
+    expect(document.querySelector('[data-page="not-found"]')).toBeNull();
+  });
+
+  it.each(['/docker/architecture-designs', '/docker/frameworks', '/docker/audio'])(
+    'answers %s with the 404 page, as Terraform does, so the pre-render skips it',
+    async (pathname) => {
+      renderRoute(pathname);
+
+      expect(
+        await screen.findByRole('heading', { name: /this page does not exist/i }, { timeout: 5000 })
+      ).toBeInTheDocument();
+    }
+  );
+
   describe('route declarations (T-762)', () => {
     // Read as text, because the failure is a *declaration* problem. React
     // Router resolves a shadowed route silently by ranking: both render

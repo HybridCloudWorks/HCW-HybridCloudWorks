@@ -4,7 +4,17 @@ const path = require('path');
 const ROOT_DIR = path.resolve(__dirname, '..');
 const TARGET_DIRS = [path.join(ROOT_DIR, 'src', 'pages'), path.join(ROOT_DIR, 'src', 'components')];
 
-const PROVIDERS = ['aws', 'azure', 'gcp', 'github', 'terraform', 'finops', 'vmware', 'ansible'];
+const PROVIDERS = [
+  'aws',
+  'azure',
+  'gcp',
+  'github',
+  'terraform',
+  'finops',
+  'vmware',
+  'ansible',
+  'docker',
+];
 const PROVIDER_PATH_REGEX = new RegExp(
   `\\b(?:to|href)=["']\\/(${PROVIDERS.join('|')})\\/[^"']+`,
   'g'

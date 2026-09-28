@@ -49,6 +49,14 @@ const LIVE_FILES = [
   'src/pages/ansible/BlogPage.jsx',
   'src/pages/ansible/EducationPage.jsx',
   'src/pages/ansible/RssPage.jsx',
+  // Docker (service-provider pattern). Live pages whose content says it is
+  // coming: honest placeholders, not ComingSoonPage guards.
+  'src/pages/docker/LandingPage.jsx',
+  'src/pages/docker/BlogPage.jsx',
+  'src/pages/docker/CodePage.jsx',
+  'src/pages/docker/EducationPage.jsx',
+  'src/pages/docker/RssPage.jsx',
+  'src/pages/docker/ToolsPage.jsx',
   // Every remaining provider page taken live 2026-09-02 by owner decision.
   'src/pages/gcp/ArchitecturePage.jsx',
   'src/pages/gcp/BlogPage.jsx',

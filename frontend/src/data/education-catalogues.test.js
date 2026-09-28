@@ -41,13 +41,16 @@ import {
 import * as ansible from '@/data/ansible/education';
 import * as aws from '@/data/aws/certifications';
 import * as azure from '@/data/azure/certifications';
+import * as docker from '@/data/docker/education';
 import * as finops from '@/data/finops/education';
 import * as gcp from '@/data/gcp/certifications';
 import * as github from '@/data/github/certifications';
 import * as terraform from '@/data/terraform/certifications';
 import * as vmware from '@/data/vmware/education';
 
-const CATALOGUES = { ansible, aws, azure, finops, gcp, github, terraform, vmware };
+// Docker's catalogue is empty by design (see its module), so its row checks
+// pass vacuously; it is here so its DATA_AS_OF and DATA_SOURCE are checked.
+const CATALOGUES = { ansible, aws, azure, docker, finops, gcp, github, terraform, vmware };
 
 describe.each(Object.entries(CATALOGUES))('%s certification catalogue', (provider, mod) => {
   const { certifications, DATA_AS_OF, DATA_SOURCE } = mod;

@@ -23,7 +23,7 @@
  * URL no route serves.
  */
 
-/** The eight providers the router actually serves; mirrors VALID_PROVIDERS. */
+/** The providers the router actually serves; mirrors VALID_PROVIDERS. */
 export const CANONICAL_PROVIDERS = Object.freeze([
   'azure',
   'aws',
@@ -33,6 +33,7 @@ export const CANONICAL_PROVIDERS = Object.freeze([
   'finops',
   'vmware',
   'ansible',
+  'docker',
 ]);
 
 /**
@@ -45,6 +46,13 @@ export const CANONICAL_PROVIDERS = Object.freeze([
  * "Google Cloud" → "googlecloud"); `text` matches free prose, where the spaces
  * survive. Keeping the two lists separate is what lets "cloud.google" work in
  * prose without polluting the squashed form.
+ *
+ * `docker` is LAST on purpose. Containers come up in writing about every other
+ * provider — "Docker images on Azure Container Apps", "a GitHub workflow that
+ * builds a Docker image" — and those documents belong to the other provider.
+ * Last means a text is filed under Docker only when it names no one else,
+ * which is also the only case where adding Docker changes an answer at all:
+ * before it was in this table, such a text inferred no provider.
  */
 export const PROVIDER_ALIASES = Object.freeze([
   { provider: 'github', squashed: ['github'], text: ['github'] },
@@ -63,6 +71,7 @@ export const PROVIDER_ALIASES = Object.freeze([
   },
   { provider: 'vmware', squashed: ['vmware', 'broadcom'], text: ['vmware', 'broadcom'] },
   { provider: 'ansible', squashed: ['ansible', 'redhat'], text: ['ansible', 'red hat'] },
+  { provider: 'docker', squashed: ['docker'], text: ['docker'] },
 ]);
 
 /** Lowercase, strip everything that is not a letter or digit. */

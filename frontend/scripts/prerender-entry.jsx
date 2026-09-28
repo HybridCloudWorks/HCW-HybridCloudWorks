@@ -85,6 +85,7 @@ const STANDALONE_ROUTES = [
   '/finops/architectures',
   '/terraform/modules',
   '/terraform/tools',
+  '/docker/tools',
   '/github/workflows',
   '/github/tools',
   '/tools/migration',

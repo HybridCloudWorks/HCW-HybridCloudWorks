@@ -109,6 +109,15 @@ const AnsibleBlogPage = lazyPage(() => import('@/pages/ansible/BlogPage'));
 const AnsibleEducationPage = lazyPage(() => import('@/pages/ansible/EducationPage'));
 const AnsibleRssPage = lazyPage(() => import('@/pages/ansible/RssPage'));
 
+// Docker (service-provider pattern, like Terraform; every page a placeholder
+// until its content is written)
+const DockerLandingPage = lazyPage(() => import('@/pages/docker/LandingPage'));
+const DockerBlogPage = lazyPage(() => import('@/pages/docker/BlogPage'));
+const DockerCodePage = lazyPage(() => import('@/pages/docker/CodePage'));
+const DockerEducationPage = lazyPage(() => import('@/pages/docker/EducationPage'));
+const DockerRssPage = lazyPage(() => import('@/pages/docker/RssPage'));
+const DockerToolsPage = lazyPage(() => import('@/pages/docker/ToolsPage'));
+
 // Coder Corner (shared public list page)
 const ProviderCoderCornerPage = lazyPage(
   () => import('@/components/shared/ProviderCoderCornerPage')
@@ -337,7 +346,7 @@ function App() {
                 <Route path="*" element={<NotFoundPage />} />
               </Route>
               {/*
-                --- Dedicated Section Routes (FinOps, Terraform, GitHub) ---
+                --- Dedicated Section Routes (FinOps, Terraform, Docker, GitHub) ---
 
                 These are provider paths that have no cross-provider dispatcher,
                 so they are declared statically.
@@ -367,6 +376,8 @@ function App() {
               {/* Terraform Specifics */}
               <Route path="/terraform/modules" element={<TerraformModulesPage />} />
               <Route path="/terraform/tools" element={<TerraformToolsPage />} />
+              {/* Docker Specifics */}
+              <Route path="/docker/tools" element={<DockerToolsPage />} />
               {/* GitHub Specifics */}
               <Route path="/github/workflows" element={<GitHubWorkflowsPage />} />
               <Route path="/github/tools" element={<GitHubToolsPage />} />
@@ -533,6 +544,7 @@ function ProviderLandingDispatcher() {
   if (provider === 'github') return <GitHubLandingPage />;
   if (provider === 'vmware') return <VMwareLandingPage />;
   if (provider === 'ansible') return <AnsibleLandingPage />;
+  if (provider === 'docker') return <DockerLandingPage />;
   return <NotFoundPage />;
 }
 
@@ -546,6 +558,7 @@ function ProviderBlogDispatcher() {
   if (provider === 'github') return <GitHubBlogPage />;
   if (provider === 'vmware') return <VMwareBlogPage />;
   if (provider === 'ansible') return <AnsibleBlogPage />;
+  if (provider === 'docker') return <DockerBlogPage />;
   return <NotFoundPage />;
 }
 
@@ -658,6 +671,11 @@ function ProviderCodeDispatcher() {
       <AnsibleCodePage />
     );
   }
+  // The Docker code page is a placeholder with no items, so there is no
+  // detail page for a slug to reach yet.
+  if (provider === 'docker') {
+    return isDetail ? <NotFoundPage /> : <DockerCodePage />;
+  }
 
   return <NotFoundPage />;
 }
@@ -681,6 +699,7 @@ function ProviderEducationDispatcher() {
   if (provider === 'terraform') return <TerraformEducationPage />;
   if (provider === 'vmware') return <VMwareEducationPage />;
   if (provider === 'ansible') return <AnsibleEducationPage />;
+  if (provider === 'docker') return <DockerEducationPage />;
   return <NotFoundPage />;
 }
 
@@ -690,7 +709,7 @@ function ProviderEducationDetailDispatcher() {
   if (provider === 'azure') return <AzureCertDetailPage />;
   // Providers without dedicated cert-detail pages fall back to their
   // education hub instead of dead-ending on a 404.
-  if (['gcp', 'finops', 'terraform', 'github', 'vmware', 'ansible'].includes(provider)) {
+  if (['gcp', 'finops', 'terraform', 'github', 'vmware', 'ansible', 'docker'].includes(provider)) {
     return <Navigate to={`/${provider}/education`} replace />;
   }
   return <NotFoundPage />;
@@ -729,6 +748,7 @@ function ProviderRssDispatcher() {
   if (provider === 'github') return <GitHubRssPage />;
   if (provider === 'vmware') return <VMwareRssPage />;
   if (provider === 'ansible') return <AnsibleRssPage />;
+  if (provider === 'docker') return <DockerRssPage />;
   return <NewsPage provider={provider} />;
 }
 
