@@ -46,6 +46,11 @@ Written down so nobody rediscovers them (#659):
 - No enforced workspace count. `coder_max_workspaces` in `group_vars` is the
   number the host is sized for and the role asserts it against the host's
   memory; it is not a Coder setting.
+- No user without a sign-in. In v2.37.3, `--login-type none` needs a
+  service account, and service accounts are Premium (the server answers
+  `Service Accounts is a Premium feature`; measured 2026-09-28). The site's
+  status token therefore belongs to a GitHub user that no GitHub account can
+  become ([`../README.md`](../README.md), "The status token for the site").
 
 ## Checking without the host
 
