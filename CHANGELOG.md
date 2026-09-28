@@ -29,7 +29,13 @@ This project has not cut a tagged release; entries are grouped under
   host's vault (checked by name). The Compose file already held what the
   live host needs (PostgreSQL 18.6 at `/var/lib/postgresql`, Coder v2.37.3
   by digest, `CODER_REDIRECT_TO_ACCESS_URL=false` from #723, password
-  sign-in off, no `CODER_FIRST_USER_*`), as did #750's route. A new
+  sign-in off, no `CODER_FIRST_USER_*`), as did #750's route. One setting
+  is added: `CODER_DISABLE_PATH_APPS: "true"`. Coder v2.37.3 otherwise
+  serves every workspace app on the dashboard's origin too, at
+  `/@<owner>/<workspace>/apps/<app>/`, where a workspace's JavaScript can
+  call the Coder API. Coder's own guidance is to turn that off whenever a
+  wildcard access URL exists, and the template's code-server is a
+  subdomain app. `template.test.mjs` now fails without it (11 tests). A new
   `vault_tools` role, straight after `hardening`, makes `/etc/hcw/ansible`
   root:root 0700 and installs `/usr/local/sbin/hcw-vault-set` (root:root
   0750), which had been put on the host by hand. The helper sets one
