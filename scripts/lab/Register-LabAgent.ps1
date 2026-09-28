@@ -526,7 +526,7 @@ function Wait-LabRegistration {
         Prints the registration lines and waits for Enter before the run
         goes on to the vault and bootstrap.sh.
     #>
-    param([Parameter(Mandatory)] [string[]] $Lines)
+    param([Parameter(Mandatory)] [AllowEmptyString()] [string[]] $Lines)
 
     foreach ($line in $Lines) {
         Write-Host $line

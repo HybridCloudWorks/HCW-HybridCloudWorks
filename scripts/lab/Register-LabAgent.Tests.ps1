@@ -308,6 +308,29 @@ Describe 'Wait-LabRegistration' {
         Should -Invoke Write-Host -ParameterFilter { $Object -eq 'second line' } -Exactly 1
         Should -Invoke Read-LabEnter -Exactly 1
     }
+
+    # The owner's first live run (2026-09-27) stopped here with "Cannot bind
+    # argument to parameter 'Lines' because it is an empty string": the real
+    # prompt has blank lines, and a Mandatory [string[]] refuses '' unless
+    # [AllowEmptyString()] says otherwise.
+    It 'takes the real registration prompt, blank lines and all' {
+        Mock Write-Host { }
+        Mock Read-LabEnter { '' }
+        $prompt = Get-LabRegistrationPrompt -Url 'https://hybridcloudworks.com/admin/labs?tab=agents' -AgentId 'vps-hostinger-01' -ObjectId $agentSpId -JobTypes (Get-LabJobTypes)
+        @($prompt) | Should -Contain ''
+        { Wait-LabRegistration -Lines $prompt } | Should -Not -Throw
+        Should -Invoke Read-LabEnter -Exactly 1
+    }
+
+    It 'prints every line of a prompt with a blank line in it' {
+        Mock Write-Host { }
+        Mock Read-LabEnter { '' }
+        Wait-LabRegistration -Lines @('first line', '', 'third line')
+        # Three prompt lines, then the function's own spacer before the pause.
+        Should -Invoke Write-Host -Exactly 4 -Scope It
+        Should -Invoke Write-Host -ParameterFilter { $Object -eq 'third line' } -Exactly 1 -Scope It
+        Should -Invoke Read-LabEnter -Exactly 1 -Scope It
+    }
 }
 
 Describe 'Get-LabVaultValues' {
