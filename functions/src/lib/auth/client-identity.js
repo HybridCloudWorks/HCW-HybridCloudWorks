@@ -9,22 +9,21 @@
  * the true client address is `CF-Connecting-IP`.
  *
  * That header is only trustworthy if the origin cannot be reached directly.
- * Today it can: the Function App has no `ip_restriction`, no `https_only`, and
- * `<app>.azurewebsites.net` resolves publicly. Anyone who finds the origin
- * hostname can send `CF-Connecting-IP: 1.2.3.4` and mint unlimited quota per
- * fabricated address — while also bypassing the WAF and any Cloudflare-side
- * rate limit.
+ * When this was written it could: the Function App had no `ip_restriction`
+ * and `<app>.azurewebsites.net` resolved publicly, so anyone who found the
+ * origin hostname could send `CF-Connecting-IP: 1.2.3.4` and mint unlimited
+ * quota per fabricated address, bypassing the WAF too.
  *
- * So the decision is: lock the origin, and make the code fail loudly until it
- * is locked, rather than silently trusting a spoofable header.
+ * So the decision is: lock the origin, and make the code fail loudly unless a
+ * request proves it came through Cloudflare, rather than silently trusting a
+ * spoofable header.
  *
- * Required infrastructure, which is NOT yet in main.tf:
- *   - `https_only = true` (bearer tokens currently traverse plaintext HTTP if
- *     anyone asks for it)
- *   - `ip_restriction` limited to Cloudflare's published ranges, or
- *     Authenticated Origin Pulls
- *   - a Cloudflare transform rule injecting a shared secret header, checked
- *     here via CF_ORIGIN_SECRET
+ * The infrastructure half is in place since 2026-08-20 (infra/): the Function
+ * App admits only Cloudflare's published ranges (`functions_origin_lock_enabled`),
+ * and `cloudflare_ruleset.origin_secret` stamps `x-hcw-origin-secret` on every
+ * request proxied to the API host, checked here against CF_ORIGIN_SECRET. The
+ * code still refuses on its own when the secret is missing or wrong, so the
+ * lock does not depend on the network rule alone.
  *
  * Note X-Forwarded-For is NOT used: it is client-spoofable, and App Service
  * appends its own hop with a `:port` suffix that trips naive splitting.
@@ -165,6 +164,28 @@ export function createClientIdentity({
 
   return {
     viaCloudflare,
+
+    /**
+     * The caller's address, only when it can be believed: the request came
+     * through our Cloudflare (it carries the origin secret) and
+     * `CF-Connecting-IP` is a well-formed address. Otherwise null, never the
+     * header's text, because without the secret that header is whatever the
+     * caller chose to send.
+     *
+     * For one consumer, the public lab submission's Turnstile check
+     * (lib/labs/public-lock.js), which passes it to Cloudflare's siteverify as
+     * `remoteip`. That field is optional, so null means "omit it", which is
+     * what the dev escape hatch below gets. Never stored and never logged: the
+     * hash from `anonymousKey` is what the quotas count.
+     *
+     * @param {object} request
+     * @returns {string|null}
+     */
+    trustedClientIp(request) {
+      if (!viaCloudflare(request)) return null;
+      const address = String(request?.headers?.get?.(CF_CLIENT_IP_HEADER) ?? '').trim();
+      return isIP(address) ? address : null;
+    },
 
     /**
      * A stable, pseudonymous key for an anonymous caller.

@@ -589,6 +589,32 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # secret. The code defaults to 5 when this is unset or unparseable.
     "CODER_MAX_WORKSPACES" = "5"
 
+    # Hybrid Lab — the Landing Zone Builder's public "Validate on the lab"
+    # (ADR 0032 decision 6, revised 2026-09-28: open, locked to the site's
+    # pane by its origin and a Cloudflare Turnstile token). The switch is
+    # labs_public_submission_enabled (variables.tf); lib/labs/public-submit.js
+    # takes nothing unless it is exactly "true".
+    "LABS_PUBLIC_SUBMISSION_ENABLED" = var.labs_public_submission_enabled ? "true" : "false"
+    # The widget's secret key, which lib/labs/public-lock.js sends to
+    # Cloudflare's siteverify and nowhere else. A vault reference, never a
+    # Terraform value: the widget is created in the Cloudflare dashboard, not
+    # here, because cloudflare_turnstile_widget would hold this secret in
+    # state (frontend.tf says why, beside the Cloudflare resources).
+    #
+    # It cannot be seeded before this applies, unlike RESEND or QLTY above:
+    # the Integrations Keys tab offers only secrets the DEPLOYED catalogue
+    # lists, and deploy-functions.yml refuses to start while this run is
+    # unfinished and fails if the live settings lack a reference declared
+    # here. So the order is this run, the functions deploy, then the seed,
+    # and in between the reference is unresolved on purpose: it is listed in
+    # EXPECTED_UNRESOLVED in scripts/check-unresolved-secrets.mjs, reported
+    # every run but not as a failure. Remove it from that list in the PR
+    # after it is seeded. Unseeded, resolvedSetting() in
+    # lib/auth/client-identity.js reads the unresolved reference as unset: the
+    # builder's button says the browser check is not configured and the lab
+    # takes nothing.
+    "TURNSTILE_SECRET_KEY" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/TURNSTILE-SECRET-KEY)"
+
     "NODE_ENV" = "production"
 
     # Timer clock: UTC, and there is deliberately NO app setting here.

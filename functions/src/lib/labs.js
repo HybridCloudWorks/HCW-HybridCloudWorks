@@ -21,8 +21,9 @@
  *     plain Firebase users (not admins), which belongs to the frontend auth
  *     swap phase; it is also outside the api-surface RPC contract. The
  *     anonymous path that replaces it is lib/labs/public-submit.js (#672):
- *     terraform-validate only, inside ADR 0032 decision 6's bounds, and
- *     closed unless LABS_PUBLIC_SUBMISSION_ENABLED is exactly "true".
+ *     terraform-validate only, inside ADR 0032 decision 6's bounds, closed
+ *     unless LABS_PUBLIC_SUBMISSION_ENABLED is exactly "true", and locked
+ *     to the site's pane by origin and Turnstile (lib/labs/public-lock.js).
  */
 import { randomUUID } from 'node:crypto';
 

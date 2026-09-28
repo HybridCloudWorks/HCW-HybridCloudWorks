@@ -113,6 +113,38 @@ describe('Content-Security-Policy', () => {
     expect(connect).toContain('https://nominatim.openstreetmap.org');
   });
 
+  // The Landing Zone Builder's "Validate on the lab" is locked to the site's
+  // pane by a Cloudflare Turnstile token (ADR 0032 decision 6, revised
+  // 2026-09-28). The widget is a script from challenges.cloudflare.com that
+  // draws an iframe from the same origin, so it needs exactly script-src and
+  // frame-src there, and Cloudflare's CSP reference asks for nothing else
+  // (connect-src only for pre-clearance, which is off). One exact origin: no
+  // *.cloudflare.com, and nothing in connect-src, where it would let code
+  // send the page's data to Cloudflare.
+  it('lets Turnstile load its script and frame from its one origin, and nothing broader', () => {
+    expect(directive('script-src')).toEqual([
+      "'self'",
+      'https://static.cloudflareinsights.com',
+      'https://challenges.cloudflare.com',
+    ]);
+    expect(directive('frame-src')).toEqual([
+      "'self'",
+      'https://login.microsoftonline.com',
+      'https://challenges.cloudflare.com',
+    ]);
+    expect(directive('connect-src')).not.toContain('https://challenges.cloudflare.com');
+    expect(CSP).not.toMatch(/\*\.cloudflare\.com/);
+    // Every directive that lists the origin, by exact source token compared
+    // with ===. A substring match on the policy text would also count a
+    // look-alike host, and CodeQL rightly flags one.
+    const TURNSTILE_ORIGIN = 'https://challenges.cloudflare.com';
+    const granting = CSP.split(';')
+      .map((part) => part.trim().split(/\s+/))
+      .filter(([, ...sources]) => sources.some((source) => source === TURNSTILE_ORIGIN))
+      .map(([name]) => name);
+    expect(granting.sort()).toEqual(['frame-src', 'script-src']);
+  });
+
   it('still refuses framing and defaults closed', () => {
     expect(directive('default-src')).toEqual(["'self'"]);
     expect(directive('frame-ancestors')).toEqual(["'none'"]);

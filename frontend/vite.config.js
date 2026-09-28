@@ -230,6 +230,9 @@ export default defineConfig(({ mode }) => {
     'VITE_SOCIAL_GITHUB_URL',
     'VITE_DEFAULT_LANGUAGE',
     'VITE_TRANSLATIONS',
+    // Public by design: the site key of the lab's Turnstile widget
+    // (src/lib/turnstile.js). Absent, "Validate on the lab" says so.
+    'VITE_TURNSTILE_SITE_KEY',
   ];
 
   // Create define object with fallbacks for non-prefixed versions just in case

@@ -7,12 +7,21 @@
  * CLOSED UNTIL THE SERVER SAYS OPEN. On mount the control asks
  * `GET public/labs/submit` whether a job would be taken, and until the
  * answer is `open: true` the button is disabled with one line saying why:
- * public submission is switched off (the default, ADR 0032 decision 6), no
- * lab agent is online, the queue is full, or the status could not be read.
- * That line is text, never a spinner: a spinner says "wait", and waiting
- * would not open a door the owner has closed. The pre-rendered page carries
- * the "checking" line, which is the same markup the first client render
- * produces, so hydration adopts it.
+ * public submission is switched off, the server's browser check (Cloudflare
+ * Turnstile) is not configured, no lab agent is online, the queue is full,
+ * or the status could not be read. That line is text, never a spinner: a
+ * spinner says "wait", and waiting would not open a door the owner has
+ * closed. The pre-rendered page carries the "checking" line, which is the
+ * same markup the first client render produces, so hydration adopts it.
+ *
+ * LOCKED TO THIS PANE (ADR 0032 decision 6, revised 2026-09-28). The server
+ * takes a job only from the site's origin with a Turnstile token for the
+ * `lab-validate` action. Once the door is open, and only then, the control
+ * loads Cloudflare's widget (useLabTurnstile.js; invisible unless Cloudflare
+ * wants the visitor to act) and the button waits for its token. Each
+ * submission spends one token and asks for the next. A build of the site
+ * with no `VITE_TURNSTILE_SITE_KEY` never loads the widget, and the button
+ * says so.
  *
  * THE FILES ARE SENT UNCHANGED. The payload is the download (labPayload.js):
  * registry `source` and `version` lines stay, and the lab rewrites them to
@@ -36,6 +45,7 @@ import { Button } from '@/components/ui/button';
 import { labModuleReport, labResolution } from '@/lib/landingZone';
 import { jobPollDelay } from '@/lib/labsPolling';
 import { fetchLabSubmissionStatus, fetchPublicLabJob, submitLabValidation } from '@/lib/publicApi';
+import { loadTurnstile, turnstileSiteKey } from '@/lib/turnstile';
 import {
   LINES,
   POLL_DEADLINE_MS,
@@ -52,14 +62,19 @@ import {
   preparePayload,
   settle,
   statusLine,
+  turnstileActive,
 } from './labValidateRules';
 import { HINT_CLASS } from './styles';
+import { useLabTurnstile } from './useLabTurnstile';
 
 const DEFAULT_REQUESTS = Object.freeze({
   status: fetchLabSubmissionStatus,
   submit: submitLabValidation,
   job: fetchPublicLabJob,
 });
+
+/** The build's site key and Cloudflare's loader; tests pass their own. */
+const DEFAULT_TURNSTILE = Object.freeze({ siteKey: turnstileSiteKey(), load: loadTurnstile });
 
 /** The door: `checking` until the status read answers, then what it said. */
 function useLabDoor(requests) {
@@ -112,8 +127,21 @@ function useWatchState(key) {
 /**
  * One submission and its polling, held against the files it sent.
  * `onRefusal` hears every refused submission, so the door can shut.
+ * `takeToken` and `renewCheck` are the Turnstile widget's: its token rides on
+ * the submission, and the widget is renewed once the server has answered,
+ * since the token is then spent.
  */
-function useLabRun({ files, key, requests, pollDelay, deadlineMs, now, onRefusal }) {
+function useLabRun({
+  files,
+  key,
+  requests,
+  pollDelay,
+  deadlineMs,
+  now,
+  onRefusal,
+  takeToken,
+  renewCheck,
+}) {
   const [record, setRecord] = useState(null);
   const { schedule, isMounted, stillWatching } = useWatchState(key);
 
@@ -136,11 +164,20 @@ function useLabRun({ files, key, requests, pollDelay, deadlineMs, now, onRefusal
     if (!next.stop) watch(runKey, jobId, next.errors, startedAt);
   };
 
+  /** The payload with this pane's one-use token, sent; the widget renewed after. */
+  const submit = async (payloadBody) => {
+    const turnstileToken = takeToken();
+    if (!turnstileToken) return { error: new Error(LINES.browserMissing) };
+    const outcome = await settle(requests.submit({ ...payloadBody, turnstileToken }));
+    renewCheck();
+    return outcome;
+  };
+
   const validate = async () => {
     const runKey = key;
     setRecord({ key: runKey, phase: 'submitting' });
     const prepared = await preparePayload(files);
-    const sent = prepared.error ? prepared : await settle(requests.submit(prepared.body));
+    const sent = prepared.error ? prepared : await submit(prepared.body);
     if (!isMounted()) return;
     if (sent.error && !prepared.error) onRefusal(sent.error);
     if (sent.error) update(runKey, { phase: 'error', error: sent.error });
@@ -222,6 +259,7 @@ function LabOutcome({ run }) {
  * @param {object} props
  * @param {Array<{ path: string, content: string }>} props.files  the emitted files, as the tabs show them
  * @param {{ status: Function, submit: Function, job: Function }} [props.requests]  the publicApi calls; tests pass their own
+ * @param {{ siteKey: string, load: () => Promise<object> }} [props.turnstile]  the site key and Cloudflare's loader; tests pass their own
  * @param {(errors: number) => number} [props.pollDelay]
  * @param {number} [props.deadlineMs]
  * @param {() => number} [props.now]
@@ -229,6 +267,7 @@ function LabOutcome({ run }) {
 export function LzLabValidate({
   files,
   requests = DEFAULT_REQUESTS,
+  turnstile = DEFAULT_TURNSTILE,
   pollDelay = jobPollDelay,
   deadlineMs = POLL_DEADLINE_MS,
   now = Date.now,
@@ -238,6 +277,17 @@ export function LzLabValidate({
   const resolution = useMemo(() => labResolution(files), [files]);
   const report = useMemo(() => labModuleReport(files), [files]);
   const hasTerraform = files.some((f) => f.path.endsWith('.tf'));
+  const widgetActive = turnstileActive(door, turnstile.siteKey);
+  const {
+    containerRef: turnstileRef,
+    phase: checkPhase,
+    take: takeToken,
+    renew: renewCheck,
+  } = useLabTurnstile({
+    active: widgetActive,
+    siteKey: turnstile.siteKey,
+    load: turnstile.load,
+  });
   const onRefusal = (error) => {
     const shut = doorFromRefusal(error);
     if (shut) setDoor(shut);
@@ -250,9 +300,17 @@ export function LzLabValidate({
     deadlineMs,
     now,
     onRefusal,
+    takeToken,
+    renewCheck,
   });
   const busy = isBusy(current);
-  const reason = disabledReason({ door, hasTerraform, resolution });
+  const reason = disabledReason({
+    door,
+    hasTerraform,
+    resolution,
+    siteKey: turnstile.siteKey,
+    check: checkPhase,
+  });
   const Icon = busy ? Loader2 : FlaskConical;
 
   return (
@@ -284,6 +342,9 @@ export function LzLabValidate({
           {statusLine(reason, current)}
         </p>
       </div>
+      {widgetActive ? (
+        <div ref={turnstileRef} data-testid="lz-lab-turnstile" data-check={checkPhase} />
+      ) : null}
       <LabModules report={report} />
       <LabOutcome run={current} />
     </div>

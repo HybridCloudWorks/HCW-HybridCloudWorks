@@ -198,3 +198,30 @@ describe('rateLimitKey', () => {
     expect(id.rateLimitKey(fromCloudflare('203.0.113.7'), {})).toBe(keyFor('203.0.113.7'));
   });
 });
+
+describe('trustedClientIp', () => {
+  // The public lab submission sends this to Turnstile's siteverify as
+  // remoteip. Only an address Cloudflare vouched for may go: without the
+  // origin secret, CF-Connecting-IP is whatever the caller typed.
+  it('returns the address when the request came through Cloudflare', () => {
+    expect(identity().trustedClientIp(fromCloudflare('203.0.113.7'))).toBe('203.0.113.7');
+    expect(identity().trustedClientIp(fromCloudflare(' 2001:db8::1 '))).toBe('2001:db8::1');
+  });
+
+  it('returns null without the origin secret, whatever the header says', () => {
+    const spoofed = makeRequest({ 'cf-connecting-ip': '203.0.113.7' });
+    expect(identity().trustedClientIp(spoofed)).toBeNull();
+    const wrong = makeRequest({ 'x-hcw-origin-secret': 'guess', 'cf-connecting-ip': '203.0.113.7' });
+    expect(identity().trustedClientIp(wrong)).toBeNull();
+  });
+
+  it('returns null in dev too, where the origin is unverified by design', () => {
+    const id = createClientIdentity({ originSecret: SECRET, allowUnverifiedOrigin: true });
+    expect(id.trustedClientIp(makeRequest({ 'cf-connecting-ip': '203.0.113.7' }))).toBeNull();
+  });
+
+  it('returns null for a header that is not an address', () => {
+    expect(identity().trustedClientIp(fromCloudflare('not-an-ip'))).toBeNull();
+    expect(identity().trustedClientIp(fromCloudflare(''))).toBeNull();
+  });
+});

@@ -165,7 +165,26 @@ export const EXPECTED = {
  * reason }` and matches only those exact values. Delete it once its change
  * has applied. "Declaring an intended change" in the header has the rest.
  */
-export const DECLARED = [];
+export const DECLARED = [
+  // Two new keys on the Function App, so `before` is absent. Both values are
+  // known at plan time and neither is a secret: a switch, and a vault
+  // reference (the pointer, never the value).
+  {
+    address: 'azurerm_function_app_flex_consumption.hcw',
+    path: 'app_settings.LABS_PUBLIC_SUBMISSION_ENABLED',
+    before: undefined,
+    after: 'true',
+    reason: 'ADR 0032 decision 6 revised 2026-09-28: public Validate on the lab opened, locked to the site',
+  },
+  {
+    address: 'azurerm_function_app_flex_consumption.hcw',
+    path: 'app_settings.TURNSTILE_SECRET_KEY',
+    before: undefined,
+    after:
+      '@Microsoft.KeyVault(SecretUri=https://kv-site-prod-cus-01.vault.azure.net/secrets/TURNSTILE-SECRET-KEY)',
+    reason: 'ADR 0032 decision 6 revised 2026-09-28: the Turnstile secret, as a Key Vault reference',
+  },
+];
 
 /** One `DECLARED` entry, for the report. */
 export function describeDeclaration({ address, path, before, after, reason }) {

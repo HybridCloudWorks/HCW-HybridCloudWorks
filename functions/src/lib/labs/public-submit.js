@@ -6,26 +6,43 @@
  *   POST /api/public/labs/submit        queue one terraform-validate job
  *   GET  /api/public/labs/job?jobId=    that job's status and output
  *
- * Three modules: the contract (public-bounds.js: the switch, the bounds, the
- * door codes, the body's checks, the job document), the job read
+ * Four modules: the contract (public-bounds.js: the switch, the bounds, the
+ * door codes, the body's checks, the job document), the lock to the site's
+ * pane (public-lock.js: the origin and the Turnstile token), the job read
  * (public-job.js), and this one, which carries the door and the submission
  * pipeline and wires all three routes. Everything a caller or a test needs
  * is re-exported here.
  *
  * ===========================================================================
- * CLOSED BY DEFAULT. ADR 0032 decision 6 keeps anonymous submission Gated.
+ * OPEN BY THE OWNER'S DECISION, AND ONLY FROM THE SITE'S PANE.
  * ===========================================================================
- * Accepting ADR 0032 did not open this path, so nothing here runs until the
- * owner revises decision 6 and then sets one app setting:
+ * ADR 0032 decision 6 held this path Gated until the owner revised it, which
+ * the owner did on 2026-09-28: open, locked to the Landing Zone Builder's
+ * pane on the site by its origin and a Cloudflare Turnstile token
+ * (public-lock.js), with every bound below unchanged. Three things must all
+ * hold before a job is taken, and each fails closed:
  *
- *   LABS_PUBLIC_SUBMISSION_ENABLED = "true"
+ *   LABS_PUBLIC_SUBMISSION_ENABLED = "true"   (infra: labs_public_submission_enabled)
+ *   TURNSTILE_SECRET_KEY resolves             (Key Vault TURNSTILE-SECRET-KEY)
+ *   an agent registered for the type is heartbeating
  *
- * Anything but that exact string is closed: absent (as it is today, since
- * nothing in infra/ sets it), "false", "TRUE", "1". While closed, every one
- * of the three routes answers `PUBLIC_SUBMISSION_CLOSED` before it reads the
- * body, the caller's identity or the store, so a closed path can never touch
- * the queue. The same rule as NEWSLETTER_SENDING_ENABLED in
- * lib/newsletter/admin-handlers.js.
+ * The switch is exact: anything but "true" is closed ("false", "TRUE", "1",
+ * absent). While it is off, every one of the three routes answers
+ * `PUBLIC_SUBMISSION_CLOSED` before it reads the body, the caller's identity
+ * or the store, so a closed path can never touch the queue. The same rule as
+ * NEWSLETTER_SENDING_ENABLED in lib/newsletter/admin-handlers.js, and setting
+ * the Terraform variable to false is the one-step kill switch. With the
+ * switch on and no Turnstile secret, the submission and the status read
+ * answer `TURNSTILE_NOT_CONFIGURED`, again before any read.
+ *
+ * THE LOCK COMES BEFORE ANY STORE READ OR COUNTER. A POST whose `Origin` is
+ * not exactly the site's is 403 ORIGIN_NOT_ALLOWED before its body is read;
+ * one without a Turnstile token is 403 TURNSTILE_REQUIRED; a client past ten
+ * checks in ten minutes on this instance is 429 TURNSTILE_RATE_LIMITED; one
+ * Cloudflare's siteverify does not pass for the site's hostname and the
+ * `lab-validate` action is 403 TURNSTILE_FAILED; and siteverify out of reach
+ * is 503 TURNSTILE_UNAVAILABLE. All five happen before the lab is read, so a
+ * refused request costs the store nothing and spends no one's quota.
  *
  * ===========================================================================
  * THE BOUNDS ARE DECISION 6's, AND NO WIDER. Each one is a test.
@@ -54,14 +71,17 @@
  * failed read of the agents or the queue is 503 LAB_STATUS_UNAVAILABLE,
  * never "open".
  *
- * ORDER. Switch, body, identity, lab, then the two counters, then the write.
- * The lab check comes before the counters so a visitor is never charged for
- * a job the lab could not have run, the same reason the explain route checks
- * its provider before counting. The lab check reads the status route's
- * one-minute door first: a shut door there refuses without reading the lab,
- * so anonymous POSTs cannot drive the two reads while the lab is down or
- * full. Only a door that is open, or not cached, is read live, because the
- * queue ceiling needs a fresh count.
+ * ORDER. Switch, Turnstile configured, origin, body, identity, the Turnstile
+ * token, lab, then the two counters, then the write. The first two are the
+ * door for everyone and read only settings; the origin reads one header; the
+ * token is checked after the identity because siteverify is given the
+ * address the identity trusts. The lab check comes before the counters so a
+ * visitor is never charged for a job the lab could not have run, the same
+ * reason the explain route checks its provider before counting. The lab
+ * check reads the status route's one-minute door first: a shut door there
+ * refuses without reading the lab, so anonymous POSTs cannot drive the two
+ * reads while the lab is down or full. Only a door that is open, or not
+ * cached, is read live, because the queue ceiling needs a fresh count.
  *
  * WHAT IS NOT ENFORCED ATOMICALLY. The queue ceiling is a count read before
  * the write: Cosmos has no cross-document transaction here, so submissions
@@ -103,6 +123,7 @@ import {
   PUBLIC_PER_DAY,
   PUBLIC_QUEUE_CEILING,
   PUBLIC_QUOTA_TTL_SECONDS,
+  UNCONFIGURED_DOOR,
   publicJobDocument,
   publicQuotaId,
   publicSubmissionEnabled,
@@ -110,10 +131,31 @@ import {
   validatePublicSubmission,
 } from './public-bounds.js';
 import { getPublicJob } from './public-job.js';
+import {
+  CHECK_WINDOW_MS,
+  LOCK_CODES,
+  LOCK_REASONS,
+  createCheckLimiter,
+  isSiteOrigin,
+  turnstileConfigured,
+  turnstileSecret,
+  verifyTurnstileToken,
+} from './public-lock.js';
 import { LAB_JOBS_CONTAINER } from './rollup.js';
 
 export * from './public-bounds.js';
+export * from './public-lock.js';
 export { getPublicJob, isLivePublicJob, projectPublicJob } from './public-job.js';
+
+/**
+ * The door every visitor meets before any store read: the switch, then the
+ * Turnstile secret. Null when both are in place and the lab itself decides.
+ */
+function settingsDoor(env) {
+  if (!publicSubmissionEnabled(env)) return CLOSED_DOOR;
+  if (!turnstileConfigured(env)) return UNCONFIGURED_DOOR;
+  return null;
+}
 
 /** The door, cached a minute for the page's status read and the POST's first look. */
 export const PUBLIC_STATUS_CACHE_ID = 'labs:public-submit';
@@ -186,9 +228,19 @@ function readContentLength(request) {
  * fills in what the next needs (returns null).
  */
 
-async function checkSwitch({ env }) {
-  if (publicSubmissionEnabled(env)) return null;
-  return reply(503, { ok: false, configured: false, code: DOOR_CODES.closed, error: CLOSED_DOOR.reason });
+/** The switch, then the Turnstile secret: a shut door for everyone, from settings alone. */
+async function checkSettings({ env }) {
+  const shut = settingsDoor(env);
+  if (!shut) return null;
+  return reply(503, { ok: false, configured: false, code: shut.code, error: shut.reason });
+}
+
+/** Exactly the site's origin, from its pane. One header, before the body is read. */
+async function checkOrigin(_deps, state) {
+  const origin = state.request?.headers?.get?.('origin') ?? null;
+  if (isSiteOrigin(origin)) return null;
+  state.context.warn?.(`labs public submit refused: ${origin ? 'an origin that is not the site' : 'no Origin header'}`);
+  return refusal(403, LOCK_CODES.origin, LOCK_REASONS[LOCK_CODES.origin]);
 }
 
 /** The raw body, bounded twice: by its declared length, then by what arrived. */
@@ -211,6 +263,8 @@ async function readRequest(_deps, state) {
   const validated = validatePublicSubmission(body);
   if (!validated.error) {
     state.value = validated.value;
+    // The lock's, not the job's: checked by checkTurnstile, never written.
+    state.turnstileToken = body.turnstileToken;
     return null;
   }
   const code = validated.status === 413 ? 'PAYLOAD_TOO_LARGE' : 'INVALID_BODY';
@@ -220,11 +274,42 @@ async function readRequest(_deps, state) {
 async function checkIdentity({ identity }, state) {
   try {
     state.clientKey = identity.anonymousKey(state.request).key;
+    state.remoteIp = identity.trustedClientIp?.(state.request) ?? null;
     return null;
   } catch {
     state.context.warn?.('labs public submit rejected: unverified origin');
     return refusal(403, 'FORBIDDEN', 'Forbidden');
   }
+}
+
+/**
+ * The Turnstile token, checked with Cloudflare. Before the lab, so no store
+ * read and no quota counter; the only count is the in-memory check limiter,
+ * which caps how many siteverify calls one client can cause.
+ */
+async function checkTurnstile({ env, fetch, now, checkLimiter }, state) {
+  const token = state.turnstileToken;
+  if (typeof token !== 'string' || !token.trim()) {
+    return refusal(403, LOCK_CODES.required, LOCK_REASONS[LOCK_CODES.required]);
+  }
+  if (!checkLimiter.take(state.clientKey, now())) {
+    state.context.warn?.('labs public submit refused: too many Turnstile checks from one client');
+    return refusal(429, LOCK_CODES.attempts, LOCK_REASONS[LOCK_CODES.attempts], {
+      'Retry-After': String(CHECK_WINDOW_MS / 1000),
+    });
+  }
+  const verdict = await verifyTurnstileToken({
+    fetch,
+    secret: turnstileSecret(env),
+    token,
+    remoteIp: state.remoteIp,
+  });
+  if (verdict.ok) return null;
+  state.context.warn?.(`labs public submit refused by the Turnstile check: ${verdict.detail}`);
+  if (verdict.kind === 'unavailable') {
+    return refusal(503, LOCK_CODES.unavailable, LOCK_REASONS[LOCK_CODES.unavailable], { 'Retry-After': '60' });
+  }
+  return refusal(403, LOCK_CODES.failed, LOCK_REASONS[LOCK_CODES.failed]);
 }
 
 async function checkLab(deps, state) {
@@ -282,9 +367,11 @@ async function enqueue({ store, uuid }, state) {
 }
 
 const SUBMIT_STEPS = Object.freeze([
-  checkSwitch,
+  checkSettings,
+  checkOrigin,
   readRequest,
   checkIdentity,
+  checkTurnstile,
   checkLab,
   checkClientQuota,
   checkDailyCap,
@@ -307,10 +394,15 @@ async function submitJob(deps, request, context) {
   }
 }
 
-/** GET public/labs/submit: the door, and the bounds behind it. No store read while closed. */
+/**
+ * GET public/labs/submit: the door, and the bounds behind it. It says why a
+ * shut door is shut: switched off (PUBLIC_SUBMISSION_CLOSED), no Turnstile
+ * secret (TURNSTILE_NOT_CONFIGURED), no agent (LAB_AGENT_OFFLINE), the queue
+ * full, or the lab unreadable. No store read for the first two.
+ */
 async function getSubmissionStatus(deps, _request, context) {
   try {
-    const door = publicSubmissionEnabled(deps.env) ? await cachedDoor(deps, context) : CLOSED_DOOR;
+    const door = settingsDoor(deps.env) ?? (await cachedDoor(deps, context));
     return jsonResponse(200, { ...door, bounds: PUBLIC_BOUNDS }, MINUTE_CACHE_SECONDS);
   } catch (error) {
     context.error?.('publicLabsSubmit status failed:', error);
@@ -320,11 +412,12 @@ async function getSubmissionStatus(deps, _request, context) {
 
 /**
  * @param {object} deps
- * @param {{ anonymousKey: Function }} deps.identity - auth/client-identity.js
+ * @param {{ anonymousKey: Function, trustedClientIp: Function }} deps.identity - auth/client-identity.js
  * @param {{ queryDocs: Function, readDoc: Function, upsertDoc: Function, createDoc: Function, incrementIf: Function, replaceDocIfMatch: Function }} deps.store
  * @param {NodeJS.ProcessEnv|Record<string, string|undefined>} [deps.env] - read per request
  * @param {() => number} [deps.now] - epoch ms
  * @param {() => string} [deps.uuid]
+ * @param {typeof fetch} [deps.fetch] - for Turnstile's siteverify (public-lock.js)
  */
 export function createPublicSubmitHandlers({
   identity,
@@ -332,6 +425,7 @@ export function createPublicSubmitHandlers({
   env = process.env,
   now = () => Date.now(),
   uuid = randomUUID,
+  fetch = globalThis.fetch,
 }) {
   const cache = createMinuteCache({
     store,
@@ -340,7 +434,10 @@ export function createPublicSubmitHandlers({
     now,
     seconds: MINUTE_CACHE_SECONDS,
   });
-  const deps = { identity, store, env, now, uuid, cache };
+  // One per handler set, which is one per worker process (labs-public-http.js
+  // builds the handlers once), so the limit is per instance.
+  const checkLimiter = createCheckLimiter();
+  const deps = { identity, store, env, now, uuid, cache, fetch, checkLimiter };
 
   return {
     getSubmissionStatus: (request, context) => getSubmissionStatus(deps, request, context),

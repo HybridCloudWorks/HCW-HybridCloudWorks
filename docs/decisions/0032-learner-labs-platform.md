@@ -1,6 +1,6 @@
-# ADR 0032: The learner labs platform — a Terraform-managed Hostinger host under Azure Arc, Docker only, Coder as the learner boundary, and public submission held Gated
+# ADR 0032: The learner labs platform — a Terraform-managed Hostinger host under Azure Arc, Docker only, Coder as the learner boundary, and public submission locked to the site's pane
 
-**Status:** Accepted 2026-09-27 (owner: "all have been approved to move forward"); amended 2026-09-26. Decision 6 is unchanged: anonymous public submission stays Gated until the owner revises it.
+**Status:** Accepted 2026-09-27 (owner: "all have been approved to move forward"); amended 2026-09-26 and 2026-09-28. Decision 6 was revised on 2026-09-28: public submission is open, only from the Landing Zone Builder's pane on the site, locked by the request's origin and a Cloudflare Turnstile token, within decision 6's original bounds, which are unchanged.
 **Decision date:** 2026-09-25
 **Owners:** Workload owner and architecture owner
 
@@ -163,6 +163,11 @@ are recorded once, here, before any of them is implemented.
    jobs are queued; jobs written with `public: true` and a 1-day TTL. Until
    then, submission is `enqueueLabJob` from `/admin/labs` under the `editor`
    role, exactly as the code stands.
+   (Revised 2026-09-28, owner decision; [the amendment of that date](#amendment-2026-09-28-decision-6-revised-open-only-from-the-sites-pane)
+   below. The Gate is replaced by a lock to the Landing Zone Builder's pane
+   on the site, the request's origin and a Cloudflare Turnstile token, and
+   every bound in this paragraph stands as written. `enqueueLabJob` under the
+   `editor` role is unchanged beside it.)
 
 ## Amendment 2026-09-26: a clean reinstall; Portainer and Vault on the host, loopback-only
 
@@ -240,6 +245,112 @@ Consequences of this amendment:
   parties". Portainer is the owner's tool here and learners never reach it.
   If that changes, the Community Edition image is the same release with no
   key.
+
+## Amendment 2026-09-28: decision 6 revised, open only from the site's pane
+
+**Context.** #672 built the anonymous path behind decision 6's bounds and
+left it closed (`LABS_PUBLIC_SUBMISSION_ENABLED` unset). The lab agent
+`vps-hostinger-01` is registered and heartbeating, so the only thing between
+the Landing Zone Builder's "Validate on the lab" and a real job was this
+decision. The consequences below named the question the revision had to
+answer: which client identifier the rate limits count.
+
+**Owner decision 2026-09-28.** "The lab should only be accessible through
+'panes' from my site, lock to that." Of the shapes put to the owner, the one
+chosen is **the site's origin plus Cloudflare Turnstile**. The same decision
+has a lab-host half, recorded under decision 4 and in
+[Labs host, "Panes only"](../architecture/labs-host.md#panes-only) (#750):
+Caddy lets only the site frame the lab and turns a direct visit away. This
+amendment is the API half, for the one public route that queues work.
+
+1. **Public submission is open, and only from the builder's pane on the
+   site.** Decision 6's Gate is replaced by a lock, and nothing else about
+   the decision moves: `terraform-validate` only, 64 KB, 2 an hour per
+   client, 50 a day globally, refused while more than 20 jobs are queued,
+   `public: true` with a 1-day TTL, and refused outright while no agent
+   registered for the type has heartbeated. The lock is checked before any
+   of those, and before any store read or counter moves, so a refused request
+   costs the store nothing and spends no one's quota
+   (`functions/src/lib/labs/public-lock.js`, `public-submit.js`).
+2. **The origin.** A `POST /api/public/labs/submit` is refused
+   `403 ORIGIN_NOT_ALLOWED` unless its `Origin` is exactly
+   `https://hybridcloudworks.com` or `https://www.hybridcloudworks.com`, the
+   production origins of the CORS allowlist (`functions/src/lib/auth/cors.js`),
+   both of which serve the site. A missing Origin is refused, and so are the
+   Static Web App's preview hostname and localhost, which CORS admits for
+   other reasons. On its own this stops browsers on other sites and nothing
+   else, because a script can send any header.
+3. **A Cloudflare Turnstile token.** The builder renders a Turnstile widget
+   (Managed mode, shown only when Cloudflare wants the visitor to act) once
+   the lab is open, and sends its token with the submission. The Function App
+   verifies it with Cloudflare's siteverify, passing the secret key and the
+   client address `client-identity.js` trusts, and accepts only
+   `success: true` for one of the site's two hostnames and the action
+   `lab-validate`. Tokens are single use and live five minutes, so a replay
+   fails at siteverify. Siteverify out of reach, or refusing the secret, is
+   `503 TURNSTILE_UNAVAILABLE`, never a pass. Because the per-client quota
+   needs the store and so comes after the lock, an in-memory limit per
+   Function App instance allows one client ten checks in ten minutes and
+   answers the next `429 TURNSTILE_RATE_LIMITED`, so junk tokens cannot drive
+   a siteverify call per request (security review of this change). The two
+   reads, the status and one job's output, stay anonymous and are not locked
+   to the origin: they queue nothing, and a job is readable only by the
+   random id its submission returned, for a day.
+4. **The client identifier is the one #738 already uses.** The per-client
+   bound counts the Cloudflare-verified, salted hash of `CF-Connecting-IP`,
+   trusted only on a request carrying the origin secret, the identity every
+   anonymous route shares. Turnstile is what makes that count mean a person
+   at a browser rather than a script rotating addresses.
+5. **Three switches, each failing closed.** `labs_public_submission_enabled`
+   (default `true`, the owner's decision in code, reviewed in the pull request
+   and read in the plan) sets `LABS_PUBLIC_SUBMISSION_ENABLED`; the Key Vault
+   secret `TURNSTILE-SECRET-KEY`, read through the `TURNSTILE_SECRET_KEY`
+   reference, must resolve; and an agent must be online. The status read says
+   which is missing: `PUBLIC_SUBMISSION_CLOSED`, `TURNSTILE_NOT_CONFIGURED` or
+   `LAB_AGENT_OFFLINE`. A build of the site without the public site key
+   `VITE_TURNSTILE_SITE_KEY` keeps the button disabled and says so. Setting
+   the variable to `false` in the `hcw-azure` workspace is the one-step kill
+   switch.
+6. **The widget is created in the Cloudflare dashboard, not by Terraform.**
+   The pinned provider has `cloudflare_turnstile_widget`, whose `secret` is a
+   read-only attribute: managing it would put the secret key in HCP Terraform
+   state, which [Variables and secrets](../standards/variables-and-secrets.md)
+   forbids, and it needs an account id and an account-level Turnstile
+   permission the zone-scoped `cloudflare_api_token` does not carry. The site
+   key goes to the repository variable, the secret key to Key Vault through
+   the API-keys page, as every other secret does. `infra/frontend.tf` records
+   this beside the Cloudflare resources, and a test fails if the resource
+   appears.
+
+Consequences of this amendment:
+
+- **The CSP grants `https://challenges.cloudflare.com` in `script-src` and
+  `frame-src`, site-wide, and nowhere else.** Static Web Apps sends one
+  policy for every page, so the grant is not scoped to the builder; the
+  script is. Only the builder loads it, and only while the lab is open, so
+  every other page makes no request to Cloudflare. `connect-src` is
+  unchanged. `frontend/src/lib/csp.test.js` holds exactly this.
+- **Cloudflare sees the builder's visitors.** Turnstile runs Cloudflare's
+  browser challenge on the page and receives the visitor's address from
+  siteverify. The site already sits behind Cloudflare's proxy, so no new
+  party receives the address, but the challenge is new processing, so the
+  site's privacy policy (`frontend/public/privacy-policy.html`) says so and
+  links Cloudflare's Turnstile Privacy Addendum.
+- **Turnstile raises the cost of automation; it does not end it.** A person
+  can solve challenges for someone else. The bounds are what cap the
+  damage: 2 an hour per verified address and 50 a day in total, against a
+  `terraform-validate` job with no network, and decision 6 needs no change
+  for that reason. The same bounds give one denial of service: about 50
+  bought tokens from 25 addresses can use up the day's global cap and pause
+  the button for everyone until midnight UTC. That costs availability, not
+  data, and a per-network sub-cap is the answer if it is seen (revisit
+  triggers).
+- **One more owner-held secret, one more public value.** The secret key
+  lives in Key Vault only and rotates by creating a new one in the dashboard
+  and pasting it on the API-keys page. The site key rotates with it and needs
+  a frontend deploy.
+- **This amendment answers the client-identifier question that the
+  "public path stays closed" consequence below left for the revision.**
 
 ## Consequences and accepted risks
 
@@ -325,6 +436,9 @@ Consequences of this amendment:
   a revision of this record. That is deliberate: the rate limits above need a
   client identifier the anonymous site does not have yet, and choosing one
   (edge-hashed IP, signed cookie, or a Coder session) is the revision's job.
+  (Revised 2026-09-28: the amendment of that date opens the path from the
+  builder's pane and chooses the edge-hashed IP, made meaningful by a
+  Turnstile token.)
 
 ## Alternatives considered
 
@@ -360,7 +474,20 @@ Consequences of this amendment:
   the revisit triggers.
 - **Opening public submission in this record**, with the bounds above.
   Deferred to a revision, for the client-identifier reason given under
-  consequences.
+  consequences. (The revision is the amendment of 2026-09-28.)
+- **For that revision (2026-09-28), the origin alone.** Rejected: any script
+  can send `Origin: https://hybridcloudworks.com`, so it locks out other
+  sites' pages and nothing else.
+- **For that revision, a signed session cookie from the site.** Rejected: the
+  site has no anonymous session to sign, and minting one is a new token
+  service to secure, rotate and explain, where Turnstile is a managed one the
+  site's own proxy vendor already runs.
+- **For that revision, a Coder session.** Rejected for the builder: it would
+  make a learner sign in with GitHub to validate a download, and the builder
+  is public by design. Coder stays the boundary for browser workspaces.
+- **For that revision, the widget as `cloudflare_turnstile_widget` in
+  `infra/`.** Rejected, for the state and token-scope reasons in item 6 of
+  the amendment.
 
 ## Validation and revisit triggers
 
@@ -387,11 +514,22 @@ Consequences of this amendment:
     when the resource group is missing or the host is down.
   - `enqueueLabJob` with no `Authorization` header still answers 401, which the
     Health Hub labs probe already asserts.
+  - Since the amendment of 2026-09-28: `GET /api/public/labs/submit` answers
+    `open: true` while `vps-hostinger-01` heartbeats, and a `POST` to it with
+    no `Origin` header answers `403 ORIGIN_NOT_ALLOWED`. The builder's
+    **Validate on the lab** at `https://hybridcloudworks.com/tools/landing-zone`
+    queues a job that `vps-hostinger-01` claims and completes, and the page
+    shows Terraform's output.
   - Every image `lab-image/` publishes is referenced by digest in
     `vps-agent/lib/capabilities.js` and the Coder template.
 - **Revisit when:**
   - the owner decides to open public submission, which is a revision of §6 of
-    this record and nothing else;
+    this record and nothing else (done 2026-09-28, the amendment of that
+    date);
+  - the daily cap fills from a handful of verified addresses, or siteverify
+    passes tokens that the job pattern says were farmed, which reopens the
+    lock (Turnstile's pre-clearance or interactive mode, or a signed
+    session);
   - the host gains data of record (learner work that cannot be rebuilt), which
     reopens the backup posture and Defender for Servers;
   - the auth syslog shows sustained credential attacks, which reopens Defender

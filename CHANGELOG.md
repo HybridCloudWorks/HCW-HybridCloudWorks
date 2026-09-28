@@ -19,6 +19,60 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **"Validate on the lab" opens to the public, locked to the site's pane by
+  origin and Cloudflare Turnstile (ADR 0032 decision 6 revised).** Owner
+  decision 2026-09-28: "The lab should only be accessible through 'panes'
+  from my site, lock to that." ADR 0032 gains a dated amendment replacing
+  decision 6's Gate with a lock, and every bound #672 built stays exactly as
+  it was: `terraform-validate` only, 64 KB, 2 an hour per client, 50 a day,
+  refused while more than 20 are queued or no agent is heartbeating, jobs
+  `public: true` with a one-day TTL. The lock, in
+  `functions/src/lib/labs/public-lock.js`, runs before any store read or
+  counter: a `POST /api/public/labs/submit` whose `Origin` is not exactly
+  `https://hybridcloudworks.com` or `https://www.hybridcloudworks.com` (the
+  CORS allowlist's production origins, now exported from
+  `lib/auth/cors.js`; both serve the site) is `403 ORIGIN_NOT_ALLOWED`
+  before its body is read, a missing Origin included; one without a
+  `turnstileToken` is `403 TURNSTILE_REQUIRED`; the token goes to
+  Cloudflare's siteverify with the secret and the address
+  `client-identity.js` trusts (new `trustedClientIp`: `CF-Connecting-IP`
+  only on a request carrying the origin secret), and anything but
+  `success: true` for one of the site's hostnames and the `lab-validate`
+  action is `403 TURNSTILE_FAILED`, which is how a replayed single-use token
+  fails; siteverify unreachable, past 5 seconds, non-2xx, non-JSON or
+  refusing the secret is `503 TURNSTILE_UNAVAILABLE`. Before siteverify, an
+  in-memory limiter per instance allows one client ten checks in ten
+  minutes and answers the next `429 TURNSTILE_RATE_LIMITED`, so junk tokens
+  cannot drive a Cloudflare call per request (from the change's security
+  review, which found nothing above Low). With no secret, or an
+  unresolved Key Vault reference, the POST and the status read answer
+  `TURNSTILE_NOT_CONFIGURED`, so the status read now says which of switch,
+  Turnstile or agent is missing. The token, the address and the secret are
+  never logged or written to the job. On the builder, the Turnstile widget
+  (Managed mode, shown only when Cloudflare wants the visitor to act) loads
+  only once the lab is open (`frontend/src/lib/turnstile.js`,
+  `landingZone/useLabTurnstile.js`); each submission spends one token and
+  asks for the next, and a build without `VITE_TURNSTILE_SITE_KEY` keeps the
+  button disabled with its reason. The CSP grants
+  `https://challenges.cloudflare.com` in `script-src` and `frame-src` and
+  nowhere else, which `csp.test.js` holds exactly. Terraform adds
+  `labs_public_submission_enabled` (default `true`, the kill switch when set
+  `false`) as `LABS_PUBLIC_SUBMISSION_ENABLED`, and `TURNSTILE_SECRET_KEY` as
+  a Key Vault reference to `TURNSTILE-SECRET-KEY`, catalogued on the API-keys
+  page and listed in `EXPECTED_UNRESOLVED` until it is seeded. The widget is
+  **not** a Terraform resource: the pinned provider's
+  `cloudflare_turnstile_widget` keeps its secret as a read-only attribute in
+  state and needs an account-scoped token, so the owner creates it in the
+  Cloudflare dashboard, and a test fails if the resource appears. Both plan
+  differences are declared in `scripts/assert-expected-plan.mjs`. Required
+  inputs, Variables and secrets, architecture §5.3, the API surface and the
+  labs-host runbook ("Opening 'Validate on the lab' to the public") carry
+  the new values and the owner's four steps. The privacy policy
+  (`frontend/public/privacy-policy.html`, effective date now 28 September
+  2026) gains one line saying the builder runs Cloudflare Turnstile while
+  Validate on the lab is available, linking Cloudflare's Turnstile Privacy
+  Addendum.
+
 - **Import `docs/content` drafts into the CMS review queue, never
   published (#749).** Nothing imported a repository draft into the CMS, so reviewing
   the three lab articles (#737/#744) on the site meant pasting each one by
@@ -47,6 +101,7 @@ This project has not cut a tagged release; entries are grouped under
   status-filtered, and a first publish assigns `slugify(title)` anyway. The
   three lab drafts are read from disk by the tests and must parse, and CI's
   `functions` row now watches `docs/content/blog-*.md`.
+
 - **Register a lab agent from the admin UI; `Register-LabAgent.ps1` finishes
   the go-live (#740).** The API admits a lab agent only when
   `lab_agents/{agentId}` binds it to its service principal, and nothing
