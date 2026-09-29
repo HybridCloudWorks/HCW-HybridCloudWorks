@@ -16,8 +16,9 @@
  * cost two days: the page turned the key red and the owner reminted it,
  * repeatedly, while the wrong value sat in the other box.
  *
- * Two callers report today — the AI router (`ai/router.js`) and the Publer
- * client and proxy (`timers/publer-sync.js`, `integrations/rest-proxy.js`).
+ * Three callers report today — the AI router (`ai/router.js`), the Publer
+ * client and proxy (`timers/publer-sync.js`, `integrations/rest-proxy.js`),
+ * and the Telegram connection probe (`integrations/connection-probe.js`).
  * They share this module so they cannot disagree about what a rejected
  * credential is, and so the catalogue's `probe` field — the page's promise
  * that something reports on a secret — has one list of reporters to name.

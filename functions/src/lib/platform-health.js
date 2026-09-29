@@ -20,9 +20,10 @@
  *      bounds upstream load to one round of checks per TTL per instance.
  *   3. **No dependency was added.** The source used `axios` and `rss-parser`;
  *      this uses global `fetch` and, for Azure, a presence test on the raw
- *      feed. Both packages are still in `package.json` but stay unreachable,
- *      which keeps T-407's "drop unreachable dependencies" cleanup available
- *      and keeps them out of an anonymous route's cold start.
+ *      feed, which keeps both out of an anonymous route's cold start. `axios`
+ *      has since left `package.json`; `rss-parser` is still there because
+ *      the RSS ingest (`lib/rss/ingest.js`) and the podcast timer
+ *      (`lib/timers/podcasts.js`) use it, but nothing on this route does.
  */
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
