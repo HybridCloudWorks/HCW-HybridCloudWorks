@@ -15,18 +15,6 @@ import Eyebrow from '@/components/shared/Eyebrow';
  * Not a `<header>` for the intro: the site styles `header` as its chrome.
  */
 
-/**
- * "Run an agent against your landing zone" on the browser labs page, where
- * the Docker Sandboxes recipe lives until it moves to the Docker hub.
- * `agent-heading` is the id that section's heading carries (the `agent` slot
- * in LabsLearnPage.jsx); `docker.test.jsx` fails if that slot is renamed.
- *
- * A plain link, not a router Link, on purpose: after a client-side navigation
- * nothing here scrolls to a `#fragment`, whereas a document load of the
- * pre-rendered labs page lets the browser do it.
- */
-export const LABS_AGENT_SECTION_PATH = '/education/labs#agent-heading';
-
 /** The same pill on every placeholder, so "coming soon" reads the same way everywhere. */
 export function ComingSoon({ className = '' }) {
   return (
