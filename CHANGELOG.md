@@ -2469,6 +2469,20 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The secrets monitor can succeed again, so delivery health goes green.**
+  `monitor-delivery-health`'s "Can every workflow still succeed?" failed on
+  2026-09-29 (run 36609411076). The workflow it named,
+  `monitor-unresolved-secrets.yml`, had failed 10 of 10 runs and had been
+  switched off since 2026-09-14. The only references it found unresolved
+  were `AZURE_SPEECH_KEY`, already listed as intended, and `RSSCOM_API_KEY`
+  and `RSSCOM_PODCAST_ID`, which wait on the owner's RSS.com Max purchase
+  (#432, owner decision 2026-09-18).
+  - Both RSS.com secrets are now in `EXPECTED_UNRESOLVED` in
+    `scripts/check-unresolved-secrets.mjs`, with that reason.
+  - Run against the live Function App's references, the monitor now exits 0:
+    all 60 resolve or are unresolved as intended.
+  - Re-enabled, it catches a reference that should resolve and doesn't, such
+    as a lapsed Coder status token.
 - **A provider's name on the AI Engine page follows the code (#701).**
   #806 renamed "NVIDIA API Catalog" to "NVIDIA API" in `DEFAULT_PROVIDERS`,
   but the card renders the stored `ai_providers` document, and seeding only
