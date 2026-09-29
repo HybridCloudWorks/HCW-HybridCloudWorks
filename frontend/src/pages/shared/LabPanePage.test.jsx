@@ -105,8 +105,17 @@ function messageFrom({ origin = CODER_ORIGIN, source, data }) {
   return Object.assign(new Event('message'), { origin, source, data });
 }
 
-/** The launcher in the pane posting its state, as it does (lab-host/coder/launcher/main.js). */
-function launcherSays(state, overrides = {}) {
+/**
+ * The launcher in the pane posting its state, as it does (lab-host/coder/launcher/main.js).
+ *
+ * Effects are flushed first. The page attaches its message listener in an
+ * effect, and when the commit that renders the pane arrived outside act (the
+ * status read resolving), that effect may not have run yet: a message sent
+ * then is simply lost. That is how "shows the launcher’s state on the
+ * toolbar" failed once in CI on 2026-09-29 and passed on the re-run.
+ */
+async function launcherSays(state, overrides = {}) {
+  await flushEffects();
   const frame = document.querySelector('iframe');
   const event = messageFrom({
     source: frame.contentWindow,
@@ -454,9 +463,9 @@ describe('LabPanePage, what the launcher says', () => {
     renderPane();
     await screen.findByTestId('lab-pane');
     expect(screen.getByTestId('lab-pane-state')).toHaveTextContent('');
-    launcherSays('create');
+    await launcherSays('create');
     expect(screen.getByTestId('lab-pane-state')).toHaveTextContent(PANE_STATE_WORDS.create);
-    launcherSays('starting');
+    await launcherSays('starting');
     expect(screen.getByTestId('lab-pane-state')).toHaveTextContent(PANE_STATE_WORDS.starting);
   });
 
@@ -465,7 +474,7 @@ describe('LabPanePage, what the launcher says', () => {
     renderPane();
     await screen.findByTestId('lab-pane');
     await flushEffects();
-    launcherSays('checking');
+    await launcherSays('checking');
     act(() => {
       vi.advanceTimersByTime(PANE_LOAD_TIMEOUT_MS * 2);
     });
@@ -478,7 +487,7 @@ describe('LabPanePage, what the launcher says', () => {
     const pane = await screen.findByTestId('lab-pane');
     const signIn = within(pane).getByTestId('lab-pane-sign-in');
     expect(signIn.className).not.toContain('bg-primary');
-    launcherSays('signed-out');
+    await launcherSays('signed-out');
     expect(signIn.className).toContain('bg-primary');
     expect(screen.getByTestId('lab-pane-state')).toHaveTextContent(PANE_STATE_WORDS['signed-out']);
   });
@@ -486,7 +495,7 @@ describe('LabPanePage, what the launcher says', () => {
   it('shows the unavailable section when the launcher gives up', async () => {
     const { container } = renderPane();
     await screen.findByTestId('lab-pane');
-    launcherSays('unavailable');
+    await launcherSays('unavailable');
     expect(screen.getByTestId('lab-unavailable')).toHaveTextContent(UNAVAILABLE_SENTENCE);
     expect(container.querySelector('iframe')).toBeNull();
   });
@@ -494,9 +503,9 @@ describe('LabPanePage, what the launcher says', () => {
   it('ignores a message from anywhere but the launcher in this pane', async () => {
     renderPane();
     await screen.findByTestId('lab-pane');
-    launcherSays('unavailable', { origin: 'https://example.com' });
-    launcherSays('unavailable', { source: window });
-    launcherSays('unavailable', { data: { type: 'other', state: 'unavailable' } });
+    await launcherSays('unavailable', { origin: 'https://example.com' });
+    await launcherSays('unavailable', { source: window });
+    await launcherSays('unavailable', { data: { type: 'other', state: 'unavailable' } });
     expect(screen.queryByTestId('lab-unavailable')).toBeNull();
     expect(screen.getByTestId('lab-pane-state')).toHaveTextContent('');
   });
