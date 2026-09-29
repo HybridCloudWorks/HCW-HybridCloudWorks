@@ -63,6 +63,10 @@ export const ADMIN_PROMPT_PAGE_ALLOWLIST = new Set([
   '/ansible', '/ansible/news', '/ansible/blog', '/ansible/code', '/ansible/education',
   '/github', '/github/news', '/github/blog', '/github/workflows', '/github/code',
   '/github/tools',
+  // Docker's pages (#775): the hub, news, blog, code, the sandbox recipe
+  // (#774), tools and learning. No architecture or frameworks page exists.
+  '/docker', '/docker/news', '/docker/blog', '/docker/code', '/docker/sandboxes',
+  '/docker/tools', '/docker/education',
 ]);
 
 export function assertAllowedPromptPage(pagePath) {

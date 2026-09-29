@@ -1,7 +1,7 @@
 /**
  * Generate the brand artwork under public/images/ from SVG templates.
  *
- * GENERATED ART. The PNGs in public/images/{gcp,github,terraform,finops}-hero/
+ * GENERATED ART. The PNGs in public/images/{gcp,github,terraform,finops,docker}-hero/
  * (landing hero rotations, #371) and public/images/default-heroes/ (default
  * social covers, #351) are drawn by this script — not bought, not stock, not
  * hand-made. Every file can be replaced one-for-one with real artwork later;
@@ -45,7 +45,10 @@ export const HERO_VARIANTS = 5;
 /** Ceiling per file — the largest azure-hero file is 277 KB. */
 export const MAX_BYTES = 400 * 1024;
 
-export const HERO_PROVIDERS = ['gcp', 'github', 'terraform', 'finops'];
+// Docker joined both lists with #775: its landing page gets a hero rotation
+// like Terraform's, and the CMS a default cover (HERO_PROVIDERS in
+// functions/src/lib/platform-settings.js names Docker).
+export const HERO_PROVIDERS = ['gcp', 'github', 'terraform', 'finops', 'docker'];
 export const COVER_PROVIDERS = [
   'azure',
   'aws',
@@ -54,6 +57,7 @@ export const COVER_PROVIDERS = [
   'terraform',
   'ansible',
   'vmware',
+  'docker',
   'multi',
 ];
 
@@ -83,6 +87,8 @@ export const PALETTES = {
     tones: ['#c00000', '#ee0000', '#ff8a8a'],
   },
   vmware: { name: 'VMware', bg: ['#06141e', '#0c2a3d'], tones: ['#0091da', '#00c1d5', '#8ee0f2'] },
+  // --docker-blue (#1D63ED) from src/index.css, a lighter blue, then the lightest.
+  docker: { name: 'Docker', bg: ['#050d1f', '#0a1a3a'], tones: ['#1d63ed', '#4d8af5', '#b3cefb'] },
   multi: {
     name: 'Hybrid Cloud',
     bg: ['#0f1219', '#1c2230'],

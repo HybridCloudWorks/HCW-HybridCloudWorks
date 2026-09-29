@@ -60,7 +60,7 @@ beforeEach(() => {
 });
 
 describe('bundled defaults', () => {
-  it('are the eight lowercase files under /images/default-heroes/', () => {
+  it('are the nine lowercase files under /images/default-heroes/', () => {
     expect(bundledDefaultHeroes()).toEqual({
       Azure: '/images/default-heroes/azure.png',
       AWS: '/images/default-heroes/aws.png',
@@ -69,9 +69,10 @@ describe('bundled defaults', () => {
       Terraform: '/images/default-heroes/terraform.png',
       Ansible: '/images/default-heroes/ansible.png',
       VMware: '/images/default-heroes/vmware.png',
+      Docker: '/images/default-heroes/docker.png',
       Multi: '/images/default-heroes/multi.png',
     });
-    expect(HERO_PROVIDERS).toHaveLength(8);
+    expect(HERO_PROVIDERS).toHaveLength(9);
     expect(PODCAST_PROVIDERS).toEqual([
       'azure',
       'aws',

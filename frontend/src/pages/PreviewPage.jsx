@@ -18,15 +18,20 @@ import React from 'react';
 import { Helmet } from 'react-helmet-async';
 import { useParams, useSearchParams } from 'react-router';
 import BlogDetailTemplate from '@/components/templates/BlogDetailTemplate';
+import { VALID_PROVIDERS } from '@/context/ProviderContext';
 import { fetchPreviewContentItem } from '@/lib/publicApi';
 import { usePublicData } from '@/hooks/usePublicData';
 import { Skeleton } from '@/components/performance/Skeleton';
 
-const PROVIDER_KEYS = ['aws', 'azure', 'gcp', 'finops', 'github', 'terraform', 'vmware', 'ansible'];
-
-function providerKeyOf(item) {
+/**
+ * The provider a draft previews as: the router's own list, so a provider the
+ * site serves can always be previewed as itself. This was a copy of that list
+ * without Docker, so a Docker draft previewed with AWS's theme and links
+ * until #775.
+ */
+export function providerKeyOf(item) {
   const raw = String(item?.['Cloud Provider'] || item?.cloudProvider || '').toLowerCase();
-  if (PROVIDER_KEYS.includes(raw)) return raw;
+  if (VALID_PROVIDERS.includes(raw)) return raw;
   if (raw.includes('google')) return 'gcp';
   return 'aws';
 }
