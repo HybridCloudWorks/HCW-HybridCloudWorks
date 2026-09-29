@@ -15,7 +15,7 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ProviderContext from '@/context/ProviderContext';
 import { SANDBOX_COMMANDS } from '@/components/labs/SandboxSection';
-import DockerLandingPage, { FOCUS_AREAS } from './LandingPage';
+import DockerLandingPage, { DOCKER_HERO_IMAGES, FOCUS_AREAS } from './LandingPage';
 import DockerBlogPage from './BlogPage';
 import DockerCodePage from './CodePage';
 import DockerEducationPage from './EducationPage';
@@ -93,6 +93,15 @@ describe('the Docker landing page', () => {
     expect(status('docker-desktop').getByText('Coming soon')).toBeInTheDocument();
     expect(status('agent-sandbox').getByText('Available now')).toBeInTheDocument();
     expect(status('agent-sandbox').queryByText('Coming soon')).toBeNull();
+  });
+
+  it('rotates its own hero art, the five generated Docker images (#775)', () => {
+    renderPage(<DockerLandingPage />);
+    const hero = screen.getByRole('img', { name: 'Docker container imagery' });
+    expect([...hero.querySelectorAll('img')].map((img) => img.getAttribute('src'))).toEqual(
+      DOCKER_HERO_IMAGES
+    );
+    expect(DOCKER_HERO_IMAGES).toEqual([1, 2, 3, 4, 5].map((n) => `/images/docker-hero/${n}.png`));
   });
 
   it('uses the site’s own lab image as the worked example for building images', () => {

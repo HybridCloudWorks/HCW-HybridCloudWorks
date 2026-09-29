@@ -85,6 +85,10 @@ const PROVIDER_URL_MARKERS = [
   ['Github', ['github']],
   ['Terraform', ['terraform']],
   ['Finops', ['finops']],
+  // LAST, for the reason `docker` is last in lib/providers.js: a URL about
+  // Docker on Azure, on GitHub or with Terraform belongs to that provider,
+  // so Docker wins only when nothing above matched (#775).
+  ['Docker', ['docker']],
 ];
 
 export function inferProviderFromUrl(url = '') {

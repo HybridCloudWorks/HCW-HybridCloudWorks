@@ -109,6 +109,20 @@ const PAGE_GROUPS = [
       ['/tools', 'Tools'],
     ],
   },
+  {
+    // #775. Every one is in the server's allowlist
+    // (functions/src/lib/cms/image-prompts.js).
+    provider: 'Docker',
+    pages: [
+      ['', 'Landing'],
+      ['/news', 'News'],
+      ['/blog', 'Blog'],
+      ['/code', 'Code'],
+      ['/sandboxes', 'Sandboxes'],
+      ['/tools', 'Tools'],
+      ['/education', 'Education'],
+    ],
+  },
 ];
 
 const PAGES = PAGE_GROUPS.flatMap(({ provider, pages }) =>

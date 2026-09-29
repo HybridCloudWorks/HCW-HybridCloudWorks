@@ -101,6 +101,20 @@ describe('inferProviderFromUrl', () => {
     expect(inferProviderFromUrl('https://github.com/x')).toBe('Github');
     expect(inferProviderFromUrl('https://terraform.io/x')).toBe('Terraform');
     expect(inferProviderFromUrl('https://finops.org/x')).toBe('Finops');
+    expect(inferProviderFromUrl('https://www.docker.com/blog/x')).toBe('Docker');
+  });
+
+  it('files Docker last, so a URL about Docker on another provider stays with it (#775)', () => {
+    expect(inferProviderFromUrl('https://docs.docker.com/build/building/multi-stage/')).toBe(
+      'Docker'
+    );
+    expect(
+      inferProviderFromUrl('https://learn.microsoft.com/azure/container-apps/docker-images')
+    ).toBe('Azure');
+    expect(inferProviderFromUrl('https://github.com/docker/build-push-action')).toBe('Github');
+    expect(
+      inferProviderFromUrl('https://registry.terraform.io/providers/kreuzwerker/docker/latest')
+    ).toBe('Terraform');
   });
 
   it('is case-insensitive', () => {

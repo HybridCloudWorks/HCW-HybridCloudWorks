@@ -120,6 +120,8 @@ export const HERO_PROVIDERS = Object.freeze([
   'Terraform',
   'Ansible',
   'VMware',
+  // Docker since #775; its bundled cover is /images/default-heroes/docker.png.
+  'Docker',
   'Multi',
 ]);
 

@@ -68,7 +68,7 @@ const TYPE_BADGE = {
   news: 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300',
 };
 
-const PROVIDER_OPTIONS = ['All', 'Azure', 'AWS', 'GCP', 'FinOps', 'GitHub', 'Terraform'];
+const PROVIDER_OPTIONS = ['All', 'Azure', 'AWS', 'GCP', 'FinOps', 'GitHub', 'Terraform', 'Docker'];
 
 function matchesProviderFilter(item, providerFilter) {
   if (providerFilter === 'All') return true;
