@@ -41,6 +41,8 @@ const ROUTES = [
   '/contact',
   '/login',
   '/not-found-deliberate',
+  // The Learn index (its catalogue lines failed contrast until 2026-09-29).
+  '/education',
   // Provider landing + standard subpages
   ...PROVIDERS.flatMap((p) => [
     `/${p}`,

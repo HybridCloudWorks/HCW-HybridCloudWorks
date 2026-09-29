@@ -1,5 +1,6 @@
 import React, { createContext, lazy, useContext } from 'react';
 import { useParams, Outlet } from 'react-router';
+import { PROVIDER_FEEDS } from '@/data/providerFeeds';
 
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'));
 
@@ -46,16 +47,9 @@ export function useProviderConfig() {
       theme: 'theme-azure',
       blogPath: 'blog',
       color: 'hsl(var(--primary))',
-      rssFeeds: [
-        {
-          name: 'Azure Blog',
-          url: 'https://azure.microsoft.com/en-us/blog/feed/',
-        },
-        {
-          name: 'Azure Updates',
-          url: 'https://azurecomcdn.azureedge.net/en-us/updates/feed/',
-        },
-      ],
+      // The feeds the news pages show; data/providerFeeds.js says why the
+      // list lives there and what holds it to the server's.
+      rssFeeds: PROVIDER_FEEDS.azure,
       blogSource: 'https://azure.microsoft.com/en-us/blog/',
       podcast: {
         // The RSS feed URL is not configured here (issue #349): the podcast
@@ -80,13 +74,7 @@ export function useProviderConfig() {
       theme: 'theme-aws',
       blogPath: 'foundational-posts',
       color: 'hsl(var(--primary))',
-      rssFeeds: [
-        { name: 'AWS Blog', url: 'https://aws.amazon.com/blogs/aws/feed/' },
-        {
-          name: 'AWS Whats New',
-          url: 'https://aws.amazon.com/about-aws/whats-new/recent/feed/',
-        },
-      ],
+      rssFeeds: PROVIDER_FEEDS.aws,
       blogSource: 'https://aws.amazon.com/blogs/aws/',
     },
     gcp: {
@@ -95,16 +83,7 @@ export function useProviderConfig() {
       theme: 'theme-gcp',
       blogPath: 'foundational-posts',
       color: 'hsl(var(--primary))',
-      rssFeeds: [
-        {
-          name: 'Google Cloud Blog',
-          url: 'https://cloud.google.com/blog/feed',
-        },
-        {
-          name: 'GCP Release Notes',
-          url: 'https://cloud.google.com/feeds/gcp-release-notes.xml',
-        },
-      ],
+      rssFeeds: PROVIDER_FEEDS.gcp,
       blogSource: 'https://cloud.google.com/blog/',
     },
     github: {
@@ -113,13 +92,7 @@ export function useProviderConfig() {
       theme: 'theme-github',
       blogPath: 'foundational-posts',
       color: 'hsl(var(--primary))',
-      rssFeeds: [
-        { name: 'GitHub Blog', url: 'https://github.blog/feed/' },
-        {
-          name: 'GitHub Changelog',
-          url: 'https://github.blog/changelog/feed/',
-        },
-      ],
+      rssFeeds: PROVIDER_FEEDS.github,
       blogSource: 'https://github.blog/',
     },
     terraform: {
@@ -128,12 +101,7 @@ export function useProviderConfig() {
       theme: 'theme-terraform',
       blogPath: 'foundational-posts',
       color: 'hsl(var(--primary))',
-      rssFeeds: [
-        {
-          name: 'HashiCorp Blog',
-          url: 'https://www.hashicorp.com/blog/feed.xml',
-        },
-      ],
+      rssFeeds: PROVIDER_FEEDS.terraform,
       blogSource: 'https://www.hashicorp.com/blog/',
     },
     finops: {
@@ -142,7 +110,7 @@ export function useProviderConfig() {
       theme: 'theme-finops',
       blogPath: 'foundational-posts',
       color: 'hsl(var(--primary))',
-      rssFeeds: [{ name: 'FinOps Foundation', url: 'https://www.finops.org/feed/' }],
+      rssFeeds: PROVIDER_FEEDS.finops,
       blogSource: 'https://www.finops.org/',
     },
     vmware: {
@@ -151,7 +119,7 @@ export function useProviderConfig() {
       theme: 'theme-vmware',
       blogPath: 'foundational-posts',
       color: 'hsl(var(--primary))',
-      rssFeeds: [{ name: 'VMware Blogs', url: 'https://blogs.vmware.com/feed/' }],
+      rssFeeds: PROVIDER_FEEDS.vmware,
       blogSource: 'https://blogs.vmware.com/',
     },
     ansible: {
@@ -160,10 +128,7 @@ export function useProviderConfig() {
       theme: 'theme-ansible',
       blogPath: 'foundational-posts',
       color: 'hsl(var(--primary))',
-      rssFeeds: [
-        { name: 'Ansible Blog', url: 'https://www.ansible.com/blog/rss.xml' },
-        { name: 'Red Hat Blog', url: 'https://www.redhat.com/en/rss/blog' },
-      ],
+      rssFeeds: PROVIDER_FEEDS.ansible,
       blogSource: 'https://www.ansible.com/blog',
     },
     docker: {
@@ -174,9 +139,9 @@ export function useProviderConfig() {
       theme: 'theme-docker',
       blogPath: 'foundational-posts',
       color: 'hsl(var(--primary))',
-      // The feed the news timer reads for Docker (functions/src/lib/rss/feeds.js,
-      // #777). docker.com/blog/feed/ redirects here.
-      rssFeeds: [{ name: 'Docker Blog', url: 'https://www.docker.com/feed/' }],
+      // The feed the news timer reads for Docker (#777). docker.com/blog/feed/
+      // redirects to the address it names.
+      rssFeeds: PROVIDER_FEEDS.docker,
       blogSource: 'https://www.docker.com/blog/',
     },
   };

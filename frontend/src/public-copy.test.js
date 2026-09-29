@@ -71,7 +71,6 @@ const SUBJECT_MATTER = Object.freeze({
   'pages/github/EducationPage.jsx': ['pipeline'],
   'pages/github/LandingPage.jsx': ['pipeline'],
   'pages/github/WorkflowsPage.jsx': ['pipeline'],
-  'pages/shared/HomePage.jsx': ['pipeline'],
   'pages/submissions/RosettaStoneSubmissionPage.jsx': ['stores'],
   'pages/terraform/EducationPage.jsx': ['pipeline'],
   'pages/terraform/LandingPage.jsx': ['pipeline'],
