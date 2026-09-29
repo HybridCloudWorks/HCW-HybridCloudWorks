@@ -94,7 +94,7 @@ export const SECRET_SECTIONS = Object.freeze([
  *
  * `setting` is the app-setting name (what `process.env` holds); `secret` is the
  * Key Vault secret name (what gets written). Both are asserted against
- * `infra/main.tf`. `probe` names the reporter whose verdict can turn this
+ * the `infra/` module. `probe` names the reporter whose verdict can turn this
  * light red.
  *
  * `null` is the honest default and most entries have it. A non-null probe is a
