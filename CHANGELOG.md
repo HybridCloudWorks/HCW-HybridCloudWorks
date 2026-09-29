@@ -2109,6 +2109,21 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The OFL fonts carry their licence, and a lab pane test no longer races.**
+  - Google Sans Flex (`frontend/public/fonts/google/`) and Mona Sans
+    (`frontend/public/fonts/github/mona-sans/`) are under the SIL Open Font
+    License 1.1, which requires its text to travel with the files. Neither
+    had it. Each now has an `OFL.txt` copied from its official repository:
+    `google/fonts` `ofl/googlesansflex/OFL.txt` and `github/mona-sans`
+    `OFL.txt`.
+  - Amazon Ember and Bookerly are proprietary and need an owner decision,
+    tracked in #791.
+  - In `LabPanePage.test.jsx`, `launcherSays` now flushes effects before
+    posting. The page attaches its `message` listener in an effect, which may
+    not have run when the pane's commit came from the status read resolving
+    outside `act`. A message sent then was lost, and "shows the launcher's
+    state on the toolbar" failed once in CI on 2026-09-29. Every call is now
+    awaited, and five consecutive runs pass 45 of 45.
 - **`Register-LabArc.ps1 -Connect` no longer fails its own clean-up.** After
   deleting the onboarding secret, the script checked what was left with
   `@(Get-LabArcPasswordCredentials …).Count`. That function returns its list
