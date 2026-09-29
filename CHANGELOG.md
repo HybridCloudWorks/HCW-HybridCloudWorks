@@ -2455,6 +2455,21 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The AI Engine's Test for NVIDIA answers in seconds, and the card reads
+  "NVIDIA API" (#701).** The one-word Test ran with the drafting limits
+  (8,192 tokens, 120 s). NVIDIA's models are reasoning models on a trial
+  tier, so it took 56.3 s and 57.9 s on 2026-09-29 (AppRequests
+  `testAiProvider`). A slower model outruns the edge's ~100 s request limit
+  and never reports.
+  - The Test now asks for 16 tokens inside 45 s (`TEST_MAX_TOKENS` and
+    `TEST_TIMEOUT_MS` in `functions/src/lib/ai/proxy.js`).
+  - `callProvider` passes both through to providers whose row sends
+    `max_tokens`. That is NVIDIA; OpenAI never gets one, because its
+    reasoning models refuse the field.
+  - A stuck provider now fails with "timeout after 45000 ms" instead of
+    hanging.
+  - The card and the keys-page label drop "Catalog".
+  - Required-Inputs marks `NVIDIA-API-KEY` as seeded.
 - **The home page no longer shows invented numbers or sample content, and
   two small lines on Home and Learn pass contrast.** Every figure and list on
   `/` is now read from something real, and `homeContent.js` says where each

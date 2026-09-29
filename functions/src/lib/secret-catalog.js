@@ -156,7 +156,7 @@ export const SECRET_CATALOG = Object.freeze([
     setting: 'NVIDIA_API_KEY',
     secret: 'NVIDIA-API-KEY',
     section: 'gen-ai',
-    label: 'NVIDIA API Catalog',
+    label: 'NVIDIA API',
     // #701. An `nvapi-` key from build.nvidia.com/settings/api-keys, trial
     // tier (~40 requests a minute). The router puts it first for
     // owner-triggered content features and never uses it for the anonymous

@@ -114,7 +114,7 @@ export const DEFAULT_PROVIDERS = [
     // per feature under "Where AI is used" — first for owner-triggered
     // content, never for the public explain route.
     id: 'nvidia',
-    name: 'NVIDIA API Catalog',
+    name: 'NVIDIA API',
     description: 'GLM-5.3, DeepSeek-V4.1-Flash — free trial tier, ~40 requests a minute',
     icon: '🟩',
     enabled: true,
