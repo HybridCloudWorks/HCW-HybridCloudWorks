@@ -12,6 +12,7 @@ import {
   SourceError,
   proposeFloors,
   readFlexNodeLines,
+  readRunnerUbuntuReleases,
   renderSummary,
   serialise,
 } from './update-version-floors.mjs';
@@ -65,6 +66,9 @@ function sourcesToday() {
       ]),
     },
     flexNodeLines: [22, 24],
+    // The x64 rows of the runner-images README on 2026-09-28: 26.04 had been
+    // generally available since 2026-09-17.
+    runnerUbuntuReleases: ['26.04', '24.04', '22.04'],
   };
 }
 
@@ -181,6 +185,67 @@ describe('proposeFloors', () => {
     const { next } = proposeFloors(current(), lts, TODAY);
     expect(next.kinds.ubuntu.newest).toBe('28.04');
     expect(next.kinds.ubuntu.codenames.future).toBe('28.04');
+  });
+
+  /**
+   * The runners ceiling. 26.04 went from Canonical's release on 2026-04-23 to
+   * GitHub's preview on 2026-06-11 and general availability on 2026-09-17;
+   * 28.04 is expected to follow the same path, and runs-on waits for the end
+   * of it while the lab host moves at the start.
+   */
+  describe('the runners ceiling', () => {
+    const withLts = (runners) => {
+      const sources = sourcesToday();
+      sources.eol.ubuntu.result.releases.unshift(rel('28.04', '28.04', { codename: 'Future Fox', isLts: true }));
+      sources.runnerUbuntuReleases = runners;
+      return sources;
+    };
+
+    it('stays put while GitHub does not offer the new LTS as generally available', () => {
+      const { next, changes, notes } = proposeFloors(current(), withLts(['26.04', '24.04', '22.04']), TODAY);
+      expect(next.kinds.ubuntu.newest).toBe('28.04');
+      expect(next.kinds.ubuntu.platformCeilings.runners).toEqual(current().kinds.ubuntu.platformCeilings.runners);
+      expect(changes.map((c) => c.kind)).not.toContain('ubuntu (runners ceiling)');
+      expect(notes).toEqual([]);
+    });
+
+    it('moves to the new LTS when GitHub lists it as generally available, and says what that moves', () => {
+      const { next, changes, notes } = proposeFloors(current(), withLts(['28.04', '26.04', '24.04']), TODAY);
+      expect(next.kinds.ubuntu.platformCeilings.runners).toMatchObject({ newest: '28.04', floor: '28.04', checkedOn: TODAY });
+      expect(changes.filter((c) => c.kind === 'ubuntu (runners ceiling)')).toEqual([
+        { kind: 'ubuntu (runners ceiling)', field: 'newest', from: '26.04', to: '28.04' },
+        { kind: 'ubuntu (runners ceiling)', field: 'floor', from: '26.04', to: '28.04' },
+      ]);
+      expect(notes.join(' ')).toMatch(/every runs-on in \.github\/workflows moves to ubuntu-28\.04/);
+    });
+
+    it('never passes the Ubuntu floor, and never takes an interim release', () => {
+      const sources = sourcesToday();
+      sources.runnerUbuntuReleases = ['28.04', '26.10', '26.04'];
+      const { next, notes } = proposeFloors(current(), sources, TODAY);
+      expect(next.kinds.ubuntu.platformCeilings.runners.newest).toBe('26.04');
+      expect(notes).toEqual([]);
+    });
+
+    it('never moves down, and leaves a note for a human instead', () => {
+      const sources = sourcesToday();
+      sources.runnerUbuntuReleases = ['24.04', '22.04'];
+      const { next, notes } = proposeFloors(current(), sources, TODAY);
+      expect(next.kinds.ubuntu.platformCeilings.runners.newest).toBe('26.04');
+      expect(notes).toEqual([
+        'GitHub-hosted runners now list ubuntu-24.04, ubuntu-22.04 as generally available, none of them the recorded ceiling ubuntu-26.04 or a newer LTS; left unchanged for a human to read.',
+      ]);
+    });
+
+    it('stays put, and says so, when the runner-images README cannot be read', () => {
+      const sources = sourcesToday();
+      sources.runnerUbuntuReleases = null;
+      const { next, notes, changes } = proposeFloors(current(), sources, TODAY);
+      expect(next.kinds.ubuntu.platformCeilings.runners.newest).toBe('26.04');
+      expect(changes).toEqual([]);
+      expect(notes).toHaveLength(1);
+      expect(notes[0]).toMatch(/image list could not be read/);
+    });
   });
 
   it('moves PostgreSQL to a newer minor release with its N-2 floor', () => {
@@ -323,6 +388,51 @@ describe('readFlexNodeLines', () => {
   it('returns null rather than guessing when the section or the row is missing', () => {
     expect(readFlexNodeLines('<html></html>')).toBe(null);
     expect(readFlexNodeLines(page(''))).toBe(null);
+  });
+});
+
+describe('readRunnerUbuntuReleases', () => {
+  const badge = (name) => `![Endpoint Badge](https://img.shields.io/endpoint?url=https%3A%2F%2Fgist.githubusercontent.com%2Fbot%2Fraw%2F${name}.json)`;
+  const preview = '![preview](https://img.shields.io/badge/preview-0969DA?style=flat&logoColor=white)';
+  /** The README's shape on 2026-09-28, cut to its Ubuntu rows, one macOS row and the section after. */
+  const readme = (ubuntu2604 = `Ubuntu 26.04<br>${badge('ubuntu26')}`) =>
+    [
+      '# GitHub Actions Runner Images',
+      '',
+      '## Available Images',
+      '',
+      '| Image | Architecture | YAML Label | Included Software |',
+      '| --------------------|--------------|---------------------|------------------|',
+      `| ${ubuntu2604} | x64 | \`ubuntu-26.04\` | [ubuntu-26.04] |`,
+      `| Ubuntu 26.04 Arm64<br>${badge('ubuntu26-arm64')} | arm64 | \`ubuntu-26.04-arm\` | [ubuntu-26.04-arm64] |`,
+      `| Ubuntu 24.04<br>${badge('ubuntu24')} | x64 | \`ubuntu-latest\` or \`ubuntu-24.04\` | [ubuntu-24.04] |`,
+      `| Ubuntu 22.04<br>${badge('ubuntu22')} | x64 | \`ubuntu-22.04\` | [ubuntu-22.04] |`,
+      `| Ubuntu Slim<br>${badge('ubuntu-slim')} | x64 | \`ubuntu-slim\` | [ubuntu-slim] |`,
+      `| macOS 26 Arm64<br>${badge('macos-26-arm64')} | arm64 | \`macos-latest\`, \`macos-26\` | [macOS-26-arm64] |`,
+      '',
+      '### Label scheme',
+      '',
+      '## Software and Image Support',
+      '',
+      '| Ubuntu | x64 | `ubuntu-30.04` | a row outside the image table |',
+    ].join('\n');
+
+  it('reads the x64 Ubuntu releases the image table lists, and nothing outside it', () => {
+    expect(readRunnerUbuntuReleases(readme())).toEqual(['26.04', '24.04', '22.04']);
+  });
+
+  it('skips an image GitHub still marks preview or beta, as the 26.04 row was until 2026-09-17', () => {
+    expect(readRunnerUbuntuReleases(readme(`Ubuntu 26.04 ${preview}<br>${badge('ubuntu26')}`))).toEqual(['24.04', '22.04']);
+    expect(readRunnerUbuntuReleases(readme(`Ubuntu 26.04 ![beta](https://img.shields.io/badge/beta-x)<br>${badge('ubuntu26')}`))).toEqual([
+      '24.04',
+      '22.04',
+    ]);
+  });
+
+  it('returns null rather than guessing when the section or its Ubuntu rows are missing', () => {
+    expect(readRunnerUbuntuReleases('# GitHub Actions Runner Images\n')).toBe(null);
+    expect(readRunnerUbuntuReleases('## Available Images\n\n| Image | Architecture | YAML Label |\n')).toBe(null);
+    expect(readRunnerUbuntuReleases(null)).toBe(null);
   });
 });
 

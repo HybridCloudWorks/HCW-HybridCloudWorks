@@ -35,7 +35,7 @@ concurrency:
 jobs:
   audit:
     name: Crawl the sitemap
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 40
     steps:
       - name: Checkout

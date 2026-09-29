@@ -1789,6 +1789,55 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **CI: every workflow runs on Ubuntu 26.04, named, not `ubuntu-latest`.**
+  Owner rule 2026-09-26: the newest LTS OS. GitHub moves `ubuntu-latest`
+  from 24.04 to 26.04 over 2026-10-19 to 2026-11-19
+  (actions/runner-images#14748), so for a month the same job could land on
+  either image. All 36 `runs-on` lines in the 23 workflows now say
+  `ubuntu-26.04`, which GitHub made generally available on 2026-09-17.
+  Pinned rather than guarded: a check that failed while `ubuntu-latest`
+  trailed the newest LTS could only be fixed by pinning, and during the
+  rollout it would pass on one run and fail on the next. The pin is held by
+  the version floors (#715). `scripts/lib/version-pins-workflows.mjs` reads
+  each job's `runs-on` as an Ubuntu pin, and a label with no release
+  (`ubuntu-latest`, `ubuntu-slim`), an expression or a runner group is a
+  finding. `scripts/version-floors.json` gains
+  `kinds.ubuntu.platformCeilings.runners`, the newest LTS GitHub-hosted
+  runners offer as generally available, which every `runs-on` must equal.
+  It is a ceiling beside the Ubuntu floor because GitHub ships a new LTS's
+  runner image months after Canonical releases it (26.04: released
+  2026-04-23, preview 2026-06-11, generally available 2026-09-17). When
+  28.04 is released the floor moves and the lab host goes red at once;
+  `runs-on` goes red only when `update-version-floors.yml`, which now also
+  reads the "Available Images" table of the runner-images README, finds
+  28.04 there without a preview or beta badge. An unreadable README leaves
+  the ceiling where it is, with a warning, as an unreadable Learn table does
+  for the functions ceiling. Tests cover the reader (release labels, quoted,
+  `-arm` and in flow lists; `ubuntu-latest`, `ubuntu-slim`, expressions and
+  groups refused; other systems skipped), the rule (a label behind the
+  ceiling and one ahead of it both refused; `runs-on` green on the ceiling
+  while the floor is ahead), a gate that every `runs-on` line in every
+  tracked workflow was read, and the updater (holds while GitHub has not
+  made the new LTS generally available, moves when it has, never past the
+  floor, never to an interim release, never down, soft on an unreadable
+  README). `.github/actionlint.yaml` declares `ubuntu-26.04`, because
+  actionlint 1.7.12, the newest release, predates it (rhysd/actionlint#743
+  adds it), and a test fails a declared label no workflow uses.
+  `deploy-azure-frontend.yml`'s canonical-link check reads `find -print0`
+  rather than looping over `$(find …)` (shellcheck SC2044, already on main),
+  checked against a fixture path containing a space. What 26.04 changes
+  for the tools the workflows use: preinstalled Node.js 22.23.2 → 24.21.0,
+  which only `publish-lab-image.yml`'s sandbox check and the four scheduled
+  pull-request `commit` jobs run on (built-in modules only); system Python
+  3.12.3 → 3.14.4, which no job uses (each sets up its own); Docker
+  28.0.4 → 29.4.2 and Compose 2.38.2 → 5.1.3; jq 1.7 → 1.8.1; and
+  coreutils now Ubuntu's Rust coreutils (uutils). Azure CLI 2.90.0, GitHub
+  CLI 2.101.0, PowerShell 7.6.6 with Pester 5.9.0, Ansible 2.21.4 and
+  Docker Buildx 0.37.1 are unchanged, and Playwright 1.63.0 lists
+  `ubuntu26.04-x64` for `install --with-deps`. Miniconda, Julia, Swift,
+  Mercurial, Pulumi and Java 8 are gone from the image; no workflow used
+  them.
+
 - **Validate on the lab: a report for learners, not the job log (owner
   request 2026-09-28).** The owner's first public run from
   `/tools/landing-zone` ended `Success! The configuration is valid.`, but the

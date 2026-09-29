@@ -17,7 +17,7 @@ concurrency:
 jobs:
   validate-structure:
     name: Validate root and documentation policy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       # fetch-depth: 0 for the TODO/CHANGELOG movement gate below, which reads
       # TODO.md at the pull request's base commit.
@@ -87,7 +87,8 @@ jobs:
       # ssh executables that refuse every write. The tests load the functions
       # from each script's syntax tree and touch only Pester's TestDrive (the
       # whole-script runs put their stand-ins there too). Pester 5 ships
-      # on the ubuntu-latest image. The result check fails on zero tests as
+      # preinstalled on the Ubuntu runner image (5.9.0 on 26.04, as on 24.04,
+      # in September 2026). The result check fails on zero tests as
       # well as on a failure, because a sweep that found nothing is not a pass.
       - name: Test the lab scripts
         shell: pwsh
