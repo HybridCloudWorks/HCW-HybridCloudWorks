@@ -454,7 +454,7 @@ available. An entry that cannot answer both belongs in store 3 or nowhere.
 | --- | --- | --- |
 | `COSMOS_ENDPOINT`, `COSMOS_DATABASE`, `STORAGE_ACCOUNT_NAME`, `STORAGE_BLOB_ENDPOINT`, `STORAGE_QUEUE_ENDPOINT`, `AZURE_OPENAI_ENDPOINT` (app settings) | §2, §4 | Derived — set from resource attributes in `infra/main.tf` |
 | `NODE_ENV`, `REGION_NAME`, `WEBSITE_SITE_NAME` | §5 | Host-provided, or a literal in `main.tf` |
-| `FEATURE_FLAG_SCHEDULERS` and the per-timer flags | §5 | Derived from store 2 Terraform variables — `schedulers_master_enabled` for the master flag, `enabled_timers` for the per-timer flags via `local.timer_flags`. Both still resolve to `"false"` today. Until 2026-08-24 the master flag was a **literal** in `main.tf`, as this row used to say; that is what made all 18 timers permanent no-ops regardless of `enabled_timers` |
+| `FEATURE_FLAG_SCHEDULERS` and the per-timer flags | §5 | Derived from store 2 Terraform variables — `schedulers_master_enabled` for the master flag, `enabled_timers` for the per-timer flags via `local.timer_flags`. The live value of each is whatever the latest `hcw-azure` apply set: a timer runs only when the master flag is on and its name is in `enabled_timers`. Until 2026-08-24 the master flag was a **literal** in `main.tf`, as this row used to say; that is what made all 18 timers permanent no-ops regardless of `enabled_timers` |
 | `ENTRA_TENANT_ID`, `ENTRA_API_AUDIENCE` (app settings) | §1 | Derived from store 2 Terraform variables |
 | `STORAGE_ACCOUNT_KEY`, `STORAGE_CONNECTION_STRING`, `COSMOS_CONNECTION_STRING` | §2 | Deliberately absent; two are test-enforced |
 | `COSMOS_KEY` | §7 | Deliberately absent |

@@ -218,4 +218,9 @@ describe('SOURCE_LABELS covers every source the API writes', () => {
       expect(SOURCE_LABELS[source], `no label for "${source}"`).toBeTruthy();
     }
   });
+
+  it('names the source the Playground itself sends, which the API does not list', () => {
+    // aiEngine.chat defaults to 'admin_playground'; it showed as a raw slug until 2026-09-29.
+    expect(SOURCE_LABELS.admin_playground).toBe('Admin playground');
+  });
 });
