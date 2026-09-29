@@ -111,9 +111,9 @@ describe('Header provider links (Docker, 2026-09-28)', () => {
     expect(screen.getByRole('link', { name: 'Docker' })).toHaveAttribute('href', '/docker');
   });
 
-  it('shows the Docker hub its own pages, like Terraform without Modules', () => {
+  it('shows the Docker hub its own pages, like Terraform with Sandboxes for Modules', () => {
     renderAt('/docker');
-    expect(primaryLabels()).toEqual(['News', 'Blogs', 'Code', 'Tools', 'Learning']);
+    expect(primaryLabels()).toEqual(['News', 'Blogs', 'Code', 'Sandboxes', 'Tools', 'Learning']);
     const hrefs = within(screen.getByRole('navigation', { name: 'Primary' }))
       .getAllByRole('link')
       .map((link) => link.getAttribute('href'));
@@ -121,6 +121,7 @@ describe('Header provider links (Docker, 2026-09-28)', () => {
       '/docker/rss',
       '/docker/blog',
       '/docker/code',
+      '/docker/sandboxes',
       '/docker/tools',
       '/docker/education',
     ]);
@@ -130,6 +131,14 @@ describe('Header provider links (Docker, 2026-09-28)', () => {
         name: 'Docker Tools',
       })
     ).toHaveAttribute('href', '/docker/tools');
+  });
+
+  it('keeps the Docker hub nav on /docker/sandboxes, a static route outside the provider layout', () => {
+    // The header reads the provider from the path through parseRoute, which
+    // knows only the page types in routeFactory's ROUTE_MAP. Without
+    // `sandboxes` there, this page would show the all-providers list.
+    renderAt('/docker/sandboxes');
+    expect(primaryLabels()).toEqual(['News', 'Blogs', 'Code', 'Sandboxes', 'Tools', 'Learning']);
   });
 
   it('sizes the all-providers columns to their labels', () => {

@@ -4,7 +4,8 @@
  * locally" lines are exactly the two from #658, the two status cards say the
  * two explicit unprovisioned sentences when both routes answer
  * `{ configured: false }` — and render full data when they answer with it —
- * the agent slot holds the sandbox section (#676) rather than a promise, a
+ * the agent slot points at the sandbox recipe's page in the Docker hub
+ * (#774, which moved it there from here) rather than holding a promise, a
  * tab returning from GitHub sign-in goes on to the pane it came from, Coder
  * is credited beside the intro, and nothing claims the host is onboarded to
  * Azure Arc before it is (#663).
@@ -22,7 +23,6 @@ import {
 } from '@/components/labs/labSignIn';
 import { NOT_PROVISIONED_SENTENCE } from '@/components/labs/LabsEstateCard';
 import { CODER_NOT_PROVISIONED_SENTENCE } from '@/components/labs/CoderStatusCard';
-import { SANDBOX_COMMANDS } from '@/components/labs/SandboxSection';
 
 const fetchLabsEstate = vi.fn();
 const fetchCoderStatus = vi.fn();
@@ -195,27 +195,25 @@ describe('LabsLearnPage', () => {
     await screen.findByText(NOT_PROVISIONED_SENTENCE);
   });
 
-  it('fills the agent slot with the sandbox section: three steps and the two commands', async () => {
+  it('keeps the agent slot and its heading id, pointing at the recipe’s page in the Docker hub', async () => {
     fetchLabsEstate.mockResolvedValue({ configured: false });
     fetchCoderStatus.mockResolvedValue({ configured: false });
     renderPage();
 
+    // An old link to /education/labs#agent-heading still lands on this heading.
     const agent = screen.getByTestId('labs-slot-agent');
-    expect(within(agent).getByRole('heading', { level: 2 })).toHaveTextContent(
-      'Run an agent against your landing zone'
-    );
+    const heading = within(agent).getByRole('heading', { level: 2 });
+    expect(heading).toHaveTextContent('Run an agent against your landing zone');
+    expect(heading).toHaveAttribute('id', 'agent-heading');
     expect(agent).not.toHaveTextContent('Coming soon');
-    expect(within(agent).getAllByTestId('sandbox-step')).toHaveLength(3);
-    const lines = [...agent.querySelectorAll('pre code')];
-    expect(lines.map((line) => line.dataset.shell)).toEqual(['PowerShell', 'bash']);
-    expect(lines.map((line) => line.textContent)).toEqual(
-      SANDBOX_COMMANDS.map((entry) => entry.command)
-    );
-    expect(within(agent).getByTestId('sandbox-first-prompt')).toBeInTheDocument();
-    expect(within(agent).getByTestId('sandbox-recipe-link')).toHaveAttribute(
+
+    // One line and one link; the recipe itself is no longer here.
+    expect(within(agent).getByRole('link', { name: 'Run an agent in a sandbox' })).toHaveAttribute(
       'href',
-      'https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/tree/main/lab-image/sandbox-template'
+      '/docker/sandboxes'
     );
+    expect(within(agent).queryAllByTestId('sandbox-step')).toHaveLength(0);
+    expect(agent.querySelectorAll('pre code')).toHaveLength(0);
     await screen.findByText(NOT_PROVISIONED_SENTENCE);
   });
 

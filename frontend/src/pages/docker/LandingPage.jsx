@@ -1,14 +1,15 @@
 import React from 'react';
-import { staticRoutes } from '@/lib/routeFactory';
+import { routes, staticRoutes } from '@/lib/routeFactory';
 import ProviderLandingTemplate from '@/components/shared/ProviderLandingTemplate';
-import { ComingSoon, LABS_AGENT_SECTION_PATH, PlaceholderLink } from './DockerPlaceholderPage';
+import { ComingSoon, PlaceholderLink } from './DockerPlaceholderPage';
 
 /*
  * Docker as a service provider (owner request 2026-09-28): the Terraform
- * landing page's template, with three focus areas that are placeholders.
- * Each says what it will cover and that it is coming; nothing here reads the
- * content API, and the template's live-content panel is off, because there is
- * no Docker content for it to show.
+ * landing page's template, with three focus areas. An area whose guide is
+ * still to be written says what it will cover and that it is coming; an area
+ * marked `available` links to its page instead (the sandbox recipe, #774).
+ * Nothing here reads the content API, and the template's live-content panel
+ * is off, because there is no Docker content for it to show.
  *
  * Facts the first area states, from lab-image/: one Dockerfile with two final
  * targets, every download checked against a pinned checksum (versions.env),
@@ -37,11 +38,24 @@ export const FOCUS_AREAS = [
     eyebrow: 'FOCUS AREA · SANDBOXES',
     title: 'Running an agent in a sandbox',
     icon: 'shield_person',
-    text: 'Docker Sandboxes run a coding agent in an isolated microVM on your own machine, with only the folder you give it. The recipe for pointing one at a landing zone from the Landing Zone Builder is on the browser labs page today.',
+    text: 'Docker Sandboxes run a coding agent in an isolated microVM on your own machine, with only the folder you give it. The recipe points one at a landing zone from the Landing Zone Builder, so the agent can validate and explain the Terraform without ever planning or applying it.',
     tags: ['Docker Sandboxes', 'Coding agents', 'Landing zones'],
-    link: { label: 'Run an agent against your landing zone', href: LABS_AGENT_SECTION_PATH },
+    available: true,
+    link: { label: 'Run an agent in a sandbox', to: routes.sandboxes('docker') },
   },
 ];
+
+/** The counterpart of `ComingSoon` for an area whose page exists. */
+function AvailableNow() {
+  return (
+    <p className="!mb-0 inline-flex w-fit items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-primary dark:text-(--slate-blue)">
+      <span className="material-symbols-outlined text-sm" aria-hidden="true">
+        check_circle
+      </span>
+      Available now
+    </p>
+  );
+}
 
 function FocusArea({ area }) {
   return (
@@ -54,7 +68,7 @@ function FocusArea({ area }) {
               {area.icon}
             </span>
           </div>
-          <ComingSoon />
+          {area.available ? <AvailableNow /> : <ComingSoon />}
         </div>
         <p className="max-w-3xl text-sm leading-relaxed text-slate-700 dark:text-slate-300">
           {area.text}
@@ -91,7 +105,7 @@ export default function DockerLandingPage() {
           </>
         ),
         description:
-          'Three guides are on the way: building container images, using the Docker Desktop app day to day, and running a coding agent in a sandbox. The worked example throughout is the image behind this site’s own browser labs.',
+          'Three guides: building container images and using the Docker Desktop app day to day, both on the way, and running a coding agent in a sandbox, which you can follow today. The worked example is the image behind this site’s own browser labs.',
         cta: { label: 'Explore the browser labs', to: staticRoutes.labs },
       }}
       sections={FOCUS_AREAS.map((area) => ({

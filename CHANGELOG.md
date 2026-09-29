@@ -1789,6 +1789,28 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **The agent sandbox recipe moved from `/education/labs` to the Docker
+  hub, at `/docker/sandboxes` (#774).** The "Run an agent against your
+  landing zone" section (`SandboxSection`, #676) is now the body of a new
+  page, "Run an agent in a sandbox" (`pages/docker/SandboxesPage.jsx`),
+  under a heading that keeps its old id, `agent-heading`. The page says
+  when its commands were last checked against Docker's documentation
+  (29 September 2026). Before the move they were read again and still
+  held: `sbx run` creates a sandbox whose name is new and reattaches with
+  `--name`, `-t/--template` takes a container image, and `--cloud`
+  sandboxes need a Docker Agentic Platform subscription, mount no host
+  folder and expire after an hour by default. On `/education/labs` the
+  `agent` slot stays with its heading, so an old
+  `/education/labs#agent-heading` link still lands on it, and holds one
+  line pointing to the new page. The Docker landing page's third focus
+  area reads "Available now" instead of "Coming soon" and links there,
+  as does the Docker tools page. The Docker hub's header gains
+  "Sandboxes", in the place Terraform's has "Modules". `sandboxes` is a
+  page type in `routeFactory.ts`, so the header recognises the static
+  route as a Docker page. The page is in `STANDALONE_ROUTES`, so it
+  pre-renders, and it is in `validate-provider-pages.js`. The issue keeps
+  `live-check`.
+
 - **The labs' "Run it locally" commands pull from Docker Hub.**
   `LAB_IMAGE` in `frontend/src/data/labs/catalogue.js` is now
   `hybridcloudworks/hcw-lab:latest`. The image went live there on

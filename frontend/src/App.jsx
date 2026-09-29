@@ -109,13 +109,14 @@ const AnsibleBlogPage = lazyPage(() => import('@/pages/ansible/BlogPage'));
 const AnsibleEducationPage = lazyPage(() => import('@/pages/ansible/EducationPage'));
 const AnsibleRssPage = lazyPage(() => import('@/pages/ansible/RssPage'));
 
-// Docker (service-provider pattern, like Terraform; every page a placeholder
+// Docker (service-provider pattern, like Terraform; a page is a placeholder
 // until its content is written)
 const DockerLandingPage = lazyPage(() => import('@/pages/docker/LandingPage'));
 const DockerBlogPage = lazyPage(() => import('@/pages/docker/BlogPage'));
 const DockerCodePage = lazyPage(() => import('@/pages/docker/CodePage'));
 const DockerEducationPage = lazyPage(() => import('@/pages/docker/EducationPage'));
 const DockerRssPage = lazyPage(() => import('@/pages/docker/RssPage'));
+const DockerSandboxesPage = lazyPage(() => import('@/pages/docker/SandboxesPage'));
 const DockerToolsPage = lazyPage(() => import('@/pages/docker/ToolsPage'));
 
 // Coder Corner (shared public list page)
@@ -377,6 +378,7 @@ function App() {
               <Route path="/terraform/modules" element={<TerraformModulesPage />} />
               <Route path="/terraform/tools" element={<TerraformToolsPage />} />
               {/* Docker Specifics */}
+              <Route path="/docker/sandboxes" element={<DockerSandboxesPage />} />
               <Route path="/docker/tools" element={<DockerToolsPage />} />
               {/* GitHub Specifics */}
               <Route path="/github/workflows" element={<GitHubWorkflowsPage />} />
