@@ -514,6 +514,55 @@ Describe 'Remove-LabArcPasswordCredentials' {
     }
 }
 
+Describe 'Confirm-LabArcCredentialsGone' {
+    # Driven through the real Invoke-LabAzJson and Get-LabArcPasswordCredentials,
+    # with only the az seam mocked. The 2026-09-28 bug lived in how the list
+    # came back from Get-LabArcPasswordCredentials (return , ...), which a mock
+    # of that function would have hidden, as the earlier tests did.
+    BeforeEach {
+        Mock Write-Host { }
+        Mock Start-Sleep { }
+        $script:listings = [System.Collections.Generic.Queue[string]]::new()
+        Mock Invoke-LabAz {
+            if (($Arguments -join ' ') -like 'ad app credential list*') {
+                $next = if ($script:listings.Count -gt 1) { $script:listings.Dequeue() } else { $script:listings.Peek() }
+                return [pscustomobject]@{ ExitCode = 0; Stdout = $next; Stderr = '' }
+            }
+            [pscustomobject]@{ ExitCode = 0; Stdout = ''; Stderr = '' }
+        }
+        $oneSecret = "[{`"keyId`":`"$keyA`",`"displayName`":`"hcw-arc-onboarding`",`"endDateTime`":`"2026-09-30T00:00:00Z`"}]"
+    }
+
+    It 'counts an empty registration as none, first time, with no deletion or wait' {
+        $script:listings.Enqueue('[]')
+        Confirm-LabArcCredentialsGone -AppId $appId | Should -Be 0
+        Should -Invoke Invoke-LabAz -Times 0 -Exactly -ParameterFilter { ($Arguments -join ' ') -like 'ad app credential delete*' }
+        Should -Invoke Start-Sleep -Times 0 -Exactly
+    }
+
+    It 'is not fooled by the list coming back as one object (the 2026-09-28 bug)' {
+        $script:listings.Enqueue('[]')
+        $listed = Get-LabArcPasswordCredentials -AppId $appId
+        @($listed | Where-Object { $null -ne $_ }).Count | Should -Be 0
+        # The old check wrapped the call itself, which is one element long
+        # whatever the registration holds.
+        @(Get-LabArcPasswordCredentials -AppId $appId).Count | Should -Be 1
+    }
+
+    It 'deletes a secret a lagging read still lists, and believes the next empty read' {
+        $script:listings.Enqueue($oneSecret)
+        $script:listings.Enqueue('[]')
+        Confirm-LabArcCredentialsGone -AppId $appId -DelaySeconds 0 | Should -Be 0
+        Should -Invoke Invoke-LabAz -Times 1 -Exactly -ParameterFilter { ($Arguments -join ' ') -eq "ad app credential delete --id $appId --key-id $keyA -o none" }
+    }
+
+    It 'reports what is still listed after the last attempt' {
+        $script:listings.Enqueue($oneSecret)
+        Confirm-LabArcCredentialsGone -AppId $appId -Attempts 3 -DelaySeconds 0 | Should -Be 1
+        Should -Invoke Invoke-LabAz -Times 2 -Exactly -ParameterFilter { ($Arguments -join ' ') -like 'ad app credential delete*' }
+    }
+}
+
 Describe 'New-LabArcSecret and Set-LabArcVaultValue' {
     BeforeEach {
         Mock Write-Host { }
