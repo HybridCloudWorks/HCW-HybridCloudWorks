@@ -179,6 +179,27 @@ const PROVIDER_META = {
     placeholderIcon: 'text-red-400/60',
     sectionIcon: 'text-red-400',
   },
+  // #777. Docker blue (--color-docker-primary, #1D63ED) for the heading, and
+  // Tailwind's blue scale for the rest, as the other rows use their own.
+  docker: {
+    name: 'Docker',
+    gradient: 'from-docker-primary via-slate-900 to-docker-primary dark:via-white',
+    accent: 'text-blue-400',
+    border: 'border-blue-500/30',
+    badge: 'bg-blue-500/20 border-blue-500/30 text-blue-400',
+    glow: 'bg-blue-500/5',
+    selectedBg: 'bg-blue-500/10 border-blue-500/40',
+    hoverBorder: 'hover:border-blue-500/20',
+    playBtn: 'from-blue-500 to-blue-700 hover:from-blue-400 hover:to-blue-800 shadow-blue-500/25',
+    subscribeBg: 'from-blue-500/20 to-blue-900/20',
+    subscribeBorder: 'border-blue-500/30',
+    subscribeIcon: 'text-blue-400',
+    subscribeHover: 'hover:bg-blue-500/20 hover:border-blue-500/40',
+    progressBar: 'from-blue-400 to-blue-300',
+    placeholder: 'from-blue-600/30 to-blue-900/40 border-blue-500/20',
+    placeholderIcon: 'text-blue-400/60',
+    sectionIcon: 'text-blue-400',
+  },
 };
 
 /** Deliberately generic. See where it is used. */

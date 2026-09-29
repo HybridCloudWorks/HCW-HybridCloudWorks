@@ -82,6 +82,7 @@ describe('bundled defaults', () => {
       'finops',
       'vmware',
       'ansible',
+      'docker',
     ]);
   });
 });

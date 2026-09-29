@@ -78,16 +78,24 @@ function tableKeys(relativePath, tableName) {
 /**
  * Providers whose dispatcher branch renders `component`.
  *
- * App.jsx routes `/:provider/<section>` through a dispatcher of the shape
- * `if (provider === 'x') return <SomePage />;`. Reading it here means the test
- * tracks the routing rather than a second list that has to be remembered — the
- * exact failure mode being guarded against.
+ * App.jsx routes `/:provider/<section>` through a dispatcher of one of two
+ * shapes: a branch per provider, `if (provider === 'x') return <SomePage />;`,
+ * or, when every provider renders the same page, a membership test,
+ * `if (!VALID_PROVIDERS.includes(provider)) return <NotFoundPage />;` followed
+ * by `return <SomePage />;` (the audio dispatcher since #777). Reading it here
+ * means the test tracks the routing rather than a second list that has to be
+ * remembered — the exact failure mode being guarded against.
  */
 function providersRoutedTo(dispatcher, component) {
   const source = readFileSync(join(process.cwd(), 'src', 'App.jsx'), 'utf8');
   const start = source.indexOf(`function ${dispatcher}(`);
   expect(start, `${dispatcher} not found in App.jsx`).toBeGreaterThan(-1);
   const body = source.slice(start, source.indexOf('\n}', start));
+
+  const everyProvider = new RegExp(
+    `if \\(!VALID_PROVIDERS\\.includes\\(provider\\)\\) return <NotFoundPage />;\\s*return <${component}[\\s/>]`
+  );
+  if (everyProvider.test(body)) return [...VALID_PROVIDERS];
 
   return [...body.matchAll(/provider === '([a-z0-9-]+)'\)\s*return\s*<([A-Za-z]+)/g)]
     .filter((match) => match[2] === component)
@@ -115,7 +123,8 @@ describe('provider coverage on shared pages', () => {
     // Derived from the dispatcher rather than VALID_PROVIDERS, so the list is
     // the thing that changes when a provider is added. Since #349 every
     // provider is routed here (the aws, azure and gcp copies of the page were
-    // folded into PROVIDER_META), so today the two lists coincide — but the
+    // folded into PROVIDER_META), and since #777 the dispatcher says so with a
+    // membership test, which `providersRoutedTo` reads as every provider. The
     // dispatcher stays the source of truth.
     const routed = providersRoutedTo('ProviderAudioDispatcher', 'SharedPodcastPage');
     expect(routed, 'no providers parsed from the audio dispatcher').not.toEqual([]);

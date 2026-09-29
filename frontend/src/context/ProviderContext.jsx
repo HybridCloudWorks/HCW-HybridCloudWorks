@@ -174,9 +174,9 @@ export function useProviderConfig() {
       theme: 'theme-docker',
       blogPath: 'foundational-posts',
       color: 'hsl(var(--primary))',
-      // Empty until Docker has a news source: the feeds the news timer reads
-      // are in functions/src/lib/rss/feeds.js, and Docker is not there yet.
-      rssFeeds: [],
+      // The feed the news timer reads for Docker (functions/src/lib/rss/feeds.js,
+      // #777). docker.com/blog/feed/ redirects here.
+      rssFeeds: [{ name: 'Docker Blog', url: 'https://www.docker.com/feed/' }],
       blogSource: 'https://www.docker.com/blog/',
     },
   };
