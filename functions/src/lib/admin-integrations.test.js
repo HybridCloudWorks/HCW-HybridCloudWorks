@@ -402,13 +402,16 @@ describe('AI feature switches', () => {
       const store = makeStore({
         readDoc: vi.fn(async () => ({
           features: {},
-          placement: { nvidia: { forgeDrafting: 'order', pricingExplain: 'first' } },
+          placement: { nvidia: { forgeDrafting: 'first', pricingExplain: 'first' } },
         })),
       });
       const body = JSON.parse((await handlers(store).getAiFeatures(makeRequest(), context)).body);
       expect(Object.keys(body.placement.nvidia).sort()).toEqual(Object.keys(body.features).sort());
-      expect(body.placement.nvidia.forgeDrafting).toBe('order');
-      expect(body.placement.nvidia.inspector).toBe('first');
+      // A stored choice is reported as stored; everything else is the
+      // default, which for content features is the backup (2026-09-29).
+      expect(body.placement.nvidia.forgeDrafting).toBe('first');
+      expect(body.placement.nvidia.inspector).toBe('order');
+      expect(body.placementDefaults.nvidia.forgeDrafting).toBe('order');
       // A stored 'first' on a locked feature is reported as what happens: off.
       expect(body.placement.nvidia.pricingExplain).toBe('off');
       expect(body.placement.nvidia.landingZoneExplain).toBe('off');

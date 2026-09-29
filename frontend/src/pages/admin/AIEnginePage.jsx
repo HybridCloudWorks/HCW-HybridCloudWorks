@@ -105,14 +105,27 @@ function fmtTokens(n) {
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
 }
-function timeAgo(ts) {
+function timeAgo(ts, now = Date.now()) {
   if (!ts) return 'Never';
   const d = ts?.toDate ? ts.toDate() : new Date(ts);
-  const secs = Math.floor((Date.now() - d) / 1000);
+  const secs = Math.floor((now - d) / 1000);
   if (secs < 60) return 'just now';
   if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
   if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
+  // Days up to a month, so a weekly probe reads "Tested 3d ago" (#701).
+  if (secs < 30 * 86400) return `${Math.floor(secs / 86400)}d ago`;
   return d.toLocaleDateString();
+}
+
+/**
+ * The card's "Tested …" line: when, and whether it was the Test button or the
+ * weekly probe (#701, `lastTestedBy: 'probe'`, lib/timers/ai-provider-probe.js
+ * in functions). Null when the provider has never been tested.
+ */
+export function describeLastTest(provider, now = Date.now()) {
+  if (!provider?.lastTested) return null;
+  const by = provider.lastTestedBy === 'probe' ? ' by the weekly check' : '';
+  return `Tested ${timeAgo(provider.lastTested, now)}${by}`;
 }
 
 function getServiceCardClassName(isGreyed, isChecked, checkedColor) {
@@ -134,7 +147,7 @@ function getServiceSelectionIcon(isChecked, isGreyed, checkedColor) {
 
 // ─── Services Tab ─────────────────────────────────────────────────────────────
 
-function ProviderCard({ provider, onToggle, onModelChange, onTest }) {
+export function ProviderCard({ provider, onToggle, onModelChange, onTest }) {
   const [testing, setTesting] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const navigate = useNavigate();
@@ -147,6 +160,10 @@ function ProviderCard({ provider, onToggle, onModelChange, onTest }) {
   };
 
   const isUnavailable = provider.status === 'unavailable';
+  const lastTest = describeLastTest(provider);
+  // `lastTestError` is what testAiProvider and the weekly probe write;
+  // `lastError` is the older field some stored documents still carry.
+  const testError = provider.lastTestError || provider.lastError;
 
   return (
     <Card
@@ -186,10 +203,8 @@ function ProviderCard({ provider, onToggle, onModelChange, onTest }) {
               </div>
             )}
 
-            {/* Last tested */}
-            {provider.lastTested && (
-              <p className="text-xs text-slate-400 mt-1">Tested {timeAgo(provider.lastTested)}</p>
-            )}
+            {/* Last tested, by the button or the weekly check */}
+            {lastTest && <p className="text-xs text-slate-400 mt-1">{lastTest}</p>}
           </div>
 
           <div className="flex flex-col items-end gap-2 shrink-0">
@@ -255,9 +270,9 @@ function ProviderCard({ provider, onToggle, onModelChange, onTest }) {
         )}
 
         {/* Error message */}
-        {provider.lastError && provider.status === 'error' && (
+        {testError && provider.status === 'error' && (
           <div className="mt-2 p-2 bg-red-50 dark:bg-red-900/20 rounded text-xs text-red-600 dark:text-red-400">
-            {provider.lastError}
+            {testError}
           </div>
         )}
       </CardContent>
@@ -276,10 +291,14 @@ function ProviderCard({ provider, onToggle, onModelChange, onTest }) {
 /** Display names for providers placed per feature (#701). */
 const PLACED_PROVIDER_LABELS = { nvidia: 'NVIDIA' };
 
-/** What each placement means, in the words the select shows. */
+/**
+ * What each placement means, in the words the select shows. 'order' is the
+ * default for content features since 2026-09-29, in the owner's words for
+ * that decision: in order, as a backup.
+ */
 const PLACEMENT_OPTIONS = [
   { value: 'first', label: 'First — free, others take over' },
-  { value: 'order', label: 'After the others' },
+  { value: 'order', label: 'In order — the backup' },
   { value: 'off', label: 'Off' },
 ];
 
@@ -526,8 +545,10 @@ function ServicesTab({ providers }) {
             {ordered.some((p) => p.id === 'nvidia') && (
               <>
                 {' '}
-                NVIDIA is also placed per feature under “Where AI is used”: it goes first for
-                content features and is never used for the public explain buttons.
+                NVIDIA is also placed per feature under “Where AI is used”: for content features it
+                is the backup unless you choose First there, and it is never used for the public
+                explain buttons. Once its timer is armed, a weekly check runs the Test on every
+                provider with a key and records the result on its card.
               </>
             )}
           </CardDescription>

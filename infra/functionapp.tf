@@ -91,6 +91,10 @@ locals {
     # labs:day:<date> document the newsletter's "Lab this week" section reads.
     # Point reads and one grouped count; never calls Azure or Coder.
     LABS_WEEKLY_ROLLUP = "labsWeeklyRollup — daily 23:55 UTC, writes the day's labs rollup document for the newsletter"
+    # #701: the AI Engine's Test on a timer, so NVIDIA's speed as the backup
+    # provider is re-measured weekly. Writes ai_providers status and ai_usage
+    # rows only; a fraction of a cent a week across the paid providers.
+    PROBE_AI_PROVIDERS = "probeAiProviders — weekly Monday 06:15 UTC, runs the AI Engine Test against every AI provider with a key and records the latency on its card"
   }
 
   timer_flags = {

@@ -1238,6 +1238,20 @@ describe('a time budget for synchronous callers (router header)', () => {
     'integrate.api.nvidia.com': 'nvidia',
   };
   const providerOf = (url) => PROVIDER_BY_HOST[new URL(url).host];
+
+  /**
+   * NVIDIA placed first for Forge drafting, as an administrator still can.
+   *
+   * These tests are about a slow FIRST provider, and NVIDIA on the trial tier
+   * is the one measured. Its default has been the backup since 2026-09-29
+   * (ai-config.js), which would leave nothing slow in front of Gemini and
+   * these tests with nothing to measure.
+   */
+  const nvidiaFirst = () => ({
+    queryDocs: async () => [],
+    readDoc: async () => ({ placement: { nvidia: { forgeDrafting: 'first' } } }),
+  });
+
   const ANSWER = JSON.stringify({
     content: [{ type: 'text', text: '{"ok":true}' }],
     choices: [{ message: { content: '{"ok":true}' } }],
@@ -1286,7 +1300,7 @@ describe('a time budget for synchronous callers (router header)', () => {
     const fetchImpl = fetchWhereStuck(['nvidia']);
     const log = { warn: vi.fn() };
     const run = timed(
-      createAiRouter({ env: KEYS, fetch: fetchImpl, log }).generateJsonResponse({
+      createAiRouter({ env: KEYS, fetch: fetchImpl, log, store: nvidiaFirst() }).generateJsonResponse({
         prompt: 'x',
         purpose: 'draft',
         feature: 'forgeDrafting',
@@ -1309,7 +1323,7 @@ describe('a time budget for synchronous callers (router header)', () => {
   it("with no budget, the background path keeps NVIDIA's full 120 s", async () => {
     vi.useFakeTimers();
     const fetchImpl = fetchWhereStuck(['nvidia']);
-    const call = createAiRouter({ env: KEYS, fetch: fetchImpl, log: quiet }).generateJsonResponse({
+    const call = createAiRouter({ env: KEYS, fetch: fetchImpl, log: quiet, store: nvidiaFirst() }).generateJsonResponse({
       prompt: 'x',
       purpose: 'draft',
       feature: 'forgeDrafting',
@@ -1348,7 +1362,7 @@ describe('a time budget for synchronous callers (router header)', () => {
       vi.useFakeTimers();
       const fetchImpl = fetchWhereStuck(['nvidia', 'gemini', 'openai', 'anthropic']);
       const run = timed(
-        createAiRouter({ env: KEYS, fetch: fetchImpl, log: quiet }).generateTextResponse({
+        createAiRouter({ env: KEYS, fetch: fetchImpl, log: quiet, store: nvidiaFirst() }).generateTextResponse({
           prompt: 'x',
           feature: 'forgeDrafting',
           budgetMs,
@@ -1372,7 +1386,7 @@ describe('a time budget for synchronous callers (router header)', () => {
   it('running out names each provider tried and why, and those never reached', async () => {
     vi.useFakeTimers();
     const fetchImpl = fetchWhereStuck(['nvidia', 'gemini', 'openai', 'anthropic']);
-    const call = createAiRouter({ env: KEYS, fetch: fetchImpl, log: quiet }).generateTextResponse({
+    const call = createAiRouter({ env: KEYS, fetch: fetchImpl, log: quiet, store: nvidiaFirst() }).generateTextResponse({
       prompt: 'x',
       feature: 'forgeDrafting',
       budgetMs: 60_000,
@@ -1388,7 +1402,7 @@ describe('a time budget for synchronous callers (router header)', () => {
     'a budget of %s ms is too short for one attempt: nothing is sent, and the error says so',
     async (budgetMs) => {
       const fetchImpl = vi.fn();
-      const call = createAiRouter({ env: KEYS, fetch: fetchImpl, log: quiet }).generateTextResponse({
+      const call = createAiRouter({ env: KEYS, fetch: fetchImpl, log: quiet, store: nvidiaFirst() }).generateTextResponse({
         prompt: 'x',
         feature: 'forgeDrafting',
         budgetMs,
@@ -1452,6 +1466,7 @@ describe('a time budget for synchronous callers (router header)', () => {
       sleep,
       now: () => t,
       log: quiet,
+      store: nvidiaFirst(),
     });
     await r.generateJsonResponse({ prompt: 'x', feature: 'forgeDrafting', budgetMs: 60_000 });
     expect(fetchImpl.mock.calls.map(([url]) => providerOf(url))).toEqual([
@@ -1480,7 +1495,7 @@ describe('a time budget for synchronous callers (router header)', () => {
           ? fail(401, { error: { message: 'Unauthorized' } })
           : geminiReply('{"ok":true}')
       );
-      const r = createAiRouter({ env: KEYS, fetch: fetchImpl, sleep: noSleep, log: quiet, onKeyVerdict });
+      const r = createAiRouter({ env: KEYS, fetch: fetchImpl, sleep: noSleep, log: quiet, onKeyVerdict, store: nvidiaFirst() });
       const result = await r.generateJsonResponse({
         prompt: 'x',
         feature: 'forgeDrafting',

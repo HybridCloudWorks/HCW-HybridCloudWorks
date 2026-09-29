@@ -249,3 +249,19 @@ timer('refreshPlaudToken', 'REFRESH_PLAUD_TOKEN', '0 0 */12 * * *', (context) =>
 timer('checkAgentHealth', 'CHECK_AGENT_HEALTH', '0 */5 * * * *', (context) =>
   createAgentHealthCheck({ store, log: context }).run()
 );
+
+// ── AI ───────────────────────────────────────────────────────────────────────
+
+timer('probeAiProviders', 'PROBE_AI_PROVIDERS', '0 15 6 * * 1', async (context) => {
+  // #701, owner decision 2026-09-29: NVIDIA is the backup for content
+  // features, re-checked weekly so a feature can move back to 'first' on
+  // evidence. The AI Engine's Test, run against every provider with a key;
+  // the results land on the provider cards (lib/timers/ai-provider-probe.js).
+  // The process-wide router, so the probe shares NVIDIA's pacing guard with
+  // every other call on this instance.
+  const [ai, { createAiProviderProbe }] = await Promise.all([
+    import('../lib/ai/router.js'),
+    import('../lib/timers/ai-provider-probe.js'),
+  ]);
+  return createAiProviderProbe({ store, ai, log: context }).run();
+});

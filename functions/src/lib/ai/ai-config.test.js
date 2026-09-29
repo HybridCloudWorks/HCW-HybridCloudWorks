@@ -226,18 +226,33 @@ describe('per-feature placement (#701)', () => {
     }
   });
 
-  it('puts nvidia first for content features, and lets configuration demote it', () => {
-    expect(placementFor(null, 'nvidia', 'forgeDrafting')).toBe('first');
-    expect(isPlacementConfigurable('nvidia', 'forgeDrafting')).toBe(true);
-    const settings = { placement: { nvidia: { forgeDrafting: 'order', podcastScript: 'off' } } };
-    expect(placementFor(settings, 'nvidia', 'forgeDrafting')).toBe('order');
+  it("is the backup ('order') for every content feature by default, and 'first' only when placed there", () => {
+    // Owner decision 2026-09-29: the trial tier queued for a minute or more.
+    for (const feature of [
+      'inspector',
+      'critique',
+      'forgeDrafting',
+      'forgeGrading',
+      'voiceCalibration',
+      'socialCaption',
+      'listenAndLearn',
+      'podcastScript',
+      'telegram',
+    ]) {
+      expect(PROVIDER_PLACEMENT_DEFAULTS.nvidia[feature], feature).toBe('order');
+      expect(placementFor(null, 'nvidia', feature), feature).toBe('order');
+      expect(isPlacementConfigurable('nvidia', feature), feature).toBe(true);
+    }
+    const settings = { placement: { nvidia: { forgeDrafting: 'first', podcastScript: 'off' } } };
+    expect(placementFor(settings, 'nvidia', 'forgeDrafting')).toBe('first');
     expect(placementFor(settings, 'nvidia', 'podcastScript')).toBe('off');
+    expect(placementFor(settings, 'nvidia', 'inspector')).toBe('order');
   });
 
   it('ignores a stored value that is not a placement', () => {
     const settings = { placement: { nvidia: { forgeDrafting: 'always', critique: true } } };
-    expect(placementFor(settings, 'nvidia', 'forgeDrafting')).toBe('first');
-    expect(placementFor(settings, 'nvidia', 'critique')).toBe('first');
+    expect(placementFor(settings, 'nvidia', 'forgeDrafting')).toBe('order');
+    expect(placementFor(settings, 'nvidia', 'critique')).toBe('order');
   });
 
   it('a call with no feature, or an unknown one, gets off', () => {
@@ -248,16 +263,19 @@ describe('per-feature placement (#701)', () => {
 
   it('applyFeaturePlacement moves or removes, never adds', () => {
     const order = ['gemini', 'openai', 'nvidia'];
-    expect(applyFeaturePlacement(order, null, 'forgeDrafting')).toEqual({
+    // By default the order stands: NVIDIA is the backup.
+    expect(applyFeaturePlacement(order, null, 'forgeDrafting')).toEqual({ order, excluded: [] });
+    const placedFirst = { placement: { nvidia: { forgeDrafting: 'first' } } };
+    expect(applyFeaturePlacement(order, placedFirst, 'forgeDrafting')).toEqual({
       order: ['nvidia', 'gemini', 'openai'],
       excluded: [],
     });
-    expect(applyFeaturePlacement(order, null, 'telegram').order).toEqual(order);
+    expect(applyFeaturePlacement(order, placedFirst, 'telegram').order).toEqual(order);
     expect(applyFeaturePlacement(order, null, 'pricingExplain')).toEqual({
       order: ['gemini', 'openai'],
       excluded: ['nvidia'],
     });
     // Not in the resolved order (no key, or disabled): placement cannot add it.
-    expect(applyFeaturePlacement(['gemini'], null, 'forgeDrafting').order).toEqual(['gemini']);
+    expect(applyFeaturePlacement(['gemini'], placedFirst, 'forgeDrafting').order).toEqual(['gemini']);
   });
 });

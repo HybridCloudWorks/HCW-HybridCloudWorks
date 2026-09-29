@@ -22,9 +22,15 @@
  * THEY BYPASS THE PREFERENCE ORDER TOO. `callProvider` takes an explicit
  * provider and does not fall through to the next one, because "test Anthropic"
  * that quietly succeeds against Gemini answers the wrong question.
+ *
+ * THE TEST HAS A SECOND CALLER (#701, 2026-09-29). `testProviderConnection`
+ * below is the Test with no HTTP and no auth, and the weekly
+ * `probeAiProviders` timer (lib/timers/ai-provider-probe.js) runs it too.
+ * Both write the same fields onto the provider document, so the card reads a
+ * probe result exactly as it reads a click; `lastTestedBy` says which it was.
  */
 
-import { recordAiUsage } from './usage.js';
+import { recordAiUsage, USAGE_SOURCES } from './usage.js';
 
 const json = (status, body) => ({
   status,
@@ -47,6 +53,105 @@ const TEST_PROMPT = 'Reply with the single word: ok';
  */
 export const TEST_MAX_TOKENS = 16;
 export const TEST_TIMEOUT_MS = 45_000;
+
+/**
+ * Who ran a Test: the usage row's `source`, and the name its log lines carry.
+ * The key is written onto the provider document as `lastTestedBy`.
+ */
+const TEST_TRIGGERS = Object.freeze({
+  admin: Object.freeze({ source: USAGE_SOURCES.adminTest, label: 'testAiProvider' }),
+  probe: Object.freeze({ source: USAGE_SOURCES.aiProviderProbe, label: 'probeAiProviders' }),
+});
+
+/**
+ * The Test itself: one short call to one named provider, a usage row, and the
+ * verdict written onto its `ai_providers` document. No HTTP and no auth, so
+ * the Test button and the weekly probe run the same code.
+ *
+ * It never throws for the provider. A refusal or a timeout is the result,
+ * returned as `ok: false` with the message, and written onto the document so
+ * the card can show it. The two writes are best-effort: a provider that
+ * answered still answered, even if recording that fact failed.
+ *
+ * @param {object} deps
+ * @param {{ upsertDoc: Function, patchDoc: Function }} deps.store
+ * @param {{ callProvider: Function, getCostEstimate: Function }} deps.ai
+ * @param {() => Date} [deps.now]
+ * @param {() => string} [deps.uuid]
+ * @param {() => number} [deps.clock] monotonic-ish source for latency
+ * @param {{ error?: Function }} [deps.log]
+ * @param {object} test
+ * @param {string} test.providerId
+ * @param {string|null} [test.model] null uses the provider's default for a short call
+ * @param {'admin'|'probe'} [test.trigger]
+ * @returns {Promise<{ok: boolean, status: 'connected'|'error', latencyMs: number,
+ *   model?: string, error?: string, code?: string|null}>}
+ */
+export async function testProviderConnection(
+  {
+    store,
+    ai,
+    now = () => new Date(),
+    uuid = () => crypto.randomUUID(),
+    clock = () => Date.now(),
+    log = null,
+  },
+  { providerId, model = null, trigger = 'admin' }
+) {
+  const { source, label } = TEST_TRIGGERS[trigger] || {};
+  if (!source) throw new TypeError(`Unknown test trigger: ${trigger}`);
+
+  const startedAt = clock();
+  let outcome;
+  try {
+    const result = await ai.callProvider({
+      provider: providerId,
+      model,
+      prompt: TEST_PROMPT,
+      maxTokens: TEST_MAX_TOKENS,
+      timeoutMs: TEST_TIMEOUT_MS,
+    });
+    outcome = {
+      ok: true,
+      status: 'connected',
+      latencyMs: clock() - startedAt,
+      model: result.model,
+    };
+    await recordAiUsage(
+      { store, ai, uuid, now },
+      {
+        provider: providerId,
+        model: result.model,
+        promptTokens: result.promptTokens,
+        completionTokens: result.completionTokens,
+        source,
+      }
+    );
+  } catch (error) {
+    log?.error?.(`${label}(${providerId}) failed:`, error);
+    outcome = {
+      ok: false,
+      status: 'error',
+      latencyMs: clock() - startedAt,
+      error: error?.message || 'The provider call failed',
+      code: error?.code || null,
+    };
+  }
+
+  try {
+    await store.patchDoc(PROVIDERS_CONTAINER, providerId, {
+      status: outcome.status,
+      latencyMs: outcome.latencyMs,
+      lastTested: now().toISOString(),
+      lastTestError: outcome.error || null,
+      lastTestedBy: trigger,
+    });
+  } catch (error) {
+    log?.error?.(`${label}(${providerId}) could not save status:`, error);
+  }
+
+  return outcome;
+}
 
 /**
  * @param {object} deps
@@ -143,7 +248,8 @@ export function createAiProxyHandlers({
      *
      * Writes the verdict back onto the provider document so the portal's status
      * badge survives a reload, which is what the page's `status`/`lastTested`
-     * fields have always expected and nothing has ever set.
+     * fields have always expected and nothing has ever set. The work is
+     * `testProviderConnection`; this adds the role check and the HTTP shape.
      */
     async testAiProvider(request, context) {
       const auth = await guard.requireRole(request, 'editor');
@@ -153,53 +259,10 @@ export function createAiProxyHandlers({
       const providerId = String(body?.providerId || '').trim();
       if (!providerId) return json(400, { ok: false, error: 'providerId is required' });
 
-      const startedAt = clock();
-      let outcome;
-      try {
-        const result = await ai.callProvider({
-          provider: providerId,
-          model: body?.model || null,
-          prompt: TEST_PROMPT,
-          maxTokens: TEST_MAX_TOKENS,
-          timeoutMs: TEST_TIMEOUT_MS,
-        });
-        outcome = {
-          ok: true,
-          status: 'connected',
-          latencyMs: clock() - startedAt,
-          model: result.model,
-        };
-        await recordUsage({
-          provider: providerId,
-          model: result.model,
-          promptTokens: result.promptTokens,
-          completionTokens: result.completionTokens,
-          source: 'admin_test',
-        });
-      } catch (error) {
-        context.error?.(`testAiProvider(${providerId}) failed:`, error);
-        outcome = {
-          ok: false,
-          status: 'error',
-          latencyMs: clock() - startedAt,
-          error: error?.message || 'The provider call failed',
-          code: error?.code || null,
-        };
-      }
-
-      // Best-effort: a provider that answered still answered, even if recording
-      // that fact failed.
-      try {
-        await store.patchDoc(PROVIDERS_CONTAINER, providerId, {
-          status: outcome.status,
-          latencyMs: outcome.latencyMs,
-          lastTested: now().toISOString(),
-          lastTestError: outcome.error || null,
-        });
-      } catch (error) {
-        context.error?.(`testAiProvider(${providerId}) could not save status:`, error);
-      }
-
+      const outcome = await testProviderConnection(
+        { store, ai, now, uuid, clock, log: context },
+        { providerId, model: body?.model || null, trigger: 'admin' }
+      );
       return json(200, outcome);
     },
   };

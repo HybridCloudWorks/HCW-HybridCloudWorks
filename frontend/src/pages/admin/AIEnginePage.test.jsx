@@ -29,7 +29,7 @@ vi.mock('@/lib/aiEngine', () => ({
 vi.mock('@/components/ui/use-toast', () => ({ useToast: () => ({ toast }) }));
 vi.mock('react-router', () => ({ useNavigate: () => vi.fn() }));
 
-const { FeatureSwitches } = await import('./AIEnginePage.jsx');
+const { FeatureSwitches, ProviderCard, describeLastTest } = await import('./AIEnginePage.jsx');
 
 const catalogue = {
   forgeDrafting: { label: 'Forge drafting', description: 'd', route: 'r' },
@@ -37,13 +37,20 @@ const catalogue = {
   pricingExplain: { label: 'Pricing explanations', description: 'd', route: 'r' },
 };
 
+/**
+ * The API's answer, shaped as it arrives. The defaults are the API's own
+ * since 2026-09-29: 'order' (the backup) for content features, 'off' locked
+ * for the public ones. The stored placement puts Forge drafting first, the
+ * choice an administrator made while 'first' was the default, which is what
+ * the owner will find on the page after the change.
+ */
 function answer(overrides = {}) {
   return {
     features: { forgeDrafting: true, telegram: true, pricingExplain: true },
     catalogue,
     placement: { nvidia: { forgeDrafting: 'first', telegram: 'order', pricingExplain: 'off' } },
     placementDefaults: {
-      nvidia: { forgeDrafting: 'first', telegram: 'order', pricingExplain: 'off' },
+      nvidia: { forgeDrafting: 'order', telegram: 'order', pricingExplain: 'off' },
     },
     ...overrides,
   };
@@ -107,5 +114,68 @@ describe('FeatureSwitches — NVIDIA placement', () => {
     render(<FeatureSwitches />);
     await screen.findByText('Forge drafting');
     expect(screen.queryByText(/NVIDIA/)).toBeNull();
+  });
+
+  it('with nothing stored, shows the default, the backup, in the owner’s words', async () => {
+    getAiFeatures.mockResolvedValue(answer({ placement: {} }));
+    render(<FeatureSwitches />);
+    const drafting = await screen.findByLabelText('NVIDIA', {
+      selector: '#placement-nvidia-forgeDrafting',
+    });
+    expect(drafting.value).toBe('order');
+    expect(drafting.selectedOptions[0].textContent).toBe('In order — the backup');
+  });
+});
+
+describe('ProviderCard — a Test result, from the button or the weekly probe (#701)', () => {
+  const NOW = Date.parse('2026-10-08T12:00:00.000Z');
+  const probed = {
+    id: 'nvidia',
+    name: 'NVIDIA API',
+    description: 'd',
+    enabled: true,
+    status: 'error',
+    latencyMs: 45_012,
+    lastTested: '2026-10-05T06:15:47.000Z',
+    lastTestError: 'timeout after 45000 ms',
+    lastTestedBy: 'probe',
+  };
+
+  it('says when it was tested and that the weekly check did it', () => {
+    expect(describeLastTest(probed, NOW)).toBe('Tested 3d ago by the weekly check');
+    expect(describeLastTest({ ...probed, lastTestedBy: 'admin' }, NOW)).toBe('Tested 3d ago');
+    // A document written before the field existed is a click.
+    expect(describeLastTest({ lastTested: '2026-10-08T11:55:00.000Z' }, NOW)).toBe('Tested 5m ago');
+    expect(describeLastTest({ status: 'untested' }, NOW)).toBeNull();
+  });
+
+  it('shows the timeout the probe recorded, which the Test writes as lastTestError', () => {
+    // The card reads the real clock, so the test date is relative to it.
+    const threeDaysAgo = new Date(Date.now() - 3 * 86_400_000 - 60_000).toISOString();
+    render(
+      <ProviderCard
+        provider={{ ...probed, lastTested: threeDaysAgo }}
+        onToggle={vi.fn()}
+        onModelChange={vi.fn()}
+        onTest={vi.fn()}
+      />
+    );
+    expect(screen.getByText('timeout after 45000 ms')).toBeTruthy();
+    expect(screen.getByText('Tested 3d ago by the weekly check')).toBeTruthy();
+    expect(screen.getByText('Error')).toBeTruthy();
+  });
+
+  it('shows the latency beside the badge when the probe connected', () => {
+    render(
+      <ProviderCard
+        provider={{ ...probed, status: 'connected', latencyMs: 2_140, lastTestError: null }}
+        onToggle={vi.fn()}
+        onModelChange={vi.fn()}
+        onTest={vi.fn()}
+      />
+    );
+    expect(screen.getByText('2140ms')).toBeTruthy();
+    expect(screen.getByText('Connected')).toBeTruthy();
+    expect(screen.queryByText('timeout after 45000 ms')).toBeNull();
   });
 });

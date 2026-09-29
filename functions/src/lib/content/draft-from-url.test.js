@@ -297,12 +297,9 @@ describe('end to end: a slow first provider no longer outlives the request (2026
     keyTopics: [],
   });
 
-  it('NVIDIA never answers; the draft still comes back from Gemini, well inside the handler budget', async () => {
-    // Before the budget, NVIDIA was allowed 120 s, the handler answered 504
-    // at 75 s, and Gemini was never asked.
-    vi.useFakeTimers();
-    const hosts = [];
-    const fetchImpl = vi.fn((url, init) => {
+  /** A fetch where NVIDIA never answers until aborted and Gemini answers at once. */
+  function fetchWithStuckNvidia(hosts) {
+    return vi.fn((url, init) => {
       const host = new URL(url).host;
       hosts.push(host);
       if (host === 'integrate.api.nvidia.com') {
@@ -319,18 +316,34 @@ describe('end to end: a slow first provider no longer outlives the request (2026
           JSON.stringify({ candidates: [{ content: { parts: [{ text: draftJson }] } }] }),
       });
     });
-    const ai = createAiRouter({
-      env: { NVIDIA_API_KEY: 'nvapi-test', GEMINI_API_KEY: 'g' },
-      fetch: fetchImpl,
-      log: { warn: vi.fn() },
-    });
-    const handler = createGenerateArticleDraftHandler({
+  }
+
+  const draftHandler = (ai) =>
+    createGenerateArticleDraftHandler({
       guard: okGuard,
       urlDrafter: createUrlDrafter({
         drafter: createDrafter({ store: { queryDocs: async () => [] }, ai, env: {} }),
         scrape: async () => goodScrape(),
       }),
     });
+
+  it('NVIDIA never answers; the draft still comes back from Gemini, well inside the handler budget', async () => {
+    // Before the budget, NVIDIA was allowed 120 s, the handler answered 504
+    // at 75 s, and Gemini was never asked. NVIDIA is placed first for
+    // drafting here, as an administrator still can; since 2026-09-29 its
+    // default is the backup (the next test).
+    vi.useFakeTimers();
+    const hosts = [];
+    const ai = createAiRouter({
+      env: { NVIDIA_API_KEY: 'nvapi-test', GEMINI_API_KEY: 'g' },
+      fetch: fetchWithStuckNvidia(hosts),
+      log: { warn: vi.fn() },
+      store: {
+        queryDocs: async () => [],
+        readDoc: async () => ({ placement: { nvidia: { forgeDrafting: 'first' } } }),
+      },
+    });
+    const handler = draftHandler(ai);
 
     const startedAt = Date.now();
     const pending = handler(makeRequestFor({ url: 'https://learn.microsoft.com/azure/x' }), {
@@ -348,6 +361,30 @@ describe('end to end: a slow first provider no longer outlives the request (2026
     // NVIDIA's share is half of (75 s less the 5 s margin), so the answer
     // comes at 35 s: under the client's 90 s and the edge's ~100 s.
     expect(at - startedAt).toBe((DRAFT_HTTP_BUDGET_MS - AFTER_MODEL_MARGIN_MS) / 2);
+  });
+
+  it('by default NVIDIA is the backup: Gemini answers at once and NVIDIA is never asked', async () => {
+    // Owner decision 2026-09-29. With no stored placement the draft does not
+    // wait out NVIDIA's share at all.
+    vi.useFakeTimers();
+    const hosts = [];
+    const ai = createAiRouter({
+      env: { NVIDIA_API_KEY: 'nvapi-test', GEMINI_API_KEY: 'g' },
+      fetch: fetchWithStuckNvidia(hosts),
+      log: { warn: vi.fn() },
+    });
+
+    const startedAt = Date.now();
+    const pending = draftHandler(ai)(makeRequestFor({ url: 'https://learn.microsoft.com/azure/x' }), {
+      error: vi.fn(),
+    }).then((res) => ({ res, at: Date.now() }));
+    await vi.advanceTimersByTimeAsync(0);
+    const { res, at } = await pending;
+
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body).draft).toMatchObject({ aiProvider: 'gemini' });
+    expect(hosts).toEqual(['generativelanguage.googleapis.com']);
+    expect(at - startedAt).toBe(0);
   });
 });
 

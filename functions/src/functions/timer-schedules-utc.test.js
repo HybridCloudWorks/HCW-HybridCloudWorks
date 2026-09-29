@@ -18,14 +18,14 @@
  * valid, the setting was valid, and only their combination was wrong.
  *
  * Re-adding the setting — or `TZ`, which does the same job — would silently
- * move **eighteen** of the twenty-two registered timers and make the same six
+ * move **nineteen** of the twenty-three registered timers and make the same six
  * sentences wrong again. There is no plan diff that reads as "every timer
  * moved five hours"; it reads as one app setting.
  *
- * Eighteen is the number this file enforces, and it is worth splitting
+ * Nineteen is the number this file enforces, and it is worth splitting
  * because the two halves matter differently to an operator:
  *
- *   - **Twelve change the instant they run.** The fixed-hour and fixed-day
+ *   - **Thirteen change the instant they run.** The fixed-hour and fixed-day
  *     schedules — a 07:00 digest becomes a 07:00 UTC digest, five hours
  *     earlier in wall-clock terms. This is the half that shows up as "the
  *     report arrived in the middle of the night".
@@ -129,6 +129,8 @@ const CLOCK_DEPENDENT = {
   // Fixed hour on one weekday — the day moves too if the clock does.
   reVerifyCertifications: { schedule: '0 0 0 * * 0', utc: 'Sunday 00:00' },
   checkLiveLinks: { schedule: '0 0 6 * * 1', utc: 'Monday 06:00' },
+  // #701: NVIDIA's weekly re-check, a quarter hour after the link check.
+  probeAiProviders: { schedule: '0 15 6 * * 1', utc: 'Monday 06:15' },
   // 08:00 CDT / 07:00 CST: the draft waits ahead of the Tuesday 09:00 Central send.
   buildWeeklyNewsletter: { schedule: '0 0 13 * * 1', utc: 'Monday 13:00' },
   scrapeSkillsHubRss: { schedule: '0 0 9 * * 5', utc: 'Friday 09:00' },
@@ -174,7 +176,7 @@ describe('timer schedules are UTC', () => {
     // Guards the guard. An empty read on either side would make every
     // assertion below pass by inspecting nothing.
     expect(terraformSource(INFRA).length).toBeGreaterThan(1000);
-    expect(timerRegistrations.size).toBe(22);
+    expect(timerRegistrations.size).toBe(23);
   });
 
   it('the app clock is UTC — no WEBSITE_TIME_ZONE or TZ app setting exists', () => {

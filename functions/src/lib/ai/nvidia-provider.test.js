@@ -59,7 +59,34 @@ function fetchFailing(failing = [], status = 500, message = 'boom') {
   return impl;
 }
 
-const storeOf = (providers = [], features = null) => ({
+const CONTENT_FEATURES = [
+  'inspector',
+  'critique',
+  'forgeDrafting',
+  'forgeGrading',
+  'voiceCalibration',
+  'socialCaption',
+  'listenAndLearn',
+  'podcastScript',
+];
+
+/**
+ * NVIDIA placed first for every content feature, as an administrator can
+ * place it under AI Engine → Where AI is used.
+ *
+ * Its DEFAULT there is the backup, 'order' (owner decision 2026-09-29). Most
+ * tests in this file are about how NVIDIA behaves when it serves: request
+ * shape, `<think>` stripping, retries, pacing, key verdicts, usage. Behind
+ * three paid providers that answer, it would never be asked, and those tests
+ * would pass without reaching it. So the store below places it first unless
+ * a test says otherwise, and the defaults are asserted on their own under
+ * "per-feature placement", with `store: null`.
+ */
+const NVIDIA_FIRST = Object.freeze({
+  placement: { nvidia: Object.fromEntries(CONTENT_FEATURES.map((f) => [f, 'first'])) },
+});
+
+const storeOf = (providers = [], features = NVIDIA_FIRST) => ({
   queryDocs: vi.fn(async () => providers),
   readDoc: vi.fn(async () => features),
 });
@@ -70,8 +97,11 @@ const router = (fetchImpl, { env = {}, ...rest } = {}) =>
     fetch: fetchImpl,
     sleep: noSleep,
     log: quiet,
+    store: storeOf(),
     ...rest,
   });
+
+const chainOf = async (r, feature) => (await r.resolveProviderChain(feature)).map((c) => c.provider);
 
 describe('availability — a key makes it possible', () => {
   it('is available when NVIDIA_API_KEY is present, and only then', () => {
@@ -206,54 +236,67 @@ describe('request shape — the OpenAI-compatible path at the NVIDIA base URL', 
 });
 
 describe('per-feature placement', () => {
-  it('goes FIRST for owner-triggered content features', async () => {
-    for (const feature of [
-      'inspector',
-      'critique',
-      'forgeDrafting',
-      'forgeGrading',
-      'voiceCalibration',
-      'socialCaption',
-      'listenAndLearn',
-      'podcastScript',
-    ]) {
-      const fetchImpl = fetchFailing();
-      await router(fetchImpl).generateJsonResponse({ prompt: 'x', feature });
-      expect(fetchImpl.providers(), feature).toEqual(['nvidia']);
+  it("is the backup ('order') by default for content features, and 'first' only when an administrator places it there", async () => {
+    // Owner decision 2026-09-29: through the portal's Test the trial tier took
+    // 56-117 s to answer, then did not answer 16 tokens inside 45 s.
+    for (const feature of CONTENT_FEATURES) {
+      const byDefault = router(fetchFailing(), { store: null });
+      expect(await chainOf(byDefault, feature), feature).toEqual([
+        'gemini',
+        'openai',
+        'anthropic',
+        'nvidia',
+      ]);
+
+      const placed = router(fetchFailing(), {
+        store: storeOf([], { placement: { nvidia: { [feature]: 'first' } } }),
+      });
+      expect(await chainOf(placed, feature), feature).toEqual([
+        'nvidia',
+        'gemini',
+        'openai',
+        'anthropic',
+      ]);
     }
   });
 
+  it('by default a content call is answered by a paid provider and never waits on NVIDIA', async () => {
+    for (const feature of CONTENT_FEATURES) {
+      const fetchImpl = fetchFailing();
+      await router(fetchImpl, { store: null }).generateJsonResponse({ prompt: 'x', feature });
+      expect(fetchImpl.providers(), feature).toEqual(['gemini']);
+    }
+  });
+
+  it('as the backup, it serves a content call when every provider above it cannot', async () => {
+    const fetchImpl = fetchFailing(['gemini', 'openai', 'anthropic'], 503, 'overloaded');
+    await expect(
+      router(fetchImpl, { store: null }).generateJsonResponse({ prompt: 'x', feature: 'forgeDrafting' })
+    ).resolves.toEqual({});
+    expect(fetchImpl.providers().at(-1)).toBe('nvidia');
+  });
+
   it('keeps the global order (last) for the Telegram assistant', async () => {
-    const fetchImpl = fetchFailing();
-    const r = router(fetchImpl);
-    expect((await r.resolveProviderChain('telegram')).map((c) => c.provider)).toEqual([
-      'gemini',
-      'openai',
-      'anthropic',
-      'nvidia',
-    ]);
+    const r = router(fetchFailing(), { store: null });
+    expect(await chainOf(r, 'telegram')).toEqual(['gemini', 'openai', 'anthropic', 'nvidia']);
   });
 
   it('is never used by a call that names no feature', async () => {
     const r = router(fetchFailing());
-    expect((await r.resolveProviderChain(null)).map((c) => c.provider)).not.toContain('nvidia');
+    expect(await chainOf(r, null)).not.toContain('nvidia');
   });
 
-  it('a stored placement can demote it to the global order or switch it off', async () => {
-    const demoted = router(fetchFailing(), {
-      store: storeOf([], { placement: { nvidia: { forgeDrafting: 'order', critique: 'off' } } }),
+  it('a stored placement moves it first for one feature, back into the order, or off', async () => {
+    const r = router(fetchFailing(), {
+      store: storeOf([], {
+        placement: { nvidia: { forgeDrafting: 'first', inspector: 'order', critique: 'off' } },
+      }),
     });
-    expect((await demoted.resolveProviderChain('forgeDrafting')).map((c) => c.provider)).toEqual([
-      'gemini',
-      'openai',
-      'anthropic',
-      'nvidia',
-    ]);
-    expect((await demoted.resolveProviderChain('critique')).map((c) => c.provider)).not.toContain(
-      'nvidia'
-    );
-    // Untouched features keep their default.
-    expect((await demoted.resolveProviderChain('inspector'))[0].provider).toBe('nvidia');
+    expect(await chainOf(r, 'forgeDrafting')).toEqual(['nvidia', 'gemini', 'openai', 'anthropic']);
+    expect(await chainOf(r, 'inspector')).toEqual(['gemini', 'openai', 'anthropic', 'nvidia']);
+    expect(await chainOf(r, 'critique')).not.toContain('nvidia');
+    // Untouched features keep their default: the backup.
+    expect(await chainOf(r, 'socialCaption')).toEqual(['gemini', 'openai', 'anthropic', 'nvidia']);
   });
 
   it('switched off globally in the portal, it is off for every feature', async () => {
@@ -342,6 +385,9 @@ describe('failover from nvidia to the next provider', () => {
     await expect(
       router(fetchImpl).generateJsonResponse({ prompt: 'x', feature: 'forgeDrafting' })
     ).resolves.toEqual({});
+    // Asked first, so the failover is NVIDIA's own and not a paid provider
+    // answering before it was reached.
+    expect(fetchImpl.providers()[0]).toBe('nvidia');
     expect(fetchImpl.providers().at(-1)).toBe('gemini');
     expect(fetchImpl.providers().filter((p) => p !== 'nvidia')).toEqual(['gemini']);
   });
@@ -349,7 +395,7 @@ describe('failover from nvidia to the next provider', () => {
   it('retries a real 429 with backoff before failing over', async () => {
     const sleep = vi.fn(async () => {});
     const fetchImpl = fetchFailing(['nvidia'], 429, 'Too Many Requests');
-    await createAiRouter({ env: KEYS, fetch: fetchImpl, sleep, log: quiet }).generateTextResponse({
+    await createAiRouter({ env: KEYS, fetch: fetchImpl, sleep, log: quiet, store: storeOf() }).generateTextResponse({
       prompt: 'x',
       feature: 'forgeDrafting',
     });
@@ -378,7 +424,7 @@ describe('failover from nvidia to the next provider', () => {
       }
       return { ok: true, status: 200, text: async () => ANSWER };
     });
-    await createAiRouter({ env: KEYS, fetch: fetchImpl, sleep, log: quiet }).generateTextResponse({
+    await createAiRouter({ env: KEYS, fetch: fetchImpl, sleep, log: quiet, store: storeOf() }).generateTextResponse({
       prompt: 'x',
       feature: 'forgeDrafting',
     });
@@ -471,6 +517,7 @@ describe('pacing guard — under the ~40 RPM account limit', () => {
       sleep,
       log: quiet,
       now: () => t,
+      store: storeOf(),
     });
     for (let i = 0; i < 4; i += 1) {
       await r.generateTextResponse({ prompt: 'draft', feature: 'forgeDrafting' });

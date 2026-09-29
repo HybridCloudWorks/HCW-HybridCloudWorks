@@ -13,7 +13,13 @@
  * the one it was asked.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { createAiProxyHandlers, TEST_MAX_TOKENS, TEST_TIMEOUT_MS } from './proxy.js';
+import {
+  createAiProxyHandlers,
+  testProviderConnection,
+  TEST_MAX_TOKENS,
+  TEST_TIMEOUT_MS,
+} from './proxy.js';
+import { USAGE_SOURCES } from './usage.js';
 
 const context = { log: vi.fn(), error: vi.fn() };
 
@@ -199,7 +205,19 @@ describe('testAiProvider', () => {
         status: 'connected',
         lastTested: '2026-08-23T20:00:00.000Z',
         lastTestError: null,
+        // The button, not the weekly probe (#701): the card says which ran.
+        lastTestedBy: 'admin',
       })
+    );
+  });
+
+  it('records the call as an admin Test in ai_usage, a registered source', async () => {
+    const store = makeStore();
+    await build({ store }).testAiProvider(makeRequest({ providerId: 'gemini' }), context);
+    expect(USAGE_SOURCES.adminTest).toBe('admin_test');
+    expect(store.upsertDoc).toHaveBeenCalledWith(
+      'ai_usage',
+      expect.objectContaining({ provider: 'gemini', source: USAGE_SOURCES.adminTest })
     );
   });
 
@@ -242,5 +260,78 @@ describe('testAiProvider', () => {
       context
     );
     expect(response.status).toBe(403);
+  });
+});
+
+describe('testProviderConnection — the Test with no HTTP, shared with the weekly probe (#701)', () => {
+  const deps = (over = {}) => ({
+    store: makeStore(),
+    ai: okAi(),
+    now: fixed.now,
+    uuid: fixed.uuid,
+    clock: (() => {
+      let t = 0;
+      return () => (t += 1_200);
+    })(),
+    ...over,
+  });
+
+  it('returns the verdict and writes it, marked as the probe, with its own usage source', async () => {
+    const d = deps();
+    const outcome = await testProviderConnection(d, { providerId: 'nvidia', trigger: 'probe' });
+
+    expect(outcome).toEqual({ ok: true, status: 'connected', latencyMs: 1_200, model: 'nvidia-default' });
+    expect(d.ai.callProvider).toHaveBeenCalledWith({
+      provider: 'nvidia',
+      model: null,
+      prompt: expect.any(String),
+      maxTokens: TEST_MAX_TOKENS,
+      timeoutMs: TEST_TIMEOUT_MS,
+    });
+    expect(d.store.patchDoc).toHaveBeenCalledWith('ai_providers', 'nvidia', {
+      status: 'connected',
+      latencyMs: 1_200,
+      lastTested: '2026-08-23T20:00:00.000Z',
+      lastTestError: null,
+      lastTestedBy: 'probe',
+    });
+    expect(d.store.upsertDoc).toHaveBeenCalledWith(
+      'ai_usage',
+      expect.objectContaining({ provider: 'nvidia', source: USAGE_SOURCES.aiProviderProbe })
+    );
+  });
+
+  it('never throws for the provider: a timeout is the result, with its message', async () => {
+    const ai = okAi();
+    ai.callProvider.mockRejectedValue(
+      Object.assign(new Error('timeout after 45000 ms'), { status: 408 })
+    );
+    const log = { error: vi.fn() };
+    const d = deps({ ai, log });
+    const outcome = await testProviderConnection(d, { providerId: 'nvidia', trigger: 'probe' });
+
+    expect(outcome).toEqual({
+      ok: false,
+      status: 'error',
+      latencyMs: 1_200,
+      error: 'timeout after 45000 ms',
+      code: null,
+    });
+    expect(d.store.patchDoc).toHaveBeenCalledWith(
+      'ai_providers',
+      'nvidia',
+      expect.objectContaining({ status: 'error', lastTestError: 'timeout after 45000 ms' })
+    );
+    expect(d.store.upsertDoc).not.toHaveBeenCalled();
+    expect(log.error).toHaveBeenCalledWith('probeAiProviders(nvidia) failed:', expect.any(Error));
+  });
+
+  it('refuses a trigger it does not know, before calling anything', async () => {
+    const d = deps();
+    await expect(
+      testProviderConnection(d, { providerId: 'gemini', trigger: 'cron' })
+    ).rejects.toThrow(/Unknown test trigger: cron/);
+    expect(d.ai.callProvider).not.toHaveBeenCalled();
+    expect(d.store.patchDoc).not.toHaveBeenCalled();
   });
 });
