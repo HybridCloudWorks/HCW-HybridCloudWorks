@@ -2515,6 +2515,18 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The break-glass secret seeder runs again (#814).**
+  `scripts/cutover/06-seed-secret.ps1` is for seeding a Key Vault secret when
+  the site is down. It built its list of allowed names from `infra/main.tf`
+  alone. Since the split (#269) that file holds no references, so every run,
+  `-Mode List` included, stopped at "Parsed no secret names". It now reads
+  every `.tf` file in `infra/`, as `functions/test/terraform-source.js` does.
+  New Pester tests (`06-seed-secret.Tests.ps1`) hold it to the repository as
+  committed, and the repository-policy workflow now runs `scripts/cutover`
+  beside `scripts/lab`. Its closing hint now prints the real restart and
+  health-check commands instead of placeholders. The docs that placed the
+  references in `main.tf`, or the script's window in `admin_ip_rules`, now
+  match.
 - **The Usage tab names the Playground's calls.** `aiEngine.chat` records
   Playground calls as `admin_playground`, but `SOURCE_LABELS` knew only the
   older `admin`, so those rows rendered as a raw slug. Both now read "Admin

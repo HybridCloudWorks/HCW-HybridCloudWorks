@@ -310,7 +310,11 @@ It holds a custom role with one data action — `setSecret` — so it can create
 new version and cannot read, delete or purge; the page has no read path to
 render a value through even if someone added one. `az keyvault secret set` from
 a desktop, through `scripts/cutover/06-seed-secret.ps1`, remains the break-glass
-route for when the app itself is the thing that is broken.
+route for when the app itself is the thing that is broken. It accepts only a
+name some app setting in the `infra/` module references, read from every `.tf`
+file there. From the split of `main.tf` (#269) until 2026-09-29 it read
+`main.tf` alone, found none, and stopped before doing anything (#814). CI now
+runs its tests, so a file move cannot break it silently again.
 
 ### Multi-line and oversized secrets
 
@@ -361,7 +365,7 @@ Seeded by hand; referenced from `infra/functionapp.tf` app settings as
 | `QLTY-API-TOKEN` | not inventoried | Qlty personal access token for the Health Hub's Code and Security summary (#569, `lib/code-quality/qlty-summary.js`). Sent only as a Bearer header to `api.qlty.sh`; the summary route returns counts and paths, never finding text |
 | `GITHUB-APP-INSTALLATION-ID`, `HOSTINGER-API-TOKEN` | not inventoried | Site rebuild trigger and VPS control |
 | `GCP-BILLING-API-KEY` | not inventoried | Cloud Billing Catalog API key for the public GCP price list — Google's documented auth for it. Replaced a ~2.3 KB service-account JSON on 2026-08-29 |
-| `GITHUB-APP-PRIVATE-KEY` | not inventoried | Multi-line PEM. **Not referenced by `main.tf` and read by nothing** — it has no app setting and no seeding path, deliberately |
+| `GITHUB-APP-PRIVATE-KEY` | not inventoried | Multi-line PEM. **Not referenced by any app setting in `infra/` and read by nothing** — it has no app setting and no seeding path, deliberately |
 | `TURNSTILE-SECRET-KEY` | not inventoried | Cloudflare Turnstile secret key for the Landing Zone Builder's "Validate on the lab" ([ADR 0032](../decisions/0032-learner-labs-platform.md), amendment of 2026-09-28), sent only to Cloudflare's siteverify. Its site key is public and is store 3 (`VITE_TURNSTILE_SITE_KEY`). The widget is created in the Cloudflare dashboard rather than as `cloudflare_turnstile_widget`, because that resource's read-only `secret` attribute would put this value in state, the rule in the next section |
 
 `infra/functionapp.tf` declares **30** `@Microsoft.KeyVault` references and no
@@ -515,16 +519,18 @@ credential the architecture removed.
 Two record-keeping gaps, which are not misplacements but do make the inventory
 unusable as a seeding checklist:
 
-- **The Key Vault contents are under-inventoried.** `main.tf` declares 21
-  `@Microsoft.KeyVault` references; CHECKLIST §1–§8 lists only a few of them.
+- **The Key Vault contents are under-inventoried.** The Function App's
+  settings declared 21 `@Microsoft.KeyVault` references on 2026-08-29, then in
+  `main.tf` and in `infra/functionapp.tf` since the split (#269); CHECKLIST
+  §1–§8 lists only a few of them.
   Every one of those resolves to empty until seeded, and an unseeded reference
   fails at *first invocation in production*, not at deploy — the failure mode
   the vault seeding runbook exists to prevent. `/api/health` now reports
   `unresolvedSecrets` as a count, which turns that class of failure into one
   number, but nothing alerts on it yet. **The inventory gap itself closed on
-  2026-08-29**: `functions/src/lib/secret-catalog.js` lists all 21 with a
-  section, a label and a description, CI asserts it against `main.tf` pair by
-  pair, and the portal's API Keys page renders it with a live status per
+  2026-08-29**: `functions/src/lib/secret-catalog.js` lists every one with a
+  section, a label and a description, CI asserts it against the `infra/`
+  module pair by pair, and the portal's API Keys page renders it with a live status per
   secret — so the inventory this section calls missing now exists, in code,
   where it cannot go stale without failing a build.
 - **There is no longer a second way in.** This entry used to record that
@@ -650,8 +656,8 @@ Every name sorts into exactly one:
 1. Run Q1–Q7. Write the answer into CHECKLIST with the store and the reason.
 2. Name it for the store it landed in: 2 words, no provider prefix.
 3. If it is a Key Vault secret, apply the underscore→hyphen transform and add
-   the `@Microsoft.KeyVault` reference to `app_settings` in `infra/main.tf` —
-   the reference, never the value.
+   the `@Microsoft.KeyVault` reference to `app_settings` in
+   `infra/functionapp.tf` — the reference, never the value.
 4. If it landed in store 4, the CHECKLIST entry must name the external system
    and say why federation is unavailable.
 5. If the answer was "deliberately absent", record it anyway, with what breaks
@@ -670,5 +676,5 @@ Every name sorts into exactly one:
 - Required-Inputs — the inventory: what exists, who consumes it, whether it is
   provisioned
 - `infra/variables.tf` — the store 2 Terraform variables and their validations
-- `infra/main.tf` — the Key Vault, its network ACLs and RBAC, and the app
-  settings that reference it
+- `infra/keyvault.tf` — the Key Vault, its network ACLs and RBAC
+- `infra/functionapp.tf` — the app settings that reference it

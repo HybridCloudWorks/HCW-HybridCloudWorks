@@ -21,8 +21,8 @@
        the reference resolves to nothing: the app deploys clean, and a missing
        credential presents as missing *data*, days later, in a feature nobody
        was looking at (Required-Inputs §4.5). So the name is checked against the
-       secrets `infra/main.tf` actually references — read from the file, not a
-       list in here that could go stale.
+       secrets the `infra/` module actually references — read from its .tf
+       files, not a list in here that could go stale.
 
     2. **PLACEHOLDERS.** Required-Inputs §4.6 states the rule and the reason: an unset
        input fails with a clear "not supplied"; a stubbed one fails as an
@@ -42,7 +42,8 @@
     secure prompt both keep it in memory only.
 
 .PARAMETER Name
-    Secret name, UPPER-KEBAB-CASE. Must be one `infra/main.tf` references.
+    Secret name, UPPER-KEBAB-CASE. Must be one an app setting in `infra/`
+    references.
 
 .PARAMETER Generate
     Generate a cryptographically random value instead of prompting. For secrets
@@ -101,18 +102,41 @@ function Write-Step { param($Text) Write-Host "`n=== $Text ===" -ForegroundColor
 $GENERATABLE = @('PREVIEW-SIGNING-SECRET', 'CLIENT-IP-SALT')
 
 # --- The referenced-name list, read from the configuration ------------------
-# Not hardcoded: a list in this file would drift from main.tf, and the whole
-# point of the check is to catch a name main.tf does not reference.
-$mainTf = Join-Path $PSScriptRoot '../../infra/main.tf'
-if (-not (Test-Path $mainTf)) { throw "Cannot find infra/main.tf at $mainTf — run this from the repository." }
-# @() so a single match stays an array — .Count and -notcontains both behave
-# differently on a bare string.
-$referenced = @([regex]::Matches((Get-Content $mainTf -Raw), 'secrets/([A-Z0-9-]+)\)') |
-        ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
-if ($referenced.Count -eq 0) { throw 'Parsed no secret names from infra/main.tf — the reference format changed; fix this script before trusting it.' }
+# Not hardcoded: a list in this file would drift from the configuration, and
+# the whole point of the check is to catch a name no app setting references.
+#
+# Read from every .tf file in infra/, never from one of them: Terraform treats
+# the directory as one module. This read main.tf alone until 2026-09-29, and
+# the references had moved to functionapp.tf when main.tf was split (#269), so
+# every run — -Mode List included — stopped at "Parsed no secret names". The
+# break-glass path was broken, and nothing said so until the day it was needed
+# (#814). functions/test/terraform-source.js reads the module the same way,
+# for the same reason; 06-seed-secret.Tests.ps1 holds this to the repository.
+function Get-ReferencedSecretName {
+    param([Parameter(Mandatory)][string] $InfraPath)
+
+    $files = @(Get-ChildItem -Path $InfraPath -Filter '*.tf' -File -ErrorAction SilentlyContinue)
+    # Fewer than this means the path is wrong, not that the module shrank: the
+    # same floor as MIN_TF_FILES in functions/test/terraform-source.js.
+    if ($files.Count -lt 4) {
+        throw "Found $($files.Count) .tf file(s) in $InfraPath — run this from the repository, where infra/ is the Terraform root module."
+    }
+    $source = ($files | Sort-Object Name | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw }) -join "`n"
+    $names = @([regex]::Matches($source, 'secrets/([A-Z0-9-]+)\)') |
+            ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+    if ($names.Count -eq 0) {
+        throw 'Parsed no secret names from infra/ — the reference format changed; fix this script before trusting it.'
+    }
+    # The comma keeps a one-name list an array — .Count and -notcontains both
+    # behave differently on a bare string. Callers assign it without @(), which
+    # would wrap it a second time.
+    return , $names
+}
+
+$referenced = Get-ReferencedSecretName -InfraPath (Join-Path $PSScriptRoot '../../infra')
 
 if ($Mode -eq 'List') {
-    Write-Step 'Secrets referenced by infra/main.tf'
+    Write-Step 'Secrets referenced by infra/'
     $referenced | ForEach-Object { Write-Host "  $_" }
     Write-Host "`n$($referenced.Count) referenced. Reading the vault needs a firewall window;" -ForegroundColor Yellow
     Write-Host 'GET /api/health reports `unresolvedSecrets` without one.' -ForegroundColor Yellow
@@ -123,12 +147,12 @@ Write-Step 'Preflight'
 if ($referenced -notcontains $Name) {
     Write-Host 'Referenced names:' -ForegroundColor Yellow
     $referenced | ForEach-Object { Write-Host "  $_" }
-    $msg = "'$Name' is not referenced by infra/main.tf. A secret whose name no app setting " +
+    $msg = "'$Name' is not referenced anywhere in infra/. A secret whose name no app setting " +
         'points at resolves to nothing and presents as missing DATA, not as a missing ' +
         'credential. App settings are UPPER_SNAKE_CASE; secrets are UPPER-KEBAB-CASE.'
     throw $msg
 }
-Write-Host "name      : $Name (referenced by infra/main.tf)"
+Write-Host "name      : $Name (referenced by infra/)"
 
 # --- Confirm the CLI is pointed at the subscription holding the vault --------
 # Before prompting for a value, and before opening anything.
@@ -324,7 +348,8 @@ finally {
 }
 
 Write-Step 'Next'
+# Real names, not placeholders: these lines are pasted as printed.
 Write-Host 'The Function App resolves references at startup. To pick this up now:'
-Write-Host '  az functionapp restart -g <RESOURCE_GROUP> -n <FUNCTION_APP_NAME>'
-Write-Host 'Then confirm without reading the value back:'
-Write-Host '  curl https://api-azure.hybridcloudworks.com/api/health   # unresolvedSecrets should drop by one'
+Write-Host '  az functionapp restart -g rg-web-site-prod-cus -n func-site-prod-cus-01'
+Write-Host 'Then confirm without reading the value back. unresolvedSecrets should drop by one:'
+Write-Host '  (Invoke-RestMethod https://api-azure.hybridcloudworks.com/api/health).unresolvedSecrets'
