@@ -2,6 +2,7 @@
   "name": "hcw-lab-host-coder",
   "description": "Hardening test for the Coder Compose file and the hcw-lab workspace template on the lab host",
   "version": "1.0.0",
+  "license": "Apache-2.0",
   "type": "module",
   "private": true,
   "scripts": {

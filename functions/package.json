@@ -2,6 +2,7 @@
   "name": "hybridcloudworks-functions-azure",
   "description": "Azure Functions API and workers for the HybridCloudWorks website",
   "version": "1.0.0",
+  "license": "Apache-2.0",
   "type": "module",
   "main": "src/functions/index.js",
   "scripts": {

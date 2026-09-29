@@ -4,7 +4,7 @@ galaxy_info:
   namespace: hcw
   author: HybridCloudWorks
   description: Pull every digest-pinned lab job image before a job needs it, and remove the digests no pin names
-  license: UNLICENSED
+  license: Apache-2.0
   min_ansible_version: "2.16"
   platforms:
     - name: Ubuntu
