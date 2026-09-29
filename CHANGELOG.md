@@ -2200,6 +2200,22 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **A Google beta that has closed reads "Coming", not available (#770).**
+  `deriveStatus` in `frontend/src/lib/certStatus.js` used to promote every
+  `beta` row to `active` the day after its `betaEndDate`. That is right for
+  Microsoft, whose betas go live as they end. It is wrong for Google, which
+  closes the beta window and opens GA later: "Beta participants will be
+  notified of their results 4-6 weeks after both the exam window and lab
+  window are closed. You can pass the beta or GA certification" (the
+  Professional Agentic Architect page, re-read 2026-09-29).
+  - A row can now say `betaClosesBeforeGa: true`. From the day after its
+    `betaEndDate` it renders `upcoming`, "Coming · beta closed · GA date not
+    announced", or "· GA <date>" when a `gaDate` is published. It turns
+    `active` on that `gaDate`.
+  - GCP's PAA carries the flag. So from 2026-10-01, until the row is updated
+    to what Google did, the page no longer offers an exam nobody can book.
+  - `findStaleStatuses` still fails on 2026-10-01 for PAA, AZ-800 and AZ-801.
+    That is the reminder, and #770 carries it.
 - **Lab image publishing: the storage-record warnings are gone, and a refused
   Docker exchange explains itself.**
   - Both publish jobs in `publish-lab-image.yml` now hold

@@ -150,14 +150,20 @@ export function formatIsoDate(iso) {
  *
  * Rules, in order:
  *   1. `expiryDate` before today → `retired`, whatever the stored status says.
- *   2. Stored `beta` whose `betaEndDate` is before today, or whose `gaDate` is
- *      today or earlier → `active`.
+ *   2. Stored `beta` whose `gaDate` is today or earlier → `active`. Stored
+ *      `beta` whose `betaEndDate` is before today → `active`, unless the row
+ *      says `betaClosesBeforeGa: true`, in which case → `upcoming` (until its
+ *      `gaDate`, if one is published). Microsoft's betas go live the moment
+ *      the beta ends; Google's close a window and open GA later ("You can pass
+ *      the beta or GA certification", with beta results 4-6 weeks after the
+ *      windows close), so a closed Google beta is not something a visitor can
+ *      book yet.
  *   3. Stored `upcoming` whose `availableDate` is today or earlier → `active`.
  *   4. Stored `active` with an `expiryDate` still ahead → `expiring`, because
  *      a published retirement date is what "expiring" means.
  *   5. Otherwise the stored status (`active` when absent).
  *
- * @param {{status?: string, expiryDate?: string, betaEndDate?: string, gaDate?: string, availableDate?: string}} cert
+ * @param {{status?: string, expiryDate?: string, betaEndDate?: string, betaClosesBeforeGa?: boolean, gaDate?: string, availableDate?: string}} cert
  * @param {string} [today] `YYYY-MM-DD`; defaults to the local date
  * @returns {'active'|'beta'|'upcoming'|'expiring'|'retired'}
  */
@@ -172,7 +178,10 @@ export function deriveStatus(cert, today = todayIso()) {
   const reached = (iso) => isIsoDate(iso) && isIsoDate(today) && iso <= today;
 
   if (stored === 'beta') {
-    if (isPastDate(cert.betaEndDate, today) || reached(cert.gaDate)) return 'active';
+    if (reached(cert.gaDate)) return 'active';
+    if (isPastDate(cert.betaEndDate, today)) {
+      return cert.betaClosesBeforeGa === true ? 'upcoming' : 'active';
+    }
     return 'beta';
   }
 
@@ -224,14 +233,26 @@ export function describeCertStatus(cert, today = todayIso()) {
         detail: isIsoDate(cert.gaDate) ? `GA ${formatIsoDate(cert.gaDate)}` : null,
       };
     }
-    case 'upcoming':
-      return {
-        status,
-        label: 'Coming',
-        detail: isIsoDate(cert.availableDate)
-          ? `available ${formatIsoDate(cert.availableDate)}`
-          : null,
-      };
+    case 'upcoming': {
+      if (isIsoDate(cert.availableDate)) {
+        return {
+          status,
+          label: 'Coming',
+          detail: `available ${formatIsoDate(cert.availableDate)}`,
+        };
+      }
+      // A beta whose window has closed ahead of GA (rule 2 in deriveStatus).
+      if (cert.status === 'beta') {
+        return {
+          status,
+          label: 'Coming',
+          detail: isIsoDate(cert.gaDate)
+            ? `beta closed · GA ${formatIsoDate(cert.gaDate)}`
+            : 'beta closed · GA date not announced',
+        };
+      }
+      return { status, label: 'Coming', detail: null };
+    }
     default:
       return { status, label: null, detail: null };
   }
