@@ -90,11 +90,17 @@ jobs:
       # preinstalled on the Ubuntu runner image (5.9.0 on 26.04, as on 24.04,
       # in September 2026). The result check fails on zero tests as
       # well as on a failure, because a sweep that found nothing is not a pass.
-      - name: Test the lab scripts
+      #
+      # scripts/cutover joined on 2026-09-29 (#814). 06-seed-secret.ps1 is the
+      # break-glass seeder for when the site is down, and it had stopped at
+      # its first line of work since the infra/ split, unnoticed, because
+      # nothing runs it on a good day. Its tests hold the names it accepts to
+      # the repository as committed.
+      - name: Test the lab and cutover scripts
         shell: pwsh
         run: |
           Import-Module Pester -MinimumVersion 5.0
-          $result = Invoke-Pester -Path scripts/lab -Output Detailed -PassThru
+          $result = Invoke-Pester -Path scripts/lab, scripts/cutover -Output Detailed -PassThru
           if ($result.Result -ne 'Passed' -or $result.PassedCount -eq 0) { exit 1 }
 
       # A step that ran ./scripts/cutover/workspace-query.tests.ps1 stood here

@@ -1,10 +1,10 @@
 /**
  * What the API-keys page may seed, in the sections it presents.
  *
- * ## Why a list in code when `06-seed-secret.ps1` reads `infra/main.tf`
+ * ## Why a list in code when `06-seed-secret.ps1` reads `infra/`
  *
  * That script runs on an operator's desktop with the repository checked out.
- * The Function App does not have `infra/main.tf` at run time, so the catalogue
+ * The Function App does not have the `infra/` module at run time, so the catalogue
  * has to travel in the bundle. A list in code can drift from Terraform, and
  * drift here is the specific failure Required-Inputs §4.5 describes: app settings are
  * `UPPER_SNAKE_CASE`, vault secrets are `UPPER-KEBAB-CASE` because Key Vault
@@ -12,7 +12,8 @@
  * clean and a missing credential presents as missing *data*, days later, in a
  * feature nobody was looking at.
  *
- * So `secret-catalog.test.js` reads `infra/main.tf` and asserts this table is
+ * So `secret-catalog.test.js` reads every `.tf` file in `infra/` (through
+ * `test/terraform-source.js`) and asserts this table is
  * exactly the set of `@Microsoft.KeyVault(SecretUri=…secrets/NAME)` references
  * it declares, with the setting names paired as Terraform pairs them. Add a
  * reference without adding it here — or spell either name wrong — and CI fails
@@ -93,7 +94,7 @@ export const SECRET_SECTIONS = Object.freeze([
  *
  * `setting` is the app-setting name (what `process.env` holds); `secret` is the
  * Key Vault secret name (what gets written). Both are asserted against
- * `infra/main.tf`. `probe` names the reporter whose verdict can turn this
+ * the `infra/` module. `probe` names the reporter whose verdict can turn this
  * light red.
  *
  * `null` is the honest default and most entries have it. A non-null probe is a

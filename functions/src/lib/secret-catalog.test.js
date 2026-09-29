@@ -1,8 +1,8 @@
 /**
- * The catalogue must match `infra/main.tf` exactly.
+ * The catalogue must match the `infra/` module exactly.
  *
  * The API-keys page writes to Key Vault under the name this catalogue gives.
- * If that name is not the one `main.tf` references, the write succeeds, the
+ * If that name is not the one `infra/` references, the write succeeds, the
  * vault gains a secret, and the app setting still resolves to nothing — so the
  * page shows a value seeded and the feature stays dark. That is TODO.md
  * §4.5's failure exactly, and it is invisible until someone uses the feature.
@@ -30,7 +30,7 @@ const INFRA = join(fileURLToPath(new URL('../../..', import.meta.url)), 'infra')
 
 /**
  * Every `"SETTING" = "@Microsoft.KeyVault(SecretUri=…secrets/SECRET)"` pair in
- * main.tf, as Terraform pairs them. Reading the PAIR rather than two separate
+ * `infra/`, as Terraform pairs them. Reading the PAIR rather than two separate
  * lists is what makes a swapped or mistyped counterpart detectable.
  */
 function terraformPairs() {
@@ -60,7 +60,7 @@ describe('secret catalogue ↔ Terraform', () => {
     // reference resolves to nothing and the failure presents as missing data.
     const declared = new Map(pairs.map((p) => [p.secret, p.setting]));
     const mismatched = SECRET_CATALOG.filter((e) => declared.get(e.secret) !== e.setting).map(
-      (e) => `${e.secret} → catalogue says ${e.setting}, main.tf says ${declared.get(e.secret)}`
+      (e) => `${e.secret} → catalogue says ${e.setting}, infra/ says ${declared.get(e.secret)}`
     );
     expect(mismatched).toEqual([]);
   });

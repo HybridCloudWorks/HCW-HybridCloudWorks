@@ -20,7 +20,7 @@
  * contain a seeded value even by accident.
  *
  * **Write a name Terraform does not reference.** `secret-catalog.js` is checked
- * against `infra/main.tf` in CI. A secret with no app setting pointing at it is
+ * against the `infra/` module in CI. A secret with no app setting pointing at it is
  * unreachable by application code, so seeding one creates a live credential
  * that nothing consumes and nobody owns.
  *
