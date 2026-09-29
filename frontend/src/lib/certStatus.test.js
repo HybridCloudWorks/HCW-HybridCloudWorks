@@ -234,6 +234,17 @@ describe('deriveStatus', () => {
     expect(deriveStatus({ status: 'beta', betaEndDate: '2026-06-30' }, TODAY)).toBe('active');
   });
 
+  it('reads a closed beta as coming, not active, when the vendor opens GA later', () => {
+    // Google closes the beta window before GA (PAA, #770): nothing can be booked in between.
+    const closed = { status: 'beta', betaEndDate: '2026-09-30', betaClosesBeforeGa: true };
+    expect(deriveStatus(closed, '2026-09-30')).toBe('beta');
+    expect(deriveStatus(closed, '2026-10-01')).toBe('upcoming');
+    expect(deriveStatus({ ...closed, gaDate: '2026-11-02' }, '2026-10-15')).toBe('upcoming');
+    expect(deriveStatus({ ...closed, gaDate: '2026-11-02' }, '2026-11-02')).toBe('active');
+    // Only an explicit true changes the rule: Microsoft's betas go live as they end.
+    expect(deriveStatus({ ...closed, betaClosesBeforeGa: 'yes' }, '2026-10-01')).toBe('active');
+  });
+
   it('promotes a beta to active on its gaDate', () => {
     expect(deriveStatus({ status: 'beta', gaDate: '2026-09-09' }, TODAY)).toBe('active');
     expect(deriveStatus({ status: 'beta', gaDate: '2026-10-01' }, TODAY)).toBe('beta');
@@ -359,6 +370,20 @@ describe('describeCertStatus', () => {
       status: 'upcoming',
       label: 'Coming',
       detail: 'available Dec 1, 2026',
+    });
+  });
+
+  it('describes a beta that closed ahead of GA, with the GA date when there is one', () => {
+    const closed = { status: 'beta', betaEndDate: '2026-09-30', betaClosesBeforeGa: true };
+    expect(describeCertStatus(closed, '2026-10-01')).toEqual({
+      status: 'upcoming',
+      label: 'Coming',
+      detail: 'beta closed · GA date not announced',
+    });
+    expect(describeCertStatus({ ...closed, gaDate: '2026-11-02' }, '2026-10-01')).toEqual({
+      status: 'upcoming',
+      label: 'Coming',
+      detail: 'beta closed · GA Nov 2, 2026',
     });
   });
 

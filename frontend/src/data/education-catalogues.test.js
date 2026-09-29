@@ -167,7 +167,8 @@ describe('the rows dated 2026-09-30 (#494)', () => {
 
     expect(deriveStatus(rowFor(azure, 'AZ-800'), AFTER)).toBe('retired');
     expect(deriveStatus(rowFor(azure, 'AZ-801'), AFTER)).toBe('retired');
-    expect(deriveStatus(rowFor(gcp, 'PAA'), AFTER)).toBe('active');
+    // Not 'active': Google closes the beta before GA, and the row says so (#770).
+    expect(deriveStatus(rowFor(gcp, 'PAA'), AFTER)).toBe('upcoming');
     expect(deriveStatus(rowFor(aws, 'MLA-C01'), AFTER)).toBe('retired');
   });
 

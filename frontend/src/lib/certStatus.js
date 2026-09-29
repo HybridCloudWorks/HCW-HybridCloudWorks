@@ -150,14 +150,20 @@ export function formatIsoDate(iso) {
  *
  * Rules, in order:
  *   1. `expiryDate` before today → `retired`, whatever the stored status says.
- *   2. Stored `beta` whose `betaEndDate` is before today, or whose `gaDate` is
- *      today or earlier → `active`.
+ *   2. Stored `beta` whose `gaDate` is today or earlier → `active`. Stored
+ *      `beta` whose `betaEndDate` is before today → `active`, unless the row
+ *      says `betaClosesBeforeGa: true`, in which case → `upcoming` (until its
+ *      `gaDate`, if one is published). Microsoft's betas go live the moment
+ *      the beta ends; Google's close a window and open GA later ("You can pass
+ *      the beta or GA certification", with beta results 4-6 weeks after the
+ *      windows close), so a closed Google beta is not something a visitor can
+ *      book yet.
  *   3. Stored `upcoming` whose `availableDate` is today or earlier → `active`.
  *   4. Stored `active` with an `expiryDate` still ahead → `expiring`, because
  *      a published retirement date is what "expiring" means.
  *   5. Otherwise the stored status (`active` when absent).
  *
- * @param {{status?: string, expiryDate?: string, betaEndDate?: string, gaDate?: string, availableDate?: string}} cert
+ * @param {{status?: string, expiryDate?: string, betaEndDate?: string, betaClosesBeforeGa?: boolean, gaDate?: string, availableDate?: string}} cert
  * @param {string} [today] `YYYY-MM-DD`; defaults to the local date
  * @returns {'active'|'beta'|'upcoming'|'expiring'|'retired'}
  */
@@ -172,7 +178,10 @@ export function deriveStatus(cert, today = todayIso()) {
   const reached = (iso) => isIsoDate(iso) && isIsoDate(today) && iso <= today;
 
   if (stored === 'beta') {
-    if (isPastDate(cert.betaEndDate, today) || reached(cert.gaDate)) return 'active';
+    if (reached(cert.gaDate)) return 'active';
+    if (isPastDate(cert.betaEndDate, today)) {
+      return cert.betaClosesBeforeGa === true ? 'upcoming' : 'active';
+    }
     return 'beta';
   }
 
@@ -200,41 +209,57 @@ export function deriveStatus(cert, today = todayIso()) {
  */
 export function describeCertStatus(cert, today = todayIso()) {
   const status = deriveStatus(cert, today);
-  const replacedBy = cert?.replacement?.code ? ` · replaced by ${cert.replacement.code}` : '';
+  const badge = BADGES[status];
+  return badge
+    ? { status, label: badge.label, detail: badge.detail(cert, today) }
+    : { status, label: null, detail: null };
+}
 
-  switch (status) {
-    case 'expiring':
-      return {
-        status,
-        label: 'Retiring',
-        detail: `last day to test ${formatIsoDate(cert.expiryDate)}${replacedBy}`,
-      };
-    case 'retired': {
+/** ` · replaced by CODE`, or '' for a row that names no replacement. */
+const replacedBy = (cert) =>
+  cert?.replacement?.code ? ` · replaced by ${cert.replacement.code}` : '';
+
+/**
+ * The badge word and date phrase for each status that has one. `active` has
+ * neither, so a caller renders nothing. One small function per status keeps
+ * `describeCertStatus` a single lookup.
+ */
+const BADGES = Object.freeze({
+  expiring: {
+    label: 'Retiring',
+    detail: (cert) => `last day to test ${formatIsoDate(cert.expiryDate)}${replacedBy(cert)}`,
+  },
+  retired: {
+    label: 'Retired',
+    detail: (cert) => {
       const on = cert.retiredDate ?? cert.expiryDate;
-      const detail = `${isIsoDate(on) ? formatIsoDate(on) : ''}${replacedBy}`.replace(/^ · /, '');
-      return { status, label: 'Retired', detail: detail || null };
-    }
-    case 'beta': {
-      if (isIsoDate(cert.betaStartDate) && cert.betaStartDate > today) {
-        return { status, label: 'Beta', detail: `from ${formatIsoDate(cert.betaStartDate)}` };
-      }
-      return {
-        status,
-        label: 'Beta',
-        detail: isIsoDate(cert.gaDate) ? `GA ${formatIsoDate(cert.gaDate)}` : null,
-      };
-    }
-    case 'upcoming':
-      return {
-        status,
-        label: 'Coming',
-        detail: isIsoDate(cert.availableDate)
-          ? `available ${formatIsoDate(cert.availableDate)}`
-          : null,
-      };
-    default:
-      return { status, label: null, detail: null };
+      const text = `${isIsoDate(on) ? formatIsoDate(on) : ''}${replacedBy(cert)}`;
+      return text.replace(/^ · /, '') || null;
+    },
+  },
+  beta: { label: 'Beta', detail: betaDetail },
+  upcoming: { label: 'Coming', detail: upcomingDetail },
+});
+
+/** A beta not yet open says when it opens; an open one, its GA date if known. */
+function betaDetail(cert, today) {
+  if (isIsoDate(cert.betaStartDate) && cert.betaStartDate > today) {
+    return `from ${formatIsoDate(cert.betaStartDate)}`;
   }
+  return isIsoDate(cert.gaDate) ? `GA ${formatIsoDate(cert.gaDate)}` : null;
+}
+
+/**
+ * The date phrase beside a "Coming" badge: the first available day when one
+ * is published; for a beta whose window closed ahead of GA (rule 2 in
+ * `deriveStatus`), that it closed and when GA is, if known; otherwise none.
+ */
+function upcomingDetail(cert) {
+  if (isIsoDate(cert.availableDate)) return `available ${formatIsoDate(cert.availableDate)}`;
+  if (cert.status !== 'beta') return null;
+  return isIsoDate(cert.gaDate)
+    ? `beta closed · GA ${formatIsoDate(cert.gaDate)}`
+    : 'beta closed · GA date not announced';
 }
 
 /**

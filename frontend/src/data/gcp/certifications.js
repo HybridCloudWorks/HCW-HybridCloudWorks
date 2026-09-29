@@ -296,6 +296,14 @@ export const certifications = [
     level: 'Professional',
     status: 'beta',
     betaEndDate: '2026-09-30',
+    // Google closes a beta window before GA: "Beta participants will be
+    // notified of their results 4-6 weeks after both the exam window and lab
+    // window are closed. You can pass the beta or GA certification" (the
+    // certification page, re-read 2026-09-29 for #770). So from 2026-10-01,
+    // until this row is updated to what Google did, it renders "Coming · beta
+    // closed · GA date not announced" instead of claiming an exam nobody can
+    // book. The findStaleStatuses alarm still fires on that day as designed.
+    betaClosesBeforeGa: true,
     description:
       'Design, build, deploy and operate agentic systems on Google Cloud. In beta until September 30: three hours, ~80 questions, $120 at the beta discount against a $200 retail price, English only. Google gives the beta credential a one-year validity rather than the usual two, and publishes no GA date yet.',
     topics: ['Agentic Systems', 'Vertex AI Agents', 'Orchestration', 'Evaluation', 'Operations'],
