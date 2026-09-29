@@ -30,9 +30,14 @@ This project has not cut a tagged release; entries are grouped under
   before this they were the 404 page. `docker` joins `PROVIDERS` in
   `scripts/build-content-manifest.mjs`, so a Docker article pre-renders at
   `/docker/blog/<slug>` and enters the sitemap. That list is now exported
-  and held to `VALID_PROVIDERS` by a test. A route test holds
-  `ProviderBlogDetailDispatcher` to `VALID_PROVIDERS` too, so no provider's
-  pre-rendered article can be a 404. `docker: ['Docker', 'docker']` joins
+  and held to `VALID_PROVIDERS` by a test. `ProviderBlogDetailDispatcher`
+  and `ProviderNewsDetailDispatcher` are now one membership test against
+  `VALID_PROVIDERS` instead of a branch per provider (ten returns each once
+  Docker was added), and a route test renders every provider's blog and
+  news detail path, so no provider's pre-rendered article can be a 404.
+  The four code pages (GitHub, Terraform, Ansible, Docker) were copies of
+  one body and now share `components/shared/ProviderCodePage.jsx`, each
+  passing its provider, title and description. `docker: ['Docker', 'docker']` joins
   `PROVIDER_ALIASES` in `functions/src/lib/public-reads.js`:
   `?provider=docker` now matches documents filed as "Docker", and
   `listCertEvents` answers `platform=docker` with an empty list instead of

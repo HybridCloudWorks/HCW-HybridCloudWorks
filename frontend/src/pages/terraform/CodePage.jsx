@@ -1,28 +1,12 @@
 import React from 'react';
-import { useNavigate } from 'react-router';
-import { ContentListingTemplate } from '@/components/templates/ContentListingTemplate';
-import { useCoderCornerData } from '@/hooks/useCoderCornerData';
+import ProviderCodePage from '@/components/shared/ProviderCodePage';
 
 export default function TerraformCodePage() {
-  const navigate = useNavigate();
-  const { items, loading } = useCoderCornerData('terraform');
-
-  const categories = [...new Set(items.map((item) => item.category).filter(Boolean))];
-
   return (
-    <ContentListingTemplate
+    <ProviderCodePage
+      provider="terraform"
       title="Terraform Code Patterns"
       description="Production-ready Terraform snippets and implementation notes, reviewed before they are published."
-      items={items}
-      itemType="guide"
-      loading={loading}
-      categories={categories}
-      icon="code"
-      actionLabel="Open Pattern"
-      onItemClick={(item) => {
-        if (!item.slug) return;
-        navigate(`/terraform/code/${item.slug}`);
-      }}
     />
   );
 }

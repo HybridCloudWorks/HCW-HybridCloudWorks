@@ -300,16 +300,21 @@ describe('public route contract', () => {
     }
   );
 
-  it('has a blog detail page for every provider, because every provider’s articles pre-render', () => {
-    // scripts/build-content-manifest.mjs pre-renders /<provider>/blog/<slug>
-    // for every provider in VALID_PROVIDERS (its test holds it there). A
-    // provider without a branch here would publish those files as the 404
-    // page, which is what Docker's articles would have been before #776.
-    const src = readFileSync(join(process.cwd(), 'src', 'App.jsx'), 'utf8');
-    const body = /function ProviderBlogDetailDispatcher\(\) \{([\s\S]*?)\n\}/.exec(src);
-    expect(body, 'ProviderBlogDetailDispatcher not found in App.jsx').not.toBeNull();
-    const served = [...body[1].matchAll(/provider === '([a-z]+)'/g)].map((m) => m[1]);
-    expect([...served].sort()).toEqual([...VALID_PROVIDERS].sort());
+  // scripts/build-content-manifest.mjs pre-renders /<provider>/blog/<slug> for
+  // every provider in VALID_PROVIDERS (its test holds it there). A provider
+  // whose detail path is not served would publish those files as the 404
+  // page, which is what Docker's articles would have been before #776.
+  it.each(
+    VALID_PROVIDERS.flatMap((provider) => [
+      [`/${provider}/blog/an-article`, `${provider} blog detail`],
+      [`/${provider}/news/an-item`, `${provider} news detail`],
+    ])
+  )('serves %s through the article template', async (pathname, heading) => {
+    renderRoute(pathname);
+
+    expect(
+      await screen.findByRole('heading', { level: 1, name: heading }, { timeout: 5000 })
+    ).toBeInTheDocument();
   });
 
   describe('route declarations (T-762)', () => {
