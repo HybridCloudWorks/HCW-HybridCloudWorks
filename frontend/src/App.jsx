@@ -109,8 +109,9 @@ const AnsibleBlogPage = lazyPage(() => import('@/pages/ansible/BlogPage'));
 const AnsibleEducationPage = lazyPage(() => import('@/pages/ansible/EducationPage'));
 const AnsibleRssPage = lazyPage(() => import('@/pages/ansible/RssPage'));
 
-// Docker (service-provider pattern, like Terraform; a page is a placeholder
-// until its content is written)
+// Docker (service-provider pattern, like Terraform). The blog and code pages
+// list published Docker content, with detail pages, as every provider's do
+// (#776); a page whose content is still to be written is a placeholder.
 const DockerLandingPage = lazyPage(() => import('@/pages/docker/LandingPage'));
 const DockerBlogPage = lazyPage(() => import('@/pages/docker/BlogPage'));
 const DockerCodePage = lazyPage(() => import('@/pages/docker/CodePage'));
@@ -574,6 +575,7 @@ function ProviderBlogDetailDispatcher() {
   if (provider === 'github') return <BlogDetailTemplate provider="github" />;
   if (provider === 'vmware') return <BlogDetailTemplate provider="vmware" />;
   if (provider === 'ansible') return <BlogDetailTemplate provider="ansible" />;
+  if (provider === 'docker') return <BlogDetailTemplate provider="docker" />;
   return <NotFoundPage />;
 }
 
@@ -587,6 +589,7 @@ function ProviderNewsDetailDispatcher() {
   if (provider === 'github') return <BlogDetailTemplate provider="github" section="news" />;
   if (provider === 'vmware') return <BlogDetailTemplate provider="vmware" section="news" />;
   if (provider === 'ansible') return <BlogDetailTemplate provider="ansible" section="news" />;
+  if (provider === 'docker') return <BlogDetailTemplate provider="docker" section="news" />;
   return <NotFoundPage />;
 }
 
@@ -673,10 +676,8 @@ function ProviderCodeDispatcher() {
       <AnsibleCodePage />
     );
   }
-  // The Docker code page is a placeholder with no items, so there is no
-  // detail page for a slug to reach yet.
   if (provider === 'docker') {
-    return isDetail ? <NotFoundPage /> : <DockerCodePage />;
+    return isDetail ? <BlogDetailTemplate provider="docker" section="code" /> : <DockerCodePage />;
   }
 
   return <NotFoundPage />;

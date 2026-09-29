@@ -19,6 +19,28 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Docker blog, news and code detail pages; Docker in the content
+  manifest and the public API (#776).** `/docker/blog` is now the shared
+  `ProviderBlogPage` ("Docker Containers Blog"), listing published articles
+  filed under Docker. `/docker/code` is the shared code listing ("Docker
+  Code Patterns"), like Terraform's and Ansible's. Both replace the
+  placeholders, and with nothing published each says so the way every
+  provider's does. `App.jsx` routes `/docker/blog/:slug`,
+  `/docker/news/:slug` and `/docker/code/:slug` to `BlogDetailTemplate`;
+  before this they were the 404 page. `docker` joins `PROVIDERS` in
+  `scripts/build-content-manifest.mjs`, so a Docker article pre-renders at
+  `/docker/blog/<slug>` and enters the sitemap. That list is now exported
+  and held to `VALID_PROVIDERS` by a test. A route test holds
+  `ProviderBlogDetailDispatcher` to `VALID_PROVIDERS` too, so no provider's
+  pre-rendered article can be a 404. `docker: ['Docker', 'docker']` joins
+  `PROVIDER_ALIASES` in `functions/src/lib/public-reads.js`:
+  `?provider=docker` now matches documents filed as "Docker", and
+  `listCertEvents` answers `platform=docker` with an empty list instead of
+  a 400. The section counts derive their providers from that table, so
+  once Functions is deployed and the manifest next published, the sitemap
+  leaves out Docker sections with nothing in them, as it does for every
+  other provider.
+
 - **Lab image: publishing to Docker Hub through a Docker OIDC connection,
   with no stored token (#779).** Owner decision 2026-09-28.
   `publish-lab-image.yml` has a third job, `Publish to Docker Hub`, which

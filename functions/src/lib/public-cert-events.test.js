@@ -46,6 +46,8 @@ describe('listCertEvents', () => {
     expect(unknown.status).toBe(400);
     expect(JSON.parse(unknown.body).error).toBe('platform is not a known provider');
     expect((await list(store(), { platform: 'AZURE' })).status).toBe(200);
+    // Docker's Learn page may ask; it answered 400 until #776 gave it an alias.
+    expect((await list(store(), { platform: 'docker' })).status).toBe(200);
   });
 
   it('answers a known platform with no scraper feeding it with an empty list and no query', async () => {

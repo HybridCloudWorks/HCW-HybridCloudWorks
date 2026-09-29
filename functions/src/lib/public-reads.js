@@ -47,7 +47,15 @@ const json = (status, body, cacheSeconds = 0) => ({
   body: JSON.stringify(body),
 });
 
-/** Mirrors PROVIDER_ALIASES in useCoderCornerData.js. */
+/**
+ * The labels a document's provider field may carry, per provider key. It
+ * began as a mirror of the frontend's useCoderCornerData.js, whose copy moved
+ * here; its keys are now the providers the public API knows, and must match
+ * VALID_PROVIDERS in frontend/src/context/ProviderContext.jsx
+ * (public-section-counts.test.js holds the list). Docker since #776: without
+ * it `?provider=docker` fell back to `['docker', 'DOCKER']` and missed
+ * `Docker`, and `listCertEvents` answered 400 for `platform=docker`.
+ */
 export const PROVIDER_ALIASES = {
   aws: ['AWS', 'Aws', 'aws'],
   azure: ['Azure', 'azure'],
@@ -57,6 +65,7 @@ export const PROVIDER_ALIASES = {
   terraform: ['Terraform', 'terraform'],
   vmware: ['VMware', 'Vmware', 'vmware'],
   ansible: ['Ansible', 'ansible'],
+  docker: ['Docker', 'docker'],
 };
 
 /**
