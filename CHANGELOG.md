@@ -2469,6 +2469,18 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **A provider's name on the AI Engine page follows the code (#701).**
+  #806 renamed "NVIDIA API Catalog" to "NVIDIA API" in `DEFAULT_PROVIDERS`,
+  but the card renders the stored `ai_providers` document, and seeding only
+  writes a document that is missing. So the old name stayed.
+  - `seedAiEngineIfEmpty` now patches each stored provider's `name`,
+    `description` and `icon` back to the seed on every page load. These are
+    `SEED_OWNED_PROVIDER_FIELDS`, which the page gives no way to edit, so a
+    difference is only ever a stale copy.
+  - Fields an administrator sets (model, enabled, order, placement) and
+    unknown providers are untouched.
+  - `providerDisplayPatches` is pure and tested, including the NVIDIA
+    document as it was stored on 2026-09-25.
 - **A slow first AI provider now fails over before the browser gives up
   (#701).** Generate draft is a synchronous call. The browser waits 90 s and
   the edge about 100 s. NVIDIA is first for drafting and was allowed 120 s per

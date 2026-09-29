@@ -21,7 +21,13 @@
  * reintroduce the exact problem it is meant to catch.
  */
 import { describe, it, expect } from 'vitest';
-import { DEFAULT_PROVIDERS, aggregateByProvider, aggregateBySource } from './aiEngine.js';
+import {
+  DEFAULT_PROVIDERS,
+  aggregateByProvider,
+  aggregateBySource,
+  providerDisplayPatches,
+  SEED_OWNED_PROVIDER_FIELDS,
+} from './aiEngine.js';
 import {
   DEFAULT_MODEL_TABLE,
   PROVIDERS,
@@ -98,6 +104,46 @@ describe('DEFAULT_PROVIDERS matches the API', () => {
       },
     ]);
     expect(agg.nvidia).toMatchObject({ calls: 1, tokens: 3000, costUsd: 0 });
+  });
+});
+
+describe('a stored provider follows the seed for what the card shows', () => {
+  const nvidia = DEFAULT_PROVIDERS.find((p) => p.id === 'nvidia');
+
+  it('calls NVIDIA "NVIDIA API", not "NVIDIA API Catalog" (owner, 2026-09-29)', () => {
+    expect(nvidia.name).toBe('NVIDIA API');
+  });
+
+  it('patches a stored document still carrying the old name, and only what differs', () => {
+    // The document the page seeded on 2026-09-25, before the rename.
+    const stored = [
+      {
+        ...nvidia,
+        name: 'NVIDIA API Catalog',
+        defaultModel: 'z-ai/glm-5.3-flash',
+        status: 'connected',
+      },
+    ];
+    expect(providerDisplayPatches(stored)).toEqual([
+      { id: 'nvidia', patch: { name: 'NVIDIA API' } },
+    ]);
+  });
+
+  it('writes nothing when every stored document already matches the seed', () => {
+    expect(providerDisplayPatches(DEFAULT_PROVIDERS.map((p) => ({ ...p })))).toEqual([]);
+  });
+
+  it('never touches fields the administrator sets, nor providers the seed does not know', () => {
+    const stored = [
+      { id: 'gemini', name: 'Old Gemini', defaultModel: 'custom', enabled: false, order: 9 },
+      { id: 'someone-else', name: 'Kept as is' },
+    ];
+    const [only] = providerDisplayPatches(stored);
+    expect(only.id).toBe('gemini');
+    expect(Object.keys(only.patch).every((k) => SEED_OWNED_PROVIDER_FIELDS.includes(k))).toBe(true);
+    expect(only.patch).not.toHaveProperty('defaultModel');
+    expect(only.patch).not.toHaveProperty('enabled');
+    expect(providerDisplayPatches([{ id: 'someone-else', name: 'x' }])).toEqual([]);
   });
 });
 
