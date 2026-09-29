@@ -1789,7 +1789,8 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
-- **CI: every workflow runs on Ubuntu 26.04, named, not `ubuntu-latest`.**
+- **CI: every workflow runs on Ubuntu 26.04, named, not `ubuntu-latest`
+  (#794).**
   Owner rule 2026-09-26: the newest LTS OS. GitHub moves `ubuntu-latest`
   from 24.04 to 26.04 over 2026-10-19 to 2026-11-19
   (actions/runner-images#14748), so for a month the same job could land on
