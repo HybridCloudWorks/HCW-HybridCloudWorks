@@ -328,6 +328,34 @@ export function subscribeMcpServers(callback) {
   return subscribeConfig('mcp-servers', callback);
 }
 
+/**
+ * The provider fields the seed owns and keeps current: what the card is
+ * called, the line under the name, and the icon. The page has no control to
+ * edit any of them, so a stored value that differs from `DEFAULT_PROVIDERS` is
+ * only ever an old copy of the seed. Seeding writes a document once, when it is
+ * missing, and the card renders the stored document, so without this a rename
+ * never reached the page: #701 renamed "NVIDIA API Catalog" to "NVIDIA API" on
+ * 2026-09-29, and the card still said Catalog after the deploy.
+ */
+export const SEED_OWNED_PROVIDER_FIELDS = Object.freeze(['name', 'description', 'icon']);
+
+/**
+ * `[{ id, patch }]` bringing each stored provider's seed-owned fields back to
+ * the seed. Providers the seed does not know are left alone; an empty list
+ * means nothing to write.
+ */
+export function providerDisplayPatches(stored, defaults = DEFAULT_PROVIDERS) {
+  return (stored || []).flatMap((existing) => {
+    const seed = defaults.find((p) => p.id === existing?.id);
+    if (!seed) return [];
+    const patch = {};
+    for (const field of SEED_OWNED_PROVIDER_FIELDS) {
+      if (seed[field] !== undefined && existing[field] !== seed[field]) patch[field] = seed[field];
+    }
+    return Object.keys(patch).length ? [{ id: existing.id, patch }] : [];
+  });
+}
+
 /** Seed the config collections if empty.
  *  Also deletes deprecated provider/server docs and patches stale URLs.
  *  Called once on admin page load.
@@ -407,6 +435,12 @@ export async function seedAiEngineIfEmpty() {
         schemaVersion: PROVIDER_SCHEMA_VERSION,
       })
     );
+  }
+
+  // Names, descriptions and icons follow the seed on every load, so a rename
+  // in DEFAULT_PROVIDERS reaches the stored document the card renders.
+  for (const { id, patch } of providerDisplayPatches(providers)) {
+    writes.push(patchConfig('ai-providers', id, patch));
   }
 
   // ─ MCP Servers ───────────────────────────────────────────────
