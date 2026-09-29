@@ -49,9 +49,10 @@ What "After" still counts:
   silence them is `.qlty/qlty.toml`, which #568 (PR #581) owns. The rule to
   add is in [radarlint-iac](#radarlint-iac).
 
-The table is the 2026-09-14 run. Since then #726 (2026-09-29) added three
-accepted checkov rows and one accepted trivy row, all on the lab-only Key
-Vault in `infra/lab-hybrid.tf`; their rows below say why.
+The table is the 2026-09-14 run. Since then #726 (2026-09-29) added rows
+below: three accepted checkov rows and one accepted trivy row on the lab-only
+Key Vault in `infra/lab-hybrid.tf`, two accepted checkov rows and one fixed
+one on the `vault` role's seal checks, and one false-positive gitleaks row.
 
 Verdicts:
 
@@ -319,6 +320,18 @@ before any verdict.
 | CKV_AZURE_189 | `infra/lab-hybrid.tf` | `azurerm_key_vault.lab_hybrid` | Accepted | Public network access stays on for the same reason: the VPS is outside Azure and has no private path to the vault. | Inline skip, 2026-09-29 (#726) |
 | CKV2_AZURE_32 | `infra/lab-hybrid.tf` | `azurerm_key_vault.lab_hybrid` | Accepted | No private endpoints, ADR 0031, and a private endpoint could not serve a caller outside Azure. | Inline skip, 2026-09-29 (#726) |
 
+### Ansible (3)
+
+From #726 on 2026-09-29, the `vault` role's auto-unseal checks. Inline
+skips on an Ansible task are `# checkov:skip=RULE:reason` inside the task,
+above the module, which checkov honours when handed the single file.
+
+| Rule | File | Task | Verdict | Reason and evidence | Resolution |
+| --- | --- | --- | --- | --- | --- |
+| CKV2_ANSIBLE_1 | `lab-host/ansible/roles/vault/tasks/seal.yml` | Ask the Arc agent for a Key Vault token | Accepted | The Azure Connected Machine agent serves its token endpoint only as plain HTTP on `127.0.0.1:40342`, as Microsoft documents and as Vault's own credential chain calls it. Nothing leaves the host, and the answer is a path to a file only root and the `himds` group can read. | Inline skip, 2026-09-29 (#726) |
+| CKV2_ANSIBLE_1 | `lab-host/ansible/roles/vault/tasks/seal.yml` | Answer the challenge and receive a Key Vault token | Accepted | As above: the same loopback endpoint, which issues the token. | Inline skip, 2026-09-29 (#726) |
+| CKV2_ANSIBLE_1 | `lab-host/ansible/roles/vault/tasks/seal.yml` | Read the seal key through Key Vault | Fixed | The URL was HTTPS, held in a variable checkov cannot resolve. It is now written out in the task, beginning `https://`. | 2026-09-29 (#726) |
+
 ### Secrets (1)
 
 | Rule | File:line | Verdict | Evidence | Resolution |
@@ -362,8 +375,10 @@ repository.
 
 ## gitleaks
 
-All nine are `generic-api-key`, and each was read in full before it was
-silenced. None is printed here. Fingerprints are in `.gitleaksignore`.
+All are `generic-api-key`, and each was read in full before it was
+silenced. None is printed here. The nine from 2026-09-14 are fingerprints in
+`.gitleaksignore`; the last row, from #726, is an inline `gitleaks:allow` on
+the line itself.
 
 | Rule | File:line | Verdict | Evidence | Resolution |
 | --- | --- | --- | --- | --- |
@@ -376,6 +391,7 @@ silenced. None is printed here. Fingerprints are in `.gitleaksignore`.
 | generic-api-key | `scripts/cutover/02-entra-spa-client.ps1:75` | False positive | As above. | `.gitleaksignore`, this PR |
 | generic-api-key | `scripts/cutover/03-entra-dev-client.ps1:61` | False positive | As above. | `.gitleaksignore`, this PR |
 | generic-api-key | `scripts/rollback/restore-admin-signin.ps1:60` | False positive | As above. | `.gitleaksignore`, this PR |
+| generic-api-key | `lab-host/ansible/roles/vault/defaults/main.yml`, `vault_seal_azurekeyvault_vault_name` | False positive | The name of the lab-only Key Vault that `infra/lab-hybrid.tf` creates, an identifier and not a credential. The rule reads "key" inside `azurekeyvault` in the variable's name. | Inline `# gitleaks:allow` on that line, 2026-09-29 (#726): it moves with the line, where a fingerprint would not |
 
 A filesystem fingerprint is `path:rule:line`. `publish-content-manifest.yml`
 regenerates the manifest weekly, so its three lines move. When they

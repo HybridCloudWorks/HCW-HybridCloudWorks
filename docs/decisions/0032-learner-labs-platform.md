@@ -520,7 +520,7 @@ versions below.
 
 **Decision, proposed.**
 
-1. **A lab-only Key Vault, `kv-labhybrid-prod-cus-01`**, in
+1. **A lab-only vault, the Key Vault `kv-labhybrid-prod-cus-01`** in
    `rg-lab-hybrid-prod-cus` (`infra/lab-hybrid.tf`). Standard tier, RBAC
    authorisation, purge protection, `prevent_destroy`, and AuditEvent to the
    Management workspace. The name drops a hyphen because the pattern's

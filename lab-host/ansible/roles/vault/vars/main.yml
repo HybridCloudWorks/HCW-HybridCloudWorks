@@ -41,7 +41,6 @@ vault_seal_azcmagent_path: /opt/azcmagent/bin/azcmagent
 vault_seal_himds_group: himds
 vault_seal_arc_tokens_dir: /var/opt/azcmagent/tokens
 vault_seal_arc_token_url: http://127.0.0.1:40342/metadata/identity/oauth2/token?api-version=2020-06-01&resource=https%3A%2F%2Fvault.azure.net
-vault_seal_key_url: "https://{{ vault_seal_azurekeyvault_vault_name }}.vault.azure.net/keys/{{ vault_seal_azurekeyvault_key_name }}?api-version=7.4"
 vault_seal_guid_pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 # Why Key Vault refused the key read, by status. -1 is no HTTP answer at all.
 vault_seal_key_refusals:

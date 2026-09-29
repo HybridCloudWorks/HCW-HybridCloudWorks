@@ -114,8 +114,12 @@
 # answered 401 with the path of a key file only root and the himds group can
 # read, and the same request carrying that file's contents is answered with
 # the token. Every task that sees the file or the token is no_log, and the
-# refusals below read only status codes and the key's public metadata.
+# refusals below read only status codes and the key's public metadata. The
+# agent serves this endpoint as plain HTTP on the loopback and nowhere else,
+# which is what Microsoft documents and what Vault itself calls; the secret
+# never crosses it, only a path to a file the caller must be able to read.
 - name: Ask the Arc agent for a Key Vault token, which it answers with a challenge
+  # checkov:skip=CKV2_ANSIBLE_1:Arc agent token endpoint, HTTP on 127.0.0.1 only. docs/security/scanner-triage.md#checkov
   ansible.builtin.uri:
     url: "{{ vault_seal_arc_token_url }}"
     headers:
@@ -154,6 +158,7 @@
     - not ansible_check_mode
 
 - name: Answer the challenge and receive a Key Vault token as the Arc machine
+  # checkov:skip=CKV2_ANSIBLE_1:Arc agent token endpoint, HTTP on 127.0.0.1 only. docs/security/scanner-triage.md#checkov
   ansible.builtin.uri:
     url: "{{ vault_seal_arc_token_url }}"
     headers:
@@ -178,9 +183,11 @@
     - vault_seal_azurekeyvault_enabled | bool
     - not ansible_check_mode
 
+# The URL is written out here, not kept in vars, so a reader and checkov both
+# see that it is HTTPS.
 - name: Read the seal key through Key Vault as the Arc machine, as Vault will at every start
   ansible.builtin.uri:
-    url: "{{ vault_seal_key_url }}"
+    url: "https://{{ vault_seal_azurekeyvault_vault_name }}.vault.azure.net/keys/{{ vault_seal_azurekeyvault_key_name }}?api-version=7.4"
     headers:
       Authorization: "Bearer {{ vault_seal_token.json.access_token }}"
     status_code: 200

@@ -53,8 +53,10 @@ vault_profile_file: /etc/profile.d/hcw-vault.sh
 # Vault data on this installation (README.md, "Auto-unseal").
 vault_seal_azurekeyvault_enabled: false
 # The vault and key infra/lab-hybrid.tf creates. scripts/lab-host-vault-seal.test.mjs
-# fails when the two disagree.
-vault_seal_azurekeyvault_vault_name: kv-labhybrid-prod-cus-01
+# fails when the two disagree. The vault name is not a secret: gitleaks reads
+# "key" in the variable's name and the name's hyphens as a credential
+# (docs/security/scanner-triage.md#gitleaks).
+vault_seal_azurekeyvault_vault_name: kv-labhybrid-prod-cus-01 # gitleaks:allow
 vault_seal_azurekeyvault_key_name: vault-seal
 # Written into the stanza when set, and otherwise left out. The Arc identity
 # never uses it: the seal reads tenant_id only to sign in with a client

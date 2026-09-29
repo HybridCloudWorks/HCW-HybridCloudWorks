@@ -25,9 +25,9 @@ const roleDefaults = read('lab-host/ansible/roles/vault/defaults/main.yml');
 const groupVars = read('lab-host/ansible/group_vars/all.yml');
 const sealTemplate = read('lab-host/ansible/roles/vault/templates/vault.hcl.j2');
 
-/** A top-level `key: value` from a YAML file, unquoted. */
+/** A top-level `key: value` from a YAML file, unquoted, ignoring a trailing comment. */
 function yamlScalar(text, key) {
-  const match = text.match(new RegExp(`^${key}:\\s*"?([^"\\n#]*?)"?\\s*$`, 'm'));
+  const match = text.match(new RegExp(`^${key}:\\s*"?([^"\\n#]*?)"?\\s*(?:#.*)?$`, 'm'));
   expect(match, `${key} is not set as a plain scalar`).not.toBeNull();
   return match[1];
 }
