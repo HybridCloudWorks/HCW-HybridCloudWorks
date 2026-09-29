@@ -13,12 +13,17 @@ terraform {
       source  = "hashicorp/azurerm"
       version = "~> 5.0"
     }
-    # azapi exists for exactly one thing: stripping the `AzureWebJobsStorage`
-    # connection string that azurerm re-injects on every apply (T-511,
-    # hashicorp/terraform-provider-azurerm#29149). See the read-then-strip pair
-    # at the end of the function app block in main.tf. It is a thin ARM
+    # azapi does two things azurerm cannot. The first is stripping the
+    # `AzureWebJobsStorage` connection string that azurerm re-injects on every
+    # apply (T-511, hashicorp/terraform-provider-azurerm#29149): the
+    # read-then-strip pair at the end of functionapp.tf. It is a thin ARM
     # passthrough — it writes the body it is given and nothing else, which is
-    # the property azurerm lacks here.
+    # the property azurerm lacks there. The second is the lab host's Vault
+    # seal key and the read of the Arc machine it is granted to (#726,
+    # lab-hybrid.tf): azurerm creates keys only through the Key Vault data
+    # plane, which would need the run identity to hold a data-plane role, and
+    # has no way to read a resource that may not exist without failing the
+    # plan.
     azapi = {
       source  = "Azure/azapi"
       version = "~> 2.0"
@@ -124,8 +129,8 @@ provider "azurerm" {
 # ARM_OIDC_TOKEN and ARM_USE_OIDC from the run environment with no HCL. The
 # subscription is pinned in HCL for the same reason it is on every azurerm
 # block: an explicit value cannot be got wrong by a missing environment
-# variable, and this provider only ever touches the function app, which is in
-# the application subscription.
+# variable, and everything this provider touches, the function app and the
+# lab's seal key and Arc machine, is in the application subscription.
 provider "azapi" {
   subscription_id = var.subscription_app
 }

@@ -811,8 +811,9 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # repository secret — an owner action, tracked in TODO.md.
     #
     # ON EVERY azurerm MINOR UPGRADE, re-test issue #29149. If it has closed,
-    # delete the azapi pair, the azapi provider, T-511 and
-    # scripts/assert-expected-plan.mjs together, and confirm with the
+    # delete the azapi pair, T-511 and scripts/assert-expected-plan.mjs
+    # together (the azapi provider stays: lab-hybrid.tf uses it too, #726),
+    # and confirm with the
     # post-apply check in deploy-functions.yml — which is what fails if the
     # strip stops working.
     #
@@ -874,9 +875,10 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
 # it writes the body it is given and nothing else, which is exactly the property
 # azurerm lacks here.
 #
-# WHEN #29149 CLOSES, delete both resources, the azapi provider, and T-511 — and
-# confirm with the post-apply check in deploy-functions.yml, which is what fails
-# if this stops working.
+# WHEN #29149 CLOSES, delete both resources and T-511 — and confirm with the
+# post-apply check in deploy-functions.yml, which is what fails if this stops
+# working. Keep the azapi provider: lab-hybrid.tf creates the lab Vault's seal
+# key with it (#726).
 
 # SECRETS-IN-STATE: THIS EXPORT IS THE WHOLE LIVE SETTINGS MAP (T-723).
 #

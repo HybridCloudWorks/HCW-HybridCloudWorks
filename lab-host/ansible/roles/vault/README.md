@@ -48,12 +48,14 @@ With `vault_enabled` true:
    `root:vault 0640`, certificate `0644`, 730 days), as the `labs_agent`
    role does for the agent's, and warns on every run within 60 days of
    expiry.
-5. Writes `/etc/vault.d/vault.hcl` (`root:vault 0640`),
+5. Checks the auto-unseal seal before it writes anything that uses it or
+   drops it ("Auto-unseal", below).
+6. Writes `/etc/vault.d/vault.hcl` (`root:vault 0640`),
    `/etc/profile.d/hcw-vault.sh` (`VAULT_ADDR` and `VAULT_CACERT` for login
    shells) and `vault.service`, HashiCorp's own unit minus the lines that
    exist for mlock; starts it, and restarts it when the binary, the
    configuration, the certificate or the unit changed.
-6. Reads `vault status` and says which state Vault is in and whose step is
+7. Reads `vault status` and says which state Vault is in and whose step is
    next. `status` exits 2 when sealed; only an error (1) fails the play.
 
 With it false, the role installs nothing, and stops and disables a Vault an
@@ -64,12 +66,12 @@ It never runs `vault operator init` or `unseal`, and never holds an unseal
 key or a token. Those are owner steps, in `lab-host/README.md`, "HashiCorp
 Vault", and the keys go to the owner's password manager and nowhere else.
 
-**A restart seals Vault.** A changed binary, configuration, certificate or
-unit restarts it, and so does every reboot, including the unattended-upgrades
-reboot at 04:30. Until the owner unseals it, it answers `Sealed true` and
-serves nothing. Auto-unseal with Azure Key Vault through the Arc machine's
-managed identity would remove that step; it is a follow-up, not built here
-(ADR 0032, amendment of 2026-09-26).
+**A restart seals Vault**, unless the auto-unseal seal is on. A changed
+binary, configuration, certificate or unit restarts it, and so does every
+reboot, including the unattended-upgrades reboot at 04:30. Under Shamir keys
+it then answers `Sealed true` and serves nothing until the owner unseals it.
+With the seal on it unseals itself ("Auto-unseal", below; ADR 0032,
+amendment of 2026-09-29).
 
 ## TLS on the loopback
 
@@ -90,6 +92,116 @@ case, so the role prints a warning on a host with swap. It does not turn
 swap off: that is a host-wide change with its own effect on the Coder
 workspaces.
 
+## Auto-unseal
+
+With `vault_seal_azurekeyvault_enabled` the configuration gains a
+`seal "azurekeyvault"` stanza (#726; ADR 0032, amendment of 2026-09-29).
+Vault's root key is then wrapped by the RSA key `vault-seal` in the lab-only
+Key Vault `kv-labhybrid-prod-cus-01` (`infra/lab-hybrid.tf`), and at every
+start Vault asks that key to unwrap it. The Shamir keys become **recovery
+keys**: they still authorise `generate-root`, a rekey or a migration, and
+they **cannot unseal Vault**. HashiCorp's seal page: "Recovery keys cannot
+decrypt the root key and therefore are not sufficient to unseal Vault if the
+auto unseal mechanism isn't working", and a Vault whose seal key is
+permanently deleted "cannot be recovered, even from backups". That is why the
+vault has purge protection and both the vault and the key carry
+`prevent_destroy`.
+
+`group_vars/all.yml` reads the switch from the host, as `arc_enabled` does:
+it is true exactly when `/etc/ansible/facts.d/hcw_vault_seal.fact` is JSON
+whose `enabled` is `true`. The seal describes the Vault data on this
+installation, so a rebuilt host starts without it whatever the repository
+says. Moving an initialised Vault onto the seal is an owner step,
+`vault operator unseal -migrate`, in
+[docs/runbooks/labs-host.md](../../../../docs/runbooks/labs-host.md),
+"HashiCorp Vault: moving to auto-unseal".
+
+### How it authenticates
+
+As the Arc machine's system-assigned identity, with nothing stored on the
+host for it. Read against the source of the pinned release, Vault 2.1.1,
+whose binary `go version -m` shows built with exactly these modules:
+
+- The seal (`go-kms-wrapping/wrappers/azurekeyvault` v2.0.14) signs in with a
+  client secret only when `tenant_id`, `client_id` and `client_secret` are all
+  set; with no `client_id` it calls `azidentity.NewDefaultAzureCredential`.
+- That chain (`azidentity` v1.13.1) reaches `ManagedIdentityCredential`,
+  which hands managed identity to MSAL for Go v1.6.0. MSAL recognises an
+  Azure Arc machine by `IDENTITY_ENDPOINT` and `IMDS_ENDPOINT`, or by
+  `/opt/azcmagent/bin/himds` existing, and runs the agent's challenge flow:
+  a 401 naming a `.key` file in `/var/opt/azcmagent/tokens`, which only root
+  and the `himds` group can read, then the same request carrying its
+  contents. Microsoft: "On Linux, you must be a member of the `himds` group."
+- MSAL refuses a user-assigned identity on Arc ("Azure Arc doesn't support
+  user-assigned managed identities"), and the seal turns a `client_id` into
+  exactly that request. So the stanza has neither `client_id` nor
+  `client_secret`, and `tenant_id` only when
+  `vault_seal_azurekeyvault_tenant_id` is set: nothing reads it without a
+  secret.
+
+With the seal on, the unit changes in four ways, and with it off it renders
+byte for byte as before #726:
+
+- `SupplementaryGroups=himds`, for the Vault process only; the `vault` user
+  itself is not in the group.
+- `Environment=AZURE_TOKEN_CREDENTIALS=ManagedIdentityCredential`, which pins
+  the chain to managed identity (azidentity's documented selector), so
+  nothing else on the host, such as an Azure CLI login, is ever tried.
+- `Wants=` and `After=himdsd.service`, the agent's daemon.
+- `StartLimitIntervalSec=0` and `RestartSec=30`. An initialised Vault whose
+  key cannot be read exits ("Vault is initialized but no Seal key could be
+  loaded"), and HashiCorp's limit of three starts a minute would leave it
+  failed after a short Key Vault or network outage. It keeps trying instead,
+  and comes up unsealed when the key answers.
+
+The agent's own systemd drop-in, `/lib/systemd/system.conf.d/azcmagent.conf`,
+already gives every unit `IDENTITY_ENDPOINT` and `IMDS_ENDPOINT`.
+
+### What the role checks
+
+Before it writes the configuration:
+
+- **With the seal on**, it reads the key the way Vault will, and writes no
+  stanza until that works: `azcmagent show` must report Connected, the
+  `himds` group must exist, the agent must answer the challenge and issue a
+  token, and Key Vault must return the key as an RSA key allowing `wrapKey`
+  and `unwrapKey`. A 403 (no grant yet), a 404 (no key yet) or an
+  unreachable vault stops the run with the reason and changes nothing, so
+  the Vault running now keeps its seal. The tasks that see the challenge
+  file or the token are `no_log`.
+- **With the seal off**, it refuses to write a configuration without the
+  stanza while Vault reports the `azurekeyvault` seal or a migration in
+  progress: Vault would not start, and the recovery keys could not help.
+
+### Migrating from Shamir
+
+The owner's lines, with what each prints, are in the runbook section named
+above. In short: stop Vault and copy `/var/lib/vault` cold, write the fact,
+run `bootstrap.sh`, enter three of the existing keys at
+`vault operator unseal -migrate`, wait for `vault status` to drop the
+`Seal Migration in Progress` line, then restart. Restarting before that line
+goes leaves Vault in migration mode again; entering the three keys again
+finishes it (rehearsed).
+
+### A rebuilt host
+
+A rebuilt host is a new Arc machine with a new identity. The next
+`hcw-azure` apply moves the grant to it (`infra/lab-hybrid.tf` reads the
+machine's principal at plan time). Then write the fact before initialising,
+and `vault operator init -recovery-shares=5 -recovery-threshold=3` gives
+recovery keys and a Vault that is already unsealed.
+
+### Back to Shamir
+
+Set `"disabled": true` beside `"enabled": true` in the fact and run
+`bootstrap.sh`: the stanza gains `disabled = "true"`, Vault restarts into a
+migration, and three recovery keys at `vault operator unseal -migrate` make
+them unseal keys again. Once `vault status` shows `Seal Type shamir` with no
+migration line, delete the fact and run `bootstrap.sh` again, which drops
+the stanza; that restart seals Vault, so unseal it as before. The key must
+still exist for all of this: the migration unwraps with it. Rehearsed on
+2026-09-29, as was restoring the cold copy taken before the migration.
+
 ## Variables
 
 | Variable | Default | Purpose |
@@ -102,6 +214,11 @@ workspaces.
 | `vault_raft_node_id` | `lab-host-01` | Fixed at first start |
 | `vault_data_dir` | `/var/lib/vault` | Raft storage, `vault:vault 0700` |
 | `vault_certificate_days`, `vault_certificate_warn_days` | `730`, `60` | The generated certificate |
+| `vault_seal_azurekeyvault_enabled` | `false` (`group_vars` reads the host's fact) | Auto-unseal through Azure Key Vault |
+| `vault_seal_azurekeyvault_vault_name`, `vault_seal_azurekeyvault_key_name` | `kv-labhybrid-prod-cus-01`, `vault-seal` | What `infra/lab-hybrid.tf` creates; `scripts/lab-host-vault-seal.test.mjs` holds them equal |
+| `vault_seal_azurekeyvault_tenant_id` | `""` | Written as `tenant_id` when set; unused without a client secret |
+| `vault_seal_azurekeyvault_disabled` | `false` (`group_vars` reads the fact's `disabled`) | Migrate back to Shamir keys |
+| `vault_seal_restart_seconds` | `30` | With the seal on, the wait between starts when the key cannot be read |
 
 Paths are in `defaults/main.yml`; `meta/argument_specs.yml` is the contract.
 
@@ -146,3 +263,5 @@ Vault is then sealed; unseal it (`lab-host/README.md`, "HashiCorp Vault").
 Safe. `get_url` with a checksum, `unarchive` and `shell` with `creates`, and
 `template` report without writing; the signature check, the version and
 certificate checks and the status read are commands, which check mode skips.
+The seal's two reads, `vault status` and `azcmagent show`, run in check mode
+because they change nothing; the token and key reads do not run.

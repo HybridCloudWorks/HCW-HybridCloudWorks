@@ -14,9 +14,12 @@
 #   - the onboarding service principal's only grant, Azure Connected Machine
 #     Onboarding on this group,
 #   - a data collection rule sending heartbeat and auth/authpriv syslog to the
-#     existing Management workspace, and
+#     existing Management workspace,
 #   - an audit-only machine-configuration assignment of the Linux security
-#     baseline on this group.
+#     baseline on this group, and, from #726,
+#   - a lab-only Key Vault holding one key, the seal key HashiCorp Vault on the
+#     host unseals itself with, and the Arc machine's one grant: wrap and
+#     unwrap on that key.
 #
 # Nothing else. The Arc machine resource is created by `azcmagent connect` on
 # the host (lab-host/ansible/roles/arc), under that service principal (ADR
@@ -176,4 +179,184 @@ resource "azurerm_resource_group_policy_assignment" "lab_hybrid_linux_baseline" 
     IncludeArcMachines = { value = "true" }
     effect             = { value = "AuditIfNotExists" }
   })
+}
+
+# -----------------------------------------------------------------------------
+# Vault auto-unseal: a lab-only Key Vault, one key, one grant (#726)
+# -----------------------------------------------------------------------------
+# HashiCorp Vault on the lab host seals itself on every restart. With a
+# `seal "azurekeyvault"` stanza it unseals itself instead, by asking this key to
+# unwrap its root key. It authenticates as the Arc machine's system-assigned
+# identity through the agent's local endpoint, so nothing is stored on the
+# host for it (ADR 0032, amendment of 2026-09-29, which records how that was
+# verified against Vault 2.1.1's source).
+#
+# Three boundaries, each one load-bearing:
+#
+#   - A vault of its own, never kv-site-prod-cus-01. The host runs learner
+#     workloads and an escape is root, which can use the Arc identity. So the
+#     identity must reach nothing but this key.
+#   - One key, created through Resource Manager rather than the Key Vault data
+#     plane, so the Terraform run identity needs no data-plane role on any
+#     vault (the doctrine that removed terraform_kv_secrets from keyvault.tf,
+#     T-748). Creating a key this way needs only the
+#     Microsoft.KeyVault/vaults/keys/write action, which Contributor carries.
+#   - The grant is scoped to that one key, not the vault, and is the narrowest
+#     built-in role covering what Vault calls: read the key, wrap, unwrap.
+
+# The vault. Standard tier: the key is software-protected, and Standard charges
+# nothing a month for either, only per operation (Azure Retail Prices API,
+# Central US, read 2026-09-29: "Operations" $0.03 and "Advanced Key Operations"
+# $0.15 per 10,000). The name is 24 characters, the Key Vault maximum: the
+# pattern's kv-lab-hybrid-prod-cus-01 is 25, so the workload token loses its
+# hyphen (docs/standards/naming-convention.md, "Constraints that override the
+# pattern": the limit wins).
+#
+# The network stays open (default Allow) on purpose. The only caller is Vault
+# on a VPS whose public address belongs to the hcw-lab workspace, and nothing
+# in infra/ reads hcw-lab (ADR 0032 decision 1). An IP rule would copy that
+# address here, and if the two ever disagreed Vault could not unseal: its
+# recovery keys cannot unseal it, only this key can. Every call is still
+# authenticated by Entra ID and authorised by the one key-scoped grant below,
+# and every unwrap is logged with the caller's address by the diagnostic
+# setting at the end of this section.
+#
+# Purge protection and prevent_destroy, because losing this key loses the
+# Vault: HashiCorp's seal documentation says a Vault whose seal key is
+# permanently deleted "cannot be recovered, even from backups". Purge
+# protection is one-way: a deleted vault then stays soft-deleted, with its
+# name reserved, for the 90 days below.
+#trivy:ignore:AVD-AZU-0013
+resource "azurerm_key_vault" "lab_hybrid" {
+  #checkov:skip=CKV_AZURE_109:Default Allow on purpose: the only caller is the lab VPS, whose address infra/ does not own, and an IP rule that drifted would leave Vault unable to unseal. Entra ID plus one key-scoped grant gate every call. ADR 0032 amendment 2026-09-29. docs/security/scanner-triage.md#checkov
+  #checkov:skip=CKV_AZURE_189:Public network access stays on for the reason given for CKV_AZURE_109: the lab VPS is outside Azure and has no private path. ADR 0032 amendment 2026-09-29. docs/security/scanner-triage.md#checkov
+  #checkov:skip=CKV2_AZURE_32:No private endpoints, owner decision 2026-09-14 (ADR 0031); the caller is a VPS outside Azure, which a private endpoint could not serve. docs/security/scanner-triage.md#checkov
+  name                       = "kv-labhybrid-${var.environment}-${var.region_abbreviation}-01"
+  location                   = azurerm_resource_group.lab_hybrid.location
+  resource_group_name        = azurerm_resource_group.lab_hybrid.name
+  tenant_id                  = data.azurerm_client_config.current.tenant_id
+  sku_name                   = "standard"
+  soft_delete_retention_days = 90
+  purge_protection_enabled   = true
+  rbac_authorization_enabled = true
+
+  network_acls {
+    default_action = "Allow"
+    bypass         = "AzureServices"
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  tags = local.tags
+}
+
+# The seal key: RSA 3072, software-protected, usable for wrapKey and unwrapKey
+# and nothing else, which is all Vault's azurekeyvault seal calls (it wraps its
+# data key with RSA-OAEP-256). 3072 rather than 2048 because this key has no
+# planned end of life and NIST SP 800-57 Part 1 does not accept 2048-bit RSA
+# for new protection past 2030. Advanced key types cost $0.15 per 10,000
+# operations against $0.03: Vault's seal health check wraps and unwraps once
+# every 10 minutes while unsealed, about 8,800 operations a month, so about
+# $0.13 a month rather than $0.03.
+#
+# Created through Resource Manager, which only ever CREATES a key. Microsoft's
+# key quickstart: "It isn't possible to update existing keys, nor create new
+# versions of existing keys. If the key already exists, then the existing key
+# is retrieved from storage and used (no write operations will occur)." So a
+# change to `body` could never be applied, and ignore_changes makes Terraform
+# agree with that rather than show a diff forever. A different key is a new
+# key with a new name, and a seal migration to it
+# (lab-host/ansible/roles/vault/README.md). No tags, for the same reason.
+#
+# Resource Manager has no DELETE for a key either, and deleting this one would
+# lose the Vault, so prevent_destroy makes Terraform refuse outright.
+resource "azapi_resource" "lab_hybrid_vault_seal_key" {
+  type      = "Microsoft.KeyVault/vaults/keys@2024-11-01"
+  name      = "vault-seal"
+  parent_id = azurerm_key_vault.lab_hybrid.id
+
+  body = {
+    properties = {
+      kty     = "RSA"
+      keySize = 3072
+      keyOps  = ["wrapKey", "unwrapKey"]
+    }
+  }
+
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes  = [body]
+  }
+}
+
+# The Arc machine, read rather than managed: `azcmagent connect` creates it and
+# a disconnect deletes it (the note on the data collection rule above).
+# ignore_not_found keeps every hcw-azure plan working while it does not exist,
+# on a rebuilt host before onboarding, say, and the grant below then plans to
+# nothing. The id is built from values known at plan time
+# (data.azurerm_client_config rather than the sensitive var.subscription_app,
+# and the group's name rather than its id), so the read happens during the
+# plan and the grant's count is known there, even on an estate where the
+# resource group does not exist yet.
+#
+# A rebuilt host is a new Arc machine with a new identity, so the next apply
+# replaces the grant with one for the new principal, and removes it while the
+# machine is gone. The name is the arc role's arc_resource_name
+# (lab-host/ansible/group_vars/all.yml); scripts/lab-host-vault-seal.test.mjs
+# holds the two together.
+data "azapi_resource" "lab_hybrid_arc_machine" {
+  type             = "Microsoft.HybridCompute/machines@2024-07-10"
+  resource_id      = "/subscriptions/${data.azurerm_client_config.current.subscription_id}/resourceGroups/rg-lab-hybrid-${var.environment}-${var.region_abbreviation}/providers/Microsoft.HybridCompute/machines/arcs-lab-hybrid-${var.environment}-${var.region_abbreviation}-01"
+  ignore_not_found = true
+}
+
+locals {
+  # The machine's system-assigned identity, or "" while there is no machine.
+  lab_hybrid_arc_principal_id = try(coalesce(data.azapi_resource.lab_hybrid_arc_machine.identity[0].principal_id, ""), "")
+}
+
+# The Arc identity's only grant: Key Vault Crypto Service Encryption User
+# (e147488a-f6f5-4113-8e2d-b22465e65bf6), whose data actions are exactly
+# keys/read, keys/wrap/action and keys/unwrap/action. Key Vault Crypto User
+# would add sign, verify, encrypt, decrypt, update and backup, none of which
+# Vault calls. The role also carries three Microsoft.EventGrid
+# eventSubscriptions actions, which reach nothing at a key's scope: Key Vault
+# publishes its events at the vault. Scoped to the key's Resource Manager id,
+# so a second key added to this vault later is out of reach.
+#
+# Microsoft recommends vault-scope grants and one vault per application. This
+# is one vault holding one key for one caller, and the key scope keeps it that
+# way if a second key is ever added. principal_type is explicit for the reason
+# given on arc_onboarding above.
+#
+# The Terraform run identity can make this assignment: it holds Role Based
+# Access Control Administrator on the subscription with no ABAC condition
+# (scripts/bootstrap-terraform-oidc.ps1, step 5). It grants itself nothing
+# here.
+resource "azurerm_role_assignment" "lab_hybrid_vault_seal" {
+  count = local.lab_hybrid_arc_principal_id == "" ? 0 : 1
+
+  scope                = azapi_resource.lab_hybrid_vault_seal_key.id
+  role_definition_name = "Key Vault Crypto Service Encryption User"
+  principal_id         = local.lab_hybrid_arc_principal_id
+  principal_type       = "ServicePrincipal"
+}
+
+# Who touched the seal key, and from where. AuditEvent records every data-plane
+# call with the caller's identity and IP address, so an unwrap from anywhere
+# but the lab host shows up as a row, which is the check the open network above
+# relies on. About 300 rows a day from the 10-minute health check, well under
+# a megabyte a day against the workspace's 0.25 GB/day cap. Logs only, as on
+# the Cosmos and content-queue settings in observability.tf: the vault's
+# metrics would add rows and answer nothing the audit log does not.
+resource "azurerm_monitor_diagnostic_setting" "lab_hybrid_key_vault" {
+  name                       = "diag-kv-to-logs"
+  target_resource_id         = azurerm_key_vault.lab_hybrid.id
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.hcw.id
+
+  enabled_log {
+    category = "AuditEvent"
+  }
 }
