@@ -430,6 +430,7 @@ Everything else there is a default nobody is expected to override.
 | `VITE_SOCIAL_X_URL`, `VITE_SOCIAL_LINKEDIN_URL`, `VITE_SOCIAL_GITHUB_URL` | §6, §7 | Public URLs |
 | `VITE_TRANSLATIONS`, `VITE_DEFAULT_LANGUAGE` | §6 | Feature flags in a public bundle (`VITE_NEWS_ENABLE_INSIGHTS` was retired with the insights panel on 2026-09-05, T-765) |
 | `VITE_TURNSTILE_SITE_KEY` | — | The Cloudflare Turnstile site key for "Validate on the lab". Public by construction (Cloudflare renders it into the page), so store 3 by the rule above; the matching secret key is store 1, `TURNSTILE-SECRET-KEY`. Set by hand from the Cloudflare dashboard, since Terraform does not manage the widget |
+| `DOCKERHUB_CONNECTION`, `DOCKERHUB_ENABLED` | — | The ID of the Docker OIDC connection `publish-lab-image.yml` signs in to Docker Hub through, and the switch that runs that job (#779). An identifier and a flag, so store 3: the connection trusts one GitHub subject, so the ID grants nothing on its own, which is the same reasoning as `CLIENT_ID`. Two words each, `DOCKERHUB` naming the system as `COPILOT_REVIEW_` does. The workflow maps the first onto `DOCKERHUB_OIDC_CONNECTIONID`, the contractual environment variable `docker/login-action` reads. Set by hand, since Docker Home, not Terraform, creates the connection ([Required inputs](required-inputs.md) §4.11) |
 
 ### Store 4 — GitHub Actions secrets, with justification
 
@@ -499,7 +500,9 @@ is the acceptable fallback if a lookup is judged too slow.
 
 **4. Docker Hub runner credentials are not used.** The runner-image workflow and
 the Container Apps runner job were removed; no Docker Hub secrets belong in this
-repository.
+repository. Publishing the lab images to Docker Hub (#779) keeps that true: it
+signs in through a Docker OIDC connection, so the only Docker values stored
+are the connection's ID and an on/off switch, both store 3.
 
 **5. `AZURE_OPENAI_KEY` is inventoried in CHECKLIST §4 as `Required: Yes`,
 source Key Vault.** `infra/main.tf` decided the opposite under T-506: Azure

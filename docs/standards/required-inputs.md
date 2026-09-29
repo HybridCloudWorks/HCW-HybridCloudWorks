@@ -20,7 +20,9 @@ Every variable, secret and setting the workload needs, with live status.
 >
 > **Section numbers are unchanged** (§4.1 … §4.10), because roughly sixteen code
 > comments cite them by number. A citation reading `REVIEW.md §4.5` now reads
-> `Required-Inputs §4.5` and lands in the same place.
+> `Required-Inputs §4.5` and lands in the same place. §4.11, the Docker Hub
+> OIDC connection, was added at the end on 2026-09-28 so that no existing
+> number moved.
 
 **Related:** [Variables and secrets](../standards/variables-and-secrets.md) carries the *rules* —
 naming, which store a value belongs in, and why. This page carries the
@@ -135,10 +137,12 @@ day (T-525). `READER_CLIENT_ID` was added to the table on 2026-08-29 (T-728) and
 is **not yet set**, so a reader comparing this against `gh variable list` should
 find exactly that one difference until the split is applied. Seeded from
 Terraform outputs by `scripts/set-github-variables.ps1` — never written by
-hand, with two exceptions, each for a value Terraform does not manage:
+hand, with four exceptions, each for a value Terraform does not manage:
 `COPILOT_REVIEW_APP_ID` identifies a GitHub App, so it is set by hand from the
-App page (runbook step 4), and `VITE_TURNSTILE_SITE_KEY` is the site key of a
-Turnstile widget created in the Cloudflare dashboard. Each row says so.
+App page (runbook step 4), `VITE_TURNSTILE_SITE_KEY` is the site key of a
+Turnstile widget created in the Cloudflare dashboard, and `DOCKERHUB_CONNECTION`
+and `DOCKERHUB_ENABLED` belong to a Docker OIDC connection created in Docker
+Home (§4.11). Each row says so.
 
 | Name | Status | Consumer |
 | --- | --- | --- |
@@ -154,6 +158,8 @@ Turnstile widget created in the Cloudflare dashboard. Each row says so.
 | `FUNCTIONS_URL` | **VERIFIED** | Smoke test's non-allowlisted probe |
 | `APP_HOSTNAME` | **VERIFIED** | Origin health probe through the temporary window |
 | `COSMOS_ENDPOINT` | **VERIFIED** | Computed-property healer. A variable, not a secret — it is a public endpoint, and the earlier secret placement was corrected 2026-08-20 |
+| `DOCKERHUB_CONNECTION` | **MISSING** until the owner creates the connection (§4.11, #779) | The ID of the Docker OIDC connection, a UUID. `publish-lab-image.yml`'s `Publish to Docker Hub` job passes it to `docker/login-action` as `DOCKERHUB_OIDC_CONNECTIONID`, the name the action reads. An identifier, not a credential: it grants nothing without a GitHub token from this repository's `main`. Set by hand from the clipboard with the one-liner in [Docker Hub publishing](../runbooks/docker-hub-publishing.md), step 2 |
+| `DOCKERHUB_ENABLED` | **MISSING** (so the Docker Hub job is skipped) | `true` turns on the `Publish to Docker Hub` job. Any other value, or none, leaves it skipped and GHCR publishing unchanged. Set by hand, after `DOCKERHUB_CONNECTION`: with it `true` and the ID missing, the job fails and names the variable. [Docker Hub publishing](../runbooks/docker-hub-publishing.md), step 3 |
 | `COSMOS_RESOURCE_GROUP` | **SET** | Healer scope |
 | `STORAGE_ACCOUNT` | **SET** | Content manifest publisher |
 | `STORAGE_RESOURCE_GROUP` | **SET** | Content manifest publisher |
@@ -178,7 +184,9 @@ else a workflow needs is either a non-sensitive variable or reached by OIDC.
 
 **No stored Azure credential is in this repository's secrets.** The Qlty
 coverage upload (#568) uses GitHub OIDC and stores no token. `GITHUB_TOKEN` is
-contractual and injected per run; it is never stored.
+contractual and injected per run; it is never stored. Publishing the lab
+images to Docker Hub (#779) adds no secret either: it signs in through a
+Docker OIDC connection (§4.11).
 
 The **Agents** store (Settings → Secrets and variables → Agents) is separate
 from Actions secrets. Copilot's setup job and agent environment read it; a
@@ -481,3 +489,25 @@ with it.
 
 The four scratch outputs that fed §4.2's three now-deleted variables are gone
 from `infra/outputs.tf`.
+
+## 4.11 Docker Hub OIDC connection — owner-created, in Docker Home
+
+The connection that lets `publish-lab-image.yml` push the lab images to
+Docker Hub with no stored credential (#779). It lives on Docker's side, in
+the `hybridcloudworks` organisation, and nothing in the repository can
+create or read it. GitHub proves which workflow is running with its OIDC
+token, and the connection's ruleset decides whether that token gets a
+short-lived Docker access token, and for which repositories. The owner's
+steps, with every field value, are in
+[Docker Hub publishing](../runbooks/docker-hub-publishing.md).
+
+| Input | Store | Status | Notes |
+| --- | --- | --- | --- |
+| OIDC connection with one ruleset | Docker Home, organisation `hybridcloudworks`, **Identity & auth** → **OIDC connections**. Created by an organisation owner or editor | **MISSING** | Ruleset label `publish-lab-image-main`. Rule (subject claim) `repo:HybridCloudWorks@312844660/HCW-HybridCloudWorks@1268997852:ref:refs/heads/main`, the immutable form this repository's tokens carry (`infra/oidc.tf` records the same subject for Azure). Resources: `hybridcloudworks/hcw-lab` and `hybridcloudworks/hcw-lab-runner` only. Scopes: read and write. Needs a Docker Team, Business or Hardened Images subscription, or the Docker-Sponsored Open Source programme (#678); the organisation's plan was not readable from outside Docker Home |
+| Connection ID | GitHub repository variable `DOCKERHUB_CONNECTION` (§4.2) | **MISSING** | Copied from the connection after it is created |
+| Docker Hub repositories `hybridcloudworks/hcw-lab`, `hybridcloudworks/hcw-lab-runner` | Docker Hub | **SET**, public and empty (Docker Hub's public API, 2026-09-28; created 00:19 and 00:20 UTC on 2026-09-29) | A ruleset can only name a repository that exists, so these come before the connection. Recreate as **Public** at `https://hub.docker.com/orgs/hybridcloudworks/repositories` if either is ever deleted |
+
+No Docker password, personal access token or organisation access token is an
+input. If one ever appears in a store, it is the wrong fix for a failing
+login: the connection's **Failures** table in Docker Home says why an
+exchange was refused.
