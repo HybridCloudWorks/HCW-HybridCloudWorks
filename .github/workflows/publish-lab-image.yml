@@ -225,6 +225,12 @@ jobs:
       packages: write
       id-token: write
       attestations: write
+      # The attest step's storage record on the linked artifacts page
+      # (docs.github.com, "Uploading storage and deployment data to the linked
+      # artifacts page"). Without it every run warned "Please check that the
+      # artifact-metadata:write permission has been included" and "Failed to
+      # create storage record" (run 36508154993, 2026-09-29).
+      artifact-metadata: write
     # What publish-dockerhub copies. Digests are not secrets.
     outputs:
       runner-digest: ${{ steps.push-runner.outputs.digest }}
@@ -385,6 +391,7 @@ jobs:
       contents: read
       id-token: write # the Docker token exchange, and Sigstore's signing certificate
       attestations: write # store the two provenance attestations
+      artifact-metadata: write # their storage records, as in `publish`
     env:
       RUNNER_DIGEST: ${{ needs.publish.outputs.runner-digest }}
       FULL_DIGEST: ${{ needs.publish.outputs.full-digest }}
@@ -419,12 +426,48 @@ jobs:
       # DOCKERHUB_OIDC_CONNECTIONID is the name the action reads;
       # DOCKERHUB_CONNECTION is ours.
       - name: Log in to Docker Hub through the OIDC connection
+        id: dockerhub-login
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         env:
           DOCKERHUB_OIDC_CONNECTIONID: ${{ vars.DOCKERHUB_CONNECTION }}
         with:
           registry: docker.io
           username: ${{ env.DOCKERHUB_ORG }}
+
+      # Docker answers a refused exchange with only `400 access_denied`, which
+      # does not say which condition failed (the first run, 36508154993 on
+      # 2026-09-29, did exactly that). This asks GitHub for an ID token with
+      # Docker's audience, as the login step did, and prints its non-secret
+      # claims beside the rule the connection should hold, so the owner can
+      # compare them character by character. The token itself is never
+      # printed: only fields decoded from its payload are.
+      - name: Explain a refused Docker token exchange
+        if: failure() && steps.dockerhub-login.outcome == 'failure'
+        env:
+          EXPECTED_RULE: repo:HybridCloudWorks@312844660/HCW-HybridCloudWorks@1268997852:ref:refs/heads/main
+        run: |
+          set -euo pipefail
+          response="$(curl -fsS -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://identity.docker.com")"
+          # The JWT's middle segment, base64url without padding: map to
+          # base64, pad to a multiple of four, decode.
+          payload="$(jq -r '.value' <<<"$response" | cut -d. -f2 | tr '_-' '/+')"
+          while [ $(( ${#payload} % 4 )) -ne 0 ]; do payload="${payload}="; done
+          claims="$(base64 -d <<<"$payload")"
+          sub="$(jq -r '.sub' <<<"$claims")"
+          {
+            echo "### Docker refused the token exchange"
+            echo
+            echo "| Claim | Value |"
+            echo "| --- | --- |"
+            jq -r '["sub","aud","repository","repository_id","repository_owner_id","ref","event_name","job_workflow_ref"][] as $k | "| `\($k)` | `\(.[$k] // "")` |"' <<<"$claims"
+            echo
+            if [ "$sub" = "$EXPECTED_RULE" ]; then
+              echo "The subject matches the rule in docs/runbooks/docker-hub-publishing.md exactly, so the connection's ruleset is not the mismatch if it holds that rule. Check in Docker Home that the ruleset lists the resources hybridcloudworks/hcw-lab and hybridcloudworks/hcw-lab-runner with read and write scopes, and that the organisation's plan includes OIDC connections (Team or Business)."
+            else
+              echo "The subject differs from the rule the runbook asks for (\`${EXPECTED_RULE}\`). The connection's rule must match this run's \`sub\` above."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::error::Docker refused the OIDC exchange. This run's subject is '${sub}'. The run summary compares it with the rule the connection should hold."
 
       # A registry-to-registry copy of the manifest GHCR holds, by digest.
       # `--prefer-index=false` keeps the source manifest's own bytes; without
