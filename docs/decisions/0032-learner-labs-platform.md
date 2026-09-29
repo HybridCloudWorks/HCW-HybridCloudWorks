@@ -1,6 +1,6 @@
 # ADR 0032: The learner labs platform — a Terraform-managed Hostinger host under Azure Arc, Docker only, Coder as the learner boundary, and public submission locked to the site's pane
 
-**Status:** Accepted 2026-09-27 (owner: "all have been approved to move forward"); amended 2026-09-26 and 2026-09-28; amendment of 2026-09-29 (Vault auto-unseal, #726) proposed, built off, and the owner's to accept. Decision 6 was revised on 2026-09-28: public submission is open, only from the Landing Zone Builder's pane on the site, locked by the request's origin and a Cloudflare Turnstile token, within decision 6's original bounds, which are unchanged. Also on 2026-09-28 the site began embedding Coder, in a pane on each lab's page, which decision 4 had ruled out and the alternatives had rejected ([amendment of that date](#amendment-2026-09-28-coder-in-the-sites-panes), #750 and #751).
+**Status:** Accepted 2026-09-27 (owner: "all have been approved to move forward"); amended 2026-09-26 and 2026-09-28; amendment of 2026-09-29 (Vault auto-unseal, #726) accepted by the owner and live on the host the same day. Decision 6 was revised on 2026-09-28: public submission is open, only from the Landing Zone Builder's pane on the site, locked by the request's origin and a Cloudflare Turnstile token, within decision 6's original bounds, which are unchanged. Also on 2026-09-28 the site began embedding Coder, in a pane on each lab's page, which decision 4 had ruled out and the alternatives had rejected ([amendment of that date](#amendment-2026-09-28-coder-in-the-sites-panes), #750 and #751).
 **Decision date:** 2026-09-25
 **Owners:** Workload owner and architecture owner
 
@@ -229,7 +229,7 @@ clean deployment.
    `kv-site-prod-cus-01`. That is
    [#726](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/726),
    P3 on the board.
-   (Built 2026-09-29 and off until the owner accepts it for the host: the
+   (Accepted and live on the host 2026-09-29: the
    [amendment of that date](#amendment-2026-09-29-vault-auto-unseal-through-the-arc-identity).)
 
 Consequences of this amendment:
@@ -237,9 +237,9 @@ Consequences of this amendment:
 - **Vault is sealed after every restart and every reboot**, including the
   unattended-upgrades reboot at 04:30, until the owner enters three of the
   five unseal keys. Anything on the host that reads from Vault must tolerate
-  a sealed Vault. #726 is the way out. (Built 2026-09-29; this holds until
-  the owner moves the host to auto-unseal, after which a restart comes back
-  unsealed while Key Vault answers. The amendment of that date.)
+  a sealed Vault. (Superseded 2026-09-29 by #726: the host now auto-unseals,
+  so a restart comes back unsealed while Key Vault answers. The amendment of
+  that date.)
 - **The inbound policy is unchanged.** Both new services listen on the
   loopback, and nothing listens on a public address but sshd on 22 and Caddy
   on 80 and 443. Because Docker's rules for a published port come before
@@ -467,8 +467,14 @@ panes-only).
 
 ## Amendment 2026-09-29: Vault auto-unseal through the Arc identity
 
-**Status: proposed, and the owner's to accept.** It is built and off. It
-takes effect on the lab host only when the owner writes
+**Status: accepted by the owner on 2026-09-29, and live on the host.** The
+owner accepted the trade stated below, the switch file was written, and the
+owner ran the migration with three of the five keys. A restart then came back
+unsealed with no keys typed: `vault status` read `Seal Type azurekeyvault`,
+`Recovery Seal Type shamir` and `Sealed false`, and the journal said
+`unsealed with stored key`. The five Shamir keys are now recovery keys. The
+cold copy taken before the switch is `/root/vault-before-726.tgz` on the
+host. As built, it takes effect on a host only when the owner writes
 `/etc/ansible/facts.d/hcw_vault_seal.fact` there and runs the migration in
 the [Labs host runbook](../runbooks/labs-host.md#hashicorp-vault-moving-to-auto-unseal),
 and doing that is the acceptance of the trade stated below. Until then Vault
@@ -518,7 +524,7 @@ versions below.
    the stand-ins do, which follow Microsoft's documented flow, is inferred;
    the owner's migration on the host is its proof.
 
-**Decision, proposed.**
+**Decision, accepted 2026-09-29.**
 
 1. **A lab-only vault, the Key Vault `kv-labhybrid-prod-cus-01`** in
    `rg-lab-hybrid-prod-cus` (`infra/lab-hybrid.tf`). Standard tier, RBAC
@@ -616,7 +622,7 @@ deleted key would lose the Vault for good.
 - **Arc adds an identity to the host.** The Arc agent's system-assigned
   identity can be granted Azure roles. This record grants it none beyond what
   the data collection rule needs; any grant is a change to `infra/` with its
-  own review. (The amendment of 2026-09-29 proposes the first, in
+  own review. (The amendment of 2026-09-29 made the first, in
   `infra/lab-hybrid.tf`: read, wrap and unwrap on one key in a lab-only Key
   Vault, never `kv-site-prod-cus-01`.)
 - **Ingestion is bounded but not zero.** Heartbeat and auth syslog on one host
@@ -785,7 +791,7 @@ deleted key would lose the Vault for good.
     **Confirm and Create**, code-server opens inside the pane, and a direct
     visit to `https://coder.lab.hybridcloudworks.com/_hcw/lab/` also lands on
     `/education/labs`.
-  - Since the amendment of 2026-09-29, once the owner has accepted it: on the
+  - Since the amendment of 2026-09-29, accepted and live that day: on the
     host, `sudo systemctl restart vault && sleep 5 && vault status` shows
     `Seal Type azurekeyvault` and `Sealed false`, and `az role assignment
     list` on the key `vault-seal` returns one row, Key Vault Crypto Service
