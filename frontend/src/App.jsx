@@ -109,8 +109,9 @@ const AnsibleBlogPage = lazyPage(() => import('@/pages/ansible/BlogPage'));
 const AnsibleEducationPage = lazyPage(() => import('@/pages/ansible/EducationPage'));
 const AnsibleRssPage = lazyPage(() => import('@/pages/ansible/RssPage'));
 
-// Docker (service-provider pattern, like Terraform; a page is a placeholder
-// until its content is written)
+// Docker (service-provider pattern, like Terraform). The blog and code pages
+// list published Docker content, with detail pages, as every provider's do
+// (#776); a page whose content is still to be written is a placeholder.
 const DockerLandingPage = lazyPage(() => import('@/pages/docker/LandingPage'));
 const DockerBlogPage = lazyPage(() => import('@/pages/docker/BlogPage'));
 const DockerCodePage = lazyPage(() => import('@/pages/docker/CodePage'));
@@ -564,30 +565,22 @@ function ProviderBlogDispatcher() {
   return <NotFoundPage />;
 }
 
+// Every provider's articles and news items open in the one article template,
+// so these two are a membership test rather than a branch per provider. They
+// used to be nine identical `if` lines each, and the list is what matters:
+// scripts/build-content-manifest.mjs pre-renders `/<provider>/blog/<slug>`
+// for every provider in VALID_PROVIDERS, so a provider missing here would
+// publish its articles as 404 pages (Docker's, until #776).
 function ProviderBlogDetailDispatcher() {
   const { provider } = useParams();
-  if (provider === 'aws') return <BlogDetailTemplate provider="aws" />;
-  if (provider === 'azure') return <BlogDetailTemplate provider="azure" />;
-  if (provider === 'gcp') return <BlogDetailTemplate provider="gcp" />;
-  if (provider === 'finops') return <BlogDetailTemplate provider="finops" />;
-  if (provider === 'terraform') return <BlogDetailTemplate provider="terraform" />;
-  if (provider === 'github') return <BlogDetailTemplate provider="github" />;
-  if (provider === 'vmware') return <BlogDetailTemplate provider="vmware" />;
-  if (provider === 'ansible') return <BlogDetailTemplate provider="ansible" />;
-  return <NotFoundPage />;
+  if (!VALID_PROVIDERS.includes(provider)) return <NotFoundPage />;
+  return <BlogDetailTemplate provider={provider} />;
 }
 
 function ProviderNewsDetailDispatcher() {
   const { provider } = useParams();
-  if (provider === 'aws') return <BlogDetailTemplate provider="aws" section="news" />;
-  if (provider === 'azure') return <BlogDetailTemplate provider="azure" section="news" />;
-  if (provider === 'gcp') return <BlogDetailTemplate provider="gcp" section="news" />;
-  if (provider === 'finops') return <BlogDetailTemplate provider="finops" section="news" />;
-  if (provider === 'terraform') return <BlogDetailTemplate provider="terraform" section="news" />;
-  if (provider === 'github') return <BlogDetailTemplate provider="github" section="news" />;
-  if (provider === 'vmware') return <BlogDetailTemplate provider="vmware" section="news" />;
-  if (provider === 'ansible') return <BlogDetailTemplate provider="ansible" section="news" />;
-  return <NotFoundPage />;
+  if (!VALID_PROVIDERS.includes(provider)) return <NotFoundPage />;
+  return <BlogDetailTemplate provider={provider} section="news" />;
 }
 
 function ProviderArchitectureDispatcher() {
@@ -673,10 +666,8 @@ function ProviderCodeDispatcher() {
       <AnsibleCodePage />
     );
   }
-  // The Docker code page is a placeholder with no items, so there is no
-  // detail page for a slug to reach yet.
   if (provider === 'docker') {
-    return isDetail ? <NotFoundPage /> : <DockerCodePage />;
+    return isDetail ? <BlogDetailTemplate provider="docker" section="code" /> : <DockerCodePage />;
   }
 
   return <NotFoundPage />;

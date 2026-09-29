@@ -2,19 +2,21 @@
  * Docker's pages (owner request 2026-09-28). A page whose content is still to
  * be written is a placeholder: it says what it will cover and that it is
  * coming, reads nothing from the API, and points at something a visitor can
- * use now. The sandbox recipe is real content, on its own page (#774).
+ * use now. The sandbox recipe is real content, on its own page (#774), and
+ * the blog and code pages list published Docker content like every other
+ * provider's (#776).
  */
 import React from 'react';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { render, screen, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router';
+import { fireEvent, render, screen, within } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ProviderContext from '@/context/ProviderContext';
 import { SANDBOX_COMMANDS } from '@/components/labs/SandboxSection';
 import DockerLandingPage, { FOCUS_AREAS } from './LandingPage';
 import DockerBlogPage from './BlogPage';
-import DockerCodePage, { LAB_IMAGE_SOURCE_URL } from './CodePage';
+import DockerCodePage from './CodePage';
 import DockerEducationPage from './EducationPage';
 import DockerRssPage from './RssPage';
 import DockerSandboxesPage, {
@@ -27,6 +29,14 @@ import DockerToolsPage from './ToolsPage';
 
 vi.mock('react-helmet-async', () => ({
   Helmet: ({ children }) => <>{children}</>,
+}));
+
+// The blog and code pages read the published list through this one function.
+// Everything else in the module stays real.
+const fetchPublicContentList = vi.fn();
+vi.mock('@/lib/publicApi', async (importOriginal) => ({
+  ...(await importOriginal()),
+  fetchPublicContentList: (...args) => fetchPublicContentList(...args),
 }));
 
 function renderPage(page) {
@@ -42,6 +52,8 @@ beforeEach(() => {
   fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(() => {
     throw new Error('a Docker placeholder page called the network');
   });
+  fetchPublicContentList.mockReset();
+  fetchPublicContentList.mockResolvedValue([]);
 });
 afterEach(() => fetchSpy.mockRestore());
 
@@ -180,8 +192,6 @@ describe('where the recipe used to be', () => {
 });
 
 describe.each([
-  ['blog', DockerBlogPage, 'Docker Blog'],
-  ['code', DockerCodePage, 'Docker Code'],
   ['education', DockerEducationPage, 'Docker Learning'],
   ['news', DockerRssPage, 'Docker News'],
   ['tools', DockerToolsPage, 'Docker Tools'],
@@ -206,16 +216,110 @@ describe.each([
   });
 });
 
-describe('links out of the placeholders', () => {
-  it('opens other sites in a new tab and says so', () => {
-    renderPage(<DockerCodePage />);
-    const link = screen.getByRole('link', { name: /lab image’s dockerfile/i });
-    expect(link).toHaveAttribute('href', LAB_IMAGE_SOURCE_URL);
-    expect(link).toHaveAttribute('target', '_blank');
-    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
-    expect(link).toHaveAccessibleName(/opens in a new tab/);
+/** A published document as the public list endpoint returns it. */
+const doc = (overrides) => ({
+  id: overrides.slug,
+  title: 'Untitled',
+  summary: 'A summary.',
+  publishedDate: '2026-09-28T12:00:00Z',
+  ...overrides,
+});
+
+describe('the Docker blog (#776)', () => {
+  it('lists the articles filed under Docker, each linking to its /docker/blog page', async () => {
+    fetchPublicContentList.mockResolvedValue([
+      doc({
+        slug: 'multi-stage-builds',
+        title: 'Multi-stage builds, line by line',
+        cloudProvider: 'Docker',
+      }),
+      // Containers come up in writing about every provider; an article filed
+      // under another one stays there even when its title says Docker.
+      doc({
+        slug: 'docker-on-container-apps',
+        title: 'Docker images on Azure Container Apps',
+        cloudProvider: 'Azure',
+      }),
+      doc({
+        slug: 'a-framework',
+        title: 'A framework',
+        cloudProvider: 'Docker',
+        type: 'framework',
+      }),
+    ]);
+    renderPage(<DockerBlogPage />);
+
+    expect(
+      screen.getByRole('heading', { level: 1, name: 'Docker Containers Blog' })
+    ).toBeInTheDocument();
+    expect(document.title).toBe('Docker Containers Blog | HCW');
+
+    // The card: its title, and its "Read" link to the article's own page.
+    const title = await screen.findByRole('heading', {
+      level: 3,
+      name: 'Multi-stage builds, line by line',
+    });
+    const card = title.closest('article');
+    expect(within(card).getByRole('link', { name: /read/i })).toHaveAttribute(
+      'href',
+      '/docker/blog/multi-stage-builds'
+    );
+    // Every article link on the page goes to that one article.
+    const articleLinks = screen
+      .getAllByRole('link')
+      .map((link) => link.getAttribute('href'))
+      .filter((href) => href?.startsWith('/docker/blog/'));
+    expect(articleLinks.length).toBeGreaterThan(0);
+    expect(new Set(articleLinks)).toEqual(new Set(['/docker/blog/multi-stage-builds']));
+    expect(screen.queryByText('Docker images on Azure Container Apps')).toBeNull();
+    expect(screen.queryByText('A framework')).toBeNull();
+    expect(screen.queryByText('Coming soon')).toBeNull();
   });
 
+  it('says so plainly when nothing is published yet', async () => {
+    renderPage(<DockerBlogPage />);
+    expect(await screen.findByText('No articles in this category yet.')).toBeInTheDocument();
+  });
+});
+
+function Where() {
+  return <p data-testid="where">{useLocation().pathname}</p>;
+}
+
+describe('the Docker code page (#776)', () => {
+  it('asks for Docker’s code patterns and opens each at /docker/code/<slug>', async () => {
+    fetchPublicContentList.mockResolvedValue([
+      doc({ slug: 'compose-stack', title: 'A small stack with Docker Compose' }),
+    ]);
+    render(
+      <MemoryRouter initialEntries={['/docker/code']}>
+        <ProviderContext.Provider value="docker">
+          <Routes>
+            <Route path="/docker/code" element={<DockerCodePage />} />
+            <Route path="*" element={<Where />} />
+          </Routes>
+        </ProviderContext.Provider>
+      </MemoryRouter>
+    );
+
+    expect(
+      screen.getByRole('heading', { level: 1, name: 'Docker Code Patterns' })
+    ).toBeInTheDocument();
+    expect(fetchPublicContentList).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'coder_corner', provider: 'docker' })
+    );
+
+    fireEvent.click(await screen.findByText('A small stack with Docker Compose'));
+    expect(screen.getByTestId('where')).toHaveTextContent('/docker/code/compose-stack');
+  });
+
+  it('says so plainly when nothing is published yet', async () => {
+    renderPage(<DockerCodePage />);
+    expect(await screen.findByText('No guides published yet.')).toBeInTheDocument();
+  });
+});
+
+describe('links out of the placeholders', () => {
   it('sends the tools page to the sandboxes page, in the same tab', () => {
     renderPage(<DockerToolsPage />);
     const link = screen.getByRole('link', { name: /run an agent in a sandbox/i });

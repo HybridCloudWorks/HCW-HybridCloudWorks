@@ -263,6 +263,16 @@ describe('listContent', () => {
     expect(params.find((p) => p.name === '@providers').value).toContain('Google Cloud');
   });
 
+  it('matches Docker the way the CMS writes it, not just the slug (#776)', async () => {
+    // Before Docker had an alias, `?provider=docker` fell back to
+    // ['docker', 'DOCKER'] and never matched a document filed as "Docker".
+    const store = { queryDocs: vi.fn(async () => []), readDoc: vi.fn() };
+    const h = createPublicReadHandlers({ store });
+    await h.listContent(makeRequest({ query: { type: 'coder_corner', provider: 'docker' } }), context);
+    const [, , params] = store.queryDocs.mock.calls[0];
+    expect(params.find((p) => p.name === '@providers').value).toEqual(['Docker', 'docker']);
+  });
+
   it('returns full documents with internal fields stripped', async () => {
     const store = {
       queryDocs: vi.fn(async () => [

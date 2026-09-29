@@ -562,6 +562,28 @@ describe('sitemapRoutes', () => {
     expect(sitemapRoutes(routes, null)).toEqual({ kept: routes, dropped: [] });
   });
 
+  it('keeps a Docker article and drops Docker’s empty sections once the counts carry Docker (#776)', () => {
+    // Until the manifest route's counts include Docker, `sections.docker` is
+    // absent and nothing of Docker's is dropped (the case below).
+    const manifest = {
+      sections: {
+        docker: { blog: 1, code: 0, 'coder-corner': 0 },
+        _unattributed: { blog: 0, code: 0, 'coder-corner': 0 },
+      },
+    };
+    const docker = [
+      '/docker/blog',
+      '/docker/blog/multi-stage-builds',
+      '/docker/code',
+      '/docker/coder-corner',
+    ];
+    expect(sitemapRoutes(docker, manifest)).toEqual({
+      kept: ['/docker/blog', '/docker/blog/multi-stage-builds'],
+      dropped: ['/docker/code', '/docker/coder-corner'],
+    });
+    expect(sitemapRoutes(docker, { sections: { azure: { blog: 0 } } }).dropped).toEqual([]);
+  });
+
   it('never drops a detail route or a section it has no count for', () => {
     const manifest = { sections: { azure: { frameworks: 0 } } };
     expect(sitemapRoutes(['/azure/frameworks/x', '/azure/code'], manifest).dropped).toEqual([]);

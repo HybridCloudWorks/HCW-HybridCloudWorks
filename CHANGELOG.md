@@ -19,6 +19,33 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Docker blog, news and code detail pages; Docker in the content
+  manifest and the public API (#776).** `/docker/blog` is now the shared
+  `ProviderBlogPage` ("Docker Containers Blog"), listing published articles
+  filed under Docker. `/docker/code` is the shared code listing ("Docker
+  Code Patterns"), like Terraform's and Ansible's. Both replace the
+  placeholders, and with nothing published each says so the way every
+  provider's does. `App.jsx` routes `/docker/blog/:slug`,
+  `/docker/news/:slug` and `/docker/code/:slug` to `BlogDetailTemplate`;
+  before this they were the 404 page. `docker` joins `PROVIDERS` in
+  `scripts/build-content-manifest.mjs`, so a Docker article pre-renders at
+  `/docker/blog/<slug>` and enters the sitemap. That list is now exported
+  and held to `VALID_PROVIDERS` by a test. `ProviderBlogDetailDispatcher`
+  and `ProviderNewsDetailDispatcher` are now one membership test against
+  `VALID_PROVIDERS` instead of a branch per provider (ten returns each once
+  Docker was added), and a route test renders every provider's blog and
+  news detail path, so no provider's pre-rendered article can be a 404.
+  The four code pages (GitHub, Terraform, Ansible, Docker) were copies of
+  one body and now share `components/shared/ProviderCodePage.jsx`, each
+  passing its provider, title and description. `docker: ['Docker',
+  'docker']` joins `PROVIDER_ALIASES` in `functions/src/lib/public-reads.js`:
+  `?provider=docker` now matches documents filed as "Docker", and
+  `listCertEvents` answers `platform=docker` with an empty list instead of
+  a 400. The section counts derive their providers from that table, so
+  once Functions is deployed and the manifest next published, the sitemap
+  leaves out Docker sections with nothing in them, as it does for every
+  other provider.
+
 - **Docker article series: two how-to drafts for review (#772, #773).**
   `docs/content/blog-docker-01-building-images.md`, "Building a lab image you
   can trust", reads `lab-image/Dockerfile` as the worked example: base images
