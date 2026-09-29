@@ -186,6 +186,17 @@ vi.mock('@/pages/github/CodePage', () => ({
   ),
 }));
 
+// The article page is the template's own business, with its own tests. What
+// this file checks is that a detail path reaches it for the right provider
+// and section (Docker's, #776).
+vi.mock('@/components/templates/BlogDetailTemplate', () => ({
+  default: ({ provider, section = 'blog' }) => (
+    <main>
+      <h1>{`${provider} ${section} detail`}</h1>
+    </main>
+  ),
+}));
+
 vi.mock('@/pages/finops/ArchitecturePage', () => ({
   default: () => (
     <main>
@@ -239,16 +250,19 @@ describe('public route contract', () => {
     expect(screen.queryByText(/PAGES Not Found/i)).not.toBeInTheDocument();
   });
 
-  // Docker's pages are rendered for real rather than mocked: they are static
-  // placeholders that fetch nothing, so the route and the page are checked
-  // together. `/docker/tools` is a static route, like `/terraform/tools`.
+  // Docker's pages are rendered for real rather than mocked, so the route and
+  // the page are checked together. Most are static pages that fetch nothing;
+  // the blog and code lists (#776) read through the hooks this file mocks to
+  // no data, and the blog list is the shared page, mocked above. `/docker/tools`
+  // and `/docker/sandboxes` (#774) are static routes, like `/terraform/tools`.
   it.each([
     ['/docker', 'Container intelligence with Docker'],
-    ['/docker/blog', 'Docker Blog'],
-    ['/docker/code', 'Docker Code'],
+    ['/docker/blog', 'Docker Containers Blog'],
+    ['/docker/code', 'Docker Code Patterns'],
     ['/docker/education', 'Docker Learning'],
     ['/docker/news', 'Docker News'],
     ['/docker/rss', 'Docker News'],
+    ['/docker/sandboxes', 'Run an agent in a sandbox'],
     ['/docker/tools', 'Docker Tools'],
   ])('renders the Docker route %s', async (pathname, heading) => {
     renderRoute(pathname);
@@ -258,6 +272,22 @@ describe('public route contract', () => {
     ).toBeInTheDocument();
     expect(document.querySelector('[data-page="not-found"]')).toBeNull();
   });
+
+  it.each([
+    ['/docker/blog/multi-stage-builds', 'docker blog detail'],
+    ['/docker/news/docker-desktop-release', 'docker news detail'],
+    ['/docker/code/compose-stack', 'docker code detail'],
+  ])(
+    'serves the Docker detail page %s through the article template (#776)',
+    async (pathname, heading) => {
+      renderRoute(pathname);
+
+      expect(
+        await screen.findByRole('heading', { level: 1, name: heading }, { timeout: 5000 })
+      ).toBeInTheDocument();
+      expect(document.querySelector('[data-page="not-found"]')).toBeNull();
+    }
+  );
 
   it.each(['/docker/architecture-designs', '/docker/frameworks', '/docker/audio'])(
     'answers %s with the 404 page, as Terraform does, so the pre-render skips it',
@@ -269,6 +299,23 @@ describe('public route contract', () => {
       ).toBeInTheDocument();
     }
   );
+
+  // scripts/build-content-manifest.mjs pre-renders /<provider>/blog/<slug> for
+  // every provider in VALID_PROVIDERS (its test holds it there). A provider
+  // whose detail path is not served would publish those files as the 404
+  // page, which is what Docker's articles would have been before #776.
+  it.each(
+    VALID_PROVIDERS.flatMap((provider) => [
+      [`/${provider}/blog/an-article`, `${provider} blog detail`],
+      [`/${provider}/news/an-item`, `${provider} news detail`],
+    ])
+  )('serves %s through the article template', async (pathname, heading) => {
+    renderRoute(pathname);
+
+    expect(
+      await screen.findByRole('heading', { level: 1, name: heading }, { timeout: 5000 })
+    ).toBeInTheDocument();
+  });
 
   describe('route declarations (T-762)', () => {
     // Read as text, because the failure is a *declaration* problem. React

@@ -1,6 +1,6 @@
 import React from 'react';
 import { routes } from '@/lib/routeFactory';
-import DockerPlaceholderPage, { LABS_AGENT_SECTION_PATH } from './DockerPlaceholderPage';
+import DockerPlaceholderPage from './DockerPlaceholderPage';
 
 export default function DockerToolsPage() {
   return (
@@ -14,7 +14,7 @@ export default function DockerToolsPage() {
         'Docker Sandboxes, for running a coding agent in isolation',
       ]}
       links={[
-        { label: 'Run an agent against your landing zone', href: LABS_AGENT_SECTION_PATH },
+        { label: 'Run an agent in a sandbox', to: routes.sandboxes('docker') },
         { label: 'Back to the Docker hub', to: routes.landing('docker') },
       ]}
     />

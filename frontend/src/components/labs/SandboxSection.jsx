@@ -1,14 +1,21 @@
 /**
- * "Run an agent against your landing zone" on `/education/labs` (#676,
- * Phase 3 of #658): the Docker Sandboxes recipe as a page section. Three
- * steps, one command per shell, the first prompt to paste, the cost line,
- * and a link to the recipe directory. Nothing here talks to this site — a
- * sandbox runs on the learner's machine (or Docker's cloud) and the section
- * is editorial.
+ * "Run an agent against your landing zone" (#676, Phase 3 of #658): the
+ * Docker Sandboxes recipe as a page section. Three steps, one command per
+ * shell, the first prompt to paste, the cost line, and a link to the recipe
+ * directory. Nothing here talks to this site — a sandbox runs on the
+ * learner's machine (or Docker's cloud) and the section is editorial.
  *
- * EVERY FACT BELOW WAS READ FROM THE DOCKER DOCUMENTATION ON 2026-09-25 and
- * the issue carries `live-check` because the `sbx` surface moves; re-verify
- * against these pages before changing a word of the commands:
+ * It was on `/education/labs` until #774 moved it to the Docker hub's own
+ * page, `/docker/sandboxes` (pages/docker/SandboxesPage.jsx); the labs page
+ * keeps a one-line pointer in the old slot. The file stays beside
+ * `CommandLine`, the lab cards' command block, which it shares.
+ *
+ * EVERY FACT BELOW WAS READ FROM THE DOCKER DOCUMENTATION ON 2026-09-25, and
+ * read again on 2026-09-29 when the section moved (`sbx run` now documents
+ * that it creates a missing sandbox and that `--name` reattaches). The issue
+ * carries `live-check` because the `sbx` surface moves; re-verify against
+ * these pages, and move CHECKED_ON in SandboxesPage.jsx, before changing a
+ * word of the commands:
  *   https://docs.docker.com/ai/sandboxes/                  — `sbx` CLI; local sandboxes free,
  *                                                            cloud pay-as-you-go
  *   https://docs.docker.com/ai/sandboxes/agents/claude-code/ — `sbx run claude <dir>`; base image

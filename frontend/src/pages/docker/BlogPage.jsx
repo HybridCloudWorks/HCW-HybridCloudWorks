@@ -1,24 +1,22 @@
 import React from 'react';
-import { routes, staticRoutes } from '@/lib/routeFactory';
-import DockerPlaceholderPage from './DockerPlaceholderPage';
+import ProviderBlogPage from '@/components/shared/ProviderBlogPage';
 
-// Static, not ProviderBlogPage: there are no Docker articles yet, and a list
-// page with nothing in it reads as a fault rather than as "coming soon".
+// The shared blog listing, like every provider's (#776). It lists published
+// articles filed under Docker, and each links to /docker/blog/<slug>.
 export default function DockerBlogPage() {
   return (
-    <DockerPlaceholderPage
-      eyebrow="Docker · Blog"
-      title="Docker Blog"
-      description="Articles on building, running and securing containers are on the way, starting with how the image behind this site’s browser labs is built."
-      plans={[
-        'Writing Dockerfiles that stay small, quick to rebuild and easy to review',
-        'Multi-stage builds, and why the lab image uses one',
-        'Provenance attestations: a signed record of how an image was built',
-      ]}
-      links={[
-        { label: 'Back to the Docker hub', to: routes.landing('docker') },
-        { label: 'See the browser labs', to: staticRoutes.labs },
-      ]}
+    <ProviderBlogPage
+      provider="docker"
+      title="Docker Containers Blog"
+      subtitle="Building container images, using the Docker Desktop app day to day, and running coding agents in sandboxes, with the image behind this site’s browser labs as the worked example."
+      metaTitle="Docker Containers Blog | HCW"
+      metaDesc="Dockerfiles, multi-stage builds and provenance attestations, Docker Desktop, and running a coding agent in a Docker sandbox."
+      gradientFrom="from-docker-primary"
+      gradientTo="to-docker-primary"
+      accentColor="bg-blue-400"
+      accentBorder="border-blue-400/60 text-blue-200"
+      accentHover="group-hover:text-blue-300"
+      glowColor="bg-blue-500/5"
     />
   );
 }

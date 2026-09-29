@@ -64,6 +64,105 @@ This project has not cut a tagged release; entries are grouped under
   its permanent-replacement list with azapi's patch resources only, since an
   `azapi_resource` is an ordinary managed resource.
 
+- **Docker education catalogue, checked on 2026-09-29; `/docker/education`
+  is a real Learning page and Docker is on the Learn index (#778).**
+  - **Docker runs no certification exam of its own.** Docker's own list is
+    `docker.com/trainings`, and it offers self-guided modules, a YouTube
+    series, and one credential that LinkedIn Learning issues.
+    `src/data/docker/education.js` says so as data
+    (`DOCKER_RUNS_OWN_EXAM = false`). The page says it first, in visitor
+    words (`CREDENTIALS_NOTE`).
+  - **Two credentials, each naming its `issuer`**, which the card shows as
+    "Issued by …":
+    - the Docker Foundations Professional Certificate (LinkedIn Learning:
+      three courses of about four hours, then a final exam);
+    - the Docker Certified Associate (Mirantis: 55 questions in 90 minutes,
+      USD 199 or EUR 200, valid two years). docker.com does not list it.
+  - **Seven learning paths.** Six are the modules docker.com links:
+    - "Build and share a containerized application", 15 minutes. The link
+      on docker.com now redirects here.
+    - "Building images", Beginner, 25 minutes, five modules.
+    - Compose.
+    - Docker Scout.
+    - Build Cloud.
+    - The administrator set-up guide.
+
+    The seventh is the LinkedIn path. Each title, module list, level and
+    time is the page's own, and nothing is estimated.
+  - **Four resources:** Docker Training, the documentation, the guides and
+    the Docker Concepts playlist.
+  - **`EducationTracks` takes three optional fields.** A path may carry
+    `linkLabel` and `duration`, and a certification may carry `issuer`.
+    Every other catalogue renders as before, which a `pathMeta` test pins.
+  - **Learn index.** `EducationIndexPage` lists Docker as a ninth
+    catalogue, and the copy, meta description and table caption say
+    "nine". The table's minimum width is 72rem, up from 64. A test holds
+    `PROVIDER_CATALOGUES` to `VALID_PROVIDERS`.
+  - **No Docker architecture blueprints.** #778 asks for them only "if Docker
+    architecture designs are wanted". The Docker hub's three focus areas do
+    not include them, so `/docker/architecture-designs` and
+    `/docker/frameworks` still answer 404, as Terraform's do.
+
+- **Docker blog, news and code detail pages; Docker in the content
+  manifest and the public API (#776).** `/docker/blog` is now the shared
+  `ProviderBlogPage` ("Docker Containers Blog"), listing published articles
+  filed under Docker. `/docker/code` is the shared code listing ("Docker
+  Code Patterns"), like Terraform's and Ansible's. Both replace the
+  placeholders, and with nothing published each says so the way every
+  provider's does. `App.jsx` routes `/docker/blog/:slug`,
+  `/docker/news/:slug` and `/docker/code/:slug` to `BlogDetailTemplate`;
+  before this they were the 404 page. `docker` joins `PROVIDERS` in
+  `scripts/build-content-manifest.mjs`, so a Docker article pre-renders at
+  `/docker/blog/<slug>` and enters the sitemap. That list is now exported
+  and held to `VALID_PROVIDERS` by a test. `ProviderBlogDetailDispatcher`
+  and `ProviderNewsDetailDispatcher` are now one membership test against
+  `VALID_PROVIDERS` instead of a branch per provider (ten returns each once
+  Docker was added), and a route test renders every provider's blog and
+  news detail path, so no provider's pre-rendered article can be a 404.
+  The four code pages (GitHub, Terraform, Ansible, Docker) were copies of
+  one body and now share `components/shared/ProviderCodePage.jsx`, each
+  passing its provider, title and description. `docker: ['Docker',
+  'docker']` joins `PROVIDER_ALIASES` in `functions/src/lib/public-reads.js`:
+  `?provider=docker` now matches documents filed as "Docker", and
+  `listCertEvents` answers `platform=docker` with an empty list instead of
+  a 400. The section counts derive their providers from that table, so
+  once Functions is deployed and the manifest next published, the sitemap
+  leaves out Docker sections with nothing in them, as it does for every
+  other provider.
+
+- **Docker article series: two how-to drafts for review (#772, #773).**
+  `docs/content/blog-docker-01-building-images.md`, "Building a lab image you
+  can trust", reads `lab-image/Dockerfile` as the worked example: base images
+  pinned by digest and the workflow step that fails an unpinned `FROM`, every
+  download checked against `versions.env`, the five stages and the `runner`
+  and `full` targets, the provider mirror and the Azure Verified Modules
+  vendored under `/opt/avm`, uid 65534 with every write under `/tmp`,
+  `smoke.sh`, provenance from `actions/attest-build-provenance`, and the
+  Docker Hub copy by digest through Docker's OIDC connection with no stored
+  token. It ends with `gh attestation verify
+  oci://docker.io/hybridcloudworks/hcw-lab:latest --bundle-from-oci`, plus a
+  stricter form pinned to the signer workflow and `refs/heads/main`.
+  `blog-docker-02-desktop.md`, "Docker Desktop for the labs", installs Docker
+  Desktop on Windows (WSL 2 backend, per-user) and macOS, walks the
+  Containers, Images, Volumes and Builds views, sets memory, disk, file
+  sharing and Apple silicon emulation for the lab image, runs the labs'
+  follow-along line in PowerShell and bash, and compares Desktop with the
+  Docker Engine on the Hybrid Lab host. Docker Desktop's current release
+  (4.93.0 of 2026-09-28, Engine 29.8.1) and its subscription terms (the
+  Docker Subscription Service Agreement last updated 2026-08-26, and Docker's
+  licensing page) were checked on 2026-09-29 and are dated in the article.
+  Every output quoted was measured on 2026-09-29 on Windows 11 with Docker
+  Desktop 4.93.0 (WSL 2 backend): the `full` build, `smoke.sh` passing
+  offline and refusing with the network on, the digest match between the two
+  registries, both `gh attestation verify` forms and a refused one, the
+  follow-along mount writing as `nobody`, a uid 1000 mode 755 directory
+  refusing that write, and the bash lines in Git Bash failing (an empty
+  `/workspace`, and `C:/Program Files/Git/workspace/smoke.sh`). Not run, and
+  the Desktop article says so: the Windows and macOS installers, `wsl
+  --update`, the `.wslconfig` change, and anything on a Mac. Listed in the
+  docs nav marked "(draft)". Nothing is published; both land In Review only
+  when imported from the Content Queue after merge.
+
 - **Lab image: publishing to Docker Hub through a Docker OIDC connection,
   with no stored token (#779).** Owner decision 2026-09-28.
   `publish-lab-image.yml` has a third job, `Publish to Docker Hub`, which
@@ -1833,6 +1932,38 @@ This project has not cut a tagged release; entries are grouped under
   structure policy admits the `lab-image` directory and its README.
 
 ### Changed
+
+- **The Docker Hub docs say it is live.** Three documents still described
+  Docker Hub publishing as waiting on the owner:
+  - `docs/runbooks/docker-hub-publishing.md` (its status box and "Follow-ups
+    once it is live");
+  - `lab-image/README.md` (the introduction and "From Docker Hub");
+  - `docs/standards/required-inputs.md` (the `DOCKERHUB_*` rows and §4.11).
+
+  All three now record the connection created on 2026-09-29, the first run
+  (36516945081), the matching digests and the verified provenance. The site
+  pulls from Docker Hub (#795), and #779 is closed.
+- **The agent sandbox recipe moved from `/education/labs` to the Docker
+  hub, at `/docker/sandboxes` (#774).** The "Run an agent against your
+  landing zone" section (`SandboxSection`, #676) is now the body of a new
+  page, "Run an agent in a sandbox" (`pages/docker/SandboxesPage.jsx`),
+  under a heading that keeps its old id, `agent-heading`. The page says
+  when its commands were last checked against Docker's documentation
+  (29 September 2026). Before the move they were read again and still
+  held: `sbx run` creates a sandbox whose name is new and reattaches with
+  `--name`, `-t/--template` takes a container image, and `--cloud`
+  sandboxes need a Docker Agentic Platform subscription, mount no host
+  folder and expire after an hour by default. On `/education/labs` the
+  `agent` slot stays with its heading, so an old
+  `/education/labs#agent-heading` link still lands on it, and holds one
+  line pointing to the new page. The Docker landing page's third focus
+  area reads "Available now" instead of "Coming soon" and links there,
+  as does the Docker tools page. The Docker hub's header gains
+  "Sandboxes", in the place Terraform's has "Modules". `sandboxes` is a
+  page type in `routeFactory.ts`, so the header recognises the static
+  route as a Docker page. The page is in `STANDALONE_ROUTES`, so it
+  pre-renders, and it is in `validate-provider-pages.js`. The issue keeps
+  `live-check`.
 
 - **The labs' "Run it locally" commands pull from Docker Hub.**
   `LAB_IMAGE` in `frontend/src/data/labs/catalogue.js` is now

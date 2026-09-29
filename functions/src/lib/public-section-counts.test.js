@@ -36,7 +36,7 @@ describe('the shape the pre-render reads', () => {
     // provider missing here has no counts, and a section page with no count is
     // never dropped — safe, but silently unfixed.
     expect([...PROVIDERS].sort()).toEqual(
-      ['ansible', 'aws', 'azure', 'finops', 'gcp', 'github', 'terraform', 'vmware'].sort()
+      ['ansible', 'aws', 'azure', 'docker', 'finops', 'gcp', 'github', 'terraform', 'vmware'].sort()
     );
   });
 

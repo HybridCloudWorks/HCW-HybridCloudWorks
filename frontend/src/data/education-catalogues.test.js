@@ -48,8 +48,8 @@ import * as github from '@/data/github/certifications';
 import * as terraform from '@/data/terraform/certifications';
 import * as vmware from '@/data/vmware/education';
 
-// Docker's catalogue is empty by design (see its module), so its row checks
-// pass vacuously; it is here so its DATA_AS_OF and DATA_SOURCE are checked.
+// Docker's catalogue has rows since #778: two credentials other organizations
+// issue, because Docker runs no exam of its own (see its module).
 const CATALOGUES = { ansible, aws, azure, docker, finops, gcp, github, terraform, vmware };
 
 describe.each(Object.entries(CATALOGUES))('%s certification catalogue', (provider, mod) => {

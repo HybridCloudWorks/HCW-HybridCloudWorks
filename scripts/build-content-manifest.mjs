@@ -43,8 +43,23 @@ const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 // This is build input only; scripts/prerender.mjs reads it from disk.
 const OUT_PATH = join(ROOT, 'frontend', 'data', 'content-manifest.json');
 
-/** Providers with a `/:provider/blog/:slug` route. Mirrors VALID_PROVIDERS. */
-const PROVIDERS = ['azure', 'aws', 'gcp', 'github', 'terraform', 'finops', 'vmware', 'ansible'];
+/**
+ * Providers with a `/:provider/blog/:slug` route. Mirrors VALID_PROVIDERS in
+ * frontend/src/context/ProviderContext.jsx, which the test holds it to: a
+ * provider missing here gets no article pages pre-rendered and no local
+ * section counts. Docker since #776, when its blog detail route arrived.
+ */
+export const PROVIDERS = Object.freeze([
+  'azure',
+  'aws',
+  'gcp',
+  'github',
+  'terraform',
+  'finops',
+  'vmware',
+  'ansible',
+  'docker',
+]);
 
 /**
  * Fetch the published corpus from the Function App's origin (T-718).

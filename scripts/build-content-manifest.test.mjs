@@ -18,6 +18,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  PROVIDERS,
   buildManifest,
   describeFetchFailure,
   describeSectionCounts,
@@ -101,6 +102,33 @@ describe('buildManifest', () => {
       { ...azure('a2', 'same'), title: 'second' },
     ]);
     expect(manifest.data['article:same'].title).toBe('first');
+  });
+
+  it('pre-renders a Docker article at /docker/blog/<slug> (#776)', () => {
+    // `Docker` is how the CMS writes the provider; the URL segment is lower case.
+    const manifest = buildManifest([
+      { id: 'd1', slug: 'multi-stage-builds', cloudProvider: 'Docker', title: 'Multi-stage' },
+    ]);
+    expect(manifest.routes).toEqual(['/docker/blog/multi-stage-builds']);
+    expect(manifest.data['article:multi-stage-builds'].title).toBe('Multi-stage');
+    expect(manifest.skipped).toEqual([]);
+  });
+});
+
+describe('PROVIDERS', () => {
+  it('is exactly the providers the frontend routes, VALID_PROVIDERS', () => {
+    // Read as text: the frontend module is JSX and imports React. A provider
+    // the router serves but this list lacks gets no pre-rendered article
+    // pages, which is how Docker's would have stayed shells.
+    const source = readFileSync(
+      join(REPO, 'frontend', 'src', 'context', 'ProviderContext.jsx'),
+      'utf8'
+    );
+    const block = /export const VALID_PROVIDERS = \[([^\]]*)\]/.exec(source);
+    expect(block, 'VALID_PROVIDERS not found in ProviderContext.jsx').not.toBeNull();
+    const valid = [...block[1].matchAll(/'([a-z]+)'/g)].map((match) => match[1]);
+    expect(valid.length).toBeGreaterThan(5);
+    expect([...PROVIDERS].sort()).toEqual([...valid].sort());
   });
 });
 

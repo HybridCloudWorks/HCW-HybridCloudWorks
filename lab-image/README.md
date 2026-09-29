@@ -3,14 +3,13 @@
 One Dockerfile, two targets, published to GHCR by
 [`publish-lab-image.yml`](../.github/workflows/publish-lab-image.yml) on every
 push to `main` that touches this directory (issue #658, Phase 1 in #674,
-Phase 2 in #675). The same workflow copies both to Docker Hub, as
-`docker.io/hybridcloudworks/hcw-lab-runner` and
-`docker.io/hybridcloudworks/hcw-lab`, once the owner has switched that on
-(#779): by digest, so each image has the same digest in both registries, and
-through a Docker OIDC connection, so no Docker token is stored anywhere. Until
-then the Docker Hub job is skipped and the two repositories there are empty.
+Phase 2 in #675). Since 2026-09-29 (#779) the same workflow also copies both
+to Docker Hub, as `docker.io/hybridcloudworks/hcw-lab-runner` and
+`docker.io/hybridcloudworks/hcw-lab`. It copies by digest, so each image has
+the same digest in both registries, and it signs in through a Docker OIDC
+connection, so no Docker token is stored anywhere.
 [Docker Hub publishing](../docs/runbooks/docker-hub-publishing.md) has the
-owner's steps.
+setup and the checks.
 
 | Target   | Image                                     | Carries                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | -------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -102,11 +101,10 @@ and that is the first-party place to copy it from.
 
 ### From Docker Hub
 
-Once Docker Hub publishing is on (#779), the same image is on Docker Hub,
-where `hybridcloudworks/hcw-lab` is short for
-`docker.io/hybridcloudworks/hcw-lab`. Both repositories are public, so the
-pull is anonymous. Before that, these fail with `manifest unknown`, because
-the repositories exist and are empty.
+The same image is on Docker Hub, where `hybridcloudworks/hcw-lab` is short
+for `docker.io/hybridcloudworks/hcw-lab`. It has been there since 2026-09-29
+(#779), and it is what the site's "Run it locally" commands pull. Both
+repositories are public, so the pull is anonymous.
 
 PowerShell:
 
