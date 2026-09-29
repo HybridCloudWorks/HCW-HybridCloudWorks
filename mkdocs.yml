@@ -159,6 +159,8 @@ nav:
       - Lab 01 landing zone (draft): content/blog-lab-01-landing-zone.md
       - Lab 02 one container (draft): content/blog-lab-02-one-container.md
       - Lab 03 agent explains (draft): content/blog-lab-03-agent-explains.md
+      - Docker 01 building images (draft): content/blog-docker-01-building-images.md
+      - Docker 02 Desktop (draft): content/blog-docker-02-desktop.md
   - Repository:
       - README: repo/readme.md
       - CHANGELOG: repo/changelog.md
