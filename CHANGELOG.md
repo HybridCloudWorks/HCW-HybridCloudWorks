@@ -2455,6 +2455,33 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **A slow first AI provider now fails over before the browser gives up
+  (#701).** Generate draft is a synchronous call. The browser waits 90 s and
+  the edge about 100 s. NVIDIA is first for drafting and was allowed 120 s per
+  attempt, and on 2026-09-29 its reasoning models took 56-58 s to answer one
+  word. So the failover to a paid provider started after the page had timed
+  out, and the editor saw a timeout although Gemini would have answered.
+  - Synchronous routes now give the AI router a time budget (`budgetMs`).
+    Half of it is held back for the next provider, and each attempt's timeout
+    is cut to its share. A retry is made only if a whole attempt still fits.
+    The contract is in the header of `functions/src/lib/ai/router.js`; the
+    arithmetic is in `functions/src/lib/ai/time-budget.js`.
+  - Routes with a budget: Generate draft and Create from recording (the
+    existing 75 s handler budget, less 5 s for the work after the model),
+    regenerate newsletter intro and suggest subject lines (14 s), and the
+    social caption Generate button (15 s). The last three answer under the
+    browser's 20 s default.
+  - A call that runs out ends with `AI_BUDGET_EXHAUSTED` (HTTP 504). It names
+    each provider tried, why it failed, and which were never reached.
+  - Background paths pass no budget and are unchanged: forge jobs, the
+    schedulers, the change feed and the queue workers. NVIDIA keeps 120 s
+    there.
+  - Gemini and Anthropic now honour a per-call `timeoutMs`, as OpenAI and
+    NVIDIA already did. The portal's Test passes 45 s, so it now bounds those
+    two at 45 s instead of 60 s.
+  - `sync-budgets.test.js` pins each budget under the browser's timeout in
+    `frontend/src/lib/api.js` and the edge's 100 s. The `functions` CI row now
+    also runs when `api.js` changes.
 - **The AI Engine's Test for NVIDIA answers in seconds, and the card reads
   "NVIDIA API" (#701).** The one-word Test ran with the drafting limits
   (8,192 tokens, 120 s). NVIDIA's models are reasoning models on a trial

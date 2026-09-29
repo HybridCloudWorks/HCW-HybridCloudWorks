@@ -4,7 +4,7 @@
  * a reject that landed while it was being sent.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { createNewsletterAdminHandlers } from './admin-handlers.js';
+import { createNewsletterAdminHandlers, NEWSLETTER_AI_BUDGET_MS } from './admin-handlers.js';
 import { NEWSLETTER_FROM } from './handlers.js';
 import { INTRO_INSTRUCTION, introInstruction } from './issue.js';
 import { createTemplateCache } from './template-source.js';
@@ -876,6 +876,21 @@ describe('subjects', () => {
     });
     expect((await denied.subjects(request(), context())).status).toBe(401);
     expect((await build({ drafter: makeDrafter() }).handlers.subjects(request({ id: 'issue-2020-01-01' }), context())).status).toBe(404);
+  });
+});
+
+describe('intro and subjects: the AI time budget', () => {
+  it('both hand the drafter what is left of NEWSLETTER_AI_BUDGET_MS, counted from the handler start', async () => {
+    // The page waits on these under the client's 20 s default, so a slow
+    // first provider has to fail over inside it (router.js header).
+    for (const route of ['intro', 'subjects']) {
+      const drafter = makeDrafter({ title: 'One', postContent: 'New intro.', keyTopics: ['Two', 'Three'] });
+      const res = await build({ drafter }).handlers[route](request({ body: { etag: 'e1' } }), context());
+      expect(res.status, route).toBe(200);
+      const { budgetMs } = drafter.generateDraft.mock.calls[0][0];
+      expect(budgetMs, route).toBeLessThanOrEqual(NEWSLETTER_AI_BUDGET_MS);
+      expect(budgetMs, route).toBeGreaterThan(NEWSLETTER_AI_BUDGET_MS - 1_000);
+    }
   });
 });
 

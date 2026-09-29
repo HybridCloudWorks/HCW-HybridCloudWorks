@@ -114,9 +114,11 @@ export const describeAiError = (error) => String(error?.message ?? error).slice(
  * @param {object[]} args.sections the issue's sections
  * @param {string} args.subject kept when the model offers no title
  * @param {string} [args.tone] Newsletter settings' introTone
+ * @param {number} [args.budgetMs] the regenerate route's time budget; the
+ *   Monday build passes none (router.js, SYNCHRONOUS CALLS HAVE A TIME BUDGET)
  * @returns {Promise<{ subject: string, intro: string }>}
  */
-export async function draftIntro({ drafter, sections, subject, tone }) {
+export async function draftIntro({ drafter, sections, subject, tone, budgetMs = null }) {
   const draft = await drafter.generateDraft({
     url: 'weekly-newsletter',
     cloudProvider: 'Auto',
@@ -124,6 +126,7 @@ export async function draftIntro({ drafter, sections, subject, tone }) {
     description: "This week's newsletter issue.",
     markdown: buildIntroContext(sections),
     customInstructionPrompt: introInstruction(tone),
+    budgetMs,
   });
   const drafted = plainText(stripMarkdown(draft?.title), 120);
   return {
@@ -150,10 +153,11 @@ export const MIN_SUBJECT_SUGGESTIONS = 3;
  * so the suggestions ride in `keyTopics` with `title` as the lead. Cleaned to
  * plain text of at most 120 characters, deduplicated without regard to case,
  * capped at five. Throws when the AI does, or when fewer than three survive.
+ * `budgetMs` is the route's time budget, as for draftIntro.
  *
  * @returns {Promise<string[]>}
  */
-export async function suggestSubjects({ drafter, sections, subject }) {
+export async function suggestSubjects({ drafter, sections, subject, budgetMs = null }) {
   const draft = await drafter.generateDraft({
     url: 'weekly-newsletter-subjects',
     cloudProvider: 'Auto',
@@ -161,6 +165,7 @@ export async function suggestSubjects({ drafter, sections, subject }) {
     description: "Subject lines for this week's newsletter issue.",
     markdown: buildIntroContext(sections),
     customInstructionPrompt: SUBJECT_INSTRUCTION,
+    budgetMs,
   });
   const candidates = [draft?.title, ...(Array.isArray(draft?.keyTopics) ? draft.keyTopics : [])];
   const seen = new Set();

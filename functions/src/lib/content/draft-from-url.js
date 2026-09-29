@@ -22,6 +22,7 @@ import { load as loadHtml } from 'cheerio';
 import { scrapeArticle } from './scrape.js';
 import { normalizeSupportingDocuments, MAX_SUPPORTING_DOCUMENTS } from './drafting.js';
 import { generateSlug } from '../rss/feeds.js';
+import { AFTER_MODEL_MARGIN_MS, startBudgetClock } from '../ai/time-budget.js';
 
 /** Beyond the primary URL, at most this many extra KB articles are scraped —
  * each is a network fetch plus markdown extraction inside the HTTP budget. */
@@ -137,6 +138,11 @@ async function fetchDocumentUrl(url, { fetchImpl = globalThis.fetch, log = {} } 
  * Publish-Ready Builder's ({urls, customInstructionPrompt, documentUrls,
  * supportingDocuments}) and the editor's ({draftText, instructions}).
  *
+ * The time budget is the second argument, not a payload field, because the
+ * payload is the client's JSON body and a client must not be able to set
+ * its own. The scrapes and fetches spend from it, and the drafter gets what
+ * is left.
+ *
  * @param {object} deps
  * @param {{ generateDraft: Function }} deps.drafter
  * @param {(url: string, opts?: object) => Promise<object>} [deps.scrape]
@@ -155,7 +161,8 @@ export function createUrlDrafter({ drafter, scrape = scrapeArticle, fetch: fetch
     documentUrls = [],
     supportingDocuments = [],
     usageOut = null,
-  } = {}) {
+  } = {}, { budgetMs = null } = {}) {
+    const budgetLeft = startBudgetClock(budgetMs);
     const primary = String(url || (Array.isArray(urls) ? urls[0] : '') || '').trim();
     const source = await scrapeToSource(primary, { scrape, env, log });
 
@@ -206,6 +213,7 @@ export function createUrlDrafter({ drafter, scrape = scrapeArticle, fetch: fetch
       customInstructionPrompt: mergedInstructions,
       supportingDocuments: normalizeSupportingDocuments(documents),
       usageOut,
+      budgetMs: budgetLeft(),
     });
 
     return {
@@ -222,7 +230,13 @@ export function createUrlDrafter({ drafter, scrape = scrapeArticle, fetch: fetch
 /** How long the HTTP handler lets one draft take. The client aborts at 90 s
  * (frontend lib/api.js pins generateArticleDraft to 90000), so answering at
  * 75 s returns a real error the UI can show instead of a dead socket; the
- * unattended path with no such ceiling is the forge-from-url job. */
+ * unattended path with no such ceiling is the forge-from-url job.
+ *
+ * The same budget, less AFTER_MODEL_MARGIN_MS, is handed down to the AI
+ * router, so a slow first provider fails over inside it (router.js header,
+ * SYNCHRONOUS CALLS HAVE A TIME BUDGET). The race in `withBudget` stays as
+ * the backstop for a scrape that hangs. sync-budgets.test.js pins both
+ * numbers against the client's. */
 export const DRAFT_HTTP_BUDGET_MS = 75000;
 
 const json = (status, body) => ({
@@ -231,7 +245,12 @@ const json = (status, body) => ({
   body: JSON.stringify(body),
 });
 
-const STATUS_BY_CODE = { BAD_URL: 400, SCRAPE_FAILED: 422, DRAFT_BUDGET_EXCEEDED: 504 };
+const STATUS_BY_CODE = {
+  BAD_URL: 400,
+  SCRAPE_FAILED: 422,
+  DRAFT_BUDGET_EXCEEDED: 504,
+  AI_BUDGET_EXHAUSTED: 504,
+};
 
 function withBudget(promise, budgetMs) {
   let timer;
@@ -267,7 +286,10 @@ export function createGenerateArticleDraftHandler({
       return json(400, { ok: false, error: 'A JSON body is required.' });
     }
     try {
-      const result = await withBudget(urlDrafter.draftFromUrl(body), budgetMs);
+      const result = await withBudget(
+        urlDrafter.draftFromUrl(body, { budgetMs: budgetMs - AFTER_MODEL_MARGIN_MS }),
+        budgetMs
+      );
       return json(200, { ok: true, ...result });
     } catch (error) {
       const status = STATUS_BY_CODE[error?.code] || 502;

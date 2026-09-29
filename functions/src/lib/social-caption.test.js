@@ -3,6 +3,7 @@ import {
   buildCaptionPrompt,
   generateCaptionText,
   createSocialCaptionHandlers,
+  CAPTION_AI_BUDGET_MS,
   CAPTION_MAX_CHARS,
 } from './social-caption.js';
 
@@ -82,5 +83,25 @@ describe('generateSocialCaption handler', () => {
     const res = await h.generateSocialCaption(request({ title: 'T' }), context);
     expect(res.status).toBe(500);
     expect(JSON.parse(res.body).message).toBe('quota');
+  });
+});
+
+describe('the AI time budget', () => {
+  it('the Generate button hands the router what is left of CAPTION_AI_BUDGET_MS', async () => {
+    // The page waits on it under the client's 20 s default, so a slow first
+    // provider has to fail over inside it (router.js header).
+    const ai = { generateTextResponse: vi.fn(async () => 'A caption.') };
+    const store = { readDoc: vi.fn(async () => ({ Title: 'T', Summary: 'S' })) };
+    const h = createSocialCaptionHandlers({ guard: guardAs('editor'), store, ai });
+    expect((await h.generateSocialCaption(request({ contentId: 'doc-1' }), context)).status).toBe(200);
+    const { budgetMs } = ai.generateTextResponse.mock.calls[0][0];
+    expect(budgetMs).toBeLessThanOrEqual(CAPTION_AI_BUDGET_MS);
+    expect(budgetMs).toBeGreaterThan(CAPTION_AI_BUDGET_MS - 1_000);
+  });
+
+  it('the on-publish trigger passes none, and keeps the full timeouts', async () => {
+    const ai = { generateTextResponse: vi.fn(async () => 'A caption.') };
+    await generateCaptionText({ ai }, { title: 'T', summary: 'S' });
+    expect(ai.generateTextResponse.mock.calls[0][0].budgetMs).toBeNull();
   });
 });

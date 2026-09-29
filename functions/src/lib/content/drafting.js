@@ -14,6 +14,7 @@
  * `CONTENTFORGE_DRAFT_MODEL` with the router's default as fallback.
  */
 import { pickNextFormat, buildVoiceAndFormatBlock } from './voice.js';
+import { startBudgetClock } from '../ai/time-budget.js';
 
 const DEFAULT_DRAFT_INSTRUCTION_PROMPT = `You are generating a high-quality technical draft article for Hybrid Cloud Works. Use the source URL as the primary source. If supporting documents are provided, incorporate them as additional context. Produce a publication-ready title, concise editorial summary, a markdown article draft following the Voice and Format instructions provided separately below, and image prompts tailored to the article.`;
 
@@ -94,7 +95,12 @@ export function createDrafter({ store, ai, env = process.env }) {
     format: presetFormat = null,
     supportingDocuments = [],
     usageOut = null,
+    // A synchronous caller's time budget, from now, failover included
+    // (router.js header, SYNCHRONOUS CALLS HAVE A TIME BUDGET). The forge and
+    // the digest pass none and keep the router's full timeouts.
+    budgetMs = null,
   }) {
+    const budgetLeft = startBudgetClock(budgetMs);
     const documents = normalizeSupportingDocuments(supportingDocuments);
     const trimmedCustomPrompt = String(customInstructionPrompt || '').trim();
     const format = presetFormat || (await pickNextFormat(store, 'content', cloudProvider));
@@ -143,6 +149,8 @@ export function createDrafter({ store, ai, env = process.env }) {
       purpose: 'draft',
       usageOut: usage,
       feature: 'forgeDrafting',
+      // What is left after the format lookup above.
+      budgetMs: budgetLeft(),
     });
     const aiProvider = usage.slice(usageStart).at(-1)?.provider || ai.getActiveAiProvider();
 
