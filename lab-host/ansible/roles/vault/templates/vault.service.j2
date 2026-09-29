@@ -6,25 +6,52 @@
 # LimitMEMLOCK=infinity, which exist for mlock, off here (disable_mlock in
 # vault.hcl). The capability bounding set is therefore empty. A restart seals
 # Vault; unsealing is an owner step.
+{# With vault_seal_azurekeyvault_enabled the unit's ordering, restart policy,
+    group and environment change as the comments below say, and Vault unseals
+    itself. With it off the rendered unit is byte for byte the one this role
+    wrote before #726, so merging the seal support alone restarts nothing. #}
 [Unit]
 Description=HashiCorp Vault (lab-host secrets only)
 Documentation=https://developer.hashicorp.com/vault/docs
 Requires=network-online.target
+{% if vault_seal_azurekeyvault_enabled | bool %}
+# Auto-unseal (#726). Vault needs the Arc agent's identity endpoint and Key
+# Vault to start at all: an initialised Vault whose seal key cannot be read
+# exits ("Vault is initialized but no Seal key could be loaded"). So it starts
+# after the agent, and systemd keeps starting it again every
+# {{ vault_seal_restart_seconds }} seconds, without the three-in-a-minute limit
+# below, until the key answers: a boot that beats the network, or a Key Vault
+# outage, ends with Vault unsealed rather than with a failed unit.
+Wants=himdsd.service
+After=network-online.target himdsd.service
+ConditionFileNotEmpty={{ vault_config_file }}
+StartLimitIntervalSec=0
+{% else %}
 After=network-online.target
 ConditionFileNotEmpty={{ vault_config_file }}
 StartLimitIntervalSec=60
 StartLimitBurst=3
+{% endif %}
 
 [Service]
 Type=notify
 User={{ vault_user }}
 Group={{ vault_group }}
+{% if vault_seal_azurekeyvault_enabled | bool %}
+# The himds group may read the agent's challenge files, and nothing else here
+# needs it. It is added to this unit only, not to the vault user.
+SupplementaryGroups={{ vault_seal_himds_group }}
+# Azure's default credential chain, pinned to managed identity: never a
+# developer credential found on the host. IDENTITY_ENDPOINT and IMDS_ENDPOINT
+# come from the agent's /lib/systemd/system.conf.d/azcmagent.conf.
+Environment=AZURE_TOKEN_CREDENTIALS=ManagedIdentityCredential
+{% endif %}
 ExecStart={{ vault_binary_path }} server -config={{ vault_config_file }}
 ExecReload=/bin/kill --signal HUP $MAINPID
 KillMode=process
 KillSignal=SIGINT
 Restart=on-failure
-RestartSec=5
+RestartSec={{ vault_seal_restart_seconds if vault_seal_azurekeyvault_enabled | bool else 5 }}
 TimeoutStopSec=30
 LimitNOFILE=65536
 # No core dumps: a dump of an unsealed Vault holds its keys.

@@ -3,7 +3,10 @@ galaxy_info:
   role_name: vault
   namespace: hcw
   author: HybridCloudWorks
-  description: HashiCorp Vault host-native from a signature-verified release, raft storage, TLS on the loopback only, never initialised by the role
+  description: >-
+    HashiCorp Vault host-native from a signature-verified release, raft storage, TLS on the
+    loopback only, never initialised by the role, optional auto-unseal through Azure Key Vault
+    and the Arc identity
   license: Apache-2.0
   min_ansible_version: "2.16"
   platforms:

@@ -33,3 +33,24 @@ listener "tcp" {
   tls_key_file    = "{{ vault_tls_key_file }}"
   tls_min_version = "tls13"
 }
+{% if vault_seal_azurekeyvault_enabled | bool %}
+
+# Auto-unseal (#726): Vault's root key is wrapped by this key in the lab-only
+# Key Vault, and Vault asks it to unwrap at every start. It signs in as the Arc
+# machine's system-assigned identity through the agent on 127.0.0.1:40342: no
+# client_secret, because with none the seal uses Azure's default credential
+# chain, which the unit pins to managed identity (vault.service). No client_id
+# either: with one, that chain asks for a user-assigned identity, which an Arc
+# machine refuses. The recovery keys cannot unseal Vault; only this key can.
+seal "azurekeyvault" {
+  vault_name = "{{ vault_seal_azurekeyvault_vault_name }}"
+  key_name   = "{{ vault_seal_azurekeyvault_key_name }}"
+{% if vault_seal_azurekeyvault_tenant_id %}
+  tenant_id  = "{{ vault_seal_azurekeyvault_tenant_id }}"
+{% endif %}
+{% if vault_seal_azurekeyvault_disabled | bool %}
+  # Migrating back to Shamir keys: the key still decrypts, and no longer seals.
+  disabled   = "true"
+{% endif %}
+}
+{% endif %}

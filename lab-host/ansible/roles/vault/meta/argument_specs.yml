@@ -12,6 +12,12 @@ argument_specs:
       - It never initialises or unseals Vault and never holds an unseal key or a token; both are
         owner steps, and the keys go to the owner's password manager only. It reports the seal
         status it reads with `vault status`.
+      - With vault_seal_azurekeyvault_enabled it adds a seal "azurekeyvault" stanza, so Vault
+        unseals itself with a key in Azure Key Vault, signing in as the Arc machine's
+        system-assigned identity. It writes the stanza only after reading the key through Key
+        Vault as that identity, and it refuses to write a configuration without the stanza while
+        Vault reports that seal. Moving an initialised Vault onto the seal is an owner step,
+        `vault operator unseal -migrate`.
       - With vault_enabled false it installs nothing, and stops and disables a Vault an earlier
         run installed, keeping its data.
     author: HybridCloudWorks
@@ -129,3 +135,39 @@ argument_specs:
         required: false
         default: /etc/profile.d/hcw-vault.sh
         description: Sets VAULT_ADDR and VAULT_CACERT for login shells.
+      vault_seal_azurekeyvault_enabled:
+        type: bool
+        required: false
+        default: false
+        description:
+          - Auto-unseal through Azure Key Vault and the Arc machine's identity (#726). group_vars
+            reads it from /etc/ansible/facts.d/hcw_vault_seal.fact on the host.
+      vault_seal_azurekeyvault_vault_name:
+        type: str
+        required: false
+        default: kv-labhybrid-prod-cus-01
+        description: The lab-only Key Vault infra/lab-hybrid.tf creates. Never kv-site-prod-cus-01.
+      vault_seal_azurekeyvault_key_name:
+        type: str
+        required: false
+        default: vault-seal
+        description: The RSA key in that vault that wraps Vault's root key.
+      vault_seal_azurekeyvault_tenant_id:
+        type: str
+        required: false
+        default: ""
+        description:
+          - Written as the stanza's tenant_id when set. The Arc identity does not use it; the seal
+            reads it only to sign in with a client secret, and there is none.
+      vault_seal_azurekeyvault_disabled:
+        type: bool
+        required: false
+        default: false
+        description: Marks the stanza disabled, to migrate back to Shamir keys with the recovery keys.
+      vault_seal_restart_seconds:
+        type: int
+        required: false
+        default: 30
+        description:
+          - With the seal on, how long systemd waits before starting Vault again when it exits because
+            the key could not be read. There is no limit on attempts.
