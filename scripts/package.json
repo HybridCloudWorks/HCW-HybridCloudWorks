@@ -2,6 +2,7 @@
   "name": "hybridcloudworks-ops-scripts",
   "description": "Operational validation and content tooling for the HybridCloudWorks website",
   "version": "1.1.0",
+  "license": "Apache-2.0",
   "type": "module",
   "private": true,
   "scripts": {

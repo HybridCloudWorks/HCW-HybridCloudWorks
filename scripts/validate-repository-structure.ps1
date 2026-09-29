@@ -89,6 +89,12 @@ $allowedRootFiles = @(
   # entry in either is a row in docs/security/scanner-triage.md.
   '.gitleaksignore',
   '.checkov.yaml',
+  # The repository licence (owner decision 2026-09-28, #780: Apache-2.0).
+  # GitHub detects a repository's licence from a LICENSE file at the root, and
+  # Apache practice keeps NOTICE beside it, so both live at the root by
+  # convention. Both are also required below.
+  'LICENSE',
+  'NOTICE',
   # Three files left the root on 2026-08-29. Architecture_Plan.md and
   # Migration_Plan.md were archived records rather than live documents and moved
   # to wiki/ (now docs/history/), so they publish as documentation instead of
@@ -153,6 +159,16 @@ foreach ($file in $actualRootFiles) {
 foreach ($requiredFile in @('README.md', 'CHANGELOG.md', 'TODO.md')) {
   if (-not (Test-Path -LiteralPath (Join-Path $repositoryRoot $requiredFile))) {
     $errors.Add("Missing required SOP document: $requiredFile")
+  }
+}
+
+# The licence files must exist (#780). Without LICENSE, GitHub reports the
+# repository as unlicensed, and sponsor programmes that require an OSI-approved
+# licence treat it that way too. NOTICE carries the copyright line and says
+# that third-party marks are not covered by the licence.
+foreach ($requiredFile in @('LICENSE', 'NOTICE')) {
+  if (-not (Test-Path -LiteralPath (Join-Path $repositoryRoot $requiredFile))) {
+    $errors.Add("Missing required licence file: $requiredFile")
   }
 }
 

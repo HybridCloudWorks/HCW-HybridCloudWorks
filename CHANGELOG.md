@@ -19,6 +19,35 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The repository is licensed under Apache-2.0.** Owner decision
+  2026-09-28, #780. `LICENSE` at the root is the Apache License 2.0 text
+  byte for byte as `https://www.apache.org/licenses/LICENSE-2.0.txt`
+  publishes it (11,358 bytes, LF, SHA-256 `cfc7749b…c523d30`).
+  `.editorconfig` gives it `indent_size = unset`, because 24 of its lines
+  are indented by an odd number of spaces and the text is not reflowed.
+  `NOTICE` names HybridCloudWorks and carries "Copyright 2026 Saul Patino
+  and HybridCloudWorks contributors". It also says that third-party names,
+  logos and marks (the vendor logos under
+  `frontend/public/icons/providers/` and `frontend/src/assets/brands/`)
+  belong to their owners and are not licensed under Apache-2.0, and that
+  other third-party material, such as the fonts under
+  `frontend/public/fonts/`, keeps its own terms.
+  `scripts/validate-repository-structure.ps1` allows both files at the
+  root and fails when either is missing. The six npm packages (`frontend`,
+  `functions`, `scripts`, `vps-agent`, `edge/availability-probe` and
+  `lab-host/coder`) declare `"license": "Apache-2.0"`. The five lockfiles
+  carry it on their root entry exactly as npm 11.17.0 writes it: each was
+  regenerated from a scratch copy and matched byte for byte.
+  `frontend/scripts/package.json` is a CommonJS boundary marker, not a
+  package, so it has no licence field. The eleven lab-host Ansible roles
+  said `license: UNLICENSED` in `meta/main.yml` and now say `Apache-2.0`.
+  The site footer drops "All rights reserved." and keeps "© <year> Hybrid
+  Cloud Works.", because a blanket reservation on every page contradicted
+  the code licence. The Terms page's content clause, which begins "Unless
+  otherwise stated", is unchanged. The README has a Licence section. The
+  docs site had nothing that conflicted, and `mkdocs.yml`'s
+  `copyright: HybridCloudWorks` stays.
+
 - **Home: the providers in two rows with a guide under them; Docker as a
   service provider, with placeholder pages.** Owner request 2026-09-28.
   The home page strip is two evenly spaced rows, Azure, AWS, GCP and

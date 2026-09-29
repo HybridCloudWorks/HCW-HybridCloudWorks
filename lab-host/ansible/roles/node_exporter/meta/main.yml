@@ -4,7 +4,7 @@ galaxy_info:
   namespace: hcw
   author: HybridCloudWorks
   description: Prometheus node_exporter from a checksum-verified release, bound to loopback under systemd
-  license: UNLICENSED
+  license: Apache-2.0
   min_ansible_version: "2.16"
   platforms:
     - name: Ubuntu
