@@ -19,6 +19,51 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Vault on the lab host: auto-unseal with a lab-only Key Vault through the
+  Arc identity, built and off (#726).** First, the question #726 asked: can
+  Vault 2.1.1's `azurekeyvault` seal sign in through the Arc agent's local
+  endpoint with no secret on the host? Yes, from the pinned release's source:
+  with no `client_id` the seal (go-kms-wrapping azurekeyvault v2.0.14) uses
+  azidentity v1.13.1's default chain, whose managed-identity credential hands
+  over to MSAL for Go v1.6.0, which detects an Arc machine and runs the
+  agent's challenge-file flow; `go version -m` on the signature-checked
+  binary lists those versions. HashiCorp documents managed identity only for
+  Vault "hosted on Azure", so this rests on the code. `infra/lab-hybrid.tf`
+  adds a Standard Key Vault `kv-labhybrid-prod-cus-01` (RBAC, purge
+  protection, `prevent_destroy`, AuditEvent to the Management workspace;
+  the pattern's `kv-lab-hybrid-prod-cus-01` is one character over Key
+  Vault's 24), one RSA 3072 key `vault-seal` allowing only `wrapKey` and
+  `unwrapKey`, created through Resource Manager so the run identity needs no
+  data-plane role, and the Arc identity's only grant, Key Vault Crypto
+  Service Encryption User on that key, for the principal read from the Arc
+  machine at plan time (nothing is planned while it is absent). About $0.13
+  a month, from Vault's 10-minute seal health check at $0.15 per 10,000
+  advanced-key operations. The `vault` role gains an opt-in
+  `seal "azurekeyvault"` stanza with no client id and no secret, switched on
+  by the host fact `/etc/ansible/facts.d/hcw_vault_seal.fact` as Arc's is;
+  it reads the key as the Arc identity before writing the stanza, refuses to
+  drop the stanza while Vault's data is under it, pins the credential chain
+  to managed identity, adds the `himds` group to the unit only, and lets
+  systemd retry every 30 seconds while Key Vault is unreachable. With the
+  seal off the unit and configuration render byte for byte as before, so
+  merging restarts nothing. `bootstrap.sh --tags vault_seal_check` runs the
+  checks alone. The migration from Shamir (`vault operator unseal -migrate`,
+  each key at Vault's own hidden prompt) is a runbook section of owner lines,
+  rehearsed on 2026-09-29 against the real 2.1.1 binary in an Ubuntu 26.04
+  container with stand-ins for the agent and Key Vault: the refusals, the
+  migration, `Sealed false` after `systemctl restart vault`, a Key Vault
+  outage across a restart, both ways back, and a rebuilt host. The rehearsal
+  found that a restart before Vault logs `seal migration complete` leaves it
+  migrating again, so the runbook waits for `vault status` to drop the
+  migration line. ADR 0032's amendment of 2026-09-29 records the decision
+  as proposed and the trade as the owner's to accept: with auto-unseal, root
+  on the host together with the Arc identity can unseal Vault, and the five
+  keys become recovery keys that cannot. `scripts/lab-host-vault-seal.test.mjs`
+  holds the vault, key and machine names in `infra/` and the role together
+  and pins the grant's shape; `assert-expected-plan.test.mjs` now compares
+  its permanent-replacement list with azapi's patch resources only, since an
+  `azapi_resource` is an ordinary managed resource.
+
 - **Lab image: publishing to Docker Hub through a Docker OIDC connection,
   with no stored token (#779).** Owner decision 2026-09-28.
   `publish-lab-image.yml` has a third job, `Publish to Docker Hub`, which

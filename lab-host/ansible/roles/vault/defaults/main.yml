@@ -45,3 +45,25 @@ vault_pgp_key_fingerprint: C874011F0AB405110D02105534365D9472D7468F
 # VAULT_ADDR and VAULT_CACERT for login shells, so `vault status` works as
 # hcwadmin with no flags.
 vault_profile_file: /etc/profile.d/hcw-vault.sh
+
+# Auto-unseal with a key in Azure Key Vault, through the Arc machine's
+# system-assigned identity (#726; ADR 0032, amendment of 2026-09-29). Off
+# here; group_vars/all.yml turns it on only from the host's own fact,
+# /etc/ansible/facts.d/hcw_vault_seal.fact, because the seal describes the
+# Vault data on this installation (README.md, "Auto-unseal").
+vault_seal_azurekeyvault_enabled: false
+# The vault and key infra/lab-hybrid.tf creates. scripts/lab-host-vault-seal.test.mjs
+# fails when the two disagree.
+vault_seal_azurekeyvault_vault_name: kv-labhybrid-prod-cus-01
+vault_seal_azurekeyvault_key_name: vault-seal
+# Written into the stanza when set, and otherwise left out. The Arc identity
+# never uses it: the seal reads tenant_id only to sign in with a client
+# secret, and there is none (README.md, "How it authenticates").
+vault_seal_azurekeyvault_tenant_id: ""
+# True only to migrate AWAY from auto-unseal, back to Shamir keys: Vault's
+# `disabled = "true"` on the stanza (README.md, "Back to Shamir").
+vault_seal_azurekeyvault_disabled: false
+# With the seal on, Vault exits when it cannot reach the key at start (a boot
+# before the network, a Key Vault outage). systemd starts it again this many
+# seconds later, with no limit on attempts, instead of giving up after three.
+vault_seal_restart_seconds: 30

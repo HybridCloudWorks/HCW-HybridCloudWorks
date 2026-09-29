@@ -249,3 +249,18 @@ vault_enabled: true
 vault_version: "2.1.1"
 vault_checksum: sha256:8aa90f9cea46f541fc7baa3d0ec692fc06afde9a248cc1f2dcac46a567c6f56b
 vault_pgp_key_checksum: sha256:c2f5bc1163bd8d15a711616b587bcede212d045a5b8b52df01c74095897cd065
+
+# Auto-unseal through Azure Key Vault and the Arc machine's identity (#726;
+# ADR 0032, amendment of 2026-09-29). Read from the host, as arc_enabled is:
+# true exactly when /etc/ansible/facts.d/hcw_vault_seal.fact is JSON whose
+# "enabled" is true, and "disabled": true in the same file migrates back to
+# Shamir keys. The seal describes the Vault data on this installation, so a
+# rebuilt host starts without it whatever the repository says. The owner
+# writes the file once the key exists (docs/runbooks/labs-host.md, "HashiCorp
+# Vault: moving to auto-unseal"); the role refuses to write the stanza until
+# the Arc identity can read the key, and refuses to drop it while Vault's
+# data is under it. A commit older than #726 knows nothing of either, so once
+# the seal is on, never run bootstrap.sh with HCW_REPO_REF at one. The vault
+# and key names are the role's defaults, the ones infra/lab-hybrid.tf creates.
+vault_seal_azurekeyvault_enabled: "{{ ansible_facts['ansible_local']['hcw_vault_seal']['enabled'] | default(false) is sameas true }}"
+vault_seal_azurekeyvault_disabled: "{{ ansible_facts['ansible_local']['hcw_vault_seal']['disabled'] | default(false) is sameas true }}"

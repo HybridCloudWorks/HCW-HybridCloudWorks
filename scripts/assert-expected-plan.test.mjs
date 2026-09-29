@@ -200,7 +200,7 @@ describe('checkPlan', () => {
 describe('EXPECTED matches the configuration', () => {
   const infraSource = terraformSource();
 
-  it('names every azapi resource declared in infra/*.tf, and only those', () => {
+  it('names every azapi action and update resource declared in infra/*.tf, and only those', () => {
     // Both directions. A resource added to the module but not here would have
     // its permanent replacement reported as drift, training operators to ignore
     // this tool; one removed from the module but left here would be reported
@@ -209,11 +209,31 @@ describe('EXPECTED matches the configuration', () => {
     // Reads the WHOLE module, not main.tf: until 2026-08-29 an azapi resource
     // in any other .tf file was invisible here, so "and only those" was only
     // ever true of one file.
-    const declared = [...infraSource.matchAll(/^resource "(azapi_[a-z_]+)" "([a-z0-9_]+)"/gm)].map(
-      (m) => `${m[1]}.${m[2]}`
-    );
+    //
+    // The two PATCH types, not every azapi resource. azapi_resource_action and
+    // azapi_update_resource are what the #29149 workaround uses, and each is
+    // recreated by replace_triggered_by on every apply. An azapi_resource is an
+    // ordinary managed resource that plans nothing once it exists: since #726
+    // one holds the lab Vault's seal key (lab-hybrid.tf), which Resource
+    // Manager can create and azurerm cannot. The test below keeps that
+    // distinction honest from the other side.
+    const declared = [
+      ...infraSource.matchAll(/^resource "(azapi_resource_action|azapi_update_resource)" "([a-z0-9_]+)"/gm),
+    ].map((m) => `${m[1]}.${m[2]}`);
     expect(declared.length).toBeGreaterThan(0);
     expect([...EXPECTED.replaced].sort()).toEqual([...declared].sort());
+  });
+
+  it('declares no azapi_resource that is replaced on every apply', () => {
+    // The other half of the split above. An azapi_resource with
+    // replace_triggered_by would be a per-apply replacement the list above
+    // cannot see. Each azapi_resource block is read up to the next top-level
+    // block and must not carry one.
+    const blocks = [...infraSource.matchAll(/^resource "azapi_resource" "([a-z0-9_]+)" \{[\s\S]*?^\}/gm)];
+    expect(blocks.map((m) => m[1])).toContain('lab_hybrid_vault_seal_key');
+    for (const [block, name] of blocks) {
+      expect(block, `azapi_resource.${name}`).not.toMatch(/replace_triggered_by/);
+    }
   });
 
   it('names a resource and an app setting that exist', () => {

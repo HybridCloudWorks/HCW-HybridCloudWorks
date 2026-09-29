@@ -1,0 +1,212 @@
+---
+# Auto-unseal through Azure Key Vault (#726), checked before install.yml
+# writes the configuration. Two refusals, one in each direction:
+#
+#   - With the seal off, never write a configuration without it while Vault's
+#     data is under it: Vault would not start, and its recovery keys cannot
+#     unseal it.
+#   - With the seal on, never write the stanza until the Arc identity has been
+#     seen to read the key through Key Vault, the way Vault will. Otherwise a
+#     missing key or grant would stop Vault at its next start rather than stop
+#     this run, and the Shamir Vault the owner has now would be down instead.
+
+# Read-only, so it runs in check mode too. Vault answers only while it runs:
+# on a first install, or a stopped unit, there is no answer and nothing to
+# compare, which reads as "no seal known".
+- name: Read which seal Vault's data is under now
+  ansible.builtin.command:
+    argv:
+      - "{{ vault_binary_path }}"
+      - status
+      - -format=json
+  environment: "{{ vault_cli_environment }}"
+  register: vault_seal_before
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+# Vault's data is under the key while it reports the azurekeyvault seal, and
+# also for the whole of a migration in either direction: moving back to Shamir,
+# Vault reports type shamir with migration true until the third recovery key
+# (read from Vault 2.1.1 in the #726 rehearsal).
+- name: Record the seal Vault reports
+  ansible.builtin.set_fact:
+    vault_seal_status_before: >-
+      {{ (vault_seal_before.stdout | from_json)
+         if vault_seal_before.rc in [0, 2] and vault_seal_before.stdout | trim is match('^\{')
+         else {} }}
+
+- name: Refuse to write a configuration without the seal while Vault's data is under it
+  ansible.builtin.assert:
+    that:
+      - vault_seal_azurekeyvault_enabled | bool or not vault_seal_data_under_key | bool
+    # Rendered on every run, passing or not (ansible-core 2.21), and there is
+    # no status at all on a first install: every field read here has a default.
+    fail_msg: >-
+      Vault reports seal type {{ vault_seal_status_before.type | default('none') }}{{ ', with a
+      seal migration in progress' if vault_seal_status_before.migration | default(false) else '' }}, and
+      vault_seal_azurekeyvault_enabled is false: /etc/ansible/facts.d/hcw_vault_seal.fact is
+      missing or does not say "enabled": true. Written without the seal, the configuration would
+      leave Vault unable to start, and its recovery keys cannot unseal it. Put the fact back
+      (roles/vault/README.md, "Auto-unseal"), or finish migrating back to Shamir keys first
+      ("Back to Shamir").
+    quiet: true
+  vars:
+    vault_seal_data_under_key: >-
+      {{ vault_seal_status_before.type | default('') == 'azurekeyvault'
+         or vault_seal_status_before.migration | default(false) | bool }}
+
+- name: Refuse a seal vault, key or tenant that cannot be what infra/lab-hybrid.tf created
+  ansible.builtin.assert:
+    that:
+      - vault_seal_azurekeyvault_vault_name is match('^[a-zA-Z](?!.*--)[a-zA-Z0-9-]{1,22}[a-zA-Z0-9]$')
+      - vault_seal_azurekeyvault_key_name is match('^[a-zA-Z0-9-]{1,127}$')
+      - vault_seal_azurekeyvault_tenant_id == '' or vault_seal_azurekeyvault_tenant_id is match(vault_seal_guid_pattern)
+    fail_msg: >-
+      vault_seal_azurekeyvault_vault_name must be a Key Vault name (3 to 24 letters, digits and
+      single hyphens, starting with a letter), vault_seal_azurekeyvault_key_name a key name
+      (letters, digits and hyphens), and vault_seal_azurekeyvault_tenant_id empty or a GUID.
+      The defaults are what infra/lab-hybrid.tf creates.
+    quiet: true
+  when: vault_seal_azurekeyvault_enabled | bool
+
+# The seal signs in as the Arc machine's system-assigned identity, so the
+# agent must be Connected, and Vault's unit joins the himds group, which is
+# what may read the agent's challenge files. systemd refuses to start a unit
+# whose SupplementaryGroups names a group that does not exist.
+- name: Read the Arc agent's state, whose identity the seal signs in as
+  ansible.builtin.command:
+    argv:
+      - "{{ vault_seal_azcmagent_path }}"
+      - show
+      - --json
+  register: vault_seal_arc_show
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: vault_seal_azurekeyvault_enabled | bool
+
+- name: Look up the himds group
+  ansible.builtin.getent:
+    database: group
+    key: "{{ vault_seal_himds_group }}"
+    fail_key: false
+  when: vault_seal_azurekeyvault_enabled | bool
+
+- name: Refuse the seal unless the Arc agent is Connected and the himds group exists
+  ansible.builtin.assert:
+    that:
+      - vault_seal_arc_show.rc == 0
+      - (vault_seal_arc_show.stdout | from_json).status == 'Connected'
+      - ansible_facts['getent_group'][vault_seal_himds_group] | default(none) is not none
+    fail_msg: >-
+      The seal authenticates as the Arc machine's identity, so it needs the Azure Connected
+      Machine agent Connected (`sudo {{ vault_seal_azcmagent_path }} show` reports
+      {{ ((vault_seal_arc_show.stdout | from_json).status | default('no status'))
+         if vault_seal_arc_show.rc == 0 and vault_seal_arc_show.stdout | trim is match('^\{') else 'nothing' }})
+      and its {{ vault_seal_himds_group }} group present. Onboard the host first
+      (docs/runbooks/labs-host.md, "Arc onboarding").
+    quiet: true
+  when: vault_seal_azurekeyvault_enabled | bool
+
+# The token flow Vault's credential chain uses on an Arc machine (MSAL for Go
+# 1.6.0, the version inside Vault 2.1.1): a request without a secret is
+# answered 401 with the path of a key file only root and the himds group can
+# read, and the same request carrying that file's contents is answered with
+# the token. Every task that sees the file or the token is no_log, and the
+# refusals below read only status codes and the key's public metadata.
+- name: Ask the Arc agent for a Key Vault token, which it answers with a challenge
+  ansible.builtin.uri:
+    url: "{{ vault_seal_arc_token_url }}"
+    headers:
+      Metadata: "true"
+    status_code: 401
+  register: vault_seal_challenge
+  failed_when: false
+  when:
+    - vault_seal_azurekeyvault_enabled | bool
+    - not ansible_check_mode
+
+- name: Refuse a challenge that is not a key file in the agent's token directory
+  ansible.builtin.assert:
+    that:
+      - vault_seal_challenge.status == 401
+      - vault_seal_challenge_file | dirname == vault_seal_arc_tokens_dir
+      - vault_seal_challenge_file is match('.*\.key$')
+    fail_msg: >-
+      The Arc agent's identity endpoint answered {{ vault_seal_challenge.status }} rather than a
+      challenge naming a .key file in {{ vault_seal_arc_tokens_dir }}. `sudo {{ vault_seal_azcmagent_path }}
+      show` and `sudo systemctl status himdsd` say whether the agent is running.
+    quiet: true
+  vars:
+    vault_seal_challenge_file: "{{ (vault_seal_challenge.www_authenticate | default('')).split('Basic realm=') | last }}"
+  when:
+    - vault_seal_azurekeyvault_enabled | bool
+    - not ansible_check_mode
+
+- name: Read the challenge file
+  ansible.builtin.slurp:
+    src: "{{ (vault_seal_challenge.www_authenticate | default('')).split('Basic realm=') | last }}"
+  register: vault_seal_challenge_secret
+  no_log: true
+  when:
+    - vault_seal_azurekeyvault_enabled | bool
+    - not ansible_check_mode
+
+- name: Answer the challenge and receive a Key Vault token as the Arc machine
+  ansible.builtin.uri:
+    url: "{{ vault_seal_arc_token_url }}"
+    headers:
+      Metadata: "true"
+      Authorization: "Basic {{ vault_seal_challenge_secret.content | b64decode | trim }}"
+  register: vault_seal_token
+  failed_when: false
+  no_log: true
+  when:
+    - vault_seal_azurekeyvault_enabled | bool
+    - not ansible_check_mode
+
+- name: Refuse the seal when the Arc agent gave no token
+  ansible.builtin.assert:
+    that:
+      - vault_seal_token.status == 200
+    fail_msg: >-
+      The Arc agent answered {{ vault_seal_token.status }} to the answered challenge, so it issued
+      no token. `sudo {{ vault_seal_azcmagent_path }} show` should report Connected.
+    quiet: true
+  when:
+    - vault_seal_azurekeyvault_enabled | bool
+    - not ansible_check_mode
+
+- name: Read the seal key through Key Vault as the Arc machine, as Vault will at every start
+  ansible.builtin.uri:
+    url: "{{ vault_seal_key_url }}"
+    headers:
+      Authorization: "Bearer {{ vault_seal_token.json.access_token }}"
+    status_code: 200
+  register: vault_seal_key_read
+  failed_when: false
+  no_log: true
+  when:
+    - vault_seal_azurekeyvault_enabled | bool
+    - not ansible_check_mode
+
+# "It stays off until the key exists": until this passes, no stanza is written.
+- name: Refuse the seal until the Arc identity can read a wrap and unwrap key
+  ansible.builtin.assert:
+    that:
+      - vault_seal_key_read.status == 200
+      - vault_seal_key_read.json.key.kty in ['RSA', 'RSA-HSM']
+      - "'wrapKey' in vault_seal_key_read.json.key.key_ops"
+      - "'unwrapKey' in vault_seal_key_read.json.key.key_ops"
+    fail_msg: >-
+      {{ vault_seal_key_refusals[vault_seal_key_read.status | string]
+         | default('Key Vault answered ' ~ (vault_seal_key_read.status | string) ~ ' for the seal key.') }}
+      Nothing was changed: Vault keeps its current seal. Confirm the run at
+      https://app.terraform.io/app/hcw/workspaces/hcw-azure/runs and re-run bootstrap.sh.
+    success_msg: >-
+      The Arc identity reads {{ vault_seal_azurekeyvault_vault_name }}/keys/{{ vault_seal_azurekeyvault_key_name }}
+      ({{ vault_seal_key_read.json.key.kty | default('') }}, {{ vault_seal_key_read.json.key.key_ops | default([]) | join(', ') }}).
+  when:
+    - vault_seal_azurekeyvault_enabled | bool
+    - not ansible_check_mode

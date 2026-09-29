@@ -31,3 +31,45 @@ vault_advice_sealed: >-
   It is initialised and sealed: unseal it with three of the owner's unseal keys
   (lab-host/README.md, "HashiCorp Vault").
 vault_advice_unsealed: It is initialised and unsealed.
+
+# Auto-unseal (#726). The Arc agent's identity endpoint and token directory are
+# the ones Microsoft documents for Linux, and the ones MSAL for Go, inside
+# Vault, validates the challenge against: a `.key` file directly in this
+# directory, 4096 bytes at most. The token is for Key Vault's resource, which
+# is what Vault's seal asks for.
+vault_seal_azcmagent_path: /opt/azcmagent/bin/azcmagent
+vault_seal_himds_group: himds
+vault_seal_arc_tokens_dir: /var/opt/azcmagent/tokens
+vault_seal_arc_token_url: http://127.0.0.1:40342/metadata/identity/oauth2/token?api-version=2020-06-01&resource=https%3A%2F%2Fvault.azure.net
+vault_seal_key_url: "https://{{ vault_seal_azurekeyvault_vault_name }}.vault.azure.net/keys/{{ vault_seal_azurekeyvault_key_name }}?api-version=7.4"
+vault_seal_guid_pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+# Why Key Vault refused the key read, by status. -1 is no HTTP answer at all.
+vault_seal_key_refusals:
+  "-1": >-
+    {{ vault_seal_azurekeyvault_vault_name }}.vault.azure.net could not be reached (a name that
+    does not resolve, or no route out on 443). The vault is created by the hcw-azure run
+    infra/lab-hybrid.tf queues (#726).
+  "401": >-
+    Key Vault did not accept the Arc identity's token. `sudo /opt/azcmagent/bin/azcmagent show`
+    should report Connected, in the tenant that owns the vault.
+  "403": >-
+    Key Vault refuses the Arc identity: its grant on the key is missing, or too new to have taken
+    effect (a few minutes). The hcw-azure apply creates it once the Arc machine exists.
+  "404": >-
+    The vault answers, and has no key named {{ vault_seal_azurekeyvault_key_name }}. The key is
+    created by the hcw-azure run infra/lab-hybrid.tf queues (#726).
+vault_advice_uninitialised_sealed_by_key: >-
+  It is not initialised, and will unseal itself through Azure Key Vault once it is: initialise it
+  with `vault operator init -recovery-shares=5 -recovery-threshold=3`, an owner step, and the
+  five recovery keys and the root token go to the owner's password manager and nowhere else
+  (roles/vault/README.md, "Auto-unseal").
+vault_advice_migration: >-
+  It is sealed for a seal migration: run `vault operator unseal -migrate` three times, entering a
+  different one of the owner's keys at each hidden prompt (docs/runbooks/labs-host.md, "HashiCorp
+  Vault: moving to auto-unseal").
+vault_advice_sealed_by_key: >-
+  It is sealed, and unseals itself through Azure Key Vault, retrying every five seconds. If it
+  stays sealed, `sudo journalctl -u vault` says why; the recovery keys cannot unseal it
+  (roles/vault/README.md, "Auto-unseal").
+vault_advice_unsealed_by_key: >-
+  It is initialised and unsealed, and unseals itself through Azure Key Vault after every restart.

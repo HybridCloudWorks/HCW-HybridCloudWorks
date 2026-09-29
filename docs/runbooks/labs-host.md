@@ -4,7 +4,8 @@ How to reach the Hostinger lab host from a desktop over SSH and VS Code (the
 first section); how to reinstall it, and what the first `bootstrap.sh` run
 checks before it changes anything; how the lab agent goes live, which is one
 PowerShell line; how the owner reaches Portainer and
-initialises and unseals HashiCorp Vault on it (owner decision 2026-09-26);
+initialises and unseals HashiCorp Vault on it (owner decision 2026-09-26),
+and moves that Vault to auto-unseal through the Arc identity (#726);
 and how the host becomes an Azure Arc-enabled server in
 `rg-lab-hybrid-prod-cus`, sends heartbeat and `auth`/`authpriv` syslog to the
 Management workspace, and is audited against the Linux security baseline,
@@ -793,16 +794,205 @@ status` then shows `Initialized true`, `Sealed false` and `HA Mode active`.
 Rehearsed on 2026-09-26 in a test container with Vault 2.1.1: exactly that
 sequence, raft's cluster port opening on `127.0.0.1:8201` only after the
 unseal, and `Sealed true` again after `systemctl restart vault`. Auto-unseal
-through Azure Key Vault and the Arc machine's identity would remove this
-step; it is
-[#726](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/726),
-not built.
+through Azure Key Vault and the Arc machine's identity removes this step
+once the owner moves the host to it
+([#726](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/726);
+the next section).
 
 **The root token.** `vault login` prompts for it, hidden, and writes it to
 `~/.vault-token`. Use it for what the host needs, then remove that file with
 `rm ~/.vault-token`. Once another way in exists, revoke the root token with
 `vault token revoke -self`; a new one takes three unseal keys and `vault
 operator generate-root`.
+
+## HashiCorp Vault: moving to auto-unseal
+
+With auto-unseal, Vault unseals itself at every start with the key
+`vault-seal` in the lab-only Key Vault `kv-labhybrid-prod-cus-01`, signing in
+as the Arc machine's identity; nothing is stored on the host for it (#726).
+**Moving to it is the owner's decision to accept**, because of the trade
+recorded in
+[ADR 0032, amendment of 2026-09-29](../decisions/0032-learner-labs-platform.md#amendment-2026-09-29-vault-auto-unseal-through-the-arc-identity):
+afterwards, root on the host together with the Arc identity can unseal
+Vault, which the Shamir keys alone never allowed. The five keys in the
+password manager become **recovery keys**. Keep them: they still authorise
+`generate-root`, a rekey, and the migration back. They can no longer unseal
+Vault, so if Key Vault or the key is unreachable, Vault stays down until it
+is back.
+
+Every step below was rehearsed on 2026-09-29 against Vault 2.1.1, the pinned
+role and ansible-core, in an Ubuntu 26.04 container with a stand-in for the
+Arc agent's challenge flow and for Key Vault. Each prints what is quoted as
+its success.
+
+**1. The `hcw-azure` run.** The merge of #726 queues a run that stops at
+**planned** at https://app.terraform.io/app/hcw/workspaces/hcw-azure/runs.
+Expected: **`Plan: 7 to add, 1 to change, 3 to destroy`**. That is the
+permanent `RUNTIME_CONFIG_WRITER` change and three `azapi_*` replacements
+(`infra/functionapp.tf`) plus four new resources:
+`azurerm_key_vault.lab_hybrid`, `azapi_resource.lab_hybrid_vault_seal_key`,
+`azurerm_role_assignment.lab_hybrid_vault_seal[0]` and
+`azurerm_monitor_diagnostic_setting.lab_hybrid_key_vault`. Anything else is
+not this change; stop and read the plan. Confirm and apply.
+
+**2. Read the grant back.** PowerShell, on the workstation. The first line
+finds the application subscription's id and the Arc machine's identity; the
+second lists the assignments on the key and says whether each is that
+identity:
+
+```powershell
+$sub = (az account show --subscription sub-app-site-prod-cus -o json | ConvertFrom-Json).id; $arc = (az resource show --ids "/subscriptions/$sub/resourceGroups/rg-lab-hybrid-prod-cus/providers/Microsoft.HybridCompute/machines/arcs-lab-hybrid-prod-cus-01" -o json | ConvertFrom-Json).identity.principalId
+```
+
+```powershell
+az role assignment list --scope "/subscriptions/$sub/resourceGroups/rg-lab-hybrid-prod-cus/providers/Microsoft.KeyVault/vaults/kv-labhybrid-prod-cus-01/keys/vault-seal" -o json | ConvertFrom-Json | Select-Object roleDefinitionName, principalType, @{n='isArcMachine'; e={$_.principalId -eq $arc}}
+```
+
+Success is exactly one row: `Key Vault Crypto Service Encryption User`,
+`ServicePrincipal`, `True`. No row means the apply has not run, or the Arc
+machine did not exist when it planned; run it again from the runs page.
+
+**3. On the host.** PowerShell, on the workstation:
+
+```powershell
+ssh hcw-lab
+```
+
+Every line from here is bash, on the host, one at a time. Vault as it is
+now:
+
+```bash
+vault status
+```
+
+Success is `Seal Type shamir`, `Initialized true` and `Sealed false`.
+
+**4. Turn the switch on for this host.**
+
+```bash
+sudo install -d -m 0755 /etc/ansible/facts.d && echo '{"enabled": true}' | sudo tee /etc/ansible/facts.d/hcw_vault_seal.fact
+```
+
+Success prints `{"enabled": true}`.
+
+**5. Read the key as the Arc identity, before touching Vault.** Only the
+role's seal checks run:
+
+```bash
+sudo /opt/hcw-src/lab-host/bootstrap.sh --tags vault_seal_check
+```
+
+Success is `failed=0` and, under `vault : Refuse the seal until the Arc
+identity can read a wrap and unwrap key`, the line `The Arc identity reads
+kv-labhybrid-prod-cus-01/keys/vault-seal (RSA, wrapKey, unwrapKey).` Vault is
+untouched. A refusal names its reason and changes nothing: `Key Vault refuses
+the Arc identity` is the grant (wait a few minutes after the apply and run
+the line again), `has no key named` is the apply. To stop here for the day
+instead, `sudo rm /etc/ansible/facts.d/hcw_vault_seal.fact` puts the host
+back as it was.
+
+**6. A cold copy of Vault's data.** Vault stops here and stays stopped until
+step 7 starts it:
+
+```bash
+sudo systemctl stop vault && sudo tar -C /var/lib -czf /root/vault-before-726.tgz vault && sudo ls -l /root/vault-before-726.tgz
+```
+
+Success is one line listing `/root/vault-before-726.tgz`, owned by root. It
+is Vault's encrypted storage from before the migration, which the current
+keys unseal; keep it until the host has come back unsealed from a reboot.
+
+**7. Write the seal and start Vault on it.**
+
+```bash
+sudo /opt/hcw-src/lab-host/bootstrap.sh
+```
+
+Success is `failed=0` and the task `vault : Say what state Vault is in`
+printing `It is sealed for a seal migration`. `vault status` now shows
+`Seal Type azurekeyvault`, `Recovery Seal Type shamir`, `Sealed true` and
+`Seal Migration in Progress true`.
+
+**8. Migrate, with three of the five keys.** Three times, entering a
+different key at each `Unseal Key (will be hidden):` prompt. The command
+takes no argument, so no key reaches the shell's history, and the prompt
+reads only from a terminal:
+
+```bash
+vault operator unseal -migrate
+```
+
+Success is `Unseal Progress 1/3`, then `2/3`, then `Sealed false` with
+`Seal Migration in Progress true` still shown at that instant.
+
+**9. Wait for the migration to finish.**
+
+```bash
+vault status
+```
+
+Success is `Seal Type azurekeyvault`, `Recovery Seal Type shamir`,
+`Sealed false`, and **no** `Seal Migration in Progress` line. Vault writes
+`core: seal migration complete` to its log a moment after the third key.
+While the line is still there, run `vault status` again after a second. Do
+not restart before it goes: in the rehearsal, a restart 8 milliseconds after
+the third key brought Vault back sealed and still migrating, and entering
+the three keys again at step 8 finished it.
+
+**10. The test: a restart comes back unsealed by itself.**
+
+```bash
+sudo systemctl restart vault && sleep 5 && vault status
+```
+
+Success is `Seal Type azurekeyvault`, `Recovery Seal Type shamir`,
+`Initialized true` and `Sealed false`, with exit code 0. A later
+`bootstrap.sh` run prints `It is initialised and unsealed, and unseals itself
+through Azure Key Vault after every restart.`
+
+**If it goes wrong.** Two ways back, both rehearsed:
+
+- **At any point from step 6 on: restore the cold copy**, which the keys
+  from before the migration unseal. Bash, on the host, one line at a time,
+  then unseal it three times as in the section above:
+
+  ```bash
+  sudo rm /etc/ansible/facts.d/hcw_vault_seal.fact
+  ```
+
+  ```bash
+  sudo systemctl stop vault && sudo find /var/lib/vault -mindepth 1 -delete && sudo tar -C /var/lib -xzf /root/vault-before-726.tgz
+  ```
+
+  ```bash
+  sudo /opt/hcw-src/lab-host/bootstrap.sh
+  ```
+
+  Success is `failed=0`, `It is initialised and sealed`, and after the three
+  unseals `Seal Type shamir` and `Sealed false`. Anything written to Vault
+  after step 6 is not in the copy.
+
+- **After step 10, with the key still in Key Vault: migrate back to Shamir
+  keys.** Bash, on the host. Mark the seal disabled, run step 7's line, and
+  run step 8's line three times with three of the same keys (now recovery
+  keys, and unseal keys again after this). When `vault status` shows
+  `Seal Type shamir` with no migration line, delete the fact with
+  `sudo rm /etc/ansible/facts.d/hcw_vault_seal.fact` and run step 7's line
+  once more to drop the stanza; that restart seals Vault, so unseal it as in
+  the section above:
+
+  ```bash
+  echo '{"enabled": true, "disabled": true}' | sudo tee /etc/ansible/facts.d/hcw_vault_seal.fact
+  ```
+
+**Afterwards.** Once the seal is on, never run `bootstrap.sh` with
+`HCW_REPO_REF` at a commit older than #726: that role knows nothing of the
+seal and would write a configuration without it. The role refuses to drop
+the stanza itself while Vault's data is under it. Every unwrap is in the
+Management workspace as an `AzureDiagnostics` row with the caller's IP
+address, from the vault's AuditEvent diagnostic setting. When the owner has
+seen the host come back unsealed from a reboot, the cold copy can go:
+`sudo rm /root/vault-before-726.tgz`.
 
 ## Arc onboarding
 

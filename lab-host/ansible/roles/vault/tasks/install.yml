@@ -203,6 +203,14 @@
       and restarts Vault, sealed (roles/vault/README.md, "Rotating the certificate").
   when: vault_certificate_check.rc | default(0) == 1
 
+# Before the configuration: the seal's refusals must run while Vault still
+# runs on the configuration it has. Tagged so that `bootstrap.sh --tags
+# vault_seal_check` runs these checks and nothing else: the owner's first step
+# of the migration reads the key as the Arc identity without touching Vault.
+- name: Check the auto-unseal seal before writing a configuration that uses it or drops it
+  ansible.builtin.import_tasks: seal.yml
+  tags: vault_seal_check
+
 - name: Write Vault's configuration
   ansible.builtin.template:
     src: vault.hcl.j2
@@ -249,8 +257,10 @@
 # Not a handler: the status read below must see the Vault this run
 # configured, and handlers run after it. A restart seals Vault, so it happens
 # only when the binary, the configuration, the certificate or the unit
-# actually changed, and never straight after the start above.
-- name: Restart Vault after its binary, configuration, certificate or unit changed (it comes back sealed)
+# actually changed, and never straight after the start above. With the seal
+# on it unseals itself again; the restart that first adds the seal brings it
+# up sealed and waiting for `vault operator unseal -migrate`.
+- name: Restart Vault after its binary, configuration, certificate or unit changed (sealed unless the seal unseals it)
   ansible.builtin.systemd_service:
     name: vault
     state: restarted
@@ -280,12 +290,22 @@
   failed_when: vault_status.rc not in [0, 2]
   when: not ansible_check_mode
 
+# `migration` is true from the start that first finds a changed seal until a
+# few seconds after `vault operator unseal -migrate` has taken its third key;
+# `type` names the seal Vault is moving to or runs under (both read from
+# Vault 2.1.1 in the #726 rehearsal).
 - name: Say what state Vault is in, and whose step is next
   ansible.builtin.debug:
     msg: "HashiCorp Vault {{ vault_version }} answers on {{ vault_api_addr }} only. {{ vault_state_advice }}"
   vars:
     vault_seal_status: "{{ vault_status.stdout | from_json }}"
+    vault_sealed_by_key: "{{ vault_seal_status.type | default('') == 'azurekeyvault' }}"
     vault_state_advice: >-
-      {{ vault_advice_uninitialised if not vault_seal_status.initialized
-         else (vault_advice_sealed if vault_seal_status.sealed else vault_advice_unsealed) }}
+      {% if not vault_seal_status.initialized %}{{
+        vault_advice_uninitialised_sealed_by_key if vault_seal_azurekeyvault_enabled | bool else vault_advice_uninitialised }}
+      {%- elif vault_seal_status.migration | default(false) %}{{ vault_advice_migration }}
+      {%- elif vault_seal_status.sealed %}{{
+        vault_advice_sealed_by_key if vault_sealed_by_key | bool else vault_advice_sealed }}
+      {%- else %}{{ vault_advice_unsealed_by_key if vault_sealed_by_key | bool else vault_advice_unsealed }}
+      {%- endif %}
   when: not ansible_check_mode

@@ -49,6 +49,10 @@ What "After" still counts:
   silence them is `.qlty/qlty.toml`, which #568 (PR #581) owns. The rule to
   add is in [radarlint-iac](#radarlint-iac).
 
+The table is the 2026-09-14 run. Since then #726 (2026-09-29) added three
+accepted checkov rows and one accepted trivy row, all on the lab-only Key
+Vault in `infra/lab-hybrid.tf`; their rows below say why.
+
 Verdicts:
 
 - **Fixed:** changed in this PR, so the scanner no longer reports it.
@@ -274,10 +278,11 @@ inside `run:`. Only people with write access can dispatch a workflow.
 | CKV_GHA_7 | `.github/workflows/monitor-functions-registered.yml:104` | Fixed | The inputs (app, resource group, minimum count) only repeated the one estate's values. A dispatch could only point the monitor at the wrong app or loosen its threshold. Now fixed in `env:`, so a manual run checks what the schedule checks. | Inputs removed, 2026-09-14 |
 | CKV_GHA_7 | `.github/workflows/verify-alert-state.yml:49` | Fixed | Same shape: one resource group input whose only other value would be wrong. | Input removed, 2026-09-14 |
 
-### Terraform (29)
+### Terraform (32)
 
-Infra files at `357114f4`. Owner decisions were read from `infra/variables.tf`
-and `docs/decisions/` before any verdict.
+Infra files at `357114f4`, and the last three rows from #726 on 2026-09-29.
+Owner decisions were read from `infra/variables.tf` and `docs/decisions/`
+before any verdict.
 
 | Rule | File:line | Resource | Verdict | Reason and evidence | Resolution |
 | --- | --- | --- | --- | --- | --- |
@@ -310,6 +315,9 @@ and `docs/decisions/` before any verdict.
 | CKV2_AZURE_32 | `infra/keyvault.tf:19` | `azurerm_key_vault.hcw` | Accepted | No private endpoints, ADR 0031. `network_acls` default Deny with the subnet service-endpoint rule. | Inline skip, 2026-09-14 |
 | CKV_AZURE_212 | `infra/functionapp.tf:13` | `azurerm_service_plan.hcw` | Accepted | FC1 has no `worker_count`. Failover instances on Flex are always-ready instances, declined by the owner against the USD 150 budget, ADR 0031. | Inline skip, 2026-09-14 |
 | CKV_AZURE_225 | `infra/functionapp.tf:13` | `azurerm_service_plan.hcw` | Accepted | Zone redundancy on Flex forces at least two always-ready instances, about USD 40/month. Declined, ADR 0031. | Inline skip, 2026-09-14 |
+| CKV_AZURE_109 | `infra/lab-hybrid.tf` | `azurerm_key_vault.lab_hybrid` | Accepted | Network default Allow on purpose. The only caller is HashiCorp Vault on the lab VPS, whose address belongs to the `hcw-lab` workspace that `infra/` never reads (ADR 0032 decision 1), and an IP rule that drifted from it would leave Vault unable to unseal, which its recovery keys cannot do. Entra ID and one key-scoped grant gate every call, and AuditEvent logs each unwrap with the caller's address. [ADR 0032](../decisions/0032-learner-labs-platform.md#amendment-2026-09-29-vault-auto-unseal-through-the-arc-identity), amendment of 2026-09-29. | Inline skip, 2026-09-29 (#726) |
+| CKV_AZURE_189 | `infra/lab-hybrid.tf` | `azurerm_key_vault.lab_hybrid` | Accepted | Public network access stays on for the same reason: the VPS is outside Azure and has no private path to the vault. | Inline skip, 2026-09-29 (#726) |
+| CKV2_AZURE_32 | `infra/lab-hybrid.tf` | `azurerm_key_vault.lab_hybrid` | Accepted | No private endpoints, ADR 0031, and a private endpoint could not serve a caller outside Azure. | Inline skip, 2026-09-29 (#726) |
 
 ### Secrets (1)
 
@@ -330,6 +338,7 @@ finding. No `.trivyignore` is needed.
 | AZU-0061 | `infra/storage.tf:49` | Accepted | Infrastructure encryption can be set only at account creation. The owner kept this account, ADR 0031. | Inline ignore, 2026-09-14 |
 | AZU-0061 | `infra/storage.tf` | Accepted | As above, on the Function host account. | Inline ignore, 2026-09-14 |
 | AZU-0058 | `infra/storage.tf` | Fixed | Host storage is GRS. Same change as checkov CKV_AZURE_206. | 2026-09-14 |
+| AZU-0013 | `infra/lab-hybrid.tf` | Accepted | Network default Allow on `azurerm_key_vault.lab_hybrid`, the lab-only Key Vault; the reason is checkov CKV_AZURE_109's row. Without the ignore it is the file's one finding at any severity (CRITICAL), measured with trivy 0.69.3. | Inline ignore, 2026-09-29 (#726) |
 
 Two trivy ignores on one resource must sit on consecutive lines directly above
 it. A comment line between them drops the upper one, as found locally with

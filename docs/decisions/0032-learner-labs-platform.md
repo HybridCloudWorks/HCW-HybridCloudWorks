@@ -1,6 +1,6 @@
 # ADR 0032: The learner labs platform — a Terraform-managed Hostinger host under Azure Arc, Docker only, Coder as the learner boundary, and public submission locked to the site's pane
 
-**Status:** Accepted 2026-09-27 (owner: "all have been approved to move forward"); amended 2026-09-26 and 2026-09-28. Decision 6 was revised on 2026-09-28: public submission is open, only from the Landing Zone Builder's pane on the site, locked by the request's origin and a Cloudflare Turnstile token, within decision 6's original bounds, which are unchanged. Also on 2026-09-28 the site began embedding Coder, in a pane on each lab's page, which decision 4 had ruled out and the alternatives had rejected ([amendment of that date](#amendment-2026-09-28-coder-in-the-sites-panes), #750 and #751).
+**Status:** Accepted 2026-09-27 (owner: "all have been approved to move forward"); amended 2026-09-26 and 2026-09-28; amendment of 2026-09-29 (Vault auto-unseal, #726) proposed, built off, and the owner's to accept. Decision 6 was revised on 2026-09-28: public submission is open, only from the Landing Zone Builder's pane on the site, locked by the request's origin and a Cloudflare Turnstile token, within decision 6's original bounds, which are unchanged. Also on 2026-09-28 the site began embedding Coder, in a pane on each lab's page, which decision 4 had ruled out and the alternatives had rejected ([amendment of that date](#amendment-2026-09-28-coder-in-the-sites-panes), #750 and #751).
 **Decision date:** 2026-09-25
 **Owners:** Workload owner and architecture owner
 
@@ -229,13 +229,17 @@ clean deployment.
    `kv-site-prod-cus-01`. That is
    [#726](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/726),
    P3 on the board.
+   (Built 2026-09-29 and off until the owner accepts it for the host: the
+   [amendment of that date](#amendment-2026-09-29-vault-auto-unseal-through-the-arc-identity).)
 
 Consequences of this amendment:
 
 - **Vault is sealed after every restart and every reboot**, including the
   unattended-upgrades reboot at 04:30, until the owner enters three of the
   five unseal keys. Anything on the host that reads from Vault must tolerate
-  a sealed Vault. #726 is the way out.
+  a sealed Vault. #726 is the way out. (Built 2026-09-29; this holds until
+  the owner moves the host to auto-unseal, after which a restart comes back
+  unsealed while Key Vault answers. The amendment of that date.)
 - **The inbound policy is unchanged.** Both new services listen on the
   loopback, and nothing listens on a public address but sshd on 22 and Caddy
   on 80 and 443. Because Docker's rules for a published port come before
@@ -461,6 +465,143 @@ app (a workspace's JavaScript on the dashboard's origin), rewriting Coder's
 HTML in Caddy, and exempting same-site top-level visits (which would end
 panes-only).
 
+## Amendment 2026-09-29: Vault auto-unseal through the Arc identity
+
+**Status: proposed, and the owner's to accept.** It is built and off. It
+takes effect on the lab host only when the owner writes
+`/etc/ansible/facts.d/hcw_vault_seal.fact` there and runs the migration in
+the [Labs host runbook](../runbooks/labs-host.md#hashicorp-vault-moving-to-auto-unseal),
+and doing that is the acceptance of the trade stated below. Until then Vault
+stays on the five Shamir keys, exactly as the amendment of 2026-09-26 left it.
+
+**Context.** That amendment's item 3 leaves Vault sealed after every restart,
+the 04:30 unattended-upgrades reboot included, until the owner enters three
+keys, and names #726 as the way out. #726 asked first whether Vault's
+`azurekeyvault` seal can sign in through the Arc agent's local identity
+endpoint, or only through Azure VM IMDS, a client secret or workload
+identity. Only the first keeps a secret off the host, and without it this
+record would not take auto-unseal.
+
+**The answer**, read against the source of the pinned release, Vault 2.1.1.
+`go version -m` on the signature-checked binary lists exactly the module
+versions below.
+
+1. The seal (`go-kms-wrapping/wrappers/azurekeyvault` v2.0.14) signs in with
+   a client secret only when `tenant_id`, `client_id` and `client_secret` are
+   all set, and otherwise calls `azidentity.NewDefaultAzureCredential`.
+   Verified in source.
+2. That chain (`azidentity` v1.13.1) includes `ManagedIdentityCredential`,
+   which hands managed identity to MSAL for Go v1.6.0. MSAL recognises an
+   Arc machine from `IDENTITY_ENDPOINT` and `IMDS_ENDPOINT`, or from
+   `/opt/azcmagent/bin/himds` existing, and runs the agent's challenge flow:
+   a 401 naming a `.key` file in `/var/opt/azcmagent/tokens`, then the same
+   request carrying that file's contents. The chain can be pinned to managed
+   identity with `AZURE_TOKEN_CREDENTIALS=ManagedIdentityCredential`.
+   Verified in source.
+3. Microsoft documents the rest of the host side: the agent sets both
+   variables in `/lib/systemd/system.conf.d/azcmagent.conf`, its daemon is
+   `himdsd.service`, and "On Linux, you must be a member of the `himds`
+   group" to read the challenge file. Verified on Microsoft Learn.
+4. Arc has a system-assigned identity only. MSAL refuses a user-assigned one
+   there ("Azure Arc doesn't support user-assigned managed identities"), and
+   the seal turns a `client_id` into exactly that request, so the stanza
+   carries none. Verified in source.
+5. HashiCorp's seal page describes managed identity only "if Vault is hosted
+   on Azure" and does not mention Arc. The path is supported by the code, not
+   documented by HashiCorp: a Vault upgrade is a reason to read this again
+   (revisit triggers).
+6. End to end, in a container: the real 2.1.1 binary, running as `vault` with
+   only the `himds` group added by its unit, answered the challenge of a
+   stand-in for the agent, received a token, read the key from a stand-in for
+   Key Vault, wrapped and unwrapped with it, migrated from Shamir and came
+   back unsealed after a restart. That the real agent and Key Vault behave as
+   the stand-ins do, which follow Microsoft's documented flow, is inferred;
+   the owner's migration on the host is its proof.
+
+**Decision, proposed.**
+
+1. **A lab-only Key Vault, `kv-labhybrid-prod-cus-01`**, in
+   `rg-lab-hybrid-prod-cus` (`infra/lab-hybrid.tf`). Standard tier, RBAC
+   authorisation, purge protection, `prevent_destroy`, and AuditEvent to the
+   Management workspace. The name drops a hyphen because the pattern's
+   `kv-lab-hybrid-prod-cus-01` is 25 characters and Key Vault allows 24.
+2. **One key, `vault-seal`**: RSA 3072, software-protected, allowed
+   `wrapKey` and `unwrapKey` only, with `prevent_destroy`. It is created
+   through Resource Manager, which needs only
+   `Microsoft.KeyVault/vaults/keys/write` (Contributor has it), so the
+   Terraform run identity holds no data-plane role on any vault.
+3. **The Arc identity's only grant: Key Vault Crypto Service Encryption User
+   on that key**, whose data actions are read, wrap and unwrap, and nothing
+   on the vault or anywhere else. Terraform reads the Arc machine's principal
+   at plan time and plans no grant while the machine does not exist, so a
+   rebuilt host's new identity gets the grant at the next apply and the old
+   one loses it.
+4. **On the host, opt-in per installation.** The `vault` role adds a
+   `seal "azurekeyvault"` stanza with no `client_id` and no secret, and the
+   unit pins the credential chain to managed identity, joins `himds`, starts
+   after the agent and retries every 30 seconds without a limit. The role
+   reads the key as the Arc identity before it writes the stanza, and refuses
+   to write a configuration without it while Vault's data is under it.
+5. **Cost.** No monthly charge for a Standard vault or a software key; RSA
+   3072 is an advanced key type at $0.15 per 10,000 operations (Azure Retail
+   Prices API, Central US, read 2026-09-29). Vault's seal health check wraps
+   and unwraps every 10 minutes while unsealed, about 8,800 operations a
+   month, so about **$0.13 a month**. AuditEvent adds about 300 rows a day
+   to the Management workspace, under a megabyte (estimated, not measured),
+   inside its free 5 GB a month and well under 1% of its 0.25 GB daily cap.
+
+**The trade, which is the owner's to accept.** With Shamir, root on this
+host, which a workspace escape can reach, cannot unseal Vault: the root key
+is split across keys only the owner holds. **With auto-unseal, root on the
+host together with the Arc identity can.** Root can restart Vault and it
+comes back unsealed, and a copy of the disk taken off the host, which holds
+the agent's identity key as well as Vault's storage (the agent keeps that key
+on the host unless the machine uses a TPM key store), can be unsealed for as
+long as that identity keeps its grant. With Shamir, the same copy stays
+sealed. What root gains that it does not already have is therefore narrow:
+root can already read an unsealed Vault's memory, which the amendment of
+2026-09-26 accepted, and Vault is unsealed nearly all the time. The
+difference is the sealed window after a restart, and a disk copied away. The
+boundary that makes this acceptable is unchanged: Vault holds lab-host
+secrets only, never a production secret and nothing that exists nowhere
+else, and the Arc identity reaches one key and nothing else. The detection
+is the vault's audit log, where every unwrap carries the caller's IP
+address. The revocation is removing the grant, or disconnecting the machine,
+which deletes the identity. The price in availability is that Vault needs
+Entra ID, Key Vault and the agent to start, and the recovery keys cannot
+stand in for them, so an outage leaves Vault down until they answer, and a
+deleted key would lose the Vault for good.
+
+**Alternatives considered.**
+
+- **A service principal and a client secret on the host.** Rejected: a
+  stored secret root can read, and one more thing to rotate. It is what #726
+  was opened to avoid.
+- **Workload identity federation.** There is no token issuer on the host to
+  federate, and Arc's identity is already the host's own credential.
+- **Key Vault Crypto User, or a grant on the vault.** Rejected as wider than
+  what Vault calls: Crypto User adds sign, verify, encrypt, decrypt, update
+  and backup, and a vault-scope grant reaches any key added later.
+- **An IP rule on the vault's firewall.** Not now. The host's address belongs
+  to the `hcw-lab` workspace, which `infra/` never reads (decision 1), and a
+  rule that drifted from it would leave Vault unable to unseal. Revisit
+  trigger below.
+- **A Premium vault and an HSM-backed key.** A monthly charge per key for a
+  Vault that holds only secrets their issuers can issue again.
+- **Keep Shamir.** The default, and what the host runs until the owner writes
+  the fact.
+
+**Consequences of this amendment, once the owner accepts it:**
+
+- A restart, including the 04:30 reboot, comes back `Sealed false` with no
+  owner step, and the five keys become recovery keys: still needed for
+  `generate-root`, a rekey and a migration back, never again for an unseal.
+- Every `hcw-azure` plan reads the Arc machine, and tolerates its absence.
+- A rebuilt host starts without the seal, whatever the repository says; the
+  owner writes the fact again after the next apply has moved the grant.
+- Once the seal is on, `bootstrap.sh` must never run at a commit older than
+  #726, whose role would write a configuration without it.
+
 ## Consequences and accepted risks
 
 - **Two Terraform workspaces, two lifecycles.** A change to the lab host is a
@@ -475,7 +616,9 @@ panes-only).
 - **Arc adds an identity to the host.** The Arc agent's system-assigned
   identity can be granted Azure roles. This record grants it none beyond what
   the data collection rule needs; any grant is a change to `infra/` with its
-  own review.
+  own review. (The amendment of 2026-09-29 proposes the first, in
+  `infra/lab-hybrid.tf`: read, wrap and unwrap on one key in a lab-only Key
+  Vault, never `kv-site-prod-cus-01`.)
 - **Ingestion is bounded but not zero.** Heartbeat and auth syslog on one host
   are kilobytes a day against the workspace's 0.25 GB/day cap
   ([ADR 0031](0031-security-scanner-owner-decisions.md) records the headroom).
@@ -642,7 +785,20 @@ panes-only).
     **Confirm and Create**, code-server opens inside the pane, and a direct
     visit to `https://coder.lab.hybridcloudworks.com/_hcw/lab/` also lands on
     `/education/labs`.
+  - Since the amendment of 2026-09-29, once the owner has accepted it: on the
+    host, `sudo systemctl restart vault && sleep 5 && vault status` shows
+    `Seal Type azurekeyvault` and `Sealed false`, and `az role assignment
+    list` on the key `vault-seal` returns one row, Key Vault Crypto Service
+    Encryption User for the Arc machine's identity (the runbook's step 2).
 - **Revisit when:**
+  - Vault is upgraded past 2.1.x, which is a reason to read the seal's
+    credential path again: signing in through the Arc agent is supported by
+    the code, not documented by HashiCorp (amendment of 2026-09-29);
+  - the Key Vault audit log shows an unwrap from an address that is not the
+    lab host's, which is a revocation first (remove the grant) and a review
+    of the auto-unseal trade second;
+  - the lab host's public address becomes something `infra/` can read, which
+    reopens an IP rule on `kv-labhybrid-prod-cus-01`;
   - the owner decides to open public submission, which is a revision of §6 of
     this record and nothing else (done 2026-09-28, the amendment of that
     date);

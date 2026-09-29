@@ -970,10 +970,32 @@ Vault: initialising and unsealing": `vault operator init` once, whose five
 unseal keys and root token go to the owner's password manager and nowhere
 else, then `vault operator unseal` three times. **A restart seals Vault**,
 and so does every reboot, including the unattended-upgrades reboot at 04:30,
-so the three unseals are repeated after each. The login shell sets
+so the three unseals are repeated after each, until the host moves to
+auto-unseal (next section). The login shell sets
 `VAULT_ADDR=https://127.0.0.1:8200` and `VAULT_CACERT`
 (`/etc/profile.d/hcw-vault.sh`), so `vault status` needs no flags; success
 before initialising is `Initialized false` and `Sealed true`, exit code 2.
+
+### Auto-unseal
+
+Off until the owner turns it on for this host (#726; ADR 0032, amendment of
+2026-09-29). With it on, Vault unseals itself at every start with the key
+`vault-seal` in the lab-only Key Vault `kv-labhybrid-prod-cus-01`
+(`infra/lab-hybrid.tf`), signing in as the Arc machine's identity through
+the agent on `127.0.0.1:40342`. Nothing is stored on the host for it. The
+five Shamir keys become recovery keys, which can no longer unseal Vault:
+if Key Vault or the key is unreachable, Vault stays down until it is back.
+
+The switch is on the host, as Arc's is: `/etc/ansible/facts.d/hcw_vault_seal.fact`
+holding `{"enabled": true}`. The `vault` role writes the seal only after it
+has read the key through Key Vault as the Arc identity, and refuses to drop
+it while Vault's data is under it (`ansible/roles/vault/README.md`,
+"Auto-unseal"). Moving the running Vault onto it is the owner's
+`vault operator unseal -migrate`, one line at a time, in
+[docs/runbooks/labs-host.md](../docs/runbooks/labs-host.md), "HashiCorp
+Vault: moving to auto-unseal". Once it is on, never run `bootstrap.sh` with
+`HCW_REPO_REF` at a commit older than #726: that role knows nothing of the
+seal and would write a configuration without it.
 
 ### Turning it off
 
