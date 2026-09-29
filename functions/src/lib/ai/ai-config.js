@@ -137,8 +137,10 @@ export const FEATURE_NAMES = Object.freeze(Object.keys(AI_FEATURES));
 /**
  * Order used when configuration says nothing. Owner decision, 2026-08-23:
  * Gemini first, then OpenAI, then Claude. NVIDIA (#701) is appended last and
- * is placed per feature — see PER_FEATURE_PROVIDERS below — so for content
- * features it is moved to the front, and for the public ones it is removed.
+ * is placed per feature — see PER_FEATURE_PROVIDERS below. By default it
+ * stays last for content features, as their backup (2026-09-29), an
+ * administrator can move it to the front for one feature, and for the public
+ * ones it is removed.
  *
  * This is a cost ordering, not a quality one. Gemini Flash-Lite is roughly a
  * tenth of Claude Sonnet per token, and the work behind these calls — summarise
@@ -193,19 +195,30 @@ export const PLACEMENTS = Object.freeze(['first', 'order', 'off']);
  * rule 3, deliberately: rule 3 is about the feature running at all, this is
  * about a trial-tier provider joining it.
  *
- * Content features the owner triggers are 'first'. The Telegram assistant is
- * owner-only chat rather than content, so it keeps the global order.
+ * Content features the owner triggers were 'first' from #701 until 2026-09-29,
+ * then 'order' (owner decision that day). Measured through the portal's Test:
+ * the free tier took 56-117 s to say "ok" with the drafting limits, and did not
+ * answer 16 tokens inside 45 s once the Test was capped (#806), so the delay is
+ * the trial tier queueing, not the model thinking. As 'first' every
+ * synchronous call waited out NVIDIA's budget share (about 35 s, #807) before
+ * the paid provider answered, and every background call waited up to two
+ * minutes. As 'order' NVIDIA is the backup: used when the providers above it
+ * cannot serve. A weekly probe (the `probeAiProviders` timer, Monday 06:15
+ * UTC, lib/timers/ai-provider-probe.js) runs the portal's Test against every
+ * provider with a key and records the latency on each provider card, so
+ * moving a feature back to 'first' is a choice made on evidence. The Telegram
+ * assistant is owner-only chat rather than content, and was 'order' already.
  */
 export const PROVIDER_PLACEMENT_DEFAULTS = Object.freeze({
   nvidia: Object.freeze({
-    inspector: 'first',
-    critique: 'first',
-    forgeDrafting: 'first',
-    forgeGrading: 'first',
-    voiceCalibration: 'first',
-    socialCaption: 'first',
-    listenAndLearn: 'first',
-    podcastScript: 'first',
+    inspector: 'order',
+    critique: 'order',
+    forgeDrafting: 'order',
+    forgeGrading: 'order',
+    voiceCalibration: 'order',
+    socialCaption: 'order',
+    listenAndLearn: 'order',
+    podcastScript: 'order',
     telegram: 'order',
     altText: 'off',
     sourceGrounding: 'off',

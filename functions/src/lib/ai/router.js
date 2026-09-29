@@ -90,8 +90,11 @@
  * three in four deliberate ways:
  *
  *   - Its place in the chain is set PER FEATURE (ai-config.js,
- *     PER_FEATURE_PROVIDERS): first for owner-triggered content, never for
- *     the anonymous public explain route. A call with no feature never uses it.
+ *     PER_FEATURE_PROVIDERS): for owner-triggered content it is the backup,
+ *     after the paid providers, unless an administrator places it first for
+ *     a feature (owner decision 2026-09-29; it was first by default from
+ *     2026-09-25 until then). It is never used for the anonymous public
+ *     explain route, and a call with no feature never uses it.
  *   - A pacing guard keeps this instance under the account limit. A call the
  *     guard refuses is not sent and fails over at once, so a burst of batch
  *     drafts degrades to the paid providers instead of failing.
@@ -138,7 +141,11 @@
  * must fit under, are pinned in sync-budgets.test.js. On the trial tier's
  * measured latency, NVIDIA will seldom finish inside a synchronous share.
  * What the budget guarantees is that it can no longer stop the provider
- * behind it from answering.
+ * behind it from answering. Since 2026-09-29 NVIDIA is not first by
+ * default, so the NVIDIA case above arises only where an administrator
+ * places it first; the budget still bounds any other slow first provider.
+ * The weekly probe (lib/timers/ai-provider-probe.js) is the evidence for
+ * placing it first again.
  *
  * A Key Vault reference that did not resolve arrives as the literal
  * `@Microsoft.KeyVault(...)` string. That is not a key; `readKey` says so.
@@ -1575,7 +1582,7 @@ export function createAiRouter({
   /** The aiProxy / testAiProvider shape: an explicit provider, text back with token counts. */
   /**
    * One call to one named provider, with no failover (the portal's Test and
-   * Playground). `maxTokens` is an optional per-call cap for providers whose
+   * Playground, and the weekly probe that runs the Test). `maxTokens` is an optional per-call cap for providers whose
    * table row sends one (NVIDIA). `timeoutMs` is an optional per-call limit
    * that every provider honours; a budgeted call passes the same argument.
    * The Test passes small values of both, so a reasoning model proves it

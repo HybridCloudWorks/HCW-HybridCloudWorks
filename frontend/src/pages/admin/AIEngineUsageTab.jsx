@@ -42,6 +42,8 @@ export const SOURCE_LABELS = {
   'podcast:script': 'Podcast transcript — script',
   'podcast:audio': 'Podcast transcript — audio',
   'podcast:sample': 'Podcast voice — live check',
+  admin_test: 'AI Engine — Test',
+  'ai-engine:probe': 'AI Engine — weekly check',
 };
 
 export default function AIEngineUsageTab() {

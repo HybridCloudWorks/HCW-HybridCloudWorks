@@ -2012,6 +2012,52 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **NVIDIA is the backup for content features, and a weekly probe records
+  its speed (#701).** Owner decision 2026-09-29. Through the AI Engine's
+  Test, NVIDIA's free trial tier took 56-117 s to answer "ok" with the
+  drafting limits. Capped at 16 tokens and 45 s (#806), it did not answer at
+  all, so the delay is the tier queueing. As `first` for content features,
+  every synchronous call waited out NVIDIA's budget share (about 35 s, #807)
+  before a paid provider answered.
+  - `PROVIDER_PLACEMENT_DEFAULTS.nvidia` in
+    `functions/src/lib/ai/ai-config.js` is now `order` for the eight content
+    features: Gemini, OpenAI and Anthropic answer first, and NVIDIA serves
+    when they cannot. Telegram was `order` already. The public explain
+    features and alt text stay locked `off`.
+  - A stored placement still wins. A feature an administrator set to
+    **First** keeps it; the dropdown's `order` option now reads "In order —
+    the backup", in the owner's words for the decision.
+  - The Test's core is `testProviderConnection` in
+    `functions/src/lib/ai/proxy.js`, with no HTTP or auth. The Test button
+    and a new timer both call it.
+  - The timer is `probeAiProviders`, Monday 06:15 UTC, in
+    `functions/src/functions/schedulers.js` and
+    `functions/src/lib/timers/ai-provider-probe.js`. It runs the Test on
+    every provider with a key, one at a time, so NVIDIA's latency sits beside
+    the paid providers', measured the same minute. It writes `status`,
+    `latencyMs`, `lastTested` and `lastTestError`, as the Test does, plus
+    `lastTestedBy: 'probe'`. A timeout is recorded, not thrown. The cost is
+    the Test's, a fraction of a cent a week; its usage rows have their own
+    source, `ai-engine:probe` ("AI Engine — weekly check"), and `admin_test`
+    is now a registered source too ("AI Engine — Test").
+  - It is flag-gated like every timer: `PROBE_AI_PROVIDERS` is in
+    `local.timer_catalogue` (`infra/functionapp.tf`) and the
+    `enabled_timers` validation, disarmed until the workspace lists it.
+    `scripts/assert-expected-plan.mjs` declares both runs of
+    `FEATURE_FLAG_PROBE_AI_PROVIDERS`, and `verify-timer-witness.mjs` records
+    that it has no public witness.
+  - The AI Engine card reads "Tested 3d ago by the weekly check". It now
+    shows the Test's error message too: the card read `lastError`, while the
+    Test has always written `lastTestError`, so a failed Test showed a red
+    badge with no reason.
+  - Tests: NVIDIA's own behaviour (request shape, `<think>` stripping,
+    429 retries, pacing, timeouts, key verdicts, zero-cost usage, the time
+    budget) is tested with NVIDIA placed first explicitly, because behind
+    three answering providers it would never be asked. New tests cover the
+    defaults, the probe, its timer wiring and the card. `route-inventory` and
+    `timer-schedules-utc` count twenty-three timers.
+  - Required-Inputs' `NVIDIA-API-KEY` row describes the placement and the
+    probe, and `.azure/api-surface.json` names the shared Test.
 - **Vault auto-unseal is live on the lab host (#726).** The owner accepted
   the trade on 2026-09-29: root on the host plus the Arc identity can now
   unseal Vault, and the five Shamir keys are recovery keys. The seal check

@@ -111,8 +111,9 @@ export const DEFAULT_PROVIDERS = [
   },
   {
     // #701. Last in the global order on purpose: its real position is set
-    // per feature under "Where AI is used" — first for owner-triggered
-    // content, never for the public explain route.
+    // per feature under "Where AI is used" — the backup for owner-triggered
+    // content unless placed first there (2026-09-29), never for the public
+    // explain route.
     id: 'nvidia',
     name: 'NVIDIA API',
     description: 'GLM-5.3, DeepSeek-V4.1-Flash — free trial tier, ~40 requests a minute',

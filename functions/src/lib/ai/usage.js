@@ -38,6 +38,14 @@ export const USAGE_SOURCES = Object.freeze({
   // two-turn sample of under 300 characters. Its own row so a check never
   // reads as episode spend.
   podcastSample: 'podcast:sample',
+  // The AI Engine's Test button (#180): a one-word prompt capped at 16
+  // tokens. The slug predates this table (proxy.js wrote it inline), and
+  // stored rows carry it, so it is registered as it was written.
+  adminTest: 'admin_test',
+  // The same Test, run by the weekly probeAiProviders timer against every
+  // provider with a key (#701, 2026-09-29). Its own row so the check's
+  // spend, a fraction of a cent a week, is not read as someone testing.
+  aiProviderProbe: 'ai-engine:probe',
 });
 
 /**

@@ -127,6 +127,7 @@ export const WITNESSES = {
   cleanupRejectedContent: { none: 'deletes rejected documents, which were never public' },
   syncSocialCalendarScheduled: { none: 'writes social_posts, which has no public route' },
   refreshPlaudToken: { none: 'rotates a secret; nothing public changes' },
+  probeAiProviders: { none: 'stamps ai_providers and writes ai_usage, which have no public route' },
 };
 
 // ── pure helpers (unit-tested) ───────────────────────────────────────────────

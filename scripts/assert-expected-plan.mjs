@@ -184,6 +184,23 @@ export const DECLARED = [
       '@Microsoft.KeyVault(SecretUri=https://kv-site-prod-cus-01.vault.azure.net/secrets/TURNSTILE-SECRET-KEY)',
     reason: 'ADR 0032 decision 6 revised 2026-09-28: the Turnstile secret, as a Key Vault reference',
   },
+  // The weekly AI provider probe's timer flag (#701), in its two runs: the
+  // merge adds the key disarmed, as local.timer_flags writes every timer not
+  // in enabled_timers; adding PROBE_AI_PROVIDERS to enabled_timers arms it.
+  {
+    address: 'azurerm_function_app_flex_consumption.hcw',
+    path: 'app_settings.FEATURE_FLAG_PROBE_AI_PROVIDERS',
+    before: undefined,
+    after: 'false',
+    reason: '#701: the probeAiProviders timer is catalogued, disarmed until enabled_timers names it',
+  },
+  {
+    address: 'azurerm_function_app_flex_consumption.hcw',
+    path: 'app_settings.FEATURE_FLAG_PROBE_AI_PROVIDERS',
+    before: 'false',
+    after: 'true',
+    reason: '#701: PROBE_AI_PROVIDERS added to enabled_timers, arming the weekly probe',
+  },
 ];
 
 /** One `DECLARED` entry, for the report. */
