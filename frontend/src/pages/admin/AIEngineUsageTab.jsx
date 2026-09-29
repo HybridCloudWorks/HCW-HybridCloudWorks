@@ -36,6 +36,9 @@ function timeAgo(ts) {
  */
 export const SOURCE_LABELS = {
   admin: 'Admin playground',
+  // What the Playground sends today (aiEngine.chat's default source); 'admin' is the
+  // older spelling, kept so historical rows still read as words.
+  admin_playground: 'Admin playground',
   'listen-and-learn:script': 'Listen & Learn — script',
   'listen-and-learn:source-script': 'Listen & Learn — source-grounded script',
   'listen-and-learn:audio': 'Listen & Learn — audio',

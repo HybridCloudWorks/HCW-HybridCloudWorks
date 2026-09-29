@@ -2515,6 +2515,13 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The Usage tab names the Playground's calls.** `aiEngine.chat` records
+  Playground calls as `admin_playground`, but `SOURCE_LABELS` knew only the
+  older `admin`, so those rows rendered as a raw slug. Both now read "Admin
+  playground", and a test pins it. `variables-and-secrets.md` also no longer
+  claims the timer flags "still resolve to false today": timers have run
+  since they were armed, so it now says a timer runs when the master flag is
+  on and its name is in `enabled_timers`.
 - **The secrets monitor can succeed again, so delivery health goes green.**
   `monitor-delivery-health`'s "Can every workflow still succeed?" failed on
   2026-09-29 (run 36609411076). The workflow it named,
