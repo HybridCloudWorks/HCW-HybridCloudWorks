@@ -2,9 +2,10 @@
  * Docker's pages (owner request 2026-09-28). A page whose content is still to
  * be written is a placeholder: it says what it will cover and that it is
  * coming, reads nothing from the API, and points at something a visitor can
- * use now. The sandbox recipe is real content, on its own page (#774), and
- * the blog and code pages list published Docker content like every other
- * provider's (#776).
+ * use now. The sandbox recipe is real content, on its own page (#774), the
+ * blog and code pages list published Docker content like every other
+ * provider's (#776), and the Learning page renders a checked, dated
+ * catalogue (#778).
  */
 import React from 'react';
 import { readFileSync } from 'node:fs';
@@ -26,6 +27,16 @@ import DockerSandboxesPage, {
   SANDBOXES_PATH,
 } from './SandboxesPage';
 import DockerToolsPage from './ToolsPage';
+import {
+  CREDENTIALS_NOTE,
+  DATA_AS_OF,
+  DATA_SOURCE,
+  DOCKER_RUNS_OWN_EXAM,
+  certifications as dockerCertifications,
+  learningPaths as dockerLearningPaths,
+  resources as dockerResources,
+} from '@/data/docker/education';
+import { pathMeta } from '@/components/shared/EducationTracks';
 
 vi.mock('react-helmet-async', () => ({
   Helmet: ({ children }) => <>{children}</>,
@@ -191,8 +202,106 @@ describe('where the recipe used to be', () => {
   });
 });
 
+describe('the Docker education catalogue (#778)', () => {
+  it('says as data that Docker runs no exam, and names another issuer on every credential', () => {
+    expect(DOCKER_RUNS_OWN_EXAM).toBe(false);
+    expect(dockerCertifications.map((cert) => [cert.code, cert.issuer])).toEqual([
+      ['Docker Foundations', 'LinkedIn Learning'],
+      ['DCA', 'Mirantis'],
+    ]);
+    for (const cert of dockerCertifications) {
+      expect(cert.issuer, cert.code).not.toMatch(/docker/i);
+    }
+  });
+
+  it('is dated and sourced from Docker’s own training page', () => {
+    expect(DATA_AS_OF).toBe('2026-09-29');
+    expect(DATA_SOURCE).toEqual({
+      label: 'Docker Training',
+      url: 'https://www.docker.com/trainings/',
+    });
+  });
+
+  it('links every path and resource somewhere real, over https, with nothing estimated', () => {
+    for (const path of dockerLearningPaths) {
+      expect(path.certUrl, path.title).toMatch(/^https:\/\//);
+      expect(path.modules.length, path.title).toBeGreaterThan(0);
+      // Docker's pages state minutes, not hours; nothing is rounded into `hours`.
+      expect(path.hours, path.title).toBeUndefined();
+    }
+    for (const resource of dockerResources) {
+      expect(resource.url, resource.title).toMatch(/^https:\/\//);
+    }
+  });
+});
+
+describe('the Docker Learning page (#778)', () => {
+  it('names itself and says Docker runs no exam before any card', () => {
+    renderPage(<DockerEducationPage />);
+    expect(screen.getByRole('heading', { level: 1, name: 'Docker Learning' })).toBeInTheDocument();
+    expect(document.title).toBe('Docker Learning | Hybrid Cloud Works');
+    const note = screen.getByTestId('docker-credentials-note');
+    expect(note).toHaveTextContent(CREDENTIALS_NOTE);
+    expect(note).toHaveTextContent(/does not run a certification exam of its own/);
+    // The note comes before the first certification card in reading order.
+    const firstCard = screen.getByRole('link', {
+      name: /Docker Foundations Professional Certificate/,
+    });
+    expect(note.compareDocumentPosition(firstCard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText('Coming soon')).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('shows who issues each credential, and opens each at its issuer in a new tab', () => {
+    renderPage(<DockerEducationPage />);
+    const tracks = screen.getByRole('region', { name: 'Certification tracks' });
+    for (const cert of dockerCertifications) {
+      const card = within(tracks).getByRole('link', { name: new RegExp(cert.title) });
+      expect(card).toHaveAttribute('href', cert.learnUrl);
+      expect(card).toHaveAttribute('target', '_blank');
+      expect(card).toHaveAttribute('rel', 'noopener noreferrer');
+      expect(card).toHaveTextContent(`Issued by ${cert.issuer}`);
+    }
+  });
+
+  it('dates the catalogue and names its source', () => {
+    const { container } = renderPage(<DockerEducationPage />);
+    const freshness = container.querySelector('[data-catalogue-as-of]');
+    expect(freshness).toHaveAttribute('data-catalogue-as-of', DATA_AS_OF);
+    expect(freshness).toHaveTextContent('Docker Training');
+  });
+
+  it('lists every learning path with its own words for the link, level and length', () => {
+    renderPage(<DockerEducationPage />);
+    const paths = screen.getByRole('region', { name: 'Learning paths' });
+    expect(
+      within(paths)
+        .getAllByRole('heading', { level: 3 })
+        .map((h) => h.textContent)
+    ).toEqual(dockerLearningPaths.map((path) => path.title));
+    const series = within(paths).getByRole('link', { name: /open the series/i });
+    expect(series).toHaveAttribute(
+      'href',
+      'https://docs.docker.com/get-started/docker-concepts/building-images/'
+    );
+    expect(within(paths).getByText('Beginner · 25 minutes')).toBeInTheDocument();
+    // No path reads as a certification's "View … details" link.
+    expect(within(paths).queryByText(/View .* details/)).toBeNull();
+  });
+});
+
+describe('pathMeta, the level-and-length line on a learning path card', () => {
+  it('joins what the path has, and shows nothing for a path with neither', () => {
+    expect(pathMeta({ level: 'Beginner', duration: '25 minutes' })).toBe('Beginner · 25 minutes');
+    expect(pathMeta({ duration: '15 minutes' })).toBe('15 minutes');
+    // The shape every other catalogue uses is unchanged.
+    expect(pathMeta({ level: 'Intermediate', hours: 45 })).toBe('Intermediate · 45 h');
+    expect(pathMeta({ level: 'Advanced' })).toBe('Advanced');
+    expect(pathMeta({})).toBe('');
+  });
+});
+
 describe.each([
-  ['education', DockerEducationPage, 'Docker Learning'],
   ['news', DockerRssPage, 'Docker News'],
   ['tools', DockerToolsPage, 'Docker Tools'],
 ])('the Docker %s page', (section, Page, title) => {

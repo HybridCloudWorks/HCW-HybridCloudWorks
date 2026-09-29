@@ -8,6 +8,12 @@
  * here still keep inline (D2 — a refactor the visitor cannot see). This is
  * the part a visitor CAN see: the Ansible and VMware tracks, paths and
  * resources that were three-card stubs before.
+ *
+ * A learning path may carry `linkLabel` for its link's words when the path is
+ * not a certification's (Docker's documentation modules, #778), and
+ * `duration` when the vendor states a time shorter than `hours` can say. A
+ * certification may carry `issuer` when the provider is not the one who
+ * awards it; Docker runs no exam of its own, so both of its rows do.
  */
 import React, { useMemo, useState } from 'react';
 import CertStatusBadge from '@/components/education/CertStatusBadge';
@@ -25,6 +31,18 @@ function LevelBadge({ level, levelMeta }) {
       {meta?.label || level}
     </span>
   );
+}
+
+/**
+ * The small line beside a learning path's label: its level and how long it
+ * takes, whichever the data has. `duration` is the vendor's own words ("25
+ * minutes") for a path shorter than an hour, where `hours` would have to
+ * round; Docker's modules (#778) are the first to need it. A path with
+ * neither shows nothing, rather than a stray separator.
+ */
+export function pathMeta(path) {
+  const length = path.duration || (path.hours ? `${path.hours} h` : null);
+  return [path.level, length].filter(Boolean).join(' · ');
 }
 
 export default function EducationTracks({
@@ -95,6 +113,11 @@ export default function EducationTracks({
               </div>
               <CertStatusBadge cert={cert} today={today} className="self-start" />
               <h3 className="text-sm font-bold text-foreground leading-snug">{cert.title}</h3>
+              {cert.issuer ? (
+                <p className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">
+                  Issued by {cert.issuer}
+                </p>
+              ) : null}
               <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
                 {cert.description}
               </p>
@@ -136,10 +159,7 @@ export default function EducationTracks({
                   <span className="text-[10px] font-black text-primary tracking-widest uppercase">
                     {path.certCode}
                   </span>
-                  <span className="text-[10px] text-slate-500">
-                    {path.level}
-                    {path.hours ? ` · ${path.hours} h` : ''}
-                  </span>
+                  <span className="text-[10px] text-slate-500">{pathMeta(path)}</span>
                 </div>
                 <h3 className="text-sm font-bold text-foreground">{path.title}</h3>
                 <p className="text-xs text-slate-600 dark:text-slate-400">{path.description}</p>
@@ -157,7 +177,7 @@ export default function EducationTracks({
                     rel="noopener noreferrer"
                     className="mt-auto text-xs font-semibold text-primary hover:underline"
                   >
-                    View {path.certCode} details ↗
+                    {path.linkLabel || `View ${path.certCode} details`} ↗
                   </a>
                 )}
               </div>

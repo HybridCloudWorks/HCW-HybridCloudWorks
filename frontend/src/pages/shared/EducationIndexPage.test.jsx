@@ -1,5 +1,5 @@
 /**
- * `/education` renders the eight catalogues and nothing it was not given.
+ * `/education` renders the nine catalogues and nothing it was not given.
  *
  * The page is built entirely out of `src/data/**`, so every assertion below
  * recomputes its expectation from those files rather than pinning a number.
@@ -18,6 +18,7 @@ import { MemoryRouter } from 'react-router';
 import { HelmetProvider } from 'react-helmet-async';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { deriveStatus, isIsoDate, todayIso } from '@/lib/certStatus';
+import { VALID_PROVIDERS } from '@/context/ProviderContext';
 import EducationIndexPage, {
   AVAILABLE_STATUS_WORD,
   LEVEL_TIERS,
@@ -77,7 +78,7 @@ function renderPage() {
 }
 
 describe('the level table can describe every catalogue', () => {
-  it('maps every level word the eight catalogues use onto a tier', () => {
+  it('maps every level word the nine catalogues use onto a tier', () => {
     const unmapped = new Set();
     for (const { provider, catalogue } of PROVIDER_CATALOGUES) {
       for (const cert of catalogue.certifications) {
@@ -106,7 +107,32 @@ describe('EducationIndexPage', () => {
     );
   });
 
-  it('renders a tile and a table column for all eight providers', () => {
+  it('lists a catalogue for every provider the router serves, in its order (#778)', () => {
+    // Docker was the one provider missing until its catalogue had rows.
+    expect(PROVIDER_CATALOGUES.map((entry) => entry.provider)).toEqual(VALID_PROVIDERS);
+  });
+
+  it('shows Docker’s two credentials at the levels their issuers give them (#778)', () => {
+    const { container } = renderPage();
+    const tile = container.querySelector('li[data-provider="docker"]');
+    expect(within(tile).getByRole('link', { name: 'Docker' })).toHaveAttribute(
+      'href',
+      '/docker/education'
+    );
+    const rows = buildEquivalenceRows(
+      PROVIDER_CATALOGUES.map((entry) => summarizeCatalogue(entry, today))
+    );
+    const dockerCodes = (tier) =>
+      rows
+        .find((row) => row.tier === tier)
+        .cells.find((cell) => cell.provider === 'docker')
+        .shown.map((cert) => cert.code);
+    expect(dockerCodes('Foundational')).toEqual(['Docker Foundations']);
+    expect(dockerCodes('Associate')).toEqual(['DCA']);
+    expect(dockerCodes('Professional')).toEqual([]);
+  });
+
+  it('renders a tile and a table column for all nine providers', () => {
     const { container } = renderPage();
 
     const tiles = container.querySelectorAll('li[data-provider]');

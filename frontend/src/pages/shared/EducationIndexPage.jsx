@@ -8,7 +8,7 @@
  * and the practitioner who already knows one and is moving to another.
  *
  * EVERYTHING HERE IS DERIVED. No certification, level, count or date is typed
- * into this file. The eight catalogues under `src/data/` are imported whole,
+ * into this file. The nine catalogues under `src/data/` are imported whole,
  * statuses come from `@/lib/certStatus` at render time, and the freshness line
  * is the same `CatalogueFreshness` the provider hubs use. The only hand-written
  * values are the four tier names, the vendor level-words that map onto them
@@ -16,7 +16,7 @@
  * covered by a test that walks every catalogue, so a vendor inventing a new
  * level word fails the suite rather than dropping a row off the table.
  *
- * WHY A TIER TABLE AND NOT A CERT-TO-CERT MAP. The eight catalogues spell
+ * WHY A TIER TABLE AND NOT A CERT-TO-CERT MAP. The nine catalogues spell
  * their levels twelve different ways — `Fundamentals`, `Foundational`,
  * `Foundations` and `Practitioner` all mean "start here" — so the columns
  * cannot be compared until the words are folded together. Folding level words
@@ -25,9 +25,9 @@
  * lets the reader draw the line.
  *
  * ONE `useToday` FOR THE WHOLE PAGE. The provider hubs each pass their own
- * `DATA_AS_OF`; this page spans eight of them and must pick one server
+ * `DATA_AS_OF`; this page spans nine of them and must pick one server
  * snapshot, or the pre-rendered HTML and the hydrating render could disagree.
- * It uses the EARLIEST `DATA_AS_OF` across the eight — the most conservative
+ * It uses the EARLIEST `DATA_AS_OF` across the nine — the most conservative
  * choice, since no catalogue is then aged past the day a person last checked
  * it. After hydration `useToday` moves to the viewer's real date, exactly as
  * it does on every other Learn page. See the header of `@/lib/certStatus`.
@@ -43,6 +43,7 @@ import { routes, staticRoutes } from '@/lib/routeFactory';
 import * as ansible from '@/data/ansible/education';
 import * as aws from '@/data/aws/certifications';
 import * as azure from '@/data/azure/certifications';
+import * as docker from '@/data/docker/education';
 import * as finops from '@/data/finops/education';
 import * as gcp from '@/data/gcp/certifications';
 import * as hub from '@/data/github/certifications';
@@ -50,10 +51,13 @@ import * as terraform from '@/data/terraform/certifications';
 import * as vmware from '@/data/vmware/education';
 
 /**
- * The eight catalogues, in the order `VALID_PROVIDERS` lists them so this page
+ * The nine catalogues, in the order `VALID_PROVIDERS` lists them so this page
  * and the router agree. `name` matches `displayName` in ProviderContext; it is
  * repeated rather than imported because `useProviderConfig` reads the provider
- * from route context, and this page is outside any provider's route.
+ * from route context, and this page is outside any provider's route. Docker is
+ * the one exception: its `displayName` is "Docker Containers" only so its hub
+ * is not titled "Docker Hub", which is Docker's own registry; a tile has no
+ * "Hub" after it, so it is plain "Docker" here (#778).
  */
 export const PROVIDER_CATALOGUES = Object.freeze([
   { provider: 'azure', name: 'Microsoft Azure', catalogue: azure },
@@ -64,6 +68,7 @@ export const PROVIDER_CATALOGUES = Object.freeze([
   { provider: 'finops', name: 'FinOps Foundation', catalogue: finops },
   { provider: 'vmware', name: 'VMware by Broadcom', catalogue: vmware },
   { provider: 'ansible', name: 'Red Hat Ansible', catalogue: ansible },
+  { provider: 'docker', name: 'Docker', catalogue: docker },
 ]);
 
 /**
@@ -78,12 +83,12 @@ export const PROVIDER_CATALOGUES = Object.freeze([
  * vendor draws:
  *   - `Advanced` folds into Professional. For VMware that puts VCP
  *     (Professional) and VCAP (Advanced) in one cell, which is two vendor
- *     tiers in one row. Splitting them would need a fifth tier that six of
- *     the eight catalogues have nothing to put in.
+ *     tiers in one row. Splitting them would need a fifth tier that seven of
+ *     the nine catalogues have nothing to put in.
  *   - `Business` folds into Specialty. AWS uses it for exactly one exam
  *     (AIB-C01, the AI Business Strategist); it is a role cut, not a rung.
  *
- * `educationLevelsAreMapped` in the test walks all eight catalogues against
+ * `educationLevelsAreMapped` in the test walks all nine catalogues against
  * this table, so a level word added to the data fails there rather than
  * vanishing from the page.
  */
@@ -221,7 +226,7 @@ export function buildEquivalenceRows(summaries) {
 }
 
 /**
- * The earliest `DATA_AS_OF` of the eight, used as the one server snapshot for
+ * The earliest `DATA_AS_OF` of the nine, used as the one server snapshot for
  * `useToday`. Ignores a malformed value rather than letting it win a string
  * comparison, and returns undefined when nothing is usable — `useToday` then
  * falls back to its own fixed day, which still hydrates cleanly.
@@ -363,7 +368,7 @@ export default function EducationIndexPage() {
         <title>Learn any cloud — certification index | Hybrid Cloud Works</title>
         <meta
           name="description"
-          content="Every certification track we follow, in one place: AWS, Azure, Google Cloud, GitHub, Terraform, FinOps, VMware and Ansible — with a level-by-level table that lines the eight catalogues up against each other."
+          content="Every certification track we follow, in one place: AWS, Azure, Google Cloud, GitHub, Terraform, FinOps, VMware, Ansible and Docker — with a level-by-level table that lines the nine catalogues up against each other."
         />
       </Helmet>
 
@@ -373,9 +378,9 @@ export default function EducationIndexPage() {
             Learn any cloud
           </h1>
           <p className="text-slate-600 dark:text-slate-400 max-w-3xl">
-            Eight certification catalogues, one page. If you have not picked a cloud yet, start with
+            Nine certification catalogues, one page. If you have not picked a cloud yet, start with
             a provider tile and take the exam it names. If you already know one and are moving to
-            another, the table below lines the eight up level by level, so the exam you already hold
+            another, the table below lines the nine up level by level, so the exam you already hold
             tells you which one to book next.
           </p>
         </header>
@@ -418,7 +423,7 @@ export default function EducationIndexPage() {
             className="text-xl font-bold text-slate-950 dark:text-white flex items-center gap-2 mb-2"
           >
             <span className="w-1 h-6 bg-primary rounded-full" aria-hidden="true"></span>
-            The same rung on eight ladders
+            The same rung on nine ladders
           </h2>
           <p className="text-slate-600 dark:text-slate-400 max-w-3xl mb-6">
             Rows are levels, columns are providers, and a cell holds that provider&rsquo;s exams at
@@ -429,7 +434,7 @@ export default function EducationIndexPage() {
           </p>
 
           {/*
-            The table is wider than a phone and must stay that way — eight
+            The table is wider than a phone and must stay that way — nine
             columns of exam codes do not usefully reflow. So it scrolls inside
             this container rather than making the page scroll sideways. Every
             column header is a link, which is what lets a keyboard user reach
@@ -440,9 +445,9 @@ export default function EducationIndexPage() {
             aria-labelledby="equivalence-heading"
             className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700"
           >
-            <table className="w-full min-w-[64rem] border-collapse text-left">
+            <table className="w-full min-w-[72rem] border-collapse text-left">
               <caption className="sr-only">
-                Certification levels across eight providers. Each row is a level; each column is a
+                Certification levels across nine providers. Each row is a level; each column is a
                 provider; each cell lists that provider&rsquo;s certifications at that level, or an
                 em dash when it publishes none.
               </caption>
