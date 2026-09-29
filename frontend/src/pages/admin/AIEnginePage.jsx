@@ -105,16 +105,23 @@ function fmtTokens(n) {
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
 }
+/**
+ * [below this many seconds, divide by, suffix]. Days run up to a month, so a
+ * weekly probe reads "Tested 3d ago" (#701); older than that is a date.
+ */
+const AGO_UNITS = [
+  [3600, 60, 'm'],
+  [86400, 3600, 'h'],
+  [30 * 86400, 86400, 'd'],
+];
+
 function timeAgo(ts, now = Date.now()) {
   if (!ts) return 'Never';
   const d = ts?.toDate ? ts.toDate() : new Date(ts);
   const secs = Math.floor((now - d) / 1000);
   if (secs < 60) return 'just now';
-  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
-  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
-  // Days up to a month, so a weekly probe reads "Tested 3d ago" (#701).
-  if (secs < 30 * 86400) return `${Math.floor(secs / 86400)}d ago`;
-  return d.toLocaleDateString();
+  const unit = AGO_UNITS.find(([below]) => secs < below);
+  return unit ? `${Math.floor(secs / unit[1])}${unit[2]} ago` : d.toLocaleDateString();
 }
 
 /**

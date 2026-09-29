@@ -146,6 +146,14 @@ describe('ProviderCard — a Test result, from the button or the weekly probe (#
     expect(describeLastTest({ ...probed, lastTestedBy: 'admin' }, NOW)).toBe('Tested 3d ago');
     // A document written before the field existed is a click.
     expect(describeLastTest({ lastTested: '2026-10-08T11:55:00.000Z' }, NOW)).toBe('Tested 5m ago');
+    expect(describeLastTest({ lastTested: '2026-10-08T11:59:30.000Z' }, NOW)).toBe(
+      'Tested just now'
+    );
+    expect(describeLastTest({ lastTested: '2026-10-08T07:00:00.000Z' }, NOW)).toBe('Tested 5h ago');
+    // Older than a month is a date, not "45d ago".
+    expect(describeLastTest({ lastTested: '2026-08-24T12:00:00.000Z' }, NOW)).toBe(
+      `Tested ${new Date('2026-08-24T12:00:00.000Z').toLocaleDateString()}`
+    );
     expect(describeLastTest({ status: 'untested' }, NOW)).toBeNull();
   });
 
