@@ -209,35 +209,44 @@ export function deriveStatus(cert, today = todayIso()) {
  */
 export function describeCertStatus(cert, today = todayIso()) {
   const status = deriveStatus(cert, today);
-  const replacedBy = cert?.replacement?.code ? ` · replaced by ${cert.replacement.code}` : '';
+  const badge = BADGES[status];
+  return badge
+    ? { status, label: badge.label, detail: badge.detail(cert, today) }
+    : { status, label: null, detail: null };
+}
 
-  switch (status) {
-    case 'expiring':
-      return {
-        status,
-        label: 'Retiring',
-        detail: `last day to test ${formatIsoDate(cert.expiryDate)}${replacedBy}`,
-      };
-    case 'retired': {
+/** ` · replaced by CODE`, or '' for a row that names no replacement. */
+const replacedBy = (cert) =>
+  cert?.replacement?.code ? ` · replaced by ${cert.replacement.code}` : '';
+
+/**
+ * The badge word and date phrase for each status that has one. `active` has
+ * neither, so a caller renders nothing. One small function per status keeps
+ * `describeCertStatus` a single lookup.
+ */
+const BADGES = Object.freeze({
+  expiring: {
+    label: 'Retiring',
+    detail: (cert) => `last day to test ${formatIsoDate(cert.expiryDate)}${replacedBy(cert)}`,
+  },
+  retired: {
+    label: 'Retired',
+    detail: (cert) => {
       const on = cert.retiredDate ?? cert.expiryDate;
-      const detail = `${isIsoDate(on) ? formatIsoDate(on) : ''}${replacedBy}`.replace(/^ · /, '');
-      return { status, label: 'Retired', detail: detail || null };
-    }
-    case 'beta': {
-      if (isIsoDate(cert.betaStartDate) && cert.betaStartDate > today) {
-        return { status, label: 'Beta', detail: `from ${formatIsoDate(cert.betaStartDate)}` };
-      }
-      return {
-        status,
-        label: 'Beta',
-        detail: isIsoDate(cert.gaDate) ? `GA ${formatIsoDate(cert.gaDate)}` : null,
-      };
-    }
-    case 'upcoming':
-      return { status, label: 'Coming', detail: upcomingDetail(cert) };
-    default:
-      return { status, label: null, detail: null };
+      const text = `${isIsoDate(on) ? formatIsoDate(on) : ''}${replacedBy(cert)}`;
+      return text.replace(/^ · /, '') || null;
+    },
+  },
+  beta: { label: 'Beta', detail: betaDetail },
+  upcoming: { label: 'Coming', detail: upcomingDetail },
+});
+
+/** A beta not yet open says when it opens; an open one, its GA date if known. */
+function betaDetail(cert, today) {
+  if (isIsoDate(cert.betaStartDate) && cert.betaStartDate > today) {
+    return `from ${formatIsoDate(cert.betaStartDate)}`;
   }
+  return isIsoDate(cert.gaDate) ? `GA ${formatIsoDate(cert.gaDate)}` : null;
 }
 
 /**
