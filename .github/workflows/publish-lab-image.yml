@@ -40,6 +40,15 @@
 #            `attestations: write`. The digests go to the job summary so the
 #            follow-up that pins them (vps-agent/lib/capabilities.js, #675)
 #            copies them from a first-party source.
+#   publish-dockerhub
+#            only after `publish` succeeds, and only while the repository
+#            variable DOCKERHUB_ENABLED is `true` (#779). Copies the two
+#            manifests `publish` pushed from GHCR to docker.io/hybridcloudworks
+#            by digest, so Docker Hub serves the same bytes under the same
+#            digest, and attests them there. It signs in through a Docker OIDC
+#            connection: a short-lived Docker token exchanged for this job's
+#            GitHub OIDC token, with no stored credential. Set out below the
+#            job's `if`, and in docs/runbooks/docker-hub-publishing.md.
 #
 #   workflow_dispatch from a branch runs `build` only. A `latest` pushed from a
 #   branch would silently replace what learners pull.
@@ -50,8 +59,9 @@
 # doctrine in iac-validate.yml). If it is ever made required, remove `paths`
 # first and move the filtering inside the job as ci.yml does.
 #
-# The push authenticates with the publish job's own GITHUB_TOKEN; no PAT, no
-# secret.
+# The GHCR push authenticates with the publish job's own GITHUB_TOKEN, and the
+# Docker Hub copy with a token Docker issues per run through the OIDC
+# connection; no PAT, no access token, no secret.
 #
 # The base image's digest lives in two places by necessity — a FROM line
 # cannot read a file — so the first step fails the build when any FROM in
@@ -90,6 +100,13 @@ concurrency:
 env:
   RUNNER_IMAGE: ghcr.io/hybridcloudworks/hcw-lab-runner
   FULL_IMAGE: ghcr.io/hybridcloudworks/hcw-lab
+  # `docker.io` as the registry part: the form actions/attest documents for
+  # Docker Hub with push-to-registry. Its credential lookup treats docker.io,
+  # index.docker.io and registry-1.docker.io as one registry, so it finds the
+  # `https://index.docker.io/v1/` entry docker login writes.
+  DOCKERHUB_ORG: hybridcloudworks
+  DOCKERHUB_RUNNER_IMAGE: docker.io/hybridcloudworks/hcw-lab-runner
+  DOCKERHUB_FULL_IMAGE: docker.io/hybridcloudworks/hcw-lab
 
 jobs:
   build:
@@ -208,6 +225,10 @@ jobs:
       packages: write
       id-token: write
       attestations: write
+    # What publish-dockerhub copies. Digests are not secrets.
+    outputs:
+      runner-digest: ${{ steps.push-runner.outputs.digest }}
+      full-digest: ${{ steps.push-full.outputs.digest }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -327,5 +348,153 @@ jobs:
             echo '```'
             echo "${RUNNER_IMAGE}:${SHA}@${RUNNER_DIGEST}"
             echo "${FULL_IMAGE}:${SHA}@${FULL_DIGEST}"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # Docker Hub, as a second registry for the same two images (#779).
+  #
+  # A job of its own, after `publish`, so that GHCR never depends on Docker
+  # Hub: by the time this starts, both images are pushed and attested there.
+  # A failure here fails the run, loudly, with GHCR already complete, and
+  # "Re-run failed jobs" repeats only this job against the same two digests.
+  #
+  # Off until the owner has created the OIDC connection in Docker Home and set
+  # two repository variables (docs/runbooks/docker-hub-publishing.md):
+  # DOCKERHUB_CONNECTION, the connection's ID, and DOCKERHUB_ENABLED, `true`.
+  # While DOCKERHUB_ENABLED is anything else the job shows as skipped, which is
+  # the state before the connection exists. With it `true` and the ID missing
+  # or malformed, the first step fails and says which, rather than skipping.
+  #
+  # The Docker side trusts one subject, this repository's `main` in GitHub's
+  # immutable-identifier form:
+  #   repo:HybridCloudWorks@312844660/HCW-HybridCloudWorks@1268997852:ref:refs/heads/main
+  # which is what `publish` already runs on (push to main, or a dispatch from
+  # main). The job declares no environment on purpose: an environment subject
+  # carries no ref, so it would match a dispatch from any branch unless a
+  # deployment-branch rule outside this file held (Required-Inputs §4.4).
+  #
+  # `id-token: write` is for the Docker token exchange and for Sigstore;
+  # `attestations: write` stores the provenance. Nothing here writes to GHCR,
+  # and the packages are public, so the copy reads them anonymously.
+  publish-dockerhub:
+    name: Publish to Docker Hub
+    needs: publish
+    if: vars.DOCKERHUB_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # the Docker token exchange, and Sigstore's signing certificate
+      attestations: write # store the two provenance attestations
+    env:
+      RUNNER_DIGEST: ${{ needs.publish.outputs.runner-digest }}
+      FULL_DIGEST: ${{ needs.publish.outputs.full-digest }}
+    steps:
+      # docker/login-action checks the ID too, but its message cannot say that
+      # the fix is a repository variable.
+      - name: DOCKERHUB_CONNECTION holds a connection ID, and both digests arrived
+        env:
+          CONNECTION_ID: ${{ vars.DOCKERHUB_CONNECTION }}
+        run: |
+          set -euo pipefail
+          uuid='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+          if [[ ! "$CONNECTION_ID" =~ $uuid ]]; then
+            echo "::error::DOCKERHUB_ENABLED is true, but the repository variable DOCKERHUB_CONNECTION is not an OIDC connection ID (a UUID, copied from the connection in Docker Home). See docs/runbooks/docker-hub-publishing.md."
+            exit 1
+          fi
+          if [ -z "$RUNNER_DIGEST" ] || [ -z "$FULL_DIGEST" ]; then
+            echo "::error::The publish job passed no digest for runner ('${RUNNER_DIGEST}') or full ('${FULL_DIGEST}'), so there is nothing to copy."
+            exit 1
+          fi
+
+      # docker/login-action v4.5.0 and later: with no password, a registry of
+      # docker.io and DOCKERHUB_OIDC_CONNECTIONID set, it requests a GitHub ID
+      # token for the audience https://identity.docker.com, exchanges it at
+      # https://identity.docker.com/oauth/token (RFC 8693) and logs in with
+      # the Docker access token it gets back, which is masked in the log and
+      # lasts 300 seconds by default. Everything that needs it follows this
+      # step directly: the two pushes and two attestations this mirrors take
+      # about 70 seconds in `publish` (run 36392932443), and a copy of the
+      # runner image from GHCR took 8 seconds measured locally. A step that
+      # fails `unauthorized` minutes after this one points at that lifetime.
+      # DOCKERHUB_OIDC_CONNECTIONID is the name the action reads;
+      # DOCKERHUB_CONNECTION is ours.
+      - name: Log in to Docker Hub through the OIDC connection
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        env:
+          DOCKERHUB_OIDC_CONNECTIONID: ${{ vars.DOCKERHUB_CONNECTION }}
+        with:
+          registry: docker.io
+          username: ${{ env.DOCKERHUB_ORG }}
+
+      # A registry-to-registry copy of the manifest GHCR holds, by digest.
+      # `--prefer-index=false` keeps the source manifest's own bytes; without
+      # it buildx wraps a single image in a new manifest list with a new
+      # digest (measured with buildx v0.37.1, the runner's). So Docker Hub
+      # serves exactly what `publish` smoke-tested and pushed, and the digest
+      # read back from Docker Hub must equal GHCR's or the step fails before
+      # anything is attested.
+      - name: Copy runner to Docker Hub
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create --prefer-index=false \
+            --tag "${DOCKERHUB_RUNNER_IMAGE}:${SHA}" \
+            --tag "${DOCKERHUB_RUNNER_IMAGE}:latest" \
+            "${RUNNER_IMAGE}@${RUNNER_DIGEST}"
+          got="$(docker buildx imagetools inspect "${DOCKERHUB_RUNNER_IMAGE}:${SHA}" --format '{{.Manifest.Digest}}')"
+          if [ "$got" != "$RUNNER_DIGEST" ]; then
+            echo "::error::${DOCKERHUB_RUNNER_IMAGE}:${SHA} is ${got} on Docker Hub, but ${RUNNER_DIGEST} on GHCR."
+            exit 1
+          fi
+
+      - name: Copy full to Docker Hub
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create --prefer-index=false \
+            --tag "${DOCKERHUB_FULL_IMAGE}:${SHA}" \
+            --tag "${DOCKERHUB_FULL_IMAGE}:latest" \
+            "${FULL_IMAGE}@${FULL_DIGEST}"
+          got="$(docker buildx imagetools inspect "${DOCKERHUB_FULL_IMAGE}:${SHA}" --format '{{.Manifest.Digest}}')"
+          if [ "$got" != "$FULL_DIGEST" ]; then
+            echo "::error::${DOCKERHUB_FULL_IMAGE}:${SHA} is ${got} on Docker Hub, but ${FULL_DIGEST} on GHCR."
+            exit 1
+          fi
+
+      # One attestation per registry, not one naming both: push-to-registry
+      # needs exactly one subject, a fully qualified image name. The copy does
+      # not carry GHCR's attestation across (measured), so this is what puts a
+      # provenance bundle beside the image on Docker Hub. GitHub's attestation
+      # API keys on the digest, so `gh attestation verify` finds this one and
+      # GHCR's for either name.
+      - name: Attest runner provenance on Docker Hub
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.DOCKERHUB_RUNNER_IMAGE }}
+          subject-digest: ${{ env.RUNNER_DIGEST }}
+          push-to-registry: true
+
+      - name: Attest full provenance on Docker Hub
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.DOCKERHUB_FULL_IMAGE }}
+          subject-digest: ${{ env.FULL_DIGEST }}
+          push-to-registry: true
+
+      - name: Published digests on Docker Hub
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Published to Docker Hub"
+            echo
+            echo "The same digests as GHCR, copied by digest."
+            echo
+            echo '```'
+            echo "${DOCKERHUB_RUNNER_IMAGE}:${SHA}@${RUNNER_DIGEST}"
+            echo "${DOCKERHUB_FULL_IMAGE}:${SHA}@${FULL_DIGEST}"
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"

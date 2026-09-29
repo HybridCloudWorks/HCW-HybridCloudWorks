@@ -3,7 +3,14 @@
 One Dockerfile, two targets, published to GHCR by
 [`publish-lab-image.yml`](../.github/workflows/publish-lab-image.yml) on every
 push to `main` that touches this directory (issue #658, Phase 1 in #674,
-Phase 2 in #675).
+Phase 2 in #675). The same workflow copies both to Docker Hub, as
+`docker.io/hybridcloudworks/hcw-lab-runner` and
+`docker.io/hybridcloudworks/hcw-lab`, once the owner has switched that on
+(#779): by digest, so each image has the same digest in both registries, and
+through a Docker OIDC connection, so no Docker token is stored anywhere. Until
+then the Docker Hub job is skipped and the two repositories there are empty.
+[Docker Hub publishing](../docs/runbooks/docker-hub-publishing.md) has the
+owner's steps.
 
 | Target   | Image                                     | Carries                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | -------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -61,11 +68,9 @@ vendored module tree is 7.5 MB and the Kubernetes schemas 62 MB on disk.
 
 The `full` image is the follow-along toolchain for the lab pages. Pull it,
 then run it with the current directory mounted at `/workspace`; both
-commands drop into `bash` there as `nobody`. Anonymous pulls work once the
-owner has made both packages public at
-<https://github.com/orgs/HybridCloudWorks/packages> (the owner step in #674);
-until then `docker login ghcr.io` with a token holding `read:packages` is
-needed first.
+commands drop into `bash` there as `nobody`. Both GHCR packages are public
+(the owner step in #674; an anonymous request for each manifest answered 200
+on 2026-09-28), so no `docker login` is needed.
 
 PowerShell:
 
@@ -94,6 +99,62 @@ pin the digest rather than the tag, exactly as
 [`vps-agent/lib/capabilities.js`](../vps-agent/lib/capabilities.js) does:
 the publish workflow writes each pushed image's digest to its job summary,
 and that is the first-party place to copy it from.
+
+### From Docker Hub
+
+Once Docker Hub publishing is on (#779), the same image is on Docker Hub,
+where `hybridcloudworks/hcw-lab` is short for
+`docker.io/hybridcloudworks/hcw-lab`. Both repositories are public, so the
+pull is anonymous. Before that, these fail with `manifest unknown`, because
+the repositories exist and are empty.
+
+PowerShell:
+
+```powershell
+docker pull hybridcloudworks/hcw-lab:latest
+```
+
+```powershell
+docker run --rm -it -v "${PWD}:/workspace" hybridcloudworks/hcw-lab:latest
+```
+
+bash:
+
+```bash
+docker pull hybridcloudworks/hcw-lab:latest
+```
+
+```bash
+docker run --rm -it -v "$PWD:/workspace" hybridcloudworks/hcw-lab:latest
+```
+
+The two registries serve the same bytes, so this pulls from Docker Hub the
+exact digest GHCR holds for `latest`, and succeeds only if Docker Hub has it.
+PowerShell:
+
+```powershell
+$d = docker buildx imagetools inspect ghcr.io/hybridcloudworks/hcw-lab:latest --format '{{.Manifest.Digest}}'; docker pull "hybridcloudworks/hcw-lab@$d"
+```
+
+Success ends with `Status: Downloaded newer image for hybridcloudworks/hcw-lab@sha256:…`
+(or `Image is up to date`) and the same `sha256:` value on the `Digest:` line.
+
+The provenance attestation verifies against this repository under the Docker
+Hub name. The first line reads it from GitHub's attestation API, which keys on
+the digest and so also finds the GHCR attestation. The second reads the bundle
+stored beside the image on Docker Hub:
+
+```powershell
+gh attestation verify oci://docker.io/hybridcloudworks/hcw-lab:latest --repo HybridCloudWorks/HCW-HybridCloudWorks
+```
+
+```powershell
+gh attestation verify oci://docker.io/hybridcloudworks/hcw-lab:latest --repo HybridCloudWorks/HCW-HybridCloudWorks --bundle-from-oci
+```
+
+Each prints `✓ Verification succeeded!` and names
+`.github/workflows/publish-lab-image.yml@refs/heads/main` as the build
+workflow.
 
 ## What works offline
 
