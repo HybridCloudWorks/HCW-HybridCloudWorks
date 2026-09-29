@@ -201,12 +201,13 @@ export default function Header() {
     { label: 'Learning', path: routes.education('ansible') },
   ];
 
-  // Docker page navigation (service-provider pattern, mirrors Terraform
-  // without Modules)
+  // Docker page navigation (service-provider pattern, mirrors Terraform, with
+  // Sandboxes where Terraform has Modules: #774)
   const getDockerPageLinks = () => [
     { label: 'News', path: routes.rss('docker') },
     { label: 'Blogs', path: routes.blog('docker') },
     { label: 'Code', path: routes.code('docker') },
+    { label: 'Sandboxes', path: routes.sandboxes('docker') },
     { label: 'Tools', path: routes.tools('docker') },
     { label: 'Learning', path: routes.education('docker') },
   ];

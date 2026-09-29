@@ -10,10 +10,11 @@
  *     "Coder status" is `GET public/labs/coder-status` (#680), both through
  *     `usePublicData`, both answering `{ configured: false }` honestly until
  *     the host and Coder exist. The cards render those as sentences.
- *   - "Run an agent against your landing zone" is `SandboxSection` (#676):
- *     static editorial — three steps, one `sbx run` line per shell, the
- *     first prompt and the recipe link — read from the Docker docs on
- *     2026-09-25 and carrying `live-check` because the `sbx` surface moves.
+ *   - "Run an agent against your landing zone" was `SandboxSection` (#676)
+ *     until it moved to the Docker hub, `/docker/sandboxes` (#774). The slot
+ *     stays, with its `agent-heading` id, and holds one line pointing there,
+ *     so a link to `/education/labs#agent-heading` still lands on a heading
+ *     that says where the recipe went.
  *   - One section is still a slot: the article list (#677) lands later, in
  *     place, so the layout does not move under it.
  *   - Beside the intro, `CoderCredit` says the labs are provided using
@@ -36,8 +37,8 @@
  * there never produces it, and `routes-are-complete.test.js` fails if it is
  * declared in one place and not the other.
  *
- * PRE-RENDER. The catalogue and the agent section are static, so the card
- * grid and the sandbox commands are in the built HTML; the two status cards
+ * PRE-RENDER. The catalogue and the agent pointer are static, so the card
+ * grid and the pointer are in the built HTML; the two status cards
  * pre-render their loading sentence, which
  * is also what the browser shows until the API answers. Nothing on the page
  * reads the clock until data has arrived, so hydration matches.
@@ -51,12 +52,11 @@ import CoderStatusCard from '@/components/labs/CoderStatusCard';
 import LabCard from '@/components/labs/LabCard';
 import LabsEstateCard from '@/components/labs/LabsEstateCard';
 import LabsSlot from '@/components/labs/LabsSlot';
-import SandboxSection from '@/components/labs/SandboxSection';
 import { useLabSignInReturn } from '@/components/labs/labSignIn';
 import { labs } from '@/data/labs/catalogue';
 import { usePublicData } from '@/hooks/usePublicData';
 import { fetchCoderStatus, fetchLabsEstate } from '@/lib/publicApi';
-import { staticRoutes } from '@/lib/routeFactory';
+import { routes, staticRoutes } from '@/lib/routeFactory';
 
 export const PAGE_TITLE = 'Browser labs';
 const CANONICAL = `https://hybridcloudworks.com${staticRoutes.labs}`;
@@ -150,7 +150,16 @@ export default function LabsLearnPage() {
         </div>
 
         <LabsSlot id="agent" title="Run an agent against your landing zone">
-          <SandboxSection />
+          <p className="text-sm text-slate-600 dark:text-slate-400 max-w-3xl">
+            The Docker Sandboxes recipe has its own page in the Docker hub now:{' '}
+            <Link
+              to={routes.sandboxes('docker')}
+              className="font-semibold underline underline-offset-4 text-slate-900 dark:text-slate-100"
+            >
+              Run an agent in a sandbox
+            </Link>
+            .
+          </p>
         </LabsSlot>
         <LabsSlot id="articles" title="Articles for these labs" />
       </div>

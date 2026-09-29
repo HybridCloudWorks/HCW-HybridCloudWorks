@@ -240,8 +240,9 @@ describe('public route contract', () => {
   });
 
   // Docker's pages are rendered for real rather than mocked: they are static
-  // placeholders that fetch nothing, so the route and the page are checked
-  // together. `/docker/tools` is a static route, like `/terraform/tools`.
+  // pages that fetch nothing, so the route and the page are checked together.
+  // `/docker/tools` and `/docker/sandboxes` (#774) are static routes, like
+  // `/terraform/tools`.
   it.each([
     ['/docker', 'Container intelligence with Docker'],
     ['/docker/blog', 'Docker Blog'],
@@ -249,6 +250,7 @@ describe('public route contract', () => {
     ['/docker/education', 'Docker Learning'],
     ['/docker/news', 'Docker News'],
     ['/docker/rss', 'Docker News'],
+    ['/docker/sandboxes', 'Run an agent in a sandbox'],
     ['/docker/tools', 'Docker Tools'],
   ])('renders the Docker route %s', async (pathname, heading) => {
     renderRoute(pathname);

@@ -37,6 +37,7 @@ export type PageType =
   | 'coderCorner'
   | 'workflows'
   | 'focus'
+  | 'sandboxes'
   | 'rss';
 
 /**
@@ -63,6 +64,10 @@ const ROUTE_MAP: Record<PageType, string> = {
   coderCorner: 'coder-corner',
   workflows: 'workflows',
   focus: 'focus',
+  // Docker's own page (#774): the Docker Sandboxes recipe. Here so the header
+  // recognises `/docker/sandboxes` as a Docker hub page, as `modules` does
+  // for `/terraform/modules`.
+  sandboxes: 'sandboxes',
   rss: 'rss',
 };
 
@@ -194,6 +199,7 @@ export const routes = {
   coderCorner: (provider: ProviderType) => getRoute(provider, 'coderCorner'),
   workflows: (provider: ProviderType) => getRoute(provider, 'workflows'),
   focus: (provider: ProviderType) => getRoute(provider, 'focus'),
+  sandboxes: (provider: ProviderType) => getRoute(provider, 'sandboxes'),
   rss: (provider: ProviderType) => getRoute(provider, 'rss'),
 } as const;
 
@@ -243,6 +249,7 @@ export function getAllRoutes(provider: ProviderType) {
     coderCorner: routes.coderCorner(provider),
     workflows: routes.workflows(provider),
     focus: routes.focus(provider),
+    sandboxes: routes.sandboxes(provider),
     rss: routes.rss(provider),
   };
 }
