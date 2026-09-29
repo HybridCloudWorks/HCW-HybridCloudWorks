@@ -127,6 +127,43 @@ describe('request shape — the OpenAI-compatible path at the NVIDIA base URL', 
     expect(body).not.toHaveProperty('response_format');
   });
 
+  it("callProvider's per-call limits reach NVIDIA, and never add max_tokens to OpenAI", async () => {
+    // The portal's Test (#701): a handful of tokens proves a reasoning model answers.
+    const fetchImpl = fetchFailing();
+    const r = router(fetchImpl);
+    await r.callProvider({ provider: 'nvidia', prompt: 'ok?', maxTokens: 16, timeoutMs: 45_000 });
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body).max_tokens).toBe(16);
+
+    await r.callProvider({ provider: 'openai', prompt: 'ok?', maxTokens: 16 });
+    // OpenAI's reasoning models refuse max_tokens; its row never sends one.
+    expect(JSON.parse(fetchImpl.mock.calls[1][1].body)).not.toHaveProperty('max_tokens');
+
+    // Without a cap, NVIDIA keeps the drafting limit.
+    await r.callProvider({ provider: 'nvidia', prompt: 'ok?' });
+    expect(JSON.parse(fetchImpl.mock.calls[2][1].body).max_tokens).toBe(8192);
+  });
+
+  it("callProvider's timeoutMs cuts a stuck NVIDIA call short with a named timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const stuck = vi.fn(
+        (url, init) =>
+          new Promise((_, reject) => {
+            init.signal.addEventListener('abort', () =>
+              reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))
+            );
+          })
+      );
+      const r = router(stuck);
+      const call = r.callProvider({ provider: 'nvidia', prompt: 'ok?', maxTokens: 16, timeoutMs: 45_000 });
+      const settled = expect(call).rejects.toThrow('timeout after 45000 ms');
+      await vi.advanceTimersByTimeAsync(45_000);
+      await settled;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('text parts are joined into one string', async () => {
     const fetchImpl = fetchFailing();
     const r = router(fetchImpl);

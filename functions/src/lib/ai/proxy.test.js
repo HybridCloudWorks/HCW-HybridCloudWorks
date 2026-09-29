@@ -13,7 +13,7 @@
  * the one it was asked.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { createAiProxyHandlers } from './proxy.js';
+import { createAiProxyHandlers, TEST_MAX_TOKENS, TEST_TIMEOUT_MS } from './proxy.js';
 
 const context = { log: vi.fn(), error: vi.fn() };
 
@@ -168,6 +168,22 @@ describe('aiProxy', () => {
 });
 
 describe('testAiProvider', () => {
+  it('asks for a few tokens inside 45 s, so a reasoning model answers the Test in seconds', async () => {
+    // #701, 2026-09-29: with the drafting limits the one-word NVIDIA Test took 56-58 s.
+    const ai = okAi();
+    await build({ ai }).testAiProvider(makeRequest({ providerId: 'nvidia' }), context);
+    expect(ai.callProvider).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'nvidia',
+        maxTokens: TEST_MAX_TOKENS,
+        timeoutMs: TEST_TIMEOUT_MS,
+      })
+    );
+    expect(TEST_MAX_TOKENS).toBeLessThanOrEqual(32);
+    // Under the edge's ~100 s request limit, with room for the page's own wait.
+    expect(TEST_TIMEOUT_MS).toBeLessThan(60_000);
+  });
+
   it('writes the verdict onto the provider document so the badge survives a reload', async () => {
     const store = makeStore();
     const response = await build({ store }).testAiProvider(

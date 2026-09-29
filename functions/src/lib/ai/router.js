@@ -1141,7 +1141,7 @@ export function createAiRouter({
 
   async function callOpenAiCompatible(
     provider,
-    { prompt, parts, model, purpose, expectJson, systemPrompt, usageOut }
+    { prompt, parts, model, purpose, expectJson, systemPrompt, usageOut, maxTokens, timeoutMs }
   ) {
     const spec = OPENAI_COMPATIBLE[provider];
     const apiKey = readKey(env, KEY_ENV[provider]);
@@ -1162,12 +1162,14 @@ export function createAiRouter({
         model: selectedModel,
         messages,
         temperature: 0.2,
-        ...(spec.maxTokens ? { max_tokens: spec.maxTokens } : {}),
+        // A caller's cap (the portal's Test) wins, but only where the table
+        // sends max_tokens at all: OpenAI's reasoning models refuse the field.
+        ...(spec.maxTokens ? { max_tokens: maxTokens ?? spec.maxTokens } : {}),
         ...(expectJson && spec.jsonAsResponseFormat
           ? { response_format: { type: 'json_object' } }
           : {}),
       },
-      ...(spec.timeoutMs ? { timeoutMs: spec.timeoutMs } : {}),
+      ...((timeoutMs ?? spec.timeoutMs) ? { timeoutMs: timeoutMs ?? spec.timeoutMs } : {}),
     });
     const usage = data?.usage || {};
     recordUsage(usageOut, provider, selectedModel, usage.prompt_tokens, usage.completion_tokens);
@@ -1417,7 +1419,14 @@ export function createAiRouter({
   }
 
   /** The aiProxy / testAiProvider shape: an explicit provider, text back with token counts. */
-  async function callProvider({ provider, model, prompt, systemPrompt = '' }) {
+  /**
+   * One call to one named provider, with no failover (the portal's Test and
+   * Playground). `maxTokens` and `timeoutMs` are optional per-call limits for
+   * providers whose table row sets them (NVIDIA); the Test passes small ones
+   * so a reasoning model proves it answers in seconds rather than thinking
+   * its way past the edge's request limit (#701, 2026-09-29: 56-58 s).
+   */
+  async function callProvider({ provider, model, prompt, systemPrompt = '', maxTokens, timeoutMs }) {
     if (!PROVIDERS.includes(provider))
       throw new AiNotConfiguredError(`Unknown AI provider: ${provider}`);
     if (!readKey(env, KEY_ENV[provider])) {
@@ -1434,6 +1443,8 @@ export function createAiRouter({
       expectJson: false,
       systemPrompt,
       usageOut,
+      maxTokens,
+      timeoutMs,
     });
     const usage = usageOut[0] || {};
     return {

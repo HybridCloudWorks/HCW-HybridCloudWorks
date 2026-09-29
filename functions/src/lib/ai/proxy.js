@@ -38,6 +38,17 @@ const PROVIDERS_CONTAINER = 'ai_providers';
 const TEST_PROMPT = 'Reply with the single word: ok';
 
 /**
+ * Limits for the Test, which asks "does this provider answer", not "can it
+ * finish a thought". NVIDIA's models are reasoning models on a trial tier:
+ * with the drafting limits (8192 tokens, 120 s) the one-word Test took 56-58 s
+ * on 2026-09-29, and a slower one outruns the edge's ~100 s request limit
+ * and never reports at all. A handful of tokens proves the model answers; 45 s
+ * turns a stuck provider into a named timeout inside the page's wait.
+ */
+export const TEST_MAX_TOKENS = 16;
+export const TEST_TIMEOUT_MS = 45_000;
+
+/**
  * @param {object} deps
  * @param {{ requireRole: Function }} deps.guard
  * @param {{ readDoc: Function, upsertDoc: Function, patchDoc: Function }} deps.store
@@ -149,6 +160,8 @@ export function createAiProxyHandlers({
           provider: providerId,
           model: body?.model || null,
           prompt: TEST_PROMPT,
+          maxTokens: TEST_MAX_TOKENS,
+          timeoutMs: TEST_TIMEOUT_MS,
         });
         outcome = {
           ok: true,
