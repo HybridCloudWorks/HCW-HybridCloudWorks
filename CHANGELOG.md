@@ -19,6 +19,45 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Docker education catalogue, checked on 2026-09-29; `/docker/education`
+  is a real Learning page and Docker is on the Learn index (#778).**
+  - **Docker runs no certification exam of its own.** Docker's own list is
+    `docker.com/trainings`, and it offers self-guided modules, a YouTube
+    series, and one credential that LinkedIn Learning issues.
+    `src/data/docker/education.js` says so as data
+    (`DOCKER_RUNS_OWN_EXAM = false`). The page says it first, in visitor
+    words (`CREDENTIALS_NOTE`).
+  - **Two credentials, each naming its `issuer`**, which the card shows as
+    "Issued by …":
+    - the Docker Foundations Professional Certificate (LinkedIn Learning:
+      three courses of about four hours, then a final exam);
+    - the Docker Certified Associate (Mirantis: 55 questions in 90 minutes,
+      USD 199 or EUR 200, valid two years). docker.com does not list it.
+  - **Seven learning paths.** Six are the modules docker.com links:
+    - "Build and share a containerized application", 15 minutes. The link
+      on docker.com now redirects here.
+    - "Building images", Beginner, 25 minutes, five modules.
+    - Compose.
+    - Docker Scout.
+    - Build Cloud.
+    - The administrator set-up guide.
+
+    The seventh is the LinkedIn path. Each title, module list, level and
+    time is the page's own, and nothing is estimated.
+  - **Four resources:** Docker Training, the documentation, the guides and
+    the Docker Concepts playlist.
+  - **`EducationTracks` takes three optional fields.** A path may carry
+    `linkLabel` and `duration`, and a certification may carry `issuer`.
+    Every other catalogue renders as before, which a `pathMeta` test pins.
+  - **Learn index.** `EducationIndexPage` lists Docker as a ninth
+    catalogue, and the copy, meta description and table caption say
+    "nine". The table's minimum width is 72rem, up from 64. A test holds
+    `PROVIDER_CATALOGUES` to `VALID_PROVIDERS`.
+  - **No Docker architecture blueprints.** #778 asks for them only "if Docker
+    architecture designs are wanted". The Docker hub's three focus areas do
+    not include them, so `/docker/architecture-designs` and
+    `/docker/frameworks` still answer 404, as Terraform's do.
+
 - **Docker blog, news and code detail pages; Docker in the content
   manifest and the public API (#776).** `/docker/blog` is now the shared
   `ProviderBlogPage` ("Docker Containers Blog"), listing published articles
