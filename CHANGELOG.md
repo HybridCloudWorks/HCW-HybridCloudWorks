@@ -2111,6 +2111,23 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **`Register-LabArc.ps1 -Connect` no longer fails its own clean-up.** After
+  deleting the onboarding secret, the script checked what was left with
+  `@(Get-LabArcPasswordCredentials …).Count`. That function returns its list
+  as one object (`return , …`), so the count was always 1, whether the
+  registration held no secret or two. On 2026-09-28 the owner's run
+  connected the lab VPS to Arc and deleted the secret from Entra, then
+  stopped before removing the four `vault_arc_*` keys from the host's vault,
+  installing the Azure Monitor Agent and associating the data collection
+  rule. The new `Confirm-LabArcCredentialsGone` assigns the list before
+  filtering it. It also re-deletes and re-reads up to six times ten seconds
+  apart, because Entra's reads can lag its writes. The vault keys are now
+  removed before that check, so a slow Entra read can't leave them behind.
+  Four Pester tests drive it through the real `Invoke-LabAzJson` with only
+  the az seam mocked, including the one-object case. The same session
+  finished the owner's run with the fixed script, and it ended with the host
+  Connected, the secret gone from Entra and the vault, and the agent sending
+  to `dcr-lab-hybrid-prod-cus`.
 - **Primary buttons use `text-primary-foreground`, every scope's pair reads,
   and provider logos read on both themes.** `--primary` is near-black on the
   light theme, white on the dark one, and the provider's own colour inside a
