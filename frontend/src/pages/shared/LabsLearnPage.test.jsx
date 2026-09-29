@@ -186,10 +186,10 @@ describe('LabsLearnPage', () => {
         RUN_LOCALLY_COMMANDS.map((entry) => entry.command)
       );
       expect(lines[0].textContent).toBe(
-        'docker run --rm -it -v ${PWD}:/workspace ghcr.io/hybridcloudworks/hcw-lab:latest'
+        'docker run --rm -it -v ${PWD}:/workspace hybridcloudworks/hcw-lab:latest'
       );
       expect(lines[1].textContent).toBe(
-        'docker run --rm -it -v "$PWD":/workspace ghcr.io/hybridcloudworks/hcw-lab:latest'
+        'docker run --rm -it -v "$PWD":/workspace hybridcloudworks/hcw-lab:latest'
       );
     }
     await screen.findByText(NOT_PROVISIONED_SENTENCE);

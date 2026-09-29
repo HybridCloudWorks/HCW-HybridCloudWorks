@@ -1789,6 +1789,16 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **The labs' "Run it locally" commands pull from Docker Hub.**
+  `LAB_IMAGE` in `frontend/src/data/labs/catalogue.js` is now
+  `hybridcloudworks/hcw-lab:latest`. The image went live there on
+  2026-09-29 through Docker's OIDC connection (run 36516945081, #779):
+  - its digest is the same one GHCR serves;
+  - its SLSA provenance verifies under both registry names;
+  - an anonymous registry token reads its manifest.
+
+  `ghcr.io/hybridcloudworks/hcw-lab:latest` stays a mirror of the same
+  digest, and the lab image README lists both.
 - **CI: every workflow runs on Ubuntu 26.04, named, not `ubuntu-latest`
   (#794).**
   Owner rule 2026-09-26: the newest LTS OS. GitHub moves `ubuntu-latest`
