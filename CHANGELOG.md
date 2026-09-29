@@ -2410,6 +2410,67 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The home page no longer shows invented numbers or sample content, and
+  two small lines on Home and Learn pass contrast.** Every figure and list on
+  `/` is now read from something real, and `homeContent.js` says where each
+  one comes from.
+  - **Quick Access Hubs.** Each hub printed a typed feed count: Azure said
+    24 while the server reads 7, AWS 32 against 3, GCP 18 against 3,
+    Terraform 12 against 1, GitHub 9 against 4 and FinOps 7 against 1.
+    VMware, Ansible and Docker said "NEW HUB". Each note is now the number
+    of feeds that provider's news page reads, from
+    `frontend/src/data/providerFeeds.js`. That file is a copy of
+    `PROVIDER_FEEDS` in `functions/src/lib/rss/feeds.js`, the list the
+    ingest actually fetches. `providerFeeds.test.js` fails if the two lists
+    differ by a feed, name or address. `HomePage.hubs.test.jsx` checks each
+    rendered count against the server file itself. The frontend CI job now
+    also runs when that file changes. `ProviderContext`'s `rssFeeds` reads
+    the same list: it still named Azure Updates' retired CDN feed and
+    Ansible's old address.
+  - **Stat row.** The row showed 24+ blueprints, 104+ articles, 22+ modules
+    and 99.9% uptime.
+    - Blueprints is now the count of the `staticBlueprints` the architecture
+      pages export (24).
+    - Articles is now the published total that `GET public/content`
+      reports (24 on 2026-09-29).
+    - Modules is gone: the Terraform modules page lists six cards, and
+      nothing counts 22.
+    - Uptime is gone: the availability probe reports only to monitoring
+      that a visitor cannot see.
+  - **"Latest from the providers"** was ten hard-coded sample headlines,
+    stamped "2 HRS AGO" to "4 DAYS AGO", with a "Last 24 Hours: 3" count.
+    It is now "Latest articles": the six newest published items the blog
+    pages read, fetched in the browser. Each card opens its own page and is
+    dated from the article. Loading, empty and error states use visitor
+    wording. The pre-render shows the loading line rather than a list
+    frozen at build time.
+  - **Blueprint carousel.** Seven of its ten hand-typed cards opened
+    "Architecture Not Found", and every card said "Snapshot v2.0". It now
+    rotates the 24 real blueprints. AWS's six open their own pages; the rest
+    open their provider's architecture page, where they are shown. The
+    section is now "Reference Blueprints: Architecture Designs by Provider",
+    not "from Cloud Vendors".
+  - **Platform Health.**
+    - The last row said "GitHub Actions" over GitHub's overall status. It
+      now says "GitHub".
+    - Each row now links to that provider's own status page. Two of them
+      used to open an unofficial AWS feed and Azure's products-by-region
+      table.
+    - The timestamp is now the server's `checkedAt`, not the time the page
+      asked.
+    - A failed check now reads UNKNOWN instead of staying on CHECKING.
+    - Its light-mode badges took the -800 shade the site's other status
+      badges use. OPERATIONAL measured 3.41:1 and REGIONAL IMPACT 3.03:1.
+  - **Contrast.**
+    - `CatalogueFreshness`, the "Catalogue checked against …" line, measured
+      3.28:1 on the `/education` tiles in light mode. The home page's "last
+      verified" timestamp measured 4.01:1 in dark mode. Both now use the
+      `text-muted-foreground` token, and tests pin both classes.
+    - `/education` is now in `e2e/contrast.spec.js` and
+      `scripts/axe-theme-scan.mjs`.
+    - Axe finds no colour-contrast violation on `/` or `/education` in
+      either theme.
+
 - **A Google beta that has closed reads "Coming", not available (#770).**
   `deriveStatus` in `frontend/src/lib/certStatus.js` used to promote every
   `beta` row to `active` the day after its `betaEndDate`. That is right for

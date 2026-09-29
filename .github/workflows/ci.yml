@@ -65,10 +65,13 @@ jobs:
           # files are what the lab pane's tests read: catalogue.test.js holds
           # the sign-in path and the launcher's path to the coder route and
           # the workspace names to the launcher's map, and
-          # LabPanePage.test.jsx holds its states to the launcher's.
+          # LabPanePage.test.jsx holds its states to the launcher's. The rss
+          # path is the news feed list the server reads: providerFeeds.test.js
+          # holds the frontend's copy to it, and HomePage.hubs.test.jsx holds
+          # each home page hub's feed count to it.
           - name: frontend
             dir: frontend
-            filter: '^(frontend/|\.azure/api-surface\.json|lab-image/(versions\.env|Dockerfile)$|vps-agent/lib/docker-runner\.js$|functions/src/lib/labs/(visitor-report\.js|fixtures/[^/]+\.log)$|lab-host/(coder/launcher/launcher\.js|ansible/roles/coder/templates/10-coder\.caddy\.j2)$)'
+            filter: '^(frontend/|\.azure/api-surface\.json|lab-image/(versions\.env|Dockerfile)$|vps-agent/lib/docker-runner\.js$|functions/src/lib/(labs/(visitor-report\.js|fixtures/[^/]+\.log)|rss/feeds\.js)$|lab-host/(coder/launcher/launcher\.js|ansible/roles/coder/templates/10-coder\.caddy\.j2)$)'
             lint: npm run lint
             format: npm run format:check
             build: npm run build

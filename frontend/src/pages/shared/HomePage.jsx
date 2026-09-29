@@ -1,199 +1,40 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Helmet } from 'react-helmet-async';
 import { Link } from 'react-router';
 import { routes } from '@/lib/routeFactory';
 import { getFunctionsBase } from '@/lib/functionsBase';
+import { fetchPublicContentPage } from '@/lib/publicApi';
+import { usePublicData } from '@/hooks/usePublicData';
+import { feedCountLabel } from '@/data/providerFeeds';
 import Eyebrow from '@/components/shared/Eyebrow';
 import NumberedSection from '@/components/shared/NumberedSection';
 import StatBlock from '@/components/shared/StatBlock';
 import ProviderLogo from '@/components/shared/ProviderLogo';
 import ProviderStrip from '@/components/home/ProviderStrip';
+import LatestArticles from '@/components/home/LatestArticles';
+import {
+  BLUEPRINT_COUNT,
+  LATEST_LIMIT,
+  blueprintCards,
+  toLatestItems,
+} from '@/components/home/homeContent';
 
-const vendorDesigns = [
-  {
-    title: 'Global Load Balancing',
-    pillar: 'Reliability',
-    provider: 'aws',
-    color: 'hsl(var(--aws-orange) / 0.12)',
-    slug: 'global-load-balancing',
-    icon: 'hub',
-  },
-  {
-    title: 'Enterprise Landing Zone',
-    pillar: 'Security',
-    provider: 'azure',
-    color: 'hsl(var(--azure-blue) / 0.12)',
-    slug: 'enterprise-landing-zone',
-    icon: 'domain_verification',
-  },
-  {
-    title: 'Zero-Trust Security',
-    pillar: 'Security & Compliance',
-    provider: 'gcp',
-    color: 'hsl(var(--gcp-red) / 0.12)',
-    slug: 'zero-trust-security',
-    icon: 'enhanced_encryption',
-  },
-  {
-    title: 'Cloud Cost Governance',
-    pillar: 'Cost-Optimization',
-    provider: 'finops',
-    color: 'hsl(var(--finops-green) / 0.12)',
-    slug: 'finops-governance',
-    icon: 'payments',
-  },
-  {
-    title: 'Multi-Region DR',
-    pillar: 'Reliability',
-    provider: 'aws',
-    color: 'hsl(var(--aws-orange) / 0.12)',
-    slug: 'multi-region-dr',
-    icon: 'rebase_edit',
-  },
-  {
-    title: 'Hybrid Connectivity',
-    pillar: 'Reliability',
-    provider: 'azure',
-    color: 'hsl(var(--azure-blue) / 0.12)',
-    slug: 'hybrid-connectivity',
-    icon: 'settings_input_component',
-  },
-  {
-    title: 'BigQuery Data Lake',
-    pillar: 'Performance Efficiency',
-    provider: 'gcp',
-    color: 'hsl(var(--gcp-red) / 0.12)',
-    slug: 'bigquery-data-lake',
-    icon: 'database',
-  },
-  {
-    title: 'Unit Economics Dashboard',
-    pillar: 'Cost-Optimization',
-    provider: 'finops',
-    color: 'hsl(var(--finops-green) / 0.12)',
-    slug: 'unit-economics',
-    icon: 'monitoring',
-  },
-  {
-    title: 'Serverless API',
-    pillar: 'Performance Efficiency',
-    provider: 'aws',
-    color: 'hsl(var(--aws-orange) / 0.12)',
-    slug: 'serverless-api',
-    icon: 'api',
-  },
-  {
-    title: 'Kubernetes on GKE',
-    pillar: 'Operational Excellence',
-    provider: 'gcp',
-    color: 'hsl(var(--gcp-red) / 0.12)',
-    slug: 'container-orchestration',
-    icon: 'grid_view',
-  },
-];
+/*
+ * The design carousel: every reference blueprint the architecture pages show,
+ * from homeContent.js. It was ten hand-typed cards, seven of which opened
+ * "Architecture Not Found", each stamped "Snapshot v2.0".
+ */
+const BLUEPRINT_CARDS = blueprintCards();
 
-const latestFeeds = [
-  {
-    id: 1,
-    title: 'Azure Kubernetes Service: New Zero-Trust Network Policy',
-    description:
-      'Introducing advanced network security features for AKS to support zero-trust architectures by default.',
-    provider: 'azure',
-    time: '2 HRS AGO',
-    category: 'Security',
-    tag: 'NETWORKING',
-  },
-  {
-    id: 2,
-    title: 'AWS Lambda now supports Multi-Region Event Triggers',
-    description:
-      'Simplify your serverless disaster recovery with automated event replication across AWS regions.',
-    provider: 'aws',
-    time: '4 HRS AGO',
-    category: 'Serverless',
-    tag: 'ARCHITECTURE',
-  },
-  {
-    id: 3,
-    title: 'GCP BigQuery: Generative AI Functions in SQL',
-    description:
-      'Execute LLM prompts directly within your SQL queries using new built-in BigQuery ML functions.',
-    provider: 'gcp',
-    time: '6 HRS AGO',
-    category: 'Data & AI',
-    tag: 'INNOVATION',
-  },
-  {
-    id: 4,
-    title: 'FinOps Guide: Optimizing GPU Spot Instances',
-    description:
-      'Strategies for managing high-cost AI workloads using spot instances without sacrificing reliability.',
-    provider: 'finops',
-    time: '1 DAY AGO',
-    category: 'Cost Mgmt',
-    tag: 'OPTIMIZATION',
-  },
-  {
-    id: 5,
-    title: 'Terraform: Cross-Cloud Module Registry Updates',
-    description:
-      'New verified modules for managing hybrid-cloud connectivity across all three major providers.',
-    provider: 'terraform',
-    time: '1 DAY AGO',
-    category: 'IaC',
-    tag: 'DEVELOPMENT',
-  },
-  {
-    id: 6,
-    title: 'GitHub Actions: Enhanced Security for OIDC',
-    description:
-      'Strengthen your CI/CD pipelines with more granular controls for OpenID Connect authentication.',
-    provider: 'github',
-    time: '2 DAYS AGO',
-    category: 'CI/CD',
-    tag: 'SECURITY',
-  },
-  {
-    id: 7,
-    title: 'Azure AI Search: Vector Store Capacity Increased',
-    description:
-      'Scale your RAG applications with 5x more vector storage capacity in the latest Azure AI Search tier.',
-    provider: 'azure',
-    time: '2 DAYS AGO',
-    category: 'AI/ML',
-    tag: 'PERFORMANCE',
-  },
-  {
-    id: 8,
-    title: 'AWS Cost Explorer: New Granular Usage Reports',
-    description:
-      'Get deep visibility into managed service costs with per-request billing breakdown and forecasting.',
-    provider: 'aws',
-    time: '3 DAYS AGO',
-    category: 'FinOps',
-    tag: 'GOVERNANCE',
-  },
-  {
-    id: 9,
-    title: 'GCP GKE: Autopilot for High-Performance Computing',
-    description:
-      'Run your HPC workloads with the simplicity of Autopilot while maintaining raw performance control.',
-    provider: 'gcp',
-    time: '3 DAYS AGO',
-    category: 'Containers',
-    tag: 'RELIABILITY',
-  },
-  {
-    id: 10,
-    title: 'FinOps: Unit Economics Benchmarking Report',
-    description:
-      'Latest industry standards for measuring cloud cost efficiency relative to business growth indicators.',
-    provider: 'finops',
-    time: '4 DAYS AGO',
-    category: 'Cost Mgmt',
-    tag: 'BENCHMARKING',
-  },
-];
+/** A card's tint. Whole strings, as everywhere else Tailwind or a style reads a colour. */
+const CARD_TINTS = {
+  aws: 'hsl(var(--aws-orange) / 0.12)',
+  azure: 'hsl(var(--azure-blue) / 0.12)',
+  gcp: 'hsl(var(--gcp-red) / 0.12)',
+  finops: 'hsl(var(--finops-green) / 0.12)',
+  vmware: 'hsl(var(--vmware-blue) / 0.12)',
+};
+const NEUTRAL_TINT = 'hsl(var(--muted) / 0.6)';
 
 /*
  * "Quick Access Hubs": each provider's news page, as data. They were eight
@@ -204,6 +45,11 @@ const latestFeeds = [
  * classes it finds written out in the source. The hubs keep the classes they
  * had: Azure and AWS hover to neutral text, the rest to their brand colour,
  * and GCP's note alone picks up its colour on hover.
+ *
+ * A hub's note is how many feeds its news page reads, from
+ * `data/providerFeeds.js`, which a test holds to the server's own list. The
+ * notes used to be typed here ("24 FEEDS" for Azure's seven, "32" for AWS's
+ * three) and three hubs said "NEW HUB" instead of a number.
  */
 const HUB_LINK =
   'hub-icon-btn glass-panel rounded-lg p-3 flex items-center gap-3 group border-l-4 border-l-transparent';
@@ -219,7 +65,6 @@ export const QUICK_ACCESS_HUBS = Object.freeze([
     provider: 'azure',
     label: 'Azure',
     icon: 'cloud_done',
-    note: '24 FEEDS',
     glow: 'rgba(0, 120, 212, 0.4)',
     hoverBorder: 'hover:border-l-azure',
     iconTone: NEUTRAL_ICON,
@@ -229,7 +74,6 @@ export const QUICK_ACCESS_HUBS = Object.freeze([
     provider: 'aws',
     label: 'AWS',
     icon: 'rocket_launch',
-    note: '32 FEEDS',
     glow: 'rgba(255, 153, 0, 0.4)',
     hoverBorder: 'hover:border-l-aws',
     iconTone: NEUTRAL_ICON,
@@ -239,7 +83,6 @@ export const QUICK_ACCESS_HUBS = Object.freeze([
     provider: 'gcp',
     label: 'GCP',
     icon: 'query_stats',
-    note: '18 FEEDS',
     glow: 'rgba(219, 68, 55, 0.4)',
     hoverBorder: 'hover:border-l-gcp',
     iconTone: 'dark:text-white group-hover:text-gcp',
@@ -250,7 +93,6 @@ export const QUICK_ACCESS_HUBS = Object.freeze([
     provider: 'terraform',
     label: 'Terraform',
     icon: 'layers',
-    note: '12 FEEDS',
     glow: 'rgba(123, 66, 188, 0.4)',
     hoverBorder: 'hover:border-l-terraform',
     iconTone: 'dark:text-white group-hover:text-terraform',
@@ -260,7 +102,6 @@ export const QUICK_ACCESS_HUBS = Object.freeze([
     provider: 'github',
     label: 'GitHub',
     icon: 'terminal',
-    note: '9 FEEDS',
     glow: 'rgba(110, 118, 129, 0.4)',
     hoverBorder: 'hover:border-l-github',
     iconTone: 'dark:text-muted-foreground group-hover:text-github',
@@ -270,7 +111,6 @@ export const QUICK_ACCESS_HUBS = Object.freeze([
     provider: 'finops',
     label: 'FinOps',
     icon: 'payments',
-    note: '7 FEEDS',
     glow: 'rgba(30, 164, 130, 0.4)',
     hoverBorder: 'hover:border-l-finops',
     iconTone: 'dark:text-muted-foreground group-hover:text-finops',
@@ -280,7 +120,6 @@ export const QUICK_ACCESS_HUBS = Object.freeze([
     provider: 'vmware',
     label: 'VMware',
     icon: 'dns',
-    note: 'NEW HUB',
     glow: 'rgba(0, 145, 218, 0.4)',
     hoverBorder: 'hover:border-l-vmware',
     iconTone: 'dark:text-muted-foreground group-hover:text-vmware',
@@ -290,7 +129,6 @@ export const QUICK_ACCESS_HUBS = Object.freeze([
     provider: 'ansible',
     label: 'Ansible',
     icon: 'terminal',
-    note: 'NEW HUB',
     glow: 'rgba(238, 0, 0, 0.35)',
     hoverBorder: 'hover:border-l-ansible',
     iconTone: 'dark:text-muted-foreground group-hover:text-ansible',
@@ -301,7 +139,6 @@ export const QUICK_ACCESS_HUBS = Object.freeze([
     provider: 'docker',
     label: 'Docker',
     icon: 'deployed_code',
-    note: 'NEW HUB',
     glow: 'rgba(29, 99, 237, 0.4)',
     hoverBorder: 'hover:border-l-docker',
     iconTone: 'dark:text-muted-foreground group-hover:text-docker',
@@ -309,53 +146,42 @@ export const QUICK_ACCESS_HUBS = Object.freeze([
   },
 ]);
 
-const PROVIDER_THEMES = {
-  azure: { bg: 'hsl(var(--azure-blue) / 0.16)', border: 'border-l-azure', text: 'text-azure' },
-  aws: { bg: 'hsl(var(--aws-orange) / 0.16)', border: 'border-l-aws', text: 'text-aws' },
-  gcp: { bg: 'hsl(var(--gcp-red) / 0.16)', border: 'border-l-gcp', text: 'text-gcp' },
-  finops: { bg: 'hsl(var(--finops-green) / 0.12)', border: 'border-l-finops', text: 'text-finops' },
-  terraform: {
-    bg: 'hsl(var(--terraform-purple) / 0.12)',
-    border: 'border-l-terraform',
-    text: 'text-terraform',
+/*
+ * Platform Health: one row per status the server checks
+ * (functions/src/lib/platform-health.js), each linking to the page where that
+ * provider publishes the same status. The links used to open an unofficial
+ * AWS feed and Azure's products-by-region table, and the last row said
+ * "GitHub Actions" over GitHub's overall status indicator.
+ */
+export const STATUS_SOURCES = Object.freeze([
+  {
+    key: 'aws',
+    label: 'Amazon Web Services',
+    href: 'https://health.aws.amazon.com/health/status',
   },
-  github: { bg: 'hsl(var(--github-gray) / 0.08)', border: 'border-l-github', text: 'text-github' },
-  vmware: { bg: 'hsl(var(--vmware-blue) / 0.12)', border: 'border-l-vmware', text: 'text-vmware' },
-  ansible: {
-    bg: 'hsl(var(--ansible-red) / 0.10)',
-    border: 'border-l-ansible',
-    text: 'text-ansible',
-  },
-};
+  { key: 'azure', label: 'Microsoft Azure', href: 'https://azure.status.microsoft/en-us/status' },
+  { key: 'gcp', label: 'Google Cloud', href: 'https://status.cloud.google.com/' },
+  { key: 'github', label: 'GitHub', href: 'https://www.githubstatus.com/' },
+]);
 
-const PROVIDER_BG_ICONS = {
-  azure: '/icons/providers/azure_bg.jpg',
-  aws: '/icons/providers/aws_bg.jpg',
-  gcp: '/icons/providers/gcp_bg.jpg',
-  finops: '/icons/providers/finops_bg.png',
-  terraform: '/icons/providers/terraform_bg.png',
-  github: '/icons/providers/github_bg.png',
-  vmware: '/icons/providers/vmware_bg.png',
-  ansible: '/icons/providers/ansible_bg.png',
-};
+const statusesAll = (status) =>
+  Object.fromEntries(STATUS_SOURCES.map((source) => [source.key, status]));
 
-const PROVIDER_ICONS = {
-  azure: 'rss_feed',
-  aws: 'rss_feed',
-  gcp: 'rss_feed',
-  finops: 'rss_feed',
-  terraform: 'layers',
-  github: 'terminal',
-  vmware: 'rss_feed',
-  ansible: 'terminal',
-};
+/** The small timestamp under "Platform Health". A token, so it holds contrast in both themes. */
+export const HEALTH_TIMESTAMP_CLASS = 'text-[8px] text-muted-foreground font-mono mt-0.5';
 
-const getHealthBadgeClass = (status) => {
+/*
+ * Light-mode badge text is the -800 shade, the same pairing the site's other
+ * status badges use (CertStatusBadge, ProviderBlogPage). The -600 shades read
+ * 3.41:1 (OPERATIONAL) and 3.03:1 (REGIONAL IMPACT) on their tints under axe
+ * on 2026-09-29, once the panel showed real statuses instead of UNKNOWN.
+ */
+export const getHealthBadgeClass = (status) => {
   if (status === 'DEGRADED' || status === 'REGIONAL IMPACT') {
-    return 'text-amber-600 dark:text-amber-400 bg-amber-100/50 dark:bg-amber-900/20';
+    return 'text-amber-800 dark:text-amber-400 bg-amber-100/50 dark:bg-amber-900/20';
   }
   if (status === 'OPERATIONAL') {
-    return 'text-emerald-600 dark:text-emerald-400 bg-emerald-100/50 dark:bg-emerald-900/20';
+    return 'text-emerald-800 dark:text-emerald-400 bg-emerald-100/50 dark:bg-emerald-900/20';
   }
   return 'text-slate-600 dark:text-slate-300 bg-slate-100/70 dark:bg-slate-800/70';
 };
@@ -364,7 +190,8 @@ const getOverallHealth = (statuses) => {
   const values = Object.values(statuses);
   if (values.includes('DEGRADED') || values.includes('REGIONAL IMPACT')) return 'DEGRADED';
   if (values.every((status) => status === 'OPERATIONAL')) return 'OPERATIONAL';
-  return 'CHECKING';
+  if (values.includes('CHECKING')) return 'CHECKING';
+  return 'UNKNOWN';
 };
 
 const getOverallHealthIconClass = (status) => {
@@ -376,6 +203,7 @@ const getOverallHealthIconClass = (status) => {
 const getOverallHealthIcon = (status) => {
   if (status === 'DEGRADED') return 'warning';
   if (status === 'OPERATIONAL') return 'check_circle';
+  if (status === 'UNKNOWN') return 'help';
   return 'sync';
 };
 
@@ -396,31 +224,50 @@ const shouldFetchPlatformHealth = (functionsBase) => {
   return new URL(functionsBase).origin === window.location.origin;
 };
 
+/** The clock time a status was checked, from the server's `checkedAt` when it sent one. */
+const checkedAtLabel = (checkedAt) => {
+  const ms = Date.parse(checkedAt);
+  const at = Number.isFinite(ms) ? new Date(ms) : new Date();
+  return `Checked at ${at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+};
+
+/** How many blueprint cards the carousel shows at once. */
+const CAROUSEL_WINDOW = 4;
+
 export default function HomePage() {
   const [startIndex, setStartIndex] = useState(0);
-  const [healthStatuses, setHealthStatuses] = useState({
-    aws: 'CHECKING',
-    azure: 'CHECKING',
-    gcp: 'CHECKING',
-    github: 'CHECKING',
-  });
+  const [healthStatuses, setHealthStatuses] = useState(() => statusesAll('CHECKING'));
   const [lastVerified, setLastVerified] = useState('Syncing...');
 
+  // The latest published articles, and the article count in the hero, from
+  // one request (homeContent.js says where every number here comes from).
+  const {
+    data: latestPage,
+    loading: latestLoading,
+    error: latestError,
+  } = usePublicData(() => fetchPublicContentPage({ limit: LATEST_LIMIT }), 'home:latest');
+  const latestItems = useMemo(() => toLatestItems(latestPage?.items), [latestPage]);
+  const articleTotal = Number.isInteger(latestPage?.total) ? latestPage.total : null;
+
   useEffect(() => {
+    if (BLUEPRINT_CARDS.length <= CAROUSEL_WINDOW) return undefined;
     const timer = setInterval(() => {
-      setStartIndex((prev) => (prev + 1) % vendorDesigns.length);
+      setStartIndex((prev) => (prev + 1) % BLUEPRINT_CARDS.length);
     }, 5000);
     return () => clearInterval(timer);
   }, []);
 
   useEffect(() => {
     const fetchHealth = async () => {
-      const now = new Date();
-      const timestamp = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const functionsBase = getFunctionsBase();
+      // Nothing was checked, so nothing may still say CHECKING.
+      const unavailable = () => {
+        setHealthStatuses(statusesAll('UNKNOWN'));
+        setLastVerified('Health check unavailable');
+      };
 
       if (!shouldFetchPlatformHealth(functionsBase)) {
-        setLastVerified('Health check unavailable');
+        unavailable();
         return;
       }
 
@@ -432,17 +279,17 @@ export default function HomePage() {
         const data = await res.json();
         if (!data?.ok || !data.statuses) throw new Error('Invalid health response');
 
-        setHealthStatuses({
-          aws: data.statuses.aws || 'UNKNOWN',
-          azure: data.statuses.azure || 'UNKNOWN',
-          gcp: data.statuses.gcp || 'UNKNOWN',
-          github: data.statuses.github || 'UNKNOWN',
-        });
+        setHealthStatuses(
+          Object.fromEntries(
+            STATUS_SOURCES.map(({ key }) => [key, data.statuses[key] || 'UNKNOWN'])
+          )
+        );
+        // The server caches its checks for minutes, so the time it checked is
+        // the true one; the time this page asked is not.
+        setLastVerified(checkedAtLabel(data.checkedAt));
       } catch {
-        setLastVerified('Health check unavailable');
-        return;
+        unavailable();
       }
-      setLastVerified(`Verified at ${timestamp}`);
     };
 
     fetchHealth();
@@ -450,13 +297,14 @@ export default function HomePage() {
     return () => clearInterval(interval);
   }, []);
 
-  const visibleDesigns = [
-    vendorDesigns[startIndex],
-    vendorDesigns[(startIndex + 1) % vendorDesigns.length],
-    vendorDesigns[(startIndex + 2) % vendorDesigns.length],
-    vendorDesigns[(startIndex + 3) % vendorDesigns.length],
-  ];
+  const visibleDesigns = Array.from(
+    { length: Math.min(CAROUSEL_WINDOW, BLUEPRINT_CARDS.length) },
+    (_, offset) => BLUEPRINT_CARDS[(startIndex + offset) % BLUEPRINT_CARDS.length]
+  );
   const overallHealth = getOverallHealth(healthStatuses);
+  // Shown while the count loads, and dropped if it cannot be had: a tile
+  // without a number is better than a number nobody measured.
+  const showArticleTile = articleTotal !== null || (latestLoading && !latestError);
   return (
     <main className="relative z-10 max-w-[1400px] mx-auto w-full px-4 md:px-8 py-8 flex flex-col gap-16 bg-background text-foreground">
       <Helmet>
@@ -494,12 +342,14 @@ export default function HomePage() {
               <span className="material-symbols-outlined text-sm">arrow_forward</span>
             </a>
           </div>
-          {/* Glassy stat blocks (Hyoga "Global Reach 35+" style) */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6">
-            <StatBlock value="24" suffix="+" label="Blueprints" />
-            <StatBlock value="104" suffix="+" label="Articles" />
-            <StatBlock value="22" suffix="+" label="Modules" />
-            <StatBlock value="99.9" suffix="%" label="Uptime" />
+          {/*
+            Glassy stat blocks (Hyoga "Global Reach 35+" style). Counted, not
+            typed: homeContent.js says where each comes from, and why the
+            modules and uptime tiles that stood here are gone.
+          */}
+          <div className="grid grid-cols-2 gap-3 mt-6 max-w-md" data-testid="home-stats">
+            <StatBlock value={BLUEPRINT_COUNT} label="Blueprints" />
+            {showArticleTile && <StatBlock value={articleTotal ?? '…'} label="Articles" />}
           </div>
         </div>
         <div className="relative h-100 lg:h-130 w-full flex items-center justify-center hero-mesh rounded-2xl border border-glass-border overflow-hidden group">
@@ -755,44 +605,44 @@ export default function HomePage() {
         </div>
       </NumberedSection>
 
-      {/* Inspiration Gallery */}
+      {/* Reference blueprints: every one the architecture pages show, four at a time */}
       <NumberedSection
         number={2}
-        eyebrow="Cloud Vendor Collections"
-        title="Architectural Designs from Cloud Vendors"
+        eyebrow="Reference Blueprints"
+        title="Architecture Designs by Provider"
         className="glass-panel rounded-2xl p-6 md:p-8 overflow-hidden"
       >
         <div className="relative">
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div
+            className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4"
+            data-testid="blueprint-carousel"
+          >
             {visibleDesigns.map((design) => (
               <Link
-                key={design.slug}
-                to={`/${design.provider}/architecture-designs/${design.slug}`}
+                key={design.key}
+                to={design.to}
                 className="group rounded-xl border border-slate-700/40 overflow-hidden bg-slate-900/40 flex flex-col h-50 cursor-pointer transition-transform duration-300 hover:-translate-y-1"
               >
-                {/* Top Half: "Screenshot" simulation */}
+                {/* Top half: the blueprint's icon on its provider's tint */}
                 <div className="flex-1 bg-slate-800/50 flex items-center justify-center relative overflow-hidden">
                   <div
                     className="absolute inset-0 opacity-20"
                     style={{
-                      backgroundImage: `radial-gradient(circle at center, ${design.color} 0%, transparent 70%)`,
+                      backgroundImage: `radial-gradient(circle at center, ${CARD_TINTS[design.provider] || NEUTRAL_TINT} 0%, transparent 70%)`,
                     }}
                   ></div>
                   <span
                     className="material-symbols-outlined text-4xl dark:text-white/30 text-slate-400 z-10"
-                    style={{ color: `${design.color}44` }}
+                    aria-hidden="true"
                   >
                     {design.icon}
                   </span>
-                  <div className="absolute bottom-2 right-2 text-[8px] font-mono text-slate-500 uppercase">
-                    Snapshot v2.0
-                  </div>
                 </div>
 
                 {/* Bottom Half: Ultra-Light Provider Shaded Color */}
                 <div
                   className="p-4 pt-3 pb-1 h-22.5 flex flex-col relative"
-                  style={{ backgroundColor: design.color }}
+                  style={{ backgroundColor: CARD_TINTS[design.provider] || NEUTRAL_TINT }}
                 >
                   <h3 className="text-sm font-extrabold text-slate-900 dark:text-white leading-tight line-clamp-2">
                     {design.title}
@@ -820,7 +670,7 @@ export default function HomePage() {
                     )}
                   </div>
                   <p className="text-[9px] uppercase font-black text-slate-800 dark:text-slate-300 tracking-wider absolute bottom-0 right-3">
-                    {design.pillar}
+                    {design.category}
                   </p>
                 </div>
               </Link>
@@ -832,71 +682,9 @@ export default function HomePage() {
       {/* Content Grid */}
       <NumberedSection number={3} eyebrow="Live Signal" title="Active Feeds" id="hubs">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-full">
-          {/* Feed Column */}
-          <div className="lg:col-span-9 flex flex-col gap-6">
-            {/* Quick Access Hubs moved to sidebar for vertical layout */}
-            <div className="flex flex-wrap items-center justify-between gap-4 p-4 glass-panel rounded-lg">
-              <div className="flex items-center gap-3">
-                <span className="material-symbols-outlined text-slate-600 dark:text-slate-400">
-                  rss_feed
-                </span>
-                <span className="eyebrow-label text-slate-700 dark:text-slate-300">
-                  Latest from the providers
-                </span>
-              </div>
-              <div className="flex gap-2">
-                <button className="px-3 py-1.5 text-xs font-mono rounded bg-secondary hover:bg-[hsl(var(--secondary)/0.9)] text-(--primary-foreground) border border-secondary dark:bg-slate-700 dark:hover:bg-slate-600 dark:text-white dark:border-slate-600">
-                  Last 24 Hours: 3
-                </button>
-                {/* Removed filter buttons */}
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-3">
-              {latestFeeds.map((feed) => (
-                <article
-                  key={feed.id}
-                  className={`dashboard-card rounded-md p-4 flex flex-col sm:flex-row gap-4 border-l-4 ${PROVIDER_THEMES[feed.provider].border} transition-all group relative overflow-hidden mr-[5%]`}
-                  style={{ backgroundColor: PROVIDER_THEMES[feed.provider].bg }}
-                >
-                  <div className="w-full sm:w-48 h-28 bg-white/50 dark:bg-slate-800/50 rounded shrink-0 overflow-hidden relative border border-slate-200/50 dark:border-slate-700/50">
-                    <img
-                      src={PROVIDER_BG_ICONS[feed.provider]}
-                      alt={feed.provider}
-                      loading="lazy"
-                      decoding="async"
-                      className="absolute inset-0 w-full h-full object-cover opacity-80 group-hover:scale-105 transition-transform duration-500"
-                    />
-                  </div>
-                  <div className="flex flex-col justify-between flex-1 py-1">
-                    <div>
-                      <div className="flex items-center gap-2 mb-1.5">
-                        <span className="material-symbols-outlined text-slate-600 dark:text-slate-400 text-base">
-                          {PROVIDER_ICONS[feed.provider] || 'rss_feed'}
-                        </span>
-                        <span className="text-[10px] font-mono text-slate-700 dark:text-white uppercase font-bold">
-                          {feed.provider.toUpperCase()} :: {feed.tag}
-                        </span>
-                      </div>
-                      <h3 className="text-lg font-bold text-slate-900 dark:text-white leading-tight mb-2 group-hover:translate-x-1 transition-transform">
-                        {feed.title}
-                      </h3>
-                      <p className="text-sm text-slate-800 dark:text-slate-300 line-clamp-2 leading-relaxed">
-                        {feed.description}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-4 mt-3 pt-3 border-t border-slate-900/10">
-                      <span className="text-xs text-slate-600 dark:text-white font-mono flex items-center gap-1 font-bold">
-                        <span className="material-symbols-outlined text-[14px]">
-                          calendar_today
-                        </span>{' '}
-                        {feed.time}
-                      </span>
-                    </div>
-                  </div>
-                </article>
-              ))}
-            </div>
+          {/* Latest published articles (components/home/LatestArticles.jsx) */}
+          <div className="lg:col-span-9">
+            <LatestArticles items={latestItems} loading={latestLoading} error={latestError} />
           </div>
 
           {/* Sidebar */}
@@ -907,87 +695,42 @@ export default function HomePage() {
                   <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-400">
                     Platform Health
                   </h3>
-                  <span className="text-[8px] text-slate-500 font-mono mt-0.5">{lastVerified}</span>
+                  <span className={HEALTH_TIMESTAMP_CLASS} data-testid="health-checked-at">
+                    {lastVerified}
+                  </span>
                 </div>
                 <span
                   className={`material-symbols-outlined text-sm animate-pulse ${getOverallHealthIconClass(overallHealth)}`}
+                  aria-hidden="true"
                 >
                   {getOverallHealthIcon(overallHealth)}
                 </span>
               </div>
               <div className="flex flex-col gap-3">
-                <a
-                  href="https://www.cloudlookingglass.com/aws.rss"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-between group/status hover:bg-slate-100/50 dark:hover:bg-slate-800/50 p-1 -m-1 rounded transition-colors"
-                >
-                  <span className="text-xs text-slate-700 dark:text-slate-300 group-hover/status:text-slate-900 dark:group-hover/status:text-white flex items-center gap-1">
-                    Amazon Web Services
-                    <span className="material-symbols-outlined text-[10px] opacity-0 group-hover/status:opacity-100 transition-opacity">
-                      open_in_new
-                    </span>
-                  </span>
-                  <span
-                    className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${getHealthBadgeClass(healthStatuses.aws)}`}
+                {STATUS_SOURCES.map((source) => (
+                  <a
+                    key={source.key}
+                    href={source.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-between group/status hover:bg-slate-100/50 dark:hover:bg-slate-800/50 p-1 -m-1 rounded transition-colors"
                   >
-                    {healthStatuses.aws}
-                  </span>
-                </a>
-                <a
-                  href="https://azure.microsoft.com/en-us/explore/global-infrastructure/products-by-region/table?msockid=23509514b2c567502fbc83a8b6c5654a"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-between group/status hover:bg-slate-100/50 dark:hover:bg-slate-800/50 p-1 -m-1 rounded transition-colors"
-                >
-                  <span className="text-xs text-slate-700 dark:text-slate-300 group-hover/status:text-slate-900 dark:group-hover/status:text-white flex items-center gap-1">
-                    Microsoft Azure
-                    <span className="material-symbols-outlined text-[10px] opacity-0 group-hover/status:opacity-100 transition-opacity">
-                      open_in_new
+                    <span className="text-xs text-slate-700 dark:text-slate-300 group-hover/status:text-slate-900 dark:group-hover/status:text-white flex items-center gap-1">
+                      {source.label}
+                      <span
+                        className="material-symbols-outlined text-[10px] opacity-0 group-hover/status:opacity-100 transition-opacity"
+                        aria-hidden="true"
+                      >
+                        open_in_new
+                      </span>
                     </span>
-                  </span>
-                  <span
-                    className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${getHealthBadgeClass(healthStatuses.azure)}`}
-                  >
-                    {healthStatuses.azure}
-                  </span>
-                </a>
-                <a
-                  href="https://status.cloud.google.com/en/feed.atom"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-between group/status hover:bg-slate-100/50 dark:hover:bg-slate-800/50 p-1 -m-1 rounded transition-colors"
-                >
-                  <span className="text-xs text-slate-700 dark:text-slate-300 group-hover/status:text-slate-900 dark:group-hover/status:text-white flex items-center gap-1">
-                    Google Cloud
-                    <span className="material-symbols-outlined text-[10px] opacity-0 group-hover/status:opacity-100 transition-opacity">
-                      open_in_new
+                    <span
+                      className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${getHealthBadgeClass(healthStatuses[source.key])}`}
+                    >
+                      {healthStatuses[source.key]}
                     </span>
-                  </span>
-                  <span
-                    className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${getHealthBadgeClass(healthStatuses.gcp)}`}
-                  >
-                    {healthStatuses.gcp}
-                  </span>
-                </a>
-                <a
-                  href="https://www.githubstatus.com/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-between group/status hover:bg-slate-100/50 dark:hover:bg-slate-800/50 p-1 -m-1 rounded transition-colors"
-                >
-                  <span className="text-xs text-slate-700 dark:text-slate-300 group-hover/status:text-slate-900 dark:group-hover/status:text-white flex items-center gap-1">
-                    GitHub Actions
-                    <span className="material-symbols-outlined text-[10px] opacity-0 group-hover/status:opacity-100 transition-opacity">
-                      open_in_new
-                    </span>
-                  </span>
-                  <span
-                    className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${getHealthBadgeClass(healthStatuses.github)}`}
-                  >
-                    {healthStatuses.github}
-                  </span>
-                </a>
+                  </a>
+                ))}
               </div>
             </div>
 
@@ -1012,7 +755,7 @@ export default function HomePage() {
                     <div className="flex flex-col">
                       <span className={`${HUB_LABEL} ${hub.labelHover}`}>{hub.label}</span>
                       <span className={[HUB_NOTE, hub.noteHover].filter(Boolean).join(' ')}>
-                        {hub.note}
+                        {feedCountLabel(hub.provider)}
                       </span>
                     </div>
                   </Link>

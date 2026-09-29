@@ -96,7 +96,22 @@ async function publicGet(pathAndQuery) {
  * @param {string} [options.source] - 'blogs' for the legacy fallback container
  * @returns {Promise<object[]>} full documents, internal fields stripped
  */
-export async function fetchPublicContentList({ type, provider, limit, offset, source } = {}) {
+export async function fetchPublicContentList(options = {}) {
+  return (await fetchPublicContentPage(options)).items;
+}
+
+/**
+ * GET public/content, keeping the count beside the rows: `{ items, total }`.
+ *
+ * `total` is how many published documents match, not how many came back
+ * (T-407), counted over the server's newest-1,000 window, so it is exact for
+ * any corpus smaller than that. The home page shows it as its article count.
+ * It is null when the response carries none: the page size is not a count,
+ * and passing it off as one is the kind of number the home page just lost.
+ * Same options, same url and so the same shared request as
+ * `fetchPublicContentList`.
+ */
+export async function fetchPublicContentPage({ type, provider, limit, offset, source } = {}) {
   const params = new URLSearchParams();
   if (type) params.set('type', type);
   if (provider) params.set('provider', provider);
@@ -105,7 +120,8 @@ export async function fetchPublicContentList({ type, provider, limit, offset, so
   if (source) params.set('source', source);
   const qs = params.toString();
   const body = await publicGet(`public/content${qs ? `?${qs}` : ''}`);
-  return body?.items || [];
+  const items = body?.items || [];
+  return { items, total: Number.isInteger(body?.total) ? body.total : null };
 }
 
 /**

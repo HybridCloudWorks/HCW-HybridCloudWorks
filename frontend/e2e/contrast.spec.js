@@ -39,6 +39,10 @@ const ROUTES = [
   '/aws/blog',
   '/aws/architecture-designs',
   '/aws/frameworks',
+  // The Learn index: nine provider tiles, each with a "Catalogue checked
+  // against …" line that read 3.28:1 in light mode until 2026-09-29, while
+  // every hub it links to was covered below and this page was not.
+  '/education',
   ...EDUCATION_PROVIDERS.map((p) => `/${p}/education`),
   // The detail templates behind those hubs — one certification page per
   // provider that has one, plus the microcredential template.
