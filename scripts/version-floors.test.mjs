@@ -35,6 +35,7 @@ import {
   readLabHost,
   readWorkflow,
   terraformConstraintAdmits,
+  trackedFiles,
 } from './version-floors.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -265,6 +266,58 @@ describe('reading a workflow', () => {
   });
 });
 
+/**
+ * runs-on names the Ubuntu release a job runs on. Until 2026-09-28 every job
+ * here said ubuntu-latest, which GitHub moved from 24.04 to 26.04 over a
+ * month on its own schedule, and nothing read it.
+ */
+describe("reading a workflow's runs-on", () => {
+  const workflow = [
+    'on: push',
+    'jobs:',
+    '  pinned:',
+    '    runs-on: ubuntu-26.04',
+    '  floating:',
+    '    runs-on: ubuntu-latest # whichever image GitHub picks',
+    '  arm:',
+    '    runs-on: "ubuntu-24.04-arm"',
+    '  listed:',
+    "    runs-on: [self-hosted, 'ubuntu-26.04']",
+    '  windows:',
+    '    runs-on: windows-2025',
+    '  computed:',
+    '    runs-on: ${{ matrix.os }}',
+    '  slim:',
+    '    runs-on: ubuntu-slim',
+    '  grouped:',
+    '    # runs-on: ubuntu-20.04 in a comment is not a pin',
+    '    runs-on:',
+    '      group: larger-runners',
+  ].join('\n');
+  const { pins, problems } = readWorkflow('.github/workflows/x.yml', workflow);
+
+  it('reads a release label, quoted, with -arm or in a flow list, as a runner pin of the Ubuntu kind', () => {
+    expect(pins.map((p) => [p.line, p.where, p.kind, p.version, p.runner])).toEqual([
+      [4, '.github/workflows/x.yml > pinned > runs-on', 'ubuntu', '26.04', true],
+      [8, '.github/workflows/x.yml > arm > runs-on', 'ubuntu', '24.04', true],
+      [10, '.github/workflows/x.yml > listed > runs-on', 'ubuntu', '26.04', true],
+    ]);
+  });
+
+  it('refuses a label with no release, an expression and a value it cannot see, and skips other systems', () => {
+    expect(problems.map((p) => [p.line, p.kind])).toEqual([
+      [6, 'ubuntu'],
+      [14, 'ubuntu'],
+      [16, 'ubuntu'],
+      [19, 'ubuntu'],
+    ]);
+    expect(problems[0].message).toMatch(/ubuntu-latest names no Ubuntu release, so the job runs whichever image GitHub points that label at/);
+    expect(problems[1].message).toMatch(/not a literal runner label/);
+    expect(problems[2].message).toMatch(/ubuntu-slim names no Ubuntu release/);
+    expect(problems[3].message).toMatch(/names no label on its own line/);
+  });
+});
+
 describe('reading a Dockerfile', () => {
   const dockerfile = [
     'FROM python:3.14-slim-trixie@sha256:abc AS fetch',
@@ -470,6 +523,31 @@ describe('the rules', () => {
     expect(judge(at({ kind: 'ubuntu', version: '26.10' }), floors)).toMatch(/interim release/);
   });
 
+  it('holds every runs-on exactly at the runners ceiling, neither behind it nor ahead of it', () => {
+    const runner = (version) => at({ kind: 'ubuntu', version, runner: true, where: '.github/workflows/ci.yml > verify > runs-on' });
+    expect(judge(runner('26.04'), floors)).toBe(null);
+    expect(judge(runner('24.04'), floors)).toBe(
+      'ubuntu-24.04 must be ubuntu-26.04: ubuntu-26.04 is the newest LTS GitHub-hosted runners offer as generally available'
+    );
+    expect(judge(runner('28.04'), floors)).toBe(
+      'ubuntu-28.04 must be ubuntu-26.04: GitHub-hosted runners do not offer ubuntu-28.04 as generally available yet'
+    );
+  });
+
+  /**
+   * The window this ceiling exists for: Canonical has released the next LTS
+   * and the Ubuntu floor has moved to it, but GitHub has not made its runner
+   * image generally available. The lab host must move; runs-on cannot yet.
+   */
+  it('keeps runs-on green on the ceiling while the Ubuntu floor is ahead of what GitHub offers', () => {
+    const ahead = structuredClone(floors);
+    Object.assign(ahead.kinds.ubuntu, { newest: '28.04', floor: '28.04' });
+    const runner = at({ kind: 'ubuntu', version: '26.04', runner: true });
+    const host = at({ kind: 'ubuntu', version: '26.04', where: 'lab-host/bootstrap.sh > accepted Ubuntu releases (target)' });
+    expect(judge(runner, ahead)).toBe(null);
+    expect(judge(host, ahead)).toMatch(/26\.04 is below the floor 28\.04/);
+  });
+
   it('checks a required_version by admission and an exact Terraform pin by floor', () => {
     expect(judge(at({ kind: 'terraform', constraint: '~> 1.5' }), floors)).toBe(null);
     expect(judge(at({ kind: 'terraform', constraint: '~> 1.15.0' }), floors)).toMatch(/does not admit 1\.16\.4/);
@@ -508,7 +586,7 @@ describe('scripts/version-floors.json', () => {
 
   it('has one entry per kind, each dated and sourced', () => {
     expect(Object.keys(kinds).sort()).toEqual(['alpine', 'debian', 'node', 'postgresql', 'python', 'terraform', 'ubuntu', 'vault']);
-    const entries = [...Object.values(kinds), ...Object.values(kinds.node.platformCeilings)];
+    const entries = [...Object.values(kinds), ...Object.values(kinds.node.platformCeilings), ...Object.values(kinds.ubuntu.platformCeilings)];
     for (const entry of entries) {
       expect(entry.newest, JSON.stringify(entry)).toBeTruthy();
       expect(entry.floor, JSON.stringify(entry)).toBeTruthy();
@@ -531,6 +609,12 @@ describe('scripts/version-floors.json', () => {
       expect(Number(ceiling.line)).toBeLessThanOrEqual(Number(kinds.node.line));
     }
     expect(kinds.ubuntu.floor).toBe(kinds.ubuntu.newest);
+    const runners = kinds.ubuntu.platformCeilings.runners;
+    expect(runners.floor).toBe(runners.newest);
+    expect(runners.newest).toMatch(/^\d*[02468]\.04$/);
+    expect(compareVersions(runners.newest, kinds.ubuntu.newest)).toBeLessThanOrEqual(0);
+    expect(Object.values(kinds.ubuntu.codenames)).toContain(runners.newest);
+    expect(Object.keys(kinds.ubuntu.platformCeilings)).toEqual(['runners']);
     expect(kinds.debian.floor).toBe(kinds.debian.newest);
     expect(kinds.postgresql.floor).toBe(majorMinorFloor(kinds.postgresql.newest));
     expect(kinds.postgresql.newest.split('.')[0]).toBe(kinds.postgresql.line);
@@ -605,6 +689,35 @@ describe('every pin in the repository meets its floor', () => {
       'lab-host/ansible/group_vars/all.yml > coder_postgres_image_tag',
     ]);
     expect(labHost.filter((p) => p.kind === 'vault').map((p) => p.where)).toEqual(['lab-host/ansible/group_vars/all.yml > vault_version']);
+  });
+
+  /**
+   * Every runs-on line in every tracked workflow was read, as a pin or as a
+   * problem, so a job cannot slip past the runners ceiling by a form the
+   * reader does not match. Counted per file against the raw text.
+   */
+  it('reads every runs-on in every workflow', () => {
+    const workflows = trackedFiles(ROOT).filter((f) => /^\.github\/workflows\/[^/]+\.ya?ml$/.test(f));
+    const read = [...collected.pins.filter((p) => p.runner), ...collected.problems.filter((p) => p.where.endsWith(' > runs-on'))];
+    const perFile = (file) => read.filter((p) => p.file === file).length;
+    const written = (file) =>
+      readFileSync(join(ROOT, file), 'utf8')
+        .split(/\r?\n/)
+        .filter((l) => /^\s+runs-on:/.test(l)).length;
+    expect(workflows.map((f) => [f, perFile(f)])).toEqual(workflows.map((f) => [f, written(f)]));
+    expect(count((p) => p.runner)).toBeGreaterThanOrEqual(30);
+  });
+
+  /**
+   * .github/actionlint.yaml declares a runner label actionlint does not know
+   * yet. A label no runs-on uses is stale, so the list follows the ceiling.
+   */
+  it('declares to actionlint only runner labels a workflow uses', () => {
+    const config = readFileSync(join(ROOT, '.github', 'actionlint.yaml'), 'utf8');
+    const declared = [...config.matchAll(/^\s+-\s+(\S+)\s*$/gm)].map((m) => m[1]);
+    const used = new Set(collected.pins.filter((p) => p.runner).map((p) => p.raw));
+    expect(declared.length).toBeGreaterThan(0);
+    expect(declared.filter((label) => !used.has(label))).toEqual([]);
   });
 
   it('names a reason for every package that has no engines.node', () => {

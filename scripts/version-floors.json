@@ -43,7 +43,7 @@
       }
     },
     "ubuntu": {
-      "rule": "The newest LTS release only; interim releases get nine months of support and are never used. A host's target (the newest release it accepts) must be the newest LTS; an older LTS it still accepts as a fallback is compatibility, not a target, and is not checked.",
+      "rule": "The newest LTS release only; interim releases get nine months of support and are never used. A host's target (the newest release it accepts) must be the newest LTS; an older LTS it still accepts as a fallback is compatibility, not a target, and is not checked. A workflow's runs-on is held by platformCeilings.runners instead, because GitHub-hosted runners reach a new LTS months after Canonical releases it.",
       "newest": "26.04",
       "floor": "26.04",
       "codenames": {
@@ -52,7 +52,17 @@
         "resolute": "26.04"
       },
       "checkedOn": "2026-09-25",
-      "source": "https://endoflife.date/api/v1/products/ubuntu/"
+      "source": "https://endoflife.date/api/v1/products/ubuntu/",
+      "platformCeilings": {
+        "runners": {
+          "platform": "GitHub-hosted runners",
+          "rule": "Every runs-on in .github/workflows names exactly this release, as ubuntu-MAJOR.MINOR (ubuntu-26.04), and never ubuntu-latest, ubuntu-slim or any other label without a release. ubuntu-latest is GitHub's pointer, not a release: GitHub moves it on its own schedule, and moved it from 24.04 to 26.04 over 2026-10-19 to 2026-11-19, so for a month the same job could land on either image (https://github.com/actions/runner-images/issues/14748). newest is the newest x64 ubuntu-MAJOR.04 label the runner-images README lists without a preview or beta badge, and floor equals it. That can sit below the Ubuntu floor for months: Canonical released 26.04 on 2026-04-23, GitHub previewed it on 2026-06-11 and made it generally available on 2026-09-17. It governs every runs-on, so it has no appliesTo list. Owner rule 2026-09-26: the newest LTS OS.",
+          "newest": "26.04",
+          "floor": "26.04",
+          "checkedOn": "2026-09-28",
+          "source": "https://github.com/actions/runner-images#available-images"
+        }
+      }
     },
     "debian": {
       "rule": "The newest stable major, for a debian image or the Debian release under an official runtime image (python:3.14-slim-trixie).",
@@ -100,7 +110,7 @@
     }
   },
   "unsourced": {
-    "$comment": "Things the repository pins that no endoflife.date product covers. Each says so rather than borrowing another source: every floor under kinds comes from endoflife.date's v1 API, which is what the weekly workflow reads. Nothing here is judged or moved by a script; each pin moves by hand.",
+    "$comment": "Things the repository pins that no endoflife.date product covers. Each says so rather than borrowing another source: every floor under kinds comes from endoflife.date's v1 API, which is what the weekly workflow reads, except that a platform ceiling reads what its platform offers from the platform's own page (Microsoft Learn for Flex Consumption, the actions/runner-images README for GitHub-hosted runners). Nothing here is judged or moved by a script; each pin moves by hand.",
     "portainer": {
       "pin": "lab-host/ansible/group_vars/all.yml > portainer_image_tag",
       "rule": "The newest LTS release of Portainer Business Edition. Portainer publishes LTS and STS lines; an STS line is superseded within weeks and gets no patch releases after that, so the pin follows LTS. Owner decision 2026-09-26: Portainer on the lab host.",

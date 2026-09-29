@@ -37,7 +37,7 @@ concurrency:
 jobs:
   analyze:
     name: Analyze ${{ matrix.language }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       # Uploading results to the code-scanning API is the only write this
       # workflow performs. It uses no secrets, no cloud credentials, no OIDC.

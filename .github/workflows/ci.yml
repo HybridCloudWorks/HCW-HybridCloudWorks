@@ -43,8 +43,13 @@ jobs:
   verify:
     name: ${{ matrix.name }}
     # All CI runs use GitHub-hosted runners. No alternate runner infrastructure
-    # is provisioned or selected.
-    runs-on: ubuntu-latest
+    # is provisioned or selected. Every job in every workflow names the
+    # Ubuntu release, never ubuntu-latest, which GitHub moves on its own
+    # schedule: scripts/version-floors.test.mjs holds each runs-on to the
+    # runners ceiling in scripts/version-floors.json, and the weekly
+    # update-version-floors.yml moves that ceiling when GitHub makes the next
+    # LTS generally available.
+    runs-on: ubuntu-26.04
     strategy:
       # One package failing should not mask the state of the others.
       fail-fast: false
@@ -214,7 +219,7 @@ jobs:
   # versions are pinned to what lab-host/bootstrap.sh installs on the host.
   ansible-lint:
     name: ansible-lint (lab-host)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     defaults:
       run:
         working-directory: lab-host/ansible
@@ -313,7 +318,7 @@ jobs:
   # and module. No npm install: the test uses node:test and nothing else.
   coder-template:
     name: coder (lab-host)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     defaults:
       run:
         working-directory: lab-host/coder
@@ -388,7 +393,7 @@ jobs:
   # purpose: the failure that matters is the round trip breaking, not style.
   harness:
     name: harness (python)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     defaults:
       run:
         working-directory: .

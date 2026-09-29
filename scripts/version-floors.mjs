@@ -22,7 +22,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { meetsFloor, npmRangeAdmits, npmRangeMinimum, parseVersion, terraformConstraintAdmits } from './lib/version-math.mjs';
+import { compareVersions, meetsFloor, npmRangeAdmits, npmRangeMinimum, parseVersion, terraformConstraintAdmits } from './lib/version-math.mjs';
 
 export * from './lib/version-math.mjs';
 export { collectPins, readDockerfile, readJobImages, readLabHost, readWorkflow, trackedFiles } from './lib/version-pins.mjs';
@@ -48,8 +48,16 @@ export function selectorMatches(selector, where) {
   return where === selector || where.startsWith(`${selector} > `) || where.startsWith(`${selector} (`);
 }
 
-/** The platform ceiling that governs a pin, if any. */
+/**
+ * The platform ceiling that governs a pin, if any. A workflow's runs-on
+ * (a `runner` pin) is always under the runners ceiling; a Node.js pin is under
+ * the ceiling whose appliesTo names it.
+ */
 export function ceilingFor(pin, floors) {
+  if (pin.kind === 'ubuntu' && pin.runner) {
+    const runners = floors.kinds.ubuntu.platformCeilings?.runners;
+    return runners ? { component: 'runners', ...runners } : null;
+  }
   if (pin.kind !== 'node') return null;
   const ceilings = Object.entries(floors.kinds.node.platformCeilings ?? {});
   const hit = ceilings.find(([, ceiling]) => ceiling.appliesTo.some((s) => selectorMatches(s, pin.where)));
@@ -116,8 +124,23 @@ function versionAgainstCeiling(version, ceiling) {
   ]);
 }
 
+/**
+ * A runs-on is exactly the release the runners ceiling records: an older one
+ * is behind, and a newer one is an image GitHub has not made generally
+ * available, which carries no SLA.
+ */
+function runnerAgainstCeiling(version, ceiling) {
+  if (version === ceiling.newest) return null;
+  const why =
+    compareVersions(version, ceiling.newest) < 0
+      ? `ubuntu-${ceiling.newest} is the newest LTS ${ceiling.platform} offer as generally available`
+      : `${ceiling.platform} do not offer ubuntu-${version} as generally available yet`;
+  return `ubuntu-${version} must be ubuntu-${ceiling.newest}: ${why}`;
+}
+
 function judgeVersion(pin, kind, ceiling) {
   if (!parseVersion(pin.version)) return `"${pin.raw}" is not a version the floors check can read`;
+  if (ceiling?.component === 'runners') return runnerAgainstCeiling(pin.version, ceiling);
   if (ceiling) return versionAgainstCeiling(pin.version, ceiling);
   const shown = pin.codename ? `${pin.version} (${pin.codename})` : pin.version;
   return firstFailure([

@@ -128,7 +128,7 @@ jobs:
     permissions:
       contents: read # the checkout, nothing more
       id-token: write # exchanged by azure/login for an Azure access token
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       # READER_CLIENT_ID, not CLIENT_ID (T-728). This workflow reads and
       # changes nothing, so it runs as the read-only identity rather than the

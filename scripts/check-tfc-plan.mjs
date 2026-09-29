@@ -15,7 +15,7 @@
  * hour on 2026-08-29. The cutover scripts are PowerShell because they drive the
  * Azure CLI from an operator's Windows desktop. This one only feeds a Node
  * script, and its endgame is T-724's remaining half: running inside
- * `iac-validate.yml`, on `ubuntu-latest`. A `.ps1` bound for a Linux runner is
+ * `iac-validate.yml`, on an Ubuntu runner. A `.ps1` bound for a Linux runner is
  * the wrong language, and it also failed the simpler test of being runnable
  * from the bash prompt the owner was actually sitting at.
  *

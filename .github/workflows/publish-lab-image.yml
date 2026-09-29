@@ -111,7 +111,7 @@ env:
 jobs:
   build:
     name: Build and smoke
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
     steps:
@@ -219,7 +219,7 @@ jobs:
     name: Publish to GHCR
     needs: build
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       packages: write
@@ -386,7 +386,7 @@ jobs:
     name: Publish to Docker Hub
     needs: publish
     if: vars.DOCKERHUB_ENABLED == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       id-token: write # the Docker token exchange, and Sigstore's signing certificate

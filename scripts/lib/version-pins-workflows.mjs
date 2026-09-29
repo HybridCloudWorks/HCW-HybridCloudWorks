@@ -2,7 +2,9 @@
  * The version pins in a GitHub Actions workflow (#715): `node-version:`,
  * `python-version:` and `terraform_version:`, each labelled
  * `file > job > step` (or `> matrix row`), so a platform ceiling in
- * scripts/version-floors.json can name exactly the pins it governs.
+ * scripts/version-floors.json can name exactly the pins it governs; and the
+ * Ubuntu release each job's `runs-on:` names, labelled `file > job > runs-on`
+ * and marked `runner`, which the runners ceiling judges.
  */
 import { parseVersion } from './version-math.mjs';
 import { clean, empty, indentOf, isComment, isDash, linesOf } from './pin-text.mjs';
@@ -66,6 +68,38 @@ function versionKey(name, value, at) {
   return { problem: { ...at, kind, message: `${name}: ${value} is not a literal version the floors check can read` } };
 }
 
+const RUNS_ON = /^\s*runs-on:\s*(.*)$/;
+const RUNNER_RELEASE = /^ubuntu-(\d+\.\d+)(-arm)?$/;
+
+/**
+ * One `runs-on:` value. `ubuntu-26.04` and `ubuntu-26.04-arm` are pins of the
+ * Ubuntu kind. `ubuntu-latest`, `ubuntu-slim` and any other Ubuntu label
+ * without a release are problems, because each runs whichever image GitHub
+ * points the label at that week; so is an expression, and a value that is not
+ * on the line (a runner group or a block list), because neither can be read.
+ * Labels of other systems (windows-, macos-, self-hosted) have no kind and are
+ * skipped. A flow list, `[ubuntu-26.04, self-hosted]`, is read label by label.
+ */
+function readRunsOn(value, at) {
+  const out = empty();
+  const refuse = (message) => out.problems.push({ ...at, kind: 'ubuntu', message });
+  if (value === '') {
+    refuse('runs-on names no label on its own line (a runner group or a block list), which the floors check does not read');
+    return out;
+  }
+  if (value.includes('${{')) {
+    refuse(`runs-on: ${value} is not a literal runner label the floors check can read`);
+    return out;
+  }
+  const labels = value.replace(/^\[(.*)\]$/, '$1').split(',').map(clean).filter(Boolean);
+  for (const label of labels.filter((l) => /^ubuntu\b/.test(l))) {
+    const release = RUNNER_RELEASE.exec(label);
+    if (release) out.pins.push({ ...at, raw: label, kind: 'ubuntu', version: release[1], runner: true });
+    else refuse(`runs-on: ${label} names no Ubuntu release, so the job runs whichever image GitHub points that label at; name the release, ubuntu-MAJOR.MINOR`);
+  }
+  return out;
+}
+
 /** Does the step starting at `dash` carry `key` (or `key-file`) anywhere in its block? */
 function stepHasKey(lines, dash, key) {
   const dashIndent = indentOf(lines[dash]);
@@ -98,9 +132,9 @@ function advanceJob(cursor, line, i) {
 }
 
 /**
- * Every Node.js, Python and Terraform version a workflow pins, and every
+ * Every Node.js, Python and Terraform version a workflow pins, every
  * setup-node or setup-python step that names none (it runs whatever the
- * runner image ships).
+ * runner image ships), and the Ubuntu release every job runs on.
  */
 export function readWorkflow(file, source) {
   const lines = linesOf(source);
@@ -116,6 +150,12 @@ export function readWorkflow(file, source) {
       const found = versionKey(key[1], value, { file, line: i + 1, where: where(i), raw: value });
       if (found.pin) out.pins.push(found.pin);
       if (found.problem) out.problems.push(found.problem);
+    }
+    const runner = cursor.inJobs && cursor.job && RUNS_ON.exec(line);
+    if (runner) {
+      const found = readRunsOn(clean(runner[1]), { file, line: i + 1, where: `${file} > ${cursor.job} > runs-on`, raw: clean(runner[1]) });
+      out.pins.push(...found.pins);
+      out.problems.push(...found.problems);
     }
     const setup = unversionedSetup(lines, i, cursor.jobLine);
     if (setup) {

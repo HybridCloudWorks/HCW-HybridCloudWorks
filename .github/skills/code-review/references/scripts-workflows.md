@@ -51,6 +51,12 @@ monitors, and manual release workflows — all on GitHub-hosted runners.
   Flex Consumption ceiling). `scripts/version-floors.test.mjs` fails a pin
   below its floor in `scripts/version-floors.json`; a new functions pin also
   needs its selector added to `platformCeilings.functions.appliesTo`.
+- **Runner image**: every job's `runs-on` names the Ubuntu release
+  (`ubuntu-26.04`), exactly the one `kinds.ubuntu.platformCeilings.runners`
+  records, never `ubuntu-latest`, which GitHub moves on its own schedule.
+  `scripts/version-floors.test.mjs` fails any other label, and
+  `update-version-floors.yml` moves the ceiling when GitHub makes the next LTS
+  generally available. A new `ubuntu-latest` is a finding.
 - **No auto-apply/auto-deploy**: Azure releases are explicit manual
   dispatches (`deploy-azure-frontend.yml`, `deploy-functions.yml`);
   Terraform applies only via HCP Terraform review. A trigger change that

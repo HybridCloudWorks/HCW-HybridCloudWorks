@@ -119,7 +119,7 @@ concurrency:
 jobs:
   build:
     name: Build and verify the site
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     defaults:
       run:
         working-directory: frontend
@@ -291,7 +291,8 @@ jobs:
           # Every page, not a sample: the two-canonical bug appeared only on
           # article detail routes, because those templates render one of their
           # own — a sample of three landing pages would have missed all 24.
-          dupes=$(for f in $(find dist -name index.html); do
+          # NUL-separated, so a path is never split on whitespace (SC2044).
+          dupes=$(find dist -name index.html -print0 | while IFS= read -r -d '' f; do
             n=$(grep -c 'rel="canonical"' "$f" || true); [ "$n" -eq 1 ] || echo "$f:$n";
           done)
           [ -z "$dupes" ] || { echo "::error::pages without exactly one canonical:"; echo "$dupes"; exit 1; }
@@ -342,7 +343,7 @@ jobs:
   deploy:
     name: Deploy to Azure Static Web Apps
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # Binding the job to an environment gives production deploys a deployment
     # history and a place to hang an approval gate. It does NOT create the gate
     # on its own: GitHub auto-creates a missing environment with no protection

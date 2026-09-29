@@ -78,7 +78,7 @@ concurrency:
 jobs:
   update:
     name: Check the pins against the Terraform Registry
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read # checkout only — this job must never be able to push
     outputs:
@@ -166,7 +166,7 @@ jobs:
     # "Artifact not found" instead of ending quietly (learn catalogue run
     # 34408439025).
     if: needs.update.outputs.changed == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # Scoped to the `automation` environment so this job's secret is reachable
     # only from a run GitHub has admitted into it (zizmor secrets-outside-env,
     # #567), like the two other scheduled PR-opening jobs. `automation` and

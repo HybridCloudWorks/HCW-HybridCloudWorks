@@ -76,7 +76,7 @@ jobs:
   # The job MUST be named copilot-setup-steps or Copilot does not pick it up.
   copilot-setup-steps:
     name: Sign in to Azure and mint the GitHub read token
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # Declaring the environment is what puts `:environment:copilot` in the OIDC
     # subject (see infra/oidc.tf github_copilot_review_environment).
     environment: copilot

@@ -67,7 +67,7 @@ jobs:
     permissions:
       contents: read # the checkout, nothing more
       id-token: write # exchanged by azure/login for an Azure access token
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     defaults:
       run:
         working-directory: scripts

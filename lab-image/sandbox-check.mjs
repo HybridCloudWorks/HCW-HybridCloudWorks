@@ -34,7 +34,7 @@
  * but those relative imports.
  *
  * No dependency beyond Node and Docker (the tar fixture is made with the
- * host's `tar --format=ustar`, present on ubuntu-latest and on Windows).
+ * host's `tar --format=ustar`, present on the Ubuntu runners and on Windows).
  */
 
 import { spawnSync, execFileSync } from 'node:child_process';

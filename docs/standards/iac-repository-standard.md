@@ -39,7 +39,7 @@ the agent drift, this page wins — update the agent.
 | `.gitignore` | `*.tfstate*`, `*.tfplan`, `.terraform/`, real `*.tfvars`, `.env*`, build output |
 | `.editorconfig` | LF, UTF-8, consistent indentation |
 | Structure validator | Script + CI workflow enforcing the root allowlist and Markdown policy |
-| Version floors | Every runtime, OS and base image on its newest supported release, one tolerance per kind (Python, Terraform, Alpine and HashiCorp Vault N-2 patches; Node.js N-2 minors on the newest line its platform allows; PostgreSQL N-2 minors; Ubuntu the newest LTS; Debian the newest major), recorded in `scripts/version-floors.json`, and every lab job image in `vps-agent/lib/capabilities.js` governed by a kind, built here, or named as unsourced; `scripts/version-floors.test.mjs` fails a pin below its floor and `update-version-floors.yml` moves the floors weekly (#715) |
+| Version floors | Every runtime, OS and base image on its newest supported release, one tolerance per kind (Python, Terraform, Alpine and HashiCorp Vault N-2 patches; Node.js N-2 minors on the newest line its platform allows; PostgreSQL N-2 minors; Ubuntu the newest LTS; Debian the newest major), recorded in `scripts/version-floors.json`, and every lab job image in `vps-agent/lib/capabilities.js` governed by a kind, built here, or named as unsourced; every workflow job's `runs-on` names the newest Ubuntu LTS that GitHub-hosted runners offer as generally available (`ubuntu-26.04`), never `ubuntu-latest`; `scripts/version-floors.test.mjs` fails a pin below its floor and `update-version-floors.yml` moves the floors and the runners ceiling weekly (#715) |
 
 ### `.github/`
 | Item | Requirement |

@@ -6,8 +6,10 @@
  *
  *   1. Reads https://endoflife.date/api/v1/products/<name>/ for python,
  *      nodejs, ubuntu, debian, alpine-linux, terraform, postgresql and
- *      hashicorp-vault, and the Azure Functions Flex Consumption page on
- *      Microsoft Learn for the Node.js lines Flex offers. endoflife.date rather than
+ *      hashicorp-vault, the Azure Functions Flex Consumption page on
+ *      Microsoft Learn for the Node.js lines Flex offers, and the
+ *      actions/runner-images README for the Ubuntu releases GitHub-hosted
+ *      runners offer. endoflife.date rather than
  *      postgresql.org's versions.json for PostgreSQL, so every kind has one
  *      source format and the workflow's "endoflife.date's v1 API for each
  *      kind" stays true; it lists a major only from its general release.
@@ -35,6 +37,13 @@
  * `az functionapp list-flexconsumption-runtimes`, needs an Azure sign-in, and
  * a scheduled job that opens pull requests should not hold one.
  *
+ * THE RUNNERS CEILING, the Ubuntu release every workflow's runs-on names, is
+ * read the same way from the "Available Images" table of the
+ * actions/runner-images README, the page GitHub marks a preview image on and
+ * takes the badge off when the image is generally available. It fails soft
+ * in the same way: an unreadable README leaves the ceiling where it is, with
+ * a warning.
+ *
  * TWO FILES. This one owns everything that touches the network, the
  * filesystem or the clock; lib/version-floor-proposals.mjs owns the decisions
  * and is re-exported here so a test imports from one place.
@@ -44,7 +53,15 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { parseArgs } from './lib/cli.mjs';
-import { PRODUCTS, SourceError, proposeFloors, readFlexNodeLines, renderSummary, serialise } from './lib/version-floor-proposals.mjs';
+import {
+  PRODUCTS,
+  SourceError,
+  proposeFloors,
+  readFlexNodeLines,
+  readRunnerUbuntuReleases,
+  renderSummary,
+  serialise,
+} from './lib/version-floor-proposals.mjs';
 import { ENGINES_EXEMPT, collectPins, findViolations } from './version-floors.mjs';
 
 export * from './lib/version-floor-proposals.mjs';
@@ -56,6 +73,7 @@ const USER_AGENT = 'HCW-HybridCloudWorks update-version-floors (+https://github.
 
 export const eolUrl = (product) => `https://endoflife.date/api/v1/products/${product}/`;
 export const FLEX_URL = 'https://learn.microsoft.com/azure/azure-functions/flex-consumption-plan';
+export const RUNNER_IMAGES_URL = 'https://raw.githubusercontent.com/actions/runner-images/main/README.md';
 
 async function fetchText(url) {
   let response;
@@ -77,17 +95,25 @@ async function fetchJson(url) {
   }
 }
 
-/** Every source, read. The Learn table may fail on its own without failing the run. */
+/** A page read by `parse`, or null with a warning: the two ceiling sources may fail without failing the run. */
+async function readSoft(url, parse) {
+  try {
+    return parse(await fetchText(url));
+  } catch (err) {
+    console.error(`::warning::${err.message}`);
+    return null;
+  }
+}
+
+/** Every source, read. */
 async function readSources() {
   const eol = {};
   for (const [kind, product] of Object.entries(PRODUCTS)) eol[kind] = await fetchJson(eolUrl(product));
-  let flexNodeLines = null;
-  try {
-    flexNodeLines = readFlexNodeLines(await fetchText(FLEX_URL));
-  } catch (err) {
-    console.error(`::warning::${err.message}`);
-  }
-  return { eol, flexNodeLines };
+  return {
+    eol,
+    flexNodeLines: await readSoft(FLEX_URL, readFlexNodeLines),
+    runnerUbuntuReleases: await readSoft(RUNNER_IMAGES_URL, readRunnerUbuntuReleases),
+  };
 }
 
 async function run(args) {

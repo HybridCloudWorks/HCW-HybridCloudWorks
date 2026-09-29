@@ -28,13 +28,16 @@ name: Update Version Floors
 # NOTHING MOVED IS NOT A PULL REQUEST. checkedOn moves only with its entry
 # (the AVM_VERIFIED_ON convention), so most weeks end at "No floor moved".
 #
-# SOURCES. endoflife.date's v1 API for each kind, and the "Supported language
+# SOURCES. endoflife.date's v1 API for each kind; the "Supported language
 # stack versions" table on Microsoft Learn's Flex Consumption page for the
-# Node.js line Azure Functions can run. A source that cannot be read, or that
-# lists an older release than the file records, ends the run with exit code 1
-# and nothing written. The Learn table is the exception: when it cannot be
-# read the functions ceiling stays put, the run carries on, and a warning in
-# the step summary says to check the page by hand.
+# Node.js line Azure Functions can run; and the "Available Images" table of
+# the actions/runner-images README for the Ubuntu release GitHub-hosted
+# runners offer as generally available, which every workflow's runs-on names.
+# A source that cannot be read, or that lists an older release than the file
+# records, ends the run with exit code 1 and nothing written. The two tables
+# are the exception: when one cannot be read its ceiling stays put, the run
+# carries on, and a warning in the step summary says to check the page by
+# hand.
 #
 # MODELLED ON update-avm-versions.yml, and for the same reasons. Two jobs, so
 # that no job holds both network input and a credential that can write to
@@ -63,8 +66,8 @@ concurrency:
 
 jobs:
   update:
-    name: Check the floors against endoflife.date and Microsoft Learn
-    runs-on: ubuntu-latest
+    name: Check the floors against endoflife.date, Microsoft Learn and runner-images
+    runs-on: ubuntu-26.04
     permissions:
       contents: read # checkout only — this job must never be able to push
     outputs:
@@ -119,7 +122,7 @@ jobs:
     # Without this gate an unchanged week fails at "Artifact not found"
     # instead of ending quietly (learn catalogue run 34408439025).
     if: needs.update.outputs.changed == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # `automation` and not `production`, as in the other scheduled
     # PR-opening jobs: this opens a pull request, runs on a schedule, and an
     # approval gate would leave the run waiting for a human who is not there.
@@ -218,7 +221,7 @@ jobs:
           {
             echo "## Summary"
             echo
-            echo "Weekly check of \`scripts/version-floors.json\` against endoflife.date and the Azure Functions Flex Consumption table on Microsoft Learn, by \`.github/workflows/update-version-floors.yml\` (#715). Opened by the App rather than pushed to \`main\`, so the required checks run on it. The floors file is the only path it touches."
+            echo "Weekly check of \`scripts/version-floors.json\` against endoflife.date, the Azure Functions Flex Consumption table on Microsoft Learn and the actions/runner-images image list, by \`.github/workflows/update-version-floors.yml\` (#715). Opened by the App rather than pushed to \`main\`, so the required checks run on it. The floors file is the only path it touches."
             echo
             cat "${SUMMARY}"
             echo
@@ -227,6 +230,7 @@ jobs:
             echo "1. **This pull request is expected to fail \`scripts (operations)\` until the pins move.** \`scripts/version-floors.test.mjs\` fails every pin below the new floors by file and line; the list above is the same set. Move each pin on this branch, or in its own pull request first, and merge the floors last. A red floors test on this pull request is the work list, not a defect in it."
             echo "2. **A moved functions ceiling is a production runtime change.** If a note above says the Flex Consumption ceiling moved, \`runtime_version\` in \`infra/functionapp.tf\` moves with it, which is an HCP Terraform run in \`hcw-azure\`, and the functions deploy that follows builds on the new line."
             echo "3. **Read the release notes for a new line** (Node.js, Python or Terraform) before moving the pins it governs; a floor that moves within a line is a patch or minor bump."
+            echo "4. **A moved runners ceiling moves every workflow's \`runs-on\`.** Compare the software table in GitHub's announcement for the new image with what each workflow installs or calls, and list the workflows that run only on a schedule or by dispatch: this pull request's CI runs none of them, so their first run on the new image is after the merge."
             echo
             echo "## Related issue or decision"
             echo

@@ -88,6 +88,29 @@ export function readFlexNodeLines(html) {
   return lines.length ? lines : null;
 }
 
+/**
+ * The Ubuntu releases GitHub-hosted runners offer as generally available, from
+ * the "Available Images" table of the actions/runner-images README: each x64
+ * row whose label cell names `ubuntu-MAJOR.MINOR` and whose image cell carries
+ * no preview or beta badge. During its preview the 26.04 row read
+ * `| Ubuntu 26.04 ![preview](...)<br>... | x64 | \`ubuntu-26.04\` | ... |`.
+ * Null when the table or any such row cannot be found.
+ */
+export function readRunnerUbuntuReleases(markdown) {
+  const text = String(markdown ?? '');
+  const start = text.indexOf('## Available Images');
+  if (start === -1) return null;
+  const next = text.indexOf('\n## ', start + 1);
+  const releases = text
+    .slice(start, next === -1 ? undefined : next)
+    .split('\n')
+    .map((line) => line.split('|').map((cell) => cell.trim()))
+    .filter(([, image, arch]) => /^Ubuntu\b/.test(image ?? '') && arch === 'x64')
+    .filter(([, image]) => !/\b(preview|beta)\b/i.test(image.split('<br>')[0]))
+    .flatMap(([, , , label]) => [...String(label).matchAll(/`ubuntu-(\d+\.\d+)`/g)].map((m) => m[1]));
+  return releases.length ? [...new Set(releases)] : null;
+}
+
 function refuseBackwards(kind, field, from, to) {
   if (from && to && compareVersions(to, from) < 0) {
     throw new SourceError(`${kind}: the source's ${field} ${to} is older than the recorded ${from}; not believed, nothing written`);
@@ -234,6 +257,47 @@ function proposeDistribution(run, kind, pick) {
   learnCodename(record, kind, entry, pick);
 }
 
+const isLtsName = (name) => /^\d*[02468]\.04$/.test(name);
+
+/** Where the runners ceiling lands: never down, and never past the Ubuntu floor it trails. */
+function runnerCeilingNewest(ceiling, offered, ubuntuNewest) {
+  if (!offered) {
+    return {
+      newest: ceiling.newest,
+      note: `The ${ceiling.platform} image list could not be read, so the runners ceiling stays at ubuntu-${ceiling.newest}; check ${ceiling.source} by hand.`,
+    };
+  }
+  const lts = offered.filter((v) => isLtsName(v) && compareVersions(v, ubuntuNewest) <= 0).sort(compareVersions);
+  const top = lts.at(-1);
+  if (!top || compareVersions(top, ceiling.newest) < 0) {
+    return {
+      newest: ceiling.newest,
+      note: `${ceiling.platform} now list ${offered.map((v) => `ubuntu-${v}`).join(', ')} as generally available, none of them the recorded ceiling ubuntu-${ceiling.newest} or a newer LTS; left unchanged for a human to read.`,
+    };
+  }
+  if (top === ceiling.newest) return { newest: top, note: null };
+  return {
+    newest: top,
+    note: `${ceiling.platform} now offer Ubuntu ${top} as generally available: every runs-on in .github/workflows moves to ubuntu-${top}. Compare the software table in GitHub's announcement for the ubuntu-latest move with what each workflow uses before merging, and list the workflows that only run on a schedule or by dispatch, because this pull request's CI does not run them.`,
+  };
+}
+
+/**
+ * The runners ceiling: the newest LTS GitHub-hosted runners offer as
+ * generally available, read from the runner-images README. It runs after the
+ * Ubuntu floor has moved, and never passes it. When the README cannot be read
+ * it stays where it is and the summary says so, as the functions ceiling does
+ * when the Learn table cannot be read.
+ */
+function proposeRunnerCeiling(run) {
+  const ceiling = run.next.kinds.ubuntu.platformCeilings?.runners;
+  if (!ceiling) return;
+  const { newest, note } = runnerCeilingNewest(ceiling, run.sources.runnerUbuntuReleases, run.next.kinds.ubuntu.newest);
+  if (note) run.notes.push(note);
+  run.record.set('ubuntu (runners ceiling)', ceiling, 'newest', newest);
+  run.record.set('ubuntu (runners ceiling)', ceiling, 'floor', newest);
+}
+
 function newestLts(sources, today) {
   const lts = releasesOf(sources.eol.ubuntu, PRODUCTS.ubuntu)
     .filter((r) => r.isLts === true && released(r, today) && /^\d+\.04$/.test(r.name))
@@ -252,9 +316,10 @@ function newestStable(sources, today) {
 
 /**
  * The floors the sources imply. Pure: `current` is the parsed floors file,
- * `sources.eol` maps each kind to its endoflife.date document, and
- * `sources.flexNodeLines` is readFlexNodeLines' result. Returns the next file
- * content, the list of moved values and the notes for the summary.
+ * `sources.eol` maps each kind to its endoflife.date document,
+ * `sources.flexNodeLines` is readFlexNodeLines' result and
+ * `sources.runnerUbuntuReleases` is readRunnerUbuntuReleases'. Returns the
+ * next file content, the list of moved values and the notes for the summary.
  */
 export function proposeFloors(current, sources, today) {
   // One run: what was read, what is being built, and what moved.
@@ -273,6 +338,7 @@ export function proposeFloors(current, sources, today) {
   proposeNode(run);
   proposeCeilings(run);
   proposeDistribution(run, 'ubuntu', newestLts(sources, today));
+  proposeRunnerCeiling(run);
   proposeDistribution(run, 'debian', newestStable(sources, today));
   proposePostgresql(run);
   proposeVault(run);
