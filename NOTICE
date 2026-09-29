@@ -1,0 +1,21 @@
+HybridCloudWorks
+Copyright 2026 Saul Patino and HybridCloudWorks contributors
+
+This product is licensed under the Apache License, Version 2.0. The full
+text of the licence is in the LICENSE file at the root of this repository.
+
+Third-party names, logos and marks
+----------------------------------
+
+Third-party product names, logos and trademarks that appear in this
+repository, including the vendor logos under frontend/public/icons/providers/
+and frontend/src/assets/brands/, belong to their respective owners. They are
+used only to identify those owners' products and services. They are not the
+copyright holders' to license, and they are not licensed under the Apache
+License, Version 2.0. Section 6 of that licence already grants no permission
+to use trade names or marks; this notice says so plainly for the marks of
+others.
+
+Other third-party material, such as the font files under
+frontend/public/fonts/, remains under its own licence terms and is not
+licensed under the Apache License, Version 2.0.

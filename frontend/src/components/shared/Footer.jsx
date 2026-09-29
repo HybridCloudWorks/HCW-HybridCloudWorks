@@ -23,10 +23,11 @@ export default function Footer() {
         className="max-w-[1400px] mx-auto px-4 md:px-6 w-full mb-6"
       />
       <div className="max-w-[1400px] mx-auto px-4 md:px-6 w-full flex flex-col md:flex-row items-center justify-between gap-2 md:gap-0">
-        {/* Left: Copyright */}
+        {/* Left: Copyright. No "All rights reserved": the site's code is
+            Apache-2.0 (LICENSE, #780), and the Terms page covers content. */}
         <div className="flex-1 flex flex-col md:flex-row items-center md:items-start md:justify-start">
           <span className="text-slate-600 dark:text-slate-400 text-xs font-mono">
-            © {currentYear} Hybrid Cloud Works. All rights reserved.
+            © {currentYear} Hybrid Cloud Works.
           </span>
         </div>
 

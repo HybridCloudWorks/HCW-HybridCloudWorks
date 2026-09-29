@@ -1,6 +1,7 @@
 {
   "name": "hcw-availability-probe",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "description": "Cloudflare Worker cron probe for /api/health, reporting AvailabilityData to Application Insights (ADR 0024, T-519)",
   "scripts": {

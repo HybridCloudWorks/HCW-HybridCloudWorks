@@ -4,7 +4,7 @@ galaxy_info:
   namespace: hcw
   author: HybridCloudWorks
   description: The vps-agent job runner as a host-native systemd service from a pinned checkout, with its certificate generated on the host
-  license: UNLICENSED
+  license: Apache-2.0
   min_ansible_version: "2.16"
   platforms:
     - name: Ubuntu

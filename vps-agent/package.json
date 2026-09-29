@@ -1,6 +1,7 @@
 {
   "name": "hcw-vps-agent",
   "version": "2.0.0",
+  "license": "Apache-2.0",
   "description": "Labs VPS agent — pull-based job executor, API-authenticated, no database credential",
   "type": "module",
   "main": "index.js",

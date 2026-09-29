@@ -31,6 +31,14 @@ indent_size = unset
 # <# #> blocks. Code indentation is enforced by scripts/validate-powershell.ps1.
 indent_size = unset
 
+[LICENSE]
+# The Apache License 2.0 text, byte for byte as the Apache Software Foundation
+# publishes it at https://www.apache.org/licenses/LICENSE-2.0.txt (#780), so it
+# can be checked against that file by hash. Its indentation is part of the text,
+# and 24 of its lines are indented by an odd number of spaces. It is never
+# reflowed to fit a grid, so this states no opinion about indentation.
+indent_size = unset
+
 [Makefile]
 indent_style = tab
 

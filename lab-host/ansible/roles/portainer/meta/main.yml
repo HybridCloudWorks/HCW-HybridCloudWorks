@@ -4,7 +4,7 @@ galaxy_info:
   namespace: hcw
   author: HybridCloudWorks
   description: Portainer Business Edition, digest-pinned, published on the host's loopback only and reached through an SSH tunnel
-  license: UNLICENSED
+  license: Apache-2.0
   min_ansible_version: "2.16"
   platforms:
     - name: Ubuntu

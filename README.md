@@ -116,3 +116,13 @@ Open work and completed work are kept apart:
   `REVIEW.md` held the owner-gated half until 2026-08-29; that role moved to
   the issues.
 - [CHANGELOG.md](CHANGELOG.md) — verified completed work.
+
+## Licence
+
+The code in this repository is licensed under the Apache License, Version 2.0
+(owner decision 2026-09-28, #780). The licence text is in [`LICENSE`](LICENSE).
+[`NOTICE`](NOTICE) carries the copyright line and says that third-party names,
+logos and marks, such as the vendor logos under
+`frontend/public/icons/providers/` and `frontend/src/assets/brands/`, belong to
+their owners and are not licensed under Apache-2.0. Other third-party material,
+such as the fonts under `frontend/public/fonts/`, keeps its own licence terms.
