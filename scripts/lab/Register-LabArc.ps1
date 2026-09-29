@@ -1535,6 +1535,43 @@ function Remove-LabArcPasswordCredentials {
     return $removed
 }
 
+function Confirm-LabArcCredentialsGone {
+    <#
+    .SYNOPSIS
+        After the deletion, how many client secrets the registration still
+        lists. Entra's reads can lag its writes, so a secret that is still
+        listed is deleted again and the list read again, up to $Attempts
+        times, before the count is believed.
+    .NOTES
+        The list is assigned first and then filtered. Get-LabArcPasswordCredentials
+        returns its array as one object (return , ...), so wrapping the call
+        itself in @() always yields exactly one element, whether the list is
+        empty or holds two secrets. That is how every -Connect run on
+        2026-09-28 reported "still has 1 client secret(s)" against a
+        registration Entra listed as having none.
+    #>
+    [OutputType([int])]
+    param(
+        [Parameter(Mandatory)] [string] $AppId,
+        [ValidateRange(1, 20)] [int] $Attempts = 6,
+        [ValidateRange(0, 120)] [int] $DelaySeconds = 10
+    )
+
+    $left = @()
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        $listed = Get-LabArcPasswordCredentials -AppId $AppId
+        $left = @($listed | Where-Object { $null -ne $_ })
+        if ($left.Count -eq 0) {
+            return 0
+        }
+        if ($attempt -lt $Attempts) {
+            $null = Remove-LabArcPasswordCredentials -AppId $AppId -Registered $left -Confirm:$false
+            Start-Sleep -Seconds $DelaySeconds
+        }
+    }
+    return $left.Count
+}
+
 function New-LabArcSecret {
     <#
     .SYNOPSIS
@@ -2241,13 +2278,18 @@ else {
     if ($removed -gt 0) {
         $changes.Add("deleted $removed client secret(s) from $DisplayName")
     }
-    $left = @(Get-LabArcPasswordCredentials -AppId $app.AppId)
-    if ($left.Count -gt 0) {
-        throw "$DisplayName still has $($left.Count) client secret(s) after the deletion. Run -Connect again; if it persists, delete them under Certificates & secrets in the portal."
+}
+# The host's copy goes before Entra's deletion is confirmed: once the host is
+# Connected nothing on it reads these keys, so a slow Entra read must not
+# leave them behind (it did on 2026-09-28).
+$vault = Remove-LabArcVaultKeys -HostAlias $HostAlias -Target $target
+if (-not $WhatIfPreference) {
+    $leftCount = Confirm-LabArcCredentialsGone -AppId $app.AppId
+    if ($leftCount -gt 0) {
+        throw "$DisplayName still lists $leftCount client secret(s) after six checks over about a minute. Delete them under Certificates & secrets in the portal, then run -Connect again."
     }
     Write-Host "Entra: $DisplayName has no client secret (deleted $removed). The principal and its grant stay; without a credential they cannot be used, and re-onboarding needs only a new secret."
 }
-$vault = Remove-LabArcVaultKeys -HostAlias $HostAlias -Target $target
 switch ($vault.State) {
     'removed' {
         $changes.Add("removed $($vault.Removed -join ', ') from the vault")
