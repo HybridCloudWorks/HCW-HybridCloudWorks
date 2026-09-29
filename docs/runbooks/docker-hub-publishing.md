@@ -129,12 +129,13 @@ break every Azure federated credential in `infra/oidc.tf`.
 
 ## 2. Store the connection ID as a repository variable
 
-Copy the connection ID to the clipboard (step 1), then run this in
-PowerShell. It reads the clipboard, refuses anything that is not a UUID, and
-sets `DOCKERHUB_CONNECTION`:
+Run this in PowerShell and, at the prompt, paste the connection ID from
+step 1. It asks rather than reading the clipboard, because copying this line
+from the page replaces whatever the clipboard held. It refuses anything that
+is not a UUID and sets `DOCKERHUB_CONNECTION`:
 
 ```powershell
-$id = ([string](Get-Clipboard -Raw)).Trim(); if ($id -match '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') { gh variable set DOCKERHUB_CONNECTION --repo HybridCloudWorks/HCW-HybridCloudWorks --body $id } else { "The clipboard does not hold a connection ID. It holds: $id" }
+$id = (Read-Host 'Docker OIDC connection ID').Trim(); if ($id -match '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') { gh variable set DOCKERHUB_CONNECTION --repo HybridCloudWorks/HCW-HybridCloudWorks --body $id } else { "That is not a connection ID (a UUID). It was: $id" }
 ```
 
 Success prints `✓ Created variable DOCKERHUB_CONNECTION for HybridCloudWorks/HCW-HybridCloudWorks`
