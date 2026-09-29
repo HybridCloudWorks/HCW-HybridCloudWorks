@@ -978,8 +978,9 @@ before initialising is `Initialized false` and `Sealed true`, exit code 2.
 
 ### Auto-unseal
 
-Off until the owner turns it on for this host (#726; ADR 0032, amendment of
-2026-09-29). With it on, Vault unseals itself at every start with the key
+On since 2026-09-29 (#726; ADR 0032, amendment of that date): the owner
+accepted the trade and ran the migration, and a restart came back unsealed
+with no keys typed. With it on, Vault unseals itself at every start with the key
 `vault-seal` in the lab-only Key Vault `kv-labhybrid-prod-cus-01`
 (`infra/lab-hybrid.tf`), signing in as the Arc machine's identity through
 the agent on `127.0.0.1:40342`. Nothing is stored on the host for it. The

@@ -2012,6 +2012,20 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Vault auto-unseal is live on the lab host (#726).** The owner accepted
+  the trade on 2026-09-29: root on the host plus the Arc identity can now
+  unseal Vault, and the five Shamir keys are recovery keys. The seal check
+  passed (the Arc identity reads `kv-labhybrid-prod-cus-01/keys/vault-seal`),
+  a cold copy was taken (`/root/vault-before-726.tgz`), and `bootstrap.sh`
+  switched the seal. The owner ran `vault operator unseal -migrate` with
+  three keys. `systemctl restart vault` then came back `Seal Type
+  azurekeyvault`, `Sealed false`, with the journal reading `unsealed with
+  stored key` and no keys typed. The grant reads back as one row: Key Vault
+  Crypto Service Encryption User for the Arc machine, on that key alone.
+  - ADR 0032's amendment of 2026-09-29 is marked accepted.
+  - `lab-host/README.md`, `docs/architecture/labs-host.md` and
+    Required-Inputs record the seal as on. The architecture record also
+    records Vault as on since #729.
 - **The Docker Hub docs say it is live.** Three documents still described
   Docker Hub publishing as waiting on the owner:
   - `docs/runbooks/docker-hub-publishing.md` (its status box and "Follow-ups
