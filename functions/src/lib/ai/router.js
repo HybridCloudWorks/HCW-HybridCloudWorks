@@ -103,6 +103,43 @@
  *   - Its usage rows are priced at zero, so the Usage tab shows the calls and
  *     the saving rather than an invented figure.
  *
+ * SYNCHRONOUS CALLS HAVE A TIME BUDGET (2026-09-29). A route that answers a
+ * browser holds the request open while the model works. The request dies at
+ * the client's timeout (frontend lib/api.js: 90 s for a draft, 20 s by
+ * default) or at the edge's ~100 s, whichever comes first. On 2026-09-29
+ * NVIDIA's reasoning models took 56-58 s to reply with one word, and an
+ * NVIDIA attempt may run 120 s. With NVIDIA first for drafting, the failover
+ * to a paid provider started after nobody was listening. `budgetMs` on
+ * generateTextResponse and generateJsonResponse is the fix. The arithmetic is
+ * in time-budget.js; the contract is here:
+ *
+ *   - The clock starts when the call is made. It covers the configuration
+ *     read, every provider, every retry and the JSON repair round trip.
+ *   - Half of the budget is the failover reserve. A provider with another
+ *     behind it stops early enough to leave the reserve, unless that would
+ *     leave it less than MIN_ATTEMPT_MS. Then it may use all that is left,
+ *     and so may the last provider.
+ *   - Each attempt's timeout is the provider's own (120 s for NVIDIA, 60 s
+ *     for the rest), cut to what is left of its share. It travels as the
+ *     same per-call `timeoutMs` that the portal's Test passes, not as a
+ *     second mechanism.
+ *   - A retry is made only if its share still holds MIN_ATTEMPT_MS after the
+ *     backoff. No attempt is started once less than that is left.
+ *   - When less than MIN_ATTEMPT_MS is left and providers are still untried,
+ *     the call fails with AI_BUDGET_EXHAUSTED (status 504). The error names
+ *     each provider tried, why it failed, and which were never reached.
+ *   - Pacing, the retry and failover rules, usage capture and key verdicts
+ *     are unchanged.
+ *
+ * No budget means no change. The background paths pass none: forge jobs,
+ * the schedulers, the change feed and every queue worker. They keep the full
+ * timeouts and three attempts. The grounded call and `callProvider` take no
+ * budget. The synchronous routes that pass one, and the client timeouts they
+ * must fit under, are pinned in sync-budgets.test.js. On the trial tier's
+ * measured latency, NVIDIA will seldom finish inside a synchronous share.
+ * What the budget guarantees is that it can no longer stop the provider
+ * behind it from answering.
+ *
  * A Key Vault reference that did not resolve arrives as the literal
  * `@Microsoft.KeyVault(...)` string. That is not a key; `readKey` says so.
  */
@@ -121,6 +158,7 @@ import {
 // It lives in an import-free module of its own so that reusing it does not
 // pull Listen & Learn into every function that loads the router.
 import { fenceArticleText } from './prompt-fence.js';
+import { MIN_ATTEMPT_MS, providerShareMs, startBudget } from './time-budget.js';
 import { createKeyVerdictReporter, recordKeyVerdict } from '../key-verdict.js';
 
 /**
@@ -749,7 +787,13 @@ function stripThinking(text) {
     .trim();
 }
 
-async function postJson(fetchImpl, url, { headers, body, timeoutMs = 60_000 }) {
+/**
+ * One chat attempt's timeout for a provider whose table row sets none: every
+ * provider but NVIDIA. A budgeted call cuts it shorter, never longer.
+ */
+const CHAT_TIMEOUT_MS = 60_000;
+
+async function postJson(fetchImpl, url, { headers, body, timeoutMs = CHAT_TIMEOUT_MS }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -981,11 +1025,28 @@ export function createAiRouter({
    * A provider that fails is logged at warn with the reason, because silently
    * spending Anthropic money to paper over a broken Gemini configuration is its
    * own kind of failure. `usageOut` records the provider that actually served.
+   *
+   * With a `budget` (header: SYNCHRONOUS CALLS HAVE A TIME BUDGET), each
+   * provider gets a share of what is left, and every attempt's `timeoutMs` is
+   * cut to that share. When too little is left to try the next provider, the
+   * call ends with AI_BUDGET_EXHAUSTED rather than sending an attempt that
+   * cannot finish. Without one, nothing here differs from before budgets.
    */
-  async function callWithFailover({ chain, explicitModel, ...args }) {
+  async function callWithFailover({ chain, explicitModel, budget = null, ...args }) {
     const attempts = [];
 
-    for (const { provider, model: configuredModel } of chain) {
+    for (const [index, { provider, model: configuredModel }] of chain.entries()) {
+      let shareEnd = null;
+      if (budget) {
+        const startedAt = now();
+        const shareMs = providerShareMs({
+          remainingMs: budget.deadline - startedAt,
+          reserveMs: budget.reserveMs,
+          hasNext: index < chain.length - 1,
+        });
+        if (shareMs === 0) throw budgetExhausted(budget, attempts, chain.slice(index));
+        shareEnd = startedAt + shareMs;
+      }
       try {
         const result = await withRetry(
           () =>
@@ -994,9 +1055,15 @@ export function createAiRouter({
               // An explicit model from the call site wins; then the
               // administrator's choice in the portal; then the purpose table.
               model: explicitModel || configuredModel,
+              // The provider's own timeout, cut to what is left of its share.
+              // withRetry starts no attempt once less than MIN_ATTEMPT_MS is left.
+              ...(shareEnd === null
+                ? {}
+                : { timeoutMs: Math.min(providerTimeoutMs(provider), shareEnd - now()) }),
             }),
           3,
-          provider
+          provider,
+          shareEnd
         );
         await reportKeyVerdict(provider, { ok: true });
         return result;
@@ -1017,6 +1084,33 @@ export function createAiRouter({
 
     // Unreachable: the loop either returns or throws on its last iteration.
     throw attempts.at(-1)?.error || new AiNotConfiguredError('No AI provider was tried');
+  }
+
+  /**
+   * How a budgeted call ends when too little time is left to try the next
+   * provider.
+   *
+   * It names each provider that was tried with its reason, and each that was
+   * never reached. "Timed out" on its own would hide which provider spent the
+   * time, and that is the one thing the owner needs in order to act. Status
+   * 504 and code AI_BUDGET_EXHAUSTED let a handler map it to an HTTP status.
+   * Nothing retries it: it is thrown outside withRetry, and after failover.
+   */
+  function budgetExhausted(budget, attempts, untried) {
+    const seconds = Math.round(budget.totalMs / 1000);
+    const notTried = untried.map((entry) => entry.provider).join(', ');
+    const tried = attempts
+      .map(({ provider, error }) => `${provider} (${error?.message || error})`)
+      .join('; ');
+    const err = new Error(
+      tried
+        ? `This AI call's ${seconds} s budget ran out after ${tried}. Not tried: ${notTried}.`
+        : `This AI call's ${seconds} s budget left too little time to try any provider (${notTried}).`
+    );
+    err.status = 504;
+    err.code = 'AI_BUDGET_EXHAUSTED';
+    if (attempts.length) err.cause = attempts.at(-1).error;
+    return err;
   }
 
   /**
@@ -1043,8 +1137,14 @@ export function createAiRouter({
    * (AI_PACED) is never retried — the window is still full two seconds later
    * — and NVIDIA's timeout is not either, because two more 120 s attempts
    * would hold an owner's job for six minutes before failing over.
+   *
+   * Inside a budget, `shareEnd` is when this provider's share runs out. A
+   * retry is made only if the share still holds MIN_ATTEMPT_MS after the
+   * backoff. The check is repeated once the wait is over, in case the wait
+   * ran long. Otherwise the error goes straight to the failover, which is
+   * worth more than a retry that cannot finish.
    */
-  async function withRetry(operation, maxAttempts = 3, provider = null) {
+  async function withRetry(operation, maxAttempts = 3, provider = null, shareEnd = null) {
     let lastError;
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       try {
@@ -1054,7 +1154,10 @@ export function createAiRouter({
         if (error?.code === 'AI_PACED') break;
         if (provider === 'nvidia' && Number(error?.status) === 408) break;
         if (attempt >= maxAttempts || !isRetryableError(error)) break;
-        await sleep(2 ** attempt * 1000);
+        const backoffMs = 2 ** attempt * 1000;
+        if (shareEnd !== null && shareEnd - now() - backoffMs < MIN_ATTEMPT_MS) break;
+        await sleep(backoffMs);
+        if (shareEnd !== null && shareEnd - now() < MIN_ATTEMPT_MS) break;
       }
     }
     throw lastError;
@@ -1074,6 +1177,7 @@ export function createAiRouter({
     expectJson,
     systemPrompt,
     usageOut,
+    timeoutMs,
   }) {
     const apiKey = readKey(env, KEY_ENV.anthropic);
     const selectedModel = model || defaultModelFor('anthropic', purpose);
@@ -1100,6 +1204,8 @@ export function createAiRouter({
         messages: [{ role: 'user', content: toAnthropicContent(parts, prompt) }],
         ...(system !== undefined ? { system } : {}),
       },
+      // Undefined keeps postJson's CHAT_TIMEOUT_MS.
+      timeoutMs,
     });
     const usage = data?.usage || {};
     recordUsage(usageOut, 'anthropic', selectedModel, usage.input_tokens, usage.output_tokens);
@@ -1181,7 +1287,23 @@ export function createAiRouter({
   const callOpenAi = (args) => callOpenAiCompatible('openai', args);
   const callNvidia = (args) => callOpenAiCompatible('nvidia', args);
 
-  async function callGemini({ prompt, parts, model, purpose, expectJson, systemPrompt, usageOut }) {
+  /**
+   * A provider's own attempt timeout: its table row's (NVIDIA's 120 s), else
+   * CHAT_TIMEOUT_MS. A budgeted call cuts it to the provider's share.
+   */
+  const providerTimeoutMs = (provider) =>
+    OPENAI_COMPATIBLE[provider]?.timeoutMs ?? CHAT_TIMEOUT_MS;
+
+  async function callGemini({
+    prompt,
+    parts,
+    model,
+    purpose,
+    expectJson,
+    systemPrompt,
+    usageOut,
+    timeoutMs,
+  }) {
     const apiKey = readKey(env, KEY_ENV.gemini);
     const selectedModel = model || defaultModelFor('gemini', purpose);
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(selectedModel)}:generateContent`;
@@ -1195,6 +1317,8 @@ export function createAiRouter({
           ...(expectJson ? { responseMimeType: 'application/json' } : {}),
         },
       },
+      // Undefined keeps postJson's CHAT_TIMEOUT_MS.
+      timeoutMs,
     });
     const usage = data?.usageMetadata || {};
     // Reasoning tokens bill at the output rate — count them as output.
@@ -1240,6 +1364,25 @@ export function createAiRouter({
     return caller(args);
   }
 
+  /**
+   * A call's budget, started now: before the configuration read, which is
+   * part of the call's time. No `budgetMs` is no budget (header).
+   */
+  const budgetFor = (budgetMs) =>
+    budgetMs === null || budgetMs === undefined ? null : startBudget(budgetMs, now());
+
+  /** Resolve the chain and call it: the shared body of both generate calls. */
+  async function generate({ feature, parts, model, budget, ...args }) {
+    const chain = chainForParts(await resolveProviderChain(feature), parts);
+    return callWithFailover({ chain, explicitModel: model, parts, budget, ...args });
+  }
+
+  /**
+   * @param {object} [params]
+   * @param {number} [params.budgetMs] Synchronous callers only: the time this
+   *   call may take, from now, failover included (header: SYNCHRONOUS CALLS
+   *   HAVE A TIME BUDGET). Omitted, the call runs as it always has.
+   */
   async function generateTextResponse({
     prompt = '',
     parts = null,
@@ -1248,13 +1391,14 @@ export function createAiRouter({
     systemPrompt = '',
     usageOut = null,
     feature = null,
+    budgetMs = null,
   } = {}) {
-    const chain = chainForParts(await resolveProviderChain(feature), parts);
-    return callWithFailover({
-      chain,
-      explicitModel: model,
-      prompt,
+    return generate({
+      feature,
       parts,
+      model,
+      budget: budgetFor(budgetMs),
+      prompt,
       purpose,
       expectJson: false,
       systemPrompt,
@@ -1262,6 +1406,7 @@ export function createAiRouter({
     });
   }
 
+  /** As generateTextResponse, parsed as JSON, with one repair round trip. */
   async function generateJsonResponse({
     prompt = '',
     parts = null,
@@ -1270,13 +1415,15 @@ export function createAiRouter({
     systemPrompt = '',
     usageOut = null,
     feature = null,
+    budgetMs = null,
   } = {}) {
-    const chain = chainForParts(await resolveProviderChain(feature), parts);
-    const text = await callWithFailover({
-      chain,
-      explicitModel: model,
-      prompt,
+    const budget = budgetFor(budgetMs);
+    const text = await generate({
+      feature,
       parts,
+      model,
+      budget,
+      prompt,
       purpose,
       expectJson: true,
       systemPrompt,
@@ -1285,17 +1432,24 @@ export function createAiRouter({
     try {
       return parseJsonWithFallbacks(text);
     } catch (parseError) {
-      // One repair round trip, then the original parse error wins.
-      const repaired = await generateTextResponse({
+      // One repair round trip, then the original parse error wins. Inside a
+      // budget the repair shares the same deadline. It is skipped when it
+      // could not have a whole attempt, because the parse error says more
+      // than "out of time" would.
+      if (budget && budget.deadline - now() < MIN_ATTEMPT_MS) throw parseError;
+      const repaired = await generate({
         prompt: `The following should be JSON but is malformed. Repair it and return ONLY valid JSON with no markdown fences, no explanation, and no extra keys.\n\n${sanitizeJsonText(text).slice(0, 30000)}`,
+        parts: null,
         model,
         purpose,
+        expectJson: false,
         systemPrompt:
           'You repair malformed JSON. Return only strict RFC 8259 JSON. Do not add commentary.',
         usageOut,
         // The repair belongs to the call that is already permitted; re-checking
         // under the same cached settings keeps the two halves consistent.
         feature,
+        budget,
       });
       try {
         return parseJsonWithFallbacks(repaired);
@@ -1421,10 +1575,12 @@ export function createAiRouter({
   /** The aiProxy / testAiProvider shape: an explicit provider, text back with token counts. */
   /**
    * One call to one named provider, with no failover (the portal's Test and
-   * Playground). `maxTokens` and `timeoutMs` are optional per-call limits for
-   * providers whose table row sets them (NVIDIA); the Test passes small ones
-   * so a reasoning model proves it answers in seconds rather than thinking
-   * its way past the edge's request limit (#701, 2026-09-29: 56-58 s).
+   * Playground). `maxTokens` is an optional per-call cap for providers whose
+   * table row sends one (NVIDIA). `timeoutMs` is an optional per-call limit
+   * that every provider honours; a budgeted call passes the same argument.
+   * The Test passes small values of both, so a reasoning model proves it
+   * answers in seconds instead of thinking past the edge's request limit
+   * (#701, 2026-09-29: 56-58 s).
    */
   async function callProvider({ provider, model, prompt, systemPrompt = '', maxTokens, timeoutMs }) {
     if (!PROVIDERS.includes(provider))

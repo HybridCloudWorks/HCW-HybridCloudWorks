@@ -7,8 +7,10 @@ import {
   RECORDING_CONTENT_TYPES,
   MIN_TRANSCRIPT_CHARS,
   MAX_TRANSCRIPT_CHARS,
+  RECORDING_DRAFT_HTTP_BUDGET_MS,
 } from './draft-from-recording.js';
 import { createContentDocument } from '../cms/content-create.js';
+import { AFTER_MODEL_MARGIN_MS } from '../ai/time-budget.js';
 
 const NOW = new Date('2026-09-06T12:00:00.000Z');
 const now = () => NOW;
@@ -309,6 +311,41 @@ describe('createContentFromRecording', () => {
     expect(
       parse(await r.handler(request({ recordingId: 'rec-1', contentType: 'blog_post' }), ctx))
     ).toMatchObject({ status: 502, body: { code: 'GENERATION_FAILED', error: 'boom' } });
+  });
+
+  it('hands the drafter its HTTP budget less the after-model margin, which the body cannot set', async () => {
+    const { drafter, handler } = build();
+    await handler(
+      request({ recordingId: 'rec-1', contentType: 'blog_post', budgetMs: 999_999 }),
+      ctx
+    );
+    const { budgetMs } = drafter.generateDraft.mock.calls[0][0];
+    const ceiling = RECORDING_DRAFT_HTTP_BUDGET_MS - AFTER_MODEL_MARGIN_MS;
+    // Less only the time the recording read took.
+    expect(budgetMs).toBeLessThanOrEqual(ceiling);
+    expect(budgetMs).toBeGreaterThan(ceiling - 1_000);
+  });
+
+  it("maps the router's AI_BUDGET_EXHAUSTED to 504 with its own message", async () => {
+    const exhausted = new Error(
+      "This AI call's 70 s budget ran out after nvidia (timeout after 35000 ms); " +
+        'gemini (timeout after 35000 ms). Not tried: openai.'
+    );
+    exhausted.code = 'AI_BUDGET_EXHAUSTED';
+    const r = build({
+      drafter: {
+        generateDraft: vi.fn(async () => {
+          throw exhausted;
+        }),
+      },
+    });
+    expect(
+      parse(await r.handler(request({ recordingId: 'rec-1', contentType: 'blog_post' }), ctx))
+    ).toMatchObject({
+      status: 504,
+      body: { code: 'AI_BUDGET_EXHAUSTED', error: exhausted.message },
+    });
+    expect(r.store.patchDoc).not.toHaveBeenCalled();
   });
 
   it('surfaces the persistence path’s own verdicts (409 duplicate) and does not link the recording', async () => {

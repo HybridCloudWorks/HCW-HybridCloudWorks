@@ -751,4 +751,12 @@ describe('draftIntro and suggestSubjects', () => {
     const few = { generateDraft: vi.fn(async () => ({ title: 'One', keyTopics: 'not a list' })) };
     await expect(suggestSubjects({ drafter: few, sections, subject: 's' })).rejects.toThrow(/at least 3/);
   });
+
+  it("passes the route's time budget to the drafter, and none for the Monday build", async () => {
+    const drafter = { generateDraft: vi.fn(async () => ({ title: 'One', postContent: 'x', keyTopics: ['Two', 'Three'] })) };
+    await draftIntro({ drafter, sections, subject: 's' });
+    await draftIntro({ drafter, sections, subject: 's', budgetMs: 12_000 });
+    await suggestSubjects({ drafter, sections, subject: 's', budgetMs: 11_000 });
+    expect(drafter.generateDraft.mock.calls.map(([call]) => call.budgetMs)).toEqual([null, 12_000, 11_000]);
+  });
 });

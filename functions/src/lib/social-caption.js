@@ -9,7 +9,19 @@
  * same) so the model never invents or mangles a URL.
  */
 
+import { startBudgetClock } from './ai/time-budget.js';
+
 export const CAPTION_MAX_CHARS = 900;
+
+/**
+ * The Generate button's AI time budget, counted from the moment the handler
+ * starts. `generateSocialCaption` has no entry in the client's timeout table
+ * (frontend lib/api.js), so it gets the 20 s default. Inside 15 s, a slow
+ * first provider fails over rather than outliving the page (router.js
+ * header, SYNCHRONOUS CALLS HAVE A TIME BUDGET). The on-publish trigger runs
+ * in the background and passes none. sync-budgets.test.js pins it.
+ */
+export const CAPTION_AI_BUDGET_MS = 15_000;
 
 export function buildCaptionPrompt({ title, summary, platforms = [] }) {
   const platformNote = platforms.length
@@ -35,11 +47,15 @@ Reply with the caption text only.`;
  * The shared core: one model call, feature-gated as socialCaption.
  * @returns {Promise<string>} the caption (trimmed, capped)
  */
-export async function generateCaptionText({ ai }, { title = '', summary = '', platforms = [] }) {
+export async function generateCaptionText(
+  { ai },
+  { title = '', summary = '', platforms = [], budgetMs = null }
+) {
   const caption = await ai.generateTextResponse({
     prompt: buildCaptionPrompt({ title, summary, platforms }),
     purpose: 'general',
     feature: 'socialCaption',
+    budgetMs,
   });
   return String(caption || '')
     .trim()
@@ -59,8 +75,14 @@ const json = (status, body) => ({
  * contentId is sent, the document is read so the Telegram/portal callers can
  * stay thin.
  */
-export function createSocialCaptionHandlers({ guard, store, ai }) {
+export function createSocialCaptionHandlers({
+  guard,
+  store,
+  ai,
+  aiBudgetMs = CAPTION_AI_BUDGET_MS,
+}) {
   async function generateSocialCaption(request, context) {
+    const budgetLeft = startBudgetClock(aiBudgetMs);
     const auth = await guard.requireRole(request, 'editor');
     if (auth.error) return auth.error;
     try {
@@ -77,7 +99,10 @@ export function createSocialCaptionHandlers({ guard, store, ai }) {
         return json(400, { error: 'title or summary (or a resolvable contentId) required' });
       }
 
-      const caption = await generateCaptionText({ ai }, { title, summary, platforms });
+      const caption = await generateCaptionText(
+        { ai },
+        { title, summary, platforms, budgetMs: budgetLeft() }
+      );
       if (!caption) return json(502, { error: 'Caption generation returned nothing' });
       return json(200, { success: true, caption });
     } catch (error) {

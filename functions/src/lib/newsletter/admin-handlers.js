@@ -71,6 +71,7 @@
  * broadcast in a design other than the one the owner chose and previewed.
  */
 import { readKey } from '../ai/router.js';
+import { startBudgetClock } from '../ai/time-budget.js';
 import { ADMIN_CONFIG_PARTITION } from '../cosmos-client.js';
 import { presentSetting } from '../platform-settings.js';
 import { createResendClient } from './resend-client.js';
@@ -220,6 +221,20 @@ function applySectionEdit(storedSections, submitted) {
 }
 
 /**
+ * The AI time budget of the two routes that wait on the drafter: regenerate
+ * the intro, and suggest subject lines. It is counted from the moment the
+ * handler starts, so the reads before the model call spend from it.
+ *
+ * Neither route has an entry in the client's timeout table (frontend
+ * lib/api.js), so both get its 20 s default. 14 s leaves room for the write
+ * and the render that follow a regenerated intro, and for the trip to the
+ * browser. Inside it, a slow first provider fails over rather than
+ * outliving the page (router.js header, SYNCHRONOUS CALLS HAVE A TIME
+ * BUDGET). sync-budgets.test.js pins it against the client default.
+ */
+export const NEWSLETTER_AI_BUDGET_MS = 14_000;
+
+/**
  * @param {object} deps
  * @param {{ requireRole: Function }} deps.guard
  * @param {{ readDoc: Function, queryDocs: Function, upsertDoc: Function, replaceDocIfMatch: Function }} deps.store
@@ -228,6 +243,7 @@ function applySectionEdit(storedSections, submitted) {
  * @param {() => Date} [deps.now]
  * @param {{ generateDraft: Function } | null} [deps.drafter] the builder's drafter; null refuses the AI routes
  * @param {ReturnType<import('./template-source.js').createTemplateCache>} [deps.templateCache]
+ * @param {number} [deps.aiBudgetMs] the AI routes' time budget; injected for tests
  */
 export function createNewsletterAdminHandlers({
   guard,
@@ -237,6 +253,7 @@ export function createNewsletterAdminHandlers({
   now = () => new Date(),
   drafter = null,
   templateCache = sharedTemplateCache,
+  aiBudgetMs = NEWSLETTER_AI_BUDGET_MS,
 }) {
   async function readSettings() {
     const doc = await store.readDoc('admin_config', NEWSLETTER_SETTINGS_CONFIG_ID, ADMIN_CONFIG_PARTITION);
@@ -467,6 +484,7 @@ export function createNewsletterAdminHandlers({
      * subject, which the owner may have edited. An AI failure writes nothing.
      */
     async intro(request, context) {
+      const budgetLeft = startBudgetClock(aiBudgetMs);
       const auth = await guard.requireRole(request, 'editor');
       if (auth.error) return auth.error;
       const body = await request.json().catch(() => null);
@@ -490,6 +508,7 @@ export function createNewsletterAdminHandlers({
             sections: issue.sections ?? [],
             subject: issue.subject,
             tone: settings.introTone,
+            budgetMs: budgetLeft(),
           }));
         } catch (error) {
           context.error?.(`regenerateNewsletterIntro AI failed ${ref}: ${errorMeta(error)}`);
@@ -518,6 +537,7 @@ export function createNewsletterAdminHandlers({
 
     /** Subject-line suggestions for the page to offer. Writes nothing, so no etag. */
     async subjects(request, context) {
+      const budgetLeft = startBudgetClock(aiBudgetMs);
       const auth = await guard.requireRole(request, 'editor');
       if (auth.error) return auth.error;
       const ref = `[invocation ${context?.invocationId ?? 'unknown'}]`;
@@ -531,7 +551,12 @@ export function createNewsletterAdminHandlers({
       }
       if (!issue) return notFound();
       try {
-        const subjects = await suggestSubjects({ drafter, sections: issue.sections ?? [], subject: issue.subject });
+        const subjects = await suggestSubjects({
+          drafter,
+          sections: issue.sections ?? [],
+          subject: issue.subject,
+          budgetMs: budgetLeft(),
+        });
         return json(200, { ok: true, subjects });
       } catch (error) {
         context.error?.(`suggestNewsletterSubjects AI failed ${ref}: ${errorMeta(error)}`);

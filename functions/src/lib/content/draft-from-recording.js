@@ -29,6 +29,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { inferProviderFromUrl } from './draft-from-url.js';
+import { AFTER_MODEL_MARGIN_MS, startBudgetClock } from '../ai/time-budget.js';
 
 /** Below this the model has nothing to work with; the UI has a transcript box. */
 export const MIN_TRANSCRIPT_CHARS = 200;
@@ -92,9 +93,13 @@ const STATUS_BY_CODE = Object.freeze({
   AI_FEATURE_DISABLED: 503,
   AI_NOT_CONFIGURED: 503,
   DRAFT_BUDGET_EXCEEDED: 504,
+  AI_BUDGET_EXHAUSTED: 504,
 });
 
-/** Same ceiling as generateArticleDraft: the client aborts at 90 s. */
+/** Same ceiling as generateArticleDraft: the client aborts at 90 s. Less
+ * AFTER_MODEL_MARGIN_MS (the content write and the link-back), it is also the
+ * AI router's budget, so a slow first provider fails over inside it
+ * (router.js header, SYNCHRONOUS CALLS HAVE A TIME BUDGET). */
 export const RECORDING_DRAFT_HTTP_BUDGET_MS = 75000;
 
 function coded(code, message, extra = {}) {
@@ -185,7 +190,10 @@ export function createRecordingDrafter({
     throw new Error('createRecordingDrafter requires persist (createContentDocument)');
   }
 
-  async function draftFromRecording(body, { user } = {}) {
+  // `budgetMs` sits beside `user`, never in `body`: the body is the client's
+  // JSON, and a client must not choose its own time budget.
+  async function draftFromRecording(body, { user, budgetMs = null } = {}) {
+    const budgetLeft = startBudgetClock(budgetMs);
     const input = parseRecordingRequest(body);
 
     const recording = await store.readDoc('recordings', input.recordingId, input.recordingId);
@@ -224,6 +232,7 @@ export function createRecordingDrafter({
       markdown: transcript,
       customInstructionPrompt: type.instructions,
       usageOut: usage,
+      budgetMs: budgetLeft(),
     });
 
     const postContent = String(parsed?.postContent || '').trim();
@@ -356,7 +365,10 @@ export function createContentFromRecordingHandler({
     const body = await request.json().catch(() => null);
     try {
       const result = await withBudget(
-        recordingDrafter.draftFromRecording(body, { user: auth.user }),
+        recordingDrafter.draftFromRecording(body, {
+          user: auth.user,
+          budgetMs: budgetMs - AFTER_MODEL_MARGIN_MS,
+        }),
         budgetMs
       );
       return json(200, { ok: true, ...result });

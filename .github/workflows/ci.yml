@@ -85,14 +85,16 @@ jobs:
           # to stay importable into the review queue. The first three frontend
           # files are the pages that word the public routes' codes themselves:
           # public-visitor-copy.test.js and public-lock.test.js read them, so a
-          # code the server answers can never go unmapped on the page. The last
+          # code the server answers can never go unmapped on the page. The next
           # two are the admin copies of server allowlists (the default-cover
           # providers and the image-prompt pages): docker-cms.test.js holds
-          # them to the server's lists (#775).
+          # them to the server's lists (#775). api.js is the browser's timeout
+          # table: sync-budgets.test.js holds the server's AI time budgets
+          # under it, so a shorter client timeout cannot land unchecked.
           - name: functions (azure)
             dir: functions
             node-version: '24'
-            filter: '^(functions/|\.azure/api-surface\.json|infra/|docs/content/blog-[a-z0-9-]+\.md$|frontend/src/pages/tools/landingZone/labValidateRules\.js$|frontend/src/pages/tools/explain/ExplainControl\.jsx$|frontend/src/lib/turnstile\.js$|frontend/src/components/admin/platform-settings/settingShared\.jsx$|frontend/src/pages/admin/ImagePromptsPage\.jsx$)'
+            filter: '^(functions/|\.azure/api-surface\.json|infra/|docs/content/blog-[a-z0-9-]+\.md$|frontend/src/pages/tools/landingZone/labValidateRules\.js$|frontend/src/pages/tools/explain/ExplainControl\.jsx$|frontend/src/lib/turnstile\.js$|frontend/src/components/admin/platform-settings/settingShared\.jsx$|frontend/src/pages/admin/ImagePromptsPage\.jsx$|frontend/src/lib/api\.js$)'
             test: npm test
           # The out-of-tree entries after infra/ are what
           # version-floors.test.mjs reads (#715): every package.json and

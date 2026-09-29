@@ -1,4 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import { MIN_ATTEMPT_MS } from './time-budget.js';
 import {
   createAiRouter,
   readKey,
@@ -1214,5 +1215,316 @@ describe('source grounding — the call (#433)', () => {
     // One request. A repair through generateTextResponse would have walked
     // the generic chain, which is what this entry point exists to avoid.
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe('a time budget for synchronous callers (router header)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const KEYS = {
+    GEMINI_API_KEY: 'g',
+    OPENAI_API_KEY: 'o',
+    ANTHROPIC_API_KEY: 'a',
+    NVIDIA_API_KEY: 'nvapi-test',
+  };
+  const PROVIDER_BY_HOST = {
+    'generativelanguage.googleapis.com': 'gemini',
+    'api.openai.com': 'openai',
+    'api.anthropic.com': 'anthropic',
+    'integrate.api.nvidia.com': 'nvidia',
+  };
+  const providerOf = (url) => PROVIDER_BY_HOST[new URL(url).host];
+  const ANSWER = JSON.stringify({
+    content: [{ type: 'text', text: '{"ok":true}' }],
+    choices: [{ message: { content: '{"ok":true}' } }],
+    candidates: [{ content: { parts: [{ text: '{"ok":true}' }] } }],
+  });
+
+  /**
+   * The named providers never answer until they are aborted, which is how a
+   * reasoning model on a busy trial tier looks from here. Everyone else
+   * answers at once. Each attempt's start and end are read off the clock.
+   */
+  function fetchWhereStuck(stuck) {
+    const attempts = [];
+    const impl = vi.fn((url, init) => {
+      const attempt = { provider: providerOf(url), startedAt: Date.now(), endedAt: null };
+      attempts.push(attempt);
+      if (!stuck.includes(attempt.provider)) {
+        attempt.endedAt = Date.now();
+        return Promise.resolve({ ok: true, status: 200, text: async () => ANSWER });
+      }
+      return new Promise((_, reject) => {
+        init.signal.addEventListener('abort', () => {
+          attempt.endedAt = Date.now();
+          reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+        });
+      });
+    });
+    impl.attempts = attempts;
+    impl.providers = () => attempts.map((a) => a.provider);
+    return impl;
+  }
+
+  /** Start a call and note when it settles, on the (fake) clock. */
+  function timed(promise) {
+    const run = { startedAt: Date.now(), endedAt: null };
+    run.promise = promise.finally(() => {
+      run.endedAt = Date.now();
+    });
+    return run;
+  }
+
+  it('a first provider that never answers fails over inside the budget, and the call ends inside it', async () => {
+    // The 2026-09-29 failure: NVIDIA first for drafting, allowed 120 s,
+    // outliving the browser before the failover ran.
+    vi.useFakeTimers();
+    const fetchImpl = fetchWhereStuck(['nvidia']);
+    const log = { warn: vi.fn() };
+    const run = timed(
+      createAiRouter({ env: KEYS, fetch: fetchImpl, log }).generateJsonResponse({
+        prompt: 'x',
+        purpose: 'draft',
+        feature: 'forgeDrafting',
+        budgetMs: 60_000,
+      })
+    );
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(run.promise).resolves.toEqual({ ok: true });
+
+    expect(fetchImpl.providers()).toEqual(['nvidia', 'gemini']);
+    // NVIDIA had its share, the budget less the failover reserve, not 120 s.
+    const [nvidia] = fetchImpl.attempts;
+    expect(nvidia.endedAt - nvidia.startedAt).toBe(30_000);
+    expect(run.endedAt - run.startedAt).toBeLessThanOrEqual(60_000);
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.stringMatching(/nvidia could not serve this call \(timeout after 30000 ms\)/)
+    );
+  });
+
+  it("with no budget, the background path keeps NVIDIA's full 120 s", async () => {
+    vi.useFakeTimers();
+    const fetchImpl = fetchWhereStuck(['nvidia']);
+    const call = createAiRouter({ env: KEYS, fetch: fetchImpl, log: quiet }).generateJsonResponse({
+      prompt: 'x',
+      purpose: 'draft',
+      feature: 'forgeDrafting',
+    });
+    await vi.advanceTimersByTimeAsync(119_999);
+    expect(fetchImpl.providers()).toEqual(['nvidia']);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(call).resolves.toEqual({ ok: true });
+    expect(fetchImpl.providers()).toEqual(['nvidia', 'gemini']);
+    const [nvidia] = fetchImpl.attempts;
+    expect(nvidia.endedAt - nvidia.startedAt).toBe(120_000);
+  });
+
+  it.each(['gemini', 'openai', 'anthropic', 'nvidia'])(
+    '%s honours the per-call timeout that a budget sets',
+    async (provider) => {
+      // Pinned, it is the only provider, so it has the whole budget, and no
+      // retry fits after it.
+      vi.useFakeTimers();
+      const fetchImpl = fetchWhereStuck([provider]);
+      const call = createAiRouter({
+        env: { ...KEYS, CONTENTFORGE_AI_PROVIDER: provider },
+        fetch: fetchImpl,
+        log: quiet,
+      }).generateTextResponse({ prompt: 'x', feature: 'forgeDrafting', budgetMs: 10_000 });
+      const settled = expect(call).rejects.toThrow('timeout after 10000 ms');
+      await vi.advanceTimersByTimeAsync(10_000);
+      await settled;
+      expect(fetchImpl.providers()).toEqual([provider]);
+    }
+  );
+
+  it.each([5_000, 9_999, 14_000, 15_000, 60_000, 70_000])(
+    'with every provider stuck and %i ms, no attempt is shorter than MIN_ATTEMPT_MS and the call ends inside the budget',
+    async (budgetMs) => {
+      vi.useFakeTimers();
+      const fetchImpl = fetchWhereStuck(['nvidia', 'gemini', 'openai', 'anthropic']);
+      const run = timed(
+        createAiRouter({ env: KEYS, fetch: fetchImpl, log: quiet }).generateTextResponse({
+          prompt: 'x',
+          feature: 'forgeDrafting',
+          budgetMs,
+        })
+      );
+      const settled = expect(run.promise).rejects.toMatchObject({
+        code: 'AI_BUDGET_EXHAUSTED',
+        status: 504,
+      });
+      await vi.advanceTimersByTimeAsync(budgetMs);
+      await settled;
+
+      expect(run.endedAt - run.startedAt).toBeLessThanOrEqual(budgetMs);
+      expect(fetchImpl.attempts.length).toBeGreaterThan(0);
+      for (const attempt of fetchImpl.attempts) {
+        expect(attempt.endedAt - attempt.startedAt).toBeGreaterThanOrEqual(MIN_ATTEMPT_MS);
+      }
+    }
+  );
+
+  it('running out names each provider tried and why, and those never reached', async () => {
+    vi.useFakeTimers();
+    const fetchImpl = fetchWhereStuck(['nvidia', 'gemini', 'openai', 'anthropic']);
+    const call = createAiRouter({ env: KEYS, fetch: fetchImpl, log: quiet }).generateTextResponse({
+      prompt: 'x',
+      feature: 'forgeDrafting',
+      budgetMs: 60_000,
+    });
+    const settled = expect(call).rejects.toThrow(
+      "This AI call's 60 s budget ran out after nvidia (timeout after 30000 ms); gemini (timeout after 30000 ms). Not tried: openai, anthropic."
+    );
+    await vi.advanceTimersByTimeAsync(60_000);
+    await settled;
+  });
+
+  it.each([0, -1, 4_999, Number.NaN])(
+    'a budget of %s ms is too short for one attempt: nothing is sent, and the error says so',
+    async (budgetMs) => {
+      const fetchImpl = vi.fn();
+      const call = createAiRouter({ env: KEYS, fetch: fetchImpl, log: quiet }).generateTextResponse({
+        prompt: 'x',
+        feature: 'forgeDrafting',
+        budgetMs,
+      });
+      await expect(call).rejects.toMatchObject({
+        code: 'AI_BUDGET_EXHAUSTED',
+        status: 504,
+        message: expect.stringMatching(
+          /too little time to try any provider \(nvidia, gemini, openai, anthropic\)/
+        ),
+      });
+      expect(fetchImpl).not.toHaveBeenCalled();
+    }
+  );
+
+  it('retries only while the share still holds a whole attempt after the backoff', async () => {
+    const env = { GEMINI_API_KEY: 'g', OPENAI_API_KEY: 'o' };
+    const run = async (budgetMs) => {
+      let t = 0;
+      const sleep = vi.fn(async (ms) => {
+        t += ms;
+      });
+      const fetchImpl = vi.fn(async (url) =>
+        providerOf(url) === 'openai' ? openaiReply('fine') : fail(503, { error: { message: 'overloaded' } })
+      );
+      const r = createAiRouter({ env, fetch: fetchImpl, sleep, now: () => t, log: quiet });
+      const text = await r.generateTextResponse({ prompt: 'x', budgetMs });
+      return {
+        text,
+        sleeps: sleep.mock.calls.map(([ms]) => ms),
+        providers: fetchImpl.mock.calls.map(([url]) => providerOf(url)),
+      };
+    };
+
+    // No budget: three Gemini attempts, as always.
+    expect(await run(undefined)).toEqual({
+      text: 'fine',
+      sleeps: [2000, 4000],
+      providers: ['gemini', 'gemini', 'gemini', 'openai'],
+    });
+    // 15 s: Gemini's share is 7.5 s. A retry after 2 s still leaves 5.5 s;
+    // a second one, after 4 s more, would leave 1.5 s. It goes to OpenAI instead.
+    expect(await run(15_000)).toEqual({
+      text: 'fine',
+      sleeps: [2000],
+      providers: ['gemini', 'gemini', 'openai'],
+    });
+  });
+
+  it("NVIDIA's 429 retries and its pacing refusal are the same inside a budget", async () => {
+    let t = 0;
+    const sleep = vi.fn(async (ms) => {
+      t += ms;
+    });
+    const fetchImpl = vi.fn(async (url) =>
+      providerOf(url) === 'nvidia' ? fail(429, { error: { message: 'Too Many Requests' } }) : geminiReply('{}')
+    );
+    const r = createAiRouter({
+      env: { ...KEYS, NVIDIA_REQUESTS_PER_MINUTE: '3' },
+      fetch: fetchImpl,
+      sleep,
+      now: () => t,
+      log: quiet,
+    });
+    await r.generateJsonResponse({ prompt: 'x', feature: 'forgeDrafting', budgetMs: 60_000 });
+    expect(fetchImpl.mock.calls.map(([url]) => providerOf(url))).toEqual([
+      'nvidia',
+      'nvidia',
+      'nvidia',
+      'gemini',
+    ]);
+    expect(sleep.mock.calls.map(([ms]) => ms)).toEqual([2000, 4000]);
+
+    // The window is now full: the next call is refused without sending,
+    // sleeping or retrying, and fails over at once.
+    fetchImpl.mockClear();
+    sleep.mockClear();
+    await r.generateJsonResponse({ prompt: 'x', feature: 'forgeDrafting', budgetMs: 60_000 });
+    expect(fetchImpl.mock.calls.map(([url]) => providerOf(url))).toEqual(['gemini']);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('usage rows and key verdicts are the same with a budget as without one', async () => {
+    const run = async (budgetMs) => {
+      const onKeyVerdict = vi.fn(async () => {});
+      const usage = [];
+      const fetchImpl = vi.fn(async (url) =>
+        providerOf(url) === 'nvidia'
+          ? fail(401, { error: { message: 'Unauthorized' } })
+          : geminiReply('{"ok":true}')
+      );
+      const r = createAiRouter({ env: KEYS, fetch: fetchImpl, sleep: noSleep, log: quiet, onKeyVerdict });
+      const result = await r.generateJsonResponse({
+        prompt: 'x',
+        feature: 'forgeDrafting',
+        usageOut: usage,
+        budgetMs,
+      });
+      return { result, usage, verdicts: onKeyVerdict.mock.calls };
+    };
+
+    const background = await run(undefined);
+    const budgeted = await run(60_000);
+    expect(budgeted).toEqual(background);
+    expect(budgeted.usage).toEqual([
+      expect.objectContaining({ provider: 'gemini', promptTokens: 10, completionTokens: 5 }),
+    ]);
+    expect(budgeted.verdicts).toEqual([
+      ['NVIDIA_API_KEY', { ok: false, status: 401 }],
+      ['GEMINI_API_KEY', { ok: true }],
+    ]);
+  });
+
+  it('the JSON repair shares the deadline, and is skipped for the parse error when it would not fit', async () => {
+    const run = async (budgetMs) => {
+      let t = 0;
+      // Gemini answers malformed JSON, 40 s after it was asked.
+      const fetchImpl = vi.fn(async () => {
+        t += 40_000;
+        return geminiReply('not json');
+      });
+      const r = createAiRouter({
+        env: { GEMINI_API_KEY: 'g' },
+        fetch: fetchImpl,
+        sleep: noSleep,
+        now: () => t,
+        log: quiet,
+      });
+      await expect(r.generateJsonResponse({ prompt: 'x', budgetMs })).rejects.toThrow(
+        /parseable JSON/
+      );
+      return fetchImpl.mock.calls.length;
+    };
+    // 2 s left: no repair, and the parse error, not "out of time".
+    expect(await run(42_000)).toBe(1);
+    // 20 s left: the repair runs.
+    expect(await run(60_000)).toBe(2);
   });
 });

@@ -4,7 +4,7 @@
  * dialects, and the HTTP handler's error mapping — the codes are the
  * contract the Publish-Ready Builder shows to the owner.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import {
   isHttpUrl,
   extractPageTitle,
@@ -14,8 +14,12 @@ import {
   createUrlDrafter,
   createGenerateArticleDraftHandler,
   buildUrlSourceDoc,
+  DRAFT_HTTP_BUDGET_MS,
   MAX_EXTRA_URL_SCRAPES,
 } from './draft-from-url.js';
+import { createDrafter } from './drafting.js';
+import { createAiRouter } from '../ai/router.js';
+import { AFTER_MODEL_MARGIN_MS } from '../ai/time-budget.js';
 
 const PAGE_HTML = `<html><head>
   <title>Fallback Title</title>
@@ -191,6 +195,31 @@ describe('createUrlDrafter', () => {
     ]);
     expect(Buffer.from(docs[0].base64Data, 'base64').toString()).toBe('PDFDATA');
   });
+
+  it('spends the budget on the scrapes and hands the drafter what is left', async () => {
+    vi.useFakeTimers();
+    try {
+      const drafter = makeDrafter();
+      const scrape = vi.fn(async () => {
+        vi.advanceTimersByTime(10_000);
+        return goodScrape();
+      });
+      const { draftFromUrl } = createUrlDrafter({ drafter, scrape });
+      await draftFromUrl({ url: 'https://a.example/x' }, { budgetMs: 60_000 });
+      expect(drafter.generateDraft.mock.calls[0][0].budgetMs).toBe(50_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('never takes a budget from the payload, which is the client body', async () => {
+    const drafter = makeDrafter();
+    const { draftFromUrl } = createUrlDrafter({ drafter, scrape: vi.fn(async () => goodScrape()) });
+    await draftFromUrl({ url: 'https://a.example/x', budgetMs: 999_999 });
+    expect(drafter.generateDraft.mock.calls[0][0].budgetMs).toBeUndefined();
+    await draftFromUrl({ url: 'https://a.example/x', budgetMs: 999_999 }, { budgetMs: 40_000 });
+    expect(drafter.generateDraft.mock.calls[1][0].budgetMs).toBeLessThanOrEqual(40_000);
+  });
 });
 
 describe('createGenerateArticleDraftHandler', () => {
@@ -216,10 +245,21 @@ describe('createGenerateArticleDraftHandler', () => {
     expect(JSON.parse(res.body)).toEqual({ ok: true, draft: { title: 'T' } });
   });
 
+  it('hands the drafter its budget, less the after-model margin, beside the body and not in it', async () => {
+    const urlDrafter = { draftFromUrl: vi.fn(async () => ({ draft: { title: 'T' } })) };
+    const handler = createGenerateArticleDraftHandler({ guard: okGuard, urlDrafter });
+    const body = { url: 'https://a.example' };
+    await handler(makeRequest(body), {});
+    expect(urlDrafter.draftFromUrl).toHaveBeenCalledWith(body, {
+      budgetMs: DRAFT_HTTP_BUDGET_MS - AFTER_MODEL_MARGIN_MS,
+    });
+  });
+
   it.each([
     ['BAD_URL', 400],
     ['SCRAPE_FAILED', 422],
     ['DRAFT_BUDGET_EXCEEDED', 504],
+    ['AI_BUDGET_EXHAUSTED', 504],
     [undefined, 502],
   ])('maps error code %s to HTTP %i', async (code, status) => {
     const err = new Error('boom');
@@ -243,6 +283,77 @@ describe('createGenerateArticleDraftHandler', () => {
     expect(JSON.parse(res.body).error).toMatch(/exceeded/);
   });
 });
+
+describe('end to end: a slow first provider no longer outlives the request (2026-09-29)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const okGuard = { requireRole: vi.fn(async () => ({ oid: 'u1' })) };
+  const draftJson = JSON.stringify({
+    title: 'From the next provider',
+    summary: 'S',
+    postContent: '# P',
+    keyTopics: [],
+  });
+
+  it('NVIDIA never answers; the draft still comes back from Gemini, well inside the handler budget', async () => {
+    // Before the budget, NVIDIA was allowed 120 s, the handler answered 504
+    // at 75 s, and Gemini was never asked.
+    vi.useFakeTimers();
+    const hosts = [];
+    const fetchImpl = vi.fn((url, init) => {
+      const host = new URL(url).host;
+      hosts.push(host);
+      if (host === 'integrate.api.nvidia.com') {
+        return new Promise((_, reject) => {
+          init.signal.addEventListener('abort', () =>
+            reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))
+          );
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({ candidates: [{ content: { parts: [{ text: draftJson }] } }] }),
+      });
+    });
+    const ai = createAiRouter({
+      env: { NVIDIA_API_KEY: 'nvapi-test', GEMINI_API_KEY: 'g' },
+      fetch: fetchImpl,
+      log: { warn: vi.fn() },
+    });
+    const handler = createGenerateArticleDraftHandler({
+      guard: okGuard,
+      urlDrafter: createUrlDrafter({
+        drafter: createDrafter({ store: { queryDocs: async () => [] }, ai, env: {} }),
+        scrape: async () => goodScrape(),
+      }),
+    });
+
+    const startedAt = Date.now();
+    const pending = handler(makeRequestFor({ url: 'https://learn.microsoft.com/azure/x' }), {
+      error: vi.fn(),
+    }).then((res) => ({ res, at: Date.now() }));
+    await vi.advanceTimersByTimeAsync(DRAFT_HTTP_BUDGET_MS);
+    const { res, at } = await pending;
+
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body).draft).toMatchObject({
+      title: 'From the next provider',
+      aiProvider: 'gemini',
+    });
+    expect(hosts).toEqual(['integrate.api.nvidia.com', 'generativelanguage.googleapis.com']);
+    // NVIDIA's share is half of (75 s less the 5 s margin), so the answer
+    // comes at 35 s: under the client's 90 s and the edge's ~100 s.
+    expect(at - startedAt).toBe((DRAFT_HTTP_BUDGET_MS - AFTER_MODEL_MARGIN_MS) / 2);
+  });
+});
+
+function makeRequestFor(body) {
+  return { json: async () => body };
+}
 
 describe('buildUrlSourceDoc', () => {
   it('lands inspected with inspectTrigger off, provenance recorded, body dual-cased', () => {
