@@ -19,6 +19,37 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Lab image: publishing to Docker Hub through a Docker OIDC connection,
+  with no stored token (#779).** Owner decision 2026-09-28.
+  `publish-lab-image.yml` has a third job, `Publish to Docker Hub`, which
+  runs after `Publish to GHCR` and only while the repository variable
+  `DOCKERHUB_ENABLED` is `true`. It signs in with `docker/login-action`
+  v4.6.0 (the pin the workflow already used; OIDC arrived in v4.5.0), which
+  exchanges the job's GitHub ID token (audience `https://identity.docker.com`)
+  for a Docker access token that lasts 300 seconds. That needs the connection
+  ID in `DOCKERHUB_CONNECTION` and no password. It then copies both images
+  from GHCR to `docker.io/hybridcloudworks/hcw-lab` and `hcw-lab-runner` by
+  digest with `docker buildx imagetools create --prefer-index=false`,
+  checks that the digest Docker Hub reports equals GHCR's, and attests each
+  image under its Docker Hub name with `push-to-registry`. The digest is
+  kept because, measured with buildx v0.37.1, the flag copies the manifest's
+  own bytes, while the default wraps a single image in a new manifest list
+  with a new digest. `id-token: write` sits on that job and `publish` only.
+  A separate job, so GHCR never waits on Docker Hub: a Docker Hub failure
+  turns the run red after GHCR has published and attested, and "Re-run
+  failed jobs" repeats only the copy. Until the owner creates the connection
+  the job is skipped. The Docker side trusts one subject, this repository's
+  `main` in GitHub's immutable-identifier form, with no environment, because
+  an environment subject carries no branch. New runbook
+  `docs/runbooks/docker-hub-publishing.md` (the owner's steps, every form
+  value, what success looks like, a failure table, and a one-time manual
+  copy if the organisation's plan cannot create a connection yet); new
+  §4.11 and two §4.2 rows in Required inputs; store 3 rows in Variables and
+  secrets; Docker Hub pull and verify commands in `lab-image/README.md`,
+  whose GHCR note now records that both packages answer anonymously. The
+  site's "Run it locally" copy and the Docker pages still name only GHCR
+  until a run has published to Docker Hub.
+
 - **The repository is licensed under Apache-2.0.** Owner decision
   2026-09-28, #780. `LICENSE` at the root is the Apache License 2.0 text
   byte for byte as `https://www.apache.org/licenses/LICENSE-2.0.txt`
