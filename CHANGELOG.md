@@ -1822,6 +1822,16 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **The Docker Hub docs say it is live.** Three documents still described
+  Docker Hub publishing as waiting on the owner:
+  - `docs/runbooks/docker-hub-publishing.md` (its status box and "Follow-ups
+    once it is live");
+  - `lab-image/README.md` (the introduction and "From Docker Hub");
+  - `docs/standards/required-inputs.md` (the `DOCKERHUB_*` rows and §4.11).
+
+  All three now record the connection created on 2026-09-29, the first run
+  (36516945081), the matching digests and the verified provenance. The site
+  pulls from Docker Hub (#795), and #779 is closed.
 - **The agent sandbox recipe moved from `/education/labs` to the Docker
   hub, at `/docker/sandboxes` (#774).** The "Run an agent against your
   landing zone" section (`SandboxSection`, #676) is now the body of a new
