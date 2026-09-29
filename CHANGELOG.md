@@ -37,14 +37,47 @@ This project has not cut a tagged release; entries are grouped under
   news detail path, so no provider's pre-rendered article can be a 404.
   The four code pages (GitHub, Terraform, Ansible, Docker) were copies of
   one body and now share `components/shared/ProviderCodePage.jsx`, each
-  passing its provider, title and description. `docker: ['Docker', 'docker']` joins
-  `PROVIDER_ALIASES` in `functions/src/lib/public-reads.js`:
+  passing its provider, title and description. `docker: ['Docker',
+  'docker']` joins `PROVIDER_ALIASES` in `functions/src/lib/public-reads.js`:
   `?provider=docker` now matches documents filed as "Docker", and
   `listCertEvents` answers `platform=docker` with an empty list instead of
   a 400. The section counts derive their providers from that table, so
   once Functions is deployed and the manifest next published, the sitemap
   leaves out Docker sections with nothing in them, as it does for every
   other provider.
+
+- **Docker article series: two how-to drafts for review (#772, #773).**
+  `docs/content/blog-docker-01-building-images.md`, "Building a lab image you
+  can trust", reads `lab-image/Dockerfile` as the worked example: base images
+  pinned by digest and the workflow step that fails an unpinned `FROM`, every
+  download checked against `versions.env`, the five stages and the `runner`
+  and `full` targets, the provider mirror and the Azure Verified Modules
+  vendored under `/opt/avm`, uid 65534 with every write under `/tmp`,
+  `smoke.sh`, provenance from `actions/attest-build-provenance`, and the
+  Docker Hub copy by digest through Docker's OIDC connection with no stored
+  token. It ends with `gh attestation verify
+  oci://docker.io/hybridcloudworks/hcw-lab:latest --bundle-from-oci`, plus a
+  stricter form pinned to the signer workflow and `refs/heads/main`.
+  `blog-docker-02-desktop.md`, "Docker Desktop for the labs", installs Docker
+  Desktop on Windows (WSL 2 backend, per-user) and macOS, walks the
+  Containers, Images, Volumes and Builds views, sets memory, disk, file
+  sharing and Apple silicon emulation for the lab image, runs the labs'
+  follow-along line in PowerShell and bash, and compares Desktop with the
+  Docker Engine on the Hybrid Lab host. Docker Desktop's current release
+  (4.93.0 of 2026-09-28, Engine 29.8.1) and its subscription terms (the
+  Docker Subscription Service Agreement last updated 2026-08-26, and Docker's
+  licensing page) were checked on 2026-09-29 and are dated in the article.
+  Every output quoted was measured on 2026-09-29 on Windows 11 with Docker
+  Desktop 4.93.0 (WSL 2 backend): the `full` build, `smoke.sh` passing
+  offline and refusing with the network on, the digest match between the two
+  registries, both `gh attestation verify` forms and a refused one, the
+  follow-along mount writing as `nobody`, a uid 1000 mode 755 directory
+  refusing that write, and the bash lines in Git Bash failing (an empty
+  `/workspace`, and `C:/Program Files/Git/workspace/smoke.sh`). Not run, and
+  the Desktop article says so: the Windows and macOS installers, `wsl
+  --update`, the `.wslconfig` change, and anything on a Mac. Listed in the
+  docs nav marked "(draft)". Nothing is published; both land In Review only
+  when imported from the Content Queue after merge.
 
 - **Lab image: publishing to Docker Hub through a Docker OIDC connection,
   with no stored token (#779).** Owner decision 2026-09-28.
@@ -1816,6 +1849,16 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **The Docker Hub docs say it is live.** Three documents still described
+  Docker Hub publishing as waiting on the owner:
+  - `docs/runbooks/docker-hub-publishing.md` (its status box and "Follow-ups
+    once it is live");
+  - `lab-image/README.md` (the introduction and "From Docker Hub");
+  - `docs/standards/required-inputs.md` (the `DOCKERHUB_*` rows and §4.11).
+
+  All three now record the connection created on 2026-09-29, the first run
+  (36516945081), the matching digests and the verified provenance. The site
+  pulls from Docker Hub (#795), and #779 is closed.
 - **The agent sandbox recipe moved from `/education/labs` to the Docker
   hub, at `/docker/sandboxes` (#774).** The "Run an agent against your
   landing zone" section (`SandboxSection`, #676) is now the body of a new
