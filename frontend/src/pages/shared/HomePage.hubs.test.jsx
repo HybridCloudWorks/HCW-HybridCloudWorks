@@ -11,7 +11,8 @@ vi.mock('react-helmet-async', () => ({
   Helmet: ({ children }) => <>{children}</>,
 }));
 
-import HomePage from './HomePage';
+import { VALID_PROVIDERS } from '@/context/ProviderContext';
+import HomePage, { QUICK_ACCESS_HUBS } from './HomePage';
 
 let fetchSpy;
 beforeEach(() => {
@@ -30,8 +31,20 @@ describe('Quick Access Hubs', () => {
     const heading = await screen.findByRole('heading', { name: 'Quick Access Hubs' });
     const hubs = within(heading.parentElement.parentElement).getAllByRole('link');
     const hrefs = hubs.map((link) => link.getAttribute('href'));
+    expect(hrefs).toEqual(QUICK_ACCESS_HUBS.map((hub) => `/${hub.provider}/rss`));
     expect(hrefs.at(-1)).toBe('/docker/rss');
     expect(hubs.at(-1)).toHaveTextContent('Docker');
-    for (const href of hrefs) expect(href).toMatch(/^\/[a-z]+\/rss$/);
+    expect(hubs.at(-1)).toHaveTextContent('NEW HUB');
+  });
+
+  it('has one hub per provider the site serves, each coloured by its own classes', () => {
+    const providers = QUICK_ACCESS_HUBS.map((hub) => hub.provider);
+    expect([...providers].sort()).toEqual([...VALID_PROVIDERS].sort());
+    for (const hub of QUICK_ACCESS_HUBS) {
+      // Written out in full, never built from the provider name: Tailwind only
+      // generates classes it finds as whole strings in the source.
+      expect(hub.hoverBorder, hub.provider).toBe(`hover:border-l-${hub.provider}`);
+      expect(hub.iconTone, hub.provider).toMatch(/^dark:text-\S+ group-hover:text-\S+/);
+    }
   });
 });

@@ -46,7 +46,12 @@ This project has not cut a tagged release; entries are grouped under
     - `/docker/audio` and `/docker/audio-architecture` render and
       pre-render instead of answering 404.
   - **Home page.** "Quick Access Hubs" ends with a Docker hub linking to
-    `/docker/rss`, marked "New hub" like VMware's and Ansible's.
+    `/docker/rss`, marked "NEW HUB" like VMware's and Ansible's. The hubs
+    were eight copies of one `<Link>` block, and a ninth tripped Qlty's
+    similar-code check. They are now data, `QUICK_ACCESS_HUBS`, rendered
+    by one block. Each hub keeps its own classes as whole literal strings,
+    since Tailwind only generates classes it finds written out, and the
+    built page carries the same nine links with the same classes.
   - **Newsletter.** Nothing changed: `newsletter/issue.js` has nothing
     keyed by provider, so Docker items reach the weekly issue as they are
     published.
