@@ -51,6 +51,7 @@ export const PODCAST_PROVIDERS = Object.freeze([
   'finops',
   'vmware',
   'ansible',
+  'docker',
 ]);
 
 /** Every setting the server's registry names, as a person reads it. */

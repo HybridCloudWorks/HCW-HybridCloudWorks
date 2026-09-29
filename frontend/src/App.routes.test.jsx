@@ -152,6 +152,17 @@ vi.mock('@/pages/azure/RssPage', () => ({
   ),
 }));
 
+// Docker's news page became the shared NewsPage with #777, and with it the
+// same lazy, fetch-heavy tree as the two above; docker.test.jsx checks it hands
+// NewsPage the provider `docker`.
+vi.mock('@/pages/docker/RssPage', () => ({
+  default: () => (
+    <main>
+      <h1>Docker News</h1>
+    </main>
+  ),
+}));
+
 vi.mock('@/components/animations', () => ({
   ScrollTrigger: ({ children }) => children,
 }));
@@ -250,10 +261,11 @@ describe('public route contract', () => {
     expect(screen.queryByText(/PAGES Not Found/i)).not.toBeInTheDocument();
   });
 
-  // Docker's pages are rendered for real rather than mocked, so the route and
-  // the page are checked together. Most are static pages that fetch nothing;
-  // the blog and code lists (#776) read through the hooks this file mocks to
-  // no data, and the blog list is the shared page, mocked above. `/docker/tools`
+  // Most of Docker's pages are rendered for real rather than mocked, so the
+  // route and the page are checked together. Most are static pages that fetch
+  // nothing; the code list (#776) and the podcast page (#777) read through the
+  // hooks this file mocks to no data. The blog list is the shared page and the
+  // news page the shared NewsPage (#777), both mocked above. `/docker/tools`
   // and `/docker/sandboxes` (#774) are static routes, like `/terraform/tools`.
   it.each([
     ['/docker', 'Container intelligence with Docker'],
@@ -262,6 +274,8 @@ describe('public route contract', () => {
     ['/docker/education', 'Docker Learning'],
     ['/docker/news', 'Docker News'],
     ['/docker/rss', 'Docker News'],
+    ['/docker/audio', 'Docker Podcast'],
+    ['/docker/audio-architecture', 'Docker Podcast'],
     ['/docker/sandboxes', 'Run an agent in a sandbox'],
     ['/docker/tools', 'Docker Tools'],
   ])('renders the Docker route %s', async (pathname, heading) => {
@@ -289,7 +303,7 @@ describe('public route contract', () => {
     }
   );
 
-  it.each(['/docker/architecture-designs', '/docker/frameworks', '/docker/audio'])(
+  it.each(['/docker/architecture-designs', '/docker/frameworks'])(
     'answers %s with the 404 page, as Terraform does, so the pre-render skips it',
     async (pathname) => {
       renderRoute(pathname);

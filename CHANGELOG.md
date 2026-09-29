@@ -19,6 +19,43 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Docker news feed, podcast page and home hub (#777).**
+  - **News feed.** `PROVIDER_FEEDS.docker` in
+    `functions/src/lib/rss/feeds.js` reads Docker's blog at
+    `https://www.docker.com/feed/`, the address
+    `https://www.docker.com/blog/feed/` redirects to. On 2026-09-29 the
+    ingest's own parser and User-Agent read it as RSS 2.0 with 10 items,
+    the newest from 2026-09-24. The feed's display name is Docker.
+    `/docker/news` and `/docker/rss` are now the shared `NewsPage`, which
+    already had Docker's `NEWS_META` row, and `rssFeeds` in
+    `ProviderContext` names the feed. `scripts/verify-timer-witness.mjs`
+    queries Docker's feed route too; its test already held its list to the
+    feed catalogue's keys.
+  - **Home page aggregate.** Nothing on the site reads the
+    `homepage_feeds` aggregate today. With a ninth provider in it, it now
+    carries nine first-pass items and one second-pass item, where there
+    were eight and two.
+  - **Podcast.**
+    - `PodcastPage` has a Docker row in `PROVIDER_META`.
+    - `ProviderAudioDispatcher` routes Docker there. It is now one
+      membership test against `VALID_PROVIDERS` instead of a branch per
+      provider; Docker would have been the tenth identical branch.
+      `provider-coverage.test.js` reads that form as "every provider".
+    - `PODCAST_PROVIDERS` names Docker, on the server and in the admin
+      copy.
+    - `/docker/audio` and `/docker/audio-architecture` render and
+      pre-render instead of answering 404.
+  - **Home page.** "Quick Access Hubs" ends with a Docker hub linking to
+    `/docker/rss`, marked "NEW HUB" like VMware's and Ansible's. The hubs
+    were eight copies of one `<Link>` block, and a ninth tripped Qlty's
+    similar-code check. They are now data, `QUICK_ACCESS_HUBS`, rendered
+    by one block. Each hub keeps its own classes as whole literal strings,
+    since Tailwind only generates classes it finds written out, and the
+    built page carries the same nine links with the same classes.
+  - **Newsletter.** Nothing changed: `newsletter/issue.js` has nothing
+    keyed by provider, so Docker items reach the weekly issue as they are
+    published.
+
 - **Docker in the CMS: an article can be written, classified, voiced,
   illustrated and previewed as Docker (#775).**
   - **Classification.** The analysis prompt in `content/inspect.js` lists

@@ -261,6 +261,8 @@ export const PODCAST_PROVIDERS = Object.freeze([
   'finops',
   'vmware',
   'ansible',
+  // #777: /docker/audio renders the shared podcast page like every provider's.
+  'docker',
 ]);
 
 const MAX_FEEDS = 50;

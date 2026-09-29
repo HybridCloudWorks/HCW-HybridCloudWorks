@@ -81,7 +81,7 @@ import { pathToFileURL } from 'node:url';
 export const DEFAULT_BASE = 'https://api-azure.hybridcloudworks.com/api';
 
 /** Every provider the feed route is queried for. Mirrors PROVIDER_FEEDS keys. */
-export const PROVIDERS = ['azure', 'aws', 'gcp', 'github', 'terraform', 'ansible', 'vmware', 'finops'];
+export const PROVIDERS = ['azure', 'aws', 'gcp', 'github', 'terraform', 'ansible', 'vmware', 'finops', 'docker'];
 
 /**
  * The witness table. One entry per registered timer — the test asserts this

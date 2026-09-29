@@ -195,6 +195,120 @@ const latestFeeds = [
   },
 ];
 
+/*
+ * "Quick Access Hubs": each provider's news page, as data. They were eight
+ * copies of one <Link> block until Docker's made it nine (#777; Qlty's
+ * similar-code finding on #804), so the block is written once below and each
+ * hub carries only what differs. Every class is a whole literal string here,
+ * never assembled from a provider name, because Tailwind generates only the
+ * classes it finds written out in the source. The hubs keep the classes they
+ * had: Azure and AWS hover to neutral text, the rest to their brand colour,
+ * and GCP's note alone picks up its colour on hover.
+ */
+const HUB_LINK =
+  'hub-icon-btn glass-panel rounded-lg p-3 flex items-center gap-3 group border-l-4 border-l-transparent';
+const HUB_ICON = 'p-2 rounded bg-white/70 dark:bg-slate-800/50 text-slate-700 transition-colors';
+const HUB_LABEL = 'text-sm font-bold text-slate-900 dark:text-(--popover-foreground)';
+const HUB_NOTE = 'text-[10px] text-slate-600 dark:text-white font-mono';
+const NEUTRAL_ICON =
+  'dark:text-white group-hover:text-slate-900 dark:group-hover:text-(--popover-foreground)';
+const NEUTRAL_LABEL = 'group-hover:text-slate-900 dark:group-hover:text-white';
+
+export const QUICK_ACCESS_HUBS = Object.freeze([
+  {
+    provider: 'azure',
+    label: 'Azure',
+    icon: 'cloud_done',
+    note: '24 FEEDS',
+    glow: 'rgba(0, 120, 212, 0.4)',
+    hoverBorder: 'hover:border-l-azure',
+    iconTone: NEUTRAL_ICON,
+    labelHover: NEUTRAL_LABEL,
+  },
+  {
+    provider: 'aws',
+    label: 'AWS',
+    icon: 'rocket_launch',
+    note: '32 FEEDS',
+    glow: 'rgba(255, 153, 0, 0.4)',
+    hoverBorder: 'hover:border-l-aws',
+    iconTone: NEUTRAL_ICON,
+    labelHover: NEUTRAL_LABEL,
+  },
+  {
+    provider: 'gcp',
+    label: 'GCP',
+    icon: 'query_stats',
+    note: '18 FEEDS',
+    glow: 'rgba(219, 68, 55, 0.4)',
+    hoverBorder: 'hover:border-l-gcp',
+    iconTone: 'dark:text-white group-hover:text-gcp',
+    labelHover: 'group-hover:text-gcp',
+    noteHover: 'group-hover:text-gcp/80 transition-colors',
+  },
+  {
+    provider: 'terraform',
+    label: 'Terraform',
+    icon: 'layers',
+    note: '12 FEEDS',
+    glow: 'rgba(123, 66, 188, 0.4)',
+    hoverBorder: 'hover:border-l-terraform',
+    iconTone: 'dark:text-white group-hover:text-terraform',
+    labelHover: 'group-hover:text-terraform',
+  },
+  {
+    provider: 'github',
+    label: 'GitHub',
+    icon: 'terminal',
+    note: '9 FEEDS',
+    glow: 'rgba(110, 118, 129, 0.4)',
+    hoverBorder: 'hover:border-l-github',
+    iconTone: 'dark:text-muted-foreground group-hover:text-github',
+    labelHover: 'group-hover:text-github',
+  },
+  {
+    provider: 'finops',
+    label: 'FinOps',
+    icon: 'payments',
+    note: '7 FEEDS',
+    glow: 'rgba(30, 164, 130, 0.4)',
+    hoverBorder: 'hover:border-l-finops',
+    iconTone: 'dark:text-muted-foreground group-hover:text-finops',
+    labelHover: 'group-hover:text-finops',
+  },
+  {
+    provider: 'vmware',
+    label: 'VMware',
+    icon: 'dns',
+    note: 'NEW HUB',
+    glow: 'rgba(0, 145, 218, 0.4)',
+    hoverBorder: 'hover:border-l-vmware',
+    iconTone: 'dark:text-muted-foreground group-hover:text-vmware',
+    labelHover: 'group-hover:text-vmware',
+  },
+  {
+    provider: 'ansible',
+    label: 'Ansible',
+    icon: 'terminal',
+    note: 'NEW HUB',
+    glow: 'rgba(238, 0, 0, 0.35)',
+    hoverBorder: 'hover:border-l-ansible',
+    iconTone: 'dark:text-muted-foreground group-hover:text-ansible',
+    labelHover: 'group-hover:text-ansible',
+  },
+  // #777: Docker's news page reads Docker's blog feed.
+  {
+    provider: 'docker',
+    label: 'Docker',
+    icon: 'deployed_code',
+    note: 'NEW HUB',
+    glow: 'rgba(29, 99, 237, 0.4)',
+    hoverBorder: 'hover:border-l-docker',
+    iconTone: 'dark:text-muted-foreground group-hover:text-docker',
+    labelHover: 'group-hover:text-docker',
+  },
+]);
+
 const PROVIDER_THEMES = {
   azure: { bg: 'hsl(var(--azure-blue) / 0.16)', border: 'border-l-azure', text: 'text-azure' },
   aws: { bg: 'hsl(var(--aws-orange) / 0.16)', border: 'border-l-aws', text: 'text-aws' },
@@ -885,142 +999,24 @@ export default function HomePage() {
                 </h4>
               </div>
               <div className="grid grid-cols-1 gap-3">
-                <Link
-                  className="hub-icon-btn glass-panel rounded-lg p-3 flex items-center gap-3 group border-l-4 border-l-transparent hover:border-l-azure"
-                  to={routes.rss('azure')}
-                  style={{ '--glow-color': 'rgba(0, 120, 212, 0.4)' }}
-                >
-                  <div className="p-2 rounded bg-white/70 dark:bg-slate-800/50 text-slate-700 dark:text-white group-hover:text-slate-900 dark:group-hover:text-(--popover-foreground) transition-colors">
-                    <span className="material-symbols-outlined text-xl">cloud_done</span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-sm font-bold text-slate-900 dark:text-(--popover-foreground) group-hover:text-slate-900 dark:group-hover:text-white">
-                      Azure
-                    </span>
-                    <span className="text-[10px] text-slate-600 dark:text-white font-mono">
-                      24 FEEDS
-                    </span>
-                  </div>
-                </Link>
-                <Link
-                  className="hub-icon-btn glass-panel rounded-lg p-3 flex items-center gap-3 group border-l-4 border-l-transparent hover:border-l-aws"
-                  to={routes.rss('aws')}
-                  style={{ '--glow-color': 'rgba(255, 153, 0, 0.4)' }}
-                >
-                  <div className="p-2 rounded bg-white/70 dark:bg-slate-800/50 text-slate-700 dark:text-white group-hover:text-slate-900 dark:group-hover:text-(--popover-foreground) transition-colors">
-                    <span className="material-symbols-outlined text-xl">rocket_launch</span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-sm font-bold text-slate-900 dark:text-(--popover-foreground) group-hover:text-slate-900 dark:group-hover:text-white">
-                      AWS
-                    </span>
-                    <span className="text-[10px] text-slate-600 dark:text-white font-mono">
-                      32 FEEDS
-                    </span>
-                  </div>
-                </Link>
-                <Link
-                  className="hub-icon-btn glass-panel rounded-lg p-3 flex items-center gap-3 group border-l-4 border-l-transparent hover:border-l-gcp"
-                  to={routes.rss('gcp')}
-                  style={{ '--glow-color': 'rgba(219, 68, 55, 0.4)' }}
-                >
-                  <div className="p-2 rounded bg-white/70 dark:bg-slate-800/50 text-slate-700 dark:text-white group-hover:text-gcp transition-colors">
-                    <span className="material-symbols-outlined text-xl">query_stats</span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-sm font-bold text-slate-900 dark:text-(--popover-foreground) group-hover:text-gcp">
-                      GCP
-                    </span>
-                    <span className="text-[10px] text-slate-600 dark:text-white font-mono group-hover:text-gcp/80 transition-colors">
-                      18 FEEDS
-                    </span>
-                  </div>
-                </Link>
-                <Link
-                  className="hub-icon-btn glass-panel rounded-lg p-3 flex items-center gap-3 group border-l-4 border-l-transparent hover:border-l-terraform"
-                  to={routes.rss('terraform')}
-                  style={{ '--glow-color': 'rgba(123, 66, 188, 0.4)' }}
-                >
-                  <div className="p-2 rounded bg-white/70 dark:bg-slate-800/50 text-slate-700 dark:text-white group-hover:text-terraform transition-colors">
-                    <span className="material-symbols-outlined text-xl">layers</span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-sm font-bold text-slate-900 dark:text-(--popover-foreground) group-hover:text-terraform">
-                      Terraform
-                    </span>
-                    <span className="text-[10px] text-slate-600 dark:text-white font-mono">
-                      12 FEEDS
-                    </span>
-                  </div>
-                </Link>
-                <Link
-                  className="hub-icon-btn glass-panel rounded-lg p-3 flex items-center gap-3 group border-l-4 border-l-transparent hover:border-l-github"
-                  to={routes.rss('github')}
-                  style={{ '--glow-color': 'rgba(110, 118, 129, 0.4)' }}
-                >
-                  <div className="p-2 rounded bg-white/70 dark:bg-slate-800/50 text-slate-700 dark:text-muted-foreground group-hover:text-github transition-colors">
-                    <span className="material-symbols-outlined text-xl">terminal</span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-sm font-bold text-slate-900 dark:text-(--popover-foreground) group-hover:text-github">
-                      GitHub
-                    </span>
-                    <span className="text-[10px] text-slate-600 dark:text-white font-mono">
-                      9 FEEDS
-                    </span>
-                  </div>
-                </Link>
-                <Link
-                  className="hub-icon-btn glass-panel rounded-lg p-3 flex items-center gap-3 group border-l-4 border-l-transparent hover:border-l-finops"
-                  to={routes.rss('finops')}
-                  style={{ '--glow-color': 'rgba(30, 164, 130, 0.4)' }}
-                >
-                  <div className="p-2 rounded bg-white/70 dark:bg-slate-800/50 text-slate-700 dark:text-muted-foreground group-hover:text-finops transition-colors">
-                    <span className="material-symbols-outlined text-xl">payments</span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-sm font-bold text-slate-900 dark:text-(--popover-foreground) group-hover:text-finops">
-                      FinOps
-                    </span>
-                    <span className="text-[10px] text-slate-600 dark:text-white font-mono">
-                      7 FEEDS
-                    </span>
-                  </div>
-                </Link>
-                <Link
-                  className="hub-icon-btn glass-panel rounded-lg p-3 flex items-center gap-3 group border-l-4 border-l-transparent hover:border-l-vmware"
-                  to={routes.rss('vmware')}
-                  style={{ '--glow-color': 'rgba(0, 145, 218, 0.4)' }}
-                >
-                  <div className="p-2 rounded bg-white/70 dark:bg-slate-800/50 text-slate-700 dark:text-muted-foreground group-hover:text-vmware transition-colors">
-                    <span className="material-symbols-outlined text-xl">dns</span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-sm font-bold text-slate-900 dark:text-(--popover-foreground) group-hover:text-vmware">
-                      VMware
-                    </span>
-                    <span className="text-[10px] text-slate-600 dark:text-white font-mono">
-                      NEW HUB
-                    </span>
-                  </div>
-                </Link>
-                <Link
-                  className="hub-icon-btn glass-panel rounded-lg p-3 flex items-center gap-3 group border-l-4 border-l-transparent hover:border-l-ansible"
-                  to={routes.rss('ansible')}
-                  style={{ '--glow-color': 'rgba(238, 0, 0, 0.35)' }}
-                >
-                  <div className="p-2 rounded bg-white/70 dark:bg-slate-800/50 text-slate-700 dark:text-muted-foreground group-hover:text-ansible transition-colors">
-                    <span className="material-symbols-outlined text-xl">terminal</span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-sm font-bold text-slate-900 dark:text-(--popover-foreground) group-hover:text-ansible">
-                      Ansible
-                    </span>
-                    <span className="text-[10px] text-slate-600 dark:text-white font-mono">
-                      NEW HUB
-                    </span>
-                  </div>
-                </Link>
+                {QUICK_ACCESS_HUBS.map((hub) => (
+                  <Link
+                    key={hub.provider}
+                    className={`${HUB_LINK} ${hub.hoverBorder}`}
+                    to={routes.rss(hub.provider)}
+                    style={{ '--glow-color': hub.glow }}
+                  >
+                    <div className={`${HUB_ICON} ${hub.iconTone}`}>
+                      <span className="material-symbols-outlined text-xl">{hub.icon}</span>
+                    </div>
+                    <div className="flex flex-col">
+                      <span className={`${HUB_LABEL} ${hub.labelHover}`}>{hub.label}</span>
+                      <span className={[HUB_NOTE, hub.noteHover].filter(Boolean).join(' ')}>
+                        {hub.note}
+                      </span>
+                    </div>
+                  </Link>
+                ))}
               </div>
             </div>
           </aside>
