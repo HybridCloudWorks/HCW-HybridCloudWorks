@@ -156,10 +156,10 @@ describe('RUN_LOCALLY_COMMANDS', () => {
   it('is PowerShell then bash, with the exact lines the page prints', () => {
     expect(RUN_LOCALLY_COMMANDS.map((entry) => entry.shell)).toEqual(['PowerShell', 'bash']);
     expect(RUN_LOCALLY_COMMANDS[0].command).toBe(
-      'docker run --rm -it -v ${PWD}:/workspace ghcr.io/hybridcloudworks/hcw-lab:latest'
+      'docker run --rm -it -v ${PWD}:/workspace hybridcloudworks/hcw-lab:latest'
     );
     expect(RUN_LOCALLY_COMMANDS[1].command).toBe(
-      'docker run --rm -it -v "$PWD":/workspace ghcr.io/hybridcloudworks/hcw-lab:latest'
+      'docker run --rm -it -v "$PWD":/workspace hybridcloudworks/hcw-lab:latest'
     );
   });
 

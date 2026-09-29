@@ -75,8 +75,15 @@ export const CODER_GITHUB_SIGN_IN_PATH = '/api/v2/users/oauth2/github/callback';
  * this is the interactive, network-attached form a person runs on their own
  * machine, not the digest-pinned form `vps-agent` executes under
  * `--network none` (ADR 0032 §5 and `vps-agent/lib/capabilities.js`).
+ *
+ * Docker Hub since 2026-09-29, when `publish-lab-image.yml` first copied the
+ * image there through Docker's OIDC connection (#779, #790). The digest is
+ * the same one GHCR serves, and so is the provenance attestation, and
+ * `ghcr.io/hybridcloudworks/hcw-lab:latest` stays a mirror of it (the lab
+ * image README lists both). Docker Hub's short name is the one a learner can
+ * type, and Docker is the sponsor the labs are pitched to (#678).
  */
-export const LAB_IMAGE = 'ghcr.io/hybridcloudworks/hcw-lab:latest';
+export const LAB_IMAGE = 'hybridcloudworks/hcw-lab:latest';
 
 /**
  * The two "Run it locally" lines, exactly as a learner pastes them. Two

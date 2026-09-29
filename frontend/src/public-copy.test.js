@@ -230,6 +230,7 @@ describe('the scan itself', () => {
     'The lab host is a server onboarded to Azure Arc.',
     'The lab uses offline copies of the Azure Verified Modules, so validation needs no internet.',
     'ghcr.io/hybridcloudworks/hcw-lab:latest',
+    'hybridcloudworks/hcw-lab:latest',
     // The lab pane (#751): what the page says in place of the tools behind it.
     "Lab workspaces aren't available right now.",
     'Sign in with GitHub to open your lab workspace',
