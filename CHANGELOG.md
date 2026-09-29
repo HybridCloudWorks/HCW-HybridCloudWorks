@@ -19,6 +19,48 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Docker in the CMS: an article can be written, classified, voiced,
+  illustrated and previewed as Docker (#775).**
+  - **Classification.** The analysis prompt in `content/inspect.js` lists
+    Docker among the providers an article must be filed under, as a service
+    provider. It files Dockerfiles, image builds, Docker Desktop, Compose,
+    Docker Hub, Scout and Sandboxes under Docker, and containers on another
+    provider under that provider (Docker images on Azure Container Apps are
+    Azure, a workflow that builds an image is GitHub, a module that deploys
+    containers is Terraform), the same rule as `docker` being last in
+    `lib/providers.js`.
+  - **Voice.** `content/voice.js` has a `docker` voice (a container
+    practitioner quoting real Dockerfile stages, compose services and
+    docker commands).
+  - **Cover art.**
+    - `ai-cover.js` has a Docker theme for AI covers.
+    - `cover-svg.js` has a Docker palette (#1D63ED) for template covers.
+    - `HERO_PROVIDERS` names Docker on the server and in the admin copy,
+      and a new test holds the two lists to each other.
+    - `generate-brand-art.mjs` gains Docker in `PALETTES`,
+      `COVER_PROVIDERS` and `HERO_PROVIDERS`, and `npm run art:generate`
+      produced `public/images/default-heroes/docker.png` and
+      `public/images/docker-hero/1–5.png`. Every existing PNG regenerated
+      byte-identical.
+    - The Docker landing page rotates those five images, as Terraform's
+      does.
+  - **Image prompts.** The server allowlist in `cms/image-prompts.js` and
+    `ImagePromptsPage` both name the seven Docker pages (hub, news, blog,
+    code, sandboxes, tools, education), and a test holds the admin page's
+    Docker group to the allowlist.
+  - **Submissions and admin.**
+    - Docker is offered on the blog and Coder Corner submission forms, but
+      not on architecture or frameworks, since Docker has no such pages.
+    - Docker is in the editor list's filter and the image gallery's
+      provider tags.
+    - `pageMeta.js` infers Docker from a URL, last, so a URL about Docker
+      on Azure, GitHub or Terraform stays with that provider.
+  - **Staging preview.** `PreviewPage` reads `VALID_PROVIDERS` instead of
+    its own copy, which lacked Docker, so a Docker draft now previews as
+    Docker, not AWS.
+  - **CI.** `ci.yml`'s functions row also runs when either of the two
+    admin files the new parity test reads changes.
+
 - **Docker education catalogue, checked on 2026-09-29; `/docker/education`
   is a real Learning page and Docker is on the Learn index (#778).**
   - **Docker runs no certification exam of its own.** Docker's own list is

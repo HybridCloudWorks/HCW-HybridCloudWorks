@@ -38,10 +38,11 @@ function pngHeader(file) {
 }
 
 describe('generated brand art', () => {
-  it('owns five hero images for each provider whose set was missing, and eight covers', () => {
+  it('owns five hero images for each provider whose set was missing, and nine covers', () => {
     const files = outputs().map((o) => o.publicPath);
     expect(files).toHaveLength(HERO_PROVIDERS.length * HERO_VARIANTS + COVER_PROVIDERS.length);
-    for (const provider of ['gcp', 'github', 'terraform', 'finops']) {
+    // Docker's set since #775: its landing page had no hero art of its own.
+    for (const provider of ['gcp', 'github', 'terraform', 'finops', 'docker']) {
       for (let i = 1; i <= 5; i += 1) expect(files).toContain(`/images/${provider}-hero/${i}.png`);
     }
     for (const provider of [
@@ -52,6 +53,7 @@ describe('generated brand art', () => {
       'terraform',
       'ansible',
       'vmware',
+      'docker',
       'multi',
     ]) {
       expect(files).toContain(`/images/default-heroes/${provider}.png`);

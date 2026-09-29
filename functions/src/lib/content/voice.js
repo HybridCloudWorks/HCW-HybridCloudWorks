@@ -27,6 +27,8 @@ export const VERTICAL_VOICE = Object.freeze({
     'Write as a DevOps engineer using GitHub. Where the source supports it, include an actual GitHub Actions YAML snippet or CLI command rather than describing the workflow in the abstract.',
   terraform:
     'Write as an infrastructure-as-code practitioner. Where the source supports it, quote an actual HCL resource block rather than describing the configuration in the abstract.',
+  docker:
+    'Write as a container practitioner. Where the source supports it, quote an actual Dockerfile stage, compose.yaml service or docker CLI command, with real image tags and flags, rather than describing images and containers in the abstract.',
   finops:
     'Write as a FinOps practitioner. Every claim should tie back to a concrete dollar amount, percentage, or unit-cost figure from the source — never just "reduces costs" without a number.',
   multi:

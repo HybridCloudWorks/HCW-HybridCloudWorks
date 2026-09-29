@@ -15,6 +15,8 @@ export const PROVIDER_BRANDING = Object.freeze({
   Ansible: { primary: '#EE0000', dark: '#151515', accent: '#EE0000', label: 'ANSIBLE' },
   VMware: { primary: '#607078', dark: '#14212a', accent: '#78be20', label: 'VMWARE' },
   Finops: { primary: '#1ea482', dark: '#064e3b', accent: '#1ea482', label: 'FINOPS' },
+  // #775: the site's --docker-blue for both accents, on a dark navy.
+  Docker: { primary: '#1D63ED', dark: '#0a1a3a', accent: '#1D63ED', label: 'DOCKER' },
 });
 
 export const CATEGORY_BADGE_COLORS = Object.freeze({

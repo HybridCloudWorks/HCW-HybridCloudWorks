@@ -32,6 +32,7 @@ export const HERO_PROVIDERS = Object.freeze([
   'Terraform',
   'Ansible',
   'VMware',
+  'Docker',
   'Multi',
 ]);
 export const SOCIAL_PROVIDERS = Object.freeze([

@@ -48,6 +48,7 @@ const COMMON_PROVIDERS = [
   { value: 'terraform', label: 'Terraform' },
   { value: 'finops', label: 'FinOps' },
   { value: 'github', label: 'GitHub' },
+  { value: 'docker', label: 'Docker' },
 ];
 
 const SLOT_OPTIONS = [

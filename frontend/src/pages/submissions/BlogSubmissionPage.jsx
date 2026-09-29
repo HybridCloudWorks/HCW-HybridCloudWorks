@@ -10,7 +10,7 @@ import { submitPublicContent } from '@/lib/publicApi';
 const MAX_CONTENT_LENGTH = 50000;
 const VALID_URL_RE = /^https?:\/\/.+\..+/;
 
-const PROVIDER_OPTIONS = ['Azure', 'Aws', 'Gcp', 'Github', 'Terraform', 'Finops'];
+const PROVIDER_OPTIONS = ['Azure', 'Aws', 'Gcp', 'Github', 'Terraform', 'Finops', 'Docker'];
 
 const EMPTY_FORM = {
   title: '',

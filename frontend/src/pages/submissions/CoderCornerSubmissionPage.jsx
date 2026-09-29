@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { CheckCircle, Loader2, Send } from 'lucide-react';
 import { submitPublicContent } from '@/lib/publicApi';
 
-const PROVIDER_OPTIONS = ['Github', 'Terraform'];
+const PROVIDER_OPTIONS = ['Github', 'Terraform', 'Docker'];
 
 const EMPTY_FORM = {
   title: '',
@@ -77,7 +77,7 @@ export default function CoderCornerSubmissionPage() {
         <title>Coder Corner Templates | HCW</title>
         <meta
           name="description"
-          content="Submit Coder Corner technical entries for GitHub and Terraform workflows."
+          content="Submit Coder Corner technical entries for GitHub, Terraform and Docker workflows."
         />
       </Helmet>
 

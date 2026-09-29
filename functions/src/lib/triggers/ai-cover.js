@@ -78,6 +78,8 @@ export const PROVIDER_THEMES = Object.freeze({
   GitHub: { color: 'purple and dark gray', vibe: 'developer-focused and sleek' },
   Terraform: { color: 'purple', vibe: 'technical and structured' },
   FinOps: { color: 'teal and green', vibe: 'financial and analytical' },
+  // #775. Docker's blue is the site's --docker-blue, #1D63ED.
+  Docker: { color: 'bright blue and white', vibe: 'modular and developer-friendly' },
   Multi: { color: 'multicolor gradient', vibe: 'versatile and integrated' },
 });
 
