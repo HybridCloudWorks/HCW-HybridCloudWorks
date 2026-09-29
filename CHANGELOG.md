@@ -2140,6 +2140,22 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Lab image publishing: the storage-record warnings are gone, and a refused
+  Docker exchange explains itself.**
+  - Both publish jobs in `publish-lab-image.yml` now hold
+    `artifact-metadata: write`, which the attest step needs to write its
+    storage record to GitHub's linked artifacts page. Without it every run
+    warned "Please check that the artifact-metadata:write permission has
+    been included" and "Failed to create storage record" (run 36508154993).
+  - That run's Docker Hub job failed at the token exchange with only
+    `400 {"error":"access_denied"}`. A new step, `Explain a refused Docker
+    token exchange`, runs only when the login fails. It requests an ID token
+    for Docker's audience and writes its `sub`, `aud`, `repository`, `ref`
+    and `job_workflow_ref` claims to the run summary (never the token),
+    beside the rule the runbook asks the connection to hold, and says
+    whether they match.
+  - The runbook's failure table points to that table and to the
+    connection's **Failures** table in Docker Home.
 - **The OFL fonts carry their licence, and a lab pane test no longer races.**
   - Google Sans Flex (`frontend/public/fonts/google/`) and Mona Sans
     (`frontend/public/fonts/github/mona-sans/`) are under the SIL Open Font
