@@ -233,29 +233,24 @@ export function describeCertStatus(cert, today = todayIso()) {
         detail: isIsoDate(cert.gaDate) ? `GA ${formatIsoDate(cert.gaDate)}` : null,
       };
     }
-    case 'upcoming': {
-      if (isIsoDate(cert.availableDate)) {
-        return {
-          status,
-          label: 'Coming',
-          detail: `available ${formatIsoDate(cert.availableDate)}`,
-        };
-      }
-      // A beta whose window has closed ahead of GA (rule 2 in deriveStatus).
-      if (cert.status === 'beta') {
-        return {
-          status,
-          label: 'Coming',
-          detail: isIsoDate(cert.gaDate)
-            ? `beta closed · GA ${formatIsoDate(cert.gaDate)}`
-            : 'beta closed · GA date not announced',
-        };
-      }
-      return { status, label: 'Coming', detail: null };
-    }
+    case 'upcoming':
+      return { status, label: 'Coming', detail: upcomingDetail(cert) };
     default:
       return { status, label: null, detail: null };
   }
+}
+
+/**
+ * The date phrase beside a "Coming" badge: the first available day when one
+ * is published; for a beta whose window closed ahead of GA (rule 2 in
+ * `deriveStatus`), that it closed and when GA is, if known; otherwise none.
+ */
+function upcomingDetail(cert) {
+  if (isIsoDate(cert.availableDate)) return `available ${formatIsoDate(cert.availableDate)}`;
+  if (cert.status !== 'beta') return null;
+  return isIsoDate(cert.gaDate)
+    ? `beta closed · GA ${formatIsoDate(cert.gaDate)}`
+    : 'beta closed · GA date not announced';
 }
 
 /**
