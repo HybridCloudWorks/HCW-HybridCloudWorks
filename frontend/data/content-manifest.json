@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-14T12:39:28.282Z",
+  "generatedAt": "2026-09-29T12:46:28.432Z",
   "routes": [
     "/azure/blog/azure-foundry-hosted-agents-accelerating-ai-agent-deployment-optimization-featur",
     "/azure/blog/in-preview-public-preview-code-first-observability-for-foundry-agents-in-vs-code",
@@ -1055,6 +1055,15 @@
       "architecture-designs": 0
     },
     "ansible": {
+      "blog": 0,
+      "frameworks": 0,
+      "coder-corner": 0,
+      "code": 0,
+      "audio": 4,
+      "audio-architecture": 4,
+      "architecture-designs": 0
+    },
+    "docker": {
       "blog": 0,
       "frameworks": 0,
       "coder-corner": 0,
