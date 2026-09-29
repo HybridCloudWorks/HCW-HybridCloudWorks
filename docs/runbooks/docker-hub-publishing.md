@@ -1,13 +1,18 @@
 # Docker Hub publishing — the OIDC connection
 
-> **Status: the workflow is ready; the connection is not created yet (#779).**
-> `publish-lab-image.yml` has a `Publish to Docker Hub` job that stays
-> skipped until the owner creates a Docker OIDC connection and sets two
-> repository variables (steps 1 to 3 below). The two Docker Hub repositories
-> already exist, public and empty: Docker Hub's public API listed
-> `hybridcloudworks/hcw-lab` and `hybridcloudworks/hcw-lab-runner` with
-> `is_private: false` and nothing pushed, created at 00:19 and 00:20 UTC on
-> 2026-09-29.
+> **Status: live since 2026-09-29 (#779, closed).** The owner created the
+> OIDC connection and set both repository variables, and run
+> [36516945081](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/runs/36516945081)
+> published both images:
+> - `hybridcloudworks/hcw-lab` and `hybridcloudworks/hcw-lab-runner` on
+>   Docker Hub carry the same digests as GHCR;
+> - an anonymous registry token reads their manifests;
+> - `gh attestation verify oci://docker.io/hybridcloudworks/hcw-lab:latest`
+>   verifies the SLSA provenance.
+>
+> Every later push to `main` that rebuilds the image publishes to both. Steps
+> 1 to 3 below are what was done once, and what to repeat if the connection
+> is ever recreated.
 
 The lab images, `hcw-lab` and `hcw-lab-runner`, are published to GHCR on
 every push to `main` that changes them. This page turns on the second
@@ -281,11 +286,11 @@ repository on federated credentials
 ([Variables and secrets](../standards/variables-and-secrets.md), "Why OIDC
 federation means zero long-lived cloud credentials in GitHub").
 
-## Follow-ups once it is live
+## Since it went live
 
-- The site still names only GHCR: `LAB_IMAGE` in
-  `frontend/src/data/labs/catalogue.js` (the `/education/labs` "Run it
-  locally" commands) and the Docker provider pages under
-  `frontend/src/pages/docker/`. They mention Docker Hub once a run has
-  published there, not before.
-- Close #779 when the three checks under "What success looks like" pass.
+- **The site:** `LAB_IMAGE` in `frontend/src/data/labs/catalogue.js`, which
+  drives the `/education/labs` "Run it locally" commands, names
+  `hybridcloudworks/hcw-lab:latest` on Docker Hub (#795). GHCR stays a
+  mirror of the same digest.
+- **#779:** closed on 2026-09-29, after the three checks under "What success
+  looks like" passed.
