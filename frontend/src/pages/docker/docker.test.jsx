@@ -42,6 +42,13 @@ vi.mock('react-helmet-async', () => ({
   Helmet: ({ children }) => <>{children}</>,
 }));
 
+// The shared news page is tested with its data in its own suite, and rendered
+// for real at /docker/news in App.routes.test.jsx; here it is enough to know
+// which provider Docker's page hands it (#777).
+vi.mock('@/pages/shared/NewsPage', () => ({
+  default: ({ provider }) => <main data-testid="shared-news-page">{provider}</main>,
+}));
+
 // The blog and code pages read the published list through this one function.
 // Everything else in the module stays real.
 const fetchPublicContentList = vi.fn();
@@ -310,29 +317,37 @@ describe('pathMeta, the level-and-length line on a learning path card', () => {
   });
 });
 
-describe.each([
-  ['news', DockerRssPage, 'Docker News'],
-  ['tools', DockerToolsPage, 'Docker Tools'],
-])('the Docker %s page', (section, Page, title) => {
-  it('is an honest placeholder: its heading, "Coming soon", and what it will cover', () => {
-    renderPage(<Page />);
-    expect(screen.getByRole('heading', { level: 1, name: title })).toBeInTheDocument();
-    expect(document.title).toBe(`${title} | Hybrid Cloud Works`);
-    expect(screen.getByText('Coming soon')).toBeInTheDocument();
-    const plans = screen.getByRole('heading', { level: 2, name: 'What this page will cover' });
-    expect(within(plans.closest('section')).getAllByRole('listitem').length).toBeGreaterThan(0);
-  });
-
-  it('links back to the Docker hub, and reads nothing from the API', () => {
-    renderPage(<Page />);
-    const nav = screen.getByRole('navigation', { name: 'Docker pages you can use now' });
-    expect(within(nav).getByRole('link', { name: /back to the docker hub/i })).toHaveAttribute(
-      'href',
-      '/docker'
-    );
-    expect(fetchSpy).not.toHaveBeenCalled();
+describe('the Docker news page (#777)', () => {
+  it('is the shared news page for Docker, which reads Docker’s blog feed', () => {
+    renderPage(<DockerRssPage />);
+    expect(screen.getByTestId('shared-news-page')).toHaveTextContent('docker');
+    expect(screen.queryByText('Coming soon')).toBeNull();
   });
 });
+
+describe.each([['tools', DockerToolsPage, 'Docker Tools']])(
+  'the Docker %s page',
+  (section, Page, title) => {
+    it('is an honest placeholder: its heading, "Coming soon", and what it will cover', () => {
+      renderPage(<Page />);
+      expect(screen.getByRole('heading', { level: 1, name: title })).toBeInTheDocument();
+      expect(document.title).toBe(`${title} | Hybrid Cloud Works`);
+      expect(screen.getByText('Coming soon')).toBeInTheDocument();
+      const plans = screen.getByRole('heading', { level: 2, name: 'What this page will cover' });
+      expect(within(plans.closest('section')).getAllByRole('listitem').length).toBeGreaterThan(0);
+    });
+
+    it('links back to the Docker hub, and reads nothing from the API', () => {
+      renderPage(<Page />);
+      const nav = screen.getByRole('navigation', { name: 'Docker pages you can use now' });
+      expect(within(nav).getByRole('link', { name: /back to the docker hub/i })).toHaveAttribute(
+        'href',
+        '/docker'
+      );
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+  }
+);
 
 /** A published document as the public list endpoint returns it. */
 const doc = (overrides) => ({

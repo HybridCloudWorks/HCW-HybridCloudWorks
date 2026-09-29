@@ -1021,6 +1021,24 @@ export default function HomePage() {
                     </span>
                   </div>
                 </Link>
+                {/* #777: Docker's news page reads Docker's blog feed. */}
+                <Link
+                  className="hub-icon-btn glass-panel rounded-lg p-3 flex items-center gap-3 group border-l-4 border-l-transparent hover:border-l-docker"
+                  to={routes.rss('docker')}
+                  style={{ '--glow-color': 'rgba(29, 99, 237, 0.4)' }}
+                >
+                  <div className="p-2 rounded bg-white/70 dark:bg-slate-800/50 text-slate-700 dark:text-muted-foreground group-hover:text-docker transition-colors">
+                    <span className="material-symbols-outlined text-xl">deployed_code</span>
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-sm font-bold text-slate-900 dark:text-(--popover-foreground) group-hover:text-docker">
+                      Docker
+                    </span>
+                    <span className="text-[10px] text-slate-600 dark:text-white font-mono">
+                      NEW HUB
+                    </span>
+                  </div>
+                </Link>
               </div>
             </div>
           </aside>

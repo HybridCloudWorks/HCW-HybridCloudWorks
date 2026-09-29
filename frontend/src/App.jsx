@@ -717,18 +717,13 @@ function ProviderMicrocredentialDetailDispatcher() {
 // One podcast page for every provider (#349). The aws, azure and gcp copies
 // were the shared page with the colours inlined; they are now rows in its
 // PROVIDER_META, and provider-coverage.test.js checks every provider routed
-// here has one.
+// here has one. Every provider is routed here, so this is a membership test
+// rather than a branch per provider; Docker joined with #777, when it would
+// have been the tenth identical `if`.
 function ProviderAudioDispatcher() {
   const { provider } = useParams();
-  if (provider === 'aws') return <SharedPodcastPage />;
-  if (provider === 'azure') return <SharedPodcastPage />;
-  if (provider === 'gcp') return <SharedPodcastPage />;
-  if (provider === 'github') return <SharedPodcastPage />;
-  if (provider === 'terraform') return <SharedPodcastPage />;
-  if (provider === 'finops') return <SharedPodcastPage />;
-  if (provider === 'vmware') return <SharedPodcastPage />;
-  if (provider === 'ansible') return <SharedPodcastPage />;
-  return <NotFoundPage />;
+  if (!VALID_PROVIDERS.includes(provider)) return <NotFoundPage />;
+  return <SharedPodcastPage />;
 }
 
 function ProviderRssDispatcher() {

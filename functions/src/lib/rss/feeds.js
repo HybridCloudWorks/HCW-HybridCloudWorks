@@ -79,6 +79,10 @@ export const PROVIDER_FEEDS = Object.freeze({
   ],
   vmware: [{ name: 'VMware Blogs', url: 'https://blogs.vmware.com/feed/' }],
   finops: [{ name: 'FinOps Foundation', url: 'https://www.finops.org/feed/' }],
+  // #777. docker.com/blog/feed/ redirects here; the final URL, so the ingest
+  // does not depend on the parser following a redirect. Read 2026-09-29 with
+  // this module's parser and User-Agent: RSS 2.0, 10 items, newest 2026-09-24.
+  docker: [{ name: 'Docker Blog', url: 'https://www.docker.com/feed/' }],
 });
 
 export const PROVIDERS = Object.freeze(Object.keys(PROVIDER_FEEDS));
@@ -92,6 +96,7 @@ export const PROVIDER_DISPLAY_NAMES = Object.freeze({
   ansible: 'Ansible',
   vmware: 'VMware',
   finops: 'FinOps',
+  docker: 'Docker',
 });
 
 /** Items kept per feed in rss_cache — the write-time cap TODO.md T-319 asked for. */

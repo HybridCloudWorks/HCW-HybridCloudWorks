@@ -29,10 +29,21 @@ describe('feed catalogue', () => {
       'ansible',
       'vmware',
       'finops',
+      'docker',
     ]);
     for (const list of Object.values(PROVIDER_FEEDS)) {
       for (const f of list) expect(f.url).toMatch(/^https:\/\//);
     }
+  });
+
+  it('reads Docker’s blog at the address its old one redirects to (#777)', () => {
+    // https://www.docker.com/blog/feed/ answers with a redirect to this URL.
+    expect(PROVIDER_FEEDS.docker).toEqual([
+      { name: 'Docker Blog', url: 'https://www.docker.com/feed/' },
+    ]);
+    expect(describeFeedError('docker/Docker Blog: Status code 404')).toBe(
+      'Docker Blog (Docker): the feed address no longer exists.'
+    );
   });
 });
 
@@ -237,9 +248,12 @@ describe('buildHomepageFeedItems', () => {
     const byProvider = Object.fromEntries(PROVIDERS.map((p) => [p, [doc(p, 4)]]));
     const items = buildHomepageFeedItems(byProvider);
     expect(items).toHaveLength(10);
-    expect(items.slice(0, 8).map((i) => i.provider)).toEqual(PROVIDERS);
+    // One newest item from each of the nine providers, then the second pass
+    // starts; with Docker (#777) there is room for one second-pass item.
+    expect(items.slice(0, PROVIDERS.length).map((i) => i.provider)).toEqual(PROVIDERS);
     expect(items[0]).toMatchObject({ id: 'azure-0', title: 'azure3', link: 'https://azure/3' });
-    expect(items[8]).toMatchObject({ id: 'azure-1', title: 'azure2' });
+    expect(items[8]).toMatchObject({ id: 'docker-0', title: 'docker3' });
+    expect(items[9]).toMatchObject({ id: 'azure-1', title: 'azure2' });
     expect(items.every((i) => i.link)).toBe(true);
   });
 
