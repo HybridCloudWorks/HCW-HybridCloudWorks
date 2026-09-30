@@ -2565,6 +2565,37 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The inputs and secrets docs describe the estate as it is (#819).** Most of
+  these pages were last true in August. Each change below was checked against
+  the code or the live estate on 2026-09-29.
+  - **`required-inputs.md`, §4.2 and §4.3.** The repository holds two
+    secrets, `TFC_TOKEN` and `MANIFEST_APP_PRIVATE_KEY`, not "one", and both
+    are now listed with their workflows, alongside `MANIFEST_APP_ID`.
+    `READER_CLIENT_ID` (set 2026-09-06, four workflows) and
+    `VITE_TURNSTILE_SITE_KEY` (set 2026-09-28) are no longer shown as unset.
+    `FUNCTIONS_URL` feeds the frontend build's `VITE_AZURE_FUNCTIONS_URL`,
+    which the doc called retired. `STORAGE_ACCOUNT` and
+    `STORAGE_RESOURCE_GROUP` are marked as read by nothing.
+  - **`required-inputs.md`, §4.7 and §4.10.** The lab rows read SET from
+    measurement: the Coder references resolve, the Arc fact is present, and
+    the lab agent is registered (its claims and heartbeats answer 200). The
+    outputs count is 24, which adds `copilot_review_client_id`.
+  - **`variables-and-secrets.md`.** The August placement errors are marked
+    resolved or moot. `TF_API_TOKEN` becomes `TFC_TOKEN`. The page no longer
+    cites the deleted `key-vault.js`, `getSecret()`, `openai-client.js` or
+    `migrate-data.yml`. `AZURE_OPENAI_ENDPOINT` is deliberately absent, and
+    `KEY_VAULT_URI` is back for the write-only API Keys path.
+  - **Runbooks.** `deployment-runbook.md` no longer describes the deleted
+    `deploy-infra.yml`, and points at §4.1, `infra/budget.tf` and
+    `infra/functionapp.tf`. `alerting-and-support.md` gives the latency alert
+    as P95, and the 5xx alert's 30-minute window as deployed. That window is
+    itself a bug, carried to #816. `cosmos-restore.md` says 61 of 74
+    containers, and lists `tool_price_history` among those not restored.
+  - **Elsewhere.** `iac-repository-standard.md` drops the removed agent and
+    issue template. `routeFactory.ts` drops a pointer to a guide that does
+    not exist. The runner-image rollout in `version-floors.json` is future
+    tense again. The admin NotebookLM entry records that the consumer product
+    still has no API, while Gemini Notebook Enterprise has a `v1alpha` one.
 - **The API Keys page no longer states a provider order the code contradicts
   (#815).** Its help text called Anthropic "second" and OpenAI "third", but
   `DEFAULT_PROVIDER_ORDER` tries OpenAI before Anthropic. NVIDIA's text still

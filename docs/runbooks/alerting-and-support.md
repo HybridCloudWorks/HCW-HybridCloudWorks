@@ -150,8 +150,8 @@ tables, and `Usage` is not billable.
 
 | Rule | Sev | Fires when | What it usually means | Look at first |
 | --- | :---: | --- | --- | --- |
-| `alert-func-http5xx` | 1 | More than 5 `Http5xx` on the Function App in 15 min | The host answered and failed: a cold start that timed out, a worker that died mid-request, an unhandled 500 | Application Insights → **Failures**, filtered to the window, grouped by operation |
-| `alert-func-latency` | 2 | Mean `HttpResponseTime` above 5 s over 30 min | A slow dependency, or cold starts dominating a low-traffic window | Application Insights → **Performance**, split by operation; then check whether a deploy landed in the window |
+| `alert-func-http5xx` | 1 | More than 5 HTTP 5xx on the Function App in 30 min, as deployed. The rule's own description says 15: the window moved in #250 on reasoning that belongs to the availability probe, and #816 settles which one is meant | The host answered and failed: a cold start that timed out, a worker that died mid-request, an unhandled 500 | Application Insights → **Failures**, filtered to the window, grouped by operation |
+| `alert-func-latency` | 2 | P95 request duration above 5 s over 30 min, evaluated every 5 min | A slow dependency, or cold starts dominating a low-traffic window | Application Insights → **Performance**, split by operation; then check whether a deploy landed in the window |
 | `alert-cosmos-throttle` | 2 | More than 10 Cosmos responses with `StatusCode = 429` in 15 min | Retries are no longer absorbing throttling | Cosmos → **Insights** → normalized RU consumption, to find the container and partition key range |
 | `alert-app-exceptions` | 1 | More than 5 `AppExceptions` rows in 15 min | Handlers are throwing | The `AppExceptions` table, grouped by `ProblemId` and `OperationName` |
 | `alert-logs-capacity` | 2 | Billable ingestion passes 80% of the daily cap since the 08:00 UTC reset | Telemetry is about to stop for the day, taking the two log-based signals with it | The `Usage` table, grouped by `DataType`, over the same window |

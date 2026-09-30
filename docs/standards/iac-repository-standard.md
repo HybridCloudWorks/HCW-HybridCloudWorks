@@ -1,10 +1,10 @@
 # IaC Repository Standard
 
 The standard every HybridCloudWorks infrastructure repository conforms to.
-HCW-HybridCloudWorks is the reference implementation; the
-`iac-repo-standardizer` agent (`.claude/agents/` in the main repository)
-applies this standard to new or existing repositories. When the standard and
-the agent drift, this page wins — update the agent.
+HCW-HybridCloudWorks is the reference implementation. An
+`iac-repo-standardizer` agent in `.claude/agents/` used to apply it to other
+repositories; it was removed on 2026-08-20 (`ba1168eb`), so the standard is
+now applied by reading this page and checked in review.
 
 ## Principles
 
@@ -47,7 +47,7 @@ the agent drift, this page wins — update the agent.
 | `CODEOWNERS` | Infra and workflow paths require infra review |
 | `CONTRIBUTING.md`, `SECURITY.md` | Contribution rules; private vulnerability reporting |
 | PR template | Infrastructure section: plan linked, no unexpected destroys, no unmoved renames, no secrets, tags preserved, required-input inventory updated |
-| Issue templates | Bug report + infrastructure change request (blast radius, cost, rollback) |
+| Issue templates | Bug report, feature request, ADR and FinOps finding (`.github/ISSUE_TEMPLATE/`). The infrastructure change request template was removed with the migration surface (`59e471b`); the PR template's "Infrastructure changes only" section now carries the plan, destroy and rollback checks |
 | `dependabot.yml` | `github-actions` + every package ecosystem present |
 | Workflows | Least-privilege `permissions:`; actions pinned (SHA preferred); credential-free CI + IaC validation on every PR; delivery gated by `workflow_dispatch` + protected Environment; never auto-apply on push |
 
@@ -134,8 +134,8 @@ Sweeps cover **every** file that declares a name, not a curated list:
 `outputs.tf`. Each name sorts into exactly one bucket — **safe now**
 (outputs; unset variables), **coordinated** (variables already set in the
 state backend or GitHub — report, never rename silently), or
-**contractual** (never touched). The `iac-repo-standardizer` agent enforces
-this on every standardization run, and also flags duplicate outputs for
+**contractual** (never touched). Review enforces it now that the
+`iac-repo-standardizer` agent is gone, including flagging duplicate outputs for
 consolidation.
 
 ## The bootstrap identity
