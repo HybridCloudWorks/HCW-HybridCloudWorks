@@ -111,7 +111,7 @@
     "@napi-rs/canvas": "^1.0.9",
     "@hono/node-server": "2.0.10",
     "@opentelemetry/core": "2.8.0",
-    "brace-expansion": "5.0.9",
+    "brace-expansion": "5.0.12",
     "uuid": "^11.0.0",
     "node-domexception": "^2.0.2",
     "debug": "^4.3.7",
@@ -135,7 +135,7 @@
     "eslint-plugin-jsx-a11y": {
       "eslint": "$eslint",
       "minimatch": "^3.1.2",
-      "brace-expansion": "^1.1.12"
+      "brace-expansion": "^1.1.21"
     },
     "eslint-plugin-react": {
       "eslint": "$eslint"
