@@ -85,27 +85,34 @@ export function renderReport({ due, today, days = DEFAULT_DAYS }) {
 const USAGE =
   'Usage: node scripts/catalogue-due-soon.mjs [--days 21] [--today YYYY-MM-DD] [--out report.md]';
 
+const refuse = (message) => {
+  throw new Error(`${message}\n${USAGE}`);
+};
+
+/** Every flag takes one value; each entry checks it and sets its option. */
+const FLAGS = {
+  '--days': (options, value) => {
+    const days = Number(value);
+    if (!Number.isInteger(days) || days < 1)
+      refuse('--days needs a whole number of days, 1 or more');
+    options.days = days;
+  },
+  '--today': (options, value) => {
+    if (!isIsoDate(value)) refuse('--today needs YYYY-MM-DD');
+    options.today = value;
+  },
+  '--out': (options, value) => {
+    if (!value) refuse('--out needs a path');
+    options.out = value;
+  },
+};
+
 export function parseArgs(argv) {
   const options = { days: DEFAULT_DAYS, today: new Date().toISOString().slice(0, 10), out: null };
-  for (let i = 0; i < argv.length; i += 1) {
-    const flag = argv[i];
-    const value = argv[i + 1];
-    if (flag === '--days') {
-      options.days = Number(value);
-      if (!Number.isInteger(options.days) || options.days < 1)
-        throw new Error(`--days needs a whole number of days, 1 or more\n${USAGE}`);
-      i += 1;
-    } else if (flag === '--today') {
-      if (!isIsoDate(value)) throw new Error(`--today needs YYYY-MM-DD\n${USAGE}`);
-      options.today = value;
-      i += 1;
-    } else if (flag === '--out') {
-      if (!value) throw new Error(`--out needs a path\n${USAGE}`);
-      options.out = value;
-      i += 1;
-    } else {
-      throw new Error(`Unknown argument: ${flag}\n${USAGE}`);
-    }
+  for (let i = 0; i < argv.length; i += 2) {
+    const apply = FLAGS[argv[i]];
+    if (!apply) refuse(`Unknown argument: ${argv[i]}`);
+    apply(options, argv[i + 1]);
   }
   return options;
 }
