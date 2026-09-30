@@ -440,19 +440,19 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "function_http_5xx" {
   severity            = 1
 
   evaluation_frequency = "PT5M"
-  # PT30M, not PT15M (T-745). The window had no headroom for ingestion lag:
-  # App Insights availability rows typically land 1-3 minutes after the probe
-  # runs and occasionally later, so at any evaluation the newest one or two
-  # results may not be queryable yet. Against a 15-minute window expecting 3
-  # results and firing below 2, that lag alone spent the "one dropped run is
-  # tolerated" budget the ADR claims — a single late ingestion plus one missed
-  # cron paged Sev 1 against a healthy site.
+  # PT15M: more than 5 server errors in any 15 minutes, as the description
+  # says. Evaluated every 5 minutes, so a burst is seen within 5 minutes of
+  # its sixth error. A handful of isolated 500s spread across an hour stays
+  # below it, which is the point of a threshold on a count rather than on a
+  # single error.
   #
-  # 30 minutes expects 6 results and fires below 3, so it absorbs lag plus two
-  # dropped runs while still detecting a real outage inside ~15 minutes (three
-  # consecutive failures). Change this and you must change the threshold below
-  # and the cron cadence in edge/availability-probe/wrangler.toml together.
-  window_duration = "PT30M"
+  # This read PT30M from #250 (2026-08-28) until #816. That change carried
+  # T-745's reasoning about the availability probe (six probe results per 30
+  # minutes, firing below 3) onto this rule, which counts requests and has no
+  # expected-result arithmetic at all. Doubling the window at the same
+  # threshold made the rule twice as sensitive as its description, and the
+  # probe got its own PT30M on 2026-09-01 (edge_probe_availability below).
+  window_duration = "PT15M"
 
   # Stateful for the reason set out on alert-app-exceptions below: stateless is
   # the azurerm default and re-notifies every evaluation. Same frequency, same

@@ -317,6 +317,71 @@ resource "azurerm_cosmosdb_sql_container" "hcw" {
   }
 }
 
+# -----------------------------------------------------------------------------
+# Computed properties, inside the apply (#816)
+# -----------------------------------------------------------------------------
+# azurerm_cosmosdb_sql_container has no computed_properties argument (azurerm
+# 5.7.0), so an apply that updates `content` or `blogs` through it PUTs a
+# definition without them, and the public content list, which orders by
+# cp_sortDate once PUBLIC_LIST_SQL_ORDER is "1", breaks until the property is
+# back. Until #816 a workflow put it back every six hours
+# (heal-computed-properties.yml): a wound the next tick closed, open for up
+# to six hours after any such apply.
+#
+# Now the apply that could wipe the property restores it. Each update
+# resource carries exactly the definitions in cosmos-containers.json
+# (generated from scripts/lib/cosmos-sort-date.mjs). replace_triggered_by
+# re-runs it after any change to its container in the same apply: azapi reads
+# the container azurerm just wrote, merges these in, and PUTs it back.
+# Otherwise it plans nothing, because Cosmos stores the query exactly as
+# written.
+#
+# The postcondition turns "the property is missing" into a failed plan or
+# apply rather than a silent healer run. A wipe made outside Terraform shows
+# on the next plan as a refreshed output without the property, and the plan
+# stops there. It is not a new permanent diff: these are conditional
+# replacements, listed as such in scripts/assert-expected-plan.mjs.
+locals {
+  cosmos_computed_properties = {
+    for name, container in local.cosmos_containers :
+    name => container.computedProperties
+    if length(try(container.computedProperties, [])) > 0
+  }
+}
+
+resource "azapi_update_resource" "cosmos_computed_properties" {
+  for_each = local.cosmos_computed_properties
+
+  # The version apply-computed-sortdate.mjs has PUT with since 2026-08-20.
+  type        = "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-11-15"
+  resource_id = azurerm_cosmosdb_sql_container.hcw[each.key].id
+
+  body = {
+    properties = {
+      resource = {
+        id                 = each.key
+        computedProperties = each.value
+      }
+    }
+  }
+
+  response_export_values = ["properties.resource.computedProperties"]
+
+  lifecycle {
+    replace_triggered_by = [azurerm_cosmosdb_sql_container.hcw[each.key]]
+
+    postcondition {
+      condition = alltrue([
+        for wanted in each.value : anytrue([
+          for got in try(self.output.properties.resource.computedProperties, []) :
+          got.name == wanted.name && got.query == wanted.query
+        ])
+      ])
+      error_message = "Container ${each.key} does not carry the computed properties infra/cosmos-containers.json defines for it. The public content list orders by cp_sortDate, so this is a production break, not drift to wave through. Re-run the apply; if it persists, compare the container's computedProperties in the portal with scripts/lib/cosmos-sort-date.mjs."
+    }
+  }
+}
+
 # NOTE: there is deliberately NO `moved` block from
 # azurerm_linux_function_app.hcw. A moved block requires the two addresses to be
 # the same resource TYPE, and these are different types. If the old resource is

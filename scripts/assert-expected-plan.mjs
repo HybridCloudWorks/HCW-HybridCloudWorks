@@ -77,6 +77,10 @@
  *       reason: '#718: Node.js 24 on Flex Consumption',
  *     }
  *
+ * A new or removed resource is declared by its action instead, since there
+ * are no values to compare: `{ address, action: 'create', reason }` (or
+ * `'delete'`), with the address exact, for_each key included (#816).
+ *
  * `path` is written as this script prints it. The entry matches that address,
  * that path and exactly those two values, so a reviewer reads the expectation
  * beside the change it permits. Once the change has applied, the entry matches
@@ -120,16 +124,17 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { isDeepStrictEqual } from 'node:util';
 
 import { actionsOf, classify, sideEffects } from './lib/plan-actions.mjs';
+import { declarationLines, findDeclaredAction, matchesDeclaration } from './lib/plan-declarations.mjs';
 import { attributeChanges, formatPath } from './lib/plan-diff.mjs';
-import { describeDifference, render, secretsOf } from './lib/plan-report.mjs';
+import { describeDifference, secretsOf } from './lib/plan-report.mjs';
 
 // What a change does is read in lib/plan-actions.mjs, what differs in
 // lib/plan-diff.mjs, and how it is printed in lib/plan-report.mjs; this file
 // keeps the policy. Re-exported so callers and tests have one module to import.
 export { classify } from './lib/plan-actions.mjs';
+export { declarationLines, describeDeclaration } from './lib/plan-declarations.mjs';
 export { attributeChanges, formatPath } from './lib/plan-diff.mjs';
 export { describeDifference, redact, secretsOf } from './lib/plan-report.mjs';
 
@@ -156,6 +161,22 @@ export const EXPECTED = {
     },
   ],
 };
+
+/**
+ * azapi update resources replaced only when the resource they correct
+ * changes, not on every apply (#816).
+ *
+ * `azapi_update_resource.cosmos_computed_properties` writes cp_sortDate back
+ * onto `content` and `blogs` whenever azurerm updates one of them, because
+ * azurerm's PUT drops it. Its replacement is therefore never drift on its
+ * own: the container update that triggers it is, and that is still checked
+ * like any other update. It is tolerated per instance (`["content"]`,
+ * `["blogs"]`) and never reported missing, since most plans do not contain it.
+ */
+export const CONDITIONAL_REPLACED = ['azapi_update_resource.cosmos_computed_properties'];
+
+/** `type.name["key"]` -> `type.name`, the address a for_each instance belongs to. */
+const baseAddress = (address) => address.replace(/\[[^\]]*\]$/, '');
 
 /**
  * Intended one-off changes, each declared by the pull request that makes it
@@ -201,39 +222,27 @@ export const DECLARED = [
     after: 'true',
     reason: '#701: PROBE_AI_PROVIDERS added to enabled_timers, arming the weekly probe',
   },
+  // #816: cp_sortDate moves inside the apply. The first plan creates one
+  // update resource per container that carries a computed property; after
+  // that they plan nothing unless their container changes.
+  {
+    address: 'azapi_update_resource.cosmos_computed_properties["blogs"]',
+    action: 'create',
+    reason: '#816: cp_sortDate on blogs, written by the apply instead of the six-hourly healer',
+  },
+  {
+    address: 'azapi_update_resource.cosmos_computed_properties["content"]',
+    action: 'create',
+    reason: '#816: cp_sortDate on content, written by the apply instead of the six-hourly healer',
+  },
+  {
+    address: 'azurerm_monitor_scheduled_query_rules_alert_v2.function_http_5xx',
+    path: 'window_duration',
+    before: 'PT30M',
+    after: 'PT15M',
+    reason: '#816: the 5xx alert back to its stated 15 minutes; #250 had given it the window of the availability probe',
+  },
 ];
-
-/** One `DECLARED` entry, for the report. */
-export function describeDeclaration({ address, path, before, after, reason }) {
-  return `${address} ${path}: ${render(before)} -> ${render(after)}${reason ? ` (${reason})` : ''}`;
-}
-
-/**
- * The report lines about declarations, shared by both entry points. DECLARED
- * names what the plan matched; NOTE names what it did not. Neither fails the
- * check: a declaration the plan lacks has usually applied already.
- */
-export function declarationLines({ declared = [], unused = [] }) {
-  return [
-    ...declared.map((d) => `DECLARED    ${describeDeclaration(d)}`),
-    ...unused.map(
-      (d) =>
-        `NOTE        declared, not in this plan: ${describeDeclaration(d)}. Once it has ` +
-        'applied, delete it from DECLARED in scripts/assert-expected-plan.mjs.'
-    ),
-  ];
-}
-
-/**
- * Whether one declaration covers one difference. A sensitive or unknown
- * difference never matches: declaring it would mean writing its value here.
- */
-function matchesDeclaration(declaration, address, difference) {
-  if (difference.sensitive || difference.unknown) return false;
-  if (declaration?.address !== address || declaration.path !== difference.path) return false;
-  const sameBefore = isDeepStrictEqual(declaration.before, difference.before);
-  return sameBefore && isDeepStrictEqual(declaration.after, difference.after);
-}
 
 /** The keys an update must carry for its values to be printed safely. */
 const MARKERS = ['before', 'after', 'after_unknown', 'before_sensitive', 'after_sensitive'];
@@ -278,6 +287,36 @@ function checkUpdate(change, { tolerated, declared, matched, secrets }) {
   return lines;
 }
 
+/** Whether a replacement is one of the expected or conditional azapi ones. */
+function isToleratedReplacement(address, expectedReplaced) {
+  return expectedReplaced.has(address) || CONDITIONAL_REPLACED.includes(baseAddress(address));
+}
+
+/**
+ * The UNEXPECTED lines for one change that is not a no-op: none for a
+ * tolerated replacement or a declared create or delete, the update's own
+ * differences for an update, and the action itself otherwise.
+ */
+function checkChange(change, action, context) {
+  const { address } = change;
+  if (action === 'replace' && isToleratedReplacement(address, context.expectedReplaced)) return [];
+
+  // Every attribute of an update, not only app_settings (#719). Anything
+  // changing beyond the one known app setting and what a pull request has
+  // declared is exactly the drift that hides beside the trio, so it is named
+  // rather than waved through on the address alone.
+  if (action === 'update') return checkUpdate(change, context);
+
+  // A create or a delete can be declared too (#816), by address and action
+  // alone. There are no values to match, so the address is exact.
+  const declaration = findDeclaredAction(context.declared, address, action);
+  if (declaration) {
+    context.matched.add(declaration);
+    return [];
+  }
+  return [`${address}: ${action}`];
+}
+
 /**
  * Compare a parsed plan against EXPECTED and DECLARED.
  *
@@ -302,7 +341,13 @@ export function checkPlan(plan, { declared = DECLARED } = {}) {
 
   const expectedReplaced = new Set(EXPECTED.replaced);
   const matched = new Set();
-  const context = { tolerated: toleratedPaths(), declared, matched, secrets: secretsOf(plan) };
+  const context = {
+    expectedReplaced,
+    tolerated: toleratedPaths(),
+    declared,
+    matched,
+    secrets: secretsOf(plan),
+  };
 
   const unexpected = [];
   const seen = new Set();
@@ -310,19 +355,10 @@ export function checkPlan(plan, { declared = DECLARED } = {}) {
   for (const change of changes) {
     const actions = actionsOf(change);
     const action = classify(actions);
-    const address = change.address;
-    for (const note of sideEffects(change, actions)) unexpected.push(`${address}: ${note}`);
+    for (const note of sideEffects(change, actions)) unexpected.push(`${change.address}: ${note}`);
     if (action === 'no-op') continue;
-
-    seen.add(address);
-    if (action === 'replace' && expectedReplaced.has(address)) continue;
-
-    // Every attribute of an update, not only app_settings (#719). Anything
-    // changing beyond the one known app setting and what a pull request has
-    // declared is exactly the drift that hides beside the trio, so it is
-    // named rather than waved through on the address alone.
-    if (action === 'update') unexpected.push(...checkUpdate(change, context));
-    else unexpected.push(`${address}: ${action}`);
+    seen.add(change.address);
+    unexpected.push(...checkChange(change, action, context));
   }
 
   // An expected change that has STOPPED appearing matters too: it means the

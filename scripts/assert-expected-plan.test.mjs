@@ -29,6 +29,7 @@ import {
   attributeChanges,
   checkPlan,
   classify,
+  CONDITIONAL_REPLACED,
   declarationLines,
   DECLARED,
   EXPECTED,
@@ -217,11 +218,17 @@ describe('EXPECTED matches the configuration', () => {
     // one holds the lab Vault's seal key (lab-hybrid.tf), which Resource
     // Manager can create and azurerm cannot. The test below keeps that
     // distinction honest from the other side.
+    //
+    // Since #816 the module also holds azapi update resources that are
+    // replaced only when the resource they correct changes. They are listed
+    // apart (CONDITIONAL_REPLACED), so between them the two lists still name
+    // every one exactly once.
     const declared = [
       ...infraSource.matchAll(/^resource "(azapi_resource_action|azapi_update_resource)" "([a-z0-9_]+)"/gm),
     ].map((m) => `${m[1]}.${m[2]}`);
     expect(declared.length).toBeGreaterThan(0);
-    expect([...EXPECTED.replaced].sort()).toEqual([...declared].sort());
+    expect([...EXPECTED.replaced, ...CONDITIONAL_REPLACED].sort()).toEqual([...declared].sort());
+    expect(EXPECTED.replaced.filter((a) => CONDITIONAL_REPLACED.includes(a))).toEqual([]);
   });
 
   it('declares no azapi_resource that is replaced on every apply', () => {
@@ -856,11 +863,85 @@ describe('DECLARED', () => {
     for (const declaration of DECLARED) {
       const label = JSON.stringify(declaration);
       expect(typeof declaration.address, label).toBe('string');
-      expect(typeof declaration.path, label).toBe('string');
       expect(typeof declaration.reason === 'string' && declaration.reason.length > 0, label).toBe(true);
-      expect(Object.hasOwn(declaration, 'before') && Object.hasOwn(declaration, 'after'), label).toBe(true);
+      if (declaration.action) {
+        // A create or delete (#816): no path, no values, nothing else.
+        expect(['create', 'delete'], label).toContain(declaration.action);
+        expect(Object.keys(declaration).sort(), label).toEqual(['action', 'address', 'reason']);
+      } else {
+        expect(typeof declaration.path, label).toBe('string');
+        expect(Object.hasOwn(declaration, 'before') && Object.hasOwn(declaration, 'after'), label).toBe(true);
+      }
       const [type, name] = declaration.address.replace(/\[.*$/, '').split('.');
       expect(infraSource, label).toContain(`resource "${type}" "${name}"`);
     }
+  });
+});
+
+describe('conditional replacements and declared creates (#816)', () => {
+  const COSMOS = 'azapi_update_resource.cosmos_computed_properties';
+  const withChanges = (...changes) => {
+    const plan = expectedPlan();
+    plan.resource_changes.push(...changes);
+    return plan;
+  };
+
+  it('tolerates the computed-property resource being replaced, instance by instance', () => {
+    const plan = withChanges(
+      { address: `${COSMOS}["content"]`, change: { actions: ['delete', 'create'] } },
+      { address: `${COSMOS}["blogs"]`, change: { actions: ['create', 'delete'] } }
+    );
+    expect(checkPlan(plan, { declared: [] })).toMatchObject({ ok: true, unexpected: [], missing: [] });
+  });
+
+  it('never reports it missing, because most plans do not contain it', () => {
+    expect(checkPlan(expectedPlan(), { declared: [] }).missing).toEqual([]);
+  });
+
+  it('still names the container update that triggers the replacement', () => {
+    const plan = withChanges(
+      { address: `${COSMOS}["content"]`, change: { actions: ['delete', 'create'] } },
+      {
+        address: 'azurerm_cosmosdb_sql_container.hcw["content"]',
+        change: {
+          actions: ['update'],
+          before: { default_ttl: null },
+          after: { default_ttl: 60 },
+          after_unknown: {},
+          before_sensitive: {},
+          after_sensitive: {},
+        },
+      }
+    );
+    const result = checkPlan(plan, { declared: [] });
+    expect(result.ok).toBe(false);
+    expect(result.unexpected).toEqual([
+      'azurerm_cosmosdb_sql_container.hcw["content"]: update default_ttl: null -> 60',
+    ]);
+  });
+
+  it('tolerates a replacement, never a create, without a declaration', () => {
+    const plan = withChanges({ address: `${COSMOS}["content"]`, change: { actions: ['create'] } });
+    expect(checkPlan(plan, { declared: [] }).unexpected).toEqual([`${COSMOS}["content"]: create`]);
+  });
+
+  it('matches a declared create by exact address and action, and reports it', () => {
+    const declaration = { address: `${COSMOS}["content"]`, action: 'create', reason: 'test' };
+    const plan = withChanges({ address: `${COSMOS}["content"]`, change: { actions: ['create'] } });
+    const result = checkPlan(plan, { declared: [declaration] });
+    expect(result).toMatchObject({ ok: true, unexpected: [] });
+    expect(result.declared).toEqual([declaration]);
+    expect(declarationLines(result)).toEqual([`DECLARED    ${COSMOS}["content"] create (test)`]);
+  });
+
+  it('does not let a create declaration cover a delete, or another instance', () => {
+    const declaration = { address: `${COSMOS}["content"]`, action: 'create', reason: 'test' };
+    const plan = withChanges(
+      { address: `${COSMOS}["content"]`, change: { actions: ['delete'] } },
+      { address: `${COSMOS}["blogs"]`, change: { actions: ['create'] } }
+    );
+    const result = checkPlan(plan, { declared: [declaration] });
+    expect(result.unexpected).toEqual([`${COSMOS}["content"]: delete`, `${COSMOS}["blogs"]: create`]);
+    expect(result.unused).toEqual([declaration]);
   });
 });
