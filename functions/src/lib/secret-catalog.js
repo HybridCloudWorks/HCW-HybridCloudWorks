@@ -99,13 +99,14 @@ export const SECRET_SECTIONS = Object.freeze([
  *
  * `null` is the honest default and most entries have it. A non-null probe is a
  * PROMISE that something reports this credential's health, and the page prints
- * "no liveness check for this one" beside a green light that has none. Two
- * things report today, both through `lib/key-verdict.js`, which is what
+ * "no liveness check for this one" beside a green light that has none. Three
+ * things report today, all through `lib/key-verdict.js`, which is what
  * distinguishes a rejected credential (401/403) from a bad request:
- * `ai/router.js` for its three providers, and the Publer client and proxy for
- * BOTH `PUBLER_API_KEY` and `PUBLER_WORKSPACE_ID` (#358). Only those may carry
- * a probe, and `secret-catalog.test.js` holds that. Wiring a new reporter and
- * setting a probe is one change, not two.
+ * `ai/router.js` for its four providers, the Publer client and proxy for BOTH
+ * `PUBLER_API_KEY` and `PUBLER_WORKSPACE_ID` (#358), and the Telegram
+ * connection probe for `TELEGRAM_BOT_TOKEN` (`integrations/connection-probe.js`).
+ * Only those may carry a probe, and `secret-catalog.test.js` holds that.
+ * Wiring a new reporter and setting a probe is one change, not two.
  *
  * The workspace id gained a probe on 2026-09-09, and the reason is worth
  * keeping: Publer answers 401 when the WORKSPACE ID is wrong and 403 when the
@@ -130,9 +131,10 @@ export const SECRET_CATALOG = Object.freeze([
     secret: 'GEMINI-API-KEY',
     section: 'gen-ai',
     label: 'Google Gemini',
-    // First in the router's preference order, and the Listen & Learn voice:
-    // Gemini TTS reads every study episode (ADR 0029 §2b).
-    help: 'API key. The first model the site asks to write, and the voice that reads every Listen & Learn episode.',
+    // The Listen & Learn voice: Gemini TTS reads every study episode (ADR 0029
+    // §2b). Its place in the writing order is the AI Engine page's, not this
+    // text's — see the note above NVIDIA's entry.
+    help: 'API key. One of the models the site writes with, tried in the order set on the AI Engine page, and the voice that reads every Listen & Learn episode.',
     probe: 'gemini',
   },
   {
@@ -140,8 +142,7 @@ export const SECRET_CATALOG = Object.freeze([
     secret: 'ANTHROPIC-API-KEY',
     section: 'gen-ai',
     label: 'Anthropic',
-    // Second in the router's preference order.
-    help: 'API key. The second model tried, when Gemini is unavailable.',
+    help: 'API key. One of the models the site writes with, tried in the order set on the AI Engine page.',
     probe: 'anthropic',
   },
   {
@@ -149,8 +150,7 @@ export const SECRET_CATALOG = Object.freeze([
     secret: 'OPENAI-API-KEY',
     section: 'gen-ai',
     label: 'OpenAI',
-    // Third in the router's preference order.
-    help: 'API key. The third model tried, when neither Gemini nor Anthropic answers.',
+    help: 'API key. One of the models the site writes with, tried in the order set on the AI Engine page.',
     probe: 'openai',
   },
   {
@@ -159,11 +159,20 @@ export const SECRET_CATALOG = Object.freeze([
     section: 'gen-ai',
     label: 'NVIDIA API',
     // #701. An `nvapi-` key from build.nvidia.com/settings/api-keys, trial
-    // tier (~40 requests a minute). The router puts it first for
-    // owner-triggered content features and never uses it for the anonymous
-    // public explain route (ai-config.js PROVIDER_PLACEMENT_DEFAULTS); its
-    // verdicts are reported by ai/router.js like the other three.
-    help: 'API key starting nvapi-. Free, rate-limited models that write drafts, summaries and scripts first; the paid models above take over when it is busy or down. Never used on the public pages.',
+    // tier (~40 requests a minute). Placed per feature
+    // (ai-config.js PROVIDER_PLACEMENT_DEFAULTS): the backup, 'order', for
+    // owner-triggered content features since 2026-09-29 (#812), and locked
+    // off for the anonymous public explain routes. Its verdicts are reported
+    // by ai/router.js like the other three.
+    //
+    // NO HELP TEXT HERE NAMES A POSITION. Until 2026-09-29 these said Gemini
+    // was "first", Anthropic "second" and OpenAI "third", while
+    // DEFAULT_PROVIDER_ORDER put OpenAI before Anthropic, and NVIDIA's said it
+    // wrote "first" the day it became the backup (#815). The order is
+    // DEFAULT_PROVIDER_ORDER until the AI Engine page changes it, so a
+    // position in this text is wrong the moment anyone reorders.
+    // secret-catalog.test.js refuses one.
+    help: 'API key starting nvapi-. Free, rate-limited models: by default the backup for drafts, summaries and scripts, used when the models above cannot answer. The AI Engine page can make them the main writer for a feature. Never used on the public pages.',
     probe: 'nvidia',
   },
   {
@@ -172,7 +181,7 @@ export const SECRET_CATALOG = Object.freeze([
     section: 'gen-ai',
     label: 'Perplexity',
     // Referenced but not reachable through the AI router today — it
-    // implements Gemini, OpenAI and Anthropic only.
+    // implements Gemini, OpenAI, Anthropic and NVIDIA only.
     help: 'API key. Nothing on the site uses it today.',
     probe: null,
   },

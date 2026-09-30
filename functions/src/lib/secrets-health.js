@@ -42,7 +42,8 @@
  * the upstream service can say it is wrong. This detects unresolved, not
  * incorrect. The "incorrect" signal is `lib/key-verdict.js`: the upstream
  * service's 401/403, recorded against the setting by whichever caller saw it
- * (the AI router; the Publer client and proxy since #358), and rendered as the
+ * (the AI router; the Publer client and proxy since #358; the Telegram
+ * connection probe), and rendered as the
  * red light on the API-keys page.
  */
 
