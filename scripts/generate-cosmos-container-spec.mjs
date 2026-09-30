@@ -26,6 +26,7 @@ import {
   CONTAINER_TTL_SECONDS,
 } from './lib/migration-manifest.mjs';
 import { parseArgs, log } from './lib/cli.mjs';
+import { COMPUTED_PROPERTY, SORT_DATE_CONTAINERS } from './lib/cosmos-sort-date.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const outPath = join(here, '..', 'infra', 'cosmos-containers.json');
@@ -60,8 +61,8 @@ const LARGE_TEXT_PATHS = [
  * explicit included path, or `ORDER BY c.cp_sortDate` fails with "The index
  * path corresponding to the specified order-by item is excluded". That is how
  * the public content list broke for 40 minutes on 2026-08-21 when
- * PUBLIC_LIST_SQL_ORDER went to "1". The property itself is still applied by
- * scripts/apply-computed-sortdate.mjs (see COMPUTED_PROPERTIES_DOC below).
+ * PUBLIC_LIST_SQL_ORDER went to "1". The property itself is defined in
+ * lib/cosmos-sort-date.mjs and applied by Terraform (COMPUTED_PROPERTIES below).
  */
 const SORT_DATE_INDEX_PATH = '/cp_sortDate/?';
 
@@ -193,29 +194,20 @@ const COMPOSITE_INDEXES = {
 };
 
 /**
- * Documentation-only computedProperties blocks, carried in the generated spec
- * so regeneration does not lose them. The real property is applied at runtime
- * by `scripts/apply-computed-sortdate.mjs` (azurerm_cosmosdb_sql_container
- * cannot express computedProperties); this records, on the containers that
- * carry it, that the property exists and who owns it. Keep the container list
- * in step with CONTAINERS in that script.
+ * The computedProperties each container carries — the real definitions, not
+ * documentation, since #816. azurerm_cosmosdb_sql_container cannot express
+ * computedProperties, and an apply that updates a container through it PUTs a
+ * definition without them. `azapi_update_resource.cosmos_computed_properties`
+ * in infra/cosmos.tf reads these from the generated spec and writes them back
+ * in the same apply, triggered by any change to the container, and fails the
+ * apply if the container does not carry them afterwards.
+ *
+ * Until #816 the query here was a sentence saying who applied the property,
+ * and a six-hourly workflow did the applying.
  */
-const COMPUTED_PROPERTIES_DOC = {
-  content: [
-    {
-      name: 'cp_sortDate',
-      query:
-        '(applied by scripts/apply-computed-sortdate.mjs — azurerm_cosmosdb_sql_container cannot express computedProperties, and a terraform apply that updates this container WIPES them; .github/workflows/heal-computed-properties.yml re-applies on infra pushes and every six hours)',
-    },
-  ],
-  blogs: [
-    {
-      name: 'cp_sortDate',
-      query:
-        '(applied by scripts/apply-computed-sortdate.mjs — azurerm_cosmosdb_sql_container cannot express computedProperties, and a terraform apply that updates this container WIPES them; .github/workflows/heal-computed-properties.yml re-applies on infra pushes and every six hours)',
-    },
-  ],
-};
+const COMPUTED_PROPERTIES = Object.fromEntries(
+  SORT_DATE_CONTAINERS.map((name) => [name, [{ ...COMPUTED_PROPERTY }]])
+);
 
 /** Why a container exists when no source documents were copied into it. */
 const DISPOSITION_NOTE = {
@@ -240,9 +232,7 @@ function build() {
       // null means "retain forever". Terraform omits default_ttl when null.
       default_ttl: CONTAINER_TTL_SECONDS[name] ?? null,
       note: note ?? null,
-      ...(COMPUTED_PROPERTIES_DOC[name]
-        ? { computedProperties: COMPUTED_PROPERTIES_DOC[name] }
-        : {}),
+      ...(COMPUTED_PROPERTIES[name] ? { computedProperties: COMPUTED_PROPERTIES[name] } : {}),
     });
   };
 
@@ -270,7 +260,7 @@ function build() {
   return {
     _comment:
       'GENERATED FILE — do not edit. Run `node scripts/generate-cosmos-container-spec.mjs` ' +
-      'after changing scripts/lib/migration-manifest.mjs. Read by infra/main.tf.',
+      'after changing scripts/lib/migration-manifest.mjs. Read by infra/cosmos.tf.',
     _source: 'scripts/lib/migration-manifest.mjs',
     containers,
   };

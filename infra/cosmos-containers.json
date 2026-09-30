@@ -1,5 +1,5 @@
 {
-  "_comment": "GENERATED FILE — do not edit. Run `node scripts/generate-cosmos-container-spec.mjs` after changing scripts/lib/migration-manifest.mjs. Read by infra/main.tf.",
+  "_comment": "GENERATED FILE — do not edit. Run `node scripts/generate-cosmos-container-spec.mjs` after changing scripts/lib/migration-manifest.mjs. Read by infra/cosmos.tf.",
   "_source": "scripts/lib/migration-manifest.mjs",
   "containers": [
     {
@@ -128,7 +128,7 @@
       "computedProperties": [
         {
           "name": "cp_sortDate",
-          "query": "(applied by scripts/apply-computed-sortdate.mjs — azurerm_cosmosdb_sql_container cannot express computedProperties, and a terraform apply that updates this container WIPES them; .github/workflows/heal-computed-properties.yml re-applies on infra pushes and every six hours)"
+          "query": "SELECT VALUE (IS_STRING(c.publishedDate) ? c.publishedDate : (IS_STRING(c.datePublished) ? c.datePublished : (IS_STRING(c[\"Published At\"]) ? c[\"Published At\"] : (IS_STRING(c.blogPublishedAt) ? c.blogPublishedAt : (IS_STRING(c.publishedAt) ? c.publishedAt : \"\"))))) FROM c"
         }
       ]
     },
@@ -385,7 +385,7 @@
       "computedProperties": [
         {
           "name": "cp_sortDate",
-          "query": "(applied by scripts/apply-computed-sortdate.mjs — azurerm_cosmosdb_sql_container cannot express computedProperties, and a terraform apply that updates this container WIPES them; .github/workflows/heal-computed-properties.yml re-applies on infra pushes and every six hours)"
+          "query": "SELECT VALUE (IS_STRING(c.publishedDate) ? c.publishedDate : (IS_STRING(c.datePublished) ? c.datePublished : (IS_STRING(c[\"Published At\"]) ? c[\"Published At\"] : (IS_STRING(c.blogPublishedAt) ? c.blogPublishedAt : (IS_STRING(c.publishedAt) ? c.publishedAt : \"\"))))) FROM c"
         }
       ]
     },

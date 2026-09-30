@@ -10,6 +10,11 @@
  * TOP window return the NEWEST N documents instead of an arbitrary N, with no
  * backfill and no write-site maintenance.
  *
+ * SUPERSEDED BY THE APPLY (#816). infra/cosmos.tf now writes the property in
+ * the same apply that could wipe it, from the definition in
+ * lib/cosmos-sort-date.mjs, and fails if it is missing. This script and its
+ * workflow run until that is proven live, then go.
+ *
  * Why a script and not Terraform: the ARM container resource supports
  * `computedProperties`, but the `azurerm_cosmosdb_sql_container` resource the
  * repo provisions with does not model them. **Drift hazard, read this:** a
@@ -37,32 +42,14 @@
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 
-const CONTAINERS = ['content', 'blogs'];
+// The definition lives in lib/cosmos-sort-date.mjs since #816, shared with the
+// spec generator that now puts it in front of Terraform. Re-exported so this
+// script's tests and callers keep their imports.
+import { COMPUTED_PROPERTY, SORT_DATE_CONTAINERS, sortDateQuery } from './lib/cosmos-sort-date.mjs';
 
-/**
- * First defined of the five aliases, else '' so the property exists on every
- * document — presence is what makes ORDER BY total. Ternary chain because
- * Cosmos SQL has no COALESCE. Exported for the unit test.
- */
-export function sortDateQuery() {
-  const aliases = [
-    'c.publishedDate',
-    'c.datePublished',
-    'c["Published At"]',
-    'c.blogPublishedAt',
-    'c.publishedAt',
-  ];
-  let expr = '""';
-  for (const alias of [...aliases].reverse()) {
-    expr = `(IS_STRING(${alias}) ? ${alias} : ${expr})`;
-  }
-  return `SELECT VALUE ${expr} FROM c`;
-}
+export { COMPUTED_PROPERTY, sortDateQuery };
 
-export const COMPUTED_PROPERTY = Object.freeze({
-  name: 'cp_sortDate',
-  query: sortDateQuery(),
-});
+const CONTAINERS = SORT_DATE_CONTAINERS;
 
 /** ISO-8601-enough for lexicographic order: YYYY-MM-DD prefix. */
 export const isSortableIso = (value) =>

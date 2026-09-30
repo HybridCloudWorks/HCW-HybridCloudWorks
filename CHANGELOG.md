@@ -2565,6 +2565,27 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **`cp_sortDate` is written by the apply that could wipe it, not by a
+  six-hourly healer (#816, first of two).** `azurerm_cosmosdb_sql_container`
+  cannot express computed properties, so an apply that updated `content` or
+  `blogs` dropped `cp_sortDate`. That broke the public list's ordering until
+  `heal-computed-properties.yml` put it back, up to six hours later.
+  - `infra/cosmos.tf` adds `azapi_update_resource.cosmos_computed_properties`,
+    one per container that carries a computed property. It is re-run by
+    `replace_triggered_by` whenever its container changes, and a
+    postcondition fails the plan or apply if the container does not carry
+    the definition.
+  - The definition moves to `scripts/lib/cosmos-sort-date.mjs`. The generated
+    `infra/cosmos-containers.json` now holds the real query instead of a
+    sentence.
+  - `scripts/assert-expected-plan.mjs` lists these as conditional
+    replacements, and learns to match a declared create by exact address.
+  - The healer keeps running until this is seen to hold. #816's second pull
+    request removes it, its role assignments and its `--apply` path.
+
+  The same change restores `alert-func-http5xx` to the 15-minute window its
+  description states: #250 had given it the availability probe's 30 minutes,
+  and with them the probe's reasoning.
 - **The inputs and secrets docs describe the estate as it is (#819).** Most of
   these pages were last true in August. Each change below was checked against
   the code or the live estate on 2026-09-29.

@@ -1,3 +1,10 @@
+# BEING RETIRED (#816). Since #816 the apply itself writes cp_sortDate back
+# whenever it updates `content` or `blogs`, and fails if a container lacks it
+# (azapi_update_resource.cosmos_computed_properties in infra/cosmos.tf). This
+# workflow keeps running until that has applied and been seen to hold; #816's
+# second pull request then deletes it, its script's --apply path, and the role
+# assignments below. Nothing here needs changing before then.
+#
 # Re-applies the cp_sortDate computed property whenever Terraform could have
 # wiped it — and on a schedule, because Terraform applies happen in TF Cloud
 # on their own clock, AFTER the push that triggers this workflow. A push-time
