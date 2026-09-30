@@ -222,6 +222,15 @@ export const DECLARED = [
     after: 'true',
     reason: '#701: PROBE_AI_PROVIDERS added to enabled_timers, arming the weekly probe',
   },
+  // The same two runs taken as one: the key had not applied when the owner
+  // armed it, so a single plan adds it already "true".
+  {
+    address: 'azurerm_function_app_flex_consumption.hcw',
+    path: 'app_settings.FEATURE_FLAG_PROBE_AI_PROVIDERS',
+    before: undefined,
+    after: 'true',
+    reason: '#701: the probeAiProviders timer catalogued and armed in one apply',
+  },
   // #816: cp_sortDate moves inside the apply. The first plan creates one
   // update resource per container that carries a computed property; after
   // that they plan nothing unless their container changes.
