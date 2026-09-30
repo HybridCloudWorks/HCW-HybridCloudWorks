@@ -579,26 +579,22 @@ variable "ops_sms_receiver" {
   }
 }
 
-# Must be the first of the current month or later, in UTC — Azure rejects
-# anything earlier for a monthly budget. Update it when a first apply into a
-# new subscription lands in a later month than this default.
+# Optional since #820. Unset (the default), each budget is created with the
+# first of the month the plan runs in (local.budget_start_date, budget.tf).
+# Set only to pin a specific month, which Azure accepts only if it is the
+# current month or later, in UTC. Existing budgets ignore it either way.
 #
-# LIVE CONSTRAINT: the Management budget added for S10 is a CREATE, so this
-# value has to be inside the month the apply lands in. At 2026-08-01 that apply
-# must happen before 2026-09-01 or ARM rejects it — "past start date should be
-# selected within the timegrain period". The existing app-subscription budget is
-# already in state and unaffected; only the new one is exposed. The failure
-# lands at the END of the graph, after the teardown, for a reason unrelated to
-# anything else in the change, so it is cheap to fix and expensive to diagnose
-# in the moment. Set it to the first of the applying month before applying.
+# Until #820 this defaulted to 2026-08-01, and the comment here said to move
+# it by hand before any apply that creates a budget. A literal that must be
+# remembered is a failure scheduled for the first month nobody remembers.
 variable "budget_start_date" {
-  description = "Budget period start (RFC3339, first of a month). Azure rejects a start date before the current month"
+  description = "Optional budget period start (RFC3339, first of a month). Unset uses the first of the month the plan runs in"
   type        = string
-  default     = "2026-08-01T00:00:00Z"
+  default     = null
 
   validation {
-    condition     = can(regex("^\\d{4}-\\d{2}-01T00:00:00Z$", var.budget_start_date))
-    error_message = "budget_start_date must be the first of a month, e.g. 2026-08-01T00:00:00Z."
+    condition     = var.budget_start_date == null ? true : can(regex("^\\d{4}-\\d{2}-01T00:00:00Z$", var.budget_start_date))
+    error_message = "budget_start_date must be null, or the first of a month, e.g. 2026-10-01T00:00:00Z."
   }
 }
 

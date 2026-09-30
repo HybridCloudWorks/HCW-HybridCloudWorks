@@ -179,11 +179,11 @@ Two things about that are worth keeping in mind:
   completely inert. The alert rules have no such fallback — see
   [Alerting and support](../runbooks/alerting-and-support.md), *Delivery is unproven*.
 - `budget_start_date` is a create-time constraint, not a "when we started"
-  field. Azure rejects a monthly budget whose start date is outside the current
-  month, so the Management budget — a *create* — fails if the apply lands on or
-  after 2026-09-01 with the value still at `2026-08-01`. Move it to the first of
-  the applying month. This is on the pre-apply checklist in the
-  [Deployment Runbook](../runbooks/deployment-runbook.md#3-apply).
+  field. Azure rejects a monthly budget whose start date is before the current
+  month. Until #820 it defaulted to `2026-08-01` and had to be moved by hand
+  before any apply that created a budget. It now defaults to unset: a new
+  budget takes the first of the month the plan runs in, and existing budgets
+  ignore the attribute ([Deployment Runbook](../runbooks/deployment-runbook.md#3-apply)).
 
 Budget alerts never shut anything down automatically, and nothing here is a
 spend cap.
