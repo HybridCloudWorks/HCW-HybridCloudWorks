@@ -2515,6 +2515,23 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The API Keys page no longer states a provider order the code contradicts
+  (#815).** Its help text called Anthropic "second" and OpenAI "third", but
+  `DEFAULT_PROVIDER_ORDER` tries OpenAI before Anthropic. NVIDIA's text still
+  said it wrote "first", though it has been the backup since #812. The order
+  is the AI Engine page's to change, so the four provider entries now point
+  there instead of naming a position, and a test in
+  `secret-catalog.test.js` refuses any ordinal in them. The same pass fixed
+  module headers that described closed gaps:
+  - `jobs.js`: the stale-queued gap that `platformJobSweeper` closed;
+  - `key-verdict.js`, `secrets-health.js` and the catalogue: three
+    key-verdict reporters, not two, and four router providers, not three;
+  - `ai-config.js`: "three answers", not two;
+  - `platform-health.js`: `axios` has left `package.json`, and `rss-parser`
+    is used elsewhere.
+
+  `required-inputs.md` gives the order by pointing at the AI Engine page, not
+  as positions.
 - **The break-glass secret seeder runs again (#814).**
   `scripts/cutover/06-seed-secret.ps1` is for seeding a Key Vault secret when
   the site is down. It built its list of allowed names from `infra/main.tf`

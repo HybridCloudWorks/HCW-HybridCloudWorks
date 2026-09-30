@@ -132,6 +132,30 @@ describe('secret catalogue ↔ Terraform', () => {
   });
 });
 
+describe('AI provider help text (#815)', () => {
+  // Until 2026-09-29 the page called Anthropic "second" and OpenAI "third"
+  // while DEFAULT_PROVIDER_ORDER tried OpenAI first of the two, and told the
+  // owner NVIDIA wrote "first" on the day it became the backup. The order is
+  // the AI Engine page's to change, so no fixed position survives in text.
+  const providerEntries = SECRET_CATALOG.filter((e) => PROVIDERS.includes(e.probe));
+
+  it('covers every provider the router implements', () => {
+    expect(providerEntries.map((e) => e.probe).sort()).toEqual([...PROVIDERS].sort());
+  });
+
+  it('names no position in the order, which the AI Engine page can change', () => {
+    const positional = providerEntries
+      .filter((e) => /\b(first|second|third|fourth|fifth|last)\b/i.test(e.help))
+      .map((e) => `${e.label}: ${e.help}`);
+    expect(positional).toEqual([]);
+  });
+
+  it('sends the reader to the AI Engine page for the order instead', () => {
+    const silent = providerEntries.filter((e) => !/AI Engine page/.test(e.help)).map((e) => e.label);
+    expect(silent).toEqual([]);
+  });
+});
+
 describe('generatable secrets', () => {
   it('are all in the catalogue', () => {
     expect(GENERATABLE_SECRETS.filter((name) => !isSeedableSecret(name))).toEqual([]);

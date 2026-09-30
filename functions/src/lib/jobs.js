@@ -33,11 +33,13 @@
  * thrown error becomes `failed` with its message; it is NOT retried — the
  * document is the source of truth and an operator re-enqueues deliberately.
  *
- * Known gap, on purpose: the document is written before the queue message is
- * sent by the output binding. If the binding fails after the write, the job
- * sits 'queued' forever. A sweeper that re-enqueues stale 'queued' jobs is
- * the first follow-up once a real worker is registered; `noop` is here so the
- * whole path can be exercised end to end before that.
+ * The document is written before the queue message is sent by the output
+ * binding, so a binding that fails after the write leaves the job 'queued'
+ * with no message behind it. That gap was left open on purpose at first and
+ * is now closed: `createJobSweeper` below re-enqueues stale 'queued' jobs, run
+ * every 15 minutes by `platformJobSweeper` (functions/jobs-sweeper.js) when
+ * the `PLATFORM_JOB_SWEEPER` timer is armed. `noop` is here so the whole path
+ * can be exercised end to end.
  */
 import { randomUUID } from 'node:crypto';
 import { ROLE_NAMES, roleLevel } from './auth/roles.js';

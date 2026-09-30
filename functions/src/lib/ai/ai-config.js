@@ -12,7 +12,7 @@
  * router calls today).
  *
  * This module is the missing half. It reads that configuration and turns it
- * into two answers the router asks for:
+ * into three answers the router asks for:
  *
  *   1. Which providers, in which order?   resolveProviderOrder()
  *   2. May this feature call a model?     isFeatureEnabled()
