@@ -1,0 +1,104 @@
+# Warn three weeks before a Learn catalogue row goes stale (#818).
+#
+# The catalogue alarm (frontend/src/data/education-catalogues.test.js, and
+# Azure's applied-skills check in azure/certifications.test.js) runs on the
+# real clock: on the day a stored status is overtaken by its own dates, CI
+# fails on every branch until the row is re-verified with the vendor and
+# updated. #770 was that day for AZ-800, AZ-801 and GCP PAA, and until this
+# existed the only notice was a hand-filed issue.
+#
+# Every Monday this asks frontend/scripts/catalogue-due-soon.mjs which rows the
+# alarm will name within 21 days, using the alarm's own rule
+# (findStatusesDueWithin in src/lib/certStatus.js), and keeps ONE issue in
+# step with the answer:
+#
+#   - rows due, no open issue   -> open one, labelled `catalogue-due`
+#   - rows due, issue open      -> replace its body with this week's list
+#   - nothing due, issue open   -> comment and close it
+#   - nothing due, no issue     -> nothing
+#
+# Twenty-one days is three Monday runs, so a row is on the board for at least
+# two working weeks before its alarm, whatever weekday that falls on.
+#
+# The org board's auto-add picks the issue up. GITHUB_TOKEN cannot write an
+# org project's fields, so its Priority is set by whoever triages the board;
+# the body says what is due and when, which is what the priority depends on.
+name: Warn Catalogue Due
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Mondays 07:00 UTC: after update-learn-catalogue.yml (06:30), so a row
+    # that Monday's refresh already fixed is not reported.
+    - cron: '0 7 * * 1'
+
+# No workflow-level permissions: the one job declares its own.
+permissions: {}
+
+concurrency:
+  group: warn-catalogue-due
+  cancel-in-progress: false
+
+jobs:
+  warn:
+    name: Keep the catalogue-due issue in step with the next 21 days
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read # checkout only
+      issues: write # open, refresh or close the one catalogue-due issue
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '26'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      # src/lib/certStatus.js imports React for its useToday hook, so the
+      # frontend tree is installed. `--ignore-scripts`: nothing here needs an
+      # install-time script.
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --ignore-scripts
+
+      - name: List the rows due within 21 days
+        id: due
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          node scripts/catalogue-due-soon.mjs --days 21 --out "${RUNNER_TEMP}/catalogue-due.md"
+          cat "${RUNNER_TEMP}/catalogue-due.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open, refresh or close the catalogue-due issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COUNT: ${{ steps.due.outputs.count }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          report="${RUNNER_TEMP}/catalogue-due.md"
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label catalogue-due --limit 1 --json number --jq '.[0].number // empty')
+
+          if [ "${COUNT}" -eq 0 ]; then
+            if [ -n "$existing" ]; then
+              gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "Nothing is due in the next 21 days any more, so this closes. Checked by ${RUN_URL}."
+              gh issue close "$existing" --repo "$GITHUB_REPOSITORY" --reason completed
+              echo "Closed #${existing}: nothing due."
+            else
+              echo "Nothing due, and no issue open."
+            fi
+            exit 0
+          fi
+
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --repo "$GITHUB_REPOSITORY" --body-file "$report"
+            echo "Refreshed #${existing}: ${COUNT} due."
+          else
+            url=$(gh issue create --repo "$GITHUB_REPOSITORY" --title "[Task]: Catalogue rows go stale within 21 days — re-verify before CI breaks" --label catalogue-due --body-file "$report")
+            echo "Opened ${url}: ${COUNT} due."
+          fi

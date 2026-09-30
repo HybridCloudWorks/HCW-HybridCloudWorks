@@ -10,6 +10,7 @@ import {
   deriveStatus,
   describeCertStatus,
   findStaleStatuses,
+  findStatusesDueWithin,
   formatIsoDate,
   isIsoDate,
   isPastDate,
@@ -486,5 +487,61 @@ describe('findStaleStatuses', () => {
     expect(findStaleStatuses([{ code: 'A', status: 'active' }], TODAY)).toEqual([]);
     expect(findStaleStatuses([{ code: 'B' }], TODAY)).toEqual([]);
     expect(findStaleStatuses(undefined, TODAY)).toEqual([]);
+  });
+});
+
+describe('findStatusesDueWithin — the warning ahead of the alarm (#818)', () => {
+  const rows = [
+    { code: 'EXP', status: 'expiring', expiryDate: '2026-09-20' },
+    { code: 'GA', status: 'upcoming', availableDate: '2026-09-12' },
+    { code: 'LATE', status: 'expiring', expiryDate: '2026-12-31' },
+    { code: 'STALE', status: 'expiring', expiryDate: '2026-09-01' },
+    { code: 'FINE', status: 'active' },
+  ];
+
+  it('names each row on the first day the alarm will, soonest first', () => {
+    expect(findStatusesDueWithin(rows, TODAY, 21)).toEqual([
+      {
+        due: '2026-09-12',
+        problem: "GA: status 'upcoming' but availableDate 2026-09-12 has been reached",
+      },
+      { due: '2026-09-21', problem: "EXP: status 'expiring' but expiryDate 2026-09-20 has passed" },
+    ]);
+  });
+
+  it('agrees with findStaleStatuses on the due day itself, and not the day before', () => {
+    for (const { due, problem } of findStatusesDueWithin(rows, TODAY, 21)) {
+      expect(findStaleStatuses(rows, due)).toContain(problem);
+      const dayBefore = new Date(Date.parse(`${due}T00:00:00Z`) - 86400000)
+        .toISOString()
+        .slice(0, 10);
+      expect(findStaleStatuses(rows, dayBefore)).not.toContain(problem);
+    }
+  });
+
+  it('leaves out rows already stale today, which the alarm already names', () => {
+    const problems = findStatusesDueWithin(rows, TODAY, 21).map((d) => d.problem);
+    expect(problems.some((p) => p.startsWith('STALE:'))).toBe(false);
+  });
+
+  it('looks exactly as far ahead as asked', () => {
+    expect(findStatusesDueWithin(rows, TODAY, 3).map((d) => d.due)).toEqual(['2026-09-12']);
+    expect(findStatusesDueWithin(rows, TODAY, 2)).toEqual([]);
+  });
+
+  it('counts calendar days across a month end', () => {
+    const due = findStatusesDueWithin(
+      [{ code: 'X', status: 'expiring', expiryDate: '2026-09-30' }],
+      '2026-09-29',
+      5
+    );
+    expect(due.map((d) => d.due)).toEqual(['2026-10-01']);
+  });
+
+  it('answers nothing for a bad date or window rather than guessing', () => {
+    expect(findStatusesDueWithin(rows, '2026-9-9', 21)).toEqual([]);
+    expect(findStatusesDueWithin(rows, TODAY, 0)).toEqual([]);
+    expect(findStatusesDueWithin(rows, TODAY, 1.5)).toEqual([]);
+    expect(findStatusesDueWithin(undefined, TODAY, 21)).toEqual([]);
   });
 });

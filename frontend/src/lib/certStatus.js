@@ -303,6 +303,38 @@ export function findStaleStatuses(entries, today = todayIso()) {
   return problems;
 }
 
+/**
+ * The rows `findStaleStatuses` will name within the next `days` days, and the
+ * day each one starts — the early warning for the alarm above (#818).
+ *
+ * The alarm is a real-clock test, so on the day a stored status goes stale
+ * every branch's build goes red until the row is re-verified; #770 was that
+ * day for three rows at once. This asks the same question of each day ahead
+ * rather than restating the rule, so the warning and the alarm cannot
+ * disagree: a row appears here exactly when, and only when, the alarm will
+ * fire for it. Rows already stale today are left out — the alarm is red for
+ * those already.
+ *
+ * @param {Array<{code?: string, id?: string}>} entries
+ * @param {string} today `YYYY-MM-DD`
+ * @param {number} days how far ahead to look, 1 or more
+ * @returns {Array<{due: string, problem: string}>} soonest first
+ */
+export function findStatusesDueWithin(entries, today, days) {
+  if (!isIsoDate(today) || !Number.isInteger(days) || days < 1) return [];
+  const seen = new Set(findStaleStatuses(entries, today));
+  const due = [];
+  for (let ahead = 1; ahead <= days; ahead += 1) {
+    const day = new Date(utcDay(today) + ahead * 86400000).toISOString().slice(0, 10);
+    for (const problem of findStaleStatuses(entries, day)) {
+      if (seen.has(problem)) continue;
+      seen.add(problem);
+      due.push({ due: day, problem });
+    }
+  }
+  return due;
+}
+
 /** Fields that are present but not a calendar day, and a dateless `expiring`. */
 function shapeProblems(entry, label) {
   const problems = [];

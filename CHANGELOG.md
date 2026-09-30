@@ -19,6 +19,27 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Three weeks' warning before a catalogue row goes stale (#818).** The
+  catalogue alarm runs on the real clock. On the day a stored status is
+  overtaken by its own dates, CI fails on every branch until someone
+  re-verifies the row. #770 is that day for three rows, and until now the only
+  warning was a hand-filed issue.
+  - A new `findStatusesDueWithin` in `certStatus.js` asks the alarm's own
+    `findStaleStatuses` about each day ahead, so the warning and the alarm
+    cannot disagree.
+  - `frontend/scripts/catalogue-due-soon.mjs` lists the rows due within 21
+    days, across certifications and Azure's applied skills.
+  - The new Monday workflow `warn-catalogue-due.yml` keeps one issue,
+    labelled `catalogue-due`, in step with that list: it opens the issue,
+    refreshes it, or closes it when nothing is due.
+  - The catalogue list now lives in one module, `src/data/catalogues.js`,
+    shared by the alarm and the warning.
+
+  AWS's SAP-C02, DVA-C02 and MLA-C02 pages were re-read on 2026-09-29. The
+  one-day conflict between the exam pages and the blog's Key dates is
+  unchanged, and the file records that and keeps the blog's dates. The first
+  rows the warning will list are SAP-C02 and SAP-C03, in the run of
+  2026-11-02.
 - **Tests for the untested edges (#817).** The sweep of 2026-09-29 found
   modules where an untested line is a security, money or data risk. Each now
   has a test:

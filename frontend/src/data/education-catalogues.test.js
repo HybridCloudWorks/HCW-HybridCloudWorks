@@ -14,8 +14,15 @@
  * so a card cannot say "expiring" after the last test day. What this test
  * adds is the alarm: the moment an `expiring`, `beta` or `upcoming` row's date
  * is in the past, the suite goes red until someone re-verifies the row
- * against the vendor and updates it. The first row due is MLA-C01
- * (last test day 2026-09-28), so expect this to fire on 2026-09-29.
+ * against the vendor and updates it.
+ *
+ * It no longer arrives unannounced. `frontend/scripts/catalogue-due-soon.mjs`
+ * asks `findStatusesDueWithin` which rows this test will name in the next 21
+ * days, and the Monday `warn-catalogue-due.yml` run keeps one issue on the
+ * board listing them, so each re-verification is scheduled weeks before the
+ * build goes red rather than discovered by it (#818). The rows due next are in
+ * that issue, not here: a list in this comment went stale the day MLA-C01
+ * fired.
  *
  * Deliberately uses the real clock. A frozen date would make the assertion
  * vacuous — the point is that the repository notices when the world moves.
@@ -38,19 +45,11 @@ import {
   isIsoDate,
   todayIso,
 } from '@/lib/certStatus';
-import * as ansible from '@/data/ansible/education';
-import * as aws from '@/data/aws/certifications';
-import * as azure from '@/data/azure/certifications';
-import * as docker from '@/data/docker/education';
-import * as finops from '@/data/finops/education';
-import * as gcp from '@/data/gcp/certifications';
-import * as github from '@/data/github/certifications';
-import * as terraform from '@/data/terraform/certifications';
-import * as vmware from '@/data/vmware/education';
+// The one list, shared with the early warning (scripts/catalogue-due-soon.mjs,
+// #818), so the alarm and the warning always cover the same catalogues.
+import { CATALOGUES } from '@/data/catalogues';
 
-// Docker's catalogue has rows since #778: two credentials other organizations
-// issue, because Docker runs no exam of its own (see its module).
-const CATALOGUES = { ansible, aws, azure, docker, finops, gcp, github, terraform, vmware };
+const { aws, azure, gcp, github, terraform, vmware } = CATALOGUES;
 
 describe.each(Object.entries(CATALOGUES))('%s certification catalogue', (provider, mod) => {
   const { certifications, DATA_AS_OF, DATA_SOURCE } = mod;
