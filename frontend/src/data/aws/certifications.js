@@ -55,6 +55,19 @@
  * contradicts it rather than merely stops repeating it. Both are worth a
  * second look the next time this file is opened.
  *
+ * Second look, 2026-09-29 (#818): unchanged on all three pages. The SAP-C02
+ * and DVA-C02 exam pages
+ * (/certification/certified-solutions-architect-professional/,
+ * /certification/certified-developer-associate/) still say November 17 and
+ * December 1. The September blog's Key dates still say November 16 and
+ * November 30, with GA delivery the day after. MLA-C02's exam page still
+ * shows "TBD" for GA registration and delivery against the blog's
+ * 2027-01-14. The blog's dates stay, for the reason above. At worst the site
+ * calls each exam retired one day early, which sends nobody to book an exam
+ * that has closed. The next look is due when registration opens on
+ * 2026-10-27. warn-catalogue-due.yml first lists SAP-C02 and SAP-C03 in its
+ * run on Monday 2026-11-02, fifteen days before their alarm.
+ *
  * 2026-09-28, the last English test day for MLA-C01: re-read its exam page
  * (updated 2026-09-25), which still says "MLA-C01 in English is available
  * through September 28, 2026" and "MLA-C01 in Korean, Japanese, and
