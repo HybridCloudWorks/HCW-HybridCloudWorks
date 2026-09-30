@@ -529,6 +529,34 @@ describe('non-HTTP triggers', () => {
       'workflow_alerts',
     ]);
   });
+
+  it('starts every change feed from now, never from the beginning of its container (#817)', () => {
+    // startFromBeginning: true on a new lease prefix replays the whole
+    // container. On `content` that is a paid model call, up to four image
+    // generations, a caption and a Publer post per document, for every
+    // document ever written.
+    for (const [name, options] of cosmosRegistrations) {
+      expect(options.startFromBeginning, name).toBe(false);
+    }
+  });
+
+  it('caps the content feed at 8 documents a batch, and the mirror feeds at 50 (#817)', () => {
+    // T-731: one content document can need several paid calls, so fifty of
+    // them cannot finish inside any timeout; the mirrors do one blob copy each.
+    for (const [name, options] of cosmosRegistrations) {
+      const expected = options.containerName === 'content' ? 8 : 50;
+      expect(options.maxItemsPerInvocation, name).toBe(expected);
+    }
+  });
+
+  it('returns from an empty or missing batch without doing any work (#817)', async () => {
+    const context = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    for (const [, options] of cosmosRegistrations) {
+      await expect(options.handler([], context)).resolves.toBeUndefined();
+      await expect(options.handler(undefined, context)).resolves.toBeUndefined();
+    }
+    expect(context.log).not.toHaveBeenCalled();
+  });
 });
 
 /**

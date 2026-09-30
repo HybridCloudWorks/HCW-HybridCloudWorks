@@ -19,6 +19,35 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Tests for the untested edges (#817).** The sweep of 2026-09-29 found
+  modules where an untested line is a security, money or data risk. Each now
+  has a test:
+  - **`telegram-http.test.js`.** A missing, empty, raw-token or wrong
+    webhook secret gets 401 before the bot, the job store or the queue is
+    touched. An unset token, or an unresolved Key Vault reference, gets 404.
+    Once the secret is valid, bad JSON and a throwing bot still get 200, so
+    Telegram does not retry into a storm. The enqueue writes a queued job as
+    `telegram-bot@system`.
+  - **`secret-vault.test.js`.** One slash in the vault URL, the name encoded,
+    and a refusal naming the secret and status but never the value or body.
+    The reference refresh reports every failure instead of throwing.
+  - **`flag-gate.test.js`.** Only an exact `"true"` arms a timer; only an
+    exact `"false"` master stops them all. The first skip warns, later ones
+    log at Information.
+  - **`default-agent-guard.test.js`.** Nothing is built at import, and it is
+    built once. Lookups read `lab_agents`, and denials write
+    `agent-auth-denial` to `admin_audit_logs`.
+  - **`vps-agent/lib/api.test.js`.** Every POST carries the bearer token, and
+    the agent's own `agentId` cannot be displaced. A refusal carries the
+    server's status and message, and `claimJob` answers null when there is no
+    job. `api.js` gains an injectable `credential`, next to its `fetchImpl`.
+  - **`route-inventory.test.js`.** Every change feed has
+    `startFromBeginning: false`; the content feed takes 8 documents a batch
+    and the others 50; an empty batch does nothing.
+  - **`scripts/generate-cosmos-container-spec.test.mjs`.** Runs the
+    generator's `--check`, documented for CI but never run by any workflow,
+    and pins `content_versions` on `/contentId` and `cp_sortDate` on
+    `content` and `blogs`.
 - **Vault on the lab host: auto-unseal with a lab-only Key Vault through the
   Arc identity, built and off (#726).** First, the question #726 asked: can
   Vault 2.1.1's `azurekeyvault` seal sign in through the Arc agent's local

@@ -33,6 +33,9 @@ import { ClientCertificateCredential } from '@azure/identity';
  * @param {string} config.certificatePath - PEM containing the private key
  * @param {string} config.scope - e.g. `api://<api-client-id>/.default`
  * @param {string} config.agentId - must match the lab_agents registry document
+ * @param {typeof fetch} [config.fetchImpl]
+ * @param {{ getToken: Function }} [config.credential] - tests only; production
+ *   always builds the certificate credential from the three values above
  */
 export function createApiClient({
   apiBase,
@@ -42,8 +45,10 @@ export function createApiClient({
   scope,
   agentId,
   fetchImpl = fetch,
+  credential: injectedCredential = null,
 }) {
-  const credential = new ClientCertificateCredential(tenantId, clientId, certificatePath);
+  const credential =
+    injectedCredential ?? new ClientCertificateCredential(tenantId, clientId, certificatePath);
 
   // The SDK caches and refreshes internally; asking per request is correct and
   // cheap, and avoids the agent holding a token past its expiry across a long
