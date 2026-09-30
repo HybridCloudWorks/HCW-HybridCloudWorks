@@ -5,7 +5,6 @@
  * All links throughout the platform should use these functions instead of hard-coded paths.
  *
  * @module routeFactory
- * @see docs/archive/frontend-routing-guide.md (Firebase-era guide, archived)
  */
 
 /**

@@ -47,7 +47,7 @@ one wins.
 
 | # | Store | Holds | Read by | Written by |
 | --- | --- | --- | --- | --- |
-| 1 | **Azure Key Vault** `kv-site-prod-cus-01` | Runtime application secrets | Function App managed identity, via `@Microsoft.KeyVault(SecretUri=…)` app settings or `src/lib/key-vault.js` | A human, out-of-band, during a seeding window |
+| 1 | **Azure Key Vault** `kv-site-prod-cus-01` | Runtime application secrets | Function App managed identity, via `@Microsoft.KeyVault(SecretUri=…)` app settings. Nothing reads the vault at run time: `src/lib/secret-vault.js` can only write | A human, out-of-band, during a seeding window |
 | 2 | **HCP Terraform workspace** `hcw-azure` | What Terraform needs to authenticate and to plan | The run environment and the `azurerm` / `cloudflare` providers | An operator in the workspace UI |
 | 3 | **GitHub Actions variables** | Non-sensitive CI/CD configuration | `${{ vars.* }}` in workflows | `gh variable set`, or the repository settings UI |
 | 4 | **GitHub Actions secrets** | Last resort — credentials to systems that offer no federation | `${{ secrets.* }}` in workflows | `gh secret set` |
@@ -74,7 +74,7 @@ record of that decision is the artefact.
 
 | Outcome | Meaning | Examples in this repository |
 | --- | --- | --- |
-| **Derived** | Terraform computes it from a resource it already manages, or a workflow fetches it after OIDC login. Nobody types it anywhere | `COSMOS_ENDPOINT`, `STORAGE_BLOB_ENDPOINT`, `STORAGE_ACCOUNT_NAME`, `AZURE_OPENAI_ENDPOINT` — all set from resource attributes in `infra/main.tf` |
+| **Derived** | Terraform computes it from a resource it already manages, or a workflow fetches it after OIDC login. Nobody types it anywhere | `COSMOS_ENDPOINT`, `STORAGE_BLOB_ENDPOINT`, `STORAGE_ACCOUNT_NAME`, `KEY_VAULT_URI` — all set from resource attributes in `infra/functionapp.tf` |
 | **Deliberately absent** | The value must *not* exist. Provisioning it changes behaviour for the worse | `COSMOS_KEY`, `AZURE_OPENAI_KEY`, `STORAGE_ACCOUNT_KEY`, `STORAGE_CONNECTION_STRING`, `COSMOS_CONNECTION_STRING` |
 | **Generated in place** | The value is created on the host that consumes it and never moves | `LABS_AGENT_CERT_PATH` — the agent's private key is generated on the VPS by `lab-host/ansible` (role `labs_agent`), owned by root with group `hcw-labs-agent` and mode `0640` so the service user reads it and nobody else can, and only the public certificate is uploaded |
 
@@ -129,8 +129,9 @@ resource is replaced, which is when you are least able to notice.
 
 **Q4 — Is it read at run time by application code, and is it sensitive?**
 → **Store 1, Azure Key Vault.** The Function App gets it either as an app
-setting holding a `@Microsoft.KeyVault(SecretUri=…)` reference (single-line
-values) or by calling `getSecret()` at run time (multi-line values — see below).
+setting holding a `@Microsoft.KeyVault(SecretUri=…)` reference, resolved by
+the host before the process starts. There is no run-time read path: the
+`getSecret()` route for multi-line values was deleted on 2026-08-29 (see below).
 Terraform creates the vault, the RBAC and the *reference*; a human seeds the
 *value*.
 
@@ -203,9 +204,11 @@ workflow obtains it. In order of preference:
    side to trust.
 
 What must not happen is the same value being typed independently into two
-stores. `COSMOS_ENDPOINT` currently exists as a runtime app setting derived from
-the resource *and* as a hand-set GitHub secret holding the same string. One of
-those is authoritative and the other is a copy; the inventory has to say which.
+stores. `COSMOS_ENDPOINT` was the example: a runtime app setting derived from
+the resource *and* a hand-set GitHub secret holding the same string. Since
+2026-08-20 the GitHub side is the variable `vars.COSMOS_ENDPOINT`, written by
+`scripts/set-github-variables.ps1` from the Terraform output, so the resource
+is authoritative and the variable is its cache.
 
 ### Subscription, tenant and client IDs
 
@@ -332,7 +335,9 @@ documents as API-key authenticated: a single string, now the app setting
 `GCP_BILLING_API_KEY` holding an ordinary vault reference. `GITHUB-APP-PRIVATE-KEY`
 is read by nothing in the ported code. `key-vault.js` had zero call sites after
 the first change, so it is gone, and with it `@azure/keyvault-secrets`,
-`google-auth-library` and `KEY_VAULT_URI`.
+`google-auth-library` and `KEY_VAULT_URI`. `KEY_VAULT_URI` came back later
+for one purpose: the API Keys page writes through `secret-vault.js`, which
+sets a secret and cannot read one.
 
 The rule that remains is simpler than the one it replaces: **every secret is an
 app setting holding a `@Microsoft.KeyVault(SecretUri=…)` reference, resolved by
@@ -445,19 +450,21 @@ available. An entry that cannot answer both belongs in store 3 or nowhere.
 | --- | --- | --- | --- | --- |
 | `GITHUB_TOKEN` | — | GitHub | Injected per-run by GitHub, scoped by `permissions:`, expires with the job. Not stored by us at all | Correct, and contractual |
 | `COPILOT_REVIEW_APP_PRIVATE_KEY` (Agents store, not Actions) | — | GitHub, read-only, this repository | Authenticates GitHub → *GitHub* for the MCP server Copilot code review uses, to reach the Actions, code-scanning, Dependabot and discussions toolsets the built-in per-review token cannot be given. The same shape as `MANIFEST_APP_PRIVATE_KEY`: a GitHub App's key, from which `copilot-setup-steps.yml` mints a one-hour installation token per session. The App holds eight **read** permissions on one repository and nothing else, so the key's ceiling is read-only — a leaked key mints nothing a leaked token would not already grant. **No personal access token, classic or fine-grained, is used**: those are user-bound and long-lived, and store 4 holds none | Justified — the one stored key in the Copilot configuration, and it can only ever produce read-only, one-hour tokens |
-| `TF_API_TOKEN` | §7 | HCP Terraform | Authenticates GitHub → *Terraform*, the reverse direction from §8. The HCP Terraform CLI credential has no inbound GitHub OIDC path. Use a **team** token, not a user token, so it survives the user leaving | Justified |
-| `FIREBASE_SERVICE_ACCOUNT_JSON` | §7 | Google Cloud | Source-side credential for the one-shot Firestore export, for a system being decommissioned. Must be scoped read-only, and deleted the day the migration completes | Justified, with an expiry |
-| `AZURE_STATIC_WEB_APPS_API_TOKEN` | §7 | **Azure** | None available — see below | **Wrong store** |
+| `TFC_TOKEN` | §7 | HCP Terraform | Authenticates GitHub → *Terraform*, the reverse direction from §8. The HCP Terraform API has no inbound GitHub OIDC path. Read by `tfc-plan-check.yml`, which holds a plan to the permanent diff, and by `deploy-functions.yml`, which refuses to deploy while an apply is in flight (#454). Use a **team** token, not a user token, so it survives the user leaving | Justified |
+| `MANIFEST_APP_PRIVATE_KEY` | — | GitHub, this repository | A GitHub App's key, with `vars.MANIFEST_APP_ID`. `scripts/github-app-token.mjs` mints a one-hour installation token from it and revokes it after use, for the four workflows that push a branch and open a pull request. The App is what lets those pull requests run CI, which a `GITHUB_TOKEN`-opened one does not | Justified |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` | §7 | Google Cloud | Source-side credential for the one-shot Firestore export, for a system being decommissioned | **Deleted** — the migration completed and `migrate-data.yml` went with it (`59e471b`); the repository holds no such secret |
+| `AZURE_STATIC_WEB_APPS_API_TOKEN` | §7 | **Azure** | None needed — see below | **Resolved 2026-08-30** — minted from ARM per run, secret deleted 2026-08-31 (T-727) |
 | `AZURE_FUNCTIONS_URL` | §7 | — | A public API base URL | **Resolved 2026-08-18** — now `vars.FUNCTIONS_URL`, store 3 |
-| `COSMOS_ENDPOINT` (GitHub-side) | §7 | — | A public hostname; with `local_auth_disabled = true` it grants nothing | **Wrong store** |
+| `COSMOS_ENDPOINT` (GitHub-side) | §7 | — | A public hostname; with `local_auth_disabled = true` it grants nothing | **Resolved 2026-08-20** — now `vars.COSMOS_ENDPOINT`, store 3 |
 | `COSMOS_KEY` | §7 | — | Must stay unset | Correctly absent |
 
 ### Not in any store
 
 | Value | CHECKLIST | Outcome |
 | --- | --- | --- |
-| `COSMOS_ENDPOINT`, `COSMOS_DATABASE`, `STORAGE_ACCOUNT_NAME`, `STORAGE_BLOB_ENDPOINT`, `STORAGE_QUEUE_ENDPOINT`, `AZURE_OPENAI_ENDPOINT` (app settings) | §2, §4 | Derived — set from resource attributes in `infra/main.tf` |
-| `NODE_ENV`, `REGION_NAME`, `WEBSITE_SITE_NAME` | §5 | Host-provided, or a literal in `main.tf` |
+| `COSMOS_ENDPOINT`, `COSMOS_DATABASE`, `STORAGE_ACCOUNT_NAME`, `STORAGE_BLOB_ENDPOINT`, `STORAGE_QUEUE_ENDPOINT`, `KEY_VAULT_URI` (app settings) | §2, §4 | Derived — set from resource attributes in `infra/functionapp.tf` |
+| `AZURE_OPENAI_ENDPOINT` | §4 | Deliberately absent. Every model call goes to a provider's own API with a key from Key Vault, and there is no Azure OpenAI account (`infra/functionapp.tf`, the AI generation comment) |
+| `NODE_ENV`, `REGION_NAME`, `WEBSITE_SITE_NAME` | §5 | Host-provided, or a literal in `infra/functionapp.tf` |
 | `FEATURE_FLAG_SCHEDULERS` and the per-timer flags | §5 | Derived from store 2 Terraform variables — `schedulers_master_enabled` for the master flag, `enabled_timers` for the per-timer flags via `local.timer_flags`. The live value of each is whatever the latest `hcw-azure` apply set: a timer runs only when the master flag is on and its name is in `enabled_timers`. Until 2026-08-24 the master flag was a **literal** in `main.tf`, as this row used to say; that is what made all 18 timers permanent no-ops regardless of `enabled_timers` |
 | `ENTRA_TENANT_ID`, `ENTRA_API_AUDIENCE` (app settings) | §1 | Derived from store 2 Terraform variables |
 | `STORAGE_ACCOUNT_KEY`, `STORAGE_CONNECTION_STRING`, `COSMOS_CONNECTION_STRING` | §2 | Deliberately absent; two are test-enforced |
@@ -471,10 +478,16 @@ available. An entry that cannot answer both belongs in store 3 or nowhere.
 
 ## Placement errors in the current configuration
 
-Five, ranked by how much they mislead a reader.
+Five, ranked by how much they mislead a reader, found in August. **None is open
+any more** (re-checked 2026-09-29, #819): 1, 2 and 3 were resolved, 4 never
+applied, and 5 is moot. Each entry keeps its reasoning, because the rule it
+illustrates still holds.
 
-**1. `AZURE_STATIC_WEB_APPS_API_TOKEN` is a long-lived Azure credential in
-store 4.** By the zero-credentials rule this cannot be right: it is an Azure
+**1. `AZURE_STATIC_WEB_APPS_API_TOKEN` was a long-lived Azure credential in
+store 4 — resolved 2026-08-30 (T-727).** `deploy-azure-frontend.yml` now
+fetches the token with `az staticwebapp secrets list` after `azure/login` on
+each run, the secret was deleted on 2026-08-31, and the `swa_token` output is
+retired (`infra/outputs.tf`). The original finding: by the zero-credentials rule this cannot be right: it is an Azure
 deployment key, statically stored, with no expiry and no subject pinning, in the
 store with the widest reader set. The workflow already authenticates to Azure
 with OIDC elsewhere. Correct placement is **derived** — fetch the token at
@@ -494,7 +507,9 @@ provider prefix dropped per the naming rule). The rename was safe-now: the
 value was unset everywhere when it happened. The variable itself remains to be
 provisioned (CHECKLIST §7).
 
-**3. `COSMOS_ENDPOINT` is in store 4 on the GitHub side.** An account endpoint
+**3. `COSMOS_ENDPOINT` was in store 4 on the GitHub side — resolved
+2026-08-20.** It is now the variable `vars.COSMOS_ENDPOINT` (store 3), and
+`migrate-data.yml`, named below, is deleted. The original finding: an account endpoint
 is a public hostname, derivable from the account name, and with
 `cosmos_local_auth_disabled = true` it grants nothing to whoever reads it.
 Correct placement is **derived** — `heal-computed-properties.yml` and
@@ -508,13 +523,14 @@ repository. Publishing the lab images to Docker Hub (#779) keeps that true: it
 signs in through a Docker OIDC connection, so the only Docker values stored
 are the connection's ID and an on/off switch, both store 3.
 
-**5. `AZURE_OPENAI_KEY` is inventoried in CHECKLIST §4 as `Required: Yes`,
-source Key Vault.** `infra/main.tf` decided the opposite under T-506: Azure
-OpenAI is keyless, only `AZURE_OPENAI_ENDPOINT` is set, and
-`lib/openai-client.js` must authenticate with `DefaultAzureCredential`. The
-correct placement is **deliberately absent**, in the same category as
-`COSMOS_KEY`. As written, the inventory instructs a future operator to create a
-credential the architecture removed.
+**5. `AZURE_OPENAI_KEY` was inventoried in CHECKLIST §4 as `Required: Yes`,
+source Key Vault — now moot.** Under T-506 the configuration decided the
+opposite: Azure OpenAI was keyless, with only an endpoint set. Since then Azure
+OpenAI has gone entirely. Every model call goes to a provider's own API with a
+key from Key Vault, there is deliberately no `AZURE_OPENAI_ENDPOINT`
+(`infra/functionapp.tf`), and `lib/openai-client.js` no longer exists. The
+placement stands: **deliberately absent**, in the same category as
+`COSMOS_KEY`.
 
 Two record-keeping gaps, which are not misplacements but do make the inventory
 unusable as a seeding checklist:
@@ -578,7 +594,7 @@ got there, and stops being true the moment the plumbing changes.
 | Azure Key Vault secret | `UPPER-KEBAB-CASE` | `-` | `CF-ORIGIN-SECRET` | 1–127 characters, **alphanumerics and hyphens only** — no underscores, ever |
 | Function App app setting | `UPPER_SNAKE_CASE`, matching `process.env.X` | `_` | `CF_ORIGIN_SECRET` | `__` is a **reserved hierarchy separator** (`COSMOS_CONNECTION__accountEndpoint`) — never use it for word separation |
 | GitHub Actions variable | `UPPER_SNAKE_CASE` | `_` | `APP_HOSTNAME` | Alphanumerics and `_` only; must not start with a number; must not start with `GITHUB_`; names are case-insensitive |
-| GitHub Actions secret | `UPPER_SNAKE_CASE` | `_` | `TF_API_TOKEN` | Same restrictions as variables, and a secret and a variable must not share a name |
+| GitHub Actions secret | `UPPER_SNAKE_CASE` | `_` | `TFC_TOKEN` | Same restrictions as variables, and a secret and a variable must not share a name |
 | Container Apps job secret | `lower-kebab-case` | `-` | `gh-app-private-key` | Lowercase alphanumerics and `-`; must start and end alphanumeric |
 | GitHub Environment | `lower-kebab-case` | `-` | `production` | Not a value, but load-bearing WHILE a federated credential pins it: the environment name appears verbatim in the OIDC subject, so renaming one that is pinned breaks login with AADSTS70021. `production` is pinned today (`infra/oidc.tf`). `data-migration` was the example here until 2026-08-30, by which point nothing pinned it and it had been deleted — an environment is immutable only for as long as a credential names it |
 

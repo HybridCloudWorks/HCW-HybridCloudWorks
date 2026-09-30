@@ -915,10 +915,15 @@ export const SERVICE_DOCS = {
     id: 'notebooklm',
     name: 'NotebookLM (Google)',
     type: 'ai_provider',
-    tagline: "Google's research assistant — no public API available yet.",
+    tagline: "Google's research assistant — no public API for the consumer product.",
     requirements: [
       { label: 'Google account', detail: 'notebooklm.google.com', required: true },
-      { label: 'Public API', detail: 'NOT YET AVAILABLE as of May 2026', required: true },
+      {
+        label: 'Public API',
+        detail:
+          'None for consumer NotebookLM (checked 2026-09-29). Gemini Notebook Enterprise has a v1alpha API that needs a Google Cloud project and a Gemini Enterprise licence',
+        required: true,
+      },
     ],
     hcwUses: [
       {
@@ -934,7 +939,7 @@ export const SERVICE_DOCS = {
         steps: [
           {
             heading: 'No public API',
-            body: 'As of May 2026, Google NotebookLM does not provide a public REST API or MCP server. The product is web-only at notebooklm.google.com. This slot is reserved in the AI Engine for when Google opens programmatic access.',
+            body: 'Checked 2026-09-29: consumer NotebookLM at notebooklm.google.com still has no public REST API or MCP server. Google’s enterprise edition, now called Gemini Notebook Enterprise, documents a v1alpha API for notebooks and their sources (docs.cloud.google.com/gemini/enterprise/notebooklm-enterprise/docs/api-notebooks), which needs a Google Cloud project and a Gemini Enterprise licence. This slot stays reserved in the AI Engine until the consumer product opens programmatic access or HCW takes the enterprise licence.',
             codes: [],
           },
           {

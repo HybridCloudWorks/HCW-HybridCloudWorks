@@ -146,23 +146,24 @@ Home (§4.11). Each row says so.
 
 | Name | Status | Consumer |
 | --- | --- | --- |
-| `CLIENT_ID` | **VERIFIED** | OIDC login for the workflows that WRITE — `deploy-functions.yml` and `heal-computed-properties.yml`. Also arms the healer, which skips while it is unset |
+| `CLIENT_ID` | **VERIFIED** | OIDC login for the workflows that WRITE — `deploy-functions.yml`, `deploy-azure-frontend.yml` and `heal-computed-properties.yml`. Also arms the healer, which skips while it is unset |
 | `COPILOT_REVIEW_CLIENT_ID` | **SET 2026-09-06** | OIDC login in `copilot-setup-steps.yml`, the job GitHub runs before Copilot code review and the Copilot cloud agent start. Identifies `github_copilot_review` (`infra/oidc.tf`): Reader on the four workload groups, nothing else. Seeded from the `copilot_review_client_id` output by `scripts/set-github-variables.ps1`; while unset the login fails closed and the Azure MCP server has no credential — see [Copilot code review MCP servers](../runbooks/copilot-code-review-mcp.md) |
 | `COPILOT_REVIEW_APP_ID` | **SET 2026-09-06** | App ID of *HCW Copilot Review Reader*, the read-only GitHub App from which `copilot-setup-steps.yml` mints a one-hour installation token for the GitHub MCP server Copilot code review uses. An identifier, like `MANIFEST_APP_ID`; the key is the Agents secret in §4.3. Set by hand from the App page (runbook step 4) |
-| `READER_CLIENT_ID` | **NOT SET** | OIDC login for the workflows that only read — `monitor-functions-registered.yml`, `verify-alert-state.yml`, `publish-content-manifest.yml` (T-728). All three are gated on it and **skip silently while it is unset**, so seed it in the same pass as the apply: an unset value looks like three workflows not running, not like a failure |
+| `READER_CLIENT_ID` | **SET 2026-09-06** | OIDC login for the workflows that only read — `monitor-functions-registered.yml`, `monitor-unresolved-secrets.yml`, `verify-alert-state.yml` and `publish-content-manifest.yml` (T-728). All four are gated on it and **skip silently while it is unset**, so a rebuilt repository seeds it in the same pass as the apply: an unset value looks like four workflows not running, not like a failure |
 | `TENANT_ID` | **VERIFIED** | OIDC login |
 | `SUBSCRIPTION_ID` | **VERIFIED** | OIDC login, `az rest` calls |
 | `RESOURCE_GROUP` | **VERIFIED** | Function App deploy and firewall windows |
 | `FUNCTION_APP_NAME` | **VERIFIED** | Deploy target, SyncTriggers, access restrictions |
 | `FUNCTIONS_STORAGE_ACCOUNT` | **VERIFIED** | Storage firewall window during deploy |
-| `FUNCTIONS_URL` | **VERIFIED** | Smoke test's non-allowlisted probe |
+| `FUNCTIONS_URL` | **VERIFIED** | The frontend build's API base: `deploy-azure-frontend.yml` passes it as `VITE_AZURE_FUNCTIONS_URL` with `REQUIRE_API_BASE: 'true'`, so the build fails without it, and as `AZURE_FUNCTIONS_URL` for the public-data generation step. Also the post-deploy smoke test's non-allowlisted probe in `deploy-functions.yml` |
 | `APP_HOSTNAME` | **VERIFIED** | Origin health probe through the temporary window |
 | `COSMOS_ENDPOINT` | **VERIFIED** | Computed-property healer. A variable, not a secret — it is a public endpoint, and the earlier secret placement was corrected 2026-08-20 |
 | `DOCKERHUB_CONNECTION` | Set 2026-09-29 (§4.11, #779, closed) | The ID of the Docker OIDC connection, a UUID. `publish-lab-image.yml`'s `Publish to Docker Hub` job passes it to `docker/login-action` as `DOCKERHUB_OIDC_CONNECTIONID`, the name the action reads. An identifier, not a credential: it grants nothing without a GitHub token from this repository's `main`. Set by hand at a prompt with the one-liner in [Docker Hub publishing](../runbooks/docker-hub-publishing.md), step 2 |
 | `DOCKERHUB_ENABLED` | `true` since 2026-09-29 | `true` turns on the `Publish to Docker Hub` job. Any other value, or none, leaves it skipped and GHCR publishing unchanged. Set by hand, after `DOCKERHUB_CONNECTION`: with it `true` and the ID missing, the job fails and names the variable. [Docker Hub publishing](../runbooks/docker-hub-publishing.md), step 3 |
 | `COSMOS_RESOURCE_GROUP` | **SET** | Healer scope |
-| `STORAGE_ACCOUNT` | **SET** | Content manifest publisher |
-| `STORAGE_RESOURCE_GROUP` | **SET** | Content manifest publisher |
+| `MANIFEST_APP_ID` | **SET 2026-09-01** | App ID of the repository's GitHub App, paired with the `MANIFEST_APP_PRIVATE_KEY` secret (§4.3). An identifier, so a variable. Read by the four workflows that open pull requests through the App: `publish-content-manifest.yml`, `update-avm-versions.yml`, `update-learn-catalogue.yml` and `update-version-floors.yml` |
+| `STORAGE_ACCOUNT` | **SET, read by nothing** | No workflow has read it since the migration surface was retired (59e471b0); `publish-content-manifest.yml` no longer does. `scripts/set-github-variables.ps1` still seeds it, so it stays set until that script and this row go together |
+| `STORAGE_RESOURCE_GROUP` | **SET, read by nothing** | As above |
 | `GCP_WORKLOAD_IDENTITY_PROVIDER` | **SET** | Workload identity federation for the one-shot Firestore migration. **Read by no workflow in the repository today** — the description here previously said "GCP pricing integration", which was never true: pricing runs in the Function App and now uses an API key. Inert; delete both when the migration record is closed |
 | `GCP_SERVICE_ACCOUNT` | **SET** | As above — the federated principal's email, not a downloaded key |
 | `VITE_ENTRA_CLIENT_ID` | **VERIFIED** | Frontend build — SPA registration |
@@ -171,16 +172,20 @@ Home (§4.11). Each row says so.
 | `VITE_SOCIAL_GITHUB_URL` | **SET** | Frontend build — footer links |
 | `VITE_SOCIAL_LINKEDIN_URL` | **SET** | Frontend build |
 | `VITE_SOCIAL_X_URL` | **SET** | Frontend build |
-| `VITE_TURNSTILE_SITE_KEY` | **MISSING** until the owner creates the widget ([ADR 0032](../decisions/0032-learner-labs-platform.md), amendment of 2026-09-28) | Frontend build: the **site key** of the Cloudflare Turnstile widget for the Landing Zone Builder's "Validate on the lab". Public by construction, since Cloudflare puts it in the page, so a variable and never a secret. Set by hand, not by `scripts/set-github-variables.ps1`: the widget is created in the Cloudflare dashboard at `https://dash.cloudflare.com/?to=/:account/turnstile` (hostname `hybridcloudworks.com`, Managed mode), not by Terraform, whose `cloudflare_turnstile_widget` would hold the secret key in state. Unset, the build succeeds and the button stays disabled saying the build has no site key; a change needs a frontend deploy to reach the site |
+| `VITE_TURNSTILE_SITE_KEY` | **SET 2026-09-28** ([ADR 0032](../decisions/0032-learner-labs-platform.md), amendment of 2026-09-28) | Frontend build: the **site key** of the Cloudflare Turnstile widget for the Landing Zone Builder's "Validate on the lab". Public by construction, since Cloudflare puts it in the page, so a variable and never a secret. Set by hand, not by `scripts/set-github-variables.ps1`: the widget is created in the Cloudflare dashboard at `https://dash.cloudflare.com/?to=/:account/turnstile` (hostname `hybridcloudworks.com`, Managed mode), not by Terraform, whose `cloudflare_turnstile_widget` would hold the secret key in state. Unset, the build succeeds and the button stays disabled saying the build has no site key; a change needs a frontend deploy to reach the site |
 
 ## 4.3 GitHub repository secrets
 
-Enumerated live 2026-08-25. **One**, which is the intended state: everything
-else a workflow needs is either a non-sensitive variable or reached by OIDC.
+Enumerated live 2026-09-29: **two**, and neither is an Azure credential.
+Everything else a workflow needs is either a non-sensitive variable or reached
+by OIDC. The one Azure-issued secret this section used to list is retired
+(struck through below).
 
 | Name | Status | Consumer |
 | --- | --- | --- |
 | ~~`AZURE_STATIC_WEB_APPS_API_TOKEN`~~ | **RETIRED 2026-08-30, DELETED 2026-08-31 (T-727)** | Nothing. `deploy-azure-frontend.yml` mints the deployment token from ARM under federated identity at deploy time, so no stored value is needed and there is nothing to rotate. The secret was removed from repository settings by the owner on 2026-08-31, after the role assignment applied |
+| `TFC_TOKEN` | **SET 2026-08-30** | An HCP Terraform API token for the `hcw-azure` workspace. Not an Azure credential. `tfc-plan-check.yml` reads a run's JSON plan with it and holds the plan to the permanent diff (`scripts/assert-expected-plan.mjs`). `deploy-functions.yml` asks the workspace whether an apply is in flight before deploying, because a deploy and an apply that write the app-settings map minutes apart lose settings (#454). Both self-arm: with no token each says so and passes rather than failing |
+| `MANIFEST_APP_PRIVATE_KEY` | **SET 2026-09-01** | Private key of the repository's GitHub App, with `MANIFEST_APP_ID` (§4.2). `scripts/github-app-token.mjs` mints a one-hour installation token from it, and revokes it after use, for the jobs that push a branch and open a pull request: `publish-content-manifest.yml`, `update-avm-versions.yml`, `update-learn-catalogue.yml` and `update-version-floors.yml`. Each job holds it for the length of two API calls and installs nothing, and each self-arms while it is unset |
 
 **No stored Azure credential is in this repository's secrets.** The Qlty
 coverage upload (#568) uses GitHub OIDC and stores no token. `GITHUB_TOKEN` is
@@ -337,14 +342,15 @@ those four keys is one owner step, `scripts/lab/Register-LabAgent.ps1`
 `LABS_AGENT_MAX_CONCURRENT` · `LABS_AGENT_POLL_MS` · `LABS_AGENT_JOB_CPUS` ·
 `LABS_AGENT_JOB_MEMORY` · `LABS_AGENT_JOB_PIDS`
 
-Status: **MISSING** until `Register-LabAgent.ps1` has run, including its
-step 4, which has the owner register the agent on Admin → Labs → Agents and
-so writes the `lab_agents/vps-hostinger-01` registry document (rows below). The
-host is provisioned and has run `bootstrap.sh` (as of 2026-09-27), so
-`LABS_AGENT_CERT_PATH` (`/etc/hcw/labs-agent.pem`, generated on the host) and
-`LABS_AGENT_ID` (`vps-hostinger-01`) are set by the role; the agent stays
-stopped until the four vault keys exist. The last four are resource limits
-with working defaults.
+Status: **SET**, checked on 2026-09-29. `Register-LabAgent.ps1` has run,
+including its step 4, which registers the agent on Admin → Labs → Agents and
+so writes the `lab_agents/vps-hostinger-01` registry document (rows below).
+`hcw-labs-agent.service` is active on the host, and its `claimLabJob` and
+`heartbeatLabAgent` calls answer 200. `LABS_AGENT_CERT_PATH`
+(`/etc/hcw/labs-agent.pem`, generated on the host) and `LABS_AGENT_ID`
+(`vps-hostinger-01`) are set by the role; on a rebuilt host the agent stays
+stopped until the four vault keys exist again. The last four are resource
+limits with working defaults.
 
 **Lab host inputs named by [ADR 0032](../decisions/0032-learner-labs-platform.md).**
 The ADR is Accepted (2026-09-27), and each row's status is its own: the
@@ -371,16 +377,16 @@ entry that never reaches the repository.
 | `ssh_public_key` | HCP Terraform workspace `hcw/hcw-lab`, Terraform variable, not sensitive | Optional, unset | The owner's SSH public key (`ssh-ed25519` or `ssh-rsa`; the provider refuses ECDSA). Set only if root has no key yet, as a second plan after the adoption (`infra-lab/README.md`, step 6): it registers the key in the Hostinger account and attaches it, which the `hardening` role then copies to `hcwadmin` |
 | Arc onboarding service principal credential (`vault_arc_service_principal_id`, `vault_arc_service_principal_secret`) | Ansible Vault on the host, never in the repository or on the desktop; the `arc` role passes them to `azcmagent connect` in a root-only temporary `--config` file it deletes in the same run | **MISSING** | The application id and client secret of `sp-arc-onboarding-lab-hybrid-prod-cus`, which holds only *Azure Connected Machine Onboarding* on `rg-lab-hybrid-prod-cus` (`infra/lab-hybrid.tf`, granted through `arc_onboarding_principal_id` in §4.1). Written by `scripts/lab/Register-LabArc.ps1` through the host's `/usr/local/sbin/hcw-vault-set`: the secret is valid for 24 hours and goes from `az`'s output to `ssh`'s standard input, never printed or written to a file. Used once. Its `-Connect` run deletes the secret from Entra and all four `vault_arc_*` keys from the vault as soon as the host reads Connected ([Labs host runbook](../runbooks/labs-host.md), "Arc onboarding", step 4); the role needs none of them on a Connected host. Re-onboarding mints a new secret |
 | `vault_arc_tenant_id`, `vault_arc_subscription_id` | Ansible Vault on the host, beside the credential | **MISSING** | The Entra tenant id and the `sub-app-site-prod-cus` subscription id `azcmagent connect` targets, the latter resolved by name by the same script. Identifiers, not secrets; kept in the vault because nothing else in the repository commits them, and removed with the credential |
-| `arc_enabled` | The host: the local fact `/etc/ansible/facts.d/hcw_arc.fact`, which `lab-host/ansible/group_vars/all.yml` reads (not a secret) | **MISSING** (no fact, so false) | True only when that file is JSON whose `enabled` is `true`. Written by `Register-LabArc.ps1 -Connect` once the grant is applied and the credential is in the vault; removed to turn Arc off ([Labs host runbook](../runbooks/labs-host.md), "Disconnecting"). On the host rather than in the repository because a rebuilt host is not onboarded, and a repository-wide `true` would stop its first run at the role's fail-closed check |
+| `arc_enabled` | The host: the local fact `/etc/ansible/facts.d/hcw_arc.fact`, which `lab-host/ansible/group_vars/all.yml` reads (not a secret) | **SET**: the fact exists on the host (checked 2026-09-29), and the machine is connected to Arc (#663) | True only when that file is JSON whose `enabled` is `true`. Written by `Register-LabArc.ps1 -Connect` once the grant is applied and the credential is in the vault; removed to turn Arc off ([Labs host runbook](../runbooks/labs-host.md), "Disconnecting"). On the host rather than in the repository because a rebuilt host is not onboarded, and a repository-wide `true` would stop its first run at the role's fail-closed check |
 | `arc_agent_version`, `arc_apt_key_checksum`, `arc_resource_group`, `arc_location`, `arc_resource_name`, `arc_tags` | `lab-host/ansible/group_vars/all.yml` (not secrets) | **SET** | The `arc` role's pins and target: agent `1.68.03532.1399`, Microsoft's signing key by SHA256, `rg-lab-hybrid-prod-cus` in `centralus`, machine name `arcs-lab-hybrid-prod-cus-01` |
 | `CODER_OAUTH2_GITHUB_ALLOWED_ORGS` | `lab-host/ansible/group_vars` (not a secret), rendered into Coder's Compose env file | **SET 2026-09-28**: `[HybridCloudWorks]`, with `coder_enabled: true` (owner decision that day) | The GitHub organisations whose members may sign in to Coder. Required by ADR 0032 and **never empty while Coder runs**: an empty value removes the restriction and lets any GitHub account consume the VPS, so the Ansible role fails rather than render an empty list. Shutting learners out is an explicit action, not an emptied list: `CODER_OAUTH2_GITHUB_ALLOW_SIGNUPS=false` for new sign-ups, or stopping the `coder` Compose service for everyone. The owner names the organisation on #682 |
 | Coder GitHub OAuth app client id and secret (`CODER_OAUTH2_GITHUB_CLIENT_ID`, `CODER_OAUTH2_GITHUB_CLIENT_SECRET`) | Ansible Vault as `vault_coder_oauth2_github_client_id` and `vault_coder_oauth2_github_client_secret`, written by the `coder` role to `/etc/hcw/coder/coder.env` on the host (root, 0600) | **SET** in the host's vault (checked by key name, 2026-09-28) | Learner sign-in to Coder; nothing on the site reads it. Created by the owner in the GitHub organisation's OAuth apps (#682). Rotate on every host rebuild and whenever the app's callback URL changes; the env file is regenerated from Vault on each Ansible run and the `coder` container is recreated when it changes, so rotation is a Vault edit and a run |
 | Coder PostgreSQL password (`POSTGRES_PASSWORD`, and inside `CODER_PG_CONNECTION_URL`) | Ansible Vault as `vault_coder_postgres_password`, written by the `coder` role to `/etc/hcw/coder/coder-postgres.env` (the database) and `/etc/hcw/coder/coder.env` (Coder), both root 0600 | **SET** in the host's vault (checked by key name, 2026-09-28) | The `coder` database user's password on the Compose network; never reachable from outside the host. Generate with `openssl rand -hex 32`: the role refuses any character outside RFC 3986 unreserved because the value sits unescaped in the connection URL. The database stores it at first initialisation, so rotation is `ALTER USER` first and then the Vault edit and run (`lab-host/README.md`, "Rotating the PostgreSQL password") |
-| `CODER-URL` | Key Vault `kv-site-prod-cus-01`; the Function App setting `CODER_URL` is a Key Vault reference to it | **MISSING** | Base URL of the Coder deployment the Function App's status proxy reads; an address, not a credential, kept in the vault so its reference follows the same path as the token beside it. Its value is known before the host exists: `https://coder.lab.hybridcloudworks.com`, so seed it as soon as the reference is applied. Since 2026-09-28 it is the one setting the lab panes on the site need: with it resolved and Coder answering (`/api/v2/buildinfo`, no token), each lab's page opens its pane. Vault names are hyphenated and app settings underscored, per the naming table in [Variables and secrets](variables-and-secrets.md) |
-| `CODER-STATUS-TOKEN` | Key Vault `kv-site-prod-cus-01`; the Function App setting `CODER_STATUS_TOKEN` is a Key Vault reference to it | **MISSING** | Read-only Coder API token for the status proxy. Coder issues it, so it can only be seeded after Coder runs on the lab host (#661) and the owner creates it (#682). The least-privileged form on Coder Community v2.37.3, measured 2026-09-28: a token scoped `template:read` and `workspace:read`, minted by the owner with `coder tokens create --user` for a Coder user of its own, `hcw-status`, that holds Template Admin, the only role below Owner whose token counts other users' running workspaces. The owner's steps, through `ssh hcw-lab` and the `coder` container's CLI with a token the owner makes in a pane, are in `lab-host/README.md`, "The status token for the site". It expires after a year and nothing renews it. It adds only the labs card's templates and running count: since 2026-09-28 the panes open without it, and without it (or with one Coder refuses) the card says only that Coder is reachable and the Function App logs a warning naming `CODER_STATUS_TOKEN`. Until it is seeded it is an expected unresolved reference (`EXPECTED_UNRESOLVED` in `scripts/check-unresolved-secrets.mjs`): the monitor reports it every run but does not fail. Remove it from that list in the PR after it is seeded |
-| `vault_labs_agent_api_base`, `vault_labs_agent_tenant_id`, `vault_labs_agent_client_id`, `vault_labs_agent_api_scope` | Ansible Vault on the host (`/etc/hcw/ansible/vault.yml`); the `labs_agent` role writes them to `/etc/hcw/labs-agent.env` as `LABS_AGENT_API_BASE`, `LABS_AGENT_TENANT_ID`, `LABS_AGENT_CLIENT_ID` and `LABS_AGENT_API_SCOPE` | **MISSING** | Identifiers, not secrets. Written by `scripts/lab/Register-LabAgent.ps1`, which merges only these four into the vault, or creates it with only these four when it does not exist, and never prints another key. The API base is the Cloudflare hostname `https://api-azure.hybridcloudworks.com/api`, because the origin lock (`functions_origin_lock_enabled`, §4.1) refuses the lab host at the `azurewebsites.net` host. The scope is `api://<HCWSite API client id>/.default` |
-| Agent app registration and service principal `sp-labs-agent-lab-hybrid-prod-cus-01` | Entra, owner-created by `Register-LabAgent.ps1`; `infra/` has no `azuread` provider | **MISSING** | Single tenant, no client secret, the lab host's public certificate as its credential (appended, never replacing another), and one grant: the `LabAgent` app role on the HCWSite API, gate 1 of the agent guard. One registration per agent host |
-| `lab_agents/vps-hostinger-01` | Cosmos DB `cosmos-site-prod-cus`, database `hcw`, container `lab_agents` (partition key `/id`), written only through the API | **MISSING** | Gate 2 of the agent guard: `oid` the agent's service principal object id, `active: true`, `capabilities` the job types it may claim. Identifiers, not secrets. Written by **Register agent** at https://hybridcloudworks.com/admin/labs?tab=agents (`POST /api/cms/labs/agents`, editor or above, #740) with the agent id and the object id `Register-LabAgent.ps1` prints and waits on; **Deactivate** and **Activate** on the agent's card (`PATCH /api/cms/labs/agents/{agentId}`) revoke and restore it. The container's firewall admits only the Function App's subnet, so the API is the only writer. Until it exists the agent authenticates and is refused with `Agent access required` |
+| `CODER-URL` | Key Vault `kv-site-prod-cus-01`; the Function App setting `CODER_URL` is a Key Vault reference to it | **SET**: the Key Vault reference resolves (ARM `configreferences`, checked 2026-09-29) | Base URL of the Coder deployment the Function App's status proxy reads; an address, not a credential, kept in the vault so its reference follows the same path as the token beside it. Its value is known before the host exists: `https://coder.lab.hybridcloudworks.com`, so seed it as soon as the reference is applied. Since 2026-09-28 it is the one setting the lab panes on the site need: with it resolved and Coder answering (`/api/v2/buildinfo`, no token), each lab's page opens its pane. Vault names are hyphenated and app settings underscored, per the naming table in [Variables and secrets](variables-and-secrets.md) |
+| `CODER-STATUS-TOKEN` | Key Vault `kv-site-prod-cus-01`; the Function App setting `CODER_STATUS_TOKEN` is a Key Vault reference to it | **SET 2026-09-28**: the Key Vault reference resolves (ARM `configreferences`, checked 2026-09-29). Expires 2027-09-28; #763 is the renewal | Read-only Coder API token for the status proxy. Coder issues it, so it can only be seeded after Coder runs on the lab host (#661) and the owner creates it (#682). The least-privileged form on Coder Community v2.37.3, measured 2026-09-28: a token scoped `template:read` and `workspace:read`, minted by the owner with `coder tokens create --user` for a Coder user of its own, `hcw-status`, that holds Template Admin, the only role below Owner whose token counts other users' running workspaces. The owner's steps, through `ssh hcw-lab` and the `coder` container's CLI with a token the owner makes in a pane, are in `lab-host/README.md`, "The status token for the site". It expires after a year and nothing renews it. It adds only the labs card's templates and running count: since 2026-09-28 the panes open without it, and without it (or with one Coder refuses) the card says only that Coder is reachable and the Function App logs a warning naming `CODER_STATUS_TOKEN`. It was an expected unresolved reference (`EXPECTED_UNRESOLVED` in `scripts/check-unresolved-secrets.mjs`) until it was seeded, and #765 removed it from that list |
+| `vault_labs_agent_api_base`, `vault_labs_agent_tenant_id`, `vault_labs_agent_client_id`, `vault_labs_agent_api_scope` | Ansible Vault on the host (`/etc/hcw/ansible/vault.yml`); the `labs_agent` role writes them to `/etc/hcw/labs-agent.env` as `LABS_AGENT_API_BASE`, `LABS_AGENT_TENANT_ID`, `LABS_AGENT_CLIENT_ID` and `LABS_AGENT_API_SCOPE` | **SET**: `/etc/hcw/labs-agent.env` exists on the host, and the agent authenticates with them (checked 2026-09-29) | Identifiers, not secrets. Written by `scripts/lab/Register-LabAgent.ps1`, which merges only these four into the vault, or creates it with only these four when it does not exist, and never prints another key. The API base is the Cloudflare hostname `https://api-azure.hybridcloudworks.com/api`, because the origin lock (`functions_origin_lock_enabled`, §4.1) refuses the lab host at the `azurewebsites.net` host. The scope is `api://<HCWSite API client id>/.default` |
+| Agent app registration and service principal `sp-labs-agent-lab-hybrid-prod-cus-01` | Entra, owner-created by `Register-LabAgent.ps1`; `infra/` has no `azuread` provider | **SET**: the service principal exists in Entra (checked 2026-09-29) | Single tenant, no client secret, the lab host's public certificate as its credential (appended, never replacing another), and one grant: the `LabAgent` app role on the HCWSite API, gate 1 of the agent guard. One registration per agent host |
+| `lab_agents/vps-hostinger-01` | Cosmos DB `cosmos-site-prod-cus`, database `hcw`, container `lab_agents` (partition key `/id`), written only through the API | **SET**: the agent is registered; its `claimLabJob` and `heartbeatLabAgent` calls answer 200 and it completed its first jobs on 2026-09-28 (Application Insights, checked 2026-09-29) | Gate 2 of the agent guard: `oid` the agent's service principal object id, `active: true`, `capabilities` the job types it may claim. Identifiers, not secrets. Written by **Register agent** at https://hybridcloudworks.com/admin/labs?tab=agents (`POST /api/cms/labs/agents`, editor or above, #740) with the agent id and the object id `Register-LabAgent.ps1` prints and waits on; **Deactivate** and **Activate** on the agent's card (`PATCH /api/cms/labs/agents/{agentId}`) revoke and restore it. The container's firewall admits only the Function App's subnet, so the API is the only writer. Until it exists the agent authenticates and is refused with `Agent access required` |
 | `portainer_enabled`, `portainer_image`, `portainer_image_tag`, `portainer_image_digest` | `lab-host/ansible/group_vars/all.yml` (not secrets) | **SET** (`portainer_enabled: true`, #729) | The `portainer` role's switch and pin: Portainer Business Edition 2.45.1 (LTS) by index digest, published on `127.0.0.1:9443` only (ADR 0032, amendment of 2026-09-26). `portainer_enabled` went `true` in #729 (owner decision 2026-09-26); `false` in a pull request turns it off and keeps its volume |
 | Portainer administrator password | The owner's password manager; Portainer keeps its own copy in the `portainer-data` volume on the host. Never in the repository or Ansible Vault | **MISSING** (created at the first sign-in) | Created by the owner in Portainer's setup screen through the SSH tunnel, with the one-time setup token Portainer prints in its log ([Labs host runbook](../runbooks/labs-host.md), "Portainer through an SSH tunnel"). At least 12 characters. A host rebuild wipes the volume, so a new one is created after every rebuild |
 | Portainer Business Edition licence key | Entered in Portainer's UI and kept in its volume; the owner keeps the key as Portainer issued it. Never in the repository or Ansible Vault | **MISSING** on the host | Portainer's 3 Nodes Free licence: one server instance, up to three nodes, internal business use, renewed yearly at no cost. The key the pre-reinstall server used may be reused, since that server no longer runs it; https://www.portainer.io/take-3 issues a new one |
@@ -401,7 +407,7 @@ Seven of the eight are repository variables (§4.2). The exception:
 
 | Name | Status | Notes |
 | --- | --- | --- |
-| `VITE_AZURE_FUNCTIONS_URL` | **RETIRED** as a repository variable | Present in `frontend/.env.example` for local development. The deployed frontend resolves the API through its own origin, so no repository variable feeds it |
+| `VITE_AZURE_FUNCTIONS_URL` | **SET** at build time from the `FUNCTIONS_URL` repository variable (§4.2) | `deploy-azure-frontend.yml` passes `vars.FUNCTIONS_URL` in with `REQUIRE_API_BASE: 'true'`, so a production build without it fails rather than shipping an SPA with no API base. The value is the cross-origin `api-azure` hostname with its `/api` prefix (`frontend/src/lib/functionsBase.js`). Also in `frontend/.env.example` for local development |
 
 ## 4.9 Local development
 
@@ -423,8 +429,8 @@ Their role in this inventory is that they are the *source* of §4.2 rather than
 a thing to be provisioned. `scripts/set-github-variables.ps1` reads them and
 writes the repository variables; nothing there is set by hand.
 
-**Twenty-three, and they live in two files.** Nineteen in `infra/outputs.tf`
-and four in `infra/oidc.tf`.
+**Twenty-four, and they live in two files.** Nineteen in `infra/outputs.tf`
+and five in `infra/oidc.tf`.
 
 **This count has now been wrong three times, each in the same way**, so the
 method matters more than the number. It said twenty-three when first written,
@@ -434,7 +440,10 @@ output block. It then stayed at twenty-four while `swa_token` was retired
 (#296, in favour of a token minted per run) and `reader_client_id` was added
 (T-728) — two changes in opposite directions that happened to leave the total
 looking plausible. Found in review on 2026-09-01, alongside the
-`cloudflare_plan` removal below.
+`cloudflare_plan` removal below. It then said twenty-three again from
+2026-09-05, when `copilot_review_client_id` was added to `oidc.tf` (#368), until the
+sweep of 2026-09-29 (#819) counted the files: the same failure, one output
+the other way.
 
 **Count by reading the files, never by adjusting the previous number:**
 
@@ -447,7 +456,7 @@ because it quotes both numbers:
 
 ```
 infra/outputs.tf:19
-infra/oidc.tf:4
+infra/oidc.tf:5
 ```
 
 The total is their sum. Said explicitly because "the command that produces the
@@ -481,13 +490,15 @@ mTLS gate on it. Read it from the zone's Overview page in the Cloudflare
 dashboard when a decision turns on it; it changes only when someone deliberately
 changes it.
 
-From `infra/oidc.tf` (4): `client_id` · `reader_client_id` ·
-`deploy_principal_id` · `federated_subjects`
+From `infra/oidc.tf` (5): `client_id` · `reader_client_id` ·
+`copilot_review_client_id` · `deploy_principal_id` · `federated_subjects`
 
 `reader_client_id` arrived with T-728, which split the read-only identity out
 of the deploy identity — `monitor-functions-registered.yml`,
-`monitor-unresolved-secrets.yml` and `verify-alert-state.yml` all authenticate
-with it.
+`monitor-unresolved-secrets.yml`, `verify-alert-state.yml` and
+`publish-content-manifest.yml` all authenticate with it.
+`copilot_review_client_id` is the read-only identity Copilot code review and
+the Copilot cloud agent sign in as (`COPILOT_REVIEW_CLIENT_ID`, §4.2).
 
 The four scratch outputs that fed §4.2's three now-deleted variables are gone
 from `infra/outputs.tf`.

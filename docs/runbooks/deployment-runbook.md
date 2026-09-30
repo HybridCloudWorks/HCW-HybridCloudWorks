@@ -190,7 +190,7 @@ variables (the script prints these with the values filled in):
 These four names come from HashiCorp and Microsoft and are exempt from the
 [2-word variable rule](../standards/iac-repository-standard.md#variable-naming) as contractual
 names. Terraform *variables* for the same workspace are listed in
-Required-Inputs §4.2.
+Required-Inputs §4.1.
 
 Both seeding halves are scripted — prefer the scripts over the UI forms, and
 both take no arguments for the reasons given in section 0:
@@ -326,12 +326,13 @@ after everything else has run, for a reason unrelated to anything under review.
 
 1. Apply is confirmed in HCP Terraform by a human who is **not** the change
    author where role separation permits.
-2. The GitHub delivery workflow (`deploy-infra.yml`) stays hard-disabled
-   until production applies are authorized. When that authorization lands,
-   enable it as designed: `workflow_dispatch`-only, `production-infra`
-   GitHub Environment with required reviewers, TFC still holds the apply
-   confirmation. Enabling is a two-step, reviewed change documented in the
-   workflow header.
+2. There is no GitHub apply workflow. `deploy-infra.yml`, which this step
+   used to say stayed hard-disabled, was deleted with the migration surface
+   (`59e471b`). Applies happen only in HCP Terraform, confirmed in its UI.
+   What GitHub adds is a verdict: `tfc-plan-check.yml` reads the run's plan
+   and holds it to the permanent diff (`scripts/assert-expected-plan.mjs`),
+   so whoever confirms has a machine answer to "is this only the known
+   diff?" before they click.
 3. Record in the run description: PR number, approver, and (for anything
    touching data-bearing resources) the rollback decision point.
 
@@ -351,8 +352,9 @@ problem means production is already degraded rather than merely unchanged.
    `azapi-strip`; the commands are on that page. Re-apply to convergence if
    either is wrong — do not edit the setting by hand.
 2. `terraform plan` again → **empty plan** (no immediate drift). Expect the
-   permanent 3-add / 1-change / 3-destroy signature from the two azapi
-   resources and the FTP policy; `infra/main.tf` documents it beside them.
+   permanent 3-add / 1-change / 3-destroy signature from the three azapi
+   resources — the app-settings pair and the FTP policy — which
+   `infra/functionapp.tf` documents beside them.
 3. **Prove alert delivery, if the run created or changed an alert rule.** Two
    tests, answering different questions, and neither substitutes for the other:
    - `az monitor action-group test-notifications create` against
@@ -421,7 +423,7 @@ Deliberate rollback is **roll-forward to the previous definition**:
 
 | Concern | Mechanism | Where |
 | --- | --- | --- |
-| Cost | Two **subscription**-scoped budgets — USD 150 on the application subscription, USD 25 on Platform Management for Log Analytics — each at 50/75/90/100% actual plus a forecast alert | `azurerm_consumption_budget_subscription` (two) in `main.tf`, [Cost analysis](../architecture/cost-analysis.md) |
+| Cost | Two **subscription**-scoped budgets — USD 150 on the application subscription, USD 25 on Platform Management for Log Analytics — each at 50/75/90/100% actual plus a forecast alert | `azurerm_consumption_budget_subscription` (two) in `infra/budget.tf`, [Cost analysis](../architecture/cost-analysis.md) |
 | Alerting | Metric and log rules routed through `ag-plat-prod-cus-01`. This row read "**declared, not yet applied**; the live estate has none" until 2026-09-07; that is **no longer true** — `alert-api-reachability-prod-cus` has been armed since 2026-09-01 (T-519), and the rules are on `main`, not on a branch. Which rules the last apply carried is a live-tenant question: `az monitor scheduled-query list -g rg-web-site-prod-cus` answers it. What each one means, what to check first, and what nothing watches | [Alerting and support](../runbooks/alerting-and-support.md), `infra/observability.tf` |
 | Drift | Periodic TFC plan (enable a scheduled speculative plan); investigate non-empty plans — portal edits are defects | TFC workspace settings |
 | Computed properties | `heal-computed-properties.yml` re-applies `cp_sortDate` on relevant pushes and every 6 h | `.github/workflows/` |
