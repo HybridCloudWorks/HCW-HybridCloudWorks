@@ -317,12 +317,14 @@ live — not on laptops, not on GitHub-hosted runners holding tokens.
 
 ## 3. Apply
 
-**Before confirming, if the run creates a budget: check `budget_start_date`.**
-Azure rejects a monthly budget whose start date falls outside the current month,
-and the constraint is checked on *create*, so an existing budget is unaffected
-while a new one fails. Set the workspace value to the first of the month the
-apply actually lands in. Otherwise the failure arrives at the end of the graph,
-after everything else has run, for a reason unrelated to anything under review.
+**A run that creates a budget needs nothing set by hand (#820).** Azure
+rejects a monthly budget whose start date falls before the current month, and
+checks it only on *create*. Since #820 a new budget takes the first of the
+month the plan runs in (`local.budget_start_date`, `infra/budget.tf`), and
+existing budgets ignore the attribute. The one way to reintroduce the old
+failure is a `budget_start_date` value in the `hcw-azure` workspace, which
+pins a month. Leave it unset unless a specific month is the point, and delete
+it once that month has passed.
 
 1. Apply is confirmed in HCP Terraform by a human who is **not** the change
    author where role separation permits.

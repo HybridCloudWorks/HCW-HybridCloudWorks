@@ -2565,6 +2565,14 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **A new budget takes the month it is created in (#820).** Azure refuses a
+  monthly budget that starts before the current month, and
+  `budget_start_date` defaulted to `2026-08-01`. From September, any apply
+  that created a budget would have failed at the end of the graph, for a
+  reason unrelated to the change: a fresh subscription, a rebuild or a forced
+  replacement. The start date is now the first of the month the plan runs in
+  (from `plantimestamp()`), unless the variable pins one. Both budgets ignore
+  the start date once they exist, so the two live budgets plan no change.
 - **`cp_sortDate` is written by the apply that could wipe it, not by a
   six-hourly healer (#816, first of two).** `azurerm_cosmosdb_sql_container`
   cannot express computed properties, so an apply that updated `content` or

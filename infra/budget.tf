@@ -31,6 +31,21 @@
 # That indifference is exactly what the alert rules in observability.tf do not
 # have — they can only route through an action group — so the delivery test
 # belongs there, and the note in that file's Alert rules header says how.
+# The first of the month this plan runs in, in UTC, unless
+# var.budget_start_date pins a date (#820). Until #820 the variable's default
+# was a literal, 2026-08-01, that had to be moved by hand before any apply that
+# CREATES a budget: a fresh subscription, a rebuild, or a forced replacement.
+# From September on, that apply would have failed at the end of the graph, for
+# a reason unrelated to the change being applied. plantimestamp() is fixed for
+# the whole plan, and the budgets ignore the attribute once they exist, so a
+# stale literal and a monthly diff are both gone.
+locals {
+  budget_start_date = coalesce(
+    var.budget_start_date,
+    formatdate("YYYY-MM-01'T00:00:00Z'", plantimestamp()),
+  )
+}
+
 resource "azurerm_consumption_budget_subscription" "hcw" {
   name            = "${var.workload_name}-monthly-budget"
   subscription_id = "/subscriptions/${var.subscription_app}"
@@ -39,16 +54,18 @@ resource "azurerm_consumption_budget_subscription" "hcw" {
 
   # Azure rejects a monthly budget whose start date is before the current
   # month (400: "Start date for monthly time grain should not be prior to
-  # current month"), so this is not a free-form "when we started" field — it
-  # goes stale and breaks the NEXT first-apply into a fresh subscription.
-  # Existing budgets are unaffected: the constraint is checked on create.
-  #
-  # A variable rather than a literal so a later deployment can set it without
-  # editing this file. Terraform has no "current month" function that would be
-  # stable across plans, and a timestamp() here would propose a diff on every
-  # run.
+  # current month"), so this is not a free-form "when we started" field. It
+  # is local.budget_start_date: the first of the month the plan runs in,
+  # unless the variable pins one (#820).
   time_period {
-    start_date = var.budget_start_date
+    start_date = local.budget_start_date
+  }
+
+  # The start date matters only on create. Ignoring it afterwards keeps an
+  # existing budget from planning a replacement every month, which a date
+  # taken from the plan's clock would otherwise do.
+  lifecycle {
+    ignore_changes = [time_period[0].start_date]
   }
 
   # T-505: the approved threshold ladder (50/75/90/100 actual + forecast),
@@ -109,7 +126,11 @@ resource "azurerm_consumption_budget_subscription" "platform_mgmt" {
   time_grain      = "Monthly"
 
   time_period {
-    start_date = var.budget_start_date
+    start_date = local.budget_start_date
+  }
+
+  lifecycle {
+    ignore_changes = [time_period[0].start_date]
   }
 
   dynamic "notification" {
