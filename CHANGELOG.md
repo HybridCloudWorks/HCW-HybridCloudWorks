@@ -2565,6 +2565,25 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **AZ-800, AZ-801 and Google's PAA re-read on the day their dates passed
+  (#770).** From 2026-10-01 the catalogue alarm failed on every branch for
+  three rows dated 2026-09-30. Each vendor page was re-read that day.
+  Microsoft retired both exams as announced: the
+  [AZ-800](https://learn.microsoft.com/en-us/credentials/certifications/exams/az-800/)
+  and [AZ-801](https://learn.microsoft.com/en-us/credentials/certifications/exams/az-801/)
+  pages now say "This exam was retired on September 30, 2026", and
+  [AZ-802](https://learn.microsoft.com/en-us/credentials/certifications/exams/az-802/)
+  is open to schedule with no retirement date. Both rows are `retired` with
+  `retiredDate` 2026-09-30 and still point at AZ-802. Google's
+  [Professional Agentic Architect](https://cloud.google.com/learn/certification/agentic-architect)
+  page and its [certification index](https://cloud.google.com/learn/certification)
+  are unchanged: the banner still says the beta "is open until September 30!",
+  with no GA date, no new window and no withdrawal. PAA is therefore stored as
+  `upcoming` with no date, and its description says the beta has closed and
+  GA is not yet dated. The tests that pinned the old statuses now pin what
+  the vendors did, including the Azure page and detail-page tests, which
+  expected AZ-800 to read as expiring.
+
 - **A new budget takes the month it is created in (#820).** Azure refuses a
   monthly budget that starts before the current month, and
   `budget_start_date` defaulted to `2026-08-01`. From September, any apply

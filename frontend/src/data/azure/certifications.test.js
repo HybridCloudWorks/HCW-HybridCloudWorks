@@ -43,12 +43,15 @@ describe('Azure certification data', () => {
   it('keeps retired exams with their retirement date, and names the replacement when known', () => {
     const retired = certifications.filter((c) => c.status === 'retired');
     // The ten Microsoft retired between 2026-06-30 and 2026-08-31, plus MB-240
-    // (retired 2026-06-30) and SC-730 (withdrawn after its beta, no date).
+    // (retired 2026-06-30), SC-730 (withdrawn after its beta, no date), and
+    // AZ-800 and AZ-801 (retired 2026-09-30, re-read 2026-10-01 for #770).
     expect(retired.map((c) => c.code).sort()).toEqual([
       'AI-102',
       'AI-900',
       'AZ-204',
       'AZ-500',
+      'AZ-800',
+      'AZ-801',
       'MB-240',
       'MB-280',
       'MB-335',
@@ -66,10 +69,11 @@ describe('Azure certification data', () => {
     expect(bySlug.get('ai-900').replacedBy).toBe('ai-901');
   });
 
-  it('marks AZ-800 and AZ-801 as retiring on 2026-09-30 in favour of AZ-802', () => {
+  it('marks AZ-800 and AZ-801 as retired on 2026-09-30 in favour of AZ-802 (#770)', () => {
     const byCode = new Map(certifications.map((c) => [c.code, c]));
     for (const code of ['AZ-800', 'AZ-801']) {
-      expect(byCode.get(code).status, code).toBe('expiring');
+      expect(byCode.get(code).status, code).toBe('retired');
+      expect(byCode.get(code).retiredDate, code).toBe('2026-09-30');
       expect(byCode.get(code).expiryDate, code).toBe('2026-09-30');
       expect(byCode.get(code).replacedBy, code).toBe('az-802');
     }
