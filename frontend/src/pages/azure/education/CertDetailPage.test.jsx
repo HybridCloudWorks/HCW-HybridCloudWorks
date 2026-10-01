@@ -263,11 +263,11 @@ describe('CertDetailPage', () => {
     );
   });
 
-  it('tells the reader when an exam is retiring (AZ-800 → AZ-802)', async () => {
+  it('tells the reader the day an exam was retired, not that it was withdrawn (AZ-800 → AZ-802, #770)', async () => {
     await renderDetail('az-800');
     const notice = screen.getByTestId('cert-status-notice');
-    expect(notice.dataset.status).toBe('expiring');
-    expect(notice.textContent).toMatch(/Retires on Sep 30, 2026/);
+    expect(notice.dataset.status).toBe('retired');
+    expect(notice.textContent).toMatch(/Retired by Microsoft on Sep 30, 2026/);
     expect(screen.getByRole('link', { name: /Replaced by AZ-802/ })).toHaveAttribute(
       'href',
       '/azure/education/az-802'

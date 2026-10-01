@@ -127,7 +127,7 @@ describe.each(Object.entries(CATALOGUES))('%s certification catalogue', (provide
  * discovered by a red build. Two facts, and they point opposite ways:
  *
  *   THE PAGES DO NOT LIE. `deriveStatus` reads the dates at render time, so on
- *   2026-10-01 AZ-800 and AZ-801 render `retired` and PAA renders `active`
+ *   2026-10-01 AZ-800 and AZ-801 render `retired` and PAA renders `upcoming`
  *   without anyone touching a file. Whatever the stored `status` says, no
  *   visitor is shown a retired exam as testable or a closed beta as open.
  *
@@ -138,27 +138,51 @@ describe.each(Object.entries(CATALOGUES))('%s certification catalogue', (provide
  *
  * #494's own table listed three rows and missed one: AZ-800 carries the same
  * `expiryDate` 2026-09-30 and the same `replacedBy: 'az-802'` as AZ-801, so it
- * trips in the same breath. The count below is the check on that — four rows
+ * trips in the same breath. The count was the check on that — four rows
  * across three catalogues, not the one the issue expected a person to fix.
+ *
+ * 2026-10-01 (#770): the day came and each vendor was re-read. Microsoft
+ * retired AZ-800 and AZ-801 as announced; Google's PAA page still published no
+ * GA date, so PAA is stored `upcoming` with no date. The stored statuses now
+ * agree with what `deriveStatus` showed on the day, so the list of overtaken
+ * rows is empty, and these tests now pin that the re-verified rows say what
+ * the vendors said rather than what their old dates implied.
  */
 describe('the rows dated 2026-09-30 (#494)', () => {
   const AFTER = '2026-10-01';
 
-  it('names exactly the four rows whose dates have been overtaken, across three catalogues', () => {
+  it('names no row whose dates have been overtaken once the vendors were re-read (#770)', () => {
     const named = Object.entries(CATALOGUES)
       .flatMap(([provider, mod]) =>
         findStaleStatuses(mod.certifications ?? [], AFTER).map((p) => `${provider}: ${p}`)
       )
       .sort();
 
-    // AZ-800 is the one #494 did not list. MLA-C01 (expiryDate 2026-09-28)
-    // fired two days earlier; it was re-verified that day and is now stored
-    // as `retired`, so it is no longer in this list.
-    expect(named).toEqual([
-      "azure: AZ-800: status 'expiring' but expiryDate 2026-09-30 has passed",
-      "azure: AZ-801: status 'expiring' but expiryDate 2026-09-30 has passed",
-      "gcp: PAA: status 'beta' but betaEndDate 2026-09-30 has passed",
-    ]);
+    // Until 2026-10-01 this listed AZ-800, AZ-801 (expiryDate 2026-09-30) and
+    // PAA (betaEndDate 2026-09-30); MLA-C01 (expiryDate 2026-09-28) had left it
+    // two days earlier. All three were re-read on the day and are now stored
+    // as what their vendors did, so nothing dated 2026-09-30 is left to fire.
+    expect(named).toEqual([]);
+  });
+
+  it('stores each re-verified row as the vendor left it on 2026-10-01 (#770)', () => {
+    const rowFor = (mod, code) => mod.certifications.find((c) => c.code === code);
+
+    for (const code of ['AZ-800', 'AZ-801']) {
+      expect(rowFor(azure, code), code).toMatchObject({
+        status: 'retired',
+        retiredDate: '2026-09-30',
+        replacedBy: 'az-802',
+      });
+    }
+    expect(rowFor(azure, 'AZ-802').status).toBe('active');
+
+    // Google published no GA date and no new window: coming, undated, and no
+    // longer carrying the beta fields that only a `beta` row reads.
+    const paa = rowFor(gcp, 'PAA');
+    expect(paa.status).toBe('upcoming');
+    for (const field of CERT_DATE_FIELDS) expect(paa[field], `PAA.${field}`).toBeUndefined();
+    expect(paa.betaClosesBeforeGa).toBeUndefined();
   });
 
   it('renders each of them correctly on that day regardless, so no page states something false', () => {

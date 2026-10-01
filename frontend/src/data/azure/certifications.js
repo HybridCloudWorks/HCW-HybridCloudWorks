@@ -22,6 +22,27 @@
 // did not make a second copy of the rows worth keeping.
 //
 // So: GitHub exams belong to /github/education. Do not re-add them here.
+//
+// AZ-800 AND AZ-801 RE-READ 2026-10-01 (#770), the day after their last test
+// day. Both exam pages now read "This exam was retired on September 30, 2026.
+// You will no longer be able to earn or renew this certification after this
+// date." (on 2026-09-29 they said "These exams will retire on September 30,
+// 2026, at 5:00 PM Central Standard Time"), so Microsoft retired them as
+// announced, on the announced day:
+//   https://learn.microsoft.com/en-us/credentials/certifications/exams/az-800/
+//   https://learn.microsoft.com/en-us/credentials/certifications/exams/az-801/
+// Both rows are now `retired` with `retiredDate` 2026-09-30. `expiryDate`
+// 2026-09-30 stays on them, as on every other retired row in this file: the
+// Azure badge and the detail page's notice print a retired row's date from
+// `expiryDate`, and without it the detail page would say "Withdrawn by
+// Microsoft", which is not what happened. `replacedBy: 'az-802'` stays because
+// the replacement is live: the AZ-802 exam page has a "Schedule exam" section,
+// English, "Retirement date: none", and the credential page both rows point at
+// now lists "Required exams: AZ-802":
+//   https://learn.microsoft.com/en-us/credentials/certifications/exams/az-802/
+//   https://learn.microsoft.com/en-us/credentials/certifications/windows-server-hybrid-administrator/
+// Only these rows were re-read, so `DATA_AS_OF` and the sync line above are
+// deliberately unchanged.
 
 /**
  * The day this file was last checked against Microsoft. The Azure education
@@ -1002,12 +1023,13 @@ export const certifications = [
     officialCode: 'AZ-800',
     title: 'Administering Windows Server Hybrid Core Infrastructure',
     level: 'Associate',
-    status: 'expiring',
+    status: 'retired',
+    retiredDate: '2026-09-30',
     expiryDate: '2026-09-30',
     replacedBy: 'az-802',
     description: 'Administer Windows Server in on-premises, hybrid, and IaaS workloads.',
     longDescription:
-      'Validate your ability to configure and manage Windows Server on-premises, hybrid, and IaaS platform workloads including AD DS, identity, storage, and compute.',
+      'Validate your ability to configure and manage Windows Server on-premises, hybrid, and IaaS platform workloads including AD DS, identity, storage, and compute Microsoft retired this exam on September 30, 2026; AZ-802 replaces it.',
     topics: ['Active Directory', 'Windows Server', 'Hybrid Identity', 'Storage', 'Virtualization'],
     hours: 40,
     prepTime: '~3 months',
@@ -1043,13 +1065,14 @@ export const certifications = [
     officialCode: 'AZ-801',
     title: 'Microsoft Certified: Windows Server Hybrid Administrator Associate',
     level: 'Associate',
-    status: 'expiring',
+    status: 'retired',
+    retiredDate: '2026-09-30',
     expiryDate: '2026-09-30',
     replacedBy: 'az-802',
     description:
       'Windows Server Hybrid Administrator Associate validates role-based Microsoft cloud skills.',
     longDescription:
-      'Windows Server Hybrid Administrator Associate validates skills for Microsoft cloud and AI workloads using official Microsoft certification requirements.',
+      'Windows Server Hybrid Administrator Associate validates skills for Microsoft cloud and AI workloads using official Microsoft certification requirements Microsoft retired this exam on September 30, 2026; AZ-802 replaces it.',
     topics: [],
     hours: 35,
     prepTime: '~6 weeks',

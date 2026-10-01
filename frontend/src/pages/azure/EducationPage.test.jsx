@@ -144,20 +144,21 @@ describe('AzureEducationPage', () => {
     expect(ai102.textContent).toMatch(/now AI-103/);
   });
 
-  it('shows the replacement on an expiring card (AZ-800 → AZ-802)', () => {
+  it('shows the retirement date and the replacement on a retired card (AZ-800 → AZ-802, #770)', () => {
+    // Expiring until 2026-09-30; Microsoft retired it that day, re-read 2026-10-01.
     expect(
       deriveStatus(
         certifications.find((c) => c.code === 'AZ-800'),
         todayIso()
       )
-    ).toBe('expiring');
+    ).toBe('retired');
     renderPage();
-    fireEvent.click(screen.getByRole('button', { name: 'Expiring' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Retired' }));
     const az800 = pageToCard('AZ-800');
     expect(az800).toBeDefined();
-    expect(az800.dataset.status).toBe('expiring');
-    expect(az800.textContent).toMatch(/Expiring Soon/);
-    expect(az800.textContent).toMatch(/then AZ-802/);
+    expect(az800.dataset.status).toBe('retired');
+    expect(az800.textContent).toMatch(/Sep 30, 2026/);
+    expect(az800.textContent).toMatch(/now AZ-802/);
   });
 
   it('never prints a beta end date or an expiry that has already passed', () => {

@@ -67,6 +67,29 @@
  * really for. Google has still published no GA date, so there is still none
  * here.
  *
+ * PAA RE-READ 2026-10-01 (#770), the day after its beta window closed, with a
+ * live fetch of the certification page and of Google's index:
+ *     https://cloud.google.com/learn/certification/agentic-architect
+ *     https://cloud.google.com/learn/certification
+ * Neither has moved since 2026-09-29. The banner on both still reads "The
+ * Professional Agentic Architect beta certification is open until September
+ * 30!", the index still lists "Agentic Architect (Beta)", and the page still
+ * says "Beta participants will be notified of their results 4-6 weeks after
+ * both the exam window and lab window are closed. You can pass the beta or GA
+ * certification". The beta exam details are unchanged (3 hours, $120 against
+ * a $200 retail price, English, ~80 questions, 1-year validity). Google
+ * published no GA date, no new beta window, and no withdrawal.
+ *
+ * So the row is now `upcoming` with no date: the beta closed on 2026-09-30 and
+ * there is nothing a reader can book until Google dates the GA exam. That
+ * stored status says by itself what `betaClosesBeforeGa` used to derive from a
+ * stored `beta`, so the flag and `betaEndDate` are gone from the row — the
+ * flag is read only for a `beta` row, and an `upcoming` row with no
+ * `availableDate` makes no claim the alarm can catch going stale. The next
+ * re-read is when Google publishes a GA date: set `availableDate` then, and
+ * the alarm takes over again. `DATA_AS_OF` is deliberately NOT bumped — one
+ * row was re-read, not all fifteen credentials.
+ *
  * `status` and any dates are read through `@/lib/certStatus` at render time;
  * `src/data/education-catalogues.test.js` fails when a dated row is past.
  */
@@ -294,18 +317,9 @@ export const certifications = [
     code: 'PAA',
     title: 'Professional Agentic Architect',
     level: 'Professional',
-    status: 'beta',
-    betaEndDate: '2026-09-30',
-    // Google closes a beta window before GA: "Beta participants will be
-    // notified of their results 4-6 weeks after both the exam window and lab
-    // window are closed. You can pass the beta or GA certification" (the
-    // certification page, re-read 2026-09-29 for #770). So from 2026-10-01,
-    // until this row is updated to what Google did, it renders "Coming · beta
-    // closed · GA date not announced" instead of claiming an exam nobody can
-    // book. The findStaleStatuses alarm still fires on that day as designed.
-    betaClosesBeforeGa: true,
+    status: 'upcoming',
     description:
-      'Design, build, deploy and operate agentic systems on Google Cloud. In beta until September 30: three hours, ~80 questions, $120 at the beta discount against a $200 retail price, English only. Google gives the beta credential a one-year validity rather than the usual two, and publishes no GA date yet.',
+      'Design, build, deploy and operate agentic systems on Google Cloud. The beta closed on September 30, 2026 and Google has not yet dated the GA exam. The beta was three hours, ~80 questions, $120 at the beta discount against a $200 retail price, English only, with a one-year validity rather than the usual two.',
     topics: ['Agentic Systems', 'Vertex AI Agents', 'Orchestration', 'Evaluation', 'Operations'],
     hours: 50,
     prepTime: '~4 months',
