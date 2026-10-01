@@ -1029,7 +1029,7 @@ export const certifications = [
     replacedBy: 'az-802',
     description: 'Administer Windows Server in on-premises, hybrid, and IaaS workloads.',
     longDescription:
-      'Validate your ability to configure and manage Windows Server on-premises, hybrid, and IaaS platform workloads including AD DS, identity, storage, and compute Microsoft retired this exam on September 30, 2026; AZ-802 replaces it.',
+      'Validate your ability to configure and manage Windows Server on-premises, hybrid, and IaaS platform workloads including AD DS, identity, storage, and compute. Microsoft retired this exam on September 30, 2026; AZ-802 replaces it.',
     topics: ['Active Directory', 'Windows Server', 'Hybrid Identity', 'Storage', 'Virtualization'],
     hours: 40,
     prepTime: '~3 months',
@@ -1072,7 +1072,7 @@ export const certifications = [
     description:
       'Windows Server Hybrid Administrator Associate validates role-based Microsoft cloud skills.',
     longDescription:
-      'Windows Server Hybrid Administrator Associate validates skills for Microsoft cloud and AI workloads using official Microsoft certification requirements Microsoft retired this exam on September 30, 2026; AZ-802 replaces it.',
+      'Windows Server Hybrid Administrator Associate validates skills for Microsoft cloud and AI workloads using official Microsoft certification requirements. Microsoft retired this exam on September 30, 2026; AZ-802 replaces it.',
     topics: [],
     hours: 35,
     prepTime: '~6 weeks',
