@@ -652,6 +652,7 @@ export function buildCertificationFromSources(
     level,
     status: lifecycle.status,
     ...(existing.featured ? { featured: existing.featured } : {}),
+    ...(existing.retiredDate ? { retiredDate: existing.retiredDate } : {}),
     ...(lifecycle.expiryDate ? { expiryDate: lifecycle.expiryDate } : {}),
     ...(existing.replacedBy ? { replacedBy: existing.replacedBy } : {}),
     ...(existing.betaEndDate ? { betaEndDate: existing.betaEndDate } : {}),

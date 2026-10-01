@@ -10,6 +10,7 @@ import {
   SourceError,
   assertSourceItems,
   buildCatalogue,
+  buildCertificationFromSources,
   collectSources,
   foreignOwnerFor,
   reconcileLifecycle,
@@ -203,10 +204,11 @@ describe('rule 3 — lifecycle only moves forward', () => {
  * — but #494's own table listed AZ-801 and missed AZ-800, and a test that says
  * "AZ-800/AZ-801" while checking one of them is how that happens again.
  *
- * That both rows really are this shape — `expiring`, 2026-09-30, `az-802` — is
- * already asserted by `src/data/azure/certifications.test.js` ("marks AZ-800
- * and AZ-801 as retiring on 2026-09-30 in favour of AZ-802"), which is where
- * the catalogue's own facts belong. Not restated here.
+ * Both rows were retired by hand on 2026-10-01 (#770), after Microsoft did
+ * exactly what the first case expects; `src/data/azure/certifications.test.js`
+ * ("marks AZ-800 and AZ-801 as retired on 2026-09-30 in favour of AZ-802")
+ * holds the catalogue's own facts. The last case here is the round trip that
+ * retirement now depends on.
  */
 describe.each(['AZ-800', 'AZ-801'])('%s on the first Monday after 2026-09-30 (#494)', (code) => {
   const FILE_ROW = { status: 'expiring', expiryDate: '2026-09-30' };
@@ -261,6 +263,33 @@ describe.each(['AZ-800', 'AZ-801'])('%s on the first Monday after 2026-09-30 (#4
       })
     ).toEqual({ status: 'expiring', expiryDate: '2026-09-30' });
     expect(report).toEqual([]);
+  });
+
+  it('keeps the retiredDate #770 recorded when the poster still lists the exam', () => {
+    // The row as stored after #770. The updater rebuilds every poster entry
+    // from scratch, so a field it does not copy is a field the next run
+    // deletes, and education-catalogues.test.js pins this one.
+    const stored = {
+      id: code.toLowerCase(),
+      slug: code.toLowerCase(),
+      code,
+      title: `Exam ${code}`,
+      status: 'retired',
+      retiredDate: '2026-09-30',
+      expiryDate: '2026-09-30',
+      replacedBy: 'az-802',
+    };
+    const none = { byCode: new Map(), byTitle: new Map() };
+    const existing = { byCode: new Map([[code, stored]]), byTitle: new Map() };
+
+    expect(
+      buildCertificationFromSources({ code, title: `Exam ${code}` }, none, existing)
+    ).toMatchObject({
+      status: 'retired',
+      retiredDate: '2026-09-30',
+      expiryDate: '2026-09-30',
+      replacedBy: 'az-802',
+    });
   });
 });
 
