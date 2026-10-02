@@ -4,8 +4,8 @@
  * The API-keys page writes to Key Vault under the name this catalogue gives.
  * If that name is not the one `infra/` references, the write succeeds, the
  * vault gains a secret, and the app setting still resolves to nothing — so the
- * page shows a value seeded and the feature stays dark. That is TODO.md
- * §4.5's failure exactly, and it is invisible until someone uses the feature.
+ * page shows a value seeded and the feature stays dark. That is
+ * Required-Inputs §4.5's failure exactly, and it is invisible until someone uses the feature.
  *
  * Text-read like `app-settings-secrets.test.js` and `cors-platform-origins.test.js`,
  * so it fails in CI on a checkout with no Azure credentials and no Terraform

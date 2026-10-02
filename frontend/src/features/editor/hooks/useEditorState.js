@@ -292,7 +292,7 @@ export function useEditorState(blogId, navigate) {
       // through and reset `orderedImageUrls` — user-mutable state that is only
       // persisted on save — from the remote document every twenty seconds,
       // discarding an in-progress reorder. It also re-rendered the whole editor
-      // on every tick while idle. (TODO.md T-209)
+      // on every tick while idle. (T-209)
       //
       // `blogEditedAt` is the only change marker here, and `saveEditorDraft` is
       // its only writer, so an out-of-band status change does not wake this.
@@ -311,7 +311,7 @@ export function useEditorState(blogId, navigate) {
       // a twenty-second poll it can be a collaborator's — and the branch then
       // cleared `externallyModified` and adopted THEIR `blogEditedAt` as our
       // baseline, so our next save passed the server's equality check and
-      // overwrote them, with no warning to either person. (TODO.md T-208)
+      // overwrote them, with no warning to either person. (T-208)
       const wasRemoteUpdateAfterLoad =
         remoteEditedAtMs > 0 &&
         loadTimeRef.current &&
@@ -330,7 +330,7 @@ export function useEditorState(blogId, navigate) {
       // older document over a newer one — which here is worse than a stale
       // view, because `applyRemoteDoc` compares the response's `blogEditedAt`
       // against our load time to decide whether someone else edited the doc.
-      // (TODO.md T-309)
+      // (T-309)
       if (inFlight) return;
       inFlight = true;
       try {
@@ -412,7 +412,7 @@ export function useEditorState(blogId, navigate) {
         });
 
         // Adopt the marker the server just stamped, rather than waiting up to a
-        // poll interval to learn it (TODO.md T-208).
+        // poll interval to learn it (T-208).
         //
         // This is what makes the poll's "is this my own write?" test an identity
         // comparison instead of a one-shot flag, and it also fixes a second

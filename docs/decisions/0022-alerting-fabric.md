@@ -133,7 +133,8 @@ is for planned windows only; it outlives the reason for it otherwise.
   every route 404. `Http5xx` does not count 404s; `AppExceptions` cannot fire
   because no handler runs. **None of the five armed rules detects it.** This is
   the accepted cost of the Cloudflare edge ([ADR 0002](../decisions/0002-cloudflare-edge.md))
-  until the Cloudflare side changes; tracked as TODO **T-519**.
+  until the Cloudflare side changes; tracked as TODO **T-519**, closed
+  2026-09-01 by the edge availability probe ([ADR 0024](0024-edge-availability-probe.md)).
 - **The per-request Cosmos audit trail is gone.** Pruning
   `CDBDataPlaneRequests` means a data-access question can no longer be answered
   from logs. Accepted because a capped workspace answers no questions at all,

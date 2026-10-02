@@ -244,7 +244,7 @@ jobs:
 
           present=$(az functionapp config appsettings list -n "$APP" -g "$RG"                       --query "[?name=='AzureWebJobsStorage'] | length(@)" -o tsv)
           if [ "$present" != "0" ]; then
-            echo "::error::AzureWebJobsStorage is present on $APP. The apply-time strip           (azapi_update_resource.function_app_settings_without_webjobs_storage, TODO.md T-511)           did not take effect. Timers and SyncTriggers are degraded. Re-apply infra/ and           investigate; do not delete the setting by hand — that hides the regression."
+            echo "::error::AzureWebJobsStorage is present on $APP. The apply-time strip           (azapi_update_resource.function_app_settings_without_webjobs_storage, T-511)           did not take effect. Timers and SyncTriggers are degraded. Re-apply infra/ and           investigate; do not delete the setting by hand — that hides the regression."
             exit 1
           fi
           echo "AzureWebJobsStorage absent — as the apply-time strip guarantees"

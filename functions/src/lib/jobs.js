@@ -1,5 +1,5 @@
 /**
- * jobs.js — in-platform asynchronous jobs (TODO.md T-322).
+ * jobs.js — in-platform asynchronous jobs (T-322).
  *
  * Flex Consumption caps an HTTP response at 230 seconds at the load balancer,
  * and nothing in host.json can raise it. Six Site-Main handlers declare

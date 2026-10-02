@@ -2,9 +2,10 @@
 
 > **CLOSED 2026-08-31. This page is a dated record, not a live list.** All 62
 > findings are resolved or handed to the owner. The three that still need an
-> owner — `T-719`, `T-721` and `T-749` — are stated in full in
-> [TODO.md](../repo/todo.md) rather than by reference to this page, so nobody has to
-> read two documents to know what is open. Do not add findings here; a new
+> owner — `T-719`, `T-721` and `T-749` — were stated in full in
+> [TODO.md](../repo/todo.md) rather than by reference to this page, and closed
+> there by 2026-09-05; their outcomes are in [CHANGELOG.md](../repo/changelog.md).
+> Open work is GitHub issues. Do not add findings here; a new
 > review is a new dated page.
 
 The review of record for the six-layer architecture review opened on
@@ -12,7 +13,7 @@ The review of record for the six-layer architecture review opened on
 recommendation for each finding, organised by the layer an engineer would be
 working in rather than by severity.
 
-Findings keep the `T-7NN` identifiers TODO.md assigns. Nothing here is fixed;
+Findings keep the `T-7NN` identifiers TODO.md assigned. Nothing here is fixed;
 recording and fixing in one change would make the record unreviewable.
 
 > **The `file:line` anchors below are pinned to merged main at `31f9613`, the
@@ -1497,7 +1498,8 @@ coverage and operations, not the security model.
 ## Remediation, 2026-08-28
 
 35 of the 62 findings are fixed, one is recorded as **will not fix** with its
-reason, and the rest are listed in [TODO.md](../repo/todo.md). Each finding above
+reason, and the rest were listed in TODO.md and closed there by 2026-09-05
+(see [CHANGELOG.md](../repo/changelog.md)). Each finding above
 carries its own status line; this section records what the remediation taught
 that the review itself did not know.
 

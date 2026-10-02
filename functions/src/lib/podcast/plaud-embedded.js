@@ -56,7 +56,7 @@
  * ## Why the file URL is the public media route
  *
  * The storage account denies direct and SAS reads by network rule (it is
- * closed to the internet; TODO.md T-105), so a blob URL — signed or not — is
+ * closed to the internet; T-105), so a blob URL — signed or not — is
  * one Plaud cannot fetch. The only URL Plaud can read is the site's media
  * delivery route, `mediaUrlFor('podcast', 'uploads/<uuid>.<ext>')`, made
  * absolute with the API's public origin. That URL is unguessable (a v4 UUID

@@ -188,7 +188,7 @@ describe('claimLabJob', () => {
 describe('heartbeatAgent', () => {
   it('writes lastSeenAt, the field the Labs snapshot actually reads', async () => {
     // The stub agent wrote lastPing while labs.js reads lastSeenAt, so the
-    // connected indicator could never be true (TODO.md T-401).
+    // connected indicator could never be true (T-401).
     const store = emptyStore();
     const h = make(allowGuard(), store);
     await h.heartbeatAgent(req({ agentId: 'vps-1', status: 'idle' }), context);

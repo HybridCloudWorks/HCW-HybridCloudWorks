@@ -2,11 +2,11 @@
  * The Labs agent API — the three operations the VPS agent is allowed to
  * perform, and nothing else.
  *
- * This replaces the agent's direct Cosmos access (TODO.md,
- * TODO.md T-401). The reasoning for the credential model is in
- * `auth/require-agent.js`; this file is what that model buys. The blast radius
- * of a credential stolen off the VPS is these three handlers, under the
- * constraints written into them, rather than read/write over two containers:
+ * This replaces the agent's direct Cosmos access (T-401). The reasoning for the
+ * credential model is in `auth/require-agent.js`; this file is what that model
+ * buys. The blast radius of a credential stolen off the VPS is these three
+ * handlers, under the constraints written into them, rather than read/write
+ * over two containers:
  *
  *   claimLabJob      — take at most one queued job, only of a type the agent
  *                      is registered for, only if nobody else took it first
@@ -149,7 +149,7 @@ export function createLabAgentHandlers({ guard, store, now = () => new Date() })
    *
    * Writes `lastSeenAt`. The stub agent wrote `lastPing` while `labs.js:188`
    * read `lastSeenAt`, so the Labs "connected" indicator could never be true
-   * (TODO.md T-401). Fixing it here rather than in the agent is deliberate:
+   * (T-401). Fixing it here rather than in the agent is deliberate:
    * the field name is now the server's business, and no future agent can get
    * it wrong.
    *

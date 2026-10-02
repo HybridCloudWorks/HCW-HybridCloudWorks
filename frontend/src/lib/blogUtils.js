@@ -21,7 +21,7 @@ export const normalizeContentFields = (doc) => {
 /**
  * Kept as a named export because several components import it; the
  * implementation now lives in lib/dateUtils.js so there is one of it
- * (TODO.md T-304).
+ * (T-304).
  */
 export const normalizeFirestoreDate = (value) => toDate(value);
 

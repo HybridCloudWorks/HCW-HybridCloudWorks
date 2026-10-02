@@ -1,6 +1,6 @@
 /**
  * aiProxy and testAiProvider — the two admin RPCs that call a model directly
- * (TODO.md #180).
+ * (#180).
  *
  * Both were listed `notImplemented` in `.azure/api-surface.json` while the AI
  * Engine page called them anyway, so the Playground and every provider's Test

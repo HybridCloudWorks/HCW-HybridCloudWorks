@@ -327,8 +327,7 @@ function QualityAutomationCard({ form, setField }) {
         <CardTitle>Quality &amp; automation</CardTitle>
         <CardDescription>
           A draft grading at or above the threshold stages as forge_ready; below it lands in
-          editing. Auto-Forge is honoured by the scheduled forge timer once the owner arms it (TODO
-          T-518 / T-607).
+          editing. Auto-Forge is honoured by the scheduled forge timer.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-wrap items-end gap-6">

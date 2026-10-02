@@ -165,7 +165,7 @@ describe('the Static Web App origin — retained as the break-glass path (#521)'
   // the only documented recovery path, discovered during the incident (#521).
   //
   // Compiled in rather than supplied through EXTRA_ALLOWED_ORIGINS, which did
-  // not take effect on the deployed app (TODO.md T-513). These tests are the
+  // not take effect on the deployed app (T-513). These tests are the
   // reason a security control belongs in code: an app setting has none.
   it('is allowed by default, with no environment configuration at all', () => {
     const cors = createCors({});

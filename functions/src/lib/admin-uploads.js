@@ -8,7 +8,7 @@
  * rides through authedFetch and the role guard unchanged.
  *
  * Three things about the body are checked, in increasing order of cost, and
- * every one of them is enforcement rather than UX (TODO.md T-306, T-307):
+ * every one of them is enforcement rather than UX (T-306, T-307):
  *
  *   1. `Content-Length`, before the body is read at all. Cheapest and least
  *      trustworthy — the header is caller-supplied and absent on a chunked
@@ -234,7 +234,7 @@ export function createAdminUploadHandlers({ guard, storage }) {
         // The pages persist `url` into Cosmos, so it must be the URL that will
         // actually serve. The raw blob URL does not: the account is closed to
         // the internet and `allow_nested_items_to_be_public = false` overrides
-        // the containers' public access (TODO.md T-105). Public containers get
+        // the containers' public access (T-105). Public containers get
         // the delivery route; private ones get no URL at all rather than a
         // plausible-looking dead one.
         const url = PUBLIC_MEDIA_CONTAINERS.has(container) ? mediaUrlFor(container, path) : '';

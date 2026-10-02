@@ -8,7 +8,7 @@ import { postJSON } from '@/lib/api';
  * stays forever on the grounds that nobody can prove it is unused.
  *
  * This used `navigator.sendBeacon` against an anonymous endpoint. The route is
- * authenticated now (TODO.md T-316) — its only caller is an admin page, so
+ * authenticated now (T-316) — its only caller is an admin page, so
  * anonymity bought nothing and cost an unauthenticated write endpoint that
  * anyone could use to poison the very evidence it exists to produce. A beacon
  * cannot carry a bearer token, and nothing here needed beacon semantics: the

@@ -8,7 +8,7 @@
  * `cms/content/import-repo/candidates` (GET: the drafts on main, marked with
  * what is already imported). Two templates, so two registrations, each
  * through httpRouteByMethod so that a later verb on either is a new key in
- * `handlers`, never a second function on the same template (TODO.md T-510).
+ * `handlers`, never a second function on the same template (T-510).
  * Both are literal segments under `cms/content/`, beside rehost-images, slug
  * and item, so the `cms/content/{id}` DELETE template does not capture them.
  */

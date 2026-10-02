@@ -145,7 +145,7 @@ export { describeDifference, redact, secretsOf } from './lib/plan-report.mjs';
  * recreates on every apply. `updated` is the one attribute the strip rewrites.
  *
  * Addresses, not counts. A near-miss count reads as close enough while meaning
- * something entirely different happened — the same reasoning TODO.md gives
+ * something entirely different happened — the same reasoning ADR 0023 gives
  * for approving the teardown against addresses rather than "92 destroyed".
  */
 export const EXPECTED = {

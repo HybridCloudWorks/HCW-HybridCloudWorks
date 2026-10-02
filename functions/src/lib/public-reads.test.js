@@ -423,7 +423,7 @@ describe('getContent', () => {
 /**
  * The public news pages were calling the EDITOR-gated cache lookup, so an
  * anonymous visitor's requests threw at token acquisition and no curated
- * imagery rendered (TODO.md T-210). The assertions that matter are about what
+ * imagery rendered (T-210). The assertions that matter are about what
  * this endpoint does NOT return: the admin equivalent answers with the whole
  * document, and the document is not public.
  */
@@ -698,7 +698,7 @@ describe('getSnapshot', () => {
   it('strips internal fields from inside items[], not just the wrapper', async () => {
     // stripInternalFields used to be applied to the wrapper only, so createdBy
     // and updatedBy on each item were never reached — the read-path half of
-    // TODO.md T-201.
+    // T-201.
     const store = {
       readDoc: vi.fn(async (_c, id) => ({
         id,

@@ -112,10 +112,11 @@ concurrency:
 # actually touches production — and it is where an approval gate belongs, since
 # an approval that fires before the build is an approval of nothing.
 #
-# STILL OPEN, and owner-gated: moving the SWA deploy to OIDC entirely, which
-# would remove the credential rather than isolate it, and storing this secret
-# as an ENVIRONMENT secret on a protected `production` rather than a repository
-# secret. Both need repository-admin and Azure access. Tracked in TODO.md.
+# STILL OPEN, and owner-gated: moving the SWA deploy off the deployment token
+# entirely, which would remove the credential rather than isolate it. Tracked
+# in #834. (The other half once listed here, storing the token as an
+# ENVIRONMENT secret on a protected `production`, went with the stored secret:
+# T-727 left no secret to store.)
 jobs:
   build:
     name: Build and verify the site
@@ -130,10 +131,11 @@ jobs:
         # protection rules, and the federated credential's subject is
         # environment-scoped, so it matches from ANY branch. Without this step
         # a dispatch from an unreviewed ref ships to production past all 12
-        # required contexts (T-705). This is the repository-side half; the
-        # durable fix is required reviewers plus a main-only branch
-        # restriction on the environment itself, which only a repo admin can
-        # configure.
+        # required contexts (T-705). This is the repository-side half. The
+        # environment-side half is now in place too: read on 2026-10-02, the
+        # `production` environment carries required reviewers and a main-only
+        # deployment-branch policy. This step stays as the check that does not
+        # depend on a setting someone can change in the UI.
         if: github.ref != 'refs/heads/main'
         # Overrides the job's `working-directory: frontend`: this step runs
         # before checkout, so that directory does not exist yet.
@@ -225,7 +227,7 @@ jobs:
           VITE_ENTRA_CLIENT_ID: ${{ inputs.entra_client_id_override || vars.VITE_ENTRA_CLIENT_ID }}
           VITE_ENTRA_TENANT_ID: ${{ vars.VITE_ENTRA_TENANT_ID }}
           # Without this the SPA requests a token the backend rejects on
-          # audience: sign-in succeeds and every API call 401s (TODO.md).
+          # audience: sign-in succeeds and every API call 401s (Required-Inputs §4.2).
           # msalConfig.js defaults it to '' — the build does not fail.
           VITE_ENTRA_API_SCOPE: ${{ vars.VITE_ENTRA_API_SCOPE }}
           # Social URLs — public, non-sensitive

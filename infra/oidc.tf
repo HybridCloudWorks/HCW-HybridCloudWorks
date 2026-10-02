@@ -18,9 +18,11 @@
 # everything here is creatable by an Azure Owner with no Entra role at all,
 # which matches the permissions this deployment is expected to run under.
 #
-# The one thing that still needs Entra rights is the API app registration
-# behind var.entra_api_audience — see TODO.md. That is a one-time manual
-# step and is deliberately not automated here.
+# The one thing that needs Entra rights is the API app registration behind
+# var.entra_api_audience. That was a one-time manual step, done by
+# scripts/cutover/01-entra-api.ps1 (the registration is "HCWSite API"), and
+# it is deliberately not automated here. Required-Inputs §4.1 lists the
+# workspace variable that carries its client id.
 # =============================================================================
 
 resource "azurerm_user_assigned_identity" "github_deploy" {
@@ -485,7 +487,7 @@ resource "azurerm_role_assignment" "github_copilot_review_reader" {
 # azurerm_cosmosdb_sql_container cannot express computedProperties, so any
 # apply that updates the `content` or `blogs` container wipes cp_sortDate —
 # and with PUBLIC_LIST_SQL_ORDER=1 live, that breaks the public content list
-# (TODO.md T-206). scripts/apply-computed-sortdate.mjs re-applies it.
+# (T-206). scripts/apply-computed-sortdate.mjs re-applies it.
 #
 # Setting computedProperties is a CONTROL-PLANE operation. The healer
 # originally did it through the SDK's container.replace(), which goes to the

@@ -136,7 +136,7 @@ function getPublicUrl(item) {
 
 // Both of these were timestamp-object-only (`?.toMillis?.() || 0`), so against the ISO
 // strings Cosmos returns they scored every document 0 and the comparators were
-// permanent no-ops (TODO.md T-304).
+// permanent no-ops (T-304).
 const sortByUpdatedAtDesc = byNewest('updatedAt');
 const sortByPublishedAtDesc = byNewest('blogPublishedAt');
 

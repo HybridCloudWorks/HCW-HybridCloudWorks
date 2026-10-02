@@ -79,7 +79,7 @@
     Key Vault references are resolved by the app at startup and refreshed on a
     schedule; restart the app if you want it now. `GET /api/health` reports
     `unresolvedSecrets`, which is how you confirm it landed without reading the
-    value back (TODO.md T-720).
+    value back (T-720).
 #>
 [CmdletBinding(DefaultParameterSetName = 'Seed', SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(

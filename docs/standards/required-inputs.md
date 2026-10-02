@@ -3,7 +3,8 @@
 Every variable, secret and setting the workload needs, with live status.
 
 > **Moved here from `REVIEW.md` on 2026-08-29**, when that file was retired and
-> its open work folded into [TODO.md](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/TODO.md).
+> its open work folded into [TODO.md](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/TODO.md)
+> (and from there into GitHub issues on 2026-09-05).
 > `REVIEW.md` was the root document that held the owner-gated open work and, in
 > its Part 4, this inventory; it no longer exists.
 > REVIEW.md's own header explained why this inventory sat there rather than in
@@ -115,7 +116,7 @@ principal:
 
 | Name | Default | What arming it does |
 | --- | --- | --- |
-| `schedulers_master_enabled` | `false` | Master switch for every catalogued timer. Both this and a name in `enabled_timers` are required — TODO.md T-518 |
+| `schedulers_master_enabled` | `false` | Master switch for every catalogued timer. Both this and a name in `enabled_timers` are required — T-518 |
 | `enabled_timers` | `[]` | Per-timer allow-list, armed one name at a time |
 | `newsletter_sending_enabled` | `false` | Lets a publisher's approval send the weekly newsletter through Resend. Set it only after the postal address and reply-to are saved in Newsletter settings |
 | `labs_public_submission_enabled` | `true` (owner decision 2026-09-28, [ADR 0032](../decisions/0032-learner-labs-platform.md) decision 6 revised) | Sets `LABS_PUBLIC_SUBMISSION_ENABLED`, which lets the Landing Zone Builder's "Validate on the lab" queue a public `terraform-validate` job, only from the site's pane (its origin and a Cloudflare Turnstile token) and within decision 6's bounds. Stays closed until `TURNSTILE-SECRET-KEY` (§4.6) resolves and an agent is online. **`false` in the workspace is the kill switch**: every public lab route then answers `PUBLIC_SUBMISSION_CLOSED` before reading anything |

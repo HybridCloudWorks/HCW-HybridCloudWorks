@@ -285,7 +285,7 @@ describe('enforceSubmissionQuota — sequential behaviour', () => {
   });
 });
 
-describe('enforceSubmissionQuota — concurrency (TODO.md T-204)', () => {
+describe('enforceSubmissionQuota — concurrency (T-204)', () => {
   it('admits exactly the limit from a cold start under a burst', async () => {
     // The defect, as an assertion. The previous implementation read, compared
     // and wrote as three separate operations, so all 200 of these read

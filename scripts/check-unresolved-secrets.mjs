@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 //
 // WHY THIS IS A WORKFLOW AND NOT THE ALERT RULE THE TRACKER ASKED FOR.
 //
-// TODO.md carried "a scheduled-query alert on unresolvedSecrets ... needs an
+// TODO.md once carried "a scheduled-query alert on unresolvedSecrets ... needs an
 // apply" for weeks. There was nothing to apply, and there could not be: the
 // count exists only as a field in the /api/health RESPONSE BODY. Nothing writes
 // it to Log Analytics, so a scheduled-query rule would run against a table that

@@ -22,7 +22,7 @@ const EMPTY_SNAPSHOT = Object.freeze({ agents: [], jobs: [], jobTypes: [] });
  * snapshot arrives — it froze, `now - lastSeenAt` stopped growing, and every
  * agent stayed "connected" for exactly as long as nothing was reachable.
  * The clock has to keep running when the fetch does not; that is the only
- * condition under which it says anything. (TODO.md T-309)
+ * condition under which it says anything. (T-309)
  */
 function useStalenessClock(enabled) {
   const [now, setNow] = useState(() => Date.now());

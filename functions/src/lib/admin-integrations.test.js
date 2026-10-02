@@ -216,7 +216,7 @@ describe('config collections (ai-providers / mcp-servers)', () => {
   it('PUT carries a stored oauthToken through a read-modify-write round trip', async () => {
     // putConfig is a full replace and reads never return oauthToken, so an
     // edit form that reads then writes would silently delete the token
-    // (TODO.md T-314).
+    // (T-314).
     const store = makeStore({
       readDoc: vi.fn(async () => ({ id: 'plaud', oauthToken: 'stored-tok', createdAt: 'x' })),
     });

@@ -4,7 +4,7 @@
  * Every assertion here is a negative one, because that is what a sanitizer is:
  * the field arrives through an anonymous endpoint and ends up inside
  * `dangerouslySetInnerHTML` on a public template, so anything that survives
- * this function executes in a visitor's browser (TODO.md T-408).
+ * this function executes in a visitor's browser (T-408).
  */
 import { describe, it, expect } from 'vitest';
 import { isSafeUrl, sanitizeSubmittedHtml } from './sanitize-html.js';

@@ -4,7 +4,7 @@
  * Two things carry the weight: the route is guarded (the source's was not,
  * and its only caller is an admin page), and the arithmetic is right — the
  * whole reason this endpoint exists is to produce a number someone will use to
- * decide whether to delete a container (TODO.md T-316).
+ * decide whether to delete a container (T-316).
  */
 import { describe, it, expect, vi } from 'vitest';
 import {

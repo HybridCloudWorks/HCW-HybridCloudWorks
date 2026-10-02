@@ -38,7 +38,7 @@ export function watchJob(jobId, onUpdate) {
       onUpdate({ job });
       // `timeout` is a real status the agent can report, and omitting it here
       // meant a timed-out job was polled every five seconds for as long as the
-      // console stayed open. (TODO.md T-308)
+      // console stayed open. (T-308)
       if (!isTerminalJobStatus(job?.status)) timer = setTimeout(step, jobPollDelay(0));
     } catch (err) {
       if (cancelled) return;
@@ -48,7 +48,7 @@ export function watchJob(jobId, onUpdate) {
       // actual failure, and returning without rescheduling stopped the poll for
       // good — so a job that went on to succeed was displayed as failed
       // permanently. The error is separate state, and the poll keeps going with
-      // backoff. (TODO.md T-308)
+      // backoff. (T-308)
       onUpdate({ pollError: err.message });
       timer = setTimeout(step, jobPollDelay(consecutiveErrors));
     }

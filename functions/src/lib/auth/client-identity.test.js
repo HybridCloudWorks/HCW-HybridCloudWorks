@@ -8,7 +8,7 @@
  *
  *   - **The origin must be verifiably Cloudflare** (DECISION 6). Rate limiting
  *     on a spoofable header is not rate limiting, so production fails closed.
- *   - **The quota unit is the subscriber, not the address** (TODO.md T-205).
+ *   - **The quota unit is the subscriber, not the address** (T-205).
  *     Hashing the full IPv6 address gave one client 2^64 buckets — an unlimited
  *     submission budget where every bucket looked well under the limit.
  *

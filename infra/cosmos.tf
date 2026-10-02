@@ -111,9 +111,9 @@ resource "azurerm_cosmosdb_account" "hcw" {
   ))
 
   # T-504: keys off. The app is managed-identity-only (AAD data plane), the
-  # operational tooling uses DefaultAzureCredential, and TODO.md's concern is
-  # a key that may once have existed — disabling local auth is the durable
-  # answer to it. Set the variable false only if plan review surfaces a key
+  # operational tooling uses DefaultAzureCredential, and the concern TODO.md
+  # once carried is a key that may once have existed — disabling local auth is
+  # the durable answer to it. Set the variable false only if plan review surfaces a key
   # consumer nobody remembered.
   # local_authentication_enabled replaced the deprecated
   # local_authentication_disabled and inverts its polarity, hence the negation.
@@ -405,7 +405,7 @@ resource "azapi_update_resource" "cosmos_computed_properties" {
 # Nothing masks that any more. COSMOS_CONNECTION_STRING used to sit in app
 # settings carrying the primary key, which kept the change-feed trigger binding
 # working while every SDK call failed — so a broken role assignment would have
-# looked like a partially working app. Both are gone (TODO.md T-315): this
+# looked like a partially working app. Both are gone (T-315): this
 # assignment is now the only thing standing between the app and a uniform 403,
 # which is the failure mode you want, because it is unambiguous.
 #

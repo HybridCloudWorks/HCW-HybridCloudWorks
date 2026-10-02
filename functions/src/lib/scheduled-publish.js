@@ -1,5 +1,5 @@
 /**
- * The read side of `scheduledPublishDate` (TODO.md T-301).
+ * The read side of `scheduledPublishDate` (T-301).
  *
  * The write side has been complete since the migration: `saveContentSchedule`
  * validates and persists the date, `BlogReviewBoard` renders the picker, and

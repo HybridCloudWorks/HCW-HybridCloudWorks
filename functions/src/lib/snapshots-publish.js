@@ -94,7 +94,7 @@ export function sanitizeCertification(doc) {
  *
  * `SANITIZERS` had a `certifications` entry and no `speakerevents` one, so raw
  * rows were written wholesale into `_snapshots/speakerevents` and served
- * anonymously by `GET public/snapshots/speakerevents` (TODO.md T-201). Two
+ * anonymously by `GET public/snapshots/speakerevents` (T-201). Two
  * things leaked:
  *
  *  - **Every admin's email address.** `upsertSpeakerEvent` stamps `createdBy`

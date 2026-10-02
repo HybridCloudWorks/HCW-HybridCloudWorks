@@ -71,8 +71,8 @@ $allowedDirectories = @('.azure', '.github', '.qlty', '.ruff_cache', '.vscode', 
 # `Missing` in one and `Set` in another.
 #
 # REVIEW.md itself was retired on 2026-08-29 for the same failure one level up:
-# it restated TODO.md's owner-gated items. Its work sections are now in TODO.md,
-# and its Part 4 inventory is docs/standards/required-inputs.md, which keeps the §4.x
+# it restated TODO.md's owner-gated items. Its work sections went to TODO.md
+# and from there, on 2026-09-05, to GitHub issues; its Part 4 inventory is docs/standards/required-inputs.md, which keeps the §4.x
 # numbering that roughly sixteen code comments cite.
 #
 # Do not recreate any of the three.
@@ -101,7 +101,7 @@ $allowedRootFiles = @(
   # reading as current work.
   # REVIEW.md held the owner-gated half of the open work, every item of which was
   # already mirrored in TODO.md under "Gate: owner" — a second document restating
-  # the first; its work sections are now in TODO.md and its Part 4 inventory is
+  # the first; its work sections went to TODO.md (now GitHub issues) and its Part 4 inventory is
   # docs/standards/required-inputs.md.
   #
   # Each is REJECTED here rather than permitted, so none can quietly return.
@@ -154,8 +154,9 @@ foreach ($file in $actualRootFiles) {
 }
 
 # The SOP documents must exist. TODO.md is the one an orchestrating agent reads
-# to decide whether there is outstanding work, so its absence is indistinguishable
-# from "the file was never written" — require it even when it holds no items.
+# for the accepted risks and the index to open issues, so its absence is
+# indistinguishable from "the file was never written" — require it even when it
+# holds no items.
 foreach ($requiredFile in @('README.md', 'CHANGELOG.md', 'TODO.md')) {
   if (-not (Test-Path -LiteralPath (Join-Path $repositoryRoot $requiredFile))) {
     $errors.Add("Missing required SOP document: $requiredFile")

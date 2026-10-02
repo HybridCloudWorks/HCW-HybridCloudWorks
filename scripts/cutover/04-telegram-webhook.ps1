@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Cutover step 3d — point the Telegram bot at Azure (TODO.md T-512).
+    Cutover step 3d — point the Telegram bot at Azure (T-512).
 
 .DESCRIPTION
     Migration-Plan §6 step 6. The URL and its secret token are registered with

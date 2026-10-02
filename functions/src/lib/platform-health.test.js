@@ -5,7 +5,7 @@
  * the landing page, so no upstream — dead, slow, or returning nonsense — may
  * produce anything worse than `UNKNOWN` for its own provider. And the cache is
  * not an optimization here, it is the only thing bounding how hard this site
- * can be made to hit four third-party status APIs (TODO.md T-316).
+ * can be made to hit four third-party status APIs (T-316).
  */
 import { describe, it, expect, vi } from 'vitest';
 import {

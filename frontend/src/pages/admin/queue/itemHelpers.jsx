@@ -2,7 +2,7 @@
  * Pure helpers for the review queue: how an item is described, ordered, badged,
  * and what a destructive confirmation says.
  *
- * Split out of QueuePage.jsx (TODO.md T-412), which had grown to 1,310 lines
+ * Split out of QueuePage.jsx (T-412), which had grown to 1,310 lines
  * with the page's riskiest code — the bulk transitions — buried in the middle
  * of it. Everything here is a pure function of one item (or of the confirm
  * target), so it is testable without rendering a card, which is the point.

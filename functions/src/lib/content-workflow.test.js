@@ -141,7 +141,7 @@ describe('saveEditorDraft', () => {
     // the response, a second save inside that window still carries the
     // pre-save value and 409s the caller against their own previous write —
     // and, worse, the client had to guess which polled document was its own.
-    // (TODO.md T-208)
+    // (T-208)
     const store = makeStore({ readDoc: vi.fn(async () => ({ id: 'c1' })) });
     const h = createContentWorkflowHandlers({ guard: guardAs('editor'), store, ...fixed });
 

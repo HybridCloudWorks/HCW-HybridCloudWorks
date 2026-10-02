@@ -1,7 +1,7 @@
 /**
  * Filter option lists for the review queue.
  *
- * Split out of QueuePage.jsx (TODO.md T-412) so the page and the list can be
+ * Split out of QueuePage.jsx (T-412) so the page and the list can be
  * separate modules without one importing the other for two arrays. They are
  * ordered deliberately — see the comment on STATUS_FILTERS.
  */

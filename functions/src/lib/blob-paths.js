@@ -96,7 +96,8 @@ export function isValidBlobPath(path) {
  * Build the URL for a blob served through the media delivery route.
  *
  * Site-relative on purpose. This value is persisted into Cosmos as `imageUrl`,
- * and the API's hostname is deployment configuration (TODO.md): baking
+ * and the API's hostname is deployment configuration (same-origin or a
+ * separate API host is a topology choice): baking
  * an absolute URL into stored documents means a topology change silently breaks
  * every image already in the database.
  *
