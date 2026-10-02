@@ -115,7 +115,7 @@ describe('the building images guide (#772)', () => {
       'Get the source',
       'One Dockerfile, two targets',
       'Base images pinned by digest',
-      'Nothing downloaded without a checksum',
+      'Every direct download checked against a pinned sum',
       'Vendored for offline use',
       'Running as a non-root user',
       'Smoke tests',

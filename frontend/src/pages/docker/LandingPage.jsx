@@ -27,7 +27,7 @@ export const DOCKER_HERO_IMAGES = [
  * because the guides are pages of their own rather than published articles.
  *
  * Facts the first area states, from lab-image/: one Dockerfile with two final
- * targets, every download checked against a pinned checksum (versions.env),
+ * targets, every direct download checked against a pinned checksum (versions.env),
  * and the publish workflow attaching a provenance attestation.
  */
 
@@ -37,7 +37,7 @@ export const FOCUS_AREAS = [
     eyebrow: 'FOCUS AREA · IMAGES',
     title: 'Building images',
     icon: 'deployed_code',
-    text: 'Writing Dockerfiles that stay small and quick to rebuild, multi-stage builds that keep build tools out of the image you ship, and provenance attestations that record how an image was made. The worked example is hcw-lab, the image every browser lab on this site runs: one Dockerfile, two build targets, and every download checked against a pinned checksum.',
+    text: 'Writing Dockerfiles that stay small and quick to rebuild, multi-stage builds that keep build tools out of the image you ship, and provenance attestations that record how an image was made. The worked example is hcw-lab, the image every browser lab on this site runs: one Dockerfile, two build targets, and every direct download checked against a pinned checksum.',
     tags: ['Dockerfiles', 'Multi-stage builds', 'Provenance'],
     available: true,
     link: { label: 'Read the guide to building images', to: routes.buildingImages('docker') },

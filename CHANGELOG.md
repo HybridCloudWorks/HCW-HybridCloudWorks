@@ -27,7 +27,7 @@ This project has not cut a tagged release; entries are grouped under
   - **`/docker/building-images`** walks through `lab-image/Dockerfile` and
     `publish-lab-image.yml`: the five stages and the `runner` and `full`
     targets, the base image pinned by digest and the workflow check that holds
-    it to `versions.env`, checksums on every download, the provider mirror and
+    it to `versions.env`, pinned sums on every direct download, the provider mirror and
     the vendored Azure Verified Modules, the non-root user, `smoke.sh`, the
     provenance attestation, and the push to GHCR. Each command is printed for
     PowerShell and bash.

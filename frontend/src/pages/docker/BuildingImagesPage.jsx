@@ -9,7 +9,7 @@
  *   lab-image/smoke.sh                 — what the smoke test refuses and checks
  *   lab-image/README.md                — the measured mirror sizes, the local
  *                                        commands and what success prints
- *   .github/workflows/publish-lab-image.yml — the FROM check, the two jobs,
+ *   .github/workflows/publish-lab-image.yml — the FROM check, the three jobs,
  *                                        `provenance: false`, the push and the
  *                                        attestation
  * Re-read them before changing a sentence here. A change to any of those files
@@ -244,17 +244,24 @@ export default function DockerBuildingImagesPage() {
         <Commands commands={COMMANDS.inspectBase} testId="commands-inspect" />
       </GuideSection>
 
-      <GuideSection id="checksums" title="Nothing downloaded without a checksum">
+      <GuideSection id="checksums" title="Every direct download checked against a pinned sum">
         <p className={PROSE}>
-          Every version and checksum lives in versions.env, which each <Code>RUN</Code> sources
-          before it starts. Each binary is checked with <Code>sha256sum -c</Code> straight after its
-          download, and because the shell runs with <Code>set -eu</Code>, a sum that does not match
-          fails the build rather than leaving an unverified binary in place. ansible-core and each
-          package it depends on are fetched by pip in hash-checking mode with{' '}
-          <Code>--only-binary=:all:</Code>, so nothing is built from source and nothing outside the
-          list can be pulled in, and the <Code>runner</Code> stage installs them a second time from
-          those same files with no package index at all. pip is then removed, so the image carries
-          no pip command.
+          Every version and checksum the Dockerfile pins lives in versions.env, which each{' '}
+          <Code>RUN</Code> sources before it starts. Each binary is checked with{' '}
+          <Code>sha256sum -c</Code> straight after its download, and because the shell runs with{' '}
+          <Code>set -eu</Code>, a sum that does not match fails the build rather than leaving an
+          unverified binary in place. ansible-core and each package it depends on are fetched by pip
+          in hash-checking mode with <Code>--only-binary=:all:</Code>, so nothing is built from
+          source and nothing outside the list can be pulled in, and the <Code>runner</Code> stage
+          installs them a second time from those same files with no package index at all. pip is
+          then removed, so the image carries no pip command.
+        </p>
+        <p className={PROSE}>
+          Packages installed with <Code>apt-get</Code> are the exception. Apart from the Azure CLI,
+          whose version is pinned, their versions are not in versions.env, and they are checked by
+          APT against the signed Debian and Microsoft package indexes rather than by{' '}
+          <Code>sha256sum -c</Code>. The Microsoft signing key itself is checked against a pinned
+          sum before APT is told to trust it.
         </p>
       </GuideSection>
 
@@ -363,8 +370,9 @@ export default function DockerBuildingImagesPage() {
 
       <GuideSection id="publish" title="Publishing to GitHub Container Registry">
         <p className={PROSE}>
-          <SourceLink href={SOURCE_LINKS.workflow}>publish-lab-image.yml</SourceLink> has two jobs,
-          so the code a pull request can change never runs with a token that can publish.
+          <SourceLink href={SOURCE_LINKS.workflow}>publish-lab-image.yml</SourceLink> has three
+          jobs. The first two keep validation and publishing apart, so the code a pull request can
+          change never runs with a token that can publish.
         </p>
         <ul className={`${PROSE} list-disc space-y-2 pl-5`}>
           <li>
@@ -382,9 +390,11 @@ export default function DockerBuildingImagesPage() {
           </li>
         </ul>
         <p className={PROSE}>
-          The result is <Code>{GHCR_IMAGE}</Code>, public, so pulling it needs no sign-in. A further
-          job copies the same images to Docker Hub by digest, which is where the lab pages’ own{' '}
-          <Code>docker run</Code> line pulls from, and the bytes are the same in both.
+          The result is <Code>{GHCR_IMAGE}</Code>, public, so pulling it needs no sign-in. The third
+          job, <strong>publish-dockerhub</strong>, runs after <strong>publish</strong> when Docker
+          Hub publishing is switched on, and copies the same images there by digest, which is where
+          the lab pages’ own <Code>docker run</Code> line pulls from, and the bytes are the same in
+          both.
         </p>
         <Commands commands={COMMANDS.pull} testId="commands-pull" />
       </GuideSection>
