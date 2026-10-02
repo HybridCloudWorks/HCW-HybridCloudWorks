@@ -86,6 +86,8 @@ const STANDALONE_ROUTES = [
   '/terraform/modules',
   '/terraform/tools',
   '/docker/sandboxes',
+  '/docker/building-images',
+  '/docker/desktop',
   '/docker/tools',
   '/github/workflows',
   '/github/tools',

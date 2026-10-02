@@ -2,7 +2,8 @@
  * Docker's pages (owner request 2026-09-28). A page whose content is still to
  * be written is a placeholder: it says what it will cover and that it is
  * coming, reads nothing from the API, and points at something a visitor can
- * use now. The sandbox recipe is real content, on its own page (#774), the
+ * use now. The sandbox recipe is real content, on its own page (#774), as
+ * are the two guides (#772, #773, tested in DockerGuides.test.jsx), the
  * blog and code pages list published Docker content like every other
  * provider's (#776), and the Learning page renders a checked, dated
  * catalogue (#778).
@@ -85,7 +86,7 @@ describe('the Docker landing page', () => {
     expect(document.title).toBe('Docker Containers Hub | Hybrid Cloud Works');
   });
 
-  it('has the three focus areas, in order: two coming soon, the sandbox one available now', () => {
+  it('has the three focus areas, in order, each available now and linking to its own page', () => {
     renderPage(<DockerLandingPage />);
     expect(FOCUS_AREAS.map((area) => area.title)).toEqual([
       'Building images',
@@ -95,11 +96,17 @@ describe('the Docker landing page', () => {
     for (const area of FOCUS_AREAS) {
       expect(screen.getByRole('heading', { level: 2, name: area.title })).toBeInTheDocument();
     }
-    const status = (id) => within(screen.getByTestId(id));
-    expect(status('building-images').getByText('Coming soon')).toBeInTheDocument();
-    expect(status('docker-desktop').getByText('Coming soon')).toBeInTheDocument();
-    expect(status('agent-sandbox').getByText('Available now')).toBeInTheDocument();
-    expect(status('agent-sandbox').queryByText('Coming soon')).toBeNull();
+    const area = (id) => within(screen.getByTestId(id));
+    for (const [id, href] of [
+      ['building-images', '/docker/building-images'],
+      ['docker-desktop', '/docker/desktop'],
+      ['agent-sandbox', '/docker/sandboxes'],
+    ]) {
+      expect(area(id).getByText('Available now')).toBeInTheDocument();
+      expect(area(id).queryByText('Coming soon')).toBeNull();
+      expect(area(id).getByRole('link')).toHaveAttribute('href', href);
+    }
+    expect(screen.queryByText(/coming soon/i)).toBeNull();
   });
 
   it('rotates its own hero art, the five generated Docker images (#775)', () => {

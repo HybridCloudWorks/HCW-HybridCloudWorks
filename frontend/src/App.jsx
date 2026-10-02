@@ -118,6 +118,8 @@ const DockerCodePage = lazyPage(() => import('@/pages/docker/CodePage'));
 const DockerEducationPage = lazyPage(() => import('@/pages/docker/EducationPage'));
 const DockerRssPage = lazyPage(() => import('@/pages/docker/RssPage'));
 const DockerSandboxesPage = lazyPage(() => import('@/pages/docker/SandboxesPage'));
+const DockerBuildingImagesPage = lazyPage(() => import('@/pages/docker/BuildingImagesPage'));
+const DockerDesktopPage = lazyPage(() => import('@/pages/docker/DesktopPage'));
 const DockerToolsPage = lazyPage(() => import('@/pages/docker/ToolsPage'));
 
 // Coder Corner (shared public list page)
@@ -380,6 +382,8 @@ function App() {
               <Route path="/terraform/tools" element={<TerraformToolsPage />} />
               {/* Docker Specifics */}
               <Route path="/docker/sandboxes" element={<DockerSandboxesPage />} />
+              <Route path="/docker/building-images" element={<DockerBuildingImagesPage />} />
+              <Route path="/docker/desktop" element={<DockerDesktopPage />} />
               <Route path="/docker/tools" element={<DockerToolsPage />} />
               {/* GitHub Specifics */}
               <Route path="/github/workflows" element={<GitHubWorkflowsPage />} />

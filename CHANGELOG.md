@@ -19,6 +19,33 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Docker guides: building images, and the Docker Desktop app (#772, #773).**
+  The Docker hub's first two focus areas said "Coming soon". Both now link to
+  a page of their own, the way the sandbox recipe does (#774) and the way
+  Terraform's sections link to theirs, and all three areas read "Available
+  now".
+  - **`/docker/building-images`** walks through `lab-image/Dockerfile` and
+    `publish-lab-image.yml`: the five stages and the `runner` and `full`
+    targets, the base image pinned by digest and the workflow check that holds
+    it to `versions.env`, checksums on every download, the provider mirror and
+    the vendored Azure Verified Modules, the non-root user, `smoke.sh`, the
+    provenance attestation, and the push to GHCR. Each command is printed for
+    PowerShell and bash.
+  - **`/docker/desktop`** installs Docker Desktop on Windows and macOS and
+    covers the dashboard, the WSL 2 backend, resource limits (`.wslconfig`
+    under WSL 2), the labs' "Run it locally" line, and how Desktop relates to
+    Docker Engine on the lab host. The run line is imported from the lab
+    catalogue, not copied. The release (4.93.0 of 2026-09-28), the
+    subscription terms and the requirements were read from docs.docker.com on
+    2026-10-02, and the page carries that date.
+  - Both pages are static routes. They are in `STANDALONE_ROUTES`, so they
+    pre-render, and they are page types in `routeFactory`, so the Docker hub
+    header stays on them. `DockerGuides.test.jsx` checks each page's sections,
+    commands and dates, and holds the building-images page to the Dockerfile,
+    `versions.env`, `smoke.sh` and the workflow, so a change that falsifies a
+    sentence fails a test. The pages pass `public-copy.test.js` with no new
+    allowance: the runner image's registry name and written-out digests stay
+    off the page.
 - **Three weeks' warning before a catalogue row goes stale (#818).** The
   catalogue alarm runs on the real clock. On the day a stored status is
   overtaken by its own dates, CI fails on every branch until someone
