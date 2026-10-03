@@ -421,6 +421,9 @@ GitHub's registry. Only then does the job attest the digest again, under its
 
 ## Prerequisites
 
+The commands in this article are also kept as a reference page, checked against
+the repository, at <https://hybridcloudworks.com/docker/building-images>.
+
 - Docker, with the `buildx` plugin, which Docker Desktop includes and Docker's
   Linux packages provide as `docker-buildx-plugin`. Checked with Docker
   Desktop 4.93.0 and Docker Engine 29.8.1. Part 2 covers installing Docker

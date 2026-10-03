@@ -14,6 +14,8 @@ export default function DockerToolsPage() {
         'Docker Sandboxes, for running a coding agent in isolation',
       ]}
       links={[
+        { label: 'The Docker Desktop app', to: routes.desktop('docker') },
+        { label: 'Building images', to: routes.buildingImages('docker') },
         { label: 'Run an agent in a sandbox', to: routes.sandboxes('docker') },
         { label: 'Back to the Docker hub', to: routes.landing('docker') },
       ]}

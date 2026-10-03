@@ -37,6 +37,8 @@ export type PageType =
   | 'workflows'
   | 'focus'
   | 'sandboxes'
+  | 'buildingImages'
+  | 'desktop'
   | 'rss';
 
 /**
@@ -67,6 +69,9 @@ const ROUTE_MAP: Record<PageType, string> = {
   // recognises `/docker/sandboxes` as a Docker hub page, as `modules` does
   // for `/terraform/modules`.
   sandboxes: 'sandboxes',
+  // Docker's two guides (#772, #773), here for the same reason as `sandboxes`.
+  buildingImages: 'building-images',
+  desktop: 'desktop',
   rss: 'rss',
 };
 
@@ -199,6 +204,8 @@ export const routes = {
   workflows: (provider: ProviderType) => getRoute(provider, 'workflows'),
   focus: (provider: ProviderType) => getRoute(provider, 'focus'),
   sandboxes: (provider: ProviderType) => getRoute(provider, 'sandboxes'),
+  buildingImages: (provider: ProviderType) => getRoute(provider, 'buildingImages'),
+  desktop: (provider: ProviderType) => getRoute(provider, 'desktop'),
   rss: (provider: ProviderType) => getRoute(provider, 'rss'),
 } as const;
 
@@ -249,6 +256,8 @@ export function getAllRoutes(provider: ProviderType) {
     workflows: routes.workflows(provider),
     focus: routes.focus(provider),
     sandboxes: routes.sandboxes(provider),
+    buildingImages: routes.buildingImages(provider),
+    desktop: routes.desktop(provider),
     rss: routes.rss(provider),
   };
 }

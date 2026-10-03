@@ -223,6 +223,16 @@ function renderRoute(pathname) {
   return render(<AppWrapper />);
 }
 
+// Renders a route and expects its level-one heading, and no 404 page.
+async function expectRouteHeading(pathname, heading) {
+  renderRoute(pathname);
+
+  expect(
+    await screen.findByRole('heading', { level: 1, name: heading }, { timeout: 5000 })
+  ).toBeInTheDocument();
+  expect(document.querySelector('[data-page="not-found"]')).toBeNull();
+}
+
 describe('public route contract', () => {
   beforeEach(() => {
     window.scrollTo = vi.fn();
@@ -265,8 +275,9 @@ describe('public route contract', () => {
   // route and the page are checked together. Most are static pages that fetch
   // nothing; the code list (#776) and the podcast page (#777) read through the
   // hooks this file mocks to no data. The blog list is the shared page and the
-  // news page the shared NewsPage (#777), both mocked above. `/docker/tools`
-  // and `/docker/sandboxes` (#774) are static routes, like `/terraform/tools`.
+  // news page the shared NewsPage (#777), both mocked above. `/docker/tools`,
+  // `/docker/sandboxes` (#774), `/docker/building-images` (#772) and
+  // `/docker/desktop` (#773) are static routes, like `/terraform/tools`.
   it.each([
     ['/docker', 'Container intelligence with Docker'],
     ['/docker/blog', 'Docker Containers Blog'],
@@ -277,14 +288,11 @@ describe('public route contract', () => {
     ['/docker/audio', 'Docker Podcast'],
     ['/docker/audio-architecture', 'Docker Podcast'],
     ['/docker/sandboxes', 'Run an agent in a sandbox'],
+    ['/docker/building-images', 'Building images'],
+    ['/docker/desktop', 'The Docker Desktop app'],
     ['/docker/tools', 'Docker Tools'],
   ])('renders the Docker route %s', async (pathname, heading) => {
-    renderRoute(pathname);
-
-    expect(
-      await screen.findByRole('heading', { level: 1, name: heading }, { timeout: 5000 })
-    ).toBeInTheDocument();
-    expect(document.querySelector('[data-page="not-found"]')).toBeNull();
+    await expectRouteHeading(pathname, heading);
   });
 
   it.each([
@@ -294,12 +302,7 @@ describe('public route contract', () => {
   ])(
     'serves the Docker detail page %s through the article template (#776)',
     async (pathname, heading) => {
-      renderRoute(pathname);
-
-      expect(
-        await screen.findByRole('heading', { level: 1, name: heading }, { timeout: 5000 })
-      ).toBeInTheDocument();
-      expect(document.querySelector('[data-page="not-found"]')).toBeNull();
+      await expectRouteHeading(pathname, heading);
     }
   );
 

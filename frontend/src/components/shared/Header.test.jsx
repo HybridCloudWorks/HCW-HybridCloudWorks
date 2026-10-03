@@ -133,13 +133,17 @@ describe('Header provider links (Docker, 2026-09-28)', () => {
     ).toHaveAttribute('href', '/docker/tools');
   });
 
-  it('keeps the Docker hub nav on /docker/sandboxes, a static route outside the provider layout', () => {
-    // The header reads the provider from the path through parseRoute, which
-    // knows only the page types in routeFactory's ROUTE_MAP. Without
-    // `sandboxes` there, this page would show the all-providers list.
-    renderAt('/docker/sandboxes');
-    expect(primaryLabels()).toEqual(['News', 'Blogs', 'Code', 'Sandboxes', 'Tools', 'Learning']);
-  });
+  it.each(['/docker/sandboxes', '/docker/building-images', '/docker/desktop'])(
+    'keeps the Docker hub nav on %s, a static route outside the provider layout',
+    (pathname) => {
+      // The header reads the provider from the path through parseRoute, which
+      // knows only the page types in routeFactory's ROUTE_MAP. Without
+      // `sandboxes`, `buildingImages` and `desktop` there (#774, #772, #773),
+      // these pages would show the all-providers list.
+      renderAt(pathname);
+      expect(primaryLabels()).toEqual(['News', 'Blogs', 'Code', 'Sandboxes', 'Tools', 'Learning']);
+    }
+  );
 
   it('sizes the all-providers columns to their labels', () => {
     // The all-providers list does not fit fixed 90px columns beside the logo:
