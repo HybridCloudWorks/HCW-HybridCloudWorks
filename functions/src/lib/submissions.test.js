@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import { bindConditionValues } from './cosmos-client.js';
 import {
@@ -49,15 +52,15 @@ describe('validateSubmission', () => {
     expect(res.value.tags).toEqual(['azure', 'functions']);
   });
 
-  it('enforces the per-type provider sets — framework cannot claim Aws', () => {
+  it('enforces the per-type provider sets — framework cannot claim Github', () => {
     const res = validateSubmission({
       type: 'framework',
       title: 'T',
       summary: 'A summary here.',
-      provider: 'Aws',
+      provider: 'Github',
       overviewHtml: '<p>overview</p>',
     });
-    expect(res.error).toMatch(/Github, Terraform/);
+    expect(res.error).toMatch(/AWS, Azure, GCP/);
   });
 
   it('requires language for coder_corner', () => {
@@ -65,7 +68,7 @@ describe('validateSubmission', () => {
       type: 'coder_corner',
       title: 'Snippets',
       summary: 'A summary here.',
-      provider: 'AWS',
+      provider: 'Github',
       content: 'article body',
     });
     expect(res.error).toMatch(/Language is required/);
@@ -87,6 +90,52 @@ describe('validateSubmission', () => {
       overviewHtml: '<p>arch</p>',
     });
     expect(good.error).toBeUndefined();
+  });
+});
+
+describe('the per-type provider lists match the submission pages', () => {
+  // Each submission page carries its own PROVIDER_OPTIONS. Until the Docker
+  // provider fix the framework and coder_corner lists here were swapped
+  // against their pages, so both forms were refused outright; read the pages
+  // so the two cannot drift apart again.
+  const PAGES = join(
+    dirname(fileURLToPath(import.meta.url)),
+    '..',
+    '..',
+    '..',
+    'frontend',
+    'src',
+    'pages',
+    'submissions'
+  );
+  const pageOptions = (file) => {
+    const source = readFileSync(join(PAGES, file), 'utf8');
+    const list = /const PROVIDER_OPTIONS = \[([^\]]*)\]/.exec(source);
+    expect(list, `PROVIDER_OPTIONS not found in ${file}`).not.toBeNull();
+    return [...list[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  };
+
+  it.each([
+    ['blog', 'BlogSubmissionPage.jsx'],
+    ['architecture', 'ArchitectureSubmissionPage.jsx'],
+    ['framework', 'FrameworkSubmissionPage.jsx'],
+    ['coder_corner', 'CoderCornerSubmissionPage.jsx'],
+  ])('%s accepts exactly what %s offers', (type, file) => {
+    expect(SUBMISSION_TYPES[type].providers).toEqual(pageOptions(file));
+  });
+
+  it('accepts a Docker blog post and a Docker Coder Corner entry (#775)', () => {
+    expect(validateSubmission(blogBody({ provider: 'Docker' })).error).toBeUndefined();
+    const res = validateSubmission({
+      type: 'coder_corner',
+      title: 'Compose for local stacks',
+      summary: 'A summary here.',
+      cloudProvider: 'Docker',
+      content: 'body',
+      language: 'YAML',
+    });
+    expect(res.error).toBeUndefined();
+    expect(composeSubmissionDoc(res.value).tags.slice(0, 2)).toEqual(['coder-corner', 'docker']);
   });
 });
 
@@ -118,13 +167,13 @@ describe('composeSubmissionDoc', () => {
       type: 'coder_corner',
       title: 'Tips',
       summary: 'S long enough.',
-      provider: 'GCP',
+      provider: 'Terraform',
       content: 'body',
       language: 'Python',
       tags: ['extra'],
     });
     const doc = composeSubmissionDoc(value);
-    expect(doc.tags.slice(0, 2)).toEqual(['coder-corner', 'gcp']);
+    expect(doc.tags.slice(0, 2)).toEqual(['coder-corner', 'terraform']);
     expect(doc.category).toBe('Coder Corner');
   });
 });

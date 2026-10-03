@@ -491,6 +491,36 @@ describe('publishContent', () => {
     expect(version.contentId).toBe('c1');
   });
 
+  it('publishes a Docker blog post at /docker/blog/<slug> (#776 route, Docker provider fix)', async () => {
+    // Before Docker was a provider the CMS knew, normalizeProviderName turned
+    // 'Docker' into '' and validatePublishMetadata refused the publish.
+    const store = makeStore(
+      readyDoc({ type: 'blog', publishTarget: 'blog', cloudProvider: 'Docker', Title: 'Compose Basics' })
+    );
+    const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
+    const body = JSON.parse(
+      (
+        await h.publishContent(
+          makeRequest({
+            contentIds: ['c1'],
+            publishTarget: 'blog',
+            forceQualityBypass: true,
+            forceImageBypass: true,
+          }),
+          context
+        )
+      ).body
+    );
+    expect(body.errors).toEqual([]);
+    expect(body.published).toBe(1);
+
+    const patch = store.patchDoc.mock.calls.find(([c]) => c === 'content')[2];
+    expect(patch.curatedSubpagePath).toBe('/docker/blog/compose-basics');
+    expect(patch.publicUrl).toBe('https://hybridcloudworks.com/docker/blog/compose-basics');
+    expect(patch['Cloud Provider']).toBe('Docker');
+    expect(patch.cloudProvider).toBe('Docker');
+  });
+
   it('refuses non-publishable statuses via the single table', async () => {
     const store = makeStore(readyDoc({ contentStatus: 'in_review' }));
     const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });

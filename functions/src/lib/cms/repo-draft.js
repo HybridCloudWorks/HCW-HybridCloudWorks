@@ -227,13 +227,21 @@ export function countEmbedFences(body) {
   return counts;
 }
 
-/** The first tag that names a provider the CMS knows, else null. */
+/**
+ * The first tag that names a provider the CMS knows, else null.
+ *
+ * Docker only when no other provider is tagged, the rule `docker` being last
+ * in frontend/src/lib/providers.js states: a post about Docker on Azure, in a
+ * GitHub workflow or with Terraform belongs to that provider's blog.
+ */
 export function inferProviderFromTags(tags = []) {
+  let docker = null;
   for (const tag of tags) {
     const provider = normalizeProviderName(tag);
-    if (provider) return provider;
+    if (provider === 'Docker') docker = provider;
+    else if (provider) return provider;
   }
-  return null;
+  return docker;
 }
 
 const refuse = (code, error) => ({ ok: false, code, error });

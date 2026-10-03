@@ -751,7 +751,8 @@ export function createPublicReadHandlers({ store }) {
         // 2026-08-21 when the flag went live and every list call failed with
         // "The index path corresponding to the specified order-by item is
         // excluded": (1) apply-computed-sortdate.mjs --inspect clean;
-        // (2) --apply has run, so the property exists; (3) `/cp_sortDate/?` is
+        // (2) the property exists, which the Terraform apply now guarantees
+        // (azapi_update_resource.cosmos_computed_properties, #816); (3) `/cp_sortDate/?` is
         // an INCLUDED PATH in the container's indexing policy — computed
         // properties are not covered by the `/*` wildcard (Cosmos docs), and an
         // ORDER BY on an unindexed property is an error, not a slow query.

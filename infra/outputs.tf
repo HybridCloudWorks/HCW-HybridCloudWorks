@@ -52,12 +52,13 @@ output "cosmos_database" {
   value       = azurerm_cosmosdb_sql_database.hcw.name
 }
 
-# The account's resource group — what heal-computed-properties.yml needs to
-# address the container through ARM (the cp_sortDate write is control-plane;
-# see oidc.tf). Same pairing guarantee as web_resource_group: read from the
-# account resource itself.
+# The account's resource group. heal-computed-properties.yml addressed the
+# containers through ARM with it until #816 deleted that workflow; nothing reads
+# it now, but scripts/set-github-variables.ps1 still seeds COSMOS_RESOURCE_GROUP
+# from it, so the two go together. Same pairing guarantee as
+# web_resource_group: read from the account resource itself.
 output "cosmos_resource_group" {
-  description = "Resource group holding the Cosmos account — the COSMOS_RESOURCE_GROUP repository variable the healer addresses ARM with"
+  description = "Resource group holding the Cosmos account — seeds the COSMOS_RESOURCE_GROUP repository variable"
   value       = azurerm_cosmosdb_account.hcw.resource_group_name
 }
 

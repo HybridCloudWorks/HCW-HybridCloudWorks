@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * T-206 step 3 — make ORDER BY safe on the public content list.
+ * T-206 — check that the public content list can ORDER BY cp_sortDate safely.
  *
  * The published date lives under five aliases, so a plain ORDER BY silently
  * drops any document missing the chosen field (public-reads.js rule 2). The
@@ -10,40 +10,35 @@
  * TOP window return the NEWEST N documents instead of an arbitrary N, with no
  * backfill and no write-site maintenance.
  *
- * SUPERSEDED BY THE APPLY (#816). infra/cosmos.tf now writes the property in
- * the same apply that could wipe it, from the definition in
- * lib/cosmos-sort-date.mjs, and fails if it is missing. This script and its
- * workflow run until that is proven live, then go.
+ * THE APPLY WRITES THE PROPERTY (#816). infra/cosmos.tf puts cp_sortDate on
+ * `content` and `blogs` in the same apply that could wipe it
+ * (azapi_update_resource.cosmos_computed_properties), from the definition in
+ * lib/cosmos-sort-date.mjs, and fails the run if a container lacks it. The
+ * `--apply` path this script had, and the six-hourly workflow that ran it,
+ * were deleted in #816's second pull request. The file keeps its name so the
+ * references to `apply-computed-sortdate.mjs --inspect` stay true.
  *
- * Why a script and not Terraform: the ARM container resource supports
- * `computedProperties`, but the `azurerm_cosmosdb_sql_container` resource the
- * repo provisions with does not model them. **Drift hazard, read this:** a
- * later `terraform apply` that updates a container PUTs azurerm's view of it,
- * which does not include computed properties — silently wiping them. Re-run
- * `--apply` after any Terraform change that touches `content` or `blogs`.
- * `infra/cosmos-containers.json` records the property as documentation.
+ * What is left is the one check the apply cannot make, because it is about
+ * the DATA rather than the container:
  *
- * Order of operations (each step gates the next):
+ *   `--inspect`  Sample every date alias in `content` and `blogs` and report
+ *                non-ISO values. cp_sortDate sorts ISO-8601 strings
+ *                lexicographically = chronologically; a container holding
+ *                non-ISO date strings would mis-sort, and only the live data
+ *                can say whether any exist. It is the precondition for
+ *                PUBLIC_LIST_SQL_ORDER=1 (infra/functionapp.tf), and the first
+ *                thing to run if the list ever comes back mis-ordered.
  *
- *   1. `--inspect`  Sample every date alias in `content` and `blogs` and
- *                   report non-ISO values. cp_sortDate sorts ISO-8601 strings
- *                   lexicographically = chronologically; a container holding
- *                   non-ISO date strings would mis-sort, and only the live
- *                   data can say whether any exist.
- *   2. `--apply`    Add cp_sortDate to both containers (idempotent).
- *   3. Flip `PUBLIC_LIST_SQL_ORDER=1` on the Function App. listContent then
- *      adds ORDER BY cp_sortDate DESC; without the flag nothing changes, so
- *      deploy order is safe in both directions.
- *
- * Needs COSMOS_ENDPOINT (+ optional COSMOS_DATABASE) and data-plane RBAC
- * (az login locally).
+ * Run locally after `az login`. Needs COSMOS_ENDPOINT (+ optional
+ * COSMOS_DATABASE), a data-plane read on both containers, and an operator
+ * window through `cosmos_admin_ip_rules` (ADR 0025).
  */
 
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 
 // The definition lives in lib/cosmos-sort-date.mjs since #816, shared with the
-// spec generator that now puts it in front of Terraform. Re-exported so this
+// spec generator that puts it in front of Terraform. Re-exported so this
 // script's tests and callers keep their imports.
 import { COMPUTED_PROPERTY, SORT_DATE_CONTAINERS, sortDateQuery } from './lib/cosmos-sort-date.mjs';
 
@@ -85,10 +80,10 @@ async function inspect() {
       }
     }
     if (bad.length === 0) {
-      console.log('  every present date alias is ISO-sortable — safe to --apply');
+      console.log('  every present date alias is ISO-sortable');
     } else {
       dirty += bad.length;
-      console.log(`  ${bad.length} NON-ISO date values — fix these before --apply:`);
+      console.log(`  ${bad.length} NON-ISO date values — these mis-sort under ORDER BY cp_sortDate:`);
       for (const entry of bad.slice(0, 20)) {
         console.log(`    ${entry.id} ${entry.field} = ${JSON.stringify(entry.value)}`);
       }
@@ -98,110 +93,14 @@ async function inspect() {
   process.exit(dirty ? 1 : 0);
 }
 
-// ---------------------------------------------------------------------------
-// --apply goes through ARM, not the data plane.
-//
-// `container.replace()` on the SDK sends the new container definition to the
-// data-plane endpoint, and Cosmos refuses that with an AAD token regardless of
-// which roles the identity holds: "cannot be authorized by AAD token in data
-// plane" (run 32420399977, 2026-08-20). computedProperties is a control-plane
-// attribute. The write is therefore a PUT on the ARM resource
-// Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers, authorized
-// by the narrow custom role infra/oidc.tf defines for exactly this (containers
-// read + write at the account, nothing else).
-//
-// Needs, besides COSMOS_ENDPOINT: SUBSCRIPTION_ID and COSMOS_RESOURCE_GROUP.
-// The account name is the first label of the endpoint host.
-// ---------------------------------------------------------------------------
-const ARM_API = '2024-11-15';
-const ARM_READ_ONLY = new Set([
-  '_rid', '_ts', '_self', '_etag', '_docs', '_sprocs', '_triggers', '_udfs', '_conflicts', 'statistics',
-]);
+const HELP = `Usage: node apply-computed-sortdate.mjs --inspect
 
-/** The PUT body ARM accepts: the GET's `properties.resource` minus read-only keys, with our property merged in. */
-export function buildArmBody(armResource, property = COMPUTED_PROPERTY) {
-  const resource = {};
-  for (const [k, v] of Object.entries(armResource)) if (!ARM_READ_ONLY.has(k)) resource[k] = v;
-  const existing = Array.isArray(resource.computedProperties) ? resource.computedProperties : [];
-  resource.computedProperties = [...existing.filter((p) => p.name !== property.name), property];
-  return { properties: { resource, options: {} } };
-}
+  --inspect   report non-ISO date values in content/blogs; exits 1 if any
+              exist, since they would mis-sort under ORDER BY cp_sortDate
 
-/** True when the container already carries exactly this property. */
-export function hasProperty(armResource, property = COMPUTED_PROPERTY) {
-  return (armResource.computedProperties || []).some((p) => p.name === property.name && p.query === property.query);
-}
-
-function armContainerUrl(name) {
-  const endpoint = process.env.COSMOS_ENDPOINT;
-  const sub = process.env.SUBSCRIPTION_ID;
-  const rg = process.env.COSMOS_RESOURCE_GROUP;
-  if (!endpoint) throw new Error('COSMOS_ENDPOINT is not set');
-  if (!sub || !rg) throw new Error('SUBSCRIPTION_ID and COSMOS_RESOURCE_GROUP are required for --apply (ARM write)');
-  const account = new URL(endpoint).hostname.split('.')[0];
-  const db = process.env.COSMOS_DATABASE || 'hcw';
-  return (
-    `https://management.azure.com/subscriptions/${sub}/resourceGroups/${rg}` +
-    `/providers/Microsoft.DocumentDB/databaseAccounts/${account}/sqlDatabases/${db}/containers/${name}` +
-    `?api-version=${ARM_API}`
-  );
-}
-
-async function armFetch(url, init = {}, token) {
-  const res = await fetch(url, { ...init, headers: { ...(init.headers || {}), Authorization: `Bearer ${token}` } });
-  return res;
-}
-
-async function apply() {
-  const { DefaultAzureCredential } = await import('@azure/identity');
-  const { token } = await new DefaultAzureCredential().getToken('https://management.azure.com/.default');
-
-  for (const name of CONTAINERS) {
-    const url = armContainerUrl(name);
-    const got = await armFetch(url, {}, token);
-    if (!got.ok) throw new Error(`${name}: ARM GET ${got.status} — ${(await got.text()).slice(0, 300)}`);
-    const current = (await got.json()).properties.resource;
-
-    if (hasProperty(current)) {
-      console.log(`${name}: cp_sortDate already applied`);
-      continue;
-    }
-
-    const body = buildArmBody(current);
-    const put = await armFetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, token);
-    if (!put.ok) throw new Error(`${name}: ARM PUT ${put.status} — ${(await put.text()).slice(0, 300)}`);
-
-    // ARM container writes are asynchronous: poll the operation until it settles.
-    const poll = put.headers.get('azure-asyncoperation') || put.headers.get('location');
-    if (put.status === 202 && poll) {
-      for (let i = 0; i < 60; i += 1) {
-        await new Promise((r) => setTimeout(r, 5000));
-        const st = await armFetch(poll, {}, token);
-        const js = st.ok ? await st.json().catch(() => ({})) : {};
-        const state = js.status || js.properties?.provisioningState;
-        if (state && /succeeded/i.test(state)) break;
-        if (state && /failed|canceled/i.test(state)) throw new Error(`${name}: ARM operation ${state}`);
-      }
-    }
-
-    const check = await armFetch(url, {}, token);
-    const after = (await check.json()).properties.resource;
-    if (!hasProperty(after)) throw new Error(`${name}: PUT accepted but cp_sortDate is not on the container afterwards`);
-    console.log(`${name}: cp_sortDate ${current.computedProperties?.some((p) => p.name === COMPUTED_PROPERTY.name) ? 'updated' : 'added'}`);
-  }
-  console.log('\nNow flip PUBLIC_LIST_SQL_ORDER=1 on the Function App and');
-  console.log('re-run smoke-deployed.mjs — list order should be newest-first.');
-}
-
-const HELP = `Usage: node apply-computed-sortdate.mjs --inspect | --apply
-
-  --inspect   report non-ISO date values in content/blogs (run FIRST;
-              exits 1 if any exist — fix them before applying)
-  --apply     add the cp_sortDate computed property to both containers
-
---inspect needs COSMOS_ENDPOINT (+ COSMOS_DATABASE) and data-plane RBAC.
---apply additionally needs SUBSCRIPTION_ID and COSMOS_RESOURCE_GROUP, and
-writes through ARM (containers read+write on the account — infra/oidc.tf).
+Needs COSMOS_ENDPOINT (+ COSMOS_DATABASE) and a data-plane read on both
+containers. The cp_sortDate property itself is written by the Terraform
+apply (azapi_update_resource.cosmos_computed_properties, #816).
 `;
 
 // pathToFileURL, not `file://${argv[1]}`: on Windows argv[1] is `C:\...`, which
@@ -209,12 +108,11 @@ writes through ARM (containers read+write on the account — infra/oidc.tf).
 // nothing. Same fix as check-deploy-drift.mjs.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const mode = process.argv[2];
-  const run = mode === '--inspect' ? inspect : mode === '--apply' ? apply : null;
-  if (!run) {
+  if (mode !== '--inspect') {
     console.log(HELP);
     process.exit(mode === '--help' || mode === '-h' ? 0 : 2);
   }
-  run().catch((err) => {
+  inspect().catch((err) => {
     console.error(err);
     process.exit(1);
   });

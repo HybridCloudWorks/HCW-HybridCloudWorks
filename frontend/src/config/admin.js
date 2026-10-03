@@ -46,7 +46,19 @@ export const CONTENT_STATUSES = {
   REJECTED: 'rejected',
 };
 
-// Cloud provider options shared across admin pages
+// Cloud provider options shared across admin pages: the providers an article
+// can be filed and published under. Each value is what the server's
+// normalizeProviderName (functions/src/lib/cms/content-update-validation.js)
+// stores, so the two lists change together.
+//
+// Read by the review board's provider picker (BlogReviewBoard) and the
+// Publish-Ready Builder's provider and landing-zone dropdowns (StageOneCard).
+// The editor filter and the public submission forms keep their own local
+// lists, which already carry Docker where it belongs (#775).
+//
+// Docker since its blog route (#776): without it a Docker article could not be
+// sent to the publish queue, and the builder could infer Docker from a URL
+// (pageMeta.js) but not show it.
 export const PROVIDER_OPTIONS = [
   { value: 'Azure', label: 'Azure' },
   { value: 'Aws', label: 'AWS' },
@@ -54,6 +66,7 @@ export const PROVIDER_OPTIONS = [
   { value: 'Github', label: 'GitHub' },
   { value: 'Terraform', label: 'Terraform' },
   { value: 'Finops', label: 'FinOps' },
+  { value: 'Docker', label: 'Docker' },
 ];
 
 // Same list with an auto-detect option for submission forms

@@ -98,6 +98,12 @@ export function assertJsonSize(value, fieldName, maxChars = 120_000) {
   return value;
 }
 
+/**
+ * A provider spelling -> the canonical value the CMS stores in
+ * `Cloud Provider`, or '' for one it cannot publish under. publish.js
+ * lower-cases the result into the URL, so 'Docker' lands at
+ * /docker/blog/<slug> (the route since #776).
+ */
 export function normalizeProviderName(value) {
   const key = String(value || '')
     .toLowerCase()
@@ -109,6 +115,10 @@ export function normalizeProviderName(value) {
   if (key === 'github') return 'Github';
   if (key === 'terraform') return 'Terraform';
   if (key === 'finops') return 'Finops';
+  // Docker since its blog route arrived (#776). Before this, a Docker article
+  // normalised to '' and could be neither filed under Docker on the review
+  // board nor published.
+  if (key === 'docker') return 'Docker';
   return '';
 }
 
@@ -195,7 +205,9 @@ function tryNormalizeKnownField(normalized, field, value) {
   if (field === 'cloudProvider' || field === 'Cloud Provider') {
     const provider = normalizeProviderName(value);
     if (!provider) {
-      throw new Error(`cloudProvider must be one of: Aws, Azure, Gcp, Github, Terraform, Finops`);
+      throw new Error(
+        `cloudProvider must be one of: Aws, Azure, Gcp, Github, Terraform, Finops, Docker`
+      );
     }
     normalized.cloudProvider = provider;
     normalized['Cloud Provider'] = provider;

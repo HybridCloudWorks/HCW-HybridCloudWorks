@@ -18,6 +18,7 @@ import { brandingFor, buildCoverSvg } from './triggers/cover-svg.js';
 import { ANALYSIS_SYSTEM_PROMPT } from './content/inspect.js';
 import { VERTICAL_VOICE, voiceForProvider } from './content/voice.js';
 import { ADMIN_PROMPT_PAGE_ALLOWLIST } from './cms/image-prompts.js';
+import { normalizeProviderName } from './cms/content-update-validation.js';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const frontend = (...parts) => readFileSync(join(REPO, 'frontend', 'src', ...parts), 'utf8');
@@ -109,5 +110,26 @@ describe('the admin copy of the hero list', () => {
     expect(block, 'HERO_PROVIDERS in settingShared.jsx').not.toBeNull();
     const admin = [...block[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
     expect(admin).toEqual([...HERO_PROVIDERS]);
+  });
+});
+
+describe('the admin provider list', () => {
+  // frontend/src/config/admin.js PROVIDER_OPTIONS feeds the review board's
+  // provider picker. A value the server cannot normalise is a button whose
+  // save is refused and a post that can never reach the publish queue, which
+  // is what Docker was until the provider fix.
+  const source = frontend('config', 'admin.js');
+  const block = /export const PROVIDER_OPTIONS = \[([\s\S]*?)\];/.exec(source);
+  const values = block ? [...block[1].matchAll(/value: '([^']+)'/g)].map((m) => m[1]) : [];
+
+  it('offers only providers the server stores as written', () => {
+    expect(block, 'PROVIDER_OPTIONS in config/admin.js').not.toBeNull();
+    expect(values.length).toBeGreaterThan(0);
+    for (const value of values) expect(normalizeProviderName(value), value).toBe(value);
+  });
+
+  it('offers Docker, stored as Docker', () => {
+    expect(values).toContain('Docker');
+    expect(normalizeProviderName('docker')).toBe('Docker');
   });
 });

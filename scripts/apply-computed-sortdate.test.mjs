@@ -5,17 +5,14 @@
  * and frontend resolve in JS, in the same priority order, and that the
  * ISO gate the --inspect step applies matches what lexicographic order needs.
  *
- * The ARM body tests below pin the control-plane write that --apply performs
- * since 2026-08-21: the GET's `properties.resource` minus ARM's read-only
- * keys, with cp_sortDate merged in exactly once.
+ * The ARM body tests that pinned the old `--apply` write went with that path
+ * (#816, part 2): the Terraform apply writes the property now.
  */
 import { describe, it, expect } from 'vitest';
 import {
   sortDateQuery,
   COMPUTED_PROPERTY,
   isSortableIso,
-  buildArmBody,
-  hasProperty,
 } from './apply-computed-sortdate.mjs';
 
 describe('sortDateQuery', () => {
@@ -56,55 +53,10 @@ describe('isSortableIso — the --inspect gate', () => {
   });
 });
 
-// The ARM GET body of a container, as observed on cosmos-site-prod-cus on
-// 2026-08-21 (shape only — read-only keys and all).
-const armResource = {
-  id: 'content',
-  indexingPolicy: { indexingMode: 'consistent', automatic: true, includedPaths: [{ path: '/*' }], excludedPaths: [] },
-  partitionKey: { paths: ['/id'], kind: 'Hash' },
-  uniqueKeyPolicy: { uniqueKeys: [] },
-  conflictResolutionPolicy: { mode: 'LastWriterWins', conflictResolutionPath: '/_ts' },
-  backupPolicy: { type: 'Continuous' },
-  geospatialConfig: { type: 'Geography' },
-  _rid: 'x', _ts: 1, _self: 'dbs/x/colls/y', _etag: '"e"', _docs: 'docs/', _sprocs: 'sprocs/', _triggers: 't/', _udfs: 'u/', _conflicts: 'c/',
-  computedProperties: [],
-  statistics: [],
-};
-
-describe('buildArmBody — the --apply control-plane write', () => {
-  it('strips every read-only key and keeps the rest of the resource intact', () => {
-    const { properties } = buildArmBody(armResource);
-    for (const k of ['_rid', '_ts', '_self', '_etag', '_docs', '_sprocs', '_triggers', '_udfs', '_conflicts', 'statistics']) {
-      expect(properties.resource).not.toHaveProperty(k);
-    }
-    expect(properties.resource.id).toBe('content');
-    expect(properties.resource.partitionKey).toEqual(armResource.partitionKey);
-    expect(properties.resource.indexingPolicy).toEqual(armResource.indexingPolicy);
-    expect(properties.options).toEqual({});
-  });
-
-  it('adds cp_sortDate once and replaces a stale definition rather than duplicating it', () => {
-    const stale = {
-      ...armResource,
-      computedProperties: [
-        { name: 'cp_sortDate', query: 'SELECT VALUE 1 FROM c' },
-        { name: 'other', query: 'SELECT VALUE 2 FROM c' },
-      ],
-    };
-    const { properties } = buildArmBody(stale);
-    expect(properties.resource.computedProperties.map((p) => p.name)).toEqual(['other', 'cp_sortDate']);
-    expect(properties.resource.computedProperties.at(-1).query).toBe(sortDateQuery());
-  });
-
-  it('hasProperty is exact on name AND query', () => {
-    expect(hasProperty(armResource)).toBe(false);
-    expect(hasProperty({ computedProperties: [{ name: 'cp_sortDate', query: 'SELECT VALUE 1 FROM c' }] })).toBe(false);
-    expect(hasProperty({ computedProperties: [COMPUTED_PROPERTY] })).toBe(true);
-  });
-
-  it('does not mutate the input', () => {
-    const copy = structuredClone(armResource);
-    buildArmBody(armResource);
-    expect(armResource).toEqual(copy);
+describe('the write path is gone (#816)', () => {
+  it('exports no ARM write helpers', async () => {
+    const mod = await import('./apply-computed-sortdate.mjs');
+    expect(mod).not.toHaveProperty('buildArmBody');
+    expect(mod).not.toHaveProperty('hasProperty');
   });
 });

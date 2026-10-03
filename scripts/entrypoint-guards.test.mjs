@@ -35,6 +35,13 @@ describe('entry-point guards fire when the script is invoked directly', () => {
     expect(got.stdout).toContain('Usage: node apply-computed-sortdate.mjs');
   });
 
+  it('apply-computed-sortdate.mjs refuses --apply, which the Terraform apply replaced (#816)', () => {
+    const got = run('apply-computed-sortdate.mjs', ['--apply'], process.env);
+    expect(got.code).toBe(2);
+    expect(got.stdout).toContain('Usage: node apply-computed-sortdate.mjs --inspect');
+    expect(got.stdout).not.toContain('--apply');
+  });
+
   it('smoke-deployed.mjs refuses to run without --base and exits non-zero', () => {
     const env = { ...process.env };
     delete env.SMOKE_BASE_URL;

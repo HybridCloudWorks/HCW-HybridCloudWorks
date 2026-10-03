@@ -231,25 +231,14 @@ export const DECLARED = [
     after: 'true',
     reason: '#701: the probeAiProviders timer catalogued and armed in one apply',
   },
-  // #816: cp_sortDate moves inside the apply. The first plan creates one
-  // update resource per container that carries a computed property; after
-  // that they plan nothing unless their container changes.
+  // #816 part 2: with cp_sortDate written by the apply (part 1, applied
+  // 2026-10-03), the healer's custom-role assignment on the deploy identity
+  // goes. Its role definition is the owner's, outside Terraform, so it is a
+  // data source here and plans no change of its own.
   {
-    address: 'azapi_update_resource.cosmos_computed_properties["blogs"]',
-    action: 'create',
-    reason: '#816: cp_sortDate on blogs, written by the apply instead of the six-hourly healer',
-  },
-  {
-    address: 'azapi_update_resource.cosmos_computed_properties["content"]',
-    action: 'create',
-    reason: '#816: cp_sortDate on content, written by the apply instead of the six-hourly healer',
-  },
-  {
-    address: 'azurerm_monitor_scheduled_query_rules_alert_v2.function_http_5xx',
-    path: 'window_duration',
-    before: 'PT30M',
-    after: 'PT15M',
-    reason: '#816: the 5xx alert back to its stated 15 minutes; #250 had given it the window of the availability probe',
+    address: 'azurerm_role_assignment.github_deploy_cosmos_container_writer',
+    action: 'delete',
+    reason: "#816: the six-hourly healer is deleted, and with it the deploy identity's container-definition role",
   },
 ];
 

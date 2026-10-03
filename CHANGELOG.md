@@ -2089,6 +2089,37 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **The six-hourly `cp_sortDate` healer is gone (#816, part 2).** Part 1
+  (#829, applied 2026-10-03) made the apply write `cp_sortDate` onto
+  `content` and `blogs` whenever it updates either container, and fail when
+  one lacks it. With that holding, the band-aid comes out.
+  - `.github/workflows/heal-computed-properties.yml` is deleted. No workflow
+    writes computed properties any more.
+  - `azurerm_role_assignment.github_deploy_cosmos_container_writer` and its
+    `data.azurerm_role_definition.cosmos_container_writer` lookup leave
+    `infra/oidc.tf`, so the deploy identity holds no Cosmos control-plane
+    write. `infra/roles/cosmos-container-writer.json` goes with them. The role
+    definition was created by hand, outside Terraform, so the owner deletes it
+    by hand after the apply.
+  - `scripts/apply-computed-sortdate.mjs` loses `--apply` and its ARM
+    helpers. `--inspect` stays: it is the one check the apply cannot make,
+    that every date alias in the data is ISO-sortable, and it now runs
+    locally. `--apply` exits 2 with the usage text, which a test pins.
+  - `scripts/assert-expected-plan.mjs` declares the role assignment's delete
+    and drops part 1's three declarations, which have applied. A declared
+    delete must now name a resource that `infra/*.tf` no longer declares.
+  - The runbook's computed-properties row, Required-Inputs (the custom-role
+    table, `CLIENT_ID`, and `COSMOS_ENDPOINT` and `COSMOS_RESOURCE_GROUP`,
+    now read by nothing), and the comments that described the healer as
+    running now describe what is true.
+- **App-settings values pass through `tostring()` (#837).** The
+  `azapi_update_resource` that strips `AzureWebJobsStorage` from the Function
+  App's settings now wraps each value in `tostring()`. Every value is already
+  a string, so the plan does not change. If a value ever comes back as an
+  object or a list, the apply now stops with an error instead of writing it
+  back in that shape. It was held back while T-513 was open, and T-513 closed
+  as a name collision rather than a value problem. The comment in
+  `infra/functionapp.tf` no longer calls the hardening pending.
 - **Comments no longer send readers to `TODO.md` for open work (#821).**
   `TODO.md` stopped carrying work on 2026-09-05, but about 120 files still
   cited it, mostly as `(TODO.md T-nnn)`. A reader who followed one found a
@@ -2620,6 +2651,33 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **A Docker article can be filed and published under Docker.** #776 added
+  `/docker/blog/<slug>`, but the CMS did not know Docker as a provider:
+  `normalizeProviderName` turned `Docker` into `''`. The review board offered
+  no Docker button, and "Send to Publish Queue" stays disabled until a
+  provider is set, so a Docker article could go nowhere.
+  - `normalizeProviderName` maps any casing of `docker` to `Docker`, the
+    stored value, in the same style as `Aws` and `Finops`. Updates naming it
+    are accepted, and publishing places the article at
+    `/docker/blog/<slug>`. A test publishes one there end to end.
+  - `PROVIDER_OPTIONS` in `frontend/src/config/admin.js` gains Docker. It is
+    the shared list, read only by the review board's picker and the
+    Publish-Ready Builder's provider and landing-zone dropdowns, and all
+    three need it. The Builder could already infer Docker from a URL but not
+    show it. The editor filter and the submission forms keep their own lists
+    and already had Docker (#775), so nothing is duplicated.
+    `docker-cms.test.js` holds every value in the shared list to
+    `normalizeProviderName`.
+  - `inferProviderFromTags` returns `Docker` for a `docker` tag, but only when
+    no other provider is tagged. Docker on Azure is Azure, the same rule as
+    `docker` coming last in `providers.js`. The server's URL inference and
+    the recording drafter know Docker too, also last.
+  - The public submissions API accepted no Docker submission, though the blog
+    and Coder Corner forms have offered it since #775. Worse, its framework
+    and Coder Corner lists had been swapped since the API was written, so it
+    refused every submission from either form. Each list is now its page's
+    list, and `submissions.test.js` reads the pages to keep them that way.
+    `ci.yml` runs the functions tests when those pages or `admin.js` change.
 - **AZ-800, AZ-801 and Google's PAA re-read on the day their dates passed
   (#770).** From 2026-10-01 the catalogue alarm failed on every branch for
   three rows dated 2026-09-30. Each vendor page was re-read that day.

@@ -150,4 +150,10 @@ describe('normalizeProviderName', () => {
     expect(normalizeProviderName('Fin-Ops')).toBe('Finops');
     expect(normalizeProviderName('oracle')).toBe('');
   });
+
+  it('canonicalizes Docker to the stored value Docker, whatever the casing', () => {
+    expect(normalizeProviderName('Docker')).toBe('Docker');
+    expect(normalizeProviderName('docker')).toBe('Docker');
+    expect(normalizeProviderName(' DOCKER ')).toBe('Docker');
+  });
 });

@@ -127,6 +127,7 @@ export const KNOWN_CLOUD_PROVIDERS = Object.freeze([
   'Github',
   'Terraform',
   'Finops',
+  'Docker',
   'Multi',
 ]);
 

@@ -73,6 +73,8 @@ export function inferProviderFromUrl(url = '') {
   if (normalized.includes('github')) return 'Github';
   if (normalized.includes('terraform')) return 'Terraform';
   if (normalized.includes('finops')) return 'Finops';
+  // Last, as in the client's pageMeta.js: Docker on Azure is Azure.
+  if (normalized.includes('docker')) return 'Docker';
   return 'Multi';
 }
 

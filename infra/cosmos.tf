@@ -337,7 +337,7 @@ resource "azurerm_cosmosdb_sql_container" "hcw" {
 # written.
 #
 # The postcondition turns "the property is missing" into a failed plan or
-# apply rather than a silent healer run. A wipe made outside Terraform shows
+# apply rather than a silent repair. A wipe made outside Terraform shows
 # on the next plan as a refreshed output without the property, and the plan
 # stops there. It is not a new permanent diff: these are conditional
 # replacements, listed as such in scripts/assert-expected-plan.mjs.
@@ -352,7 +352,7 @@ locals {
 resource "azapi_update_resource" "cosmos_computed_properties" {
   for_each = local.cosmos_computed_properties
 
-  # The version apply-computed-sortdate.mjs has PUT with since 2026-08-20.
+  # The version the healer's ARM PUT used from 2026-08-20 until #816 retired it.
   type        = "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-11-15"
   resource_id = azurerm_cosmosdb_sql_container.hcw[each.key].id
 

@@ -147,12 +147,15 @@ resource "azurerm_federated_identity_credential" "github_branch_immutable" {
 # form survives an org rename breaking the IDs' association, the ID form
 # survives a rename outright. Six credentials against a cap of 20.
 #
-# The branch pair is NOT redundant now and must not be deleted alongside a
-# future data-migration cleanup. heal-computed-properties.yml and
-# publish-content-manifest.yml declare no environment, so they still present
-# the ref subject. The rule is per-workflow, not per-repository: a workflow
-# that names an environment needs an environment credential, one that does not
-# needs the branch credential, and this identity serves both kinds.
+# The rule is per-workflow, not per-repository: a workflow that names an
+# environment needs an environment credential, one that does not needs the
+# branch credential. This said the branch pair was still needed because
+# heal-computed-properties.yml and publish-content-manifest.yml declared no
+# environment. publish-content-manifest has signed in as the reader identity
+# since T-728, and the healer was deleted in #816 part 2, so no workflow on
+# THIS identity presents the ref subject today. Retiring the branch pair is an
+# identity decision for the owner, as the data-migration pair was (T-524), so
+# it stays until that decision is made.
 # ---------------------------------------------------------------------------
 resource "azurerm_federated_identity_credential" "github_production" {
   name                      = "github-${var.github_repo}-env-production"
@@ -222,7 +225,7 @@ resource "azurerm_role_assignment" "github_deploy_funcsa_network" {
 # So there are two identities now, and the division is what the job DOES, not
 # which team owns it:
 #
-#   github_deploy   writes something      deploy-functions, heal-computed-properties
+#   github_deploy   writes something      deploy-functions, deploy-azure-frontend
 #   github_reader   writes nothing        monitor-functions-registered,
 #                                         verify-alert-state, publish-content-manifest
 #
@@ -484,51 +487,31 @@ resource "azurerm_role_assignment" "github_copilot_review_reader" {
 #   - anything at subscription scope.
 
 # ---------------------------------------------------------------------------
-# heal-computed-properties.yml — a control-plane write, so an ARM role
+# REMOVED (#816, part 2) — the healer's container-definition role
 # ---------------------------------------------------------------------------
-# azurerm_cosmosdb_sql_container cannot express computedProperties, so any
-# apply that updates the `content` or `blogs` container wipes cp_sortDate —
-# and with PUBLIC_LIST_SQL_ORDER=1 live, that breaks the public content list
-# (T-206). scripts/apply-computed-sortdate.mjs re-applies it.
+# azurerm_cosmosdb_sql_container cannot express computedProperties, so an apply
+# that updates the `content` or `blogs` container used to wipe cp_sortDate
+# (T-206). Until #816, heal-computed-properties.yml put it back every six hours
+# through an ARM PUT, authorized by a custom role assigned here:
+# `data.azurerm_role_definition.cosmos_container_writer` looked up
+# "HCW Cosmos Container Definition Writer" and
+# `azurerm_role_assignment.github_deploy_cosmos_container_writer` granted it to
+# this identity at the account scope.
 #
-# Setting computedProperties is a CONTROL-PLANE operation. The healer
-# originally did it through the SDK's container.replace(), which goes to the
-# data-plane endpoint, and Cosmos refuses that with an AAD token no matter
-# which roles the identity holds: run 32420399977 (2026-08-20) failed with
-# "cannot be authorized by AAD token in data plane" while holding Data
-# Contributor on exactly those containers. The write now goes through ARM
-# (a PUT on .../sqlDatabases/hcw/containers/{name}), and the authorization
-# for that is a custom role: containers read + write on the account and
-# nothing else. Not "Cosmos DB Operator" — that is databaseAccounts/* minus
-# keys, which also covers the firewall, the database and every container's
-# existence, none of which the healer has any business touching.
+# The apply writes the property itself now, in the same run that could wipe it,
+# and fails if a container lacks it afterwards
+# (azapi_update_resource.cosmos_computed_properties in cosmos.tf, #829). So the
+# workflow, the script's --apply path and the assignment went together, and
+# this identity no longer holds any Cosmos control-plane write. The role
+# DEFINITION was the owner's, created by hand from infra/roles/ because the
+# Terraform identity cannot create definitions, so it is deleted by hand too,
+# after the apply that destroys the assignment (Azure refuses to delete a
+# definition that still has one).
 #
-# The two container-scoped DATA-PLANE grants below stay: --inspect reads
-# documents in content and blogs to check the date aliases are ISO-sortable,
-# and that is a data-plane read.
-# The role DEFINITION is not managed here. Creating one needs
-# Microsoft.Authorization/roleDefinitions/write, which the Terraform run
-# identity deliberately does not hold (it is Contributor + Role Based Access
-# Control Administrator: it may assign roles, not invent them — the first
-# apply of this block proved it with a 403 on 2026-08-21). Same split as the
-# bootstrap identity itself: the owner creates the definition once from the
-# reviewed JSON in infra/roles/, and Terraform consumes it by name and does
-# the assignment.
-#
-#   az role definition create --role-definition @infra/roles/cosmos-container-writer.json
-#
-# To change the permission set: edit the JSON, `az role definition update`,
-# and nothing here moves. A rename is the one change that needs both.
-data "azurerm_role_definition" "cosmos_container_writer" {
-  name  = "HCW Cosmos Container Definition Writer"
-  scope = azurerm_cosmosdb_account.hcw.id
-}
-
-resource "azurerm_role_assignment" "github_deploy_cosmos_container_writer" {
-  scope              = azurerm_cosmosdb_account.hcw.id
-  role_definition_id = data.azurerm_role_definition.cosmos_container_writer.id
-  principal_id       = azurerm_user_assigned_identity.github_deploy.principal_id
-}
+# The two container-scoped DATA-PLANE grants below are not part of this
+# removal. Their reader was the workflow's dispatch-only
+# `--inspect`; with the workflow gone, `apply-computed-sortdate.mjs --inspect`
+# runs locally under the operator's own sign-in.
 
 # `name` omitted on the data-plane assignments for the same reason as
 # func_cosmos in main.tf: the provider generates a stable GUID, and a
@@ -595,17 +578,17 @@ resource "azurerm_cosmosdb_sql_role_assignment" "github_deploy_cosmos_blogs" {
 #   github_deploy_funcsa_network           Storage Account Contributor on the
 #                                          FUNCTIONS host account only, for the
 #                                          per-run firewall window.
-#   github_deploy_cosmos_container_writer  the custom container-definition role
-#                                          at account scope, for the healer's
-#                                          ARM PUT of computedProperties.
 #   github_deploy_cosmos_content           data-plane Data Contributor scoped to
 #   github_deploy_cosmos_blogs             colls/content and colls/blogs, for
 #                                          apply-computed-sortdate --inspect.
 #
+# (github_deploy_cosmos_container_writer, the custom container-definition role
+# that sat in this list for the healer's ARM PUT, was removed in #816 part 2.)
+#
 # The two container-scoped Cosmos grants are UNAFFECTED by dropping the
 # database-scoped one. They are separate assignments; the database scope was a
-# superset sitting alongside them, not their parent. The healer keeps data-plane
-# access to exactly the two containers it reads, and loses everything else.
+# superset sitting alongside them, not their parent. The identity kept data-plane
+# access to exactly the two containers the healer read, and lost everything else.
 #
 # The two storage grants had no consumer to lose. Nothing in .github/workflows
 # addresses the content storage account, and scripts/apply-computed-sortdate.mjs
