@@ -20,7 +20,7 @@ This project has not cut a tagged release; entries are grouped under
 ### Added
 
 - **Drafts: a ContentForge stage before the Content Queue, at `/admin/drafts`
-  (owner request 2026-10-03).** Articles drafted as `docs/content/*.md` files
+  (#840, owner request 2026-10-03).** Articles drafted as `docs/content/*.md` files
   could only be read on the site by importing them straight into review. They
   now have a stage of their own, saved in the site: create, edit, delete and
   push forward from any device, with no GitHub credential and no pull request
