@@ -19,9 +19,11 @@
 # which matches the permissions this deployment is expected to run under.
 #
 # The one thing that needs Entra rights is the API app registration behind
-# var.entra_api_audience. That was a one-time manual step, done by
-# scripts/cutover/01-entra-api.ps1 (the registration is "HCWSite API"), and
-# it is deliberately not automated here. Required-Inputs §4.1 lists the
+# var.entra_api_audience ("HCWSite API"). It is a prerequisite created by hand,
+# once, and deliberately not automated here. scripts/cutover/01-entra-api.ps1
+# does not create it: it asserts the registration, its scope, app roles and
+# token version exist, then grants the role. If the registration is missing,
+# that script stops rather than guessing. Required-Inputs §4.1 lists the
 # workspace variable that carries its client id.
 # =============================================================================
 

@@ -126,16 +126,15 @@ jobs:
         working-directory: frontend
     steps:
       - name: Refuse a deploy from a ref that is not main
-        # The `production` environment records who deployed but does not gate
-        # whether they may: GitHub auto-creates a missing environment with no
-        # protection rules, and the federated credential's subject is
-        # environment-scoped, so it matches from ANY branch. Without this step
-        # a dispatch from an unreviewed ref ships to production past all 12
-        # required contexts (T-705). This is the repository-side half. The
-        # environment-side half is now in place too: read on 2026-10-02, the
-        # `production` environment carries required reviewers and a main-only
-        # deployment-branch policy. This step stays as the check that does not
-        # depend on a setting someone can change in the UI.
+        # The federated credential's subject is environment-scoped, so it
+        # matches from ANY branch, and GitHub auto-creates a missing
+        # environment with no protection rules. Without a gate a dispatch from
+        # an unreviewed ref ships to production past all 12 required contexts
+        # (T-705). Read live on 2026-10-02, the `production` environment does
+        # gate: one required reviewer (saulpatinojr) and a main-only
+        # deployment-branch policy (Required-Inputs §4.4). Both are settings
+        # outside the repository that nothing in a checkout can prove are
+        # still set, so this step stays as the repository-side backstop.
         if: github.ref != 'refs/heads/main'
         # Overrides the job's `working-directory: frontend`: this step runs
         # before checkout, so that directory does not exist yet.
@@ -347,10 +346,11 @@ jobs:
     needs: build
     runs-on: ubuntu-26.04
     # Binding the job to an environment gives production deploys a deployment
-    # history and a place to hang an approval gate. It does NOT create the gate
-    # on its own: GitHub auto-creates a missing environment with no protection
-    # rules, so until required reviewers are configured on the `production`
-    # environment this records who deployed without gating whether they may
+    # history and an approval gate. The gate lives in the environment, not
+    # here: read live on 2026-10-02, `production` has one required reviewer
+    # and a main-only deployment-branch policy (Required-Inputs §4.4). Without
+    # them GitHub would auto-create a bare environment that records who
+    # deployed without gating whether they may
     # (T-705).
     environment: production
     # id-token for the federated login that mints the deployment token (T-727).

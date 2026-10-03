@@ -811,10 +811,12 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # change STOPS appearing, because a strip that is not running is how
     # AzureWebJobsStorage comes back (T-511).
     #
-    # It runs in CI as `tfc-plan-check.yml`, dispatched against the run HCP
-    # Terraform planned for a commit (`--commit`, T-724 and #298), on the
-    # `TFC_TOKEN` secret. It is dispatch-only by design: that workflow's header
-    # explains why a per-pull-request check would report on the wrong run.
+    # It runs in CI as `tfc-plan-check.yml`, on the `TFC_TOKEN` secret, and
+    # `--commit` (T-724, #298) picks the run HCP Terraform planned for a given
+    # commit. It is dispatch-only by design: the decision it gates comes after
+    # the merge, when a queued plan is waiting to be confirmed, so it is
+    # dispatched then, with the merge commit. A speculative plan on a pull
+    # request gates nothing. That workflow's header has the full reasoning.
     #
     # ON EVERY azurerm MINOR UPGRADE, re-test issue #29149. If it has closed,
     # delete the azapi pair, T-511 and scripts/assert-expected-plan.mjs
@@ -940,8 +942,8 @@ resource "azapi_update_resource" "function_app_settings_without_webjobs_storage"
     # strings — but doing it now could silently remove the very fault under
     # investigation and destroy the evidence. That was the reason while T-513
     # was open. T-513 has since closed as a name collision rather than a value
-    # problem (CHANGELOG.md), so the hardening is no longer blocked; it is not
-    # done here because this comment-only change must not alter the plan.
+    # problem (CHANGELOG.md), so the hardening is no longer blocked. It is
+    # #837, kept out of a comment-only change because it alters the plan.
     properties = merge(
       {
         for key, value in azapi_resource_action.function_app_settings.output.properties :
