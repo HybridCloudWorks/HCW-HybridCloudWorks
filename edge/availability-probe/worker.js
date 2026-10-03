@@ -6,9 +6,11 @@
  * Bot Fight Mode answers datacenter clients asking for
  * https://api-azure.<domain>/api/health with a 403 interstitial. A WAF skip
  * rule against it was built, applied and confirmed inert, because Bot Fight
- * Mode does not run on the Ruleset Engine (T-519; recorded in ADR 0024). So the standard web test in infra/observability.tf
- * cannot be armed, and the one signal that survives the app being completely
- * down — reachability — has no alert behind it.
+ * Mode does not run on the Ruleset Engine (T-519; recorded in ADR 0024). So
+ * the standard web test in infra/observability.tf cannot be armed, and without
+ * this Worker the one signal that survives the app being completely down —
+ * reachability — would have no alert behind it. With it, that alert is
+ * `alert-api-reachability-*`, armed since 2026-09-01.
  *
  * This Worker is the alternative: a cron-triggered probe running on
  * Cloudflare itself. A subrequest from a same-account Worker to its own zone

@@ -463,8 +463,9 @@ describe('property 3 — every route evaluates CORS', () => {
 
 describe('non-HTTP triggers', () => {
   it('the scheduler timers stay behind one feature flag', () => {
-    // Not an authorization surface, but they are registrations, and one of
-    // them deletes blobs with an unimplemented body (T-302). The
+    // Not an authorization surface, but they are registrations, and two of
+    // them delete blobs (cleanupTempStorage and cleanupUnusedCertImages, both
+    // dry-run until their own *_DELETE setting, T-302). The
     // nineteen are the timers in schedulers.js — the seventeen from T-323 plus
     // buildWeeklyNewsletter (#504) and probeAiProviders (#701); the twentieth
     // is platformJobSweeper (jobs-sweeper.js), behind its own flag; the

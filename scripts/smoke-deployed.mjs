@@ -4,10 +4,10 @@
  * a standing tool.
  *
  * Everything below the Critical line in the review was authored in an
- * environment that can reach neither a deployed Function App nor a Cosmos
- * account, so every fix is authored-but-unverified until this
- * runs against the real thing. The checks are the specific assumptions the
- * session's fixes rest on, in priority order — not a generic ping.
+ * environment that could reach neither a deployed Function App nor a Cosmos
+ * account, so every fix was authored-but-unverified until this ran against the
+ * real thing. The checks are the specific assumptions those fixes rested on,
+ * in priority order — not a generic ping.
  *
  * Tiers (each skippable, so partial environments still give partial signal):
  *
