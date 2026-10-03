@@ -247,12 +247,12 @@ export default function DraftEditor({
               {...input('body')}
               rows={28}
               spellCheck
-              className="min-h-[24rem] font-mono text-sm"
+              className="min-h-96 font-mono text-sm"
             />
           </Field>
           <section aria-label="Preview" className="space-y-1">
             <p className="text-sm font-medium">Preview</p>
-            <div className="min-h-[24rem] overflow-auto rounded-md border bg-background p-4">
+            <div className="min-h-96 overflow-auto rounded-md border bg-background p-4">
               {form.title && <h1 className="mb-2 text-2xl font-bold">{form.title}</h1>}
               {form.subtitle && <p className="mb-4 text-muted-foreground">{form.subtitle}</p>}
               {previewBody.trim() ? (

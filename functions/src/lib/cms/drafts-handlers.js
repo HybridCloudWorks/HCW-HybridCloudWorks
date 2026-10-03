@@ -1,7 +1,8 @@
 /**
  * drafts-handlers.js — the routes behind /admin/drafts (owner request
- * 2026-10-03). What a draft is and which moves are allowed is ./drafts.js;
- * this is the store, the GitHub import and the HTTP shape.
+ * 2026-10-03). What a draft is and which moves are allowed is ./drafts.js
+ * and ./drafts-stage.js; the docs/content import is ./drafts-import.js; this
+ * is the store and the HTTP shape.
  *
  *   GET    cms/drafts                       the list (no bodies)
  *   POST   cms/drafts                       a new draft { fields }
@@ -25,37 +26,17 @@
  * current version's summary, which the page uses to offer a reload. Same rule
  * the repository import followed for its in-review refresh.
  *
- * THE IMPORT IS ONCE PER FILE. It lists docs/content on main through the
- * existing pinned source (repo-draft-source.js: two hosts, no token, no
- * redirects, a deadline and a byte cap), skips every path a document already
- * claims (`repoPath`) before fetching anything, and creates the rest
- * create-only under the id derived from the path (repoDraftContentId), so a
- * double click or a second run never duplicates: the database refuses the
- * second create. A file whose title a published article already carries is
- * skipped, as the original import refused it. Nothing here reads a file back
- * over a draft: after import, the Drafts page is the article's source of
- * truth and docs/content is an archive.
- *
  * AUDIT. One row per action, written after the work and best-effort (as
  * set-slug.js and the original import did), so a failed audit write cannot
  * turn a completed save into a 500 that invites a retry. The transitions also
  * write the `audits` status_transition row transitionContentStatus writes.
  */
 import { randomUUID } from 'node:crypto';
-import { buildDedupFields } from './content-dedup.js';
-import {
-  REPO_NAME,
-  REPO_OWNER,
-  REPO_REF,
-  buildRepoDraftData,
-  parseRepoDraft,
-  repoDraftContentId,
-} from './repo-draft.js';
+import { REPO_REF } from './repo-draft.js';
 import {
   DRAFTS_STAGE_STATUS,
   DraftInputError,
   REVIEW_STATUS,
-  asImportedDraft,
   backToDraftsRefusal,
   buildBackToDraftsPatch,
   buildDraftUpdate,
@@ -70,13 +51,14 @@ import {
   toDraftView,
   validateDraftFields,
 } from './drafts.js';
+import { createDraftsImporter, editorOf, publishedWithTitle } from './drafts-import.js';
+
+export { publishedWithTitle };
 
 /** Rows the list returns. The Drafts stage is one person's desk; this is generous. */
 export const MAX_LISTED_DRAFTS = 200;
 /** Content ids are UUIDs; migrated ones are Firestore ids. Neither has anything else. */
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
-
-const REPO = Object.freeze({ owner: REPO_OWNER, name: REPO_NAME, ref: REPO_REF });
 
 const json = (status, body) => ({
   status,
@@ -86,9 +68,6 @@ const json = (status, body) => ({
 
 const refused = ({ status, code, error }, extra = {}) =>
   json(status, { ok: false, code, error, ...extra });
-
-const editorOf = (user = {}) =>
-  [user.email, user.preferred_username, user.oid, user.sub].find(Boolean) || 'admin';
 
 const LIST_PROJECTION = [
   'c.id',
@@ -115,8 +94,27 @@ export const LIST_QUERY =
   'WHERE c.contentStatus = @drafting OR IS_DEFINED(c.draftOrigin) OR IS_DEFINED(c.repoPath)';
 
 const NOT_FOUND = { status: 404, code: 'NOT_FOUND', error: 'No such draft.' };
+const BAD_ID = { status: 400, code: 'BAD_ID', error: 'A draft id is required.' };
+const ETAG_REQUIRED = {
+  status: 400,
+  code: 'ETAG_REQUIRED',
+  error: 'etag is required: send the etag of the version you are looking at (reload the draft).',
+};
 const CONFLICT_MESSAGE =
   'This draft changed in another tab or on another device since you opened it. Nothing was saved; reload it to see the latest version.';
+
+/** Thrown inside a handler to answer with a refusal; the route wrapper turns it into the response. */
+class Refusal extends Error {
+  constructor(refusal, extra = {}) {
+    super(refusal.error);
+    this.response = refused(refusal, extra);
+  }
+}
+
+/** Throw when `refusal` is set: a refusal is an answer, not a branch every handler repeats. */
+const refuseIf = (refusal, extra) => {
+  if (refusal) throw new Refusal(refusal, extra);
+};
 
 async function readBody(request) {
   const body = await request.json().catch(() => null);
@@ -125,57 +123,16 @@ async function readBody(request) {
 
 function readId(request) {
   const id = String(request.params?.id || '');
-  return ID_PATTERN.test(id) ? id : null;
+  refuseIf(!ID_PATTERN.test(id) && BAD_ID);
+  return id;
 }
 
 function readEtag(body) {
-  return typeof body.etag === 'string' && body.etag.length > 0 && body.etag.length <= 200
-    ? body.etag
-    : null;
+  const { etag } = body;
+  const valid = typeof etag === 'string' && etag.length > 0 && etag.length <= 200;
+  refuseIf(!valid && ETAG_REQUIRED);
+  return etag;
 }
-
-const ETAG_REQUIRED = {
-  status: 400,
-  code: 'ETAG_REQUIRED',
-  error: 'etag is required: send the etag of the version you are looking at (reload the draft).',
-};
-
-/**
- * A published article already carrying this title, at any date, other than
- * this document. Carried over from the original import (repo-import.js,
- * retired with this page): the dedup gate's seven-day title window does not
- * see the older hand-pasted posts docs/content also holds, and importing or
- * sending one of those must not queue a second copy of a live article.
- */
-export async function publishedWithTitle(store, title, selfId = null) {
-  const { normalizedTitle } = buildDedupFields({ title });
-  if (!normalizedTitle) return null;
-  const rows = await store.queryDocs(
-    'content',
-    'SELECT TOP 5 c.id, c.contentStatus, c.Live FROM c WHERE c.normalizedTitle = @title',
-    [{ name: '@title', value: normalizedTitle }]
-  );
-  return (
-    rows.find(
-      (row) => row.id !== selfId && (row.Live === true || row.contentStatus === 'published')
-    ) || null
-  );
-}
-
-async function claimsByPath(store, paths) {
-  const byPath = new Map();
-  if (paths.length === 0) return byPath;
-  const rows = await store.queryDocs(
-    'content',
-    'SELECT c.id, c.repoPath, c.contentStatus, c.Live, c.Title, c.title FROM c WHERE ARRAY_CONTAINS(@paths, c.repoPath)',
-    [{ name: '@paths', value: paths }]
-  );
-  for (const row of rows) byPath.set(row.repoPath, [...(byPath.get(row.repoPath) || []), row]);
-  return byPath;
-}
-
-/** Upstream failures the import maps to a status; anything else from GitHub is a 502. */
-const STATUS_BY_UPSTREAM_CODE = Object.freeze({ RATE_LIMITED: 503, TIMEOUT: 504 });
 
 const isPreconditionFailure = (error) => error?.code === 412 || error?.code === 404;
 
@@ -200,64 +157,65 @@ export function createDraftsHandlers({
   uuid = randomUUID,
   log = {},
 }) {
-  const authorize = (request) => guard.requireRole(request, 'editor');
+  const importer = createDraftsImporter({ store, source, now, log });
 
-  async function audit(action, { user, request, contentId = null, title = '', details = {} }) {
+  async function writeAudit(container, row) {
     try {
-      await store.upsertDoc('admin_audit_logs', {
-        id: uuid(),
-        action,
-        userId: user.oid || user.sub || null,
-        userEmail: user.email || null,
-        timestamp: now().toISOString(),
-        contentId,
-        contentTitle: title,
-        details,
-        userAgent: request.headers?.get?.('user-agent') || null,
-        compliance: { schemaVersion: 1, detailsSanitized: true, identityVerified: true },
-      });
+      await store.upsertDoc(container, { id: uuid(), timestamp: now().toISOString(), ...row });
     } catch (error) {
-      log.error?.(`[drafts] audit row ${action} failed`, error);
+      log.error?.(`[drafts] ${container} row ${row.action} failed`, error);
     }
   }
+
+  const audit = (action, { user, request, contentId = null, title = '', details = {} }) =>
+    writeAudit('admin_audit_logs', {
+      action,
+      userId: user.oid || user.sub || null,
+      userEmail: user.email || null,
+      contentId,
+      contentTitle: title,
+      details,
+      userAgent: request.headers?.get?.('user-agent') || null,
+      compliance: { schemaVersion: 1, detailsSanitized: true, identityVerified: true },
+    });
 
   /** The status_transition row createContentStatusTransitioner writes, for the same history. */
-  async function auditTransition({ user, request, doc, from, to }) {
-    try {
-      await store.upsertDoc('audits', {
-        id: uuid(),
-        timestamp: now().toISOString(),
-        action: 'status_transition',
-        resourceType: 'content',
-        resourceId: doc.id,
-        resourceTitle: doc.Title || doc.title || '',
-        userId: user.oid || user.sub || editorOf(user),
-        userName: user.name || null,
-        userEmail: user.email || null,
-        changes: {
-          before: { contentStatus: from },
-          after: { contentStatus: to },
-          changedFields: ['contentStatus'],
-          notes: '',
-        },
-        ipAddress: null,
-        userAgent: request.headers?.get?.('user-agent') || null,
-        metadata: { authMethod: 'entra_bearer_token', reviewedBy: editorOf(user), via: 'drafts' },
-        compliance: { dataClassification: 'internal', retentionMonths: 24, identityVerified: true },
-      });
-    } catch (error) {
-      log.error?.('[drafts] audits row failed', error);
-    }
-  }
+  const auditTransition = ({ user, request, doc, from, to }) =>
+    writeAudit('audits', {
+      action: 'status_transition',
+      resourceType: 'content',
+      resourceId: doc.id,
+      resourceTitle: doc.Title || doc.title || '',
+      userId: user.oid || user.sub || editorOf(user),
+      userName: user.name || null,
+      userEmail: user.email || null,
+      changes: {
+        before: { contentStatus: from },
+        after: { contentStatus: to },
+        changedFields: ['contentStatus'],
+        notes: '',
+      },
+      ipAddress: null,
+      userAgent: request.headers?.get?.('user-agent') || null,
+      metadata: { authMethod: 'entra_bearer_token', reviewedBy: editorOf(user), via: 'drafts' },
+      compliance: { dataClassification: 'internal', retentionMonths: 24, identityVerified: true },
+    });
 
   /** The 412 a lost race answers, with what is stored now (or 404 if it is gone). */
   async function conflict(id) {
     const latest = await store.readDoc('content', id, id).catch(() => null);
-    if (!latest) return refused({ ...NOT_FOUND, error: 'This draft no longer exists.' });
-    return refused(
+    refuseIf(!latest && { ...NOT_FOUND, error: 'This draft no longer exists.' });
+    throw new Refusal(
       { status: 412, code: 'CONFLICT', error: CONFLICT_MESSAGE },
       { current: toDraftSummary(latest) }
     );
+  }
+
+  /** A document this page may show, or the 404. */
+  async function readDraft(id) {
+    const doc = await store.readDoc('content', id, id);
+    refuseIf(!(doc && comesFromDrafts(doc)) && NOT_FOUND);
+    return doc;
   }
 
   /**
@@ -267,273 +225,124 @@ export function createDraftsHandlers({
    */
   async function loadForWrite(request) {
     const id = readId(request);
-    if (!id)
-      return {
-        response: refused({
-          ...NOT_FOUND,
-          status: 400,
-          code: 'BAD_ID',
-          error: 'A draft id is required.',
-        }),
-      };
     const body = await readBody(request);
     const etag = readEtag(body);
-    if (!etag) return { response: refused(ETAG_REQUIRED) };
-    const current = await store.readDoc('content', id, id);
-    if (!current || !comesFromDrafts(current)) return { response: refused(NOT_FOUND) };
-    if (current._etag !== etag) return { response: await conflict(id) };
+    const current = await readDraft(id);
+    if (current._etag !== etag) await conflict(id);
     return { id, body, etag, current };
   }
 
-  /** patchDoc under the etag; null when the race was lost. */
-  async function patchIfUnchanged(id, update, etag) {
+  /** patchDoc under the etag; a lost race becomes the 412. */
+  async function patchUnderEtag(id, update, etag) {
     try {
       return await store.patchDoc('content', id, update, { ifMatch: etag });
     } catch (error) {
-      if (isPreconditionFailure(error)) return null;
+      if (isPreconditionFailure(error)) return conflict(id);
       throw error;
     }
   }
 
-  const failed = (context, what, error) => {
-    context?.error?.(`[drafts] ${what} failed:`, error);
-    return json(500, {
-      ok: false,
-      error: `Failed to ${what}`,
-      message: error?.message || 'Unknown error',
-    });
+  async function deleteUnderEtag(id, etag) {
+    try {
+      await store.deleteDocIfMatch('content', id, etag);
+    } catch (error) {
+      if (isPreconditionFailure(error)) await conflict(id);
+      throw error;
+    }
+  }
+
+  /**
+   * Every route: the guard, then the work. A Refusal or a DraftInputError is
+   * the answer it carries; anything else is a 500 naming the action.
+   */
+  const route = (what, work) => async (request, context) => {
+    const auth = await guard.requireRole(request, 'editor');
+    if (auth.error) return auth.error;
+    try {
+      return await work({ request, context, user: auth.user });
+    } catch (error) {
+      if (error instanceof Refusal) return error.response;
+      if (error instanceof DraftInputError) {
+        return refused({ status: 400, code: 'INVALID', error: error.message });
+      }
+      context?.error?.(`[drafts] ${what} failed:`, error);
+      return json(500, {
+        ok: false,
+        error: `Failed to ${what}`,
+        message: error?.message || 'Unknown error',
+      });
+    }
   };
 
-  // ── the GitHub import ────────────────────────────────────────────────────
+  /** A route that changes an existing draft: route() plus loadForWrite. */
+  const writeRoute = (what, work) =>
+    route(what, async (args) => work({ ...args, ...(await loadForWrite(args.request)) }));
 
-  function importFailure(path, error) {
-    if (typeof error?.code === 'string') {
-      return { path, outcome: 'failed', code: error.code, error: error.message };
-    }
-    log.error?.(`[drafts] import ${path}: ${error?.message || error}`);
-    return {
-      path,
-      outcome: 'failed',
-      code: 'INTERNAL',
-      error: 'The import failed unexpectedly; see the function logs.',
-    };
-  }
-
-  function alreadyClaimed(path, rows) {
-    if (rows.length > 1) {
-      return {
-        path,
-        outcome: 'skipped',
-        code: 'AMBIGUOUS',
-        error: `${rows.length} documents claim this path; resolve that by hand.`,
-        contentIds: rows.map((row) => row.id),
-      };
-    }
-    const [row] = rows;
-    return {
-      path,
-      outcome: 'skipped',
-      code: 'ALREADY_IMPORTED',
-      contentId: row.id,
-      title: row.Title || row.title || null,
-      contentStatus: row.contentStatus || null,
-      stage: stageOf(row),
-    };
-  }
-
-  async function importOne(path, claims, user) {
-    if (claims?.length) return alreadyClaimed(path, claims);
-    try {
-      const [fetched, commitSha] = await Promise.all([
-        source.fetchDraft(path),
-        source.lastCommitSha(path),
-      ]);
-      const parsed = parseRepoDraft(fetched.text);
-      if (!parsed.ok) return { path, outcome: 'refused', code: parsed.code, error: parsed.error };
-      const { draft } = parsed;
-      const live = await publishedWithTitle(store, draft.title);
-      if (live) {
-        return {
-          path,
-          outcome: 'skipped',
-          code: 'PUBLISHED_ELSEWHERE',
-          title: draft.title,
-          existingId: live.id,
-          error: `An article titled "${draft.title}" is already published (${live.id}).`,
-        };
-      }
-      const id = repoDraftContentId(path);
-      const editor = editorOf(user);
-      const doc = asImportedDraft(
-        buildRepoDraftData({ path, draft, source: { ...fetched, commitSha }, editor, now }),
-        { id, editor, now }
-      );
-      // The invariant, checked where the write happens rather than trusted
-      // from the builders.
-      if (doc.contentStatus !== DRAFTS_STAGE_STATUS || doc.Live !== false) {
-        throw new Error('drafts: refusing to import a document that is not a draft');
-      }
-      try {
-        await store.createDoc('content', doc);
-      } catch (error) {
-        if (error?.code === 409) {
-          return {
-            path,
-            outcome: 'skipped',
-            code: 'ALREADY_IMPORTED',
-            contentId: id,
-            title: draft.title,
-          };
-        }
-        throw error;
-      }
-      return {
-        path,
-        outcome: 'imported',
-        contentId: id,
-        title: draft.title,
-        contentStatus: DRAFTS_STAGE_STATUS,
-        warnings: draft.warnings,
-        repoCommitSha: commitSha,
-      };
-    } catch (error) {
-      return importFailure(path, error);
-    }
+  /** Counters after a delete; the change feed never delivers one (T-324). */
+  async function countersAfterDelete(id, context) {
+    if (!onContentDeleted) return;
+    await Promise.resolve(onContentDeleted(id)).catch((error) =>
+      context?.warn?.(`[drafts] counters not updated for ${id}: ${error?.message}`)
+    );
   }
 
   return {
     /** GET cms/drafts */
-    async list(request, context) {
-      const auth = await authorize(request);
-      if (auth.error) return auth.error;
-      try {
-        const rows = await store.queryDocs('content', LIST_QUERY, [
-          { name: '@drafting', value: DRAFTS_STAGE_STATUS },
-        ]);
-        const drafts = rows
-          .map(toDraftSummary)
-          .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
-        return json(200, { ok: true, drafts, limit: MAX_LISTED_DRAFTS });
-      } catch (error) {
-        context?.error?.('[drafts] list failed:', error);
-        return json(500, { ok: false, error: 'Failed to list drafts' });
-      }
-    },
+    list: route('list drafts', async () => {
+      const rows = await store.queryDocs('content', LIST_QUERY, [
+        { name: '@drafting', value: DRAFTS_STAGE_STATUS },
+      ]);
+      const drafts = rows
+        .map(toDraftSummary)
+        .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+      return json(200, { ok: true, drafts, limit: MAX_LISTED_DRAFTS });
+    }),
 
     /** GET cms/drafts/{id} */
-    async get(request, context) {
-      const auth = await authorize(request);
-      if (auth.error) return auth.error;
-      const id = readId(request);
-      if (!id)
-        return refused({
-          ...NOT_FOUND,
-          status: 400,
-          code: 'BAD_ID',
-          error: 'A draft id is required.',
-        });
-      try {
-        const doc = await store.readDoc('content', id, id);
-        if (!doc || !comesFromDrafts(doc)) return refused(NOT_FOUND);
-        return json(200, { ok: true, draft: toDraftView(doc) });
-      } catch (error) {
-        context?.error?.('[drafts] get failed:', error);
-        return json(500, { ok: false, error: 'Failed to read the draft' });
-      }
-    },
+    get: route('read the draft', async ({ request }) => {
+      const doc = await readDraft(readId(request));
+      return json(200, { ok: true, draft: toDraftView(doc) });
+    }),
 
     /** POST cms/drafts — { fields } */
-    async create(request, context) {
-      const auth = await authorize(request);
-      if (auth.error) return auth.error;
-      const body = await readBody(request);
-      let fields;
-      try {
-        fields = validateDraftFields(body.fields);
-      } catch (error) {
-        if (error instanceof DraftInputError)
-          return refused({ status: 400, code: 'INVALID', error: error.message });
-        throw error;
-      }
-      try {
-        const doc = buildNewDraftDocument({ id: uuid(), fields, editor: editorOf(auth.user), now });
-        const created = (await store.createDoc('content', doc)) || doc;
-        await audit('content_draft_created', {
-          user: auth.user,
-          request,
-          contentId: doc.id,
-          title: doc.Title,
-        });
-        return json(201, { ok: true, draft: toDraftView(created) });
-      } catch (error) {
-        return failed(context, 'create the draft', error);
-      }
-    },
+    create: route('create the draft', async ({ request, user }) => {
+      const fields = validateDraftFields((await readBody(request)).fields);
+      const doc = buildNewDraftDocument({ id: uuid(), fields, editor: editorOf(user), now });
+      const created = (await store.createDoc('content', doc)) || doc;
+      await audit('content_draft_created', { user, request, contentId: doc.id, title: doc.Title });
+      return json(201, { ok: true, draft: toDraftView(created) });
+    }),
 
     /** PUT cms/drafts/{id} — { fields, etag } */
-    async update(request, context) {
-      const auth = await authorize(request);
-      if (auth.error) return auth.error;
-      try {
-        const loaded = await loadForWrite(request);
-        if (loaded.response) return loaded.response;
-        const { id, body, etag, current } = loaded;
-        let fields;
-        try {
-          fields = validateDraftFields(body.fields);
-        } catch (error) {
-          if (error instanceof DraftInputError)
-            return refused({ status: 400, code: 'INVALID', error: error.message });
-          throw error;
-        }
-        const blocked = saveRefusal(current);
-        if (blocked) return refused(blocked);
-        const update = buildDraftUpdate(fields, { current, editor: editorOf(auth.user), now });
-        const written = await patchIfUnchanged(id, update, etag);
-        if (!written) return await conflict(id);
-        await audit('content_draft_saved', {
-          user: auth.user,
-          request,
-          contentId: id,
-          title: fields.title,
-          details: { updatedFields: Object.keys(update) },
-        });
-        return json(200, { ok: true, draft: toDraftView(written) });
-      } catch (error) {
-        return failed(context, 'save the draft', error);
-      }
-    },
+    update: writeRoute('save the draft', async ({ request, user, id, body, etag, current }) => {
+      const fields = validateDraftFields(body.fields);
+      refuseIf(saveRefusal(current));
+      const update = buildDraftUpdate(fields, { current, editor: editorOf(user), now });
+      const written = await patchUnderEtag(id, update, etag);
+      await audit('content_draft_saved', {
+        user,
+        request,
+        contentId: id,
+        title: fields.title,
+        details: { updatedFields: Object.keys(update) },
+      });
+      return json(200, { ok: true, draft: toDraftView(written) });
+    }),
 
     /**
      * DELETE cms/drafts/{id} — { etag }. A draft, or an article from Drafts
      * that is still In Review (the same document, so both go). Anything live
      * or past review is refused and untouched.
      */
-    async remove(request, context) {
-      const auth = await authorize(request);
-      if (auth.error) return auth.error;
-      try {
-        const loaded = await loadForWrite(request);
-        if (loaded.response) return loaded.response;
-        const { id, etag, current } = loaded;
-        const blocked = deleteRefusal(current);
-        if (blocked) return refused(blocked);
-        try {
-          await store.deleteDocIfMatch('content', id, etag);
-        } catch (error) {
-          if (isPreconditionFailure(error)) return await conflict(id);
-          throw error;
-        }
-        // The change feed never delivers a delete (T-324); the dashboard
-        // counters move here, best-effort — as DELETE cms/content/{id} does.
-        if (onContentDeleted) {
-          await Promise.resolve(onContentDeleted(id)).catch((error) =>
-            context?.warn?.(`[drafts] counters not updated for ${id}: ${error?.message}`)
-          );
-        }
+    remove: writeRoute(
+      'delete the draft',
+      async ({ request, context, user, id, etag, current }) => {
+        refuseIf(deleteRefusal(current));
+        await deleteUnderEtag(id, etag);
+        await countersAfterDelete(id, context);
         const stage = stageOf(current);
         await audit('content_draft_deleted', {
-          user: auth.user,
+          user,
           request,
           contentId: id,
           title: current.Title || current.title || '',
@@ -544,38 +353,28 @@ export function createDraftsHandlers({
           },
         });
         return json(200, { ok: true, deleted: id, stage });
-      } catch (error) {
-        return failed(context, 'delete the draft', error);
       }
-    },
+    ),
 
     /** POST cms/drafts/{id}/send-to-review — { etag } */
-    async sendToReview(request, context) {
-      const auth = await authorize(request);
-      if (auth.error) return auth.error;
-      try {
-        const loaded = await loadForWrite(request);
-        if (loaded.response) return loaded.response;
-        const { id, etag, current } = loaded;
-        const blocked = sendToReviewRefusal(current);
-        if (blocked) return refused(blocked);
+    sendToReview: writeRoute(
+      'send the draft to review',
+      async ({ request, user, id, etag, current }) => {
+        refuseIf(sendToReviewRefusal(current));
         const title = String(current.Title || current.title || '').trim();
         const live = await publishedWithTitle(store, title, id);
-        if (live) {
-          return refused(
-            {
-              status: 409,
-              code: 'PUBLISHED_ELSEWHERE',
-              error: `An article titled "${title}" is already published (${live.id}). Retitle the draft, or delete it if it is that article.`,
-            },
-            { existingId: live.id }
-          );
-        }
-        const patch = buildSendToReviewPatch(current, { editor: editorOf(auth.user), now });
-        const written = await patchIfUnchanged(id, patch, etag);
-        if (!written) return await conflict(id);
+        refuseIf(
+          live && {
+            status: 409,
+            code: 'PUBLISHED_ELSEWHERE',
+            error: `An article titled "${title}" is already published (${live?.id}). Retitle the draft, or delete it if it is that article.`,
+          },
+          { existingId: live?.id }
+        );
+        const patch = buildSendToReviewPatch(current, { editor: editorOf(user), now });
+        const written = await patchUnderEtag(id, patch, etag);
         await auditTransition({
-          user: auth.user,
+          user,
           request,
           doc: current,
           from: DRAFTS_STAGE_STATUS,
@@ -586,88 +385,52 @@ export function createDraftsHandlers({
           draft: toDraftView(written),
           reviewPath: `/admin/queue/${encodeURIComponent(id)}`,
         });
-      } catch (error) {
-        return failed(context, 'send the draft to review', error);
       }
-    },
+    ),
 
     /** POST cms/drafts/{id}/back-to-drafts — { etag } */
-    async backToDrafts(request, context) {
-      const auth = await authorize(request);
-      if (auth.error) return auth.error;
-      try {
-        const loaded = await loadForWrite(request);
-        if (loaded.response) return loaded.response;
-        const { id, etag, current } = loaded;
-        const blocked = backToDraftsRefusal(current);
-        if (blocked) return refused(blocked);
-        const written = await patchIfUnchanged(
-          id,
-          buildBackToDraftsPatch({ editor: editorOf(auth.user), now }),
-          etag
-        );
-        if (!written) return await conflict(id);
+    backToDrafts: writeRoute(
+      'move the article back to Drafts',
+      async ({ request, user, id, etag, current }) => {
+        refuseIf(backToDraftsRefusal(current));
+        const patch = buildBackToDraftsPatch({ editor: editorOf(user), now });
+        const written = await patchUnderEtag(id, patch, etag);
         await auditTransition({
-          user: auth.user,
+          user,
           request,
           doc: current,
           from: REVIEW_STATUS,
           to: DRAFTS_STAGE_STATUS,
         });
         return json(200, { ok: true, draft: toDraftView(written) });
-      } catch (error) {
-        return failed(context, 'move the article back to Drafts', error);
       }
-    },
+    ),
 
-    /** POST cms/drafts/import-repo — every docs/content draft not yet imported. */
-    async importFromRepo(request, context) {
-      const auth = await authorize(request);
-      if (auth.error) return auth.error;
-      let files;
-      try {
-        files = await source.listCandidates();
-      } catch (error) {
-        const upstream = typeof error?.code === 'string';
-        const status = upstream ? STATUS_BY_UPSTREAM_CODE[error.code] || 502 : 500;
-        context?.warn?.(`[drafts] import listing ${status} ${error?.code || 'ERROR'}`);
-        return json(status, {
-          ok: false,
-          code: upstream ? error.code : 'INTERNAL',
-          error: upstream
-            ? `Could not list docs/content on GitHub: ${error.message}`
-            : 'Failed to list the repository drafts',
-        });
+    /** POST cms/drafts/import-repo — every docs/content article not yet imported. */
+    importFromRepo: route('import the repository drafts', async ({ request, context, user }) => {
+      const { status, body } = await importer.importAll(user);
+      if (status !== 200) {
+        context?.warn?.(`[drafts] import listing ${status} ${body.code}`);
+        return json(status, body);
       }
-      try {
-        const paths = files.map((file) => file.path);
-        const claims = await claimsByPath(store, paths);
-        const results = await Promise.all(
-          paths.map((path) => importOne(path, claims.get(path), auth.user))
-        );
-        await Promise.all(
-          results.map((result) =>
-            audit('content_draft_repo_import', {
-              user: auth.user,
-              request,
-              contentId: result.contentId || null,
-              title: result.title || '',
-              details: {
-                repoPath: result.path,
-                repoRef: REPO_REF,
-                outcome: result.outcome,
-                ...(result.code && { code: result.code }),
-              },
-            })
-          )
-        );
-        const counts = {};
-        for (const { outcome } of results) counts[outcome] = (counts[outcome] || 0) + 1;
-        context?.log?.(`[drafts] import ${JSON.stringify(counts)}`);
-        return json(200, { ok: true, repo: REPO, results, counts });
-      } catch (error) {
-        return failed(context, 'import the repository drafts', error);
-      }
-    },
+      await Promise.all(
+        body.results.map((result) =>
+          audit('content_draft_repo_import', {
+            user,
+            request,
+            contentId: result.contentId || null,
+            title: result.title || '',
+            details: {
+              repoPath: result.path,
+              repoRef: REPO_REF,
+              outcome: result.outcome,
+              ...(result.code && { code: result.code }),
+            },
+          })
+        )
+      );
+      context?.log?.(`[drafts] import ${JSON.stringify(body.counts)}`);
+      return json(200, body);
+    }),
   };
 }

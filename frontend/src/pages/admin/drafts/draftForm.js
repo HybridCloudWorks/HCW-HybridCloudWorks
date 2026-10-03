@@ -153,3 +153,35 @@ export function summarizeImport(counts = {}) {
       : 'Nothing was published.',
   };
 }
+
+export const LIVE_DELETE_MESSAGE =
+  'This article is live on the site, so deleting it is refused and nothing was changed. A published article is never touched from Drafts.';
+
+/**
+ * Why Delete is refused for this article, or null when it may be asked. The
+ * API refuses the same ones (functions/src/lib/cms/drafts-stage.js
+ * deleteRefusal); saying so here spares a confirm that could only end in a
+ * refusal.
+ */
+export function deleteRefusalMessage(draft) {
+  if (!draft?.id || draft.actions?.delete) return null;
+  if (draft.stage === 'live') return LIVE_DELETE_MESSAGE;
+  return `This article is "${draft.contentStatus}", past review, so deleting it here is refused and nothing was changed.`;
+}
+
+/** The delete confirm's wording: an article In Review takes its queue item with it. */
+export function deleteConfirmCopy(draft) {
+  if (draft?.stage === 'in_review') {
+    return {
+      title: 'Delete this draft and its In Review item?',
+      description:
+        'It has been sent to In Review. Deleting it removes it from Drafts and from the Content Queue. This cannot be undone.',
+    };
+  }
+  return {
+    title: 'Delete this draft?',
+    description: draft?.id
+      ? 'The draft is removed from the site. This cannot be undone.'
+      : 'This draft has never been saved; its text will be discarded.',
+  };
+}

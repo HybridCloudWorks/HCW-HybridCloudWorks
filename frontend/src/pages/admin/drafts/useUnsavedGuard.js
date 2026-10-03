@@ -18,22 +18,37 @@ import { useEffect } from 'react';
 
 export const UNSAVED_MESSAGE = 'This draft has unsaved changes. Leave without saving them?';
 
-function isInAppNavigation(event) {
-  if (event.defaultPrevented || event.button !== 0) return null;
-  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return null;
+/** A plain left click: no modifier asking for a new tab or window. */
+const isPlainLeftClick = (event) =>
+  !event.defaultPrevented &&
+  event.button === 0 &&
+  !(event.metaKey || event.ctrlKey || event.shiftKey || event.altKey);
+
+/** The link the click is on, when it opens in this tab; else null. */
+function sameTabLink(event) {
   const anchor = event.target?.closest?.('a[href]');
-  if (!anchor || (anchor.target && anchor.target !== '_self') || anchor.hasAttribute('download')) {
-    return null;
-  }
+  const sameTab = anchor && (!anchor.target || anchor.target === '_self');
+  return sameTab && !anchor.hasAttribute('download') ? anchor : null;
+}
+
+/** Does following this link leave the page for another route of this app? */
+function leavesThisPage(anchor) {
+  const here = window.location;
+  let url;
   try {
-    const url = new URL(anchor.href, window.location.href);
-    if (url.origin !== window.location.origin) return null;
-    const here = window.location;
-    if (url.pathname === here.pathname && url.search === here.search) return null;
-    return anchor;
+    url = new URL(anchor.href, here.href);
   } catch {
-    return null;
+    return false;
   }
+  return (
+    url.origin === here.origin && (url.pathname !== here.pathname || url.search !== here.search)
+  );
+}
+
+export function isInAppNavigation(event) {
+  if (!isPlainLeftClick(event)) return false;
+  const anchor = sameTabLink(event);
+  return Boolean(anchor) && leavesThisPage(anchor);
 }
 
 const browserConfirm = (message) => window.confirm(message);
