@@ -51,13 +51,16 @@ const LIVE_FILES = [
   'src/pages/ansible/RssPage.jsx',
   // Docker (service-provider pattern). Live pages; the ones whose content is
   // still to be written say it is coming: honest placeholders, not
-  // ComingSoonPage guards. SandboxesPage holds the sandbox recipe (#774).
+  // ComingSoonPage guards. SandboxesPage holds the sandbox recipe (#774);
+  // BuildingImagesPage and DesktopPage the two guides (#772, #773).
   'src/pages/docker/LandingPage.jsx',
   'src/pages/docker/BlogPage.jsx',
   'src/pages/docker/CodePage.jsx',
   'src/pages/docker/EducationPage.jsx',
   'src/pages/docker/RssPage.jsx',
   'src/pages/docker/SandboxesPage.jsx',
+  'src/pages/docker/BuildingImagesPage.jsx',
+  'src/pages/docker/DesktopPage.jsx',
   'src/pages/docker/ToolsPage.jsx',
   // Every remaining provider page taken live 2026-09-02 by owner decision.
   'src/pages/gcp/ArchitecturePage.jsx',

@@ -18,14 +18,16 @@ export const DOCKER_HERO_IMAGES = [
 
 /*
  * Docker as a service provider (owner request 2026-09-28): the Terraform
- * landing page's template, with three focus areas. An area whose guide is
- * still to be written says what it will cover and that it is coming; an area
- * marked `available` links to its page instead (the sandbox recipe, #774).
- * Nothing here reads the content API, and the template's live-content panel
- * is off, because there is no Docker content for it to show.
+ * landing page's template, with three focus areas, each linking to its own
+ * page as Terraform's sections link to theirs: building images (#772), the
+ * Docker Desktop app (#773) and the sandbox recipe (#774). An area marked
+ * `available` says so and shows its link; one without it would say what it
+ * will cover and that it is coming, which no area does today. Nothing here
+ * reads the content API, and the template's live-content panel is off,
+ * because the guides are pages of their own rather than published articles.
  *
  * Facts the first area states, from lab-image/: one Dockerfile with two final
- * targets, every download checked against a pinned checksum (versions.env),
+ * targets, every direct download checked against a pinned checksum (versions.env),
  * and the publish workflow attaching a provenance attestation.
  */
 
@@ -35,16 +37,20 @@ export const FOCUS_AREAS = [
     eyebrow: 'FOCUS AREA · IMAGES',
     title: 'Building images',
     icon: 'deployed_code',
-    text: 'Writing Dockerfiles that stay small and quick to rebuild, multi-stage builds that keep build tools out of the image you ship, and provenance attestations that record how an image was made. The worked example is hcw-lab, the image every browser lab on this site runs: one Dockerfile, two build targets, and every download checked against a pinned checksum.',
+    text: 'Writing Dockerfiles that stay small and quick to rebuild, multi-stage builds that keep build tools out of the image you ship, and provenance attestations that record how an image was made. The worked example is hcw-lab, the image every browser lab on this site runs: one Dockerfile, two build targets, and every direct download checked against a pinned checksum.',
     tags: ['Dockerfiles', 'Multi-stage builds', 'Provenance'],
+    available: true,
+    link: { label: 'Read the guide to building images', to: routes.buildingImages('docker') },
   },
   {
     id: 'docker-desktop',
     eyebrow: 'FOCUS AREA · DESKTOP',
     title: 'The Docker Desktop app',
     icon: 'desktop_windows',
-    text: 'Installing Docker Desktop on Windows, macOS and Linux, then using it day to day: running and inspecting containers, managing images and volumes, the settings worth changing first, and how the app relates to the docker command line.',
+    text: 'Installing Docker Desktop on Windows and macOS, then using it day to day: running and inspecting containers, managing images and volumes, the WSL 2 backend and resource limits, running the lab image, and how the app relates to Docker Engine on a Linux server.',
     tags: ['Install', 'Containers', 'Images and volumes'],
+    available: true,
+    link: { label: 'Read the Docker Desktop guide', to: routes.desktop('docker') },
   },
   {
     id: 'agent-sandbox',
@@ -118,7 +124,7 @@ export default function DockerLandingPage() {
           </>
         ),
         description:
-          'Three guides: building container images and using the Docker Desktop app day to day, both on the way, and running a coding agent in a sandbox, which you can follow today. The worked example is the image behind this site’s own browser labs.',
+          'Three guides you can follow today: building container images, using the Docker Desktop app day to day, and running a coding agent in a sandbox. The worked example is the image behind this site’s own browser labs.',
         media: (
           <HeroImageCarousel
             images={DOCKER_HERO_IMAGES}

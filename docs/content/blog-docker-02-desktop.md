@@ -84,6 +84,9 @@ VM, which is why the WSL 2 backend matters.
 
 ## Prerequisites
 
+The install steps and settings in this article are also kept as a reference
+page at <https://hybridcloudworks.com/docker/desktop>.
+
 **Windows**, from Docker's
 [Windows install page](https://docs.docker.com/desktop/setup/install/windows-install/),
 for the WSL 2 backend on x86_64:
