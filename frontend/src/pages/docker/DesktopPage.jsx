@@ -212,9 +212,9 @@ export default function DockerDesktopPage() {
         <ul className={`${PROSE} list-disc space-y-2 pl-5`}>
           <li>
             <strong>Windows</strong>, with the WSL 2 backend: Windows 11 64-bit Enterprise, Pro or
-            Education version 23H2 (build 22631) or later, or Windows 10 64-bit 22H2 (build 19045);
-            WSL 2.1.5 or later; 8 GB of RAM; and hardware virtualisation turned on in the BIOS or
-            UEFI. Windows Server is not supported.
+            Education version 23H2 (build 22631) or later, or Windows 10 64-bit Enterprise, Pro or
+            Education 22H2 (build 19045); WSL 2.1.5 or later; 8 GB of RAM; and hardware
+            virtualisation turned on in the BIOS or UEFI. Windows Server is not supported.
           </li>
           <li>
             <strong>macOS</strong>: the current macOS release or one of the two before it, and at
