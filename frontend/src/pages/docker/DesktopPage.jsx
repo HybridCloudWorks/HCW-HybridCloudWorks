@@ -189,6 +189,7 @@ export default function DockerDesktopPage() {
       links={[
         { label: 'Docker Desktop documentation', href: DOCS.windowsInstall, external: true },
         { label: 'Building the lab image', to: routes.buildingImages('docker') },
+        { label: 'The article series on the Docker blog', to: routes.blog('docker') },
         { label: 'See the browser labs', to: staticRoutes.labs },
         { label: 'Back to the Docker hub', to: routes.landing('docker') },
       ]}
@@ -211,10 +212,12 @@ export default function DockerDesktopPage() {
         </p>
         <ul className={`${PROSE} list-disc space-y-2 pl-5`}>
           <li>
-            <strong>Windows</strong>, with the WSL 2 backend: Windows 11 64-bit Enterprise, Pro or
-            Education version 23H2 (build 22631) or later, or Windows 10 64-bit Enterprise, Pro or
-            Education 22H2 (build 19045); WSL 2.1.5 or later; 8 GB of RAM; and hardware
-            virtualisation turned on in the BIOS or UEFI. Windows Server is not supported.
+            <strong>Windows</strong> on x86_64, with the WSL 2 backend: Windows 11 64-bit
+            Enterprise, Pro or Education version 23H2 (build 22631) or later, or Windows 10 64-bit
+            Enterprise, Pro or Education 22H2 (build 19045); WSL 2.1.5 or later; 8 GB of RAM; and
+            hardware virtualisation turned on in the BIOS or UEFI. Windows Server is not supported.
+            The install steps below download the x86_64 installer; Windows on Arm is out of scope
+            here.
           </li>
           <li>
             <strong>macOS</strong>: the current macOS release or one of the two before it, and at

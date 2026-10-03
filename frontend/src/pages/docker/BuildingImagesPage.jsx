@@ -166,6 +166,7 @@ export default function DockerBuildingImagesPage() {
         { label: 'The Dockerfile on GitHub', href: SOURCE_LINKS.dockerfile, external: true },
         { label: 'The publish workflow on GitHub', href: SOURCE_LINKS.workflow, external: true },
         { label: 'Use the image in Docker Desktop', to: routes.desktop('docker') },
+        { label: 'The article series on the Docker blog', to: routes.blog('docker') },
         { label: 'See the browser labs', to: staticRoutes.labs },
         { label: 'Back to the Docker hub', to: routes.landing('docker') },
       ]}
@@ -177,7 +178,10 @@ export default function DockerBuildingImagesPage() {
           <Code>.github/workflows/</Code>. Clone it and work from its root, because every command
           here names <Code>lab-image</Code> as a relative path. You need Docker with BuildKit, which
           is the default builder in Docker Desktop and in Docker Engine 23 and later; the Dockerfile
-          uses <Code>RUN --mount</Code> and <Code>COPY --chmod</Code>, which need it.
+          uses <Code>RUN --mount</Code> and <Code>COPY --chmod</Code>, which need it. You also need
+          the <Code>buildx</Code> plugin for the <Code>docker buildx imagetools</Code> command
+          below. Docker Desktop includes it; on Linux, Docker’s packages ship it separately as{' '}
+          <Code>docker-buildx-plugin</Code>.
         </p>
         <Commands commands={COMMANDS.clone} testId="commands-clone" />
       </GuideSection>
