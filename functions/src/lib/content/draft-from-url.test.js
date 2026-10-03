@@ -66,6 +66,11 @@ describe('url and page helpers', () => {
     expect(inferProviderFromUrl('https://cloud.google.com/run')).toBe('Gcp');
     expect(inferProviderFromUrl('https://example.com/post')).toBe('Multi');
   });
+
+  it('infers Docker last, as the Builder does: Docker on Azure is Azure', () => {
+    expect(inferProviderFromUrl('https://docs.docker.com/build/')).toBe('Docker');
+    expect(inferProviderFromUrl('https://learn.microsoft.com/azure/docker-on-aci')).toBe('Azure');
+  });
 });
 
 describe('scrapeToSource', () => {

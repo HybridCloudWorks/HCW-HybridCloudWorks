@@ -65,8 +65,8 @@ concurrency:
 jobs:
   verify:
     name: Verify alert rule state
-    # Same self-arming gate as heal-computed-properties.yml: before the first
-    # apply there is no identity to log in as, and a red run would read as a
+    # Same self-arming gate as monitor-functions-registered.yml: before the
+    # first apply there is no identity to log in as, and a red run would read as a
     # permissions bug while actually meaning "not deployed yet".
     if: ${{ vars.READER_CLIENT_ID != '' }}
     permissions:

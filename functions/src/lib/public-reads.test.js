@@ -154,7 +154,7 @@ describe('listContent', () => {
       // cp_sortDate is a computed property, defined on every document, which
       // is what exempts this from rule 2's "never ORDER BY a possibly-missing
       // field". The flag exists because the property must be applied to the
-      // live containers first (scripts/apply-computed-sortdate.mjs).
+      // live containers first (the Terraform apply writes it, #816).
       process.env.PUBLIC_LIST_SQL_ORDER = '1';
       try {
         const { query } = await captureQuery();

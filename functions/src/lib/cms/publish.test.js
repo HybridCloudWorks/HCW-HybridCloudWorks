@@ -491,6 +491,47 @@ describe('publishContent', () => {
     expect(version.contentId).toBe('c1');
   });
 
+  it.each([
+    ['Docker', 'docker'],
+    ['VMware', 'vmware'],
+    ['Ansible', 'ansible'],
+  ])('publishes a %s blog post at /%s/blog/<slug>', async (provider, segment) => {
+    // Before the CMS derived its providers from the site's registry,
+    // normalizeProviderName turned each of these into '' and
+    // validatePublishMetadata refused the publish.
+    const store = makeStore(
+      readyDoc({
+        type: 'blog',
+        publishTarget: 'blog',
+        cloudProvider: provider,
+        Title: 'Compose Basics',
+      })
+    );
+    const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });
+    const body = JSON.parse(
+      (
+        await h.publishContent(
+          makeRequest({
+            contentIds: ['c1'],
+            publishTarget: 'blog',
+            forceQualityBypass: true,
+            forceImageBypass: true,
+          }),
+          context
+        )
+      ).body
+    );
+    expect(body.errors).toEqual([]);
+    expect(body.published).toBe(1);
+
+    const patch = store.patchDoc.mock.calls.find(([c]) => c === 'content')[2];
+    const stored = segment.charAt(0).toUpperCase() + segment.slice(1);
+    expect(patch.curatedSubpagePath).toBe(`/${segment}/blog/compose-basics`);
+    expect(patch.publicUrl).toBe(`https://hybridcloudworks.com/${segment}/blog/compose-basics`);
+    expect(patch['Cloud Provider']).toBe(stored);
+    expect(patch.cloudProvider).toBe(stored);
+  });
+
   it('refuses non-publishable statuses via the single table', async () => {
     const store = makeStore(readyDoc({ contentStatus: 'in_review' }));
     const h = createPublishHandlers({ guard: guardAs('publisher'), store, ...fixed });

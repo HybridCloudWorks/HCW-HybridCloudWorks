@@ -855,7 +855,7 @@ describe('the fixture', () => {
 describe('DECLARED', () => {
   const infraSource = terraformSource();
 
-  it('holds only complete entries, each for a resource declared in infra/*.tf', () => {
+  it('holds only complete entries, each for a resource infra/*.tf declares, or no longer declares for a delete', () => {
     // Empty is the normal state, and then this passes trivially. An entry
     // needs both values spelled out, because an omitted one matches only an
     // absent attribute, and a reason, because the next reader has to decide
@@ -873,7 +873,13 @@ describe('DECLARED', () => {
         expect(Object.hasOwn(declaration, 'before') && Object.hasOwn(declaration, 'after'), label).toBe(true);
       }
       const [type, name] = declaration.address.replace(/\[.*$/, '').split('.');
-      expect(infraSource, label).toContain(`resource "${type}" "${name}"`);
+      // A declared delete is the removal of a whole resource (#816), so its
+      // block must be gone; every other entry must name a block that exists.
+      if (declaration.action === 'delete' && !/\[.*\]$/.test(declaration.address)) {
+        expect(infraSource, label).not.toContain(`resource "${type}" "${name}"`);
+      } else {
+        expect(infraSource, label).toContain(`resource "${type}" "${name}"`);
+      }
     }
   });
 });
@@ -932,6 +938,14 @@ describe('conditional replacements and declared creates (#816)', () => {
     expect(result).toMatchObject({ ok: true, unexpected: [] });
     expect(result.declared).toEqual([declaration]);
     expect(declarationLines(result)).toEqual([`DECLARED    ${COSMOS}["content"] create (test)`]);
+  });
+
+  it('passes the healer removal (#816 part 2) on the shipped declarations: 3 add, 1 change, 4 destroy', () => {
+    const ROLE = 'azurerm_role_assignment.github_deploy_cosmos_container_writer';
+    const plan = withChanges({ address: ROLE, change: { actions: ['delete'] } });
+    const result = checkPlan(plan);
+    expect(result).toMatchObject({ ok: true, unexpected: [], missing: [] });
+    expect(result.declared.map((d) => d.address)).toEqual([ROLE]);
   });
 
   it('does not let a create declaration cover a delete, or another instance', () => {

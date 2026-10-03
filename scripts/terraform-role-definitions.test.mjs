@@ -100,8 +100,9 @@ describe('custom role definitions', () => {
   it('never gives a reviewed JSON an assignable scope Azure refuses outright', () => {
     // The narrow claim, because the broad one is false. Microsoft documents
     // custom roles as assignable at management group, subscription and resource
-    // group scopes — but cosmos-container-writer.json names a RESOURCE and was
-    // created and is in use, so ARM accepts more than the doc lists. Asserting
+    // group scopes — but cosmos-container-writer.json (deleted with the healer
+    // in #816) named a RESOURCE and was created and used, so ARM accepts more
+    // than the doc lists. Asserting
     // the documented set would fail CI on a role that works, which is how a
     // guard teaches people to ignore guards.
     //

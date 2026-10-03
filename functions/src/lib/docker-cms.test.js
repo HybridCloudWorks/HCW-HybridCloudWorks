@@ -18,6 +18,7 @@ import { brandingFor, buildCoverSvg } from './triggers/cover-svg.js';
 import { ANALYSIS_SYSTEM_PROMPT } from './content/inspect.js';
 import { VERTICAL_VOICE, voiceForProvider } from './content/voice.js';
 import { ADMIN_PROMPT_PAGE_ALLOWLIST } from './cms/image-prompts.js';
+import { normalizeProviderName } from './cms/content-update-validation.js';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const frontend = (...parts) => readFileSync(join(REPO, 'frontend', 'src', ...parts), 'utf8');
@@ -109,5 +110,35 @@ describe('the admin copy of the hero list', () => {
     expect(block, 'HERO_PROVIDERS in settingShared.jsx').not.toBeNull();
     const admin = [...block[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
     expect(admin).toEqual([...HERO_PROVIDERS]);
+  });
+});
+
+describe('the admin provider list', () => {
+  // frontend/src/config/admin.js builds the review board's provider picker
+  // from CANONICAL_PROVIDERS in frontend/src/lib/providers.js, storing each
+  // key with its first letter capitalised. A value the server cannot
+  // normalise is a button whose save is refused and a post that can never
+  // reach the publish queue, which is what Docker, VMware and Ansible were
+  // until 2026-10-03.
+  const block = /export const CANONICAL_PROVIDERS = Object\.freeze\(\[([\s\S]*?)\]\);/.exec(
+    frontend('lib', 'providers.js')
+  );
+  const providers = block ? [...block[1].matchAll(/'([^']+)'/g)].map((m) => m[1]) : [];
+  const stored = (provider) => provider.charAt(0).toUpperCase() + provider.slice(1);
+
+  it('stores each value the way admin.js writes it', () => {
+    expect(frontend('config', 'admin.js')).toContain(
+      'provider.charAt(0).toUpperCase() + provider.slice(1)'
+    );
+  });
+
+  it('offers only providers the server stores as written, and every one it knows', () => {
+    expect(block, 'CANONICAL_PROVIDERS in lib/providers.js').not.toBeNull();
+    expect(providers.length).toBeGreaterThan(0);
+    for (const provider of providers) {
+      expect(normalizeProviderName(provider), provider).toBe(stored(provider));
+      expect(normalizeProviderName(stored(provider)), provider).toBe(stored(provider));
+    }
+    expect(providers).toEqual(expect.arrayContaining(['docker', 'vmware', 'ansible']));
   });
 });

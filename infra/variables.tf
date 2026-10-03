@@ -327,12 +327,13 @@ variable "cosmos_allow_azure_datacenter_ips" {
     the integration subnet the firewall admits by virtual_network_rule. Nothing
     in CI holds a Cosmos data-plane role any more.
 
-    NOT heal-computed-properties, which this said until 2026-08-29: its
-    automatic path sets computedProperties through ARM, a control-plane
-    operation this firewall never gated. Its dispatch-only --inspect mode reads
-    documents and now needs an operator window through cosmos_admin_ip_rules,
-    the same populate/apply/work/empty procedure every other live-data
-    inspection uses.
+    NOT heal-computed-properties, which this said until 2026-08-29: it set
+    computedProperties through ARM, a control-plane operation this firewall
+    never gated, and #816 deleted it once the apply took that write over.
+    `apply-computed-sortdate.mjs --inspect` reads documents and needs an
+    operator window through cosmos_admin_ip_rules, the same
+    populate/apply/work/empty procedure every other live-data inspection
+    uses.
 
     Turning this back on re-admits every Azure tenant at the network layer.
     docs/decisions/0025-cosmos-firewall-datacenter-sentinel.md is the record of why that

@@ -147,7 +147,7 @@ Home (§4.11). Each row says so.
 
 | Name | Status | Consumer |
 | --- | --- | --- |
-| `CLIENT_ID` | **VERIFIED** | OIDC login for the workflows that WRITE — `deploy-functions.yml`, `deploy-azure-frontend.yml` and `heal-computed-properties.yml`. Also arms the healer, which skips while it is unset |
+| `CLIENT_ID` | **VERIFIED** | OIDC login for the workflows that WRITE — `deploy-functions.yml` and `deploy-azure-frontend.yml`. `heal-computed-properties.yml` signed in with it too until #816 deleted it |
 | `COPILOT_REVIEW_CLIENT_ID` | **SET 2026-09-06** | OIDC login in `copilot-setup-steps.yml`, the job GitHub runs before Copilot code review and the Copilot cloud agent start. Identifies `github_copilot_review` (`infra/oidc.tf`): Reader on the four workload groups, nothing else. Seeded from the `copilot_review_client_id` output by `scripts/set-github-variables.ps1`; while unset the login fails closed and the Azure MCP server has no credential — see [Copilot code review MCP servers](../runbooks/copilot-code-review-mcp.md) |
 | `COPILOT_REVIEW_APP_ID` | **SET 2026-09-06** | App ID of *HCW Copilot Review Reader*, the read-only GitHub App from which `copilot-setup-steps.yml` mints a one-hour installation token for the GitHub MCP server Copilot code review uses. An identifier, like `MANIFEST_APP_ID`; the key is the Agents secret in §4.3. Set by hand from the App page (runbook step 4) |
 | `READER_CLIENT_ID` | **SET 2026-09-06** | OIDC login for the workflows that only read — `monitor-functions-registered.yml`, `monitor-unresolved-secrets.yml`, `verify-alert-state.yml` and `publish-content-manifest.yml` (T-728). All four are gated on it and **skip silently while it is unset**, so a rebuilt repository seeds it in the same pass as the apply: an unset value looks like four workflows not running, not like a failure |
@@ -158,10 +158,10 @@ Home (§4.11). Each row says so.
 | `FUNCTIONS_STORAGE_ACCOUNT` | **VERIFIED** | Storage firewall window during deploy |
 | `FUNCTIONS_URL` | **VERIFIED** | The frontend build's API base: `deploy-azure-frontend.yml` passes it as `VITE_AZURE_FUNCTIONS_URL` with `REQUIRE_API_BASE: 'true'`, so the build fails without it, and as `AZURE_FUNCTIONS_URL` for the public-data generation step. Also the post-deploy smoke test's non-allowlisted probe in `deploy-functions.yml` |
 | `APP_HOSTNAME` | **VERIFIED** | Origin health probe through the temporary window |
-| `COSMOS_ENDPOINT` | **VERIFIED** | Computed-property healer. A variable, not a secret — it is a public endpoint, and the earlier secret placement was corrected 2026-08-20 |
+| `COSMOS_ENDPOINT` | **SET, read by nothing** | Its one workflow reader, the computed-property healer, was deleted in #816 (the apply writes `cp_sortDate` now). A variable, not a secret — it is a public endpoint, and the earlier secret placement was corrected 2026-08-20. `scripts/set-github-variables.ps1` still seeds it, so it stays set until that script and this row go together |
 | `DOCKERHUB_CONNECTION` | Set 2026-09-29 (§4.11, #779, closed) | The ID of the Docker OIDC connection, a UUID. `publish-lab-image.yml`'s `Publish to Docker Hub` job passes it to `docker/login-action` as `DOCKERHUB_OIDC_CONNECTIONID`, the name the action reads. An identifier, not a credential: it grants nothing without a GitHub token from this repository's `main`. Set by hand at a prompt with the one-liner in [Docker Hub publishing](../runbooks/docker-hub-publishing.md), step 2 |
 | `DOCKERHUB_ENABLED` | `true` since 2026-09-29 | `true` turns on the `Publish to Docker Hub` job. Any other value, or none, leaves it skipped and GHCR publishing unchanged. Set by hand, after `DOCKERHUB_CONNECTION`: with it `true` and the ID missing, the job fails and names the variable. [Docker Hub publishing](../runbooks/docker-hub-publishing.md), step 3 |
-| `COSMOS_RESOURCE_GROUP` | **SET** | Healer scope |
+| `COSMOS_RESOURCE_GROUP` | **SET, read by nothing** | Was the healer's ARM scope; the healer was deleted in #816. `scripts/set-github-variables.ps1` still seeds it from the `cosmos_resource_group` output, so it stays set until that script and this row go together |
 | `MANIFEST_APP_ID` | **SET 2026-09-01** | App ID of the repository's GitHub App, paired with the `MANIFEST_APP_PRIVATE_KEY` secret (§4.3). An identifier, so a variable. Read by the four workflows that open pull requests through the App: `publish-content-manifest.yml`, `update-avm-versions.yml`, `update-learn-catalogue.yml` and `update-version-floors.yml` |
 | `STORAGE_ACCOUNT` | **SET, read by nothing** | No workflow has read it since the migration surface was retired (59e471b0); `publish-content-manifest.yml` no longer does. `scripts/set-github-variables.ps1` still seeds it, so it stays set until that script and this row go together |
 | `STORAGE_RESOURCE_GROUP` | **SET, read by nothing** | As above |
@@ -210,7 +210,7 @@ Enumerated live 2026-08-25.
 
 | Name | Status | Notes |
 | --- | --- | --- |
-| `production` | **SET — one required reviewer and a `main`-only branch rule** (read live 2026-10-02) | Both deploy workflows bind to it, so it records who deployed. **Read live on 2026-10-02, it also gates them: one required reviewer (`saulpatinojr`, self-review allowed) and the `main`-only deployment-branch rule.** That reverses the owner decision of 2026-08-29, which this row carried until then without re-reading the setting; when the reviewer was added is not recorded. The 2026-08-29 decision, kept for its reasoning: ~~required reviewers deliberately not configured, because in a single-operator estate a required reviewer you approve yourself is not a control — it is a click that produces an audit trail implying oversight that did not happen~~. What still matters here is the other half. GitHub auto-creates a missing environment with no protection rules, and the federated credential's subject is environment-scoped (`repo:HybridCloudWorks/HCW-HybridCloudWorks:environment:production`, declared in `infra/oidc.tf`), so it matches from any branch — an unprotected environment leaves `workflow_dispatch` able to ship an unreviewed ref past all 12 required contexts (T-705). A `main`-only **deployment-branch rule** closes that, costs a solo operator nothing, and is not self-approval theatre. ~~**Owner action, reduced to one thing:** Settings → Environments → `production` → Deployment branches → *Selected branches* → `main`.~~ **Done 2026-09-02:** the `main`-only deployment-branch rule is set. The guard step in both workflows stays as the repository-side backstop; belt and braces is correct here because the environment rule is configured outside the repository and nothing in a checkout can prove it is still set |
+| `production` | **SET — two required reviewers, either of whom approves, and a `main`-only branch rule** (read live 2026-10-03) | Both deploy workflows bind to it, so it records who deployed. **It also gates them: two required reviewers, `saulpatinojr` and `hcw-architect`, either of whom can approve a deployment (self-review allowed), and the `main`-only deployment-branch rule.** The second reviewer was added on 2026-10-03; read it back with `gh api repos/HybridCloudWorks/HCW-HybridCloudWorks/environments/production`. Read live on 2026-10-02 it had one reviewer (`saulpatinojr`), which reversed the owner decision of 2026-08-29 that this row carried until then without re-reading the setting; when that first reviewer was added is not recorded. The 2026-08-29 decision, kept for its reasoning: ~~required reviewers deliberately not configured, because in a single-operator estate a required reviewer you approve yourself is not a control — it is a click that produces an audit trail implying oversight that did not happen~~. What still matters here is the other half. GitHub auto-creates a missing environment with no protection rules, and the federated credential's subject is environment-scoped (`repo:HybridCloudWorks/HCW-HybridCloudWorks:environment:production`, declared in `infra/oidc.tf`), so it matches from any branch — an unprotected environment leaves `workflow_dispatch` able to ship an unreviewed ref past all 12 required contexts (T-705). A `main`-only **deployment-branch rule** closes that, costs a solo operator nothing, and is not self-approval theatre. ~~**Owner action, reduced to one thing:** Settings → Environments → `production` → Deployment branches → *Selected branches* → `main`.~~ **Done 2026-09-02:** the `main`-only deployment-branch rule is set. The guard step in both workflows stays as the repository-side backstop; belt and braces is correct here because the environment rule is configured outside the repository and nothing in a checkout can prove it is still set |
 | `copilot` | **SET** | Copilot cloud agent and Copilot code review. `copilot-setup-steps.yml` declares it, so the OIDC subject is `repo:HybridCloudWorks/HCW-HybridCloudWorks:environment:copilot`, trusted (both forms) only by `github_copilot_review` — a Reader-only identity, so a deployment-branch rule here would gain nothing and would block Copilot's own branches |
 | `data-migration` | **RETIRED** | Its only consumer, `migrate-data.yml`, was deleted in `59e471b`. The two federated credentials that still trusted it were removed on 2026-08-26 (T-524), so nothing in Azure trusts the subject either |
 
@@ -287,7 +287,7 @@ problem. The two cost very different amounts to diagnose.
 
 ## 4.6b Custom role definitions — owner-created, once
 
-Four custom roles are referenced by `infra/` and **not created by it**.
+Three custom roles are referenced by `infra/` and **not created by it**.
 `azurerm_role_definition` needs `Microsoft.Authorization/roleDefinitions/write`,
 and the HCP Terraform run identity is Contributor + Role Based Access Control
 Administrator. Neither carries it: Contributor excludes
@@ -302,7 +302,6 @@ here. Run these once, from an account with Owner or User Access Administrator on
 the subscription:
 
 ```
-az role definition create --role-definition @infra/roles/cosmos-container-writer.json
 az role definition create --role-definition @infra/roles/keyvault-secret-writer.json
 az role definition create --role-definition @infra/roles/function-config-refresh.json
 az role definition create --role-definition @infra/roles/function-settings-reader.json
@@ -310,17 +309,21 @@ az role definition create --role-definition @infra/roles/function-settings-reade
 
 | Role | Grants | Consumer |
 | --- | --- | --- |
-| `HCW Cosmos Container Definition Writer` | Container definition read + write on the Cosmos account. No keys, no data plane, no account settings | `heal-computed-properties.yml` re-applying `cp_sortDate` |
 | `HCW Key Vault Secret Writer` | `setSecret` and nothing else — no get, no list, no delete, no purge | The API Keys page, so a pasted credential cannot be read back out |
 | `HCW Function Config Refresh` | `Microsoft.Web/sites/config/Write`, with `config/list/action` excluded | The API Keys page, so a seeded secret goes live in seconds rather than on App Service's 24-hour cache cycle |
 | `HCW Function Settings Reader` | `Microsoft.Web/sites/config/list/action` and nothing else | `monitor-functions-registered.yml`, the one thing the `Reader` role cannot express — listing app settings is an action, not a read |
 
-The first was created on 2026-08-21. The second and third were declared as
-Terraform `resource` blocks when the API Keys page landed, which would have
-failed the very apply that turns the page on. The fourth arrived with the
-identity split (T-728). **The last three are all new and unapplied**, and the
-Terraform plan errors with "role definition not found" until each exists —
-which reads like a permissions problem and is actually this step.
+The first two were declared as Terraform `resource` blocks when the API Keys
+page landed, which would have failed the very apply that turns the page on.
+The third arrived with the identity split (T-728). Until each exists, the
+Terraform plan errors with "role definition not found" — which reads like a
+permissions problem and is actually this step.
+
+A fourth, `HCW Cosmos Container Definition Writer`
+(`infra/roles/cosmos-container-writer.json`), was created on 2026-08-21 for
+`heal-computed-properties.yml`. #816 deleted the healer, the JSON and the
+Terraform assignment; the definition itself is the owner's to delete, once,
+after the apply that destroys the assignment.
 `scripts/terraform-role-definitions.test.mjs` now fails CI on the `resource`
 form, and on a `data` lookup naming a role no JSON here registers.
 

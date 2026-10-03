@@ -35,13 +35,21 @@ const WINDOW_MS = 60 * 60 * 1000;
 /**
  * Per-type contract. Providers are per-page in the source
  * (pages/submissions/*.jsx) and deliberately not merged into one set — a
- * 'framework' submission claiming provider 'Aws' was never possible in the UI
- * and should not become possible through the API.
+ * 'framework' submission claiming provider 'Github' was never possible in the
+ * UI and should not become possible through the API.
+ *
+ * Each list is the PROVIDER_OPTIONS of its page, exactly. Until the Docker
+ * provider fix, the framework and coder_corner lists here were each other's:
+ * the Frameworks form offers AWS, Azure and GCP and the Coder Corner form
+ * GitHub, Terraform and Docker, so every submission from either form was
+ * refused with "cloudProvider must be one of". Docker joined the blog and
+ * Coder Corner forms in #775 and only now the lists that accept them.
+ * submissions.test.js reads the pages and holds these to them.
  */
 export const SUBMISSION_TYPES = Object.freeze({
   blog: {
     publishTarget: 'blog',
-    providers: ['Azure', 'Aws', 'Gcp', 'Github', 'Terraform', 'Finops'],
+    providers: ['Azure', 'Aws', 'Gcp', 'Github', 'Terraform', 'Finops', 'Docker'],
     requires: ['title', 'summary', 'content'],
     optional: ['tags', 'sourceUrl'],
   },
@@ -60,7 +68,7 @@ export const SUBMISSION_TYPES = Object.freeze({
   },
   framework: {
     publishTarget: 'framework',
-    providers: ['Github', 'Terraform'],
+    providers: ['AWS', 'Azure', 'GCP'],
     requires: ['title', 'summary', 'overviewHtml'],
     optional: [
       'tags',
@@ -74,7 +82,7 @@ export const SUBMISSION_TYPES = Object.freeze({
   },
   coder_corner: {
     publishTarget: 'coder_corner',
-    providers: ['AWS', 'Azure', 'GCP'],
+    providers: ['Github', 'Terraform', 'Docker'],
     requires: ['title', 'summary', 'content', 'language'],
     optional: ['tags', 'repoUrl', 'codeSnippet', 'explanation'],
   },

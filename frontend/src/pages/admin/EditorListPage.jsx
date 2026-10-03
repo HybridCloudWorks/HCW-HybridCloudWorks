@@ -13,6 +13,7 @@ import { postJSON, getJSON } from '@/lib/api';
 import { logAdminAction } from '@/lib/auditLog';
 import { unpublishToInspected } from '@/lib/contentWorkflow';
 import { safeUrl } from '@/lib/safeUrl';
+import { PROVIDER_OPTIONS as ADMIN_PROVIDER_OPTIONS } from '@/config/admin';
 import {
   getCanonicalContentType,
   getContentPublicPath,
@@ -68,7 +69,10 @@ const TYPE_BADGE = {
   news: 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300',
 };
 
-const PROVIDER_OPTIONS = ['All', 'Azure', 'AWS', 'GCP', 'FinOps', 'GitHub', 'Terraform', 'Docker'];
+// Every provider the site routes, from the registry (config/admin.js), so the
+// filter cannot fall behind it again: VMware and Ansible were missing here.
+// Matched by substring of the stored value, so the label's lower case works.
+const PROVIDER_OPTIONS = ['All', ...ADMIN_PROVIDER_OPTIONS.map((option) => option.label)];
 
 function matchesProviderFilter(item, providerFilter) {
   if (providerFilter === 'All') return true;

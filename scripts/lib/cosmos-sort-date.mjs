@@ -11,10 +11,9 @@
  * `generate-cosmos-container-spec.mjs` writes this definition into
  * `infra/cosmos-containers.json`, and Terraform applies it from there in the
  * same apply that manages the container (`azapi_update_resource.cosmos_computed_properties`
- * in infra/cosmos.tf). `apply-computed-sortdate.mjs`, the six-hourly healer
- * this replaces, compares against the same string. Cosmos stores the query as
- * written, so both see an exact match on a healthy container, and neither
- * plans a change.
+ * in infra/cosmos.tf). Cosmos stores the query as written, so a healthy
+ * container matches it exactly and the update plans nothing. The six-hourly
+ * healer that compared against the same string was deleted in #816.
  */
 
 /** The containers the public list orders by `cp_sortDate`. */

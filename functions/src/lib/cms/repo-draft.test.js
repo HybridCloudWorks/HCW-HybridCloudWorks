@@ -201,7 +201,19 @@ describe('parseRepoDraft — refusals and warnings', () => {
   it('takes the provider from the first tag that names one the CMS knows', () => {
     expect(inferProviderFromTags(['iac', 'azure', 'terraform'])).toBe('Azure');
     expect(inferProviderFromTags(['terraform', 'docker'])).toBe('Terraform');
-    expect(inferProviderFromTags(['docker', 'ai-agents'])).toBeNull();
+    expect(inferProviderFromTags(['oracle', 'ai-agents'])).toBeNull();
+  });
+
+  it('files a docker-tagged post under Docker, unless another provider is tagged too', () => {
+    expect(inferProviderFromTags(['docker', 'ai-agents'])).toBe('Docker');
+    expect(inferProviderFromTags(['Docker', 'compose'])).toBe('Docker');
+    // Docker last, as in frontend/src/lib/providers.js: Docker on Azure is Azure.
+    expect(inferProviderFromTags(['docker', 'azure'])).toBe('Azure');
+  });
+
+  it('knows every provider the site routes, VMware and Ansible included', () => {
+    expect(inferProviderFromTags(['homelab', 'vmware'])).toBe('Vmware');
+    expect(inferProviderFromTags(['ansible', 'docker'])).toBe('Ansible');
   });
 });
 

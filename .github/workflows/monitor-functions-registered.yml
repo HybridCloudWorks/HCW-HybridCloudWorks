@@ -97,7 +97,8 @@ name: Monitor Functions Registered
 
 on:
   schedule:
-    # Offset from the top of the hour, as heal-computed-properties.yml is.
+    # Offset from the top of the hour, so it does not queue behind every other
+    # top-of-the-hour schedule on GitHub's runners.
     - cron: '41 * * * *'
   # No inputs (checkov CKV_GHA_7). The app, its resource group and the
   # threshold are fixed below: a manual run checks the same thing the schedule
@@ -121,8 +122,8 @@ concurrency:
 jobs:
   check:
     name: Check the expected functions are registered
-    # Self-arming, as heal-computed-properties.yml is: before the first apply
-    # there is no identity to log in as, and an hourly red run would read as a
+    # Self-arming, as verify-alert-state.yml is: before the first apply there
+    # is no identity to log in as, and an hourly red run would read as a
     # permissions bug while actually meaning "not deployed yet".
     if: ${{ vars.READER_CLIENT_ID != '' }}
     permissions:

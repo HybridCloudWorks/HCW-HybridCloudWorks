@@ -655,8 +655,9 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # T-206, last step. With "1" the public content list asks Cosmos for the
     # NEWEST N documents (ORDER BY c.cp_sortDate DESC) instead of an arbitrary
     # N that is then sorted in memory. cp_sortDate is a computed property the
-    # healer workflow maintains on `content` and `blogs` — present on both as
-    # of 2026-08-21 (run 32448029469) — and it is defined on every document
+    # apply writes onto `content` and `blogs` and fails without
+    # (azapi_update_resource.cosmos_computed_properties in cosmos.tf, #816) —
+    # present on both since 2026-08-21 — and it is defined on every document
     # ("" when no date alias exists), which is what makes ORDER BY safe.
     # Precondition before flipping: `apply-computed-sortdate.mjs --inspect`
     # clean (every date alias ISO-sortable). Flip back to "0" if the list
@@ -938,17 +939,19 @@ resource "azapi_update_resource" "function_app_settings_without_webjobs_storage"
     # one; `azapi-strip` has this one. Without the marker the two are
     # indistinguishable, because ARM shows only the final state either way.
     #
-    # Values pass through exactly as azapi returned them, unchanged. Wrapping
-    # them in tostring() would be reasonable hardening — app-settings values are
-    # strings — but doing it now could silently remove the very fault under
-    # investigation and destroy the evidence. That was the reason while T-513
-    # was open. T-513 has since closed as a name collision rather than a value
-    # problem (CHANGELOG.md), so the hardening is no longer blocked. It is
-    # #837, kept out of a comment-only change because it alters the plan.
+    # Each value passes through tostring() (#837). App-settings values are
+    # strings and ARM's appsettings PUT takes a string map, so this changes
+    # nothing today. What it buys: a value that ever comes back from the list
+    # call as an object or a list stops this apply with an error naming the
+    # conversion, rather than being written back in whatever shape azapi
+    # decoded it. It was held back while T-513 was open, because it could have
+    # hidden the fault under investigation. T-513 closed as a name collision
+    # (CORS_* against a variable App Service injects), not a value problem
+    # (CHANGELOG.md).
     properties = merge(
       {
         for key, value in azapi_resource_action.function_app_settings.output.properties :
-        key => value if key != "AzureWebJobsStorage"
+        key => tostring(value) if key != "AzureWebJobsStorage"
       },
       { "RUNTIME_CONFIG_WRITER" = "azapi-strip" }
     )
