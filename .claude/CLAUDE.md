@@ -191,6 +191,28 @@ so it is recorded here, where every session reads it.
   recommends changes, or any review thread still unresolved on the head, is
   not that: fix, push, and wait for the next review of the new head. Ready
   for review on its own is still not permission to merge.
+- **Copilot review is off until the owner says otherwise; all green is the
+  merge.** Owner instruction 2026-10-03, after PRs #835 and #836 took three
+  and four Copilot rounds each and the reviews then stopped arriving. This
+  overrides the two bullets above until the owner turns review back on:
+
+  - **While review is off:** a session merges as soon as every required
+    status check is green on the current head and no review thread is
+    unresolved. Do not wait for, or request, a Copilot review. The
+    `copilot_code_review` rule was removed from the `Default` ruleset
+    (20680114) that day. Its parameters were `review_on_push: true` and
+    `review_draft_pull_requests: true`, so turning it back on means adding
+    that rule back with them.
+  - **When review is back on: at most two rounds, then all green is the
+    merge.** A round is one Copilot review of a head, and the fixes pushed
+    in answer to it. Work the loop above for the first and second reviews.
+    After the second round's fixes are pushed, merge once required checks are
+    green and every thread is replied to and resolved. Do not wait for a
+    third review. A review that does arrive on the final head still has its
+    findings answered on their threads before the merge.
+
+  Delete this bullet, and restore the two above as written, only when the
+  owner says so.
 - **Every review conversation is resolved before the merge, including the
   ones that ask for nothing.** Owner instruction 2026-09-06, after a merge
   was blocked with `A conversation must be resolved before this pull request
