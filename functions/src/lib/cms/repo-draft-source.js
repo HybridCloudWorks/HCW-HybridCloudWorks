@@ -1,7 +1,8 @@
 /**
  * repo-draft-source.js — the GitHub side of the repository draft import
- * (./repo-import.js): list the drafts in docs/content on main, fetch one, and
- * look up the last commit to touch it.
+ * (./drafts-handlers.js, the Drafts page's "Import from docs/content"): list
+ * the drafts in docs/content on main, fetch one, and look up the last commit
+ * to touch it.
  *
  * TWO HOSTS, FIXED HERE AND NOWHERE ELSE. `raw.githubusercontent.com` for the
  * file at `HybridCloudWorks/HCW-HybridCloudWorks/main/<path>`, and

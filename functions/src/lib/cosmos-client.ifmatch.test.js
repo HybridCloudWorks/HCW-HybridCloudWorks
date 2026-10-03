@@ -16,6 +16,7 @@ const item = vi.hoisted(() => ({
   patch: vi.fn(async () => ({ resource: { id: 'c1' } })),
   read: vi.fn(async () => ({ resource: { id: 'c1', _etag: '"live"', a: 1 } })),
   replace: vi.fn(async () => ({ resource: { id: 'c1' } })),
+  delete: vi.fn(async () => ({})),
 }));
 
 vi.mock('@azure/cosmos', () => ({
@@ -27,7 +28,7 @@ vi.mock('@azure/cosmos', () => ({
 }));
 vi.mock('@azure/identity', () => ({ DefaultAzureCredential: class {} }));
 
-const { patchDoc } = await import('./cosmos-client.js');
+const { patchDoc, deleteDocIfMatch } = await import('./cosmos-client.js');
 
 describe('patchDoc ifMatch', () => {
   beforeEach(() => {
@@ -93,5 +94,37 @@ describe('patchDoc ifMatch', () => {
 
     await patchDoc('content', 'c1', updates);
     expect(item.replace).toHaveBeenCalledTimes(2);
+  });
+});
+
+/**
+ * The delete counterpart (the Drafts stage, lib/cms/drafts-handlers.js). A
+ * fake store in the handler tests would accept any option at all, so this is
+ * what proves the condition actually reaches the SDK.
+ */
+describe('deleteDocIfMatch', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.COSMOS_ENDPOINT = 'https://example.documents.azure.com';
+  });
+
+  it('sends If-Match with the etag the caller read', async () => {
+    await deleteDocIfMatch('content', 'c1', '"abc"');
+    expect(item.delete).toHaveBeenCalledWith({
+      accessCondition: { type: 'IfMatch', condition: '"abc"' },
+    });
+  });
+
+  it('refuses to delete unconditionally when no etag is given', async () => {
+    await expect(deleteDocIfMatch('content', 'c1', '')).rejects.toThrow(/etag is required/);
+    expect(item.delete).not.toHaveBeenCalled();
+  });
+
+  it("passes the SDK's 412 through rather than retrying", async () => {
+    item.delete.mockRejectedValueOnce(Object.assign(new Error('precondition'), { code: 412 }));
+    await expect(deleteDocIfMatch('content', 'c1', '"stale"')).rejects.toMatchObject({
+      code: 412,
+    });
+    expect(item.delete).toHaveBeenCalledTimes(1);
   });
 });

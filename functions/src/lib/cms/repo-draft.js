@@ -1,11 +1,14 @@
 /**
  * repo-draft.js — the pure half of importing a `docs/content/blog-*.md` draft
- * from the repository into the CMS review queue (owner request 2026-09-28).
+ * from the repository into the CMS (owner request 2026-09-28). Since
+ * 2026-10-03 the import lands each file in the Drafts stage (/admin/drafts,
+ * ./drafts-handlers.js), once; the original straight-to-review import
+ * (repo-import.js) was retired with it.
  *
- * Nothing here does I/O. The fetch, the store and the HTTP shape are in
- * ./repo-import.js; this module decides which paths may be imported at all,
- * reads a draft's front matter, and builds the content document the review
- * queue lists.
+ * Nothing here does I/O. The fetch is ./repo-draft-source.js, the store and
+ * the HTTP shape ./drafts-handlers.js; this module decides which paths may be
+ * imported at all, reads a draft's front matter, and builds the content
+ * document (./drafts.js asImportedDraft sets the Drafts stage's status on it).
  *
  * THE ALLOW-LIST IS A PATTERN, NOT A LOOKUP. `^docs/content/blog-[a-z0-9-]+\.md$`
  * admits no `.`, `/`, `%` or `\` after the directory, so a traversal
@@ -30,15 +33,13 @@
  * THE BODY IS NOT TRANSFORMED. The text after the closing `---` goes into the
  * document as written, so a `landing-zone` or `pricing-scenario` fence reaches
  * the review board and the publish renderer byte for byte. The one change is
- * the one every content writer makes: createContentDocument runs
- * normalizeContentBodyFields over it, which trims and moves a TL;DR section to
- * the end.
+ * the one every content writer makes, made when the draft is sent to In
+ * Review (./drafts.js buildSendToReviewPatch): normalizeContentBodyFields,
+ * which trims and moves a TL;DR section to the end.
  */
 import { createHash } from 'node:crypto';
 import { slugify } from './publish.js';
 import { normalizeProviderName } from './content-update-validation.js';
-import { normalizeContentBodyFields } from './content-quality.js';
-import { buildDedupFields } from './content-dedup.js';
 
 export const REPO_OWNER = 'HybridCloudWorks';
 export const REPO_NAME = 'HCW-HybridCloudWorks';
@@ -128,7 +129,7 @@ export const REPO_DRAFT_ID_NAMESPACE = '8bccdb11-a980-4071-bc3a-805c389b371b';
  * random id, two imports of the same path racing each other (a double click)
  * would both find nothing by repoPath and both create, and every later import
  * would then find two. With the id derived from the path, both race to the
- * same id and the create is create-only (repo-import.js), so the second one
+ * same id and the create is create-only (drafts-handlers.js), so the second one
  * is refused rather than duplicated. UUID-shaped so nothing downstream — the
  * slug suffix a colliding publish takes, the preview route — sees a
  * difference.
@@ -198,7 +199,7 @@ export function parseInlineList(value) {
     .slice(0, MAX_TAGS);
 }
 
-function isCalendarDate(value) {
+export function isCalendarDate(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const parsed = new Date(`${value}T00:00:00Z`);
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
@@ -338,14 +339,20 @@ function provenance({ path, source }) {
 }
 
 /**
- * The `data` for createContentDocument — the createContentItem write path, so
- * an imported draft is shaped like every other draft (the Publish-Ready
- * Builder's persistStage.js payload and draft-from-recording.js are the two
- * it follows) and goes through the same dedup and document stamping.
+ * The document an imported file becomes, shaped like every other draft (the
+ * Publish-Ready Builder's persistStage.js payload and draft-from-recording.js
+ * are the two it follows) so createContentDocument would accept it as is.
+ *
+ * The Drafts import (./drafts.js asImportedDraft) lays the Drafts stage's
+ * status and stamping over it: `contentStatus: 'drafting'`, `Live: false`,
+ * asserted again where the write happens. The `in_review` below is the
+ * state the original import wrote, and the state Send to In Review produces
+ * from the draft, so the two documents imported before the Drafts page
+ * existed and every one sent from it look alike on the review board.
  *
  * Deliberate choices, each against a specific failure:
- *   - `contentStatus: 'in_review'` and `Live: false`, fixed here and asserted
- *     again by the caller before it writes. `in_review` is outside
+ *   - `contentStatus: 'in_review'` and `Live: false` as the review state.
+ *     `in_review` is outside
  *     QUALITY_ENFORCED_STATUSES, so the quality gate reports without blocking,
  *     and its only forward edges are approved/published/rejected — every one
  *     a human's transition.
@@ -393,60 +400,5 @@ export function buildRepoDraftData({ path, draft, source, editor, now = () => ne
     repoImportedAt: stamp,
     repoImportedBy: editor,
     fetchedAt: stamp,
-  };
-}
-
-/**
- * The patch a re-import applies to the in-review document it found.
- *
- * THE REPOSITORY OWNS THE ARTICLE WHILE IT IS IN REVIEW, AND ONLY THEN. So
- * this rewrites what the file says — title, subtitle, body, tags, reading
- * time — and the provenance, and nothing a reviewer decides: not the
- * provider, the key topics, the images or the schedule, and never
- * contentStatus, Live or a publish field (no key here can move the document
- * through the state machine). Once the article is approved it belongs to the
- * site and repo-import.js refuses to touch it.
- *
- * `blogDraft` is written only when the document already has one: approval
- * copies the body into an absent blogDraft (content-status.js), but keeps a
- * present one, so a stale blogDraft left behind here would be the text the
- * editor opens after approval.
- *
- * The body fields go through normalizeContentBodyFields, as they do on the
- * create path and in updateContentItem, and `normalizedTitle` follows a
- * changed title so the dedup check keeps matching the document by what it is
- * now called. `readTime` undefined is a deletion (patchDoc's convention): the
- * file no longer states a reading time.
- */
-export function buildRepoDraftRefresh({
-  path,
-  draft,
-  source,
-  editor,
-  current = {},
-  now = () => new Date(),
-}) {
-  const stamp = now().toISOString();
-  const bodies = normalizeContentBodyFields({
-    Content: draft.body,
-    content: draft.body,
-    postContent: draft.body,
-    ...(typeof current.blogDraft === 'string' && { blogDraft: draft.body }),
-  });
-  return {
-    Title: draft.title,
-    title: draft.title,
-    Summary: draft.subtitle,
-    summary: draft.subtitle,
-    ...bodies,
-    ...buildDedupFields({ title: draft.title }),
-    Tags: draft.tags,
-    readTime: draft.reading ? `${draft.reading} min` : undefined,
-    ...provenance({ path, source }),
-    frontMatter: frontMatterRecord(draft),
-    repoRefreshedAt: stamp,
-    repoRefreshedBy: editor,
-    updatedAt: stamp,
-    updatedBy: editor,
   };
 }

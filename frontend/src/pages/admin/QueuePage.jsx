@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import ConfirmModal from '@/components/admin/ConfirmModal';
-import { useNavigate, useSearchParams } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import { useAuthReady } from '@/hooks/useAuthReady';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
@@ -19,8 +19,7 @@ import {
 import { QueueList } from './queue/QueueList';
 import { CONTENT_TYPE_OPTIONS, STATUS_FILTERS } from './queue/constants';
 import { useQueueActions } from './queue/useQueueActions';
-import RepoDraftImportPanel from './RepoDraftImportPanel';
-import { XCircle, RefreshCw, Loader2, Filter, Trash2, Flame } from 'lucide-react';
+import { XCircle, RefreshCw, Loader2, Filter, Trash2, Flame, FilePen } from 'lucide-react';
 
 function isValidHttpUrl(value = '') {
   try {
@@ -160,9 +159,6 @@ export default function QueuePage() {
   });
   const [loadError, setLoadError] = useState(null);
   const [forgeMeter, setForgeMeter] = useState(null);
-  // Bumped after a repository import so the list reloads even when the In
-  // Review filter it switches to is already the selected one.
-  const [reloadKey, setReloadKey] = useState(0);
   const [pageSize, setPageSize] = useState(() => {
     const fromUrl = Number(searchParams.get('pageSize'));
     return [50, 100, 200].includes(fromUrl) ? fromUrl : 100;
@@ -263,13 +259,7 @@ export default function QueuePage() {
       }
     }
     loadItems();
-  }, [authReady, statusFilter, contentTypeFilter, pageSize, reloadKey]);
-
-  // Imported drafts land In Review; show them there.
-  const handleRepoImported = () => {
-    setStatusFilter('in_review');
-    setReloadKey((key) => key + 1);
-  };
+  }, [authReady, statusFilter, contentTypeFilter, pageSize]);
 
   useEffect(() => {
     const next = new URLSearchParams();
@@ -380,7 +370,25 @@ export default function QueuePage() {
 
       <ForgeFromUrlCard />
 
-      <RepoDraftImportPanel onImported={handleRepoImported} />
+      {/* Repository drafts moved to their own stage (owner request 2026-10-03):
+          written, imported and sent here from /admin/drafts. */}
+      <Card>
+        <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
+          <div className="flex items-start gap-3">
+            <FilePen className="mt-0.5 h-5 w-5 text-muted-foreground" />
+            <div>
+              <p className="font-medium">Drafts</p>
+              <p className="text-sm text-muted-foreground">
+                Articles are written, imported from docs/content, and sent to In Review on the
+                Drafts page.
+              </p>
+            </div>
+          </div>
+          <Button asChild variant="outline" size="sm">
+            <Link to="/admin/drafts">Open Drafts</Link>
+          </Button>
+        </CardContent>
+      </Card>
 
       {/* Rejected decay-countdown explanation banner */}
       {statusFilter === 'rejected' && (

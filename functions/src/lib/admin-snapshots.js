@@ -94,6 +94,8 @@ export function matchesQueueStatus(item = {}, statusFilter = 'needs_review') {
   }
   if (statusFilter === 'in_progress') {
     if (status === 'rejected' || status === 'archived') return false;
+    // The Drafts stage is not the pipeline yet (/admin/drafts lists it).
+    if (status === 'drafting') return false;
     if (item.Live === true) return false;
     if (status === 'ingested' || status === 'inspected' || status === 'needs_rework') return false;
     return true;
@@ -133,6 +135,9 @@ export function summarizeDashboardItems(items = []) {
         summary.rejected += 1;
         return;
       }
+      // Not the pipeline yet — see classifyContentBucket in
+      // triggers/dashboard-stats.js, which this must agree with.
+      if (status === 'drafting') return;
 
       bucket.total += 1;
 

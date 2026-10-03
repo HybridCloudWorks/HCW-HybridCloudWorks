@@ -172,12 +172,19 @@ tags:       # azure, terraform, github-actions, iac
 reading:    # minutes
 ```
 
-To review a draft on the site, import it from **Admin → Content Queue →
-Import drafts from the repository** (`/admin/queue`). The import reads the
-file from `main`, takes the title, summary and tags from this front matter,
-and lands the article **In Review**; it never publishes it. Importing again
-refreshes the draft while it is still in review. Once it is approved, the
-site owns it and the import leaves it alone.
+Articles are now written on the site, in **Admin → Drafts**
+(`/admin/drafts`): the editor has a field for each key above, the markdown
+body, and a live preview, and a save is instant from any device. **Send to In
+Review** puts the article on the Content Queue; nothing is published from the
+Drafts page.
+
+The `blog-*.md` files in this directory were brought in once with **Import
+from docs/content** on that page, which reads each file from `main`, takes
+these seven keys from its front matter, and creates a draft. Importing again
+skips every file already imported, so it never duplicates and never
+overwrites. **After import, the Drafts page is the source of truth:** an edit
+made to a file here does not reach the site. The files stay as an archive for
+now. A new file added here can still be imported the same way, once.
 
 ## Code blocks
 

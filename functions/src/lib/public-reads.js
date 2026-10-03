@@ -81,9 +81,23 @@ const PUBLIC_STATUSES = new Set([
   'published_both',
 ]);
 
+/**
+ * Statuses that are never public, whatever else a document says.
+ *
+ * `drafting` is the Drafts stage (lib/cms/content-status.js
+ * DRAFTS_STAGE_STATUS; a literal here because content-status imports this
+ * module's provider registry through content-update-validation, and the cycle
+ * would run before either finished loading). A draft is written Live false
+ * and Status 'Draft' and no Drafts route can change either, so it already
+ * fails every disjunct below; this makes the answer not depend on that.
+ * drafts.test.js holds the literal to the constant.
+ */
+export const NEVER_PUBLIC_STATUSES = Object.freeze(new Set(['drafting']));
+
 export function isPublicDocument(doc = {}) {
   if (!doc) return false;
   if (isSoftDeleted(doc)) return false;
+  if (NEVER_PUBLIC_STATUSES.has(String(doc.contentStatus || ''))) return false;
   return (
     doc.Live === true ||
     doc.Status === 'Live' ||

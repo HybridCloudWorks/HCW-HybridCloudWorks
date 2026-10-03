@@ -23,16 +23,24 @@ import {
 export const MARKERS_CONTAINER = 'content_stats_markers';
 export const ABSENT_POSITION = Object.freeze({ exists: false, bucket: null, type: null });
 
-/** 'needsReview' | 'inProgress' | 'published' | 'rejected' | null (archived / missing / blocked). */
+/**
+ * Statuses on no counter. `archived` is out of the pipeline; `drafting` is the
+ * Drafts stage (content-status.js DRAFTS_STAGE_STATUS), the owner's writing
+ * desk, not the pipeline yet — counting it as inProgress would put every
+ * unfinished draft on the Editor badge. A draft enters the counters when it
+ * is sent to In Review.
+ */
+const UNCOUNTED_STATUSES = new Set(['archived', 'drafting']);
+const NEEDS_REVIEW_STATUSES = new Set(['draft', 'ingested', 'inspected']);
+
+/** 'needsReview' | 'inProgress' | 'published' | 'rejected' | null (archived / drafting / missing / blocked). */
 export function classifyContentBucket(data) {
-  if (!data) return null;
-  if (isBlockedContentSource(data)) return null;
+  if (!data || isBlockedContentSource(data)) return null;
   const status = String(data.contentStatus || 'ingested');
   if (status === 'rejected') return 'rejected';
-  if (status === 'archived') return null;
+  if (UNCOUNTED_STATUSES.has(status)) return null;
   if (data.Live === true) return 'published';
-  if (status === 'draft' || status === 'ingested' || status === 'inspected') return 'needsReview';
-  return 'inProgress';
+  return NEEDS_REVIEW_STATUSES.has(status) ? 'needsReview' : 'inProgress';
 }
 
 export function resolveStatsPosition(data) {

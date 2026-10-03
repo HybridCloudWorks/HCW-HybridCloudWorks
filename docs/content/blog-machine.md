@@ -21,6 +21,38 @@ owner-gated activation checklist (below) and the backlog. Per-phase
 "As built" notes record where the landed code deliberately differs from
 the original spec text.
 
+## The Drafts stage (2026-10-03)
+
+Hand-written articles have a stage of their own before the queue:
+**Admin → Drafts** (`/admin/drafts`), the entry above Review Queue in the
+admin menu. A draft is an ordinary `content` document at
+`contentStatus: 'drafting'`, `Live: false` — the same container and shape as
+everything else, so no infrastructure changed — and it is never public:
+`isPublicDocument` refuses the status outright, and the manifest, pre-render
+and feeds never select it.
+
+- **Write and save** on the page: title, subtitle, date, track, part, tags,
+  reading time and the markdown body, with a live preview through the
+  article renderer. Saves carry the version's ETag, so two tabs or devices
+  cannot overwrite each other; the second is told to reload.
+- **Send to In Review** moves the same document to `in_review`, normalised and
+  stamped exactly as the old repository import left it, and it continues
+  through the review board and the Publish Queue as before.
+- **Back to Drafts** returns an article that came from Drafts and is still In
+  Review (not approved, not live). **Delete** removes a draft, or one still In
+  Review — one document, so both go — and refuses anything live.
+- **Import from docs/content** brings the `blog-*.md` articles in once, as
+  drafts (`blog-template.md` and this file are skipped as contracts). After
+  that the Drafts page, not the file, is the article's source of truth.
+
+`drafting` is deliberately not the forge's `draft`: `forgeScheduled` picks up
+`draft` documents to rewrite, and a hand-written article must never be one.
+The state machine's two new edges (`drafting → in_review`,
+`in_review → drafting`) are walked only by the Drafts routes;
+`transitionContentStatus` refuses both. Code:
+`functions/src/lib/cms/drafts.js`, `drafts-handlers.js`,
+`frontend/src/pages/admin/DraftsPage.jsx`.
+
 ## What already exists — the load-bearing fact
 
 **The forge pipeline is built and works end-to-end**

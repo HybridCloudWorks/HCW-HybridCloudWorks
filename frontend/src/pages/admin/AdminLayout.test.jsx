@@ -173,3 +173,17 @@ describe('the admin sidebar', () => {
     expect(mains[0]).toHaveAttribute('id', 'main-content');
   });
 });
+
+/**
+ * Drafts is the stage before the review queue (owner request 2026-10-03), so
+ * its nav entry sits immediately before it in the Pipeline group.
+ */
+describe('the Pipeline nav group', () => {
+  const pipeline = () => NAV_GROUPS.find((group) => group.label === 'Pipeline');
+
+  it('puts Drafts immediately before the review queue', () => {
+    const labels = pipeline().items.map((item) => item.label);
+    expect(labels.indexOf('Drafts')).toBe(labels.indexOf('Review Queue') - 1);
+    expect(pipeline().items.find((item) => item.label === 'Drafts').to).toBe('/admin/drafts');
+  });
+});

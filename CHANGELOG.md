@@ -19,6 +19,61 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Drafts: a ContentForge stage before the Content Queue, at `/admin/drafts`
+  (#840, owner request 2026-10-03).** Articles drafted as `docs/content/*.md` files
+  could only be read on the site by importing them straight into review. They
+  now have a stage of their own, saved in the site: create, edit, delete and
+  push forward from any device, with no GitHub credential and no pull request
+  per save.
+  - **The page.** A list of drafts on the left; on the right an editor for the
+    seven front-matter fields the repository drafts carry (title, subtitle,
+    date, track, part, tags, reading) and the markdown body, with a live
+    preview through the article renderer. New draft, Save, Delete (confirmed),
+    Send to In Review and Back to Drafts; the save state (saved, unsaved
+    changes, saving, error) beside Save; a warning before leaving with unsaved
+    changes, whether by switching drafts, following a link or closing the tab.
+    Its menu entry, **Drafts**, sits immediately above Review Queue.
+  - **The data model needs no infrastructure change.** A draft is an ordinary
+    `content` document at the new `contentStatus: 'drafting'`, `Live: false`,
+    `Status: 'Draft'` — same container, same shape as the repository import's
+    documents, no Terraform. `drafting` is deliberately not `draft`, which
+    `forgeScheduled` picks up to rewrite. The state machine gains two edges,
+    `drafting → in_review` (Send to In Review) and `in_review → drafting`
+    (Back to Drafts, only for an article that came from Drafts and is not
+    approved or live); both are walked only by the Drafts routes, and
+    `transitionContentStatus` refuses them (`DRAFTS_STAGE`). A draft is kept
+    out of the queue filters and the dashboard counters.
+  - **Never public.** `isPublicDocument` refuses `drafting` outright, and a
+    draft's fields fail the public list query and the manifest/pre-render
+    query; `drafts.test.js` evaluates both SQL predicates, as written, against
+    every draft shape, so a predicate change that let one through fails there.
+  - **Send to In Review** moves the same document to `in_review` in the end
+    state the old import produced — body normalised, dedup title, quality and
+    image reports, provider from the tags when none is set — so it lands on
+    the review board and goes on to the Publish Queue as before. **Delete**
+    removes a draft or an article from Drafts still In Review (one document,
+    so both go) and refuses anything live with a message saying so.
+  - **Two tabs cannot overwrite each other.** Save, delete and both
+    transitions carry the version's ETag and are written conditioned on it
+    (`patchDoc` `ifMatch`, and a new `deleteDocIfMatch`); a stale one is a 412
+    `CONFLICT`, and the page keeps the owner's text and offers Reload latest.
+  - **Migration.** "Import from docs/content" on the page reuses the existing
+    parser, allow-list and pinned GitHub fetch to bring the ten `blog-*.md`
+    articles in once, as drafts (`blog-template.md` and `blog-machine.md` are
+    contracts and skipped). It is idempotent: a path already claimed by
+    `repoPath` is skipped before any fetch, and the create is create-only
+    under the id derived from the path. The two Docker drafts the old import
+    put In Review show on the page as In Review, with Back to Drafts.
+  - **Retired:** the Content Queue's "Import drafts from the repository" panel
+    and its two routes (`POST cms/content/import-repo`,
+    `GET cms/content/import-repo/candidates`), which wrote straight to review
+    and refreshed in-review articles from the repository — which would now
+    overwrite edits made on the Drafts page. The queue links to
+    `/admin/drafts` instead. Eight admin-only routes under `cms/drafts` replace
+    them, behind `requireRole` at editor, in the route inventory and the API
+    contract. The `docs/content` files stay as an archive;
+    `blog-template.md` and `blog-machine.md` say the Drafts page is the source
+    of truth after import.
 - **Docker guides: building images, and the Docker Desktop app (#772, #773).**
   The Docker hub's first two focus areas said "Coming soon". Both now link to
   a page of their own, the way the sandbox recipe does (#774) and the way

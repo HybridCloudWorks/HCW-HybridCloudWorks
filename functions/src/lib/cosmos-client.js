@@ -505,6 +505,27 @@ export async function deleteDoc(containerName, id, partitionKey) {
 }
 
 /**
+ * Delete a document only if it is still the version that was read: the
+ * delete counterpart of `patchDoc(..., { ifMatch })`. Throws the SDK's 412
+ * when the document changed since `etag` was read, and its 404 when it is
+ * already gone, so a caller that decided "this may be deleted" from a read
+ * cannot delete a document that has since moved on (the Drafts stage,
+ * lib/cms/drafts-handlers.js: a draft sent to review in another tab).
+ *
+ * @param {string} containerName
+ * @param {string} id
+ * @param {string} etag - the `_etag` read earlier
+ * @param {string} [partitionKey]
+ */
+export async function deleteDocIfMatch(containerName, id, etag, partitionKey) {
+  if (!etag) throw new Error('deleteDocIfMatch: an etag is required');
+  const container = getContainer(containerName);
+  await container
+    .item(id, resolvePartitionKey(containerName, partitionKey, id))
+    .delete({ accessCondition: { type: 'IfMatch', condition: etag } });
+}
+
+/**
  * Query documents with SQL.
  * Equivalent to: admin.firestore().collection(name).where(...).orderBy(...).limit(n).get()
  *
