@@ -2089,6 +2089,43 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **September's measured cost replaces the estimate (#822).**
+  `docs/architecture/cost-analysis.md` now states September 2026, the
+  estate's first full month in `centralus`, from Cost Management (actual cost,
+  by resource group and service, read 2026-10-03). The application
+  subscription cost USD 34.32 and Platform Management USD 2.49, so **USD 36.81**
+  combined. That replaces the five-day reading of 2026-08-24 and the "USD
+  15–20" estimate. The page records the query and that the figures can still
+  move slightly while September's billing finalises.
+  - The total landed near the combined estimate, but the shape did not. The
+    application subscription cost about twice its estimate, and Platform
+    Management about an eighth: Log Analytics ingestion billed USD 0.00.
+  - The largest line is `rg-web-site-prod-cus` Storage at USD 12.40. That is
+    `stsitefuncprodcus01`, the Functions host storage (`Standard_GRS`).
+    Its September metrics show the line is transactions, not capacity: 17.3
+    million operations (12.0 M `GetBlob`), 0.64 GB stored. It is named as the
+    first line to look at. Functions, Azure Monitor and Cosmos follow at about
+    USD 6 each.
+  - The VALIDATION and OPEN_ITEMS lines record the gap and its drivers. The
+    subscription budget now measures the workload, because the retired-resource
+    tail has cleared.
+- **The Static Web App deploy keeps its deployment token, as an accepted risk
+  (#834).** Owner decision 2026-10-03, recorded under *Accepted risks* in
+  `TODO.md`.
+  - Today the `deploy` job signs in with GitHub OIDC and reads the token just
+    in time through the `HCW Static Web App Deployer` role. It uses the token
+    for one run, from `main` only, with a production approval.
+  - Moving to the "GitHub" policy would not remove the token. Microsoft still
+    labels the token the recommended policy, and its identity-token example
+    still passes `azure_static_web_apps_api_token` beside `github_id_token`.
+  - Compensating control: reset the token every 90 days or on any suspicion.
+    Nothing stores it, so a reset breaks nothing.
+  - The comments in `deploy-azure-frontend.yml` that called this open now
+    point at the accepted risk.
+- **Production deploys have two required reviewers.** Since 2026-10-03 the
+  `production` environment names `saulpatinojr` and `hcw-architect`, and
+  either can approve. Required-Inputs §4.4 and the comments in both deploy
+  workflows said one.
 - **The six-hourly `cp_sortDate` healer is gone (#816, part 2).** Part 1
   (#829, applied 2026-10-03) made the apply write `cp_sortDate` onto
   `content` and `blogs` whenever it updates either container, and fail when
@@ -2651,33 +2688,43 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
-- **A Docker article can be filed and published under Docker.** #776 added
-  `/docker/blog/<slug>`, but the CMS did not know Docker as a provider:
-  `normalizeProviderName` turned `Docker` into `''`. The review board offered
-  no Docker button, and "Send to Publish Queue" stays disabled until a
-  provider is set, so a Docker article could go nowhere.
-  - `normalizeProviderName` maps any casing of `docker` to `Docker`, the
-    stored value, in the same style as `Aws` and `Finops`. Updates naming it
-    are accepted, and publishing places the article at
-    `/docker/blog/<slug>`. A test publishes one there end to end.
-  - `PROVIDER_OPTIONS` in `frontend/src/config/admin.js` gains Docker. It is
-    the shared list, read only by the review board's picker and the
-    Publish-Ready Builder's provider and landing-zone dropdowns, and all
-    three need it. The Builder could already infer Docker from a URL but not
-    show it. The editor filter and the submission forms keep their own lists
-    and already had Docker (#775), so nothing is duplicated.
-    `docker-cms.test.js` holds every value in the shared list to
-    `normalizeProviderName`.
-  - `inferProviderFromTags` returns `Docker` for a `docker` tag, but only when
-    no other provider is tagged. Docker on Azure is Azure, the same rule as
-    `docker` coming last in `providers.js`. The server's URL inference and
+- **Every provider the site routes can be chosen on the review board, Docker,
+  VMware and Ansible included.** #776 added `/docker/blog/<slug>`, and VMware
+  and Ansible have had blog routes longer. But the CMS knew six providers:
+  `normalizeProviderName` turned `Docker`, `VMware` and `Ansible` into `''`.
+  The review board offered Azure, AWS, GCP, GitHub, Terraform and FinOps only,
+  and "Send to Publish Queue" stays disabled until a provider is set, so an
+  article for any of the other three could go nowhere.
+  - `normalizeProviderName` is now derived from `PROVIDER_ALIASES` in
+    `public-reads.js`, the server's provider registry, which
+    `public-section-counts.test.js` already holds to `VALID_PROVIDERS`. The
+    stored value is the route key with its first letter capitalised, as `Aws`
+    and `Finops` always were: `Docker`, `Vmware`, `Ansible`. Every spelling
+    the registry lists (`Google Cloud`, `GitHub`, `VMware`) still
+    normalises. `publish.test.js` publishes a Docker, a VMware and an Ansible
+    post end to end, to `/docker/blog/<slug>`, `/vmware/blog/<slug>` and
+    `/ansible/blog/<slug>`.
+  - `PROVIDER_OPTIONS` in `frontend/src/config/admin.js` is now built from
+    `CANONICAL_PROVIDERS` in `lib/providers.js`, the frontend registry, rather
+    than kept as a copy. It feeds the review board's picker and the
+    Publish-Ready Builder's provider and landing-zone dropdowns. The editor's
+    provider filter, which had Docker but not VMware or Ansible, now reads the
+    same list. The submission forms keep their own lists on purpose: each
+    offers only what its page can file under.
+    `admin.test.js` and `BlogReviewBoard.test.jsx` fail if a provider is
+    registered but missing from the board, and `docker-cms.test.js` holds the
+    frontend registry to `normalizeProviderName`.
+  - `inferProviderFromTags` knows every provider too. It returns `Docker` only
+    when no other provider is tagged: Docker on Azure is Azure, the same rule
+    as `docker` coming last in `providers.js`. The server's URL inference and
     the recording drafter know Docker too, also last.
   - The public submissions API accepted no Docker submission, though the blog
     and Coder Corner forms have offered it since #775. Worse, its framework
     and Coder Corner lists had been swapped since the API was written, so it
     refused every submission from either form. Each list is now its page's
     list, and `submissions.test.js` reads the pages to keep them that way.
-    `ci.yml` runs the functions tests when those pages or `admin.js` change.
+    `ci.yml` runs the functions tests when those pages, `admin.js` or
+    `lib/providers.js` change.
 - **AZ-800, AZ-801 and Google's PAA re-read on the day their dates passed
   (#770).** From 2026-10-01 the catalogue alarm failed on every branch for
   three rows dated 2026-09-30. Each vendor page was re-read that day.

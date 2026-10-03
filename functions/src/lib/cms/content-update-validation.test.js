@@ -1,3 +1,4 @@
+import { PROVIDER_ALIASES } from '../public-reads.js';
 import { describe, it, expect } from 'vitest';
 import {
   FORBIDDEN_CONTENT_UPDATE_KEYS,
@@ -155,5 +156,20 @@ describe('normalizeProviderName', () => {
     expect(normalizeProviderName('Docker')).toBe('Docker');
     expect(normalizeProviderName('docker')).toBe('Docker');
     expect(normalizeProviderName(' DOCKER ')).toBe('Docker');
+  });
+
+  it('knows every provider the site routes, VMware and Ansible included', () => {
+    expect(normalizeProviderName('VMware')).toBe('Vmware');
+    expect(normalizeProviderName('vmware')).toBe('Vmware');
+    expect(normalizeProviderName('Ansible')).toBe('Ansible');
+    expect(normalizeProviderName('GitHub')).toBe('Github');
+    expect(normalizeProviderName('FinOps')).toBe('Finops');
+    for (const key of Object.keys(PROVIDER_ALIASES)) {
+      const stored = normalizeProviderName(key);
+      expect(stored, key).not.toBe('');
+      // The stored value lower-cases back to the route segment publish.js writes.
+      expect(stored.toLowerCase(), key).toBe(key);
+      expect(normalizeProviderName(stored), key).toBe(stored);
+    }
   });
 });

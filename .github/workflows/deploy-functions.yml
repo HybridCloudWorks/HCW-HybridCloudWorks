@@ -38,8 +38,9 @@ jobs:
     runs-on: ubuntu-26.04
     # Binding the job to an environment gives production deploys a deployment
     # history and an approval gate. The gate lives in the environment, not
-    # here: read live on 2026-10-02, `production` has one required reviewer
-    # and a main-only deployment-branch policy (Required-Inputs §4.4). Without
+    # here: read live on 2026-10-03, `production` has two required reviewers
+    # (saulpatinojr and hcw-architect; either one approves) and a main-only
+    # deployment-branch policy (Required-Inputs §4.4). Without
     # them GitHub would auto-create a bare environment that records who
     # deployed without gating whether they may.
     environment: production
@@ -49,9 +50,10 @@ jobs:
         # matches from ANY branch, and GitHub auto-creates a missing
         # environment with no protection rules. Without a gate a dispatch from
         # an unreviewed ref ships to production past all 12 required contexts
-        # (T-705). Read live on 2026-10-02, the `production` environment does
-        # gate: one required reviewer (saulpatinojr) and a main-only
-        # deployment-branch policy (Required-Inputs §4.4). Both are settings
+        # (T-705). Read live on 2026-10-03, the `production` environment does
+        # gate: two required reviewers, saulpatinojr and hcw-architect, either
+        # of whom can approve, and a main-only deployment-branch policy
+        # (Required-Inputs §4.4). Both are settings
         # outside the repository that nothing in a checkout can prove are
         # still set, so this step stays as the repository-side backstop.
         if: github.ref != 'refs/heads/main'

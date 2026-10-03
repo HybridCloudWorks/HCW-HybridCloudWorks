@@ -1,8 +1,11 @@
 # HCW Azure FinOps Assessment
 
-**Status:** Corrected 2026-08-25 against the built estate and the first Cost
-Management reading (taken 2026-08-24). The pre-deployment envelope this page
-used to carry described resources that were never created; see *Corrected
+**Status:** Measured 2026-10-03 against September 2026, the estate's first full
+calendar month in `centralus` (#822): **USD 36.81** across the application and
+Platform Management subscriptions. That replaces the five-day reading of
+2026-08-24 and the "USD 15–20" estimate extrapolated from it. Corrected
+2026-08-25 against the built estate; the pre-deployment envelope this page used
+to carry described resources that were never created; see *Corrected
 2026-08-25* below.
 
 **Currency:** USD
@@ -51,17 +54,18 @@ dispositioned here.
 
 ## Corrected 2026-09-07
 
-Two things moved after the 2026-08-24 reading below was taken. The reading
-itself is left exactly as measured — it is the only baseline this estate has —
-but its two headline conclusions no longer describe the platform:
+Two things moved after the 2026-08-24 reading was taken. That five-day reading
+was this page's only baseline until September's measured month replaced it on
+2026-10-03 (next section); its two headline conclusions had already stopped
+describing the platform:
 
 | What this page concluded | What changed |
 | --- | --- |
 | "One fixed USD 9 line" — Static Web Apps Standard, billing whether or not anyone visits | **The Static Web App moved to the Free plan on 2026-09-05** (owner decision, #341; `sku_tier = "Free"` in `infra/frontend.tf`). That line is now **USD 0**, and the workload's one fixed cost is gone. Everything the estate uses is in Free; `infra/frontend.tf` lists what Standard bought that it did not. Microsoft documents the move in either direction, so a third custom domain or a bandwidth overage is the signal to go back |
 | "Cloudflare's Bot Fight Mode is what blocks Azure's availability agents, which is why this platform has no reachability alert" | **The platform has had a reachability alert since 2026-09-01** (T-519 closed). It is not the Azure availability test — that is still uncreated, and Bot Fight Mode is still why — but a Cloudflare Worker probe ([ADR 0024](../decisions/0024-edge-availability-probe.md)) feeding `alert-api-reachability-prod-cus`. The *cost* consequence is unchanged and is why the sentence survived this long: the Worker is free and the 14,400-execution web test is still unarmed |
 
-The Cosmos figures below are later than the 2026-08-24 reading and are not
-affected — they were measured on 2026-09-06 against the live account.
+The Cosmos size figures further down were measured on 2026-09-06 against the
+live account, and are not affected by either reading.
 
 **What this does to the total.** The estate's whole fixed cost was the USD 9
 Static Web Apps line; removing it leaves telemetry as the only line that is not
@@ -69,49 +73,123 @@ a rounding error. The shape stated at the end of the next section — "one fixed
 USD 9 line, one telemetry line of roughly USD 20, and everything else a
 rounding error" — is now **one telemetry line of roughly USD 20, and everything
 else a rounding error**. The measurement plan's first item settles the rest.
+*(It did, and the shape was wrong: September's measured month, next section,
+puts the cost in the application subscription and almost none of it in
+telemetry.)*
 
 ## What the estate actually costs
 
-Cost Management, month-to-date, read 2026-08-24. Application subscription:
+**September 2026, measured.** Cost Management, read 2026-10-03: actual cost
+(`ActualCost`, summed `PreTaxCost`) for 2026-09-01 to 2026-09-30, grouped by
+resource group and service. September is the first full calendar month of the
+current estate in `centralus`, which it moved to on 2026-08-19
+([Naming-Convention](../standards/naming-convention.md)). **Read 2026-10-03:**
+the figures can still move slightly while September's billing finalises.
 
-| Resource | Month-to-date | Why it is what it is |
-| --- | ---: | --- |
-| Static Web Apps, Standard | $1.34 | The one fixed monthly line in the workload — it bills whether or not anyone visits. `infra/main.tf` records what Standard buys: managed SSL on a custom domain, the Front Door CDN backbone, SPA routing, PR staging environments, 100 GB bandwidth included |
-| Functions host storage (`stsitefuncprodcus01`) | $0.98 | Deployment packages and host state. 7-day blob and container soft delete is declared on `main` and moves this line slightly |
-| Cosmos DB, serverless | $0.68 | No provisioned throughput to pay for while idle (ADR 0003). RU charges only when a request runs |
-| Functions, Flex Consumption | $0.14 | Zero always-ready instances, so nothing is billed while nothing executes |
-| Key Vault, Standard | $0.01 | Per-operation, and secrets are cached by the client |
-| **Five largest lines** | **$3.15** | The balance to the $3.23 total sits in lines too small to itemise |
+The query, per subscription (Reader is enough):
 
-**Read that as a partial month, not a monthly figure.** The whole estate was
-moved to `centralus` on 2026-08-19 ([Naming-Convention](../standards/naming-convention.md)), so
-month-to-date on 2026-08-24 covers roughly five days of the current resources,
-not twenty-four. The check that proves it: Static Web Apps Standard has a
-published fixed price near USD 9 per app per month, and $1.34 over five days
-extrapolates to almost exactly that. A full month at this traffic is therefore
-closer to **USD 15–20** on the application subscription than to $3.23 — still an
-order of magnitude under the USD 150 ceiling, and still dominated by one fixed
-line rather than by usage. That extrapolation is arithmetic, not a measurement;
-re-read it after a full calendar month in `centralus`.
+```text
+POST https://management.azure.com/subscriptions/<subscription id>/providers/Microsoft.CostManagement/query?api-version=2023-11-01
+{
+  "type": "ActualCost",
+  "timeframe": "Custom",
+  "timePeriod": { "from": "2026-09-01T00:00:00Z", "to": "2026-09-30T23:59:59Z" },
+  "dataset": {
+    "granularity": "None",
+    "aggregation": { "totalCost": { "name": "PreTaxCost", "function": "Sum" } },
+    "grouping": [
+      { "type": "Dimension", "name": "ResourceGroupName" },
+      { "type": "Dimension", "name": "ServiceName" }
+    ]
+  }
+}
+```
 
-**The subscription budget is not measuring the workload.** The same reading put
-the application subscription's month-to-date spend at **$37.14** against the USD
-150 budget. About **91%** of that is not this workload: deleted lab resources and
-the retired `southcentralus` estate still settling. So the budget's
-50/75/90/100 ladder is currently tracking a tail that is going away, and the
-first month after it clears is the first month the ladder means anything.
+Application subscription, `sub-app-site-prod-cus`: **USD 34.32**.
 
-**The largest controllable line is telemetry, and it bills somewhere else.** Log
-Analytics ingestion is charged in Platform Management, where there was **no
-budget at all** until the USD 25 ceiling above was declared. The 0.25 GB/day cap
-bounds it at about 7.5 GB a month, which at the USD 2.30–2.76/GB the
-configuration records is roughly **USD 17–21 a month** — five times the entire
-application-subscription workload. The workspace was found sitting *at* that cap
-(`dataIngestionStatus: OverQuota`), so the top of that range is the realistic
-figure, not the bottom.
+| Resource group | Service | September |
+| --- | --- | ---: |
+| `rg-web-site-prod-cus` | Storage | $12.40 |
+| `rg-web-site-prod-cus` | Functions | $6.09 |
+| `rg-web-site-prod-cus` | Azure Monitor | $5.86 |
+| `rg-db-site-prod-cus` | Azure Cosmos DB | $5.71 |
+| `rg-sec-site-prod-cus` | Key Vault | $2.45 |
+| `rg-web-site-prod-cus` | Azure App Service | $1.23 |
+| `rg-lab-hybrid-prod-cus` | Azure Arc | $0.35 |
+| `rg-stor-site-prod-cus` | Storage | $0.23 |
+| `rg-lab-hybrid-prod-cus` | Key Vault | $0.01 |
+| `rg-web-site-prod-cus` | Bandwidth | $0.00 |
+| `rg-stor-site-prod-cus` | Bandwidth | $0.00 |
+| **Total** | | **$34.32** |
 
-That is the whole cost shape of this platform: one fixed USD 9 line, one
-telemetry line of roughly USD 20, and everything else a rounding error.
+Platform Management subscription: **USD 2.49**.
+
+| Resource group | Service | September |
+| --- | --- | ---: |
+| `rg-mgmt-plat-prod-cus` | Azure Monitor | $2.49 |
+| `rg-mgmt-plat-prod-cus` | Log Analytics | $0.00 |
+| **Total** | | **$2.49** |
+
+**Combined: USD 36.81 a month**, about a quarter of the USD 150 application
+ceiling, with Platform Management at about a tenth of its USD 25.
+
+### The gap against the estimate, and what drives it
+
+This page estimated **USD 15–20** for the application subscription, from five
+days of month-to-date on 2026-08-24, and roughly **USD 17–21** of Log Analytics
+ingestion in Platform Management. The combined total landed near the combined
+estimate. The shape did not:
+
+- **The application subscription cost about twice the estimate** (USD 34.32
+  against 15–20). The estimate assumed one fixed line, Static Web Apps
+  Standard at about USD 9, and rounding errors around it. That line went to
+  USD 0 when the site moved to the Free plan on 2026-09-05 (#341). The
+  `Azure App Service` line of USD 1.23 is consistent with the Standard days
+  before the move, though the query does not name the resource. What filled
+  the gap is usage the five-day reading undercounted:
+  - **`rg-web-site-prod-cus` Storage, USD 12.40, is the largest line.** That
+    group holds one storage account, `stsitefuncprodcus01`, the Function App's
+    host storage (`Standard_GRS`, `infra/storage.tf`). Its September metrics,
+    read 2026-10-03 with `az monitor metrics list` (Reader): **17.3 million
+    transactions**, of which `GetBlob` 12.0 M, `GetBlobProperties` 3.7 M,
+    `ListContainers` 0.70 M, `RenewBlobLease` 0.45 M, `GetQueueMetadata` 0.26 M
+    and `CreateContainer` 64 thousand; 1.58 TB of blob egress, which is in
+    region and is why the Bandwidth line is $0.00; 44 GB in; and **0.64 GB
+    stored** (2026-09-29). So the line is transactions, not capacity, and the
+    reads are the Functions host's own: about 577,000 operations a day, the
+    rate #611 found and closed without explaining. Why the host reads that much
+    (12 million blob reads averaging about 130 KB, which would fit the
+    deployment package being fetched on instance starts, though nothing here
+    proves it), and whether the account needs geo-redundancy, are the
+    questions to take to this line first.
+  - **Functions, USD 6.09**, against USD 0.14 in the five days. Flex
+    Consumption bills on execution, and September carried the armed timers
+    (2026-09-05) for a whole month.
+  - **Azure Monitor in the application subscription, USD 5.86.** This page
+    placed telemetry in Platform Management. What bills here is in
+    `rg-web-site-prod-cus` (the alert rules and Application Insights,
+    `infra/observability.tf`), not the workspace's ingestion.
+  - **Cosmos DB, USD 5.71**, against USD 0.68 in the five days, and **Key
+    Vault, USD 2.45**, against USD 0.01. Both are per-request meters, so both
+    scale with the same month of armed timers and traffic.
+- **Platform Management cost about an eighth of its estimate** (USD 2.49
+  against 17–21). Log Analytics ingestion billed **USD 0.00**. The estimate
+  priced the 0.25 GB/day cap as if it were always reached, and since the
+  verbosity cut it is headroom, not the bill. What does bill there is Azure
+  Monitor at USD 2.49.
+
+**The subscription budget now measures the workload.** On 2026-08-24 the
+application subscription's month-to-date was **$37.14**, about 91% of it
+deleted lab resources and the retired `southcentralus` estate settling.
+September has no such tail: every line above is a current workload resource
+group. So the budget's 50/75/90/100 ladder now tracks this workload, at about
+23% of its ceiling.
+
+That is the cost shape of this platform as measured: **host storage
+transactions are the largest line**; Functions, Azure Monitor and Cosmos
+follow at around USD 6 each; Key Vault and the rest are small; and telemetry
+ingestion, which this page used to call the largest controllable line, billed
+nothing in September.
 
 ## What bills, and what holds it down
 
@@ -293,14 +371,17 @@ after a quarter, since every row here scales linearly with it.
 
 The first baseline now exists, so this is maintenance rather than discovery:
 
-1. Re-read month-to-date per resource after a full calendar month in
-   `centralus` — the 2026-08-24 reading covers roughly five days.
+1. ~~Re-read month-to-date per resource after a full calendar month in
+   `centralus`.~~ **Done 2026-10-03 (#822):** September 2026, USD 36.81
+   combined, by resource group and service, above. Re-read it monthly the same
+   way.
 2. Re-read the Platform Management subscription separately. It is the only one
    with a cost that varies with load, and it was invisible until it had a
    budget.
-3. Once the deleted-lab and `southcentralus` tail clears, compare the
-   application subscription's total against the workload total; a gap that
-   persists is something nobody knows about.
+3. ~~Once the deleted-lab and `southcentralus` tail clears, compare the
+   application subscription's total against the workload total.~~ **Done
+   2026-10-03:** the tail has cleared, and every September line is a workload
+   resource group.
 4. Attribute by service and by the required tags.
 5. Confirm the Log Analytics figure against the cap after a full **uncapped**
    day. The pre-apply ingestion numbers in `infra/observability.tf` are a floor,
@@ -321,11 +402,11 @@ GOAL: Keep the production Azure workload below USD 150/month on the application 
 SCOPE: Three subscriptions (app, Platform Management, Platform Connectivity); one region, centralus. Cloudflare, Hostinger and external AI provider APIs are tracked separately because no Azure budget can see them.
 CONSTRAINTS: Single primary region; anonymous public site; Entra admin only; static-first delivery; no destructive optimization.
 DECISIONS: Consumption/serverless compute with zero always-ready; Cosmos Serverless; capped telemetry at 0.25 GB/day; Cloudflare retained; no Front Door, Firewall, Bastion, VPN Gateway, NAT, APIM, DDoS plan or private endpoints; no Azure OpenAI account.
-FINOPS: Baseline read 2026-08-24 — USD 3.23 month-to-date over roughly five days of the current estate, against USD 37.14 subscription spend of which about 91% is retired resources. Log Analytics bills separately in Platform Management at roughly USD 20/month.
+FINOPS: Measured September 2026 (read 2026-10-03, Cost Management ActualCost by resource group and service) — USD 34.32 application subscription plus USD 2.49 Platform Management, USD 36.81 combined. Largest line: rg-web-site-prod-cus Storage USD 12.40 (stsitefuncprodcus01, 17.3 M host-storage transactions, 0.64 GB stored). Log Analytics ingestion billed USD 0.00.
 IMPLEMENTATION: Two subscription budgets with 50/75/90/100 actual plus forecast; Log Analytics daily cap and an 80%-of-cap alert; storage lifecycle and bounded versioning; zero always-ready instances; bounded maximum instance count; required allocation tags applied from one map.
-VALIDATION: Re-read after a full calendar month in centralus; confirm ingestion after a full uncapped day; reconcile the workload total against the subscription total once the retired-resource tail clears.
+VALIDATION: Done for September 2026 (#822): the full month replaced the five-day reading and the USD 15–20 estimate; the application subscription came in at about twice the estimate (host storage transactions, Functions, Azure Monitor, Cosmos) and Platform Management at about an eighth; the retired-resource tail has cleared. Still open: confirm ingestion after a full uncapped day.
 RISK_GATES: Arming the availability test (14,400 executions/month); adding fixed-cost networking; always-ready or zone-redundant compute; provisioned Cosmos throughput; multi-region replication; Defender plans; raising the Log Analytics daily cap.
-OPEN_ITEMS: Cloudflare plan cost; Hostinger billed cost; a full-month application-subscription figure; exact Azure Monitor alert-rule and web-test unit prices.
+OPEN_ITEMS: Cloudflare plan cost; Hostinger billed cost; what drives the Functions host storage reads (the largest line) and whether stsitefuncprodcus01 needs GRS; exact Azure Monitor alert-rule and web-test unit prices.
 NEXT_OWNER: Workload owner for post-apply cost measurement.
 ```
 

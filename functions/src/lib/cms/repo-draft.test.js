@@ -210,6 +210,11 @@ describe('parseRepoDraft — refusals and warnings', () => {
     // Docker last, as in frontend/src/lib/providers.js: Docker on Azure is Azure.
     expect(inferProviderFromTags(['docker', 'azure'])).toBe('Azure');
   });
+
+  it('knows every provider the site routes, VMware and Ansible included', () => {
+    expect(inferProviderFromTags(['homelab', 'vmware'])).toBe('Vmware');
+    expect(inferProviderFromTags(['ansible', 'docker'])).toBe('Ansible');
+  });
 });
 
 describe('repoDraftContentId', () => {

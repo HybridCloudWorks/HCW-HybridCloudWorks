@@ -23,6 +23,7 @@
  * Date instances exactly as the source did; Cosmos JSON-serializes a Date to
  * its ISO string on write, which is the same shape the migration writes.
  */
+import { PROVIDER_ALIASES } from '../public-reads.js';
 import { normalizePublishTarget } from './publish-targets.js';
 
 export function assertStringLength(value, fieldName, maxLength, { allowEmpty = true } = {}) {
@@ -99,27 +100,45 @@ export function assertJsonSize(value, fieldName, maxChars = 120_000) {
 }
 
 /**
- * A provider spelling -> the canonical value the CMS stores in
- * `Cloud Provider`, or '' for one it cannot publish under. publish.js
- * lower-cases the result into the URL, so 'Docker' lands at
- * /docker/blog/<slug> (the route since #776).
+ * The value the CMS stores in `Cloud Provider` for each provider the site
+ * routes: the route key with its first letter capitalised ('Aws', 'Gcp',
+ * 'Finops', 'Vmware', 'Docker').
+ *
+ * Derived from PROVIDER_ALIASES in public-reads.js, the server's provider
+ * registry, whose keys public-section-counts.test.js holds to VALID_PROVIDERS.
+ * A provider added there is publishable here with no second edit. Until this
+ * was derived, the list was hand-kept and stopped at FinOps, so a Docker,
+ * VMware or Ansible article normalised to '' and could be neither filed nor
+ * published, although each has had a /<provider>/blog/<slug> route.
  */
-export function normalizeProviderName(value) {
-  const key = String(value || '')
+export const STORED_PROVIDER_VALUES = Object.freeze(
+  Object.fromEntries(
+    Object.keys(PROVIDER_ALIASES).map((key) => [key, key.charAt(0).toUpperCase() + key.slice(1)])
+  )
+);
+
+const squashProvider = (value) =>
+  String(value || '')
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '');
 
-  if (key === 'aws') return 'Aws';
-  if (key === 'azure') return 'Azure';
-  if (key === 'gcp' || key === 'googlecloud') return 'Gcp';
-  if (key === 'github') return 'Github';
-  if (key === 'terraform') return 'Terraform';
-  if (key === 'finops') return 'Finops';
-  // Docker since its blog route arrived (#776). Before this, a Docker article
-  // normalised to '' and could be neither filed under Docker on the review
-  // board nor published.
-  if (key === 'docker') return 'Docker';
-  return '';
+/** Every spelling the registry lists ('Google Cloud', 'GitHub', ...), squashed -> its key. */
+const PROVIDER_BY_SPELLING = new Map(
+  Object.entries(PROVIDER_ALIASES).flatMap(([key, labels]) => [
+    [key, key],
+    ...labels.map((label) => [squashProvider(label), key]),
+  ])
+);
+
+/**
+ * A provider spelling -> the canonical value the CMS stores in
+ * `Cloud Provider`, or '' for one it cannot publish under. publish.js
+ * lower-cases the result into the URL, so 'Docker' lands at
+ * /docker/blog/<slug> and 'Vmware' at /vmware/blog/<slug>.
+ */
+export function normalizeProviderName(value) {
+  const key = PROVIDER_BY_SPELLING.get(squashProvider(value));
+  return key ? STORED_PROVIDER_VALUES[key] : '';
 }
 
 export const FORBIDDEN_CONTENT_UPDATE_KEYS = new Set([
@@ -206,7 +225,7 @@ function tryNormalizeKnownField(normalized, field, value) {
     const provider = normalizeProviderName(value);
     if (!provider) {
       throw new Error(
-        `cloudProvider must be one of: Aws, Azure, Gcp, Github, Terraform, Finops, Docker`
+        `cloudProvider must be one of: ${Object.values(STORED_PROVIDER_VALUES).join(', ')}`
       );
     }
     normalized.cloudProvider = provider;

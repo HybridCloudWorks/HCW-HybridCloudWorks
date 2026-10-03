@@ -114,22 +114,31 @@ describe('the admin copy of the hero list', () => {
 });
 
 describe('the admin provider list', () => {
-  // frontend/src/config/admin.js PROVIDER_OPTIONS feeds the review board's
-  // provider picker. A value the server cannot normalise is a button whose
-  // save is refused and a post that can never reach the publish queue, which
-  // is what Docker was until the provider fix.
-  const source = frontend('config', 'admin.js');
-  const block = /export const PROVIDER_OPTIONS = \[([\s\S]*?)\];/.exec(source);
-  const values = block ? [...block[1].matchAll(/value: '([^']+)'/g)].map((m) => m[1]) : [];
+  // frontend/src/config/admin.js builds the review board's provider picker
+  // from CANONICAL_PROVIDERS in frontend/src/lib/providers.js, storing each
+  // key with its first letter capitalised. A value the server cannot
+  // normalise is a button whose save is refused and a post that can never
+  // reach the publish queue, which is what Docker, VMware and Ansible were
+  // until 2026-10-03.
+  const block = /export const CANONICAL_PROVIDERS = Object\.freeze\(\[([\s\S]*?)\]\);/.exec(
+    frontend('lib', 'providers.js')
+  );
+  const providers = block ? [...block[1].matchAll(/'([^']+)'/g)].map((m) => m[1]) : [];
+  const stored = (provider) => provider.charAt(0).toUpperCase() + provider.slice(1);
 
-  it('offers only providers the server stores as written', () => {
-    expect(block, 'PROVIDER_OPTIONS in config/admin.js').not.toBeNull();
-    expect(values.length).toBeGreaterThan(0);
-    for (const value of values) expect(normalizeProviderName(value), value).toBe(value);
+  it('stores each value the way admin.js writes it', () => {
+    expect(frontend('config', 'admin.js')).toContain(
+      'provider.charAt(0).toUpperCase() + provider.slice(1)'
+    );
   });
 
-  it('offers Docker, stored as Docker', () => {
-    expect(values).toContain('Docker');
-    expect(normalizeProviderName('docker')).toBe('Docker');
+  it('offers only providers the server stores as written, and every one it knows', () => {
+    expect(block, 'CANONICAL_PROVIDERS in lib/providers.js').not.toBeNull();
+    expect(providers.length).toBeGreaterThan(0);
+    for (const provider of providers) {
+      expect(normalizeProviderName(provider), provider).toBe(stored(provider));
+      expect(normalizeProviderName(stored(provider)), provider).toBe(stored(provider));
+    }
+    expect(providers).toEqual(expect.arrayContaining(['docker', 'vmware', 'ansible']));
   });
 });

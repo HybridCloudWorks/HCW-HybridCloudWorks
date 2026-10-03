@@ -112,11 +112,14 @@ concurrency:
 # actually touches production — and it is where an approval gate belongs, since
 # an approval that fires before the build is an approval of nothing.
 #
-# STILL OPEN, and owner-gated: moving the SWA deploy off the deployment token
-# entirely, which would remove the credential rather than isolate it. Tracked
-# in #834. (The other half once listed here, storing the token as an
-# ENVIRONMENT secret on a protected `production`, went with the stored secret:
-# T-727 left no secret to store.)
+# KEPT, AS AN ACCEPTED RISK (owner decision 2026-10-03, #834): the deploy
+# stays on the deployment token rather than moving off it. TODO.md, Accepted
+# risks, has the reasoning: Microsoft's "GitHub" policy example still passes
+# the token beside github_id_token, so switching would not remove it, and the
+# compensating control is resetting the token every 90 days or on suspicion.
+# (The other half once listed here, storing the token as an ENVIRONMENT
+# secret on a protected `production`, went with the stored secret: T-727 left
+# no secret to store.)
 jobs:
   build:
     name: Build and verify the site
@@ -130,9 +133,10 @@ jobs:
         # matches from ANY branch, and GitHub auto-creates a missing
         # environment with no protection rules. Without a gate a dispatch from
         # an unreviewed ref ships to production past all 12 required contexts
-        # (T-705). Read live on 2026-10-02, the `production` environment does
-        # gate: one required reviewer (saulpatinojr) and a main-only
-        # deployment-branch policy (Required-Inputs §4.4). Both are settings
+        # (T-705). Read live on 2026-10-03, the `production` environment does
+        # gate: two required reviewers, saulpatinojr and hcw-architect, either
+        # of whom can approve, and a main-only deployment-branch policy
+        # (Required-Inputs §4.4). Both are settings
         # outside the repository that nothing in a checkout can prove are
         # still set, so this step stays as the repository-side backstop.
         if: github.ref != 'refs/heads/main'
@@ -347,8 +351,9 @@ jobs:
     runs-on: ubuntu-26.04
     # Binding the job to an environment gives production deploys a deployment
     # history and an approval gate. The gate lives in the environment, not
-    # here: read live on 2026-10-02, `production` has one required reviewer
-    # and a main-only deployment-branch policy (Required-Inputs §4.4). Without
+    # here: read live on 2026-10-03, `production` has two required reviewers
+    # (saulpatinojr and hcw-architect; either one approves) and a main-only
+    # deployment-branch policy (Required-Inputs §4.4). Without
     # them GitHub would auto-create a bare environment that records who
     # deployed without gating whether they may
     # (T-705).
@@ -397,7 +402,9 @@ jobs:
       # that. So the token is still what the action takes; what changed is that
       # it no longer lives as a long-lived GitHub secret and a Terraform output.
       # It is read from ARM under the same federated identity this repository
-      # already uses everywhere else, and it lives for one run.
+      # already uses everywhere else, and it lives for one run. Keeping it is
+      # an accepted risk (TODO.md, Accepted risks; #834), compensated by
+      # resetting the token every 90 days or on any suspicion.
       - name: Azure login (OIDC)
         uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3
         with:
