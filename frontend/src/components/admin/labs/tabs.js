@@ -1,15 +1,18 @@
 /**
- * The Labs Hub's tabs, and where old addresses land (#577).
+ * The Labs Hub's tabs, and where old addresses land (#577; Catalogue first
+ * since ADR 0033 "Labs").
  *
  * This page already validated `?tab=` — it tested the requested id against
  * TABS before using it, which none of the other hubs did. What it had no answer
  * for was an id that USED to be a tab: `setup` fell through to Dashboard
- * silently. These are the same five duties with that gap closed.
+ * silently. These are the same duties with that gap closed, plus the
+ * catalogue the hub manages now: the labs themselves, not only the runner.
  */
 
 export const LABS_PATH = '/admin/labs';
 
 export const TABS = Object.freeze([
+  { id: 'catalogue', label: 'Catalogue' },
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'jobs', label: 'Jobs' },
   { id: 'console', label: 'Console' },
@@ -17,8 +20,12 @@ export const TABS = Object.freeze([
   { id: 'settings', label: 'Settings' },
 ]);
 
-/** Dashboard, which is what the page opened on and what answers "is it up". */
-export const DEFAULT_TAB = 'dashboard';
+/**
+ * Catalogue: what the hub is for is the labs, and "which labs exist and
+ * where are they published" is the first question; "is the runner up" is
+ * the Dashboard, one tab along.
+ */
+export const DEFAULT_TAB = 'catalogue';
 
 const TAB_IDS = new Set(TABS.map((tab) => tab.id));
 
@@ -39,9 +46,12 @@ export const MOVED_TABS = Object.freeze({
   queue: 'jobs',
   run: 'console',
   shell: 'console',
+  labs: 'catalogue',
+  lab: 'catalogue',
+  overview: 'dashboard',
 });
 
-/** The tab to show for a `?tab=` value: its own, where it moved, or Dashboard. */
+/** The tab to show for a `?tab=` value: its own, where it moved, or the default. */
 export function resolveTab(requested) {
   // Own properties only: `?tab=constructor` must not read Object.prototype.
   const id = Object.prototype.hasOwnProperty.call(MOVED_TABS, requested ?? '')

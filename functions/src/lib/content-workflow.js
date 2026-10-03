@@ -1,6 +1,6 @@
 /**
  * Content workflow write RPCs — saveEditorDraft, unpublishContentToInspected,
- * deleteContentItem, saveContentSchedule, softDeleteLivePage,
+ * deleteContentItem, saveContentSchedule, unscheduleContent, softDeleteLivePage,
  * requestContentInspection, resetContentReviewState.
  *
  * Ported from Site-Main cms-functions.js (:3340-3564, :4635-4985, :5827-5906)
@@ -121,10 +121,13 @@ export function validateSaveEditorDraftBody(body) {
     );
     assertStringLength(body.title, 'title', 250, { allowEmpty: true });
     const resolvedAuthor =
-      assertStringLength(body.authorName, 'authorName', 120, { allowEmpty: true }).trim() ||
-      'Hybrid Cloud Works';
+      assertStringLength(body.authorName, 'authorName', 120, {
+        allowEmpty: true,
+      }).trim() || 'Hybrid Cloud Works';
     assertStringLength(body.summary, 'summary', 5000, { allowEmpty: true });
-    assertStringLength(body.sidebarContent, 'sidebarContent', 12000, { allowEmpty: true });
+    assertStringLength(body.sidebarContent, 'sidebarContent', 12000, {
+      allowEmpty: true,
+    });
     const validatedImageUrls = assertImageUrlList(body.orderedImageUrls)
       .filter(Boolean)
       .slice(0, 4);
@@ -180,7 +183,11 @@ export function createContentWorkflowHandlers({
     userAgent: request.headers?.get?.('user-agent') || null,
     contentId,
     contentTitle,
-    compliance: { schemaVersion: 1, detailsSanitized: true, identityVerified: true },
+    compliance: {
+      schemaVersion: 1,
+      detailsSanitized: true,
+      identityVerified: true,
+    },
   });
 
   return {
@@ -241,7 +248,13 @@ export function createContentWorkflowHandlers({
 
         const nowIso = now().toISOString();
         const currentStatus = String(currentData.contentStatus || '');
-        const nextStatus = currentStatus.startsWith('published_') ? currentStatus : 'editing';
+        // A live article keeps its status through a save: `published` with the
+        // Live flag is the canonical spelling, `published_*` the Firestore-era
+        // one (ADR 0033 §1). Anything else becomes `editing`.
+        const staysPublished =
+          currentStatus.startsWith('published_') ||
+          (currentStatus === 'published' && currentData.Live === true);
+        const nextStatus = staysPublished ? currentStatus : 'editing';
         const imageUpdates = buildContentImageUpdates(validatedImageUrls, currentData);
 
         await store.patchDoc('content', contentId, {
@@ -388,7 +401,12 @@ export function createContentWorkflowHandlers({
           })
         );
 
-        return json(200, { success: true, contentId, from: previousStatus, to: 'inspected' });
+        return json(200, {
+          success: true,
+          contentId,
+          from: previousStatus,
+          to: 'inspected',
+        });
       } catch (error) {
         context.error('unpublishContentToInspected failed:', error);
         return json(500, {
@@ -460,8 +478,12 @@ export function createContentWorkflowHandlers({
           contentData.publishTarget || contentData.type || contentData.contentType
         );
         const nowIso = now().toISOString();
+        // A forge-ready item keeps its status: it is already one click from
+        // publishing, and a reschedule from the Calendar must not demote it
+        // (ADR 0033 Amplify slice). Everything else is approved by scheduling.
+        const keepsStatus = String(contentData.contentStatus || '') === 'forge_ready';
         const updates = {
-          contentStatus: 'approved',
+          ...(keepsStatus ? {} : { contentStatus: 'approved' }),
           publishTarget: resolvedPublishTarget,
           Live: false,
           updatedAt: nowIso,
@@ -477,7 +499,9 @@ export function createContentWorkflowHandlers({
             return json(400, { error: 'Valid scheduledPublishDate required' });
           }
           if (scheduleDate.getTime() <= now().getTime()) {
-            return json(400, { error: 'scheduledPublishDate must be in the future' });
+            return json(400, {
+              error: 'scheduledPublishDate must be in the future',
+            });
           }
           scheduledIso = scheduleDate.toISOString();
           updates.scheduledPublishDate = scheduledIso;
@@ -495,6 +519,54 @@ export function createContentWorkflowHandlers({
         context.error('saveContentSchedule failed:', error);
         return json(500, {
           error: 'Failed to save schedule',
+          message: error?.message || 'Unknown error',
+        });
+      }
+    },
+
+    /**
+     * POST /api/unscheduleContent — publisher (ADR 0033 Amplify slice). Clears
+     * the schedule and nothing else: the status stays, so an approved item
+     * returns to the Calendar's Unscheduled panel rather than to review.
+     */
+    async unscheduleContent(request, context) {
+      const auth = await guard.requireRole(request, 'publisher');
+      if (auth.error) return auth.error;
+      const { user } = auth;
+      try {
+        const body = (await request.json().catch(() => null)) || {};
+        const { contentId } = body;
+        if (!contentId || typeof contentId !== 'string') {
+          return json(400, { error: 'contentId required' });
+        }
+        const contentData = await store.readDoc('content', contentId, contentId);
+        if (!contentData) return json(404, { error: `content ${contentId} not found` });
+        if (contentData.Live === true) {
+          return json(409, {
+            error: 'This content is live; unpublish it instead of unscheduling it.',
+          });
+        }
+        if (!contentData.scheduledPublishDate) {
+          return json(200, {
+            success: true,
+            contentId,
+            alreadyUnscheduled: true,
+          });
+        }
+        await store.patchDoc('content', contentId, {
+          scheduledPublishDate: null,
+          updatedAt: now().toISOString(),
+          updatedBy: actor(user),
+        });
+        return json(200, {
+          success: true,
+          contentId,
+          previousScheduledPublishDate: contentData.scheduledPublishDate,
+        });
+      } catch (error) {
+        context.error('unscheduleContent failed:', error);
+        return json(500, {
+          error: 'Failed to unschedule content',
           message: error?.message || 'Unknown error',
         });
       }

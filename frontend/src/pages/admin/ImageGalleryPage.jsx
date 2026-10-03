@@ -1,1380 +1,531 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router';
-import { postJSON } from '@/lib/api';
-import ConfirmModal from '@/components/admin/ConfirmModal';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+/**
+ * Image Gallery — the central media library (ADR 0033 Creative slice).
+ *
+ * Visual first: a thumbnail grid with hover actions and a details dialog per
+ * image; server-side search, filters, sort and paging (lib/imageGallery.js
+ * → GET cms/images); bulk actions that patch each selected image against its
+ * own document (POST cms/images/bulk — the fix for "Update Selected" touching
+ * one image and tag toggles erasing tags); archive, trash and permanent
+ * delete; folders persisted in admin_config/gallery_folders; upload and
+ * import-from-URL. Every image that came from a prompt set links back to it
+ * on Image Prompts.
+ */
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router';
+import { Images, Loader2, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
+import PageHeader from '@/components/admin/shared/PageHeader';
+import EmptyState from '@/components/admin/shared/EmptyState';
+import GalleryTile from '@/components/admin/images/GalleryTile';
+import GalleryToolbar from '@/components/admin/images/GalleryToolbar';
+import BulkActionsBar from '@/components/admin/images/BulkActionsBar';
+import ImageDetailsDialog from '@/components/admin/images/ImageDetailsDialog';
+import UploadPanel from '@/components/admin/images/UploadPanel';
 import {
-  Copy,
-  Trash2,
-  RefreshCw,
-  ExternalLink,
-  Wand2,
-  Loader2,
-  Upload,
-  FolderPlus,
-  FolderOpen,
-  X,
-  Pencil,
-} from 'lucide-react';
-import {
+  asListing,
+  bulkGalleryImages,
   customTagOptions,
-  deleteFolderProblem,
+  deleteGalleryImage,
+  fetchGalleryFolders,
   folderOptions,
-  getSourceLabel,
-  loadGalleryItems,
-  newFolderProblem,
   providerOptions,
+  queryGalleryImages,
+  saveGalleryFolders,
   slotOptions,
   toggledSelection,
-  uniqueTags,
+  updateGalleryImage,
 } from '@/lib/imageGallery';
-import {
-  PUBLIC_IMAGE_EXTENSIONS,
-  imageExtensionFor,
-  publicImageFileProblem,
-  uploadImageFile,
-} from '@/lib/imageUpload';
-import { normalizeContentProvider } from '@/lib/contentModel';
-import { resolveMediaUrl } from '../../lib/functionsBase';
+import { resolveMediaUrl } from '@/lib/functionsBase';
 
-const COMMON_PROVIDERS = [
-  { value: '', label: 'No provider tag' },
-  { value: 'aws', label: 'AWS' },
-  { value: 'azure', label: 'Azure' },
-  { value: 'gcp', label: 'GCP' },
-  { value: 'terraform', label: 'Terraform' },
-  { value: 'finops', label: 'FinOps' },
-  { value: 'github', label: 'GitHub' },
-  { value: 'docker', label: 'Docker' },
+const DEFAULT_FILTERS = Object.freeze({
+  q: '',
+  folder: 'all',
+  source: 'all',
+  provider: 'all',
+  slot: 'all',
+  tag: 'all',
+  set: '',
+  state: 'active',
+  sort: 'newest',
+  offset: 0,
+  limit: 60,
+});
+
+const PAGE_SIZES = [60, 120, 200];
+
+/** What a permanent delete did, in one sentence. */
+export function deletionMessage(item, res) {
+  if (res.storageDeleted) return `"${item.title}" and its file were deleted.`;
+  if (res.sharedWith) {
+    const others = `${res.sharedWith} other record${res.sharedWith === 1 ? '' : 's'}`;
+    return `"${item.title}" was deleted; the file stays because ${others} use it.`;
+  }
+  return `"${item.title}" was deleted; no stored file was found for it.`;
+}
+
+/** The empty-state copy for a state tab with nothing in it. */
+function emptyStateFor(state) {
+  if (state === 'trash') {
+    return {
+      title: 'Trash is empty',
+      description: 'Trashed images appear here until you restore or delete them.',
+    };
+  }
+  if (state === 'archived') {
+    return {
+      title: 'No archived images',
+      description: 'Archived images appear here, hidden from pickers but kept.',
+    };
+  }
+  return { title: 'No images', description: 'Nothing has been recorded in any state.' };
+}
+
+/** True when any filter other than paging and state differs from the default. */
+export function hasActiveFilters(filters) {
+  return ['q', 'folder', 'source', 'provider', 'slot', 'tag', 'set'].some(
+    (key) => String(filters[key] || '') !== String(DEFAULT_FILTERS[key] || '')
+  );
+}
+
+const HELP = [
+  'Every image the site holds is here: uploaded by hand, imported from a URL, generated as an AI cover or preview, or curated for a news grid.',
+  'Hover or tab to a tile for its actions; open Details to edit the title, alt text, caption, licence, tags and folder, and to see which content uses it and the prompt and set that produced it.',
+  'Tick several tiles to tag, move, archive, trash or delete them together. A tag toggle adds to every selected image, or removes it when all of them already have it — other tags are untouched.',
+  'Archive keeps an image but hides it from pickers. Trash hides it everywhere and keeps the file until you delete permanently from the Trash filter.',
+  'A "Duplicate" chip means the same bytes or URL already exist in an earlier record. "Used in N" counts the content documents whose cover or inline slots point at the image.',
 ];
 
-const SLOT_OPTIONS = [
-  { value: '', label: 'No slot tag' },
-  { value: 'rss', label: 'RSS' },
-  { value: 'hero', label: 'Hero' },
-  { value: 'secondary1', label: 'Secondary 1' },
-  { value: 'secondary2', label: 'Secondary 2' },
-  { value: 'secondary3', label: 'Secondary 3' },
-];
-
-function formatDate(value) {
-  if (!value) return 'Unknown';
-  const date = value?.toDate ? value.toDate() : new Date(value);
-  if (Number.isNaN(date.getTime())) return 'Unknown';
-  return date.toLocaleString();
-}
-
-function slugifyFilename(value = '') {
-  return String(value || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
-
-function getGalleryBaseName(file) {
-  return file.name.replace(/\.[^.]+$/, '') || 'uploaded-image';
-}
-
-function getGalleryExtractedTags(baseName, pullTagsFromFilename) {
-  if (!pullTagsFromFilename || !baseName.includes('-')) return [];
-  return baseName
-    .split('-')
-    .map((tag) => tag.trim().toLowerCase())
-    .filter(Boolean);
-}
-
-function getGalleryFilenameBase({
-  baseName,
-  normalizedProvider,
-  uploadSlot,
-  customTagsArray,
-  uploadRenameFilename,
-}) {
-  if (uploadRenameFilename.trim()) return uploadRenameFilename.trim();
-  if (!customTagsArray.length && !normalizedProvider && !uploadSlot) return baseName;
-
-  const parts = [];
-  if (normalizedProvider) parts.push(normalizedProvider.toLowerCase());
-  if (uploadSlot) parts.push(uploadSlot.toLowerCase());
-  if (customTagsArray.length > 0) parts.push(...customTagsArray.slice(0, 2));
-  return parts.length > 0 ? parts.join('-') : baseName;
-}
-
-function getGalleryUploadTitle({ uploadFilesLength, uploadTitle, baseName }) {
-  if (uploadFilesLength === 1 && uploadTitle.trim()) return uploadTitle.trim();
-  return baseName || uploadTitle.trim() || 'Uploaded image';
-}
-
-function getGalleryStoragePath(safeName, index) {
-  const timestamp = Date.now();
-  const randomId = Math.random().toString(36).slice(2, 10);
-  const fileNumber = String(index + 1).padStart(3, '0');
-  return `image-gallery/manual/${timestamp}-${randomId}-${safeName}-${fileNumber}`;
-}
-
-function matchesGalleryProvider(item, providerFilter) {
-  const provider = String(item.provider || '').toUpperCase();
-  return providerFilter === 'all' || provider === providerFilter;
-}
-
-function matchesGallerySlot(item, slotFilter) {
-  const slot = String(item.slot || '').toLowerCase();
-  return slotFilter === 'all' || slot === slotFilter;
-}
-
-function matchesGalleryCustomTag(item, customTagFilter) {
-  const customTags = (item.customTags || []).map((tag) =>
-    String(tag || '')
-      .trim()
-      .toLowerCase()
-  );
-  return customTagFilter === 'all' || customTags.includes(customTagFilter.toLowerCase());
-}
-
-function matchesGalleryFolder(item, folderFilter) {
-  const itemFolder = item.folder ? String(item.folder).trim().toLowerCase() : '';
-  return (
-    folderFilter === 'all' ||
-    (folderFilter === '--none--' && (itemFolder === '' || itemFolder === 'default')) ||
-    (folderFilter !== '--none--' && itemFolder === folderFilter.toLowerCase())
-  );
-}
-
-function matchesGalleryTerm(item, term) {
-  if (!term) return true;
-  const articleId = String(item.articleId || '').toLowerCase();
-  const imageUrl = String(item.imageUrl || '').toLowerCase();
-  const title = String(item.title || '').toLowerCase();
-  const slot = String(item.slot || '').toLowerCase();
-  const customTags = (item.customTags || []).map((tag) =>
-    String(tag || '')
-      .trim()
-      .toLowerCase()
-  );
-  return (
-    articleId.includes(term) ||
-    imageUrl.includes(term) ||
-    title.includes(term) ||
-    slot.includes(term) ||
-    customTags.some((tag) => tag.includes(term))
-  );
-}
-
-function matchesGalleryItem(item, term, filters) {
-  return (
-    matchesGalleryProvider(item, filters.providerFilter) &&
-    matchesGallerySlot(item, filters.slotFilter) &&
-    matchesGalleryCustomTag(item, filters.customTagFilter) &&
-    matchesGalleryFolder(item, filters.folderFilter) &&
-    matchesGalleryTerm(item, term)
-  );
-}
-
-function buildGalleryUploadData({
-  file,
-  index,
-  normalizedProvider,
-  uploadSlot,
-  customTagsArray,
-  uploadRenameFilename,
-  pullTagsFromFilename,
-  uploadTitle,
-  uploadFolder,
-  uploadFilesLength,
-}) {
-  if (!file || !file.name) throw new Error(`Invalid file at index ${index}`);
-  if (!String(file.type || '').startsWith('image/'))
-    throw new Error(`"${file.name}" is not an image file.`);
-
-  // From the DECLARED TYPE, not the filename (#631). The upload route requires
-  // the path's extension to agree with the content type it is sent, so trusting
-  // the name turned valid files into a 415: Windows writes `.jfif` for a JPEG
-  // saved from a browser, and a PNG someone named `.jpg` was refused the same
-  // way. `handleManualUpload` has already gated the file through
-  // publicImageFileProblem, so this cannot be empty in practice — but an empty
-  // extension would build a path the route rejects for an unrelated-looking
-  // reason, which is worth naming rather than discovering.
-  const extension = imageExtensionFor(file);
-  if (!extension) {
-    throw new Error(`"${file.name}" is not a type this gallery can store.`);
+/** Filters a link can carry: `?set=NAME`, `?q=TEXT`, `?state=trash`, `?folder=aws`. */
+export function filtersFromSearch(search) {
+  const params = new URLSearchParams(search || '');
+  const next = { ...DEFAULT_FILTERS };
+  for (const key of ['q', 'set', 'folder', 'source', 'provider', 'slot', 'tag', 'state', 'sort']) {
+    const value = params.get(key);
+    if (value) next[key] = value;
   }
-  const baseName = getGalleryBaseName(file);
-  const extractedTags = getGalleryExtractedTags(baseName, pullTagsFromFilename);
-  const filenameBase = getGalleryFilenameBase({
-    baseName,
-    normalizedProvider,
-    uploadSlot,
-    customTagsArray,
-    uploadRenameFilename,
-  });
-  const safeName = (slugifyFilename(filenameBase) || 'uploaded-image').toLowerCase();
-  const storagePath = `${getGalleryStoragePath(safeName, index)}.${extension}`;
-  const allTags = [...new Set([...extractedTags, ...customTagsArray])];
-  const title = getGalleryUploadTitle({ uploadFilesLength, uploadTitle, baseName });
-
-  return {
-    extension,
-    baseName,
-    filenameBase,
-    safeName,
-    storagePath,
-    allTags,
-    title,
-    folder: (uploadFolder || 'default').toLowerCase(),
-  };
-}
-
-/**
- * The blob container gallery uploads go to.
- *
- * It must be one the media delivery route serves (PUBLIC_MEDIA_CONTAINERS in
- * functions/src/lib/blob-paths.js), or the upload route returns no URL and
- * there is nothing to put in the record. See the note in uploadGalleryFile.
- */
-const GALLERY_CONTAINER = 'covers';
-
-/** What the file picker offers, derived from what the route will accept. */
-const GALLERY_ACCEPT = Object.keys(PUBLIC_IMAGE_EXTENSIONS).join(',');
-
-async function uploadGalleryFile({
-  file,
-  index,
-  normalizedProvider,
-  uploadSlot,
-  customTagsArray,
-  uploadRenameFilename,
-  pullTagsFromFilename,
-  uploadTitle,
-  uploadFolder,
-  uploadFilesLength,
-}) {
-  const uploadData = buildGalleryUploadData({
-    file,
-    index,
-    normalizedProvider,
-    uploadSlot,
-    customTagsArray,
-    uploadRenameFilename,
-    pullTagsFromFilename,
-    uploadTitle,
-    uploadFolder,
-    uploadFilesLength,
-  });
-
-  // `covers`, not `content` (#602).
-  //
-  // Every container is private in Terraform; "public" means reachable through
-  // the media delivery route, and only the containers in
-  // PUBLIC_MEDIA_CONTAINERS are. `content` is not one of them, so the upload
-  // route returned url:'' by design and this function wrote that empty string
-  // into the gallery record. The image stored fine and was then unusable: the
-  // card rendered no thumbnail, and "Use this image" handed an empty hero URL
-  // to the submit page.
-  //
-  // `covers` is the container Terraform describes as "content cover images,
-  // served via the media route" — which is exactly what a gallery image is
-  // used as. Nothing already in `content` becomes reachable by this change;
-  // only images uploaded here from now on.
-  //
-  // The stored ref keeps the container prefix so the delete path
-  // (parseStorageRef) can still find the blob; `covers` is in its
-  // KNOWN_STORAGE_CONTAINERS set already.
-  const uploaded = await uploadImageFile({
-    container: GALLERY_CONTAINER,
-    path: uploadData.storagePath,
-    file,
-  });
-  const imageUrl = uploaded.url;
-
-  // Refuse to record an image nothing can display. This is the defect itself,
-  // not a precaution: the route answers 200 with an empty `url` for a private
-  // container, so persisting it created a row that looked fine in the list and
-  // resolved to nothing everywhere it was used. Failing here is loud, and it
-  // stays correct if the container ever moves again.
-  if (!imageUrl) {
-    throw new Error(
-      `Upload succeeded but returned no public URL (container '${GALLERY_CONTAINER}'). ` +
-        'The gallery record was not created.'
-    );
-  }
-
-  await postJSON('createManualGalleryImageRecord', {
-    articleId: 'manual-upload',
-    imageUrl,
-    provider: normalizedProvider,
-    title: uploadData.title,
-    slot: uploadSlot,
-    storagePath: `${GALLERY_CONTAINER}/${uploadData.storagePath}`,
-    customTags: uploadData.allTags,
-    folder: uploadData.folder,
-  });
-
-  return file.name;
-}
-
-/**
- * Upload every queued file, skipping the ones a publicly served container will
- * not take.
- *
- * Returns what landed and what did not so the caller reports rather than
- * branches — the loop's guards were counted into handleManualUpload, which the
- * repository's own complexity gate flagged at 10.
- *
- * @returns {Promise<{uploaded: string[], rejected: string[]}>}
- */
-async function uploadGalleryBatch(files, options) {
-  const uploaded = [];
-  const rejected = [];
-  for (let index = 0; index < files.length; index += 1) {
-    const file = files[index];
-    if (!file || !file.name) {
-      console.warn(`Skipping invalid file at index ${index}`);
-      continue;
-    }
-    // Named here rather than left to the route's 415, which would abort the
-    // whole batch on the first bad file without saying which one.
-    const problem = publicImageFileProblem(file);
-    if (problem) {
-      rejected.push(`${file.name}: ${problem}`);
-      continue;
-    }
-    // Sequential on purpose: each upload is a full base64 body, and the route
-    // caps a single one at 15 MB. Firing a queue of them at once is how a
-    // multi-file batch turns into a memory spike on a 2048 MB instance.
-    uploaded.push(
-      await uploadGalleryFile({ ...options, file, index, uploadFilesLength: files.length })
-    );
-  }
-  return { uploaded, rejected };
-}
-
-/** One tag in the update panel's toggle row. */
-function TagToggle({ tag, selected, onToggle }) {
-  return (
-    <Badge
-      variant={selected ? 'default' : 'outline'}
-      className="cursor-pointer gap-2"
-      onClick={onToggle}
-    >
-      <input
-        type="checkbox"
-        checked={selected}
-        readOnly
-        className="h-3 w-3 cursor-pointer pointer-events-none"
-      />
-      {tag}
-    </Badge>
-  );
-}
-
-/**
- * Rename one gallery image.
- *
- * Module-level over a state bag, as linkWrites.js is: written inside the
- * component its guard was one of the component's own exits, and the page
- * already measured 16 of them.
- */
-async function renameGalleryImage(state, itemId, newTitle) {
-  const title = String(newTitle || '').trim();
-  if (!title) {
-    state.setDeleteError('Title cannot be empty');
-    return;
-  }
-  state.setBusyId(itemId);
-  try {
-    const item = state.items.find((it) => it.id === itemId);
-    if (!item) throw new Error('Item not found');
-    await postJSON('updateGalleryImageMetadata', {
-      id: itemId,
-      galleryCollection: item.galleryCollection,
-      title,
-    });
-    state.setEditingItemId(null);
-    state.setEditingTitle('');
-    await state.fetchGallery();
-  } catch (error) {
-    console.error('Rename error:', error);
-    state.setDeleteError(`Rename failed: ${error.message || error}`);
-  } finally {
-    state.setBusyId('');
-  }
-}
-
-/** The visible items: everything matching the search term and the four filters. */
-function filterGalleryItems(items, searchTerm, filters) {
-  const term = searchTerm.trim().toLowerCase();
-  return (items || []).filter((item) => matchesGalleryItem(item, term, filters));
+  // A link into a set or a search should find the image whatever its state.
+  if ((next.set || next.q) && !params.get('state')) next.state = 'all';
+  return next;
 }
 
 export default function ImageGalleryPage() {
   const navigate = useNavigate();
-  const [items, setItems] = useState([]);
+  const location = useLocation();
+  const [filters, setFilters] = useState(() => filtersFromSearch(location.search));
+  const [debouncedQ, setDebouncedQ] = useState(() => filtersFromSearch(location.search).q);
+  const [listing, setListing] = useState({ items: [], total: 0, hasMore: false, facets: null });
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [providerFilter, setProviderFilter] = useState('all');
-  const [slotFilter, setSlotFilter] = useState('all');
-  const [customTagFilter, setCustomTagFilter] = useState('all');
-  const [busyId, setBusyId] = useState('');
+  const [error, setError] = useState('');
+  const [persistedFolders, setPersistedFolders] = useState([]);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [busyIds, setBusyIds] = useState(() => new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [copiedId, setCopiedId] = useState('');
-  const [deleteError, setDeleteError] = useState('');
-  const [deleteTarget, setDeleteTarget] = useState(null);
-  const [uploadFiles, setUploadFiles] = useState([]);
-  const [uploadTitle, setUploadTitle] = useState('');
-  const [uploadProvider, setUploadProvider] = useState('');
-  const [uploadSlot, setUploadSlot] = useState('');
-  const [uploadCustomTags, setUploadCustomTags] = useState('');
-  const [uploading, setUploading] = useState(false);
-  const [uploadMessage, setUploadMessage] = useState('');
-  // Deliberately NOT `deleteError`: fetchGallery clears that on every refresh,
-  // and this message is set immediately before one, so it would be wiped
-  // before it could be read.
-  const [uploadWarning, setUploadWarning] = useState('');
-  const [selectedIds, setSelectedIds] = useState(new Set());
-  const [manualFolders, setManualFolders] = useState([]);
-  const [uploadFolder, setUploadFolder] = useState('default');
-  const [folderFilter, setFolderFilter] = useState('all');
-  const [newFolderName, setNewFolderName] = useState('');
-  const [showNewFolderInput, setShowNewFolderInput] = useState(false);
-  const [uploadRenameFilename, setUploadRenameFilename] = useState('');
-  const [pullTagsFromFilename, setPullTagsFromFilename] = useState(false);
-  const [editingItemId, setEditingItemId] = useState(null);
-  const [editingTitle, setEditingTitle] = useState('');
-  const [selectedTagsForUpdate, setSelectedTagsForUpdate] = useState(new Set());
-  const uploadInputRef = useRef(null);
+  const [detailsId, setDetailsId] = useState('');
+  const [message, setMessage] = useState('');
+  const [generation, setGeneration] = useState(0);
 
-  const fetchGallery = useCallback(async () => {
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQ(filters.q), 250);
+    return () => clearTimeout(timer);
+  }, [filters.q]);
+
+  const queryParams = useMemo(() => ({ ...filters, q: debouncedQ }), [filters, debouncedQ]);
+
+  // One read per (filters, generation); a slower older answer never paints
+  // over a newer one because the cleanup marks it stale.
+  const readListing = useCallback(async (params, isStale) => {
+    setLoading(true);
     try {
-      setLoading(true);
-      setDeleteError('');
-      setItems(await loadGalleryItems());
-    } catch (error) {
-      console.error('Failed to fetch generated images:', error);
-      setDeleteError(`Load failed: ${error.message || error}`);
+      const next = await queryGalleryImages(params);
+      if (isStale()) return;
+      // asListing again here: idempotent on the envelope, and it means a
+      // caller (or a test) handing back a bare array still renders.
+      setListing(asListing(next));
+      setError('');
+    } catch (err) {
+      if (isStale()) return;
+      setListing({ items: [], total: 0, hasMore: false, facets: null });
+      setError(err?.message || 'The gallery could not be read.');
     } finally {
-      setLoading(false);
+      if (!isStale()) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    // The read marks itself pending; that is the one state write an effect
+    // that starts a fetch has to make.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchGallery();
-  }, [fetchGallery]);
+    readListing(queryParams, () => cancelled);
+    return () => {
+      cancelled = true;
+    };
+  }, [queryParams, generation, readListing]);
 
-  // Each of these is a pure function of `items` (lib/imageGallery.js). Written
-  // as useMemo bodies they put their returns inside this component, which is
-  // what took it to 16 exits.
-  const providerFilterOptions = useMemo(() => providerOptions(items), [items]);
-  const slotFilterOptions = useMemo(() => slotOptions(items), [items]);
-  const customTagFilterOptions = useMemo(() => customTagOptions(items), [items]);
-  const folders = useMemo(() => folderOptions(items, manualFolders), [items, manualFolders]);
-  const allUniqueTags = useMemo(() => uniqueTags(items), [items]);
-  const filtered = useMemo(
+  useEffect(() => {
+    let cancelled = false;
+    fetchGalleryFolders()
+      .then((folders) => {
+        if (!cancelled) setPersistedFolders(folders);
+      })
+      .catch(() => {
+        // Folders fall back to the seeds plus whatever the items use.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const refresh = useCallback(() => setGeneration((g) => g + 1), []);
+  const { items, facets } = listing;
+  const folders = useMemo(() => folderOptions(items, persistedFolders), [items, persistedFolders]);
+  const providerValues = useMemo(
     () =>
-      filterGalleryItems(items, searchTerm, {
-        providerFilter,
-        slotFilter,
-        customTagFilter,
-        folderFilter,
-      }),
-    [items, providerFilter, slotFilter, customTagFilter, folderFilter, searchTerm]
+      facets?.providers?.length
+        ? facets.providers.map((p) => p.toUpperCase())
+        : providerOptions(items).slice(1),
+    [facets, items]
+  );
+  const slotValues = useMemo(
+    () => (facets?.slots?.length ? facets.slots : slotOptions(items).slice(1)),
+    [facets, items]
+  );
+  const tagValues = useMemo(
+    () => (facets?.tags?.length ? facets.tags : customTagOptions(items).slice(1)),
+    [facets, items]
+  );
+  const selectedItems = useMemo(
+    () => items.filter((item) => selectedIds.has(item.id)),
+    [items, selectedIds]
+  );
+  const detailsItem = useMemo(
+    () => items.find((item) => item.id === detailsId) || null,
+    [items, detailsId]
   );
 
-  const updateSlot = async (item, newSlot) => {
-    setBusyId(item.id);
+  const say = (text) => {
+    setMessage(text);
+    setError('');
+  };
+  const fail = (text) => setError(text);
+
+  const withBusy = async (ids, work) => {
+    setBusyIds((prev) => new Set([...prev, ...ids]));
     try {
-      await postJSON('updateGalleryImageMetadata', {
-        imageId: item.id,
-        galleryCollection: item.galleryCollection,
-        slot: newSlot,
-      });
-      setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, slot: newSlot } : i)));
-    } catch (error) {
-      setDeleteError(`Slot update failed: ${error.message || error}`);
+      await work();
     } finally {
-      setBusyId('');
-    }
-  };
-
-  const copyText = async (text, itemId) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopiedId(itemId);
-      setTimeout(() => setCopiedId(''), 2000);
-    } catch (error) {
-      console.error('Clipboard write failed:', error);
-    }
-  };
-
-  const handleReuse = (item) => {
-    if (item?.imageUrl) {
-      navigate(`/admin/submit?reuseImage=${encodeURIComponent(item.imageUrl)}`);
-    }
-  };
-
-  const handleManualUpload = async () => {
-    if (!uploadFiles || uploadFiles.length === 0) {
-      const errorMsg = 'No files selected';
-      setDeleteError(errorMsg);
-      return;
-    }
-
-    setUploading(true);
-    setDeleteError('');
-    setUploadMessage('');
-    setUploadWarning('');
-
-    try {
-      const normalizedProvider = normalizeContentProvider(uploadProvider);
-      const customTagsArray = uploadCustomTags
-        .split(',')
-        .map((tag) => tag.trim().toLowerCase())
-        .filter(Boolean);
-
-      const { uploaded, rejected } = await uploadGalleryBatch(uploadFiles, {
-        normalizedProvider,
-        uploadSlot,
-        customTagsArray,
-        uploadRenameFilename,
-        pullTagsFromFilename,
-        uploadTitle,
-        uploadFolder,
+      setBusyIds((prev) => {
+        const next = new Set(prev);
+        ids.forEach((id) => next.delete(id));
+        return next;
       });
+    }
+  };
 
-      setUploadFiles([]);
-      setUploadTitle('');
-      setUploadProvider('');
-      setUploadSlot('');
-      setUploadCustomTags('');
-      if (uploadInputRef.current) {
-        uploadInputRef.current.value = '';
-      }
-      setUploadMessage(
-        `${uploaded.length} image${uploaded.length === 1 ? '' : 's'} uploaded to ${uploadFolder || 'Default'} folder.`
+  const runBulk = async (targets, action, extra = {}) => {
+    if (!targets.length) return;
+    setBulkBusy(true);
+    try {
+      await withBusy(
+        targets.map((t) => t.id),
+        async () => {
+          const res = await bulkGalleryImages(targets, action, extra);
+          const verb = {
+            tag: 'retagged',
+            move: `moved to ${extra.folder}`,
+            archive: 'archived',
+            restore: 'restored',
+            trash: 'moved to trash',
+            untrash: 'restored',
+            delete: 'deleted permanently',
+            set: 'updated',
+          }[action];
+          say(
+            `${res.updated} image${res.updated === 1 ? '' : 's'} ${verb}${res.failed ? `; ${res.failed} failed` : ''}.`
+          );
+          if (['delete', 'trash', 'archive', 'restore'].includes(action)) {
+            setSelectedIds(new Set());
+            if (targets.some((t) => t.id === detailsId) && action === 'delete') setDetailsId('');
+          }
+          refresh();
+        }
       );
-      if (rejected.length > 0) {
-        setUploadWarning(`Not uploaded — ${rejected.join('; ')}`);
-      }
-      await fetchGallery();
-    } catch (error) {
-      setDeleteError(`Upload failed: ${error.message || error}`);
-      console.error('Upload error:', error);
+    } catch (err) {
+      fail(`${action} failed: ${err?.message || err}`);
     } finally {
-      setUploading(false);
+      setBulkBusy(false);
     }
   };
 
-  const doDelete = async (item) => {
-    setDeleteError('');
-    setBusyId(item.id);
+  const copyText = async (text, id) => {
     try {
-      if (item.galleryCollection === 'generated_content_images') {
-        await postJSON('deleteContentGeneratedImage', { imageId: item.id });
-      } else {
-        await postJSON('deleteCuratedGeneratedImage', { articleId: item.articleId });
-      }
-      await fetchGallery();
-    } catch (error) {
-      setDeleteError(`Delete failed: ${error.message || error}`);
-    } finally {
-      setBusyId('');
+      await navigator.clipboard.writeText(resolveMediaUrl(text));
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(''), 2000);
+    } catch (err) {
+      fail(`Could not copy: ${err?.message || err}`);
     }
   };
 
-  const handleAddFiles = (event) => {
-    const newFiles = Array.from(event.target.files || []);
-    setUploadFiles((prev) => [...prev, ...newFiles]);
+  const reuse = (item) => {
+    if (item?.imageUrl) navigate(`/admin/submit?reuseImage=${encodeURIComponent(item.imageUrl)}`);
   };
 
-  const handleRemoveQueuedFile = (fileToRemove) => {
-    setUploadFiles((prev) =>
-      prev.filter((file) => file.name !== fileToRemove.name || file.size !== fileToRemove.size)
-    );
-  };
-
-  const handleToggleSelect = (itemId) => setSelectedIds((prev) => toggledSelection(prev, itemId));
-
-  const handleCreateFolder = () => {
-    const folderName = newFolderName.trim().toLowerCase();
-    const problem = newFolderProblem(folderName, folders);
-    if (problem) {
-      setDeleteError(problem);
-      return;
-    }
-    setManualFolders([...manualFolders, folderName].sort());
-    setNewFolderName('');
-    setShowNewFolderInput(false);
-    setUploadMessage(`Folder "${folderName}" created successfully.`);
-  };
-
-  const handleDeleteFolder = async (folderName) => {
-    const lowerFolderName = folderName.toLowerCase();
-    const problem = deleteFolderProblem(folderName, items);
-    if (problem) {
-      setDeleteError(problem);
-      return;
-    }
-
-    setManualFolders(manualFolders.filter((f) => f.toLowerCase() !== lowerFolderName));
-    if (folderFilter.toLowerCase() === lowerFolderName) setFolderFilter('all');
-    if (uploadFolder.toLowerCase() === lowerFolderName) setUploadFolder('default');
-    setUploadMessage(`Folder "${folderName}" deleted successfully.`);
-  };
-
-  const handleRemoveCustomTag = (tagToRemove) => {
-    const tagsArray = uploadCustomTags
-      .split(',')
-      .map((t) => t.trim())
-      .filter((t) => t && t !== tagToRemove);
-    setUploadCustomTags(tagsArray.join(', '));
-  };
-
-  const handleUpdateImage = async (itemId) => {
-    setBusyId(itemId);
+  const saveDetails = async (item, fields) => {
     try {
-      const item = items.find((it) => it.id === itemId);
-      if (!item) throw new Error('Item not found');
-
-      // Get tags from custom tags input (new permanent tags)
-      const newCustomTags = uploadCustomTags
-        .split(',')
-        .map((tag) => tag.trim().toLowerCase())
-        .filter(Boolean);
-
-      // Merge with selected tags from toggles
-      const allTags = new Set([...selectedTagsForUpdate, ...newCustomTags]);
-      const finalTags = Array.from(allTags);
-
-      const updateData = {
-        id: itemId,
-        galleryCollection: item.galleryCollection,
-      };
-
-      // Update provider if a value is set
-      if (uploadProvider) {
-        updateData.provider = uploadProvider.toLowerCase();
-      }
-
-      // Update slot if a value is set
-      if (uploadSlot) {
-        updateData.slot = uploadSlot.toLowerCase();
-      }
-
-      // Update custom tags
-      if (finalTags.length > 0) {
-        updateData.customTags = finalTags;
-      }
-
-      await postJSON('updateGalleryImageMetadata', updateData);
-
-      setUploadMessage(`✓ Image updated`);
-      await fetchGallery();
-      setUploadProvider('');
-      setUploadSlot('');
-      setUploadCustomTags('');
-      setSelectedTagsForUpdate(new Set());
-    } catch (error) {
-      console.error('Update error:', error);
-      setDeleteError(`Update failed: ${error.message || error}`);
-    } finally {
-      setBusyId('');
-    }
-  };
-
-  const handleRenameImage = (itemId, newTitle) =>
-    renameGalleryImage(
-      { items, setBusyId, setDeleteError, setEditingItemId, setEditingTitle, fetchGallery },
-      itemId,
-      newTitle
-    );
-
-  const handleMoveToFolder = async (itemId, newFolder) => {
-    setBusyId(itemId);
-    try {
-      const item = items.find((it) => it.id === itemId);
-      if (!item) throw new Error('Item not found');
-
-      await postJSON('updateGalleryImageMetadata', {
-        id: itemId,
-        galleryCollection: item.galleryCollection,
-        folder: newFolder.toLowerCase(),
+      await withBusy([item.id], async () => {
+        await updateGalleryImage(item, fields);
+        say(`"${fields.title || item.title}" saved.`);
+        refresh();
       });
-
-      await fetchGallery();
-    } catch (error) {
-      console.error('Move error:', error);
-      setDeleteError(`Move failed: ${error.message || error}`);
-    } finally {
-      setBusyId('');
+    } catch (err) {
+      fail(`Save failed: ${err?.message || err}`);
     }
   };
 
-  let galleryContent = null;
-  if (loading) {
-    galleryContent = (
-      <Card>
-        <CardContent className="p-6 text-sm text-muted-foreground">Loading gallery...</CardContent>
-      </Card>
+  const deleteOne = async (item) => {
+    try {
+      await withBusy([item.id], async () => {
+        const res = await deleteGalleryImage(item);
+        say(deletionMessage(item, res));
+        setDetailsId('');
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(item.id);
+          return next;
+        });
+        refresh();
+      });
+    } catch (err) {
+      fail(`Delete failed: ${err?.message || err}`);
+    }
+  };
+
+  const changeFolders = async (next) => {
+    try {
+      setPersistedFolders(await saveGalleryFolders(next));
+    } catch (err) {
+      fail(`Folders could not be saved: ${err?.message || err}`);
+    }
+  };
+
+  const page = Math.floor(filters.offset / filters.limit) + 1;
+  const pageCount = Math.max(1, Math.ceil(listing.total / filters.limit));
+  const first = listing.total === 0 ? 0 : filters.offset + 1;
+  const last = Math.min(filters.offset + items.length, listing.total);
+  const summary = loading
+    ? 'Loading images…'
+    : `Showing ${first}–${last} of ${listing.total}${selectedIds.size ? ` · ${selectedIds.size} selected` : ''}`;
+
+  let grid;
+  if (error) {
+    grid = (
+      <EmptyState
+        variant="error"
+        title="The gallery could not be read"
+        description={error}
+        onRetry={refresh}
+      />
     );
-  } else if (filtered.length === 0) {
-    galleryContent = (
-      <Card>
-        <CardContent className="p-6 text-sm text-muted-foreground">
-          No generated images found for the current filters.
-        </CardContent>
-      </Card>
+  } else if (loading && items.length === 0) {
+    grid = (
+      <div className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-border py-16 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Loading images…
+      </div>
+    );
+  } else if (items.length === 0 && hasActiveFilters(filters)) {
+    grid = (
+      <EmptyState
+        variant="filtered"
+        title="Nothing matches these filters"
+        description="Try a broader search, another folder or source, or clear the filters."
+        action={
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setFilters({ ...DEFAULT_FILTERS, state: filters.state })}
+          >
+            Clear filters
+          </Button>
+        }
+      />
+    );
+  } else if (items.length === 0 && filters.state !== 'active') {
+    grid = <EmptyState {...emptyStateFor(filters.state)} />;
+  } else if (items.length === 0) {
+    grid = (
+      <EmptyState
+        icon={Images}
+        title="No images yet"
+        description="Upload or import an image above, generate a cover from the review queue, or try an image set on Image Prompts — everything lands here."
+        action={
+          <Button variant="outline" size="sm" onClick={() => navigate('/admin/image-prompts')}>
+            Open Image Prompts
+          </Button>
+        }
+      />
     );
   } else {
-    galleryContent = (
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {filtered.map((item) => {
-          const provider = String(item.provider || 'UNKNOWN').toUpperCase();
-          const imageUrl = item.imageUrl || '';
-          const isBusy = busyId === item.id;
-          const sourceLabel = getSourceLabel(item.sourceCollection);
-          const isSelected = selectedIds.has(item.id);
-          const customTags = item.customTags || [];
-
-          return (
-            <Card key={item.id} className="overflow-hidden">
-              <div className="aspect-video bg-muted/40 relative">
-                {imageUrl ? (
-                  <img
-                    src={resolveMediaUrl(imageUrl)}
-                    alt={item.title}
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
-                    No image URL
-                  </div>
-                )}
-                <div className="absolute top-2 left-2">
-                  <input
-                    type="checkbox"
-                    checked={isSelected}
-                    onChange={() => handleToggleSelect(item.id)}
-                    className="h-5 w-5 cursor-pointer"
-                  />
-                </div>
-              </div>
-
-              <CardHeader className="pb-2">
-                <div className="flex items-start gap-2">
-                  <CardTitle className="truncate text-sm flex-1" title={item.title}>
-                    {editingItemId === item.id ? (
-                      <div className="flex gap-2">
-                        <Input
-                          value={editingTitle}
-                          onChange={(e) => setEditingTitle(e.target.value)}
-                          className="h-7 text-sm"
-                          onKeyPress={(e) => {
-                            if (e.key === 'Enter') handleRenameImage(item.id, editingTitle);
-                          }}
-                        />
-                        <Button
-                          size="sm"
-                          className="h-7 px-2"
-                          onClick={() => handleRenameImage(item.id, editingTitle)}
-                        >
-                          Save
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 px-2"
-                          onClick={() => {
-                            setEditingItemId(null);
-                            setEditingTitle('');
-                          }}
-                        >
-                          Cancel
-                        </Button>
-                      </div>
-                    ) : (
-                      item.title
-                    )}
-                  </CardTitle>
-                  {editingItemId !== item.id && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditingItemId(item.id);
-                        setEditingTitle(item.title || '');
-                      }}
-                      className="text-muted-foreground hover:text-primary"
-                      title="Rename image"
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
-                  )}
-                </div>
-                <div className="flex flex-wrap items-center gap-2 text-xs">
-                  <Badge variant="outline">{provider}</Badge>
-                  <Badge variant="outline">{sourceLabel}</Badge>
-                  {customTags.map((tag, idx) => (
-                    <Badge key={idx} variant="secondary">
-                      {tag}
-                    </Badge>
-                  ))}
-                  <select
-                    value={item.slot || ''}
-                    disabled={isBusy}
-                    onChange={(e) => updateSlot(item, e.target.value)}
-                    className="rounded border border-input bg-background px-1.5 py-0.5 text-[11px] text-muted-foreground hover:border-primary focus:outline-none disabled:opacity-50"
-                    title="Change slot tag"
-                  >
-                    {SLOT_OPTIONS.map((opt) => (
-                      <option key={opt.value || 'none'} value={opt.value}>
-                        {opt.value ? opt.label : '— slot —'}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    value={(item.folder || 'default').toLowerCase()}
-                    disabled={isBusy}
-                    onChange={(e) => handleMoveToFolder(item.id, e.target.value)}
-                    className="rounded border border-input bg-background px-1.5 py-0.5 text-[11px] text-muted-foreground hover:border-primary focus:outline-none disabled:opacity-50"
-                    title="Move to folder"
-                  >
-                    {folders.map((folder) => (
-                      <option key={folder} value={folder}>
-                        📁 {folder}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <p className="text-xs text-muted-foreground">{formatDate(item.createdAt)}</p>
-                <p className="truncate text-xs text-muted-foreground" title={item.articleId}>
-                  {item.articleId}
-                </p>
-              </CardHeader>
-
-              <CardContent className="space-y-2">
-                <a
-                  href={imageUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 break-all text-xs text-blue-600 hover:underline"
-                >
-                  Open image <ExternalLink className="h-3 w-3" />
-                </a>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleReuse(item)}
-                    disabled={!imageUrl || isBusy}
-                    className="gap-1"
-                  >
-                    <Wand2 className="h-3.5 w-3.5" /> Reuse
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => copyText(imageUrl, `url-${item.id}`)}
-                    disabled={!imageUrl || isBusy}
-                    className="gap-1"
-                  >
-                    <Copy className="h-3.5 w-3.5" />
-                    {copiedId === `url-${item.id}` ? 'Copied!' : 'Copy URL'}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => copyText(`![${item.title}](${imageUrl})`, `md-${item.id}`)}
-                    disabled={!imageUrl || isBusy}
-                    className="gap-1"
-                  >
-                    <Copy className="h-3.5 w-3.5" />
-                    {copiedId === `md-${item.id}` ? 'Copied!' : 'Copy Markdown'}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    size="sm"
-                    onClick={() => setDeleteTarget(item)}
-                    disabled={isBusy}
-                    className="gap-1"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" /> Delete
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
+    grid = (
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+        {items.map((item) => (
+          <GalleryTile
+            key={item.id}
+            item={item}
+            selected={selectedIds.has(item.id)}
+            busy={busyIds.has(item.id)}
+            copied={copiedId === `url-${item.id}`}
+            onToggleSelect={(id) => setSelectedIds((prev) => toggledSelection(prev, id))}
+            onOpen={(it) => setDetailsId(it.id)}
+            onReuse={reuse}
+            onCopy={copyText}
+            onArchive={(it) => runBulk([it], 'archive')}
+            onTrash={(it) => runBulk([it], 'trash')}
+            onRestore={(it) => runBulk([it], 'restore')}
+          />
+        ))}
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="mb-2 text-3xl font-bold text-slate-900 dark:text-white">AI Image Gallery</h1>
-        <p className="text-slate-600 dark:text-slate-400">
-          Organize and manage AI-generated images with folder management, custom tagging, and
-          advanced filtering.
-        </p>
-        {deleteError && <p className="mt-1 text-sm text-destructive">{deleteError}</p>}
-        {uploadWarning && <p className="mt-1 text-sm text-destructive">{uploadWarning}</p>}
-      </div>
-
-      {/* SECTION 1: Upload Images */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Upload className="h-5 w-5" />
-            Section 1: Upload Images
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            {/* File Upload */}
-            <div className="space-y-3">
-              <div>
-                <p className="text-sm font-semibold mb-2">Select Files</p>
-                {/*
-                  `accept` is not `image/*`: `covers` is publicly served, so
-                  the upload route refuses SVG (a scriptable document) and
-                  anything outside the five raster types. Offering them in the
-                  picker would be offering a 415.
-                */}
-                <Input
-                  ref={uploadInputRef}
-                  type="file"
-                  accept={GALLERY_ACCEPT}
-                  multiple
-                  onChange={handleAddFiles}
-                  className="cursor-pointer"
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  Select multiple files at once or add files incrementally
-                </p>
-              </div>
-
-              {uploadFiles.length > 0 && (
-                <div className="rounded-md border border-border p-3 bg-muted/30">
-                  <p className="mb-2 text-sm font-medium">Queued Files ({uploadFiles.length})</p>
-                  <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
-                    {uploadFiles.map((file, idx) => (
-                      <Badge
-                        key={`${file.name}-${file.size}-${idx}`}
-                        variant="outline"
-                        className="gap-1"
-                      >
-                        {file.name}
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveQueuedFile(file)}
-                          className="ml-1 text-destructive hover:text-destructive/80"
-                          title="Remove from queue"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Folder Management */}
-            <div className="space-y-3">
-              <div>
-                <p className="text-sm font-semibold mb-2 flex items-center gap-2">
-                  <FolderOpen className="h-4 w-4" />
-                  Upload Destination Folder
-                </p>
-                <select
-                  value={uploadFolder}
-                  onChange={(e) => setUploadFolder(e.target.value)}
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm mb-2"
-                >
-                  {folders.map((folder) => (
-                    <option key={folder} value={folder}>
-                      {folder}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-muted-foreground">
-                  Images will be organized into this folder
-                </p>
-              </div>
-
-              <div className="rounded-md border border-border p-3 bg-muted/30">
-                <p className="text-sm font-medium mb-2 flex items-center justify-between">
-                  <span className="flex items-center gap-2">
-                    <FolderPlus className="h-4 w-4" />
-                    Manage Folders
-                  </span>
-                  {!showNewFolderInput && (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setShowNewFolderInput(true)}
-                      className="h-6 gap-1 text-xs"
-                    >
-                      <FolderPlus className="h-3 w-3" /> New
-                    </Button>
-                  )}
-                </p>
-
-                {showNewFolderInput && (
-                  <div className="flex gap-2 mb-3">
-                    <Input
-                      value={newFolderName}
-                      onChange={(e) => setNewFolderName(e.target.value)}
-                      placeholder="New folder name"
-                      className="h-8 text-sm"
-                      onKeyPress={(e) => e.key === 'Enter' && handleCreateFolder()}
-                    />
-                    <Button type="button" size="sm" onClick={handleCreateFolder} className="h-8">
-                      Create
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => {
-                        setShowNewFolderInput(false);
-                        setNewFolderName('');
-                      }}
-                      className="h-8"
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                )}
-
-                <div className="flex flex-wrap gap-2">
-                  {folders.map((folder) => (
-                    <Badge key={folder} variant="secondary" className="gap-2">
-                      {folder}
-                      {folder !== 'Default' && (
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteFolder(folder)}
-                          className="text-destructive hover:text-destructive/80"
-                          title="Delete folder"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      )}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Rename Section */}
-          <div className="border-t pt-4 space-y-3">
-            <p className="text-sm font-semibold">Rename Files</p>
-            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-              <div className="space-y-2">
-                <Input
-                  value={uploadRenameFilename}
-                  onChange={(e) => setUploadRenameFilename(e.target.value)}
-                  placeholder="Custom filename (optional)"
-                  className="text-sm"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Override auto-generated filenames with a custom name
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="pullTagsCheckbox"
-                  checked={pullTagsFromFilename}
-                  onChange={(e) => setPullTagsFromFilename(e.target.checked)}
-                  className="h-4 w-4 cursor-pointer"
-                />
-                <label htmlFor="pullTagsCheckbox" className="text-sm cursor-pointer">
-                  Pull Tags from Filename (split by hyphen)
-                </label>
-              </div>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              When &quot;Pull Tags&quot; is checked, tags will be extracted from hyphenated
-              filenames (e.g., &quot;aws-lambda-migration&quot; → [&quot;aws&quot;,
-              &quot;lambda&quot;, &quot;migration&quot;])
-            </p>
-          </div>
-
-          <div className="flex items-center justify-between gap-3 pt-2 border-t">
-            <div className="text-xs text-muted-foreground">
-              {uploadMessage || `Upload images to the ${uploadFolder} folder with custom metadata`}
-            </div>
-            <Button
-              type="button"
-              onClick={handleManualUpload}
-              disabled={uploading || uploadFiles.length === 0}
-              className="gap-2"
-            >
-              {uploading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Upload className="h-4 w-4" />
-              )}
-              {uploading ? 'Uploading...' : `Upload ${uploadFiles.length || ''} to ${uploadFolder}`}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* SECTION 2: Tags & Metadata Management */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Wand2 className="h-5 w-5" />
-            Section 2: Tags & Metadata Management
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <div className="space-y-2">
-              <p className="text-sm font-semibold">Provider Tag</p>
-              <select
-                value={uploadProvider}
-                onChange={(event) => setUploadProvider(event.target.value)}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              >
-                {COMMON_PROVIDERS.map((option) => (
-                  <option key={option.value || 'none'} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              <p className="text-xs text-muted-foreground">Cloud platform or category</p>
-            </div>
-
-            <div className="space-y-2">
-              <p className="text-sm font-semibold">Slot Tag</p>
-              <select
-                value={uploadSlot}
-                onChange={(event) => setUploadSlot(event.target.value)}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              >
-                {SLOT_OPTIONS.map((option) => (
-                  <option key={option.value || 'none'} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              <p className="text-xs text-muted-foreground">Image placement type</p>
-            </div>
-
-            <div className="space-y-2 lg:col-span-2">
-              <p className="text-sm font-semibold">Add New Custom Tags</p>
-              <Input
-                value={uploadCustomTags}
-                onChange={(event) => setUploadCustomTags(event.target.value)}
-                placeholder="migration, serverless, kubernetes"
-                className="font-mono text-sm"
-              />
-              <p className="text-xs text-muted-foreground">
-                Add comma-separated tags that will become permanent
-              </p>
-              {uploadCustomTags.trim() && (
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {uploadCustomTags
-                    .split(',')
-                    .map((tag) => tag.trim())
-                    .filter(Boolean)
-                    .map((tag, idx) => (
-                      <Badge key={idx} variant="secondary" className="gap-1">
-                        {tag}
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveCustomTag(tag)}
-                          className="text-destructive hover:text-destructive/80"
-                          title="Remove tag"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </Badge>
-                    ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Tag Toggle Subsection */}
-          {allUniqueTags.length > 0 && (
-            <div className="border-t pt-4 space-y-3">
-              <p className="text-sm font-semibold">Toggle Existing Tags</p>
-              <p className="text-xs text-muted-foreground">
-                Select/deselect tags to attach or remove from the selected image
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {allUniqueTags.map((tag) => (
-                  <TagToggle
-                    key={tag}
-                    tag={tag}
-                    selected={selectedTagsForUpdate.has(tag)}
-                    onToggle={() =>
-                      setSelectedTagsForUpdate(toggledSelection(selectedTagsForUpdate, tag))
-                    }
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="flex justify-end pt-2 border-t">
-            <Button
-              type="button"
-              variant="default"
-              onClick={() =>
-                selectedIds.size >= 1 ? handleUpdateImage([...selectedIds][0]) : null
-              }
-              disabled={selectedIds.size === 0}
-              className="gap-2"
-            >
-              <RefreshCw className="h-4 w-4" />
-              Update Selected Image{selectedIds.size > 1 ? 's' : ''} ({selectedIds.size})
-            </Button>
-          </div>
-
-          <div className="text-xs text-muted-foreground border-t pt-3">
-            <p>
-              <strong>How to Update:</strong> Select images from the gallery below using checkboxes.
-              Set Provider Tag, Slot Tag, add new custom tags, or toggle existing tags, then click
-              &quot;Update Selected Image(s)&quot; to apply changes.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* SECTION 3: Search & Filter */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            🔍 Section 3: Search & Filter
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
-            <Input
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search by title, tags, or URL"
-              className="sm:col-span-2"
-            />
-
-            <select
-              value={folderFilter}
-              onChange={(e) => setFolderFilter(e.target.value)}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              title="Filter by Folder"
-            >
-              <option value="all">All Folders</option>
-              <option value="--none--">--none--</option>
-              {folders.map((folder) => (
-                <option key={folder} value={folder}>
-                  {folder}
-                </option>
-              ))}
-            </select>
-
-            <select
-              value={providerFilter}
-              onChange={(e) => setProviderFilter(e.target.value)}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              title="Filter by Provider"
-            >
-              <option value="all">All Providers</option>
-              {COMMON_PROVIDERS.filter((p) => p.value).map((option) => (
-                <option key={option.value} value={option.value.toUpperCase()}>
-                  {option.label}
-                </option>
-              ))}
-              {providerFilterOptions
-                .filter(
-                  (value) =>
-                    value !== 'all' &&
-                    !COMMON_PROVIDERS.some((p) => p.value.toUpperCase() === value)
-                )
-                .map((value) => (
-                  <option key={value} value={value}>
-                    {value}
-                  </option>
-                ))}
-            </select>
-
-            <select
-              value={slotFilter}
-              onChange={(e) => setSlotFilter(e.target.value)}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              title="Filter by Slot"
-            >
-              {slotFilterOptions.map((value) => (
-                <option key={value} value={value}>
-                  {value === 'all' ? 'All Slots' : value}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <select
-              value={customTagFilter}
-              onChange={(e) => setCustomTagFilter(e.target.value)}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              title="Filter by Custom Tag"
-            >
-              {customTagFilterOptions.map((value) => (
-                <option key={value} value={value}>
-                  {value === 'all' ? 'All Custom Tags' : value}
-                </option>
-              ))}
-            </select>
-
-            <Button type="button" variant="outline" onClick={fetchGallery} className="gap-2">
-              <RefreshCw className="h-4 w-4" /> Refresh Gallery
-            </Button>
-          </div>
-
-          <div className="flex items-center justify-between border-t pt-3">
-            <span className="text-sm font-medium text-muted-foreground">
-              {loading
-                ? 'Loading images...'
-                : `Showing ${filtered.length} of ${items.length} images${
-                    selectedIds.size > 0 ? ` • ${selectedIds.size} selected` : ''
-                  }${folderFilter !== 'all' ? ` • Folder: ${folderFilter}` : ''}`}
+    <div className="space-y-5">
+      <PageHeader
+        icon={Images}
+        title="Image Gallery"
+        help={HELP}
+        status={
+          facets?.counts ? (
+            <span className="text-muted-foreground">
+              {facets.counts.active} active · {facets.counts.archived} archived ·{' '}
+              {facets.counts.trash} in trash
             </span>
-          </div>
-        </CardContent>
-      </Card>
-
-      {galleryContent}
-
-      <ConfirmModal
-        open={Boolean(deleteTarget)}
-        title="Delete this image?"
-        description={
-          deleteTarget
-            ? `Delete generated image for ${deleteTarget.title}? This cannot be undone.`
-            : ''
+          ) : null
         }
-        confirmLabel="Delete"
-        onConfirm={() => {
-          const item = deleteTarget;
-          setDeleteTarget(null);
-          doDelete(item);
-        }}
-        onCancel={() => setDeleteTarget(null)}
+        actions={
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={() => document.getElementById('gallery-files')?.focus()}
+          >
+            <Upload className="h-3.5 w-3.5" aria-hidden="true" /> Add images
+          </Button>
+        }
       />
+
+      {message && (
+        <p
+          role="status"
+          className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
+        >
+          {message}
+        </p>
+      )}
+
+      <UploadPanel
+        folders={folders}
+        items={items}
+        onFoldersChange={changeFolders}
+        onUploaded={async () => refresh()}
+        onMessage={say}
+      />
+
+      <GalleryToolbar
+        filters={filters}
+        onChange={setFilters}
+        facets={facets}
+        folders={folders}
+        providerValues={providerValues}
+        slotValues={slotValues}
+        tagValues={tagValues}
+        loading={loading}
+        onRefresh={refresh}
+        summary={summary}
+      />
+
+      <BulkActionsBar
+        selectedItems={selectedItems}
+        allItems={items}
+        folders={folders}
+        busy={bulkBusy}
+        onClear={() => setSelectedIds(new Set())}
+        onSelectAll={() => setSelectedIds(new Set(items.map((item) => item.id)))}
+        onBulk={(action, extra) => runBulk(selectedItems, action, extra)}
+      />
+
+      {grid}
+
+      {listing.total > 0 && (
+        <nav
+          className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground"
+          aria-label="Gallery pages"
+        >
+          <span>
+            Page {page} of {pageCount}
+          </span>
+          <div className="flex items-center gap-2">
+            <label htmlFor="gallery-page-size">Per page</label>
+            <select
+              id="gallery-page-size"
+              value={filters.limit}
+              onChange={(e) => setFilters({ ...filters, limit: Number(e.target.value), offset: 0 })}
+              className="rounded-md border border-input bg-background px-2 py-1 text-xs"
+            >
+              {PAGE_SIZES.map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
+            </select>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={filters.offset === 0 || loading}
+              onClick={() =>
+                setFilters({ ...filters, offset: Math.max(0, filters.offset - filters.limit) })
+              }
+            >
+              Previous
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={!listing.hasMore || loading}
+              onClick={() => setFilters({ ...filters, offset: filters.offset + filters.limit })}
+            >
+              Next
+            </Button>
+          </div>
+        </nav>
+      )}
+
+      {detailsItem && (
+        <ImageDetailsDialog
+          item={detailsItem}
+          folders={folders}
+          busy={busyIds.has(detailsItem.id)}
+          copied={copiedId}
+          onClose={() => setDetailsId('')}
+          onSave={saveDetails}
+          onArchive={(it) => runBulk([it], 'archive')}
+          onRestore={(it) => runBulk([it], 'restore')}
+          onTrash={(it) => runBulk([it], 'trash')}
+          onDelete={deleteOne}
+          onReuse={reuse}
+          onCopy={copyText}
+          onOpenSet={(name) => navigate(`/admin/image-prompts?set=${encodeURIComponent(name)}`)}
+          onOpenContent={(use) => navigate(`/admin/queue/${encodeURIComponent(use.id)}`)}
+          onOpenVariant={(id) => {
+            if (items.some((item) => item.id === id)) setDetailsId(id);
+            else setFilters({ ...DEFAULT_FILTERS, state: 'all', q: id });
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -4,6 +4,9 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { ADMIN_ROUTES } from '@/config/admin';
+import StatusBadge from '@/components/admin/shared/StatusBadge';
+import TaxonomyChips from '@/components/admin/shared/TaxonomyChips';
+import { canApproveIn, canRejectIn } from '@/components/admin/TypedReviewList';
 import {
   CheckCircle,
   XCircle,
@@ -89,9 +92,7 @@ function CoderCornerHeader({ item, title, language, difficulty }) {
       <div className="flex-1 min-w-0">
         <h3 className="font-semibold text-base line-clamp-2">{title}</h3>
         <div className="flex flex-wrap items-center gap-2 mt-1.5">
-          <Badge variant="outline" className="font-mono text-[10px]">
-            {item.contentStatus || 'unknown'}
-          </Badge>
+          <StatusBadge content={item} />
           {provider && <Badge variant="outline">{provider}</Badge>}
           {language && (
             <Badge className="bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200 gap-1">
@@ -105,11 +106,7 @@ function CoderCornerHeader({ item, title, language, difficulty }) {
               {difficulty.charAt(0).toUpperCase() + difficulty.slice(1)}
             </Badge>
           )}
-          {item.Live && (
-            <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300">
-              Live
-            </Badge>
-          )}
+          <TaxonomyChips item={item} />
         </div>
       </div>
     </div>
@@ -126,7 +123,7 @@ function CoderCornerActions({
   handleReject,
   handleRestore,
 }) {
-  const showReject = statusFilter !== 'rejected' && !item.Live && !String(statusFilter).includes('published');
+  const showReject = canRejectIn(statusFilter, item);
 
   return (
     <div className="flex flex-wrap items-center gap-2 pt-1">
@@ -211,7 +208,9 @@ function CoderCornerActions({
  *   - code snippet preview (first ~10 lines from blogDraft or content)
  *   - breakdown and use-cases from Summary / sidebarContent
  *
- * Props match QueueItemCard pattern for consistency.
+ * Props match QueueItemCard pattern for consistency. On the review page
+ * (ReviewPage) the same card is the Coder Corner board, with `statusFilter`
+ * set from the item's own status.
  */
 export function CoderCornerReviewBoard({
   item,
@@ -236,8 +235,7 @@ export function CoderCornerReviewBoard({
   const codeMatch = rawDraft.match(/```[\w]*\n([\s\S]*?)```/);
   const codePreview = codeMatch ? codeMatch[1].split('\n').slice(0, 10).join('\n') : null;
 
-  const canApprove =
-    statusFilter === 'needs_review' || statusFilter === 'in_review' || statusFilter === 'inspected';
+  const canApprove = canApproveIn(statusFilter);
 
   return (
     <Card className="overflow-hidden border-l-4 border-l-amber-500/60">

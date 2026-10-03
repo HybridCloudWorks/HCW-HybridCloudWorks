@@ -153,7 +153,7 @@ describe('the Cloud pricing cache card (#613)', () => {
     await waitFor(() =>
       expect(within(card).getByText(/Stale: last refreshed 26 hours ago/)).toBeTruthy()
     );
-    expect(within(card).getByText('Failed')).toBeTruthy();
+    expect(within(card).getByText('Unavailable')).toBeTruthy();
   });
 });
 
@@ -211,7 +211,15 @@ describe('the service cards', () => {
 
     await waitFor(() => expect(screen.getByText(/restricted to only send emails/)).toBeTruthy());
     expect(screen.queryByText(/sending domain\(s\)/)).toBeNull();
-    expect(within(cardFor('Resend')).getByText('Failed')).toBeTruthy();
+    expect(within(cardFor('Resend')).getByText('Unavailable')).toBeTruthy();
+    // And the failure is recorded with the provider's sentence (ADR 0033).
+    await waitFor(() =>
+      expect(sendJSON).toHaveBeenCalledWith(
+        'cms/integration-status',
+        'PUT',
+        expect.objectContaining({ service: 'resend', ok: false, error: expect.stringMatching(/./) })
+      )
+    );
   });
 
   it('does not call YouTube a placeholder, because its key has a live consumer', async () => {
@@ -329,6 +337,54 @@ describe('the group picker', () => {
     render(<Harness group="communication" />);
     fireEvent.click(await screen.findByRole('button', { name: /See them on the Keys tab/ }));
     expect(onOpenKeys).toHaveBeenCalled();
+  });
+});
+
+describe('what a card says about itself (ADR 0033)', () => {
+  it('shows the recorded last verdicts, the facts, and how to disconnect', async () => {
+    getJSON.mockImplementation(async (route) => {
+      if (route === 'cms/integration-status') {
+        return {
+          success: true,
+          services: {
+            resend: {
+              lastOkAt: '2026-10-01T00:00:00.000Z',
+              lastFailAt: '2026-10-02T00:00:00.000Z',
+              lastError: 'restricted_api_key',
+            },
+          },
+        };
+      }
+      return payload([item()]);
+    });
+    render(<Harness group="communication" />);
+    const card = await waitFor(() => cardFor('Resend'));
+    await waitFor(() => expect(within(card).getByTestId('persisted-status')).toBeTruthy());
+    expect(within(card).getByTestId('persisted-status').textContent).toMatch(
+      /Last worked .* Last failed .* restricted_api_key/
+    );
+    // The most recent verdict is the badge, with nothing tested this session.
+    expect(within(card).getByText('Unavailable')).toBeTruthy();
+    expect(within(card).getByText('Used in')).toBeTruthy();
+    expect(within(card).getByText('Newsletter Hub')).toBeTruthy();
+    expect(within(card).getByText(/cannot delete from it/)).toBeTruthy();
+    fireEvent.click(within(card).getByRole('button', { name: /Rotate or replace the key/ }));
+    expect(onOpenKeys).toHaveBeenCalled();
+  });
+
+  it('offers Reconnect only on Plaud, and sends it to the Recording Hub', async () => {
+    render(<Harness group="content" />);
+    const plaud = await waitFor(() => cardFor('Plaud'));
+    const link = within(plaud).getByRole('link', { name: /Reconnect in Recording Hub/ });
+    expect(link.getAttribute('href')).toBe('/admin/recording-hub?tab=settings');
+    expect(within(cardFor('RSS.com')).queryByText(/Reconnect/)).toBeNull();
+  });
+
+  it('says why a card has no test instead of showing no beaker and explaining nothing', async () => {
+    render(<Harness group="gen-ai" />);
+    const card = await waitFor(() => cardFor('Perplexity'));
+    expect(within(card).getByText(/No test: Perplexity has no read-only endpoint/)).toBeTruthy();
+    expect(within(card).queryByRole('button', { name: /Test Perplexity/ })).toBeNull();
   });
 });
 

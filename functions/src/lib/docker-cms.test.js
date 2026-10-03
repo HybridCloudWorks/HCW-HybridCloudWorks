@@ -94,12 +94,21 @@ describe('image prompts', () => {
   });
 
   it('offers the admin page only paths the server will accept', () => {
-    // ImagePromptsPage builds `/<provider lower-cased><suffix>` from PAGE_GROUPS.
-    const source = frontend('pages', 'admin', 'ImagePromptsPage.jsx');
-    const docker = /provider: 'Docker',\s*pages: \[([\s\S]*?)\n {4}\],/.exec(source);
-    expect(docker, 'the Docker group in ImagePromptsPage.jsx').not.toBeNull();
-    const offered = [...docker[1].matchAll(/\['([^']*)', '[^']*'\]/g)].map((m) => `/docker${m[1]}`);
-    expect(offered.sort()).toEqual([...DOCKER_PAGES].sort());
+    // Since ADR 0033 the page carries no page list of its own: the set editor
+    // groups the server's `allowedPages` (GET cms/image-prompts), so what is
+    // offered IS the allowlist above, Docker's seven pages included. A page
+    // list reappearing in the frontend would be the drift this test guards.
+    const page = frontend('pages', 'admin', 'ImagePromptsPage.jsx');
+    const editor = frontend('components', 'admin', 'images', 'PromptSetEditor.jsx');
+    expect(page).not.toMatch(/PAGE_GROUPS|provider: 'Docker'/);
+    expect(page).toContain('allowedPages={library?.allowedPages');
+    expect(editor).toContain('groupPages(allowedPages)');
+    // The editor labels Docker's pages by their suffix; every suffix the
+    // allowlist uses must have a label, or a page would show as a bare path.
+    for (const path of DOCKER_PAGES) {
+      const suffix = path.replace('/docker', '').replace(/^\//, '');
+      if (suffix) expect(editor, `label for ${path}`).toMatch(new RegExp(`['"]?${suffix}['"]?: '`));
+    }
   });
 });
 

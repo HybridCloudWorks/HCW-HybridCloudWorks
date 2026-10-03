@@ -124,8 +124,10 @@ export default function PublishingTab({ certs }) {
   return (
     <div className="space-y-4">
       <TabIntro>
-        The About page reads a published snapshot, not the collection. Edits appear there after the
-        next publish — yours, or the re-verify timer&apos;s when it changes a cert.
+        The About page reads a published snapshot, not the collection, and renders whichever is
+        newer — this snapshot or the JSON baked into the last deploy — so a publish shows to
+        visitors right away. Edits appear there after the next publish: yours, or the re-verify
+        timer&apos;s when it changes a cert.
       </TabIntro>
       <Card>
         <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-4 space-y-0">

@@ -11,6 +11,7 @@ import {
   buildSpeakingEventPayload,
   buildSyncPatch,
   countPublishable,
+  filterRows,
   formFromManual,
   formFromSessionize,
   formatShortDate,
@@ -86,13 +87,26 @@ describe('merging Sessionize with stored overrides', () => {
     expect(mapSessionizeEvents({})).toEqual([]);
   });
 
-  it('pairs by eventId only and keeps unmatched stored rows as manual entries', () => {
+  it("pairs by eventId, then by name — the widget's two steps — and keeps the rest as manual entries", () => {
     const { mergedEvents, manualEntries } = mergeEvents(sessionize, stored);
     expect(mergedEvents.map((e) => [e.id, e._storedDoc?._docId ?? null])).toEqual([
       [2, null],
       [1, 'event-1'],
     ]);
     expect(manualEntries.map((fd) => fd._docId)).toEqual(['manual-x']);
+
+    // A row created by hand before Sessionize listed the event has no id; the
+    // name pairs it, so it is not shown twice (once per source).
+    const byName = [{ _docId: 'hand', eventName: 'two', description: 'x' }];
+    const merged = mergeEvents(sessionize, byName);
+    expect(merged.mergedEvents.find((e) => e.id === 2)._storedDoc._docId).toBe('hand');
+    expect(merged.manualEntries).toEqual([]);
+  });
+
+  it('lists every stored row when Sessionize answered nothing, so an outage hides no entry', () => {
+    const { mergedEvents, manualEntries } = mergeEvents([], stored);
+    expect(mergedEvents).toEqual([]);
+    expect(manualEntries.map((fd) => fd._docId)).toEqual(['manual-x', 'event-1']);
   });
 
   it('says what a sync would create and which records it would fill in', () => {
@@ -123,6 +137,10 @@ describe('merging Sessionize with stored overrides', () => {
       location: 'Chicago',
       eventUrl: 'https://1',
     });
+    // Sessionize sends a timestamp; the store takes the calendar day.
+    expect(
+      buildSyncPatch({ eventId: 1 }, { ...sessionize[0], date: '2026-09-01T00:00:00' }, 1).date
+    ).toBe('2026-09-01');
     expect(buildSessionizeCreatePayload(sessionize[1], 2)).toEqual({
       eventId: 2,
       sessionizeId: 2,
@@ -132,6 +150,7 @@ describe('merging Sessionize with stored overrides', () => {
       location: null,
       eventUrl: null,
       display: true,
+      status: 'accepted',
     });
   });
 });
@@ -144,11 +163,25 @@ describe('save payloads and forms', () => {
     presentationUrl: '',
     eventImageUrl: '',
     display: true,
+    status: 'proposed',
+    cfpDeadline: '2026-05-01',
+    audience: ' Platform engineers ',
+    topic: '',
+    attendance: '80.9',
+    feedback: '',
+    sessions: [
+      { title: ' Keynote ', abstract: 'A', slidesUrl: 'https://s', videoUrl: 'javascript:x' },
+      { title: '', abstract: 'dropped' },
+    ],
+    evidence: [
+      { label: '', url: 'https://p' },
+      { label: 'No URL', url: '' },
+    ],
     _manualName: ' Meetup ',
     _manualDate: '2026-07-01',
   };
 
-  it('sends name and date for a manual entry', () => {
+  it("sends name and date for a manual entry, with the hub's fields cleaned", () => {
     expect(buildSpeakingEventPayload(null, form)).toEqual({
       description: 'Talk',
       location: null,
@@ -156,10 +189,38 @@ describe('save payloads and forms', () => {
       presentationUrl: null,
       eventImageUrl: null,
       display: true,
+      status: 'proposed',
+      cfpDeadline: '2026-05-01',
+      audience: 'Platform engineers',
+      topic: null,
+      attendance: 80,
+      feedback: null,
+      sessions: [{ title: 'Keynote', abstract: 'A', slidesUrl: 'https://s', videoUrl: null }],
+      evidence: [{ label: 'https://p', url: 'https://p' }],
       eventName: 'Meetup',
       name: 'Meetup',
       date: '2026-07-01',
     });
+  });
+
+  it('filters rows by search text and by the shown status', () => {
+    const sessionize = mapSessionizeEvents({
+      events: [
+        { id: 1, name: 'One', eventStartDate: '2026-09-01' },
+        { id: 2, name: 'Two', eventStartDate: '2099-10-01' },
+      ],
+    });
+    const rows = mergeEvents(sessionize, [
+      { _docId: 'event-1', eventId: 1, topic: 'Landing zones', status: 'delivered' },
+      { _docId: 'manual-x', eventName: 'Meetup', date: '2099-07-01', status: 'proposed' },
+    ]);
+    expect(filterRows(rows, { search: 'landing' }).mergedEvents.map((e) => e.id)).toEqual([1]);
+    expect(filterRows(rows, { search: 'landing' }).manualEntries).toEqual([]);
+    expect(filterRows(rows, { status: 'proposed' }).manualEntries.map((r) => r._docId)).toEqual([
+      'manual-x',
+    ]);
+    // A Sessionize row with no override shows as accepted, and is found there.
+    expect(filterRows(rows, { status: 'accepted' }).mergedEvents.map((e) => e.id)).toEqual([2]);
   });
 
   it('sends Sessionize identity only where the stored doc lacks it', () => {
@@ -172,10 +233,23 @@ describe('save payloads and forms', () => {
   it('prefills forms from the override, then Sessionize', () => {
     expect(
       formFromSessionize({ website: 'https://site', location: 'Here', _storedDoc: null })
-    ).toMatchObject({ eventUrl: 'https://site', location: 'Here', display: true });
+    ).toMatchObject({
+      eventUrl: 'https://site',
+      location: 'Here',
+      display: true,
+      status: 'accepted',
+    });
     expect(
       formFromManual({ _docId: 'm', name: 'N', date: '2026-07-01', display: false })
-    ).toMatchObject({ _manualName: 'N', _manualDate: '2026-07-01', display: false });
+    ).toMatchObject({
+      _manualName: 'N',
+      _manualDate: '2026-07-01',
+      display: false,
+      status: 'idea',
+    });
+    expect(
+      formFromManual({ _docId: 'm', name: 'N', attendance: 40, sessions: [{ title: 'T' }] })
+    ).toMatchObject({ attendance: '40', sessions: [{ title: 'T', slidesUrl: '', videoUrl: '' }] });
   });
 
   it('renders structured locations and drops unknown objects', () => {
@@ -185,11 +259,10 @@ describe('save payloads and forms', () => {
 });
 
 describe('publishing and links', () => {
-  it('counts only display === true as published, as the server sanitizer does', () => {
-    expect(countPublishable([{ display: true }, { display: false }, {}])).toEqual({
-      published: 1,
-      withheld: 2,
-    });
+  it('counts published rows, tombstones for hidden Sessionize rows, and the withheld rest', () => {
+    expect(
+      countPublishable([{ display: true }, { display: false }, {}, { display: false, eventId: 5 }])
+    ).toEqual({ published: 1, tombstones: 1, withheld: 2 });
   });
 
   it('links only http(s) URLs', () => {

@@ -23,7 +23,11 @@ const allowGuard = (role = 'viewer') => ({
   })),
 });
 const denyGuard = {
-  requireRole: vi.fn(async () => ({ user: null, role: null, error: { status: 403, body: '{}' } })),
+  requireRole: vi.fn(async () => ({
+    user: null,
+    role: null,
+    error: { status: 403, body: '{}' },
+  })),
 };
 
 const makeRequest = (body) => ({
@@ -35,7 +39,12 @@ const makeRequest = (body) => ({
 });
 
 const NOW = new Date('2026-08-07T04:00:00.000Z');
-const fixed = { now: () => NOW, uuid: () => 'fixed-uuid' };
+const ENV = {
+  RUNTIME_CONFIG_GENERATION: 'run-77-abc1234',
+  RUNTIME_CONFIG_WRITER: 'azapi-strip',
+  RESOLVED_KEY: 'a-real-value',
+};
+const fixed = { now: () => NOW, uuid: () => 'fixed-uuid', env: ENV };
 
 describe('helpers', () => {
   it('getWorkflowAlertStatus falls back through status -> active flag -> open', () => {
@@ -52,21 +61,34 @@ describe('helpers', () => {
 
   it('buildWorkflowAlertUpdates: resolve auto-acknowledges, reopen nulls out', () => {
     const resolve = buildWorkflowAlertUpdates({
-      action: 'resolve', nowIso: 'T', actor: 'a', normalizedResolutionNote: 'done', alertData: {},
+      action: 'resolve',
+      nowIso: 'T',
+      actor: 'a',
+      normalizedResolutionNote: 'done',
+      alertData: {},
     });
     expect(resolve).toMatchObject({
-      active: false, status: 'resolved', resolutionNote: 'done',
+      active: false,
+      status: 'resolved',
+      resolutionNote: 'done',
       acknowledgedAt: 'T', // was never acknowledged — resolve fills it
     });
 
     const alreadyAcked = buildWorkflowAlertUpdates({
-      action: 'resolve', nowIso: 'T', actor: 'a', normalizedResolutionNote: 'done',
+      action: 'resolve',
+      nowIso: 'T',
+      actor: 'a',
+      normalizedResolutionNote: 'done',
       alertData: { acknowledgedAt: 'earlier' },
     });
     expect(alreadyAcked).not.toHaveProperty('acknowledgedAt');
 
     const reopen = buildWorkflowAlertUpdates({
-      action: 'reopen', nowIso: 'T', actor: 'a', normalizedResolutionNote: '', alertData: {},
+      action: 'reopen',
+      nowIso: 'T',
+      actor: 'a',
+      normalizedResolutionNote: '',
+      alertData: {},
     });
     // Explicit nulls — a deletion (undefined) would be a different write.
     expect(reopen.resolvedAt).toBeNull();
@@ -97,18 +119,40 @@ describe('getOpsHealthSnapshot', () => {
         if (container === 'content') {
           // staged rows
           return [
-            { id: 's1', contentStatus: 'approved', updatedAt: '2026-08-06T04:00:00Z' },
-            { id: 's-live', contentStatus: 'published', Live: true, updatedAt: '2026-08-07T03:00:00Z' },
+            {
+              id: 's1',
+              contentStatus: 'approved',
+              updatedAt: '2026-08-06T04:00:00Z',
+            },
+            {
+              id: 's-live',
+              contentStatus: 'published',
+              Live: true,
+              updatedAt: '2026-08-07T03:00:00Z',
+            },
           ];
         }
         if (container === 'workflow_digests') {
           expect(query).toContain('ORDER BY c.id DESC'); // the source's bug fix
-          return [{ id: '2026-08-06', publishingOps: { status: 'success', lastRunAt: 'run-ts' } }];
+          return [
+            {
+              id: '2026-08-06',
+              publishingOps: { status: 'success', lastRunAt: 'run-ts' },
+            },
+          ];
         }
         if (container === 'workflow_alerts') {
           return [
-            { id: 'a-open', alertType: 'scheduled_publish_failures', updatedAt: '2026-08-07T02:00:00Z' },
-            { id: 'a-resolved', status: 'resolved', updatedAt: '2026-08-07T03:00:00Z' },
+            {
+              id: 'a-open',
+              alertType: 'scheduled_publish_failures',
+              updatedAt: '2026-08-07T02:00:00Z',
+            },
+            {
+              id: 'a-resolved',
+              status: 'resolved',
+              updatedAt: '2026-08-07T03:00:00Z',
+            },
           ];
         }
         if (container === 'generated_content_images') {
@@ -124,6 +168,12 @@ describe('getOpsHealthSnapshot', () => {
         if (container === 'workflow_digests') return null; // today's digest absent
         if (container === 'system') return { telegram: 'state' };
         if (container === 'content') return id === 'c-exists' ? { id } : null;
+        if (container === 'admin_config' && id === 'forge_stats') {
+          return {
+            updatedAt: '2026-08-07T01:00:00.000Z',
+            today: { date: '2026-08-07', forged: 3 },
+          };
+        }
         return null;
       }),
       upsertDoc: vi.fn(),
@@ -138,9 +188,28 @@ describe('getOpsHealthSnapshot', () => {
 
     expect(body.readiness).toEqual({
       functionsConfigured: true,
+      configGeneration: 'run-77-abc1234',
+      configWriter: 'azapi-strip',
+      unresolvedSecrets: [],
       publishedItems: 12,
       missingSlugCount: 1,
       rssSources: 3,
+      lastCheckedAt: NOW.toISOString(),
+    });
+    // Every block says when it was read (ADR 0033 §1 Platform).
+    expect(body.lastCheckedAt).toBe(NOW.toISOString());
+    expect(body.operationalSignals.lastCheckedAt).toBe(NOW.toISOString());
+    expect(body.digest.lastCheckedAt).toBe(NOW.toISOString());
+    expect(body.storage).toEqual({
+      generatedImages: 3,
+      bounded: false,
+      lastCheckedAt: NOW.toISOString(),
+    });
+    expect(body.forge).toEqual({
+      updatedAt: '2026-08-07T01:00:00.000Z',
+      todayDate: '2026-08-07',
+      forgedToday: 3,
+      lastCheckedAt: NOW.toISOString(),
     });
     // Today's digest missing -> latest-by-id fallback used.
     expect(body.digest.id).toBe('2026-08-06');
@@ -152,7 +221,43 @@ describe('getOpsHealthSnapshot', () => {
       lastSchedulerSuccessAt: 'run-ts',
     });
     expect(body.operationalSignals.oldestStagedHours).toBe(24); // staged Live item excluded
-    expect(body.telegramNotifyState).toEqual({ telegram: 'state' });
+    expect(body.telegramNotifyState).toEqual({
+      telegram: 'state',
+      lastCheckedAt: NOW.toISOString(),
+    });
+  });
+
+  it('derives readiness from the config stamp and the unresolved references, not a constant', async () => {
+    // The literal `true` this replaced reported "Ready" on a worker that had
+    // never received its configuration (ADR 0033 §1 Platform).
+    const store = opsStore();
+    const h = createOpsHealthHandlers({
+      guard: allowGuard(),
+      store,
+      ...fixed,
+      env: {
+        RUNTIME_CONFIG_GENERATION: 'run-78',
+        RUNTIME_CONFIG_WRITER: 'azurerm',
+        PUBLER_API_KEY: '@Microsoft.KeyVault(SecretUri=https://kv/secrets/PUBLER-API-KEY)',
+        RESEND_API_KEY: 'resolved',
+      },
+    });
+    const body = JSON.parse((await h.getOpsHealthSnapshot(makeRequest({}), context)).body);
+    expect(body.readiness.functionsConfigured).toBe(false);
+    expect(body.readiness.unresolvedSecrets).toEqual(['PUBLER_API_KEY']);
+
+    const unset = createOpsHealthHandlers({
+      guard: allowGuard(),
+      store,
+      ...fixed,
+      env: {},
+    });
+    const unsetBody = JSON.parse((await unset.getOpsHealthSnapshot(makeRequest({}), context)).body);
+    expect(unsetBody.readiness).toMatchObject({
+      functionsConfigured: false,
+      configGeneration: 'unset',
+      configWriter: 'unset',
+    });
   });
 
   it('denies without touching the store', async () => {
@@ -172,10 +277,19 @@ describe('updateWorkflowAlert', () => {
   });
 
   it('validates action, requires a note to resolve, 404s missing alerts', async () => {
-    const h = createOpsHealthHandlers({ guard: allowGuard('publisher'), store: alertStore(), ...fixed });
+    const h = createOpsHealthHandlers({
+      guard: allowGuard('publisher'),
+      store: alertStore(),
+      ...fixed,
+    });
     expect((await h.updateWorkflowAlert(makeRequest({ alertId: 'a1' }), context)).status).toBe(400);
-    expect((await h.updateWorkflowAlert(makeRequest({ alertId: 'a1', action: 'nuke' }), context)).status).toBe(400);
-    expect((await h.updateWorkflowAlert(makeRequest({ alertId: 'a1', action: 'resolve' }), context)).status).toBe(400);
+    expect(
+      (await h.updateWorkflowAlert(makeRequest({ alertId: 'a1', action: 'nuke' }), context)).status
+    ).toBe(400);
+    expect(
+      (await h.updateWorkflowAlert(makeRequest({ alertId: 'a1', action: 'resolve' }), context))
+        .status
+    ).toBe(400);
 
     const missing = createOpsHealthHandlers({
       guard: allowGuard('publisher'),
@@ -183,29 +297,52 @@ describe('updateWorkflowAlert', () => {
       ...fixed,
     });
     expect(
-      (await missing.updateWorkflowAlert(makeRequest({ alertId: 'x', action: 'acknowledge' }), context)).status
+      (
+        await missing.updateWorkflowAlert(
+          makeRequest({ alertId: 'x', action: 'acknowledge' }),
+          context
+        )
+      ).status
     ).toBe(404);
   });
 
   it('patches the alert and writes the audit row with the before/after diff', async () => {
     const store = alertStore();
-    const h = createOpsHealthHandlers({ guard: allowGuard('publisher'), store, ...fixed });
+    const h = createOpsHealthHandlers({
+      guard: allowGuard('publisher'),
+      store,
+      ...fixed,
+    });
     const res = await h.updateWorkflowAlert(
-      makeRequest({ alertId: 'a1', action: 'resolve', resolutionNote: 'fixed the feed' }),
+      makeRequest({
+        alertId: 'a1',
+        action: 'resolve',
+        resolutionNote: 'fixed the feed',
+      }),
       context
     );
-    expect(JSON.parse(res.body)).toEqual({ success: true, alertId: 'a1', action: 'resolve' });
+    expect(JSON.parse(res.body)).toEqual({
+      success: true,
+      alertId: 'a1',
+      action: 'resolve',
+    });
 
     const patch = store.patchDoc.mock.calls[0];
     expect(patch[0]).toBe('workflow_alerts');
-    expect(patch[2]).toMatchObject({ status: 'resolved', resolutionNote: 'fixed the feed' });
+    expect(patch[2]).toMatchObject({
+      status: 'resolved',
+      resolutionNote: 'fixed the feed',
+    });
 
     const audit = store.upsertDoc.mock.calls.find(([c]) => c === 'audits')[1];
     expect(audit).toMatchObject({
       action: 'workflow_alert_resolve',
       resourceId: 'a1',
       resourceTitle: 'link_rot',
-      changes: { before: { active: true, status: 'open' }, notes: 'fixed the feed' },
+      changes: {
+        before: { active: true, status: 'open' },
+        notes: 'fixed the feed',
+      },
       metadata: { alertType: 'link_rot' },
     });
   });

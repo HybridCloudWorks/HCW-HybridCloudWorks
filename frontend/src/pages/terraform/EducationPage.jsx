@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Helmet } from 'react-helmet-async';
 import CatalogueFreshness from '@/components/education/CatalogueFreshness';
 import CertStatusBadge from '@/components/education/CertStatusBadge';
+import ProviderLabsSection from '@/components/labs/ProviderLabsSection';
 import { DATA_AS_OF, DATA_SOURCE, certifications } from '@/data/terraform/certifications';
 import { deriveStatus, useToday } from '@/lib/certStatus';
 
@@ -631,6 +632,9 @@ export default function TerraformEducationPage() {
             </article>
           )}
         </section>
+
+        {/* ── Labs (ADR 0033 §8) ───────────────────────────────────────── */}
+        <ProviderLabsSection provider="terraform" className="mb-16" />
 
         {/* ── Learning Resources ───────────────────────────────────────── */}
         <section className="mb-16">

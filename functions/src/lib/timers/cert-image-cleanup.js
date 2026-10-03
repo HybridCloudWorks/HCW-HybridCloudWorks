@@ -1,9 +1,17 @@
 /**
  * cert-image-cleanup.js — `cleanupUnusedCertImages`, daily.
  *
- * Ported from Site-Main index.js (088f458). Deletes `images/` blobs in the
+ * Ported from Site-Main index.js (088f458). Deletes image blobs in the
  * `certifications` container that no certification document references and
- * that are older than seven days. Compare by blob path, never by exact URL:
+ * that are older than seven days.
+ *
+ * THE PREFIX IS THE WHOLE CONTAINER, FILTERED BY SEGMENT. The editor writes
+ * `{docId}/images/badge-{ts}.{ext}` (CertEditor.jsx), and this listed
+ * `images/` — a prefix no upload has ever had — so it examined nothing and
+ * reported a clean container every night (ADR 0033, Spotlight slice). It now
+ * lists everything and keeps a blob only when one of its path segments is
+ * `images`, which covers today's `{docId}/images/…` and the legacy top-level
+ * `images/…` the migrated references still name. Compare by blob path, never by exact URL:
  * editor uploads store tokened/variant URLs, and an exact-URL comparison
  * classified every editor-uploaded badge as unreferenced (the 2026-07-18
  * "cert images disappear" fix).
@@ -60,6 +68,14 @@ export function blobNameFromUrl(url, { accountHost = null } = {}) {
   return path.startsWith(`${CONTAINER}/`) ? path.slice(CONTAINER.length + 1) : path;
 }
 
+/** An editor upload (`{docId}/images/…`) or a legacy top-level `images/…` blob. */
+export function isImageBlobName(name) {
+  return String(name || '')
+    .split('/')
+    .slice(0, -1)
+    .includes('images');
+}
+
 /** Every blob name a certification document references, across its image-bearing fields. */
 export function collectReferencedBlobNames(docs, opts) {
   const names = new Set();
@@ -109,12 +125,14 @@ export function createCertImageCleanup({
       []
     );
     const referenced = collectReferencedBlobNames(certs);
-    const blobs = await storage.listBlobs(CONTAINER, 'images/');
+    const blobs = ((await storage.listBlobs(CONTAINER, '')) || []).filter((blob) =>
+      isImageBlobName(blob.name)
+    );
     const cutoff = now().getTime() - SEVEN_DAYS_MS;
 
     const candidates = [];
     let skipped = 0;
-    for (const blob of blobs || []) {
+    for (const blob of blobs) {
       const modified = blob.lastModified ? new Date(blob.lastModified).getTime() : Number.NaN;
       if (!Number.isFinite(modified) || modified > cutoff || referenced.has(blob.name)) {
         skipped += 1;
@@ -140,7 +158,7 @@ export function createCertImageCleanup({
     );
     return {
       dryRun: !deleteEnabled,
-      examined: (blobs || []).length,
+      examined: blobs.length,
       referenced: referenced.size,
       candidates: candidates.length,
       deleted,

@@ -160,26 +160,6 @@ export function sortQueueItems(a, b) {
   return -SORT_OPTIONS.published.compare(a, b);
 }
 
-export function getLiveBadge(item) {
-  if (item.Live === true) {
-    return (
-      <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300">
-        ✓ Live
-      </Badge>
-    );
-  }
-
-  if (item.contentStatus?.startsWith('published_')) {
-    return (
-      <Badge variant="outline" className="text-orange-600 border-orange-400">
-        Staged
-      </Badge>
-    );
-  }
-
-  return null;
-}
-
 // Decay badge for rejected / soft-deleted items. Two phases:
 //   1. contentStatus === 'rejected' and no softDeletedAt yet → counting down
 //      to the 04:00 CT cron that will set softDeletedAt. (~0-24h.)

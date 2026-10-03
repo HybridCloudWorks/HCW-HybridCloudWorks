@@ -339,6 +339,14 @@ function App() {
                 <Route path="coder-corner" element={<ProviderCoderCornerDispatcher />} />
                 <Route path="coder-corner/:slug" element={<ProviderCoderCornerDispatcher />} />
                 <Route path="education" element={<ProviderEducationDispatcher />} />
+                {/* A provider's labs under its Learn section (ADR 0033 §3): the
+                    list and one lab's pane. Declared before `education/:certSlug`
+                    so `labs` is never read as a certification slug (ADR 0033 §6
+                    item 6); `/education/labs` above stays the cross-provider
+                    index. Pre-rendered per provider and per lab in
+                    scripts/prerender-entry.jsx. */}
+                <Route path="education/labs" element={<LabsLearnPage />} />
+                <Route path="education/labs/:labId" element={<LabPanePage />} />
                 <Route path="education/:certSlug" element={<ProviderEducationDetailDispatcher />} />
                 <Route
                   path="education/microcredentials/:mcSlug"

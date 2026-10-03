@@ -22,10 +22,19 @@ vi.mock('@/hooks/useAuthReady', () => ({ useAuthReady: () => ({ authReady: true 
 vi.mock('react-router', async () => {
   const React_ = await vi.importActual('react');
   return {
+    // PageHeader reads the route to find its purpose sentence.
+    useLocation: () => ({ pathname: '/admin/social', search: '' }),
     useSearchParams: () => [new URLSearchParams(searchParams), setSearchParams],
     Link: ({ to, children }) => React_.createElement('a', { href: to }, children),
   };
 });
+
+// The header's connection state is the accounts call's answer (ADR 0033);
+// `accountsStatus` is what one test moves.
+let accountsStatus = 'ready';
+vi.mock('@/components/admin/social/usePublerAccounts', () => ({
+  default: () => ({ accounts: [], status: accountsStatus, error: '', reason: '' }),
+}));
 
 // Every panel is a stub: this file is about which one the page mounts and with
 // what, not about what any of them renders.
@@ -54,6 +63,7 @@ const selectedTab = () =>
 
 beforeEach(() => {
   searchParams = '';
+  accountsStatus = 'ready';
   setSearchParams.mockReset();
 });
 
@@ -128,5 +138,25 @@ describe('the tab bar', () => {
     // to the sidebar.
     render(<SocialHubPage />);
     expect(screen.getAllByText(/Publer/).length).toBeGreaterThan(0);
+  });
+});
+
+describe('the header connection state', () => {
+  it('is the accounts call’s answer, never a constant (ADR 0033 §1 Amplify)', () => {
+    render(<SocialHubPage />);
+    expect(screen.getByText('Publer connected')).toBeInTheDocument();
+    expect(screen.getByText('Healthy')).toBeInTheDocument();
+  });
+
+  it('says not connected when the proxy has no key, and unreachable when the call failed', () => {
+    accountsStatus = 'not_configured';
+    const { unmount } = render(<SocialHubPage />);
+    expect(screen.getByText(/Publer not connected/)).toBeInTheDocument();
+    expect(screen.getByText('Misconfigured')).toBeInTheDocument();
+    unmount();
+    accountsStatus = 'error';
+    render(<SocialHubPage />);
+    expect(screen.getByText('Publer could not be reached')).toBeInTheDocument();
+    expect(screen.getByText('Unavailable')).toBeInTheDocument();
   });
 });

@@ -25,7 +25,15 @@ import { fetchStudyGuide } from './studyguide.js';
 import { findVideosForAreas } from './videos.js';
 import { generateEpisodeScript } from './script.js';
 import { synthesizeDialogue, SpeechNotConfiguredError } from './speech/index.js';
-import { saveEpisode, saveEpisodeFailure, saveSet, uploadEpisodeAudio, STATUS } from './publish.js';
+import {
+  saveEpisode,
+  saveEpisodeFailure,
+  saveSet,
+  uploadEpisodeAudio,
+  versionStamp,
+  STATUS,
+} from './publish.js';
+import { speechArgsFor, voiceSettingsOf } from './speech-settings.js';
 import { recordAiUsageBatch, totalCostUsd, USAGE_SOURCES } from '../ai/usage.js';
 
 /**
@@ -81,7 +89,12 @@ function resolveDeps(deps = {}) {
  * Always the `listenAndLearn` product: Gemini TTS, with Azure AI Speech as
  * the fallback, never ElevenLabs (speech/index.js). `model` is the Gemini
  * model the job resolved — the run's choice or the stored default — or null
- * for the setting and module default.
+ * for the setting and module default. `voice` is the book's own voice
+ * settings (speech-settings.js `voiceSettingsOf`, ADR 0033 §4): the hosts'
+ * voices, a narrator for a single-voice chapter, the language, the rate,
+ * and an explicit provider or model, each of which outranks the defaults
+ * for this book only. `now` stamps the blob path so this take has a path of
+ * its own and never overwrites the one before it.
  */
 export async function renderAudio({
   script,
@@ -91,15 +104,24 @@ export async function renderAudio({
   storage,
   env,
   model = null,
+  voice = null,
+  narrator = false,
+  now = new Date().toISOString(),
   synthesize,
   uploadAudio,
 }) {
+  const speech = speechArgsFor(voice || voiceSettingsOf(null), { narrator });
   let rendered;
   try {
     rendered = await synthesize({
       product: 'listenAndLearn',
       dialogue: script.dialogue,
-      model,
+      // The book's model wins over the run's: it is the more specific choice.
+      model: speech.model || model,
+      voices: speech.voices,
+      provider: speech.provider,
+      lang: speech.lang,
+      speakingRate: speech.speakingRate,
       env,
     });
   } catch (err) {
@@ -116,6 +138,7 @@ export async function renderAudio({
     areaSlug,
     audio: rendered.audio,
     contentType: rendered.contentType,
+    stamp: versionStamp(now),
   });
 
   // Which voice read it, kept for the same reason the approver is kept: for
@@ -126,6 +149,11 @@ export async function renderAudio({
     ...uploaded,
     speechProvider: rendered.provider || null,
     speechModel: rendered.model || null,
+    voice: speech.voices,
+    // Gemini measures this from the PCM it decoded, so for that provider it
+    // is the real length; Azure derives it from the text at a pessimistic
+    // speaking rate, so there it is an over-estimate. The field name is the
+    // document's, which the players read as the duration either way.
     durationSeconds: rendered.estimatedSeconds ?? null,
     // What the synthesis is billed on. TTS prices audio output an order of
     // magnitude above text, so this is the number that decides an episode's
@@ -154,6 +182,8 @@ async function generateOneArea({
   storage,
   env,
   ttsModel,
+  voice,
+  actorId,
   now,
   ai,
   writeScript,
@@ -196,6 +226,8 @@ async function generateOneArea({
     storage,
     env,
     model: ttsModel,
+    voice,
+    now,
     synthesize,
     uploadAudio,
   });
@@ -209,6 +241,7 @@ async function generateOneArea({
     videos,
     order,
     now,
+    actorId,
   });
 
   // Recorded after the episode is saved, never before: a usage row for work
@@ -297,7 +330,8 @@ export async function generateEpisodes({
   // in a second place nobody looks. Needs the cost table, hence `ai`.
   const recordUsage =
     injectedRecordUsage ||
-    ((records) => recordAiUsageBatch({ store, ai: { getCostEstimate: ai.getCostEstimate } }, records));
+    ((records) =>
+      recordAiUsageBatch({ store, ai: { getCostEstimate: ai.getCostEstimate } }, records));
 
   const guide = await fetchGuide({ provider, examCode, sourceUrl: studyGuideUrl });
 
@@ -314,7 +348,10 @@ export async function generateEpisodes({
     );
   }
 
-  await persistSet(store, { provider: platform, examCode, guide, cert, now, actorId });
+  // The merged set is what carries the book's voice settings (ADR 0033 §4);
+  // a test double that returns nothing reads as the defaults.
+  const set = await persistSet(store, { provider: platform, examCode, guide, cert, now, actorId });
+  const voice = voiceSettingsOf(set);
 
   // Videos are gathered for all areas up front so cross-area deduping works;
   // a total failure here is survivable, the episodes just ship without links.
@@ -344,6 +381,8 @@ export async function generateEpisodes({
           storage,
           env,
           ttsModel,
+          voice,
+          actorId,
           now,
           ai,
           writeScript,

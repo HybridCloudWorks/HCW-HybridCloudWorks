@@ -10,6 +10,11 @@
  * Client-side validation is UX, not enforcement: the route checks size, type
  * and extension again, and is the authority. What this adds is a clear message
  * before a 15 MB body is base64-encoded and sent only to be refused.
+ *
+ * ADR 0033 added the two measurements the gallery records on upload — pixel
+ * dimensions and a sha256 for duplicate detection — both best-effort: a
+ * browser without `crypto.subtle` or an image that will not decode yields
+ * null, never a failed upload.
  */
 import { postJSON } from '@/lib/api';
 
@@ -81,6 +86,50 @@ export function readFileAsBase64(file) {
  */
 export function imageExtensionFor(file) {
   return PUBLIC_IMAGE_EXTENSIONS[String(file?.type || '').toLowerCase()] || '';
+}
+
+/**
+ * The pixel size of an image file, decoded by the browser through
+ * `createImageBitmap`, or null when it cannot be (no decoder in this
+ * environment, an unsupported or corrupt file). Resolves at once where the
+ * API is missing — jsdom has an `Image` that never loads, and waiting on it
+ * would hold every upload for the timeout.
+ *
+ * @param {Blob} file
+ * @returns {Promise<{ width: number, height: number } | null>}
+ */
+export async function readImageDimensions(file) {
+  if (!file || typeof globalThis.createImageBitmap !== 'function') return null;
+  try {
+    const bitmap = await globalThis.createImageBitmap(file);
+    const size =
+      bitmap.width > 0 && bitmap.height > 0 ? { width: bitmap.width, height: bitmap.height } : null;
+    bitmap.close?.();
+    return size;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Hex sha256 of a file's bytes through WebCrypto, or '' where it is
+ * unavailable. The server records it on the row and marks later uploads of
+ * the same bytes as duplicates.
+ *
+ * @param {Blob} file
+ * @returns {Promise<string>}
+ */
+export async function sha256HexOf(file) {
+  try {
+    const subtle = globalThis.crypto?.subtle;
+    if (!subtle || !file || typeof file.arrayBuffer !== 'function') return '';
+    const digest = await subtle.digest('SHA-256', await file.arrayBuffer());
+    return Array.from(new Uint8Array(digest))
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('');
+  } catch {
+    return '';
+  }
 }
 
 /**

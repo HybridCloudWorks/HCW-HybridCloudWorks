@@ -13,6 +13,9 @@ vi.mock('@/lib/functionsBase', () => ({
 import {
   formatSeconds,
   MAIN_FEED_PROVIDER,
+  playbackPositionKey,
+  readPlaybackPosition,
+  savePlaybackPosition,
   mergeAudioEpisodes,
   normalizeHostEpisode,
   normalizeListenAndLearnEpisode,
@@ -224,5 +227,54 @@ describe('formatSeconds', () => {
     expect(formatSeconds(3723)).toBe('1:02:03');
     expect(formatSeconds(null)).toBe('—');
     expect(formatSeconds(NaN)).toBe('—');
+  });
+});
+
+describe('playback position (ADR 0033 §4)', () => {
+  const makeStorage = () => {
+    const map = new Map();
+    return {
+      getItem: (k) => (map.has(k) ? map.get(k) : null),
+      setItem: (k, v) => map.set(k, String(v)),
+      removeItem: (k) => map.delete(k),
+      map,
+    };
+  };
+
+  it('remembers a position per episode and reads it back', () => {
+    const storage = makeStorage();
+    savePlaybackPosition('listen-and-learn:s/a', 123.7, 600, storage);
+    expect(readPlaybackPosition('listen-and-learn:s/a', storage)).toBe(123);
+    expect(readPlaybackPosition('listen-and-learn:s/b', storage)).toBe(0);
+    expect(playbackPositionKey('listen-and-learn:s/a')).toBe(
+      'hcw:audio-position:listen-and-learn:s/a'
+    );
+  });
+
+  it('treats the last few seconds as finished, so the next visit starts over', () => {
+    const storage = makeStorage();
+    savePlaybackPosition('x', 597, 600, storage);
+    expect(storage.map.size).toBe(0);
+    savePlaybackPosition('x', 100, 600, storage);
+    savePlaybackPosition('x', 0, 600, storage);
+    expect(readPlaybackPosition('x', storage)).toBe(0);
+  });
+
+  it('never throws when storage is missing or broken, and reads 0', () => {
+    const broken = {
+      getItem: () => {
+        throw new Error('blocked');
+      },
+      setItem: () => {
+        throw new Error('blocked');
+      },
+      removeItem: () => {},
+    };
+    expect(() => savePlaybackPosition('x', 10, 100, broken)).not.toThrow();
+    expect(readPlaybackPosition('x', broken)).toBe(0);
+    expect(readPlaybackPosition('', makeStorage())).toBe(0);
+    const garbage = makeStorage();
+    garbage.setItem('hcw:audio-position:x', 'not json');
+    expect(readPlaybackPosition('x', garbage)).toBe(0);
   });
 });

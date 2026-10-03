@@ -2,10 +2,29 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Helmet } from 'react-helmet-async';
 import { motion, AnimatePresence } from 'framer-motion';
-import { loadPublicDataSnapshot } from '@/lib/publicData';
-import { fetchPublicSnapshotItems } from '@/lib/publicApi';
+import { fetchPublicSnapshot } from '@/lib/publicApi';
+import { newerSnapshot } from '@/lib/speakingEvents';
 import CustomSessionizeWidget from '@/components/widgets/CustomSessionizeWidget';
 import { resolveMediaUrl } from '../../lib/functionsBase';
+
+/**
+ * The build-time copy of the snapshot, whole — rows AND the stamp — so it can
+ * be compared with the live publish. Null when the file is absent or not JSON.
+ */
+async function loadStaticSnapshot(path) {
+  try {
+    const response = await fetch(path, {
+      headers: { Accept: 'application/json' },
+      cache: 'default',
+    });
+    const contentType = response.headers.get('content-type') || '';
+    if (!response.ok || !contentType.toLowerCase().includes('application/json')) return null;
+    const payload = await response.json();
+    return Array.isArray(payload?.items) ? payload : null;
+  } catch {
+    return null;
+  }
+}
 
 function normalizeCertification(rawData) {
   // Use the raw data directly for maximum precision with Firestore field names
@@ -18,10 +37,20 @@ function normalizeCertification(rawData) {
     return undefined;
   };
 
+  // A stored date is a calendar day (`YYYY-MM-DD`, or a timestamp whose
+  // leading day is the one meant). Anchored at local noon so the day shown
+  // is the day named — `new Date('2026-10-01')` is midnight UTC and read as
+  // 30 September everywhere west of Greenwich (ADR 0033 §1).
   const toDate = (v) => {
     if (!v) return undefined;
     if (typeof v?.toDate === 'function') return v.toDate();
-    if (typeof v === 'string' || typeof v === 'number') return new Date(v);
+    if (typeof v === 'string') {
+      const match = v.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (match) return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12);
+      const parsed = new Date(v);
+      return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+    }
+    if (typeof v === 'number') return new Date(v);
     return undefined;
   };
 
@@ -121,6 +150,8 @@ function normalizeCertification(rawData) {
     display_order: get(raw, ['displayOrder', 'display_order', 'DisplayOrder']) ?? 999,
     tags: get(raw, ['tags', 'Tags']) || [],
     display: get(raw, ['display', 'Display']) === true,
+    // "Feature in Spotlight" in the admin: featured certs lead the page.
+    featured: get(raw, ['featured', 'Featured']) === true,
   };
   return normalized;
 }
@@ -283,13 +314,14 @@ export default function AboutPage() {
       setLoading(true);
 
       try {
-        // Static JSON is the fast public path. The snapshots API is only a
-        // quiet fallback for deploys that do not have the generated file yet.
-        let rawItems = await loadPublicDataSnapshot('/data/certifications.json');
-
-        if (rawItems.length === 0) {
-          rawItems = await fetchPublicSnapshotItems('certifications');
-        }
+        // The newer of the deploy-time JSON and the live published snapshot,
+        // so Publish snapshot has an effect before the next deploy (ADR 0033
+        // §1). Either read failing leaves the other.
+        const [staticDoc, liveDoc] = await Promise.all([
+          loadStaticSnapshot('/data/certifications.json'),
+          fetchPublicSnapshot('certifications').catch(() => null),
+        ]);
+        let rawItems = newerSnapshot(staticDoc, liveDoc)?.items || [];
 
         try {
           rawItems = rawItems.filter((item) => item && typeof item === 'object');
@@ -334,7 +366,12 @@ export default function AboutPage() {
             return cert;
           });
 
-        certItems.sort((a, b) => (a.display_order ?? 999) - (b.display_order ?? 999));
+        // Featured first, then the global display order.
+        certItems.sort(
+          (a, b) =>
+            Number(b.featured === true) - Number(a.featured === true) ||
+            (a.display_order ?? 999) - (b.display_order ?? 999)
+        );
         setCertifications(certItems);
 
         const newExpanded = {};
@@ -657,7 +694,7 @@ export default function AboutPage() {
               </h3>
             </div>
           </div>
-          <CustomSessionizeWidget speakerId="c6yicoezls" />
+          <CustomSessionizeWidget />
         </section>
 
         {/* CERTIFICATION REGISTRY */}

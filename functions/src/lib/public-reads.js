@@ -1187,7 +1187,11 @@ export function createPublicReadHandlers({ store }) {
           ),
         ]);
 
-        if (!set) return json(404, { error: 'Not found' });
+        // A soft-deleted or archived book (ADR 0033 §4) is gone from the site
+        // as a whole, whatever its chapters still say; its chapters are also
+        // archived — status 'archived', which the SQL above excludes — so the
+        // two reads agree.
+        if (!set || isSoftDeleted(set) || set.archivedAt) return json(404, { error: 'Not found' });
 
         return json(
           200,

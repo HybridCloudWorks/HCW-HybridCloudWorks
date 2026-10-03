@@ -26,7 +26,7 @@ function getArticleUrl(article = {}) {
   return article.sourceUrl || article['CD Url'] || article.url || article.link || '';
 }
 
-function buildImageRequestBody(article, basePrompt, provider) {
+function buildImageRequestBody(article, basePrompt, provider, lineage = {}) {
   return {
     articleTitle: article.title || 'AWS News Article',
     articleSummary: article.summary || article.description || '',
@@ -34,6 +34,10 @@ function buildImageRequestBody(article, basePrompt, provider) {
     provider: provider || 'AWS',
     articleId: article.id,
     articleUrl: getArticleUrl(article),
+    // The set and prompt the page resolved, so the curated row records its
+    // lineage and shows under the set on Image Prompts (ADR 0033).
+    promptSet: lineage.setName || '',
+    promptName: lineage.promptName || '',
   };
 }
 
@@ -100,7 +104,7 @@ export function useGenerateCuratedImages(pagePath, provider) {
    * @returns {Promise<string|null>} Image URL or null if generation failed
    */
   const generateArticleImage = useCallback(
-    async (article, basePrompt, { cachedUrl: knownCached } = {}) => {
+    async (article, basePrompt, { cachedUrl: knownCached, lineage } = {}) => {
       try {
         if (!article?.id) {
           console.warn(`[generateCuratedImages] Article missing ID, skipping generation`);
@@ -137,7 +141,7 @@ export function useGenerateCuratedImages(pagePath, provider) {
 
         // postJSON injects the Entra access token (lib/api.js).
         console.warn(`[generateCuratedImages] Generating new image for article: ${article.id}`);
-        const requestBody = buildImageRequestBody(article, basePrompt, provider);
+        const requestBody = buildImageRequestBody(article, basePrompt, provider, lineage);
         const { imageUrl } = await postJSON('generateCuratedArticleImage', requestBody);
 
         if (imageUrl) {
@@ -180,6 +184,7 @@ export function useGenerateCuratedImages(pagePath, provider) {
         let basePrompt =
           DEFAULT_PROMPT_BY_PROVIDER[providerKey] ||
           'Professional technical illustration for cloud infrastructure with clean, modern design';
+        let lineage = {};
 
         // The prompt is editor-only configuration and is only ever an input to
         // generation, so an anonymous visitor neither can nor needs to read it.
@@ -194,6 +199,7 @@ export function useGenerateCuratedImages(pagePath, provider) {
               basePrompt = additionalParameters
                 ? `${promptData.primaryPrompt}\n\nAdditional Style Constraints:\n${additionalParameters}`
                 : promptData.primaryPrompt;
+              lineage = { setName: promptData.setName, promptName: promptData.promptName };
               console.warn(
                 `[generateCuratedImages] Using prompt set: ${promptData.setName} / ${promptData.promptName || 'primary'}`
               );
@@ -237,6 +243,7 @@ export function useGenerateCuratedImages(pagePath, provider) {
             // so generateArticleImage falls back to its single-id read rather
             // than treating a failed batch as "definitely no cover".
             cachedUrl: article?.id in cachedUrls ? cachedUrls[article.id] : undefined,
+            lineage,
           }).then((url) => ({
             id: article.id,
             url,

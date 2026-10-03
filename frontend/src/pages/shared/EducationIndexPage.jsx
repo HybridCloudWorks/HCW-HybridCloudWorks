@@ -39,6 +39,8 @@ import CatalogueFreshness from '@/components/education/CatalogueFreshness';
 import SectionHeading from '@/components/education/SectionHeading';
 import { deriveStatus, isIsoDate, useToday } from '@/lib/certStatus';
 import { routes, staticRoutes } from '@/lib/routeFactory';
+import { providerName } from '@/components/labs/labsWords';
+import { labsForProvider, labsPath, providersWithLabs } from '@/data/labs/catalogue';
 
 import * as ansible from '@/data/ansible/education';
 import * as aws from '@/data/aws/certifications';
@@ -415,6 +417,23 @@ export default function EducationIndexPage() {
             open VS Code in your browser with az, terraform, kubectl, helm and ansible installed, or
             run the same image on your own machine with one docker command.
           </p>
+          {/* Each hub's own list (ADR 0033 §3): the labs sit under the
+              provider they teach, and the index above groups them the same way. */}
+          <ul className="mt-3 flex flex-wrap gap-2 list-none p-0" aria-label="Labs by provider">
+            {providersWithLabs().map((provider) => (
+              <li key={provider}>
+                <Link
+                  to={labsPath(provider)}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 dark:border-slate-600 px-3 py-1 text-xs font-semibold text-slate-800 dark:text-slate-200 hover:border-primary hover:text-primary"
+                >
+                  {providerName(provider)} labs
+                  <span className="text-slate-500 dark:text-slate-400 font-normal">
+                    {labsForProvider(provider).length}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
         </section>
 
         <section aria-labelledby="equivalence-heading">

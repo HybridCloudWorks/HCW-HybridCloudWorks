@@ -120,3 +120,68 @@ describe('queuedMessage', () => {
     expect(queuedMessage(null)).toBe('Queued…');
   });
 });
+
+describe('the Audio Library words (ADR 0033 §4)', async () => {
+  const view = await import('./episodeView');
+
+  it('summarises a book by its counts and duration, in the kind’s own noun', () => {
+    expect(
+      view.bookSummary({
+        kind: 'course',
+        counts: { chapters: 5, published: 3, durationSeconds: 2820 },
+      })
+    ).toBe('5 lessons · 3 published · 47 min');
+    expect(
+      view.bookSummary({
+        kind: 'book',
+        counts: { chapters: 1, archived: 1, durationSeconds: 3900 },
+      })
+    ).toBe('1 chapter · 1 archived · 1 h 05 min');
+    expect(view.bookSummary({ kind: 'book' })).toBe('0 chapters');
+    expect(view.formatTotalDuration(0)).toBeNull();
+  });
+
+  it('names the active take and how many there are', () => {
+    const chapter = {
+      activeVersionId: 'b',
+      versions: [
+        { id: 'a', speechModel: 'm1', durationSeconds: 60, audioBytes: 1048576 },
+        { id: 'b', speechModel: 'm2', durationSeconds: 552, audioBytes: 4613734 },
+      ],
+    };
+    expect(view.versionSummary(chapter)).toBe('Take 2 of 2 · m2 · 9:12 · 4.4 MB');
+    expect(view.versionSummary({ versions: [] })).toBeNull();
+  });
+
+  it('gives every chapter status a label, a tone and a help sentence, and tolerates an unknown one', () => {
+    expect(view.chapterStatus('published')).toMatchObject({ label: 'Published', tone: 'ok' });
+    expect(view.chapterStatus('archived')).toMatchObject({ label: 'Archived', tone: 'off' });
+    expect(view.chapterStatus('weird')).toMatchObject({ label: 'weird', tone: 'muted' });
+    expect(view.chapterStatus('published').help).toMatch(/live/i);
+  });
+
+  it('describes a book’s voice in one line', () => {
+    expect(
+      view.voiceSummary({
+        speakers: { Maya: 'Kore', Elena: 'Leda' },
+        narrator: 'Puck',
+        language: 'en-US',
+        provider: 'auto',
+        speakingRate: 1,
+      })
+    ).toBe('Kore & Leda · narrator Puck · en-US · auto');
+    expect(view.voiceSummary(null)).toBe('Default voices');
+  });
+
+  it('turns a chapter regeneration’s 202 into one line', () => {
+    expect(
+      view.regenerateMessage({
+        provider: 'gemini',
+        model: 'gemini-2.5-flash-preview-tts',
+        estimatedCostUsd: 0.05,
+      })
+    ).toBe('Queued — speech by Gemini Economy (gemini-2.5-flash-preview-tts), up to $0.05');
+    expect(view.regenerateMessage({ provider: null })).toMatch(/no speech provider/);
+    expect(view.regenerateMessage(null)).toBe('Queued…');
+  });
+});

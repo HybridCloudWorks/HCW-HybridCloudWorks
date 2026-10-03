@@ -460,7 +460,11 @@ export function useEditorState(blogId, navigate) {
   const handlePublish = useCallback(
     async (targetStatus = 'approved') => {
       const status = String(blog?.contentStatus || '');
-      const isAlreadyLive = blog?.Live === true || status.startsWith('published_');
+      // `published` is the canonical spelling, `published_*` the Firestore-era
+      // one (ADR 0033 §1): either means the article has been published and a
+      // save republishes it rather than re-entering the queue.
+      const isAlreadyLive =
+        blog?.Live === true || status === 'published' || status.startsWith('published_');
 
       async function handleLiveRepublish() {
         const publishTarget = blog?.publishTarget || blog?.type || null;
@@ -509,7 +513,8 @@ export function useEditorState(blogId, navigate) {
           note: 'Status transitioned from editor. Final live publishing still occurs from /admin/published.',
         });
 
-        await logAdminAction('content_published_from_editor', { contentId: blogId, targetStatus });
+        // transitionContentStatus writes the `audits` row itself; the client
+        // copy that doubled it is gone (ADR 0033 §1).
         navigate('/admin/published');
       }
 
@@ -592,7 +597,9 @@ export function useEditorState(blogId, navigate) {
   const currentTarget = blog?.publishTarget || '';
   const destinationUrl = blog ? getDestinationUrl(blog) : null;
   const isLiveOrPublished =
-    blog?.Live === true || String(blog?.contentStatus || '').startsWith('published_');
+    blog?.Live === true ||
+    blog?.contentStatus === 'published' ||
+    String(blog?.contentStatus || '').startsWith('published_');
   const orderedImages = orderedImageUrls.map((url, index) => ({
     id: `${index}-${url}`,
     url,

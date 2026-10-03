@@ -1,837 +1,391 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import ConfirmModal from '@/components/admin/ConfirmModal';
-import { useImagePrompts } from '@/hooks/useImagePrompts';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+/**
+ * Image Prompts — a creative system for coordinated image sets (ADR 0033).
+ *
+ * The image set is the first-class object: the grid shows every set with
+ * its purpose, style, prompts, images and pages; opening one shows its
+ * brief, its prompt variations, the pages that generate with it, and every
+ * image it has produced — with a Generate action to try it. Assigning a set
+ * to a page is an explicit button press; nothing saves on a dropdown change.
+ * The keyword matrix below is applied by every generator (see its panel).
+ *
+ * `?set=NAME` opens a set, which is how the gallery and the review board
+ * link here.
+ */
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router';
+import { Image as ImageIcon, Plus, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Check, X } from 'lucide-react';
-import { useToast } from '@/components/ui/use-toast';
+import { Input } from '@/components/ui/input';
+import PageHeader from '@/components/admin/shared/PageHeader';
+import EmptyState from '@/components/admin/shared/EmptyState';
+import PromptSetCard from '@/components/admin/images/PromptSetCard';
+import PromptSetEditor from '@/components/admin/images/PromptSetEditor';
 import KeywordMatrixPanel from '@/components/admin/KeywordMatrixPanel';
+import { useImagePrompts } from '@/hooks/useImagePrompts';
+import { useToast } from '@/components/ui/use-toast';
 
-const SLOT_TEMPLATE_FIELDS = [
-  {
-    key: 'hero',
-    label: 'Hero Slot Template',
-    placeholder: 'Cover composition guidance for the hero image.',
-  },
-  {
-    key: 'secondary1',
-    label: 'Secondary 1 Slot Template',
-    placeholder: 'Architecture or platform detail emphasis for supporting image 1.',
-  },
-  {
-    key: 'secondary2',
-    label: 'Secondary 2 Slot Template',
-    placeholder: 'Implementation flow or operational motion emphasis for supporting image 2.',
-  },
-  {
-    key: 'secondary3',
-    label: 'Secondary 3 Slot Template',
-    placeholder: 'Business outcome or governance emphasis for supporting image 3.',
-  },
+const HELP = [
+  'An image set is a creative brief: a shared primary prompt, style rules, what to avoid, an aspect ratio and tags. Everything generated from it looks like it belongs together.',
+  'Prompts are named variations inside a set — extra parameters plus a template per image slot. The hero template is what the AI cover uses from the review queue and the change feed; the secondary templates feed the Submit URLs previews.',
+  'Assign a set to a site page (every provider section, including VMware and Ansible) and the covers for content on that page generate from it. Choose the prompt, then press Assign — the dropdown alone saves nothing.',
+  'Every image generated from a set appears under it with its status and where it is used, and every image in the gallery links back to its set. Generate tries the set on a subject right here.',
+  'Changing a primary prompt bumps the version and keeps the old text; images record the version they came from. Archive hides a set from generators without losing it; rename moves prompts, pages and images with it.',
 ];
 
-const EMPTY_SLOT_TEMPLATES = {
-  hero: '',
-  secondary1: '',
-  secondary2: '',
-  secondary3: '',
-};
-
-const PAGE_GROUPS = [
-  {
-    provider: 'AWS',
-    pages: [
-      ['', 'Landing'],
-      ['/news', 'News'],
-      ['/blog', 'Blog'],
-      ['/architecture-designs', 'Architecture Designs'],
-      ['/frameworks', 'Frameworks'],
-      ['/education', 'Education'],
-      ['/audio-architecture', 'Audio Architecture'],
-    ],
-  },
-  {
-    provider: 'Azure',
-    pages: [
-      ['', 'Landing'],
-      ['/news', 'News'],
-      ['/blog', 'Blog'],
-      ['/architecture-designs', 'Architecture Designs'],
-      ['/frameworks', 'Frameworks'],
-      ['/education', 'Education'],
-      ['/audio-architecture', 'Audio Architecture'],
-    ],
-  },
-  {
-    provider: 'GCP',
-    pages: [
-      ['', 'Landing'],
-      ['/news', 'News'],
-      ['/blog', 'Blog'],
-      ['/architecture-designs', 'Architecture Designs'],
-      ['/frameworks', 'Frameworks'],
-      ['/education', 'Education'],
-      ['/audio-architecture', 'Audio Architecture'],
-    ],
-  },
-  {
-    provider: 'FinOps',
-    pages: [
-      ['', 'Landing'],
-      ['/news', 'News'],
-      ['/blog', 'Blog'],
-      ['/architecture-designs', 'Architecture Designs'],
-      ['/frameworks', 'Frameworks'],
-      ['/education', 'Education'],
-      ['/tools', 'Tools'],
-      ['/focus', 'Focus'],
-    ],
-  },
-  {
-    provider: 'Terraform',
-    pages: [
-      ['', 'Landing'],
-      ['/news', 'News'],
-      ['/blog', 'Blog'],
-      ['/code', 'Code'],
-      ['/modules', 'Modules'],
-      ['/tools', 'Tools'],
-    ],
-  },
-  {
-    provider: 'GitHub',
-    pages: [
-      ['', 'Landing'],
-      ['/news', 'News'],
-      ['/blog', 'Blog'],
-      ['/workflows', 'Workflows'],
-      ['/code', 'Code'],
-      ['/tools', 'Tools'],
-    ],
-  },
-  {
-    // #775. Every one is in the server's allowlist
-    // (functions/src/lib/cms/image-prompts.js).
-    provider: 'Docker',
-    pages: [
-      ['', 'Landing'],
-      ['/news', 'News'],
-      ['/blog', 'Blog'],
-      ['/code', 'Code'],
-      ['/sandboxes', 'Sandboxes'],
-      ['/tools', 'Tools'],
-      ['/education', 'Education'],
-    ],
-  },
-];
-
-const PAGES = PAGE_GROUPS.flatMap(({ provider, pages }) =>
-  pages.map(([suffix, label]) => {
-    const basePath = `/${provider.toLowerCase()}`;
-    const value = suffix ? `${basePath}${suffix}` : basePath;
-    return {
-      value,
-      label: `${provider} ${label}`,
-    };
-  })
-);
-
-function normalizeValue(value) {
-  return String(value || '').trim();
+/** The page body: error, loading, the open set, the empty library, or the grid. */
+function LibraryBody({
+  loadError,
+  hookError,
+  library,
+  editor,
+  sets,
+  visibleSets,
+  openName,
+  archivedHidden,
+  onRetry,
+  onCreate,
+  onOpen,
+  onShowEverything,
+}) {
+  if (loadError) {
+    return (
+      <EmptyState
+        variant="error"
+        title="The prompt library could not be read"
+        description={hookError || loadError}
+        onRetry={onRetry}
+      />
+    );
+  }
+  if (!library) {
+    return (
+      <p className="rounded-xl border border-dashed border-border py-12 text-center text-sm text-muted-foreground">
+        Loading image sets…
+      </p>
+    );
+  }
+  if (editor) return editor;
+  if (sets.length === 0) {
+    return (
+      <EmptyState
+        icon={ImageIcon}
+        title="No image sets yet"
+        description="A set is the shared brief every image generated from it follows. Create one, give it a primary prompt and style rules, then assign it to the pages it should illustrate."
+        action={
+          <Button size="sm" onClick={onCreate} className="gap-1">
+            <Plus className="h-4 w-4" aria-hidden="true" /> Create the first set
+          </Button>
+        }
+      />
+    );
+  }
+  if (visibleSets.length === 0) {
+    return (
+      <EmptyState
+        variant="filtered"
+        title="No sets match"
+        description={
+          archivedHidden
+            ? `${archivedHidden} archived set${archivedHidden === 1 ? ' is' : 's are'} hidden.`
+            : 'Try another word.'
+        }
+        action={
+          <Button variant="outline" size="sm" onClick={onShowEverything}>
+            Show everything
+          </Button>
+        }
+      />
+    );
+  }
+  return (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+      {visibleSets.map((set) => (
+        <PromptSetCard
+          key={set.id}
+          set={set}
+          selected={set.name === openName}
+          onOpen={(s) => onOpen(s.name)}
+        />
+      ))}
+    </div>
+  );
 }
 
 export default function ImagePromptsPage() {
   const { toast } = useToast();
+  const navigate = useNavigate();
+  const location = useLocation();
   const {
-    fetchPromptSets,
-    fetchPromptSet,
+    fetchPromptLibrary,
     savePromptSet,
     deletePromptSet,
-    fetchPromptNames,
-    fetchPrompt,
     savePrompt,
     deletePrompt,
-    fetchPageAssignment,
     savePageAssignment,
+    duplicatePromptSet,
+    renamePromptSet,
+    archivePromptSet,
+    restorePromptSet,
+    generateSetSample,
+    loading,
     error: hookError,
   } = useImagePrompts();
 
-  const [selectedPage, setSelectedPage] = useState(PAGES[0].value);
-  const [promptSets, setPromptSets] = useState([]);
-  const [selectedPromptSet, setSelectedPromptSet] = useState('');
-  const [promptSetName, setPromptSetName] = useState('');
-  const [promptNames, setPromptNames] = useState([]);
-  const [selectedPromptName, setSelectedPromptName] = useState('');
-  const [promptName, setPromptName] = useState('');
-  const [primaryPrompt, setPrimaryPrompt] = useState('');
-  const [additionalParameters, setAdditionalParameters] = useState('');
-  const [slotTemplates, setSlotTemplates] = useState(EMPTY_SLOT_TEMPLATES);
-  const [isLoading, setIsLoading] = useState(false);
-  const [pageStatus, setPageStatus] = useState('');
-  const [deletePromptSetOpen, setDeletePromptSetOpen] = useState(false);
-  const [deletePromptOpen, setDeletePromptOpen] = useState(false);
-
-  const resetPromptFields = useCallback(() => {
-    setPromptNames([]);
-    setSelectedPromptName('');
-    setPromptName('');
-    setAdditionalParameters('');
-    setSlotTemplates(EMPTY_SLOT_TEMPLATES);
-  }, []);
-
-  const resetSetFields = useCallback(() => {
-    setSelectedPromptSet('');
-    setPromptSetName('');
-    setPrimaryPrompt('');
-    resetPromptFields();
-  }, [resetPromptFields]);
-
-  const loadPromptDetails = useCallback(
-    async (setName, nextPromptName) => {
-      if (!setName || !nextPromptName) {
-        setSelectedPromptName('');
-        setPromptName('');
-        setAdditionalParameters('');
-        return;
-      }
-
-      const promptData = await fetchPrompt(setName, nextPromptName);
-      setSelectedPromptName(nextPromptName);
-      setPromptName(nextPromptName);
-      setAdditionalParameters(promptData?.additionalParameters || '');
-      setSlotTemplates({ ...EMPTY_SLOT_TEMPLATES, ...(promptData?.slotTemplates || {}) });
-    },
-    [fetchPrompt]
+  const [library, setLibrary] = useState(null);
+  const [loadError, setLoadError] = useState('');
+  const [query, setQuery] = useState('');
+  const [showArchived, setShowArchived] = useState(false);
+  const [openName, setOpenName] = useState(
+    () => new URLSearchParams(location.search).get('set') || ''
   );
-
-  const loadPromptSetDetails = useCallback(
-    async (setName, preferredPromptName = '') => {
-      if (!setName) {
-        resetSetFields();
-        return;
-      }
-
-      const [setData, names] = await Promise.all([
-        fetchPromptSet(setName),
-        fetchPromptNames(setName),
-      ]);
-      setSelectedPromptSet(setName);
-      setPromptSetName(setName);
-      setPrimaryPrompt(setData?.primaryPrompt || '');
-      setPromptNames(names);
-
-      const nextPromptName = names.includes(preferredPromptName) ? preferredPromptName : '';
-      await loadPromptDetails(setName, nextPromptName);
-    },
-    [fetchPromptNames, fetchPromptSet, loadPromptDetails, resetSetFields]
-  );
-
-  const loadPageState = useCallback(
-    async (pagePath) => {
-      setIsLoading(true);
-      setPageStatus('');
-      try {
-        const [allPromptSets, assignment] = await Promise.all([
-          fetchPromptSets(),
-          fetchPageAssignment(pagePath),
-        ]);
-
-        setPromptSets(allPromptSets);
-
-        const assignedSetName = normalizeValue(assignment?.setName);
-        const assignedPromptName = normalizeValue(assignment?.promptName);
-
-        if (assignedSetName) {
-          await loadPromptSetDetails(assignedSetName, assignedPromptName);
-          setPageStatus(
-            assignedPromptName
-              ? `Assigned: ${assignedSetName} / ${assignedPromptName}`
-              : `Assigned: ${assignedSetName}`
-          );
-        } else {
-          resetSetFields();
-          setPageStatus('No Prompt Set assigned to this page yet.');
-        }
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    [fetchPageAssignment, fetchPromptSets, loadPromptSetDetails, resetSetFields]
-  );
+  const [creating, setCreating] = useState(false);
+  const [generation, setGeneration] = useState(0);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      loadPageState(selectedPage);
-    }, 0);
-    return () => clearTimeout(timer);
-  }, [loadPageState, selectedPage]);
-
-  const handleSelectPromptSet = async (setName) => {
-    setIsLoading(true);
-    try {
-      if (!setName) {
-        resetSetFields();
-        await savePageAssignment(selectedPage, '', '');
-        setPageStatus('No Prompt Set assigned to this page yet.');
-        return;
+    let cancelled = false;
+    fetchPromptLibrary().then((next) => {
+      if (cancelled) return;
+      if (next) {
+        setLibrary(next);
+        setLoadError('');
+      } else {
+        setLoadError('The prompt library could not be read.');
       }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchPromptLibrary, generation]);
 
-      await loadPromptSetDetails(setName);
-      await savePageAssignment(selectedPage, setName, '');
-      setPageStatus(`Assigned Prompt Set "${setName}" to ${selectedPage}`);
-    } finally {
-      setIsLoading(false);
+  const refresh = useCallback(() => setGeneration((g) => g + 1), []);
+  const sets = useMemo(() => library?.sets || [], [library]);
+  const openSet = useMemo(
+    () => sets.find((set) => set.name === openName) || null,
+    [sets, openName]
+  );
+  const pageAssignments = useMemo(() => {
+    const map = {};
+    for (const set of sets) {
+      for (const page of set.pages)
+        map[page.pagePath] = { setName: set.name, promptName: page.promptName };
     }
+    return map;
+  }, [sets]);
+  const visibleSets = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    return sets.filter((set) => {
+      if (!showArchived && set.archivedAt) return false;
+      if (!term) return true;
+      return [set.name, set.purpose, set.theme, set.primaryPrompt, set.tags.join(' ')]
+        .join(' ')
+        .toLowerCase()
+        .includes(term);
+    });
+  }, [sets, query, showArchived]);
+  const archivedCount = sets.filter((set) => set.archivedAt).length;
+
+  const open = (name) => {
+    setCreating(false);
+    setOpenName(name);
+    const search = name ? `?set=${encodeURIComponent(name)}` : '';
+    navigate(`${location.pathname}${search}`, { replace: true });
+  };
+  const ok = (title, description) => toast({ title, description });
+  const bad = (title, description) => toast({ title, description, variant: 'destructive' });
+
+  /** Run a write; on success say so and reload; on failure show the hook's error. */
+  const act = async (work, success, failure) => {
+    const result = await work();
+    if (result) {
+      ok(success.title, success.description);
+      refresh();
+    } else {
+      bad(failure, hookError || 'The server did not accept the change.');
+    }
+    return result;
   };
 
-  const handleSelectPromptName = async (nextPromptName) => {
-    setIsLoading(true);
-    try {
-      await loadPromptDetails(selectedPromptSet || promptSetName, nextPromptName);
-      await savePageAssignment(selectedPage, selectedPromptSet || promptSetName, nextPromptName);
-      setPageStatus(
-        nextPromptName
-          ? `Assigned: ${(selectedPromptSet || promptSetName).trim()} / ${nextPromptName}`
-          : `Assigned: ${(selectedPromptSet || promptSetName).trim()}`
+  const handlers = {
+    onSaveSet: (name, fields) =>
+      act(
+        () => savePromptSet(name, fields),
+        { title: 'Set saved', description: `"${name}" updated.` },
+        'Set not saved'
+      ),
+    onCreateSet: async (name, fields) => {
+      const saved = await act(
+        () => savePromptSet(name, fields),
+        { title: 'Set created', description: `"${name}" is ready for prompts and pages.` },
+        'Set not created'
       );
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleSavePromptSet = async () => {
-    const nextSetName = normalizeValue(promptSetName);
-    if (!nextSetName) {
-      toast({
-        title: 'Validation Error',
-        description: 'Prompt Set name cannot be empty.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    if (!primaryPrompt.trim()) {
-      toast({
-        title: 'Validation Error',
-        description: 'Primary Prompt cannot be empty.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    setIsLoading(true);
-    try {
-      const success = await savePromptSet(nextSetName, primaryPrompt);
-      if (!success) {
-        throw new Error(hookError || 'Failed to save Prompt Set.');
-      }
-
-      const allPromptSets = await fetchPromptSets();
-      setPromptSets(allPromptSets);
-      setSelectedPromptSet(nextSetName);
-      await savePageAssignment(selectedPage, nextSetName, selectedPromptName || promptName);
-      setPageStatus(
-        selectedPromptName || promptName
-          ? `Assigned: ${nextSetName} / ${selectedPromptName || promptName}`
-          : `Assigned: ${nextSetName}`
+      if (saved) open(name);
+    },
+    onDeleteSet: async (name) => {
+      const done = await act(
+        () => deletePromptSet(name),
+        { title: 'Set deleted', description: `"${name}" and its prompts were removed.` },
+        'Set not deleted'
       );
-
-      toast({
-        title: 'Prompt Set Saved',
-        description: `"${nextSetName}" is available to every page.`,
-      });
-    } catch (err) {
-      toast({
-        title: 'Error',
-        description: err.message || 'Failed to save Prompt Set.',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleSavePrompt = async () => {
-    const nextSetName = normalizeValue(promptSetName || selectedPromptSet);
-    const nextPromptName = normalizeValue(promptName);
-
-    if (!nextSetName) {
-      toast({
-        title: 'Validation Error',
-        description: 'Select or create a Prompt Set first.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    if (!primaryPrompt.trim()) {
-      toast({
-        title: 'Validation Error',
-        description: 'Save the Prompt Set primary prompt before saving a Prompt Name.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    if (!nextPromptName) {
-      toast({
-        title: 'Validation Error',
-        description: 'Prompt Name cannot be empty.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    setIsLoading(true);
-    try {
-      const setSaved = await savePromptSet(nextSetName, primaryPrompt);
-      if (!setSaved) {
-        throw new Error(hookError || 'Failed to save Prompt Set before saving Prompt Name.');
-      }
-
-      const promptSaved = await savePrompt(
-        nextSetName,
-        nextPromptName,
-        additionalParameters,
-        slotTemplates
+      if (done) open('');
+    },
+    onArchiveSet: (name) =>
+      act(
+        () => archivePromptSet(name),
+        {
+          title: 'Set archived',
+          description: `"${name}" is hidden from generators; its pages are unassigned.`,
+        },
+        'Set not archived'
+      ),
+    onRestoreSet: (name) =>
+      act(
+        () => restorePromptSet(name),
+        { title: 'Set restored', description: `"${name}" can be assigned again.` },
+        'Set not restored'
+      ),
+    onDuplicateSet: async (name, newName) => {
+      const res = await act(
+        () => duplicatePromptSet(name, newName),
+        { title: 'Set duplicated', description: `"${newName}" copied from "${name}".` },
+        'Set not duplicated'
       );
-      if (!promptSaved) {
-        throw new Error(hookError || 'Failed to save Prompt Name.');
-      }
-
-      const [allPromptSets, allPromptNames] = await Promise.all([
-        fetchPromptSets(),
-        fetchPromptNames(nextSetName),
-      ]);
-      setPromptSets(allPromptSets);
-      setPromptNames(allPromptNames);
-      setSelectedPromptSet(nextSetName);
-      setPromptSetName(nextSetName);
-      setSelectedPromptName(nextPromptName);
-      setPromptName(nextPromptName);
-      await savePageAssignment(selectedPage, nextSetName, nextPromptName);
-      setPageStatus(`Assigned: ${nextSetName} / ${nextPromptName}`);
-
-      toast({
-        title: 'Prompt Name Saved',
-        description: `"${nextPromptName}" is now available under "${nextSetName}".`,
-      });
-    } catch (err) {
-      toast({
-        title: 'Error',
-        description: err.message || 'Failed to save Prompt Name.',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsLoading(false);
-    }
+      if (res) open(newName);
+    },
+    onRenameSet: async (name, newName) => {
+      const res = await act(
+        () => renamePromptSet(name, newName),
+        { title: 'Set renamed', description: `"${name}" is now "${newName}".` },
+        'Set not renamed'
+      );
+      if (res) open(newName);
+    },
+    onSavePrompt: (setName, promptName, fields) =>
+      act(
+        () => savePrompt(setName, promptName, fields.additionalParameters, fields.slotTemplates),
+        { title: 'Prompt saved', description: `"${promptName}" is in "${setName}".` },
+        'Prompt not saved'
+      ),
+    onDeletePrompt: (setName, promptName) =>
+      act(
+        () => deletePrompt(setName, promptName),
+        { title: 'Prompt deleted', description: `"${promptName}" removed from "${setName}".` },
+        'Prompt not deleted'
+      ),
+    onAssignPage: (pagePath, setName, promptName) =>
+      act(
+        () => savePageAssignment(pagePath, setName, promptName),
+        setName
+          ? {
+              title: 'Page assigned',
+              description: `${pagePath} now generates with "${setName}"${promptName ? ` / ${promptName}` : ''}.`,
+            }
+          : {
+              title: 'Page unassigned',
+              description: `${pagePath} falls back to the built-in prompt.`,
+            },
+        'Assignment not saved'
+      ),
+    onGenerateSample: async (body) => {
+      const result = await generateSetSample(body);
+      ok('Sample generated', `Filed under "${body.setName}" in the gallery.`);
+      refresh();
+      return result;
+    },
+    onOpenGallery: (name) => navigate(`/admin/image-gallery?set=${encodeURIComponent(name)}`),
+    onOpenImage: (image) =>
+      navigate(
+        `/admin/image-gallery?set=${encodeURIComponent(image.promptSet || openName)}&q=${encodeURIComponent(image.id)}`
+      ),
   };
 
-  const doDeletePromptSet = async () => {
-    setDeletePromptSetOpen(false);
-    const nextSetName = normalizeValue(selectedPromptSet || promptSetName);
-    if (!nextSetName) return;
-
-    setIsLoading(true);
-    try {
-      const success = await deletePromptSet(nextSetName);
-      if (!success) {
-        throw new Error(hookError || 'Failed to delete Prompt Set.');
+  const editing = creating || Boolean(openSet);
+  const body = (
+    <LibraryBody
+      loadError={loadError}
+      hookError={hookError}
+      library={library}
+      editor={
+        editing ? (
+          <PromptSetEditor
+            set={openSet}
+            isNew={creating}
+            allowedPages={library?.allowedPages || []}
+            pageAssignments={pageAssignments}
+            busy={loading}
+            onBack={() => open('')}
+            {...handlers}
+          />
+        ) : null
       }
-
-      const allPromptSets = await fetchPromptSets();
-      setPromptSets(allPromptSets);
-      resetSetFields();
-      await savePageAssignment(selectedPage, '', '');
-      setPageStatus('No Prompt Set assigned to this page yet.');
-
-      toast({
-        title: 'Prompt Set Deleted',
-        description: `"${nextSetName}" and its Prompt Names were deleted.`,
-      });
-    } catch (err) {
-      toast({
-        title: 'Error',
-        description: err.message || 'Failed to delete Prompt Set.',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const doDeletePrompt = async () => {
-    setDeletePromptOpen(false);
-    const nextSetName = normalizeValue(selectedPromptSet || promptSetName);
-    const nextPromptName = normalizeValue(selectedPromptName || promptName);
-    if (!nextSetName || !nextPromptName) return;
-
-    setIsLoading(true);
-    try {
-      const success = await deletePrompt(nextSetName, nextPromptName);
-      if (!success) {
-        throw new Error(hookError || 'Failed to delete Prompt Name.');
-      }
-
-      const names = await fetchPromptNames(nextSetName);
-      setPromptNames(names);
-      setSelectedPromptName('');
-      setPromptName('');
-      setAdditionalParameters('');
-      await savePageAssignment(selectedPage, nextSetName, '');
-      setPageStatus(`Assigned: ${nextSetName}`);
-
-      toast({
-        title: 'Prompt Name Deleted',
-        description: `"${nextPromptName}" was removed from "${nextSetName}".`,
-      });
-    } catch (err) {
-      toast({
-        title: 'Error',
-        description: err.message || 'Failed to delete Prompt Name.',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const selectedPageLabel =
-    PAGES.find((page) => page.value === selectedPage)?.label || selectedPage;
+      sets={sets}
+      visibleSets={visibleSets}
+      openName={openName}
+      archivedHidden={showArchived ? 0 : archivedCount}
+      onRetry={refresh}
+      onCreate={() => setCreating(true)}
+      onOpen={(name) => open(name)}
+      onShowEverything={() => {
+        setQuery('');
+        setShowArchived(true);
+      }}
+    />
+  );
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-2">
-          Image Generation Prompts
-        </h1>
-        <p className="text-slate-600 dark:text-slate-400">
-          Assign global Prompt Sets and Prompt Names to any page, then reuse them across the
-          platform.
-        </p>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        icon={ImageIcon}
+        title="Image Prompts"
+        help={HELP}
+        status={
+          library ? (
+            <span className="text-muted-foreground">
+              {sets.length - archivedCount} active set{sets.length - archivedCount === 1 ? '' : 's'}
+              {archivedCount ? ` · ${archivedCount} archived` : ''} ·{' '}
+              {Object.keys(pageAssignments).length} page
+              {Object.keys(pageAssignments).length === 1 ? '' : 's'} assigned
+            </span>
+          ) : null
+        }
+        actions={
+          !editing ? (
+            <Button type="button" size="sm" className="gap-1" onClick={() => setCreating(true)}>
+              <Plus className="h-4 w-4" aria-hidden="true" /> New set
+            </Button>
+          ) : null
+        }
+      />
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <Card className="lg:col-span-1">
-          <CardHeader>
-            <CardTitle className="text-lg">Select Page</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <select
-              value={selectedPage}
-              onChange={(e) => setSelectedPage(e.target.value)}
-              className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-slate-blue/50"
-            >
-              {PAGES.map((page) => (
-                <option key={page.value} value={page.value}>
-                  {page.label}
-                </option>
-              ))}
-            </select>
-
-            <div className="mt-4 p-3 rounded-lg bg-slate-100 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/50">
-              <p className="text-[11px] text-slate-600 dark:text-slate-400 uppercase tracking-wider font-mono">
-                Path
-              </p>
-              <p className="text-sm font-mono text-slate-900 dark:text-white mt-1">
-                {selectedPage}
-              </p>
-            </div>
-
-            <div className="mt-3 p-3 rounded-lg bg-slate-100 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/50">
-              <p className="text-[11px] text-slate-600 dark:text-slate-400 uppercase tracking-wider font-mono">
-                Active Assignment
-              </p>
-              <p className="text-sm text-slate-900 dark:text-white mt-1">
-                {pageStatus || 'Loading assignment...'}
-              </p>
-            </div>
-
-            {hookError && (
-              <div className="mt-3 p-2.5 rounded-lg bg-red-500/10 border border-red-500/30">
-                <p className="text-[11px] text-red-700 dark:text-red-400 font-mono">{hookError}</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle className="text-lg">Prompt Library for {selectedPageLabel}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-5">
-            <div>
-              <label
-                htmlFor="prompt-set-name"
-                className="block text-sm font-semibold text-slate-900 dark:text-white mb-2"
-              >
-                Prompt Set
-                <span className="text-red-500 ml-1">*</span>
-              </label>
-              <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_240px_auto_auto] gap-2">
-                <input
-                  id="prompt-set-name"
-                  type="text"
-                  value={promptSetName}
-                  onChange={(e) => {
-                    setPromptSetName(e.target.value);
-                    if (e.target.value !== selectedPromptSet) {
-                      setSelectedPromptSet('');
-                      setPromptNames([]);
-                      setSelectedPromptName('');
-                      setPromptName('');
-                      setAdditionalParameters('');
-                    }
-                  }}
-                  disabled={isLoading}
-                  placeholder="e.g., Azure Chibi, AWS Lego, Enterprise Hero"
-                  className="w-full px-4 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-slate-blue/50 disabled:opacity-50"
-                />
-                <select
-                  value={selectedPromptSet}
-                  onChange={(e) => handleSelectPromptSet(e.target.value)}
-                  disabled={isLoading}
-                  className="w-full px-4 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-slate-blue/50 disabled:opacity-50"
-                >
-                  <option value="">Select Prompt Set...</option>
-                  {promptSets.map((setName) => (
-                    <option key={setName} value={setName}>
-                      {setName}
-                    </option>
-                  ))}
-                </select>
-                <Button
-                  onClick={handleSavePromptSet}
-                  disabled={isLoading || !promptSetName.trim() || !primaryPrompt.trim()}
-                  className="px-3 bg-green-600 hover:bg-green-700 text-white"
-                  title="Save Prompt Set"
-                >
-                  <Check className="h-4 w-4" />
-                </Button>
-                <Button
-                  onClick={() => setDeletePromptSetOpen(true)}
-                  disabled={isLoading || !(selectedPromptSet || promptSetName)}
-                  variant="destructive"
-                  className="px-3"
-                  title="Delete Prompt Set"
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-              <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
-                Prompt Sets are global. Save once, then assign them to any page.
-              </p>
-            </div>
-
-            <div>
-              <label
-                htmlFor="primary-prompt"
-                className="block text-sm font-semibold text-slate-900 dark:text-white mb-2"
-              >
-                Primary Prompt
-                <span className="text-red-500 ml-1">*</span>
-              </label>
-              <textarea
-                id="primary-prompt"
-                value={primaryPrompt}
-                onChange={(e) => setPrimaryPrompt(e.target.value)}
-                disabled={isLoading}
-                placeholder="The shared base prompt for this Prompt Set. Every Prompt Name in the set will inherit this."
-                className="w-full h-32 px-4 py-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-slate-blue/50 disabled:opacity-50"
-              />
-              <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
-                This is the shared style anchor for the entire Prompt Set.
-              </p>
-            </div>
-
-            <div>
-              <label
-                htmlFor="prompt-name"
-                className="block text-sm font-semibold text-slate-900 dark:text-white mb-2"
-              >
-                Prompt Name
-                <span className="text-red-500 ml-1">*</span>
-              </label>
-              <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_240px_auto_auto] gap-2">
-                <input
-                  id="prompt-name"
-                  type="text"
-                  value={promptName}
-                  onChange={(e) => {
-                    setPromptName(e.target.value);
-                    if (e.target.value !== selectedPromptName) {
-                      setSelectedPromptName('');
-                    }
-                  }}
-                  disabled={isLoading}
-                  placeholder="e.g., Hero, Deep Dive, Lego Team, Chibi Analyst"
-                  className="w-full px-4 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-slate-blue/50 disabled:opacity-50"
-                />
-                <select
-                  value={selectedPromptName}
-                  onChange={(e) => handleSelectPromptName(e.target.value)}
-                  disabled={isLoading || !selectedPromptSet}
-                  className="w-full px-4 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-slate-blue/50 disabled:opacity-50"
-                >
-                  <option value="">Select Prompt Name...</option>
-                  {promptNames.map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
-                <Button
-                  onClick={handleSavePrompt}
-                  disabled={
-                    isLoading ||
-                    !promptSetName.trim() ||
-                    !primaryPrompt.trim() ||
-                    !promptName.trim()
-                  }
-                  className="px-3 bg-green-600 hover:bg-green-700 text-white"
-                  title="Save Prompt Name"
-                >
-                  <Check className="h-4 w-4" />
-                </Button>
-                <Button
-                  onClick={() => setDeletePromptOpen(true)}
-                  disabled={isLoading || !selectedPromptSet || !(selectedPromptName || promptName)}
-                  variant="destructive"
-                  className="px-3"
-                  title="Delete Prompt Name"
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-              <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
-                Prompt Names are variations inside the Prompt Set. Choose one to assign it to the
-                selected page.
-              </p>
-            </div>
-
-            <div>
-              <label
-                htmlFor="additional-parameters"
-                className="block text-sm font-semibold text-slate-900 dark:text-white mb-2"
-              >
-                Additional Parameters
-                <span className="text-slate-400">(Optional)</span>
-              </label>
-              <textarea
-                id="additional-parameters"
-                value={additionalParameters}
-                onChange={(e) => setAdditionalParameters(e.target.value)}
-                disabled={isLoading}
-                placeholder="What makes this Prompt Name different from others in the same Prompt Set: composition, props, lighting, camera angle, character variation, palette, etc."
-                className="w-full h-24 px-4 py-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-slate-blue/50 disabled:opacity-50"
-              />
-              <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
-                These parameters differentiate one Prompt Name from another while keeping the same
-                Primary Prompt.
-              </p>
-            </div>
-
-            <div>
-              <p className="block text-sm font-semibold text-slate-900 dark:text-white mb-2">
-                Per-Slot Prompt Templates
-                <span className="text-slate-400 ml-1">(Optional)</span>
-              </p>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {SLOT_TEMPLATE_FIELDS.map((field) => (
-                  <div key={field.key}>
-                    <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-2">
-                      {field.label}
-                    </label>
-                    <textarea
-                      value={slotTemplates[field.key]}
-                      onChange={(e) =>
-                        setSlotTemplates((prev) => ({ ...prev, [field.key]: e.target.value }))
-                      }
-                      disabled={isLoading}
-                      placeholder={field.placeholder}
-                      className="w-full h-24 px-4 py-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-slate-blue/50 disabled:opacity-50"
-                    />
-                  </div>
-                ))}
-              </div>
-              <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-2">
-                These templates let you steer hero and secondary image composition from the prompt
-                library instead of relying on backend defaults.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card className="border-slate-200/50 dark:border-slate-700/30 bg-slate-50/50 dark:bg-slate-800/20">
-        <CardContent className="pt-6">
-          <div className="space-y-2 text-sm">
-            <p className="font-semibold text-slate-900 dark:text-white">
-              How Image Generation Prompt Sets Work
-            </p>
-            <ul className="space-y-1 text-slate-600 dark:text-slate-400 ml-4">
-              <li>
-                • <strong>Pages:</strong> Select any page first. That page can use any saved Prompt
-                Set and Prompt Name.
-              </li>
-              <li>
-                • <strong>Prompt Set:</strong> A global group of prompts that share one Primary
-                Prompt.
-              </li>
-              <li>
-                • <strong>Primary Prompt:</strong> The shared foundation for every Prompt Name in
-                the Prompt Set.
-              </li>
-              <li>
-                • <strong>Prompt Name:</strong> A named variation inside the Prompt Set.
-              </li>
-              <li>
-                • <strong>Additional Parameters:</strong> The part that makes each Prompt Name
-                unique while keeping the same Primary Prompt.
-              </li>
-              <li>
-                • <strong>Per-Slot Templates:</strong> Optional hero and secondary image guidance
-                saved with each Prompt Name for multi-image generation.
-              </li>
-              <li>
-                • <strong>Green Check:</strong> Save the Prompt Set or Prompt Name from its own row.
-              </li>
-              <li>
-                • <strong>Red X:</strong> Delete the selected Prompt Set or Prompt Name from its own
-                row.
-              </li>
-              <li>
-                • Selecting a Prompt Set or Prompt Name assigns it to the page currently selected on
-                the left.
-              </li>
-              <li>
-                • New Content uses the assigned Prompt Name slot templates when generating image
-                sets for that page.
-              </li>
-            </ul>
+      {!editing && library && sets.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative min-w-[16rem] flex-1">
+            <Search
+              className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground"
+              aria-hidden="true"
+            />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search sets by name, purpose, theme, prompt or tag"
+              aria-label="Search image sets"
+              className="pl-8"
+            />
           </div>
-        </CardContent>
-      </Card>
+          <label className="flex items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={showArchived}
+              onChange={(e) => setShowArchived(e.target.checked)}
+              className="h-3.5 w-3.5"
+            />
+            Show archived ({archivedCount})
+          </label>
+        </div>
+      )}
+
+      {body}
 
       <KeywordMatrixPanel />
-
-      <ConfirmModal
-        open={deletePromptSetOpen}
-        title={`Delete "${selectedPromptSet || promptSetName}"?`}
-        description="This Prompt Set and all Prompt Names inside it will be permanently deleted."
-        confirmLabel="Delete"
-        onConfirm={doDeletePromptSet}
-        onCancel={() => setDeletePromptSetOpen(false)}
-      />
-
-      <ConfirmModal
-        open={deletePromptOpen}
-        title={`Delete "${selectedPromptName || promptName}"?`}
-        description="This Prompt Name will be permanently deleted from the selected Prompt Set."
-        confirmLabel="Delete"
-        onConfirm={doDeletePrompt}
-        onCancel={() => setDeletePromptOpen(false)}
-      />
     </div>
   );
 }

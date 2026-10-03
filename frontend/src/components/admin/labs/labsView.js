@@ -46,10 +46,12 @@ export const FALLBACK_JOB_TYPES = [
   },
 ];
 
+// One style per JOB_STATUSES entry (functions/src/lib/labs.js). There is no
+// `running`: the agent writes `claimed`, then a terminal status, and the
+// style this map carried for it coloured a state that was never stored.
 export const STATUS_STYLES = {
   queued: 'border-sky-300 text-sky-600 dark:border-sky-700 dark:text-sky-400',
   claimed: 'border-violet-300 text-violet-600 dark:border-violet-700 dark:text-violet-400',
-  running: 'border-amber-300 text-amber-600 dark:border-amber-700 dark:text-amber-400',
   succeeded: 'border-emerald-300 text-emerald-600 dark:border-emerald-700 dark:text-emerald-400',
   failed: 'border-rose-300 text-rose-600 dark:border-rose-700 dark:text-rose-400',
   timeout: 'border-orange-300 text-orange-600 dark:border-orange-700 dark:text-orange-400',
@@ -76,6 +78,35 @@ export function formatTime(ts) {
  * getLabsSnapshot RPC every 15s replaces the two legacy subscription streams,
  * and also supplies the server's job-type allowlist.
  */
+
+/**
+ * The shared status vocabulary (lib/status.js) for the three concepts the
+ * Dashboard defines (ADR 0033 "Labs"): the Agent from the fleet, the Desktop
+ * from the public workspace read, the Lab from the catalogue.
+ */
+
+/** `fleetState(...)` as a system status word: online → healthy, stale → degraded, none → unavailable. */
+export function fleetStatusWord(fleet) {
+  if (fleet.state === 'online') return 'healthy';
+  if (fleet.state === 'stale') return 'degraded';
+  return 'unavailable';
+}
+
+/**
+ * A catalogue status as a StatusBadge status: `available` is published and
+ * healthy, `coming` is held back and says since when.
+ */
+export function labStatusInfo(lab) {
+  if (lab.status === 'available') {
+    return { id: 'available', label: 'Available', tone: 'ok', help: 'Listed on the public pages.' };
+  }
+  return {
+    id: 'coming',
+    label: 'Not yet listed',
+    tone: 'warn',
+    help: `Held back since ${lab.comingSince}: ${lab.comingReason}`,
+  };
+}
 
 /** The payload hints the Console shows per job type. */
 export const PAYLOAD_PLACEHOLDERS = {

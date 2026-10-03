@@ -1,6 +1,6 @@
 /**
  * The review and Drafts panels. What must hold: the email preview cannot run
- * anything, each tab shows only its own issues, a card's red X deletes at once,
+ * anything, each tab shows only its own issues, a card's red X deletes once confirmed,
  * keeping moves an issue to Drafts, approval lives only on Drafts, and it says
  * what a send will need before offering one. Editing a draft stays local until
  * Save changes, sends sections as the stored items in their new order, never
@@ -178,7 +178,7 @@ describe('the Newsletter (review) tab', () => {
     expect(screen.getByRole('button', { name: /keep in drafts/i })).toBeDisabled();
   });
 
-  it("deletes an issue from its card's red X at once, with the row's etag", async () => {
+  it("deletes an issue from its card's red X once confirmed, with the row's etag", async () => {
     const state = withIssue();
     sendJSON.mockImplementation(async () => {
       state.status = 'deleted';
@@ -188,6 +188,9 @@ describe('the Newsletter (review) tab', () => {
     await screen.findByTitle('Email preview');
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete 2026-09-14' }));
+    // Nothing is sent until the dialog is answered (ADR 0033: destructive actions confirm).
+    expect(sendJSON).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
 
     await waitFor(() =>
       expect(sendJSON).toHaveBeenCalledWith(`cms/newsletters/${ID}`, 'DELETE', { etag: 'e1' })

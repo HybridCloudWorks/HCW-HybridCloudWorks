@@ -4,6 +4,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import {
+  LISTEN_AND_LEARN_DEFAULT_MODEL,
   LISTEN_AND_LEARN_GEMINI_MODELS,
   LISTEN_AND_LEARN_GEMINI_MODEL_IDS,
   LISTEN_AND_LEARN_SPEECH_CONFIG_ID,
@@ -24,13 +25,20 @@ const BEST = 'gemini-3.1-flash-tts-preview';
 const ECONOMY = 'gemini-2.5-flash-preview-tts';
 
 describe('the two choices', () => {
-  it('are Best (3.1, the module default) and Economy (2.5), in that order, with the owner’s labels', () => {
+  it('are Best (3.1) and Economy (2.5, the module default — ADR 0033 §4), in that order, with the owner’s labels', () => {
     expect(LISTEN_AND_LEARN_GEMINI_MODELS).toEqual([
       { id: BEST, tier: 'best', label: 'Best — newest voice, about twice the cost' },
       { id: ECONOMY, tier: 'economy', label: 'Economy — cheaper' },
     ]);
     expect(LISTEN_AND_LEARN_GEMINI_MODEL_IDS).toEqual([BEST, ECONOMY]);
-    expect(GEMINI_DEFAULT_MODEL).toBe(BEST);
+    // The cheapest sensible voice reads when nothing is stored, and the
+    // options say which one that is rather than leaving it to position.
+    expect(GEMINI_DEFAULT_MODEL).toBe(ECONOMY);
+    expect(LISTEN_AND_LEARN_DEFAULT_MODEL).toBe(ECONOMY);
+    expect(listenAndLearnModelOptions().map((o) => [o.id, o.isDefault])).toEqual([
+      [BEST, false],
+      [ECONOMY, true],
+    ]);
     expect(Object.isFrozen(LISTEN_AND_LEARN_GEMINI_MODELS)).toBe(true);
   });
 
@@ -69,6 +77,7 @@ describe('listenAndLearnModelOptions', () => {
     const options = listenAndLearnModelOptions();
     expect(options.map((o) => o.id)).toEqual([BEST, ECONOMY]);
     for (const option of options) {
+      expect(option).toMatchObject({ isDefault: option.id === ECONOMY });
       expect(option.perEpisodeUsd).toBe(estimateGeminiCostUsd(option.id, MAX_SCRIPT_BYTES));
       expect(option.perEpisodeUsd).toBeGreaterThan(0);
     }
@@ -94,7 +103,9 @@ describe('the stored default', () => {
     expect(await readStoredListenAndLearnModel(vi.fn(async () => null))).toBeNull();
     expect(await readStoredListenAndLearnModel(vi.fn(async () => ({})))).toBeNull();
     expect(
-      await readStoredListenAndLearnModel(vi.fn(async () => ({ geminiModel: 'gemini-2.5-pro-preview-tts' })))
+      await readStoredListenAndLearnModel(
+        vi.fn(async () => ({ geminiModel: 'gemini-2.5-pro-preview-tts' }))
+      )
     ).toBeNull();
   });
 
@@ -110,8 +121,11 @@ describe('the stored default', () => {
 });
 
 describe('resolveListenAndLearnModel', () => {
-  it('prefers the run, then the stored default, then nothing', () => {
+  it('prefers the run, then the book, then the stored default, then nothing', () => {
     expect(resolveListenAndLearnModel({ requested: ECONOMY, stored: BEST })).toBe(ECONOMY);
+    expect(resolveListenAndLearnModel({ requested: null, book: ECONOMY, stored: BEST })).toBe(
+      ECONOMY
+    );
     expect(resolveListenAndLearnModel({ requested: null, stored: BEST })).toBe(BEST);
     expect(resolveListenAndLearnModel({ requested: null, stored: null })).toBeNull();
     expect(resolveListenAndLearnModel()).toBeNull();

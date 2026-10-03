@@ -25,15 +25,27 @@
  */
 import { randomUUID } from 'node:crypto';
 import {
+  buildGalleryListing,
+  CONTENT_USAGE_PROJECTION,
+  GALLERY_MAX_LIMIT,
+  parseGalleryListParams,
+} from './gallery-images.js';
+import {
   AI_FEATURES,
+  DEFAULT_PROVIDER_ORDER,
   FEATURE_NAMES,
   FEATURES_DOC_ID,
+  MAX_ROUTE_FALLBACKS,
   PER_FEATURE_PROVIDERS,
   PLACEMENTS,
   PROVIDER_PLACEMENT_DEFAULTS,
+  ROUTING_DOC_ID,
   isPlacementConfigurable,
+  normalizeRoute,
+  normalizeRouting,
   placementFor,
 } from './ai/ai-config.js';
+import { validateMcpApiKeyEnvVar, validateMcpUrl } from './ai/mcp.js';
 
 const json = (status, body) => ({
   status,
@@ -74,8 +86,79 @@ const stripOAuthToken = ({ oauthToken, oauthRefreshToken, ...rest }) => ({
 
 const SETTINGS_CONTAINER = 'admin_settings';
 const SETTINGS_DOC_ID = 'integrations';
+/**
+ * The Change history row a settings save writes: the same action and shape
+ * platform-settings.js uses (PLATFORM_SETTING_AUDIT_ACTION), with
+ * `details.setting` naming this document, so the Platform Settings hub lists
+ * the Sessionize speaker id beside every other setting (ADR 0033 Platform).
+ */
+export const INTEGRATIONS_SETTING_AUDIT_ACTION = 'platform_setting_updated';
+export const INTEGRATIONS_SETTING_NAME = 'integrations';
 /** Kept in step with the router's reader by ai-config.js exporting it. */
 const AI_FEATURES_DOC_ID = FEATURES_DOC_ID;
+
+/**
+ * Validate one route of a PUT cms/ai-routing body. Returns the error
+ * sentence, or null. Stricter than the router's normaliser on purpose: the
+ * router drops what it cannot use so a stored oddity never breaks a call,
+ * while a save names the mistake so it is never stored.
+ */
+function routeError(feature, raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return `routes.${feature} must be { provider, model?, fallbacks? } or null`;
+  }
+  const provider = String(raw.provider || '')
+    .toLowerCase()
+    .trim();
+  if (!DEFAULT_PROVIDER_ORDER.includes(provider)) {
+    return `routes.${feature}.provider must be one of ${DEFAULT_PROVIDER_ORDER.join(', ')}`;
+  }
+  if (raw.model !== undefined && raw.model !== null && typeof raw.model !== 'string') {
+    return `routes.${feature}.model must be a string or null`;
+  }
+  if (raw.fallbacks !== undefined) {
+    if (!Array.isArray(raw.fallbacks)) return `routes.${feature}.fallbacks must be an array`;
+    if (raw.fallbacks.length > MAX_ROUTE_FALLBACKS) {
+      return `routes.${feature}.fallbacks: at most ${MAX_ROUTE_FALLBACKS}`;
+    }
+    const seen = new Set([provider]);
+    for (const entry of raw.fallbacks) {
+      const fallback = String(entry?.provider || '')
+        .toLowerCase()
+        .trim();
+      if (!DEFAULT_PROVIDER_ORDER.includes(fallback)) {
+        return `routes.${feature}.fallbacks: unknown provider "${entry?.provider ?? ''}"`;
+      }
+      if (seen.has(fallback)) {
+        return `routes.${feature}.fallbacks: ${fallback} is listed twice (or is the primary)`;
+      }
+      seen.add(fallback);
+      if (entry.model !== undefined && entry.model !== null && typeof entry.model !== 'string') {
+        return `routes.${feature}.fallbacks: model must be a string or null`;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * The checks every mcp_servers write passes (ADR 0033, security finding):
+ * the URL is https (loopback excepted) and the key name is on the allowlist.
+ * Only the fields present are checked, so a PATCH that flips `enabled` on a
+ * server saved before the allowlist still goes through; the next Sync or
+ * call refuses the bad field with the same sentence.
+ */
+function mcpWriteError(fields) {
+  try {
+    if (Object.prototype.hasOwnProperty.call(fields, 'url')) validateMcpUrl(fields.url);
+    if (Object.prototype.hasOwnProperty.call(fields, 'apiKeyEnvVar')) {
+      validateMcpApiKeyEnvVar(fields.apiKeyEnvVar);
+    }
+  } catch (error) {
+    return error.message;
+  }
+  return null;
+}
 
 /**
  * Every per-feature provider's placement for every feature, as the router
@@ -135,7 +218,20 @@ export function createAdminIntegrationHandlers({
   store,
   now = () => new Date(),
   uuid = randomUUID,
+  // Called after any write the AI router reads (providers, features,
+  // routing), so the router's 60 s cache is dropped in THIS process and a
+  // change applies on the next call rather than after the TTL (ADR 0033).
+  // Other warm instances converge within the TTL, as before.
+  onAiConfigChanged = () => {},
 }) {
+  const aiConfigChanged = () => {
+    try {
+      onAiConfigChanged();
+    } catch {
+      // Invalidation is a convenience; the write already happened.
+    }
+  };
+
   return {
     // ── recordings (RecordingsPage.jsx) ────────────────────────────────────
 
@@ -149,7 +245,11 @@ export function createAdminIntegrationHandlers({
         const sorted = items
           .sort((a, b) => dateValue(b.createdAt) - dateValue(a.createdAt))
           .slice(0, limit);
-        return json(200, { success: true, items: sorted, total: sorted.length });
+        return json(200, {
+          success: true,
+          items: sorted,
+          total: sorted.length,
+        });
       } catch (error) {
         context.error('listRecordings failed:', error);
         return json(500, { error: 'Failed to list recordings' });
@@ -209,7 +309,11 @@ export function createAdminIntegrationHandlers({
       const auth = await guard.requireRole(request, 'editor');
       if (auth.error) return auth.error;
       try {
-        const items = await store.queryDocs('speakerevents', `SELECT TOP ${LIST_WINDOW} * FROM c`, []);
+        const items = await store.queryDocs(
+          'speakerevents',
+          `SELECT TOP ${LIST_WINDOW} * FROM c`,
+          []
+        );
         return json(200, { success: true, items, total: items.length });
       } catch (error) {
         context.error('listSpeakerEvents failed:', error);
@@ -256,6 +360,37 @@ export function createAdminIntegrationHandlers({
             ...updates,
             updatedAt: nowIso,
           });
+        }
+        // The Sessionize speaker id is edited on the Integrations page but it
+        // is a platform setting like any other, so its save joins the Platform
+        // Settings Change history through the same `platform_setting_updated`
+        // row platform-settings.js writes (ADR 0033 Platform). Best effort,
+        // like that writer: the save has landed, and a failed audit row must
+        // not report it as refused.
+        if (Object.prototype.hasOwnProperty.call(updates, 'sessionizeSpeakerId')) {
+          const before = String(existing?.sessionizeSpeakerId ?? '').trim();
+          const after = String(updates.sessionizeSpeakerId ?? '').trim();
+          try {
+            await store.upsertDoc('admin_audit_logs', {
+              id: uuid(),
+              action: INTEGRATIONS_SETTING_AUDIT_ACTION,
+              userId: auth.user?.oid || auth.user?.sub || null,
+              userName: auth.user?.name || null,
+              userEmail: auth.user?.email || auth.user?.preferred_username || null,
+              timestamp: nowIso,
+              // A public identifier (it is the Sessionize URL), so the value
+              // itself is a choice the history can show.
+              details: {
+                setting: INTEGRATIONS_SETTING_NAME,
+                sessionizeSpeakerId: after || null,
+                changed: before !== after,
+              },
+            });
+          } catch (auditError) {
+            context.warn?.(
+              `putSettings saved but the audit row failed: ${auditError?.message || auditError}`
+            );
+          }
         }
         return json(200, { success: true, settings });
       } catch (error) {
@@ -358,7 +493,10 @@ export function createAdminIntegrationHandlers({
                 ]),
               ].map((provider) => [
                 provider,
-                { ...(existing?.placement?.[provider] || {}), ...(body.placement[provider] || {}) },
+                {
+                  ...(existing?.placement?.[provider] || {}),
+                  ...(body.placement[provider] || {}),
+                },
               ])
             )
           : undefined;
@@ -369,8 +507,12 @@ export function createAdminIntegrationHandlers({
         };
         const saved = existing
           ? await store.patchDoc(SETTINGS_CONTAINER, AI_FEATURES_DOC_ID, fields)
-          : await store.upsertDoc(SETTINGS_CONTAINER, { id: AI_FEATURES_DOC_ID, ...fields });
+          : await store.upsertDoc(SETTINGS_CONTAINER, {
+              id: AI_FEATURES_DOC_ID,
+              ...fields,
+            });
         const result = saved || { ...existing, ...fields };
+        aiConfigChanged();
         return json(200, {
           success: true,
           features: result.features || merged,
@@ -382,33 +524,143 @@ export function createAdminIntegrationHandlers({
       }
     },
 
+    // ── AI routing by task (lib/ai/ai-config.js, ADR 0033 §4) ──────────────
+
+    /**
+     * GET /api/cms/ai-routing — which provider and model serve each feature.
+     *
+     * `routes` holds only the features that have one; a feature absent here
+     * follows the global order of preference ("Simple mode"). The catalogue
+     * travels with the answer for the same reason getAiFeatures sends it.
+     */
+    async getAiRouting(request, context) {
+      const auth = await guard.requireRole(request, 'editor');
+      if (auth.error) return auth.error;
+      try {
+        const doc = await store.readDoc(SETTINGS_CONTAINER, ROUTING_DOC_ID, ROUTING_DOC_ID);
+        return json(200, {
+          success: true,
+          routes: normalizeRouting(doc).routes,
+          catalogue: AI_FEATURES,
+          providers: DEFAULT_PROVIDER_ORDER,
+          maxFallbacks: MAX_ROUTE_FALLBACKS,
+          updatedAt: doc?.updatedAt || null,
+        });
+      } catch (error) {
+        context.error('getAiRouting failed:', error);
+        return json(500, { error: 'Failed to read AI routing' });
+      }
+    },
+
+    /**
+     * PUT /api/cms/ai-routing — body { routes: { <feature>: route | null } }.
+     * Merges: a feature not in the body keeps its route; `null` removes one
+     * (back to the global order). Same role as the feature switches.
+     */
+    async putAiRouting(request, context) {
+      const auth = await guard.requireRole(request, 'editor');
+      if (auth.error) return auth.error;
+      try {
+        const body = validBody(await request.json().catch(() => null));
+        const incoming = body?.routes;
+        if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) {
+          return json(400, {
+            error:
+              'Body must be { routes: { <feature>: { provider, model?, fallbacks?: [{ provider, model? }] } | null } }',
+          });
+        }
+        const unknown = Object.keys(incoming).filter((name) => !FEATURE_NAMES.includes(name));
+        if (unknown.length > 0) {
+          return json(400, {
+            error: `Unknown AI feature(s): ${unknown.join(', ')}. Known: ${FEATURE_NAMES.join(', ')}`,
+          });
+        }
+        for (const [feature, raw] of Object.entries(incoming)) {
+          if (raw === null) continue;
+          const problem = routeError(feature, raw);
+          if (problem) return json(400, { error: problem });
+        }
+
+        const existing = await store.readDoc(SETTINGS_CONTAINER, ROUTING_DOC_ID, ROUTING_DOC_ID);
+        const routes = { ...normalizeRouting(existing).routes };
+        for (const [feature, raw] of Object.entries(incoming)) {
+          if (raw === null) delete routes[feature];
+          else routes[feature] = normalizeRoute(raw);
+        }
+        const nowIso = now().toISOString();
+        const doc = { id: ROUTING_DOC_ID, routes, updatedAt: nowIso };
+        // A full replace rather than a patch: `routes` is one map, and a
+        // removed feature has to leave the stored document, not linger as a
+        // key the patch never touched.
+        await store.upsertDoc(SETTINGS_CONTAINER, existing ? { ...existing, ...doc } : doc);
+        aiConfigChanged();
+        return json(200, { success: true, routes, updatedAt: nowIso });
+      } catch (error) {
+        context.error('putAiRouting failed:', error);
+        return json(500, { error: 'Failed to save AI routing' });
+      }
+    },
+
     // ── image gallery reads (lib/imageGallery.js) ──────────────────────────
 
     /**
-     * GET /api/cms/images?limit=&articleId= — both galleries, newest first
-     * each; articleId narrows to one article's images (SubmitUrls preview
-     * gallery watches generated rows for its session id).
+     * GET /api/cms/images — the media library listing (ADR 0033). Query:
+     * q, folder, source, provider, slot, tag, set, contentId, articleId,
+     * state (active|archived|trash|all), sort (newest|oldest|title|most-used),
+     * offset, limit (≤200), usage=1 (attach the content documents using each
+     * image). Filtering, sorting and paging live in
+     * lib/gallery-images.js buildGalleryListing; this does the reads.
+     *
+     * The read window is ORDER BY c._ts DESC — `_ts` exists on every row
+     * where `createdAt` does not (curated rows never had one), so the newest
+     * thousand are what the window holds. Within it, rows sort by createdAt
+     * with a curated row's generatedAt standing in.
+     *
+     * `curated` and `generated` are still returned, newest first, for the
+     * editor's gallery and the Submit URLs preview gallery, which read them.
      */
     async listImages(request, context) {
       const auth = await guard.requireRole(request, 'editor');
       if (auth.error) return auth.error;
       try {
-        const limit = Math.min(Math.max(Number(request.query.get('limit')) || 60, 1), 200);
-        const articleId = String(request.query.get('articleId') || '').trim();
-        const query = articleId
-          ? `SELECT TOP ${LIST_WINDOW} * FROM c WHERE c.articleId = @articleId`
-          : `SELECT TOP ${LIST_WINDOW} * FROM c`;
-        const parameters = articleId ? [{ name: '@articleId', value: articleId }] : [];
-        const [curated, generated] = await Promise.all([
+        const params = parseGalleryListParams((key) => request.query.get(key));
+        const where = params.articleId ? ' WHERE c.articleId = @articleId' : '';
+        const parameters = params.articleId
+          ? [{ name: '@articleId', value: params.articleId }]
+          : [];
+        const query = `SELECT TOP ${LIST_WINDOW} * FROM c${where} ORDER BY c._ts DESC`;
+        const [curated, generated, content] = await Promise.all([
           store.queryDocs('curated_article_images', query, parameters),
           store.queryDocs('generated_content_images', query, parameters),
+          params.usage
+            ? store
+                .queryDocs(
+                  'content',
+                  `SELECT TOP 2000 ${CONTENT_USAGE_PROJECTION} FROM c WHERE NOT IS_DEFINED(c.softDeletedAt) AND (IS_DEFINED(c.heroImageUrl) OR IS_DEFINED(c.altCoverImage) OR IS_DEFINED(c.contentImageUrl) OR IS_DEFINED(c.coverImage) OR IS_DEFINED(c.aiImageUrls) OR IS_DEFINED(c.secondaryImageUrls))`,
+                  []
+                )
+                .catch((error) => {
+                  context.warn?.('listImages usage read failed:', error?.message);
+                  return [];
+                })
+            : Promise.resolve([]),
         ]);
-        const newestFirst = (rows) =>
-          rows.sort((a, b) => dateValue(b.createdAt) - dateValue(a.createdAt)).slice(0, limit);
+        const listing = buildGalleryListing({ curated, generated, content }, params);
+        // The compatibility arrays: every matching row of each collection,
+        // newest first, capped at `limit`.
+        const matching = buildGalleryListing(
+          { curated, generated, content },
+          { ...params, offset: 0, limit: GALLERY_MAX_LIMIT * 5 }
+        ).items;
         return json(200, {
           success: true,
-          curated: newestFirst(curated),
-          generated: newestFirst(generated),
+          ...listing,
+          curated: matching
+            .filter((item) => item.galleryCollection === 'curated_article_images')
+            .slice(0, params.limit),
+          generated: matching
+            .filter((item) => item.galleryCollection === 'generated_content_images')
+            .slice(0, params.limit),
         });
       } catch (error) {
         context.error('listImages failed:', error);
@@ -477,6 +729,10 @@ export function createAdminIntegrationHandlers({
         // otherwise persist the boolean into the stored document, where it
         // would then shadow the real value on the next read.
         const { hasOauthToken: _ignored, hasOauthRefreshToken: _ignored2, ...incoming } = body;
+        if (container === 'mcp_servers') {
+          const problem = mcpWriteError(incoming);
+          if (problem) return json(400, { error: problem });
+        }
 
         const doc = {
           ...incoming,
@@ -507,6 +763,7 @@ export function createAdminIntegrationHandlers({
           doc.oauthRefreshToken = existing.oauthRefreshToken;
         }
         await store.upsertDoc(container, doc);
+        if (container === 'ai_providers') aiConfigChanged();
         const item = container === 'mcp_servers' ? stripOAuthToken(doc) : doc;
         return json(200, { success: true, id, item });
       } catch (error) {
@@ -544,12 +801,19 @@ export function createAdminIntegrationHandlers({
           ...updates
         } = body;
         if (Object.keys(updates).length === 0) {
-          return json(400, { error: 'Body must contain at least one updatable field' });
+          return json(400, {
+            error: 'Body must contain at least one updatable field',
+          });
+        }
+        if (container === 'mcp_servers') {
+          const problem = mcpWriteError(updates);
+          if (problem) return json(400, { error: problem });
         }
         const updated = await store.patchDoc(container, id, {
           ...updates,
           updatedAt: now().toISOString(),
         });
+        if (container === 'ai_providers') aiConfigChanged();
         const item = container === 'mcp_servers' ? stripOAuthToken(updated) : updated;
         return json(200, { success: true, item });
       } catch (error) {
@@ -568,6 +832,7 @@ export function createAdminIntegrationHandlers({
         const id = String(request.params.id || '').trim();
         if (!id) return json(400, { error: 'id required' });
         await store.deleteDoc(container, id);
+        if (container === 'ai_providers') aiConfigChanged();
         return json(200, { success: true });
       } catch (error) {
         context.error(`deleteConfig(${container}) failed:`, error);
@@ -585,6 +850,11 @@ export function createAdminIntegrationHandlers({
         const limit = Math.min(Math.max(Number(request.query.get('limit')) || 100, 1), 500);
         const since = String(request.query.get('since') || '').trim();
 
+        // Newest first IN THE QUERY (ADR 0033): `TOP 1000` with no ORDER BY
+        // returned an arbitrary thousand, so once the container held more
+        // rows than that the newest calls could be the ones left out. Every
+        // row carries `timestamp` (usage.js writes it), so the ORDER BY
+        // drops nothing; the in-memory sort below stays as the tiebreak.
         let query = `SELECT TOP ${LIST_WINDOW} * FROM c`;
         const parameters = [];
         if (since) {
@@ -594,6 +864,7 @@ export function createAdminIntegrationHandlers({
           query += ' WHERE c.timestamp >= @since';
           parameters.push({ name: '@since', value: since });
         }
+        query += ' ORDER BY c.timestamp DESC';
         const rows = await store.queryDocs('ai_usage', query, parameters);
         const items = rows
           .sort((a, b) => dateValue(b.timestamp) - dateValue(a.timestamp))

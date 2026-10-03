@@ -1,14 +1,23 @@
 /**
- * Pure helpers every Certifications Hub tab shares (#572): reading a cert
- * document, the stats strip, the catalog filter, the renewals list, the
- * verification source and the public-snapshot diff. No React, no fetching,
- * so each is tested on its own in certView.test.js.
+ * Pure helpers every Certifications Hub tab shares (#572, ADR 0033 Spotlight
+ * slice): reading a cert document, the stats strip, the catalog filter, the
+ * renewals list, the verification source, the editor's validation and the
+ * public-snapshot diff. No React, no fetching, so each is tested on its own
+ * in certView.test.js.
+ *
+ * DATES ARE CALENDAR DAYS. A certification's issue, expiry and renewal dates
+ * are stored as plain `YYYY-MM-DD` (the API normalises every write) and read
+ * by their leading day; nothing here parses one through `new Date(iso)`,
+ * which places midnight UTC and showed a cert as expired the evening before
+ * its last day everywhere west of Greenwich (ADR 0033 §1). "Expired" is
+ * today's local calendar date being past the expiry day; days left are whole
+ * calendar days.
  */
 import { resolveMediaUrl } from '@/lib/functionsBase';
+import { daysUntil, isIsoDate, todayIso } from '@/lib/certStatus';
 
 export const COLLECTION = 'certifications';
 
-const DAY_MS = 24 * 60 * 60 * 1000;
 /** The stats strip's "Expiring 90d" and the card's Expiring badge. */
 export const EXPIRING_SOON_DAYS = 90;
 /** How far ahead Renewals looks; the old page's "expiring" view used the same. */
@@ -38,15 +47,25 @@ export const resolveImages = (cert) => {
 
 export const resolveImage = (cert) => resolveImages(cert)[0] || '';
 
+/**
+ * `YYYY-MM-DD` for a stored date: the leading day of a string (a plain day or
+ * a timestamp), the UTC day of a Firestore-shaped value (those were written
+ * as UTC midnight of the day meant). Empty for nothing usable.
+ */
 export const toIso = (val) => {
   if (!val) return '';
-  if (typeof val === 'string') return val.slice(0, 10);
+  if (typeof val === 'string') {
+    const head = val.trim().slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(head) ? head : '';
+  }
+  if (val instanceof Date) return Number.isNaN(val.getTime()) ? '' : val.toISOString().slice(0, 10);
   if (val?.toDate) return val.toDate().toISOString().slice(0, 10);
   if (val?.seconds) return new Date(val.seconds * 1000).toISOString().slice(0, 10);
   return '';
 };
 
-export const fromIso = (s) => (s ? new Date(`${s}T00:00:00Z`).toISOString() : null);
+/** What a save writes for a date input: the plain day, or null for none. */
+export const fromIso = (s) => (s && isIsoDate(s) ? s : null);
 
 export const issuerOf = (cert) => {
   const i = cert.issuer;
@@ -60,39 +79,44 @@ export const emptyForm = Object.freeze({
   issuer: '',
   issueDate: '',
   expDate: '',
+  renewalDate: '',
+  renewalRequirements: '',
   verifyUrl: '',
   learnUrl: '',
   imageUrl: '',
   description: '',
+  evidence: [],
+  relatedLearning: [],
   display: true,
   certState: true,
   featured: false,
   display_order: 999,
 });
 
-/** Epoch ms of a cert's expiry, or 0 when it has none. */
-export function expiryMs(cert) {
+/** Today's local calendar date for a clock value, as `YYYY-MM-DD`. */
+const todayFor = (nowMs) => todayIso(new Date(nowMs));
+
+/** Whole calendar days from today to the cert's expiry; null when it has none. */
+export function daysToExpiry(cert, nowMs) {
   const exp = toIso(cert.expDate);
-  return exp ? new Date(exp).getTime() : 0;
+  return exp ? daysUntil(exp, todayFor(nowMs)) : null;
 }
 
-/** Expired / expiring-soon flags for a card, as the old page computed them. */
+/** Expired / expiring-soon flags for a card. Expired means today is past the expiry day. */
 export function expiryFlags(cert, nowMs) {
-  const expMs = expiryMs(cert);
-  const isExpired = expMs > 0 && expMs < nowMs;
-  const isExpiringSoon = expMs > 0 && !isExpired && expMs < nowMs + EXPIRING_SOON_DAYS * DAY_MS;
+  const days = daysToExpiry(cert, nowMs);
+  const isExpired = days !== null && days < 0;
+  const isExpiringSoon = days !== null && !isExpired && days < EXPIRING_SOON_DAYS;
   return { isExpired, isExpiringSoon };
 }
 
+/** Display order is one global ladder across every issuer (ADR 0033, Spotlight slice). */
 export function sortByDisplayOrder(rows) {
   return [...rows].sort((a, b) => (a.display_order ?? 999) - (b.display_order ?? 999));
 }
 
 export function computeStats(items, nowMs) {
-  const expiringSoon = items.filter((c) => {
-    const t = expiryMs(c);
-    return t > nowMs && t < nowMs + EXPIRING_SOON_DAYS * DAY_MS;
-  }).length;
+  const expiringSoon = items.filter((c) => expiryFlags(c, nowMs).isExpiringSoon).length;
   const issuerCounts = items.reduce((acc, c) => {
     const k = issuerOf(c);
     acc[k] = (acc[k] || 0) + 1;
@@ -127,25 +151,21 @@ export const hiddenCerts = (items) => items.filter((c) => c.display !== true);
 
 /**
  * Renewals: every cert that has expired, or expires within the renewal
- * window, soonest first, with whole days left (negative once expired).
- *
- * Both sides round AWAY from the expiry moment, so the count is never 0 for an
- * expired cert: an hour past expiry is "1 day ago", not "0 days ago" beside an
- * Expired badge. A cert still valid rounds up the same way (an hour left is 1).
+ * window, soonest first, with whole calendar days left (negative once
+ * expired: a cert that expired yesterday is "1 day ago", never 0).
  */
 export function renewalRows(items, nowMs) {
-  const horizon = nowMs + RENEWAL_WINDOW_DAYS * DAY_MS;
   return items
-    .map((cert) => ({ cert, expMs: expiryMs(cert) }))
-    .filter(({ expMs }) => expMs > 0 && expMs <= horizon)
-    .sort((a, b) => a.expMs - b.expMs)
-    .map(({ cert, expMs }) => {
-      const expired = expMs < nowMs;
-      const daysLeft = expired
-        ? -Math.ceil((nowMs - expMs) / DAY_MS)
-        : Math.ceil((expMs - nowMs) / DAY_MS);
-      return { cert, due: toIso(cert.expDate), daysLeft, expired };
-    });
+    .map((cert) => ({ cert, days: daysToExpiry(cert, nowMs) }))
+    .filter(({ days }) => days !== null && days <= RENEWAL_WINDOW_DAYS)
+    .sort((a, b) => a.days - b.days)
+    .map(({ cert, days }) => ({
+      cert,
+      due: toIso(cert.expDate),
+      daysLeft: days,
+      expired: days < 0,
+      renewalDate: toIso(cert.renewalDate) || null,
+    }));
 }
 
 export function isCredlyUrl(value) {
@@ -180,6 +200,50 @@ export function verificationCounts(items) {
   );
 }
 
+const isHttpUrl = (value) => /^https?:\/\/\S+$/i.test(String(value || '').trim());
+const isImageRef = (value) => isHttpUrl(value) || /^\/\S+$/.test(String(value || '').trim());
+
+/**
+ * The editor's validation, as `{ field: message }` — empty when the form can
+ * be saved. The same rules the API enforces (functions/src/lib/admin-crud.js
+ * `validateCertification`), stated here so a refusal is shown beside the
+ * field rather than as a toast after the round trip.
+ */
+export function validateCertForm(form) {
+  const errors = {};
+  if (!String(form.name ?? '').trim()) errors.name = 'Name is required.';
+  if (form.issueDate && !isIsoDate(form.issueDate)) errors.issueDate = 'Enter a real date.';
+  if (form.expDate && !isIsoDate(form.expDate)) errors.expDate = 'Enter a real date.';
+  if (form.renewalDate && !isIsoDate(form.renewalDate)) errors.renewalDate = 'Enter a real date.';
+  if (!errors.expDate && form.issueDate && form.expDate && form.expDate < form.issueDate) {
+    errors.expDate = 'Expiration must be on or after the issue date.';
+  }
+  for (const key of ['verifyUrl', 'learnUrl']) {
+    if (String(form[key] || '').trim() && !isHttpUrl(form[key])) {
+      errors[key] = 'Must start with http:// or https://.';
+    }
+  }
+  if (String(form.imageUrl || '').trim() && !isImageRef(form.imageUrl)) {
+    errors.imageUrl = 'Must be an http(s) URL or an uploaded image path.';
+  }
+  const order = form.display_order;
+  if (order !== '' && order !== null && order !== undefined) {
+    const n = Number(order);
+    if (!Number.isInteger(n) || n < 0) errors.display_order = 'A whole number, 0 or more.';
+  }
+  (form.evidence || []).forEach((row, index) => {
+    if (String(row.url || '').trim() && !isHttpUrl(row.url)) {
+      errors[`evidence.${index}`] = 'Must start with http:// or https://.';
+    }
+  });
+  (form.relatedLearning || []).forEach((row, index) => {
+    if (String(row.url || '').trim() && !isHttpUrl(row.url)) {
+      errors[`relatedLearning.${index}`] = 'Must start with http:// or https://.';
+    }
+  });
+  return errors;
+}
+
 /**
  * The public fields the snapshot publishes (functions/src/lib/snapshots-publish.js
  * `sanitizeCertification`), each read from an admin row and a snapshot item.
@@ -193,6 +257,7 @@ const PUBLIC_FIELDS = [
   ['active', (c) => c.certState ?? null, (s) => s.certState ?? null],
   ['verify URL', (c) => c.verifyUrl || null, (s) => s.verifyUrl || null],
   ['order', (c) => c.display_order ?? null, (s) => s.displayOrder ?? null],
+  ['featured', (c) => c.featured === true, (s) => s.featured === true],
 ];
 
 function changedFields(row, item) {

@@ -6,12 +6,16 @@
  */
 import { httpRoute, httpRouteByMethod } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
-import { readDoc } from '../lib/cosmos-client.js';
+import { readDoc, upsertDoc } from '../lib/cosmos-client.js';
 import { createNewsletterInsightsHandlers } from '../lib/newsletter/insights-handlers.js';
 
 let handlers = null;
 const insights = () => {
-  handlers ??= createNewsletterInsightsHandlers({ guard: getDefaultGuard(), store: { readDoc } });
+  // upsertDoc: the consent record an admin "add subscriber" writes (ADR 0033).
+  handlers ??= createNewsletterInsightsHandlers({
+    guard: getDefaultGuard(),
+    store: { readDoc, upsertDoc },
+  });
   return handlers;
 };
 
@@ -36,11 +40,22 @@ httpRoute('mailingListRecipients', {
   handler: (request, context) => insights().recipients(request, context),
 });
 
-httpRoute('mailingListAudience', {
-  methods: ['GET'],
+httpRouteByMethod('mailingListAudience', {
   authLevel: 'anonymous',
   route: 'cms/mailing-list/audience',
-  handler: (request, context) => insights().audience(request, context),
+  handlers: {
+    GET: (request, context) => insights().audience(request, context),
+    // ADR 0033 Amplify slice: add a subscriber (invite, or consent recorded).
+    POST: (request, context) => insights().addContact(request, context),
+  },
+});
+
+// Registered before the {contactId} route so the literal segment is never read as an id.
+httpRoute('mailingListAudienceExport', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'cms/mailing-list/audience/export',
+  handler: (request, context) => insights().exportAudience(request, context),
 });
 
 httpRoute('mailingListAudienceSummary', {

@@ -525,25 +525,32 @@ describe('AI cover', () => {
       uuid: () => `g${++n}`,
     });
     const r = await gen.run('c1', 'ev1');
-    expect(r).toEqual({ ran: true, reason: 'generated', targets: ['hero', 'card'] });
+    // No set is assigned to this document, so the built-in prompt applies.
+    expect(r).toEqual({
+      ran: true,
+      reason: 'generated',
+      targets: ['hero', 'card'],
+      promptSource: 'builtin',
+    });
     expect(replicate.generate).toHaveBeenCalledTimes(2);
     expect(replicate.generate.mock.calls[0][0]).toMatch(/Lego minifigure[\s\S]*Image slot: hero/);
+    // Stamped paths (ADR 0033 §6.2): a regeneration writes beside, not over.
+    const stamp = now().toISOString().replace(/[-:TZ]/g, '').replace(/\..*$/, '');
+    const hero = `/api/public/media/covers/c1-ai-hero-${stamp}.png`;
+    const card = `/api/public/media/covers/c1-ai-card-${stamp}.png`;
     expect(storage.uploadBlob.mock.calls.map((c) => c[1])).toEqual([
-      'c1-ai-hero.png',
-      'c1-ai-card.png',
+      `c1-ai-hero-${stamp}.png`,
+      `c1-ai-card-${stamp}.png`,
     ]);
     const doc = store.data.content.get('c1');
     expect(doc).toMatchObject({
       altCoverImageTrigger: false,
       altCoverImageRunId: null,
-      altCoverImage: '/api/public/media/covers/c1-ai-hero.png',
-      aiImageUrls: {
-        hero: '/api/public/media/covers/c1-ai-hero.png',
-        card: '/api/public/media/covers/c1-ai-card.png',
-      },
+      altCoverImage: hero,
+      aiImageUrls: { hero, card },
       altCoverImageError: null,
     });
-    expect(doc.aiImageHistory.hero).toEqual(['/api/public/media/covers/c1-ai-hero.png']);
+    expect(doc.aiImageHistory.hero).toEqual([hero]);
     expect(store.data.generated_content_images.size).toBe(2);
     expect((await gen.run('c1', 'ev1')).reason).toBe(SKIP_REASONS.FLAG_NOT_SET);
 

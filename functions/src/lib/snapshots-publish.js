@@ -85,6 +85,9 @@ export function sanitizeCertification(doc) {
     ),
     displayOrder: getFirst(doc, ['displayOrder', 'display_order', 'DisplayOrder']),
     tags: getFirst(doc, ['tags', 'Tags']),
+    // "Feature in Spotlight" had no public effect because this list dropped
+    // it (ADR 0033 §1); the About page now leads with featured certs.
+    featured: getFirst(doc, ['featured', 'Featured']) === true ? true : undefined,
     display: true,
   });
 }
@@ -117,10 +120,22 @@ export function sanitizeCertification(doc) {
  * deliberate act, which is why the list is enumerated rather than computed.
  */
 export function sanitizeSpeakerEvent(doc) {
+  const sessionizeId = getFirst(doc, ['sessionizeId', 'sessionize_id', 'eventId']);
+  const display = getFirst(doc, ['display', 'Display']);
+
+  // A Sessionize-backed row the editor has unticked publishes a TOMBSTONE —
+  // its join key and `display: false` and nothing else — so the public widget
+  // can hide the event Sessionize still lists (ADR 0033, Spotlight slice).
+  // Before this the widget rendered the Sessionize entry regardless, because
+  // the row it would have matched had been dropped from the snapshot.
+  if (display === false && sessionizeId !== undefined) {
+    return { id: doc.id, sessionizeId, display: false };
+  }
+
   // Not `!== false`: a document with no `display` field is not published.
   // Failing closed matters more than showing an event whose author forgot the
   // flag, and it matches how sanitizeCertification treats the same field.
-  if (getFirst(doc, ['display', 'Display']) !== true) return null;
+  if (display !== true) return null;
 
   return compactObject({
     id: doc.id,
@@ -133,10 +148,72 @@ export function sanitizeSpeakerEvent(doc) {
     presentationUrl: getFirst(doc, ['presentationUrl', 'presentation_url']),
     image: sanitizeImageValue(getFirst(doc, ['image', 'Image'])),
     eventImageUrl: sanitizeImageValue(getFirst(doc, ['eventImageUrl', 'event_image_url'])),
+    // The image-mirror trigger's copies (private blob, served through the
+    // media route). Written server-side only — upsertSpeakerEvent's allowlist
+    // refuses the key — so a mirrored image is always one the trigger made.
+    images: sanitizeImageValue(getFirst(doc, ['images', 'Images'])),
+    // The hub's status and sessions (ADR 0033 §4): a delivered session's
+    // slides and recording are what the public page links.
+    status: getFirst(doc, ['status']),
+    sessions: sanitizeSessions(getFirst(doc, ['sessions'])),
     // The join key the widget matches Sessionize entries on. Not sensitive —
     // Sessionize ids are public — and omitting it would break the merge.
-    sessionizeId: getFirst(doc, ['sessionizeId', 'sessionize_id']),
+    sessionizeId,
     display: true,
+  });
+}
+
+function sanitizeSessions(value) {
+  if (!Array.isArray(value)) return undefined;
+  const out = value
+    .filter((s) => s && typeof s === 'object')
+    .map((s) =>
+      compactObject({
+        title: s.title,
+        abstract: s.abstract,
+        slidesUrl: s.slidesUrl,
+        videoUrl: s.videoUrl,
+      })
+    )
+    .filter((s) => s.title);
+  return out.length ? out : undefined;
+}
+
+/**
+ * What the public speaking widget needs beside the rows: the Sessionize
+ * speaker id it should read live, and the speaker profile (bio, headshot,
+ * links). Both are saved on `admin_settings/integrations`; publishing copies
+ * them into the snapshot so the widget never carries a hard-coded id and
+ * reads nothing admin-gated. Only when the store can read documents.
+ */
+async function speakerMeta(store) {
+  if (typeof store.readDoc !== 'function') return undefined;
+  let settings = null;
+  try {
+    settings = await store.readDoc('admin_settings', 'integrations', 'integrations');
+  } catch {
+    return undefined;
+  }
+  if (!settings) return undefined;
+  const speakerId = String(settings.sessionizeSpeakerId || '').trim();
+  const profile = settings.speakerProfile;
+  return compactObject({
+    speakerId: speakerId || undefined,
+    speakerProfile:
+      profile && typeof profile === 'object'
+        ? compactObject({
+            name: profile.name,
+            bio: profile.bio,
+            headshotUrl: profile.headshotUrl,
+            links: Array.isArray(profile.links)
+              ? profile.links
+                  .filter(
+                    (l) => l && typeof l === 'object' && /^https?:\/\//i.test(String(l.url || ''))
+                  )
+                  .map((l) => ({ label: l.label || l.url, url: l.url }))
+              : undefined,
+          })
+        : undefined,
   });
 }
 
@@ -150,7 +227,7 @@ const SNAPSHOT_COLLECTIONS = ['certifications', 'speakerevents'];
 /**
  * @param {object} deps
  * @param {{ requireRole: Function }} deps.guard
- * @param {{ queryDocs: Function, upsertDoc: Function }} deps.store
+ * @param {{ queryDocs: Function, upsertDoc: Function, readDoc?: Function }} deps.store
  * @param {() => Date} [deps.now]
  */
 export function createSnapshotPublishHandlers({ guard, store, now = () => new Date() }) {
@@ -163,7 +240,17 @@ export function createSnapshotPublishHandlers({ guard, store, now = () => new Da
       let items = rows.map((d) => serializeValue(d));
       const sanitize = SANITIZERS[collectionName];
       if (sanitize) items = items.map(sanitize).filter(Boolean);
-      await store.upsertDoc('_snapshots', { id: collectionName, generatedAt, items });
+      const meta = collectionName === 'speakerevents' ? await speakerMeta(store) : undefined;
+      // `publishedAt` is the name the public pages compare against the
+      // build-time JSON's stamp (ADR 0033, Spotlight slice: the newer of the
+      // two wins); `generatedAt` stays for every existing reader.
+      await store.upsertDoc('_snapshots', {
+        id: collectionName,
+        generatedAt,
+        publishedAt: generatedAt,
+        items,
+        ...(meta && Object.keys(meta).length ? { meta } : {}),
+      });
       results[collectionName] = items.length;
     }
 

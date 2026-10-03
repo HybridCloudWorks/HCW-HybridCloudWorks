@@ -11,7 +11,9 @@ const context = { log: vi.fn(), error: vi.fn() };
 
 const USER = { oid: 'u1', email: 'editor@hcw.dev' };
 const guardAs = (role) => ({ requireRole: vi.fn(async () => ({ user: USER, role, error: null })) });
-const denyGuard = { requireRole: vi.fn(async () => ({ user: null, role: null, error: { status: 403, body: '{}' } })) };
+const denyGuard = {
+  requireRole: vi.fn(async () => ({ user: null, role: null, error: { status: 403, body: '{}' } })),
+};
 
 const makeRequest = (body) => ({ headers: { get: () => 'vitest' }, json: async () => body ?? {} });
 
@@ -43,7 +45,9 @@ describe('enqueueLabJob', () => {
     );
     expect(big.status).toBe(413);
 
-    expect((await h.enqueueLabJob(makeRequest({ type: 'shell-echo', payload: 42 }), context)).status).toBe(400);
+    expect(
+      (await h.enqueueLabJob(makeRequest({ type: 'shell-echo', payload: 42 }), context)).status
+    ).toBe(400);
     expect(store.upsertDoc).not.toHaveBeenCalled();
   });
 
@@ -79,18 +83,31 @@ describe('enqueueLabJob', () => {
       context
     );
     expect(chart.status).toBe(200);
-    expect(store.upsertDoc.mock.calls[0][1]).toMatchObject({ type: 'helm-template', payloadEncoding: 'tar' });
+    expect(store.upsertDoc.mock.calls[0][1]).toMatchObject({
+      type: 'helm-template',
+      payloadEncoding: 'tar',
+    });
 
     // Omitted means text, which is what every pre-#675 caller sends.
-    const plain = await h.enqueueLabJob(makeRequest({ type: 'kubeconform', payload: 'kind: Pod' }), context);
+    const plain = await h.enqueueLabJob(
+      makeRequest({ type: 'kubeconform', payload: 'kind: Pod' }),
+      context
+    );
     expect(plain.status).toBe(200);
-    expect(store.upsertDoc.mock.calls[1][1]).toMatchObject({ type: 'kubeconform', payloadEncoding: 'text' });
+    expect(store.upsertDoc.mock.calls[1][1]).toMatchObject({
+      type: 'kubeconform',
+      payloadEncoding: 'text',
+    });
   });
 
   it('every job type names its encodings, and the five #675 types are all present', () => {
-    expect(Object.keys(LAB_JOB_TYPES).sort()).toEqual(
-      ['ansible-check', 'helm-template', 'kubeconform', 'shell-echo', 'terraform-validate']
-    );
+    expect(Object.keys(LAB_JOB_TYPES).sort()).toEqual([
+      'ansible-check',
+      'helm-template',
+      'kubeconform',
+      'shell-echo',
+      'terraform-validate',
+    ]);
     for (const [type, spec] of Object.entries(LAB_JOB_TYPES)) {
       expect(spec.payloadEncodings.length, type).toBeGreaterThan(0);
       expect(spec.maxPayloadBytes, type).toBeLessThanOrEqual(64 * 1024);
@@ -104,7 +121,11 @@ describe('enqueueLabJob', () => {
       makeRequest({ type: 'terraform-validate', payload: 'resource {}' }),
       context
     );
-    expect(JSON.parse(res.body)).toEqual({ jobId: 'fixed-uuid', type: 'terraform-validate', status: 'queued' });
+    expect(JSON.parse(res.body)).toEqual({
+      jobId: 'fixed-uuid',
+      type: 'terraform-validate',
+      status: 'queued',
+    });
     expect(store.upsertDoc.mock.calls[0][1]).toMatchObject({
       id: 'fixed-uuid',
       status: 'queued',
@@ -123,7 +144,11 @@ describe('getLabsSnapshot', () => {
         if (query.includes('VALUE COUNT')) return [3];
         if (container === 'lab_agents') {
           return [
-            { id: 'fresh', lastSeenAt: new Date(NOW.getTime() - 30_000).toISOString(), capabilities: ['shell-echo'] },
+            {
+              id: 'fresh',
+              lastSeenAt: new Date(NOW.getTime() - 30_000).toISOString(),
+              capabilities: ['shell-echo'],
+            },
             { id: 'stale', lastSeenAt: new Date(NOW.getTime() - 120_000).toISOString() },
             { id: 'never' },
           ];
@@ -143,6 +168,23 @@ describe('getLabsSnapshot', () => {
     expect(body.queueDepth).toBe(3);
     expect(body.jobTypes.map((t) => t.type)).toEqual(Object.keys(LAB_JOB_TYPES));
     expect(body.statuses).toEqual(JOB_STATUSES);
+    // Newest first in the query itself, so TOP 100 is the newest 100 of the
+    // container and not an arbitrary 100 sorted afterwards (ADR 0033).
+    const jobsQuery = store.queryDocs.mock.calls.find(
+      ([container, sql]) => container === 'lab_jobs' && !sql.includes('VALUE COUNT')
+    )[1];
+    expect(jobsQuery).toMatch(/ORDER BY c\.createdAt DESC/);
+  });
+
+  it('knows no running status: the agent writes claimed, then a terminal one', () => {
+    expect(JOB_STATUSES).toEqual([
+      'queued',
+      'claimed',
+      'succeeded',
+      'failed',
+      'timeout',
+      'cancelled',
+    ]);
   });
 
   it('carries the registry half of each agent: active, its object id, when it was registered (#740)', async () => {
@@ -168,14 +210,26 @@ describe('getLabsSnapshot', () => {
     const h = createLabHandlers({ guard: guardAs('viewer'), store, ...fixed });
     const { agents } = JSON.parse((await h.getLabsSnapshot(makeRequest({}), context)).body);
 
-    expect(agents.map(({ agentId, active, oid, registeredAt }) => ({ agentId, active, oid, registeredAt }))).toEqual([
+    expect(
+      agents.map(({ agentId, active, oid, registeredAt }) => ({
+        agentId,
+        active,
+        oid,
+        registeredAt,
+      }))
+    ).toEqual([
       {
         agentId: 'vps-hostinger-01',
         active: true,
         oid: '9f8e7d6c-5b4a-4938-8271-605f4e3d2c1b',
         registeredAt: '2026-09-27T12:00:00.000Z',
       },
-      { agentId: 'revoked', active: false, oid: '12345678-90ab-4cde-8f01-23456789abcd', registeredAt: null },
+      {
+        agentId: 'revoked',
+        active: false,
+        oid: '12345678-90ab-4cde-8f01-23456789abcd',
+        registeredAt: null,
+      },
       { agentId: 'legacy', active: false, oid: null, registeredAt: null },
     ]);
   });
@@ -186,10 +240,10 @@ describe('cancelLabJob', () => {
     const h404 = createLabHandlers({ guard: guardAs('editor'), store: makeStore(), ...fixed });
     expect((await h404.cancelLabJob(makeRequest({ jobId: 'x' }), context)).status).toBe(404);
 
-    const running = makeStore({ readDoc: vi.fn(async () => ({ id: 'j1', status: 'running' })) });
-    const h409 = createLabHandlers({ guard: guardAs('editor'), store: running, ...fixed });
+    const claimed = makeStore({ readDoc: vi.fn(async () => ({ id: 'j1', status: 'claimed' })) });
+    const h409 = createLabHandlers({ guard: guardAs('editor'), store: claimed, ...fixed });
     expect((await h409.cancelLabJob(makeRequest({ jobId: 'j1' }), context)).status).toBe(409);
-    expect(running.patchDoc).not.toHaveBeenCalled();
+    expect(claimed.patchDoc).not.toHaveBeenCalled();
 
     const queued = makeStore({ readDoc: vi.fn(async () => ({ id: 'j1', status: 'queued' })) });
     const h = createLabHandlers({ guard: guardAs('editor'), store: queued, ...fixed });
@@ -255,10 +309,7 @@ describe('getLabJob', () => {
   it('denial makes zero store calls; missing job 404s', async () => {
     const store = makeStore();
     const denied = createLabHandlers({ guard: denyGuard, store, ...fixed });
-    const res = await denied.getLabJob(
-      { method: 'GET', query: { get: () => 'job-1' } },
-      context
-    );
+    const res = await denied.getLabJob({ method: 'GET', query: { get: () => 'job-1' } }, context);
     expect(res.status).toBe(403);
     expect(store.readDoc).not.toHaveBeenCalled();
 

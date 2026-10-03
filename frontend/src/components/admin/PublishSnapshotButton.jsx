@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { UploadCloud, Check, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
@@ -7,17 +7,35 @@ import { postJSON } from '@/lib/api';
 /**
  * Triggers the publishSnapshot Azure Function, which snapshots both the
  * certifications and speakerevents content containers into _snapshots/
- * documents. The About page and speaking-events widget read from those
- * documents, so visitors see new content without a full site redeploy.
+ * documents. The About page and speaking-events widget render the newer of
+ * those documents and the JSON baked into the last deploy, so visitors see
+ * new content without a full site redeploy (ADR 0033, Spotlight slice).
  *
  * `onPublished(result)` is called after a publish lands, so a page showing
- * the snapshot (the Certifications Hub's Publishing tab) can re-read it.
+ * the snapshot (the two Publishing tabs) can re-read it.
+ *
+ * Race-safety: the in-flight guard is a ref checked before any await — the
+ * disabled attribute only takes effect after the re-render the first click
+ * causes, so a fast double click used to send two publishes. The "Published"
+ * flash is a timer that is cleared on unmount, so it never sets state on a
+ * component that has gone.
  */
 export default function PublishSnapshotButton({ onPublished } = {}) {
   const { toast } = useToast();
   const [state, setState] = useState('idle'); // idle | publishing | done
+  const inFlight = useRef(false);
+  const resetTimer = useRef(null);
+
+  useEffect(
+    () => () => {
+      if (resetTimer.current) clearTimeout(resetTimer.current);
+    },
+    []
+  );
 
   const handlePublish = async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setState('publishing');
     try {
       const result = await postJSON('publishSnapshot', {});
@@ -27,10 +45,16 @@ export default function PublishSnapshotButton({ onPublished } = {}) {
         description: `Certifications: ${result.certifications} · Events: ${result.speakerevents}`,
       });
       onPublished?.(result);
-      setTimeout(() => setState('idle'), 3000);
+      if (resetTimer.current) clearTimeout(resetTimer.current);
+      resetTimer.current = setTimeout(() => {
+        resetTimer.current = null;
+        setState('idle');
+      }, 3000);
     } catch (err) {
       setState('idle');
       toast({ title: 'Publish failed', description: err.message, variant: 'destructive' });
+    } finally {
+      inFlight.current = false;
     }
   };
 

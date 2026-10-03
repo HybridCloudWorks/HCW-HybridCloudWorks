@@ -11,7 +11,10 @@ import { postJSON, getJSON, sendJSON } from '@/lib/api';
  * assignments) and cms/keyword-config (synonym/augmentation collections).
  *
  * Tree shapes (see functions/src/lib/cms/image-prompts.js):
- *   sets[]        id = set name, { primaryPrompt }
+ *   sets[]        id = set name, { primaryPrompt, purpose, theme, styleRules,
+ *                 negativePrompt, aspectRatio, tags, version, history,
+ *                 archivedAt } — a set IS an image set (ADR 0033)
+ *   images[]      gallery rows carrying set lineage, tagged galleryCollection
  *   prompts[]     id = prompt name, { setName, additionalParameters, slotTemplates }
  *   pages[]       id = page doc id, { pagePath, setName, promptName }
  *   legacyPages[] id = page doc id, may carry { title, primaryPrompt, secondaryPrompt }
@@ -84,6 +87,98 @@ async function loadConfigTree() {
     prompts: res.prompts || [],
     legacyPages: res.legacyPages || [],
     legacySets: res.legacySets || [],
+    images: res.images || [],
+    allowedPages: res.allowedPages || [],
+  };
+}
+
+/** Legacy per-page sets, added to the library under their own names. */
+function addLegacySets(tree, byName) {
+  for (const { pageDocId, data } of legacyPageEntries(tree)) {
+    const names = legacySetsForPage(tree, pageDocId).map((entry) => entry.id);
+    let legacyNames = names;
+    if (names.length === 0) {
+      legacyNames = hasLegacyPromptFields(data)
+        ? [normalizeKey(data.title) || LEGACY_DEFAULT_PROMPT_NAME]
+        : [];
+    }
+    for (const name of legacyNames) {
+      if (byName.has(name)) continue;
+      const legacy = findLegacySetByNameInTree(tree, name);
+      if (!legacy) continue;
+      byName.set(name, {
+        id: name,
+        ...legacy,
+        legacy: true,
+        version: 1,
+        history: [],
+        tags: [],
+        prompts: [
+          {
+            id: legacy.legacyPromptName,
+            name: legacy.legacyPromptName,
+            ...(findLegacyPromptDataInTree(tree, legacy, name) || {}),
+          },
+        ],
+        pages: [],
+        images: [],
+      });
+    }
+  }
+}
+
+/**
+ * Every set as the Image Prompts page shows it: the set document with its
+ * prompts, the pages assigned to it and the generated images carrying its
+ * lineage. Legacy per-page sets appear too, flagged `legacy`, so nothing an
+ * older page configured goes missing from the grid. Pure over the tree.
+ */
+export function buildPromptLibrary(tree) {
+  const byName = new Map();
+  for (const set of tree.sets) {
+    byName.set(set.id, {
+      ...set,
+      name: set.name || set.id,
+      legacy: false,
+      prompts: [],
+      pages: [],
+      images: [],
+      tags: Array.isArray(set.tags) ? set.tags : [],
+      history: Array.isArray(set.history) ? set.history : [],
+      version: Number(set.version) || 1,
+    });
+  }
+  addLegacySets(tree, byName);
+  for (const prompt of tree.prompts) {
+    const set = byName.get(prompt.setName);
+    if (set) set.prompts.push({ ...prompt, name: prompt.name || prompt.id });
+  }
+  for (const page of tree.pages) {
+    const setName = normalizeKey(page.setName);
+    const set = setName && byName.get(setName);
+    if (set) {
+      set.pages.push({
+        pagePath: page.pagePath || docIdToPath(page.id),
+        promptName: page.promptName || '',
+      });
+    }
+  }
+  for (const image of tree.images) {
+    const key = normalizeKey(image.promptSet || image.promptSetId);
+    const set = key && byName.get(key);
+    if (set) set.images.push(image);
+  }
+  const sets = [...byName.values()];
+  const stamp = (row) => new Date(row.createdAt || row.generatedAt || 0).getTime();
+  for (const set of sets) {
+    set.prompts.sort((a, b) => a.name.localeCompare(b.name));
+    set.pages.sort((a, b) => a.pagePath.localeCompare(b.pagePath));
+    set.images.sort((a, b) => stamp(b) - stamp(a));
+  }
+  return {
+    sets: sets.sort((a, b) => a.name.localeCompare(b.name)),
+    pages: tree.pages,
+    allowedPages: tree.allowedPages,
   };
 }
 
@@ -275,15 +370,26 @@ export function useImagePrompts() {
     }
   }, []);
 
-  const savePromptSet = useCallback(async (setName, primaryPrompt) => {
+  /**
+   * `savePromptSet(name, 'prompt text')` as before, or
+   * `savePromptSet(name, { primaryPrompt, purpose, theme, styleRules,
+   * negativePrompt, aspectRatio, tags })` — fields absent from the object are
+   * left as they are on the server.
+   */
+  const savePromptSet = useCallback(async (setName, primaryPromptOrFields) => {
     const normalizedSetName = normalizeKey(setName);
+    const fields =
+      primaryPromptOrFields && typeof primaryPromptOrFields === 'object'
+        ? primaryPromptOrFields
+        : { primaryPrompt: primaryPromptOrFields };
     setLoading(true);
     setError(null);
     try {
       await postJSON('manageImagePromptConfig', {
         action: 'saveSet',
         setName: normalizedSetName,
-        primaryPrompt: String(primaryPrompt || '').trim(),
+        ...fields,
+        primaryPrompt: String(fields.primaryPrompt || '').trim(),
       });
       return true;
     } catch (err) {
@@ -520,6 +626,88 @@ export function useImagePrompts() {
     }
   }, []);
 
+  /** The whole library — sets with prompts, pages and images — in one read. */
+  const fetchPromptLibrary = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      return buildPromptLibrary(await loadConfigTree());
+    } catch (err) {
+      setError(`${err?.code || 'UNKNOWN'}: ${err?.message || 'Unknown error'}`);
+      console.error('Error loading prompt library:', err);
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  /** One manageImagePromptConfig action that returns the response or null. */
+  const runSetAction = useCallback(async (action, body, failure) => {
+    setLoading(true);
+    setError(null);
+    try {
+      return await postJSON('manageImagePromptConfig', { action, ...body });
+    } catch (err) {
+      setError(`${err?.code || 'UNKNOWN'}: ${err?.message || failure}`);
+      console.error(`Error on ${action}:`, err);
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const duplicatePromptSet = useCallback(
+    (setName, newSetName) =>
+      runSetAction(
+        'duplicateSet',
+        { setName: normalizeKey(setName), newSetName: normalizeKey(newSetName) },
+        'Failed to duplicate set.'
+      ),
+    [runSetAction]
+  );
+
+  const renamePromptSet = useCallback(
+    (setName, newSetName) =>
+      runSetAction(
+        'renameSet',
+        { setName: normalizeKey(setName), newSetName: normalizeKey(newSetName) },
+        'Failed to rename set.'
+      ),
+    [runSetAction]
+  );
+
+  const archivePromptSet = useCallback(
+    (setName) =>
+      runSetAction('archiveSet', { setName: normalizeKey(setName) }, 'Failed to archive set.'),
+    [runSetAction]
+  );
+
+  const restorePromptSet = useCallback(
+    (setName) =>
+      runSetAction('restoreSet', { setName: normalizeKey(setName) }, 'Failed to restore set.'),
+    [runSetAction]
+  );
+
+  /**
+   * One hero from a set through POST cms/image-prompts/sample. Throws on
+   * failure so the caller can show the server's message; a sample is an
+   * explicit, billed action and a silent null would hide the reason.
+   */
+  const generateSetSample = useCallback(async (body) => {
+    setError(null);
+    return postJSON('cms/image-prompts/sample', body);
+  }, []);
+
+  /** Which set a content document would generate with today, or null. */
+  const resolvePromptForContent = useCallback(async (contentId) => {
+    try {
+      return await getJSON(`cms/image-prompts/resolve?contentId=${encodeURIComponent(contentId)}`);
+    } catch (err) {
+      console.error('Error resolving prompt for content:', err);
+      return null;
+    }
+  }, []);
+
   // --------------------------------------------------------------------------
   // Keyword Matrix CRUD (cms/keyword-config)
   // --------------------------------------------------------------------------
@@ -627,6 +815,13 @@ export function useImagePrompts() {
     fetchPageAssignment,
     savePageAssignment,
     resolvePromptForPage,
+    fetchPromptLibrary,
+    duplicatePromptSet,
+    renamePromptSet,
+    archivePromptSet,
+    restorePromptSet,
+    generateSetSample,
+    resolvePromptForContent,
     fetchKeywordSynonyms,
     saveKeywordSynonym,
     deleteKeywordSynonym,

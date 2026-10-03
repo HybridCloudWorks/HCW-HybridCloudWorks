@@ -29,6 +29,14 @@ export function readBuilderSnapshot() {
   }
 }
 
+/** The taxonomy (ADR 0033 §4); an older snapshot has neither, so a fresh page's defaults apply. */
+function restoredTaxonomy(saved) {
+  return {
+    kind: saved.kind || 'article',
+    ideaOrigin: saved.ideaOrigin || 'imported-source',
+  };
+}
+
 function applyPrimaryBuilderSnapshot(saved, setters) {
   const {
     provider = '',
@@ -49,6 +57,7 @@ function applyPrimaryBuilderSnapshot(saved, setters) {
   } = saved;
 
   setters.setProvider(provider);
+  setters.setTaxonomy?.(restoredTaxonomy(saved));
   setters.setBlogLandingProvider(blogLandingProvider);
   setters.setContentType(contentType);
   setters.setTitle(title);

@@ -127,7 +127,15 @@ async function fetchSnapshot(base, id) {
     throw new Error(`GET ${url} returned zero items — refusing to write an empty snapshot`);
   }
 
-  return { items, generatedAt: body.snapshot.generatedAt || null };
+  return {
+    items,
+    generatedAt: body.snapshot.generatedAt || null,
+    // The speaking snapshot carries the Sessionize speaker id and the speaker
+    // profile the public widget reads (ADR 0033, Spotlight slice); the static
+    // copy must carry them too, or it would lose them whenever it wins the
+    // newer-of-the-two comparison the pages make.
+    meta: body.snapshot.meta || null,
+  };
 }
 
 async function main() {
@@ -136,14 +144,18 @@ async function main() {
   fs.mkdirSync(OUT_DIR, { recursive: true });
 
   for (const { id, outFile } of SNAPSHOTS) {
-    const { items, generatedAt } = await fetchSnapshot(base, id);
+    const { items, generatedAt, meta } = await fetchSnapshot(base, id);
 
-    // Shape kept identical to the previous Firestore dump: consumers read
+    // Shape kept compatible with the previous Firestore dump: consumers read
     // `items`, and loadPublicDataSnapshot returns [] unless it finds that key.
+    // `publishedAt` is the stamp the pages compare with the live snapshot's.
+    const stamp = generatedAt || new Date().toISOString();
     const payload = {
-      generatedAt: generatedAt || new Date().toISOString(),
+      generatedAt: stamp,
+      publishedAt: stamp,
       count: items.length,
       items,
+      ...(meta ? { meta } : {}),
     };
 
     const outPath = path.join(OUT_DIR, outFile);

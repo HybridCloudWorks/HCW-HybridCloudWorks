@@ -92,6 +92,20 @@ export const DEFAULT_PROMPTS = Object.freeze({
   version: 0,
 });
 
+/**
+ * A number from a stored or submitted value, or the fallback when the value
+ * is absent (undefined, null, '') or not a number. `Number(x) || fallback`
+ * was used before ADR 0033 and turned an explicit 0 into the fallback: a
+ * publish threshold of 0 saved as 80 and an Auto-Forge daily limit of 0 as
+ * 3, so the two settings could not be set to the one value that means
+ * "everything passes" and "paused".
+ */
+export function numberOr(value, fallback) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 function normalizeKeywordList(value) {
   if (!Array.isArray(value)) return [];
   return value
@@ -104,15 +118,17 @@ function normalizeKeywordList(value) {
 }
 
 export function normalizeProfile(raw = {}) {
-  const interestAreas =
-    Array.isArray(raw.interestAreas) && raw.interestAreas.length
-      ? raw.interestAreas.map((area) => ({
-          key: String(area.key || '').trim() || 'custom',
-          label: String(area.label || area.key || 'Custom'),
-          weight: Math.max(0, Math.min(100, Number(area.weight) || 0)),
-          keywords: normalizeKeywordList(area.keywords),
-        }))
-      : [...DEFAULT_INTEREST_AREAS];
+  // An explicit empty list is kept (ADR 0033): the Studio could not clear
+  // the interest areas while an empty array fell back to the defaults.
+  // Only a missing or non-list value takes the defaults.
+  const interestAreas = Array.isArray(raw.interestAreas)
+    ? raw.interestAreas.map((area) => ({
+        key: String(area.key || '').trim() || 'custom',
+        label: String(area.label || area.key || 'Custom'),
+        weight: Math.max(0, Math.min(100, numberOr(area.weight, 0))),
+        keywords: normalizeKeywordList(area.keywords),
+      }))
+    : [...DEFAULT_INTEREST_AREAS];
 
   return {
     certifications: Array.isArray(raw.certifications)
@@ -149,11 +165,11 @@ export function normalizePrompts(raw = {}) {
     },
     publishThreshold: Math.max(
       0,
-      Math.min(100, Number(raw.publishThreshold) || DEFAULT_PUBLISH_THRESHOLD)
+      Math.min(100, numberOr(raw.publishThreshold, DEFAULT_PUBLISH_THRESHOLD))
     ),
     autoForge: {
       enabled: raw.autoForge?.enabled === true,
-      dailyLimit: Math.max(0, Math.min(10, Number(raw.autoForge?.dailyLimit) || 3)),
+      dailyLimit: Math.max(0, Math.min(10, numberOr(raw.autoForge?.dailyLimit, 3))),
     },
     version: Number(raw.version) || 0,
   };

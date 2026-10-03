@@ -17,8 +17,8 @@
  * and the cmsGenerateContent AI pipeline (route intentionally NOT registered
  * until it exists — a stub returning "TODO: AI output" is not an endpoint).
  */
-import { httpRoute } from '../lib/auth/http-route.js';
-import { getDefaultGuard } from '../lib/auth/default-guard.js';
+import { httpRoute } from "../lib/auth/http-route.js";
+import { getDefaultGuard } from "../lib/auth/default-guard.js";
 import {
   queryDocs,
   readDoc,
@@ -26,14 +26,14 @@ import {
   deleteDoc,
   patchDoc,
   replaceDocIfMatch,
-} from '../lib/cosmos-client.js';
-import { createCmsContentHandlers } from '../lib/cms-content.js';
-import { createDashboardStatsMaintainer } from '../lib/triggers/dashboard-stats.js';
-import { createContentCreateHandler } from '../lib/cms/content-create.js';
+} from "../lib/cosmos-client.js";
+import { createCmsContentHandlers } from "../lib/cms-content.js";
+import { createDashboardStatsMaintainer } from "../lib/triggers/dashboard-stats.js";
+import { createContentCreateHandler } from "../lib/cms/content-create.js";
 import {
   createContentUpdateHandler,
   createContentTransitionHandler,
-} from '../lib/cms/content-update.js';
+} from "../lib/cms/content-update.js";
 
 const handlers = () =>
   createCmsContentHandlers({
@@ -51,39 +51,40 @@ const handlers = () =>
 const createHandler = () =>
   createContentCreateHandler({
     guard: getDefaultGuard(),
-    store: { queryDocs, upsertDoc },
+    // readDoc: the content taxonomy, when the body names a kind or idea origin.
+    store: { queryDocs, upsertDoc, readDoc },
   });
 
-httpRoute('cmsListContent', {
-  methods: ['GET'],
-  authLevel: 'anonymous',
-  route: 'cms/content',
+httpRoute("cmsListContent", {
+  methods: ["GET"],
+  authLevel: "anonymous",
+  route: "cms/content",
   handler: (request, context) => handlers().list(request, context),
 });
 
-httpRoute('cmsGetContentItem', {
-  methods: ['GET', 'POST'],
-  authLevel: 'anonymous',
-  route: 'cms/content/item',
+httpRoute("cmsGetContentItem", {
+  methods: ["GET", "POST"],
+  authLevel: "anonymous",
+  route: "cms/content/item",
   handler: (request, context) => handlers().get(request, context),
 });
 
 // Replaces the interim raw-upsert save placeholder: creation now goes through
 // the full source semantics (dedup 409, quality gate 422) at the RPC route the
 // frontend actually calls (SubmitUrlsPage → postJSON('createContentItem')).
-httpRoute('createContentItem', {
-  methods: ['POST'],
-  authLevel: 'anonymous',
-  route: 'createContentItem',
+httpRoute("createContentItem", {
+  methods: ["POST"],
+  authLevel: "anonymous",
+  route: "createContentItem",
   handler: (request, context) => createHandler()(request, context),
 });
 
 // Partial writes on content go through patchDoc — an upsert would replace the
 // whole document (see #42). Same RPC-route convention as createContentItem.
-httpRoute('updateContentItem', {
-  methods: ['POST', 'PATCH'],
-  authLevel: 'anonymous',
-  route: 'updateContentItem',
+httpRoute("updateContentItem", {
+  methods: ["POST", "PATCH"],
+  authLevel: "anonymous",
+  route: "updateContentItem",
   handler: (request, context) =>
     createContentUpdateHandler({
       guard: getDefaultGuard(),
@@ -91,10 +92,10 @@ httpRoute('updateContentItem', {
     })(request, context),
 });
 
-httpRoute('transitionContentStatus', {
-  methods: ['POST'],
-  authLevel: 'anonymous',
-  route: 'transitionContentStatus',
+httpRoute("transitionContentStatus", {
+  methods: ["POST"],
+  authLevel: "anonymous",
+  route: "transitionContentStatus",
   handler: (request, context) =>
     createContentTransitionHandler({
       guard: getDefaultGuard(),
@@ -102,9 +103,27 @@ httpRoute('transitionContentStatus', {
     })(request, context),
 });
 
-httpRoute('cmsDeleteContent', {
-  methods: ['DELETE'],
-  authLevel: 'anonymous',
-  route: 'cms/content/{id}',
+httpRoute("cmsDeleteContent", {
+  methods: ["DELETE"],
+  authLevel: "anonymous",
+  route: "cms/content/{id}",
   handler: (request, context) => handlers().remove(request, context),
+});
+
+// Version history (ADR 0033 §1): content_versions was written on every save
+// and read by nothing. The editor's History dialog lists and restores from
+// these. Literal `versions` segment beside the `cms/content/{id}` template,
+// the arrangement `item`, `slug` and `rehost-images` already use.
+httpRoute("cmsListContentVersions", {
+  methods: ["GET"],
+  authLevel: "anonymous",
+  route: "cms/content/{id}/versions",
+  handler: (request, context) => handlers().listVersions(request, context),
+});
+
+httpRoute("cmsGetContentVersion", {
+  methods: ["GET"],
+  authLevel: "anonymous",
+  route: "cms/content/{id}/versions/{versionId}",
+  handler: (request, context) => handlers().getVersion(request, context),
 });

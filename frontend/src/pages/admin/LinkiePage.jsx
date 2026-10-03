@@ -26,7 +26,8 @@ import { useSearchParams } from 'react-router';
 import { Link2 } from 'lucide-react';
 import { useAuthReady } from '@/hooks/useAuthReady';
 import { Label } from '@/components/ui/label';
-import ServicePageHeader from '@/components/admin/ServicePageHeader';
+import PageHeader from '@/components/admin/shared/PageHeader';
+import StatusBadge from '@/components/admin/shared/StatusBadge';
 import HubTabs from '@/components/admin/HubTabs';
 import LinksTab from '@/components/admin/linkie/LinksTab';
 import AnalyticsTab from '@/components/admin/linkie/AnalyticsTab';
@@ -44,6 +45,22 @@ const PANELS = {
   analytics: AnalyticsTab,
   settings: SettingsTab,
 };
+
+const HELP = [
+  'Links: the posts on the Linkie profile. Write one here, or push a live page onto the profile with Push content.',
+  'Analytics: what Linkie reports about clicks and views. Read-only.',
+  'Settings: whether the Linkie key works, and where it is set (Integrations).',
+  'With more than one profile, the picker above the tabs chooses which one every list and chart is about; the choice stays in the URL.',
+];
+
+/** The connection as the shared status vocabulary (ADR 0033 §2). */
+function connectionStatus(connected) {
+  if (connected === 'checking') return { system: 'unknown', text: 'Checking Linkie…' };
+  if (connected === 'unknown') return { system: 'unknown', text: 'Linkie status unknown' };
+  return connected
+    ? { system: 'healthy', text: 'Linkie connected' }
+    : { system: 'unavailable', text: 'Linkie disconnected' };
+}
 
 /** The profile picker, shown only when the key owns more than one. */
 function ProfilePicker({ profiles, profileId, onSelect }) {
@@ -78,6 +95,7 @@ export default function LinkiePage() {
   const activeTab = resolveTab(searchParams.get('tab'));
   const preferredProfileId = searchParams.get('profile') || '';
   const hub = useLinkie(authReady);
+  const header = connectionStatus(hub.connected);
 
   // `profile` is carried through every navigation: dropping it on a tab change
   // would silently move the operator to whichever profile sorts first.
@@ -93,13 +111,16 @@ export default function LinkiePage() {
 
   return (
     <div className="space-y-6">
-      <ServicePageHeader
+      <PageHeader
         icon={Link2}
         title="Linkie Hub"
-        service="Linkie"
-        connected={hub.connected}
-        description="Manage your Linkie posts, push published content, and review link analytics."
-        accent="emerald"
+        help={HELP}
+        status={
+          <>
+            <StatusBadge system={header.system} />
+            <span className="text-muted-foreground">{header.text}</span>
+          </>
+        }
       />
 
       <ProfilePicker

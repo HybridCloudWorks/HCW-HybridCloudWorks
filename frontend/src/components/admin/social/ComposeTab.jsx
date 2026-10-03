@@ -13,12 +13,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
-import { AlertCircle, CheckCircle, Loader2, Sparkles } from 'lucide-react';
+import { AlertCircle, CheckCircle, Link2, Loader2, Sparkles } from 'lucide-react';
 import { postJSON } from '@/lib/api';
 import {
   describePublerEnvelope,
+  isPublerReady,
   publerPollJob,
-  publerReady,
   publerScheduleBulk,
   saveSocialPost,
 } from './publerApi';
@@ -117,7 +117,7 @@ async function recordPost(form, scheduleRes, scheduledTime, url) {
 /** Validate, send, record and report. One exit. */
 async function runSchedule(state, form) {
   const validationError = getScheduleValidationError({
-    ready: publerReady(),
+    ready: form.ready,
     caption: form.caption,
     selectedAccountIds: form.selectedAccountIds,
   });
@@ -173,24 +173,68 @@ function ContentRow({ item, selected, onSelect }) {
   );
 }
 
+/** What the `?contentId=` deep link found: the page, a wait, or nothing live by that id. */
+function DeepLinkNotice({ deepLinked, loading }) {
+  if (deepLinked) {
+    return (
+      <span>
+        Composing for{' '}
+        <strong>{deepLinked.Title || deepLinked.title || 'the linked content'}</strong>, from the
+        link you followed.
+      </span>
+    );
+  }
+  if (loading) return <span>Looking for the linked content…</span>;
+  return (
+    <span>
+      The link named content that is not live, so nothing was preselected. Pick a page below.
+    </span>
+  );
+}
+
 /**
  * Step 1 — the published pages this post can be about, with its own loading and
  * error states. Its own component because the composer beside it is a separate
  * duty: together they put ComposeTab over Qlty's function-complexity budget,
  * and "pick a thing" and "write about the thing" are the natural seam.
  */
-function ContentPicker({ items, loading, error, configured, selectedId, onSelect }) {
+function ContentPicker({
+  items,
+  loading,
+  error,
+  accountsStatus,
+  deepLinkedId,
+  selectedId,
+  onSelect,
+}) {
+  const deepLinked = deepLinkedId ? items.find((item) => item.id === deepLinkedId) : null;
   return (
     <div className="space-y-4">
       <Label className="text-sm font-semibold block">1. Pick published content</Label>
 
-      {!configured && (
+      {accountsStatus === 'not_configured' && (
         <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 text-amber-700 dark:text-amber-300 text-xs">
           <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
           <span>
-            <strong>Publer not fully configured.</strong> Check the Settings tab.
+            <strong>Scheduling is paused until Publer connects.</strong> See the Accounts tab.
           </span>
         </div>
+      )}
+      {accountsStatus === 'error' && (
+        <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 text-amber-700 dark:text-amber-300 text-xs">
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+          <span>
+            <strong>Publer could not be reached.</strong> Scheduling is off until the accounts call
+            succeeds.
+          </span>
+        </div>
+      )}
+
+      {deepLinkedId && (
+        <p className="flex items-start gap-2 text-xs text-muted-foreground" role="status">
+          <Link2 className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+          <DeepLinkNotice deepLinked={deepLinked} loading={loading} />
+        </p>
       )}
 
       <div className="space-y-1.5 max-h-96 overflow-y-auto pr-1">
@@ -224,8 +268,8 @@ function ContentPicker({ items, loading, error, configured, selectedId, onSelect
 
 export default function ComposeTab({ ready = true, contentId = '' }) {
   const { toast } = useToast();
-  const publerConfigured = publerReady();
   const { accounts, status: accountsStatus, error: accountsError, reason } = usePublerAccounts();
+  const publerConfigured = isPublerReady(accountsStatus);
   const {
     items: recentContent,
     loading: loadingContent,
@@ -284,7 +328,14 @@ export default function ComposeTab({ ready = true, contentId = '' }) {
   const handleGenerateCaption = () => runCaption(state, selectedContent, selectedAccountIds);
 
   const handleSchedule = () =>
-    runSchedule(state, { caption, scheduledAt, selectedAccountIds, accounts, selectedContent });
+    runSchedule(state, {
+      ready: publerConfigured,
+      caption,
+      scheduledAt,
+      selectedAccountIds,
+      accounts,
+      selectedContent,
+    });
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -292,7 +343,8 @@ export default function ComposeTab({ ready = true, contentId = '' }) {
         items={recentContent}
         loading={loadingContent}
         error={contentError}
-        configured={publerConfigured}
+        accountsStatus={accountsStatus}
+        deepLinkedId={contentId}
         selectedId={selectedContent?.id}
         onSelect={handleSelectContent}
       />
@@ -372,7 +424,12 @@ export default function ComposeTab({ ready = true, contentId = '' }) {
 
         <Button
           onClick={handleSchedule}
-          disabled={submitting || !caption.trim() || selectedAccountIds.length === 0}
+          disabled={
+            submitting || !publerConfigured || !caption.trim() || selectedAccountIds.length === 0
+          }
+          title={
+            publerConfigured ? undefined : 'Publer is not connected, so nothing can be scheduled'
+          }
           className="w-full gap-2"
         >
           <ScheduleButtonContent

@@ -50,14 +50,33 @@
  * Resend's messages can echo what was sent.
  */
 import { readKey } from '../ai/router.js';
-import { NEWSLETTER_SEGMENT_NAME } from './handlers.js';
+import {
+  NEWSLETTER_SEGMENT_NAME,
+  ensureConfirmedContact,
+  resolveSegmentId,
+  sendConfirmationEmail,
+} from './handlers.js';
+import { normalizeEmail } from './email.js';
+import { ISSUE_ID_PATTERN } from './issue.js';
 import { createResendClient } from './resend-client.js';
+import { resolveFromAddress } from './sender.js';
+
+/** Audience export and whole-list search page at most this far (ADR 0033 Amplify slice). */
+export const EXPORT_MAX_PAGES = 50;
+/** One CSV cell, RFC 4180: quoted when it holds a comma, quote or newline. */
+export const csvCell = (value) => {
+  const text = value === null || value === undefined ? '' : String(value);
+  // A cell starting with a formula character is prefixed so a spreadsheet
+  // opens it as text, never as a formula (CSV injection).
+  const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+  return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+};
 
 /** Resend ids (UUIDs) and the opaque cursors it pages with. */
 export const ID_PATTERN = /^[A-Za-z0-9-]{1,64}$/;
-const ISSUE_ID_PATTERN = /^issue-\d{4}-\d{2}-\d{2}$/;
 /** A date, or a date-time in UTC or with an offset. */
-const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2}))?$/;
+const ISO_DATE_PATTERN =
+  /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2}))?$/;
 /**
  * A hostname: labels of letters, digits and inner hyphens, a letter-only TLD.
  * Applied after trimming and lower-casing; the 253 cap is checked separately.
@@ -92,7 +111,12 @@ export const RECIPIENT_TYPES = Object.freeze([
   'unsubscribed',
   'suppressed',
 ]);
-export const DOMAIN_REGIONS = Object.freeze(['us-east-1', 'eu-west-1', 'sa-east-1', 'ap-northeast-1']);
+export const DOMAIN_REGIONS = Object.freeze([
+  'us-east-1',
+  'eu-west-1',
+  'sa-east-1',
+  'ap-northeast-1',
+]);
 
 export const DEFAULT_METRICS_DAYS = 30;
 export const DEFAULT_PAGE_LIMIT = 20;
@@ -116,7 +140,9 @@ const badRequest = (error) => json(400, { ok: false, error });
 
 /** Only the listed fields, and only those present. */
 const pick = (row, fields) =>
-  Object.fromEntries(fields.filter((field) => row?.[field] !== undefined).map((field) => [field, row[field]]));
+  Object.fromEntries(
+    fields.filter((field) => row?.[field] !== undefined).map((field) => [field, row[field]])
+  );
 
 const rowsOf = (result) => (Array.isArray(result?.data?.data) ? result.data.data : []);
 
@@ -213,12 +239,15 @@ function readDate(request, name) {
   const raw = queryValue(request, name);
   if (raw === null || raw === '') return { value: undefined };
   if (!ISO_DATE_PATTERN.test(raw) || !Number.isFinite(Date.parse(raw))) {
-    return { error: `${name} must be an ISO 8601 date (YYYY-MM-DD) or date-time` };
+    return {
+      error: `${name} must be an ISO 8601 date (YYYY-MM-DD) or date-time`,
+    };
   }
   return { value: raw };
 }
 
-const isPlainObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+const isPlainObject = (value) =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
 /** The next-page cursor: the last row's id, when Resend says there is more. */
 const nextCursor = (result, rows) => {
@@ -231,7 +260,12 @@ const nextCursor = (result, rows) => {
 
 const METRIC_ROW_FIELDS = ['period', 'broadcast_id', 'domain_id', 'domain_name', ...METRICS];
 const DOMAIN_SUMMARY_FIELDS = ['id', 'name', 'status', 'region', 'created_at'];
-const DOMAIN_DETAIL_FIELDS = [...DOMAIN_SUMMARY_FIELDS, 'open_tracking', 'click_tracking', 'tracking_subdomain'];
+const DOMAIN_DETAIL_FIELDS = [
+  ...DOMAIN_SUMMARY_FIELDS,
+  'open_tracking',
+  'click_tracking',
+  'tracking_subdomain',
+];
 const DOMAIN_RECORD_FIELDS = ['record', 'name', 'type', 'ttl', 'status', 'value', 'priority'];
 const LOG_SUMMARY_FIELDS = ['id', 'created_at', 'method', 'response_status'];
 const TEMPLATE_SUMMARY_FIELDS = ['id', 'name', 'alias', 'status', 'published_at'];
@@ -242,7 +276,9 @@ const projectTotals = (totals) => (isPlainObject(totals) ? pick(totals, METRICS)
 const projectDomain = (row) => pick(row, DOMAIN_SUMMARY_FIELDS);
 const projectDomainDetail = (row) => ({
   ...pick(row, DOMAIN_DETAIL_FIELDS),
-  records: Array.isArray(row?.records) ? row.records.map((record) => pick(record, DOMAIN_RECORD_FIELDS)) : [],
+  records: Array.isArray(row?.records)
+    ? row.records.map((record) => pick(record, DOMAIN_RECORD_FIELDS))
+    : [],
 });
 const projectLog = (row) => ({
   ...pick(row, LOG_SUMMARY_FIELDS),
@@ -307,7 +343,10 @@ export function createNewsletterInsightsHandlers({
     return apiKey ? createResendClient({ apiKey, fetch: fetchImpl }) : null;
   };
   const notConfigured = () =>
-    json(503, { ok: false, error: 'Resend is not configured: RESEND_API_KEY is not set' });
+    json(503, {
+      ok: false,
+      error: 'Resend is not configured: RESEND_API_KEY is not set',
+    });
 
   /**
    * A Resend failure as an HTTP answer. Logs the route, the status and the
@@ -318,12 +357,19 @@ export function createNewsletterInsightsHandlers({
     context.warn?.(`${route} Resend HTTP ${status} ${ref(context)}`);
     const name = typeof result?.data?.name === 'string' ? result.data.name : '';
     const message = typeof result?.data?.message === 'string' ? result.data.message : '';
-    const text = [name, message].filter(Boolean).join(': ') || (status ? `HTTP ${status}` : 'No answer from Resend');
+    const text =
+      [name, message].filter(Boolean).join(': ') ||
+      (status ? `HTTP ${status}` : 'No answer from Resend');
     const error = text.slice(0, ERROR_TEXT_LIMIT);
     if (status === 429) {
       const seconds = Number.parseInt(String(result?.retryAfter ?? ''), 10);
-      const retryAfterSeconds = Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds, 3600) : 1;
-      return json(429, { ok: false, status, retryAfterSeconds, error }, { 'Retry-After': String(retryAfterSeconds) });
+      const retryAfterSeconds =
+        Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds, 3600) : 1;
+      return json(
+        429,
+        { ok: false, status, retryAfterSeconds, error },
+        { 'Retry-After': String(retryAfterSeconds) }
+      );
     }
     return json(502, { ok: false, status, error });
   }
@@ -331,7 +377,10 @@ export function createNewsletterInsightsHandlers({
   const failed = (route, error, context) => {
     const name = typeof error?.name === 'string' ? error.name : 'Error';
     context.error?.(`${route} failed ${name} ${ref(context)}`);
-    return json(500, { ok: false, error: 'The Newsletter Hub request failed.' });
+    return json(500, {
+      ok: false,
+      error: 'The Newsletter Hub request failed.',
+    });
   };
 
   /**
@@ -393,8 +442,10 @@ export function createNewsletterInsightsHandlers({
         const broadcastRaw = queryValue(request, 'broadcast_id');
         const issueRaw = queryValue(request, 'issue_id');
         if (broadcastRaw && issueRaw) return badRequest('Send broadcast_id or issue_id, not both');
-        if (broadcastRaw && !ID_PATTERN.test(broadcastRaw)) return badRequest('broadcast_id is not a Resend id');
-        if (issueRaw && !ISSUE_ID_PATTERN.test(issueRaw)) return badRequest('issue_id must be issue-YYYY-MM-DD');
+        if (broadcastRaw && !ID_PATTERN.test(broadcastRaw))
+          return badRequest('broadcast_id is not a Resend id');
+        if (issueRaw && !ISSUE_ID_PATTERN.test(issueRaw))
+          return badRequest('issue_id must be issue-YYYY-MM-DD');
         const start = readDate(request, 'start_date');
         if (start.error) return badRequest(start.error);
         const end = readDate(request, 'end_date');
@@ -404,8 +455,11 @@ export function createNewsletterInsightsHandlers({
           return badRequest(`granularity must be one of ${GRANULARITIES.join(', ')}`);
         }
         const endDate = end.value ?? now().toISOString();
-        const startDate = start.value ?? new Date(Date.parse(endDate) - DEFAULT_METRICS_DAYS * DAY_MS).toISOString();
-        if (Date.parse(startDate) > Date.parse(endDate)) return badRequest('start_date must not be after end_date');
+        const startDate =
+          start.value ??
+          new Date(Date.parse(endDate) - DEFAULT_METRICS_DAYS * DAY_MS).toISOString();
+        if (Date.parse(startDate) > Date.parse(endDate))
+          return badRequest('start_date must not be after end_date');
 
         let broadcastId = broadcastRaw || undefined;
         if (issueRaw) {
@@ -493,7 +547,11 @@ export function createNewsletterInsightsHandlers({
         return await relay(
           route,
           context,
-          () => opened.client.listBroadcastRecipients(broadcastId, { type, ...pageOptions.value }),
+          () =>
+            opened.client.listBroadcastRecipients(broadcastId, {
+              type,
+              ...pageOptions.value,
+            }),
           (result) => {
             const rows = rowsOf(result);
             return {
@@ -537,16 +595,52 @@ export function createNewsletterInsightsHandlers({
             searchScope: 'page',
           });
         }
+        const needle = search ? search.trim().toLowerCase() : '';
+        const matches = (contact) =>
+          !needle ||
+          String(contact.email ?? '')
+            .toLowerCase()
+            .includes(needle);
+        // `scope=all` with a search: Resend has no contact search, so page
+        // the whole segment here and answer every match (ADR 0033 Amplify
+        // slice). Capped at EXPORT_MAX_PAGES, and `truncated` says when.
+        if (needle && queryValue(request, 'scope') === 'all') {
+          const contacts = [];
+          let after;
+          let truncated = false;
+          for (let pageNumber = 0; ; pageNumber += 1) {
+            if (pageNumber === EXPORT_MAX_PAGES) {
+              truncated = true;
+              break;
+            }
+            const listed = await opened.client.listSegmentContacts(segment.id, {
+              limit: SUMMARY_PAGE_SIZE,
+              after,
+            });
+            if (!listed.ok) return refused(route, listed, context);
+            const rows = rowsOf(listed);
+            contacts.push(...rows.map(projectContact).filter(matches));
+            const cursor = nextCursor(listed, rows);
+            if (!cursor) break;
+            after = cursor;
+          }
+          return json(200, {
+            ok: true,
+            segmentFound: true,
+            contacts,
+            has_more: false,
+            next_after: null,
+            searchScope: 'all',
+            truncated,
+          });
+        }
         return await relay(
           route,
           context,
           () => opened.client.listSegmentContacts(segment.id, pageOptions.value),
           (result) => {
             const rows = rowsOf(result);
-            const needle = search ? search.trim().toLowerCase() : '';
-            const contacts = rows
-              .map(projectContact)
-              .filter((contact) => !needle || String(contact.email ?? '').toLowerCase().includes(needle));
+            const contacts = rows.map(projectContact).filter(matches);
             return {
               segmentFound: true,
               contacts,
@@ -572,7 +666,11 @@ export function createNewsletterInsightsHandlers({
       if (opened.response) return opened.response;
       const at = now().getTime();
       if (summaryCache && at - summaryCache.at < SUMMARY_CACHE_MS) {
-        return json(200, { ok: true, ...summaryCache.value, cachedAt: new Date(summaryCache.at).toISOString() });
+        return json(200, {
+          ok: true,
+          ...summaryCache.value,
+          cachedAt: new Date(summaryCache.at).toISOString(),
+        });
       }
       try {
         const segment = await segmentId(opened.client);
@@ -587,7 +685,10 @@ export function createNewsletterInsightsHandlers({
               truncated = true;
               break;
             }
-            const listed = await opened.client.listSegmentContacts(segment.id, { limit: SUMMARY_PAGE_SIZE, after });
+            const listed = await opened.client.listSegmentContacts(segment.id, {
+              limit: SUMMARY_PAGE_SIZE,
+              after,
+            });
             if (!listed.ok) return refused(route, listed, context);
             const rows = rowsOf(listed);
             total += rows.length;
@@ -597,9 +698,184 @@ export function createNewsletterInsightsHandlers({
             after = cursor;
           }
         }
-        const value = { total, subscribed: total - unsubscribed, unsubscribed, truncated };
+        const value = {
+          total,
+          subscribed: total - unsubscribed,
+          unsubscribed,
+          truncated,
+        };
         summaryCache = { at, value };
-        return json(200, { ok: true, ...value, cachedAt: new Date(at).toISOString() });
+        return json(200, {
+          ok: true,
+          ...value,
+          cachedAt: new Date(at).toISOString(),
+        });
+      } catch (error) {
+        return failed(route, error, context);
+      }
+    },
+
+    /**
+     * PUBLISHER. The whole Newsletter segment as CSV (ADR 0033 Amplify slice):
+     * email, first name, last name, joined, status. Publisher because it is
+     * every subscriber's address in one file. Pages to EXPORT_MAX_PAGES and
+     * says so in a trailing comment row when it stopped short.
+     */
+    async exportAudience(request, context) {
+      const route = 'mailingListAudienceExport';
+      const opened = await open(request, 'publisher');
+      if (opened.response) return opened.response;
+      try {
+        const segment = await segmentId(opened.client);
+        if (segment.result) return refused(route, segment.result, context);
+        const lines = ['email,first_name,last_name,joined,status'];
+        let truncated = false;
+        if (segment.id) {
+          let after;
+          for (let pageNumber = 0; ; pageNumber += 1) {
+            if (pageNumber === EXPORT_MAX_PAGES) {
+              truncated = true;
+              break;
+            }
+            const listed = await opened.client.listSegmentContacts(segment.id, {
+              limit: SUMMARY_PAGE_SIZE,
+              after,
+            });
+            if (!listed.ok) return refused(route, listed, context);
+            const rows = rowsOf(listed);
+            for (const row of rows.map(projectContact)) {
+              lines.push(
+                [
+                  row.email,
+                  row.first_name,
+                  row.last_name,
+                  row.created_at,
+                  row.unsubscribed ? 'unsubscribed' : 'subscribed',
+                ]
+                  .map(csvCell)
+                  .join(',')
+              );
+            }
+            const cursor = nextCursor(listed, rows);
+            if (!cursor) break;
+            after = cursor;
+          }
+        }
+        if (truncated)
+          lines.push(
+            `# truncated: the list is longer than ${EXPORT_MAX_PAGES * SUMMARY_PAGE_SIZE} contacts`
+          );
+        context.log?.(`${route} ${lines.length - 1} row(s) ${ref(context)}`);
+        const day = now().toISOString().slice(0, 10);
+        return {
+          status: 200,
+          headers: {
+            'Content-Type': 'text/csv; charset=utf-8',
+            'Content-Disposition': `attachment; filename="newsletter-audience-${day}.csv"`,
+            'Cache-Control': 'no-store',
+          },
+          body: `${lines.join('\r\n')}\r\n`,
+        };
+      } catch (error) {
+        return failed(route, error, context);
+      }
+    },
+
+    /**
+     * PUBLISHER. Add a subscriber from the admin (ADR 0033 Amplify slice).
+     * Body `{ email, mode, consentRecordedOn? }`:
+     *
+     *   mode: 'invite'     double opt-in respected — the address gets the same
+     *                      signed confirmation link the signup form sends, and
+     *                      nothing is written to the list until it is opened.
+     *   mode: 'confirmed'  consent was recorded elsewhere (a conference form,
+     *                      a written request); `consentRecordedOn` is required,
+     *                      a date, and the contact is added subscribed with
+     *                      the same read-back the public confirm does.
+     */
+    async addContact(request, context) {
+      const route = 'mailingListContactAdd';
+      const opened = await open(request, 'publisher');
+      if (opened.response) return opened.response;
+      const body = await request.json().catch(() => null);
+      if (!isPlainObject(body))
+        return badRequest('Send a JSON body { email, mode, consentRecordedOn? }');
+      const unknown = Object.keys(body).filter(
+        (key) => !['email', 'mode', 'consentRecordedOn', 'source'].includes(key)
+      );
+      if (unknown.length) return badRequest(`Unknown field(s): ${unknown.join(', ')}`);
+      const email = normalizeEmail(body.email);
+      if (!email) return badRequest('email must be a valid address');
+      const mode =
+        body.mode === 'confirmed' ? 'confirmed' : body.mode === 'invite' ? 'invite' : null;
+      if (!mode)
+        return badRequest(
+          "mode must be 'invite' (send a confirmation link) or 'confirmed' (consent recorded)"
+        );
+      let consentRecordedOn = null;
+      if (mode === 'confirmed') {
+        const when =
+          typeof body.consentRecordedOn === 'string' ? Date.parse(body.consentRecordedOn) : NaN;
+        if (!Number.isFinite(when))
+          return badRequest(
+            'consentRecordedOn is required for a confirmed add: the date consent was given'
+          );
+        if (when > now().getTime()) return badRequest('consentRecordedOn cannot be in the future');
+        consentRecordedOn = new Date(when).toISOString();
+      }
+      try {
+        if (mode === 'invite') {
+          const sent = await sendConfirmationEmail({
+            client: opened.client,
+            apiKey: readKey(env, 'RESEND_API_KEY'),
+            email,
+            source: 'website',
+            now: () => now().getTime(),
+            from: await resolveFromAddress(store, context),
+          });
+          if (!sent.ok) return refused(route, sent, context);
+          context.log?.(`${route} invited ${ref(context)}`);
+          return json(202, {
+            ok: true,
+            mode,
+            message:
+              'A confirmation link was emailed. The address joins the list when it is opened.',
+          });
+        }
+        const segment = await resolveSegmentId(opened.client);
+        const ensured = await ensureConfirmedContact({
+          client: opened.client,
+          email,
+          segmentId: segment,
+        });
+        if (!ensured.ok) {
+          context.warn?.(`${route} not confirmed: ${ensured.why} ${ref(context)}`);
+          return json(502, {
+            ok: false,
+            error: `Resend did not confirm the contact: ${ensured.why}`,
+          });
+        }
+        summaryCache = null;
+        // The consent record lives beside the audit trail, never in a log line.
+        await store.upsertDoc?.('admin_audit_logs', {
+          id: `newsletter-consent-${now().getTime()}-${Math.random().toString(36).slice(2, 8)}`,
+          action: 'newsletter_subscriber_added',
+          userId: opened.auth?.user?.oid ?? null,
+          timestamp: now().toISOString(),
+          details: { consentRecordedOn, mode, emailMasked: maskEmail(email) },
+          compliance: {
+            schemaVersion: 1,
+            detailsSanitized: true,
+            identityVerified: true,
+          },
+        });
+        context.log?.(`${route} confirmed ${ref(context)}`);
+        return json(200, {
+          ok: true,
+          mode,
+          consentRecordedOn,
+          message: 'Added as a confirmed subscriber.',
+        });
       } catch (error) {
         return failed(route, error, context);
       }
@@ -613,10 +889,12 @@ export function createNewsletterInsightsHandlers({
       const contactId = String(request.params?.contactId ?? '');
       if (!ID_PATTERN.test(contactId)) return badRequest('The path must carry a Resend contact id');
       const body = await request.json().catch(() => null);
-      if (!isPlainObject(body)) return badRequest('Send a JSON body { unsubscribed: true | false }');
+      if (!isPlainObject(body))
+        return badRequest('Send a JSON body { unsubscribed: true | false }');
       const unknown = Object.keys(body).filter((key) => key !== 'unsubscribed');
       if (unknown.length) return badRequest(`Unknown field(s): ${unknown.join(', ')}`);
-      if (typeof body.unsubscribed !== 'boolean') return badRequest('unsubscribed must be true or false');
+      if (typeof body.unsubscribed !== 'boolean')
+        return badRequest('unsubscribed must be true or false');
       try {
         const result = await opened.client.setContactUnsubscribed(contactId, body.unsubscribed);
         if (!result.ok) return refused(route, result, context);
@@ -651,9 +929,14 @@ export function createNewsletterInsightsHandlers({
       const opened = await open(request, 'editor');
       if (opened.response) return opened.response;
       try {
-        return await relay(route, context, () => opened.client.listDomains(), (result) => ({
-          domains: rowsOf(result).map(projectDomain),
-        }));
+        return await relay(
+          route,
+          context,
+          () => opened.client.listDomains(),
+          (result) => ({
+            domains: rowsOf(result).map(projectDomain),
+          })
+        );
       } catch (error) {
         return failed(route, error, context);
       }
@@ -666,9 +949,14 @@ export function createNewsletterInsightsHandlers({
       const domainId = readPathId(request, 'domainId');
       if (!domainId) return badRequest('domainId is not a Resend id');
       try {
-        return await relay(route, context, () => opened.client.getDomain(domainId), (result) => ({
-          domain: projectDomainDetail(result.data),
-        }));
+        return await relay(
+          route,
+          context,
+          () => opened.client.getDomain(domainId),
+          (result) => ({
+            domain: projectDomainDetail(result.data),
+          })
+        );
       } catch (error) {
         return failed(route, error, context);
       }
@@ -691,10 +979,16 @@ export function createNewsletterInsightsHandlers({
         return badRequest(`region must be one of ${DOMAIN_REGIONS.join(', ')}`);
       }
       try {
-        const result = await opened.client.createDomain({ name, region: body.region });
+        const result = await opened.client.createDomain({
+          name,
+          region: body.region,
+        });
         if (!result.ok) return refused(route, result, context);
         context.log?.(`${route} ok ${ref(context)}`);
-        return json(201, { ok: true, domain: projectDomainDetail(result.data) });
+        return json(201, {
+          ok: true,
+          domain: projectDomainDetail(result.data),
+        });
       } catch (error) {
         return failed(route, error, context);
       }
@@ -725,7 +1019,8 @@ export function createNewsletterInsightsHandlers({
       const domainId = readPathId(request, 'domainId');
       if (!domainId) return badRequest('domainId is not a Resend id');
       const body = await request.json().catch(() => null);
-      if (!isPlainObject(body)) return badRequest('Send a JSON body { open_tracking, click_tracking }');
+      if (!isPlainObject(body))
+        return badRequest('Send a JSON body { open_tracking, click_tracking }');
       const allowed = ['open_tracking', 'click_tracking'];
       const unknown = Object.keys(body).filter((key) => !allowed.includes(key));
       if (unknown.length) return badRequest(`Unknown field(s): ${unknown.join(', ')}`);
@@ -754,10 +1049,19 @@ export function createNewsletterInsightsHandlers({
       const pageOptions = readPage(request);
       if (pageOptions.error) return badRequest(pageOptions.error);
       try {
-        return await relay(route, context, () => opened.client.listLogs(pageOptions.value), (result) => {
-          const rows = rowsOf(result);
-          return { logs: rows.map(projectLog), has_more: Boolean(result.data?.has_more), next_after: nextCursor(result, rows) };
-        });
+        return await relay(
+          route,
+          context,
+          () => opened.client.listLogs(pageOptions.value),
+          (result) => {
+            const rows = rowsOf(result);
+            return {
+              logs: rows.map(projectLog),
+              has_more: Boolean(result.data?.has_more),
+              next_after: nextCursor(result, rows),
+            };
+          }
+        );
       } catch (error) {
         return failed(route, error, context);
       }
@@ -771,14 +1075,21 @@ export function createNewsletterInsightsHandlers({
       const logId = readPathId(request, 'logId');
       if (!logId) return badRequest('logId is not a Resend id');
       try {
-        return await relay(route, context, () => opened.client.getLog(logId), ({ data }) => ({
-          log: {
-            ...projectLog(data),
-            ...(typeof data?.user_agent === 'string' ? { user_agent: redactText(data.user_agent) } : {}),
-            request_body: redactSensitive(data?.request_body ?? null),
-            response_body: redactSensitive(data?.response_body ?? null),
-          },
-        }));
+        return await relay(
+          route,
+          context,
+          () => opened.client.getLog(logId),
+          ({ data }) => ({
+            log: {
+              ...projectLog(data),
+              ...(typeof data?.user_agent === 'string'
+                ? { user_agent: redactText(data.user_agent) }
+                : {}),
+              request_body: redactSensitive(data?.request_body ?? null),
+              response_body: redactSensitive(data?.response_body ?? null),
+            },
+          })
+        );
       } catch (error) {
         return failed(route, error, context);
       }
@@ -791,14 +1102,19 @@ export function createNewsletterInsightsHandlers({
       const pageOptions = readPage(request);
       if (pageOptions.error) return badRequest(pageOptions.error);
       try {
-        return await relay(route, context, () => opened.client.listEmails(pageOptions.value), (result) => {
-          const rows = rowsOf(result);
-          return {
-            emails: rows.map(projectEmail),
-            has_more: Boolean(result.data?.has_more),
-            next_after: nextCursor(result, rows),
-          };
-        });
+        return await relay(
+          route,
+          context,
+          () => opened.client.listEmails(pageOptions.value),
+          (result) => {
+            const rows = rowsOf(result);
+            return {
+              emails: rows.map(projectEmail),
+              has_more: Boolean(result.data?.has_more),
+              next_after: nextCursor(result, rows),
+            };
+          }
+        );
       } catch (error) {
         return failed(route, error, context);
       }
@@ -811,14 +1127,19 @@ export function createNewsletterInsightsHandlers({
       const pageOptions = readPage(request);
       if (pageOptions.error) return badRequest(pageOptions.error);
       try {
-        return await relay(route, context, () => opened.client.listTemplates(pageOptions.value), (result) => {
-          const rows = rowsOf(result);
-          return {
-            templates: rows.map(projectTemplate),
-            has_more: Boolean(result.data?.has_more),
-            next_after: nextCursor(result, rows),
-          };
-        });
+        return await relay(
+          route,
+          context,
+          () => opened.client.listTemplates(pageOptions.value),
+          (result) => {
+            const rows = rowsOf(result);
+            return {
+              templates: rows.map(projectTemplate),
+              has_more: Boolean(result.data?.has_more),
+              next_after: nextCursor(result, rows),
+            };
+          }
+        );
       } catch (error) {
         return failed(route, error, context);
       }
@@ -831,9 +1152,17 @@ export function createNewsletterInsightsHandlers({
       const templateId = readPathId(request, 'templateId');
       if (!templateId) return badRequest('templateId is not a Resend id');
       try {
-        return await relay(route, context, () => opened.client.getTemplate(templateId), ({ data }) => ({
-          template: { ...projectTemplate(data), html: typeof data?.html === 'string' ? data.html : null },
-        }));
+        return await relay(
+          route,
+          context,
+          () => opened.client.getTemplate(templateId),
+          ({ data }) => ({
+            template: {
+              ...projectTemplate(data),
+              html: typeof data?.html === 'string' ? data.html : null,
+            },
+          })
+        );
       } catch (error) {
         return failed(route, error, context);
       }

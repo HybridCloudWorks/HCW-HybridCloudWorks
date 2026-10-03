@@ -484,9 +484,14 @@ export async function setEnabled(colName, docId, enabled) {
   await notifyConfigSubscribers(route);
 }
 
-/** Update the default model for a provider. */
+/**
+ * Update the default model for a provider. `null` (or '') clears the pin:
+ * the router then picks a model per purpose, or per task when a route names
+ * one (ADR 0033). Until this there was no way back from a pinned model.
+ */
 export async function setProviderModel(providerId, model) {
-  await sendJSON(`cms/config/ai-providers/${providerId}`, 'PATCH', { defaultModel: model });
+  const defaultModel = typeof model === 'string' && model.trim() ? model.trim() : null;
+  await sendJSON(`cms/config/ai-providers/${providerId}`, 'PATCH', { defaultModel });
   await notifyConfigSubscribers('ai-providers');
 }
 
@@ -612,13 +617,16 @@ function aggregateBy(records, keyOf) {
   const agg = {};
   for (const r of records) {
     const key = keyOf(r);
-    if (!agg[key]) agg[key] = { tokens: 0, costUsd: 0, calls: 0, estimated: 0 };
+    if (!agg[key]) agg[key] = { tokens: 0, costUsd: 0, calls: 0, estimated: 0, unpriced: 0 };
     agg[key].tokens += r.totalTokens || 0;
     agg[key].costUsd += r.estimatedCostUsd || 0;
     agg[key].calls += 1;
     // Rows whose token counts were derived rather than reported by the API.
     // Surfaced so a derived figure is never shown as a billed one.
     if (r.estimatedTokens) agg[key].estimated += 1;
+    // Rows for a model the cost table has no rate for (ADR 0033): they cost
+    // $0 here, and the page says so rather than letting zero read as free.
+    if (r.unpriced) agg[key].unpriced += 1;
   }
   return agg;
 }
@@ -636,12 +644,18 @@ function aggregateBy(records, keyOf) {
  * look non-deterministic between Function App instances.
  */
 export async function setProviderOrder(orderedIds) {
-  await Promise.all(
-    orderedIds.map((id, index) =>
-      sendJSON(`cms/config/ai-providers/${id}`, 'PATCH', { order: index + 1 })
-    )
-  );
-  await notifyConfigSubscribers('ai-providers');
+  // Sequential, not parallel (ADR 0033): with Promise.all a failure on the
+  // third PATCH left the first two written and the list half-moved, and the
+  // page reported "nothing was changed". Written in order, a failure stops
+  // at the first unwritten row; the subscribers are then re-notified in the
+  // `finally` so the cards show what the API actually holds, success or not.
+  try {
+    for (const [index, id] of orderedIds.entries()) {
+      await sendJSON(`cms/config/ai-providers/${id}`, 'PATCH', { order: index + 1 });
+    }
+  } finally {
+    await notifyConfigSubscribers('ai-providers');
+  }
 }
 
 /**
@@ -683,8 +697,41 @@ export async function setAiPlacement(provider, feature, placement) {
   return res.placement || {};
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Routing by task (ADR 0033 §4)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Which provider and model serve each feature. `routes` holds only the
+ * features that have a route; a feature absent from it follows the global
+ * order ("Simple mode"). The catalogue and provider list come from the API,
+ * never from a copy here.
+ */
+export async function getAiRouting() {
+  const res = await getJSON('cms/ai-routing');
+  return {
+    routes: res.routes || {},
+    catalogue: res.catalogue || {},
+    providers: res.providers || [],
+    maxFallbacks: res.maxFallbacks || 3,
+    updatedAt: res.updatedAt || null,
+  };
+}
+
+/**
+ * Set one feature's route, or clear it with `null` so it follows the global
+ * order again. Merges server-side; other features are untouched. Returns
+ * every route as stored.
+ */
+export async function setAiRoute(feature, route) {
+  const res = await sendJSON('cms/ai-routing', 'PUT', { routes: { [feature]: route } });
+  return res.routes || {};
+}
+
 // Named export bundle for convenience
 export const aiEngine = {
+  getAiRouting,
+  setAiRoute,
   chat,
   testProvider,
   syncMcpTools,

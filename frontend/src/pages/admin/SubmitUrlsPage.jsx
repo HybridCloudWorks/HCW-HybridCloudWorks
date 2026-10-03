@@ -34,6 +34,8 @@ import {
   inferProviderFromUrl,
   slugifyTitle,
 } from '@/components/admin/submit-urls/pageMeta';
+import PageHeader from '@/components/admin/shared/PageHeader';
+import { FilePlus2 } from 'lucide-react';
 import StageOneCard from '@/components/admin/submit-urls/StageOneCard';
 import StageTwoCard from '@/components/admin/submit-urls/StageTwoCard';
 import StageThreeCard from '@/components/admin/submit-urls/StageThreeCard';
@@ -43,6 +45,13 @@ import FeedbackCard, {
   WorkflowHeader,
 } from '@/components/admin/submit-urls/pageChrome';
 import { SECTION_BLOCKS_BY_TYPE } from '@/components/admin/submit-urls/contentBlocks';
+
+const SUBMIT_HELP = [
+  'What this page is: the start of the pipeline. Paste a source URL (or several) and the builder drafts, illustrates and saves a new content item.',
+  'Stage 1 sets what the item will be: provider, content type, and its kind and idea origin (the classification downstream tools read).',
+  'Stage 2 drafts from the source, Stage 3 picks or generates images, Stage 4 checks readiness and saves. Nothing is published from here.',
+  'Where it goes next: the saved item lands in the Review Queue as Inspected, where it is approved or rejected; Create and Open Editor jumps straight to it.',
+];
 
 export default function SubmitUrlsPage() {
   const location = useLocation();
@@ -62,6 +71,9 @@ export default function SubmitUrlsPage() {
   const [contentType, setContentType] = useState('blog');
   const [title, setTitle] = useState('');
   const [publishedDate, setPublishedDate] = useState('');
+  // Kind and idea origin (ADR 0033 §4): a URL submission is an imported
+  // source by definition; what it becomes defaults to an article.
+  const [taxonomy, setTaxonomy] = useState({ kind: 'article', ideaOrigin: 'imported-source' });
 
   // Stage 2: URL Submission + AI Draft (in-memory)
   const [sourceUrl, setSourceUrl] = useState('');
@@ -158,6 +170,7 @@ export default function SubmitUrlsPage() {
         setContentType,
         setTitle,
         setPublishedDate,
+        setTaxonomy,
         setSourceUrl,
         setKbArticleUrls,
         setKbDocumentUrl,
@@ -196,6 +209,8 @@ export default function SubmitUrlsPage() {
       contentType,
       title,
       publishedDate,
+      kind: taxonomy.kind,
+      ideaOrigin: taxonomy.ideaOrigin,
       sourceUrl,
       kbArticleUrls,
       kbDocumentUrl,
@@ -229,6 +244,7 @@ export default function SubmitUrlsPage() {
     contentType,
     title,
     publishedDate,
+    taxonomy,
     sourceUrl,
     kbArticleUrls,
     kbDocumentUrl,
@@ -592,6 +608,8 @@ export default function SubmitUrlsPage() {
   const persistState = {
     canPreview,
     contentType,
+    kind: taxonomy.kind,
+    ideaOrigin: taxonomy.ideaOrigin,
     draftContent,
     draftSummary,
     draftTitle,
@@ -629,12 +647,14 @@ export default function SubmitUrlsPage() {
 
   return (
     <div className="space-y-6 max-w-5xl">
-      <WorkflowHeader
-        currentStep={currentStep}
-        readinessComplete={readinessComplete}
-        readinessScore={readinessScore}
-        readinessTotal={readinessChecks.length}
-      />
+      <PageHeader icon={FilePlus2} title="New Content" help={SUBMIT_HELP}>
+        <WorkflowHeader
+          currentStep={currentStep}
+          readinessComplete={readinessComplete}
+          readinessScore={readinessScore}
+          readinessTotal={readinessChecks.length}
+        />
+      </PageHeader>
 
       <SelectionSummaryCard
         provider={provider}
@@ -659,6 +679,9 @@ export default function SubmitUrlsPage() {
           setTitle={setTitle}
           publishedDate={publishedDate}
           setPublishedDate={setPublishedDate}
+          kind={taxonomy.kind}
+          ideaOrigin={taxonomy.ideaOrigin}
+          setTaxonomy={setTaxonomy}
         />
 
         <StageTwoCard

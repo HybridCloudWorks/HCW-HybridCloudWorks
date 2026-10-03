@@ -12,7 +12,11 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, Sparkles, Clock, Zap, Mic, CalendarDays } from 'lucide-react';
-import { postJSON } from '@/lib/api';
+// Both imports were missing until 2026-10-03: `sendJSON` crashed "Create
+// Draft" after the content existed, so the recording was never marked routed,
+// and `aiEngine` crashed the transcript button (ADR 0033 §1 Amplify).
+import { postJSON, sendJSON } from '@/lib/api';
+import { aiEngine } from '@/lib/aiEngine';
 import { fmtDate, fmtDuration } from './recordingView';
 import { ScriptThisButton, TranscriptToggleIcon } from './shared';
 
@@ -234,12 +238,13 @@ export function RouteModal({ recording, onClose, onRouted }) {
   const handleRoute = async () => {
     setRouting(true);
     try {
+      // No `provider`: the AI router's configured order decides, so a routing
+      // change on the AI Engine page applies here too (ADR 0033 §4).
       const result = await postJSON('createContentFromRecording', {
         recordingId: recording.id,
         transcript: recording.transcript,
         title: recording.title,
         contentType,
-        provider: 'gemini',
       });
       if (result?.contentId) {
         await sendJSON(`cms/recordings/${recording.id}`, 'PATCH', {
@@ -292,8 +297,8 @@ export function RouteModal({ recording, onClose, onRouted }) {
             </select>
           </div>
           <p className="text-xs text-slate-500">
-            Gemini (Google AI) will summarize and structure the transcript into a new draft.
-            You&apos;ll review it in the Editor.
+            The AI Engine&apos;s default provider summarizes and structures the transcript into a
+            new draft. You&apos;ll review it in the Editor.
           </p>
           <div className="flex gap-2">
             <Button className="flex-1" onClick={handleRoute} disabled={routing}>

@@ -7,10 +7,24 @@
  * public read filters on it (public-reads.js `getListenAndLearn`).
  *
  * Layout
- *   Cosmos   listen_and_learn/{provider}_{examCode}              — the set
- *            listen_and_learn_episodes/{areaSlug} @ /setId       — one per area
+ *   Cosmos   listen_and_learn/{provider}_{examCode}              — the set (a book or course, ADR 0033 §4)
+ *            listen_and_learn_episodes/{areaSlug} @ /setId       — one per area (a chapter)
  *            listen_and_learn_episodes/source_{slug} @ /setId    — one per source episode
- *   Blob     listenandlearn/{provider}/{examCode}/{areaSlug}.mp3
+ *            listen_and_learn_episodes/manual_{slug} @ /setId    — one per hand-made chapter
+ *   Blob     listenandlearn/{provider}/{examCode}/{areaSlug}-{yyyymmddHHMMSS}.mp3
+ *
+ * AUDIO VERSIONS (ADR 0033 §4). Until 2026-10-03 regenerating an area wrote
+ * the new MP3 to the SAME blob path, under a one-year immutable cache
+ * header, so a listener who had heard the old take kept hearing it; and the
+ * document was replaced wholesale, so a published episode went back to
+ * draft, or — when the regeneration failed — off the site. Now every upload
+ * carries a version stamp in its path, so regeneration never overwrites, and
+ * a chapter carries `versions[]`, one entry per take, exactly one `active`.
+ * The top-level `audioUrl` / `audioPath` / `audioBytes` / `durationSeconds` /
+ * `speechProvider` / `speechModel` MIRROR the active version, so the public
+ * readers and players need no change. A chapter written before versions
+ * existed is read as one implicit version (`versionsOf`); its first
+ * regeneration writes `versions[]` for real.
  *
  * Two containers rather than an `episodes[]` array on the set: episodes are
  * approved, regenerated and listened to individually, and concurrent array
@@ -49,12 +63,20 @@ export const STATUS = {
   draft: 'draft',
   published: 'published',
   failed: 'failed',
+  // Kept but off the site (ADR 0033 §4). The public reads select
+  // `status = 'published'` in SQL, so an archived chapter leaves the site
+  // with no change to any projection; `statusBeforeArchive` is what Restore
+  // puts back.
+  archived: 'archived',
 };
 
 /** What an episode was grounded on. See the header. */
 export const EPISODE_KIND = Object.freeze({
   guide: 'guide',
   source: 'source',
+  // A chapter made by hand from pasted text or an existing content item
+  // (ADR 0033 §4), spoken by one narrator from `sourceText`.
+  manual: 'manual',
 });
 
 /**
@@ -62,10 +84,195 @@ export const EPISODE_KIND = Object.freeze({
  * because every episode written before #433 was one and none of them carries
  * the field. Anything that is not a known kind is also read as guide rather
  * than passed through — a reader that branches on the value must not meet a
- * third one.
+ * fourth one.
  */
 export function episodeKindOf(doc) {
-  return doc?.kind === EPISODE_KIND.source ? EPISODE_KIND.source : EPISODE_KIND.guide;
+  const kind = doc?.kind;
+  return kind === EPISODE_KIND.source || kind === EPISODE_KIND.manual ? kind : EPISODE_KIND.guide;
+}
+
+/** The document id of a hand-made chapter: `manual_<slug of its title>`. */
+export const MANUAL_CHAPTER_ID_PREFIX = 'manual_';
+
+export function manualChapterId(title) {
+  const slug = slugifyTitle(title);
+  if (!slug) throw new Error('A chapter needs a title with at least one letter or digit');
+  return `${MANUAL_CHAPTER_ID_PREFIX}${slug}`;
+}
+
+/**
+ * `2026-10-03T14:05:09.123Z` → `20261003140509`: the version stamp a blob
+ * path carries, UTC, second resolution. Two takes of one chapter within one
+ * second would share a path; the job runs for minutes, so they cannot.
+ */
+export function versionStamp(now) {
+  const date = now instanceof Date ? now : new Date(now || Date.now());
+  const safe = Number.isNaN(date.getTime()) ? new Date() : date;
+  return safe.toISOString().replace(/[-:T]/g, '').slice(0, 14);
+}
+
+/** A stamped path, or null: `azure/az-104/area-1-20261003140509.mp3`. */
+export const STAMPED_PATH_PATTERN = /-(\d{14})\.mp3$/;
+
+/**
+ * One audio version from what `renderAudio` returned. `id` is the stamp
+ * when the path carries one — stable, sortable, and unique within a chapter
+ * — and `legacy` for the implicit version a pre-ADR-0033 document is read
+ * as.
+ */
+export function toVersion(audio, { now, actorId = null, costUsd = null } = {}) {
+  if (!audio?.url) return null;
+  const stamp = STAMPED_PATH_PATTERN.exec(String(audio.path || ''))?.[1];
+  return {
+    id: stamp || 'legacy',
+    audioUrl: audio.url,
+    audioPath: audio.path || null,
+    audioBytes: audio.bytes || null,
+    durationSeconds: audio.durationSeconds ?? null,
+    speechProvider: audio.speechProvider || null,
+    speechModel: audio.speechModel || null,
+    voice: audio.voice || null,
+    generatedAt: now || null,
+    generatedBy: actorId,
+    costUsd: typeof costUsd === 'number' ? costUsd : null,
+    active: true,
+  };
+}
+
+/**
+ * A chapter's versions, oldest first. A document with none but with audio
+ * is one implicit, active version built from its top-level fields; one with
+ * neither has no versions.
+ */
+export function versionsOf(doc) {
+  if (Array.isArray(doc?.versions) && doc.versions.length > 0) return doc.versions;
+  if (!doc?.audioUrl) return [];
+  return [
+    {
+      id: 'legacy',
+      audioUrl: doc.audioUrl,
+      audioPath: doc.audioPath || null,
+      audioBytes: doc.audioBytes || null,
+      durationSeconds: doc.durationSeconds ?? null,
+      speechProvider: doc.speechProvider || null,
+      speechModel: doc.speechModel || null,
+      voice: null,
+      generatedAt: doc.generatedAt || null,
+      generatedBy: null,
+      costUsd: null,
+      active: true,
+    },
+  ];
+}
+
+export function activeVersionOf(doc) {
+  const versions = versionsOf(doc);
+  return versions.find((v) => v.active) || versions[versions.length - 1] || null;
+}
+
+/** The top-level fields that mirror the active version, from that version. */
+export function mirrorActiveVersion(doc) {
+  const active = activeVersionOf(doc);
+  return {
+    ...doc,
+    audioUrl: active?.audioUrl || null,
+    audioPath: active?.audioPath || null,
+    audioBytes: active?.audioBytes || null,
+    durationSeconds: active?.durationSeconds ?? null,
+    speechProvider: active?.speechProvider || null,
+    speechModel: active?.speechModel || null,
+  };
+}
+
+/**
+ * The document after a regeneration landed (ADR 0033 §4): the fresh script
+ * and metadata, the previous takes kept and deactivated, the new take
+ * active, and the APPROVAL KEPT — a published chapter stays published in
+ * its new voice, which is what "regenerate" means to a listener. Where the
+ * regeneration produced no audio (speech not configured), the previous
+ * active take stays active and `audioError` says why there is no new one.
+ * Edits an operator made by hand (a renamed title, a changed order) survive
+ * because they are marked when written (`titleEditedAt`, `orderEditedAt`).
+ *
+ * @param {object|null} existing the stored document, or null for a first take
+ * @param {object} fresh the document `toEpisodeDoc` built for this run
+ * @param {{ now: string, actorId?: string|null, costUsd?: number|null }} meta
+ */
+export function mergeRegeneration(existing, fresh, { now, actorId = null, costUsd = null } = {}) {
+  const previous = versionsOf(existing).map((v) => ({ ...v, active: false }));
+  const incoming = toVersion(
+    fresh.audioUrl
+      ? {
+          url: fresh.audioUrl,
+          path: fresh.audioPath,
+          bytes: fresh.audioBytes,
+          durationSeconds: fresh.durationSeconds,
+          speechProvider: fresh.speechProvider,
+          speechModel: fresh.speechModel,
+          voice: fresh.voice || null,
+        }
+      : null,
+    { now, actorId, costUsd }
+  );
+  // No new take: the last active one stays active.
+  const versions = incoming ? [...previous, incoming] : versionsOf(existing);
+
+  const keepStatus = existing?.status === STATUS.published || existing?.status === STATUS.archived;
+  const merged = {
+    ...fresh,
+    versions,
+    status: keepStatus ? existing.status : STATUS.draft,
+    approvedAt: keepStatus ? (existing.approvedAt ?? null) : null,
+    approvedBy: keepStatus ? (existing.approvedBy ?? null) : null,
+    ...(existing?.statusBeforeArchive ? { statusBeforeArchive: existing.statusBeforeArchive } : {}),
+    ...(existing?.archivedAt ? { archivedAt: existing.archivedAt } : {}),
+    ...(existing?.titleEditedAt
+      ? { title: existing.title, titleEditedAt: existing.titleEditedAt }
+      : {}),
+    ...(existing?.orderEditedAt
+      ? { order: existing.order, orderEditedAt: existing.orderEditedAt }
+      : {}),
+    ...(existing?.sourceContentId ? { sourceContentId: existing.sourceContentId } : {}),
+    firstGeneratedAt: existing?.firstGeneratedAt || existing?.generatedAt || now,
+    regeneratedAt: existing ? now : null,
+    lastError: null,
+    updatedAt: now,
+    updatedBy: actorId,
+  };
+  const mirrored = mirrorActiveVersion(merged);
+  // An old take kept active because the new run had no audio still carries
+  // the run's explanation.
+  return { ...mirrored, audioError: fresh.audioError || null };
+}
+
+/**
+ * The top-level fields a hand-made chapter's text lives in, from a content
+ * item's body: the pipeline keeps the article under several spellings
+ * (lib/cms/content-quality.js reads the same four), HTML tags are dropped
+ * and whitespace collapsed because the text is spoken, not shown.
+ */
+export function speakableTextOf(item) {
+  const raw = String(item?.postContent || item?.blogDraft || item?.content || item?.Content || '');
+  let text = raw;
+  let prev;
+  // Innermost tags first, repeated until stable: a single pass over
+  // `<scr<script>ipt>` leaves `ipt>` behind, and a tag that survives is read
+  // aloud as angle brackets.
+  do {
+    prev = text;
+    text = text.replace(/<[^<>]*>/g, ' ');
+  } while (text !== prev);
+  return text
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/[ \t]+/g, ' ')
+    .replace(/ +([.,;:!?])/g, '$1')
+    .replace(/\s*\n\s*/g, '\n')
+    .trim();
 }
 
 /**
@@ -93,7 +300,8 @@ export function slugifyTitle(text) {
 
 export function sourceEpisodeId(title) {
   const slug = slugifyTitle(title);
-  if (!slug) throw new Error('A source-grounded episode needs a title with at least one letter or digit');
+  if (!slug)
+    throw new Error('A source-grounded episode needs a title with at least one letter or digit');
   return `${SOURCE_EPISODE_ID_PREFIX}${slug}`;
 }
 
@@ -111,9 +319,15 @@ export function setId(provider, examCode) {
   return `${String(provider).toLowerCase()}_${String(examCode).toLowerCase()}`;
 }
 
-/** Blob path for one episode's audio. Validated by blob-paths `isValidBlobPath`. */
-export function audioPath(provider, examCode, areaSlug) {
-  return `${String(provider).toLowerCase()}/${String(examCode).toLowerCase()}/${areaSlug}.mp3`;
+/**
+ * Blob path for one episode's audio. Validated by blob-paths `isValidBlobPath`.
+ * With a `stamp` (every new upload, ADR 0033 §4) the path is per version, so
+ * regeneration never overwrites; without one it is the pre-2026-10-03 path,
+ * which public-media.js serves with a short cache instead of an immutable one.
+ */
+export function audioPath(provider, examCode, areaSlug, stamp = null) {
+  const suffix = stamp ? `-${stamp}` : '';
+  return `${String(provider).toLowerCase()}/${String(examCode).toLowerCase()}/${areaSlug}${suffix}.mp3`;
 }
 
 /**
@@ -132,8 +346,9 @@ export async function uploadEpisodeAudio({
   areaSlug,
   audio,
   contentType,
+  stamp = null,
 }) {
-  const path = audioPath(provider, examCode, areaSlug);
+  const path = audioPath(provider, examCode, areaSlug, stamp);
 
   await storage.uploadBlob(AUDIO_CONTAINER, path, audio, contentType, {
     provider: String(provider).toLowerCase(),
@@ -163,6 +378,8 @@ export function toEpisodeDoc({
   now,
   kind = EPISODE_KIND.guide,
   sources = [],
+  sourceText = null,
+  sourceContentId = null,
 }) {
   return {
     id: area.slug,
@@ -171,8 +388,15 @@ export function toEpisodeDoc({
     examCode,
     areaSlug: area.slug,
     areaName: area.name,
-    kind: kind === EPISODE_KIND.source ? EPISODE_KIND.source : EPISODE_KIND.guide,
+    kind: episodeKindOf({ kind }),
     sources: Array.isArray(sources) ? sources : [],
+    // What was spoken, kept so a chapter can be regenerated in another voice
+    // without the script being written again (ADR 0033 §4). For a dialogue
+    // episode the transcript below is that text; `sourceText` is for the
+    // hand-made chapter whose text came from an operator or a content item.
+    sourceText: typeof sourceText === 'string' && sourceText ? sourceText : null,
+    sourceContentId: sourceContentId || null,
+    versions: [],
     // Position in the official study guide. Episodes are listened to in the
     // order the exam presents them, which is rarely the order a query returns
     // and never the order exam weighting would give.
@@ -206,18 +430,36 @@ export function toEpisodeDoc({
 }
 
 /**
- * Write one episode as a draft, replacing any previous generation for the
- * same area. Regeneration is idempotent because the document id is the area
- * slug within the set's partition.
+ * Write one episode, merging onto any previous generation for the same area
+ * (`mergeRegeneration`). Regeneration is idempotent because the document id
+ * is the area slug within the set's partition.
  *
- * A whole-document replace, deliberately: a regenerated episode must not
- * inherit the approval of the version it replaced.
+ * A merge, not a replace, from ADR 0033 §4 on: a re-run of a whole set must
+ * not clear its approvals, and a regenerated chapter keeps its earlier takes
+ * as versions. Until then this was a whole-document replace so that a new
+ * take could not inherit an approval — which also meant every re-run took a
+ * set off the site until each episode was approved again.
  */
 export async function saveEpisode(
   store,
-  { provider, examCode, area, script, audio, videos, order, now, kind, sources }
+  {
+    provider,
+    examCode,
+    area,
+    script,
+    audio,
+    videos,
+    order,
+    now,
+    kind,
+    sources,
+    sourceText,
+    sourceContentId,
+    actorId = null,
+    costUsd = null,
+  }
 ) {
-  const doc = toEpisodeDoc({
+  const fresh = toEpisodeDoc({
     area,
     script,
     audio,
@@ -228,7 +470,11 @@ export async function saveEpisode(
     now,
     kind,
     sources,
+    sourceText,
+    sourceContentId,
   });
+  const existing = await store.readDoc(EPISODE_CONTAINER, fresh.id, fresh.setId);
+  const doc = mergeRegeneration(existing || null, fresh, { now, actorId, costUsd });
   await store.upsertDoc(EPISODE_CONTAINER, doc);
   return doc;
 }
@@ -237,8 +483,12 @@ export async function saveEpisode(
  * Record that an area failed, so the admin page shows a gap instead of silence.
  *
  * Merges onto whatever is stored. A previous good generation keeps its
- * transcript and audio and is merely marked failed — replacing it wholesale
- * would destroy a working episode because its *re*generation failed.
+ * transcript and audio — and, from ADR 0033 §4 on, its STATUS: a published
+ * chapter whose regeneration failed stays published, in its previous take,
+ * with `lastError` saying what happened so the card can offer Retry and
+ * Keep current. Only a chapter that was never good, or was a draft, is
+ * marked failed; replacing a working episode because its *re*generation
+ * failed is the bug this used to have.
  *
  * `kind` is written explicitly: a failure marker for a source episode that
  * had never succeeded would otherwise be a document with no `kind`, which
@@ -251,6 +501,8 @@ export async function saveEpisodeFailure(
 ) {
   const id = setId(provider, examCode);
   const existing = (await store.readDoc(EPISODE_CONTAINER, area.slug, id)) || {};
+  const message = String(error).slice(0, 500);
+  const keepLive = existing.status === STATUS.published || existing.status === STATUS.archived;
 
   await store.upsertDoc(EPISODE_CONTAINER, {
     ...existing,
@@ -259,17 +511,26 @@ export async function saveEpisodeFailure(
     provider,
     examCode,
     areaSlug: area.slug,
-    areaName: area.name,
+    areaName: area.name || existing.areaName || area.slug,
     kind: episodeKindOf(kind ? { kind } : existing),
-    weightLabel: area.weightLabel || '',
+    weightLabel: area.weightLabel || existing.weightLabel || '',
     order: Number.isInteger(order) ? order : (existing.order ?? 0),
-    status: STATUS.failed,
-    error: String(error).slice(0, 500),
-    generatedAt: now,
+    status: keepLive ? existing.status : STATUS.failed,
+    error: keepLive ? (existing.error ?? null) : message,
+    lastError: { message, at: now, attempt: 'regeneration' },
+    generatedAt: keepLive ? existing.generatedAt || now : now,
+    updatedAt: now,
   });
 }
 
-/** Upsert the parent document that describes the certification this set belongs to. */
+/**
+ * Upsert the parent document that describes the certification this set
+ * belongs to. A merge: the Audio Library fields an operator set (kind,
+ * title, author, description, cover, tags, voice — ADR 0033 §4) survive a
+ * re-run, and a set with no `kind` is a course, because every set written
+ * before the library existed was one. `areaSlugs` is what the admin read
+ * compares a guide chapter against to say "not in the current guide".
+ */
 export async function saveSet(store, { provider, examCode, guide, cert, now, actorId }) {
   const id = setId(provider, examCode);
   const existing = (await store.readDoc(SET_CONTAINER, id, id)) || {};
@@ -279,13 +540,19 @@ export async function saveSet(store, { provider, examCode, guide, cert, now, act
     id,
     provider,
     examCode,
-    certSlug: cert?.slug || String(examCode).toLowerCase(),
-    certTitle: cert?.title || guide.title,
+    kind: existing.kind === 'book' ? 'book' : 'course',
+    certSlug: cert?.slug || existing.certSlug || String(examCode).toLowerCase(),
+    certTitle: cert?.title || existing.certTitle || guide.title,
+    title: existing.title || cert?.title || guide.title,
     studyGuideUrl: guide.sourceUrl,
     studyGuideTitle: guide.title,
     areaCount: guide.areas.length,
+    areaSlugs: guide.areas.map((area) => area.slug),
     generatedAt: now,
     generatedBy: actorId || null,
+    createdAt: existing.createdAt || existing.generatedAt || now,
+    updatedAt: now,
+    updatedBy: actorId || null,
   };
 
   await store.upsertDoc(SET_CONTAINER, doc);
@@ -312,13 +579,18 @@ export async function ensureSet(store, { provider, examCode, cert, now, actorId 
     id,
     provider,
     examCode,
+    kind: 'course',
     certSlug: cert?.slug || String(examCode).toLowerCase(),
     certTitle: cert?.title || String(examCode),
+    title: cert?.title || String(examCode),
     studyGuideUrl: null,
     studyGuideTitle: null,
     areaCount: 0,
     generatedAt: now,
     generatedBy: actorId || null,
+    createdAt: now,
+    updatedAt: now,
+    updatedBy: actorId || null,
   };
   await store.upsertDoc(SET_CONTAINER, doc);
   return doc;

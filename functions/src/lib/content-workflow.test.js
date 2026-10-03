@@ -22,7 +22,11 @@ const guardAs = (role) => ({
   requireRole: vi.fn(async () => ({ user: USER, role, error: null })),
 });
 const denyGuard = {
-  requireRole: vi.fn(async () => ({ user: null, role: null, error: { status: 403, body: '{}' } })),
+  requireRole: vi.fn(async () => ({
+    user: null,
+    role: null,
+    error: { status: 403, body: '{}' },
+  })),
 };
 
 const makeRequest = (body) => ({
@@ -32,7 +36,11 @@ const makeRequest = (body) => ({
 
 function makeStore(over = {}) {
   return {
-    readDoc: vi.fn(async () => ({ id: 'c1', Title: 'Existing', contentStatus: 'editing' })),
+    readDoc: vi.fn(async () => ({
+      id: 'c1',
+      Title: 'Existing',
+      contentStatus: 'editing',
+    })),
     patchDoc: vi.fn(async (_c, id, u) => ({ id, ...u })),
     upsertDoc: vi.fn(async (_c, d) => d),
     deleteDoc: vi.fn(async () => {}),
@@ -79,7 +87,10 @@ describe('helpers', () => {
     expect(updates.heroImageUrl).toBe('https://a/1.png');
     expect(updates.contentImageUrl).toBe('https://a/1.png');
     expect(updates.secondaryImageUrls).toEqual(['https://a/2.png']);
-    expect(updates.aiImageUrls).toEqual({ hero: 'https://a/1.png', secondary1: 'https://a/2.png' });
+    expect(updates.aiImageUrls).toEqual({
+      hero: 'https://a/1.png',
+      secondary1: 'https://a/2.png',
+    });
 
     const cleared = buildContentImageFieldUpdates(buildContentImageUpdates([], {}));
     expect('heroImageUrl' in cleared && cleared.heroImageUrl === undefined).toBe(true);
@@ -89,13 +100,25 @@ describe('helpers', () => {
 });
 
 describe('saveEditorDraft', () => {
-  const validBody = { contentId: 'c1', draft: 'Body text', title: 'T', tags: 'a,b' };
+  const validBody = {
+    contentId: 'c1',
+    draft: 'Body text',
+    title: 'T',
+    tags: 'a,b',
+  };
 
   it('409s a stale editor and lets force through', async () => {
     const store = makeStore({
-      readDoc: vi.fn(async () => ({ id: 'c1', blogEditedAt: '2026-08-01T00:00:00.000Z' })),
+      readDoc: vi.fn(async () => ({
+        id: 'c1',
+        blogEditedAt: '2026-08-01T00:00:00.000Z',
+      })),
     });
-    const h = createContentWorkflowHandlers({ guard: guardAs('editor'), store, ...fixed });
+    const h = createContentWorkflowHandlers({
+      guard: guardAs('editor'),
+      store,
+      ...fixed,
+    });
 
     const stale = await h.saveEditorDraft(
       makeRequest({ ...validBody, expectedEditedAtMs: 0 }),
@@ -115,8 +138,14 @@ describe('saveEditorDraft', () => {
   });
 
   it('patches content, then writes version + audit with the source shapes', async () => {
-    const store = makeStore({ readDoc: vi.fn(async () => ({ id: 'c1', Title: 'Old' })) });
-    const h = createContentWorkflowHandlers({ guard: guardAs('editor'), store, ...fixed });
+    const store = makeStore({
+      readDoc: vi.fn(async () => ({ id: 'c1', Title: 'Old' })),
+    });
+    const h = createContentWorkflowHandlers({
+      guard: guardAs('editor'),
+      store,
+      ...fixed,
+    });
     const res = await h.saveEditorDraft(
       makeRequest({ ...validBody, expectedEditedAtMs: 0 }),
       context
@@ -143,7 +172,11 @@ describe('saveEditorDraft', () => {
     // and, worse, the client had to guess which polled document was its own.
     // (T-208)
     const store = makeStore({ readDoc: vi.fn(async () => ({ id: 'c1' })) });
-    const h = createContentWorkflowHandlers({ guard: guardAs('editor'), store, ...fixed });
+    const h = createContentWorkflowHandlers({
+      guard: guardAs('editor'),
+      store,
+      ...fixed,
+    });
 
     const res = await h.saveEditorDraft(
       makeRequest({ ...validBody, expectedEditedAtMs: 0 }),
@@ -157,11 +190,49 @@ describe('saveEditorDraft', () => {
 
   it('preserves a published_* status instead of demoting to editing', async () => {
     const store = makeStore({
-      readDoc: vi.fn(async () => ({ id: 'c1', contentStatus: 'published_blog' })),
+      readDoc: vi.fn(async () => ({
+        id: 'c1',
+        contentStatus: 'published_blog',
+      })),
     });
-    const h = createContentWorkflowHandlers({ guard: guardAs('editor'), store, ...fixed });
+    const h = createContentWorkflowHandlers({
+      guard: guardAs('editor'),
+      store,
+      ...fixed,
+    });
     await h.saveEditorDraft(makeRequest({ ...validBody, expectedEditedAtMs: 0 }), context);
     expect(store.patchDoc.mock.calls[0][2].contentStatus).toBe('published_blog');
+  });
+
+  it('keeps the canonical `published` when the article is Live, and demotes it when it is not (ADR 0033 §1)', async () => {
+    const live = makeStore({
+      readDoc: vi.fn(async () => ({
+        id: 'c1',
+        contentStatus: 'published',
+        Live: true,
+      })),
+    });
+    await createContentWorkflowHandlers({
+      guard: guardAs('editor'),
+      store: live,
+      ...fixed,
+    }).saveEditorDraft(makeRequest({ ...validBody, expectedEditedAtMs: 0 }), context);
+    expect(live.patchDoc.mock.calls[0][2].contentStatus).toBe('published');
+
+    // `published` with Live=false is staged, not live: an edit reopens it.
+    const staged = makeStore({
+      readDoc: vi.fn(async () => ({
+        id: 'c1',
+        contentStatus: 'published',
+        Live: false,
+      })),
+    });
+    await createContentWorkflowHandlers({
+      guard: guardAs('editor'),
+      store: staged,
+      ...fixed,
+    }).saveEditorDraft(makeRequest({ ...validBody, expectedEditedAtMs: 0 }), context);
+    expect(staged.patchDoc.mock.calls[0][2].contentStatus).toBe('editing');
   });
 });
 
@@ -170,7 +241,11 @@ describe('unpublishContentToInspected', () => {
     const store = makeStore({
       readDoc: vi.fn(async () => ({ id: 'c1', contentStatus: 'editing' })),
     });
-    const h = createContentWorkflowHandlers({ guard: guardAs('publisher'), store, ...fixed });
+    const h = createContentWorkflowHandlers({
+      guard: guardAs('publisher'),
+      store,
+      ...fixed,
+    });
     const res = await h.unpublishContentToInspected(makeRequest({ contentId: 'c1' }), context);
     expect(res.status).toBe(400);
     expect(JSON.parse(res.body).allowedStatuses).toEqual(['published', 'approved']);
@@ -179,9 +254,17 @@ describe('unpublishContentToInspected', () => {
 
   it('normalizes legacy statuses, patches, and audits the transition', async () => {
     const store = makeStore({
-      readDoc: vi.fn(async () => ({ id: 'c1', contentStatus: 'published_news', Title: 'T' })),
+      readDoc: vi.fn(async () => ({
+        id: 'c1',
+        contentStatus: 'published_news',
+        Title: 'T',
+      })),
     });
-    const h = createContentWorkflowHandlers({ guard: guardAs('publisher'), store, ...fixed });
+    const h = createContentWorkflowHandlers({
+      guard: guardAs('publisher'),
+      store,
+      ...fixed,
+    });
     const body = JSON.parse(
       (
         await h.unpublishContentToInspected(
@@ -212,7 +295,11 @@ describe('deleteContentItem / softDeleteLivePage', () => {
         throw err;
       }),
     });
-    const h = createContentWorkflowHandlers({ guard: guardAs('publisher'), store, ...fixed });
+    const h = createContentWorkflowHandlers({
+      guard: guardAs('publisher'),
+      store,
+      ...fixed,
+    });
     expect((await h.deleteContentItem(makeRequest({ contentId: 'gone' }), context)).status).toBe(
       200
     );
@@ -222,7 +309,11 @@ describe('deleteContentItem / softDeleteLivePage', () => {
     const store = makeStore({
       readDoc: vi.fn(async (_c, id) => (id === 'legacy-1' ? { id: 'legacy-1' } : null)),
     });
-    const h = createContentWorkflowHandlers({ guard: guardAs('publisher'), store, ...fixed });
+    const h = createContentWorkflowHandlers({
+      guard: guardAs('publisher'),
+      store,
+      ...fixed,
+    });
     const res = await h.softDeleteLivePage(
       makeRequest({ blogId: 'legacy-1', reason: ' old ' }),
       context
@@ -241,15 +332,25 @@ describe('deleteContentItem / softDeleteLivePage', () => {
 
   it('soft delete 404s when neither id resolves', async () => {
     const store = makeStore({ readDoc: vi.fn(async () => null) });
-    const h = createContentWorkflowHandlers({ guard: guardAs('publisher'), store, ...fixed });
+    const h = createContentWorkflowHandlers({
+      guard: guardAs('publisher'),
+      store,
+      ...fixed,
+    });
     expect((await h.softDeleteLivePage(makeRequest({ contentId: 'x' }), context)).status).toBe(404);
   });
 });
 
 describe('saveContentSchedule', () => {
   it('instant publish clears the schedule; future date required otherwise', async () => {
-    const store = makeStore({ readDoc: vi.fn(async () => ({ id: 'c1', type: 'framework' })) });
-    const h = createContentWorkflowHandlers({ guard: guardAs('publisher'), store, ...fixed });
+    const store = makeStore({
+      readDoc: vi.fn(async () => ({ id: 'c1', type: 'framework' })),
+    });
+    const h = createContentWorkflowHandlers({
+      guard: guardAs('publisher'),
+      store,
+      ...fixed,
+    });
 
     const instant = JSON.parse(
       (await h.saveContentSchedule(makeRequest({ contentId: 'c1', instantPublish: true }), context))
@@ -264,7 +365,11 @@ describe('saveContentSchedule', () => {
     });
 
     const past = await h.saveContentSchedule(
-      makeRequest({ contentId: 'c1', instantPublish: false, scheduledPublishDate: '2020-01-01' }),
+      makeRequest({
+        contentId: 'c1',
+        instantPublish: false,
+        scheduledPublishDate: '2020-01-01',
+      }),
       context
     );
     expect(past.status).toBe(400);
@@ -283,12 +388,93 @@ describe('saveContentSchedule', () => {
     );
     expect(future.scheduledPublishDate).toBe('2026-09-01T00:00:00.000Z');
   });
+
+  it('keeps forge_ready on a reschedule instead of demoting it to approved', async () => {
+    const store = makeStore({
+      readDoc: vi.fn(async () => ({
+        id: 'c1',
+        type: 'blog',
+        contentStatus: 'forge_ready',
+      })),
+    });
+    const h = createContentWorkflowHandlers({
+      guard: guardAs('publisher'),
+      store,
+      ...fixed,
+    });
+    await h.saveContentSchedule(
+      makeRequest({
+        contentId: 'c1',
+        instantPublish: false,
+        scheduledPublishDate: '2026-09-01T00:00:00Z',
+      }),
+      context
+    );
+    expect(store.patchDoc.mock.calls[0][2]).not.toHaveProperty('contentStatus');
+  });
+});
+
+describe('unscheduleContent', () => {
+  it('clears the schedule, keeps the status, and refuses live content', async () => {
+    const store = makeStore({
+      readDoc: vi.fn(async () => ({
+        id: 'c1',
+        contentStatus: 'approved',
+        scheduledPublishDate: '2026-09-01T00:00:00.000Z',
+      })),
+    });
+    const h = createContentWorkflowHandlers({
+      guard: guardAs('publisher'),
+      store,
+      ...fixed,
+    });
+    const res = JSON.parse(
+      (await h.unscheduleContent(makeRequest({ contentId: 'c1' }), context)).body
+    );
+    expect(res.previousScheduledPublishDate).toBe('2026-09-01T00:00:00.000Z');
+    expect(store.patchDoc.mock.calls[0][2]).toEqual({
+      scheduledPublishDate: null,
+      updatedAt: fixed.now().toISOString(),
+      updatedBy: expect.any(String),
+    });
+
+    const live = makeStore({
+      readDoc: vi.fn(async () => ({
+        id: 'c1',
+        Live: true,
+        scheduledPublishDate: 'x',
+      })),
+    });
+    const hl = createContentWorkflowHandlers({
+      guard: guardAs('publisher'),
+      store: live,
+      ...fixed,
+    });
+    expect((await hl.unscheduleContent(makeRequest({ contentId: 'c1' }), context)).status).toBe(
+      409
+    );
+    expect(live.patchDoc).not.toHaveBeenCalled();
+
+    // Publisher, like saveContentSchedule: a schedule is a publishing decision.
+    expect(store.readDoc).toHaveBeenCalled();
+    const guard = guardAs('publisher');
+    await createContentWorkflowHandlers({
+      guard,
+      store,
+      ...fixed,
+    }).unscheduleContent(makeRequest({ contentId: 'c1' }), context);
+    expect(guard.requireRole).toHaveBeenCalledWith(expect.anything(), 'publisher');
+  });
 });
 
 describe('inspection state RPCs', () => {
   it('requestContentInspection arms the trigger; reset disarms and clears errors', async () => {
     const store = makeStore();
-    const h = createContentWorkflowHandlers({ guard: guardAs('editor'), store, ...fixed });
+    const h = createContentWorkflowHandlers({
+      guard: guardAs('editor'),
+      store,
+      ...fixed,
+    });
 
     await h.requestContentInspection(makeRequest({ contentId: 'c1' }), context);
     expect(store.patchDoc.mock.calls[0][2]).toMatchObject({
@@ -307,7 +493,11 @@ describe('inspection state RPCs', () => {
 
   it('every handler denies with zero store calls', async () => {
     const store = makeStore();
-    const h = createContentWorkflowHandlers({ guard: denyGuard, store, ...fixed });
+    const h = createContentWorkflowHandlers({
+      guard: denyGuard,
+      store,
+      ...fixed,
+    });
     const reqs = [
       h.saveEditorDraft(makeRequest({ contentId: 'c1' }), context),
       h.unpublishContentToInspected(makeRequest({ contentId: 'c1' }), context),

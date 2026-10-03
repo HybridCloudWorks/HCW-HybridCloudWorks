@@ -56,12 +56,9 @@ export function createLabAgentHandlers({ guard, store, now = () => new Date() })
   /**
    * Claim one queued job.
    *
-   * The source used a Firestore transaction (`index.js:84-97`). Cosmos has no
-   * cross-document transaction here, and does not need one: the contended
-   * write is a single document, so an ETag-guarded replace gives the same
-   * guarantee. Two agents racing for the same job produce one 412, and the
-   * loser simply tries the next candidate — which is exactly what the source's
-   * `return null` on a lost transaction did.
+   * The contended write is a single document, so an ETag-guarded replace is
+   * the whole of the locking: two agents racing for the same job produce
+   * one 412, and the loser simply tries the next candidate.
    *
    * Capabilities come from the registry record, NOT from the request. The
    * source agent sent its own capability list and filtered client-side; an
@@ -90,15 +87,21 @@ export function createLabAgentHandlers({ guard, store, now = () => new Date() })
     const staleBefore = new Date(nowMs - CLAIM_LEASE_MS).toISOString();
 
     // Two claimable shapes: never claimed, or claimed by an agent that has
-    // since gone away. Without the second, a VPS that dies mid-claim strands
-    // its jobs permanently — the source had the same hole, and it showed up as
-    // jobs stuck in 'claimed' forever.
+    // since gone away. Without the second, a host that dies mid-claim strands
+    // its jobs permanently, as jobs stuck in 'claimed' forever.
+    //
+    // FIFO in the query itself (ADR 0033 inventory): without ORDER BY, TOP 20
+    // was whichever 20 candidates Cosmos returned, so with more than twenty
+    // queued the oldest could wait behind newer ones indefinitely. Every
+    // lab_jobs document carries createdAt (enqueueLabJob and the public
+    // submit both write it), so the sort drops nothing.
     const candidates = await store.queryDocs(
       'lab_jobs',
       `SELECT TOP @limit * FROM c
         WHERE ARRAY_CONTAINS(@types, c.type)
           AND (c.status = 'queued'
-               OR (c.status = 'claimed' AND (NOT IS_DEFINED(c.claimedAt) OR c.claimedAt < @staleBefore)))`,
+               OR (c.status = 'claimed' AND (NOT IS_DEFINED(c.claimedAt) OR c.claimedAt < @staleBefore)))
+        ORDER BY c.createdAt ASC`,
       [
         { name: '@limit', value: CLAIM_SCAN_LIMIT },
         { name: '@types', value: capabilities },
@@ -106,9 +109,8 @@ export function createLabAgentHandlers({ guard, store, now = () => new Date() })
       ]
     );
 
-    // Oldest first. Sorted in memory rather than with ORDER BY, because
-    // createdAt is not guaranteed present on every historical document and
-    // Cosmos drops documents missing the sort field from the result set.
+    // Oldest first, again in memory, so a store that ignores ORDER BY (a test
+    // double, a future mirror) still hands out the oldest.
     const ordered = [...candidates].sort((a, b) =>
       String(a.createdAt ?? '').localeCompare(String(b.createdAt ?? ''))
     );
@@ -236,8 +238,10 @@ export function createLabAgentHandlers({ guard, store, now = () => new Date() })
     }
 
     // A job the operator cancelled, or one already reported, must not be
-    // reopened by a late-arriving result.
-    if (!['claimed', 'running'].includes(job.status)) {
+    // reopened by a late-arriving result. `claimed` is the only state a held
+    // job is ever in: the agent reports nothing between claim and completion
+    // (JOB_STATUSES in labs.js).
+    if (job.status !== 'claimed') {
       return json(409, { ok: false, error: `Job is ${job.status}` });
     }
 

@@ -31,24 +31,19 @@ import { logAdminAction } from '@/lib/auditLog';
 import { toDate } from '@/lib/dateUtils';
 import { getContentPublicPath, getPublishTargetForItem } from '@/lib/contentModel';
 import {
-  unpublishToInspected,
   requestContentInspection,
   saveContentSchedule,
   resetContentReviewState,
 } from '@/lib/contentWorkflow';
+import StatusBadge from '@/components/admin/shared/StatusBadge';
+import TaxonomyChips from '@/components/admin/shared/TaxonomyChips';
+import { useContentTransitions } from '@/pages/admin/queue/useContentTransitions';
 import { ImageOrderManager } from '@/components/admin/ImageOrderManager';
 import { ImageGalleryPicker } from '@/components/admin/ImageGalleryPicker';
+import { useImagePrompts } from '@/hooks/useImagePrompts';
 import { getOrderedContentImages } from '@/lib/contentImages';
 import { resolveMediaUrl } from '../../lib/functionsBase';
 import { safeUrl } from '@/lib/safeUrl';
-
-const getStatusLabel = (status, isLive = false) => {
-  if (!status) return 'reviewed';
-  if (status === 'ingested') return 'reviewed';
-  if (status.startsWith('published_')) return isLive ? 'published' : 'ready to publish';
-  if (status === 'ready_to_publish') return 'ready to publish';
-  return status.replace(/_/g, ' ');
-};
 
 const toLocalDateInputValue = (value) => {
   const year = value.getFullYear();
@@ -61,9 +56,13 @@ const toLocalDateInputValue = (value) => {
  * BlogReviewBoard — full review UI for standard blog content items.
  * Handles all state, content writes, and Azure Function calls internally.
  *
- * @param {{ blog: object, blogId: string }} props
+ * The status moves (approve, reject, recall) go through the shared
+ * useContentTransitions hook (ADR 0033 §2); `onChanged` lets the page
+ * refetch the record after one lands.
+ *
+ * @param {{ blog: object, blogId: string, onChanged?: () => void }} props
  */
-export default function BlogReviewBoard({ blog, blogId }) {
+export default function BlogReviewBoard({ blog, blogId, onChanged }) {
   const navigate = useNavigate();
 
   const [notes, setNotes] = useState('');
@@ -72,8 +71,11 @@ export default function BlogReviewBoard({ blog, blogId }) {
     notesRef.current = notes;
   }, [notes]);
 
-  const [transitioning, setTransitioning] = useState(null);
-  const [transitionError, setTransitionError] = useState(null);
+  const transitions = useContentTransitions({ onTransitioned: () => onChanged?.() });
+  // The verb in flight for this record ('approving' | 'rejecting' | 'recalling'), or null.
+  const transitioning = transitions.loading[blogId] || null;
+  const [localTransitionError, setTransitionError] = useState(null);
+  const transitionError = localTransitionError || transitions.errors[blogId] || null;
 
   // UI expand/collapse state
   const [summaryExpanded, setSummaryExpanded] = useState(true);
@@ -83,6 +85,11 @@ export default function BlogReviewBoard({ blog, blogId }) {
   const [expandedImage, setExpandedImage] = useState('');
   const [coverTriggerPending, setCoverTriggerPending] = useState(false);
   const [coverTriggerMessage, setCoverTriggerMessage] = useState(null);
+  // Which Image Prompts set the cover would generate with when the override
+  // above is empty (ADR 0033): read once per document so the button's text
+  // can say what will actually happen.
+  const { resolvePromptForContent } = useImagePrompts();
+  const [coverPromptPlan, setCoverPromptPlan] = useState(null);
   const [reviewImages, setReviewImages] = useState([]);
   const [savingImages, setSavingImages] = useState(false);
 
@@ -210,27 +217,29 @@ export default function BlogReviewBoard({ blog, blogId }) {
     }
   };
 
+  // approve / reject through the one shared copy; the server writes the
+  // audit row, so none is written here (ADR 0033 §1, §2).
   const handleTransition = useCallback(
-    async (newStatus) => {
-      setTransitioning(newStatus);
+    (newStatus) => {
       setTransitionError(null);
-      try {
-        await postJSON('transitionContentStatus', {
-          contentId: blogId,
-          newStatus,
-          publishTarget: getPublishTargetForItem(blog),
-          reviewNotes: notesRef.current,
-        });
-        await logAdminAction('status_transition', { contentId: blogId, newStatus });
-        // The parent's data hook refetches on demand — state updates on reload
-      } catch (err) {
-        setTransitionError(err.message);
-      } finally {
-        setTransitioning(null);
-      }
+      const options = {
+        reviewNotes: notesRef.current,
+        publishTarget: getPublishTargetForItem(blog),
+      };
+      return newStatus === 'rejected'
+        ? transitions.reject(blogId, options)
+        : transitions.approve(blog, options);
     },
-    [blog, blogId]
+    [blog, blogId, transitions]
   );
+
+  const handleRecall = () => {
+    setTransitionError(null);
+    return transitions.recall(blogId, {
+      currentStatus: status,
+      reviewNotes: notesRef.current || 'Returned to review queue from review board',
+    });
+  };
 
   const handleTriggerInspect = async () => {
     try {
@@ -240,18 +249,36 @@ export default function BlogReviewBoard({ blog, blogId }) {
     }
   };
 
+  useEffect(() => {
+    if (!blogId) return undefined;
+    let cancelled = false;
+    resolvePromptForContent(blogId).then((plan) => {
+      if (!cancelled) setCoverPromptPlan(plan);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [blogId, resolvePromptForContent, blog?.altCoverImageGeneratedAt]);
+
   const handleTriggerCover = async () => {
     setTransitionError(null);
     setCoverTriggerMessage(null);
     setCoverTriggerPending(true);
     try {
+      // An empty seed clears a previous override, so the assigned set applies
+      // again; a non-empty one is used verbatim.
       await postJSON('triggerAiImageGeneration', {
         contentIds: [blogId],
         aiImageTargets: ['hero'],
         imagePromptSeed: imagePrompt.trim(),
       });
+      const using = imagePrompt.trim()
+        ? 'your prompt override'
+        : coverPromptPlan?.setName
+          ? `the "${coverPromptPlan.setName}" image set`
+          : 'the built-in prompt';
       setCoverTriggerMessage(
-        'AI cover regeneration queued. The Images panel will update when the new file is ready.'
+        `AI cover queued using ${using}. The Images panel updates when the new file lands; the previous cover stays in the gallery.`
       );
     } catch (err) {
       setCoverTriggerPending(false);
@@ -367,7 +394,9 @@ export default function BlogReviewBoard({ blog, blogId }) {
   const hasProvider = Boolean(selectedProvider && selectedProvider !== 'Unknown');
   const showProviderOptions = providerPickerOpen || !hasProvider;
   const isPublishedLive = blog.Live === true;
-  const statusLabel = getStatusLabel(status, isPublishedLive);
+  // `published` is the canonical spelling, `published_*` the Firestore-era
+  // one (ADR 0033 §1); a review board must read both.
+  const isPublishedStatus = status === 'published' || status.startsWith('published_');
   const explicitPublishedUrl =
     blog.slugPageUrl || blog.publishedUrl || blog.blogUrl || blog.publicUrl || '';
   const computedPublishedUrl = getContentPublicPath(blog);
@@ -452,7 +481,8 @@ export default function BlogReviewBoard({ blog, blogId }) {
                 <Badge variant="outline">{selectedProvider}</Badge>
               </button>
             )}
-            <Badge>{statusLabel}</Badge>
+            <StatusBadge content={blog} />
+            <TaxonomyChips item={blog} />
           </div>
           {showProviderOptions && (
             <div className="flex flex-wrap items-center gap-2 mt-3">
@@ -870,15 +900,63 @@ export default function BlogReviewBoard({ blog, blogId }) {
               </Button>
 
               <div className="space-y-2">
-                <p className="text-xs font-medium text-muted-foreground">
+                <Label
+                  htmlFor="ai-cover-prompt-override"
+                  className="text-xs font-medium text-muted-foreground"
+                >
                   AI Image Prompt Override
-                </p>
+                </Label>
                 <Textarea
+                  id="ai-cover-prompt-override"
                   value={imagePrompt}
                   onChange={(e) => setImagePrompt(e.target.value)}
-                  placeholder="Enter custom prompt or leave empty for auto-generation..."
+                  placeholder="Leave empty to use the assigned image set; type a prompt to use it verbatim."
                   className="text-xs min-h-20"
                 />
+                <p className="text-[11px] text-muted-foreground">
+                  {imagePrompt.trim() ? (
+                    'Your override is sent as written; the image set and keyword matrix are not applied.'
+                  ) : coverPromptPlan === null ? (
+                    'Checking which image set applies…'
+                  ) : coverPromptPlan.setName ? (
+                    <>
+                      Without an override the cover uses the{' '}
+                      <button
+                        type="button"
+                        className="text-blue-600 hover:underline dark:text-blue-400"
+                        onClick={() =>
+                          navigate(
+                            `/admin/image-prompts?set=${encodeURIComponent(coverPromptPlan.setName)}`
+                          )
+                        }
+                      >
+                        {coverPromptPlan.setName}
+                      </button>{' '}
+                      image set
+                      {coverPromptPlan.promptName ? ` (${coverPromptPlan.promptName})` : ''}
+                      {coverPromptPlan.source === 'page'
+                        ? `, assigned to ${coverPromptPlan.pagePath}`
+                        : ', recorded on this content'}
+                      , with the hero slot template, style rules and keyword matrix.
+                    </>
+                  ) : (
+                    <>
+                      No image set is assigned to this content&apos;s pages
+                      {coverPromptPlan.pagePaths?.length
+                        ? ` (${coverPromptPlan.pagePaths.join(', ')})`
+                        : ''}
+                      , so the built-in illustration prompt applies.{' '}
+                      <button
+                        type="button"
+                        className="text-blue-600 hover:underline dark:text-blue-400"
+                        onClick={() => navigate('/admin/image-prompts')}
+                      >
+                        Assign one on Image Prompts
+                      </button>
+                      .
+                    </>
+                  )}
+                </p>
                 <Button
                   onClick={handleTriggerCover}
                   variant="outline"
@@ -919,35 +997,16 @@ export default function BlogReviewBoard({ blog, blogId }) {
                 <p className="text-xs text-destructive mb-2">{transitionError}</p>
               )}
 
-              {(['ingested', 'inspected', 'in_review'].includes(status) ||
-                status.startsWith('published_')) && (
+              {(['ingested', 'inspected', 'in_review'].includes(status) || isPublishedStatus) && (
                 <>
-                  {status.startsWith('published_') ? (
+                  {isPublishedStatus ? (
                     <Button
-                      onClick={async () => {
-                        setTransitioning('inspected');
-                        setTransitionError(null);
-                        try {
-                          await unpublishToInspected(
-                            blogId,
-                            status,
-                            notesRef.current || 'Returned to review queue from review board'
-                          );
-                          await logAdminAction('content_recalled_to_review', {
-                            contentId: blogId,
-                            fromStatus: status,
-                          });
-                        } catch (err) {
-                          setTransitionError(err.message);
-                        } finally {
-                          setTransitioning(null);
-                        }
-                      }}
+                      onClick={handleRecall}
                       variant="outline"
                       className="w-full gap-2"
                       disabled={Boolean(transitioning)}
                     >
-                      {transitioning === 'inspected' ? (
+                      {transitioning === 'recalling' ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
                         <Newspaper className="h-4 w-4" />
@@ -960,7 +1019,7 @@ export default function BlogReviewBoard({ blog, blogId }) {
                       className="w-full gap-2"
                       disabled={Boolean(transitioning) || !hasProvider}
                     >
-                      {transitioning === 'approved' ? (
+                      {transitioning === 'approving' ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
                         <Newspaper className="h-4 w-4" />
@@ -974,7 +1033,7 @@ export default function BlogReviewBoard({ blog, blogId }) {
                     className="w-full gap-2"
                     disabled={Boolean(transitioning)}
                   >
-                    {transitioning === 'rejected' ? (
+                    {transitioning === 'rejecting' ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
                       <XCircle className="h-4 w-4" />
@@ -1011,7 +1070,7 @@ export default function BlogReviewBoard({ blog, blogId }) {
                 </Button>
               )}
 
-              {status.startsWith('published_') && !isPublishedLive && (
+              {isPublishedStatus && !isPublishedLive && (
                 <>
                   <Button onClick={() => navigate('/admin/published')} className="w-full gap-2">
                     Go to Publish Pane

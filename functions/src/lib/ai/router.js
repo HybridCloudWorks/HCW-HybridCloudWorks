@@ -154,11 +154,14 @@
 import {
   DEFAULT_PROVIDER_ORDER,
   applyFeaturePlacement,
+  applyFeatureRoute,
   createAiConfigLoader,
   configuredModelFor,
   isFeatureEnabled,
   resolveProviderOrder,
+  routeFor,
 } from './ai-config.js';
+import { featureSource, recordAiUsage } from './usage.js';
 // The prompt-injection fence the article episodes use (#435). A source URL
 // is owner-supplied data that ends up inside the prompt, and #433 is the reason
 // that fence exists; it is reused rather than restated so the two cannot drift.
@@ -252,9 +255,14 @@ export const COST_TABLE = Object.freeze({
     'gpt-4o-mini': [0.15, 0.6],
     o1: [15.0, 60.0],
     'o3-mini': [1.1, 4.4],
-    // gpt-5-mini / gpt-5-nano (the defaults) are deliberately not priced here:
-    // upstream never priced them either, and a guessed figure is worse than
-    // the visible fallback. Add the rows when the owner confirms the rates.
+    // gpt-5-mini / gpt-5-nano (the defaults) have no confirmed rate anywhere
+    // in this repository, so they are UNPRICED (null) rather than charged at
+    // the gpt-4o default as they were until ADR 0033: a row priced at a model
+    // it did not use is a wrong number that reads as a right one. An unpriced
+    // row costs 0 and carries `unpriced: true`, which the Usage tab counts and
+    // says. Replace null with [input, output] per 1M once the owner confirms.
+    'gpt-5-mini': null,
+    'gpt-5-nano': null,
     default: [5.0, 15.0],
   },
   gemini: {
@@ -284,8 +292,16 @@ export const COST_TABLE = Object.freeze({
     'gemini-2.5-flash-lite': [0.1, 0.4],
     default: [0.3, 2.5],
   },
-  perplexity: { 'sonar-pro': [3.0, 15.0], sonar: [1.0, 1.0], default: [3.0, 15.0] },
-  azure: { 'gpt-4o': [5.0, 15.0], 'gpt-4o-mini': [0.15, 0.6], default: [5.0, 15.0] },
+  perplexity: {
+    'sonar-pro': [3.0, 15.0],
+    sonar: [1.0, 1.0],
+    default: [3.0, 15.0],
+  },
+  azure: {
+    'gpt-4o': [5.0, 15.0],
+    'gpt-4o-mini': [0.15, 0.6],
+    default: [5.0, 15.0],
+  },
   bedrock: {
     'amazon.nova-micro-v1:0': [0.035, 0.14],
     'amazon.nova-lite-v1:0': [0.06, 0.24],
@@ -323,8 +339,19 @@ export const COST_TABLE = Object.freeze({
   },
 });
 
+/**
+ * Does the cost table price this model? False for a row deliberately set to
+ * null (a model whose rate is not known), so a caller can mark the usage
+ * row `unpriced` instead of letting a zero read as free.
+ */
+export function isPriced(provider, model) {
+  const rates = COST_TABLE[provider] || {};
+  return !(Object.hasOwn(rates, model) && rates[model] === null);
+}
+
 export function getCostEstimate(provider, model, promptTokens = 0, completionTokens = 0) {
   const rates = COST_TABLE[provider] || {};
+  if (!isPriced(provider, model)) return 0;
   const [inRate, outRate] = rates[model] || rates.default || [0, 0];
   return parseFloat(
     ((promptTokens / 1_000_000) * inRate + (completionTokens / 1_000_000) * outRate).toFixed(8)
@@ -405,6 +432,7 @@ function recordUsage(usageOut, provider, model, promptTokens, completionTokens) 
     promptTokens: inTokens,
     completionTokens: outTokens,
     costUsd: getCostEstimate(provider, model, inTokens, outTokens),
+    ...(isPriced(provider, model) ? {} : { unpriced: true }),
   });
 }
 
@@ -445,7 +473,9 @@ function toOpenAiContent(parts, prompt) {
     throw refusePart(
       'openai',
       part,
-      mime ? `{text} or image/* inline data, not ${mime}` : '{text} or {inlineData:{mimeType:image/*,data}}'
+      mime
+        ? `{text} or image/* inline data, not ${mime}`
+        : '{text} or {inlineData:{mimeType:image/*,data}}'
     );
   });
 }
@@ -484,7 +514,9 @@ function toAnthropicContent(parts, prompt) {
     throw refusePart(
       'anthropic',
       part,
-      mime ? `{text} or image/* inline data, not ${mime}` : '{text} or {inlineData:{mimeType:image/*,data}}'
+      mime
+        ? `{text} or image/* inline data, not ${mime}`
+        : '{text} or {inlineData:{mimeType:image/*,data}}'
     );
   });
 }
@@ -495,7 +527,12 @@ function toGeminiParts(parts, prompt) {
   return parts.map((part) => {
     if (typeof part?.text === 'string') return { text: part.text };
     if (part?.inlineData?.mimeType && part?.inlineData?.data) {
-      return { inlineData: { mimeType: part.inlineData.mimeType, data: part.inlineData.data } };
+      return {
+        inlineData: {
+          mimeType: part.inlineData.mimeType,
+          data: part.inlineData.data,
+        },
+      };
     }
     // A URL the model should fetch is not a part on this endpoint at all — it
     // is a grounded call; see generateGroundedJsonResponse.
@@ -883,7 +920,11 @@ export function createAiRouter({
    * name: the recorder maps a setting to its vault secret through the
    * catalogue, and a provider name would map to nothing.
    */
-  const reportVerdict = createKeyVerdictReporter({ onKeyVerdict, log, source: 'ai-router' });
+  const reportVerdict = createKeyVerdictReporter({
+    onKeyVerdict,
+    log,
+    source: 'ai-router',
+  });
   const reportKeyVerdict = (provider, verdict) => reportVerdict(KEY_ENV[provider], verdict);
 
   const pinnedProvider = () =>
@@ -950,7 +991,7 @@ export function createAiRouter({
    *                    disabled: string[], excluded: string[], pinned: string}>}
    */
   async function resolveChainDetails(feature = null) {
-    const { providers: docs, features } = await config.load();
+    const { providers: docs, features, routing } = await config.load();
 
     if (feature && !isFeatureEnabled(features, feature)) {
       throw new AiFeatureDisabledError(feature);
@@ -965,13 +1006,29 @@ export function createAiRouter({
     // feature to it.
     const { order, excluded } = applyFeaturePlacement(resolved.order, features, feature);
 
+    // Per-task routing (ADR 0033 §4) after placement: a route reorders the
+    // providers this feature may use and names a model per step; it cannot
+    // add a provider that has no key, is switched off, or is placed off.
+    const route = routeFor(routing, feature);
+    const routed = applyFeatureRoute(order, route);
+    if (route && routed.skipped.length) {
+      log.warn?.(
+        `[ai-router] '${feature}' routes to ${routed.skipped.join(', ')} but ${
+          routed.skipped.length === 1 ? 'it is' : 'they are'
+        } not available (no key, disabled, or placed off); serving from ${
+          routed.chain[0]?.provider || 'none'
+        }`
+      );
+    }
+
     const pinned = pinnedProvider();
-    let chain = order;
+    let chain = routed.chain;
     if (pinned) {
       if (order.includes(pinned)) {
         // An explicit pin is an instruction, not a preference: it selects one
-        // provider and does NOT fall through to the others.
-        chain = [pinned];
+        // provider and does NOT fall through to the others — a route is a
+        // preference, so the pin wins over it too.
+        chain = routed.chain.filter((entry) => entry.provider === pinned);
       } else {
         let why = 'its key is not present';
         if (disabled.includes(pinned)) why = 'it is disabled in the admin portal';
@@ -983,10 +1040,17 @@ export function createAiRouter({
     }
 
     return {
-      chain: chain.map((provider) => ({ provider, model: configuredModelFor(docs, provider) })),
+      // The model named on the route wins over the provider card's pin; a
+      // step with no routed model keeps the card's choice (then the purpose
+      // table, in callWith).
+      chain: chain.map(({ provider, model }) => ({
+        provider,
+        model: model || configuredModelFor(docs, provider),
+      })),
       disabled,
       excluded,
       pinned,
+      routed: Boolean(route),
     };
   }
 
@@ -1039,8 +1103,41 @@ export function createAiRouter({
    * call ends with AI_BUDGET_EXHAUSTED rather than sending an attempt that
    * cannot finish. Without one, nothing here differs from before budgets.
    */
-  async function callWithFailover({ chain, explicitModel, budget = null, ...args }) {
+  /**
+   * Every call that reaches a model is recorded in `ai_usage` HERE, once
+   * (ADR 0033: "every call site records usage"). Until this, five of fourteen
+   * call sites wrote a row and the rest spent invisibly. The row's `source`
+   * is the feature (`ai:<feature>`), and its id travels back on the caller's
+   * `usageOut` entry as `recordedRowId`, so a caller that re-records the same
+   * entry with a more specific source (Listen & Learn, the podcast) UPSERTS
+   * the same row instead of adding a second one. With no store (unit tests)
+   * nothing is written and the entries still reach the caller.
+   */
+  async function recordCallUsage(entries, feature) {
+    if (!store?.upsertDoc) return entries;
+    const recorded = [];
+    for (const entry of entries) {
+      const row = await recordAiUsage(
+        { store, ai: { getCostEstimate, isPriced } },
+        { ...entry, source: featureSource(feature) }
+      );
+      recorded.push(row ? { ...entry, recordedRowId: row.id } : entry);
+    }
+    return recorded;
+  }
+
+  async function callWithFailover({
+    chain,
+    explicitModel,
+    budget = null,
+    feature = null,
+    usageOut = null,
+    ...args
+  }) {
     const attempts = [];
+    // Collected here, recorded once the call has an answer, then handed to
+    // the caller's array with the row ids attached (recordCallUsage).
+    const collected = [];
 
     for (const [index, { provider, model: configuredModel }] of chain.entries()) {
       let shareEnd = null;
@@ -1059,20 +1156,26 @@ export function createAiRouter({
           () =>
             callWith(provider, {
               ...args,
-              // An explicit model from the call site wins; then the
-              // administrator's choice in the portal; then the purpose table.
+              usageOut: collected,
+              // An explicit model from the call site wins; then the route's
+              // or the administrator's choice in the portal; then the
+              // purpose table.
               model: explicitModel || configuredModel,
               // The provider's own timeout, cut to what is left of its share.
               // withRetry starts no attempt once less than MIN_ATTEMPT_MS is left.
               ...(shareEnd === null
                 ? {}
-                : { timeoutMs: Math.min(providerTimeoutMs(provider), shareEnd - now()) }),
+                : {
+                    timeoutMs: Math.min(providerTimeoutMs(provider), shareEnd - now()),
+                  }),
             }),
           3,
           provider,
           shareEnd
         );
         await reportKeyVerdict(provider, { ok: true });
+        const recorded = await recordCallUsage(collected, feature);
+        if (Array.isArray(usageOut)) usageOut.push(...recorded);
         return result;
       } catch (error) {
         attempts.push({ provider, error });
@@ -1172,7 +1275,11 @@ export function createAiRouter({
 
   const logUsage = (provider, usage, model, purpose) => {
     if (env.CONTENTFORGE_LOG_TOKEN_USAGE === 'true') {
-      log.warn?.(`[ai-model] ${provider} token usage`, { ...usage, model, purpose });
+      log.warn?.(`[ai-model] ${provider} token usage`, {
+        ...usage,
+        model,
+        purpose,
+      });
     }
   };
 
@@ -1193,7 +1300,13 @@ export function createAiRouter({
     // expensive context.
     let system;
     if (systemPrompt) {
-      system = [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }];
+      system = [
+        {
+          type: 'text',
+          text: systemPrompt,
+          cache_control: { type: 'ephemeral' },
+        },
+      ];
       if (expectJson) system.push({ type: 'text', text: JSON_ONLY });
     } else if (expectJson) {
       system = JSON_ONLY;
@@ -1298,8 +1411,7 @@ export function createAiRouter({
    * A provider's own attempt timeout: its table row's (NVIDIA's 120 s), else
    * CHAT_TIMEOUT_MS. A budgeted call cuts it to the provider's share.
    */
-  const providerTimeoutMs = (provider) =>
-    OPENAI_COMPATIBLE[provider]?.timeoutMs ?? CHAT_TIMEOUT_MS;
+  const providerTimeoutMs = (provider) => OPENAI_COMPATIBLE[provider]?.timeoutMs ?? CHAT_TIMEOUT_MS;
 
   async function callGemini({
     prompt,
@@ -1381,7 +1493,14 @@ export function createAiRouter({
   /** Resolve the chain and call it: the shared body of both generate calls. */
   async function generate({ feature, parts, model, budget, ...args }) {
     const chain = chainForParts(await resolveProviderChain(feature), parts);
-    return callWithFailover({ chain, explicitModel: model, parts, budget, ...args });
+    return callWithFailover({
+      chain,
+      explicitModel: model,
+      parts,
+      budget,
+      feature,
+      ...args,
+    });
   }
 
   /**
@@ -1525,7 +1644,13 @@ export function createAiRouter({
     if (!gemini) throw new AiNotConfiguredError(groundingUnavailable({ disabled, pinned }));
 
     const selectedModel = model || gemini.model || defaultModelFor('gemini', purpose);
-    const body = buildGroundedRequest({ model: selectedModel, prompt, pages, videos, systemPrompt });
+    const body = buildGroundedRequest({
+      model: selectedModel,
+      prompt,
+      pages,
+      videos,
+      systemPrompt,
+    });
 
     let data;
     try {
@@ -1549,13 +1674,16 @@ export function createAiRouter({
     // still on the spend page. Tool-use tokens are the fetched pages — prompt
     // side; thought tokens bill as output, as on the chat endpoint.
     const usage = data?.usage || {};
+    const collected = [];
     recordUsage(
-      usageOut,
+      collected,
       'gemini',
       selectedModel,
       (Number(usage.total_input_tokens) || 0) + (Number(usage.total_tool_use_tokens) || 0),
       (Number(usage.total_output_tokens) || 0) + (Number(usage.total_thought_tokens) || 0)
     );
+    const recorded = await recordCallUsage(collected, feature);
+    if (Array.isArray(usageOut)) usageOut.push(...recorded);
     logUsage('gemini', usage, selectedModel, purpose);
 
     const status = data?.status;
@@ -1589,7 +1717,14 @@ export function createAiRouter({
    * answers in seconds instead of thinking past the edge's request limit
    * (#701, 2026-09-29: 56-58 s).
    */
-  async function callProvider({ provider, model, prompt, systemPrompt = '', maxTokens, timeoutMs }) {
+  async function callProvider({
+    provider,
+    model,
+    prompt,
+    systemPrompt = '',
+    maxTokens,
+    timeoutMs,
+  }) {
     if (!PROVIDERS.includes(provider))
       throw new AiNotConfiguredError(`Unknown AI provider: ${provider}`);
     if (!readKey(env, KEY_ENV[provider])) {
@@ -1646,6 +1781,9 @@ const defaultRouter = createAiRouter({
   store: {
     queryDocs: async (...args) => (await import('../cosmos-client.js')).queryDocs(...args),
     readDoc: async (...args) => (await import('../cosmos-client.js')).readDoc(...args),
+    // The usage row every call writes (recordCallUsage). Lazy for the same
+    // reason as the two reads.
+    upsertDoc: async (...args) => (await import('../cosmos-client.js')).upsertDoc(...args),
   },
   // The same process-wide writer the Publer timer and proxy use, so the two
   // reporters cannot disagree about what a rejected credential is. It imports

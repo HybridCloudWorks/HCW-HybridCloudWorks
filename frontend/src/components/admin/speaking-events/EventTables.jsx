@@ -2,11 +2,13 @@
  * The two event tables (#573), moved from SpeakingEventsPage.jsx: Sessionize
  * events with their stored override, and manual (stored-only) entries. Each
  * tab passes the rows it owns; Past adds a column of slide and event links.
+ * Every row shows its status through the shared StatusBadge (ADR 0033 §2).
  */
 
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import StatusBadge from '@/components/admin/shared/StatusBadge';
 import {
   Check,
   ExternalLink,
@@ -16,7 +18,14 @@ import {
   Pencil,
   Trash2,
 } from 'lucide-react';
-import { formatShortDate, httpUrl, safeString } from './eventModel';
+import {
+  formatShortDate,
+  httpUrl,
+  manualRowStatus,
+  safeString,
+  sessionizeRowStatus,
+  speakingStatusInfo,
+} from './eventModel';
 
 const TH = 'text-left px-4 py-2.5 font-medium text-muted-foreground';
 
@@ -36,7 +45,7 @@ function DeleteButton({ docId, editor, label }) {
       size="sm"
       variant="ghost"
       className="h-7 px-2 text-xs text-destructive hover:text-destructive"
-      onClick={() => editor.remove(docId)}
+      onClick={() => editor.requestRemove(docId)}
       disabled={busy}
       aria-label={label}
     >
@@ -48,9 +57,10 @@ function DeleteButton({ docId, editor, label }) {
 /** Slides and event page, as links, for a delivered session. */
 export function LinksCell({ fd }) {
   // Only http(s) becomes a link: a stored `javascript:` value must not run.
-  const slides = httpUrl(fd?.presentationUrl);
+  const slides = httpUrl(fd?.presentationUrl) || httpUrl(fd?.sessions?.[0]?.slidesUrl);
+  const video = httpUrl(fd?.sessions?.find((s) => httpUrl(s.videoUrl))?.videoUrl);
   const event = httpUrl(fd?.eventUrl);
-  if (!slides && !event) {
+  if (!slides && !event && !video) {
     return <span className="text-xs text-muted-foreground">—</span>;
   }
   return (
@@ -58,6 +68,11 @@ export function LinksCell({ fd }) {
       {slides && (
         <a href={slides} target="_blank" rel="noopener noreferrer" className="underline">
           Slides
+        </a>
+      )}
+      {video && (
+        <a href={video} target="_blank" rel="noopener noreferrer" className="underline">
+          Recording
         </a>
       )}
       {event && (
@@ -93,7 +108,7 @@ function OverrideCell({ fd }) {
         )}
         {fd.display === false && (
           <Badge variant="outline" className="text-xs text-amber-600 border-amber-300 ml-0.5">
-            hidden
+            hidden publicly
           </Badge>
         )}
       </div>
@@ -110,13 +125,16 @@ function SessionizeRow({ ev, editor, showLinks }) {
     >
       <td className="px-4 py-3 text-muted-foreground font-mono text-xs">{ev.id}</td>
       <td className="px-4 py-3 text-muted-foreground whitespace-nowrap text-xs">
-        {formatShortDate(ev.date)}
+        {formatShortDate(fd?.date || ev.date)}
       </td>
       <td className="px-4 py-3">
         <div className="font-medium leading-snug">{ev.name}</div>
         {fd?.description && (
           <div className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{fd.description}</div>
         )}
+      </td>
+      <td className="px-4 py-3">
+        <StatusBadge size="xs" status={speakingStatusInfo(sessionizeRowStatus(ev))} />
       </td>
       <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell text-xs max-w-44 truncate">
         {safeString(fd?.location) || safeString(ev.location) || '—'}
@@ -163,6 +181,7 @@ export function SessionizeEventsTable({ rows, editor, showLinks = false }) {
             <th className={`${TH} w-16`}>ID</th>
             <th className={`${TH} w-28`}>Date</th>
             <th className={TH}>Event Name</th>
+            <th className={`${TH} w-28`}>Status</th>
             <th className={`${TH} hidden lg:table-cell w-44`}>Location</th>
             <th className={`${TH} w-28`}>Stored override</th>
             {showLinks && <th className={`${TH} w-28`}>Links</th>}
@@ -185,7 +204,17 @@ function ManualRow({ fd, editor, showLinks }) {
       <td className="px-4 py-3 text-muted-foreground whitespace-nowrap text-xs">
         {formatShortDate(fd.date)}
       </td>
-      <td className="px-4 py-3 font-medium">{fd.eventName || fd.name || '—'}</td>
+      <td className="px-4 py-3 font-medium">
+        {fd.eventName || fd.name || '—'}
+        {fd.cfpDeadline && (
+          <div className="text-xs text-muted-foreground mt-0.5">
+            CFP closes {formatShortDate(fd.cfpDeadline)}
+          </div>
+        )}
+      </td>
+      <td className="px-4 py-3">
+        <StatusBadge size="xs" status={speakingStatusInfo(manualRowStatus(fd))} />
+      </td>
       <td className="px-4 py-3">
         <Badge
           variant="outline"
@@ -228,6 +257,7 @@ export function ManualEntriesTable({ rows, editor, showLinks = false }) {
           <tr>
             <th className={`${TH} w-28`}>Date</th>
             <th className={TH}>Name</th>
+            <th className={`${TH} w-28`}>Status</th>
             <th className={TH}>Display</th>
             {showLinks && <th className={TH}>Links</th>}
             <th className="px-4 py-2.5" />

@@ -123,6 +123,13 @@ export const AI_FEATURES = Object.freeze({
     route:
       'The "Explain this number" button on /tools/comparison — the one anonymous AI call. Off answers "Explanations are not available" before any quota is counted; cached explanations still serve (#613).',
   }),
+  forgeAssist: Object.freeze({
+    label: 'Forge Studio assist',
+    description:
+      'Outlines, expands, condenses, rewrites, retitles or fact-checks a draft from an action in Forge Studio.',
+    route:
+      'The AI actions on the Draft tab in Forge Studio (ADR 0033). Off means each button answers that the feature is switched off; the draft text is untouched.',
+  }),
   landingZoneExplain: Object.freeze({
     label: 'Landing zone explanations',
     description:
@@ -220,6 +227,7 @@ export const PROVIDER_PLACEMENT_DEFAULTS = Object.freeze({
     listenAndLearn: 'order',
     podcastScript: 'order',
     telegram: 'order',
+    forgeAssist: 'order',
     altText: 'off',
     sourceGrounding: 'off',
     pricingExplain: 'off',
@@ -289,6 +297,124 @@ export function applyFeaturePlacement(order, settings, feature) {
 export const PROVIDERS_CONTAINER = 'ai_providers';
 export const SETTINGS_CONTAINER = 'admin_settings';
 export const FEATURES_DOC_ID = 'ai-features';
+
+/**
+ * Per-task routing (ADR 0033 §4): `admin_settings/ai-routing`.
+ *
+ *   { routes: { <feature>: { provider, model, fallbacks: [{ provider, model }] } } }
+ *
+ * A feature with a route is served by its primary provider first, then its
+ * fallbacks in order, then whatever the global order still offers — so a
+ * route can never leave a task with fewer options than the default ("Simple
+ * mode") had. A feature without a route uses the global order unchanged.
+ * Rule 1 still holds: a routed provider that has no key, or is switched off,
+ * is skipped, never added. The model named on a route wins over the
+ * provider card's `defaultModel`; a route with no model leaves the card's
+ * choice (or the purpose table) in force.
+ */
+export const ROUTING_DOC_ID = 'ai-routing';
+export const MAX_ROUTE_FALLBACKS = 3;
+
+const cleanModel = (value) => {
+  const model = typeof value === 'string' ? value.trim() : '';
+  return model || null;
+};
+
+const cleanProvider = (value) =>
+  String(value || '')
+    .toLowerCase()
+    .trim();
+
+/**
+ * One stored route, normalised: a provider the router implements, an optional
+ * model, and up to MAX_ROUTE_FALLBACKS fallbacks that are neither the primary
+ * nor each other. Null when the entry names no usable provider.
+ *
+ * @param {unknown} raw
+ * @returns {{provider: string, model: string|null, fallbacks: Array<{provider: string, model: string|null}>}|null}
+ */
+export function normalizeRoute(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const provider = cleanProvider(raw.provider);
+  if (!DEFAULT_PROVIDER_ORDER.includes(provider)) return null;
+  const seen = new Set([provider]);
+  const fallbacks = [];
+  for (const entry of Array.isArray(raw.fallbacks) ? raw.fallbacks : []) {
+    const fallbackProvider = cleanProvider(entry?.provider);
+    if (!DEFAULT_PROVIDER_ORDER.includes(fallbackProvider) || seen.has(fallbackProvider)) continue;
+    seen.add(fallbackProvider);
+    fallbacks.push({
+      provider: fallbackProvider,
+      model: cleanModel(entry?.model),
+    });
+    if (fallbacks.length >= MAX_ROUTE_FALLBACKS) break;
+  }
+  return { provider, model: cleanModel(raw.model), fallbacks };
+}
+
+/**
+ * The routing document, normalised to known features and valid routes.
+ *
+ * @param {object|null} doc The `ai-routing` document, or null.
+ * @returns {{routes: Record<string, ReturnType<typeof normalizeRoute>>}}
+ */
+export function normalizeRouting(doc) {
+  const routes = {};
+  const stored = doc?.routes;
+  if (stored && typeof stored === 'object' && !Array.isArray(stored)) {
+    for (const [feature, raw] of Object.entries(stored)) {
+      if (!FEATURE_NAMES.includes(feature)) continue;
+      const route = normalizeRoute(raw);
+      if (route) routes[feature] = route;
+    }
+  }
+  return { routes };
+}
+
+/** The route for a feature, or null when it follows the global order. */
+export function routeFor(routing, feature) {
+  if (!feature || !routing?.routes) return null;
+  return Object.hasOwn(routing.routes, feature) ? routing.routes[feature] : null;
+}
+
+/**
+ * Apply a feature's route to an already-resolved order.
+ *
+ * Runs AFTER resolveProviderOrder and applyFeaturePlacement, so `order` holds
+ * only providers that hold a key, are enabled, and are allowed for this
+ * feature: the route can move them, never add one. The result is
+ * `[primary, ...fallbacks, ...rest of order]`, each with the model the route
+ * named (or null, meaning "the card's choice"). `skipped` names routed
+ * providers that were not available, so a log line can say why the primary
+ * did not serve.
+ *
+ * @param {string[]} order
+ * @param {ReturnType<typeof normalizeRoute>|null} route
+ * @returns {{chain: Array<{provider: string, model: string|null}>, skipped: string[]}}
+ */
+export function applyFeatureRoute(order, route) {
+  if (!route)
+    return {
+      chain: order.map((provider) => ({ provider, model: null })),
+      skipped: [],
+    };
+  const wanted = [{ provider: route.provider, model: route.model }, ...route.fallbacks];
+  const chain = [];
+  const skipped = [];
+  const used = new Set();
+  for (const entry of wanted) {
+    if (order.includes(entry.provider)) {
+      chain.push(entry);
+      used.add(entry.provider);
+    } else {
+      skipped.push(entry.provider);
+    }
+  }
+  for (const provider of order) {
+    if (!used.has(provider)) chain.push({ provider, model: null });
+  }
+  return { chain, skipped };
+}
 
 /** Ranked lowest-first, so an unordered provider sorts after every ordered one. */
 function rankOf(doc, id) {
@@ -386,19 +512,27 @@ export function createAiConfigLoader({
   now = () => Date.now(),
   log = console,
 } = {}) {
-  const EMPTY = Object.freeze({ providers: null, features: null });
+  const EMPTY = Object.freeze({
+    providers: null,
+    features: null,
+    routing: null,
+  });
 
   let cache = null; // { at, value }
   let inflight = null;
 
   async function read() {
-    const [providers, features] = await Promise.all([
+    const [providers, features, routing] = await Promise.all([
       store.queryDocs(PROVIDERS_CONTAINER, 'SELECT * FROM c'),
       store.readDoc(SETTINGS_CONTAINER, FEATURES_DOC_ID, FEATURES_DOC_ID),
+      // Per-task routing (ADR 0033). A missing document is "no routes", which
+      // is the global order — the same answer every call got before routing.
+      store.readDoc(SETTINGS_CONTAINER, ROUTING_DOC_ID, ROUTING_DOC_ID),
     ]);
     return {
       providers: Array.isArray(providers) ? providers : [],
       features: features || null,
+      routing: routing ? normalizeRouting(routing) : null,
     };
   }
 

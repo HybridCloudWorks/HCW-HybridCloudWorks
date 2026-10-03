@@ -19,32 +19,40 @@
  *
  *   Overview  the strip, then one read of `getOpsHealthSnapshot`: readiness,
  *             publishing and operational signals. Reported, not asked for.
+ *             Every card says when its block was read and links to Checks.
  *   Alerts    workflow alerts, filtered, with acknowledge / resolve / reopen.
  *             Its own tab because answering one is a live action.
- *   Checks    the pipeline smoke tests, token claims, the admin registry and
- *             the Labs probes — checks that run on demand and do real work.
+ *   Checks    the probe registry (health/probeRegistry.js): one card per hub
+ *             dependency with the same five facts each, Test all, and under
+ *             it the detailed identity, smoke-test and Labs cards those
+ *             probes summarise.
  *   Code and Security
  *             Qlty's grades and open issues, condensed (health/CodeQualityTab).
  *             Read the first time the tab opens, never on page load.
- *   Report    the Markdown summary of those checks, plus the Code and
- *             Security summary when that tab was read, and Copy report.
+ *   Report    the Markdown summary of those checks and every probe's last
+ *             status, plus the Code and Security summary when that tab was
+ *             read, and Copy report.
  *
  * Deep links are `?tab=`; an unknown or moved id lands where its content went
  * (health/tabs.js).
  *
- * The strip at the top of Overview is the one place the two halves meet: a
- * signal and a probe verdict beside each other, which is the whole reason they
- * are one hub.
+ * ONE VOCABULARY (ADR 0033 §2). Every verdict, signal and probe on this page
+ * renders through StatusBadge with lib/status.js's five words — healthy,
+ * degraded, misconfigured, unavailable, unknown — the same words the
+ * Integrations page uses for the same states. Stored values are untouched;
+ * the mapping happens at render.
  *
- * State two tabs read lives here, on the page, not in the tabs: the snapshot
- * feeds Overview and Alerts, and the identity and probe results feed the
- * strip, Checks and Report. So switching tabs never refetches or reruns a
- * probe, and a report copied from Report is the checks just run on Checks.
- * The header and tab bar always render; a snapshot that fails to load is an
- * error on the two tabs that show it, and Checks and Report carry on.
+ * State the tabs read lives here, on the page, not in the tabs: the snapshot
+ * feeds Overview, Alerts and the snapshot probes; the identity and Labs
+ * results feed the strip, Checks and Report; the probe runner's results feed
+ * Checks and Report and persist to sessionStorage. So switching tabs never
+ * refetches or reruns a probe, and a report copied from Report is the checks
+ * just run on Checks. The header and tab bar always render; a snapshot that
+ * fails to load is an error on the two tabs that show it, and Checks and
+ * Report carry on.
  */
 
-import React from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router';
 import { useAuthReady } from '@/hooks/useAuthReady';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
@@ -52,6 +60,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import HubTabs from '@/components/admin/HubTabs';
+import PageHeader from '@/components/admin/shared/PageHeader';
+import StatusBadge from '@/components/admin/shared/StatusBadge';
 import { TabError, TabLoading } from '@/components/admin/integrations/TabNotice';
 import { Activity, ClipboardCopy, Loader2, RefreshCw } from 'lucide-react';
 
@@ -61,6 +71,7 @@ import {
   PublishingOpsCard,
   WorkflowAlertsCard,
   getAlertStatus,
+  readinessStatus,
 } from './health/signals';
 import {
   AdminRegistryCard,
@@ -73,26 +84,26 @@ import {
   evaluateLabsProbe,
   messageOf,
   useSmokeActions,
+  verdictStatus,
 } from './health/probes';
 import CodeQualityTab from './health/CodeQualityTab';
 import { withCodeQuality } from './health/codeQuality';
+import ProbeGrid from './health/ProbeCards';
+import { PROBES, probeReportLines } from './health/probeRegistry';
 import { TABS, resolveTab } from './health/tabs';
 import useAlertActions from './health/useAlertActions';
 import useCodeQuality from './health/useCodeQuality';
 import useHealthChecks from './health/useHealthChecks';
 import useOpsSnapshot from './health/useOpsSnapshot';
+import useProbeRunner from './health/useProbeRunner';
 
-const VERDICT_TONE = {
-  PASS: 'border-emerald-300 text-emerald-700 dark:border-emerald-700 dark:text-emerald-400',
-  FAIL: 'border-rose-300 text-rose-700 dark:border-rose-700 dark:text-rose-400',
-  UNKNOWN: 'border-slate-300 text-slate-600 dark:border-slate-700 dark:text-slate-400',
-};
-
-const verdictLabel = (pass) => {
-  if (pass === true) return 'PASS';
-  if (pass === false) return 'FAIL';
-  return 'UNKNOWN';
-};
+const HELP = [
+  'Overview is what the platform wrote down while nobody watched: counts and ages from timers, with the time each block was read. Nothing here is asked for.',
+  'Alerts are the workflow alerts those timers raised. Acknowledge, resolve with a note, or reopen; each writes to the alert and re-reads the snapshot.',
+  'Checks is where you ask. One card per dependency, every hub, each with the same five facts: what it covers, how it is doing, when that was checked, what breaks, what to do. Test all runs everything that spends and writes nothing.',
+  'Code and Security reads Qlty once, when you open it. Report is the Markdown record of all of the above, ready to copy.',
+  'Every status is one of five words: Healthy, Degraded, Misconfigured, Unavailable, Unknown. They mean the same thing on the Integrations page.',
+];
 
 const EMPTY_READINESS = {
   functionsConfigured: false,
@@ -119,24 +130,16 @@ function GlanceItem({ label, children }) {
   );
 }
 
-function UnknownBadge() {
-  return (
-    <Badge variant="outline" className={VERDICT_TONE.UNKNOWN}>
-      UNKNOWN
-    </Badge>
-  );
-}
-
 /**
  * The observed half and the verified half on one line.
  *
- * Deliberately mixed rather than grouped: "Functions URL Ready" next to
- * "Identity UNKNOWN" is the state where the estate looks fine and this
+ * Deliberately mixed rather than grouped: "Runtime config Healthy" next to
+ * "Identity Unknown" is the state where the estate looks fine and this
  * session cannot prove it can talk to it, and that pairing is invisible when
  * the two live on different tabs.
  *
  * The strip renders even when the snapshot has not arrived, because the two
- * verdicts do not depend on it. Its observed badges then say UNKNOWN: the
+ * verdicts do not depend on it. Its observed badges then say Unknown: the
  * zeros a missing snapshot defaults to would read as "no open alerts".
  */
 function AtAGlance({
@@ -153,20 +156,14 @@ function AtAGlance({
       aria-label="Health at a glance"
       className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg border bg-muted/30 px-4 py-3 text-sm"
     >
-      <GlanceItem label="Functions URL">
-        {snapshotLoaded ? (
-          <Badge variant={readiness.functionsConfigured ? 'secondary' : 'destructive'}>
-            {readiness.functionsConfigured ? 'Ready' : 'Missing'}
-          </Badge>
-        ) : (
-          <UnknownBadge />
-        )}
+      <GlanceItem label="Runtime config">
+        <StatusBadge system={snapshotLoaded ? readinessStatus(readiness) : 'unknown'} />
       </GlanceItem>
       <GlanceItem label="Open alerts">
         {snapshotLoaded ? (
           <Badge variant={openAlertCount > 0 ? 'destructive' : 'secondary'}>{openAlertCount}</Badge>
         ) : (
-          <UnknownBadge />
+          <StatusBadge system="unknown" />
         )}
       </GlanceItem>
       <GlanceItem label="Publish failures">
@@ -175,18 +172,14 @@ function AtAGlance({
             {signals.publishFailureCount || 0}
           </Badge>
         ) : (
-          <UnknownBadge />
+          <StatusBadge system="unknown" />
         )}
       </GlanceItem>
       <GlanceItem label="Identity">
-        <Badge variant="outline" className={VERDICT_TONE[verdictLabel(identityVerdict.pass)]}>
-          {verdictLabel(identityVerdict.pass)}
-        </Badge>
+        <StatusBadge system={verdictStatus(identityVerdict.pass)} />
       </GlanceItem>
       <GlanceItem label="Labs probe">
-        <Badge variant="outline" className={VERDICT_TONE[verdictLabel(labsVerdict.pass)]}>
-          {verdictLabel(labsVerdict.pass)}
-        </Badge>
+        <StatusBadge system={verdictStatus(labsVerdict.pass)} />
       </GlanceItem>
     </div>
   );
@@ -220,7 +213,8 @@ function OverviewTab({ ops, derived, identity, labs }) {
       />
       <TabIntro>
         One read of the ops-health snapshot. Written by timers and schedulers that ran without
-        anyone watching — reported here, not asked for.
+        anyone watching — reported here, not asked for. Each card says when it was read; the impact,
+        the fix and a test for every row are on Checks.
       </TabIntro>
       {ops.loaded ? (
         <>
@@ -274,9 +268,9 @@ function AlertsTab({ ops, derived, alerts }) {
   );
 }
 
-function ChecksTab({ smoke, identity, identityRunning, rerunIdentity, probes }) {
+function ChecksTab({ smoke, identity, identityRunning, rerunIdentity, probes, runner, resolve }) {
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <TabIntro>
           Checks that run in this signed-in session and do real work. Nothing here is true until you
@@ -287,25 +281,37 @@ function ChecksTab({ smoke, identity, identityRunning, rerunIdentity, probes }) 
         </ProbeButton>
       </div>
 
-      <SmokeActionsCard
-        runningAction={smoke.runningAction}
-        actionInfoOpen={smoke.actionInfoOpen}
-        actionMessage={smoke.actionMessage}
-        actionError={smoke.actionError}
-        onRunAction={smoke.runAction}
-        onToggleActionInfo={smoke.toggleActionInfo}
+      <ProbeGrid
+        probes={PROBES}
+        resolve={resolve}
+        running={runner.running}
+        runningAll={runner.runningAll}
+        onRun={runner.runOne}
+        onRunAll={runner.runAll}
       />
 
-      <TokenClaimsCard identity={identity} />
-      <AdminRegistryCard identity={identity} />
-      <LabsProbeCard
-        labs={probes.labs}
-        labsBusy={probes.labsBusy}
-        onLabs={probes.runLabs}
-        unauth={probes.unauth}
-        unauthBusy={probes.unauthBusy}
-        onUnauth={probes.runUnauth}
-      />
+      <div className="space-y-4">
+        <h2 className="text-lg font-semibold">The detail behind the session checks</h2>
+        <SmokeActionsCard
+          runningAction={smoke.runningAction}
+          actionInfoOpen={smoke.actionInfoOpen}
+          actionMessage={smoke.actionMessage}
+          actionError={smoke.actionError}
+          onRunAction={smoke.runAction}
+          onToggleActionInfo={smoke.toggleActionInfo}
+        />
+
+        <TokenClaimsCard identity={identity} />
+        <AdminRegistryCard identity={identity} />
+        <LabsProbeCard
+          labs={probes.labs}
+          labsBusy={probes.labsBusy}
+          onLabs={probes.runLabs}
+          unauth={probes.unauth}
+          unauthBusy={probes.unauthBusy}
+          onUnauth={probes.runUnauth}
+        />
+      </div>
     </div>
   );
 }
@@ -317,9 +323,10 @@ function ReportTab({ report, settling, copyReport }) {
         <div className="space-y-1.5">
           <CardTitle className="text-lg">Report</CardTitle>
           <CardDescription>
-            What Copy report puts on the clipboard: the checks on the Checks tab, as they stand, and
-            the Code and Security summary if that tab was read. Claim names, booleans, statuses, job
-            ids and Qlty counts only.
+            What Copy report puts on the clipboard: the checks on the Checks tab as they stand,
+            every probe&apos;s last status, and the Code and Security summary if that tab was read.
+            Claim names, booleans, statuses, job ids and Qlty counts only. Print this page for a
+            paper copy.
           </CardDescription>
         </div>
         <div className="flex flex-col items-end gap-1">
@@ -329,19 +336,19 @@ function ReportTab({ report, settling, copyReport }) {
             disabled={settling}
             title={settling ? 'Checks still running' : 'Copy the Markdown report'}
           >
-            <ClipboardCopy className="mr-2 h-3.5 w-3.5" /> Copy report
+            <ClipboardCopy className="mr-2 h-3.5 w-3.5" aria-hidden="true" /> Copy report
           </Button>
           {settling ? (
             <p className="flex items-center gap-1 text-xs text-muted-foreground" role="status">
-              <Loader2 className="h-3 w-3 animate-spin" /> Checks still running — the report is not
-              final
+              <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" /> Checks still running —
+              the report is not final
             </p>
           ) : null}
         </div>
       </CardHeader>
       <CardContent>
         <pre
-          className="max-h-[420px] overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-muted/60 p-3 font-mono text-xs"
+          className="max-h-105 overflow-auto whitespace-pre-wrap wrap-break-word rounded-md border border-border bg-muted/60 p-3 font-mono text-xs print:max-h-none"
           aria-label="Diagnostics report"
         >
           {report}
@@ -401,19 +408,49 @@ export default function HealthPage() {
     publishingWatchdog: digestForDisplay?.publishingWatchdog || null,
   };
 
+  // What the probe registry reads: the page's state, and the actions that
+  // change it. Held in a ref so a probe started now reads the state as it is
+  // when it runs, not as it was when the button rendered.
+  const probeContext = {
+    snapshot: ops.loaded ? snapshot : null,
+    ops,
+    identity,
+    labs,
+    unauth,
+    smoke: { lastRuns: smoke.lastRuns, runningAction: smoke.runningAction },
+    actions: {
+      rerunIdentity: checks.rerunIdentity,
+      runLabs: checks.runLabs,
+      runUnauth: checks.runUnauth,
+      runSmoke: smoke.runAction,
+    },
+  };
+  const contextRef = useRef(probeContext);
+  useEffect(() => {
+    contextRef.current = probeContext;
+  });
+  const getContext = useCallback(() => contextRef.current, []);
+  const runner = useProbeRunner(PROBES, getContext);
+  const resolve = (probe) => runner.resolve(probe, probeContext);
+
   // Nothing may be copied while a check is in flight: a report taken mid-run
   // would say a token "could not be read" or a probe was "not run" for work
   // that is merely pending, and that is what would end up in the record.
-  const settling = identity === null || identityBusy || labsBusy || unauthBusy;
+  const settling =
+    identity === null || identityBusy || labsBusy || unauthBusy || runner.running.size > 0;
 
   const report = withCodeQuality(
-    buildReport({
-      generatedAt: new Date().toISOString(),
-      identityPending: identity === null,
-      ...(identity || {}),
-      labs,
-      unauth,
-    }),
+    [
+      buildReport({
+        generatedAt: new Date().toISOString(),
+        identityPending: identity === null,
+        ...(identity || {}),
+        labs,
+        unauth,
+      }),
+      '',
+      ...probeReportLines(PROBES, resolve),
+    ].join('\n'),
     code.data
   );
 
@@ -437,16 +474,12 @@ export default function HealthPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
-          <Activity className="h-6 w-6" /> Health Hub
-        </h1>
-        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-          What the platform reports about itself, and the checks you can run against it from this
-          session. The token behind those checks is decoded here and reduced to claim names; it is
-          never displayed, and only the summary on the Report tab is copied.
-        </p>
-      </div>
+      <PageHeader
+        icon={Activity}
+        title="Health Hub"
+        description="What the platform reports about itself, and the checks you can run against it from this session. The token behind those checks is decoded here and reduced to claim names; it is never displayed, and only the summary on the Report tab is copied."
+        help={HELP}
+      />
 
       <HubTabs
         tabs={TABS}
@@ -465,6 +498,8 @@ export default function HealthPage() {
           rerunIdentity={checks.rerunIdentity}
           labs={labs}
           probes={checks}
+          runner={runner}
+          resolve={resolve}
           report={report}
           settling={settling}
           copyReport={copyReport}

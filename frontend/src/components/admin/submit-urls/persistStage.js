@@ -108,6 +108,8 @@ export function buildContentCreatePayload({
   secondaryImageUrls,
   aiImageUrls,
   contentType,
+  kind,
+  ideaOrigin,
   frameworkSourceUrls,
   frameworkKnowledgePrompt,
   frameworkDiagramPrompt,
@@ -130,6 +132,10 @@ export function buildContentCreatePayload({
     storageCollection: 'content',
     type: contentType,
     publishTarget,
+    // The classification (ADR 0033 §4), only when Stage 1 set one; absent, the
+    // server derives it from `type` and `source` at read time.
+    ...(kind && { kind }),
+    ...(ideaOrigin && { ideaOrigin }),
     ...providerFields({ provider, blogLandingProvider, publishTarget }),
     Title: resolvedTitle,
     title: resolvedTitle,
@@ -194,6 +200,8 @@ export async function persistContentItem(state) {
       secondaryImageUrls,
       aiImageUrls,
       contentType: state.contentType,
+      kind: state.kind,
+      ideaOrigin: state.ideaOrigin,
       frameworkSourceUrls: state.frameworkSourceUrls,
       frameworkKnowledgePrompt: state.frameworkKnowledgePrompt,
       frameworkDiagramPrompt: state.frameworkDiagramPrompt,

@@ -14,9 +14,39 @@ import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Trash2, X } from 'lucide
 
 const LAST_ITEM_TITLE = 'An issue needs at least one item, so the last one cannot be removed';
 
-/** What PATCH expects: each section's id and its remaining stored items, in order. */
+/**
+ * What PATCH expects: each section's id and its remaining items, in order.
+ * A manual section (one the owner created for their own blocks) carries its
+ * title too, because the server has no stored copy to take it from.
+ */
 export function toSectionsPayload(sections) {
-  return sections.map((section) => ({ id: section.id, items: section.items }));
+  return sections.map((section) =>
+    section.manual
+      ? { id: section.id, title: section.title, items: section.items }
+      : { id: section.id, items: section.items }
+  );
+}
+
+/**
+ * `sections` with `item` appended to the section `sectionId`, creating the
+ * section (with `sectionTitle`, marked manual) when it is not there yet.
+ * Pure: the caller holds the result as local state until Save changes.
+ */
+export function addItemToSections(sections, sectionId, sectionTitle, item) {
+  const exists = sections.some((section) => section.id === sectionId);
+  if (!exists)
+    return [
+      ...sections,
+      { id: sectionId, title: sectionTitle || sectionId, manual: true, items: [item] },
+    ];
+  return sections.map((section) =>
+    section.id === sectionId
+      ? {
+          ...section,
+          items: [...(section.items || []).filter((row) => row.url !== item.url), item],
+        }
+      : section
+  );
 }
 
 /** Section ids and item urls in order: equal signatures mean nothing was edited. */
@@ -113,6 +143,14 @@ function SectionBlock({ section, index, count, totalItems, disabled, onChange })
                 >
                   {label}
                 </a>
+                {item.manual && (
+                  <span
+                    className="rounded border border-border px-1 text-[10px] text-muted-foreground"
+                    title="Added by hand; not collected from the site"
+                  >
+                    manual
+                  </span>
+                )}
                 <IconButton
                   label={`Move item ${label} up`}
                   disabled={disabled || itemIndex === 0}

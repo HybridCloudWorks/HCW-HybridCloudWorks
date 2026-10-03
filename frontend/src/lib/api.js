@@ -48,6 +48,18 @@ const FUNCTION_TIMEOUT_MS = {
   // with its own retries, an upload and a second read. Deliberately absent
   // from SAFE_RETRY_FUNCTIONS: a client retry would render, and bill, twice.
   'cms/podcast/elevenlabs/sample': 120000,
+  // The AI Engine's Test and Playground (ADR 0033). The server caps the Test
+  // at 45 s (proxy.js TEST_TIMEOUT_MS) and a Playground call at the
+  // provider's own 120 s chat timeout; the client sits above each so the
+  // server's named error arrives instead of a client-side "timed out".
+  // Before this both ran under the 20 s default and a slow provider's
+  // answer was discarded while its spinner kept turning.
+  testAiProvider: 50000,
+  aiProxy: 125000,
+  // Forge Studio's AI actions: the handler runs under an 85 s budget
+  // (forge-studio.js FORGE_ASSIST_HTTP_BUDGET_MS); sync-budgets.test.js in
+  // functions pins this value above it.
+  'cms/forge/assist': 95000,
 };
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 const SAFE_RETRY_FUNCTIONS = new Set([

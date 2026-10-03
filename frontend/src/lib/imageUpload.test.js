@@ -9,11 +9,13 @@ const postJSON = vi.fn();
 vi.mock('@/lib/api', () => ({ postJSON: (...args) => postJSON(...args) }));
 
 import {
+  imageExtensionFor,
   MAX_IMAGE_UPLOAD_BYTES,
   PUBLIC_IMAGE_EXTENSIONS,
-  imageExtensionFor,
   publicImageFileProblem,
   readFileAsBase64,
+  readImageDimensions,
+  sha256HexOf,
   uploadImageFile,
 } from './imageUpload';
 
@@ -91,5 +93,23 @@ describe('imageExtensionFor', () => {
     for (const value of [as('image/svg+xml'), as('image/bmp'), as(''), null, undefined]) {
       expect(imageExtensionFor(value)).toBe('');
     }
+  });
+});
+
+// ── ADR 0033: the two measurements an upload records, both best-effort ──────
+
+describe('readImageDimensions', () => {
+  it('resolves null at once where there is no decoder (jsdom), never throws', async () => {
+    const file = new File([new Uint8Array([1, 2, 3])], 'x.png', { type: 'image/png' });
+    await expect(readImageDimensions(file)).resolves.toBeNull();
+    await expect(readImageDimensions(null)).resolves.toBeNull();
+  });
+});
+
+describe('sha256HexOf', () => {
+  it('returns 64 hex characters when WebCrypto is available, or an empty string', async () => {
+    const file = new File([new Uint8Array([1, 2, 3])], 'x.png', { type: 'image/png' });
+    const hex = await sha256HexOf(file);
+    expect(hex === '' || /^[a-f0-9]{64}$/.test(hex)).toBe(true);
   });
 });

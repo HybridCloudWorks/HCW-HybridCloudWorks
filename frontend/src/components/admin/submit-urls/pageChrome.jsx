@@ -11,14 +11,18 @@ import { CheckCircle, AlertCircle } from 'lucide-react';
 import { getQueueReviewPath } from './persistStage';
 import { getPublishTargetLabel } from './pageMeta';
 
+/**
+ * The step and readiness badges under the page header. The heading itself is
+ * the shared PageHeader on SubmitUrlsPage (ADR 0033 §7); this strip is the
+ * builder's own progress: Options → Draft → Images → Final QA.
+ */
 export function WorkflowHeader({ currentStep, readinessComplete, readinessScore, readinessTotal }) {
   return (
     <div>
-      <h1 className="text-2xl font-bold tracking-tight">Publish-Ready Builder</h1>
-      <p className="text-muted-foreground">
+      <p className="text-sm text-muted-foreground">
         Guided workflow: Options → Draft → Images → Final QA and publish-style preview.
       </p>
-      <div className="flex flex-wrap gap-2 mt-3">
+      <div className="flex flex-wrap gap-2 mt-2" aria-label="Builder progress">
         {[1, 2, 3, 4].map((step) => (
           <Badge key={step} variant={currentStep >= step ? 'default' : 'outline'}>
             Step {step}

@@ -11,6 +11,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   USAGE_CONTAINER,
   USAGE_SOURCES,
+  featureSource,
   recordAiUsage,
   recordAiUsageBatch,
   totalCostUsd,
@@ -34,7 +35,10 @@ const CALL = {
 describe('the row shape the Usage tab reads', () => {
   it('writes every field that page totals or groups by', async () => {
     const d = deps();
-    const row = await recordAiUsage(d, { ...CALL, source: USAGE_SOURCES.listenAndLearnAudio });
+    const row = await recordAiUsage(d, {
+      ...CALL,
+      source: USAGE_SOURCES.listenAndLearnAudio,
+    });
 
     expect(d.store.upsertDoc).toHaveBeenCalledWith(USAGE_CONTAINER, row);
     expect(row).toEqual({
@@ -78,10 +82,16 @@ describe('the row shape the Usage tab reads', () => {
   it('flags derived token counts, and only ever with true', async () => {
     // An absent flag reads as "reported", which is what every historical row
     // is — writing `false` on new rows would make the two look different.
-    const flagged = await recordAiUsage(deps(), { ...CALL, estimatedTokens: true });
+    const flagged = await recordAiUsage(deps(), {
+      ...CALL,
+      estimatedTokens: true,
+    });
     expect(flagged.estimatedTokens).toBe(true);
 
-    const reported = await recordAiUsage(deps(), { ...CALL, estimatedTokens: false });
+    const reported = await recordAiUsage(deps(), {
+      ...CALL,
+      estimatedTokens: false,
+    });
     expect(reported).not.toHaveProperty('estimatedTokens');
   });
 
@@ -166,5 +176,54 @@ describe('totalCostUsd', () => {
   it('does not accumulate floating-point noise across many rows', () => {
     const rows = Array.from({ length: 3 }, () => ({ estimatedCostUsd: 0.1 }));
     expect(totalCostUsd(rows)).toBe(0.3);
+  });
+});
+
+describe('one row per call (ADR 0033)', () => {
+  it('reuses the id the router recorded, so a caller re-recording with its own source replaces the row', async () => {
+    const d = deps();
+    const row = await recordAiUsage(d, {
+      ...CALL,
+      recordedRowId: 'router-row-1',
+      source: 'listen-and-learn:script',
+    });
+    expect(row.id).toBe('router-row-1');
+    expect(row.source).toBe('listen-and-learn:script');
+    expect(d.store.upsertDoc).toHaveBeenCalledWith(
+      USAGE_CONTAINER,
+      expect.objectContaining({ id: 'router-row-1' })
+    );
+  });
+
+  it('mints an id when nothing was recorded before', async () => {
+    const row = await recordAiUsage(deps(), { ...CALL, recordedRowId: '' });
+    expect(row.id).toBe('fixed-id');
+  });
+
+  it('featureSource names the feature, and the unspecified slug when there is none', () => {
+    expect(featureSource('inspector')).toBe('ai:inspector');
+    expect(featureSource('')).toBe(USAGE_SOURCES.aiUnspecified);
+    expect(featureSource(null)).toBe('ai:unspecified');
+  });
+
+  it('an unpriced model is written at cost 0 with the flag, whatever the cost table would say', async () => {
+    const d = deps({
+      ai: { getCostEstimate: vi.fn(() => 0.25), isPriced: vi.fn(() => false) },
+    });
+    const row = await recordAiUsage(d, {
+      ...CALL,
+      provider: 'openai',
+      model: 'gpt-5-mini',
+    });
+    expect(row.estimatedCostUsd).toBe(0);
+    expect(row.unpriced).toBe(true);
+    const explicit = await recordAiUsage(deps(), {
+      ...CALL,
+      unpriced: true,
+      costUsd: 3,
+    });
+    expect(explicit).toMatchObject({ estimatedCostUsd: 0, unpriced: true });
+    const priced = await recordAiUsage(deps(), CALL);
+    expect(priced.unpriced).toBeUndefined();
   });
 });

@@ -24,8 +24,9 @@
  * functions/src/lib/cms/drafts-handlers.js, drafts.js and drafts-stage.js.
  */
 import React, { useState } from 'react';
-import { FileInput, Loader2, Plus, RefreshCw } from 'lucide-react';
+import { FileInput, FilePen, Loader2, Plus, RefreshCw } from 'lucide-react';
 import ConfirmModal from '@/components/admin/ConfirmModal';
+import SharedPageHeader from '@/components/admin/shared/PageHeader';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { useAuthReady } from '@/hooks/useAuthReady';
@@ -92,45 +93,50 @@ function Alert({ tone = 'error', children }) {
   );
 }
 
+const DRAFTS_HELP = [
+  'What this page is: the writing desk before the pipeline. Articles written here are saved in the site from any device; nothing is published from this page.',
+  'New draft starts one; Import from docs/content brings the repository articles in once, as drafts. Save keeps your text; two tabs cannot overwrite each other.',
+  'Kind and idea origin classify the draft (what it becomes, how it started); set them before sending it on so downstream tools pick it up correctly.',
+  'Where it goes next: Send to In Review puts the draft on the Review Queue under In Review. Back to Drafts brings it here again until it is approved.',
+];
+
 function PageHeader({ onNew, onImport, importing, onRefresh, refreshing }) {
   return (
-    <div className="flex flex-wrap items-start justify-between gap-4">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Drafts</h1>
-        <p className="text-muted-foreground">
-          Write articles here and save them from any device. When one is ready, Send to In Review
-          puts it on the Content Queue; nothing is published from this page.
-        </p>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" onClick={onNew} className="gap-1">
-          <Plus className="h-4 w-4" /> New draft
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={onImport}
-          disabled={importing}
-          className="gap-1"
-        >
-          {importing ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <FileInput className="h-4 w-4" />
-          )}
-          Import from docs/content
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={onRefresh}
-          disabled={refreshing}
-          className="gap-1"
-        >
-          <RefreshCw className="h-4 w-4" /> Refresh
-        </Button>
-      </div>
-    </div>
+    <SharedPageHeader
+      icon={FilePen}
+      title="Drafts"
+      help={DRAFTS_HELP}
+      actions={
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" onClick={onNew} className="gap-1">
+            <Plus className="h-4 w-4" /> New draft
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onImport}
+            disabled={importing}
+            className="gap-1"
+          >
+            {importing ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <FileInput className="h-4 w-4" />
+            )}
+            Import from docs/content
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onRefresh}
+            disabled={refreshing}
+            className="gap-1"
+          >
+            <RefreshCw className="h-4 w-4" /> Refresh
+          </Button>
+        </div>
+      }
+    />
   );
 }
 

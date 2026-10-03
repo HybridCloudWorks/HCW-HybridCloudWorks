@@ -23,12 +23,30 @@
  *
  * Items are mutated optimistically rather than refetched, which is why
  * `setItems` is a parameter.
+ *
+ * The status moves themselves — approve, reject, restore — are
+ * useContentTransitions (ADR 0033 §2), the one copy every review surface
+ * uses; this hook adds the queue's selection, confirmation and bulk
+ * bookkeeping around it. The server records each transition in `audits`, so
+ * no client audit row is written for them; the client-only actions (forge
+ * enqueue, bulk soft-delete, permanent delete) still log their own.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { postJSON } from '@/lib/api';
 import { logAdminAction } from '@/lib/auditLog';
 import { requestContentInspection } from '@/lib/contentWorkflow';
 import { getPublishTargetForItem } from '@/lib/contentModel';
+import { useContentTransitions } from './useContentTransitions';
+
+/** Two per-item maps as one: a value in `b` wins unless it is null/undefined. */
+function mergeItemMaps(a, b) {
+  const merged = { ...a };
+  for (const [key, value] of Object.entries(b)) {
+    if (value !== null && value !== undefined) merged[key] = value;
+    else if (!(key in merged)) merged[key] = value;
+  }
+  return merged;
+}
 
 /** Mirrors FORGE_MAX_BATCH in functions/src/functions/forge-jobs.js — the
  * job rejects a larger batch, so a bigger selection is chunked here. */
@@ -43,8 +61,17 @@ export const FORGE_MAX_BATCH = 10;
  * @param {string} params.contentTypeFilter only used to clear the selection
  */
 export function useQueueActions({ items, setItems, statusFilter, contentTypeFilter }) {
-  const [actionLoading, setActionLoading] = useState({});
-  const [actionError, setActionError] = useState({});
+  const [localLoading, setActionLoading] = useState({});
+  const [localError, setActionError] = useState({});
+  const transitions = useContentTransitions();
+  const actionLoading = useMemo(
+    () => mergeItemMaps(transitions.loading, localLoading),
+    [transitions.loading, localLoading]
+  );
+  const actionError = useMemo(
+    () => mergeItemMaps(transitions.errors, localError),
+    [transitions.errors, localError]
+  );
   const [bulkDeletingRejected, setBulkDeletingRejected] = useState(false);
   const [bulkDeleteError, setBulkDeleteError] = useState(null);
   const [bulkDeleteMessage, setBulkDeleteMessage] = useState(null);
@@ -147,31 +174,18 @@ export function useQueueActions({ items, setItems, statusFilter, contentTypeFilt
     const failures = [];
     try {
       for (const contentId of ids) {
-        try {
-          await postJSON('transitionContentStatus', {
-            contentId,
-            newStatus: 'rejected',
-            markLive: false,
-            reviewNotes: 'Bulk rejected from queue',
-          });
-          await logAdminAction('content_rejected', { contentId, bulk: true });
-          successCount += 1;
-        } catch (err) {
-          console.error('Bulk reject error for', contentId, err);
-          failures.push({ id: contentId, message: err?.message || 'Unknown error' });
-        }
+        // A null answer is a failure the hook has already written under the
+        // card as "Reject failed: <reason>"; the run goes on to the next id.
+        const result = await transitions.reject(contentId, {
+          reviewNotes: 'Bulk rejected from queue',
+        });
+        if (result) successCount += 1;
+        else failures.push(contentId);
       }
-      const failedIds = new Set(failures.map((f) => f.id));
+      const failedIds = new Set(failures);
       const successSet = new Set(ids.filter((id) => !failedIds.has(id)));
       setItems((prev) => prev.filter((item) => !successSet.has(item.id)));
       setSelectedIds(new Set());
-      if (failures.length) {
-        setActionError((prev) => {
-          const next = { ...prev };
-          for (const f of failures) next[f.id] = `Reject failed: ${f.message}`;
-          return next;
-        });
-      }
       setBulkDeleteMessage(
         `Rejected ${successCount} item${successCount === 1 ? '' : 's'}.${
           failures.length
@@ -187,28 +201,11 @@ export function useQueueActions({ items, setItems, statusFilter, contentTypeFilt
   const handleApprove = async (item) => {
     const contentId = item.id;
     const publishTarget = getPublishTargetForItem(item);
-
-    setActionError((prev) => ({ ...prev, [contentId]: null }));
-    setActionLoading((prev) => ({ ...prev, [contentId]: 'approving' }));
-    try {
-      const newStatus = 'approved';
-
-      await postJSON('transitionContentStatus', {
-        contentId,
-        newStatus,
-        publishTarget,
-        markLive: false,
-        reviewNotes: `Approved in queue for ${publishTarget} publish stage`,
-      });
-
-      await logAdminAction('content_approved', { contentId, publishTarget, newStatus });
-      setItems((prev) => prev.filter((item) => item.id !== contentId));
-    } catch (err) {
-      console.error('Approve error:', err);
-      setActionError((prev) => ({ ...prev, [contentId]: `Approve failed: ${err.message}` }));
-    } finally {
-      setActionLoading((prev) => ({ ...prev, [contentId]: null }));
-    }
+    const result = await transitions.approve(item, {
+      publishTarget,
+      reviewNotes: `Approved in queue for ${publishTarget} publish stage`,
+    });
+    if (result) setItems((prev) => prev.filter((entry) => entry.id !== contentId));
   };
 
   const handleReject = (contentId) => {
@@ -216,23 +213,8 @@ export function useQueueActions({ items, setItems, statusFilter, contentTypeFilt
   };
 
   const doReject = async (contentId) => {
-    setActionError((prev) => ({ ...prev, [contentId]: null }));
-    setActionLoading((prev) => ({ ...prev, [contentId]: 'rejecting' }));
-    try {
-      await postJSON('transitionContentStatus', {
-        contentId,
-        newStatus: 'rejected',
-        markLive: false,
-        reviewNotes: 'Rejected from queue',
-      });
-      await logAdminAction('content_rejected', { contentId });
-      setItems((prev) => prev.filter((item) => item.id !== contentId));
-    } catch (err) {
-      console.error('Reject error:', err);
-      setActionError((prev) => ({ ...prev, [contentId]: `Reject failed: ${err.message}` }));
-    } finally {
-      setActionLoading((prev) => ({ ...prev, [contentId]: null }));
-    }
+    const result = await transitions.reject(contentId, { reviewNotes: 'Rejected from queue' });
+    if (result) setItems((prev) => prev.filter((item) => item.id !== contentId));
   };
 
   const handleDeleteRejectedNow = () => {
@@ -277,21 +259,10 @@ export function useQueueActions({ items, setItems, statusFilter, contentTypeFilt
   };
 
   const doRestore = async (contentId) => {
-    setActionError((prev) => ({ ...prev, [contentId]: null }));
-    setActionLoading((prev) => ({ ...prev, [contentId]: 'restoring' }));
-    try {
-      await postJSON('transitionContentStatus', {
-        contentId,
-        newStatus: 'inspected',
-        reviewNotes: 'Restored from rejected status',
-      });
-      setItems((prev) => prev.filter((item) => item.id !== contentId));
-    } catch (err) {
-      console.error('Restore error:', err);
-      setActionError((prev) => ({ ...prev, [contentId]: `Restore failed: ${err.message}` }));
-    } finally {
-      setActionLoading((prev) => ({ ...prev, [contentId]: null }));
-    }
+    const result = await transitions.restore(contentId, {
+      reviewNotes: 'Restored from rejected status',
+    });
+    if (result) setItems((prev) => prev.filter((item) => item.id !== contentId));
   };
 
   const doPermanentDelete = async (contentId) => {

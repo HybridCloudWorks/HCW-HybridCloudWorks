@@ -54,7 +54,12 @@ export const PODCAST_PROVIDERS = Object.freeze([
   'docker',
 ]);
 
-/** Every setting the server's registry names, as a person reads it. */
+/**
+ * Every setting a Change history row can name, as a person reads it. The
+ * first seven are the server's platform-settings registry; `integrations` is
+ * the Sessionize speaker id, saved on the Integrations page and written to
+ * the same history (ADR 0033 Platform).
+ */
 export const SETTING_LABELS = Object.freeze({
   'default-heroes': 'Default covers',
   'social-autopost': 'Social autoposting',
@@ -63,7 +68,18 @@ export const SETTING_LABELS = Object.freeze({
   'podcast-voices': 'Podcast voices',
   'newsletter-settings': 'Newsletter settings',
   'content-taxonomy': 'Content types & idea origins',
+  integrations: 'Sessionize speaker id (Integrations)',
 });
+
+/**
+ * The names the history route's `?setting=` filter accepts: the server's
+ * registry, which validates the value before querying. `integrations` is
+ * listed by the unfiltered read but is not a registry setting, so it is not
+ * offered as a filter — asking for it would be a 400.
+ */
+export const HISTORY_FILTERABLE = Object.freeze(
+  Object.keys(SETTING_LABELS).filter((id) => id !== 'integrations')
+);
 
 export const settingRoute = (name) => `cms/platform-settings/${name}`;
 

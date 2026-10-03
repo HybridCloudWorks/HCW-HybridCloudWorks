@@ -54,6 +54,8 @@ describe('QueuePage', () => {
       expect(postJSON).toHaveBeenCalledWith('getQueueSnapshot', {
         statusFilter: 'needs_review',
         contentTypeFilter: 'all',
+        kindFilter: 'all',
+        ideaOriginFilter: 'all',
         itemLimit: 100,
       })
     );
@@ -109,11 +111,9 @@ describe('QueuePage', () => {
       })
     );
 
-    expect(logAdminAction).toHaveBeenCalledWith('content_approved', {
-      contentId: 'content-2',
-      publishTarget: 'blog',
-      newStatus: 'approved',
-    });
+    // The server writes the audit row for a transition; the client no longer
+    // doubles it (ADR 0033 §1).
+    expect(logAdminAction).not.toHaveBeenCalled();
 
     await waitFor(() => {
       expect(screen.queryByText('Azure review item')).not.toBeInTheDocument();
@@ -137,11 +137,17 @@ describe('QueuePage', () => {
     fireEvent.change(input, { target: { value: 'https://learn.microsoft.com/azure/aks' } });
     fireEvent.click(screen.getByRole('button', { name: 'Forge' }));
 
-    // The exact payload key matters: the job's worker reads payload.url.
+    // The exact payload key matters: the job's worker reads payload.url. The
+    // classification rides along (ADR 0033 §4): a pasted URL is an imported
+    // source, and what it becomes defaults to an article.
     await waitFor(() =>
       expect(postJSON).toHaveBeenCalledWith('enqueueJob', {
         type: 'forge-from-url',
-        payload: { url: 'https://learn.microsoft.com/azure/aks' },
+        payload: {
+          url: 'https://learn.microsoft.com/azure/aks',
+          kind: 'article',
+          ideaOrigin: 'imported-source',
+        },
       })
     );
     expect(await screen.findByText(/Forge queued \(job job-77\)/)).toBeInTheDocument();

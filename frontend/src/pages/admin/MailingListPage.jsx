@@ -1,5 +1,5 @@
 /**
- * Newsletter Hub (route `/admin/mailing-list`) — the weekly newsletter and its provider, Resend (ADR 0030).
+ * Newsletter Hub (route `/admin/mailing-list`) — the weekly newsletter and its provider, Resend (ADR 0030, ADR 0033).
  *
  * Resend replaced Klaviyo, which this page used to read through `klaviyoProxy`:
  * lists, profiles and campaigns, and nothing was ever written. The tabs follow
@@ -8,13 +8,16 @@
  *   Newsletter  build this week's issue, review it, delete it or keep it
  *   Drafts      kept issues, edited and approved; approval schedules it
  *               through Resend only when a publisher confirms
- *   Published   a calendar of what was sent or scheduled, each email viewable
- *               with Resend's metrics for it, and the month's figures
+ *   Published   the shared Calendar filtered to newsletter sends, each email
+ *               viewable with Resend's metrics; cancel, reschedule, retry and
+ *               duplicate live here beside the preview
  *   Audience    the Newsletter segment in Resend: counts, the contacts a page
- *               at a time, and (publisher) unsubscribe, resubscribe, remove
+ *               at a time, search across the whole list, CSV export, adding a
+ *               subscriber, and (publisher) unsubscribe, resubscribe, remove
  *   Settings    what every issue needs (postal address, reply-to, send slot),
- *               the Resend connection check, and Resend itself: sending
- *               domains (records, verify, tracking), recent emails and API logs
+ *               the sender address, the Resend connection check, and Resend
+ *               itself: sending domains (records, verify, tracking), recent
+ *               emails and API logs
  *
  * The test posts a NAME to `connectionProbe` and the server builds the call,
  * so `RESEND_API_KEY` never reaches the browser.
@@ -25,14 +28,17 @@ import { useSearchParams } from 'react-router';
 import { useAuthReady } from '@/hooks/useAuthReady';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import ServicePageHeader from '@/components/admin/ServicePageHeader';
+import PageHeader from '@/components/admin/shared/PageHeader';
+import StatusBadge from '@/components/admin/shared/StatusBadge';
+import HubTabs from '@/components/admin/HubTabs';
 import { Mail, Loader2, RefreshCw, CheckCircle, AlertCircle, ExternalLink } from 'lucide-react';
 import { postJSON } from '@/lib/api';
 import { countList, unwrapProxy } from '@/lib/proxyEnvelope';
 import NewsletterIssues from '@/components/admin/newsletter/NewsletterIssues';
-import NewsletterCalendar from '@/components/admin/newsletter/NewsletterCalendar';
+import NewsletterPublished from '@/components/admin/newsletter/NewsletterPublished';
 import NewsletterAudience from '@/components/admin/newsletter/NewsletterAudience';
 import NewsletterSettingsCard from '@/components/admin/newsletter/NewsletterSettingsCard';
+import SenderCard from '@/components/admin/newsletter/settings/SenderCard';
 import ResendDomains from '@/components/admin/newsletter/settings/ResendDomains';
 import ResendEmails from '@/components/admin/newsletter/settings/ResendEmails';
 import ResendLogs from '@/components/admin/newsletter/settings/ResendLogs';
@@ -47,6 +53,32 @@ const TABS = [
 const TAB_IDS = new Set(TABS.map((tab) => tab.id));
 /** Tabs that moved: a bookmark to one lands where its content went. */
 const MOVED_TABS = { connection: 'settings' };
+
+/** The words this hub uses, once (ADR 0033): Resend's and this page's. */
+const GLOSSARY = [
+  <span key="publication">
+    <strong>Publication</strong> — this newsletter: one list of subscribers, one sender, one weekly
+    rhythm.
+  </span>,
+  <span key="issue">
+    <strong>Issue</strong> (Resend calls it a <strong>Campaign</strong> or{' '}
+    <strong>Broadcast</strong>) — one send: a subject, an intro, sections of items, to everyone on
+    the list at one time.
+  </span>,
+  <span key="template">
+    <strong>Template</strong> — the design the email is laid out in: the built-in one, or a Resend
+    template chosen on Settings.
+  </span>,
+  <span key="audience">
+    <strong>Audience</strong> — the confirmed subscribers, kept in Resend as the “Newsletter”
+    segment. Nothing here stores an address.
+  </span>,
+  <span key="send">
+    <strong>Send</strong> — Approve on Drafts schedules the issue through Resend for the next send
+    slot (or its own send time); Published shows it as scheduled, then sent once Resend confirms.
+  </span>,
+  'Newsletter builds this week’s issue from what the site published. Drafts holds the ones you kept; approve one there. Published is the calendar of what went out. Audience is who gets it. Settings is everything set once.',
+];
 
 // ── Resend connection ─────────────────────────────────────────────────────────
 
@@ -78,6 +110,7 @@ function SettingsTab({ onStatusChange }) {
   return (
     <div className="max-w-3xl space-y-6">
       <NewsletterSettingsCard />
+      <SenderCard />
       <ConnectionCard onStatusChange={onStatusChange} />
       <ResendDomains />
       <ResendEmails />
@@ -169,6 +202,13 @@ function ConnectionCard({ onStatusChange }) {
   );
 }
 
+/** The header's Resend line: the shared vocabulary for a dependency's state, and its sentence. */
+function connectionStatus(connected) {
+  if (connected === 'checking') return { system: 'unknown', text: 'Checking Resend…' };
+  if (connected) return { system: 'healthy', text: 'Resend connected' };
+  return { system: 'unavailable', text: 'Resend not reachable — test it on Settings' };
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function MailingListPage() {
@@ -178,6 +218,8 @@ export default function MailingListPage() {
   // the newsletter rather than on a blank page.
   const requested = MOVED_TABS[searchParams.get('tab')] ?? searchParams.get('tab');
   const activeTab = TAB_IDS.has(requested) ? requested : 'newsletter';
+  // The Calendar links an issue as `?tab=published&issue=<id>`.
+  const issueParam = searchParams.get('issue') || null;
   const [connected, setConnected] = useState('checking');
 
   useEffect(() => {
@@ -193,39 +235,32 @@ export default function MailingListPage() {
 
   return (
     <div className="space-y-6">
-      <ServicePageHeader
+      <PageHeader
         icon={Mail}
         title="Newsletter Hub"
-        service="Resend"
-        connected={connected}
-        description="Build, keep, approve and look back on the weekly newsletter, sent through Resend."
-        accent="violet"
+        help={GLOSSARY}
+        helpTitle="What the words mean"
+        status={
+          <>
+            <StatusBadge system={connectionStatus(connected).system} />
+            <span className="text-muted-foreground">{connectionStatus(connected).text}</span>
+          </>
+        }
       />
 
-      <div className="flex gap-1 border-b border-border">
-        {TABS.map(({ id, label }) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setTab(id)}
-            className={`px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors border-b-2 -mb-px ${
-              activeTab === id
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      <div>
+      <HubTabs
+        tabs={TABS}
+        active={activeTab}
+        onSelect={setTab}
+        idPrefix="newsletter"
+        label="Newsletter Hub"
+      >
         {activeTab === 'newsletter' && <NewsletterIssues view="review" />}
         {activeTab === 'drafts' && <NewsletterIssues view="drafts" />}
-        {activeTab === 'published' && <NewsletterCalendar />}
+        {activeTab === 'published' && <NewsletterPublished initialIssueId={issueParam} />}
         {activeTab === 'audience' && <NewsletterAudience />}
         {activeTab === 'settings' && <SettingsTab onStatusChange={setConnected} />}
-      </div>
+      </HubTabs>
     </div>
   );
 }

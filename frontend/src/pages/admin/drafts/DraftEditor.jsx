@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import RichTextBody from '@/components/shared/RichTextBody';
+import TaxonomyPicker from '@/components/admin/shared/TaxonomyPicker';
 import { ARTICLE_PROSE_CLASS } from '@/lib/articleStyles';
 import { StageBadge } from './DraftList';
 import { TRACK_SUGGESTIONS, reviewPath } from './draftForm';
@@ -238,6 +239,17 @@ export default function DraftEditor({
             <Field id="draft-tags" label="Tags" hint="Comma-separated: azure, terraform, docker">
               <Input {...input('tags')} />
             </Field>
+          </div>
+          <div className="sm:col-span-2">
+            <TaxonomyPicker
+              kind={form.kind}
+              ideaOrigin={form.ideaOrigin}
+              disabled={readOnly}
+              onChange={(next) => {
+                if (next.kind !== form.kind) onChange('kind', next.kind);
+                if (next.ideaOrigin !== form.ideaOrigin) onChange('ideaOrigin', next.ideaOrigin);
+              }}
+            />
           </div>
         </div>
 

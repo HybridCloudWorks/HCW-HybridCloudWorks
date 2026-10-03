@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router';
-import { ExternalLink, Search, Trash2 } from 'lucide-react';
+import { ExternalLink, Globe, Search, Trash2 } from 'lucide-react';
 import { useAuthReady } from '@/hooks/useAuthReady';
 import { usePublicData } from '@/hooks/usePublicData';
 import { fetchPublicContentList } from '@/lib/publicApi';
@@ -8,12 +8,32 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { getCanonicalContentType, getContentPublicPath } from '@/lib/contentModel';
+import { getCanonicalContentType } from '@/lib/contentModel';
 import ConfirmModal from '@/components/admin/ConfirmModal';
+import EmptyState from '@/components/admin/shared/EmptyState';
+import PageHeader from '@/components/admin/shared/PageHeader';
+import StatusBadge from '@/components/admin/shared/StatusBadge';
+import TaxonomyChips from '@/components/admin/shared/TaxonomyChips';
 import { postJSON, getJSON } from '@/lib/api';
 import { toMillis } from '@/lib/dateUtils';
 import { safeUrl } from '@/lib/safeUrl';
-import { isLiveRecord } from '@/lib/livePages';
+import { getLiveUrl, isLiveRecord } from '@/lib/livePages';
+
+const LIVE_PAGES_HELP = [
+  'What is here: every page visitors can open right now — the records whose Live flag is set, with the URL the site serves them at.',
+  'Nothing is drafted or approved here; this is the end of the pipeline. Open Editor to change a page, Open Live Page to see it as a visitor does.',
+  'Delete Live Page takes the page off the site immediately (the URL returns 404) and soft-deletes the record for 24 hours before cleanup.',
+  'Legacy pages from the retired blogs collection can be included with the checkbox; they are read-only here.',
+];
+
+/**
+ * The newest live pages, ordered on the server (ADR 0033 §1). The list route
+ * used to answer 500 arbitrary documents of every status that were then
+ * filtered here, so a live page could be missing while a hundred rejected
+ * items were fetched for nothing. `live=true` filters and `sort=publishedAt`
+ * orders newest first: every published document carries publishedAt.
+ */
+export const LIVE_PAGES_QUERY = 'cms/content?live=true&limit=500&sort=publishedAt';
 
 function getProvider(item) {
   return item['Cloud Provider'] || item.cloudProvider || item.provider || 'Unknown';
@@ -52,25 +72,15 @@ function getRecencyScore(item) {
   );
 }
 
-function getLiveUrl(item) {
-  const explicitUrl =
-    item.slugPageUrl ||
-    item.publishedUrl ||
-    item.blogUrl ||
-    item.publicUrl ||
-    (item.curatedSubpagePath
-      ? `https://hybridcloudworks.com${String(item.curatedSubpagePath).startsWith('/') ? item.curatedSubpagePath : `/${item.curatedSubpagePath}`}`
-      : '');
-  if (explicitUrl) return explicitUrl;
-  const publicPath = getContentPublicPath(item);
-  return publicPath ? `https://hybridcloudworks.com${publicPath}` : '';
-}
-
 export default function LivePagesPage() {
   const { authReady } = useAuthReady();
   const [includeLegacyPages, setIncludeLegacyPages] = useState(false);
-  const { data: contentItems, loading: contentLoading } = usePublicData(
-    () => getJSON('cms/content?limit=500').then((res) => res.items || []),
+  const {
+    data: contentItems,
+    loading: contentLoading,
+    error: contentError,
+  } = usePublicData(
+    () => getJSON(LIVE_PAGES_QUERY).then((res) => res.items || []),
     authReady ? 'live-pages:content' : ''
   );
   // Legacy blogs via the public list — this page only renders live records,
@@ -155,18 +165,26 @@ export default function LivePagesPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Live Pages</h1>
-        <p className="text-sm text-muted-foreground">
-          Public pages only. Draft, staged, or unpublished items do not appear here.
-        </p>
-      </div>
+      <PageHeader
+        icon={Globe}
+        title="Live Pages"
+        help={LIVE_PAGES_HELP}
+        status={
+          <span className="text-muted-foreground">
+            Public pages only. Draft, staged, or unpublished items do not appear here.
+          </span>
+        }
+      />
 
       <Card>
         <CardContent className="p-4">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <label htmlFor="live-pages-search" className="sr-only">
+              Search live pages
+            </label>
             <Input
+              id="live-pages-search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search by title, provider, type, or live URL"
@@ -202,12 +220,20 @@ export default function LivePagesPage() {
           </CardContent>
         </Card>
       )}
-      {!loading && liveItems.length === 0 && (
-        <Card>
-          <CardContent className="p-8 text-sm text-muted-foreground">
-            No live pages match the current filter.
-          </CardContent>
-        </Card>
+      {!loading && contentError && (
+        <EmptyState
+          variant="error"
+          title="Live pages could not be loaded"
+          description={contentError.message || 'The request failed.'}
+          onRetry={() => window.location.reload()}
+        />
+      )}
+      {!loading && !contentError && liveItems.length === 0 && (
+        <EmptyState
+          variant={query ? 'filtered' : 'empty'}
+          title={query ? 'No live pages match the current filter.' : 'Nothing is live yet.'}
+          description="Pages published from the Publish page appear here with their public URL."
+        />
       )}
       {!loading && liveItems.length > 0 && (
         <Card>
@@ -227,11 +253,10 @@ export default function LivePagesPage() {
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-medium">{getTitle(item)}</p>
                     <div className="mt-1 flex flex-wrap items-center gap-2">
+                      <StatusBadge content={item} />
                       <Badge variant="outline">{getProvider(item)}</Badge>
                       <Badge variant="secondary">{getTypeLabel(item)}</Badge>
-                      <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300">
-                        Live
-                      </Badge>
+                      <TaxonomyChips item={item} />
                     </div>
                     <a
                       href={safeUrl(liveUrl, '#')}

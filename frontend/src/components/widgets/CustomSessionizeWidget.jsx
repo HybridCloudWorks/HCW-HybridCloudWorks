@@ -1,12 +1,24 @@
 /* eslint-disable complexity */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { loadPublicDataSnapshot } from '@/lib/publicData';
-import { fetchPublicSnapshotItems } from '@/lib/publicApi';
+import { fetchPublicSnapshot } from '@/lib/publicApi';
+import { DEFAULT_SESSIONIZE_SPEAKER_ID } from '@/lib/adminSettings';
+import {
+  getDateTimestamp,
+  isTombstone,
+  isUpcoming,
+  matchStoredRow,
+  newerSnapshot,
+  parseDateValue,
+} from '@/lib/speakingEvents';
 import { resolveMediaUrl } from '../../lib/functionsBase';
 
 /**
- * CustomSessionizeWidget: Displays speaking engagements from Sessionize API + Firestore
+ * CustomSessionizeWidget: speaking engagements from the Sessionize API merged
+ * with the published `speakerevents` snapshot (overrides, manual entries and
+ * tombstones), rendering the newer of the deploy-time JSON and the live
+ * publish. Dates, the upcoming rule and the id-then-name match are
+ * lib/speakingEvents, shared with the admin hub (ADR 0033, Spotlight slice).
  *
  * LOCATION DISPLAY FORMAT STANDARD:
  * ================================
@@ -27,35 +39,47 @@ import { resolveMediaUrl } from '../../lib/functionsBase';
  * - Virtual indicator → Show "Virtual"
  * - No location data → Show "Virtual"
  */
-// Pure date helpers, deliberately at module scope rather than inside the
-// component: defined in the body they get a fresh identity every render, which
-// makes them unusable as useEffect dependencies — the sort effect below calls
-// getDateTimestamp, and react-hooks/exhaustive-deps rightly flagged its absence
-// from that dep array. Neither helper closes over props or state.
-const parseDateValue = (value) => {
-  if (!value) return null;
-  if (typeof value?.toDate === 'function') return value.toDate();
-  if (value instanceof Date) return value;
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    // Accept either a bare YYYY-MM-DD or a full ISO timestamp; anchor at
-    // local noon so display dates do not drift across timezones.
-    const match = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (match) {
-      const [, year, month, day] = match;
-      return new Date(Number(year), Number(month) - 1, Number(day), 12);
-    }
+/**
+ * The build-time copy of the snapshot, whole: `loadPublicDataSnapshot` answers
+ * only the rows, and choosing between the deploy-time copy and the live
+ * publish needs the stamp on each (ADR 0033 §1). Null when the file is absent
+ * or not JSON — the live snapshot then stands alone.
+ */
+async function loadStaticSnapshot(path) {
+  try {
+    const response = await fetch(path, {
+      headers: { Accept: 'application/json' },
+      cache: 'default',
+    });
+    const contentType = response.headers.get('content-type') || '';
+    if (!response.ok || !contentType.toLowerCase().includes('application/json')) return null;
+    const payload = await response.json();
+    return Array.isArray(payload?.items) ? payload : null;
+  } catch {
+    return null;
   }
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-};
+}
 
-const getDateTimestamp = (value) => {
-  const date = parseDateValue(value);
-  return date ? date.getTime() : 0;
-};
+/**
+ * The published speaking snapshot to render: the newer of the deploy-time
+ * JSON and the live `_snapshots` document, so a publish shows before the next
+ * deploy. Either read failing leaves the other.
+ */
+export async function loadSpeakingSnapshot() {
+  const [staticDoc, liveDoc] = await Promise.all([
+    loadStaticSnapshot('/data/speakerevents.json'),
+    fetchPublicSnapshot('speakerevents').catch(() => null),
+  ]);
+  return newerSnapshot(staticDoc, liveDoc) || { items: [], meta: null };
+}
 
-const CustomSessionizeWidget = ({ speakerId = 'c6yicoezls' }) => {
+/**
+ * `speakerId` is read from the published snapshot's `meta` — the Settings
+ * tab's speaker ID, copied in by Publish snapshot — then from the prop, then
+ * from the one default the admin settings module holds. No second
+ * hard-coded id lives here (ADR 0033, Spotlight slice).
+ */
+const CustomSessionizeWidget = ({ speakerId: speakerIdProp = null }) => {
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -320,9 +344,11 @@ const CustomSessionizeWidget = ({ speakerId = 'c6yicoezls' }) => {
     const coords = get(normalizedRaw, ['locationCoords', 'coords', 'coordinates']);
     // Primary: Firebase Storage image (populated by Cloud Function from eventImageUrl)
     const imagesRaw = get(normalizedRaw, ['images', 'Images']);
-    const storedImage = Array.isArray(imagesRaw)
-      ? imagesRaw[0]?.downloadURL
-      : imagesRaw?.downloadURL || (typeof imagesRaw === 'string' ? imagesRaw : null);
+    const firstImage = Array.isArray(imagesRaw) ? imagesRaw[0] : imagesRaw;
+    const storedImage =
+      typeof firstImage === 'string'
+        ? firstImage
+        : firstImage?.downloadURL || firstImage?.url || firstImage?.src || null;
 
     // Fallback: raw external URL in eventImageUrl field
     const imageRaw = get(normalizedRaw, ['eventImageUrl', 'imageUrl', 'eventImageURL']);
@@ -347,7 +373,10 @@ const CustomSessionizeWidget = ({ speakerId = 'c6yicoezls' }) => {
       location: loc,
       location_coords: coords,
       eventUrl: get(normalizedRaw, ['eventUrl']),
-      presentationUrl: get(normalizedRaw, ['presentationUrl']),
+      presentationUrl:
+        get(normalizedRaw, ['presentationUrl']) ||
+        (Array.isArray(normalizedRaw.sessions) ? normalizedRaw.sessions[0]?.slidesUrl : null) ||
+        null,
       image: storedImage || null,
       eventImageUrl: externalImageUrl || null,
       isManualEntry: true,
@@ -359,6 +388,12 @@ const CustomSessionizeWidget = ({ speakerId = 'c6yicoezls' }) => {
     if (!isInView) return; // Don't fetch until widget is near the viewport
     const fetchData = async () => {
       try {
+        // The published snapshot first: it carries the speaker id to read and
+        // the rows (overrides, manual entries and tombstones) to merge in.
+        const snapshotDoc = await loadSpeakingSnapshot();
+        const speakerId = String(
+          snapshotDoc?.meta?.speakerId || speakerIdProp || DEFAULT_SESSIONIZE_SPEAKER_ID
+        ).trim();
         if (!/^[a-zA-Z0-9]+$/.test(speakerId)) {
           throw new Error('Invalid speaker ID');
         }
@@ -372,89 +407,71 @@ const CustomSessionizeWidget = ({ speakerId = 'c6yicoezls' }) => {
         const sessionizeData = await sessionizeResponse.json();
         const allSessionizeEvents = sessionizeData.events || sessionizeData.sessions || [];
 
-        // Static JSON is the fast public path. The snapshots API is only a
-        // quiet fallback for deploys that do not have the generated file yet.
-        let rawCustomEvents = await loadPublicDataSnapshot('/data/speakerevents.json');
-
-        if (rawCustomEvents.length === 0) {
-          try {
-            rawCustomEvents = await fetchPublicSnapshotItems('speakerevents');
-          } catch {
-            rawCustomEvents = [];
-          }
-        }
-
+        const rawCustomEvents = (snapshotDoc.items || []).filter(
+          (item) => item && typeof item === 'object'
+        );
+        // A tombstone names a Sessionize event the editor unticked: the event
+        // is dropped, not merged (functions/src/lib/snapshots-publish.js).
+        const hiddenSessionizeIds = new Set(
+          rawCustomEvents.filter(isTombstone).map((item) => Number(item.sessionizeId))
+        );
         const allCustomEvents = rawCustomEvents
-          .filter((item) => item && typeof item === 'object')
+          .filter((item) => !isTombstone(item))
           .map((d) => normalizeEvent(d));
 
-        // Two lookup maps: by Sessionize numeric ID (preferred) and by lowercased name (fallback)
-        const bySessionizeId = new Map(
-          allCustomEvents.filter((e) => e.sessionizeId).map((e) => [e.sessionizeId, e])
-        );
-        const byName = new Map(
-          allCustomEvents.map((e) => [(e.name || '').trim().toLowerCase(), e])
-        );
+        // Track which stored rows were matched so we know what's left for manual entries
+        const matchedStoredIds = new Set();
 
-        // Track which Firestore docs were matched so we know what's left for manual entries
-        const matchedFirestoreIds = new Set();
-
-        const mergeWithFirestore = (sessionizeEvent, firestoreDoc) => {
-          // Firestore wins on any field it actually has set; Sessionize fills the rest
+        const mergeWithStored = (sessionizeEvent, storedRow) => {
+          // The stored row wins on any field it actually has set; Sessionize fills the rest
           const startsAt = sessionizeEvent.startsAt || sessionizeEvent.eventStartDate || null;
           const sessionizeEventUrl = sessionizeEvent.eventUrl || sessionizeEvent.website || null;
           return {
-            id: sessionizeEvent.id || firestoreDoc.id,
-            name: firestoreDoc.name || (sessionizeEvent.name || sessionizeEvent.title || '').trim(),
+            id: sessionizeEvent.id || storedRow.id,
+            name: storedRow.name || (sessionizeEvent.name || sessionizeEvent.title || '').trim(),
             startsAt,
-            date: firestoreDoc.date || startsAt,
-            location: firestoreDoc.location || sessionizeEvent.location || null,
-            location_coords: firestoreDoc.location_coords || null,
-            description: firestoreDoc.description || sessionizeEvent.description || null,
-            eventUrl: firestoreDoc.eventUrl || sessionizeEventUrl,
-            presentationUrl: firestoreDoc.presentationUrl || null,
-            image: firestoreDoc.image || null,
-            eventImageUrl: firestoreDoc.eventImageUrl || null,
+            date: storedRow.date || startsAt,
+            location: storedRow.location || sessionizeEvent.location || null,
+            location_coords: storedRow.location_coords || null,
+            description: storedRow.description || sessionizeEvent.description || null,
+            eventUrl: storedRow.eventUrl || sessionizeEventUrl,
+            presentationUrl:
+              storedRow.presentationUrl || storedRow.sessions?.[0]?.slidesUrl || null,
+            image: storedRow.image || null,
+            eventImageUrl: storedRow.eventImageUrl || null,
             isManualEntry: false,
           };
         };
 
-        const combinedEvents = allSessionizeEvents.map((sessionizeEvent) => {
-          const sessionizeNumericId = sessionizeEvent.id ? Number(sessionizeEvent.id) : null;
-          const eventName = (sessionizeEvent.name || sessionizeEvent.title || '').trim();
-          const normalizedName = eventName.toLowerCase();
-          const startsAt = sessionizeEvent.startsAt || sessionizeEvent.eventStartDate || null;
-          const sessionizeEventUrl = sessionizeEvent.eventUrl || sessionizeEvent.website || null;
+        const combinedEvents = allSessionizeEvents
+          .filter((sessionizeEvent) => !hiddenSessionizeIds.has(Number(sessionizeEvent.id)))
+          .map((sessionizeEvent) => {
+            const eventName = (sessionizeEvent.name || sessionizeEvent.title || '').trim();
+            const startsAt = sessionizeEvent.startsAt || sessionizeEvent.eventStartDate || null;
+            const sessionizeEventUrl = sessionizeEvent.eventUrl || sessionizeEvent.website || null;
 
-          // 1. Match by Sessionize ID (most reliable)
-          let firestoreDoc = sessionizeNumericId ? bySessionizeId.get(sessionizeNumericId) : null;
-
-          // 2. Fall back to name match (case-insensitive)
-          if (!firestoreDoc) {
-            firestoreDoc = byName.get(normalizedName);
-            // Also try without trailing year suffix variants like " (copy)"
-            if (!firestoreDoc && normalizedName.endsWith(' (copy)')) {
-              firestoreDoc = byName.get(normalizedName.replace(' (copy)', '').trim());
+            // Sessionize id first, then name — the same two steps the admin hub takes.
+            const storedRow = matchStoredRow(
+              { id: sessionizeEvent.id, name: eventName },
+              allCustomEvents.map((e) => ({ ...e, eventId: e.sessionizeId }))
+            );
+            if (storedRow) {
+              matchedStoredIds.add(storedRow.id);
+              return mergeWithStored(sessionizeEvent, storedRow);
             }
-          }
 
-          if (firestoreDoc) {
-            matchedFirestoreIds.add(firestoreDoc.id);
-            return mergeWithFirestore(sessionizeEvent, firestoreDoc);
-          }
+            // No stored row — use Sessionize data as-is
+            return {
+              ...sessionizeEvent,
+              startsAt,
+              eventUrl: sessionizeEventUrl,
+              name: eventName,
+            };
+          });
 
-          // No Firestore doc — use Sessionize data as-is
-          return {
-            ...sessionizeEvent,
-            startsAt,
-            eventUrl: sessionizeEventUrl,
-            name: eventName,
-          };
-        });
-
-        // Unmatched Firestore docs with display:true become standalone manual entries
+        // Unmatched stored rows with display:true become standalone manual entries
         const manualEntries = allCustomEvents
-          .filter((e) => !matchedFirestoreIds.has(e.id) && e.display === true)
+          .filter((e) => !matchedStoredIds.has(e.id) && e.display === true)
           .map((entry) => ({ ...entry, isManualEntry: true }));
 
         const allEvents = [...combinedEvents, ...manualEntries];
@@ -465,8 +482,8 @@ const CustomSessionizeWidget = ({ speakerId = 'c6yicoezls' }) => {
           if (!dateA && !dateB) return 1;
           if (!dateA) return 1;
           if (!dateB) return -1;
-          const isComingSoon = dateA > Date.now() || dateB > Date.now();
-          if (isComingSoon) {
+          const comingSoon = isUpcoming(a.date || a.startsAt) || isUpcoming(b.date || b.startsAt);
+          if (comingSoon) {
             return dateA - dateB;
           }
           return dateB - dateA;
@@ -483,7 +500,7 @@ const CustomSessionizeWidget = ({ speakerId = 'c6yicoezls' }) => {
     };
 
     fetchData();
-  }, [speakerId, resolveLocations, isInView]);
+  }, [speakerIdProp, resolveLocations, isInView]);
 
   // IntersectionObserver: start fetching data when the widget is 300px from the viewport.
   // Fires once, then disconnects — no overhead after initial load.
@@ -541,10 +558,11 @@ const CustomSessionizeWidget = ({ speakerId = 'c6yicoezls' }) => {
 
   const currentDate = new Date();
 
+  // Today or later is "coming soon" — the same rule as the admin's Upcoming tab.
   const comingSoonEvents = sessions.filter((s) => {
     const d = parseDateValue(s.date || s.startsAt);
     if (!d) return false;
-    return d > currentDate;
+    return isUpcoming(d, currentDate);
   });
 
   const currentYear = currentDate.getFullYear();
@@ -552,13 +570,13 @@ const CustomSessionizeWidget = ({ speakerId = 'c6yicoezls' }) => {
   const currentYearPastEvents = sessions.filter((s) => {
     const dt = parseDateValue(s.date || s.startsAt);
     if (!dt) return false;
-    return dt <= currentDate && dt.getFullYear() === currentYear;
+    return !isUpcoming(dt, currentDate) && dt.getFullYear() === currentYear;
   });
 
   const previousYearEvents = sessions.filter((s) => {
     const dt = parseDateValue(s.date || s.startsAt);
     if (!dt) return false;
-    return dt.getFullYear() === currentYear - 1 && dt <= currentDate;
+    return dt.getFullYear() === currentYear - 1 && !isUpcoming(dt, currentDate);
   });
 
   comingSoonEvents.sort(

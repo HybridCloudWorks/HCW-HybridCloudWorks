@@ -41,12 +41,22 @@ function paragraphsHtml(text, style) {
 
 const formatRange = (issue) => {
   const fmt = (iso) =>
-    new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(iso));
+    new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric',
+      timeZone: 'UTC',
+    }).format(new Date(iso));
   const end = new Date(Date.parse(issue.periodEnd) - 1).toISOString();
   return `${fmt(issue.periodStart)} – ${fmt(end)}`;
 };
 
-const COLORS = { ink: '#111827', muted: '#4b5563', rule: '#e5e7eb', accent: '#2563eb', bg: '#f3f4f6' };
+const COLORS = {
+  ink: '#111827',
+  muted: '#4b5563',
+  rule: '#e5e7eb',
+  accent: '#2563eb',
+  bg: '#f3f4f6',
+};
 
 /**
  * The sections as they will be rendered: every link re-checked HERE, at the
@@ -60,7 +70,12 @@ function renderableSections(issue) {
     .map((section) => ({
       ...section,
       items: (section.items || [])
-        .map((item) => ({ ...item, url: absoluteUrl(item?.url) }))
+        // An image is optional and, like the link, only ever https.
+        .map((item) => ({
+          ...item,
+          url: absoluteUrl(item?.url),
+          imageUrl: item?.imageUrl ? absoluteUrl(item.imageUrl) : null,
+        }))
         .filter((item) => item.url && item.title),
     }))
     .filter((section) => section.items.length > 0);
@@ -79,7 +94,8 @@ export const TEST_SEND_NOTE =
 function preheaderHtml(preheader) {
   const text = String(preheader ?? '').trim();
   if (!text) return '';
-  const hidden = 'display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all';
+  const hidden =
+    'display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all';
   return `<div style="${hidden}">${escapeHtml(text)}</div>
 <div style="${hidden}">${'&#847;&zwnj;&nbsp;'.repeat(80)}</div>
 `;
@@ -108,7 +124,12 @@ export function renderIssueParts(issue, { postalAddress, testSend = false }) {
       const items = section.items
         .map(
           (item) => `<tr><td style="padding:0 0 18px">
-<a href="${escapeHtml(item.url)}" style="font-size:17px;font-weight:600;color:${COLORS.accent};text-decoration:none">${escapeHtml(item.title)}</a>
+${
+  item.imageUrl
+    ? `<a href="${escapeHtml(item.url)}" style="display:block;margin:0 0 10px"><img src="${escapeHtml(item.imageUrl)}" alt="" width="560" style="display:block;width:100%;max-width:560px;height:auto;border-radius:6px"></a>
+`
+    : ''
+}<a href="${escapeHtml(item.url)}" style="font-size:17px;font-weight:600;color:${COLORS.accent};text-decoration:none">${escapeHtml(item.title)}</a>
 ${item.label ? `<div style="font-size:12px;letter-spacing:.02em;text-transform:uppercase;color:${COLORS.muted};margin-top:4px">${escapeHtml(item.label)}</div>` : ''}
 ${item.summary ? `<div style="font-size:15px;line-height:1.55;color:${COLORS.muted};margin-top:6px">${escapeHtml(item.summary)}</div>` : ''}
 </td></tr>`
@@ -124,7 +145,9 @@ ${item.summary ? `<div style="font-size:15px;line-height:1.55;color:${COLORS.mut
   const note = issue.customNote
     ? `<tr><td style="padding:0 0 8px">${paragraphsHtml(issue.customNote, p)}</td></tr>`
     : '';
-  const intro = issue.intro ? `<tr><td style="padding:0 0 8px">${paragraphsHtml(issue.intro, p)}</td></tr>` : '';
+  const intro = issue.intro
+    ? `<tr><td style="padding:0 0 8px">${paragraphsHtml(issue.intro, p)}</td></tr>`
+    : '';
 
   const bodyHtml = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
 ${intro}${note}${sectionHtml}
@@ -155,12 +178,21 @@ export function addressHtml(postalAddress) {
 export const FOOTER_COLOR = COLORS.muted;
 
 /** The plain-text part. Every design sends this one: a template shapes only the HTML. */
-function renderIssueText(issue, { subject, range, sections, unsubscribe }, { postalAddress, testSend = false }) {
+function renderIssueText(
+  issue,
+  { subject, range, sections, unsubscribe },
+  { postalAddress, testSend = false }
+) {
   const textSections = sections.map((section) =>
     [
       section.title.toUpperCase(),
       ...section.items.map((item) =>
-        [`- ${item.title}`, item.label ? `  ${item.label}` : null, item.summary ? `  ${item.summary}` : null, `  ${item.url}`]
+        [
+          `- ${item.title}`,
+          item.label ? `  ${item.label}` : null,
+          item.summary ? `  ${item.summary}` : null,
+          `  ${item.url}`,
+        ]
           .filter(Boolean)
           .join('\n')
       ),

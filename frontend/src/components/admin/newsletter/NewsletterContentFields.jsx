@@ -14,12 +14,18 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ArrowDown, ArrowUp } from 'lucide-react';
 
-/** Used when the server sends no options; it always does, so these are a fallback. */
+/**
+ * Used when the server sends no options; it always does, so these are a
+ * fallback. The sections mirror the registry in
+ * functions/src/lib/newsletter/sections.js (five, in email order).
+ */
 export const FALLBACK_CONTENT_OPTIONS = Object.freeze({
   sections: [
     { id: 'articles', title: 'New on HybridCloudWorks' },
     { id: 'certification-news', title: 'Certification news' },
     { id: 'episodes', title: 'Listen & learn' },
+    { id: 'cloud-price-changes', title: 'Cloud price changes' },
+    { id: 'lab-this-week', title: 'Lab this week' },
   ],
   introTones: ['professional', 'friendly', 'concise', 'enthusiastic'],
   windowDays: { min: 1, max: 31 },

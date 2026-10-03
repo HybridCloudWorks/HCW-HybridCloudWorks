@@ -52,6 +52,33 @@ const MAX_AGE_SECONDS = 31536000;
 
 const CACHE_CONTROL = `public, max-age=${MAX_AGE_SECONDS}, immutable`;
 
+/**
+ * Five minutes, for a path that is NOT content-addressed. Listen & Learn
+ * audio written before ADR 0033 §4 lives at `{provider}/{exam}/{slug}.mp3`
+ * with no stamp, and a regeneration rewrote the same path — so a browser that
+ * had cached the old take under the immutable header above kept playing it
+ * for a year. Paths written since carry `-{yyyymmddHHMMSS}` before the
+ * extension and never change content, so they keep the immutable header.
+ */
+const REVALIDATE_SECONDS = 300;
+
+const STAMPED_AUDIO_PATH = /-\d{14}\.[a-z0-9]+$/i;
+
+/**
+ * The cache header for one blob: immutable for every content-addressed path,
+ * a short revalidating cache for an unstamped Listen & Learn path.
+ *
+ * @param {string} container
+ * @param {string} blobPath
+ * @returns {string}
+ */
+export function cacheControlFor(container, blobPath) {
+  if (container === 'listenandlearn' && !STAMPED_AUDIO_PATH.test(String(blobPath || ''))) {
+    return `public, max-age=${REVALIDATE_SECONDS}`;
+  }
+  return CACHE_CONTROL;
+}
+
 const json = (status, body) => ({
   status,
   headers: { 'Content-Type': 'application/json' },
@@ -114,10 +141,10 @@ export function resolveRange(range, totalLength) {
 }
 
 /** The headers every successful answer carries, body or not. */
-function deliveryHeaders({ contentType, etag }) {
+function deliveryHeaders({ contentType, etag }, cacheControl = CACHE_CONTROL) {
   return {
     'Content-Type': contentType || 'application/octet-stream',
-    'Cache-Control': CACHE_CONTROL,
+    'Cache-Control': cacheControl,
     'Accept-Ranges': 'bytes',
     ...(etag ? { ETag: etag } : {}),
     // The bytes are already public; this only stops a browser from sniffing
@@ -126,9 +153,9 @@ function deliveryHeaders({ contentType, etag }) {
   };
 }
 
-const notModified = (etag) => ({
+const notModified = (etag, cacheControl = CACHE_CONTROL) => ({
   status: 304,
-  headers: { ETag: etag, 'Cache-Control': CACHE_CONTROL, 'Accept-Ranges': 'bytes' },
+  headers: { ETag: etag, 'Cache-Control': cacheControl, 'Accept-Ranges': 'bytes' },
 });
 
 /**
@@ -179,15 +206,16 @@ export function createPublicMediaHandlers({ storage }) {
 
   /** HEAD: the 200's headers, sized for the whole blob, and no body. */
   async function head(container, blobPath, request) {
+    const cacheControl = cacheControlFor(container, blobPath);
     const blob = canHead
       ? await storage.headBlobForDelivery(container, blobPath)
       : await storage.readBlobForDelivery(container, blobPath);
     if (!blob) return json(404, { error: 'Not found' });
-    if (etagMatches(request, blob.etag)) return notModified(blob.etag);
+    if (etagMatches(request, blob.etag)) return notModified(blob.etag, cacheControl);
     return {
       status: 200,
       headers: {
-        ...deliveryHeaders(blob),
+        ...deliveryHeaders(blob, cacheControl),
         'Content-Length': String(blob.contentLength ?? blob.body?.length ?? 0),
       },
     };
@@ -195,6 +223,7 @@ export function createPublicMediaHandlers({ storage }) {
 
   /** A single satisfiable-or-not byte range: 206, 416, or 304. */
   async function partial(container, blobPath, request, range) {
+    const cacheControl = cacheControlFor(container, blobPath);
     // A conditional request or a suffix needs the blob's properties before
     // any bytes are read: the first so a matching ETag answers 304 without
     // a ranged download it would then discard, the second because a suffix
@@ -205,7 +234,7 @@ export function createPublicMediaHandlers({ storage }) {
     if (conditional || 'suffix' in range) {
       const blob = await storage.headBlobForDelivery(container, blobPath);
       if (!blob) return json(404, { error: 'Not found' });
-      if (etagMatches(request, blob.etag)) return notModified(blob.etag);
+      if (etagMatches(request, blob.etag)) return notModified(blob.etag, cacheControl);
       if ('suffix' in range) {
         offsets = resolveRange(range, blob.contentLength);
         if (!offsets) return unsatisfiable(blob.contentLength);
@@ -219,7 +248,7 @@ export function createPublicMediaHandlers({ storage }) {
     return {
       status: 206,
       headers: {
-        ...deliveryHeaders(chunk),
+        ...deliveryHeaders(chunk, cacheControl),
         'Content-Range': `bytes ${chunk.start}-${chunk.end}/${chunk.totalLength}`,
         'Content-Length': String(chunk.body.length),
       },
@@ -240,12 +269,13 @@ export function createPublicMediaHandlers({ storage }) {
 
   /** The whole blob, exactly as before ranges existed, plus `Accept-Ranges`. */
   async function full(container, blobPath, request) {
+    const cacheControl = cacheControlFor(container, blobPath);
     const blob = await storage.readBlobForDelivery(container, blobPath);
     if (!blob) return json(404, { error: 'Not found' });
-    if (etagMatches(request, blob.etag)) return notModified(blob.etag);
+    if (etagMatches(request, blob.etag)) return notModified(blob.etag, cacheControl);
     return {
       status: 200,
-      headers: deliveryHeaders(blob),
+      headers: deliveryHeaders(blob, cacheControl),
       body: blob.body,
     };
   }

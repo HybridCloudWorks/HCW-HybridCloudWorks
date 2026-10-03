@@ -24,7 +24,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { History, Loader2, RefreshCw } from 'lucide-react';
 import { getJSON } from '@/lib/api';
-import { SELECT_CLASS, SETTING_LABELS } from './settingShared';
+import { HISTORY_FILTERABLE, SELECT_CLASS, SETTING_LABELS } from './settingShared';
 
 export const HISTORY_ROUTE = 'cms/platform-settings/history';
 export const HISTORY_PAGE_SIZE = 25;
@@ -194,7 +194,7 @@ function HistoryBody({ history, filtered }) {
       <p className="py-4 text-sm text-muted-foreground">
         {filtered
           ? 'No changes recorded for this setting yet.'
-          : 'No settings changes recorded yet. Each save from this hub or the Newsletter Hub is listed here.'}
+          : 'No settings changes recorded yet. Each save from this hub, the Newsletter Hub or the Sessionize speaker id on Integrations is listed here.'}
       </p>
     );
   }
@@ -249,9 +249,9 @@ export default function ChangeHistoryTab() {
               onChange={(event) => setSetting(event.target.value)}
             >
               <option value="">All settings</option>
-              {Object.entries(SETTING_LABELS).map(([id, label]) => (
+              {HISTORY_FILTERABLE.map((id) => (
                 <option key={id} value={id}>
-                  {label}
+                  {SETTING_LABELS[id]}
                 </option>
               ))}
             </select>

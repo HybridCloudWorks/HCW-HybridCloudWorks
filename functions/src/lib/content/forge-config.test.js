@@ -6,6 +6,7 @@ import {
   DEFAULT_MASTER_PROMPT,
   DEFAULT_PROMPTS,
   CACHE_TTL_MS,
+  numberOr,
 } from './forge-config.js';
 import { ADMIN_CONFIG_PARTITION } from '../cosmos-client.js';
 
@@ -64,5 +65,44 @@ describe('createForgeConfigLoader', () => {
     loader.clearForgeConfigCache();
     store.readDoc.mockRejectedValueOnce(new Error('down'));
     expect((await loader.loadForgePrompts()).publishThreshold).toBe(80);
+  });
+});
+
+describe('zero values and empty lists (ADR 0033)', () => {
+  it('keeps an explicit 0 publish threshold and 0 daily limit instead of the fallbacks', () => {
+    const prompts = normalizePrompts({
+      publishThreshold: 0,
+      autoForge: { enabled: true, dailyLimit: 0 },
+    });
+    expect(prompts.publishThreshold).toBe(0);
+    expect(prompts.autoForge.dailyLimit).toBe(0);
+    // Absent and unusable values still fall back.
+    expect(normalizePrompts({}).publishThreshold).toBe(80);
+    expect(
+      normalizePrompts({
+        publishThreshold: 'abc',
+        autoForge: { dailyLimit: null },
+      })
+    ).toMatchObject({
+      publishThreshold: 80,
+      autoForge: { dailyLimit: 3 },
+    });
+  });
+
+  it('keeps an explicit empty interest-area list, and takes the defaults only when the field is missing', () => {
+    expect(normalizeProfile({ interestAreas: [] }).interestAreas).toEqual([]);
+    expect(normalizeProfile({}).interestAreas.length).toBeGreaterThan(0);
+    expect(normalizeProfile({ interestAreas: 'nope' }).interestAreas.length).toBeGreaterThan(0);
+    expect(
+      normalizeProfile({ interestAreas: [{ key: 'k', weight: 0 }] }).interestAreas[0].weight
+    ).toBe(0);
+  });
+
+  it('numberOr', () => {
+    expect(numberOr(0, 9)).toBe(0);
+    expect(numberOr('', 9)).toBe(9);
+    expect(numberOr(null, 9)).toBe(9);
+    expect(numberOr('12', 9)).toBe(12);
+    expect(numberOr('x', 9)).toBe(9);
   });
 });

@@ -23,6 +23,11 @@ describe('isLiveRecord', () => {
     expect(isLiveRecord(null)).toBe(false);
   });
 
+  it('the canonical `published` is live with the flag and staged without it', () => {
+    expect(isLiveRecord({ contentStatus: 'published', Live: true })).toBe(true);
+    expect(isLiveRecord({ contentStatus: 'published', Live: false })).toBe(false);
+  });
+
   it('soft-deletion wins outright, even over an explicit Live', () => {
     // A record can still say Live while it is inside the delete window, and
     // offering the operator a page that is about to stop existing is worse
@@ -48,6 +53,24 @@ describe('getLiveUrl', () => {
   it('is an empty string when the record names nowhere', () => {
     expect(getLiveUrl({})).toBe('');
     expect(getLiveUrl({ curatedSubpagePath: '' })).toBe('');
+    expect(getLiveUrl(null)).toBe('');
+  });
+
+  it('derives the URL from provider and slug when no field carries one (ADR 0033 §2)', () => {
+    // The fallback LivePagesPage alone used to have; now every surface sees
+    // the page, because the site serves it at exactly this path.
+    expect(getLiveUrl({ 'Cloud Provider': 'Azure', slug: 'landing-zones', type: 'blog' })).toBe(
+      'https://hybridcloudworks.com/azure/blog/landing-zones'
+    );
+    expect(getLiveUrl({ cloudProvider: 'Aws', Slug: 'waf', type: 'framework' })).toBe(
+      'https://hybridcloudworks.com/aws/frameworks/waf'
+    );
+    // An explicit field still wins over the derivation.
+    expect(getLiveUrl({ publicUrl: 'https://x/y', cloudProvider: 'Aws', slug: 's' })).toBe(
+      'https://x/y'
+    );
+    // No slug, no URL: a derivation needs both halves.
+    expect(getLiveUrl({ cloudProvider: 'Aws', type: 'blog' })).toBe('');
   });
 
   it('skips a blank field rather than returning it', () => {

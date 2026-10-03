@@ -1,12 +1,17 @@
 import { describe, it, expect, vi } from 'vitest';
 import { mergeDigest, raiseAlert, writeSystemAudit, toMillis } from './workflow-records.js';
 import { createReviewerDigest, createReviewerDigestManualHandler } from './reviewer-digest.js';
-import { createContentCleanup, getRejectionReferenceDate, deletionOrigin } from './content-cleanup.js';
+import {
+  createContentCleanup,
+  getRejectionReferenceDate,
+  deletionOrigin,
+} from './content-cleanup.js';
 import { createPublishingWatchdog } from './publishing-watchdog.js';
 import { createLinkCheck, collectLiveLinkTargets, probeUrl } from './link-check.js';
 import { createCertReverify, parseExpiryMs, isCredlyUrl } from './cert-reverify.js';
 import {
   createCertImageCleanup,
+  isImageBlobName,
   blobNameFromUrl,
   collectReferencedBlobNames,
 } from './cert-image-cleanup.js';
@@ -127,7 +132,10 @@ describe('reviewer digest', () => {
       sourceFeed: 'f',
       sourceUrl: 'https://a',
     });
-    expect(digest.topItems[2]).toMatchObject({ title: 'Untitled', status: 'ingested' });
+    expect(digest.topItems[2]).toMatchObject({
+      title: 'Untitled',
+      status: 'ingested',
+    });
     expect(digest.generatedBy).toBe('scheduler');
   });
 
@@ -135,17 +143,29 @@ describe('reviewer digest', () => {
     const store = memStore({}, () => []);
     store.countDocs.mockResolvedValue(2);
     const guard = {
-      requireRole: vi.fn(async () => ({ user: { oid: 'u1' }, role: 'editor', error: null })),
+      requireRole: vi.fn(async () => ({
+        user: { oid: 'u1' },
+        role: 'editor',
+        error: null,
+      })),
     };
     const handler = createReviewerDigestManualHandler({ guard, store, now });
     const res = await handler({ headers: { get: () => null } }, { error: vi.fn() });
     expect(res.status).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body).toMatchObject({ success: true, totalQueued: 8, recentRssCount: 0 });
+    expect(body).toMatchObject({
+      success: true,
+      totalQueued: 8,
+      recentRssCount: 0,
+    });
     expect(store.data.workflow_digests.get('2026-08-21').generatedBy).toBe('manual');
 
     const denied = createReviewerDigestManualHandler({
-      guard: { requireRole: vi.fn(async () => ({ error: { status: 403, body: '{}' } })) },
+      guard: {
+        requireRole: vi.fn(async () => ({
+          error: { status: 403, body: '{}' },
+        })),
+      },
       store,
       now,
     });
@@ -162,10 +182,19 @@ describe('content cleanup', () => {
       { id: 'viaUpdated', updatedAt: iso(-30 * H) },
     ];
     const store = memStore({ content: rejected }, (c) => (c === 'content' ? rejected : []));
-    const r = await createContentCleanup({ store, now, uuid: () => 'a1' }).softDeleteRejected({
+    const r = await createContentCleanup({
+      store,
+      now,
+      uuid: () => 'a1',
+    }).softDeleteRejected({
       olderThanHours: 24,
     });
-    expect(r).toEqual({ deletedCount: 2, softDeletedCount: 2, examinedCount: 4, hasMore: false });
+    expect(r).toEqual({
+      deletedCount: 2,
+      softDeletedCount: 2,
+      examinedCount: 4,
+      hasMore: false,
+    });
     expect(store.data.content.get('old')).toMatchObject({
       softDeletedAt: NOW.toISOString(),
       softDeletedReason: 'rejected_aged_out',
@@ -173,7 +202,11 @@ describe('content cleanup', () => {
     expect(store.data.content.get('fresh').softDeletedAt).toBeUndefined();
     expect(store.data.admin_audit_logs.get('a1')).toMatchObject({
       action: 'cron_soft_deleted_rejected_content',
-      details: { affectedCount: 2, affectedIds: ['old', 'viaUpdated'], olderThanHours: 24 },
+      details: {
+        affectedCount: 2,
+        affectedIds: ['old', 'viaUpdated'],
+        olderThanHours: 24,
+      },
     });
     expect(getRejectionReferenceDate({ updatedAt: 'x' })).toBeNull();
   });
@@ -193,16 +226,30 @@ describe('content cleanup', () => {
         content_versions: [{ id: 'v1', contentId: 'c1' }],
       },
       (c, q) => {
-        if (c === 'content') return q.includes('AND NOT (') ? [] : [{ id: 'c1', publishedBlogId: 'b1', deletionRequestedBy: 'editor' }];
+        if (c === 'content')
+          return q.includes('AND NOT (')
+            ? []
+            : [
+                {
+                  id: 'c1',
+                  publishedBlogId: 'b1',
+                  deletionRequestedBy: 'editor',
+                },
+              ];
         if (c === 'blogs') return [{ id: 'b2' }];
         if (c === 'content_versions') return [{ id: 'v1' }];
         return [];
       }
     );
     const env = { CONTENT_HARD_DELETE: 'true' };
-    const r = await createContentCleanup({ store, now, uuid: () => 'a2', env }).hardDeleteSoftDeleted(
-      { olderThanHours: 24 * 7 }
-    );
+    const onContentDeleted = vi.fn(async () => ({}));
+    const r = await createContentCleanup({
+      store,
+      now,
+      uuid: () => 'a2',
+      env,
+      onContentDeleted,
+    }).hardDeleteSoftDeleted({ olderThanHours: 24 * 7 });
     expect(r).toEqual({
       dryRun: false,
       examinedCount: 1,
@@ -222,6 +269,9 @@ describe('content cleanup', () => {
       ['content', 'c1', 'c1'],
       ['content_versions', 'v1', 'c1'],
     ]);
+    // The purge moved the dashboard counters itself (ADR 0033 §1): the change
+    // feed never sees a delete, and until 2026-10-03 nothing here did either.
+    expect(onContentDeleted).toHaveBeenCalledWith('c1');
     expect(store.queryDocs.mock.calls[0][2]).toEqual([
       { name: '@cutoff', value: iso(-7 * 24 * H) },
     ]);
@@ -234,7 +284,14 @@ describe('content cleanup', () => {
     });
     const empty = memStore({}, () => []);
     const log = { log: vi.fn(), warn: vi.fn() };
-    expect(await createContentCleanup({ store: empty, now, env, log }).hardDeleteSoftDeleted()).toEqual({
+    expect(
+      await createContentCleanup({
+        store: empty,
+        now,
+        env,
+        log,
+      }).hardDeleteSoftDeleted()
+    ).toEqual({
       dryRun: false,
       examinedCount: 0,
       eligibleCount: 0,
@@ -254,6 +311,78 @@ describe('content cleanup', () => {
     );
   });
 
+  it('moves the counters through the stats maintainer by default, and a counter failure does not stop the purge', async () => {
+    const marker = { id: 'c1', bucket: 'rejected', type: 'blog' };
+    const stats = { id: 'dashboard_stats_v1', rejected: 3, totalDocs: 10 };
+    const store = memStore(
+      {
+        content: [
+          {
+            id: 'c1',
+            softDeletedAt: iso(-8 * 24 * H),
+            softDeletedReason: 'rejected_aged_out',
+          },
+        ],
+        content_stats_markers: [marker],
+        system: [stats],
+      },
+      (c, q) => {
+        if (c === 'content')
+          return q.includes('AND NOT (')
+            ? []
+            : [{ id: 'c1', softDeletedReason: 'rejected_aged_out' }];
+        return [];
+      }
+    );
+    const env = { CONTENT_HARD_DELETE: 'true' };
+    const r = await createContentCleanup({
+      store,
+      now,
+      uuid: () => 'a7',
+      env,
+    }).hardDeleteSoftDeleted();
+    expect(r.deletedContentCount).toBe(1);
+    // The marker is gone and the counters came down with the document.
+    expect(store.data.content_stats_markers.has('c1')).toBe(false);
+    expect(store.data.system.get('dashboard_stats_v1')).toMatchObject({
+      rejected: 2,
+      totalDocs: 9,
+    });
+
+    const log = { log: vi.fn(), warn: vi.fn() };
+    const failing = vi.fn(async () => {
+      throw new Error('stats offline');
+    });
+    const store2 = memStore(
+      {
+        content: [
+          {
+            id: 'c2',
+            softDeletedAt: iso(-8 * 24 * H),
+            deletionRequestedBy: 'editor',
+          },
+        ],
+      },
+      (c, q) =>
+        c === 'content' && !q.includes('AND NOT (')
+          ? [{ id: 'c2', deletionRequestedBy: 'editor' }]
+          : []
+    );
+    const r2 = await createContentCleanup({
+      store: store2,
+      now,
+      uuid: () => 'a8',
+      env,
+      log,
+      onContentDeleted: failing,
+    }).hardDeleteSoftDeleted();
+    expect(r2.deletedContentCount).toBe(1);
+    expect(store2.data.content.has('c2')).toBe(false);
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.stringContaining('counters not updated for c2: stats offline')
+    );
+  });
+
   it('is dry-run until CONTENT_HARD_DELETE=true: nothing is deleted, no audit is written, the plan is logged', async () => {
     const known = [
       { id: 'u1', deletionRequestedBy: 'editor' },
@@ -266,7 +395,12 @@ describe('content cleanup', () => {
     );
     const log = { log: vi.fn(), warn: vi.fn() };
     for (const env of [{}, { CONTENT_HARD_DELETE: 'false' }, { CONTENT_HARD_DELETE: 'TRUE' }]) {
-      const r = await createContentCleanup({ store, now, env, log }).hardDeleteSoftDeleted();
+      const r = await createContentCleanup({
+        store,
+        now,
+        env,
+        log,
+      }).hardDeleteSoftDeleted();
       expect(r).toMatchObject({
         dryRun: true,
         eligibleCount: 2,
@@ -301,7 +435,12 @@ describe('content cleanup', () => {
       c === 'content' ? (q.includes('AND NOT (') ? unknown : known) : []
     );
     const env = { CONTENT_HARD_DELETE: 'true' };
-    const r = await createContentCleanup({ store, now, uuid: () => 'a3', env }).hardDeleteSoftDeleted();
+    const r = await createContentCleanup({
+      store,
+      now,
+      uuid: () => 'a3',
+      env,
+    }).hardDeleteSoftDeleted();
     expect(r).toMatchObject({
       dryRun: false,
       examinedCount: 5,
@@ -319,7 +458,9 @@ describe('content cleanup', () => {
     // The eligible query never sees an unknown-origin row, so refused rows
     // cannot occupy its TOP window and starve the eligible ones.
     const [eligibleQuery, unknownQuery] = store.queryDocs.mock.calls.map((c) => c[1]);
-    expect(eligibleQuery).toContain('c.softDeletedAt <= @cutoff AND ((IS_STRING(c.deletionRequestedBy)');
+    expect(eligibleQuery).toContain(
+      'c.softDeletedAt <= @cutoff AND ((IS_STRING(c.deletionRequestedBy)'
+    );
     expect(unknownQuery).toContain('AND NOT ((IS_STRING(c.deletionRequestedBy)');
     // Armed, everything refused: nothing is deleted, but the audit entry is
     // still written, because the refused ids are the record a human reviews.
@@ -328,8 +469,20 @@ describe('content cleanup', () => {
       c === 'content' && q.includes('AND NOT (') ? onlyUnknown : []
     );
     const log2 = { log: vi.fn(), warn: vi.fn() };
-    const r2 = await createContentCleanup({ store: store2, now, uuid: () => 'a4', env, log: log2 }).hardDeleteSoftDeleted();
-    expect(r2).toMatchObject({ dryRun: false, examinedCount: 2, eligibleCount: 0, refusedCount: 2, deletedContentCount: 0 });
+    const r2 = await createContentCleanup({
+      store: store2,
+      now,
+      uuid: () => 'a4',
+      env,
+      log: log2,
+    }).hardDeleteSoftDeleted();
+    expect(r2).toMatchObject({
+      dryRun: false,
+      examinedCount: 2,
+      eligibleCount: 0,
+      refusedCount: 2,
+      deletedContentCount: 0,
+    });
     expect(store2.deleteDoc).not.toHaveBeenCalled();
     expect(store2.data.admin_audit_logs.get('a4').details).toMatchObject({
       deletedContentCount: 0,
@@ -342,18 +495,40 @@ describe('content cleanup', () => {
     );
     // Armed and idle: nothing examined, so nothing to record and no audit entry.
     const idle = memStore({}, () => []);
-    await createContentCleanup({ store: idle, now, uuid: () => 'a5', env }).hardDeleteSoftDeleted();
+    await createContentCleanup({
+      store: idle,
+      now,
+      uuid: () => 'a5',
+      env,
+    }).hardDeleteSoftDeleted();
     expect(idle.data.admin_audit_logs).toBeUndefined();
 
     // A full refused window reports hasMore even when the eligible window is not full.
     const manyUnknown = Array.from({ length: 3 }, (_, i) => ({ id: `n${i}` }));
-    const store3 = memStore({}, (c, q) => (c === 'content' && q.includes('AND NOT (') ? manyUnknown : []));
-    const r3 = await createContentCleanup({ store: store3, now, uuid: () => 'a6', env }).hardDeleteSoftDeleted({ limit: 3 });
-    expect(r3).toMatchObject({ eligibleCount: 0, refusedCount: 3, hasMore: true, refusedHasMore: true });
+    const store3 = memStore({}, (c, q) =>
+      c === 'content' && q.includes('AND NOT (') ? manyUnknown : []
+    );
+    const r3 = await createContentCleanup({
+      store: store3,
+      now,
+      uuid: () => 'a6',
+      env,
+    }).hardDeleteSoftDeleted({ limit: 3 });
+    expect(r3).toMatchObject({
+      eligibleCount: 0,
+      refusedCount: 3,
+      hasMore: true,
+      refusedHasMore: true,
+    });
 
     expect(deletionOrigin({ deletionRequestedBy: 'x' })).toBe('user');
     expect(deletionOrigin({ softDeletedReason: 'rejected_aged_out' })).toBe('policy');
-    expect(deletionOrigin({ softDeletedReason: 'rejected_aged_out', deletionRequestedBy: 'x' })).toBe('user');
+    expect(
+      deletionOrigin({
+        softDeletedReason: 'rejected_aged_out',
+        deletionRequestedBy: 'x',
+      })
+    ).toBe('user');
     expect(deletionOrigin({})).toBe('unknown');
     expect(deletionOrigin(null)).toBe('unknown');
   });
@@ -442,7 +617,12 @@ describe('certification re-verification', () => {
     expect(isCredlyUrl('http://credly.com/x')).toBe(false);
     const certs = [
       { id: 'expired', name: 'E', certState: true, expDate: '2026-01-01' },
-      { id: 'revoked', name: 'R', certState: true, verifyUrl: 'https://credly.com/badges/r' },
+      {
+        id: 'revoked',
+        name: 'R',
+        certState: true,
+        verifyUrl: 'https://credly.com/badges/r',
+      },
       {
         id: 'fine',
         name: 'F',
@@ -450,7 +630,25 @@ describe('certification re-verification', () => {
         expDate: '2099-01-01T00:00:00Z',
         verifyUrl: 'https://credly.com/badges/f',
       },
-      { id: 'unreachable', name: 'U', certState: true, verifyUrl: 'https://credly.com/badges/u' },
+      {
+        id: 'unreachable',
+        name: 'U',
+        certState: true,
+        verifyUrl: 'https://credly.com/badges/u',
+      },
+      // Marked inactive at an earlier expiry, then renewed: the expiry is ahead
+      // again, so it comes back (ADR 0033, Spotlight slice).
+      { id: 'renewed', name: 'N', certState: false, expDate: '2099-06-01' },
+      // Inactive with a future expiry but Credly still refuses it: stays off.
+      {
+        id: 'stillRevoked',
+        name: 'S',
+        certState: false,
+        expDate: '2099-06-01',
+        verifyUrl: 'https://credly.com/badges/r',
+      },
+      // Inactive and lapsed: nothing to reason from, left alone.
+      { id: 'lapsed', name: 'L', certState: false, expDate: '2020-01-01' },
     ];
     const store = memStore({ certifications: certs }, () => certs);
     const fetch = vi.fn(async (url) => {
@@ -461,13 +659,31 @@ describe('certification re-verification', () => {
       };
     });
     const publishSnapshots = vi.fn(async () => ({}));
-    const r = await createCertReverify({ store, fetch, publishSnapshots, now }).run();
-    expect(r).toEqual({ examined: 4, expiredCount: 1, revokedCount: 1 });
+    const r = await createCertReverify({
+      store,
+      fetch,
+      publishSnapshots,
+      now,
+    }).run();
+    expect(r).toEqual({
+      examined: 7,
+      expiredCount: 1,
+      revokedCount: 1,
+      renewedCount: 1,
+    });
     expect(store.data.certifications.get('expired').certState).toBe(false);
+    expect(store.data.certifications.get('expired')._updatedAt).toBeDefined();
     expect(store.data.certifications.get('revoked').certState).toBe(false);
     expect(store.data.certifications.get('fine').certState).toBe(true);
     expect(store.data.certifications.get('unreachable').certState).toBe(true);
-    expect(fetch).toHaveBeenCalledTimes(3); // expired one is not fetched
+    expect(store.data.certifications.get('renewed')).toMatchObject({
+      certState: true,
+      reverifyReason: 'renewed',
+    });
+    expect(store.data.certifications.get('stillRevoked').certState).toBe(false);
+    expect(store.data.certifications.get('lapsed').certState).toBe(false);
+    expect(fetch).toHaveBeenCalledTimes(4); // the expired, renewed and lapsed ones are not fetched
+    expect(store.queryDocs.mock.calls[0][1]).not.toContain('certState'); // every cert, not only active
     expect(publishSnapshots).toHaveBeenCalledWith(['certifications']);
   });
 });
@@ -503,7 +719,11 @@ describe('cert image cleanup', () => {
           {
             imageUrl: 'https://stsiteprodcus01.blob.core.windows.net/certifications/images/a.png',
             badge: { ref: 'certifications/images/b.png' },
-            image: [{ url: 'https://storage.googleapis.com/x/certifications/images/c.png' }],
+            image: [
+              {
+                url: 'https://storage.googleapis.com/x/certifications/images/c.png',
+              },
+            ],
           },
         ]),
       ].sort()
@@ -522,27 +742,44 @@ describe('cert image cleanup', () => {
       { name: 'images/keep.png', lastModified: iso(-30 * 24 * H) },
       { name: 'images/recent.png', lastModified: iso(-2 * 24 * H) },
       { name: 'images/orphan.png', lastModified: iso(-30 * 24 * H) },
+      // The editor's real path shape (CertEditor.jsx), which the old `images/`
+      // prefix never listed.
+      { name: 'cert-9/images/badge-1.png', lastModified: iso(-30 * 24 * H) },
+      // Not an image path: never a candidate, whatever its age.
+      { name: 'exports/old.json', lastModified: iso(-300 * 24 * H) },
     ];
-    const storage = { listBlobs: vi.fn(async () => blobs), deleteBlob: vi.fn(async () => {}) };
-    const dry = await createCertImageCleanup({ store, storage, env: {}, now }).run();
+    expect(isImageBlobName('cert-9/images/badge-1.png')).toBe(true);
+    expect(isImageBlobName('images/a.png')).toBe(true);
+    expect(isImageBlobName('exports/images.json')).toBe(false);
+    const storage = {
+      listBlobs: vi.fn(async () => blobs),
+      deleteBlob: vi.fn(async () => {}),
+    };
+    const dry = await createCertImageCleanup({
+      store,
+      storage,
+      env: {},
+      now,
+    }).run();
     expect(dry).toEqual({
       dryRun: true,
-      examined: 3,
+      examined: 4,
       referenced: 1,
-      candidates: 1,
+      candidates: 2,
       deleted: 0,
       skipped: 2,
     });
     expect(storage.deleteBlob).not.toHaveBeenCalled();
-    expect(storage.listBlobs).toHaveBeenCalledWith('certifications', 'images/');
+    expect(storage.listBlobs).toHaveBeenCalledWith('certifications', '');
     const real = await createCertImageCleanup({
       store,
       storage,
       env: { CERT_IMAGE_CLEANUP_DELETE: 'true' },
       now,
     }).run();
-    expect(real).toMatchObject({ dryRun: false, deleted: 1 });
+    expect(real).toMatchObject({ dryRun: false, deleted: 2 });
     expect(storage.deleteBlob).toHaveBeenCalledWith('certifications', 'images/orphan.png');
+    expect(storage.deleteBlob).toHaveBeenCalledWith('certifications', 'cert-9/images/badge-1.png');
   });
 });
 
@@ -602,7 +839,11 @@ describe('plaud token refresh', () => {
       ok: true,
       status: 200,
       text: async () =>
-        JSON.stringify({ access_token: 'a2', refresh_token: 'r2', expires_in: 3600 }),
+        JSON.stringify({
+          access_token: 'a2',
+          refresh_token: 'r2',
+          expires_in: 3600,
+        }),
     }));
     expect(await createPlaudTokenRefresh({ store, fetch, now }).run()).toEqual({
       ok: true,
@@ -616,7 +857,11 @@ describe('plaud token refresh', () => {
       lastTokenRefreshError: null,
     });
     expect(fetch.mock.calls[0][1].body).toBe('refresh_token=r1');
-    fetch.mockResolvedValueOnce({ ok: false, status: 401, text: async () => 'revoked' });
+    fetch.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      text: async () => 'revoked',
+    });
     expect(await createPlaudTokenRefresh({ store, fetch, now }).run()).toEqual({
       ok: false,
       reason: 'http_401',
@@ -652,7 +897,12 @@ describe('plaud token refresh', () => {
 describe('agent health + temp storage', () => {
   it('marks stale agents offline with the partition key, once', async () => {
     const store = memStore({}, () => [
-      { id: 'agent-1', agentId: 'agent-1', status: 'idle', lastSeenAt: iso(-5 * 60 * 1000) },
+      {
+        id: 'agent-1',
+        agentId: 'agent-1',
+        status: 'idle',
+        lastSeenAt: iso(-5 * 60 * 1000),
+      },
     ]);
     expect(await createAgentHealthCheck({ store, now }).run()).toEqual({
       markedOffline: 1,
@@ -688,12 +938,17 @@ describe('agent health + temp storage', () => {
       examined: 2,
       candidates: 1,
       deleted: 0,
-      byPrefix: { 'content:uploads/': { examined: 2, candidates: 1, deleted: 0 } },
+      byPrefix: {
+        'content:uploads/': { examined: 2, candidates: 1, deleted: 0 },
+      },
     });
     expect(storage.deleteBlob).not.toHaveBeenCalled();
     const real = await createTempStorageCleanup({
       storage,
-      env: { TEMP_STORAGE_CLEANUP_DELETE: 'true', TEMP_STORAGE_MAX_AGE_DAYS: '3' },
+      env: {
+        TEMP_STORAGE_CLEANUP_DELETE: 'true',
+        TEMP_STORAGE_MAX_AGE_DAYS: '3',
+      },
       now,
     }).run();
     expect(real).toMatchObject({ dryRun: false, maxAgeDays: 3, deleted: 1 });
@@ -709,18 +964,33 @@ describe('forge scheduled', () => {
           ? { ok: false, httpStatus: 409, error: 'dupe' }
           : contentId === 'bad'
             ? { ok: false, httpStatus: 502, error: 'gen failed' }
-            : { ok: true, result: { status: contentId === 'ed' ? 'editing' : 'forge_ready' } }
+            : {
+                ok: true,
+                result: {
+                  status: contentId === 'ed' ? 'editing' : 'forge_ready',
+                },
+              }
       ),
     };
     const off = {
-      loadForgePrompts: async () => ({ autoForge: { enabled: false, dailyLimit: 3 } }),
+      loadForgePrompts: async () => ({
+        autoForge: { enabled: false, dailyLimit: 3 },
+      }),
       loadForgeProfile: async () => ({ interestAreas: [] }),
     };
     expect(
-      (await createForgeScheduled({ store: memStore(), config: off, forge }).run()).skippedRun
+      (
+        await createForgeScheduled({
+          store: memStore(),
+          config: off,
+          forge,
+        }).run()
+      ).skippedRun
     ).toBe(true);
     const on = {
-      loadForgePrompts: async () => ({ autoForge: { enabled: true, dailyLimit: 4 } }),
+      loadForgePrompts: async () => ({
+        autoForge: { enabled: true, dailyLimit: 4 },
+      }),
       loadForgeProfile: async () => ({ interestAreas: [] }),
     };
     const store = memStore({}, () => [
@@ -731,7 +1001,12 @@ describe('forge scheduled', () => {
       { id: 'bad' },
       { id: 'overflow' },
     ]);
-    const r = await createForgeScheduled({ store, config: on, forge, now }).run();
+    const r = await createForgeScheduled({
+      store,
+      config: on,
+      forge,
+      now,
+    }).run();
     expect(r).toEqual({
       skippedRun: false,
       attempted: 4,
@@ -752,10 +1027,15 @@ describe('forge scheduled', () => {
   it("spends only the day's REMAINING budget and skips entirely at the limit (T-607)", async () => {
     const todayKey = NOW.toISOString().slice(0, 10);
     const forge = {
-      runForgePipeline: vi.fn(async () => ({ ok: true, result: { status: 'forge_ready' } })),
+      runForgePipeline: vi.fn(async () => ({
+        ok: true,
+        result: { status: 'forge_ready' },
+      })),
     };
     const config = {
-      loadForgePrompts: async () => ({ autoForge: { enabled: true, dailyLimit: 3 } }),
+      loadForgePrompts: async () => ({
+        autoForge: { enabled: true, dailyLimit: 3 },
+      }),
       loadForgeProfile: async () => ({ interestAreas: [] }),
     };
     // 2 of 3 already forged today (by /forge, forge-from-url, or an earlier run).
@@ -775,8 +1055,17 @@ describe('forge scheduled', () => {
       today: { date: todayKey, forged: 3 },
     });
     forge.runForgePipeline.mockClear();
-    const full = await createForgeScheduled({ store, config, forge, now }).run();
-    expect(full).toMatchObject({ skippedRun: true, reason: 'daily_limit_reached', forgedToday: 3 });
+    const full = await createForgeScheduled({
+      store,
+      config,
+      forge,
+      now,
+    }).run();
+    expect(full).toMatchObject({
+      skippedRun: true,
+      reason: 'daily_limit_reached',
+      forgedToday: 3,
+    });
     expect(forge.runForgePipeline).not.toHaveBeenCalled();
 
     // Yesterday's bucket does not count against today.
@@ -806,10 +1095,15 @@ describe('forge scheduled', () => {
     ).toEqual(['hot', 'warm', 'plain']);
 
     const forge = {
-      runForgePipeline: vi.fn(async () => ({ ok: true, result: { status: 'forge_ready' } })),
+      runForgePipeline: vi.fn(async () => ({
+        ok: true,
+        result: { status: 'forge_ready' },
+      })),
     };
     const config = {
-      loadForgePrompts: async () => ({ autoForge: { enabled: true, dailyLimit: 1 } }),
+      loadForgePrompts: async () => ({
+        autoForge: { enabled: true, dailyLimit: 1 },
+      }),
       loadForgeProfile: async () => ({ interestAreas }),
     };
     const store = memStore({}, () => [

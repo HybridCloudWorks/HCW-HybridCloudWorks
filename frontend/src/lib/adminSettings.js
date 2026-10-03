@@ -1,10 +1,14 @@
 /**
  * Admin integration settings — small API-backed settings doc so values like
- * the Sessionize speaker ID are editable from the Connections page instead of
+ * the Sessionize speaker ID are editable from the Integrations page instead of
  * being hard-coded.
  *
  * Backed by GET/PUT /api/cms/settings (the admin_settings/integrations doc);
- * PUT is a merge-save and the server stamps updatedAt.
+ * PUT is a merge-save and the server stamps updatedAt. A PUT that carries
+ * `sessionizeSpeakerId` also writes a `platform_setting_updated` audit row,
+ * so the save appears in Platform Settings → Change history beside every
+ * other setting (ADR 0033 Platform); the Platform Settings "All settings"
+ * index lists this document with the others.
  */
 import { getJSON, sendJSON } from '@/lib/api';
 

@@ -107,7 +107,7 @@ export function getScheduleValidationError({ ready, caption, selectedAccountIds 
 }
 
 export function getScheduleValidationDescription(validationError) {
-  if (validationError === 'Publer not configured') return 'Check the Settings tab.';
+  if (validationError === 'Publer not configured') return 'Connect it on the Accounts tab.';
   if (validationError === 'Caption required') return 'Write a caption before scheduling.';
   return '';
 }

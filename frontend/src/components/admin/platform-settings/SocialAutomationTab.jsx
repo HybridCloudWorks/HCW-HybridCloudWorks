@@ -40,8 +40,8 @@ function PublerNotes({ publerStatus, publerError, unsupported }) {
     <>
       {publerStatus === 'not_configured' ? (
         <p className="text-xs text-muted-foreground">
-          Publer not configured — connect it in the Social Hub&apos;s Connection Settings tab to
-          pick accounts here; until then, add them by id.
+          Publer not configured — connect it in the Social Hub&apos;s Settings tab to pick accounts
+          here; until then, add them by id.
         </p>
       ) : null}
       {publerStatus === 'error' ? (

@@ -136,18 +136,19 @@ describe('createExportScheduler', () => {
     return { s, store, messages, blobs };
   }
 
-  it('Sunday: one job document and one queue message per container of the full plan, 61 of them', async () => {
+  // 61 → 62 and 54 → 55 on 2026-10-03: the `ambassador` container (ADR 0033 §4).
+  it('Sunday: one job document and one queue message per container of the full plan, 62 of them', async () => {
     const { s, store, messages, blobs } = scheduler(SUNDAY);
     const result = await s.run();
     expect(result).toEqual({
       runId: '2026-09-13',
       mode: 'full',
-      containers: 61,
-      enqueued: 61,
+      containers: 62,
+      enqueued: 62,
       skipped: false,
     });
-    expect(store.upsertDoc).toHaveBeenCalledTimes(61);
-    expect(messages).toHaveLength(61);
+    expect(store.upsertDoc).toHaveBeenCalledTimes(62);
+    expect(messages).toHaveLength(62);
     expect(messages[0]).toEqual({ jobId: 'job-1', type: EXPORT_JOB_TYPE });
 
     const [container, doc] = store.upsertDoc.mock.calls[0];
@@ -173,9 +174,9 @@ describe('createExportScheduler', () => {
     });
   });
 
-  it('a weekday: the delta plan, 54 containers, without class C', async () => {
+  it('a weekday: the delta plan, 55 containers, without class C', async () => {
     const { s, store } = scheduler(MONDAY);
-    expect(await s.run()).toMatchObject({ mode: 'delta', containers: 54, enqueued: 54 });
+    expect(await s.run()).toMatchObject({ mode: 'delta', containers: 55, enqueued: 55 });
     const containers = store.upsertDoc.mock.calls.map(([, d]) => d.payload.container);
     for (const name of OPERATIONAL) expect(containers).not.toContain(name);
   });
@@ -188,7 +189,7 @@ describe('createExportScheduler', () => {
     expect(await second.s.run()).toEqual({
       runId: '2026-09-14',
       mode: 'delta',
-      containers: 54,
+      containers: 55,
       enqueued: 0,
       skipped: true,
     });
@@ -535,6 +536,6 @@ describe('run completion', () => {
     });
     const result = await exporter.completeRunIfLast(run);
     expect(result).toEqual({ written: true, tracked: true });
-    expect((await blobs.readJson('delta/2026-09-14/manifest.json')).containers).toHaveLength(54);
+    expect((await blobs.readJson('delta/2026-09-14/manifest.json')).containers).toHaveLength(55);
   });
 });

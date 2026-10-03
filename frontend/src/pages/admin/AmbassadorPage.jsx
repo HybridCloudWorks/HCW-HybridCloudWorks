@@ -1,20 +1,109 @@
 /**
- * Ambassador Hub (route /admin/ambassador) — Spotlight. Filled in by the
- * Ambassador slice (ADR 0033 §4 and the brief's module spec).
+ * Ambassador Hub (route `/admin/ambassador`) — Spotlight (ADR 0033 §4).
+ * Everything here exists to culminate in a credible application: the
+ * programs worth pursuing, one application per pursuit, the evidence that
+ * backs it (imported from Speaking, Certifications and Published content, or
+ * added by hand), the deadlines and renewals around it, and a readiness
+ * score that explains itself and never promises acceptance.
+ *
+ * Five tabs by duty, Settings last (components/admin/ambassador):
+ *
+ *   Dashboard     where every pursuit stands, what is due, what to do next
+ *   Programs      the catalogue, with details, requirements and readiness
+ *   Applications  the list, and the workspace for the one selected
+ *   Evidence      the library, with filters and the three imports
+ *   Settings      programs, requirements, evidence types, reminders, fields
+ *
+ * The three reads are the page's (useAmbassadorData), so switching tabs
+ * never refetches and an edit on one tab is on every other. Until the
+ * `ambassador` container exists the API answers NOT_PROVISIONED and the hub
+ * shows that one state with the owner's plan command (§6 item 4).
  */
-import React from 'react';
+import React, { useCallback, useState } from 'react';
+import { useSearchParams } from 'react-router';
 import { BadgeCheck } from 'lucide-react';
+import { useAuthReady } from '@/hooks/useAuthReady';
+import { useToast } from '@/components/ui/use-toast';
+import HubTabs from '@/components/admin/HubTabs';
 import PageHeader from '@/components/admin/shared/PageHeader';
-import EmptyState from '@/components/admin/shared/EmptyState';
+import DashboardTab from '@/components/admin/ambassador/DashboardTab';
+import ProgramsTab from '@/components/admin/ambassador/ProgramsTab';
+import ApplicationsTab from '@/components/admin/ambassador/ApplicationsTab';
+import EvidenceTab from '@/components/admin/ambassador/EvidenceTab';
+import SettingsTab from '@/components/admin/ambassador/SettingsTab';
+import NotProvisioned from '@/components/admin/ambassador/NotProvisioned';
+import useAmbassadorData from '@/components/admin/ambassador/useAmbassadorData';
+import { TABS, resolveTab } from '@/components/admin/ambassador/tabs';
+
+const PANELS = {
+  dashboard: DashboardTab,
+  programs: ProgramsTab,
+  applications: ApplicationsTab,
+  evidence: EvidenceTab,
+  settings: SettingsTab,
+};
+
+const HELP = [
+  'Everything here exists to culminate in a credible application: a program, the evidence that meets its requirements, and the written responses, submitted inside its window.',
+  'Programs are seeded with seven (MVP, MCT, AWS Hero, AWS Ambassador, GitHub Star, Docker Captain, vExpert); edit their requirements on Settings to match the current published rules.',
+  'Evidence is imported from Speaking, Certifications and Published content, or added by hand; attach it to an application from the requirement checklist.',
+  'Readiness is computed from your own evidence and says how; acceptance is the program’s decision and this hub never promises it.',
+  'Applications are private: nothing here is published. The packet view prints and the export downloads a JSON file you keep.',
+];
 
 export default function AmbassadorPage() {
+  const { authReady } = useAuthReady();
+  const { toast } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = resolveTab(searchParams.get('tab'));
+  const hub = useAmbassadorData(authReady, { toast });
+  const [selection, setSelection] = useState({
+    applicationId: searchParams.get('application') || null,
+  });
+
+  const setTab = useCallback(
+    (id, extra = {}) => {
+      const next = { tab: id, ...extra };
+      if (selection.applicationId && !('application' in extra))
+        next.application = selection.applicationId;
+      setSearchParams(next);
+    },
+    [setSearchParams, selection.applicationId]
+  );
+
+  const openApplication = useCallback(
+    (applicationId) => {
+      setSelection({ applicationId });
+      setSearchParams(
+        applicationId
+          ? { tab: 'applications', application: applicationId }
+          : { tab: 'applications' }
+      );
+    },
+    [setSearchParams]
+  );
+
+  const nav = { setTab: (id) => id !== activeTab && setTab(id), openApplication };
+  const ActivePanel = PANELS[activeTab];
+
   return (
     <div className="space-y-6">
-      <PageHeader icon={BadgeCheck} title="Ambassador" />
-      <EmptyState
-        title="The Ambassador hub is being built"
-        description="Programs, applications, evidence and renewals will live here."
-      />
+      <PageHeader icon={BadgeCheck} title="Ambassador Hub" help={HELP} />
+      <HubTabs
+        tabs={TABS}
+        active={activeTab}
+        onSelect={nav.setTab}
+        idPrefix="ambassador"
+        label="Ambassador Hub"
+      >
+        {hub.notProvisioned ? (
+          <div className="pt-4">
+            <NotProvisioned onRetry={hub.refreshAll} />
+          </div>
+        ) : (
+          <ActivePanel hub={hub} nav={nav} selection={selection} />
+        )}
+      </HubTabs>
     </div>
   );
 }

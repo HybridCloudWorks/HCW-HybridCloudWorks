@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Helmet } from 'react-helmet-async';
 import { Link } from 'react-router';
-import { getProviderPath } from '@/lib/routeFactory';
+import { getProviderPath, routes } from '@/lib/routeFactory';
+import ProviderLabsSection from '@/components/labs/ProviderLabsSection';
+import { labsForProvider } from '@/data/labs/catalogue';
 import {
   DATA_AS_OF,
   LEVEL_META,
@@ -323,16 +325,38 @@ const resources = [
     icon: 'account_tree',
     url: 'https://learn.microsoft.com/en-us/azure/architecture/',
   },
+  // The site's own labs under this hub (ADR 0033 §8), in place of the
+  // Microsoft Learn labs link this entry carried until 2026-10-03: a lab here
+  // opens with the tools installed and needs no subscription.
   {
     id: 'labs',
-    title: 'Technical Labs',
+    title: 'Browser labs',
     description:
-      'Hands-on Microsoft Learn labs for building, configuring, and validating technical skills.',
-    count: '50+',
+      'Hands-on Azure exercises on this site: validate a Landing Zone Builder download with terraform and az already installed, step by step, in your browser.',
+    count: `${labsForProvider('azure').length} ${labsForProvider('azure').length === 1 ? 'lab' : 'labs'}`,
     icon: 'science',
-    url: 'https://learn.microsoft.com/en-us/labs/',
+    to: routes.labs('azure'),
   },
 ];
+
+/**
+ * A resource card is an in-site link when the entry carries `to`, and an
+ * external one opening in a new tab when it carries `url`.
+ */
+function ResourceLink({ resource, className, children }) {
+  if (resource.to) {
+    return (
+      <Link to={resource.to} className={className}>
+        {children}
+      </Link>
+    );
+  }
+  return (
+    <a href={resource.url} target="_blank" rel="noopener noreferrer" className={className}>
+      {children}
+    </a>
+  );
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -1689,11 +1713,9 @@ export default function AzureEducationPage() {
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {resources.map((resource) => (
-              <a
+              <ResourceLink
                 key={resource.id}
-                href={resource.url}
-                target="_blank"
-                rel="noopener noreferrer"
+                resource={resource}
                 className={`group backdrop-blur-md rounded-2xl p-6 transition-all duration-300 flex flex-col ${
                   resource.highlight
                     ? 'bg-linear-to-br from-primary/20 to-blue-900/20 border border-primary/40 hover:shadow-[0_0_30px_rgba(0,120,212,0.25)] hover:border-primary/70'
@@ -1722,16 +1744,18 @@ export default function AzureEducationPage() {
                 <div className="flex items-center justify-between pt-4 border-t border-slate-700">
                   <span className="text-sm font-bold text-primary">{resource.count}</span>
                   <span className="flex items-center gap-1.5 text-foreground text-sm font-semibold group-hover:text-primary transition-colors">
-                    Explore
+                    {resource.to ? 'Open' : 'Explore'}
                     <span className="material-symbols-outlined text-[14px]" aria-hidden="true">
-                      open_in_new
+                      {resource.to ? 'arrow_forward' : 'open_in_new'}
                     </span>
                   </span>
                 </div>
-              </a>
+              </ResourceLink>
             ))}
           </div>
         </section>
+
+        <ProviderLabsSection provider="azure" className="mt-16" />
       </main>
     </>
   );

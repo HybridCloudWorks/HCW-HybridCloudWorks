@@ -37,20 +37,26 @@ import {
   MAX_TAGS,
   MAX_TITLE_CHARS,
   isCalendarDate,
-} from './repo-draft.js';
-import { MAX_DRAFT_BYTES } from './repo-draft-source.js';
+} from "./repo-draft.js";
+import { MAX_DRAFT_BYTES } from "./repo-draft-source.js";
 import {
   assertStringArray,
   assertStringLength,
   isPlainObject,
-} from './content-update-validation.js';
-import { getPrimaryContentBody } from './content-quality.js';
-import { DRAFTS_STAGE_STATUS } from './content-status.js';
-import { DRAFT_ORIGINS, allowedActions, stageOf, statusOf } from './drafts-stage.js';
+} from "./content-update-validation.js";
+import { getPrimaryContentBody } from "./content-quality.js";
+import { DRAFTS_STAGE_STATUS } from "./content-status.js";
+import {
+  DRAFT_ORIGINS,
+  allowedActions,
+  stageOf,
+  statusOf,
+} from "./drafts-stage.js";
+import { resolveIdeaOrigin, resolveKind } from "./taxonomy.js";
 
 // The stage half lives in ./drafts-stage.js; re-exported so callers import
 // the Drafts stage from one place.
-export * from './drafts-stage.js';
+export * from "./drafts-stage.js";
 
 /**
  * The body cap. The same number the repository import caps a fetched file at
@@ -64,18 +70,42 @@ export const MAX_READING_MINUTES = 999;
 
 /**
  * The editor's fields — the seven front-matter keys docs/content/blog-template.md
- * names, plus the body. A save carries these and nothing else.
+ * names, the body, and the two taxonomy fields (ADR 0033 §4: what the draft
+ * will become, how it became an idea). A save carries these and nothing else.
  */
 export const DRAFT_FIELDS = Object.freeze([
-  'title',
-  'subtitle',
-  'date',
-  'track',
-  'part',
-  'tags',
-  'reading',
-  'body',
+  "title",
+  "subtitle",
+  "date",
+  "track",
+  "part",
+  "tags",
+  "reading",
+  "body",
+  "kind",
+  "ideaOrigin",
 ]);
+
+/** What a draft written on the page is until the owner says otherwise. */
+export const DRAFT_TAXONOMY_DEFAULTS = Object.freeze({
+  kind: "article",
+  ideaOrigin: "manual",
+});
+
+/** The id shape taxonomy.js stores; membership is the handler's check (it has the store). */
+const TAXONOMY_ID_PATTERN = /^[a-z0-9][a-z0-9-]{1,39}$/;
+
+function readTaxonomyId(value, name) {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value !== "string") fail(`${name} must be a string`);
+  const id = value.trim().toLowerCase();
+  if (!TAXONOMY_ID_PATTERN.test(id)) {
+    fail(
+      `${name} must be a taxonomy id (2-40 lower-case letters, digits or hyphens)`,
+    );
+  }
+  return id;
+}
 
 /** Thrown for input the owner can correct; the handler answers 400 with the message. */
 export class DraftInputError extends Error {}
@@ -85,11 +115,14 @@ const fail = (message) => {
 };
 
 function readTags(value) {
-  if (value === undefined || value === null || value === '') return [];
-  const list = typeof value === 'string' ? value.split(',') : value;
+  if (value === undefined || value === null || value === "") return [];
+  const list = typeof value === "string" ? value.split(",") : value;
   let tags;
   try {
-    tags = assertStringArray(list, 'tags', { maxItems: MAX_TAGS, maxItemLength: MAX_TAG_CHARS });
+    tags = assertStringArray(list, "tags", {
+      maxItems: MAX_TAGS,
+      maxItemLength: MAX_TAG_CHARS,
+    });
   } catch (error) {
     fail(error.message);
   }
@@ -97,27 +130,34 @@ function readTags(value) {
 }
 
 function readReading(value) {
-  if (value === undefined || value === null || value === '') return null;
-  const minutes = typeof value === 'number' ? value : Number(String(value).trim());
-  if (!Number.isInteger(minutes) || minutes < 1 || minutes > MAX_READING_MINUTES) {
+  if (value === undefined || value === null || value === "") return null;
+  const minutes =
+    typeof value === "number" ? value : Number(String(value).trim());
+  if (
+    !Number.isInteger(minutes) ||
+    minutes < 1 ||
+    minutes > MAX_READING_MINUTES
+  ) {
     fail(`reading must be a whole number of minutes, 1-${MAX_READING_MINUTES}`);
   }
   return minutes;
 }
 
 function readDate(value) {
-  const date = String(value ?? '').trim();
+  const date = String(value ?? "").trim();
   if (!date) return null;
-  if (!isCalendarDate(date)) fail('date must be a calendar date, YYYY-MM-DD');
+  if (!isCalendarDate(date)) fail("date must be a calendar date, YYYY-MM-DD");
   return date;
 }
 
 function readText(value, name, max, { required = false } = {}) {
-  if (value !== undefined && value !== null && typeof value !== 'string') {
+  if (value !== undefined && value !== null && typeof value !== "string") {
     fail(`${name} must be a string`);
   }
   try {
-    return assertStringLength(value, name, max, { allowEmpty: !required }).trim();
+    return assertStringLength(value, name, max, {
+      allowEmpty: !required,
+    }).trim();
   } catch (error) {
     return fail(error.message);
   }
@@ -132,28 +172,33 @@ function readText(value, name, max, { required = false } = {}) {
  *
  * @param {unknown} input
  * @returns {{ title: string, subtitle: string, date: string|null, track: string|null,
- *   part: string|null, tags: string[], reading: number|null, body: string }}
+ *   part: string|null, tags: string[], reading: number|null, body: string,
+ *   kind: string|null, ideaOrigin: string|null }}
  */
 export function validateDraftFields(input) {
-  if (!isPlainObject(input)) fail('A JSON object of draft fields is required.');
-  const unknown = Object.keys(input).filter((key) => !DRAFT_FIELDS.includes(key));
-  if (unknown.length) fail(`Not a draft field: ${unknown.join(', ')}`);
+  if (!isPlainObject(input)) fail("A JSON object of draft fields is required.");
+  const unknown = Object.keys(input).filter(
+    (key) => !DRAFT_FIELDS.includes(key),
+  );
+  if (unknown.length) fail(`Not a draft field: ${unknown.join(", ")}`);
 
-  const body = input.body ?? '';
-  if (typeof body !== 'string') fail('body must be a string');
-  const bytes = Buffer.byteLength(body, 'utf8');
+  const body = input.body ?? "";
+  if (typeof body !== "string") fail("body must be a string");
+  const bytes = Buffer.byteLength(body, "utf8");
   if (bytes > MAX_DRAFT_BODY_BYTES) {
     fail(`The body is ${bytes} bytes; at most ${MAX_DRAFT_BODY_BYTES}.`);
   }
   return {
-    title: readText(input.title, 'title', MAX_TITLE_CHARS, { required: true }),
-    subtitle: readText(input.subtitle, 'subtitle', MAX_SUBTITLE_CHARS),
+    title: readText(input.title, "title", MAX_TITLE_CHARS, { required: true }),
+    subtitle: readText(input.subtitle, "subtitle", MAX_SUBTITLE_CHARS),
     date: readDate(input.date),
-    track: readText(input.track, 'track', MAX_TRACK_CHARS) || null,
-    part: readText(input.part, 'part', MAX_PART_CHARS) || null,
+    track: readText(input.track, "track", MAX_TRACK_CHARS) || null,
+    part: readText(input.part, "part", MAX_PART_CHARS) || null,
     tags: readTags(input.tags),
     reading: readReading(input.reading),
     body,
+    kind: readTaxonomyId(input.kind, "kind"),
+    ideaOrigin: readTaxonomyId(input.ideaOrigin, "ideaOrigin"),
   };
 }
 
@@ -171,6 +216,10 @@ function documentFields(fields) {
     // `undefined` deletes on a patch (patchDoc's convention) and is dropped
     // from a create: no reading time stated, none stored.
     readTime: fields.reading ? `${fields.reading} min` : undefined,
+    // The taxonomy fields only when the save names them: an older page that
+    // sends neither leaves the stored classification alone.
+    ...(fields.kind && { kind: fields.kind }),
+    ...(fields.ideaOrigin && { ideaOrigin: fields.ideaOrigin }),
     frontMatter: {
       title: fields.title,
       subtitle: fields.subtitle,
@@ -190,7 +239,7 @@ function documentFields(fields) {
 export const DRAFT_INVARIANTS = Object.freeze({
   contentStatus: DRAFTS_STAGE_STATUS,
   Live: false,
-  Status: 'Draft',
+  Status: "Draft",
   approvedForBlog: false,
   approvedForNews: false,
   // The change-feed inspector would rewrite a hand-written article with a
@@ -206,24 +255,31 @@ export const DRAFT_INVARIANTS = Object.freeze({
  * to In Review), no provider (inferred from the tags at Send to In Review, set
  * on the review board otherwise).
  */
-export function buildNewDraftDocument({ id, fields, editor, now = () => new Date() }) {
+export function buildNewDraftDocument({
+  id,
+  fields,
+  editor,
+  now = () => new Date(),
+}) {
   const stamp = now().toISOString();
   const { readTime, ...rest } = documentFields(fields);
   return {
     id,
-    type: 'blog',
-    publishTarget: 'blog',
+    type: "blog",
+    publishTarget: "blog",
     ...rest,
     ...(readTime && { readTime }),
     keyTopics: fields.tags,
-    Author: 'Hybrid Cloud Works',
-    source: 'drafts',
-    sourceTrustLevel: 'manual',
+    Author: "Hybrid Cloud Works",
+    source: "drafts",
+    sourceTrustLevel: "manual",
     trustedSource: true,
+    kind: fields.kind || DRAFT_TAXONOMY_DEFAULTS.kind,
+    ideaOrigin: fields.ideaOrigin || DRAFT_TAXONOMY_DEFAULTS.ideaOrigin,
     draftOrigin: DRAFT_ORIGINS.site,
-    storageCollection: 'content',
+    storageCollection: "content",
     createdBy: editor,
-    'Created At': stamp,
+    "Created At": stamp,
     updatedAt: stamp,
     updatedBy: editor,
     ...DRAFT_INVARIANTS,
@@ -235,15 +291,21 @@ export function buildNewDraftDocument({ id, fields, editor, now = () => new Date
  * (the existing import's shape, provenance and all) with the Drafts stage's
  * status and stamping in place of in_review's.
  */
-export function asImportedDraft(repoData, { id, editor, now = () => new Date() }) {
+export function asImportedDraft(
+  repoData,
+  { id, editor, now = () => new Date() },
+) {
   const stamp = now().toISOString();
   return {
     ...repoData,
     id,
+    // A repository article is a hand-written article (ADR 0033 §4).
+    kind: DRAFT_TAXONOMY_DEFAULTS.kind,
+    ideaOrigin: DRAFT_TAXONOMY_DEFAULTS.ideaOrigin,
     draftOrigin: DRAFT_ORIGINS.repo,
-    storageCollection: 'content',
+    storageCollection: "content",
     createdBy: editor,
-    'Created At': stamp,
+    "Created At": stamp,
     updatedAt: stamp,
     updatedBy: editor,
     ...DRAFT_INVARIANTS,
@@ -256,11 +318,14 @@ export function asImportedDraft(repoData, { id, editor, now = () => new Date() }
  * (content-status.js), so a stale one left here would be the text the editor
  * opens after approval (repo-draft.js made the same choice for re-imports).
  */
-export function buildDraftUpdate(fields, { current = {}, editor, now = () => new Date() }) {
+export function buildDraftUpdate(
+  fields,
+  { current = {}, editor, now = () => new Date() },
+) {
   const stamp = now().toISOString();
   return {
     ...documentFields(fields),
-    ...(typeof current.blogDraft === 'string' && { blogDraft: fields.body }),
+    ...(typeof current.blogDraft === "string" && { blogDraft: fields.body }),
     updatedAt: stamp,
     updatedBy: editor,
   };
@@ -269,24 +334,28 @@ export function buildDraftUpdate(fields, { current = {}, editor, now = () => new
 // ── what the page receives ─────────────────────────────────────────────────
 
 function readingOf(doc) {
-  const fromReadTime = /^(\d{1,3})\b/.exec(String(doc.readTime || ''))?.[1];
+  const fromReadTime = /^(\d{1,3})\b/.exec(String(doc.readTime || ""))?.[1];
   if (fromReadTime) return Number(fromReadTime);
   const fromFrontMatter = Number(doc.frontMatter?.reading);
-  return Number.isInteger(fromFrontMatter) && fromFrontMatter > 0 ? fromFrontMatter : null;
+  return Number.isInteger(fromFrontMatter) && fromFrontMatter > 0
+    ? fromFrontMatter
+    : null;
 }
 
 /** One row of the list. No body: the list is read on every visit. */
 export function toDraftSummary(doc = {}) {
   return {
     id: doc.id,
-    title: String(doc.Title || doc.title || '').trim() || 'Untitled draft',
-    subtitle: String(doc.Summary ?? doc.summary ?? ''),
+    title: String(doc.Title || doc.title || "").trim() || "Untitled draft",
+    subtitle: String(doc.Summary ?? doc.summary ?? ""),
     contentStatus: statusOf(doc),
     stage: stageOf(doc),
     live: doc.Live === true,
     origin: doc.draftOrigin || (doc.repoPath ? DRAFT_ORIGINS.repo : null),
+    kind: resolveKind(doc),
+    ideaOrigin: resolveIdeaOrigin(doc),
     repoPath: doc.repoPath || null,
-    updatedAt: doc.updatedAt || doc['Created At'] || null,
+    updatedAt: doc.updatedAt || doc["Created At"] || null,
     etag: doc._etag || null,
     actions: allowedActions(doc),
   };
@@ -295,18 +364,24 @@ export function toDraftSummary(doc = {}) {
 /** The open draft: the summary plus the eight editor fields. */
 export function toDraftView(doc = {}) {
   const front = doc.frontMatter || {};
-  const tags = Array.isArray(doc.Tags) ? doc.Tags : Array.isArray(front.tags) ? front.tags : [];
+  const tags = Array.isArray(doc.Tags)
+    ? doc.Tags
+    : Array.isArray(front.tags)
+      ? front.tags
+      : [];
   return {
     ...toDraftSummary(doc),
     fields: {
-      title: String(doc.Title || doc.title || ''),
-      subtitle: String(doc.Summary ?? doc.summary ?? ''),
+      title: String(doc.Title || doc.title || ""),
+      subtitle: String(doc.Summary ?? doc.summary ?? ""),
       date: front.date || null,
       track: front.track || null,
       part: front.part || null,
       tags: tags.map(String),
       reading: readingOf(doc),
       body: getPrimaryContentBody(doc),
+      kind: resolveKind(doc),
+      ideaOrigin: resolveIdeaOrigin(doc),
     },
   };
 }

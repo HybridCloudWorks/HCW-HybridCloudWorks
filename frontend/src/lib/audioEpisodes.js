@@ -219,6 +219,89 @@ export function mergeAudioEpisodes({ host = [], listenAndLearn = [] } = {}) {
   ];
 }
 
+// ── playback position (ADR 0033 §4) ─────────────────────────────────────────
+//
+// Where a listener left off in a chapter, remembered per chapter in this
+// browser only. A convenience, never a requirement: every read and write is
+// wrapped so a private window, blocked storage or a pre-render context
+// behaves exactly as if nothing had been remembered.
+
+const POSITION_PREFIX = 'hcw:audio-position:';
+
+/** How close to the end still counts as "finished", so it restarts from 0. */
+const FINISHED_WITHIN_SECONDS = 5;
+
+/** The storage key for one episode: its list id, which is unique across sources. */
+export function playbackPositionKey(episodeId) {
+  const id = String(episodeId || '').trim();
+  return id ? `${POSITION_PREFIX}${id}` : '';
+}
+
+/**
+ * The remembered position in seconds, or 0 when none, when it was finished,
+ * or when storage cannot be read.
+ *
+ * @param {string} episodeId
+ * @param {Storage} [storage]
+ */
+export function readPlaybackPosition(episodeId, storage) {
+  const key = playbackPositionKey(episodeId);
+  if (!key) return 0;
+  try {
+    const store = storage || globalThis.localStorage;
+    const raw = store?.getItem(key);
+    if (!raw) return 0;
+    const parsed = JSON.parse(raw);
+    const seconds = Number(parsed?.t);
+    const duration = Number(parsed?.d);
+    if (!Number.isFinite(seconds) || seconds <= 0) return 0;
+    if (
+      Number.isFinite(duration) &&
+      duration > 0 &&
+      duration - seconds <= FINISHED_WITHIN_SECONDS
+    ) {
+      return 0;
+    }
+    return seconds;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Remember a position. A position at or near the end clears the entry so the
+ * next visit starts from the top. Never throws.
+ *
+ * @param {string} episodeId
+ * @param {number} seconds
+ * @param {number|null} [duration]
+ * @param {Storage} [storage]
+ */
+export function savePlaybackPosition(episodeId, seconds, duration = null, storage) {
+  const key = playbackPositionKey(episodeId);
+  if (!key) return;
+  try {
+    const store = storage || globalThis.localStorage;
+    if (!store) return;
+    const t = Number(seconds);
+    const d = Number(duration);
+    const finished = Number.isFinite(d) && d > 0 && d - t <= FINISHED_WITHIN_SECONDS;
+    if (!Number.isFinite(t) || t <= 0 || finished) {
+      store.removeItem(key);
+      return;
+    }
+    store.setItem(
+      key,
+      JSON.stringify({
+        t: Math.floor(t),
+        ...(Number.isFinite(d) && d > 0 ? { d: Math.floor(d) } : {}),
+      })
+    );
+  } catch {
+    // remembering is a convenience, never a requirement
+  }
+}
+
 /** `9:00` / `1:02:03` for a player's time labels; `—` when unknown. */
 export function formatSeconds(seconds) {
   if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return '—';

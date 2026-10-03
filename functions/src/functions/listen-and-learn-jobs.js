@@ -27,18 +27,38 @@ import {
 import { readDoc, upsertDoc, patchDoc } from '../lib/cosmos-client.js';
 import { uploadBlob } from '../lib/blob-storage.js';
 import { generateJsonResponse, getActiveAiProvider, getCostEstimate } from '../lib/ai/router.js';
+import { recordAiUsageBatch, totalCostUsd, USAGE_SOURCES } from '../lib/ai/usage.js';
 import { registerJobType } from '../lib/jobs.js';
-import { generateEpisodes, isSupportedPlatform, SUPPORTED_PLATFORMS } from '../lib/listen-and-learn/generate.js';
+import {
+  generateEpisodes,
+  isSupportedPlatform,
+  renderAudio,
+  SUPPORTED_PLATFORMS,
+} from '../lib/listen-and-learn/generate.js';
+import { SPEAK_CHAPTER_JOB_TYPE } from '../lib/listen-and-learn/handlers.js';
+import {
+  EPISODE_CONTAINER,
+  EPISODE_KIND,
+  SET_CONTAINER,
+  STATUS,
+  mergeRegeneration,
+  saveEpisodeFailure,
+  setId,
+  uploadEpisodeAudio,
+} from '../lib/listen-and-learn/publish.js';
 import { MAX_SCRIPT_BYTES } from '../lib/listen-and-learn/script.js';
 import {
   estimateSpeechCostUsd,
   resolveSpeechProvider,
+  synthesizeDialogue,
 } from '../lib/listen-and-learn/speech/index.js';
 import {
+  NARRATOR_SPEAKER,
   listenAndLearnModelOptions,
   parseTtsModel,
   readStoredListenAndLearnModel,
   resolveListenAndLearnModel,
+  voiceSettingsOf,
 } from '../lib/listen-and-learn/speech-settings.js';
 
 /** Every synthesis and estimate here is for this product, never the podcast's. */
@@ -129,7 +149,8 @@ export function speechEstimateForRun(payload, env = process.env) {
     ...(unknownStored ? { modelNote: STORED_MODEL_NOTE } : {}),
     episodes,
     perEpisodeUsd,
-    estimatedCostUsd: typeof perEpisodeUsd === 'number' ? roundUpUsd(perEpisodeUsd * episodes) : null,
+    estimatedCostUsd:
+      typeof perEpisodeUsd === 'number' ? roundUpUsd(perEpisodeUsd * episodes) : null,
   };
 }
 
@@ -283,6 +304,162 @@ export async function runListenAndLearnGeneration(payload, { context, job } = {}
 
   return report;
 }
+
+/**
+ * Validate a speak-chapter payload (ADR 0033 §4): the set, the chapter id
+ * and an optional model. `{ value }` or `{ error }`, like the guide payload.
+ */
+export function parseSpeakChapterPayload(payload) {
+  const model = parseTtsModel(payload?.ttsModel);
+  if (model.error) return { error: model.error };
+  const platform = String(payload?.platform || '')
+    .trim()
+    .toLowerCase();
+  const examCode = String(payload?.examCode || '').trim();
+  const chapterId = String(payload?.chapterId || '').trim();
+  if (!/^[a-z][a-z0-9-]{1,30}$/.test(platform)) return { error: 'platform is required' };
+  if (!examCode) return { error: 'examCode is required' };
+  if (!/^[a-z0-9][a-z0-9_-]{0,120}$/.test(chapterId)) return { error: 'chapterId is required' };
+  return { value: { platform, examCode, chapterId, ttsModel: model.value } };
+}
+
+/**
+ * Speak one hand-made chapter's text as a new audio version (ADR 0033 §4).
+ *
+ * One narrator, the book's voice settings, the text chunked by the provider.
+ * On success the take is appended to `versions[]` and made active, the
+ * top-level audio fields mirror it, and the chapter's status is KEPT — a
+ * published chapter stays published in its new voice. On a synthesis
+ * failure the chapter keeps its current take and status and records
+ * `lastError`, so the card can offer Retry and Keep current; a chapter that
+ * had no take is marked failed. A missing speech provider is the
+ * transcript-only state, not a failure: `audioError` says which setting is
+ * missing and nothing else changes.
+ */
+export async function runSpeakChapter(payload, { context, job } = {}) {
+  const parsed = parseSpeakChapterPayload(payload);
+  if (parsed.error) throw new Error(parsed.error);
+  const { platform, examCode, chapterId } = parsed.value;
+
+  const store = { readDoc, upsertDoc, patchDoc };
+  const id = setId(platform, examCode);
+  const [set, chapter] = await Promise.all([
+    readDoc(SET_CONTAINER, id, id),
+    readDoc(EPISODE_CONTAINER, chapterId, id),
+  ]);
+  if (!chapter || chapter.softDeletedAt) throw new Error(`No chapter ${chapterId} in ${id}`);
+  const text = typeof chapter.sourceText === 'string' ? chapter.sourceText.trim() : '';
+  if (!text) throw new Error(`Chapter ${chapterId} has no text to speak`);
+
+  const now = new Date().toISOString();
+  const actorId = job?.requestedBy?.oid || null;
+  const ttsModel = await resolveRunModel(parsed.value.ttsModel, store);
+  const voice = voiceSettingsOf(set);
+
+  let audio;
+  try {
+    audio = await renderAudio({
+      script: { dialogue: [{ speaker: NARRATOR_SPEAKER, text }] },
+      platform,
+      examCode,
+      areaSlug: chapterId,
+      storage: { uploadBlob },
+      env: process.env,
+      model: ttsModel,
+      voice,
+      narrator: true,
+      now,
+      synthesize: synthesizeDialogue,
+      uploadAudio: uploadEpisodeAudio,
+    });
+  } catch (err) {
+    await saveEpisodeFailure(store, {
+      provider: platform,
+      examCode,
+      area: { slug: chapterId, name: chapter.title || chapter.areaName || chapterId },
+      error: err.message,
+      order: chapter.order,
+      now,
+      kind: EPISODE_KIND.manual,
+    });
+    throw err;
+  }
+
+  if (audio.error) {
+    // No provider: nothing to version. Say why on the chapter and stop.
+    await patchDoc(
+      EPISODE_CONTAINER,
+      chapterId,
+      { audioError: audio.error, updatedAt: now },
+      {
+        partitionKey: id,
+      }
+    );
+    context?.log?.(`speak-listen-and-learn-chapter: ${id}/${chapterId} — no speech provider`);
+    return {
+      chapterId,
+      status: chapter.status,
+      generated: 1,
+      failed: 0,
+      withoutAudio: 1,
+      costUsd: 0,
+    };
+  }
+
+  const usage = await recordAiUsageBatch({ store, ai: { getCostEstimate } }, [
+    {
+      provider: audio.speechProvider,
+      model: audio.speechModel,
+      promptTokens: audio.promptTokens,
+      completionTokens: audio.completionTokens,
+      estimatedTokens: audio.estimatedTokens,
+      source: USAGE_SOURCES.listenAndLearnAudio,
+    },
+  ]);
+  const costUsd = totalCostUsd(usage);
+
+  const fresh = {
+    ...chapter,
+    kind: EPISODE_KIND.manual,
+    audioUrl: audio.url,
+    audioPath: audio.path,
+    audioBytes: audio.bytes,
+    durationSeconds: audio.durationSeconds ?? null,
+    speechProvider: audio.speechProvider,
+    speechModel: audio.speechModel,
+    voice: audio.voice,
+    audioError: null,
+    generatedAt: now,
+  };
+  const merged = mergeRegeneration(chapter, fresh, { now, actorId, costUsd });
+  await upsertDoc(EPISODE_CONTAINER, merged);
+
+  context?.log?.(
+    `speak-listen-and-learn-chapter: ${id}/${chapterId} — ${audio.bytes} bytes, $${costUsd} spent (${audio.speechProvider} ${audio.speechModel || ''})`
+  );
+  return {
+    chapterId,
+    status: merged.status === STATUS.archived ? STATUS.archived : merged.status,
+    audioBytes: audio.bytes,
+    durationSeconds: audio.durationSeconds ?? null,
+    generated: 1,
+    failed: 0,
+    withoutAudio: 0,
+    costUsd,
+  };
+}
+
+registerJobType(SPEAK_CHAPTER_JOB_TYPE, {
+  // Speaks and stores a take; publishing it is a separate action.
+  role: 'editor',
+  description:
+    'Read one hand-made Audio Library chapter aloud from its stored text and save the take as a new version.',
+  maxPayloadBytes: 1024,
+  // A 60,000-character chapter is about fourteen Gemini requests at a few
+  // seconds each, plus one upload.
+  timeoutMs: 10 * 60 * 1000,
+  worker: runSpeakChapter,
+});
 
 registerJobType('generate-listen-and-learn', {
   // Generates and stores an episode; publishing it is a separate action.

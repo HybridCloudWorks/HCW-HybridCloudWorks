@@ -100,6 +100,19 @@ describe('applyBuilderSnapshot', () => {
     expect(s.setDraftReady).toHaveBeenCalledWith(true);
   });
 
+  it('restores the kind and idea origin, defaulting an older snapshot (ADR 0033 §4)', () => {
+    const s = { ...setters(), setTaxonomy: vi.fn() };
+    applyBuilderSnapshot({ kind: 'tutorial', ideaOrigin: 'conference' }, s);
+    expect(s.setTaxonomy).toHaveBeenCalledWith({ kind: 'tutorial', ideaOrigin: 'conference' });
+
+    const older = { ...setters(), setTaxonomy: vi.fn() };
+    applyBuilderSnapshot({}, older);
+    expect(older.setTaxonomy).toHaveBeenCalledWith({
+      kind: 'article',
+      ideaOrigin: 'imported-source',
+    });
+  });
+
   it('coerces a non-array list back to an array', () => {
     // JSON.parse will hand back whatever was stored, including the wrong type.
     const s = setters();

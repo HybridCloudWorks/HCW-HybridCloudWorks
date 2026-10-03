@@ -1,6 +1,7 @@
 import { ArrowLeft, Save, Loader2, CheckCircle, AlertTriangle, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import StatusBadge from '@/components/admin/shared/StatusBadge';
 import { useEditor } from '../context/EditorContext';
 
 function formatLastSaved(date) {
@@ -48,9 +49,6 @@ export function SaveBar({ navigate }) {
     isLiveOrPublished,
     currentTarget,
   } = useEditor();
-
-  const status = blog?.contentStatus || '';
-  const statusLabel = status.replace(/_/g, ' ') || 'unknown';
 
   return (
     <div className="flex flex-col border-b border-border bg-background z-10">
@@ -100,9 +98,7 @@ export function SaveBar({ navigate }) {
         </Button>
 
         <div className="flex items-center gap-2">
-          <Badge variant="outline" className="capitalize text-xs">
-            {statusLabel}
-          </Badge>
+          {blog && <StatusBadge content={blog} />}
           {currentTarget && (
             <Badge variant="secondary" className="capitalize text-xs">
               {currentTarget}

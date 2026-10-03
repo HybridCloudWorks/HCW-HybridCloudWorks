@@ -80,3 +80,49 @@ httpRoute('rejectNewsletter', {
   route: 'cms/newsletters/{id}/reject',
   handler: (request, context) => admin().reject(request, context),
 });
+
+// ADR 0033 Amplify slice: managing an approved issue from the hub.
+httpRoute('cancelNewsletter', {
+  methods: ['POST'],
+  authLevel: 'anonymous',
+  route: 'cms/newsletters/{id}/cancel',
+  handler: (request, context) => admin().cancel(request, context),
+});
+
+httpRoute('rescheduleNewsletter', {
+  methods: ['POST'],
+  authLevel: 'anonymous',
+  route: 'cms/newsletters/{id}/reschedule',
+  handler: (request, context) => admin().reschedule(request, context),
+});
+
+httpRoute('retryNewsletter', {
+  methods: ['POST'],
+  authLevel: 'anonymous',
+  route: 'cms/newsletters/{id}/retry',
+  handler: (request, context) => admin().retry(request, context),
+});
+
+httpRoute('duplicateNewsletter', {
+  methods: ['POST'],
+  authLevel: 'anonymous',
+  route: 'cms/newsletters/{id}/duplicate',
+  handler: (request, context) => admin().duplicate(request, context),
+});
+
+// Not under cms/newsletters/{id}: a literal segment there would be read as an id.
+httpRoute('reconcileNewsletters', {
+  methods: ['POST'],
+  authLevel: 'anonymous',
+  route: 'cms/newsletter-reconcile',
+  handler: (request, context) => admin().reconcile(request, context),
+});
+
+httpRouteByMethod('newsletterSender', {
+  authLevel: 'anonymous',
+  route: 'cms/newsletter-sender',
+  handlers: {
+    GET: (request, context) => admin().getSender(request, context),
+    PUT: (request, context) => admin().putSender(request, context),
+  },
+});

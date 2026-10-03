@@ -70,12 +70,16 @@ locals {
   cpu_period = 100000
   cpu_quota  = 100000
 
-  # The lab catalogue (frontend/src/data/labs/catalogue.js in #681) keys on
-  # these ids, and the site's deep link is
-  # /templates/hcw-lab/workspace?mode=auto&param.lab=<id>. `source` is the
-  # path in this repository the startup script checks out sparsely into the
-  # lab folder; empty means the folder starts empty with a README that says
-  # what to put in it.
+  # The lab catalogue (frontend/src/data/labs/catalogue.js, #681; providers,
+  # objectives and steps since ADR 0033) keys on these ids. The site's pane
+  # for a lab (/<provider>/education/labs/<id>, or /education/labs/<id> from
+  # the index) loads the lab launcher with ?lab=<id>, which creates the
+  # workspace from this template with param.lab=<id>. Adding a lab is one
+  # row in the catalogue, one entry here (map, option and regex) and one in
+  # the launcher's LAB_WORKSPACES; the catalogue's test holds all three to
+  # the same ids. `source` is the path in this repository the startup script
+  # checks out sparsely into the lab folder; empty means the folder starts
+  # empty with a README that says what to put in it.
   labs = {
     "landing-zone-builder-output" = {
       title  = "Landing Zone Builder output"
@@ -125,7 +129,7 @@ data "coder_workspace_owner" "me" {}
 data "coder_parameter" "lab" {
   name         = "lab"
   display_name = "Lab"
-  description  = "Which lab folder to open in VS Code. Set by the Open in Coder link on hybridcloudworks.com/education/labs."
+  description  = "Which lab folder to open in VS Code. Set by the lab's page on hybridcloudworks.com (a provider's Learn section, /<provider>/education/labs/<id>, or /education/labs/<id>)."
   type         = "string"
   form_type    = "dropdown"
   mutable      = false

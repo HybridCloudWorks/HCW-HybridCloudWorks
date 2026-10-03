@@ -10,6 +10,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import {
+  cacheControlFor,
   createPublicMediaHandlers,
   ifNoneMatchMatches,
   parseRangeHeader,
@@ -131,6 +132,35 @@ describe('path validation', () => {
 });
 
 describe('caching', () => {
+  it('serves an unstamped Listen & Learn path with a short revalidating cache (ADR 0033 §4)', async () => {
+    // Pre-library episode audio lives at `{provider}/{exam}/{slug}.mp3` and a
+    // regeneration rewrote that path; a year-long immutable header kept the
+    // old take playing. A stamped path never changes content and stays
+    // immutable.
+    expect(cacheControlFor('listenandlearn', 'azure/az-104/area-1.mp3')).toBe(
+      'public, max-age=300'
+    );
+    expect(cacheControlFor('listenandlearn', 'azure/az-104/area-1-20261003140509.mp3')).toContain(
+      'immutable'
+    );
+    expect(cacheControlFor('covers', 'post-1/cover.png')).toContain('immutable');
+
+    const unstamped = await createPublicMediaHandlers({ storage: okStorage() }).getMedia(
+      makeRequest({ container: 'listenandlearn', blobPath: 'azure/az-104/area-1.mp3' }),
+      context
+    );
+    expect(unstamped.headers['Cache-Control']).toBe('public, max-age=300');
+    const stamped = await createPublicMediaHandlers({ storage: okStorage() }).getMedia(
+      makeRequest({
+        container: 'listenandlearn',
+        blobPath: 'azure/az-104/area-1-20261003140509.mp3',
+      }),
+      context
+    );
+    expect(stamped.headers['Cache-Control']).toContain('immutable');
+    expect(stamped.headers['Cache-Control']).toContain('max-age=31536000');
+  });
+
   it('marks responses immutable so repeat views never reach the function', async () => {
     const res = await createPublicMediaHandlers({ storage: okStorage() }).getMedia(
       makeRequest(),
@@ -409,9 +439,11 @@ describe('byte ranges (#349)', () => {
     expect(storage.readBlobRangeForDelivery).not.toHaveBeenCalled();
   });
 
-  it('keeps the immutable cache headers and the ETag on a 206', async () => {
+  it('keeps the cache header and the ETag on a 206', async () => {
+    // An UNSTAMPED Listen & Learn path, so the short revalidating header
+    // (ADR 0033 §4), not the immutable one — see the caching describe.
     const res = await get(rangeStorage(), { range: 'bytes=0-3' });
-    expect(res.headers['Cache-Control']).toContain('immutable');
+    expect(res.headers['Cache-Control']).toBe('public, max-age=300');
     expect(res.headers.ETag).toBe(ETAG);
     expect(res.headers['X-Content-Type-Options']).toBe('nosniff');
   });
@@ -542,7 +574,7 @@ describe('byte ranges (#349)', () => {
       expect(res.headers['Accept-Ranges']).toBe('bytes');
       expect(res.headers['Content-Type']).toBe('audio/mpeg');
       expect(res.headers.ETag).toBe(ETAG);
-      expect(res.headers['Cache-Control']).toContain('immutable');
+      expect(res.headers['Cache-Control']).toBe('public, max-age=300');
       expect(storage.readBlobForDelivery).not.toHaveBeenCalled();
       expect(storage.readBlobRangeForDelivery).not.toHaveBeenCalled();
     });

@@ -10,8 +10,9 @@
  *
  *   Overview  every service on one grid, broken and not-configured first, with
  *             Test all (one service at a time) and when each was last tested
- *   Services  one group at a time; each card has its test, its docs link and
- *             the names and lights of the keys it uses
+ *   Services  one group at a time; each card has its test, its docs link,
+ *             what it is for and where it is used, and the names and lights
+ *             of the keys it uses
  *   Keys      every Key Vault credential: its light, the services that use
  *             it, paste and generate, and "Other credentials"
  *   Identity  the Entra configuration the browser and the API run on
@@ -21,8 +22,10 @@
  * `/admin/api-keys` redirect to Overview and Keys (tabs.js).
  *
  * Each tab loads its own data, with its own loading and error states, so one
- * refused request never blanks another tab or the tab bar. Only the session's
- * test results live here, on the page, so they survive switching tabs.
+ * refused request never blanks another tab or the tab bar. The session's test
+ * results live here, on the page, so they survive switching tabs — and since
+ * ADR 0033 each is recorded to `cms/integration-status`, so the last verdict
+ * survives a reload too and the Health page can show it.
  *
  * No tab shows a credential value, masked or otherwise: the API has no read
  * path for one and the app's vault role cannot read one.
@@ -36,6 +39,7 @@
 import React from 'react';
 import { useSearchParams } from 'react-router';
 import { Plug } from 'lucide-react';
+import PageHeader from '@/components/admin/shared/PageHeader';
 import IntegrationsOverview from '@/components/admin/integrations/IntegrationsOverview';
 import IntegrationsServices from '@/components/admin/integrations/IntegrationsServices';
 import IntegrationsKeys from '@/components/admin/integrations/IntegrationsKeys';
@@ -43,6 +47,14 @@ import IntegrationsIdentity from '@/components/admin/integrations/IntegrationsId
 import useServiceTests from '@/components/admin/integrations/useServiceTests';
 import { TABS, resolveTab } from '@/components/admin/integrations/tabs';
 import HubTabs from '@/components/admin/HubTabs';
+
+const HELP = [
+  'Overview lists every service worst first. A red word is the one to look at; press Test all to ask every safe service at once, one at a time.',
+  'Services groups the cards. Each says what the service does for the site, where it is used, which way data flows and what its key can reach, with a beaker to test it.',
+  'Keys is the only place a credential is written. Paste a new value to rotate; nothing here can read one back. Disconnecting a key-based service means replacing or revoking its key.',
+  'Identity shows the Entra app registrations the browser and the API run on. The Health page tests the token this session actually holds.',
+  'Every test result is recorded, so "last worked" and "last failed" are still here tomorrow and on the Health page.',
+];
 
 export default function IntegrationsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -59,15 +71,12 @@ export default function IntegrationsPage() {
   const openGroup = (group) => setSearchParams({ tab: 'services', group });
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="flex items-center gap-2 text-2xl font-semibold">
-          <Plug className="h-6 w-6" /> Integrations Hub
-        </h1>
-        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-          Every third-party service, whether it is answering, and the keys it answers with. Keys are
-          held in Azure Key Vault and can be written here but never read back.
-        </p>
-      </div>
+      <PageHeader
+        icon={Plug}
+        title="Integrations Hub"
+        description="Every third-party service, whether it is answering, and the keys it answers with. Keys are held in Azure Key Vault and can be written here but never read back."
+        help={HELP}
+      />
 
       <HubTabs
         tabs={TABS}

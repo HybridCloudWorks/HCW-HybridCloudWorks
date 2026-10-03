@@ -13,10 +13,12 @@
  */
 
 import React from 'react';
+import { Link } from 'react-router';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import StatusBadge from '@/components/admin/shared/StatusBadge';
 import { AlertTriangle, CheckCircle2, Workflow } from 'lucide-react';
 
 export const ALERT_FILTERS = [
@@ -47,11 +49,34 @@ export function formatTimestamp(value) {
   }).format(date);
 }
 
-function getPublishingStatusBadgeVariant(status) {
-  if (status === 'failed') return 'destructive';
-  if (status === 'degraded') return 'outline';
-  return 'secondary';
+/**
+ * Every Overview card ends the same way (ADR 0033 §1 Platform): when the
+ * block it shows was read, and where its probes, impacts and fixes live.
+ */
+export function CheckedFooter({ at, probeLabel }) {
+  return (
+    <p className="flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-2 text-xs text-muted-foreground">
+      <span>Checked {formatTimestamp(at)}</span>
+      <Link
+        to="/admin/health?tab=checks"
+        className="font-medium text-primary underline-offset-2 hover:underline"
+      >
+        {probeLabel ?? 'Impact, fixes and tests on Checks'}
+      </Link>
+    </p>
+  );
 }
+
+/** The one word for the runtime-configuration readiness (ADR 0033). */
+export function readinessStatus(readiness) {
+  if (!readiness) return 'unknown';
+  if (readiness.functionsConfigured) return 'healthy';
+  if ((readiness.unresolvedSecrets?.length ?? 0) > 0) return 'misconfigured';
+  return 'unavailable';
+}
+
+/** A count that is fine at zero and worth a look above it. */
+const countStatus = (count, above = 'degraded') => ((Number(count) || 0) > 0 ? above : 'healthy');
 
 export function getAlertActionLabel(action) {
   if (action === 'resolve') return 'Resolved';
@@ -96,17 +121,29 @@ export function PipelineReadinessCard({ readiness, digestForDisplay }) {
         <CardTitle className="text-lg">Pipeline Readiness</CardTitle>
       </CardHeader>
       <CardContent className="space-y-2 text-sm">
-        <div className="flex items-center justify-between">
-          <span>Functions URL</span>
-          {readiness.functionsConfigured ? (
-            <span className="inline-flex items-center gap-1 text-emerald-600">
-              <CheckCircle2 className="h-4 w-4" /> Ready
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1 text-amber-600">
-              <AlertTriangle className="h-4 w-4" /> Missing
-            </span>
-          )}
+        <div className="flex items-center justify-between gap-3">
+          <span>Runtime config</span>
+          <span className="flex items-center gap-2 text-right">
+            {readiness.configGeneration ? (
+              <span className="text-xs text-muted-foreground">
+                {readiness.configGeneration} · {readiness.configWriter}
+              </span>
+            ) : null}
+            <StatusBadge system={readinessStatus(readiness)} />
+          </span>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <span>Unresolved Key Vault references</span>
+          <span className="flex items-center gap-2 text-right text-xs">
+            {readiness.unresolvedSecrets?.length ? (
+              <span className="font-mono text-muted-foreground">
+                {readiness.unresolvedSecrets.join(', ')}
+              </span>
+            ) : null}
+            <Badge variant={readiness.unresolvedSecrets?.length ? 'destructive' : 'secondary'}>
+              {readiness.unresolvedSecrets?.length ?? 0}
+            </Badge>
+          </span>
         </div>
         <div className="flex items-center justify-between">
           <span>Published Entries</span>
@@ -136,15 +173,15 @@ export function PipelineReadinessCard({ readiness, digestForDisplay }) {
             <Badge variant="outline">Run digest action to generate</Badge>
           )}
         </div>
+        <CheckedFooter at={readiness.lastCheckedAt} />
       </CardContent>
     </Card>
   );
 }
 
-export function PublishingOpsCard({ publishingOps, publishingWatchdog, digestForDisplay }) {
-  const schedulerStatus = publishingOps?.status || 'Idle (no due items)';
-  const schedulerVariant = getPublishingStatusBadgeVariant(publishingOps?.status);
-  const metrics = {
+/** The six counters the publishing card shows, zero where a block is absent. */
+export function publishingMetrics(publishingOps, publishingWatchdog) {
+  return {
     due: publishingOps?.due || 0,
     published: publishingOps?.published || 0,
     skipped: publishingOps?.skipped || 0,
@@ -152,6 +189,10 @@ export function PublishingOpsCard({ publishingOps, publishingWatchdog, digestFor
     overdue: publishingWatchdog?.overdueScheduledCount || 0,
     stagedTooLong: publishingWatchdog?.stagedTooLongCount || 0,
   };
+}
+
+export function PublishingOpsCard({ publishingOps, publishingWatchdog, digestForDisplay }) {
+  const metrics = publishingMetrics(publishingOps, publishingWatchdog);
 
   return (
     <Card>
@@ -162,9 +203,14 @@ export function PublishingOpsCard({ publishingOps, publishingWatchdog, digestFor
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
         {renderPublishingHint(publishingOps)}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-3">
           <span>Scheduler Status</span>
-          <Badge variant={schedulerVariant}>{schedulerStatus}</Badge>
+          <span className="flex items-center gap-2">
+            {!publishingOps ? (
+              <span className="text-xs text-muted-foreground">Idle (no due items)</span>
+            ) : null}
+            <StatusBadge system={publishingOps?.status ?? 'unknown'} />
+          </span>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="p-3 border rounded-lg">
@@ -203,6 +249,7 @@ export function PublishingOpsCard({ publishingOps, publishingWatchdog, digestFor
           {formatTimestamp(publishingOps?.lastRunAt || publishingWatchdog?.lastRunAt)}
           {getDigestDocLabel(digestForDisplay?.digestDate)}
         </p>
+        <CheckedFooter at={digestForDisplay?.lastCheckedAt} />
       </CardContent>
     </Card>
   );
@@ -221,18 +268,28 @@ export function OperationalSignalsCard({ signals }) {
           <div className="p-3 border rounded-lg">
             <p className="text-muted-foreground text-xs">Queue SLA Breaches</p>
             <p className="text-xl font-bold">{signals.queueBreachCount || 0}</p>
+            <StatusBadge system={countStatus(signals.queueBreachCount)} size="xs" />
           </div>
           <div className="p-3 border rounded-lg">
             <p className="text-muted-foreground text-xs">Oldest Staged Age</p>
             <p className="text-xl font-bold">{formatHours(signals.oldestStagedHours)}</p>
+            <StatusBadge
+              system={(signals.oldestStagedHours || 0) > 72 ? 'degraded' : 'healthy'}
+              size="xs"
+            />
           </div>
           <div className="p-3 border rounded-lg">
             <p className="text-muted-foreground text-xs">Open Alert Age</p>
             <p className="text-xl font-bold">{formatHours(signals.openAlertAgeHours)}</p>
+            <StatusBadge
+              system={(signals.openAlertAgeHours || 0) > 24 ? 'degraded' : 'healthy'}
+              size="xs"
+            />
           </div>
           <div className="p-3 border rounded-lg">
             <p className="text-muted-foreground text-xs">Orphaned Images</p>
             <p className="text-xl font-bold">{signals.orphanedGeneratedImages || 0}</p>
+            <StatusBadge system={countStatus(signals.orphanedGeneratedImages)} size="xs" />
           </div>
         </div>
         <div className="flex items-center justify-between">
@@ -245,6 +302,7 @@ export function OperationalSignalsCard({ signals }) {
           <span>Last Scheduler Success</span>
           <Badge variant="outline">{formatTimestamp(signals.lastSchedulerSuccessAt)}</Badge>
         </div>
+        <CheckedFooter at={signals.lastCheckedAt} />
       </CardContent>
     </Card>
   );

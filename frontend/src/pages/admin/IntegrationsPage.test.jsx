@@ -34,6 +34,13 @@ vi.mock('@/hooks/useAuthReady', () => ({ useAuthReady: () => ({ authReady: true 
 vi.mock('@/components/ui/use-toast', () => ({ useToast: () => ({ toast: vi.fn() }) }));
 vi.mock('react-router', () => ({
   useSearchParams: () => [new URLSearchParams(searchParams), setSearchParams],
+  // PageHeader reads the route to find its purpose sentence.
+  useLocation: () => ({ pathname: '/admin/integrations', search: '' }),
+  Link: ({ to, children, ...rest }) => (
+    <a href={to} {...rest}>
+      {children}
+    </a>
+  ),
 }));
 
 const SECRETS = {
@@ -227,7 +234,7 @@ describe('the session’s test results', () => {
     searchParams = 'tab=services&group=communication';
     rerender(<IntegrationsPage />);
     const resendCard = (await screen.findByText('Resend')).closest('.p-4');
-    expect(within(resendCard).getByText('Connected')).toBeTruthy();
+    expect(within(resendCard).getByText('Healthy')).toBeTruthy();
     expect(within(resendCard).getByText(/tested just now/)).toBeTruthy();
   });
 });

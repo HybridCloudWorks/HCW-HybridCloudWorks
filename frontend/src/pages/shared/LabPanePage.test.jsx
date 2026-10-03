@@ -10,7 +10,7 @@
 import React from 'react';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { HelmetProvider } from 'react-helmet-async';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -53,13 +53,16 @@ const REACHABLE = {
 /** Backend words a visitor must not read on this page, in any state. */
 const BEHIND_THE_SITE = /\bcoder\b|oauth|code-server|\bvps\b|callback|caddy|hostinger|\bapi\b/i;
 
-function renderPane(labId = LAB.id) {
+function renderPane(labId = LAB.id, provider = null) {
+  const path = provider ? `/${provider}/education/labs/${labId}` : `/education/labs/${labId}`;
   return render(
     <HelmetProvider>
-      <MemoryRouter initialEntries={[`/education/labs/${labId}`]}>
+      <MemoryRouter initialEntries={[path]}>
         <Routes>
           <Route path="/education/labs/:labId" element={<LabPanePage />} />
           <Route path="/education/labs" element={<p>labs index</p>} />
+          <Route path="/:provider/education/labs/:labId" element={<LabPanePage />} />
+          <Route path="/:provider/education/labs" element={<p>provider labs</p>} />
         </Routes>
       </MemoryRouter>
     </HelmetProvider>
@@ -517,5 +520,114 @@ describe('LabPanePage routing', () => {
     renderPane('no-such-lab');
     expect(screen.getByText('labs index')).toBeInTheDocument();
     expect(fetchCoderStatus).not.toHaveBeenCalled();
+  });
+
+  it('sends an unknown id under a provider back to that provider’s list (ADR 0033)', () => {
+    fetchCoderStatus.mockResolvedValue(REACHABLE);
+    renderPane('no-such-lab', 'terraform');
+    expect(screen.getByText('provider labs')).toBeInTheDocument();
+  });
+
+  it('goes back to the provider’s list from a page reached under a provider', async () => {
+    fetchCoderStatus.mockResolvedValue(REACHABLE);
+    markSignedIn();
+    renderPane(LAB.id, 'terraform');
+    const pane = await screen.findByTestId('lab-pane');
+    expect(within(pane).getByRole('link', { name: 'Back to labs' })).toHaveAttribute(
+      'href',
+      '/terraform/education/labs'
+    );
+    expect(screen.getByRole('link', { name: 'Terraform Learn' })).toHaveAttribute(
+      'href',
+      '/terraform/education'
+    );
+    expect(document.querySelector('link[rel="canonical"]')?.getAttribute('href') ?? '').toMatch(
+      /\/terraform\/education\/labs\/terraform-validate-walkthrough$|^$/
+    );
+  });
+});
+
+describe('LabPanePage, the lab itself (ADR 0033 §4)', () => {
+  beforeEach(() => {
+    fetchCoderStatus.mockResolvedValue(REACHABLE);
+  });
+
+  it('shows the objectives, prerequisites, steps, resources and facts whatever the pane is doing', async () => {
+    const { container } = renderPane();
+    await screen.findByTestId('lab-sign-in');
+
+    expect(within(screen.getByTestId('lab-objectives')).getAllByRole('listitem')).toHaveLength(
+      LAB.objectives.length
+    );
+    expect(within(screen.getByTestId('lab-prerequisites')).getAllByRole('listitem')).toHaveLength(
+      LAB.prerequisites.length
+    );
+    const steps = screen.getAllByTestId('lab-step');
+    expect(steps).toHaveLength(LAB.steps.length);
+    LAB.steps.forEach((entry, index) => {
+      expect(within(steps[index]).getByRole('heading', { level: 3 })).toHaveTextContent(
+        entry.title
+      );
+    });
+    // The one step a runner job can check carries the hint and the job type.
+    const checks = screen.getAllByTestId('lab-step-validation');
+    expect(checks).toHaveLength(1);
+    expect(checks[0]).toHaveTextContent(LAB.validation.jobType);
+    expect(checks[0]).toHaveTextContent(LAB.steps.at(-1).validation.hint);
+    // Fenced commands render as code blocks.
+    expect(container.querySelectorAll('[data-testid="lab-steps"] pre code').length).toBeGreaterThan(
+      0
+    );
+    expect(within(screen.getByTestId('lab-resources')).getAllByRole('link')).toHaveLength(
+      LAB.resources.length
+    );
+    expect(screen.getByTestId('lab-difficulty')).toHaveTextContent('Introductory');
+    expect(screen.getByTestId('lab-minutes')).toHaveTextContent('about 20 minutes');
+    expect(screen.getByTestId('how-labs-work')).toBeInTheDocument();
+    expect(screen.getByTestId('workspace-status')).toBeInTheDocument();
+    // Stop and reset are the workspace's own; the page says where.
+    expect(screen.getByRole('heading', { name: 'Your workspace' })).toBeInTheDocument();
+    expect(container.textContent).toMatch(/Stop keeps your files/);
+    expect(visibleWords(container)).not.toMatch(BEHIND_THE_SITE);
+  });
+
+  it('lists the articles for a lab that has them, and no heading for one that has none', async () => {
+    renderPane('landing-zone-builder-output');
+    await screen.findByTestId('lab-sign-in');
+    expect(within(screen.getByTestId('lab-articles')).getAllByRole('link')).toHaveLength(3);
+    expect(screen.getByRole('link', { name: 'Build a landing zone you can read' })).toHaveAttribute(
+      'href',
+      '/azure/blog/build-a-landing-zone-you-can-read'
+    );
+  });
+
+  it('shows no article heading for a lab without articles', async () => {
+    renderPane('ansible-syntax-check-walkthrough');
+    await screen.findByTestId('lab-sign-in');
+    expect(screen.queryByTestId('lab-articles')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Articles for this lab' })).toBeNull();
+  });
+
+  it('reads the workspace state as one word from the status read', async () => {
+    markSignedIn();
+    renderPane();
+    await screen.findByTestId('lab-pane');
+    await waitFor(() =>
+      expect(screen.getByTestId('workspace-status')).toHaveAttribute('data-status', 'healthy')
+    );
+  });
+
+  it('reads degraded when the workspaces answer but their detail does not', async () => {
+    fetchCoderStatus.mockResolvedValue({
+      ...REACHABLE,
+      templates: [],
+      capacity: { running: null, max: 5 },
+    });
+    markSignedIn();
+    renderPane();
+    await screen.findByTestId('lab-pane');
+    await waitFor(() =>
+      expect(screen.getByTestId('workspace-status')).toHaveAttribute('data-status', 'degraded')
+    );
   });
 });

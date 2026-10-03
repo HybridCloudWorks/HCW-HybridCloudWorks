@@ -7,7 +7,7 @@
  */
 import React from 'react';
 import { render, screen } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router';
+import { MemoryRouter, Route, Routes, useParams } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   SIGNED_IN_KEY,
@@ -118,12 +118,20 @@ function ReturningLabsPage() {
   return <p>labs page</p>;
 }
 
+function PanePage() {
+  const { provider, labId } = useParams();
+  return <p>pane page {`${provider}/${labId}`}</p>;
+}
+
 function renderLabsAt(entries, index = entries.length - 1) {
   return render(
     <MemoryRouter initialEntries={entries} initialIndex={index}>
       <Routes>
         <Route path="/education/labs" element={<ReturningLabsPage />} />
-        <Route path="/education/labs/:labId" element={<p>pane page</p>} />
+        {/* The return lands on the lab's page under its home provider (ADR
+            0033), never on the index's own pane route. */}
+        <Route path="/:provider/education/labs/:labId" element={<PanePage />} />
+        <Route path="/education/labs/:labId" element={<p>index pane page</p>} />
         <Route path="/education" element={<p>learn page</p>} />
       </Routes>
     </MemoryRouter>
@@ -134,7 +142,7 @@ describe('useLabSignInReturn', () => {
   it('sends a tab arriving from outside the site on to the pane its sign-in started from', async () => {
     markSignInStarted(LAB);
     renderLabsAt(['/education/labs']);
-    expect(await screen.findByText('pane page')).toBeInTheDocument();
+    expect(await screen.findByText(`pane page terraform/${LAB}`)).toBeInTheDocument();
     expect(window.localStorage.getItem(SIGN_IN_PENDING_KEY)).toBeNull();
     expect(readSignedInAt()).toBeGreaterThan(0);
   });

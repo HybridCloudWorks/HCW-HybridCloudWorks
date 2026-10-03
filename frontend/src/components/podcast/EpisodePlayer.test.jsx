@@ -242,3 +242,29 @@ describe('EpisodePlayer', () => {
     expect(screen.queryByRole('link', { name: /Download/ })).toBeNull();
   });
 });
+
+describe('playback position (ADR 0033 §4)', () => {
+  it('picks up where this browser left off, and remembers where it pauses', () => {
+    window.localStorage.setItem(
+      'hcw:audio-position:listen-and-learn:azure_az-104/a',
+      JSON.stringify({ t: 120, d: 540 })
+    );
+    const { container } = render(<EpisodePlayer episode={episode} meta={meta} />);
+    const audio = container.querySelector('audio');
+    Object.defineProperty(audio, 'duration', { configurable: true, value: 540 });
+    fireEvent.loadedMetadata(audio);
+    expect(audio.currentTime).toBe(120);
+
+    audio.currentTime = 200;
+    fireEvent.pause(audio);
+    expect(
+      JSON.parse(window.localStorage.getItem('hcw:audio-position:listen-and-learn:azure_az-104/a'))
+    ).toMatchObject({ t: 200 });
+
+    fireEvent.ended(audio);
+    expect(
+      window.localStorage.getItem('hcw:audio-position:listen-and-learn:azure_az-104/a')
+    ).toBeNull();
+    window.localStorage.clear();
+  });
+});

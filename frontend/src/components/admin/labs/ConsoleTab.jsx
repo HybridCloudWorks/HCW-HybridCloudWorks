@@ -176,12 +176,19 @@ function SubmitJobForm({ jobTypes, type, spec, payload, submitting, onType, onPa
   );
 }
 
-function ConsoleTab({ jobTypes }) {
+/**
+ * @param {object} props
+ * @param {Array<object>} props.jobTypes the runner's allowlist
+ * @param {{jobId: string, type?: string}|null} [props.watch] a job to open
+ *   on: the Catalogue tab's Validate enqueues a lab's check and lands here
+ *   with it (ADR 0033), so the pane shows that job rather than an empty one
+ */
+function ConsoleTab({ jobTypes, watch = null }) {
   const { toast } = useToast();
-  const [type, setType] = useState(jobTypes[0]?.type || 'shell-echo');
+  const [type, setType] = useState(watch?.type || jobTypes[0]?.type || 'shell-echo');
   const [payload, setPayload] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [activeJobId, setActiveJobId] = useState(null);
+  const [activeJobId, setActiveJobId] = useState(watch?.jobId ?? null);
   const [cancelling, setCancelling] = useState(false);
   // The status poll, and the read error kept apart from it — a failure to
   // *read* the status is not a status. (useJobWatch)
@@ -265,5 +272,5 @@ function ConsoleTab({ jobTypes }) {
 }
 
 export default function LabsConsoleTab({ hub }) {
-  return <ConsoleTab jobTypes={hub.jobTypes} />;
+  return <ConsoleTab jobTypes={hub.jobTypes} watch={hub.watchJob} />;
 }

@@ -10,17 +10,17 @@
 // individual exact-match chips below it let admins drill into one or the
 // other without bulk-rejecting items in the *other* state by accident.
 export const STATUS_FILTERS = [
-  { value: 'needs_review', label: 'Needs Review (Ingested + Inspected)' },
+  { value: 'needs_review', label: 'Needs review (draft + ingested + inspected)' },
   { value: 'ingested', label: '⤷ Ingested (raw, uninspected)' },
   { value: 'inspected', label: '⤷ Inspected (AI-processed)' },
-  { value: 'in_progress', label: 'In Progress' },
-  { value: 'in_review', label: 'In Review' },
+  { value: 'in_progress', label: 'In progress' },
+  { value: 'in_review', label: 'In review' },
   { value: 'editing', label: 'Editing' },
   { value: 'approved', label: 'Approved' },
-  { value: 'forge_ready', label: 'Forge Ready (AI draft graded)' },
-  { value: 'needs_rework', label: 'Needs Rework' },
-  { value: 'ready_to_publish', label: 'Staged (Pre-Live)' },
-  { value: 'published_live', label: 'Published (Live)' },
+  { value: 'forge_ready', label: 'Forge ready (AI draft graded)' },
+  { value: 'needs_rework', label: 'Needs rework' },
+  { value: 'ready_to_publish', label: 'Staged (pre-live)' },
+  { value: 'published_live', label: 'Live' },
   { value: 'rejected', label: 'Rejected' },
 ];
 

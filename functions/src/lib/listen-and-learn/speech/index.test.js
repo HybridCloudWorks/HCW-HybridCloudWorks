@@ -42,7 +42,10 @@ const LL = { product: 'listenAndLearn' };
  * without them refuses before sending. The other entry points ignore
  * `voices`, so the same object serves resolveSpeechProvider and the estimate.
  */
-const PODCAST_VOICES = Object.freeze({ Maya: 'MayaVoice00000000001', Elena: 'ElenaVoice0000000002' });
+const PODCAST_VOICES = Object.freeze({
+  Maya: 'MayaVoice00000000001',
+  Elena: 'ElenaVoice0000000002',
+});
 const POD = { product: 'podcast', voices: PODCAST_VOICES };
 
 const DIALOGUE = [
@@ -62,7 +65,9 @@ const geminiOk = () =>
       steps: [
         {
           type: 'model_output',
-          content: [{ type: 'audio', data: pcmBase64(), mime_type: 'audio/L16', sample_rate: 24000 }],
+          content: [
+            { type: 'audio', data: pcmBase64(), mime_type: 'audio/L16', sample_rate: 24000 },
+          ],
         },
       ],
     }),
@@ -268,7 +273,9 @@ describe('resolveSpeechProvider — Listen & Learn', () => {
   it('names its own providers when the pin is not one at all', () => {
     expect(() =>
       resolveSpeechProvider({ ...GEMINI, LISTEN_AND_LEARN_TTS_PROVIDER: 'polly' }, LL)
-    ).toThrow(/LISTEN_AND_LEARN_TTS_PROVIDER is "polly"; Listen & Learn providers are gemini, azure/);
+    ).toThrow(
+      /LISTEN_AND_LEARN_TTS_PROVIDER is "polly"; Listen & Learn providers are gemini, azure/
+    );
   });
 
   it('does not read the podcast’s pin', () => {
@@ -295,9 +302,9 @@ describe('resolveSpeechProvider — podcast', () => {
     expect(resolveSpeechProvider({ ...ALL, PODCAST_TTS_PROVIDER: 'elevenlabs' }, POD).name).toBe(
       'elevenlabs'
     );
-    expect(() => resolveSpeechProvider({ ...GEMINI, PODCAST_TTS_PROVIDER: 'elevenlabs' }, POD)).toThrow(
-      /PODCAST_TTS_PROVIDER pins "elevenlabs", which is not configured/
-    );
+    expect(() =>
+      resolveSpeechProvider({ ...GEMINI, PODCAST_TTS_PROVIDER: 'elevenlabs' }, POD)
+    ).toThrow(/PODCAST_TTS_PROVIDER pins "elevenlabs", which is not configured/);
     expect(() => resolveSpeechProvider({ ...ALL, PODCAST_TTS_PROVIDER: 'gemini' }, POD)).toThrow(
       /PODCAST_TTS_PROVIDER pins "gemini", which is not a podcast provider — ElevenLabs is only the podcast voice.*podcast may pin elevenlabs/
     );
@@ -319,7 +326,7 @@ describe('synthesizeDialogue', () => {
     const result = await synthesizeDialogue({ ...LL, dialogue: DIALOGUE, env: ALL, fetchImpl });
 
     expect(result.provider).toBe('gemini');
-    expect(result.model).toBe('gemini-3.1-flash-tts-preview');
+    expect(result.model).toBe('gemini-2.5-flash-preview-tts');
     expect(result).not.toHaveProperty('fellBackFrom');
     expect(gemini).toHaveBeenCalledTimes(1);
     expect(eleven).not.toHaveBeenCalled();
@@ -405,8 +412,15 @@ describe('synthesizeDialogue', () => {
       expect(modelSent(pinned)).toBe('gemini-2.5-flash-preview-tts');
 
       const bare = geminiOk();
-      await synthesizeDialogue({ ...LL, dialogue: DIALOGUE, model: null, env: GEMINI, fetchImpl: bare });
-      expect(modelSent(bare)).toBe('gemini-3.1-flash-tts-preview');
+      await synthesizeDialogue({
+        ...LL,
+        dialogue: DIALOGUE,
+        model: null,
+        env: GEMINI,
+        fetchImpl: bare,
+      });
+      // Economy, the cheapest sensible voice (ADR 0033 §4).
+      expect(modelSent(bare)).toBe('gemini-2.5-flash-preview-tts');
     });
 
     it('never writes the choice into the caller’s env', async () => {
@@ -588,13 +602,16 @@ describe('estimateSpeechCostUsd', () => {
   it('prices Listen & Learn with Gemini even when the ElevenLabs key is present', () => {
     const estimate = estimateSpeechCostUsd({ ...LL, ceilingBytes: 9000, env: ALL });
     expect(estimate.provider).toBe('gemini');
-    expect(estimate.model).toBe('gemini-3.1-flash-tts-preview');
+    expect(estimate.model).toBe('gemini-2.5-flash-preview-tts');
   });
 
   it('returns null, not $0, for a dialogue synthesis would refuse', async () => {
     // Copilot review on #447: a whitespace-only dialogue estimated 0 while
     // synthesizeDialogue threw "No dialogue turns to synthesise".
-    const blank = [{ speaker: 'Maya', text: '  ' }, { speaker: 'Elena', text: '' }];
+    const blank = [
+      { speaker: 'Maya', text: '  ' },
+      { speaker: 'Elena', text: '' },
+    ];
     expect(estimateSpeechCostUsd({ ...POD, dialogue: blank, env: ELEVEN })).toBeNull();
     expect(estimateSpeechCostUsd({ ...POD, dialogue: [], env: ELEVEN })).toBeNull();
     expect(estimateSpeechCostUsd({ ...POD, env: ELEVEN })).toBeNull();
@@ -602,9 +619,9 @@ describe('estimateSpeechCostUsd', () => {
       /No dialogue turns/
     );
     // A ceiling is still priced with no dialogue: that is the enqueue path.
-    expect(estimateSpeechCostUsd({ ...POD, ceilingBytes: 9000, env: ELEVEN }).estimatedCostUsd).toBe(
-      0.9
-    );
+    expect(
+      estimateSpeechCostUsd({ ...POD, ceilingBytes: 9000, env: ELEVEN }).estimatedCostUsd
+    ).toBe(0.9);
   });
 
   it('counts exactly the turns synthesis would speak, through one shared filter', async () => {
@@ -686,12 +703,23 @@ describe('estimateSpeechCostUsd', () => {
     // 9,000 bytes ÷ 13 bytes/s ≈ 692 s × 32 tokens/s ≈ 22,154 tokens at
     // USD 20 per 1M (the 3.1 flash rate) ≈ USD 0.44 — above twice the
     // ~USD 0.17 an episode measured on 2.5 flash, which is priced at half that.
-    const estimate = estimateSpeechCostUsd({ ...LL, ceilingBytes: 9000, env: GEMINI });
+    const estimate = estimateSpeechCostUsd({
+      ...LL,
+      ceilingBytes: 9000,
+      model: 'gemini-3.1-flash-tts-preview',
+      env: GEMINI,
+    });
     expect(estimate.provider).toBe('gemini');
     expect(estimate.model).toBe('gemini-3.1-flash-tts-preview');
     expect(estimate.estimatedCostUsd).toBeGreaterThan(0.34);
     expect(estimate.estimatedCostUsd).toBeLessThan(0.6);
-    expect(estimate.estimatedCostUsd).toBe(estimateGeminiCostUsd('gemini-3.1-flash-tts-preview', 9000));
+    expect(estimate.estimatedCostUsd).toBe(
+      estimateGeminiCostUsd('gemini-3.1-flash-tts-preview', 9000)
+    );
+    // The default, Economy, is half of that (ADR 0033 §4).
+    const economy = estimateSpeechCostUsd({ ...LL, ceilingBytes: 9000, env: GEMINI });
+    expect(economy.model).toBe('gemini-2.5-flash-preview-tts');
+    expect(economy.estimatedCostUsd).toBeCloseTo(estimate.estimatedCostUsd / 2, 6);
   });
 
   it('rounds a fractional token count UP, so the ceiling is never below the exact value', () => {
@@ -712,9 +740,9 @@ describe('estimateSpeechCostUsd', () => {
     expect(estimateSpeechCostUsd({ ...LL, ceilingBytes: 12.2, env: GEMINI })).toMatchObject({
       bytes: 13,
     });
-    expect(estimateSpeechCostUsd({ ...POD, ceilingBytes: 12.2, env: ELEVEN }).estimatedCostUsd).toBe(
-      getCostEstimate('elevenlabs', 'eleven_v3', 0, 13)
-    );
+    expect(
+      estimateSpeechCostUsd({ ...POD, ceilingBytes: 12.2, env: ELEVEN }).estimatedCostUsd
+    ).toBe(getCostEstimate('elevenlabs', 'eleven_v3', 0, 13));
   });
 
   it('prices the Economy model at half the Best model, from the cost table', () => {
@@ -733,7 +761,8 @@ describe('estimateSpeechCostUsd', () => {
     const accented = [{ speaker: 'Maya', text: 'é'.repeat(1300) }]; // 2 bytes each
     const cjk = [{ speaker: 'Maya', text: '語'.repeat(1300) }]; // 3 bytes each
 
-    const cost = (dialogue) => estimateSpeechCostUsd({ ...LL, dialogue, env: GEMINI }).estimatedCostUsd;
+    const cost = (dialogue) =>
+      estimateSpeechCostUsd({ ...LL, dialogue, env: GEMINI }).estimatedCostUsd;
     expect(cost(ascii)).toBeGreaterThan(0);
     expect(cost(accented)).toBeCloseTo(cost(ascii) * 2, 6);
     expect(cost(cjk)).toBeCloseTo(cost(ascii) * 3, 6);
@@ -752,7 +781,11 @@ describe('estimateSpeechCostUsd', () => {
       [LL, GEMINI],
       [POD, ELEVEN],
     ]) {
-      const ceiling = estimateSpeechCostUsd({ ...product, ceilingBytes: 9000, env }).estimatedCostUsd;
+      const ceiling = estimateSpeechCostUsd({
+        ...product,
+        ceilingBytes: 9000,
+        env,
+      }).estimatedCostUsd;
       const actual = estimateSpeechCostUsd({ ...product, dialogue: widest, env }).estimatedCostUsd;
       expect(ceiling).toBeGreaterThanOrEqual(actual);
     }
@@ -760,7 +793,9 @@ describe('estimateSpeechCostUsd', () => {
     const plain = [{ speaker: 'Maya', text: 'a'.repeat(8000) }];
     expect(
       estimateSpeechCostUsd({ ...LL, ceilingBytes: 9000, env: GEMINI }).estimatedCostUsd
-    ).toBeGreaterThan(estimateSpeechCostUsd({ ...LL, dialogue: plain, env: GEMINI }).estimatedCostUsd);
+    ).toBeGreaterThan(
+      estimateSpeechCostUsd({ ...LL, dialogue: plain, env: GEMINI }).estimatedCostUsd
+    );
   });
 
   it('is honest that Azure Speech is not priced', () => {
@@ -789,7 +824,9 @@ describe('estimateSpeechCostUsd', () => {
       env: { ...GEMINI, [GEMINI_MODEL_SETTING]: 'gemini-3.1-flash-tts-preview' },
     });
     expect(chosen.model).toBe('gemini-2.5-flash-preview-tts');
-    expect(chosen.estimatedCostUsd).toBe(estimateGeminiCostUsd('gemini-2.5-flash-preview-tts', 9000));
+    expect(chosen.estimatedCostUsd).toBe(
+      estimateGeminiCostUsd('gemini-2.5-flash-preview-tts', 9000)
+    );
     expect(
       estimateSpeechCostUsd({
         ...LL,

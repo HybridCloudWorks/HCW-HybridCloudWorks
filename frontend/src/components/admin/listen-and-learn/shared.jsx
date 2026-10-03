@@ -1,20 +1,17 @@
 /**
- * The parts Review and Published both need: choosing a set, and rendering the
- * episodes of the chosen one.
- *
- * Shared rather than copied because the two tabs differ only in which episodes
- * they pass — #588 counts 61-line copies as real duplication, and this is
- * exactly that shape.
+ * The parts the Review tab needs: choosing a book, and rendering the
+ * chapters of the chosen one. Kept apart from the tab so the list can be
+ * tested without the page's job polling (#588).
  */
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Loader2 } from 'lucide-react';
 import EpisodeCard from './EpisodeCard';
 
-/** The generated sets, as one button each. `null` selection selects nothing. */
+/** The books, as one button each. `null` selection selects nothing. */
 export function SetPicker({ sets, selected, onOpen }) {
   if (sets.length === 0) {
-    return <p className="text-sm text-muted-foreground">Nothing generated yet.</p>;
+    return <p className="text-sm text-muted-foreground">Nothing in the library yet.</p>;
   }
   return (
     <div className="flex flex-wrap gap-2">
@@ -29,7 +26,7 @@ export function SetPicker({ sets, selected, onOpen }) {
           }
           onClick={() => onOpen(set.provider, set.examCode)}
         >
-          {set.examCode}
+          {set.kind === 'course' ? set.examCode : set.title}
           <span className="ml-1.5 text-[10px] opacity-70">{set.provider}</span>
         </Button>
       ))}
@@ -38,16 +35,22 @@ export function SetPicker({ sets, selected, onOpen }) {
 }
 
 /**
- * The chosen set's episodes, or the reason there are none to show. `emptyLabel`
- * differs per tab: an empty Review means everything is approved, while an empty
- * Published means nothing is live yet.
+ * The chosen book's chapters, or the reason there are none to show.
  */
-export function EpisodeList({ loading, episodes, busySlugs, onReview, emptyLabel }) {
+export function EpisodeList({
+  loading,
+  episodes,
+  busySlugs,
+  onReview,
+  onRetry,
+  onKeepCurrent,
+  emptyLabel,
+}) {
   if (loading) {
     return (
-      <p className="text-sm text-muted-foreground flex items-center gap-2">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        Loading episodes…
+      <p className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+        Loading chapters…
       </p>
     );
   }
@@ -58,21 +61,24 @@ export function EpisodeList({ loading, episodes, busySlugs, onReview, emptyLabel
     <div className="space-y-3">
       {episodes.map((episode) => (
         <EpisodeCard
-          key={episode.areaSlug}
+          key={episode.id}
           episode={episode}
-          busy={busySlugs.has(episode.areaSlug)}
+          busy={busySlugs.has(episode.id)}
           onReview={onReview}
+          onRetry={onRetry}
+          onKeepCurrent={onKeepCurrent}
         />
       ))}
     </div>
   );
 }
 
-/** "3 published · 2 draft · 0 failed" for the chosen set. */
+/** "3 published · 2 draft · 0 failed" for the chosen book. */
 export function CountsLine({ counts }) {
   return (
     <span className="text-xs font-normal text-muted-foreground">
       {counts.published || 0} published · {counts.draft || 0} draft · {counts.failed || 0} failed
+      {counts.archived ? ` · ${counts.archived} archived` : ''}
     </span>
   );
 }

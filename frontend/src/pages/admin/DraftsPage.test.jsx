@@ -127,7 +127,9 @@ describe('the form model', () => {
     expect(form).toMatchObject({ tags: 'azure, terraform', reading: '9' });
     expect(isDirty(form, fromDraft(view()))).toBe(false);
     expect(isDirty({ ...form, body: 'x' }, form)).toBe(true);
-    expect(toPayload(form)).toEqual(FIELDS);
+    // The classification always travels with the form: a draft that never
+    // said is an article someone typed in (ADR 0033 §4).
+    expect(toPayload(form)).toEqual({ ...FIELDS, kind: 'article', ideaOrigin: 'manual' });
     expect(toPayload({ ...EMPTY_FORM, title: ' T ', tags: 'a, ,a, b' })).toMatchObject({
       title: 'T',
       tags: ['a', 'b'],
@@ -178,7 +180,7 @@ describe('DraftsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
     await waitFor(() =>
       expect(sendJSON).toHaveBeenCalledWith('cms/drafts/d1', 'PUT', {
-        fields: { ...FIELDS, body: 'New body' },
+        fields: { ...FIELDS, body: 'New body', kind: 'article', ideaOrigin: 'manual' },
         etag: '"e1"',
       })
     );

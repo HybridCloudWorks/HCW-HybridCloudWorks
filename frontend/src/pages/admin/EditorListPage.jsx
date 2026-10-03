@@ -9,16 +9,16 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import ConfirmModal from '@/components/admin/ConfirmModal';
-import { postJSON, getJSON } from '@/lib/api';
-import { logAdminAction } from '@/lib/auditLog';
-import { unpublishToInspected } from '@/lib/contentWorkflow';
+import EmptyState from '@/components/admin/shared/EmptyState';
+import PageHeader from '@/components/admin/shared/PageHeader';
+import StatusBadge from '@/components/admin/shared/StatusBadge';
+import TaxonomyChips from '@/components/admin/shared/TaxonomyChips';
+import { getJSON } from '@/lib/api';
+import { getLiveUrl } from '@/lib/livePages';
 import { safeUrl } from '@/lib/safeUrl';
 import { PROVIDER_OPTIONS as ADMIN_PROVIDER_OPTIONS } from '@/config/admin';
-import {
-  getCanonicalContentType,
-  getContentPublicPath,
-  getPublishTargetForItem,
-} from '@/lib/contentModel';
+import { getCanonicalContentType } from '@/lib/contentModel';
+import { useContentTransitions } from './queue/useContentTransitions';
 import {
   PenLine,
   ExternalLink,
@@ -30,7 +30,15 @@ import {
   ChevronUp,
   ExternalLink as LinkIcon,
   Clock3,
+  PenTool,
 } from 'lucide-react';
+
+const EDITOR_HELP = [
+  'What arrives here: items approved in the Review Queue, forge output graded as Forge ready, and anything the inspector marked Needs rework.',
+  'Pre-live drafts are the work: open one to edit its text, metadata, images and publish date. Live items are listed below them so a published page can be edited too.',
+  'What to do: Edit opens the editor; Send to Publish from inside it moves the item to the Publish page. Unpublish or Archive a live item from its row.',
+  'Where it goes next: the Publish page for anything not yet live; the Archive board, below, for pages taken down for good.',
+];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -38,24 +46,8 @@ function getContentType(item) {
   return getCanonicalContentType(item);
 }
 
-function getPublicUrl(item) {
-  const explicitUrl =
-    item.slugPageUrl ||
-    item.publishedUrl ||
-    item.blogUrl ||
-    item.publicUrl ||
-    (item.curatedSubpagePath
-      ? `https://hybridcloudworks.com${String(item.curatedSubpagePath).startsWith('/') ? item.curatedSubpagePath : `/${item.curatedSubpagePath}`}`
-      : '');
-  if (explicitUrl) return explicitUrl;
-
-  const publicPath = getContentPublicPath(item);
-  if (publicPath) return publicPath;
-
-  const publishTarget = getPublishTargetForItem(item);
-  if (!publishTarget) return null;
-  return null;
-}
+/** The one live-URL rule every surface shares (lib/livePages.js, ADR 0033 §2). */
+const getPublicUrl = (item) => getLiveUrl(item) || null;
 
 function getProviderDisplay(item) {
   return item['Cloud Provider'] || item.cloudProvider || '—';
@@ -181,6 +173,7 @@ function LiveItemRow({ item, onArchive, onUnpublish, actionId }) {
       <div className="flex-1 min-w-0">
         <p className="font-medium text-sm truncate">{title}</p>
         <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+          <StatusBadge content={item} size="xs" />
           <Badge variant="outline" className="text-xs">
             {provider}
           </Badge>
@@ -189,6 +182,7 @@ function LiveItemRow({ item, onArchive, onUnpublish, actionId }) {
           >
             {type}
           </span>
+          <TaxonomyChips item={item} />
           <span className="text-xs text-muted-foreground">
             {formatPostDate(item.blogPublishedAt)}
           </span>
@@ -317,7 +311,6 @@ function DraftItemRow({ item }) {
   const type = getContentType(item);
   const provider = getProviderDisplay(item);
   const title = item.Title || item.title || 'Untitled';
-  const status = String(item.contentStatus || 'editing').replace(/_/g, ' ');
   const updatedAt = toDate(item.updatedAt) || toDate(item.blogEditedAt);
 
   return (
@@ -333,9 +326,8 @@ function DraftItemRow({ item }) {
           >
             {type}
           </span>
-          <Badge variant="secondary" className="text-[11px]">
-            {status}
-          </Badge>
+          <StatusBadge content={item} size="xs" />
+          <TaxonomyChips item={item} />
           {updatedAt && (
             <span className="text-xs text-muted-foreground">
               Updated{' '}
@@ -400,9 +392,13 @@ export default function EditorListPage() {
 
   // Action state
   const [actionId, setActionId] = useState('');
-  const [actionError, setActionError] = useState('');
+  const [localActionError, setActionError] = useState('');
   const [unpublishTarget, setUnpublishTarget] = useState(null);
   const [archiveTarget, setArchiveTarget] = useState(null);
+  // Archive and unpublish through the shared transitions (ADR 0033 §2); the
+  // server records both, so no client audit row is written here.
+  const transitions = useContentTransitions();
+  const actionError = localActionError || Object.values(transitions.errors).find(Boolean) || '';
 
   // Live counts
   const counts = useMemo(() => {
@@ -477,7 +473,12 @@ export default function EditorListPage() {
 
     if (filteredArchive.length === 0) {
       return (
-        <p className="text-sm text-muted-foreground text-center py-6">{emptyArchiveMessage}</p>
+        <EmptyState
+          compact
+          variant={archiveSearch || archiveProviderFilter !== 'All' ? 'filtered' : 'empty'}
+          title={emptyArchiveMessage}
+          description="Archive a live item from its row above and it is listed here."
+        />
       );
     }
 
@@ -504,39 +505,24 @@ export default function EditorListPage() {
   const doUnpublish = async (item) => {
     setActionError('');
     setActionId(item.id);
-    try {
-      const currentStatus = item.contentStatus || '';
-      await unpublishToInspected(
-        item.id,
-        currentStatus,
-        `Unpublished from Editor board (was ${currentStatus || 'unknown'}) - returned to review queue`
-      );
-      navigate('/admin/queue');
-    } catch (err) {
-      console.error('Unpublish error:', err);
-      setActionError(`Unpublish failed: ${err.message}`);
-    } finally {
-      setActionId('');
-    }
+    const currentStatus = item.contentStatus || '';
+    const result = await transitions.recall(item.id, {
+      currentStatus,
+      reviewNotes: `Unpublished from Editor board (was ${currentStatus || 'unknown'}) - returned to review queue`,
+    });
+    setActionId('');
+    if (result) navigate('/admin/queue');
   };
 
   const doArchive = async (item) => {
     setActionError('');
     setActionId(item.id);
-    try {
-      await postJSON('transitionContentStatus', {
-        contentId: item.id,
-        newStatus: 'archived',
-        markLive: false,
-        reviewNotes: 'Archived from Editor board',
-      });
-      await logAdminAction('content_archived', { contentId: item.id });
-    } catch (err) {
-      console.error('Archive error:', err);
-      setActionError(`Archive failed: ${err.message}`);
-    } finally {
-      setActionId('');
-    }
+    await transitions.transition(item, 'archived', {
+      markLive: false,
+      reviewNotes: 'Archived from Editor board',
+      label: 'Archive',
+    });
+    setActionId('');
   };
 
   function renderLiveBoardSection() {
@@ -592,13 +578,15 @@ export default function EditorListPage() {
         )}
 
         {!loading && filteredLive.length === 0 && (
-          <Card>
-            <CardContent className="p-8 text-center text-muted-foreground">
-              {search || typeFilter !== 'all'
+          <EmptyState
+            variant={search || typeFilter !== 'all' ? 'filtered' : 'empty'}
+            title={
+              search || typeFilter !== 'all'
                 ? 'No items match your filters.'
-                : 'No live published content found.'}
-            </CardContent>
-          </Card>
+                : 'No live published content found.'
+            }
+            description="Live pages appear here once something is published from the Publish page."
+          />
         )}
 
         {!loading && filteredLive.length > 0 && (
@@ -697,16 +685,24 @@ export default function EditorListPage() {
 
   return (
     <div className="space-y-6">
-      {/* ── Header ── */}
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Editor</h1>
-        <p className="text-sm text-muted-foreground">
-          {loading
-            ? 'Loading…'
-            : `${filteredDrafts.length} pre-live drafts and ${liveList.length} live published items`}
-        </p>
-        {actionError && <p className="text-sm text-destructive mt-1">{actionError}</p>}
-      </div>
+      <PageHeader
+        icon={PenTool}
+        title="Editor"
+        help={EDITOR_HELP}
+        status={
+          <span className="text-muted-foreground">
+            {loading
+              ? 'Loading…'
+              : `${filteredDrafts.length} pre-live drafts and ${liveList.length} live published items`}
+          </span>
+        }
+      >
+        {actionError && (
+          <p role="alert" className="text-sm text-destructive">
+            {actionError}
+          </p>
+        )}
+      </PageHeader>
 
       {renderLiveBoardSection()}
       {renderArchiveSection()}

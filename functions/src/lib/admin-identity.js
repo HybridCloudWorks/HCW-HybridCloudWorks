@@ -98,24 +98,150 @@ export function checkBootstrapAllowlist(user, env = process.env) {
   return { ok: true };
 }
 
-/** Source upsertSpeakerEvent's date normalizer; Timestamps become ISO strings. */
+/**
+ * A speaker event's calendar date as plain `YYYY-MM-DD` (ADR 0033 §4).
+ *
+ * Until 2026-10-03 this produced a UTC-midnight ISO timestamp, which the
+ * admin and the public widget then read in local time — a day early west of
+ * Greenwich. An event date is a calendar day, so the day is what is stored:
+ * the leading day of a string is kept as written, and a Date, epoch or
+ * Firestore-shaped `{ seconds }` takes its UTC day. Null for nothing usable.
+ */
 export function normalizeSpeakerEventDate(value) {
   if (value === null || value === undefined || value === '') return null;
-  if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? null : value.toISOString();
-  }
-  if (typeof value === 'number' || typeof value === 'string') {
+  if (typeof value === 'string') {
+    const head = value.trim().slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(head)) {
+      const [y, m, d] = head.split('-').map(Number);
+      const probe = new Date(Date.UTC(y, m - 1, d));
+      return probe.toISOString().slice(0, 10) === head ? head : null;
+    }
     const dt = new Date(value);
-    return Number.isNaN(dt.getTime()) ? null : dt.toISOString();
+    return Number.isNaN(dt.getTime()) ? null : dt.toISOString().slice(0, 10);
+  }
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.toISOString().slice(0, 10);
+  }
+  if (typeof value === 'number') {
+    const dt = new Date(value);
+    return Number.isNaN(dt.getTime()) ? null : dt.toISOString().slice(0, 10);
   }
   if (typeof value === 'object') {
     const seconds = value.seconds ?? value._seconds;
     if (typeof seconds === 'number') {
       const nanos = value.nanoseconds ?? value._nanoseconds ?? 0;
-      return new Date(seconds * 1000 + Math.floor(nanos / 1e6)).toISOString();
+      return new Date(seconds * 1000 + Math.floor(nanos / 1e6)).toISOString().slice(0, 10);
     }
   }
   return null;
+}
+
+export const SPEAKER_EVENT_STATUSES = Object.freeze([
+  'idea',
+  'proposed',
+  'accepted',
+  'declined',
+  'delivered',
+]);
+
+/**
+ * The fields `upsertSpeakerEvent` accepts (ADR 0033 §4). Positive, like the
+ * snapshot sanitizer's list: the write side had no allowlist, so anything an
+ * editor's client sent was stored, and the sanitizer was the only thing
+ * between it and the public snapshot. `images[]` is absent on purpose — the
+ * image-mirror trigger writes it from the server, never a client.
+ */
+export const SPEAKER_EVENT_FIELDS = Object.freeze([
+  'eventId',
+  'sessionizeId',
+  'eventName',
+  'name',
+  'date',
+  'location',
+  'location_coords',
+  'eventUrl',
+  'presentationUrl',
+  'eventImageUrl',
+  'description',
+  'display',
+  'status',
+  'cfpDeadline',
+  'sessions',
+  'audience',
+  'topic',
+  'evidence',
+  'feedback',
+  'attendance',
+]);
+
+const SPEAKER_EVENT_FIELD_SET = new Set(SPEAKER_EVENT_FIELDS);
+const SPEAKER_EVENT_DATE_FIELDS = ['date', 'cfpDeadline'];
+
+const isHttpUrl = (value) => typeof value === 'string' && /^https?:\/\/\S+$/i.test(value.trim());
+const text = (value, max) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
+
+function cleanSessions(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((s) => s && typeof s === 'object')
+    .map((s) => ({
+      title: text(s.title, 300),
+      abstract: text(s.abstract, 8000),
+      slidesUrl: isHttpUrl(s.slidesUrl) ? s.slidesUrl.trim() : null,
+      videoUrl: isHttpUrl(s.videoUrl) ? s.videoUrl.trim() : null,
+    }))
+    .filter((s) => s.title)
+    .slice(0, 50);
+}
+
+function cleanEvidence(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((e) => e && typeof e === 'object' && isHttpUrl(e.url))
+    .map((e) => ({ label: text(e.label, 200) || e.url.trim(), url: e.url.trim() }))
+    .slice(0, 50);
+}
+
+/**
+ * The body of `upsertSpeakerEvent` with every key checked: unknown keys are a
+ * refusal (`error`), dates become calendar days, URLs must be http(s), the
+ * status must be one of SPEAKER_EVENT_STATUSES, and the structured lists are
+ * reduced to their declared shape. Returns `{ value }` or `{ error }`.
+ */
+export function validateSpeakerEventData(data) {
+  const unknown = Object.keys(data).filter(
+    (key) => key !== 'id' && !SPEAKER_EVENT_FIELD_SET.has(key)
+  );
+  if (unknown.length) return { error: `Unknown speaker event field(s): ${unknown.join(', ')}` };
+  const out = { ...data };
+  delete out.id;
+  for (const key of SPEAKER_EVENT_DATE_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(out, key))
+      out[key] = normalizeSpeakerEventDate(out[key]);
+  }
+  for (const key of ['eventUrl', 'presentationUrl', 'eventImageUrl']) {
+    if (out[key] === undefined || out[key] === null || out[key] === '') continue;
+    if (!isHttpUrl(out[key])) return { error: `${key} must be an http(s) URL` };
+    out[key] = out[key].trim();
+  }
+  if (
+    out.status !== undefined &&
+    out.status !== null &&
+    !SPEAKER_EVENT_STATUSES.includes(out.status)
+  ) {
+    return { error: `status must be one of ${SPEAKER_EVENT_STATUSES.join(', ')}` };
+  }
+  if ('sessions' in out) out.sessions = cleanSessions(out.sessions);
+  if ('evidence' in out) out.evidence = cleanEvidence(out.evidence);
+  if ('attendance' in out) {
+    const n = Number(out.attendance);
+    out.attendance =
+      out.attendance === null || out.attendance === '' || !Number.isFinite(n)
+        ? null
+        : Math.max(0, Math.floor(n));
+  }
+  if ('display' in out) out.display = out.display === true;
+  return { value: out };
 }
 
 /**
@@ -390,15 +516,14 @@ export function createAdminIdentityHandlers({
           return json(400, { error: 'data object required' });
         }
 
-        const normalizedData = { ...data };
-        delete normalizedData.id; // the route/docId is the key, never the body
-        if (Object.prototype.hasOwnProperty.call(normalizedData, 'date')) {
-          normalizedData.date = normalizeSpeakerEventDate(normalizedData.date);
-        }
+        // The route/docId is the key, never the body; every other key must be
+        // one the hub declares (ADR 0033 §4), or the write is refused.
+        const checked = validateSpeakerEventData(data);
+        if (checked.error) return json(400, { error: checked.error });
 
         const nowIso = now().toISOString();
         const payload = {
-          ...normalizedData,
+          ...checked.value,
           updatedAt: nowIso,
           updatedBy: actor(auth.user),
         };
@@ -416,7 +541,13 @@ export function createAdminIdentityHandlers({
           if (existing) {
             await store.patchDoc('speakerevents', docId, payload);
           } else {
-            await store.upsertDoc('speakerevents', { id: docId, ...payload });
+            // A merge that creates is still a creation, so it is stamped as one.
+            await store.upsertDoc('speakerevents', {
+              id: docId,
+              ...payload,
+              createdAt: nowIso,
+              createdBy: actor(auth.user),
+            });
           }
         }
 

@@ -16,6 +16,7 @@ import React, { useState } from 'react';
 import { usePublicData } from '@/hooks/usePublicData';
 import { fetchPublishedEpisodes, isSupportedPlatform } from '@/lib/listenAndLearn';
 import { resolveMediaUrl } from '@/lib/functionsBase';
+import { readPlaybackPosition, savePlaybackPosition } from '@/lib/audioEpisodes';
 import { safeUrl } from '@/lib/safeUrl';
 
 const ACCENTS = {
@@ -61,6 +62,15 @@ function Episode({ episode, accent }) {
   const takeaways = Array.isArray(episode.keyTakeaways) ? episode.keyTakeaways : [];
   const videos = Array.isArray(episode.videos) ? episode.videos : [];
   const transcript = Array.isArray(episode.transcript) ? episode.transcript : [];
+  // The same key the hero playlist and the audio page use, so a position
+  // remembered in one player is picked up by the others (ADR 0033 §4).
+  const positionKey = `listen-and-learn:${episode.setId}/${episode.id}`;
+  const remember = (audioEl) =>
+    savePlaybackPosition(
+      positionKey,
+      audioEl.currentTime,
+      audioEl.duration || episode.durationSeconds
+    );
 
   return (
     <article className="bg-card/40 border border-card/30 rounded-xl p-4">
@@ -96,6 +106,14 @@ function Episode({ episode, accent }) {
           src={resolveMediaUrl(episode.audioUrl)}
           className="w-full h-10 mb-3"
           aria-label={`Listen: ${episode.title}`}
+          onLoadedMetadata={(e) => {
+            const at = readPlaybackPosition(positionKey);
+            if (at > 0 && at < (e.currentTarget.duration || Infinity))
+              e.currentTarget.currentTime = at;
+          }}
+          onPause={(e) => remember(e.currentTarget)}
+          onTimeUpdate={(e) => remember(e.currentTarget)}
+          onEnded={() => savePlaybackPosition(positionKey, 0)}
         >
           <track kind="captions" />
         </audio>
@@ -184,7 +202,8 @@ export default function ListenAndLearn({ platform, examCode, studyGuideUrl }) {
     return (
       <SectionShell accent={accent}>
         <p className="text-sm text-foreground/70 mt-2">
-          Study podcasts are live for Azure and AWS certifications. This platform is coming next.
+          Study podcasts are live for Azure and AWS certifications; other platforms&apos; audio is
+          on their podcast page.
         </p>
       </SectionShell>
     );

@@ -22,6 +22,9 @@
  *     stores null; `undefined` deletion is NOT used here on purpose.
  */
 import { randomUUID } from 'node:crypto';
+import { readConfigStamp } from './auth/http-route.js';
+import { ADMIN_CONFIG_PARTITION } from './cosmos-client.js';
+import { unresolvedSecretNames } from './secrets-health.js';
 
 const json = (status, body) => ({
   status,
@@ -99,12 +102,16 @@ const ORPHAN_PROBE_BATCH = 100;
  * @param {{ queryDocs: Function, readDoc: Function, upsertDoc: Function, patchDoc: Function }} deps.store
  * @param {() => Date} [deps.now]
  * @param {() => string} [deps.uuid]
+ * @param {Record<string, unknown>} [deps.env] the worker's environment, read
+ *   for the runtime configuration stamp and the unresolved Key Vault
+ *   references (ADR 0033 §1 Platform)
  */
 export function createOpsHealthHandlers({
   guard,
   store,
   now = () => new Date(),
   uuid = randomUUID,
+  env = process.env,
 }) {
   const count = async (where, params = []) => {
     const rows = await store.queryDocs(
@@ -122,8 +129,14 @@ export function createOpsHealthHandlers({
     const nowMs = nowDate.getTime();
     const breachCutoffIso = new Date(nowMs - 24 * 60 * 60 * 1000).toISOString();
 
-    const needsReviewIn = { name: '@nrStatuses', value: ['draft', 'ingested', 'inspected'] };
-    const stagedIn = { name: '@stagedStatuses', value: ['approved', 'published'] };
+    const needsReviewIn = {
+      name: '@nrStatuses',
+      value: ['draft', 'ingested', 'inspected'],
+    };
+    const stagedIn = {
+      name: '@stagedStatuses',
+      value: ['approved', 'published'],
+    };
 
     const [
       publishedCount,
@@ -136,6 +149,7 @@ export function createOpsHealthHandlers({
       alertRows,
       generatedImages,
       notifyState,
+      forgeStats,
     ] = await Promise.all([
       count("c.contentStatus = 'published'"),
       store.queryDocs(
@@ -163,18 +177,34 @@ export function createOpsHealthHandlers({
         []
       ),
       store.readDoc('system', 'notify_state', 'notify_state'),
+      // The autonomous forge's rolling day bucket (content/forge.js), so the
+      // Health page can say when the forge last did anything (ADR 0033).
+      store.readDoc('admin_config', 'forge_stats', ADMIN_CONFIG_PARTITION),
     ]);
+    const lastCheckedAt = nowDate.toISOString();
 
     const alerts = [...alertRows]
       .sort((a, b) => toMillis(b.updatedAt) - toMillis(a.updatedAt))
       .slice(0, 20);
 
     const missingSlugCount = publishedSlim.filter((d) => !d.slug && !d.Slug).length;
+    // `functionsConfigured` used to be the literal `true` — a placeholder the
+    // page rendered as "Functions URL Ready" whatever the worker's state
+    // (ADR 0033 §1 Platform). It is now derived: the runtime configuration
+    // stamp reached this process (T-513), and every Key Vault reference in
+    // its environment resolved (T-720). The names are the authenticated
+    // surface's to show — /api/health gives anonymous callers the count only.
+    const configStamp = readConfigStamp(env);
+    const unresolvedSecrets = unresolvedSecretNames(env);
     const readiness = {
-      functionsConfigured: true,
+      functionsConfigured: configStamp.generation !== 'unset' && unresolvedSecrets.length === 0,
+      configGeneration: configStamp.generation,
+      configWriter: configStamp.writer,
+      unresolvedSecrets,
       publishedItems: publishedCount,
       missingSlugCount,
       rssSources: rssCount,
+      lastCheckedAt,
     };
 
     const digestData = digestDoc || latestDigestRows[0] || null;
@@ -242,16 +272,36 @@ export function createOpsHealthHandlers({
         digestData?.publishingOps?.status === 'success'
           ? (digestData?.publishingOps?.lastRunAt ?? null)
           : null,
+      lastCheckedAt,
+    };
+
+    // What the generated-images read already fetched, counted rather than
+    // discarded: the only storage figure this snapshot can give cheaply. The
+    // read is bounded, so `bounded` says when the count is a floor.
+    const storage = {
+      generatedImages: generatedImages.length,
+      bounded: generatedImages.length >= IMAGES_PROBE_BOUND,
+      lastCheckedAt,
+    };
+
+    const forge = {
+      updatedAt: forgeStats?.updatedAt ?? null,
+      todayDate: forgeStats?.today?.date ?? null,
+      forgedToday: Number(forgeStats?.today?.forged) || 0,
+      lastCheckedAt,
     };
 
     return {
       success: true,
-      generatedAt: nowDate.toISOString(),
+      generatedAt: lastCheckedAt,
+      lastCheckedAt,
       readiness,
-      digest: digestData,
+      digest: digestData ? { ...digestData, lastCheckedAt } : null,
       alerts,
       operationalSignals,
-      telegramNotifyState: notifyState || {},
+      storage,
+      forge,
+      telegramNotifyState: { ...(notifyState || {}), lastCheckedAt },
     };
   }
 
@@ -302,7 +352,9 @@ export function createOpsHealthHandlers({
           });
         }
         if (action === 'resolve' && !normalizedResolutionNote) {
-          return json(400, { error: 'resolutionNote is required when resolving an alert' });
+          return json(400, {
+            error: 'resolutionNote is required when resolving an alert',
+          });
         }
 
         const alertData = await store.readDoc('workflow_alerts', alertId, alertId);
@@ -334,14 +386,20 @@ export function createOpsHealthHandlers({
           userName: user.name || null,
           userEmail: user.email || null,
           changes: {
-            before: { active: alertData?.active ?? true, status: alertData?.status || 'open' },
+            before: {
+              active: alertData?.active ?? true,
+              status: alertData?.status || 'open',
+            },
             after: updates,
             changedFields: Object.keys(updates),
             notes: normalizedResolutionNote,
           },
           ipAddress: null, // see content-update.js — no trustworthy source yet
           userAgent: request.headers?.get?.('user-agent') || null,
-          metadata: { authMethod: 'entra_bearer_token', alertType: alertData?.alertType || null },
+          metadata: {
+            authMethod: 'entra_bearer_token',
+            alertType: alertData?.alertType || null,
+          },
           compliance: {
             dataClassification: 'internal',
             retentionMonths: 24,

@@ -1,28 +1,42 @@
 /**
- * Review and Published are the same panel over a different slice of the same
- * set, so they are one component and two configurations of it.
+ * Review — the chapters of one book that are not live yet, with their
+ * transcripts and an audio preview, and the approval that publishes them.
+ * Failed chapters belong here rather than in the Library's published view:
+ * they are work in progress that needs a decision, and the card explains the
+ * failure. A chapter whose regeneration failed while published is NOT here
+ * — it is still live, and its row in the Library offers Retry and Keep
+ * current (ADR 0033 §4).
  *
- * Written this way on purpose: the first draft of #574 was two files that
- * differed in a filter, an empty-state sentence and a doc comment, and were
- * otherwise identical for thirty-five lines. That is the duplication #588
- * counts, and — worse — it is two places to change the approve button.
+ * Until ADR 0033 §4 a Published tab sat beside this one over the same list;
+ * the Library's book view shows each chapter's status now, so the published
+ * slice lives there.
  */
 import React from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { statusCounts } from './episodeView';
 import { SetPicker, EpisodeList, CountsLine } from './shared';
 
-const isPublished = (episode) => episode.status === 'published';
+const needsReview = (episode) => episode.status !== 'published' && episode.status !== 'archived';
 
-function SetEpisodesTab({ hub, keep, emptyLabel }) {
-  const { sets, selected, episodes, loading, busySlugs, openSet, review } = hub;
-  const shown = episodes.filter(keep);
+export function ReviewTab({ hub }) {
+  const {
+    sets,
+    selected,
+    episodes,
+    loading,
+    busySlugs,
+    openSet,
+    review,
+    regenerate,
+    patchChapter,
+  } = hub;
+  const shown = episodes.filter(needsReview);
 
   return (
     <div className="space-y-6 pt-6">
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Generated sets</CardTitle>
+          <CardTitle className="text-base">Books and courses</CardTitle>
         </CardHeader>
         <CardContent>
           <SetPicker sets={sets} selected={selected} onOpen={openSet} />
@@ -32,8 +46,8 @@ function SetEpisodesTab({ hub, keep, emptyLabel }) {
       {selected && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              {selected.examCode}
+            <CardTitle className="flex items-center gap-2 text-base">
+              {hub.book?.title || selected.examCode}
               <CountsLine counts={statusCounts(episodes)} />
             </CardTitle>
           </CardHeader>
@@ -43,7 +57,13 @@ function SetEpisodesTab({ hub, keep, emptyLabel }) {
               episodes={shown}
               busySlugs={busySlugs}
               onReview={review}
-              emptyLabel={emptyLabel(episodes)}
+              onRetry={(episode) => regenerate(episode.id)}
+              onKeepCurrent={(episode) => patchChapter(episode.id, { clearError: true })}
+              emptyLabel={
+                episodes.length > 0
+                  ? 'Every chapter in this book is published or archived — see the Library.'
+                  : 'No chapters in this book yet.'
+              }
             />
           </CardContent>
         </Card>
@@ -52,38 +72,4 @@ function SetEpisodesTab({ hub, keep, emptyLabel }) {
   );
 }
 
-/**
- * Review — generated episodes that are not live yet, with their transcripts and
- * an audio preview, and the approval that publishes them. Failed episodes
- * belong here rather than on Published: they are work in progress that needs a
- * decision, and the card already explains the failure.
- */
-export function ReviewTab({ hub }) {
-  return (
-    <SetEpisodesTab
-      hub={hub}
-      keep={(episode) => !isPublished(episode)}
-      emptyLabel={(all) =>
-        all.length > 0
-          ? 'Every episode in this set is published — see the Published tab.'
-          : 'No episodes in this set.'
-      }
-    />
-  );
-}
-
-/**
- * Published — what is live on the certification pages, per set, with the same
- * card Review uses so an episode can be withdrawn from where it is visible.
- */
-export function PublishedTab({ hub }) {
-  return (
-    <SetEpisodesTab
-      hub={hub}
-      keep={isPublished}
-      emptyLabel={() =>
-        'Nothing from this set is published yet — approve episodes on the Review tab.'
-      }
-    />
-  );
-}
+export default ReviewTab;

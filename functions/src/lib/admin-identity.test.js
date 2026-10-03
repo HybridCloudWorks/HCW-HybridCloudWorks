@@ -15,6 +15,7 @@ import {
   checkBootstrapAllowlist,
   getPermissionsForRole,
   normalizeSpeakerEventDate,
+  validateSpeakerEventData,
 } from './admin-identity.js';
 
 const context = { log: vi.fn(), error: vi.fn() };
@@ -73,16 +74,15 @@ describe('helpers', () => {
     expect(checkBootstrapAllowlist(USER, { OWNER_ADMIN_UID: 'someone-else' }).status).toBe(403);
   });
 
-  it('speaker date normalizer handles Date, epoch, string, Timestamp-like, junk', () => {
-    expect(normalizeSpeakerEventDate(new Date('2026-01-01T00:00:00Z'))).toBe(
-      '2026-01-01T00:00:00.000Z'
-    );
-    expect(normalizeSpeakerEventDate(1767225600000)).toBe('2026-01-01T00:00:00.000Z');
-    expect(normalizeSpeakerEventDate('2026-01-01')).toMatch(/^2026-01-01T/);
-    expect(normalizeSpeakerEventDate({ seconds: 1767225600, nanoseconds: 0 })).toBe(
-      '2026-01-01T00:00:00.000Z'
-    );
-    expect(normalizeSpeakerEventDate({ _seconds: 1767225600 })).toBe('2026-01-01T00:00:00.000Z');
+  it('speaker date normalizer answers the calendar day for Date, epoch, string, Timestamp-like, junk', () => {
+    expect(normalizeSpeakerEventDate(new Date('2026-01-01T00:00:00Z'))).toBe('2026-01-01');
+    expect(normalizeSpeakerEventDate(1767225600000)).toBe('2026-01-01');
+    expect(normalizeSpeakerEventDate('2026-01-01')).toBe('2026-01-01');
+    // The leading day is the day the author typed, whatever offset follows it.
+    expect(normalizeSpeakerEventDate('2026-01-01T23:30:00-06:00')).toBe('2026-01-01');
+    expect(normalizeSpeakerEventDate({ seconds: 1767225600, nanoseconds: 0 })).toBe('2026-01-01');
+    expect(normalizeSpeakerEventDate({ _seconds: 1767225600 })).toBe('2026-01-01');
+    expect(normalizeSpeakerEventDate('2026-02-30')).toBeNull();
     expect(normalizeSpeakerEventDate('junk')).toBeNull();
     expect(normalizeSpeakerEventDate('')).toBeNull();
   });
@@ -220,7 +220,12 @@ describe('getAuthExpectations', () => {
   // deployed. Reporting its own literals rather than the guard's constants
   // would let it agree with itself while the guard drifted.
   it('reports the values the guard actually enforces, not copies of them', async () => {
-    const h = createAdminIdentityHandlers({ guard: guardWith(), store: makeStore(), env, ...fixed });
+    const h = createAdminIdentityHandlers({
+      guard: guardWith(),
+      store: makeStore(),
+      env,
+      ...fixed,
+    });
     const body = JSON.parse((await h.getAuthExpectations(getRequest(), context)).body);
 
     expect(body.adminAppRole).toBe(ENTRA_ADMIN_APP_ROLE);
@@ -348,30 +353,104 @@ describe('recordAdminAudit', () => {
 });
 
 describe('speaker events', () => {
-  it('upsert merges by default (patch when present), normalizing the date', async () => {
-    const store = makeStore({ readDoc: vi.fn(async () => ({ id: 'ev1', title: 'kept' })) });
+  it('upsert merges by default (patch when present), storing the calendar day', async () => {
+    const store = makeStore({ readDoc: vi.fn(async () => ({ id: 'ev1', name: 'kept' })) });
     const h = createAdminIdentityHandlers({ guard: guardWith(), store, ...fixed });
     await h.upsertSpeakerEvent(
-      makeRequest({ docId: 'ev1', data: { title: 'Talk', date: { seconds: 1767225600 } } }),
+      makeRequest({ docId: 'ev1', data: { name: 'Talk', date: { seconds: 1767225600 } } }),
       context
     );
     expect(store.upsertDoc).not.toHaveBeenCalled();
     const patch = store.patchDoc.mock.calls[0][2];
-    expect(patch.date).toBe('2026-01-01T00:00:00.000Z');
+    // A calendar day, not UTC midnight: the admin and the widget read it as the
+    // day it names in every zone (ADR 0033 §4).
+    expect(patch.date).toBe('2026-01-01');
     expect(patch.updatedBy).toBe('first@hcw.dev');
+  });
+
+  it('keeps the leading day of a timestamp string and stamps a merge-create as a creation', async () => {
+    const store = makeStore({ readDoc: vi.fn(async () => null) });
+    const h = createAdminIdentityHandlers({ guard: guardWith(), store, ...fixed });
+    await h.upsertSpeakerEvent(
+      makeRequest({
+        docId: 'ev3',
+        data: {
+          name: 'Evening talk',
+          date: '2026-03-14T23:30:00-06:00',
+          cfpDeadline: '2026-01-31',
+        },
+      }),
+      context
+    );
+    expect(store.patchDoc).not.toHaveBeenCalled();
+    expect(store.upsertDoc.mock.calls[0][1]).toMatchObject({
+      id: 'ev3',
+      date: '2026-03-14',
+      cfpDeadline: '2026-01-31',
+      createdAt: '2026-08-07T02:00:00.000Z',
+      createdBy: 'first@hcw.dev',
+    });
+  });
+
+  it('refuses a field the hub does not declare, a bad URL and an unknown status', async () => {
+    const store = makeStore();
+    const h = createAdminIdentityHandlers({ guard: guardWith(), store, ...fixed });
+    const unknown = await h.upsertSpeakerEvent(
+      makeRequest({ docId: 'ev1', data: { name: 'Talk', internalNotes: 'client paid 5k' } }),
+      context
+    );
+    expect(unknown.status).toBe(400);
+    expect(JSON.parse(unknown.body).error).toContain('internalNotes');
+    expect(
+      (
+        await h.upsertSpeakerEvent(
+          makeRequest({ docId: 'ev1', data: { eventUrl: 'javascript:alert(1)' } }),
+          context
+        )
+      ).status
+    ).toBe(400);
+    expect(
+      (
+        await h.upsertSpeakerEvent(
+          makeRequest({ docId: 'ev1', data: { status: 'maybe' } }),
+          context
+        )
+      ).status
+    ).toBe(400);
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+    expect(store.patchDoc).not.toHaveBeenCalled();
+  });
+
+  it('reduces sessions and evidence to their declared shape', () => {
+    expect(
+      validateSpeakerEventData({
+        status: 'accepted',
+        sessions: [
+          { title: ' Keynote ', abstract: 'x', slidesUrl: 'https://s', videoUrl: 'ftp://no' },
+          { title: '' },
+        ],
+        evidence: [{ label: 'Photos', url: 'https://p' }, { url: 'nope' }],
+        attendance: '120.7',
+      }).value
+    ).toEqual({
+      status: 'accepted',
+      sessions: [{ title: 'Keynote', abstract: 'x', slidesUrl: 'https://s', videoUrl: null }],
+      evidence: [{ label: 'Photos', url: 'https://p' }],
+      attendance: 120,
+    });
   });
 
   it('merge:false replaces wholesale with creation stamps', async () => {
     const store = makeStore();
     const h = createAdminIdentityHandlers({ guard: guardWith(), store, ...fixed });
     await h.upsertSpeakerEvent(
-      makeRequest({ docId: 'ev2', data: { title: 'New talk' }, merge: false }),
+      makeRequest({ docId: 'ev2', data: { name: 'New talk' }, merge: false }),
       context
     );
     expect(store.patchDoc).not.toHaveBeenCalled();
     expect(store.upsertDoc.mock.calls[0][1]).toMatchObject({
       id: 'ev2',
-      title: 'New talk',
+      name: 'New talk',
       createdAt: '2026-08-07T02:00:00.000Z',
       createdBy: 'first@hcw.dev',
     });

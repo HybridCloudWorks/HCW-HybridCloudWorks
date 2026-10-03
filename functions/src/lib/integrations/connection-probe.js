@@ -165,14 +165,14 @@ export function assertUrlSafe(value) {
  * should read them. The first is the one a rejection blames when
  * `reportsKeyVerdict` is on.
  */
-export function createProbe({
-  name,
-  service,
-  settings,
-  buildRequest,
-  reportsKeyVerdict = false,
-}) {
-  return Object.freeze({ name, service, settings, buildRequest, reportsKeyVerdict });
+export function createProbe({ name, service, settings, buildRequest, reportsKeyVerdict = false }) {
+  return Object.freeze({
+    name,
+    service,
+    settings,
+    buildRequest,
+    reportsKeyVerdict,
+  });
 }
 
 /**
@@ -221,7 +221,10 @@ export const PROBES = Object.freeze({
     settings: ['RSSCOM_API_KEY'],
     buildRequest: ({ values }) => ({
       url: 'https://api.rss.com/v4/podcasts',
-      headers: { 'X-Api-Key': values.RSSCOM_API_KEY, Accept: 'application/json' },
+      headers: {
+        'X-Api-Key': values.RSSCOM_API_KEY,
+        Accept: 'application/json',
+      },
     }),
   }),
 
@@ -268,7 +271,10 @@ export const PROBES = Object.freeze({
     settings: ['RESEND_API_KEY'],
     buildRequest: ({ values }) => ({
       url: 'https://api.resend.com/domains',
-      headers: { Authorization: `Bearer ${values.RESEND_API_KEY}`, Accept: 'application/json' },
+      headers: {
+        Authorization: `Bearer ${values.RESEND_API_KEY}`,
+        Accept: 'application/json',
+      },
     }),
   }),
 
@@ -284,7 +290,49 @@ export const PROBES = Object.freeze({
     settings: ['QLTY_API_TOKEN'],
     buildRequest: ({ values }) => ({
       url: 'https://api.qlty.sh/user',
-      headers: { Authorization: `Bearer ${values.QLTY_API_TOKEN}`, Accept: 'application/json' },
+      headers: {
+        Authorization: `Bearer ${values.QLTY_API_TOKEN}`,
+        Accept: 'application/json',
+      },
+    }),
+  }),
+
+  /**
+   * `GET /v1/account` — whose Replicate account the token belongs to
+   * (ADR 0033 Platform: a card for every AI key). Read-only and free; the
+   * cover generator (triggers/ai-cover.js) spends the same token on
+   * predictions, and this proves the token without starting one. No key
+   * verdict: Replicate's 401/403 split has not been measured here.
+   */
+  replicate: createProbe({
+    name: 'replicate',
+    service: 'Replicate',
+    settings: ['REPLICATE_API_KEY'],
+    buildRequest: ({ values }) => ({
+      url: 'https://api.replicate.com/v1/account',
+      headers: {
+        Authorization: `Bearer ${values.REPLICATE_API_KEY}`,
+        Accept: 'application/json',
+      },
+    }),
+  }),
+
+  /**
+   * `GET /v1/team/credit-usage` — the team's remaining Firecrawl credits
+   * (ADR 0033 Platform). Read-only and free, where a scrape would spend a
+   * credit on a page nobody asked for; the count also tells the operator how
+   * close the summariser is to running dry. No key verdict, same reason.
+   */
+  firecrawl: createProbe({
+    name: 'firecrawl',
+    service: 'Firecrawl',
+    settings: ['FIRECRAWL_API_KEY'],
+    buildRequest: ({ values }) => ({
+      url: 'https://api.firecrawl.dev/v1/team/credit-usage',
+      headers: {
+        Authorization: `Bearer ${values.FIRECRAWL_API_KEY}`,
+        Accept: 'application/json',
+      },
     }),
   }),
 });

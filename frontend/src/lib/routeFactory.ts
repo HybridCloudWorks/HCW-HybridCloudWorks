@@ -207,6 +207,17 @@ export const routes = {
   buildingImages: (provider: ProviderType) => getRoute(provider, 'buildingImages'),
   desktop: (provider: ProviderType) => getRoute(provider, 'desktop'),
   rss: (provider: ProviderType) => getRoute(provider, 'rss'),
+  /**
+   * A provider's labs under its Learn section (ADR 0033 §3): the list at
+   * `/:provider/education/labs` and one lab's pane at
+   * `/:provider/education/labs/:labId`. Both are children of the
+   * `/:provider` block in App.jsx, declared before `education/:certSlug` so
+   * `labs` is never read as a certification slug (ADR 0033 §6 item 6). The
+   * cross-provider index stays at `staticRoutes.labs`.
+   */
+  labs: (provider: ProviderType) => getProviderPath(provider, 'education/labs'),
+  labPane: (provider: ProviderType, labId: string) =>
+    getProviderPath(provider, `education/labs/${encodeURIComponent(labId)}`),
 } as const;
 
 /**

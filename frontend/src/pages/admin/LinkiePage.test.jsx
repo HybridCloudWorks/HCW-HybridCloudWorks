@@ -41,9 +41,15 @@ vi.mock('@/components/ui/use-toast', () => ({ useToast: () => ({ toast }) }));
 // `tab=connection` is deliberately the OLD id: #577 renamed that tab to
 // Settings, and every one of these tests reaching the Test Connection button
 // is the redirect working. The explicit assertions are at the end of the file.
-vi.mock('react-router', () => ({
-  useSearchParams: () => [new URLSearchParams(searchParams), vi.fn()],
-}));
+vi.mock('react-router', async () => {
+  const React_ = await vi.importActual('react');
+  return {
+    // PageHeader reads the route to find its purpose sentence.
+    useLocation: () => ({ pathname: '/admin/linkie', search: '' }),
+    useSearchParams: () => [new URLSearchParams(searchParams), vi.fn()],
+    Link: ({ to, children }) => React_.createElement('a', { href: to }, children),
+  };
+});
 
 // The Functions base is cross-origin in production, which is what makes a
 // stored `/api/public/media/…` path absolute. jsdom's origin is http, so

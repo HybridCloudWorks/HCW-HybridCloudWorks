@@ -4,6 +4,7 @@
  * once already (T-601), so the resolver's contract is pinned here too.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 
 // The module registers job types on import, and registerJobType throws on a
 // duplicate — so the registry is faked rather than shared across test files.
@@ -13,6 +14,9 @@ vi.mock('../lib/cosmos-client.js', () => ({
   queryDocs: vi.fn(),
   patchDoc: vi.fn(),
   upsertDoc: vi.fn(),
+  incrementIf: vi.fn(),
+  replaceDocIfMatch: vi.fn(),
+  createDoc: vi.fn(),
 }));
 vi.mock('../lib/ai/router.js', () => ({
   generateJsonResponse: vi.fn(),
@@ -24,7 +28,8 @@ vi.mock('../lib/newsletter/issue.js', () => ({
   createIssueBuilder: vi.fn(() => ({ build: issueBuild })),
 }));
 
-const { resolveForgeTargets, runForgeFromUrl, FORGE_MAX_BATCH } = await import('./forge-jobs.js');
+const { resolveForgeTargets, runForgeFromUrl, FORGE_MAX_BATCH, forgeStore } =
+  await import('./forge-jobs.js');
 const { registerJobType } = await import('../lib/jobs.js');
 
 // Registration happens once, on import. Vitest 5 clears mock call history
@@ -32,9 +37,37 @@ const { registerJobType } = await import('../lib/jobs.js');
 // before any test runs, rather than read from the mock inside a test.
 const registrations = [...registerJobType.mock.calls];
 
+describe('the store the jobs hand to the forge (ADR 0033)', () => {
+  /** Every `store.<method>(` the given module calls. */
+  const storeMethodsIn = (file) => {
+    const text = readFileSync(new URL(file, import.meta.url), 'utf8');
+    return [...new Set([...text.matchAll(/\bstore\.(\w+)\(/g)].map((m) => m[1]))];
+  };
+
+  it('carries every method forge.js calls, so the budget claim cannot throw a TypeError', () => {
+    // The crash: forge.js claimForgeBudget calls store.incrementIf,
+    // store.replaceDocIfMatch and store.createDoc; the store here had none of
+    // them, so every manual forge job died at the claim, before any model call.
+    const called = storeMethodsIn('../lib/content/forge.js');
+    expect(called).toEqual(
+      expect.arrayContaining(['incrementIf', 'replaceDocIfMatch', 'createDoc'])
+    );
+    for (const method of called) {
+      expect(typeof forgeStore[method], `forgeStore.${method}`).toBe('function');
+    }
+  });
+
+  it('carries every method the calibration job and the drafter call too', () => {
+    for (const file of ['../lib/content/forge-studio.js', '../lib/content/drafting.js']) {
+      for (const method of storeMethodsIn(file)) {
+        expect(typeof forgeStore[method], `${file} → forgeStore.${method}`).toBe('function');
+      }
+    }
+  });
+});
+
 describe('build-newsletter-issue', () => {
-  const worker = () =>
-    registrations.find(([name]) => name === 'build-newsletter-issue')[1].worker;
+  const worker = () => registrations.find(([name]) => name === 'build-newsletter-issue')[1].worker;
 
   it('passes no days of its own, so the window saved in Newsletter settings applies (#557)', async () => {
     issueBuild.mockClear();
@@ -60,7 +93,9 @@ describe('resolveForgeTargets', () => {
   it('rejects an empty payload and an oversized batch', () => {
     expect(() => resolveForgeTargets({})).toThrow(/sourceContentId/);
     expect(() =>
-      resolveForgeTargets({ sourceContentIds: Array.from({ length: FORGE_MAX_BATCH + 1 }, (_, i) => `c${i}`) })
+      resolveForgeTargets({
+        sourceContentIds: Array.from({ length: FORGE_MAX_BATCH + 1 }, (_, i) => `c${i}`),
+      })
     ).toThrow(/At most/);
   });
 });
@@ -108,7 +143,10 @@ describe('runForgeFromUrl', () => {
       contentId: 'new-1',
       actor: { email: 'owner@hcw' },
     });
-    expect(out).toMatchObject({ status: 'forge_ready', sourceUrl: 'https://learn.microsoft.com/azure/x' });
+    expect(out).toMatchObject({
+      status: 'forge_ready',
+      sourceUrl: 'https://learn.microsoft.com/azure/x',
+    });
   });
 
   it('honours an explicit provider over inference', async () => {
@@ -118,9 +156,13 @@ describe('runForgeFromUrl', () => {
   });
 
   it('fails the job on a bad URL or failed scrape, before any write', async () => {
-    const d = deps({ scrape: vi.fn(async () => ({ success: false, error: '403' })) });
+    const d = deps({
+      scrape: vi.fn(async () => ({ success: false, error: '403' })),
+    });
     await expect(runForgeFromUrl({ url: 'https://a.example/x' }, d)).rejects.toThrow(/403/);
-    await expect(runForgeFromUrl({ url: 'nope' }, d)).rejects.toMatchObject({ code: 'BAD_URL' });
+    await expect(runForgeFromUrl({ url: 'nope' }, d)).rejects.toMatchObject({
+      code: 'BAD_URL',
+    });
     expect(d.store.upsertDoc).not.toHaveBeenCalled();
   });
 
@@ -136,13 +178,21 @@ describe('runForgeFromUrl', () => {
       },
     });
     const out = await runForgeFromUrl({ url: 'https://a.example/x' }, d);
-    expect(out).toMatchObject({ success: false, skipped: true, duplicateOf: 'X' });
+    expect(out).toMatchObject({
+      success: false,
+      skipped: true,
+      duplicateOf: 'X',
+    });
   });
 
   it('fails the job when the pipeline fails for any non-duplicate reason', async () => {
     const d = deps({
       forge: {
-        runForgePipeline: vi.fn(async () => ({ ok: false, httpStatus: 502, error: 'Generation failed' })),
+        runForgePipeline: vi.fn(async () => ({
+          ok: false,
+          httpStatus: 502,
+          error: 'Generation failed',
+        })),
       },
     });
     await expect(runForgeFromUrl({ url: 'https://a.example/x' }, d)).rejects.toThrow(

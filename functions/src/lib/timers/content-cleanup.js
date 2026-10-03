@@ -23,9 +23,19 @@
  * refused and left for a human: the admin content queue lists it under the
  * `soft_deleted` filter. Every run logs one summary line, idle runs included,
  * so the per-category host.json override (T-766) has something to witness.
+ *
+ * COUNTERS. The change feed never delivers a delete (T-324), so every hard
+ * delete here moves the dashboard counters itself through the same stats
+ * maintainer the delete endpoints call (`onContentDeleted`, defaulting to
+ * createDashboardStatsMaintainer over `store`). Until 2026-10-03 the purge
+ * skipped this and `dashboard_stats_v1` drifted upward by one per purged
+ * document until someone pressed Recalculate (ADR 0033 §1). Best-effort, after
+ * the delete that matters: a counter that fails to move is a warning, not a
+ * document that fails to go.
  */
-import { getDocDateValue } from '../cms/content-dedup.js';
-import { writeSystemAudit } from './workflow-records.js';
+import { getDocDateValue } from "../cms/content-dedup.js";
+import { createDashboardStatsMaintainer } from "../triggers/dashboard-stats.js";
+import { writeSystemAudit } from "./workflow-records.js";
 
 export function getRejectionReferenceDate(data) {
   return (
@@ -38,9 +48,9 @@ export function getRejectionReferenceDate(data) {
 
 /** Who put the deletion mark on a document — the only thing the hard reaper trusts. */
 export function deletionOrigin(doc) {
-  if (doc?.deletionRequestedBy) return 'user';
-  if (doc?.softDeletedReason === 'rejected_aged_out') return 'policy';
-  return 'unknown';
+  if (doc?.deletionRequestedBy) return "user";
+  if (doc?.softDeletedReason === "rejected_aged_out") return "policy";
+  return "unknown";
 }
 
 export function createContentCleanup({
@@ -49,20 +59,31 @@ export function createContentCleanup({
   uuid,
   log = {},
   env = process.env,
+  onContentDeleted = null,
 }) {
   const auditOpts = { now, ...(uuid && { uuid }) };
+  const countersAfterDelete =
+    onContentDeleted ||
+    ((contentId) =>
+      createDashboardStatsMaintainer({ store, now, log }).applyTransition({
+        contentId,
+        afterData: null,
+      }));
 
   /** Mark rejected content older than `olderThanHours` as soft-deleted. */
-  async function softDeleteRejected({ olderThanHours = null, limit = 500 } = {}) {
+  async function softDeleteRejected({
+    olderThanHours = null,
+    limit = 500,
+  } = {}) {
     const maxLimit = Math.min(Number(limit) || 500, 500);
     const cutoff =
-      typeof olderThanHours === 'number' && olderThanHours > 0
+      typeof olderThanHours === "number" && olderThanHours > 0
         ? new Date(now().getTime() - olderThanHours * 60 * 60 * 1000)
         : null;
     const rows = await store.queryDocs(
-      'content',
+      "content",
       `SELECT TOP ${maxLimit} c.id, c.softDeletedAt, c.rejectedAt, c.reviewedAt, c.updatedAt FROM c WHERE c.contentStatus = 'rejected'`,
-      []
+      [],
     );
     const examined = (rows || []).length;
     const toMark = (rows || []).filter((data) => {
@@ -81,27 +102,30 @@ export function createContentCleanup({
     }
     const stamp = now().toISOString();
     for (const doc of toMark) {
-      await store.patchDoc('content', doc.id, {
+      await store.patchDoc("content", doc.id, {
         softDeletedAt: stamp,
-        softDeletedReason: 'rejected_aged_out',
+        softDeletedReason: "rejected_aged_out",
       });
     }
     await writeSystemAudit(
       store,
       {
-        action: 'cron_soft_deleted_rejected_content',
-        source: 'cleanupRejectedContent',
+        action: "cron_soft_deleted_rejected_content",
+        source: "cleanupRejectedContent",
         details: {
           affectedCount: toMark.length,
           examinedCount: examined,
-          olderThanHours: typeof olderThanHours === 'number' ? olderThanHours : null,
+          olderThanHours:
+            typeof olderThanHours === "number" ? olderThanHours : null,
           affectedIds: toMark.slice(0, 50).map((d) => d.id),
           truncatedAffectedIds: toMark.length > 50,
         },
       },
-      auditOpts
+      auditOpts,
     );
-    log.log?.(`[cleanupRejectedContent] soft-deleted ${toMark.length} of ${examined}`);
+    log.log?.(
+      `[cleanupRejectedContent] soft-deleted ${toMark.length} of ${examined}`,
+    );
     return {
       deletedCount: toMark.length,
       softDeletedCount: toMark.length,
@@ -115,31 +139,36 @@ export function createContentCleanup({
    * blogs and versions. Dry-run unless `CONTENT_HARD_DELETE=true`; documents
    * whose mark has no recorded origin are refused in both modes.
    */
-  async function hardDeleteSoftDeleted({ olderThanHours = 24, limit = 200 } = {}) {
-    const deleteEnabled = env.CONTENT_HARD_DELETE === 'true';
+  async function hardDeleteSoftDeleted({
+    olderThanHours = 24,
+    limit = 200,
+  } = {}) {
+    const deleteEnabled = env.CONTENT_HARD_DELETE === "true";
     const maxLimit = Math.min(Number(limit) || 200, 500);
-    const cutoff = new Date(now().getTime() - olderThanHours * 60 * 60 * 1000).toISOString();
+    const cutoff = new Date(
+      now().getTime() - olderThanHours * 60 * 60 * 1000,
+    ).toISOString();
     // Origin is decided in the query, not only in memory: if unknown-origin
     // rows shared the TOP window with eligible ones, enough of them would
     // starve the eligible rows forever (they are never deleted, so they never
     // leave the window). Eligible and refused are two bounded queries, and
     // the in-memory check below stays as a second guard on what came back.
-    const params = [{ name: '@cutoff', value: cutoff }];
+    const params = [{ name: "@cutoff", value: cutoff }];
     const agedClause =
-      'IS_DEFINED(c.softDeletedAt) AND c.softDeletedAt != null AND c.softDeletedAt <= @cutoff';
+      "IS_DEFINED(c.softDeletedAt) AND c.softDeletedAt != null AND c.softDeletedAt <= @cutoff";
     const knownOriginClause =
       '((IS_STRING(c.deletionRequestedBy) AND c.deletionRequestedBy != "") OR c.softDeletedReason = "rejected_aged_out")';
     const candidates =
       (await store.queryDocs(
-        'content',
+        "content",
         `SELECT TOP ${maxLimit} c.id, c.publishedBlogId, c.deletionRequestedBy, c.softDeletedReason FROM c WHERE ${agedClause} AND ${knownOriginClause}`,
-        params
+        params,
       )) || [];
     const unknownRows =
       (await store.queryDocs(
-        'content',
+        "content",
         `SELECT TOP ${maxLimit} c.id FROM c WHERE ${agedClause} AND NOT ${knownOriginClause}`,
-        params
+        params,
       )) || [];
 
     const eligible = [];
@@ -148,11 +177,11 @@ export function createContentCleanup({
     let policyCount = 0;
     for (const doc of candidates) {
       const origin = deletionOrigin(doc);
-      if (origin === 'unknown') {
+      if (origin === "unknown") {
         refusedIds.push(doc.id);
         continue;
       }
-      if (origin === 'user') userRequestedCount += 1;
+      if (origin === "user") userRequestedCount += 1;
       else policyCount += 1;
       eligible.push(doc);
     }
@@ -170,23 +199,26 @@ export function createContentCleanup({
       deletedVersionCount: 0,
       // Either window full means another pass is needed: the eligible one for
       // the next deleting run, the refused one for the human review list.
-      hasMore: candidates.length === maxLimit || unknownRows.length === maxLimit,
+      hasMore:
+        candidates.length === maxLimit || unknownRows.length === maxLimit,
       refusedHasMore: unknownRows.length === maxLimit,
     };
     // Counts only: a document id is an identifier, and traces stay content-free.
     if (refusedIds.length) {
       log.warn?.(
-        `[cleanupSoftDeletedContent] refused ${refusedIds.length} document(s) whose deletion mark has no recorded origin — left for review`
+        `[cleanupSoftDeletedContent] refused ${refusedIds.length} document(s) whose deletion mark has no recorded origin — left for review`,
       );
     }
     if (!deleteEnabled) {
       log.log?.(
-        `[cleanupSoftDeletedContent] dry-run: would delete content=${eligible.length} (user=${userRequestedCount}, policy=${policyCount}) refused=${refusedIds.length} examined=${examinedCount}`
+        `[cleanupSoftDeletedContent] dry-run: would delete content=${eligible.length} (user=${userRequestedCount}, policy=${policyCount}) refused=${refusedIds.length} examined=${examinedCount}`,
       );
       return summary;
     }
     if (!examinedCount) {
-      log.log?.('[cleanupSoftDeletedContent] content=0 blogs=0 versions=0 refused=0 examined=0');
+      log.log?.(
+        "[cleanupSoftDeletedContent] content=0 blogs=0 versions=0 refused=0 examined=0",
+      );
       return summary;
     }
 
@@ -199,43 +231,51 @@ export function createContentCleanup({
       const blogIds = new Set();
       if (
         doc.publishedBlogId &&
-        (await store.readDoc('blogs', doc.publishedBlogId, doc.publishedBlogId))
+        (await store.readDoc("blogs", doc.publishedBlogId, doc.publishedBlogId))
       ) {
         blogIds.add(doc.publishedBlogId);
       }
       const related = await store.queryDocs(
-        'blogs',
-        'SELECT c.id FROM c WHERE c.sourceContentId = @id',
-        [{ name: '@id', value: doc.id }]
+        "blogs",
+        "SELECT c.id FROM c WHERE c.sourceContentId = @id",
+        [{ name: "@id", value: doc.id }],
       );
       for (const blog of related || []) blogIds.add(blog.id);
       for (const blogId of blogIds) {
-        await store.deleteDoc('blogs', blogId, blogId);
+        await store.deleteDoc("blogs", blogId, blogId);
         deletedBlogCount += 1;
       }
-      await store.deleteDoc('content', doc.id, doc.id);
-      // Best-effort, after the delete that matters.
+      await store.deleteDoc("content", doc.id, doc.id);
+      // The counters, best-effort, after the delete that matters.
+      try {
+        await countersAfterDelete(doc.id);
+      } catch (err) {
+        log.warn?.(
+          `[cleanupSoftDeletedContent] counters not updated for ${doc.id}: ${err?.message || err}`,
+        );
+      }
+      // Versions, best-effort.
       try {
         const versions = await store.queryDocs(
-          'content_versions',
-          'SELECT c.id FROM c WHERE c.contentId = @id',
-          [{ name: '@id', value: doc.id }]
+          "content_versions",
+          "SELECT c.id FROM c WHERE c.contentId = @id",
+          [{ name: "@id", value: doc.id }],
         );
         for (const version of versions || []) {
-          await store.deleteDoc('content_versions', version.id, doc.id);
+          await store.deleteDoc("content_versions", version.id, doc.id);
           versionsDeleted += 1;
         }
       } catch (err) {
         log.warn?.(
-          `[cleanupSoftDeletedContent] versions cleanup failed for ${doc.id}: ${err?.message || err}`
+          `[cleanupSoftDeletedContent] versions cleanup failed for ${doc.id}: ${err?.message || err}`,
         );
       }
     }
     await writeSystemAudit(
       store,
       {
-        action: 'cron_hard_deleted_soft_deleted_content',
-        source: 'cleanupSoftDeletedContent',
+        action: "cron_hard_deleted_soft_deleted_content",
+        source: "cleanupSoftDeletedContent",
         details: {
           deletedContentCount: eligible.length,
           deletedBlogCount,
@@ -250,10 +290,10 @@ export function createContentCleanup({
           truncatedRefusedIds: refusedIds.length > 50,
         },
       },
-      auditOpts
+      auditOpts,
     );
     log.log?.(
-      `[cleanupSoftDeletedContent] content=${eligible.length} blogs=${deletedBlogCount} versions=${versionsDeleted} refused=${refusedIds.length} examined=${examinedCount}`
+      `[cleanupSoftDeletedContent] content=${eligible.length} blogs=${deletedBlogCount} versions=${versionsDeleted} refused=${refusedIds.length} examined=${examinedCount}`,
     );
     return {
       ...summary,

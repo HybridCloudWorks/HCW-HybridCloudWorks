@@ -11,11 +11,15 @@ import { httpRoute, httpRouteByMethod } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
 import { queryDocs, readDoc, upsertDoc, patchDoc, deleteDoc } from '../lib/cosmos-client.js';
 import { createAdminIntegrationHandlers } from '../lib/admin-integrations.js';
+import { invalidateConfig } from '../lib/ai/router.js';
 
 const handlers = () =>
   createAdminIntegrationHandlers({
     guard: getDefaultGuard(),
     store: { queryDocs, readDoc, upsertDoc, patchDoc, deleteDoc },
+    // A provider toggle, reorder, model pin or feature switch applies on the
+    // next AI call instead of after the router's 60 s cache (ADR 0033).
+    onAiConfigChanged: invalidateConfig,
   });
 
 httpRouteByMethod('cmsRecordings', {

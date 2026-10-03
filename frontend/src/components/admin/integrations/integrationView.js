@@ -11,6 +11,7 @@
  *   sortByStatus          broken and not-configured first
  */
 
+import { SYSTEM_STATUS } from '@/lib/status';
 import { SERVICES, SERVICE_GROUPS } from './serviceRegistry';
 
 // ── Joining the two halves ────────────────────────────────────────────────────
@@ -124,7 +125,21 @@ export function buildKeyGroups({
       usedBy.set(name, [...(usedBy.get(name) ?? []), service.name]);
     }
   }
-  const rows = (secrets ?? []).map((item) => ({ ...item, usedBy: usedBy.get(item.secret) ?? [] }));
+  // Which of those services can be asked whether the key works (ADR 0033):
+  // a key with no timer-driven liveness check may still be checked by the
+  // beaker on its service card, and the Keys row says which.
+  const testedBy = new Map();
+  for (const service of services) {
+    if (!service.test) continue;
+    for (const name of service.secrets ?? []) {
+      testedBy.set(name, [...(testedBy.get(name) ?? []), service.name]);
+    }
+  }
+  const rows = (secrets ?? []).map((item) => ({
+    ...item,
+    usedBy: usedBy.get(item.secret) ?? [],
+    testedBy: testedBy.get(item.secret) ?? [],
+  }));
   const groupIds = new Set(groups.map((group) => group.id));
   const byId = new Map((sections ?? []).map((section) => [section.id, section]));
 
@@ -151,13 +166,43 @@ export function buildKeyGroups({
  * broken service is the one to look at, then one nobody has set up.
  */
 export const SERVICE_STATUS = Object.freeze({
-  broken: { rank: 0, label: 'Broken', tone: 'failing' },
-  'not-configured': { rank: 1, label: 'Not configured', tone: 'never' },
-  pending: { rank: 2, label: 'Going live', tone: 'pending' },
-  untested: { rank: 3, label: 'Not tested yet', tone: null },
-  ok: { rank: 4, label: 'Working', tone: 'live' },
-  'link-only': { rank: 5, label: 'Profile link', tone: null },
+  // `badge` is what StatusBadge renders: the shared vocabulary of
+  // lib/status.js (ADR 0033 §2), so this page's words are the Health page's.
+  broken: { rank: 0, label: 'Unavailable', tone: 'failing', badge: SYSTEM_STATUS.unavailable },
+  'not-configured': {
+    rank: 1,
+    label: 'Misconfigured',
+    tone: 'never',
+    badge: SYSTEM_STATUS.misconfigured,
+  },
+  pending: { rank: 2, label: 'Degraded', tone: 'pending', badge: SYSTEM_STATUS.degraded },
+  untested: { rank: 3, label: 'Unknown', tone: null, badge: SYSTEM_STATUS.unknown },
+  ok: { rank: 4, label: 'Healthy', tone: 'live', badge: SYSTEM_STATUS.healthy },
+  'link-only': {
+    rank: 5,
+    label: 'Profile link',
+    tone: null,
+    badge: {
+      id: 'link-only',
+      label: 'Profile link',
+      tone: 'muted',
+      help: 'A public profile; nothing to test.',
+    },
+  },
 });
+
+/**
+ * The shared status for one test result (`{ ok, message }`): a refusal that
+ * says the service is not configured is misconfigured, any other failure is
+ * unavailable, a pass is healthy, nothing yet is unknown.
+ */
+export function resultStatus(result) {
+  if (!result) return SYSTEM_STATUS.unknown;
+  if (result.ok) return SYSTEM_STATUS.healthy;
+  return /not configured|is not set/i.test(String(result.message ?? ''))
+    ? SYSTEM_STATUS.misconfigured
+    : SYSTEM_STATUS.unavailable;
+}
 
 /**
  * One status for a service, from its credential lights and this session's

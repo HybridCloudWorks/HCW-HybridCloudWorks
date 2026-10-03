@@ -1,9 +1,11 @@
 /**
- * Stage 1: the global options every later stage reads (#634).
+ * Stage 1: the global options every later stage reads (#634), including the
+ * kind and idea origin the saved record will carry (ADR 0033 §4).
  */
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
+import TaxonomyPicker from '@/components/admin/shared/TaxonomyPicker';
 import { CONTENT_TYPE_OPTIONS } from './contentBlocks';
 import {
   PROVIDER_OPTIONS_WITH_AUTO as PROVIDER_OPTIONS,
@@ -25,6 +27,9 @@ export default function StageOneCard({
   setTitle,
   publishedDate,
   setPublishedDate,
+  kind = 'article',
+  ideaOrigin = 'imported-source',
+  setTaxonomy = () => {},
 }) {
   return (
     <Card>
@@ -115,6 +120,10 @@ export default function StageOneCard({
             onChange={(e) => setPublishedDate(e.target.value)}
             type="date"
           />
+        </div>
+
+        <div className="md:col-span-2">
+          <TaxonomyPicker kind={kind} ideaOrigin={ideaOrigin} onChange={setTaxonomy} />
         </div>
       </CardContent>
     </Card>

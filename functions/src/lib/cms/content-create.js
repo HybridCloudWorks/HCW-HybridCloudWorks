@@ -21,26 +21,42 @@
  *   - createdBy falls back through the Entra claim names (email is often
  *     absent on access tokens; preferred_username usually is not) before the
  *     source's literal 'admin'.
+ *   - `kind` and `ideaOrigin` (ADR 0033 §4) are accepted when they name an
+ *     enabled entry of the stored taxonomy and refused with a 400 naming the
+ *     allowed ids otherwise; absent, the record is classified at read time
+ *     from its `type` and `source`, so nothing here invents a value.
  */
-import { randomUUID } from 'node:crypto';
+import { randomUUID } from "node:crypto";
 import {
   normalizeContentBodyFields,
   getPrimaryContentBody,
   buildContentQualityReport,
   buildImageReadinessReport,
   buildImageLineage,
-} from './content-quality.js';
-import { findDuplicateContent, buildDedupFields } from './content-dedup.js';
-import { normalizePublishTarget, SUPPORTED_PUBLISH_TARGETS } from './publish-targets.js';
+} from "./content-quality.js";
+import { findDuplicateContent, buildDedupFields } from "./content-dedup.js";
+import {
+  normalizePublishTarget,
+  SUPPORTED_PUBLISH_TARGETS,
+} from "./publish-targets.js";
+import {
+  TaxonomyFieldError,
+  validateTaxonomyFieldsWithStore,
+} from "./taxonomy-fields.js";
 
 const json = (status, body) => ({
   status,
-  headers: { 'Content-Type': 'application/json' },
+  headers: { "Content-Type": "application/json" },
   body: JSON.stringify(body),
 });
 
 /** Statuses that must pass the quality gate to be set at creation time. */
-export const QUALITY_ENFORCED_STATUSES = ['inspected', 'approved', 'forge_ready', 'published'];
+export const QUALITY_ENFORCED_STATUSES = [
+  "inspected",
+  "approved",
+  "forge_ready",
+  "published",
+];
 
 const nullCritique = async () => null;
 
@@ -49,10 +65,11 @@ const nullCritique = async () => null;
  * (createContentFromRecording, #180) persists through the same dedup, quality
  * gate and document shape instead of growing a parallel one. Returns
  * `{ status, body }` in the handler's own vocabulary: 200 with `contentId`,
- * 409 duplicate, 422 quality gate. Throws only on a store failure.
+ * 400 unknown kind or idea origin, 409 duplicate, 422 quality gate. Throws
+ * only on a store failure.
  *
  * @param {object} args
- * @param {{ queryDocs: Function, upsertDoc: Function }} args.store
+ * @param {{ queryDocs: Function, upsertDoc: Function, readDoc?: Function }} args.store
  * @param {object} args.user       The guard's user (claims), for createdBy.
  * @param {object} args.data       The content fields, as the request's `data`.
  * @param {boolean} [args.runEditorialCritique=true]
@@ -71,30 +88,51 @@ export async function createContentDocument({
   now = () => new Date(),
   uuid = randomUUID,
 }) {
-  const requestedType = String(data.type || '').toLowerCase();
-  const normalizedType = SUPPORTED_PUBLISH_TARGETS.has(requestedType) ? requestedType : 'blog';
+  const requestedType = String(data.type || "").toLowerCase();
+  const normalizedType = SUPPORTED_PUBLISH_TARGETS.has(requestedType)
+    ? requestedType
+    : "blog";
+
+  // Before the dedup read: a bad classification is the caller's mistake and
+  // costs no query. A disabled id is refused here even though an existing
+  // record may keep one (taxonomy-fields.js) — this record does not exist yet.
+  let taxonomyFields;
+  try {
+    taxonomyFields = await validateTaxonomyFieldsWithStore(store, data);
+  } catch (error) {
+    if (error instanceof TaxonomyFieldError) {
+      return { status: 400, body: { success: false, error: error.message } };
+    }
+    throw error;
+  }
+  const { kind: _kind, ideaOrigin: _ideaOrigin, ...rest } = data;
 
   const normalizedData = normalizeContentBodyFields({
-    ...data,
+    ...rest,
     publishTarget: normalizePublishTarget(data.publishTarget, normalizedType),
     type: normalizedType,
   });
 
   const sourceUrl =
-    normalizedData.sourceUrl || normalizedData.url || normalizedData['CD Url'] || '';
+    normalizedData.sourceUrl ||
+    normalizedData.url ||
+    normalizedData["CD Url"] ||
+    "";
   const duplicate = await findDuplicateContent(store, {
     url: sourceUrl,
     canonicalUrl: normalizedData.canonicalUrl,
     title: normalizedData.Title || normalizedData.title,
     publishedAt:
-      normalizedData.publishedAt || normalizedData.publishedDate || normalizedData['Published At'],
+      normalizedData.publishedAt ||
+      normalizedData.publishedDate ||
+      normalizedData["Published At"],
   });
   if (duplicate.duplicate) {
     return {
       status: 409,
       body: {
         success: false,
-        error: 'Duplicate content detected',
+        error: "Duplicate content detected",
         duplicateReason: duplicate.reason,
         existingId: duplicate.existingId,
       },
@@ -105,17 +143,29 @@ export async function createContentDocument({
     runEditorialCritique === false
       ? null
       : await critiqueDraft({
-          title: normalizedData.Title || normalizedData.title || '',
+          title: normalizedData.Title || normalizedData.title || "",
           postContent: getPrimaryContentBody(normalizedData),
         });
-  const contentQuality = buildContentQualityReport(normalizedData, qualityCritique);
+  const contentQuality = buildContentQualityReport(
+    normalizedData,
+    qualityCritique,
+  );
   const imageReadiness = buildImageReadinessReport(normalizedData);
-  const requestedStatus = normalizedData.contentStatus || 'draft';
-  const shouldEnforceQuality = QUALITY_ENFORCED_STATUSES.includes(requestedStatus);
-  if (shouldEnforceQuality && !contentQuality.ready && forceQualityBypass !== true) {
+  const requestedStatus = normalizedData.contentStatus || "draft";
+  const shouldEnforceQuality =
+    QUALITY_ENFORCED_STATUSES.includes(requestedStatus);
+  if (
+    shouldEnforceQuality &&
+    !contentQuality.ready &&
+    forceQualityBypass !== true
+  ) {
     return {
       status: 422,
-      body: { success: false, error: 'Content quality gate failed', contentQuality },
+      body: {
+        success: false,
+        error: "Content quality gate failed",
+        contentQuality,
+      },
     };
   }
 
@@ -130,20 +180,28 @@ export async function createContentDocument({
   const doc = {
     ...normalizedData,
     ...dedupFields,
+    // Only when the caller classified it; a null clears nothing on a create.
+    ...(taxonomyFields.kind && { kind: taxonomyFields.kind }),
+    ...(taxonomyFields.ideaOrigin && { ideaOrigin: taxonomyFields.ideaOrigin }),
     id: uuid(),
     contentStatus: requestedStatus,
-    storageCollection: 'content',
+    storageCollection: "content",
     contentQuality,
     imageReadiness,
     // Source wrote the readiness report under both names; callers read both.
     imageQuality: imageReadiness,
     imageLineage,
-    createdBy: user?.email || user?.preferred_username || user?.oid || user?.sub || 'admin',
-    'Created At': timestamp,
+    createdBy:
+      user?.email ||
+      user?.preferred_username ||
+      user?.oid ||
+      user?.sub ||
+      "admin",
+    "Created At": timestamp,
     updatedAt: timestamp,
   };
   // New doc with a fresh uuid — upsert can never overwrite (matches .add()).
-  await store.upsertDoc('content', doc);
+  await store.upsertDoc("content", doc);
 
   return { status: 200, body: { success: true, contentId: doc.id } };
 }
@@ -151,7 +209,9 @@ export async function createContentDocument({
 /**
  * @param {object} deps
  * @param {{ requireRole: Function }} deps.guard
- * @param {{ queryDocs: Function, upsertDoc: Function }} deps.store
+ * @param {{ queryDocs: Function, upsertDoc: Function, readDoc?: Function }} deps.store
+ *   `readDoc` reads the taxonomy when the body names a kind or idea origin;
+ *   without it the defaults apply.
  * @param {Function} [deps.critiqueDraft] async ({title, postContent}) => critique|null
  * @param {() => Date} [deps.now]
  * @param {() => string} [deps.uuid]
@@ -164,14 +224,17 @@ export function createContentCreateHandler({
   uuid = randomUUID,
 }) {
   return async function createContentItem(request, context) {
-    const auth = await guard.requireRole(request, 'editor');
+    const auth = await guard.requireRole(request, "editor");
     if (auth.error) return auth.error;
     const { user } = auth;
 
     try {
       const body = await request.json().catch(() => null);
       const data =
-        body && typeof body.data === 'object' && body.data !== null && !Array.isArray(body.data)
+        body &&
+        typeof body.data === "object" &&
+        body.data !== null &&
+        !Array.isArray(body.data)
           ? body.data
           : {};
 
@@ -187,10 +250,10 @@ export function createContentCreateHandler({
       });
       return json(result.status, result.body);
     } catch (error) {
-      context.error('createContentItem failed:', error);
+      context.error("createContentItem failed:", error);
       return json(500, {
-        error: 'Failed to create content item',
-        message: error?.message || 'Unknown error',
+        error: "Failed to create content item",
+        message: error?.message || "Unknown error",
       });
     }
   };

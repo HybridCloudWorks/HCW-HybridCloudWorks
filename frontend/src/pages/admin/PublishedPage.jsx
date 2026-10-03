@@ -7,17 +7,19 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { getCoverImageUrl, formatPostDate } from '@/lib/blogUtils';
 import { byNewest } from '@/lib/dateUtils';
-import { PenSquare, Loader2, Calendar, Images, Headphones } from 'lucide-react';
+import { PenSquare, Loader2, Calendar, Images, Headphones, Rocket } from 'lucide-react';
+import EmptyState from '@/components/admin/shared/EmptyState';
+import PageHeader from '@/components/admin/shared/PageHeader';
+import StatusBadge from '@/components/admin/shared/StatusBadge';
+import TaxonomyChips from '@/components/admin/shared/TaxonomyChips';
+import { getLiveUrl } from '@/lib/livePages';
+import { contentStatusInfo } from '@/lib/status';
 import { postJSON, getJSON } from '@/lib/api';
 import { useToast } from '@/components/ui/use-toast';
 import { logAdminAction } from '@/lib/auditLog';
 import { unpublishToInspected } from '@/lib/contentWorkflow';
 import { ADMIN_ROUTES } from '@/config/admin';
-import {
-  getCanonicalContentType,
-  getContentPublicPath,
-  getPublishTargetForItem,
-} from '@/lib/contentModel';
+import { getCanonicalContentType, getPublishTargetForItem } from '@/lib/contentModel';
 import { ImageOrderManager } from '@/components/admin/ImageOrderManager';
 import { ImageGalleryPicker } from '@/components/admin/ImageGalleryPicker';
 import { getOrderedContentImages } from '@/lib/contentImages';
@@ -120,19 +122,15 @@ function getItemTypeLabel(item) {
   }
 }
 
-function getPublicUrl(item) {
-  const explicitUrl =
-    item.slugPageUrl ||
-    item.publishedUrl ||
-    item.blogUrl ||
-    item.publicUrl ||
-    (item.curatedSubpagePath
-      ? `https://hybridcloudworks.com${String(item.curatedSubpagePath).startsWith('/') ? item.curatedSubpagePath : `/${item.curatedSubpagePath}`}`
-      : '');
-  if (explicitUrl) return explicitUrl;
-  const publicPath = getContentPublicPath(item);
-  return publicPath ? `https://hybridcloudworks.com${publicPath}` : '';
-}
+/** The one live-URL rule every surface shares (lib/livePages.js, ADR 0033 §2). */
+const getPublicUrl = getLiveUrl;
+
+const PUBLISH_HELP = [
+  'What arrives here: items approved in the Review Queue or sent from the Editor (Approved, Forge ready, or Published but not yet live).',
+  'What to do: open Images to set the hero and order, check the slug, then Publish. The pre-publish checklist names anything missing before it goes out.',
+  'Publishing writes the public page and sets Live; Unpublish takes a page back to Inspected. Schedule from the Calendar when it should go out later.',
+  'Where it goes next: a live page appears on Live Pages with its URL, can be read aloud as a podcast transcript, and is picked up by the newsletter and social tools.',
+];
 
 // Both of these were timestamp-object-only (`?.toMillis?.() || 0`), so against the ISO
 // strings Cosmos returns they scored every document 0 and the comparators were
@@ -480,10 +478,10 @@ export default function PublishedPage() {
 
   const readyToPublish = (snapshot.readyCandidates || [])
     .filter((item) => {
-      const status = item.contentStatus || '';
-      const isLive = isItemLive(item);
-      if (isLive) return false;
-      return status.startsWith('published_') || status.includes('approved');
+      if (isItemLive(item)) return false;
+      // The publishable statuses by their canonical names (content-status.js
+      // PUBLISHABLE_NORMALIZED_STATUSES); the legacy spellings resolve to them.
+      return ['approved', 'forge_ready', 'published'].includes(contentStatusInfo(item).id);
     })
     .sort(sortByUpdatedAtDesc);
 
@@ -644,17 +642,22 @@ export default function PublishedPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Publish</h1>
-        <p className="text-sm text-muted-foreground">
-          {snapshot.readyTotal || readyToPublish.length} staged for go-live from Review or Editor ·{' '}
-          {snapshot.publishedTotal || published.length} already live
-        </p>
-        {queryErrorMessage && <p className="text-sm text-destructive mt-1">{queryErrorMessage}</p>}
-        {publishError && <p className="text-sm text-destructive mt-1">{publishError}</p>}
-        {imageError && <p className="text-sm text-destructive mt-1">{imageError}</p>}
+      <PageHeader
+        icon={Rocket}
+        title="Publish"
+        help={PUBLISH_HELP}
+        status={
+          <span className="text-muted-foreground">
+            {snapshot.readyTotal || readyToPublish.length} staged for go-live from Review or Editor
+            · {snapshot.publishedTotal || published.length} already live
+          </span>
+        }
+      >
+        {queryErrorMessage && <p className="text-sm text-destructive">{queryErrorMessage}</p>}
+        {publishError && <p className="text-sm text-destructive">{publishError}</p>}
+        {imageError && <p className="text-sm text-destructive">{imageError}</p>}
         <PublishDiagnostics publishDebug={publishDebug} />
-      </div>
+      </PageHeader>
 
       <Card>
         <CardContent className="p-4 space-y-3">
@@ -667,9 +670,16 @@ export default function PublishedPage() {
           </div>
 
           {readyToPublish.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No items are currently staged for publishing.
-            </p>
+            <EmptyState
+              compact
+              title="No items are currently staged for publishing."
+              description="Approve an item in the Review Queue, or Send to Publish from the Editor, and it appears here."
+              action={
+                <Button variant="outline" size="sm" asChild>
+                  <Link to={ADMIN_ROUTES.QUEUE}>Open Review Queue</Link>
+                </Button>
+              }
+            />
           ) : (
             <div className="space-y-2">
               {readyToPublish.map((item) => {
@@ -695,13 +705,15 @@ export default function PublishedPage() {
                         <p className="font-medium truncate">
                           {displayItem.Title || displayItem.title}
                         </p>
-                        <div className="flex items-center gap-2 mt-1">
+                        <div className="flex flex-wrap items-center gap-2 mt-1">
+                          <StatusBadge content={displayItem} />
                           <Badge variant="outline" className="text-xs">
                             {getItemProvider(displayItem)}
                           </Badge>
                           <Badge variant="secondary" className="text-xs">
                             {getItemTypeLabel(displayItem)}
                           </Badge>
+                          <TaxonomyChips item={displayItem} />
                         </div>
                         <PipelineStepper item={displayItem} className="mt-2" />
                       </div>
@@ -796,11 +808,10 @@ export default function PublishedPage() {
       <RehostImagesPanel />
 
       {published.length === 0 ? (
-        <Card>
-          <CardContent className="p-8 text-center text-muted-foreground">
-            No published content yet.
-          </CardContent>
-        </Card>
+        <EmptyState
+          title="No published content yet."
+          description="Pages you publish from the list above appear here with their live URL."
+        />
       ) : (
         <div className="space-y-2">
           {published.map((row) => {
@@ -823,14 +834,17 @@ export default function PublishedPage() {
                   )}
                   <div className="flex-1 min-w-0">
                     <p className="font-medium truncate">{blog.Title || blog.title}</p>
-                    <div className="flex items-center gap-2 mt-1">
+                    <div className="flex flex-wrap items-center gap-2 mt-1">
+                      <StatusBadge content={blog} />
                       <Badge variant="outline" className="text-xs">
                         {getItemProvider(blog)}
                       </Badge>
+                      <TaxonomyChips item={blog} />
                       <span className="text-xs text-muted-foreground">
                         {formatPostDate(blog.blogPublishedAt)}
                       </span>
                     </div>
+                    <PipelineStepper item={blog} className="mt-2" />
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     {publicUrl && (
@@ -867,9 +881,6 @@ export default function PublishedPage() {
                         Review
                       </Link>
                     </Button>
-                    <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300">
-                      {blog.contentStatus.replace(/_/g, ' ')}
-                    </Badge>
                   </div>
                 </div>
 

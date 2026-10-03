@@ -1,12 +1,15 @@
 /**
- * One lab from the catalogue (#681): what it is, what it exercises, how long
- * it takes, and the two ways to run it.
+ * One lab from the catalogue (#681, ADR 0033 §4): what it is, how hard it
+ * is, how long it takes, what it exercises, which provider hubs list it,
+ * and the two ways to run it.
  *
- * "Open lab workspace" goes to the lab's own page on the site,
- * `/education/labs/<id>`, which opens the workspace in a pane (#751). It is
- * an in-site link, not a link to the workspace host: since #750 that host
- * sends a top-level visit straight back to `/education/labs`, so the pane is
- * the only way in (owner decision 2026-09-28).
+ * "Open lab" goes to the lab's own page on the site under the provider
+ * whose list is showing it (`/<provider>/education/labs/<id>`), or under
+ * the lab's home provider from the cross-provider index, which opens the
+ * workspace in a pane (#751). It is an in-site link, not a link to the
+ * workspace host: since #750 that host sends a top-level visit straight back
+ * to `/education/labs`, so the pane is the only way in (owner decision
+ * 2026-09-28).
  *
  * "Run it locally" is the same image on the learner's own machine, mounting
  * the current directory. Two lines, PowerShell then bash, each labelled with
@@ -17,43 +20,47 @@
  */
 import React from 'react';
 import { Link } from 'react-router';
-import { RUN_LOCALLY_COMMANDS, labPanePath } from '@/data/labs/catalogue';
+import { RUN_LOCALLY_COMMANDS, labPanePath, primaryProvider } from '@/data/labs/catalogue';
 import CommandLine from './CommandLine';
-import { plural } from './labsWords';
+import LabFacts from './LabFacts';
 
 const MUTED = 'text-slate-600 dark:text-slate-400';
 
-export default function LabCard({ lab }) {
+/**
+ * @param {object} props
+ * @param {object} props.lab a catalogue row
+ * @param {string|null} [props.provider] the hub whose list shows the card;
+ *   the lab's home provider when the card is on the cross-provider index
+ * @param {'h3'|'h4'} [props.headingLevel] h4 inside the index's provider
+ *   groups, which are headed by an h3; h3 on a provider's own list
+ */
+export default function LabCard({ lab, provider = null, headingLevel = 'h3' }) {
+  const paneProvider = provider ?? primaryProvider(lab);
+  const Heading = headingLevel;
+  // Keyed by the hub too, so two lists on one page never share a heading id.
+  const titleId = `lab-${paneProvider}-${lab.id}-title`;
   return (
     <li
       data-lab={lab.id}
       className="glass glass-hover rounded-xl p-5 flex flex-col gap-3"
-      aria-labelledby={`lab-${lab.id}-title`}
+      aria-labelledby={titleId}
     >
-      <h3 id={`lab-${lab.id}-title`} className="text-base font-bold text-slate-950 dark:text-white">
+      <Heading id={titleId} className="text-base font-bold text-slate-950 dark:text-white">
         {lab.title}
-      </h3>
+      </Heading>
       <p className="text-sm text-slate-700 dark:text-slate-300">{lab.summary}</p>
 
-      <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs">
-        <span className={`uppercase tracking-wider ${MUTED}`}>Tools</span>
-        <span className="font-mono font-bold text-slate-900 dark:text-slate-100">
-          {lab.tools.join(', ')}
-        </span>
-        <span aria-hidden="true" className={MUTED}>
-          ·
-        </span>
-        <span className={MUTED} data-testid="lab-minutes">
-          about {plural(lab.estimatedMinutes, 'minute')}
-        </span>
-      </p>
+      <LabFacts lab={lab} />
 
       <Link
-        to={labPanePath(lab.id)}
+        to={labPanePath(paneProvider, lab.id)}
         data-testid="open-lab-workspace"
         className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-bold text-primary-foreground hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary self-start"
       >
-        Open lab workspace <span className="sr-only">for {lab.title}; GitHub sign-in required</span>
+        Open lab{' '}
+        <span className="sr-only">
+          {lab.title}: steps, and the workspace; GitHub sign-in required for the workspace
+        </span>
       </Link>
 
       <details className="mt-auto">

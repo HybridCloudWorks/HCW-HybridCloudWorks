@@ -54,6 +54,14 @@ import {
 export { DEFAULT_WINDOW_DAYS };
 const MAX_INTRO_LENGTH = 1200;
 
+/**
+ * An issue id: the UTC build date, optionally with a short suffix a
+ * duplicate gets (admin-handlers.js duplicate; ADR 0033 Amplify slice).
+ * Shared with the admin and insights routes so none of them accepts an id
+ * the others refuse.
+ */
+export const ISSUE_ID_PATTERN = /^issue-\d{4}-\d{2}-\d{2}(-[a-z0-9]{1,12})?$/;
+
 /** Statuses a rebuild may overwrite. Anything else has left the owner's hands. */
 const REBUILDABLE = new Set(['draft', 'rejected', 'deleted']);
 
@@ -68,7 +76,9 @@ export const INTRO_INSTRUCTION = [
 
 /** The intro instruction with the tone sentence for `tone` appended; an unknown tone reads as the default. */
 export function introInstruction(tone = DEFAULT_INTRO_TONE) {
-  const sentence = Object.hasOwn(INTRO_TONES, tone) ? INTRO_TONES[tone] : INTRO_TONES[DEFAULT_INTRO_TONE];
+  const sentence = Object.hasOwn(INTRO_TONES, tone)
+    ? INTRO_TONES[tone]
+    : INTRO_TONES[DEFAULT_INTRO_TONE];
   return `${INTRO_INSTRUCTION} ${sentence}`;
 }
 
@@ -94,7 +104,12 @@ export function clampWindowDays(days) {
 export function buildIntroContext(sections) {
   return sections
     .map((section) =>
-      [`## ${section.title}`, ...section.items.map((item) => `- ${item.title}${item.summary ? ` — ${item.summary}` : ''}`)].join('\n')
+      [
+        `## ${section.title}`,
+        ...section.items.map(
+          (item) => `- ${item.title}${item.summary ? ` — ${item.summary}` : ''}`
+        ),
+      ].join('\n')
     )
     .join('\n\n');
 }
@@ -180,7 +195,9 @@ export async function suggestSubjects({ drafter, sections, subject, budgetMs = n
     if (subjects.length === MAX_SUBJECT_SUGGESTIONS) break;
   }
   if (subjects.length < MIN_SUBJECT_SUGGESTIONS) {
-    throw new Error(`The AI suggested ${subjects.length} usable subject line(s); at least ${MIN_SUBJECT_SUGGESTIONS} are needed. Try again.`);
+    throw new Error(
+      `The AI suggested ${subjects.length} usable subject line(s); at least ${MIN_SUBJECT_SUGGESTIONS} are needed. Try again.`
+    );
   }
   return subjects;
 }
@@ -213,7 +230,11 @@ export function planSections(registry, entries = []) {
 
 const defaultSubject = (since, until) => {
   const fmt = (date) =>
-    new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(date);
+    new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric',
+      timeZone: 'UTC',
+    }).format(date);
   return `HybridCloudWorks Weekly: ${fmt(since)} – ${fmt(new Date(until.getTime() - 1))}`;
 };
 
@@ -225,7 +246,13 @@ const defaultSubject = (since, until) => {
  * @param {object[]} [deps.sections]
  * @param {object} [deps.log]
  */
-export function createIssueBuilder({ store, drafter, now = () => new Date(), sections = SECTIONS, log }) {
+export function createIssueBuilder({
+  store,
+  drafter,
+  now = () => new Date(),
+  sections = SECTIONS,
+  log,
+}) {
   /**
    * Newsletter settings, as admin-handlers reads them. An unreadable document
    * costs the owner's choices for this build, not the build: the defaults are
@@ -234,7 +261,11 @@ export function createIssueBuilder({ store, drafter, now = () => new Date(), sec
    */
   async function readSettings() {
     try {
-      const doc = await store.readDoc('admin_config', NEWSLETTER_SETTINGS_CONFIG_ID, ADMIN_CONFIG_PARTITION);
+      const doc = await store.readDoc(
+        'admin_config',
+        NEWSLETTER_SETTINGS_CONFIG_ID,
+        ADMIN_CONFIG_PARTITION
+      );
       const presented = presentSetting('newsletter-settings', doc);
       // A stored document that fails validation presents as the defaults; say
       // why on the issue, as the Platform Settings API does, instead of silently.
@@ -245,7 +276,10 @@ export function createIssueBuilder({ store, drafter, now = () => new Date(), sec
       return { settings: presented.value, problem };
     } catch (error) {
       log?.warn?.(`[newsletter] settings not read, defaults used: ${error?.message ?? error}`);
-      return { settings: newsletterSettingsDefaults(), problem: 'settings: could not be read, so the default content choices were used' };
+      return {
+        settings: newsletterSettingsDefaults(),
+        problem: 'settings: could not be read, so the default content choices were used',
+      };
     }
   }
 
@@ -257,7 +291,9 @@ export function createIssueBuilder({ store, drafter, now = () => new Date(), sec
   async function build({ days, keep = false, keptBy = null } = {}) {
     const until = now();
     const { settings, problem: settingsProblem } = await readSettings();
-    const windowDays = clampWindowDays(days === undefined || days === null ? settings.windowDays : days);
+    const windowDays = clampWindowDays(
+      days === undefined || days === null ? settings.windowDays : days
+    );
     const since = new Date(until.getTime() - windowDays * 24 * 60 * 60 * 1000);
     const id = `issue-${until.toISOString().slice(0, 10)}`;
 
@@ -270,7 +306,8 @@ export function createIssueBuilder({ store, drafter, now = () => new Date(), sec
         success: false,
         issueId: id,
         reason: 'kept',
-        message: "Today's issue is saved in Drafts, so it is not rebuilt over your edits. Delete it first to build it again.",
+        message:
+          "Today's issue is saved in Drafts, so it is not rebuilt over your edits. Delete it first to build it again.",
       };
     }
     if (existing && !REBUILDABLE.has(existing.status)) {
@@ -284,7 +321,14 @@ export function createIssueBuilder({ store, drafter, now = () => new Date(), sec
     }
 
     const plan = planSections(sections, settings.sections);
-    const collected = await collectSections({ store, since, until, sections: plan.sections, maxItems: plan.maxItems, log });
+    const collected = await collectSections({
+      store,
+      since,
+      until,
+      sections: plan.sections,
+      maxItems: plan.maxItems,
+      log,
+    });
     if (settingsProblem) collected.problems.unshift(settingsProblem);
     const itemCount = collected.sections.reduce((sum, section) => sum + section.items.length, 0);
     if (itemCount === 0) {
@@ -303,7 +347,12 @@ export function createIssueBuilder({ store, drafter, now = () => new Date(), sec
     // Intro off is a choice, not a failure: no AI call, no intro, no introError.
     if (drafter && settings.introEnabled !== false) {
       try {
-        const drafted = await draftIntro({ drafter, sections: collected.sections, subject, tone: settings.introTone });
+        const drafted = await draftIntro({
+          drafter,
+          sections: collected.sections,
+          subject,
+          tone: settings.introTone,
+        });
         subject = drafted.subject;
         intro = drafted.intro;
       } catch (error) {
@@ -326,12 +375,22 @@ export function createIssueBuilder({ store, drafter, now = () => new Date(), sec
       intro,
       introError,
       customNote: typeof existing?.customNote === 'string' ? existing.customNote : '',
+      // The owner's inbox line and send time belong to them, not to the
+      // build: a rebuild refreshes the items and keeps both (ADR 0033).
+      preheader: typeof existing?.preheader === 'string' ? existing.preheader : '',
+      ...(typeof existing?.sendAt === 'string' ? { sendAt: existing.sendAt } : {}),
+      ...(Array.isArray(existing?.versions) ? { versions: existing.versions } : {}),
       sections: collected.sections,
       itemCount,
       problems: collected.problems,
       createdAt: existing?.createdAt ?? stamp,
       updatedAt: stamp,
-      ...(keep ? { savedAt: stamp, savedBy: keptBy ? String(keptBy).slice(0, 100) : null } : {}),
+      ...(keep
+        ? {
+            savedAt: stamp,
+            savedBy: keptBy ? String(keptBy).slice(0, 100) : null,
+          }
+        : {}),
     };
     await store.upsertDoc('newsletters', doc);
     return {

@@ -14,15 +14,31 @@
  *     (admin-generated, anonymously served via public/curated-image/{id}).
  *   - generatePreviewImages — the Submit URLs draft builder's per-slot
  *     preview generation (hero/secondary1-3), one slot per call.
+ *   - generatePromptSetSample (ADR 0033) — the Image Prompts page's "Generate"
+ *     on a set: one hero through the same path, so a set can be tried without
+ *     leaving the page. The row it writes carries the set's lineage and shows
+ *     up under the set as its generation history.
  *
- * All four are editor-guarded. Distinct from the automatic ai-cover trigger
- * only in WHO asks; the generation path is shared, not duplicated.
+ * All are editor-guarded. Distinct from the automatic ai-cover trigger only
+ * in WHO asks; the generation path is shared, not duplicated. Every prompt
+ * composed here passes through the keyword matrix (`applyKeywordMatrix`),
+ * which until ADR 0033 was configured in the admin and read by nothing.
  */
 import {
-  buildImagePrompt,
   generateCoversForContent,
+  generatedImageRecordFields,
   PROVIDER_THEMES,
+  resolveCoverPrompt,
 } from './triggers/ai-cover.js';
+import {
+  applyKeywordMatrix,
+  composeSetPrompt,
+  keywordMatrixLines,
+  lineageFor,
+  loadKeywordMatrix,
+  normalizePromptConfigKey,
+  promptTemplateVersionFor,
+} from './cms/image-prompts.js';
 import { mediaUrlFor } from './blob-paths.js';
 import { fetchImage as defaultFetchImage } from './triggers/fetch-image.js';
 
@@ -35,13 +51,26 @@ const json = (status, body) => ({
   body: JSON.stringify(body),
 });
 
+const compact = (iso) =>
+  String(iso || '')
+    .replace(/[-:TZ]/g, '')
+    .replace(/\..*$/, '')
+    .slice(0, 14);
+
 /** The curated news-grid prompt: the caller's base, themed by provider. */
-export function buildCuratedPrompt({ basePrompt, articleTitle, articleSummary, provider }) {
+export function buildCuratedPrompt({
+  basePrompt,
+  articleTitle,
+  articleSummary,
+  provider,
+  keywordLines = [],
+}) {
   const theme = PROVIDER_THEMES[provider] || PROVIDER_THEMES.Multi;
   return [
     `${basePrompt || 'Professional technical illustration'} in a ${theme.color} color scheme with a ${theme.vibe} aesthetic.`,
     `Subject: ${articleTitle}.`,
     articleSummary ? `Context: ${articleSummary}` : '',
+    ...keywordLines,
     'No text overlays, labels, or written words in the image.',
   ]
     .filter(Boolean)
@@ -61,6 +90,7 @@ export function buildPreviewSlotPrompt({
   summary,
   provider,
   contentType,
+  keywordLines = [],
 }) {
   const theme = PROVIDER_THEMES[provider] || PROVIDER_THEMES.Multi;
   const base = String(template || '').trim() || String(summaryPrompt || '').trim();
@@ -69,18 +99,28 @@ export function buildPreviewSlotPrompt({
       `Professional technical illustration for a ${contentType || 'blog'} article titled "${title}".`,
     String(detailsPrompt || '').trim(),
     summary ? `Article context: ${summary}` : '',
+    ...keywordLines,
     `Style: ${theme.color} color scheme, ${theme.vibe} aesthetic. No text overlays, labels, or written words.`,
     `Image slot: ${slot}. Keep composition distinct while preserving style continuity.`,
   ];
   return lines.filter(Boolean).join('\n');
 }
 
+/** What a caller is told about the model behind a generation. */
+function modelInfo(replicate) {
+  return {
+    imageProvider: replicate?.provider || 'replicate',
+    imageModel: replicate?.model || '',
+    costPerImageUsd: typeof replicate?.costPerImageUsd === 'number' ? replicate.costPerImageUsd : null,
+  };
+}
+
 /**
  * @param {object} deps
  * @param {{ requireRole: Function }} deps.guard
- * @param {{ readDoc: Function, patchDoc: Function, upsertDoc: Function }} deps.store
+ * @param {{ readDoc: Function, patchDoc: Function, upsertDoc: Function, queryDocs?: Function }} deps.store
  * @param {{ uploadBlob: Function }} deps.storage
- * @param {{ configured: boolean, generate: Function }} deps.replicate
+ * @param {{ configured: boolean, generate: Function, model?: string }} deps.replicate
  */
 export function createManualImageHandlers({
   guard,
@@ -90,8 +130,22 @@ export function createManualImageHandlers({
   fetchImage = defaultFetchImage,
   now = () => new Date(),
   uuid,
+  log = {},
 }) {
   const coverDeps = { store, storage, replicate, fetchImage, now, uuid };
+
+  /** The set (and prompt) a request names, when it names one and it exists. */
+  async function readNamedSet(setName, promptName) {
+    const set = normalizePromptConfigKey(setName);
+    if (!set || typeof store.readDoc !== 'function') return { set: null, prompt: null };
+    const setDoc = await store.readDoc('image_prompt_sets', set, set).catch(() => null);
+    if (!setDoc) return { set: null, prompt: null };
+    const prompt = normalizePromptConfigKey(promptName);
+    const promptDoc = prompt
+      ? await store.readDoc('image_prompt_sets_prompts', prompt, set).catch(() => null)
+      : null;
+    return { set: setDoc, prompt: promptDoc };
+  }
 
   /**
    * POST /api/triggerAiImageGeneration — { contentIds[], aiImageTargets?,
@@ -126,7 +180,9 @@ export function createManualImageHandlers({
           await store.patchDoc('content', contentId, {
             altCoverImageTrigger: true,
             ...(targets?.length ? { aiImageTargets: targets } : {}),
-            ...(seed ? { altCoverImagePrompt: seed } : {}),
+            // An empty seed CLEARS a previous override so the library applies
+            // again; a non-empty one is used verbatim (ADR 0033).
+            altCoverImagePrompt: seed || null,
           });
           queued += 1;
         } catch (error) {
@@ -158,15 +214,24 @@ export function createManualImageHandlers({
       const data = await store.readDoc('content', contentId, contentId);
       if (!data) return json(404, { error: `Content ${contentId} not found` });
 
-      const provided =
-        typeof data.altCoverImagePrompt === 'string' && data.altCoverImagePrompt.trim();
-      const prompt = provided || buildImagePrompt(data);
+      const resolved = await resolveCoverPrompt({ store, log: context }, data);
       const { generatedUrls, update } = await generateCoversForContent(coverDeps, contentId, data, {
         targets: ['hero'],
-        prompt,
+        prompt: resolved.prompt,
+        lineage: resolved.lineage,
+        aspectRatio: resolved.aspectRatio,
       });
-      await store.patchDoc('content', contentId, update);
-      return json(200, { success: true, imageUrl: generatedUrls.hero });
+      await store.patchDoc('content', contentId, {
+        ...update,
+        altCoverImagePromptSource: resolved.source,
+      });
+      return json(200, {
+        success: true,
+        imageUrl: generatedUrls.hero,
+        promptSource: resolved.source,
+        promptSet: resolved.lineage?.promptSet || '',
+        ...modelInfo(replicate),
+      });
     } catch (error) {
       context.error('generateReviewHeroImage failed:', error);
       return json(500, {
@@ -178,9 +243,9 @@ export function createManualImageHandlers({
 
   /**
    * POST /api/generateCuratedArticleImage — { articleId, articleTitle,
-   * articleSummary, basePrompt, provider, articleUrl } → { success, imageUrl }.
-   * Writes the curated_article_images doc the anonymous
-   * public/curated-image/{id} route serves.
+   * articleSummary, basePrompt, provider, articleUrl, promptSet?, promptName? }
+   * → { success, imageUrl }. Writes the curated_article_images doc the
+   * anonymous public/curated-image/{id} route serves.
    */
   async function generateCuratedArticleImage(request, context) {
     const auth = await guard.requireRole(request, 'editor');
@@ -196,39 +261,69 @@ export function createManualImageHandlers({
         return json(503, { error: 'REPLICATE_API_KEY is not configured' });
       }
 
+      const articleSummary = String(body.articleSummary || '').trim();
+      const keyword = await loadKeywordMatrix(store, context);
+      const keywordLines = keywordMatrixLines(
+        applyKeywordMatrix(`${articleTitle} ${articleSummary}`, keyword)
+      );
       const prompt = buildCuratedPrompt({
         basePrompt: body.basePrompt,
         articleTitle,
-        articleSummary: String(body.articleSummary || '').trim(),
+        articleSummary,
         provider: body.provider,
+        keywordLines,
       });
-      const generated = await replicate.generate(prompt);
+      const { set, prompt: promptDoc } = await readNamedSet(body.promptSet, body.promptName);
+      const generated = await replicate.generate(prompt, { aspectRatio: set?.aspectRatio || undefined });
       const fetched = await fetchImage(generated);
       // Not an image: fail the request rather than store it (#415). The outer
       // catch turns this into the 500 the editor already sees for a generation
       // that did not come back.
       if (fetched.refused) throw new Error(`Generated image refused: ${fetched.reason}`);
       const { buffer, contentType } = fetched;
+      // The doc id IS the article id and the public route serves one image per
+      // article, so this path stays stable: a regeneration replaces the
+      // article's curated image rather than adding a second one.
       const blobPath = `curated-${articleId}.png`;
       await storage.uploadBlob('covers', blobPath, buffer, contentType, {
         articleId,
         slot: 'curated',
       });
       const imageUrl = mediaUrlFor('covers', blobPath);
+      const nowIso = now().toISOString();
 
-      // The doc id IS the article id — that is the public route's lookup key.
       await store.upsertDoc('curated_article_images', {
         id: articleId,
         imageUrl,
         articleTitle,
+        title: articleTitle,
+        altText: articleTitle,
         articleUrl: String(body.articleUrl || '').trim() || null,
         provider: String(body.provider || '').trim() || null,
-        prompt,
+        slot: 'curated',
         folder: 'default',
         archived: false,
-        generatedAt: now().toISOString(),
+        archivedAt: null,
+        softDeletedAt: null,
+        approvalStatus: 'approved',
+        sourceCollection: 'curated_article_images',
+        generatedAt: nowIso,
+        createdAt: nowIso,
+        ...generatedImageRecordFields({
+          buffer,
+          contentType,
+          blobPath,
+          replicate,
+          lineage: lineageFor({
+            set,
+            prompt: promptDoc,
+            promptText: prompt,
+            slot: 'curated',
+            source: set ? 'page' : 'curated',
+          }),
+        }),
       });
-      return json(200, { success: true, imageUrl });
+      return json(200, { success: true, imageUrl, ...modelInfo(replicate) });
     } catch (error) {
       context.error('generateCuratedArticleImage failed:', error);
       return json(500, {
@@ -262,6 +357,11 @@ export function createManualImageHandlers({
       }
 
       const stamp = now().toISOString();
+      const title = String(body.title || '').trim() || 'Untitled draft';
+      const summary = String(body.summary || '').trim();
+      const keyword = await loadKeywordMatrix(store, context);
+      const keywordLines = keywordMatrixLines(applyKeywordMatrix(`${title} ${summary}`, keyword));
+      const { set, prompt: promptDoc } = await readNamedSet(body.promptSet, body.promptName);
       const imageUrls = {};
       const imageRecords = {};
       const promptLogs = {};
@@ -271,45 +371,150 @@ export function createManualImageHandlers({
           template: body.slotTemplates?.[slot],
           summaryPrompt: body.summaryPrompt,
           detailsPrompt: body.detailsPrompt,
-          title: String(body.title || '').trim() || 'Untitled draft',
-          summary: String(body.summary || '').trim(),
+          title,
+          summary,
           provider: body.provider,
           contentType: body.contentType,
+          keywordLines,
         });
-        const generated = await replicate.generate(prompt);
+        const generated = await replicate.generate(prompt, {
+          aspectRatio: set?.aspectRatio || undefined,
+        });
         const fetched = await fetchImage(generated);
         if (fetched.refused) throw new Error(`Generated ${slot} image refused: ${fetched.reason}`);
         const { buffer, contentType } = fetched;
-        const blobPath = `preview-${articleId}-${slot}.png`;
+        // Stamped, so re-generating a slot keeps the earlier preview's bytes
+        // (ADR 0033 §6.2); old un-stamped paths still resolve.
+        const blobPath = `preview-${articleId}-${slot}-${compact(stamp)}.png`;
         await storage.uploadBlob('covers', blobPath, buffer, contentType, {
           articleId,
           slot,
         });
         const imageUrl = mediaUrlFor('covers', blobPath);
         const imageId = uuid();
+        const lineage = set
+          ? lineageFor({ set, prompt: promptDoc, promptText: prompt, slot, source: 'content' })
+          : {
+              promptSetId: '',
+              promptSet: String(body.promptSet || '').trim(),
+              setId: '',
+              promptName: String(body.promptName || '').trim(),
+              promptTemplateVersion: String(body.promptTemplateVersion || '').trim(),
+              prompt,
+              promptSlot: slot,
+              promptSource: 'preview',
+            };
         await store.upsertDoc('generated_content_images', {
           id: imageId,
           contentId: articleId,
           articleId,
           slot,
           imageUrl,
-          prompt,
-          title: String(body.title || '').trim() || 'Untitled draft',
+          title,
+          altText: title,
           provider: String(body.provider || '').trim() || '',
           contentType: String(body.contentType || '').trim() || 'blog',
           sourceUrl: String(body.sourceUrl || '').trim() || null,
           sourceCollection: 'preview',
+          approvalStatus: 'draft',
+          folder: 'default',
+          customTags: [],
           createdAt: stamp,
+          ...generatedImageRecordFields({ buffer, contentType, blobPath, replicate, lineage }),
         });
         imageUrls[slot] = imageUrl;
         imageRecords[slot] = { imageId, imageUrl };
         promptLogs[slot] = prompt;
       }
-      return json(200, { success: true, imageUrls, imageRecords, promptLogs });
+      return json(200, { success: true, imageUrls, imageRecords, promptLogs, ...modelInfo(replicate) });
     } catch (error) {
       context.error('generatePreviewImages failed:', error);
       return json(500, {
         error: 'Failed to generate preview images',
+        message: error?.message || 'Unknown error',
+      });
+    }
+  }
+
+  /**
+   * POST /api/cms/image-prompts/sample — { setName, promptName?, slot?,
+   * title?, summary?, provider? } → { success, imageUrl, imageId, prompt,
+   * imageProvider, imageModel, costPerImageUsd }. One image from a set, so a
+   * set can be tried from the Image Prompts page. The row is a `preview`
+   * under `promptset-{slug}` and carries the set's lineage.
+   */
+  async function generatePromptSetSample(request, context) {
+    const auth = await guard.requireRole(request, 'editor');
+    if (auth.error) return auth.error;
+    try {
+      const body = (await request.json().catch(() => null)) || {};
+      const setName = normalizePromptConfigKey(body.setName);
+      if (!setName) return json(400, { error: 'setName required' });
+      const slot = PREVIEW_SLOTS.includes(String(body.slot || '')) ? String(body.slot) : 'hero';
+      if (!replicate.configured) {
+        return json(503, { error: 'REPLICATE_API_KEY is not configured' });
+      }
+      const { set, prompt: promptDoc } = await readNamedSet(setName, body.promptName);
+      if (!set) return json(404, { error: `Prompt set "${setName}" not found` });
+      if (set.archivedAt) return json(409, { error: `Prompt set "${setName}" is archived` });
+
+      const article = {
+        title: String(body.title || '').trim() || `${setName} sample`,
+        summary: String(body.summary || '').trim(),
+        cloudProvider: String(body.provider || '').trim(),
+      };
+      const keyword = await loadKeywordMatrix(store, context);
+      const prompt = composeSetPrompt({ set, prompt: promptDoc, slot, article, keyword });
+      const generated = await replicate.generate(prompt, { aspectRatio: set.aspectRatio || undefined });
+      const fetched = await fetchImage(generated);
+      if (fetched.refused) throw new Error(`Generated sample refused: ${fetched.reason}`);
+      const { buffer, contentType } = fetched;
+      const stamp = now().toISOString();
+      const slug = setName
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 60);
+      const articleId = `promptset-${slug || 'set'}`;
+      const blobPath = `${articleId}-${slot}-${compact(stamp)}.png`;
+      await storage.uploadBlob('covers', blobPath, buffer, contentType, { articleId, slot });
+      const imageUrl = mediaUrlFor('covers', blobPath);
+      const imageId = uuid();
+      await store.upsertDoc('generated_content_images', {
+        id: imageId,
+        contentId: articleId,
+        articleId,
+        slot,
+        imageUrl,
+        title: article.title,
+        altText: article.title,
+        provider: article.cloudProvider,
+        contentType: 'sample',
+        sourceCollection: 'preview',
+        approvalStatus: 'draft',
+        folder: 'default',
+        customTags: cleanTagsOf(set.tags),
+        createdAt: stamp,
+        ...generatedImageRecordFields({
+          buffer,
+          contentType,
+          blobPath,
+          replicate,
+          lineage: lineageFor({ set, prompt: promptDoc, promptText: prompt, slot, source: 'sample' }),
+        }),
+      });
+      return json(200, {
+        success: true,
+        imageUrl,
+        imageId,
+        prompt,
+        promptTemplateVersion: promptTemplateVersionFor(set),
+        ...modelInfo(replicate),
+      });
+    } catch (error) {
+      context.error('generatePromptSetSample failed:', error);
+      return json(500, {
+        error: 'Failed to generate sample image',
         message: error?.message || 'Unknown error',
       });
     }
@@ -320,5 +525,12 @@ export function createManualImageHandlers({
     generateReviewHeroImage,
     generateCuratedArticleImage,
     generatePreviewImages,
+    generatePromptSetSample,
   };
+}
+
+function cleanTagsOf(tags) {
+  return Array.isArray(tags)
+    ? tags.map((t) => String(t || '').trim().toLowerCase()).filter(Boolean)
+    : [];
 }

@@ -8,8 +8,8 @@
  *   view="drafts"  (Drafts tab) holds kept drafts, and is where one is
  *                  approved — the owner's layout of 2026-09-13.
  *
- * Scheduled and sent issues leave both views for the Published calendar
- * (NewsletterCalendar). Nothing goes to subscribers until Approve is pressed
+ * Scheduled, sent and failed issues leave both views for the Published tab
+ * (NewsletterPublished). Nothing goes to subscribers until Approve is pressed
  * and confirmed, because it cannot be undone from here once Resend has it.
  * Approval sends the version the page is showing; if the issue changed since,
  * the server refuses it.
@@ -26,6 +26,8 @@ import { Button } from '@/components/ui/button';
 import { AlertCircle, CheckCircle, Loader2, PenTool, RefreshCw, X } from 'lucide-react';
 import { getJSON, postJSON, sendJSON } from '@/lib/api';
 import { runJob } from '@/lib/jobs';
+import ConfirmModal from '@/components/admin/ConfirmModal';
+import EmptyState from '@/components/admin/shared/EmptyState';
 import IssueDetail from './IssueDetail';
 import { STATUS_LABELS, formatWhen } from './issueFormat';
 
@@ -60,12 +62,14 @@ function Notice({ notice }) {
   );
 }
 
-export default function NewsletterIssues({ view = 'review', settingsVersion = 0 }) {
+export default function NewsletterIssues({ view = 'review' }) {
   const [issues, setIssues] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [detail, setDetail] = useState(null);
   const [busy, setBusy] = useState('');
   const [notice, setNotice] = useState(null);
+  // The row whose red X was pressed, until the dialog answers.
+  const [pendingDelete, setPendingDelete] = useState(null);
   // Issue id -> when its next test send is allowed (ms). Held here, not in
   // IssueDetail, so the countdown survives a save that remounts the detail.
   const [testReadyAt, setTestReadyAt] = useState({});
@@ -107,7 +111,7 @@ export default function NewsletterIssues({ view = 'review', settingsVersion = 0 
     queueMicrotask(() => {
       loadDetail(selectedId).catch((err) => setNotice({ ok: false, message: err.message }));
     });
-  }, [selectedId, loadDetail, settingsVersion]);
+  }, [selectedId, loadDetail]);
 
   const run = async (label, action) => {
     setBusy(label);
@@ -151,13 +155,22 @@ export default function NewsletterIssues({ view = 'review', settingsVersion = 0 
       await loadList();
     });
 
-  /** The card's red X: deletes at once, with the etag the list row carries. */
+  /** The card's red X, once confirmed: deletes with the etag the list row carries. */
   const handleDelete = (row) =>
     run('delete', async () => {
       await sendJSON(`cms/newsletters/${row.id}`, 'DELETE', { etag: row.etag });
       if (row.id === selectedId) setDetail(null);
       setNotice({ ok: true, message: `Deleted ${row.id.replace('issue-', '')}.` });
       await loadList();
+    });
+
+  /** A new kept draft with this issue's content (ADR 0033); it opens on Drafts. */
+  const handleDuplicate = () =>
+    run('duplicate', async () => {
+      const res = await postJSON(`cms/newsletters/${selectedId}/duplicate`, {});
+      setNotice({ ok: true, message: `Duplicated as ${res.issue.id} — it is on the Drafts tab.` });
+      await loadList();
+      if (view === 'drafts') setSelectedId(res.issue.id);
     });
 
   const handleSave = (patch) =>
@@ -300,11 +313,15 @@ export default function NewsletterIssues({ view = 'review', settingsVersion = 0 
       <Notice notice={notice} />
 
       {rows.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          {view === 'drafts'
-            ? 'Nothing in Drafts. Keep an issue from the Newsletter tab and it appears here.'
-            : "No issues to review. Build this week's issue to draft one from what was published."}
-        </p>
+        <EmptyState
+          compact
+          title={view === 'drafts' ? 'Nothing in Drafts' : 'No issues to review'}
+          description={
+            view === 'drafts'
+              ? 'Keep an issue from the Newsletter tab and it appears here.'
+              : "Build this week's issue to draft one from what was published."
+          }
+        />
       ) : (
         <ul className="flex flex-wrap gap-3 pt-2" aria-label="Issues">
           {rows.map((row) => {
@@ -328,7 +345,7 @@ export default function NewsletterIssues({ view = 'review', settingsVersion = 0 
                 {DELETABLE.has(row.status) && (
                   <button
                     type="button"
-                    onClick={() => handleDelete(row)}
+                    onClick={() => setPendingDelete(row)}
                     disabled={Boolean(busy)}
                     aria-label={`Delete ${label}`}
                     title="Delete"
@@ -359,8 +376,22 @@ export default function NewsletterIssues({ view = 'review', settingsVersion = 0 
           onRegenerateIntro={handleRegenerateIntro}
           onSuggestSubjects={handleSuggestSubjects}
           onSendTest={handleSendTest}
+          onDuplicate={handleDuplicate}
         />
       )}
+
+      <ConfirmModal
+        open={Boolean(pendingDelete)}
+        title={pendingDelete ? `Delete ${pendingDelete.id.replace('issue-', '')}?` : ''}
+        description="The issue is removed from this list. Nothing was sent, so nothing reaches subscribers."
+        confirmLabel="Delete"
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => {
+          const row = pendingDelete;
+          setPendingDelete(null);
+          handleDelete(row);
+        }}
+      />
     </div>
   );
 }

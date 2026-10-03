@@ -22,6 +22,7 @@ import { DRAFT_HTTP_BUDGET_MS } from '../content/draft-from-url.js';
 import { RECORDING_DRAFT_HTTP_BUDGET_MS } from '../content/draft-from-recording.js';
 import { NEWSLETTER_AI_BUDGET_MS } from '../newsletter/admin-handlers.js';
 import { CAPTION_AI_BUDGET_MS } from '../social-caption.js';
+import { FORGE_ASSIST_AI_BUDGET_MS, FORGE_ASSIST_HTTP_BUDGET_MS } from '../content/forge-studio.js';
 import { AFTER_MODEL_MARGIN_MS, MIN_ATTEMPT_MS } from './time-budget.js';
 
 const API_JS = fileURLToPath(new URL('../../../../frontend/src/lib/api.js', import.meta.url));
@@ -92,6 +93,13 @@ const BUDGETED = [
     handlerMs: CAPTION_AI_BUDGET_MS,
     aiMs: CAPTION_AI_BUDGET_MS,
   },
+  {
+    // Forge Studio's AI actions over the draft text (ADR 0033).
+    route: 'cms/forge/assist',
+    clientMs: CLIENT.byRoute['cms/forge/assist'],
+    handlerMs: FORGE_ASSIST_HTTP_BUDGET_MS,
+    aiMs: FORGE_ASSIST_AI_BUDGET_MS,
+  },
 ];
 
 /**
@@ -105,6 +113,8 @@ const HTTP_ROUTES_THAT_REACH_A_MODEL = Object.freeze({
   'recording-content-http.js': 'budget: RECORDING_DRAFT_HTTP_BUDGET_MS',
   'newsletter-admin-http.js': 'budget: NEWSLETTER_AI_BUDGET_MS',
   'social-caption-http.js': 'budget: CAPTION_AI_BUDGET_MS',
+  'forge-config-http.js':
+    'budget: FORGE_ASSIST_HTTP_BUDGET_MS (cms/forge/assist; the two config RPCs reach no model)',
   'ai-proxy-http.js':
     'none: the portal Test and Playground call one named provider through callProvider, with no failover; the Test caps itself (proxy.js)',
   'cloud-tools-http.js':
@@ -136,11 +146,14 @@ describe('synchronous AI routes answer before the browser and the edge give up',
     );
   });
 
-  it.each(BUDGETED)('$route: the handler answers inside the client timeout and the edge', (entry) => {
-    const where = `${entry.route}: handler ${entry.handlerMs} ms, client ${entry.clientMs} ms`;
-    expect(entry.clientMs - entry.handlerMs, where).toBeGreaterThanOrEqual(MIN_HEADROOM_MS);
-    expect(EDGE_TIMEOUT_MS - entry.handlerMs, where).toBeGreaterThanOrEqual(MIN_HEADROOM_MS);
-  });
+  it.each(BUDGETED)(
+    '$route: the handler answers inside the client timeout and the edge',
+    (entry) => {
+      const where = `${entry.route}: handler ${entry.handlerMs} ms, client ${entry.clientMs} ms`;
+      expect(entry.clientMs - entry.handlerMs, where).toBeGreaterThanOrEqual(MIN_HEADROOM_MS);
+      expect(EDGE_TIMEOUT_MS - entry.handlerMs, where).toBeGreaterThanOrEqual(MIN_HEADROOM_MS);
+    }
+  );
 
   it.each(BUDGETED)('$route: the AI budget leaves room for a failover at all', (entry) => {
     // The reserve is half the budget, so a second provider needs 2 x MIN_ATTEMPT_MS.

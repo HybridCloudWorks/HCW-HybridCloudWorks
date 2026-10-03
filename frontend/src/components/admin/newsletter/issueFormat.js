@@ -5,6 +5,7 @@ export const STATUS_LABELS = {
   sending: 'Sending',
   scheduled: 'Scheduled',
   sent: 'Sent',
+  failed: 'Failed',
   rejected: 'Rejected',
 };
 

@@ -129,6 +129,18 @@ describe('buildContentCreatePayload', () => {
     expect(payload.content).toBe(payload.postContent);
   });
 
+  it('carries the kind and idea origin from Stage 1, and neither key when unset (ADR 0033 §4)', () => {
+    const classified = buildContentCreatePayload(
+      payloadInput({ kind: 'tutorial', ideaOrigin: 'audience-question' })
+    );
+    expect(classified.kind).toBe('tutorial');
+    expect(classified.ideaOrigin).toBe('audience-question');
+
+    const unset = buildContentCreatePayload(payloadInput());
+    expect('kind' in unset).toBe(false);
+    expect('ideaOrigin' in unset).toBe(false);
+  });
+
   it('falls back from the generated title to the typed one', () => {
     const payload = buildContentCreatePayload(payloadInput({ draftTitle: '', title: 'Typed' }));
     expect(payload.title).toBe('Typed');

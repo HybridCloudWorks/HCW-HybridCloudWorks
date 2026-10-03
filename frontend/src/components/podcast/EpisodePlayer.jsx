@@ -18,7 +18,12 @@
  * `key={episode.id}` and every piece of state below resets with the element.
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { formatSeconds, stripHtml } from '@/lib/audioEpisodes';
+import {
+  formatSeconds,
+  readPlaybackPosition,
+  savePlaybackPosition,
+  stripHtml,
+} from '@/lib/audioEpisodes';
 import { safeUrl } from '@/lib/safeUrl';
 
 /**
@@ -81,6 +86,21 @@ export default function EpisodePlayer({ episode, meta, onPlayingChange }) {
     if (audio) audio.currentTime = next;
   }
 
+  // Where this browser left off in this episode (ADR 0033 §4): restored once
+  // the element knows its length, saved as it plays and when it pauses, and
+  // cleared when it ends so the next visit starts from the top. A storage
+  // that cannot be read or written leaves the player exactly as it was.
+  function restorePosition(audioEl) {
+    const at = readPlaybackPosition(episode.id);
+    if (at > 0 && at < (audioEl.duration || Infinity)) {
+      audioEl.currentTime = at;
+      setCurrentTime(at);
+    }
+  }
+  function rememberPosition(audioEl) {
+    savePlaybackPosition(episode.id, audioEl.currentTime, audioEl.duration || known);
+  }
+
   return (
     <article
       className={`bg-card/40 backdrop-blur-md border ${meta.border} rounded-2xl overflow-hidden`}
@@ -92,12 +112,19 @@ export default function EpisodePlayer({ episode, meta, onPlayingChange }) {
           ref={audioRef}
           src={mediaUrl}
           preload="metadata"
-          onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime || 0)}
+          onTimeUpdate={(e) => {
+            setCurrentTime(e.currentTarget.currentTime || 0);
+            rememberPosition(e.currentTarget);
+          }}
           onLoadedMetadata={(e) => {
             const d = e.currentTarget.duration;
             if (Number.isFinite(d) && d > 0) setDuration(d);
+            restorePosition(e.currentTarget);
           }}
-          onEnded={() => setIsPlaying(false)}
+          onEnded={() => {
+            setIsPlaying(false);
+            savePlaybackPosition(episode.id, 0);
+          }}
           // The element is the source of truth, not the button: OS media keys,
           // headphone controls and the browser's own audio UI move it without
           // going through our handler, and the indicator on the list above
@@ -105,7 +132,10 @@ export default function EpisodePlayer({ episode, meta, onPlayingChange }) {
           // are idempotent against the effect that mirrors this state onto the
           // element (play() on a playing element, pause() on a paused one).
           onPlay={() => setIsPlaying(true)}
-          onPause={() => setIsPlaying(false)}
+          onPause={(e) => {
+            setIsPlaying(false);
+            rememberPosition(e.currentTarget);
+          }}
           aria-label={`Audio: ${episode.title}`}
         />
       )}

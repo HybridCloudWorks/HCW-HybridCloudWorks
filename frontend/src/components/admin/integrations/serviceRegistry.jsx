@@ -5,26 +5,40 @@
  * Moved unchanged out of pages/admin/IntegrationsPage.jsx (#570), which is now
  * only the tab bar. Every tab reads this one list, so the Overview grid, the
  * Services cards and the Keys tab's "used by" line cannot disagree about which
- * service owns which key.
+ * service owns which key. The Health page's probe registry reads it too
+ * (pages/admin/health/probeRegistry.js), so a service tested here is a service
+ * probed there, by the same function.
+ *
+ * ADR 0033 (Platform) added a card for every AI key that until then appeared
+ * only as a loose key on the Keys tab — Gemini, Anthropic, OpenAI, NVIDIA,
+ * Perplexity, ElevenLabs, Azure Speech, Firecrawl, Replicate — and one for the
+ * Hybrid Lab's three values, each saying what the service is for, what it can
+ * do, which hubs use it, which way data flows and what the key can reach.
  */
 
 import React from 'react';
 import {
   Award,
   BookOpen,
+  Bot,
   Cloud,
   Coins,
+  FlaskConical,
   Globe,
+  Image as ImageIcon,
   Link2,
   Mail,
   Mic,
   Radio,
   Rss,
+  ScanText,
   Send,
   Share2,
   ShieldCheck,
+  Sparkles,
+  Volume2,
 } from 'lucide-react';
-import { postJSON } from '@/lib/api';
+import { getJSON, postJSON } from '@/lib/api';
 import { fetchCloudPricing } from '@/lib/publicApi';
 import { DEFAULT_PRICING_REGION, describeAge, describeCounts } from '@/lib/cloudPricing';
 import { countList, unwrapProxy } from '@/lib/proxyEnvelope';
@@ -151,6 +165,72 @@ async function testQlty() {
     : 'Connected to Qlty.';
 }
 
+async function testReplicate() {
+  // GET /v1/account, server-side (ADR 0033): whose account the token is, with
+  // no prediction started and nothing billed.
+  const body = unwrapProxy(await postJSON('connectionProbe', { probe: 'replicate' }), 'Replicate');
+  const who = body?.username;
+  return typeof who === 'string' && who.trim()
+    ? `Connected as ${who.trim()}.`
+    : 'Connected to Replicate.';
+}
+
+async function testFirecrawl() {
+  // GET /v1/team/credit-usage, server-side (ADR 0033): free, and the count
+  // says how close the summariser is to running dry.
+  const body = unwrapProxy(await postJSON('connectionProbe', { probe: 'firecrawl' }), 'Firecrawl');
+  const credits = body?.data?.remaining_credits ?? body?.remaining_credits;
+  return Number.isFinite(credits)
+    ? `Connected — ${credits} credits remaining.`
+    : 'Connected to Firecrawl.';
+}
+
+/**
+ * The AI Engine's own Test, by route: `testAiProvider` sends the one-word
+ * prompt the portal button sends and the weekly probe repeats, and writes the
+ * outcome onto the provider document. It answers `{ status, latencyMs, error }`
+ * with HTTP 200 whatever the model said, so `status` is the verdict.
+ */
+const testAiProvider = (providerId, label) => async () => {
+  const outcome = await postJSON('testAiProvider', { providerId });
+  if (outcome?.status !== 'connected') {
+    throw new Error(outcome?.error || `${label} did not answer the test prompt.`);
+  }
+  return Number.isFinite(outcome.latencyMs)
+    ? `Connected — answered in ${outcome.latencyMs} ms.`
+    : `Connected to ${label}.`;
+};
+
+async function testElevenLabs() {
+  // The Audio tab's status read (cms/podcast/elevenlabs): plan and credits,
+  // no synthesis. `configured: false` and `subscriptionError` are both the
+  // server's own sentences.
+  const res = await getJSON('cms/podcast/elevenlabs');
+  if (!res?.configured) {
+    throw new Error(res?.reason || 'ElevenLabs is not configured: ELEVENLABS_API_KEY is not set');
+  }
+  if (res.subscriptionError) throw new Error(res.subscriptionError);
+  const sub = res.subscription || {};
+  const tier = typeof sub.tier === 'string' && sub.tier ? ` on the ${sub.tier} plan` : '';
+  const credits =
+    Number.isFinite(sub.creditsLeft) && Number.isFinite(sub.creditLimit)
+      ? ` — ${sub.creditsLeft} of ${sub.creditLimit} credits left`
+      : '';
+  return `Connected${tier}${credits}.`;
+}
+
+async function testHybridLab() {
+  // The public labs card's own read (public/labs/coder-status), which the
+  // server answers from CODER_URL and CODER_STATUS_TOKEN and caches.
+  const res = await getJSON('public/labs/coder-status');
+  if (!res?.configured) throw new Error('Coder is not configured: CODER_URL is not set');
+  if (!res.reachable) throw new Error('Coder is configured but did not answer within 5 s.');
+  const templates = Array.isArray(res.templates) ? res.templates.length : 0;
+  const running = res.capacity?.running ?? 'unknown';
+  const max = res.capacity?.max ?? 'unknown';
+  return `Connected — ${templates} template(s), ${running} of ${max} workspaces running.`;
+}
+
 async function testCloudPricing() {
   // The public read the comparison page makes, for the default region, and
   // always FRESH: a diagnostic that could answer from the browser's copy would
@@ -191,7 +271,7 @@ export const SERVICE_GROUPS = Object.freeze([
   {
     id: 'communication',
     title: 'Communication',
-    blurb: 'Anything that speaks to an audience \u2014 posts, newsletters, links and alerts.',
+    blurb: 'Anything that speaks to an audience — posts, newsletters, links and alerts.',
   },
   {
     id: 'content',
@@ -230,7 +310,21 @@ export const SERVICE_GROUPS = Object.freeze([
     title: 'Site platform',
     blurb: 'Values the site runs on. Each one says what changing it breaks.',
   },
+  {
+    id: 'labs',
+    title: 'Hybrid Lab',
+    blurb:
+      'The browser workspaces learners open from the labs page, and the check that lets the Landing Zone Builder send the lab a job.',
+  },
 ]);
+
+/** The sentence every key-based card shows about disconnecting (ADR 0033). */
+export const DISCONNECT_NOTE =
+  'This hub writes to Key Vault but cannot delete from it, so disconnecting a key-based service means pasting a replacement key, or revoking the key at the provider and leaving the light to go red.';
+
+/** What a LLM provider card says the key can reach. */
+const LLM_SECURITY_NOTE =
+  'The key never reaches a browser: every call is made server-side through the AI router, and a rejected key is reported as a red light on the Keys tab.';
 
 /**
  * Every service, and the credentials that belong to it.
@@ -244,27 +338,35 @@ export const SERVICE_GROUPS = Object.freeze([
  *           that holds the credential when there is one, and the owner’s own
  *           profile when there is not. EVERY service has one, and a test says
  *           so — a card with no key, no test and no link is a dead end.
- *   `test`  A GET that proves the credential works, or `null` where a browser
- *           cannot make one. `null` is honest rather than lazy: the education
- *           profiles are public HTML that a browser cannot fetch from another
- *           origin, and the YouTube, RSS.com, Telegram and Resend keys are only
- *           ever read on the server, so a browser cannot call them directly.
+ *   `test`  A GET that proves the credential works, or `null` where no cheap
+ *           read exists. `null` is honest rather than lazy, and since ADR 0033
+ *           it comes with `untestedReason` saying why, shown on the card: the
+ *           education profiles are public HTML a browser cannot fetch from
+ *           another origin; Perplexity has no read-only endpoint, so a test
+ *           would be a paid completion; Azure Speech is unprovisioned on
+ *           purpose.
  *
  *           NO BEAKER MEANS THE GLOBE HAS TO WORK HARDER. When a service holds
  *           credentials and offers no test, the only thing this page can do
  *           about a red light is send you where the credential is managed — so
- *           `url` must be that page, not the vendor’s front door. `t.me/BotFather`,
- *           `dashboard.rss.com/api-access/`, the Google credentials console.
- *           A test below holds it: such a service must point at a specific
- *           page rather than a bare host.
+ *           `url` must be that page, not the vendor’s front door. A test below
+ *           holds it: such a service must point at a specific page rather
+ *           than a bare host.
  *   `group` Which heading it sits under.
+ *
+ * FOUR MORE SAY WHAT THE SERVICE IS (ADR 0033 Platform), for a reader who has
+ * never seen this repository: `capabilities` (what it can do here), `usedIn`
+ * (which hubs call it), `dataDirection` (which way data flows) and
+ * `securityNote` (what the key can reach and where it lives).
  *
  * Two optional fields put something the card can DO beneath the key lines,
  * and IntegrationsServices maps each to a component: `setting` for the one
  * service configured rather than credentialed (Sessionize’s speaker id), and
  * `action` for the one the site fills itself (the pricing cache’s Refresh
- * now). Both are names, not components, so this file stays free of React
- * state and the registry test can read them as data.
+ * now). `reconnectHref` names the page holding a service's own sign-in flow
+ * (Plaud's OAuth connect, in the Recording Hub). All are names, not
+ * components, so this file stays free of React state and the registry test
+ * can read them as data.
  *
  * DESCRIPTIONS ARE FOR SOMEONE WHO HAS NEVER SEEN THIS REPOSITORY. One line,
  * saying what the service is and what it does for the site. No issue numbers,
@@ -281,6 +383,11 @@ export const SERVICES = Object.freeze([
     url: 'https://app.publer.com/#/settings/access',
     test: testPubler,
     secrets: ['PUBLER-API-KEY', 'PUBLER-WORKSPACE-ID'],
+    capabilities: ['List connected social accounts', 'Schedule and publish posts'],
+    usedIn: ['Social Hub', 'Platform Settings (Social automation)'],
+    dataDirection: 'Outbound: captions and links for live content go to Publer.',
+    securityNote:
+      'Both values are read on the server only. Publer answers 403 for a wrong key and 401 for a wrong workspace id, and each has its own light.',
   },
   {
     id: 'resend',
@@ -293,6 +400,11 @@ export const SERVICES = Object.freeze([
     // Server-side: GET /domains, which a sending-only key cannot pass.
     test: testResend,
     secrets: ['RESEND-API-KEY'],
+    capabilities: ['Manage contacts', 'Create and send broadcasts', 'Send the confirmation email'],
+    usedIn: ['Newsletter Hub'],
+    dataDirection: 'Outbound: subscriber addresses and issue HTML go to Resend.',
+    securityNote:
+      'A Full access key, read on the server only; the test refuses a key minted with sending access alone.',
   },
   {
     id: 'linkie',
@@ -303,6 +415,10 @@ export const SERVICES = Object.freeze([
     url: 'https://app.linkie.bio',
     test: testLinkie,
     secrets: ['LINKIE-API-KEY'],
+    capabilities: ['List profiles', 'Add, reorder and remove links'],
+    usedIn: ['Linkie Hub'],
+    dataDirection: 'Outbound: live page titles and URLs go to Linkie.',
+    securityNote: 'Read on the server only, through the Linkie proxy.',
   },
   {
     id: 'telegram',
@@ -317,6 +433,11 @@ export const SERVICES = Object.freeze([
     // not read the chat id, so a green light here says nothing about it.
     test: testTelegram,
     secrets: ['TELEGRAM-BOT-TOKEN', 'TELEGRAM-CHAT-ID'],
+    capabilities: ['Send review notices', 'Answer approve / reject replies', 'Alert on failures'],
+    usedIn: ['Review Queue', 'Health (alerts)', 'Forge Studio'],
+    dataDirection: 'Two-way: notices go out; approve / reject commands come back on the webhook.',
+    securityNote:
+      'The token sits in the request path, so no probe ever quotes its URL; the chat id is never tested, only used.',
   },
 
   // ── Content ──────────────────────────────────────────────────────────────
@@ -334,14 +455,17 @@ export const SERVICES = Object.freeze([
     // show id, so the test works before RSSCOM-PODCAST-ID is seeded.
     test: testRssCom,
     secrets: ['RSSCOM-API-KEY', 'RSSCOM-PODCAST-ID'],
+    capabilities: ['List shows', 'Publish an episode'],
+    usedIn: ['Recording Hub (Distribution)'],
+    dataDirection: 'Outbound: episode audio and show notes go to RSS.com.',
+    securityNote: 'Read on the server only. The podcast id is an identifier, not a secret.',
   },
   {
     id: 'youtube',
     group: 'content',
     icon: Youtube,
     name: 'YouTube',
-    description:
-      'Finds the \u201cwatch next\u201d videos shown beside each Listen & Learn episode.',
+    description: 'Finds the “watch next” videos shown beside each Listen & Learn episode.',
     url: 'https://console.cloud.google.com/apis/credentials',
     // Server-side (#483). COSTS ~100 OF 10,000 DAILY QUOTA UNITS per press,
     // because the Data API prices search.list per call — so this is a button
@@ -352,6 +476,11 @@ export const SERVICES = Object.freeze([
     // still tested from its own card, where the cost is said beside the button.
     skipInTestAll: 'Costs ~100 of 10,000 daily YouTube quota units, so it is tested on its own.',
     secrets: ['YOUTUBE-API-KEY'],
+    capabilities: ['Search for related videos'],
+    usedIn: ['Listen & Learn'],
+    dataDirection: 'Inbound: video titles and ids come from YouTube.',
+    securityNote:
+      'Read on the server only; the key travels in the query string, so no probe quotes its URL.',
   },
   {
     id: 'plaud',
@@ -363,7 +492,15 @@ export const SERVICES = Object.freeze([
     test: testPlaud,
     secrets: ['PLAUD-EMBEDDED-CLIENT-ID', 'PLAUD-EMBEDDED-API-KEY'],
     credentialNote:
-      'Reading recordings from the recorder uses a separate sign-in that renews itself every 12 hours \u2014 reconnect from Recording Hub \u2192 Plaud \u2192 Connect. The two values above are only for turning uploaded audio into text.',
+      'Reading recordings from the recorder uses a separate sign-in that renews itself every 12 hours — reconnect from Recording Hub → Settings → Connect. The two values above are only for turning uploaded audio into text.',
+    // The one service with its own sign-in flow: Reconnect goes there.
+    reconnectHref: '/admin/recording-hub?tab=settings',
+    capabilities: ['List recordings', 'Download audio', 'Transcribe an upload'],
+    usedIn: ['Recording Hub'],
+    dataDirection:
+      'Inbound: recordings and transcripts come from Plaud; uploads go to it for transcription.',
+    securityNote:
+      'The OAuth tokens live on the MCP server document and are never returned to a browser; the embedded key is read on the server only.',
   },
   {
     id: 'sessionize',
@@ -377,6 +514,10 @@ export const SERVICES = Object.freeze([
     // The one service configured rather than credentialed. Its setting is
     // rendered on this card because the setting IS its connection.
     setting: 'sessionizeSpeakerId',
+    capabilities: ['Read the public speaker profile and its events'],
+    usedIn: ['Speaking'],
+    dataDirection: 'Inbound: a public JSON feed, read by the browser directly.',
+    securityNote: 'No credential. The speaker id is public and stored in admin settings.',
   },
 
   // ── Education ────────────────────────────────────────────────────────────
@@ -388,7 +529,10 @@ export const SERVICES = Object.freeze([
     description: 'The badge wallet behind the certifications page.',
     url: 'https://www.credly.com/users/saul-patino/badges',
     test: null,
+    untestedReason: 'A public profile page a browser cannot fetch from another origin.',
     secrets: [],
+    usedIn: ['Certifications'],
+    dataDirection: 'Inbound: badge images and links, copied by hand.',
   },
   {
     id: 'microsoft-learn',
@@ -398,7 +542,10 @@ export const SERVICES = Object.freeze([
     description: 'The certification transcript behind the Azure Learn pages.',
     url: 'https://learn.microsoft.com/en-us/users/saulpatinojr/transcript/d4993ir4gpz8g40',
     test: null,
+    untestedReason: 'A public profile page a browser cannot fetch from another origin.',
     secrets: [],
+    usedIn: ['Certifications'],
+    dataDirection: 'Inbound: transcript entries, copied by hand.',
   },
   {
     id: 'aws-skill-builder',
@@ -408,7 +555,10 @@ export const SERVICES = Object.freeze([
     description: 'The certification badges behind the AWS Learn pages.',
     url: 'https://skillsprofile.skillbuilder.aws/user/saulpatino/certification-badges',
     test: null,
+    untestedReason: 'A public profile page a browser cannot fetch from another origin.',
     secrets: [],
+    usedIn: ['Certifications'],
+    dataDirection: 'Inbound: badge images and links, copied by hand.',
   },
   {
     id: 'google-developer',
@@ -418,7 +568,154 @@ export const SERVICES = Object.freeze([
     description: 'The developer profile behind the Google Cloud Learn pages.',
     url: 'https://developers.google.com/profile/u/105048864698113573023',
     test: null,
+    untestedReason: 'A public profile page a browser cannot fetch from another origin.',
     secrets: [],
+    usedIn: ['Certifications'],
+    dataDirection: 'Inbound: profile badges, copied by hand.',
+  },
+
+  // ── Gen AI (ADR 0033) ────────────────────────────────────────────────────
+  {
+    id: 'gemini',
+    group: 'gen-ai',
+    icon: Sparkles,
+    name: 'Google Gemini',
+    description:
+      'One of the models the site writes with, and the voice that reads every Listen & Learn episode.',
+    url: 'https://aistudio.google.com/app/apikey',
+    test: testAiProvider('gemini', 'Gemini'),
+    secrets: ['GEMINI-API-KEY'],
+    capabilities: ['Draft, summarise and grade content', 'Text to speech for Listen & Learn'],
+    usedIn: ['Forge Studio', 'Review Queue (inspector)', 'Listen & Learn', 'AI Engine'],
+    dataDirection: 'Outbound: article text and prompts go to Google; drafts and audio come back.',
+    securityNote: LLM_SECURITY_NOTE,
+  },
+  {
+    id: 'anthropic',
+    group: 'gen-ai',
+    icon: Bot,
+    name: 'Anthropic',
+    description:
+      'One of the models the site writes with, tried in the order set on the AI Engine page.',
+    url: 'https://console.anthropic.com/settings/keys',
+    test: testAiProvider('anthropic', 'Anthropic'),
+    secrets: ['ANTHROPIC-API-KEY'],
+    capabilities: ['Draft, summarise and grade content'],
+    usedIn: ['Forge Studio', 'Review Queue (inspector)', 'AI Engine'],
+    dataDirection: 'Outbound: article text and prompts go to Anthropic; drafts come back.',
+    securityNote: LLM_SECURITY_NOTE,
+  },
+  {
+    id: 'openai',
+    group: 'gen-ai',
+    icon: Bot,
+    name: 'OpenAI',
+    description:
+      'One of the models the site writes with, tried in the order set on the AI Engine page.',
+    url: 'https://platform.openai.com/api-keys',
+    test: testAiProvider('openai', 'OpenAI'),
+    secrets: ['OPENAI-API-KEY'],
+    capabilities: ['Draft, summarise and grade content'],
+    usedIn: ['Forge Studio', 'Review Queue (inspector)', 'AI Engine'],
+    dataDirection: 'Outbound: article text and prompts go to OpenAI; drafts come back.',
+    securityNote: LLM_SECURITY_NOTE,
+  },
+  {
+    id: 'nvidia',
+    group: 'gen-ai',
+    icon: Bot,
+    name: 'NVIDIA API',
+    description:
+      'Free, rate-limited models: by default the backup writer for drafts, summaries and scripts.',
+    url: 'https://build.nvidia.com/settings/api-keys',
+    test: testAiProvider('nvidia', 'NVIDIA'),
+    secrets: ['NVIDIA-API-KEY'],
+    capabilities: ['Draft, summarise and grade content (backup)'],
+    usedIn: ['Forge Studio', 'AI Engine'],
+    dataDirection: 'Outbound: article text and prompts go to NVIDIA; drafts come back.',
+    securityNote: `${LLM_SECURITY_NOTE} Locked off for the anonymous public explain routes.`,
+  },
+  {
+    id: 'perplexity',
+    group: 'gen-ai',
+    icon: Bot,
+    name: 'Perplexity',
+    description: 'A search-grounded model. Nothing on the site uses it today.',
+    url: 'https://www.perplexity.ai/settings/api',
+    test: null,
+    untestedReason:
+      'Perplexity has no read-only endpoint, so a test would be a paid completion for a service nothing uses.',
+    secrets: ['PERPLEXITY-API-KEY'],
+    capabilities: [],
+    usedIn: [],
+    dataDirection: 'None today.',
+    securityNote: 'Read by nothing; the key can be left unset.',
+  },
+
+  // ── AI services (ADR 0033) ───────────────────────────────────────────────
+  {
+    id: 'elevenlabs',
+    group: 'ai-services',
+    icon: Volume2,
+    name: 'ElevenLabs',
+    description: 'Reads podcast episodes aloud.',
+    url: 'https://elevenlabs.io/app/settings/api-keys',
+    // The Audio tab's status read: plan and credits, no synthesis.
+    test: testElevenLabs,
+    secrets: ['ELEVENLABS-API-KEY'],
+    capabilities: ['Text to speech for podcast episodes', 'List voices', 'Preview a voice'],
+    usedIn: ['Recording Hub (Episodes)', 'Platform Settings (Audio)'],
+    dataDirection: 'Outbound: episode scripts go to ElevenLabs; audio comes back.',
+    securityNote:
+      'Read on the server only. Create the key restricted to Text to Speech, User (Read) and Voices (Read), with a credit limit.',
+  },
+  {
+    id: 'azure-speech',
+    group: 'ai-services',
+    icon: Volume2,
+    name: 'Azure AI Speech',
+    description: 'A spare narrator, ready in case the main one stops being available.',
+    // The page that says where the key is read from in the portal; the portal
+    // itself routes by fragment, which is a bare host to a reader of the URL.
+    url: 'https://learn.microsoft.com/azure/ai-services/speech-service/overview#find-keys-and-endpoint',
+    test: null,
+    untestedReason:
+      'Not set up on purpose: the key is deliberately unprovisioned until it is needed.',
+    secrets: ['AZURE-SPEECH-KEY'],
+    capabilities: ['Text to speech (standby)'],
+    usedIn: [],
+    dataDirection: 'None today.',
+    securityNote: 'Read on the server only, once provisioned.',
+  },
+  {
+    id: 'firecrawl',
+    group: 'ai-services',
+    icon: ScanText,
+    name: 'Firecrawl',
+    description: 'Reads a web page and pulls out its text, so a link can be summarised.',
+    url: 'https://www.firecrawl.dev/app/api-keys',
+    test: testFirecrawl,
+    secrets: ['FIRECRAWL-API-KEY'],
+    capabilities: ['Scrape a page to clean text'],
+    usedIn: ['New Content (submit a URL)', 'Review Queue (inspector)'],
+    dataDirection: 'Outbound: a public URL goes to Firecrawl; the page text comes back.',
+    securityNote: 'Read on the server only. The test reads the credit balance and scrapes nothing.',
+  },
+  {
+    id: 'replicate',
+    group: 'ai-services',
+    icon: ImageIcon,
+    name: 'Replicate',
+    description:
+      'Generates the cover image for a post. Without it, posts use a stock image instead.',
+    url: 'https://replicate.com/account/api-tokens',
+    test: testReplicate,
+    secrets: ['REPLICATE-API-KEY'],
+    capabilities: ['Run an image model for a cover'],
+    usedIn: ['Image Prompts', 'Image Gallery', 'Editor (AI cover)'],
+    dataDirection:
+      'Outbound: a prompt goes to Replicate; the image comes back and is stored in Blob.',
+    securityNote: 'Read on the server only. The test reads the account and starts no prediction.',
   },
 
   // ── Cloud ────────────────────────────────────────────────────────────────
@@ -439,6 +736,10 @@ export const SERVICES = Object.freeze([
     // The one service the site fills itself, so the card carries the button
     // that fills it (CloudPricingRefresh), the way Sessionize carries its id.
     action: 'refreshCloudPricing',
+    capabilities: ['Read three public price lists', 'Refresh the cached comparison'],
+    usedIn: ['Public pricing comparison'],
+    dataDirection: 'Inbound: list prices come from the providers; nothing of ours goes out.',
+    securityNote: 'Read on the server only. Scope the AWS policy to pricing:GetProducts.',
   },
 
   // ── Code quality ─────────────────────────────────────────────────────────
@@ -454,5 +755,32 @@ export const SERVICES = Object.freeze([
     // Server-side: GET /user with the stored token, which never reaches a browser.
     test: testQlty,
     secrets: ['QLTY-API-TOKEN'],
+    capabilities: ['Read grades and open findings'],
+    usedIn: ['Health (Code and Security)'],
+    dataDirection: 'Inbound: findings come from Qlty; nothing goes out.',
+    securityNote: 'A personal token read on the server only.',
+  },
+
+  // ── Hybrid Lab (ADR 0033) ────────────────────────────────────────────────
+  {
+    id: 'hybrid-lab',
+    group: 'labs',
+    icon: FlaskConical,
+    name: 'Hybrid Lab (Coder and Turnstile)',
+    description:
+      'The browser workspaces behind the labs page, and the check that lets a visitor send the lab a job.',
+    url: 'https://developers.cloudflare.com/turnstile/',
+    // The public labs card's own read, cached server-side.
+    test: testHybridLab,
+    secrets: ['CODER-URL', 'CODER-STATUS-TOKEN', 'TURNSTILE-SECRET-KEY'],
+    capabilities: ['List lab templates', 'Count running workspaces', 'Verify a browser check'],
+    usedIn: ['Labs', 'Public labs page', 'Landing Zone Builder'],
+    dataDirection:
+      'Inbound: workspace status comes from Coder; a Turnstile token goes to Cloudflare to verify.',
+    securityNote:
+      'The status token is read-only in Coder and never reaches a browser; the Turnstile secret goes to Cloudflare siteverify and nowhere else.',
   },
 ]);
+
+/** A service by id, or undefined. Read by the Health probe registry. */
+export const serviceById = (id) => SERVICES.find((service) => service.id === id);

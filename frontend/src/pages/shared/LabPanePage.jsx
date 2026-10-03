@@ -1,5 +1,20 @@
 /**
- * `/education/labs/:labId`: one lab's workspace, in a pane on the site (#751).
+ * One lab's page: its objectives, steps and resources, and its workspace in
+ * a pane on the site (#751; the structure since ADR 0033 §4). Two addresses,
+ * one page:
+ *
+ *   /:provider/education/labs/:labId   under the provider's Learn section,
+ *                                      the canonical one (the lab's first
+ *                                      provider when it is listed under two)
+ *   /education/labs/:labId             from the cross-provider index, kept
+ *                                      for links written before ADR 0033
+ *
+ * The provider comes from the route; "Back to labs" returns to the list the
+ * visitor came from. The page body is the catalogue row (LabSteps, LabFacts,
+ * LabArticles) around the pane, plus "How labs work" (HowLabsWork) and the
+ * one-word workspace state (WorkspaceStatusBadge) from the same status read
+ * that decides whether the pane opens. Stop and reset are the workspace's
+ * own: the page says where they are and does not pretend to hold them.
  *
  * WHY A PANE. Owner decision 2026-09-28: the lab is reached only through
  * panes on the site (ADR 0032, amendment of that date). #750 enforces it on
@@ -106,16 +121,24 @@ import {
   labById,
   labLauncherUrl,
   labPanePath,
+  labsPath,
+  primaryProvider,
 } from '@/data/labs/catalogue';
+import HowLabsWork from '@/components/labs/HowLabsWork';
+import LabArticles from '@/components/labs/LabArticles';
+import LabFacts from '@/components/labs/LabFacts';
+import LabSteps from '@/components/labs/LabSteps';
+import WorkspaceStatusBadge from '@/components/labs/WorkspaceStatusBadge';
 import {
   markSignInStarted,
   markSignedIn,
   readSignedInAt,
   subscribeSignedIn,
 } from '@/components/labs/labSignIn';
+import { providerName } from '@/components/labs/labsWords';
 import { usePublicData } from '@/hooks/usePublicData';
 import { fetchCoderStatus } from '@/lib/publicApi';
-import { staticRoutes } from '@/lib/routeFactory';
+import { routes, staticRoutes } from '@/lib/routeFactory';
 import { safeUrl } from '@/lib/safeUrl';
 
 export const UNAVAILABLE_SENTENCE = "Lab workspaces aren't available right now.";
@@ -225,6 +248,8 @@ const BUTTON =
   'inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary';
 const PRIMARY = `${BUTTON} bg-primary text-primary-foreground hover:opacity-90`;
 const SECONDARY = `${BUTTON} border border-slate-300 dark:border-slate-600 text-slate-900 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800`;
+const LINK =
+  'font-semibold text-slate-900 dark:text-slate-100 underline underline-offset-4 hover:text-primary';
 
 /** What the status read says about the workspaces: 'checking', 'available' or 'unavailable'. */
 export function workspaceService({ data, loading, error }) {
@@ -244,16 +269,16 @@ const serverFalse = () => false;
 const noSubscription = () => () => {};
 
 export default function LabPanePage() {
-  const { labId } = useParams();
+  const { labId, provider = null } = useParams();
   const lab = labById(labId);
-  if (!lab) return <Navigate to={staticRoutes.labs} replace />;
-  return <LabPane key={lab.id} lab={lab} />;
+  if (!lab) return <Navigate to={labsPath(provider)} replace />;
+  return <LabPane key={`${provider ?? ''}/${lab.id}`} lab={lab} provider={provider} />;
 }
 
 /** "I've already signed in": record it, which shows the pane. No argument, so the click event is not taken for a time. */
 const alreadySignedIn = () => markSignedIn();
 
-function LabPane({ lab }) {
+function LabPane({ lab, provider }) {
   const status = usePublicData(() => fetchCoderStatus(), WORKSPACE_STATUS_KEY);
   const signedInAt = useSyncExternalStore(subscribeSignedIn, readSignedInAt, serverSignedInAt);
   const [pending, setPending] = useState(false);
@@ -263,48 +288,190 @@ function LabPane({ lab }) {
     markSignInStarted(lab.id);
     setPending(true);
   };
+  // Where "Back to labs" goes: the list this page was reached from.
+  const backTo = labsPath(provider);
+  const canonical = `${SITE_ORIGIN}${labPanePath(primaryProvider(lab), lab.id)}`;
+  const badge = {
+    status: status.loading && status.data === null ? undefined : status.data,
+    loading: status.loading,
+    error: status.error,
+  };
 
   return (
     <>
       <Helmet>
         <title>{`${lab.title} — Browser labs | Hybrid Cloud Works`}</title>
         <meta name="description" content={lab.summary} />
-        <link rel="canonical" href={`${SITE_ORIGIN}${labPanePath(lab.id)}`} />
+        <link rel="canonical" href={canonical} />
       </Helmet>
 
-      <div className="relative z-10 max-w-[1400px] mx-auto w-full px-4 md:px-8 py-8 flex flex-col gap-6">
-        <header>
-          <p className="flex flex-wrap gap-x-1.5 text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
+      <div className="relative z-10 max-w-350 mx-auto w-full px-4 md:px-8 py-8 flex flex-col gap-8">
+        <header className="flex flex-col gap-3">
+          <p className="flex flex-wrap gap-x-1.5 text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">
             <Link to={staticRoutes.education} className="underline-offset-4 hover:underline">
               Learn any cloud
             </Link>
+            {provider ? (
+              <>
+                <span aria-hidden="true">/</span>
+                <Link
+                  to={routes.education(provider)}
+                  className="underline-offset-4 hover:underline"
+                >
+                  {providerName(provider)} Learn
+                </Link>
+              </>
+            ) : null}
             <span aria-hidden="true">/</span>
-            <Link to={staticRoutes.labs} className="underline-offset-4 hover:underline">
+            <Link to={backTo} className="underline-offset-4 hover:underline">
               Labs
             </Link>
             <span aria-hidden="true">/</span>
             <span>{lab.title}</span>
           </p>
-          <h1 className="display-heading text-2xl sm:text-3xl text-slate-950 dark:text-white mb-2">
-            {lab.title}
-          </h1>
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="display-heading text-2xl sm:text-3xl text-slate-950 dark:text-white">
+              {lab.title}
+            </h1>
+            <WorkspaceStatusBadge {...badge} />
+          </div>
           <p className={`${MUTED} max-w-3xl`}>{lab.summary}</p>
+          <LabFacts lab={lab} showTools />
         </header>
         <PaneBody
           service={workspaceService(status)}
           signedInAt={signedInAt}
           lab={lab}
+          backTo={backTo}
           pending={pending}
           signInHref={signInHref}
           onStartSignIn={startSignIn}
         />
+        <LabDetails lab={lab} />
       </div>
     </>
   );
 }
 
+/**
+ * The lab itself, below the pane (ADR 0033 §4): objectives, prerequisites,
+ * the steps in order with the runner's check on the one it can check, the
+ * resources and articles, how labs work, and where stop and reset live.
+ * Static from the catalogue, so it is in the pre-rendered HTML whatever the
+ * pane is doing.
+ */
+function LabDetails({ lab }) {
+  return (
+    <div
+      className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_22rem] gap-8"
+      data-testid="lab-details"
+    >
+      <section aria-labelledby="lab-steps-heading" className="flex flex-col gap-4 min-w-0">
+        <h2
+          id="lab-steps-heading"
+          className="text-xl font-bold text-slate-950 dark:text-white flex items-center gap-2"
+        >
+          <span className="w-1 h-6 bg-primary rounded-full" aria-hidden="true"></span>
+          Steps
+        </h2>
+        <LabSteps steps={lab.steps} />
+      </section>
+      <aside className="flex flex-col gap-6 min-w-0" aria-label="About this lab">
+        <DetailList id="lab-objectives" title="What you will learn" items={lab.objectives} />
+        <DetailList id="lab-prerequisites" title="Before you start" items={lab.prerequisites} />
+        <section
+          aria-labelledby="lab-workspace-heading"
+          className="glass rounded-xl p-5 flex flex-col gap-2"
+        >
+          <h2
+            id="lab-workspace-heading"
+            className="text-base font-bold text-slate-950 dark:text-white"
+          >
+            Your workspace
+          </h2>
+          <p className={`text-sm ${MUTED}`}>
+            Opening this page starts your workspace, or resumes it where you left off. Stop and
+            reset are in the workspace&apos;s own menu, top left inside the pane under the workspace
+            name: Stop keeps your files for next time, and deleting the workspace resets the lab to
+            its starting folder. Workspaces also stop by themselves after an hour of inactivity.
+          </p>
+          <p className={`text-xs ${MUTED}`}>
+            Prefer your own machine? The{' '}
+            <Link to={labsPath(primaryProvider(lab))} className={LINK}>
+              lab list
+            </Link>{' '}
+            has the Run it locally line for this lab&apos;s container image.
+          </p>
+        </section>
+        {lab.resources.length > 0 ? (
+          <section
+            aria-labelledby="lab-resources-heading"
+            className="glass rounded-xl p-5 flex flex-col gap-2"
+          >
+            <h2
+              id="lab-resources-heading"
+              className="text-base font-bold text-slate-950 dark:text-white"
+            >
+              Resources
+            </h2>
+            <ul className="flex flex-col gap-1.5 list-none p-0 m-0" data-testid="lab-resources">
+              {lab.resources.map((entry) => (
+                <li key={entry.url} className="text-sm">
+                  {entry.url.startsWith('/') ? (
+                    <Link to={entry.url} className={LINK}>
+                      {entry.label}
+                    </Link>
+                  ) : (
+                    <a href={entry.url} target="_blank" rel="noopener noreferrer" className={LINK}>
+                      {entry.label}
+                      <span className="sr-only"> (opens in a new tab)</span>
+                    </a>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+        {lab.articleSlugs.length > 0 ? (
+          <section
+            aria-labelledby="lab-articles-heading"
+            className="glass rounded-xl p-5 flex flex-col gap-2"
+          >
+            <h2
+              id="lab-articles-heading"
+              className="text-base font-bold text-slate-950 dark:text-white"
+            >
+              Articles for this lab
+            </h2>
+            <LabArticles articles={lab.articleSlugs} />
+          </section>
+        ) : null}
+        <HowLabsWork headingLevel="h2" id="lab-how-labs-work" />
+      </aside>
+    </div>
+  );
+}
+
+function DetailList({ id, title, items }) {
+  return (
+    <section aria-labelledby={`${id}-heading`} className="glass rounded-xl p-5 flex flex-col gap-2">
+      <h2 id={`${id}-heading`} className="text-base font-bold text-slate-950 dark:text-white">
+        {title}
+      </h2>
+      <ul
+        className="flex flex-col gap-1.5 list-disc pl-5 m-0 text-sm text-slate-700 dark:text-slate-300"
+        data-testid={id}
+      >
+        {items.map((line) => (
+          <li key={line}>{line}</li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 /** Exactly one of: opening, unavailable, the sign-in step, or the pane. */
-function PaneBody({ service, signedInAt, lab, pending, signInHref, onStartSignIn }) {
+function PaneBody({ service, signedInAt, lab, backTo, pending, signInHref, onStartSignIn }) {
   if (service === 'checking') {
     return (
       <p role="status" className={`text-sm ${MUTED}`} data-testid="lab-opening">
@@ -312,14 +479,29 @@ function PaneBody({ service, signedInAt, lab, pending, signInHref, onStartSignIn
       </p>
     );
   }
-  if (service === 'unavailable') return <Unavailable />;
+  if (service === 'unavailable') return <Unavailable backTo={backTo} />;
   if (!signedInAt) {
-    return <SignInStep signInHref={signInHref} pending={pending} onStart={onStartSignIn} />;
+    return (
+      <SignInStep
+        signInHref={signInHref}
+        backTo={backTo}
+        pending={pending}
+        onStart={onStartSignIn}
+      />
+    );
   }
-  return <Pane key={signedInAt} lab={lab} signInHref={signInHref} onStartSignIn={onStartSignIn} />;
+  return (
+    <Pane
+      key={signedInAt}
+      lab={lab}
+      backTo={backTo}
+      signInHref={signInHref}
+      onStartSignIn={onStartSignIn}
+    />
+  );
 }
 
-function Unavailable() {
+function Unavailable({ backTo }) {
   return (
     <section
       data-testid="lab-unavailable"
@@ -329,17 +511,17 @@ function Unavailable() {
         {UNAVAILABLE_SENTENCE}
       </p>
       <p className={`text-sm ${MUTED}`}>
-        You can still run this lab on your own machine: the labs page has the two lines for it,
-        under Run it locally.
+        You can still follow the steps below and run this lab on your own machine: the labs page has
+        the two lines for it, under Run it locally.
       </p>
-      <Link to={staticRoutes.labs} className={`${SECONDARY} self-start`}>
+      <Link to={backTo} className={`${SECONDARY} self-start`}>
         Back to labs
       </Link>
     </section>
   );
 }
 
-function SignInStep({ signInHref, pending, onStart }) {
+function SignInStep({ signInHref, backTo, pending, onStart }) {
   return (
     <section
       aria-labelledby="lab-sign-in-heading"
@@ -377,7 +559,7 @@ function SignInStep({ signInHref, pending, onStart }) {
         <button type="button" onClick={alreadySignedIn} className={SECONDARY}>
           I&apos;ve already signed in
         </button>
-        <Link to={staticRoutes.labs} className={SECONDARY}>
+        <Link to={backTo} className={SECONDARY}>
           Back to labs
         </Link>
       </div>
@@ -406,7 +588,7 @@ function useLauncherState(frameRef) {
  * The toolbar and the frame. Keyed by the sign-in time above it, so a new
  * sign-in in another tab mounts a new one: that is the reload.
  */
-function Pane({ lab, signInHref, onStartSignIn }) {
+function Pane({ lab, backTo, signInHref, onStartSignIn }) {
   const paneRef = useRef(null);
   const frameRef = useRef(null);
   const [loaded, setLoaded] = useState(false);
@@ -438,7 +620,7 @@ function Pane({ lab, signInHref, onStartSignIn }) {
     }
   };
 
-  if (timedOut || paneState === 'unavailable') return <Unavailable />;
+  if (timedOut || paneState === 'unavailable') return <Unavailable backTo={backTo} />;
 
   const src = safeUrl(labLauncherUrl(lab));
   const signedOut = paneState === 'signed-out';
@@ -448,7 +630,7 @@ function Pane({ lab, signInHref, onStartSignIn }) {
         ref={paneRef}
         aria-label={`Lab workspace: ${lab.title}`}
         data-testid="lab-pane"
-        className="flex flex-col rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 h-[calc(100dvh-14rem)] min-h-[32rem]"
+        className="flex flex-col rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 h-[calc(100dvh-14rem)] min-h-128"
       >
         <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-slate-200 dark:border-slate-700">
           <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
@@ -476,7 +658,7 @@ function Pane({ lab, signInHref, onStartSignIn }) {
               Sign in with GitHub <span className="sr-only">(opens in a new tab)</span>
             </a>
           ) : null}
-          <Link to={staticRoutes.labs} className={SECONDARY}>
+          <Link to={backTo} className={SECONDARY}>
             Back to labs
           </Link>
         </div>

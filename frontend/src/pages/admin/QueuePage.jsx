@@ -7,6 +7,10 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { postJSON } from '@/lib/api';
+import PageHeader from '@/components/admin/shared/PageHeader';
+import TaxonomyPicker from '@/components/admin/shared/TaxonomyPicker';
+import { useTaxonomy } from '@/components/admin/shared/useTaxonomy';
+import { enabledEntries } from '@/lib/taxonomy';
 import {
   forgedTodayFromStats,
   formatPublishedDate,
@@ -19,7 +23,25 @@ import {
 import { QueueList } from './queue/QueueList';
 import { CONTENT_TYPE_OPTIONS, STATUS_FILTERS } from './queue/constants';
 import { useQueueActions } from './queue/useQueueActions';
-import { XCircle, RefreshCw, Loader2, Filter, Trash2, Flame, FilePen } from 'lucide-react';
+import {
+  XCircle,
+  RefreshCw,
+  Loader2,
+  Filter,
+  Trash2,
+  Flame,
+  FilePen,
+  ListChecks,
+} from 'lucide-react';
+
+/** What a first-time user needs to know about this page (ADR 0033 §7). */
+const QUEUE_HELP = [
+  'What arrives here: items from RSS feeds, Submit URLs, Forge from URL, the Recording Hub, and drafts sent to review from the Drafts page.',
+  'Needs review is the default: Ingested items are raw, Inspected ones have been read by the AI inspector and carry a summary.',
+  'What to do: open an item to read it, then Send to Publish (approve) or Reject. Select several and Forge or Reject them together.',
+  'Kind and idea origin classify every item; set them here or on the review page so downstream tools (Listen & Learn, Social Hub, Newsletter) pick the right items.',
+  'Where it goes next: approved items appear in the Editor for polishing, then on the Publish page. Rejected items decay and are purged unless restored.',
+];
 
 function isValidHttpUrl(value = '') {
   try {
@@ -62,6 +84,9 @@ function ForgeFromUrlCard() {
   const [forgingUrl, setForgingUrl] = useState(false);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
+  // The classification of what the forge will write (ADR 0033 §4). A pasted
+  // URL is an imported source by definition; what it becomes is the owner's call.
+  const [taxonomy, setTaxonomy] = useState({ kind: 'article', ideaOrigin: 'imported-source' });
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -76,7 +101,7 @@ function ForgeFromUrlCard() {
     try {
       const accepted = await postJSON('enqueueJob', {
         type: 'forge-from-url',
-        payload: { url },
+        payload: { url, kind: taxonomy.kind, ideaOrigin: taxonomy.ideaOrigin },
       });
       if (!accepted?.ok || !accepted.jobId) {
         throw new Error(accepted?.error || 'Job was not accepted');
@@ -113,10 +138,42 @@ function ForgeFromUrlCard() {
             {forgingUrl ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Forge'}
           </Button>
         </form>
+        <TaxonomyPicker
+          className="mt-3"
+          compact
+          kind={taxonomy.kind}
+          ideaOrigin={taxonomy.ideaOrigin}
+          onChange={setTaxonomy}
+          disabled={forgingUrl}
+        />
         {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
         {notice && <p className="mt-2 text-sm text-muted-foreground">{notice}</p>}
       </CardContent>
     </Card>
+  );
+}
+
+/** One labelled select over a taxonomy list, with "All" first. */
+function TaxonomyFilterSelect({ id, label, value, entries, onChange }) {
+  return (
+    <div>
+      <Label htmlFor={id} className="text-xs">
+        {label}
+      </Label>
+      <select
+        id={id}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-2 w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm"
+      >
+        <option value="all">All</option>
+        {entries.map((entry) => (
+          <option key={entry.id} value={entry.id}>
+            {entry.label}
+          </option>
+        ))}
+      </select>
+    </div>
   );
 }
 
@@ -138,6 +195,119 @@ function ForgeFeedback({ error, message }) {
   );
 }
 
+/**
+ * For bulk-reject confirmations, a top-10 preview inside the modal so the
+ * user can verify scope. Items are looked up out of the current `items`
+ * array (only currently-rendered items can be selected anyway).
+ */
+function BulkRejectPreview({ confirmTarget, items }) {
+  if (confirmTarget?.type !== 'bulkReject') return null;
+  const ids = confirmTarget.ids || [];
+  if (ids.length === 0) return null;
+  const byId = new Map(items.map((it) => [it.id, it]));
+  const previewItems = ids
+    .slice(0, 10)
+    .map((id) => byId.get(id))
+    .filter(Boolean);
+  const overflow = Math.max(ids.length - previewItems.length, 0);
+  return (
+    <div className="rounded-md border border-border bg-muted/40 p-3 max-h-72 overflow-y-auto text-sm">
+      <ul className="space-y-2">
+        {previewItems.map((it) => {
+          const dateInfo = formatPublishedDate(it);
+          const domain = getRootDomain(it);
+          return (
+            <li key={it.id} className="flex flex-col gap-0.5">
+              <span className="font-medium leading-snug line-clamp-2">
+                {it.Title || it.title || 'Untitled'}
+              </span>
+              <span className="text-xs text-muted-foreground font-mono">
+                {domain || ''}
+                {dateInfo ? ` · ${dateInfo.label}` : ''}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      {overflow > 0 && (
+        <p className="mt-2 text-xs text-muted-foreground italic">…and {overflow} more not shown.</p>
+      )}
+    </div>
+  );
+}
+
+/** The header's bulk actions, out of QueuePage for complexity's sake. */
+function QueueHeaderActions({
+  statusFilter,
+  totalCount,
+  selectedIds,
+  bulkDeletingRejected,
+  forgingSelected,
+  bulkRejecting,
+  handleDeleteRejectedNow,
+  handleForgeSelected,
+  handleBulkReject,
+}) {
+  return (
+    <div className="flex flex-col items-end gap-2">
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={handleDeleteRejectedNow}
+        disabled={bulkDeletingRejected || statusFilter !== 'rejected' || totalCount === 0}
+        className="gap-1 text-destructive hover:text-destructive"
+      >
+        {bulkDeletingRejected ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <Trash2 className="h-4 w-4" />
+        )}
+        Delete Rejected Now
+      </Button>
+      {selectedIds.size > 0 && statusFilter !== 'rejected' && statusFilter !== 'published_live' && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleForgeSelected}
+          disabled={forgingSelected}
+          className="gap-1"
+        >
+          {forgingSelected ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Flame className="h-4 w-4 text-primary" />
+          )}
+          Forge Selected ({selectedIds.size})
+        </Button>
+      )}
+      {selectedIds.size > 1 && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleBulkReject}
+          disabled={bulkRejecting}
+          className="gap-1 text-destructive hover:text-destructive border-destructive/60"
+        >
+          {bulkRejecting ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <XCircle className="h-4 w-4" />
+          )}
+          Reject All Now ({selectedIds.size})
+        </Button>
+      )}
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => window.location.reload()}
+        className="gap-1"
+      >
+        <RefreshCw className="h-4 w-4" /> Refresh
+      </Button>
+    </div>
+  );
+}
+
 export default function QueuePage() {
   const navigate = useNavigate();
   const { authReady } = useAuthReady();
@@ -149,6 +319,9 @@ export default function QueuePage() {
   const [contentTypeFilter, setContentTypeFilter] = useState(
     searchParams.get('contentType') || 'all'
   );
+  const [kindFilter, setKindFilter] = useState(searchParams.get('kind') || 'all');
+  const [ideaOriginFilter, setIdeaOriginFilter] = useState(searchParams.get('ideaOrigin') || 'all');
+  const { taxonomy } = useTaxonomy();
   const [sortKey, setSortKey] = useState(() => {
     const v = searchParams.get('sort');
     return v && SORT_OPTIONS[v] ? v : 'published';
@@ -197,46 +370,7 @@ export default function QueuePage() {
     [items, sortKey, sortDirection]
   );
 
-  // For bulk-reject confirmations, render a top-10 preview inside the modal
-  // so the user can verify scope. Items are looked up out of the current
-  // `items` array (only currently-rendered items can be selected anyway).
-  const confirmModalPreview = (() => {
-    if (confirmTarget?.type !== 'bulkReject') return null;
-    const ids = confirmTarget.ids || [];
-    if (ids.length === 0) return null;
-    const byId = new Map(items.map((it) => [it.id, it]));
-    const previewItems = ids
-      .slice(0, 10)
-      .map((id) => byId.get(id))
-      .filter(Boolean);
-    const overflow = Math.max(ids.length - previewItems.length, 0);
-    return (
-      <div className="rounded-md border border-border bg-muted/40 p-3 max-h-72 overflow-y-auto text-sm">
-        <ul className="space-y-2">
-          {previewItems.map((it) => {
-            const dateInfo = formatPublishedDate(it);
-            const domain = getRootDomain(it);
-            return (
-              <li key={it.id} className="flex flex-col gap-0.5">
-                <span className="font-medium leading-snug line-clamp-2">
-                  {it.Title || it.title || 'Untitled'}
-                </span>
-                <span className="text-xs text-muted-foreground font-mono">
-                  {domain || ''}
-                  {dateInfo ? ` · ${dateInfo.label}` : ''}
-                </span>
-              </li>
-            );
-          })}
-        </ul>
-        {overflow > 0 && (
-          <p className="mt-2 text-xs text-muted-foreground italic">
-            …and {overflow} more not shown.
-          </p>
-        )}
-      </div>
-    );
-  })();
+  const confirmModalPreview = <BulkRejectPreview confirmTarget={confirmTarget} items={items} />;
 
   useEffect(() => {
     if (!authReady) return;
@@ -247,6 +381,8 @@ export default function QueuePage() {
         const result = await postJSON('getQueueSnapshot', {
           statusFilter,
           contentTypeFilter,
+          kindFilter,
+          ideaOriginFilter,
           itemLimit: pageSize,
         });
         setItems((result.items || []).sort(sortQueueItems));
@@ -259,17 +395,28 @@ export default function QueuePage() {
       }
     }
     loadItems();
-  }, [authReady, statusFilter, contentTypeFilter, pageSize]);
+  }, [authReady, statusFilter, contentTypeFilter, kindFilter, ideaOriginFilter, pageSize]);
 
   useEffect(() => {
     const next = new URLSearchParams();
     next.set('status', statusFilter);
     next.set('contentType', contentTypeFilter);
+    if (kindFilter !== 'all') next.set('kind', kindFilter);
+    if (ideaOriginFilter !== 'all') next.set('ideaOrigin', ideaOriginFilter);
     next.set('pageSize', String(pageSize));
     next.set('sort', sortKey);
     next.set('dir', sortDirection);
     setSearchParams(next, { replace: true });
-  }, [statusFilter, contentTypeFilter, pageSize, sortKey, sortDirection, setSearchParams]);
+  }, [
+    statusFilter,
+    contentTypeFilter,
+    kindFilter,
+    ideaOriginFilter,
+    pageSize,
+    sortKey,
+    sortDirection,
+    setSearchParams,
+  ]);
 
   // The forged-today meter (T-607). Best effort: a failed read leaves the
   // header without a meter rather than without a queue.
@@ -296,77 +443,32 @@ export default function QueuePage() {
 
   return (
     <div className="space-y-6 max-w-5xl">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Content Queue</h1>
-          <p className="text-muted-foreground">
-            Mixed intake review board for manual URL submissions and RSS-fed candidates before
-            staging in Publish
-          </p>
-          <p className="text-xs text-muted-foreground mt-1">
-            Showing {items.length} of {totalCount} matching items.
-          </p>
-          <ForgedTodayMeter meter={forgeMeter} />
-        </div>
-        <div className="flex flex-col items-end gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleDeleteRejectedNow}
-            disabled={bulkDeletingRejected || statusFilter !== 'rejected' || totalCount === 0}
-            className="gap-1 text-destructive hover:text-destructive"
-          >
-            {bulkDeletingRejected ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Trash2 className="h-4 w-4" />
-            )}
-            Delete Rejected Now
-          </Button>
-          {selectedIds.size > 0 &&
-            statusFilter !== 'rejected' &&
-            statusFilter !== 'published_live' && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleForgeSelected}
-                disabled={forgingSelected}
-                className="gap-1"
-              >
-                {forgingSelected ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Flame className="h-4 w-4 text-primary" />
-                )}
-                Forge Selected ({selectedIds.size})
-              </Button>
-            )}
-          {selectedIds.size > 1 && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleBulkReject}
-              disabled={bulkRejecting}
-              className="gap-1 text-destructive hover:text-destructive border-destructive/60"
-            >
-              {bulkRejecting ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <XCircle className="h-4 w-4" />
-              )}
-              Reject All Now ({selectedIds.size})
-            </Button>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => window.location.reload()}
-            className="gap-1"
-          >
-            <RefreshCw className="h-4 w-4" /> Refresh
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        icon={ListChecks}
+        title="Content Queue"
+        help={QUEUE_HELP}
+        status={
+          <>
+            <span className="text-muted-foreground">
+              Showing {items.length} of {totalCount} matching items.
+            </span>
+            <ForgedTodayMeter meter={forgeMeter} />
+          </>
+        }
+        actions={
+          <QueueHeaderActions
+            statusFilter={statusFilter}
+            totalCount={totalCount}
+            selectedIds={selectedIds}
+            bulkDeletingRejected={bulkDeletingRejected}
+            forgingSelected={forgingSelected}
+            bulkRejecting={bulkRejecting}
+            handleDeleteRejectedNow={handleDeleteRejectedNow}
+            handleForgeSelected={handleForgeSelected}
+            handleBulkReject={handleBulkReject}
+          />
+        }
+      />
 
       <ForgeFromUrlCard />
 
@@ -458,6 +560,22 @@ export default function QueuePage() {
                 {label}
               </Button>
             ))}
+          </div>
+          <div className="mt-3 grid gap-4 sm:grid-cols-2">
+            <TaxonomyFilterSelect
+              id="queue-kind-filter"
+              label="Kind (what it becomes)"
+              value={kindFilter}
+              entries={enabledEntries(taxonomy.kinds)}
+              onChange={setKindFilter}
+            />
+            <TaxonomyFilterSelect
+              id="queue-origin-filter"
+              label="Idea origin (how it started)"
+              value={ideaOriginFilter}
+              entries={enabledEntries(taxonomy.ideaOrigins)}
+              onChange={setIdeaOriginFilter}
+            />
           </div>
           <div className="mt-3 flex flex-wrap items-end gap-6">
             <div>

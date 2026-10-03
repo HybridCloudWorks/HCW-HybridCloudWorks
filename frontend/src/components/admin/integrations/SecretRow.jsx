@@ -20,6 +20,10 @@ export function SecretRow({ item, onSubmit, busy }) {
   const [value, setValue] = useState('');
   const inputRef = useRef(null);
   const presentation = STATE_PRESENTATION[item.state] ?? STATE_PRESENTATION.never;
+  // "Used by Google Gemini" under the Google Gemini row says nothing: since
+  // ADR 0033 every AI key has a service card of the same name, so only the
+  // OTHER services a key serves are worth a line.
+  const usedBy = (item.usedBy ?? []).filter((name) => name !== item.label);
 
   const submit = async (payload) => {
     const ok = await onSubmit(item.secret, payload);
@@ -44,9 +48,9 @@ export function SecretRow({ item, onSubmit, busy }) {
             <code className="text-xs text-muted-foreground">{item.secret}</code>
           </div>
           <p className="mt-0.5 text-xs text-muted-foreground">{item.help}</p>
-          {item.usedBy?.length > 0 ? (
+          {usedBy.length > 0 ? (
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Used by <span className="font-medium">{item.usedBy.join(', ')}</span>
+              Used by <span className="font-medium">{usedBy.join(', ')}</span>
             </p>
           ) : null}
           <p className="mt-1 text-xs">
@@ -84,8 +88,15 @@ export function SecretRow({ item, onSubmit, busy }) {
                 ) : null}
                 {!item.hasLivenessCheck && item.state === 'live' ? (
                   // Otherwise green would imply "verified", which for these
-                  // means only "the reference resolved to something".
-                  <span className="text-muted-foreground"> · no liveness check for this one</span>
+                  // means only "the reference resolved to something". Where
+                  // a service card's beaker exercises the key, say that
+                  // instead — "no liveness check" beside a key the Services
+                  // tab tests contradicted the card (ADR 0033 Platform).
+                  <span className="text-muted-foreground">
+                    {item.testedBy?.length
+                      ? ` · checked by the ${item.testedBy.join(' and ')} test on the Services tab, not by a timer`
+                      : ' · no liveness check for this one'}
+                  </span>
                 ) : null}
               </>
             )}

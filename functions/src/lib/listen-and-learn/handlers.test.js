@@ -183,8 +183,7 @@ describe('getSet', () => {
 });
 
 describe('reviewEpisode', () => {
-  const review = (body) =>
-    handlers(makeStore()).reviewEpisode(makeRequest({ body }), context);
+  const review = (body) => handlers(makeStore()).reviewEpisode(makeRequest({ body }), context);
 
   it('publishes an episode and stamps the approver', async () => {
     const store = makeStore();
@@ -292,14 +291,14 @@ describe('getSet — the two kinds (#433)', () => {
       ).body
     );
 
-    expect(body.episodes).toEqual([
+    expect(body.episodes).toMatchObject([
       { id: 'area-1', order: 0, status: STATUS.published, kind: 'guide', sources: [] },
       { id: 'source_t', order: 1000, status: STATUS.draft, kind: 'source', sources },
     ]);
   });
 
   it('toReviewEpisode applies the one rule and never returns a non-array source list', () => {
-    expect(toReviewEpisode({ id: 'x' })).toEqual({ id: 'x', kind: 'guide', sources: [] });
+    expect(toReviewEpisode({ id: 'x' })).toMatchObject({ id: 'x', kind: 'guide', sources: [] });
     expect(toReviewEpisode({ id: 'x', kind: 'source', sources: 'https://a' })).toMatchObject({
       kind: 'source',
       sources: [],
