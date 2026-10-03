@@ -4,7 +4,7 @@
  * A CSP is only a control if it says no to something. This one had drifted into
  * saying yes to the entire Firebase/GCP surface long after the last Firebase
  * import was deleted, while omitting the one origin admin sign-in cannot work
- * without (TODO.md T-404). Both halves are asserted here, because neither
+ * without (T-404). Both halves are asserted here, because neither
  * shows up in a build, a lint, or any test that renders a component — a CSP
  * failure appears in a browser console on a deployed site and nowhere else.
  */

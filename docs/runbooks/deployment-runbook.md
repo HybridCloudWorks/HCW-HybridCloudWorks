@@ -415,7 +415,7 @@ Deliberate rollback is **roll-forward to the previous definition**:
 3. `prevent_destroy` resources cannot be rolled back by replacement. If a
    bad change landed *inside* one (e.g. an indexing policy), the revert
    updates it in place. If the resource itself must go, that is a human
-   decision recorded in TODO.md — remove the guard in a dedicated PR that
+   decision recorded on a GitHub issue — remove the guard in a dedicated PR that
    says so in its title.
 4. State surgery (`terraform state mv/rm`, imports) is a last resort:
    snapshot the state first (TFC keeps versions), record the commands run

@@ -1,5 +1,5 @@
 /**
- * The API contract (.azure/api-surface.json) held to account (TODO.md T-207).
+ * The API contract (.azure/api-surface.json) held to account (T-207).
  *
  * The contract said `rpc.functions` describes "functions the frontend already
  * invokes" and then listed seventeen that were never registered — every one a

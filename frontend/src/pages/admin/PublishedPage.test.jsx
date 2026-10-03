@@ -82,7 +82,7 @@ const sampleSnapshot = {
  * landed: the row button VALIDATES (fetching the full document for the body
  * check) and opens a modal; the modal's "Publish Now" is what publishes. A
  * test that clicked the row button and expected publishContent was asserting
- * a flow that no longer exists (TODO.md T-320).
+ * a flow that no longer exists (T-320).
  */
 async function publishFirstCandidate() {
   fireEvent.click(screen.getAllByRole('button', { name: 'Publish' })[0]);

@@ -69,7 +69,7 @@ describe('uploadFile', () => {
 
     // NOT the raw blob URL. The account is closed to the internet and
     // allow_nested_items_to_be_public overrides container access, so that URL
-    // is dead (TODO.md T-105). `url` is what pages persist into Cosmos.
+    // is dead (T-105). `url` is what pages persist into Cosmos.
     expect(parsed.url).toBe('/api/public/media/certifications/cert-1/images/badge-123.png');
     expect(parsed.blobUrl).toBe('https://acct.blob/x/y.png');
 

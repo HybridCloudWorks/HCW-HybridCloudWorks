@@ -13,7 +13,7 @@
  * document. Every comparator returned 0, so every sort was a no-op and the
  * lists rendered in raw Cosmos order while the sort controls appeared to work.
  * The same expression in the row components produced the em-dash where a date
- * belonged (TODO.md T-304).
+ * belonged (T-304).
  *
  * The rule that matters: **never return NaN.** A NaN comparison is silently
  * false, and a NaN subtraction makes a comparator non-transitive, so the

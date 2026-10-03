@@ -300,7 +300,7 @@ export function createContentWorkflowHandlers({
           success: true,
           contentId,
           // The marker this write just stamped. The editor needs it for two
-          // things it could not do without it (TODO.md T-208):
+          // things it could not do without it (T-208):
           //
           //   1. Recognise its OWN write when the poll returns it. The client
           //      used a one-shot boolean, which was consumed by whatever the

@@ -124,16 +124,18 @@ is for planned windows only; it outlives the reason for it otherwise.
 
 ## Consequences and accepted risks
 
-- **Reachability has no alert, and that is the failure class this platform has
-  actually had.** Cloudflare Bot Fight Mode answers Azure's availability agents
+- **At the time of this ADR, reachability had no alert, and that is the
+  failure class this platform has actually had.** Cloudflare Bot Fight Mode answers Azure's availability agents
   the way it answers any datacenter client — a 403 interstitial — and a WAF skip
   rule against it was built, applied and confirmed inert, because Bot Fight Mode
   does not run on the Ruleset Engine. Three recorded incidents (2026-08-20 mass
   404, and two on 2026-08-21) share one shape: host up, functions unregistered,
   every route 404. `Http5xx` does not count 404s; `AppExceptions` cannot fire
-  because no handler runs. **None of the five armed rules detects it.** This is
-  the accepted cost of the Cloudflare edge ([ADR 0002](../decisions/0002-cloudflare-edge.md))
-  until the Cloudflare side changes; tracked as TODO **T-519**.
+  because no handler runs. **None of the five rules armed then detected it.**
+  It was accepted as a cost of the Cloudflare edge ([ADR 0002](../decisions/0002-cloudflare-edge.md))
+  and tracked as TODO **T-519**. T-519 closed on 2026-09-01: the edge
+  availability probe ([ADR 0024](0024-edge-availability-probe.md)) feeds
+  `alert-api-reachability-prod-cus`, which is armed (`infra/observability.tf`).
 - **The per-request Cosmos audit trail is gone.** Pruning
   `CDBDataPlaneRequests` means a data-access question can no longer be answered
   from logs. Accepted because a capped workspace answers no questions at all,

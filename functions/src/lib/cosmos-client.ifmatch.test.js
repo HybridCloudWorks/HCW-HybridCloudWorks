@@ -8,7 +8,7 @@
  * `processPublishContent` *passes* `{ ifMatch }`, against a fake store that
  * would accept any option name at all. If this module ignored the option, that
  * test would stay green while two concurrent runs both published — which is
- * precisely the outcome the precondition is for (TODO.md T-301).
+ * precisely the outcome the precondition is for (T-301).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 

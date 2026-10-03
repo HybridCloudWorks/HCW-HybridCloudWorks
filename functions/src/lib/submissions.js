@@ -119,7 +119,7 @@ export function validateSubmission(body) {
   // Sanitized here, not merely on render. This field arrives anonymously and
   // is eventually rendered with dangerouslySetInnerHTML on a public template;
   // sanitizing at ingest makes safety a property of the stored data rather
-  // than of one component's rendering choice (TODO.md T-408).
+  // than of one component's rendering choice (T-408).
   //
   // The length check below therefore measures the SANITIZED value: the cap
   // exists to bound what is stored, and measuring the input would let a
@@ -296,7 +296,7 @@ function rateLimitError() {
  * number: 200 concurrent POSTs all read `count: 0`, all pass the check, and all
  * write `count: 1`, so 200 land in the review queue against a limit of 5 — and
  * because the counter ends at 1 rather than 200, the trick repeats every burst
- * instead of once an hour (TODO.md T-204).
+ * instead of once an hour (T-204).
  *
  * **The shape of the fix.** There are two distinct situations and they need
  * different primitives, which is why this is not one operation:

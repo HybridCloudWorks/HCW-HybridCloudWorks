@@ -74,7 +74,7 @@ describe('cms content list', () => {
 
     // `?limit=abc` produced `TOP NaN`, a 500 carrying raw Cosmos error text;
     // `?limit=0` and negatives produced `TOP 0`, a silently empty list
-    // (TODO.md T-310).
+    // (T-310).
     for (const bad of ['abc', '0', '-5', '', 'NaN']) {
       store.queryDocs.mockClear();
       await h.list(makeRequest({ query: { limit: bad } }), context);

@@ -1,7 +1,7 @@
 /**
  * The review queue's list and its item card.
  *
- * Split out of QueuePage.jsx (TODO.md T-412). This is the bulk of the page by
+ * Split out of QueuePage.jsx (T-412). This is the bulk of the page by
  * line count and almost none of its risk: every component here is a function of
  * its props, with the mutating handlers passed in. Separating it is what lets
  * the bulk-transition logic be exercised without rendering four hundred lines

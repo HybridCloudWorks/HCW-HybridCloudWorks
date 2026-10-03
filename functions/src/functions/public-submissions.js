@@ -38,7 +38,7 @@ export function createSubmissionsHandler({
   identity = createClientIdentity(),
   // `upsertDoc` writes the submission itself; the other three are the quota's,
   // and it needs all three because a correct counter needs operations that can
-  // fail — see enforceSubmissionQuota (TODO.md T-204).
+  // fail — see enforceSubmissionQuota (T-204).
   store = { readDoc, upsertDoc, incrementIf, createDoc, replaceDocIfMatch },
   now = Date.now,
 } = {}) {

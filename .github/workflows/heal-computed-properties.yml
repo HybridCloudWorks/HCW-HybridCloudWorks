@@ -14,7 +14,7 @@
 #
 # Why the property gets wiped at all: azurerm_cosmosdb_sql_container cannot
 # express computedProperties, so any terraform apply that updates the content
-# or blogs container PUTs a definition without them (TODO.md T-206;
+# or blogs container PUTs a definition without them (T-206;
 # scripts/apply-computed-sortdate.mjs header). With PUBLIC_LIST_SQL_ORDER=1
 # live, a wiped property breaks the public content list until re-applied —
 # which is why this exists as automation rather than a runbook note.

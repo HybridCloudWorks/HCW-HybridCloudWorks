@@ -124,7 +124,7 @@ export const ROLE_CACHE_TTL_MS = 60_000;
  *
  * Not a tuning knob either, but for a duller reason: the cache had no eviction
  * at all, so on a long-lived instance it grew with every distinct principal
- * that ever signed in (TODO.md T-408). Entries are only created for tokens that
+ * that ever signed in (T-408). Entries are only created for tokens that
  * verified, so this is bounded by real admins in practice — the limit exists so
  * that "in practice" is not the only thing bounding it. Well above any
  * plausible admin count, and small enough that a full sweep is trivial.

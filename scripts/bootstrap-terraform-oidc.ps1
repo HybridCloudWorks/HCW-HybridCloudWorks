@@ -88,7 +88,8 @@
   which subscriptions the identity can actually deploy into, and the workspace
   variables still to be set by hand. Defaults under scripts/.reports/, which is
   gitignored — the report holds real subscription and client ids, and
-  TODO.md's rule is that real values never enter tracked files.
+  docs/standards/variables-and-secrets.md treats subscription, tenant and
+  client ids as identifiers that are not published.
 
   Skipped under -WhatIf: there would be nothing true to report.
 
@@ -711,8 +712,8 @@ $(($TargetSubscriptionIds | ForEach-Object {
 #
 # Deliberately gitignored: it holds real subscription and client ids. Those are
 # identifiers rather than credentials — the identity is federated and no secret
-# exists — but TODO.md's rule is that real values never enter tracked
-# files, and a report is not an exception to it.
+# exists — but docs/standards/variables-and-secrets.md says such identifiers
+# are still not published, and a report is not an exception to it.
 if (-not $WhatIfPreference) {
   Write-Step 'Report'
 

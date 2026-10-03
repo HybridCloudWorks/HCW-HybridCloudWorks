@@ -22,7 +22,7 @@ let database = null;
  * for these five. Wrong in the worst way: a point read against the wrong
  * logical partition does not error, it returns nothing — and `readDoc` maps
  * that to `null`. The first person to write a `content_versions` reader would
- * have got `null` forever with no indication why (TODO.md T-313).
+ * have got `null` forever with no indication why (T-313).
  *
  * Mirrored from `infra/cosmos-containers.json`, which is the source of truth.
  * `cosmos-client.test.js` asserts the two agree, so adding a fifth exception to
@@ -191,7 +191,7 @@ export async function replaceDocIfMatch(containerName, document, options = {}) {
  * concurrency in the expensive direction: the submission quota read the count,
  * compared it, and wrote it back as three separate operations, so N simultaneous
  * requests all read the same value, all passed the limit check, and all wrote
- * `count: 1` — N accepted against a limit of five (TODO.md T-204).
+ * `count: 1` — N accepted against a limit of five (T-204).
  *
  * Both halves are needed and neither is sufficient alone:
  *
@@ -366,7 +366,7 @@ export function toJsonPointer(fieldPath) {
  *   itself, which is a much narrower window and re-reads on conflict rather
  *   than telling the caller. The scheduled publisher needs the wider guard,
  *   because the timer and an operator can both act on one document
- *   (TODO.md T-301).
+ *   (T-301).
  * @returns {Promise<object>} the document after the write
  */
 export async function patchDoc(containerName, id, updates, options = {}) {

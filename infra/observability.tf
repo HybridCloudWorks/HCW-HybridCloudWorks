@@ -1,6 +1,6 @@
 # =============================================================================
 # observability.tf — the plan's operational alarm fabric (T-505, closed —
-# CHANGELOG.md; it is no longer an open item in TODO.md)
+# CHANGELOG.md)
 #
 # Action group, diagnostic settings, and the alert rules that route through it.
 #

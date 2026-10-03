@@ -434,7 +434,7 @@ export async function fetchPublicFeed(provider) {
  * Anonymous on purpose. The equivalent admin route is editor-gated, and the
  * news pages that need this are public, so calling that one made every
  * anonymous visitor's lookup throw at token acquisition and left the grid with
- * no imagery (TODO.md T-210). The server returns only the URL — never the
+ * no imagery (T-210). The server returns only the URL — never the
  * document, which carries an internal blob path and prompt metadata.
  */
 export async function fetchPublicCuratedImage(articleId) {

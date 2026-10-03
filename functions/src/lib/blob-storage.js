@@ -16,7 +16,7 @@
  * This module previously required STORAGE_CONNECTION_STRING and threw without
  * it, which made every upload and every gallery delete fail on a deployed
  * app — invisibly, because the one test suite covering uploads injected a fake
- * `uploadBlob` and so never reached this file (TODO.md T-104).
+ * `uploadBlob` and so never reached this file (T-104).
  *
  * Required app settings: STORAGE_BLOB_ENDPOINT (or STORAGE_ACCOUNT_NAME)
  * Required RBAC on the Function App MI: Storage Blob Data Contributor, plus
@@ -121,7 +121,7 @@ export function getContainerClient(containerName) {
  *   conditioned on `If-None-Match: *` and the service answers 409
  *   `BlobAlreadyExists` rather than replacing an existing blob. Opt-in rather
  *   than the default so the AI-image and migration paths, which rewrite the
- *   same deterministic keys on purpose, keep working unchanged (TODO.md T-307).
+ *   same deterministic keys on purpose, keep working unchanged (T-307).
  * @returns {Promise<string>} URL of the uploaded blob
  */
 export async function uploadBlob(
@@ -372,7 +372,7 @@ export async function deleteBlob(containerName, blobName) {
  * Whether that URL is anonymously readable depends on the container's access
  * level AND on the account's `allow_nested_items_to_be_public`, which is a
  * master override: with it false, a container declared `container_access_type
- * = "blob"` still answers 409 (TODO.md T-105). Do not assume this URL is
+ * = "blob"` still answers 409 (T-105). Do not assume this URL is
  * public without checking both.
  *
  * @param {string} containerName

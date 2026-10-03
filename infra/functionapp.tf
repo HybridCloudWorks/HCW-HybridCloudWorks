@@ -272,7 +272,7 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     ip_restriction_default_action = var.functions_origin_lock_enabled ? "Deny" : "Allow"
 
     # SCM (Kudu) reachability, closed by a per-run window rather than a standing
-    # rule — see TODO.md T-520, raised as S2 in the 2026-08-24 Go-Live review.
+    # rule — see T-520, raised as S2 in the 2026-08-24 Go-Live review.
     #
     # The Flex Consumption deploy runs THROUGH Kudu ("Will use Kudu
     # https://<scmsite>/api/publish to deploy since Flex consumption plan is
@@ -345,7 +345,7 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # below the resource — so the setting never survives the run that creates
     # it, and nothing downstream has to remember to clean up. deploy-functions.yml
     # asserts it is absent and FAILS if it is not, rather than deleting it:
-    # a repair there would hide a regression in the strip. TODO.md T-511.
+    # a repair there would hide a regression in the strip. T-511.
     #
     # The failure mode is worth remembering: a keyless connection string does
     # not fail at deploy, and does not fail as "storage". It fails as a 404 on
@@ -356,7 +356,7 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # Cosmos DB — endpoint only; runtime auth uses managed identity via DefaultAzureCredential
     "COSMOS_ENDPOINT" = azurerm_cosmosdb_account.hcw.endpoint
     "COSMOS_DATABASE" = azurerm_cosmosdb_sql_database.hcw.name
-    # COSMOS_CONNECTION_STRING is deliberately absent (TODO.md T-315): it carried
+    # COSMOS_CONNECTION_STRING is deliberately absent (T-315): it carried
     # the account PRIMARY KEY for two empty change-feed handlers. The six
     # current change-feed functions use the IDENTITY-BASED binding —
     # the app's managed identity already holds Cosmos Data Contributor at account
@@ -424,7 +424,7 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # underscored name so `process.env.X` reads port unchanged, and the Key Vault
     # secret uses hyphens because Key Vault names cannot contain underscores.
     #
-    # These resolve to empty until the vault is seeded (TODO.md). Optional
+    # These resolve to empty until the vault is seeded (Required-Inputs §4.6). Optional
     # integrations remain disabled until their owner-approved credentials exist.
     # -------------------------------------------------------------------------
 
@@ -489,7 +489,7 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # @Microsoft.KeyVault(...) string, which readSetting() treats as no key at
     # all — so the provider simply is not offered, and declaring it here
     # switches nothing on and provisions nothing. Using it means creating a
-    # Cognitive Services resource, which is a spend decision (TODO.md).
+    # Cognitive Services resource, which is a spend decision for the owner.
     "AZURE_SPEECH_KEY"    = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/AZURE-SPEECH-KEY)"
     "AZURE_SPEECH_REGION" = var.speech_region
 
@@ -666,8 +666,9 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # Feature flags.
     #
     # One per timer. They previously shared FEATURE_FLAG_SCHEDULERS, so enabling
-    # the scheduled publisher would also have armed cleanupTempStorage — an
-    # unimplemented TODO that deletes blobs (TODO.md T-302).
+    # the scheduled publisher would also have armed cleanupTempStorage, which
+    # was then an unimplemented stub that would delete blobs (T-302). It is
+    # implemented now, in functions/src/lib/timers/temp-storage.js.
     #
     # FEATURE_FLAG_SCHEDULERS is a master kill switch only: "false" holds every
     # timer off regardless of the individual flags, and any other value defers
@@ -705,7 +706,7 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # uishable from a timer that does not fire.
     }, local.timer_flags, {
     # The three that delete stay DRY-RUN even when their flag is on, until
-    # the matching *_DELETE setting is "true" (TODO.md T-302). Deliberately NOT
+    # the matching *_DELETE setting is "true" (T-302). Deliberately NOT
     # part of enabled_timers: arming the timer and arming the deletion are two
     # decisions, and conflating them is how a dry run becomes a data loss.
     # CONTENT_HARD_DELETE is the content reaper's pin (T-518 Wave 3a): the
@@ -761,7 +762,7 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # NOT timestamp(): that would change on every plan, propose a diff forever
     # and restart the host each apply. The generation must be an immutable
     # identifier supplied by whatever performed the deployment.
-    # Guard gate 2 — the admins/{oid} registry (TODO.md, lib/admin-identity.js).
+    # Guard gate 2 — the admins/{oid} registry (lib/admin-identity.js).
     # Gate 1 is the Entra `Admin` App Role; a token carrying it and no registry
     # record is still a 403, which is the point: directory membership alone does
     # not grant access to this application.
@@ -811,9 +812,12 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # change STOPS appearing, because a strip that is not running is how
     # AzureWebJobsStorage comes back (T-511).
     #
-    # It is not in CI: the plan runs in HCP Terraform and `iac-validate.yml`
-    # has no workspace token, so wiring it up needs a TFC API token as a
-    # repository secret — an owner action, tracked in TODO.md.
+    # It runs in CI as `tfc-plan-check.yml`, on the `TFC_TOKEN` secret, and
+    # `--commit` (T-724, #298) picks the run HCP Terraform planned for a given
+    # commit. It is dispatch-only by design: the decision it gates comes after
+    # the merge, when a queued plan is waiting to be confirmed, so it is
+    # dispatched then, with the merge commit. A speculative plan on a pull
+    # request gates nothing. That workflow's header has the full reasoning.
     #
     # ON EVERY azurerm MINOR UPGRADE, re-test issue #29149. If it has closed,
     # delete the azapi pair, T-511 and scripts/assert-expected-plan.mjs
@@ -903,7 +907,7 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
 # `functions/src/functions/app-settings-secrets.test.js` asserts that invariant
 # by reading this file as text, so it fails in CI rather than being rediscovered
 # from a state file. It cannot see an out-of-band write; nothing here can, which
-# is why §4.5 of TODO.md says settings are Terraform-managed and editing one
+# is why Required-Inputs §4.5 says settings are Terraform-managed and editing one
 # by hand is how drift starts.
 #
 # The narrower export that would remove the problem does not exist: the strip
@@ -937,7 +941,10 @@ resource "azapi_update_resource" "function_app_settings_without_webjobs_storage"
     # Values pass through exactly as azapi returned them, unchanged. Wrapping
     # them in tostring() would be reasonable hardening — app-settings values are
     # strings — but doing it now could silently remove the very fault under
-    # investigation and destroy the evidence. Harden after T-513 closes.
+    # investigation and destroy the evidence. That was the reason while T-513
+    # was open. T-513 has since closed as a name collision rather than a value
+    # problem (CHANGELOG.md), so the hardening is no longer blocked. It is
+    # #837, kept out of a comment-only change because it alters the plan.
     properties = merge(
       {
         for key, value in azapi_resource_action.function_app_settings.output.properties :

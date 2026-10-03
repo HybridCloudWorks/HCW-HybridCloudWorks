@@ -109,7 +109,7 @@ export function isPublicDocument(doc = {}) {
  *     query with it. The container and its migrated documents remain until
  *     the owner drops them in an apply of their own.
  *
- * TODO.md T-202 prescribed `.filter(isPublicDocument)` on the podcasts and feed
+ * T-202 prescribed `.filter(isPublicDocument)` on the podcasts and feed
  * handlers. Applied literally it would have returned `false` for **every**
  * document in all three, silently emptying the podcasts page, the news feed and
  * the (since retired) insights panel — the same shape of failure as T-101, arrived at through a
@@ -198,11 +198,11 @@ const LIST_MAX_LIMIT = 250;
 // published articles vanish arbitrarily. The public filter now runs in SQL
 // (see listContent), so the window applies to the PUBLISHED subset of the
 // requested type/provider, which moves the threshold far from the data
-// (TODO.md T-206).
+// (T-206).
 const FETCH_WINDOW = 1000;
 
 /**
- * The SQL half of the public filter (TODO.md T-206), mirroring
+ * The SQL half of the public filter (T-206), mirroring
  * `isPublicDocument` — which STILL runs on every row afterwards. Two layers on
  * purpose, with an asymmetry that matters:
  *
@@ -239,7 +239,7 @@ const sqlNotTruthy = (field) =>
 export const SQL_NOT_SOFT_DELETED = `${sqlNotTruthy('softDeletedAt')} AND ${sqlNotTruthy('softDeleteExpiresAt')}`;
 
 /**
- * What the public LIST endpoint returns per document (TODO.md T-206).
+ * What the public LIST endpoint returns per document (T-206).
  *
  * This replaces `SELECT *`, which transferred whole documents — body fields
  * included — at ~20 KB average, making one anonymous list request the dominant
@@ -388,7 +388,7 @@ export const PUBLIC_CONTENT_LIST_FIELDS = [
 const LIST_PROJECTION = PUBLIC_CONTENT_LIST_FIELDS.map((f) => `c["${f}"]`).join(', ');
 
 /**
- * Document ceilings for the feed endpoint (TODO.md T-203).
+ * Document ceilings for the feed endpoint (T-203).
  *
  * These are runaway guards, NOT page sizes, and the distinction is the whole
  * of why they are not smaller. T-203 suggested sizing them to "what
@@ -413,7 +413,7 @@ const LIST_PROJECTION = PUBLIC_CONTENT_LIST_FIELDS.map((f) => `c["${f}"]`).join(
 const FEED_CACHE_MAX_DOCS = 200;
 
 /**
- * Items served per `rss_cache` document (TODO.md T-319).
+ * Items served per `rss_cache` document (T-319).
  *
  * FEED_CACHE_MAX_DOCS bounds the number of feeds; this bounds the number of
  * articles inside each one, which is the other half of the same runaway. One
@@ -672,7 +672,7 @@ export const CURATED_IMAGE_BATCH_MAX = 50;
  * they are not *enforced* unique, and the previous `SELECT TOP 1` with no
  * `ORDER BY` picked arbitrarily among duplicates and only then asked whether
  * the winner was public — so a published article could 404 forever because an
- * unpublished draft shared its slug (TODO.md T-305).
+ * unpublished draft shared its slug (T-305).
  *
  * `ORDER BY c._ts DESC` is safe here for a reason that does not generalize:
  * `_ts` is a system property Cosmos writes on every document, so the
@@ -724,7 +724,7 @@ export function createPublicReadHandlers({ store }) {
         // The public filter runs in SQL so the TOP window counts published
         // documents rather than all documents, and the projection replaces
         // `SELECT *` so a list request stops transferring article bodies —
-        // both halves of TODO.md T-206. `isPublicDocument` still re-filters
+        // both halves of T-206. `isPublicDocument` still re-filters
         // every row below; see SQL_PUBLIC_CLAUSE for why both layers exist.
         const clauses = [SQL_PUBLIC_CLAUSE, SQL_NOT_SOFT_DELETED];
         const parameters = [];
@@ -771,7 +771,7 @@ export function createPublicReadHandlers({ store }) {
         // `total` is the number of matching documents, not the size of this
         // page — it was measured after the slice, so it always equalled
         // `items.length` and any paginating consumer would have concluded there
-        // was exactly one page (TODO.md T-407).
+        // was exactly one page (T-407).
         //
         // It is still bounded by FETCH_WINDOW, so on a collection larger than
         // that it under-reports. That is a smaller lie than the page size and
@@ -813,7 +813,7 @@ export function createPublicReadHandlers({ store }) {
             // `find`, not `rows[0] && isPublicDocument(...)`. Filtering after
             // taking one row meant a published article 404'd whenever an
             // unpublished document happened to share its slug and win the
-            // arbitrary pick (TODO.md T-305).
+            // arbitrary pick (T-305).
             const match = rows.find(isPublicDocument);
             if (match) {
               return json(
@@ -841,7 +841,7 @@ export function createPublicReadHandlers({ store }) {
      * `getJSON('cms/images/curated/...')`, which runs through `acquireApiToken`
      * and throws without an MSAL account — so on `/{provider}/news`, an
      * anonymous visitor's lookups all failed and no curated imagery rendered
-     * where cached images used to (TODO.md T-210).
+     * where cached images used to (T-210).
      *
      * **Only `imageUrl` is returned, never the document.** The admin endpoint
      * answers with the whole thing, and the whole thing is not public: a
@@ -981,7 +981,7 @@ export function createPublicReadHandlers({ store }) {
         // fields exist in the stored snapshot at all. But stripInternalFields
         // used to be applied to the wrapper only, so `createdBy` and
         // `updatedBy` inside items[] were never reached, and a collection with
-        // no sanitizer leaked wholesale (TODO.md T-201).
+        // no sanitizer leaked wholesale (T-201).
         //
         // Descending here means a future snapshot collection added without a
         // sanitizer still cannot publish admin emails. It is not a substitute
@@ -1076,7 +1076,7 @@ export function createPublicReadHandlers({ store }) {
           }
         }
 
-        // Counted before the slice — see listContent above (TODO.md T-407).
+        // Counted before the slice — see listContent above (T-407).
         return json(
           200,
           { success: true, items, total: matching.length, feedUrl, mainFeedUrl },
@@ -1101,7 +1101,7 @@ export function createPublicReadHandlers({ store }) {
         if (!provider) return json(400, { error: 'provider required' });
 
         // The query was unbounded on an anonymous endpoint, and queryDocs
-        // calls .fetchAll() (TODO.md T-203). rss_cache is TTL-bounded at seven
+        // calls .fetchAll() (T-203). rss_cache is TTL-bounded at seven
         // days and syncRssFeeds now enforces that bound, but a document count
         // is not an item count and the timer only rewrites feeds it still
         // fetches — a retired feed's document keeps whatever it last held. The

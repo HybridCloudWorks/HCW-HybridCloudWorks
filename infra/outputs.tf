@@ -237,14 +237,12 @@ output "subnet_id" {
 # deprecations once for the refresh and once for the plan.
 #
 # (Not to be confused with the "Value for undeclared variable" warnings on the
-# same runs. Those come from three stale values in the TFC workspace, are
-# unrelated to this output, and are fixed by deleting them there — TODO.md.
-# That distinction is why the count is spelled out at all, and deleting it was
-# the more costly half of the same automated edit.)
-#
-# (Not to be confused with the "Value for undeclared variable" warnings on the
-# same runs. Those come from three stale values in the TFC workspace, are
-# unrelated to this output, and are fixed by deleting them there — TODO.md.)
+# same runs. Those came from three stale values in the TFC workspace, were
+# unrelated to this output, and were fixed by deleting them there on 2026-09-02
+# — `migration_writer_enabled`, `cosmos_scratch_enabled` and
+# `storage_scratch_enabled`; CHANGELOG.md, "The settings sweep is done". That
+# distinction is why the count is spelled out at all, and deleting it was the
+# more costly half of the same automated edit.)
 #
 # THE REPLACEMENT THE WARNING NAMES IS NOT USABLE HERE, which is why this is a
 # removal rather than a migration. In provider v5 the non-deprecated path to a

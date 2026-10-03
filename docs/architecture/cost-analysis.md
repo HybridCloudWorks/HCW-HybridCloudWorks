@@ -389,4 +389,4 @@ Allowances are the documented F0 shapes at the time of writing — confirm on
 the service's pricing page before building against one, and add any new
 cognitive account through the normal PR + plan review (it is a new resource:
 tags, ADR if architecturally material, F0 SKU stated in the diff). Creating one
-is a spend decision and belongs in `TODO.md`.
+is a spend decision and belongs in an `owner-gated` GitHub issue.

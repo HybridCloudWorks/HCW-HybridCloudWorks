@@ -4,7 +4,7 @@
  * Extracted from LabsPage.jsx because two of them had already drifted apart
  * inside that one file: the output pane treated four statuses as terminal and
  * the poll loop treated three, so a job that timed out kept the poll running
- * forever while the pane it fed said the job was finished (TODO.md T-308).
+ * forever while the pane it fed said the job was finished (T-308).
  * A constant that two call sites must agree on belongs in one place, and a
  * rule worth agreeing on is worth testing.
  */

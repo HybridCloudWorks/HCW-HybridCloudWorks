@@ -402,9 +402,16 @@ so it was not added.
 
 ## radarlint-iac
 
-All 19 are S1135, "Complete the task associated to this TODO comment". Each
-match is the file name `TODO.md` inside an explanatory comment, such as
-`see TODO.md T-520` or `(TODO.md)`. None is a TODO marker.
+> **Retired 2026-10-02 (#821).** #821 repointed the `TODO.md` comments listed
+> below. A recount that day (`grep -rn TODO infra`, case-insensitive) found
+> **no** TODO token left under `infra/`, so the triage rule was removed from
+> `.qlty/qlty.toml` and S1135 reports again in `infra/`. A new hit there is a
+> finding: point the comment at an issue instead. The table is the record as
+> of 2026-09-14, and its line numbers are from that date.
+
+All 19 were S1135, "Complete the task associated to this TODO comment". Each
+match was the file name `TODO.md` inside an explanatory comment, such as
+`see TODO.md T-520` or `(TODO.md)`. None was a TODO marker.
 
 | Rule | File:line | Verdict | Resolution |
 | --- | --- | --- | --- |
@@ -429,7 +436,7 @@ match is the file name `TODO.md` inside an explanatory comment, such as
 | terraform:S1135 | `infra/variables.tf:107` | False positive | Qlty triage rule below |
 
 radarlint has no inline suppression, and its only configuration is
-`.qlty/qlty.toml`, where #588 added this rule. The rule key contains a colon,
+`.qlty/qlty.toml`, where #588 added this rule (removed by #821). The rule key contains a colon,
 so the match needs the plugin prefix; the bare `terraform:S1135` matches
 nothing:
 
@@ -443,7 +450,8 @@ set.ignored = true
 
 Open work lives in GitHub issues (owner decision 2026-09-05). A real TODO in
 `infra/` would name an issue number, not a TODO marker, so silencing S1135
-there hides nothing the repository relies on.
+there hid nothing the repository relied on. With no hits left, it also
+silenced nothing, and leaving S1135 on costs nothing.
 
 ## Owner decisions 2026-09-14
 

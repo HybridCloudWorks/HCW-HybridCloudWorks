@@ -85,9 +85,12 @@ These apply regardless of component, and CI enforces most of them:
 - **Documentation discipline.** New Markdown files are rejected by the
   Repository Policy workflow unless allowlisted in
   `scripts/validate-repository-structure.ps1`. Narrative docs belong in
-  `docs/` (published to docs.hybridcloudworks.com), open work in `TODO.md`, completed work
-  in `CHANGELOG.md`. If a change completes tracked work, check that TODO.md
-  and CHANGELOG.md moved with it.
+  `docs/` (published to docs.hybridcloudworks.com), open work in GitHub issues
+  on [project 1](https://github.com/orgs/HybridCloudWorks/projects/1), completed
+  work in `CHANGELOG.md`, accepted risks in `TODO.md`. If a change completes
+  tracked work, check that the issue closes with it and CHANGELOG.md records it.
+  A comment that sends the reader to `TODO.md` for open work is a finding:
+  point it at the issue instead.
 - **Owner-facing instructions** (in docs, TODO items, PR bodies): must follow
   `.claude/CLAUDE.md` — PowerShell by default, bash flagged explicitly,
   one-line commands, **no placeholders** in pasteable commands (look values

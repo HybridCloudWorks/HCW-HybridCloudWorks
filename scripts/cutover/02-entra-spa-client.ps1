@@ -17,7 +17,7 @@
     it otherwise:
 
         ~~It uses a SPA platform on the EXISTING registration rather than a
-        second registration — TODO.md allows either, and one registration means
+        second registration — the plan allowed either, and one registration means
         the SPA requests a scope on its own app, which consents automatically
         and removes the single highest-risk mismatch in the system (a SPA client
         id and an API audience that disagree).~~

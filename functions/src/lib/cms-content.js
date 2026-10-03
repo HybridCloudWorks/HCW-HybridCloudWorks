@@ -139,7 +139,7 @@ export function createCmsContentHandlers({ guard, store, onContentDeleted = null
           .toLowerCase();
         // `?limit=abc` produced `TOP NaN` (a 500 carrying raw Cosmos error
         // text) and `?limit=0` produced `TOP 0` (a silently empty list). Same
-        // clamp the four sibling handlers use (TODO.md T-310).
+        // clamp the four sibling handlers use (T-310).
         const max = Math.min(
           Math.max(Number(request.query.get('limit')) || LIST_DEFAULT_LIMIT, 1),
           LIST_MAX_LIMIT

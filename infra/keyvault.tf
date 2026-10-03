@@ -39,7 +39,9 @@ resource "azurerm_key_vault" "hcw" {
   # vault is unreachable by anyone except the app, which is the correct steady
   # state — populate it only for the seeding window. Secret VALUES are
   # deliberately not managed by Terraform, so they never enter state or TFC.
-  # See TODO.md for the runbook.
+  # The procedure is scripts/cutover/06-seed-secret.ps1, which opens its own
+  # window rather than using this variable, and always closes it;
+  # Required-Inputs §4.6 lists the secrets.
   network_acls {
     default_action             = "Deny"
     bypass                     = "AzureServices"

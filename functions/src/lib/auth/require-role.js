@@ -44,7 +44,7 @@ import {
 // Static, not `await import()` inside the handler. verify-token.js imports
 // nothing from this module, so there was never a cycle to break — the dynamic
 // form just put a module-map lookup and a microtask on the path every
-// authenticated request takes (TODO.md T-408).
+// authenticated request takes (T-408).
 import { bearerTokenFrom } from './verify-token.js';
 
 /**
@@ -141,7 +141,7 @@ export function createRoleGuard({ verifier, lookupAdmin, auditDenial, now = Date
   // The sink is injected, and `default-guard.js` supplies the real one — an
   // `admin_audit_logs` upsert. This comment used to end "the container exists
   // on the Azure side with no writer", which was true when it was written and
-  // is what TODO.md T-406 recorded; the writer landed with the guard's
+  // is what T-406 recorded; the writer landed with the guard's
   // production composition.
   const audit = (entry) => {
     try {
@@ -157,7 +157,7 @@ export function createRoleGuard({ verifier, lookupAdmin, auditDenial, now = Date
    * The cache is keyed by object id and only reached after a token verifies,
    * so it cannot be grown by an anonymous caller — but it had no eviction at
    * all, so on a long-lived instance it grew monotonically with every distinct
-   * principal that ever signed in (TODO.md T-408). Sweeping on write keeps it
+   * principal that ever signed in (T-408). Sweeping on write keeps it
    * O(1) amortised without a timer.
    */
   function evict() {

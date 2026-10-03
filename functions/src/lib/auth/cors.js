@@ -83,9 +83,13 @@ Object.freeze(PRODUCTION_ORIGINS);
  * stop/start, three deploys and about twenty probes. `parseExtraOrigins()` and
  * `createCors()` return `true` for that exact value locally, so the code is not
  * the problem, and `TELEGRAM_BOT_TOKEN` reaching the same worker proves app
- * settings do arrive. It is unexplained, and it is TODO.md T-513.
+ * settings do arrive. That was T-513, and it has since been explained: on
+ * that date the setting was named `CORS_ALLOWED_ORIGINS`, which collides with a
+ * variable App Service injects, so the worker only ever saw `[]`. CHANGELOG.md
+ * records the proof, and `parseExtraOrigins` in http-route.js explains the
+ * rename to `EXTRA_ALLOWED_ORIGINS`.
  *
- * Two reasons this is the better home regardless of how T-513 resolves:
+ * Two reasons this is the better home even with the setting fixed:
  *
  *   1. An allowlist is a security control. In code it is reviewed, diffed and
  *      covered by the tests below. As an app setting it can be changed by
@@ -103,7 +107,7 @@ const PREVIEW_ORIGINS = ['https://calm-ground-0d0e6a010.7.azurestaticapps.net'];
  * surface. Fourteen registered routes use PUT, PATCH or DELETE; a browser that
  * preflights one of those reads this header, does not find its method, and
  * refuses to send the request — the call never reaches the guard, so nothing
- * server-side ever logs it (TODO.md T-102).
+ * server-side ever logs it (T-102).
  */
 const ALLOW_METHODS = 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
 

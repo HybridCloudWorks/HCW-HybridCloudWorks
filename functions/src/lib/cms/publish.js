@@ -1017,7 +1017,7 @@ export function createPublishHandlers({
       // slug — was decided from `contentData`; without the precondition two
       // concurrent runs both pass the gate and both publish, which the
       // scheduled publisher makes reachable rather than theoretical
-      // (TODO.md T-301).
+      // (T-301).
       try {
         await store.patchDoc('content', contentId, contentUpdate, { ifMatch: contentData._etag });
       } catch (error) {
@@ -1107,7 +1107,7 @@ export function createPublishHandlers({
       }
     },
 
-    // Not a route. Exposed so the scheduled publisher (TODO.md T-301) and the
+    // Not a route. Exposed so the scheduled publisher (T-301) and the
     // re-host route (lib/cms/rehost-images.js) run the same pipeline rather
     // than a second implementation of it — the status gate, quality and image
     // gates, slug resolution and version snapshot are the publish semantics,

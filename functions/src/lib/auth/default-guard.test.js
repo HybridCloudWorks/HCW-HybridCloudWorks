@@ -3,7 +3,7 @@
  *
  * `require-role.test.js` covers the guard's behaviour against injected fakes,
  * which is the right shape for the rules — but it cannot see whether the real
- * composition supplies the dependencies at all. That gap is what TODO.md T-406
+ * composition supplies the dependencies at all. That gap is what T-406
  * described: `admin_audit_logs` with no writer. The writer exists now, and this
  * file is what keeps it existing, because nothing else fails if the
  * `auditDenial` line is deleted.

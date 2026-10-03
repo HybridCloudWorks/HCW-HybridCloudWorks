@@ -7,8 +7,9 @@ repository, reviewed through pull requests and published here on every merge.
 
 The current product is an Azure-hosted website. The root [README](repo/readme.md)
 is the entry point for product features and local development. [TODO.md](repo/todo.md)
-and [CHANGELOG.md](repo/changelog.md) remain the repository's concise execution and
-release records; this site holds the longer narrative.
+(accepted risks and an index to the open GitHub issues) and
+[CHANGELOG.md](repo/changelog.md) (completed work) remain the repository's concise
+records; this site holds the longer narrative.
 
 ## Current platform
 

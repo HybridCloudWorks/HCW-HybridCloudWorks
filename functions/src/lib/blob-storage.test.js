@@ -5,7 +5,7 @@
  * injects `{ uploadBlob: vi.fn() }`, so seven green tests reported that uploads
  * worked while the real module required STORAGE_CONNECTION_STRING — a setting
  * `infra/` has never produced — and therefore threw on every upload and every
- * gallery delete in a deployed app (TODO.md T-104).
+ * gallery delete in a deployed app (T-104).
  *
  * The load-bearing assertions are therefore about configuration and credential
  * shape, the part no handler test can reach: that the module reads what
@@ -165,7 +165,7 @@ describe('uploadBlob overwrite conditions', () => {
   it('turns overwrite:false into If-None-Match: *', async () => {
     // The handler asking for the option is only half the fix; if this module
     // drops it, the caller-chosen path silently replaces a live asset and
-    // admin-uploads.test.js still passes against its fake (TODO.md T-307).
+    // admin-uploads.test.js still passes against its fake (T-307).
     await uploadBlob('covers', 'a/b.png', Buffer.from('x'), 'image/png', {}, { overwrite: false });
     expect(uploadSpy.mock.calls[0][2].conditions).toEqual({ ifNoneMatch: '*' });
   });

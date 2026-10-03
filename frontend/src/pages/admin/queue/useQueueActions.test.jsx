@@ -1,7 +1,7 @@
 /**
  * The review queue's mutating actions.
  *
- * These are the tests the decomposition (TODO.md T-412) existed to make
+ * These are the tests the decomposition (T-412) existed to make
  * possible: before it, every one of these paths could only be reached by
  * rendering four hundred lines of card markup.
  *

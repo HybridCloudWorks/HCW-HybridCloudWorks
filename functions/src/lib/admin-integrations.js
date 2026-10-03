@@ -490,7 +490,7 @@ export function createAdminIntegrationHandlers({
         // from any edit form would silently delete a stored token. Carry it
         // forward unless the caller explicitly supplied a new one; an explicit
         // empty string still clears it, which is how a token is revoked
-        // (TODO.md T-314).
+        // (T-314).
         if (
           container === 'mcp_servers' &&
           !Object.prototype.hasOwnProperty.call(incoming, 'oauthToken') &&

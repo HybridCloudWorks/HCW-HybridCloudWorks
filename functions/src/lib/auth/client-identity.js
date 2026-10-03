@@ -43,7 +43,7 @@ const CF_CLIENT_IP_HEADER = 'cf-connecting-ip';
  * providers hand out at the low end. Hashing the full address therefore gave
  * one client 2^64 distinct quota documents: unlimited submissions, every bucket
  * reading well under the limit, and unbounded growth of `submission_quota` as a
- * side effect (TODO.md T-205).
+ * side effect (T-205).
  *
  * Truncating to /64 is the conservative choice in the direction that matters.
  * It can over-group — two households behind one ISP's /64 would share a bucket,
@@ -215,7 +215,7 @@ export function createClientIdentity({
 
       // Normalized BEFORE hashing, because the hash is what the quota counts:
       // hashing the raw address gave an IPv6 client one bucket per address in
-      // its /64 (TODO.md T-205).
+      // its /64 (T-205).
       const unit = normalizeClientIp(request?.headers?.get?.(CF_CLIENT_IP_HEADER));
       const hash = createHash('sha256')
         .update(`${ipSalt ?? ''}:${unit}`)
