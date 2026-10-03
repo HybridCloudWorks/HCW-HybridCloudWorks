@@ -30,6 +30,11 @@ export function classifyContentBucket(data) {
   const status = String(data.contentStatus || 'ingested');
   if (status === 'rejected') return 'rejected';
   if (status === 'archived') return null;
+  // The Drafts stage (content-status.js DRAFTS_STAGE_STATUS) is the owner's
+  // writing desk, not the pipeline: counting it as inProgress would put every
+  // unfinished draft on the Editor badge. Same treatment as archived; it
+  // enters the counters when it is sent to In Review.
+  if (status === 'drafting') return null;
   if (data.Live === true) return 'published';
   if (status === 'draft' || status === 'ingested' || status === 'inspected') return 'needsReview';
   return 'inProgress';

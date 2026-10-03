@@ -14,6 +14,7 @@ import {
   ChevronRight,
   LogOut,
   PenLine,
+  FilePen,
   Mic,
   Share2,
   Radio,
@@ -47,6 +48,8 @@ const NAV_GROUPS = [
     items: [
       { to: '/admin', icon: LayoutDashboard, label: 'Dashboard', end: true },
       { to: '/admin/submit', icon: Zap, label: 'New Content' },
+      // Drafts is the stage before the queue (owner request 2026-10-03).
+      { to: '/admin/drafts', icon: FilePen, label: 'Drafts' },
       { to: '/admin/queue', icon: ListChecks, label: 'Review Queue', badgeKey: 'queue' },
       { to: '/admin/editor', icon: PenLine, label: 'Editor', badgeKey: 'editor' },
       { to: '/admin/published', icon: Newspaper, label: 'Publish' },

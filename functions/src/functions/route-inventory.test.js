@@ -383,32 +383,54 @@ describe('the lab agent registry routes (#740)', () => {
 });
 
 /**
- * The repository draft import (owner request 2026-09-28). Property 1 proves
- * these reach a guard; this pins the role. They make outbound calls to GitHub
- * and write content documents, so they sit behind requireRole at editor — the
- * role that creates and reviews content everywhere else — and are never public:
- * an anonymous caller could otherwise spend the Function App's GitHub rate
- * limit or push drafts into the review queue. One registration per template
- * (property 4), each answering exactly one verb.
+ * The Drafts stage, /admin/drafts (owner request 2026-10-03). Property 1
+ * proves these reach a guard; this pins the role and the verbs. They create,
+ * edit, move and delete content documents, and the import makes outbound
+ * calls to GitHub, so they sit behind requireRole at editor — the role that
+ * creates and reviews content everywhere else — and are never public: an
+ * anonymous caller could otherwise write the owner's drafts, push them into
+ * review, or spend the Function App's GitHub rate limit. One registration per
+ * template (property 4).
+ *
+ * The routes they replace, cms/content/import-repo and its candidates list,
+ * are retired, and asserted absent so they cannot quietly come back as a
+ * second path into review that skips the Drafts stage.
  */
-describe('the repository draft import routes', () => {
-  it.each([
-    ['cms/content/import-repo', 'POST'],
-    ['cms/content/import-repo/candidates', 'GET'],
-  ])('%s answers %s through requireRole at editor', async (route, method) => {
+describe('the Drafts stage routes', () => {
+  const VERBS = {
+    'cms/drafts': ['GET', 'POST'],
+    'cms/drafts/{id}': ['GET', 'PUT', 'DELETE'],
+    'cms/drafts/{id}/send-to-review': ['POST'],
+    'cms/drafts/{id}/back-to-drafts': ['POST'],
+    'cms/drafts/import-repo': ['POST'],
+  };
+
+  it.each(Object.entries(VERBS))('%s is one registration answering exactly %j', (route, verbs) => {
     const registrations = [...httpRegistrations.values()].filter((o) => o.route === route);
     expect(registrations).toHaveLength(1);
-    const [options] = registrations;
     expect(PUBLIC_ROUTES.has(route)).toBe(false);
-    expect(options.methods).toEqual([method, 'OPTIONS']);
+    expect(registrations[0].methods).toEqual([...verbs, 'OPTIONS']);
+  });
 
-    clearGuards();
-    const res = await invoke(options, makeRequest({ method }));
-    expect(requireRole).toHaveBeenCalledTimes(1);
-    expect(requireRole.mock.calls[0][1]).toBe('editor');
-    // The guard's refusal is the answer: nothing ran behind it, including the
-    // fetch that the network stub above would have rejected.
-    expect(res?.status).toBe(403);
+  it.each(Object.entries(VERBS).flatMap(([route, verbs]) => verbs.map((verb) => [route, verb])))(
+    '%s answers %s through requireRole at editor, and nothing runs behind a refusal',
+    async (route, method) => {
+      const options = [...httpRegistrations.values()].find((o) => o.route === route);
+
+      clearGuards();
+      const res = await invoke(options, makeRequest({ method }));
+      expect(requireRole).toHaveBeenCalledTimes(1);
+      expect(requireRole.mock.calls[0][1]).toBe('editor');
+      // The guard's refusal is the answer: nothing ran behind it, including the
+      // fetch that the network stub above would have rejected.
+      expect(res?.status).toBe(403);
+    }
+  );
+
+  it('the straight-to-review import routes it replaces are gone', () => {
+    const routes = new Set([...httpRegistrations.values()].map((o) => o.route));
+    expect(routes.has('cms/content/import-repo')).toBe(false);
+    expect(routes.has('cms/content/import-repo/candidates')).toBe(false);
   });
 });
 

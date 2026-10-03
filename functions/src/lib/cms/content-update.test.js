@@ -254,3 +254,39 @@ describe('transitionContentStatus', () => {
     expect(store.patchDoc).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * The Drafts stage's two edges belong to lib/cms/drafts-handlers.js, which
+ * checks where the article came from and writes under the read's ETag. The
+ * generic transition (the admin portal's and the Telegram bot's) must refuse
+ * both, or any in_review article could be dropped into the owner's Drafts and
+ * a half-written draft pushed on with no title check.
+ */
+describe('transitionContentStatus and the Drafts stage', () => {
+  it.each([
+    ['in_review', 'drafting'],
+    ['drafting', 'in_review'],
+    ['drafting', 'published'],
+    ['drafting', 'rejected'],
+  ])('refuses %s → %s and writes nothing', async (from, to) => {
+    const store = makeStore({
+      readDoc: vi.fn(async () => ({ id: 'c1', contentStatus: from, repoPath: 'docs/content/blog-x.md' })),
+    });
+    const h = createContentTransitionHandler({ guard: guardAs('super_admin'), store, ...fixed });
+    const res = await h(makeRequest({ contentId: 'c1', newStatus: to }), context);
+    expect(res.status).toBe(409);
+    expect(JSON.parse(res.body)).toMatchObject({
+      code: 'DRAFTS_STAGE',
+      error: expect.stringMatching(/\/admin\/drafts/),
+    });
+    expect(store.patchDoc).not.toHaveBeenCalled();
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+  });
+
+  it('leaves in_review’s own edges alone', async () => {
+    const store = makeStore({ readDoc: vi.fn(async () => ({ id: 'c1', contentStatus: 'in_review' })) });
+    const h = createContentTransitionHandler({ guard: guardAs('editor'), store, ...fixed });
+    const res = await h(makeRequest({ contentId: 'c1', newStatus: 'approved' }), context);
+    expect(res.status).toBe(200);
+  });
+});

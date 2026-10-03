@@ -22,12 +22,32 @@
 import { normalizePublishTarget } from './publish-targets.js';
 import { normalizeCurrentStatusForBlogOnly } from './content-update-validation.js';
 
+/**
+ * The Drafts stage (owner request 2026-10-03): an article the owner is
+ * writing on /admin/drafts. Deliberately NOT `draft`, which already means
+ * something else here — createContentDocument's default and
+ * draft-from-recording's status, and one of forgeScheduled's
+ * CANDIDATE_STATUSES, so a `draft` document can be picked up and rewritten by
+ * the autonomous forge. A hand-written article must never be.
+ *
+ * Its one forward edge is in_review (Send to In Review); in_review's edge
+ * back is Back to Drafts. Both are walked only by lib/cms/drafts-handlers.js,
+ * under the read's ETag: DRAFTS_ONLY_STATUSES below makes the generic
+ * transitioner (transitionContentStatus, the Telegram bot) refuse any edge
+ * that enters or leaves this status, the way it reserves `published` for
+ * publishers.
+ */
+export const DRAFTS_STAGE_STATUS = 'drafting';
+export const DRAFTS_ONLY_STATUSES = Object.freeze([DRAFTS_STAGE_STATUS]);
+
 export const VALID_TRANSITIONS = {
+  drafting: ['in_review'],
   draft: ['ingested', 'in_review', 'approved', 'published', 'rejected'],
   ingested: ['inspected', 'in_review', 'approved', 'published', 'rejected'],
   inspected: ['in_review', 'approved', 'published', 'rejected'],
   needs_rework: ['inspected', 'in_review', 'approved', 'published', 'rejected'],
-  in_review: ['approved', 'published', 'rejected'],
+  // drafting: Back to Drafts, for an article that came from the Drafts stage.
+  in_review: ['approved', 'published', 'rejected', 'drafting'],
   approved: ['editing', 'published', 'rejected'],
   editing: ['approved', 'forge_ready', 'published', 'in_review', 'rejected'],
   // forge_ready — ContentForge generated + graded above threshold; staged for

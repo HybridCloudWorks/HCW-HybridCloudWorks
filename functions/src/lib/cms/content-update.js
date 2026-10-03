@@ -37,6 +37,7 @@ import {
   normalizeCurrentStatusForBlogOnly,
 } from './content-update-validation.js';
 import {
+  DRAFTS_ONLY_STATUSES,
   VALID_TRANSITIONS,
   buildStatusUpdateData,
   validateTransitionRequest,
@@ -182,6 +183,23 @@ export function createContentStatusTransitioner({ store, now = () => new Date(),
 
     const currentStatus = data.contentStatus || 'ingested';
     const normalizedCurrentStatus = normalizeCurrentStatusForBlogOnly(currentStatus);
+
+    // The Drafts stage's edges (drafting -> in_review, in_review -> drafting)
+    // belong to lib/cms/drafts-handlers.js, which checks where the article
+    // came from and conditions the write on the read's ETag. Through here an
+    // in_review article from anywhere could be dropped into the owner's
+    // Drafts, or a half-written draft pushed on with no title check.
+    if (
+      DRAFTS_ONLY_STATUSES.includes(normalizedCurrentStatus) ||
+      DRAFTS_ONLY_STATUSES.includes(normalizedStatus)
+    ) {
+      return {
+        ok: false,
+        status: 409,
+        code: 'DRAFTS_STAGE',
+        error: `${normalizedCurrentStatus} → ${normalizedStatus} is a Drafts stage move; use /admin/drafts (Send to In Review or Back to Drafts).`,
+      };
+    }
 
     const allowed = VALID_TRANSITIONS[normalizedCurrentStatus];
     if (!allowed || !allowed.includes(normalizedStatus)) {

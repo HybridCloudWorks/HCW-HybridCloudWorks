@@ -166,6 +166,7 @@ const AdminAuthGuard = lazyPage(() => import('@/pages/admin/AdminAuthGuard'));
 const AuthCallbackPage = lazyPage(() => import('@/pages/AuthCallbackPage'));
 const AdminLayout = lazyPage(() => import('@/pages/admin/AdminLayout'));
 const AdminDashboardPage = lazyPage(() => import('@/pages/admin/DashboardPage'));
+const AdminDraftsPage = lazyPage(() => import('@/pages/admin/DraftsPage'));
 const AdminQueuePage = lazyPage(() => import('@/pages/admin/QueuePage'));
 const AdminReviewPage = lazyPage(() => import('@/pages/admin/ReviewPage'));
 const AdminEditorPage = lazyPage(() => import('@/pages/admin/EditorPage'));
@@ -419,6 +420,7 @@ function App() {
                 }
               >
                 <Route index element={<AdminDashboardPage />} />
+                <Route path="drafts" element={<AdminDraftsPage />} />
                 <Route path="queue" element={<AdminQueuePage />} />
                 <Route path="queue/:blogId" element={<AdminReviewPage />} />
                 <Route path="editor" element={<AdminEditorListPage />} />

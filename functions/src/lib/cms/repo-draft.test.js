@@ -17,7 +17,6 @@ import {
   REPO_DRAFT_ID_NAMESPACE,
   blobUrlFor,
   buildRepoDraftData,
-  buildRepoDraftRefresh,
   checkRepoDraftPath,
   countEmbedFences,
   findRepoRelativeLinks,
@@ -355,73 +354,7 @@ describe('the three lab drafts, read from disk', () => {
   );
 });
 
-describe('buildRepoDraftRefresh — what a re-import may touch', () => {
-  const draft = parseRepoDraft(readRepoFile(LAB_DRAFTS[0])).draft;
-  const refresh = (current = {}) =>
-    buildRepoDraftRefresh({
-      path: LAB_DRAFTS[0],
-      draft,
-      source: SOURCE,
-      editor: 'editor@hcw.dev',
-      current,
-      now: FIXED_NOW,
-    });
-
-  it('rewrites what the file says and the provenance, and nothing a reviewer decides', () => {
-    const update = refresh();
-    expect(Object.keys(update).sort()).toEqual(
-      [
-        'Content',
-        'Summary',
-        'Tags',
-        'Title',
-        'content',
-        'frontMatter',
-        'normalizedTitle',
-        'postContent',
-        'readTime',
-        'repoCommitSha',
-        'repoContentSha256',
-        'repoPath',
-        'repoRawUrl',
-        'repoRef',
-        'repoRefreshedAt',
-        'repoRefreshedBy',
-        'summary',
-        'title',
-        'updatedAt',
-        'updatedBy',
-      ].sort()
-    );
-    expect(update.content).toContain(LAB_FENCE);
-    expect(update.readTime).toBe(`${draft.reading} min`);
-  });
-
-  it('cannot move the document through the state machine or publish it', () => {
-    const update = refresh({ blogDraft: 'old' });
-    for (const key of [
-      'contentStatus',
-      'Status',
-      'Live',
-      'publishedAt',
-      'Published At',
-      'slug',
-      'Slug',
-      'Cloud Provider',
-      'cloudProvider',
-      'keyTopics',
-      'approvedForBlog',
-      'scheduledPublishDate',
-    ]) {
-      expect(update, key).not.toHaveProperty(key);
-    }
-  });
-
-  it('rewrites blogDraft only when the document already has one', () => {
-    expect(refresh()).not.toHaveProperty('blogDraft');
-    expect(refresh({ blogDraft: 'stale text' }).blogDraft).toBe(draft.body);
-  });
-
+describe('sha256Hex', () => {
   it('hashes bytes and strings alike', () => {
     expect(sha256Hex('abc')).toBe(sha256Hex(Buffer.from('abc')));
     expect(sha256Hex('abc')).toMatch(/^[0-9a-f]{64}$/);
