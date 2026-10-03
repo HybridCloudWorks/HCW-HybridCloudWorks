@@ -341,8 +341,12 @@ export default function DockerDesktopPage() {
         <p className={PROSE}>
           For comparison, a browser lab workspace is limited to one CPU and 2 GB of memory.{' '}
           <strong>Resource Saver</strong>, on by default and set under the same Resources settings,
-          stops Docker’s Linux VM after five minutes with no containers running, and starts it again
-          for the next one, which takes about 3 to 10 seconds. With WSL integration turned on for a
+          steps in after five minutes with no containers running. On macOS it stops Docker’s Linux
+          VM, freeing its memory, and starts it again for the next container, which takes about 3 to
+          10 seconds. On Windows with WSL 2 it only pauses Docker Engine inside the{' '}
+          <Code>docker-desktop</Code> distribution: CPU use drops and the next container starts
+          straight away, but the memory WSL holds is not given back unless WSL’s{' '}
+          <Code>autoMemoryReclaim</Code> setting is on. With WSL integration turned on for a
           distribution, Docker Desktop counts that as activity and does not enter it.
         </p>
       </GuideSection>

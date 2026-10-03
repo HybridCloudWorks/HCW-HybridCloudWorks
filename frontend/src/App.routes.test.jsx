@@ -223,6 +223,16 @@ function renderRoute(pathname) {
   return render(<AppWrapper />);
 }
 
+// Renders a route and expects its level-one heading, and no 404 page.
+async function expectRouteHeading(pathname, heading) {
+  renderRoute(pathname);
+
+  expect(
+    await screen.findByRole('heading', { level: 1, name: heading }, { timeout: 5000 })
+  ).toBeInTheDocument();
+  expect(document.querySelector('[data-page="not-found"]')).toBeNull();
+}
+
 describe('public route contract', () => {
   beforeEach(() => {
     window.scrollTo = vi.fn();
@@ -282,12 +292,7 @@ describe('public route contract', () => {
     ['/docker/desktop', 'The Docker Desktop app'],
     ['/docker/tools', 'Docker Tools'],
   ])('renders the Docker route %s', async (pathname, heading) => {
-    renderRoute(pathname);
-
-    expect(
-      await screen.findByRole('heading', { level: 1, name: heading }, { timeout: 5000 })
-    ).toBeInTheDocument();
-    expect(document.querySelector('[data-page="not-found"]')).toBeNull();
+    await expectRouteHeading(pathname, heading);
   });
 
   it.each([
@@ -297,12 +302,7 @@ describe('public route contract', () => {
   ])(
     'serves the Docker detail page %s through the article template (#776)',
     async (pathname, heading) => {
-      renderRoute(pathname);
-
-      expect(
-        await screen.findByRole('heading', { level: 1, name: heading }, { timeout: 5000 })
-      ).toBeInTheDocument();
-      expect(document.querySelector('[data-page="not-found"]')).toBeNull();
+      await expectRouteHeading(pathname, heading);
     }
   );
 

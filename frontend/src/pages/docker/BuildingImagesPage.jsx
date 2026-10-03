@@ -246,8 +246,8 @@ export default function DockerBuildingImagesPage() {
 
       <GuideSection id="checksums" title="Every direct download checked against a pinned sum">
         <p className={PROSE}>
-          Every version and checksum the Dockerfile pins lives in versions.env, which each{' '}
-          <Code>RUN</Code> sources before it starts. Each binary is checked with{' '}
+          Every version and checksum the Dockerfile pins lives in versions.env, which each step that
+          downloads something sources before it starts. Each binary is checked with{' '}
           <Code>sha256sum -c</Code> straight after its download, and because the shell runs with{' '}
           <Code>set -eu</Code>, a sum that does not match fails the build rather than leaving an
           unverified binary in place. ansible-core and each package it depends on are fetched by pip
