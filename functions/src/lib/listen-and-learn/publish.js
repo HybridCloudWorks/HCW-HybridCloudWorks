@@ -262,13 +262,16 @@ export function speakableTextOf(item) {
     prev = text;
     text = text.replace(/<[^<>]*>/g, ' ');
   } while (text !== prev);
+  // `&amp;` is decoded LAST. Decoding it first turns the literal text
+  // `&amp;lt;` into `&lt;`, which the next replace then reads as `<` — the
+  // double-unescape CodeQL js/double-escaping names (PR #841).
   return text
     .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')
     .replace(/[ \t]+/g, ' ')
     .replace(/ +([.,;:!?])/g, '$1')
     .replace(/\s*\n\s*/g, '\n')

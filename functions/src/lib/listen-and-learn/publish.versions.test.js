@@ -264,6 +264,13 @@ describe('saveEpisodeFailure keeps a published chapter on the site (ADR 0033 §4
 });
 
 describe('speakableTextOf', () => {
+  it('decodes &amp; last, so an escaped entity stays literal text (CodeQL js/double-escaping)', () => {
+    expect(speakableTextOf({ content: 'Write &amp;lt;b&amp;gt; to show a tag' })).toBe(
+      'Write &lt;b&gt; to show a tag'
+    );
+    expect(speakableTextOf({ content: 'A &amp; B &lt; C' })).toBe('A & B < C');
+  });
+
   it('reads the body under its several spellings, drops markup, keeps line breaks', () => {
     expect(
       speakableTextOf({ postContent: '<p>Hello&nbsp;<b>world</b></p>\n<p>Two &amp; three</p>' })

@@ -145,57 +145,65 @@ describe('the grid', () => {
 });
 
 describe('Test all', () => {
-  it('runs every testable service one at a time, never two at once', async () => {
-    let active = 0;
-    let peak = 0;
-    const slow = async () => {
-      active += 1;
-      peak = Math.max(peak, active);
-      await new Promise((resolve) => setTimeout(resolve, 5));
-      active -= 1;
-      return { ok: true, status: 200, data: {} };
-    };
-    postJSON.mockImplementation(slow);
-    fetchMock.mockImplementation(async () => {
-      await slow();
-      return { ok: true, json: async () => ({ events: [] }) };
-    });
+  it(
+    'runs every testable service one at a time, never two at once',
+    { timeout: 20000 },
+    async () => {
+      let active = 0;
+      let peak = 0;
+      const slow = async () => {
+        active += 1;
+        peak = Math.max(peak, active);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        active -= 1;
+        return { ok: true, status: 200, data: {} };
+      };
+      postJSON.mockImplementation(slow);
+      fetchMock.mockImplementation(async () => {
+        await slow();
+        return { ok: true, json: async () => ({ events: [] }) };
+      });
 
-    render(<Harness />);
-    fireEvent.click(screen.getByRole('button', { name: /Test all/ }));
-    await waitFor(
-      () => expect(screen.getByRole('button', { name: /Test all/ }).disabled).toBe(false),
-      {
-        timeout: 3000,
-      }
-    );
+      render(<Harness />);
+      fireEvent.click(screen.getByRole('button', { name: /Test all/ }));
+      // The registry now holds many more services (ADR 0033), each run one
+      // after the other with a 5 ms pause, and the coverage job instruments
+      // every render: 3 s was the wall this test hit there. Generous on
+      // purpose; what is asserted is the peak concurrency, not the speed.
+      await waitFor(
+        () => expect(screen.getByRole('button', { name: /Test all/ }).disabled).toBe(false),
+        {
+          timeout: 15000,
+        }
+      );
 
-    expect(peak).toBe(1);
-    const probes = postJSON.mock.calls.map(([route, body]) => body?.probe ?? route);
-    // Every testable service once, in registry order, and no YouTube: its
-    // test spends daily quota.
-    expect(probes).toEqual([
-      'publerProxy',
-      'resend',
-      'linkieProxy',
-      'telegram',
-      'rsscom',
-      'mcpProxy',
-      // ADR 0033: the four language models, then the two AI-service probes.
-      'testAiProvider',
-      'testAiProvider',
-      'testAiProvider',
-      'testAiProvider',
-      'firecrawl',
-      'replicate',
-      'qlty',
-    ]);
-    expect(probes).not.toContain('youtube');
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toContain('speaker-42');
-    // The pricing cache is in Test all too: it is a read, and spends nothing.
-    expect(fetchCloudPricing).toHaveBeenCalledTimes(1);
-  });
+      expect(peak).toBe(1);
+      const probes = postJSON.mock.calls.map(([route, body]) => body?.probe ?? route);
+      // Every testable service once, in registry order, and no YouTube: its
+      // test spends daily quota.
+      expect(probes).toEqual([
+        'publerProxy',
+        'resend',
+        'linkieProxy',
+        'telegram',
+        'rsscom',
+        'mcpProxy',
+        // ADR 0033: the four language models, then the two AI-service probes.
+        'testAiProvider',
+        'testAiProvider',
+        'testAiProvider',
+        'testAiProvider',
+        'firecrawl',
+        'replicate',
+        'qlty',
+      ]);
+      expect(probes).not.toContain('youtube');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0][0]).toContain('speaker-42');
+      // The pricing cache is in Test all too: it is a read, and spends nothing.
+      expect(fetchCloudPricing).toHaveBeenCalledTimes(1);
+    }
+  );
 
   it('records a result and a time on each tile, and says YouTube was left out', async () => {
     render(<Harness />);
