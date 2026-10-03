@@ -65,17 +65,23 @@ export function extractPageDescription(html) {
 /** Same keyword map the Publish-Ready Builder uses client-side
  * (SubmitUrlsPage.jsx inferProviderFromUrl), capitalised to the stored
  * 'Cloud Provider' convention; 'Multi' when nothing matches. */
+const URL_PROVIDER_KEYWORDS = [
+  ['Azure', ['azure', 'microsoft']],
+  ['Aws', ['aws', 'amazon']],
+  ['Gcp', ['gcp', 'google']],
+  ['Github', ['github']],
+  ['Terraform', ['terraform']],
+  ['Finops', ['finops']],
+  // Last, as in the client's pageMeta.js: Docker on Azure is Azure.
+  ['Docker', ['docker']],
+];
+
 export function inferProviderFromUrl(url = '') {
   const normalized = String(url).toLowerCase();
-  if (normalized.includes('azure') || normalized.includes('microsoft')) return 'Azure';
-  if (normalized.includes('aws') || normalized.includes('amazon')) return 'Aws';
-  if (normalized.includes('gcp') || normalized.includes('google')) return 'Gcp';
-  if (normalized.includes('github')) return 'Github';
-  if (normalized.includes('terraform')) return 'Terraform';
-  if (normalized.includes('finops')) return 'Finops';
-  // Last, as in the client's pageMeta.js: Docker on Azure is Azure.
-  if (normalized.includes('docker')) return 'Docker';
-  return 'Multi';
+  const match = URL_PROVIDER_KEYWORDS.find(([, keywords]) =>
+    keywords.some((keyword) => normalized.includes(keyword))
+  );
+  return match ? match[0] : 'Multi';
 }
 
 /**
