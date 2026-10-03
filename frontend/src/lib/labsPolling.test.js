@@ -25,7 +25,7 @@ describe('TERMINAL_JOB_STATUSES', () => {
   it('includes timeout, which the poll loop used to omit', () => {
     // The defect: `timeout` is a status the agent reports, and leaving it out
     // meant a timed-out job was polled every 5s for as long as the console
-    // stayed open. (TODO.md T-308)
+    // stayed open. (T-308)
     expect(isTerminalJobStatus('timeout')).toBe(true);
   });
 

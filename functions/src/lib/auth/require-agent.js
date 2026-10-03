@@ -5,18 +5,17 @@
  * WHY THE AGENT DOES NOT GET A COSMOS CLIENT
  * ===========================================================================
  * `vps-agent/index.js` held a Cosmos **account primary key** — read/write over
- * all 71 containers — deployed to a third-party VPS (TODO.md,
- * TODO.md T-401). The VPS is outside the trust boundary in exactly the way the
- * browser is, so it gets the same answer the browser got: no data-plane client,
- * no key, an API instead.
+ * all 71 containers — deployed to a third-party VPS (T-401). The VPS is outside
+ * the trust boundary in exactly the way the browser is, so it gets the same
+ * answer the browser got: no data-plane client, no key, an API instead.
  *
- * TODO.md offered a Cosmos **resource token** brokered by a Functions
+ * T-401 offered a Cosmos **resource token** brokered by a Functions
  * endpoint as the narrower alternative. It is not viable here. Resource tokens
  * are minted from the SQL API's users/permissions model, which requires the
  * master key to create, and `disableLocalAuth` permits "only MSI and AAD" —
  * it disables resource tokens along with keys. Brokering them would mean the
  * Functions app holds the master key and the account can never turn local auth
- * off, which is the whole point of TODO.md T-315. So that option would have
+ * off, which is the whole point of T-315. So that option would have
  * traded one permanent key for another.
  *
  * ===========================================================================
@@ -46,7 +45,7 @@
  */
 
 // Static, not `await import()` inside the guard. verify-token.js imports
-// nothing from here, so there was no cycle to break (TODO.md T-408).
+// nothing from here, so there was no cycle to break (T-408).
 import { bearerTokenFrom } from './verify-token.js';
 
 const deny = (status, error) => ({

@@ -68,7 +68,7 @@ const BUILD_TIME = new Date().toISOString();
  * It used to return `node: process.version`, the site name, and whether the
  * schedulers flag was on — an unauthenticated inventory of the runtime version
  * and deployment name, which is the first thing anyone enumerating a host
- * looks for and is of no use to a probe (TODO.md T-402). A liveness check
+ * looks for and is of no use to a probe (T-402). A liveness check
  * needs one bit: is the host answering.
  *
  * `startedAt` stays. It is the one field with an operational use — telling a

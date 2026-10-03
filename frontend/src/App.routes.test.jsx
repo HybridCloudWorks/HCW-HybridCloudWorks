@@ -74,7 +74,7 @@ vi.mock('@/pages/azure/LandingPage', () => ({
 }));
 
 // These six routes used to assert "Coming Soon". They stopped being
-// placeholders when App.jsx routed them to real pages (TODO.md T-320); the
+// placeholders when App.jsx routed them to real pages (T-320); the
 // suite is a ROUTE contract — path -> page module — so the pages are mocked
 // with distinctive headings exactly like the providers above, not rendered.
 vi.mock('@/pages/gcp/LandingPage', () => ({

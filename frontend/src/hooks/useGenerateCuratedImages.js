@@ -40,7 +40,7 @@ function buildImageRequestBody(article, basePrompt, provider) {
 /**
  * Hook to generate and manage images for curated articles.
  *
- * Two audiences, and the split between them is the point (TODO.md T-210). This
+ * Two audiences, and the split between them is the point (T-210). This
  * hook runs on the PUBLIC `/{provider}/news` route, but every call it made was
  * authenticated: the cache lookup went to an editor-gated `cms/*` endpoint via
  * `getJSON`, whose `acquireApiToken` throws outright without an MSAL account.

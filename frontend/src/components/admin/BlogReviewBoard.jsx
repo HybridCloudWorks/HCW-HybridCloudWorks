@@ -139,7 +139,7 @@ export default function BlogReviewBoard({ blog, blogId }) {
       // `toDate`, not `.toDate()`. `scheduledPublishDate` is an ISO string
       // since the migration, and calling a legacy timestamp method on it
       // threw — inside a setTimeout, so outside the error boundary, blanking
-      // the review page for any scheduled item (TODO.md T-303). A null here
+      // the review page for any scheduled item (T-303). A null here
       // now falls through to the same default as an unscheduled item rather
       // than taking the page down.
       const date = toDate(blog.scheduledPublishDate);

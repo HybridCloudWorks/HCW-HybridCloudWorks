@@ -17,7 +17,7 @@
  * or deactivates one; DELETE removes a deactivated one, owner request
  * 2026-09-28). Two templates, so two registrations, each through
  * httpRouteByMethod so that a later verb on either is a new key in
- * `handlers`, never a second function on the same template (TODO.md T-510).
+ * `handlers`, never a second function on the same template (T-510).
  */
 import { httpRoute, httpRouteByMethod } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';

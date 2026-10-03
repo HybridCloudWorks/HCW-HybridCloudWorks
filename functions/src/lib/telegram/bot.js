@@ -1,5 +1,5 @@
 /**
- * telegram/bot.js — the inbound Telegram bot (TODO.md T-512).
+ * telegram/bot.js — the inbound Telegram bot (T-512).
  *
  * Site-Main `functions/lib/telegram-bot.js` + the `telegramWebhook` handler in
  * `functions/index.js` (5643–5850). Ported deliberately rather than retired:

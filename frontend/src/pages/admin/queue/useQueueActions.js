@@ -2,7 +2,7 @@
  * Every mutating action the review queue can take, and the state that tracks
  * them.
  *
- * Extracted from QueuePage.jsx (TODO.md T-412). This is the page's riskiest
+ * Extracted from QueuePage.jsx (T-412). This is the page's riskiest
  * code — the bulk paths transition many documents one at a time and each
  * partial failure has to be attributed back to its own card — so isolating it
  * means it can be exercised without rendering four hundred lines of card

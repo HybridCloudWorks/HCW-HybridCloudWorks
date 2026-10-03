@@ -49,7 +49,7 @@ const fail = (code) => Object.assign(new Error(`fake Cosmos ${code}`), { code })
  * The quota needs store operations that can FAIL — a conditional increment, a
  * create that 409s, a replace that 412s — because a counter built only from
  * operations that always succeed is the defect it was built to fix
- * (TODO.md T-204). This fake gives them their success and 404/412 behaviour,
+ * (T-204). This fake gives them their success and 404/412 behaviour,
  * which is all this file needs: it is a transport test, and the concurrency
  * bound itself is pinned in lib/submissions.test.js against a fake that models
  * Cosmos's per-document serialization.

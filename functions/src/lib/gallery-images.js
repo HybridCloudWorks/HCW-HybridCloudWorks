@@ -15,7 +15,7 @@
  * anything else returns null — the record delete still proceeds and
  * storageDeleted reports false, mirroring the source's ignore-failures
  * posture (and matching reality: pre-migration blobs live in Firebase
- * Storage, with operational secrets and external access tracked in TODO.md.
+ * Storage, whose bucket has since been decommissioned — see below).
  *
  *
  * THE GOOGLE BRANCHES STAY, THOUGH THE BUCKET IS GONE (#518). The bucket was

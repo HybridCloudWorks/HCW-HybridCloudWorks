@@ -54,7 +54,8 @@ was never applied is the one easy mistake here.
 
 **Authority:** this page does not authorize anything. Tuning a threshold is a
 normal pull request; arming the availability test or the timers is an owner
-decision recorded in `TODO.md`.
+decision, made on an `owner-gated` GitHub issue and recorded in
+`CHANGELOG.md` once taken.
 
 ## Read this before the rules
 

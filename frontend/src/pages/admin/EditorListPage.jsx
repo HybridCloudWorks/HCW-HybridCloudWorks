@@ -92,7 +92,7 @@ function filterByType(items, typeFilter) {
 // Every comparator in this file was timestamp-object-only, so against the ISO strings
 // Cosmos returns each scored 0 and the sorts were permanent no-ops — the lists
 // rendered in raw Cosmos order while the controls appeared to work
-// (TODO.md T-304).
+// (T-304).
 const sortByPublishedDateDesc = byNewest('blogPublishedAt');
 const sortByUpdatedDateDesc = byNewest('updatedAt', 'blogEditedAt');
 

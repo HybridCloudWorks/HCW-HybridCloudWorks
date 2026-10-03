@@ -4,7 +4,7 @@
  * The load-bearing assertions are the ISO-string ones. Ten copies of this logic
  * existed — the review counted seven — and two of them were Firestore-only,
  * which against the strings Cosmos returns scored every document 0, so every
- * comparator returned 0 and every sort silently did nothing (TODO.md T-304).
+ * comparator returned 0 and every sort silently did nothing (T-304).
  * A single test on an ISO string would have caught it in either copy.
  *
  * The last guard in this file is what found copies eight, nine and ten.

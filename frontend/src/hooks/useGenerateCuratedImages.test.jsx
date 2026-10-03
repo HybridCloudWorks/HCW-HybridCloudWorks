@@ -6,7 +6,7 @@
  * through `acquireApiToken`, which throws outright without an MSAL account.
  * The hook runs on `/{provider}/news`, so for every anonymous visitor the
  * lookups failed and the grid rendered no curated imagery where cached images
- * used to appear (TODO.md T-210).
+ * used to appear (T-210).
  *
  * The assertions are about WHO calls WHAT, because that is the whole defect:
  * reading a cached image must be anonymous, and everything behind the admin

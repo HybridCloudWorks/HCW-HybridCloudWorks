@@ -3,7 +3,7 @@
  *
  * These assert the properties every route gets for free, because the failure
  * this replaces was not a broken control — `cors.js` was correct and tested —
- * but a control applied at one call site out of fifty-eight (TODO.md T-102).
+ * but a control applied at one call site out of fifty-eight (T-102).
  */
 import { describe, it, expect, vi } from 'vitest';
 import {

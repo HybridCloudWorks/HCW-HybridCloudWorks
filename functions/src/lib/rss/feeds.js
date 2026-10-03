@@ -99,7 +99,7 @@ export const PROVIDER_DISPLAY_NAMES = Object.freeze({
   docker: 'Docker',
 });
 
-/** Items kept per feed in rss_cache — the write-time cap TODO.md T-319 asked for. */
+/** Items kept per feed in rss_cache — the write-time cap T-319 asked for. */
 export const MAX_CACHE_ITEMS_PER_FEED = 20;
 /** New content drafts created per feed per run. */
 export const MAX_NEW_CONTENT_PER_FEED = 10;
@@ -181,7 +181,7 @@ export function cacheDocId(provider, feed) {
 /**
  * The compact item shape the public feed and the homepage read.
  *
- * The cap keeps the NEWEST `max` items, not the first `max` (TODO.md T-319).
+ * The cap keeps the NEWEST `max` items, not the first `max` (T-319).
  * Feed order is conventionally newest-first but nothing enforces it, and the
  * two readers of this array both sort by `pubDate` — buildHomepageFeedItems
  * below and useNewsData.js in the browser — so a feed that publishes in any

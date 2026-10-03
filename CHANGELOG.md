@@ -2089,6 +2089,34 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Comments no longer send readers to `TODO.md` for open work (#821).**
+  `TODO.md` stopped carrying work on 2026-09-05, but about 120 files still
+  cited it, mostly as `(TODO.md T-nnn)`. A reader who followed one found a
+  file of accepted risks and nothing about the item.
+  - `TODO.md T-nnn` is now `T-nnn` throughout code, config and current docs.
+    The T-items are closed; each one's record is in this file or in the
+    commit that closed it. `.github/CONTRIBUTING.md` now says so, and says
+    that a comment pointing at open work names its issue.
+  - Other `TODO.md` pointers now name what they meant: Required-Inputs
+    §4.1, §4.2, §4.5 or §4.6, an ADR, or the changelog entry. Mentions that
+    describe the file itself (the structure gate, the docs build, the
+    accepted risks, the handling rules) are unchanged. So are
+    `docs/history/` and the dated architecture records, which are evidence
+    kept as written.
+  - The admin Forge Studio page no longer shows "(TODO T-518 / T-607)". The
+    timers were armed on 2026-09-05, so it now says Auto-Forge is honoured
+    by the scheduled forge timer.
+  - The five live gaps #821 listed were checked against the estate on
+    2026-10-02. One is still open: moving the Static Web App deploy off its
+    deployment token, now #834 (owner-gated, on the board). The other four
+    were already closed, and their comments now say how. T-513 was explained
+    as the `CORS_*` name collision. The expected-plan assertion runs in
+    `tfc-plan-check.yml` on `TFC_TOKEN`. The three stale workspace variables
+    were deleted on 2026-09-02. The `HCWSite API` registration exists and
+    issues v2 tokens.
+  - `infra/` is touched in comments and one variable description only, so
+    the `hcw-azure` plan carries no change beyond the permanent baseline.
+
 - **NVIDIA is the backup for content features, and a weekly probe records
   its speed (#701).** Owner decision 2026-09-29. Through the AI Engine's
   Test, NVIDIA's free trial tier took 56-117 s to answer "ok" with the

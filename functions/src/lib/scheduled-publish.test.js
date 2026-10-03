@@ -6,7 +6,7 @@
  * it failed to publish, or keep republishing the same document every fifteen
  * minutes forever. The feature it implements was accepted by the server and
  * confirmed by the UI for the whole migration while doing nothing at all
- * (TODO.md T-301), so the tests are written against the silence, not the
+ * (T-301), so the tests are written against the silence, not the
  * happy path.
  */
 import { describe, it, expect, vi } from 'vitest';

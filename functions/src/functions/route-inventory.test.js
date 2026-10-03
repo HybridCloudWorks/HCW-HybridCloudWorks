@@ -2,7 +2,7 @@
  * The route inventory — the replacement for the `firestore.rules` default-deny
  * catch-all, and the test `lib/auth/require-role.js` declares in its header as
  * *"the highest-value test in the port"*. It was declared and never written
- * (TODO.md T-103).
+ * (T-103).
  *
  * Firestore had `match /{document=**} { allow read, write: if false }`, which
  * caught every path the API forgot. Azure has no equivalent: every
@@ -139,7 +139,7 @@ const PUBLIC_ROUTES = new Set([
   // Returns one field, `imageUrl`, for one cached news-article image — never
   // the document, which carries an internal blob path and prompt metadata. It
   // is here because the public news pages were calling the editor-gated
-  // equivalent and rendering nothing (TODO.md T-210).
+  // equivalent and rendering nothing (T-210).
   'public/curated-image/{id}',
   // Batched twin of the route above (T-739). Identical disclosure rules —
   // imageUrl only, archived withheld, whitespace treated as uncached — and
@@ -463,8 +463,9 @@ describe('property 3 — every route evaluates CORS', () => {
 
 describe('non-HTTP triggers', () => {
   it('the scheduler timers stay behind one feature flag', () => {
-    // Not an authorization surface, but they are registrations, and one of
-    // them deletes blobs with an unimplemented body (TODO.md T-302). The
+    // Not an authorization surface, but they are registrations, and two of
+    // them delete blobs (cleanupTempStorage and cleanupUnusedCertImages, both
+    // dry-run until their own *_DELETE setting, T-302). The
     // nineteen are the timers in schedulers.js — the seventeen from T-323 plus
     // buildWeeklyNewsletter (#504) and probeAiProviders (#701); the twentieth
     // is platformJobSweeper (jobs-sweeper.js), behind its own flag; the
@@ -573,7 +574,7 @@ describe('non-HTTP triggers', () => {
  * Seven `cms/*` templates were declared two or three times each and eight
  * functions never started: list, patch and put across certifications,
  * recordings, social posts, settings, config and keyword-config, which is most
- * of what the admin UI does (TODO.md T-510). Every one of those registrations
+ * of what the admin UI does (T-510). Every one of those registrations
  * passed properties 1, 2 and 3 — individually they were all fine.
  *
  * `httpRegistrations` is keyed by function NAME, which is exactly why the

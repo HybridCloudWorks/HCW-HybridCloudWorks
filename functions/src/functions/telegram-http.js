@@ -1,5 +1,5 @@
 /**
- * telegram-http.js — the inbound Telegram webhook (TODO.md T-512).
+ * telegram-http.js — the inbound Telegram webhook (T-512).
  *
  * Logic is lib/telegram/bot.js; this file is registration, the secret-token
  * gate, and wiring the dependencies.

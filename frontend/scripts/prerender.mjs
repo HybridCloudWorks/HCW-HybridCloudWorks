@@ -1,5 +1,5 @@
 /**
- * Pre-render the built SPA to real HTML, one file per route (TODO.md T-515).
+ * Pre-render the built SPA to real HTML, one file per route (T-515).
  *
  * WHAT WAS WRONG. This repository built with `vite build` and shipped a single
  * `index.html` containing an empty `<div id="root">` and the title "Hybrid Cloud

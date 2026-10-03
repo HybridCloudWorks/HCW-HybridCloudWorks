@@ -1,7 +1,7 @@
 /**
  * Anonymous media delivery — `GET|HEAD public/media/{container}/{*blobPath}`.
  *
- * The delivery model this implements, and why (TODO.md T-105):
+ * The delivery model this implements, and why (T-105):
  *
  * The storage account sets `allow_nested_items_to_be_public = false` and
  * `network_rules { default_action = "Deny" }`. The first is a master override,
@@ -21,8 +21,9 @@
  * This is the second. It adds no Azure resource, reverses no security setting,
  * and leaves a CDN free to be layered in front of the site origin later without
  * touching application code — cache headers here are written so that it can be.
- * The first option remains open and is a spend decision, not an engineering
- * one; it is recorded in TODO.md §0.
+ * The first option is not planned. It is a possible future alternative, and
+ * choosing it would be a spend decision for the owner rather than an
+ * engineering one.
  *
  * Cost note: this puts image bytes through Function invocations. `immutable`
  * cache headers plus conditional-request support keep repeat views off the

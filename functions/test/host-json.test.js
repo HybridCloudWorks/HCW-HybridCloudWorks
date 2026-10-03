@@ -62,7 +62,7 @@ describe('host.json', () => {
     // it does not quieten the table — it empties it, permanently and silently.
     // That is the table Migration-Plan §7's scheduled-job gate reads to answer
     // "did the timer fire", so raising this makes the gate unobservable
-    // (TODO.md T-514).
+    // (T-514).
     expect(config.logging?.logLevel?.['Host.Results']).toBe('Information');
   });
 

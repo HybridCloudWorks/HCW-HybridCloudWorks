@@ -37,7 +37,7 @@
              this a placement error as a stored secret: correct handling is
              fetching it at deploy time (az staticwebapp secrets list) after
              azure/login, storing nothing.
-     COSMOS_KEY - must stay unset (TODO.md); provisioning it would switch
+     COSMOS_KEY - must stay unset (T-504); provisioning it would switch
              clients onto a key path the account rejects.
     VITE_ENTRA_* - Entra app-registration values, produced by the manual
              registration step, not derivable from any state this script can
@@ -320,7 +320,7 @@ if ($outputs) {
     # the /api prefix.
     #
     # The route prefix is load-bearing either way: a base without /api 404s
-    # uniformly (VITE_AZURE_FUNCTIONS_URL, documented in TODO.md).
+    # uniformly (VITE_AZURE_FUNCTIONS_URL, Required-Inputs §4.2).
     @{ output = 'api_base_url'; kind = 'variable'; name = 'FUNCTIONS_URL'; transform = { param($v) $v } }
     # The bare app name the deploy action targets. Hardcoded in the workflow
     # until 2026-08-20, where it went stale across a rename and would have

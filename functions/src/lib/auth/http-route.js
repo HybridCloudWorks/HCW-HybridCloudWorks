@@ -3,7 +3,7 @@
  *
  * Every `app.http` registration in `src/functions/` goes through this. It
  * exists because CORS was correct, well tested, and wired into exactly one of
- * fifty-eight routes (TODO.md T-102) — the other fifty-seven registered
+ * fifty-eight routes (T-102) — the other fifty-seven registered
  * `app.http` directly and quietly opted out. A control that each call site must
  * remember to apply is a control that will be missing from route fifty-nine.
  *
@@ -23,9 +23,9 @@
  *    as an opaque network error, which is how an authorization message becomes
  *    an unexplained failure in the UI.
  *
- * Topology-independent, on purpose. The [TODO.md](TODO.md) §0.1 decision —
- * same-origin behind a Static Web App, or a separate API hostname — changes
- * configuration here, not code. Same-origin requests either carry no `Origin`
+ * Topology-independent, on purpose. The topology decision — same-origin
+ * behind a Static Web App, or a separate API hostname — changes configuration
+ * here, not code. Same-origin requests either carry no `Origin`
  * (allowed) or carry the site's own, which is already in the production
  * allowlist; a different SPA hostname is added through `EXTRA_ALLOWED_ORIGINS`.
  *
@@ -42,7 +42,8 @@ import { createCors } from './cors.js';
  * Origins beyond the production allowlist, comma-separated.
  *
  * The escape hatch for a preview slot, a staging hostname, or a cross-origin
- * SPA host chosen by §0.1. Empty in the default deployment.
+ * SPA host, should the topology ever choose one. Empty in the default
+ * deployment.
  *
  * THE NAME MATTERS, and it is not the obvious one. This read
  * `CORS_ALLOWED_ORIGINS` until 2026-08-22, and that setting **can never reach
@@ -59,7 +60,7 @@ import { createCors } from './cors.js';
  * the worker reported the first two verbatim while the third arrived as `[]`.
  * Same write, same instant, same process. Only the name differed.
  *
- * So do not name anything here `CORS_*` or `WEBSITE_*`. TODO.md T-513.
+ * So do not name anything here `CORS_*` or `WEBSITE_*`. T-513.
  */
 export function parseExtraOrigins(env = process.env) {
   return String(env.EXTRA_ALLOWED_ORIGINS || '')
@@ -135,12 +136,13 @@ let allowlistLogged = false;
  * route. So the line must be written from inside a request with the context in
  * hand, which is why it lives here rather than where the allowlist is built.
  *
- * It exists because T-513 is open: `CORS_ALLOWED_ORIGINS` is set on the app and
- * the app does not honour it, while `TELEGRAM_BOT_TOKEN` in the same worker
- * reads fine. Confirmed from outside on 2026-08-22 — the setting carries two
- * origins and only the one compiled into `PREVIEW_ORIGINS` answers 200. This
- * line separates the two remaining explanations: the value never reaches
- * `process.env`, or it reaches it and parses to empty.
+ * It was added for T-513, while `CORS_ALLOWED_ORIGINS` was set on the app and
+ * the app did not honour it, though `TELEGRAM_BOT_TOKEN` in the same worker
+ * read fine. This line separated the two remaining explanations: the value
+ * never reaches `process.env`, or it reaches it and parses to empty. It showed
+ * the second — the worker received `[]`, the platform's own CORS variable —
+ * which closed T-513 (see `parseExtraOrigins` above). It stays because the
+ * allowlist a worker actually runs is still worth one line per process.
  *
  * Origins only. `Access-Control-Allow-Origin` already returns the same
  * information to any browser that asks.
@@ -280,7 +282,7 @@ export function httpRoute(name, options, { cors, register = app } = {}) {
  * That is not a hypothetical. It shipped: seven `cms/*` templates were each
  * declared two or three times, eight functions never started, and the admin UI
  * lost list, patch and put across certifications, recordings, social posts,
- * settings, config and keyword-config (TODO.md T-510). Nothing caught it,
+ * settings, config and keyword-config (T-510). Nothing caught it,
  * because every one of those registrations was individually correct.
  *
  * So: one template, one registration, and the method fan-out happens here.
