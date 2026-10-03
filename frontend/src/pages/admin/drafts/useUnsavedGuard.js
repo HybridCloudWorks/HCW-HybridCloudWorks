@@ -19,10 +19,12 @@ import { useEffect } from 'react';
 export const UNSAVED_MESSAGE = 'This draft has unsaved changes. Leave without saving them?';
 
 /** A plain left click: no modifier asking for a new tab or window. */
-const isPlainLeftClick = (event) =>
-  !event.defaultPrevented &&
-  event.button === 0 &&
-  !(event.metaKey || event.ctrlKey || event.shiftKey || event.altKey);
+const NEW_TAB_MODIFIERS = ['metaKey', 'ctrlKey', 'shiftKey', 'altKey'];
+
+function isPlainLeftClick(event) {
+  if (event.defaultPrevented || event.button !== 0) return false;
+  return !NEW_TAB_MODIFIERS.some((key) => event[key]);
+}
 
 /** The link the click is on, when it opens in this tab; else null. */
 function sameTabLink(event) {

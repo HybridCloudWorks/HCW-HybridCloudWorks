@@ -126,6 +126,84 @@ function listingFailure(error) {
   };
 }
 
+/** The write, create-only; a 409 is another import that finished first. */
+async function createDraft(deps, { path, draft, file, user }) {
+  const { store, now } = deps;
+  const id = repoDraftContentId(path);
+  const editor = editorOf(user);
+  const doc = asImportedDraft(buildRepoDraftData({ path, draft, source: file, editor, now }), {
+    id,
+    editor,
+    now,
+  });
+  // The invariant, checked where the write happens rather than trusted from
+  // the builders.
+  if (doc.contentStatus !== DRAFTS_STAGE_STATUS || doc.Live !== false) {
+    throw new Error('drafts: refusing to import a document that is not a draft');
+  }
+  const created = await store.createDoc('content', doc).then(
+    () => true,
+    (error) => {
+      if (error?.code === 409) return false;
+      throw error;
+    }
+  );
+  const base = { path, contentId: id, title: draft.title };
+  return created
+    ? {
+        ...base,
+        outcome: 'imported',
+        contentStatus: DRAFTS_STAGE_STATUS,
+        warnings: draft.warnings,
+        repoCommitSha: file.commitSha,
+      }
+    : { ...base, outcome: 'skipped', code: 'ALREADY_IMPORTED' };
+}
+
+const publishedElsewhere = (path, title, live) => ({
+  path,
+  outcome: 'skipped',
+  code: 'PUBLISHED_ELSEWHERE',
+  title,
+  existingId: live.id,
+  error: `An article titled "${title}" is already published (${live.id}).`,
+});
+
+/** A path no document claims yet: fetch, parse, check the title, create. */
+async function importNew(deps, path, user) {
+  const { source, store } = deps;
+  const [fetched, commitSha] = await Promise.all([
+    source.fetchDraft(path),
+    source.lastCommitSha(path),
+  ]);
+  const parsed = parseRepoDraft(fetched.text);
+  if (!parsed.ok) return { path, outcome: 'refused', code: parsed.code, error: parsed.error };
+  const { draft } = parsed;
+  const live = await publishedWithTitle(store, draft.title);
+  if (live) return publishedElsewhere(path, draft.title, live);
+  return createDraft(deps, { path, draft, file: { ...fetched, commitSha }, user });
+}
+
+function importOne(deps, path, claims, user) {
+  if (claims?.length) return alreadyClaimed(path, claims);
+  return importNew(deps, path, user).catch((error) => importFailure(deps.log, path, error));
+}
+
+/**
+ * Every docs/content article not yet imported. `{ status, body }`: 200 with
+ * one result per file, or the listing's failure.
+ */
+async function importAll(deps, user) {
+  const files = await deps.source.listCandidates().catch((error) => ({ error }));
+  if (files.error) return listingFailure(files.error);
+  const paths = files.map((file) => file.path);
+  const claims = await claimsByPath(deps.store, paths);
+  const results = await Promise.all(
+    paths.map((path) => importOne(deps, path, claims.get(path), user))
+  );
+  return { status: 200, body: { ok: true, repo: REPO, results, counts: tally(results) } };
+}
+
 /**
  * @param {object} deps
  * @param {{ queryDocs: Function, createDoc: Function }} deps.store `createDoc` is create-only
@@ -134,84 +212,6 @@ function listingFailure(error) {
  * @param {{ error?: Function }} [deps.log]
  */
 export function createDraftsImporter({ store, source, now, log = {} }) {
-  /** The write, create-only; a 409 is another import that finished first. */
-  async function createDraft(path, draft, file, user) {
-    const id = repoDraftContentId(path);
-    const editor = editorOf(user);
-    const doc = asImportedDraft(buildRepoDraftData({ path, draft, source: file, editor, now }), {
-      id,
-      editor,
-      now,
-    });
-    // The invariant, checked where the write happens rather than trusted from
-    // the builders.
-    if (doc.contentStatus !== DRAFTS_STAGE_STATUS || doc.Live !== false) {
-      throw new Error('drafts: refusing to import a document that is not a draft');
-    }
-    const created = await store.createDoc('content', doc).then(
-      () => true,
-      (error) => {
-        if (error?.code === 409) return false;
-        throw error;
-      }
-    );
-    const base = { path, contentId: id, title: draft.title };
-    return created
-      ? {
-          ...base,
-          outcome: 'imported',
-          contentStatus: DRAFTS_STAGE_STATUS,
-          warnings: draft.warnings,
-          repoCommitSha: file.commitSha,
-        }
-      : { ...base, outcome: 'skipped', code: 'ALREADY_IMPORTED' };
-  }
-
-  /** A path no document claims yet: fetch, parse, check the title, create. */
-  async function importNew(path, user) {
-    const [fetched, commitSha] = await Promise.all([
-      source.fetchDraft(path),
-      source.lastCommitSha(path),
-    ]);
-    const parsed = parseRepoDraft(fetched.text);
-    if (!parsed.ok) return { path, outcome: 'refused', code: parsed.code, error: parsed.error };
-    const live = await publishedWithTitle(store, parsed.draft.title);
-    if (live) {
-      return {
-        path,
-        outcome: 'skipped',
-        code: 'PUBLISHED_ELSEWHERE',
-        title: parsed.draft.title,
-        existingId: live.id,
-        error: `An article titled "${parsed.draft.title}" is already published (${live.id}).`,
-      };
-    }
-    return createDraft(path, parsed.draft, { ...fetched, commitSha }, user);
-  }
-
-  async function importOne(path, claims, user) {
-    if (claims?.length) return alreadyClaimed(path, claims);
-    return importNew(path, user).catch((error) => importFailure(log, path, error));
-  }
-
-  return {
-    /**
-     * Every docs/content article not yet imported. `{ status, body }`: 200
-     * with one result per file, or the listing's failure.
-     */
-    async importAll(user) {
-      let files;
-      try {
-        files = await source.listCandidates();
-      } catch (error) {
-        return listingFailure(error);
-      }
-      const paths = files.map((file) => file.path);
-      const claims = await claimsByPath(store, paths);
-      const results = await Promise.all(
-        paths.map((path) => importOne(path, claims.get(path), user))
-      );
-      return { status: 200, body: { ok: true, repo: REPO, results, counts: tally(results) } };
-    },
-  };
+  const deps = { store, source, now, log };
+  return { importAll: (user) => importAll(deps, user) };
 }
