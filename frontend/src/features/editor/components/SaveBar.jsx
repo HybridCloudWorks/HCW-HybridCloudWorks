@@ -137,7 +137,7 @@ export function SaveBar({ navigate }) {
             <Button
               size="sm"
               className="h-8"
-              onClick={() => handlePublish('approved_blog')}
+              onClick={() => handlePublish('approved')}
               disabled={saving || publishing}
             >
               {publishing ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : null}

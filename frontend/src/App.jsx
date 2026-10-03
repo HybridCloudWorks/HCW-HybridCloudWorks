@@ -193,6 +193,7 @@ const AdminMailingListPage = lazyPage(() => import('@/pages/admin/MailingListPag
 const AdminIntegrationsPage = lazyPage(() => import('@/pages/admin/IntegrationsPage'));
 const AdminLabsPage = lazyPage(() => import('@/pages/admin/LabsPage'));
 const AdminListenAndLearnPage = lazyPage(() => import('@/pages/admin/ListenAndLearnPage'));
+const AdminAmbassadorPage = lazyPage(() => import('@/pages/admin/AmbassadorPage'));
 
 // Placeholder loader
 // Shown on every lazy route. It was a bare spinning div: no role, no
@@ -433,6 +434,7 @@ function App() {
                 <Route path="coder-corner" element={<AdminCoderCornerPage />} />
                 <Route path="speaking-events" element={<AdminSpeakingEventsPage />} />
                 <Route path="certifications" element={<AdminCertificationsPage />} />
+                <Route path="ambassador" element={<AdminAmbassadorPage />} />
                 <Route path="image-prompts" element={<AdminImagePromptsPage />} />
                 <Route path="image-gallery" element={<AdminImageGalleryPage />} />
                 <Route path="platform" element={<AdminPlatformSettingsPage />} />

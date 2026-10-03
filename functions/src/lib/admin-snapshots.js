@@ -87,7 +87,7 @@ export function matchesQueueStatus(item = {}, statusFilter = 'needs_review') {
     return status === 'draft' || status === 'ingested' || status === 'inspected';
   }
   if (statusFilter === 'ready_to_publish') {
-    return ['approved', 'published'].includes(status) && item.Live !== true;
+    return ['approved', 'forge_ready', 'published'].includes(status) && item.Live !== true;
   }
   if (statusFilter === 'published_live') {
     return item.Live === true;
@@ -97,7 +97,9 @@ export function matchesQueueStatus(item = {}, statusFilter = 'needs_review') {
     // The Drafts stage is not the pipeline yet (/admin/drafts lists it).
     if (status === 'drafting') return false;
     if (item.Live === true) return false;
-    if (status === 'ingested' || status === 'inspected' || status === 'needs_rework') return false;
+    // needs_rework is the inspector's "come back to this"; it is in progress,
+    // and the dashboard counts it so (ADR 0033 §1).
+    if (status === 'draft' || status === 'ingested' || status === 'inspected') return false;
     return true;
   }
   return status === statusFilter;
@@ -170,13 +172,20 @@ export function queueFilterFor(statusFilter) {
     return { ...inList(['draft', 'ingested', 'inspected']), sortField: 'fetchedAt' };
   }
   if (statusFilter === 'ready_to_publish') {
-    return { ...inList(['approved', 'published']), sortField: 'updatedAt' };
+    // forge_ready is publishable (content-status.js PUBLISHABLE_NORMALIZED_STATUSES)
+    // and until 2026-10-03 appeared on no screen at all (ADR 0033 §1).
+    return { ...inList(['approved', 'forge_ready', 'published']), sortField: 'updatedAt' };
   }
   if (statusFilter === 'published_live') {
     return { where: 'c.Live = true', params: [], sortField: 'publishedAt' };
   }
   if (statusFilter === 'in_progress') {
-    return { ...inList(['approved', 'in_review', 'editing']), sortField: 'updatedAt' };
+    // The same set the dashboard counts as inProgress (triggers/dashboard-stats.js),
+    // so the Editor badge never counts an item this view cannot show.
+    return {
+      ...inList(['approved', 'in_review', 'editing', 'forge_ready', 'needs_rework']),
+      sortField: 'updatedAt',
+    };
   }
   if (statusFilter === 'soft_deleted') {
     return {

@@ -378,7 +378,7 @@ export default function EditorListPage() {
     authReady ? 'editor:archived' : ''
   );
   const { data: draftItems, loading: draftLoading } = usePublicData(
-    () => listContent('status=editing,approved_blog&limit=500'),
+    () => listContent('status=editing,approved,forge_ready,needs_rework&limit=500'),
     authReady ? 'editor:drafts' : ''
   );
 

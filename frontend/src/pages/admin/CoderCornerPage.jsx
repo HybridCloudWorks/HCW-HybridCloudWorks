@@ -15,8 +15,8 @@ const STATUS_FILTERS = [
   { value: 'needs_review', label: 'Needs Review' },
   { value: 'in_review', label: 'In Review' },
   { value: 'editing', label: 'Editing' },
-  { value: 'approved_blog', label: 'Approved' },
-  { value: 'published_blog', label: 'Ready / Published' },
+  { value: 'approved', label: 'Approved' },
+  { value: 'approved,forge_ready,published', label: 'Ready / Published' },
   { value: 'rejected', label: 'Rejected' },
 ];
 
@@ -80,7 +80,7 @@ export default function CoderCornerPage() {
     try {
       await postJSON('transitionContentStatus', {
         contentId,
-        newStatus: 'approved_blog',
+        newStatus: 'approved',
         publishTarget: getPublishTargetForType('coder_corner'),
         markLive: false,
         reviewNotes: 'Approved in coder corner queue',

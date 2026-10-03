@@ -858,7 +858,7 @@ describe('newsletter settings', () => {
 });
 
 describe('presentSetting', () => {
-  it('names the six settings and nothing else', () => {
+  it('names the seven settings and nothing else', () => {
     expect(PLATFORM_SETTING_NAMES).toEqual([
       'default-heroes',
       'social-autopost',
@@ -866,6 +866,7 @@ describe('presentSetting', () => {
       'listen-and-learn-speech',
       'podcast-voices',
       'newsletter-settings',
+      'content-taxonomy',
     ]);
   });
 

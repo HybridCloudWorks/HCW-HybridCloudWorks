@@ -361,15 +361,28 @@ export function normalizeContentUpdatesForBlogOnly(updates = {}) {
   return normalized;
 }
 
-/** Collapse the retired news-era statuses onto their blog equivalents. */
+/**
+ * Collapse the retired news-era statuses onto their blog equivalents.
+ *
+ * `approved_blog` and `published_blog` are the Firestore-era names the admin
+ * pages kept sending after the port normalised the stored values to
+ * `approved` and `published`. Until 2026-10-03 neither was mapped here, so
+ * every Approve button — queue, review boards, editor — reached the
+ * transition table with a status it does not know and got back 400
+ * "Invalid transition" (ADR 0033 §1). The pages now send the canonical
+ * names; the aliases stay so an old tab, the Telegram bot or a bookmarked
+ * request keeps working.
+ */
+const STATUS_ALIASES = Object.freeze({
+  published_news: 'published',
+  published_both: 'published',
+  published_blog: 'published',
+  approved_news: 'approved',
+  approved_blog: 'approved',
+});
+
 export function normalizeStatusForBlogOnly(status) {
-  if (status === 'published_news' || status === 'published_both') {
-    return 'published';
-  }
-  if (status === 'approved_news') {
-    return 'approved';
-  }
-  return status;
+  return Object.hasOwn(STATUS_ALIASES, status) ? STATUS_ALIASES[status] : status;
 }
 
 export function normalizeCurrentStatusForBlogOnly(status) {

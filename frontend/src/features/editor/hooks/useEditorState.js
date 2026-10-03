@@ -458,7 +458,7 @@ export function useEditorState(blogId, navigate) {
 
   // ── Publish ────────────────────────────────────────────────────────────────
   const handlePublish = useCallback(
-    async (targetStatus = 'approved_blog') => {
+    async (targetStatus = 'approved') => {
       const status = String(blog?.contentStatus || '');
       const isAlreadyLive = blog?.Live === true || status.startsWith('published_');
 
@@ -481,7 +481,7 @@ export function useEditorState(blogId, navigate) {
         setPublishDebug({
           mode: 'live-republish',
           from: status || null,
-          to: 'published_blog',
+          to: 'published',
           contentId: blogId,
           note: 'This live item was republished from the editor so the public page stays in sync.',
           expectedPublicUrl: mapping?.expectedPublicUrl || getDestinationUrl(blog) || null,

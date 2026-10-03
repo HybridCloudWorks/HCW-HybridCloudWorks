@@ -74,6 +74,7 @@ describe('tabs', () => {
   it('are one per concern, with Change history last', () => {
     expect(TABS.map((tab) => [tab.id, tab.label])).toEqual([
       ['content', 'Content defaults'],
+      ['taxonomy', 'Content types & origins'],
       ['social', 'Social automation'],
       ['audio', 'Audio'],
       ['history', 'Change history'],
@@ -161,12 +162,12 @@ describe('tabs', () => {
 
     fireEvent.keyDown(tab('Content defaults'), { key: 'ArrowRight' });
     await waitFor(() =>
-      expect(screen.getByTestId('location').textContent).toBe('/admin/platform?tab=social')
+      expect(screen.getByTestId('location').textContent).toBe('/admin/platform?tab=taxonomy')
     );
-    expect(document.activeElement).toBe(tab('Social automation'));
-    expect(tab('Social automation').getAttribute('tabindex')).toBe('0');
+    expect(document.activeElement).toBe(tab('Content types & origins'));
+    expect(tab('Content types & origins').getAttribute('tabindex')).toBe('0');
 
-    fireEvent.keyDown(tab('Social automation'), { key: 'End' });
+    fireEvent.keyDown(tab('Content types & origins'), { key: 'End' });
     await waitFor(() =>
       expect(screen.getByTestId('location').textContent).toBe('/admin/platform?tab=history')
     );

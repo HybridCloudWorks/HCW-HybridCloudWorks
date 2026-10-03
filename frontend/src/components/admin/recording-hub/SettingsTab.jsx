@@ -367,10 +367,14 @@ export default function SettingsTab({ hub }) {
         </p>
         <p className="text-sm text-slate-600 dark:text-slate-300">
           <strong className="text-slate-900 dark:text-slate-100">Podcast feeds and voice</strong> —{' '}
-          <RouterLink to="/admin/platform-settings" className="text-violet-600 hover:underline">
+          <RouterLink to="/admin/platform?tab=audio" className="text-violet-600 hover:underline">
             Platform settings
           </RouterLink>
-          , which is also where the RSS.com credentials are seeded.
+          . The RSS.com credentials are on{' '}
+          <RouterLink to="/admin/integrations?tab=keys" className="text-violet-600 hover:underline">
+            Integrations → Keys
+          </RouterLink>
+          .
         </p>
         <p className="text-sm text-slate-600 dark:text-slate-300">
           <strong className="text-slate-900 dark:text-slate-100">What has been published</strong> —{' '}

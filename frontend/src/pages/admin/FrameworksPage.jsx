@@ -27,14 +27,14 @@ const STATUS_FILTERS = [
   { value: 'needs_review', label: 'Needs Review' },
   { value: 'in_review', label: 'In Review' },
   { value: 'editing', label: 'Editing' },
-  { value: 'approved_blog', label: 'Approved' },
-  { value: 'published_blog', label: 'Ready / Published' },
+  { value: 'approved', label: 'Approved' },
+  { value: 'approved,forge_ready,published', label: 'Ready / Published' },
   { value: 'rejected', label: 'Rejected' },
 ];
 
 function getStatusParam(statusFilter) {
   if (statusFilter === 'needs_review') {
-    return 'ingested,inspected';
+    return 'draft,ingested,inspected';
   }
   return statusFilter;
 }
@@ -69,7 +69,7 @@ function FrameworkActions({
   navigate,
 }) {
   const showModerationActions =
-    statusFilter !== 'rejected' && !item.Live && statusFilter !== 'published_blog';
+    statusFilter !== 'rejected' && !item.Live && !String(statusFilter).includes('published');
   const canApprove = statusFilter === 'needs_review' || statusFilter === 'in_review';
 
   return (
@@ -263,7 +263,7 @@ export default function FrameworksPage() {
     try {
       await postJSON('transitionContentStatus', {
         contentId,
-        newStatus: 'approved_blog',
+        newStatus: 'approved',
         publishTarget: getPublishTargetForType('framework'),
         markLive: false,
         reviewNotes: 'Approved in frameworks queue',

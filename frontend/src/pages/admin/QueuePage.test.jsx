@@ -102,7 +102,7 @@ describe('QueuePage', () => {
     await waitFor(() =>
       expect(postJSON).toHaveBeenCalledWith('transitionContentStatus', {
         contentId: 'content-2',
-        newStatus: 'approved_blog',
+        newStatus: 'approved',
         publishTarget: 'blog',
         markLive: false,
         reviewNotes: 'Approved in queue for blog publish stage',
@@ -112,7 +112,7 @@ describe('QueuePage', () => {
     expect(logAdminAction).toHaveBeenCalledWith('content_approved', {
       contentId: 'content-2',
       publishTarget: 'blog',
-      newStatus: 'approved_blog',
+      newStatus: 'approved',
     });
 
     await waitFor(() => {

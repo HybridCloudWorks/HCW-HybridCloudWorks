@@ -222,7 +222,7 @@ function QueueItemActions({
         </Button>
       )}
 
-      {(statusFilter === 'approved_blog' || item.publishTarget === 'blog') && (
+      {(statusFilter === 'approved' || item.publishTarget === 'blog') && (
         <Button
           variant="outline"
           size="sm"

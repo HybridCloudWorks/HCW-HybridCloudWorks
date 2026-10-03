@@ -31,22 +31,6 @@ export {
   setCachedAdminStatus,
 };
 
-// Kept for backward compatibility. Frontend no longer uses static allowlists.
-export const OWNER_ADMIN_EMAIL = '';
-export const OWNER_ADMIN_UID = '';
-export const ADMIN_EMAILS = [];
-export const ADMIN_UIDS = [];
-
-// Content Status Workflow
-export const CONTENT_STATUSES = {
-  INGESTED: 'ingested',
-  INSPECTED: 'inspected',
-  IN_REVIEW: 'in_review',
-  EDITING: 'editing',
-  PUBLISHED_BLOG: 'published_blog',
-  REJECTED: 'rejected',
-};
-
 // How the admin pages name each provider on a button or in a dropdown.
 // Keyed by CANONICAL_PROVIDERS; admin.test.js fails if one is missing.
 export const PROVIDER_LABELS = Object.freeze({
@@ -103,16 +87,3 @@ export const BLOG_LANDING_ZONE_OPTIONS = [
     label: `${opt.label} Blog Landing`,
   })),
 ];
-
-/**
- * Check if a user can perform a specific action
- * @param {Object} user - Firebase user object
- * @param {string} action - Action to check permission for
- * @returns {boolean} True if user has permission
- *
- * @todo Implement role-based access control (RBAC)
- * Currently defaults to isAuthorizedAdmin check
- */
-export function canPerformAction(user, _action) {
-  return isAuthorizedAdmin(user);
-}

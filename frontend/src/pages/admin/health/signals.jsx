@@ -25,9 +25,19 @@ export const ALERT_FILTERS = [
   { value: 'resolved', label: 'Resolved' },
 ];
 
+/**
+ * A Cosmos timestamp is an ISO string; a migrated one may still be a
+ * Firestore-shaped `{ toDate }` or `{ seconds }`. Until 2026-10-03 only the
+ * first shape was read, so every time on this page said "Not available"
+ * (ADR 0033 §1 Platform).
+ */
 export function formatTimestamp(value) {
-  const date = value?.toDate?.() || null;
-  if (!date) return 'Not available';
+  let date = null;
+  if (typeof value?.toDate === 'function') date = value.toDate();
+  else if (value && typeof value === 'object' && typeof value.seconds === 'number')
+    date = new Date(value.seconds * 1000);
+  else if (typeof value === 'string' || typeof value === 'number') date = new Date(value);
+  if (!date || Number.isNaN(date.getTime())) return 'Not available';
 
   return new Intl.DateTimeFormat('en-US', {
     month: 'short',

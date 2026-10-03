@@ -126,7 +126,7 @@ function CoderCornerActions({
   handleReject,
   handleRestore,
 }) {
-  const showReject = statusFilter !== 'rejected' && !item.Live && statusFilter !== 'published_blog';
+  const showReject = statusFilter !== 'rejected' && !item.Live && !String(statusFilter).includes('published');
 
   return (
     <div className="flex flex-wrap items-center gap-2 pt-1">

@@ -60,7 +60,9 @@ describe('classification helpers', () => {
     expect(matchesQueueStatus({ contentStatus: 'approved' }, 'ready_to_publish')).toBe(true);
     expect(matchesQueueStatus({ contentStatus: 'published', Live: true }, 'ready_to_publish')).toBe(false);
     expect(matchesQueueStatus({ contentStatus: 'editing' }, 'in_progress')).toBe(true);
-    expect(matchesQueueStatus({ contentStatus: 'needs_rework' }, 'in_progress')).toBe(false);
+    expect(matchesQueueStatus({ contentStatus: 'needs_rework' }, 'in_progress')).toBe(true);
+    expect(matchesQueueStatus({ contentStatus: 'forge_ready' }, 'ready_to_publish')).toBe(true);
+    expect(matchesQueueStatus({ contentStatus: 'draft' }, 'in_progress')).toBe(false);
     expect(matchesQueueStatus({ Live: true }, 'published_live')).toBe(true);
   });
 

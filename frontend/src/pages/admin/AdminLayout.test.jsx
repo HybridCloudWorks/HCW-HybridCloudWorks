@@ -1,10 +1,8 @@
 /**
- * The Platform group's order and membership.
- *
- * The owner asked for this order explicitly — Platform Settings first, Labs
- * last, with the two merged pages between them — so it is asserted rather than
- * left to whoever next appends an item to the array. Appending is what the
- * array invites, and an appended item lands after Labs.
+ * The sidebar is the navigation registry (config/adminNav.js, ADR 0033 §3):
+ * the groups a first-time user can read, the order the work happens in, and
+ * one sentence per item shown on hover. These tests pin the decisions the
+ * owner made on 2026-10-03, so the next edit to the array is a visible one.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
@@ -17,32 +15,80 @@ vi.mock('@/lib/api', () => ({
 import { postJSON } from '@/lib/api';
 import AdminLayout, { NAV_GROUPS } from './AdminLayout';
 
-const platform = () => NAV_GROUPS.find((group) => group.label === 'Platform');
+const group = (label) => NAV_GROUPS.find((g) => g.label === label);
 
-describe('the Platform nav group', () => {
-  it('runs settings, health, integrations, labs — in that order', () => {
-    expect(platform().items.map((item) => item.label)).toEqual([
+describe('the navigation registry', () => {
+  it('has the seven groups, in the order the owner chose', () => {
+    expect(NAV_GROUPS.map((g) => g.label)).toEqual([
+      'Home',
+      'Pipeline',
+      'Enhanced',
+      'Creative',
+      'Amplify',
+      'Spotlight',
+      'Platform',
+    ]);
+  });
+
+  it('runs the Pipeline in the order the work happens, ending at Live Pages', () => {
+    expect(group('Pipeline').items.map((i) => i.label)).toEqual([
+      'New Content',
+      'Drafts',
+      'Review Queue',
+      'Editor',
+      'Publish',
+      'Live Pages',
+    ]);
+  });
+
+  it('replaces the generic Content group with Enhanced, holding Listen & Learn and Labs', () => {
+    expect(group('Content')).toBeUndefined();
+    const labels = group('Enhanced').items.map((i) => i.label);
+    expect(labels).toContain('Listen & Learn');
+    expect(labels).toContain('Labs');
+    expect(labels).toContain('Frameworks');
+    expect(labels).toContain('Coder Corner');
+  });
+
+  it('keeps Labs and Listen & Learn out of Platform and Spotlight', () => {
+    expect(group('Platform').items.map((i) => i.label)).toEqual([
       'Platform Settings',
       'Health',
       'Integrations',
-      'Labs',
+    ]);
+    expect(group('Spotlight').items.map((i) => i.label)).toEqual([
+      'Speaking',
+      'Certifications',
+      'Ambassador',
     ]);
   });
 
-  it('points each item at the route that still exists', () => {
-    expect(platform().items.map((item) => item.to)).toEqual([
-      '/admin/platform',
-      '/admin/health',
-      '/admin/integrations',
-      '/admin/labs',
-    ]);
+  it('names the two image pages so their relationship is in the names', () => {
+    const labels = group('Creative').items.map((i) => i.label);
+    expect(labels).toContain('Image Prompts');
+    expect(labels).toContain('Image Gallery');
+    expect(labels).not.toContain('Prompts');
   });
 
-  it('no longer offers the four routes that were merged away', () => {
-    // These still resolve — App.jsx redirects them — but a nav entry pointing
-    // at a redirect is a second name for one page, which is the thing the
-    // merge removed.
-    const everyRoute = NAV_GROUPS.flatMap((group) => group.items.map((item) => item.to));
+  it('gives every group and every item a one-sentence description', () => {
+    for (const g of NAV_GROUPS) {
+      expect(g.description.length, g.label).toBeGreaterThan(20);
+      for (const item of g.items) {
+        expect(item.description.length, item.label).toBeGreaterThan(20);
+        expect(item.to, item.label).toMatch(/^\/admin/);
+        expect(item.icon, item.label).toBeTypeOf('object');
+      }
+    }
+  });
+
+  it('declares no text tag on any menu item (#566)', () => {
+    for (const item of NAV_GROUPS.flatMap((g) => g.items)) {
+      expect(item, item.label).not.toHaveProperty('pill');
+    }
+  });
+
+  it('no longer offers the routes that were merged away', () => {
+    const everyRoute = NAV_GROUPS.flatMap((g) => g.items.map((i) => i.to));
     for (const retired of [
       '/admin/ops-health',
       '/admin/diagnostics',
@@ -51,15 +97,15 @@ describe('the Platform nav group', () => {
     ]) {
       expect(everyRoute).not.toContain(retired);
     }
+    expect(new Set(everyRoute).size).toBe(everyRoute.length);
   });
 });
 
 /**
- * The rendered sidebar (#566): no product tags, the live badges kept, the
- * brand readable, the sidebar pinned, and one main landmark.
+ * The rendered sidebar (#566): the live badges, the brand readable, the
+ * sidebar pinned, one main landmark, and the descriptions on hover.
  */
 describe('the admin sidebar', () => {
-  /** The saved collapsed/expanded choice the layout reads on mount. */
   let stored;
 
   beforeEach(() => {
@@ -72,9 +118,9 @@ describe('the admin sidebar', () => {
     });
     postJSON.mockResolvedValue({
       stats: {
-        blog: { needsReview: 2, inProgress: 1 },
+        blog: { needsReview: 2, inProgress: 1, published: 5 },
         news: { needsReview: 1 },
-        framework: { inProgress: 3 },
+        framework: { inProgress: 3, published: 2 },
       },
     });
   });
@@ -83,10 +129,6 @@ describe('the admin sidebar', () => {
     vi.unstubAllGlobals();
   });
 
-  /**
-   * Mount the layout the way App.jsx does: every route, admin included, sits
-   * inside App's `<main id="main-content">`.
-   */
   function renderAdmin(path = '/admin/labs') {
     return render(
       <main id="main-content" tabIndex={-1}>
@@ -101,28 +143,24 @@ describe('the admin sidebar', () => {
     );
   }
 
-  it('declares no text tag on any menu item', () => {
-    for (const item of NAV_GROUPS.flatMap((group) => group.items)) {
-      expect(item, item.label).not.toHaveProperty('pill');
-    }
-  });
-
   it('renders none of the retired tags', async () => {
     renderAdmin();
-    const nav = screen.getByRole('navigation');
+    const nav = screen.getByRole('navigation', { name: 'ContentForge' });
     await screen.findByText('3');
     for (const tag of ['New', 'Podcast', 'Publer', 'Linkie', 'Resend', 'VPS']) {
       expect(within(nav).queryByText(tag)).not.toBeInTheDocument();
     }
   });
 
-  it('keeps the live count badges for the review queue and the editor', async () => {
+  it('keeps the live count badges for the review queue, the editor and live pages', async () => {
     renderAdmin();
-    // queue = 2 + 1 needing review; editor = 1 + 3 in progress.
+    // queue = 2 + 1 needing review; editor = 1 + 3 in progress; live = 5 + 2.
     const queue = screen.getByRole('link', { name: 'Review Queue' });
     const editor = screen.getByRole('link', { name: 'Editor' });
+    const live = screen.getByRole('link', { name: 'Live Pages' });
     expect(await within(queue).findByText('3')).toBeInTheDocument();
     expect(within(editor).getByText('4')).toBeInTheDocument();
+    expect(within(live).getByText('7')).toBeInTheDocument();
   });
 
   it('keeps the badge on the collapsed icon rail', async () => {
@@ -132,11 +170,18 @@ describe('the admin sidebar', () => {
     expect(await within(queue).findByText('3')).toBeInTheDocument();
   });
 
+  it('explains every item on hover with the registry sentence', () => {
+    renderAdmin();
+    const queue = screen.getByRole('link', { name: 'Review Queue' });
+    expect(queue).toHaveAttribute('title', group('Pipeline').items[2].description);
+    const labs = screen.getByRole('link', { name: 'Labs' });
+    expect(labs.getAttribute('title')).toMatch(/learning environments/i);
+  });
+
   it('shows both lines of the brand, with room for them', () => {
     renderAdmin();
     const title = screen.getByText('ContentForge');
     expect(screen.getByText('Influencer CMS')).toBeInTheDocument();
-    // `leading-none` in a fixed `h-14` is what cut the title off at zoom.
     expect(title.className).not.toContain('leading-none');
     expect(title.parentElement.parentElement.className).not.toMatch(/(^|\s)h-14(\s|$)/);
   });
@@ -154,9 +199,9 @@ describe('the admin sidebar', () => {
     expect(aside.className).toMatch(/(^|\s)sticky(\s|$)/);
     expect(aside.className).toMatch(/(^|\s)top-0(\s|$)/);
     expect(aside.className).toMatch(/(^|\s)h-dvh(\s|$)/);
-    // The nav list scrolls on its own when the menu outgrows the screen.
-    expect(screen.getByRole('navigation').className).toContain('overflow-y-auto');
-
+    expect(screen.getByRole('navigation', { name: 'ContentForge' }).className).toContain(
+      'overflow-y-auto'
+    );
     const shell = aside.parentElement;
     expect(shell.className).toMatch(/(^|\s)h-dvh(\s|$)/);
     expect(shell.className).toContain('overflow-hidden');
@@ -169,21 +214,6 @@ describe('the admin sidebar', () => {
     renderAdmin();
     const mains = screen.getAllByRole('main');
     expect(mains).toHaveLength(1);
-    // The one that ScrollToTop focuses and the skip link targets.
     expect(mains[0]).toHaveAttribute('id', 'main-content');
-  });
-});
-
-/**
- * Drafts is the stage before the review queue (owner request 2026-10-03), so
- * its nav entry sits immediately before it in the Pipeline group.
- */
-describe('the Pipeline nav group', () => {
-  const pipeline = () => NAV_GROUPS.find((group) => group.label === 'Pipeline');
-
-  it('puts Drafts immediately before the review queue', () => {
-    const labels = pipeline().items.map((item) => item.label);
-    expect(labels.indexOf('Drafts')).toBe(labels.indexOf('Review Queue') - 1);
-    expect(pipeline().items.find((item) => item.label === 'Drafts').to).toBe('/admin/drafts');
   });
 });

@@ -53,7 +53,7 @@ export default function SettingsTab({ hub }) {
           </ul>
           <p>
             <Link
-              to="/admin/platform-settings?tab=ai"
+              to="/admin/platform?tab=audio"
               className="text-primary underline underline-offset-4"
             >
               Change the default on Platform settings

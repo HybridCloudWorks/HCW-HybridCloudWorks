@@ -598,7 +598,7 @@ export default function CalendarPage() {
                 {
                   label: 'Instant Ready',
                   value: instantPublishContent.length,
-                  to: '/admin/queue?status=approved_blog',
+                  to: '/admin/queue?status=ready_to_publish',
                   hint: 'Open the queue filtered to approved content',
                 },
                 {

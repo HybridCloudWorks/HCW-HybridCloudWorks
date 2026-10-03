@@ -334,7 +334,7 @@ describe('single-item actions', () => {
 
     expect(postJSON).toHaveBeenCalledWith(
       'transitionContentStatus',
-      expect.objectContaining({ contentId: 'a', newStatus: 'approved_blog', markLive: false })
+      expect.objectContaining({ contentId: 'a', newStatus: 'approved', markLive: false })
     );
     expect(state.items.map((i) => i.id)).toEqual(['b', 'c']);
   });

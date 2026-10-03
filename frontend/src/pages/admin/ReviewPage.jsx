@@ -66,7 +66,7 @@ export default function ReviewPage() {
       await handleArchitectureSave(formData);
       await postJSON('transitionContentStatus', {
         contentId: blogId,
-        newStatus: 'approved_blog',
+        newStatus: 'approved',
         publishTarget: getPublishTargetForType('architecture'),
         markLive: false,
         reviewNotes: 'Architecture review complete and sent to publish stage',
@@ -94,7 +94,7 @@ export default function ReviewPage() {
       await handleFrameworkSave(formData);
       await postJSON('transitionContentStatus', {
         contentId: blogId,
-        newStatus: 'approved_blog',
+        newStatus: 'approved',
         publishTarget: getPublishTargetForType('framework'),
         markLive: false,
         reviewNotes: 'Framework review complete and sent to publish stage',

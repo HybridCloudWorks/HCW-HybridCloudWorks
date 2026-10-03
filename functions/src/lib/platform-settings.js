@@ -72,6 +72,11 @@ import { MAX_ITEMS_PER_SECTION, SECTIONS } from './newsletter/sections.js';
 import { isValidSendTime, isValidTimeZone } from './newsletter/schedule.js';
 import { normalizeEmail } from './newsletter/email.js';
 import { sharedTemplateCache } from './newsletter/template-source.js';
+import {
+  CONTENT_TAXONOMY_CONFIG_ID,
+  defaultTaxonomy,
+  normalizeContentTaxonomy,
+} from './cms/taxonomy.js';
 
 const json = (status, body) => ({
   status,
@@ -630,6 +635,22 @@ export const PLATFORM_SETTINGS = Object.freeze({
     // Section titles, tones and bounds for the Content form (#557).
     options: newsletterContentOptions,
   }),
+  // ADR 0033 §4: what an item becomes and how it became an idea, read by
+  // every picker and list that classifies content (lib/cms/taxonomy.js).
+  'content-taxonomy': Object.freeze({
+    docId: CONTENT_TAXONOMY_CONFIG_ID,
+    // The taxonomy module throws its own 400-shaped error so it can be read
+    // without this module; re-raised here as the error the PUT handler maps.
+    normalize: (body) => {
+      try {
+        return normalizeContentTaxonomy(body);
+      } catch (error) {
+        if (error?.status === 400) fail(error.message);
+        throw error;
+      }
+    },
+    empty: defaultTaxonomy,
+  }),
 });
 
 export const PLATFORM_SETTING_NAMES = Object.freeze(Object.keys(PLATFORM_SETTINGS));
@@ -870,6 +891,15 @@ export function createPlatformSettingsHandlers({
         // A model id is a setting, not content, and which one was chosen is
         // the whole point of the row.
         return { geminiModel: value.geminiModel };
+      case 'content-taxonomy':
+        // Ids are settings; labels and descriptions are content, so only
+        // which entries exist and which are on is recorded.
+        return {
+          kinds: value.kinds.length,
+          kindsEnabled: value.kinds.filter((k) => k.enabled).map((k) => k.id),
+          ideaOrigins: value.ideaOrigins.length,
+          ideaOriginsEnabled: value.ideaOrigins.filter((o) => o.enabled).map((o) => o.id),
+        };
       case 'podcast-voices':
         // Voice ids are settings, not content, and which ones were chosen is
         // the point of the row: a change of voice is what a listener hears.

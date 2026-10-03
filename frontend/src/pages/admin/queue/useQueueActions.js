@@ -191,7 +191,7 @@ export function useQueueActions({ items, setItems, statusFilter, contentTypeFilt
     setActionError((prev) => ({ ...prev, [contentId]: null }));
     setActionLoading((prev) => ({ ...prev, [contentId]: 'approving' }));
     try {
-      const newStatus = 'approved_blog';
+      const newStatus = 'approved';
 
       await postJSON('transitionContentStatus', {
         contentId,

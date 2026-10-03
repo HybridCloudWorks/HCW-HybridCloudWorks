@@ -4,6 +4,7 @@
  * the Newsletter Hub's level of separation (components/admin/platform-settings):
  *
  *   Content defaults   default covers; a link to the newsletter's own settings
+ *   Content types      what an item becomes and how it became an idea (ADR 0033)
  *   Social automation  autoposting to Publer on a live publish
  *   Audio              podcast feeds and the Listen & Learn voice
  *   Change history     every save, who made it and what it recorded
@@ -24,10 +25,12 @@ import ContentDefaultsTab from '@/components/admin/platform-settings/ContentDefa
 import SocialAutomationTab from '@/components/admin/platform-settings/SocialAutomationTab';
 import AudioTab from '@/components/admin/platform-settings/AudioTab';
 import ChangeHistoryTab from '@/components/admin/platform-settings/ChangeHistoryTab';
+import TaxonomyTab from '@/components/admin/platform-settings/TaxonomyTab';
 import HubTabs from '@/components/admin/HubTabs';
 
 export const TABS = Object.freeze([
   { id: 'content', label: 'Content defaults', Component: ContentDefaultsTab },
+  { id: 'taxonomy', label: 'Content types & origins', Component: TaxonomyTab },
   { id: 'social', label: 'Social automation', Component: SocialAutomationTab },
   { id: 'audio', label: 'Audio', Component: AudioTab },
   { id: 'history', label: 'Change history', Component: ChangeHistoryTab },

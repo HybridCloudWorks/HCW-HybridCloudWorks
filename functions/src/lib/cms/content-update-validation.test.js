@@ -138,6 +138,16 @@ describe('status normalizers', () => {
     expect(normalizeStatusForBlogOnly('editing')).toBe('editing');
   });
 
+  it('maps the Firestore-era admin aliases every Approve button sent (ADR 0033)', () => {
+    expect(normalizeStatusForBlogOnly('approved_blog')).toBe('approved');
+    expect(normalizeStatusForBlogOnly('published_blog')).toBe('published');
+  });
+
+  it('does not read Object.prototype for a status that names one of its keys', () => {
+    expect(normalizeStatusForBlogOnly('constructor')).toBe('constructor');
+    expect(normalizeStatusForBlogOnly('__proto__')).toBe('__proto__');
+  });
+
   it('defaults an absent current status to ingested', () => {
     expect(normalizeCurrentStatusForBlogOnly(undefined)).toBe('ingested');
     expect(normalizeCurrentStatusForBlogOnly('')).toBe('ingested');

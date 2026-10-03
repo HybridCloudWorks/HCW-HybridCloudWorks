@@ -820,7 +820,7 @@ export default function BlogReviewBoard({ blog, blogId }) {
               </div>
             </CardHeader>
             {originalExpanded && (
-              <CardContent className="prose prose-sm dark:prose-invert max-w-none border-t pt-4 max-h-[600px] overflow-y-auto">
+              <CardContent className="prose prose-sm dark:prose-invert max-w-none border-t pt-4 max-h-150 overflow-y-auto">
                 {content ? (
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
                 ) : (
@@ -877,7 +877,7 @@ export default function BlogReviewBoard({ blog, blogId }) {
                   value={imagePrompt}
                   onChange={(e) => setImagePrompt(e.target.value)}
                   placeholder="Enter custom prompt or leave empty for auto-generation..."
-                  className="text-xs min-h-[80px]"
+                  className="text-xs min-h-20"
                 />
                 <Button
                   onClick={handleTriggerCover}
@@ -956,11 +956,11 @@ export default function BlogReviewBoard({ blog, blogId }) {
                     </Button>
                   ) : (
                     <Button
-                      onClick={() => handleTransition('approved_blog')}
+                      onClick={() => handleTransition('approved')}
                       className="w-full gap-2"
                       disabled={Boolean(transitioning) || !hasProvider}
                     >
-                      {transitioning === 'approved_blog' ? (
+                      {transitioning === 'approved' ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
                         <Newspaper className="h-4 w-4" />
@@ -984,13 +984,13 @@ export default function BlogReviewBoard({ blog, blogId }) {
                 </>
               )}
 
-              {status === 'approved_blog' && !isPublishedLive && (
+              {status === 'approved' && !isPublishedLive && (
                 <Button onClick={() => navigate('/admin/published')} className="w-full gap-2">
                   Go to Publish Pane
                 </Button>
               )}
 
-              {['approved_blog', 'editing'].includes(status) && (
+              {['approved', 'forge_ready', 'editing'].includes(status) && (
                 <Button
                   onClick={() => navigate(`/admin/editor/${blogId}`)}
                   className="w-full gap-2"
@@ -1000,7 +1000,7 @@ export default function BlogReviewBoard({ blog, blogId }) {
                 </Button>
               )}
 
-              {!['approved_blog', 'editing'].includes(status) && (
+              {!['approved', 'forge_ready', 'editing'].includes(status) && (
                 <Button
                   variant="outline"
                   onClick={() => navigate(`/admin/editor/${blogId}`)}

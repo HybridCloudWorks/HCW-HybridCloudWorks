@@ -62,6 +62,7 @@ export const SETTING_LABELS = Object.freeze({
   'listen-and-learn-speech': 'Listen & Learn voice',
   'podcast-voices': 'Podcast voices',
   'newsletter-settings': 'Newsletter settings',
+  'content-taxonomy': 'Content types & idea origins',
 });
 
 export const settingRoute = (name) => `cms/platform-settings/${name}`;
