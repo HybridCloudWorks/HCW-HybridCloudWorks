@@ -21,9 +21,9 @@
  * This is the second. It adds no Azure resource, reverses no security setting,
  * and leaves a CDN free to be layered in front of the site origin later without
  * touching application code — cache headers here are written so that it can be.
- * The first option remains open and is a spend decision, not an engineering
- * one. It would be an `owner-gated` GitHub issue if anyone takes it up; none is
- * open.
+ * The first option is not planned. It is a possible future alternative, and
+ * choosing it would be a spend decision for the owner rather than an
+ * engineering one.
  *
  * Cost note: this puts image bytes through Function invocations. `immutable`
  * cache headers plus conditional-request support keep repeat views off the

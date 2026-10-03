@@ -111,9 +111,9 @@ resource "azurerm_cosmosdb_account" "hcw" {
   ))
 
   # T-504: keys off. The app is managed-identity-only (AAD data plane), the
-  # operational tooling uses DefaultAzureCredential, and the concern TODO.md
-  # once carried is a key that may once have existed — disabling local auth is
-  # the durable answer to it. Set the variable false only if plan review surfaces a key
+  # operational tooling uses DefaultAzureCredential, and the old rotation
+  # question was about a key that may once have existed — disabling local auth
+  # is the durable answer to it. Set the variable false only if plan review surfaces a key
   # consumer nobody remembered.
   # local_authentication_enabled replaced the deprecated
   # local_authentication_disabled and inverts its polarity, hence the negation.

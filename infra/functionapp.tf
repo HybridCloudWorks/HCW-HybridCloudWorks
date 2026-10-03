@@ -666,8 +666,9 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # Feature flags.
     #
     # One per timer. They previously shared FEATURE_FLAG_SCHEDULERS, so enabling
-    # the scheduled publisher would also have armed cleanupTempStorage — an
-    # unimplemented TODO that deletes blobs (T-302).
+    # the scheduled publisher would also have armed cleanupTempStorage, which
+    # was then an unimplemented stub that would delete blobs (T-302). It is
+    # implemented now, in functions/src/lib/timers/temp-storage.js.
     #
     # FEATURE_FLAG_SCHEDULERS is a master kill switch only: "false" holds every
     # timer off regardless of the individual flags, and any other value defers

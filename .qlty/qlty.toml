@@ -192,13 +192,11 @@ name = "zizmor"
 # TODO/NOTE/OPTIMIZE marker comments found no open task: the TODO hits are
 # `TODO.md` references or string literals a validator matches, and each NOTE
 # is an explanation. FIXME, HACK and BUG stay reported.
-[[triage]]
-match.plugins = ["radarlint-iac"]
-# The rule key itself contains a colon, so it must carry the plugin prefix;
-# a bare "terraform:S1135" matches nothing (checked with qlty 0.644.0).
-match.rules = ["radarlint-iac:terraform:S1135"]
-match.file_patterns = ["infra/**"]
-set.ignored = true
+#
+# The radarlint-iac S1135 rule that sat here is retired (#821). Its 19 hits
+# were `TODO.md` in infra/ comments; #821 repointed them, and a recount on
+# 2026-10-02 found no TODO token left under infra/. A new one is now reported,
+# which is what should happen. docs/security/scanner-triage.md has the record.
 
 [[triage]]
 match.plugins = ["ripgrep"]
