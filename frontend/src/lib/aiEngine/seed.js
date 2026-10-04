@@ -268,6 +268,39 @@ export function providerDisplayPatches(stored, defaults = DEFAULT_PROVIDERS) {
   });
 }
 
+/**
+ * `[{ id, patch }]` bringing each stored provider's `models` back to the seed,
+ * and releasing a pin on a model the seed no longer offers.
+ *
+ * The model list is what the router serves, a fact of the code rather than a
+ * choice anyone makes on the page, which has no control to edit it. The pin
+ * (`defaultModel`) is the administrator's, and stays wherever it is still
+ * offered. But a pin can only be picked from the list, so a pin outside it is
+ * one the code has withdrawn, and the router would keep sending every call
+ * to it. It goes back to the seed's own value: Auto for NVIDIA.
+ *
+ * #701, 2026-10-04: the NVIDIA card was first written on 2026-09-25 pinned to
+ * z-ai/glm-5.3-flash, which then took 70 s to answer on the trial tier. The
+ * router's defaults moved to z-ai/glm-5.3, but neither the list nor the pin
+ * on the stored card would ever have followed.
+ */
+export function providerModelPatches(stored, defaults = DEFAULT_PROVIDERS) {
+  return (stored || []).flatMap((existing) => {
+    const seed = defaults.find((p) => p.id === existing?.id);
+    if (!Array.isArray(seed?.models) || seed.models.length === 0) return [];
+    const patch = {};
+    const storedModels = Array.isArray(existing.models) ? existing.models : [];
+    if (JSON.stringify(storedModels) !== JSON.stringify(seed.models)) {
+      patch.models = [...seed.models];
+    }
+    const pin = existing.defaultModel;
+    if (pin && !seed.models.includes(pin) && pin !== seed.defaultModel) {
+      patch.defaultModel = seed.defaultModel ?? null;
+    }
+    return Object.keys(patch).length ? [{ id: existing.id, patch }] : [];
+  });
+}
+
 // Providers and servers that have been permanently removed from defaults.
 //
 // `openai` used to be on this list and was deleted from the container on every
@@ -377,6 +410,11 @@ export async function seedAiEngineIfEmpty() {
     // Names, descriptions and icons follow the seed on every load, so a rename
     // in DEFAULT_PROVIDERS reaches the stored document the card renders.
     ...providerDisplayPatches(providers).map(({ id, patch }) =>
+      patchConfig('ai-providers', id, patch)
+    ),
+    // The model list follows the router, and a pin it no longer offers is
+    // released, so a withdrawn model stops receiving calls (#701).
+    ...providerModelPatches(providers).map(({ id, patch }) =>
       patchConfig('ai-providers', id, patch)
     ),
     // ─ MCP Servers ───────────────────────────────────────────────

@@ -2916,7 +2916,12 @@ This project has not cut a tagged release; entries are grouped under
   calls all default to GLM-5.3 (`functions/src/lib/ai/router.js`), and the
   AI Services card offers and describes only that model. The other two keep
   their zero-cost rows and can return through a `CONTENTFORGE_NVIDIA_*_MODEL`
-  override.
+  override. The stored card would not have followed: the page wrote it on
+  2026-09-25 pinned to `z-ai/glm-5.3-flash`, and the router obeys a pin for
+  every purpose. `providerModelPatches` (`frontend/src/lib/aiEngine/seed.js`)
+  now keeps each stored provider's model list equal to the seed on admin page
+  load, and returns a pin the list no longer offers to the seed's own value,
+  Auto for NVIDIA. A pin still on the list is left alone.
 
 - **Every provider the site routes can be chosen on the review board, Docker,
   VMware and Ansible included.** #776 added `/docker/blog/<slug>`, and VMware
