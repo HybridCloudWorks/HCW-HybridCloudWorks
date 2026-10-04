@@ -123,6 +123,8 @@ nav:
       - 0030 Newsletter provider: decisions/0030-newsletter-provider.md
       - 0031 Security scanner owner decisions: decisions/0031-security-scanner-owner-decisions.md
       - 0032 Learner labs platform: decisions/0032-learner-labs-platform.md
+      - 0033 ContentForge alignment: decisions/0033-contentforge-alignment.md
+      - 0034 AI model selection: decisions/0034-ai-model-selection.md
   - Runbooks:
       - Deployment: runbooks/deployment-runbook.md
       - Admin sign-in rollback: runbooks/admin-signin-rollback.md
