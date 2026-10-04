@@ -474,7 +474,7 @@ export const SERVICE_DOCS = {
       {
         feature: 'ContentForge Pipeline',
         usage:
-          'Second provider in the default order (Gemini, OpenAI, Anthropic): serves a call when the provider before it cannot, or first where Routing or Where AI is used places it first.',
+          'Second provider in the default order (Gemini, OpenAI, Anthropic, then NVIDIA as the content backup): serves a call when the provider before it cannot, or first where Routing or Where AI is used places it first.',
         files: ['functions/src/lib/ai/router.js', 'functions/src/lib/ai/ai-config.js'],
         status: HCW_STATUS.ACTIVE,
       },
@@ -497,12 +497,13 @@ export const SERVICE_DOCS = {
           },
           {
             heading: 'Configure local development',
-            body: 'For local Azure Functions development only, add the key to functions/.env. This file is ignored by git and is not a production secret store.',
+            body: 'For local Azure Functions development only, add the key to functions/.env. This file is ignored by git and is not a production secret store. The command prompts for the key and never shows it.',
             codes: [
               {
-                lang: 'bash',
-                label: 'functions/.env',
-                content: 'OPENAI_API_KEY=replace-with-your-key',
+                lang: 'powershell',
+                label: 'Append to functions/.env (repository root)',
+                content:
+                  '$k = Read-Host -AsSecureString "OpenAI key"; Add-Content -Path functions/.env -Value ("OPENAI_API_KEY=" + [System.Net.NetworkCredential]::new("", $k).Password)',
               },
             ],
           },
@@ -530,7 +531,10 @@ export const SERVICE_DOCS = {
                 lang: 'text',
                 label: 'Model reference',
                 content:
-                  "gpt-5-mini — the card's default\ngpt-5-nano — lower cost, shorter answers",
+                  "gpt-5-mini  — the card's default\n" +
+                  'gpt-5-nano  — lower cost, shorter answers\n' +
+                  'gpt-4o      — the previous generation, still offered\n' +
+                  'gpt-4o-mini — the previous generation, small',
               },
             ],
           },
@@ -641,12 +645,13 @@ export const SERVICE_DOCS = {
           },
           {
             heading: 'Configure local development',
-            body: 'For local Azure Functions development only, add the key to functions/.env. This file is ignored by git and is not a production secret store.',
+            body: 'For local Azure Functions development only, add the key to functions/.env. This file is ignored by git and is not a production secret store. The command prompts for the key and never shows it.',
             codes: [
               {
-                lang: 'bash',
-                label: 'functions/.env',
-                content: 'NVIDIA_API_KEY=replace-with-your-key',
+                lang: 'powershell',
+                label: 'Append to functions/.env (repository root)',
+                content:
+                  '$k = Read-Host -AsSecureString "NVIDIA key"; Add-Content -Path functions/.env -Value ("NVIDIA_API_KEY=" + [System.Net.NetworkCredential]::new("", $k).Password)',
               },
             ],
           },
@@ -663,7 +668,7 @@ export const SERVICE_DOCS = {
           },
           {
             heading: 'Wait before judging a fresh key',
-            body: 'A freshly seeded key can answer "403 Authorization failed" from the app for up to about 40 minutes, the same reply a wrong key gets, while a workstation or Azure Cloud Shell accepts it at once (measured 2026-10-04). Test again later before reseeding, and delete the previous key at NVIDIA only after the new one passes from here.',
+            body: 'A freshly seeded key can answer "403 Authorization failed" from the app for up to about 40 minutes, the same reply a wrong key gets. Measured 2026-10-04: the app refused a key at 1, 12 and 13 minutes after seeding and accepted it at 37; a workstation accepted that same key at about 23 minutes; a separate key seconds old passed at once from Azure Cloud Shell. Test again later before reseeding, and delete the previous key at NVIDIA only after the new one passes from here.',
             codes: [],
           },
         ],
@@ -722,7 +727,7 @@ export const SERVICE_DOCS = {
           },
           {
             heading: 'Failover on 400 and 422',
-            body: 'A bad request from this provider fails over, unlike the three frontier APIs: the catalogue models have their own context and parameter limits, and the next provider will very likely take the same request. A part the router itself refused does not fail over.',
+            body: 'A bad request from this provider fails over, unlike the three frontier APIs: the catalogue models have their own context and parameter limits, and the next provider will very likely take the same request. A prompt part the router rejected locally before sending (AI_PART_REFUSED) does not fail over.',
             codes: [],
           },
           {
