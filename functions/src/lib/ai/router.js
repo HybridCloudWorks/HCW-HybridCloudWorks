@@ -1361,8 +1361,9 @@ async function callAnthropic(
  * the JSON rule as an instruction rather than `response_format`, because
  * neither array content nor `json_object` is accepted by every model on the
  * catalogue and an unaccepted field is a 400; an explicit `max_tokens`; a
- * longer timeout; `<think>` stripped from the answer. Built per router
- * because the pacing guard is the router's.
+ * longer timeout; `<think>` stripped from the answer; and a `temperature`,
+ * which the GPT-5 rows leave out because those models refuse any value but
+ * the default. Built per router because the pacing guard is the router's.
  *
  * Foundry's one difference is `auth`: a row without it sends the provider's
  * key as the bearer; Foundry sends an Entra token, or the api-key header a
@@ -1391,6 +1392,7 @@ function openAiCompatibleTable(ctx) {
       url: `${NVIDIA_BASE_URL}/chat/completions`,
       jsonAsResponseFormat: false,
       content: toPlainText,
+      temperature: 0.2,
       maxTokens: NVIDIA_MAX_TOKENS,
       timeoutMs: NVIDIA_TIMEOUT_MS,
       clean: stripThinking,
@@ -1441,7 +1443,11 @@ function openAiCompatibleBody(spec, model, { prompt, parts, expectJson, systemPr
   return {
     model,
     messages,
-    temperature: 0.2,
+    // Only where the row sets one. The GPT-5 family on OpenAI and Foundry
+    // accepts the default temperature alone and answers 400 to any other
+    // value ("Only the default (1) value is supported", measured 2026-10-04
+    // on the Foundry card's Test); NVIDIA's catalogue models take it.
+    ...(spec.temperature === undefined ? {} : { temperature: spec.temperature }),
     ...(spec.maxTokens ? { max_tokens: maxTokens ?? spec.maxTokens } : {}),
     ...(expectJson && spec.jsonAsResponseFormat
       ? { response_format: { type: 'json_object' } }

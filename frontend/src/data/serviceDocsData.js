@@ -565,8 +565,8 @@ export const SERVICE_DOCS = {
         title: 'Advanced',
         steps: [
           {
-            heading: 'Reasoning models and max_tokens',
-            body: "OpenAI's reasoning models refuse the max_tokens field, so the router never sends it to OpenAI; the per-call cap the portal's Test passes applies only to providers whose table row sends one.",
+            heading: 'Reasoning models, max_tokens and temperature',
+            body: "OpenAI's reasoning models refuse the max_tokens field and any temperature but the default, so the router sends neither to OpenAI; the per-call cap the portal's Test passes applies only to providers whose table row sends one.",
             codes: [],
           },
           {
@@ -866,8 +866,8 @@ export const SERVICE_DOCS = {
             codes: [],
           },
           {
-            heading: 'Reasoning models and max_tokens',
-            body: 'GPT-5 deployments refuse the max_tokens field, so the row sends none, as for OpenAI; JSON generation asks for response_format json_object with one repair round trip.',
+            heading: 'Reasoning models, max_tokens and temperature',
+            body: 'GPT-5 deployments refuse the max_tokens field and any temperature but the default (400, "Only the default (1) value is supported"), so the row sends neither, as for OpenAI; JSON generation asks for response_format json_object with one repair round trip.',
             codes: [],
           },
         ],

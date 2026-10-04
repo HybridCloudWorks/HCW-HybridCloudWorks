@@ -2984,6 +2984,18 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **GPT-5 models refused every OpenAI and Foundry call over `temperature`
+  (#849).** The owner's first Test of the Foundry card, after the apply and
+  deploy, reached the account and was authorised, then failed with
+  `400 Unsupported value: 'temperature' does not support 0.2 with this
+  model. Only the default (1) value is supported.` The OpenAI-compatible
+  request body sent `temperature: 0.2` to every provider; the GPT-5 family
+  accepts only the default, so the OpenAI provider, whose defaults moved to
+  gpt-5-mini and gpt-5-nano, has been failing the same way. The table row
+  now decides: NVIDIA's catalogue models keep 0.2, the OpenAI and Foundry
+  rows send none. `foundry-provider.test.js` and `nvidia-provider.test.js`
+  pin both sides; the two setup guides say so.
+
 - **NVIDIA's Test timed out with a working key; every NVIDIA default is now
   GLM-5.3 (#701).** The portal's Test sent `z-ai/glm-5.3-flash` and gave up at
   45 s, three times on 2026-10-04, after a freshly rotated key was seeded. A

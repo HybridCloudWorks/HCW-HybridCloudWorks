@@ -86,8 +86,9 @@ describe('the request', () => {
     expect(call.init.headers['api-key']).toBeUndefined();
     const body = JSON.parse(call.init.body);
     expect(body.model).toBe('gpt-5-nano');
-    // Reasoning models refuse the field; the row sends none, like OpenAI's.
+    // Reasoning models refuse both fields; the row sends neither, like OpenAI's.
     expect(body).not.toHaveProperty('max_tokens');
+    expect(body).not.toHaveProperty('temperature');
   });
 
   it('asks for response_format json_object on a JSON generation', async () => {
