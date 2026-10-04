@@ -134,7 +134,7 @@ describe('a rejection', () => {
 });
 
 describe('the token', () => {
-  it('is fetched for the Cognitive Services scope and reused until five minutes before expiry', async () => {
+  it('is fetched for the Foundry audience and reused until five minutes before expiry', async () => {
     let now = 1_000_000;
     const getToken = vi.fn(async () => ({ token: `t${getToken.mock.calls.length}`, expiresOnTimestamp: now + 20 * 60_000 }));
     const provider = createFoundryTokenProvider({ getToken, now: () => now });
@@ -145,6 +145,22 @@ describe('the token', () => {
     now += 6 * 60_000;
     expect(await provider()).toBe('t2');
     expect(getToken).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('the audience', () => {
+  it('is ai.azure.com by default and FOUNDRY_TOKEN_SCOPE when the environment sets one', async () => {
+    const { foundryTokenScope } = await import('./router.js');
+    expect(foundryTokenScope({})).toBe('https://ai.azure.com/.default');
+    expect(foundryTokenScope({ FOUNDRY_TOKEN_SCOPE: 'https://cognitiveservices.azure.com/.default' })).toBe(
+      'https://cognitiveservices.azure.com/.default'
+    );
+    const getToken = vi.fn(async () => token('t', 3_600_000));
+    await router(fetchRecording(), {
+      env: { ...KEYS, FOUNDRY_TOKEN_SCOPE: 'https://cognitiveservices.azure.com/.default' },
+      getToken,
+    }).callProvider({ provider: 'foundry', prompt: 'ping' });
+    expect(getToken).toHaveBeenCalledWith('https://cognitiveservices.azure.com/.default');
   });
 });
 

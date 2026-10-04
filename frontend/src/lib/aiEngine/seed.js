@@ -135,7 +135,7 @@ export const DEFAULT_PROVIDERS = [
     order: 5,
     schemaVersion: PROVIDER_SCHEMA_VERSION,
     notes:
-      'Nothing to seed: the app signs in with its own identity, and FOUNDRY_ENDPOINT is set by Terraform. Spend is capped by the Foundry budget (USD 75 a month, alerts at 50, 90 and 100 %). First for content features; never the public explain route.',
+      'Nothing to seed: the app signs in with its own identity, and FOUNDRY_ENDPOINT is set by Terraform. A USD 75 monthly budget on its resource group alerts at 50, 90 and 100 %; a budget alerts, it does not stop spend. First for content features; never the public explain route.',
   },
 ];
 

@@ -158,9 +158,10 @@
  *
  *   - NO KEY. The account has local authentication off; the Function App's
  *     system-assigned identity holds "Cognitive Services OpenAI User" and
- *     the router sends an Entra token (scope cognitiveservices.azure.com)
- *     as the bearer, fetched through @azure/identity and cached until five
- *     minutes before it expires. What makes the provider POSSIBLE is the
+ *     the router sends an Entra token for the audience the Foundry v1
+ *     endpoint documents, https://ai.azure.com (FOUNDRY_TOKEN_SCOPE in the
+ *     environment overrides it), fetched through @azure/identity and cached
+ *     until five minutes before it expires. What makes the provider POSSIBLE is the
  *     endpoint setting, which Terraform writes from the account; KEY_ENV
  *     names it so every "has a key" check reads the same way. Locally,
  *     `FOUNDRY_API_KEY` set in functions/.env sends an api-key header
@@ -619,8 +620,19 @@ function toGeminiParts(parts, prompt) {
 
 export const NVIDIA_BASE_URL = 'https://integrate.api.nvidia.com/v1';
 
-/** The Entra scope every Foundry / Azure OpenAI data-plane call is authorised for. */
-export const FOUNDRY_TOKEN_SCOPE = 'https://cognitiveservices.azure.com/.default';
+/**
+ * The Entra audience the Foundry v1 endpoint accepts. Microsoft's pages name
+ * two: the keyless-authentication guide for Foundry resources on the
+ * /openai/v1 path says tokens must carry `https://ai.azure.com/.default`,
+ * while older Azure OpenAI pages say `https://cognitiveservices.azure.com`.
+ * This is the documented one for the resource kind foundry.tf creates;
+ * FOUNDRY_TOKEN_SCOPE in the environment overrides it, so a 401 on the other
+ * audience is an app setting away rather than a deploy.
+ */
+export const FOUNDRY_TOKEN_SCOPE = 'https://ai.azure.com/.default';
+
+/** The audience to request: the environment's override, else FOUNDRY_TOKEN_SCOPE. */
+export const foundryTokenScope = (env) => readKey(env, 'FOUNDRY_TOKEN_SCOPE') || FOUNDRY_TOKEN_SCOPE;
 
 /** The account's base URL for the OpenAI v1 surface, from FOUNDRY_ENDPOINT without a trailing slash. */
 export function foundryBaseUrl(env) {
@@ -634,12 +646,16 @@ export function foundryBaseUrl(env) {
  * in a stub and production hands in DefaultAzureCredential: the Function
  * App's system-assigned identity there, `az login` on a workstation.
  */
-export function createFoundryTokenProvider({ getToken, now = () => Date.now() }) {
+export function createFoundryTokenProvider({
+  getToken,
+  now = () => Date.now(),
+  scope = FOUNDRY_TOKEN_SCOPE,
+}) {
   const EARLY_MS = 5 * 60_000;
   let cached = null;
   return async () => {
     if (cached && cached.expiresOnTimestamp - now() > EARLY_MS) return cached.token;
-    cached = await getToken(FOUNDRY_TOKEN_SCOPE);
+    cached = await getToken(scope);
     return cached.token;
   };
 }
@@ -1015,7 +1031,7 @@ function createRouterContext({
       KEYLESS_PROVIDERS.includes(provider)
         ? Promise.resolve()
         : reportVerdict(KEY_ENV[provider], verdict),
-    foundryToken: createFoundryTokenProvider({ getToken, now }),
+    foundryToken: createFoundryTokenProvider({ getToken, now, scope: foundryTokenScope(env) }),
   };
   ctx.openAiCompatible = openAiCompatibleTable(ctx);
   return ctx;

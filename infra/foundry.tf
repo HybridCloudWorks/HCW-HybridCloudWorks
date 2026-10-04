@@ -5,11 +5,13 @@
 # as a paid provider for the content features, with the cheapest text models.
 # Prices read that day, per 1M tokens, Global Standard: gpt-5-nano $0.05 in /
 # $0.40 out, gpt-5-mini $0.25 / $2.00. At the site's volume that is single
-# dollars a month; the budget below is the ceiling, not the target.
+# dollars a month; the budget below alerts at its thresholds. It does not
+# stop spend: nothing in Azure Cost Management does.
 #
 # NO KEY. The Function App reaches the account with its system-assigned
 # identity and the "Cognitive Services OpenAI User" role: the router asks
-# @azure/identity for a token for https://cognitiveservices.azure.com and
+# @azure/identity for a token for https://ai.azure.com (the audience the
+# Foundry v1 endpoint documents; FOUNDRY_TOKEN_SCOPE overrides it) and
 # sends it as the bearer. `local_auth_enabled = false` means the account has
 # no API keys to seed, rotate, or leak, and nothing here needs a Key Vault
 # window. The app setting the router keys availability on is the ENDPOINT
@@ -79,8 +81,10 @@ resource "azurerm_role_assignment" "function_app_foundry_user" {
 }
 
 # USD 75 a month on the `ai` resource group alone, so the Foundry spend has
-# its own ceiling beside the subscription budget in budget.tf: 50 and 90 %
-# actual, 100 % actual and forecast, through the same action group. The
+# its own alerts beside the subscription budget in budget.tf: 50 and 90 %
+# actual, 100 % actual and forecast, through the same action group. A budget
+# notifies; it does not stop consumption, and the owner's response to an
+# alert is to disable the provider on the AI Engine page. The
 # start date follows budget.tf's reasoning (first of the plan's month,
 # ignored after create).
 resource "azurerm_consumption_budget_resource_group" "foundry" {

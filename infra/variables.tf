@@ -536,7 +536,7 @@ variable "foundry_account_name" {
 }
 
 variable "foundry_budget_amount_usd" {
-  description = "Monthly budget ceiling in USD for the Foundry resource group alone (#849); owner decision 2026-10-04"
+  description = "Monthly budget amount in USD for the Foundry resource group's alerts (#849, owner decision 2026-10-04). A budget notifies at its thresholds; it does not stop spend"
   type        = number
   default     = 75
 }

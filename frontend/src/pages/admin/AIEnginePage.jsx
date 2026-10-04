@@ -305,9 +305,9 @@ const PLACED_PROVIDER_LABELS = { nvidia: 'NVIDIA', foundry: 'Foundry' };
  * that decision: in order, as a backup.
  */
 const PLACEMENT_OPTIONS = [
-  { value: 'first', label: 'First — free, others take over' },
+  { value: 'first', label: 'First — tried before every other provider' },
   { value: 'order', label: 'In order — the backup' },
-  { value: 'off', label: 'Off' },
+  { value: 'off', label: 'Off — never for this feature' },
 ];
 
 export function FeatureSwitches() {

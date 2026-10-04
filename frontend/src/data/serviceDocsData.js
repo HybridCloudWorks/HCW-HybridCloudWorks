@@ -837,7 +837,7 @@ export const SERVICE_DOCS = {
           },
           {
             heading: 'Watch the budget',
-            body: 'The Foundry resource group has its own Cost Management budget of USD 75 a month, with alerts at 50, 90 and 100 % actual and 100 % forecast to the ops action group. The Usage & Cost tab prices each call from the same rates.',
+            body: 'The Foundry resource group has its own Cost Management budget of USD 75 a month, with alerts at 50, 90 and 100 % actual and 100 % forecast to the ops action group. A budget alerts; it does not stop spend, so the response to an alert is to turn the provider off here. The Usage & Cost tab prices each call from the same rates.',
             codes: [],
           },
         ],
@@ -862,7 +862,7 @@ export const SERVICE_DOCS = {
         steps: [
           {
             heading: 'Token, not key',
-            body: 'The router fetches an Entra token for https://cognitiveservices.azure.com/.default through @azure/identity and reuses it until five minutes before expiry. A 401 or 403 from Foundry therefore means the role assignment, not a secret: check that the Function App identity holds Cognitive Services OpenAI User on the account.',
+            body: 'The router fetches an Entra token for https://ai.azure.com/.default (the audience the Foundry v1 endpoint documents; the FOUNDRY_TOKEN_SCOPE app setting overrides it) through @azure/identity and reuses it until five minutes before expiry. A 401 or 403 from Foundry therefore means the role assignment or the audience, not a secret: check that the Function App identity holds Cognitive Services OpenAI User on the account.',
             codes: [],
           },
           {
