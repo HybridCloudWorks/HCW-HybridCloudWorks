@@ -11,16 +11,20 @@
  * the view shapes they return — so every rule about what a book may carry is
  * testable without a store. The handlers (handlers.js) do the I/O.
  */
-import {
-  EPISODE_KIND,
-  STATUS,
-  activeVersionOf,
-  episodeKindOf,
-  manualChapterId,
-  slugifyTitle,
-  versionsOf,
-} from './publish.js';
+import { STATUS, manualChapterId, slugifyTitle } from './publish.js';
 import { normalizeVoiceSettings, voiceSettingsOf } from './speech-settings.js';
+import {
+  checkBoolean,
+  checkEnum,
+  checkInteger,
+  checkPattern,
+  checkTags,
+  checkText,
+  checkUrl,
+  collectFields,
+  fail,
+  firstError,
+} from './validate.js';
 
 export const BOOK_KINDS = Object.freeze(['course', 'book']);
 
@@ -28,6 +32,8 @@ export const BOOK_KINDS = Object.freeze(['course', 'book']);
 const PROVIDER_PATTERN = /^[a-z][a-z0-9-]{1,30}$/;
 /** A book's code is its slug: the exam code slot for a book with no exam. */
 const CODE_PATTERN = /^[a-z0-9][a-z0-9-]{0,60}$/;
+/** A version id as `publish.js` mints them (`versionStamp`). */
+const VERSION_ID_PATTERN = /^[a-z0-9]{1,20}$/i;
 
 export const LIMITS = Object.freeze({
   title: 160,
@@ -41,48 +47,39 @@ export const LIMITS = Object.freeze({
   sourceText: 60000,
 });
 
-const str = (value) => (typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '');
+// ── field checks the generic ones in validate.js do not cover ──────────────
 
-function checkText(value, field, max, { required = false } = {}) {
+function checkVoice(value) {
   if (value === undefined) return { skip: true };
-  if (value === null || value === '') {
-    return required ? { error: `${field} is required` } : { value: null };
+  const voice = normalizeVoiceSettings(value);
+  return voice.error ? fail(voice.error) : { value: voice.value };
+}
+
+function checkSourceContentIds(value) {
+  if (value === undefined) return { skip: true };
+  const valid = Array.isArray(value) && value.every((id) => typeof id === 'string' && id.trim());
+  if (!valid) return fail('sourceContentIds must be an array of ids');
+  return { value: [...new Set(value.map((id) => id.trim()))].slice(0, 50) };
+}
+
+/**
+ * Text to speak, trimmed but with its line breaks kept — `checkText`
+ * collapses whitespace for a label, which spoken text must not have done to
+ * it. `null` clears the text.
+ */
+function checkSpokenText(value) {
+  if (value === undefined) return { skip: true };
+  if (value !== null && typeof value !== 'string') return fail('sourceText must be a string');
+  const text = value === null ? '' : value.trim();
+  if (text.length > LIMITS.sourceText) {
+    return fail(`sourceText must be at most ${LIMITS.sourceText} characters`);
   }
-  if (typeof value !== 'string') return { error: `${field} must be a string` };
-  const text = str(value);
-  if (required && !text) return { error: `${field} is required` };
-  if (text.length > max) return { error: `${field} must be at most ${max} characters` };
   return { value: text || null };
 }
 
-function checkUrl(value, field) {
+function checkClearError(value) {
   if (value === undefined) return { skip: true };
-  if (value === null || value === '') return { value: null };
-  if (typeof value !== 'string') return { error: `${field} must be a string` };
-  const url = value.trim();
-  if (url.length > LIMITS.url)
-    return { error: `${field} must be at most ${LIMITS.url} characters` };
-  // Site-relative media paths (the gallery's) or https; nothing executable.
-  if (!/^(\/[^/\\][^\s]*|https:\/\/[^\s]+)$/.test(url)) {
-    return { error: `${field} must be an https URL or a site-relative path` };
-  }
-  return { value: url };
-}
-
-function checkTags(value) {
-  if (value === undefined) return { skip: true };
-  if (value === null) return { value: [] };
-  if (!Array.isArray(value)) return { error: 'tags must be an array of strings' };
-  if (value.length > LIMITS.tags) return { error: `tags must hold at most ${LIMITS.tags} entries` };
-  const tags = [];
-  for (const raw of value) {
-    if (typeof raw !== 'string') return { error: 'tags must be an array of strings' };
-    const tag = str(raw).toLowerCase();
-    if (!tag) continue;
-    if (tag.length > LIMITS.tag) return { error: `a tag must be at most ${LIMITS.tag} characters` };
-    if (!tags.includes(tag)) tags.push(tag);
-  }
-  return { value: tags };
+  return value === true ? { value: true } : fail('clearError must be true');
 }
 
 /**
@@ -91,42 +88,35 @@ function checkTags(value) {
  * without touching anything the body did not name.
  */
 export function parseBookPatch(body) {
-  const out = {};
-  const checks = [
+  return collectFields([
     ['title', checkText(body?.title, 'title', LIMITS.title, { required: true })],
     ['certTitle', checkText(body?.certTitle, 'certTitle', LIMITS.title)],
     ['author', checkText(body?.author, 'author', LIMITS.author)],
     ['description', checkText(body?.description, 'description', LIMITS.description)],
-    ['coverImageUrl', checkUrl(body?.coverImageUrl, 'coverImageUrl')],
-    ['tags', checkTags(body?.tags)],
-  ];
-  for (const [field, checked] of checks) {
-    if (checked.skip) continue;
-    if (checked.error) return { error: checked.error };
-    out[field] = checked.value;
-  }
-  if (body?.kind !== undefined) {
-    if (!BOOK_KINDS.includes(body.kind)) {
-      return { error: `kind must be one of ${BOOK_KINDS.join(', ')}` };
-    }
-    out.kind = body.kind;
-  }
-  if (body?.voice !== undefined) {
-    const voice = normalizeVoiceSettings(body.voice);
-    if (voice.error) return { error: voice.error };
-    out.voice = voice.value;
-  }
-  if (body?.sourceContentIds !== undefined) {
-    if (
-      !Array.isArray(body.sourceContentIds) ||
-      body.sourceContentIds.some((id) => typeof id !== 'string' || !id.trim())
-    ) {
-      return { error: 'sourceContentIds must be an array of ids' };
-    }
-    out.sourceContentIds = [...new Set(body.sourceContentIds.map((id) => id.trim()))].slice(0, 50);
-  }
-  if (Object.keys(out).length === 0) return { error: 'Nothing to change' };
-  return { value: out };
+    ['coverImageUrl', checkUrl(body?.coverImageUrl, 'coverImageUrl', LIMITS.url)],
+    ['tags', checkTags(body?.tags, { maxTags: LIMITS.tags, maxTagLength: LIMITS.tag })],
+    ['kind', checkEnum(body?.kind, 'kind', BOOK_KINDS)],
+    ['voice', checkVoice(body?.voice)],
+    ['sourceContentIds', checkSourceContentIds(body?.sourceContentIds)],
+  ]);
+}
+
+/**
+ * A book PATCH body as the route reads it: the metadata fields through
+ * `parseBookPatch` and `archived` beside them, since archiving is a
+ * lifecycle move the handler acts on rather than a field it writes. A body
+ * naming neither is "Nothing to change".
+ */
+export function parseBookEdit(body) {
+  const { archived, ...fields } = body;
+  const patch = Object.keys(fields).length ? parseBookPatch(fields) : { value: {} };
+  const error =
+    patch.error ||
+    firstError([
+      [archived !== undefined && typeof archived !== 'boolean', 'archived must be true or false'],
+      [archived === undefined && Object.keys(patch.value).length === 0, 'Nothing to change'],
+    ]);
+  return error ? fail(error) : { value: { fields: patch.value, archived } };
 }
 
 /**
@@ -215,52 +205,49 @@ export function parseChapterCreate(body) {
  * regeneration error ("Keep current"). Validated the same way as a book.
  */
 export function parseChapterPatch(body) {
-  const out = {};
-  const title = checkText(body?.title, 'title', LIMITS.title, { required: true });
-  if (title.error) return { error: title.error };
-  if (!title.skip) out.title = title.value;
+  return collectFields([
+    ['title', checkText(body?.title, 'title', LIMITS.title, { required: true })],
+    ['order', checkInteger(body?.order, 'order', { min: 0, max: 10000 })],
+    ['sourceText', checkSpokenText(body?.sourceText)],
+    [
+      'activeVersionId',
+      checkPattern(
+        body?.activeVersionId,
+        VERSION_ID_PATTERN,
+        'activeVersionId must name a version'
+      ),
+    ],
+    ['archived', checkBoolean(body?.archived, 'archived')],
+    ['clearError', checkClearError(body?.clearError)],
+  ]);
+}
 
-  if (body?.order !== undefined) {
-    const order = Number(body.order);
-    if (!Number.isInteger(order) || order < 0 || order > 10000) {
-      return { error: 'order must be a whole number between 0 and 10000' };
-    }
-    out.order = order;
+/**
+ * The status fields that archive a chapter, or restore one, or null when the
+ * chapter is already where the move would put it. A book archive stamps
+ * `archivedWithBook` so that restoring the book puts back only the chapters
+ * it took, and restoring the book skips a chapter archived on its own.
+ */
+export function chapterArchiveUpdates(chapter, archive, { at, withBook = false }) {
+  const isArchived = chapter.status === STATUS.archived;
+  if (archive && !isArchived) {
+    return {
+      status: STATUS.archived,
+      statusBeforeArchive: chapter.status || STATUS.draft,
+      archivedAt: at,
+      archivedWithBook: withBook ? true : null,
+    };
   }
-
-  if (body?.sourceText !== undefined) {
-    if (body.sourceText !== null && typeof body.sourceText !== 'string') {
-      return { error: 'sourceText must be a string' };
-    }
-    const text = body.sourceText === null ? '' : body.sourceText.trim();
-    if (text.length > LIMITS.sourceText) {
-      return { error: `sourceText must be at most ${LIMITS.sourceText} characters` };
-    }
-    out.sourceText = text || null;
+  const restorable = isArchived && (!withBook || chapter.archivedWithBook);
+  if (!archive && restorable) {
+    return {
+      status: chapter.statusBeforeArchive || STATUS.draft,
+      statusBeforeArchive: null,
+      archivedAt: null,
+      archivedWithBook: null,
+    };
   }
-
-  if (body?.activeVersionId !== undefined) {
-    if (
-      typeof body.activeVersionId !== 'string' ||
-      !/^[a-z0-9]{1,20}$/i.test(body.activeVersionId)
-    ) {
-      return { error: 'activeVersionId must name a version' };
-    }
-    out.activeVersionId = body.activeVersionId;
-  }
-
-  if (body?.archived !== undefined) {
-    if (typeof body.archived !== 'boolean') return { error: 'archived must be true or false' };
-    out.archived = body.archived;
-  }
-
-  if (body?.clearError !== undefined) {
-    if (body.clearError !== true) return { error: 'clearError must be true' };
-    out.clearError = true;
-  }
-
-  if (Object.keys(out).length === 0) return { error: 'Nothing to change' };
-  return { value: out };
+  return null;
 }
 
 /** `{ order: [ids] }` — every id a string, no duplicates, at least one. */
@@ -275,97 +262,5 @@ export function parseReorder(body) {
   return { value: ids.map((id) => id.trim()) };
 }
 
-// ── view shapes ─────────────────────────────────────────────────────────────
-
-/**
- * A chapter as the admin reads it: kind and sources resolved by the one rule,
- * versions always an array with the active one named, and — against its
- * book — whether a guide chapter is still in the current study guide.
- */
-export function toChapterView(doc, set = null) {
-  const versions = versionsOf(doc);
-  const active = activeVersionOf(doc);
-  const kind = episodeKindOf(doc);
-  const inGuide =
-    kind !== EPISODE_KIND.guide ||
-    !Array.isArray(set?.areaSlugs) ||
-    set.areaSlugs.length === 0 ||
-    set.areaSlugs.includes(doc.areaSlug || doc.id);
-  return {
-    ...doc,
-    kind,
-    sources: Array.isArray(doc?.sources) ? doc.sources : [],
-    versions,
-    activeVersionId: active?.id || null,
-    versionCount: versions.length,
-    droppedFromGuide: !inGuide,
-    lastError: doc?.lastError || null,
-  };
-}
-
-/**
- * A book as the admin reads it, with defaults for every field a pre-library
- * set lacks, and the chapter counts the Library grid shows when they were
- * aggregated for it.
- */
-export function toBookView(doc, counts = null) {
-  const kind = doc?.kind === 'book' ? 'book' : 'course';
-  return {
-    ...doc,
-    kind,
-    title: doc?.title || doc?.certTitle || doc?.examCode || doc?.id || '',
-    author: doc?.author ?? null,
-    description: doc?.description ?? null,
-    coverImageUrl: doc?.coverImageUrl ?? null,
-    tags: Array.isArray(doc?.tags) ? doc.tags : [],
-    sourceContentIds: Array.isArray(doc?.sourceContentIds) ? doc.sourceContentIds : [],
-    archivedAt: doc?.archivedAt ?? null,
-    voice: voiceSettingsOf(doc),
-    counts: counts || {
-      chapters: 0,
-      published: 0,
-      drafts: 0,
-      failed: 0,
-      archived: 0,
-      durationSeconds: 0,
-    },
-  };
-}
-
-/**
- * Per-book counts from a projection of every chapter row (setId, status,
- * durationSeconds, softDeletedAt). Soft-deleted chapters are not counted;
- * archived ones are counted apart; the duration total is of the live and
- * draft chapters, which is what a listener could hear.
- */
-export function summarizeChapters(rows) {
-  const bySet = new Map();
-  for (const row of rows || []) {
-    if (!row?.setId || row.softDeletedAt || row.softDeleteExpiresAt) continue;
-    const counts = bySet.get(row.setId) || {
-      chapters: 0,
-      published: 0,
-      drafts: 0,
-      failed: 0,
-      archived: 0,
-      durationSeconds: 0,
-    };
-    counts.chapters += 1;
-    if (row.status === STATUS.published) counts.published += 1;
-    else if (row.status === STATUS.failed) counts.failed += 1;
-    else if (row.status === STATUS.archived) counts.archived += 1;
-    else counts.drafts += 1;
-    if (row.status !== STATUS.archived && Number.isFinite(Number(row.durationSeconds))) {
-      counts.durationSeconds += Math.max(0, Math.round(Number(row.durationSeconds)));
-    }
-    bySet.set(row.setId, counts);
-  }
-  return bySet;
-}
-
-/** The chapters that stand in the way of a delete without `force`. */
-export function publishedChapters(chapters) {
-  return (chapters || []).filter(
-    (c) => c?.status === STATUS.published && !c.softDeletedAt && !c.softDeleteExpiresAt
-  );
-}
+// ── view shapes live in views.js; re-exported so callers keep one import ────
+export { publishedChapters, summarizeChapters, toBookView, toChapterView } from './views.js';

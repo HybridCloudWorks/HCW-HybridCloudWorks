@@ -27,53 +27,59 @@ const MAX_LABEL = 60;
 const MAX_DESCRIPTION = 200;
 const MAX_ENTRIES = 60;
 
-const entry = (id, label, description) => Object.freeze({ id, label, description });
+/** A table of `id: [label, description]` as the frozen entry list the pickers read, in table order. */
+const entries = (table) =>
+  Object.freeze(
+    Object.entries(table).map(([id, [label, description]]) =>
+      Object.freeze({ id, label, description })
+    )
+  );
 
 /** What an item becomes. The order is the order the pickers show. */
-export const DEFAULT_KINDS = Object.freeze([
-  entry('article', 'Article', 'A written piece for a provider blog.'),
-  entry('tutorial', 'Tutorial', 'Step-by-step instructions the reader follows along.'),
-  entry('documentation', 'Documentation page', 'Reference material kept current over time.'),
-  entry('course-lesson', 'Course lesson', 'One lesson inside a course or study guide.'),
-  entry('lab', 'Lab', 'A hands-on exercise with an environment to work in.'),
-  entry('newsletter', 'Newsletter', 'An issue or a block destined for the newsletter.'),
-  entry('social-post', 'Social post', 'A short post for LinkedIn, X or another network.'),
-  entry('video-script', 'Video script', 'The spoken script for a recorded video.'),
-  entry('podcast-script', 'Podcast script', 'A two-host dialogue for a podcast episode.'),
-  entry('audiobook-chapter', 'Audiobook chapter', 'A chapter of a book or course read aloud.'),
-  entry('training-audio', 'Training audio', 'Spoken training material outside a book.'),
-  entry('event-announcement', 'Event announcement', 'A talk, webinar or meetup to promote.'),
-  entry('case-study', 'Case study', 'A real engagement, its problem and its outcome.'),
-  entry('white-paper', 'White paper', 'A longer argued document on one topic.'),
-  entry('landing-page', 'Landing page', 'A page built to introduce one thing.'),
-  entry('reference-guide', 'Reference guide', 'A framework, blueprint or lookup table.'),
-  entry('certification-content', 'Certification content', 'Material tied to an exam objective.'),
-  entry('speaker-content', 'Speaker content', 'An abstract, slides or notes for a talk.'),
-  entry('ambassador-evidence', 'Ambassador evidence', 'Proof of community contribution for a program.'),
-  entry('image-set', 'Image set', 'A coordinated set of images on one theme.'),
-]);
+export const DEFAULT_KINDS = entries({
+  article: ['Article', 'A written piece for a provider blog.'],
+  tutorial: ['Tutorial', 'Step-by-step instructions the reader follows along.'],
+  documentation: ['Documentation page', 'Reference material kept current over time.'],
+  'course-lesson': ['Course lesson', 'One lesson inside a course or study guide.'],
+  lab: ['Lab', 'A hands-on exercise with an environment to work in.'],
+  newsletter: ['Newsletter', 'An issue or a block destined for the newsletter.'],
+  'social-post': ['Social post', 'A short post for LinkedIn, X or another network.'],
+  'video-script': ['Video script', 'The spoken script for a recorded video.'],
+  'podcast-script': ['Podcast script', 'A two-host dialogue for a podcast episode.'],
+  'audiobook-chapter': ['Audiobook chapter', 'A chapter of a book or course read aloud.'],
+  'training-audio': ['Training audio', 'Spoken training material outside a book.'],
+  'event-announcement': ['Event announcement', 'A talk, webinar or meetup to promote.'],
+  'case-study': ['Case study', 'A real engagement, its problem and its outcome.'],
+  'white-paper': ['White paper', 'A longer argued document on one topic.'],
+  'landing-page': ['Landing page', 'A page built to introduce one thing.'],
+  'reference-guide': ['Reference guide', 'A framework, blueprint or lookup table.'],
+  'certification-content': ['Certification content', 'Material tied to an exam objective.'],
+  'speaker-content': ['Speaker content', 'An abstract, slides or notes for a talk.'],
+  'ambassador-evidence': ['Ambassador evidence', 'Proof of community contribution for a program.'],
+  'image-set': ['Image set', 'A coordinated set of images on one theme.'],
+});
 
 /** How an item became an idea. */
-export const DEFAULT_IDEA_ORIGINS = Object.freeze([
-  entry('manual', 'Manually entered', 'Someone typed the idea in.'),
-  entry('content-gap', 'Content gap', 'Something the site should cover and does not.'),
-  entry('search-trend', 'Search trend', 'People are searching for it.'),
-  entry('audience-question', 'Audience question', 'A reader, viewer or attendee asked.'),
-  entry('content-refresh', 'Existing content refresh', 'An older piece needs updating.'),
-  entry('support-request', 'Support request', 'A ticket or question from a client.'),
-  entry('product-update', 'Product update', 'A vendor shipped or changed something.'),
-  entry('conference', 'Conference or event', 'Prompted by a talk, booth or hallway chat.'),
-  entry('certification-objective', 'Certification objective', 'Maps to an exam skill.'),
-  entry('speaker-engagement', 'Speaker engagement', 'Material for or from a speaking slot.'),
-  entry('ambassador-requirement', 'Ambassador requirement', 'Needed for a program application.'),
-  entry('ai-recommendation', 'AI recommendation', 'Suggested by the forge or an assistant.'),
-  entry('imported-source', 'Imported source', 'Drafted from a URL or document someone imported.'),
-  entry('rss-feed', 'RSS or external feed', 'Arrived through a subscribed feed.'),
-  entry('recording', 'Recording', 'Started as a Plaud or uploaded recording.'),
-  entry('performance-insight', 'Performance insight', 'Earlier content did well and warrants more.'),
-  entry('repurposing', 'Content repurposing', 'Reshaped from something already published.'),
-  entry('team-request', 'Team request', 'A colleague asked for it.'),
-]);
+export const DEFAULT_IDEA_ORIGINS = entries({
+  manual: ['Manually entered', 'Someone typed the idea in.'],
+  'content-gap': ['Content gap', 'Something the site should cover and does not.'],
+  'search-trend': ['Search trend', 'People are searching for it.'],
+  'audience-question': ['Audience question', 'A reader, viewer or attendee asked.'],
+  'content-refresh': ['Existing content refresh', 'An older piece needs updating.'],
+  'support-request': ['Support request', 'A ticket or question from a client.'],
+  'product-update': ['Product update', 'A vendor shipped or changed something.'],
+  conference: ['Conference or event', 'Prompted by a talk, booth or hallway chat.'],
+  'certification-objective': ['Certification objective', 'Maps to an exam skill.'],
+  'speaker-engagement': ['Speaker engagement', 'Material for or from a speaking slot.'],
+  'ambassador-requirement': ['Ambassador requirement', 'Needed for a program application.'],
+  'ai-recommendation': ['AI recommendation', 'Suggested by the forge or an assistant.'],
+  'imported-source': ['Imported source', 'Drafted from a URL or document someone imported.'],
+  'rss-feed': ['RSS or external feed', 'Arrived through a subscribed feed.'],
+  recording: ['Recording', 'Started as a Plaud or uploaded recording.'],
+  'performance-insight': ['Performance insight', 'Earlier content did well and warrants more.'],
+  repurposing: ['Content repurposing', 'Reshaped from something already published.'],
+  'team-request': ['Team request', 'A colleague asked for it.'],
+});
 
 const DEFAULT_KIND_IDS = new Set(DEFAULT_KINDS.map((k) => k.id));
 const DEFAULT_ORIGIN_IDS = new Set(DEFAULT_IDEA_ORIGINS.map((o) => o.id));

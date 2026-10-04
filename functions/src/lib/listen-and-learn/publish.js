@@ -245,6 +245,9 @@ export function mergeRegeneration(existing, fresh, { now, actorId = null, costUs
   return { ...mirrored, audioError: fresh.audioError || null };
 }
 
+/** The spellings the pipeline keeps an article's body under, first match wins. */
+const SPEAKABLE_FIELDS = Object.freeze(['postContent', 'blogDraft', 'content', 'Content']);
+
 /**
  * The top-level fields a hand-made chapter's text lives in, from a content
  * item's body: the pipeline keeps the article under several spellings
@@ -252,8 +255,8 @@ export function mergeRegeneration(existing, fresh, { now, actorId = null, costUs
  * and whitespace collapsed because the text is spoken, not shown.
  */
 export function speakableTextOf(item) {
-  const raw = String(item?.postContent || item?.blogDraft || item?.content || item?.Content || '');
-  let text = raw;
+  const field = SPEAKABLE_FIELDS.find((key) => item?.[key]);
+  let text = String(field ? item[field] : '');
   let prev;
   // Innermost tags first, repeated until stable: a single pass over
   // `<scr<script>ipt>` leaves `ipt>` behind, and a tag that survives is read

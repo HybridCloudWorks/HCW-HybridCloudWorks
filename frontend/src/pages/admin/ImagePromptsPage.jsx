@@ -32,71 +32,65 @@ const HELP = [
   'Changing a primary prompt bumps the version and keeps the old text; images record the version they came from. Archive hides a set from generators without losing it; rename moves prompts, pages and images with it.',
 ];
 
-/** The page body: error, loading, the open set, the empty library, or the grid. */
-function LibraryBody({
-  loadError,
-  hookError,
-  library,
-  editor,
-  sets,
-  visibleSets,
-  openName,
-  archivedHidden,
-  onRetry,
-  onCreate,
-  onOpen,
-  onShowEverything,
-}) {
-  if (loadError) {
-    return (
-      <EmptyState
-        variant="error"
-        title="The prompt library could not be read"
-        description={hookError || loadError}
-        onRetry={onRetry}
-      />
-    );
-  }
-  if (!library) {
-    return (
-      <p className="rounded-xl border border-dashed border-border py-12 text-center text-sm text-muted-foreground">
-        Loading image sets…
-      </p>
-    );
-  }
-  if (editor) return editor;
-  if (sets.length === 0) {
-    return (
-      <EmptyState
-        icon={ImageIcon}
-        title="No image sets yet"
-        description="A set is the shared brief every image generated from it follows. Create one, give it a primary prompt and style rules, then assign it to the pages it should illustrate."
-        action={
-          <Button size="sm" onClick={onCreate} className="gap-1">
-            <Plus className="h-4 w-4" aria-hidden="true" /> Create the first set
-          </Button>
-        }
-      />
-    );
-  }
-  if (visibleSets.length === 0) {
-    return (
-      <EmptyState
-        variant="filtered"
-        title="No sets match"
-        description={
-          archivedHidden
-            ? `${archivedHidden} archived set${archivedHidden === 1 ? ' is' : 's are'} hidden.`
-            : 'Try another word.'
-        }
-        action={
-          <Button variant="outline" size="sm" onClick={onShowEverything}>
-            Show everything
-          </Button>
-        }
-      />
-    );
-  }
+/** The five states of the page body, first match wins (PR #841: one return). */
+function LibraryError({ hookError, loadError, onRetry }) {
+  return (
+    <EmptyState
+      variant="error"
+      title="The prompt library could not be read"
+      description={hookError || loadError}
+      onRetry={onRetry}
+    />
+  );
+}
+
+function LibraryLoading() {
+  return (
+    <p className="rounded-xl border border-dashed border-border py-12 text-center text-sm text-muted-foreground">
+      Loading image sets…
+    </p>
+  );
+}
+
+function LibraryEditor({ editor }) {
+  return editor;
+}
+
+function LibraryEmpty({ onCreate }) {
+  return (
+    <EmptyState
+      icon={ImageIcon}
+      title="No image sets yet"
+      description="A set is the shared brief every image generated from it follows. Create one, give it a primary prompt and style rules, then assign it to the pages it should illustrate."
+      action={
+        <Button size="sm" onClick={onCreate} className="gap-1">
+          <Plus className="h-4 w-4" aria-hidden="true" /> Create the first set
+        </Button>
+      }
+    />
+  );
+}
+
+function LibraryNoMatch({ archivedHidden, onShowEverything }) {
+  return (
+    <EmptyState
+      variant="filtered"
+      title="No sets match"
+      description={
+        archivedHidden
+          ? `${archivedHidden} archived set${archivedHidden === 1 ? ' is' : 's are'} hidden.`
+          : 'Try another word.'
+      }
+      action={
+        <Button variant="outline" size="sm" onClick={onShowEverything}>
+          Show everything
+        </Button>
+      }
+    />
+  );
+}
+
+function LibraryGrid({ visibleSets, openName, onOpen }) {
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
       {visibleSets.map((set) => (
@@ -109,6 +103,21 @@ function LibraryBody({
       ))}
     </div>
   );
+}
+
+const LIBRARY_VIEWS = [
+  [(p) => Boolean(p.loadError), LibraryError],
+  [(p) => !p.library, LibraryLoading],
+  [(p) => Boolean(p.editor), LibraryEditor],
+  [(p) => p.sets.length === 0, LibraryEmpty],
+  [(p) => p.visibleSets.length === 0, LibraryNoMatch],
+  [() => true, LibraryGrid],
+];
+
+/** The page body: error, loading, the open set, the empty library, or the grid. */
+function LibraryBody(props) {
+  const [, View] = LIBRARY_VIEWS.find(([when]) => when(props));
+  return <View {...props} />;
 }
 
 export default function ImagePromptsPage() {

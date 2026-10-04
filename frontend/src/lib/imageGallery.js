@@ -8,6 +8,11 @@
  */
 import { getJSON, postJSON, sendJSON } from '@/lib/api';
 import { toMillis } from '@/lib/dateUtils';
+import { normalizeGalleryItem } from '@/lib/imageGallerySource';
+
+// The per-row shape lives in lib/imageGallerySource.js (PR #841 split); it is
+// re-exported here so every existing import keeps working.
+export { SOURCE_LABELS, getSourceLabel, normalizeGalleryItem } from '@/lib/imageGallerySource';
 
 const PAGE_SIZE = 200;
 
@@ -15,17 +20,6 @@ export const GALLERY_COLLECTIONS = Object.freeze([
   'generated_content_images',
   'curated_article_images',
 ]);
-
-/** Where an image came from — the server's `source` id and the word for it. */
-export const SOURCE_LABELS = Object.freeze({
-  upload: 'Uploaded',
-  'ai-cover': 'AI cover',
-  preview: 'Preview',
-  curated: 'Curated',
-  import: 'Imported',
-  rehost: 'Re-hosted',
-  other: 'Generated',
-});
 
 export const STATE_OPTIONS = Object.freeze([
   { value: 'active', label: 'Active' },
@@ -74,100 +68,6 @@ export const SLOT_OPTIONS = Object.freeze([
   { value: 'secondary3', label: 'Secondary 3' },
   { value: 'curated', label: 'Curated' },
 ]);
-
-const text = (value, fallback = '') => (value ? String(value) : fallback);
-const orNull = (value) => value ?? null;
-
-/** The descriptive fields: what the image is and says. */
-function describeItem(data, articleId) {
-  return {
-    title: text(data.title, articleId),
-    altText: text(data.altText),
-    caption: text(data.caption),
-    license: text(data.license),
-    credit: text(data.credit),
-    provider: text(data.provider),
-    slot: text(data.slot),
-    folder: text(data.folder, 'default'),
-    customTags: Array.isArray(data.customTags) ? data.customTags : [],
-    approvalStatus: text(data.approvalStatus),
-  };
-}
-
-/** Where the image came from: set, prompt, model. */
-function lineageOf(data) {
-  return {
-    promptSet: text(data.promptSet || data.promptSetId),
-    promptSetId: text(data.promptSetId || data.promptSet),
-    promptName: text(data.promptName),
-    promptTemplateVersion: text(data.promptTemplateVersion),
-    prompt: text(data.prompt),
-    imageProvider: text(data.imageProvider),
-    imageModel: text(data.imageModel),
-  };
-}
-
-/** The bytes and the record's lifecycle stamps. */
-function fileFactsOf(data) {
-  return {
-    width: orNull(data.width),
-    height: orNull(data.height),
-    bytes: orNull(data.bytes),
-    format: text(data.format),
-    sha256: text(data.sha256),
-    storagePath: text(data.storagePath),
-    createdAt: data.createdAt || data.generatedAt || null,
-    updatedAt: orNull(data.updatedAt),
-    archivedAt: orNull(data.archivedAt),
-    softDeletedAt: orNull(data.softDeletedAt),
-    createdBy: orNull(data.createdBy),
-  };
-}
-
-export function normalizeGalleryItem(item, sourceCollection) {
-  const data = item || {};
-  const articleId = String(data.articleId || data.contentId || data.id || '');
-  const normalizedSourceCollection = String(data.sourceCollection || '').trim() || sourceCollection;
-  const galleryCollection = data.galleryCollection || sourceCollection;
-  return {
-    id: data.id,
-    articleId,
-    contentId: text(data.contentId),
-    imageUrl: text(data.imageUrl),
-    galleryCollection,
-    sourceCollection: normalizedSourceCollection,
-    source: data.source || sourceIdFor(normalizedSourceCollection, galleryCollection),
-    sourceUrl: orNull(data.sourceUrl),
-    ...describeItem(data, articleId),
-    ...lineageOf(data),
-    ...fileFactsOf(data),
-    usedBy: Array.isArray(data.usedBy) ? data.usedBy : [],
-    usageCount: Number(data.usageCount) || 0,
-    duplicateOf: orNull(data.duplicateOf),
-  };
-}
-
-function sourceIdFor(sourceCollection, galleryCollection) {
-  if (
-    galleryCollection === 'curated_article_images' ||
-    sourceCollection === 'curated_article_images'
-  )
-    return 'curated';
-  if (sourceCollection === 'manual_upload') return 'upload';
-  if (sourceCollection === 'preview') return 'preview';
-  if (sourceCollection === 'import') return 'import';
-  if (sourceCollection === 'rehost') return 'rehost';
-  if (['content', 'generated_content_images', 'blogs'].includes(sourceCollection))
-    return 'ai-cover';
-  return sourceCollection ? 'other' : 'ai-cover';
-}
-
-/** The word for a source id, or for a legacy sourceCollection value. */
-export function getSourceLabel(sourceOrCollection) {
-  const key = String(sourceOrCollection || '');
-  if (SOURCE_LABELS[key]) return SOURCE_LABELS[key];
-  return SOURCE_LABELS[sourceIdFor(key, '')] || 'Generated';
-}
 
 const createdAtMillis = toMillis;
 

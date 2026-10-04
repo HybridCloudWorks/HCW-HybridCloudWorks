@@ -53,6 +53,87 @@ export function deletionOrigin(doc) {
   return "unknown";
 }
 
+/**
+ * The aged rows sorted by what the reaper may do with them: `eligible` has a
+ * recorded origin and is counted by who put the mark there; `refusedIds` is
+ * every row whose mark has none, the query's and the in-memory check's.
+ */
+export function partitionByOrigin(candidates, unknownRows) {
+  const eligible = [];
+  const refusedIds = unknownRows.map((d) => d.id);
+  let userRequestedCount = 0;
+  let policyCount = 0;
+  for (const doc of candidates) {
+    const origin = deletionOrigin(doc);
+    if (origin === "unknown") {
+      refusedIds.push(doc.id);
+      continue;
+    }
+    if (origin === "user") userRequestedCount += 1;
+    else policyCount += 1;
+    eligible.push(doc);
+  }
+  return { eligible, refusedIds, userRequestedCount, policyCount };
+}
+
+/** Every blog linked to the document (`publishedBlogId`, `blogs.sourceContentId`), deleted; the count. */
+async function deleteLinkedBlogs(store, doc) {
+  const blogIds = new Set();
+  if (
+    doc.publishedBlogId &&
+    (await store.readDoc("blogs", doc.publishedBlogId, doc.publishedBlogId))
+  ) {
+    blogIds.add(doc.publishedBlogId);
+  }
+  const related = await store.queryDocs(
+    "blogs",
+    "SELECT c.id FROM c WHERE c.sourceContentId = @id",
+    [{ name: "@id", value: doc.id }],
+  );
+  for (const blog of related || []) blogIds.add(blog.id);
+  for (const blogId of blogIds) await store.deleteDoc("blogs", blogId, blogId);
+  return blogIds.size;
+}
+
+/** The document's content_versions rows, deleted best-effort; the count. */
+async function deleteVersions(store, doc, log) {
+  let deleted = 0;
+  try {
+    const versions = await store.queryDocs(
+      "content_versions",
+      "SELECT c.id FROM c WHERE c.contentId = @id",
+      [{ name: "@id", value: doc.id }],
+    );
+    for (const version of versions || []) {
+      await store.deleteDoc("content_versions", version.id, doc.id);
+      deleted += 1;
+    }
+  } catch (err) {
+    log.warn?.(
+      `[cleanupSoftDeletedContent] versions cleanup failed for ${doc.id}: ${err?.message || err}`,
+    );
+  }
+  return deleted;
+}
+
+/**
+ * One eligible document, gone: its blogs, the document itself, then the
+ * counters and its versions, each best-effort after the delete that matters.
+ */
+async function purgeDocument({ store, log, countersAfterDelete }, doc) {
+  const blogs = await deleteLinkedBlogs(store, doc);
+  await store.deleteDoc("content", doc.id, doc.id);
+  try {
+    await countersAfterDelete(doc.id);
+  } catch (err) {
+    log.warn?.(
+      `[cleanupSoftDeletedContent] counters not updated for ${doc.id}: ${err?.message || err}`,
+    );
+  }
+  const versions = await deleteVersions(store, doc, log);
+  return { blogs, versions };
+}
+
 export function createContentCleanup({
   store,
   now = () => new Date(),
@@ -171,20 +252,8 @@ export function createContentCleanup({
         params,
       )) || [];
 
-    const eligible = [];
-    const refusedIds = unknownRows.map((d) => d.id);
-    let userRequestedCount = 0;
-    let policyCount = 0;
-    for (const doc of candidates) {
-      const origin = deletionOrigin(doc);
-      if (origin === "unknown") {
-        refusedIds.push(doc.id);
-        continue;
-      }
-      if (origin === "user") userRequestedCount += 1;
-      else policyCount += 1;
-      eligible.push(doc);
-    }
+    const { eligible, refusedIds, userRequestedCount, policyCount } =
+      partitionByOrigin(candidates, unknownRows);
     const examinedCount = candidates.length + unknownRows.length;
 
     const summary = {
@@ -228,48 +297,12 @@ export function createContentCleanup({
     let deletedBlogCount = 0;
     let versionsDeleted = 0;
     for (const doc of eligible) {
-      const blogIds = new Set();
-      if (
-        doc.publishedBlogId &&
-        (await store.readDoc("blogs", doc.publishedBlogId, doc.publishedBlogId))
-      ) {
-        blogIds.add(doc.publishedBlogId);
-      }
-      const related = await store.queryDocs(
-        "blogs",
-        "SELECT c.id FROM c WHERE c.sourceContentId = @id",
-        [{ name: "@id", value: doc.id }],
+      const gone = await purgeDocument(
+        { store, log, countersAfterDelete },
+        doc,
       );
-      for (const blog of related || []) blogIds.add(blog.id);
-      for (const blogId of blogIds) {
-        await store.deleteDoc("blogs", blogId, blogId);
-        deletedBlogCount += 1;
-      }
-      await store.deleteDoc("content", doc.id, doc.id);
-      // The counters, best-effort, after the delete that matters.
-      try {
-        await countersAfterDelete(doc.id);
-      } catch (err) {
-        log.warn?.(
-          `[cleanupSoftDeletedContent] counters not updated for ${doc.id}: ${err?.message || err}`,
-        );
-      }
-      // Versions, best-effort.
-      try {
-        const versions = await store.queryDocs(
-          "content_versions",
-          "SELECT c.id FROM c WHERE c.contentId = @id",
-          [{ name: "@id", value: doc.id }],
-        );
-        for (const version of versions || []) {
-          await store.deleteDoc("content_versions", version.id, doc.id);
-          versionsDeleted += 1;
-        }
-      } catch (err) {
-        log.warn?.(
-          `[cleanupSoftDeletedContent] versions cleanup failed for ${doc.id}: ${err?.message || err}`,
-        );
-      }
+      deletedBlogCount += gone.blogs;
+      versionsDeleted += gone.versions;
     }
     await writeSystemAudit(
       store,

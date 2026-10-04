@@ -32,6 +32,13 @@
  * the admin reads drop them here, and nothing is removed from storage except
  * a single audio VERSION's blob when that version is deleted by hand — never
  * the active one.
+ *
+ * SHAPE OF A ROUTE (PR #841). Every route is `guarded(...)`: the role guard,
+ * then the route body, with any throw logged and answered as a 500. The body
+ * reads the route and the request body through `readRequest`, which answers
+ * the first thing wrong as one refusal, so a route is one guard, the store
+ * reads it needs, and one success — the validation rules themselves live in
+ * library.js, where they are tested without a store.
  */
 import { JOBS_CONTAINER, newJobDoc } from '../jobs.js';
 // The one body-shape test the other admin writers use: an object, not null,
@@ -54,8 +61,9 @@ import {
 } from './publish.js';
 import { LISTEN_AND_LEARN_JOB_TYPE, parseSourceEpisodePayload } from './source-episode.js';
 import {
+  chapterArchiveUpdates,
   parseBookCreate,
-  parseBookPatch,
+  parseBookEdit,
   parseChapterCreate,
   parseChapterPatch,
   parseReorder,
@@ -64,6 +72,7 @@ import {
   toBookView,
   toChapterView,
 } from './library.js';
+import { firstError } from './validate.js';
 import { MAX_SCRIPT_BYTES } from './script.js';
 import {
   AZURE_VOICES,
@@ -88,6 +97,9 @@ const json = (status, body) => ({
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify(body),
 });
+
+/** A refusal on its way to `json(status, { error })`. */
+const refuse = (status, error) => ({ ok: false, status, error });
 
 /**
  * An episode as the review view returns it: `kind` resolved by the one rule
@@ -136,6 +148,331 @@ function truthyQuery(request, name) {
   return value === '1' || value === 'true' || value === 'yes';
 }
 
+const ROUTE_REQUIRED = Object.freeze({
+  set: 'platform and examCode are required',
+  chapter: 'platform, examCode and chapterId are required',
+  version: 'platform, examCode, chapterId and versionId are required',
+});
+
+/**
+ * The set, chapter and version the route names, each validated as far as the
+ * route goes: `/{platform}/{examCode}`, then `/chapters/{chapterId}`, then
+ * `/versions/{versionId}`. One 400 names everything the route needed.
+ */
+function readRoute(request, { chapter = false, version = false } = {}) {
+  const ref = routeSet(request);
+  const chapterId = String(request.params?.chapterId || '').trim();
+  const versionId = String(request.params?.versionId || '').trim();
+  const shape = version ? 'version' : chapter ? 'chapter' : 'set';
+  const idsValid = {
+    set: () => true,
+    chapter: () => CHAPTER_ID_PATTERN.test(chapterId),
+    version: () => CHAPTER_ID_PATTERN.test(chapterId) && VERSION_ID_PATTERN.test(versionId),
+  };
+  if (!ref || !idsValid[shape]()) return refuse(400, ROUTE_REQUIRED[shape]);
+  return { ok: true, ref, chapterId, versionId };
+}
+
+/** A JSON object body run through `parse` (`{ value } | { error }`). */
+function parseBody(body, parse) {
+  if (!isPlainObject(body)) return refuse(400, 'Body must be a JSON object');
+  const parsed = parse(body);
+  return parsed.error ? refuse(400, parsed.error) : { ok: true, body, parsed: parsed.value };
+}
+
+/** `readRoute` then the body — in that order, as the routes always checked. */
+async function readRequest(
+  request,
+  { chapter = false, version = false, parse = null, emptyBody = false } = {}
+) {
+  const route = readRoute(request, { chapter, version });
+  if (!route.ok || !parse) return route;
+  const body = (await request.json().catch(() => null)) ?? (emptyBody ? {} : null);
+  const read = parseBody(body, parse);
+  return read.ok ? { ...route, ...read } : read;
+}
+
+const noSetMessage = (ref) => `No Listen & Learn set for ${ref.platform}/${ref.examCode}`;
+const noChapterMessage = (ref, chapterId) => `No chapter ${chapterId} in ${ref.id}`;
+
+// ── body parsers the routes own (the library ones are in library.js) ─────────
+
+/** `{ ttsModel? }` → `{ value: { ttsModel } }`, null when none was named. */
+function parseTtsModelBody(body) {
+  const model = parseTtsModel(body.ttsModel);
+  return model.error ? { error: model.error } : { value: { ttsModel: model.value } };
+}
+
+/** UTF-8 bytes of `text`, else the non-negative `bytes` given, else null. */
+function speechBytesOf(body) {
+  if (typeof body.text === 'string') return Buffer.byteLength(body.text, 'utf8');
+  const bytes = Number(body.bytes);
+  return Number.isFinite(bytes) && bytes >= 0 ? Math.ceil(bytes) : null;
+}
+
+/** `{ bytes? | text?, ttsModel?, platform?, examCode? }` for the estimate. */
+function parseEstimateBody(body) {
+  const model = parseTtsModel(body.ttsModel);
+  if (model.error) return { error: model.error };
+  const bytes = speechBytesOf(body);
+  if (bytes === null) return { error: 'Give text or a byte count to price' };
+  return {
+    value: { bytes, ttsModel: model.value, platform: body.platform, examCode: body.examCode },
+  };
+}
+
+/**
+ * `{ platform, examCode, areaSlug, status }` for the review. 'failed' is
+ * written by the generator, never chosen by a reviewer: marking a working
+ * episode failed would hide it from the site with no record of why, which
+ * is what `draft` is for. 'archived' has its own control on the chapter.
+ */
+function parseReviewBody(body) {
+  const platform = String(body.platform || '')
+    .trim()
+    .toLowerCase();
+  const examCode = String(body.examCode || '').trim();
+  const areaSlug = String(body.areaSlug || '').trim();
+  const status = String(body.status || '').trim();
+  const error = firstError([
+    [
+      status !== STATUS.published && status !== STATUS.draft,
+      `status must be "${STATUS.published}" or "${STATUS.draft}"`,
+    ],
+    [!platform || !examCode || !areaSlug, 'platform, examCode and areaSlug are required'],
+  ]);
+  return error ? { error } : { value: { platform, examCode, areaSlug, status } };
+}
+
+// ── pure planning the chapter routes do before writing ──────────────────────
+
+/** The audio fields that follow a newly chosen active version; null if unknown. */
+function activeVersionUpdates(chapter, activeVersionId) {
+  const versions = versionsOf(chapter);
+  if (!versions.some((v) => v.id === activeVersionId)) return null;
+  const next = versions.map((v) => ({ ...v, active: v.id === activeVersionId }));
+  const mirrored = mirrorActiveVersion({ ...chapter, versions: next });
+  return {
+    versions: next,
+    audioUrl: mirrored.audioUrl,
+    audioPath: mirrored.audioPath,
+    audioBytes: mirrored.audioBytes,
+    durationSeconds: mirrored.durationSeconds,
+    speechProvider: mirrored.speechProvider,
+    speechModel: mirrored.speechModel,
+  };
+}
+
+/**
+ * The patch a chapter PATCH writes, from its parsed body against the chapter
+ * as stored: edits are stamped, choosing a version rewrites the top-level
+ * audio fields from it so the public players follow, and archive / restore
+ * is a no-op when the chapter is already there.
+ */
+function chapterPatchUpdates(chapter, parsed, { at, by }) {
+  const { title, order, sourceText, activeVersionId, archived, clearError } = parsed;
+  const updates = { updatedAt: at, updatedBy: by };
+  if (title !== undefined) Object.assign(updates, { title, titleEditedAt: at });
+  if (order !== undefined) Object.assign(updates, { order, orderEditedAt: at });
+  if (sourceText !== undefined) updates.sourceText = sourceText;
+  if (clearError) updates.lastError = null;
+  if (activeVersionId !== undefined) {
+    const chosen = activeVersionUpdates(chapter, activeVersionId);
+    if (!chosen) return refuse(404, `No version ${activeVersionId} on this chapter`);
+    Object.assign(updates, chosen);
+  }
+  if (archived !== undefined) {
+    Object.assign(updates, chapterArchiveUpdates(chapter, archived, { at }) || {});
+  }
+  return { ok: true, updates };
+}
+
+/** The document a hand-made chapter starts as: a draft with no audio yet. */
+function newChapterDoc({ ref, parsed, sourceText, order, at, by }) {
+  return {
+    id: parsed.id,
+    setId: ref.id,
+    provider: ref.platform,
+    examCode: ref.examCode,
+    areaSlug: parsed.id,
+    areaName: parsed.title,
+    kind: EPISODE_KIND.manual,
+    sources: [],
+    sourceText,
+    sourceContentId: parsed.contentId,
+    versions: [],
+    order,
+    weightLabel: '',
+    weightLow: null,
+    title: parsed.title,
+    summary: '',
+    keyTakeaways: [],
+    transcript: [],
+    speakers: null,
+    audioUrl: null,
+    audioPath: null,
+    audioBytes: null,
+    speechProvider: null,
+    speechModel: null,
+    durationSeconds: null,
+    audioError: null,
+    videos: [],
+    status: STATUS.draft,
+    generatedAt: at,
+    approvedAt: null,
+    approvedBy: null,
+    createdAt: at,
+    createdBy: by,
+    updatedAt: at,
+    updatedBy: by,
+  };
+}
+
+/**
+ * Which job regenerates a chapter, by its kind: a guide chapter re-reads its
+ * area from the set's study guide (`areas: [slug]`), a source chapter
+ * re-reads its stored sources, a hand-made chapter speaks its `sourceText`.
+ * Each answers `{ type, payload, bytes }` — the bytes price the run — or the
+ * 400 that says why this chapter cannot be regenerated as it stands.
+ */
+const REGENERATION_PLANS = Object.freeze({
+  [EPISODE_KIND.manual]({ chapter, chapterId, ref, modelFields }) {
+    if (!chapter.sourceText) {
+      return refuse(400, 'This chapter has no text to speak; add some first');
+    }
+    return {
+      ok: true,
+      type: SPEAK_CHAPTER_JOB_TYPE,
+      payload: { platform: ref.platform, examCode: ref.examCode, chapterId, ...modelFields },
+      bytes: Buffer.byteLength(chapter.sourceText, 'utf8'),
+    };
+  },
+  [EPISODE_KIND.source]({ chapter, ref, cert, modelFields }) {
+    const parsed = parseSourceEpisodePayload({
+      platform: ref.platform,
+      examCode: ref.examCode,
+      title: chapter.areaName || chapter.title,
+      sources: chapter.sources,
+      ...cert,
+    });
+    if (parsed.error) return refuse(400, parsed.error);
+    return {
+      ok: true,
+      type: LISTEN_AND_LEARN_JOB_TYPE,
+      payload: {
+        platform: ref.platform,
+        examCode: ref.examCode,
+        title: parsed.value.title,
+        sources: parsed.value.sources,
+        ...cert,
+        ...modelFields,
+      },
+      bytes: MAX_SCRIPT_BYTES,
+    };
+  },
+  [EPISODE_KIND.guide]({ chapter, set, ref, cert, modelFields }) {
+    if (!set?.studyGuideUrl) {
+      return refuse(
+        400,
+        'This chapter was read from a study guide the set no longer names; run the set from the Generate tab'
+      );
+    }
+    return {
+      ok: true,
+      type: LISTEN_AND_LEARN_JOB_TYPE,
+      payload: {
+        platform: ref.platform,
+        examCode: ref.examCode,
+        studyGuideUrl: set.studyGuideUrl,
+        areas: [chapter.areaSlug || chapter.id],
+        ...cert,
+        ...modelFields,
+      },
+      bytes: MAX_SCRIPT_BYTES,
+    };
+  },
+});
+
+function regenerationPlan({ chapter, chapterId, set, ref, ttsModel }) {
+  const cert = {
+    ...(set?.certTitle ? { certTitle: set.certTitle } : {}),
+    ...(set?.certSlug ? { certSlug: set.certSlug } : {}),
+  };
+  const modelFields = ttsModel ? { ttsModel } : {};
+  const plan = REGENERATION_PLANS[episodeKindOf(chapter)];
+  return plan({ chapter, chapterId, set, ref, cert, modelFields });
+}
+
+// ── store reads the routes share, bound to the store by the factory ─────────
+
+/**
+ * The scaffold every route shares: the role guard, then the route body,
+ * with any throw logged under `label` and answered as a 500 carrying
+ * `message`. The body answers everything else.
+ */
+const guardedWith =
+  (guard) =>
+  (role, label, message, run) =>
+  async (request, context, io = {}) => {
+    const auth = await guard.requireRole(request, role);
+    if (auth.error) return auth.error;
+    try {
+      return await run({ request, context, auth, io });
+    } catch (error) {
+      context.error(`${label} failed:`, error);
+      return json(500, { error: message });
+    }
+  };
+
+/** Read a set and its live chapters, or the 404 to answer with. */
+async function loadSetFrom(store, ref) {
+  const [set, rows] = await Promise.all([
+    store.readDoc(SET_CONTAINER, ref.id, ref.id),
+    store.queryDocs(
+      EPISODE_CONTAINER,
+      `SELECT TOP ${MAX_EPISODES_PER_SET} * FROM c WHERE c.setId = @setId`,
+      [{ name: '@setId', value: ref.id }]
+    ),
+  ]);
+  const chapters = rows.filter((doc) => !isSoftDeleted(doc));
+  if ((!set || isSoftDeleted(set)) && chapters.length === 0) return { missing: true };
+  return { set: set && !isSoftDeleted(set) ? set : null, chapters: [...chapters].sort(byOrder) };
+}
+
+/** One chapter in a set, or null; soft-deleted reads as absent. */
+async function loadChapterFrom(store, ref, chapterId) {
+  const doc = await store.readDoc(EPISODE_CONTAINER, chapterId, ref.id);
+  return doc && !isSoftDeleted(doc) ? doc : null;
+}
+
+/**
+ * The text a new chapter speaks: as pasted, or read from the content item
+ * it names with the markup dropped — a missing item is a 404, an item with
+ * no body is a 400.
+ */
+async function resolveChapterTextFrom(store, { sourceText, contentId }) {
+  if (sourceText || !contentId) return { ok: true, sourceText };
+  const item = await store.readDoc('content', contentId, contentId);
+  if (!item) return refuse(404, `content ${contentId} not found`);
+  const text = speakableTextOf(item);
+  return text
+    ? { ok: true, sourceText: text }
+    : refuse(400, 'That content item has no body text to speak');
+}
+
+/** One past the highest `order` among the set's live chapters. */
+async function nextChapterOrderIn(store, ref) {
+  const siblings = await store.queryDocs(
+    EPISODE_CONTAINER,
+    `SELECT TOP ${MAX_EPISODES_PER_SET} c.id, c["order"], c.softDeletedAt FROM c WHERE c.setId = @setId`,
+    [{ name: '@setId', value: ref.id }]
+  );
+  return (
+    siblings.filter((s) => !isSoftDeleted(s)).reduce((max, s) => Math.max(max, s.order ?? 0), -1) +
+    1
+  );
+}
+
 /**
  * @param {object} deps
  * @param {{ requireRole: Function }} deps.guard
@@ -155,27 +492,12 @@ export function createListenAndLearnHandlers({
   uuid = () => crypto.randomUUID(),
 }) {
   const stamp = () => now().toISOString();
-
-  /** Read a set and its live chapters, or the 404 to answer with. */
-  async function loadSet(ref, { includeDeleted = false } = {}) {
-    const [set, rows] = await Promise.all([
-      store.readDoc(SET_CONTAINER, ref.id, ref.id),
-      store.queryDocs(
-        EPISODE_CONTAINER,
-        `SELECT TOP ${MAX_EPISODES_PER_SET} * FROM c WHERE c.setId = @setId`,
-        [{ name: '@setId', value: ref.id }]
-      ),
-    ]);
-    const chapters = includeDeleted ? rows : rows.filter((doc) => !isSoftDeleted(doc));
-    if ((!set || isSoftDeleted(set)) && chapters.length === 0) return { missing: true };
-    return { set: set && !isSoftDeleted(set) ? set : null, chapters: [...chapters].sort(byOrder) };
-  }
-
-  /** One chapter in a set, or null; soft-deleted reads as absent. */
-  async function loadChapter(ref, chapterId) {
-    const doc = await store.readDoc(EPISODE_CONTAINER, chapterId, ref.id);
-    return doc && !isSoftDeleted(doc) ? doc : null;
-  }
+  const actorOf = (auth) => auth.user?.oid || null;
+  const guarded = guardedWith(guard);
+  const loadSet = (ref) => loadSetFrom(store, ref);
+  const loadChapter = (ref, chapterId) => loadChapterFrom(store, ref, chapterId);
+  const resolveChapterText = (parsed) => resolveChapterTextFrom(store, parsed);
+  const nextChapterOrder = (ref) => nextChapterOrderIn(store, ref);
 
   /** Write a job document and queue it; the 202 body every enqueue answers. */
   async function queueJob({ type, payload, user, enqueue, extra = {} }) {
@@ -223,34 +545,33 @@ export function createListenAndLearnHandlers({
   /** Archive or restore every live chapter of a book, one write each. */
   async function archiveChapters(ref, chapters, archive, at) {
     for (const chapter of chapters) {
-      if (archive && chapter.status !== STATUS.archived) {
-        await store.patchDoc(
-          EPISODE_CONTAINER,
-          chapter.id,
-          {
-            status: STATUS.archived,
-            statusBeforeArchive: chapter.status || STATUS.draft,
-            archivedAt: at,
-            archivedWithBook: true,
-            updatedAt: at,
-          },
-          { partitionKey: ref.id }
-        );
-      } else if (!archive && chapter.status === STATUS.archived && chapter.archivedWithBook) {
-        await store.patchDoc(
-          EPISODE_CONTAINER,
-          chapter.id,
-          {
-            status: chapter.statusBeforeArchive || STATUS.draft,
-            statusBeforeArchive: null,
-            archivedAt: null,
-            archivedWithBook: null,
-            updatedAt: at,
-          },
-          { partitionKey: ref.id }
-        );
-      }
+      const fields = chapterArchiveUpdates(chapter, archive, { at, withBook: true });
+      if (!fields) continue;
+      await store.patchDoc(
+        EPISODE_CONTAINER,
+        chapter.id,
+        { ...fields, updatedAt: at },
+        { partitionKey: ref.id }
+      );
     }
+  }
+
+  /** Queue the first reading of a new chapter; the 202 body, or null unwired. */
+  async function speakNewChapter({ ref, doc, set, sourceText, user, enqueue, context }) {
+    if (typeof enqueue !== 'function') {
+      context.error?.('createChapter: no queue output wired');
+      return null;
+    }
+    const accepted = await queueJob({
+      type: SPEAK_CHAPTER_JOB_TYPE,
+      payload: { platform: ref.platform, examCode: ref.examCode, chapterId: doc.id },
+      user,
+      enqueue,
+      extra: {
+        speech: await estimateFor(set, { bytes: Buffer.byteLength(sourceText, 'utf8') }),
+      },
+    });
+    return JSON.parse(accepted.body);
   }
 
   return {
@@ -260,10 +581,11 @@ export function createListenAndLearnHandlers({
      * Soft-deleted books are never listed; archived ones only with
      * `?archived=1`.
      */
-    async listSets(request, context) {
-      const auth = await guard.requireRole(request, 'editor');
-      if (auth.error) return auth.error;
-      try {
+    listSets: guarded(
+      'editor',
+      'listListenAndLearnSets',
+      'Failed to list Listen & Learn sets',
+      async ({ request }) => {
         const [rows, chapterRows] = await Promise.all([
           store.queryDocs(SET_CONTAINER, `SELECT TOP ${MAX_SETS} * FROM c`, []),
           store.queryDocs(
@@ -283,28 +605,25 @@ export function createListenAndLearnHandlers({
           )
           .map((set) => toBookView(set, counts.get(set.id) || null));
         return json(200, { success: true, items, total: items.length });
-      } catch (error) {
-        context.error('listListenAndLearnSets failed:', error);
-        return json(500, { error: 'Failed to list Listen & Learn sets' });
       }
-    },
+    ),
 
     /**
      * GET /api/cms/listen-and-learn/{platform}/{examCode} — one book and every
      * chapter in it, drafts, failures and archived included. This is the
      * review view, so it deliberately shows what the public read hides.
      */
-    async getSet(request, context) {
-      const auth = await guard.requireRole(request, 'editor');
-      if (auth.error) return auth.error;
-      try {
-        const ref = routeSet(request);
-        if (!ref) return json(400, { error: 'platform and examCode are required' });
+    getSet: guarded(
+      'editor',
+      'getListenAndLearnSet',
+      'Failed to get the Listen & Learn set',
+      async ({ request }) => {
+        const route = readRoute(request);
+        if (!route.ok) return json(route.status, { error: route.error });
+        const { ref } = route;
 
         const loaded = await loadSet(ref);
-        if (loaded.missing) {
-          return json(404, { error: `No Listen & Learn set for ${ref.platform}/${ref.examCode}` });
-        }
+        if (loaded.missing) return json(404, { error: noSetMessage(ref) });
 
         return json(200, {
           success: true,
@@ -313,11 +632,8 @@ export function createListenAndLearnHandlers({
             : null,
           episodes: loaded.chapters.map((doc) => toChapterView(doc, loaded.set)),
         });
-      } catch (error) {
-        context.error('getListenAndLearnSet failed:', error);
-        return json(500, { error: 'Failed to get the Listen & Learn set' });
       }
-    },
+    ),
 
     /**
      * POST /api/cms/listen-and-learn
@@ -327,16 +643,16 @@ export function createListenAndLearnHandlers({
      * 409 when the code is taken: the code is the route and the blob path
      * segment, and a second book under it would share both.
      */
-    async createBook(request, context) {
-      const auth = await guard.requireRole(request, 'editor');
-      if (auth.error) return auth.error;
-      try {
-        const body = await request.json().catch(() => null);
-        if (!isPlainObject(body)) return json(400, { error: 'Body must be a JSON object' });
-        const parsed = parseBookCreate(body);
-        if (parsed.error) return json(400, { error: parsed.error });
+    createBook: guarded(
+      'editor',
+      'createListenAndLearnBook',
+      'Failed to create the book',
+      async ({ request, context, auth }) => {
+        const read = parseBody(await request.json().catch(() => null), parseBookCreate);
+        if (!read.ok) return json(read.status, { error: read.error });
+        const { body, parsed } = read;
 
-        const { provider, examCode } = parsed.value;
+        const { provider, examCode } = parsed;
         const id = setId(provider, examCode);
         const existing = await store.readDoc(SET_CONTAINER, id, id);
         if (existing && !isSoftDeleted(existing)) {
@@ -344,36 +660,32 @@ export function createListenAndLearnHandlers({
         }
 
         const at = stamp();
+        const by = actorOf(auth);
         const doc = {
           id,
           provider,
           examCode,
-          ...parsed.value,
+          ...parsed,
           certSlug: body.certSlug ? String(body.certSlug).trim() : examCode,
-          certTitle: parsed.value.certTitle || parsed.value.title,
+          certTitle: parsed.certTitle || parsed.title,
           studyGuideUrl: null,
           studyGuideTitle: null,
           areaCount: 0,
           areaSlugs: [],
           generatedAt: at,
-          generatedBy: auth.user?.oid || null,
+          generatedBy: by,
           createdAt: at,
-          createdBy: auth.user?.oid || null,
+          createdBy: by,
           updatedAt: at,
-          updatedBy: auth.user?.oid || null,
+          updatedBy: by,
           archivedAt: null,
           softDeletedAt: null,
         };
         await store.upsertDoc(SET_CONTAINER, doc);
-        context.log?.(
-          `createListenAndLearnBook: ${id} (${doc.kind}) by ${auth.user?.oid || 'unknown'}`
-        );
+        context.log?.(`createListenAndLearnBook: ${id} (${doc.kind}) by ${by || 'unknown'}`);
         return json(201, { success: true, item: toBookView(doc) });
-      } catch (error) {
-        context.error('createListenAndLearnBook failed:', error);
-        return json(500, { error: 'Failed to create the book' });
       }
-    },
+    ),
 
     /**
      * PATCH /api/cms/listen-and-learn/{platform}/{examCode}
@@ -384,55 +696,42 @@ export function createListenAndLearnHandlers({
      * `status = 'published'` — stop serving them in the same stroke; restore
      * puts back the chapters the archive took, and only those.
      */
-    async patchBook(request, context) {
-      const auth = await guard.requireRole(request, 'editor');
-      if (auth.error) return auth.error;
-      try {
-        const ref = routeSet(request);
-        if (!ref) return json(400, { error: 'platform and examCode are required' });
-        const body = await request.json().catch(() => null);
-        if (!isPlainObject(body)) return json(400, { error: 'Body must be a JSON object' });
-
-        const { archived, ...fields } = body;
-        const patch = Object.keys(fields).length ? parseBookPatch(fields) : { value: {} };
-        if (patch.error) return json(400, { error: patch.error });
-        if (archived !== undefined && typeof archived !== 'boolean') {
-          return json(400, { error: 'archived must be true or false' });
-        }
-        if (archived === undefined && Object.keys(patch.value).length === 0) {
-          return json(400, { error: 'Nothing to change' });
-        }
+    patchBook: guarded(
+      'editor',
+      'patchListenAndLearnBook',
+      'Failed to update the book',
+      async ({ request, context, auth }) => {
+        const read = await readRequest(request, { parse: parseBookEdit });
+        if (!read.ok) return json(read.status, { error: read.error });
+        const { ref, parsed } = read;
+        const { fields, archived } = parsed;
 
         const loaded = await loadSet(ref);
-        if (loaded.missing || !loaded.set) {
-          return json(404, { error: `No Listen & Learn set for ${ref.platform}/${ref.examCode}` });
-        }
+        if (loaded.missing || !loaded.set) return json(404, { error: noSetMessage(ref) });
 
         const at = stamp();
-        const updates = { ...patch.value, updatedAt: at, updatedBy: auth.user?.oid || null };
-        if (archived === true && !loaded.set.archivedAt) {
-          updates.archivedAt = at;
-          await archiveChapters(ref, loaded.chapters, true, at);
-        } else if (archived === false && loaded.set.archivedAt) {
-          updates.archivedAt = null;
-          await archiveChapters(ref, loaded.chapters, false, at);
+        const by = actorOf(auth);
+        const updates = { ...fields, updatedAt: at, updatedBy: by };
+        // Only a move changes anything: archiving an archived book, or
+        // restoring a live one, leaves the chapters alone.
+        const moves = archived !== undefined && archived !== Boolean(loaded.set.archivedAt);
+        if (moves) {
+          updates.archivedAt = archived ? at : null;
+          await archiveChapters(ref, loaded.chapters, archived, at);
         }
 
         const updated = await store.patchDoc(SET_CONTAINER, ref.id, updates, {
           partitionKey: ref.id,
         });
         context.log?.(
-          `patchListenAndLearnBook: ${ref.id} ${Object.keys(updates).join(',')} by ${auth.user?.oid || 'unknown'}`
+          `patchListenAndLearnBook: ${ref.id} ${Object.keys(updates).join(',')} by ${by || 'unknown'}`
         );
         return json(200, {
           success: true,
           item: toBookView(updated || { ...loaded.set, ...updates }),
         });
-      } catch (error) {
-        context.error('patchListenAndLearnBook failed:', error);
-        return json(500, { error: 'Failed to update the book' });
       }
-    },
+    ),
 
     /**
      * DELETE /api/cms/listen-and-learn/{platform}/{examCode}[?force=1]
@@ -442,16 +741,16 @@ export function createListenAndLearnHandlers({
      * delete that silently takes live audio off the site is the kind of
      * thing a confirm dialog exists for.
      */
-    async deleteBook(request, context) {
-      const auth = await guard.requireRole(request, 'editor');
-      if (auth.error) return auth.error;
-      try {
-        const ref = routeSet(request);
-        if (!ref) return json(400, { error: 'platform and examCode are required' });
+    deleteBook: guarded(
+      'editor',
+      'deleteListenAndLearnBook',
+      'Failed to delete the book',
+      async ({ request, context, auth }) => {
+        const route = readRoute(request);
+        if (!route.ok) return json(route.status, { error: route.error });
+        const { ref } = route;
         const loaded = await loadSet(ref);
-        if (loaded.missing) {
-          return json(404, { error: `No Listen & Learn set for ${ref.platform}/${ref.examCode}` });
-        }
+        if (loaded.missing) return json(404, { error: noSetMessage(ref) });
         const live = publishedChapters(loaded.chapters);
         if (live.length > 0 && !truthyQuery(request, 'force')) {
           return json(409, {
@@ -461,32 +760,20 @@ export function createListenAndLearnHandlers({
         }
 
         const at = stamp();
-        const by = auth.user?.oid || null;
+        const by = actorOf(auth);
+        const tombstone = { softDeletedAt: at, softDeletedBy: by, updatedAt: at };
         for (const chapter of loaded.chapters) {
-          await store.patchDoc(
-            EPISODE_CONTAINER,
-            chapter.id,
-            { softDeletedAt: at, softDeletedBy: by, updatedAt: at },
-            { partitionKey: ref.id }
-          );
+          await store.patchDoc(EPISODE_CONTAINER, chapter.id, tombstone, { partitionKey: ref.id });
         }
         if (loaded.set) {
-          await store.patchDoc(
-            SET_CONTAINER,
-            ref.id,
-            { softDeletedAt: at, softDeletedBy: by, updatedAt: at },
-            { partitionKey: ref.id }
-          );
+          await store.patchDoc(SET_CONTAINER, ref.id, tombstone, { partitionKey: ref.id });
         }
         context.log?.(
           `deleteListenAndLearnBook: ${ref.id} with ${loaded.chapters.length} chapters by ${by || 'unknown'}`
         );
         return json(200, { success: true, id: ref.id, chapters: loaded.chapters.length });
-      } catch (error) {
-        context.error('deleteListenAndLearnBook failed:', error);
-        return json(500, { error: 'Failed to delete the book' });
       }
-    },
+    ),
 
     /**
      * POST /api/cms/listen-and-learn/{platform}/{examCode}/chapters
@@ -497,119 +784,51 @@ export function createListenAndLearnHandlers({
      * audio and, unless `speak: false`, queues the job that reads it, whose
      * id the 201 carries so the page can follow it.
      */
-    async createChapter(request, context, { enqueue } = {}) {
-      const auth = await guard.requireRole(request, 'editor');
-      if (auth.error) return auth.error;
-      try {
-        const ref = routeSet(request);
-        if (!ref) return json(400, { error: 'platform and examCode are required' });
-        const body = await request.json().catch(() => null);
-        if (!isPlainObject(body)) return json(400, { error: 'Body must be a JSON object' });
-        const parsed = parseChapterCreate(body);
-        if (parsed.error) return json(400, { error: parsed.error });
+    createChapter: guarded(
+      'editor',
+      'createListenAndLearnChapter',
+      'Failed to create the chapter',
+      async ({ request, context, auth, io }) => {
+        const read = await readRequest(request, { parse: parseChapterCreate });
+        if (!read.ok) return json(read.status, { error: read.error });
+        const { ref, parsed } = read;
 
         const set = await store.readDoc(SET_CONTAINER, ref.id, ref.id);
-        if (!set || isSoftDeleted(set)) {
-          return json(404, { error: `No Listen & Learn set for ${ref.platform}/${ref.examCode}` });
-        }
+        if (!set || isSoftDeleted(set)) return json(404, { error: noSetMessage(ref) });
 
-        let { sourceText } = parsed.value;
-        if (!sourceText && parsed.value.contentId) {
-          const item = await store.readDoc(
-            'content',
-            parsed.value.contentId,
-            parsed.value.contentId
-          );
-          if (!item) return json(404, { error: `content ${parsed.value.contentId} not found` });
-          sourceText = speakableTextOf(item);
-          if (!sourceText) {
-            return json(400, { error: 'That content item has no body text to speak' });
-          }
-        }
+        const text = await resolveChapterText(parsed);
+        if (!text.ok) return json(text.status, { error: text.error });
+        const { sourceText } = text;
 
-        const existing = await store.readDoc(EPISODE_CONTAINER, parsed.value.id, ref.id);
+        const existing = await store.readDoc(EPISODE_CONTAINER, parsed.id, ref.id);
         if (existing && !isSoftDeleted(existing)) {
           return json(409, {
-            error: `A chapter titled "${parsed.value.title}" already exists; rename it`,
+            error: `A chapter titled "${parsed.title}" already exists; rename it`,
           });
         }
 
-        const siblings = await store.queryDocs(
-          EPISODE_CONTAINER,
-          `SELECT TOP ${MAX_EPISODES_PER_SET} c.id, c["order"], c.softDeletedAt FROM c WHERE c.setId = @setId`,
-          [{ name: '@setId', value: ref.id }]
-        );
-        const order =
-          siblings
-            .filter((s) => !isSoftDeleted(s))
-            .reduce((max, s) => Math.max(max, s.order ?? 0), -1) + 1;
-
+        const order = await nextChapterOrder(ref);
         const at = stamp();
-        const by = auth.user?.oid || null;
-        const doc = {
-          id: parsed.value.id,
-          setId: ref.id,
-          provider: ref.platform,
-          examCode: ref.examCode,
-          areaSlug: parsed.value.id,
-          areaName: parsed.value.title,
-          kind: EPISODE_KIND.manual,
-          sources: [],
-          sourceText,
-          sourceContentId: parsed.value.contentId,
-          versions: [],
-          order,
-          weightLabel: '',
-          weightLow: null,
-          title: parsed.value.title,
-          summary: '',
-          keyTakeaways: [],
-          transcript: [],
-          speakers: null,
-          audioUrl: null,
-          audioPath: null,
-          audioBytes: null,
-          speechProvider: null,
-          speechModel: null,
-          durationSeconds: null,
-          audioError: null,
-          videos: [],
-          status: STATUS.draft,
-          generatedAt: at,
-          approvedAt: null,
-          approvedBy: null,
-          createdAt: at,
-          createdBy: by,
-          updatedAt: at,
-          updatedBy: by,
-        };
+        const by = actorOf(auth);
+        const doc = newChapterDoc({ ref, parsed, sourceText, order, at, by });
         await store.upsertDoc(EPISODE_CONTAINER, doc);
 
-        let queued = null;
-        if (parsed.value.speak) {
-          if (typeof enqueue !== 'function') {
-            context.error?.('createChapter: no queue output wired');
-          } else {
-            const accepted = await queueJob({
-              type: SPEAK_CHAPTER_JOB_TYPE,
-              payload: { platform: ref.platform, examCode: ref.examCode, chapterId: doc.id },
+        const queued = parsed.speak
+          ? await speakNewChapter({
+              ref,
+              doc,
+              set,
+              sourceText,
               user: auth.user,
-              enqueue,
-              extra: {
-                speech: await estimateFor(set, { bytes: Buffer.byteLength(sourceText, 'utf8') }),
-              },
-            });
-            queued = JSON.parse(accepted.body);
-          }
-        }
+              enqueue: io.enqueue,
+              context,
+            })
+          : null;
 
         context.log?.(`createListenAndLearnChapter: ${ref.id}/${doc.id} by ${by || 'unknown'}`);
         return json(201, { success: true, item: toChapterView(doc, set), job: queued });
-      } catch (error) {
-        context.error('createListenAndLearnChapter failed:', error);
-        return json(500, { error: 'Failed to create the chapter' });
       }
-    },
+    ),
 
     /**
      * PATCH /api/cms/listen-and-learn/{platform}/{examCode}/chapters/{chapterId}
@@ -620,65 +839,23 @@ export function createListenAndLearnHandlers({
      * failed regeneration (`clearError`). Choosing a version rewrites the
      * top-level audio fields from it, so the public players follow.
      */
-    async patchChapter(request, context) {
-      const auth = await guard.requireRole(request, 'editor');
-      if (auth.error) return auth.error;
-      try {
-        const ref = routeSet(request);
-        const chapterId = String(request.params?.chapterId || '').trim();
-        if (!ref || !CHAPTER_ID_PATTERN.test(chapterId)) {
-          return json(400, { error: 'platform, examCode and chapterId are required' });
-        }
-        const body = await request.json().catch(() => null);
-        if (!isPlainObject(body)) return json(400, { error: 'Body must be a JSON object' });
-        const parsed = parseChapterPatch(body);
-        if (parsed.error) return json(400, { error: parsed.error });
+    patchChapter: guarded(
+      'editor',
+      'patchListenAndLearnChapter',
+      'Failed to update the chapter',
+      async ({ request, context, auth }) => {
+        const read = await readRequest(request, { chapter: true, parse: parseChapterPatch });
+        if (!read.ok) return json(read.status, { error: read.error });
+        const { ref, chapterId, parsed } = read;
 
         const chapter = await loadChapter(ref, chapterId);
-        if (!chapter) return json(404, { error: `No chapter ${chapterId} in ${ref.id}` });
+        if (!chapter) return json(404, { error: noChapterMessage(ref, chapterId) });
 
         const at = stamp();
-        const by = auth.user?.oid || null;
-        const { title, order, sourceText, activeVersionId, archived, clearError } = parsed.value;
-        const updates = { updatedAt: at, updatedBy: by };
-        if (title !== undefined) Object.assign(updates, { title, titleEditedAt: at });
-        if (order !== undefined) Object.assign(updates, { order, orderEditedAt: at });
-        if (sourceText !== undefined) updates.sourceText = sourceText;
-        if (clearError) updates.lastError = null;
-
-        if (activeVersionId !== undefined) {
-          const versions = versionsOf(chapter);
-          if (!versions.some((v) => v.id === activeVersionId)) {
-            return json(404, { error: `No version ${activeVersionId} on this chapter` });
-          }
-          const next = versions.map((v) => ({ ...v, active: v.id === activeVersionId }));
-          const mirrored = mirrorActiveVersion({ ...chapter, versions: next });
-          Object.assign(updates, {
-            versions: next,
-            audioUrl: mirrored.audioUrl,
-            audioPath: mirrored.audioPath,
-            audioBytes: mirrored.audioBytes,
-            durationSeconds: mirrored.durationSeconds,
-            speechProvider: mirrored.speechProvider,
-            speechModel: mirrored.speechModel,
-          });
-        }
-
-        if (archived === true && chapter.status !== STATUS.archived) {
-          Object.assign(updates, {
-            status: STATUS.archived,
-            statusBeforeArchive: chapter.status || STATUS.draft,
-            archivedAt: at,
-            archivedWithBook: null,
-          });
-        } else if (archived === false && chapter.status === STATUS.archived) {
-          Object.assign(updates, {
-            status: chapter.statusBeforeArchive || STATUS.draft,
-            statusBeforeArchive: null,
-            archivedAt: null,
-            archivedWithBook: null,
-          });
-        }
+        const by = actorOf(auth);
+        const planned = chapterPatchUpdates(chapter, parsed, { at, by });
+        if (!planned.ok) return json(planned.status, { error: planned.error });
+        const { updates } = planned;
 
         const updated = await store.patchDoc(EPISODE_CONTAINER, chapterId, updates, {
           partitionKey: ref.id,
@@ -691,34 +868,27 @@ export function createListenAndLearnHandlers({
           success: true,
           item: toChapterView(updated || { ...chapter, ...updates }, set),
         });
-      } catch (error) {
-        context.error('patchListenAndLearnChapter failed:', error);
-        return json(500, { error: 'Failed to update the chapter' });
       }
-    },
+    ),
 
     /**
      * PATCH /api/cms/listen-and-learn/{platform}/{examCode}/chapters
      * `{ order: [chapterId, …] }` — the new order, first to last. One write
      * per chapter whose position changed, none for the rest.
      */
-    async reorderChapters(request, context) {
-      const auth = await guard.requireRole(request, 'editor');
-      if (auth.error) return auth.error;
-      try {
-        const ref = routeSet(request);
-        if (!ref) return json(400, { error: 'platform and examCode are required' });
-        const body = await request.json().catch(() => null);
-        if (!isPlainObject(body)) return json(400, { error: 'Body must be a JSON object' });
-        const parsed = parseReorder(body);
-        if (parsed.error) return json(400, { error: parsed.error });
+    reorderChapters: guarded(
+      'editor',
+      'reorderListenAndLearnChapters',
+      'Failed to reorder the chapters',
+      async ({ request, context, auth }) => {
+        const read = await readRequest(request, { parse: parseReorder });
+        if (!read.ok) return json(read.status, { error: read.error });
+        const { ref, parsed: order } = read;
 
         const loaded = await loadSet(ref);
-        if (loaded.missing) {
-          return json(404, { error: `No Listen & Learn set for ${ref.platform}/${ref.examCode}` });
-        }
+        if (loaded.missing) return json(404, { error: noSetMessage(ref) });
         const byId = new Map(loaded.chapters.map((c) => [c.id, c]));
-        const unknown = parsed.value.filter((id) => !byId.has(id));
+        const unknown = order.filter((id) => !byId.has(id));
         if (unknown.length) {
           return json(404, {
             error: `Unknown chapter${unknown.length > 1 ? 's' : ''}: ${unknown.join(', ')}`,
@@ -727,39 +897,35 @@ export function createListenAndLearnHandlers({
 
         const at = stamp();
         let changed = 0;
-        for (const [index, id] of parsed.value.entries()) {
+        for (const [index, id] of order.entries()) {
           if (byId.get(id).order === index) continue;
           await store.patchDoc(
             EPISODE_CONTAINER,
             id,
-            { order: index, orderEditedAt: at, updatedAt: at, updatedBy: auth.user?.oid || null },
+            { order: index, orderEditedAt: at, updatedAt: at, updatedBy: actorOf(auth) },
             { partitionKey: ref.id }
           );
           changed += 1;
         }
         context.log?.(`reorderListenAndLearnChapters: ${ref.id} ${changed} moved`);
-        return json(200, { success: true, changed, order: parsed.value });
-      } catch (error) {
-        context.error('reorderListenAndLearnChapters failed:', error);
-        return json(500, { error: 'Failed to reorder the chapters' });
+        return json(200, { success: true, changed, order });
       }
-    },
+    ),
 
     /**
      * DELETE /api/cms/listen-and-learn/{platform}/{examCode}/chapters/{chapterId}[?force=1]
      * Soft; refused with 409 for a published chapter unless `force`.
      */
-    async deleteChapter(request, context) {
-      const auth = await guard.requireRole(request, 'editor');
-      if (auth.error) return auth.error;
-      try {
-        const ref = routeSet(request);
-        const chapterId = String(request.params?.chapterId || '').trim();
-        if (!ref || !CHAPTER_ID_PATTERN.test(chapterId)) {
-          return json(400, { error: 'platform, examCode and chapterId are required' });
-        }
+    deleteChapter: guarded(
+      'editor',
+      'deleteListenAndLearnChapter',
+      'Failed to delete the chapter',
+      async ({ request, context, auth }) => {
+        const route = readRoute(request, { chapter: true });
+        if (!route.ok) return json(route.status, { error: route.error });
+        const { ref, chapterId } = route;
         const chapter = await loadChapter(ref, chapterId);
-        if (!chapter) return json(404, { error: `No chapter ${chapterId} in ${ref.id}` });
+        if (!chapter) return json(404, { error: noChapterMessage(ref, chapterId) });
         if (chapter.status === STATUS.published && !truthyQuery(request, 'force')) {
           return json(409, {
             error: 'This chapter is published; confirm to take it off the site and delete it',
@@ -767,21 +933,17 @@ export function createListenAndLearnHandlers({
           });
         }
         const at = stamp();
+        const by = actorOf(auth);
         await store.patchDoc(
           EPISODE_CONTAINER,
           chapterId,
-          { softDeletedAt: at, softDeletedBy: auth.user?.oid || null, updatedAt: at },
+          { softDeletedAt: at, softDeletedBy: by, updatedAt: at },
           { partitionKey: ref.id }
         );
-        context.log?.(
-          `deleteListenAndLearnChapter: ${ref.id}/${chapterId} by ${auth.user?.oid || 'unknown'}`
-        );
+        context.log?.(`deleteListenAndLearnChapter: ${ref.id}/${chapterId} by ${by || 'unknown'}`);
         return json(200, { success: true, id: chapterId });
-      } catch (error) {
-        context.error('deleteListenAndLearnChapter failed:', error);
-        return json(500, { error: 'Failed to delete the chapter' });
       }
-    },
+    ),
 
     /**
      * DELETE /api/cms/listen-and-learn/{platform}/{examCode}/chapters/{chapterId}/versions/{versionId}
@@ -790,18 +952,16 @@ export function createListenAndLearnHandlers({
      * players would point at nothing — and never the implicit `legacy`
      * version's blob while it is the only take, for the same reason.
      */
-    async deleteVersion(request, context) {
-      const auth = await guard.requireRole(request, 'editor');
-      if (auth.error) return auth.error;
-      try {
-        const ref = routeSet(request);
-        const chapterId = String(request.params?.chapterId || '').trim();
-        const versionId = String(request.params?.versionId || '').trim();
-        if (!ref || !CHAPTER_ID_PATTERN.test(chapterId) || !VERSION_ID_PATTERN.test(versionId)) {
-          return json(400, { error: 'platform, examCode, chapterId and versionId are required' });
-        }
+    deleteVersion: guarded(
+      'editor',
+      'deleteListenAndLearnVersion',
+      'Failed to delete the version',
+      async ({ request, context, auth }) => {
+        const route = readRoute(request, { chapter: true, version: true });
+        if (!route.ok) return json(route.status, { error: route.error });
+        const { ref, chapterId, versionId } = route;
         const chapter = await loadChapter(ref, chapterId);
-        if (!chapter) return json(404, { error: `No chapter ${chapterId} in ${ref.id}` });
+        if (!chapter) return json(404, { error: noChapterMessage(ref, chapterId) });
 
         const versions = versionsOf(chapter);
         const target = versions.find((v) => v.id === versionId);
@@ -816,125 +976,68 @@ export function createListenAndLearnHandlers({
           await storage.deleteBlob(AUDIO_CONTAINER, target.audioPath);
         }
         const at = stamp();
+        const by = actorOf(auth);
         const remaining = versions.filter((v) => v.id !== versionId);
         await store.patchDoc(
           EPISODE_CONTAINER,
           chapterId,
-          { versions: remaining, updatedAt: at, updatedBy: auth.user?.oid || null },
+          { versions: remaining, updatedAt: at, updatedBy: by },
           { partitionKey: ref.id }
         );
         context.log?.(
-          `deleteListenAndLearnVersion: ${ref.id}/${chapterId}/${versionId} by ${auth.user?.oid || 'unknown'}`
+          `deleteListenAndLearnVersion: ${ref.id}/${chapterId}/${versionId} by ${by || 'unknown'}`
         );
         return json(200, { success: true, id: versionId, versions: remaining });
-      } catch (error) {
-        context.error('deleteListenAndLearnVersion failed:', error);
-        return json(500, { error: 'Failed to delete the version' });
       }
-    },
+    ),
 
     /**
      * POST /api/cms/listen-and-learn/{platform}/{examCode}/chapters/{chapterId}/regenerate
      * `{ ttsModel? }`
      *
      * One chapter, a new take (ADR 0033 §4). Which job runs depends on the
-     * chapter's kind: a guide chapter re-reads its area from the set's study
-     * guide (`areas: [slug]`), a source chapter re-reads its stored sources,
-     * a hand-made chapter speaks its `sourceText`. Each lands as a new
+     * chapter's kind — `REGENERATION_PLANS` above. Each lands as a new
      * active version; the approval is kept; a failure keeps the current
      * take live. The 202 carries the expected speech spend.
      */
-    async regenerateChapter(request, context, { enqueue } = {}) {
-      const auth = await guard.requireRole(request, 'editor');
-      if (auth.error) return auth.error;
-      try {
-        const ref = routeSet(request);
-        const chapterId = String(request.params?.chapterId || '').trim();
-        if (!ref || !CHAPTER_ID_PATTERN.test(chapterId)) {
-          return json(400, { error: 'platform, examCode and chapterId are required' });
-        }
-        const body = (await request.json().catch(() => null)) ?? {};
-        if (!isPlainObject(body)) return json(400, { error: 'Body must be a JSON object' });
-        const model = parseTtsModel(body.ttsModel);
-        if (model.error) return json(400, { error: model.error });
+    regenerateChapter: guarded(
+      'editor',
+      'regenerateListenAndLearnChapter',
+      'Failed to queue the regeneration',
+      async ({ request, context, auth, io }) => {
+        const read = await readRequest(request, {
+          chapter: true,
+          parse: parseTtsModelBody,
+          emptyBody: true,
+        });
+        if (!read.ok) return json(read.status, { error: read.error });
+        const { ref, chapterId, parsed } = read;
+        const { ttsModel } = parsed;
 
         const [set, chapter] = await Promise.all([
           store.readDoc(SET_CONTAINER, ref.id, ref.id),
           loadChapter(ref, chapterId),
         ]);
-        if (!chapter) return json(404, { error: `No chapter ${chapterId} in ${ref.id}` });
-        if (typeof enqueue !== 'function') {
+        if (!chapter) return json(404, { error: noChapterMessage(ref, chapterId) });
+        if (typeof io.enqueue !== 'function') {
           context.error?.('regenerateChapter: no queue output wired');
           return json(500, { error: 'Job queue is not configured' });
         }
 
-        const kind = episodeKindOf(chapter);
-        const cert = {
-          ...(set?.certTitle ? { certTitle: set.certTitle } : {}),
-          ...(set?.certSlug ? { certSlug: set.certSlug } : {}),
-        };
-        const ttsModel = model.value ? { ttsModel: model.value } : {};
-        let type;
-        let payload;
-        let bytes = MAX_SCRIPT_BYTES;
+        const plan = regenerationPlan({ chapter, chapterId, set, ref, ttsModel });
+        if (!plan.ok) return json(plan.status, { error: plan.error });
 
-        if (kind === EPISODE_KIND.manual) {
-          if (!chapter.sourceText) {
-            return json(400, { error: 'This chapter has no text to speak; add some first' });
-          }
-          type = SPEAK_CHAPTER_JOB_TYPE;
-          payload = { platform: ref.platform, examCode: ref.examCode, chapterId, ...ttsModel };
-          bytes = Buffer.byteLength(chapter.sourceText, 'utf8');
-        } else if (kind === EPISODE_KIND.source) {
-          const parsed = parseSourceEpisodePayload({
-            platform: ref.platform,
-            examCode: ref.examCode,
-            title: chapter.areaName || chapter.title,
-            sources: chapter.sources,
-            ...cert,
-          });
-          if (parsed.error) return json(400, { error: parsed.error });
-          type = LISTEN_AND_LEARN_JOB_TYPE;
-          payload = {
-            platform: ref.platform,
-            examCode: ref.examCode,
-            title: parsed.value.title,
-            sources: parsed.value.sources,
-            ...cert,
-            ...ttsModel,
-          };
-        } else {
-          if (!set?.studyGuideUrl) {
-            return json(400, {
-              error:
-                'This chapter was read from a study guide the set no longer names; run the set from the Generate tab',
-            });
-          }
-          type = LISTEN_AND_LEARN_JOB_TYPE;
-          payload = {
-            platform: ref.platform,
-            examCode: ref.examCode,
-            studyGuideUrl: set.studyGuideUrl,
-            areas: [chapter.areaSlug || chapter.id],
-            ...cert,
-            ...ttsModel,
-          };
-        }
-
-        const speech = await estimateFor(set, { bytes, ttsModel: model.value });
-        context.log?.(`regenerateListenAndLearnChapter: ${ref.id}/${chapterId} as ${type}`);
+        const speech = await estimateFor(set, { bytes: plan.bytes, ttsModel });
+        context.log?.(`regenerateListenAndLearnChapter: ${ref.id}/${chapterId} as ${plan.type}`);
         return await queueJob({
-          type,
-          payload,
+          type: plan.type,
+          payload: plan.payload,
           user: auth.user,
-          enqueue,
+          enqueue: io.enqueue,
           extra: { chapterId, speech },
         });
-      } catch (error) {
-        context.error('regenerateListenAndLearnChapter failed:', error);
-        return json(500, { error: 'Failed to queue the regeneration' });
       }
-    },
+    ),
 
     /**
      * GET /api/cms/listen-and-learn/speech-options — what the Settings tab
@@ -944,10 +1047,11 @@ export function createListenAndLearnHandlers({
      * the speaking-rate bounds. Read from the server so the page cannot
      * describe a fallback the code does not have.
      */
-    async speechOptions(request, context) {
-      const auth = await guard.requireRole(request, 'editor');
-      if (auth.error) return auth.error;
-      try {
+    speechOptions: guarded(
+      'editor',
+      'listenAndLearnSpeechOptions',
+      'Failed to read the speech options',
+      async () => {
         const stored = await readStoredListenAndLearnModel(store.readDoc).catch(() => null);
         return json(200, {
           success: true,
@@ -960,11 +1064,8 @@ export function createListenAndLearnHandlers({
           speakingRate: SPEAKING_RATE,
           speech: describeSpeechProviders(env, { product: PRODUCT }),
         });
-      } catch (error) {
-        context.error('listenAndLearnSpeechOptions failed:', error);
-        return json(500, { error: 'Failed to read the speech options' });
       }
-    },
+    ),
 
     /**
      * POST /api/cms/listen-and-learn/estimate
@@ -974,34 +1075,26 @@ export function createListenAndLearnHandlers({
      * book's voice when one is named, else by the run's model or the stored
      * default. A ceiling, in the same arithmetic the 202 uses.
      */
-    async estimateSpeech(request, context) {
-      const auth = await guard.requireRole(request, 'editor');
-      if (auth.error) return auth.error;
-      try {
-        const body = await request.json().catch(() => null);
-        if (!isPlainObject(body)) return json(400, { error: 'Body must be a JSON object' });
-        const model = parseTtsModel(body.ttsModel);
-        if (model.error) return json(400, { error: model.error });
-        let bytes;
-        if (typeof body.text === 'string') bytes = Buffer.byteLength(body.text, 'utf8');
-        else if (Number.isFinite(Number(body.bytes)) && Number(body.bytes) >= 0)
-          bytes = Math.ceil(Number(body.bytes));
-        else return json(400, { error: 'Give text or a byte count to price' });
+    estimateSpeech: guarded(
+      'editor',
+      'listenAndLearnEstimate',
+      'Failed to estimate the speech cost',
+      async ({ request }) => {
+        const read = parseBody(await request.json().catch(() => null), parseEstimateBody);
+        if (!read.ok) return json(read.status, { error: read.error });
+        const { bytes, ttsModel, platform, examCode } = read.parsed;
 
         let set = null;
-        if (body.platform && body.examCode) {
-          const id = setId(String(body.platform), String(body.examCode));
+        if (platform && examCode) {
+          const id = setId(String(platform), String(examCode));
           set = await store.readDoc(SET_CONTAINER, id, id);
         }
         return json(200, {
           success: true,
-          ...(await estimateFor(set, { bytes, ttsModel: model.value })),
+          ...(await estimateFor(set, { bytes, ttsModel })),
         });
-      } catch (error) {
-        context.error('listenAndLearnEstimate failed:', error);
-        return json(500, { error: 'Failed to estimate the speech cost' });
       }
-    },
+    ),
 
     /**
      * POST /api/cms/listen-and-learn/source-episode
@@ -1016,20 +1109,16 @@ export function createListenAndLearnHandlers({
      *
      * @param {{ enqueue: (message: {jobId: string, type: string}) => void }} io - the queue output
      */
-    async generateSourceEpisode(request, context, { enqueue } = {}) {
-      const auth = await guard.requireRole(request, 'editor');
-      if (auth.error) return auth.error;
-      try {
-        const body = await request.json().catch(() => null);
-        if (!isPlainObject(body)) {
-          return json(400, { error: 'Body must be a JSON object' });
-        }
+    generateSourceEpisode: guarded(
+      'editor',
+      'generateSourceEpisode',
+      'Failed to queue the source-grounded episode',
+      async ({ request, context, auth, io }) => {
+        const read = parseBody(await request.json().catch(() => null), parseSourceEpisodePayload);
+        if (!read.ok) return json(read.status, { error: read.error });
+        const { platform, examCode, title, areaSlug, sources, cert } = read.parsed;
 
-        const parsed = parseSourceEpisodePayload(body);
-        if (parsed.error) return json(400, { error: parsed.error });
-        const { platform, examCode, title, areaSlug, sources, cert } = parsed.value;
-
-        if (typeof enqueue !== 'function') {
+        if (typeof io.enqueue !== 'function') {
           context.error?.('generateSourceEpisode: no queue output wired');
           return json(500, { error: 'Job queue is not configured' });
         }
@@ -1047,18 +1136,15 @@ export function createListenAndLearnHandlers({
             ...(cert.slug ? { certSlug: cert.slug } : {}),
           },
           user: auth.user,
-          enqueue,
+          enqueue: io.enqueue,
           extra: { areaSlug, sourceCount: sources.length },
         });
         context.log?.(
           `generateSourceEpisode: queued ${JSON.parse(response.body).jobId} for ${examCode} (${sources.length} sources)`
         );
         return response;
-      } catch (error) {
-        context.error('generateSourceEpisode failed:', error);
-        return json(500, { error: 'Failed to queue the source-grounded episode' });
       }
-    },
+    ),
 
     /**
      * POST /api/cms/listen-and-learn/review
@@ -1072,50 +1158,31 @@ export function createListenAndLearnHandlers({
       const body = await request.json().catch(() => null);
       const wantsPublish =
         isPlainObject(body) && String(body.status || '').trim() === STATUS.published;
-      const auth = await guard.requireRole(request, wantsPublish ? 'publisher' : 'editor');
-      if (auth.error) return auth.error;
-      try {
-        if (!isPlainObject(body)) {
-          return json(400, { error: 'Body must be a JSON object' });
-        }
+      const review = guarded(
+        wantsPublish ? 'publisher' : 'editor',
+        'reviewListenAndLearn',
+        'Failed to update the episode',
+        async ({ auth }) => {
+          const read = parseBody(body, parseReviewBody);
+          if (!read.ok) return json(read.status, { error: read.error });
+          const { platform, examCode, areaSlug, status } = read.parsed;
 
-        const platform = String(body.platform || '')
-          .trim()
-          .toLowerCase();
-        const examCode = String(body.examCode || '').trim();
-        const areaSlug = String(body.areaSlug || '').trim();
-        const status = String(body.status || '').trim();
-
-        // 'failed' is written by the generator, never chosen by a reviewer:
-        // marking a working episode failed would hide it from the site with no
-        // record of why, which is what `draft` is for. 'archived' has its own
-        // control on the chapter.
-        if (status !== STATUS.published && status !== STATUS.draft) {
-          return json(400, {
-            error: `status must be "${STATUS.published}" or "${STATUS.draft}"`,
+          const updated = await setEpisodeStatus(store, {
+            provider: platform,
+            examCode,
+            areaSlug,
+            status,
+            actorId: actorOf(auth),
+            now: stamp(),
           });
-        }
-        if (!platform || !examCode || !areaSlug) {
-          return json(400, { error: 'platform, examCode and areaSlug are required' });
-        }
 
-        const updated = await setEpisodeStatus(store, {
-          provider: platform,
-          examCode,
-          areaSlug,
-          status,
-          actorId: auth.user?.oid || null,
-          now: stamp(),
-        });
-
-        context.log?.(
-          `reviewListenAndLearn: ${examCode}/${areaSlug} → ${status} by ${auth.user?.oid || 'unknown'}`
-        );
-        return json(200, { success: true, examCode, areaSlug, status, item: updated || null });
-      } catch (error) {
-        context.error('reviewListenAndLearn failed:', error);
-        return json(500, { error: 'Failed to update the episode' });
-      }
+          context.log?.(
+            `reviewListenAndLearn: ${examCode}/${areaSlug} → ${status} by ${actorOf(auth) || 'unknown'}`
+          );
+          return json(200, { success: true, examCode, areaSlug, status, item: updated || null });
+        }
+      );
+      return review(request, context);
     },
   };
 }

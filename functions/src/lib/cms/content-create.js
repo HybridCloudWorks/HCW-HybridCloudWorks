@@ -27,6 +27,7 @@
  *     from its `type` and `source`, so nothing here invents a value.
  */
 import { randomUUID } from "node:crypto";
+import { actorName } from "../auth/actor-name.js";
 import {
   normalizeContentBodyFields,
   getPrimaryContentBody,
@@ -191,12 +192,7 @@ export async function createContentDocument({
     // Source wrote the readiness report under both names; callers read both.
     imageQuality: imageReadiness,
     imageLineage,
-    createdBy:
-      user?.email ||
-      user?.preferred_username ||
-      user?.oid ||
-      user?.sub ||
-      "admin",
+    createdBy: actorName(user),
     "Created At": timestamp,
     updatedAt: timestamp,
   };

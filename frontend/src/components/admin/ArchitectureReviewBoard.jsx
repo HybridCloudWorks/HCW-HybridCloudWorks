@@ -1,4 +1,3 @@
-/* eslint-disable complexity -- the initial form state reads every legacy spelling of every field */
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,8 +7,70 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Eye, Code, DollarSign, Layers, FileText, Plus, Trash2, MousePointer } from 'lucide-react';
 import InteractiveDiagram from '@/components/widgets/InteractiveDiagram';
 import DiagramSourcePanel from '@/components/admin/architecture/DiagramSourcePanel';
-import ReviewBoardShell from '@/components/admin/ReviewBoardShell';
+import ReviewBoardShell, {
+  MetadataSelect,
+  TextareaCard,
+  initialFormFrom,
+} from '@/components/admin/ReviewBoardShell';
 import { useResolvedHotspots } from '@/hooks/useResolvedHotspots';
+
+/**
+ * The blueprint's form from its record: each field, the record keys it may
+ * be stored under (legacy spellings included) and its default. Built per
+ * call so no two forms share a fallback object.
+ */
+export function initialBlueprintForm(blog) {
+  return initialFormFrom(blog, {
+    title: [['title', 'Title'], ''],
+    summary: [['summary', 'Summary'], ''],
+    cloudProvider: [['cloudProvider', 'Cloud Provider'], 'AWS'],
+    category: [['category'], 'Compute'],
+    complexity: [['complexity'], 'Medium'],
+    tags: [['tags', 'Tags'], []],
+    overviewHtml: [['overviewHtml', 'overview'], ''],
+    diagramUrl: [['diagramUrl', 'contentImageUrl', 'imageUrl'], ''],
+    // JSON fields (stored as objects in DB, parsed for editing if needed)
+    technicalSpecs: [['technicalSpecs'], { components: [], patterns: [] }],
+    costAnalysis: [['costAnalysis'], { estimatedMonthly: '$0', breakdown: [] }],
+    terraformCode: [['terraformCode'], '# Terraform HCL'],
+    deploymentSteps: [['deploymentSteps'], []],
+    // Hotspots for interactive diagram. A hotspot is either shape-anchored
+    // ({shapeId}) or hand-positioned ({x, y}); both render, and the diagram
+    // source below is what makes the first kind resolvable.
+    hotspots: [['hotspots'], []],
+    diagramXml: [['diagramXml'], ''],
+  });
+}
+
+const COORDINATES = [
+  ['x', 'X %'],
+  ['y', 'Y %'],
+];
+
+/** The X % / Y % inputs of a hand-positioned hotspot. */
+function HotspotCoordinates({ spot, onChange }) {
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      {COORDINATES.map(([axis, label]) => (
+        <div key={axis}>
+          <label
+            htmlFor={`hotspot-${spot.id}-${axis}`}
+            className="text-[10px] text-muted-foreground"
+          >
+            {label}
+          </label>
+          <Input
+            type="number"
+            id={`hotspot-${spot.id}-${axis}`}
+            value={spot[axis]}
+            onChange={(e) => onChange(axis, Number(e.target.value))}
+            className="h-6 text-xs"
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
 
 /**
  * Architecture Review Board
@@ -21,26 +82,7 @@ import { useResolvedHotspots } from '@/hooks/useResolvedHotspots';
  * is the blueprint's own fields.
  */
 export default function ArchitectureReviewBoard({ blog, onSave, onPublish, saving, error }) {
-  const [formData, setFormData] = useState({
-    title: blog.title || blog.Title || '',
-    summary: blog.summary || blog.Summary || '',
-    cloudProvider: blog.cloudProvider || blog['Cloud Provider'] || 'AWS',
-    category: blog.category || 'Compute',
-    complexity: blog.complexity || 'Medium',
-    tags: blog.tags || blog.Tags || [],
-    overviewHtml: blog.overviewHtml || blog.overview || '',
-    diagramUrl: blog.diagramUrl || blog.contentImageUrl || blog.imageUrl || '',
-    // JSON fields (stored as objects in DB, parsed for editing if needed)
-    technicalSpecs: blog.technicalSpecs || { components: [], patterns: [] },
-    costAnalysis: blog.costAnalysis || { estimatedMonthly: '$0', breakdown: [] },
-    terraformCode: blog.terraformCode || '# Terraform HCL',
-    deploymentSteps: blog.deploymentSteps || [],
-    // Hotspots for interactive diagram. A hotspot is either shape-anchored
-    // ({shapeId}) or hand-positioned ({x, y}); both render, and the diagram
-    // source below is what makes the first kind resolvable.
-    hotspots: blog.hotspots || [],
-    diagramXml: blog.diagramXml || '',
-  });
+  const [formData, setFormData] = useState(() => initialBlueprintForm(blog));
 
   // The preview resolves hotspots the same way the public page does. An admin
   // positioning a pin against different maths than the visitor sees is
@@ -194,38 +236,10 @@ export default function ArchitectureReviewBoard({ blog, onSave, onPublish, savin
                   Pinned to shape {spot.shapeId}
                 </p>
               ) : (
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label
-                      htmlFor={`hotspot-${spot.id}-x`}
-                      className="text-[10px] text-muted-foreground"
-                    >
-                      X %
-                    </label>
-                    <Input
-                      type="number"
-                      id={`hotspot-${spot.id}-x`}
-                      value={spot.x}
-                      onChange={(e) => updateHotspot(spot.id, 'x', Number(e.target.value))}
-                      className="h-6 text-xs"
-                    />
-                  </div>
-                  <div>
-                    <label
-                      htmlFor={`hotspot-${spot.id}-y`}
-                      className="text-[10px] text-muted-foreground"
-                    >
-                      Y %
-                    </label>
-                    <Input
-                      type="number"
-                      id={`hotspot-${spot.id}-y`}
-                      value={spot.y}
-                      onChange={(e) => updateHotspot(spot.id, 'y', Number(e.target.value))}
-                      className="h-6 text-xs"
-                    />
-                  </div>
-                </div>
+                <HotspotCoordinates
+                  spot={spot}
+                  onChange={(axis, value) => updateHotspot(spot.id, axis, value)}
+                />
               )}
               <Textarea
                 value={spot.description}
@@ -245,36 +259,20 @@ export default function ArchitectureReviewBoard({ blog, onSave, onPublish, savin
           <CardTitle className="text-sm font-semibold text-muted-foreground">Metadata</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div>
-            <label htmlFor="cloudProvider" className="text-xs font-medium text-muted-foreground">
-              Cloud Provider
-            </label>
-            <select
-              id="cloudProvider"
-              value={formData.cloudProvider}
-              onChange={(e) => handleChange('cloudProvider', e.target.value)}
-              className="w-full mt-1 rounded-md border border-input bg-background px-3 py-1 text-sm"
-            >
-              <option value="AWS">AWS</option>
-              <option value="Azure">Azure</option>
-              <option value="GCP">GCP</option>
-            </select>
-          </div>
-          <div>
-            <label htmlFor="complexity" className="text-xs font-medium text-muted-foreground">
-              Complexity
-            </label>
-            <select
-              id="complexity"
-              value={formData.complexity}
-              onChange={(e) => handleChange('complexity', e.target.value)}
-              className="w-full mt-1 rounded-md border border-input bg-background px-3 py-1 text-sm"
-            >
-              <option value="Low">Low</option>
-              <option value="Medium">Medium</option>
-              <option value="High">High</option>
-            </select>
-          </div>
+          <MetadataSelect
+            id="cloudProvider"
+            label="Cloud Provider"
+            value={formData.cloudProvider}
+            onChange={(value) => handleChange('cloudProvider', value)}
+            options={['AWS', 'Azure', 'GCP']}
+          />
+          <MetadataSelect
+            id="complexity"
+            label="Complexity"
+            value={formData.complexity}
+            onChange={(value) => handleChange('complexity', value)}
+            options={['Low', 'Medium', 'High']}
+          />
           <div>
             <label htmlFor="category" className="text-xs font-medium text-muted-foreground">
               Category
@@ -320,39 +318,27 @@ export default function ArchitectureReviewBoard({ blog, onSave, onPublish, savin
       icon: Layers,
       content: (
         <>
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm">Key Components</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Textarea
-                value={(formData.technicalSpecs?.components || []).join('\n')}
-                onChange={(e) =>
-                  handleNestedChange('technicalSpecs', 'components', e.target.value.split('\n'))
-                }
-                aria-label="Key components, one per line"
-                className="min-h-37.5 font-mono text-sm"
-                placeholder="AWS Lambda&#10;Amazon SNS&#10;DynamoDB"
-              />
-              <p className="text-xs text-muted-foreground mt-2">One component per line</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm">Architecture Patterns</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Textarea
-                value={(formData.technicalSpecs?.patterns || []).join('\n')}
-                onChange={(e) =>
-                  handleNestedChange('technicalSpecs', 'patterns', e.target.value.split('\n'))
-                }
-                aria-label="Architecture patterns, one per line"
-                className="min-h-25 font-mono text-sm"
-                placeholder="Event-Driven&#10;Fan-Out"
-              />
-            </CardContent>
-          </Card>
+          <TextareaCard
+            title="Key Components"
+            value={(formData.technicalSpecs?.components || []).join('\n')}
+            onChange={(value) =>
+              handleNestedChange('technicalSpecs', 'components', value.split('\n'))
+            }
+            ariaLabel="Key components, one per line"
+            className="min-h-37.5 font-mono text-sm"
+            placeholder="AWS Lambda&#10;Amazon SNS&#10;DynamoDB"
+            help="One component per line"
+          />
+          <TextareaCard
+            title="Architecture Patterns"
+            value={(formData.technicalSpecs?.patterns || []).join('\n')}
+            onChange={(value) =>
+              handleNestedChange('technicalSpecs', 'patterns', value.split('\n'))
+            }
+            ariaLabel="Architecture patterns, one per line"
+            className="min-h-25 font-mono text-sm"
+            placeholder="Event-Driven&#10;Fan-Out"
+          />
         </>
       ),
     },

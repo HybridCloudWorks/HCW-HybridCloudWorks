@@ -77,19 +77,30 @@ export function createCertReverify({
   async function verdictFor(cert, nowMs) {
     const expMs = cert.expDate ? parseExpiryMs(cert.expDate) : NaN;
     const expired = Number.isFinite(expMs) && nowMs > expMs;
-    if (cert.certState === true) {
-      if (expired) return { next: 'inactive', reason: 'expired' };
-      if (isCredlyUrl(cert.verifyUrl) && (await credlySaysRevoked(cert))) {
-        return { next: 'inactive', reason: 'revoked' };
-      }
-      return null;
-    }
-    // Inactive: a renewal moved the expiry ahead, so it comes back — unless
-    // Credly still says the badge cannot be verified. A cert with no expiry
-    // date stays as the owner set it; the timer has nothing to reason from.
-    if (!Number.isFinite(expMs) || expired) return null;
-    if (isCredlyUrl(cert.verifyUrl) && (await credlySaysRevoked(cert))) return null;
-    return { next: 'active', reason: 'renewed' };
+    return cert.certState === true
+      ? activeVerdict(cert, expired)
+      : inactiveVerdict(cert, Number.isFinite(expMs), expired);
+  }
+
+  /** Whether Credly, when it is the verifier, says the badge is revoked. */
+  async function revokedOnCredly(cert) {
+    return isCredlyUrl(cert.verifyUrl) && (await credlySaysRevoked(cert));
+  }
+
+  /** An active cert goes inactive when expired or revoked. */
+  async function activeVerdict(cert, expired) {
+    if (expired) return { next: 'inactive', reason: 'expired' };
+    return (await revokedOnCredly(cert)) ? { next: 'inactive', reason: 'revoked' } : null;
+  }
+
+  /**
+   * Inactive: a renewal moved the expiry ahead, so it comes back — unless
+   * Credly still says the badge cannot be verified. A cert with no expiry
+   * date stays as the owner set it; the timer has nothing to reason from.
+   */
+  async function inactiveVerdict(cert, hasExpiry, expired) {
+    if (!hasExpiry || expired) return null;
+    return (await revokedOnCredly(cert)) ? null : { next: 'active', reason: 'renewed' };
   }
 
   async function run() {

@@ -8,6 +8,7 @@
  * the Audio Library words (ADR 0033 §4) joined them on 2026-10-03.
  */
 import { GEMINI_TTS_MODEL_TIERS } from '@/lib/listenAndLearn';
+import { statusTable } from '@/lib/status';
 
 export const formatDuration = (seconds) => {
   if (!seconds) return null;
@@ -35,31 +36,11 @@ export const formatCost = (usd) => (usd >= 0.01 ? `$${usd.toFixed(2)}` : `$${usd
  * Chapter statuses as StatusBadge takes them (`{ label, tone, help }`), one
  * vocabulary with lib/status.js's tones so colour is never the only signal.
  */
-export const CHAPTER_STATUS = Object.freeze({
-  published: {
-    id: 'published',
-    label: 'Published',
-    tone: 'ok',
-    help: 'Live on the site; visitors can play it now.',
-  },
-  draft: {
-    id: 'draft',
-    label: 'Draft',
-    tone: 'muted',
-    help: 'Generated and waiting for approval; not on the site.',
-  },
-  failed: {
-    id: 'failed',
-    label: 'Failed',
-    tone: 'bad',
-    help: 'The last generation failed and there is no take to play.',
-  },
-  archived: {
-    id: 'archived',
-    label: 'Archived',
-    tone: 'off',
-    help: 'Kept but off the site; Restore puts it back as it was.',
-  },
+export const CHAPTER_STATUS = statusTable({
+  published: ['Published', 'ok', 'Live on the site; visitors can play it now.'],
+  draft: ['Draft', 'muted', 'Generated and waiting for approval; not on the site.'],
+  failed: ['Failed', 'bad', 'The last generation failed and there is no take to play.'],
+  archived: ['Archived', 'off', 'Kept but off the site; Restore puts it back as it was.'],
 });
 
 export function chapterStatus(status) {

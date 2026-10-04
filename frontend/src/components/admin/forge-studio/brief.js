@@ -8,6 +8,7 @@
  * document's body as its source and refuses an empty one — the server has
  * the same function, and its test pins the same shape.
  */
+import { recordsFrom } from '@/lib/tableRecords';
 
 /** Where a finished piece publishes; the content document's `type`. */
 export const TARGET_CHANNELS = Object.freeze([
@@ -33,33 +34,32 @@ export const READING_LEVELS = Object.freeze([
 ]);
 
 /** The five ways a piece starts; each leads to the Brief. */
-export const START_MODES = Object.freeze([
-  {
-    id: 'idea',
-    label: 'From an idea',
-    description: 'A title and a few lines of brief. The forge writes the first draft.',
-  },
-  {
-    id: 'template',
-    label: 'From a template',
-    description: 'Pick one of the forge’s formats; the brief carries it as the requested shape.',
-  },
-  {
-    id: 'existing',
-    label: 'From existing content',
-    description: 'Repurpose a piece already in the pipeline. The original is never changed.',
-  },
-  {
-    id: 'url',
-    label: 'From a URL',
-    description: 'Scrape a page into a source document and forge from it (the forge-from-url job).',
-  },
-  {
-    id: 'blank',
-    label: 'Blank',
-    description: 'An empty brief. Write the draft yourself and use the AI actions as you go.',
-  },
-]);
+export const START_MODES = recordsFrom(
+  ['id', 'label', 'description'],
+  [
+    ['idea', 'From an idea', 'A title and a few lines of brief. The forge writes the first draft.'],
+    [
+      'template',
+      'From a template',
+      'Pick one of the forge’s formats; the brief carries it as the requested shape.',
+    ],
+    [
+      'existing',
+      'From existing content',
+      'Repurpose a piece already in the pipeline. The original is never changed.',
+    ],
+    [
+      'url',
+      'From a URL',
+      'Scrape a page into a source document and forge from it (the forge-from-url job).',
+    ],
+    [
+      'blank',
+      'Blank',
+      'An empty brief. Write the draft yourself and use the AI actions as you go.',
+    ],
+  ]
+);
 
 export const EMPTY_BRIEF = Object.freeze({
   mode: 'idea',
@@ -126,15 +126,10 @@ export function toBriefPayload(form) {
 /** Does the brief carry anything a drafter could work from? Mirrors the API's rule. */
 export function briefHasSubstance(form) {
   const payload = toBriefPayload(form);
-  return Boolean(
-    payload.objective ||
-    payload.keyMessage ||
-    payload.audience ||
-    payload.requiredTopics.length ||
-    payload.sources.length ||
-    payload.sourceContentId ||
-    payload.sourceUrl
-  );
+  const hasWords = Boolean(payload.objective || payload.keyMessage || payload.audience);
+  const hasTopics = payload.requiredTopics.length > 0 || payload.sources.length > 0;
+  const hasSource = Boolean(payload.sourceContentId || payload.sourceUrl);
+  return hasWords || hasTopics || hasSource;
 }
 
 /**
@@ -167,10 +162,13 @@ export function briefToMarkdown(form, title = '', { templateLabel = '' } = {}) {
   return lines.join('\n').trim();
 }
 
+/** The spellings a document's body has gone by, first one filled wins. */
+const BODY_FIELDS = Object.freeze(['content', 'blogDraft', 'Content', 'postContent']);
+
 /** The body of a content document, whichever spelling it uses. */
 export function bodyOf(doc) {
   const d = doc || {};
-  return String(d.content || d.blogDraft || d.Content || d.postContent || '');
+  return String(BODY_FIELDS.map((field) => d[field]).find(Boolean) || '');
 }
 
 /** The title of a content document, whichever spelling it uses. */

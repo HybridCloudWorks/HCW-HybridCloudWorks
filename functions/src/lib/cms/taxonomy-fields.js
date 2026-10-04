@@ -82,32 +82,42 @@ export function validateTaxonomyFields(
 ) {
   const out = {};
   for (const field of TAXONOMY_FIELDS) {
-    if (!Object.hasOwn(data, field)) continue;
-    const id = normalizeId(data[field], field);
+    const id = Object.hasOwn(data, field)
+      ? normalizeId(data[field], field)
+      : undefined;
     if (id === undefined) continue;
-    if (id === null) {
-      out[field] = null;
-      continue;
-    }
-    const list = listFor(taxonomy, field);
-    const entry = list.find((item) => item.id === id);
-    const enabledIds = list
-      .filter((item) => item.enabled !== false)
-      .map((item) => item.id);
-    if (!entry) {
-      throw new TaxonomyFieldError(
-        `${field} "${id}" is not a known ${field === "kind" ? "kind" : "idea origin"}; allowed: ${enabledIds.join(", ")}`,
-      );
-    }
-    const keepsDisabled = existing && String(existing[field] || "") === id;
-    if (entry.enabled === false && !keepsDisabled) {
-      throw new TaxonomyFieldError(
-        `${field} "${id}" is disabled; allowed: ${enabledIds.join(", ")}`,
-      );
-    }
-    out[field] = id;
+    out[field] = id === null ? null : checkedId(field, id, taxonomy, existing);
   }
   return out;
+}
+
+const FIELD_NOUN = Object.freeze({ kind: "kind", ideaOrigin: "idea origin" });
+
+/**
+ * `id` as the taxonomy knows it: a listed entry that is enabled, or one the
+ * record already carries (`existing`) even though it has since been
+ * disabled. Anything else is refused naming the enabled ids.
+ */
+function checkedId(field, id, taxonomy, existing) {
+  const list = listFor(taxonomy, field);
+  const entry = list.find((item) => item.id === id);
+  const allowed = () =>
+    list
+      .filter((item) => item.enabled !== false)
+      .map((item) => item.id)
+      .join(", ");
+  if (!entry) {
+    throw new TaxonomyFieldError(
+      `${field} "${id}" is not a known ${FIELD_NOUN[field]}; allowed: ${allowed()}`,
+    );
+  }
+  const keepsDisabled = existing && String(existing[field] || "") === id;
+  if (entry.enabled === false && !keepsDisabled) {
+    throw new TaxonomyFieldError(
+      `${field} "${id}" is disabled; allowed: ${allowed()}`,
+    );
+  }
+  return id;
 }
 
 /** True when `data` names either field, so a caller can skip the taxonomy read otherwise. */

@@ -1140,35 +1140,13 @@ export function createAiRouter({
     const collected = [];
 
     for (const [index, { provider, model: configuredModel }] of chain.entries()) {
-      let shareEnd = null;
-      if (budget) {
-        const startedAt = now();
-        const shareMs = providerShareMs({
-          remainingMs: budget.deadline - startedAt,
-          reserveMs: budget.reserveMs,
-          hasNext: index < chain.length - 1,
-        });
-        if (shareMs === 0) throw budgetExhausted(budget, attempts, chain.slice(index));
-        shareEnd = startedAt + shareMs;
-      }
+      const shareEnd = budget ? shareEndFor(budget, { chain, index, attempts }) : null;
+      // An explicit model from the call site wins; then the route's or the
+      // administrator's choice in the portal; then the purpose table.
+      const model = explicitModel || configuredModel;
       try {
         const result = await withRetry(
-          () =>
-            callWith(provider, {
-              ...args,
-              usageOut: collected,
-              // An explicit model from the call site wins; then the route's
-              // or the administrator's choice in the portal; then the
-              // purpose table.
-              model: explicitModel || configuredModel,
-              // The provider's own timeout, cut to what is left of its share.
-              // withRetry starts no attempt once less than MIN_ATTEMPT_MS is left.
-              ...(shareEnd === null
-                ? {}
-                : {
-                    timeoutMs: Math.min(providerTimeoutMs(provider), shareEnd - now()),
-                  }),
-            }),
+          () => callWith(provider, attemptArgs(provider, { args, collected, model, shareEnd })),
           3,
           provider,
           shareEnd
@@ -1179,21 +1157,59 @@ export function createAiRouter({
         return result;
       } catch (error) {
         attempts.push({ provider, error });
-        const status = Number(error?.status);
-        // 401/403 ONLY. A 404 means the model id is wrong and a 429 means the
-        // account is busy — neither says the credential is bad, and reporting
-        // them would turn the light red for something no rotation can fix.
-        if ([401, 403].includes(status)) await reportKeyVerdict(provider, { ok: false, status });
-        const last = chain[chain.length - 1].provider === provider;
-        if (last || !isProviderUnusable(error, provider)) throw error;
-        log.warn?.(
-          `[ai-router] ${provider} could not serve this call (${error?.message || error}); trying the next provider`
-        );
+        await failOverOrThrow(provider, error, chain);
       }
     }
 
     // Unreachable: the loop either returns or throws on its last iteration.
     throw attempts.at(-1)?.error || new AiNotConfiguredError('No AI provider was tried');
+  }
+
+  /**
+   * When this provider's share of the budget ends, or the AI_BUDGET_EXHAUSTED
+   * error when too little is left to start it at all.
+   */
+  function shareEndFor(budget, { chain, index, attempts }) {
+    const startedAt = now();
+    const shareMs = providerShareMs({
+      remainingMs: budget.deadline - startedAt,
+      reserveMs: budget.reserveMs,
+      hasNext: index < chain.length - 1,
+    });
+    if (shareMs === 0) throw budgetExhausted(budget, attempts, chain.slice(index));
+    return startedAt + shareMs;
+  }
+
+  /**
+   * One attempt's arguments. Under a budget, the provider's own timeout is
+   * cut to what is left of its share; withRetry starts no attempt once less
+   * than MIN_ATTEMPT_MS is left.
+   */
+  function attemptArgs(provider, { args, collected, model, shareEnd }) {
+    const timeout =
+      shareEnd === null
+        ? {}
+        : { timeoutMs: Math.min(providerTimeoutMs(provider), shareEnd - now()) };
+    return { ...args, usageOut: collected, model, ...timeout };
+  }
+
+  /**
+   * After a provider failed: report a bad credential, then either hand the
+   * call to the next provider (a warning, so silently spending the next
+   * provider's money is visible) or rethrow when there is none or the
+   * failure is not the provider's.
+   */
+  async function failOverOrThrow(provider, error, chain) {
+    const status = Number(error?.status);
+    // 401/403 ONLY. A 404 means the model id is wrong and a 429 means the
+    // account is busy — neither says the credential is bad, and reporting
+    // them would turn the light red for something no rotation can fix.
+    if ([401, 403].includes(status)) await reportKeyVerdict(provider, { ok: false, status });
+    const last = chain[chain.length - 1].provider === provider;
+    if (last || !isProviderUnusable(error, provider)) throw error;
+    log.warn?.(
+      `[ai-router] ${provider} could not serve this call (${error?.message || error}); trying the next provider`
+    );
   }
 
   /**

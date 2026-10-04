@@ -72,8 +72,7 @@ export function pickDefaultHero(heroes = {}, providerRaw = '') {
     .trim()
     .toLowerCase();
   const entries = Object.entries(heroes || {});
-  const byKey = (wanted) =>
-    entries.find(([key]) => key.toLowerCase() === wanted)?.[1] || null;
+  const byKey = (wanted) => entries.find(([key]) => key.toLowerCase() === wanted)?.[1] || null;
   if (provider) {
     const exact = byKey(provider);
     if (exact) return exact;
@@ -87,14 +86,14 @@ export function pickDefaultHero(heroes = {}, providerRaw = '') {
 
 /** Mirrors applyPublishTimeCoverTrigger's "already has a cover" field list. */
 function hasCover(data = {}) {
-  return Boolean(
-    data.altCoverImage ||
-      data['Cover Image'] ||
-      data.contentImageUrl ||
-      data.aiImageUrls?.hero ||
-      data.heroImageUrl ||
-      data.coverImage
-  );
+  return [
+    data.altCoverImage,
+    data['Cover Image'],
+    data.contentImageUrl,
+    data.aiImageUrls?.hero,
+    data.heroImageUrl,
+    data.coverImage,
+  ].some(Boolean);
 }
 
 export const PROVIDER_THEMES = Object.freeze({
@@ -114,11 +113,9 @@ export const BUILTIN_PROMPT_VERSION = 'builtin-lego-v1';
 
 export function buildImagePrompt(article) {
   const provider =
-    article.cloudProvider ||
-    article['Cloud Provider'] ||
-    article.provider ||
-    article.Provider ||
-    'Azure';
+    [article.cloudProvider, article['Cloud Provider'], article.provider, article.Provider].find(
+      Boolean
+    ) || 'Azure';
   const theme = PROVIDER_THEMES[provider] || PROVIDER_THEMES.Azure;
   if (article.keyTopics && article.visualTheme && article.summary) {
     return `Create a professional technical illustration in ${theme.color} color scheme with a ${theme.vibe} aesthetic.
@@ -143,10 +140,7 @@ Style requirements:
 The scene should visually represent the article's core concepts through the Lego characters' construction work.`;
   }
   const resources =
-    article.resources ||
-    article.Resources ||
-    article.title ||
-    article.Title ||
+    [article.resources, article.Resources, article.title, article.Title].find(Boolean) ||
     'cloud infrastructure';
   return `Create a professional technical illustration in ${theme.color} color scheme with a ${theme.vibe} aesthetic. The scene features cute Lego minifigure-style characters collaborating to build cloud infrastructure. Show 2-3 blocky characters working together on: ${resources}. The characters should be constructing these as modular building blocks, similar to Lego bricks. Include subtle ${provider} branding elements. Style: isometric 3D illustration, clean and modern, tech-focused, with a playful builder theme. No text or logos, just the visual scene.`;
 }
@@ -164,14 +158,19 @@ The scene should visually represent the article's core concepts through the Lego
  * @returns {Promise<{ prompt: string, source: 'override'|'library'|'builtin', lineage: object, aspectRatio?: string }>}
  */
 export async function resolveCoverPrompt({ store, log = {} }, data, { slot = 'hero' } = {}) {
-  const provided =
-    typeof data.altCoverImagePrompt === 'string' && data.altCoverImagePrompt.trim();
+  const provided = typeof data.altCoverImagePrompt === 'string' && data.altCoverImagePrompt.trim();
   if (provided) {
     return {
       prompt: provided,
       source: 'override',
       aspectRatio: undefined,
-      lineage: lineageFor({ set: null, prompt: null, promptText: provided, slot, source: 'override' }),
+      lineage: lineageFor({
+        set: null,
+        prompt: null,
+        promptText: provided,
+        slot,
+        source: 'override',
+      }),
     };
   }
   try {
@@ -199,7 +198,9 @@ export async function resolveCoverPrompt({ store, log = {} }, data, { slot = 'he
       };
     }
   } catch (error) {
-    log.warn?.(`[generateAiCover] prompt library unavailable, using built-in prompt: ${error?.message || error}`);
+    log.warn?.(
+      `[generateAiCover] prompt library unavailable, using built-in prompt: ${error?.message || error}`
+    );
   }
   const prompt = buildImagePrompt(data);
   return {
@@ -236,6 +237,75 @@ export function aiCoverBlobPath(contentId, target, stampIso) {
   return `${contentId}-ai-${target}-${compactStamp(stampIso)}.png`;
 }
 
+const RETRYABLE_STATUSES = [429, 503, 502, 504];
+const PREDICTION_SETTLED = ['succeeded', 'failed', 'canceled'];
+
+/** POST the prediction, retrying the transient statuses with backoff. */
+async function createPrediction(fetchImpl, { model, headers, input, sleep }) {
+  let lastStatus = 0;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const response = await fetchWithTimeout(
+      fetchImpl,
+      `https://api.replicate.com/v1/models/${model}/predictions`,
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ input }),
+        // `Prefer: wait=60` asks Replicate to hold the connection for up to
+        // 60s, so the deadline has to clear that plus slack — otherwise the
+        // timeout would fire on the happy path (T-712).
+        timeoutMs: REPLICATE_POST_TIMEOUT_MS,
+      }
+    );
+    if (response.ok) return response.json();
+    lastStatus = response.status;
+    if (!RETRYABLE_STATUSES.includes(response.status) || attempt === 3) break;
+    await sleep(2 ** attempt * 1000);
+  }
+  throw new Error(`Replicate HTTP ${lastStatus}`);
+}
+
+/**
+ * Poll until the prediction settles. Prefer: wait returns a completed
+ * prediction in the common case; this is the otherwise. An iteration count
+ * alone does not bound wall-clock time: each iteration sleeps 2s AND makes
+ * a request, so a run of slow-but-not-timing-out polls could sit here far
+ * longer than the arithmetic suggests. The deadline is the real bound
+ * (T-712).
+ */
+async function awaitPrediction(fetchImpl, prediction, { authorization, sleep }) {
+  const pollDeadline = Date.now() + REPLICATE_POLL_BUDGET_MS;
+  let current = prediction;
+  for (let poll = 0; poll < 60 && !PREDICTION_SETTLED.includes(current.status); poll += 1) {
+    if (Date.now() > pollDeadline) {
+      throw new Error(
+        `Replicate prediction still ${current.status} after ${Math.round(REPLICATE_POLL_BUDGET_MS / 1000)}s`
+      );
+    }
+    await sleep(2000);
+    const response = await fetchWithTimeout(
+      fetchImpl,
+      current.urls?.get || `https://api.replicate.com/v1/predictions/${current.id}`,
+      { headers: { Authorization: authorization }, timeoutMs: REPLICATE_POLL_TIMEOUT_MS }
+    );
+    if (!response.ok) throw new Error(`Replicate poll HTTP ${response.status}`);
+    current = await response.json();
+  }
+  return current;
+}
+
+/** The image URL a settled prediction carries, in any of its output shapes. */
+function predictionImageUrl(prediction) {
+  if (prediction.status !== 'succeeded') {
+    throw new Error(`Replicate prediction ${prediction.status}: ${prediction.error || 'unknown'}`);
+  }
+  const output = prediction.output;
+  const imageUrl =
+    typeof output === 'string' ? output : Array.isArray(output) ? output[0] : output?.url;
+  if (!imageUrl) throw new Error('No image URL returned from Replicate API');
+  return imageUrl;
+}
+
 /**
  * Replicate over REST. `generate(prompt)` resolves to the image URL.
  * @param {{ env?: object, fetch?: typeof fetch, sleep?: Function }} deps
@@ -267,66 +337,21 @@ export function createReplicateClient({
       'Content-Type': 'application/json',
       Prefer: 'wait=60',
     };
-    let prediction;
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
-      const response = await fetchWithTimeout(
-        fetchImpl,
-        `https://api.replicate.com/v1/models/${model}/predictions`,
-        {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ input }),
-          // `Prefer: wait=60` asks Replicate to hold the connection for up to
-          // 60s, so the deadline has to clear that plus slack — otherwise the
-          // timeout would fire on the happy path (T-712).
-          timeoutMs: REPLICATE_POST_TIMEOUT_MS,
-        }
-      );
-      if (response.ok) {
-        prediction = await response.json();
-        break;
-      }
-      const retryable = [429, 503, 502, 504].includes(response.status);
-      if (!retryable || attempt === 3) throw new Error(`Replicate HTTP ${response.status}`);
-      await sleep(2 ** attempt * 1000);
-    }
-    // Prefer: wait returns a completed prediction in the common case; poll otherwise.
-    // An iteration count alone does not bound wall-clock time: each iteration
-    // sleeps 2s AND makes a request, so a run of slow-but-not-timing-out polls
-    // could sit here far longer than the arithmetic suggests. The deadline is
-    // the real bound (T-712).
-    const pollDeadline = Date.now() + REPLICATE_POLL_BUDGET_MS;
-    for (
-      let poll = 0;
-      poll < 60 && !['succeeded', 'failed', 'canceled'].includes(prediction.status);
-      poll += 1
-    ) {
-      if (Date.now() > pollDeadline) {
-        throw new Error(
-          `Replicate prediction still ${prediction.status} after ${Math.round(REPLICATE_POLL_BUDGET_MS / 1000)}s`
-        );
-      }
-      await sleep(2000);
-      const response = await fetchWithTimeout(
-        fetchImpl,
-        prediction.urls?.get || `https://api.replicate.com/v1/predictions/${prediction.id}`,
-        { headers: { Authorization: headers.Authorization }, timeoutMs: REPLICATE_POLL_TIMEOUT_MS }
-      );
-      if (!response.ok) throw new Error(`Replicate poll HTTP ${response.status}`);
-      prediction = await response.json();
-    }
-    if (prediction.status !== 'succeeded')
-      throw new Error(
-        `Replicate prediction ${prediction.status}: ${prediction.error || 'unknown'}`
-      );
-    const output = prediction.output;
-    const imageUrl =
-      typeof output === 'string' ? output : Array.isArray(output) ? output[0] : output?.url;
-    if (!imageUrl) throw new Error('No image URL returned from Replicate API');
-    return imageUrl;
+    const created = await createPrediction(fetchImpl, { model, headers, input, sleep });
+    const settled = await awaitPrediction(fetchImpl, created, {
+      authorization: headers.Authorization,
+      sleep,
+    });
+    return predictionImageUrl(settled);
   }
 
-  return { configured: Boolean(apiKey), provider: IMAGE_PROVIDER, model, costPerImageUsd, generate };
+  return {
+    configured: Boolean(apiKey),
+    provider: IMAGE_PROVIDER,
+    model,
+    costPerImageUsd,
+    generate,
+  };
 }
 
 /**

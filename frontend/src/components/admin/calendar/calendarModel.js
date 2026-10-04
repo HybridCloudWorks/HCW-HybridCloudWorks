@@ -225,60 +225,10 @@ function byStart(a, b) {
   return String(a.start).localeCompare(String(b.start));
 }
 
-/**
- * Items narrowed by the toolbar's filters. `kinds` empty means every kind;
- * `status` '' means every status; `channel` matches a social platform, a
- * content provider or a Listen & Learn provider, case-insensitively.
- */
-export function applyFilters(items, { kinds = [], status = '', channel = '' } = {}) {
-  const wantedKinds = new Set(kinds);
-  const needle = channel.trim().toLowerCase();
-  return (items || []).filter((item) => {
-    if (wantedKinds.size && !wantedKinds.has(item.kind)) return false;
-    if (status && String(item.status) !== status) return false;
-    if (needle) {
-      const haystack = [item.meta?.provider, ...(item.meta?.platforms || [])]
-        .filter(Boolean)
-        .map((v) => String(v).toLowerCase());
-      if (!haystack.some((v) => v.includes(needle))) return false;
-    }
-    return true;
-  });
-}
-
-/** Every distinct channel the items name, for the filter list. */
-export function channelsOf(items) {
-  const set = new Set();
-  for (const item of items || []) {
-    if (item.meta?.provider) set.add(String(item.meta.provider));
-    for (const platform of item.meta?.platforms || []) set.add(String(platform));
-  }
-  return [...set].sort((a, b) => a.localeCompare(b));
-}
-
-export const SLOT_MS = 15 * 60 * 1000;
-
-/**
- * Ids of timed items sharing a fifteen-minute slot with another. Two
- * publishes in one slot crowd the audience and, for social, can trip a
- * platform's rate limit; the page warns, it does not forbid.
- */
-export function findConflicts(items) {
-  const bySlot = new Map();
-  for (const item of items || []) {
-    if (item.allDay || item.status === 'published' || item.status === 'sent') continue;
-    const t = Date.parse(item.start);
-    if (!Number.isFinite(t)) continue;
-    const slot = Math.floor(t / SLOT_MS);
-    if (!bySlot.has(slot)) bySlot.set(slot, []);
-    bySlot.get(slot).push(item.id);
-  }
-  const conflicted = new Set();
-  for (const ids of bySlot.values()) {
-    if (ids.length > 1) ids.forEach((id) => conflicted.add(id));
-  }
-  return conflicted;
-}
+// The toolbar's narrowing and the grid's collision rule live in sibling modules
+// (PR #841); re-exported here so the public API of calendarModel is unchanged.
+export { applyFilters, channelsOf } from './calendarFilters';
+export { SLOT_MS, findConflicts } from './calendarConflicts';
 
 /** True when `day` (local midnight) is before today. */
 export const isPastDay = (day, now = new Date()) =>

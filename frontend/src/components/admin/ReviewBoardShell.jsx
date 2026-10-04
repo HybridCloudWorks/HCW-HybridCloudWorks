@@ -16,9 +16,97 @@ import { CheckCircle, Loader2, Save, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
+import { Textarea } from '@/components/ui/textarea';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 const GRID_COLS = { 2: 'grid-cols-2', 3: 'grid-cols-3', 4: 'grid-cols-4', 5: 'grid-cols-5' };
+
+/**
+ * The first field of `record` that holds a truthy value, else `fallback`.
+ *
+ * Both boards read every legacy spelling of a field (`title` or `Title`,
+ * `cloudProvider` or `'Cloud Provider'`); this is that `a || b || default`
+ * chain written once (PR #841).
+ */
+export function firstFilled(record, keys, fallback) {
+  const hit = keys.find((key) => Boolean(record?.[key]));
+  return hit === undefined ? fallback : record[hit];
+}
+
+/**
+ * Build a board's initial form from a record and a field table.
+ *
+ * `spec` maps each form field to `[keys, fallback]`: the record keys to read
+ * in order of preference, and the value when none of them is set. Fallbacks
+ * that are objects or arrays are used as given, so the caller builds the
+ * table inside its initializer when a fresh one per form matters.
+ */
+export function initialFormFrom(record, spec) {
+  const form = {};
+  for (const [field, [keys, fallback]] of Object.entries(spec)) {
+    form[field] = firstFilled(record, keys, fallback);
+  }
+  return form;
+}
+
+/** A labelled `<select>` for one metadata field; `options` are the values. */
+export function MetadataSelect({ id, label, value, onChange, options }) {
+  return (
+    <div>
+      <label htmlFor={id} className="text-xs font-medium text-muted-foreground">
+        {label}
+      </label>
+      <select
+        id={id}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-full mt-1 rounded-md border border-input bg-background px-3 py-1 text-sm"
+      >
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+/**
+ * A card holding one textarea: a list typed one item per line, or a block of
+ * code or prose. `help` is the one-line note under the field, when there is
+ * one.
+ */
+export function TextareaCard({
+  title,
+  value,
+  onChange,
+  ariaLabel,
+  className,
+  placeholder,
+  help,
+  spellCheck,
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm">{title}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <Textarea
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          aria-label={ariaLabel}
+          className={className}
+          placeholder={placeholder}
+          spellCheck={spellCheck}
+        />
+        {help && <p className="text-xs text-muted-foreground mt-2">{help}</p>}
+      </CardContent>
+    </Card>
+  );
+}
 
 /**
  * @param {{

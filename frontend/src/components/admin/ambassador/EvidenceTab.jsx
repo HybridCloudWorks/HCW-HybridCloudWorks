@@ -1,76 +1,113 @@
 /**
  * Evidence (ADR 0033 §4): the library every application draws on. Filters
- * by source module, program relevance, period and verification; add by hand;
- * import from Speaking, Certifications and Published content with a picker
- * that marks what is already in; edit, verify and delete each item.
+ * by source module, program relevance, period and verification
+ * (evidenceView.js); add by hand; import from Speaking, Certifications and
+ * Published content with a picker that marks what is already in; edit,
+ * verify and delete each item (EvidenceCard.jsx).
  */
 import React, { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { CheckCircle2, Download, ExternalLink, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Download, Plus } from 'lucide-react';
 import ConfirmModal from '@/components/admin/ConfirmModal';
 import EmptyState from '@/components/admin/shared/EmptyState';
-import StatusBadge from '@/components/admin/shared/StatusBadge';
-import { safeUrl } from '@/lib/safeUrl';
-import {
-  EVIDENCE_SOURCES,
-  IMPORT_SOURCES,
-  evidenceRelevant,
-  programById,
-  sourceLabel,
-} from './ambassadorModel';
+import { EVIDENCE_SOURCES, IMPORT_SOURCES, programById, sourceLabel } from './ambassadorModel';
+import EvidenceCard from './EvidenceCard';
 import EvidenceEditor from './EvidenceEditor';
 import ImportDialog from './ImportDialog';
 import { ReadsStatus, SelectField, allLanded } from './Parts';
+import { EMPTY_EVIDENCE_FILTERS, anyFilterSet, filterEvidence, yearsOf } from './evidenceView';
 
-const VERIFIED = {
-  id: 'verified',
-  label: 'Verified',
-  tone: 'ok',
-  help: 'A reviewer could confirm it from the URL or files.',
-};
-const UNVERIFIED = {
-  id: 'unverified',
-  label: 'Unverified',
-  tone: 'muted',
-  help: 'Recorded, not yet confirmed.',
-};
+const option = (value, label) => ({ value, label });
 
-function yearsOf(evidence) {
-  return [
-    ...new Set(
-      evidence.map((e) => String(e.date || '').slice(0, 4)).filter((y) => /^\d{4}$/.test(y))
-    ),
-  ]
-    .sort()
-    .reverse();
+/** The four filters: source module, program relevance, period and verification. */
+function EvidenceFilters({ filters, setFilter, programs, years }) {
+  return (
+    <div className="flex flex-wrap items-end gap-2">
+      <SelectField
+        id="evidence-filter-source"
+        label="Source"
+        value={filters.source}
+        onChange={setFilter('source')}
+        options={[
+          option('', 'All sources'),
+          ...EVIDENCE_SOURCES.map((s) => option(s, sourceLabel(s))),
+        ]}
+      />
+      <SelectField
+        id="evidence-filter-program"
+        label="Relevant to"
+        value={filters.program}
+        onChange={setFilter('program')}
+        options={[option('', 'Any program'), ...programs.map((p) => option(p.id, p.name))]}
+      />
+      <SelectField
+        id="evidence-filter-year"
+        label="Period"
+        value={filters.year}
+        onChange={setFilter('year')}
+        options={[option('', 'Any year'), ...years.map((y) => option(y, y))]}
+      />
+      <SelectField
+        id="evidence-filter-verification"
+        label="Verification"
+        value={filters.verification}
+        onChange={setFilter('verification')}
+        options={[
+          option('', 'Any'),
+          option('verified', 'Verified'),
+          option('unverified', 'Unverified'),
+        ]}
+      />
+    </div>
+  );
+}
+
+/** The matching items as cards, or the honest empty state. */
+function EvidenceGrid({ rows, filtered, byId, hub, onEdit, onDelete }) {
+  if (rows.length === 0) {
+    return (
+      <EmptyState
+        compact
+        variant={filtered ? 'filtered' : 'empty'}
+        title={filtered ? 'No evidence matches these filters.' : 'No evidence yet.'}
+        description={
+          filtered
+            ? 'Clear a filter to see the rest.'
+            : 'Import your talks and certifications, or add an item by hand.'
+        }
+      />
+    );
+  }
+  return (
+    <div className="grid gap-3 md:grid-cols-2">
+      {rows.map((item) => (
+        <EvidenceCard
+          key={item.id}
+          item={item}
+          byId={byId}
+          busy={hub.busyIds.has(item.id)}
+          onEdit={() => onEdit(item)}
+          onVerify={(verificationStatus) =>
+            hub.writes.patchEvidence(item.id, { verificationStatus })
+          }
+          onDelete={() => onDelete(item)}
+        />
+      ))}
+    </div>
+  );
 }
 
 export default function EvidenceTab({ hub }) {
   const { programs, evidence } = hub;
   const reads = [programs, evidence];
-  const [source, setSource] = useState('');
-  const [programFilter, setProgramFilter] = useState('');
-  const [year, setYear] = useState('');
-  const [verification, setVerification] = useState('');
+  const [filters, setFilters] = useState(EMPTY_EVIDENCE_FILTERS);
   const [editing, setEditing] = useState(null); // null | {} (new) | item
   const [importing, setImporting] = useState(null); // source module
   const [confirmDelete, setConfirmDelete] = useState(null);
   const byId = useMemo(() => programById(programs.data), [programs.data]);
   const years = useMemo(() => yearsOf(evidence.data), [evidence.data]);
-
-  const rows = useMemo(
-    () =>
-      evidence.data.filter(
-        (e) =>
-          (!source || e.sourceModule === source) &&
-          (!programFilter || evidenceRelevant(e, programFilter)) &&
-          (!year || String(e.date || '').startsWith(year)) &&
-          (!verification || (e.verificationStatus || 'unverified') === verification)
-      ),
-    [evidence.data, source, programFilter, year, verification]
-  );
-  const filtered = Boolean(source || programFilter || year || verification);
+  const rows = useMemo(() => filterEvidence(evidence.data, filters), [evidence.data, filters]);
+  const setFilter = (key) => (value) => setFilters((f) => ({ ...f, [key]: value }));
 
   const save = async (payload) => {
     const saved = editing?.id
@@ -97,49 +134,12 @@ export default function EvidenceTab({ hub }) {
       {allLanded(reads) && (
         <>
           <div className="flex flex-wrap items-end justify-between gap-3">
-            <div className="flex flex-wrap items-end gap-2">
-              <SelectField
-                id="evidence-filter-source"
-                label="Source"
-                value={source}
-                onChange={setSource}
-                options={[
-                  { value: '', label: 'All sources' },
-                  ...EVIDENCE_SOURCES.map((s) => ({ value: s, label: sourceLabel(s) })),
-                ]}
-              />
-              <SelectField
-                id="evidence-filter-program"
-                label="Relevant to"
-                value={programFilter}
-                onChange={setProgramFilter}
-                options={[
-                  { value: '', label: 'Any program' },
-                  ...programs.data.map((p) => ({ value: p.id, label: p.name })),
-                ]}
-              />
-              <SelectField
-                id="evidence-filter-year"
-                label="Period"
-                value={year}
-                onChange={setYear}
-                options={[
-                  { value: '', label: 'Any year' },
-                  ...years.map((y) => ({ value: y, label: y })),
-                ]}
-              />
-              <SelectField
-                id="evidence-filter-verification"
-                label="Verification"
-                value={verification}
-                onChange={setVerification}
-                options={[
-                  { value: '', label: 'Any' },
-                  { value: 'verified', label: 'Verified' },
-                  { value: 'unverified', label: 'Unverified' },
-                ]}
-              />
-            </div>
+            <EvidenceFilters
+              filters={filters}
+              setFilter={setFilter}
+              programs={programs.data}
+              years={years}
+            />
             <div className="flex flex-wrap gap-2">
               {IMPORT_SOURCES.map((s) => (
                 <Button key={s} size="sm" variant="outline" onClick={() => setImporting(s)}>
@@ -152,100 +152,14 @@ export default function EvidenceTab({ hub }) {
             </div>
           </div>
 
-          {rows.length === 0 ? (
-            <EmptyState
-              compact
-              variant={filtered ? 'filtered' : 'empty'}
-              title={filtered ? 'No evidence matches these filters.' : 'No evidence yet.'}
-              description={
-                filtered
-                  ? 'Clear a filter to see the rest.'
-                  : 'Import your talks and certifications, or add an item by hand.'
-              }
-            />
-          ) : (
-            <div className="grid gap-3 md:grid-cols-2">
-              {rows.map((item) => {
-                const url = safeUrl(item.url);
-                const verified = item.verificationStatus === 'verified';
-                const busy = hub.busyIds.has(item.id);
-                return (
-                  <Card key={item.id} data-testid="evidence-card">
-                    <CardContent className="space-y-2 p-4">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="truncate font-medium">{item.title}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {item.date || 'undated'} · {sourceLabel(item.sourceModule)}
-                            {item.technology?.length ? ` · ${item.technology.join(', ')}` : ''}
-                          </p>
-                        </div>
-                        <StatusBadge size="xs" status={verified ? VERIFIED : UNVERIFIED} />
-                      </div>
-                      {item.description && (
-                        <p className="line-clamp-2 text-sm text-muted-foreground">
-                          {item.description}
-                        </p>
-                      )}
-                      <p className="text-xs text-muted-foreground">
-                        Counts for{' '}
-                        {(item.programIds || []).length === 0
-                          ? 'every program'
-                          : item.programIds.map((id) => byId.get(id)?.name || id).join(', ')}
-                        {item.metrics?.attendees ? ` · ${item.metrics.attendees} attendees` : ''}
-                        {item.metrics?.views ? ` · ${item.metrics.views} views` : ''}
-                      </p>
-                      <div className="flex flex-wrap gap-1">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-7 px-2"
-                          onClick={() => setEditing(item)}
-                        >
-                          <Pencil className="mr-1 h-3 w-3" /> Edit
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-7 px-2"
-                          disabled={busy}
-                          title={verified ? 'Mark unverified' : 'Mark verified'}
-                          onClick={() =>
-                            hub.writes.patchEvidence(item.id, {
-                              verificationStatus: verified ? 'unverified' : 'verified',
-                            })
-                          }
-                        >
-                          <CheckCircle2 className="mr-1 h-3 w-3" />{' '}
-                          {verified ? 'Unverify' : 'Verify'}
-                        </Button>
-                        {url && (
-                          <a
-                            href={url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex h-7 items-center rounded-md border border-input px-2 text-xs hover:bg-accent"
-                          >
-                            <ExternalLink className="mr-1 h-3 w-3" /> Open
-                          </a>
-                        )}
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-7 px-2 text-destructive"
-                          disabled={busy}
-                          onClick={() => setConfirmDelete(item)}
-                        >
-                          <Trash2 className="h-3 w-3" />
-                          <span className="sr-only">Delete {item.title}</span>
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-          )}
+          <EvidenceGrid
+            rows={rows}
+            filtered={anyFilterSet(filters)}
+            byId={byId}
+            hub={hub}
+            onEdit={setEditing}
+            onDelete={setConfirmDelete}
+          />
         </>
       )}
 

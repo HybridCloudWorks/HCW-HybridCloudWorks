@@ -239,6 +239,129 @@ const defaultSubject = (since, until) => {
 };
 
 /**
+ * Newsletter settings, as admin-handlers reads them. An unreadable document
+ * costs the owner's choices for this build, not the build: the defaults are
+ * what the builder did before settings existed, and the problem is recorded
+ * on the issue so the draft says why it may not match the settings.
+ */
+async function readBuildSettings(store, log) {
+  try {
+    const doc = await store.readDoc(
+      'admin_config',
+      NEWSLETTER_SETTINGS_CONFIG_ID,
+      ADMIN_CONFIG_PARTITION
+    );
+    const presented = presentSetting('newsletter-settings', doc);
+    // A stored document that fails validation presents as the defaults; say
+    // why on the issue, as the Platform Settings API does, instead of silently.
+    const problem =
+      presented.stored === 'invalid'
+        ? `settings: the saved newsletter settings are invalid (${presented.problem}), so the default content choices were used`
+        : null;
+    return { settings: presented.value, problem };
+  } catch (error) {
+    log?.warn?.(`[newsletter] settings not read, defaults used: ${error?.message ?? error}`);
+    return {
+      settings: newsletterSettingsDefaults(),
+      problem: 'settings: could not be read, so the default content choices were used',
+    };
+  }
+}
+
+/**
+ * Why today's issue is not rebuilt, as the build's answer, or null when it
+ * may be: a kept draft holds the owner's edits, and anything approved has
+ * left their hands (see the header).
+ */
+function rebuildRefusal(existing, id) {
+  if (existing?.status === 'draft' && existing.savedAt) {
+    return {
+      success: false,
+      issueId: id,
+      reason: 'kept',
+      message:
+        "Today's issue is saved in Drafts, so it is not rebuilt over your edits. Delete it first to build it again.",
+    };
+  }
+  if (existing && !REBUILDABLE.has(existing.status)) {
+    return {
+      success: false,
+      issueId: id,
+      reason: 'locked',
+      status: existing.status,
+      message: `Today's issue is already ${existing.status}; it is not rebuilt, so readers get the version that was approved.`,
+    };
+  }
+  return null;
+}
+
+/**
+ * The subject and intro for a build: the AI's when the intro is on and the
+ * drafter is there, else the default subject and no intro. Intro off is a
+ * choice, not a failure: no AI call, no intro, no introError. The AI being
+ * off or down costs the intro, not the issue: the items are the newsletter,
+ * and the owner can write the note by hand.
+ */
+async function draftIntroIfEnabled({ drafter, settings, sections, subject, log }) {
+  if (!drafter || settings.introEnabled === false) return { subject, intro: '', introError: null };
+  try {
+    const drafted = await draftIntro({ drafter, sections, subject, tone: settings.introTone });
+    return { subject: drafted.subject, intro: drafted.intro, introError: null };
+  } catch (error) {
+    const introError = describeAiError(error);
+    log?.warn?.(`[newsletter] intro not drafted: ${introError}`);
+    return { subject, intro: '', introError };
+  }
+}
+
+/**
+ * What a rebuild carries forward from the issue it replaces: the owner's
+ * note, inbox line and send time belong to them, not to the build, as does
+ * the version history (ADR 0033).
+ */
+function inheritedFields(existing) {
+  return {
+    customNote: typeof existing?.customNote === 'string' ? existing.customNote : '',
+    preheader: typeof existing?.preheader === 'string' ? existing.preheader : '',
+    ...(typeof existing?.sendAt === 'string' ? { sendAt: existing.sendAt } : {}),
+    ...(Array.isArray(existing?.versions) ? { versions: existing.versions } : {}),
+  };
+}
+
+/** The issue document a build writes. */
+function issueDocument({
+  id,
+  since,
+  until,
+  existing,
+  collected,
+  itemCount,
+  drafted,
+  keep,
+  keptBy,
+}) {
+  const stamp = until.toISOString();
+  return {
+    id,
+    kind: 'weekly_issue',
+    version: 1,
+    status: 'draft',
+    periodStart: since.toISOString(),
+    periodEnd: until.toISOString(),
+    subject: drafted.subject,
+    intro: drafted.intro,
+    introError: drafted.introError,
+    ...inheritedFields(existing),
+    sections: collected.sections,
+    itemCount,
+    problems: collected.problems,
+    createdAt: existing?.createdAt ?? stamp,
+    updatedAt: stamp,
+    ...(keep ? { savedAt: stamp, savedBy: keptBy ? String(keptBy).slice(0, 100) : null } : {}),
+  };
+}
+
+/**
  * @param {object} deps
  * @param {{ queryDocs: Function, readDoc: Function, upsertDoc: Function }} deps.store
  * @param {{ generateDraft: Function } | null} deps.drafter null skips the intro
@@ -254,46 +377,14 @@ export function createIssueBuilder({
   log,
 }) {
   /**
-   * Newsletter settings, as admin-handlers reads them. An unreadable document
-   * costs the owner's choices for this build, not the build: the defaults are
-   * what the builder did before settings existed, and the problem is recorded
-   * on the issue so the draft says why it may not match the settings.
-   */
-  async function readSettings() {
-    try {
-      const doc = await store.readDoc(
-        'admin_config',
-        NEWSLETTER_SETTINGS_CONFIG_ID,
-        ADMIN_CONFIG_PARTITION
-      );
-      const presented = presentSetting('newsletter-settings', doc);
-      // A stored document that fails validation presents as the defaults; say
-      // why on the issue, as the Platform Settings API does, instead of silently.
-      const problem =
-        presented.stored === 'invalid'
-          ? `settings: the saved newsletter settings are invalid (${presented.problem}), so the default content choices were used`
-          : null;
-      return { settings: presented.value, problem };
-    } catch (error) {
-      log?.warn?.(`[newsletter] settings not read, defaults used: ${error?.message ?? error}`);
-      return {
-        settings: newsletterSettingsDefaults(),
-        problem: 'settings: could not be read, so the default content choices were used',
-      };
-    }
-  }
-
-  /**
    * @param {{ days?: number, keep?: boolean, keptBy?: string }} [payload]
    *   `days` overrides the saved window (clamped); `keep` lands the built issue
    *   in Drafts; `keptBy` is recorded as `savedBy`.
    */
   async function build({ days, keep = false, keptBy = null } = {}) {
     const until = now();
-    const { settings, problem: settingsProblem } = await readSettings();
-    const windowDays = clampWindowDays(
-      days === undefined || days === null ? settings.windowDays : days
-    );
+    const { settings, problem: settingsProblem } = await readBuildSettings(store, log);
+    const windowDays = clampWindowDays(days ?? settings.windowDays);
     const since = new Date(until.getTime() - windowDays * 24 * 60 * 60 * 1000);
     const id = `issue-${until.toISOString().slice(0, 10)}`;
 
@@ -301,24 +392,8 @@ export function createIssueBuilder({
     // A deleted issue is gone as far as the owner is concerned: rebuild it from
     // scratch rather than carrying its note or creation time forward.
     const existing = stored?.status === 'deleted' ? null : stored;
-    if (existing?.status === 'draft' && existing.savedAt) {
-      return {
-        success: false,
-        issueId: id,
-        reason: 'kept',
-        message:
-          "Today's issue is saved in Drafts, so it is not rebuilt over your edits. Delete it first to build it again.",
-      };
-    }
-    if (existing && !REBUILDABLE.has(existing.status)) {
-      return {
-        success: false,
-        issueId: id,
-        reason: 'locked',
-        status: existing.status,
-        message: `Today's issue is already ${existing.status}; it is not rebuilt, so readers get the version that was approved.`,
-      };
-    }
+    const refusal = rebuildRefusal(existing, id);
+    if (refusal) return refusal;
 
     const plan = planSections(sections, settings.sections);
     const collected = await collectSections({
@@ -341,64 +416,31 @@ export function createIssueBuilder({
       };
     }
 
-    let subject = defaultSubject(since, until);
-    let intro = '';
-    let introError = null;
-    // Intro off is a choice, not a failure: no AI call, no intro, no introError.
-    if (drafter && settings.introEnabled !== false) {
-      try {
-        const drafted = await draftIntro({
-          drafter,
-          sections: collected.sections,
-          subject,
-          tone: settings.introTone,
-        });
-        subject = drafted.subject;
-        intro = drafted.intro;
-      } catch (error) {
-        // The AI being off or down costs the intro, not the issue: the items
-        // are the newsletter, and the owner can write the note by hand.
-        introError = describeAiError(error);
-        log?.warn?.(`[newsletter] intro not drafted: ${introError}`);
-      }
-    }
-
-    const stamp = until.toISOString();
-    const doc = {
-      id,
-      kind: 'weekly_issue',
-      version: 1,
-      status: 'draft',
-      periodStart: since.toISOString(),
-      periodEnd: until.toISOString(),
-      subject,
-      intro,
-      introError,
-      customNote: typeof existing?.customNote === 'string' ? existing.customNote : '',
-      // The owner's inbox line and send time belong to them, not to the
-      // build: a rebuild refreshes the items and keeps both (ADR 0033).
-      preheader: typeof existing?.preheader === 'string' ? existing.preheader : '',
-      ...(typeof existing?.sendAt === 'string' ? { sendAt: existing.sendAt } : {}),
-      ...(Array.isArray(existing?.versions) ? { versions: existing.versions } : {}),
+    const drafted = await draftIntroIfEnabled({
+      drafter,
+      settings,
       sections: collected.sections,
+      subject: defaultSubject(since, until),
+      log,
+    });
+    const doc = issueDocument({
+      id,
+      since,
+      until,
+      existing,
+      collected,
       itemCount,
-      problems: collected.problems,
-      createdAt: existing?.createdAt ?? stamp,
-      updatedAt: stamp,
-      ...(keep
-        ? {
-            savedAt: stamp,
-            savedBy: keptBy ? String(keptBy).slice(0, 100) : null,
-          }
-        : {}),
-    };
+      drafted,
+      keep,
+      keptBy,
+    });
     await store.upsertDoc('newsletters', doc);
     return {
       success: true,
       issueId: id,
-      subject,
+      subject: drafted.subject,
       itemCount,
-      introError,
+      introError: drafted.introError,
       kept: Boolean(keep),
       sections: collected.sections.map((section) => section.id),
       problems: collected.problems,

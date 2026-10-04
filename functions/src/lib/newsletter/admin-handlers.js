@@ -31,7 +31,7 @@
  * `sent` with Resend's `sent_at`, or `failed` with the reason when Resend
  * canceled or lost it. That is the only path to `sent` for a scheduled issue.
  *
- * ## Manual blocks (applySectionEdit)
+ * ## Manual blocks (applySectionEdit, in section-edit.js since PR #841)
  *
  * The owner can add an item of their own — a chosen live article or a custom
  * block with a title, link, summary and image — to any section, or into a
@@ -107,7 +107,21 @@ import { ISSUE_ID_PATTERN, describeAiError, draftIntro, suggestSubjects } from '
 import { reconcileIssue, reconcileIssues, reconcilable, overdue } from './reconcile.js';
 import { renderIssue } from './render.js';
 import { resolveSendTime } from './schedule.js';
-import { absoluteUrl, plainText } from './sections.js';
+import { applySectionEdit, normalizeManualItem } from './section-edit.js';
+import { createIssueActions } from './issue-actions.js';
+import {
+  changedElsewhere,
+  describeForLog,
+  describeForOwner,
+  errorMeta,
+  etagRequired,
+  json,
+  missingEtag,
+  notFound,
+  resendNotConfigured,
+  staleView,
+} from './admin-responses.js';
+import { parseSenderBody } from './validate.js';
 import {
   NEWSLETTER_SENDER_CONFIG_ID,
   checkSendingDomain,
@@ -123,6 +137,10 @@ import {
 import { renderIssueInTemplate } from './template-layout.js';
 import { loadTemplateHtml, sharedTemplateCache } from './template-source.js';
 
+// Section editing lives in section-edit.js since PR #841; re-exported so the
+// route tests and any caller keep one import.
+export { applySectionEdit, normalizeManualItem } from './section-edit.js';
+
 export const MAX_CUSTOM_NOTE_LENGTH = 2000;
 export const MAX_SUBJECT_LENGTH = 120;
 export const MAX_PREHEADER_LENGTH = 150;
@@ -136,20 +154,12 @@ const PUBLISHED_LIMIT = 100;
 export const MAX_VERSIONS = 10;
 /** Overdue scheduled issues a list read asks Resend about, at most. */
 const LIST_RECONCILE_LIMIT = 5;
-const MAX_SECTION_TITLE_LENGTH = 80;
-const MANUAL_SECTION_ID = /^manual(-[a-z0-9]{1,20})?$/;
 
 /** Only these can be deleted: anything else was approved, and Resend has it (a failed one no longer does). */
 const DELETABLE = new Set(['draft', 'rejected', 'failed']);
 
 /** What the preview footer shows before an address is set, so it is obvious. */
 const ADDRESS_NOT_SET = '[Postal address not set — add it in Newsletter settings before approving]';
-
-const json = (status, body) => ({
-  status,
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify(body),
-});
 
 /** Stored fields the page may see. The issue holds nothing private, but a list is a projection. */
 const SUMMARY_FIELDS = [
@@ -198,148 +208,6 @@ function monthWindow(month) {
     from: new Date(Date.UTC(year, monthNumber - 1, 1) - day).toISOString(),
     to: new Date(Date.UTC(year, monthNumber, 1) + day).toISOString(),
   };
-}
-
-/**
- * An error for an approval LOG LINE: its name and code only. SDK messages can
- * carry request details such as the document id, so they are never logged.
- */
-const errorMeta = (error) => {
-  const name = typeof error?.name === 'string' ? error.name : 'Error';
-  const code =
-    typeof error?.code === 'string' || typeof error?.code === 'number' ? ` code ${error.code}` : '';
-  return `${name}${code}`;
-};
-
-/** Resend's refusal for a LOG LINE: status and error name only, never its message. */
-const describeForLog = (result) => {
-  const name = typeof result?.data?.name === 'string' ? ` ${result.data.name}` : '';
-  return `HTTP ${result?.status ?? 0}${name}`;
-};
-
-/**
- * Resend's refusal for the OWNER: the log summary plus Resend's own sentence,
- * which is what says what to fix. It can echo the broadcast (subject, body,
- * postal address), so it is stored on the issue and returned to the page, and
- * never logged.
- */
-const describeForOwner = (result) => {
-  const message =
-    typeof result?.data?.message === 'string' ? `: ${result.data.message.slice(0, 200)}` : '';
-  return `${describeForLog(result)}${message}`;
-};
-
-/**
- * A manual block as submitted, validated into the stored item shape, or
- * `{ error }`. Plain text only and https only, like a collected item: the
- * renderer escapes every field, and `absoluteUrl` drops anything that is not
- * https (a site path is made absolute).
- */
-export function normalizeManualItem(raw) {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw))
-    return { error: 'a manual item must be an object' };
-  const title = plainText(raw.title, 160);
-  if (!title) return { error: 'a manual item needs a title' };
-  const url = absoluteUrl(raw.url);
-  if (!url) return { error: 'a manual item needs an https link' };
-  const item = { manual: true, title, url };
-  const summary = plainText(raw.summary);
-  if (summary) item.summary = summary;
-  const label = plainText(raw.label, 40);
-  if (label) item.label = label;
-  if (raw.imageUrl !== undefined && raw.imageUrl !== null && raw.imageUrl !== '') {
-    const imageUrl = absoluteUrl(raw.imageUrl);
-    if (!imageUrl) return { error: 'a manual item image must be an https URL' };
-    item.imageUrl = imageUrl;
-  }
-  if (raw.contentId !== undefined && raw.contentId !== null)
-    item.contentId = String(raw.contentId).slice(0, 120);
-  return { item };
-}
-
-/**
- * The stored sections, filtered and reordered as the page submitted them,
- * plus any manual blocks it added, or `{ error }`. Collected items may only
- * be removed or reordered (see "Editing sections never adds content" above)
- * and are written back as STORED; a manual item (`manual: true`) is
- * validated by `normalizeManualItem` and may land in any section, or in a
- * manual section the page creates (`manual`, `manual-<slug>`, with a title).
- */
-export function applySectionEdit(storedSections, submitted) {
-  if (!Array.isArray(submitted)) return { error: 'sections must be an array' };
-  const stored = new Map((storedSections || []).map((section) => [section.id, section]));
-  const seenSections = new Set();
-  const sections = [];
-  for (const entry of submitted) {
-    if (
-      !entry ||
-      typeof entry !== 'object' ||
-      Array.isArray(entry) ||
-      typeof entry.id !== 'string'
-    ) {
-      return {
-        error: 'each section must be an object with the id of a section in this issue',
-      };
-    }
-    let original = stored.get(entry.id);
-    if (!original) {
-      // Only a manual section may be new, and it needs a title.
-      if (!MANUAL_SECTION_ID.test(entry.id)) {
-        return {
-          error: 'sections may only be removed or reordered; a section was added',
-        };
-      }
-      const title = plainText(entry.title, MAX_SECTION_TITLE_LENGTH);
-      if (!title) return { error: 'a manual section needs a title' };
-      original = { id: entry.id, title, manual: true, items: [] };
-    }
-    if (seenSections.has(entry.id)) return { error: 'a section is listed more than once' };
-    seenSections.add(entry.id);
-    if (entry.title !== undefined && entry.title !== original.title) {
-      if (!original.manual) return { error: 'a section title cannot be edited' };
-      const title = plainText(entry.title, MAX_SECTION_TITLE_LENGTH);
-      if (!title) return { error: 'a manual section needs a title' };
-      original = { ...original, title };
-    }
-    if (!Array.isArray(entry.items)) return { error: 'each section needs an items array' };
-    const byUrl = new Map((original.items || []).map((item) => [item.url, item]));
-    const seenItems = new Set();
-    const items = [];
-    for (const item of entry.items) {
-      const isObject = item && typeof item === 'object' && !Array.isArray(item);
-      if (isObject && item.manual === true) {
-        const manual = normalizeManualItem(item);
-        if (manual.error) return { error: manual.error };
-        if (seenItems.has(manual.item.url)) return { error: 'an item is listed more than once' };
-        seenItems.add(manual.item.url);
-        items.push(manual.item);
-        continue;
-      }
-      const url = isObject ? item.url : undefined;
-      const match = typeof url === 'string' ? byUrl.get(url) : undefined;
-      if (!match) {
-        return {
-          error:
-            'items may only be removed or reordered within their section; an item was added or moved',
-        };
-      }
-      if (seenItems.has(url)) return { error: 'an item is listed more than once' };
-      seenItems.add(url);
-      // Any field the page sends back must be the stored value: this is a
-      // subset check, not an editor for titles, summaries or labels.
-      const edited = Object.keys(item).some((key) => item[key] !== match[key]);
-      if (edited)
-        return {
-          error: 'item fields cannot be edited; they come from the site',
-        };
-      items.push(match);
-    }
-    // A section left with nothing is a removed section.
-    if (items.length) sections.push({ ...original, items });
-  }
-  const itemCount = sections.reduce((sum, section) => sum + section.items.length, 0);
-  if (itemCount === 0) return { error: 'at least one item must remain in the issue' };
-  return { sections, itemCount };
 }
 
 /**
@@ -403,6 +271,30 @@ const summariseVersion = (version) => ({
 export const NEWSLETTER_AI_BUDGET_MS = 14_000;
 
 /**
+ * The From address to store for a trimmed `raw` (PUT newsletter-sender): ''
+ * returns to the default; anything else must parse and sit on a sending
+ * domain — the default's, or one Resend lists as verified. `{ error }` is
+ * the 400 to return.
+ */
+async function resolveSender(raw, client) {
+  if (!raw) return { from: '' };
+  const parsed = parseFromAddress(raw);
+  if (!parsed) {
+    return {
+      error: json(400, {
+        ok: false,
+        error: 'from must be an email address, optionally as "Name <address>"',
+      }),
+    };
+  }
+  const domain = await checkSendingDomain(parsed.domain, client);
+  if (!domain.ok) {
+    return { error: json(400, { ok: false, code: 'DOMAIN_NOT_SENDING', error: domain.reason }) };
+  }
+  return { from: parsed.from };
+}
+
+/**
  * @param {object} deps
  * @param {{ requireRole: Function }} deps.guard
  * @param {{ readDoc: Function, queryDocs: Function, upsertDoc: Function, replaceDocIfMatch: Function }} deps.store
@@ -447,32 +339,6 @@ export function createNewsletterAdminHandlers({
 
   /** Where this send comes from: the owner's sender, or the default (sender.js). */
   const fromAddress = (context) => resolveFromAddress(store, context);
-
-  const notFound = () => json(404, { ok: false, error: 'Issue not found' });
-
-  /**
-   * The caller's view of the issue is stale: it read a version that is no
-   * longer stored. Checked BEFORE writing, against the `etag` the caller got
-   * from GET, because the server's own read is fresh by definition; comparing
-   * only that would let an editor working from an old view overwrite another
-   * editor's change without either of them knowing. The etag is REQUIRED on
-   * every write: an optional one protects only the callers that remember it.
-   */
-  const staleView = (body, issue) => body.etag !== issue._etag;
-  /** A write without the version it was made against cannot be checked, so it is refused. */
-  const missingEtag = (body) => typeof body?.etag !== 'string' || body.etag.length === 0;
-  const etagRequired = () =>
-    json(400, {
-      ok: false,
-      code: 'ETAG_REQUIRED',
-      error: 'etag is required: send the issue.etag from the last read of this issue.',
-    });
-  const changedElsewhere = () =>
-    json(409, {
-      ok: false,
-      code: 'ISSUE_CHANGED',
-      error: 'This issue changed since you opened it. Reload it and try again.',
-    });
 
   // Terraform's newsletter_sending_enabled. Anything but the exact string
   // "true" is off, so a missing or mistyped setting cannot send.
@@ -589,6 +455,21 @@ export function createNewsletterAdminHandlers({
       return { rows, warnings: [] };
     }
   }
+
+  // cancel, reschedule and retry live in issue-actions.js (PR #841); they
+  // read, render and present an issue through the same functions as the
+  // routes below.
+  const actions = createIssueActions({
+    guard,
+    store,
+    now,
+    readIssue,
+    readSettings,
+    present,
+    renderChosenDesign,
+    clientOrNull,
+    fromAddress,
+  });
 
   return {
     async list(request, context) {
@@ -1319,70 +1200,7 @@ export function createNewsletterAdminHandlers({
      * because the plan or the state is what it names. On success the issue
      * is a kept draft again, approvable afresh, with the cancellation recorded.
      */
-    async cancel(request, context) {
-      const auth = await guard.requireRole(request, 'publisher');
-      if (auth.error) return auth.error;
-      const body = await request.json().catch(() => null);
-      if (missingEtag(body)) return etagRequired();
-      const ref = `[invocation ${context?.invocationId ?? 'unknown'}]`;
-      const apiKey = readKey(env, 'RESEND_API_KEY');
-      if (!apiKey)
-        return json(503, {
-          ok: false,
-          error: 'Resend is not configured: RESEND_API_KEY is not set',
-        });
-      try {
-        const issue = await readIssue(request);
-        if (!issue) return notFound();
-        if (issue.status !== 'scheduled' || !issue.broadcastId) {
-          return json(409, {
-            ok: false,
-            error: `Only a scheduled issue can be canceled; this issue is ${issue.status}.`,
-          });
-        }
-        if (staleView(body, issue)) return changedElsewhere();
-        const client = createResendClient({ apiKey, fetch: fetchImpl });
-        const deleted = await client.deleteBroadcast(issue.broadcastId);
-        if (!deleted.ok) {
-          context.error?.(`cancelNewsletter refused ${ref}: ${describeForLog(deleted)}`);
-          return json(502, {
-            ok: false,
-            code: 'CANCEL_REFUSED',
-            error: `Resend did not cancel the broadcast: ${describeForOwner(deleted)}`,
-          });
-        }
-        const at = now().toISOString();
-        const canceled = {
-          ...issue,
-          status: 'draft',
-          savedAt: issue.savedAt ?? at,
-          canceledAt: at,
-          canceledBroadcastId: issue.broadcastId,
-          broadcastId: null,
-          broadcastStatus: null,
-          scheduledAt: null,
-          approvedAt: null,
-          approvedBy: null,
-          lastError: null,
-          updatedAt: at,
-        };
-        let written;
-        try {
-          written = await store.replaceDocIfMatch('newsletters', canceled);
-        } catch (error) {
-          if (error?.code === 412) return changedElsewhere();
-          throw error;
-        }
-        context.log?.(`cancelNewsletter ok ${ref}`);
-        return json(200, await present(written ?? canceled, await readSettings(), context));
-      } catch (error) {
-        context.error?.(`cancelNewsletter failed ${ref}: ${errorMeta(error)}`);
-        return json(500, {
-          ok: false,
-          error: 'Failed to cancel the newsletter issue',
-        });
-      }
-    },
+    cancel: actions.cancel,
 
     /**
      * Move a scheduled broadcast. Resend's update does not take a new
@@ -1391,201 +1209,14 @@ export function createNewsletterAdminHandlers({
      * refused the issue returns to a draft with the reason rather than
      * standing scheduled against a broadcast that no longer exists.
      */
-    async reschedule(request, context) {
-      const auth = await guard.requireRole(request, 'publisher');
-      if (auth.error) return auth.error;
-      const body = await request.json().catch(() => null);
-      if (missingEtag(body)) return etagRequired();
-      const ref = `[invocation ${context?.invocationId ?? 'unknown'}]`;
-      const when = typeof body.scheduledAt === 'string' ? Date.parse(body.scheduledAt) : NaN;
-      if (!Number.isFinite(when))
-        return json(400, {
-          ok: false,
-          error: 'scheduledAt must be an ISO instant',
-        });
-      if (when <= now().getTime() + 60 * 1000)
-        return json(400, {
-          ok: false,
-          error: 'scheduledAt must be at least a minute ahead',
-        });
-      const scheduledAt = new Date(when).toISOString();
-      const apiKey = readKey(env, 'RESEND_API_KEY');
-      if (!apiKey)
-        return json(503, {
-          ok: false,
-          error: 'Resend is not configured: RESEND_API_KEY is not set',
-        });
-      try {
-        const settings = await readSettings();
-        const issue = await readIssue(request);
-        if (!issue) return notFound();
-        if (issue.status !== 'scheduled' || !issue.broadcastId) {
-          return json(409, {
-            ok: false,
-            error: `Only a scheduled issue can be rescheduled; this issue is ${issue.status}.`,
-          });
-        }
-        if (staleView(body, issue)) return changedElsewhere();
-        const rendered = await renderChosenDesign(
-          issue,
-          { postalAddress: settings.postalAddress },
-          settings,
-          context
-        );
-        if (rendered.templateProblem) {
-          return json(409, {
-            ok: false,
-            code: 'TEMPLATE_UNUSABLE',
-            templateProblem: rendered.templateProblem,
-            error: `The template chosen in Newsletter settings cannot be used: ${rendered.templateProblem.message}`,
-          });
-        }
-        const client = createResendClient({ apiKey, fetch: fetchImpl });
-        const deleted = await client.deleteBroadcast(issue.broadcastId);
-        if (!deleted.ok) {
-          context.error?.(`rescheduleNewsletter cancel refused ${ref}: ${describeForLog(deleted)}`);
-          return json(502, {
-            ok: false,
-            code: 'CANCEL_REFUSED',
-            error: `Resend did not release the current broadcast, so nothing moved: ${describeForOwner(deleted)}`,
-          });
-        }
-        const at = now().toISOString();
-        let segmentId;
-        let created = null;
-        try {
-          segmentId = await resolveSegmentId(client);
-          created = await client.createBroadcast({
-            segmentId,
-            from: await fromAddress(context),
-            replyTo: settings.replyTo,
-            subject: rendered.subject,
-            html: rendered.html,
-            text: rendered.text,
-            name: `HybridCloudWorks Weekly ${issue.id.slice('issue-'.length)}`,
-            scheduledAt,
-          });
-        } catch (error) {
-          created = {
-            ok: false,
-            status: 0,
-            data: { message: String(error?.message ?? error) },
-          };
-        }
-        if (!created.ok || !created.data?.id) {
-          // The old broadcast is gone and no new one exists: say so on the issue.
-          context.error?.(
-            `rescheduleNewsletter new broadcast refused ${ref}: ${describeForLog(created)}`
-          );
-          const reverted = {
-            ...issue,
-            status: 'draft',
-            savedAt: issue.savedAt ?? at,
-            canceledAt: at,
-            canceledBroadcastId: issue.broadcastId,
-            broadcastId: null,
-            broadcastStatus: null,
-            scheduledAt: null,
-            approvedAt: null,
-            approvedBy: null,
-            lastError: `The previous broadcast was canceled but Resend refused the new one: ${describeForOwner(created)}. Approve again to reschedule.`,
-            updatedAt: at,
-          };
-          await store.replaceDocIfMatch('newsletters', reverted).catch((error) => {
-            context.error?.(`rescheduleNewsletter could not revert ${ref}: ${errorMeta(error)}`);
-          });
-          return json(502, {
-            ok: false,
-            code: 'RESCHEDULE_REFUSED',
-            error: reverted.lastError,
-          });
-        }
-        const moved = {
-          ...issue,
-          broadcastId: created.data.id,
-          broadcastStatus: 'scheduled',
-          scheduledAt,
-          sendAt: scheduledAt,
-          rescheduledAt: at,
-          lastError: null,
-          updatedAt: at,
-        };
-        let written;
-        try {
-          written = await store.replaceDocIfMatch('newsletters', moved);
-        } catch (error) {
-          if (error?.code === 412) {
-            return json(409, {
-              ok: false,
-              code: 'CHANGED_DURING_RESCHEDULE',
-              broadcastId: created.data.id,
-              error: `Resend accepted broadcast ${created.data.id} for ${scheduledAt}, but this issue changed meanwhile. Reload it; if it does not show the new time, cancel the extra broadcast in Resend.`,
-            });
-          }
-          throw error;
-        }
-        context.log?.(`rescheduleNewsletter ok ${ref}`);
-        return json(200, await present(written ?? moved, settings, context));
-      } catch (error) {
-        context.error?.(`rescheduleNewsletter failed ${ref}: ${errorMeta(error)}`);
-        return json(500, {
-          ok: false,
-          error: 'Failed to reschedule the newsletter issue',
-        });
-      }
-    },
+    reschedule: actions.reschedule,
 
     /**
      * A failed issue back to a kept draft, so it can be approved again. The
      * failure stays in `lastError` for the page to show until the next
      * approval clears it.
      */
-    async retry(request, context) {
-      const auth = await guard.requireRole(request, 'publisher');
-      if (auth.error) return auth.error;
-      const body = await request.json().catch(() => null);
-      if (missingEtag(body)) return etagRequired();
-      try {
-        const issue = await readIssue(request);
-        if (!issue) return notFound();
-        if (issue.status !== 'failed') {
-          return json(409, {
-            ok: false,
-            error: `Only a failed issue can be retried; this issue is ${issue.status}.`,
-          });
-        }
-        if (staleView(body, issue)) return changedElsewhere();
-        const at = now().toISOString();
-        const retried = {
-          ...issue,
-          status: 'draft',
-          savedAt: issue.savedAt ?? at,
-          retriedAt: at,
-          failedBroadcastId: issue.broadcastId ?? null,
-          broadcastId: null,
-          broadcastStatus: null,
-          scheduledAt: null,
-          sentAt: null,
-          approvedAt: null,
-          approvedBy: null,
-          updatedAt: at,
-        };
-        let written;
-        try {
-          written = await store.replaceDocIfMatch('newsletters', retried);
-        } catch (error) {
-          if (error?.code === 412) return changedElsewhere();
-          throw error;
-        }
-        return json(200, await present(written ?? retried, await readSettings(), context));
-      } catch (error) {
-        context.error?.(`retryNewsletter failed: ${errorMeta(error)}`);
-        return json(500, {
-          ok: false,
-          error: 'Failed to retry the newsletter issue',
-        });
-      }
-    },
+    retry: actions.retry,
 
     /**
      * A new kept draft with this issue's subject, preview text, note, intro
@@ -1645,11 +1276,7 @@ export function createNewsletterAdminHandlers({
       const auth = await guard.requireRole(request, 'editor');
       if (auth.error) return auth.error;
       const client = clientOrNull();
-      if (!client)
-        return json(503, {
-          ok: false,
-          error: 'Resend is not configured: RESEND_API_KEY is not set',
-        });
+      if (!client) return resendNotConfigured();
       try {
         const rows = await store.queryDocs(
           'newsletters',
@@ -1703,47 +1330,17 @@ export function createNewsletterAdminHandlers({
     async putSender(request, context) {
       const auth = await guard.requireRole(request, 'publisher');
       if (auth.error) return auth.error;
-      const body = await request.json().catch(() => null);
-      if (!body || typeof body !== 'object' || Array.isArray(body))
-        return json(400, { ok: false, error: 'Body must be a JSON object' });
-      if (body.from !== undefined && typeof body.from !== 'string')
-        return json(400, { ok: false, error: 'from must be a string' });
-      const raw = String(body.from ?? '').trim();
+      const requested = parseSenderBody(await request.json().catch(() => null));
+      if (requested.error) return json(400, { ok: false, error: requested.error });
       try {
-        const at = now().toISOString();
-        const by = auth.user?.oid || auth.user?.sub || null;
-        if (!raw) {
-          await store.upsertDoc('admin_config', {
-            id: NEWSLETTER_SENDER_CONFIG_ID,
-            configScope: ADMIN_CONFIG_PARTITION,
-            from: '',
-            updatedAt: at,
-            updatedBy: by,
-          });
-          return json(200, {
-            ok: true,
-            ...presentSender({ from: '', updatedAt: at, updatedBy: by }),
-          });
-        }
-        const parsed = parseFromAddress(raw);
-        if (!parsed)
-          return json(400, {
-            ok: false,
-            error: 'from must be an email address, optionally as "Name <address>"',
-          });
-        const domain = await checkSendingDomain(parsed.domain, clientOrNull());
-        if (!domain.ok)
-          return json(400, {
-            ok: false,
-            code: 'DOMAIN_NOT_SENDING',
-            error: domain.reason,
-          });
+        const resolved = await resolveSender(requested.from, clientOrNull());
+        if (resolved.error) return resolved.error;
         const doc = {
           id: NEWSLETTER_SENDER_CONFIG_ID,
           configScope: ADMIN_CONFIG_PARTITION,
-          from: parsed.from,
-          updatedAt: at,
-          updatedBy: by,
+          from: resolved.from,
+          updatedAt: now().toISOString(),
+          updatedBy: auth.user?.oid || auth.user?.sub || null,
         };
         await store.upsertDoc('admin_config', doc);
         return json(200, { ok: true, ...presentSender(doc) });

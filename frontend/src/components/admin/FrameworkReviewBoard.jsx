@@ -1,12 +1,78 @@
-/* eslint-disable complexity -- the initial form state reads every legacy spelling of every field */
 import React, { useState, lazy, Suspense } from 'react';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Eye, Code, BookOpen, Layers, ExternalLink, Activity } from 'lucide-react';
-import ReviewBoardShell from '@/components/admin/ReviewBoardShell';
+import ReviewBoardShell, {
+  MetadataSelect,
+  TextareaCard,
+  initialFormFrom,
+} from '@/components/admin/ReviewBoardShell';
 const FrameworkRadar = lazy(() => import('@/components/widgets/FrameworkRadar'));
+
+/**
+ * The framework's form from its record: each field, the record keys it may
+ * be stored under (legacy spellings included) and its default. Built per
+ * call so no two forms share a fallback object.
+ */
+export function initialFrameworkForm(blog) {
+  return initialFormFrom(blog, {
+    title: [['title', 'Title'], ''],
+    summary: [['summary', 'Summary'], ''],
+    cloudProvider: [['cloudProvider', 'Cloud Provider'], 'AWS'],
+    category: [['category'], 'Architecture'],
+    complexity: [['complexity'], 'Foundation'],
+    tags: [['tags', 'Tags'], []],
+    featured: [['featured'], false],
+    docLink: [['docLink'], ''],
+    overviewHtml: [['overviewHtml', 'overview'], ''],
+    commandExample: [['commandExample'], ''],
+    keyPillars: [['keyPillars'], []],
+    frameworkConcepts: [['frameworkConcepts', 'frameworkConceptSeeds', 'keyPillars'], []],
+    patterns: [['patterns'], []],
+    architectureRecommendation: [['architectureRecommendation', 'recommendation'], ''],
+    frameworkSourceUrls: [['frameworkSourceUrls', 'officialSources'], []],
+    frameworkKnowledgePrompt: [['frameworkKnowledgePrompt'], ''],
+    frameworkDiagramPrompt: [['frameworkDiagramPrompt'], ''],
+    frameworkImagePrompt: [['frameworkImagePrompt'], ''],
+    terraformCode: [['terraformCode'], '# IaC example'],
+    // Maturity Scoring
+    maturityScores: [
+      ['maturityScores'],
+      { Security: 3, Reliability: 3, Cost: 3, Operations: 3, Performance: 3, Sustainability: 3 },
+    ],
+  });
+}
+
+/** The Pillars tab: three lists typed one item per line. */
+const PILLAR_LISTS = [
+  {
+    field: 'keyPillars',
+    title: 'Key Pillars',
+    ariaLabel: 'Key pillars, one per line',
+    className: 'min-h-37.5 font-mono text-sm',
+    placeholder:
+      'Security\nReliability\nCost Optimization\nOperational Excellence\nPerformance Efficiency',
+    help: 'One pillar per line',
+  },
+  {
+    field: 'patterns',
+    title: 'Architecture Patterns',
+    ariaLabel: 'Architecture patterns, one per line',
+    className: 'min-h-25 font-mono text-sm',
+    placeholder: 'Event-Driven\nMicroservices\nMulti-Region',
+    help: 'One pattern per line',
+  },
+  {
+    field: 'frameworkConcepts',
+    title: 'Framework Concepts (Interactive Nodes)',
+    ariaLabel: 'Framework concepts, one per line',
+    className: 'min-h-32.5 font-mono text-sm',
+    placeholder: 'Security posture\nReliability guardrails\nCost governance',
+    help: 'One concept node per line',
+  },
+];
 
 /**
  * Framework Review Board
@@ -18,37 +84,7 @@ const FrameworkRadar = lazy(() => import('@/components/widgets/FrameworkRadar'))
  * file is the framework's own fields.
  */
 export default function FrameworkReviewBoard({ blog, onSave, onPublish, onDelete, saving, error }) {
-  const [formData, setFormData] = useState({
-    title: blog.title || blog.Title || '',
-    summary: blog.summary || blog.Summary || '',
-    cloudProvider: blog.cloudProvider || blog['Cloud Provider'] || 'AWS',
-    category: blog.category || 'Architecture',
-    complexity: blog.complexity || 'Foundation',
-    tags: blog.tags || blog.Tags || [],
-    featured: blog.featured || false,
-    docLink: blog.docLink || '',
-    overviewHtml: blog.overviewHtml || blog.overview || '',
-    commandExample: blog.commandExample || '',
-    keyPillars: blog.keyPillars || [],
-    frameworkConcepts:
-      blog.frameworkConcepts || blog.frameworkConceptSeeds || blog.keyPillars || [],
-    patterns: blog.patterns || [],
-    architectureRecommendation: blog.architectureRecommendation || blog.recommendation || '',
-    frameworkSourceUrls: blog.frameworkSourceUrls || blog.officialSources || [],
-    frameworkKnowledgePrompt: blog.frameworkKnowledgePrompt || '',
-    frameworkDiagramPrompt: blog.frameworkDiagramPrompt || '',
-    frameworkImagePrompt: blog.frameworkImagePrompt || '',
-    terraformCode: blog.terraformCode || '# IaC example',
-    // Maturity Scoring
-    maturityScores: blog.maturityScores || {
-      Security: 3,
-      Reliability: 3,
-      Cost: 3,
-      Operations: 3,
-      Performance: 3,
-      Sustainability: 3,
-    },
-  });
+  const [formData, setFormData] = useState(() => initialFrameworkForm(blog));
 
   const handleChange = (field, value) => setFormData((prev) => ({ ...prev, [field]: value }));
 
@@ -135,40 +171,20 @@ export default function FrameworkReviewBoard({ blog, onSave, onPublish, onDelete
           <CardTitle className="text-sm font-semibold text-muted-foreground">Metadata</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div>
-            <label
-              htmlFor="fw-cloud-provider"
-              className="text-xs font-medium text-muted-foreground"
-            >
-              Cloud Provider
-            </label>
-            <select
-              id="fw-cloud-provider"
-              value={formData.cloudProvider}
-              onChange={(e) => handleChange('cloudProvider', e.target.value)}
-              className="w-full mt-1 rounded-md border border-input bg-background px-3 py-1 text-sm"
-            >
-              <option value="AWS">AWS</option>
-              <option value="Azure">Azure</option>
-              <option value="GCP">GCP</option>
-              <option value="FinOps">FinOps</option>
-            </select>
-          </div>
-          <div>
-            <label htmlFor="fw-complexity" className="text-xs font-medium text-muted-foreground">
-              Complexity
-            </label>
-            <select
-              id="fw-complexity"
-              value={formData.complexity}
-              onChange={(e) => handleChange('complexity', e.target.value)}
-              className="w-full mt-1 rounded-md border border-input bg-background px-3 py-1 text-sm"
-            >
-              <option value="Foundation">Foundation</option>
-              <option value="Intermediate">Intermediate</option>
-              <option value="Advanced">Advanced</option>
-            </select>
-          </div>
+          <MetadataSelect
+            id="fw-cloud-provider"
+            label="Cloud Provider"
+            value={formData.cloudProvider}
+            onChange={(value) => handleChange('cloudProvider', value)}
+            options={['AWS', 'Azure', 'GCP', 'FinOps']}
+          />
+          <MetadataSelect
+            id="fw-complexity"
+            label="Complexity"
+            value={formData.complexity}
+            onChange={(value) => handleChange('complexity', value)}
+            options={['Foundation', 'Intermediate', 'Advanced']}
+          />
           <div>
             <label htmlFor="fw-category" className="text-xs font-medium text-muted-foreground">
               Category
@@ -242,59 +258,14 @@ export default function FrameworkReviewBoard({ blog, onSave, onPublish, onDelete
       icon: Layers,
       content: (
         <>
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm">Key Pillars</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Textarea
-                value={lines('keyPillars')}
-                onChange={(e) =>
-                  handleChange('keyPillars', e.target.value.split('\n').filter(Boolean))
-                }
-                aria-label="Key pillars, one per line"
-                className="min-h-37.5 font-mono text-sm"
-                placeholder="Security&#10;Reliability&#10;Cost Optimization&#10;Operational Excellence&#10;Performance Efficiency"
-              />
-              <p className="text-xs text-muted-foreground mt-2">One pillar per line</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm">Architecture Patterns</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Textarea
-                value={lines('patterns')}
-                onChange={(e) =>
-                  handleChange('patterns', e.target.value.split('\n').filter(Boolean))
-                }
-                aria-label="Architecture patterns, one per line"
-                className="min-h-25 font-mono text-sm"
-                placeholder="Event-Driven&#10;Microservices&#10;Multi-Region"
-              />
-              <p className="text-xs text-muted-foreground mt-2">One pattern per line</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm">Framework Concepts (Interactive Nodes)</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Textarea
-                value={lines('frameworkConcepts')}
-                onChange={(e) =>
-                  handleChange('frameworkConcepts', e.target.value.split('\n').filter(Boolean))
-                }
-                aria-label="Framework concepts, one per line"
-                className="min-h-32.5 font-mono text-sm"
-                placeholder="Security posture&#10;Reliability guardrails&#10;Cost governance"
-              />
-              <p className="text-xs text-muted-foreground mt-2">One concept node per line</p>
-            </CardContent>
-          </Card>
+          {PILLAR_LISTS.map(({ field, ...card }) => (
+            <TextareaCard
+              key={field}
+              {...card}
+              value={lines(field)}
+              onChange={(value) => handleChange(field, value.split('\n').filter(Boolean))}
+            />
+          ))}
         </>
       ),
     },
@@ -372,7 +343,8 @@ export default function FrameworkReviewBoard({ blog, onSave, onPublish, onDelete
                 onChange={setLines('frameworkSourceUrls')}
                 aria-label="Official source URLs, one per line"
                 className="min-h-30 font-mono text-xs"
-                placeholder="https://learn.microsoft.com/...&#10;https://docs.aws.amazon.com/..."
+                placeholder="https://learn.microsoft.com/...
+https://docs.aws.amazon.com/..."
               />
             </CardContent>
           </Card>

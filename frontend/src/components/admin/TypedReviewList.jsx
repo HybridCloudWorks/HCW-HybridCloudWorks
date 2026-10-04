@@ -26,15 +26,20 @@ import { getJSON } from '@/lib/api';
 import { byNewest } from '@/lib/dateUtils';
 import { useContentTransitions } from '@/pages/admin/queue/useContentTransitions';
 
-export const TYPED_STATUS_FILTERS = Object.freeze([
-  { value: 'needs_review', label: 'Needs review' },
-  { value: 'in_review', label: 'In review' },
-  { value: 'editing', label: 'Editing' },
-  { value: 'approved', label: 'Approved' },
-  { value: 'needs_rework', label: 'Needs rework' },
-  { value: 'approved,forge_ready,published', label: 'Ready / Published' },
-  { value: 'rejected', label: 'Rejected' },
-]);
+/** Chip label by `status=` value, in the order the chips are shown. */
+const TYPED_STATUS_LABELS = {
+  needs_review: 'Needs review',
+  in_review: 'In review',
+  editing: 'Editing',
+  approved: 'Approved',
+  needs_rework: 'Needs rework',
+  'approved,forge_ready,published': 'Ready / Published',
+  rejected: 'Rejected',
+};
+
+export const TYPED_STATUS_FILTERS = Object.freeze(
+  Object.entries(TYPED_STATUS_LABELS).map(([value, label]) => ({ value, label }))
+);
 
 /** The `status=` the list route gets for a chip. */
 export function statusParamFor(statusFilter) {

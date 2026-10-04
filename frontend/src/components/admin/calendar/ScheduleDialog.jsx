@@ -84,6 +84,64 @@ function SlotWarning({ items }) {
   );
 }
 
+/** Title and lead sentence: what is being scheduled, or moved, and in which zone. */
+function ScheduleHeading({ moving, chosen }) {
+  return (
+    <DialogHeader>
+      <DialogTitle>{moving ? 'Move the publish' : 'Schedule content'}</DialogTitle>
+      <DialogDescription>
+        {chosen
+          ? `“${titleOf(chosen)}” publishes at the time below.`
+          : 'Choose approved content and when it publishes.'}{' '}
+        Times are in {browserTimeZone()}.
+      </DialogDescription>
+    </DialogHeader>
+  );
+}
+
+/** Day and time. No `min` on the day: the past is refused with a sentence, not a browser tooltip. */
+function WhenFields({ day, time, onDay, onTime }) {
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      <div className="space-y-1.5">
+        <Label htmlFor="cal-day">Day</Label>
+        <Input
+          id="cal-day"
+          type="date"
+          value={day}
+          onChange={(event) => onDay(event.target.value)}
+          required
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="cal-time">Time</Label>
+        <Input
+          id="cal-time"
+          type="time"
+          value={time}
+          onChange={(event) => onTime(event.target.value)}
+          required
+        />
+      </div>
+    </div>
+  );
+}
+
+/** Cancel and the submit, which waits while a write runs or while there is nothing to pick. */
+function ScheduleFooter({ busy, canSubmit, moving, onClose }) {
+  return (
+    <DialogFooter className="gap-2 sm:gap-0">
+      <Button type="button" variant="outline" onClick={onClose} disabled={busy}>
+        Cancel
+      </Button>
+      <Button type="submit" disabled={busy || !canSubmit}>
+        {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+        {moving ? 'Move' : 'Schedule'}
+      </Button>
+    </DialogFooter>
+  );
+}
+
 export default function ScheduleDialog({
   open,
   content = null,
@@ -106,6 +164,7 @@ export default function ScheduleDialog({
   const when = useMemo(() => combineDateTime(dateOfKey(day), time), [day, time]);
   const sameSlot = useMemo(() => sameSlotItems(items, when, excludeId), [items, when, excludeId]);
   const moving = mode === 'reschedule';
+  const canSubmit = Boolean(content) || choices.length > 0;
 
   const submit = (event) => {
     event.preventDefault();
@@ -118,41 +177,11 @@ export default function ScheduleDialog({
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
       <DialogContent className="sm:max-w-lg">
         <form onSubmit={submit} className="space-y-4">
-          <DialogHeader>
-            <DialogTitle>{moving ? 'Move the publish' : 'Schedule content'}</DialogTitle>
-            <DialogDescription>
-              {chosen
-                ? `“${titleOf(chosen)}” publishes at the time below.`
-                : 'Choose approved content and when it publishes.'}{' '}
-              Times are in {browserTimeZone()}.
-            </DialogDescription>
-          </DialogHeader>
+          <ScheduleHeading moving={moving} chosen={chosen} />
 
           {!content && <ContentSelect picked={picked} choices={choices} onPick={setPicked} />}
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="cal-day">Day</Label>
-              {/* No `min`: the past is refused below with a sentence, not a browser tooltip. */}
-              <Input
-                id="cal-day"
-                type="date"
-                value={day}
-                onChange={(event) => setDay(event.target.value)}
-                required
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="cal-time">Time</Label>
-              <Input
-                id="cal-time"
-                type="time"
-                value={time}
-                onChange={(event) => setTime(event.target.value)}
-                required
-              />
-            </div>
-          </div>
+          <WhenFields day={day} time={time} onDay={setDay} onTime={setTime} />
 
           <SlotWarning items={sameSlot} />
 
@@ -162,15 +191,7 @@ export default function ScheduleDialog({
             </p>
           )}
 
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button type="button" variant="outline" onClick={onClose} disabled={busy}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={busy || (!content && choices.length === 0)}>
-              {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {moving ? 'Move' : 'Schedule'}
-            </Button>
-          </DialogFooter>
+          <ScheduleFooter busy={busy} canSubmit={canSubmit} moving={moving} onClose={onClose} />
         </form>
       </DialogContent>
     </Dialog>

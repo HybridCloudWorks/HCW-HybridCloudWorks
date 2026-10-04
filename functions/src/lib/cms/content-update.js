@@ -28,6 +28,7 @@
  *     carried.
  */
 import { randomUUID } from "node:crypto";
+import { actorName } from "../auth/actor-name.js";
 import { normalizeContentBodyFields } from "./content-quality.js";
 import { normalizePublishTarget } from "./publish-targets.js";
 import {
@@ -53,6 +54,19 @@ const json = (status, body) => ({
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify(body),
 });
+
+/**
+ * The first non-empty value of `keys` across `records` in order — the
+ * version row reads the update first, then the stored document, under
+ * either spelling of the field — or "".
+ */
+function firstFilled(records, keys) {
+  for (const record of records) {
+    const value = keys.map((key) => record[key]).find(Boolean);
+    if (value) return value;
+  }
+  return "";
+}
 
 /**
  * POST/PATCH updateContentItem — validated partial update + version history +
@@ -117,12 +131,7 @@ export function createContentUpdateHandler({
         }
       }
 
-      const editor =
-        user.email ||
-        user.preferred_username ||
-        user.oid ||
-        user.sub ||
-        "admin";
+      const editor = actorName(user);
       const nowIso = now().toISOString();
 
       // Content patch first — see the ordering note in the header.
@@ -135,24 +144,18 @@ export function createContentUpdateHandler({
       await store.upsertDoc("content_versions", {
         id: uuid(),
         contentId,
-        title:
-          normalizedUpdates.Title ||
-          normalizedUpdates.title ||
-          currentData.Title ||
-          currentData.title ||
-          "",
-        summary:
-          normalizedUpdates.Summary ||
-          normalizedUpdates.summary ||
-          currentData.Summary ||
-          currentData.summary ||
-          "",
-        draft:
-          normalizedUpdates.blogDraft ||
-          normalizedUpdates.content ||
-          currentData.blogDraft ||
-          currentData.content ||
-          "",
+        title: firstFilled(
+          [normalizedUpdates, currentData],
+          ["Title", "title"],
+        ),
+        summary: firstFilled(
+          [normalizedUpdates, currentData],
+          ["Summary", "summary"],
+        ),
+        draft: firstFilled(
+          [normalizedUpdates, currentData],
+          ["blogDraft", "content"],
+        ),
         updatedFields: Object.keys(normalizedUpdates),
         versionCreatedAt: nowIso,
         versionCreatedBy: editor,

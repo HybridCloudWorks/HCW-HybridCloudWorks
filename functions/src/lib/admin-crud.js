@@ -105,6 +105,17 @@ function cleanLinkList(value, max = 50) {
 export function validateCertification(body, existing = null) {
   const out = { ...body };
   delete out.id;
+  for (const step of CERT_STEPS) {
+    const error = step(out, existing);
+    if (error) return { error };
+  }
+  return { value: out };
+}
+
+const isBlank = (value) => value === undefined || value === null || value === '';
+
+/** Each step cleans `out` in place and answers an error sentence, or null. */
+function cleanCertDates(out, existing) {
   for (const key of CERT_DATE_FIELDS) {
     if (!(key in out)) continue;
     if (out[key] === null || out[key] === '') {
@@ -112,41 +123,140 @@ export function validateCertification(body, existing = null) {
       continue;
     }
     const day = toCalendarDate(out[key]);
-    if (!day) return { error: `${key} must be a YYYY-MM-DD date` };
+    if (!day) return `${key} must be a YYYY-MM-DD date`;
     out[key] = day;
   }
   const issue = 'issueDate' in out ? out.issueDate : toCalendarDate(existing?.issueDate);
   const exp = 'expDate' in out ? out.expDate : toCalendarDate(existing?.expDate);
-  if (issue && exp && exp < issue) return { error: 'expDate must be on or after issueDate' };
+  const inverted = issue && exp && exp < issue;
+  return inverted ? 'expDate must be on or after issueDate' : null;
+}
+
+function cleanCertUrls(out) {
   for (const key of CERT_URL_FIELDS) {
-    if (out[key] === undefined || out[key] === null || out[key] === '') continue;
-    if (!isHttpUrl(out[key])) return { error: `${key} must be an http(s) URL` };
+    if (isBlank(out[key])) continue;
+    if (!isHttpUrl(out[key])) return `${key} must be an http(s) URL`;
     out[key] = String(out[key]).trim();
   }
-  if (out.imageUrl !== undefined && out.imageUrl !== null && out.imageUrl !== '') {
-    if (!isImageRef(out.imageUrl))
-      return {
-        error: 'imageUrl must be an http(s) URL or an uploaded media path',
-      };
-    out.imageUrl = String(out.imageUrl).trim();
-  }
-  if ('display_order' in out && out.display_order !== null && out.display_order !== undefined) {
-    const n = Number(out.display_order);
-    if (!Number.isInteger(n) || n < 0)
-      return { error: 'display_order must be a whole number of 0 or more' };
-    out.display_order = n;
-  }
+  if (isBlank(out.imageUrl)) return null;
+  if (!isImageRef(out.imageUrl)) return 'imageUrl must be an http(s) URL or an uploaded media path';
+  out.imageUrl = String(out.imageUrl).trim();
+  return null;
+}
+
+function cleanDisplayOrder(out) {
+  const order = 'display_order' in out ? out.display_order : null;
+  if (order === null || order === undefined) return null;
+  const n = Number(out.display_order);
+  if (!Number.isInteger(n) || n < 0) return 'display_order must be a whole number of 0 or more';
+  out.display_order = n;
+  return null;
+}
+
+function cleanCertLists(out) {
   if ('evidence' in out) out.evidence = cleanLinkList(out.evidence);
   if ('relatedLearning' in out) out.relatedLearning = cleanLinkList(out.relatedLearning);
   if ('renewalRequirements' in out && out.renewalRequirements !== null) {
     out.renewalRequirements = String(out.renewalRequirements).trim().slice(0, 4000);
   }
-  return { value: out };
+  return null;
 }
+
+/** In the order their errors are reported. */
+const CERT_STEPS = [cleanCertDates, cleanCertUrls, cleanDisplayOrder, cleanCertLists];
 
 /** `{docId}/images/…` inside the certifications container — the only shape the editor uploads. */
 export function isCertImagePath(path) {
   return isValidBlobPath(path) && /^[^/]+\/images\/[^/]+$/.test(path);
+}
+
+/** Delete an abandoned badge upload: only at a cert image path, never one a stored certification still references. */
+async function deleteCertImage({ store, storage }, path) {
+  if (!isCertImagePath(path)) {
+    return json(400, { error: 'path must be a certification image path ({docId}/images/…)' });
+  }
+  const referencing = await store.queryDocs(
+    'certifications',
+    'SELECT TOP 1 c.id FROM c WHERE CONTAINS(c.imageUrl, @path)',
+    [{ name: '@path', value: path }]
+  );
+  if (referencing.length > 0) {
+    return json(409, { error: 'A stored certification still references this image' });
+  }
+  await storage.deleteBlob('certifications', path);
+  return json(200, { success: true, path });
+}
+
+// ── social post edits (ADR 0033 Amplify slice) ─────────────────────────────
+
+/** One editable field each: the cleaned value, or the sentence refusing it. */
+const SOCIAL_FIELD_CLEANERS = {
+  caption(value) {
+    const caption = typeof value === 'string' ? value.trim() : '';
+    if (!caption || caption.length > MAX_CAPTION) {
+      return { error: `caption must be 1 to ${MAX_CAPTION} characters` };
+    }
+    return { value: caption };
+  },
+  url(value) {
+    const url = value === null ? null : String(value).trim();
+    if (url && !/^https?:\/\//i.test(url)) return { error: 'url must be absolute http(s)' };
+    return { value: url || null };
+  },
+  scheduledAt(value, nowMs) {
+    if (value === null) {
+      return { error: 'scheduledAt cannot be cleared; delete the post to cancel it' };
+    }
+    const when = new Date(value);
+    if (Number.isNaN(when.getTime())) return { error: 'scheduledAt must be an ISO instant' };
+    if (when.getTime() <= nowMs) return { error: 'scheduledAt must be in the future' };
+    return { value: when.toISOString() };
+  },
+};
+
+/** The body of a social-post PATCH as `{ updates }`, or `{ error }` naming the first bad field. */
+export function validateSocialPostPatch(body, nowMs) {
+  const unknown = Object.keys(body).filter((key) => !SOCIAL_EDITABLE.includes(key));
+  if (unknown.length) return { error: `Unknown field(s): ${unknown.join(', ')}` };
+  const updates = {};
+  for (const key of SOCIAL_EDITABLE) {
+    if (body[key] === undefined) continue;
+    const cleaned = SOCIAL_FIELD_CLEANERS[key](body[key], nowMs);
+    if (cleaned.error) return cleaned;
+    updates[key] = cleaned.value;
+  }
+  return { updates };
+}
+
+/** Why a stored post refuses this edit, or null. */
+export function socialPostEditRefusal(existing, updates) {
+  if (existing.status === 'published') return 'A published post cannot be edited or rescheduled.';
+  if (updates.scheduledAt && existing.status !== 'scheduled') {
+    return `Only a scheduled post can be rescheduled; this one is ${existing.status}.`;
+  }
+  return null;
+}
+
+/** The stored post an edit applies to, or the refusal (404, 409). */
+async function loadEditableSocialPost(store, id, updates) {
+  const existing = await store.readDoc('social_posts', id, id);
+  if (!existing) return { error: json(404, { error: `social post ${id} not found` }) };
+  const refusal = socialPostEditRefusal(existing, updates);
+  return refusal ? { error: json(409, { error: refusal }) } : { existing };
+}
+
+/** Route id, validated body and the stored post, or the response that refuses the edit. */
+async function prepareSocialPostEdit({ store, now }, request) {
+  const id = String(request.params.id || '').trim();
+  if (!id) return { error: json(400, { error: 'id required' }) };
+  const body = validBody(await request.json().catch(() => null));
+  if (!body || Object.keys(body).length === 0) {
+    return { error: json(400, { error: 'Body must be a non-empty JSON object' }) };
+  }
+  const checked = validateSocialPostPatch(body, now().getTime());
+  if (checked.error) return { error: json(400, { error: checked.error }) };
+  const loaded = await loadEditableSocialPost(store, id, checked.updates);
+  return loaded.error ? loaded : { id, updates: checked.updates, existing: loaded.existing };
 }
 
 /**
@@ -296,24 +406,7 @@ export function createAdminCrudHandlers({
       try {
         if (!storage?.deleteBlob) return json(503, { error: 'Blob storage is not configured' });
         const body = validBody(await request.json().catch(() => null));
-        const path = String(body?.path || '').trim();
-        if (!isCertImagePath(path)) {
-          return json(400, {
-            error: 'path must be a certification image path ({docId}/images/…)',
-          });
-        }
-        const referencing = await store.queryDocs(
-          'certifications',
-          'SELECT TOP 1 c.id FROM c WHERE CONTAINS(c.imageUrl, @path)',
-          [{ name: '@path', value: path }]
-        );
-        if (referencing.length > 0) {
-          return json(409, {
-            error: 'A stored certification still references this image',
-          });
-        }
-        await storage.deleteBlob('certifications', path);
-        return json(200, { success: true, path });
+        return await deleteCertImage({ store, storage }, String(body?.path || '').trim());
       } catch (error) {
         context.error('deleteCertificationImage failed:', error);
         return json(500, { error: 'Failed to delete certification image' });
@@ -410,61 +503,9 @@ export function createAdminCrudHandlers({
       const auth = await guard.requireRole(request, 'editor');
       if (auth.error) return auth.error;
       try {
-        const id = String(request.params.id || '').trim();
-        if (!id) return json(400, { error: 'id required' });
-        const body = validBody(await request.json().catch(() => null));
-        if (!body || Object.keys(body).length === 0) {
-          return json(400, { error: 'Body must be a non-empty JSON object' });
-        }
-        const unknown = Object.keys(body).filter((key) => !SOCIAL_EDITABLE.includes(key));
-        if (unknown.length)
-          return json(400, {
-            error: `Unknown field(s): ${unknown.join(', ')}`,
-          });
-
-        const updates = {};
-        if (body.caption !== undefined) {
-          const caption = typeof body.caption === 'string' ? body.caption.trim() : '';
-          if (!caption || caption.length > MAX_CAPTION) {
-            return json(400, {
-              error: `caption must be 1 to ${MAX_CAPTION} characters`,
-            });
-          }
-          updates.caption = caption;
-        }
-        if (body.url !== undefined) {
-          const url = body.url === null ? null : String(body.url).trim();
-          if (url && !/^https?:\/\//i.test(url))
-            return json(400, { error: 'url must be absolute http(s)' });
-          updates.url = url || null;
-        }
-        if (body.scheduledAt !== undefined) {
-          if (body.scheduledAt === null) {
-            return json(400, {
-              error: 'scheduledAt cannot be cleared; delete the post to cancel it',
-            });
-          }
-          const when = new Date(body.scheduledAt);
-          if (Number.isNaN(when.getTime()))
-            return json(400, { error: 'scheduledAt must be an ISO instant' });
-          if (when.getTime() <= now().getTime())
-            return json(400, { error: 'scheduledAt must be in the future' });
-          updates.scheduledAt = when.toISOString();
-        }
-
-        const existing = await store.readDoc('social_posts', id, id);
-        if (!existing) return json(404, { error: `social post ${id} not found` });
-        if (existing.status === 'published') {
-          return json(409, {
-            error: 'A published post cannot be edited or rescheduled.',
-          });
-        }
-        if (updates.scheduledAt && existing.status !== 'scheduled') {
-          return json(409, {
-            error: `Only a scheduled post can be rescheduled; this one is ${existing.status}.`,
-          });
-        }
-
+        const prepared = await prepareSocialPostEdit({ store, now }, request);
+        if (prepared.error) return prepared.error;
+        const { id, updates, existing } = prepared;
         const publerPostIds = Array.isArray(existing.publerPostIds) ? existing.publerPostIds : [];
         const updated = await store.patchDoc('social_posts', id, {
           ...updates,

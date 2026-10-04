@@ -91,6 +91,50 @@ function CalendarContent({ read, view, visible, viewProps, onMore }) {
 }
 
 /**
+ * The schedule dialog to show, if any: the write hook's own request first,
+ * else a Schedule… press on the Unscheduled panel arriving as a prop.
+ */
+function activeDialog(scheduling, scheduleRequest, now) {
+  if (scheduling) return scheduling;
+  if (!scheduleRequest) return null;
+  return { content: scheduleRequest.content, day: scheduleRequest.day || now, mode: 'schedule' };
+}
+
+/** Names the sources whose items are missing from this read. */
+function SourceWarning({ warnings }) {
+  if (warnings.length === 0) return null;
+  return (
+    <p
+      role="status"
+      className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+    >
+      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      <span>Some sources could not be read, so their items are missing: {warnings.join('; ')}</span>
+    </p>
+  );
+}
+
+/** The ScheduleDialog keyed on its content and day, so a new request starts a fresh form. */
+function CalendarScheduleDialog({ dialog, unscheduled, items, busy, onSubmit, onClose }) {
+  return (
+    <ScheduleDialog
+      open
+      key={`${dialog.content?.id ?? 'pick'}:${dialog.day?.getTime?.() ?? ''}`}
+      content={dialog.content}
+      choices={unscheduled}
+      initialDay={dialog.day}
+      initialTime={dialog.time || '09:00'}
+      items={items}
+      excludeId={dialog.excludeId || null}
+      mode={dialog.mode}
+      busy={busy}
+      onSubmit={onSubmit}
+      onClose={onClose}
+    />
+  );
+}
+
+/**
  * @param {object} props
  * @param {string[]|null} [props.kinds] server-side narrowing; null is every kind
  * @param {'month'|'week'|'agenda'} [props.initialView]
@@ -122,24 +166,18 @@ export default function SharedCalendar({
   const [selected, setSelected] = useState(null);
 
   const read = useCalendarItems({ view, cursor, kinds, enabled });
-  const writes = useCalendarWrites({
-    unscheduled,
-    onChanged: () => {
-      read.refresh();
-      onChanged?.();
-    },
-  });
+  // Every write ends here: the refetch, and the word to a sibling panel.
+  const changed = () => {
+    read.refresh();
+    onChanged?.();
+  };
+  const writes = useCalendarWrites({ unscheduled, onChanged: changed });
   const visible = useMemo(() => applyFilters(read.items, filters), [read.items, filters]);
   const days = useMemo(() => groupByDay(visible), [visible]);
   const conflicts = useMemo(() => findConflicts(read.items), [read.items]);
   const channels = useMemo(() => channelsOf(read.items), [read.items]);
 
-  // A Schedule… press on the Unscheduled panel arrives as a prop.
-  const dialog =
-    writes.scheduling ||
-    (scheduleRequest
-      ? { content: scheduleRequest.content, day: scheduleRequest.day || now, mode: 'schedule' }
-      : null);
+  const dialog = activeDialog(writes.scheduling, scheduleRequest, now);
   const closeDialog = () => {
     writes.setScheduling(null);
     onScheduleHandled?.();
@@ -179,17 +217,7 @@ export default function SharedCalendar({
         onRefresh={read.refresh}
       />
 
-      {read.warnings.length > 0 && (
-        <p
-          role="status"
-          className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
-        >
-          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          <span>
-            Some sources could not be read, so their items are missing: {read.warnings.join('; ')}
-          </span>
-        </p>
-      )}
+      <SourceWarning warnings={read.warnings} />
 
       <CalendarContent
         read={read}
@@ -205,8 +233,7 @@ export default function SharedCalendar({
           onClose={() => setSelected(null)}
           onDone={() => {
             setSelected(null);
-            read.refresh();
-            onChanged?.();
+            changed();
           }}
           onReschedule={(item) => {
             setSelected(null);
@@ -216,16 +243,10 @@ export default function SharedCalendar({
       )}
 
       {dialog && (
-        <ScheduleDialog
-          open
-          key={`${dialog.content?.id ?? 'pick'}:${dialog.day?.getTime?.() ?? ''}`}
-          content={dialog.content}
-          choices={unscheduled}
-          initialDay={dialog.day}
-          initialTime={dialog.time || '09:00'}
+        <CalendarScheduleDialog
+          dialog={dialog}
+          unscheduled={unscheduled}
           items={read.items}
-          excludeId={dialog.excludeId || null}
-          mode={dialog.mode}
           busy={writes.busy}
           onSubmit={async (picked) => {
             if (await writes.submitSchedule(picked)) closeDialog();

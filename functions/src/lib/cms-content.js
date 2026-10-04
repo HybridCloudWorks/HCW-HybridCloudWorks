@@ -187,6 +187,100 @@ const json = (status, body) => ({
   body: JSON.stringify(body),
 });
 
+// ── the list query ──────────────────────────────────────────────────────────
+
+const queryText = (query, key) => String(query.get(key) || "").trim();
+const queryLower = (query, key) => queryText(query, key).toLowerCase();
+
+/** `?status=a,b`: one status is an equality, several an ARRAY_CONTAINS. */
+function statusClause(statusParam, parameters) {
+  const statuses = statusParam
+    ? statusParam
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : [];
+  if (statuses.length === 1) {
+    parameters.push({ name: "@status", value: statuses[0] });
+    return "c.contentStatus = @status";
+  }
+  if (statuses.length > 1) {
+    parameters.push({ name: "@statuses", value: statuses });
+    return "ARRAY_CONTAINS(@statuses, c.contentStatus)";
+  }
+  return null;
+}
+
+/** `?type=`: case-insensitive (Frameworks/CoderCorner boards). */
+function typeClause(type, parameters) {
+  if (!type) return null;
+  parameters.push({ name: "@type", value: type });
+  return "LOWER(c.type) = @type";
+}
+
+/**
+ * GET /api/cms/content's query string as the Cosmos query and its
+ * parameters, or `{ error }` for a sort field the list does not offer.
+ */
+export function buildListQuery(query) {
+  const sort = queryText(query, "sort");
+  if (sort && !LIST_SORT_FIELDS.includes(sort)) {
+    return { error: `sort must be one of: ${LIST_SORT_FIELDS.join(", ")}` };
+  }
+  // `?limit=abc` produced `TOP NaN` (a 500 carrying raw Cosmos error
+  // text) and `?limit=0` produced `TOP 0` (a silently empty list). Same
+  // clamp the four sibling handlers use (T-310).
+  const max = Math.min(
+    Math.max(Number(query.get("limit")) || LIST_DEFAULT_LIMIT, 1),
+    LIST_MAX_LIMIT,
+  );
+  const parameters = [{ name: "@limit", value: max }];
+  const kind = queryLower(query, "kind");
+  const ideaOrigin = queryLower(query, "ideaOrigin");
+  // In parameter order: each clause pushes its own parameters as it is built.
+  const clauses = [
+    statusClause(queryText(query, "status"), parameters),
+    query.get("live") === "true" ? "c.Live = true" : null,
+    typeClause(queryLower(query, "type"), parameters),
+    kind ? kindFilterClause(kind, parameters) : null,
+    ideaOrigin ? ideaOriginFilterClause(ideaOrigin, parameters) : null,
+  ].filter(Boolean);
+
+  let text = `SELECT TOP @limit ${PROJECTION} FROM c`;
+  if (clauses.length > 0) text += ` WHERE ${clauses.join(" AND ")}`;
+  if (sort) text += ` ORDER BY c["${sort}"] DESC`;
+  return { query: text, parameters };
+}
+
+// ── the handlers ────────────────────────────────────────────────────────────
+
+/**
+ * Every handler: the editor role, then the body, then one place a failure
+ * is logged under `name` and answered as `failure` — never error.message,
+ * which is raw Cosmos text on these paths and can carry query structure.
+ */
+function guarded(guard, { name, failure }, fn) {
+  return async (request, context) => {
+    const auth = await guard.requireRole(request, "editor");
+    if (auth.error) return auth.error;
+    try {
+      return await fn(request, context);
+    } catch (error) {
+      context.error(`${name} failed:`, error);
+      return json(500, { error: failure });
+    }
+  };
+}
+
+/** The content id of a get: the query on GET, the JSON body otherwise. */
+async function contentIdOf(request) {
+  if (String(request.method).toUpperCase() === "GET") {
+    return request.query.get("contentId");
+  }
+  const body = await request.json().catch(() => null);
+  return body?.contentId;
+}
+
 /**
  * @param {object} deps
  * @param {{ requireRole: Function }} deps.guard role guard (default-guard.js in prod)
@@ -206,99 +300,34 @@ export function createCmsContentHandlers({
      * ideaOrigin filter on the taxonomy (stored or derived); sort orders by
      * one of LIST_SORT_FIELDS, newest first.
      */
-    async list(request, context) {
-      const auth = await guard.requireRole(request, "editor");
-      if (auth.error) return auth.error;
-
-      try {
-        const statusParam = String(request.query.get("status") || "").trim();
-        const statuses = statusParam
-          ? statusParam
-              .split(",")
-              .map((s) => s.trim())
-              .filter(Boolean)
-          : [];
-        const liveOnly = request.query.get("live") === "true";
-        const type = String(request.query.get("type") || "")
-          .trim()
-          .toLowerCase();
-        const kind = String(request.query.get("kind") || "")
-          .trim()
-          .toLowerCase();
-        const ideaOrigin = String(request.query.get("ideaOrigin") || "")
-          .trim()
-          .toLowerCase();
-        const sort = String(request.query.get("sort") || "").trim();
-        if (sort && !LIST_SORT_FIELDS.includes(sort)) {
-          return json(400, {
-            error: `sort must be one of: ${LIST_SORT_FIELDS.join(", ")}`,
-          });
-        }
-        // `?limit=abc` produced `TOP NaN` (a 500 carrying raw Cosmos error
-        // text) and `?limit=0` produced `TOP 0` (a silently empty list). Same
-        // clamp the four sibling handlers use (T-310).
-        const max = Math.min(
-          Math.max(Number(request.query.get("limit")) || LIST_DEFAULT_LIMIT, 1),
-          LIST_MAX_LIMIT,
+    list: guarded(
+      guard,
+      { name: "listContentItems", failure: "Failed to list content items" },
+      async (request) => {
+        const built = buildListQuery(request.query);
+        if (built.error) return json(400, { error: built.error });
+        const items = await store.queryDocs(
+          "content",
+          built.query,
+          built.parameters,
         );
-
-        let query = `SELECT TOP @limit ${PROJECTION} FROM c`;
-        const parameters = [{ name: "@limit", value: max }];
-        const clauses = [];
-        if (statuses.length === 1) {
-          clauses.push("c.contentStatus = @status");
-          parameters.push({ name: "@status", value: statuses[0] });
-        } else if (statuses.length > 1) {
-          clauses.push("ARRAY_CONTAINS(@statuses, c.contentStatus)");
-          parameters.push({ name: "@statuses", value: statuses });
-        }
-        if (liveOnly) {
-          clauses.push("c.Live = true");
-        }
-        if (type) {
-          clauses.push("LOWER(c.type) = @type");
-          parameters.push({ name: "@type", value: type });
-        }
-        if (kind) clauses.push(kindFilterClause(kind, parameters));
-        if (ideaOrigin)
-          clauses.push(ideaOriginFilterClause(ideaOrigin, parameters));
-        if (clauses.length > 0) query += ` WHERE ${clauses.join(" AND ")}`;
-        if (sort) query += ` ORDER BY c["${sort}"] DESC`;
-
-        const items = await store.queryDocs("content", query, parameters);
         return json(200, { success: true, items, total: items.length });
-      } catch (error) {
-        context.error("listContentItems failed:", error);
-        // No error.message to the client: it is raw Cosmos text on this path
-        // and can carry query structure. The context.error above keeps it.
-        return json(500, { error: "Failed to list content items" });
-      }
-    },
+      },
+    ),
 
     /** GET|POST /api/cms/content/item — source: getContentItem */
-    async get(request, context) {
-      const auth = await guard.requireRole(request, "editor");
-      if (auth.error) return auth.error;
-
-      let contentId;
-      if (String(request.method).toUpperCase() === "GET") {
-        contentId = request.query.get("contentId");
-      } else {
-        const body = await request.json().catch(() => null);
-        contentId = body?.contentId;
-      }
-      if (!contentId) return json(400, { error: "contentId required" });
-
-      try {
+    get: guarded(
+      guard,
+      { name: "getContentItem", failure: "Failed to get content item" },
+      async (request) => {
+        const contentId = await contentIdOf(request);
+        if (!contentId) return json(400, { error: "contentId required" });
         const item = await store.readDoc("content", contentId, contentId);
         if (!item)
           return json(404, { error: `content ${contentId} not found` });
         return json(200, { success: true, item });
-      } catch (error) {
-        context.error("getContentItem failed:", error);
-        return json(500, { error: "Failed to get content item" });
-      }
-    },
+      },
+    ),
 
     /**
      * GET /api/cms/content/{id}/versions — the saved versions of one record,
@@ -306,12 +335,15 @@ export function createCmsContentHandlers({
      * on every save and read by nothing). Editor role: the same role that
      * writes them.
      */
-    async listVersions(request, context) {
-      const auth = await guard.requireRole(request, "editor");
-      if (auth.error) return auth.error;
-      const contentId = request.params?.id;
-      if (!contentId) return json(400, { error: "id required" });
-      try {
+    listVersions: guarded(
+      guard,
+      {
+        name: "listContentVersions",
+        failure: "Failed to list content versions",
+      },
+      async (request) => {
+        const contentId = request.params?.id;
+        if (!contentId) return json(400, { error: "id required" });
         const versions = await store.queryDocs(
           "content_versions",
           `SELECT TOP ${VERSIONS_LIST_LIMIT} ${VERSION_LIST_PROJECTION} FROM c WHERE c.contentId = @contentId ORDER BY c.versionCreatedAt DESC`,
@@ -323,21 +355,18 @@ export function createCmsContentHandlers({
           versions,
           limit: VERSIONS_LIST_LIMIT,
         });
-      } catch (error) {
-        context.error("listContentVersions failed:", error);
-        return json(500, { error: "Failed to list content versions" });
-      }
-    },
+      },
+    ),
 
     /** GET /api/cms/content/{id}/versions/{versionId} — one version, body included. */
-    async getVersion(request, context) {
-      const auth = await guard.requireRole(request, "editor");
-      if (auth.error) return auth.error;
-      const contentId = request.params?.id;
-      const versionId = request.params?.versionId;
-      if (!contentId || !versionId)
-        return json(400, { error: "id and versionId required" });
-      try {
+    getVersion: guarded(
+      guard,
+      { name: "getContentVersion", failure: "Failed to read content version" },
+      async (request) => {
+        const contentId = request.params?.id;
+        const versionId = request.params?.versionId;
+        if (!contentId || !versionId)
+          return json(400, { error: "id and versionId required" });
         // Partitioned by /contentId (the manifest's one non-/id container).
         const version = await store.readDoc(
           "content_versions",
@@ -348,22 +377,18 @@ export function createCmsContentHandlers({
           return json(404, { error: `version ${versionId} not found` });
         }
         return json(200, { success: true, version });
-      } catch (error) {
-        context.error("getContentVersion failed:", error);
-        return json(500, { error: "Failed to read content version" });
-      }
-    },
+      },
+    ),
 
     // Creation lives in cms/content-create.js (full source semantics: dedup,
     // quality gate). The interim raw-upsert `save` placeholder is retired —
     // a validation-free write path must not coexist with the real one.
 
     /** DELETE /api/cms/content/{id} — blob cleanup still pending, as before. */
-    async remove(request, context) {
-      const auth = await guard.requireRole(request, "editor");
-      if (auth.error) return auth.error;
-
-      try {
+    remove: guarded(
+      guard,
+      { name: "cmsDeleteContent", failure: "Failed to delete content" },
+      async (request, context) => {
         const id = request.params.id;
         if (!id) return json(400, { error: "id required" });
         await store.deleteDoc("content", id);
@@ -377,10 +402,7 @@ export function createCmsContentHandlers({
           );
         }
         return json(200, { success: true });
-      } catch (error) {
-        context.error("cmsDeleteContent failed:", error);
-        return json(500, { error: "Failed to delete content" });
-      }
-    },
+      },
+    ),
   };
 }

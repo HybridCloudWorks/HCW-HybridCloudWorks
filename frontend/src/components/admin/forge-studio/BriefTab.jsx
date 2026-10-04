@@ -27,6 +27,52 @@ function Field({ id, label, hint, children }) {
   );
 }
 
+/** A labelled `<select>`; `emptyLabel`, when given, is the first option with no value. */
+function SelectField({ id, label, value, onChange, options, emptyLabel }) {
+  return (
+    <Field id={id} label={label}>
+      <select
+        id={id}
+        className={SELECT_CLASS}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {emptyLabel !== undefined && <option value="">{emptyLabel}</option>}
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </Field>
+  );
+}
+
+const asOptions = (values) => values.map((value) => ({ value, label: value }));
+
+/** The two voice selects, side by side; each writes one brief field. */
+const VOICE_SELECTS = Object.freeze([
+  {
+    id: 'brief-tone',
+    label: 'Tone',
+    field: 'tone',
+    emptyLabel: 'Forge default (direct, practitioner)',
+    options: asOptions(TONES),
+  },
+  {
+    id: 'brief-reading',
+    label: 'Reading level',
+    field: 'readingLevel',
+    emptyLabel: 'Not specified',
+    options: asOptions(READING_LEVELS),
+  },
+]);
+
+const CHANNEL_OPTIONS = TARGET_CHANNELS.map((channel) => ({
+  value: channel.id,
+  label: channel.label,
+}));
+
 /**
  * @param {{
  *   session: ReturnType<typeof import('./useForgeSession').useForgeSession>,
@@ -113,36 +159,17 @@ export default function BriefTab({ session, formats = [], onBack, onNext }) {
           </Field>
 
           <div className="grid gap-4 sm:grid-cols-3">
-            <Field id="brief-tone" label="Tone">
-              <select
-                id="brief-tone"
-                className={SELECT_CLASS}
-                value={brief.tone}
-                onChange={(event) => setBrief('tone', event.target.value)}
-              >
-                <option value="">Forge default (direct, practitioner)</option>
-                {TONES.map((tone) => (
-                  <option key={tone} value={tone}>
-                    {tone}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field id="brief-reading" label="Reading level">
-              <select
-                id="brief-reading"
-                className={SELECT_CLASS}
-                value={brief.readingLevel}
-                onChange={(event) => setBrief('readingLevel', event.target.value)}
-              >
-                <option value="">Not specified</option>
-                {READING_LEVELS.map((level) => (
-                  <option key={level} value={level}>
-                    {level}
-                  </option>
-                ))}
-              </select>
-            </Field>
+            {VOICE_SELECTS.map((select) => (
+              <SelectField
+                key={select.id}
+                id={select.id}
+                label={select.label}
+                value={brief[select.field]}
+                onChange={(value) => setBrief(select.field, value)}
+                options={select.options}
+                emptyLabel={select.emptyLabel}
+              />
+            ))}
             <Field id="brief-length" label="Target length (words)">
               <Input
                 id="brief-length"
@@ -203,20 +230,13 @@ export default function BriefTab({ session, formats = [], onBack, onNext }) {
           </div>
 
           <div className="grid gap-4 sm:grid-cols-3">
-            <Field id="brief-channel" label="Publish to">
-              <select
-                id="brief-channel"
-                className={SELECT_CLASS}
-                value={brief.targetChannel}
-                onChange={(event) => setBrief('targetChannel', event.target.value)}
-              >
-                {TARGET_CHANNELS.map((channel) => (
-                  <option key={channel.id} value={channel.id}>
-                    {channel.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
+            <SelectField
+              id="brief-channel"
+              label="Publish to"
+              value={brief.targetChannel}
+              onChange={(value) => setBrief('targetChannel', value)}
+              options={CHANNEL_OPTIONS}
+            />
             <Field id="brief-campaign" label="Related campaign">
               <Input
                 id="brief-campaign"

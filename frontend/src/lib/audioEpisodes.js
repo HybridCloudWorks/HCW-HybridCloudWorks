@@ -246,26 +246,25 @@ export function playbackPositionKey(episodeId) {
  */
 export function readPlaybackPosition(episodeId, storage) {
   const key = playbackPositionKey(episodeId);
-  if (!key) return 0;
   try {
-    const store = storage || globalThis.localStorage;
-    const raw = store?.getItem(key);
-    if (!raw) return 0;
-    const parsed = JSON.parse(raw);
-    const seconds = Number(parsed?.t);
-    const duration = Number(parsed?.d);
-    if (!Number.isFinite(seconds) || seconds <= 0) return 0;
-    if (
-      Number.isFinite(duration) &&
-      duration > 0 &&
-      duration - seconds <= FINISHED_WITHIN_SECONDS
-    ) {
-      return 0;
-    }
-    return seconds;
+    const raw = key ? (storage || globalThis.localStorage)?.getItem(key) : null;
+    return raw ? storedSeconds(raw) : 0;
   } catch {
     return 0;
   }
+}
+
+/** Whether a position counts as having finished the episode. */
+function finishedAt(seconds, duration) {
+  return Number.isFinite(duration) && duration > 0 && duration - seconds <= FINISHED_WITHIN_SECONDS;
+}
+
+/** The seconds a stored entry resumes at, or 0 for an unusable or finished one. */
+function storedSeconds(raw) {
+  const parsed = JSON.parse(raw);
+  const seconds = Number(parsed?.t);
+  const usable = Number.isFinite(seconds) && seconds > 0 && !finishedAt(seconds, Number(parsed?.d));
+  return usable ? seconds : 0;
 }
 
 /**
@@ -285,7 +284,7 @@ export function savePlaybackPosition(episodeId, seconds, duration = null, storag
     if (!store) return;
     const t = Number(seconds);
     const d = Number(duration);
-    const finished = Number.isFinite(d) && d > 0 && d - t <= FINISHED_WITHIN_SECONDS;
+    const finished = finishedAt(t, d);
     if (!Number.isFinite(t) || t <= 0 || finished) {
       store.removeItem(key);
       return;

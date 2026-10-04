@@ -114,6 +114,55 @@ function TileActions({
   );
 }
 
+/** The facts under the picture: title, chips, folder and size, usage, the file link. */
+function TileFooter({ item, url, resolved }) {
+  const dims = formatDimensions(item);
+  return (
+    <div className="flex flex-1 flex-col gap-1.5 p-3">
+      <p className="truncate text-sm font-medium" title={item.title}>
+        {item.title}
+      </p>
+      <div className="flex flex-wrap items-center gap-1 text-[10px]">
+        <Badge variant="outline">{getSourceLabel(item.source)}</Badge>
+        {item.provider && <Badge variant="outline">{String(item.provider).toUpperCase()}</Badge>}
+        {item.slot && <Badge variant="secondary">{item.slot}</Badge>}
+        {item.promptSet && (
+          <Badge variant="secondary" title={`Image set: ${item.promptSet}`}>
+            Set: {item.promptSet}
+          </Badge>
+        )}
+        {item.customTags.slice(0, 3).map((tag) => (
+          <Badge key={tag} variant="secondary">
+            {tag}
+          </Badge>
+        ))}
+        {item.customTags.length > 3 && (
+          <span className="text-muted-foreground">+{item.customTags.length - 3}</span>
+        )}
+      </div>
+      <div className="mt-auto flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+        <span>
+          {item.folder}
+          {dims ? ` · ${dims}` : ''}
+        </span>
+        <span title={item.usageCount ? 'Content using this image' : 'Not used by any content'}>
+          {item.usageCount ? `Used in ${item.usageCount}` : 'Unused'}
+        </span>
+      </div>
+      {url && (
+        <a
+          href={safeUrl(resolved)}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1 text-[11px] text-blue-600 hover:underline dark:text-blue-400"
+        >
+          Open file <ExternalLink className="h-3 w-3" aria-hidden="true" />
+        </a>
+      )}
+    </div>
+  );
+}
+
 export default function GalleryTile({
   item,
   selected,
@@ -130,7 +179,6 @@ export default function GalleryTile({
   const url = item.imageUrl || '';
   const resolved = resolveMediaUrl(url);
   const state = tileState(item);
-  const dims = formatDimensions(item);
   const alt = item.altText || item.title || item.articleId || 'Gallery image';
   const checkboxId = `gallery-select-${item.id}`;
 
@@ -194,48 +242,7 @@ export default function GalleryTile({
         />
       </div>
 
-      <div className="flex flex-1 flex-col gap-1.5 p-3">
-        <p className="truncate text-sm font-medium" title={item.title}>
-          {item.title}
-        </p>
-        <div className="flex flex-wrap items-center gap-1 text-[10px]">
-          <Badge variant="outline">{getSourceLabel(item.source)}</Badge>
-          {item.provider && <Badge variant="outline">{String(item.provider).toUpperCase()}</Badge>}
-          {item.slot && <Badge variant="secondary">{item.slot}</Badge>}
-          {item.promptSet && (
-            <Badge variant="secondary" title={`Image set: ${item.promptSet}`}>
-              Set: {item.promptSet}
-            </Badge>
-          )}
-          {item.customTags.slice(0, 3).map((tag) => (
-            <Badge key={tag} variant="secondary">
-              {tag}
-            </Badge>
-          ))}
-          {item.customTags.length > 3 && (
-            <span className="text-muted-foreground">+{item.customTags.length - 3}</span>
-          )}
-        </div>
-        <div className="mt-auto flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-          <span>
-            {item.folder}
-            {dims ? ` · ${dims}` : ''}
-          </span>
-          <span title={item.usageCount ? 'Content using this image' : 'Not used by any content'}>
-            {item.usageCount ? `Used in ${item.usageCount}` : 'Unused'}
-          </span>
-        </div>
-        {url && (
-          <a
-            href={safeUrl(resolved)}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 text-[11px] text-blue-600 hover:underline dark:text-blue-400"
-          >
-            Open file <ExternalLink className="h-3 w-3" aria-hidden="true" />
-          </a>
-        )}
-      </div>
+      <TileFooter item={item} url={url} resolved={resolved} />
     </article>
   );
 }

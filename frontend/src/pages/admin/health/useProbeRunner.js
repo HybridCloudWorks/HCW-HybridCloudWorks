@@ -42,6 +42,42 @@ function writeStored(results) {
  * @param {ReadonlyArray<object>} probes the registry
  * @param {() => object} getContext the page's current probe context, read at run time
  */
+/**
+ * Run one probe against the page context. A live probe answers an outcome;
+ * a snapshot probe refreshes the ops snapshot; a session probe runs its
+ * action. A live probe that throws answers an `unavailable` outcome so the
+ * card can say so; the other kinds answer nothing.
+ */
+async function executeProbe(probe, ctx) {
+  try {
+    if (probe.kind === 'live') return await probe.run(ctx);
+    if (probe.kind === 'snapshot') await ctx.ops?.refresh?.();
+    else if (probe.run) await probe.run(ctx);
+  } catch (error) {
+    if (probe.kind === 'live') {
+      return {
+        status: 'unavailable',
+        summary: error?.message || 'The probe threw before it could record a result.',
+        checkedAt: new Date().toISOString(),
+      };
+    }
+  }
+  return null;
+}
+
+/** Every non-snapshot probe, with the session probes that share one action run once. */
+function probesToRunAll(probes) {
+  const seenActions = new Set();
+  return safeProbes(probes).filter((probe) => {
+    if (probe.kind === 'snapshot') return false;
+    if (probe.kind !== 'session') return true;
+    const key = probe.run?.toString();
+    const seen = seenActions.has(key);
+    seenActions.add(key);
+    return !seen;
+  });
+}
+
 export default function useProbeRunner(probes, getContext) {
   const [results, setResults] = useState(readStored);
   const [running, setRunning] = useState(() => new Set());
@@ -65,24 +101,9 @@ export default function useProbeRunner(probes, getContext) {
       if (!probe || inFlight.current.has(probe.id)) return null;
       inFlight.current.add(probe.id);
       setRunning(new Set(inFlight.current));
-      const ctx = getContext();
       let outcome = null;
       try {
-        if (probe.kind === 'live') {
-          outcome = await probe.run(ctx);
-        } else if (probe.kind === 'snapshot') {
-          await ctx.ops?.refresh?.();
-        } else if (probe.run) {
-          await probe.run(ctx);
-        }
-      } catch (error) {
-        if (probe.kind === 'live') {
-          outcome = {
-            status: 'unavailable',
-            summary: error?.message || 'The probe threw before it could record a result.',
-            checkedAt: new Date().toISOString(),
-          };
-        }
+        outcome = await executeProbe(probe, getContext());
       } finally {
         inFlight.current.delete(probe.id);
         if (mounted.current) setRunning(new Set(inFlight.current));
@@ -102,17 +123,7 @@ export default function useProbeRunner(probes, getContext) {
       const ctx = getContext();
       // One snapshot refresh serves every snapshot probe.
       await ctx.ops?.refresh?.();
-      const toRun = safeProbes(probes).filter((probe) => probe.kind !== 'snapshot');
-      // Identity probes share one action; run it once.
-      const seenActions = new Set();
-      const unique = toRun.filter((probe) => {
-        if (probe.kind !== 'session') return true;
-        const key = probe.run?.toString();
-        if (seenActions.has(key)) return false;
-        seenActions.add(key);
-        return true;
-      });
-      await Promise.allSettled(unique.map((probe) => runOne(probe)));
+      await Promise.allSettled(probesToRunAll(probes).map((probe) => runOne(probe)));
     } finally {
       if (mounted.current) setRunningAll(false);
     }

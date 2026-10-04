@@ -31,6 +31,22 @@ import {
 import { normalizePublishTarget } from './cms/publish-targets.js';
 import { toValidDate } from './cms/content-status.js';
 
+/**
+ * Why an unschedule cannot proceed, as the response to send, or null when it
+ * can (PR #841). The one 200 here is the idempotent case: nothing scheduled.
+ */
+function unscheduleRefusal(contentId, validId, contentData) {
+  if (!validId) return json(400, { error: 'contentId required' });
+  if (!contentData) return json(404, { error: `content ${contentId} not found` });
+  if (contentData.Live === true) {
+    return json(409, { error: 'This content is live; unpublish it instead of unscheduling it.' });
+  }
+  if (!contentData.scheduledPublishDate) {
+    return json(200, { success: true, contentId, alreadyUnscheduled: true });
+  }
+  return null;
+}
+
 const json = (status, body) => ({
   status,
   headers: { 'Content-Type': 'application/json' },
@@ -536,23 +552,10 @@ export function createContentWorkflowHandlers({
       try {
         const body = (await request.json().catch(() => null)) || {};
         const { contentId } = body;
-        if (!contentId || typeof contentId !== 'string') {
-          return json(400, { error: 'contentId required' });
-        }
-        const contentData = await store.readDoc('content', contentId, contentId);
-        if (!contentData) return json(404, { error: `content ${contentId} not found` });
-        if (contentData.Live === true) {
-          return json(409, {
-            error: 'This content is live; unpublish it instead of unscheduling it.',
-          });
-        }
-        if (!contentData.scheduledPublishDate) {
-          return json(200, {
-            success: true,
-            contentId,
-            alreadyUnscheduled: true,
-          });
-        }
+        const validId = Boolean(contentId) && typeof contentId === 'string';
+        const contentData = validId ? await store.readDoc('content', contentId, contentId) : null;
+        const refusal = unscheduleRefusal(contentId, validId, contentData);
+        if (refusal) return refusal;
         await store.patchDoc('content', contentId, {
           scheduledPublishDate: null,
           updatedAt: now().toISOString(),

@@ -55,22 +55,23 @@ export function fieldsFromVersion(version = {}) {
   return fields;
 }
 
-export default function VersionHistoryDialog({ open, onOpenChange }) {
-  const { blog, setField, handleSave } = useEditor();
-  const { toast } = useToast();
-  // The list, keyed by the record it was read for: a different record (or
-  // nothing yet) is the loading state, so no state is reset inside an effect.
-  const [listing, setListing] = useState({ key: null, versions: null, error: null });
-  const [restoreError, setRestoreError] = useState(null);
-  const [restoringId, setRestoringId] = useState('');
-  // The restore in flight. Set with the fields; the effect below saves on the
-  // render that carries them, so handleSave closes over the restored fields.
-  const pendingSaveRef = useRef(null);
-  const [saveTick, setSaveTick] = useState(0);
+/** The one-line "why · who · how long" under a version's time. */
+export function describeVersion(version) {
+  const parts = [REASON_LABEL[version.versionReason] || version.versionReason || 'Saved'];
+  if (version.versionCreatedBy) parts.push(version.versionCreatedBy);
+  if (typeof version.draftChars === 'number') {
+    parts.push(`${version.draftChars.toLocaleString()} characters`);
+  }
+  return parts.join(' · ');
+}
 
-  const contentId = blog?.id;
-  const versions = listing.key === contentId ? listing.versions : null;
-  const error = (listing.key === contentId ? listing.error : null) || restoreError;
+/**
+ * The version list for the open record. The list is keyed by the record it
+ * was read for: a different record (or nothing yet) is the loading state, so
+ * no state is reset inside an effect.
+ */
+function useVersionListing(open, contentId) {
+  const [listing, setListing] = useState({ key: null, versions: null, error: null });
 
   useEffect(() => {
     if (!open || !contentId) return undefined;
@@ -92,6 +93,90 @@ export default function VersionHistoryDialog({ open, onOpenChange }) {
       cancelled = true;
     };
   }, [open, contentId]);
+
+  const current = listing.key === contentId;
+  return { versions: current ? listing.versions : null, error: current ? listing.error : null };
+}
+
+function VersionRow({ version, restoringId, onRestore }) {
+  const when = formatWhen(version.versionCreatedAt);
+  return (
+    <li className="flex items-start justify-between gap-3 rounded-md border border-border px-3 py-2 text-sm">
+      <div className="min-w-0">
+        <p className="font-medium">{when || 'Unknown time'}</p>
+        <p className="truncate text-xs text-muted-foreground">{describeVersion(version)}</p>
+        {version.title && (
+          <p className="truncate text-xs text-muted-foreground">“{version.title}”</p>
+        )}
+      </div>
+      <Button
+        size="sm"
+        variant="outline"
+        className="shrink-0 gap-1"
+        disabled={Boolean(restoringId)}
+        onClick={() => onRestore(version.id)}
+        aria-label={`Restore the version from ${when}`}
+      >
+        {restoringId === version.id ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+        ) : (
+          <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+        )}
+        Restore this version
+      </Button>
+    </li>
+  );
+}
+
+/** The dialog body below the header: error, loading, empty, or the list. */
+function VersionListBody({ open, versions, error, restoringId, onRestore }) {
+  const loading = open && versions === null && !error;
+  return (
+    <>
+      {error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
+      {loading && (
+        <p className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Loading versions…
+        </p>
+      )}
+      {versions?.length === 0 && (
+        <EmptyState
+          compact
+          title="No saved versions yet"
+          description="A version is written each time the article is saved here or on the review page."
+        />
+      )}
+      {versions?.length > 0 && (
+        <ul className="max-h-96 space-y-2 overflow-y-auto" aria-label="Saved versions">
+          {versions.map((version) => (
+            <VersionRow
+              key={version.id}
+              version={version}
+              restoringId={restoringId}
+              onRestore={onRestore}
+            />
+          ))}
+        </ul>
+      )}
+    </>
+  );
+}
+
+export default function VersionHistoryDialog({ open, onOpenChange }) {
+  const { blog, setField, handleSave } = useEditor();
+  const { toast } = useToast();
+  const contentId = blog?.id;
+  const listing = useVersionListing(open, contentId);
+  const [restoreError, setRestoreError] = useState(null);
+  const [restoringId, setRestoringId] = useState('');
+  // The restore in flight. Set with the fields; the effect below saves on the
+  // render that carries them, so handleSave closes over the restored fields.
+  const pendingSaveRef = useRef(null);
+  const [saveTick, setSaveTick] = useState(0);
 
   useEffect(() => {
     const pending = pendingSaveRef.current;
@@ -147,64 +232,13 @@ export default function VersionHistoryDialog({ open, onOpenChange }) {
           </DialogDescription>
         </DialogHeader>
 
-        {error && (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
-        )}
-        {open && versions === null && !error && (
-          <p className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Loading versions…
-          </p>
-        )}
-        {versions && versions.length === 0 && (
-          <EmptyState
-            compact
-            title="No saved versions yet"
-            description="A version is written each time the article is saved here or on the review page."
-          />
-        )}
-        {versions && versions.length > 0 && (
-          <ul className="max-h-96 space-y-2 overflow-y-auto" aria-label="Saved versions">
-            {versions.map((version) => (
-              <li
-                key={version.id}
-                className="flex items-start justify-between gap-3 rounded-md border border-border px-3 py-2 text-sm"
-              >
-                <div className="min-w-0">
-                  <p className="font-medium">
-                    {formatWhen(version.versionCreatedAt) || 'Unknown time'}
-                  </p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {REASON_LABEL[version.versionReason] || version.versionReason || 'Saved'}
-                    {version.versionCreatedBy ? ` · ${version.versionCreatedBy}` : ''}
-                    {typeof version.draftChars === 'number'
-                      ? ` · ${version.draftChars.toLocaleString()} characters`
-                      : ''}
-                  </p>
-                  {version.title && (
-                    <p className="truncate text-xs text-muted-foreground">“{version.title}”</p>
-                  )}
-                </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="shrink-0 gap-1"
-                  disabled={Boolean(restoringId)}
-                  onClick={() => restore(version.id)}
-                  aria-label={`Restore the version from ${formatWhen(version.versionCreatedAt)}`}
-                >
-                  {restoringId === version.id ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                  ) : (
-                    <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
-                  )}
-                  Restore this version
-                </Button>
-              </li>
-            ))}
-          </ul>
-        )}
+        <VersionListBody
+          open={open}
+          versions={listing.versions}
+          error={listing.error || restoreError}
+          restoringId={restoringId}
+          onRestore={restore}
+        />
       </DialogContent>
     </Dialog>
   );

@@ -303,12 +303,20 @@ describe('the workspace', () => {
     });
     postJSON.mockResolvedValue({ ok: true, draft: { id: 'c1' } });
     renderPage('/admin/forge-studio?tab=finish&contentId=c1');
-    const button = await screen.findByRole('button', { name: /Send to In Review/ });
-    fireEvent.click(button);
-    await waitFor(() =>
-      expect(postJSON).toHaveBeenCalledWith('cms/drafts/c1/send-to-review', { etag: 'e1' })
+    // Generous waits: the Finish tab mounts behind a document read and a
+    // config read, and under the full suite's load the default second was
+    // not always enough (PR #841).
+    const button = await screen.findByRole(
+      'button',
+      { name: /Send to In Review/ },
+      { timeout: 5000 }
     );
-    expect(await screen.findByText(/Sent to In Review/)).toBeInTheDocument();
+    fireEvent.click(button);
+    await waitFor(
+      () => expect(postJSON).toHaveBeenCalledWith('cms/drafts/c1/send-to-review', { etag: 'e1' }),
+      { timeout: 5000 }
+    );
+    expect(await screen.findByText(/Sent to In Review/, {}, { timeout: 5000 })).toBeInTheDocument();
   });
 
   it('Draft and Finish say what to do when nothing exists yet', async () => {

@@ -436,8 +436,10 @@ export default function HealthPage() {
   // Nothing may be copied while a check is in flight: a report taken mid-run
   // would say a token "could not be read" or a probe was "not run" for work
   // that is merely pending, and that is what would end up in the record.
-  const settling =
-    identity === null || identityBusy || labsBusy || unauthBusy || runner.running.size > 0;
+  const identityPending = identity === null;
+  const checksBusy = identityBusy || labsBusy || unauthBusy;
+  const probesRunning = runner.running.size > 0;
+  const settling = identityPending || checksBusy || probesRunning;
 
   const report = withCodeQuality(
     [

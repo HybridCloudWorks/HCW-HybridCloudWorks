@@ -26,6 +26,57 @@
 /** A `failed` issue reads as one whose send is over without a send. */
 export const FAILED_STATUS = 'failed';
 
+/** `value` as an ISO instant when it parses as a date, else `fallback`. */
+const isoOr = (value, fallback) =>
+  typeof value === 'string' && !Number.isNaN(Date.parse(value))
+    ? new Date(value).toISOString()
+    : fallback;
+
+/** Resend answered 404: the broadcast was deleted there, or never created. */
+const missingPatch = (issue, nowIso) => ({
+  status: FAILED_STATUS,
+  broadcastStatus: 'missing',
+  lastError: `Resend no longer has broadcast ${issue.broadcastId}: it was deleted there, or never created. Retry to approve it again.`,
+  reconciledAt: nowIso,
+});
+
+const sentPatch = (issue, data, broadcastStatus, nowIso) => ({
+  status: 'sent',
+  sentAt: isoOr(data.sent_at, nowIso),
+  broadcastStatus,
+  lastError: null,
+  reconciledAt: nowIso,
+});
+
+const canceledPatch = (issue, data, broadcastStatus, nowIso) => ({
+  status: FAILED_STATUS,
+  broadcastStatus: 'canceled',
+  lastError:
+    'Resend reports this broadcast was canceled while queued, so some or all subscribers did not get it. It cannot be sent again from Resend; retry here to approve a fresh send.',
+  reconciledAt: nowIso,
+});
+
+/** Still waiting at Resend: note its status, a moved time, and that a `sending` claim is settled. */
+const waitingPatch = (issue, data, broadcastStatus, nowIso) => {
+  const patch = { broadcastStatus, reconciledAt: nowIso };
+  const scheduledAt = isoOr(data.scheduled_at, null);
+  if (scheduledAt && scheduledAt !== issue.scheduledAt) patch.scheduledAt = scheduledAt;
+  if (issue.status === 'sending') patch.status = 'scheduled';
+  return patch;
+};
+
+/**
+ * Resend's broadcast statuses, lower-cased, to the patch each implies. Both
+ * spellings of canceled have been seen; a status not listed means no write.
+ */
+const PATCH_BY_BROADCAST_STATUS = Object.freeze({
+  sent: sentPatch,
+  canceled: canceledPatch,
+  cancelled: canceledPatch,
+  scheduled: waitingPatch,
+  queued: waitingPatch,
+});
+
 /**
  * The patch a Resend answer implies for `issue`, or null for no change.
  *
@@ -36,52 +87,13 @@ export const FAILED_STATUS = 'failed';
 export function mapBroadcastToIssue(issue, result, now) {
   const nowIso = now.toISOString();
   if (!result) return null;
-  if (!result.ok) {
-    if (result.status === 404) {
-      return {
-        status: FAILED_STATUS,
-        broadcastStatus: 'missing',
-        lastError: `Resend no longer has broadcast ${issue.broadcastId}: it was deleted there, or never created. Retry to approve it again.`,
-        reconciledAt: nowIso,
-      };
-    }
-    return null;
-  }
+  if (!result.ok) return result.status === 404 ? missingPatch(issue, nowIso) : null;
   const data = result.data || {};
   const broadcastStatus = String(data.status || '').toLowerCase();
-  if (broadcastStatus === 'sent') {
-    const sentAt =
-      typeof data.sent_at === 'string' && !Number.isNaN(Date.parse(data.sent_at))
-        ? new Date(data.sent_at).toISOString()
-        : nowIso;
-    return {
-      status: 'sent',
-      sentAt,
-      broadcastStatus,
-      lastError: null,
-      reconciledAt: nowIso,
-    };
-  }
-  if (broadcastStatus === 'canceled' || broadcastStatus === 'cancelled') {
-    return {
-      status: FAILED_STATUS,
-      broadcastStatus: 'canceled',
-      lastError:
-        'Resend reports this broadcast was canceled while queued, so some or all subscribers did not get it. It cannot be sent again from Resend; retry here to approve a fresh send.',
-      reconciledAt: nowIso,
-    };
-  }
-  if (broadcastStatus === 'scheduled' || broadcastStatus === 'queued') {
-    const patch = { broadcastStatus, reconciledAt: nowIso };
-    const scheduledAt =
-      typeof data.scheduled_at === 'string' && !Number.isNaN(Date.parse(data.scheduled_at))
-        ? new Date(data.scheduled_at).toISOString()
-        : null;
-    if (scheduledAt && scheduledAt !== issue.scheduledAt) patch.scheduledAt = scheduledAt;
-    if (issue.status === 'sending') patch.status = 'scheduled';
-    return patch;
-  }
-  return null;
+  const patchFor = Object.hasOwn(PATCH_BY_BROADCAST_STATUS, broadcastStatus)
+    ? PATCH_BY_BROADCAST_STATUS[broadcastStatus]
+    : null;
+  return patchFor ? patchFor(issue, data, broadcastStatus, nowIso) : null;
 }
 
 /** Issues the reconcile reads: approved ones that Resend holds. */

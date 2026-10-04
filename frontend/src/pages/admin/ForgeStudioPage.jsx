@@ -42,6 +42,46 @@ const HELP = [
   'Voice & profile: the voice the forge writes in, the guardrails, the publish threshold and Auto-Forge. Calibration only suggests; you accept each chip.',
 ];
 
+/** The Voice & profile panel: the configuration read, its failure, or the form. */
+function VoicePanel({ config, configError, onRetry, onConfig }) {
+  if (configError) {
+    return (
+      <EmptyState
+        variant="error"
+        title="The forge configuration could not be read"
+        description={configError}
+        onRetry={onRetry}
+      />
+    );
+  }
+  if (!config) {
+    return (
+      <div
+        className="flex items-center justify-center py-12"
+        role="status"
+        aria-label="Loading configuration"
+      >
+        <Loader2 className="h-8 w-8 animate-spin text-slate-blue" />
+      </div>
+    );
+  }
+  return <VoiceProfileTab config={config} onConfig={onConfig} />;
+}
+
+/** The header's status line: the open document, else the brief in progress. */
+function SessionStatus({ session }) {
+  if (session.doc) {
+    return (
+      <>
+        <span className="text-muted-foreground">Working on</span>
+        <span className="font-medium">{session.text.title || 'Untitled'}</span>
+        <StatusBadge content={session.doc} size="xs" />
+      </>
+    );
+  }
+  return <span className="text-muted-foreground">Brief in progress: {session.title}</span>;
+}
+
 export default function ForgeStudioPage() {
   const { authReady } = useAuthReady();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -134,50 +174,21 @@ export default function ForgeStudioPage() {
         }}
       />
     ),
-    voice: () => {
-      if (configError) {
-        return (
-          <EmptyState
-            variant="error"
-            title="The forge configuration could not be read"
-            description={configError}
-            onRetry={retryConfig}
-          />
-        );
-      }
-      if (!config) {
-        return (
-          <div
-            className="flex items-center justify-center py-12"
-            role="status"
-            aria-label="Loading configuration"
-          >
-            <Loader2 className="h-8 w-8 animate-spin text-slate-blue" />
-          </div>
-        );
-      }
-      return <VoiceProfileTab config={config} onConfig={setConfig} />;
-    },
+    voice: () => (
+      <VoicePanel
+        config={config}
+        configError={configError}
+        onRetry={retryConfig}
+        onConfig={setConfig}
+      />
+    ),
   };
   // Elements, not component types: a map of arrow components rebuilt each
   // render would remount the panel on every state change and lose its
   // local state (a notice, an AI result, the form being edited).
   const panel = panels[activeTab]();
 
-  let headerStatus = null;
-  if (session.doc) {
-    headerStatus = (
-      <>
-        <span className="text-muted-foreground">Working on</span>
-        <span className="font-medium">{session.text.title || 'Untitled'}</span>
-        <StatusBadge content={session.doc} size="xs" />
-      </>
-    );
-  } else if (session.title) {
-    headerStatus = (
-      <span className="text-muted-foreground">Brief in progress: {session.title}</span>
-    );
-  }
+  const headerStatus = session.doc || session.title ? <SessionStatus session={session} /> : null;
 
   return (
     <div className="max-w-6xl space-y-6">

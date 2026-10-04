@@ -94,26 +94,34 @@ export async function checkSendingDomain(domain, client) {
     };
   }
   const listed = await client.listDomains();
-  if (!listed.ok) {
-    const message =
-      typeof listed.data?.message === 'string' ? `: ${listed.data.message.slice(0, 200)}` : '';
-    return {
-      ok: false,
-      reason: `Resend could not list sending domains (HTTP ${listed.status})${message}`,
-    };
-  }
-  const rows = Array.isArray(listed.data?.data) ? listed.data.data : [];
-  const match = rows.find((row) => String(row?.name ?? '').toLowerCase() === domain.toLowerCase());
-  if (!match)
+  return listed.ok ? domainVerdict(domain, listed.data?.data) : listingRefusal(listed);
+}
+
+/** The reason a Resend domain listing could not be read. */
+function listingRefusal(listed) {
+  const message =
+    typeof listed.data?.message === 'string' ? `: ${listed.data.message.slice(0, 200)}` : '';
+  return {
+    ok: false,
+    reason: `Resend could not list sending domains (HTTP ${listed.status})${message}`,
+  };
+}
+
+/** Whether `domain` is among `rows` and verified. */
+function domainVerdict(domain, rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  const match = list.find((row) => String(row?.name ?? '').toLowerCase() === domain.toLowerCase());
+  if (!match) {
     return {
       ok: false,
       reason: `${domain} is not a sending domain in Resend. Add and verify it there first.`,
     };
-  if (String(match.status ?? '').toLowerCase() !== 'verified') {
-    return {
-      ok: false,
-      reason: `${domain} is in Resend but its status is "${match.status}", not verified.`,
-    };
   }
-  return { ok: true };
+  const verified = String(match.status ?? '').toLowerCase() === 'verified';
+  return verified
+    ? { ok: true }
+    : {
+        ok: false,
+        reason: `${domain} is in Resend but its status is "${match.status}", not verified.`,
+      };
 }

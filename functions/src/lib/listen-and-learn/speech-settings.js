@@ -231,6 +231,69 @@ export function isVoiceName(value) {
 
 const LANGUAGE_PATTERN = /^[a-z]{2,3}(-[A-Z][a-z]{3})?(-[A-Z]{2}|-\d{3})?$/;
 
+const isBlank = (value) => value === undefined || value === null || value === '';
+const isRecord = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+// Each field of a voice body is checked by one function returning `{ value }`
+// or `{ error }`; `normalizeVoiceSettings` runs them in the order the errors
+// used to be reported and answers with the first one (PR #841).
+
+/** A voice id for one field, or null for an absent one. */
+function checkVoice(value, field, geminiBound) {
+  if (isBlank(value)) return null;
+  if (!isVoiceName(value)) return { error: `${field} is not a voice name` };
+  if (geminiBound && !GEMINI_VOICE_IDS.includes(value)) {
+    return { error: `${field} must be one of the Gemini voices: ${GEMINI_VOICE_IDS.join(', ')}` };
+  }
+  return { value };
+}
+
+function checkProvider(raw) {
+  const provider = raw === undefined ? 'auto' : String(raw);
+  return VOICE_PROVIDERS.includes(provider)
+    ? { value: provider }
+    : { error: `voice.provider must be one of ${VOICE_PROVIDERS.join(', ')}` };
+}
+
+function checkModel(raw) {
+  const model = parseTtsModel(raw);
+  return model.error ? { error: `voice.model: ${model.error}` } : { value: model.value };
+}
+
+/** The two hosts' voices, each defaulting to Gemini's when not named. */
+function checkSpeakers(raw, geminiBound) {
+  const given = isRecord(raw) ? raw : {};
+  const speakers = {};
+  for (const speaker of VOICE_SPEAKERS) {
+    const checked = checkVoice(given[speaker], `voice.speakers.${speaker}`, geminiBound);
+    if (checked?.error) return { error: checked.error };
+    speakers[speaker] = checked?.value || DEFAULT_VOICE_SETTINGS.speakers[speaker];
+  }
+  return { value: speakers };
+}
+
+function checkNarrator(raw, geminiBound) {
+  const checked = checkVoice(raw, 'voice.narrator', geminiBound);
+  if (checked?.error) return { error: checked.error };
+  return { value: checked?.value || DEFAULT_VOICE_SETTINGS.narrator };
+}
+
+function checkLanguage(raw) {
+  const language = isBlank(raw) ? DEFAULT_VOICE_SETTINGS.language : String(raw).trim();
+  return LANGUAGE_PATTERN.test(language)
+    ? { value: language }
+    : { error: 'voice.language must be a BCP 47 tag such as en-US' };
+}
+
+function checkSpeakingRate(raw) {
+  if (isBlank(raw)) return { value: SPEAKING_RATE.default };
+  const rate = Number(raw);
+  const inRange = Number.isFinite(rate) && rate >= SPEAKING_RATE.min && rate <= SPEAKING_RATE.max;
+  return inRange
+    ? { value: Math.round(rate * 100) / 100 }
+    : { error: `voice.speakingRate must be between ${SPEAKING_RATE.min} and ${SPEAKING_RATE.max}` };
+}
+
 /**
  * A book's voice settings from an untrusted body: `{ value }` or `{ error }`.
  * Absent fields take the defaults; a present field must be well formed, and
@@ -241,71 +304,22 @@ const LANGUAGE_PATTERN = /^[a-z]{2,3}(-[A-Z][a-z]{3})?(-[A-Z]{2}|-\d{3})?$/;
  */
 export function normalizeVoiceSettings(raw) {
   if (raw === undefined || raw === null) return { value: { ...DEFAULT_VOICE_SETTINGS } };
-  if (typeof raw !== 'object' || Array.isArray(raw)) {
-    return { error: 'voice must be an object' };
-  }
+  if (!isRecord(raw)) return { error: 'voice must be an object' };
 
-  const provider = raw.provider === undefined ? 'auto' : String(raw.provider);
-  if (!VOICE_PROVIDERS.includes(provider)) {
-    return { error: `voice.provider must be one of ${VOICE_PROVIDERS.join(', ')}` };
-  }
-
-  const model = parseTtsModel(raw.model);
-  if (model.error) return { error: `voice.model: ${model.error}` };
-
-  const geminiBound = provider !== 'azure';
-  const checkVoice = (value, field) => {
-    if (value === undefined || value === null || value === '') return null;
-    if (!isVoiceName(value)) return { error: `${field} is not a voice name` };
-    if (geminiBound && !GEMINI_VOICE_IDS.includes(value)) {
-      return { error: `${field} must be one of the Gemini voices: ${GEMINI_VOICE_IDS.join(', ')}` };
-    }
-    return { value };
-  };
-
-  const speakers = {};
-  const rawSpeakers =
-    raw.speakers && typeof raw.speakers === 'object' && !Array.isArray(raw.speakers)
-      ? raw.speakers
-      : {};
-  for (const speaker of VOICE_SPEAKERS) {
-    const checked = checkVoice(rawSpeakers[speaker], `voice.speakers.${speaker}`);
-    if (checked?.error) return { error: checked.error };
-    speakers[speaker] = checked?.value || DEFAULT_VOICE_SETTINGS.speakers[speaker];
-  }
-
-  const narrator = checkVoice(raw.narrator, 'voice.narrator');
-  if (narrator?.error) return { error: narrator.error };
-
-  const language =
-    raw.language === undefined || raw.language === null || raw.language === ''
-      ? DEFAULT_VOICE_SETTINGS.language
-      : String(raw.language).trim();
-  if (!LANGUAGE_PATTERN.test(language)) {
-    return { error: 'voice.language must be a BCP 47 tag such as en-US' };
-  }
-
-  let speakingRate = SPEAKING_RATE.default;
-  if (raw.speakingRate !== undefined && raw.speakingRate !== null && raw.speakingRate !== '') {
-    const rate = Number(raw.speakingRate);
-    if (!Number.isFinite(rate) || rate < SPEAKING_RATE.min || rate > SPEAKING_RATE.max) {
-      return {
-        error: `voice.speakingRate must be between ${SPEAKING_RATE.min} and ${SPEAKING_RATE.max}`,
-      };
-    }
-    speakingRate = Math.round(rate * 100) / 100;
-  }
-
-  return {
-    value: {
-      provider,
-      model: model.value,
-      speakers,
-      narrator: narrator?.value || DEFAULT_VOICE_SETTINGS.narrator,
-      language,
-      speakingRate,
-    },
-  };
+  const provider = checkProvider(raw.provider);
+  // Azure accepts any well-formed voice name; everything else is Gemini-bound.
+  const geminiBound = provider.value !== 'azure';
+  const checks = [
+    ['provider', provider],
+    ['model', checkModel(raw.model)],
+    ['speakers', checkSpeakers(raw.speakers, geminiBound)],
+    ['narrator', checkNarrator(raw.narrator, geminiBound)],
+    ['language', checkLanguage(raw.language)],
+    ['speakingRate', checkSpeakingRate(raw.speakingRate)],
+  ];
+  const failed = checks.find(([, checked]) => checked.error);
+  if (failed) return { error: failed[1].error };
+  return { value: Object.fromEntries(checks.map(([field, checked]) => [field, checked.value])) };
 }
 
 /**

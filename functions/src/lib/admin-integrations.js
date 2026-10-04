@@ -97,6 +97,46 @@ export const INTEGRATIONS_SETTING_NAME = 'integrations';
 /** Kept in step with the router's reader by ai-config.js exporting it. */
 const AI_FEATURES_DOC_ID = FEATURES_DOC_ID;
 
+const isPlainObject = (value) =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+/** A model field: absent, null, or a string. */
+const isOptionalString = (value) =>
+  value === undefined || value === null || typeof value === 'string';
+const providerName = (value) =>
+  String(value || '')
+    .toLowerCase()
+    .trim();
+
+/** One fallback of a route: a known provider not already used, with an optional model. */
+function fallbackError(feature, entry, seen) {
+  const fallback = providerName(entry?.provider);
+  if (!DEFAULT_PROVIDER_ORDER.includes(fallback)) {
+    return `routes.${feature}.fallbacks: unknown provider "${entry?.provider ?? ''}"`;
+  }
+  if (seen.has(fallback)) {
+    return `routes.${feature}.fallbacks: ${fallback} is listed twice (or is the primary)`;
+  }
+  seen.add(fallback);
+  if (!isOptionalString(entry.model)) {
+    return `routes.${feature}.fallbacks: model must be a string or null`;
+  }
+  return null;
+}
+
+/** The fallbacks of a route: an array of at most MAX_ROUTE_FALLBACKS, each distinct from the primary and each other. */
+function fallbacksError(feature, provider, fallbacks) {
+  if (!Array.isArray(fallbacks)) return `routes.${feature}.fallbacks must be an array`;
+  if (fallbacks.length > MAX_ROUTE_FALLBACKS) {
+    return `routes.${feature}.fallbacks: at most ${MAX_ROUTE_FALLBACKS}`;
+  }
+  const seen = new Set([provider]);
+  for (const entry of fallbacks) {
+    const problem = fallbackError(feature, entry, seen);
+    if (problem) return problem;
+  }
+  return null;
+}
+
 /**
  * Validate one route of a PUT cms/ai-routing body. Returns the error
  * sentence, or null. Stricter than the router's normaliser on purpose: the
@@ -104,39 +144,34 @@ const AI_FEATURES_DOC_ID = FEATURES_DOC_ID;
  * while a save names the mistake so it is never stored.
  */
 function routeError(feature, raw) {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+  if (!isPlainObject(raw)) {
     return `routes.${feature} must be { provider, model?, fallbacks? } or null`;
   }
-  const provider = String(raw.provider || '')
-    .toLowerCase()
-    .trim();
+  const provider = providerName(raw.provider);
   if (!DEFAULT_PROVIDER_ORDER.includes(provider)) {
     return `routes.${feature}.provider must be one of ${DEFAULT_PROVIDER_ORDER.join(', ')}`;
   }
-  if (raw.model !== undefined && raw.model !== null && typeof raw.model !== 'string') {
+  if (!isOptionalString(raw.model)) {
     return `routes.${feature}.model must be a string or null`;
   }
-  if (raw.fallbacks !== undefined) {
-    if (!Array.isArray(raw.fallbacks)) return `routes.${feature}.fallbacks must be an array`;
-    if (raw.fallbacks.length > MAX_ROUTE_FALLBACKS) {
-      return `routes.${feature}.fallbacks: at most ${MAX_ROUTE_FALLBACKS}`;
-    }
-    const seen = new Set([provider]);
-    for (const entry of raw.fallbacks) {
-      const fallback = String(entry?.provider || '')
-        .toLowerCase()
-        .trim();
-      if (!DEFAULT_PROVIDER_ORDER.includes(fallback)) {
-        return `routes.${feature}.fallbacks: unknown provider "${entry?.provider ?? ''}"`;
-      }
-      if (seen.has(fallback)) {
-        return `routes.${feature}.fallbacks: ${fallback} is listed twice (or is the primary)`;
-      }
-      seen.add(fallback);
-      if (entry.model !== undefined && entry.model !== null && typeof entry.model !== 'string') {
-        return `routes.${feature}.fallbacks: model must be a string or null`;
-      }
-    }
+  return raw.fallbacks === undefined ? null : fallbacksError(feature, provider, raw.fallbacks);
+}
+
+/**
+ * The whole `routes` map of a PUT cms/ai-routing body: an object of known
+ * features, each a valid route or null. Returns the error sentence, or null.
+ */
+function routingRequestError(incoming) {
+  if (!isPlainObject(incoming)) {
+    return 'Body must be { routes: { <feature>: { provider, model?, fallbacks?: [{ provider, model? }] } | null } }';
+  }
+  const unknown = Object.keys(incoming).filter((name) => !FEATURE_NAMES.includes(name));
+  if (unknown.length > 0) {
+    return `Unknown AI feature(s): ${unknown.join(', ')}. Known: ${FEATURE_NAMES.join(', ')}`;
+  }
+  for (const [feature, raw] of Object.entries(incoming)) {
+    const problem = raw === null ? null : routeError(feature, raw);
+    if (problem) return problem;
   }
   return null;
 }
@@ -563,23 +598,8 @@ export function createAdminIntegrationHandlers({
       try {
         const body = validBody(await request.json().catch(() => null));
         const incoming = body?.routes;
-        if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) {
-          return json(400, {
-            error:
-              'Body must be { routes: { <feature>: { provider, model?, fallbacks?: [{ provider, model? }] } | null } }',
-          });
-        }
-        const unknown = Object.keys(incoming).filter((name) => !FEATURE_NAMES.includes(name));
-        if (unknown.length > 0) {
-          return json(400, {
-            error: `Unknown AI feature(s): ${unknown.join(', ')}. Known: ${FEATURE_NAMES.join(', ')}`,
-          });
-        }
-        for (const [feature, raw] of Object.entries(incoming)) {
-          if (raw === null) continue;
-          const problem = routeError(feature, raw);
-          if (problem) return json(400, { error: problem });
-        }
+        const problem = routingRequestError(incoming);
+        if (problem) return json(400, { error: problem });
 
         const existing = await store.readDoc(SETTINGS_CONTAINER, ROUTING_DOC_ID, ROUTING_DOC_ID);
         const routes = { ...normalizeRouting(existing).routes };

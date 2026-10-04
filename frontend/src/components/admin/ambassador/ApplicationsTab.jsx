@@ -15,6 +15,7 @@ import {
   todayIso,
 } from './ambassadorModel';
 import ApplicationWorkspace from './ApplicationWorkspace';
+import DataTable from './DataTable';
 import { ReadsStatus, SelectField, allLanded, whenText } from './Parts';
 
 function StartForm({ programs, onStart, starting }) {
@@ -50,6 +51,95 @@ function StartForm({ programs, onStart, starting }) {
         Start application
       </Button>
     </form>
+  );
+}
+
+/** The status and program filters above the table. */
+function ApplicationFilters({ status, setStatus, programFilter, setProgramFilter, programs }) {
+  return (
+    <div className="flex flex-wrap items-end gap-2">
+      <SelectField
+        id="applications-status-filter"
+        label="Status"
+        value={status}
+        onChange={setStatus}
+        options={[
+          { value: '', label: 'All statuses' },
+          ...APPLICATION_STATUSES.map((s) => ({
+            value: s,
+            label: ambassadorStatusInfo(s).label,
+          })),
+        ]}
+      />
+      <SelectField
+        id="applications-program-filter"
+        label="Program"
+        value={programFilter}
+        onChange={setProgramFilter}
+        options={[
+          { value: '', label: 'All programs' },
+          ...programs.map((p) => ({ value: p.id, label: p.name })),
+        ]}
+      />
+    </div>
+  );
+}
+
+function ApplicationRow({ application: a, program, selected, today, onOpen }) {
+  return (
+    <tr className={selected ? 'bg-primary/5' : 'hover:bg-muted/30'}>
+      <td className="px-4 py-3">
+        <div className="font-medium">{program?.name || a.title}</div>
+        {a.title && program && <div className="text-xs text-muted-foreground">{a.title}</div>}
+      </td>
+      <td className="px-4 py-3">
+        <StatusBadge size="xs" status={ambassadorStatusInfo(a.status)} />
+      </td>
+      <td className="px-4 py-3 text-xs text-muted-foreground">
+        {whenText(a.submissionDeadline, today)}
+      </td>
+      <td className="px-4 py-3 text-xs tabular-nums">{(a.evidenceIds || []).length} attached</td>
+      <td className="px-4 py-3 text-xs text-muted-foreground">{a.updatedAt?.slice(0, 10)}</td>
+      <td className="px-4 py-3 text-right">
+        <Button size="sm" variant={selected ? 'default' : 'outline'} onClick={onOpen}>
+          {selected ? 'Open' : 'Work on it'}
+        </Button>
+      </td>
+    </tr>
+  );
+}
+
+const COLUMNS = ['Program', 'Status', 'Deadline', 'Evidence', 'Updated', ''];
+
+/** The matching applications, or the honest empty state. */
+function ApplicationsList({ rows, filtered, byId, selection, nav, today }) {
+  if (rows.length === 0) {
+    return (
+      <EmptyState
+        compact
+        variant={filtered ? 'filtered' : 'empty'}
+        title={filtered ? 'No applications match these filters.' : 'No applications yet.'}
+        description={
+          filtered
+            ? 'Clear a filter to see the rest.'
+            : 'Choose a program above, or start from a card on the Programs tab.'
+        }
+      />
+    );
+  }
+  return (
+    <DataTable columns={COLUMNS}>
+      {rows.map((a) => (
+        <ApplicationRow
+          key={a.id}
+          application={a}
+          program={byId.get(a.programId)}
+          selected={a.id === selection.applicationId}
+          today={today}
+          onOpen={() => nav.openApplication(a.id)}
+        />
+      ))}
+    </DataTable>
   );
 }
 
@@ -89,31 +179,13 @@ export default function ApplicationsTab({ hub, nav, selection }) {
       {allLanded(reads) && (
         <>
           <div className="flex flex-wrap items-end justify-between gap-3">
-            <div className="flex flex-wrap items-end gap-2">
-              <SelectField
-                id="applications-status-filter"
-                label="Status"
-                value={status}
-                onChange={setStatus}
-                options={[
-                  { value: '', label: 'All statuses' },
-                  ...APPLICATION_STATUSES.map((s) => ({
-                    value: s,
-                    label: ambassadorStatusInfo(s).label,
-                  })),
-                ]}
-              />
-              <SelectField
-                id="applications-program-filter"
-                label="Program"
-                value={programFilter}
-                onChange={setProgramFilter}
-                options={[
-                  { value: '', label: 'All programs' },
-                  ...programs.data.map((p) => ({ value: p.id, label: p.name })),
-                ]}
-              />
-            </div>
+            <ApplicationFilters
+              status={status}
+              setStatus={setStatus}
+              programFilter={programFilter}
+              setProgramFilter={setProgramFilter}
+              programs={programs.data}
+            />
             <StartForm programs={programs.data} onStart={start} starting={starting} />
           </div>
 
@@ -127,85 +199,14 @@ export default function ApplicationsTab({ hub, nav, selection }) {
             />
           )}
 
-          {rows.length === 0 ? (
-            <EmptyState
-              compact
-              variant={status || programFilter ? 'filtered' : 'empty'}
-              title={
-                status || programFilter
-                  ? 'No applications match these filters.'
-                  : 'No applications yet.'
-              }
-              description={
-                status || programFilter
-                  ? 'Clear a filter to see the rest.'
-                  : 'Choose a program above, or start from a card on the Programs tab.'
-              }
-            />
-          ) : (
-            <div className="overflow-x-auto rounded-lg border border-border">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50">
-                  <tr>
-                    <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">
-                      Program
-                    </th>
-                    <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">
-                      Status
-                    </th>
-                    <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">
-                      Deadline
-                    </th>
-                    <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">
-                      Evidence
-                    </th>
-                    <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">
-                      Updated
-                    </th>
-                    <th className="px-4 py-2.5" />
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {rows.map((a) => (
-                    <tr
-                      key={a.id}
-                      className={
-                        a.id === selection.applicationId ? 'bg-primary/5' : 'hover:bg-muted/30'
-                      }
-                    >
-                      <td className="px-4 py-3">
-                        <div className="font-medium">{byId.get(a.programId)?.name || a.title}</div>
-                        {a.title && byId.get(a.programId) && (
-                          <div className="text-xs text-muted-foreground">{a.title}</div>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <StatusBadge size="xs" status={ambassadorStatusInfo(a.status)} />
-                      </td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground">
-                        {whenText(a.submissionDeadline, today)}
-                      </td>
-                      <td className="px-4 py-3 text-xs tabular-nums">
-                        {(a.evidenceIds || []).length} attached
-                      </td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground">
-                        {a.updatedAt?.slice(0, 10)}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <Button
-                          size="sm"
-                          variant={a.id === selection.applicationId ? 'default' : 'outline'}
-                          onClick={() => nav.openApplication(a.id)}
-                        >
-                          {a.id === selection.applicationId ? 'Open' : 'Work on it'}
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <ApplicationsList
+            rows={rows}
+            filtered={Boolean(status || programFilter)}
+            byId={byId}
+            selection={selection}
+            nav={nav}
+            today={today}
+          />
         </>
       )}
     </div>

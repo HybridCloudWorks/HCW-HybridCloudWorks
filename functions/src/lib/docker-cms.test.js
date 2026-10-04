@@ -99,7 +99,12 @@ describe('image prompts', () => {
     // offered IS the allowlist above, Docker's seven pages included. A page
     // list reappearing in the frontend would be the drift this test guards.
     const page = frontend('pages', 'admin', 'ImagePromptsPage.jsx');
-    const editor = frontend('components', 'admin', 'images', 'PromptSetEditor.jsx');
+    // The editor is a frame over prompt-set-editor/ (PR #841): the grouping
+    // call is in its hook and the page labels in its model.
+    const editor = [
+      frontend('components', 'admin', 'images', 'prompt-set-editor', 'usePromptSetEditor.js'),
+      frontend('components', 'admin', 'images', 'prompt-set-editor', 'promptSetEditorModel.js'),
+    ].join('\n');
     expect(page).not.toMatch(/PAGE_GROUPS|provider: 'Docker'/);
     expect(page).toContain('allowedPages={library?.allowedPages');
     expect(editor).toContain('groupPages(allowedPages)');

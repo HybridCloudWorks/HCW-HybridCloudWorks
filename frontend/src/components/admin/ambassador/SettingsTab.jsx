@@ -21,10 +21,12 @@ import StatusBadge from '@/components/admin/shared/StatusBadge';
 import {
   EMPTY_REQUIREMENT,
   EVIDENCE_SOURCES,
+  PROGRAM_STATE,
   programForm,
   programPayload,
   sourceLabel,
 } from './ambassadorModel';
+import DataTable from './DataTable';
 import {
   Field,
   ReadsStatus,
@@ -348,6 +350,8 @@ export function ProgramEditor({ program, onClose, onSave, saving }) {
   );
 }
 
+const COLUMNS = ['Order', 'Program', 'Requirements', 'Reminders', 'State', ''];
+
 export default function SettingsTab({ hub }) {
   const { programs } = hub;
   const [editing, setEditing] = useState(null); // null | {} (new) | program
@@ -385,129 +389,93 @@ export default function SettingsTab({ hub }) {
               <Plus className="mr-1 h-3.5 w-3.5" /> Add program
             </Button>
           </div>
-          <div className="overflow-x-auto rounded-lg border border-border">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Order</th>
-                  <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">
-                    Program
-                  </th>
-                  <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">
-                    Requirements
-                  </th>
-                  <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">
-                    Reminders
-                  </th>
-                  <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">State</th>
-                  <th className="px-4 py-2.5" />
+          <DataTable columns={COLUMNS}>
+            {ordered.map((program, index) => {
+              const busy = hub.busyIds.has(program.id);
+              const disabled = program.enabled === false;
+              return (
+                <tr key={program.id} className={disabled ? 'opacity-60' : ''}>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-1">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 w-7 p-0"
+                        aria-label={`Move ${program.name} up`}
+                        disabled={busy || index === 0}
+                        onClick={() => move(index, -1)}
+                      >
+                        <ArrowUp className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 w-7 p-0"
+                        aria-label={`Move ${program.name} down`}
+                        disabled={busy || index === ordered.length - 1}
+                        onClick={() => move(index, 1)}
+                      >
+                        <ArrowDown className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="font-medium">{program.name}</div>
+                    <div className="text-xs text-muted-foreground">{program.provider}</div>
+                  </td>
+                  <td className="px-4 py-3 text-xs">
+                    {(program.requirements || []).length} ·{' '}
+                    {(program.requirements || [])
+                      .flatMap((r) => r.evidenceTypes)
+                      .filter((v, i, a) => a.indexOf(v) === i)
+                      .map(sourceLabel)
+                      .join(', ') || '—'}
+                  </td>
+                  <td className="px-4 py-3 text-xs text-muted-foreground">
+                    {program.reminders?.daysBeforeDeadline ?? 14}d before a deadline ·{' '}
+                    {program.reminders?.daysBeforeRenewal ?? 30}d before a renewal
+                  </td>
+                  <td className="px-4 py-3">
+                    <StatusBadge
+                      size="xs"
+                      status={PROGRAM_STATE[disabled ? 'disabled' : 'enabled']}
+                    />
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <div className="flex justify-end gap-1">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 px-2"
+                        onClick={() => setEditing(program)}
+                      >
+                        <Pencil className="mr-1 h-3 w-3" /> Edit
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 px-2"
+                        disabled={busy}
+                        onClick={() => hub.writes.patchProgram(program.id, { enabled: disabled })}
+                      >
+                        {disabled ? 'Re-enable' : 'Disable'}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 px-2 text-destructive"
+                        disabled={busy}
+                        onClick={() => setConfirmDelete(program)}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                        <span className="sr-only">Delete {program.name}</span>
+                      </Button>
+                    </div>
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {ordered.map((program, index) => {
-                  const busy = hub.busyIds.has(program.id);
-                  const disabled = program.enabled === false;
-                  return (
-                    <tr key={program.id} className={disabled ? 'opacity-60' : ''}>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1">
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 w-7 p-0"
-                            aria-label={`Move ${program.name} up`}
-                            disabled={busy || index === 0}
-                            onClick={() => move(index, -1)}
-                          >
-                            <ArrowUp className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 w-7 p-0"
-                            aria-label={`Move ${program.name} down`}
-                            disabled={busy || index === ordered.length - 1}
-                            onClick={() => move(index, 1)}
-                          >
-                            <ArrowDown className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="font-medium">{program.name}</div>
-                        <div className="text-xs text-muted-foreground">{program.provider}</div>
-                      </td>
-                      <td className="px-4 py-3 text-xs">
-                        {(program.requirements || []).length} ·{' '}
-                        {(program.requirements || [])
-                          .flatMap((r) => r.evidenceTypes)
-                          .filter((v, i, a) => a.indexOf(v) === i)
-                          .map(sourceLabel)
-                          .join(', ') || '—'}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground">
-                        {program.reminders?.daysBeforeDeadline ?? 14}d before a deadline ·{' '}
-                        {program.reminders?.daysBeforeRenewal ?? 30}d before a renewal
-                      </td>
-                      <td className="px-4 py-3">
-                        <StatusBadge
-                          size="xs"
-                          status={
-                            disabled
-                              ? {
-                                  id: 'disabled',
-                                  label: 'Disabled',
-                                  tone: 'off',
-                                  help: 'Hidden from new applications.',
-                                }
-                              : {
-                                  id: 'enabled',
-                                  label: 'Enabled',
-                                  tone: 'ok',
-                                  help: 'Offered on the Programs tab.',
-                                }
-                          }
-                        />
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex justify-end gap-1">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 px-2"
-                            onClick={() => setEditing(program)}
-                          >
-                            <Pencil className="mr-1 h-3 w-3" /> Edit
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 px-2"
-                            disabled={busy}
-                            onClick={() =>
-                              hub.writes.patchProgram(program.id, { enabled: disabled })
-                            }
-                          >
-                            {disabled ? 'Re-enable' : 'Disable'}
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 px-2 text-destructive"
-                            disabled={busy}
-                            onClick={() => setConfirmDelete(program)}
-                          >
-                            <Trash2 className="h-3 w-3" />
-                            <span className="sr-only">Delete {program.name}</span>
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+              );
+            })}
+          </DataTable>
         </>
       )}
       {editing && (

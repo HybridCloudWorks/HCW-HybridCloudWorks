@@ -2,7 +2,8 @@
  * An open book (ADR 0033 §4): its cover and metadata, the actions on the
  * book itself, and the ordered list of chapters with everything a chapter
  * can do. Reordering is a drag between rows or the Move buttons on each; the
- * server is told the whole order once, and writes only what moved.
+ * server is told the whole order once (chapterOrder.js), and writes only what
+ * moved.
  */
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -26,6 +27,7 @@ import BookDialog from './BookDialog';
 import ChapterDialog from './ChapterDialog';
 import ChapterRow from './ChapterRow';
 import VersionsDialog from './VersionsDialog';
+import { moveChapter, orderedChapters } from './chapterOrder';
 import {
   BOOK_KIND_LABEL,
   bookSummary,
@@ -33,15 +35,6 @@ import {
   statusCounts,
   voiceSummary,
 } from './episodeView';
-
-/** The chapters in list order, archived last so the live book reads first. */
-function ordered(episodes) {
-  return [...episodes].sort((a, b) => {
-    const aa = a.status === 'archived' ? 1 : 0;
-    const bb = b.status === 'archived' ? 1 : 0;
-    return aa - bb || (a.order ?? 0) - (b.order ?? 0);
-  });
-}
 
 function PublishedList({ items }) {
   if (!items?.length) return null;
@@ -242,27 +235,52 @@ function DeleteDialogs({ confirm, onCancel, onDeleteBook, onDeleteChapter }) {
   );
 }
 
+/** The book is not open yet, or could not be read. */
+function BookUnavailable({ hub }) {
+  const { selected, loading } = hub;
+  if (loading) {
+    return (
+      <p className="flex items-center gap-2 pt-6 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Loading the book…
+      </p>
+    );
+  }
+  return (
+    <div className="space-y-4 pt-6">
+      <Button variant="ghost" size="sm" onClick={hub.closeBook}>
+        <ArrowLeft className="mr-1.5 h-4 w-4" aria-hidden="true" /> Back to the Library
+      </Button>
+      <EmptyState
+        variant="error"
+        title={`Could not open ${selected?.platform}/${selected?.examCode}`}
+        description={hub.error || 'The book could not be read.'}
+        onRetry={() => hub.openSet(selected.platform, selected.examCode)}
+      />
+    </div>
+  );
+}
+
 export default function BookDetail({ hub }) {
-  const { book, selected, episodes, loading, busySlugs, catalog } = hub;
+  if (!hub.book) return <BookUnavailable hub={hub} />;
+  return <OpenBook hub={hub} />;
+}
+
+function OpenBook({ hub }) {
+  const { book, episodes, busySlugs, catalog } = hub;
   const [editing, setEditing] = useState(false);
   const [adding, setAdding] = useState(false);
   const [versionsFor, setVersionsFor] = useState(null);
   const [confirm, setConfirm] = useState(null); // { kind, chapter?, published? }
   const [dragIndex, setDragIndex] = useState(null);
 
-  const chapters = ordered(episodes);
+  const chapters = orderedChapters(episodes);
   const counts = statusCounts(episodes);
   const noun = chapterNoun(book, 2);
   const versionsChapter = versionsFor ? episodes.find((e) => e.id === versionsFor) || null : null;
 
   const applyOrder = async (fromIndex, toIndex) => {
-    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return;
-    const live = chapters.filter((c) => c.status !== 'archived');
-    if (fromIndex >= live.length || toIndex >= live.length) return;
-    const next = [...live];
-    const [moved] = next.splice(fromIndex, 1);
-    next.splice(toIndex, 0, moved);
-    await hub.reorder(next.map((c) => c.id));
+    const ids = moveChapter(chapters, fromIndex, toIndex);
+    if (ids) await hub.reorder(ids);
   };
 
   // A published chapter is refused without force (409) and the server names
@@ -270,12 +288,12 @@ export default function BookDetail({ hub }) {
   const askDelete = async (chapter) => {
     if (chapter.status !== 'published') {
       setConfirm({ kind: 'chapter-confirm', chapter });
-      return;
-    }
-    const result = await hub.deleteChapter(chapter.id, { force: false });
-    if (result?.status === 409) {
-      const fallback = [{ id: chapter.id, title: chapter.title || chapter.areaName }];
-      setConfirm({ kind: 'chapter', chapter, published: result.detail?.published || fallback });
+    } else {
+      const result = await hub.deleteChapter(chapter.id, { force: false });
+      if (result?.status === 409) {
+        const fallback = [{ id: chapter.id, title: chapter.title || chapter.areaName }];
+        setConfirm({ kind: 'chapter', chapter, published: result.detail?.published || fallback });
+      }
     }
   };
 
@@ -296,29 +314,6 @@ export default function BookDetail({ hub }) {
     versions: (chapter) => setVersionsFor(chapter.id),
     keepCurrent: (chapter) => hub.patchChapter(chapter.id, { clearError: true }),
   };
-
-  if (!book && loading) {
-    return (
-      <p className="flex items-center gap-2 pt-6 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Loading the book…
-      </p>
-    );
-  }
-  if (!book) {
-    return (
-      <div className="space-y-4 pt-6">
-        <Button variant="ghost" size="sm" onClick={hub.closeBook}>
-          <ArrowLeft className="mr-1.5 h-4 w-4" aria-hidden="true" /> Back to the Library
-        </Button>
-        <EmptyState
-          variant="error"
-          title={`Could not open ${selected?.platform}/${selected?.examCode}`}
-          description={hub.error || 'The book could not be read.'}
-          onRetry={() => hub.openSet(selected.platform, selected.examCode)}
-        />
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-6 pt-6">

@@ -22,6 +22,48 @@ import {
 const whenSentence = (when) =>
   `Publishes ${formatWhen(when.toISOString())} (${browserTimeZone()}).`;
 
+const refuse = (title, message) => ({ kind: 'refuse', title, message });
+
+/** An Unscheduled card dropped on `day`: 09:00 that day, or a dialog when nine has passed. */
+function planUnscheduledDrop(day, payload, { unscheduled, now }) {
+  const content = unscheduled.find((row) => row.id === payload.contentId) || null;
+  const when = combineDateTime(day, '09:00');
+  if (when.getTime() <= now.getTime()) {
+    return {
+      kind: 'dialog',
+      content: content || { id: payload.contentId, title: 'this content' },
+      day,
+    };
+  }
+  return {
+    kind: 'write',
+    label: 'Scheduled',
+    contentId: payload.contentId,
+    when,
+    publishTarget: payload.publishTarget || (content ? getPublishTargetForItem(content) : null),
+    done: whenSentence(when),
+  };
+}
+
+/** A scheduled chip dragged to `day`: keep its time of day, refuse a time already gone. */
+function planCalendarDrop(day, payload, { now }) {
+  const when = combineDateTime(day, timeInputValue(payload.start));
+  if (!when || when.getTime() <= now.getTime()) {
+    return refuse('That time has passed today', 'Use Reschedule to pick a later time.');
+  }
+  return {
+    kind: 'write',
+    label: 'Moved',
+    contentId: payload.contentId,
+    when,
+    publishTarget: payload.publishTarget || null,
+    done: `Now publishes ${formatWhen(when.toISOString())} (${browserTimeZone()}).`,
+  };
+}
+
+/** One planner per drag source; anything else was not a calendar item. */
+const PLANNERS = { unscheduled: planUnscheduledDrop, calendar: planCalendarDrop };
+
 /**
  * What a drop on `day` should do. Pure.
  *
@@ -31,50 +73,12 @@ const whenSentence = (when) =>
  */
 export function planDrop(day, payload, { unscheduled = [], now = new Date() } = {}) {
   if (isPastDay(day, now)) {
-    return {
-      kind: 'refuse',
-      title: 'That day has passed',
-      message: 'Drop it on today or a later day.',
-    };
+    return refuse('That day has passed', 'Drop it on today or a later day.');
   }
-  if (payload.source === 'unscheduled') {
-    const content = unscheduled.find((row) => row.id === payload.contentId) || null;
-    const when = combineDateTime(day, '09:00');
-    if (when.getTime() <= now.getTime()) {
-      return {
-        kind: 'dialog',
-        content: content || { id: payload.contentId, title: 'this content' },
-        day,
-      };
-    }
-    return {
-      kind: 'write',
-      label: 'Scheduled',
-      contentId: payload.contentId,
-      when,
-      publishTarget: payload.publishTarget || (content ? getPublishTargetForItem(content) : null),
-      done: whenSentence(when),
-    };
-  }
-  if (payload.source === 'calendar') {
-    const when = combineDateTime(day, timeInputValue(payload.start));
-    if (!when || when.getTime() <= now.getTime()) {
-      return {
-        kind: 'refuse',
-        title: 'That time has passed today',
-        message: 'Use Reschedule to pick a later time.',
-      };
-    }
-    return {
-      kind: 'write',
-      label: 'Moved',
-      contentId: payload.contentId,
-      when,
-      publishTarget: payload.publishTarget || null,
-      done: `Now publishes ${formatWhen(when.toISOString())} (${browserTimeZone()}).`,
-    };
-  }
-  return { kind: 'refuse', title: 'Nothing to drop', message: 'That was not a calendar item.' };
+  const plan = PLANNERS[payload.source];
+  return plan
+    ? plan(day, payload, { unscheduled, now })
+    : refuse('Nothing to drop', 'That was not a calendar item.');
 }
 
 /**

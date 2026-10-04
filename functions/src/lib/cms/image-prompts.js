@@ -54,25 +54,68 @@ export function hasLegacyPromptFields(data = {}) {
 
 /** Verbatim from the source — the pages a prompt set may be assigned to. */
 export const ADMIN_PROMPT_PAGE_ALLOWLIST = new Set([
-  '/aws', '/aws/news', '/aws/blog', '/aws/architecture-designs', '/aws/frameworks',
-  '/aws/education', '/aws/audio-architecture',
-  '/azure', '/azure/news', '/azure/blog', '/azure/architecture-designs', '/azure/frameworks',
-  '/azure/education', '/azure/audio-architecture',
-  '/gcp', '/gcp/news', '/gcp/blog', '/gcp/architecture-designs', '/gcp/frameworks',
-  '/gcp/education', '/gcp/audio-architecture',
-  '/finops', '/finops/news', '/finops/blog', '/finops/architecture-designs',
-  '/finops/frameworks', '/finops/education', '/finops/tools', '/finops/focus',
-  '/vmware', '/vmware/news', '/vmware/blog', '/vmware/architecture-designs',
-  '/vmware/frameworks', '/vmware/education', '/vmware/audio-architecture',
-  '/terraform', '/terraform/news', '/terraform/blog', '/terraform/code',
-  '/terraform/modules', '/terraform/tools',
-  '/ansible', '/ansible/news', '/ansible/blog', '/ansible/code', '/ansible/education',
-  '/github', '/github/news', '/github/blog', '/github/workflows', '/github/code',
+  '/aws',
+  '/aws/news',
+  '/aws/blog',
+  '/aws/architecture-designs',
+  '/aws/frameworks',
+  '/aws/education',
+  '/aws/audio-architecture',
+  '/azure',
+  '/azure/news',
+  '/azure/blog',
+  '/azure/architecture-designs',
+  '/azure/frameworks',
+  '/azure/education',
+  '/azure/audio-architecture',
+  '/gcp',
+  '/gcp/news',
+  '/gcp/blog',
+  '/gcp/architecture-designs',
+  '/gcp/frameworks',
+  '/gcp/education',
+  '/gcp/audio-architecture',
+  '/finops',
+  '/finops/news',
+  '/finops/blog',
+  '/finops/architecture-designs',
+  '/finops/frameworks',
+  '/finops/education',
+  '/finops/tools',
+  '/finops/focus',
+  '/vmware',
+  '/vmware/news',
+  '/vmware/blog',
+  '/vmware/architecture-designs',
+  '/vmware/frameworks',
+  '/vmware/education',
+  '/vmware/audio-architecture',
+  '/terraform',
+  '/terraform/news',
+  '/terraform/blog',
+  '/terraform/code',
+  '/terraform/modules',
+  '/terraform/tools',
+  '/ansible',
+  '/ansible/news',
+  '/ansible/blog',
+  '/ansible/code',
+  '/ansible/education',
+  '/github',
+  '/github/news',
+  '/github/blog',
+  '/github/workflows',
+  '/github/code',
   '/github/tools',
   // Docker's pages (#775): the hub, news, blog, code, the sandbox recipe
   // (#774), tools and learning. No architecture or frameworks page exists.
-  '/docker', '/docker/news', '/docker/blog', '/docker/code', '/docker/sandboxes',
-  '/docker/tools', '/docker/education',
+  '/docker',
+  '/docker/news',
+  '/docker/blog',
+  '/docker/code',
+  '/docker/sandboxes',
+  '/docker/tools',
+  '/docker/education',
 ]);
 
 export function assertAllowedPromptPage(pagePath) {
@@ -112,10 +155,58 @@ function cleanTags(value) {
   return [
     ...new Set(
       value
-        .map((tag) => String(tag || '').trim().toLowerCase().slice(0, 40))
+        .map((tag) =>
+          String(tag || '')
+            .trim()
+            .toLowerCase()
+            .slice(0, 40)
+        )
         .filter(Boolean)
     ),
   ].slice(0, SET_TAG_LIMIT);
+}
+
+/** The creative fields a body names, bounded; throws on a bad one. */
+function creativeSetFields(body) {
+  const fields = {};
+  for (const [key, limit] of Object.entries(SET_TEXT_LIMITS)) {
+    if (body[key] === undefined || body[key] === null) continue;
+    assertStringLength(body[key], key, limit, { allowEmpty: true });
+    fields[key] = String(body[key] || '').trim();
+  }
+  if (body.aspectRatio !== undefined && body.aspectRatio !== null) {
+    const ratio = String(body.aspectRatio || '').trim();
+    if (!SET_ASPECT_RATIOS.includes(ratio)) {
+      throw new Error(`aspectRatio must be one of ${SET_ASPECT_RATIOS.filter(Boolean).join(', ')}`);
+    }
+    fields.aspectRatio = ratio;
+  }
+  if (body.tags !== undefined && body.tags !== null) fields.tags = cleanTags(body.tags);
+  return fields;
+}
+
+/**
+ * Version and history: a new set starts at 1 with its creation stamps; an
+ * existing one increments only when the primary prompt text changed, pushing
+ * the previous prompt onto `history` (newest first, capped).
+ */
+function setVersionFields(existing, primaryPrompt, { nowIso, updatedBy }) {
+  if (!existing) return { version: 1, history: [], createdAt: nowIso, createdBy: updatedBy };
+  const previousPrompt = String(existing.primaryPrompt || '').trim();
+  if (previousPrompt === primaryPrompt) return {};
+  const previousVersion = Number(existing.version) || 1;
+  return {
+    version: previousVersion + 1,
+    history: [
+      {
+        version: previousVersion,
+        primaryPrompt: previousPrompt,
+        savedAt: existing.updatedAt || null,
+        savedBy: existing.updatedBy || null,
+      },
+      ...(Array.isArray(existing.history) ? existing.history : []),
+    ].slice(0, SET_HISTORY_LIMIT),
+  };
 }
 
 /**
@@ -130,42 +221,13 @@ function cleanTags(value) {
  */
 export function buildSetSaveFields(existing, body, { nowIso, updatedBy }) {
   const primaryPrompt = String(body.primaryPrompt || '').trim();
-  const fields = { primaryPrompt, updatedAt: nowIso, updatedBy };
-  for (const [key, limit] of Object.entries(SET_TEXT_LIMITS)) {
-    if (body[key] !== undefined && body[key] !== null) {
-      assertStringLength(body[key], key, limit, { allowEmpty: true });
-      fields[key] = String(body[key] || '').trim();
-    }
-  }
-  if (body.aspectRatio !== undefined && body.aspectRatio !== null) {
-    const ratio = String(body.aspectRatio || '').trim();
-    if (!SET_ASPECT_RATIOS.includes(ratio)) {
-      throw new Error(`aspectRatio must be one of ${SET_ASPECT_RATIOS.filter(Boolean).join(', ')}`);
-    }
-    fields.aspectRatio = ratio;
-  }
-  if (body.tags !== undefined && body.tags !== null) fields.tags = cleanTags(body.tags);
-
-  const previousPrompt = String(existing?.primaryPrompt || '').trim();
-  const previousVersion = Number(existing?.version) || (existing ? 1 : 0);
-  if (!existing) {
-    fields.version = 1;
-    fields.history = [];
-    fields.createdAt = nowIso;
-    fields.createdBy = updatedBy;
-  } else if (previousPrompt !== primaryPrompt) {
-    fields.version = previousVersion + 1;
-    fields.history = [
-      {
-        version: previousVersion,
-        primaryPrompt: previousPrompt,
-        savedAt: existing.updatedAt || null,
-        savedBy: existing.updatedBy || null,
-      },
-      ...(Array.isArray(existing.history) ? existing.history : []),
-    ].slice(0, SET_HISTORY_LIMIT);
-  }
-  return fields;
+  return {
+    primaryPrompt,
+    updatedAt: nowIso,
+    updatedBy,
+    ...creativeSetFields(body),
+    ...setVersionFields(existing, primaryPrompt, { nowIso, updatedBy }),
+  };
 }
 
 /** `${name}@v${version}` — the template version a generated image records. */
@@ -189,7 +251,9 @@ export function applyKeywordMatrix(text, { synonyms = [], augmentations = [] } =
   if (!lower.trim()) return { canonical, directives };
   const hits = (patterns) =>
     (Array.isArray(patterns) ? patterns : []).some((pattern) => {
-      const p = String(pattern || '').trim().toLowerCase();
+      const p = String(pattern || '')
+        .trim()
+        .toLowerCase();
       return p && lower.includes(p);
     });
   for (const group of synonyms || []) {
@@ -258,11 +322,12 @@ const TYPE_SUFFIXES = Object.freeze({
   coder_corner: '/code',
 });
 
+/** The spellings a content document names its provider under, first match wins. */
+const PROVIDER_FIELDS = Object.freeze(['cloudProvider', 'Cloud Provider', 'provider', 'Provider']);
+
 /** The provider slug (`aws`, `gcp`, …) a content document names, or ''. */
 export function providerSlugFor(data = {}) {
-  const raw = String(
-    data.cloudProvider || data['Cloud Provider'] || data.provider || data.Provider || ''
-  )
+  const raw = String(PROVIDER_FIELDS.map((key) => data[key]).find(Boolean) || '')
     .trim()
     .toLowerCase();
   return PROVIDER_SLUGS[raw] || (ADMIN_PROMPT_PAGE_ALLOWLIST.has(`/${raw}`) ? raw : '');
@@ -283,6 +348,48 @@ export function pagePathsForContent(data = {}) {
   return [`/${slug}${suffix}`, `/${slug}`].filter((path) => ADMIN_PROMPT_PAGE_ALLOWLIST.has(path));
 }
 
+/** A set by name, unless it is archived or missing. */
+async function readLiveSet(store, name) {
+  const setName = normalizePromptConfigKey(name);
+  if (!setName) return null;
+  const set = await store.readDoc('image_prompt_sets', setName, setName).catch(() => null);
+  return set && !set.archivedAt ? set : null;
+}
+
+async function readSetPrompt(store, setName, name) {
+  const promptName = normalizePromptConfigKey(name);
+  if (!promptName) return null;
+  return store.readDoc('image_prompt_sets_prompts', promptName, setName).catch(() => null);
+}
+
+/** The set the document's own lineage names, with its prompt. */
+async function resolveOwnSet(store, data) {
+  const setName = data.imagePromptSet || data.promptSet || data.imageLineage?.promptSet;
+  const set = await readLiveSet(store, setName);
+  if (!set) return null;
+  const promptName = data.imagePromptName || data.promptName || data.imageLineage?.promptName;
+  return {
+    set,
+    prompt: await readSetPrompt(store, set.id, promptName),
+    pagePath: null,
+    source: 'content',
+  };
+}
+
+/** The first page assignment for the document's pages that names a live set. */
+async function resolveAssignedSet(store, data) {
+  for (const pagePath of pagePathsForContent(data)) {
+    const docId = pathToPromptPageDocId(pagePath);
+    const assignment = await store.readDoc('image_prompt_pages', docId, docId).catch(() => null);
+    const set = await readLiveSet(store, assignment?.setName);
+    if (set) {
+      const prompt = await readSetPrompt(store, set.id, assignment?.promptName);
+      return { set, prompt, pagePath, source: 'page' };
+    }
+  }
+  return null;
+}
+
 /**
  * The set (and prompt) a content document should generate with.
  *
@@ -295,45 +402,7 @@ export function pagePathsForContent(data = {}) {
  */
 export async function resolvePromptSetForContent(store, data = {}) {
   if (!store?.readDoc) return null;
-  const readSet = async (name) => {
-    const setName = normalizePromptConfigKey(name);
-    if (!setName) return null;
-    const set = await store.readDoc('image_prompt_sets', setName, setName).catch(() => null);
-    if (!set || set.archivedAt) return null;
-    return set;
-  };
-  const readPrompt = async (setName, name) => {
-    const promptName = normalizePromptConfigKey(name);
-    if (!promptName) return null;
-    return store.readDoc('image_prompt_sets_prompts', promptName, setName).catch(() => null);
-  };
-
-  const ownSetName = data.imagePromptSet || data.promptSet || data.imageLineage?.promptSet;
-  const ownSet = await readSet(ownSetName);
-  if (ownSet) {
-    const promptName = data.imagePromptName || data.promptName || data.imageLineage?.promptName;
-    return {
-      set: ownSet,
-      prompt: await readPrompt(ownSet.id, promptName),
-      pagePath: null,
-      source: 'content',
-    };
-  }
-
-  for (const pagePath of pagePathsForContent(data)) {
-    const assignment = await store
-      .readDoc('image_prompt_pages', pathToPromptPageDocId(pagePath), pathToPromptPageDocId(pagePath))
-      .catch(() => null);
-    const set = await readSet(assignment?.setName);
-    if (!set) continue;
-    return {
-      set,
-      prompt: await readPrompt(set.id, assignment?.promptName),
-      pagePath,
-      source: 'page',
-    };
-  }
-  return null;
+  return (await resolveOwnSet(store, data)) || (await resolveAssignedSet(store, data));
 }
 
 /** Title / summary / topics lines for the article being illustrated. */
@@ -355,7 +424,13 @@ function articleLines(article = {}) {
  * illustrator: the set's shared prompt, the variation, the slot's own
  * template, the article, the matrix, the style rules, then what to avoid.
  */
-export function composeSetPrompt({ set, prompt = null, slot = 'hero', article = {}, keyword } = {}) {
+export function composeSetPrompt({
+  set,
+  prompt = null,
+  slot = 'hero',
+  article = {},
+  keyword,
+} = {}) {
   const lines = [String(set?.primaryPrompt || '').trim()];
   const variation = String(prompt?.additionalParameters || '').trim();
   if (variation) lines.push(`Variation: ${variation}`);
@@ -414,6 +489,36 @@ const IMAGE_PROJECTION =
   'c.id, c.imageUrl, c.title, c.slot, c.contentId, c.articleId, c.promptSet, c.promptSetId, ' +
   'c.promptName, c.promptTemplateVersion, c.approvalStatus, c.archivedAt, c.softDeletedAt, ' +
   'c.createdAt, c.generatedAt, c.imageModel, c.imageProvider, c.sourceCollection, c.width, c.height';
+
+/**
+ * What `resolveForContent` answers: the set and composed hero prompt a
+ * document would generate with, or the `builtin` shape when no set applies.
+ */
+function resolutionBody(contentId, data, resolved, prompt) {
+  const pagePaths = pagePathsForContent(data);
+  if (!resolved) {
+    return {
+      success: true,
+      contentId,
+      setName: '',
+      promptName: '',
+      source: 'builtin',
+      pagePaths,
+      prompt: '',
+    };
+  }
+  return {
+    success: true,
+    contentId,
+    setName: resolved.set.name || resolved.set.id,
+    promptName: resolved.prompt?.name || resolved.prompt?.id || '',
+    promptTemplateVersion: promptTemplateVersionFor(resolved.set),
+    source: resolved.source,
+    pagePath: resolved.pagePath,
+    pagePaths,
+    prompt,
+  };
+}
 
 /**
  * @param {object} deps
@@ -696,7 +801,12 @@ export function createImagePromptHandlers({ guard, store, now = () => new Date()
             );
             let repointed = { pages: 0, images: 0 };
             if (renaming) {
-              repointed = await repointSet(normalizedSetName, normalizedNewSetName, nowIso, updatedBy);
+              repointed = await repointSet(
+                normalizedSetName,
+                normalizedNewSetName,
+                nowIso,
+                updatedBy
+              );
               const old = await promptsOfSet(normalizedSetName);
               for (const prompt of old) {
                 await deleteIgnoringMissing(
@@ -754,9 +864,14 @@ export function createImagePromptHandlers({ guard, store, now = () => new Date()
               updatedBy,
             };
             if (existingPrompt) {
-              await store.patchDoc('image_prompt_sets_prompts', normalizedPromptName, promptFields, {
-                partitionKey: normalizedSetName,
-              });
+              await store.patchDoc(
+                'image_prompt_sets_prompts',
+                normalizedPromptName,
+                promptFields,
+                {
+                  partitionKey: normalizedSetName,
+                }
+              );
             } else {
               await store.upsertDoc('image_prompt_sets_prompts', {
                 id: normalizedPromptName,
@@ -888,36 +1003,16 @@ export function createImagePromptHandlers({ guard, store, now = () => new Date()
         const data = await store.readDoc('content', contentId, contentId);
         if (!data) return json(404, { error: `content ${contentId} not found` });
         const resolved = await resolvePromptSetForContent(store, data);
-        if (!resolved) {
-          return json(200, {
-            success: true,
-            contentId,
-            setName: '',
-            promptName: '',
-            source: 'builtin',
-            pagePaths: pagePathsForContent(data),
-            prompt: '',
-          });
-        }
-        const keyword = await loadKeywordMatrix(store, context);
-        const prompt = composeSetPrompt({
-          set: resolved.set,
-          prompt: resolved.prompt,
-          slot: 'hero',
-          article: data,
-          keyword,
-        });
-        return json(200, {
-          success: true,
-          contentId,
-          setName: resolved.set.name || resolved.set.id,
-          promptName: resolved.prompt?.name || resolved.prompt?.id || '',
-          promptTemplateVersion: promptTemplateVersionFor(resolved.set),
-          source: resolved.source,
-          pagePath: resolved.pagePath,
-          pagePaths: pagePathsForContent(data),
-          prompt,
-        });
+        const prompt = resolved
+          ? composeSetPrompt({
+              set: resolved.set,
+              prompt: resolved.prompt,
+              slot: 'hero',
+              article: data,
+              keyword: await loadKeywordMatrix(store, context),
+            })
+          : '';
+        return json(200, resolutionBody(contentId, data, resolved, prompt));
       } catch (error) {
         context.error('resolveImagePrompt failed:', error);
         return json(500, { error: 'Failed to resolve image prompt' });

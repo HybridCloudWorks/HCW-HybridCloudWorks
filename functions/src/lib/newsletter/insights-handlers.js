@@ -56,7 +56,7 @@ import {
   resolveSegmentId,
   sendConfirmationEmail,
 } from './handlers.js';
-import { normalizeEmail } from './email.js';
+import { parseAddContactBody } from './validate.js';
 import { ISSUE_ID_PATTERN } from './issue.js';
 import { createResendClient } from './resend-client.js';
 import { resolveFromAddress } from './sender.js';
@@ -316,6 +316,126 @@ const projectContact = (row) => ({
   unsubscribed: row?.unsubscribed === true,
 });
 
+const AUDIENCE_CSV_HEADER = 'email,first_name,last_name,joined,status';
+
+/** One contact as an audience CSV row: email, names, joined, subscribed or not. */
+const csvRowFor = (contact) =>
+  [
+    contact.email,
+    contact.first_name,
+    contact.last_name,
+    contact.created_at,
+    contact.unsubscribed ? 'unsubscribed' : 'subscribed',
+  ]
+    .map(csvCell)
+    .join(',');
+
+/**
+ * Every contact of the segment as CSV lines, header first, paging to
+ * EXPORT_MAX_PAGES and ending with a comment row when it stopped short. A
+ * Resend refusal comes back as `{ refusal }` for the route to pass on.
+ */
+async function collectAudienceCsv(client, segmentId) {
+  const lines = [AUDIENCE_CSV_HEADER];
+  if (!segmentId) return { lines };
+  let after;
+  for (let pageNumber = 0; pageNumber < EXPORT_MAX_PAGES; pageNumber += 1) {
+    const listed = await client.listSegmentContacts(segmentId, { limit: SUMMARY_PAGE_SIZE, after });
+    if (!listed.ok) return { refusal: listed };
+    const rows = rowsOf(listed);
+    for (const row of rows) lines.push(csvRowFor(projectContact(row)));
+    after = nextCursor(listed, rows);
+    if (!after) return { lines };
+  }
+  lines.push(
+    `# truncated: the list is longer than ${EXPORT_MAX_PAGES * SUMMARY_PAGE_SIZE} contacts`
+  );
+  return { lines };
+}
+
+/** A CSV download: CRLF line ends, a trailing newline, never cached. */
+const csvAttachment = (filename, lines) => ({
+  status: 200,
+  headers: {
+    'Content-Type': 'text/csv; charset=utf-8',
+    'Content-Disposition': `attachment; filename="${filename}"`,
+    'Cache-Control': 'no-store',
+  },
+  body: `${lines.join('\r\n')}\r\n`,
+});
+
+/**
+ * Invite mode of addContact (ADR 0033 Amplify slice): double opt-in
+ * respected. The address gets the same signed confirmation link the signup
+ * form sends, and nothing is written to the list until it is opened.
+ * `deps` is the factory's { env, store, now, ref, refused }.
+ */
+async function inviteContact(deps, route, opened, email, context) {
+  const sent = await sendConfirmationEmail({
+    client: opened.client,
+    apiKey: readKey(deps.env, 'RESEND_API_KEY'),
+    email,
+    source: 'website',
+    now: () => deps.now().getTime(),
+    from: await resolveFromAddress(deps.store, context),
+  });
+  if (!sent.ok) return deps.refused(route, sent, context);
+  context.log?.(`${route} invited ${deps.ref(context)}`);
+  return json(202, {
+    ok: true,
+    mode: 'invite',
+    message: 'A confirmation link was emailed. The address joins the list when it is opened.',
+  });
+}
+
+/**
+ * Confirmed mode of addContact: consent was recorded elsewhere, so the
+ * contact is added subscribed with the same read-back the public confirm
+ * does, and the consent date is written beside the audit trail — never in a
+ * log line. `deps.invalidateSummary` drops the cached audience summary.
+ */
+async function addConfirmedContact(
+  deps,
+  route,
+  opened,
+  { email, mode, consentRecordedOn },
+  context
+) {
+  const segment = await resolveSegmentId(opened.client);
+  const ensured = await ensureConfirmedContact({
+    client: opened.client,
+    email,
+    segmentId: segment,
+  });
+  if (!ensured.ok) {
+    context.warn?.(`${route} not confirmed: ${ensured.why} ${deps.ref(context)}`);
+    return json(502, {
+      ok: false,
+      error: `Resend did not confirm the contact: ${ensured.why}`,
+    });
+  }
+  deps.invalidateSummary();
+  await deps.store.upsertDoc?.('admin_audit_logs', {
+    id: `newsletter-consent-${deps.now().getTime()}-${Math.random().toString(36).slice(2, 8)}`,
+    action: 'newsletter_subscriber_added',
+    userId: opened.auth?.user?.oid ?? null,
+    timestamp: deps.now().toISOString(),
+    details: { consentRecordedOn, mode, emailMasked: maskEmail(email) },
+    compliance: {
+      schemaVersion: 1,
+      detailsSanitized: true,
+      identityVerified: true,
+    },
+  });
+  context.log?.(`${route} confirmed ${deps.ref(context)}`);
+  return json(200, {
+    ok: true,
+    mode,
+    consentRecordedOn,
+    message: 'Added as a confirmed subscriber.',
+  });
+}
+
 /**
  * @param {object} deps
  * @param {{ requireRole: Function }} deps.guard
@@ -432,6 +552,18 @@ export function createNewsletterInsightsHandlers({
     if (!result.ok) return refused(route, result, context);
     return json(200, { ok: true, ...project(result) });
   }
+
+  /** What the addContact helpers need from this factory; summaryCache is state, so it is a function. */
+  const contactDeps = {
+    env,
+    store,
+    now,
+    ref,
+    refused,
+    invalidateSummary: () => {
+      summaryCache = null;
+    },
+  };
 
   return {
     async metrics(request, context) {
@@ -728,54 +860,11 @@ export function createNewsletterInsightsHandlers({
       try {
         const segment = await segmentId(opened.client);
         if (segment.result) return refused(route, segment.result, context);
-        const lines = ['email,first_name,last_name,joined,status'];
-        let truncated = false;
-        if (segment.id) {
-          let after;
-          for (let pageNumber = 0; ; pageNumber += 1) {
-            if (pageNumber === EXPORT_MAX_PAGES) {
-              truncated = true;
-              break;
-            }
-            const listed = await opened.client.listSegmentContacts(segment.id, {
-              limit: SUMMARY_PAGE_SIZE,
-              after,
-            });
-            if (!listed.ok) return refused(route, listed, context);
-            const rows = rowsOf(listed);
-            for (const row of rows.map(projectContact)) {
-              lines.push(
-                [
-                  row.email,
-                  row.first_name,
-                  row.last_name,
-                  row.created_at,
-                  row.unsubscribed ? 'unsubscribed' : 'subscribed',
-                ]
-                  .map(csvCell)
-                  .join(',')
-              );
-            }
-            const cursor = nextCursor(listed, rows);
-            if (!cursor) break;
-            after = cursor;
-          }
-        }
-        if (truncated)
-          lines.push(
-            `# truncated: the list is longer than ${EXPORT_MAX_PAGES * SUMMARY_PAGE_SIZE} contacts`
-          );
-        context.log?.(`${route} ${lines.length - 1} row(s) ${ref(context)}`);
+        const collected = await collectAudienceCsv(opened.client, segment.id);
+        if (collected.refusal) return refused(route, collected.refusal, context);
+        context.log?.(`${route} ${collected.lines.length - 1} row(s) ${ref(context)}`);
         const day = now().toISOString().slice(0, 10);
-        return {
-          status: 200,
-          headers: {
-            'Content-Type': 'text/csv; charset=utf-8',
-            'Content-Disposition': `attachment; filename="newsletter-audience-${day}.csv"`,
-            'Cache-Control': 'no-store',
-          },
-          body: `${lines.join('\r\n')}\r\n`,
-        };
+        return csvAttachment(`newsletter-audience-${day}.csv`, collected.lines);
       } catch (error) {
         return failed(route, error, context);
       }
@@ -798,84 +887,12 @@ export function createNewsletterInsightsHandlers({
       const opened = await open(request, 'publisher');
       if (opened.response) return opened.response;
       const body = await request.json().catch(() => null);
-      if (!isPlainObject(body))
-        return badRequest('Send a JSON body { email, mode, consentRecordedOn? }');
-      const unknown = Object.keys(body).filter(
-        (key) => !['email', 'mode', 'consentRecordedOn', 'source'].includes(key)
-      );
-      if (unknown.length) return badRequest(`Unknown field(s): ${unknown.join(', ')}`);
-      const email = normalizeEmail(body.email);
-      if (!email) return badRequest('email must be a valid address');
-      const mode =
-        body.mode === 'confirmed' ? 'confirmed' : body.mode === 'invite' ? 'invite' : null;
-      if (!mode)
-        return badRequest(
-          "mode must be 'invite' (send a confirmation link) or 'confirmed' (consent recorded)"
-        );
-      let consentRecordedOn = null;
-      if (mode === 'confirmed') {
-        const when =
-          typeof body.consentRecordedOn === 'string' ? Date.parse(body.consentRecordedOn) : NaN;
-        if (!Number.isFinite(when))
-          return badRequest(
-            'consentRecordedOn is required for a confirmed add: the date consent was given'
-          );
-        if (when > now().getTime()) return badRequest('consentRecordedOn cannot be in the future');
-        consentRecordedOn = new Date(when).toISOString();
-      }
+      const parsed = parseAddContactBody(body, now().getTime());
+      if (parsed.error) return badRequest(parsed.error);
       try {
-        if (mode === 'invite') {
-          const sent = await sendConfirmationEmail({
-            client: opened.client,
-            apiKey: readKey(env, 'RESEND_API_KEY'),
-            email,
-            source: 'website',
-            now: () => now().getTime(),
-            from: await resolveFromAddress(store, context),
-          });
-          if (!sent.ok) return refused(route, sent, context);
-          context.log?.(`${route} invited ${ref(context)}`);
-          return json(202, {
-            ok: true,
-            mode,
-            message:
-              'A confirmation link was emailed. The address joins the list when it is opened.',
-          });
-        }
-        const segment = await resolveSegmentId(opened.client);
-        const ensured = await ensureConfirmedContact({
-          client: opened.client,
-          email,
-          segmentId: segment,
-        });
-        if (!ensured.ok) {
-          context.warn?.(`${route} not confirmed: ${ensured.why} ${ref(context)}`);
-          return json(502, {
-            ok: false,
-            error: `Resend did not confirm the contact: ${ensured.why}`,
-          });
-        }
-        summaryCache = null;
-        // The consent record lives beside the audit trail, never in a log line.
-        await store.upsertDoc?.('admin_audit_logs', {
-          id: `newsletter-consent-${now().getTime()}-${Math.random().toString(36).slice(2, 8)}`,
-          action: 'newsletter_subscriber_added',
-          userId: opened.auth?.user?.oid ?? null,
-          timestamp: now().toISOString(),
-          details: { consentRecordedOn, mode, emailMasked: maskEmail(email) },
-          compliance: {
-            schemaVersion: 1,
-            detailsSanitized: true,
-            identityVerified: true,
-          },
-        });
-        context.log?.(`${route} confirmed ${ref(context)}`);
-        return json(200, {
-          ok: true,
-          mode,
-          consentRecordedOn,
-          message: 'Added as a confirmed subscriber.',
-        });
+        return parsed.mode === 'invite'
+          ? await inviteContact(contactDeps, route, opened, parsed.email, context)
+          : await addConfirmedContact(contactDeps, route, opened, parsed, context);
       } catch (error) {
         return failed(route, error, context);
       }

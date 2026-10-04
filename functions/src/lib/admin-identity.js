@@ -27,6 +27,7 @@ import { randomUUID } from 'node:crypto';
 import { ADMIN_ROLES, ENTRA_ADMIN_APP_ROLE, ENTRA_API_DELEGATED_SCOPE } from './auth/roles.js';
 import { ENTRA_REQUIRED_TOKEN_VERSION } from './auth/verify-token.js';
 import { ENTRA_LAB_AGENT_APP_ROLE } from './auth/require-agent.js';
+import { actorName } from './auth/actor-name.js';
 
 const json = (status, body) => ({
   status,
@@ -215,34 +216,61 @@ export function validateSpeakerEventData(data) {
   if (unknown.length) return { error: `Unknown speaker event field(s): ${unknown.join(', ')}` };
   const out = { ...data };
   delete out.id;
-  for (const key of SPEAKER_EVENT_DATE_FIELDS) {
-    if (Object.prototype.hasOwnProperty.call(out, key))
-      out[key] = normalizeSpeakerEventDate(out[key]);
+  for (const step of SPEAKER_EVENT_STEPS) {
+    const error = step(out);
+    if (error) return { error };
   }
-  for (const key of ['eventUrl', 'presentationUrl', 'eventImageUrl']) {
-    if (out[key] === undefined || out[key] === null || out[key] === '') continue;
-    if (!isHttpUrl(out[key])) return { error: `${key} must be an http(s) URL` };
-    out[key] = out[key].trim();
-  }
-  if (
-    out.status !== undefined &&
-    out.status !== null &&
-    !SPEAKER_EVENT_STATUSES.includes(out.status)
-  ) {
-    return { error: `status must be one of ${SPEAKER_EVENT_STATUSES.join(', ')}` };
-  }
-  if ('sessions' in out) out.sessions = cleanSessions(out.sessions);
-  if ('evidence' in out) out.evidence = cleanEvidence(out.evidence);
-  if ('attendance' in out) {
-    const n = Number(out.attendance);
-    out.attendance =
-      out.attendance === null || out.attendance === '' || !Number.isFinite(n)
-        ? null
-        : Math.max(0, Math.floor(n));
-  }
-  if ('display' in out) out.display = out.display === true;
   return { value: out };
 }
+
+const SPEAKER_EVENT_URL_FIELDS = ['eventUrl', 'presentationUrl', 'eventImageUrl'];
+const isBlank = (value) => value === undefined || value === null || value === '';
+
+/** Each step cleans `out` in place and answers an error sentence, or null. */
+function cleanSpeakerEventDates(out) {
+  for (const key of SPEAKER_EVENT_DATE_FIELDS) {
+    if (Object.hasOwn(out, key)) out[key] = normalizeSpeakerEventDate(out[key]);
+  }
+  return null;
+}
+
+function cleanSpeakerEventUrls(out) {
+  for (const key of SPEAKER_EVENT_URL_FIELDS) {
+    if (isBlank(out[key])) continue;
+    if (!isHttpUrl(out[key])) return `${key} must be an http(s) URL`;
+    out[key] = out[key].trim();
+  }
+  return null;
+}
+
+function checkSpeakerEventStatus(out) {
+  const unset = out.status === undefined || out.status === null;
+  if (unset || SPEAKER_EVENT_STATUSES.includes(out.status)) return null;
+  return `status must be one of ${SPEAKER_EVENT_STATUSES.join(', ')}`;
+}
+
+function cleanSpeakerEventShapes(out) {
+  if ('sessions' in out) out.sessions = cleanSessions(out.sessions);
+  if ('evidence' in out) out.evidence = cleanEvidence(out.evidence);
+  if ('attendance' in out) out.attendance = cleanAttendance(out.attendance);
+  if ('display' in out) out.display = out.display === true;
+  return null;
+}
+
+/** A whole count of people, or null for nothing usable. */
+function cleanAttendance(value) {
+  const n = Number(value);
+  if (value === null || value === '' || !Number.isFinite(n)) return null;
+  return Math.max(0, Math.floor(n));
+}
+
+/** In the order their errors are reported. */
+const SPEAKER_EVENT_STEPS = [
+  cleanSpeakerEventDates,
+  cleanSpeakerEventUrls,
+  checkSpeakerEventStatus,
+  cleanSpeakerEventShapes,
+];
 
 /**
  * @param {object} deps
@@ -259,7 +287,7 @@ export function createAdminIdentityHandlers({
   uuid = randomUUID,
   env = process.env,
 }) {
-  const actor = (user) => user.email || user.preferred_username || user.oid || user.sub || 'admin';
+  const actor = (user) => actorName(user);
 
   /**
    * Would `bootstrapCurrentUserAdmin` actually succeed for this caller?

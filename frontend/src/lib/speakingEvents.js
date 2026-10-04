@@ -14,42 +14,19 @@
  * the day named in every zone.
  */
 
-export const SPEAKING_STATUSES = Object.freeze([
-  'idea',
-  'proposed',
-  'accepted',
-  'declined',
-  'delivered',
-]);
+import { statusTable } from '@/lib/status';
 
-/** StatusBadge input per status (lib/status.js shape: label, tone, help). */
-export const SPEAKING_STATUS_INFO = Object.freeze({
-  idea: {
-    id: 'idea',
-    label: 'Idea',
-    tone: 'muted',
-    help: 'A talk worth proposing; nothing sent yet.',
-  },
-  proposed: {
-    id: 'proposed',
-    label: 'Proposed',
-    tone: 'warn',
-    help: 'Submitted to a call for papers; waiting on the organiser.',
-  },
-  accepted: {
-    id: 'accepted',
-    label: 'Accepted',
-    tone: 'ok',
-    help: 'On the agenda. Sessionize events start here.',
-  },
-  declined: { id: 'declined', label: 'Declined', tone: 'bad', help: 'Not selected this time.' },
-  delivered: {
-    id: 'delivered',
-    label: 'Delivered',
-    tone: 'ok',
-    help: 'Given. Add slides, a recording and attendance as evidence.',
-  },
+/** StatusBadge input per status, built by lib/status.js so the record shape is shared. */
+export const SPEAKING_STATUS_INFO = statusTable({
+  idea: ['Idea', 'muted', 'A talk worth proposing; nothing sent yet.'],
+  proposed: ['Proposed', 'warn', 'Submitted to a call for papers; waiting on the organiser.'],
+  accepted: ['Accepted', 'ok', 'On the agenda. Sessionize events start here.'],
+  declined: ['Declined', 'bad', 'Not selected this time.'],
+  delivered: ['Delivered', 'ok', 'Given. Add slides, a recording and attendance as evidence.'],
 });
+
+/** The statuses in pipeline order: the table's key order. */
+export const SPEAKING_STATUSES = Object.freeze(Object.keys(SPEAKING_STATUS_INFO));
 
 export function speakingStatusInfo(status) {
   return SPEAKING_STATUS_INFO[status] || SPEAKING_STATUS_INFO.idea;

@@ -19,6 +19,10 @@
  * Item order inside Pipeline is the order the work happens. No text tags
  * beside an item (#566): a badge is state, a tag naming the product behind a
  * page belongs on that page's header.
+ *
+ * The registry is two tables — the groups, and the items with the group each
+ * belongs to — joined once below. One row per entry, so adding a page is one
+ * line and no group is a copy of another's shape.
  */
 import {
   Activity,
@@ -49,233 +53,260 @@ import {
   Zap,
 } from 'lucide-react';
 
-export const NAV_GROUPS = Object.freeze([
-  {
-    id: 'home',
-    label: 'Home',
-    description: 'Where you are, what is waiting, and what to do next.',
-    items: [
-      {
-        to: '/admin',
-        icon: LayoutDashboard,
-        label: 'Dashboard',
-        end: true,
-        description: 'Everything waiting on you, the pipeline at a glance, and recent activity.',
-      },
-    ],
-  },
-  {
-    id: 'pipeline',
-    label: 'Pipeline',
-    description:
-      'Every piece of content moves through these stages, in this order, to a live page.',
-    items: [
-      {
-        to: '/admin/submit',
-        icon: Zap,
-        label: 'New Content',
-        description: 'Start something: import a URL or document, or draft from a source.',
-      },
-      {
-        to: '/admin/drafts',
-        icon: FilePen,
-        label: 'Drafts',
-        description:
-          'Your writing desk. Articles you are still writing, before anyone reviews them.',
-      },
-      {
-        to: '/admin/queue',
-        icon: ListChecks,
-        label: 'Review Queue',
-        badgeKey: 'queue',
-        description: 'Triage what arrived: approve it for editing, send it back, or reject it.',
-      },
-      {
-        to: '/admin/editor',
-        icon: PenLine,
-        label: 'Editor',
-        badgeKey: 'editor',
-        description: 'Polish approved drafts: text, metadata, images, and the publish date.',
-      },
-      {
-        to: '/admin/published',
-        icon: Newspaper,
-        label: 'Publish',
-        description: 'Push finished content live, now or on a schedule, and see what went out.',
-      },
-      {
-        to: '/admin/live-pages',
-        icon: Globe,
-        label: 'Live Pages',
-        badgeKey: 'live',
-        description: 'Every page visitors can open right now, with its URL, type and provider.',
-      },
-    ],
-  },
-  {
-    id: 'enhanced',
-    label: 'Enhanced',
-    description:
-      'Tools that turn published content into something more: audio, labs, structured guides.',
-    items: [
-      {
-        to: '/admin/listen-and-learn',
-        icon: Headphones,
-        label: 'Listen & Learn',
-        description:
-          'Turn study guides and articles into spoken chapters, organised as books and courses.',
-      },
-      {
-        to: '/admin/labs',
-        icon: FlaskConical,
-        label: 'Labs',
-        description:
-          'Hands-on learning environments per provider, and the agent and desktop behind them.',
-      },
-      {
-        to: '/admin/frameworks',
-        icon: BookOpen,
-        label: 'Frameworks',
-        description:
-          'Well-Architected style reference guides, reviewed and published on their own board.',
-      },
-      {
-        to: '/admin/coder-corner',
-        icon: Code2,
-        label: 'Coder Corner',
-        description:
-          'Code-first tutorials and snippets, reviewed and published on their own board.',
-      },
-    ],
-  },
-  {
-    id: 'creative',
-    label: 'Creative',
-    description: 'Where new content and images are made, and how the AI behind them is set up.',
-    items: [
-      {
-        to: '/admin/forge-studio',
-        icon: Flame,
-        label: 'Forge Studio',
-        description: 'Brief, draft and shape a piece with AI help, then send it into the pipeline.',
-      },
-      {
-        to: '/admin/ai-engine',
-        icon: Bot,
-        label: 'AI Engine',
-        description:
-          'Which AI provider and model handles each kind of task, with fallbacks and usage.',
-      },
-      {
-        to: '/admin/image-prompts',
-        icon: Image,
-        label: 'Image Prompts',
-        description: 'Prompt sets that generate coordinated images on a shared theme.',
-      },
-      {
-        to: '/admin/image-gallery',
-        icon: Images,
-        label: 'Image Gallery',
-        description:
-          'Every image the site holds: generated, uploaded or imported, with where it is used.',
-      },
-    ],
-  },
-  {
-    id: 'amplify',
-    label: 'Amplify',
-    description:
-      'Where finished content reaches an audience: the calendar, the newsletter, social.',
-    items: [
-      {
-        to: '/admin/calendar',
-        icon: Calendar,
-        label: 'Calendar',
-        description:
-          'Everything scheduled across ContentForge: publishes, sends, posts, talks, deadlines.',
-      },
-      {
-        to: '/admin/mailing-list',
-        icon: Mail,
-        label: 'Newsletter Hub',
-        description: 'Build, review, send and measure newsletter issues; manage who receives them.',
-      },
-      {
-        to: '/admin/social',
-        icon: Share2,
-        label: 'Social Hub',
-        description: 'Schedule live pages to LinkedIn, X and other networks through Publer.',
-      },
-      {
-        to: '/admin/linkie',
-        icon: Link2,
-        label: 'Linkie Hub',
-        description: 'The link-in-bio profile: which pages it lists and how they perform.',
-      },
-      {
-        to: '/admin/recording-hub',
-        icon: Radio,
-        label: 'Recording Hub',
-        description: 'Plaud recordings to transcripts to podcast episodes, and their distribution.',
-      },
-    ],
-  },
-  {
-    id: 'spotlight',
-    label: 'Spotlight',
-    description:
-      'Your own visibility: the talks you give, the credentials you hold, the programs you pursue.',
-    items: [
-      {
-        to: '/admin/speaking-events',
-        icon: Mic,
-        label: 'Speaking',
-        description:
-          'Talks, proposals and deadlines, synced from Sessionize and published to About.',
-      },
-      {
-        to: '/admin/certifications',
-        icon: Award,
-        label: 'Certifications',
-        description: 'Credentials, badges, expiry and renewal dates, published to About.',
-      },
-      {
-        to: '/admin/ambassador',
-        icon: BadgeCheck,
-        label: 'Ambassador',
-        description:
-          'Prepare and track applications to MVP, Hero, Captain and other programs, with evidence.',
-      },
-    ],
-  },
-  {
-    id: 'platform',
-    label: 'Platform',
-    description: 'How the system itself is configured, connected and watched.',
-    items: [
-      {
-        to: '/admin/platform',
-        icon: SlidersHorizontal,
-        label: 'Platform Settings',
-        description:
-          'Defaults the pipeline reads on every run: covers, voices, content types, autoposting.',
-      },
-      {
-        to: '/admin/health',
-        icon: Activity,
-        label: 'Health',
-        description:
-          'Whether each part of the platform is working, with last-checked times and fixes.',
-      },
-      {
-        to: '/admin/integrations',
-        icon: Plug,
-        label: 'Integrations',
-        description: 'Every external service, its keys, its connection test and where it is used.',
-      },
-    ],
-  },
-]);
+/** `[id, label, description]`, in menu order. */
+const GROUPS = [
+  ['home', 'Home', 'Where you are, what is waiting, and what to do next.'],
+  [
+    'pipeline',
+    'Pipeline',
+    'Every piece of content moves through these stages, in this order, to a live page.',
+  ],
+  [
+    'enhanced',
+    'Enhanced',
+    'Tools that turn published content into something more: audio, labs, structured guides.',
+  ],
+  [
+    'creative',
+    'Creative',
+    'Where new content and images are made, and how the AI behind them is set up.',
+  ],
+  [
+    'amplify',
+    'Amplify',
+    'Where finished content reaches an audience: the calendar, the newsletter, social.',
+  ],
+  [
+    'spotlight',
+    'Spotlight',
+    'Your own visibility: the talks you give, the credentials you hold, the programs you pursue.',
+  ],
+  ['platform', 'Platform', 'How the system itself is configured, connected and watched.'],
+];
+
+/**
+ * `[group, to, icon, label, description, extra?]`, in the order each group
+ * shows them. `extra` carries `end` (exact match for the dashboard route)
+ * and `badgeKey` (which count the sidebar shows beside the item).
+ */
+const ITEMS = [
+  [
+    'home',
+    '/admin',
+    LayoutDashboard,
+    'Dashboard',
+    'Everything waiting on you, the pipeline at a glance, and recent activity.',
+    { end: true },
+  ],
+
+  // Pipeline, in the order the work happens.
+  [
+    'pipeline',
+    '/admin/submit',
+    Zap,
+    'New Content',
+    'Start something: import a URL or document, or draft from a source.',
+  ],
+  [
+    'pipeline',
+    '/admin/drafts',
+    FilePen,
+    'Drafts',
+    'Your writing desk. Articles you are still writing, before anyone reviews them.',
+  ],
+  [
+    'pipeline',
+    '/admin/queue',
+    ListChecks,
+    'Review Queue',
+    'Triage what arrived: approve it for editing, send it back, or reject it.',
+    { badgeKey: 'queue' },
+  ],
+  [
+    'pipeline',
+    '/admin/editor',
+    PenLine,
+    'Editor',
+    'Polish approved drafts: text, metadata, images, and the publish date.',
+    { badgeKey: 'editor' },
+  ],
+  [
+    'pipeline',
+    '/admin/published',
+    Newspaper,
+    'Publish',
+    'Push finished content live, now or on a schedule, and see what went out.',
+  ],
+  [
+    'pipeline',
+    '/admin/live-pages',
+    Globe,
+    'Live Pages',
+    'Every page visitors can open right now, with its URL, type and provider.',
+    { badgeKey: 'live' },
+  ],
+
+  // Enhanced
+  [
+    'enhanced',
+    '/admin/listen-and-learn',
+    Headphones,
+    'Listen & Learn',
+    'Turn study guides and articles into spoken chapters, organised as books and courses.',
+  ],
+  [
+    'enhanced',
+    '/admin/labs',
+    FlaskConical,
+    'Labs',
+    'Hands-on learning environments per provider, and the agent and desktop behind them.',
+  ],
+  [
+    'enhanced',
+    '/admin/frameworks',
+    BookOpen,
+    'Frameworks',
+    'Well-Architected style reference guides, reviewed and published on their own board.',
+  ],
+  [
+    'enhanced',
+    '/admin/coder-corner',
+    Code2,
+    'Coder Corner',
+    'Code-first tutorials and snippets, reviewed and published on their own board.',
+  ],
+
+  // Creative
+  [
+    'creative',
+    '/admin/forge-studio',
+    Flame,
+    'Forge Studio',
+    'Brief, draft and shape a piece with AI help, then send it into the pipeline.',
+  ],
+  [
+    'creative',
+    '/admin/ai-engine',
+    Bot,
+    'AI Engine',
+    'Which AI provider and model handles each kind of task, with fallbacks and usage.',
+  ],
+  [
+    'creative',
+    '/admin/image-prompts',
+    Image,
+    'Image Prompts',
+    'Prompt sets that generate coordinated images on a shared theme.',
+  ],
+  [
+    'creative',
+    '/admin/image-gallery',
+    Images,
+    'Image Gallery',
+    'Every image the site holds: generated, uploaded or imported, with where it is used.',
+  ],
+
+  // Amplify
+  [
+    'amplify',
+    '/admin/calendar',
+    Calendar,
+    'Calendar',
+    'Everything scheduled across ContentForge: publishes, sends, posts, talks, deadlines.',
+  ],
+  [
+    'amplify',
+    '/admin/mailing-list',
+    Mail,
+    'Newsletter Hub',
+    'Build, review, send and measure newsletter issues; manage who receives them.',
+  ],
+  [
+    'amplify',
+    '/admin/social',
+    Share2,
+    'Social Hub',
+    'Schedule live pages to LinkedIn, X and other networks through Publer.',
+  ],
+  [
+    'amplify',
+    '/admin/linkie',
+    Link2,
+    'Linkie Hub',
+    'The link-in-bio profile: which pages it lists and how they perform.',
+  ],
+  [
+    'amplify',
+    '/admin/recording-hub',
+    Radio,
+    'Recording Hub',
+    'Plaud recordings to transcripts to podcast episodes, and their distribution.',
+  ],
+
+  // Spotlight
+  [
+    'spotlight',
+    '/admin/speaking-events',
+    Mic,
+    'Speaking',
+    'Talks, proposals and deadlines, synced from Sessionize and published to About.',
+  ],
+  [
+    'spotlight',
+    '/admin/certifications',
+    Award,
+    'Certifications',
+    'Credentials, badges, expiry and renewal dates, published to About.',
+  ],
+  [
+    'spotlight',
+    '/admin/ambassador',
+    BadgeCheck,
+    'Ambassador',
+    'Prepare and track applications to MVP, Hero, Captain and other programs, with evidence.',
+  ],
+
+  // Platform
+  [
+    'platform',
+    '/admin/platform',
+    SlidersHorizontal,
+    'Platform Settings',
+    'Defaults the pipeline reads on every run: covers, voices, content types, autoposting.',
+  ],
+  [
+    'platform',
+    '/admin/health',
+    Activity,
+    'Health',
+    'Whether each part of the platform is working, with last-checked times and fixes.',
+  ],
+  [
+    'platform',
+    '/admin/integrations',
+    Plug,
+    'Integrations',
+    'Every external service, its keys, its connection test and where it is used.',
+  ],
+];
+
+/** One row of ITEMS as the registry entry the sidebar and the headers read. */
+const navItem = ([, to, icon, label, description, extra = {}]) => ({
+  to,
+  icon,
+  label,
+  ...extra,
+  description,
+});
+
+export const NAV_GROUPS = Object.freeze(
+  GROUPS.map(([id, label, description]) => ({
+    id,
+    label,
+    description,
+    items: ITEMS.filter(([group]) => group === id).map(navItem),
+  }))
+);
 
 /** Every item across every group, flat. */
 export const NAV_ITEMS = Object.freeze(NAV_GROUPS.flatMap((group) => group.items));

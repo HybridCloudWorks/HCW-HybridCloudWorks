@@ -155,31 +155,41 @@ export async function sendConfirmationEmail({
  *
  * @returns {Promise<{ ok: true } | { ok: false, why: string }>} `why` is operator-safe: statuses and names, never the address.
  */
-export async function ensureConfirmedContact({ client, email, segmentId }) {
-  const created = await client.createContact({ email, segmentId });
-  if (!created.ok) {
-    // Resend does not document which status means "already exists", so the
-    // status is not guessed at: the contact is looked up. Only a contact that
-    // really exists is resubscribed — someone who unsubscribed and is now
-    // choosing to come back, which is exactly the consent this records. A
-    // 401, a 5xx or a transport failure finds no contact and is reported as
-    // the create failure it was, not masked by a PATCH.
-    const existing = await client.getContact(email);
-    if (!existing.ok) {
-      return {
-        ok: false,
-        why: `create ${describe(created)}; no existing contact (${describe(existing)})`,
-      };
-    }
-    const resubscribed = await client.resubscribeContact(email);
-    if (!resubscribed.ok) {
-      return {
-        ok: false,
-        why: `create ${describe(created)}, then update ${describe(resubscribed)}`,
-      };
-    }
+export async function ensureConfirmedContact(deps) {
+  for (const step of [ensureContactExists, ensureInSegment, ensureSubscribed]) {
+    const outcome = await step(deps);
+    if (!outcome.ok) return outcome;
   }
+  return { ok: true };
+}
 
+const OK = Object.freeze({ ok: true });
+
+/** Step 1: the contact exists, resubscribed if it had opted out. */
+async function ensureContactExists({ client, email, segmentId }) {
+  const created = await client.createContact({ email, segmentId });
+  if (created.ok) return OK;
+  // Resend does not document which status means "already exists", so the
+  // status is not guessed at: the contact is looked up. Only a contact that
+  // really exists is resubscribed — someone who unsubscribed and is now
+  // choosing to come back, which is exactly the consent this records. A
+  // 401, a 5xx or a transport failure finds no contact and is reported as
+  // the create failure it was, not masked by a PATCH.
+  const existing = await client.getContact(email);
+  if (!existing.ok) {
+    return {
+      ok: false,
+      why: `create ${describe(created)}; no existing contact (${describe(existing)})`,
+    };
+  }
+  const resubscribed = await client.resubscribeContact(email);
+  return resubscribed.ok
+    ? OK
+    : { ok: false, why: `create ${describe(created)}, then update ${describe(resubscribed)}` };
+}
+
+/** Step 2: the contact is in the Newsletter segment, read back after adding. */
+async function ensureInSegment({ client, email, segmentId }) {
   const inSegment = async () => {
     const listed = await client.listContactSegments(email);
     return (
@@ -188,30 +198,28 @@ export async function ensureConfirmedContact({ client, email, segmentId }) {
       listed.data.data.some((row) => row?.id === segmentId)
     );
   };
-  if (!(await inSegment())) {
-    const added = await client.addContactToSegment(email, segmentId);
-    if (!added.ok || !(await inSegment())) {
-      return {
+  if (await inSegment()) return OK;
+  const added = await client.addContactToSegment(email, segmentId);
+  const present = added.ok && (await inSegment());
+  return present
+    ? OK
+    : {
         ok: false,
         why: `the contact is not in the ${NEWSLETTER_SEGMENT_NAME} segment after adding it (${describe(added)})`,
       };
-    }
-  }
+}
 
+/** Step 3: the contact reads back as subscribed, repaired once if not. */
+async function ensureSubscribed({ client, email }) {
   const stored = await client.getContact(email);
   if (!stored.ok) return { ok: false, why: `reading the contact back ${describe(stored)}` };
-  if (stored.data?.unsubscribed !== false) {
-    // resend/resend-node#458's shape. Repair once, then check again.
-    const repaired = await client.resubscribeContact(email);
-    const reread = repaired.ok ? await client.getContact(email) : repaired;
-    if (!reread.ok || reread.data?.unsubscribed !== false) {
-      return {
-        ok: false,
-        why: 'the contact reads back as unsubscribed after confirming',
-      };
-    }
-  }
-  return { ok: true };
+  if (stored.data?.unsubscribed === false) return OK;
+  // resend/resend-node#458's shape. Repair once, then check again.
+  const repaired = await client.resubscribeContact(email);
+  const reread = repaired.ok ? await client.getContact(email) : repaired;
+  return reread.ok && reread.data?.unsubscribed === false
+    ? OK
+    : { ok: false, why: 'the contact reads back as unsubscribed after confirming' };
 }
 
 /**

@@ -6,85 +6,41 @@
  * no fetching; tested in ambassadorModel.test.js.
  */
 
-export const APPLICATION_STATUSES = Object.freeze([
-  'interested',
-  'preparing',
-  'ready',
-  'submitted',
-  'under_review',
-  'accepted',
-  'active',
-  'renewal_due',
-  'renewed',
-  'denied',
-  'expired',
-  'withdrawn',
-]);
+import { statusTable } from '@/lib/status';
 
-/** StatusBadge input per status (lib/status.js shape: label, tone, help). */
-export const AMBASSADOR_STATUS = Object.freeze({
-  interested: {
-    id: 'interested',
-    label: 'Interested',
-    tone: 'muted',
-    help: 'A program worth pursuing; nothing gathered yet.',
-  },
-  preparing: {
-    id: 'preparing',
-    label: 'Preparing',
-    tone: 'warn',
-    help: 'Collecting evidence and writing responses.',
-  },
-  ready: {
-    id: 'ready',
-    label: 'Ready',
-    tone: 'ok',
-    help: 'Every requirement met; waiting for the window.',
-  },
-  submitted: {
-    id: 'submitted',
-    label: 'Submitted',
-    tone: 'warn',
-    help: 'Sent to the program; nothing more to do but wait.',
-  },
-  under_review: {
-    id: 'under_review',
-    label: 'Under review',
-    tone: 'warn',
-    help: 'The program has acknowledged it and is reviewing.',
-  },
-  accepted: {
-    id: 'accepted',
-    label: 'Accepted',
-    tone: 'ok',
-    help: 'Approved; the award has not started yet.',
-  },
-  active: { id: 'active', label: 'Active', tone: 'ok', help: 'Holding the award now.' },
-  renewal_due: {
-    id: 'renewal_due',
-    label: 'Renewal due',
-    tone: 'warn',
-    help: 'The renewal window is open or close; gather this cycle’s evidence.',
-  },
-  renewed: { id: 'renewed', label: 'Renewed', tone: 'ok', help: 'Renewed for another cycle.' },
-  denied: {
-    id: 'denied',
-    label: 'Denied',
-    tone: 'bad',
-    help: 'Not selected; a new pursuit can start from here.',
-  },
-  expired: {
-    id: 'expired',
-    label: 'Expired',
-    tone: 'off',
-    help: 'The award lapsed without renewal.',
-  },
-  withdrawn: {
-    id: 'withdrawn',
-    label: 'Withdrawn',
-    tone: 'off',
-    help: 'Pulled before a decision.',
-  },
+/** StatusBadge input per status, built by lib/status.js so the record shape is shared. */
+export const AMBASSADOR_STATUS = statusTable({
+  interested: ['Interested', 'muted', 'A program worth pursuing; nothing gathered yet.'],
+  preparing: ['Preparing', 'warn', 'Collecting evidence and writing responses.'],
+  ready: ['Ready', 'ok', 'Every requirement met; waiting for the window.'],
+  submitted: ['Submitted', 'warn', 'Sent to the program; nothing more to do but wait.'],
+  under_review: ['Under review', 'warn', 'The program has acknowledged it and is reviewing.'],
+  accepted: ['Accepted', 'ok', 'Approved; the award has not started yet.'],
+  active: ['Active', 'ok', 'Holding the award now.'],
+  renewal_due: [
+    'Renewal due',
+    'warn',
+    'The renewal window is open or close; gather this cycle’s evidence.',
+  ],
+  renewed: ['Renewed', 'ok', 'Renewed for another cycle.'],
+  denied: ['Denied', 'bad', 'Not selected; a new pursuit can start from here.'],
+  expired: ['Expired', 'off', 'The award lapsed without renewal.'],
+  withdrawn: ['Withdrawn', 'off', 'Pulled before a decision.'],
+});
+
+/** The statuses in lifecycle order: the table's key order. */
+export const APPLICATION_STATUSES = Object.freeze(Object.keys(AMBASSADOR_STATUS));
+
+/** A program's place in the catalogue, for the Settings table. */
+export const PROGRAM_STATE = statusTable({
+  enabled: ['Enabled', 'ok', 'Offered on the Programs tab.'],
+  disabled: ['Disabled', 'off', 'Hidden from new applications.'],
+});
+
+/** Whether a reviewer could confirm an evidence item, for the Evidence tab. */
+export const VERIFICATION_STATUS = statusTable({
+  verified: ['Verified', 'ok', 'A reviewer could confirm it from the URL or files.'],
+  unverified: ['Unverified', 'muted', 'Recorded, not yet confirmed.'],
 });
 
 export function ambassadorStatusInfo(status) {
@@ -235,37 +191,61 @@ export function statusCounts(applications) {
   return counts;
 }
 
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+/** A deadline within the next thirty days, today included. */
+const closingSoon = (daysLeft) => daysLeft !== null && daysLeft >= 0 && daysLeft <= 30;
+
+/**
+ * What one pursued application may need next, one rule per entry: `when`
+ * reads the application's facts, `say` words the action. Evaluated in order,
+ * so the shortfall comes before the attach reminder before the deadline.
+ */
+const APPLICATION_ACTIONS = Object.freeze([
+  {
+    when: ({ readiness }) => Boolean(readiness?.missing?.length),
+    say: ({ name, readiness }) => {
+      const [first] = readiness.missing;
+      return `${name}: ${first.shortfall} more ${first.label.toLowerCase()} needed.`;
+    },
+  },
+  {
+    when: ({ app }) => (app.evidenceIds || []).length === 0,
+    say: ({ name }) => `${name}: attach evidence from the Evidence tab.`,
+  },
+  {
+    when: ({ app, daysLeft }) => closingSoon(daysLeft) && app.status !== 'submitted',
+    say: ({ name, daysLeft }) => `${name}: submission closes in ${plural(daysLeft, 'day')}.`,
+  },
+]);
+
+/** The facts the action rules read for one application. */
+function applicationFacts(app, { byId, readinessById, now }) {
+  return {
+    app,
+    name: byId.get(app.programId)?.name || app.title,
+    readiness: readinessById?.[app.programId],
+    daysLeft: daysUntil(app.submissionDeadline, now),
+  };
+}
+
+const isUnverified = (item) => (item.verificationStatus || 'unverified') !== 'verified';
+
 /**
  * The next things worth doing, in words, from what the hub knows: unmet
  * requirements on readiness, applications with no evidence attached, windows
  * closing soon, and evidence awaiting verification.
  */
 export function recommendedActions({ applications, programs, evidence, readinessById, today }) {
-  const now = today || todayIso();
-  const byId = programById(programs);
-  const actions = [];
-  for (const app of applications || []) {
-    if (!PURSUING_STATUSES.includes(app.status)) continue;
-    const program = byId.get(app.programId);
-    const readiness = readinessById?.[app.programId];
-    const name = program?.name || app.title;
-    if (readiness?.missing?.length) {
-      const [first] = readiness.missing;
-      actions.push(`${name}: ${first.shortfall} more ${first.label.toLowerCase()} needed.`);
-    }
-    if (!(app.evidenceIds || []).length) {
-      actions.push(`${name}: attach evidence from the Evidence tab.`);
-    }
-    const left = daysUntil(app.submissionDeadline, now);
-    if (left !== null && left >= 0 && left <= 30 && app.status !== 'submitted') {
-      actions.push(`${name}: submission closes in ${left} day${left === 1 ? '' : 's'}.`);
-    }
-  }
-  const unverified = (evidence || []).filter(
-    (e) => (e.verificationStatus || 'unverified') !== 'verified'
-  ).length;
-  if (unverified > 0)
-    actions.push(`${unverified} evidence item${unverified === 1 ? '' : 's'} still unverified.`);
+  const context = { byId: programById(programs), readinessById, now: today || todayIso() };
+  const actions = (applications || [])
+    .filter((app) => PURSUING_STATUSES.includes(app.status))
+    .map((app) => applicationFacts(app, context))
+    .flatMap((facts) =>
+      APPLICATION_ACTIONS.filter((rule) => rule.when(facts)).map((rule) => rule.say(facts))
+    );
+  const unverified = (evidence || []).filter(isUnverified).length;
+  if (unverified > 0) actions.push(`${plural(unverified, 'evidence item')} still unverified.`);
   return actions.slice(0, 8);
 }
 
@@ -350,31 +330,40 @@ const lines = (text) =>
     .map((l) => l.trim())
     .filter(Boolean);
 
+/** A stored value as the form holds it: the text, or the field's default when unset. */
+const textOf = (value, fallback = '') => value || fallback;
+/** A stored list as one-per-line text. */
+const linesOf = (list) => (list || []).join('\n');
+
 /** A stored program as the Settings editor's form (lists as one-per-line text). */
 export function programForm(program) {
   if (!program) return { ...EMPTY_PROGRAM_FORM };
+  const window = program.applicationWindow || {};
+  const reminders = program.reminders || {};
   return {
     ...EMPTY_PROGRAM_FORM,
-    name: program.name || '',
-    provider: program.provider || '',
-    category: program.category || 'community-expert',
-    description: program.description || '',
-    applicationUrl: program.applicationUrl || '',
-    eligibility: (program.eligibility || []).join('\n'),
-    criteria: (program.criteria || []).join('\n'),
-    recommendedActivities: (program.recommendedActivities || []).join('\n'),
+    name: textOf(program.name),
+    provider: textOf(program.provider),
+    category: textOf(program.category, EMPTY_PROGRAM_FORM.category),
+    description: textOf(program.description),
+    applicationUrl: textOf(program.applicationUrl),
+    eligibility: linesOf(program.eligibility),
+    criteria: linesOf(program.criteria),
+    recommendedActivities: linesOf(program.recommendedActivities),
     applicationWindow: {
-      opens: program.applicationWindow?.opens || '',
-      closes: program.applicationWindow?.closes || '',
-      note: program.applicationWindow?.note || '',
+      opens: textOf(window.opens),
+      closes: textOf(window.closes),
+      note: textOf(window.note),
     },
-    renewalCadence: program.renewalCadence || 'annual',
-    expirationRule: program.expirationRule || '',
+    renewalCadence: textOf(program.renewalCadence, EMPTY_PROGRAM_FORM.renewalCadence),
+    expirationRule: textOf(program.expirationRule),
     requirements: (program.requirements || []).map((r) => ({ ...EMPTY_REQUIREMENT, ...r })),
     evidenceTypes: program.evidenceTypes || [],
     reminders: {
-      daysBeforeDeadline: program.reminders?.daysBeforeDeadline ?? 14,
-      daysBeforeRenewal: program.reminders?.daysBeforeRenewal ?? 30,
+      daysBeforeDeadline:
+        reminders.daysBeforeDeadline ?? EMPTY_PROGRAM_FORM.reminders.daysBeforeDeadline,
+      daysBeforeRenewal:
+        reminders.daysBeforeRenewal ?? EMPTY_PROGRAM_FORM.reminders.daysBeforeRenewal,
     },
     customFields: program.customFields || [],
   };

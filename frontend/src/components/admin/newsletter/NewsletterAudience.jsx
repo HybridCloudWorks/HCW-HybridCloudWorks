@@ -330,6 +330,114 @@ function ContactsTable({ contacts, busyIds, onToggle, onRemove }) {
   );
 }
 
+/** The search box, the whole-list switch and the three actions. */
+function AudienceToolbar({
+  searchInput,
+  onSearch,
+  wholeList,
+  onWholeList,
+  onAdd,
+  onExport,
+  exporting,
+  onReload,
+}) {
+  return (
+    <div className="flex flex-wrap items-end justify-between gap-2">
+      <div className="w-full max-w-sm space-y-1">
+        <label htmlFor="audience-search" className="text-xs font-medium">
+          Search by email
+        </label>
+        <Input
+          id="audience-search"
+          type="search"
+          value={searchInput}
+          onChange={(event) => onSearch(event.target.value)}
+          maxLength={100}
+        />
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            className="h-3.5 w-3.5"
+            checked={wholeList}
+            onChange={(event) => onWholeList(event.target.checked)}
+          />
+          Search the whole list (slower: every page is read)
+        </label>
+        <p className="text-xs text-muted-foreground">
+          {wholeList
+            ? 'Every match across the list is shown.'
+            : 'Searches the contacts loaded in each page, not the whole list. Use Load more to look further.'}
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="outline" size="sm" className="gap-2" onClick={onAdd}>
+          <UserPlus className="h-4 w-4" /> Add subscriber
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-2"
+          onClick={onExport}
+          disabled={exporting}
+        >
+          {exporting ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Download className="h-4 w-4" />
+          )}{' '}
+          Export CSV
+        </Button>
+        <Button variant="outline" size="sm" className="gap-2" onClick={onReload}>
+          <RefreshCw className="h-4 w-4" /> Refresh
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** The list itself: loading, the empty cases, the table and Load more. */
+function AudienceBody({ list, search, busyIds, onToggle, onRemove }) {
+  const { page } = list;
+  const showEmpty = !list.loading && !list.error;
+  return (
+    <>
+      {list.loading && (
+        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading subscribers…
+        </p>
+      )}
+
+      {showEmpty && !page.segmentFound && (
+        <p className="text-sm text-muted-foreground">
+          No subscribers yet. The Newsletter list is created by the first confirmed signup.
+        </p>
+      )}
+
+      {showEmpty && page.segmentFound && page.contacts.length === 0 && (
+        <p className="text-sm text-muted-foreground">
+          {search.trim() ? 'No contact on this page matches that search.' : 'No contacts.'}
+        </p>
+      )}
+
+      {!list.loading && page.contacts.length > 0 && (
+        <ContactsTable
+          contacts={page.contacts}
+          busyIds={busyIds}
+          onToggle={onToggle}
+          onRemove={onRemove}
+        />
+      )}
+
+      {!list.loading && page.hasMore && (
+        <Button variant="outline" onClick={list.loadMore} disabled={list.loadingMore}>
+          {list.loadingMore && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          Load more
+        </Button>
+      )}
+    </>
+  );
+}
+
 export default function NewsletterAudience() {
   const [searchInput, setSearchInput] = useState('');
   const [wholeList, setWholeList] = useState(false);
@@ -392,63 +500,20 @@ export default function NewsletterAudience() {
       (rows) => rows.filter((row) => row.id !== contact.id)
     );
 
-  const { page } = list;
-  const showEmpty = !list.loading && !list.error;
-
   return (
     <div className="space-y-4">
       <AudienceSummary summary={summary.summary} error={summary.error} />
 
-      <div className="flex flex-wrap items-end justify-between gap-2">
-        <div className="w-full max-w-sm space-y-1">
-          <label htmlFor="audience-search" className="text-xs font-medium">
-            Search by email
-          </label>
-          <Input
-            id="audience-search"
-            type="search"
-            value={searchInput}
-            onChange={(event) => setSearchInput(event.target.value)}
-            maxLength={100}
-          />
-          <label className="flex items-center gap-2 text-xs text-muted-foreground">
-            <input
-              type="checkbox"
-              className="h-3.5 w-3.5"
-              checked={wholeList}
-              onChange={(event) => setWholeList(event.target.checked)}
-            />
-            Search the whole list (slower: every page is read)
-          </label>
-          <p className="text-xs text-muted-foreground">
-            {wholeList
-              ? 'Every match across the list is shown.'
-              : 'Searches the contacts loaded in each page, not the whole list. Use Load more to look further.'}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" className="gap-2" onClick={() => setAdding(true)}>
-            <UserPlus className="h-4 w-4" /> Add subscriber
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-2"
-            onClick={exportCsv}
-            disabled={exporting}
-          >
-            {exporting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Download className="h-4 w-4" />
-            )}{' '}
-            Export CSV
-          </Button>
-          <Button variant="outline" size="sm" className="gap-2" onClick={list.reload}>
-            <RefreshCw className="h-4 w-4" /> Refresh
-          </Button>
-        </div>
-      </div>
+      <AudienceToolbar
+        searchInput={searchInput}
+        onSearch={setSearchInput}
+        wholeList={wholeList}
+        onWholeList={setWholeList}
+        onAdd={() => setAdding(true)}
+        onExport={exportCsv}
+        exporting={exporting}
+        onReload={list.reload}
+      />
 
       {notice && (
         <p role="status" className="text-sm text-emerald-600">
@@ -457,45 +522,19 @@ export default function NewsletterAudience() {
       )}
       {actionError && <Notice>{actionError}</Notice>}
       {list.error && <Notice>{list.error}</Notice>}
-      {page.truncated && (
+      {list.page.truncated && (
         <p role="status" className="text-xs text-muted-foreground">
           The list is longer than the server searches in one go, so some matches may be missing.
         </p>
       )}
 
-      {list.loading && (
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" /> Loading subscribers…
-        </p>
-      )}
-
-      {showEmpty && !page.segmentFound && (
-        <p className="text-sm text-muted-foreground">
-          No subscribers yet. The Newsletter list is created by the first confirmed signup.
-        </p>
-      )}
-
-      {showEmpty && page.segmentFound && page.contacts.length === 0 && (
-        <p className="text-sm text-muted-foreground">
-          {search.trim() ? 'No contact on this page matches that search.' : 'No contacts.'}
-        </p>
-      )}
-
-      {!list.loading && page.contacts.length > 0 && (
-        <ContactsTable
-          contacts={page.contacts}
-          busyIds={busyIds}
-          onToggle={toggle}
-          onRemove={remove}
-        />
-      )}
-
-      {!list.loading && page.hasMore && (
-        <Button variant="outline" onClick={list.loadMore} disabled={list.loadingMore}>
-          {list.loadingMore && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          Load more
-        </Button>
-      )}
+      <AudienceBody
+        list={list}
+        search={search}
+        busyIds={busyIds}
+        onToggle={toggle}
+        onRemove={remove}
+      />
 
       {adding && (
         <AddSubscriberDialog

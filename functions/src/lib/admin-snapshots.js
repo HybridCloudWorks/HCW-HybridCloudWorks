@@ -114,34 +114,38 @@ export function matchesTaxonomyFilter(
   return true;
 }
 
+const NEEDS_REVIEW_STATUSES = new Set(["draft", "ingested", "inspected"]);
+const READY_STATUSES = new Set(["approved", "forge_ready", "published"]);
+/**
+ * Not in progress: rejected and archived are out of the pipeline; drafting
+ * is the Drafts stage, not the pipeline yet (/admin/drafts lists it); the
+ * needs-review statuses have their own view. needs_rework is the inspector's
+ * "come back to this"; it IS in progress, and the dashboard counts it so
+ * (ADR 0033 §1).
+ */
+const NOT_IN_PROGRESS_STATUSES = new Set([
+  "rejected",
+  "archived",
+  "drafting",
+  ...NEEDS_REVIEW_STATUSES,
+]);
+
+/** The queue views that are not one stored status, by what they match. */
+const QUEUE_VIEWS = {
+  needs_review: (status) => NEEDS_REVIEW_STATUSES.has(status),
+  ready_to_publish: (status, item) =>
+    READY_STATUSES.has(status) && item.Live !== true,
+  published_live: (_status, item) => item.Live === true,
+  in_progress: (status, item) =>
+    !NOT_IN_PROGRESS_STATUSES.has(status) && item.Live !== true,
+};
+
 export function matchesQueueStatus(item = {}, statusFilter = "needs_review") {
   const status = String(item.contentStatus || "ingested");
-  if (statusFilter === "needs_review") {
-    return (
-      status === "draft" || status === "ingested" || status === "inspected"
-    );
-  }
-  if (statusFilter === "ready_to_publish") {
-    return (
-      ["approved", "forge_ready", "published"].includes(status) &&
-      item.Live !== true
-    );
-  }
-  if (statusFilter === "published_live") {
-    return item.Live === true;
-  }
-  if (statusFilter === "in_progress") {
-    if (status === "rejected" || status === "archived") return false;
-    // The Drafts stage is not the pipeline yet (/admin/drafts lists it).
-    if (status === "drafting") return false;
-    if (item.Live === true) return false;
-    // needs_rework is the inspector's "come back to this"; it is in progress,
-    // and the dashboard counts it so (ADR 0033 §1).
-    if (status === "draft" || status === "ingested" || status === "inspected")
-      return false;
-    return true;
-  }
-  return status === statusFilter;
+  const view = Object.hasOwn(QUEUE_VIEWS, statusFilter)
+    ? QUEUE_VIEWS[statusFilter]
+    : null;
+  return view ? view(status, item) : status === statusFilter;
 }
 
 export const DASHBOARD_STATS_TYPES = [
@@ -264,17 +268,10 @@ export function queueFilterFor(statusFilter) {
 
 const sortDescBy = (field) => (a, b) => toMillis(b[field]) - toMillis(a[field]);
 
-/**
- * @param {object} deps
- * @param {{ requireRole: Function }} deps.guard
- * @param {{ queryDocs: Function, readDoc: Function, upsertDoc: Function }} deps.store
- * @param {() => Date} [deps.now]
- */
-export function createAdminSnapshotHandlers({
-  guard,
-  store,
-  now = () => new Date(),
-}) {
+const FULL_SCAN_TOP = 5000; // content is ~1k docs; bounded, not unbounded
+
+/** The content reads the four snapshots share, over one store. */
+function createSnapshotReads(store) {
   const countWhere = async (where, params) => {
     const rows = await store.queryDocs(
       "content",
@@ -294,17 +291,13 @@ export function createAdminSnapshotHandlers({
   async function recentNeedsReviewItems(limit = 10) {
     const { where, params } = queueFilterFor("needs_review");
     const rows = await fetchProjected(where, params, limit * 3);
+    const freshest = (item) =>
+      toMillis(item.fetchedAt || item.updatedAt || item.createdAt);
     return rows
       .filter((item) => !isBlockedContentSource(item))
-      .sort((a, b) => {
-        const aMs = toMillis(a.fetchedAt || a.updatedAt || a.createdAt);
-        const bMs = toMillis(b.fetchedAt || b.updatedAt || b.createdAt);
-        return bMs - aMs;
-      })
+      .sort((a, b) => freshest(b) - freshest(a))
       .slice(0, limit);
   }
-
-  const FULL_SCAN_TOP = 5000; // content is ~1k docs; bounded, not unbounded
 
   async function fullScanStats() {
     const rows = await store.queryDocs(
@@ -315,15 +308,140 @@ export function createAdminSnapshotHandlers({
     return { items: rows, stats: summarizeDashboardItems(rows) };
   }
 
-  const seedFromStats = (stats, totalDocs) => {
-    const seed = emptyDashboardStats();
-    seed.rejected = stats.rejected;
-    DASHBOARD_STATS_TYPES.forEach((t) => {
-      if (stats[t]) seed[t] = { ...stats[t] };
-    });
-    seed.totalDocs = totalDocs;
-    return seed;
+  return { countWhere, fetchProjected, recentNeedsReviewItems, fullScanStats };
+}
+
+const seedFromStats = (stats, totalDocs) => {
+  const seed = emptyDashboardStats();
+  seed.rejected = stats.rejected;
+  DASHBOARD_STATS_TYPES.forEach((t) => {
+    if (stats[t]) seed[t] = { ...stats[t] };
+  });
+  seed.totalDocs = totalDocs;
+  return seed;
+};
+
+const isTaxonomyFiltered = ({ kindFilter, ideaOriginFilter }) =>
+  (kindFilter && kindFilter !== "all") ||
+  (ideaOriginFilter && ideaOriginFilter !== "all");
+
+/**
+ * The narrowing a queue view still needs after its Cosmos window: the
+ * checks that are derived from fallback fields and cannot be a WHERE clause.
+ */
+function queueItemFilters({
+  statusFilter,
+  contentTypeFilter,
+  kindFilter,
+  ideaOriginFilter,
+}) {
+  const filters = [(item) => !isBlockedContentSource(item)];
+  if (statusFilter === "ready_to_publish" || statusFilter === "in_progress") {
+    filters.push((item) => matchesQueueStatus(item, statusFilter));
+  } else if (statusFilter === "rejected") {
+    filters.push((item) => !item.softDeletedAt);
+  } else if (statusFilter === "soft_deleted") {
+    filters.push((item) => Boolean(item.softDeletedAt));
+  }
+  if (contentTypeFilter !== "all") {
+    filters.push((item) => matchesAdminContentType(item, contentTypeFilter));
+  }
+  if (isTaxonomyFiltered({ kindFilter, ideaOriginFilter })) {
+    filters.push((item) =>
+      matchesTaxonomyFilter(item, { kindFilter, ideaOriginFilter }),
+    );
+  }
+  return filters;
+}
+
+/** POST getQueueSnapshot's body as its answer (source :6300). */
+async function buildQueueSnapshot({ reads, now }, body) {
+  const {
+    statusFilter = "needs_review",
+    contentTypeFilter = "all",
+    kindFilter = "all",
+    ideaOriginFilter = "all",
+    itemLimit = 100,
+  } = body;
+  // 1000 cap supports the queue's "All" view (content queue runs 200+).
+  const normalizedLimit = Math.min(Math.max(Number(itemLimit) || 100, 1), 1000);
+  // Content-type and taxonomy filtering happen in JS (derived from fallback
+  // fields); fetch a 3x buffer to survive the discard, as the source did.
+  const narrowedInJs =
+    contentTypeFilter !== "all" ||
+    isTaxonomyFiltered({ kindFilter, ideaOriginFilter });
+  const fetchSize = narrowedInJs ? normalizedLimit * 3 : normalizedLimit;
+
+  const { where, params, sortField } = queueFilterFor(statusFilter);
+  const [totalCount, rawItems] = await Promise.all([
+    reads.countWhere(where, params),
+    reads.fetchProjected(where, params, fetchSize),
+  ]);
+
+  const blockedInPage = rawItems.filter(isBlockedContentSource).length;
+  const filters = queueItemFilters({
+    statusFilter,
+    contentTypeFilter,
+    kindFilter,
+    ideaOriginFilter,
+  });
+  const items = rawItems
+    .filter((item) => filters.every((keep) => keep(item)))
+    .sort(sortDescBy(sortField));
+
+  return {
+    success: true,
+    generatedAt: now().toISOString(),
+    totalCount: Math.max(0, totalCount - blockedInPage),
+    items: items.slice(0, normalizedLimit),
   };
+}
+
+/**
+ * The stored stats document projected to the shape summarizeDashboardItems
+ * returns, so the DashboardPage UI needs no changes.
+ */
+function projectStats(statsDoc) {
+  const stats = emptyDashboardStats();
+  delete stats.totalDocs;
+  delete stats.schemaVersion;
+  DASHBOARD_STATS_TYPES.forEach((t) => {
+    if (statsDoc[t]) stats[t] = { ...stats[t], ...statsDoc[t] };
+  });
+  stats.rejected = statsDoc.rejected || 0;
+  return stats;
+}
+
+/**
+ * Not yet seeded (first deploy): live aggregation plus a fire-and-forget
+ * seed so subsequent loads take the fast path.
+ */
+async function scanAndSeedStats({ store, reads, now }, context) {
+  const scan = await reads.fullScanStats();
+  const seed = seedFromStats(scan.stats, scan.items.length);
+  seed.id = DASHBOARD_STATS_DOC_ID;
+  seed.updatedAt = now().toISOString();
+  store
+    .upsertDoc("system", seed)
+    .catch((err) =>
+      context.warn?.("[dashboard-stats] seed write failed:", err?.message),
+    );
+  return scan.stats;
+}
+
+/**
+ * @param {object} deps
+ * @param {{ requireRole: Function }} deps.guard
+ * @param {{ queryDocs: Function, readDoc: Function, upsertDoc: Function }} deps.store
+ * @param {() => Date} [deps.now]
+ */
+export function createAdminSnapshotHandlers({
+  guard,
+  store,
+  now = () => new Date(),
+}) {
+  const reads = createSnapshotReads(store);
+  const ctx = { store, reads, now };
 
   return {
     /** POST /api/getQueueSnapshot — source :6300. */
@@ -333,70 +451,7 @@ export function createAdminSnapshotHandlers({
 
       try {
         const body = (await request.json().catch(() => null)) || {};
-        const {
-          statusFilter = "needs_review",
-          contentTypeFilter = "all",
-          kindFilter = "all",
-          ideaOriginFilter = "all",
-          itemLimit = 100,
-        } = body;
-        // 1000 cap supports the queue's "All" view (content queue runs 200+).
-        const normalizedLimit = Math.min(
-          Math.max(Number(itemLimit) || 100, 1),
-          1000,
-        );
-        // Content-type and taxonomy filtering happen in JS (derived from
-        // fallback fields); fetch a 3x buffer to survive the discard, as the
-        // source did.
-        const taxonomyFiltered =
-          (kindFilter && kindFilter !== "all") ||
-          (ideaOriginFilter && ideaOriginFilter !== "all");
-        const fetchSize =
-          contentTypeFilter === "all" && !taxonomyFiltered
-            ? normalizedLimit
-            : normalizedLimit * 3;
-
-        const { where, params, sortField } = queueFilterFor(statusFilter);
-        const [totalCount, rawItems] = await Promise.all([
-          countWhere(where, params),
-          fetchProjected(where, params, fetchSize),
-        ]);
-
-        const blockedInPage = rawItems.filter(isBlockedContentSource).length;
-        let items = rawItems.filter((item) => !isBlockedContentSource(item));
-
-        if (
-          statusFilter === "ready_to_publish" ||
-          statusFilter === "in_progress"
-        ) {
-          items = items.filter((item) =>
-            matchesQueueStatus(item, statusFilter),
-          );
-        } else if (statusFilter === "rejected") {
-          items = items.filter((item) => !item.softDeletedAt);
-        } else if (statusFilter === "soft_deleted") {
-          items = items.filter((item) => Boolean(item.softDeletedAt));
-        }
-
-        if (contentTypeFilter !== "all") {
-          items = items.filter((item) =>
-            matchesAdminContentType(item, contentTypeFilter),
-          );
-        }
-        if (taxonomyFiltered) {
-          items = items.filter((item) =>
-            matchesTaxonomyFilter(item, { kindFilter, ideaOriginFilter }),
-          );
-        }
-
-        items.sort(sortDescBy(sortField));
-
-        return json(200, {
-          success: true,
-          generatedAt: now().toISOString(),
-          totalCount: Math.max(0, totalCount - blockedInPage),
-          items: items.slice(0, normalizedLimit),
-        });
+        return json(200, await buildQueueSnapshot(ctx, body));
       } catch (error) {
         context.error("getQueueSnapshot failed:", error);
         return json(500, {
@@ -418,10 +473,10 @@ export function createAdminSnapshotHandlers({
 
         const [readyTotal, readyRows, publishedTotal, publishedRows] =
           await Promise.all([
-            countWhere(ready.where, ready.params),
-            fetchProjected(ready.where, ready.params, 150),
-            countWhere(publishedWhere, []),
-            fetchProjected(publishedWhere, [], 100),
+            reads.countWhere(ready.where, ready.params),
+            reads.fetchProjected(ready.where, ready.params, 150),
+            reads.countWhere(publishedWhere, []),
+            reads.fetchProjected(publishedWhere, [], 100),
           ]);
 
         const readyCandidates = readyRows
@@ -461,37 +516,11 @@ export function createAdminSnapshotHandlers({
             DASHBOARD_STATS_DOC_ID,
             DASHBOARD_STATS_DOC_ID,
           ),
-          recentNeedsReviewItems(10),
+          reads.recentNeedsReviewItems(10),
         ]);
-
-        let stats;
-        if (statsDoc) {
-          // Project to the shape summarizeDashboardItems returned so the
-          // DashboardPage UI needs no changes.
-          stats = emptyDashboardStats();
-          delete stats.totalDocs;
-          delete stats.schemaVersion;
-          DASHBOARD_STATS_TYPES.forEach((t) => {
-            if (statsDoc[t]) stats[t] = { ...stats[t], ...statsDoc[t] };
-          });
-          stats.rejected = statsDoc.rejected || 0;
-        } else {
-          // Not yet seeded (first deploy): live aggregation + fire-and-forget
-          // seed so subsequent loads take the fast path.
-          const scan = await fullScanStats();
-          stats = scan.stats;
-          const seed = seedFromStats(stats, scan.items.length);
-          seed.id = DASHBOARD_STATS_DOC_ID;
-          seed.updatedAt = now().toISOString();
-          store
-            .upsertDoc("system", seed)
-            .catch((err) =>
-              context.warn?.(
-                "[dashboard-stats] seed write failed:",
-                err?.message,
-              ),
-            );
-        }
+        const stats = statsDoc
+          ? projectStats(statsDoc)
+          : await scanAndSeedStats(ctx, context);
 
         return json(200, {
           success: true,
@@ -515,7 +544,7 @@ export function createAdminSnapshotHandlers({
 
       try {
         const { user } = auth;
-        const scan = await fullScanStats();
+        const scan = await reads.fullScanStats();
         const seed = seedFromStats(scan.stats, scan.items.length);
         seed.id = DASHBOARD_STATS_DOC_ID;
         const nowIso = now().toISOString();

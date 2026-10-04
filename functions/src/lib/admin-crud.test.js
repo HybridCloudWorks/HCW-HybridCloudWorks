@@ -5,7 +5,13 @@
  * newest-first list, createdAt stamp on create).
  */
 import { describe, it, expect, vi } from 'vitest';
-import { createAdminCrudHandlers, isCertImagePath, validateCertification } from './admin-crud.js';
+import {
+  createAdminCrudHandlers,
+  isCertImagePath,
+  socialPostEditRefusal,
+  validateCertification,
+  validateSocialPostPatch,
+} from './admin-crud.js';
 
 const context = { log: vi.fn(), error: vi.fn() };
 
@@ -411,5 +417,39 @@ describe('social posts: patch (ADR 0033 Amplify slice)', () => {
     });
     const res = JSON.parse((await patch(store, { caption: 'x' })).body);
     expect(res.publer.push).toBe('next-sync');
+  });
+});
+
+describe('social posts: the patch validator and the edit refusal (ADR 0033 Amplify slice)', () => {
+  const nowMs = Date.parse('2026-09-01T00:00:00.000Z');
+
+  it('cleans each editable field and names the first bad one', () => {
+    expect(
+      validateSocialPostPatch(
+        { caption: '  hi  ', url: null, scheduledAt: '2026-09-02T09:00:00Z' },
+        nowMs
+      )
+    ).toEqual({
+      updates: { caption: 'hi', url: null, scheduledAt: '2026-09-02T09:00:00.000Z' },
+    });
+    expect(validateSocialPostPatch({ caption: '' }, nowMs).error).toMatch(/caption must be 1 to/);
+    expect(validateSocialPostPatch({ url: 'ftp://x' }, nowMs).error).toBe(
+      'url must be absolute http(s)'
+    );
+    expect(validateSocialPostPatch({ scheduledAt: 'soon' }, nowMs).error).toBe(
+      'scheduledAt must be an ISO instant'
+    );
+    expect(validateSocialPostPatch({ caption: 'x', status: 'y' }, nowMs).error).toBe(
+      'Unknown field(s): status'
+    );
+  });
+
+  it('refuses edits to a published post and reschedules only a scheduled one', () => {
+    expect(socialPostEditRefusal({ status: 'published' }, { caption: 'x' })).toMatch(/published/);
+    expect(socialPostEditRefusal({ status: 'draft' }, { scheduledAt: 'x' })).toMatch(
+      /this one is draft/
+    );
+    expect(socialPostEditRefusal({ status: 'draft' }, { caption: 'x' })).toBeNull();
+    expect(socialPostEditRefusal({ status: 'scheduled' }, { scheduledAt: 'x' })).toBeNull();
   });
 });

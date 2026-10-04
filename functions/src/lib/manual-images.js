@@ -45,6 +45,19 @@ import { fetchImage as defaultFetchImage } from './triggers/fetch-image.js';
 export const TRIGGER_MAX_CONTENT_IDS = 25;
 export const PREVIEW_SLOTS = ['hero', 'secondary1', 'secondary2', 'secondary3'];
 
+/**
+ * Why a sample cannot be generated, as the response to send, or null when it
+ * can (PR #841). Checked in the order the page can act on: name the set,
+ * configure the key, then the set itself.
+ */
+function sampleRefusal(setName, configured, set) {
+  if (!setName) return json(400, { error: 'setName required' });
+  if (!configured) return json(503, { error: 'REPLICATE_API_KEY is not configured' });
+  if (!set) return json(404, { error: `Prompt set "${setName}" not found` });
+  if (set.archivedAt) return json(409, { error: `Prompt set "${setName}" is archived` });
+  return null;
+}
+
 const json = (status, body) => ({
   status,
   headers: { 'Content-Type': 'application/json' },
@@ -111,7 +124,8 @@ function modelInfo(replicate) {
   return {
     imageProvider: replicate?.provider || 'replicate',
     imageModel: replicate?.model || '',
-    costPerImageUsd: typeof replicate?.costPerImageUsd === 'number' ? replicate.costPerImageUsd : null,
+    costPerImageUsd:
+      typeof replicate?.costPerImageUsd === 'number' ? replicate.costPerImageUsd : null,
   };
 }
 
@@ -274,7 +288,9 @@ export function createManualImageHandlers({
         keywordLines,
       });
       const { set, prompt: promptDoc } = await readNamedSet(body.promptSet, body.promptName);
-      const generated = await replicate.generate(prompt, { aspectRatio: set?.aspectRatio || undefined });
+      const generated = await replicate.generate(prompt, {
+        aspectRatio: set?.aspectRatio || undefined,
+      });
       const fetched = await fetchImage(generated);
       // Not an image: fail the request rather than store it (#415). The outer
       // catch turns this into the 500 the editor already sees for a generation
@@ -350,7 +366,9 @@ export function createManualImageHandlers({
         .filter((slot) => PREVIEW_SLOTS.includes(slot));
       if (!articleId) return json(400, { error: 'articleId required' });
       if (!slots.length) {
-        return json(400, { error: `aiImageTargets must name at least one of ${PREVIEW_SLOTS.join(', ')}` });
+        return json(400, {
+          error: `aiImageTargets must name at least one of ${PREVIEW_SLOTS.join(', ')}`,
+        });
       }
       if (!replicate.configured) {
         return json(503, { error: 'REPLICATE_API_KEY is not configured' });
@@ -426,7 +444,13 @@ export function createManualImageHandlers({
         imageRecords[slot] = { imageId, imageUrl };
         promptLogs[slot] = prompt;
       }
-      return json(200, { success: true, imageUrls, imageRecords, promptLogs, ...modelInfo(replicate) });
+      return json(200, {
+        success: true,
+        imageUrls,
+        imageRecords,
+        promptLogs,
+        ...modelInfo(replicate),
+      });
     } catch (error) {
       context.error('generatePreviewImages failed:', error);
       return json(500, {
@@ -449,14 +473,12 @@ export function createManualImageHandlers({
     try {
       const body = (await request.json().catch(() => null)) || {};
       const setName = normalizePromptConfigKey(body.setName);
-      if (!setName) return json(400, { error: 'setName required' });
       const slot = PREVIEW_SLOTS.includes(String(body.slot || '')) ? String(body.slot) : 'hero';
-      if (!replicate.configured) {
-        return json(503, { error: 'REPLICATE_API_KEY is not configured' });
-      }
-      const { set, prompt: promptDoc } = await readNamedSet(setName, body.promptName);
-      if (!set) return json(404, { error: `Prompt set "${setName}" not found` });
-      if (set.archivedAt) return json(409, { error: `Prompt set "${setName}" is archived` });
+      const named =
+        setName && replicate.configured ? await readNamedSet(setName, body.promptName) : {};
+      const refusal = sampleRefusal(setName, replicate.configured, named.set);
+      if (refusal) return refusal;
+      const { set, prompt: promptDoc } = named;
 
       const article = {
         title: String(body.title || '').trim() || `${setName} sample`,
@@ -465,7 +487,9 @@ export function createManualImageHandlers({
       };
       const keyword = await loadKeywordMatrix(store, context);
       const prompt = composeSetPrompt({ set, prompt: promptDoc, slot, article, keyword });
-      const generated = await replicate.generate(prompt, { aspectRatio: set.aspectRatio || undefined });
+      const generated = await replicate.generate(prompt, {
+        aspectRatio: set.aspectRatio || undefined,
+      });
       const fetched = await fetchImage(generated);
       if (fetched.refused) throw new Error(`Generated sample refused: ${fetched.reason}`);
       const { buffer, contentType } = fetched;
@@ -500,7 +524,13 @@ export function createManualImageHandlers({
           contentType,
           blobPath,
           replicate,
-          lineage: lineageFor({ set, prompt: promptDoc, promptText: prompt, slot, source: 'sample' }),
+          lineage: lineageFor({
+            set,
+            prompt: promptDoc,
+            promptText: prompt,
+            slot,
+            source: 'sample',
+          }),
         }),
       });
       return json(200, {
@@ -531,6 +561,12 @@ export function createManualImageHandlers({
 
 function cleanTagsOf(tags) {
   return Array.isArray(tags)
-    ? tags.map((t) => String(t || '').trim().toLowerCase()).filter(Boolean)
+    ? tags
+        .map((t) =>
+          String(t || '')
+            .trim()
+            .toLowerCase()
+        )
+        .filter(Boolean)
     : [];
 }

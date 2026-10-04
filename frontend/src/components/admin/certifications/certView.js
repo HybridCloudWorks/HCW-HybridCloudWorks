@@ -16,6 +16,9 @@
 import { resolveMediaUrl } from '@/lib/functionsBase';
 import { daysUntil, isIsoDate, todayIso } from '@/lib/certStatus';
 
+/** The editor's validation is certValidation.js; re-exported so every tab imports from one place. */
+export { validateCertForm } from './certValidation';
+
 export const COLLECTION = 'certifications';
 
 /** The stats strip's "Expiring 90d" and the card's Expiring badge. */
@@ -53,16 +56,21 @@ export const resolveImage = (cert) => resolveImages(cert)[0] || '';
  * as UTC midnight of the day meant). Empty for nothing usable.
  */
 export const toIso = (val) => {
-  if (!val) return '';
   if (typeof val === 'string') {
     const head = val.trim().slice(0, 10);
     return /^\d{4}-\d{2}-\d{2}$/.test(head) ? head : '';
   }
-  if (val instanceof Date) return Number.isNaN(val.getTime()) ? '' : val.toISOString().slice(0, 10);
-  if (val?.toDate) return val.toDate().toISOString().slice(0, 10);
-  if (val?.seconds) return new Date(val.seconds * 1000).toISOString().slice(0, 10);
-  return '';
+  const date = asDate(val);
+  return date && !Number.isNaN(date.getTime()) ? date.toISOString().slice(0, 10) : '';
 };
+
+/** A Date from a Date, a Firestore Timestamp or a `{ seconds }` shape; null for anything else. */
+function asDate(val) {
+  if (val instanceof Date) return val;
+  if (val?.toDate) return val.toDate();
+  if (val?.seconds) return new Date(val.seconds * 1000);
+  return null;
+}
 
 /** What a save writes for a date input: the plain day, or null for none. */
 export const fromIso = (s) => (s && isIsoDate(s) ? s : null);
@@ -198,50 +206,6 @@ export function verificationCounts(items) {
     },
     { credly: 0, link: 0, none: 0 }
   );
-}
-
-const isHttpUrl = (value) => /^https?:\/\/\S+$/i.test(String(value || '').trim());
-const isImageRef = (value) => isHttpUrl(value) || /^\/\S+$/.test(String(value || '').trim());
-
-/**
- * The editor's validation, as `{ field: message }` — empty when the form can
- * be saved. The same rules the API enforces (functions/src/lib/admin-crud.js
- * `validateCertification`), stated here so a refusal is shown beside the
- * field rather than as a toast after the round trip.
- */
-export function validateCertForm(form) {
-  const errors = {};
-  if (!String(form.name ?? '').trim()) errors.name = 'Name is required.';
-  if (form.issueDate && !isIsoDate(form.issueDate)) errors.issueDate = 'Enter a real date.';
-  if (form.expDate && !isIsoDate(form.expDate)) errors.expDate = 'Enter a real date.';
-  if (form.renewalDate && !isIsoDate(form.renewalDate)) errors.renewalDate = 'Enter a real date.';
-  if (!errors.expDate && form.issueDate && form.expDate && form.expDate < form.issueDate) {
-    errors.expDate = 'Expiration must be on or after the issue date.';
-  }
-  for (const key of ['verifyUrl', 'learnUrl']) {
-    if (String(form[key] || '').trim() && !isHttpUrl(form[key])) {
-      errors[key] = 'Must start with http:// or https://.';
-    }
-  }
-  if (String(form.imageUrl || '').trim() && !isImageRef(form.imageUrl)) {
-    errors.imageUrl = 'Must be an http(s) URL or an uploaded image path.';
-  }
-  const order = form.display_order;
-  if (order !== '' && order !== null && order !== undefined) {
-    const n = Number(order);
-    if (!Number.isInteger(n) || n < 0) errors.display_order = 'A whole number, 0 or more.';
-  }
-  (form.evidence || []).forEach((row, index) => {
-    if (String(row.url || '').trim() && !isHttpUrl(row.url)) {
-      errors[`evidence.${index}`] = 'Must start with http:// or https://.';
-    }
-  });
-  (form.relatedLearning || []).forEach((row, index) => {
-    if (String(row.url || '').trim() && !isHttpUrl(row.url)) {
-      errors[`relatedLearning.${index}`] = 'Must start with http:// or https://.';
-    }
-  });
-  return errors;
 }
 
 /**

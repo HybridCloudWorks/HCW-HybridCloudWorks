@@ -45,6 +45,7 @@
  *                            moved it to forge_ready or editing
  */
 import { ADMIN_CONFIG_PARTITION } from '../cosmos-client.js';
+import { actorName as nameActor } from '../auth/actor-name.js';
 import { ARTICLE_CLOSE, ARTICLE_OPEN, fenceArticleText } from '../ai/prompt-fence.js';
 import { AFTER_MODEL_MARGIN_MS } from '../ai/time-budget.js';
 import { normalizeProfile, normalizePrompts } from './forge-config.js';
@@ -59,8 +60,7 @@ const json = (status, body) => ({
 /** The only fields an update may carry, per document. Anything else in the
  * request body is dropped, not stored — the difference between a whitelist
  * and a denylist is what happens to the field nobody thought of. */
-const actorName = (user) =>
-  user?.email || user?.preferred_username || user?.oid || user?.sub || 'editor';
+const actorName = (user) => nameActor(user, 'editor');
 
 const PROFILE_FIELDS = ['certifications', 'speakingTopics', 'interestAreas', 'wordSoup'];
 const PROMPT_FIELDS = [
@@ -319,17 +319,23 @@ export function normalizeBrief(raw = {}) {
   };
 }
 
+/** The brief fields a drafter could work from; a list counts when it has entries. */
+const SUBSTANCE_FIELDS = [
+  'objective',
+  'keyMessage',
+  'audience',
+  'requiredTopics',
+  'sources',
+  'sourceContentId',
+  'sourceUrl',
+];
+
 /** Does the brief carry anything a drafter could work from? */
 export function briefHasSubstance(brief) {
-  return Boolean(
-    brief.objective ||
-    brief.keyMessage ||
-    brief.audience ||
-    brief.requiredTopics.length ||
-    brief.sources.length ||
-    brief.sourceContentId ||
-    brief.sourceUrl
-  );
+  return SUBSTANCE_FIELDS.some((key) => {
+    const value = brief[key];
+    return Array.isArray(value) ? value.length > 0 : Boolean(value);
+  });
 }
 
 /**
@@ -517,253 +523,281 @@ export function createForgeWorkspaceHandlers({
   now = () => new Date(),
   uuid = () => crypto.randomUUID(),
 }) {
-  const readContent = (id) => store.readDoc('content', id, id);
-
-  async function recordActivity(doc, entry) {
-    const activity = appendActivity(doc.activity, entry);
-    await store.patchDoc('content', doc.id, { activity });
-    return activity;
-  }
-
-  async function loadTarget(body) {
-    const contentId = String(body?.contentId || '').trim();
-    if (!SAFE_ID.test(contentId))
-      return { error: json(400, { ok: false, error: 'contentId required' }) };
-    const doc = await readContent(contentId);
-    const refusal = workspaceWriteRefusal(doc);
-    if (refusal)
-      return {
-        error: json(refusal.status, { ok: false, error: refusal.error }),
-      };
-    return { contentId, doc };
-  }
-
-  /** POST cms/forge/brief — { contentId, brief, kind, ideaOrigin } */
-  async function saveBrief(request, context) {
+  const ctx = { store, ai, now, uuid };
+  /** Editor role first, then the JSON body (null when unreadable), then the route. */
+  const editorRoute = (route) => async (request, context) => {
     const auth = await guard.requireRole(request, 'editor');
     if (auth.error) return auth.error;
     const body = await request.json().catch(() => null);
-    const target = await loadTarget(body);
-    if (target.error) return target.error;
+    return route(ctx, body, auth, context);
+  };
+  return {
+    saveBrief: editorRoute(saveBrief),
+    assist: editorRoute(assist),
+    save: editorRoute(save),
+  };
+}
 
-    const brief = normalizeBrief(body?.brief);
-    if (!briefHasSubstance(brief)) {
-      return json(400, {
-        ok: false,
-        error: 'The brief needs an objective, a key message, an audience, a topic or a source.',
-      });
-    }
-    const kind = text(body?.kind, 60);
-    const ideaOrigin = text(body?.ideaOrigin, 60);
-    const stamp = now().toISOString();
-    const actor = actorName(auth.user);
-    try {
-      const update = {
-        forgeBrief: { ...brief, savedAt: stamp, savedBy: actor },
-        type: brief.targetChannel,
-        publishTarget: brief.targetChannel,
-        ...(kind ? { kind } : {}),
-        ...(ideaOrigin ? { ideaOrigin } : {}),
-        activity: appendActivity(
-          target.doc.activity,
-          activityEntry({ at: stamp, actor, action: 'forge_brief_saved' })
-        ),
-        updatedAt: stamp,
-        updatedBy: actor,
-      };
-      const written = await store.patchDoc('content', target.contentId, update);
-      return json(200, {
-        ok: true,
-        contentId: target.contentId,
-        brief: update.forgeBrief,
-        kind: kind || target.doc.kind || null,
-        ideaOrigin: ideaOrigin || target.doc.ideaOrigin || null,
-        etag: written?._etag || null,
-      });
-    } catch (error) {
-      context?.error?.(`[forge/brief] ${error?.message || error}`);
-      return json(502, { ok: false, error: String(error?.message || error) });
-    }
-  }
+/** A step that cannot go on, carrying the response to send instead. */
+const refuse = (status, body) => ({ error: json(status, body) });
 
-  /** POST cms/forge/assist — { contentId, action, text, instruction?, tone? } */
-  async function assist(request, context) {
-    const auth = await guard.requireRole(request, 'editor');
-    if (auth.error) return auth.error;
-    const body = await request.json().catch(() => null);
-    const action = String(body?.action || '').trim();
-    if (!ASSIST_ACTION_NAMES.includes(action)) {
-      return json(400, {
-        ok: false,
-        error: `action must be one of ${ASSIST_ACTION_NAMES.join(', ')}`,
-      });
-    }
-    const draft = String(body?.text || '');
-    if (!draft.trim()) return json(400, { ok: false, error: 'text is required' });
-    if (draft.length > MAX_ASSIST_TEXT_CHARS) {
-      return json(400, {
-        ok: false,
-        error: `text is over ${MAX_ASSIST_TEXT_CHARS} characters; select a section instead`,
-      });
-    }
-    const target = await loadTarget(body);
-    if (target.error) return target.error;
+/** The content document a workspace write targets, or the refusal to answer with. */
+async function loadTarget(store, body) {
+  const contentId = String(body?.contentId || '').trim();
+  if (!SAFE_ID.test(contentId)) return refuse(400, { ok: false, error: 'contentId required' });
+  const doc = await store.readDoc('content', contentId, contentId);
+  const refusal = workspaceWriteRefusal(doc);
+  if (refusal) return refuse(refusal.status, { ok: false, error: refusal.error });
+  return { contentId, doc };
+}
 
-    const spec = ASSIST_ACTIONS[action];
-    const prompt = buildAssistPrompt(action, {
-      text: draft,
-      instruction: body?.instruction,
-      tone: body?.tone,
-    });
-    const usageOut = [];
-    let result;
-    try {
-      // One call to the router per action (ADR 0033): the chain, the model
-      // and the usage row are the router's; `forgeAssist` is the feature
-      // switch and the route the AI Engine page shows for it.
-      if (spec.json) {
-        result = await ai.generateJsonResponse({
-          prompt,
-          purpose: spec.purpose,
-          feature: 'forgeAssist',
-          usageOut,
-          budgetMs: FORGE_ASSIST_AI_BUDGET_MS,
-        });
-      } else {
-        const answer = await ai.generateTextResponse({
-          prompt,
-          purpose: spec.purpose,
-          feature: 'forgeAssist',
-          usageOut,
-          budgetMs: FORGE_ASSIST_AI_BUDGET_MS,
-        });
-        result = { text: String(answer || '').trim() };
-      }
-    } catch (error) {
-      context?.error?.(`[forge/assist] ${action}: ${error?.message || error}`);
-      const status = error?.code === 'AI_FEATURE_DISABLED' ? 409 : 502;
-      return json(status, {
-        ok: false,
-        error: String(error?.message || error),
-        code: error?.code || null,
-      });
-    }
+async function recordActivity(store, doc, entry) {
+  const activity = appendActivity(doc.activity, entry);
+  await store.patchDoc('content', doc.id, { activity });
+  return activity;
+}
 
-    const served = usageOut.at(-1) || {};
-    const stamp = now().toISOString();
-    const entry = activityEntry({
-      at: stamp,
-      actor: actorName(auth.user),
-      action: 'forge_assist',
-      provider: served.provider || null,
-      model: served.model || null,
-      details: { assist: action, chars: draft.length },
-    });
-    // Recording is part of the answer: AI-written text must be identifiable
-    // afterwards, so a failure here is reported rather than swallowed.
-    try {
-      await recordActivity(target.doc, entry);
-    } catch (error) {
-      context?.error?.(`[forge/assist] activity write failed: ${error?.message || error}`);
-      return json(502, {
-        ok: false,
-        error: 'The model answered but the activity record could not be written; nothing was kept.',
-      });
-    }
-    return json(200, {
-      ok: true,
-      action,
-      label: spec.label,
-      result,
-      provider: served.provider || null,
-      model: served.model || null,
-      activity: entry,
+/** POST cms/forge/brief — { contentId, brief, kind, ideaOrigin } */
+async function saveBrief(ctx, body, auth, context) {
+  const target = await loadTarget(ctx.store, body);
+  if (target.error) return target.error;
+
+  const brief = normalizeBrief(body?.brief);
+  if (!briefHasSubstance(brief)) {
+    return json(400, {
+      ok: false,
+      error: 'The brief needs an objective, a key message, an audience, a topic or a source.',
     });
   }
-
-  /** POST cms/forge/save — { contentId, etag, title?, summary?, body? } */
-  async function save(request, context) {
-    const auth = await guard.requireRole(request, 'editor');
-    if (auth.error) return auth.error;
-    const body = await request.json().catch(() => null);
-    const target = await loadTarget(body);
-    if (target.error) return target.error;
-    const etag = String(body?.etag || '');
-    if (!etag) {
-      return json(400, {
-        ok: false,
-        code: 'ETAG_REQUIRED',
-        error:
-          'etag is required: send the etag of the version you are looking at (reload the draft).',
-      });
-    }
-    const title = text(body?.title, 300);
-    const summary = text(body?.summary, 2000);
-    const markdown = String(body?.body ?? '');
-    if (markdown.length > MAX_SAVE_BODY_CHARS) {
-      return json(400, {
-        ok: false,
-        error: `body is over ${MAX_SAVE_BODY_CHARS} characters`,
-      });
-    }
-    const stamp = now().toISOString();
-    const actor = actorName(auth.user);
+  const kind = text(body?.kind, 60);
+  const ideaOrigin = text(body?.ideaOrigin, 60);
+  const stamp = ctx.now().toISOString();
+  const actor = actorName(auth.user);
+  try {
     const update = {
-      ...(title ? { Title: title } : {}),
-      ...(body?.summary !== undefined ? { Summary: summary } : {}),
-      ...(body?.body !== undefined ? { content: markdown, blogDraft: markdown } : {}),
+      forgeBrief: { ...brief, savedAt: stamp, savedBy: actor },
+      type: brief.targetChannel,
+      publishTarget: brief.targetChannel,
+      ...(kind ? { kind } : {}),
+      ...(ideaOrigin ? { ideaOrigin } : {}),
       activity: appendActivity(
         target.doc.activity,
-        activityEntry({ at: stamp, actor, action: 'forge_studio_saved' })
+        activityEntry({ at: stamp, actor, action: 'forge_brief_saved' })
       ),
       updatedAt: stamp,
       updatedBy: actor,
     };
-    let written;
-    try {
-      written = await store.patchDoc('content', target.contentId, update, {
-        ifMatch: etag,
-      });
-    } catch (error) {
-      if (error?.code === 412) {
-        return json(412, {
-          ok: false,
-          code: 'CONFLICT',
-          error:
-            'This draft changed in another tab or on another device since you opened it. Nothing was saved; reload it to see the latest version.',
-        });
-      }
-      context?.error?.(`[forge/save] ${error?.message || error}`);
-      return json(502, { ok: false, error: String(error?.message || error) });
-    }
-    // The version row every save writes (content_versions): best-effort, the
-    // save itself is already durable.
-    if (body?.body !== undefined) {
-      await store
-        .upsertDoc('content_versions', {
-          id: uuid(),
-          contentId: target.contentId,
-          title: title || target.doc.Title || target.doc.title || '',
-          summary: body?.summary !== undefined ? summary : target.doc.Summary || '',
-          draft: markdown,
-          versionCreatedAt: stamp,
-          versionCreatedBy: actor,
-          versionReason: 'forge_studio_saved',
-        })
-        .catch((error) => context?.error?.(`[forge/save] version row failed: ${error?.message}`));
-    }
+    const written = await ctx.store.patchDoc('content', target.contentId, update);
     return json(200, {
       ok: true,
       contentId: target.contentId,
+      brief: update.forgeBrief,
+      kind: kind || target.doc.kind || null,
+      ideaOrigin: ideaOrigin || target.doc.ideaOrigin || null,
       etag: written?._etag || null,
-      title: written?.Title ?? title,
-      summary: written?.Summary ?? summary,
-      contentStatus: written?.contentStatus || target.doc.contentStatus || null,
-      activity: update.activity,
+    });
+  } catch (error) {
+    context?.error?.(`[forge/brief] ${error?.message || error}`);
+    return json(502, { ok: false, error: String(error?.message || error) });
+  }
+}
+
+/** The action and draft text of an assist request, or the 400 refusing it. */
+function parseAssistRequest(body) {
+  const action = String(body?.action || '').trim();
+  if (!ASSIST_ACTION_NAMES.includes(action)) {
+    return refuse(400, {
+      ok: false,
+      error: `action must be one of ${ASSIST_ACTION_NAMES.join(', ')}`,
     });
   }
+  const draft = String(body?.text || '');
+  if (!draft.trim()) return refuse(400, { ok: false, error: 'text is required' });
+  if (draft.length > MAX_ASSIST_TEXT_CHARS) {
+    return refuse(400, {
+      ok: false,
+      error: `text is over ${MAX_ASSIST_TEXT_CHARS} characters; select a section instead`,
+    });
+  }
+  return { action, draft };
+}
 
-  return { saveBrief, assist, save };
+/**
+ * One call to the router per action (ADR 0033): the chain, the model and
+ * the usage row are the router's; `forgeAssist` is the feature switch and
+ * the route the AI Engine page shows for it. Answers `{ result, served }`,
+ * or the 409 (feature off) / 502 (provider failure) to send.
+ */
+async function runAssist(ai, { action, draft, body }, context) {
+  const spec = ASSIST_ACTIONS[action];
+  const usageOut = [];
+  const call = {
+    prompt: buildAssistPrompt(action, {
+      text: draft,
+      instruction: body?.instruction,
+      tone: body?.tone,
+    }),
+    purpose: spec.purpose,
+    usageOut,
+    budgetMs: FORGE_ASSIST_AI_BUDGET_MS,
+  };
+  // The feature is named at the call, not in `call`: ai-call-sites.test.js
+  // reads each generate call's arguments for the toggle it answers to.
+  try {
+    const result = spec.json
+      ? await ai.generateJsonResponse({ ...call, feature: 'forgeAssist' })
+      : {
+          text: String(
+            (await ai.generateTextResponse({ ...call, feature: 'forgeAssist' })) || ''
+          ).trim(),
+        };
+    return { result, served: usageOut.at(-1) || {} };
+  } catch (error) {
+    context?.error?.(`[forge/assist] ${action}: ${error?.message || error}`);
+    const status = error?.code === 'AI_FEATURE_DISABLED' ? 409 : 502;
+    return refuse(status, {
+      ok: false,
+      error: String(error?.message || error),
+      code: error?.code || null,
+    });
+  }
+}
+
+/** POST cms/forge/assist — { contentId, action, text, instruction?, tone? } */
+async function assist(ctx, body, auth, context) {
+  const parsed = parseAssistRequest(body);
+  if (parsed.error) return parsed.error;
+  const target = await loadTarget(ctx.store, body);
+  if (target.error) return target.error;
+
+  const { action, draft } = parsed;
+  const ran = await runAssist(ctx.ai, { action, draft, body }, context);
+  if (ran.error) return ran.error;
+  const { result, served } = ran;
+  const entry = activityEntry({
+    at: ctx.now().toISOString(),
+    actor: actorName(auth.user),
+    action: 'forge_assist',
+    provider: served.provider || null,
+    model: served.model || null,
+    details: { assist: action, chars: draft.length },
+  });
+  // Recording is part of the answer: AI-written text must be identifiable
+  // afterwards, so a failure here is reported rather than swallowed.
+  try {
+    await recordActivity(ctx.store, target.doc, entry);
+  } catch (error) {
+    context?.error?.(`[forge/assist] activity write failed: ${error?.message || error}`);
+    return json(502, {
+      ok: false,
+      error: 'The model answered but the activity record could not be written; nothing was kept.',
+    });
+  }
+  return json(200, {
+    ok: true,
+    action,
+    label: ASSIST_ACTIONS[action].label,
+    result,
+    provider: served.provider || null,
+    model: served.model || null,
+    activity: entry,
+  });
+}
+
+/** The ETag and the edited fields of a save, or the 400 refusing it. */
+function parseSaveRequest(body) {
+  const etag = String(body?.etag || '');
+  if (!etag) {
+    return refuse(400, {
+      ok: false,
+      code: 'ETAG_REQUIRED',
+      error:
+        'etag is required: send the etag of the version you are looking at (reload the draft).',
+    });
+  }
+  const markdown = String(body?.body ?? '');
+  if (markdown.length > MAX_SAVE_BODY_CHARS) {
+    return refuse(400, { ok: false, error: `body is over ${MAX_SAVE_BODY_CHARS} characters` });
+  }
+  return { etag, title: text(body?.title, 300), summary: text(body?.summary, 2000), markdown };
+}
+
+/** The fields a save writes: only what the body carried, plus the activity row. */
+function saveUpdate(body, { title, summary, markdown }, { stamp, actor, doc }) {
+  return {
+    ...(title ? { Title: title } : {}),
+    ...(body?.summary !== undefined ? { Summary: summary } : {}),
+    ...(body?.body !== undefined ? { content: markdown, blogDraft: markdown } : {}),
+    activity: appendActivity(
+      doc.activity,
+      activityEntry({ at: stamp, actor, action: 'forge_studio_saved' })
+    ),
+    updatedAt: stamp,
+    updatedBy: actor,
+  };
+}
+
+/** The patch under the ETag: `{ written }`, or the 412 CONFLICT / 502 to send. */
+async function patchUnderEtag(store, contentId, update, etag, context) {
+  try {
+    return { written: await store.patchDoc('content', contentId, update, { ifMatch: etag }) };
+  } catch (error) {
+    if (error?.code === 412) {
+      return refuse(412, {
+        ok: false,
+        code: 'CONFLICT',
+        error:
+          'This draft changed in another tab or on another device since you opened it. Nothing was saved; reload it to see the latest version.',
+      });
+    }
+    context?.error?.(`[forge/save] ${error?.message || error}`);
+    return refuse(502, { ok: false, error: String(error?.message || error) });
+  }
+}
+
+/**
+ * The version row every body save writes (content_versions): best-effort,
+ * the save itself is already durable.
+ */
+function writeVersionRow(ctx, { target, parsed, body, stamp, actor }, context) {
+  return ctx.store
+    .upsertDoc('content_versions', {
+      id: ctx.uuid(),
+      contentId: target.contentId,
+      title: parsed.title || target.doc.Title || target.doc.title || '',
+      summary: body?.summary !== undefined ? parsed.summary : target.doc.Summary || '',
+      draft: parsed.markdown,
+      versionCreatedAt: stamp,
+      versionCreatedBy: actor,
+      versionReason: 'forge_studio_saved',
+    })
+    .catch((error) => context?.error?.(`[forge/save] version row failed: ${error?.message}`));
+}
+
+/** POST cms/forge/save — { contentId, etag, title?, summary?, body? } */
+async function save(ctx, body, auth, context) {
+  const target = await loadTarget(ctx.store, body);
+  if (target.error) return target.error;
+  const parsed = parseSaveRequest(body);
+  if (parsed.error) return parsed.error;
+  const stamp = ctx.now().toISOString();
+  const actor = actorName(auth.user);
+  const update = saveUpdate(body, parsed, { stamp, actor, doc: target.doc });
+  const patched = await patchUnderEtag(ctx.store, target.contentId, update, parsed.etag, context);
+  if (patched.error) return patched.error;
+  if (body?.body !== undefined) {
+    await writeVersionRow(ctx, { target, parsed, body, stamp, actor }, context);
+  }
+  const { written } = patched;
+  return json(200, {
+    ok: true,
+    contentId: target.contentId,
+    etag: written?._etag || null,
+    title: written?.Title ?? parsed.title,
+    summary: written?.Summary ?? parsed.summary,
+    contentStatus: written?.contentStatus || target.doc.contentStatus || null,
+    activity: update.activity,
+  });
 }
 
 const CALIBRATION_PROMPT = `You are analysing a set of published articles by one author to help them tune an AI writing profile that must sound exactly like them. Study the writing itself: sentence rhythm, vocabulary, recurring analogies, opinions they keep returning to, how they open and close, what they never say.
@@ -836,9 +870,12 @@ export async function runVoiceCalibration(
     'SELECT TOP @n c.Title, c.blogDraft, c.content, c.Content, c.postContent FROM c WHERE c.Live = true ORDER BY c.publishedAt DESC',
     [{ name: '@n', value: postCount }]
   );
+  // The body under whichever field the pipeline wrote it, first one wins.
+  const bodyOf = (post) =>
+    String([post.blogDraft, post.content, post.Content, post.postContent].find(Boolean) || '');
   const bodies = (posts || [])
     .map((post) => {
-      const text = String(post.blogDraft || post.content || post.Content || post.postContent || '');
+      const text = bodyOf(post);
       return text ? `## ${post.Title || 'Untitled'}\n\n${text.slice(0, 6000)}` : '';
     })
     .filter(Boolean);
