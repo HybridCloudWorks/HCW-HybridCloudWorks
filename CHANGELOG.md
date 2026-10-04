@@ -2307,6 +2307,23 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **About page: a composition root over per-section modules (#842).**
+  `frontend/src/pages/shared/AboutPage.jsx` was one component with 70
+  return statements and a complexity of 130 under a file-wide
+  `eslint-disable complexity`, flagged by qlty on every PR that touched it.
+  It now arranges six modules under `pages/shared/about/`: the hero, the
+  speaking section, the certification registry (its four bodies as four
+  small components), the issuer group, the card and the badge modal, with
+  the data in `useCertifications.js` and every ordering rule in
+  `certificationSorting.js` as tables (`certificationSorting.test.js` pins
+  the orders the page always produced). The `eslint-disable` is gone; no
+  function in the touched files has more than five returns or a complexity
+  above 18. Behaviour unchanged: the prerendered `/about` is byte-identical
+  before and after (17,296 bytes, checked with a temporary render test), the
+  card's markup is byte-identical across every branch for a fixture set,
+  and the public-copy, accessibility and existing About tests pass
+  unchanged (4,069 frontend tests in all).
+
 - **AI router: the factory's closures are module-level functions over a
   context (#843).** `createAiRouter` in `functions/src/lib/ai/router.js` was
   one 780-line factory with 24 return statements and a complexity of 137,
