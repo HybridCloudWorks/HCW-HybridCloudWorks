@@ -107,7 +107,7 @@ import { ISSUE_ID_PATTERN, describeAiError, draftIntro, suggestSubjects } from '
 import { reconcileIssue, reconcileIssues, reconcilable, overdue } from './reconcile.js';
 import { renderIssue } from './render.js';
 import { resolveSendTime } from './schedule.js';
-import { applySectionEdit, normalizeManualItem } from './section-edit.js';
+import { applySectionEdit } from './section-edit.js';
 import { createIssueActions } from './issue-actions.js';
 import {
   changedElsewhere,
