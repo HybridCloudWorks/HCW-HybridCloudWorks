@@ -644,9 +644,15 @@ export function createFoundryTokenProvider({ getToken, now = () => Date.now() })
   };
 }
 
-/** Production's token source: @azure/identity, imported only when Foundry is first called. */
+/**
+ * Production's token source: @azure/identity, imported only when Foundry is
+ * first called. The specifier is a variable with `@vite-ignore` because the
+ * frontend's contract tests import this module through Vite, which would
+ * otherwise try to resolve a package only the Function App installs.
+ */
 async function defaultGetToken(scope) {
-  const { DefaultAzureCredential } = await import('@azure/identity');
+  const identity = '@azure/identity';
+  const { DefaultAzureCredential } = await import(/* @vite-ignore */ identity);
   return new DefaultAzureCredential().getToken(scope);
 }
 
