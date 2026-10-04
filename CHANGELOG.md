@@ -2307,6 +2307,18 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **NVIDIA's setup note and the seeding reference warn that a fresh key is
+  refused for a while (#701).** On 2026-10-04 a key seeded at 08:02 UTC got
+  `403 Authorization failed` from the app at 1, 12 and 13 minutes, the same
+  reply a made-up key gets, then passed from a workstation at about 23 minutes
+  and from the app at 37; a key seconds old passed at once from Azure Cloud
+  Shell. Four reseeds and a rotation were spent on a key that was never wrong.
+  The card's setup note and `docs/standards/required-inputs.md` now say to
+  Test again later before reseeding and to delete the previous key only after
+  the new one passes from the app. `notes` joins the seed-owned provider
+  fields (`frontend/src/lib/aiEngine/seed.js`), so the note reaches the stored
+  card rather than only a card seeded after it was written.
+
 - **September's measured cost replaces the estimate (#822).**
   `docs/architecture/cost-analysis.md` now states September 2026, the
   estate's first full month in `centralus`, from Cost Management (actual cost,
