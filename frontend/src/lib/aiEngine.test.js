@@ -58,6 +58,8 @@ describe('DEFAULT_PROVIDERS matches the API', () => {
       openai: 'OPENAI_API_KEY',
       anthropic: 'ANTHROPIC_API_KEY',
       nvidia: 'NVIDIA_API_KEY',
+      // Not a key: the endpoint Terraform sets (#849).
+      foundry: 'FOUNDRY_ENDPOINT',
     };
     for (const provider of DEFAULT_PROVIDERS) {
       expect(provider.apiKeyEnvVar, provider.id).toBe(expected[provider.id]);
@@ -78,9 +80,10 @@ describe('DEFAULT_PROVIDERS matches the API', () => {
 
   it('lists its defaultModel among its own models', () => {
     for (const provider of DEFAULT_PROVIDERS) {
-      // NVIDIA seeds no pin, so the router's per-purpose table decides (#701):
-      // a pin here would apply one model to drafting, grading and captions.
-      if (provider.id === 'nvidia') {
+      // NVIDIA and Foundry seed no pin, so the router's per-purpose table
+      // decides (#701, #849): a pin here would apply one model to drafting,
+      // grading and captions.
+      if (provider.id === 'nvidia' || provider.id === 'foundry') {
         expect(provider.defaultModel).toBeNull();
         continue;
       }

@@ -93,6 +93,7 @@ function ProviderIcon({ provider }) {
     anthropic: '🟣',
     gemini: '🔵',
     nvidia: '🟩',
+    foundry: '🟦',
     perplexity: '🔍',
     azure: '🪟',
     bedrock: '🟠',
@@ -296,7 +297,7 @@ export function ProviderCard({ provider, onToggle, onModelChange, onTest }) {
  * than no switch at all — it reads as working.
  */
 /** Display names for providers placed per feature (#701). */
-const PLACED_PROVIDER_LABELS = { nvidia: 'NVIDIA' };
+const PLACED_PROVIDER_LABELS = { nvidia: 'NVIDIA', foundry: 'Foundry' };
 
 /**
  * What each placement means, in the words the select shows. 'order' is the

@@ -113,6 +113,30 @@ export const DEFAULT_PROVIDERS = [
     notes:
       'Seed NVIDIA-API-KEY (an nvapi- key from build.nvidia.com/settings/api-keys). A freshly seeded key can answer "403 Authorization failed" from here for up to about 40 minutes, the same reply a wrong key gets: Test again later before reseeding, and delete the previous key at NVIDIA only once the new one passes here. Free, so usage shows at $0. Trial terms and a ~40 requests/minute limit: the API paces itself and hands busy or failed calls to the next provider.',
   },
+  {
+    // Microsoft Foundry (#849, owner decision 2026-10-04): a PAID provider
+    // under its own USD 75 budget, first for the content features and off
+    // the public route (features-catalogue.js). No key: the Function App's
+    // identity authenticates, and Terraform sets the endpoint this card's
+    // apiKeyEnvVar names.
+    id: 'foundry',
+    name: 'Microsoft Foundry',
+    description: 'GPT-5 nano and mini on Azure, billed to the app subscription',
+    icon: '🟦',
+    enabled: true,
+    // Unset on purpose: with no pin the router uses mini for drafts and
+    // analysis and nano for short calls. Choosing one here pins it for every
+    // purpose.
+    defaultModel: null,
+    models: ['gpt-5-nano', 'gpt-5-mini'],
+    apiKeyEnvVar: 'FOUNDRY_ENDPOINT',
+    docsUrl: 'https://learn.microsoft.com/azure/foundry/',
+    status: 'untested',
+    order: 5,
+    schemaVersion: PROVIDER_SCHEMA_VERSION,
+    notes:
+      'Nothing to seed: the app signs in with its own identity, and FOUNDRY_ENDPOINT is set by Terraform. Spend is capped by the Foundry budget (USD 75 a month, alerts at 50, 90 and 100 %). First for content features; never the public explain route.',
+  },
 ];
 
 export const DEFAULT_MCP_SERVERS = [

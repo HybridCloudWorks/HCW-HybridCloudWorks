@@ -119,7 +119,7 @@ export const FEATURE_NAMES = Object.freeze(Object.keys(AI_FEATURES));
  * the portal can move it and switch it off like any other provider); a
  * placement then moves it or removes it for one feature.
  */
-export const PER_FEATURE_PROVIDERS = Object.freeze(['nvidia']);
+export const PER_FEATURE_PROVIDERS = Object.freeze(['nvidia', 'foundry']);
 
 export const PLACEMENTS = Object.freeze(['first', 'order', 'off']);
 
@@ -170,6 +170,28 @@ export const PROVIDER_PLACEMENT_DEFAULTS = Object.freeze({
     telegram: 'order',
     forgeAssist: 'order',
     altText: 'off',
+    sourceGrounding: 'off',
+    pricingExplain: 'off',
+    landingZoneExplain: 'off',
+  }),
+  // Microsoft Foundry (#849). Owner decision 2026-10-04: first for the
+  // content features, not for the public route. It is a paid provider under
+  // its own budget, so 'first' is the point of it; altText is included
+  // because gpt-5-mini reads images. The three 'off' rows are the same locks
+  // as NVIDIA's: the anonymous public explain route stays on the order the
+  // owner set for it, and the grounded call is Gemini-only by construction.
+  foundry: Object.freeze({
+    inspector: 'first',
+    critique: 'first',
+    forgeDrafting: 'first',
+    forgeGrading: 'first',
+    voiceCalibration: 'first',
+    socialCaption: 'first',
+    listenAndLearn: 'first',
+    podcastScript: 'first',
+    telegram: 'first',
+    forgeAssist: 'first',
+    altText: 'first',
     sourceGrounding: 'off',
     pricingExplain: 'off',
     landingZoneExplain: 'off',

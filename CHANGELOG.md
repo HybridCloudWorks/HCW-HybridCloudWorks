@@ -19,6 +19,26 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Microsoft Foundry as a paid AI provider (#849, owner decision
+  2026-10-04).** Of a budget of about USD 75 a month, the first call was
+  Foundry with the cheapest text models: gpt-5-nano ($0.05 in / $0.40 out
+  per 1M tokens) for short calls and gpt-5-mini ($0.25 / $2.00) for drafts
+  and analysis. A fifth provider `foundry` in the AI router on the account's
+  OpenAI v1 chat endpoint; placed per feature like NVIDIA, first for the
+  content features and locked off the anonymous public explain route and
+  the grounded call; priced at the Global Standard rates in the cost table.
+  No key: `infra/foundry.tf` creates the AIServices account with local
+  authentication off, the two deployments (Global Standard, centralus), the
+  Cognitive Services OpenAI User role for the Function App's identity, and a
+  USD 75 monthly budget on the returning `ai` resource group with alerts at
+  50, 90 and 100 %; the router sends an Entra token through
+  `@azure/identity`, cached until five minutes before expiry, and
+  `FOUNDRY_ENDPOINT` (set by Terraform) is what makes the provider
+  available. The AI Services card, its setup instructions and the
+  Required-Inputs row follow. `foundry-provider.test.js` pins the request,
+  the token cache, the placement and the pricing. Live after the owner's
+  TFC run.
+
 - **Setup instructions for OpenAI and NVIDIA on the AI Engine.** The book
   icon on each provider card opens `/admin/ai-engine/docs/<provider>`, and
   for OpenAI and NVIDIA that page said "Documentation not found": the docs

@@ -456,10 +456,15 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # anonymous public explain route — and paces itself under the limit.
     # Unseeded, it is the same literal reference readKey() treats as no key,
     # so it too switches nothing on.
-    "GEMINI_API_KEY"     = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/GEMINI-API-KEY)"
-    "ANTHROPIC_API_KEY"  = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/ANTHROPIC-API-KEY)"
-    "OPENAI_API_KEY"     = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/OPENAI-API-KEY)"
-    "NVIDIA_API_KEY"     = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/NVIDIA-API-KEY)"
+    "GEMINI_API_KEY"    = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/GEMINI-API-KEY)"
+    "ANTHROPIC_API_KEY" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/ANTHROPIC-API-KEY)"
+    "OPENAI_API_KEY"    = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/OPENAI-API-KEY)"
+    "NVIDIA_API_KEY"    = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/NVIDIA-API-KEY)"
+    # FOUNDRY_ENDPOINT (#849) is not a secret: the account's OpenAI v1 host,
+    # reached with the app's identity (foundry.tf). Its presence is what makes
+    # the `foundry` provider available to the router, the way a key does for
+    # the others.
+    "FOUNDRY_ENDPOINT"   = "https://${azurerm_cognitive_account.foundry.custom_subdomain_name}.openai.azure.com"
     "PERPLEXITY_API_KEY" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/PERPLEXITY-API-KEY)"
     "REPLICATE_API_KEY"  = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/REPLICATE-API-KEY)"
 
