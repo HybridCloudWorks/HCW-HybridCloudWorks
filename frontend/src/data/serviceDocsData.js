@@ -9,6 +9,7 @@
  *  Plaud CLI   — https://docs.plaud.ai/documentation/plaud_app/cli
  *  Anthropic   — https://docs.anthropic.com
  *  OpenAI      — https://platform.openai.com/docs
+ *  NVIDIA API  — https://build.nvidia.com/models
  *  Gemini API   — https://ai.google.dev/gemini-api/docs
  *  Perplexity  — https://docs.perplexity.ai
  *  Azure OAI   — https://learn.microsoft.com/en-us/azure/ai-services/openai
@@ -437,6 +438,314 @@ export const SERVICE_DOCS = {
       {
         label: 'Google AI Studio',
         url: 'https://aistudio.google.com/app/apikey',
+      },
+    ],
+  },
+
+  // ── OpenAI ───────────────────────────────────────────────────────────────
+  openai: {
+    id: 'openai',
+    name: 'OpenAI',
+    type: 'ai_provider',
+    tagline: 'GPT-5 mini and nano through the OpenAI Platform API.',
+    requirements: [
+      {
+        label: 'OpenAI API key',
+        detail: 'Create a key at platform.openai.com/api-keys',
+        required: true,
+      },
+      {
+        label: 'Azure Function App setting',
+        detail: 'Production uses a Key Vault reference for OPENAI_API_KEY (secret OPENAI-API-KEY)',
+        required: true,
+      },
+      {
+        label: 'Entra admin access',
+        detail: 'Required to use the authenticated AI Engine routes',
+        required: true,
+      },
+      {
+        label: 'Local Azure Functions environment',
+        detail: 'Use functions/.env for local development only',
+        required: true,
+      },
+    ],
+    hcwUses: [
+      {
+        feature: 'ContentForge Pipeline',
+        usage:
+          'Second provider in the default order (Gemini, OpenAI, Anthropic, then NVIDIA as the content backup): serves a call when the provider before it cannot, or first where Routing or Where AI is used places it first.',
+        files: ['functions/src/lib/ai/router.js', 'functions/src/lib/ai/ai-config.js'],
+        status: HCW_STATUS.ACTIVE,
+      },
+      {
+        feature: 'AI Engine Playground and Test',
+        usage:
+          'Available through the authenticated Azure aiProxy and testAiProvider routes; the weekly probe runs the Test every Monday at 06:15 UTC and records the latency on the card.',
+        files: ['functions/src/lib/ai/proxy.js', 'functions/src/lib/timers/ai-provider-probe.js'],
+        status: HCW_STATUS.ACTIVE,
+      },
+    ],
+    sections: {
+      install: {
+        title: 'Configure',
+        steps: [
+          {
+            heading: 'Create the API key',
+            body: 'Create a key at platform.openai.com/api-keys. Do not put it in browser code, source control, or the Admin Portal configuration document.',
+            codes: [],
+          },
+          {
+            heading: 'Configure local development',
+            body: 'For local Azure Functions development only, add the key to functions/.env. This file is ignored by git and is not a production secret store. The command prompts for the key and never shows it.',
+            codes: [
+              {
+                lang: 'powershell',
+                label: 'Append to functions/.env (repository root)',
+                content:
+                  '$k = Read-Host -AsSecureString "OpenAI key"; Add-Content -Path functions/.env -Value ("OPENAI_API_KEY=" + [System.Net.NetworkCredential]::new("", $k).Password)',
+              },
+            ],
+          },
+          {
+            heading: 'Configure production',
+            body: 'Seed OPENAI-API-KEY in Key Vault with the seeding script; the Function App setting OPENAI_API_KEY is a Key Vault reference Terraform manages. Restart the Function App to pick the value up at once. The browser calls Azure Functions and never receives the key.',
+            codes: [
+              {
+                lang: 'powershell',
+                label: 'Seed the secret (repository root)',
+                content: './scripts/cutover/06-seed-secret.ps1 -Name OPENAI-API-KEY',
+              },
+            ],
+          },
+        ],
+      },
+      use: {
+        title: 'Use',
+        steps: [
+          {
+            heading: 'Available models',
+            body: 'The Admin Portal seeds the current model list. Select a model on the card to pin it for every purpose, or leave Auto so the router uses its purpose defaults.',
+            codes: [
+              {
+                lang: 'text',
+                label: 'Model reference',
+                content:
+                  "gpt-5-mini  — the card's default\n" +
+                  'gpt-5-nano  — lower cost, shorter answers\n' +
+                  'gpt-4o      — the previous generation, still offered\n' +
+                  'gpt-4o-mini — the previous generation, small',
+              },
+            ],
+          },
+          {
+            heading: 'Use the AI Engine Playground',
+            body: 'Navigate to /admin/ai-engine → AI Services or Playground → select "OpenAI" → choose a model → click Test or Send. Requests are authenticated with Entra and proxied by Azure Functions.',
+            codes: [],
+          },
+        ],
+      },
+      uninstall: {
+        title: 'Disconnect',
+        steps: [
+          {
+            heading: 'Disable in AI Engine',
+            body: 'Turn OpenAI off or change the provider order in /admin/ai-engine. The Azure API honors the stored provider configuration on every request.',
+            codes: [],
+          },
+          {
+            heading: 'Remove the production secret',
+            body: 'Remove the OPENAI-API-KEY secret from Key Vault, restart the Function App, and revoke the key at platform.openai.com. With no key the router treats the provider as absent and the others serve as before.',
+            codes: [],
+          },
+        ],
+      },
+      advanced: {
+        title: 'Advanced',
+        steps: [
+          {
+            heading: 'Reasoning models and max_tokens',
+            body: "OpenAI's reasoning models refuse the max_tokens field, so the router never sends it to OpenAI; the per-call cap the portal's Test passes applies only to providers whose table row sends one.",
+            codes: [],
+          },
+          {
+            heading: 'JSON responses',
+            body: 'JSON generation asks this provider for response_format json_object, with one repair round trip if the answer does not parse.',
+            codes: [],
+          },
+        ],
+      },
+    },
+    references: [
+      {
+        label: 'OpenAI Platform documentation',
+        url: 'https://platform.openai.com/docs',
+      },
+      {
+        label: 'API keys',
+        url: 'https://platform.openai.com/api-keys',
+      },
+    ],
+  },
+
+  // ── NVIDIA API ───────────────────────────────────────────────────────────
+  nvidia: {
+    id: 'nvidia',
+    name: 'NVIDIA API',
+    type: 'ai_provider',
+    tagline:
+      'Open-weight models on the NVIDIA API Catalog: a free trial tier at about 40 requests a minute.',
+    requirements: [
+      {
+        label: 'NVIDIA API Catalog key',
+        detail:
+          'An nvapi- key from build.nvidia.com/settings/api-keys; read the trial terms before seeding',
+        required: true,
+      },
+      {
+        label: 'Azure Function App setting',
+        detail: 'Production uses a Key Vault reference for NVIDIA_API_KEY (secret NVIDIA-API-KEY)',
+        required: true,
+      },
+      {
+        label: 'Entra admin access',
+        detail: 'Required to use the authenticated AI Engine routes',
+        required: true,
+      },
+      {
+        label: 'Local Azure Functions environment',
+        detail: 'Use functions/.env for local development only',
+        required: true,
+      },
+    ],
+    hcwUses: [
+      {
+        feature: 'ContentForge Pipeline',
+        usage:
+          'The backup for owner-triggered content (drafting, grading, the inspector, captions, Listen & Learn and podcast scripts) after the paid providers, unless Routing or Where AI is used places it first. Never used for the anonymous public explain route, and a call that names no feature never uses it.',
+        files: ['functions/src/lib/ai/router.js', 'functions/src/lib/ai/ai-config.js'],
+        status: HCW_STATUS.ACTIVE,
+      },
+      {
+        feature: 'AI Engine Test and the weekly probe',
+        usage:
+          "The card's Test and the Monday 06:15 UTC probe record its latency; the probe is the evidence for placing it first for a feature.",
+        files: ['functions/src/lib/ai/proxy.js', 'functions/src/lib/timers/ai-provider-probe.js'],
+        status: HCW_STATUS.ACTIVE,
+      },
+    ],
+    sections: {
+      install: {
+        title: 'Configure',
+        steps: [
+          {
+            heading: 'Create the API key',
+            body: 'Generate one key at build.nvidia.com/settings/api-keys. Do not put it in browser code, source control, or the Admin Portal configuration document.',
+            codes: [],
+          },
+          {
+            heading: 'Configure local development',
+            body: 'For local Azure Functions development only, add the key to functions/.env. This file is ignored by git and is not a production secret store. The command prompts for the key and never shows it.',
+            codes: [
+              {
+                lang: 'powershell',
+                label: 'Append to functions/.env (repository root)',
+                content:
+                  '$k = Read-Host -AsSecureString "NVIDIA key"; Add-Content -Path functions/.env -Value ("NVIDIA_API_KEY=" + [System.Net.NetworkCredential]::new("", $k).Password)',
+              },
+            ],
+          },
+          {
+            heading: 'Configure production',
+            body: 'Seed NVIDIA-API-KEY in Key Vault with the seeding script; the Function App setting NVIDIA_API_KEY is a Key Vault reference Terraform manages. Restart the Function App to pick the value up at once.',
+            codes: [
+              {
+                lang: 'powershell',
+                label: 'Seed the secret (repository root)',
+                content: './scripts/cutover/06-seed-secret.ps1 -Name NVIDIA-API-KEY',
+              },
+            ],
+          },
+          {
+            heading: 'Wait before judging a fresh key',
+            body: 'A freshly seeded key can answer "403 Authorization failed" from the app for up to about 40 minutes, the same reply a wrong key gets. Measured 2026-10-04: the app refused a key at 1, 12 and 13 minutes after seeding and accepted it at 37; a workstation accepted that same key at about 23 minutes; a separate key seconds old passed at once from Azure Cloud Shell. Test again later before reseeding, and delete the previous key at NVIDIA only after the new one passes from here.',
+            codes: [],
+          },
+        ],
+      },
+      use: {
+        title: 'Use',
+        steps: [
+          {
+            heading: 'Available models',
+            body: 'The router uses GLM-5.3 for every purpose. The two "flash" models stay priced for an override, but on the trial tier they were the slow ones: 70 s and more than 120 s to answer one line, against 2.6 s for GLM-5.3.',
+            codes: [
+              {
+                lang: 'text',
+                label: 'Model reference',
+                content:
+                  'z-ai/glm-5.3                     — the default for every purpose\n' +
+                  'z-ai/glm-5.3-flash               — CONTENTFORGE_NVIDIA_*_MODEL override only\n' +
+                  'deepseek-ai/deepseek-v4.1-flash  — CONTENTFORGE_NVIDIA_*_MODEL override only',
+              },
+            ],
+          },
+          {
+            heading: 'Use the AI Engine Playground',
+            body: 'Navigate to /admin/ai-engine → AI Services or Playground → select "NVIDIA API" → click Test or Send. The Test caps max_tokens and the timeout so a reasoning model proves it answers in seconds rather than thinking past the edge limit.',
+            codes: [],
+          },
+          {
+            heading: 'Pacing',
+            body: 'The router keeps each instance under the account limit (36 requests a minute by default; NVIDIA_REQUESTS_PER_MINUTE overrides). A call the guard refuses is not sent and fails over to the next provider at once, so a burst of batch drafts degrades to the paid providers instead of failing.',
+            codes: [],
+          },
+        ],
+      },
+      uninstall: {
+        title: 'Disconnect',
+        steps: [
+          {
+            heading: 'Disable in AI Engine',
+            body: 'Turn NVIDIA off, or change its placement under Where AI is used, in /admin/ai-engine. The Azure API honors the stored configuration on every request.',
+            codes: [],
+          },
+          {
+            heading: 'Remove the production secret',
+            body: 'Remove the NVIDIA-API-KEY secret from Key Vault, restart the Function App, and delete the key at build.nvidia.com. With no key the router treats the provider as absent and the paid providers serve as before.',
+            codes: [],
+          },
+        ],
+      },
+      advanced: {
+        title: 'Advanced',
+        steps: [
+          {
+            heading: 'Text only',
+            body: 'A call carrying an image is routed past this provider rather than refused by it; the next provider in the chain takes it.',
+            codes: [],
+          },
+          {
+            heading: 'Failover on 400 and 422',
+            body: 'A bad request from this provider fails over, unlike the three frontier APIs: the catalogue models have their own context and parameter limits, and the next provider will very likely take the same request. A prompt part the router rejected locally before sending (AI_PART_REFUSED) does not fail over.',
+            codes: [],
+          },
+          {
+            heading: 'Cost and output',
+            body: "Usage rows are priced at zero so the Usage tab shows the calls and the saving. A <think> block in an answer is stripped before the text reaches the caller. Model ids are the `model` value in each page's curl sample, which is not always the URL slug.",
+            codes: [],
+          },
+        ],
+      },
+    },
+    references: [
+      {
+        label: 'NVIDIA API Catalog models',
+        url: 'https://build.nvidia.com/models',
+      },
+      {
+        label: 'API keys',
+        url: 'https://build.nvidia.com/settings/api-keys',
       },
     ],
   },

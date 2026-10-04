@@ -19,6 +19,16 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Setup instructions for OpenAI and NVIDIA on the AI Engine.** The book
+  icon on each provider card opens `/admin/ai-engine/docs/<provider>`, and
+  for OpenAI and NVIDIA that page said "Documentation not found": the docs
+  data (`frontend/src/data/serviceDocsData.js`) had entries for Gemini and
+  Anthropic only, written before the other two were wired. Both now have
+  the same shape as the others (requirements, where the site uses them,
+  configure / use / disconnect / advanced, references). NVIDIA's carries
+  the day's findings: GLM-5.3 as the only default, the pacing guard, and
+  the wait before judging a freshly seeded key (#701).
+
 - **ContentForge alignment: one content operating system (ADR 0033, owner
   request 2026-10-03).** Twenty-six admin pages inventoried, then rebuilt in
   eight slices so a first-time user can read the menu, every stage of the
