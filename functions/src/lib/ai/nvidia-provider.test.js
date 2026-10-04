@@ -230,7 +230,7 @@ describe('request shape — the OpenAI-compatible path at the NVIDIA base URL', 
     const fetchImpl = fetchFailing();
     const out = await router(fetchImpl).callProvider({ provider: 'nvidia', prompt: 'ping' });
     expect(out).toMatchObject({ text: '{}', promptTokens: 120, completionTokens: 30 });
-    expect(out.model).toBe('z-ai/glm-5.3-flash');
+    expect(out.model).toBe('z-ai/glm-5.3');
     expect(fetchImpl.providers()).toEqual(['nvidia']);
   });
 });

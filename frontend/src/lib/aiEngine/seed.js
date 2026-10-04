@@ -97,14 +97,14 @@ export const DEFAULT_PROVIDERS = [
     // explain route.
     id: 'nvidia',
     name: 'NVIDIA API',
-    description: 'GLM-5.3, DeepSeek-V4.1-Flash — free trial tier, ~40 requests a minute',
+    description: 'GLM-5.3 — free trial tier, ~40 requests a minute',
     icon: '🟩',
     enabled: true,
-    // Unset on purpose: with no pin the router picks a model per purpose
-    // (GLM-5.3 for drafts, DeepSeek-V4.1-Flash for analysis, GLM-5.3-Flash
-    // for short calls). Choosing one here pins it for every purpose.
+    // Unset on purpose: with no pin the router uses GLM-5.3 for every
+    // purpose, the one trial-tier model that answered inside the Test's 45 s
+    // on 2026-10-04 (#701). Choosing one here pins it for every purpose.
     defaultModel: null,
-    models: ['z-ai/glm-5.3', 'z-ai/glm-5.3-flash', 'deepseek-ai/deepseek-v4.1-flash'],
+    models: ['z-ai/glm-5.3'],
     apiKeyEnvVar: 'NVIDIA_API_KEY',
     docsUrl: 'https://build.nvidia.com/models',
     status: 'untested',

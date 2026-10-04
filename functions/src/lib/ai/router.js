@@ -235,17 +235,23 @@ export const DEFAULT_MODEL_TABLE = Object.freeze({
   //   deepseek-ai/deepseek-v4.1-flash  build.nvidia.com/deepseek-ai/deepseek-v4.1-flash
   //   z-ai/glm-5.3                     build.nvidia.com/z-ai/glm-5-3
   //   z-ai/glm-5.3-flash               build.nvidia.com/z-ai/glm-5-3-flash
-  // GLM-5.3, the large text MoE, writes the long drafts; DeepSeek-V4.1-Flash
-  // does analysis and grading; GLM-5.3-Flash the short general calls. Kimi K3
-  // is on the catalogue too, but its page's sample left `model` blank on the
-  // day, so it is not a default — set CONTENTFORGE_NVIDIA_*_MODEL or pin a
-  // model in the portal once its id is confirmed. The catalogue changes
-  // often: a retired id is a 404, which fails over to the next provider.
+  // GLM-5.3, the large text MoE, serves every purpose. On the trial tier the
+  // "flash" models were the slow ones, measured direct from a workstation on
+  // 2026-10-04 with a one-line prompt: z-ai/glm-5.3 2.6 s,
+  // z-ai/glm-5.3-flash 70 s, deepseek-ai/deepseek-v4.1-flash over 120 s. The
+  // portal's Test gives up at 45 s, so the GLM-5.3-Flash default failed every
+  // Test while the key was good (#701). Both keep their cost-table rows, so
+  // history still prices, and a CONTENTFORGE_NVIDIA_*_MODEL override can bring
+  // either back once NVIDIA serves it faster; the portal offers only the
+  // defaults below (frontend aiEngine.test.js holds the two lists equal).
+  // Kimi K3 is on the catalogue too, but its page's sample left `model` blank
+  // on the day, so it is not a default. The catalogue changes often: a
+  // retired id is a 404, which fails over to the next provider.
   nvidia: {
     draft: ['CONTENTFORGE_NVIDIA_DRAFT_MODEL', 'z-ai/glm-5.3'],
-    analysis: ['CONTENTFORGE_NVIDIA_ANALYSIS_MODEL', 'deepseek-ai/deepseek-v4.1-flash'],
-    multimodal: ['CONTENTFORGE_NVIDIA_MULTIMODAL_MODEL', 'deepseek-ai/deepseek-v4.1-flash'],
-    general: ['CONTENTFORGE_NVIDIA_MODEL', 'z-ai/glm-5.3-flash'],
+    analysis: ['CONTENTFORGE_NVIDIA_ANALYSIS_MODEL', 'z-ai/glm-5.3'],
+    multimodal: ['CONTENTFORGE_NVIDIA_MULTIMODAL_MODEL', 'z-ai/glm-5.3'],
+    general: ['CONTENTFORGE_NVIDIA_MODEL', 'z-ai/glm-5.3'],
   },
 });
 
