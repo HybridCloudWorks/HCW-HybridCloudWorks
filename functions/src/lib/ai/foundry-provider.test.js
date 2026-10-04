@@ -91,6 +91,14 @@ describe('the request', () => {
     expect(body).not.toHaveProperty('temperature');
   });
 
+  it("sends no temperature on OpenAI's row either: the same GPT-5 defaults refuse any value but 1", async () => {
+    const fetchImpl = fetchRecording();
+    await router(fetchImpl).callProvider({ provider: 'openai', prompt: 'ping' });
+    const [call] = fetchImpl.calls;
+    expect(call.provider).toBe('openai');
+    expect(JSON.parse(call.init.body)).not.toHaveProperty('temperature');
+  });
+
   it('asks for response_format json_object on a JSON generation', async () => {
     const fetchImpl = fetchRecording();
     await router(fetchImpl).generateJsonResponse({ prompt: 'x', feature: 'inspector' });

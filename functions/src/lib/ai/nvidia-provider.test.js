@@ -149,9 +149,6 @@ describe('request shape — the OpenAI-compatible path at the NVIDIA base URL', 
     expect(body.model).toBe('z-ai/glm-5.3');
     expect(body.max_tokens).toBe(8192);
     expect(body.temperature).toBe(0.2);
-    // The OpenAI row sends none: its GPT-5 defaults refuse any value but 1.
-    const openai = fetchImpl.mock.calls.find(([url]) => new URL(url).host === 'api.openai.com');
-    if (openai) expect(JSON.parse(openai[1].body)).not.toHaveProperty('temperature');
     // Plain-string content, and JSON asked for in words, not response_format.
     expect(body.messages).toEqual([
       { role: 'system', content: expect.stringMatching(/^You are an editor\.\n\nReturn only valid JSON/) },
