@@ -26,6 +26,7 @@ import {
   aggregateByProvider,
   aggregateBySource,
   providerDisplayPatches,
+  providerModelPatches,
   SEED_OWNED_PROVIDER_FIELDS,
 } from './aiEngine.js';
 import {
@@ -144,6 +145,42 @@ describe('a stored provider follows the seed for what the card shows', () => {
     expect(only.patch).not.toHaveProperty('defaultModel');
     expect(only.patch).not.toHaveProperty('enabled');
     expect(providerDisplayPatches([{ id: 'someone-else', name: 'x' }])).toEqual([]);
+  });
+});
+
+describe('providerModelPatches', () => {
+  // The NVIDIA card as the page first wrote it on 2026-09-25 (#701).
+  const nvidiaAsSeeded = {
+    id: 'nvidia',
+    name: 'NVIDIA API',
+    defaultModel: 'z-ai/glm-5.3-flash',
+    models: ['z-ai/glm-5.3', 'z-ai/glm-5.3-flash', 'deepseek-ai/deepseek-v4.1-flash'],
+    status: 'error',
+  };
+
+  it('brings the 2026-09-25 NVIDIA card to the router defaults and releases its withdrawn pin', () => {
+    expect(providerModelPatches([nvidiaAsSeeded])).toEqual([
+      { id: 'nvidia', patch: { models: ['z-ai/glm-5.3'], defaultModel: null } },
+    ]);
+  });
+
+  it('keeps a pin the list still offers', () => {
+    const stored = [{ ...nvidiaAsSeeded, defaultModel: 'z-ai/glm-5.3' }];
+    expect(providerModelPatches(stored)).toEqual([
+      { id: 'nvidia', patch: { models: ['z-ai/glm-5.3'] } },
+    ]);
+  });
+
+  it('writes nothing when every stored document already matches the seed', () => {
+    expect(providerModelPatches(DEFAULT_PROVIDERS.map((p) => ({ ...p })))).toEqual([]);
+  });
+
+  it('leaves providers the seed does not know, and every field but models and the pin', () => {
+    expect(
+      providerModelPatches([{ id: 'someone-else', models: ['x'], defaultModel: 'y' }])
+    ).toEqual([]);
+    const [only] = providerModelPatches([nvidiaAsSeeded]);
+    expect(Object.keys(only.patch).sort()).toEqual(['defaultModel', 'models']);
   });
 });
 

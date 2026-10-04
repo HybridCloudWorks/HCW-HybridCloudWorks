@@ -31,6 +31,7 @@ import {
   PROVIDER_SCHEMA_VERSION,
   SEED_OWNED_PROVIDER_FIELDS,
   providerDisplayPatches,
+  providerModelPatches,
   seedAiEngineIfEmpty,
 } from './aiEngine/seed';
 import {
@@ -59,6 +60,7 @@ export {
   PROVIDER_SCHEMA_VERSION,
   SEED_OWNED_PROVIDER_FIELDS,
   providerDisplayPatches,
+  providerModelPatches,
   seedAiEngineIfEmpty,
   addMcpServer,
   removeMcpServer,

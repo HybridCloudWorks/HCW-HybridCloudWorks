@@ -2906,6 +2906,23 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **NVIDIA's Test timed out with a working key; every NVIDIA default is now
+  GLM-5.3 (#701).** The portal's Test sent `z-ai/glm-5.3-flash` and gave up at
+  45 s, three times on 2026-10-04, after a freshly rotated key was seeded. A
+  direct call from a workstation with a one-line prompt measured
+  `z-ai/glm-5.3` at 2.6 s, `z-ai/glm-5.3-flash` at 70 s and
+  `deepseek-ai/deepseek-v4.1-flash` past 120 s, so on the trial tier the
+  "flash" models are the slow ones. Drafts, analysis, multimodal and general
+  calls all default to GLM-5.3 (`functions/src/lib/ai/router.js`), and the
+  AI Services card offers and describes only that model. The other two keep
+  their zero-cost rows and can return through a `CONTENTFORGE_NVIDIA_*_MODEL`
+  override. The stored card would not have followed: the page wrote it on
+  2026-09-25 pinned to `z-ai/glm-5.3-flash`, and the router obeys a pin for
+  every purpose. `providerModelPatches` (`frontend/src/lib/aiEngine/seed.js`)
+  now keeps each stored provider's model list equal to the seed on admin page
+  load, and returns a pin the list no longer offers to the seed's own value,
+  Auto for NVIDIA. A pin still on the list is left alone.
+
 - **Every provider the site routes can be chosen on the review board, Docker,
   VMware and Ansible included.** #776 added `/docker/blog/<slug>`, and VMware
   and Ansible have had blog routes longer. But the CMS knew six providers:
