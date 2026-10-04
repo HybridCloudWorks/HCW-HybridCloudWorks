@@ -111,7 +111,7 @@ export const DEFAULT_PROVIDERS = [
     order: 4,
     schemaVersion: PROVIDER_SCHEMA_VERSION,
     notes:
-      'Seed NVIDIA-API-KEY (an nvapi- key from build.nvidia.com/settings/api-keys). Free, so usage shows at $0. Trial terms and a ~40 requests/minute limit: the API paces itself and hands busy or failed calls to the next provider.',
+      'Seed NVIDIA-API-KEY (an nvapi- key from build.nvidia.com/settings/api-keys). A freshly seeded key can answer "403 Authorization failed" from here for up to about 40 minutes, the same reply a wrong key gets: Test again later before reseeding, and delete the previous key at NVIDIA only once the new one passes here. Free, so usage shows at $0. Trial terms and a ~40 requests/minute limit: the API paces itself and hands busy or failed calls to the next provider.',
   },
 ];
 
@@ -242,14 +242,17 @@ export const DEFAULT_MCP_SERVERS = [
 
 /**
  * The provider fields the seed owns and keeps current: what the card is
- * called, the line under the name, and the icon. The page has no control to
- * edit any of them, so a stored value that differs from `DEFAULT_PROVIDERS` is
- * only ever an old copy of the seed. Seeding writes a document once, when it is
- * missing, and the card renders the stored document, so without this a rename
- * never reached the page: #701 renamed "NVIDIA API Catalog" to "NVIDIA API" on
- * 2026-09-29, and the card still said Catalog after the deploy.
+ * called, the line under the name, the icon, and the setup note. The page has
+ * no control to edit any of them, so a stored value that differs from
+ * `DEFAULT_PROVIDERS` is only ever an old copy of the seed. Seeding writes a
+ * document once, when it is missing, and the card renders the stored document,
+ * so without this a rename never reached the page: #701 renamed "NVIDIA API
+ * Catalog" to "NVIDIA API" on 2026-09-29, and the card still said Catalog
+ * after the deploy. `notes` joined on 2026-10-04 for the same reason: the
+ * warning that a fresh NVIDIA key is refused for a while had to reach the
+ * stored card, not only a card seeded after it was written.
  */
-export const SEED_OWNED_PROVIDER_FIELDS = Object.freeze(['name', 'description', 'icon']);
+export const SEED_OWNED_PROVIDER_FIELDS = Object.freeze(['name', 'description', 'icon', 'notes']);
 
 /**
  * `[{ id, patch }]` bringing each stored provider's seed-owned fields back to
