@@ -1,15 +1,17 @@
 /**
- * The certification editor: name is required, a new cert POSTs and an
- * existing one PATCHes the payload the old page sent, a double click saves
- * once, the image upload keeps its type and size rules, and the order helper
- * suggests the first free slot within the issuer.
+ * The certification editor (ADR 0033 §2, Spotlight slice): a real dialog;
+ * validation names the field and nothing is sent until it passes; a new cert
+ * POSTs and an existing one PATCHes with calendar-day dates and order 0 kept;
+ * a double click saves once; the image upload keeps its type and size rules;
+ * an upload abandoned by Cancel is deleted; and the order helper reads the
+ * global ladder.
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 
-import CertEditor, { buildPayload, initialForm } from './CertEditor';
-import { nextFreeOrder, siblingsOf, issuerOptionsFrom } from './editorFields';
+import CertEditor, { buildPayload, initialForm, uploadedPathFromUrl } from './CertEditor';
+import { ladderWindow, nextFreeOrder, siblingsOf, issuerOptionsFrom } from './editorFields';
 
 const postJSON = vi.fn();
 const sendJSON = vi.fn();
@@ -22,7 +24,7 @@ vi.mock('@/components/ui/use-toast', () => ({ useToast: () => ({ toast }) }));
 
 beforeEach(() => {
   postJSON.mockReset();
-  sendJSON.mockReset();
+  sendJSON.mockReset().mockResolvedValue({ success: true });
   toast.mockReset();
 });
 
@@ -39,42 +41,79 @@ const EXISTING = {
 };
 
 describe('payload', () => {
-  it('trims, nulls empties, canonicalises dates and defaults the order', () => {
+  it('trims, nulls empties, keeps dates as calendar days, keeps order 0 and defaults a blank order', () => {
     const payload = buildPayload({
       ...initialForm({}),
       name: '  Cloud Architect ',
       issuer: 'Custom Issuer',
       issueDate: '2026-01-02',
+      renewalDate: '2026-11-01',
       display_order: '',
+      evidence: [
+        { label: '', url: 'https://t' },
+        { label: 'x', url: '' },
+      ],
     });
     expect(payload).toMatchObject({
       name: 'Cloud Architect',
       code: null,
       issuer: 'Custom Issuer',
-      issueDate: '2026-01-02T00:00:00.000Z',
+      issueDate: '2026-01-02',
       expDate: null,
+      renewalDate: '2026-11-01',
+      renewalRequirements: null,
       verifyUrl: null,
+      evidence: [{ label: 'https://t', url: 'https://t' }],
+      relatedLearning: [],
       display: true,
       certState: true,
       featured: false,
       display_order: 999,
     });
+    expect(buildPayload({ ...initialForm({}), name: 'X', display_order: 0 }).display_order).toBe(0);
   });
 
   it('opens an existing cert with its dates as yyyy-mm-dd', () => {
     expect(initialForm(EXISTING)).toMatchObject({ expDate: '2027-03-01', issuer: 'Microsoft' });
     expect(initialForm({ issuer: '' }).issuer).toBe('');
+    expect(initialForm({ evidence: ['https://a'] }).evidence).toEqual([
+      { label: 'https://a', url: 'https://a' },
+    ]);
+  });
+
+  it('reads the blob path back out of an upload URL', () => {
+    expect(uploadedPathFromUrl('/api/public/media/certifications/c1/images/badge-1.png')).toBe(
+      'c1/images/badge-1.png'
+    );
+    expect(uploadedPathFromUrl('https://images.credly.com/x.png')).toBeNull();
   });
 });
 
 describe('saving', () => {
-  it('refuses a save without a name', async () => {
+  it('is a dialog, refuses a save without a name and says so beside the field', async () => {
     render(<CertEditor cert={{}} allCerts={[]} onClose={vi.fn()} onSaved={vi.fn()} />);
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Add Certification/ })).toBeInTheDocument();
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Add' }));
     });
     expect(postJSON).not.toHaveBeenCalled();
-    expect(toast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Name is required' }));
+    expect(screen.getByText('Name is required.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Name *')).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('refuses an expiry before the issue date and a non-http verify URL', async () => {
+    render(
+      <CertEditor cert={EXISTING} allCerts={[EXISTING]} onClose={vi.fn()} onSaved={vi.fn()} />
+    );
+    fireEvent.change(screen.getByLabelText('Issue date'), { target: { value: '2027-06-01' } });
+    fireEvent.change(screen.getByLabelText('Verify URL'), { target: { value: 'credly.com/x' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    });
+    expect(sendJSON).not.toHaveBeenCalled();
+    expect(screen.getByText(/on or after the issue date/)).toBeInTheDocument();
+    expect(screen.getByText(/Must start with http/)).toBeInTheDocument();
   });
 
   it('creates a new cert once, however many clicks, and hands back the row', async () => {
@@ -114,14 +153,18 @@ describe('saving', () => {
     expect(sendJSON).toHaveBeenCalledWith(
       'cms/certifications/c1',
       'PATCH',
-      expect.objectContaining({ name: 'Azure Administrator', code: 'AZ-104' })
+      expect.objectContaining({
+        name: 'Azure Administrator',
+        code: 'AZ-104',
+        expDate: '2027-03-01',
+      })
     );
     expect(onClose).not.toHaveBeenCalled();
     expect(toast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Save failed' }));
   });
 });
 
-describe('image upload rules', () => {
+describe('image upload', () => {
   const pick = (file) => {
     const input = document.querySelector('input[type="file"]');
     fireEvent.change(input, { target: { files: [file] } });
@@ -137,22 +180,48 @@ describe('image upload rules', () => {
     expect(toast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Image too large' }));
     expect(postJSON).not.toHaveBeenCalled();
   });
+
+  it('deletes an upload that Cancel abandons, and keeps the one a save references', async () => {
+    postJSON.mockResolvedValue({ url: '/api/public/media/certifications/c1/images/badge-9.png' });
+    const onClose = vi.fn();
+    render(<CertEditor cert={EXISTING} allCerts={[]} onClose={onClose} onSaved={vi.fn()} />);
+    await act(async () => {
+      pick(new File(['x'], 'a.png', { type: 'image/png' }));
+    });
+    await waitFor(() =>
+      expect(postJSON).toHaveBeenCalledWith('cms/uploads/certifications', expect.anything())
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText('Image URL')).toHaveValue(
+        '/api/public/media/certifications/c1/images/badge-9.png'
+      )
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    });
+    expect(onClose).toHaveBeenCalled();
+    await waitFor(() =>
+      expect(sendJSON).toHaveBeenCalledWith('cms/certifications/images', 'DELETE', {
+        path: 'c1/images/badge-9.png',
+      })
+    );
+  });
 });
 
 describe('order and issuer helpers', () => {
   const all = [
     { _docId: 'a', issuer: 'Microsoft', display_order: 1, name: 'A' },
     { _docId: 'b', issuer: 'microsoft', display_order: 2, name: 'B' },
-    { _docId: 'c', issuer: 'AWS', display_order: 1, name: 'C' },
+    { _docId: 'c', issuer: 'AWS', display_order: 4, name: 'C' },
     { _docId: 'd', issuer: 'Unknown' },
   ];
 
-  it('suggests the first order no sibling from the same issuer uses', () => {
-    const siblings = siblingsOf(all, 'x', 'Microsoft');
-    expect(siblings.map((s) => s._docId)).toEqual(['a', 'b']);
+  it('reads one global ladder across issuers and suggests the first free order on it', () => {
+    const siblings = siblingsOf(all, 'x');
+    expect(siblings.map((s) => s._docId)).toEqual(['a', 'b', 'c', 'd']);
     expect(nextFreeOrder(siblings)).toBe(3);
-    expect(siblingsOf(all, 'a', 'Microsoft').map((s) => s._docId)).toEqual(['b']);
-    expect(siblingsOf(all, 'a', '')).toEqual([]);
+    expect(siblingsOf(all, 'a').map((s) => s._docId)).toEqual(['b', 'c', 'd']);
+    expect(ladderWindow(siblings, 2, 1).map((s) => s._docId)).toEqual(['a', 'b', 'c']);
   });
 
   it('builds the issuer list from the collection, deduped case-insensitively', () => {

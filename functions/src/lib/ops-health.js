@@ -22,6 +22,9 @@
  *     stores null; `undefined` deletion is NOT used here on purpose.
  */
 import { randomUUID } from 'node:crypto';
+import { readConfigStamp } from './auth/http-route.js';
+import { ADMIN_CONFIG_PARTITION } from './cosmos-client.js';
+import { unresolvedSecretNames } from './secrets-health.js';
 
 const json = (status, body) => ({
   status,
@@ -47,42 +50,73 @@ export function getWorkflowAlertStatus(alert = {}) {
   return alert.status || (alert.active === false ? 'resolved' : 'open');
 }
 
-/** Per-action update payload for a workflow_alert doc (source :5907). */
-export function buildWorkflowAlertUpdates({
-  action,
-  nowIso,
-  actor,
-  normalizedResolutionNote,
-  alertData,
-}) {
-  const updates = { updatedAt: nowIso, updatedBy: actor };
-  if (action === 'acknowledge') {
-    updates.acknowledgedAt = nowIso;
-    updates.acknowledgedBy = actor;
-    updates.status = 'acknowledged';
-  } else if (action === 'resolve') {
-    updates.active = false;
-    updates.resolvedAt = nowIso;
-    updates.resolvedBy = actor;
-    updates.status = 'resolved';
-    updates.resolutionNote = normalizedResolutionNote;
+/**
+ * What each action writes onto a workflow_alert doc, beside the updatedAt /
+ * updatedBy stamp every action carries (source :5907). The keys are the
+ * actions updateWorkflowAlert accepts.
+ */
+const WORKFLOW_ALERT_ACTION_UPDATES = Object.freeze({
+  acknowledge: ({ nowIso, actor }) => ({
+    acknowledgedAt: nowIso,
+    acknowledgedBy: actor,
+    status: 'acknowledged',
+  }),
+  resolve: ({ nowIso, actor, normalizedResolutionNote, alertData }) => ({
+    active: false,
+    resolvedAt: nowIso,
+    resolvedBy: actor,
+    status: 'resolved',
+    resolutionNote: normalizedResolutionNote,
     // Cleared on resolve so the alert's next activation announces again
     // (lib/triggers/activation-notice.js).
-    updates.activationNotifiedAt = null;
-    if (!alertData?.acknowledgedAt) {
-      updates.acknowledgedAt = nowIso;
-      updates.acknowledgedBy = actor;
-    }
-  } else if (action === 'reopen') {
-    updates.active = true;
-    updates.status = 'open';
-    updates.resolvedAt = null;
-    updates.resolvedBy = null;
-    updates.resolutionNote = null;
+    activationNotifiedAt: null,
+    // Resolving an alert nobody acknowledged acknowledges it in the same write.
+    ...(alertData?.acknowledgedAt ? {} : { acknowledgedAt: nowIso, acknowledgedBy: actor }),
+  }),
+  reopen: () => ({
+    active: true,
+    status: 'open',
+    resolvedAt: null,
+    resolvedBy: null,
+    resolutionNote: null,
     // Reopen must announce: cleared in the same write that sets active.
-    updates.activationNotifiedAt = null;
+    activationNotifiedAt: null,
+  }),
+});
+
+/** The actions updateWorkflowAlert accepts, as its 400 lists them. */
+export const WORKFLOW_ALERT_ACTIONS = Object.freeze(Object.keys(WORKFLOW_ALERT_ACTION_UPDATES));
+
+/** Per-action update payload for a workflow_alert doc (source :5907). */
+export function buildWorkflowAlertUpdates(change) {
+  const { action, nowIso, actor } = change;
+  const forAction = Object.hasOwn(WORKFLOW_ALERT_ACTION_UPDATES, action)
+    ? WORKFLOW_ALERT_ACTION_UPDATES[action](change)
+    : {};
+  return { updatedAt: nowIso, updatedBy: actor, ...forAction };
+}
+
+/**
+ * The 400 an updateWorkflowAlert body earns before the alert is read, or
+ * null: both ids present, an action from the table, and a resolution note
+ * when resolving.
+ */
+export function alertUpdateRefusal({ alertId, action, normalizedResolutionNote }) {
+  if (!alertId || !action) {
+    return json(400, { error: 'alertId and action required' });
   }
-  return updates;
+  if (!WORKFLOW_ALERT_ACTIONS.includes(action)) {
+    return json(400, {
+      error: 'Invalid action',
+      validActions: [...WORKFLOW_ALERT_ACTIONS],
+    });
+  }
+  if (action === 'resolve' && !normalizedResolutionNote) {
+    return json(400, {
+      error: 'resolutionNote is required when resolving an alert',
+    });
+  }
+  return null;
 }
 
 const IMAGES_PROBE_BOUND = 2000;
@@ -93,18 +127,79 @@ const IMAGES_PROBE_BOUND = 2000;
  */
 const ORPHAN_PROBE_BATCH = 100;
 
+/** An image's content id as a key, or '' when it has none. */
+const contentIdOf = (image) => String(image?.contentId || '').trim();
+
+/**
+ * Orphan detection (T-711): how many generated images name a content
+ * document that no longer exists, or none at all.
+ *
+ * This used to be `Promise.all(generatedImages.map(… readDoc …))` — an
+ * unthrottled fan-out of up to IMAGES_PROBE_BOUND (2000) concurrent point
+ * reads, purely to produce one count. Every /status, /queue, /alerts,
+ * /digest and /ai reaches it, AND so does every free-form Telegram
+ * message, so one chat message could exhaust the RU budget the anonymous
+ * public list endpoints share and 429 the website.
+ *
+ * Two properties do the work. Images are keyed by contentId and a single
+ * content document can carry up to four generated images, so deduplicating
+ * removes most of the reads before any I/O. What remains is answered in
+ * batches with ARRAY_CONTAINS instead of one request each: ~2000 point
+ * reads become a handful of queries, and the count is identical.
+ */
+async function countOrphanedImages(store, generatedImages) {
+  const idsToProbe = [...new Set(generatedImages.map(contentIdOf))].filter(Boolean);
+  // An image with no contentId is an orphan by definition and needs no probe.
+  const missingIdCount = generatedImages.filter((image) => !contentIdOf(image)).length;
+
+  const existingIds = new Set();
+  for (let i = 0; i < idsToProbe.length; i += ORPHAN_PROBE_BATCH) {
+    const batch = idsToProbe.slice(i, i + ORPHAN_PROBE_BATCH);
+    const rows = await store.queryDocs(
+      'content',
+      'SELECT c.id FROM c WHERE ARRAY_CONTAINS(@ids, c.id)',
+      [{ name: '@ids', value: batch }]
+    );
+    for (const row of rows || []) existingIds.add(row.id);
+  }
+  return (
+    missingIdCount +
+    generatedImages.filter((image) => {
+      const contentId = contentIdOf(image);
+      return contentId && !existingIds.has(contentId);
+    }).length
+  );
+}
+
+/**
+ * The autonomous forge's rolling day bucket (content/forge.js) as the Health
+ * page shows it: when the forge last did anything, and how much today.
+ */
+function forgeSummary(forgeStats, lastCheckedAt) {
+  return {
+    updatedAt: forgeStats?.updatedAt ?? null,
+    todayDate: forgeStats?.today?.date ?? null,
+    forgedToday: Number(forgeStats?.today?.forged) || 0,
+    lastCheckedAt,
+  };
+}
+
 /**
  * @param {object} deps
  * @param {{ requireRole: Function }} deps.guard
  * @param {{ queryDocs: Function, readDoc: Function, upsertDoc: Function, patchDoc: Function }} deps.store
  * @param {() => Date} [deps.now]
  * @param {() => string} [deps.uuid]
+ * @param {Record<string, unknown>} [deps.env] the worker's environment, read
+ *   for the runtime configuration stamp and the unresolved Key Vault
+ *   references (ADR 0033 §1 Platform)
  */
 export function createOpsHealthHandlers({
   guard,
   store,
   now = () => new Date(),
   uuid = randomUUID,
+  env = process.env,
 }) {
   const count = async (where, params = []) => {
     const rows = await store.queryDocs(
@@ -122,8 +217,14 @@ export function createOpsHealthHandlers({
     const nowMs = nowDate.getTime();
     const breachCutoffIso = new Date(nowMs - 24 * 60 * 60 * 1000).toISOString();
 
-    const needsReviewIn = { name: '@nrStatuses', value: ['draft', 'ingested', 'inspected'] };
-    const stagedIn = { name: '@stagedStatuses', value: ['approved', 'published'] };
+    const needsReviewIn = {
+      name: '@nrStatuses',
+      value: ['draft', 'ingested', 'inspected'],
+    };
+    const stagedIn = {
+      name: '@stagedStatuses',
+      value: ['approved', 'published'],
+    };
 
     const [
       publishedCount,
@@ -136,6 +237,7 @@ export function createOpsHealthHandlers({
       alertRows,
       generatedImages,
       notifyState,
+      forgeStats,
     ] = await Promise.all([
       count("c.contentStatus = 'published'"),
       store.queryDocs(
@@ -163,18 +265,34 @@ export function createOpsHealthHandlers({
         []
       ),
       store.readDoc('system', 'notify_state', 'notify_state'),
+      // The autonomous forge's rolling day bucket (content/forge.js), so the
+      // Health page can say when the forge last did anything (ADR 0033).
+      store.readDoc('admin_config', 'forge_stats', ADMIN_CONFIG_PARTITION),
     ]);
+    const lastCheckedAt = nowDate.toISOString();
 
     const alerts = [...alertRows]
       .sort((a, b) => toMillis(b.updatedAt) - toMillis(a.updatedAt))
       .slice(0, 20);
 
     const missingSlugCount = publishedSlim.filter((d) => !d.slug && !d.Slug).length;
+    // `functionsConfigured` used to be the literal `true` — a placeholder the
+    // page rendered as "Functions URL Ready" whatever the worker's state
+    // (ADR 0033 §1 Platform). It is now derived: the runtime configuration
+    // stamp reached this process (T-513), and every Key Vault reference in
+    // its environment resolved (T-720). The names are the authenticated
+    // surface's to show — /api/health gives anonymous callers the count only.
+    const configStamp = readConfigStamp(env);
+    const unresolvedSecrets = unresolvedSecretNames(env);
     const readiness = {
-      functionsConfigured: true,
+      functionsConfigured: configStamp.generation !== 'unset' && unresolvedSecrets.length === 0,
+      configGeneration: configStamp.generation,
+      configWriter: configStamp.writer,
+      unresolvedSecrets,
       publishedItems: publishedCount,
       missingSlugCount,
       rssSources: rssCount,
+      lastCheckedAt,
     };
 
     const digestData = digestDoc || latestDigestRows[0] || null;
@@ -193,44 +311,7 @@ export function createOpsHealthHandlers({
         getWorkflowAlertStatus(alert) !== 'resolved'
     ).length;
 
-    // Orphan detection (T-711).
-    //
-    // This used to be `Promise.all(generatedImages.map(… readDoc …))` — an
-    // unthrottled fan-out of up to IMAGES_PROBE_BOUND (2000) concurrent point
-    // reads, purely to produce one count. Every /status, /queue, /alerts,
-    // /digest and /ai reaches it, AND so does every free-form Telegram
-    // message, so one chat message could exhaust the RU budget the anonymous
-    // public list endpoints share and 429 the website.
-    //
-    // Two properties do the work. Images are keyed by contentId and a single
-    // content document can carry up to four generated images, so deduplicating
-    // removes most of the reads before any I/O. What remains is answered in
-    // batches with ARRAY_CONTAINS instead of one request each: ~2000 point
-    // reads become a handful of queries, and the count is identical.
-    const idsToProbe = [
-      ...new Set(generatedImages.map((image) => String(image?.contentId || '').trim())),
-    ].filter(Boolean);
-    // An image with no contentId is an orphan by definition and needs no probe.
-    const missingIdCount = generatedImages.filter(
-      (image) => !String(image?.contentId || '').trim()
-    ).length;
-
-    const existingIds = new Set();
-    for (let i = 0; i < idsToProbe.length; i += ORPHAN_PROBE_BATCH) {
-      const batch = idsToProbe.slice(i, i + ORPHAN_PROBE_BATCH);
-      const rows = await store.queryDocs(
-        'content',
-        'SELECT c.id FROM c WHERE ARRAY_CONTAINS(@ids, c.id)',
-        [{ name: '@ids', value: batch }]
-      );
-      for (const row of rows || []) existingIds.add(row.id);
-    }
-    const orphanedGeneratedImages =
-      missingIdCount +
-      generatedImages.filter((image) => {
-        const contentId = String(image?.contentId || '').trim();
-        return contentId && !existingIds.has(contentId);
-      }).length;
+    const orphanedGeneratedImages = await countOrphanedImages(store, generatedImages);
 
     const operationalSignals = {
       queueBreachCount,
@@ -242,16 +323,29 @@ export function createOpsHealthHandlers({
         digestData?.publishingOps?.status === 'success'
           ? (digestData?.publishingOps?.lastRunAt ?? null)
           : null,
+      lastCheckedAt,
+    };
+
+    // What the generated-images read already fetched, counted rather than
+    // discarded: the only storage figure this snapshot can give cheaply. The
+    // read is bounded, so `bounded` says when the count is a floor.
+    const storage = {
+      generatedImages: generatedImages.length,
+      bounded: generatedImages.length >= IMAGES_PROBE_BOUND,
+      lastCheckedAt,
     };
 
     return {
       success: true,
-      generatedAt: nowDate.toISOString(),
+      generatedAt: lastCheckedAt,
+      lastCheckedAt,
       readiness,
-      digest: digestData,
+      digest: digestData ? { ...digestData, lastCheckedAt } : null,
       alerts,
       operationalSignals,
-      telegramNotifyState: notifyState || {},
+      storage,
+      forge: forgeSummary(forgeStats, lastCheckedAt),
+      telegramNotifyState: { ...(notifyState || {}), lastCheckedAt },
     };
   }
 
@@ -292,18 +386,8 @@ export function createOpsHealthHandlers({
         const body = (await request.json().catch(() => null)) || {};
         const { alertId, action, resolutionNote = '' } = body;
         const normalizedResolutionNote = String(resolutionNote || '').trim();
-        if (!alertId || !action) {
-          return json(400, { error: 'alertId and action required' });
-        }
-        if (!['acknowledge', 'resolve', 'reopen'].includes(action)) {
-          return json(400, {
-            error: 'Invalid action',
-            validActions: ['acknowledge', 'resolve', 'reopen'],
-          });
-        }
-        if (action === 'resolve' && !normalizedResolutionNote) {
-          return json(400, { error: 'resolutionNote is required when resolving an alert' });
-        }
+        const refused = alertUpdateRefusal({ alertId, action, normalizedResolutionNote });
+        if (refused) return refused;
 
         const alertData = await store.readDoc('workflow_alerts', alertId, alertId);
         if (!alertData) {
@@ -334,14 +418,20 @@ export function createOpsHealthHandlers({
           userName: user.name || null,
           userEmail: user.email || null,
           changes: {
-            before: { active: alertData?.active ?? true, status: alertData?.status || 'open' },
+            before: {
+              active: alertData?.active ?? true,
+              status: alertData?.status || 'open',
+            },
             after: updates,
             changedFields: Object.keys(updates),
             notes: normalizedResolutionNote,
           },
           ipAddress: null, // see content-update.js — no trustworthy source yet
           userAgent: request.headers?.get?.('user-agent') || null,
-          metadata: { authMethod: 'entra_bearer_token', alertType: alertData?.alertType || null },
+          metadata: {
+            authMethod: 'entra_bearer_token',
+            alertType: alertData?.alertType || null,
+          },
           compliance: {
             dataClassification: 'internal',
             retentionMonths: 24,

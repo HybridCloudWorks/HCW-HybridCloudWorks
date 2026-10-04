@@ -6,6 +6,7 @@ import {
   parseJsonWithFallbacks,
   isRetryableError,
   getCostEstimate,
+  isPriced,
   buildGroundedPrompt,
   buildGroundedRequest,
   isYouTubeVideoUrl,
@@ -16,8 +17,16 @@ import {
   PROVIDERS,
 } from './router.js';
 
-const ok = (body) => ({ ok: true, status: 200, text: async () => JSON.stringify(body) });
-const fail = (status, body = {}) => ({ ok: false, status, text: async () => JSON.stringify(body) });
+const ok = (body) => ({
+  ok: true,
+  status: 200,
+  text: async () => JSON.stringify(body),
+});
+const fail = (status, body = {}) => ({
+  ok: false,
+  status,
+  text: async () => JSON.stringify(body),
+});
 const noSleep = vi.fn(async () => {});
 const quiet = { warn: vi.fn() };
 
@@ -27,12 +36,25 @@ const openaiReply = (text, usage = { prompt_tokens: 10, completion_tokens: 5 }) 
   ok({ choices: [{ message: { content: text } }], usage });
 const geminiReply = (
   text,
-  usage = { promptTokenCount: 10, candidatesTokenCount: 3, thoughtsTokenCount: 2 }
-) => ok({ candidates: [{ content: { parts: [{ text }] } }], usageMetadata: usage });
+  usage = {
+    promptTokenCount: 10,
+    candidatesTokenCount: 3,
+    thoughtsTokenCount: 2,
+  }
+) =>
+  ok({
+    candidates: [{ content: { parts: [{ text }] } }],
+    usageMetadata: usage,
+  });
 
 describe('provider resolution — by key presence', () => {
   it('no key → no provider, and the generate calls fail with AI_NOT_CONFIGURED', async () => {
-    const r = createAiRouter({ env: {}, fetch: vi.fn(), sleep: noSleep, log: quiet });
+    const r = createAiRouter({
+      env: {},
+      fetch: vi.fn(),
+      sleep: noSleep,
+      log: quiet,
+    });
     expect(r.availableProviders()).toEqual([]);
     expect(r.getActiveAiProvider()).toBeNull();
     await expect(r.generateJsonResponse({ prompt: 'x' })).rejects.toMatchObject({
@@ -49,7 +71,10 @@ describe('provider resolution — by key presence', () => {
     const env = { OPENAI_API_KEY: 'o', ANTHROPIC_API_KEY: 'a' };
     expect(createAiRouter({ env, log: quiet }).getActiveAiProvider()).toBe('openai');
     expect(
-      createAiRouter({ env: { ...env, GEMINI_API_KEY: 'g' }, log: quiet }).getActiveAiProvider()
+      createAiRouter({
+        env: { ...env, GEMINI_API_KEY: 'g' },
+        log: quiet,
+      }).getActiveAiProvider()
     ).toBe('gemini');
     expect(
       createAiRouter({
@@ -102,7 +127,10 @@ describe('request shaping', () => {
     expect(init.headers['x-api-key']).toBe('a');
     const body = JSON.parse(init.body);
     expect(body.model).toBe('claude-sonnet-4-6');
-    expect(body.system[0]).toMatchObject({ text: 'S', cache_control: { type: 'ephemeral' } });
+    expect(body.system[0]).toMatchObject({
+      text: 'S',
+      cache_control: { type: 'ephemeral' },
+    });
     expect(body.system[1].text).toMatch(/only valid JSON/);
     expect(usageOut[0]).toMatchObject({
       provider: 'anthropic',
@@ -123,16 +151,30 @@ describe('request shaping', () => {
     });
     expect(await r.generateJsonResponse({ prompt: 'p', systemPrompt: 'S' })).toEqual({ b: 2 });
     const body = JSON.parse(fetch.mock.calls[0][1].body);
-    expect(body).toMatchObject({ model: 'gpt-custom', response_format: { type: 'json_object' } });
+    expect(body).toMatchObject({
+      model: 'gpt-custom',
+      response_format: { type: 'json_object' },
+    });
     expect(body.messages.map((m) => m.role)).toEqual(['system', 'user']);
     expect(fetch.mock.calls[0][1].headers.Authorization).toBe('Bearer o');
   });
 
   it('gemini: public API with the key header, JSON mime type, reasoning tokens counted as output', async () => {
     const fetch = vi.fn(async () => geminiReply('{"c":3}'));
-    const r = createAiRouter({ env: { GEMINI_API_KEY: 'g' }, fetch, sleep: noSleep, log: quiet });
+    const r = createAiRouter({
+      env: { GEMINI_API_KEY: 'g' },
+      fetch,
+      sleep: noSleep,
+      log: quiet,
+    });
     const usageOut = [];
-    expect(await r.generateJsonResponse({ prompt: 'p', systemPrompt: 'S', usageOut })).toEqual({
+    expect(
+      await r.generateJsonResponse({
+        prompt: 'p',
+        systemPrompt: 'S',
+        usageOut,
+      })
+    ).toEqual({
       c: 3,
     });
     const [url, init] = fetch.mock.calls[0];
@@ -166,7 +208,10 @@ describe('request shaping', () => {
     }).generateTextResponse({ parts });
     expect(JSON.parse(a.mock.calls[0][1].body).messages[0].content).toEqual([
       { type: 'text', text: 'look' },
-      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } },
+      {
+        type: 'image',
+        source: { type: 'base64', media_type: 'image/png', data: 'AAAA' },
+      },
     ]);
     const o = vi.fn(async () => openaiReply('ok'));
     await createAiRouter({
@@ -190,7 +235,12 @@ describe('resilience', () => {
       .mockResolvedValueOnce(fail(503))
       .mockResolvedValueOnce(anthropicReply('done'));
     const sleep = vi.fn(async () => {});
-    const r = createAiRouter({ env: { ANTHROPIC_API_KEY: 'a' }, fetch, sleep, log: quiet });
+    const r = createAiRouter({
+      env: { ANTHROPIC_API_KEY: 'a' },
+      fetch,
+      sleep,
+      log: quiet,
+    });
     expect(await r.generateTextResponse({ prompt: 'p' })).toBe('done');
     expect(sleep.mock.calls.map((c) => c[0])).toEqual([2000, 4000]);
 
@@ -239,7 +289,9 @@ describe('resilience', () => {
 
   it('parseJsonWithFallbacks strips fences and extracts an embedded object', () => {
     expect(parseJsonWithFallbacks('```json\n{"a":1}\n```')).toEqual({ a: 1 });
-    expect(parseJsonWithFallbacks('Sure! {"a":\n"bc"} thanks')).toEqual({ a: 'b c' });
+    expect(parseJsonWithFallbacks('Sure! {"a":\n"bc"} thanks')).toEqual({
+      a: 'b c',
+    });
     expect(parseJsonWithFallbacks('')).toEqual({});
     expect(() => parseJsonWithFallbacks('no json here')).toThrow();
   });
@@ -248,7 +300,12 @@ describe('resilience', () => {
 describe('callProvider (admin test path)', () => {
   it('requires an explicit, configured provider and returns text with token counts', async () => {
     const fetch = vi.fn(async () => openaiReply('hi', { prompt_tokens: 7, completion_tokens: 2 }));
-    const r = createAiRouter({ env: { OPENAI_API_KEY: 'o' }, fetch, sleep: noSleep, log: quiet });
+    const r = createAiRouter({
+      env: { OPENAI_API_KEY: 'o' },
+      fetch,
+      sleep: noSleep,
+      log: quiet,
+    });
     expect(await r.callProvider({ provider: 'openai', prompt: 'p' })).toEqual({
       text: 'hi',
       promptTokens: 7,
@@ -311,7 +368,11 @@ describe('cost table (ported from upstream ai-model-router.cost.test.js)', () =>
 });
 
 describe('stored configuration, applied end to end', () => {
-  const keys = { GEMINI_API_KEY: 'g', OPENAI_API_KEY: 'o', ANTHROPIC_API_KEY: 'a' };
+  const keys = {
+    GEMINI_API_KEY: 'g',
+    OPENAI_API_KEY: 'o',
+    ANTHROPIC_API_KEY: 'a',
+  };
 
   /** A store whose ai_providers rows and ai-features doc are given inline. */
   const storeOf = (providers, features = null) => ({
@@ -338,7 +399,12 @@ describe('stored configuration, applied end to end', () => {
 
   it('routes to Gemini by default when every key is present', async () => {
     const fetchImpl = spyFetch();
-    const r = createAiRouter({ env: keys, fetch: fetchImpl, sleep: noSleep, log: quiet });
+    const r = createAiRouter({
+      env: keys,
+      fetch: fetchImpl,
+      sleep: noSleep,
+      log: quiet,
+    });
     await r.generateJsonResponse({ prompt: 'x' });
     expect(fetchImpl.host()).toBe('generativelanguage.googleapis.com');
   });
@@ -407,9 +473,12 @@ describe('stored configuration, applied end to end', () => {
       log: quiet,
       store: storeOf([], { features: { critique: false } }),
     });
-    await expect(r.generateJsonResponse({ prompt: 'x', feature: 'critique' })).rejects.toMatchObject(
-      { code: 'AI_FEATURE_DISABLED', feature: 'critique' }
-    );
+    await expect(
+      r.generateJsonResponse({ prompt: 'x', feature: 'critique' })
+    ).rejects.toMatchObject({
+      code: 'AI_FEATURE_DISABLED',
+      feature: 'critique',
+    });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
@@ -422,7 +491,9 @@ describe('stored configuration, applied end to end', () => {
       log: quiet,
       store: storeOf([], { features: { critique: false } }),
     });
-    await expect(r.generateJsonResponse({ prompt: 'x', feature: 'inspector' })).resolves.toEqual({});
+    await expect(r.generateJsonResponse({ prompt: 'x', feature: 'inspector' })).resolves.toEqual(
+      {}
+    );
   });
 
   it('says "disabled in the portal", not "not configured", when all providers are off', async () => {
@@ -467,7 +538,11 @@ describe('stored configuration, applied end to end', () => {
 });
 
 describe('failover — "order of preference" has to mean preference', () => {
-  const keys = { GEMINI_API_KEY: 'g', OPENAI_API_KEY: 'o', ANTHROPIC_API_KEY: 'a' };
+  const keys = {
+    GEMINI_API_KEY: 'g',
+    OPENAI_API_KEY: 'o',
+    ANTHROPIC_API_KEY: 'a',
+  };
   const HOSTS = {
     gemini: 'generativelanguage.googleapis.com',
     openai: 'api.openai.com',
@@ -506,7 +581,12 @@ describe('failover — "order of preference" has to mean preference', () => {
   }
 
   const router = (fetchImpl, extraEnv = {}) =>
-    createAiRouter({ env: { ...keys, ...extraEnv }, fetch: fetchImpl, sleep: noSleep, log: quiet });
+    createAiRouter({
+      env: { ...keys, ...extraEnv },
+      fetch: fetchImpl,
+      sleep: noSleep,
+      log: quiet,
+    });
 
   it('falls through to OpenAI when Gemini rejects the model as unknown', async () => {
     // The exact risk that prompted this: the Gemini model ids were ported from
@@ -549,7 +629,9 @@ describe('failover — "order of preference" has to mean preference', () => {
     // provider would defeat the reason someone set it.
     const fetchImpl = fetchFailing(['anthropic'], 404, 'unknown model');
     await expect(
-      router(fetchImpl, { CONTENTFORGE_AI_PROVIDER: 'anthropic' }).generateTextResponse({
+      router(fetchImpl, {
+        CONTENTFORGE_AI_PROVIDER: 'anthropic',
+      }).generateTextResponse({
         prompt: 'x',
       })
     ).rejects.toThrow(/404/);
@@ -560,7 +642,10 @@ describe('failover — "order of preference" has to mean preference', () => {
     // usageOut is what drafting.js and inspect.js persist and the portal shows.
     const fetchImpl = fetchFailing(['gemini'], 404, 'unknown model');
     const usage = [];
-    await router(fetchImpl).generateTextResponse({ prompt: 'x', usageOut: usage });
+    await router(fetchImpl).generateTextResponse({
+      prompt: 'x',
+      usageOut: usage,
+    });
     expect(usage.at(-1).provider).toBe('openai');
   });
 
@@ -583,7 +668,12 @@ describe('failover — "order of preference" has to mean preference', () => {
   it('warns when it falls through, so a broken provider is not silently paid around', async () => {
     const log = { warn: vi.fn() };
     const fetchImpl = fetchFailing(['gemini'], 404, 'unknown model');
-    await createAiRouter({ env: keys, fetch: fetchImpl, sleep: noSleep, log }).generateTextResponse({
+    await createAiRouter({
+      env: keys,
+      fetch: fetchImpl,
+      sleep: noSleep,
+      log,
+    }).generateTextResponse({
       prompt: 'x',
     });
     expect(log.warn).toHaveBeenCalledWith(expect.stringMatching(/gemini could not serve/i));
@@ -646,7 +736,10 @@ describe('reporting a credential verdict to the API-keys page', () => {
         onKeyVerdict,
       });
       await expect(r.generateJsonResponse({ prompt: 'p' })).rejects.toThrow();
-      expect(onKeyVerdict).toHaveBeenCalledWith('GEMINI_API_KEY', { ok: false, status });
+      expect(onKeyVerdict).toHaveBeenCalledWith('GEMINI_API_KEY', {
+        ok: false,
+        status,
+      });
     }
   });
 
@@ -699,8 +792,17 @@ describe('a dropped part is impossible (#433)', () => {
   // filter it out, so a `fileData` part reached the model as nothing and the
   // model answered without it. A happy-path test cannot notice that; these
   // assert the refusal, and that the refusal neither retries nor fails over.
-  const keys = { GEMINI_API_KEY: 'g', OPENAI_API_KEY: 'o', ANTHROPIC_API_KEY: 'a' };
-  const fileData = { fileData: { fileUri: 'https://www.youtube.com/watch?v=abc', mimeType: 'video/*' } };
+  const keys = {
+    GEMINI_API_KEY: 'g',
+    OPENAI_API_KEY: 'o',
+    ANTHROPIC_API_KEY: 'a',
+  };
+  const fileData = {
+    fileData: {
+      fileUri: 'https://www.youtube.com/watch?v=abc',
+      mimeType: 'video/*',
+    },
+  };
   const unknown = { junk: true };
 
   for (const provider of ['gemini', 'openai', 'anthropic']) {
@@ -749,9 +851,12 @@ describe('a dropped part is impossible (#433)', () => {
     const r = createAiRouter({ env: keys, fetch, sleep: noSleep, log: quiet });
     await expect(r.generateTextResponse({ parts: [fileData] })).rejects.toThrow(/gemini/);
     expect(fetch).not.toHaveBeenCalled();
-    expect(isRetryableError({ status: 400, message: 'Cannot send a prompt part to gemini' })).toBe(
-      false
-    );
+    expect(
+      isRetryableError({
+        status: 400,
+        message: 'Cannot send a prompt part to gemini',
+      })
+    ).toBe(false);
   });
 });
 
@@ -850,18 +955,18 @@ describe('source grounding — validation (#433)', () => {
   });
 
   it('a YouTube URL must be a video, and only a YouTube video may be', () => {
-    expect(() =>
-      validateGroundingSources([page('https://www.youtube.com/watch?v=abc')])
-    ).toThrow(/YouTube URL given as kind 'page'/);
-    expect(() => validateGroundingSources([page('https://www.youtube.com/playlist?list=x')])).toThrow(
+    expect(() => validateGroundingSources([page('https://www.youtube.com/watch?v=abc')])).toThrow(
       /YouTube URL given as kind 'page'/
     );
+    expect(() =>
+      validateGroundingSources([page('https://www.youtube.com/playlist?list=x')])
+    ).toThrow(/YouTube URL given as kind 'page'/);
     expect(() => validateGroundingSources([video('https://vimeo.com/123')])).toThrow(
       /is kind 'video' but is not a YouTube video URL/
     );
-    expect(() => validateGroundingSources([video('https://www.youtube.com/playlist?list=x')])).toThrow(
-      /is kind 'video' but is not a YouTube video URL/
-    );
+    expect(() =>
+      validateGroundingSources([video('https://www.youtube.com/playlist?list=x')])
+    ).toThrow(/is kind 'video' but is not a YouTube video URL/);
   });
 
   it('refuses over the cap in a sentence rather than truncating', () => {
@@ -869,13 +974,17 @@ describe('source grounding — validation (#433)', () => {
       page(`https://example.com/${i}`)
     );
     expect(() => validateGroundingSources(pages)).toThrow(
-      new RegExp(`at most ${GROUNDING_LIMITS.pages} pages.*${GROUNDING_LIMITS.pages + 1} distinct pages`)
+      new RegExp(
+        `at most ${GROUNDING_LIMITS.pages} pages.*${GROUNDING_LIMITS.pages + 1} distinct pages`
+      )
     );
     const videos = Array.from({ length: GROUNDING_LIMITS.videos + 1 }, (_, i) =>
       video(`https://youtu.be/v${i}`)
     );
     expect(() => validateGroundingSources(videos)).toThrow(
-      new RegExp(`at most ${GROUNDING_LIMITS.videos} videos.*${GROUNDING_LIMITS.videos + 1} distinct videos`)
+      new RegExp(
+        `at most ${GROUNDING_LIMITS.videos} videos.*${GROUNDING_LIMITS.videos + 1} distinct videos`
+      )
     );
     // Exactly at the cap is fine, and duplicates do not count toward it.
     const atCap = [...pages.slice(0, GROUNDING_LIMITS.pages), pages[0]];
@@ -904,7 +1013,11 @@ describe('source grounding — validation (#433)', () => {
 });
 
 describe('source grounding — the call (#433)', () => {
-  const keys = { GEMINI_API_KEY: 'g', OPENAI_API_KEY: 'o', ANTHROPIC_API_KEY: 'a' };
+  const keys = {
+    GEMINI_API_KEY: 'g',
+    OPENAI_API_KEY: 'o',
+    ANTHROPIC_API_KEY: 'a',
+  };
   const INTERACTIONS = 'https://generativelanguage.googleapis.com/v1beta/interactions';
   const sources = [
     { kind: 'page', url: 'https://example.com/article' },
@@ -920,7 +1033,10 @@ describe('source grounding — the call (#433)', () => {
     ok({
       status: 'completed',
       steps: [
-        { type: 'url_context_result', result: [{ status: 'success', url: 'https://example.com/article' }] },
+        {
+          type: 'url_context_result',
+          result: [{ status: 'success', url: 'https://example.com/article' }],
+        },
         { type: 'model_output', content: [{ type: 'text', text }] },
       ],
       usage,
@@ -961,7 +1077,10 @@ describe('source grounding — the call (#433)', () => {
     ]);
     expect(body.tools).toEqual([{ type: 'url_context' }]);
     expect(body.system_instruction).toBe('S');
-    expect(body.response_format).toEqual({ type: 'text', mime_type: 'application/json' });
+    expect(body.response_format).toEqual({
+      type: 'text',
+      mime_type: 'application/json',
+    });
     // Not a field of the Interactions generation_config; must not be sent.
     expect(JSON.stringify(body)).not.toMatch(/temperature/);
   });
@@ -992,7 +1111,12 @@ describe('source grounding — the call (#433)', () => {
     const r = createAiRouter({ env: keys, fetch, sleep: noSleep, log: quiet });
     const usageOut = [];
     expect(
-      await r.generateGroundedJsonResponse({ prompt: 'p', sources, usageOut, feature: 'sourceGrounding' })
+      await r.generateGroundedJsonResponse({
+        prompt: 'p',
+        sources,
+        usageOut,
+        feature: 'sourceGrounding',
+      })
     ).toEqual({ title: 't' });
     // Tool-use tokens are the fetched pages — prompt side. Thoughts bill as output.
     expect(usageOut).toEqual([
@@ -1015,7 +1139,11 @@ describe('source grounding — the call (#433)', () => {
       log: quiet,
       store: storeOf([{ id: 'gemini', enabled: true, defaultModel: 'gemini-2.5-pro' }]),
     });
-    await pinned.generateGroundedJsonResponse({ prompt: 'p', sources, feature: 'sourceGrounding' });
+    await pinned.generateGroundedJsonResponse({
+      prompt: 'p',
+      sources,
+      feature: 'sourceGrounding',
+    });
     expect(JSON.parse(fetch.mock.calls.at(-1)[1].body).model).toBe('gemini-2.5-pro');
     await pinned.generateGroundedJsonResponse({
       prompt: 'p',
@@ -1036,10 +1164,16 @@ describe('source grounding — the call (#433)', () => {
         log: quiet,
       });
       await expect(
-        r.generateGroundedJsonResponse({ prompt: 'p', sources, feature: 'sourceGrounding' })
+        r.generateGroundedJsonResponse({
+          prompt: 'p',
+          sources,
+          feature: 'sourceGrounding',
+        })
       ).rejects.toMatchObject({
         code: 'AI_NOT_CONFIGURED',
-        message: expect.stringMatching(/Source grounding needs Gemini, and GEMINI_API_KEY is not set/),
+        message: expect.stringMatching(
+          /Source grounding needs Gemini, and GEMINI_API_KEY is not set/
+        ),
       });
       expect(fetch).not.toHaveBeenCalled();
     });
@@ -1054,10 +1188,16 @@ describe('source grounding — the call (#433)', () => {
         store: storeOf([{ id: 'gemini', enabled: false }]),
       });
       await expect(
-        r.generateGroundedJsonResponse({ prompt: 'p', sources, feature: 'sourceGrounding' })
+        r.generateGroundedJsonResponse({
+          prompt: 'p',
+          sources,
+          feature: 'sourceGrounding',
+        })
       ).rejects.toMatchObject({
         code: 'AI_NOT_CONFIGURED',
-        message: expect.stringMatching(/Source grounding needs Gemini; it is disabled in the admin portal/),
+        message: expect.stringMatching(
+          /Source grounding needs Gemini; it is disabled in the admin portal/
+        ),
       });
       expect(fetch).not.toHaveBeenCalled();
     });
@@ -1071,7 +1211,11 @@ describe('source grounding — the call (#433)', () => {
         log: quiet,
       });
       await expect(
-        r.generateGroundedJsonResponse({ prompt: 'p', sources, feature: 'sourceGrounding' })
+        r.generateGroundedJsonResponse({
+          prompt: 'p',
+          sources,
+          feature: 'sourceGrounding',
+        })
       ).rejects.toMatchObject({
         code: 'AI_NOT_CONFIGURED',
         message: expect.stringMatching(/CONTENTFORGE_AI_PROVIDER pins openai/),
@@ -1088,7 +1232,11 @@ describe('source grounding — the call (#433)', () => {
         log: quiet,
       });
       await expect(
-        r.generateGroundedJsonResponse({ prompt: 'p', sources, feature: 'sourceGrounding' })
+        r.generateGroundedJsonResponse({
+          prompt: 'p',
+          sources,
+          feature: 'sourceGrounding',
+        })
       ).resolves.toEqual({});
     });
 
@@ -1102,13 +1250,25 @@ describe('source grounding — the call (#433)', () => {
         store: storeOf([], { features: { sourceGrounding: false } }),
       });
       await expect(
-        r.generateGroundedJsonResponse({ prompt: 'p', sources, feature: 'sourceGrounding' })
-      ).rejects.toMatchObject({ code: 'AI_FEATURE_DISABLED', feature: 'sourceGrounding' });
+        r.generateGroundedJsonResponse({
+          prompt: 'p',
+          sources,
+          feature: 'sourceGrounding',
+        })
+      ).rejects.toMatchObject({
+        code: 'AI_FEATURE_DISABLED',
+        feature: 'sourceGrounding',
+      });
       expect(fetch).not.toHaveBeenCalled();
     });
 
     it('validation runs before configuration: a bad list is refused even with no key at all', async () => {
-      const r = createAiRouter({ env: {}, fetch: vi.fn(), sleep: noSleep, log: quiet });
+      const r = createAiRouter({
+        env: {},
+        fetch: vi.fn(),
+        sleep: noSleep,
+        log: quiet,
+      });
       await expect(
         r.generateGroundedJsonResponse({
           prompt: 'p',
@@ -1121,13 +1281,26 @@ describe('source grounding — the call (#433)', () => {
     it('Gemini rejects the key (401): the call fails; OpenAI and Anthropic are never fetched', async () => {
       const onKeyVerdict = vi.fn();
       const fetch = vi.fn(async () => fail(401, { error: { message: 'API key not valid' } }));
-      const r = createAiRouter({ env: keys, fetch, sleep: noSleep, log: quiet, onKeyVerdict });
+      const r = createAiRouter({
+        env: keys,
+        fetch,
+        sleep: noSleep,
+        log: quiet,
+        onKeyVerdict,
+      });
       await expect(
-        r.generateGroundedJsonResponse({ prompt: 'p', sources, feature: 'sourceGrounding' })
+        r.generateGroundedJsonResponse({
+          prompt: 'p',
+          sources,
+          feature: 'sourceGrounding',
+        })
       ).rejects.toThrow(/401/);
       const hosts = fetch.mock.calls.map((c) => new URL(c[0]).host);
       expect(hosts).toEqual(['generativelanguage.googleapis.com']);
-      expect(onKeyVerdict).toHaveBeenCalledWith('GEMINI_API_KEY', { ok: false, status: 401 });
+      expect(onKeyVerdict).toHaveBeenCalledWith('GEMINI_API_KEY', {
+        ok: false,
+        status: 401,
+      });
     });
   });
 
@@ -1139,7 +1312,11 @@ describe('source grounding — the call (#433)', () => {
     const sleep = vi.fn(async () => {});
     const r = createAiRouter({ env: keys, fetch, sleep, log: quiet });
     expect(
-      await r.generateGroundedJsonResponse({ prompt: 'p', sources, feature: 'sourceGrounding' })
+      await r.generateGroundedJsonResponse({
+        prompt: 'p',
+        sources,
+        feature: 'sourceGrounding',
+      })
     ).toEqual({ after: 'retry' });
     expect(sleep.mock.calls.map((c) => c[0])).toEqual([2000]);
     expect(fetch.mock.calls.map((c) => c[0])).toEqual([INTERACTIONS, INTERACTIONS]);
@@ -1147,19 +1324,36 @@ describe('source grounding — the call (#433)', () => {
 
   it('a status other than completed is an error naming the status and the reported reason', async () => {
     const failed = vi.fn(async () =>
-      interactionReply('', { status: 'failed', errors: [{ code: 13, message: 'video too long' }] })
+      interactionReply('', {
+        status: 'failed',
+        errors: [{ code: 13, message: 'video too long' }],
+      })
     );
     await expect(
-      createAiRouter({ env: keys, fetch: failed, sleep: noSleep, log: quiet }).generateGroundedJsonResponse(
-        { prompt: 'p', sources, feature: 'sourceGrounding' }
-      )
+      createAiRouter({
+        env: keys,
+        fetch: failed,
+        sleep: noSleep,
+        log: quiet,
+      }).generateGroundedJsonResponse({
+        prompt: 'p',
+        sources,
+        feature: 'sourceGrounding',
+      })
     ).rejects.toThrow(/status 'failed'.*video too long/);
 
     const incomplete = vi.fn(async () => interactionReply('{"cut":', { status: 'incomplete' }));
     await expect(
-      createAiRouter({ env: keys, fetch: incomplete, sleep: noSleep, log: quiet }).generateGroundedJsonResponse(
-        { prompt: 'p', sources, feature: 'sourceGrounding' }
-      )
+      createAiRouter({
+        env: keys,
+        fetch: incomplete,
+        sleep: noSleep,
+        log: quiet,
+      }).generateGroundedJsonResponse({
+        prompt: 'p',
+        sources,
+        feature: 'sourceGrounding',
+      })
     ).rejects.toThrow(/status 'incomplete'/);
   });
 
@@ -1167,7 +1361,12 @@ describe('source grounding — the call (#433)', () => {
     const fetch = vi.fn(async () => interactionReply('', { status: 'failed' }));
     const usageOut = [];
     await expect(
-      createAiRouter({ env: keys, fetch, sleep: noSleep, log: quiet }).generateGroundedJsonResponse({
+      createAiRouter({
+        env: keys,
+        fetch,
+        sleep: noSleep,
+        log: quiet,
+      }).generateGroundedJsonResponse({
         prompt: 'p',
         sources,
         usageOut,
@@ -1190,12 +1389,20 @@ describe('source grounding — the call (#433)', () => {
               { status: 'paywall', url: 'https://example.com/paid' },
             ],
           },
-          { type: 'model_output', content: [{ type: 'text', text: '{"ok":true}' }] },
+          {
+            type: 'model_output',
+            content: [{ type: 'text', text: '{"ok":true}' }],
+          },
         ],
       })
     );
     await expect(
-      createAiRouter({ env: keys, fetch, sleep: noSleep, log: quiet }).generateGroundedJsonResponse({
+      createAiRouter({
+        env: keys,
+        fetch,
+        sleep: noSleep,
+        log: quiet,
+      }).generateGroundedJsonResponse({
         prompt: 'p',
         sources: [...sources, { kind: 'page', url: 'https://example.com/paid' }],
         feature: 'sourceGrounding',
@@ -1206,7 +1413,12 @@ describe('source grounding — the call (#433)', () => {
   it('a reply with no parseable JSON is the parse error, with no repair round trip', async () => {
     const fetch = vi.fn(async () => interactionReply('nope'));
     await expect(
-      createAiRouter({ env: keys, fetch, sleep: noSleep, log: quiet }).generateGroundedJsonResponse({
+      createAiRouter({
+        env: keys,
+        fetch,
+        sleep: noSleep,
+        log: quiet,
+      }).generateGroundedJsonResponse({
         prompt: 'p',
         sources,
         feature: 'sourceGrounding',
@@ -1249,7 +1461,9 @@ describe('a time budget for synchronous callers (router header)', () => {
    */
   const nvidiaFirst = () => ({
     queryDocs: async () => [],
-    readDoc: async () => ({ placement: { nvidia: { forgeDrafting: 'first' } } }),
+    readDoc: async () => ({
+      placement: { nvidia: { forgeDrafting: 'first' } },
+    }),
   });
 
   const ANSWER = JSON.stringify({
@@ -1266,11 +1480,19 @@ describe('a time budget for synchronous callers (router header)', () => {
   function fetchWhereStuck(stuck) {
     const attempts = [];
     const impl = vi.fn((url, init) => {
-      const attempt = { provider: providerOf(url), startedAt: Date.now(), endedAt: null };
+      const attempt = {
+        provider: providerOf(url),
+        startedAt: Date.now(),
+        endedAt: null,
+      };
       attempts.push(attempt);
       if (!stuck.includes(attempt.provider)) {
         attempt.endedAt = Date.now();
-        return Promise.resolve({ ok: true, status: 200, text: async () => ANSWER });
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          text: async () => ANSWER,
+        });
       }
       return new Promise((_, reject) => {
         init.signal.addEventListener('abort', () => {
@@ -1300,7 +1522,12 @@ describe('a time budget for synchronous callers (router header)', () => {
     const fetchImpl = fetchWhereStuck(['nvidia']);
     const log = { warn: vi.fn() };
     const run = timed(
-      createAiRouter({ env: KEYS, fetch: fetchImpl, log, store: nvidiaFirst() }).generateJsonResponse({
+      createAiRouter({
+        env: KEYS,
+        fetch: fetchImpl,
+        log,
+        store: nvidiaFirst(),
+      }).generateJsonResponse({
         prompt: 'x',
         purpose: 'draft',
         feature: 'forgeDrafting',
@@ -1323,7 +1550,12 @@ describe('a time budget for synchronous callers (router header)', () => {
   it("with no budget, the background path keeps NVIDIA's full 120 s", async () => {
     vi.useFakeTimers();
     const fetchImpl = fetchWhereStuck(['nvidia']);
-    const call = createAiRouter({ env: KEYS, fetch: fetchImpl, log: quiet, store: nvidiaFirst() }).generateJsonResponse({
+    const call = createAiRouter({
+      env: KEYS,
+      fetch: fetchImpl,
+      log: quiet,
+      store: nvidiaFirst(),
+    }).generateJsonResponse({
       prompt: 'x',
       purpose: 'draft',
       feature: 'forgeDrafting',
@@ -1348,7 +1580,11 @@ describe('a time budget for synchronous callers (router header)', () => {
         env: { ...KEYS, CONTENTFORGE_AI_PROVIDER: provider },
         fetch: fetchImpl,
         log: quiet,
-      }).generateTextResponse({ prompt: 'x', feature: 'forgeDrafting', budgetMs: 10_000 });
+      }).generateTextResponse({
+        prompt: 'x',
+        feature: 'forgeDrafting',
+        budgetMs: 10_000,
+      });
       const settled = expect(call).rejects.toThrow('timeout after 10000 ms');
       await vi.advanceTimersByTimeAsync(10_000);
       await settled;
@@ -1362,7 +1598,12 @@ describe('a time budget for synchronous callers (router header)', () => {
       vi.useFakeTimers();
       const fetchImpl = fetchWhereStuck(['nvidia', 'gemini', 'openai', 'anthropic']);
       const run = timed(
-        createAiRouter({ env: KEYS, fetch: fetchImpl, log: quiet, store: nvidiaFirst() }).generateTextResponse({
+        createAiRouter({
+          env: KEYS,
+          fetch: fetchImpl,
+          log: quiet,
+          store: nvidiaFirst(),
+        }).generateTextResponse({
           prompt: 'x',
           feature: 'forgeDrafting',
           budgetMs,
@@ -1386,7 +1627,12 @@ describe('a time budget for synchronous callers (router header)', () => {
   it('running out names each provider tried and why, and those never reached', async () => {
     vi.useFakeTimers();
     const fetchImpl = fetchWhereStuck(['nvidia', 'gemini', 'openai', 'anthropic']);
-    const call = createAiRouter({ env: KEYS, fetch: fetchImpl, log: quiet, store: nvidiaFirst() }).generateTextResponse({
+    const call = createAiRouter({
+      env: KEYS,
+      fetch: fetchImpl,
+      log: quiet,
+      store: nvidiaFirst(),
+    }).generateTextResponse({
       prompt: 'x',
       feature: 'forgeDrafting',
       budgetMs: 60_000,
@@ -1402,7 +1648,12 @@ describe('a time budget for synchronous callers (router header)', () => {
     'a budget of %s ms is too short for one attempt: nothing is sent, and the error says so',
     async (budgetMs) => {
       const fetchImpl = vi.fn();
-      const call = createAiRouter({ env: KEYS, fetch: fetchImpl, log: quiet, store: nvidiaFirst() }).generateTextResponse({
+      const call = createAiRouter({
+        env: KEYS,
+        fetch: fetchImpl,
+        log: quiet,
+        store: nvidiaFirst(),
+      }).generateTextResponse({
         prompt: 'x',
         feature: 'forgeDrafting',
         budgetMs,
@@ -1426,9 +1677,17 @@ describe('a time budget for synchronous callers (router header)', () => {
         t += ms;
       });
       const fetchImpl = vi.fn(async (url) =>
-        providerOf(url) === 'openai' ? openaiReply('fine') : fail(503, { error: { message: 'overloaded' } })
+        providerOf(url) === 'openai'
+          ? openaiReply('fine')
+          : fail(503, { error: { message: 'overloaded' } })
       );
-      const r = createAiRouter({ env, fetch: fetchImpl, sleep, now: () => t, log: quiet });
+      const r = createAiRouter({
+        env,
+        fetch: fetchImpl,
+        sleep,
+        now: () => t,
+        log: quiet,
+      });
       const text = await r.generateTextResponse({ prompt: 'x', budgetMs });
       return {
         text,
@@ -1458,7 +1717,9 @@ describe('a time budget for synchronous callers (router header)', () => {
       t += ms;
     });
     const fetchImpl = vi.fn(async (url) =>
-      providerOf(url) === 'nvidia' ? fail(429, { error: { message: 'Too Many Requests' } }) : geminiReply('{}')
+      providerOf(url) === 'nvidia'
+        ? fail(429, { error: { message: 'Too Many Requests' } })
+        : geminiReply('{}')
     );
     const r = createAiRouter({
       env: { ...KEYS, NVIDIA_REQUESTS_PER_MINUTE: '3' },
@@ -1468,7 +1729,11 @@ describe('a time budget for synchronous callers (router header)', () => {
       log: quiet,
       store: nvidiaFirst(),
     });
-    await r.generateJsonResponse({ prompt: 'x', feature: 'forgeDrafting', budgetMs: 60_000 });
+    await r.generateJsonResponse({
+      prompt: 'x',
+      feature: 'forgeDrafting',
+      budgetMs: 60_000,
+    });
     expect(fetchImpl.mock.calls.map(([url]) => providerOf(url))).toEqual([
       'nvidia',
       'nvidia',
@@ -1481,7 +1746,11 @@ describe('a time budget for synchronous callers (router header)', () => {
     // sleeping or retrying, and fails over at once.
     fetchImpl.mockClear();
     sleep.mockClear();
-    await r.generateJsonResponse({ prompt: 'x', feature: 'forgeDrafting', budgetMs: 60_000 });
+    await r.generateJsonResponse({
+      prompt: 'x',
+      feature: 'forgeDrafting',
+      budgetMs: 60_000,
+    });
     expect(fetchImpl.mock.calls.map(([url]) => providerOf(url))).toEqual(['gemini']);
     expect(sleep).not.toHaveBeenCalled();
   });
@@ -1495,7 +1764,14 @@ describe('a time budget for synchronous callers (router header)', () => {
           ? fail(401, { error: { message: 'Unauthorized' } })
           : geminiReply('{"ok":true}')
       );
-      const r = createAiRouter({ env: KEYS, fetch: fetchImpl, sleep: noSleep, log: quiet, onKeyVerdict, store: nvidiaFirst() });
+      const r = createAiRouter({
+        env: KEYS,
+        fetch: fetchImpl,
+        sleep: noSleep,
+        log: quiet,
+        onKeyVerdict,
+        store: nvidiaFirst(),
+      });
       const result = await r.generateJsonResponse({
         prompt: 'x',
         feature: 'forgeDrafting',
@@ -1509,7 +1785,11 @@ describe('a time budget for synchronous callers (router header)', () => {
     const budgeted = await run(60_000);
     expect(budgeted).toEqual(background);
     expect(budgeted.usage).toEqual([
-      expect.objectContaining({ provider: 'gemini', promptTokens: 10, completionTokens: 5 }),
+      expect.objectContaining({
+        provider: 'gemini',
+        promptTokens: 10,
+        completionTokens: 5,
+      }),
     ]);
     expect(budgeted.verdicts).toEqual([
       ['NVIDIA_API_KEY', { ok: false, status: 401 }],
@@ -1541,5 +1821,296 @@ describe('a time budget for synchronous callers (router header)', () => {
     expect(await run(42_000)).toBe(1);
     // 20 s left: the repair runs.
     expect(await run(60_000)).toBe(2);
+  });
+});
+
+describe('per-task routing, applied end to end (ADR 0033 §4)', () => {
+  const keys = {
+    GEMINI_API_KEY: 'g',
+    OPENAI_API_KEY: 'o',
+    ANTHROPIC_API_KEY: 'a',
+  };
+  const HOSTS = {
+    'generativelanguage.googleapis.com': 'gemini',
+    'api.openai.com': 'openai',
+    'api.anthropic.com': 'anthropic',
+  };
+
+  /** Providers, features and routing documents, as the loader reads them. */
+  const storeOf = ({ providers = [], features = null, routing = null } = {}) => ({
+    queryDocs: vi.fn(async () => providers),
+    readDoc: vi.fn(async (_c, id) => (id === 'ai-routing' ? routing : features)),
+  });
+
+  function spyFetch() {
+    const calls = [];
+    const impl = vi.fn(async (url, init) => {
+      calls.push({
+        provider: HOSTS[new URL(url).host],
+        body: JSON.parse(init.body),
+      });
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        text: async () =>
+          JSON.stringify({
+            content: [{ type: 'text', text: '{}' }],
+            choices: [{ message: { content: '{}' } }],
+            candidates: [{ content: { parts: [{ text: '{}' }] } }],
+            usage: {
+              prompt_tokens: 10,
+              completion_tokens: 5,
+              input_tokens: 10,
+              output_tokens: 5,
+            },
+            usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 },
+          }),
+      };
+    });
+    impl.calls = calls;
+    return impl;
+  }
+
+  const router = (fetchImpl, store) =>
+    createAiRouter({
+      env: keys,
+      fetch: fetchImpl,
+      sleep: noSleep,
+      log: quiet,
+      store,
+    });
+
+  it('a routed feature is served by its primary provider, with the routed model, ahead of the global order', async () => {
+    const fetchImpl = spyFetch();
+    const r = router(
+      fetchImpl,
+      storeOf({
+        providers: [{ id: 'anthropic', defaultModel: 'claude-haiku-4-5' }],
+        routing: {
+          routes: {
+            forgeDrafting: { provider: 'anthropic', model: 'claude-opus-4-6' },
+          },
+        },
+      })
+    );
+    await r.generateJsonResponse({ prompt: 'x', feature: 'forgeDrafting' });
+    expect(fetchImpl.calls[0].provider).toBe('anthropic');
+    // The route's model beats the card's defaultModel.
+    expect(fetchImpl.calls[0].body.model).toBe('claude-opus-4-6');
+  });
+
+  it('a feature without a route keeps the global order (Simple mode)', async () => {
+    const fetchImpl = spyFetch();
+    const r = router(
+      fetchImpl,
+      storeOf({
+        routing: { routes: { forgeDrafting: { provider: 'anthropic' } } },
+      })
+    );
+    await r.generateJsonResponse({ prompt: 'x', feature: 'inspector' });
+    expect(fetchImpl.calls[0].provider).toBe('gemini');
+  });
+
+  it('a routed primary that is disabled is skipped for its fallback, and the rest of the order still follows', async () => {
+    const fetchImpl = spyFetch();
+    const r = router(
+      fetchImpl,
+      storeOf({
+        providers: [{ id: 'anthropic', enabled: false }],
+        routing: {
+          routes: {
+            telegram: {
+              provider: 'anthropic',
+              fallbacks: [{ provider: 'openai', model: 'gpt-5-mini' }],
+            },
+          },
+        },
+      })
+    );
+    const chain = await r.resolveProviderChain('telegram');
+    expect(chain.map((c) => c.provider)).toEqual(['openai', 'gemini']);
+    expect(chain[0].model).toBe('gpt-5-mini');
+    expect(quiet.warn).toHaveBeenCalledWith(
+      expect.stringContaining("'telegram' routes to anthropic")
+    );
+  });
+
+  it('an explicit model from the call site still wins over the route', async () => {
+    const fetchImpl = spyFetch();
+    const r = router(
+      fetchImpl,
+      storeOf({
+        routing: {
+          routes: { telegram: { provider: 'openai', model: 'gpt-5-mini' } },
+        },
+      })
+    );
+    await r.generateTextResponse({
+      prompt: 'x',
+      feature: 'telegram',
+      model: 'gpt-4o-mini',
+    });
+    expect(fetchImpl.calls[0].body.model).toBe('gpt-4o-mini');
+  });
+
+  it('CONTENTFORGE_AI_PROVIDER still pins one provider over a route', async () => {
+    const fetchImpl = spyFetch();
+    const r = createAiRouter({
+      env: { ...keys, CONTENTFORGE_AI_PROVIDER: 'gemini' },
+      fetch: fetchImpl,
+      sleep: noSleep,
+      log: quiet,
+      store: storeOf({
+        routing: { routes: { telegram: { provider: 'openai' } } },
+      }),
+    });
+    const chain = await r.resolveProviderChain('telegram');
+    expect(chain.map((c) => c.provider)).toEqual(['gemini']);
+  });
+});
+
+describe('every call records usage once (ADR 0033)', () => {
+  const keys = { GEMINI_API_KEY: 'g', OPENAI_API_KEY: 'o' };
+  const okFetch = () =>
+    vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      text: async () =>
+        JSON.stringify({
+          choices: [{ message: { content: 'hi' } }],
+          candidates: [{ content: { parts: [{ text: 'hi' }] } }],
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
+          usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 },
+        }),
+    }));
+  const storeWithUsage = () => ({
+    queryDocs: vi.fn(async () => []),
+    readDoc: vi.fn(async () => null),
+    upsertDoc: vi.fn(async (_c, row) => row),
+  });
+
+  it('writes one ai_usage row per call, sourced to the feature, even when the caller passes no usageOut', async () => {
+    const store = storeWithUsage();
+    const r = createAiRouter({
+      env: keys,
+      fetch: okFetch(),
+      sleep: noSleep,
+      log: quiet,
+      store,
+    });
+    await r.generateTextResponse({ prompt: 'x', feature: 'inspector' });
+    expect(store.upsertDoc).toHaveBeenCalledTimes(1);
+    const [container, row] = store.upsertDoc.mock.calls[0];
+    expect(container).toBe('ai_usage');
+    expect(row).toMatchObject({
+      provider: 'gemini',
+      source: 'ai:inspector',
+      promptTokens: 10,
+      completionTokens: 5,
+      totalTokens: 15,
+    });
+    expect(row.timestamp).toBeTruthy();
+  });
+
+  it('hands the caller its usageOut entries with the recorded row id, so a second record upserts rather than duplicates', async () => {
+    const store = storeWithUsage();
+    const r = createAiRouter({
+      env: keys,
+      fetch: okFetch(),
+      sleep: noSleep,
+      log: quiet,
+      store,
+    });
+    const usageOut = [];
+    await r.generateTextResponse({
+      prompt: 'x',
+      feature: 'podcastScript',
+      usageOut,
+    });
+    expect(usageOut).toHaveLength(1);
+    expect(usageOut[0].recordedRowId).toBe(store.upsertDoc.mock.calls[0][1].id);
+    expect(usageOut[0]).toMatchObject({
+      provider: 'gemini',
+      promptTokens: 10,
+      completionTokens: 5,
+    });
+  });
+
+  it('with no store, writes nothing and still fills usageOut (unit-test routers)', async () => {
+    const r = createAiRouter({
+      env: keys,
+      fetch: okFetch(),
+      sleep: noSleep,
+      log: quiet,
+    });
+    const usageOut = [];
+    await r.generateTextResponse({
+      prompt: 'x',
+      feature: 'inspector',
+      usageOut,
+    });
+    expect(usageOut).toHaveLength(1);
+    expect(usageOut[0].recordedRowId).toBeUndefined();
+  });
+
+  it('a failed recording never fails the call', async () => {
+    const store = {
+      ...storeWithUsage(),
+      upsertDoc: vi.fn(async () => {
+        throw new Error('cosmos down');
+      }),
+    };
+    const r = createAiRouter({
+      env: keys,
+      fetch: okFetch(),
+      sleep: noSleep,
+      log: quiet,
+      store,
+    });
+    await expect(r.generateTextResponse({ prompt: 'x', feature: 'inspector' })).resolves.toBe('hi');
+  });
+});
+
+describe('unpriced models (ADR 0033)', () => {
+  it('gpt-5-mini and gpt-5-nano cost 0 and are reported unpriced, instead of being charged at gpt-4o', () => {
+    expect(isPriced('openai', 'gpt-5-mini')).toBe(false);
+    expect(isPriced('openai', 'gpt-5-nano')).toBe(false);
+    expect(getCostEstimate('openai', 'gpt-5-mini', 1_000_000, 1_000_000)).toBe(0);
+    // A model with no row at all still prices at the provider default.
+    expect(isPriced('openai', 'gpt-4.1-something')).toBe(true);
+    expect(getCostEstimate('openai', 'gpt-4.1-something', 1_000_000, 0)).toBe(5);
+    expect(isPriced('gemini', 'gemini-3.6-flash')).toBe(true);
+  });
+
+  it('the usage entry a call pushes carries the flag', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      text: async () =>
+        JSON.stringify({
+          choices: [{ message: { content: 'hi' } }],
+          usage: { prompt_tokens: 1, completion_tokens: 1 },
+        }),
+    }));
+    const r = createAiRouter({
+      env: { OPENAI_API_KEY: 'o' },
+      fetch: fetchImpl,
+      sleep: noSleep,
+      log: quiet,
+    });
+    const usageOut = [];
+    await r.generateTextResponse({
+      prompt: 'x',
+      feature: 'telegram',
+      usageOut,
+    });
+    expect(usageOut[0]).toMatchObject({
+      model: 'gpt-5-nano',
+      costUsd: 0,
+      unpriced: true,
+    });
   });
 });

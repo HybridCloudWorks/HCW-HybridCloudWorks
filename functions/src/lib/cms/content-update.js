@@ -27,27 +27,108 @@
  *     (admins/{oid} record), the same authority the source's user.adminRole
  *     carried.
  */
-import { randomUUID } from 'node:crypto';
-import { normalizeContentBodyFields } from './content-quality.js';
-import { normalizePublishTarget } from './publish-targets.js';
+import { randomUUID } from "node:crypto";
+import { actorName } from "../auth/actor-name.js";
+import { normalizeContentBodyFields } from "./content-quality.js";
+import { normalizePublishTarget } from "./publish-targets.js";
 import {
   validateAndNormalizeUpdateContentItemUpdates,
   normalizeContentUpdatesForBlogOnly,
   normalizeStatusForBlogOnly,
   normalizeCurrentStatusForBlogOnly,
-} from './content-update-validation.js';
+} from "./content-update-validation.js";
 import {
   DRAFTS_ONLY_STATUSES,
   VALID_TRANSITIONS,
   buildStatusUpdateData,
   validateTransitionRequest,
-} from './content-status.js';
+} from "./content-status.js";
+import {
+  TaxonomyFieldError,
+  hasTaxonomyFields,
+  validateTaxonomyFieldsWithStore,
+} from "./taxonomy-fields.js";
 
 const json = (status, body) => ({
   status,
-  headers: { 'Content-Type': 'application/json' },
+  headers: { "Content-Type": "application/json" },
   body: JSON.stringify(body),
 });
+
+/**
+ * The first non-empty value of `keys` across `records` in order — the
+ * version row reads the update first, then the stored document, under
+ * either spelling of the field — or "".
+ */
+function firstFilled(records, keys) {
+  for (const record of records) {
+    const value = keys.map((key) => record[key]).find(Boolean);
+    if (value) return value;
+  }
+  return "";
+}
+
+/**
+ * The content id and the validated, normalised updates a body carries, or
+ * the 400 refusing it: a missing id or a non-object `updates`, then any
+ * rule the validator throws.
+ */
+function parseUpdateBody(body) {
+  const { contentId, updates = {} } = body || {};
+  if (!contentId || typeof updates !== "object") {
+    return {
+      error: json(400, { error: "contentId and updates object required" }),
+    };
+  }
+  let validatedUpdates;
+  try {
+    validatedUpdates = validateAndNormalizeUpdateContentItemUpdates(updates);
+  } catch (error) {
+    return { error: json(400, { error: String(error.message || error) }) };
+  }
+  return {
+    contentId,
+    normalizedUpdates: normalizeContentBodyFields(
+      normalizeContentUpdatesForBlogOnly(validatedUpdates),
+    ),
+  };
+}
+
+/**
+ * kind / ideaOrigin against the saved taxonomy (ADR 0033 §4), written onto
+ * `normalizedUpdates`. The current record is passed so a disabled id it
+ * already carries survives an edit of other fields; moving onto a disabled
+ * id is the 400 returned here. Null when nothing refuses.
+ */
+async function taxonomyRefusal(store, normalizedUpdates, currentData) {
+  if (!hasTaxonomyFields(normalizedUpdates)) return null;
+  try {
+    Object.assign(
+      normalizedUpdates,
+      await validateTaxonomyFieldsWithStore(store, normalizedUpdates, {
+        existing: currentData,
+      }),
+    );
+    return null;
+  } catch (error) {
+    if (error instanceof TaxonomyFieldError)
+      return json(400, { error: error.message });
+    throw error;
+  }
+}
+
+/**
+ * The stored document an update lands on, with the taxonomy fields of the
+ * update checked against it — or the 404 / 400 refusing the update.
+ */
+async function readUpdateTarget(store, contentId, normalizedUpdates) {
+  const currentData = await store.readDoc("content", contentId, contentId);
+  if (!currentData) {
+    return { error: json(404, { error: `Content ${contentId} not found` }) };
+  }
+  const refused = await taxonomyRefusal(store, normalizedUpdates, currentData);
+  return refused ? { error: refused } : { currentData };
+}
 
 /**
  * POST/PATCH updateContentItem — validated partial update + version history +
@@ -59,91 +140,84 @@ const json = (status, body) => ({
  * @param {() => Date} [deps.now]
  * @param {() => string} [deps.uuid]
  */
-export function createContentUpdateHandler({ guard, store, now = () => new Date(), uuid = randomUUID }) {
+export function createContentUpdateHandler({
+  guard,
+  store,
+  now = () => new Date(),
+  uuid = randomUUID,
+}) {
   return async function updateContentItem(request, context) {
-    const auth = await guard.requireRole(request, 'editor');
+    const auth = await guard.requireRole(request, "editor");
     if (auth.error) return auth.error;
     const { user } = auth;
 
     try {
-      const body = await request.json().catch(() => null);
-      const { contentId, updates = {} } = body || {};
-      if (!contentId || typeof updates !== 'object') {
-        return json(400, { error: 'contentId and updates object required' });
-      }
+      const parsed = parseUpdateBody(await request.json().catch(() => null));
+      if (parsed.error) return parsed.error;
+      const { contentId, normalizedUpdates } = parsed;
 
-      let validatedUpdates;
-      try {
-        validatedUpdates = validateAndNormalizeUpdateContentItemUpdates(updates);
-      } catch (error) {
-        return json(400, { error: String(error.message || error) });
-      }
-
-      const normalizedUpdates = normalizeContentBodyFields(
-        normalizeContentUpdatesForBlogOnly(validatedUpdates)
+      const target = await readUpdateTarget(
+        store,
+        contentId,
+        normalizedUpdates,
       );
+      if (target.error) return target.error;
+      const { currentData } = target;
 
-      const currentData = await store.readDoc('content', contentId, contentId);
-      if (!currentData) {
-        return json(404, { error: `Content ${contentId} not found` });
-      }
-
-      const editor = user.email || user.preferred_username || user.oid || user.sub || 'admin';
+      const editor = actorName(user);
       const nowIso = now().toISOString();
 
       // Content patch first — see the ordering note in the header.
-      await store.patchDoc('content', contentId, {
+      await store.patchDoc("content", contentId, {
         ...normalizedUpdates,
         updatedAt: nowIso,
         updatedBy: editor,
       });
 
-      await store.upsertDoc('content_versions', {
+      await store.upsertDoc("content_versions", {
         id: uuid(),
         contentId,
-        title:
-          normalizedUpdates.Title ||
-          normalizedUpdates.title ||
-          currentData.Title ||
-          currentData.title ||
-          '',
-        summary:
-          normalizedUpdates.Summary ||
-          normalizedUpdates.summary ||
-          currentData.Summary ||
-          currentData.summary ||
-          '',
-        draft:
-          normalizedUpdates.blogDraft ||
-          normalizedUpdates.content ||
-          currentData.blogDraft ||
-          currentData.content ||
-          '',
+        title: firstFilled(
+          [normalizedUpdates, currentData],
+          ["Title", "title"],
+        ),
+        summary: firstFilled(
+          [normalizedUpdates, currentData],
+          ["Summary", "summary"],
+        ),
+        draft: firstFilled(
+          [normalizedUpdates, currentData],
+          ["blogDraft", "content"],
+        ),
         updatedFields: Object.keys(normalizedUpdates),
         versionCreatedAt: nowIso,
         versionCreatedBy: editor,
-        versionReason: 'review_updated',
+        versionReason: "review_updated",
       });
 
-      await store.upsertDoc('admin_audit_logs', {
+      await store.upsertDoc("admin_audit_logs", {
         id: uuid(),
-        action: 'content_item_updated',
+        action: "content_item_updated",
         userId: user.oid || user.sub || null,
         userEmail: user.email || null,
         timestamp: nowIso,
         details: { contentId, updatedFields: Object.keys(normalizedUpdates) },
-        userAgent: request.headers?.get?.('user-agent') || null,
+        userAgent: request.headers?.get?.("user-agent") || null,
         contentId,
-        contentTitle: currentData.Title || currentData.title || '',
-        compliance: { schemaVersion: 1, detailsSanitized: true, identityVerified: true },
+        contentTitle: currentData.Title || currentData.title || "",
+        compliance: {
+          schemaVersion: 1,
+          detailsSanitized: true,
+          identityVerified: true,
+        },
       });
 
       return json(200, { success: true, contentId });
     } catch (error) {
-      context.error('updateContentItem failed:', error);
+      context.error("updateContentItem failed:", error);
       return json(500, {
-        error: 'Failed to update content item',
-        message: error?.message || 'Unknown error',
+        error: "Failed to update content item",
+        message: error?.message || "Unknown error",
       });
     }
   };
@@ -160,29 +234,38 @@ export function createContentUpdateHandler({ guard, store, now = () => new Date(
  * @returns {{ ok: true, contentId, from, to } |
  *           { ok: false, status: number, error: string, allowedTransitions?: string[] }}
  */
-export function createContentStatusTransitioner({ store, now = () => new Date(), uuid = randomUUID }) {
+export function createContentStatusTransitioner({
+  store,
+  now = () => new Date(),
+  uuid = randomUUID,
+}) {
   return async function applyContentStatusTransition({
     contentId,
     newStatus,
     publishTarget = null,
     markLive = null,
-    reviewNotes = '',
-    reviewedBy = 'admin',
+    reviewNotes = "",
+    reviewedBy = "admin",
     actor = {},
     userAgent = null,
-    authMethod = 'entra_bearer_token',
+    authMethod = "entra_bearer_token",
     legacyBlogId = null,
   }) {
     const normalizedStatus = normalizeStatusForBlogOnly(newStatus);
     const normalizedPublishTarget = normalizePublishTarget(publishTarget);
 
-    const data = await store.readDoc('content', contentId, contentId);
+    const data = await store.readDoc("content", contentId, contentId);
     if (!data) {
-      return { ok: false, status: 404, error: `Content ${contentId} not found` };
+      return {
+        ok: false,
+        status: 404,
+        error: `Content ${contentId} not found`,
+      };
     }
 
-    const currentStatus = data.contentStatus || 'ingested';
-    const normalizedCurrentStatus = normalizeCurrentStatusForBlogOnly(currentStatus);
+    const currentStatus = data.contentStatus || "ingested";
+    const normalizedCurrentStatus =
+      normalizeCurrentStatusForBlogOnly(currentStatus);
 
     // The Drafts stage's edges (drafting -> in_review, in_review -> drafting)
     // belong to lib/cms/drafts-handlers.js, which checks where the article
@@ -196,7 +279,7 @@ export function createContentStatusTransitioner({ store, now = () => new Date(),
       return {
         ok: false,
         status: 409,
-        code: 'DRAFTS_STAGE',
+        code: "DRAFTS_STAGE",
         error: `${normalizedCurrentStatus} → ${normalizedStatus} is a Drafts stage move; use /admin/drafts (Send to In Review or Back to Drafts).`,
       };
     }
@@ -212,31 +295,40 @@ export function createContentStatusTransitioner({ store, now = () => new Date(),
     }
 
     const nowDate = now();
-    const updateData = buildStatusUpdateData(data, normalizedStatus, reviewedBy, reviewNotes, {
-      publishTarget: normalizedPublishTarget,
-      markLive,
-      now: nowDate,
-    });
+    const updateData = buildStatusUpdateData(
+      data,
+      normalizedStatus,
+      reviewedBy,
+      reviewNotes,
+      {
+        publishTarget: normalizedPublishTarget,
+        markLive,
+        now: nowDate,
+      },
+    );
 
     // Enforce additional invariants tied to the state machine.
-    if (normalizedStatus === 'archived') {
+    if (normalizedStatus === "archived") {
       updateData.archivedAt = nowDate.toISOString();
     }
-    if (normalizedCurrentStatus === 'rejected' && normalizedStatus === 'inspected') {
+    if (
+      normalizedCurrentStatus === "rejected" &&
+      normalizedStatus === "inspected"
+    ) {
       // "Restore" should remove rejection marker so the doc no longer appears as rejected.
       updateData.rejectedAt = null;
     }
 
-    await store.patchDoc('content', contentId, updateData);
+    await store.patchDoc("content", contentId, updateData);
 
     const changedFields = Object.keys(updateData);
-    await store.upsertDoc('audits', {
+    await store.upsertDoc("audits", {
       id: uuid(),
       timestamp: nowDate.toISOString(),
-      action: 'status_transition',
-      resourceType: 'content',
+      action: "status_transition",
+      resourceType: "content",
       resourceId: contentId,
-      resourceTitle: data.Title || data.title || '',
+      resourceTitle: data.Title || data.title || "",
       userId: actor.oid || actor.sub || reviewedBy,
       userName: actor.name || null,
       userEmail: actor.email || null,
@@ -254,14 +346,89 @@ export function createContentStatusTransitioner({ store, now = () => new Date(),
         reviewedBy,
       },
       compliance: {
-        dataClassification: 'internal',
+        dataClassification: "internal",
         retentionMonths: 24,
         identityVerified: true,
       },
     });
 
-    return { ok: true, contentId, from: normalizedCurrentStatus, to: normalizedStatus };
+    return {
+      ok: true,
+      contentId,
+      from: normalizedCurrentStatus,
+      to: normalizedStatus,
+    };
   };
+}
+
+/** The roles that may make content live; editors stop at the review workflow. */
+const PUBLISHING_ROLES = ["publisher", "super_admin"];
+
+/**
+ * What refuses a transition request before any read: the live transition
+ * for a non-publisher (403 — the dedicated publishContent endpoint enforces
+ * the same boundary), then the request-shape rules of
+ * validateTransitionRequest. Null when nothing refuses.
+ */
+function transitionRequestRefusal(auth, { normalizedStatus, ...request }) {
+  if (
+    normalizedStatus === "published" &&
+    !PUBLISHING_ROLES.includes(String(auth.role || "").toLowerCase())
+  ) {
+    return json(403, {
+      error: "publisher access required for live publishing",
+    });
+  }
+  const validation = validateTransitionRequest({
+    ...request,
+    normalizedStatus,
+  });
+  return validation.ok ? null : json(validation.status, validation.error);
+}
+
+/**
+ * The content id a transition applies to. Older API calls pass blogId
+ * instead of contentId; the document carrying it as publishedBlogId is
+ * looked up, or the 404 says there is none.
+ */
+async function resolveTransitionTarget(store, contentId, blogId) {
+  if (contentId) return { resolvedContentId: contentId, legacyBlogId: null };
+  const rows = await store.queryDocs(
+    "content",
+    "SELECT TOP 1 c.id FROM c WHERE c.publishedBlogId = @blogId",
+    [{ name: "@blogId", value: blogId }],
+  );
+  if (rows.length === 0) {
+    return {
+      error: json(404, {
+        error: "legacy content document not found for this blogId",
+      }),
+    };
+  }
+  return { resolvedContentId: rows[0].id, legacyBlogId: blogId };
+}
+
+/** The transitioner's outcome as the handler's response, the success logged. */
+function transitionResponse(
+  context,
+  result,
+  { resolvedContentId, legacyBlogId, reviewedBy },
+) {
+  if (!result.ok) {
+    const { status, ok: _ok, ...errorBody } = result;
+    return json(status, errorBody);
+  }
+  context.warn(
+    `transitionStatus ${resolvedContentId}: ${result.from} → ${result.to} by ${reviewedBy}`,
+  );
+  return json(200, {
+    success: true,
+    contentId: resolvedContentId,
+    legacyBlogId,
+    collectionName: "content",
+    from: result.from,
+    to: result.to,
+  });
 }
 
 /**
@@ -274,11 +441,16 @@ export function createContentStatusTransitioner({ store, now = () => new Date(),
  * @param {() => Date} [deps.now]
  * @param {() => string} [deps.uuid]
  */
-export function createContentTransitionHandler({ guard, store, now = () => new Date(), uuid = randomUUID }) {
+export function createContentTransitionHandler({
+  guard,
+  store,
+  now = () => new Date(),
+  uuid = randomUUID,
+}) {
   const applyTransition = createContentStatusTransitioner({ store, now, uuid });
 
   return async function transitionContentStatus(request, context) {
-    const auth = await guard.requireRole(request, 'editor');
+    const auth = await guard.requireRole(request, "editor");
     if (auth.error) return auth.error;
     const { user } = auth;
 
@@ -290,23 +462,18 @@ export function createContentTransitionHandler({ guard, store, now = () => new D
         newStatus,
         publishTarget = null,
         markLive = null,
-        reviewNotes = '',
-        reviewedBy = user.email || user.preferred_username || user.oid || 'admin',
+        reviewNotes = "",
+        reviewedBy = user.email ||
+          user.preferred_username ||
+          user.oid ||
+          "admin",
       } = body;
 
       const normalizedStatus = normalizeStatusForBlogOnly(newStatus);
 
       // Editors may move content through the review workflow, but the live
-      // transition is reserved for publishers. The dedicated publishContent
-      // endpoint enforces the same boundary.
-      if (
-        normalizedStatus === 'published' &&
-        !['publisher', 'super_admin'].includes(String(auth.role || '').toLowerCase())
-      ) {
-        return json(403, { error: 'publisher access required for live publishing' });
-      }
-
-      const validation = validateTransitionRequest({
+      // transition is reserved for publishers.
+      const refused = transitionRequestRefusal(auth, {
         contentId,
         blogId,
         normalizedStatus,
@@ -314,25 +481,15 @@ export function createContentTransitionHandler({ guard, store, now = () => new D
         reviewNotes,
         reviewedBy,
       });
-      if (!validation.ok) {
-        return json(validation.status, validation.error);
-      }
+      if (refused) return refused;
 
-      // Fallback for older API calls that pass blogId instead of contentId.
-      let resolvedContentId = contentId || null;
-      let legacyBlogId = null;
-      if (!resolvedContentId) {
-        const rows = await store.queryDocs(
-          'content',
-          'SELECT TOP 1 c.id FROM c WHERE c.publishedBlogId = @blogId',
-          [{ name: '@blogId', value: blogId }]
-        );
-        if (rows.length === 0) {
-          return json(404, { error: 'legacy content document not found for this blogId' });
-        }
-        resolvedContentId = rows[0].id;
-        legacyBlogId = blogId;
-      }
+      const target = await resolveTransitionTarget(
+        store,
+        contentId || null,
+        blogId,
+      );
+      if (target.error) return target.error;
+      const { resolvedContentId, legacyBlogId } = target;
 
       const result = await applyTransition({
         contentId: resolvedContentId,
@@ -342,31 +499,19 @@ export function createContentTransitionHandler({ guard, store, now = () => new D
         reviewNotes,
         reviewedBy,
         actor: user,
-        userAgent: request.headers?.get?.('user-agent') || null,
+        userAgent: request.headers?.get?.("user-agent") || null,
         legacyBlogId,
       });
-
-      if (!result.ok) {
-        const { status, ok: _ok, ...errorBody } = result;
-        return json(status, errorBody);
-      }
-
-      context.warn(
-        `transitionStatus ${resolvedContentId}: ${result.from} → ${result.to} by ${reviewedBy}`
-      );
-      return json(200, {
-        success: true,
-        contentId: resolvedContentId,
+      return transitionResponse(context, result, {
+        resolvedContentId,
         legacyBlogId,
-        collectionName: 'content',
-        from: result.from,
-        to: result.to,
+        reviewedBy,
       });
     } catch (error) {
-      context.error('transitionContentStatus failed:', error);
+      context.error("transitionContentStatus failed:", error);
       return json(500, {
-        error: 'Failed to transition content status',
-        message: error?.message || 'Unknown error',
+        error: "Failed to transition content status",
+        message: error?.message || "Unknown error",
       });
     }
   };

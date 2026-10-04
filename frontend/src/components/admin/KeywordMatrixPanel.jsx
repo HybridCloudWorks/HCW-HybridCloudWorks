@@ -157,9 +157,12 @@ export default function KeywordMatrixPanel() {
       </CardHeader>
       <CardContent className="space-y-8">
         <p className="text-sm text-slate-600 dark:text-slate-400">
-          The matrix collapses messy article tags into canonical tags and injects scene directives
-          when specific keywords are found. Changes save to the content configuration store and take
-          effect on the next hero generation.
+          The matrix collapses messy article wording into canonical concepts and adds a scene
+          directive when a keyword appears. It is applied, case-insensitively, to the title and
+          summary of whatever is being illustrated, by every generator: the AI cover from the review
+          queue and the change feed, the Submit URLs preview slots, curated news images, and a set
+          sample from this page. Saved changes apply to the next generation; images already made
+          keep the prompt they were made with (shown on each image in the gallery).
         </p>
 
         {/* Live tester */}
@@ -259,7 +262,7 @@ export default function KeywordMatrixPanel() {
                 {synonyms.length === 0 && (
                   <tr>
                     <td colSpan={3} className="p-3 text-center text-slate-500">
-                      No synonyms saved yet. Seed defaults are used until you add some.
+                      No synonym groups yet. Until you add one, no concepts are collapsed.
                     </td>
                   </tr>
                 )}
@@ -355,7 +358,7 @@ export default function KeywordMatrixPanel() {
                 {augmentations.length === 0 && (
                   <tr>
                     <td colSpan={4} className="p-3 text-center text-slate-500">
-                      No augmentations saved yet. Seed defaults are used until you add some.
+                      No augmentations yet. Until you add one, no directives are added.
                     </td>
                   </tr>
                 )}

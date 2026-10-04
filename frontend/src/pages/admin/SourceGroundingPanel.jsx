@@ -184,8 +184,8 @@ export function SourceGroundingPanel({ platform, examCode, certTitle, onDone }) 
           <p className="text-[11px] text-muted-foreground">
             Gemini reads the pages and watches the videos itself, so this needs Gemini enabled on
             the AI Engine page; no other provider can, and the run refuses rather than falling back
-            to one. At most 20 pages and 10 videos. Re-running the same title replaces the episode
-            and clears its approval.
+            to one. At most 20 pages and 10 videos. Re-running the same title adds a new take to the
+            same chapter and keeps its approval; the earlier take stays in its versions.
           </p>
         </form>
       </CardContent>

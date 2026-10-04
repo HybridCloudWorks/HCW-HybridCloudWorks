@@ -11,9 +11,12 @@ import { describe, expect, it } from 'vitest';
 import {
   AGENT_ID_PATTERN,
   OBJECT_ID_PATTERN,
+  STATUS_STYLES,
   fleetState,
+  fleetStatusWord,
   formatDuration,
   formatTime,
+  labStatusInfo,
   registrationToast,
   validateAgentRegistration,
 } from './labsView';
@@ -142,5 +145,32 @@ describe('registrationToast (#740)', () => {
         registrationToast({ changed, agent: { ...agent, active: false } }).description
       ).toMatch(/still deactivated/);
     }
+  });
+});
+
+describe('the concept statuses (ADR 0033)', () => {
+  it('styles exactly the statuses the runner writes: no running', () => {
+    // JOB_STATUSES in functions/src/lib/labs.js, which the snapshot sends.
+    expect(Object.keys(STATUS_STYLES).sort()).toEqual(
+      ['queued', 'claimed', 'succeeded', 'failed', 'timeout', 'cancelled'].sort()
+    );
+  });
+
+  it('reads the fleet in the shared vocabulary', () => {
+    expect(fleetStatusWord(fleetState([online('a1')], NOW))).toBe('healthy');
+    expect(fleetStatusWord(fleetState([stale('a1')], NOW))).toBe('degraded');
+    expect(fleetStatusWord(fleetState([], NOW))).toBe('unavailable');
+  });
+
+  it('says an available lab is listed and a held one since when, and why', () => {
+    expect(labStatusInfo({ status: 'available' })).toMatchObject({ id: 'available', tone: 'ok' });
+    const held = labStatusInfo({
+      status: 'coming',
+      comingSince: '2026-10-03',
+      comingReason: 'the image lacks helm',
+    });
+    expect(held).toMatchObject({ id: 'coming', tone: 'warn' });
+    expect(held.help).toContain('2026-10-03');
+    expect(held.help).toContain('the image lacks helm');
   });
 });

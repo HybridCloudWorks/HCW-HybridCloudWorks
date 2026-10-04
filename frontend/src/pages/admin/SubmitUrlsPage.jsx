@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { getJSON } from '@/lib/api';
 import { useImagePrompts } from '@/hooks/useImagePrompts';
 import * as draftStage from '@/components/admin/submit-urls/draftStage';
 import {
@@ -20,11 +19,15 @@ import * as promptStage from '@/components/admin/submit-urls/promptStage';
 import {
   applyBuilderSnapshot,
   readBuilderSnapshot,
+  takeReuseImage,
   writeBuilderSnapshot,
 } from '@/components/admin/submit-urls/builderSnapshot';
+import { usePreviewGallery } from '@/components/admin/submit-urls/usePreviewGallery';
+import { usePromptLibraryLoad } from '@/components/admin/submit-urls/usePromptLibraryLoad';
 import {
   buildReadinessChecks,
   canGenerateDraftImages,
+  createPreviewSessionId,
   getCurrentStep,
   getPreviewSection,
   getPromptLibraryPagePath,
@@ -34,6 +37,8 @@ import {
   inferProviderFromUrl,
   slugifyTitle,
 } from '@/components/admin/submit-urls/pageMeta';
+import PageHeader from '@/components/admin/shared/PageHeader';
+import { FilePlus2 } from 'lucide-react';
 import StageOneCard from '@/components/admin/submit-urls/StageOneCard';
 import StageTwoCard from '@/components/admin/submit-urls/StageTwoCard';
 import StageThreeCard from '@/components/admin/submit-urls/StageThreeCard';
@@ -43,6 +48,13 @@ import FeedbackCard, {
   WorkflowHeader,
 } from '@/components/admin/submit-urls/pageChrome';
 import { SECTION_BLOCKS_BY_TYPE } from '@/components/admin/submit-urls/contentBlocks';
+
+const SUBMIT_HELP = [
+  'What this page is: the start of the pipeline. Paste a source URL (or several) and the builder drafts, illustrates and saves a new content item.',
+  'Stage 1 sets what the item will be: provider, content type, and its kind and idea origin (the classification downstream tools read).',
+  'Stage 2 drafts from the source, Stage 3 picks or generates images, Stage 4 checks readiness and saves. Nothing is published from here.',
+  'Where it goes next: the saved item lands in the Review Queue as Inspected, where it is approved or rejected; Create and Open Editor jumps straight to it.',
+];
 
 export default function SubmitUrlsPage() {
   const location = useLocation();
@@ -62,6 +74,9 @@ export default function SubmitUrlsPage() {
   const [contentType, setContentType] = useState('blog');
   const [title, setTitle] = useState('');
   const [publishedDate, setPublishedDate] = useState('');
+  // Kind and idea origin (ADR 0033 §4): a URL submission is an imported
+  // source by definition; what it becomes defaults to an article.
+  const [taxonomy, setTaxonomy] = useState({ kind: 'article', ideaOrigin: 'imported-source' });
 
   // Stage 2: URL Submission + AI Draft (in-memory)
   const [sourceUrl, setSourceUrl] = useState('');
@@ -122,9 +137,6 @@ export default function SubmitUrlsPage() {
   const [promptLibraryLoading, setPromptLibraryLoading] = useState(false);
   const [promptLibraryStatus, setPromptLibraryStatus] = useState('');
   const [promptLibraryError, setPromptLibraryError] = useState('');
-  const [galleryItems, setGalleryItems] = useState([]);
-  const [galleryLoading, setGalleryLoading] = useState(false);
-  const [galleryRefreshing, setGalleryRefreshing] = useState(false);
 
   // Stage 4: Preview (persist)
   const [previewSaving, setPreviewSaving] = useState(false);
@@ -133,24 +145,10 @@ export default function SubmitUrlsPage() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
   const [builderStateLoaded, setBuilderStateLoaded] = useState(false);
-  const [previewSessionId] = useState(() => {
-    const rand =
-      typeof globalThis.crypto?.randomUUID === 'function'
-        ? globalThis.crypto.randomUUID().slice(0, 8)
-        : Array.from(globalThis.crypto.getRandomValues(new Uint8Array(4)), (b) =>
-            b.toString(16).padStart(2, '0')
-          ).join('');
-    return `preview-${Date.now()}-${rand}`;
-  });
+  const [previewSessionId] = useState(createPreviewSessionId);
 
   React.useEffect(() => {
-    if (typeof window === 'undefined') {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setBuilderStateLoaded(true);
-      return;
-    }
-
-    const saved = readBuilderSnapshot();
+    const saved = typeof window === 'undefined' ? null : readBuilderSnapshot();
     if (saved) {
       applyBuilderSnapshot(saved, {
         setProvider,
@@ -158,6 +156,7 @@ export default function SubmitUrlsPage() {
         setContentType,
         setTitle,
         setPublishedDate,
+        setTaxonomy,
         setSourceUrl,
         setKbArticleUrls,
         setKbDocumentUrl,
@@ -184,18 +183,19 @@ export default function SubmitUrlsPage() {
       });
     }
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setBuilderStateLoaded(true);
   }, []);
 
   React.useEffect(() => {
-    if (typeof window === 'undefined' || !builderStateLoaded) return;
-
     const snapshot = {
       provider,
       blogLandingProvider,
       contentType,
       title,
       publishedDate,
+      kind: taxonomy.kind,
+      ideaOrigin: taxonomy.ideaOrigin,
       sourceUrl,
       kbArticleUrls,
       kbDocumentUrl,
@@ -221,7 +221,7 @@ export default function SubmitUrlsPage() {
       slotUrls,
     };
 
-    writeBuilderSnapshot(snapshot);
+    if (typeof window !== 'undefined' && builderStateLoaded) writeBuilderSnapshot(snapshot);
   }, [
     builderStateLoaded,
     provider,
@@ -229,6 +229,7 @@ export default function SubmitUrlsPage() {
     contentType,
     title,
     publishedDate,
+    taxonomy,
     sourceUrl,
     kbArticleUrls,
     kbDocumentUrl,
@@ -255,56 +256,21 @@ export default function SubmitUrlsPage() {
   ]);
 
   React.useEffect(() => {
-    const query = new URLSearchParams(location.search);
-    const queryReuseImage = query.get('reuseImage');
-    let cachedReuseImage = '';
-
-    try {
-      cachedReuseImage = window.localStorage.getItem('contentforge_reuse_image') || '';
-      window.localStorage.removeItem('contentforge_reuse_image');
-    } catch {
-      cachedReuseImage = '';
+    const reuseImage = takeReuseImage(location.search);
+    if (reuseImage) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSlotUrls((prev) => ({ ...prev, hero: reuseImage }));
+      setSelectedUploaded((prev) => ({ ...prev, hero: true }));
     }
-
-    const reuseImage = queryReuseImage || cachedReuseImage;
-    if (!reuseImage) return;
-
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSlotUrls((prev) => ({ ...prev, hero: reuseImage }));
-    setSelectedUploaded((prev) => ({ ...prev, hero: true }));
   }, [location.search]);
 
-  const loadPreviewGalleryItems = React.useCallback(
-    async ({ silent = false } = {}) => {
-      if (!previewSessionId) return;
-      if (silent) {
-        setGalleryRefreshing(true);
-      } else {
-        setGalleryLoading(true);
-      }
-
-      try {
-        const res = await getJSON(
-          `cms/images?articleId=${encodeURIComponent(previewSessionId)}&limit=24`
-        );
-        // Server returns each gallery newest-first already.
-        const items = res.generated || [];
-
-        setGalleryItems(items);
-      } catch (err) {
-        setError(err.message || 'Failed to load saved gallery images.');
-      } finally {
-        setGalleryLoading(false);
-        setGalleryRefreshing(false);
-      }
-    },
-    [previewSessionId]
-  );
-
-  React.useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadPreviewGalleryItems();
-  }, [loadPreviewGalleryItems, generatedImageIds]);
+  const {
+    galleryItems,
+    setGalleryItems,
+    galleryLoading,
+    galleryRefreshing,
+    loadPreviewGalleryItems,
+  } = usePreviewGallery({ previewSessionId, generatedImageIds, setError });
 
   const selectedAiTargets = useMemo(
     () =>
@@ -339,9 +305,10 @@ export default function SubmitUrlsPage() {
     () => getResolvedProvider(provider, inferredProvider),
     [provider, inferredProvider]
   );
-  const resolvedBlogLandingProvider = useMemo(() => {
-    return getResolvedBlogLandingProvider(contentType, blogLandingProvider, resolvedProvider);
-  }, [contentType, blogLandingProvider, resolvedProvider]);
+  const resolvedBlogLandingProvider = useMemo(
+    () => getResolvedBlogLandingProvider(contentType, blogLandingProvider, resolvedProvider),
+    [contentType, blogLandingProvider, resolvedProvider]
+  );
   const previewSlug = useMemo(() => slugifyTitle(draftTitle || title), [draftTitle, title]);
   const previewProviderSegment = useMemo(
     () => (resolvedBlogLandingProvider ? resolvedBlogLandingProvider.toLowerCase() : 'provider'),
@@ -360,40 +327,42 @@ export default function SubmitUrlsPage() {
     provider && inferredProvider && provider !== inferredProvider
   );
 
-  const readinessChecks = useMemo(() => {
-    return buildReadinessChecks({
-      sourceUrl: kbArticleUrls[0] || sourceUrl,
-      contentType,
-      frameworkSourceUrls,
+  const readinessChecks = useMemo(
+    () =>
+      buildReadinessChecks({
+        sourceUrl: kbArticleUrls[0] || sourceUrl,
+        contentType,
+        frameworkSourceUrls,
+        resolvedProvider,
+        resolvedBlogLandingProvider,
+        inferredProvider,
+        previewSlug,
+        previewPath,
+        draftTitle,
+        title,
+        draftSummary,
+        draftContent,
+        hasHeroSelected,
+        sectionBlocks,
+      }),
+    [
+      sourceUrl,
+      kbArticleUrls,
       resolvedProvider,
+      contentType,
       resolvedBlogLandingProvider,
       inferredProvider,
       previewSlug,
       previewPath,
       draftTitle,
       title,
+      frameworkSourceUrls,
       draftSummary,
       draftContent,
       hasHeroSelected,
       sectionBlocks,
-    });
-  }, [
-    sourceUrl,
-    kbArticleUrls,
-    resolvedProvider,
-    contentType,
-    resolvedBlogLandingProvider,
-    inferredProvider,
-    previewSlug,
-    previewPath,
-    draftTitle,
-    title,
-    frameworkSourceUrls,
-    draftSummary,
-    draftContent,
-    hasHeroSelected,
-    sectionBlocks,
-  ]);
+    ]
+  );
 
   const readinessComplete = readinessChecks.every((check) => check.done);
   const readinessScore = useMemo(
@@ -401,19 +370,24 @@ export default function SubmitUrlsPage() {
     [readinessChecks]
   );
 
-  const currentStep = useMemo(() => {
-    return getCurrentStep({
-      hasSourceUrls,
-      draftReady,
-      hasUploadedImages,
-      hasSelectedGeneratedImages,
-    });
-  }, [hasSourceUrls, draftReady, hasUploadedImages, hasSelectedGeneratedImages]);
-  const promptLibraryPagePath = useMemo(() => {
-    const providerSegment =
-      contentType === 'blog' ? resolvedBlogLandingProvider || resolvedProvider : resolvedProvider;
-    return getPromptLibraryPagePath(contentType, providerSegment);
-  }, [contentType, resolvedBlogLandingProvider, resolvedProvider]);
+  const currentStep = useMemo(
+    () =>
+      getCurrentStep({
+        hasSourceUrls,
+        draftReady,
+        hasUploadedImages,
+        hasSelectedGeneratedImages,
+      }),
+    [hasSourceUrls, draftReady, hasUploadedImages, hasSelectedGeneratedImages]
+  );
+  const promptLibraryPagePath = useMemo(
+    () =>
+      getPromptLibraryPagePath(
+        contentType,
+        contentType === 'blog' ? resolvedBlogLandingProvider || resolvedProvider : resolvedProvider
+      ),
+    [contentType, resolvedBlogLandingProvider, resolvedProvider]
+  );
 
   /**
    * The prompt library's machinery is in promptStage.js over this bag (#634).
@@ -441,41 +415,24 @@ export default function SubmitUrlsPage() {
     setSummaryPrompt,
   });
 
-  React.useEffect(() => {
-    let cancelled = false;
-    promptStage.loadPromptLibrary(
-      {
-        promptLibraryPagePath,
-        fetchPageAssignment,
-        fetchPrompt,
-        fetchPromptNames,
-        fetchPromptSet,
-        fetchPromptSets,
-        setDetailsPrompt,
-        setPromptLibraryError,
-        setPromptLibraryLoading,
-        setPromptLibraryStatus,
-        setPromptNames,
-        setPromptSets,
-        setSelectedPromptName,
-        setSelectedPromptSet,
-        setSelectedSlotTemplates,
-        setSummaryPrompt,
-      },
-      () => cancelled
-    );
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
+  usePromptLibraryLoad({
+    promptLibraryPagePath,
     fetchPageAssignment,
     fetchPrompt,
     fetchPromptNames,
     fetchPromptSet,
     fetchPromptSets,
-    promptLibraryPagePath,
-  ]);
+    setDetailsPrompt,
+    setPromptLibraryError,
+    setPromptLibraryLoading,
+    setPromptLibraryStatus,
+    setPromptNames,
+    setPromptSets,
+    setSelectedPromptName,
+    setSelectedPromptSet,
+    setSelectedSlotTemplates,
+    setSummaryPrompt,
+  });
 
   const handleSelectPromptSet = (setName) => promptStage.selectPromptSet(promptBag(), setName);
   const handleSelectPromptName = (promptName) =>
@@ -492,7 +449,7 @@ export default function SubmitUrlsPage() {
     });
     setGenerationPromptLogs({});
     setGalleryItems([]);
-  }, []);
+  }, [setGalleryItems]);
 
   /**
    * Stage 2's machinery lives in draftStage.js over this bag (#634), the same
@@ -592,6 +549,8 @@ export default function SubmitUrlsPage() {
   const persistState = {
     canPreview,
     contentType,
+    kind: taxonomy.kind,
+    ideaOrigin: taxonomy.ideaOrigin,
     draftContent,
     draftSummary,
     draftTitle,
@@ -629,12 +588,14 @@ export default function SubmitUrlsPage() {
 
   return (
     <div className="space-y-6 max-w-5xl">
-      <WorkflowHeader
-        currentStep={currentStep}
-        readinessComplete={readinessComplete}
-        readinessScore={readinessScore}
-        readinessTotal={readinessChecks.length}
-      />
+      <PageHeader icon={FilePlus2} title="New Content" help={SUBMIT_HELP}>
+        <WorkflowHeader
+          currentStep={currentStep}
+          readinessComplete={readinessComplete}
+          readinessScore={readinessScore}
+          readinessTotal={readinessChecks.length}
+        />
+      </PageHeader>
 
       <SelectionSummaryCard
         provider={provider}
@@ -659,6 +620,9 @@ export default function SubmitUrlsPage() {
           setTitle={setTitle}
           publishedDate={publishedDate}
           setPublishedDate={setPublishedDate}
+          kind={taxonomy.kind}
+          ideaOrigin={taxonomy.ideaOrigin}
+          setTaxonomy={setTaxonomy}
         />
 
         <StageTwoCard

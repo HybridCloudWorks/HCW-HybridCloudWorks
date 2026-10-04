@@ -13,6 +13,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const postJSON = vi.fn();
 vi.mock('@/lib/api', () => ({
   postJSON: (...args) => postJSON(...args),
+  // The cover card asks which prompt set a cover would use (ADR 0033);
+  // answered empty here so the board renders without that lookup.
+  getJSON: async () => ({}),
 }));
 vi.mock('@/lib/auditLog', () => ({ logAdminAction: vi.fn() }));
 vi.mock('@/lib/contentWorkflow', () => ({

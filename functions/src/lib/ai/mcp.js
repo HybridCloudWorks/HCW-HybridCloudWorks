@@ -5,9 +5,17 @@
  * credentials are resolved here from Azure Function App settings / Key Vault
  * references or from the write-only oauthToken field in Cosmos DB.
  */
-import { parseMcpResponseBody } from "../cloud-tools/mcp-parse.js";
+import { parseMcpResponseBody } from '../cloud-tools/mcp-parse.js';
+import {
+  KNOWN_INTEGRATION_KEY_NAMES,
+  MCP_KEY_ENV_PATTERN,
+  readMcpSecret,
+  resolveMcpAuthHeaders,
+  validateMcpApiKeyEnvVar,
+  validateMcpUrl,
+} from './mcp-policy.js';
 
-const MCP_CONTAINER = "mcp_servers";
+const MCP_CONTAINER = 'mcp_servers';
 const SESSION_TTL_MS = 5 * 60_000;
 const DEFAULT_TIMEOUT_MS = 30_000;
 const SSE_TIMEOUT_MS = 25_000;
@@ -15,61 +23,32 @@ const sessions = new Map();
 
 const json = (status, body) => ({
   status,
-  headers: { "Content-Type": "application/json" },
+  headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify(body),
 });
 
 class McpUpstreamError extends Error {
-  constructor(message, { status = 0, responseBody = "" } = {}) {
+  constructor(message, { status = 0, responseBody = '' } = {}) {
     super(message);
-    this.name = "McpUpstreamError";
+    this.name = 'McpUpstreamError';
     this.status = status;
     this.responseBody = responseBody;
   }
 }
 
 /**
- * Treat an environment value as a usable secret only when it is resolved.
- * Azure Key Vault references that fail to resolve arrive as a literal string;
- * sending that literal as a bearer token creates a misleading upstream 401.
+ * The URL rule, the key-name allowlist and the credential resolution are
+ * mcp-policy.js; they are re-exported so every caller keeps importing them
+ * from here.
  */
-export function readMcpSecret(env, name) {
-  if (!name || typeof env?.[name] !== "string") return "";
-  const value = env[name].replace(/^\ufeff/, "").trim();
-  if (!value || value.startsWith("@Microsoft.KeyVault(")) return "";
-  return value;
-}
-
-/** Resolve OAuth first, then the configured Azure Function App setting. */
-export function resolveMcpAuthHeaders({
-  oauthToken,
-  apiKeyEnvVar,
-  env = process.env,
-}) {
-  const stored =
-    typeof oauthToken === "string"
-      ? oauthToken.replace(/^\ufeff/, "").trim()
-      : "";
-  const bearerToken = stored || readMcpSecret(env, apiKeyEnvVar);
-  return bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {};
-}
-
-/** Reject malformed or credential-bearing URLs before making an outbound call. */
-export function validateMcpUrl(value) {
-  let parsed;
-  try {
-    parsed = new URL(String(value || "").trim());
-  } catch {
-    throw new Error("MCP server URL must be a valid URL");
-  }
-  if (!["http:", "https:"].includes(parsed.protocol)) {
-    throw new Error("MCP server URL must use http or https");
-  }
-  if (parsed.username || parsed.password) {
-    throw new Error("MCP server URL must not contain embedded credentials");
-  }
-  return parsed.toString();
-}
+export {
+  KNOWN_INTEGRATION_KEY_NAMES,
+  MCP_KEY_ENV_PATTERN,
+  readMcpSecret,
+  resolveMcpAuthHeaders,
+  validateMcpApiKeyEnvVar,
+  validateMcpUrl,
+};
 
 function sessionFor(serverId) {
   const entry = sessions.get(serverId);
@@ -96,10 +75,8 @@ async function fetchWithTimeout(fetchImpl, url, options, timeoutMs) {
   try {
     return await fetchImpl(url, { ...options, signal: controller.signal });
   } catch (error) {
-    if (error?.name === "AbortError") {
-      throw new McpUpstreamError(
-        `MCP request timed out after ${Math.round(timeoutMs / 1000)}s`,
-      );
+    if (error?.name === 'AbortError') {
+      throw new McpUpstreamError(`MCP request timed out after ${Math.round(timeoutMs / 1000)}s`);
     }
     throw error;
   } finally {
@@ -107,12 +84,7 @@ async function fetchWithTimeout(fetchImpl, url, options, timeoutMs) {
   }
 }
 
-async function getSessionId(
-  serverId,
-  url,
-  authHeaders,
-  { fetchImpl, log, timeoutMs },
-) {
+async function getSessionId(serverId, url, authHeaders, { fetchImpl, log, timeoutMs }) {
   const cached = sessionFor(serverId);
   if (cached) return cached;
 
@@ -121,33 +93,31 @@ async function getSessionId(
       fetchImpl,
       url,
       {
-        method: "POST",
+        method: 'POST',
         headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json, text/event-stream",
+          'Content-Type': 'application/json',
+          Accept: 'application/json, text/event-stream',
           ...authHeaders,
         },
         body: JSON.stringify({
-          jsonrpc: "2.0",
-          method: "initialize",
+          jsonrpc: '2.0',
+          method: 'initialize',
           params: {
-            protocolVersion: "2024-11-05",
+            protocolVersion: '2024-11-05',
             capabilities: {},
-            clientInfo: { name: "hcw-mcp-proxy", version: "1.0.0" },
+            clientInfo: { name: 'hcw-mcp-proxy', version: '1.0.0' },
           },
           id: -1,
         }),
       },
-      timeoutMs,
+      timeoutMs
     );
     const sessionId =
-      response.headers.get("mcp-session-id") ||
-      response.headers.get("Mcp-Session-Id") ||
-      null;
+      response.headers.get('mcp-session-id') || response.headers.get('Mcp-Session-Id') || null;
     if (sessionId) rememberSession(serverId, sessionId);
     return sessionId;
   } catch (error) {
-    log.warn?.("[mcp] initialize handshake failed", {
+    log.warn?.('[mcp] initialize handshake failed', {
       serverId,
       message: error.message,
     });
@@ -158,10 +128,10 @@ async function getSessionId(
 async function httpRpc(serverId, url, rpcBody, authHeaders, options) {
   const { fetchImpl, log, timeoutMs } = options;
   const makeHeaders = (sessionId) => ({
-    "Content-Type": "application/json",
-    Accept: "application/json, text/event-stream",
+    'Content-Type': 'application/json',
+    Accept: 'application/json, text/event-stream',
     ...authHeaders,
-    ...(sessionId ? { "MCP-Session-Id": sessionId } : {}),
+    ...(sessionId ? { 'MCP-Session-Id': sessionId } : {}),
   });
 
   const post = async (sessionId) => {
@@ -169,11 +139,11 @@ async function httpRpc(serverId, url, rpcBody, authHeaders, options) {
       fetchImpl,
       url,
       {
-        method: "POST",
+        method: 'POST',
         headers: makeHeaders(sessionId),
         body: JSON.stringify(rpcBody),
       },
-      timeoutMs,
+      timeoutMs
     );
     const responseBody = await response.text();
     return { response, responseBody };
@@ -196,25 +166,24 @@ async function httpRpc(serverId, url, rpcBody, authHeaders, options) {
   }
 
   if (!result.response.ok) {
-    throw new McpUpstreamError(
-      `MCP server returned HTTP ${result.response.status}`,
-      { status: result.response.status, responseBody: result.responseBody },
-    );
+    throw new McpUpstreamError(`MCP server returned HTTP ${result.response.status}`, {
+      status: result.response.status,
+      responseBody: result.responseBody,
+    });
   }
 
   return parseMcpResponseBody(result.responseBody);
 }
 
 function drainSseFrames(buffer) {
-  const lines = buffer.split("\n");
+  const lines = buffer.split('\n');
   const tail = lines.pop();
   const frames = [];
-  let event = "";
+  let event = '';
   for (const line of lines) {
     const trimmed = line.trim();
-    if (trimmed.startsWith("event:")) event = trimmed.slice(6).trim();
-    if (trimmed.startsWith("data:"))
-      frames.push({ event, data: trimmed.slice(5).trim() });
+    if (trimmed.startsWith('event:')) event = trimmed.slice(6).trim();
+    if (trimmed.startsWith('data:')) frames.push({ event, data: trimmed.slice(5).trim() });
   }
   return { frames, tail };
 }
@@ -222,11 +191,7 @@ function drainSseFrames(buffer) {
 function sseEndpoint(postUrl, frame, sseUrl) {
   if (
     postUrl ||
-    !(
-      frame.event === "endpoint" ||
-      frame.data.startsWith("/") ||
-      frame.data.startsWith("http")
-    )
+    !(frame.event === 'endpoint' || frame.data.startsWith('/') || frame.data.startsWith('http'))
   ) {
     return postUrl;
   }
@@ -238,7 +203,7 @@ function sseEndpoint(postUrl, frame, sseUrl) {
 }
 
 function matchingSseResponse(data, targetId) {
-  if (!data.startsWith("{")) return null;
+  if (!data.startsWith('{')) return null;
   try {
     const message = JSON.parse(data);
     return message.id === targetId ? message : null;
@@ -256,13 +221,13 @@ function sseRpc(sseUrl, authHeaders, rpcBody, { fetchImpl, timeoutMs }) {
   return new Promise(async (resolve, reject) => {
     const controller = new AbortController();
     const timeoutHandle = setTimeout(
-      () => finish(null, new McpUpstreamError("SSE MCP request timed out")),
-      Math.min(timeoutMs, SSE_TIMEOUT_MS),
+      () => finish(null, new McpUpstreamError('SSE MCP request timed out')),
+      Math.min(timeoutMs, SSE_TIMEOUT_MS)
     );
     let postUrl = null;
     let requestSent = false;
     let settled = false;
-    let buffer = "";
+    let buffer = '';
     let readyTimer = null;
 
     const finish = (result, error) => {
@@ -280,22 +245,21 @@ function sseRpc(sseUrl, authHeaders, rpcBody, { fetchImpl, timeoutMs }) {
         fetchImpl,
         postUrl,
         {
-          method: "POST",
+          method: 'POST',
           headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
             ...authHeaders,
           },
           body: JSON.stringify(body),
         },
-        timeoutMs,
+        timeoutMs
       );
       await response.text();
       if (!response.ok)
-        throw new McpUpstreamError(
-          `SSE MCP POST returned HTTP ${response.status}`,
-          { status: response.status },
-        );
+        throw new McpUpstreamError(`SSE MCP POST returned HTTP ${response.status}`, {
+          status: response.status,
+        });
     };
 
     const sendRequest = async () => {
@@ -305,18 +269,18 @@ function sseRpc(sseUrl, authHeaders, rpcBody, { fetchImpl, timeoutMs }) {
         // The SSE transport requires initialize and initialized before the
         // requested tools/list or tools/call message.
         await post({
-          jsonrpc: "2.0",
-          method: "initialize",
+          jsonrpc: '2.0',
+          method: 'initialize',
           params: {
-            protocolVersion: "2024-11-05",
+            protocolVersion: '2024-11-05',
             capabilities: {},
-            clientInfo: { name: "hcw-mcp-proxy", version: "1.0.0" },
+            clientInfo: { name: 'hcw-mcp-proxy', version: '1.0.0' },
           },
           id: -1,
         });
         await post({
-          jsonrpc: "2.0",
-          method: "notifications/initialized",
+          jsonrpc: '2.0',
+          method: 'notifications/initialized',
           params: {},
         });
         await post(rpcBody);
@@ -330,29 +294,26 @@ function sseRpc(sseUrl, authHeaders, rpcBody, { fetchImpl, timeoutMs }) {
         fetchImpl,
         sseUrl,
         {
-          method: "GET",
+          method: 'GET',
           headers: {
-            Accept: "text/event-stream",
-            "Cache-Control": "no-cache",
+            Accept: 'text/event-stream',
+            'Cache-Control': 'no-cache',
             ...authHeaders,
           },
           signal: controller.signal,
         },
-        timeoutMs,
+        timeoutMs
       );
       if (!response.ok) {
         return finish(
           null,
           new McpUpstreamError(`SSE GET returned HTTP ${response.status}`, {
             status: response.status,
-          }),
+          })
         );
       }
       if (!response.body?.getReader) {
-        return finish(
-          null,
-          new McpUpstreamError("SSE server returned no readable event stream"),
-        );
+        return finish(null, new McpUpstreamError('SSE server returned no readable event stream'));
       }
 
       const reader = response.body.getReader();
@@ -360,18 +321,14 @@ function sseRpc(sseUrl, authHeaders, rpcBody, { fetchImpl, timeoutMs }) {
       while (!settled) {
         const { value, done } = await reader.read();
         if (done)
-          return finish(
-            null,
-            new McpUpstreamError("SSE stream ended before the MCP response"),
-          );
+          return finish(null, new McpUpstreamError('SSE stream ended before the MCP response'));
         buffer += decoder.decode(value, { stream: true });
         const drained = drainSseFrames(buffer);
         buffer = drained.tail;
         for (const frame of drained.frames) {
           postUrl = sseEndpoint(postUrl, frame, sseUrl);
-          if (postUrl && !readyTimer)
-            readyTimer = setTimeout(sendRequest, 1_000);
-          if (postUrl && frame.data.includes("SSE Connection established")) {
+          if (postUrl && !readyTimer) readyTimer = setTimeout(sendRequest, 1_000);
+          if (postUrl && frame.data.includes('SSE Connection established')) {
             if (readyTimer) clearTimeout(readyTimer);
             readyTimer = setTimeout(sendRequest, 50);
           }
@@ -380,41 +337,32 @@ function sseRpc(sseUrl, authHeaders, rpcBody, { fetchImpl, timeoutMs }) {
         }
       }
     } catch (error) {
-      if (!settled && error?.name !== "AbortError") finish(null, error);
+      if (!settled && error?.name !== 'AbortError') finish(null, error);
     }
   });
 }
 
-function callMcpRpc({
-  serverId,
-  url,
-  transport,
-  authHeaders,
-  rpcBody,
-  options,
-}) {
-  if (transport === "sse") return sseRpc(url, authHeaders, rpcBody, options);
+function callMcpRpc({ serverId, url, transport, authHeaders, rpcBody, options }) {
+  if (transport === 'sse') return sseRpc(url, authHeaders, rpcBody, options);
   return httpRpc(serverId, url, rpcBody, authHeaders, options);
 }
 
 function extractMcpText(rawResult) {
-  if (typeof rawResult === "string") return rawResult;
+  if (typeof rawResult === 'string') return rawResult;
   if (Array.isArray(rawResult?.content)) {
     return rawResult.content
-      .filter((item) => item?.type === "text" && typeof item.text === "string")
+      .filter((item) => item?.type === 'text' && typeof item.text === 'string')
       .map((item) => item.text)
-      .join("\n");
+      .join('\n');
   }
   return JSON.stringify(rawResult ?? {});
 }
 
 function normalizeMcpTools(rpcResult) {
-  const tools = Array.isArray(rpcResult?.result?.tools)
-    ? rpcResult.result.tools
-    : [];
+  const tools = Array.isArray(rpcResult?.result?.tools) ? rpcResult.result.tools : [];
   return tools.map((tool) => ({
-    name: tool.name || "",
-    description: tool.description || "",
+    name: tool.name || '',
+    description: tool.description || '',
     inputSchema: tool.inputSchema || {},
   }));
 }
@@ -422,7 +370,7 @@ function normalizeMcpTools(rpcResult) {
 function errorFields(error) {
   let upstream = {};
   try {
-    upstream = parseMcpResponseBody(error.responseBody || "") || {};
+    upstream = parseMcpResponseBody(error.responseBody || '') || {};
   } catch {
     upstream = {};
   }
@@ -430,21 +378,18 @@ function errorFields(error) {
     status: error.status,
     upstreamError: upstream.error,
     upstreamDescription: upstream.error_description,
-    message: error.message || "",
+    message: error.message || '',
   };
 }
 
 function mcpAuthError(error, fallback) {
   const fields = errorFields(error);
-  if (
-    [401, 402, 403].includes(fields.status) ||
-    fields.upstreamError === "invalid_token"
-  ) {
+  if ([401, 402, 403].includes(fields.status) || fields.upstreamError === 'invalid_token') {
     return {
       error:
         fields.upstreamDescription ||
-        "MCP authentication failed. Check the Azure Function App setting or stored OAuth token for this server.",
-      code: "UNAUTHENTICATED",
+        'MCP authentication failed. Check the Azure Function App setting or stored OAuth token for this server.',
+      code: 'UNAUTHENTICATED',
     };
   }
   return {
@@ -465,13 +410,114 @@ function failureBody(authFailure, extra = {}) {
 async function markServerError(store, serverId, message, now) {
   try {
     await store.patchDoc(MCP_CONTAINER, serverId, {
-      status: "error",
+      status: 'error',
       lastTested: now().toISOString(),
       lastError: message,
     });
   } catch {
     // The upstream failure is the useful result; do not mask it with a status-write failure.
   }
+}
+
+/**
+ * The configured server, or the outcome refusing the call: 500 when the
+ * configuration could not be read (`onReadError` gets the error, so each
+ * caller logs it its own way), 404 when there is no such server.
+ */
+async function loadMcpServer(store, serverId, onReadError) {
+  let server;
+  try {
+    server = await store.readDoc(MCP_CONTAINER, serverId, serverId);
+  } catch (error) {
+    onReadError(error);
+    return {
+      failure: {
+        ok: false,
+        error: 'Failed to read MCP server configuration',
+        httpStatus: 500,
+      },
+    };
+  }
+  if (!server) return { failure: { ok: false, error: 'MCP server not found', httpStatus: 404 } };
+  return { server };
+}
+
+/** The server's URL under the URL rule and the key-name allowlist, or the message refusing it. */
+function validatedMcpUrl(server) {
+  try {
+    const url = validateMcpUrl(server.url);
+    validateMcpApiKeyEnvVar(server.apiKeyEnvVar);
+    return { url };
+  } catch (error) {
+    return { error: error.message };
+  }
+}
+
+const isJsonObject = (value) =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+/**
+ * What stands between a found server and a tool call: the server must be
+ * enabled, its URL and key name must pass policy, and the arguments must be
+ * a JSON object. The URL on success, the outcome on refusal.
+ */
+function prepareToolCall(server, toolArguments) {
+  if (server.enabled !== true) {
+    return { failure: { ok: false, error: 'MCP server is disabled', httpStatus: 403 } };
+  }
+  const { url, error } = validatedMcpUrl(server);
+  if (error) return { failure: { ok: false, error, httpStatus: 400 } };
+  if (!isJsonObject(toolArguments)) {
+    return {
+      failure: {
+        ok: false,
+        error: 'arguments must be a JSON object',
+        httpStatus: 400,
+      },
+    };
+  }
+  return { url };
+}
+
+/** One JSON-RPC call to a configured server, with the credential it stores. */
+function rpcOnServer({ serverId, server, url, rpcBody, env, options }) {
+  return callMcpRpc({
+    serverId,
+    url,
+    transport: server.transport || 'http',
+    authHeaders: resolveMcpAuthHeaders({
+      oauthToken: server.oauthToken,
+      apiKeyEnvVar: server.apiKeyEnvVar,
+      env,
+    }),
+    rpcBody,
+    options,
+  });
+}
+
+/** A tools/call reply as the outcome callMcpTool reports; every shape is a 200. */
+function toolCallOutcome(rpcResult) {
+  if (rpcResult?.error) {
+    return {
+      ok: false,
+      error: rpcResult.error.message || 'MCP error',
+      code: rpcResult.error.code,
+      httpStatus: 200,
+    };
+  }
+  if (!rpcResult || !Object.hasOwn(rpcResult, 'result')) {
+    return {
+      ok: false,
+      error: 'MCP server returned no tool result',
+      httpStatus: 200,
+    };
+  }
+  const rawResult = rpcResult.result;
+  const result = extractMcpText(rawResult);
+  if (rawResult?.isError) {
+    return { ok: false, error: result || 'MCP tool error', httpStatus: 200 };
+  }
+  return { ok: true, result, raw: rawResult, httpStatus: 200 };
 }
 
 /**
@@ -513,82 +559,42 @@ export async function callMcpTool({
   log = console,
   timeoutMs = DEFAULT_TIMEOUT_MS,
 }) {
-  const serverId = String(rawServerId || "").trim();
-  const tool = String(rawTool || "").trim();
+  const serverId = String(rawServerId || '').trim();
+  const tool = String(rawTool || '').trim();
   if (!serverId || !tool) {
-    return { ok: false, error: "serverId and tool are required", httpStatus: 400 };
-  }
-
-  let server;
-  try {
-    server = await store.readDoc(MCP_CONTAINER, serverId, serverId);
-  } catch (error) {
-    log.error?.(
-      `[mcp] configuration read failed: server=${serverId} code=${error?.code ?? error?.statusCode ?? "n/a"} ${error?.message || error}`,
-    );
     return {
       ok: false,
-      error: "Failed to read MCP server configuration",
-      httpStatus: 500,
+      error: 'serverId and tool are required',
+      httpStatus: 400,
     };
   }
-  if (!server) return { ok: false, error: "MCP server not found", httpStatus: 404 };
-  if (server.enabled !== true) {
-    return { ok: false, error: "MCP server is disabled", httpStatus: 403 };
-  }
 
-  let url;
-  try {
-    url = validateMcpUrl(server.url);
-  } catch (error) {
-    return { ok: false, error: error.message, httpStatus: 400 };
-  }
+  const loaded = await loadMcpServer(store, serverId, (error) =>
+    log.error?.(
+      `[mcp] configuration read failed: server=${serverId} code=${error?.code ?? error?.statusCode ?? 'n/a'} ${error?.message || error}`
+    )
+  );
+  if (loaded.failure) return loaded.failure;
+  const { server } = loaded;
 
-  if (
-    !toolArguments ||
-    typeof toolArguments !== "object" ||
-    Array.isArray(toolArguments)
-  ) {
-    return { ok: false, error: "arguments must be a JSON object", httpStatus: 400 };
-  }
+  const prepared = prepareToolCall(server, toolArguments);
+  if (prepared.failure) return prepared.failure;
 
   try {
-    const rpcResult = await callMcpRpc({
+    const rpcResult = await rpcOnServer({
       serverId,
-      url,
-      transport: server.transport || "http",
-      authHeaders: resolveMcpAuthHeaders({
-        oauthToken: server.oauthToken,
-        apiKeyEnvVar: server.apiKeyEnvVar,
-        env,
-      }),
+      server,
+      url: prepared.url,
       rpcBody: {
-        jsonrpc: "2.0",
-        method: "tools/call",
+        jsonrpc: '2.0',
+        method: 'tools/call',
         params: { name: tool, arguments: toolArguments },
         id: 2,
       },
+      env,
       options: { fetchImpl, log, timeoutMs },
     });
-
-    if (rpcResult?.error) {
-      return {
-        ok: false,
-        error: rpcResult.error.message || "MCP error",
-        code: rpcResult.error.code,
-        httpStatus: 200,
-      };
-    }
-    if (!rpcResult || !Object.hasOwn(rpcResult, "result")) {
-      return { ok: false, error: "MCP server returned no tool result", httpStatus: 200 };
-    }
-
-    const rawResult = rpcResult.result;
-    const result = extractMcpText(rawResult);
-    if (rawResult?.isError) {
-      return { ok: false, error: result || "MCP tool error", httpStatus: 200 };
-    }
-    return { ok: true, result, raw: rawResult, httpStatus: 200 };
+    return toolCallOutcome(rpcResult);
   } catch (error) {
     // Content-free on purpose: a McpUpstreamError carries `responseBody`,
     // which for a tool call can be the tool's output — a transcript — and
@@ -597,13 +603,83 @@ export async function callMcpTool({
     // an operator needs; the body reaches only the caller, through
     // `mcpAuthError`, and only as an OAuth error description.
     log.error?.(
-      `[mcp] upstream call failed: server=${serverId} tool=${tool} status=${error?.status ?? "n/a"} ${error?.message || error}`,
+      `[mcp] upstream call failed: server=${serverId} tool=${tool} status=${error?.status ?? 'n/a'} ${error?.message || error}`
     );
     return {
-      ...failureBody(mcpAuthError(error, "MCP tool call failed")),
+      ...failureBody(mcpAuthError(error, 'MCP tool call failed')),
       httpStatus: 200,
     };
   }
+}
+
+/** A sync that could not reach a tool list: the server marked, the 200 saying why. */
+async function syncFailed({ store, now }, serverId, message) {
+  await markServerError(store, serverId, message, now);
+  return json(200, { ok: false, error: message, tools: [] });
+}
+
+/** A tools/list reply as the tools it carries, or the message refusing it. */
+function toolListOutcome(rpcResult) {
+  if (rpcResult?.error) return { error: rpcResult.error.message || 'MCP error' };
+  if (!rpcResult || !Object.hasOwn(rpcResult, 'result')) {
+    return { error: 'MCP server returned no tool list' };
+  }
+  return { tools: normalizeMcpTools(rpcResult) };
+}
+
+/** tools/list on a validated server, the result stored on its document. */
+async function syncToolList(ctx, context, { serverId, server, url }) {
+  const { store, env, now, transportOptions } = ctx;
+  try {
+    const rpcResult = await rpcOnServer({
+      serverId,
+      server,
+      url,
+      rpcBody: { jsonrpc: '2.0', method: 'tools/list', params: {}, id: 1 },
+      env,
+      options: transportOptions,
+    });
+    const outcome = toolListOutcome(rpcResult);
+    if (outcome.error) return syncFailed(ctx, serverId, outcome.error);
+
+    await store.patchDoc(MCP_CONTAINER, serverId, {
+      tools: outcome.tools,
+      status: 'connected',
+      lastTested: now().toISOString(),
+      lastError: null,
+    });
+    return json(200, { ok: true, tools: outcome.tools });
+  } catch (error) {
+    const message = error.message || 'MCP tool sync failed';
+    context.error?.('[syncMcpTools] upstream call failed:', error);
+    await markServerError(store, serverId, message, now);
+    return json(200, {
+      ...failureBody(mcpAuthError(error, message)),
+      tools: [],
+    });
+  }
+}
+
+/** POST syncMcpTools: parse, find the server, check its URL, then list its tools. */
+async function syncMcpTools(ctx, request, context) {
+  const auth = await ctx.guard.requireRole(request, 'editor');
+  if (auth.error) return auth.error;
+
+  const body = await request.json().catch(() => null);
+  const serverId = String(body?.serverId || '').trim();
+  if (!serverId) return json(400, { ok: false, error: 'serverId is required' });
+
+  const loaded = await loadMcpServer(ctx.store, serverId, (error) =>
+    context.error?.('[syncMcpTools] configuration read failed:', error)
+  );
+  if (loaded.failure) {
+    const { httpStatus, ...failure } = loaded.failure;
+    return json(httpStatus, failure);
+  }
+
+  const { url, error } = validatedMcpUrl(loaded.server);
+  if (error) return syncFailed(ctx, serverId, error);
+  return syncToolList(ctx, context, { serverId, server: loaded.server, url });
 }
 
 /** Create the two admin MCP handlers with injectable dependencies for tests. */
@@ -616,11 +692,11 @@ export function createMcpHandlers({
   log = console,
   timeoutMs = DEFAULT_TIMEOUT_MS,
 }) {
-  const transportOptions = { fetchImpl, log, timeoutMs };
+  const ctx = { guard, store, env, now, transportOptions: { fetchImpl, log, timeoutMs } };
 
   return {
     async mcpProxy(request, context) {
-      const auth = await guard.requireRole(request, "editor");
+      const auth = await guard.requireRole(request, 'editor');
       if (auth.error) return auth.error;
 
       const body = await request.json().catch(() => null);
@@ -633,85 +709,13 @@ export function createMcpHandlers({
         fetch: fetchImpl,
         log: {
           warn: (...args) => log.warn?.(...args),
-          error: (...args) => context.error?.("[mcpProxy]", ...args),
+          error: (...args) => context.error?.('[mcpProxy]', ...args),
         },
         timeoutMs,
       });
       return json(httpStatus, outcome);
     },
 
-    async syncMcpTools(request, context) {
-      const auth = await guard.requireRole(request, "editor");
-      if (auth.error) return auth.error;
-
-      const body = await request.json().catch(() => null);
-      const serverId = String(body?.serverId || "").trim();
-      if (!serverId)
-        return json(400, { ok: false, error: "serverId is required" });
-
-      let server;
-      try {
-        server = await store.readDoc(MCP_CONTAINER, serverId, serverId);
-      } catch (error) {
-        context.error?.("[syncMcpTools] configuration read failed:", error);
-        return json(500, {
-          ok: false,
-          error: "Failed to read MCP server configuration",
-        });
-      }
-      if (!server)
-        return json(404, { ok: false, error: "MCP server not found" });
-
-      let url;
-      try {
-        url = validateMcpUrl(server.url);
-      } catch (error) {
-        await markServerError(store, serverId, error.message, now);
-        return json(200, { ok: false, error: error.message, tools: [] });
-      }
-
-      try {
-        const rpcResult = await callMcpRpc({
-          serverId,
-          url,
-          transport: server.transport || "http",
-          authHeaders: resolveMcpAuthHeaders({
-            oauthToken: server.oauthToken,
-            apiKeyEnvVar: server.apiKeyEnvVar,
-            env,
-          }),
-          rpcBody: { jsonrpc: "2.0", method: "tools/list", params: {}, id: 1 },
-          options: transportOptions,
-        });
-
-        if (rpcResult?.error) {
-          const message = rpcResult.error.message || "MCP error";
-          await markServerError(store, serverId, message, now);
-          return json(200, { ok: false, error: message, tools: [] });
-        }
-        if (!rpcResult || !Object.hasOwn(rpcResult, "result")) {
-          const message = "MCP server returned no tool list";
-          await markServerError(store, serverId, message, now);
-          return json(200, { ok: false, error: message, tools: [] });
-        }
-
-        const tools = normalizeMcpTools(rpcResult);
-        await store.patchDoc(MCP_CONTAINER, serverId, {
-          tools,
-          status: "connected",
-          lastTested: now().toISOString(),
-          lastError: null,
-        });
-        return json(200, { ok: true, tools });
-      } catch (error) {
-        const message = error.message || "MCP tool sync failed";
-        context.error?.("[syncMcpTools] upstream call failed:", error);
-        await markServerError(store, serverId, message, now);
-        return json(200, {
-          ...failureBody(mcpAuthError(error, message)),
-          tools: [],
-        });
-      }
-    },
+    syncMcpTools: (request, context) => syncMcpTools(ctx, request, context),
   };
 }

@@ -40,6 +40,10 @@ describe('sanitizeCertification', () => {
       verifyUrl: 'https://verify',
       display: true,
     });
+    expect(out).not.toHaveProperty('featured');
+    expect(
+      sanitizeCertification({ id: 'c2', name: 'F', display: true, featured: true }).featured
+    ).toBe(true);
     expect(out).not.toHaveProperty('description');
     expect(out).not.toHaveProperty('learnUrl');
     expect(out).not.toHaveProperty('_updatedAt');
@@ -77,8 +81,37 @@ describe('sanitizeSpeakerEvent', () => {
     ...over,
   });
 
-  it('drops hidden events entirely', () => {
-    expect(sanitizeSpeakerEvent(full({ display: false }))).toBeNull();
+  it('publishes a hidden Sessionize-backed row as a tombstone and nothing more', () => {
+    // The widget needs the join key to hide what Sessionize still lists
+    // (ADR 0033, Spotlight slice); every other field stays private.
+    expect(sanitizeSpeakerEvent(full({ display: false }))).toEqual({
+      id: 'ev1',
+      sessionizeId: 12345,
+      display: false,
+    });
+    expect(
+      sanitizeSpeakerEvent(full({ display: false, sessionizeId: undefined, eventId: 77 }))
+    ).toEqual({ id: 'ev1', sessionizeId: 77, display: false });
+  });
+
+  it('drops a hidden manual entry entirely — nothing public to hide', () => {
+    expect(sanitizeSpeakerEvent(full({ display: false, sessionizeId: undefined }))).toBeNull();
+  });
+
+  it('carries the mirrored images, the status and the sessions when present', () => {
+    const out = sanitizeSpeakerEvent(
+      full({
+        images: [{ downloadURL: '/api/public/media/speakerevents/ev1/a.png', path: 'private' }],
+        status: 'delivered',
+        sessions: [
+          { title: 'Keynote', slidesUrl: 'https://s', internal: 'x' },
+          { abstract: 'no title' },
+        ],
+      })
+    );
+    expect(out.images).toEqual([{ downloadURL: '/api/public/media/speakerevents/ev1/a.png' }]);
+    expect(out.status).toBe('delivered');
+    expect(out.sessions).toEqual([{ title: 'Keynote', slidesUrl: 'https://s' }]);
   });
 
   it('fails closed when display is unset', () => {
@@ -187,6 +220,44 @@ describe('publishSnapshot handler', () => {
     expect(JSON.stringify(evSnap)).not.toContain('admin@example.com');
 
     expect(store.upsertDoc.mock.calls.every(([c]) => c === '_snapshots')).toBe(true);
+    expect(evSnap.publishedAt).toBe(NOW.toISOString());
+    expect(evSnap).not.toHaveProperty('meta');
+  });
+
+  it('copies the speaker id and profile from admin_settings into the speakerevents snapshot', async () => {
+    const store = {
+      queryDocs: vi.fn(async () => []),
+      readDoc: vi.fn(async (container, id) =>
+        container === 'admin_settings' && id === 'integrations'
+          ? {
+              sessionizeSpeakerId: ' abc123 ',
+              speakerProfile: {
+                name: 'Speaker',
+                bio: 'Talks about clouds',
+                headshotUrl: 'https://img/h.png',
+                links: [{ label: 'Site', url: 'https://site' }, { url: 'javascript:x' }],
+              },
+              resendApiKey: 'never',
+            }
+          : null
+      ),
+      upsertDoc: vi.fn(async (_c, d) => d),
+    };
+    const h = createSnapshotPublishHandlers({ guard: guardAs('editor'), store, now: () => NOW });
+    await h.publishSnapshot(makeRequest(), context);
+    const evSnap = store.upsertDoc.mock.calls.find(([, d]) => d.id === 'speakerevents')[1];
+    expect(evSnap.meta).toEqual({
+      speakerId: 'abc123',
+      speakerProfile: {
+        name: 'Speaker',
+        bio: 'Talks about clouds',
+        headshotUrl: 'https://img/h.png',
+        links: [{ label: 'Site', url: 'https://site' }],
+      },
+    });
+    expect(JSON.stringify(evSnap)).not.toContain('never');
+    const certSnap = store.upsertDoc.mock.calls.find(([, d]) => d.id === 'certifications')[1];
+    expect(certSnap).not.toHaveProperty('meta');
   });
 
   it('every snapshot collection has a sanitizer', async () => {

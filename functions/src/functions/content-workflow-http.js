@@ -31,6 +31,7 @@ for (const name of [
   'unpublishContentToInspected',
   'deleteContentItem',
   'saveContentSchedule',
+  'unscheduleContent',
   'softDeleteLivePage',
   'requestContentInspection',
   'resetContentReviewState',

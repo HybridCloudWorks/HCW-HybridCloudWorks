@@ -30,7 +30,7 @@
  */
 import { useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { labById, labPanePath } from '@/data/labs/catalogue';
+import { labById, labPanePath, primaryProvider } from '@/data/labs/catalogue';
 
 export const SIGN_IN_PENDING_KEY = 'hcw.labs.signInPending';
 export const SIGNED_IN_KEY = 'hcw.labs.signedInAt';
@@ -153,7 +153,10 @@ export function subscribeSignedIn(onChange) {
  * "Back to labs" in the tab that is still waiting does not bounce back to
  * the pane. A fresh record for a lab the catalogue has is taken once:
  * sign-in is recorded, which reloads the waiting pane in the first tab, and
- * this tab goes on to the same lab's pane.
+ * this tab goes on to the same lab's pane under the lab's home provider
+ * (`/<provider>/education/labs/<id>`, ADR 0033), whichever list it was
+ * opened from. The hook runs on the index and on every provider list, since
+ * #750's redirect lands on the index only.
  */
 export function useLabSignInReturn() {
   const navigate = useNavigate();
@@ -161,8 +164,9 @@ export function useLabSignInReturn() {
   useEffect(() => {
     if (key !== 'default') return;
     const labId = takePendingSignIn();
-    if (!labId || !labById(labId)) return;
+    const lab = labId ? labById(labId) : null;
+    if (!lab) return;
     markSignedIn();
-    navigate(labPanePath(labId), { replace: true });
+    navigate(labPanePath(primaryProvider(lab), lab.id), { replace: true });
   }, [key, navigate]);
 }

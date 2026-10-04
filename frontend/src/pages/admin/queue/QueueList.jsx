@@ -13,7 +13,11 @@
 import React from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
+import { ADMIN_ROUTES } from '@/config/admin';
+import EmptyState from '@/components/admin/shared/EmptyState';
+import StatusBadge from '@/components/admin/shared/StatusBadge';
+import TaxonomyChips from '@/components/admin/shared/TaxonomyChips';
 import { getCoverImageUrl } from '@/lib/blogUtils';
 import {
   BookOpen,
@@ -35,7 +39,6 @@ import {
   getEditorPath,
   getForgeBadge,
   getHeroCacheBust,
-  getLiveBadge,
   getQueueItemCoverUrl,
   getReviewPath,
   getRootDomain,
@@ -69,11 +72,11 @@ export function QueueList({
 
   if (items.length === 0) {
     return (
-      <Card>
-        <CardContent className="p-12 text-center">
-          <p className="text-muted-foreground">No items in this status.</p>
-        </CardContent>
-      </Card>
+      <EmptyState
+        variant="filtered"
+        title="Nothing matches these filters"
+        description="New items arrive here from RSS feeds, Submit URLs, Forge from URL and Drafts sent to review. Try another status, type, kind or origin."
+      />
     );
   }
 
@@ -222,7 +225,7 @@ function QueueItemActions({
         </Button>
       )}
 
-      {(statusFilter === 'approved_blog' || item.publishTarget === 'blog') && (
+      {(statusFilter === 'approved' || item.publishTarget === 'blog') && (
         <Button
           variant="outline"
           size="sm"
@@ -355,6 +358,7 @@ function QueueItemDateMeta({ item }) {
 function QueueItemBadges({ item }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
+      <StatusBadge content={item} />
       <Badge variant="outline">{item['Cloud Provider'] || item.cloudProvider || 'Unknown'}</Badge>
       <Badge variant="secondary">{item.category || 'Uncategorized'}</Badge>
       {getSourceBadge(item)}
@@ -364,11 +368,8 @@ function QueueItemBadges({ item }) {
           {item.publishTarget}
         </Badge>
       )}
-      {getLiveBadge(item)}
+      <TaxonomyChips item={item} />
       {getForgeBadge(item)}
-      <Badge variant="outline" className="font-mono text-[10px]">
-        {item.contentStatus || 'unknown'}
-      </Badge>
       {getDecayBadge(item)}
     </div>
   );

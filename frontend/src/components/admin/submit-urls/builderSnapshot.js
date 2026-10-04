@@ -29,6 +29,14 @@ export function readBuilderSnapshot() {
   }
 }
 
+/** The taxonomy (ADR 0033 §4); an older snapshot has neither, so a fresh page's defaults apply. */
+function restoredTaxonomy(saved) {
+  return {
+    kind: saved.kind || 'article',
+    ideaOrigin: saved.ideaOrigin || 'imported-source',
+  };
+}
+
 function applyPrimaryBuilderSnapshot(saved, setters) {
   const {
     provider = '',
@@ -49,6 +57,7 @@ function applyPrimaryBuilderSnapshot(saved, setters) {
   } = saved;
 
   setters.setProvider(provider);
+  setters.setTaxonomy?.(restoredTaxonomy(saved));
   setters.setBlogLandingProvider(blogLandingProvider);
   setters.setContentType(contentType);
   setters.setTitle(title);
@@ -123,4 +132,23 @@ export function writeBuilderSnapshot(snapshot) {
   } catch {
     return false;
   }
+}
+
+const REUSE_IMAGE_STORAGE_KEY = 'contentforge_reuse_image';
+
+/**
+ * The image another page asked this builder to reuse as the hero: the
+ * `?reuseImage=` query wins, else the one the gallery left in localStorage,
+ * which is consumed (removed) on read so it is used once. '' when neither.
+ */
+export function takeReuseImage(search) {
+  const queryReuseImage = new URLSearchParams(search).get('reuseImage');
+  let cachedReuseImage = '';
+  try {
+    cachedReuseImage = window.localStorage.getItem(REUSE_IMAGE_STORAGE_KEY) || '';
+    window.localStorage.removeItem(REUSE_IMAGE_STORAGE_KEY);
+  } catch {
+    cachedReuseImage = '';
+  }
+  return queryReuseImage || cachedReuseImage;
 }

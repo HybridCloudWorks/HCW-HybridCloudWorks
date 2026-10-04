@@ -43,9 +43,22 @@ const HUBS = [
   'pages/finops/EducationPage.jsx',
 ];
 
+/**
+ * The carousel chrome the GCP, GitHub and Terraform hubs render from one
+ * shared component (PR #841). The pagination assertions below read the
+ * source that holds the markup, so for these hubs they read this file.
+ */
+const SHARED_CAROUSEL = 'components/education/CertificationCarouselSection.jsx';
+const CAROUSEL_SOURCE = {
+  'pages/gcp/EducationPage.jsx': SHARED_CAROUSEL,
+  'pages/github/EducationPage.jsx': SHARED_CAROUSEL,
+  'pages/terraform/EducationPage.jsx': SHARED_CAROUSEL,
+};
+
 /** Hubs plus the detail templates they link to. */
 const EDUCATION_FILES = [
   ...HUBS,
+  SHARED_CAROUSEL,
   'pages/aws/education/CertDetailPage.jsx',
   'pages/azure/education/CertDetailPage.jsx',
   'pages/aws/education/MicrocredentialDetailPage.jsx',
@@ -149,7 +162,7 @@ ${offenders.join('\n')}`
 
 describe('education carousels are usable with a screen reader', () => {
   for (const rel of HUBS) {
-    const source = read(rel);
+    const source = read(CAROUSEL_SOURCE[rel] ?? rel);
 
     it(`${rel} labels each pagination dot and marks the current one`, () => {
       expect(source).toContain('aria-label={`Page ${i + 1} of ${totalPages}`}');

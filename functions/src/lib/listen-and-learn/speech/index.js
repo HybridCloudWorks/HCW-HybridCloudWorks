@@ -168,7 +168,8 @@ function resolveProduct(product) {
 }
 
 const isConfigured = (env) => (p) =>
-  p.keys.every((k) => readSetting(env, k)) && (!p.extra || p.extra.some((k) => readSetting(env, k)));
+  p.keys.every((k) => readSetting(env, k)) &&
+  (!p.extra || p.extra.some((k) => readSetting(env, k)));
 
 /** The product's providers with a usable configuration, in its preference order. */
 function configuredProviders(env, product) {
@@ -198,11 +199,30 @@ export function speechNotConfiguredMessage(product) {
  * @param {object} [env]
  * @param {{product: keyof typeof SPEECH_PRODUCTS}} options
  */
-export function resolveSpeechProvider(env = process.env, { product } = {}) {
+export function resolveSpeechProvider(env = process.env, { product, provider = null } = {}) {
   const name = resolveProduct(product);
   const allowed = SPEECH_PRODUCTS[name];
   const configured = configuredProviders(env, name);
   const pinSetting = SPEECH_PIN_SETTINGS[name];
+
+  // A book's own choice (ADR 0033 §4) outranks the pin: it is the more
+  // specific instruction, and it is held to the same rule — one of the
+  // product's providers, configured, or a sentence rather than a fallthrough.
+  const chosen = String(provider || '')
+    .trim()
+    .toLowerCase();
+  if (chosen) {
+    const match = configured.find((p) => p.name === chosen);
+    if (match) return match;
+    if (allowed.includes(chosen)) {
+      throw new SpeechNotConfiguredError(
+        `The book asks for "${chosen}", which is not configured (${providerByName(chosen).requirement})`
+      );
+    }
+    throw new SpeechNotConfiguredError(
+      `The book asks for "${chosen}", which is not a ${PRODUCT_LABELS[name]} provider — ${PRODUCT_RULE}. ${PRODUCT_LABELS[name]} may use ${allowed.join(' or ')}`
+    );
+  }
 
   const pinned = readSetting(env, pinSetting).toLowerCase();
   if (pinned) {
@@ -222,6 +242,46 @@ export function resolveSpeechProvider(env = process.env, { product } = {}) {
   }
 
   return configured[0] || null;
+}
+
+/**
+ * Every provider a product knows, for the admin page's Advanced section
+ * (ADR 0033 §4): whether it is configured, what configuring it takes, whether
+ * the product may use it at all, and which one would run today with no
+ * per-book choice — so the fallback behaviour is read from the server rather
+ * than described from memory. Never throws: an unusable pin is reported as
+ * `wouldRun: null` with its sentence in `pinError`.
+ *
+ * @param {object} [env]
+ * @param {{product: keyof typeof SPEECH_PRODUCTS}} options
+ */
+export function describeSpeechProviders(env = process.env, { product } = {}) {
+  const name = resolveProduct(product);
+  const allowed = SPEECH_PRODUCTS[name];
+  const pinSetting = SPEECH_PIN_SETTINGS[name];
+  let wouldRun = null;
+  let pinError = null;
+  try {
+    wouldRun = resolveSpeechProvider(env, { product: name })?.name || null;
+  } catch (err) {
+    if (err?.name !== 'SpeechNotConfiguredError') throw err;
+    pinError = err.message;
+  }
+  return {
+    product: name,
+    order: [...allowed],
+    pin: { setting: pinSetting, value: readSetting(env, pinSetting).toLowerCase() || null },
+    wouldRun,
+    pinError,
+    providers: PROVIDERS.map((p) => ({
+      id: p.name,
+      configured: isConfigured(env)(p),
+      requirement: p.requirement,
+      allowed: allowed.includes(p.name),
+      // Why a provider is off the list for this product, by the owner's rule.
+      reason: allowed.includes(p.name) ? null : PRODUCT_RULE,
+    })),
+  };
 }
 
 /**
@@ -269,6 +329,9 @@ function providerEnv(provider, env, model) {
  * @param {{speaker: string, text: string}[]} params.dialogue
  * @param {Record<string,string>} [params.voices] speaker name → provider voice
  * @param {string|null} [params.model] a Gemini model id; ignored by the other providers
+ * @param {string|null} [params.provider] a book's own provider (ADR 0033 §4); null for the product's order and pin
+ * @param {string} [params.lang] BCP 47 tag; Azure puts it on the SSML, Gemini infers it
+ * @param {number} [params.speakingRate] 1 is the voice's pace; Azure honours it, Gemini has no rate
  * @param {object} [params.env]
  * @param {Function} [params.fetchImpl]
  * @returns {Promise<{audio: Buffer, contentType: string, bytes: number, provider: string, requests: number}>}
@@ -278,6 +341,9 @@ export async function synthesizeDialogue({
   dialogue,
   voices = null,
   model = null,
+  provider: chosenProvider = null,
+  lang = 'en-US',
+  speakingRate = 1,
   env = process.env,
   fetchImpl = fetch,
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
@@ -286,12 +352,14 @@ export async function synthesizeDialogue({
   const turns = speakableTurns(dialogue);
   if (turns.length === 0) throw new SpeechError('No dialogue turns to synthesise');
 
-  const provider = resolveSpeechProvider(env, { product: name });
+  const provider = resolveSpeechProvider(env, { product: name, provider: chosenProvider });
   if (!provider) throw new SpeechNotConfiguredError(speechNotConfiguredMessage(name));
 
   const result = await provider.synthesize({
     dialogue: turns,
     voices,
+    lang,
+    speakingRate,
     env: providerEnv(provider, env, model),
     fetchImpl,
     sleep,
@@ -375,12 +443,13 @@ export function estimateSpeechCostUsd({
   dialogue = null,
   ceilingBytes = null,
   model = null,
+  provider: chosenProvider = null,
   env = process.env,
 } = {}) {
   const name = resolveProduct(product);
   let provider;
   try {
-    provider = resolveSpeechProvider(env, { product: name });
+    provider = resolveSpeechProvider(env, { product: name, provider: chosenProvider });
   } catch (err) {
     if (err?.name === 'SpeechNotConfiguredError') return null;
     throw err;
@@ -415,7 +484,10 @@ export function estimateSpeechCostUsd({
 
 /** UTF-8 bytes of every turn's text — the unit azure.js's speaking rate is in. */
 function dialogueBytes(turns) {
-  return turns.reduce((total, turn) => total + Buffer.byteLength(String(turn?.text ?? ''), 'utf8'), 0);
+  return turns.reduce(
+    (total, turn) => total + Buffer.byteLength(String(turn?.text ?? ''), 'utf8'),
+    0
+  );
 }
 
 /** Exposed so the admin surface can say which voices an episode was read in. */

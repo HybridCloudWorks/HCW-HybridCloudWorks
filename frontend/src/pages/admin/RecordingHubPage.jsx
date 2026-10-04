@@ -34,7 +34,8 @@ import { Radio, RefreshCw } from 'lucide-react';
 import { useAuthReady } from '@/hooks/useAuthReady';
 import { useToast } from '@/components/ui/use-toast';
 import { Button } from '@/components/ui/button';
-import ServicePageHeader from '@/components/admin/ServicePageHeader';
+import PageHeader from '@/components/admin/shared/PageHeader';
+import StatusBadge from '@/components/admin/shared/StatusBadge';
 import HubTabs from '@/components/admin/HubTabs';
 import RecordingsTab from '@/components/admin/recording-hub/RecordingsTab';
 import TranscriptsTab from '@/components/admin/recording-hub/TranscriptsTab';
@@ -48,18 +49,6 @@ import { TABS, resolveTab } from '@/components/admin/recording-hub/tabs';
  * Each tab's panel, by id. With TABS in recording-hub/tabs.js this is the whole
  * of adding a tab: every panel receives the same hub state.
  */
-/**
- * What ServicePageHeader shows for each connection state. `checking` and
- * `unknown` pass through as themselves: the header renders a third state for
- * them, which is the whole reason the hub keeps them apart from `disconnected`.
- */
-const HEADER_STATE = Object.freeze({
-  [CONNECTION.connected]: true,
-  [CONNECTION.disconnected]: false,
-  [CONNECTION.checking]: CONNECTION.checking,
-  [CONNECTION.unknown]: CONNECTION.unknown,
-});
-
 const PANELS = {
   recordings: RecordingsTab,
   transcripts: TranscriptsTab,
@@ -68,12 +57,33 @@ const PANELS = {
   settings: SettingsTab,
 };
 
+/**
+ * The Plaud connection as the shared status vocabulary (ADR 0033 §2).
+ * `unknown` is a check that could not run — not `disconnected`, which is a
+ * check that ran and said so — and keeps its own word.
+ */
+const HEADER_STATE = Object.freeze({
+  [CONNECTION.connected]: { system: 'healthy', text: 'Plaud connected' },
+  [CONNECTION.disconnected]: { system: 'misconfigured', text: 'Plaud disconnected' },
+  [CONNECTION.checking]: { system: 'unknown', text: 'Checking Plaud…' },
+  [CONNECTION.unknown]: { system: 'unknown', text: 'Plaud status unknown' },
+});
+
+const HELP = [
+  'Recordings: the live Plaud library (once Plaud is connected on Settings), what this site stores, and two ways to add audio by hand. Script this queues a podcast script; Create Content drafts an article from the transcript and opens it in the Editor.',
+  'Transcripts: what the pipeline produced. Approve one and it is published to RSS.com.',
+  'Episodes: what is live on the show, read from the public feed.',
+  'Distribution: every send to RSS.com and how it went, failures first, each with Retry.',
+  'Settings: the Plaud OAuth token, the refresh timer’s record, and links to the voice and licence settings this hub reads but does not own.',
+];
+
 export default function RecordingHubPage() {
   const { authReady } = useAuthReady();
   const { toast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = resolveTab(searchParams.get('tab'));
   const hub = useRecordingHub(authReady, toast);
+  const header = HEADER_STATE[hub.connection] || HEADER_STATE[CONNECTION.unknown];
 
   const setTab = (id) => {
     if (id === activeTab) return;
@@ -84,13 +94,16 @@ export default function RecordingHubPage() {
 
   return (
     <div className="space-y-6">
-      <ServicePageHeader
+      <PageHeader
         icon={Radio}
         title="Recording Hub"
-        service="Plaud"
-        connected={HEADER_STATE[hub.connection]}
-        description="Browse and transcribe your Plaud recordings, review the transcripts the podcast pipeline produced, and see what reached RSS.com."
-        accent="violet"
+        help={HELP}
+        status={
+          <>
+            <StatusBadge system={header.system} />
+            <span className="text-muted-foreground">{header.text}</span>
+          </>
+        }
       />
 
       {hub.connection === CONNECTION.unknown && (

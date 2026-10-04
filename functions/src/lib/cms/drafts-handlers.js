@@ -31,8 +31,8 @@
  * turn a completed save into a 500 that invites a retry. The transitions also
  * write the `audits` status_transition row transitionContentStatus writes.
  */
-import { randomUUID } from 'node:crypto';
-import { REPO_REF } from './repo-draft.js';
+import { randomUUID } from "node:crypto";
+import { REPO_REF } from "./repo-draft.js";
 import {
   DRAFTS_STAGE_STATUS,
   DraftInputError,
@@ -50,8 +50,16 @@ import {
   toDraftSummary,
   toDraftView,
   validateDraftFields,
-} from './drafts.js';
-import { createDraftsImporter, editorOf, publishedWithTitle } from './drafts-import.js';
+} from "./drafts.js";
+import {
+  createDraftsImporter,
+  editorOf,
+  publishedWithTitle,
+} from "./drafts-import.js";
+import {
+  TaxonomyFieldError,
+  validateTaxonomyFieldsWithStore,
+} from "./taxonomy-fields.js";
 
 export { publishedWithTitle };
 
@@ -62,7 +70,7 @@ const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
 const json = (status, body) => ({
   status,
-  headers: { 'Content-Type': 'application/json' },
+  headers: { "Content-Type": "application/json" },
   body: JSON.stringify(body),
 });
 
@@ -70,19 +78,23 @@ const refused = ({ status, code, error }, extra = {}) =>
   json(status, { ok: false, code, error, ...extra });
 
 const LIST_PROJECTION = [
-  'c.id',
-  'c.Title',
-  'c.title',
-  'c.Summary',
-  'c.summary',
-  'c.contentStatus',
-  'c.Live',
-  'c.draftOrigin',
-  'c.repoPath',
-  'c.updatedAt',
+  "c.id",
+  "c.Title",
+  "c.title",
+  "c.Summary",
+  "c.summary",
+  "c.contentStatus",
+  "c.Live",
+  "c.draftOrigin",
+  "c.kind",
+  "c.ideaOrigin",
+  "c.type",
+  "c.source",
+  "c.repoPath",
+  "c.updatedAt",
   'c["Created At"]',
-  'c._etag',
-].join(', ');
+  "c._etag",
+].join(", ");
 
 /**
  * Every document the page shows: the drafts, and anything that came from
@@ -91,17 +103,22 @@ const LIST_PROJECTION = [
  */
 export const LIST_QUERY =
   `SELECT TOP ${MAX_LISTED_DRAFTS} ${LIST_PROJECTION} FROM c ` +
-  'WHERE c.contentStatus = @drafting OR IS_DEFINED(c.draftOrigin) OR IS_DEFINED(c.repoPath)';
+  "WHERE c.contentStatus = @drafting OR IS_DEFINED(c.draftOrigin) OR IS_DEFINED(c.repoPath)";
 
-const NOT_FOUND = { status: 404, code: 'NOT_FOUND', error: 'No such draft.' };
-const BAD_ID = { status: 400, code: 'BAD_ID', error: 'A draft id is required.' };
+const NOT_FOUND = { status: 404, code: "NOT_FOUND", error: "No such draft." };
+const BAD_ID = {
+  status: 400,
+  code: "BAD_ID",
+  error: "A draft id is required.",
+};
 const ETAG_REQUIRED = {
   status: 400,
-  code: 'ETAG_REQUIRED',
-  error: 'etag is required: send the etag of the version you are looking at (reload the draft).',
+  code: "ETAG_REQUIRED",
+  error:
+    "etag is required: send the etag of the version you are looking at (reload the draft).",
 };
 const CONFLICT_MESSAGE =
-  'This draft changed in another tab or on another device since you opened it. Nothing was saved; reload it to see the latest version.';
+  "This draft changed in another tab or on another device since you opened it. Nothing was saved; reload it to see the latest version.";
 
 /** Thrown inside a handler to answer with a refusal; the route wrapper turns it into the response. */
 class Refusal extends Error {
@@ -118,23 +135,25 @@ const refuseIf = (refusal, extra) => {
 
 async function readBody(request) {
   const body = await request.json().catch(() => null);
-  return body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+  return body && typeof body === "object" && !Array.isArray(body) ? body : {};
 }
 
 function readId(request) {
-  const id = String(request.params?.id || '');
+  const id = String(request.params?.id || "");
   refuseIf(!ID_PATTERN.test(id) && BAD_ID);
   return id;
 }
 
 function readEtag(body) {
   const { etag } = body;
-  const valid = typeof etag === 'string' && etag.length > 0 && etag.length <= 200;
+  const valid =
+    typeof etag === "string" && etag.length > 0 && etag.length <= 200;
   refuseIf(!valid && ETAG_REQUIRED);
   return etag;
 }
 
-const isPreconditionFailure = (error) => error?.code === 412 || error?.code === 404;
+const isPreconditionFailure = (error) =>
+  error?.code === 412 || error?.code === 404;
 
 // ── the store, under the etag ──────────────────────────────────────────────
 // Module-level functions over `deps` (the factory's injected store, clock,
@@ -152,53 +171,69 @@ async function writeAudit(deps, container, row) {
   }
 }
 
-const audit = (deps, action, { user, request, contentId = null, title = '', details = {} }) =>
-  writeAudit(deps, 'admin_audit_logs', {
+const audit = (
+  deps,
+  action,
+  { user, request, contentId = null, title = "", details = {} },
+) =>
+  writeAudit(deps, "admin_audit_logs", {
     action,
     userId: user.oid || user.sub || null,
     userEmail: user.email || null,
     contentId,
     contentTitle: title,
     details,
-    userAgent: request.headers?.get?.('user-agent') || null,
-    compliance: { schemaVersion: 1, detailsSanitized: true, identityVerified: true },
+    userAgent: request.headers?.get?.("user-agent") || null,
+    compliance: {
+      schemaVersion: 1,
+      detailsSanitized: true,
+      identityVerified: true,
+    },
   });
 
 /** The status_transition row createContentStatusTransitioner writes, for the same history. */
 const auditTransition = (deps, { user, request, doc, from, to }) =>
-  writeAudit(deps, 'audits', {
-    action: 'status_transition',
-    resourceType: 'content',
+  writeAudit(deps, "audits", {
+    action: "status_transition",
+    resourceType: "content",
     resourceId: doc.id,
-    resourceTitle: doc.Title || doc.title || '',
+    resourceTitle: doc.Title || doc.title || "",
     userId: user.oid || user.sub || editorOf(user),
     userName: user.name || null,
     userEmail: user.email || null,
     changes: {
       before: { contentStatus: from },
       after: { contentStatus: to },
-      changedFields: ['contentStatus'],
-      notes: '',
+      changedFields: ["contentStatus"],
+      notes: "",
     },
     ipAddress: null,
-    userAgent: request.headers?.get?.('user-agent') || null,
-    metadata: { authMethod: 'entra_bearer_token', reviewedBy: editorOf(user), via: 'drafts' },
-    compliance: { dataClassification: 'internal', retentionMonths: 24, identityVerified: true },
+    userAgent: request.headers?.get?.("user-agent") || null,
+    metadata: {
+      authMethod: "entra_bearer_token",
+      reviewedBy: editorOf(user),
+      via: "drafts",
+    },
+    compliance: {
+      dataClassification: "internal",
+      retentionMonths: 24,
+      identityVerified: true,
+    },
   });
 
 /** The 412 a lost race answers, with what is stored now (or 404 if it is gone). Always throws. */
 async function conflict(deps, id) {
-  const latest = await deps.store.readDoc('content', id, id).catch(() => null);
-  refuseIf(!latest && { ...NOT_FOUND, error: 'This draft no longer exists.' });
+  const latest = await deps.store.readDoc("content", id, id).catch(() => null);
+  refuseIf(!latest && { ...NOT_FOUND, error: "This draft no longer exists." });
   throw new Refusal(
-    { status: 412, code: 'CONFLICT', error: CONFLICT_MESSAGE },
-    { current: toDraftSummary(latest) }
+    { status: 412, code: "CONFLICT", error: CONFLICT_MESSAGE },
+    { current: toDraftSummary(latest) },
   );
 }
 
 /** A document this page may show, or the 404. */
 async function readDraft(deps, id) {
-  const doc = await deps.store.readDoc('content', id, id);
+  const doc = await deps.store.readDoc("content", id, id);
   refuseIf(!(doc && comesFromDrafts(doc)) && NOT_FOUND);
   return doc;
 }
@@ -220,7 +255,7 @@ async function loadForWrite(deps, request) {
 /** patchDoc under the etag; a lost race becomes the 412. */
 async function patchUnderEtag(deps, id, update, etag) {
   try {
-    return await deps.store.patchDoc('content', id, update, { ifMatch: etag });
+    return await deps.store.patchDoc("content", id, update, { ifMatch: etag });
   } catch (error) {
     if (isPreconditionFailure(error)) await conflict(deps, id);
     throw error;
@@ -229,7 +264,7 @@ async function patchUnderEtag(deps, id, update, etag) {
 
 async function deleteUnderEtag(deps, id, etag) {
   try {
-    await deps.store.deleteDocIfMatch('content', id, etag);
+    await deps.store.deleteDocIfMatch("content", id, etag);
   } catch (error) {
     if (isPreconditionFailure(error)) await conflict(deps, id);
     throw error;
@@ -240,7 +275,9 @@ async function deleteUnderEtag(deps, id, etag) {
 async function countersAfterDelete(deps, id, context) {
   if (!deps.onContentDeleted) return;
   await Promise.resolve(deps.onContentDeleted(id)).catch((error) =>
-    context?.warn?.(`[drafts] counters not updated for ${id}: ${error?.message}`)
+    context?.warn?.(
+      `[drafts] counters not updated for ${id}: ${error?.message}`,
+    ),
   );
 }
 
@@ -250,22 +287,34 @@ function failure(context, what, error) {
   return json(500, {
     ok: false,
     error: `Failed to ${what}`,
-    message: error?.message || 'Unknown error',
+    message: error?.message || "Unknown error",
   });
 }
 
 /** A thrown refusal or input error is the answer it carries; anything else is a 500. */
 function answerFor(error, context, what) {
   if (error instanceof Refusal) return error.response;
-  if (error instanceof DraftInputError) {
-    return refused({ status: 400, code: 'INVALID', error: error.message });
+  if (error instanceof DraftInputError || error instanceof TaxonomyFieldError) {
+    return refused({ status: 400, code: "INVALID", error: error.message });
   }
   return failure(context, what, error);
 }
 
+/**
+ * The taxonomy fields of a save, checked against the stored lists (ADR 0033
+ * §4). `current` lets a draft keep a since-disabled id through an edit of
+ * other fields; a new draft or a move onto a disabled id is refused.
+ */
+async function checkedTaxonomy(deps, fields, current = null) {
+  const checked = await validateTaxonomyFieldsWithStore(deps.store, fields, {
+    existing: current,
+  });
+  return { ...fields, ...checked };
+}
+
 /** Every route: the guard, then the work. */
 const route = (deps, what, work) => async (request, context) => {
-  const auth = await deps.guard.requireRole(request, 'editor');
+  const auth = await deps.guard.requireRole(request, "editor");
   if (auth.error) return auth.error;
   try {
     return await work(deps, { request, context, user: auth.user });
@@ -277,19 +326,21 @@ const route = (deps, what, work) => async (request, context) => {
 /** A route that changes an existing draft: route() plus loadForWrite. */
 const writeRoute = (deps, what, work) =>
   route(deps, what, async (d, args) =>
-    work(d, { ...args, ...(await loadForWrite(d, args.request)) })
+    work(d, { ...args, ...(await loadForWrite(d, args.request)) }),
   );
 
 // ── the routes ─────────────────────────────────────────────────────────────
 
 /** GET cms/drafts */
 async function listDrafts(deps) {
-  const rows = await deps.store.queryDocs('content', LIST_QUERY, [
-    { name: '@drafting', value: DRAFTS_STAGE_STATUS },
+  const rows = await deps.store.queryDocs("content", LIST_QUERY, [
+    { name: "@drafting", value: DRAFTS_STAGE_STATUS },
   ]);
   const drafts = rows
     .map(toDraftSummary)
-    .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+    .sort((a, b) =>
+      String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")),
+    );
   return json(200, { ok: true, drafts, limit: MAX_LISTED_DRAFTS });
 }
 
@@ -301,15 +352,18 @@ async function getDraft(deps, { request }) {
 
 /** POST cms/drafts — { fields } */
 async function createDraft(deps, { request, user }) {
-  const fields = validateDraftFields((await readBody(request)).fields);
+  const fields = await checkedTaxonomy(
+    deps,
+    validateDraftFields((await readBody(request)).fields),
+  );
   const doc = buildNewDraftDocument({
     id: deps.uuid(),
     fields,
     editor: editorOf(user),
     now: deps.now,
   });
-  const created = (await deps.store.createDoc('content', doc)) || doc;
-  await audit(deps, 'content_draft_created', {
+  const created = (await deps.store.createDoc("content", doc)) || doc;
+  await audit(deps, "content_draft_created", {
     user,
     request,
     contentId: doc.id,
@@ -320,11 +374,19 @@ async function createDraft(deps, { request, user }) {
 
 /** PUT cms/drafts/{id} — { fields, etag } */
 async function saveDraft(deps, { request, user, id, body, etag, current }) {
-  const fields = validateDraftFields(body.fields);
+  const fields = await checkedTaxonomy(
+    deps,
+    validateDraftFields(body.fields),
+    current,
+  );
   refuseIf(saveRefusal(current));
-  const update = buildDraftUpdate(fields, { current, editor: editorOf(user), now: deps.now });
+  const update = buildDraftUpdate(fields, {
+    current,
+    editor: editorOf(user),
+    now: deps.now,
+  });
   const written = await patchUnderEtag(deps, id, update, etag);
-  await audit(deps, 'content_draft_saved', {
+  await audit(deps, "content_draft_saved", {
     user,
     request,
     contentId: id,
@@ -339,16 +401,19 @@ async function saveDraft(deps, { request, user, id, body, etag, current }) {
  * is still In Review (the same document, so both go). Anything live or past
  * review is refused and untouched.
  */
-async function deleteDraft(deps, { request, context, user, id, etag, current }) {
+async function deleteDraft(
+  deps,
+  { request, context, user, id, etag, current },
+) {
   refuseIf(deleteRefusal(current));
   await deleteUnderEtag(deps, id, etag);
   await countersAfterDelete(deps, id, context);
   const stage = stageOf(current);
-  await audit(deps, 'content_draft_deleted', {
+  await audit(deps, "content_draft_deleted", {
     user,
     request,
     contentId: id,
-    title: current.Title || current.title || '',
+    title: current.Title || current.title || "",
     details: {
       stage,
       contentStatus: current.contentStatus || null,
@@ -364,18 +429,25 @@ async function refuseIfPublishedElsewhere(deps, id, title) {
   refuseIf(
     live && {
       status: 409,
-      code: 'PUBLISHED_ELSEWHERE',
+      code: "PUBLISHED_ELSEWHERE",
       error: `An article titled "${title}" is already published (${live?.id}). Retitle the draft, or delete it if it is that article.`,
     },
-    { existingId: live?.id }
+    { existingId: live?.id },
   );
 }
 
 /** POST cms/drafts/{id}/send-to-review — { etag } */
 async function sendToReview(deps, { request, user, id, etag, current }) {
   refuseIf(sendToReviewRefusal(current));
-  await refuseIfPublishedElsewhere(deps, id, String(current.Title || current.title || '').trim());
-  const patch = buildSendToReviewPatch(current, { editor: editorOf(user), now: deps.now });
+  await refuseIfPublishedElsewhere(
+    deps,
+    id,
+    String(current.Title || current.title || "").trim(),
+  );
+  const patch = buildSendToReviewPatch(current, {
+    editor: editorOf(user),
+    now: deps.now,
+  });
   const written = await patchUnderEtag(deps, id, patch, etag);
   await auditTransition(deps, {
     user,
@@ -394,7 +466,10 @@ async function sendToReview(deps, { request, user, id, etag, current }) {
 /** POST cms/drafts/{id}/back-to-drafts — { etag } */
 async function backToDrafts(deps, { request, user, id, etag, current }) {
   refuseIf(backToDraftsRefusal(current));
-  const patch = buildBackToDraftsPatch({ editor: editorOf(user), now: deps.now });
+  const patch = buildBackToDraftsPatch({
+    editor: editorOf(user),
+    now: deps.now,
+  });
   const written = await patchUnderEtag(deps, id, patch, etag);
   await auditTransition(deps, {
     user,
@@ -410,19 +485,19 @@ async function backToDrafts(deps, { request, user, id, etag, current }) {
 const auditImport = (deps, { user, request }, results) =>
   Promise.all(
     results.map((result) =>
-      audit(deps, 'content_draft_repo_import', {
+      audit(deps, "content_draft_repo_import", {
         user,
         request,
         contentId: result.contentId || null,
-        title: result.title || '',
+        title: result.title || "",
         details: {
           repoPath: result.path,
           repoRef: REPO_REF,
           outcome: result.outcome,
           ...(result.code && { code: result.code }),
         },
-      })
-    )
+      }),
+    ),
   );
 
 /** POST cms/drafts/import-repo — every docs/content article not yet imported. */
@@ -439,14 +514,14 @@ async function importFromRepo(deps, { request, context, user }) {
 
 /** Handler name → what a failure says it was doing, whether it writes an existing draft, the work. */
 const ROUTES = Object.freeze({
-  list: ['list drafts', route, listDrafts],
-  get: ['read the draft', route, getDraft],
-  create: ['create the draft', route, createDraft],
-  update: ['save the draft', writeRoute, saveDraft],
-  remove: ['delete the draft', writeRoute, deleteDraft],
-  sendToReview: ['send the draft to review', writeRoute, sendToReview],
-  backToDrafts: ['move the article back to Drafts', writeRoute, backToDrafts],
-  importFromRepo: ['import the repository drafts', route, importFromRepo],
+  list: ["list drafts", route, listDrafts],
+  get: ["read the draft", route, getDraft],
+  create: ["create the draft", route, createDraft],
+  update: ["save the draft", writeRoute, saveDraft],
+  remove: ["delete the draft", writeRoute, deleteDraft],
+  sendToReview: ["send the draft to review", writeRoute, sendToReview],
+  backToDrafts: ["move the article back to Drafts", writeRoute, backToDrafts],
+  importFromRepo: ["import the repository drafts", route, importFromRepo],
 });
 
 /**
@@ -481,6 +556,9 @@ export function createDraftsHandlers({
     importer: createDraftsImporter({ store, source, now, log }),
   };
   return Object.fromEntries(
-    Object.entries(ROUTES).map(([name, [what, wrap, work]]) => [name, wrap(deps, what, work)])
+    Object.entries(ROUTES).map(([name, [what, wrap, work]]) => [
+      name,
+      wrap(deps, what, work),
+    ]),
   );
 }

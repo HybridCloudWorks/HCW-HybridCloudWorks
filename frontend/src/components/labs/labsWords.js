@@ -101,3 +101,27 @@ export function agentWords(agent) {
   const queue = Number.isFinite(queued) ? `${plural(queued, 'job')} queued` : 'queue unknown';
   return `${agent.online ? 'online' : 'offline'}, ${queue}`;
 }
+
+/**
+ * How each provider hub is named in the labs' own prose: the list heading
+ * ("Terraform labs"), the chips on a card, the groups on the index. The
+ * `/:provider` segment is the key, so every VALID_PROVIDERS entry has a row
+ * (labsWords.test.js checks) and a provider with no labs yet still has a
+ * name for its empty list.
+ */
+export const PROVIDER_NAMES = Object.freeze({
+  azure: 'Azure',
+  aws: 'AWS',
+  gcp: 'Google Cloud',
+  github: 'GitHub',
+  terraform: 'Terraform',
+  finops: 'FinOps',
+  vmware: 'VMware',
+  ansible: 'Ansible',
+  docker: 'Docker',
+});
+
+/** "Terraform" for `terraform`; the segment itself for a provider this map does not know. */
+export function providerName(provider) {
+  return PROVIDER_NAMES[provider] ?? String(provider ?? '');
+}

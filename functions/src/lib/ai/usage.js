@@ -46,7 +46,24 @@ export const USAGE_SOURCES = Object.freeze({
   // provider with a key (#701, 2026-09-29). Its own row so the check's
   // spend, a fraction of a cent a week, is not read as someone testing.
   aiProviderProbe: 'ai-engine:probe',
+  // A router call whose call site named no feature (ADR 0033). The call-sites
+  // test keeps this from happening in production code; the row exists so a
+  // call that somehow slips through is still visible rather than unrecorded.
+  aiUnspecified: 'ai:unspecified',
 });
+
+/**
+ * The `source` the router stamps on the row it writes for every call
+ * (router.js recordCallUsage): `ai:<feature>`, the feature being the one the
+ * call site declared. The Usage tab turns the prefix into the feature's
+ * catalogue label, so no new USAGE_SOURCES entry is needed per feature.
+ */
+export const FEATURE_SOURCE_PREFIX = 'ai:';
+
+export function featureSource(feature) {
+  const name = String(feature || '').trim();
+  return name ? `${FEATURE_SOURCE_PREFIX}${name}` : USAGE_SOURCES.aiUnspecified;
+}
 
 /**
  * Write one usage row.
@@ -65,11 +82,28 @@ export const USAGE_SOURCES = Object.freeze({
  * @param {number} [record.costUsd] a cost the caller already computed
  * @param {boolean} [record.estimatedTokens] true when the counts are derived
  *   rather than reported by the API
+ * @param {string} [record.recordedRowId] the id of the row the router already
+ *   wrote for this call (router.js recordCallUsage). The write then REPLACES
+ *   that row — same id, this caller's `source` — so a call recorded by the
+ *   router and again by its caller is one row, not two (ADR 0033).
+ * @param {boolean} [record.unpriced] true when the cost table has no rate
+ *   for the model; the row then costs 0 and says so, instead of a default
+ *   rate posing as a figure
  * @returns {Promise<object|null>} the row written, or null if the write failed
  */
 export async function recordAiUsage(
   { store, ai, uuid = () => crypto.randomUUID(), now = () => new Date() },
-  { provider, model, promptTokens = 0, completionTokens = 0, source, costUsd, estimatedTokens }
+  {
+    provider,
+    model,
+    promptTokens = 0,
+    completionTokens = 0,
+    source,
+    costUsd,
+    estimatedTokens,
+    recordedRowId,
+    unpriced,
+  }
 ) {
   // Everything is inside the try, including building the row. Pricing it calls
   // into the cost table, and an earlier version did that outside — so a caller
@@ -79,22 +113,26 @@ export async function recordAiUsage(
   try {
     const inTokens = Number(promptTokens) || 0;
     const outTokens = Number(completionTokens) || 0;
+    const isUnpriced =
+      unpriced === true || (typeof ai?.isPriced === 'function' && !ai.isPriced(provider, model));
 
     const row = {
-      id: uuid(),
+      id: typeof recordedRowId === 'string' && recordedRowId ? recordedRowId : uuid(),
       provider,
       model,
       promptTokens: inTokens,
       completionTokens: outTokens,
       totalTokens: inTokens + outTokens,
-      estimatedCostUsd:
-        typeof costUsd === 'number'
+      estimatedCostUsd: isUnpriced
+        ? 0
+        : typeof costUsd === 'number'
           ? costUsd
           : ai.getCostEstimate(provider, model, inTokens, outTokens),
       source: source || USAGE_SOURCES.admin,
       // Only ever true, never false: an absent flag reads as "reported", which
       // is what every historical row is.
       ...(estimatedTokens ? { estimatedTokens: true } : {}),
+      ...(isUnpriced ? { unpriced: true } : {}),
       timestamp: now().toISOString(),
     };
 

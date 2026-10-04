@@ -34,7 +34,7 @@ import {
   getCostEstimate,
 } from '../../../functions/src/lib/ai/router.js';
 import { USAGE_SOURCES } from '../../../functions/src/lib/ai/usage.js';
-import { SOURCE_LABELS } from '../pages/admin/AIEngineUsageTab.jsx';
+import { SOURCE_LABELS, labelForSource } from '../pages/admin/AIEngineUsageTab.jsx';
 
 const ids = DEFAULT_PROVIDERS.map((p) => p.id);
 
@@ -222,5 +222,31 @@ describe('SOURCE_LABELS covers every source the API writes', () => {
   it('names the source the Playground itself sends, which the API does not list', () => {
     // aiEngine.chat defaults to 'admin_playground'; it showed as a raw slug until 2026-09-29.
     expect(SOURCE_LABELS.admin_playground).toBe('Admin playground');
+  });
+});
+
+describe('usage aggregation counts unpriced rows (ADR 0033)', () => {
+  it('counts rows for a model with no confirmed rate, so $0 never reads as free', () => {
+    const agg = aggregateByProvider([
+      {
+        provider: 'openai',
+        model: 'gpt-5-mini',
+        totalTokens: 10,
+        estimatedCostUsd: 0,
+        unpriced: true,
+      },
+      { provider: 'openai', model: 'gpt-4o', totalTokens: 10, estimatedCostUsd: 0.1 },
+    ]);
+    expect(agg.openai).toMatchObject({ calls: 2, unpriced: 1, costUsd: 0.1 });
+  });
+
+  it('labels a router-recorded row by its feature, and the unspecified slug by name', () => {
+    expect(labelForSource('ai:inspector', { inspector: { label: 'Content Inspector' } })).toBe(
+      'AI — Content Inspector'
+    );
+    expect(labelForSource('ai:newFeature', {})).toBe('AI — newFeature');
+    expect(labelForSource(USAGE_SOURCES.aiUnspecified)).toBe('AI — task not named');
+    expect(labelForSource('admin_test')).toBe('AI Engine — Test');
+    expect(labelForSource('something-else')).toBe('something-else');
   });
 });

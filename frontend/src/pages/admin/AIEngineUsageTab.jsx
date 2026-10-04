@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Loader2, Activity, Zap, DollarSign } from 'lucide-react';
+import EmptyState from '@/components/admin/shared/EmptyState';
 import { aiEngine } from '@/lib/aiEngine';
 
 function fmtCost(usd) {
@@ -47,18 +48,59 @@ export const SOURCE_LABELS = {
   'podcast:sample': 'Podcast voice — live check',
   admin_test: 'AI Engine — Test',
   'ai-engine:probe': 'AI Engine — weekly check',
+  // A router call whose site named no feature (ADR 0033); the call-sites
+  // test keeps production code from writing it.
+  'ai:unspecified': 'AI — task not named',
 };
+
+/**
+ * The prefix the router stamps on the row it writes for every call
+ * (functions/src/lib/ai/usage.js featureSource): `ai:<feature>`. The label
+ * is the feature's catalogue entry, read from the API with the switches, so
+ * a new feature never shows as a raw slug here.
+ */
+export const FEATURE_SOURCE_PREFIX = 'ai:';
+
+/** A readable name for a usage row's `source`. */
+export function labelForSource(source, catalogue = {}) {
+  if (SOURCE_LABELS[source]) return SOURCE_LABELS[source];
+  if (typeof source === 'string' && source.startsWith(FEATURE_SOURCE_PREFIX)) {
+    const feature = source.slice(FEATURE_SOURCE_PREFIX.length);
+    return `AI — ${catalogue[feature]?.label || feature}`;
+  }
+  return source;
+}
 
 export default function AIEngineUsageTab() {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [catalogue, setCatalogue] = useState({});
+
+  // A failed read is said, with a retry. Until ADR 0033 this promise had no
+  // catch and a 403 left the spinner turning forever.
+  const load = useCallback(() => {
+    aiEngine
+      .getUsageRecords(200)
+      .then((result) => setRecords(result))
+      .catch((err) => setError(err?.message || 'Usage could not be read.'))
+      .finally(() => setLoading(false));
+    // Labels for the `ai:<feature>` rows; a failure here only leaves the slug.
+    aiEngine
+      .getAiFeatures?.()
+      .then((answer) => setCatalogue(answer?.catalogue || {}))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
-    aiEngine.getUsageRecords(200).then((result) => {
-      setRecords(result);
-      setLoading(false);
-    });
-  }, []);
+    load();
+  }, [load]);
+
+  const retry = () => {
+    setLoading(true);
+    setError(null);
+    load();
+  };
 
   const agg = aiEngine.aggregateByProvider(records);
   const chartData = Object.entries(agg).map(([provider, data]) => ({
@@ -78,12 +120,25 @@ export default function AIEngineUsageTab() {
       cost: parseFloat(data.costUsd.toFixed(6)),
       calls: data.calls,
       estimated: data.estimated,
+      unpriced: data.unpriced,
     }))
     .sort((a, b) => b.cost - a.cost || b.tokens - a.tokens);
 
   const totalTokens = records.reduce((sum, record) => sum + (record.totalTokens || 0), 0);
   const totalCost = records.reduce((sum, record) => sum + (record.estimatedCostUsd || 0), 0);
   const totalCalls = records.length;
+  const unpricedCalls = records.filter((record) => record.unpriced).length;
+
+  if (error) {
+    return (
+      <EmptyState
+        variant="error"
+        title="Usage could not be read"
+        description={error}
+        onRetry={retry}
+      />
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -96,14 +151,23 @@ export default function AIEngineUsageTab() {
         {[
           { label: 'Total Calls', value: totalCalls.toLocaleString(), icon: Activity },
           { label: 'Total Tokens', value: fmtTokens(totalTokens), icon: Zap },
-          { label: 'Est. Cost (USD)', value: `$${totalCost.toFixed(4)}`, icon: DollarSign },
-        ].map(({ label, value, icon: Icon }) => (
+          {
+            label: 'Est. Cost (USD)',
+            value: `$${totalCost.toFixed(4)}`,
+            icon: DollarSign,
+            note:
+              unpricedCalls > 0
+                ? `${unpricedCalls} call${unpricedCalls === 1 ? '' : 's'} on a model with no confirmed rate, counted at $0`
+                : null,
+          },
+        ].map(({ label, value, icon: Icon, note }) => (
           <Card key={label}>
             <CardContent className="p-4 flex items-center gap-3">
               <Icon className="h-5 w-5 text-indigo-500 shrink-0" />
               <div>
                 <p className="text-xs text-slate-500">{label}</p>
                 <p className="text-lg font-bold">{value}</p>
+                {note && <p className="text-[11px] text-amber-700 dark:text-amber-400">{note}</p>}
               </div>
             </CardContent>
           </Card>
@@ -194,7 +258,15 @@ export default function AIEngineUsageTab() {
                 {sourceRows.map((row) => (
                   <tr key={row.source} className="border-b border-slate-100 dark:border-slate-800">
                     <td className="py-1.5 font-medium">
-                      {SOURCE_LABELS[row.source] || row.source}
+                      {labelForSource(row.source, catalogue)}
+                      {row.unpriced > 0 && (
+                        <span
+                          className="ml-1.5 text-amber-700 dark:text-amber-400 font-normal"
+                          title={`${row.unpriced} of ${row.calls} rows used a model with no confirmed rate and are counted at $0`}
+                        >
+                          {row.unpriced} unpriced
+                        </span>
+                      )}
                       {row.estimated > 0 && (
                         // Derived counts must never be shown as billed ones.
                         <span
@@ -242,12 +314,20 @@ export default function AIEngineUsageTab() {
                       <td className="px-4 py-1.5 font-mono">
                         {record.provider}/{record.model}
                       </td>
-                      <td className="px-4 py-1.5 text-slate-500">{record.source}</td>
+                      <td className="px-4 py-1.5 text-slate-500">
+                        {labelForSource(record.source, catalogue)}
+                      </td>
                       <td className="px-4 py-1.5 text-right">
                         {fmtTokens(record.totalTokens || 0)}
                       </td>
                       <td className="px-4 py-1.5 text-right font-mono">
-                        {fmtCost(record.estimatedCostUsd)}
+                        {record.unpriced ? (
+                          <span title="No confirmed rate for this model; counted at $0">
+                            unpriced
+                          </span>
+                        ) : (
+                          fmtCost(record.estimatedCostUsd)
+                        )}
                       </td>
                       <td className="px-4 py-1.5 text-right text-slate-400">
                         {timeAgo(record.timestamp)}
@@ -262,9 +342,11 @@ export default function AIEngineUsageTab() {
       )}
 
       {!loading && records.length === 0 && (
-        <div className="text-center py-12 text-slate-400 text-sm">
-          No usage logged yet. Use the Playground to make your first call.
-        </div>
+        <EmptyState
+          title="No usage logged yet"
+          description="Every call through the AI router records a row here. The Playground is the quickest way to make the first one."
+          onRetry={retry}
+        />
       )}
 
       {loading && (

@@ -39,6 +39,8 @@ import CatalogueFreshness from '@/components/education/CatalogueFreshness';
 import SectionHeading from '@/components/education/SectionHeading';
 import { deriveStatus, isIsoDate, useToday } from '@/lib/certStatus';
 import { routes, staticRoutes } from '@/lib/routeFactory';
+import { providerName } from '@/components/labs/labsWords';
+import { labsForProvider, labsPath, providersWithLabs } from '@/data/labs/catalogue';
 
 import * as ansible from '@/data/ansible/education';
 import * as aws from '@/data/aws/certifications';
@@ -372,7 +374,7 @@ export default function EducationIndexPage() {
         />
       </Helmet>
 
-      <div className="relative z-10 max-w-[1200px] mx-auto w-full px-4 md:px-8 py-12 flex flex-col gap-12">
+      <div className="relative z-10 max-w-300 mx-auto w-full px-4 md:px-8 py-12 flex flex-col gap-12">
         <header>
           <h1 className="display-heading text-3xl sm:text-4xl text-slate-950 dark:text-white mb-3">
             Learn any cloud
@@ -415,6 +417,23 @@ export default function EducationIndexPage() {
             open VS Code in your browser with az, terraform, kubectl, helm and ansible installed, or
             run the same image on your own machine with one docker command.
           </p>
+          {/* Each hub's own list (ADR 0033 §3): the labs sit under the
+              provider they teach, and the index above groups them the same way. */}
+          <ul className="mt-3 flex flex-wrap gap-2 list-none p-0" aria-label="Labs by provider">
+            {providersWithLabs().map((provider) => (
+              <li key={provider}>
+                <Link
+                  to={labsPath(provider)}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 dark:border-slate-600 px-3 py-1 text-xs font-semibold text-slate-800 dark:text-slate-200 hover:border-primary hover:text-primary"
+                >
+                  {providerName(provider)} labs
+                  <span className="text-slate-500 dark:text-slate-400 font-normal">
+                    {labsForProvider(provider).length}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
         </section>
 
         <section aria-labelledby="equivalence-heading">
@@ -445,7 +464,7 @@ export default function EducationIndexPage() {
             aria-labelledby="equivalence-heading"
             className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700"
           >
-            <table className="w-full min-w-[72rem] border-collapse text-left">
+            <table className="w-full min-w-6xl border-collapse text-left">
               <caption className="sr-only">
                 Certification levels across nine providers. Each row is a level; each column is a
                 provider; each cell lists that provider&rsquo;s certifications at that level, or an

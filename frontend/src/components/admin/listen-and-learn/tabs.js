@@ -1,5 +1,6 @@
 /**
- * The Listen & Learn Hub's tabs, and where old addresses land (#574).
+ * The Listen & Learn Hub's tabs, and where old addresses land (#574, ADR
+ * 0033 §4).
  *
  * Kept out of the page module so a link builder elsewhere can import the ids
  * without pulling the lazily loaded page into the main bundle.
@@ -10,41 +11,45 @@
 export const LISTEN_AND_LEARN_PATH = '/admin/listen-and-learn';
 
 export const TABS = Object.freeze([
+  { id: 'library', label: 'Library' },
   { id: 'generate', label: 'Generate' },
   { id: 'review', label: 'Review' },
-  { id: 'published', label: 'Published' },
   { id: 'settings', label: 'Settings' },
 ]);
 
 /**
- * Generate, because that is what the one-scroll page opened on: the form was
- * the first thing below the header, so a bookmark with no `?tab=` should land
- * where its owner left off rather than on an empty Review.
+ * Library, because that is what the hub is now: the books and courses, each
+ * opening to its chapters, where everything from rename to regenerate lives.
+ * Generate is one way to add to it, not the front door.
  */
-export const DEFAULT_TAB = 'generate';
+export const DEFAULT_TAB = 'library';
 
 const TAB_IDS = new Set(TABS.map((tab) => tab.id));
 
 /**
- * Ids that were never tabs here but name what a tab now holds. This page had
- * no tabs before #574 — these are the section headings and the words someone
- * would reasonably type, so a hand-written link lands where the content went
- * instead of silently falling back to Generate.
+ * Ids that were tabs or section headings here before and name what a tab now
+ * holds, so a hand-written or bookmarked link lands where the content went
+ * instead of silently falling back to the Library. `published` was a tab
+ * until ADR 0033 §4 folded it into the Library, where a book's chapters show
+ * their status.
  */
 export const MOVED_TABS = Object.freeze({
-  sets: 'review',
-  'generated-sets': 'review',
-  episodes: 'review',
+  published: 'library',
+  sets: 'library',
+  'generated-sets': 'library',
+  books: 'library',
+  episodes: 'library',
+  chapters: 'library',
+  live: 'library',
   drafts: 'review',
   approve: 'review',
-  live: 'published',
   voice: 'settings',
   speech: 'settings',
   sources: 'generate',
   grounding: 'generate',
 });
 
-/** The tab to show for a `?tab=` value: its own, where it moved, or Generate. */
+/** The tab to show for a `?tab=` value: its own, where it moved, or the Library. */
 export function resolveTab(requested) {
   // Own properties only: `?tab=constructor` must not read Object.prototype.
   const id = Object.prototype.hasOwnProperty.call(MOVED_TABS, requested ?? '')

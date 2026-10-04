@@ -18,7 +18,12 @@
  * `key={episode.id}` and every piece of state below resets with the element.
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { formatSeconds, stripHtml } from '@/lib/audioEpisodes';
+import {
+  formatSeconds,
+  readPlaybackPosition,
+  savePlaybackPosition,
+  stripHtml,
+} from '@/lib/audioEpisodes';
 import { safeUrl } from '@/lib/safeUrl';
 
 /**
@@ -32,6 +37,68 @@ import { safeUrl } from '@/lib/safeUrl';
  */
 export function isInternalPath(url) {
   return Boolean(url && url.startsWith('/') && !url.startsWith('//'));
+}
+
+/** The cover, or the provider-coloured placeholder when the feed has none. */
+function EpisodeArtwork({ image, episode, meta }) {
+  if (image) {
+    return (
+      <img
+        src={image}
+        alt={episode.title}
+        loading="lazy"
+        decoding="async"
+        className="w-full aspect-square max-w-50 rounded-lg object-cover shrink-0"
+      />
+    );
+  }
+  return (
+    <div
+      className={`w-full aspect-square max-w-50 rounded-lg bg-linear-to-br ${meta.placeholder} flex items-center justify-center shrink-0`}
+    >
+      <span className={`material-symbols-outlined ${meta.placeholderIcon} text-3xl`}>podcasts</span>
+    </div>
+  );
+}
+
+/**
+ * Download and the episode link, beside the play button. Both render only
+ * from a sanitised URL; an enclosure that failed `safeUrl` says so instead.
+ */
+function EpisodeLinks({ episode, mediaUrl, link }) {
+  const internalLink = isInternalPath(link);
+  return (
+    <>
+      {mediaUrl && (
+        <a
+          href={mediaUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-2 px-4 py-2 bg-card/50 hover:bg-card/70 text-foreground rounded-lg transition-colors text-sm font-semibold"
+        >
+          <span className="material-symbols-outlined text-[16px]">download</span>
+          Download
+        </a>
+      )}
+      {episode.mediaUrl && !mediaUrl && (
+        <span className="text-xs text-foreground/70" role="note">
+          Media URL not playable
+        </span>
+      )}
+      {link && (
+        <a
+          href={link}
+          {...(internalLink ? {} : { target: '_blank', rel: 'noopener noreferrer' })}
+          className="flex items-center gap-2 px-4 py-2 bg-card/50 hover:bg-card/70 text-foreground rounded-lg transition-colors text-sm font-semibold"
+        >
+          <span className="material-symbols-outlined text-[16px]">
+            {internalLink ? 'school' : 'open_in_new'}
+          </span>
+          {internalLink ? 'Certification' : 'Open'}
+        </a>
+      )}
+    </>
+  );
 }
 
 export default function EpisodePlayer({ episode, meta, onPlayingChange }) {
@@ -70,7 +137,6 @@ export default function EpisodePlayer({ episode, meta, onPlayingChange }) {
   // it can be null or not a string at all. Decide internal-vs-external on the
   // sanitised string and render the link only when there is one.
   const link = safeUrl(episode.link);
-  const internalLink = isInternalPath(link);
   const known = duration ?? episode.durationSeconds ?? null;
   const sliderMax = known && known > 0 ? known : 0;
 
@@ -79,6 +145,21 @@ export default function EpisodePlayer({ episode, meta, onPlayingChange }) {
     const next = Number(event.target.value);
     setCurrentTime(next);
     if (audio) audio.currentTime = next;
+  }
+
+  // Where this browser left off in this episode (ADR 0033 §4): restored once
+  // the element knows its length, saved as it plays and when it pauses, and
+  // cleared when it ends so the next visit starts from the top. A storage
+  // that cannot be read or written leaves the player exactly as it was.
+  function restorePosition(audioEl) {
+    const at = readPlaybackPosition(episode.id);
+    if (at > 0 && at < (audioEl.duration || Infinity)) {
+      audioEl.currentTime = at;
+      setCurrentTime(at);
+    }
+  }
+  function rememberPosition(audioEl) {
+    savePlaybackPosition(episode.id, audioEl.currentTime, audioEl.duration || known);
   }
 
   return (
@@ -92,12 +173,19 @@ export default function EpisodePlayer({ episode, meta, onPlayingChange }) {
           ref={audioRef}
           src={mediaUrl}
           preload="metadata"
-          onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime || 0)}
+          onTimeUpdate={(e) => {
+            setCurrentTime(e.currentTarget.currentTime || 0);
+            rememberPosition(e.currentTarget);
+          }}
           onLoadedMetadata={(e) => {
             const d = e.currentTarget.duration;
             if (Number.isFinite(d) && d > 0) setDuration(d);
+            restorePosition(e.currentTarget);
           }}
-          onEnded={() => setIsPlaying(false)}
+          onEnded={() => {
+            setIsPlaying(false);
+            savePlaybackPosition(episode.id, 0);
+          }}
           // The element is the source of truth, not the button: OS media keys,
           // headphone controls and the browser's own audio UI move it without
           // going through our handler, and the indicator on the list above
@@ -105,7 +193,10 @@ export default function EpisodePlayer({ episode, meta, onPlayingChange }) {
           // are idempotent against the effect that mirrors this state onto the
           // element (play() on a playing element, pause() on a paused one).
           onPlay={() => setIsPlaying(true)}
-          onPause={() => setIsPlaying(false)}
+          onPause={(e) => {
+            setIsPlaying(false);
+            rememberPosition(e.currentTarget);
+          }}
           aria-label={`Audio: ${episode.title}`}
         />
       )}
@@ -122,23 +213,7 @@ export default function EpisodePlayer({ episode, meta, onPlayingChange }) {
         </div>
 
         <div className="flex gap-6 items-start mb-6">
-          {image ? (
-            <img
-              src={image}
-              alt={episode.title}
-              loading="lazy"
-              decoding="async"
-              className="w-full aspect-square max-w-[200px] rounded-lg object-cover flex-shrink-0"
-            />
-          ) : (
-            <div
-              className={`w-full aspect-square max-w-[200px] rounded-lg bg-gradient-to-br ${meta.placeholder} flex items-center justify-center flex-shrink-0`}
-            >
-              <span className={`material-symbols-outlined ${meta.placeholderIcon} text-3xl`}>
-                podcasts
-              </span>
-            </div>
-          )}
+          <EpisodeArtwork image={image} episode={episode} meta={meta} />
           <div className="flex-1 min-w-0">
             <h2 className="text-xl sm:text-2xl font-bold text-white mb-2 leading-tight">
               {episode.title}
@@ -156,7 +231,7 @@ export default function EpisodePlayer({ episode, meta, onPlayingChange }) {
           data-testid="episode-track"
         >
           <div
-            className={`h-full bg-gradient-to-r ${meta.progressBar} rounded-full transition-all duration-200`}
+            className={`h-full bg-linear-to-r ${meta.progressBar} rounded-full transition-all duration-200`}
             style={{
               // Clamped like the slider's value: a document's durationSeconds
               // can be shorter than the real file, and the bar must not
@@ -189,40 +264,13 @@ export default function EpisodePlayer({ episode, meta, onPlayingChange }) {
             onClick={() => setIsPlaying((p) => !p)}
             disabled={!mediaUrl}
             aria-label={isPlaying ? 'Pause' : 'Play'}
-            className={`w-12 h-12 bg-gradient-to-br ${meta.playBtn} rounded-full flex items-center justify-center transition-all shadow-lg disabled:opacity-40`}
+            className={`w-12 h-12 bg-linear-to-br ${meta.playBtn} rounded-full flex items-center justify-center transition-all shadow-lg disabled:opacity-40`}
           >
             <span className="material-symbols-outlined text-white text-2xl">
               {isPlaying ? 'pause' : 'play_arrow'}
             </span>
           </button>
-          {mediaUrl && (
-            <a
-              href={mediaUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2 px-4 py-2 bg-card/50 hover:bg-card/70 text-foreground rounded-lg transition-colors text-sm font-semibold"
-            >
-              <span className="material-symbols-outlined text-[16px]">download</span>
-              Download
-            </a>
-          )}
-          {episode.mediaUrl && !mediaUrl && (
-            <span className="text-xs text-foreground/70" role="note">
-              Media URL not playable
-            </span>
-          )}
-          {link && (
-            <a
-              href={link}
-              {...(internalLink ? {} : { target: '_blank', rel: 'noopener noreferrer' })}
-              className="flex items-center gap-2 px-4 py-2 bg-card/50 hover:bg-card/70 text-foreground rounded-lg transition-colors text-sm font-semibold"
-            >
-              <span className="material-symbols-outlined text-[16px]">
-                {internalLink ? 'school' : 'open_in_new'}
-              </span>
-              {internalLink ? 'Certification' : 'Open'}
-            </a>
-          )}
+          <EpisodeLinks episode={episode} mediaUrl={mediaUrl} link={link} />
         </div>
       </div>
     </article>

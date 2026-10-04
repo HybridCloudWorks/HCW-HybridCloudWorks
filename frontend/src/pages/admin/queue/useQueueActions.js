@@ -23,16 +23,56 @@
  *
  * Items are mutated optimistically rather than refetched, which is why
  * `setItems` is a parameter.
+ *
+ * The status moves themselves — approve, reject, restore — are
+ * useContentTransitions (ADR 0033 §2), the one copy every review surface
+ * uses; this hook adds the queue's selection, confirmation and bulk
+ * bookkeeping around it. The server records each transition in `audits`, so
+ * no client audit row is written for them; the client-only actions (forge
+ * enqueue, bulk soft-delete, permanent delete) still log their own.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { postJSON } from '@/lib/api';
 import { logAdminAction } from '@/lib/auditLog';
 import { requestContentInspection } from '@/lib/contentWorkflow';
 import { getPublishTargetForItem } from '@/lib/contentModel';
+import { useContentTransitions } from './useContentTransitions';
+import { enqueueForgeBatches, forgeFailureMessage, forgeQueuedMessage } from './forgeSelected';
 
-/** Mirrors FORGE_MAX_BATCH in functions/src/functions/forge-jobs.js — the
- * job rejects a larger batch, so a bigger selection is chunked here. */
-export const FORGE_MAX_BATCH = 10;
+export { FORGE_MAX_BATCH } from './forgeSelected';
+
+/** `prev` with `id` toggled: removed when present, added when not. */
+export function toggleId(prev, id) {
+  const next = new Set(prev);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  return next;
+}
+
+/**
+ * Header select-all over the ids currently on screen: everything visible
+ * selected → clear, anything unselected → select all visible.
+ */
+export function toggleAllIds(prev, visibleIds) {
+  const ids = (visibleIds || []).filter(Boolean);
+  const allSelected = ids.length > 0 && ids.every((id) => prev.has(id));
+  return allSelected ? new Set() : new Set(ids);
+}
+
+/** The selected ids that are still on screen; a stale selection acts on nothing. */
+export function selectedOnScreen(selectedIds, items) {
+  return Array.from(selectedIds).filter((id) => items.some((it) => it.id === id));
+}
+
+/** Two per-item maps as one: a value in `b` wins unless it is null/undefined. */
+function mergeItemMaps(a, b) {
+  const merged = { ...a };
+  for (const [key, value] of Object.entries(b)) {
+    if (value !== null && value !== undefined) merged[key] = value;
+    else if (!(key in merged)) merged[key] = value;
+  }
+  return merged;
+}
 
 /**
  * @param {object} params
@@ -43,8 +83,17 @@ export const FORGE_MAX_BATCH = 10;
  * @param {string} params.contentTypeFilter only used to clear the selection
  */
 export function useQueueActions({ items, setItems, statusFilter, contentTypeFilter }) {
-  const [actionLoading, setActionLoading] = useState({});
-  const [actionError, setActionError] = useState({});
+  const [localLoading, setActionLoading] = useState({});
+  const [localError, setActionError] = useState({});
+  const transitions = useContentTransitions();
+  const actionLoading = useMemo(
+    () => mergeItemMaps(transitions.loading, localLoading),
+    [transitions.loading, localLoading]
+  );
+  const actionError = useMemo(
+    () => mergeItemMaps(transitions.errors, localError),
+    [transitions.errors, localError]
+  );
   const [bulkDeletingRejected, setBulkDeletingRejected] = useState(false);
   const [bulkDeleteError, setBulkDeleteError] = useState(null);
   const [bulkDeleteMessage, setBulkDeleteMessage] = useState(null);
@@ -59,84 +108,45 @@ export function useQueueActions({ items, setItems, statusFilter, contentTypeFilt
     setSelectedIds(new Set());
   }, [statusFilter, contentTypeFilter]);
 
-  const toggleSelected = useCallback((id) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
+  const toggleSelected = useCallback((id) => setSelectedIds((prev) => toggleId(prev, id)), []);
 
-  // Header select-all over the ids currently on screen: everything visible
-  // selected → clear, anything unselected → select all visible. Operates on
-  // the caller-supplied visible ids rather than `items` so a sorted or
-  // paged view selects exactly what the admin is looking at.
-  const toggleSelectAll = useCallback((visibleIds) => {
-    setSelectedIds((prev) => {
-      const ids = (visibleIds || []).filter(Boolean);
-      const allSelected = ids.length > 0 && ids.every((id) => prev.has(id));
-      return allSelected ? new Set() : new Set(ids);
-    });
-  }, []);
+  // Operates on the caller-supplied visible ids rather than `items` so a
+  // sorted or paged view selects exactly what the admin is looking at.
+  const toggleSelectAll = useCallback(
+    (visibleIds) => setSelectedIds((prev) => toggleAllIds(prev, visibleIds)),
+    []
+  );
 
   const [forgingSelected, setForgingSelected] = useState(false);
   const [forgeMessage, setForgeMessage] = useState(null);
   const [forgeError, setForgeError] = useState(null);
 
   /**
-   * "Forge Selected" (Blog Machine T-603): enqueue the checked documents in
-   * ≤FORGE_MAX_BATCH chunks and let the pipeline run under the job budget —
-   * fire-and-forget like the Forge-from-URL box, because a forge run takes
-   * minutes and its results land back in this queue as forge_ready/editing.
-   * The pipeline's own gates (title dedupe 409, empty-source refusal) decide
-   * per document; nothing is filtered here beyond "still on screen".
+   * "Forge Selected" (Blog Machine T-603): the checked documents, enqueued in
+   * chunks by forgeSelected.js; this is the state around that run.
    */
   const handleForgeSelected = async () => {
-    const ids = Array.from(selectedIds).filter((id) => items.some((it) => it.id === id));
+    const ids = selectedOnScreen(selectedIds, items);
     if (ids.length === 0) return;
     setForgingSelected(true);
     setForgeError(null);
     setForgeMessage(null);
-    const jobIds = [];
-    const failures = [];
     try {
-      for (let start = 0; start < ids.length; start += FORGE_MAX_BATCH) {
-        const chunk = ids.slice(start, start + FORGE_MAX_BATCH);
-        try {
-          const accepted = await postJSON('enqueueJob', {
-            type: 'forge-article',
-            payload: { sourceContentIds: chunk },
-          });
-          if (!accepted?.ok || !accepted.jobId) {
-            throw new Error(accepted?.error || 'Job was not accepted');
-          }
-          jobIds.push(accepted.jobId);
-        } catch (err) {
-          failures.push({ count: chunk.length, message: err?.message || 'Unknown error' });
-        }
-      }
+      const { jobIds, failures } = await enqueueForgeBatches(ids);
       if (jobIds.length) {
         await logAdminAction('content_forge_enqueued', { count: ids.length, jobIds });
         setSelectedIds(new Set());
-        setForgeMessage(
-          `Forge queued for ${ids.length - failures.reduce((n, f) => n + f.count, 0)} item${ids.length === 1 ? '' : 's'} (job${jobIds.length === 1 ? '' : 's'} ${jobIds.join(', ')}). Results land back here as forge_ready or editing — refresh in a few minutes.`
-        );
+        setForgeMessage(forgeQueuedMessage(ids.length, jobIds, failures));
       }
-      if (failures.length) {
-        setForgeError(
-          `${failures.reduce((n, f) => n + f.count, 0)} item(s) failed to queue: ${failures[0].message}`
-        );
-      }
+      if (failures.length) setForgeError(forgeFailureMessage(failures));
     } finally {
       setForgingSelected(false);
     }
   };
 
   const handleBulkReject = () => {
-    const ids = Array.from(selectedIds).filter((id) => items.some((it) => it.id === id));
-    if (ids.length < 2) return;
-    setConfirmTarget({ type: 'bulkReject', ids });
+    const ids = selectedOnScreen(selectedIds, items);
+    if (ids.length >= 2) setConfirmTarget({ type: 'bulkReject', ids });
   };
 
   const doBulkReject = async (ids) => {
@@ -147,31 +157,18 @@ export function useQueueActions({ items, setItems, statusFilter, contentTypeFilt
     const failures = [];
     try {
       for (const contentId of ids) {
-        try {
-          await postJSON('transitionContentStatus', {
-            contentId,
-            newStatus: 'rejected',
-            markLive: false,
-            reviewNotes: 'Bulk rejected from queue',
-          });
-          await logAdminAction('content_rejected', { contentId, bulk: true });
-          successCount += 1;
-        } catch (err) {
-          console.error('Bulk reject error for', contentId, err);
-          failures.push({ id: contentId, message: err?.message || 'Unknown error' });
-        }
+        // A null answer is a failure the hook has already written under the
+        // card as "Reject failed: <reason>"; the run goes on to the next id.
+        const result = await transitions.reject(contentId, {
+          reviewNotes: 'Bulk rejected from queue',
+        });
+        if (result) successCount += 1;
+        else failures.push(contentId);
       }
-      const failedIds = new Set(failures.map((f) => f.id));
+      const failedIds = new Set(failures);
       const successSet = new Set(ids.filter((id) => !failedIds.has(id)));
       setItems((prev) => prev.filter((item) => !successSet.has(item.id)));
       setSelectedIds(new Set());
-      if (failures.length) {
-        setActionError((prev) => {
-          const next = { ...prev };
-          for (const f of failures) next[f.id] = `Reject failed: ${f.message}`;
-          return next;
-        });
-      }
       setBulkDeleteMessage(
         `Rejected ${successCount} item${successCount === 1 ? '' : 's'}.${
           failures.length
@@ -187,28 +184,11 @@ export function useQueueActions({ items, setItems, statusFilter, contentTypeFilt
   const handleApprove = async (item) => {
     const contentId = item.id;
     const publishTarget = getPublishTargetForItem(item);
-
-    setActionError((prev) => ({ ...prev, [contentId]: null }));
-    setActionLoading((prev) => ({ ...prev, [contentId]: 'approving' }));
-    try {
-      const newStatus = 'approved_blog';
-
-      await postJSON('transitionContentStatus', {
-        contentId,
-        newStatus,
-        publishTarget,
-        markLive: false,
-        reviewNotes: `Approved in queue for ${publishTarget} publish stage`,
-      });
-
-      await logAdminAction('content_approved', { contentId, publishTarget, newStatus });
-      setItems((prev) => prev.filter((item) => item.id !== contentId));
-    } catch (err) {
-      console.error('Approve error:', err);
-      setActionError((prev) => ({ ...prev, [contentId]: `Approve failed: ${err.message}` }));
-    } finally {
-      setActionLoading((prev) => ({ ...prev, [contentId]: null }));
-    }
+    const result = await transitions.approve(item, {
+      publishTarget,
+      reviewNotes: `Approved in queue for ${publishTarget} publish stage`,
+    });
+    if (result) setItems((prev) => prev.filter((entry) => entry.id !== contentId));
   };
 
   const handleReject = (contentId) => {
@@ -216,31 +196,13 @@ export function useQueueActions({ items, setItems, statusFilter, contentTypeFilt
   };
 
   const doReject = async (contentId) => {
-    setActionError((prev) => ({ ...prev, [contentId]: null }));
-    setActionLoading((prev) => ({ ...prev, [contentId]: 'rejecting' }));
-    try {
-      await postJSON('transitionContentStatus', {
-        contentId,
-        newStatus: 'rejected',
-        markLive: false,
-        reviewNotes: 'Rejected from queue',
-      });
-      await logAdminAction('content_rejected', { contentId });
-      setItems((prev) => prev.filter((item) => item.id !== contentId));
-    } catch (err) {
-      console.error('Reject error:', err);
-      setActionError((prev) => ({ ...prev, [contentId]: `Reject failed: ${err.message}` }));
-    } finally {
-      setActionLoading((prev) => ({ ...prev, [contentId]: null }));
-    }
+    const result = await transitions.reject(contentId, { reviewNotes: 'Rejected from queue' });
+    if (result) setItems((prev) => prev.filter((item) => item.id !== contentId));
   };
 
   const handleDeleteRejectedNow = () => {
-    if (statusFilter !== 'rejected') {
-      setBulkDeleteError('Switch the filter to Rejected to bulk delete those items.');
-      return;
-    }
-    setConfirmTarget({ type: 'bulkDelete' });
+    if (statusFilter === 'rejected') setConfirmTarget({ type: 'bulkDelete' });
+    else setBulkDeleteError('Switch the filter to Rejected to bulk delete those items.');
   };
 
   const doBulkDelete = async () => {
@@ -277,21 +239,10 @@ export function useQueueActions({ items, setItems, statusFilter, contentTypeFilt
   };
 
   const doRestore = async (contentId) => {
-    setActionError((prev) => ({ ...prev, [contentId]: null }));
-    setActionLoading((prev) => ({ ...prev, [contentId]: 'restoring' }));
-    try {
-      await postJSON('transitionContentStatus', {
-        contentId,
-        newStatus: 'inspected',
-        reviewNotes: 'Restored from rejected status',
-      });
-      setItems((prev) => prev.filter((item) => item.id !== contentId));
-    } catch (err) {
-      console.error('Restore error:', err);
-      setActionError((prev) => ({ ...prev, [contentId]: `Restore failed: ${err.message}` }));
-    } finally {
-      setActionLoading((prev) => ({ ...prev, [contentId]: null }));
-    }
+    const result = await transitions.restore(contentId, {
+      reviewNotes: 'Restored from rejected status',
+    });
+    if (result) setItems((prev) => prev.filter((item) => item.id !== contentId));
   };
 
   const doPermanentDelete = async (contentId) => {
@@ -325,12 +276,14 @@ export function useQueueActions({ items, setItems, statusFilter, contentTypeFilt
   const handleConfirm = async () => {
     const target = confirmTarget;
     setConfirmTarget(null);
-    if (!target) return;
-    if (target.type === 'reject') await doReject(target.id);
-    else if (target.type === 'bulkDelete') await doBulkDelete();
-    else if (target.type === 'bulkReject') await doBulkReject(target.ids || []);
-    else if (target.type === 'restore') await doRestore(target.id);
-    else if (target.type === 'deleteRejected') await doPermanentDelete(target.id);
+    const run = {
+      reject: () => doReject(target.id),
+      bulkDelete: () => doBulkDelete(),
+      bulkReject: () => doBulkReject(target.ids || []),
+      restore: () => doRestore(target.id),
+      deleteRejected: () => doPermanentDelete(target.id),
+    };
+    if (target) await run[target.type]?.();
   };
 
   const handleReinspect = async (contentId) => {

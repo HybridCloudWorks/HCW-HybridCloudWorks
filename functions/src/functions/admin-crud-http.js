@@ -6,6 +6,7 @@
 import { httpRoute, httpRouteByMethod } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
 import { queryDocs, readDoc, upsertDoc, patchDoc, deleteDoc } from '../lib/cosmos-client.js';
+import { deleteBlob } from '../lib/blob-storage.js';
 import { createAdminCrudHandlers } from '../lib/admin-crud.js';
 import { createPublerClient } from '../lib/timers/publer-sync.js';
 import { unpublishFromPubler } from '../lib/triggers/handlers.js';
@@ -14,6 +15,7 @@ const handlers = () =>
   createAdminCrudHandlers({
     guard: getDefaultGuard(),
     store: { queryDocs, readDoc, upsertDoc, patchDoc, deleteDoc },
+    storage: { deleteBlob },
     // T-324: the change feed never sees a delete, so the Publer un-publish
     // that syncSocialPostToPubler's `!after` branch did happens on the route.
     unpublishSocialPost: (doc) => unpublishFromPubler(createPublerClient(), doc),
@@ -26,6 +28,15 @@ httpRouteByMethod('cmsCertifications', {
     GET: (request, context) => handlers().listCertifications(request, context),
     POST: (request, context) => handlers().createCertification(request, context),
   },
+});
+
+// Declared before `cms/certifications/{id}` so the literal segment is not
+// read as an id (ADR 0033, Spotlight slice: the editor's cancel path).
+httpRoute('cmsCertificationImages', {
+  methods: ['DELETE'],
+  authLevel: 'anonymous',
+  route: 'cms/certifications/images',
+  handler: (request, context) => handlers().deleteCertificationImage(request, context),
 });
 
 httpRouteByMethod('cmsCertificationById', {
@@ -46,11 +57,14 @@ httpRouteByMethod('cmsSocialPosts', {
   },
 });
 
-httpRoute('cmsDeleteSocialPost', {
-  methods: ['DELETE'],
+httpRouteByMethod('cmsSocialPostById', {
   authLevel: 'anonymous',
   route: 'cms/social-posts/{id}',
-  handler: (request, context) => handlers().deleteSocialPost(request, context),
+  handlers: {
+    // ADR 0033 Amplify slice: edit and reschedule; the change feed pushes to Publer.
+    PATCH: (request, context) => handlers().patchSocialPost(request, context),
+    DELETE: (request, context) => handlers().deleteSocialPost(request, context),
+  },
 });
 
 httpRoute('cmsDeleteBlog', {

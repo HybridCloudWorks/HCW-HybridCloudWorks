@@ -1,7 +1,7 @@
 /**
  * image-prompts-http.js — the manageImagePromptConfig RPC (the route name the
- * frontend already posts to via postJSON) plus the config-tree and keyword
- * endpoints replacing useImagePrompts.js's direct Firestore access.
+ * frontend already posts to via postJSON) plus the config-tree, resolve and
+ * keyword endpoints replacing useImagePrompts.js's direct Firestore access.
  * Registration only; semantics in lib/cms/image-prompts.js.
  */
 import { httpRoute, httpRouteByMethod } from '../lib/auth/http-route.js';
@@ -27,6 +27,15 @@ httpRoute('cmsGetImagePromptConfig', {
   authLevel: 'anonymous',
   route: 'cms/image-prompts',
   handler: (request, context) => handlers().getConfigTree(request, context),
+});
+
+// Which set a content document would generate with, and the hero prompt it
+// would send — shown beside "Generate AI Cover" so the button's text is true.
+httpRoute('cmsResolveImagePrompt', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'cms/image-prompts/resolve',
+  handler: (request, context) => handlers().resolveForContent(request, context),
 });
 
 httpRoute('cmsGetKeywordConfig', {

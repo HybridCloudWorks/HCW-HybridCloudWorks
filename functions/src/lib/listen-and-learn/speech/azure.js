@@ -137,6 +137,24 @@ const byteLength = (text) => Buffer.byteLength(String(text || ''), 'utf8');
  * speech. Falls back to a hard byte split only if a single "sentence" is
  * itself over budget, which means punctuation-free text.
  */
+/**
+ * A sentence with no boundary to use, split on characters: the full chunks,
+ * each at most `limit` bytes plus one multi-byte character, and the
+ * remainder still open.
+ */
+function splitByBytes(sentence, limit) {
+  const parts = [];
+  let chunk = '';
+  for (const char of sentence) {
+    if (byteLength(chunk) + byteLength(char) > limit) {
+      parts.push(chunk.trim());
+      chunk = '';
+    }
+    chunk += char;
+  }
+  return { parts, remainder: chunk };
+}
+
 function splitTurnText(text, limit) {
   const sentences = String(text).match(/[^.!?]+[.!?]*\s*/g) || [String(text)];
   const parts = [];
@@ -148,19 +166,10 @@ function splitTurnText(text, limit) {
       buffer = '';
     }
     if (byteLength(sentence) > limit) {
-      // No sentence boundary to use. Split on characters; the byte length of
-      // a chunk is then at most `limit` plus one multi-byte character.
       if (buffer.trim()) parts.push(buffer.trim());
-      buffer = '';
-      let chunk = '';
-      for (const char of sentence) {
-        if (byteLength(chunk) + byteLength(char) > limit) {
-          parts.push(chunk.trim());
-          chunk = '';
-        }
-        chunk += char;
-      }
-      buffer = chunk;
+      const split = splitByBytes(sentence, limit);
+      parts.push(...split.parts);
+      buffer = split.remainder;
       continue;
     }
     buffer += sentence;
@@ -217,7 +226,14 @@ export function chunkTurns(turns, limit = MAX_BYTES_PER_REQUEST) {
  * same host speaks twice: separate elements give the synthesiser a sentence
  * boundary to breathe on, and merging saved nothing measurable.
  */
-export function buildSsml(turns, { voices, lang = 'en-US' }) {
+export function buildSsml(turns, { voices, lang = 'en-US', speakingRate = 1 }) {
+  // A rate of 1 is the voice's own pace and is left unmarked; anything else
+  // is a `<prosody rate>` percentage (ADR 0033 §4, per-book speaking rate —
+  // Azure is the Listen & Learn provider that supports one).
+  const rate = Number(speakingRate);
+  const prosody = Number.isFinite(rate) && rate > 0 && rate !== 1;
+  const wrap = (text) =>
+    prosody ? `<prosody rate="${Math.round(rate * 100)}%">${text}</prosody>` : text;
   const body = turns
     .map((turn) => {
       const voice = voices[turn.speaker];
@@ -226,7 +242,7 @@ export function buildSsml(turns, { voices, lang = 'en-US' }) {
           `No voice configured for speaker "${turn.speaker}" (known: ${Object.keys(voices).join(', ') || 'none'})`
         );
       }
-      return `<voice name="${escapeXml(voice)}">${escapeXml(turn.text)}</voice>`;
+      return `<voice name="${escapeXml(voice)}">${wrap(escapeXml(turn.text))}</voice>`;
     })
     .join('');
 
@@ -295,6 +311,8 @@ export async function synthesizeWithAzure({
   // from a caller passing one, and spreading it last silently outranked the
   // environment override it is supposed to defer to.
   voices = null,
+  lang = 'en-US',
+  speakingRate = 1,
   env = process.env,
   fetchImpl = fetch,
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
@@ -325,7 +343,7 @@ export async function synthesizeWithAzure({
     // Sequential on purpose: the parts are concatenated in order, and a
     // parallel burst is the reliable way to meet the per-resource 429.
     parts.push(
-      await synthesizeOne(buildSsml(chunk, { voices: resolvedVoices }), {
+      await synthesizeOne(buildSsml(chunk, { voices: resolvedVoices, lang, speakingRate }), {
         endpoint,
         key,
         fetchImpl,

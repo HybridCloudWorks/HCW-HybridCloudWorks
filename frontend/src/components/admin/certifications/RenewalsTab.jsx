@@ -4,9 +4,10 @@
  *
  * The weekly re-verify timer (`reVerifyCertifications`, Sundays 00:00 UTC,
  * functions/src/lib/timers/cert-reverify.js) marks expired and Credly-revoked
- * certs inactive and republishes the snapshot. It records no run history that
- * the API can read, so this tab says what the timer does and shows its effect
- * (the "Marked inactive" badge) rather than inventing a last-run time.
+ * certs inactive, re-activates a renewed one whose expiry moved ahead, and
+ * republishes the snapshot. It records no run history that the API can read,
+ * so this tab says what the timer does and shows its effect (the "Marked
+ * inactive" badge) rather than inventing a last-run time.
  */
 import React, { useMemo } from 'react';
 import { Badge } from '@/components/ui/badge';
@@ -26,6 +27,10 @@ function RenewalDetail({ row }) {
   return (
     <p className="mt-1 flex flex-wrap items-center gap-2 text-xs">
       <span className={row.expired ? 'text-rose-600' : 'text-amber-600'}>{dueLine(row)}</span>
+      {row.renewalDate && <span className="text-muted-foreground">Renew by {row.renewalDate}</span>}
+      {row.cert.renewalRequirements && (
+        <span className="text-muted-foreground">{row.cert.renewalRequirements}</span>
+      )}
       {row.cert.certState === false && (
         <Badge variant="outline" className="text-[10px]">
           Marked inactive
@@ -45,7 +50,8 @@ export default function RenewalsTab({ certs, nowMs, actions }) {
       <TabIntro>
         Expired certifications and those expiring in the next {RENEWAL_WINDOW_DAYS} days, soonest
         first. Every Sunday at 00:00 UTC the re-verify timer marks expired certs, and Credly badges
-        that no longer verify, as inactive and republishes the public snapshot.
+        that no longer verify, as inactive; brings back a renewed cert whose expiry is ahead again;
+        and republishes the public snapshot.
       </TabIntro>
       {certs.loaded ? (
         <>

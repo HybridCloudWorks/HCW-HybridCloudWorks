@@ -61,8 +61,9 @@ import React, { useState } from 'react';
 import { authedFetch, getEndpoint, getJSON, postJSON } from '@/lib/api';
 import { runJob } from '@/lib/jobs';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import StatusBadge from '@/components/admin/shared/StatusBadge';
+import { SYSTEM_STATUS } from '@/lib/status';
 import {
   FileText,
   FlaskConical,
@@ -181,12 +182,12 @@ export function summarizeToken(payload, expectations, nowMs = Date.now()) {
     typeof payload.scp === 'string' ? payload.scp.split(' ').filter(Boolean).map(String) : [];
   // `azp` (v2) or `appid` (v1) — the client that ASKED for this token, as
   // distinct from `aud`, the API it is for.
-  const azp =
-    typeof payload.azp === 'string'
-      ? payload.azp
-      : typeof payload.appid === 'string'
-        ? payload.appid
-        : null;
+  let azp = null;
+  if (typeof payload.azp === 'string') {
+    ({ azp } = payload);
+  } else if (typeof payload.appid === 'string') {
+    azp = payload.appid;
+  }
 
   return {
     claimNames: Object.keys(payload).sort(),
@@ -324,11 +325,19 @@ export function evaluateUnauthenticatedProbe(result) {
   return { pass, reason: `HTTP ${result.httpStatus}` };
 }
 
-const mark = (value) => {
-  if (value === true) return 'PASS';
-  if (value === false) return 'FAIL';
-  return 'UNKNOWN';
+/**
+ * A verdict in the shared vocabulary (ADR 0033 §2): a comparison that holds
+ * is healthy, one that fails is unavailable, one that could not be made is
+ * unknown. The same three words the badges, the Overview and the
+ * Integrations page use, so the report reads like the screen it describes.
+ */
+export const verdictStatus = (value) => {
+  if (value === true) return 'healthy';
+  if (value === false) return 'unavailable';
+  return 'unknown';
 };
+
+const mark = (value) => SYSTEM_STATUS[verdictStatus(value)].label;
 
 const list = (values) => (values && values.length ? values.join(', ') : '(none)');
 
@@ -739,19 +748,10 @@ export function SmokeActionsCard({
 
 // ── Presentation ──────────────────────────────────────────────────────────────
 
-const VERDICT_STYLES = {
-  PASS: 'border-emerald-300 text-emerald-700 dark:border-emerald-700 dark:text-emerald-400',
-  FAIL: 'border-rose-300 text-rose-700 dark:border-rose-700 dark:text-rose-400',
-  UNKNOWN: 'border-slate-300 text-slate-600 dark:border-slate-700 dark:text-slate-400',
-};
-
 export function Verdict({ pass, children }) {
-  const label = mark(pass);
   return (
     <div className="flex items-start gap-2 text-sm">
-      <Badge variant="outline" className={`mt-0.5 shrink-0 text-[10px] ${VERDICT_STYLES[label]}`}>
-        {label}
-      </Badge>
+      <StatusBadge system={verdictStatus(pass)} size="xs" className="mt-0.5 shrink-0" />
       <span>{children}</span>
     </div>
   );
@@ -761,7 +761,7 @@ function Row({ label, children }) {
   return (
     <div className="flex flex-col gap-0.5 text-sm sm:flex-row sm:gap-3">
       <span className="w-48 shrink-0 text-muted-foreground">{label}</span>
-      <span className="min-w-0 break-words font-mono text-xs leading-5">{children}</span>
+      <span className="min-w-0 wrap-break-word font-mono text-xs leading-5">{children}</span>
     </div>
   );
 }
@@ -1009,11 +1009,17 @@ export function LabsProbeCard({ labs, labsBusy, onLabs, unauth, unauthBusy, onUn
   );
 }
 
-/** Local state for the three smoke actions, kept out of the page component. */
+/**
+ * Local state for the three smoke actions, kept out of the page component.
+ * `lastRuns` keeps each action's latest outcome by id, so the probe registry
+ * can show "RSS fetch: Healthy, 3 min ago" after the shared message line has
+ * moved on to another action (ADR 0033).
+ */
 export function useSmokeActions(onAfterRun) {
   const [runningAction, setRunningAction] = useState('');
   const [actionMessage, setActionMessage] = useState('');
   const [actionError, setActionError] = useState('');
+  const [lastRuns, setLastRuns] = useState({});
   const [actionInfoOpen, setActionInfoOpen] = useState({
     rss: false,
     inspect: false,
@@ -1030,9 +1036,18 @@ export function useSmokeActions(onAfterRun) {
       const nextMessage = await config.runner();
       await onAfterRun?.();
       setActionMessage(nextMessage);
+      setLastRuns((prev) => ({
+        ...prev,
+        [actionId]: { ok: true, message: nextMessage, at: new Date().toISOString() },
+      }));
     } catch (error) {
       const rawMessage = error.message || `Failed to run ${config.title}.`;
-      setActionError(actionId === 'digest' ? normalizeDigestError(rawMessage) : rawMessage);
+      const message = actionId === 'digest' ? normalizeDigestError(rawMessage) : rawMessage;
+      setActionError(message);
+      setLastRuns((prev) => ({
+        ...prev,
+        [actionId]: { ok: false, message, at: new Date().toISOString() },
+      }));
     } finally {
       setRunningAction('');
     }
@@ -1047,6 +1062,7 @@ export function useSmokeActions(onAfterRun) {
     actionMessage,
     actionError,
     actionInfoOpen,
+    lastRuns,
     runAction,
     toggleActionInfo,
     setActionMessage,

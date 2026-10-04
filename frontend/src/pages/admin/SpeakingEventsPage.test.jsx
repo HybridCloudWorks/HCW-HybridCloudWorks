@@ -10,7 +10,7 @@
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 
 import SpeakingEventsPage from './SpeakingEventsPage';
 
@@ -27,6 +27,12 @@ vi.mock('@/lib/api', () => ({
 }));
 vi.mock('@/lib/publicApi', () => ({
   fetchPublicSnapshotItems: (...args) => fetchPublicSnapshotItems(...args),
+  // The Publishing tab reads the whole snapshot, fresh; the fixture answers
+  // the same rows through both shapes.
+  fetchPublicSnapshot: async (id) => {
+    const items = await fetchPublicSnapshotItems(id);
+    return { generatedAt: '2026-09-01T12:00:00Z', items, meta: { speakerId: 'speaker-42' } };
+  },
 }));
 vi.mock('@/lib/adminSettings', () => ({
   getIntegrationSettings: async () => ({ sessionizeSpeakerId: 'speaker-42' }),
@@ -38,6 +44,7 @@ vi.mock('@/hooks/useAuthReady', () => ({ useAuthReady: () => ({ authReady: true 
 vi.mock('@/components/ui/use-toast', () => ({ useToast: () => ({ toast: vi.fn() }) }));
 vi.mock('react-router', () => ({
   useSearchParams: () => [new URLSearchParams(searchParams), setSearchParams],
+  useLocation: () => ({ pathname: '/admin/speaking-events' }),
   Link: ({ to, children, ...rest }) => (
     <a href={to} {...rest}>
       {children}
@@ -249,6 +256,43 @@ describe('per-tab loading and error isolation', () => {
   });
 });
 
+describe('Upcoming when Sessionize is down, search, and the delete dialog', () => {
+  it('still lists every stored row beside the Sessionize error', async () => {
+    sessionizeResponse = async () => ({ ok: false, status: 503 });
+    render(<SpeakingEventsPage />);
+    expect((await panel().findByRole('alert')).textContent).toContain('Sessionize HTTP 503');
+    expect(await panel().findByText('Local Meetup')).toBeTruthy();
+  });
+
+  it('filters the list by search text and by status', async () => {
+    render(<SpeakingEventsPage />);
+    await panel().findByText('Future Conf');
+    fireEvent.change(panel().getByLabelText('Search sessions'), { target: { value: 'local' } });
+    expect(panel().queryByText('Future Conf')).toBeNull();
+    expect(panel().getByText('Local Meetup')).toBeTruthy();
+    fireEvent.change(panel().getByLabelText('Search sessions'), { target: { value: '' } });
+    fireEvent.change(panel().getByLabelText('Status'), { target: { value: 'accepted' } });
+    expect(panel().getByText('Future Conf')).toBeTruthy();
+    expect(panel().queryByText('Local Meetup')).toBeNull();
+    fireEvent.change(panel().getByLabelText('Status'), { target: { value: 'declined' } });
+    expect(panel().getByText('No sessions match these filters.')).toBeTruthy();
+  });
+
+  it('asks before a delete, through a dialog rather than window.confirm', async () => {
+    searchParams = 'tab=past';
+    render(<SpeakingEventsPage />);
+    await panel().findByText('Old Conf');
+    fireEvent.click(panel().getByRole('button', { name: /^Delete stored override for Old Conf/ }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Delete this stored event?')).toBeTruthy();
+    expect(postJSON).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+    await waitFor(() =>
+      expect(postJSON).toHaveBeenCalledWith('deleteSpeakerEvent', { docId: 'event-102' })
+    );
+  });
+});
+
 describe('Publishing and Settings', () => {
   it('does not assert snapshot/store drift when the public snapshot returns no rows', async () => {
     fetchPublicSnapshotItems.mockResolvedValue([]);
@@ -275,7 +319,9 @@ describe('Publishing and Settings', () => {
     searchParams = 'tab=settings';
     render(<SpeakingEventsPage />);
     expect(await panel().findByText('speaker-42')).toBeTruthy();
-    expect(panel().queryByRole('textbox')).toBeNull();
+    // Shown, never editable here: no input carries the id.
+    expect(panel().queryByDisplayValue('speaker-42')).toBeNull();
+    expect(await panel().findByRole('form', { name: 'Speaker profile' })).toBeTruthy();
     expect(
       panel()
         .getByRole('link', { name: /Sessionize card in the Integrations Hub/ })

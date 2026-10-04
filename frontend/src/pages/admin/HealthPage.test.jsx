@@ -43,6 +43,8 @@ vi.mock('@/components/ui/use-toast', () => ({ useToast: () => ({ toast }) }));
 vi.mock('react-router', async () => {
   const { useState } = await import('react');
   return {
+    // PageHeader reads the route to find its purpose sentence.
+    useLocation: () => ({ pathname: '/admin/health', search: '' }),
     useSearchParams: () => {
       const [params, setParams] = useState(() => new URLSearchParams(searchParams));
       const set = (next) => {
@@ -172,6 +174,7 @@ const snapshotAware = (impl) => async (name, body) => {
 
 beforeEach(() => {
   searchParams = '';
+  window.sessionStorage.clear();
   setSearchParams.mockReset();
   acquireApiToken.mockReset().mockResolvedValue(TOKEN);
   getJSON.mockReset().mockResolvedValue(EXPECTATIONS);
@@ -317,16 +320,17 @@ describe('the hub', () => {
     renderAt();
 
     const glance = screen.getByRole('group', { name: 'Health at a glance' });
-    // The identity run happens on load whatever tab is open.
-    await waitFor(() => expect(glance.textContent).toContain('PASS'));
+    // The identity run happens on load whatever tab is open. One vocabulary
+    // (ADR 0033 §2): the words are lib/status.js's, here and on Integrations.
+    await waitFor(() => expect(glance.textContent).toContain('Healthy'));
     // An observed signal…
-    expect(glance.textContent).toContain('Functions URL');
-    expect(glance.textContent).toContain('Ready');
+    expect(glance.textContent).toContain('Runtime config');
     expect(glance.textContent).toContain('Open alerts');
     // …and a verified one, in the same strip.
     expect(glance.textContent).toContain('Identity');
     expect(glance.textContent).toContain('Labs probe');
-    expect(glance.textContent).toContain('UNKNOWN');
+    expect(glance.textContent).toContain('Unknown');
+    expect(glance.textContent).not.toMatch(/PASS|FAIL|UNKNOWN/);
   });
 
   it('renders readiness and publishing metrics from the backend snapshot', async () => {
@@ -336,7 +340,13 @@ describe('the hub', () => {
     await waitFor(() => expect(postJSON).toHaveBeenCalledWith('getOpsHealthSnapshot', {}));
 
     expect(await screen.findByText('14')).toBeInTheDocument();
-    expect(screen.getByText('degraded')).toBeInTheDocument();
+    expect(screen.getAllByText('Degraded').length).toBeGreaterThanOrEqual(1);
+    // Every block says when it was read (ADR 0033 §1 Platform), as a real time.
+    expect(screen.getAllByText(/^Checked /).length).toBeGreaterThanOrEqual(3);
+    // In the strip and on the readiness card: the placeholder "Functions URL
+    // Ready" is gone from both.
+    expect(screen.getAllByText('Runtime config').length).toBe(2);
+    expect(screen.queryByText('Functions URL')).toBeNull();
     expect(screen.getByText('Queue SLA Breaches')).toBeInTheDocument();
     expect(screen.getByText('18h')).toBeInTheDocument();
 
@@ -373,8 +383,8 @@ describe('a snapshot that fails to load', () => {
     expect(screen.queryByText('Queue SLA Breaches')).toBeNull();
     // No default zeros standing in for counts nobody read.
     const glance = screen.getByRole('group', { name: 'Health at a glance' });
-    expect(glance.textContent).not.toContain('Missing');
-    expect(within(glance).getAllByText('UNKNOWN').length).toBeGreaterThanOrEqual(3);
+    expect(glance.textContent).not.toContain('Misconfigured');
+    expect(within(glance).getAllByText('Unknown').length).toBeGreaterThanOrEqual(3);
 
     openTab('Alerts');
     expect(screen.getByRole('alert').textContent).toContain('Snapshot refused: HTTP 503');
@@ -478,8 +488,8 @@ describe('the Checks tab', () => {
     seen(
       /aud, azp, email, exp, iat, iss, name, oid, preferred_username, roles, scp, sub, tid, ver/
     );
-    expect(screen.getAllByText('PASS').length).toBeGreaterThanOrEqual(5);
-    expect(screen.queryByText('FAIL')).toBeNull();
+    expect(screen.getAllByText('Healthy').length).toBeGreaterThanOrEqual(5);
+    expect(screen.queryByText('Unavailable')).toBeNull();
     expectNoSecrets(container.textContent);
   });
 
@@ -507,8 +517,8 @@ describe('the Checks tab', () => {
     expect(getJSON).toHaveBeenCalledTimes(1);
     expect(getJSON).toHaveBeenCalledWith('getAuthExpectations', { token: TOKEN });
     // And the claims panel reflects that same token: Admin present.
-    expect(screen.getAllByText('PASS').length).toBeGreaterThanOrEqual(5);
-    expect(screen.queryByText('FAIL')).toBeNull();
+    expect(screen.getAllByText('Healthy').length).toBeGreaterThanOrEqual(5);
+    expect(screen.queryByText('Unavailable')).toBeNull();
   });
 
   it('names a 200 with no JSON body from the status route instead of rendering a blank', async () => {
@@ -533,7 +543,7 @@ describe('the Checks tab', () => {
     expect(reportText()).toContain(
       '- getCurrentAdminStatus: status route answered 200 with no JSON body'
     );
-    expect(reportText()).toContain('- Result: UNKNOWN (token or registry not read)');
+    expect(reportText()).toContain('- Result: Unknown (token or registry not read)');
   });
 
   it('reports the API refusing the token as unknown, with the refusal shown', async () => {
@@ -545,8 +555,9 @@ describe('the Checks tab', () => {
     await waitFor(() =>
       expect(screen.getByRole('status').textContent).toContain('Authentication required')
     );
-    expect(screen.getAllByText('UNKNOWN').length).toBeGreaterThanOrEqual(3);
-    expect(screen.getByText('Invalid token')).toBeTruthy();
+    expect(screen.getAllByText('Unknown').length).toBeGreaterThanOrEqual(3);
+    // On the registry card and on the probe card that summarises it.
+    expect(screen.getAllByText('Invalid token').length).toBeGreaterThanOrEqual(1);
     expectNoSecrets(container.textContent);
   });
 
@@ -586,7 +597,7 @@ describe('the Checks tab', () => {
 
     fireEvent.click(screen.getByText('Run authenticated probe'));
     await waitFor(() => seen(/read failed \(getLabJob timed out after 20s\) — state unknown/));
-    expect(verdictBadge(/Authenticated no-op path/).getByText('FAIL')).toBeTruthy();
+    expect(verdictBadge(/Authenticated no-op path/).getByText('Unavailable')).toBeTruthy();
     expect(screen.queryByText(/still "queued"/)).toBeNull();
   });
 
@@ -647,14 +658,14 @@ describe('the Checks tab', () => {
     // Not stuck: the busy flag was cleared in finally, so the button comes back.
     expect(screen.getByText('Run unauthenticated probe').closest('button').disabled).toBe(false);
     // Surfaced as a failed probe, and the report says the same.
-    expect(verdictBadge(/Unauthenticated request refused/).getByText('FAIL')).toBeTruthy();
+    expect(verdictBadge(/Unauthenticated request refused/).getByText('Unavailable')).toBeTruthy();
 
     // …and so does Copy, on the tab it moved to.
     openTab('Report');
     expect(copyButton().disabled).toBe(false);
     expect(screen.queryByText(/Checks still running/)).toBeNull();
     expect(reportText()).toContain(
-      'no Authorization header: FAIL (VITE_AZURE_FUNCTIONS_URL is not set'
+      'no Authorization header: Unavailable (VITE_AZURE_FUNCTIONS_URL is not set'
     );
 
     // The button is usable again: the next run goes through.
@@ -663,7 +674,7 @@ describe('the Checks tab', () => {
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
   });
 
-  it('a 200 on the unauthenticated probe is a FAIL', async () => {
+  it('a 200 on the unauthenticated probe is Unavailable, never a pass', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => jsonResponse(200, { jobId: 'leak' }))
@@ -674,7 +685,7 @@ describe('the Checks tab', () => {
     await waitFor(() =>
       expect(screen.getByText(/Unauthenticated request refused — HTTP 200/)).toBeTruthy()
     );
-    expect(verdictBadge(/Unauthenticated request refused/).getByText('FAIL')).toBeTruthy();
+    expect(verdictBadge(/Unauthenticated request refused/).getByText('Unavailable')).toBeTruthy();
   });
 
   it('does not start a second identity run when Re-run is clicked during the first', async () => {
@@ -782,6 +793,111 @@ describe('the Code and Security tab', () => {
   });
 });
 
+// ── The probe registry (ADR 0033 Platform) ───────────────────────────────────
+
+describe('the probe registry on Checks', () => {
+  const probeCard = (id) => document.querySelector(`[data-probe="${id}"]`);
+  const summaryOf = (id) => within(probeCard(id)).getByTestId('probe-summary').textContent;
+  const badgeOf = (id) => probeCard(id).querySelector('[data-status]').getAttribute('data-status');
+
+  it('shows one card per hub dependency, in hub groups, each with impact, fix and a link', async () => {
+    renderAt('checks');
+    await identityLoaded();
+    const grid = screen.getByRole('region', { name: 'Probe registry' });
+    for (const hub of ['Pipeline', 'Creative', 'Amplify', 'Enhanced', 'Spotlight', 'Platform']) {
+      expect(within(grid).getByText(hub)).toBeTruthy();
+    }
+    for (const id of [
+      'publer',
+      'ai-providers',
+      'lab-agents',
+      'cosmos',
+      'runtime-config',
+      'elevenlabs',
+    ]) {
+      const card = probeCard(id);
+      expect(card, `no card for ${id}`).toBeTruthy();
+      expect(within(card).getByText('Impact')).toBeTruthy();
+      expect(within(card).getByText('Fix')).toBeTruthy();
+      expect(within(card).getByRole('link')).toBeTruthy();
+    }
+  });
+
+  it('evaluates snapshot and session probes from page state, in the shared words', async () => {
+    renderAt('checks');
+    await identityLoaded();
+    // Snapshot-backed: readiness is configured in the fixture.
+    expect(badgeOf('cosmos')).toBe('healthy');
+    expect(badgeOf('runtime-config')).toBe('healthy');
+    expect(badgeOf('scheduled-publishing')).toBe('degraded');
+    expect(badgeOf('publishing-failures')).toBe('degraded');
+    // Session-backed: the identity run passed.
+    expect(badgeOf('identity-token')).toBe('healthy');
+    expect(badgeOf('admin-registry')).toBe('healthy');
+    // Not pressed yet.
+    expect(badgeOf('labs-noop')).toBe('unknown');
+    expect(badgeOf('publer')).toBe('unknown');
+    expect(summaryOf('publer')).toBe('Not tested yet.');
+  });
+
+  it('runs a service probe from its card with the Integrations test, and keeps the result across tabs', async () => {
+    postJSON.mockImplementation(
+      snapshotAware(async (name) => {
+        if (name === 'publerProxy') return { ok: true, status: 200, data: { accounts: [{}, {}] } };
+        throw new Error(`unexpected postJSON ${name}`);
+      })
+    );
+    renderAt('checks');
+    await identityLoaded();
+    fireEvent.click(within(probeCard('publer')).getByRole('button', { name: 'Test Publer' }));
+    await waitFor(() => expect(badgeOf('publer')).toBe('healthy'));
+    expect(summaryOf('publer')).toContain('2 social account(s)');
+    expect(postJSON).toHaveBeenCalledWith('publerProxy', { path: '/accounts', method: 'GET' });
+
+    openTab('Report');
+    expect(reportText()).toContain('### Probe registry');
+    expect(reportText()).toMatch(/- Publer: Healthy \(.+\) — Connected — 2 social account\(s\)\./);
+    openTab('Checks');
+    expect(badgeOf('publer')).toBe('healthy');
+    // And it is remembered for a reload (per-viewer convenience).
+    expect(
+      JSON.parse(window.sessionStorage.getItem('contentforge.health.probes.v1')).publer.status
+    ).toBe('healthy');
+  });
+
+  it('reports a refused service as unavailable and a missing key as misconfigured', async () => {
+    postJSON.mockImplementation(
+      snapshotAware(async (name, body) => {
+        if (name === 'publerProxy') return { ok: false, status: 403, error: 'Forbidden' };
+        if (name === 'connectionProbe' && body.probe === 'resend') {
+          return {
+            ok: false,
+            error: 'Resend is not configured: RESEND_API_KEY is not set',
+            code: 'INTEGRATION_NOT_CONFIGURED',
+          };
+        }
+        throw new Error(`unexpected postJSON ${name}`);
+      })
+    );
+    renderAt('checks');
+    await identityLoaded();
+    fireEvent.click(within(probeCard('publer')).getByRole('button', { name: 'Test Publer' }));
+    fireEvent.click(within(probeCard('resend')).getByRole('button', { name: 'Test Resend' }));
+    await waitFor(() => expect(badgeOf('publer')).toBe('unavailable'));
+    await waitFor(() => expect(badgeOf('resend')).toBe('misconfigured'));
+    expect(summaryOf('publer')).toMatch(/Forbidden/);
+  });
+
+  it('leaves the probes that write or spend out of Test all, and says so on their cards', async () => {
+    renderAt('checks');
+    await identityLoaded();
+    for (const id of ['rss-fetch', 'labs-noop', 'youtube']) {
+      expect(within(probeCard(id)).getByText(/Not in Test all/)).toBeTruthy();
+    }
+    expect(within(probeCard('resend')).queryByText(/Not in Test all/)).toBeNull();
+  });
+});
+
 // ── The report ────────────────────────────────────────────────────────────────
 
 describe('the Report tab', () => {
@@ -838,7 +954,7 @@ describe('the Report tab', () => {
 
     openTab('Report');
     await waitFor(() => expect(copyButton().disabled).toBe(false));
-    expect(reportText()).toContain('- enqueueLabJob with no Authorization header: PASS');
+    expect(reportText()).toContain('- enqueueLabJob with no Authorization header: Healthy');
     expectNoSecrets(reportText());
   });
 
@@ -854,7 +970,7 @@ describe('the Report tab', () => {
     const [[copied]] = writeText.mock.calls;
     expect(copied).toContain('### Identity — token claims and admin registry');
     expect(copied).toContain('### Labs no-op probe');
-    expect(copied).toContain('Registry uid equals token oid: PASS');
+    expect(copied).toContain('Registry uid equals token oid: Healthy');
     // #355 and #356 closed on 2026-09-07 by this page's first run. The report
     // is a repeatable check now, and names no ticket.
     expect(copied).not.toMatch(/#3\d\d/);

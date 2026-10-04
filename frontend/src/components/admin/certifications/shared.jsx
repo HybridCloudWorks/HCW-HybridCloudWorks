@@ -42,8 +42,8 @@ export function DeleteCertDialog({ cert, busy, onCancel, onConfirm }) {
             <p className="font-semibold">Delete this certification?</p>
           </div>
           <p className="text-xs text-slate-500">
-            <strong>{cert.name}</strong> will be permanently removed. The About page snapshot
-            updates on next build.
+            <strong>{cert.name}</strong> will be permanently removed. The About page keeps showing
+            it until you run Publish snapshot on the Publishing tab.
           </p>
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={onCancel} disabled={busy}>

@@ -9,8 +9,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SERVICES, SERVICE_GROUPS } from './serviceRegistry';
 
 const postJSON = vi.fn();
+const getJSON = vi.fn();
 vi.mock('@/lib/api', () => ({
-  getJSON: vi.fn(),
+  getJSON: (...args) => getJSON(...args),
   sendJSON: vi.fn(),
   postJSON: (...args) => postJSON(...args),
 }));
@@ -46,8 +47,19 @@ describe('the service registry', () => {
       'Microsoft Learn',
       'AWS Skill Builder',
       'Google Developer',
+      // ADR 0033: the AI keys that used to be loose rows on the Keys tab.
+      'Google Gemini',
+      'Anthropic',
+      'OpenAI',
+      'NVIDIA API',
+      'Perplexity',
+      'ElevenLabs',
+      'Azure AI Speech',
+      'Firecrawl',
+      'Replicate',
       'Cloud pricing cache',
       'Qlty',
+      'Hybrid Lab (Coder and Turnstile)',
     ]);
   });
 
@@ -84,17 +96,100 @@ describe('the service registry', () => {
     }
   });
 
-  it('leaves no credentialed service untestable, which is what #483 closed', () => {
-    // The replacement for the vacuousness guard above. Every service that
-    // holds a credential can now be asked whether it works, including the
-    // three whose keys never reach the browser - those run server-side through
-    // `connectionProbe`. Adding a credentialed service with no test is allowed,
-    // but it has to be a decision made HERE, in the open, at which point the
-    // globe rule above starts applying to it.
+  it('names exactly the credentialed services with no test, and says why on each (ADR 0033)', () => {
+    // #483 emptied this set. ADR 0033 added a card for every AI key, and two
+    // of them have no cheap read to test with: Perplexity has no read-only
+    // endpoint (a test would be a paid completion for a service nothing
+    // uses) and Azure Speech is unprovisioned on purpose. Both are decisions
+    // made HERE, in the open, and each card says so in words.
     const untestable = SERVICES.filter(
       (service) => !service.test && (service.secrets ?? []).length > 0
-    ).map((service) => service.name);
-    expect(untestable).toEqual([]);
+    );
+    expect(untestable.map((service) => service.name)).toEqual(['Perplexity', 'Azure AI Speech']);
+    for (const service of untestable) {
+      expect(service.untestedReason, `${service.name} says nothing`).toMatch(/\w{10,}/);
+    }
+  });
+
+  it('says what every service is for, where it is used and which way data flows (ADR 0033)', () => {
+    for (const service of SERVICES) {
+      expect(Array.isArray(service.usedIn), `${service.name} has no usedIn`).toBe(true);
+      expect(service.dataDirection, `${service.name} has no dataDirection`).toMatch(/\w/);
+      if ((service.secrets ?? []).length > 0) {
+        expect(service.securityNote, `${service.name} has no securityNote`).toMatch(/\w/);
+      }
+    }
+  });
+
+  describe('the AI and lab cards (ADR 0033)', () => {
+    const runnerFor = (id) => SERVICES.find((service) => service.id === id).test;
+    beforeEach(() => {
+      postJSON.mockReset();
+      getJSON.mockReset();
+    });
+
+    it('tests each language model through the AI Engine’s own testAiProvider', async () => {
+      for (const id of ['gemini', 'anthropic', 'openai', 'nvidia']) {
+        postJSON.mockResolvedValueOnce({ status: 'connected', latencyMs: 812 });
+        await expect(runnerFor(id)()).resolves.toBe('Connected — answered in 812 ms.');
+        expect(postJSON).toHaveBeenLastCalledWith('testAiProvider', { providerId: id });
+      }
+      postJSON.mockResolvedValueOnce({ status: 'error', error: 'timeout after 45000 ms' });
+      await expect(runnerFor('nvidia')()).rejects.toThrow('timeout after 45000 ms');
+    });
+
+    it('reads ElevenLabs’ plan without synthesising anything', async () => {
+      getJSON.mockResolvedValueOnce({
+        configured: true,
+        subscription: { tier: 'free', creditsLeft: 7000, creditLimit: 10000 },
+      });
+      await expect(runnerFor('elevenlabs')()).resolves.toBe(
+        'Connected on the free plan — 7000 of 10000 credits left.'
+      );
+      expect(getJSON).toHaveBeenCalledWith('cms/podcast/elevenlabs');
+      getJSON.mockResolvedValueOnce({ configured: false, reason: 'ELEVENLABS_API_KEY is not set' });
+      await expect(runnerFor('elevenlabs')()).rejects.toThrow(/not set/);
+      getJSON.mockResolvedValueOnce({ configured: true, subscriptionError: 'missing_permissions' });
+      await expect(runnerFor('elevenlabs')()).rejects.toThrow('missing_permissions');
+    });
+
+    it('posts the Replicate and Firecrawl probe names and reads the envelope’s ok', async () => {
+      postJSON.mockResolvedValueOnce({ ok: true, status: 200, data: { username: 'hcw' } });
+      await expect(runnerFor('replicate')()).resolves.toBe('Connected as hcw.');
+      expect(postJSON).toHaveBeenLastCalledWith('connectionProbe', { probe: 'replicate' });
+      postJSON.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        data: { data: { remaining_credits: 412 } },
+      });
+      await expect(runnerFor('firecrawl')()).resolves.toBe('Connected — 412 credits remaining.');
+      expect(postJSON).toHaveBeenLastCalledWith('connectionProbe', { probe: 'firecrawl' });
+      postJSON.mockResolvedValueOnce({ ok: false, status: 401, error: 'Unauthenticated' });
+      await expect(runnerFor('replicate')()).rejects.toThrow(/Unauthenticated/);
+    });
+
+    it('tests the Hybrid Lab through the public coder-status read', async () => {
+      getJSON.mockResolvedValueOnce({
+        configured: true,
+        reachable: true,
+        templates: [{ name: 'a' }],
+        capacity: { running: 1, max: 4 },
+      });
+      await expect(runnerFor('hybrid-lab')()).resolves.toBe(
+        'Connected — 1 template(s), 1 of 4 workspaces running.'
+      );
+      expect(getJSON).toHaveBeenCalledWith('public/labs/coder-status');
+      getJSON.mockResolvedValueOnce({ configured: false });
+      await expect(runnerFor('hybrid-lab')()).rejects.toThrow(/CODER_URL/);
+      getJSON.mockResolvedValueOnce({ configured: true, reachable: false });
+      await expect(runnerFor('hybrid-lab')()).rejects.toThrow(/did not answer/);
+    });
+
+    it('sends Plaud’s Reconnect to the Recording Hub’s own sign-in', () => {
+      const plaud = SERVICES.find((service) => service.id === 'plaud');
+      expect(plaud.reconnectHref).toBe('/admin/recording-hub?tab=settings');
+      expect(SERVICES.filter((service) => service.reconnectHref)).toHaveLength(1);
+    });
   });
 
   describe('the server-side probes (#483, #569)', () => {
@@ -126,7 +221,7 @@ describe('the service registry', () => {
       // so a runner that does not read `ok` says Connected for a 401. That
       // defect has now been written three times in this file's history, which
       // is why every new runner gets this test.
-      for (const id of ['telegram', 'rsscom', 'youtube', 'qlty']) {
+      for (const id of ['telegram', 'rsscom', 'youtube', 'qlty', 'replicate', 'firecrawl']) {
         postJSON.mockResolvedValueOnce({
           ok: false,
           status: 401,

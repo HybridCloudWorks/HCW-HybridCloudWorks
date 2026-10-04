@@ -43,6 +43,9 @@ export const AUTHORED = freeze([
   'certifications',
   'certEvents',
   'speakerevents',
+  // Ambassador programs, applications and evidence (ADR 0033 §4): the
+  // applications are hand-written and recoverable from nowhere else.
+  'ambassador',
   'podcasts',
   'episodes',
   'youtubevideos',

@@ -1,27 +1,44 @@
 /**
  * One service on the Services tab: what it is, where it lives, whether it
- * answers, and the names of the keys it runs on.
+ * answers, what it does for the site, and the names of the keys it runs on.
  *
  * THE LAYOUT IS THE POINT OF THIS COMPONENT. Identity on the left, actions as
  * two icon buttons pinned to the top right, and the keys in their own bordered
  * subgroup below. A globe is a link out and a beaker is a test; neither needs
  * a word, and words were what made the row wrap.
  *
+ * STATUS IS ONE WORD FROM ONE VOCABULARY (ADR 0033 §2): the badge beside the
+ * name is lib/status.js's, the same word the Health page and the Overview
+ * grid use for the same state. Under it, what the record says: when the test
+ * last passed and last failed, which survives a reload because it is written
+ * to `cms/integration-status` (useServiceTests).
+ *
  * KEYS ARE NAMES AND LIGHTS HERE, NOTHING MORE (#570). Pasting, rotating and
  * generating moved to the Keys tab, which is where every key lives; a card
  * saying "PUBLER-API-KEY — Rejected" and linking there is the whole job. That
  * keeps one write path per key rather than two that look like different keys.
- *
- * The test result is held by the page (useServiceTests), so it is still there
- * after a trip to another tab and shows on the Overview grid too.
+ * Disconnecting is said in the same place: this hub cannot delete a vault
+ * secret, so a key-based service is disconnected by replacing or revoking its
+ * key, and the card says so instead of offering a button that would lie.
  */
 
 import React from 'react';
 import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { AlertCircle, CheckCircle, FlaskConical, Globe, Loader2 } from 'lucide-react';
+import StatusBadge from '@/components/admin/shared/StatusBadge';
+import {
+  AlertCircle,
+  CheckCircle,
+  ExternalLink,
+  FlaskConical,
+  Globe,
+  KeyRound,
+  Loader2,
+} from 'lucide-react';
 import { STATE_PRESENTATION, StateDot, relativeTime } from './StateDot';
+import { resultStatus } from './integrationView';
+import { persistedVerdict } from './integrationStatus';
+import { DISCONNECT_NOTE } from './serviceRegistry';
 
 export function TestResultLine({ result }) {
   if (!result) return null;
@@ -32,11 +49,44 @@ export function TestResultLine({ result }) {
       }`}
     >
       {result.ok ? (
-        <CheckCircle className="mt-px h-3.5 w-3.5 shrink-0" />
+        <CheckCircle className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
       ) : (
-        <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" />
+        <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
       )}
-      <span className="min-w-0 break-words">{result.message}</span>
+      <span className="min-w-0 wrap-break-word">{result.message}</span>
+    </p>
+  );
+}
+
+/**
+ * When the test last passed and last failed, from the persisted record.
+ * `repeatsError` says the result line above already shows this very
+ * sentence, so it is not printed twice.
+ */
+export function PersistedStatusLine({ record, repeatsError = false }) {
+  if (!record || (!record.lastOkAt && !record.lastFailAt)) return null;
+  return (
+    <p className="mt-2 text-xs text-muted-foreground" data-testid="persisted-status">
+      {record.lastOkAt ? (
+        <span>
+          Last worked{' '}
+          <time dateTime={record.lastOkAt}>{relativeTime(record.lastOkAt) ?? record.lastOkAt}</time>
+        </span>
+      ) : (
+        <span>Never recorded as working</span>
+      )}
+      {' · '}
+      {record.lastFailAt ? (
+        <span>
+          Last failed{' '}
+          <time dateTime={record.lastFailAt}>
+            {relativeTime(record.lastFailAt) ?? record.lastFailAt}
+          </time>
+          {record.lastError && !repeatsError ? ` — ${record.lastError}` : ''}
+        </span>
+      ) : (
+        <span>No failure recorded</span>
+      )}
     </p>
   );
 }
@@ -53,7 +103,7 @@ export function ServiceActions({ service, testing, onTest }) {
           title={`Open ${service.name} — ${service.url}`}
         >
           <a href={service.url} target="_blank" rel="noopener noreferrer">
-            <Globe className="h-4 w-4" />
+            <Globe className="h-4 w-4" aria-hidden="true" />
             <span className="sr-only">{`Open ${service.name}`}</span>
           </a>
         </Button>
@@ -69,9 +119,9 @@ export function ServiceActions({ service, testing, onTest }) {
           aria-label={testing ? `Testing ${service.name}` : `Test ${service.name}`}
         >
           {testing ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
           ) : (
-            <FlaskConical className="h-4 w-4" />
+            <FlaskConical className="h-4 w-4" aria-hidden="true" />
           )}
         </Button>
       )}
@@ -96,27 +146,86 @@ function KeyNames({ items }) {
   );
 }
 
-export default function ServiceCard({ service, result, testing, onTest, children }) {
+/** What the service is for, as four short facts (ADR 0033 Platform). */
+function ServiceFacts({ service }) {
+  const rows = [
+    ['Can do', service.capabilities?.length ? service.capabilities.join(' · ') : null],
+    ['Used in', service.usedIn?.length ? service.usedIn.join(', ') : null],
+    ['Data flow', service.dataDirection || null],
+    ['Key reach', service.securityNote || null],
+  ].filter(([, value]) => value);
+  if (rows.length === 0) return null;
+  return (
+    <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+      {rows.map(([label, value]) => (
+        <React.Fragment key={label}>
+          <dt className="text-muted-foreground">{label}</dt>
+          <dd className="min-w-0 wrap-break-word">{value}</dd>
+        </React.Fragment>
+      ))}
+    </dl>
+  );
+}
+
+/** Reconnect where a service has its own sign-in; otherwise how a key is disconnected. */
+function ConnectionActions({ service, onOpenKeys }) {
+  const hasKeys = (service.secrets ?? []).length > 0;
+  if (!service.reconnectHref && !hasKeys) return null;
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/60 pt-3 text-xs">
+      {service.reconnectHref ? (
+        <Button asChild size="sm" variant="outline">
+          <a href={service.reconnectHref}>
+            <ExternalLink className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" /> Reconnect in
+            Recording Hub
+          </a>
+        </Button>
+      ) : null}
+      {hasKeys ? (
+        <>
+          {onOpenKeys ? (
+            <Button size="sm" variant="outline" onClick={onOpenKeys}>
+              <KeyRound className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" /> Rotate or replace the
+              key
+            </Button>
+          ) : null}
+          <span className="min-w-0 flex-1 text-muted-foreground">{DISCONNECT_NOTE}</span>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The badge beside the name: this session's test if there is one, else the
+ * persisted record's most recent verdict, else nothing — the key lights below
+ * still say what they say.
+ */
+export function cardStatus(result, record) {
+  if (result) return resultStatus(result);
+  const verdict = persistedVerdict(record);
+  return verdict ? resultStatus(verdict) : null;
+}
+
+export default function ServiceCard({
+  service,
+  result,
+  record,
+  testing,
+  onTest,
+  onOpenKeys,
+  children,
+}) {
   const Icon = service.icon;
+  const status = cardStatus(result, record);
   return (
     <Card className="p-4">
       <div className="flex items-start gap-3">
-        <Icon className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+        <Icon className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" aria-hidden="true" />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-semibold">{service.name}</p>
-            {result && (
-              <Badge
-                variant="outline"
-                className={`text-[10px] ${
-                  result.ok
-                    ? 'border-emerald-300 text-emerald-600'
-                    : 'border-destructive/50 text-destructive'
-                }`}
-              >
-                {result.ok ? 'Connected' : 'Failed'}
-              </Badge>
-            )}
+            {status ? <StatusBadge status={status} size="xs" /> : null}
             {result?.at && (
               <span className="text-[11px] text-muted-foreground">
                 tested {relativeTime(result.at)}
@@ -129,11 +238,20 @@ export default function ServiceCard({ service, result, testing, onTest, children
       </div>
 
       <TestResultLine result={result} />
+      <PersistedStatusLine
+        record={record}
+        repeatsError={Boolean(result && !result.ok && record?.lastError === result.message)}
+      />
+      {!service.test && service.untestedReason ? (
+        <p className="mt-2 text-xs text-muted-foreground">No test: {service.untestedReason}</p>
+      ) : null}
+      <ServiceFacts service={service} />
       <KeyNames items={service.items ?? []} />
 
       {service.credentialNote && (
         <p className="mt-3 text-xs text-muted-foreground">{service.credentialNote}</p>
       )}
+      <ConnectionActions service={service} onOpenKeys={onOpenKeys} />
       {children}
     </Card>
   );

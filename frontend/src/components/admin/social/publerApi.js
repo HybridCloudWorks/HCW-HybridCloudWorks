@@ -24,9 +24,14 @@ import {
   unwrapPublerPosts,
 } from '@/lib/publerAccounts';
 
-// publerReady is always true — readiness is now determined by the function's
-// ability to resolve its secrets, not by client-side env vars.
-export const publerReady = () => true;
+/**
+ * Readiness is the ACCOUNTS CALL's answer, nothing else (ADR 0033 Amplify
+ * slice). `publerReady = () => true` lived here until 2026-10-03 and made the
+ * header say "connected" with no key, no workspace and a refused call alike.
+ * `usePublerAccounts` settles into one of these; the header and the composer
+ * read that status.
+ */
+export const isPublerReady = (status) => status === 'ready';
 
 /**
  * Route a Publer API request through the server-side publerProxy Azure Function.

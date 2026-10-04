@@ -8,32 +8,12 @@
  * learns it may predate the write and must be re-issued (useCertifications).
  */
 
-import { useCallback, useRef, useState } from 'react';
 import { sendJSON } from '@/lib/api';
 import { COLLECTION, sortByDisplayOrder } from './certView';
 
-/**
- * Per-cert in-flight guard. `claim(id)` is false when a write to that cert is
- * already out; `busyIds` is the set the cards disable their buttons from.
- */
-export function useWriteGuard() {
-  const inFlight = useRef(new Set());
-  const [busyIds, setBusyIds] = useState(() => new Set());
-
-  const claim = useCallback((id) => {
-    const free = !inFlight.current.has(id);
-    if (free) {
-      inFlight.current.add(id);
-      setBusyIds(new Set(inFlight.current));
-    }
-    return free;
-  }, []);
-  const release = useCallback((id) => {
-    inFlight.current.delete(id);
-    setBusyIds(new Set(inFlight.current));
-  }, []);
-  return { busyIds, claim, release };
-}
+// The per-row guard lives with the other shared primitives (ADR 0033 §2);
+// re-exported so this module's callers and tests keep their import.
+export { default as useWriteGuard } from '@/components/admin/shared/useWriteGuard';
 
 /** The list with `saved` replacing the row of the same id, or appended. */
 export function upsertRow(rows, saved) {

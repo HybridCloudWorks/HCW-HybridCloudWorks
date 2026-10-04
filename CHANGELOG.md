@@ -19,6 +19,169 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **ContentForge alignment: one content operating system (ADR 0033, owner
+  request 2026-10-03).** Twenty-six admin pages inventoried, then rebuilt in
+  eight slices so a first-time user can read the menu, every stage of the
+  pipeline agrees with every other, and nothing a feature creates is lost
+  when the page is left. The brief, findings and acceptance criteria are in
+  `docs/decisions/0033-contentforge-alignment.md`; a Figma file holds the
+  redesigned Home, Forge Studio, Image Gallery, Calendar, Audio Library and
+  Ambassador screens.
+  - **Approve works again.** Every Approve button — queue, review boards,
+    editor save bar — sent `approved_blog`, a status the backend normaliser
+    never mapped, so the transition table answered 400 "Invalid transition"
+    from every surface. The normaliser maps `approved_blog` and
+    `published_blog`; the pages send the canonical names. The Queue
+    "Approved" chip, the Editor list and the Frameworks / Coder Corner
+    filters queried statuses never stored and always came back empty; they
+    now query the stored ones, and `forge_ready` and `needs_rework` — counted
+    in the Editor badge but shown on no screen — have a chip.
+  - **Home.** One pipeline graphic (New Content → Drafts → Review Queue →
+    Editor → Publish → Live Pages) replaces the two identical strips; an
+    Explore section introduces every menu group in a sentence. Sidebar and
+    dashboard read one counts hook that refetches on navigation, so the
+    badges follow a Recount.
+  - **Sidebar** reads one registry (`frontend/src/config/adminNav.js`) with a
+    description per item shown on hover and repeated under each page title.
+    Live Pages joins Pipeline; the Content group becomes Enhanced and takes
+    Listen & Learn and Labs; Spotlight gains Ambassador; Prompts is Image
+    Prompts.
+  - **Shared primitives** for every hub: PageHeader (purpose line, collapsible
+    "How this works"), StatusBadge over one status vocabulary
+    (`lib/status.js`: healthy / degraded / misconfigured / unavailable /
+    unknown; content statuses with their help sentences), EmptyState,
+    TaxonomyPicker and TaxonomyChips, `useGuardedLoad` and `useWriteGuard`.
+  - **Content taxonomy.** Every content record can carry `kind` (what it will
+    become) and `ideaOrigin` (how it became an idea), two separate lists
+    edited on Platform Settings → Content types & origins
+    (`admin_config/content_taxonomy`; built-ins can be disabled, never
+    removed). Older records derive both from `type` and `source` at read time,
+    so filters and chips agree with no backfill. Pickers on New Content,
+    Drafts, Forge-from-URL, Forge Studio and the Review page; chips and
+    filters on every pipeline list.
+  - **Pipeline pages.** One `useContentTransitions` hook replaces three
+    hand-rolled approve/reject/restore copies; Frameworks and Coder Corner
+    share one typed list; Architecture and Framework boards share one shell;
+    Coder Corner items get their own board on the Review page. The Review
+    page shows save and publish errors and never navigates on a failed save.
+    Live Pages asks the server for live pages ordered by publish date instead
+    of filtering 500 arbitrary documents. The editor's Metadata tab gains
+    History: `content_versions` was written on every save and read by
+    nothing; it now lists versions and restores one as a new version. The
+    purge timer updates the dashboard counters it used to drift. Duplicate
+    client audit rows removed where the server already writes one.
+  - **Forge Studio** is a workspace, not a settings form: Start (idea,
+    template, existing content, URL, blank) → Brief (objective, audience,
+    kind, origin, tone, length, must and must-not cover, sources, channel,
+    SEO) → Draft (the document is created on the Drafts page first, the forge
+    runs against it, ten AI actions apply only on an explicit button, every
+    AI edit recorded in `activity[]`) → Finish (send to review, open in
+    editor, publish, social post, images, audio — each with a destination).
+    The old configuration form is the fifth tab, with its zero-value,
+    chip-save and ETag bugs fixed. The manual forge job's store lacked
+    `incrementIf`, so the budget claim threw; fixed with a test.
+  - **AI Engine** gains per-task routing (`admin_settings/ai-routing`:
+    primary provider and model plus fallbacks per feature, read ahead of the
+    global order; Simple and Advanced views), an "Auto (per task)" model
+    option, usage recorded once per call for every call site (nine of
+    fourteen recorded nothing), unpriced models shown as unpriced rather than
+    at gpt-4o rates, and config invalidation after every write. A custom MCP
+    server can no longer name an arbitrary app setting as its bearer key and
+    must be https.
+  - **Image Prompts and Image Gallery** share lineage. A prompt set is an
+    image set: purpose, theme, style rules, negative prompt, version history,
+    duplicate, rename, archive, a Generate sample, and every image it
+    produced. The AI cover uses the assigned set's prompt and style rules
+    (the hardcoded "Lego minifigure" prompt is the last fallback) and
+    generated rows record set, prompt, template version, provider, model,
+    size and path; regeneration writes a new stamped blob instead of
+    overwriting. The gallery is a visual library: search, filters, sort,
+    paging, bulk tag/move/archive/trash with a confirm, a details dialog with
+    alt text, caption, licence, dimensions, "used by" and a link to the set,
+    import from URL, persisted folders. Thirteen listed gallery bugs fixed,
+    among them "Update selected" updating one image and tag toggles erasing
+    tags.
+  - **Calendar** aggregates every scheduled kind through one read
+    (`GET cms/calendar`): content publishes and failures, newsletter issues,
+    social posts, talks and CFP deadlines, certification expiry and renewal,
+    Ambassador deadlines, audio releases. Month, week and agenda views;
+    filters; drag-and-drop rescheduling with a keyboard alternative;
+    unschedule; quick create; conflict marks; a refetch after every change
+    (the old page never refetched). The Newsletter Hub embeds the same
+    calendar filtered to its issues.
+  - **Newsletter.** Issues reach `sent`: nothing moved a scheduled issue past
+    `scheduled`, so metrics never appeared. Reconciliation reads the Resend
+    broadcast on read and on demand; cancel, reschedule, retry and duplicate
+    from the hub; per-issue send time; version history; manual content
+    blocks (a live article or a custom block with a gallery image) beside the
+    automatic sections; the From address is a setting; audience CSV export,
+    add a subscriber, whole-list search. Social Hub's header reflects the
+    real Publer accounts call, and a scheduled post can be edited and
+    rescheduled. Recording Hub's "Send to pipeline" called a function it
+    never imported and crashed after creating the content; fixed, with the
+    editor links.
+  - **Listen & Learn** is an Audio Library. Book or course → chapter or lesson →
+    audio version, on the two existing containers. The hub opens on a Library
+    of books with covers and durations; a book lists its ordered chapters with
+    status, player (position remembered), Approve, Regenerate, Versions,
+    Rename, Archive and Delete; new books from pasted text or a content item,
+    with a cost estimate before generating. A failed regeneration no longer
+    unpublishes a chapter (it keeps the current take and offers Retry);
+    regeneration writes a new stamped file instead of overwriting one served
+    under a one-year immutable header; re-running a guide keeps approvals and
+    order; areas dropped from a guide are flagged. Text-to-speech defaults to
+    the cheapest Gemini model with the estimate stated, chunks long dialogue
+    on sentence boundaries, and takes per-book voice, language and rate.
+    Publishing is publisher-gated.
+  - **Labs** live under each provider's Learn section
+    (`/:provider/education/labs`), with objectives, prerequisites, steps,
+    resources and a panel that explains Lab, Desktop and Agent in visitor
+    words; `/education/labs` stays as the index grouped by provider. The
+    catalogue carries providers, difficulty, steps and validation, and a new
+    lab family is one row and one template entry. The admin hub gains a
+    Catalogue tab with Validate, and a Concepts panel with live status. Job
+    listing and claiming are ordered; the dead `running` status and the stale
+    `.env` instructions are gone.
+  - **Speaking and Certifications.** Status, CFP deadline, sessions and
+    evidence on talks; renewal date, requirements, evidence and validation on
+    certifications; dates stored as plain days so nothing shows a day early;
+    editors are the shared dialog; "Show on site" off now hides a Sessionize
+    event publicly; "Feature in Spotlight" has a public effect; Publish
+    snapshot has an effect before the next deploy (the live snapshot wins
+    when newer); the speaker id is no longer hardcoded on About.
+  - **Ambassador**, new under Spotlight: programs (seven seeded, all
+    editable, disable never deletes), applications with a status machine,
+    deadlines, renewals, files and history, an evidence library that imports
+    from Speaking, Certifications and published content without re-entry,
+    readiness per program that explains its arithmetic and never promises
+    acceptance, an application workspace and packet view, and Settings as the
+    last tab. Private by default; soft delete; audited.
+  - **Health** probes every hub and dependency through a registry of 36
+    checks with one vocabulary, last-checked times (every time said "Not
+    available": the formatter expected Firestore timestamps and Cosmos stores
+    ISO strings), impact, fix and a deep link; Test all runs the safe ones in
+    parallel. Integrations gains service cards for every AI key and the lab
+    host, with persisted last-worked / last-failed status. Platform Settings
+    opens on an index of every setting document and where it is edited.
+  - **Infra.** One new Cosmos container, `ambassador` (`/id`), declared in the
+    migration manifest and `infra/cosmos-containers.json`. It needs a
+    `terraform apply` with owner review; until then the Ambassador hub shows a
+    not-provisioned state and names the plan command, and nothing else
+    breaks.
+  - Links to the non-existent `/admin/platform-settings` fixed; dead exports
+    removed from `config/admin.js`.
+  - **Code structure.** Qlty measured 180 code smells the first cut
+    introduced and 57 pre-existing ones it made worse (handler factories
+    every slice added routes to, files past their complexity budget). All
+    were restructured away rather than suppressed: handler bodies moved out
+    of their factories into module-level functions over a context, request
+    validation into tables, large components into reducers, hooks and
+    per-section components, large modules into sibling modules behind a
+    re-export shim. Every extracted helper has its own test (about 350 new
+    tests); existing tests pass unchanged; four pre-existing
+    `eslint-disable complexity` comments were removed because the code no
+    longer needs them.
+
 - **Drafts: a ContentForge stage before the Content Queue, at `/admin/drafts`
   (#840, owner request 2026-10-03).** Articles drafted as `docs/content/*.md` files
   could only be read on the site by importing them straight into review. They

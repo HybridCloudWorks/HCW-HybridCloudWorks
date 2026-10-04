@@ -1,65 +1,213 @@
-import { getJSON } from '@/lib/api';
+/**
+ * The Image Gallery's data layer (ADR 0033 Creative slice): the listing
+ * call with its server-side search, filters, sort and paging; the folder,
+ * bulk, import and usage calls; and the pure helpers the page and its tests
+ * share. The derived-option helpers from #602 stay here too: they are pure
+ * functions of the items on screen and the page passes each one straight to
+ * `useMemo`.
+ */
+import { getJSON, postJSON, sendJSON } from '@/lib/api';
 import { toMillis } from '@/lib/dateUtils';
+import { normalizeGalleryItem } from '@/lib/imageGallerySource';
+
+// The per-row shape lives in lib/imageGallerySource.js (PR #841 split); it is
+// re-exported here so every existing import keeps working.
+export { SOURCE_LABELS, getSourceLabel, normalizeGalleryItem } from '@/lib/imageGallerySource';
 
 const PAGE_SIZE = 200;
 
-export function normalizeGalleryItem(item, sourceCollection) {
-  const data = item || {};
-  const articleId = String(data.articleId || data.contentId || data.id);
-  const normalizedSourceCollection = String(data.sourceCollection || '').trim() || sourceCollection;
-  return {
-    id: data.id,
-    articleId,
-    imageUrl: data.imageUrl || '',
-    provider: data.provider || '',
-    title: data.title || articleId,
-    slot: data.slot || '',
-    galleryCollection: sourceCollection,
-    sourceCollection: normalizedSourceCollection,
-    createdAt: data.createdAt || null,
-    customTags: data.customTags || [],
-    folder: data.folder || 'default',
-  };
-}
+export const GALLERY_COLLECTIONS = Object.freeze([
+  'generated_content_images',
+  'curated_article_images',
+]);
 
-export function getSourceLabel(sourceCollection) {
-  if (
-    sourceCollection === 'generated_content_images' ||
-    sourceCollection === 'content' ||
-    sourceCollection === 'blogs'
-  ) {
-    return 'ContentForge';
-  }
-  if (sourceCollection === 'curated_article_images') return 'Curated';
-  if (sourceCollection === 'preview') return 'Preview';
-  if (sourceCollection === 'manual_upload') return 'Uploaded';
-  return 'Generated';
-}
+export const STATE_OPTIONS = Object.freeze([
+  { value: 'active', label: 'Active' },
+  { value: 'archived', label: 'Archived' },
+  { value: 'trash', label: 'Trash' },
+  { value: 'all', label: 'Everything' },
+]);
+
+export const SORT_OPTIONS = Object.freeze([
+  { value: 'newest', label: 'Newest first' },
+  { value: 'oldest', label: 'Oldest first' },
+  { value: 'title', label: 'Title A–Z' },
+  { value: 'most-used', label: 'Most used' },
+]);
+
+export const LICENSE_OPTIONS = Object.freeze([
+  { value: '', label: 'Not recorded' },
+  { value: 'ai-generated', label: 'AI generated' },
+  { value: 'owned', label: 'Owned / original' },
+  { value: 'cc0', label: 'CC0 / public domain' },
+  { value: 'cc-by', label: 'CC BY' },
+  { value: 'cc-by-sa', label: 'CC BY-SA' },
+  { value: 'stock', label: 'Stock licence' },
+  { value: 'other', label: 'Other' },
+]);
+
+export const COMMON_PROVIDERS = Object.freeze([
+  { value: '', label: 'No provider tag' },
+  { value: 'aws', label: 'AWS' },
+  { value: 'azure', label: 'Azure' },
+  { value: 'gcp', label: 'GCP' },
+  { value: 'terraform', label: 'Terraform' },
+  { value: 'finops', label: 'FinOps' },
+  { value: 'github', label: 'GitHub' },
+  { value: 'docker', label: 'Docker' },
+  { value: 'vmware', label: 'VMware' },
+  { value: 'ansible', label: 'Ansible' },
+]);
+
+export const SLOT_OPTIONS = Object.freeze([
+  { value: '', label: 'No slot tag' },
+  { value: 'rss', label: 'RSS' },
+  { value: 'hero', label: 'Hero' },
+  { value: 'secondary1', label: 'Secondary 1' },
+  { value: 'secondary2', label: 'Secondary 2' },
+  { value: 'secondary3', label: 'Secondary 3' },
+  { value: 'curated', label: 'Curated' },
+]);
 
 const createdAtMillis = toMillis;
 
-export async function loadGalleryItems({ max = PAGE_SIZE } = {}) {
-  // GET cms/images returns both galleries, newest first each, capped at max.
-  const res = await getJSON(`cms/images?limit=${max}`);
+/** `?a=b&c=d` from the non-empty, non-default params. */
+export function galleryQueryString(params = {}) {
+  const search = new URLSearchParams();
+  const entries = {
+    q: params.q,
+    folder: params.folder,
+    source: params.source,
+    provider: params.provider,
+    slot: params.slot,
+    tag: params.tag,
+    set: params.set,
+    contentId: params.contentId,
+    articleId: params.articleId,
+    state: params.state,
+    sort: params.sort,
+    offset: params.offset,
+    limit: params.limit ?? PAGE_SIZE,
+    usage: params.usage === false ? '' : '1',
+  };
+  for (const [key, value] of Object.entries(entries)) {
+    const text = String(value ?? '').trim();
+    if (!text || text === 'all') continue;
+    if (key === 'state' && text === 'active') continue;
+    if (key === 'sort' && text === 'newest') continue;
+    if (key === 'offset' && text === '0') continue;
+    search.set(key, text);
+  }
+  const out = search.toString();
+  return out ? `?${out}` : '';
+}
 
-  return [
-    ...(res.curated || []).map((item) => normalizeGalleryItem(item, 'curated_article_images')),
-    ...(res.generated || []).map((item) => normalizeGalleryItem(item, 'generated_content_images')),
-  ]
-    .sort((a, b) => createdAtMillis(b.createdAt) - createdAtMillis(a.createdAt))
-    .reduce(
-      (acc, item) => {
-        // Dedupe by imageUrl — multiple rows for the same generated asset
-        // (regens, multi-page reuse) collapse into a single tile keyed on the
-        // newest row. Items without a URL fall back to id-uniqueness.
-        const key = item.imageUrl || `__id:${item.id}`;
-        if (acc.seen.has(key)) return acc;
-        acc.seen.add(key);
-        acc.items.push(item);
-        return acc;
-      },
-      { seen: new Set(), items: [] }
-    ).items;
+/**
+ * Whatever the listing call returned — the envelope, or a bare array from an
+ * older caller or a test — as `{ items, total, hasMore, facets }`.
+ */
+export function asListing(response) {
+  if (Array.isArray(response)) {
+    return { items: response, total: response.length, hasMore: false, facets: null, offset: 0 };
+  }
+  const items = Array.isArray(response?.items)
+    ? response.items
+    : [
+        ...(response?.curated || []).map((i) => normalizeGalleryItem(i, 'curated_article_images')),
+        ...(response?.generated || []).map((i) =>
+          normalizeGalleryItem(i, 'generated_content_images')
+        ),
+      ].sort((a, b) => createdAtMillis(b.createdAt) - createdAtMillis(a.createdAt));
+  return {
+    items: items.map((item) => normalizeGalleryItem(item, item.galleryCollection)),
+    total: Number(response?.total) || items.length,
+    hasMore: Boolean(response?.hasMore),
+    offset: Number(response?.offset) || 0,
+    facets: response?.facets || null,
+  };
+}
+
+/** The listing, with every server-side filter: `{ items, total, hasMore, facets }`. */
+export async function queryGalleryImages(params = {}) {
+  return asListing(await getJSON(`cms/images${galleryQueryString(params)}`));
+}
+
+/**
+ * The first page as a flat list, for pickers that only need "the newest
+ * images" (BlogReviewBoard, MetadataTab, PostImageField). Rows sharing one
+ * URL collapse into the newest, as the tile view did before paging.
+ */
+export async function loadGalleryItems({ max = PAGE_SIZE, ...params } = {}) {
+  const { items } = await queryGalleryImages({ ...params, limit: max });
+  const seen = new Set();
+  return items.filter((item) => {
+    const key = item.imageUrl || `__id:${item.id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+export async function fetchGalleryFolders() {
+  const res = await getJSON('cms/images/folders');
+  return Array.isArray(res?.folders) ? res.folders : [...SEED_FOLDERS];
+}
+
+export async function saveGalleryFolders(folders) {
+  const res = await sendJSON('cms/images/folders', 'PUT', { folders });
+  return Array.isArray(res?.folders) ? res.folders : folders;
+}
+
+/** One image's metadata patch; fields absent from `fields` are untouched. */
+export function updateGalleryImage(item, fields) {
+  return postJSON('updateGalleryImageMetadata', {
+    id: item.id,
+    galleryCollection: item.galleryCollection,
+    ...fields,
+  });
+}
+
+/** `{ items: [{id, galleryCollection}], action, ... }` → per-item results. */
+export function bulkGalleryImages(items, action, extra = {}) {
+  return postJSON('cms/images/bulk', {
+    action,
+    items: items.map((item) => ({ id: item.id, galleryCollection: item.galleryCollection })),
+    ...extra,
+  });
+}
+
+export function importGalleryImage(body) {
+  return postJSON('cms/images/import', body);
+}
+
+export function fetchImageUsage(item) {
+  return getJSON(
+    `cms/images/${encodeURIComponent(item.id)}/usage?collection=${encodeURIComponent(item.galleryCollection)}`
+  );
+}
+
+/** Permanent delete of one row through the route its collection uses. */
+export function deleteGalleryImage(item) {
+  if (item.galleryCollection === 'curated_article_images') {
+    return postJSON('deleteCuratedGeneratedImage', { articleId: item.articleId || item.id });
+  }
+  return postJSON('deleteContentGeneratedImage', { imageId: item.id });
+}
+
+/** `1.2 MB`, `640 KB`, `312 B`; '' for nothing. */
+export function formatBytes(bytes) {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n <= 0) return '';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** `1920 × 1080`, or '' when either side is unknown. */
+export function formatDimensions(item) {
+  const w = Number(item?.width);
+  const h = Number(item?.height);
+  return w > 0 && h > 0 ? `${w} × ${h}` : '';
 }
 
 /**
@@ -134,7 +282,8 @@ export const SEED_FOLDERS = Object.freeze([
 
 /**
  * Folders to offer: the seeds, every folder in use, and any the operator
- * created but has not filed anything into yet.
+ * created (persisted in admin_config/gallery_folders) but has not filed
+ * anything into yet.
  */
 export function folderOptions(items, manualFolders = []) {
   const folders = new Set(SEED_FOLDERS);
@@ -177,4 +326,17 @@ export function toggledSelection(selected, id) {
   if (next.has(id)) next.delete(id);
   else next.add(id);
   return next;
+}
+
+/**
+ * The tag change a bulk toggle means for a SELECTION: the tags every selected
+ * item already has are the ones a click removes; the rest are the ones a
+ * click adds. Pure, so the "toggle erased every other tag" defect has a test
+ * that names it.
+ */
+export function tagToggleIntent(tag, selectedItems) {
+  const items = selectedItems || [];
+  if (items.length === 0) return { addTags: [], removeTags: [] };
+  const onAll = items.every((item) => tagsOf(item).includes(String(tag).toLowerCase()));
+  return onAll ? { addTags: [], removeTags: [tag] } : { addTags: [tag], removeTags: [] };
 }

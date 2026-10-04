@@ -21,19 +21,26 @@ import ImageGalleryPage from './ImageGalleryPage';
 const postJSON = vi.fn();
 const uploadImageFile = vi.fn();
 
-const loadGalleryItems = vi.fn(() => Promise.resolve([]));
+// The listing call. A bare array is accepted (asListing wraps it), so these
+// tests describe items, not envelopes.
+const queryGalleryImages = vi.fn(() => Promise.resolve([]));
 
 vi.mock('@/lib/api', () => ({
   postJSON: (...args) => postJSON(...args),
   getJSON: vi.fn(() => Promise.resolve({ items: [] })),
+  sendJSON: vi.fn(() => Promise.resolve({ folders: ['default'] })),
 }));
 // Only the network read is replaced; the derived-list helpers stay real, so
 // the filter dropdowns below are rendered from the real code path.
 vi.mock('@/lib/imageGallery', async (importOriginal) => ({
   ...(await importOriginal()),
-  loadGalleryItems: (...args) => loadGalleryItems(...args),
+  queryGalleryImages: (...args) => queryGalleryImages(...args),
 }));
-vi.mock('react-router', () => ({ useNavigate: () => vi.fn() }));
+const navigate = vi.fn();
+vi.mock('react-router', () => ({
+  useNavigate: () => navigate,
+  useLocation: () => ({ pathname: '/admin/image-gallery', search: '' }),
+}));
 // The real module's validation is exercised as itself in imageUpload.test.js;
 // here only the network call is replaced, so publicImageFileProblem and
 // PUBLIC_IMAGE_EXTENSIONS stay real and the picker's accept list is the real
@@ -62,7 +69,7 @@ describe('a gallery upload', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     postJSON.mockResolvedValue({ items: [] });
-    loadGalleryItems.mockResolvedValue([]);
+    queryGalleryImages.mockResolvedValue([]);
     uploadImageFile.mockResolvedValue({ url: '/api/public/media/covers/x/hero.png' });
   });
 
@@ -101,6 +108,9 @@ describe('a gallery upload', () => {
     await waitFor(() => expect(recordCalls()).toHaveLength(1));
     const [[, body]] = recordCalls();
     expect(body.imageUrl).toBe('/api/public/media/covers/x/hero.png');
+    // What the browser could measure travels with the record (ADR 0033).
+    expect(body.bytes).toBe(3);
+    expect(body.format).toBe('png');
     // parseStorageRef splits on the first segment to find the blob to delete,
     // so the prefix has to be the container that was actually written.
     expect(body.storagePath.startsWith('covers/')).toBe(true);
@@ -159,12 +169,101 @@ describe('the filter dropdowns', () => {
     // `oracle` on purpose: the provider dropdown renders COMMON_PROVIDERS from
     // a static list and appends only the providers NOT in it, so a common one
     // would pass this test through the static path and prove nothing.
-    loadGalleryItems.mockResolvedValue([
+    queryGalleryImages.mockResolvedValue([
       { id: '1', provider: 'oracle', slot: 'hero', customTags: ['cloud'], folder: 'aws' },
     ]);
     render(<ImageGalleryPage />);
     await waitFor(() => expect(screen.getByRole('option', { name: 'ORACLE' })).toBeInTheDocument());
     expect(screen.getByRole('option', { name: 'hero' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'cloud' })).toBeInTheDocument();
+  });
+});
+
+// ── ADR 0033: bulk edits, states and the empty gallery ──────────────────────
+
+const ITEMS = [
+  {
+    id: 'a',
+    galleryCollection: 'generated_content_images',
+    title: 'Alpha',
+    imageUrl: '/api/public/media/covers/a.png',
+    customTags: ['cloud'],
+    folder: 'default',
+    source: 'upload',
+    usageCount: 0,
+  },
+  {
+    id: 'b',
+    galleryCollection: 'generated_content_images',
+    title: 'Beta',
+    imageUrl: '/api/public/media/covers/b.png',
+    customTags: ['cloud', 'edge'],
+    folder: 'default',
+    source: 'ai-cover',
+    promptSet: 'Azure Chibi',
+    usageCount: 2,
+  },
+];
+
+function bulkCalls() {
+  return postJSON.mock.calls.filter(([route]) => route === 'cms/images/bulk');
+}
+
+describe('bulk actions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    postJSON.mockResolvedValue({ success: true, updated: 2, failed: 0, results: [] });
+    queryGalleryImages.mockResolvedValue(ITEMS);
+  });
+
+  it('a tag toggle sends add/remove for the whole selection, never the tag list', async () => {
+    render(<ImageGalleryPage />);
+    fireEvent.click(await screen.findByLabelText('Select Alpha'));
+    fireEvent.click(screen.getByLabelText('Select Beta'));
+    // `cloud` is on both, so the toggle REMOVES it; `edge` is on one, so it ADDS.
+    fireEvent.click(screen.getByRole('button', { name: 'cloud' }));
+    await waitFor(() => expect(bulkCalls()).toHaveLength(1));
+    expect(bulkCalls()[0][1]).toMatchObject({
+      action: 'tag',
+      addTags: [],
+      removeTags: ['cloud'],
+      items: [
+        { id: 'a', galleryCollection: 'generated_content_images' },
+        { id: 'b', galleryCollection: 'generated_content_images' },
+      ],
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'edge' }));
+    await waitFor(() => expect(bulkCalls()).toHaveLength(2));
+    expect(bulkCalls()[1][1]).toMatchObject({ action: 'tag', addTags: ['edge'], removeTags: [] });
+  });
+
+  it('archive touches every selected image in one request', async () => {
+    render(<ImageGalleryPage />);
+    fireEvent.click(await screen.findByLabelText('Select Alpha'));
+    fireEvent.click(screen.getByLabelText('Select Beta'));
+    fireEvent.click(screen.getByRole('button', { name: /archive 2/i }));
+    await waitFor(() => expect(bulkCalls()).toHaveLength(1));
+    expect(bulkCalls()[0][1].action).toBe('archive');
+    expect(bulkCalls()[0][1].items).toHaveLength(2);
+  });
+
+  it('shows the set an image came from on its tile', async () => {
+    render(<ImageGalleryPage />);
+    expect(await screen.findByText('Set: Azure Chibi')).toBeInTheDocument();
+    expect(screen.getByText('Used in 2')).toBeInTheDocument();
+  });
+});
+
+describe('an empty gallery', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    postJSON.mockResolvedValue({ items: [] });
+    queryGalleryImages.mockResolvedValue([]);
+  });
+
+  it('says it is empty and where images come from, not that nothing was generated', async () => {
+    render(<ImageGalleryPage />);
+    expect(await screen.findByText('No images yet')).toBeInTheDocument();
+    expect(screen.queryByText(/no generated images/i)).not.toBeInTheDocument();
   });
 });

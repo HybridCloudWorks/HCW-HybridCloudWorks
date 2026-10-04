@@ -1,7 +1,7 @@
 /**
  * The larger fields of the certification editor, each with its own small
  * state: the issuer picker, the badge image drop zone, the display order with
- * its vendor ladder, and the visibility checkboxes. CertEditor owns the form;
+ * the global ladder, and the visibility checkboxes. CertEditor owns the form;
  * these read `form` and call `set(key, value)`.
  */
 import React, { useMemo, useRef, useState } from 'react';
@@ -238,23 +238,28 @@ export function BadgeImageField({ imageUrl, uploading, onFile, onClear }) {
   );
 }
 
-/** Siblings sharing this issuer — used to scope display_order and visualize the vendor ladder. */
-export function siblingsOf(allCerts, docId, issuer) {
-  const matchIssuer = (issuer || '').trim().toLowerCase();
-  if (!matchIssuer) return [];
+/**
+ * Every other certification, in display order. ONE GLOBAL LADDER, not one per
+ * issuer (ADR 0033, Spotlight slice): the About page and the Featured tab
+ * both sort by `display_order` across every issuer, so a ladder scoped to the
+ * issuer suggested numbers that collided with other issuers' certs the moment
+ * the list was sorted. `issuer` is accepted and ignored so older callers
+ * keep working.
+ */
+export function siblingsOf(allCerts, docId) {
   return (allCerts || [])
     .filter((c) => c._docId !== docId)
-    .filter((c) => issuerOf(c).toLowerCase() === matchIssuer)
     .map((c) => ({
       _docId: c._docId,
       name: c.name,
       code: c.code,
+      issuer: issuerOf(c),
       order: Number(c.display_order ?? 999),
     }))
     .sort((a, b) => a.order - b.order);
 }
 
-/** The lowest order number no sibling uses. */
+/** The lowest order number no other certification uses. */
 export function nextFreeOrder(siblings) {
   const used = new Set(siblings.map((s) => s.order));
   let n = 1;
@@ -262,15 +267,25 @@ export function nextFreeOrder(siblings) {
   return n;
 }
 
-function SiblingLadder({ siblings, issuer, order }) {
+/** The part of the ladder around `order`: the `span` rows before and after it. */
+export function ladderWindow(siblings, order, span = 3) {
+  const target = Number(order);
+  if (!Number.isFinite(target)) return siblings.slice(0, span * 2);
+  const at = siblings.findIndex((s) => s.order >= target);
+  const centre = at === -1 ? siblings.length : at;
+  return siblings.slice(Math.max(0, centre - span), centre + span + 1);
+}
+
+function SiblingLadder({ siblings, order }) {
   if (siblings.length === 0) return null;
+  const rows = ladderWindow(siblings, order);
   return (
     <div className="mt-2 p-2 rounded-md bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/50">
       <p className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">
-        Other certs from {issuer}
+        Nearby on the About page ladder
       </p>
       <ul className="space-y-0.5 text-[11px]">
-        {siblings.map((s) => {
+        {rows.map((s) => {
           const conflict = s.order === Number(order);
           return (
             <li
@@ -283,8 +298,9 @@ function SiblingLadder({ siblings, issuer, order }) {
                 <span className="font-mono text-[10px] mr-1">#{s.order}</span>
                 {s.name}
                 {s.code ? ` (${s.code})` : ''}
+                <span className="text-slate-400"> · {s.issuer}</span>
               </span>
-              {conflict && <span className="text-[9px]">conflict</span>}
+              {conflict && <span className="text-[9px]">same number</span>}
             </li>
           );
         })}
@@ -293,33 +309,38 @@ function SiblingLadder({ siblings, issuer, order }) {
   );
 }
 
-export function DisplayOrderField({ form, set, allCerts, docId }) {
-  const siblings = useMemo(
-    () => siblingsOf(allCerts, docId, form.issuer),
-    [allCerts, docId, form.issuer]
-  );
+export function DisplayOrderField({ form, set, allCerts, docId, error }) {
+  const siblings = useMemo(() => siblingsOf(allCerts, docId), [allCerts, docId]);
   return (
     <div className="col-span-2">
-      <Label className="text-xs flex items-center justify-between">
+      <Label className="text-xs flex items-center justify-between" htmlFor="cert-display-order">
         <span>
-          Display order
-          {form.issuer ? <span className="text-slate-500"> within {form.issuer}</span> : null}
+          Display order <span className="text-slate-500">across every issuer; 0 is first</span>
         </span>
         <button
           type="button"
           onClick={() => set('display_order', nextFreeOrder(siblings))}
-          disabled={!form.issuer}
-          className="text-[10px] font-semibold text-indigo-600 hover:text-indigo-700 disabled:text-slate-400"
+          className="text-[10px] font-semibold text-indigo-600 hover:text-indigo-700"
         >
           Suggest next
         </button>
       </Label>
       <Input
+        id="cert-display-order"
         type="number"
+        min="0"
+        step="1"
         value={form.display_order}
         onChange={(e) => set('display_order', e.target.value)}
+        aria-invalid={Boolean(error) || undefined}
+        aria-describedby={error ? 'cert-display-order-error' : undefined}
       />
-      <SiblingLadder siblings={siblings} issuer={form.issuer} order={form.display_order} />
+      {error && (
+        <p id="cert-display-order-error" className="mt-1 text-[11px] text-rose-600" role="alert">
+          {error}
+        </p>
+      )}
+      <SiblingLadder siblings={siblings} order={form.display_order} />
     </div>
   );
 }

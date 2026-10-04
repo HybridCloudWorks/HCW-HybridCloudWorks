@@ -23,6 +23,8 @@
  *   GET    /contacts/{id|email}/segments             { data: [{ id, name }] }
  *   POST   /contacts/{id|email}/segments/{segmentId}
  *   POST   /broadcasts                               { segment_id, from, reply_to, subject, html, text, name, send, scheduled_at }
+ *   GET    /broadcasts/{id}                          { status: draft|scheduled|queued|sent|canceled, scheduled_at, sent_at }
+ *   DELETE /broadcasts/{id}                          draft or scheduled only; deleting a scheduled one cancels it
  *
  * Read for the Mailing List page (insights-handlers.js), same date:
  *   GET    /emails/metrics?start_date&end_date&metrics&dimensions&granularity&broadcast_id
@@ -76,7 +78,11 @@ export function createResendClient({ apiKey, fetch: fetchImpl = globalThis.fetch
     } catch (error) {
       // The key is in a header, not the URL, so the message cannot carry it;
       // it is still reduced to its own message rather than passed whole.
-      return { ok: false, status: 0, data: { message: String(error?.message ?? error) } };
+      return {
+        ok: false,
+        status: 0,
+        data: { message: String(error?.message ?? error) },
+      };
     }
     let data = null;
     try {
@@ -117,7 +123,11 @@ export function createResendClient({ apiKey, fetch: fetchImpl = globalThis.fetch
       call('GET', `/segments?limit=100${after ? `&after=${encodeURIComponent(after)}` : ''}`),
     createSegment: (name) => call('POST', '/segments', { name }),
     createContact: ({ email, segmentId }) =>
-      call('POST', '/contacts', { email, unsubscribed: false, segments: [{ id: segmentId }] }),
+      call('POST', '/contacts', {
+        email,
+        unsubscribed: false,
+        segments: [{ id: segmentId }],
+      }),
     getContact: (email) => call('GET', contactPath(email)),
     resubscribeContact: (email) => call('PATCH', contactPath(email), { unsubscribed: false }),
     listContactSegments: (email) => call('GET', `${contactPath(email)}/segments?limit=100`),
@@ -142,6 +152,14 @@ export function createResendClient({ apiKey, fetch: fetchImpl = globalThis.fetch
         ...(scheduledAt ? { scheduled_at: scheduledAt } : {}),
       }),
 
+    /** The broadcast as Resend holds it: the reconcile (reconcile.js) reads `status`. */
+    getBroadcast: (broadcastId) => call('GET', `/broadcasts/${seg(broadcastId)}`),
+    /**
+     * Delete — which for a `scheduled` broadcast is the cancel: Resend
+     * documents no other way to stop one. Refused for a sent broadcast.
+     */
+    deleteBroadcast: (broadcastId) => call('DELETE', `/broadcasts/${seg(broadcastId)}`),
+
     // ── Reads and configuration for the Mailing List page (insights-handlers.js).
     // None of these sends email. List-type metric parameters are sent
     // comma-separated, which Resend documents as equivalent to repeating them.
@@ -165,11 +183,14 @@ export function createResendClient({ apiKey, fetch: fetchImpl = globalThis.fetch
       call('GET', `/segments/${seg(segmentId)}/contacts${qs(page(options))}`),
     // By Resend contact id: the admin routes never put an address in a path.
     setContactUnsubscribed: (contactId, unsubscribed) =>
-      call('PATCH', `/contacts/${seg(contactId)}`, { unsubscribed: Boolean(unsubscribed) }),
+      call('PATCH', `/contacts/${seg(contactId)}`, {
+        unsubscribed: Boolean(unsubscribed),
+      }),
     deleteContact: (contactId) => call('DELETE', `/contacts/${seg(contactId)}`),
     listDomains: () => call('GET', '/domains'),
     getDomain: (domainId) => call('GET', `/domains/${seg(domainId)}`),
-    createDomain: ({ name, region }) => call('POST', '/domains', { name, ...(region ? { region } : {}) }),
+    createDomain: ({ name, region }) =>
+      call('POST', '/domains', { name, ...(region ? { region } : {}) }),
     verifyDomain: (domainId) => call('POST', `/domains/${seg(domainId)}/verify`),
     updateDomainTracking: (domainId, { openTracking, clickTracking }) =>
       call('PATCH', `/domains/${seg(domainId)}`, {

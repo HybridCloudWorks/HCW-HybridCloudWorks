@@ -23,11 +23,16 @@
  * Date instances exactly as the source did; Cosmos JSON-serializes a Date to
  * its ISO string on write, which is the same shape the migration writes.
  */
-import { PROVIDER_ALIASES } from '../public-reads.js';
-import { normalizePublishTarget } from './publish-targets.js';
+import { PROVIDER_ALIASES } from "../public-reads.js";
+import { normalizePublishTarget } from "./publish-targets.js";
 
-export function assertStringLength(value, fieldName, maxLength, { allowEmpty = true } = {}) {
-  const normalized = String(value || '');
+export function assertStringLength(
+  value,
+  fieldName,
+  maxLength,
+  { allowEmpty = true } = {},
+) {
+  const normalized = String(value || "");
   if (!allowEmpty && !normalized.trim()) {
     throw new Error(`${fieldName} is required`);
   }
@@ -38,7 +43,7 @@ export function assertStringLength(value, fieldName, maxLength, { allowEmpty = t
 }
 
 export function assertOptionalDateString(value, fieldName) {
-  const normalized = String(value || '').trim();
+  const normalized = String(value || "").trim();
   if (!normalized) return null;
   const parsed = new Date(normalized);
   if (Number.isNaN(parsed.getTime())) {
@@ -48,14 +53,18 @@ export function assertOptionalDateString(value, fieldName) {
 }
 
 export function isPlainObject(value) {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-export function assertOptionalHttpUrl(value, fieldName, { allowEmpty = true } = {}) {
-  const normalized = String(value || '').trim();
+export function assertOptionalHttpUrl(
+  value,
+  fieldName,
+  { allowEmpty = true } = {},
+) {
+  const normalized = String(value || "").trim();
   if (!normalized) {
     if (!allowEmpty) throw new Error(`${fieldName} is required`);
-    return '';
+    return "";
   }
   if (normalized.length > 2048) {
     throw new Error(`${fieldName} exceeds 2048 characters`);
@@ -66,13 +75,17 @@ export function assertOptionalHttpUrl(value, fieldName, { allowEmpty = true } = 
   } catch {
     throw new Error(`${fieldName} must be a valid URL`);
   }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error(`${fieldName} must be an http(s) URL`);
   }
   return normalized;
 }
 
-export function assertStringArray(value, fieldName, { maxItems = 50, maxItemLength = 120 } = {}) {
+export function assertStringArray(
+  value,
+  fieldName,
+  { maxItems = 50, maxItemLength = 120 } = {},
+) {
   if (value === null || value === undefined) return null;
   if (!Array.isArray(value)) {
     throw new Error(`${fieldName} must be an array`);
@@ -81,9 +94,11 @@ export function assertStringArray(value, fieldName, { maxItems = 50, maxItemLeng
     throw new Error(`${fieldName} exceeds ${maxItems} items`);
   }
   return value.map((entry) => {
-    const normalized = String(entry || '').trim();
+    const normalized = String(entry || "").trim();
     if (normalized.length > maxItemLength) {
-      throw new Error(`${fieldName} contains an entry that exceeds ${maxItemLength} characters`);
+      throw new Error(
+        `${fieldName} contains an entry that exceeds ${maxItemLength} characters`,
+      );
     }
     return normalized;
   });
@@ -113,21 +128,24 @@ export function assertJsonSize(value, fieldName, maxChars = 120_000) {
  */
 export const STORED_PROVIDER_VALUES = Object.freeze(
   Object.fromEntries(
-    Object.keys(PROVIDER_ALIASES).map((key) => [key, key.charAt(0).toUpperCase() + key.slice(1)])
-  )
+    Object.keys(PROVIDER_ALIASES).map((key) => [
+      key,
+      key.charAt(0).toUpperCase() + key.slice(1),
+    ]),
+  ),
 );
 
 const squashProvider = (value) =>
-  String(value || '')
+  String(value || "")
     .toLowerCase()
-    .replace(/[^a-z0-9]/g, '');
+    .replace(/[^a-z0-9]/g, "");
 
 /** Every spelling the registry lists ('Google Cloud', 'GitHub', ...), squashed -> its key. */
 const PROVIDER_BY_SPELLING = new Map(
   Object.entries(PROVIDER_ALIASES).flatMap(([key, labels]) => [
     [key, key],
     ...labels.map((label) => [squashProvider(label), key]),
-  ])
+  ]),
 );
 
 /**
@@ -138,29 +156,29 @@ const PROVIDER_BY_SPELLING = new Map(
  */
 export function normalizeProviderName(value) {
   const key = PROVIDER_BY_SPELLING.get(squashProvider(value));
-  return key ? STORED_PROVIDER_VALUES[key] : '';
+  return key ? STORED_PROVIDER_VALUES[key] : "";
 }
 
 export const FORBIDDEN_CONTENT_UPDATE_KEYS = new Set([
   // Workflow/state machine is authoritative via transition handlers.
-  'contentStatus',
-  'Status',
-  'Live',
+  "contentStatus",
+  "Status",
+  "Live",
 
-  'approvedForNews',
-  'reviewedAt',
-  'reviewedBy',
-  'reviewNotes',
-  'publishedToBlogs',
-  'publishedBlogId',
-  'movedToBlogsAt',
+  "approvedForNews",
+  "reviewedAt",
+  "reviewedBy",
+  "reviewNotes",
+  "publishedToBlogs",
+  "publishedBlogId",
+  "movedToBlogsAt",
   // Timestamps/identity are backend-owned.
-  'createdAt',
-  'createdBy',
-  'updatedAt',
-  'updatedBy',
-  'publishedAt',
-  'Published At',
+  "createdAt",
+  "createdBy",
+  "updatedAt",
+  "updatedBy",
+  "publishedAt",
+  "Published At",
   // The site URL has ONE writer, POST cms/content/slug (../cms/set-slug.js).
   // Added 2026-09-07 with that route (#400) after establishing what this file
   // did with a slug before it: nothing. `slug` matches no normalizer above, so
@@ -172,120 +190,184 @@ export const FORBIDDEN_CONTENT_UPDATE_KEYS = new Set([
   // slugifies and probes `c.slug OR c.Slug` before it writes, and republishes
   // so the URLs follow. The publish pipeline patches slug/Slug directly and is
   // unaffected — it never passes through this validator.
-  'slug',
-  'Slug',
+  "slug",
+  "Slug",
 ]);
 
 // Per-field-type normalizers used by validateAndNormalizeUpdateContentItemUpdates.
-// Each tries to handle the field; returns true if it consumed the entry,
-// false to fall through to the next normalizer.
+// KNOWN_FIELD_NORMALIZERS below pairs each field test with what it writes;
+// the first whose test holds consumes the entry, and none holding falls
+// through to the generic normalizer.
+
+/** `url`, `sourceUrl`, `diagramUrl`, any `…Url`/`…URL`, and `docLink`. */
 function isUrlField(field) {
-  return (
-    /Url$/i.test(field) ||
-    /URL$/i.test(field) ||
-    field === 'url' ||
-    field === 'sourceUrl' ||
-    field === 'docLink' ||
-    field === 'diagramUrl'
-  );
+  return /Url$/i.test(field) || field === "docLink";
 }
 
 function isDateLikeField(field) {
-  return /At$/.test(field) || /Date$/.test(field) || field === 'publishedDate';
+  return /At$/.test(field) || /Date$/.test(field) || field === "publishedDate";
 }
 
+/** A date-like field with a value the date normalizer can take; any other value falls through. */
+function isDateLikeEntry(field, value) {
+  return (
+    isDateLikeField(field) &&
+    (typeof value === "string" || value instanceof Date)
+  );
+}
+
+/**
+ * The dual-casing text fields, either spelling -> the pair that is always
+ * written together and the length the pair shares. A Map, so a field named
+ * like an Object prototype member cannot read as a pair.
+ */
+const PAIRED_TEXT_FIELDS = new Map([
+  ["title", { keys: ["title", "Title"], maxLength: 240 }],
+  ["Title", { keys: ["title", "Title"], maxLength: 240 }],
+  ["summary", { keys: ["summary", "Summary"], maxLength: 10_000 }],
+  ["Summary", { keys: ["summary", "Summary"], maxLength: 10_000 }],
+]);
+
+function normalizeUrlField(normalized, field, value) {
+  normalized[field] = assertOptionalHttpUrl(value, field, {
+    allowEmpty: true,
+  });
+}
+
+function normalizeDateLikeField(normalized, field, value) {
+  normalized[field] =
+    typeof value === "string" ? assertOptionalDateString(value, field) : value;
+}
+
+function normalizePairedTextField(normalized, field, value) {
+  const pair = PAIRED_TEXT_FIELDS.get(field);
+  const text = assertStringLength(value, pair.keys[0], pair.maxLength, {
+    allowEmpty: true,
+  }).trim();
+  Object.assign(
+    normalized,
+    Object.fromEntries(pair.keys.map((key) => [key, text])),
+  );
+}
+
+function normalizeCloudProviderField(normalized, _field, value) {
+  const provider = normalizeProviderName(value);
+  if (!provider) {
+    throw new Error(
+      `cloudProvider must be one of: ${Object.values(STORED_PROVIDER_VALUES).join(", ")}`,
+    );
+  }
+  normalized.cloudProvider = provider;
+  normalized["Cloud Provider"] = provider;
+}
+
+function normalizePublishTargetField(normalized, _field, value) {
+  normalized.publishTarget = normalizePublishTarget(value);
+}
+
+/** The id shape taxonomy.js enforces when the lists are saved. */
+const TAXONOMY_ID_PATTERN = /^[a-z0-9][a-z0-9-]{1,39}$/;
+
+/**
+ * Shape only — a slug id, as taxonomy.js stores them. Membership in the
+ * saved taxonomy is checked by the handler, which has the store and the
+ * current record (content-update.js, ADR 0033 §4).
+ */
+function normalizeTaxonomyIdField(normalized, field, value) {
+  const id = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (!TAXONOMY_ID_PATTERN.test(id)) {
+    throw new Error(
+      `${field} must be a taxonomy id (2-40 lower-case letters, digits or hyphens)`,
+    );
+  }
+  normalized[field] = id;
+}
+
+function normalizeTagsField(normalized, _field, value) {
+  const tags =
+    assertStringArray(value, "tags", { maxItems: 60, maxItemLength: 60 }) || [];
+  const cleaned = tags.map((t) => String(t || "").trim()).filter(Boolean);
+  normalized.tags = cleaned;
+  normalized.Tags = cleaned;
+}
+
+function normalizeKeyTopicsField(normalized, _field, value) {
+  const topics =
+    assertStringArray(value, "keyTopics", {
+      maxItems: 40,
+      maxItemLength: 120,
+    }) || [];
+  normalized.keyTopics = topics
+    .map((t) => String(t || "").trim())
+    .filter(Boolean);
+}
+
+function normalizeFrameworkSourceUrlsField(normalized, _field, value) {
+  const urls =
+    assertStringArray(value, "frameworkSourceUrls", {
+      maxItems: 30,
+      maxItemLength: 2048,
+    }) || [];
+  urls.forEach((u) => {
+    if (u)
+      assertOptionalHttpUrl(u, "frameworkSourceUrls", { allowEmpty: true });
+  });
+  normalized.frameworkSourceUrls = urls.filter(Boolean);
+}
+
+const isOneOf =
+  (...names) =>
+  (field) =>
+    names.includes(field);
+
+/**
+ * [matches(field, value), normalize(normalized, field, value)], in the order
+ * the fields are tried: the first match consumes the entry.
+ */
+const KNOWN_FIELD_NORMALIZERS = [
+  [isUrlField, normalizeUrlField],
+  [isDateLikeEntry, normalizeDateLikeField],
+  [(field) => PAIRED_TEXT_FIELDS.has(field), normalizePairedTextField],
+  [isOneOf("cloudProvider", "Cloud Provider"), normalizeCloudProviderField],
+  [isOneOf("publishTarget"), normalizePublishTargetField],
+  [isOneOf("kind", "ideaOrigin"), normalizeTaxonomyIdField],
+  [isOneOf("tags", "Tags"), normalizeTagsField],
+  [isOneOf("keyTopics"), normalizeKeyTopicsField],
+  [isOneOf("frameworkSourceUrls"), normalizeFrameworkSourceUrlsField],
+];
+
+/** True when a known-field normalizer consumed the entry. */
 function tryNormalizeKnownField(normalized, field, value) {
-  if (isUrlField(field)) {
-    normalized[field] = assertOptionalHttpUrl(value, field, { allowEmpty: true });
-    return true;
-  }
-  if (isDateLikeField(field)) {
-    if (typeof value === 'string') {
-      normalized[field] = assertOptionalDateString(value, field);
-      return true;
-    }
-    if (value instanceof Date) {
-      normalized[field] = value;
-      return true;
-    }
-  }
-  if (field === 'title' || field === 'Title') {
-    const t = assertStringLength(value, 'title', 240, { allowEmpty: true }).trim();
-    normalized.title = t;
-    normalized.Title = t;
-    return true;
-  }
-  if (field === 'summary' || field === 'Summary') {
-    const s = assertStringLength(value, 'summary', 10_000, { allowEmpty: true }).trim();
-    normalized.summary = s;
-    normalized.Summary = s;
-    return true;
-  }
-  if (field === 'cloudProvider' || field === 'Cloud Provider') {
-    const provider = normalizeProviderName(value);
-    if (!provider) {
-      throw new Error(
-        `cloudProvider must be one of: ${Object.values(STORED_PROVIDER_VALUES).join(', ')}`
-      );
-    }
-    normalized.cloudProvider = provider;
-    normalized['Cloud Provider'] = provider;
-    return true;
-  }
-  if (field === 'publishTarget') {
-    normalized.publishTarget = normalizePublishTarget(value);
-    return true;
-  }
-  return tryNormalizeArrayField(normalized, field, value);
-}
-
-function tryNormalizeArrayField(normalized, field, value) {
-  if (field === 'tags' || field === 'Tags') {
-    const tags = assertStringArray(value, 'tags', { maxItems: 60, maxItemLength: 60 }) || [];
-    const cleaned = tags.map((t) => String(t || '').trim()).filter(Boolean);
-    normalized.tags = cleaned;
-    normalized.Tags = cleaned;
-    return true;
-  }
-  if (field === 'keyTopics') {
-    const topics =
-      assertStringArray(value, 'keyTopics', { maxItems: 40, maxItemLength: 120 }) || [];
-    normalized.keyTopics = topics.map((t) => String(t || '').trim()).filter(Boolean);
-    return true;
-  }
-  if (field === 'frameworkSourceUrls') {
-    const urls =
-      assertStringArray(value, 'frameworkSourceUrls', { maxItems: 30, maxItemLength: 2048 }) || [];
-    urls.forEach((u) => {
-      if (u) assertOptionalHttpUrl(u, 'frameworkSourceUrls', { allowEmpty: true });
-    });
-    normalized.frameworkSourceUrls = urls.filter(Boolean);
-    return true;
-  }
-  return false;
+  const match = KNOWN_FIELD_NORMALIZERS.find(([matches]) =>
+    matches(field, value),
+  );
+  if (!match) return false;
+  match[1](normalized, field, value);
+  return true;
 }
 
 const MAX_STRING_DEFAULT = 12_000;
 const MAX_STRING_LARGE = 120_000;
 
+/** `overviewHtml`, `terraformCode`, `blogDraft` and every other `…Html`/`…Code`/`…Draft`. */
 function isLargeStringField(field) {
-  return (
-    /Html$/i.test(field) ||
-    /Code$/i.test(field) ||
-    /Draft$/i.test(field) ||
-    field === 'overviewHtml' ||
-    field === 'terraformCode'
-  );
+  return /(Html|Code|Draft)$/i.test(field);
 }
 
 function normalizeGenericField(normalized, field, value) {
-  if (typeof value === 'boolean' || typeof value === 'number') {
+  if (typeof value === "boolean" || typeof value === "number") {
     normalized[field] = value;
     return;
   }
-  if (typeof value === 'string') {
-    const max = isLargeStringField(field) ? MAX_STRING_LARGE : MAX_STRING_DEFAULT;
-    normalized[field] = assertStringLength(value, field, max, { allowEmpty: true });
+  if (typeof value === "string") {
+    const max = isLargeStringField(field)
+      ? MAX_STRING_LARGE
+      : MAX_STRING_DEFAULT;
+    normalized[field] = assertStringLength(value, field, max, {
+      allowEmpty: true,
+    });
     return;
   }
   if (Array.isArray(value)) {
@@ -304,35 +386,46 @@ function normalizeGenericField(normalized, field, value) {
 
 export function validateAndNormalizeUpdateContentItemUpdates(updates = {}) {
   if (!isPlainObject(updates)) {
-    throw new Error('updates must be an object');
+    throw new Error("updates must be an object");
   }
   const entries = Object.entries(updates);
   if (entries.length === 0) {
-    throw new Error('updates must include at least one field');
+    throw new Error("updates must include at least one field");
   }
   if (entries.length > 80) {
-    throw new Error('updates exceeds 80 fields');
+    throw new Error("updates exceeds 80 fields");
   }
 
   const normalized = {};
   for (const [key, value] of entries) {
-    const field = String(key || '').trim();
+    const field = String(key || "").trim();
     if (!field) continue;
-    if (field.length > 120) {
-      throw new Error(`updates contains a field name that exceeds 120 characters`);
-    }
-    if (FORBIDDEN_CONTENT_UPDATE_KEYS.has(field)) {
-      throw new Error(`updates cannot modify protected field: ${field}`);
-    }
-    if (value === undefined) continue;
-    if (value === null) {
-      normalized[field] = null;
-      continue;
-    }
-    if (tryNormalizeKnownField(normalized, field, value)) continue;
-    normalizeGenericField(normalized, field, value);
+    normalizeEntry(normalized, field, value);
   }
   return normalized;
+}
+
+/**
+ * One update entry onto `normalized`: the name checked against the length
+ * ceiling and the denylist, an undefined value skipped, a null kept as a
+ * deletion, then the known-field normalizers before the generic one.
+ */
+function normalizeEntry(normalized, field, value) {
+  if (field.length > 120) {
+    throw new Error(
+      `updates contains a field name that exceeds 120 characters`,
+    );
+  }
+  if (FORBIDDEN_CONTENT_UPDATE_KEYS.has(field)) {
+    throw new Error(`updates cannot modify protected field: ${field}`);
+  }
+  if (value === undefined) return;
+  if (value === null) {
+    normalized[field] = null;
+    return;
+  }
+  if (tryNormalizeKnownField(normalized, field, value)) return;
+  normalizeGenericField(normalized, field, value);
 }
 
 /**
@@ -343,15 +436,17 @@ export function validateAndNormalizeUpdateContentItemUpdates(updates = {}) {
 export function normalizeContentUpdatesForBlogOnly(updates = {}) {
   const normalized = { ...updates };
 
-  if (Object.prototype.hasOwnProperty.call(normalized, 'publishTarget')) {
+  if (Object.prototype.hasOwnProperty.call(normalized, "publishTarget")) {
     normalized.publishTarget = normalizePublishTarget(
       normalized.publishTarget,
-      normalized.type || normalized.contentType
+      normalized.type || normalized.contentType,
     );
   }
 
-  if (typeof normalized.contentStatus === 'string') {
-    normalized.contentStatus = normalizeStatusForBlogOnly(normalized.contentStatus);
+  if (typeof normalized.contentStatus === "string") {
+    normalized.contentStatus = normalizeStatusForBlogOnly(
+      normalized.contentStatus,
+    );
   }
 
   if (normalized.approvedForNews === true) {
@@ -361,17 +456,32 @@ export function normalizeContentUpdatesForBlogOnly(updates = {}) {
   return normalized;
 }
 
-/** Collapse the retired news-era statuses onto their blog equivalents. */
+/**
+ * Collapse the retired news-era statuses onto their blog equivalents.
+ *
+ * `approved_blog` and `published_blog` are the Firestore-era names the admin
+ * pages kept sending after the port normalised the stored values to
+ * `approved` and `published`. Until 2026-10-03 neither was mapped here, so
+ * every Approve button — queue, review boards, editor — reached the
+ * transition table with a status it does not know and got back 400
+ * "Invalid transition" (ADR 0033 §1). The pages now send the canonical
+ * names; the aliases stay so an old tab, the Telegram bot or a bookmarked
+ * request keeps working.
+ */
+const STATUS_ALIASES = Object.freeze({
+  published_news: "published",
+  published_both: "published",
+  published_blog: "published",
+  approved_news: "approved",
+  approved_blog: "approved",
+});
+
 export function normalizeStatusForBlogOnly(status) {
-  if (status === 'published_news' || status === 'published_both') {
-    return 'published';
-  }
-  if (status === 'approved_news') {
-    return 'approved';
-  }
-  return status;
+  return Object.hasOwn(STATUS_ALIASES, status)
+    ? STATUS_ALIASES[status]
+    : status;
 }
 
 export function normalizeCurrentStatusForBlogOnly(status) {
-  return normalizeStatusForBlogOnly(status || 'ingested');
+  return normalizeStatusForBlogOnly(status || "ingested");
 }

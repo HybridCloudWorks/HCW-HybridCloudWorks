@@ -1,26 +1,24 @@
 /**
- * Labs platform RPCs — enqueueLabJob, getLabsSnapshot, cancelLabJob.
- * Ported from Site-Main labs-functions.js (all 319 lines reviewed).
+ * Labs platform RPCs — enqueueLabJob, getLabJob, getLabsSnapshot,
+ * cancelLabJob. The admin Labs Hub's view of the job runner.
  *
- * The VPS agent pulls jobs with its own credentials; the browser never writes
- * these collections directly — these endpoints are the only writers. The
- * server-side LAB_JOB_TYPES allowlist is carried verbatim: payloads are only
- * ever substituted into the agent's allowlisted command templates, so the
- * type allowlist plus per-type payload byte caps are the enqueue-side
- * containment.
+ * The VPS agent pulls jobs with its own credentials (lib/lab-agent.js); the
+ * browser never writes these containers directly — these endpoints are the
+ * only writers. The server-side LAB_JOB_TYPES allowlist is the enqueue-side
+ * containment: payloads are only ever substituted into the agent's
+ * allowlisted command templates, so the type allowlist plus per-type payload
+ * byte caps bound what reaches the host.
  *
- * Adaptations:
- *   - Firestore's cancel transaction becomes read-then-conditional-patch.
- *     The race window (job claimed between read and patch) resolves the same
- *     way the source's did: the agent ignores cancellation on jobs it has
- *     already claimed, so a lost race means the job simply runs — annoying,
- *     not unsafe.
- *   - lastSeenAt/createdAt arrive as ISO strings in Cosmos; the snapshot's
- *     online/staleness math parses them (Timestamp .toMillis in the source).
- *   - submitPublicLabJob is deliberately NOT ported here: it authenticates
- *     plain Firebase users (not admins), which belongs to the frontend auth
- *     swap phase; it is also outside the api-surface RPC contract. The
- *     anonymous path that replaces it is lib/labs/public-submit.js (#672):
+ * Both containers are Cosmos DB (`lab_jobs`, `lab_agents`, partition `/id`),
+ * and every timestamp is an ISO string written by this module or by
+ * lab-agent.js; `toMs` still accepts an object with `toMillis` so a document
+ * from before the store moved reads rather than breaks.
+ *
+ *   - Cancel is read-then-conditional-patch. The race window (job claimed
+ *     between read and patch) resolves safely: the agent ignores cancellation
+ *     on jobs it has already claimed, so a lost race means the job simply
+ *     runs — annoying, not unsafe.
+ *   - The anonymous submission path is lib/labs/public-submit.js (#672):
  *     terraform-validate only, inside ADR 0032 decision 6's bounds, closed
  *     unless LABS_PUBLIC_SUBMISSION_ENABLED is exactly "true", and locked
  *     to the site's pane by origin and Turnstile (lib/labs/public-lock.js).
@@ -81,15 +79,16 @@ export const LAB_JOB_TYPES = Object.freeze({
   },
 });
 
-export const JOB_STATUSES = [
-  'queued',
-  'claimed',
-  'running',
-  'succeeded',
-  'failed',
-  'timeout',
-  'cancelled',
-];
+/**
+ * Every status a `lab_jobs` document can hold, in lifecycle order: enqueue
+ * writes `queued`, the agent's claim writes `claimed`, its completion writes
+ * one of `succeeded` / `failed` / `timeout` (AGENT_TERMINAL_STATUSES in
+ * lab-agent.js), and cancelLabJob writes `cancelled` while still queued.
+ * There is no `running`: the agent reports nothing between claim and
+ * completion, so the status it used to name was never written and read as
+ * a state the Hub kept waiting for (ADR 0033 inventory, 2026-10-03).
+ */
+export const JOB_STATUSES = ['queued', 'claimed', 'succeeded', 'failed', 'timeout', 'cancelled'];
 
 const toMs = (v) => {
   if (!v) return 0;
@@ -106,7 +105,7 @@ export const AGENT_STALE_AFTER_MS = 90 * 1000;
  * The snapshot's online rule, exported so the public estate read
  * (lib/labs/estate.js) says "online" by the same clock the admin page does.
  *
- * @param {unknown} lastSeenAt - ISO string, Date, or Firestore-style { toMillis }
+ * @param {unknown} lastSeenAt - ISO string, Date, or an object with toMillis()
  * @param {number} nowMs
  */
 export function isAgentOnline(lastSeenAt, nowMs) {
@@ -177,15 +176,17 @@ export function createLabHandlers({ guard, store, now = () => new Date(), uuid =
         return json(200, { jobId, type, status: 'queued' });
       } catch (error) {
         context.error('enqueueLabJob failed:', error);
-        return json(500, { error: 'Failed to enqueue job', message: error?.message || 'Unknown error' });
+        return json(500, {
+          error: 'Failed to enqueue job',
+          message: error?.message || 'Unknown error',
+        });
       }
     },
 
     /**
      * GET|POST /api/getLabJob — viewer; one job with its output. The console
-     * tab watches the job it just enqueued (this replaces the browser's
-     * onSnapshot on lab_jobs/{id}); output is agent-written text, returned
-     * only to authenticated viewers.
+     * tab polls it for the job it just enqueued; output is agent-written
+     * text, returned only to authenticated viewers.
      */
     async getLabJob(request, context) {
       const auth = await guard.requireRole(request, 'viewer');
@@ -233,14 +234,15 @@ export function createLabHandlers({ guard, store, now = () => new Date(), uuid =
       try {
         const nowMs = now().getTime();
 
+        // Newest first in the query itself: without ORDER BY, TOP 100 was
+        // whichever 100 documents Cosmos returned, and the 25 shown were
+        // the newest of those, not of the container (ADR 0033 inventory).
+        // Every lab_jobs document carries createdAt (enqueue and the public
+        // submit both write it), so the sort drops nothing.
         const [agentRows, jobRows, queuedCount] = await Promise.all([
           store.queryDocs('lab_agents', 'SELECT TOP 200 * FROM c', []),
-          store.queryDocs('lab_jobs', 'SELECT TOP 100 * FROM c', []),
-          store.queryDocs(
-            'lab_jobs',
-            "SELECT VALUE COUNT(1) FROM c WHERE c.status = 'queued'",
-            []
-          ),
+          store.queryDocs('lab_jobs', 'SELECT TOP 100 * FROM c ORDER BY c.createdAt DESC', []),
+          store.queryDocs('lab_jobs', "SELECT VALUE COUNT(1) FROM c WHERE c.status = 'queued'", []),
         ]);
 
         const agents = agentRows.map((data) => {
@@ -265,6 +267,8 @@ export function createLabHandlers({ guard, store, now = () => new Date(), uuid =
           };
         });
 
+        // Sorted again in memory, so a store that ignores ORDER BY (a test
+        // double, a future mirror) still shows the newest 25.
         const jobs = [...jobRows]
           .sort((a, b) => toMs(b.createdAt) - toMs(a.createdAt))
           .slice(0, 25)
@@ -295,7 +299,10 @@ export function createLabHandlers({ guard, store, now = () => new Date(), uuid =
         });
       } catch (error) {
         context.error('getLabsSnapshot failed:', error);
-        return json(500, { error: 'Failed to build labs snapshot', message: error?.message || 'Unknown error' });
+        return json(500, {
+          error: 'Failed to build labs snapshot',
+          message: error?.message || 'Unknown error',
+        });
       }
     },
 

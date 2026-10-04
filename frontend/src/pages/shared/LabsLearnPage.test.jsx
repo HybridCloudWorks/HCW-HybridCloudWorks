@@ -1,21 +1,29 @@
 /**
- * `/education/labs` (#681): the cards come from the catalogue and nothing
- * else, every card opens its own lab's pane page (#751), the two "Run it
- * locally" lines are exactly the two from #658, the two status cards say the
- * two explicit unprovisioned sentences when both routes answer
- * `{ configured: false }` — and render full data when they answer with it —
- * the agent slot points at the sandbox recipe's page in the Docker hub
- * (#774, which moved it there from here) rather than holding a promise, a
- * tab returning from GitHub sign-in goes on to the pane it came from, Coder
- * is credited beside the intro, and nothing claims the host is onboarded to
- * Azure Arc before it is (#663).
+ * `/education/labs` and `/:provider/education/labs` (#681, ADR 0033): the
+ * cards come from the catalogue and nothing else, grouped by home provider
+ * on the index and filtered on a provider's list; every card opens its own
+ * lab's page under a provider (#751); a provider with no lab gets an honest
+ * empty section; the two "Run it locally" lines are exactly the two from
+ * #658; the two status cards say the two explicit unprovisioned sentences
+ * when both routes answer `{ configured: false }` — and render full data when
+ * they answer with it; the agent slot points at the sandbox recipe's page in
+ * the Docker hub (#774, which moved it there from here); the article slot
+ * lists the published articles; a tab returning from GitHub sign-in goes on
+ * to the pane it came from; Coder is credited beside the intro on the index;
+ * and nothing claims the host is onboarded to Azure Arc before it is (#663).
  */
 import React from 'react';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { HelmetProvider } from 'react-helmet-async';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { RUN_LOCALLY_COMMANDS, labs } from '@/data/labs/catalogue';
+import {
+  RUN_LOCALLY_COMMANDS,
+  allLabArticles,
+  labs,
+  labsForProvider,
+  primaryProvider,
+} from '@/data/labs/catalogue';
 import {
   SIGN_IN_PENDING_KEY,
   markSignInStarted,
@@ -58,15 +66,23 @@ const CODER = {
   asOf: new Date(NOW - 20_000).toISOString(),
 };
 
-function renderPage() {
+function renderPage(path = '/education/labs') {
   return render(
     <HelmetProvider>
-      <MemoryRouter initialEntries={['/education/labs']}>
-        <LabsLearnPage />
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/education/labs" element={<LabsLearnPage />} />
+          <Route path="/:provider/education/labs" element={<LabsLearnPage />} />
+        </Routes>
       </MemoryRouter>
     </HelmetProvider>
   );
 }
+
+const unprovisioned = () => {
+  fetchLabsEstate.mockResolvedValue({ configured: false });
+  fetchCoderStatus.mockResolvedValue({ configured: false });
+};
 
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -109,35 +125,44 @@ describe('LabsLearnPage', () => {
     expect(within(screen.getByTestId('coder-templates')).getByText('hcw-lab')).toBeInTheDocument();
   });
 
-  it('renders one card per catalogue row, in catalogue order, with its facts', async () => {
-    fetchLabsEstate.mockResolvedValue({ configured: false });
-    fetchCoderStatus.mockResolvedValue({ configured: false });
+  it('renders one card per catalogue row, once each, grouped by home provider, with its facts', async () => {
+    unprovisioned();
     const { container } = renderPage();
 
     const cards = [...container.querySelectorAll('li[data-lab]')];
     expect(cards.map((card) => card.dataset.lab)).toEqual(labs.map((lab) => lab.id));
+    // Each group is headed by its provider and links to that provider's list.
+    for (const provider of ['azure', 'terraform', 'ansible']) {
+      const group = screen.getByTestId(`labs-group-${provider}`);
+      expect(within(group).getByRole('heading', { level: 3 })).toBeInTheDocument();
+      expect(within(group).getByRole('link', { name: /^All .* labs$/ })).toHaveAttribute(
+        'href',
+        `/${provider}/education/labs`
+      );
+    }
 
     for (const lab of labs) {
       const card = container.querySelector(`li[data-lab="${lab.id}"]`);
-      expect(within(card).getByRole('heading', { level: 3 })).toHaveTextContent(lab.title);
+      // h4 under the group's h3, so the outline stays in order.
+      expect(within(card).getByRole('heading', { level: 4 })).toHaveTextContent(lab.title);
       expect(within(card).getByText(lab.summary)).toBeInTheDocument();
       expect(within(card).getByText(lab.tools.join(', '))).toBeInTheDocument();
       expect(within(card).getByTestId('lab-minutes')).toHaveTextContent(
         `about ${lab.estimatedMinutes} minutes`
       );
+      expect(within(card).getByTestId('lab-difficulty')).toBeInTheDocument();
     }
     await screen.findByText(NOT_PROVISIONED_SENTENCE);
   });
 
-  it('sends each card to its own lab’s pane page on the site', async () => {
-    fetchLabsEstate.mockResolvedValue({ configured: false });
-    fetchCoderStatus.mockResolvedValue({ configured: false });
+  it('sends each card to its own lab’s page under its home provider', async () => {
+    unprovisioned();
     const { container } = renderPage();
 
     for (const lab of labs) {
       const card = container.querySelector(`li[data-lab="${lab.id}"]`);
-      const link = within(card).getByRole('link', { name: /open lab workspace/i });
-      expect(link).toHaveAttribute('href', `/education/labs/${lab.id}`);
+      const link = within(card).getByTestId('open-lab-workspace');
+      expect(link).toHaveAttribute('href', `/${primaryProvider(lab)}/education/labs/${lab.id}`);
       expect(link).not.toHaveAttribute('target');
     }
     // Since #750 a top-level visit to the workspace host lands back here, so
@@ -148,13 +173,12 @@ describe('LabsLearnPage', () => {
         (host) => host === 'lab.hybridcloudworks.com' || host.endsWith('.lab.hybridcloudworks.com')
       );
     expect(labHosts).toEqual([]);
-    expect(container.querySelector('header')).toHaveTextContent(/Open lab workspace opens the lab/);
+    expect(container.querySelector('header')).toHaveTextContent(/Open lab opens the lab/);
     await screen.findByText(NOT_PROVISIONED_SENTENCE);
   });
 
-  it('sends a tab returning from GitHub sign-in on to the pane it started from', async () => {
-    fetchLabsEstate.mockResolvedValue({ configured: false });
-    fetchCoderStatus.mockResolvedValue({ configured: false });
+  it('sends a tab returning from GitHub sign-in on to the pane it started from, under the lab’s provider', async () => {
+    unprovisioned();
     const [, lab] = labs;
     markSignInStarted(lab.id);
     render(
@@ -162,7 +186,8 @@ describe('LabsLearnPage', () => {
         <MemoryRouter initialEntries={['/education/labs']}>
           <Routes>
             <Route path="/education/labs" element={<LabsLearnPage />} />
-            <Route path="/education/labs/:labId" element={<p>pane for the lab</p>} />
+            <Route path="/:provider/education/labs/:labId" element={<p>pane for the lab</p>} />
+            <Route path="/education/labs/:labId" element={<p>index pane</p>} />
           </Routes>
         </MemoryRouter>
       </HelmetProvider>
@@ -170,6 +195,29 @@ describe('LabsLearnPage', () => {
     expect(await screen.findByText('pane for the lab')).toBeInTheDocument();
     expect(window.localStorage.getItem(SIGN_IN_PENDING_KEY)).toBeNull();
     expect(readSignedInAt()).toBeGreaterThanOrEqual(NOW);
+  });
+
+  it('explains Lab, Desktop and Agent in a learner’s words', async () => {
+    unprovisioned();
+    renderPage();
+    const panel = screen.getByTestId('how-labs-work');
+    expect(within(panel).getByRole('heading', { name: 'How labs work' })).toBeInTheDocument();
+    for (const term of ['Lab', 'Desktop', 'Agent']) {
+      expect(within(panel).getByText(term, { selector: 'dt' })).toBeInTheDocument();
+    }
+    // Visitor words: the panel names the workspace and the runner, never the
+    // tools behind them (public-copy.test.js scans the component too).
+    expect(panel.textContent).not.toMatch(/\bcoder\b|code-server|\bvps\b|hostinger/i);
+    await screen.findByText(NOT_PROVISIONED_SENTENCE);
+  });
+
+  it('says in one word how the workspaces are doing, in the shared vocabulary', async () => {
+    fetchLabsEstate.mockResolvedValue({ configured: false });
+    fetchCoderStatus.mockResolvedValue(CODER);
+    renderPage();
+    const badge = await screen.findByTestId('workspace-status');
+    await waitFor(() => expect(badge).toHaveAttribute('data-status', 'healthy'));
+    expect(badge).toHaveTextContent('Healthy');
   });
 
   it('prints the two Run it locally lines on every card, PowerShell then bash', async () => {
@@ -217,16 +265,20 @@ describe('LabsLearnPage', () => {
     await screen.findByText(NOT_PROVISIONED_SENTENCE);
   });
 
-  it('holds the article list as a headed slot that promises nothing', async () => {
-    fetchLabsEstate.mockResolvedValue({ configured: false });
-    fetchCoderStatus.mockResolvedValue({ configured: false });
+  it('lists the published articles the labs point at, once each, and promises nothing', async () => {
+    unprovisioned();
     renderPage();
 
     const articles = screen.getByTestId('labs-slot-articles');
     expect(within(articles).getByRole('heading', { level: 2 })).toBeInTheDocument();
-    expect(articles).toHaveTextContent('Coming soon.');
-    // The issue that builds it is the team's to-do, not the visitor's.
-    expect(articles).not.toHaveTextContent(/#\d|issue/i);
+    const links = within(articles).getAllByRole('link');
+    expect(links.map((link) => link.getAttribute('href'))).toEqual([
+      '/azure/blog/build-a-landing-zone-you-can-read',
+      '/terraform/blog/follow-along-in-one-container',
+      '/terraform/blog/let-an-agent-explain-it',
+    ]);
+    expect(links).toHaveLength(allLabArticles().length);
+    expect(articles).not.toHaveTextContent(/coming soon|#\d|issue/i);
     await screen.findByText(NOT_PROVISIONED_SENTENCE);
   });
 
@@ -275,5 +327,71 @@ describe('LabsLearnPage', () => {
       '/education'
     );
     await screen.findByText(NOT_PROVISIONED_SENTENCE);
+  });
+});
+
+describe('a provider’s labs (/:provider/education/labs, ADR 0033)', () => {
+  it('lists only the labs under that provider, linking each under it', async () => {
+    unprovisioned();
+    const { container } = renderPage('/terraform/education/labs');
+
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Terraform labs');
+    const cards = [...container.querySelectorAll('li[data-lab]')];
+    expect(cards.map((card) => card.dataset.lab)).toEqual(
+      labsForProvider('terraform').map((lab) => lab.id)
+    );
+    for (const card of cards) {
+      expect(within(card).getByTestId('open-lab-workspace')).toHaveAttribute(
+        'href',
+        `/terraform/education/labs/${card.dataset.lab}`
+      );
+    }
+    // The breadcrumb goes back through the provider's Learn page.
+    expect(screen.getByRole('link', { name: 'Terraform Learn' })).toHaveAttribute(
+      'href',
+      '/terraform/education'
+    );
+    // The estate card and the Coder credit are the index's.
+    expect(screen.queryByTestId('estate-card')).toBeNull();
+    expect(screen.queryByTestId('coder-credit')).toBeNull();
+    expect(fetchLabsEstate).not.toHaveBeenCalled();
+    expect(screen.getByTestId('how-labs-work')).toBeInTheDocument();
+    await waitFor(() => expect(fetchCoderStatus).toHaveBeenCalledTimes(1));
+  });
+
+  it('lists a lab shared by two hubs under both', async () => {
+    unprovisioned();
+    const { container } = renderPage('/azure/education/labs');
+    expect(container.querySelector('li[data-lab="landing-zone-builder-output"]')).not.toBeNull();
+    expect(screen.getByTestId('open-lab-workspace')).toHaveAttribute(
+      'href',
+      '/azure/education/labs/landing-zone-builder-output'
+    );
+    await waitFor(() => expect(fetchCoderStatus).toHaveBeenCalledTimes(1));
+  });
+
+  it('says honestly when a provider has no lab yet, and points at the ones that do', async () => {
+    unprovisioned();
+    const { container } = renderPage('/docker/education/labs');
+
+    expect(container.querySelectorAll('li[data-lab]')).toHaveLength(0);
+    const empty = screen.getByTestId('labs-empty');
+    expect(empty).toHaveTextContent('There is no Docker lab yet.');
+    expect(within(empty).getByRole('link', { name: 'Azure' })).toHaveAttribute(
+      'href',
+      '/azure/education/labs'
+    );
+    expect(within(empty).getByRole('link', { name: 'Ansible' })).toHaveAttribute(
+      'href',
+      '/ansible/education/labs'
+    );
+    expect(within(empty).getByRole('link', { name: 'full list' })).toHaveAttribute(
+      'href',
+      '/education/labs'
+    );
+    expect(empty).not.toHaveTextContent(/coming soon/i);
+    // No article slot either: nothing on this page points at one.
+    expect(screen.queryByTestId('labs-slot-articles')).toBeNull();
+    await waitFor(() => expect(fetchCoderStatus).toHaveBeenCalledTimes(1));
   });
 });

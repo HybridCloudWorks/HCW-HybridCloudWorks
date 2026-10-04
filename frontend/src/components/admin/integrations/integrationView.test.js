@@ -55,10 +55,12 @@ describe('joining services to credentials', () => {
     section: 'communication',
     label: 'Telegram — bot token',
   });
-  const firecrawl = item({
-    secret: 'FIRECRAWL-API-KEY',
-    section: 'ai-services',
-    label: 'Firecrawl',
+  // A site-platform value, which no service card claims (since ADR 0033
+  // every AI key has a card, so Firecrawl no longer serves as the example).
+  const originSecret = item({
+    secret: 'CF-ORIGIN-SECRET',
+    section: 'platform',
+    label: 'Cloudflare origin secret',
   });
 
   // ── grouping ────────────────────────────────────────────────────────────
@@ -155,7 +157,7 @@ describe('joining services to credentials', () => {
     // second would look like a different credential.
     const { serviceGroups } = buildIntegrationView({
       sections,
-      secrets: [publerKey, publerWorkspace, telegram, firecrawl],
+      secrets: [publerKey, publerWorkspace, telegram, originSecret],
     });
     const communication = serviceGroups.find((group) => group.id === 'communication');
     const onCards = communication.cards.flatMap((card) => card.items.map((row) => row.secret));
@@ -166,12 +168,12 @@ describe('joining services to credentials', () => {
   });
 
   it('shows a credential with no service card as a loose row in its own group', () => {
-    // Firecrawl has no card. It must still appear, under AI services, rather
-    // than falling off the page because nothing claimed it.
-    const { serviceGroups } = buildIntegrationView({ sections, secrets: [firecrawl] });
-    const aiServices = serviceGroups.find((group) => group.id === 'ai-services');
-    expect(aiServices.loose.map((row) => row.secret)).toEqual(['FIRECRAWL-API-KEY']);
-    expect(aiServices.cards).toEqual([]);
+    // The origin secret has no card. It must still appear, under Site
+    // platform, rather than falling off the page because nothing claimed it.
+    const { serviceGroups } = buildIntegrationView({ sections, secrets: [originSecret] });
+    const platform = serviceGroups.find((group) => group.id === 'platform');
+    expect(platform.loose.map((row) => row.secret)).toEqual(['CF-ORIGIN-SECRET']);
+    expect(platform.cards).toEqual([]);
   });
 
   it('gives a credential whose group this page does not know a heading of its own', () => {
@@ -219,13 +221,19 @@ describe('the Keys tab join (#570)', () => {
       secrets: [
         item({ secret: 'PUBLER-API-KEY', section: 'communication' }),
         item({ secret: 'FIRECRAWL-API-KEY', section: 'ai-services' }),
+        item({ secret: 'CF-ORIGIN-SECRET', section: 'platform' }),
       ],
     });
     const communication = groups.find((group) => group.id === 'communication');
     expect(communication.items.map((row) => row.secret)).toEqual(['PUBLER-API-KEY']);
     expect(communication.items[0].usedBy).toEqual(['Publer']);
+    // And which service test exercises it, for the row's wording (ADR 0033).
+    expect(communication.items[0].testedBy).toEqual(['Publer']);
     const aiServices = groups.find((group) => group.id === 'ai-services');
-    expect(aiServices.items[0].usedBy).toEqual([]);
+    expect(aiServices.items[0].usedBy).toEqual(['Firecrawl']);
+    const platform = groups.find((group) => group.id === 'platform');
+    expect(platform.items[0].usedBy).toEqual([]);
+    expect(platform.items[0].testedBy).toEqual([]);
   });
 
   it('drops a group with no keys and puts an unknown section under Other credentials', () => {

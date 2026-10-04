@@ -6,10 +6,12 @@
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router';
 
 import PlatformSettingsPage, { TABS, resolveTab } from './PlatformSettingsPage';
+import { SETTINGS_INDEX } from '@/components/admin/platform-settings/AllSettingsTab';
+import { NAV_ITEMS } from '@/config/adminNav';
 import { settingRoute } from '@/components/admin/platform-settings/settingShared';
 import { HISTORY_ROUTE } from '@/components/admin/platform-settings/ChangeHistoryTab';
 import { ELEVENLABS_STATUS_ROUTE } from '@/components/admin/platform-settings/ElevenLabsCard';
@@ -71,21 +73,59 @@ beforeEach(() => {
 });
 
 describe('tabs', () => {
-  it('are one per concern, with Change history last', () => {
+  it('are one per concern, the index first and Change history last', () => {
     expect(TABS.map((tab) => [tab.id, tab.label])).toEqual([
+      ['index', 'All settings'],
       ['content', 'Content defaults'],
+      ['taxonomy', 'Content types & origins'],
       ['social', 'Social automation'],
       ['audio', 'Audio'],
       ['history', 'Change history'],
     ]);
     expect(resolveTab('audio').id).toBe('audio');
-    expect(resolveTab('nope').id).toBe('content');
-    expect(resolveTab(null).id).toBe('content');
+    expect(resolveTab('nope').id).toBe('index');
+    expect(resolveTab(null).id).toBe('index');
   });
 
-  it('opens Content defaults with no ?tab=, loading only the covers', async () => {
+  it('opens the All settings index with no ?tab=, reading nothing (ADR 0033)', async () => {
     renderAt('/admin/platform');
     expect(screen.getByRole('heading', { name: /Platform Settings Hub/ })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'All settings' }).getAttribute('aria-selected')).toBe(
+      'true'
+    );
+    // Every setting document, with where it is edited and a real link.
+    const table = screen.getByRole('table');
+    for (const label of [
+      'Default covers',
+      'Newsletter settings',
+      'AI providers and models',
+      'Sessionize speaker id',
+      'Gallery folders',
+      'Plaud sign-in',
+      'Labs agents',
+    ]) {
+      expect(within(table).getByText(label)).toBeTruthy();
+    }
+    expect(
+      within(table).getByRole('link', { name: 'Open Sessionize speaker id' }).getAttribute('href')
+    ).toBe('/admin/integrations?tab=services&group=content');
+    expect(
+      within(table).getByRole('link', { name: 'Open Newsletter settings' }).getAttribute('href')
+    ).toBe('/admin/mailing-list?tab=settings');
+    expect(routesAsked()).toEqual([]);
+    expect(postJSON).not.toHaveBeenCalled();
+  });
+
+  it('every index row links to a route the sidebar declares', () => {
+    const routes = new Set(NAV_ITEMS.map((item) => item.to));
+    for (const row of SETTINGS_INDEX) {
+      const [path] = row.href.split('?');
+      expect(routes, `${row.label} links to ${path}`).toContain(path);
+    }
+  });
+
+  it('opens Content defaults from ?tab=content, loading only the covers', async () => {
+    renderAt('/admin/platform?tab=content');
     await screen.findByText('Default covers');
     expect(
       screen.getByRole('tab', { name: 'Content defaults' }).getAttribute('aria-selected')
@@ -127,16 +167,16 @@ describe('tabs', () => {
     expect(routesAsked()).toEqual([HISTORY_ROUTE]);
   });
 
-  it('lands an unknown ?tab= on Content defaults rather than a blank page', async () => {
+  it('lands an unknown ?tab= on the index rather than a blank page', async () => {
     renderAt('/admin/platform?tab=covers');
-    await screen.findByText('Default covers');
-    expect(
-      screen.getByRole('tab', { name: 'Content defaults' }).getAttribute('aria-selected')
-    ).toBe('true');
+    expect(screen.getByRole('tab', { name: 'All settings' }).getAttribute('aria-selected')).toBe(
+      'true'
+    );
+    expect(screen.getByRole('table')).toBeTruthy();
   });
 
   it('switching tabs writes ?tab= and mounts the new tab fresh', async () => {
-    renderAt('/admin/platform');
+    renderAt('/admin/platform?tab=content');
     await screen.findByText('Default covers');
     fireEvent.click(screen.getByRole('tab', { name: 'Change history' }));
     await waitFor(() =>
@@ -153,7 +193,7 @@ describe('tabs', () => {
   });
 
   it('follows the ARIA tabs keyboard pattern: roving tabindex, arrows wrap, Home and End', async () => {
-    renderAt('/admin/platform');
+    renderAt('/admin/platform?tab=content');
     await screen.findByText('Default covers');
     const tab = (name) => screen.getByRole('tab', { name });
     expect(tab('Content defaults').getAttribute('tabindex')).toBe('0');
@@ -161,26 +201,27 @@ describe('tabs', () => {
 
     fireEvent.keyDown(tab('Content defaults'), { key: 'ArrowRight' });
     await waitFor(() =>
-      expect(screen.getByTestId('location').textContent).toBe('/admin/platform?tab=social')
+      expect(screen.getByTestId('location').textContent).toBe('/admin/platform?tab=taxonomy')
     );
-    expect(document.activeElement).toBe(tab('Social automation'));
-    expect(tab('Social automation').getAttribute('tabindex')).toBe('0');
+    expect(document.activeElement).toBe(tab('Content types & origins'));
+    expect(tab('Content types & origins').getAttribute('tabindex')).toBe('0');
 
-    fireEvent.keyDown(tab('Social automation'), { key: 'End' });
+    fireEvent.keyDown(tab('Content types & origins'), { key: 'End' });
     await waitFor(() =>
       expect(screen.getByTestId('location').textContent).toBe('/admin/platform?tab=history')
     );
+    // Wraps to the index, which is first now.
     fireEvent.keyDown(tab('Change history'), { key: 'ArrowRight' });
     await waitFor(() =>
-      expect(screen.getByTestId('location').textContent).toBe('/admin/platform?tab=content')
+      expect(screen.getByTestId('location').textContent).toBe('/admin/platform?tab=index')
     );
-    fireEvent.keyDown(tab('Content defaults'), { key: 'ArrowLeft' });
+    fireEvent.keyDown(tab('All settings'), { key: 'ArrowLeft' });
     await waitFor(() =>
       expect(screen.getByTestId('location').textContent).toBe('/admin/platform?tab=history')
     );
     fireEvent.keyDown(tab('Change history'), { key: 'Home' });
     await waitFor(() =>
-      expect(screen.getByTestId('location').textContent).toBe('/admin/platform?tab=content')
+      expect(screen.getByTestId('location').textContent).toBe('/admin/platform?tab=index')
     );
   });
 
@@ -190,7 +231,7 @@ describe('tabs', () => {
       const setting = route.replace('cms/platform-settings/', '');
       return { success: true, value: empty[setting], exists: false };
     });
-    renderAt('/admin/platform');
+    renderAt('/admin/platform?tab=content');
     expect((await screen.findByRole('alert')).textContent).toContain('HTTP 500');
     fireEvent.click(screen.getByRole('tab', { name: 'Audio' }));
     await screen.findByText('Podcast feeds');

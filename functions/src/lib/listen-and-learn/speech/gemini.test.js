@@ -15,7 +15,9 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   GEMINI_DEFAULT_MODEL,
   GEMINI_DEFAULT_VOICES,
+  GEMINI_MAX_REQUEST_BYTES,
   buildDialoguePrompt,
+  chunkDialogueForGemini,
   downmixToMono,
   extractAudio,
   parseWav,
@@ -150,28 +152,83 @@ describe('the request', () => {
 
     const body = JSON.parse(init.body);
     expect(body.response_format).toEqual({ type: 'audio' });
-    expect(body.model).toBe('gemini-3.1-flash-tts-preview');
+    expect(body.model).toBe('gemini-2.5-flash-preview-tts');
     expect(body.generation_config.speech_config).toEqual([
       { speaker: 'Maya', voice: GEMINI_DEFAULT_VOICES.Maya },
       { speaker: 'Elena', voice: GEMINI_DEFAULT_VOICES.Elena },
     ]);
   });
 
-  it('defaults to the 3.1 flash model the owner asked for', () => {
-    expect(GEMINI_DEFAULT_MODEL).toBe('gemini-3.1-flash-tts-preview');
+  it('defaults to the Economy model — the cheapest sensible voice (ADR 0033 §4)', () => {
+    expect(GEMINI_DEFAULT_MODEL).toBe('gemini-2.5-flash-preview-tts');
   });
 
-  it('sends the whole episode in one request', async () => {
-    // A 9,000-byte script is roughly 2.5k tokens against a 32k session window,
-    // so unlike the Azure path there is nothing to chunk.
+  it('sends a short dialogue in one request', async () => {
+    const fetchImpl = vi.fn(async () => audioResponse());
+    const result = await synthesizeWithGemini({ dialogue: DIALOGUE, env: KEYED_ENV, fetchImpl });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(result.requests).toBe(1);
+  });
+
+  it('chunks a long dialogue under the request budget and joins the PCM before one MP3 encode (ADR 0033 §4)', async () => {
+    // 60 turns × 150 bytes = 9,000 bytes, the script cap: two parts under
+    // GEMINI_MAX_REQUEST_BYTES, each a whole number of turns.
     const long = Array.from({ length: 60 }, (_, i) =>
       turn(i % 2 ? 'Elena' : 'Maya', 'word '.repeat(30))
     );
-    const fetchImpl = vi.fn(async () => audioResponse());
+    const samples = 24000; // one second per part
+    const fetchImpl = vi.fn(async () =>
+      ok(interaction([audioBlock({ data: pcmBase64(samples) })]))
+    );
     const result = await synthesizeWithGemini({ dialogue: long, env: KEYED_ENV, fetchImpl });
 
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
-    expect(result.requests).toBe(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(result.requests).toBe(2);
+    // Two seconds of PCM were joined, then encoded once: one MPEG stream that
+    // starts with a frame sync, not two files glued together.
+    expect(result.estimatedSeconds).toBe(2);
+    expect(result.audio[0]).toBe(0xff);
+    expect(result.audio[1] & 0xe0).toBe(0xe0);
+
+    const parts = chunkDialogueForGemini(long);
+    expect(parts).toHaveLength(2);
+    for (const part of parts) {
+      const bytes = part.reduce((n, t) => n + Buffer.byteLength(t.text, 'utf8'), 0);
+      expect(bytes).toBeLessThanOrEqual(GEMINI_MAX_REQUEST_BYTES);
+    }
+    expect(parts.flat()).toHaveLength(60);
+    // Each request named only its own part of the transcript.
+    const inputs = fetchImpl.mock.calls.map(([, init]) => JSON.parse(init.body).input);
+    expect(inputs[0].split('\n').length - 1).toBe(parts[0].length);
+    expect(inputs[1].split('\n').length - 1).toBe(parts[1].length);
+  });
+
+  it('names the part that stopped early, and ships nothing from the others', async () => {
+    const long = Array.from({ length: 60 }, (_, i) =>
+      turn(i % 2 ? 'Elena' : 'Maya', 'word '.repeat(30))
+    );
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(ok(interaction([audioBlock({ data: pcmBase64(2400) })])))
+      .mockResolvedValueOnce(
+        ok({ status: 'incomplete', errors: [{ code: 'limit', message: 'cut' }] })
+      );
+    await expect(
+      synthesizeWithGemini({ dialogue: long, env: KEYED_ENV, fetchImpl })
+    ).rejects.toThrow(/stopped early \(part 2 of 2\)/);
+  });
+
+  it('reads a single narrator without inventing a second speaker (ADR 0033 §4)', async () => {
+    const fetchImpl = vi.fn(async () => audioResponse());
+    await synthesizeWithGemini({
+      dialogue: [turn('Narrator', 'Chapter one.')],
+      voices: { Narrator: 'Kore' },
+      env: KEYED_ENV,
+      fetchImpl,
+    });
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    expect(body.input).toBe('TTS the following text read by Narrator:\nNarrator: Chapter one.');
+    expect(body.generation_config.speech_config).toEqual([{ speaker: 'Narrator', voice: 'Kore' }]);
   });
 
   it('honours a model override without a deploy', async () => {
@@ -229,7 +286,9 @@ describe('the response', () => {
     // This is the production bug: the reply has no `output_audio`, and a
     // parser that only looked there reported "no audio" on every episode.
     const samples = 24000 * 4; // 4 seconds
-    const fetchImpl = vi.fn(async () => ok(interaction([audioBlock({ data: pcmBase64(samples) })])));
+    const fetchImpl = vi.fn(async () =>
+      ok(interaction([audioBlock({ data: pcmBase64(samples) })]))
+    );
 
     const result = await synthesizeWithGemini({ dialogue: DIALOGUE, env: KEYED_ENV, fetchImpl });
 
@@ -237,7 +296,7 @@ describe('the response', () => {
     expect(result.audio[1] & 0xe0).toBe(0xe0);
     expect(result.bytes).toBe(result.audio.length);
     expect(result.estimatedSeconds).toBe(4);
-    expect(result.model).toBe('gemini-3.1-flash-tts-preview');
+    expect(result.model).toBe('gemini-2.5-flash-preview-tts');
   });
 
   it('still reads the SDK-style output_audio field if a REST revision adds it', async () => {
@@ -254,7 +313,9 @@ describe('the response', () => {
     // The API has no output-format option, and the delivery route buffers a
     // whole blob into memory — so 48 KB/s of PCM never reaches storage.
     const samples = 24000 * 4;
-    const fetchImpl = vi.fn(async () => ok(interaction([audioBlock({ data: pcmBase64(samples) })])));
+    const fetchImpl = vi.fn(async () =>
+      ok(interaction([audioBlock({ data: pcmBase64(samples) })]))
+    );
 
     const result = await synthesizeWithGemini({ dialogue: DIALOGUE, env: KEYED_ENV, fetchImpl });
     expect(result.audio.length).toBeLessThan(samples * 2 * 0.5);
@@ -339,7 +400,9 @@ describe('the response', () => {
     const raw = (over) => interaction([audioBlock(over)]);
     expect(() => extractAudio(raw({ channels: 0 }))).toThrow(/0 channels is not mono or stereo/);
     expect(() => extractAudio(raw({ channels: 3 }))).toThrow(/3 channels is not mono or stereo/);
-    expect(() => extractAudio(raw({ sample_rate: 0 }))).toThrow(/0 Hz is outside the 8000–96000 Hz band/);
+    expect(() => extractAudio(raw({ sample_rate: 0 }))).toThrow(
+      /0 Hz is outside the 8000–96000 Hz band/
+    );
     expect(() => extractAudio(raw({ sample_rate: 'fast' }))).toThrow(/NaN Hz is outside/);
     expect(extractAudio(raw({ sample_rate: 8000, channels: 2 }))).toMatchObject({
       sampleRate: 8000,
@@ -430,10 +493,18 @@ describe('the response', () => {
 
   it('prefers the token counts the API reports', async () => {
     const fetchImpl = vi.fn(async () =>
-      ok(interaction([audioBlock()], { usage: { total_input_tokens: 120, total_output_tokens: 3400 } }))
+      ok(
+        interaction([audioBlock()], {
+          usage: { total_input_tokens: 120, total_output_tokens: 3400 },
+        })
+      )
     );
     const result = await synthesizeWithGemini({ dialogue: DIALOGUE, env: KEYED_ENV, fetchImpl });
-    expect(result).toMatchObject({ promptTokens: 120, completionTokens: 3400, estimatedTokens: false });
+    expect(result).toMatchObject({
+      promptTokens: 120,
+      completionTokens: 3400,
+      estimatedTokens: false,
+    });
   });
 });
 
@@ -450,7 +521,12 @@ describe('a 200 that is not a success', () => {
     // audio; "returned no audio" would send the operator looking at the
     // prompt when the reply is what is broken.
     const fetchImpl = vi.fn(async () =>
-      ok(interaction([{ type: 'text', text: 'lead-in' }, { type: 'audio', mime_type: 'audio/L16' }]))
+      ok(
+        interaction([
+          { type: 'text', text: 'lead-in' },
+          { type: 'audio', mime_type: 'audio/L16' },
+        ])
+      )
     );
     const err = await synthesizeWithGemini({ dialogue: DIALOGUE, env: KEYED_ENV, fetchImpl }).catch(
       (e) => e
@@ -532,9 +608,9 @@ describe('a 200 that is not a success', () => {
 describe('failures', () => {
   it('reports a missing key as not-configured so the caller can degrade', async () => {
     const fetchImpl = vi.fn();
-    await expect(
-      synthesizeWithGemini({ dialogue: DIALOGUE, env: {}, fetchImpl })
-    ).rejects.toThrow(/GEMINI_API_KEY is not configured/);
+    await expect(synthesizeWithGemini({ dialogue: DIALOGUE, env: {}, fetchImpl })).rejects.toThrow(
+      /GEMINI_API_KEY is not configured/
+    );
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
@@ -569,7 +645,12 @@ describe('failures', () => {
     for (const status of [400, 401, 403]) {
       const fetchImpl = vi.fn(async () => ({ ok: false, status, text: async () => 'no' }));
       await expect(
-        synthesizeWithGemini({ dialogue: DIALOGUE, env: KEYED_ENV, fetchImpl, sleep: async () => {} })
+        synthesizeWithGemini({
+          dialogue: DIALOGUE,
+          env: KEYED_ENV,
+          fetchImpl,
+          sleep: async () => {},
+        })
       ).rejects.toThrow(new RegExp(`Gemini TTS HTTP ${status}`));
       expect(fetchImpl).toHaveBeenCalledTimes(1);
     }

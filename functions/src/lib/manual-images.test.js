@@ -119,20 +119,28 @@ describe('generateReviewHeroImage', () => {
     });
     const res = await handlers.generateReviewHeroImage(request({ contentId: 'c1' }), context);
     const body = JSON.parse(res.body);
-    expect(body).toEqual({ success: true, imageUrl: '/api/public/media/covers/c1-ai-hero.png' });
-    // Gallery record via the shared path…
+    // Stamped path (ADR 0033 §6.2): a regeneration never overwrites.
+    const url = '/api/public/media/covers/c1-ai-hero-20260828120000.png';
+    expect(body).toMatchObject({ success: true, imageUrl: url, promptSource: 'builtin' });
+    expect(body.imageProvider).toBe('replicate');
+    // Gallery record via the shared path, carrying the delete ref, the model
+    // and the lineage of the prompt that produced it…
     expect(store.upsertDoc).toHaveBeenCalledWith(
       'generated_content_images',
-      expect.objectContaining({ slot: 'hero', sourceCollection: 'content' })
+      expect.objectContaining({
+        slot: 'hero',
+        sourceCollection: 'content',
+        storagePath: 'covers/c1-ai-hero-20260828120000.png',
+        imageProvider: 'replicate',
+        promptTemplateVersion: 'builtin-lego-v1',
+        bytes: 3,
+      })
     );
     // …and the same update fields the change-feed trigger writes.
     expect(store.patchDoc).toHaveBeenCalledWith(
       'content',
       'c1',
-      expect.objectContaining({
-        altCoverImage: '/api/public/media/covers/c1-ai-hero.png',
-        altCoverImageError: null,
-      })
+      expect.objectContaining({ altCoverImage: url, altCoverImageError: null })
     );
   });
 
@@ -165,7 +173,11 @@ describe('generateCuratedArticleImage', () => {
       context
     );
     const body = JSON.parse(res.body);
-    expect(body).toEqual({ success: true, imageUrl: '/api/public/media/covers/curated-a1.png' });
+    expect(body).toMatchObject({
+      success: true,
+      imageUrl: '/api/public/media/covers/curated-a1.png',
+      imageProvider: 'replicate',
+    });
     expect(storage.uploadBlob.mock.calls[0][1]).toBe('curated-a1.png');
     // Doc id IS the article id — the public route's lookup key.
     expect(store.upsertDoc).toHaveBeenCalledWith(
@@ -223,11 +235,9 @@ describe('generatePreviewImages', () => {
     );
     const body = JSON.parse(res.body);
     expect(body.success).toBe(true);
-    expect(body.imageUrls.hero).toBe('/api/public/media/covers/preview-draft-1-hero.png');
-    expect(body.imageRecords.hero).toEqual({
-      imageId: 'img-1',
-      imageUrl: '/api/public/media/covers/preview-draft-1-hero.png',
-    });
+    const url = '/api/public/media/covers/preview-draft-1-hero-20260828120000.png';
+    expect(body.imageUrls.hero).toBe(url);
+    expect(body.imageRecords.hero).toEqual({ imageId: 'img-1', imageUrl: url });
     expect(body.promptLogs.hero).toContain('Hero template');
     expect(store.upsertDoc).toHaveBeenCalledWith(
       'generated_content_images',
@@ -262,5 +272,147 @@ describe('authorization', () => {
     ]) {
       expect((await handlers[name](request(body), context)).status).toBe(403);
     }
+  });
+});
+
+// ── ADR 0033: lineage, the keyword matrix and the per-set sample ────────────
+
+describe('lineage and the keyword matrix', () => {
+  function libraryHandlers() {
+    const set = {
+      id: 'S',
+      name: 'S',
+      primaryPrompt: 'Set prompt',
+      styleRules: 'flat',
+      aspectRatio: '1:1',
+      version: 2,
+      tags: ['Azure'],
+    };
+    const promptDoc = { id: 'Hero', name: 'Hero', setName: 'S', slotTemplates: { hero: 'wide shot' } };
+    const store = {
+      readDoc: vi.fn(async (c, id) => {
+        if (c === 'image_prompt_sets' && id === 'S') return set;
+        if (c === 'image_prompt_sets_prompts' && id === 'Hero') return promptDoc;
+        return null;
+      }),
+      patchDoc: vi.fn(async () => ({})),
+      upsertDoc: vi.fn(async (c, d) => d),
+      queryDocs: vi.fn(async (c) =>
+        c === 'prompt_keyword_augmentations'
+          ? [{ id: 'k', label: 'kiro', patterns: ['kiro'], directive: 'Include the Kiro icon.' }]
+          : []
+      ),
+    };
+    const storage = { uploadBlob: vi.fn(async () => 'ok') };
+    const replicate = {
+      configured: true,
+      provider: 'replicate',
+      model: 'm',
+      costPerImageUsd: 0.02,
+      generate: vi.fn(async () => 'https://replicate/img.png'),
+    };
+    const handlers = createManualImageHandlers({
+      guard: guardAs('editor'),
+      store,
+      storage,
+      replicate,
+      fetchImage: vi.fn(async () => ({ buffer: Buffer.from('png'), contentType: 'image/png' })),
+      now: () => new Date('2026-08-28T12:00:00Z'),
+      uuid: () => 'img-1',
+    });
+    return { handlers, store, storage, replicate };
+  }
+
+  it('generatePreviewImages applies the matrix and records the named set’s lineage', async () => {
+    const { handlers, store, replicate } = libraryHandlers();
+    const res = await handlers.generatePreviewImages(
+      request({
+        articleId: 'd1',
+        aiImageTargets: ['hero'],
+        title: 'Kiro on Azure',
+        promptSet: 'S',
+        promptName: 'Hero',
+      }),
+      context
+    );
+    const body = JSON.parse(res.body);
+    expect(body.promptLogs.hero).toContain('Include the Kiro icon.');
+    expect(body).toMatchObject({ imageProvider: 'replicate', imageModel: 'm', costPerImageUsd: 0.02 });
+    expect(replicate.generate.mock.calls[0][1]).toEqual({ aspectRatio: '1:1' });
+    expect(store.upsertDoc).toHaveBeenCalledWith(
+      'generated_content_images',
+      expect.objectContaining({
+        promptSet: 'S',
+        promptName: 'Hero',
+        promptTemplateVersion: 'S@v2',
+        imageModel: 'm',
+        approvalStatus: 'draft',
+      })
+    );
+  });
+
+  it('generateCuratedArticleImage writes createdAt, title and the model so the gallery can sort and label it', async () => {
+    const { handlers, store } = libraryHandlers();
+    await handlers.generateCuratedArticleImage(
+      request({ articleId: 'a1', articleTitle: 'Kiro news', provider: 'AWS' }),
+      context
+    );
+    const doc = store.upsertDoc.mock.calls[0][1];
+    expect(doc).toMatchObject({
+      id: 'a1',
+      title: 'Kiro news',
+      slot: 'curated',
+      storagePath: 'covers/curated-a1.png',
+      imageModel: 'm',
+    });
+    expect(doc.createdAt).toBe('2026-08-28T12:00:00.000Z');
+    expect(doc.prompt).toContain('Include the Kiro icon.');
+  });
+
+  it('generatePromptSetSample composes from the set and files the row under the set', async () => {
+    const { handlers, store, storage, replicate } = libraryHandlers();
+    const res = await handlers.generatePromptSetSample(
+      request({ setName: 'S', promptName: 'Hero', title: 'Try it' }),
+      context
+    );
+    const body = JSON.parse(res.body);
+    expect(body).toMatchObject({
+      success: true,
+      imageId: 'img-1',
+      promptTemplateVersion: 'S@v2',
+      imageProvider: 'replicate',
+      costPerImageUsd: 0.02,
+    });
+    expect(body.prompt).toContain('Set prompt');
+    expect(body.prompt).toContain('Slot composition: wide shot');
+    expect(replicate.generate.mock.calls[0][1]).toEqual({ aspectRatio: '1:1' });
+    expect(storage.uploadBlob.mock.calls[0][1]).toBe('promptset-s-hero-20260828120000.png');
+    expect(store.upsertDoc).toHaveBeenCalledWith(
+      'generated_content_images',
+      expect.objectContaining({
+        articleId: 'promptset-s',
+        sourceCollection: 'preview',
+        promptSet: 'S',
+        customTags: ['azure'],
+      })
+    );
+  });
+
+  it('generatePromptSetSample 400s without a set, 404s an unknown one, 403s without the role', async () => {
+    const { handlers } = libraryHandlers();
+    expect((await handlers.generatePromptSetSample(request({}), context)).status).toBe(400);
+    expect((await handlers.generatePromptSetSample(request({ setName: 'Nope' }), context)).status).toBe(404);
+    const denied = makeHandlers({ role: null });
+    expect((await denied.handlers.generatePromptSetSample(request({ setName: 'S' }), context)).status).toBe(403);
+  });
+
+  it('triggerAiImageGeneration clears a previous override when the seed is empty, so the library applies again', async () => {
+    const { handlers, store } = makeHandlers();
+    await handlers.triggerAiImageGeneration(request({ contentIds: ['c1'], imagePromptSeed: '' }), context);
+    expect(store.patchDoc).toHaveBeenCalledWith(
+      'content',
+      'c1',
+      expect.objectContaining({ altCoverImagePrompt: null })
+    );
   });
 });

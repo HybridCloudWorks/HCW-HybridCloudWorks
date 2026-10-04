@@ -214,6 +214,7 @@ const DISPOSITION_NOTE = {
   reseed: 'seed data — re-seeded on the far side, not migrated',
   regenerate: 'cache — refilled by a scheduled job, not migrated',
   transient: 'transient runtime state — written at runtime, not migrated',
+  'azure-only': 'created on Azure after cutover — no Firestore source, nothing to migrate',
 };
 
 function build() {

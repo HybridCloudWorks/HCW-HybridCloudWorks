@@ -210,6 +210,17 @@ describe('the lights', () => {
     expect(screen.getByText(/no liveness check/)).toBeTruthy();
   });
 
+  it('names the service test that checks the key instead, where one exists (ADR 0033)', () => {
+    render(
+      <SecretRow
+        item={item({ state: 'live', hasLivenessCheck: false, testedBy: ['Resend'] })}
+        onSubmit={vi.fn()}
+      />
+    );
+    expect(screen.queryByText(/no liveness check/)).toBeNull();
+    expect(screen.getByText(/checked by the Resend test on the Services tab/)).toBeTruthy();
+  });
+
   it('does not add that caveat where a check does exist', () => {
     render(<SecretRow item={item({ state: 'live', hasLivenessCheck: true })} onSubmit={vi.fn()} />);
     expect(screen.queryByText(/no liveness check/)).toBeNull();

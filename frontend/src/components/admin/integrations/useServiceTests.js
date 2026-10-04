@@ -1,10 +1,13 @@
 /**
- * This session's connection tests, held by the Integrations Hub page (#570).
+ * This session's connection tests, held by the Integrations Hub page (#570),
+ * and the record of what each test last said (ADR 0033 Platform).
  *
  * Lives on the page rather than in a tab so a result survives switching tabs:
  * a test run from a Services card shows on the Overview grid, and "Test all"
- * keeps going if the Overview tab is left. It is not persisted — "last tested"
- * means in this browser session, and says so.
+ * keeps going if the Overview tab is left. Since ADR 0033 the outcome is also
+ * PERSISTED: each result is PUT to `cms/integration-status`, and the tabs read
+ * that record on first mount (`ensurePersisted`), so "last worked" and "last
+ * failed" are there after a reload and on the Health page too.
  *
  * The tests themselves are the registry's own `service.test` functions, called
  * exactly as the cards always called them. Nothing here builds a request.
@@ -19,10 +22,14 @@
  *     the one-provider-at-a-time guarantee holds from either direction;
  *   - a service marked `skipInTestAll` (YouTube, which spends quota) is left
  *     out of "Test all"; the Overview says so on its tile, so it is never
- *     silent, and any result from testing it on its own is kept.
+ *     silent, and any result from testing it on its own is kept;
+ *   - the persisted record is read once per page, whichever tab asks first,
+ *     and a failed read is a muted note on the tab rather than an alert —
+ *     the cards and their tests need none of it.
  */
 
 import { useCallback, useRef, useState } from 'react';
+import { mergeStatus, readIntegrationStatus, recordIntegrationStatus } from './integrationStatus';
 
 const stamp = () => new Date().toISOString();
 
@@ -30,8 +37,24 @@ export default function useServiceTests() {
   const [results, setResults] = useState({});
   const [testing, setTesting] = useState(() => new Set());
   const [runningAll, setRunningAll] = useState(false);
+  const [persisted, setPersisted] = useState({});
+  // idle → loading → loaded | failed. One read per page mount.
+  const [persistedState, setPersistedState] = useState('idle');
   const inFlight = useRef(new Set());
   const allInFlight = useRef(false);
+  const persistedRequested = useRef(false);
+
+  const ensurePersisted = useCallback(() => {
+    if (persistedRequested.current) return;
+    persistedRequested.current = true;
+    setPersistedState('loading');
+    readIntegrationStatus()
+      .then((services) => {
+        setPersisted(services);
+        setPersistedState('loaded');
+      })
+      .catch(() => setPersistedState('failed'));
+  }, []);
 
   // The test itself. `runAll` calls this directly; everything else goes
   // through `runTest`, which refuses while "Test all" owns the queue.
@@ -49,6 +72,14 @@ export default function useServiceTests() {
       setTesting(new Set(inFlight.current));
     }
     setResults((previous) => ({ ...previous, [service.id]: result }));
+    // Optimistic: the record reads as it will once the write lands. The write
+    // is best effort — a refused record never turns a passing test into a
+    // failure on the card, and the session result above stands either way.
+    setPersisted((previous) => ({
+      ...previous,
+      [service.id]: mergeStatus(previous[service.id], result, result.at),
+    }));
+    recordIntegrationStatus(service.id, result).catch(() => {});
     return result;
   }, []);
 
@@ -83,5 +114,14 @@ export default function useServiceTests() {
     [startTest]
   );
 
-  return { results, testing, runningAll, runTest, runAll };
+  return {
+    results,
+    testing,
+    runningAll,
+    runTest,
+    runAll,
+    persisted,
+    persistedState,
+    ensurePersisted,
+  };
 }

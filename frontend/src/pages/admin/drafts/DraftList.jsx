@@ -10,6 +10,7 @@ import { Loader2, Undo2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import TaxonomyChips from '@/components/admin/shared/TaxonomyChips';
 import { STAGE_LABELS, reviewPath } from './draftForm';
 
 const STAGE_CLASS = {
@@ -57,6 +58,7 @@ function DraftRow({ draft, selected, busy, onSelect, onBackToDrafts }) {
           {draft.origin === 'repo-import' ? 'From docs/content' : 'Written here'}
           {draft.updatedAt ? ` · ${formatUpdated(draft.updatedAt)}` : ''}
         </span>
+        <TaxonomyChips item={draft} className="mt-1" />
       </button>
       {draft.stage === 'in_review' && (
         <div className="mt-2 flex flex-wrap items-center gap-2">

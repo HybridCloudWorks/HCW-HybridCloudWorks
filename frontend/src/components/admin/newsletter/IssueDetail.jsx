@@ -22,10 +22,27 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Archive, Loader2, MailCheck, RotateCcw, Sparkles, XCircle } from 'lucide-react';
+import {
+  Archive,
+  Copy,
+  History,
+  Loader2,
+  MailCheck,
+  Plus,
+  RotateCcw,
+  Sparkles,
+  XCircle,
+} from 'lucide-react';
+import StatusBadge from '@/components/admin/shared/StatusBadge';
+import { itemStatus } from '@/components/admin/calendar/calendarModel';
 import ApprovalBox from './ApprovalBox';
-import SectionEditor, { sectionsSignature, toSectionsPayload } from './SectionEditor';
-import { STATUS_LABELS, formatWhen } from './issueFormat';
+import ManualBlockDialog from './ManualBlockDialog';
+import SectionEditor, {
+  addItemToSections,
+  sectionsSignature,
+  toSectionsPayload,
+} from './SectionEditor';
+import { formatWhen } from './issueFormat';
 
 export const MAX_PREHEADER = 150;
 const SAVE_FIRST = 'Save your changes first';
@@ -84,29 +101,41 @@ function useIssueEdits(issue) {
     customNote: issue.customNote || '',
     preheader: issue.preheader || '',
     sections: issue.sections || [],
+    // The per-issue send time as a datetime-local value ('' = the settings slot).
+    sendAt: toLocalInput(issue.sendAt),
   };
   const [subject, setSubject] = useState(stored.subject);
   const [customNote, setCustomNote] = useState(stored.customNote);
   const [preheader, setPreheader] = useState(stored.preheader);
   const [sections, setSections] = useState(stored.sections);
+  const [sendAt, setSendAt] = useState(stored.sendAt);
 
   const changed = {
     subject: subject !== stored.subject,
     customNote: customNote !== stored.customNote,
     preheader: preheader !== stored.preheader,
     sections: sectionsSignature(sections) !== sectionsSignature(stored.sections),
+    sendAt: sendAt !== stored.sendAt,
   };
-  const values = { subject, customNote, preheader, sections: toSectionsPayload(sections) };
+  const values = {
+    subject,
+    customNote,
+    preheader,
+    sections: toSectionsPayload(sections),
+    sendAt: sendAt ? new Date(sendAt).toISOString() : null,
+  };
 
   return {
     subject,
     customNote,
     preheader,
     sections,
+    sendAt,
     setSubject,
     setCustomNote,
     setPreheader,
     setSections,
+    setSendAt,
     dirty: Object.values(changed).some(Boolean),
     patch: () =>
       Object.fromEntries(
@@ -119,8 +148,55 @@ function useIssueEdits(issue) {
       setCustomNote(stored.customNote);
       setPreheader(stored.preheader);
       setSections(stored.sections);
+      setSendAt(stored.sendAt);
     },
   };
+}
+
+/** An ISO instant as a datetime-local value, or '' for none. */
+export function toLocalInput(iso) {
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+/** The saved versions, newest first (ADR 0033): what changed and when, so a rewrite can be traced. */
+function VersionHistory({ versions }) {
+  const [open, setOpen] = useState(false);
+  if (!versions?.length) return null;
+  return (
+    <div className="rounded-lg border border-border/60">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-muted-foreground hover:text-foreground"
+      >
+        <History className="h-3.5 w-3.5" aria-hidden="true" /> {versions.length} earlier version
+        {versions.length === 1 ? '' : 's'}
+      </button>
+      {open && (
+        <ol
+          className="space-y-1 border-t border-border/60 px-3 py-2 text-xs"
+          aria-label="Version history"
+        >
+          {versions.map((version) => (
+            <li key={version.at} className="flex flex-wrap gap-x-2 text-muted-foreground">
+              <span className="whitespace-nowrap">{formatWhen(version.at)}</span>
+              <span className="truncate font-medium text-foreground">
+                {version.subject || '(no subject)'}
+              </span>
+              <span>
+                {version.itemCount} item(s) in {version.sectionCount} section(s)
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
 }
 
 function SubjectField({ value, onChange, busy, onSuggestSubjects }) {
@@ -182,6 +258,7 @@ function ActionBar({
   onKeep,
   onRegenerateIntro,
   onSendTest,
+  onDuplicate,
 }) {
   const { dirty } = edits;
   const locked = Boolean(busy);
@@ -241,8 +318,54 @@ function ActionBar({
           Keep in Drafts
         </Button>
       )}
+      {onDuplicate && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="gap-1.5"
+          onClick={onDuplicate}
+          disabled={locked}
+          title="A new kept draft with this issue's content"
+        >
+          <Spin on={busy === 'duplicate'} icon={Copy} />
+          Duplicate
+        </Button>
+      )}
     </div>
   );
+}
+
+/** The per-issue send time (ADR 0033): empty means the slot in Newsletter settings. */
+function SendTimeField({ value, onChange, plan }) {
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor="nl-send-at">Send time for this issue (optional)</Label>
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          id="nl-send-at"
+          type="datetime-local"
+          className="w-auto"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        />
+        {value && (
+          <Button type="button" variant="ghost" size="sm" onClick={() => onChange('')}>
+            Use the settings slot
+          </Button>
+        )}
+      </div>
+      <p className="text-xs text-muted-foreground">{sendTimeHint(value, plan, zone)}</p>
+    </div>
+  );
+}
+
+function sendTimeHint(value, plan, zone) {
+  if (value) return `Approval schedules it for this time (${zone}).`;
+  if (plan?.overrideExpired) {
+    return 'The saved send time has passed, so approval uses the settings slot instead.';
+  }
+  return 'Empty: approval uses the send day and time in Newsletter settings.';
 }
 
 /**
@@ -288,6 +411,7 @@ function DraftEditor({
 }) {
   const edits = useIssueEdits(detail.issue);
   const secondsLeft = useSecondsLeft(testReadyAt);
+  const [adding, setAdding] = useState(false);
 
   return (
     <>
@@ -324,12 +448,14 @@ function DraftEditor({
             placeholder="Announcements, events, anything the sections do not cover"
           />
         </div>
+        <SendTimeField value={edits.sendAt} onChange={edits.setSendAt} plan={detail.sendPlan} />
         <ActionBar view={view} edits={edits} busy={busy} secondsLeft={secondsLeft} {...actions} />
         {edits.dirty && (
           <p className="text-xs text-muted-foreground">
             Unsaved changes. The preview shows the saved version until you save.
           </p>
         )}
+        <VersionHistory versions={detail.issue.versions} />
       </div>
 
       {view === 'drafts' && (
@@ -340,13 +466,25 @@ function DraftEditor({
 
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="space-y-2">
-          <h4 className="text-sm font-semibold">
-            Sections{' '}
-            <span className="font-normal text-muted-foreground">
-              ({edits.sections.reduce((sum, section) => sum + (section.items?.length || 0), 0)}{' '}
-              item(s))
-            </span>
-          </h4>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h4 className="text-sm font-semibold">
+              Sections{' '}
+              <span className="font-normal text-muted-foreground">
+                ({edits.sections.reduce((sum, section) => sum + (section.items?.length || 0), 0)}{' '}
+                item(s))
+              </span>
+            </h4>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5 h-7"
+              onClick={() => setAdding(true)}
+              disabled={Boolean(busy)}
+            >
+              <Plus className="h-3.5 w-3.5" /> Add a block
+            </Button>
+          </div>
           <SectionEditor
             sections={edits.sections}
             disabled={Boolean(busy)}
@@ -355,6 +493,15 @@ function DraftEditor({
         </div>
         <Preview detail={detail} />
       </div>
+      {adding && (
+        <ManualBlockDialog
+          sections={edits.sections}
+          onAdd={(sectionId, sectionTitle, item) =>
+            edits.setSections(addItemToSections(edits.sections, sectionId, sectionTitle, item))
+          }
+          onClose={() => setAdding(false)}
+        />
+      )}
     </>
   );
 }
@@ -367,10 +514,18 @@ export default function IssueDetail({ onReject, ...props }) {
   return (
     <Card className="p-4 space-y-4">
       <div className="flex flex-wrap items-center gap-2 text-sm">
-        <Badge>{STATUS_LABELS[issue.status] || issue.status}</Badge>
+        <StatusBadge status={itemStatus({ status: issue.status })} />
         <span className="text-muted-foreground">{issue.itemCount} item(s) saved</span>
         {issue.scheduledAt && <span>Sends {formatWhen(issue.scheduledAt)}</span>}
         {issue.sentAt && <span>Sent {formatWhen(issue.sentAt)}</span>}
+        {detail.fromAddress && (
+          <span className="text-xs text-muted-foreground" title="Set on the Settings tab">
+            From {detail.fromAddress}
+          </span>
+        )}
+        {issue.duplicatedFrom && (
+          <Badge variant="outline">copy of {issue.duplicatedFrom.replace('issue-', '')}</Badge>
+        )}
       </div>
 
       <StatusWarnings issue={issue} />

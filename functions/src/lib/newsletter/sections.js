@@ -116,7 +116,9 @@ export const certificationNewsSection = Object.freeze({
     return (rows || [])
       .filter((row) => !row.softDeletedAt)
       .map((row) => {
-        const codes = Array.isArray(row.certCodes) ? row.certCodes.filter((c) => typeof c === 'string') : [];
+        const codes = Array.isArray(row.certCodes)
+          ? row.certCodes.filter((c) => typeof c === 'string')
+          : [];
         const kind = CERT_EVENT_LABELS[row.type] ?? 'News';
         return {
           title: plainText(row.title, 160),
@@ -158,7 +160,10 @@ export const episodesSection = Object.freeze({
     const setIds = [...new Set((episodes || []).map((e) => e.setId).filter(Boolean))];
     const sets = new Map(
       await Promise.all(
-        setIds.map(async (id) => [id, await store.readDoc('listen_and_learn', id, id).catch(() => null)])
+        setIds.map(async (id) => [
+          id,
+          await store.readDoc('listen_and_learn', id, id).catch(() => null),
+        ])
       )
     );
 
@@ -175,7 +180,10 @@ export const episodesSection = Object.freeze({
           title: plainText(episode.title, 160),
           summary: plainText(episode.summary),
           url: provider ? absoluteUrl(path) : null,
-          label: plainText(set?.certTitle ? `Study episode · ${set.certTitle}` : 'Study episode', 80),
+          label: plainText(
+            set?.certTitle ? `Study episode · ${set.certTitle}` : 'Study episode',
+            80
+          ),
         };
       });
 
@@ -271,7 +279,11 @@ export const cloudPriceChangesSection = Object.freeze({
   },
 });
 
-/** Where every "Lab this week" item links: the public labs page. */
+/**
+ * Where every "Lab this week" item links: the cross-provider labs index. A
+ * day document carries no provider, and the index groups every lab by its
+ * provider hub (ADR 0033 §3), so it is the one page that fits every item.
+ */
 export const LABS_PAGE_URL = `${SITE_ORIGIN}/education/labs`;
 
 const plural = (n, word) => `${n} ${n === 1 ? word : `${word}s`}`;
@@ -330,7 +342,10 @@ export function labWeekItems(days) {
     });
   }
   for (const t of types) {
-    const problems = [t.failed > 0 ? `${t.failed} failed` : null, t.timeout > 0 ? `${t.timeout} timed out` : null]
+    const problems = [
+      t.failed > 0 ? `${t.failed} failed` : null,
+      t.timeout > 0 ? `${t.timeout} timed out` : null,
+    ]
       .filter(Boolean)
       .join(' · ');
     items.push({
@@ -386,11 +401,20 @@ export const SECTIONS = Object.freeze([
  * `maxItems` caps a section by id (Newsletter settings → Content); a section it
  * does not name keeps MAX_ITEMS_PER_SECTION.
  */
-export async function collectSections({ store, since, until, sections = SECTIONS, maxItems = {}, log }) {
+export async function collectSections({
+  store,
+  since,
+  until,
+  sections = SECTIONS,
+  maxItems = {},
+  log,
+}) {
   const out = [];
   const problems = [];
   for (const section of sections) {
-    const limit = Object.hasOwn(maxItems, section.id) ? maxItems[section.id] : MAX_ITEMS_PER_SECTION;
+    const limit = Object.hasOwn(maxItems, section.id)
+      ? maxItems[section.id]
+      : MAX_ITEMS_PER_SECTION;
     try {
       const items = (await section.collect({ store, since, until })).slice(0, limit);
       if (items.length > 0) out.push({ id: section.id, title: section.title, items });

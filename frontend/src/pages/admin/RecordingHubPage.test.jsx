@@ -370,7 +370,7 @@ describe('Podcast tab', () => {
     // Article chip links to the editor and to the public page.
     expect(screen.getByRole('link', { name: 'Picking a state backend' })).toHaveAttribute(
       'href',
-      '/admin/editor?id=content-1'
+      '/admin/editor/content-1'
     );
     expect(
       screen.getByRole('link', { name: 'Open Picking a state backend on the site' })

@@ -2,127 +2,29 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Helmet } from 'react-helmet-async';
 import { motion, AnimatePresence } from 'framer-motion';
-import { loadPublicDataSnapshot } from '@/lib/publicData';
-import { fetchPublicSnapshotItems } from '@/lib/publicApi';
+import { fetchPublicSnapshot } from '@/lib/publicApi';
+import { newerSnapshot } from '@/lib/speakingEvents';
 import CustomSessionizeWidget from '@/components/widgets/CustomSessionizeWidget';
 import { resolveMediaUrl } from '../../lib/functionsBase';
+import { normalizeCertification } from './about/certifications';
 
-function normalizeCertification(rawData) {
-  // Use the raw data directly for maximum precision with Firestore field names
-  const raw = rawData;
-
-  const get = (obj, candidates) => {
-    for (const k of candidates) {
-      if (obj[k] !== undefined && obj[k] !== null) return obj[k];
-    }
-    return undefined;
-  };
-
-  const toDate = (v) => {
-    if (!v) return undefined;
-    if (typeof v?.toDate === 'function') return v.toDate();
-    if (typeof v === 'string' || typeof v === 'number') return new Date(v);
-    return undefined;
-  };
-
-  const toBool = (v) => {
-    if (v === undefined || v === null) return undefined;
-    if (typeof v === 'boolean') return v;
-    if (typeof v === 'string') return v.toLowerCase() === 'true';
-    if (typeof v === 'number') return v !== 0;
-    return undefined;
-  };
-
-  // 5. Image Resolution Strategy
-  const resolveImageUrl = () => {
-    // Helper to clean/validate URLs
-    const cleanUrl = (val) => {
-      if (!val || typeof val !== 'string') return undefined;
-      const key = val.trim();
-      if (key === '') return undefined;
-      // The Firebase Storage bucket is gone (#518). This used to rewrite the
-      // GCS form into the Firebase REST form "so storage rules apply"; both
-      // point at the same decommissioned project, so the rewrite produced one
-      // dead URL from another. Undefined, so the caller’s existing falsy
-      // branch omits the image rather than rendering a broken frame.
-      // `http` and case-insensitive, matching what blogUtils.js gets for free
-      // from `new URL().hostname` — the two must agree or one page renders a
-      // broken image the other has already learned to skip.
-      if (/^https?:\/\/(storage|firebasestorage)\.googleapis\.com\//i.test(key)) return undefined;
-      // Case-insensitive: `startsWith('http')` treated `HTTPS://example.com/x`
-      // as a relative path and prefixed it with `/`, producing a URL that
-      // resolves nowhere.
-      return /^(https?:\/\/|\/|data:)/i.test(key) ? key : `/${key}`;
-    };
-
-    // A. Priority: Complex Object/Array from Firestore (Rowy image upload fields)
-    // Checks all known field names for badge/credential images
-    let complexData = get(raw, [
-      'image',
-      'Image',
-      'badge',
-      'Badge',
-      'credentialImage',
-      'CredentialImage', // DB schema field name
-    ]);
-
-    // Unwrap Array if necessary
-    if (Array.isArray(complexData)) {
-      complexData = complexData.length > 0 ? complexData[0] : undefined;
-    }
-
-    // Attempt to extract URL from Object
-    if (complexData && typeof complexData === 'object') {
-      const urlCandidate =
-        complexData.downloadURL ||
-        complexData.downloadUrl ||
-        complexData.url ||
-        complexData.src ||
-        complexData.link;
-
-      const cleaned = cleanUrl(urlCandidate);
-      if (cleaned) return cleaned;
-    }
-
-    // B. Fallback: Simple string URL fields
-    const simpleUrl = get(raw, [
-      'imageUrl',
-      'ImageUrl',
-      'image_url',
-      'credentialImage',
-      'CredentialImage', // also check as plain string
-    ]);
-    return cleanUrl(simpleUrl);
-  };
-
-  const normalized = {
-    id: raw.id,
-    name: get(raw, ['name', 'Name']),
-    issuer: (() => {
-      const iv = get(raw, ['issuer', 'Issuer']);
-      if (Array.isArray(iv)) return iv[0] ?? 'Other';
-      if (!iv) return 'Other';
-      if (iv === 'Microsft') return 'Microsoft';
-      if (typeof iv === 'string') {
-        const s = iv.trim();
-        const low = s.toLowerCase();
-        if (low === 'google cloud partners' || low === 'google cloud partner')
-          return 'Google Cloud Partners';
-        if (low === 'google cloud') return 'Google Cloud';
-      }
-      return iv;
-    })(),
-    issue_date: toDate(get(raw, ['issueDate', 'issue_date', 'IssueDate'])),
-    exp_date: toDate(get(raw, ['expDate', 'exp_date', 'ExpDate'])),
-    certState: toBool(get(raw, ['certState', 'isValid', 'is_valid', 'cert_state'])),
-    code: get(raw, ['code', 'Code']),
-    verify_url: get(raw, ['verifyUrl', 'verify_url', 'VerifyUrl']),
-    image_url: resolveImageUrl(),
-    display_order: get(raw, ['displayOrder', 'display_order', 'DisplayOrder']) ?? 999,
-    tags: get(raw, ['tags', 'Tags']) || [],
-    display: get(raw, ['display', 'Display']) === true,
-  };
-  return normalized;
+/**
+ * The build-time copy of the snapshot, whole — rows AND the stamp — so it can
+ * be compared with the live publish. Null when the file is absent or not JSON.
+ */
+async function loadStaticSnapshot(path) {
+  try {
+    const response = await fetch(path, {
+      headers: { Accept: 'application/json' },
+      cache: 'default',
+    });
+    const contentType = response.headers.get('content-type') || '';
+    if (!response.ok || !contentType.toLowerCase().includes('application/json')) return null;
+    const payload = await response.json();
+    return Array.isArray(payload?.items) ? payload : null;
+  } catch {
+    return null;
+  }
 }
 
 const CertificationCard = ({ cert, onImageClick }) => {
@@ -283,13 +185,14 @@ export default function AboutPage() {
       setLoading(true);
 
       try {
-        // Static JSON is the fast public path. The snapshots API is only a
-        // quiet fallback for deploys that do not have the generated file yet.
-        let rawItems = await loadPublicDataSnapshot('/data/certifications.json');
-
-        if (rawItems.length === 0) {
-          rawItems = await fetchPublicSnapshotItems('certifications');
-        }
+        // The newer of the deploy-time JSON and the live published snapshot,
+        // so Publish snapshot has an effect before the next deploy (ADR 0033
+        // §1). Either read failing leaves the other.
+        const [staticDoc, liveDoc] = await Promise.all([
+          loadStaticSnapshot('/data/certifications.json'),
+          fetchPublicSnapshot('certifications').catch(() => null),
+        ]);
+        let rawItems = newerSnapshot(staticDoc, liveDoc)?.items || [];
 
         try {
           rawItems = rawItems.filter((item) => item && typeof item === 'object');
@@ -334,7 +237,12 @@ export default function AboutPage() {
             return cert;
           });
 
-        certItems.sort((a, b) => (a.display_order ?? 999) - (b.display_order ?? 999));
+        // Featured first, then the global display order.
+        certItems.sort(
+          (a, b) =>
+            Number(b.featured === true) - Number(a.featured === true) ||
+            (a.display_order ?? 999) - (b.display_order ?? 999)
+        );
         setCertifications(certItems);
 
         const newExpanded = {};
@@ -657,7 +565,7 @@ export default function AboutPage() {
               </h3>
             </div>
           </div>
-          <CustomSessionizeWidget speakerId="c6yicoezls" />
+          <CustomSessionizeWidget />
         </section>
 
         {/* CERTIFICATION REGISTRY */}

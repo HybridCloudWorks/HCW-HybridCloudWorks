@@ -1,11 +1,14 @@
 import { describe, it, expect } from 'vitest';
+import { VALID_PROVIDERS } from '@/context/ProviderContext';
 import {
+  PROVIDER_NAMES,
   agentWords,
   arcStatusWord,
   capacityWords,
   heartbeatAgeWords,
   plural,
   policyWords,
+  providerName,
 } from './labsWords';
 
 const NOW = Date.parse('2026-09-25T12:00:00Z');
@@ -74,5 +77,13 @@ describe('the other words', () => {
     expect(agentWords({ online: true, queued: 2 })).toBe('online, 2 jobs queued');
     expect(agentWords({ online: false, queued: 0 })).toBe('offline, 0 jobs queued');
     expect(agentWords(null)).toBe('unavailable');
+  });
+
+  it('names every provider hub the router serves, and echoes an unknown segment (ADR 0033)', () => {
+    expect(Object.keys(PROVIDER_NAMES).sort()).toEqual([...VALID_PROVIDERS].sort());
+    expect(providerName('terraform')).toBe('Terraform');
+    expect(providerName('gcp')).toBe('Google Cloud');
+    expect(providerName('nope')).toBe('nope');
+    expect(providerName(undefined)).toBe('');
   });
 });

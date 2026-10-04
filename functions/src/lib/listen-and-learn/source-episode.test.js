@@ -155,7 +155,9 @@ describe('parseSourceEpisodePayload', () => {
     const { error } = parseSourceEpisodePayload(
       payload({ sources: [{ kind: 'page', url: 'https://youtu.be/abc' }] })
     );
-    expect(error).toMatch(/Source 1 \(https:\/\/youtu.be\/abc\) is a YouTube URL given as kind 'page'/);
+    expect(error).toMatch(
+      /Source 1 \(https:\/\/youtu.be\/abc\) is a YouTube URL given as kind 'page'/
+    );
   });
 
   it('refuses an over-cap list rather than truncating it', () => {
@@ -168,7 +170,9 @@ describe('parseSourceEpisodePayload', () => {
   });
 
   it('refuses an empty list, a non-list, and a non-http URL', () => {
-    expect(parseSourceEpisodePayload(payload({ sources: [] })).error).toMatch(/at least one source/);
+    expect(parseSourceEpisodePayload(payload({ sources: [] })).error).toMatch(
+      /at least one source/
+    );
     expect(parseSourceEpisodePayload(payload({ sources: 'https://x' })).error).toMatch(
       /at least one source/
     );
@@ -196,7 +200,9 @@ describe('parseSourceEpisodePayload', () => {
     expect(parseSourceEpisodePayload(payload({ platform: 'vmware' })).error).toMatch(
       /not available for "vmware".*azure, github, aws/
     );
-    expect(parseSourceEpisodePayload(payload({ examCode: ' ' })).error).toBe('examCode is required');
+    expect(parseSourceEpisodePayload(payload({ examCode: ' ' })).error).toBe(
+      'examCode is required'
+    );
   });
 
   it('needs no study guide URL — a source episode is not a guide run', () => {
@@ -238,7 +244,8 @@ describe('generateSourceEpisode — the run', () => {
       status: STATUS.draft,
       order: SOURCE_EPISODE_ORDER,
       videos: [],
-      audioPath: 'azure/az-104/source_entra-id-basics.mp3',
+      // Stamped per take (ADR 0033 §4), from the run's `now`.
+      audioPath: 'azure/az-104/source_entra-id-basics-20260909120000.mp3',
       speechProvider: 'gemini',
       approvedAt: null,
     });
@@ -304,7 +311,10 @@ describe('generateSourceEpisode — the run', () => {
 
     const bare = happyDeps();
     await run({ deps: bare });
-    expect(bare.synthesize.mock.calls[0][0]).toMatchObject({ product: 'listenAndLearn', model: null });
+    expect(bare.synthesize.mock.calls[0][0]).toMatchObject({
+      product: 'listenAndLearn',
+      model: null,
+    });
   });
 
   it('with Gemini unavailable: the sentence, no failover, nothing saved', async () => {
@@ -411,7 +421,9 @@ describe('generateSourceEpisode — the run', () => {
     expect(Object.keys(padded.docs[EPISODE_CONTAINER])).toEqual(
       Object.keys(trimmed.docs[EPISODE_CONTAINER])
     );
-    expect(Object.keys(padded.docs[SET_CONTAINER])).toEqual(Object.keys(trimmed.docs[SET_CONTAINER]));
+    expect(Object.keys(padded.docs[SET_CONTAINER])).toEqual(
+      Object.keys(trimmed.docs[SET_CONTAINER])
+    );
     const paddedDoc = padded.docs[EPISODE_CONTAINER]['source_entra-id-basics'];
     const trimmedDoc = trimmed.docs[EPISODE_CONTAINER]['source_entra-id-basics'];
     for (const field of ['setId', 'provider', 'examCode', 'areaSlug', 'areaName', 'audioPath']) {
@@ -430,13 +442,13 @@ describe('generateSourceEpisode — the run', () => {
     expect(report).toMatchObject({ examCode: 'AZ-104', platform: 'azure' });
   });
 
-  it('regenerating the same title replaces the same document and clears its approval', async () => {
+  it('regenerating the same title replaces the same document and keeps its approval (ADR 0033 §4)', async () => {
     const store = makeStore();
     await run({ store });
     store.docs[EPISODE_CONTAINER]['source_entra-id-basics'].status = STATUS.published;
     await run({ store, title: '  entra id BASICS ' });
     expect(Object.keys(store.docs[EPISODE_CONTAINER])).toEqual(['source_entra-id-basics']);
-    expect(store.docs[EPISODE_CONTAINER]['source_entra-id-basics'].status).toBe(STATUS.draft);
+    expect(store.docs[EPISODE_CONTAINER]['source_entra-id-basics'].status).toBe(STATUS.published);
   });
 });
 

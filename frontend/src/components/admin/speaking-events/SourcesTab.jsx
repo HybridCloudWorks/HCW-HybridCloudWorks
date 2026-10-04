@@ -15,6 +15,7 @@ import { Download, Loader2, Plus } from 'lucide-react';
 import EventForm from './EventForm';
 import { ManualEntriesTable, SectionHeading } from './EventTables';
 import { Dismissible, ReadsStatus, RefreshButton, allLanded, refreshAll } from './TabParts';
+import { canListRows } from './SessionsTab';
 import { syncDifferences } from './eventModel';
 
 const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
@@ -49,6 +50,19 @@ function NameList({ title, events }) {
 function SessionizeSource({ sessionize, stored }) {
   const { toCreate, toPatch } = syncDifferences(sessionize.data, stored.data);
   const readAt = sessionize.loadedAt ? sessionize.loadedAt.toLocaleTimeString() : null;
+  if (sessionize.error) {
+    // Nothing to compare against: the sync button is disabled above, and the
+    // stored rows are all listed as manual entries below until Sessionize answers.
+    return (
+      <section className="space-y-3 rounded-lg border border-border p-4">
+        <SectionHeading>Sessionize</SectionHeading>
+        <p className="text-sm text-muted-foreground">
+          Sessionize could not be read, so this page cannot say what a sync would change. Every
+          stored row is listed below meanwhile.
+        </p>
+      </section>
+    );
+  }
   return (
     <section className="space-y-3 rounded-lg border border-border p-4">
       <SectionHeading>Sessionize</SectionHeading>
@@ -72,10 +86,13 @@ function SessionizeSource({ sessionize, stored }) {
   );
 }
 
-function ManualSource({ rows, editor }) {
+function ManualSource({ rows, editor, sessionizeDown }) {
   return (
     <section>
-      <SectionHeading>Manual Entries — Stored Only ({rows.manualEntries.length})</SectionHeading>
+      <SectionHeading>
+        {sessionizeDown ? 'Stored rows' : 'Manual Entries — Stored Only'} (
+        {rows.manualEntries.length})
+      </SectionHeading>
       {rows.manualEntries.length > 0 ? (
         <ManualEntriesTable rows={rows.manualEntries} editor={editor} />
       ) : (
@@ -127,10 +144,14 @@ export default function SourcesTab({ data, editor, sync }) {
       {editor.error && <Dismissible onDismiss={editor.clearError}>{editor.error}</Dismissible>}
       {editor.isOpen && <EventForm editor={editor} />}
       <ReadsStatus reads={reads} label="sources" />
-      {allLanded(reads) && (
+      {canListRows(sessionize, stored) && (
         <div className="space-y-8">
           <SessionizeSource sessionize={sessionize} stored={stored} />
-          <ManualSource rows={data.rows} editor={editor} />
+          <ManualSource
+            rows={data.rows}
+            editor={editor}
+            sessionizeDown={Boolean(sessionize.error)}
+          />
         </div>
       )}
     </div>

@@ -7,7 +7,15 @@
  * newsletter builder shares this module because it uses the same drafter; it
  * replaced `generate-weekly-digest` (ADR 0030 §2a).
  */
-import { readDoc, queryDocs, patchDoc, upsertDoc } from '../lib/cosmos-client.js';
+import {
+  readDoc,
+  queryDocs,
+  patchDoc,
+  upsertDoc,
+  incrementIf,
+  replaceDocIfMatch,
+  createDoc,
+} from '../lib/cosmos-client.js';
 import * as ai from '../lib/ai/router.js';
 import { defaultForgeConfig } from '../lib/content/forge-config-default.js';
 import { createDrafter } from '../lib/content/drafting.js';
@@ -26,7 +34,25 @@ import { registerJobType } from '../lib/jobs.js';
 
 export const FORGE_MAX_BATCH = 10;
 
-const store = { readDoc, queryDocs, patchDoc, upsertDoc };
+/**
+ * The store every job here hands to the forge. It carries EVERY method
+ * forge.js calls, and forge-jobs.test.js asserts that by reading forge.js:
+ * until ADR 0033 this object had four methods while `claimForgeBudget`
+ * called `store.incrementIf`, `store.replaceDocIfMatch` and
+ * `store.createDoc` — so every manual forge job threw a TypeError at the
+ * budget claim, after the dedupe check and before any model call. The
+ * calibration job's ETag-safe suggestions write uses the same two.
+ */
+export const forgeStore = Object.freeze({
+  readDoc,
+  queryDocs,
+  patchDoc,
+  upsertDoc,
+  incrementIf,
+  replaceDocIfMatch,
+  createDoc,
+});
+const store = forgeStore;
 // The process-wide loader, shared with Forge Studio so a config edit there
 // clears the cache THIS worker reads (see forge-config-default.js).
 const config = defaultForgeConfig;
@@ -111,8 +137,14 @@ registerJobType('forge-article', {
  * @param {{ url: string, provider?: string }} payload
  * @param {object} deps — { scrape, forge, store, now, uuid, log, actor }
  */
-export async function runForgeFromUrl(payload, { scrape, forge, store: docStore, now, uuid, log, actor }) {
-  const source = await scrapeToSource(String(payload?.url || '').trim(), { scrape, log });
+export async function runForgeFromUrl(
+  payload,
+  { scrape, forge, store: docStore, now, uuid, log, actor }
+) {
+  const source = await scrapeToSource(String(payload?.url || '').trim(), {
+    scrape,
+    log,
+  });
   const provider = String(payload?.provider || '').trim() || inferProviderFromUrl(source.url);
   const doc = buildUrlSourceDoc({ source, provider, now, uuid });
   await docStore.upsertDoc('content', doc);
@@ -185,5 +217,9 @@ registerJobType('build-newsletter-issue', {
   // (#504), and a job payload is caller-supplied, so it must not set who a
   // draft was saved by. Saving from the page goes through saveNewsletter.
   worker: (payload, { context }) =>
-    createIssueBuilder({ store, drafter: createDrafter({ store, ai }), log: context }).build({ days: payload?.days }),
+    createIssueBuilder({
+      store,
+      drafter: createDrafter({ store, ai }),
+      log: context,
+    }).build({ days: payload?.days }),
 });

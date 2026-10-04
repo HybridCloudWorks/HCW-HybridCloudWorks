@@ -329,7 +329,9 @@ describe('listen & learn speech', () => {
 
   it('stores exactly one of the two offered Gemini models, matched exactly', () => {
     expect(normalizeListenAndLearnSpeech({ geminiModel: BEST })).toEqual({ geminiModel: BEST });
-    expect(normalizeListenAndLearnSpeech({ geminiModel: ECONOMY })).toEqual({ geminiModel: ECONOMY });
+    expect(normalizeListenAndLearnSpeech({ geminiModel: ECONOMY })).toEqual({
+      geminiModel: ECONOMY,
+    });
     const rule = new RegExp(`geminiModel must be one of ${BEST}, ${ECONOMY}`);
     // The id is sent to a paid API as the model name: no near-misses, no
     // third model, no trimming to a match.
@@ -356,7 +358,8 @@ describe('listen & learn speech', () => {
 
   it('shows the module default selected when nothing is stored — that is what will run', () => {
     expect(presentSetting('listen-and-learn-speech', null)).toEqual({
-      value: { geminiModel: BEST },
+      // Economy is the module default (ADR 0033 §4).
+      value: { geminiModel: ECONOMY },
       exists: false,
       stored: null,
       updatedAt: null,
@@ -376,7 +379,8 @@ describe('listen & learn speech', () => {
       ADMIN_CONFIG_PARTITION
     );
     const body = parse(res);
-    expect(body.value).toEqual({ geminiModel: BEST });
+    // Nothing stored: the module default, which is Economy (ADR 0033 §4).
+    expect(body.value).toEqual({ geminiModel: ECONOMY });
     expect(body.options).toEqual(listenAndLearnModelOptions());
     expect(body.options.map((o) => [o.id, o.tier])).toEqual([
       [BEST, 'best'],
@@ -387,7 +391,10 @@ describe('listen & learn speech', () => {
     expect(body.options[0].perEpisodeUsd).toBeGreaterThan(0);
     expect(body.options[1].perEpisodeUsd).toBeCloseTo(body.options[0].perEpisodeUsd / 2, 6);
     // The other settings offer nothing to choose from, and say nothing.
-    const feeds = await h.getSetting(makeRequest({ params: { setting: 'podcast-feeds' } }), context);
+    const feeds = await h.getSetting(
+      makeRequest({ params: { setting: 'podcast-feeds' } }),
+      context
+    );
     expect(parse(feeds)).not.toHaveProperty('options');
   });
 
@@ -395,7 +402,10 @@ describe('listen & learn speech', () => {
     const store = makeStore();
     const h = createPlatformSettingsHandlers({ guard: allowGuard, store, ...fixed });
     const res = await h.putSetting(
-      makeRequest({ params: { setting: 'listen-and-learn-speech' }, body: { geminiModel: ECONOMY } }),
+      makeRequest({
+        params: { setting: 'listen-and-learn-speech' },
+        body: { geminiModel: ECONOMY },
+      }),
       context
     );
     expect(res.status).toBe(200);
@@ -439,7 +449,10 @@ describe('podcast voices (#725)', () => {
   const ELENA = 'ElenaVoice0000000002';
 
   it('stores the two hosts’ ElevenLabs voice ids, trimmed', () => {
-    expect(normalizePodcastVoices({ Maya: ` ${MAYA} `, Elena: ELENA })).toEqual({ Maya: MAYA, Elena: ELENA });
+    expect(normalizePodcastVoices({ Maya: ` ${MAYA} `, Elena: ELENA })).toEqual({
+      Maya: MAYA,
+      Elena: ELENA,
+    });
   });
 
   it('refuses a missing host, a blank one, a non-id, the same voice twice and an unknown key', () => {
@@ -680,9 +693,9 @@ describe('newsletter settings', () => {
     ).toThrow(/at least one section/);
     // A list naming only one section, turned off, still has the other four appended on.
     expect(
-      normalizeNewsletterSettings({ sections: [{ id: 'articles', enabled: false }] }).sections.filter(
-        (s) => s.enabled
-      )
+      normalizeNewsletterSettings({
+        sections: [{ id: 'articles', enabled: false }],
+      }).sections.filter((s) => s.enabled)
     ).toHaveLength(4);
   });
 
@@ -725,26 +738,42 @@ describe('newsletter settings', () => {
   describe('template', () => {
     it('defaults to the built-in design, including for a document saved before the field existed', () => {
       expect(normalizeNewsletterSettings({}).templateId).toBe('');
-      const legacy = { id: 'newsletter_settings', postalAddress: 'PO Box 1', signupPlacement: 'footer' };
+      const legacy = {
+        id: 'newsletter_settings',
+        postalAddress: 'PO Box 1',
+        signupPlacement: 'footer',
+      };
       const shown = presentSetting('newsletter-settings', legacy);
       expect(shown.stored).toBe('valid');
       expect(shown.value.templateId).toBe('');
     });
 
     it('keeps a Resend template id, trimmed, and an explicit empty string', () => {
-      expect(normalizeNewsletterSettings({ templateId: ' 34a080c9-b17d-4187-ad80-5af20266e535 ' }).templateId).toBe(
-        '34a080c9-b17d-4187-ad80-5af20266e535'
+      expect(
+        normalizeNewsletterSettings({ templateId: ' 34a080c9-b17d-4187-ad80-5af20266e535 ' })
+          .templateId
+      ).toBe('34a080c9-b17d-4187-ad80-5af20266e535');
+      expect(normalizeNewsletterSettings({ templateId: 'x'.repeat(64) }).templateId).toBe(
+        'x'.repeat(64)
       );
-      expect(normalizeNewsletterSettings({ templateId: 'x'.repeat(64) }).templateId).toBe('x'.repeat(64));
       expect(normalizeNewsletterSettings({ templateId: '   ' }).templateId).toBe('');
     });
 
     it('refuses anything that is not an id or not a string', () => {
       for (const bad of ['a/b', '../templates', 'a.b', 'a b', 'x'.repeat(65), 'id?x=1']) {
-        expectRejects(() => normalizeNewsletterSettings({ templateId: bad }), /templateId must be empty/);
+        expectRejects(
+          () => normalizeNewsletterSettings({ templateId: bad }),
+          /templateId must be empty/
+        );
       }
-      expectRejects(() => normalizeNewsletterSettings({ templateId: 7 }), /templateId must be a string/);
-      expectRejects(() => normalizeNewsletterSettings({ templateId: null }), /templateId must be a string/);
+      expectRejects(
+        () => normalizeNewsletterSettings({ templateId: 7 }),
+        /templateId must be a string/
+      );
+      expectRejects(
+        () => normalizeNewsletterSettings({ templateId: null }),
+        /templateId must be a string/
+      );
     });
   });
 
@@ -765,7 +794,11 @@ describe('newsletter settings', () => {
       for (const bad of ['Footer', 'sidebar', '', null, 1, ['footer']]) {
         expectRejects(
           () =>
-            normalizeNewsletterSettings({ signupPlacement: bad, signupHeading: 42, signupBlurb: {} }),
+            normalizeNewsletterSettings({
+              signupPlacement: bad,
+              signupHeading: 42,
+              signupBlurb: {},
+            }),
           /signupPlacement must be one of footer, blogEnd, both, none/
         );
       }
@@ -781,9 +814,9 @@ describe('newsletter settings', () => {
     });
 
     it('keeps markup as the literal text it is', () => {
-      expect(normalizeNewsletterSettings({ signupHeading: '<b>Bold</b> & more' }).signupHeading).toBe(
-        '<b>Bold</b> & more'
-      );
+      expect(
+        normalizeNewsletterSettings({ signupHeading: '<b>Bold</b> & more' }).signupHeading
+      ).toBe('<b>Bold</b> & more');
     });
 
     it('accepts the heading at 80 characters and the blurb at 240, measured after trimming', () => {
@@ -807,13 +840,22 @@ describe('newsletter settings', () => {
     });
 
     it('refuses a blank heading but allows a blank blurb', () => {
-      expectRejects(() => normalizeNewsletterSettings({ signupHeading: '  \n ' }), /must not be blank/);
+      expectRejects(
+        () => normalizeNewsletterSettings({ signupHeading: '  \n ' }),
+        /must not be blank/
+      );
       expect(normalizeNewsletterSettings({ signupBlurb: '   ' }).signupBlurb).toBe('');
     });
 
     it('refuses wording that is not a string', () => {
-      expectRejects(() => normalizeNewsletterSettings({ signupHeading: 7 }), /signupHeading must be a string/);
-      expectRejects(() => normalizeNewsletterSettings({ signupBlurb: null }), /signupBlurb must be a string/);
+      expectRejects(
+        () => normalizeNewsletterSettings({ signupHeading: 7 }),
+        /signupHeading must be a string/
+      );
+      expectRejects(
+        () => normalizeNewsletterSettings({ signupBlurb: null }),
+        /signupBlurb must be a string/
+      );
     });
   });
 
@@ -838,9 +880,9 @@ describe('newsletter settings', () => {
   });
 
   it('refuses a reply-to on the sending subdomain, which receives no mail', () => {
-    expect(() => normalizeNewsletterSettings({ replyTo: 'hello@news.hybridcloudworks.com' })).toThrow(
-      /does not/
-    );
+    expect(() =>
+      normalizeNewsletterSettings({ replyTo: 'hello@news.hybridcloudworks.com' })
+    ).toThrow(/does not/);
   });
 
   it('refuses what cannot describe a send', () => {
@@ -852,13 +894,15 @@ describe('newsletter settings', () => {
       { postalAddress: 'x'.repeat(301) },
       { unexpected: true },
     ]) {
-      expect(() => normalizeNewsletterSettings(bad), JSON.stringify(bad)).toThrow(PlatformSettingValidationError);
+      expect(() => normalizeNewsletterSettings(bad), JSON.stringify(bad)).toThrow(
+        PlatformSettingValidationError
+      );
     }
   });
 });
 
 describe('presentSetting', () => {
-  it('names the six settings and nothing else', () => {
+  it('names the seven settings and nothing else', () => {
     expect(PLATFORM_SETTING_NAMES).toEqual([
       'default-heroes',
       'social-autopost',
@@ -866,6 +910,7 @@ describe('presentSetting', () => {
       'listen-and-learn-speech',
       'podcast-voices',
       'newsletter-settings',
+      'content-taxonomy',
     ]);
   });
 
@@ -1001,14 +1046,22 @@ describe('handlers', () => {
 
   it('selects the saved newsletter template in the template cache, so a different one shows on the next preview', async () => {
     const templateCache = { select: vi.fn() };
-    const h = createPlatformSettingsHandlers({ guard: allowGuard, store: makeStore(), ...fixed, templateCache });
+    const h = createPlatformSettingsHandlers({
+      guard: allowGuard,
+      store: makeStore(),
+      ...fixed,
+      templateCache,
+    });
     const put = await h.putSetting(
       makeRequest({ params: { setting: 'newsletter-settings' }, body: { templateId: 'tpl-1' } }),
       context
     );
     expect(put.status).toBe(200);
     expect(templateCache.select).toHaveBeenCalledWith('tpl-1');
-    await h.putSetting(makeRequest({ params: { setting: 'podcast-feeds' }, body: { feeds: [] } }), context);
+    await h.putSetting(
+      makeRequest({ params: { setting: 'podcast-feeds' }, body: { feeds: [] } }),
+      context
+    );
     expect(templateCache.select).toHaveBeenCalledTimes(1);
   });
 
@@ -1224,9 +1277,9 @@ describe('change history', () => {
     const store = historyStore();
     const h = createPlatformSettingsHandlers({ guard: denyGuard, store, ...fixed });
     expect((await h.getHistory(historyRequest(), context)).status).toBe(403);
-    expect(
-      (await h.getSetting(historyRequest({}, { setting: 'history' }), context)).status
-    ).toBe(403);
+    expect((await h.getSetting(historyRequest({}, { setting: 'history' }), context)).status).toBe(
+      403
+    );
     expect(store.queryDocs).not.toHaveBeenCalled();
   });
 
@@ -1321,7 +1374,11 @@ describe('change history', () => {
   });
 
   it('projects each row to id, at, actor, setting and summary, and nothing more', async () => {
-    const h = createPlatformSettingsHandlers({ guard: allowGuard, store: historyStore(), ...fixed });
+    const h = createPlatformSettingsHandlers({
+      guard: allowGuard,
+      store: historyStore(),
+      ...fixed,
+    });
     const res = await h.getHistory(historyRequest(), context);
     expect(res.status).toBe(200);
     expect(parse(res)).toEqual({
@@ -1347,9 +1404,9 @@ describe('change history', () => {
     expect(
       presentHistoryEntry(auditRow({ userName: null, userId: 'someone@example.com' })).actor
     ).toBeNull();
-    expect(JSON.stringify(presentHistoryEntry(auditRow({ userName: 'owner@example.com' })))).not.toContain(
-      '@'
-    );
+    expect(
+      JSON.stringify(presentHistoryEntry(auditRow({ userName: 'owner@example.com' })))
+    ).not.toContain('@');
   });
 
   it('keeps scalar and list summaries and drops anything nested', () => {
@@ -1379,7 +1436,11 @@ describe('change history', () => {
       auditRow({ id: 'a1', timestamp: '2026-09-14T10:00:00.000Z' }),
       auditRow({ id: 'a2', timestamp: '2026-09-13T10:00:00.000Z' }),
     ];
-    const h = createPlatformSettingsHandlers({ guard: allowGuard, store: historyStore(rows), ...fixed });
+    const h = createPlatformSettingsHandlers({
+      guard: allowGuard,
+      store: historyStore(rows),
+      ...fixed,
+    });
     const full = parse(await h.getHistory(historyRequest({ limit: '2' }), context));
     expect(full.nextAfter).toBe('2026-09-13T10:00:00.000Z');
     const short = parse(await h.getHistory(historyRequest({ limit: '3' }), context));

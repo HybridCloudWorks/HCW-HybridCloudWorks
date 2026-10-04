@@ -19,26 +19,30 @@
  *     rebuilds it from a full scan, and the dashboard self-seeds on first
  *     load exactly as the source did.
  */
-import { ADMIN_CONTENT_SNAPSHOT_FIELDS } from './cms-content.js';
+import { ADMIN_CONTENT_SNAPSHOT_FIELDS } from "./cms-content.js";
+import { resolveIdeaOrigin, resolveKind } from "./cms/taxonomy.js";
 
 const json = (status, body) => ({
   status,
-  headers: { 'Content-Type': 'application/json' },
+  headers: { "Content-Type": "application/json" },
   body: JSON.stringify(body),
 });
 
-const PROJECTION = ['c.id', ...ADMIN_CONTENT_SNAPSHOT_FIELDS.map((f) => `c["${f}"]`)].join(', ');
+const PROJECTION = [
+  "c.id",
+  ...ADMIN_CONTENT_SNAPSHOT_FIELDS.map((f) => `c["${f}"]`),
+].join(", ");
 
 // ── classification helpers (verbatim) ──────────────────────────────────────
 
-const BLOCKED_CONTENT_HOSTS = new Set(['stackfeed.io']);
+const BLOCKED_CONTENT_HOSTS = new Set(["stackfeed.io"]);
 
 function normalizeHostname(value) {
-  if (!value || typeof value !== 'string') return '';
+  if (!value || typeof value !== "string") return "";
   try {
-    return new URL(value).hostname.toLowerCase().replace(/^www\./, '');
+    return new URL(value).hostname.toLowerCase().replace(/^www\./, "");
   } catch {
-    return '';
+    return "";
   }
 }
 
@@ -47,64 +51,111 @@ export function isBlockedContentSource(data = {}) {
     data.sourceUrl,
     data.url,
     data.link,
-    data['CD Url'],
+    data["CD Url"],
     data.sourceFeed,
     ...(Array.isArray(data.sourceUrls) ? data.sourceUrls : []),
   ];
-  return fields.some((value) => BLOCKED_CONTENT_HOSTS.has(normalizeHostname(value)));
+  return fields.some((value) =>
+    BLOCKED_CONTENT_HOSTS.has(normalizeHostname(value)),
+  );
 }
 
 export function toMillis(value) {
   if (!value) return 0;
-  if (typeof value.toMillis === 'function') return value.toMillis();
-  if (typeof value.toDate === 'function') return value.toDate().getTime();
+  if (typeof value.toMillis === "function") return value.toMillis();
+  if (typeof value.toDate === "function") return value.toDate().getTime();
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
 }
 
-const SUPPORTED_ADMIN_TYPES = new Set(['blog', 'framework', 'architecture', 'coder_corner']);
+const SUPPORTED_ADMIN_TYPES = new Set([
+  "blog",
+  "framework",
+  "architecture",
+  "coder_corner",
+]);
 
 export function getCanonicalContentTypeForAdmin(data = {}) {
-  const raw = data.type || data.contentType || data.publishTarget || 'blog';
-  const normalized = String(raw || '')
+  const raw = data.type || data.contentType || data.publishTarget || "blog";
+  const normalized = String(raw || "")
     .trim()
     .toLowerCase();
-  if (normalized === 'news' || normalized === 'rss') return 'news';
+  if (normalized === "news" || normalized === "rss") return "news";
   if (SUPPORTED_ADMIN_TYPES.has(normalized)) return normalized;
-  return 'blog';
+  return "blog";
 }
 
-export function matchesAdminContentType(item = {}, contentTypeFilter = 'all') {
+export function matchesAdminContentType(item = {}, contentTypeFilter = "all") {
   const canonical = getCanonicalContentTypeForAdmin(item);
-  if (contentTypeFilter === 'all') return true;
-  if (contentTypeFilter === 'blog') return canonical === 'blog' || canonical === 'news';
+  if (contentTypeFilter === "all") return true;
+  if (contentTypeFilter === "blog")
+    return canonical === "blog" || canonical === "news";
   return canonical === contentTypeFilter;
 }
 
-export function matchesQueueStatus(item = {}, statusFilter = 'needs_review') {
-  const status = String(item.contentStatus || 'ingested');
-  if (statusFilter === 'needs_review') {
-    return status === 'draft' || status === 'ingested' || status === 'inspected';
+/**
+ * The taxonomy filters (ADR 0033 §4), on the resolved value: a record with
+ * nothing stored matches the kind its `type` derives to and the origin its
+ * `source` derives to, which is what the chip on its card says.
+ */
+export function matchesTaxonomyFilter(
+  item = {},
+  { kindFilter = "all", ideaOriginFilter = "all" },
+) {
+  if (kindFilter && kindFilter !== "all" && resolveKind(item) !== kindFilter)
+    return false;
+  if (
+    ideaOriginFilter &&
+    ideaOriginFilter !== "all" &&
+    resolveIdeaOrigin(item) !== ideaOriginFilter
+  ) {
+    return false;
   }
-  if (statusFilter === 'ready_to_publish') {
-    return ['approved', 'published'].includes(status) && item.Live !== true;
-  }
-  if (statusFilter === 'published_live') {
-    return item.Live === true;
-  }
-  if (statusFilter === 'in_progress') {
-    if (status === 'rejected' || status === 'archived') return false;
-    // The Drafts stage is not the pipeline yet (/admin/drafts lists it).
-    if (status === 'drafting') return false;
-    if (item.Live === true) return false;
-    if (status === 'ingested' || status === 'inspected' || status === 'needs_rework') return false;
-    return true;
-  }
-  return status === statusFilter;
+  return true;
 }
 
-export const DASHBOARD_STATS_TYPES = ['blog', 'framework', 'architecture', 'coder_corner', 'news'];
-export const DASHBOARD_STATS_DOC_ID = 'dashboard_stats_v1'; // in the `system` container
+const NEEDS_REVIEW_STATUSES = new Set(["draft", "ingested", "inspected"]);
+const READY_STATUSES = new Set(["approved", "forge_ready", "published"]);
+/**
+ * Not in progress: rejected and archived are out of the pipeline; drafting
+ * is the Drafts stage, not the pipeline yet (/admin/drafts lists it); the
+ * needs-review statuses have their own view. needs_rework is the inspector's
+ * "come back to this"; it IS in progress, and the dashboard counts it so
+ * (ADR 0033 §1).
+ */
+const NOT_IN_PROGRESS_STATUSES = new Set([
+  "rejected",
+  "archived",
+  "drafting",
+  ...NEEDS_REVIEW_STATUSES,
+]);
+
+/** The queue views that are not one stored status, by what they match. */
+const QUEUE_VIEWS = {
+  needs_review: (status) => NEEDS_REVIEW_STATUSES.has(status),
+  ready_to_publish: (status, item) =>
+    READY_STATUSES.has(status) && item.Live !== true,
+  published_live: (_status, item) => item.Live === true,
+  in_progress: (status, item) =>
+    !NOT_IN_PROGRESS_STATUSES.has(status) && item.Live !== true,
+};
+
+export function matchesQueueStatus(item = {}, statusFilter = "needs_review") {
+  const status = String(item.contentStatus || "ingested");
+  const view = Object.hasOwn(QUEUE_VIEWS, statusFilter)
+    ? QUEUE_VIEWS[statusFilter]
+    : null;
+  return view ? view(status, item) : status === statusFilter;
+}
+
+export const DASHBOARD_STATS_TYPES = [
+  "blog",
+  "framework",
+  "architecture",
+  "coder_corner",
+  "news",
+];
+export const DASHBOARD_STATS_DOC_ID = "dashboard_stats_v1"; // in the `system` container
 
 export function emptyDashboardStats() {
   const stats = { rejected: 0, totalDocs: 0, schemaVersion: 1 };
@@ -129,15 +180,15 @@ export function summarizeDashboardItems(items = []) {
     .forEach((item) => {
       const type = getCanonicalContentTypeForAdmin(item);
       const bucket = summary[type] || summary.blog;
-      const status = String(item.contentStatus || 'ingested');
+      const status = String(item.contentStatus || "ingested");
 
-      if (status === 'rejected') {
+      if (status === "rejected") {
         summary.rejected += 1;
         return;
       }
       // Not the pipeline yet — see classifyContentBucket in
       // triggers/dashboard-stats.js, which this must agree with.
-      if (status === 'drafting') return;
+      if (status === "drafting") return;
 
       bucket.total += 1;
 
@@ -146,9 +197,13 @@ export function summarizeDashboardItems(items = []) {
         return;
       }
 
-      if (status === 'draft' || status === 'ingested' || status === 'inspected') {
+      if (
+        status === "draft" ||
+        status === "ingested" ||
+        status === "inspected"
+      ) {
         bucket.needsReview += 1;
-      } else if (status !== 'archived') {
+      } else if (status !== "archived") {
         // Everything else not-yet-Live (in_review, approved, editing,
         // published staged but Live=false) is in progress.
         bucket.inProgress += 1;
@@ -160,39 +215,223 @@ export function summarizeDashboardItems(items = []) {
 
 // ── query plumbing ──────────────────────────────────────────────────────────
 
-/** statusFilter -> { where clause, params, sortField } (source :6333-6358). */
-export function queueFilterFor(statusFilter) {
-  const inList = (statuses) => ({
-    where: 'ARRAY_CONTAINS(@statuses, c.contentStatus)',
-    params: [{ name: '@statuses', value: statuses }],
-  });
-  if (statusFilter === 'needs_review') {
-    return { ...inList(['draft', 'ingested', 'inspected']), sortField: 'fetchedAt' };
-  }
-  if (statusFilter === 'ready_to_publish') {
-    return { ...inList(['approved', 'published']), sortField: 'updatedAt' };
-  }
-  if (statusFilter === 'published_live') {
-    return { where: 'c.Live = true', params: [], sortField: 'publishedAt' };
-  }
-  if (statusFilter === 'in_progress') {
-    return { ...inList(['approved', 'in_review', 'editing']), sortField: 'updatedAt' };
-  }
-  if (statusFilter === 'soft_deleted') {
+/**
+ * The queue views (source :6333-6358), by what their Cosmos window matches:
+ * `statuses` is an ARRAY_CONTAINS over contentStatus, `status` one stored
+ * value, `where` a clause of its own. Any other filter is one stored status.
+ */
+const QUEUE_FILTERS = Object.freeze({
+  needs_review: {
+    statuses: ["draft", "ingested", "inspected"],
+    sortField: "fetchedAt",
+  },
+  // forge_ready is publishable (content-status.js PUBLISHABLE_NORMALIZED_STATUSES)
+  // and until 2026-10-03 appeared on no screen at all (ADR 0033 §1).
+  ready_to_publish: {
+    statuses: ["approved", "forge_ready", "published"],
+    sortField: "updatedAt",
+  },
+  published_live: { where: "c.Live = true", sortField: "publishedAt" },
+  // The same set the dashboard counts as inProgress (triggers/dashboard-stats.js),
+  // so the Editor badge never counts an item this view cannot show.
+  in_progress: {
+    statuses: [
+      "approved",
+      "in_review",
+      "editing",
+      "forge_ready",
+      "needs_rework",
+    ],
+    sortField: "updatedAt",
+  },
+  soft_deleted: { status: "rejected", sortField: "fetchedAt" },
+});
+
+/** A queue view's WHERE clause and its parameters. */
+function queueWhere(view) {
+  if (view.statuses) {
     return {
-      where: 'c.contentStatus = @status',
-      params: [{ name: '@status', value: 'rejected' }],
-      sortField: 'fetchedAt',
+      where: "ARRAY_CONTAINS(@statuses, c.contentStatus)",
+      params: [{ name: "@statuses", value: [...view.statuses] }],
     };
   }
+  if (view.where) return { where: view.where, params: [] };
   return {
-    where: 'c.contentStatus = @status',
-    params: [{ name: '@status', value: String(statusFilter) }],
-    sortField: 'fetchedAt',
+    where: "c.contentStatus = @status",
+    params: [{ name: "@status", value: view.status }],
   };
 }
 
+/** statusFilter -> { where clause, params, sortField } (source :6333-6358). */
+export function queueFilterFor(statusFilter) {
+  const view = Object.hasOwn(QUEUE_FILTERS, statusFilter)
+    ? QUEUE_FILTERS[statusFilter]
+    : { status: String(statusFilter), sortField: "fetchedAt" };
+  return { ...queueWhere(view), sortField: view.sortField };
+}
+
 const sortDescBy = (field) => (a, b) => toMillis(b[field]) - toMillis(a[field]);
+
+const FULL_SCAN_TOP = 5000; // content is ~1k docs; bounded, not unbounded
+
+/** The content reads the four snapshots share, over one store. */
+function createSnapshotReads(store) {
+  const countWhere = async (where, params) => {
+    const rows = await store.queryDocs(
+      "content",
+      `SELECT VALUE COUNT(1) FROM c WHERE ${where}`,
+      params,
+    );
+    return Number(rows[0]) || 0;
+  };
+
+  const fetchProjected = (where, params, top) =>
+    store.queryDocs(
+      "content",
+      `SELECT TOP ${top} ${PROJECTION} FROM c WHERE ${where}`,
+      params,
+    );
+
+  async function recentNeedsReviewItems(limit = 10) {
+    const { where, params } = queueFilterFor("needs_review");
+    const rows = await fetchProjected(where, params, limit * 3);
+    const freshest = (item) =>
+      toMillis(item.fetchedAt || item.updatedAt || item.createdAt);
+    return rows
+      .filter((item) => !isBlockedContentSource(item))
+      .sort((a, b) => freshest(b) - freshest(a))
+      .slice(0, limit);
+  }
+
+  async function fullScanStats() {
+    const rows = await store.queryDocs(
+      "content",
+      `SELECT TOP ${FULL_SCAN_TOP} c.id, c["contentStatus"], c["Live"], c["type"], c["contentType"], c["publishTarget"], c["targetLandingZone"], c["sourceUrl"], c["sourceUrls"], c["sourceFeed"], c["CD Url"] FROM c`,
+      [],
+    );
+    return { items: rows, stats: summarizeDashboardItems(rows) };
+  }
+
+  return { countWhere, fetchProjected, recentNeedsReviewItems, fullScanStats };
+}
+
+const seedFromStats = (stats, totalDocs) => {
+  const seed = emptyDashboardStats();
+  seed.rejected = stats.rejected;
+  DASHBOARD_STATS_TYPES.forEach((t) => {
+    if (stats[t]) seed[t] = { ...stats[t] };
+  });
+  seed.totalDocs = totalDocs;
+  return seed;
+};
+
+const isTaxonomyFiltered = ({ kindFilter, ideaOriginFilter }) =>
+  (kindFilter && kindFilter !== "all") ||
+  (ideaOriginFilter && ideaOriginFilter !== "all");
+
+/**
+ * The narrowing a queue view still needs after its Cosmos window: the
+ * checks that are derived from fallback fields and cannot be a WHERE clause.
+ */
+function queueItemFilters({
+  statusFilter,
+  contentTypeFilter,
+  kindFilter,
+  ideaOriginFilter,
+}) {
+  const filters = [(item) => !isBlockedContentSource(item)];
+  if (statusFilter === "ready_to_publish" || statusFilter === "in_progress") {
+    filters.push((item) => matchesQueueStatus(item, statusFilter));
+  } else if (statusFilter === "rejected") {
+    filters.push((item) => !item.softDeletedAt);
+  } else if (statusFilter === "soft_deleted") {
+    filters.push((item) => Boolean(item.softDeletedAt));
+  }
+  if (contentTypeFilter !== "all") {
+    filters.push((item) => matchesAdminContentType(item, contentTypeFilter));
+  }
+  if (isTaxonomyFiltered({ kindFilter, ideaOriginFilter })) {
+    filters.push((item) =>
+      matchesTaxonomyFilter(item, { kindFilter, ideaOriginFilter }),
+    );
+  }
+  return filters;
+}
+
+/** POST getQueueSnapshot's body as its answer (source :6300). */
+async function buildQueueSnapshot({ reads, now }, body) {
+  const {
+    statusFilter = "needs_review",
+    contentTypeFilter = "all",
+    kindFilter = "all",
+    ideaOriginFilter = "all",
+    itemLimit = 100,
+  } = body;
+  // 1000 cap supports the queue's "All" view (content queue runs 200+).
+  const normalizedLimit = Math.min(Math.max(Number(itemLimit) || 100, 1), 1000);
+  // Content-type and taxonomy filtering happen in JS (derived from fallback
+  // fields); fetch a 3x buffer to survive the discard, as the source did.
+  const narrowedInJs =
+    contentTypeFilter !== "all" ||
+    isTaxonomyFiltered({ kindFilter, ideaOriginFilter });
+  const fetchSize = narrowedInJs ? normalizedLimit * 3 : normalizedLimit;
+
+  const { where, params, sortField } = queueFilterFor(statusFilter);
+  const [totalCount, rawItems] = await Promise.all([
+    reads.countWhere(where, params),
+    reads.fetchProjected(where, params, fetchSize),
+  ]);
+
+  const blockedInPage = rawItems.filter(isBlockedContentSource).length;
+  const filters = queueItemFilters({
+    statusFilter,
+    contentTypeFilter,
+    kindFilter,
+    ideaOriginFilter,
+  });
+  const items = rawItems
+    .filter((item) => filters.every((keep) => keep(item)))
+    .sort(sortDescBy(sortField));
+
+  return {
+    success: true,
+    generatedAt: now().toISOString(),
+    totalCount: Math.max(0, totalCount - blockedInPage),
+    items: items.slice(0, normalizedLimit),
+  };
+}
+
+/**
+ * The stored stats document projected to the shape summarizeDashboardItems
+ * returns, so the DashboardPage UI needs no changes.
+ */
+function projectStats(statsDoc) {
+  const stats = emptyDashboardStats();
+  delete stats.totalDocs;
+  delete stats.schemaVersion;
+  DASHBOARD_STATS_TYPES.forEach((t) => {
+    if (statsDoc[t]) stats[t] = { ...stats[t], ...statsDoc[t] };
+  });
+  stats.rejected = statsDoc.rejected || 0;
+  return stats;
+}
+
+/**
+ * Not yet seeded (first deploy): live aggregation plus a fire-and-forget
+ * seed so subsequent loads take the fast path.
+ */
+async function scanAndSeedStats({ store, reads, now }, context) {
+  const scan = await reads.fullScanStats();
+  const seed = seedFromStats(scan.stats, scan.items.length);
+  seed.id = DASHBOARD_STATS_DOC_ID;
+  seed.updatedAt = now().toISOString();
+  store
+    .upsertDoc("system", seed)
+    .catch((err) =>
+      context.warn?.("[dashboard-stats] seed write failed:", err?.message),
+    );
+  return scan.stats;
+}
 
 /**
  * @param {object} deps
@@ -200,131 +439,57 @@ const sortDescBy = (field) => (a, b) => toMillis(b[field]) - toMillis(a[field]);
  * @param {{ queryDocs: Function, readDoc: Function, upsertDoc: Function }} deps.store
  * @param {() => Date} [deps.now]
  */
-export function createAdminSnapshotHandlers({ guard, store, now = () => new Date() }) {
-  const countWhere = async (where, params) => {
-    const rows = await store.queryDocs(
-      'content',
-      `SELECT VALUE COUNT(1) FROM c WHERE ${where}`,
-      params
-    );
-    return Number(rows[0]) || 0;
-  };
-
-  const fetchProjected = (where, params, top) =>
-    store.queryDocs('content', `SELECT TOP ${top} ${PROJECTION} FROM c WHERE ${where}`, params);
-
-  async function recentNeedsReviewItems(limit = 10) {
-    const { where, params } = queueFilterFor('needs_review');
-    const rows = await fetchProjected(where, params, limit * 3);
-    return rows
-      .filter((item) => !isBlockedContentSource(item))
-      .sort((a, b) => {
-        const aMs = toMillis(a.fetchedAt || a.updatedAt || a.createdAt);
-        const bMs = toMillis(b.fetchedAt || b.updatedAt || b.createdAt);
-        return bMs - aMs;
-      })
-      .slice(0, limit);
-  }
-
-  const FULL_SCAN_TOP = 5000; // content is ~1k docs; bounded, not unbounded
-
-  async function fullScanStats() {
-    const rows = await store.queryDocs(
-      'content',
-      `SELECT TOP ${FULL_SCAN_TOP} c.id, c["contentStatus"], c["Live"], c["type"], c["contentType"], c["publishTarget"], c["targetLandingZone"], c["sourceUrl"], c["sourceUrls"], c["sourceFeed"], c["CD Url"] FROM c`,
-      []
-    );
-    return { items: rows, stats: summarizeDashboardItems(rows) };
-  }
-
-  const seedFromStats = (stats, totalDocs) => {
-    const seed = emptyDashboardStats();
-    seed.rejected = stats.rejected;
-    DASHBOARD_STATS_TYPES.forEach((t) => {
-      if (stats[t]) seed[t] = { ...stats[t] };
-    });
-    seed.totalDocs = totalDocs;
-    return seed;
-  };
+export function createAdminSnapshotHandlers({
+  guard,
+  store,
+  now = () => new Date(),
+}) {
+  const reads = createSnapshotReads(store);
+  const ctx = { store, reads, now };
 
   return {
     /** POST /api/getQueueSnapshot — source :6300. */
     async getQueueSnapshot(request, context) {
-      const auth = await guard.requireRole(request, 'viewer');
+      const auth = await guard.requireRole(request, "viewer");
       if (auth.error) return auth.error;
 
       try {
         const body = (await request.json().catch(() => null)) || {};
-        const {
-          statusFilter = 'needs_review',
-          contentTypeFilter = 'all',
-          itemLimit = 100,
-        } = body;
-        // 1000 cap supports the queue's "All" view (content queue runs 200+).
-        const normalizedLimit = Math.min(Math.max(Number(itemLimit) || 100, 1), 1000);
-        // Content-type filtering happens in JS (derived from 3 fallback
-        // fields); fetch a 3x buffer to survive the discard, as the source did.
-        const fetchSize = contentTypeFilter === 'all' ? normalizedLimit : normalizedLimit * 3;
-
-        const { where, params, sortField } = queueFilterFor(statusFilter);
-        const [totalCount, rawItems] = await Promise.all([
-          countWhere(where, params),
-          fetchProjected(where, params, fetchSize),
-        ]);
-
-        const blockedInPage = rawItems.filter(isBlockedContentSource).length;
-        let items = rawItems.filter((item) => !isBlockedContentSource(item));
-
-        if (statusFilter === 'ready_to_publish' || statusFilter === 'in_progress') {
-          items = items.filter((item) => matchesQueueStatus(item, statusFilter));
-        } else if (statusFilter === 'rejected') {
-          items = items.filter((item) => !item.softDeletedAt);
-        } else if (statusFilter === 'soft_deleted') {
-          items = items.filter((item) => Boolean(item.softDeletedAt));
-        }
-
-        if (contentTypeFilter !== 'all') {
-          items = items.filter((item) => matchesAdminContentType(item, contentTypeFilter));
-        }
-
-        items.sort(sortDescBy(sortField));
-
-        return json(200, {
-          success: true,
-          generatedAt: now().toISOString(),
-          totalCount: Math.max(0, totalCount - blockedInPage),
-          items: items.slice(0, normalizedLimit),
-        });
+        return json(200, await buildQueueSnapshot(ctx, body));
       } catch (error) {
-        context.error('getQueueSnapshot failed:', error);
+        context.error("getQueueSnapshot failed:", error);
         return json(500, {
-          error: 'Failed to generate queue snapshot',
-          message: error?.message || 'Unknown error',
+          error: "Failed to generate queue snapshot",
+          message: error?.message || "Unknown error",
         });
       }
     },
 
     /** POST /api/getPublishSnapshot — source :6405. */
     async getPublishSnapshot(request, context) {
-      const auth = await guard.requireRole(request, 'viewer');
+      const auth = await guard.requireRole(request, "viewer");
       if (auth.error) return auth.error;
 
       try {
-        const ready = queueFilterFor('ready_to_publish');
-        const publishedWhere = "c.Live = true AND c.contentStatus = 'published'";
+        const ready = queueFilterFor("ready_to_publish");
+        const publishedWhere =
+          "c.Live = true AND c.contentStatus = 'published'";
 
-        const [readyTotal, readyRows, publishedTotal, publishedRows] = await Promise.all([
-          countWhere(ready.where, ready.params),
-          fetchProjected(ready.where, ready.params, 150),
-          countWhere(publishedWhere, []),
-          fetchProjected(publishedWhere, [], 100),
-        ]);
+        const [readyTotal, readyRows, publishedTotal, publishedRows] =
+          await Promise.all([
+            reads.countWhere(ready.where, ready.params),
+            reads.fetchProjected(ready.where, ready.params, 150),
+            reads.countWhere(publishedWhere, []),
+            reads.fetchProjected(publishedWhere, [], 100),
+          ]);
 
         const readyCandidates = readyRows
           .filter((item) => item.Live !== true)
-          .sort(sortDescBy('updatedAt'))
+          .sort(sortDescBy("updatedAt"))
           .slice(0, 100);
-        const publishedItems = [...publishedRows].sort(sortDescBy('publishedAt'));
+        const publishedItems = [...publishedRows].sort(
+          sortDescBy("publishedAt"),
+        );
 
         return json(200, {
           success: true,
@@ -335,48 +500,31 @@ export function createAdminSnapshotHandlers({ guard, store, now = () => new Date
           publishedItems,
         });
       } catch (error) {
-        context.error('getPublishSnapshot failed:', error);
+        context.error("getPublishSnapshot failed:", error);
         return json(500, {
-          error: 'Failed to generate publish snapshot',
-          message: error?.message || 'Unknown error',
+          error: "Failed to generate publish snapshot",
+          message: error?.message || "Unknown error",
         });
       }
     },
 
     /** POST /api/getAdminDashboardSnapshot — source :6038. */
     async getAdminDashboardSnapshot(request, context) {
-      const auth = await guard.requireRole(request, 'viewer');
+      const auth = await guard.requireRole(request, "viewer");
       if (auth.error) return auth.error;
 
       try {
         const [statsDoc, recentNeedsReview] = await Promise.all([
-          store.readDoc('system', DASHBOARD_STATS_DOC_ID, DASHBOARD_STATS_DOC_ID),
-          recentNeedsReviewItems(10),
+          store.readDoc(
+            "system",
+            DASHBOARD_STATS_DOC_ID,
+            DASHBOARD_STATS_DOC_ID,
+          ),
+          reads.recentNeedsReviewItems(10),
         ]);
-
-        let stats;
-        if (statsDoc) {
-          // Project to the shape summarizeDashboardItems returned so the
-          // DashboardPage UI needs no changes.
-          stats = emptyDashboardStats();
-          delete stats.totalDocs;
-          delete stats.schemaVersion;
-          DASHBOARD_STATS_TYPES.forEach((t) => {
-            if (statsDoc[t]) stats[t] = { ...stats[t], ...statsDoc[t] };
-          });
-          stats.rejected = statsDoc.rejected || 0;
-        } else {
-          // Not yet seeded (first deploy): live aggregation + fire-and-forget
-          // seed so subsequent loads take the fast path.
-          const scan = await fullScanStats();
-          stats = scan.stats;
-          const seed = seedFromStats(stats, scan.items.length);
-          seed.id = DASHBOARD_STATS_DOC_ID;
-          seed.updatedAt = now().toISOString();
-          store
-            .upsertDoc('system', seed)
-            .catch((err) => context.warn?.('[dashboard-stats] seed write failed:', err?.message));
-        }
+        const stats = statsDoc
+          ? projectStats(statsDoc)
+          : await scanAndSeedStats(ctx, context);
 
         return json(200, {
           success: true,
@@ -385,32 +533,33 @@ export function createAdminSnapshotHandlers({ guard, store, now = () => new Date
           recentNeedsReview,
         });
       } catch (error) {
-        context.error('getAdminDashboardSnapshot failed:', error);
+        context.error("getAdminDashboardSnapshot failed:", error);
         return json(500, {
-          error: 'Failed to generate dashboard snapshot',
-          message: error?.message || 'Unknown error',
+          error: "Failed to generate dashboard snapshot",
+          message: error?.message || "Unknown error",
         });
       }
     },
 
     /** POST /api/recalculateDashboardStats — source :6109; full overwrite. */
     async recalculateDashboardStats(request, context) {
-      const auth = await guard.requireRole(request, 'editor');
+      const auth = await guard.requireRole(request, "editor");
       if (auth.error) return auth.error;
 
       try {
         const { user } = auth;
-        const scan = await fullScanStats();
+        const scan = await reads.fullScanStats();
         const seed = seedFromStats(scan.stats, scan.items.length);
         seed.id = DASHBOARD_STATS_DOC_ID;
         const nowIso = now().toISOString();
         seed.updatedAt = nowIso;
         seed.recalculatedAt = nowIso;
-        seed.recalculatedBy = user.email || user.preferred_username || user.oid || 'admin';
+        seed.recalculatedBy =
+          user.email || user.preferred_username || user.oid || "admin";
 
         // Deliberate full replace (source used .set() without merge): a
         // recalculation must clear drifted keys, not merge over them.
-        await store.upsertDoc('system', seed);
+        await store.upsertDoc("system", seed);
 
         return json(200, {
           success: true,
@@ -418,10 +567,10 @@ export function createAdminSnapshotHandlers({ guard, store, now = () => new Date
           stats: scan.stats,
         });
       } catch (error) {
-        context.error('recalculateDashboardStats failed:', error);
+        context.error("recalculateDashboardStats failed:", error);
         return json(500, {
-          error: 'Failed to recalculate dashboard stats',
-          message: error?.message || 'Unknown error',
+          error: "Failed to recalculate dashboard stats",
+          message: error?.message || "Unknown error",
         });
       }
     },

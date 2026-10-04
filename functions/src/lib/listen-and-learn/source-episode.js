@@ -39,14 +39,17 @@ import { synthesizeDialogue } from './speech/index.js';
 import { renderAudio, SUPPORTED_PLATFORMS, isSupportedPlatform } from './generate.js';
 import {
   EPISODE_KIND,
+  SET_CONTAINER,
   SOURCE_EPISODE_ORDER,
   STATUS,
   ensureSet,
   saveEpisode,
   saveEpisodeFailure,
+  setId,
   sourceEpisodeId,
   uploadEpisodeAudio,
 } from './publish.js';
+import { voiceSettingsOf } from './speech-settings.js';
 
 /**
  * The job that runs both kinds (functions/listen-and-learn-jobs.js). One
@@ -256,6 +259,13 @@ export async function generateSourceEpisode({
       grounding: { sources: resolved, ai, generatedAt: now },
     });
 
+    // The book's voice, when the set already exists (ADR 0033 §4); a store
+    // without `readDoc` — an older test double — reads as the defaults.
+    const existingSet =
+      typeof store?.readDoc === 'function'
+        ? await store.readDoc(SET_CONTAINER, setId(platform, examCode), setId(platform, examCode))
+        : null;
+
     audio = await renderAudio({
       script,
       platform: platform,
@@ -264,6 +274,8 @@ export async function generateSourceEpisode({
       storage,
       env,
       model: ttsModel,
+      voice: voiceSettingsOf(existingSet),
+      now,
       synthesize,
       uploadAudio,
     });
@@ -297,6 +309,7 @@ export async function generateSourceEpisode({
     now,
     kind: EPISODE_KIND.source,
     sources: resolved,
+    actorId,
   });
 
   // After the save, never before, for the reason generate.js gives: a usage

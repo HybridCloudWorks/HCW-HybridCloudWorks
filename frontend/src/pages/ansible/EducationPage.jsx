@@ -1,6 +1,7 @@
 import React from 'react';
 import { Helmet } from 'react-helmet-async';
 import EducationTracks from '@/components/shared/EducationTracks';
+import ProviderLabsSection from '@/components/labs/ProviderLabsSection';
 import {
   DATA_AS_OF,
   DATA_SOURCE,
@@ -32,6 +33,8 @@ export default function AnsibleEducationPage() {
             foundations before automating them with RHCE.
           </p>
         </header>
+        {/* The site's own Ansible lab, under this hub (ADR 0033 §8). */}
+        <ProviderLabsSection provider="ansible" />
         <EducationTracks
           certifications={certifications}
           learningPaths={learningPaths}

@@ -32,7 +32,7 @@ export function SourceChip({ item }) {
       <span className="inline-flex items-center gap-1.5 text-xs">
         <Badge variant="secondary">article</Badge>
         {item.sourceId && (
-          <Link to={`/admin/editor?id=${encodeURIComponent(item.sourceId)}`} className="underline">
+          <Link to={`/admin/editor/${encodeURIComponent(item.sourceId)}`} className="underline">
             {item.sourceTitle || item.sourceSlug || item.sourceId}
           </Link>
         )}

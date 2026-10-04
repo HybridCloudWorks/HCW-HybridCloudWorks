@@ -1,5 +1,13 @@
 import { useState } from 'react';
-import { Bot, Loader2, ChevronDown, ChevronRight, ExternalLink, Images } from 'lucide-react';
+import {
+  Bot,
+  Loader2,
+  ChevronDown,
+  ChevronRight,
+  ExternalLink,
+  History,
+  Images,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -9,6 +17,7 @@ import { useEditor } from '../context/EditorContext';
 import { ImageOrderManager } from '@/components/admin/ImageOrderManager';
 import { ImageGalleryPicker } from '@/components/admin/ImageGalleryPicker';
 import { resolveMediaUrl } from '../../../lib/functionsBase';
+import VersionHistoryDialog from './VersionHistoryDialog';
 
 function CollapsibleSection({ title, defaultOpen = false, children }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -51,6 +60,7 @@ export function MetadataTab() {
   } = useEditor();
 
   const { title, summary, tags, authorName, publishedDate, sidebarContent, draft } = fields;
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const wordCount = draft ? stripHtmlTags(draft).split(/\s+/).filter(Boolean).length : 0;
   const readMinutes = Math.max(1, Math.round(wordCount / 200));
@@ -77,6 +87,17 @@ export function MetadataTab() {
           <span>
             {wordCount} words · ~{readMinutes} min read
           </span>
+          {/* Every save writes a version (ADR 0033 §1); this is where they are read. */}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto h-6 px-2 text-xs"
+            onClick={() => setHistoryOpen(true)}
+            disabled={!blog?.id}
+          >
+            <History className="h-3 w-3 mr-1" aria-hidden="true" />
+            History
+          </Button>
         </div>
         {destinationUrl && (
           <a
@@ -244,6 +265,8 @@ export function MetadataTab() {
           Reordering and removals are stored with the next draft save or publish action.
         </p>
       </CollapsibleSection>
+
+      <VersionHistoryDialog open={historyOpen} onOpenChange={setHistoryOpen} />
 
       {scrapedImages.length > 0 && (
         <CollapsibleSection title={`Scraped images (${scrapedImages.length})`}>

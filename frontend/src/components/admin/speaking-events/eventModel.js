@@ -1,11 +1,45 @@
 /**
- * The Speaking Events Hub's pure data rules (#573), moved out of
- * SpeakingEventsPage.jsx unchanged: how a Sessionize event pairs with its
- * stored override, what a sync writes, and what a save sends. The tabs only
- * add where a row belongs (upcoming or past) and what a sync would change.
+ * The Speaking Events Hub's pure data rules (#573, ADR 0033 Spotlight slice):
+ * how a Sessionize event pairs with its stored override, what a sync writes,
+ * what a save sends, and which rows a search or status filter keeps.
+ *
+ * The rules the public widget must share — dates, the upcoming definition,
+ * the id-then-name match, the status vocabulary — live in lib/speakingEvents
+ * and are re-exported here so the hub's imports read as before.
  */
+import {
+  SPEAKING_STATUSES,
+  SPEAKING_STATUS_INFO,
+  derivedStatus,
+  getDateTimestamp,
+  isUpcoming,
+  matchStoredRow,
+  parseDateValue,
+  speakingStatusInfo,
+  storedSessionizeId,
+  toInputDate,
+} from '@/lib/speakingEvents';
 
-// Only the fields the user manually provides — Sessionize ID/name/date come from the API
+export {
+  SPEAKING_STATUSES,
+  SPEAKING_STATUS_INFO,
+  derivedStatus,
+  getDateTimestamp,
+  isUpcoming,
+  parseDateValue,
+  speakingStatusInfo,
+  toInputDate,
+};
+
+export const EMPTY_SESSION = Object.freeze({
+  title: '',
+  abstract: '',
+  slidesUrl: '',
+  videoUrl: '',
+});
+export const EMPTY_EVIDENCE = Object.freeze({ label: '', url: '' });
+
+// Only the fields the user provides — Sessionize ID/name/date come from the API.
 export const EMPTY_FORM = Object.freeze({
   description: '',
   location: '',
@@ -13,6 +47,14 @@ export const EMPTY_FORM = Object.freeze({
   presentationUrl: '',
   eventImageUrl: '',
   display: true,
+  status: 'idea',
+  cfpDeadline: '',
+  audience: '',
+  topic: '',
+  attendance: '',
+  feedback: '',
+  sessions: [],
+  evidence: [],
 });
 
 /**
@@ -24,36 +66,6 @@ export function sessionizeUrl(speakerId) {
   return `https://sessionize.com/api/speaker/json/${encodeURIComponent(String(speakerId ?? ''))}`;
 }
 
-export function parseDateValue(dateValue) {
-  if (!dateValue) return null;
-  if (typeof dateValue?.toDate === 'function') return dateValue.toDate();
-  if (dateValue instanceof Date) return dateValue;
-  if (typeof dateValue === 'string') {
-    // Accept either YYYY-MM-DD or a full ISO timestamp; anchor at local noon.
-    const match = dateValue.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (match) {
-      const [, year, month, day] = match;
-      return new Date(Number(year), Number(month) - 1, Number(day), 12);
-    }
-  }
-  const parsed = new Date(dateValue);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-export function toInputDate(isoOrStr) {
-  if (!isoOrStr) return '';
-  if (typeof isoOrStr === 'string') {
-    // Match the leading YYYY-MM-DD even if a full ISO timestamp is supplied.
-    const match = isoOrStr.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (match) return match[0];
-  }
-  const d = parseDateValue(isoOrStr);
-  if (!d) return '';
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${d.getFullYear()}-${month}-${day}`;
-}
-
 // Format date as MM/DD/YYYY
 export function formatShortDate(dateValue) {
   const d = parseDateValue(dateValue);
@@ -61,12 +73,6 @@ export function formatShortDate(dateValue) {
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${month}/${day}/${d.getFullYear()}`;
-}
-
-// Convert date value to timestamp for sorting
-export function getDateTimestamp(dateValue) {
-  const d = parseDateValue(dateValue);
-  return d ? d.getTime() : 0;
 }
 
 // Safely convert any value to a display string — handles structured location objects.
@@ -92,8 +98,7 @@ export function httpUrl(value) {
 
 // Resolve the canonical numeric ID from a stored record.
 export function fdNumericId(fd) {
-  const v = fd.eventId ?? fd.sessionizeId;
-  return v ? Number(v) : null;
+  return storedSessionizeId(fd);
 }
 
 /** Sessionize's speaker JSON, reduced to the fields the hub uses. */
@@ -110,34 +115,25 @@ export function mapSessionizeEvents(data) {
 const newestFirst = (a, b) => getDateTimestamp(b.date) - getDateTimestamp(a.date);
 
 /**
- * Each Sessionize event paired with its stored override (matched by eventId
- * only — consistent with sync), and the stored docs no Sessionize event
- * matches. Both newest first.
+ * Each Sessionize event paired with its stored override — by Sessionize id,
+ * then by name, the same two steps the public widget takes — and the stored
+ * docs no Sessionize event matches. Both newest first. When Sessionize is
+ * unreachable `sessionizeEvents` is empty and every stored row is listed
+ * here, so an outage never hides what the store holds.
  */
 export function mergeEvents(sessionizeEvents, storedDocs) {
+  const matched = new Set();
   const mergedEvents = sessionizeEvents
-    .map((se) => ({
-      ...se,
-      _storedDoc: storedDocs.find((d) => fdNumericId(d) === Number(se.id)) || null,
-    }))
-    .sort(newestFirst);
-  const manualEntries = storedDocs
-    .filter((fd) => {
-      const id = fdNumericId(fd);
-      return !(id && sessionizeEvents.some((se) => Number(se.id) === id));
+    .map((se) => {
+      const stored = matchStoredRow(se, storedDocs);
+      if (stored) matched.add(stored._docId ?? stored.id);
+      return { ...se, _storedDoc: stored || null };
     })
     .sort(newestFirst);
+  const manualEntries = storedDocs
+    .filter((fd) => !matched.has(fd._docId ?? fd.id))
+    .sort(newestFirst);
   return { mergedEvents, manualEntries };
-}
-
-/**
- * Upcoming is today or later, in local time; an undated row is upcoming too,
- * because it has not been delivered as far as anyone recorded.
- */
-export function isUpcoming(dateValue, now = new Date()) {
-  const d = parseDateValue(dateValue);
-  if (!d) return true;
-  return d >= new Date(now.getFullYear(), now.getMonth(), now.getDate());
 }
 
 /** Soonest first, undated last. */
@@ -151,13 +147,57 @@ export function splitByDate(rows, now = new Date()) {
   return { upcoming, past };
 }
 
+/** The status a Sessionize row shows: its override's, or accepted (delivered once past). */
+export function sessionizeRowStatus(ev, now = new Date()) {
+  return derivedStatus(
+    { ...ev._storedDoc, date: ev._storedDoc?.date || ev.date },
+    {
+      sessionizeBacked: true,
+      now,
+    }
+  );
+}
+
+/** The status a manual row shows: its own, or idea (delivered once past). */
+export function manualRowStatus(fd, now = new Date()) {
+  return derivedStatus(fd, { sessionizeBacked: false, now });
+}
+
+/**
+ * The rows a search box and a status filter keep. Search is over name,
+ * location, topic and audience; the status filter is over the shown status,
+ * so a Sessionize row with no override is found under "accepted".
+ */
+export function filterRows(rows, { search = '', status = '' } = {}, now = new Date()) {
+  const q = search.trim().toLowerCase();
+  const keep = (text) =>
+    !q ||
+    String(text || '')
+      .toLowerCase()
+      .includes(q);
+  const mergedEvents = rows.mergedEvents.filter((ev) => {
+    const fd = ev._storedDoc;
+    if (status && sessionizeRowStatus(ev, now) !== status) return false;
+    return keep(
+      [ev.name, safeString(fd?.location), safeString(ev.location), fd?.topic, fd?.audience].join(
+        ' '
+      )
+    );
+  });
+  const manualEntries = rows.manualEntries.filter((fd) => {
+    if (status && manualRowStatus(fd, now) !== status) return false;
+    return keep([fd.eventName, fd.name, safeString(fd.location), fd.topic, fd.audience].join(' '));
+  });
+  return { mergedEvents, manualEntries };
+}
+
 export function buildSyncPatch(existing, sessionizeEvent, sessionizeId) {
   const patch = {};
   if (!existing.eventId) patch.eventId = sessionizeId;
   if (!existing.sessionizeId) patch.sessionizeId = sessionizeId;
   if (!existing.eventName?.trim()) patch.eventName = sessionizeEvent.name;
   if (!existing.name?.trim()) patch.name = sessionizeEvent.name;
-  if (!existing.date) patch.date = sessionizeEvent.date || null;
+  if (!existing.date) patch.date = toInputDate(sessionizeEvent.date) || null;
   if (!existing.location && sessionizeEvent.location) patch.location = sessionizeEvent.location;
   if (!existing.eventUrl && sessionizeEvent.website) patch.eventUrl = sessionizeEvent.website;
   return patch;
@@ -169,10 +209,11 @@ export function buildSessionizeCreatePayload(sessionizeEvent, sessionizeId) {
     sessionizeId,
     eventName: sessionizeEvent.name,
     name: sessionizeEvent.name,
-    date: sessionizeEvent.date || null,
+    date: toInputDate(sessionizeEvent.date) || null,
     location: sessionizeEvent.location || null,
     eventUrl: sessionizeEvent.website || null,
     display: true,
+    status: 'accepted',
   };
 }
 
@@ -186,7 +227,7 @@ export function syncDifferences(sessionizeEvents, storedDocs) {
   const toPatch = [];
   for (const se of sessionizeEvents) {
     const seId = Number(se.id);
-    const existing = storedDocs.find((fd) => fdNumericId(fd) === seId);
+    const existing = matchStoredRow(se, storedDocs);
     if (!existing) toCreate.push(se);
     else if (Object.keys(buildSyncPatch(existing, se, seId)).length > 0) toPatch.push(se);
   }
@@ -196,21 +237,58 @@ export function syncDifferences(sessionizeEvents, storedDocs) {
 /**
  * Stored rows a publish would put in the public snapshot. The server's
  * sanitizer (functions/src/lib/snapshots-publish.js) keeps only
- * `display === true`, so a row with no flag is not published either.
+ * `display === true`; a Sessionize-backed row unticked becomes a tombstone
+ * that hides the Sessionize entry publicly; any other row without the flag is
+ * withheld.
  */
 export function countPublishable(storedDocs) {
   const published = storedDocs.filter((fd) => fd.display === true).length;
-  return { published, withheld: storedDocs.length - published };
+  const tombstones = storedDocs.filter(
+    (fd) => fd.display === false && storedSessionizeId(fd) !== null
+  ).length;
+  return { published, tombstones, withheld: storedDocs.length - published - tombstones };
+}
+
+const trimmedOrNull = (value) => String(value ?? '').trim() || null;
+
+function cleanSessions(sessions) {
+  return (sessions || [])
+    .map((s) => ({
+      title: String(s.title || '').trim(),
+      abstract: String(s.abstract || '').trim(),
+      slidesUrl: httpUrl(s.slidesUrl),
+      videoUrl: httpUrl(s.videoUrl),
+    }))
+    .filter((s) => s.title);
+}
+
+function cleanEvidence(evidence) {
+  return (evidence || [])
+    .map((e) => ({ label: String(e.label || '').trim(), url: httpUrl(e.url) }))
+    .filter((e) => e.url)
+    .map((e) => ({ label: e.label || e.url, url: e.url }));
 }
 
 function buildBaseSpeakingPayload(form) {
+  const attendance = Number(form.attendance);
   return {
-    description: form.description.trim() || null,
-    location: form.location.trim() || null,
-    eventUrl: form.eventUrl.trim() || null,
-    presentationUrl: form.presentationUrl.trim() || null,
-    eventImageUrl: form.eventImageUrl.trim() || null,
+    description: trimmedOrNull(form.description),
+    location: trimmedOrNull(form.location),
+    eventUrl: trimmedOrNull(form.eventUrl),
+    presentationUrl: trimmedOrNull(form.presentationUrl),
+    eventImageUrl: trimmedOrNull(form.eventImageUrl),
     display: form.display,
+    status: SPEAKING_STATUSES.includes(form.status) ? form.status : 'idea',
+    cfpDeadline: form.cfpDeadline || null,
+    audience: trimmedOrNull(form.audience),
+    topic: trimmedOrNull(form.topic),
+    attendance:
+      form.attendance === '' || form.attendance === null || !Number.isFinite(attendance)
+        ? null
+        : Math.max(0, Math.floor(attendance)),
+    feedback: trimmedOrNull(form.feedback),
+    sessions: cleanSessions(form.sessions),
+    evidence: cleanEvidence(form.evidence),
   };
 }
 
@@ -229,7 +307,7 @@ function buildSessionizeSpeakingPayload(editingEvent) {
   if (!existingDoc?.sessionizeId) payload.sessionizeId = Number(editingEvent.id);
   if (!existingDoc?.eventName?.trim()) payload.eventName = editingEvent.name;
   if (!existingDoc?.name?.trim()) payload.name = editingEvent.name;
-  if (!existingDoc?.date && editingEvent.date) payload.date = editingEvent.date;
+  if (!existingDoc?.date && editingEvent.date) payload.date = toInputDate(editingEvent.date);
   return payload;
 }
 
@@ -239,6 +317,30 @@ export function buildSpeakingEventPayload(editingEvent, form) {
     ? buildSessionizeSpeakingPayload(editingEvent)
     : buildManualSpeakingPayload(form);
   return Object.assign(payload, identity);
+}
+
+/** The structured fields of a stored row, as the form holds them. */
+function formDetails(fd, fallbackStatus) {
+  return {
+    status: SPEAKING_STATUSES.includes(fd?.status) ? fd.status : fallbackStatus,
+    cfpDeadline: toInputDate(fd?.cfpDeadline),
+    audience: fd?.audience || '',
+    topic: fd?.topic || '',
+    attendance:
+      fd?.attendance === null || fd?.attendance === undefined ? '' : String(fd.attendance),
+    feedback: fd?.feedback || '',
+    sessions: Array.isArray(fd?.sessions)
+      ? fd.sessions.map((s) => ({
+          ...EMPTY_SESSION,
+          ...s,
+          slidesUrl: s.slidesUrl || '',
+          videoUrl: s.videoUrl || '',
+        }))
+      : [],
+    evidence: Array.isArray(fd?.evidence)
+      ? fd.evidence.map((e) => ({ ...EMPTY_EVIDENCE, ...e }))
+      : [],
+  };
 }
 
 /** The form for enriching a Sessionize event, prefilled from its override. */
@@ -251,6 +353,7 @@ export function formFromSessionize(sessionizeEvent) {
     presentationUrl: fd?.presentationUrl || '',
     eventImageUrl: fd?.eventImageUrl || '',
     display: fd?.display !== false,
+    ...formDetails(fd, 'accepted'),
   };
 }
 
@@ -263,6 +366,7 @@ export function formFromManual(fd) {
     presentationUrl: fd.presentationUrl || '',
     eventImageUrl: fd.eventImageUrl || '',
     display: fd.display !== false,
+    ...formDetails(fd, 'idea'),
     _manualName: fd.eventName || fd.name || '',
     _manualDate: toInputDate(fd.date),
   };

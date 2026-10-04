@@ -4,15 +4,17 @@
  * A row of group buttons (Communication, Content, Education, …) picks which
  * group's cards show. The group is in the URL as `?group=`, so a link can open
  * straight onto one. Each card carries its description, its docs link, its
- * test, and the names and lights of the keys it uses; the keys themselves are
- * changed on the Keys tab.
+ * test, what it is for, and the names and lights of the keys it uses; the keys
+ * themselves are changed on the Keys tab, and the card says so where a reader
+ * would look for Disconnect.
  *
  * Loads its own credential status. When that read fails the cards still
  * render — every one has a link and most have a test, and neither needs the
- * lights — and the error says why the key lines are missing.
+ * lights — and the error says why the key lines are missing. The persisted
+ * test record (ADR 0033) is the page's, asked for once on first mount.
  */
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { buildIntegrationView } from './integrationView';
 import { SERVICES, SERVICE_GROUPS } from './serviceRegistry';
 import ServiceCard from './ServiceCard';
@@ -68,6 +70,10 @@ function LooseKeysNote({ count, onOpenKeys }) {
 export default function IntegrationsServices({ group, onGroupChange, onOpenKeys, tests }) {
   const { data, loading, error, reload } = useSecretStatus();
   const { speakerId, setSpeakerId, loading: loadingSpeaker } = useSpeakerId();
+  const { ensurePersisted } = tests;
+  useEffect(() => {
+    ensurePersisted?.();
+  }, [ensurePersisted]);
 
   const { serviceGroups } = buildIntegrationView({
     services: SERVICES,
@@ -100,8 +106,10 @@ export default function IntegrationsServices({ group, onGroupChange, onOpenKeys,
               key={service.id}
               service={service}
               result={tests.results[service.id]}
+              record={tests.persisted?.[service.id]}
               testing={tests.testing.has(service.id)}
               onTest={() => tests.runTest(service, speakerId.trim())}
+              onOpenKeys={onOpenKeys}
             >
               {service.setting === 'sessionizeSpeakerId' ? (
                 <SessionizeSetting

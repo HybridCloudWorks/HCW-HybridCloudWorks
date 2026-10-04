@@ -15,7 +15,10 @@ import { renderHook, act, waitFor } from '@testing-library/react';
 
 vi.mock('@/lib/api', () => ({ postJSON: vi.fn() }));
 vi.mock('@/lib/auditLog', () => ({ logAdminAction: vi.fn(async () => {}) }));
-vi.mock('@/lib/contentWorkflow', () => ({ requestContentInspection: vi.fn(async () => {}) }));
+vi.mock('@/lib/contentWorkflow', () => ({
+  requestContentInspection: vi.fn(async () => {}),
+  unpublishToInspected: vi.fn(async () => ({})),
+}));
 vi.mock('@/lib/contentModel', () => ({ getPublishTargetForItem: vi.fn(() => 'blog') }));
 
 const { postJSON } = await import('@/lib/api');
@@ -192,7 +195,15 @@ describe('bulk reject', () => {
     expect(state.items.map((i) => i.id)).toEqual(['c']);
     expect(result.current.bulkDeleteMessage).toBe('Rejected 2 items.');
     expect(result.current.selectedIds.size).toBe(0);
-    expect(logAdminAction).toHaveBeenCalledWith('content_rejected', { contentId: 'a', bulk: true });
+    // The server records every transition in `audits`; the client copy that
+    // doubled it is gone (ADR 0033 §1).
+    expect(logAdminAction).not.toHaveBeenCalled();
+    expect(postJSON).toHaveBeenCalledWith('transitionContentStatus', {
+      contentId: 'a',
+      newStatus: 'rejected',
+      markLive: false,
+      reviewNotes: 'Bulk rejected from queue',
+    });
   });
 
   it('does not stop at the first failure, and keeps only what failed', async () => {
@@ -232,7 +243,7 @@ describe('bulk reject', () => {
     });
 
     expect(result.current.actionError.b).toBe('Reject failed: conflict');
-    expect(result.current.actionError.a).toBeUndefined();
+    expect(result.current.actionError.a).toBeFalsy();
     expect(result.current.bulkDeleteMessage).toMatch(/Rejected 2 items\./);
     expect(result.current.bulkDeleteMessage).toMatch(/1 failed/);
   });
@@ -334,8 +345,25 @@ describe('single-item actions', () => {
 
     expect(postJSON).toHaveBeenCalledWith(
       'transitionContentStatus',
-      expect.objectContaining({ contentId: 'a', newStatus: 'approved_blog', markLive: false })
+      expect.objectContaining({ contentId: 'a', newStatus: 'approved', markLive: false })
     );
+    expect(state.items.map((i) => i.id)).toEqual(['b', 'c']);
+    expect(logAdminAction).not.toHaveBeenCalled();
+  });
+
+  it('restores a rejected item with one request — the server clears its rejection marker', async () => {
+    postJSON.mockResolvedValue({ success: true });
+    const { result, state } = setup({ statusFilter: 'rejected' });
+    act(() => result.current.handleRestore('a'));
+    await act(async () => {
+      await result.current.handleConfirm();
+    });
+    expect(postJSON).toHaveBeenCalledTimes(1);
+    expect(postJSON).toHaveBeenCalledWith('transitionContentStatus', {
+      contentId: 'a',
+      newStatus: 'inspected',
+      reviewNotes: 'Restored from rejected status',
+    });
     expect(state.items.map((i) => i.id)).toEqual(['b', 'c']);
   });
 

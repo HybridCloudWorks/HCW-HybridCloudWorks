@@ -102,6 +102,9 @@ describe('claimLabJob', () => {
     expect(Object.keys(body.job).sort()).toEqual(['id', 'payload', 'payloadEncoding', 'type']);
     // A document from before #675 carries no encoding and is text.
     expect(body.job.payloadEncoding).toBe('text');
+    // FIFO in the query too, so TOP 20 is the twenty oldest candidates and
+    // not an arbitrary twenty sorted afterwards (ADR 0033).
+    expect(store.queryDocs.mock.calls[0][1]).toMatch(/ORDER BY c\.createdAt ASC/);
   });
 
   it('passes a tar payload encoding through to the agent, and nothing else', async () => {
@@ -114,7 +117,9 @@ describe('claimLabJob', () => {
     expect(body.job.payloadEncoding).toBe('tar');
 
     store.queryDocs = vi.fn(async () => [job({ id: 'odd', payloadEncoding: 'zip' })]);
-    const odd = parse(await make(allowGuard(), store).claimLabJob(req({ agentId: 'vps-1' }), context));
+    const odd = parse(
+      await make(allowGuard(), store).claimLabJob(req({ agentId: 'vps-1' }), context)
+    );
     expect(odd.job.payloadEncoding).toBe('text');
   });
 

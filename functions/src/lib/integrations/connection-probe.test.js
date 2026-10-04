@@ -38,11 +38,15 @@ const ENV = {
   YOUTUBE_API_KEY: YT_KEY,
   RESEND_API_KEY: RESEND_KEY,
   QLTY_API_TOKEN: QLTY_TOKEN,
+  REPLICATE_API_KEY: 'not-a-real-replicate-key-EXAMPLE-VALUE-FOR-TESTS',
+  FIRECRAWL_API_KEY: 'not-a-real-firecrawl-key-EXAMPLE-VALUE-FOR-TESTS',
 };
 
 const readKey = (env, name) => (typeof env?.[name] === 'string' ? env[name].trim() : '');
 
-const allow = { requireRole: vi.fn(async () => ({ user: { role: 'editor' } })) };
+const allow = {
+  requireRole: vi.fn(async () => ({ user: { role: 'editor' } })),
+};
 const ctx = () => ({ error: vi.fn(), warn: vi.fn(), log: vi.fn() });
 
 const req = (body) => ({ json: async () => body });
@@ -56,7 +60,9 @@ function respond({ ok = true, status = 200, text = '{}' }) {
 
 describe('redactSecrets', () => {
   it('blanks a credential wherever it appears', () => {
-    expect(redactSecrets(`GET /bot${TOKEN}/getMe failed`, [TOKEN])).toBe('GET /bot***/getMe failed');
+    expect(redactSecrets(`GET /bot${TOKEN}/getMe failed`, [TOKEN])).toBe(
+      'GET /bot***/getMe failed'
+    );
   });
 
   it('leaves a short value alone rather than corrupting the sentence', () => {
@@ -109,7 +115,15 @@ describe('assertUrlSafe', () => {
 
 describe('the probe table', () => {
   it('is closed, and every entry is a GET with no caller-supplied component', () => {
-    expect(PROBE_NAMES).toEqual(['telegram', 'rsscom', 'youtube', 'resend', 'qlty']);
+    expect(PROBE_NAMES).toEqual([
+      'telegram',
+      'rsscom',
+      'youtube',
+      'resend',
+      'qlty',
+      'replicate',
+      'firecrawl',
+    ]);
     for (const name of PROBE_NAMES) {
       const probe = PROBES[name];
       const { url, headers } = probe.buildRequest({ values: ENV });
@@ -132,6 +146,20 @@ describe('the probe table', () => {
     expect(PROBES.resend.reportsKeyVerdict).toBe(false);
     // A Qlty 403 could be the token's scope rather than a dead token.
     expect(PROBES.qlty.reportsKeyVerdict).toBe(false);
+    // Neither provider's 401/403 split has been measured here (ADR 0033).
+    expect(PROBES.replicate.reportsKeyVerdict).toBe(false);
+    expect(PROBES.firecrawl.reportsKeyVerdict).toBe(false);
+  });
+
+  it('asks Replicate and Firecrawl read-only questions that spend nothing', () => {
+    expect(PROBES.replicate.settings).toEqual(['REPLICATE_API_KEY']);
+    expect(PROBES.replicate.buildRequest({ values: ENV }).url).toBe(
+      'https://api.replicate.com/v1/account'
+    );
+    expect(PROBES.firecrawl.settings).toEqual(['FIRECRAWL_API_KEY']);
+    expect(PROBES.firecrawl.buildRequest({ values: ENV }).url).toBe(
+      'https://api.firecrawl.dev/v1/team/credit-usage'
+    );
   });
 
   it('asks Qlty who the token belongs to, a read that depends on no project', () => {
@@ -268,18 +296,30 @@ describe('createConnectionProbe', () => {
         text: '{"ok":false,"error_code":401,"description":"Unauthorized"}',
       }),
     })(req({ probe: 'telegram' }), ctx());
-    expect(bodyOf(res)).toMatchObject({ ok: false, status: 401, error: 'Unauthorized' });
+    expect(bodyOf(res)).toMatchObject({
+      ok: false,
+      status: 401,
+      error: 'Unauthorized',
+    });
   });
 
   it('records a Telegram rejection against the bot token', async () => {
     const onKeyVerdict = vi.fn(async () => {});
     await build({
       onKeyVerdict,
-      fetch: respond({ ok: false, status: 401, text: '{"description":"Unauthorized"}' }),
+      fetch: respond({
+        ok: false,
+        status: 401,
+        text: '{"description":"Unauthorized"}',
+      }),
     })(req({ probe: 'telegram' }), ctx());
     expect(onKeyVerdict).toHaveBeenCalledWith(
       'TELEGRAM_BOT_TOKEN',
-      expect.objectContaining({ ok: false, status: 401, detail: 'Unauthorized' })
+      expect.objectContaining({
+        ok: false,
+        status: 401,
+        detail: 'Unauthorized',
+      })
     );
   });
 
@@ -288,7 +328,11 @@ describe('createConnectionProbe', () => {
       const onKeyVerdict = vi.fn(async () => {});
       await build({
         onKeyVerdict,
-        fetch: respond({ ok: false, status: 403, text: '{"message":"quotaExceeded"}' }),
+        fetch: respond({
+          ok: false,
+          status: 403,
+          text: '{"message":"quotaExceeded"}',
+        }),
       })(req({ probe }), ctx());
       expect(onKeyVerdict, probe).not.toHaveBeenCalled();
     }

@@ -6,23 +6,70 @@
  * will publish, and the local `social_posts` records are what this hub believes
  * it scheduled. A post deleted in Publer's own UI leaves a record here, which
  * is the point of showing both.
+ *
+ * A local record can be edited and moved here (ADR 0033 Amplify slice):
+ * PATCH cms/social-posts/{id} changes the caption or the time, and the
+ * change feed pushes the new text and time to Publer for every post id it
+ * holds. Deletes confirm first.
+ *
+ * The state is useSocialQueue; this file is the cards and the three bodies
+ * the tab can show, first match wins (PR #841).
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { useToast } from '@/components/ui/use-toast';
-import { AlertCircle, CheckCircle, Clock, Loader2, RefreshCw, Trash2 } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import {
-  deleteSocialPostDoc,
-  listSocialPosts,
-  publerCallFailed,
-  publerDeletePost,
-  publerListPosts,
-  readPublerPosts,
-} from './publerApi';
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import ConfirmModal from '@/components/admin/ConfirmModal';
+import EmptyState from '@/components/admin/shared/EmptyState';
+import StatusBadge from '@/components/admin/shared/StatusBadge';
+import { useToast } from '@/components/ui/use-toast';
+import { AlertCircle, Clock, Loader2, Pencil, RefreshCw, Trash2 } from 'lucide-react';
+import { sendJSON } from '@/lib/api';
 import { firstText, fmtDate } from './socialView';
 import { PlatformBadge } from './shared';
+import useSocialQueue from './useSocialQueue';
+
+/** A record's status as the shared vocabulary reads it. */
+const recordStatus = (post) => {
+  const status = String(post.status || 'scheduled');
+  if (post.syncStatus === 'failed') {
+    return {
+      id: 'failed',
+      label: 'Sync failed',
+      tone: 'bad',
+      help: post.syncError || 'Publer did not take the last change.',
+    };
+  }
+  if (status === 'published')
+    return { id: 'published', label: 'Published', tone: 'ok', help: 'Publer posted it.' };
+  if (status === 'failed')
+    return { id: 'failed', label: 'Failed', tone: 'bad', help: 'Publer could not post it.' };
+  return {
+    id: status,
+    label: status.charAt(0).toUpperCase() + status.slice(1),
+    tone: 'warn',
+    help: 'Waiting for its time.',
+  };
+};
+
+/** `YYYY-MM-DDTHH:MM` local, for a datetime-local input. */
+function localInputValue(iso) {
+  const date = new Date(iso);
+  if (!iso || Number.isNaN(date.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
 
 /** One post Publer is holding, with the delete that removes it there. */
 function PublerQueueCard({ post, deleting, onDelete }) {
@@ -51,7 +98,12 @@ function PublerQueueCard({ post, deleting, onDelete }) {
           <Badge variant="secondary" className="capitalize text-[10px]">
             {firstText([post.status, post.state], 'scheduled')}
           </Badge>
-          <DeleteButton disabled={!post.id} busy={deleting} onClick={() => onDelete(post.id)} />
+          <DeleteButton
+            label={`Delete Publer post ${text.slice(0, 40)}`}
+            disabled={!post.id}
+            busy={deleting}
+            onClick={() => onDelete(post)}
+          />
         </div>
       </div>
     </Card>
@@ -59,7 +111,8 @@ function PublerQueueCard({ post, deleting, onDelete }) {
 }
 
 /** One social_posts record this hub wrote when it scheduled something. */
-function LocalRecordCard({ post, deleting, onDelete }) {
+function LocalRecordCard({ post, deleting, onDelete, onEdit }) {
+  const editable = post.status !== 'published';
   return (
     <Card className="p-4">
       <div className="flex items-start gap-3">
@@ -75,20 +128,30 @@ function LocalRecordCard({ post, deleting, onDelete }) {
                 {fmtDate(post.scheduledAt)}
               </span>
             )}
+            {post.syncStatus === 'pending' && (
+              <span className="text-[10px] text-muted-foreground">Publer update pending</span>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <Badge
-            variant="secondary"
-            className={`capitalize text-[10px] ${
-              post.status === 'published'
-                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                : ''
-            }`}
-          >
-            {post.status || 'scheduled'}
-          </Badge>
-          <DeleteButton busy={deleting} onClick={() => onDelete(post.id)} />
+          <StatusBadge status={recordStatus(post)} size="xs" />
+          {editable && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              aria-label={`Edit post ${(post.caption || '').slice(0, 40)}`}
+              title="Edit the caption or move the time"
+              onClick={() => onEdit(post)}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+          )}
+          <DeleteButton
+            label={`Delete record ${(post.caption || '').slice(0, 40)}`}
+            busy={deleting}
+            onClick={() => onDelete(post)}
+          />
         </div>
       </div>
     </Card>
@@ -96,13 +159,14 @@ function LocalRecordCard({ post, deleting, onDelete }) {
 }
 
 /** The trash button both cards use, spinner and all. */
-function DeleteButton({ busy, disabled = false, onClick }) {
+function DeleteButton({ label, busy, disabled = false, onClick }) {
   return (
     <Button
       variant="ghost"
       size="icon"
       className="h-7 w-7 text-destructive hover:bg-destructive/10"
       disabled={disabled || busy}
+      aria-label={label}
       onClick={onClick}
     >
       {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
@@ -110,99 +174,139 @@ function DeleteButton({ busy, disabled = false, onClick }) {
   );
 }
 
-export default function QueueTab() {
+/** Edit a record's caption and, while it is still scheduled, its time. */
+function EditRecordDialog({ post, onClose, onSaved }) {
   const { toast } = useToast();
-
-  const [publerPosts, setPublerPosts] = useState([]);
-  const [publerNotice, setPublerNotice] = useState('');
-  const [localPosts, setLocalPosts] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [caption, setCaption] = useState(post.caption || '');
+  const [when, setWhen] = useState(localInputValue(post.scheduledAt));
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [deletingId, setDeletingId] = useState(null);
+  const canMove = post.status === 'scheduled' && Boolean(post.scheduledAt);
 
-  const load = useCallback(async () => {
+  const save = async (event) => {
+    event.preventDefault();
+    const body = {};
+    if (caption.trim() !== (post.caption || '')) body.caption = caption.trim();
+    if (
+      canMove &&
+      when &&
+      new Date(when).toISOString() !== new Date(post.scheduledAt).toISOString()
+    ) {
+      if (new Date(when).getTime() <= Date.now()) {
+        setError('That time has passed. Pick a time in the future.');
+        return;
+      }
+      body.scheduledAt = new Date(when).toISOString();
+    }
+    if (Object.keys(body).length === 0) {
+      onClose();
+      return;
+    }
+    setBusy(true);
     setError('');
     try {
-      const [publerRes, snap] = await Promise.all([
-        publerListPosts('scheduled').catch(publerCallFailed),
-        listSocialPosts(),
-      ]);
-      const { posts, notice } = readPublerPosts(publerRes);
-      setPublerPosts(posts);
-      setPublerNotice(notice);
-      setLocalPosts(Array.isArray(snap) ? snap : []);
+      const res = await sendJSON(`cms/social-posts/${encodeURIComponent(post.id)}`, 'PATCH', body);
+      toast({
+        title: 'Post updated',
+        description:
+          res?.publer?.push === 'change-feed'
+            ? 'Publer is being updated now.'
+            : 'Publer has not reported this post yet; the next sync carries the change.',
+      });
+      onSaved(res?.item || { ...post, ...body });
     } catch (err) {
-      // A failed read empties both lists rather than leaving rows beside an
-      // error saying they could not be read (#555).
-      setPublerPosts([]);
-      setLocalPosts([]);
-      setError(err?.message || 'Could not load the queue.');
+      setError(err.message);
     } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    queueMicrotask(() => {
-      load();
-    });
-  }, [load]);
-
-  const refresh = () => {
-    setLoading(true);
-    load();
-  };
-
-  const handleDeletePubler = async (postId) => {
-    // Ignore a second click while the first delete is unanswered rather than
-    // sending it twice (#555).
-    if (deletingId) return;
-    setDeletingId(postId);
-    try {
-      await publerDeletePost(postId);
-      setPublerPosts((prev) => prev.filter((p) => p.id !== postId));
-      toast({ title: 'Post deleted from Publer' });
-    } catch (err) {
-      toast({ title: 'Delete failed', description: err.message, variant: 'destructive' });
-    } finally {
-      setDeletingId(null);
+      setBusy(false);
     }
   };
 
-  const handleDeleteLocal = async (docId) => {
-    if (deletingId) return;
-    setDeletingId(docId);
-    try {
-      await deleteSocialPostDoc(docId);
-      setLocalPosts((prev) => prev.filter((p) => p.id !== docId));
-      toast({ title: 'Post record removed' });
-    } catch (err) {
-      toast({ title: 'Delete failed', description: err.message, variant: 'destructive' });
-    } finally {
-      setDeletingId(null);
-    }
-  };
+  return (
+    <Dialog open onOpenChange={(isOpen) => !isOpen && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <form onSubmit={save} className="space-y-4">
+          <DialogHeader>
+            <DialogTitle>Edit post</DialogTitle>
+            <DialogDescription>
+              The change is pushed to Publer for every account this post went to.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label htmlFor="social-edit-caption">Caption</Label>
+            <Textarea
+              id="social-edit-caption"
+              rows={4}
+              maxLength={5000}
+              value={caption}
+              onChange={(event) => setCaption(event.target.value)}
+            />
+          </div>
+          {canMove && (
+            <div className="space-y-1.5">
+              <Label htmlFor="social-edit-when">
+                Posts at ({Intl.DateTimeFormat().resolvedOptions().timeZone})
+              </Label>
+              <Input
+                id="social-edit-when"
+                type="datetime-local"
+                value={when}
+                onChange={(event) => setWhen(event.target.value)}
+              />
+            </div>
+          )}
+          {error && (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          )}
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button type="button" variant="outline" onClick={onClose} disabled={busy}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={busy || !caption.trim()}>
+              {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
+function QueueLoading() {
+  return (
+    <div className="flex items-center justify-center py-12">
+      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+    </div>
+  );
+}
 
-  if (error) {
-    return (
-      <div className="flex flex-col items-center py-8 gap-3 text-destructive">
-        <AlertCircle className="h-6 w-6" />
-        <p className="text-sm">{error}</p>
-        <Button variant="outline" size="sm" onClick={refresh}>
-          Retry
-        </Button>
-      </div>
-    );
-  }
+function QueueUnavailable({ error, refresh }) {
+  return (
+    <EmptyState
+      variant="error"
+      title="The queue could not be read"
+      description={error}
+      onRetry={refresh}
+    />
+  );
+}
 
+/** Publer's queue above, the hub's own records below, and the two dialogs. */
+function QueueLists({
+  publerPosts,
+  publerNotice,
+  localPosts,
+  deletingId,
+  pendingDelete,
+  setPendingDelete,
+  editing,
+  setEditing,
+  refresh,
+  confirmDelete,
+  applyEdit,
+}) {
   const totalPubler = publerPosts.length;
   const totalLocal = localPosts.length;
 
@@ -232,10 +336,11 @@ export default function QueueTab() {
         )}
 
         {!publerNotice && totalPubler === 0 && (
-          <div className="flex flex-col items-center py-8 gap-2 text-muted-foreground">
-            <CheckCircle className="h-8 w-8 text-emerald-400" />
-            <p className="text-sm font-medium">No scheduled posts in Publer</p>
-          </div>
+          <EmptyState
+            compact
+            title="No scheduled posts in Publer"
+            description="Compose a post with a time and it appears here until Publer posts it."
+          />
         )}
 
         {publerPosts.map((post, index) => (
@@ -243,7 +348,7 @@ export default function QueueTab() {
             key={post.id ?? `publer-${index}`}
             post={post}
             deleting={deletingId === post.id}
-            onDelete={handleDeletePubler}
+            onDelete={(target) => setPendingDelete({ kind: 'publer', post: target })}
           />
         ))}
       </div>
@@ -262,11 +367,44 @@ export default function QueueTab() {
               key={post.id}
               post={post}
               deleting={deletingId === post.id}
-              onDelete={handleDeleteLocal}
+              onDelete={(target) => setPendingDelete({ kind: 'local', post: target })}
+              onEdit={setEditing}
             />
           ))}
         </div>
       )}
+
+      <ConfirmModal
+        open={Boolean(pendingDelete)}
+        title={
+          pendingDelete?.kind === 'publer' ? 'Delete this post from Publer?' : 'Remove this record?'
+        }
+        description={
+          pendingDelete?.kind === 'publer'
+            ? 'Publer will not post it. This cannot be undone.'
+            : 'The record is removed here and the post is deleted from Publer when Publer has it. This cannot be undone.'
+        }
+        confirmLabel="Delete"
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={confirmDelete}
+      />
+
+      {editing && (
+        <EditRecordDialog post={editing} onClose={() => setEditing(null)} onSaved={applyEdit} />
+      )}
     </div>
   );
+}
+
+/** The three bodies the tab can show, first match wins. */
+const QUEUE_VIEWS = [
+  [(q) => q.loading, QueueLoading],
+  [(q) => Boolean(q.error), QueueUnavailable],
+  [() => true, QueueLists],
+];
+
+export default function QueueTab() {
+  const queue = useSocialQueue();
+  const [, View] = QUEUE_VIEWS.find(([when]) => when(queue));
+  return <View {...queue} />;
 }

@@ -8,359 +8,98 @@
  *   view="drafts"  (Drafts tab) holds kept drafts, and is where one is
  *                  approved — the owner's layout of 2026-09-13.
  *
- * Scheduled and sent issues leave both views for the Published calendar
- * (NewsletterCalendar). Nothing goes to subscribers until Approve is pressed
+ * Scheduled, sent and failed issues leave both views for the Published tab
+ * (NewsletterPublished). Nothing goes to subscribers until Approve is pressed
  * and confirmed, because it cannot be undone from here once Resend has it.
  * Approval sends the version the page is showing; if the issue changed since,
  * the server refuses it.
  *
  * The open issue is edited in IssueDetail (subject, preview text, note,
- * sections, AI intro and subjects, a test send to the owner). This file owns
- * the list, the selection and every request, so all of them share `run`: one
- * action at a time, the selection locked while it runs, and a 409 re-reads
- * the issue.
+ * sections, AI intro and subjects, a test send to the owner). The list is
+ * IssueList.jsx, the state and requests are useNewsletterIssues.js over
+ * issuesModel.js and issueActions.js (PR #841); this file puts them together
+ * and holds the one question it asks: the red X's confirmation.
  */
-import React, { useCallback, useEffect, useState } from 'react';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { AlertCircle, CheckCircle, Loader2, PenTool, RefreshCw, X } from 'lucide-react';
-import { getJSON, postJSON, sendJSON } from '@/lib/api';
-import { runJob } from '@/lib/jobs';
+import React, { useState } from 'react';
+import ConfirmModal from '@/components/admin/ConfirmModal';
 import IssueDetail from './IssueDetail';
-import { STATUS_LABELS, formatWhen } from './issueFormat';
+import { IssueList, IssuesHeader, Notice } from './IssueList';
+import { formatWhen } from './issueFormat';
+import { issueLabel } from './issuesModel';
+import useNewsletterIssues from './useNewsletterIssues';
 
 export { formatWhen };
 
-/** The server allows one test send per issue a minute (429 inside it). */
-const TEST_COOLDOWN_MS = 60_000;
-
-/** Which issues each view shows. Anything scheduled or sent is on the calendar. */
-const IN_VIEW = {
-  review: (row) => (row.status === 'draft' && !row.savedAt) || row.status === 'rejected',
-  drafts: (row) => (row.status === 'draft' && Boolean(row.savedAt)) || row.status === 'sending',
-};
-
-/** What the server will delete: nothing that was approved. */
-const DELETABLE = new Set(['draft', 'rejected']);
-
-function Notice({ notice }) {
-  if (!notice) return null;
+/** The red X's question. Nothing is sent until it is answered (ADR 0033: destructive actions confirm). */
+function DeleteConfirm({ row, onCancel, onConfirm }) {
   return (
-    <p
-      role={notice.ok ? 'status' : 'alert'}
-      className={`text-sm flex items-start gap-2 ${notice.ok ? 'text-emerald-600' : 'text-destructive'}`}
-    >
-      {notice.ok ? (
-        <CheckCircle className="h-4 w-4 mt-0.5 shrink-0" />
-      ) : (
-        <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-      )}
-      {notice.message}
-    </p>
+    <ConfirmModal
+      open={Boolean(row)}
+      title={row ? `Delete ${issueLabel(row.id)}?` : ''}
+      description="The issue is removed from this list. Nothing was sent, so nothing reaches subscribers."
+      confirmLabel="Delete"
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
   );
 }
 
-export default function NewsletterIssues({ view = 'review', settingsVersion = 0 }) {
-  const [issues, setIssues] = useState([]);
-  const [selectedId, setSelectedId] = useState(null);
-  const [detail, setDetail] = useState(null);
-  const [busy, setBusy] = useState('');
-  const [notice, setNotice] = useState(null);
-  // Issue id -> when its next test send is allowed (ms). Held here, not in
-  // IssueDetail, so the countdown survives a save that remounts the detail.
-  const [testReadyAt, setTestReadyAt] = useState({});
+/** The open issue, when it is one of this view's rows; else null. */
+const openIssue = (detail, rows) =>
+  detail?.issue && rows.some((row) => row.id === detail.issue.id) ? detail.issue : null;
 
-  const loadList = useCallback(async () => {
-    const res = await getJSON('cms/newsletters');
-    setIssues(res.issues || []);
-    return res.issues || [];
-  }, []);
-
-  const loadDetail = useCallback(async (id) => {
-    setDetail(await getJSON(`cms/newsletters/${id}`));
-  }, []);
-
-  const rows = issues.filter(IN_VIEW[view] ?? IN_VIEW.review);
-
-  useEffect(() => {
-    // Deferred, like the rest of the admin pages: the effect starts a fetch
-    // and the state is set when it answers, not synchronously in the effect.
-    queueMicrotask(() => {
-      loadList().catch((err) => setNotice({ ok: false, message: err.message }));
-    });
-  }, [loadList]);
-
-  // Keep the selection inside this view: after a keep, an approval or a delete
-  // the open issue leaves it, and the next one (if any) opens instead.
-  useEffect(() => {
-    if (busy) return;
-    const ids = issues.filter(IN_VIEW[view] ?? IN_VIEW.review).map((row) => row.id);
-    if (selectedId && ids.includes(selectedId)) return;
-    queueMicrotask(() => {
-      setSelectedId(ids[0] ?? null);
-      if (!ids.length) setDetail(null);
-    });
-  }, [issues, view, selectedId, busy]);
-
-  useEffect(() => {
-    if (!selectedId) return;
-    queueMicrotask(() => {
-      loadDetail(selectedId).catch((err) => setNotice({ ok: false, message: err.message }));
-    });
-  }, [selectedId, loadDetail, settingsVersion]);
-
-  const run = async (label, action) => {
-    setBusy(label);
-    setNotice(null);
-    try {
-      return await action();
-    } catch (err) {
-      setNotice({ ok: false, message: err.message });
-      // Someone else changed this issue since it was loaded: show what is
-      // stored now, so the next attempt is made against the current version.
-      if (err?.status === 409 && selectedId) {
-        await Promise.all([loadDetail(selectedId), loadList()]).catch(() => {});
-      }
-    } finally {
-      setBusy('');
-    }
+export default function NewsletterIssues({ view = 'review' }) {
+  const panel = useNewsletterIssues(view);
+  const { rows, selectedId, detail, busy, notice, testReadyAt } = panel;
+  // The row whose red X was pressed, until the dialog answers.
+  const [pendingDelete, setPendingDelete] = useState(null);
+  const confirmDelete = () => {
+    const row = pendingDelete;
+    setPendingDelete(null);
+    panel.remove(row);
   };
-
-  const handleBuild = () =>
-    run('build', async () => {
-      // No days: the window saved in Newsletter settings → Content applies (#557).
-      const job = await runJob('build-newsletter-issue', {});
-      if (job.status !== 'succeeded') throw new Error(job.error || `Build ${job.status}`);
-      const result = job.result || {};
-      setNotice({ ok: result.success === true, message: result.message || 'No issue was built.' });
-      await loadList();
-      if (!result.issueId) return;
-      // A new id is loaded by the selection effect; the SAME id (a same-day
-      // rebuild) does not change the selection, so only then load it here.
-      if (result.issueId === selectedId) {
-        await loadDetail(result.issueId);
-      } else {
-        setSelectedId(result.issueId);
-      }
-    });
-
-  const handleKeep = () =>
-    run('keep', async () => {
-      await postJSON(`cms/newsletters/${selectedId}/save`, { etag: detail?.issue?.etag });
-      setNotice({ ok: true, message: 'Kept — it is on the Drafts tab.' });
-      await loadList();
-    });
-
-  /** The card's red X: deletes at once, with the etag the list row carries. */
-  const handleDelete = (row) =>
-    run('delete', async () => {
-      await sendJSON(`cms/newsletters/${row.id}`, 'DELETE', { etag: row.etag });
-      if (row.id === selectedId) setDetail(null);
-      setNotice({ ok: true, message: `Deleted ${row.id.replace('issue-', '')}.` });
-      await loadList();
-    });
-
-  const handleSave = (patch) =>
-    run('save', async () => {
-      // The version this edit was made against; the server refuses a stale one.
-      setDetail(
-        await sendJSON(`cms/newsletters/${selectedId}`, 'PATCH', {
-          ...patch,
-          etag: detail?.issue?.etag,
-        })
-      );
-      setNotice({ ok: true, message: 'Changes saved.' });
-      await loadList();
-    });
-
-  const handleRegenerateIntro = () =>
-    run('intro', async () => {
-      setDetail(
-        await postJSON(`cms/newsletters/${selectedId}/intro`, { etag: detail?.issue?.etag })
-      );
-      setNotice({ ok: true, message: 'Intro regenerated.' });
-      await loadList();
-    });
-
-  /** Writes nothing; resolves to the suggestions, or undefined on failure. */
-  const handleSuggestSubjects = () =>
-    run('subjects', async () => {
-      const res = await postJSON(`cms/newsletters/${selectedId}/subjects`, {});
-      return res.subjects || [];
-    });
-
-  const handleSendTest = () => {
-    const id = selectedId;
-    return run('test', async () => {
-      const res = await postJSON(`cms/newsletters/${id}/test`, { etag: detail?.issue?.etag });
-      // Recording the send changed the issue's etag. Hold the new one, or the
-      // next save, keep or approval would be refused as stale.
-      if (res?.etag) {
-        setDetail((current) =>
-          current?.issue?.id === id
-            ? { ...current, issue: { ...current.issue, etag: res.etag } }
-            : current
-        );
-      }
-      setTestReadyAt((current) => ({ ...current, [id]: Date.now() + TEST_COOLDOWN_MS }));
-      // An unusable template sends the test in the built-in design; say so.
-      const fallback = res?.templateProblem?.message
-        ? ` It used the built-in design because your template could not be used: ${res.templateProblem.message}`
-        : '';
-      setNotice({ ok: true, message: `Test sent to ${res?.sentTo}.${fallback}` });
-      // The list row carries the etag the red X deletes with.
-      await loadList();
-    });
-  };
-
-  /**
-   * Re-read the issue after an approval that did not come back as a clean
-   * success. A warning or a refusal can mean the server's state moved — to
-   * `sending`, back to `draft`, or to `rejected` — and a page still showing the
-   * old draft would keep offering an Approve the server will refuse.
-   */
-  const refreshAfterApproval = async (id) => {
-    await Promise.all([loadDetail(id), loadList()]).catch(() => {});
-  };
-
-  const handleApprove = () => {
-    const id = selectedId;
-    const etag = detail?.issue?.etag;
-    setBusy('approve');
-    setNotice(null);
-    return (async () => {
-      try {
-        // The version on screen: an issue edited since is refused, not sent.
-        const res = await postJSON(`cms/newsletters/${id}/approve`, { etag });
-        if (res?.warning) {
-          setNotice({ ok: false, message: res.warning });
-          await refreshAfterApproval(id);
-          return;
-        }
-        setDetail(res);
-        const when = res.issue?.scheduledAt
-          ? `scheduled for ${formatWhen(res.issue.scheduledAt)}`
-          : 'sent';
-        setNotice({
-          ok: true,
-          message: `Approved — the newsletter is ${when}. It is on the Published tab.`,
-        });
-        await loadList();
-      } catch (err) {
-        setNotice({ ok: false, message: err.message });
-        await refreshAfterApproval(id);
-      } finally {
-        setBusy('');
-      }
-    })();
-  };
-
-  const handleReject = () =>
-    run('reject', async () => {
-      setDetail(
-        await postJSON(`cms/newsletters/${selectedId}/reject`, { etag: detail?.issue?.etag })
-      );
-      setNotice({ ok: true, message: 'Stuck send cleared.' });
-      await loadList();
-    });
+  const open = openIssue(detail, rows);
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold">{view === 'drafts' ? 'Drafts' : 'Weekly issues'}</h3>
-        <div className="flex gap-2">
-          {view === 'review' && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5 h-8"
-              onClick={handleBuild}
-              disabled={Boolean(busy)}
-            >
-              {busy === 'build' ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <PenTool className="h-3.5 w-3.5" />
-              )}
-              Build this week&apos;s issue
-            </Button>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="gap-1.5 h-8"
-            onClick={() => run('refresh', loadList)}
-            disabled={Boolean(busy)}
-          >
-            <RefreshCw className="h-3.5 w-3.5" /> Refresh
-          </Button>
-        </div>
-      </div>
+      <IssuesHeader view={view} busy={busy} onBuild={panel.build} onRefresh={panel.refresh} />
 
       <Notice notice={notice} />
 
-      {rows.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          {view === 'drafts'
-            ? 'Nothing in Drafts. Keep an issue from the Newsletter tab and it appears here.'
-            : "No issues to review. Build this week's issue to draft one from what was published."}
-        </p>
-      ) : (
-        <ul className="flex flex-wrap gap-3 pt-2" aria-label="Issues">
-          {rows.map((row) => {
-            const label = row.id.replace('issue-', '');
-            return (
-              <li key={row.id} className="relative">
-                <button
-                  type="button"
-                  onClick={() => setSelectedId(row.id)}
-                  // Not while an action runs: its late response would land on
-                  // whichever issue had been selected in the meantime.
-                  disabled={Boolean(busy)}
-                  aria-pressed={row.id === selectedId}
-                  className={`rounded-lg border px-3 py-2 text-left text-sm ${row.id === selectedId ? 'border-primary' : 'border-border'}`}
-                >
-                  <span className="block font-medium">{label}</span>
-                  <Badge variant="secondary" className="mt-1 text-[10px]">
-                    {STATUS_LABELS[row.status] || row.status}
-                  </Badge>
-                </button>
-                {DELETABLE.has(row.status) && (
-                  <button
-                    type="button"
-                    onClick={() => handleDelete(row)}
-                    disabled={Boolean(busy)}
-                    aria-label={`Delete ${label}`}
-                    title="Delete"
-                    className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-white shadow hover:bg-red-700 disabled:opacity-50"
-                  >
-                    <X className="h-3 w-3" strokeWidth={3} />
-                  </button>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
+      <IssueList
+        view={view}
+        rows={rows}
+        selectedId={selectedId}
+        busy={busy}
+        onSelect={panel.select}
+        onDelete={setPendingDelete}
+      />
 
-      {detail?.issue && rows.some((row) => row.id === detail.issue.id) && (
+      {open && (
         // Keyed on the issue and its last write, so the editable fields reset
         // to what the server holds whenever a different or updated issue loads.
         <IssueDetail
-          key={`${detail.issue.id}:${detail.issue.updatedAt ?? ''}:${detail.issue.status}`}
+          key={`${open.id}:${open.updatedAt ?? ''}:${open.status}`}
           view={view}
           detail={detail}
           busy={busy}
-          testReadyAt={testReadyAt[detail.issue.id]}
-          onSave={handleSave}
-          onKeep={handleKeep}
-          onApprove={handleApprove}
-          onReject={handleReject}
-          onRegenerateIntro={handleRegenerateIntro}
-          onSuggestSubjects={handleSuggestSubjects}
-          onSendTest={handleSendTest}
+          testReadyAt={testReadyAt[open.id]}
+          onSave={panel.save}
+          onKeep={panel.keep}
+          onApprove={panel.approve}
+          onReject={panel.reject}
+          onRegenerateIntro={panel.regenerateIntro}
+          onSuggestSubjects={panel.suggestSubjects}
+          onSendTest={panel.sendTest}
+          onDuplicate={panel.duplicate}
         />
       )}
+
+      <DeleteConfirm
+        row={pendingDelete}
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={confirmDelete}
+      />
     </div>
   );
 }

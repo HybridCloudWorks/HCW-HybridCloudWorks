@@ -2,129 +2,91 @@
  * Gallery image-record RPCs — saveContentImageOrder,
  * updateGalleryImageMetadata, createManualGalleryImageRecord,
  * deleteCuratedGeneratedImage, deleteContentGeneratedImage,
- * deleteRejectedContent.
+ * deleteRejectedContent — plus, since ADR 0033 (Creative slice), the media
+ * library the Image Gallery page is: `buildGalleryListing` (search, filters,
+ * sort, pagination, usage and duplicate detection over both image
+ * containers), bulk edits, persisted folders (admin_config/gallery_folders),
+ * import-from-URL, and per-image usage.
  *
  * Ported from Site-Main cms-functions.js (:2376-2440, :4967-5330, :7095-7250).
  *
- * Storage adaptation: GCS bucket paths ('covers/x.png') map onto the Azure
- * storage containers Terraform creates with the SAME names as the GCS path
- * prefixes (blogs, covers, certifications, speakerevents, content) — first
- * path segment selects the container, the rest is the blob name.
- * parseStorageRef also reads Azure blob URLs and the two legacy Google URL
- * shapes; a legacy URL whose prefix is a known container maps across, and
- * anything else returns null — the record delete still proceeds and
- * storageDeleted reports false, mirroring the source's ignore-failures
- * posture (and matching reality: pre-migration blobs live in Firebase
- * Storage, whose bucket has since been decommissioned — see below).
+ * The pure parts live in ./gallery/ (PR #841), each re-exported from here so
+ * the callers and tests that import them from this path still do:
+ *   storage-ref.js  URL or path → the Azure blob it names (and why the
+ *                   legacy Google branches stay, #518)
+ *   metadata.js     the metadata request and the patch it produces (the
+ *                   missing `slot` default is deliberate — see there)
+ *   listing.js      the one row shape, usage index, duplicates, listing
+ *   bulk.js         bulk edits against each item's own document
+ *   import.js       import-from-URL
+ *   filters.js, measure.js  the listing filters and the byte readers
+ * What stays here is what touches the store and the blobs: the folder list,
+ * the row delete, and the routes.
  *
- *
- * THE GOOGLE BRANCHES STAY, THOUGH THE BUCKET IS GONE (#518). The bucket was
- * decommissioned and every URL into it 404s — but this path does not FETCH
- * those URLs, it maps a legacy URL onto the Azure blob that replaced it so a
- * delete can find it. Removing the branches would make that mapping fail for
- * any row still carrying a legacy URL whose object WAS migrated, turning a
- * successful delete into a silent orphan. The rendering side is where the dead
- * URLs mattered, and it now treats them as absent.
- *
- * The slot-guard subtlety the source fixed is preserved: `slot` has NO
- * default in validation, so a rename/archive that doesn't mention slot can't
- * silently clear the image's slot tag, while an explicit '' still does.
+ * A BLOB IS DELETED ONLY WHEN NO OTHER ROW POINTS AT IT. Before the stamped
+ * paths, every regeneration of a slot wrote the same blob, so deleting an old
+ * history row deleted the CURRENT cover's bytes. The delete now checks both
+ * containers for another row with the same URL and leaves the blob when one
+ * exists (`storageDeleted: false, sharedWith: n`).
  */
 import { randomUUID } from 'node:crypto';
 import { buildContentImageUpdates } from './content-workflow.js';
+import { ADMIN_CONFIG_PARTITION } from './cosmos-client.js';
+import { fetchImage as defaultFetchImage, requireImageExtension } from './triggers/fetch-image.js';
+import { sourceOf } from './cms/inline-images.js';
+import { measureImage, sha256Hex } from './gallery/measure.js';
+import { dateValue, GALLERY_MAX_LIMIT, parseGalleryListParams } from './gallery/filters.js';
+import {
+  GALLERY_COLLECTIONS,
+  cleanFolder,
+  cleanTagList,
+  json,
+  optionalInt,
+  refuse,
+} from './gallery/shared.js';
+import { parseStorageRef } from './gallery/storage-ref.js';
+import { buildMetadataPatch, validateGalleryImageMetadataRequest } from './gallery/metadata.js';
+import {
+  CONTENT_USAGE_PROJECTION,
+  buildContentUsageIndex,
+  normalizeGalleryRow,
+} from './gallery/listing.js';
+import { applyBulkAction, parseBulkRequest } from './gallery/bulk.js';
+import {
+  fetchForImport,
+  findImportDuplicate,
+  importBlobPath,
+  importFileName,
+  importRefusal,
+  importedImageDoc,
+} from './gallery/import.js';
 
-const json = (status, body) => ({
-  status,
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify(body),
-});
+export { measureImage, sha256Hex, parseGalleryListParams, GALLERY_MAX_LIMIT };
+export { GALLERY_COLLECTIONS } from './gallery/shared.js';
+export { KNOWN_STORAGE_CONTAINERS, parseStorageRef } from './gallery/storage-ref.js';
+export { validateGalleryImageMetadataRequest, buildMetadataPatch } from './gallery/metadata.js';
+export {
+  sourceIdFor,
+  GALLERY_SOURCES,
+  normalizeGalleryRow,
+  CONTENT_USAGE_PROJECTION,
+  buildContentUsageIndex,
+  markDuplicates,
+  buildGalleryListing,
+} from './gallery/listing.js';
+export { BULK_ACTIONS, BULK_LIMIT, buildBulkPatch } from './gallery/bulk.js';
 
-export const KNOWN_STORAGE_CONTAINERS = new Set([
-  'blogs',
-  'covers',
-  'certifications',
-  'speakerevents',
-  'content',
-]);
+/** admin_config document the gallery's folder list lives in (ADR 0033 §4). */
+export const GALLERY_FOLDERS_CONFIG_ID = 'gallery_folders';
+export const GALLERY_FOLDER_LIMIT = 100;
 
-/** URL or relative path -> { container, blobName } | null. See header. */
-export function parseStorageRef(value) {
-  const raw = String(value || '').trim();
-  if (!raw) return null;
-
-  const fromPath = (path) => {
-    const clean = String(path || '').replace(/^\/+/, '');
-    const slash = clean.indexOf('/');
-    if (slash <= 0) return null;
-    const container = clean.slice(0, slash);
-    const blobName = clean.slice(slash + 1);
-    if (!KNOWN_STORAGE_CONTAINERS.has(container) || !blobName) return null;
-    return { container, blobName };
-  };
-
-  if (!/^https?:\/\//i.test(raw)) return fromPath(raw);
-
-  try {
-    const parsed = new URL(raw);
-    if (parsed.hostname.endsWith('.blob.core.windows.net')) {
-      return fromPath(decodeURIComponent(parsed.pathname));
-    }
-    if (parsed.hostname === 'storage.googleapis.com') {
-      // /{bucket}/{path} — drop the bucket segment.
-      const parts = parsed.pathname.replace(/^\/+/, '').split('/');
-      return fromPath(decodeURIComponent(parts.slice(1).join('/')));
-    }
-    if (parsed.hostname === 'firebasestorage.googleapis.com') {
-      const marker = '/o/';
-      const markerIndex = parsed.pathname.indexOf(marker);
-      if (markerIndex >= 0) {
-        return fromPath(decodeURIComponent(parsed.pathname.slice(markerIndex + marker.length)));
-      }
-    }
-  } catch {
-    return null;
-  }
-  return null;
-}
-
-/** Source :5105 — note the deliberate absence of a `slot` default. */
-export function validateGalleryImageMetadataRequest(body) {
-  const {
-    imageId,
-    id,
-    galleryCollection = 'generated_content_images',
-    provider,
-    slot,
-    title,
-    folder,
-    customTags,
-    theme,
-    style,
-    promptSet,
-    promptName,
-    promptTemplateVersion,
-    approvalStatus,
-    archived,
-  } = body || {};
-
-  const actualImageId = imageId || id;
-
-  if (!actualImageId || typeof actualImageId !== 'string') {
-    return { ok: false, status: 400, error: 'imageId or id required' };
-  }
-  if (!['generated_content_images', 'curated_article_images'].includes(galleryCollection)) {
-    return { ok: false, status: 400, error: 'Invalid galleryCollection' };
-  }
-  return {
-    ok: true,
-    imageId: actualImageId,
-    galleryCollection,
-    provider, slot, title, folder, customTags, theme, style,
-    promptSet, promptName, promptTemplateVersion, approvalStatus, archived,
-  };
-}
-
-/** Source :7160 — dotted paths; undefined = patchDoc deletion. */
+/**
+ * Source :7160 — dotted paths; undefined = patchDoc deletion. Extended under
+ * ADR 0033 to scrub every field a content document can point at an image
+ * with: the AI slot map and history, the hero/cover trio, and the secondary
+ * list. Before, deleting a gallery row left `heroImageUrl` pointing at a blob
+ * that no longer existed.
+ */
 export function buildContentImageRemovalUpdates(contentData, { slot, imageUrl }) {
   const currentHistory = Array.isArray(contentData.aiImageHistory?.[slot])
     ? contentData.aiImageHistory[slot]
@@ -140,16 +102,164 @@ export function buildContentImageRemovalUpdates(contentData, { slot, imageUrl })
   if (slot === 'hero' && contentData.altCoverImage === imageUrl) {
     updates.altCoverImage = fallbackUrl || undefined;
   }
+  for (const field of ['heroImageUrl', 'contentImageUrl', 'coverImage']) {
+    if (contentData[field] === imageUrl) updates[field] = fallbackUrl || undefined;
+  }
+  const secondary = Array.isArray(contentData.secondaryImageUrls)
+    ? contentData.secondaryImageUrls
+    : [];
+  if (secondary.includes(imageUrl)) {
+    const remaining = secondary.filter((url) => url !== imageUrl);
+    updates.secondaryImageUrls = remaining.length > 0 ? remaining : undefined;
+  }
   return updates;
 }
 
-const APPROVAL_STATUSES = ['draft', 'approved', 'rejected', 'archived'];
+// ── folders ───────────────────────────────────────────────────────────────
+
+export const SEED_FOLDERS = Object.freeze([
+  'default',
+  'aws',
+  'azure',
+  'gcp',
+  'finops',
+  'architecture',
+]);
+
+/** The folder list a PUT may store: lowercased, deduplicated, `default` first. */
+export function cleanFolderList(value) {
+  const folders = new Set(['default']);
+  for (const folder of Array.isArray(value) ? value : []) {
+    const name = String(folder || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9._ -]+/g, '-')
+      .slice(0, 40);
+    if (name) folders.add(name);
+  }
+  return [...folders].slice(0, GALLERY_FOLDER_LIMIT);
+}
+
+// ── store and blob operations the routes share ────────────────────────────
+
+/**
+ * The scaffold every route shares: the role guard, then the route body,
+ * with any throw logged under `label` and answered as a 500 carrying
+ * `message` (and the error's own message where the route always has). The
+ * body answers everything else (PR #841).
+ */
+const guardedWith =
+  (guard) =>
+  (role, label, message, run, { withMessage = true } = {}) =>
+  async (request, context) => {
+    const auth = await guard.requireRole(request, role);
+    if (auth.error) return auth.error;
+    try {
+      return await run({ request, context, auth, user: auth.user });
+    } catch (error) {
+      context.error(`${label} failed:`, error);
+      const body = withMessage
+        ? { error: message, message: error?.message || 'Unknown error' }
+        : { error: message };
+      return json(500, body);
+    }
+  };
+
+/** Rows in either container (other than `excludeId`) that point at `imageUrl`. */
+async function otherRowsSharing(store, imageUrl, excludeId) {
+  if (!imageUrl || typeof store.queryDocs !== 'function') return 0;
+  let count = 0;
+  for (const collection of GALLERY_COLLECTIONS) {
+    try {
+      const rows = await store.queryDocs(
+        collection,
+        'SELECT TOP 10 c.id FROM c WHERE c.imageUrl = @url AND c.id != @id',
+        [
+          { name: '@url', value: imageUrl },
+          { name: '@id', value: excludeId || '' },
+        ]
+      );
+      count += (rows || []).length;
+    } catch {
+      // Counting is protective; an unreadable container reads as unshared.
+    }
+  }
+  return count;
+}
+
+async function deleteBlobFor(storage, { imageUrl, storagePath }, context) {
+  const ref = parseStorageRef(storagePath) || parseStorageRef(imageUrl);
+  if (!ref) return false;
+  try {
+    await storage.deleteBlob(ref.container, ref.blobName);
+    return true;
+  } catch (error) {
+    context.warn?.('gallery blob delete failed:', ref.container, ref.blobName, error?.message);
+    return false;
+  }
+}
+
+/** Scrub every reference to `imageUrl` on the content doc that owns a row. */
+async function scrubContentReferences(store, { contentId, slot, imageUrl }) {
+  if (!contentId || contentId === 'manual-upload') return;
+  const contentData = await store.readDoc('content', contentId, contentId).catch(() => null);
+  if (!contentData) return;
+  const updates = buildContentImageRemovalUpdates(contentData, { slot, imageUrl });
+  await store.patchDoc('content', contentId, updates);
+}
+
+/** Permanent delete of one row: blob (if unshared), content references, the row. */
+async function deleteOneRow({ store, storage }, { galleryCollection, id }, context) {
+  const row = await store.readDoc(galleryCollection, id, id);
+  if (!row) return refuse(404, `${galleryCollection}/${id} not found`);
+  const imageUrl = String(row.imageUrl || '').trim();
+  const sharedWith = await otherRowsSharing(store, imageUrl, id);
+  const storageDeleted =
+    sharedWith > 0
+      ? false
+      : await deleteBlobFor(storage, { imageUrl, storagePath: row.storagePath }, context);
+
+  const owned = galleryCollection === 'generated_content_images';
+  const contentId = owned ? String(row.contentId || row.articleId || '').trim() : '';
+  const slot = owned ? String(row.slot || 'hero').trim() : '';
+  if (owned) await scrubContentReferences(store, { contentId, slot, imageUrl });
+  await store.deleteDoc(galleryCollection, id);
+  return { ok: true, id, galleryCollection, contentId, slot, storageDeleted, sharedWith };
+}
+
+async function readFolders(store) {
+  const doc = await store
+    .readDoc('admin_config', GALLERY_FOLDERS_CONFIG_ID, ADMIN_CONFIG_PARTITION)
+    .catch(() => null);
+  return cleanFolderList([...SEED_FOLDERS, ...(doc?.folders || [])]);
+}
+
+// ── usage ─────────────────────────────────────────────────────────────────
+
+/** Why a usage read cannot start, or null. */
+function usageRefusal(id, collection) {
+  if (!id) return refuse(400, 'id required');
+  if (!GALLERY_COLLECTIONS.includes(collection)) return refuse(400, 'Invalid collection');
+  return null;
+}
+
+/** Live content documents pointing at `@u` through any image field. */
+const USAGE_QUERY =
+  `SELECT TOP 100 ${CONTENT_USAGE_PROJECTION} FROM c WHERE NOT IS_DEFINED(c.softDeletedAt) AND (` +
+  'c.heroImageUrl = @u OR c.altCoverImage = @u OR c.contentImageUrl = @u OR c.coverImage = @u OR c["Cover Image"] = @u ' +
+  'OR c.aiImageUrls.hero = @u OR c.aiImageUrls.secondary1 = @u OR c.aiImageUrls.secondary2 = @u OR c.aiImageUrls.secondary3 = @u OR c.aiImageUrls.content = @u ' +
+  'OR ARRAY_CONTAINS(c.secondaryImageUrls, @u))';
+
+/** Other rows generated for the same content and slot. */
+const VARIANTS_QUERY =
+  'SELECT TOP 50 c.id, c.imageUrl, c.title, c.createdAt, c.promptSet, c.promptName, c.approvalStatus, c.softDeletedAt, c.archivedAt FROM c WHERE c.contentId = @cid AND c.slot = @slot AND c.id != @id';
 
 /**
  * @param {object} deps
  * @param {{ requireRole: Function }} deps.guard
  * @param {{ queryDocs: Function, readDoc: Function, upsertDoc: Function, patchDoc: Function, deleteDoc: Function }} deps.store
- * @param {{ deleteBlob: Function }} deps.storage
+ * @param {{ deleteBlob: Function, uploadBlob?: Function }} deps.storage
+ * @param {Function} [deps.fetchImage] the guarded fetcher (import-from-URL)
  * @param {() => Date} [deps.now]
  * @param {() => string} [deps.uuid]
  */
@@ -157,32 +267,23 @@ export function createGalleryImageHandlers({
   guard,
   store,
   storage,
+  fetchImage = defaultFetchImage,
   now = () => new Date(),
   uuid = randomUUID,
 }) {
   const actor = (user) => user.email || user.preferred_username || user.oid || 'admin';
-
-  async function deleteBlobFor({ imageUrl, storagePath }, context) {
-    const ref = parseStorageRef(storagePath) || parseStorageRef(imageUrl);
-    if (!ref) return false;
-    try {
-      await storage.deleteBlob(ref.container, ref.blobName);
-      return true;
-    } catch (error) {
-      context.warn?.('gallery blob delete failed:', ref.container, ref.blobName, error?.message);
-      return false;
-    }
-  }
+  const guarded = guardedWith(guard);
+  const deleteOne = (target, context) => deleteOneRow({ store, storage }, target, context);
+  const readBody = async (request) => (await request.json().catch(() => null)) || {};
 
   return {
     /** POST /api/saveContentImageOrder — source :4967; editor. */
-    async saveContentImageOrder(request, context) {
-      const auth = await guard.requireRole(request, 'editor');
-      if (auth.error) return auth.error;
-      const { user } = auth;
-
-      try {
-        const body = (await request.json().catch(() => null)) || {};
+    saveContentImageOrder: guarded(
+      'editor',
+      'saveContentImageOrder',
+      'Failed to save image order',
+      async ({ request, user }) => {
+        const body = await readBody(request);
         const { contentId, imageUrls = [] } = body;
         if (!contentId || typeof contentId !== 'string') {
           return json(400, { error: 'contentId required' });
@@ -207,105 +308,70 @@ export function createGalleryImageHandlers({
         });
 
         return json(200, { success: true, contentId, imageCount: imageUrls.length });
-      } catch (error) {
-        context.error('saveContentImageOrder failed:', error);
-        return json(500, { error: 'Failed to save image order', message: error?.message || 'Unknown error' });
       }
-    },
+    ),
 
     /** POST /api/updateGalleryImageMetadata — source :5156; editor; partial. */
-    async updateGalleryImageMetadata(request, context) {
-      const auth = await guard.requireRole(request, 'editor');
-      if (auth.error) return auth.error;
-      const { user } = auth;
-
-      try {
-        const body = (await request.json().catch(() => null)) || {};
+    updateGalleryImageMetadata: guarded(
+      'editor',
+      'updateGalleryImageMetadata',
+      'Failed to update image metadata',
+      async ({ request, user }) => {
+        const body = await readBody(request);
         const validated = validateGalleryImageMetadataRequest(body);
         if (!validated.ok) return json(validated.status, { error: validated.error });
-        const {
-          imageId, galleryCollection, provider, slot, title, folder, customTags,
-          theme, style, promptSet, promptName, promptTemplateVersion, approvalStatus, archived,
-        } = validated;
+        const { imageId, galleryCollection } = validated;
 
         const existing = await store.readDoc(galleryCollection, imageId, imageId);
         if (!existing) return json(404, { error: `${galleryCollection}/${imageId} not found` });
 
-        const updateData = {
-          updatedAt: now().toISOString(),
-          updatedBy: actor(user),
-        };
-        if (provider !== undefined && provider !== null) {
-          updateData.provider = String(provider || '').trim().toLowerCase();
-        }
-        if (slot !== undefined) {
-          updateData.slot = String(slot || '').trim();
-        }
-        if (title !== undefined && title !== null) {
-          updateData.title = String(title || '').trim() || 'Uploaded image';
-        }
-        if (folder !== undefined && folder !== null) {
-          updateData.folder = String(folder || 'default').trim().toLowerCase();
-        }
-        if (customTags !== undefined && customTags !== null) {
-          updateData.customTags = Array.isArray(customTags)
-            ? customTags.map((tag) => String(tag || '').trim().toLowerCase()).filter(Boolean)
-            : [];
-        }
-        if (theme !== undefined && theme !== null) updateData.theme = String(theme || '').trim();
-        if (style !== undefined && style !== null) updateData.style = String(style || '').trim();
-        if (promptSet !== undefined && promptSet !== null) updateData.promptSet = String(promptSet || '').trim();
-        if (promptName !== undefined && promptName !== null) updateData.promptName = String(promptName || '').trim();
-        if (promptTemplateVersion !== undefined && promptTemplateVersion !== null) {
-          updateData.promptTemplateVersion = String(promptTemplateVersion || '').trim();
-        }
-        if (approvalStatus !== undefined && approvalStatus !== null) {
-          const normalized = String(approvalStatus || 'draft').trim();
-          updateData.approvalStatus = APPROVAL_STATUSES.includes(normalized) ? normalized : 'draft';
-        }
-        if (archived !== undefined && archived !== null) {
-          updateData.archived = archived === true;
-        }
-
+        const updateData = buildMetadataPatch(validated, {
+          nowIso: now().toISOString(),
+          actor: actor(user),
+        });
         await store.patchDoc(galleryCollection, imageId, updateData);
         return json(200, { success: true, imageId, galleryCollection, ...updateData });
-      } catch (error) {
-        context.error('updateGalleryImageMetadata failed:', error);
-        return json(500, { error: 'Failed to update image metadata', message: error?.message || 'Unknown error' });
       }
-    },
+    ),
 
     /** POST /api/createManualGalleryImageRecord — source :5304; editor. */
-    async createManualGalleryImageRecord(request, context) {
-      const auth = await guard.requireRole(request, 'editor');
-      if (auth.error) return auth.error;
-      const { user } = auth;
-
-      try {
-        const body = (await request.json().catch(() => null)) || {};
+    createManualGalleryImageRecord: guarded(
+      'editor',
+      'createManualGalleryImageRecord',
+      'Failed to create image record',
+      async ({ request, user }) => {
+        const body = await readBody(request);
         if (!String(body.imageUrl || '').trim()) {
           return json(400, { error: 'imageUrl required' });
         }
 
         const nowIso = now().toISOString();
         const who = actor(user);
-        const customTags = Array.isArray(body.customTags)
-          ? body.customTags.filter((tag) => String(tag || '').trim()).map((tag) => String(tag).trim())
-          : [];
+        const customTags = cleanTagList(body.customTags);
+        const title = String(body.title || '').trim() || 'Uploaded image';
         const doc = {
           id: uuid(),
           articleId: String(body.articleId || 'manual-upload').trim(),
           contentId: '',
           imageUrl: String(body.imageUrl).trim(),
           provider: String(body.provider || '').trim(),
-          title: String(body.title || '').trim() || 'Uploaded image',
+          title,
+          altText: String(body.altText || '').trim() || title,
+          caption: String(body.caption || '').trim(),
+          license: String(body.license || 'owned')
+            .trim()
+            .toLowerCase(),
+          credit: String(body.credit || '').trim(),
           slot: String(body.slot || '').trim(),
           customTags,
-          folder: String(body.folder || 'Default').trim(),
+          folder: cleanFolder(body.folder),
           archived: false,
+          archivedAt: null,
+          softDeletedAt: null,
           theme: String(body.theme || '').trim(),
           style: String(body.style || '').trim(),
           promptSet: String(body.promptSet || '').trim(),
+          promptSetId: String(body.promptSet || '').trim(),
           promptName: String(body.promptName || '').trim(),
           promptTemplateVersion: String(body.promptTemplateVersion || '').trim(),
           approvalStatus: String(body.approvalStatus || 'approved').trim(),
@@ -314,6 +380,17 @@ export function createGalleryImageHandlers({
           lastUsedAt: null,
           sourceCollection: 'manual_upload',
           storagePath: String(body.storagePath || '').trim(),
+          width: optionalInt(body.width) ?? null,
+          height: optionalInt(body.height) ?? null,
+          bytes: optionalInt(body.bytes) ?? null,
+          format:
+            String(body.format || '')
+              .trim()
+              .toLowerCase()
+              .replace(/^image\//, '') || null,
+          sha256: /^[a-f0-9]{64}$/i.test(String(body.sha256 || ''))
+            ? String(body.sha256).toLowerCase()
+            : '',
           createdAt: nowIso,
           createdBy: who,
           updatedAt: nowIso,
@@ -321,100 +398,256 @@ export function createGalleryImageHandlers({
         };
         await store.upsertDoc('generated_content_images', doc);
         return json(200, { success: true, imageId: doc.id });
-      } catch (error) {
-        context.error('createManualGalleryImageRecord failed:', error);
-        return json(500, { error: 'Failed to create image record', message: error?.message || 'Unknown error' });
       }
-    },
+    ),
 
     /** POST /api/deleteCuratedGeneratedImage — source :7095; editor. */
-    async deleteCuratedGeneratedImage(request, context) {
-      const auth = await guard.requireRole(request, 'editor');
-      if (auth.error) return auth.error;
-
-      try {
-        const body = (await request.json().catch(() => null)) || {};
-        const { articleId } = body;
+    deleteCuratedGeneratedImage: guarded(
+      'editor',
+      'deleteCuratedGeneratedImage',
+      'Failed to delete curated image',
+      async ({ request, context }) => {
+        const { articleId } = await readBody(request);
         if (!articleId || typeof articleId !== 'string') {
           return json(400, { error: 'articleId is required' });
         }
-
-        const cacheData = await store.readDoc('curated_article_images', articleId, articleId);
-        if (!cacheData) {
-          return json(404, { error: `curated_article_images/${articleId} not found` });
-        }
-
-        const storageDeleted = await deleteBlobFor(
-          { imageUrl: cacheData.imageUrl, storagePath: cacheData.storagePath },
+        const result = await deleteOne(
+          { galleryCollection: 'curated_article_images', id: articleId },
           context
         );
-        await store.deleteDoc('curated_article_images', articleId);
-
-        return json(200, { success: true, articleId, storageDeleted });
-      } catch (error) {
-        context.error('deleteCuratedGeneratedImage failed:', error);
-        return json(500, { error: 'Failed to delete curated image', message: error?.message || 'Unknown error' });
+        if (!result.ok) return json(result.status, { error: result.error });
+        return json(200, {
+          success: true,
+          articleId,
+          storageDeleted: result.storageDeleted,
+          sharedWith: result.sharedWith,
+        });
       }
-    },
+    ),
 
     /** POST /api/deleteContentGeneratedImage — source :7193; editor. */
-    async deleteContentGeneratedImage(request, context) {
-      const auth = await guard.requireRole(request, 'editor');
-      if (auth.error) return auth.error;
-
-      try {
-        const body = (await request.json().catch(() => null)) || {};
-        const { imageId } = body;
+    deleteContentGeneratedImage: guarded(
+      'editor',
+      'deleteContentGeneratedImage',
+      'Failed to delete generated image',
+      async ({ request, context }) => {
+        const { imageId } = await readBody(request);
         if (!imageId || typeof imageId !== 'string') {
           return json(400, { error: 'imageId is required' });
         }
-
-        const imageData = await store.readDoc('generated_content_images', imageId, imageId);
-        if (!imageData) {
-          return json(404, { error: `generated_content_images/${imageId} not found` });
-        }
-
-        const contentId = String(imageData.contentId || imageData.articleId || '').trim();
-        const slot = String(imageData.slot || 'hero').trim();
-        const imageUrl = String(imageData.imageUrl || '').trim();
-
-        const storageDeleted = await deleteBlobFor(
-          { imageUrl, storagePath: imageData.storagePath },
+        const result = await deleteOne(
+          { galleryCollection: 'generated_content_images', id: imageId },
           context
         );
-
-        // Scrub the slot/history references on the owning content doc.
-        if (contentId) {
-          const contentData = await store.readDoc('content', contentId, contentId);
-          if (contentData) {
-            const updates = buildContentImageRemovalUpdates(contentData, { slot, imageUrl });
-            await store.patchDoc('content', contentId, updates);
-          }
-        }
-
-        await store.deleteDoc('generated_content_images', imageId);
-
+        if (!result.ok) return json(result.status, { error: result.error });
         return json(200, {
           success: true,
           imageId,
-          contentId,
-          slot,
+          contentId: result.contentId,
+          slot: result.slot,
           sourceCollection: 'content',
-          storageDeleted,
+          storageDeleted: result.storageDeleted,
+          sharedWith: result.sharedWith,
         });
-      } catch (error) {
-        context.error('deleteContentGeneratedImage failed:', error);
-        return json(500, { error: 'Failed to delete generated image', message: error?.message || 'Unknown error' });
       }
-    },
+    ),
+
+    /**
+     * POST /api/cms/images/bulk — { items: [{id, galleryCollection}], action,
+     * addTags?, removeTags?, folder?, fields? } → per-item results. One
+     * request for a selection, each item patched against ITS OWN document.
+     */
+    bulkGalleryImages: guarded(
+      'editor',
+      'bulkGalleryImages',
+      'Failed to update images',
+      async ({ request, context, user }) => {
+        const body = await readBody(request);
+        const parsed = parseBulkRequest(body);
+        if (!parsed.ok) return json(parsed.status, { error: parsed.error });
+        const { action, items } = parsed;
+        const stamps = { nowIso: now().toISOString(), actor: actor(user) };
+        const results = [];
+        for (const item of items) {
+          results.push(
+            await applyBulkAction({ store, deleteOne }, { item, action, body, stamps, context })
+          );
+        }
+        const updated = results.filter((r) => r.ok).length;
+        return json(200, {
+          success: updated > 0,
+          action,
+          updated,
+          failed: results.length - updated,
+          results,
+        });
+      }
+    ),
+
+    /** GET /api/cms/images/folders — the persisted folder list plus the seeds. */
+    getGalleryFolders: guarded(
+      'editor',
+      'getGalleryFolders',
+      'Failed to load folders',
+      async () => json(200, { success: true, folders: await readFolders(store) }),
+      { withMessage: false }
+    ),
+
+    /** PUT /api/cms/images/folders — { folders: [] } replaces the list. */
+    putGalleryFolders: guarded(
+      'editor',
+      'putGalleryFolders',
+      'Failed to save folders',
+      async ({ request, user }) => {
+        const body = await readBody(request);
+        if (!Array.isArray(body.folders)) return json(400, { error: 'folders array required' });
+        const folders = cleanFolderList(body.folders);
+        const nowIso = now().toISOString();
+        const existing = await store
+          .readDoc('admin_config', GALLERY_FOLDERS_CONFIG_ID, ADMIN_CONFIG_PARTITION)
+          .catch(() => null);
+        if (existing) {
+          await store.patchDoc(
+            'admin_config',
+            GALLERY_FOLDERS_CONFIG_ID,
+            { folders, updatedAt: nowIso, updatedBy: actor(user) },
+            { partitionKey: ADMIN_CONFIG_PARTITION }
+          );
+        } else {
+          await store.upsertDoc('admin_config', {
+            id: GALLERY_FOLDERS_CONFIG_ID,
+            configScope: ADMIN_CONFIG_PARTITION,
+            folders,
+            createdAt: nowIso,
+            updatedAt: nowIso,
+            updatedBy: actor(user),
+          });
+        }
+        return json(200, {
+          success: true,
+          folders: cleanFolderList([...SEED_FOLDERS, ...folders]),
+        });
+      },
+      { withMessage: false }
+    ),
+
+    /**
+     * POST /api/cms/images/import — { url, title?, folder?, tags?, provider?,
+     * slot?, altText?, caption?, license?, credit?, force? }. Fetches through
+     * the guarded fetcher (protocol and private-IP checks, size cap, media
+     * type gate), stores under covers/image-gallery/imports/, creates the
+     * record. A byte-identical or same-URL image already in the gallery
+     * answers 409 with that record unless `force` is set.
+     */
+    importGalleryImage: guarded(
+      'editor',
+      'importGalleryImage',
+      'Failed to import image',
+      async ({ request, user }) => {
+        const body = await readBody(request);
+        const url = String(body.url || '').trim();
+        const refused = importRefusal(url, storage);
+        if (refused) return json(refused.status, { error: refused.error });
+
+        const fetched = await fetchForImport(fetchImage, url);
+        if (!fetched.ok) return json(fetched.status, { error: fetched.error });
+        const { buffer, contentType } = fetched;
+        const ext = requireImageExtension(contentType);
+        const sha = sha256Hex(buffer);
+        const source = sourceOf(url);
+
+        const duplicate =
+          body.force === true ? null : await findImportDuplicate(store, { sha, source });
+        if (duplicate) {
+          return json(409, {
+            error: 'This image is already in the gallery',
+            duplicateOf: duplicate.id,
+            imageUrl: duplicate.imageUrl,
+            title: duplicate.title,
+          });
+        }
+
+        const nowIso = now().toISOString();
+        const title = String(body.title || '').trim() || importFileName(url) || 'Imported image';
+        const blobPath = importBlobPath(title, ext, nowIso);
+        await storage.uploadBlob('covers', blobPath, buffer, contentType, { sourceUrl: source });
+        const doc = importedImageDoc({
+          id: uuid(),
+          body,
+          url,
+          source,
+          title,
+          blobPath,
+          buffer,
+          contentType,
+          ext,
+          sha,
+          nowIso,
+          who: actor(user),
+        });
+        await store.upsertDoc('generated_content_images', doc);
+        return json(200, {
+          success: true,
+          imageId: doc.id,
+          imageUrl: doc.imageUrl,
+          bytes: doc.bytes,
+          width: doc.width,
+          height: doc.height,
+          format: ext,
+        });
+      }
+    ),
+
+    /**
+     * GET /api/cms/images/{id}/usage?collection= — the content documents
+     * using this image (by URL match on every image field) and its variants
+     * (other rows for the same content and slot).
+     */
+    getImageUsage: guarded(
+      'editor',
+      'getImageUsage',
+      'Failed to read image usage',
+      async ({ request }) => {
+        const id = String(request.params.id || '').trim();
+        const collection = String(request.query.get('collection') || 'generated_content_images');
+        const refused = usageRefusal(id, collection);
+        if (refused) return json(refused.status, { error: refused.error });
+        const row = await store.readDoc(collection, id, id);
+        if (!row) return json(404, { error: `${collection}/${id} not found` });
+        const item = normalizeGalleryRow(row, collection);
+        const usedBy = item.imageUrl
+          ? await store.queryDocs('content', USAGE_QUERY, [{ name: '@u', value: item.imageUrl }])
+          : [];
+        const usage = buildContentUsageIndex(usedBy).get(item.imageUrl) || [];
+        const variants =
+          item.contentId && item.slot
+            ? await store.queryDocs('generated_content_images', VARIANTS_QUERY, [
+                { name: '@cid', value: item.contentId },
+                { name: '@slot', value: item.slot },
+                { name: '@id', value: id },
+              ])
+            : [];
+        return json(200, {
+          success: true,
+          id,
+          imageUrl: item.imageUrl,
+          usedBy: usage,
+          usageCount: new Set(usage.map((u) => u.id)).size,
+          variants: (variants || []).sort(
+            (a, b) => dateValue(b.createdAt) - dateValue(a.createdAt)
+          ),
+        });
+      },
+      { withMessage: false }
+    ),
 
     /** POST /api/deleteRejectedContent — source :2376/:5807; publisher. */
-    async deleteRejectedContent(request, context) {
-      const auth = await guard.requireRole(request, 'publisher');
-      if (auth.error) return auth.error;
-
-      try {
-        const body = (await request.json().catch(() => null)) || {};
+    deleteRejectedContent: guarded(
+      'publisher',
+      'deleteRejectedContent',
+      'Failed to delete rejected content',
+      async ({ request, auth }) => {
+        const body = await readBody(request);
         const { olderThanHours = null, limit = 500 } = body;
         const maxLimit = Math.min(Number(limit) || 500, 499);
         const nowDate = now();
@@ -474,10 +707,7 @@ export function createGalleryImageHandlers({
           examinedCount: rows.length,
           hasMore: rows.length === maxLimit,
         });
-      } catch (error) {
-        context.error('deleteRejectedContent failed:', error);
-        return json(500, { error: 'Failed to delete rejected content', message: error?.message || 'Unknown error' });
       }
-    },
+    ),
   };
 }

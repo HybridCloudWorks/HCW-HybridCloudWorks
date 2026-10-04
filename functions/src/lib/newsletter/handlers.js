@@ -40,6 +40,7 @@ import { readKey } from '../ai/router.js';
 import { enforceSubmissionQuota } from '../submissions.js';
 import { createResendClient } from './resend-client.js';
 import { normalizeEmail } from './email.js';
+import { DEFAULT_NEWSLETTER_FROM, resolveFromAddress } from './sender.js';
 import {
   buildConfirmationToken,
   deriveConfirmationKey,
@@ -48,8 +49,12 @@ import {
 
 export { normalizeEmail };
 
-/** Where newsletters come from — the domain verified in Resend on 2026-09-13. */
-export const NEWSLETTER_FROM = 'HybridCloudWorks <newsletter@news.hybridcloudworks.com>';
+/**
+ * Where newsletters come from unless the owner chose otherwise in Newsletter
+ * Hub → Settings (sender.js, ADR 0033 Amplify slice). Kept under this name
+ * because the broadcast tests pin it as the default.
+ */
+export const NEWSLETTER_FROM = DEFAULT_NEWSLETTER_FROM;
 
 /** The segment every confirmed subscriber is added to. Created if missing. */
 export const NEWSLETTER_SEGMENT_NAME = 'Newsletter';
@@ -121,6 +126,103 @@ function describe(result) {
 }
 
 /**
+ * Email one confirmation link. Shared by the public signup and the admin's
+ * "add a subscriber" (insights-handlers.js), so both links are signed the
+ * same way and carry the same 48-hour expiry.
+ */
+export async function sendConfirmationEmail({
+  client,
+  apiKey,
+  email,
+  source = 'website',
+  now = Date.now,
+  from = NEWSLETTER_FROM,
+}) {
+  const token = buildConfirmationToken(
+    deriveConfirmationKey(apiKey),
+    { email, source: normalizeSource(source) },
+    { now }
+  );
+  const link = `${CONFIRM_PAGE_URL}#t=${token}`;
+  const { subject, text, html } = confirmationEmail({ email, link });
+  return client.sendEmail({ from, to: [email], subject, text, html });
+}
+
+/**
+ * Put `email` in the Newsletter segment, subscribed, and READ IT BACK before
+ * saying so (the header's "Confirm does not trust the write"). Shared by the
+ * public confirm and the admin's consent-recorded add.
+ *
+ * @returns {Promise<{ ok: true } | { ok: false, why: string }>} `why` is operator-safe: statuses and names, never the address.
+ */
+export async function ensureConfirmedContact(deps) {
+  for (const step of [ensureContactExists, ensureInSegment, ensureSubscribed]) {
+    const outcome = await step(deps);
+    if (!outcome.ok) return outcome;
+  }
+  return { ok: true };
+}
+
+const OK = Object.freeze({ ok: true });
+
+/** Step 1: the contact exists, resubscribed if it had opted out. */
+async function ensureContactExists({ client, email, segmentId }) {
+  const created = await client.createContact({ email, segmentId });
+  if (created.ok) return OK;
+  // Resend does not document which status means "already exists", so the
+  // status is not guessed at: the contact is looked up. Only a contact that
+  // really exists is resubscribed — someone who unsubscribed and is now
+  // choosing to come back, which is exactly the consent this records. A
+  // 401, a 5xx or a transport failure finds no contact and is reported as
+  // the create failure it was, not masked by a PATCH.
+  const existing = await client.getContact(email);
+  if (!existing.ok) {
+    return {
+      ok: false,
+      why: `create ${describe(created)}; no existing contact (${describe(existing)})`,
+    };
+  }
+  const resubscribed = await client.resubscribeContact(email);
+  return resubscribed.ok
+    ? OK
+    : { ok: false, why: `create ${describe(created)}, then update ${describe(resubscribed)}` };
+}
+
+/** Step 2: the contact is in the Newsletter segment, read back after adding. */
+async function ensureInSegment({ client, email, segmentId }) {
+  const inSegment = async () => {
+    const listed = await client.listContactSegments(email);
+    return (
+      listed.ok &&
+      Array.isArray(listed.data?.data) &&
+      listed.data.data.some((row) => row?.id === segmentId)
+    );
+  };
+  if (await inSegment()) return OK;
+  const added = await client.addContactToSegment(email, segmentId);
+  const present = added.ok && (await inSegment());
+  return present
+    ? OK
+    : {
+        ok: false,
+        why: `the contact is not in the ${NEWSLETTER_SEGMENT_NAME} segment after adding it (${describe(added)})`,
+      };
+}
+
+/** Step 3: the contact reads back as subscribed, repaired once if not. */
+async function ensureSubscribed({ client, email }) {
+  const stored = await client.getContact(email);
+  if (!stored.ok) return { ok: false, why: `reading the contact back ${describe(stored)}` };
+  if (stored.data?.unsubscribed === false) return OK;
+  // resend/resend-node#458's shape. Repair once, then check again.
+  const repaired = await client.resubscribeContact(email);
+  const reread = repaired.ok ? await client.getContact(email) : repaired;
+  return reread.ok && reread.data?.unsubscribed === false
+    ? OK
+    : { ok: false, why: 'the contact reads back as unsubscribed after confirming' };
+}
+
+/**
  * The Newsletter segment id: found by name, created if missing. Used by
  * confirm to add a contact, and exported for the send step to reuse.
  */
@@ -151,6 +253,218 @@ export async function resolveSegmentId(client) {
   throw new Error(`creating the ${NEWSLETTER_SEGMENT_NAME} segment failed: ${describe(created)}`);
 }
 
+// ── The two routes, hoisted out of the factory (PR #841 quality round) ──────
+//
+// Each takes the factory's `ctx` first: `{ identity, store, env, fetchImpl,
+// now, segmentId }`. What is refused, in what order and with which answer,
+// is what it was inside the factory; the steps are only named.
+
+const unavailable = () =>
+  json(503, { ok: false, error: 'Newsletter signup is temporarily unavailable.' });
+
+const invalidAddress = () => json(400, { ok: false, error: 'Please enter a valid email address.' });
+
+const tooMany = () =>
+  json(
+    429,
+    { ok: false, error: 'Too many attempts. Please try again later.' },
+    { 'Retry-After': '3600' }
+  );
+
+/** The Resend key and a client on it, or null without the key. */
+function configuredResend(env, fetchImpl) {
+  const apiKey = readKey(env, 'RESEND_API_KEY');
+  return apiKey ? { apiKey, client: createResendClient({ apiKey, fetch: fetchImpl }) } : null;
+}
+
+/** Who is calling, or a ready 403 when the origin is not verifiably Cloudflare. */
+function callerKey({ identity }, request, context) {
+  try {
+    return { key: identity.anonymousKey(request).key };
+  } catch {
+    context.warn?.('newsletter request rejected: unverified origin');
+    return { refused: json(403, { ok: false, error: 'Forbidden' }) };
+  }
+}
+
+async function withinQuota({ store, now }, key, limit) {
+  try {
+    await enforceSubmissionQuota(store, key, { now: now(), limit });
+    return true;
+  } catch (error) {
+    if (error?.code === 'SUBMISSION_RATE_LIMIT') return false;
+    throw error;
+  }
+}
+
+/**
+ * The signup body read: `{ email, source }`, or `{ response }` for a body
+ * that is not one, an address that cannot be one, or a filled honeypot —
+ * answered exactly like a real signup, so a bot learns nothing, and nothing
+ * is sent or counted.
+ */
+function readSignup(body, context) {
+  if (!body || typeof body !== 'object') return { response: invalidAddress() };
+  if (typeof body.website === 'string' && body.website.trim()) {
+    context.log?.('newsletter signup ignored: honeypot filled');
+    return { response: json(202, { ok: true }) };
+  }
+  const email = normalizeEmail(body.email);
+  if (!email) return { response: invalidAddress() };
+  return { email, source: normalizeSource(body.source) };
+}
+
+/**
+ * What a signup needs from the environment: Resend, and the salt. FAIL
+ * CLOSED without the salt: the per-address quota document's id is a hash of
+ * the address and is persisted in Cosmos; unsalted, it is a
+ * dictionary-reversible list of everyone who tried to subscribe.
+ * `{ apiKey, client, salt }` or `{ response }`.
+ */
+function signupSetup({ env, fetchImpl }, context) {
+  const setup = configuredResend(env, fetchImpl);
+  if (!setup) {
+    context.error?.('newsletter signup refused: RESEND_API_KEY is not set');
+    return { response: unavailable() };
+  }
+  const salt = readKey(env, 'CLIENT_IP_SALT');
+  if (!salt) {
+    context.error?.('newsletter signup refused: CLIENT_IP_SALT is not set');
+    return { response: unavailable() };
+  }
+  return { ...setup, salt };
+}
+
+/** The header's two limits, caller then address: the 429, or null when both allow. */
+async function signupLimited(ctx, caller, email, salt) {
+  if (!(await withinQuota(ctx, `newsletter-caller:${caller}`, SUBSCRIBE_PER_CALLER_PER_HOUR))) {
+    return tooMany();
+  }
+  const address = `newsletter-address:${addressKey(email, salt)}`;
+  if (!(await withinQuota(ctx, address, SUBSCRIBE_PER_ADDRESS_PER_HOUR))) return tooMany();
+  return null;
+}
+
+/** The confirmation link emailed, and the answer. */
+async function sendSignupConfirmation({ store, now }, { setup, email, source }, context) {
+  const sent = await sendConfirmationEmail({
+    client: setup.client,
+    apiKey: setup.apiKey,
+    email,
+    source,
+    now,
+    from: await resolveFromAddress(store, context),
+  });
+  if (!sent.ok) {
+    context.error?.(`newsletter confirmation email failed: ${describe(sent)}`);
+    return json(502, {
+      ok: false,
+      error: 'We could not send the confirmation email. Please try again.',
+    });
+  }
+  context.log?.(`newsletter confirmation sent: source=${source}`);
+  return json(202, { ok: true });
+}
+
+async function subscribe(ctx, request, context) {
+  const caller = callerKey(ctx, request, context);
+  if (caller.refused) return caller.refused;
+  const body = await request.json().catch(() => null);
+  const signup = readSignup(body, context);
+  if (signup.response) return signup.response;
+  const setup = signupSetup(ctx, context);
+  if (setup.response) return setup.response;
+  const limited = await signupLimited(ctx, caller.key, signup.email, setup.salt);
+  if (limited) return limited;
+  return sendSignupConfirmation(ctx, { setup, ...signup }, context);
+}
+
+/**
+ * What a confirm needs before the token is even read: the salt — fail
+ * closed without it, BEFORE the quota write, because the caller key is an
+ * address hash persisted as a document id, and unsalted it is reversible —
+ * then the caller's quota, then Resend. `{ setup }` or `{ response }`.
+ */
+async function admitConfirm(ctx, caller, context) {
+  if (!readKey(ctx.env, 'CLIENT_IP_SALT')) {
+    context.error?.('newsletter confirm refused: CLIENT_IP_SALT is not set');
+    return { response: unavailable() };
+  }
+  if (!(await withinQuota(ctx, `newsletter-confirm:${caller}`, CONFIRM_PER_CALLER_PER_HOUR))) {
+    return { response: tooMany() };
+  }
+  const setup = configuredResend(ctx.env, ctx.fetchImpl);
+  if (!setup) {
+    context.error?.('newsletter confirm refused: RESEND_API_KEY is not set');
+    return { response: unavailable() };
+  }
+  return { setup };
+}
+
+/** The subscriber put in the segment and read back (ensureConfirmedContact), and the answer. */
+async function confirmSubscriber(ctx, client, subscriber, context) {
+  const failed = (why) => {
+    context.error?.(`newsletter confirm failed: ${why}`);
+    return json(502, {
+      ok: false,
+      error: 'We could not confirm your subscription right now. Please try again in a few minutes.',
+    });
+  };
+  let segment;
+  try {
+    segment = await ctx.segmentId(client);
+  } catch (error) {
+    return failed(error.message);
+  }
+  const ensured = await ensureConfirmedContact({
+    client,
+    email: subscriber.email,
+    segmentId: segment,
+  });
+  if (!ensured.ok) return failed(ensured.why);
+  context.log?.(`newsletter subscription confirmed: source=${subscriber.source}`);
+  return json(200, { ok: true });
+}
+
+async function confirm(ctx, request, context) {
+  const caller = callerKey(ctx, request, context);
+  if (caller.refused) return caller.refused;
+  const admitted = await admitConfirm(ctx, caller.key, context);
+  if (admitted.response) return admitted.response;
+  const body = await request.json().catch(() => null);
+  const subscriber = verifyConfirmationToken(
+    deriveConfirmationKey(admitted.setup.apiKey),
+    body?.token,
+    ctx.now()
+  );
+  if (!subscriber) {
+    return json(400, {
+      ok: false,
+      code: 'INVALID_OR_EXPIRED',
+      error: 'This confirmation link is invalid or has expired. Please sign up again.',
+    });
+  }
+  return confirmSubscriber(ctx, admitted.setup.client, subscriber, context);
+}
+
+/**
+ * The Newsletter segment's id, resolved once per process: a segment id does
+ * not change, and listing on every confirm is waste. A failure must not be
+ * cached, or one bad minute poisons the process.
+ */
+function segmentIdCache() {
+  let promise = null;
+  return (client) => {
+    if (!promise) {
+      promise = resolveSegmentId(client).catch((error) => {
+        promise = null;
+        throw error;
+      });
+    }
+    return promise;
+  };
+}
+
 /**
  * @param {object} deps
  * @param {{ anonymousKey: Function }} deps.identity
@@ -166,203 +480,9 @@ export function createNewsletterHandlers({
   fetch: fetchImpl = globalThis.fetch,
   now = Date.now,
 }) {
-  /** Per process: a segment id does not change, and listing on every confirm is waste. */
-  let segmentIdPromise = null;
-
-  const configured = () => {
-    const apiKey = readKey(env, 'RESEND_API_KEY');
-    if (!apiKey) return null;
-    return { apiKey, client: createResendClient({ apiKey, fetch: fetchImpl }) };
+  const ctx = { identity, store, env, fetchImpl, now, segmentId: segmentIdCache() };
+  return {
+    subscribe: (request, context) => subscribe(ctx, request, context),
+    confirm: (request, context) => confirm(ctx, request, context),
   };
-
-  function segmentId(client) {
-    if (!segmentIdPromise) {
-      // A failure must not be cached, or one bad minute poisons the process.
-      segmentIdPromise = resolveSegmentId(client).catch((error) => {
-        segmentIdPromise = null;
-        throw error;
-      });
-    }
-    return segmentIdPromise;
-  }
-
-  /** Who is calling, or a ready 403 when the origin is not verifiably Cloudflare. */
-  function callerKey(request, context) {
-    try {
-      return { key: identity.anonymousKey(request).key };
-    } catch {
-      context.warn?.('newsletter request rejected: unverified origin');
-      return { refused: json(403, { ok: false, error: 'Forbidden' }) };
-    }
-  }
-
-  async function withinQuota(key, limit) {
-    try {
-      await enforceSubmissionQuota(store, key, { now: now(), limit });
-      return true;
-    } catch (error) {
-      if (error?.code === 'SUBMISSION_RATE_LIMIT') return false;
-      throw error;
-    }
-  }
-
-  const tooMany = () =>
-    json(429, { ok: false, error: 'Too many attempts. Please try again later.' }, { 'Retry-After': '3600' });
-
-  async function subscribe(request, context) {
-    const caller = callerKey(request, context);
-    if (caller.refused) return caller.refused;
-
-    const body = await request.json().catch(() => null);
-    if (!body || typeof body !== 'object') {
-      return json(400, { ok: false, error: 'Please enter a valid email address.' });
-    }
-
-    // The honeypot is answered exactly like a real signup, so a bot learns
-    // nothing, and nothing is sent or counted.
-    if (typeof body.website === 'string' && body.website.trim()) {
-      context.log?.('newsletter signup ignored: honeypot filled');
-      return json(202, { ok: true });
-    }
-
-    const email = normalizeEmail(body.email);
-    if (!email) return json(400, { ok: false, error: 'Please enter a valid email address.' });
-    const source = normalizeSource(body.source);
-
-    const setup = configured();
-    if (!setup) {
-      context.error?.('newsletter signup refused: RESEND_API_KEY is not set');
-      return json(503, { ok: false, error: 'Newsletter signup is temporarily unavailable.' });
-    }
-    // FAIL CLOSED without the salt. The per-address quota document's id is a
-    // hash of the address and is persisted in Cosmos; unsalted, it is a
-    // dictionary-reversible list of everyone who tried to subscribe.
-    const salt = readKey(env, 'CLIENT_IP_SALT');
-    if (!salt) {
-      context.error?.('newsletter signup refused: CLIENT_IP_SALT is not set');
-      return json(503, { ok: false, error: 'Newsletter signup is temporarily unavailable.' });
-    }
-
-    if (!(await withinQuota(`newsletter-caller:${caller.key}`, SUBSCRIBE_PER_CALLER_PER_HOUR))) {
-      return tooMany();
-    }
-    if (!(await withinQuota(`newsletter-address:${addressKey(email, salt)}`, SUBSCRIBE_PER_ADDRESS_PER_HOUR))) {
-      return tooMany();
-    }
-
-    const token = buildConfirmationToken(deriveConfirmationKey(setup.apiKey), { email, source }, { now });
-    const link = `${CONFIRM_PAGE_URL}#t=${token}`;
-    const { subject, text, html } = confirmationEmail({ email, link });
-    const sent = await setup.client.sendEmail({
-      from: NEWSLETTER_FROM,
-      to: [email],
-      subject,
-      text,
-      html,
-    });
-    if (!sent.ok) {
-      context.error?.(`newsletter confirmation email failed: ${describe(sent)}`);
-      return json(502, { ok: false, error: 'We could not send the confirmation email. Please try again.' });
-    }
-
-    context.log?.(`newsletter confirmation sent: source=${source}`);
-    return json(202, { ok: true });
-  }
-
-  async function confirm(request, context) {
-    const caller = callerKey(request, context);
-    if (caller.refused) return caller.refused;
-
-    // Fail closed without the salt, BEFORE the quota write: the caller key is
-    // an address hash persisted as a document id, and unsalted it is reversible.
-    if (!readKey(env, 'CLIENT_IP_SALT')) {
-      context.error?.('newsletter confirm refused: CLIENT_IP_SALT is not set');
-      return json(503, { ok: false, error: 'Newsletter signup is temporarily unavailable.' });
-    }
-
-    if (!(await withinQuota(`newsletter-confirm:${caller.key}`, CONFIRM_PER_CALLER_PER_HOUR))) {
-      return tooMany();
-    }
-
-    const setup = configured();
-    if (!setup) {
-      context.error?.('newsletter confirm refused: RESEND_API_KEY is not set');
-      return json(503, { ok: false, error: 'Newsletter signup is temporarily unavailable.' });
-    }
-
-    const body = await request.json().catch(() => null);
-    const subscriber = verifyConfirmationToken(
-      deriveConfirmationKey(setup.apiKey),
-      body?.token,
-      now()
-    );
-    if (!subscriber) {
-      return json(400, {
-        ok: false,
-        code: 'INVALID_OR_EXPIRED',
-        error: 'This confirmation link is invalid or has expired. Please sign up again.',
-      });
-    }
-    const { email } = subscriber;
-    const { client } = setup;
-    const failed = (why) => {
-      context.error?.(`newsletter confirm failed: ${why}`);
-      return json(502, {
-        ok: false,
-        error: 'We could not confirm your subscription right now. Please try again in a few minutes.',
-      });
-    };
-
-    let segment;
-    try {
-      segment = await segmentId(client);
-    } catch (error) {
-      return failed(error.message);
-    }
-
-    const created = await client.createContact({ email, segmentId: segment });
-    if (!created.ok) {
-      // Resend does not document which status means "already exists", so the
-      // status is not guessed at: the contact is looked up. Only a contact that
-      // really exists is resubscribed — someone who unsubscribed and is now
-      // choosing to come back, which is exactly the consent this records. A
-      // 401, a 5xx or a transport failure finds no contact and is reported as
-      // the create failure it was, not masked by a PATCH.
-      const existing = await client.getContact(email);
-      if (!existing.ok) {
-        return failed(`create ${describe(created)}; no existing contact (${describe(existing)})`);
-      }
-      const resubscribed = await client.resubscribeContact(email);
-      if (!resubscribed.ok) {
-        return failed(`create ${describe(created)}, then update ${describe(resubscribed)}`);
-      }
-    }
-
-    const inSegment = async () => {
-      const listed = await client.listContactSegments(email);
-      return listed.ok && Array.isArray(listed.data?.data) && listed.data.data.some((row) => row?.id === segment);
-    };
-    if (!(await inSegment())) {
-      const added = await client.addContactToSegment(email, segment);
-      if (!added.ok || !(await inSegment())) {
-        return failed(`the contact is not in the ${NEWSLETTER_SEGMENT_NAME} segment after adding it (${describe(added)})`);
-      }
-    }
-
-    const stored = await client.getContact(email);
-    if (!stored.ok) return failed(`reading the contact back ${describe(stored)}`);
-    if (stored.data?.unsubscribed !== false) {
-      // resend/resend-node#458's shape. Repair once, then check again.
-      const repaired = await client.resubscribeContact(email);
-      const reread = repaired.ok ? await client.getContact(email) : repaired;
-      if (!reread.ok || reread.data?.unsubscribed !== false) {
-        return failed('the contact reads back as unsubscribed after confirming');
-      }
-    }
-
-    context.log?.(`newsletter subscription confirmed: source=${subscriber.source}`);
-    return json(200, { ok: true });
-  }
-
-  return { subscribe, confirm };
 }

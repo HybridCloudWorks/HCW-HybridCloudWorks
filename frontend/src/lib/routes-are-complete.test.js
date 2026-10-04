@@ -31,6 +31,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { routes } from '../../scripts/prerender-entry.jsx';
 import { VALID_PROVIDERS } from '@/context/ProviderContext';
+import { availableLabs, labPanePath, labsPath, providersWithLabs } from '@/data/labs/catalogue';
 
 const APP = () => readFileSync(join(process.cwd(), 'src', 'App.jsx'), 'utf8');
 
@@ -112,5 +113,46 @@ describe('pre-render coverage', () => {
       });
 
     expect([...new Set(phantom)], 'pre-rendered but not declared in App.jsx').toEqual([]);
+  });
+
+  it('pre-renders every provider’s lab list and every lab’s page under each provider that lists it (ADR 0033)', () => {
+    for (const provider of providersWithLabs()) {
+      expect(prerendered.has(labsPath(provider)), `${labsPath(provider)} is not pre-rendered`).toBe(
+        true
+      );
+    }
+    for (const lab of availableLabs) {
+      expect(prerendered.has(labPanePath(null, lab.id))).toBe(true);
+      for (const provider of lab.providers) {
+        expect(prerendered.has(labPanePath(provider, lab.id))).toBe(true);
+      }
+    }
+  });
+});
+
+describe('the provider lab routes (ADR 0033 §6 item 6)', () => {
+  /** The relative `path="..."` values of the `/:provider` block, in declaration order. */
+  const providerChildren = () =>
+    [...APP().matchAll(/<Route\s+path="([^"/:*][^"]*)"/g)].map((m) => m[1]);
+
+  it('declares education/labs and education/labs/:labId before education/:certSlug', () => {
+    // React Router ranks a static segment above a dynamic one whatever the
+    // order, but the ADR asks for the order to be visible in the file so a
+    // reader does not have to know the ranking rule to trust the route.
+    const children = providerChildren();
+    const list = children.indexOf('education/labs');
+    const pane = children.indexOf('education/labs/:labId');
+    const cert = children.indexOf('education/:certSlug');
+    expect(list).toBeGreaterThan(-1);
+    expect(pane).toBeGreaterThan(-1);
+    expect(cert).toBeGreaterThan(-1);
+    expect(list).toBeLessThan(cert);
+    expect(pane).toBeLessThan(cert);
+  });
+
+  it('keeps the cross-provider index and its pane route as absolute paths', () => {
+    expect(declaredAbsolutePaths()).toEqual(
+      expect.arrayContaining(['/education/labs', '/education/labs/:labId'])
+    );
   });
 });

@@ -7,7 +7,13 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, render, renderHook, screen, waitFor } from '@testing-library/react';
 
-import { SettingSection, settingRoute, useSetting } from './settingShared';
+import {
+  HISTORY_FILTERABLE,
+  SETTING_LABELS,
+  SettingSection,
+  settingRoute,
+  useSetting,
+} from './settingShared';
 
 const getJSON = vi.fn();
 const sendJSON = vi.fn();
@@ -131,6 +137,16 @@ describe('useSetting', () => {
     act(() => result.current.reload());
     await waitFor(() => expect(result.current.value).toEqual({ Maya: '', Elena: '' }));
     expect(result.current.saved).toBeNull();
+  });
+});
+
+describe('SETTING_LABELS and HISTORY_FILTERABLE (ADR 0033)', () => {
+  it('labels every setting the history can show, and offers only server-filterable ones', () => {
+    expect(SETTING_LABELS['content-taxonomy']).toBe('Content types & idea origins');
+    expect(SETTING_LABELS.integrations).toMatch(/Sessionize/);
+    expect(HISTORY_FILTERABLE).not.toContain('integrations');
+    expect(HISTORY_FILTERABLE).toContain('content-taxonomy');
+    for (const id of HISTORY_FILTERABLE) expect(SETTING_LABELS[id]).toBeTruthy();
   });
 });
 

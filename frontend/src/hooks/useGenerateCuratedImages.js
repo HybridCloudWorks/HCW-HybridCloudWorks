@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { getFunctionsBase } from '@/lib/functionsBase';
 import { useImagePrompts } from './useImagePrompts';
 import { useAdminAuth } from '@/hooks/useAdminAuth';
@@ -18,15 +18,18 @@ const DEFAULT_PROMPT_BY_PROVIDER = {
     'FinOps cloud cost optimization illustration with financial analytics and cloud operations motifs, modern dashboard-inspired composition, no text overlay, high-detail digital art',
 };
 
+const FALLBACK_PROMPT =
+  'Professional technical illustration for cloud infrastructure with clean, modern design';
+
 function isFunctionsBaseUnavailable(functionsBase) {
   return !functionsBase || functionsBase.includes('localhost') || functionsBase.includes('5173');
 }
 
 function getArticleUrl(article = {}) {
-  return article.sourceUrl || article['CD Url'] || article.url || article.link || '';
+  return [article.sourceUrl, article['CD Url'], article.url, article.link].find(Boolean) ?? '';
 }
 
-function buildImageRequestBody(article, basePrompt, provider) {
+function buildImageRequestBody(article, basePrompt, provider, lineage = {}) {
   return {
     articleTitle: article.title || 'AWS News Article',
     articleSummary: article.summary || article.description || '',
@@ -34,7 +37,227 @@ function buildImageRequestBody(article, basePrompt, provider) {
     provider: provider || 'AWS',
     articleId: article.id,
     articleUrl: getArticleUrl(article),
+    // The set and prompt the page resolved, so the curated row records its
+    // lineage and shows under the set on Image Prompts (ADR 0033).
+    promptSet: lineage.setName || '',
+    promptName: lineage.promptName || '',
   };
+}
+
+/**
+ * The hook's machinery, as module-level functions over a `ctx` the hook
+ * builds (PR #841): `{ functionsBase, provider, pagePath, canGenerate,
+ * resolvePromptForPage, setImageMap, setLoading, setError }`. The hook keeps
+ * the state and the role gate; these keep the request logic, and each is
+ * small enough to read on its own.
+ */
+
+/** Anonymous cache read — see the hook's header. */
+export async function readCachedImageUrl(articleId) {
+  try {
+    return await fetchPublicCuratedImage(articleId);
+  } catch (err) {
+    console.error(`[generateCuratedImages] Error fetching cache for ${articleId}:`, err.message);
+    return null;
+  }
+}
+
+/** Whether an article can be looked up at all: it needs an id and a reachable Functions host. */
+function canAttemptImage(ctx, article) {
+  if (!article?.id) {
+    console.warn(`[generateCuratedImages] Article missing ID, skipping generation`);
+    return false;
+  }
+  // Skip if functionsBase is not configured (empty, localhost, or vite dev server)
+  if (isFunctionsBaseUnavailable(ctx.functionsBase)) {
+    console.warn(
+      `[generateCuratedImages] Cloud Functions not available (${ctx.functionsBase}), skipping for ${article.id}`
+    );
+    return false;
+  }
+  return true;
+}
+
+/** The admin action: ask the server for a new image. postJSON injects the Entra access token (lib/api.js). */
+async function requestGeneratedImage(ctx, article, basePrompt, lineage) {
+  console.warn(`[generateCuratedImages] Generating new image for article: ${article.id}`);
+  const requestBody = buildImageRequestBody(article, basePrompt, ctx.provider, lineage);
+  const { imageUrl } = await postJSON('generateCuratedArticleImage', requestBody);
+  return imageUrl || null;
+}
+
+/**
+ * Generate a unique image for a single curated article.
+ * @param {Object} ctx - The hook's context (see above)
+ * @param {Object} article - Curated article object with id, title, summary
+ * @param {string} basePrompt - Base prompt from image_prompts
+ * @returns {Promise<string|null>} Image URL or null if generation failed
+ */
+export async function generateArticleImageWith(
+  ctx,
+  article,
+  basePrompt,
+  { cachedUrl: knownCached, lineage } = {}
+) {
+  try {
+    if (!canAttemptImage(ctx, article)) return null;
+
+    // Check the server-side image cache first — anonymous, so this is the
+    // part that works for a public visitor.
+    //
+    // `knownCached` is the batched answer from generateImagesForArticles,
+    // which asks once for the whole grid (T-739). It is honoured even when
+    // null, because "the batch said this one has no cover" is an answer;
+    // re-asking per id is exactly the N+1 that was removed. A lone caller
+    // that passes nothing still gets the single-id read.
+    const cachedUrl =
+      knownCached !== undefined ? knownCached : await readCachedImageUrl(article.id);
+    if (cachedUrl) {
+      ctx.setImageMap((prev) => ({ ...prev, [article.id]: cachedUrl }));
+      return cachedUrl;
+    }
+
+    // Not cached. Generating one is an admin action behind the role guard,
+    // so an anonymous visitor stops here with whatever the cache had rather
+    // than issuing a request that cannot succeed.
+    if (!ctx.canGenerate) return null;
+
+    return await requestGeneratedImage(ctx, article, basePrompt, lineage);
+  } catch (err) {
+    console.error(`[generateCuratedImages] Failed for article ${article?.id}:`, err.message || err);
+    return null;
+  }
+}
+
+/** The prompt text and lineage from a resolved page assignment. */
+function promptFromAssignment(promptData) {
+  const additionalParameters = promptData.additionalParameters?.trim();
+  const basePrompt = additionalParameters
+    ? `${promptData.primaryPrompt}\n\nAdditional Style Constraints:\n${additionalParameters}`
+    : promptData.primaryPrompt;
+  console.warn(
+    `[generateCuratedImages] Using prompt set: ${promptData.setName} / ${promptData.promptName || 'primary'}`
+  );
+  return {
+    basePrompt,
+    lineage: { setName: promptData.setName, promptName: promptData.promptName },
+  };
+}
+
+/**
+ * The prompt the page generates with: the assigned set's, or the provider
+ * default. The prompt is editor-only configuration and is only ever an input
+ * to generation, so an anonymous visitor neither can nor needs to read it.
+ * Attempting it was pure cost: the call threw, the default prompt was
+ * substituted, and the default was then used for nothing, because
+ * generation is gated too.
+ */
+export async function resolveBasePrompt(ctx) {
+  const providerKey = String(ctx.provider || 'AWS').toUpperCase();
+  const fallback = {
+    basePrompt: DEFAULT_PROMPT_BY_PROVIDER[providerKey] || FALLBACK_PROMPT,
+    lineage: {},
+  };
+  if (!ctx.canGenerate) return fallback;
+
+  try {
+    const promptData = await ctx.resolvePromptForPage(ctx.pagePath);
+    if (promptData?.primaryPrompt) return promptFromAssignment(promptData);
+    console.warn('[generateCuratedImages] No prompt assignment configured for this page');
+  } catch (promptErr) {
+    console.warn(
+      '[generateCuratedImages] Could not fetch prompts, using default:',
+      promptErr.message
+    );
+    // Continue with default prompt
+  }
+  return fallback;
+}
+
+/**
+ * One batched cache read for the whole grid, before anything else (T-739).
+ * This used to be one GET per card — twelve round trips for a twelve-card
+ * grid, on a route that had already fetched the feed, and repeated on every
+ * remount before the request-layer cache existed.
+ *
+ * Failure is non-fatal and yields an empty map: an editor then falls through
+ * to generation as before, and an anonymous visitor sees cards without
+ * covers, which is what they would have seen anyway.
+ */
+async function readBatchedCache(articles) {
+  try {
+    return await fetchPublicCuratedImages(articles.map((a) => a?.id));
+  } catch (cacheErr) {
+    console.warn(
+      '[generateCuratedImages] Batched cache read failed; falling back per article:',
+      cacheErr.message
+    );
+    return {};
+  }
+}
+
+/** `{ articleId: imageUrl }` for every article that got a url. */
+function toImageMap(results) {
+  const newImageMap = {};
+  for (const { id, url } of results) {
+    if (url) newImageMap[id] = url;
+  }
+  return newImageMap;
+}
+
+/** The grid's images, one request per uncached article, in parallel. */
+async function generateGrid(ctx, articles) {
+  const { basePrompt, lineage } = await resolveBasePrompt(ctx);
+  const cachedUrls = await readBatchedCache(articles);
+
+  console.warn(`[generateCuratedImages] Generating images for ${articles.length} articles...`);
+  const results = await Promise.all(
+    articles.map((article) =>
+      generateArticleImageWith(ctx, article, basePrompt, {
+        // `undefined` (not null) when the batch had no answer for this id,
+        // so generateArticleImageWith falls back to its single-id read
+        // rather than treating a failed batch as "definitely no cover".
+        cachedUrl: article?.id in cachedUrls ? cachedUrls[article.id] : undefined,
+        lineage,
+      }).then((url) => ({ id: article.id, url }))
+    )
+  );
+  console.warn(`[generateCuratedImages] All ${articles.length} image requests completed`);
+
+  const newImageMap = toImageMap(results);
+  console.warn(
+    `[generateCuratedImages] Success: ${Object.keys(newImageMap).length}/${articles.length} images ready`
+  );
+  return newImageMap;
+}
+
+/**
+ * Generate images for multiple curated articles.
+ * Fetches the prompt for the page and generates unique images.
+ * @param {Object} ctx - The hook's context (see above)
+ * @param {Array} articles - Array of curated article objects
+ * @returns {Promise<Object>} Map of articleId -> imageUrl
+ */
+export async function generateImagesForArticlesWith(ctx, articles) {
+  if (!articles || articles.length === 0) {
+    console.warn('[generateCuratedImages] No articles to process');
+    return {};
+  }
+
+  ctx.setLoading(true);
+  ctx.setError(null);
+  try {
+    console.warn(`[generateCuratedImages] Processing ${articles.length} articles`);
+    const newImageMap = await generateGrid(ctx, articles);
+    ctx.setImageMap((prev) => ({ ...prev, ...newImageMap }));
+    return newImageMap;
+  } catch (err) {
+    ctx.setError(err?.message || 'Failed to generate curated article images');
+    console.error('[generateCuratedImages] Error:', err);
+    return {};
+  } finally {
+    ctx.setLoading(false);
+  }
 }
 
 /**
@@ -80,197 +303,31 @@ export function useGenerateCuratedImages(pagePath, provider) {
   const { hasRole } = useAdminAuth();
   const canGenerate = hasRole('editor');
 
-  /** Anonymous cache read — see the header. */
-  const getCachedImageUrl = useCallback(async (articleId) => {
-    try {
-      return await fetchPublicCuratedImage(articleId);
-    } catch (err) {
-      console.error(`[generateCuratedImages] Error fetching cache for ${articleId}:`, err.message);
-      return null;
-    }
-  }, []);
-
   const { resolvePromptForPage } = useImagePrompts();
   const functionsBase = getFunctionsBase();
 
-  /**
-   * Generate a unique image for a single curated article.
-   * @param {Object} article - Curated article object with id, title, summary
-   * @param {string} basePrompt - Base prompt from image_prompts
-   * @returns {Promise<string|null>} Image URL or null if generation failed
-   */
-  const generateArticleImage = useCallback(
-    async (article, basePrompt, { cachedUrl: knownCached } = {}) => {
-      try {
-        if (!article?.id) {
-          console.warn(`[generateCuratedImages] Article missing ID, skipping generation`);
-          return null;
-        }
-
-        // Skip if functionsBase is not configured (empty, localhost, or vite dev server)
-        if (isFunctionsBaseUnavailable(functionsBase)) {
-          console.warn(
-            `[generateCuratedImages] Cloud Functions not available (${functionsBase}), skipping for ${article.id}`
-          );
-          return null;
-        }
-
-        // Check the server-side image cache first — anonymous, so this is the
-        // part that works for a public visitor.
-        //
-        // `knownCached` is the batched answer from generateImagesForArticles,
-        // which asks once for the whole grid (T-739). It is honoured even when
-        // null, because "the batch said this one has no cover" is an answer;
-        // re-asking per id is exactly the N+1 that was removed. A lone caller
-        // that passes nothing still gets the single-id read.
-        const cachedUrl =
-          knownCached !== undefined ? knownCached : await getCachedImageUrl(article.id);
-        if (cachedUrl) {
-          setImageMap((prev) => ({ ...prev, [article.id]: cachedUrl }));
-          return cachedUrl;
-        }
-
-        // Not cached. Generating one is an admin action behind the role guard,
-        // so an anonymous visitor stops here with whatever the cache had rather
-        // than issuing a request that cannot succeed.
-        if (!canGenerate) return null;
-
-        // postJSON injects the Entra access token (lib/api.js).
-        console.warn(`[generateCuratedImages] Generating new image for article: ${article.id}`);
-        const requestBody = buildImageRequestBody(article, basePrompt, provider);
-        const { imageUrl } = await postJSON('generateCuratedArticleImage', requestBody);
-
-        if (imageUrl) {
-          return imageUrl;
-        }
-
-        return null;
-      } catch (err) {
-        console.error(
-          `[generateCuratedImages] Failed for article ${article?.id}:`,
-          err.message || err
-        );
-        return null;
-      }
-    },
-    [functionsBase, provider, getCachedImageUrl, canGenerate]
+  const ctx = useMemo(
+    () => ({
+      functionsBase,
+      provider,
+      pagePath,
+      canGenerate,
+      resolvePromptForPage,
+      setImageMap,
+      setLoading,
+      setError,
+    }),
+    [functionsBase, provider, pagePath, canGenerate, resolvePromptForPage]
   );
 
-  /**
-   * Generate images for multiple curated articles.
-   * Fetches the prompt for the page and generates unique images.
-   * @param {Array} articles - Array of curated article objects
-   * @returns {Promise<Object>} Map of articleId -> imageUrl
-   */
+  const generateArticleImage = useCallback(
+    (article, basePrompt, options) => generateArticleImageWith(ctx, article, basePrompt, options),
+    [ctx]
+  );
+
   const generateImagesForArticles = useCallback(
-    async (articles) => {
-      if (!articles || articles.length === 0) {
-        console.warn('[generateCuratedImages] No articles to process');
-        return {};
-      }
-
-      setLoading(true);
-      setError(null);
-
-      try {
-        console.warn(`[generateCuratedImages] Processing ${articles.length} articles`);
-
-        // Fetch the assigned global prompt set/prompt for this page.
-        const providerKey = String(provider || 'AWS').toUpperCase();
-        let basePrompt =
-          DEFAULT_PROMPT_BY_PROVIDER[providerKey] ||
-          'Professional technical illustration for cloud infrastructure with clean, modern design';
-
-        // The prompt is editor-only configuration and is only ever an input to
-        // generation, so an anonymous visitor neither can nor needs to read it.
-        // Attempting it was pure cost: the call threw, the default prompt was
-        // substituted, and the default was then used for nothing, because
-        // generation is gated too.
-        if (canGenerate) {
-          try {
-            const promptData = await resolvePromptForPage(pagePath);
-            if (promptData?.primaryPrompt) {
-              const additionalParameters = promptData.additionalParameters?.trim();
-              basePrompt = additionalParameters
-                ? `${promptData.primaryPrompt}\n\nAdditional Style Constraints:\n${additionalParameters}`
-                : promptData.primaryPrompt;
-              console.warn(
-                `[generateCuratedImages] Using prompt set: ${promptData.setName} / ${promptData.promptName || 'primary'}`
-              );
-            } else {
-              console.warn('[generateCuratedImages] No prompt assignment configured for this page');
-            }
-          } catch (promptErr) {
-            console.warn(
-              '[generateCuratedImages] Could not fetch prompts, using default:',
-              promptErr.message
-            );
-            // Continue with default prompt
-          }
-        }
-
-        // One batched cache read for the whole grid, before anything else
-        // (T-739). This used to be one GET per card — twelve round trips for a
-        // twelve-card grid, on a route that had already fetched the feed, and
-        // repeated on every remount before the request-layer cache existed.
-        //
-        // Failure is non-fatal and yields an empty map: an editor then falls
-        // through to generation as before, and an anonymous visitor sees cards
-        // without covers, which is what they would have seen anyway.
-        let cachedUrls = {};
-        try {
-          cachedUrls = await fetchPublicCuratedImages(articles.map((a) => a?.id));
-        } catch (cacheErr) {
-          console.warn(
-            '[generateCuratedImages] Batched cache read failed; falling back per article:',
-            cacheErr.message
-          );
-        }
-
-        // Generate images for all articles in parallel
-        console.warn(
-          `[generateCuratedImages] Generating images for ${articles.length} articles...`
-        );
-        const imagePromises = articles.map((article) =>
-          generateArticleImage(article, basePrompt, {
-            // `undefined` (not null) when the batch had no answer for this id,
-            // so generateArticleImage falls back to its single-id read rather
-            // than treating a failed batch as "definitely no cover".
-            cachedUrl: article?.id in cachedUrls ? cachedUrls[article.id] : undefined,
-          }).then((url) => ({
-            id: article.id,
-            url,
-          }))
-        );
-
-        const results = await Promise.all(imagePromises);
-        console.warn(`[generateCuratedImages] All ${articles.length} image requests completed`);
-
-        // Build map of articleId -> imageUrl
-        const newImageMap = {};
-        let successCount = 0;
-        results.forEach(({ id, url }) => {
-          if (url) {
-            newImageMap[id] = url;
-            successCount++;
-          }
-        });
-        console.warn(
-          `[generateCuratedImages] Success: ${successCount}/${articles.length} images ready`
-        );
-
-        setImageMap((prev) => ({ ...prev, ...newImageMap }));
-        return newImageMap;
-      } catch (err) {
-        const errorMsg = err?.message || 'Failed to generate curated article images';
-        setError(errorMsg);
-        console.error('[generateCuratedImages] Error:', err);
-        return {};
-      } finally {
-        setLoading(false);
-      }
-    },
-    [provider, pagePath, resolvePromptForPage, generateArticleImage, canGenerate]
+    (articles) => generateImagesForArticlesWith(ctx, articles),
+    [ctx]
   );
 
   /**
@@ -278,12 +335,7 @@ export function useGenerateCuratedImages(pagePath, provider) {
    * @param {string} articleId - The article ID
    * @returns {string|null} Image URL if available, null otherwise
    */
-  const getImageUrl = useCallback(
-    (articleId) => {
-      return imageMap[articleId] || null;
-    },
-    [imageMap]
-  );
+  const getImageUrl = useCallback((articleId) => imageMap[articleId] || null, [imageMap]);
 
   return {
     imageMap,

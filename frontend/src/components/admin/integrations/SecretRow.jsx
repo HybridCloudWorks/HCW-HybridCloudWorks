@@ -15,11 +15,64 @@ import { Input } from '@/components/ui/input';
 import { Loader2, Save, Wand2 } from 'lucide-react';
 import { STATE_PRESENTATION, StateDot, relativeTime } from './StateDot';
 
+/**
+ * The state line under a credential's name.
+ *
+ * A WRITE IS SLOW AND THE PAGE MUST SAY SO. A spinner inside one small button
+ * is easy to miss on a phone, and nothing else on the row moved, so an
+ * operator had no way to tell a save in progress from a dead page. While
+ * `busy`, the state label is replaced by "Saving…" and the rest of the line is
+ * suppressed: the old status is about to stop being true, and showing it
+ * beside a spinner invites reading it as the new one.
+ */
+function SecretStateLine({ item, busy }) {
+  const presentation = STATE_PRESENTATION[item.state] ?? STATE_PRESENTATION.never;
+  if (busy) {
+    return (
+      <span className="inline-flex items-center gap-1.5 font-medium text-muted-foreground">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        Saving…
+      </span>
+    );
+  }
+  return (
+    <>
+      <span className="font-medium">{presentation.label}</span>
+      {item.lastWriteAt ? (
+        <span className="text-muted-foreground"> · updated {relativeTime(item.lastWriteAt)}</span>
+      ) : null}
+      {item.state === 'failing' && item.lastFailStatus ? (
+        <span className="text-muted-foreground"> · HTTP {item.lastFailStatus}</span>
+      ) : null}
+      {item.state === 'failing' && item.lastFailDetail ? (
+        // The provider's own words. `HTTP 401` alone sent two days into
+        // reminting a key that a sentence would have exonerated or condemned
+        // outright (#463 item 4, #358).
+        <span className="text-muted-foreground"> — {item.lastFailDetail}</span>
+      ) : null}
+      {!item.hasLivenessCheck && item.state === 'live' ? (
+        // Otherwise green would imply "verified", which for these means only
+        // "the reference resolved to something". Where a service card's beaker
+        // exercises the key, say that instead — "no liveness check" beside a
+        // key the Services tab tests contradicted the card (ADR 0033 Platform).
+        <span className="text-muted-foreground">
+          {item.testedBy?.length
+            ? ` · checked by the ${item.testedBy.join(' and ')} test on the Services tab, not by a timer`
+            : ' · no liveness check for this one'}
+        </span>
+      ) : null}
+    </>
+  );
+}
+
 /** One credential: its light, its name, and somewhere to paste a new value. */
 export function SecretRow({ item, onSubmit, busy }) {
   const [value, setValue] = useState('');
   const inputRef = useRef(null);
-  const presentation = STATE_PRESENTATION[item.state] ?? STATE_PRESENTATION.never;
+  // "Used by Google Gemini" under the Google Gemini row says nothing: since
+  // ADR 0033 every AI key has a service card of the same name, so only the
+  // OTHER services a key serves are worth a line.
+  const usedBy = (item.usedBy ?? []).filter((name) => name !== item.label);
 
   const submit = async (payload) => {
     const ok = await onSubmit(item.secret, payload);
@@ -44,51 +97,13 @@ export function SecretRow({ item, onSubmit, busy }) {
             <code className="text-xs text-muted-foreground">{item.secret}</code>
           </div>
           <p className="mt-0.5 text-xs text-muted-foreground">{item.help}</p>
-          {item.usedBy?.length > 0 ? (
+          {usedBy.length > 0 ? (
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Used by <span className="font-medium">{item.usedBy.join(', ')}</span>
+              Used by <span className="font-medium">{usedBy.join(', ')}</span>
             </p>
           ) : null}
           <p className="mt-1 text-xs">
-            {/*
-              A WRITE IS SLOW AND THE PAGE MUST SAY SO. A spinner inside one
-              small button is easy to miss on a phone, and nothing else on the
-              row moved, so an operator had no way to tell a save in progress
-              from a dead page. While `busy`, the state label is replaced by
-              "Saving…" and the rest of the line is suppressed: the old status
-              is about to stop being true, and showing it beside a spinner
-              invites reading it as the new one.
-            */}
-            {busy ? (
-              <span className="inline-flex items-center gap-1.5 font-medium text-muted-foreground">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                Saving…
-              </span>
-            ) : (
-              <>
-                <span className="font-medium">{presentation.label}</span>
-                {item.lastWriteAt ? (
-                  <span className="text-muted-foreground">
-                    {' '}
-                    · updated {relativeTime(item.lastWriteAt)}
-                  </span>
-                ) : null}
-                {item.state === 'failing' && item.lastFailStatus ? (
-                  <span className="text-muted-foreground"> · HTTP {item.lastFailStatus}</span>
-                ) : null}
-                {item.state === 'failing' && item.lastFailDetail ? (
-                  // The provider's own words. `HTTP 401` alone sent two days
-                  // into reminting a key that a sentence would have exonerated
-                  // or condemned outright (#463 item 4, #358).
-                  <span className="text-muted-foreground"> — {item.lastFailDetail}</span>
-                ) : null}
-                {!item.hasLivenessCheck && item.state === 'live' ? (
-                  // Otherwise green would imply "verified", which for these
-                  // means only "the reference resolved to something".
-                  <span className="text-muted-foreground"> · no liveness check for this one</span>
-                ) : null}
-              </>
-            )}
+            <SecretStateLine item={item} busy={busy} />
           </p>
         </div>
       </div>

@@ -26,6 +26,10 @@ export const EMPTY_FORM = Object.freeze({
   tags: '',
   reading: '',
   body: '',
+  // The taxonomy (ADR 0033 §4): a draft written here is an article someone
+  // typed in, until the owner says otherwise.
+  kind: 'article',
+  ideaOrigin: 'manual',
 });
 
 const FORM_KEYS = Object.keys(EMPTY_FORM);
@@ -60,6 +64,8 @@ export function fromDraft(draft) {
     tags: Array.isArray(fields.tags) ? fields.tags.join(', ') : '',
     reading: fields.reading === null || fields.reading === undefined ? '' : String(fields.reading),
     body: String(fields.body ?? ''),
+    kind: String(fields.kind || EMPTY_FORM.kind),
+    ideaOrigin: String(fields.ideaOrigin || EMPTY_FORM.ideaOrigin),
   };
 }
 
@@ -87,6 +93,9 @@ export function toPayload(form) {
     tags: parseTags(form.tags),
     reading: reading === '' ? null : Number(reading),
     body: String(form.body ?? ''),
+    // Only when set: an unset value leaves the stored classification alone.
+    ...(form.kind && { kind: String(form.kind).trim() }),
+    ...(form.ideaOrigin && { ideaOrigin: String(form.ideaOrigin).trim() }),
   };
 }
 

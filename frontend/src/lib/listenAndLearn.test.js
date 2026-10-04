@@ -10,7 +10,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('@/lib/api', () => ({ getJSON: vi.fn(), postJSON: vi.fn() }));
+vi.mock('@/lib/api', () => ({ getJSON: vi.fn(), postJSON: vi.fn(), sendJSON: vi.fn() }));
 vi.mock('@/lib/publicApi', () => ({ fetchPublicListenAndLearn: vi.fn() }));
 vi.mock('@/lib/jobs', () => ({ runJob: vi.fn() }));
 
@@ -215,5 +215,129 @@ describe('generation runs as a job', () => {
     });
 
     expect(runJob.mock.calls[0][2].onAccepted).toBe(onAccepted);
+  });
+});
+
+describe('the Audio Library calls (ADR 0033 §4)', async () => {
+  const lib = await import('./listenAndLearn.js');
+  const { sendJSON } = await import('@/lib/api');
+  const key = { platform: 'azure', examCode: 'AZ-104' };
+
+  it('offers only the platforms with a public page to play a course on, and says why GitHub is missing', () => {
+    expect(lib.GENERATE_PLATFORMS).toEqual(['azure', 'aws']);
+    expect(lib.GITHUB_GENERATE_NOTE).toMatch(/GitHub/);
+    expect(lib.SUPPORTED_PLATFORMS).toContain('github');
+  });
+
+  it('lists books, archived ones only when asked', async () => {
+    getJSON.mockResolvedValue({ items: [{ id: 'a' }] });
+    expect(await lib.fetchBooks()).toEqual([{ id: 'a' }]);
+    expect(getJSON).toHaveBeenLastCalledWith('cms/listen-and-learn');
+    await lib.fetchBooks({ archived: true });
+    expect(getJSON).toHaveBeenLastCalledWith('cms/listen-and-learn?archived=1');
+  });
+
+  it('creates, patches and soft-deletes a book through its route, with force as a query', async () => {
+    postJSON.mockResolvedValue({ item: { id: 'azure_x' } });
+    expect(await lib.createBook({ provider: 'azure', title: 'X' })).toEqual({ id: 'azure_x' });
+    expect(postJSON).toHaveBeenCalledWith('cms/listen-and-learn', {
+      provider: 'azure',
+      title: 'X',
+    });
+
+    sendJSON.mockResolvedValue({ item: { id: 'azure_az-104', title: 'Renamed' } });
+    expect(await lib.patchBook(key, { title: 'Renamed' })).toEqual({
+      id: 'azure_az-104',
+      title: 'Renamed',
+    });
+    expect(sendJSON).toHaveBeenCalledWith('cms/listen-and-learn/azure/AZ-104', 'PATCH', {
+      title: 'Renamed',
+    });
+
+    sendJSON.mockResolvedValue({ success: true });
+    await lib.deleteBook(key);
+    expect(sendJSON).toHaveBeenLastCalledWith('cms/listen-and-learn/azure/AZ-104', 'DELETE');
+    await lib.deleteBook(key, { force: true });
+    expect(sendJSON).toHaveBeenLastCalledWith(
+      'cms/listen-and-learn/azure/AZ-104?force=1',
+      'DELETE'
+    );
+  });
+
+  it('creates, patches, reorders and deletes chapters, and deletes one version', async () => {
+    postJSON.mockResolvedValue({ item: { id: 'manual_x' }, job: null });
+    await lib.createChapter(key, { title: 'X', sourceText: 'Hi' });
+    expect(postJSON).toHaveBeenCalledWith('cms/listen-and-learn/azure/AZ-104/chapters', {
+      title: 'X',
+      sourceText: 'Hi',
+    });
+
+    sendJSON.mockResolvedValue({ item: { id: 'manual_x', order: 2 } });
+    await lib.patchChapter({ ...key, chapterId: 'manual_x' }, { order: 2 });
+    expect(sendJSON).toHaveBeenLastCalledWith(
+      'cms/listen-and-learn/azure/AZ-104/chapters/manual_x',
+      'PATCH',
+      { order: 2 }
+    );
+
+    await lib.reorderChapters(key, ['b', 'a']);
+    expect(sendJSON).toHaveBeenLastCalledWith(
+      'cms/listen-and-learn/azure/AZ-104/chapters',
+      'PATCH',
+      {
+        order: ['b', 'a'],
+      }
+    );
+
+    await lib.deleteChapter({ ...key, chapterId: 'manual_x' }, { force: true });
+    expect(sendJSON).toHaveBeenLastCalledWith(
+      'cms/listen-and-learn/azure/AZ-104/chapters/manual_x?force=1',
+      'DELETE'
+    );
+
+    await lib.deleteVersion({ ...key, chapterId: 'manual_x', versionId: '20261003140509' });
+    expect(sendJSON).toHaveBeenLastCalledWith(
+      'cms/listen-and-learn/azure/AZ-104/chapters/manual_x/versions/20261003140509',
+      'DELETE'
+    );
+  });
+
+  it('regenerates one chapter as a job enqueued through its own route, so a 400 is the route’s sentence', async () => {
+    runJob.mockResolvedValue({ status: 'succeeded' });
+    postJSON.mockResolvedValue({ ok: true, jobId: 'j' });
+    const onAccepted = vi.fn();
+    await lib.regenerateChapter(
+      { ...key, chapterId: 'area-1', ttsModel: 'gemini-2.5-flash-preview-tts' },
+      { onAccepted }
+    );
+    const [, payload, options] = runJob.mock.calls.at(-1);
+    expect(payload).toEqual({ ttsModel: 'gemini-2.5-flash-preview-tts' });
+    expect(options.onAccepted).toBe(onAccepted);
+    await options.fetchers.enqueue({ payload });
+    expect(postJSON).toHaveBeenCalledWith(
+      'cms/listen-and-learn/azure/AZ-104/chapters/area-1/regenerate',
+      payload
+    );
+  });
+
+  it('follows a job another call already queued without enqueueing again', async () => {
+    runJob.mockResolvedValue({ status: 'succeeded' });
+    const accepted = { ok: true, jobId: 'j-2', type: 'speak-listen-and-learn-chapter' };
+    await lib.followJob(accepted);
+    const [type, , options] = runJob.mock.calls.at(-1);
+    expect(type).toBe('speak-listen-and-learn-chapter');
+    expect(await options.fetchers.enqueue()).toBe(accepted);
+  });
+
+  it('prices text by the book when one is named', async () => {
+    postJSON.mockResolvedValue({ estimatedCostUsd: 0.01 });
+    await lib.estimateSpeech({ text: 'Hello', ...key });
+    expect(postJSON).toHaveBeenCalledWith('cms/listen-and-learn/estimate', {
+      text: 'Hello',
+      platform: 'azure',
+      examCode: 'AZ-104',
+    });
+    await lib.estimateSpeech({ bytes: 9000 });
+    expect(postJSON).toHaveBeenLastCalledWith('cms/listen-and-learn/estimate', { bytes: 9000 });
   });
 });

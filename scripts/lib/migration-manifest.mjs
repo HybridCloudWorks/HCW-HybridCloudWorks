@@ -29,6 +29,9 @@
  *               migrating it only imports drift. Container still provisioned.
  *   regenerate— cache; a scheduled job refills it. Do not migrate.
  *   transient — in-flight job/quota records with no value after cutover.
+ *   azure-only— created on Azure after cutover, with no Firestore source at
+ *               all. Provisioned, never migrated: there is nothing to copy.
+ *               The first was `ambassador` (ADR 0033 §4).
  *   probe     — historical declaration with no known application writer.
  *               Also: exists in Firestore with neither a rules match nor a
  *               writer at the baseline (legacy residue the 2026-08-21 preflight
@@ -386,6 +389,13 @@ export const COLLECTIONS = [
   { name: 'admin_audit_logs', disposition: 'migrate' },
   { name: '_snapshots', disposition: 'migrate', note: 'Leading underscore is legal in Cosmos container names.' },
 
+  // --- Spotlight -------------------------------------------------------------
+  {
+    name: 'ambassador',
+    disposition: 'azure-only',
+    note: 'Ambassador hub (ADR 0033 §4). One container, documents told apart by `docType`: `program` (the catalogue, seeded on first read), `application` (one pursuit of one program, private), `evidence` (a talk, cert or article linked by {sourceModule, sourceId} with a snapshot). Partitioned on /id like every other small container; every list is a docType filter over one physical partition.',
+  },
+
   // --- Social --------------------------------------------------------------
   { name: 'social_posts', disposition: 'migrate', note: '~15 docs. 5 call sites — the only live one of the social_* set.' },
   // The remaining social_* collections have a firestore.rules match
@@ -575,7 +585,13 @@ export const MIGRATED_DISPOSITIONS = new Set(['migrate']);
  * `probe` collections stay unprovisioned until the preflight confirms they
  * exist and hold something.
  */
-export const PROVISIONED_DISPOSITIONS = new Set(['migrate', 'reseed', 'regenerate', 'transient']);
+export const PROVISIONED_DISPOSITIONS = new Set([
+  'migrate',
+  'reseed',
+  'regenerate',
+  'transient',
+  'azure-only',
+]);
 
 /**
  * Flatten the manifest into one entry per Cosmos container.

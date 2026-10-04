@@ -11,10 +11,18 @@ import { createAdminIntegrationHandlers } from './admin-integrations.js';
 const context = { log: vi.fn(), error: vi.fn() };
 
 const allowGuard = {
-  requireRole: vi.fn(async () => ({ user: { oid: 'u1' }, role: 'editor', error: null })),
+  requireRole: vi.fn(async () => ({
+    user: { oid: 'u1' },
+    role: 'editor',
+    error: null,
+  })),
 };
 const denyGuard = {
-  requireRole: vi.fn(async () => ({ user: null, role: null, error: { status: 403, body: '{}' } })),
+  requireRole: vi.fn(async () => ({
+    user: null,
+    role: null,
+    error: { status: 403, body: '{}' },
+  })),
 };
 
 const makeRequest = ({ query = {}, params = {}, body } = {}) => ({
@@ -37,12 +45,19 @@ function makeStore(over = {}) {
   };
 }
 
-const fixed = { now: () => new Date('2026-08-06T12:00:00.000Z'), uuid: () => 'fixed-uuid' };
+const fixed = {
+  now: () => new Date('2026-08-06T12:00:00.000Z'),
+  uuid: () => 'fixed-uuid',
+};
 
 describe('auth', () => {
   it('all handlers pass guard denials through with zero store calls', async () => {
     const store = makeStore();
-    const h = createAdminIntegrationHandlers({ guard: denyGuard, store, ...fixed });
+    const h = createAdminIntegrationHandlers({
+      guard: denyGuard,
+      store,
+      ...fixed,
+    });
     const calls = [
       h.listRecordings(makeRequest(), context),
       h.createRecording(makeRequest({ body: { title: 't', transcript: 'x' } }), context),
@@ -52,8 +67,20 @@ describe('auth', () => {
       h.putSettings(makeRequest({ body: { a: 1 } }), context),
       h.listImages(makeRequest(), context),
       h.listConfig(makeRequest({ params: { collection: 'ai-providers' } }), context),
-      h.putConfig(makeRequest({ params: { collection: 'ai-providers', id: 'v' }, body: {} }), context),
-      h.patchConfig(makeRequest({ params: { collection: 'mcp-servers', id: 'v' }, body: { a: 1 } }), context),
+      h.putConfig(
+        makeRequest({
+          params: { collection: 'ai-providers', id: 'v' },
+          body: {},
+        }),
+        context
+      ),
+      h.patchConfig(
+        makeRequest({
+          params: { collection: 'mcp-servers', id: 'v' },
+          body: { a: 1 },
+        }),
+        context
+      ),
       h.deleteConfig(makeRequest({ params: { collection: 'mcp-servers', id: 'v' } }), context),
       h.listUsage(makeRequest(), context),
     ];
@@ -68,9 +95,15 @@ describe('auth', () => {
 describe('recordings', () => {
   it('create requires title and transcript, stamps id/createdAt/status', async () => {
     const store = makeStore();
-    const h = createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+    const h = createAdminIntegrationHandlers({
+      guard: allowGuard,
+      store,
+      ...fixed,
+    });
 
-    expect((await h.createRecording(makeRequest({ body: { title: 'T' } }), context)).status).toBe(400);
+    expect((await h.createRecording(makeRequest({ body: { title: 'T' } }), context)).status).toBe(
+      400
+    );
 
     await h.createRecording(makeRequest({ body: { title: 'T', transcript: 'Tx' } }), context);
     const doc = store.upsertDoc.mock.calls[0][1];
@@ -89,12 +122,19 @@ describe('recordings', () => {
       ]),
       readDoc: vi.fn(async () => ({ id: 'r1', status: 'new' })),
     });
-    const h = createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+    const h = createAdminIntegrationHandlers({
+      guard: allowGuard,
+      store,
+      ...fixed,
+    });
     const res = await h.listRecordings(makeRequest(), context);
     expect(JSON.parse(res.body).items.map((i) => i.id)).toEqual(['new', 'old']);
 
     await h.patchRecording(
-      makeRequest({ params: { id: 'r1' }, body: { status: 'routed', contentId: 'c9' } }),
+      makeRequest({
+        params: { id: 'r1' },
+        body: { status: 'routed', contentId: 'c9' },
+      }),
       context
     );
     expect(store.patchDoc).toHaveBeenCalledWith('recordings', 'r1', {
@@ -102,27 +142,46 @@ describe('recordings', () => {
       contentId: 'c9',
     });
 
-    const h404 = createAdminIntegrationHandlers({ guard: allowGuard, store: makeStore(), ...fixed });
+    const h404 = createAdminIntegrationHandlers({
+      guard: allowGuard,
+      store: makeStore(),
+      ...fixed,
+    });
     expect(
-      (await h404.patchRecording(makeRequest({ params: { id: 'x' }, body: { a: 1 } }), context)).status
+      (await h404.patchRecording(makeRequest({ params: { id: 'x' }, body: { a: 1 } }), context))
+        .status
     ).toBe(404);
   });
 });
 
 describe('settings', () => {
   it('GET returns {} when the doc is missing', async () => {
-    const h = createAdminIntegrationHandlers({ guard: allowGuard, store: makeStore(), ...fixed });
+    const h = createAdminIntegrationHandlers({
+      guard: allowGuard,
+      store: makeStore(),
+      ...fixed,
+    });
     const res = await h.getSettings(makeRequest(), context);
     expect(JSON.parse(res.body).settings).toEqual({});
   });
 
   it('PUT merges into an existing doc (patch, never replace)', async () => {
     const store = makeStore({
-      readDoc: vi.fn(async () => ({ id: 'integrations', sessionizeSpeakerId: 'abc', other: 'kept' })),
+      readDoc: vi.fn(async () => ({
+        id: 'integrations',
+        sessionizeSpeakerId: 'abc',
+        other: 'kept',
+      })),
     });
-    const h = createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+    const h = createAdminIntegrationHandlers({
+      guard: allowGuard,
+      store,
+      ...fixed,
+    });
     await h.putSettings(makeRequest({ body: { sessionizeSpeakerId: 'xyz' } }), context);
-    expect(store.upsertDoc).not.toHaveBeenCalled();
+    // The settings document is patched, never replaced; the one upsert is the
+    // Change history row (ADR 0033), tested below.
+    expect(store.upsertDoc).not.toHaveBeenCalledWith('admin_settings', expect.anything());
     expect(store.patchDoc).toHaveBeenCalledWith('admin_settings', 'integrations', {
       sessionizeSpeakerId: 'xyz',
       updatedAt: '2026-08-06T12:00:00.000Z',
@@ -131,13 +190,72 @@ describe('settings', () => {
 
   it('PUT creates the doc when absent', async () => {
     const store = makeStore();
-    const h = createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+    const h = createAdminIntegrationHandlers({
+      guard: allowGuard,
+      store,
+      ...fixed,
+    });
     await h.putSettings(makeRequest({ body: { sessionizeSpeakerId: 'xyz' } }), context);
     expect(store.patchDoc).not.toHaveBeenCalled();
     expect(store.upsertDoc.mock.calls[0][1]).toMatchObject({
       id: 'integrations',
       sessionizeSpeakerId: 'xyz',
     });
+  });
+
+  it('PUT of the speaker id writes a platform_setting_updated row, and only then (ADR 0033)', async () => {
+    const store = makeStore({
+      readDoc: vi.fn(async () => ({
+        id: 'integrations',
+        sessionizeSpeakerId: 'abc',
+      })),
+    });
+    const h = createAdminIntegrationHandlers({
+      guard: allowGuard,
+      store,
+      ...fixed,
+    });
+    await h.putSettings(makeRequest({ body: { sessionizeSpeakerId: 'xyz' } }), context);
+    const audit = store.upsertDoc.mock.calls.find(
+      ([container]) => container === 'admin_audit_logs'
+    );
+    expect(audit[1]).toMatchObject({
+      id: 'fixed-uuid',
+      action: 'platform_setting_updated',
+      userId: 'u1',
+      timestamp: '2026-08-06T12:00:00.000Z',
+      details: {
+        setting: 'integrations',
+        sessionizeSpeakerId: 'xyz',
+        changed: true,
+      },
+    });
+
+    store.upsertDoc.mockClear();
+    await h.putSettings(makeRequest({ body: { other: 'field' } }), context);
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+  });
+
+  it('PUT still answers 200 when the audit row fails, because the save already took', async () => {
+    const warn = vi.fn();
+    const store = makeStore({
+      readDoc: vi.fn(async () => null),
+      upsertDoc: vi.fn(async (container, doc) => {
+        if (container === 'admin_audit_logs') throw new Error('audit down');
+        return doc;
+      }),
+    });
+    const h = createAdminIntegrationHandlers({
+      guard: allowGuard,
+      store,
+      ...fixed,
+    });
+    const res = await h.putSettings(makeRequest({ body: { sessionizeSpeakerId: 'xyz' } }), {
+      ...context,
+      warn,
+    });
+    expect(res.status).toBe(200);
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/audit row failed/));
   });
 });
 
@@ -149,7 +267,11 @@ describe('images', () => {
         { id: `${container}-new`, createdAt: '2026-04-01T00:00:00Z' },
       ]),
     });
-    const h = createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+    const h = createAdminIntegrationHandlers({
+      guard: allowGuard,
+      store,
+      ...fixed,
+    });
     const res = await h.listImages(makeRequest(), context);
     const body = JSON.parse(res.body);
     expect(body.curated[0].id).toBe('curated_article_images-new');
@@ -160,7 +282,11 @@ describe('images', () => {
     const store = makeStore({
       readDoc: vi.fn(async (_c, id) => (id === 'hit' ? { id: 'hit', imageUrl: 'u' } : null)),
     });
-    const h = createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+    const h = createAdminIntegrationHandlers({
+      guard: allowGuard,
+      store,
+      ...fixed,
+    });
 
     const hit = await h.getCuratedImage(makeRequest({ params: { id: 'hit' } }), context);
     expect(JSON.parse(hit.body).item.imageUrl).toBe('u');
@@ -175,7 +301,11 @@ describe('images', () => {
 describe('config collections (ai-providers / mcp-servers)', () => {
   it('404s any collection outside the allowlist before touching Cosmos', async () => {
     const store = makeStore();
-    const h = createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+    const h = createAdminIntegrationHandlers({
+      guard: allowGuard,
+      store,
+      ...fixed,
+    });
     const res = await h.listConfig(makeRequest({ params: { collection: 'admins' } }), context);
     expect(res.status).toBe(404);
     expect(store.queryDocs).not.toHaveBeenCalled();
@@ -188,7 +318,11 @@ describe('config collections (ai-providers / mcp-servers)', () => {
         { id: 'a', order: 1, oauthToken: 'SECRET2' },
       ]),
     });
-    const h = createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+    const h = createAdminIntegrationHandlers({
+      guard: allowGuard,
+      store,
+      ...fixed,
+    });
     const res = await h.listConfig(makeRequest({ params: { collection: 'mcp-servers' } }), context);
     const body = JSON.parse(res.body);
     expect(body.items.map((i) => i.id)).toEqual(['a', 'b']);
@@ -200,11 +334,21 @@ describe('config collections (ai-providers / mcp-servers)', () => {
 
   it('PUT upserts at the client-chosen route id, preserving createdAt', async () => {
     const store = makeStore({
-      readDoc: vi.fn(async () => ({ id: 'vertex', createdAt: '2025-01-01T00:00:00Z' })),
+      readDoc: vi.fn(async () => ({
+        id: 'vertex',
+        createdAt: '2025-01-01T00:00:00Z',
+      })),
     });
-    const h = createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+    const h = createAdminIntegrationHandlers({
+      guard: allowGuard,
+      store,
+      ...fixed,
+    });
     await h.putConfig(
-      makeRequest({ params: { collection: 'ai-providers', id: 'vertex' }, body: { enabled: true } }),
+      makeRequest({
+        params: { collection: 'ai-providers', id: 'vertex' },
+        body: { enabled: true },
+      }),
       context
     );
     const doc = store.upsertDoc.mock.calls[0][1];
@@ -218,9 +362,17 @@ describe('config collections (ai-providers / mcp-servers)', () => {
     // edit form that reads then writes would silently delete the token
     // (T-314).
     const store = makeStore({
-      readDoc: vi.fn(async () => ({ id: 'plaud', oauthToken: 'stored-tok', createdAt: 'x' })),
+      readDoc: vi.fn(async () => ({
+        id: 'plaud',
+        oauthToken: 'stored-tok',
+        createdAt: 'x',
+      })),
     });
-    const h = createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+    const h = createAdminIntegrationHandlers({
+      guard: allowGuard,
+      store,
+      ...fixed,
+    });
     await h.putConfig(
       makeRequest({
         params: { collection: 'mcp-servers', id: 'plaud' },
@@ -240,7 +392,11 @@ describe('config collections (ai-providers / mcp-servers)', () => {
     const store = makeStore({
       readDoc: vi.fn(async () => ({ id: 'plaud', oauthToken: 'old-tok' })),
     });
-    const h = createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+    const h = createAdminIntegrationHandlers({
+      guard: allowGuard,
+      store,
+      ...fixed,
+    });
     await h.putConfig(
       makeRequest({
         params: { collection: 'mcp-servers', id: 'plaud' },
@@ -257,9 +413,16 @@ describe('config collections (ai-providers / mcp-servers)', () => {
     const store = makeStore({
       readDoc: vi.fn(async () => ({ id: 'plaud', oauthToken: 'old-tok' })),
     });
-    const h = createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+    const h = createAdminIntegrationHandlers({
+      guard: allowGuard,
+      store,
+      ...fixed,
+    });
     await h.putConfig(
-      makeRequest({ params: { collection: 'mcp-servers', id: 'plaud' }, body: { oauthToken: '' } }),
+      makeRequest({
+        params: { collection: 'mcp-servers', id: 'plaud' },
+        body: { oauthToken: '' },
+      }),
       context
     );
     expect(store.upsertDoc.mock.calls[0][1].oauthToken).toBe('');
@@ -267,11 +430,21 @@ describe('config collections (ai-providers / mcp-servers)', () => {
 
   it('PUT does not invent an oauthToken for a non-mcp collection', async () => {
     const store = makeStore({
-      readDoc: vi.fn(async () => ({ id: 'vertex', oauthToken: 'should-not-carry' })),
+      readDoc: vi.fn(async () => ({
+        id: 'vertex',
+        oauthToken: 'should-not-carry',
+      })),
     });
-    const h = createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+    const h = createAdminIntegrationHandlers({
+      guard: allowGuard,
+      store,
+      ...fixed,
+    });
     await h.putConfig(
-      makeRequest({ params: { collection: 'ai-providers', id: 'vertex' }, body: { enabled: true } }),
+      makeRequest({
+        params: { collection: 'ai-providers', id: 'vertex' },
+        body: { enabled: true },
+      }),
       context
     );
     expect(store.upsertDoc.mock.calls[0][1]).not.toHaveProperty('oauthToken');
@@ -282,9 +455,16 @@ describe('config collections (ai-providers / mcp-servers)', () => {
       readDoc: vi.fn(async () => ({ id: 'plaud' })),
       patchDoc: vi.fn(async (_c, id, u) => ({ id, ...u })),
     });
-    const h = createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+    const h = createAdminIntegrationHandlers({
+      guard: allowGuard,
+      store,
+      ...fixed,
+    });
     const res = await h.patchConfig(
-      makeRequest({ params: { collection: 'mcp-servers', id: 'plaud' }, body: { oauthToken: 'tok-123' } }),
+      makeRequest({
+        params: { collection: 'mcp-servers', id: 'plaud' },
+        body: { oauthToken: 'tok-123' },
+      }),
       context
     );
     expect(store.patchDoc.mock.calls[0][2].oauthToken).toBe('tok-123'); // write goes through
@@ -293,7 +473,11 @@ describe('config collections (ai-providers / mcp-servers)', () => {
 
   it('DELETE targets the mapped container', async () => {
     const store = makeStore();
-    const h = createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+    const h = createAdminIntegrationHandlers({
+      guard: allowGuard,
+      store,
+      ...fixed,
+    });
     await h.deleteConfig(makeRequest({ params: { collection: 'mcp-servers', id: 's1' } }), context);
     expect(store.deleteDoc).toHaveBeenCalledWith('mcp_servers', 's1');
   });
@@ -307,7 +491,11 @@ describe('usage records', () => {
         { id: 'b', timestamp: '2026-03-01T00:00:00Z' },
       ]),
     });
-    const h = createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+    const h = createAdminIntegrationHandlers({
+      guard: allowGuard,
+      store,
+      ...fixed,
+    });
     const res = await h.listUsage(makeRequest({ query: { since: '2026-01-01' } }), context);
     expect(JSON.parse(res.body).items.map((i) => i.id)).toEqual(['b', 'a']);
     const [, query, params] = store.queryDocs.mock.calls[0];
@@ -315,9 +503,30 @@ describe('usage records', () => {
     expect(params).toContainEqual({ name: '@since', value: '2026-01-01' });
   });
 
+  it('orders newest first in the query, so the TOP window holds the newest rows (ADR 0033)', async () => {
+    const store = makeStore();
+    const h = createAdminIntegrationHandlers({
+      guard: allowGuard,
+      store,
+      ...fixed,
+    });
+    await h.listUsage(makeRequest(), context);
+    expect(store.queryDocs.mock.calls[0][1]).toMatch(/ORDER BY c\.timestamp DESC$/);
+    await h.listUsage(makeRequest({ query: { since: '2026-01-01' } }), context);
+    expect(store.queryDocs.mock.calls[1][1]).toMatch(
+      /WHERE c\.timestamp >= @since ORDER BY c\.timestamp DESC$/
+    );
+  });
+
   it('400s an unparseable since', async () => {
-    const h = createAdminIntegrationHandlers({ guard: allowGuard, store: makeStore(), ...fixed });
-    expect((await h.listUsage(makeRequest({ query: { since: 'junk' } }), context)).status).toBe(400);
+    const h = createAdminIntegrationHandlers({
+      guard: allowGuard,
+      store: makeStore(),
+      ...fixed,
+    });
+    expect((await h.listUsage(makeRequest({ query: { since: 'junk' } }), context)).status).toBe(
+      400
+    );
   });
 });
 
@@ -345,14 +554,18 @@ describe('AI feature switches', () => {
   });
 
   it('GET reports a stored false as false', async () => {
-    const store = makeStore({ readDoc: vi.fn(async () => ({ features: { critique: false } })) });
+    const store = makeStore({
+      readDoc: vi.fn(async () => ({ features: { critique: false } })),
+    });
     const body = JSON.parse((await handlers(store).getAiFeatures(makeRequest(), context)).body);
     expect(body.features.critique).toBe(false);
     expect(body.features.inspector).toBe(true);
   });
 
   it('PUT merges rather than replaces, so one toggle does not clear the rest', async () => {
-    const store = makeStore({ readDoc: vi.fn(async () => ({ features: { critique: false } })) });
+    const store = makeStore({
+      readDoc: vi.fn(async () => ({ features: { critique: false } })),
+    });
     const response = await handlers(store).putAiFeatures(
       makeRequest({ body: { features: { telegram: false } } }),
       context
@@ -393,7 +606,9 @@ describe('AI feature switches', () => {
   it('PUT 400s a body that is not { features: {...} }', async () => {
     const store = makeStore();
     for (const body of [{}, { features: [] }, { features: null }]) {
-      expect((await handlers(store).putAiFeatures(makeRequest({ body }), context)).status).toBe(400);
+      expect((await handlers(store).putAiFeatures(makeRequest({ body }), context)).status).toBe(
+        400
+      );
     }
   });
 
@@ -402,7 +617,9 @@ describe('AI feature switches', () => {
       const store = makeStore({
         readDoc: vi.fn(async () => ({
           features: {},
-          placement: { nvidia: { forgeDrafting: 'first', pricingExplain: 'first' } },
+          placement: {
+            nvidia: { forgeDrafting: 'first', pricingExplain: 'first' },
+          },
         })),
       });
       const body = JSON.parse((await handlers(store).getAiFeatures(makeRequest(), context)).body);
@@ -426,7 +643,9 @@ describe('AI feature switches', () => {
         })),
       });
       const response = await handlers(store).putAiFeatures(
-        makeRequest({ body: { placement: { nvidia: { forgeDrafting: 'order' } } } }),
+        makeRequest({
+          body: { placement: { nvidia: { forgeDrafting: 'order' } } },
+        }),
         context
       );
       expect(response.status).toBe(200);
@@ -441,7 +660,9 @@ describe('AI feature switches', () => {
       const store = makeStore();
       for (const value of ['first', 'order']) {
         const response = await handlers(store).putAiFeatures(
-          makeRequest({ body: { placement: { nvidia: { landingZoneExplain: value } } } }),
+          makeRequest({
+            body: { placement: { nvidia: { landingZoneExplain: value } } },
+          }),
           context
         );
         expect(response.status).toBe(400);
@@ -472,7 +693,11 @@ describe('AI feature switches', () => {
 
   it('both verbs require a role', async () => {
     const store = makeStore();
-    const denied = createAdminIntegrationHandlers({ guard: denyGuard, store, ...fixed });
+    const denied = createAdminIntegrationHandlers({
+      guard: denyGuard,
+      store,
+      ...fixed,
+    });
     expect((await denied.getAiFeatures(makeRequest(), context)).status).toBe(403);
     expect(
       (await denied.putAiFeatures(makeRequest({ body: { features: {} } }), context)).status
@@ -507,10 +732,11 @@ describe('partial MCP/AI config updates never disturb a stored secret', () => {
   };
 
   const patch = (store, collection, body, id = 'plaud') =>
-    createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed }).patchConfig(
-      makeRequest({ params: { collection, id }, body }),
-      context
-    );
+    createAdminIntegrationHandlers({
+      guard: allowGuard,
+      store,
+      ...fixed,
+    }).patchConfig(makeRequest({ params: { collection, id }, body }), context);
 
   it('PATCH omitting oauthToken does not send it, so the merge cannot clear it', async () => {
     const store = mergingStore(storedServer());
@@ -526,7 +752,9 @@ describe('partial MCP/AI config updates never disturb a stored secret', () => {
     // is built from it, so this is the point where an untouched secret would
     // leak back to the browser.
     const store = mergingStore(storedServer());
-    const res = await patch(store, 'mcp-servers', { url: 'https://mcp.example/v2' });
+    const res = await patch(store, 'mcp-servers', {
+      url: 'https://mcp.example/v2',
+    });
     const { item } = JSON.parse(res.body);
 
     expect(res.body).not.toContain('stored-tok');
@@ -545,12 +773,23 @@ describe('partial MCP/AI config updates never disturb a stored secret', () => {
     expect(res.body).not.toContain('stored-ref');
     expect(item).not.toHaveProperty('oauthRefreshToken');
     expect(item.hasOauthRefreshToken).toBe(true);
-    expect(JSON.parse((await patch(mergingStore(storedServer()), 'mcp-servers', { enabled: false })).body).item.hasOauthRefreshToken).toBe(false);
+    expect(
+      JSON.parse(
+        (
+          await patch(mergingStore(storedServer()), 'mcp-servers', {
+            enabled: false,
+          })
+        ).body
+      ).item.hasOauthRefreshToken
+    ).toBe(false);
   });
 
   it('PATCH drops hasOauthRefreshToken as a read artefact and stores an explicit refresh token', async () => {
     const store = mergingStore(storedServer());
-    await patch(store, 'mcp-servers', { oauthRefreshToken: 'new-ref', hasOauthRefreshToken: false });
+    await patch(store, 'mcp-servers', {
+      oauthRefreshToken: 'new-ref',
+      hasOauthRefreshToken: false,
+    });
 
     const updates = store.patchDoc.mock.calls[0][2];
     expect(updates.oauthRefreshToken).toBe('new-ref');
@@ -560,11 +799,19 @@ describe('partial MCP/AI config updates never disturb a stored secret', () => {
 
   it('a PUT round trip carries a stored refresh token forward like the access token', async () => {
     const store = mergingStore(storedServer({ oauthRefreshToken: 'stored-ref' }));
-    const h = createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+    const h = createAdminIntegrationHandlers({
+      guard: allowGuard,
+      store,
+      ...fixed,
+    });
     await h.putConfig(
       makeRequest({
         params: { collection: 'mcp-servers', id: 'plaud' },
-        body: { enabled: true, hasOauthToken: true, hasOauthRefreshToken: true },
+        body: {
+          enabled: true,
+          hasOauthToken: true,
+          hasOauthRefreshToken: true,
+        },
       }),
       context
     );
@@ -588,7 +835,11 @@ describe('partial MCP/AI config updates never disturb a stored secret', () => {
     // Otherwise it would be a write that touches nothing but updatedAt, and
     // report success for an edit that was never applied.
     const store = mergingStore(storedServer());
-    for (const body of [{ hasOauthToken: true }, { id: 'plaud' }, { id: 'p', hasOauthToken: false }]) {
+    for (const body of [
+      { hasOauthToken: true },
+      { id: 'plaud' },
+      { id: 'p', hasOauthToken: false },
+    ]) {
       expect((await patch(store, 'mcp-servers', body)).status).toBe(400);
     }
     expect(store.patchDoc).not.toHaveBeenCalled();
@@ -609,16 +860,28 @@ describe('partial MCP/AI config updates never disturb a stored secret', () => {
     // on the same document. Pinned together because the two verbs share one
     // edit surface and only one of them was ever at risk of dropping it.
     const store = mergingStore(storedServer());
-    const h = createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+    const h = createAdminIntegrationHandlers({
+      guard: allowGuard,
+      store,
+      ...fixed,
+    });
     const read = JSON.parse(
-      (await h.patchConfig(
-        makeRequest({ params: { collection: 'mcp-servers', id: 'plaud' }, body: { enabled: false } }),
-        context
-      )).body
+      (
+        await h.patchConfig(
+          makeRequest({
+            params: { collection: 'mcp-servers', id: 'plaud' },
+            body: { enabled: false },
+          }),
+          context
+        )
+      ).body
     ).item;
 
     await h.putConfig(
-      makeRequest({ params: { collection: 'mcp-servers', id: 'plaud' }, body: { ...read, enabled: true } }),
+      makeRequest({
+        params: { collection: 'mcp-servers', id: 'plaud' },
+        body: { ...read, enabled: true },
+      }),
       context
     );
 
@@ -657,5 +920,246 @@ describe('partial MCP/AI config updates never disturb a stored secret', () => {
     const store = makeStore({ readDoc: vi.fn(async () => null) });
     expect((await patch(store, 'mcp-servers', { enabled: false })).status).toBe(404);
     expect(store.patchDoc).not.toHaveBeenCalled();
+  });
+});
+
+describe('AI routing by task (ADR 0033 §4)', () => {
+  const onAiConfigChanged = vi.fn();
+  const handlers = (store) =>
+    createAdminIntegrationHandlers({
+      guard: allowGuard,
+      store,
+      onAiConfigChanged,
+      ...fixed,
+    });
+
+  it('GET answers the normalised routes with the catalogue and the provider list', async () => {
+    const store = makeStore({
+      readDoc: vi.fn(async () => ({
+        id: 'ai-routing',
+        routes: {
+          forgeDrafting: { provider: 'anthropic', model: 'claude-opus-4-6' },
+          junk: { provider: 'x' },
+        },
+        updatedAt: '2026-10-01T00:00:00Z',
+      })),
+    });
+    const res = await handlers(store).getAiRouting(makeRequest(), context);
+    const body = JSON.parse(res.body);
+    expect(res.status).toBe(200);
+    expect(body.routes).toEqual({
+      forgeDrafting: {
+        provider: 'anthropic',
+        model: 'claude-opus-4-6',
+        fallbacks: [],
+      },
+    });
+    expect(body.catalogue.forgeDrafting.label).toBe('Forge drafting');
+    expect(body.providers).toEqual(['gemini', 'openai', 'anthropic', 'nvidia']);
+    expect(store.readDoc).toHaveBeenCalledWith('admin_settings', 'ai-routing', 'ai-routing');
+  });
+
+  it('PUT merges routes, removes one with null, writes the whole map, and invalidates the router cache', async () => {
+    onAiConfigChanged.mockClear();
+    const store = makeStore({
+      readDoc: vi.fn(async () => ({
+        id: 'ai-routing',
+        routes: {
+          telegram: { provider: 'openai' },
+          inspector: { provider: 'gemini' },
+        },
+      })),
+    });
+    const res = await handlers(store).putAiRouting(
+      makeRequest({
+        body: {
+          routes: {
+            forgeDrafting: {
+              provider: 'anthropic',
+              model: 'claude-opus-4-6',
+              fallbacks: [{ provider: 'gemini', model: null }],
+            },
+            inspector: null,
+          },
+        },
+      }),
+      context
+    );
+    const body = JSON.parse(res.body);
+    expect(res.status).toBe(200);
+    expect(Object.keys(body.routes).sort()).toEqual(['forgeDrafting', 'telegram']);
+    expect(body.routes.forgeDrafting.fallbacks).toEqual([{ provider: 'gemini', model: null }]);
+    const [container, doc] = store.upsertDoc.mock.calls[0];
+    expect(container).toBe('admin_settings');
+    expect(doc.id).toBe('ai-routing');
+    expect(doc.routes.inspector).toBeUndefined();
+    expect(onAiConfigChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it('PUT refuses an unknown feature, an unknown provider, a duplicate fallback and a bad shape, writing nothing', async () => {
+    const store = makeStore();
+    const h = handlers(store);
+    const bad = [
+      { routes: { nope: { provider: 'gemini' } } },
+      { routes: { telegram: { provider: 'vertex' } } },
+      {
+        routes: {
+          telegram: { provider: 'gemini', fallbacks: [{ provider: 'gemini' }] },
+        },
+      },
+      {
+        routes: {
+          telegram: {
+            provider: 'gemini',
+            fallbacks: [{ provider: 'openai' }, { provider: 'openai' }],
+          },
+        },
+      },
+      { routes: { telegram: 'gemini' } },
+      { routes: [] },
+      {},
+    ];
+    for (const body of bad) {
+      expect(
+        (await h.putAiRouting(makeRequest({ body }), context)).status,
+        JSON.stringify(body)
+      ).toBe(400);
+    }
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+  });
+
+  it('both routes refuse without the editor role', async () => {
+    const store = makeStore();
+    const h = createAdminIntegrationHandlers({
+      guard: denyGuard,
+      store,
+      ...fixed,
+    });
+    expect((await h.getAiRouting(makeRequest(), context)).status).toBe(403);
+    expect((await h.putAiRouting(makeRequest({ body: { routes: {} } }), context)).status).toBe(403);
+    expect(store.readDoc).not.toHaveBeenCalled();
+  });
+});
+
+describe('the router cache is dropped after a write it reads (ADR 0033)', () => {
+  it('feature switches and provider documents invalidate; MCP servers and recordings do not', async () => {
+    const onAiConfigChanged = vi.fn();
+    const store = makeStore({
+      readDoc: vi.fn(async () => ({ id: 'x', enabled: true })),
+    });
+    const h = createAdminIntegrationHandlers({
+      guard: allowGuard,
+      store,
+      onAiConfigChanged,
+      ...fixed,
+    });
+    await h.putAiFeatures(makeRequest({ body: { features: { telegram: false } } }), context);
+    await h.patchConfig(
+      makeRequest({
+        params: { collection: 'ai-providers', id: 'gemini' },
+        body: { enabled: false },
+      }),
+      context
+    );
+    await h.putConfig(
+      makeRequest({
+        params: { collection: 'ai-providers', id: 'gemini' },
+        body: { enabled: true },
+      }),
+      context
+    );
+    await h.deleteConfig(
+      makeRequest({ params: { collection: 'ai-providers', id: 'vertex' } }),
+      context
+    );
+    expect(onAiConfigChanged).toHaveBeenCalledTimes(4);
+    await h.patchConfig(
+      makeRequest({
+        params: { collection: 'mcp-servers', id: 'context7' },
+        body: { enabled: true },
+      }),
+      context
+    );
+    expect(onAiConfigChanged).toHaveBeenCalledTimes(4);
+  });
+});
+
+describe('MCP server writes are checked (ADR 0033, security finding)', () => {
+  const h = (
+    store = makeStore({
+      readDoc: vi.fn(async () => ({ id: 'custom', url: 'https://ok.test' })),
+    })
+  ) => createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+
+  it('PUT refuses a plain-http URL and a key name outside the allowlist, before any write', async () => {
+    const store = makeStore();
+    const handlers = h(store);
+    const http = await handlers.putConfig(
+      makeRequest({
+        params: { collection: 'mcp-servers', id: 'custom' },
+        body: { url: 'http://evil.test/mcp', apiKeyEnvVar: 'MCP_X' },
+      }),
+      context
+    );
+    expect(http.status).toBe(400);
+    expect(JSON.parse(http.body).error).toMatch(/https/);
+    const key = await handlers.putConfig(
+      makeRequest({
+        params: { collection: 'mcp-servers', id: 'custom' },
+        body: {
+          url: 'https://evil.test/mcp',
+          apiKeyEnvVar: 'COSMOS_CONNECTION_STRING',
+        },
+      }),
+      context
+    );
+    expect(key.status).toBe(400);
+    expect(JSON.parse(key.body).error).toMatch(/not allowed/);
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+  });
+
+  it('PATCH checks only the fields it carries, so flipping enabled on an old document still works', async () => {
+    const store = makeStore({
+      readDoc: vi.fn(async () => ({ id: 'old', url: 'http://old.test' })),
+    });
+    const handlers = h(store);
+    expect(
+      (
+        await handlers.patchConfig(
+          makeRequest({
+            params: { collection: 'mcp-servers', id: 'old' },
+            body: { enabled: true },
+          }),
+          context
+        )
+      ).status
+    ).toBe(200);
+    expect(
+      (
+        await handlers.patchConfig(
+          makeRequest({
+            params: { collection: 'mcp-servers', id: 'old' },
+            body: { apiKeyEnvVar: 'ANTHROPIC_API_KEY' },
+          }),
+          context
+        )
+      ).status
+    ).toBe(400);
+  });
+
+  it('accepts https plus an MCP_* key, and the seeded integration keys', async () => {
+    const store = makeStore();
+    const res = await h(store).putConfig(
+      makeRequest({
+        params: { collection: 'mcp-servers', id: 'custom' },
+        body: {
+          url: 'https://mcp.example.test/mcp',
+          apiKeyEnvVar: 'MCP_EXAMPLE_KEY',
+        },
+      }),
+      context
+    );
+    expect(res.status).toBe(200);
+    expect(store.upsertDoc).toHaveBeenCalledTimes(1);
   });
 });

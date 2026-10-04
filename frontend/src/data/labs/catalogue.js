@@ -1,17 +1,37 @@
 /**
- * The lab catalogue for `/education/labs` (#681, Coder Phase 3 of #659).
+ * The lab catalogue (#681, Coder Phase 3 of #659; per-provider structure in
+ * ADR 0033 §4 "Labs").
  *
- * PURE DATA. Nothing here fetches, formats or renders; the page derives every
- * card from these rows and `catalogue.test.js` asserts each row carries every
- * field below and that no two share an `id`. Adding a lab is adding a row.
+ * PURE DATA. Nothing here fetches, formats or renders; the pages derive every
+ * card, step and link from these rows and `catalogue.test.js` asserts each
+ * row carries every field below with the right shape, that no two share an
+ * `id`, and that every provider, difficulty, tool and validation job type
+ * comes from the fixed lists this file exports.
+ *
+ * ADDING A LAB IS ADDING A ROW — AND ONE TEMPLATE ENTRY. A new lab family
+ * (an AWS lab, a Kubernetes lab under Azure, a second Ansible lab) needs:
+ *
+ *   1. one row here, with `providers` naming the provider hub(s) it is
+ *      listed under (`/<provider>/education/labs`, every provider already
+ *      has that route) and `technology` naming what it exercises;
+ *   2. one entry in the Coder template's lab map and parameter options
+ *      (lab-host/coder/templates/hcw-lab/main.tf) and one in the launcher's
+ *      LAB_WORKSPACES (lab-host/coder/launcher/launcher.js), both keyed by
+ *      the same `id`.
+ *
+ * No new route, page or component: the provider list filters by
+ * `providers`, the cross-provider index groups by it, the pane page renders
+ * the row's steps, and the admin Catalogue tab lists it. A provider that is
+ * not yet in VALID_PROVIDERS (context/ProviderContext.jsx) is the one thing
+ * this cannot do, because the `/:provider` routes do not exist for it.
  *
  * `id` doubles as the Coder template parameter: the lab's pane
- * (`/education/labs/<id>`, #751) loads the lab launcher with `?lab=<id>`
- * (`labLauncherUrl`), which creates the learner's workspace from the
- * `hcw-lab` template (#679) with `param.lab=<id>`, and the template opens
- * that lab's folder in code-server. So an `id` is a path segment and a
- * Terraform variable value at once — lowercase, hyphenated, no spaces —
- * which the test also enforces.
+ * (`/<provider>/education/labs/<id>`, or `/education/labs/<id>` from the
+ * index, #751) loads the lab launcher with `?lab=<id>` (`labLauncherUrl`),
+ * which creates the learner's workspace from the `hcw-lab` template (#679)
+ * with `param.lab=<id>`, and the template opens that lab's folder in
+ * code-server. So an `id` is a path segment and a Terraform variable value at
+ * once — lowercase, hyphenated, no spaces — which the test also enforces.
  *
  * `workspaceName` is the name the launcher gives the learner's workspace for
  * this lab, one per lab per learner. The launcher keeps the same map
@@ -22,14 +42,54 @@
  * one DNS label of 63, and a Coder username can be 32.
  *
  * `tools` names what the lab actually exercises, from the toolchain the
- * `hcw-lab` image ships (ADR 0032 §5). `articleSlugs` is empty until #677
- * publishes the walkthroughs; the page renders no article link for an empty
- * list rather than a placeholder.
+ * `hcw-lab` image ships (ADR 0032 §5). `status` is `available` for every lab
+ * the public pages list; a `coming` lab is kept out of them and must carry
+ * `comingSince` (a date) and `comingReason`, so nothing is promised without
+ * saying since when and why.
+ *
+ * EVERY STRING HERE IS VISITOR COPY. The rows render on public pages, so
+ * they name what a learner sees (the workspace, the lab host, the runner's
+ * checks) and never the tools behind the site; public-copy.test.js scans
+ * this directory and LabPanePage.test.jsx holds the pane page to the same
+ * rule.
  */
-import { staticRoutes } from '@/lib/routeFactory';
+import { routes, staticRoutes } from '@/lib/routeFactory';
 
 /** Every tool a lab may name; the test refuses anything outside this set. */
 export const LAB_TOOLS = Object.freeze(['az', 'terraform', 'kubectl', 'helm', 'ansible']);
+
+/**
+ * The provider hubs a lab may be listed under. A subset of VALID_PROVIDERS
+ * (context/ProviderContext.jsx), which the test checks; a lab's first
+ * provider is the one its canonical page lives under.
+ */
+export const LAB_PROVIDERS = Object.freeze(['azure', 'terraform', 'ansible']);
+
+/** How much a lab assumes, in the order the pages sort by. */
+export const LAB_DIFFICULTIES = Object.freeze(['intro', 'intermediate', 'advanced']);
+
+/** The words the pages print for each difficulty. */
+export const DIFFICULTY_LABELS = Object.freeze({
+  intro: 'Introductory',
+  intermediate: 'Intermediate',
+  advanced: 'Advanced',
+});
+
+/** A lab is listed publicly only while `available`. */
+export const LAB_STATUSES = Object.freeze(['available', 'coming']);
+
+/**
+ * The runner job types a lab's validation may name: the four that check
+ * work (vps-agent capabilities, mirrored in functions/src/lib/labs.js
+ * LAB_JOB_TYPES and components/admin/labs/labsView.js FALLBACK_JOB_TYPES).
+ * `shell-echo` is a smoke test and checks nothing, so it is not here.
+ */
+export const LAB_VALIDATION_JOB_TYPES = Object.freeze([
+  'terraform-validate',
+  'ansible-check',
+  'helm-template',
+  'kubeconform',
+]);
 
 /** The one Coder template every lab runs on today (#679). */
 export const LAB_TEMPLATE = 'hcw-lab';
@@ -106,17 +166,140 @@ export const RUN_LOCALLY_COMMANDS = Object.freeze([
   }),
 ]);
 
-/** The fields every lab carries, in the order the test reports a missing one. */
+/**
+ * The fields every lab carries, in the order the test reports a missing one.
+ * `comingSince` and `comingReason` are required only while `status` is
+ * `coming`, and refused otherwise.
+ */
 export const LAB_FIELDS = Object.freeze([
   'id',
   'workspaceName',
   'title',
   'summary',
+  'providers',
+  'technology',
   'tools',
+  'difficulty',
+  'estimatedMinutes',
+  'status',
+  'objectives',
+  'prerequisites',
+  'steps',
+  'resources',
+  'validation',
   'template',
   'params',
   'articleSlugs',
-  'estimatedMinutes',
+]);
+
+/** Markdown from lines, so a fenced block can be written line by line. */
+const md = (lines) => lines.join('\n');
+
+/** A lab step: `validation` is present only on the step a runner job can check. */
+const step = (title, body, validation = null) =>
+  Object.freeze(
+    validation ? { title, body, validation: Object.freeze(validation) } : { title, body }
+  );
+
+/** A learner-facing link: `url` is a site path or an https address. */
+const resource = (label, url) => Object.freeze({ label, url });
+
+/**
+ * A published article on this site, `/<provider>/blog/<slug>`: the three
+ * parts of the landing-zone series (docs/content/blog-lab-0*.md).
+ */
+const article = (provider, slug, title) => Object.freeze({ provider, slug, title });
+
+const ARTICLE_LANDING_ZONE = article(
+  'azure',
+  'build-a-landing-zone-you-can-read',
+  'Build a landing zone you can read'
+);
+const ARTICLE_ONE_CONTAINER = article(
+  'terraform',
+  'follow-along-in-one-container',
+  'Follow along in one container'
+);
+const ARTICLE_AGENT_EXPLAINS = article(
+  'terraform',
+  'let-an-agent-explain-it',
+  'Let an agent explain it'
+);
+
+/**
+ * A small Terraform root for the runner's `terraform-validate` job: the
+ * Landing Zone Builder's management module at the version the builder pins,
+ * which the runner has an offline copy of. Fits the job's text payload.
+ */
+const LANDING_ZONE_SAMPLE = md([
+  'terraform {',
+  '  required_version = ">= 1.12"',
+  '  required_providers {',
+  '    azurerm = {',
+  '      source  = "hashicorp/azurerm"',
+  '      version = "~> 4.0"',
+  '    }',
+  '  }',
+  '}',
+  '',
+  'provider "azurerm" {',
+  '  features {}',
+  '}',
+  '',
+  'module "management" {',
+  '  source  = "Azure/avm-ptn-alz-management/azurerm"',
+  '  version = "~> 0.9"',
+  '',
+  '  location                = "centralus"',
+  '  resource_group_name     = "rg-alz-management"',
+  '  automation_account_name = "aa-alz-management"',
+  '}',
+]);
+
+/** The root the walkthrough opens, as the runner's text payload. */
+const PROVIDERS_ONLY_SAMPLE = md([
+  'terraform {',
+  '  required_version = ">= 1.9"',
+  '  required_providers {',
+  '    azurerm = {',
+  '      source  = "hashicorp/azurerm"',
+  '      version = "~> 5.0"',
+  '    }',
+  '    random = {',
+  '      source  = "hashicorp/random"',
+  '      version = "~> 3.6"',
+  '    }',
+  '  }',
+  '}',
+  '',
+  'provider "azurerm" {',
+  '  features {}',
+  '}',
+  '',
+  'resource "random_pet" "smoke" {',
+  '  length = 2',
+  '}',
+]);
+
+/** A playbook on ansible.builtin only, which is all the runner resolves. */
+const ANSIBLE_SAMPLE = md([
+  '---',
+  '- name: Configure a web host',
+  '  hosts: all',
+  '  gather_facts: false',
+  '  vars:',
+  '    site_root: /var/www/hcw',
+  '  tasks:',
+  '    - name: Install nginx',
+  '      ansible.builtin.package:',
+  '        name: nginx',
+  '        state: present',
+  '',
+  '    - name: Create the site root',
+  '      ansible.builtin.file:',
+  '        path: "{{ site_root }}"',
+  '        state: directory',
+  '        mode: "0755"',
 ]);
 
 export const labs = Object.freeze([
@@ -125,38 +308,335 @@ export const labs = Object.freeze([
     workspaceName: 'lab-lzb',
     title: 'Validate a Landing Zone Builder download',
     summary:
-      'Take the zip the Landing Zone Builder at /tools/landing-zone hands you, unpack it in the workspace, and run terraform fmt and terraform validate against the Azure Verified Modules it declares — the same checks the lab runner applies before anything is planned.',
+      'Take the zip the Landing Zone Builder at /tools/landing-zone hands you, unpack it in the workspace, and run terraform init, fmt and validate against the Azure Verified Modules it declares — the same checks the lab runner applies before anything is planned.',
+    providers: Object.freeze(['azure', 'terraform']),
+    technology: Object.freeze(['terraform', 'azure-verified-modules', 'landing-zone']),
     tools: Object.freeze(['terraform', 'az']),
+    difficulty: 'intermediate',
+    estimatedMinutes: 25,
+    status: 'available',
+    objectives: Object.freeze([
+      'Read the nine Terraform files the Landing Zone Builder produces and say what each module call is for.',
+      'Initialise the root with the network on and see what terraform downloads for an Azure landing zone.',
+      'Run terraform fmt and terraform validate, break one reference, and watch validate name the line.',
+      'Say what validate cannot tell you, and why a plan — not a validate — is where credentials enter.',
+      'Send the same root to the lab runner and compare its offline check with yours.',
+    ]),
+    prerequisites: Object.freeze([
+      'A download from the Landing Zone Builder at /tools/landing-zone (a zip of Terraform files).',
+      'A GitHub account in the HybridCloudWorks organization to open the workspace; or Docker on your own machine and the Run it locally line.',
+      'No Azure subscription: init and validate need none. Only the optional plan at the end asks for a sign-in.',
+    ]),
+    steps: Object.freeze([
+      step(
+        'Build and download a landing zone',
+        md([
+          'Open the [Landing Zone Builder](/tools/landing-zone), choose the components you want (management groups, policy, management, a hub and spokes) and download the zip. The builder writes plain Terraform on Azure Verified Modules: every `module` block names a registry module and a version, so the files initialise anywhere Terraform can reach the registry.',
+        ])
+      ),
+      step(
+        'Upload it into the workspace and unzip',
+        md([
+          'The lab folder starts empty apart from a README. Drag the zip into the file explorer (or use File > Upload), then in the terminal:',
+          '',
+          '```bash',
+          'unzip landing-zone-*.zip -d landing-zone && cd landing-zone && ls',
+          '```',
+          '',
+          'You should see nine `.tf` files. Read `main.tf` first: the comments say why each call looks the way it does, not only what it is.',
+        ])
+      ),
+      step(
+        'terraform init, with the network on',
+        md([
+          '```bash',
+          'terraform init',
+          '```',
+          '',
+          'This workspace reaches the Terraform registry, so init downloads the Azure Verified Modules and their providers — tens of megabytes for a full landing zone. Note how long it takes and what lands in `.terraform/`; the lab runner at the end does the same work with no network at all, from offline copies of these modules.',
+        ])
+      ),
+      step(
+        'fmt and validate, then break something',
+        md([
+          '```bash',
+          'terraform fmt -check -diff',
+          'terraform validate',
+          '```',
+          '',
+          '`fmt -check` reports formatting only and changes nothing; `validate` checks that every reference resolves and every argument is one the provider or module accepts. Now open `main.tf`, misspell a reference inside one module call (for example the resource group name a module reads), and run `terraform validate` again. It names the file and line. Fix it and re-run until both pass.',
+        ])
+      ),
+      step(
+        'What validate cannot tell you',
+        md([
+          'Validate never contacts Azure, so it cannot know whether a name is taken, whether a policy definition exists, or what will be created. That is a plan. If you want to see one:',
+          '',
+          '```bash',
+          'az login --use-device-code',
+          'terraform plan',
+          '```',
+          '',
+          'A plan needs a subscription and read permissions; it changes nothing. Stop there: the articles for this lab explain why nothing from a lab is ever applied.',
+        ])
+      ),
+      step(
+        'Check it on the lab runner',
+        md([
+          'The Landing Zone Builder page offers to validate your download on the lab: the runner receives the root, swaps each module source for its offline copy of that Azure Verified Module at a version that satisfies your constraint, and runs `terraform init -backend=false` and `terraform validate` with the network switched off. Compare its log with what you ran here — same result, no download.',
+        ]),
+        {
+          jobType: 'terraform-validate',
+          hint: 'The runner takes one main.tf as text or a whole root as a tar archive, and inits it with no network from offline copies of the Azure Verified Modules the builder emits.',
+        }
+      ),
+    ]),
+    resources: Object.freeze([
+      resource('Landing Zone Builder', staticRoutes.landingZone),
+      resource('Azure Verified Modules', 'https://azure.github.io/Azure-Verified-Modules/'),
+      resource(
+        'terraform validate',
+        'https://developer.hashicorp.com/terraform/cli/commands/validate'
+      ),
+      resource(
+        'Azure landing zones',
+        'https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ready/landing-zone/'
+      ),
+    ]),
+    validation: Object.freeze({
+      jobType: 'terraform-validate',
+      payloadEncoding: 'text',
+      samplePayload: LANDING_ZONE_SAMPLE,
+    }),
     template: LAB_TEMPLATE,
     params: Object.freeze({ lab: 'landing-zone-builder-output' }),
-    articleSlugs: Object.freeze([]),
-    estimatedMinutes: 25,
+    articleSlugs: Object.freeze([
+      ARTICLE_LANDING_ZONE,
+      ARTICLE_ONE_CONTAINER,
+      ARTICLE_AGENT_EXPLAINS,
+    ]),
   }),
   Object.freeze({
     id: 'terraform-validate-walkthrough',
     workspaceName: 'lab-tfv',
     title: 'Terraform validate, step by step',
     summary:
-      'Start from a deliberately broken module and work through what terraform init -backend=false, terraform fmt -check and terraform validate each catch, why the provider mirror lets init succeed offline, and what none of the three can tell you before a plan.',
+      'Start from a small root that passes, see what terraform init -backend=false, terraform fmt -check and terraform validate each check, break it three different ways to learn which command catches which mistake, and find out why init works here with no registry at all.',
+    providers: Object.freeze(['terraform']),
+    technology: Object.freeze(['terraform', 'provider-mirror']),
     tools: Object.freeze(['terraform']),
+    difficulty: 'intro',
+    estimatedMinutes: 20,
+    status: 'available',
+    objectives: Object.freeze([
+      'Tell apart what terraform init, terraform fmt and terraform validate each check, by making each one fail.',
+      'Read a provider mirror configuration and explain why init needs no network in this image.',
+      'Add a provider the mirror does not hold and see init refuse it, then reach the registry on purpose.',
+      'Say what none of the three commands can know before a plan.',
+    ]),
+    prerequisites: Object.freeze([
+      'Nothing to bring: the workspace opens on a two-provider root that already passes.',
+      'A GitHub account in the HybridCloudWorks organization to open the workspace; or Docker on your own machine and the Run it locally line.',
+    ]),
+    steps: Object.freeze([
+      step(
+        'Read the root',
+        md([
+          'The folder holds one file, `main.tf`: two providers (`hashicorp/azurerm` and `hashicorp/random`), one `random_pet` resource and no backend. Read the comment at the top; it says what a passing init here proves.',
+        ])
+      ),
+      step(
+        'Initialise with no registry',
+        md([
+          '```bash',
+          'terraform init -backend=false',
+          '```',
+          '',
+          'It completes, and nothing was downloaded. The image sets `TF_CLI_CONFIG_FILE` to a configuration that installs providers from a filesystem mirror. Look at both:',
+          '',
+          '```bash',
+          'cat "$TF_CLI_CONFIG_FILE"',
+          'ls /opt/terraform/mirror/registry.terraform.io/hashicorp',
+          '```',
+          '',
+          'Every provider listed there can be installed offline; that is how the lab runner validates with the network switched off.',
+        ])
+      ),
+      step(
+        'fmt, then validate',
+        md([
+          '```bash',
+          'terraform fmt -check -diff',
+          'terraform validate',
+          '```',
+          '',
+          'Both pass. Now indent the `length` line in `main.tf` by one extra space and run both again: `fmt -check` reports the file and exits non-zero, `validate` still passes. Formatting is not correctness. Run `terraform fmt` with no flags to fix it.',
+        ])
+      ),
+      step(
+        'Break a reference',
+        md([
+          'Add an output that points at a resource that does not exist:',
+          '',
+          '```hcl',
+          'output "pet" {',
+          '  value = random_pet.smokey.id',
+          '}',
+          '```',
+          '',
+          '`terraform fmt -check` is happy; `terraform validate` is not, and it names `main.tf`, the line and the undeclared resource. Change `smokey` to `smoke` and validate again.',
+        ])
+      ),
+      step(
+        'Ask for a provider the mirror lacks',
+        md([
+          'Add `aws = { source = "hashicorp/aws", version = "~> 6.0" }` to `required_providers` and run `terraform init -backend=false`. It fails before validate can run: the mirror has no `hashicorp/aws`, and the configuration allows no other source. This is the runner’s answer too, by design. In this workspace you may reach the registry for one command:',
+          '',
+          '```bash',
+          'TF_CLI_CONFIG_FILE=/dev/null terraform init -backend=false',
+          '```',
+          '',
+          'Then remove the `aws` block again, delete `.terraform.lock.hcl`, and re-run the offline init.',
+        ])
+      ),
+      step(
+        'What none of the three can tell you',
+        md([
+          'A root that inits, formats and validates can still fail to plan: `azurerm` needs credentials to plan anything, a name may be taken, a quota may be full. Those are plan-time and apply-time facts, and this lab stops before them on purpose. To see the runner reach the same verdict on your `main.tf`, send it as a `terraform-validate` job.',
+        ]),
+        {
+          jobType: 'terraform-validate',
+          hint: 'Paste main.tf as the text payload: the runner inits it with no network from the same mirror and prints what terraform validate said.',
+        }
+      ),
+    ]),
+    resources: Object.freeze([
+      resource(
+        'Provider installation and mirrors',
+        'https://developer.hashicorp.com/terraform/cli/config/config-file#provider-installation'
+      ),
+      resource(
+        'terraform validate',
+        'https://developer.hashicorp.com/terraform/cli/commands/validate'
+      ),
+      resource('terraform fmt', 'https://developer.hashicorp.com/terraform/cli/commands/fmt'),
+      resource(
+        'The hcw-lab image',
+        'https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/tree/main/lab-image'
+      ),
+    ]),
+    validation: Object.freeze({
+      jobType: 'terraform-validate',
+      payloadEncoding: 'text',
+      samplePayload: PROVIDERS_ONLY_SAMPLE,
+    }),
     template: LAB_TEMPLATE,
     params: Object.freeze({ lab: 'terraform-validate-walkthrough' }),
-    articleSlugs: Object.freeze([]),
-    estimatedMinutes: 20,
+    articleSlugs: Object.freeze([ARTICLE_ONE_CONTAINER]),
   }),
   Object.freeze({
     id: 'ansible-syntax-check-walkthrough',
     workspaceName: 'lab-asc',
     title: 'Ansible syntax check, step by step',
     summary:
-      'Run ansible-playbook --syntax-check and ansible-lint over the playbook that configures the Hybrid Lab host itself, read what each one reports, and fix a role until both pass — with no host in reach and nothing executed.',
+      'Run ansible-playbook --syntax-check over the playbook that configures the Hybrid Lab host itself, see it fail until the collections it needs are installed, break a play and read what the check reports, and learn what a syntax check is not — with no host in reach and nothing executed.',
+    providers: Object.freeze(['ansible']),
+    technology: Object.freeze(['ansible', 'ansible-core', 'collections']),
     tools: Object.freeze(['ansible']),
+    difficulty: 'intro',
+    estimatedMinutes: 20,
+    status: 'available',
+    objectives: Object.freeze([
+      'Read a real playbook layout: ansible.cfg, site.yml, roles, requirements.yml and an inventory.',
+      'See why a syntax check fails on a module from a collection that is not installed, and install the pinned collections.',
+      'Break a play and a task, and read exactly what --syntax-check reports for each.',
+      'Say what a syntax check does not do, and what would be needed for --check mode or a lint.',
+    ]),
+    prerequisites: Object.freeze([
+      'Nothing to bring: the workspace opens on the lab host’s own Ansible directory.',
+      'A GitHub account in the HybridCloudWorks organization to open the workspace; or Docker on your own machine and the Run it locally line.',
+    ]),
+    steps: Object.freeze([
+      step(
+        'Read the layout',
+        md([
+          'The folder is the configuration management for the Hybrid Lab host. `ansible.cfg` points at `inventory/localhost.yml` and `roles/`; `site.yml` runs the roles in order; `requirements.yml` pins the collections they use; each role’s `meta/argument_specs.yml` is its variable contract. Read `site.yml` top to bottom before running anything.',
+        ])
+      ),
+      step(
+        'Run the syntax check, and watch it fail',
+        md([
+          '```bash',
+          'ansible-playbook --syntax-check site.yml',
+          '```',
+          '',
+          'The image carries `ansible-core` and no collections, so the first role that names a module outside `ansible.builtin` stops the check with "couldn’t resolve module/action". A syntax check resolves every module it meets; a missing collection is a syntax error to it.',
+        ])
+      ),
+      step(
+        'Install the pinned collections',
+        md([
+          '```bash',
+          'ansible-galaxy collection install -r requirements.yml',
+          'ansible-playbook --syntax-check site.yml',
+          '```',
+          '',
+          'The versions are exact, so you install the same code the host runs. The check now ends with `playbook: site.yml` and exit code 0.',
+        ])
+      ),
+      step(
+        'Break a play',
+        md([
+          'In `site.yml`, rename `pre_tasks:` to `pre_taskz:` and run the check again. It reports that `pre_taskz` is not a valid attribute for a Play, with the file and line. Then open any `roles/*/tasks/main.yml`, misspell a module name (`ansible.builtin.fil`), and see the same kind of message name the task instead. Put both back:',
+          '',
+          '```bash',
+          'git checkout -- .',
+          'ansible-playbook --syntax-check site.yml',
+          '```',
+        ])
+      ),
+      step(
+        'What a syntax check is not',
+        md([
+          'It parses and resolves; it does not connect, gather facts, evaluate conditions or run a single module. `--check` mode would need a host to talk to, and a lint (ansible-lint) is a separate tool this image does not carry — run it on your own machine if you want style rules. To see the runner apply the same check to a playbook of your own, send one that uses `ansible.builtin` modules only, since the runner installs no collections.',
+        ]),
+        {
+          jobType: 'ansible-check',
+          hint: 'Paste one playbook as the text payload, ansible.builtin modules only: the runner has ansible-core and no collections, so anything else fails to resolve, exactly as step 2 did here.',
+        }
+      ),
+    ]),
+    resources: Object.freeze([
+      resource(
+        'ansible-playbook',
+        'https://docs.ansible.com/ansible/latest/cli/ansible-playbook.html'
+      ),
+      resource(
+        'Installing collections',
+        'https://docs.ansible.com/ansible/latest/collections_guide/collections_installing.html'
+      ),
+      resource(
+        'Role argument specs',
+        'https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_reuse_roles.html#role-argument-validation'
+      ),
+      resource(
+        'The lab host playbook',
+        'https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/tree/main/lab-host'
+      ),
+    ]),
+    validation: Object.freeze({
+      jobType: 'ansible-check',
+      payloadEncoding: 'text',
+      samplePayload: ANSIBLE_SAMPLE,
+    }),
     template: LAB_TEMPLATE,
     params: Object.freeze({ lab: 'ansible-syntax-check-walkthrough' }),
     articleSlugs: Object.freeze([]),
-    estimatedMinutes: 20,
   }),
 ]);
+
+/** The labs the public pages list: `available` ones, in catalogue order. */
+export const availableLabs = Object.freeze(labs.filter((lab) => lab.status === 'available'));
 
 /**
  * What a lab's pane loads: the lab launcher, told which lab. The launcher
@@ -182,14 +662,74 @@ export function coderSignInUrl(origin = CODER_ORIGIN) {
   return `${origin}${CODER_GITHUB_SIGN_IN_PATH}?redirect=${encodeURIComponent('/')}`;
 }
 
-/** The site page that holds one lab's pane: `/education/labs/<id>` (#751). */
-export function labPanePath(labId) {
-  return `${staticRoutes.labs}/${encodeURIComponent(labId)}`;
+/** The provider a lab's canonical pages live under: the first it lists. */
+export function primaryProvider(lab) {
+  return lab.providers[0];
+}
+
+/**
+ * The labs list for a provider, `/<provider>/education/labs`; with no
+ * provider, the cross-provider index `/education/labs`.
+ */
+export function labsPath(provider = null) {
+  return provider ? routes.labs(provider) : staticRoutes.labs;
+}
+
+/**
+ * The site page that holds one lab's pane (#751): under a provider,
+ * `/<provider>/education/labs/<id>`; with no provider, the index's
+ * `/education/labs/<id>`, kept for links written before ADR 0033.
+ */
+export function labPanePath(provider, labId) {
+  if (!provider) return `${staticRoutes.labs}/${encodeURIComponent(labId)}`;
+  return routes.labPane(provider, labId);
 }
 
 /** The catalogue row with this id, or null for an id the catalogue does not have. */
 export function labById(labId) {
   return labs.find((lab) => lab.id === labId) ?? null;
+}
+
+/** The available labs listed under a provider, in catalogue order. */
+export function labsForProvider(provider) {
+  return availableLabs.filter((lab) => lab.providers.includes(provider));
+}
+
+/**
+ * The available labs grouped for the cross-provider index, in LAB_PROVIDERS
+ * order: each lab once, under its home provider, so a lab listed under two
+ * hubs (the landing zone, Azure and Terraform) is not printed twice on one
+ * page; its card's provider chips name the other hub. A provider with no
+ * lab of its own has no group.
+ */
+export function labsByProvider() {
+  return LAB_PROVIDERS.map((provider) => ({
+    provider,
+    labs: availableLabs.filter((lab) => primaryProvider(lab) === provider),
+  })).filter((group) => group.labs.length > 0);
+}
+
+/** The providers whose list has at least one available lab, in LAB_PROVIDERS order. */
+export function providersWithLabs() {
+  return LAB_PROVIDERS.filter((provider) => labsForProvider(provider).length > 0);
+}
+
+/** One article's page on the site: `/<provider>/blog/<slug>`. */
+export function articlePath(entry) {
+  return `/${entry.provider}/blog/${encodeURIComponent(entry.slug)}`;
+}
+
+/** Every article any available lab points at, once each, in catalogue order. */
+export function allLabArticles() {
+  const seen = new Set();
+  return availableLabs
+    .flatMap((lab) => lab.articleSlugs)
+    .filter((entry) => {
+      const key = `${entry.provider}/${entry.slug}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 }
 
 export default labs;

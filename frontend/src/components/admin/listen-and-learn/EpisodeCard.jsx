@@ -1,49 +1,25 @@
 /**
- * One episode row: what it says, whether it has audio, and the approval.
- *
- * Moved out of ListenAndLearnPage by #574 unchanged. Review and Published both
- * render it — the only difference is which episodes they pass in — so the
- * approve and withdraw buttons stay one piece of code rather than two that can
- * drift.
+ * One chapter on the Review tab: what it says, whether it has audio, and the
+ * approval. The Library's ChapterRow carries the fuller set of actions; this
+ * card is the reviewer's view, with the one recovery it needs — a failed
+ * regeneration's Retry and Keep current (ADR 0033 §4).
  */
-import React, { useState } from 'react';
+import React from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-  AlertTriangle,
-  CheckCircle2,
-  ChevronDown,
-  ChevronUp,
-  Loader2,
-  VolumeX,
-} from 'lucide-react';
-import { resolveMediaUrl } from '@/lib/functionsBase';
+import StatusBadge from '@/components/admin/shared/StatusBadge';
+import { Loader2, VolumeX } from 'lucide-react';
 import { EpisodeSources } from '@/pages/admin/SourceGroundingPanel';
-import { formatDuration, formatSize } from './episodeView';
-
-const STATUS_BADGE = {
-  published: { variant: 'default', label: 'Published', icon: CheckCircle2 },
-  draft: { variant: 'outline', label: 'Draft', icon: null },
-  failed: { variant: 'destructive', label: 'Failed', icon: AlertTriangle },
-};
-
-export function StatusBadge({ status }) {
-  const spec = STATUS_BADGE[status] || STATUS_BADGE.draft;
-  const Icon = spec.icon;
-  return (
-    <Badge variant={spec.variant} className="gap-1">
-      {Icon && <Icon className="h-3 w-3" />}
-      {spec.label}
-    </Badge>
-  );
-}
+import ChapterPlayer from './ChapterPlayer';
+import RegenerationNotice from './RegenerationNotice';
+import Transcript from './Transcript';
+import { KIND_LABEL, chapterStatus, versionSummary } from './episodeView';
 
 /**
  * The player, or an honest explanation of why there isn't one.
  *
  * Its own component because a missing key is a normal state here rather than an
- * error, so both branches carry real content and inlining them pushed the card
- * past the complexity budget.
+ * error, so both branches carry real content.
  */
 function EpisodeAudio({ episode }) {
   if (!episode.audioUrl) {
@@ -51,45 +27,55 @@ function EpisodeAudio({ episode }) {
     // Saying which setting is missing turns "no player" into a task.
     if (!episode.audioError) return null;
     return (
-      <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-        <VolumeX className="h-3.5 w-3.5 shrink-0" />
+      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <VolumeX className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
         No audio — {episode.audioError}
       </p>
     );
   }
-
-  // Which voice read it. Provenance for AI-generated study content, and the
-  // only thing that answers "why does this one sound different" after a
-  // provider or model change.
-  const meta = [
-    episode.speechModel || episode.speechProvider,
-    formatDuration(episode.durationSeconds),
-    formatSize(episode.audioBytes),
-  ].filter(Boolean);
-
   return (
     <>
-      <audio
-        controls
-        preload="none"
-        src={resolveMediaUrl(episode.audioUrl)}
-        className="w-full h-10"
-        aria-label={`Preview: ${episode.title || episode.areaName}`}
-      >
-        <track kind="captions" />
-      </audio>
-      {meta.length > 0 && <p className="text-[11px] text-muted-foreground">{meta.join(' · ')}</p>}
+      <ChapterPlayer
+        positionKey={`listen-and-learn:${episode.setId}/${episode.id}`}
+        audioUrl={episode.audioUrl}
+        title={episode.title || episode.areaName}
+        durationSeconds={episode.durationSeconds}
+        audioBytes={episode.audioBytes}
+      />
+      {/* Which voice read it. Provenance for AI-generated study content, and
+          the only thing that answers "why does this one sound different"
+          after a provider or model change. */}
+      <p className="text-[11px] text-muted-foreground">
+        {versionSummary(episode) || episode.speechModel || episode.speechProvider}
+      </p>
     </>
   );
 }
 
-export default function EpisodeCard({ episode, busy, onReview }) {
-  const [showTranscript, setShowTranscript] = useState(false);
-  const transcript = Array.isArray(episode.transcript) ? episode.transcript : [];
+function EpisodeBadges({ episode }) {
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-1.5">
+      <StatusBadge status={chapterStatus(episode.status)} />
+      {episode.kind && (
+        <Badge variant="outline" className="text-[10px]">
+          {KIND_LABEL[episode.kind] || episode.kind}
+        </Badge>
+      )}
+      {episode.droppedFromGuide && (
+        <Badge variant="secondary" className="text-[10px]">
+          Not in current guide
+        </Badge>
+      )}
+    </div>
+  );
+}
+
+export default function EpisodeCard({ episode, busy, onReview, onRetry, onKeepCurrent }) {
   const published = episode.status === 'published';
+  const failedOnly = episode.status === 'failed' && episode.error && !episode.lastError;
 
   return (
-    <div className="rounded-lg border border-border p-4 space-y-3">
+    <div className="space-y-3 rounded-lg border border-border p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-sm font-semibold">{episode.title || episode.areaName}</p>
@@ -98,46 +84,24 @@ export default function EpisodeCard({ episode, busy, onReview }) {
             {episode.weightLabel ? ` · ${episode.weightLabel} of exam` : ''}
           </p>
         </div>
-        <StatusBadge status={episode.status} />
+        <EpisodeBadges episode={episode} />
       </div>
 
       {episode.summary && <p className="text-xs text-muted-foreground">{episode.summary}</p>}
 
       <EpisodeSources episode={episode} />
 
-      {episode.status === 'failed' && episode.error && (
-        <p className="text-xs text-destructive">{episode.error}</p>
-      )}
+      <RegenerationNotice
+        chapter={episode}
+        busy={busy}
+        onRetry={onRetry}
+        onKeepCurrent={onKeepCurrent}
+      />
+      {failedOnly && <p className="text-xs text-destructive">{episode.error}</p>}
 
       <EpisodeAudio episode={episode} />
 
-      {transcript.length > 0 && (
-        <div>
-          <button
-            type="button"
-            onClick={() => setShowTranscript((open) => !open)}
-            aria-expanded={showTranscript}
-            className="text-xs font-medium text-muted-foreground hover:text-foreground flex items-center gap-1"
-          >
-            {showTranscript ? (
-              <ChevronUp className="h-3.5 w-3.5" />
-            ) : (
-              <ChevronDown className="h-3.5 w-3.5" />
-            )}
-            {showTranscript ? 'Hide transcript' : `Read transcript (${transcript.length} turns)`}
-          </button>
-          {showTranscript && (
-            <div className="mt-2 space-y-2 max-h-96 overflow-y-auto pr-2">
-              {transcript.map((turn, i) => (
-                <p key={`${turn.speaker}-${i}`} className="text-xs text-muted-foreground">
-                  <span className="font-semibold text-foreground">{turn.speaker}: </span>
-                  {turn.text}
-                </p>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      <Transcript transcript={episode.transcript} />
 
       {episode.status !== 'failed' && (
         <div className="flex items-center gap-2">
@@ -147,7 +111,7 @@ export default function EpisodeCard({ episode, busy, onReview }) {
             disabled={busy}
             onClick={() => onReview(episode, published ? 'draft' : 'published')}
           >
-            {busy && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
+            {busy && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
             {published ? 'Withdraw to draft' : 'Approve and publish'}
           </Button>
           {published && episode.approvedAt && (

@@ -22,6 +22,11 @@ import {
   placementFor,
   isFeatureEnabled,
   resolveProviderOrder,
+  normalizeRoute,
+  normalizeRouting,
+  routeFor,
+  applyFeatureRoute,
+  MAX_ROUTE_FALLBACKS,
 } from './ai-config.js';
 import { PROVIDERS } from './router.js';
 
@@ -70,7 +75,11 @@ describe('rule 2 — unreadable configuration is not empty configuration', () =>
       readDoc: vi.fn().mockRejectedValue(new Error('cosmos down')),
     };
     const loader = createAiConfigLoader({ store, log: quiet });
-    await expect(loader.load()).resolves.toEqual({ providers: null, features: null });
+    await expect(loader.load()).resolves.toEqual({
+      providers: null,
+      features: null,
+      routing: null,
+    });
   });
 
   it('a read failure with a warm cache keeps serving the last known configuration', async () => {
@@ -82,7 +91,12 @@ describe('rule 2 — unreadable configuration is not empty configuration', () =>
       queryDocs: vi.fn().mockResolvedValue([doc('openai', { enabled: false })]),
       readDoc: vi.fn().mockResolvedValue({ features: { critique: false } }),
     };
-    const loader = createAiConfigLoader({ store, ttlMs: 100, now: () => now, log: quiet });
+    const loader = createAiConfigLoader({
+      store,
+      ttlMs: 100,
+      now: () => now,
+      log: quiet,
+    });
 
     const first = await loader.load();
     expect(first.providers).toHaveLength(1);
@@ -115,7 +129,11 @@ describe('rule 3 — absent means on', () => {
 
 describe('ordering', () => {
   it('sorts by the configured order field', () => {
-    const docs = [doc('gemini', { order: 3 }), doc('openai', { order: 1 }), doc('anthropic', { order: 2 })];
+    const docs = [
+      doc('gemini', { order: 3 }),
+      doc('openai', { order: 1 }),
+      doc('anthropic', { order: 2 }),
+    ];
     const { order } = resolveProviderOrder(docs, ['gemini', 'openai', 'anthropic']);
     expect(order).toEqual(['openai', 'anthropic', 'gemini']);
   });
@@ -175,8 +193,16 @@ describe('the catalogue and the provider list stay in step', () => {
 describe('caching', () => {
   it('reads once inside the TTL and again after it', async () => {
     let now = 0;
-    const store = { queryDocs: vi.fn().mockResolvedValue([]), readDoc: vi.fn().mockResolvedValue(null) };
-    const loader = createAiConfigLoader({ store, ttlMs: 1000, now: () => now, log: quiet });
+    const store = {
+      queryDocs: vi.fn().mockResolvedValue([]),
+      readDoc: vi.fn().mockResolvedValue(null),
+    };
+    const loader = createAiConfigLoader({
+      store,
+      ttlMs: 1000,
+      now: () => now,
+      log: quiet,
+    });
 
     await loader.load();
     await loader.load();
@@ -188,7 +214,10 @@ describe('caching', () => {
   });
 
   it('shares one in-flight read between concurrent callers', async () => {
-    const store = { queryDocs: vi.fn().mockResolvedValue([]), readDoc: vi.fn().mockResolvedValue(null) };
+    const store = {
+      queryDocs: vi.fn().mockResolvedValue([]),
+      readDoc: vi.fn().mockResolvedValue(null),
+    };
     const loader = createAiConfigLoader({ store, log: quiet });
 
     await Promise.all([loader.load(), loader.load(), loader.load()]);
@@ -199,7 +228,11 @@ describe('caching', () => {
     // This is what keeps every existing unit test — and any caller that does
     // not hand over a Cosmos client — on the pre-configuration behaviour.
     const loader = createAiConfigLoader({});
-    await expect(loader.load()).resolves.toEqual({ providers: null, features: null });
+    await expect(loader.load()).resolves.toEqual({
+      providers: null,
+      features: null,
+      routing: null,
+    });
   });
 });
 
@@ -243,14 +276,18 @@ describe('per-feature placement (#701)', () => {
       expect(placementFor(null, 'nvidia', feature), feature).toBe('order');
       expect(isPlacementConfigurable('nvidia', feature), feature).toBe(true);
     }
-    const settings = { placement: { nvidia: { forgeDrafting: 'first', podcastScript: 'off' } } };
+    const settings = {
+      placement: { nvidia: { forgeDrafting: 'first', podcastScript: 'off' } },
+    };
     expect(placementFor(settings, 'nvidia', 'forgeDrafting')).toBe('first');
     expect(placementFor(settings, 'nvidia', 'podcastScript')).toBe('off');
     expect(placementFor(settings, 'nvidia', 'inspector')).toBe('order');
   });
 
   it('ignores a stored value that is not a placement', () => {
-    const settings = { placement: { nvidia: { forgeDrafting: 'always', critique: true } } };
+    const settings = {
+      placement: { nvidia: { forgeDrafting: 'always', critique: true } },
+    };
     expect(placementFor(settings, 'nvidia', 'forgeDrafting')).toBe('order');
     expect(placementFor(settings, 'nvidia', 'critique')).toBe('order');
   });
@@ -264,7 +301,10 @@ describe('per-feature placement (#701)', () => {
   it('applyFeaturePlacement moves or removes, never adds', () => {
     const order = ['gemini', 'openai', 'nvidia'];
     // By default the order stands: NVIDIA is the backup.
-    expect(applyFeaturePlacement(order, null, 'forgeDrafting')).toEqual({ order, excluded: [] });
+    expect(applyFeaturePlacement(order, null, 'forgeDrafting')).toEqual({
+      order,
+      excluded: [],
+    });
     const placedFirst = { placement: { nvidia: { forgeDrafting: 'first' } } };
     expect(applyFeaturePlacement(order, placedFirst, 'forgeDrafting')).toEqual({
       order: ['nvidia', 'gemini', 'openai'],
@@ -276,6 +316,97 @@ describe('per-feature placement (#701)', () => {
       excluded: ['nvidia'],
     });
     // Not in the resolved order (no key, or disabled): placement cannot add it.
-    expect(applyFeaturePlacement(['gemini'], placedFirst, 'forgeDrafting').order).toEqual(['gemini']);
+    expect(applyFeaturePlacement(['gemini'], placedFirst, 'forgeDrafting').order).toEqual([
+      'gemini',
+    ]);
+  });
+});
+
+describe('per-task routing (ADR 0033 §4)', () => {
+  it('normalizes a route: known providers only, trimmed model, deduplicated capped fallbacks', () => {
+    expect(
+      normalizeRoute({
+        provider: ' Anthropic ',
+        model: ' claude-opus-4-6 ',
+        fallbacks: [
+          { provider: 'gemini', model: '' },
+          { provider: 'anthropic' },
+          { provider: 'gemini' },
+          { provider: 'openai' },
+          { provider: 'nvidia' },
+          { provider: 'vertex' },
+        ],
+      })
+    ).toEqual({
+      provider: 'anthropic',
+      model: 'claude-opus-4-6',
+      fallbacks: [
+        { provider: 'gemini', model: null },
+        { provider: 'openai', model: null },
+        { provider: 'nvidia', model: null },
+      ].slice(0, MAX_ROUTE_FALLBACKS),
+    });
+    expect(normalizeRoute({ provider: 'vertex' })).toBeNull();
+    expect(normalizeRoute(null)).toBeNull();
+    expect(normalizeRoute('gemini')).toBeNull();
+  });
+
+  it('normalizes the document to known features and ignores the rest', () => {
+    const routing = normalizeRouting({
+      routes: {
+        forgeDrafting: { provider: 'anthropic' },
+        notAFeature: { provider: 'gemini' },
+        inspector: { provider: 'nobody' },
+      },
+    });
+    expect(Object.keys(routing.routes)).toEqual(['forgeDrafting']);
+    expect(routeFor(routing, 'forgeDrafting')).toMatchObject({
+      provider: 'anthropic',
+    });
+    expect(routeFor(routing, 'inspector')).toBeNull();
+    expect(routeFor(routing, null)).toBeNull();
+    expect(routeFor(null, 'forgeDrafting')).toBeNull();
+    expect(normalizeRouting(null)).toEqual({ routes: {} });
+    expect(normalizeRouting({ routes: 'x' })).toEqual({ routes: {} });
+  });
+
+  it('applyFeatureRoute puts the primary and fallbacks first, keeps the rest of the order, and never adds a provider', () => {
+    const order = ['gemini', 'openai', 'anthropic'];
+    const route = normalizeRoute({
+      provider: 'anthropic',
+      model: 'claude-sonnet-4-6',
+      fallbacks: [{ provider: 'nvidia' }, { provider: 'openai', model: 'gpt-5-mini' }],
+    });
+    const { chain, skipped } = applyFeatureRoute(order, route);
+    expect(chain).toEqual([
+      { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+      { provider: 'openai', model: 'gpt-5-mini' },
+      { provider: 'gemini', model: null },
+    ]);
+    // nvidia holds no key / is disabled / is placed off: skipped, not added.
+    expect(skipped).toEqual(['nvidia']);
+  });
+
+  it('with no route the chain is the order, unchanged, with no model pinned', () => {
+    expect(applyFeatureRoute(['gemini', 'openai'], null)).toEqual({
+      chain: [
+        { provider: 'gemini', model: null },
+        { provider: 'openai', model: null },
+      ],
+      skipped: [],
+    });
+  });
+
+  it('the loader reads the routing document beside providers and features', async () => {
+    const readDoc = vi.fn(async (_c, id) =>
+      id === 'ai-routing' ? { id, routes: { telegram: { provider: 'openai' } } } : null
+    );
+    const loader = createAiConfigLoader({
+      store: { queryDocs: vi.fn(async () => []), readDoc },
+      log: quiet,
+    });
+    const value = await loader.load();
+    expect(value.routing.routes.telegram).toMatchObject({ provider: 'openai' });
+    expect(readDoc).toHaveBeenCalledWith('admin_settings', 'ai-routing', 'ai-routing');
   });
 });

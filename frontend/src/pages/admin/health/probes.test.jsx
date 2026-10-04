@@ -240,7 +240,9 @@ describe('evaluateLabsProbe', () => {
     expect(report).toContain(
       'lab_jobs/job-1 final status: unknown — the closing read returned no status'
     );
-    expect(report).toContain('Authenticated no-op path: FAIL (final lab_jobs/job-1 state unknown');
+    expect(report).toContain(
+      'Authenticated no-op path: Unavailable (final lab_jobs/job-1 state unknown'
+    );
     expect(report).not.toContain('still "queued"');
     expect(report).not.toContain('final status: null');
   });
@@ -265,7 +267,7 @@ describe('evaluateLabsProbe', () => {
     expect(report).toContain(
       'lab_jobs/job-1 final status: read failed (getLabJob timed out after 20s) — state unknown'
     );
-    expect(report).toContain('Authenticated no-op path: FAIL (final getLabJob read failed');
+    expect(report).toContain('Authenticated no-op path: Unavailable (final getLabJob read failed');
     expect(report).not.toContain('still "queued"');
   });
 });
@@ -340,14 +342,14 @@ describe('buildReport', () => {
     expect(report).toContain(
       'Claims present (names only): aud, azp, email, exp, iat, iss, name, oid, preferred_username, roles, scp, sub, tid, ver'
     );
-    expect(report).toContain("`aud` equals the API's ENTRA_API_AUDIENCE: PASS");
-    expect(report).toContain('App Role `Admin` present in `roles`: PASS');
-    expect(report).toContain('Registry uid equals token oid: PASS');
-    expect(report).toContain('- Result: PASS');
+    expect(report).toContain("`aud` equals the API's ENTRA_API_AUDIENCE: Healthy");
+    expect(report).toContain('App Role `Admin` present in `roles`: Healthy');
+    expect(report).toContain('Registry uid equals token oid: Healthy');
+    expect(report).toContain('- Result: Healthy');
     expect(report).toContain('### Labs no-op probe');
     expect(report).toContain('jobId job-1');
-    expect(report).toContain('Authenticated no-op path: PASS');
-    expect(report).toContain('no Authorization header: PASS (HTTP 401)');
+    expect(report).toContain('Authenticated no-op path: Healthy');
+    expect(report).toContain('no Authorization header: Healthy (HTTP 401)');
     // Both tickets these checks were built for closed on 2026-09-07. The
     // report is a repeatable check now, so it names no ticket at all.
     expect(report).not.toMatch(/#3\d\d/);
@@ -367,14 +369,14 @@ describe('buildReport', () => {
       adminHttp: 200,
     });
     expect(report).toContain(
-      '- Result: UNKNOWN (could not compare: aud matches the API audience; admin App Role present in roles; delegated scope present in scp; token version matches)'
+      '- Result: Unknown (could not compare: aud matches the API audience; admin App Role present in roles; delegated scope present in scp; token version matches)'
     );
-    expect(report).not.toContain('- Result: PASS');
-    expect(report).not.toContain('- Result: FAIL');
+    expect(report).not.toContain('- Result: Healthy');
+    expect(report).not.toContain('- Result: Unavailable');
     expect(report).toContain('- getAuthExpectations: Authentication required');
     expectNoSecrets(report);
 
-    // A real failure still outranks an unknown: FAIL names what failed.
+    // A real failure still outranks an unknown: Unavailable names what failed.
     const mixed = evaluateIdentity(
       summarizeToken(CLAIMS, null),
       summarizeAdminStatus({ ...ADMIN_STATUS, isAdmin: false }, OID)
@@ -402,12 +404,12 @@ describe('buildReport', () => {
       adminHttp: 200,
     });
     expect(report).toContain('isAdmin false');
-    expect(report).toContain('- Result: FAIL');
+    expect(report).toContain('- Result: Unavailable');
     expect(report).toContain(
-      'Authenticated no-op path: UNKNOWN (NOT RUN — press "Run authenticated probe")'
+      'Authenticated no-op path: Unknown (NOT RUN — press "Run authenticated probe")'
     );
     expect(report).toContain(
-      'no Authorization header: UNKNOWN (NOT RUN — press "Run unauthenticated probe")'
+      'no Authorization header: Unknown (NOT RUN — press "Run unauthenticated probe")'
     );
     expectNoSecrets(report);
   });
@@ -430,6 +432,6 @@ describe('buildReport', () => {
     });
     expect(report).toContain('Token: could not be read (Not authenticated. Please sign in.)');
     expect(report).toContain('getCurrentAdminStatus: not called');
-    expect(report).toContain('- Result: UNKNOWN');
+    expect(report).toContain('- Result: Unknown');
   });
 });

@@ -34,6 +34,7 @@ import React, { useMemo, useRef, useState } from 'react';
 import { usePublicData } from '@/hooks/usePublicData';
 import { fetchPublishedEpisodes } from '@/lib/listenAndLearn';
 import { resolveMediaUrl } from '@/lib/functionsBase';
+import { readPlaybackPosition, savePlaybackPosition } from '@/lib/audioEpisodes';
 
 function formatDuration(seconds) {
   const total = Number(seconds);
@@ -42,6 +43,18 @@ function formatDuration(seconds) {
   const s = Math.round(total % 60);
   return `${m}:${String(s).padStart(2, '0')}`;
 }
+
+/** `47 min` / `2 h 05 min` for the whole course; '' when nothing is known. */
+function formatTotal(seconds) {
+  const total = Number(seconds);
+  if (!Number.isFinite(total) || total <= 0) return '';
+  const h = Math.floor(total / 3600);
+  const m = Math.round((total % 3600) / 60);
+  return h > 0 ? `${h} h ${String(m).padStart(2, '0')} min` : `${m} min`;
+}
+
+/** The key a chapter's position is remembered under — the same id the audio page uses for the row. */
+const positionKey = (chapter) => `listen-and-learn:${chapter.setId}/${chapter.id}`;
 
 export default function EpisodePlaylist({ platform, examCode, className = '' }) {
   const enabled = Boolean(platform && examCode);
@@ -62,6 +75,11 @@ export default function EpisodePlaylist({ platform, examCode, className = '' }) 
   const [index, setIndex] = useState(0);
   const audioRef = useRef(null);
 
+  const totalSeconds = useMemo(
+    () => chapters.reduce((sum, c) => sum + (Number(c.durationSeconds) || 0), 0),
+    [chapters]
+  );
+
   if (loading || chapters.length === 0) return null;
 
   const current = chapters[Math.min(index, chapters.length - 1)];
@@ -73,8 +91,19 @@ export default function EpisodePlaylist({ platform, examCode, className = '' }) 
     requestAnimationFrame(() => audioRef.current?.play?.().catch(() => {}));
   };
 
+  // Next chapter, automatically, when one ends (ADR 0033 §4); the finished
+  // chapter's remembered position is cleared so a return starts it over.
   const advance = () => {
+    savePlaybackPosition(positionKey(current), 0);
     if (index < chapters.length - 1) play(index + 1);
+  };
+
+  const remember = (audioEl) => {
+    savePlaybackPosition(
+      positionKey(current),
+      audioEl.currentTime,
+      audioEl.duration || current.durationSeconds
+    );
   };
 
   return (
@@ -95,6 +124,7 @@ export default function EpisodePlaylist({ platform, examCode, className = '' }) 
         Study podcast
         <span className="ml-auto text-xs font-normal text-foreground/60">
           {chapters.length} {chapters.length === 1 ? 'chapter' : 'chapters'}
+          {formatTotal(totalSeconds) ? ` · ${formatTotal(totalSeconds)}` : ''}
         </span>
       </h2>
 
@@ -109,6 +139,14 @@ export default function EpisodePlaylist({ platform, examCode, className = '' }) 
         preload="none"
         src={resolveMediaUrl(current.audioUrl)}
         onEnded={advance}
+        onLoadedMetadata={(e) => {
+          // Pick up where this browser left off in this chapter.
+          const at = readPlaybackPosition(positionKey(current));
+          if (at > 0 && at < (e.currentTarget.duration || Infinity))
+            e.currentTarget.currentTime = at;
+        }}
+        onPause={(e) => remember(e.currentTarget)}
+        onTimeUpdate={(e) => remember(e.currentTarget)}
         className="w-full h-9 mb-3"
         aria-label={`Play chapter: ${current.title}`}
       >

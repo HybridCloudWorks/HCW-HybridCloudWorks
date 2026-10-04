@@ -72,6 +72,11 @@ import { MAX_ITEMS_PER_SECTION, SECTIONS } from './newsletter/sections.js';
 import { isValidSendTime, isValidTimeZone } from './newsletter/schedule.js';
 import { normalizeEmail } from './newsletter/email.js';
 import { sharedTemplateCache } from './newsletter/template-source.js';
+import {
+  CONTENT_TAXONOMY_CONFIG_ID,
+  defaultTaxonomy,
+  normalizeContentTaxonomy,
+} from './cms/taxonomy.js';
 
 const json = (status, body) => ({
   status,
@@ -388,12 +393,16 @@ export function normalizePodcastVoices(body) {
     }
     const id = raw.trim();
     if (!isElevenLabsVoiceId(id)) {
-      fail(`${host} must be an ElevenLabs voice id, 20 letters and digits as the voice list shows it`);
+      fail(
+        `${host} must be an ElevenLabs voice id, 20 letters and digits as the voice list shows it`
+      );
     }
     voices[host] = id;
   }
   if (new Set(Object.values(voices)).size !== PODCAST_HOSTS.length) {
-    fail(`${PODCAST_HOSTS.join(' and ')} must have different voices, so a listener can tell the hosts apart`);
+    fail(
+      `${PODCAST_HOSTS.join(' and ')} must have different voices, so a listener can tell the hosts apart`
+    );
   }
   return voices;
 }
@@ -443,7 +452,12 @@ function normalizeSectionSettings(raw) {
     const maxItems =
       entry.maxItems === undefined
         ? MAX_ITEMS_PER_SECTION
-        : clampInteger(entry.maxItems, MIN_SECTION_ITEMS, MAX_SECTION_ITEMS, `sections[${index}].maxItems`);
+        : clampInteger(
+            entry.maxItems,
+            MIN_SECTION_ITEMS,
+            MAX_SECTION_ITEMS,
+            `sections[${index}].maxItems`
+          );
     seen.add(entry.id);
     out.push({ id: entry.id, enabled, maxItems });
   });
@@ -458,7 +472,12 @@ function normalizeSectionSettings(raw) {
 function normalizeNewsletterContent(body, value) {
   if (body.sections !== undefined) value.sections = normalizeSectionSettings(body.sections);
   if (body.windowDays !== undefined) {
-    value.windowDays = clampInteger(body.windowDays, MIN_WINDOW_DAYS, MAX_WINDOW_DAYS, 'windowDays');
+    value.windowDays = clampInteger(
+      body.windowDays,
+      MIN_WINDOW_DAYS,
+      MAX_WINDOW_DAYS,
+      'windowDays'
+    );
   }
   if (body.introEnabled !== undefined) {
     if (typeof body.introEnabled !== 'boolean') fail('introEnabled must be true or false');
@@ -571,7 +590,8 @@ export function normalizeNewsletterSettings(body) {
     value.sendTime = body.sendTime;
   }
   if (body.timeZone !== undefined) {
-    if (!isValidTimeZone(body.timeZone)) fail('timeZone must be an IANA time zone such as America/Chicago');
+    if (!isValidTimeZone(body.timeZone))
+      fail('timeZone must be an IANA time zone such as America/Chicago');
     value.timeZone = body.timeZone;
   }
   return value;
@@ -629,6 +649,22 @@ export const PLATFORM_SETTINGS = Object.freeze({
     empty: newsletterSettingsDefaults,
     // Section titles, tones and bounds for the Content form (#557).
     options: newsletterContentOptions,
+  }),
+  // ADR 0033 §4: what an item becomes and how it became an idea, read by
+  // every picker and list that classifies content (lib/cms/taxonomy.js).
+  'content-taxonomy': Object.freeze({
+    docId: CONTENT_TAXONOMY_CONFIG_ID,
+    // The taxonomy module throws its own 400-shaped error so it can be read
+    // without this module; re-raised here as the error the PUT handler maps.
+    normalize: (body) => {
+      try {
+        return normalizeContentTaxonomy(body);
+      } catch (error) {
+        if (error?.status === 400) fail(error.message);
+        throw error;
+      }
+    },
+    empty: defaultTaxonomy,
   }),
 });
 
@@ -821,6 +857,120 @@ export function buildHistoryQuery({ setting, limit, after }) {
 }
 
 /**
+ * What the audit row records for each setting: counts and ids, never
+ * contents. A setting not listed here records nothing beyond its name.
+ */
+const AUDIT_SUMMARIES = Object.freeze({
+  'default-heroes': (value) => ({ providers: Object.keys(value.heroes).length }),
+  'social-autopost': (value) => ({
+    enabled: value.enabled,
+    accounts: value.accountIds.length,
+    scheduleDelayMinutes: value.scheduleDelayMinutes,
+  }),
+  // Whether a main feed is set, never which one: the audit row records
+  // counts, and a URL is content.
+  'podcast-feeds': (value) => ({ feeds: value.feeds.length, mainFeed: Boolean(value.mainFeedUrl) }),
+  // A model id is a setting, not content, and which one was chosen is
+  // the whole point of the row.
+  'listen-and-learn-speech': (value) => ({ geminiModel: value.geminiModel }),
+  // Ids are settings; labels and descriptions are content, so only
+  // which entries exist and which are on is recorded.
+  'content-taxonomy': (value) => ({
+    kinds: value.kinds.length,
+    kindsEnabled: value.kinds.filter((k) => k.enabled).map((k) => k.id),
+    ideaOrigins: value.ideaOrigins.length,
+    ideaOriginsEnabled: value.ideaOrigins.filter((o) => o.enabled).map((o) => o.id),
+  }),
+  // Voice ids are settings, not content, and which ones were chosen is
+  // the point of the row: a change of voice is what a listener hears.
+  'podcast-voices': (value) => ({ ...value }),
+  // Whether each is set, never the address or the inbox: those are
+  // personal details, and the audit row records settings, not content.
+  'newsletter-settings': (value) => ({
+    postalAddress: Boolean(value.postalAddress),
+    replyTo: Boolean(value.replyTo),
+    sendDay: value.sendDay,
+    sendTime: value.sendTime,
+    timeZone: value.timeZone,
+    sections: value.sections.filter((entry) => entry.enabled).map((entry) => entry.id),
+    windowDays: value.windowDays,
+    introEnabled: value.introEnabled,
+    introTone: value.introTone,
+    // Where the box shows is a setting; its wording is content, so only
+    // whether it differs from the default is recorded.
+    signupPlacement: value.signupPlacement,
+    signupHeadingCustom: value.signupHeading !== DEFAULT_NEWSLETTER_SETTINGS.signupHeading,
+    signupBlurbCustom: value.signupBlurb !== DEFAULT_NEWSLETTER_SETTINGS.signupBlurb,
+    // An id, not content: which design the email uses.
+    templateId: value.templateId || null,
+  }),
+});
+
+/** What the audit row records: counts, never contents. */
+const summarize = (name, value) => AUDIT_SUMMARIES[name]?.(value) ?? {};
+
+/** What a spec offers to choose from, or nothing. */
+const optionsFor = (spec) =>
+  typeof spec.options === 'function' ? { options: spec.options() } : {};
+
+/**
+ * The audit details as a log line may carry them: the row may keep the
+ * template id, telemetry says only whether a template is chosen.
+ */
+const auditDetailsForLog = (details) =>
+  details.templateId === undefined
+    ? details
+    : { ...details, templateId: details.templateId ? '[set]' : null };
+
+/**
+ * A PUT body as the value the setting stores, or the 400 refusing it: not a
+ * JSON object (or past MAX_BODY_JSON), then whatever the spec's normalizer
+ * refuses. Any other error the normalizer throws is the handler's 500.
+ */
+function normalizedSettingValue(spec, body) {
+  if (!isPlainObject(body) || JSON.stringify(body).length > MAX_BODY_JSON) {
+    return { error: json(400, { error: 'Body must be a JSON object' }) };
+  }
+  try {
+    return { value: spec.normalize(body) };
+  } catch (error) {
+    if (error instanceof PlatformSettingValidationError) {
+      return { error: json(400, { error: error.message }) };
+    }
+    throw error;
+  }
+}
+
+/**
+ * GET /api/cms/platform-settings/history?setting=&limit=&after=
+ *
+ * The `platform_setting_updated` audit rows, newest first. Editor, the same
+ * as reading a setting. The response carries `{ id, at, actor, setting,
+ * summary }` per row and `nextAfter` when a full page came back; the log
+ * line on failure names no query value.
+ */
+async function getHistory({ guard, store }, request, context) {
+  const auth = await guard.requireRole(request, 'editor');
+  if (auth.error) return auth.error;
+  const parsed = parseHistoryQuery(request.query);
+  if (parsed.error) return json(400, { error: parsed.error });
+  try {
+    const { query, parameters } = buildHistoryQuery(parsed);
+    const rows = await store.queryDocs('admin_audit_logs', query, parameters);
+    const entries = (rows ?? []).slice(0, parsed.limit).map(presentHistoryEntry);
+    const last = entries.at(-1);
+    return json(200, {
+      success: true,
+      entries,
+      nextAfter: entries.length === parsed.limit && last?.at ? last.at : null,
+    });
+  } catch (error) {
+    context.error(`getPlatformSettingHistory failed: ${error?.message || error}`);
+    return json(500, { error: 'Failed to read platform settings history' });
+  }
+}
+
+/**
  * @param {object} deps
  * @param {{ requireRole: Function }} deps.guard
  * @param {{ readDoc: Function, upsertDoc: Function, queryDocs?: Function }} deps.store
@@ -851,90 +1001,10 @@ export function createPlatformSettingsHandlers({
     });
   }
 
-  /** What the audit row records: counts, never contents. */
-  const summarize = (name, value) => {
-    switch (name) {
-      case 'default-heroes':
-        return { providers: Object.keys(value.heroes).length };
-      case 'social-autopost':
-        return {
-          enabled: value.enabled,
-          accounts: value.accountIds.length,
-          scheduleDelayMinutes: value.scheduleDelayMinutes,
-        };
-      case 'podcast-feeds':
-        // Whether a main feed is set, never which one: the audit row records
-        // counts, and a URL is content.
-        return { feeds: value.feeds.length, mainFeed: Boolean(value.mainFeedUrl) };
-      case 'listen-and-learn-speech':
-        // A model id is a setting, not content, and which one was chosen is
-        // the whole point of the row.
-        return { geminiModel: value.geminiModel };
-      case 'podcast-voices':
-        // Voice ids are settings, not content, and which ones were chosen is
-        // the point of the row: a change of voice is what a listener hears.
-        return { ...value };
-      case 'newsletter-settings':
-        // Whether each is set, never the address or the inbox: those are
-        // personal details, and the audit row records settings, not content.
-        return {
-          postalAddress: Boolean(value.postalAddress),
-          replyTo: Boolean(value.replyTo),
-          sendDay: value.sendDay,
-          sendTime: value.sendTime,
-          timeZone: value.timeZone,
-          sections: value.sections.filter((entry) => entry.enabled).map((entry) => entry.id),
-          windowDays: value.windowDays,
-          introEnabled: value.introEnabled,
-          introTone: value.introTone,
-          // Where the box shows is a setting; its wording is content, so only
-          // whether it differs from the default is recorded.
-          signupPlacement: value.signupPlacement,
-          signupHeadingCustom: value.signupHeading !== DEFAULT_NEWSLETTER_SETTINGS.signupHeading,
-          signupBlurbCustom: value.signupBlurb !== DEFAULT_NEWSLETTER_SETTINGS.signupBlurb,
-          // An id, not content: which design the email uses.
-          templateId: value.templateId || null,
-        };
-      default:
-        return {};
-    }
-  };
-
-  /** What a spec offers to choose from, or nothing. */
-  const optionsFor = (spec) =>
-    typeof spec.options === 'function' ? { options: spec.options() } : {};
-
-  /**
-   * GET /api/cms/platform-settings/history?setting=&limit=&after=
-   *
-   * The `platform_setting_updated` audit rows, newest first. Editor, the same
-   * as reading a setting. The response carries `{ id, at, actor, setting,
-   * summary }` per row and `nextAfter` when a full page came back; the log
-   * line on failure names no query value.
-   */
-  async function getHistory(request, context) {
-    const auth = await guard.requireRole(request, 'editor');
-    if (auth.error) return auth.error;
-    const parsed = parseHistoryQuery(request.query);
-    if (parsed.error) return json(400, { error: parsed.error });
-    try {
-      const { query, parameters } = buildHistoryQuery(parsed);
-      const rows = await store.queryDocs('admin_audit_logs', query, parameters);
-      const entries = (rows ?? []).slice(0, parsed.limit).map(presentHistoryEntry);
-      const last = entries.at(-1);
-      return json(200, {
-        success: true,
-        entries,
-        nextAfter: entries.length === parsed.limit && last?.at ? last.at : null,
-      });
-    } catch (error) {
-      context.error(`getPlatformSettingHistory failed: ${error?.message || error}`);
-      return json(500, { error: 'Failed to read platform settings history' });
-    }
-  }
+  const history = (request, context) => getHistory({ guard, store }, request, context);
 
   return {
-    getHistory,
+    getHistory: history,
 
     /** GET /api/cms/platform-settings/{setting} */
     async getSetting(request, context) {
@@ -942,7 +1012,7 @@ export function createPlatformSettingsHandlers({
       // literal and this template is not guaranteed (platform-settings-http.js),
       // so the segment reaches the history reader from here too. No setting
       // is named `history`.
-      if (request.params?.setting === 'history') return getHistory(request, context);
+      if (request.params?.setting === 'history') return history(request, context);
       const auth = await guard.requireRole(request, 'editor');
       if (auth.error) return auth.error;
       const name = String(request.params?.setting || '');
@@ -970,20 +1040,9 @@ export function createPlatformSettingsHandlers({
       const spec = resolve(request);
       if (!spec) return json(404, { error: 'Unknown platform setting' });
 
-      const body = await request.json().catch(() => null);
-      if (!isPlainObject(body) || JSON.stringify(body).length > MAX_BODY_JSON) {
-        return json(400, { error: 'Body must be a JSON object' });
-      }
-
-      let value;
-      try {
-        value = spec.normalize(body);
-      } catch (error) {
-        if (error instanceof PlatformSettingValidationError) {
-          return json(400, { error: error.message });
-        }
-        throw error;
-      }
+      const parsed = normalizedSettingValue(spec, await request.json().catch(() => null));
+      if (parsed.error) return parsed.error;
+      const { value } = parsed;
 
       try {
         const updatedAt = now().toISOString();
@@ -1004,12 +1063,8 @@ export function createPlatformSettingsHandlers({
         try {
           await audit(PLATFORM_SETTING_AUDIT_ACTION, auth.user, details);
         } catch (auditError) {
-          // The audit row may keep the template id; telemetry does not. The log
-          // says only whether a template is chosen.
-          const logged =
-            details.templateId === undefined ? details : { ...details, templateId: details.templateId ? '[set]' : null };
           context.warn?.(
-            `putPlatformSetting(${name}) saved but the audit row failed (${JSON.stringify(logged)}): ${auditError?.message || auditError}`
+            `putPlatformSetting(${name}) saved but the audit row failed (${JSON.stringify(auditDetailsForLog(details))}): ${auditError?.message || auditError}`
           );
         }
         return json(200, {

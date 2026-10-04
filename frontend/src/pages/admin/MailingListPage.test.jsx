@@ -30,9 +30,15 @@ vi.mock('@/lib/api', () => ({
 }));
 vi.mock('@/lib/jobs', () => ({ runJob: (...args) => runJob(...args) }));
 vi.mock('@/hooks/useAuthReady', () => ({ useAuthReady: () => ({ authReady: true }) }));
-vi.mock('react-router', () => ({
-  useSearchParams: () => [new URLSearchParams(searchParams), vi.fn()],
-}));
+vi.mock('react-router', async () => {
+  const React_ = await vi.importActual('react');
+  return {
+    // PageHeader reads the route to find its purpose sentence.
+    useLocation: () => ({ pathname: '/admin/mailing-list', search: '' }),
+    useSearchParams: () => [new URLSearchParams(searchParams), vi.fn()],
+    Link: ({ to, children }) => React_.createElement('a', { href: to }, children),
+  };
+});
 
 /** The probe's envelope, HTTP 200 whatever Resend said. */
 const envelope = (ok, status, data, error) => ({ ok, status, data, ...(error ? { error } : {}) });
@@ -212,7 +218,7 @@ describe('The newsletter tab', () => {
     postJSON.mockResolvedValue(envelope(true, 200, domains([])));
     render(<MailingListPage />);
     const labels = ['Newsletter', 'Drafts', 'Published', 'Audience', 'Settings'];
-    const tabs = screen.getAllByRole('button').filter((b) => labels.includes(b.textContent));
+    const tabs = screen.getAllByRole('tab').filter((b) => labels.includes(b.textContent));
     expect(tabs.map((b) => b.textContent)).toEqual(labels);
   });
 
@@ -240,14 +246,19 @@ describe('The newsletter tab', () => {
     expect(getJSON).toHaveBeenCalledWith('cms/mailing-list/audience/summary');
   });
 
-  it('opens Published on a month calendar', async () => {
+  it('opens Published on the shared calendar, narrowed to newsletter sends (ADR 0033 §2)', async () => {
     searchParams = 'tab=published';
     postJSON.mockResolvedValue(envelope(true, 200, domains([])));
+    getJSON.mockImplementation(async (route) =>
+      route.startsWith('cms/calendar?') ? { ok: true, items: [], warnings: [] } : { value: {} }
+    );
     render(<MailingListPage />);
     expect(await screen.findByRole('button', { name: 'Previous month' })).toBeInTheDocument();
     await waitFor(() =>
       expect(
-        getJSON.mock.calls.some(([route]) => /^cms\/newsletters\?month=\d{4}-\d{2}$/.test(route))
+        getJSON.mock.calls.some(([route]) =>
+          /^cms\/calendar\?from=.*&kinds=newsletter$/.test(route)
+        )
       ).toBe(true)
     );
   });

@@ -237,8 +237,16 @@ describe('a full run', () => {
     }
 
     const bare = happyDeps();
-    await generateEpisodes({ ...baseRun(), store: makeStore(), storage: makeStorage(), deps: bare });
-    expect(bare.synthesize.mock.calls[0][0]).toMatchObject({ product: 'listenAndLearn', model: null });
+    await generateEpisodes({
+      ...baseRun(),
+      store: makeStore(),
+      storage: makeStorage(),
+      deps: bare,
+    });
+    expect(bare.synthesize.mock.calls[0][0]).toMatchObject({
+      product: 'listenAndLearn',
+      model: null,
+    });
   });
 
   it('leaves the provenance null when there was no audio', async () => {
@@ -469,21 +477,25 @@ describe('persistence details', () => {
     expect(setId('AZURE', 'AZ-104')).toBe('azure_az-104');
   });
 
-  it('a regenerated episode does not inherit the approval it replaced', async () => {
+  it('a regenerated episode keeps its approval and adds a version (ADR 0033 §4)', async () => {
+    // Until 2026-10-03 this asserted the opposite — a whole-document replace
+    // that sent a published episode back to draft on every re-run, so a
+    // re-run of a set took it off the site until each episode was approved
+    // again. The new take becomes the active version; the old one is kept.
     const store = makeStore();
-    const save = () =>
+    const save = (path) =>
       saveEpisode(store, {
         provider: 'azure',
         examCode: 'AZ-104',
         area: area(1),
         script: script(),
-        audio: { url: '/u', path: 'p', bytes: 1 },
+        audio: { url: `/u/${path}`, path, bytes: 1 },
         videos: [],
         order: 0,
         now: NOW,
       });
 
-    await save();
+    await save('azure/az-104/area-1-20260824120000.mp3');
     await setEpisodeStatus(store, {
       provider: 'azure',
       examCode: 'AZ-104',
@@ -494,9 +506,45 @@ describe('persistence details', () => {
     });
     expect(store.docs[EPISODE_CONTAINER]['area-1'].status).toBe(STATUS.published);
 
-    await save();
-    expect(store.docs[EPISODE_CONTAINER]['area-1'].status).toBe(STATUS.draft);
-    expect(store.docs[EPISODE_CONTAINER]['area-1'].approvedBy).toBeNull();
+    await save('azure/az-104/area-1-20260825120000.mp3');
+    const doc = store.docs[EPISODE_CONTAINER]['area-1'];
+    expect(doc.status).toBe(STATUS.published);
+    expect(doc.approvedBy).toBe('oid-1');
+    expect(doc.versions.map((v) => [v.id, v.active])).toEqual([
+      ['20260824120000', false],
+      ['20260825120000', true],
+    ]);
+    // The top-level fields mirror the active take, so the players follow.
+    expect(doc.audioPath).toBe('azure/az-104/area-1-20260825120000.mp3');
+    expect(doc.audioUrl).toBe('/u/azure/az-104/area-1-20260825120000.mp3');
+  });
+
+  it('a regeneration with no audio keeps the previous take active and says why (ADR 0033 §4)', async () => {
+    const store = makeStore();
+    await saveEpisode(store, {
+      provider: 'azure',
+      examCode: 'AZ-104',
+      area: area(1),
+      script: script(),
+      audio: { url: '/u/a', path: 'azure/az-104/area-1-20260824120000.mp3', bytes: 1 },
+      videos: [],
+      order: 0,
+      now: NOW,
+    });
+    await saveEpisode(store, {
+      provider: 'azure',
+      examCode: 'AZ-104',
+      area: area(1),
+      script: script(),
+      audio: { error: 'No Listen & Learn speech provider is configured' },
+      videos: [],
+      order: 0,
+      now: '2026-08-25T12:00:00.000Z',
+    });
+    const doc = store.docs[EPISODE_CONTAINER]['area-1'];
+    expect(doc.versions).toHaveLength(1);
+    expect(doc.audioUrl).toBe('/u/a');
+    expect(doc.audioError).toMatch(/no listen & learn speech provider/i);
   });
 
   it('stamps who approved and clears the stamp on unapproval', async () => {
@@ -543,12 +591,9 @@ describe('persistence details', () => {
       now: NOW,
     });
 
-    expect(store.patchDoc).toHaveBeenCalledWith(
-      EPISODE_CONTAINER,
-      'area-1',
-      expect.anything(),
-      { partitionKey: 'azure_az-104' }
-    );
+    expect(store.patchDoc).toHaveBeenCalledWith(EPISODE_CONTAINER, 'area-1', expect.anything(), {
+      partitionKey: 'azure_az-104',
+    });
   });
 
   it('refuses a status the reviewer must not set', async () => {
@@ -557,10 +602,10 @@ describe('persistence details', () => {
         provider: 'azure',
         examCode: 'AZ-104',
         areaSlug: 'area-1',
-        status: 'archived',
+        status: 'bogus',
         now: NOW,
       })
-    ).rejects.toThrow(/Unknown episode status "archived"/);
+    ).rejects.toThrow(/Unknown episode status "bogus"/);
   });
 
   it('keeps the transcript, which is the accessible equivalent of the audio', () => {
@@ -603,7 +648,11 @@ describe('persistence details', () => {
     const set = store.docs[SET_CONTAINER]['azure_az-104'];
     expect(set.areaCount).toBe(2);
     expect(set.generatedBy).toBe('oid-2');
-    // Falls back to the guide title when the caller supplies no cert title.
-    expect(set.certTitle).toBe('Study guide for AZ-104');
+    // An earlier certification title survives a re-run that names none
+    // (ADR 0033 §4: a re-run must not clear what an operator set); the guide
+    // title is the fallback only when there was never one.
+    expect(set.certTitle).toBe('T');
+    expect(set.kind).toBe('course');
+    expect(set.areaSlugs).toEqual(['area-1', 'area-2']);
   });
 });

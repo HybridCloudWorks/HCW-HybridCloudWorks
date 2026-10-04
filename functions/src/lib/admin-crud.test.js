@@ -5,15 +5,29 @@
  * newest-first list, createdAt stamp on create).
  */
 import { describe, it, expect, vi } from 'vitest';
-import { createAdminCrudHandlers } from './admin-crud.js';
+import {
+  createAdminCrudHandlers,
+  isCertImagePath,
+  socialPostEditRefusal,
+  validateCertification,
+  validateSocialPostPatch,
+} from './admin-crud.js';
 
 const context = { log: vi.fn(), error: vi.fn() };
 
 const allowGuard = {
-  requireRole: vi.fn(async () => ({ user: { oid: 'u1' }, role: 'editor', error: null })),
+  requireRole: vi.fn(async () => ({
+    user: { oid: 'u1' },
+    role: 'editor',
+    error: null,
+  })),
 };
 const denyGuard = {
-  requireRole: vi.fn(async () => ({ user: null, role: null, error: { status: 403, body: '{}' } })),
+  requireRole: vi.fn(async () => ({
+    user: null,
+    role: null,
+    error: { status: 403, body: '{}' },
+  })),
 };
 
 const makeRequest = ({ query = {}, params = {}, body } = {}) => ({
@@ -36,7 +50,10 @@ function makeStore(over = {}) {
   };
 }
 
-const fixed = { now: () => new Date('2026-08-06T12:00:00.000Z'), uuid: () => 'fixed-uuid' };
+const fixed = {
+  now: () => new Date('2026-08-06T12:00:00.000Z'),
+  uuid: () => 'fixed-uuid',
+};
 
 describe('auth', () => {
   it('every handler passes guard denials through and never touches the store', async () => {
@@ -45,11 +62,16 @@ describe('auth', () => {
     const calls = [
       h.listCertifications(makeRequest(), context),
       h.createCertification(makeRequest({ body: { name: 'x' } }), context),
-      h.patchCertification(makeRequest({ params: { id: 'c1' }, body: { featured: true } }), context),
+      h.patchCertification(
+        makeRequest({ params: { id: 'c1' }, body: { featured: true } }),
+        context
+      ),
       h.deleteCertification(makeRequest({ params: { id: 'c1' } }), context),
+      h.deleteCertificationImage(makeRequest({ body: { path: 'c1/images/x.png' } }), context),
       h.listSocialPosts(makeRequest(), context),
       h.createSocialPost(makeRequest({ body: { text: 'x' } }), context),
       h.deleteSocialPost(makeRequest({ params: { id: 's1' } }), context),
+      h.patchSocialPost(makeRequest({ params: { id: 's1' }, body: { caption: 'x' } }), context),
     ];
     for (const call of calls) expect((await call).status).toBe(403);
     expect(store.queryDocs).not.toHaveBeenCalled();
@@ -64,7 +86,9 @@ describe('certifications', () => {
     const store = makeStore();
     const h = createAdminCrudHandlers({ guard: allowGuard, store, ...fixed });
 
-    expect((await h.createCertification(makeRequest({ body: { issuer: 'MS' } }), context)).status).toBe(400);
+    expect(
+      (await h.createCertification(makeRequest({ body: { issuer: 'MS' } }), context)).status
+    ).toBe(400);
 
     const res = await h.createCertification(
       makeRequest({ body: { name: 'AZ-104', id: 'client-chosen' } }),
@@ -89,7 +113,10 @@ describe('certifications', () => {
     const [container, id, updates] = store.patchDoc.mock.calls[0];
     expect(container).toBe('certifications');
     expect(id).toBe('c1');
-    expect(updates).toEqual({ featured: true, _updatedAt: '2026-08-06T12:00:00.000Z' });
+    expect(updates).toEqual({
+      featured: true,
+      _updatedAt: '2026-08-06T12:00:00.000Z',
+    });
   });
 
   it('patch 404s a missing doc and strips a client-sent id from updates', async () => {
@@ -99,7 +126,8 @@ describe('certifications', () => {
       ...fixed,
     });
     expect(
-      (await h404.patchCertification(makeRequest({ params: { id: 'x' }, body: { a: 1 } }), context)).status
+      (await h404.patchCertification(makeRequest({ params: { id: 'x' }, body: { a: 1 } }), context))
+        .status
     ).toBe(404);
 
     const store = makeStore();
@@ -111,8 +139,163 @@ describe('certifications', () => {
     expect(store.patchDoc.mock.calls[0][2]).not.toHaveProperty('id');
   });
 
+  it('stores calendar days, refuses an expiry before the issue date and a bad URL, allows order 0', async () => {
+    const store = makeStore();
+    const h = createAdminCrudHandlers({ guard: allowGuard, store, ...fixed });
+    const ok = await h.createCertification(
+      makeRequest({
+        body: {
+          name: 'AZ-104',
+          issueDate: '2026-01-02T00:00:00.000Z',
+          expDate: '2027-01-02',
+          renewalDate: '2026-11-01',
+          display_order: 0,
+          verifyUrl: 'https://www.credly.com/badges/x',
+          evidence: [{ label: 'Transcript', url: 'https://t' }, { url: 'nope' }],
+          relatedLearning: ['https://learn.microsoft.com/az-104'],
+        },
+      }),
+      context
+    );
+    expect(ok.status).toBe(200);
+    expect(store.upsertDoc.mock.calls[0][1]).toMatchObject({
+      issueDate: '2026-01-02',
+      expDate: '2027-01-02',
+      renewalDate: '2026-11-01',
+      display_order: 0,
+      evidence: [{ label: 'Transcript', url: 'https://t' }],
+      relatedLearning: [
+        {
+          label: 'https://learn.microsoft.com/az-104',
+          url: 'https://learn.microsoft.com/az-104',
+        },
+      ],
+    });
+
+    const before = await h.createCertification(
+      makeRequest({
+        body: { name: 'X', issueDate: '2026-05-01', expDate: '2026-04-30' },
+      }),
+      context
+    );
+    expect(before.status).toBe(400);
+    expect(JSON.parse(before.body).error).toMatch(/expDate/);
+    expect(
+      (
+        await h.createCertification(
+          makeRequest({ body: { name: 'X', verifyUrl: 'javascript:1' } }),
+          context
+        )
+      ).status
+    ).toBe(400);
+    expect(
+      (
+        await h.createCertification(
+          makeRequest({ body: { name: 'X', display_order: -1 } }),
+          context
+        )
+      ).status
+    ).toBe(400);
+    expect(
+      (
+        await h.createCertification(
+          makeRequest({ body: { name: 'X', expDate: '2026-02-30' } }),
+          context
+        )
+      ).status
+    ).toBe(400);
+  });
+
+  it('a partial patch checks the new expiry against the stored issue date', async () => {
+    const store = makeStore({
+      readDoc: vi.fn(async () => ({
+        id: 'c1',
+        name: 'AZ-104',
+        issueDate: '2026-06-01',
+      })),
+    });
+    const h = createAdminCrudHandlers({ guard: allowGuard, store, ...fixed });
+    expect(
+      (
+        await h.patchCertification(
+          makeRequest({
+            params: { id: 'c1' },
+            body: { expDate: '2026-01-01' },
+          }),
+          context
+        )
+      ).status
+    ).toBe(400);
+    const ok = await h.patchCertification(
+      makeRequest({
+        params: { id: 'c1' },
+        body: { expDate: '2027-01-01T05:00:00Z' },
+      }),
+      context
+    );
+    expect(ok.status).toBe(200);
+    expect(store.patchDoc.mock.calls[0][2].expDate).toBe('2027-01-01');
+    expect(
+      validateCertification({
+        imageUrl: '/api/public/media/certifications/c1/images/b.png',
+      }).value.imageUrl
+    ).toBe('/api/public/media/certifications/c1/images/b.png');
+  });
+
+  it('deletes an abandoned upload only at a cert image path nothing references', async () => {
+    const storage = { deleteBlob: vi.fn(async () => {}) };
+    const store = makeStore({ queryDocs: vi.fn(async () => []) });
+    const h = createAdminCrudHandlers({
+      guard: allowGuard,
+      store,
+      storage,
+      ...fixed,
+    });
+    expect(isCertImagePath('c1/images/badge-1.png')).toBe(true);
+    expect(isCertImagePath('images/badge-1.png')).toBe(false);
+    expect(isCertImagePath('../c1/images/x.png')).toBe(false);
+
+    expect(
+      (await h.deleteCertificationImage(makeRequest({ body: { path: 'exports/x.json' } }), context))
+        .status
+    ).toBe(400);
+    const ok = await h.deleteCertificationImage(
+      makeRequest({ body: { path: 'c1/images/badge-1.png' } }),
+      context
+    );
+    expect(ok.status).toBe(200);
+    expect(storage.deleteBlob).toHaveBeenCalledWith('certifications', 'c1/images/badge-1.png');
+
+    store.queryDocs.mockResolvedValueOnce([{ id: 'c1' }]);
+    expect(
+      (
+        await h.deleteCertificationImage(
+          makeRequest({ body: { path: 'c1/images/badge-2.png' } }),
+          context
+        )
+      ).status
+    ).toBe(409);
+    expect(storage.deleteBlob).toHaveBeenCalledTimes(1);
+
+    const noStorage = createAdminCrudHandlers({
+      guard: allowGuard,
+      store,
+      ...fixed,
+    });
+    expect(
+      (
+        await noStorage.deleteCertificationImage(
+          makeRequest({ body: { path: 'c1/images/b.png' } }),
+          context
+        )
+      ).status
+    ).toBe(503);
+  });
+
   it('list and delete round-trip through the store', async () => {
-    const store = makeStore({ queryDocs: vi.fn(async () => [{ id: 'a' }, { id: 'b' }]) });
+    const store = makeStore({
+      queryDocs: vi.fn(async () => [{ id: 'a' }, { id: 'b' }]),
+    });
     const h = createAdminCrudHandlers({ guard: allowGuard, store, ...fixed });
     const res = await h.listCertifications(makeRequest(), context);
     expect(JSON.parse(res.body).total).toBe(2);
@@ -143,7 +326,10 @@ describe('social posts', () => {
   it('honors an explicit status filter and the limit clamp', async () => {
     const store = makeStore();
     const h = createAdminCrudHandlers({ guard: allowGuard, store, ...fixed });
-    await h.listSocialPosts(makeRequest({ query: { status: 'draft,failed', limit: '5000' } }), context);
+    await h.listSocialPosts(
+      makeRequest({ query: { status: 'draft,failed', limit: '5000' } }),
+      context
+    );
     expect(store.queryDocs.mock.calls[0][2][0].value).toEqual(['draft', 'failed']);
   });
 
@@ -169,8 +355,101 @@ describe('social posts', () => {
   });
 
   it('rejects malformed bodies', async () => {
-    const h = createAdminCrudHandlers({ guard: allowGuard, store: makeStore(), ...fixed });
+    const h = createAdminCrudHandlers({
+      guard: allowGuard,
+      store: makeStore(),
+      ...fixed,
+    });
     expect((await h.createSocialPost(makeRequest({ body: [1, 2] }), context)).status).toBe(400);
     expect((await h.createSocialPost(makeRequest(), context)).status).toBe(400);
+  });
+});
+
+describe('social posts: patch (ADR 0033 Amplify slice)', () => {
+  const scheduled = {
+    id: 's1',
+    status: 'scheduled',
+    caption: 'old',
+    scheduledAt: '2026-09-01T09:00:00.000Z',
+    publerPostIds: ['p1'],
+  };
+  const patch = (store, body) =>
+    createAdminCrudHandlers({
+      guard: allowGuard,
+      store,
+      ...fixed,
+    }).patchSocialPost(makeRequest({ params: { id: 's1' }, body }), context);
+
+  it('reschedules into the future and marks the edit for the change feed to push', async () => {
+    const store = makeStore({ readDoc: vi.fn(async () => scheduled) });
+    const res = await patch(store, {
+      caption: 'new caption',
+      scheduledAt: '2026-09-02T09:00:00Z',
+    });
+    expect(res.status).toBe(200);
+    expect(store.patchDoc.mock.calls[0][2]).toMatchObject({
+      caption: 'new caption',
+      scheduledAt: '2026-09-02T09:00:00.000Z',
+      syncOrigin: 'calendar',
+      syncStatus: 'pending',
+    });
+    expect(JSON.parse(res.body).publer).toEqual({
+      push: 'change-feed',
+      postIds: ['p1'],
+    });
+  });
+
+  it('refuses the past, unknown fields, a cleared time, and edits to a published post', async () => {
+    const store = makeStore({ readDoc: vi.fn(async () => scheduled) });
+    expect((await patch(store, { scheduledAt: '2020-01-01T00:00:00Z' })).status).toBe(400);
+    expect((await patch(store, { status: 'published' })).status).toBe(400);
+    expect((await patch(store, { scheduledAt: null })).status).toBe(400);
+    expect(store.patchDoc).not.toHaveBeenCalled();
+    const published = makeStore({
+      readDoc: vi.fn(async () => ({ ...scheduled, status: 'published' })),
+    });
+    expect((await patch(published, { caption: 'x' })).status).toBe(409);
+  });
+
+  it('says the next sync will carry a post Publer has not reported ids for', async () => {
+    const store = makeStore({
+      readDoc: vi.fn(async () => ({ ...scheduled, publerPostIds: [] })),
+    });
+    const res = JSON.parse((await patch(store, { caption: 'x' })).body);
+    expect(res.publer.push).toBe('next-sync');
+  });
+});
+
+describe('social posts: the patch validator and the edit refusal (ADR 0033 Amplify slice)', () => {
+  const nowMs = Date.parse('2026-09-01T00:00:00.000Z');
+
+  it('cleans each editable field and names the first bad one', () => {
+    expect(
+      validateSocialPostPatch(
+        { caption: '  hi  ', url: null, scheduledAt: '2026-09-02T09:00:00Z' },
+        nowMs
+      )
+    ).toEqual({
+      updates: { caption: 'hi', url: null, scheduledAt: '2026-09-02T09:00:00.000Z' },
+    });
+    expect(validateSocialPostPatch({ caption: '' }, nowMs).error).toMatch(/caption must be 1 to/);
+    expect(validateSocialPostPatch({ url: 'ftp://x' }, nowMs).error).toBe(
+      'url must be absolute http(s)'
+    );
+    expect(validateSocialPostPatch({ scheduledAt: 'soon' }, nowMs).error).toBe(
+      'scheduledAt must be an ISO instant'
+    );
+    expect(validateSocialPostPatch({ caption: 'x', status: 'y' }, nowMs).error).toBe(
+      'Unknown field(s): status'
+    );
+  });
+
+  it('refuses edits to a published post and reschedules only a scheduled one', () => {
+    expect(socialPostEditRefusal({ status: 'published' }, { caption: 'x' })).toMatch(/published/);
+    expect(socialPostEditRefusal({ status: 'draft' }, { scheduledAt: 'x' })).toMatch(
+      /this one is draft/
+    );
+    expect(socialPostEditRefusal({ status: 'draft' }, { caption: 'x' })).toBeNull();
+    expect(socialPostEditRefusal({ status: 'scheduled' }, { scheduledAt: 'x' })).toBeNull();
   });
 });

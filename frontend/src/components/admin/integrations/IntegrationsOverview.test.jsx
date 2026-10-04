@@ -15,9 +15,10 @@ import { SERVICES } from './serviceRegistry';
 const getJSON = vi.fn();
 const postJSON = vi.fn();
 
+const sendJSON = vi.fn(async () => ({ success: true }));
 vi.mock('@/lib/api', () => ({
   getJSON: (...args) => getJSON(...args),
-  sendJSON: vi.fn(),
+  sendJSON: (...args) => sendJSON(...args),
   postJSON: (...args) => postJSON(...args),
 }));
 vi.mock('@/lib/adminSettings', () => ({
@@ -97,8 +98,35 @@ describe('the grid', () => {
     render(<Harness />);
     await waitFor(() => expect(tileNames()[0]).toBe('telegram'));
     expect(tileNames()[1]).toBe('resend');
-    expect(within(tile('telegram')).getByText('Broken')).toBeTruthy();
-    expect(within(tile('resend')).getByText('Not configured')).toBeTruthy();
+    // The shared vocabulary (ADR 0033 §2), not this page's own words.
+    expect(within(tile('telegram')).getByText('Unavailable')).toBeTruthy();
+    expect(within(tile('resend')).getByText('Misconfigured')).toBeTruthy();
+  });
+
+  it('reads the recorded last verdicts and sorts a service that last failed first (ADR 0033)', async () => {
+    getJSON.mockImplementation(async (route) => {
+      if (route === 'cms/integration-status') {
+        return {
+          success: true,
+          services: {
+            linkie: {
+              lastOkAt: '2026-10-01T00:00:00.000Z',
+              lastFailAt: '2026-10-02T00:00:00.000Z',
+              lastError: 'Unauthorized',
+            },
+            publer: { lastOkAt: '2026-10-02T00:00:00.000Z', lastFailAt: null, lastError: null },
+          },
+        };
+      }
+      return { success: true, sections: [], secrets: [] };
+    });
+    render(<Harness />);
+    await waitFor(() => expect(tileNames()[0]).toBe('linkie'));
+    expect(within(tile('linkie')).getByText('Unavailable')).toBeTruthy();
+    expect(within(tile('linkie')).getByText(/Unauthorized/)).toBeTruthy();
+    expect(within(tile('linkie')).getByText(/last tested/)).toBeTruthy();
+    expect(within(tile('publer')).getByText('Healthy')).toBeTruthy();
+    expect(getJSON).toHaveBeenCalledWith('cms/integration-status');
   });
 
   it('opens a service’s group on the Services tab', async () => {
@@ -117,59 +145,80 @@ describe('the grid', () => {
 });
 
 describe('Test all', () => {
-  it('runs every testable service one at a time, never two at once', async () => {
-    let active = 0;
-    let peak = 0;
-    const slow = async () => {
-      active += 1;
-      peak = Math.max(peak, active);
-      await new Promise((resolve) => setTimeout(resolve, 5));
-      active -= 1;
-      return { ok: true, status: 200, data: {} };
-    };
-    postJSON.mockImplementation(slow);
-    fetchMock.mockImplementation(async () => {
-      await slow();
-      return { ok: true, json: async () => ({ events: [] }) };
-    });
+  it(
+    'runs every testable service one at a time, never two at once',
+    { timeout: 20000 },
+    async () => {
+      let active = 0;
+      let peak = 0;
+      const slow = async () => {
+        active += 1;
+        peak = Math.max(peak, active);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        active -= 1;
+        return { ok: true, status: 200, data: {} };
+      };
+      postJSON.mockImplementation(slow);
+      fetchMock.mockImplementation(async () => {
+        await slow();
+        return { ok: true, json: async () => ({ events: [] }) };
+      });
 
-    render(<Harness />);
-    fireEvent.click(screen.getByRole('button', { name: /Test all/ }));
-    await waitFor(
-      () => expect(screen.getByRole('button', { name: /Test all/ }).disabled).toBe(false),
-      {
-        timeout: 3000,
-      }
-    );
+      render(<Harness />);
+      fireEvent.click(screen.getByRole('button', { name: /Test all/ }));
+      // The registry now holds many more services (ADR 0033), each run one
+      // after the other with a 5 ms pause, and the coverage job instruments
+      // every render: 3 s was the wall this test hit there. Generous on
+      // purpose; what is asserted is the peak concurrency, not the speed.
+      await waitFor(
+        () => expect(screen.getByRole('button', { name: /Test all/ }).disabled).toBe(false),
+        {
+          timeout: 15000,
+        }
+      );
 
-    expect(peak).toBe(1);
-    const probes = postJSON.mock.calls.map(([route, body]) => body?.probe ?? route);
-    // Every testable service once, in registry order, and no YouTube: its
-    // test spends daily quota.
-    expect(probes).toEqual([
-      'publerProxy',
-      'resend',
-      'linkieProxy',
-      'telegram',
-      'rsscom',
-      'mcpProxy',
-      'qlty',
-    ]);
-    expect(probes).not.toContain('youtube');
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toContain('speaker-42');
-    // The pricing cache is in Test all too: it is a read, and spends nothing.
-    expect(fetchCloudPricing).toHaveBeenCalledTimes(1);
-  });
+      expect(peak).toBe(1);
+      const probes = postJSON.mock.calls.map(([route, body]) => body?.probe ?? route);
+      // Every testable service once, in registry order, and no YouTube: its
+      // test spends daily quota.
+      expect(probes).toEqual([
+        'publerProxy',
+        'resend',
+        'linkieProxy',
+        'telegram',
+        'rsscom',
+        'mcpProxy',
+        // ADR 0033: the four language models, then the two AI-service probes.
+        'testAiProvider',
+        'testAiProvider',
+        'testAiProvider',
+        'testAiProvider',
+        'firecrawl',
+        'replicate',
+        'qlty',
+      ]);
+      expect(probes).not.toContain('youtube');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0][0]).toContain('speaker-42');
+      // The pricing cache is in Test all too: it is a read, and spends nothing.
+      expect(fetchCloudPricing).toHaveBeenCalledTimes(1);
+    }
+  );
 
   it('records a result and a time on each tile, and says YouTube was left out', async () => {
     render(<Harness />);
     fireEvent.click(screen.getByRole('button', { name: /Test all/ }));
     await waitFor(() => expect(within(tile('publer')).getByText(/tested just now/)).toBeTruthy());
-    await waitFor(() => expect(within(tile('sessionize')).getByText('Working')).toBeTruthy());
+    await waitFor(() => expect(within(tile('sessionize')).getByText('Healthy')).toBeTruthy());
     expect(within(tile('youtube')).getByText(/Not in Test all/)).toBeTruthy();
     expect(within(tile('youtube')).queryByText(/^tested /)).toBeNull();
-    expect(within(tile('youtube')).getByText('Not tested yet')).toBeTruthy();
+    expect(within(tile('youtube')).getByText('Unknown')).toBeTruthy();
+    // Each verdict is recorded for the next visit (ADR 0033).
+    expect(sendJSON).toHaveBeenCalledWith(
+      'cms/integration-status',
+      'PUT',
+      expect.objectContaining({ service: 'sessionize', ok: true })
+    );
   });
 
   it('keeps going past a refusal and shows it as broken with the provider’s words', async () => {
@@ -181,8 +230,8 @@ describe('Test all', () => {
     render(<Harness />);
     fireEvent.click(screen.getByRole('button', { name: /Test all/ }));
 
-    await waitFor(() => expect(within(tile('sessionize')).getByText('Working')).toBeTruthy());
-    expect(within(tile('telegram')).getByText('Broken')).toBeTruthy();
+    await waitFor(() => expect(within(tile('sessionize')).getByText('Healthy')).toBeTruthy());
+    expect(within(tile('telegram')).getByText('Unavailable')).toBeTruthy();
     expect(within(tile('telegram')).getByText(/Unauthorized/)).toBeTruthy();
     expect(tileNames()[0]).toBe('telegram');
   });

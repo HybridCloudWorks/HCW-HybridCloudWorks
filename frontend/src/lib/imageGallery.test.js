@@ -9,13 +9,17 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
+  asListing,
   customTagOptions,
   deleteFolderProblem,
   folderOptions,
+  galleryQueryString,
   newFolderProblem,
+  normalizeGalleryItem,
   providerOptions,
   SEED_FOLDERS,
   slotOptions,
+  tagToggleIntent,
   toggledSelection,
   uniqueTags,
 } from './imageGallery';
@@ -111,5 +115,68 @@ describe('toggledSelection', () => {
     expect([...toggledSelection(before, 'b')].sort()).toEqual(['a', 'b']);
     expect([...toggledSelection(before, 'a')]).toEqual([]);
     expect([...before]).toEqual(['a']);
+  });
+});
+
+// ── ADR 0033: the listing client and the bulk tag intent ────────────────────
+
+describe('galleryQueryString', () => {
+  it('omits defaults and `all`, keeps everything else, and always asks for usage', () => {
+    expect(galleryQueryString({})).toBe('?limit=200&usage=1');
+    expect(
+      galleryQueryString({
+        q: 'x',
+        folder: 'all',
+        state: 'trash',
+        sort: 'title',
+        offset: 60,
+        limit: 60,
+        usage: false,
+      })
+    ).toBe('?q=x&state=trash&sort=title&offset=60&limit=60');
+  });
+});
+
+describe('asListing', () => {
+  it('wraps a bare array, reads the envelope, and falls back to curated/generated', () => {
+    expect(asListing([{ id: 'a' }]).total).toBe(1);
+    const env = asListing({
+      items: [{ id: 'a', galleryCollection: 'curated_article_images' }],
+      total: 9,
+      hasMore: true,
+      facets: { x: 1 },
+    });
+    expect(env).toMatchObject({ total: 9, hasMore: true, facets: { x: 1 } });
+    expect(env.items[0].source).toBe('curated');
+    const legacy = asListing({
+      curated: [{ id: 'c', createdAt: '2026-01-01' }],
+      generated: [{ id: 'g', createdAt: '2026-02-01' }],
+    });
+    expect(legacy.items.map((i) => i.id)).toEqual(['g', 'c']);
+  });
+});
+
+describe('tagToggleIntent', () => {
+  it('removes a tag every selected image has, adds it otherwise, and does nothing for no selection', () => {
+    const items = [{ customTags: ['cloud', 'edge'] }, { customTags: ['Cloud'] }];
+    expect(tagToggleIntent('cloud', items)).toEqual({ addTags: [], removeTags: ['cloud'] });
+    expect(tagToggleIntent('edge', items)).toEqual({ addTags: ['edge'], removeTags: [] });
+    expect(tagToggleIntent('edge', [])).toEqual({ addTags: [], removeTags: [] });
+  });
+});
+
+describe('normalizeGalleryItem', () => {
+  it('derives the source id from legacy sourceCollection values', () => {
+    expect(
+      normalizeGalleryItem(
+        { id: 'a', sourceCollection: 'manual_upload' },
+        'generated_content_images'
+      ).source
+    ).toBe('upload');
+    expect(normalizeGalleryItem({ id: 'b' }, 'curated_article_images').source).toBe('curated');
+    expect(
+      normalizeGalleryItem({ id: 'c', sourceCollection: 'content' }, 'generated_content_images')
+        .source
+    ).toBe('ai-cover');
   });
 });

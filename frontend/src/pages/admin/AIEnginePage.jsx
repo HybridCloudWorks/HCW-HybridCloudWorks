@@ -1,15 +1,23 @@
 /**
  * AI Engine — Admin Page  (/admin/ai-engine)
  *
- * Four tabs:
- *   1. AI Services   — provider cards with status, enable toggle, model selector, Test button
- *   2. MCP Servers   — server cards with tool browser, enable toggle, Sync / Test buttons, Add Server form
- *   3. Playground    — pick provider or MCP tool, compose messages, see response + cost
- *   4. Usage         — token usage chart + estimated cost by provider, recent call log
+ * Five tabs (components/admin/ai-engine/tabs.js), selected by `?tab=`:
+ *   1. AI Services   — order of preference, feature switches, provider cards
+ *                      with status, enable toggle, model pin (or Auto), Test
+ *   2. Routing       — which provider and model serve each task, with
+ *                      fallbacks (ADR 0033 §4); a task with no route follows
+ *                      the order of preference
+ *   3. MCP Servers   — server cards with tool browser, Sync, Add Server form
+ *   4. Playground    — one provider or MCP tool, a prompt, the answer and cost
+ *   5. Usage         — every recorded call, by provider and by feature
+ *
+ * The "Site Services" tab that sat between them until ADR 0033 was a
+ * placeholder: local state over a stale provider list that saved nothing.
+ * Its address lands on Routing, which answers the question it posed.
  */
 
-import React, { useEffect, useState, lazy, Suspense } from 'react';
-import { useNavigate } from 'react-router';
+import React, { useCallback, useEffect, useState, lazy, Suspense } from 'react';
+import { useNavigate, useSearchParams } from 'react-router';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -27,8 +35,6 @@ import { useToast } from '@/components/ui/use-toast';
 import {
   Bot,
   Server,
-  FlaskConical,
-  BarChart2,
   Clock,
   Loader2,
   ChevronDown,
@@ -42,9 +48,6 @@ import {
   Info,
   DollarSign,
   BookOpen,
-  Layers,
-  CheckSquare,
-  Square,
   ArrowUp,
   ArrowDown,
   ToggleLeft,
@@ -55,16 +58,22 @@ import {
   subscribeProviders,
   subscribeMcpServers,
 } from '@/lib/aiEngine';
+import HubTabs from '@/components/admin/HubTabs';
+import PageHeader from '@/components/admin/shared/PageHeader';
+import EmptyState from '@/components/admin/shared/EmptyState';
+import RoutingTab from '@/components/admin/ai-engine/RoutingTab';
+import { TABS, resolveTab } from '@/components/admin/ai-engine/tabs';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const TABS = [
-  { id: 'services', label: 'AI Services', icon: Bot },
-  { id: 'mcp', label: 'MCP Servers', icon: Server },
-  { id: 'siteservices', label: 'Site Services', icon: Layers },
-  { id: 'playground', label: 'Playground', icon: FlaskConical },
-  { id: 'usage', label: 'Usage & Cost', icon: BarChart2 },
-];
+/**
+ * The model select's "no pin" value. Radix Select cannot carry an empty
+ * string as an item, and a provider whose `defaultModel` is unset (NVIDIA by
+ * default) is the Auto state: the router picks a model per purpose, or per
+ * task when Routing names one (ADR 0033). Until this there was no way back
+ * to Auto once a model had been picked.
+ */
+export const AUTO_MODEL = '__auto__';
 
 function StatusBadge({ status }) {
   const map = {
@@ -135,23 +144,6 @@ export function describeLastTest(provider, now = Date.now()) {
   return `Tested ${timeAgo(provider.lastTested, now)}${by}`;
 }
 
-function getServiceCardClassName(isGreyed, isChecked, checkedColor) {
-  if (isGreyed) {
-    return 'opacity-40 cursor-not-allowed bg-slate-50 border-slate-200 dark:bg-slate-800/30 dark:border-slate-700';
-  }
-  if (isChecked) {
-    return `bg-${checkedColor}-50 border-${checkedColor}-200 dark:bg-${checkedColor}-900/20 dark:border-${checkedColor}-700 cursor-pointer`;
-  }
-  return 'bg-white border-slate-200 dark:bg-slate-900 dark:border-slate-700 hover:border-slate-300 cursor-pointer';
-}
-
-function getServiceSelectionIcon(isChecked, isGreyed, checkedColor) {
-  if (isChecked && !isGreyed) {
-    return <CheckSquare className={`h-4 w-4 text-${checkedColor}-500 shrink-0`} />;
-  }
-  return <Square className="h-4 w-4 text-slate-300 shrink-0" />;
-}
-
 // ─── Services Tab ─────────────────────────────────────────────────────────────
 
 export function ProviderCard({ provider, onToggle, onModelChange, onTest }) {
@@ -189,17 +181,25 @@ export function ProviderCard({ provider, onToggle, onModelChange, onTest }) {
             </div>
             <p className="text-xs text-slate-500 mt-0.5">{provider.description}</p>
 
-            {/* Model selector */}
+            {/* Model selector: a pin for every purpose, or Auto */}
             {!isUnavailable && provider.models?.length > 0 && (
               <div className="mt-2">
                 <Select
-                  value={provider.defaultModel || ''}
-                  onValueChange={(val) => onModelChange(provider.id, val)}
+                  value={provider.defaultModel || AUTO_MODEL}
+                  onValueChange={(val) =>
+                    onModelChange(provider.id, val === AUTO_MODEL ? null : val)
+                  }
                 >
-                  <SelectTrigger className="h-7 text-xs w-full max-w-xs">
+                  <SelectTrigger
+                    className="h-7 text-xs w-full max-w-xs"
+                    aria-label={`Model for ${provider.name}`}
+                  >
                     <SelectValue placeholder="Select model" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value={AUTO_MODEL} className="text-xs">
+                      Auto (per task)
+                    </SelectItem>
                     {provider.models.map((m) => (
                       <SelectItem key={m} value={m} className="text-xs">
                         {m}
@@ -478,20 +478,38 @@ function ServicesTab({ providers }) {
   const { toast } = useToast();
   const [reordering, setReordering] = useState(false);
 
+  // Each write says so when it fails. Until ADR 0033 a rejected PATCH here
+  // was an unhandled promise: the switch stayed where it was clicked while
+  // the API held the old value.
+  const failed = (title) => (err) =>
+    toast({ title, description: err?.message || 'Nothing was changed.', variant: 'destructive' });
+
   const handleToggle = async (id, enabled) => {
-    await aiEngine.setEnabled('ai_providers', id, enabled);
+    try {
+      await aiEngine.setEnabled('ai_providers', id, enabled);
+    } catch (err) {
+      failed('Could not change the provider')(err);
+    }
   };
 
   const handleModelChange = async (id, model) => {
-    await aiEngine.setProviderModel(id, model);
+    try {
+      await aiEngine.setProviderModel(id, model);
+    } catch (err) {
+      failed('Could not save the model')(err);
+    }
   };
 
   const handleTest = async (id) => {
-    const result = await aiEngine.testProvider(id);
-    if (result.ok) {
-      toast({ title: 'Connected ✓', description: `${result.latencyMs}ms response time` });
-    } else {
-      toast({ title: 'Connection failed', description: result.error, variant: 'destructive' });
+    try {
+      const result = await aiEngine.testProvider(id);
+      if (result.ok) {
+        toast({ title: 'Connected ✓', description: `${result.latencyMs}ms response time` });
+      } else {
+        toast({ title: 'Connection failed', description: result.error, variant: 'destructive' });
+      }
+    } catch (err) {
+      failed('The test did not run')(err);
     }
   };
 
@@ -1243,372 +1261,129 @@ function PlaygroundTab({ providers, servers }) {
   );
 }
 
-// ─── Site Services Tab ────────────────────────────────────────────────────────
-
-/**
- * SITE_PAGES — list of pages that use AI or MCP services.
- * Each entry: { id, label, path, description, services: string[] }
- * services must be IDs matching the SERVICES map below.
- */
-const SITE_PAGES = [
-  {
-    id: 'content-pipeline',
-    label: 'ContentForge Pipeline',
-    path: '/admin/submit-urls',
-    description: 'Ingest URLs → AI analysis, content generation, cover image creation',
-    services: ['gemini', 'anthropic', 'perplexity', 'replicate', 'firecrawl'],
-  },
-  {
-    id: 'recording-hub',
-    label: 'Recording Hub',
-    path: '/admin/recording-hub',
-    description: 'Podcast transcripts and the Plaud MCP — browse recordings, transcripts, AI notes',
-    services: ['plaud', 'anthropic', 'gemini'],
-  },
-  {
-    id: 'ai-playground',
-    label: 'AI Playground',
-    path: '/admin/ai-engine (Playground tab)',
-    description: 'Interactive chat with any enabled AI provider or MCP tool',
-    services: [
-      'anthropic',
-      'gemini',
-      'perplexity',
-      'azure',
-      'bedrock',
-      'replicate',
-      'firecrawl',
-      'context7',
-      'plaud',
-    ],
-  },
-  {
-    id: 'submit-urls',
-    label: 'Submit URLs',
-    path: '/admin/submit-urls',
-    description: 'Firecrawl-powered URL scraping and content ingestion',
-    services: ['firecrawl', 'gemini', 'anthropic'],
-  },
-  {
-    id: 'dashboard',
-    label: 'Admin Dashboard',
-    path: '/admin/dashboard',
-    description: 'ContentForge pipeline status, Plaud → content workflow',
-    services: ['plaud', 'firecrawl'],
-  },
-];
-
-/**
- * SERVICES — all available AI / MCP services and their mutual-exclusivity groups.
- * exclusiveWith: services in the same group cannot be active at the same time.
- */
-const SERVICES = {
-  // AI providers
-  anthropic: { label: 'Claude (Anthropic)', icon: '🟣', type: 'ai', exclusiveWith: [] },
-  gemini: { label: 'Gemini (Google AI)', icon: '🔵', type: 'ai', exclusiveWith: [] },
-  perplexity: { label: 'Perplexity Sonar', icon: '🔍', type: 'ai', exclusiveWith: [] },
-  azure: { label: 'Azure OpenAI', icon: '🪟', type: 'ai', exclusiveWith: [] },
-  bedrock: { label: 'AWS Bedrock (Nova)', icon: '🟠', type: 'ai', exclusiveWith: [] },
-  replicate: { label: 'Replicate', icon: '🎨', type: 'ai', exclusiveWith: [] },
-  // MCP servers
-  plaud: { label: 'Plaud MCP', icon: '🎙️', type: 'mcp', exclusiveWith: [] },
-  firecrawl: { label: 'Firecrawl MCP', icon: '🔥', type: 'mcp', exclusiveWith: [] },
-  context7: { label: 'Context7 MCP', icon: '📚', type: 'mcp', exclusiveWith: [] },
-  'replicate-mcp': {
-    label: 'Replicate MCP',
-    icon: '🎨',
-    type: 'mcp',
-    exclusiveWith: ['replicate'],
-  },
-};
-
-function SiteServicesTab() {
-  const [selectedPage, setSelectedPage] = useState(SITE_PAGES[0].id);
-  const [prevPage, setPrevPage] = useState(selectedPage);
-  const [checked, setChecked] = useState(() => {
-    const init = {};
-    (SITE_PAGES[0]?.services ?? []).forEach((s) => {
-      init[s] = true;
-    });
-    return init;
-  });
-
-  const page = SITE_PAGES.find((p) => p.id === selectedPage);
-  const pageServices = page ? page.services : [];
-
-  // Reset checked state when page changes (setState-during-render pattern)
-  if (prevPage !== selectedPage) {
-    setPrevPage(selectedPage);
-    const init = {};
-    pageServices.forEach((s) => {
-      init[s] = true;
-    });
-    setChecked(init);
-  }
-
-  /** Returns set of service IDs that are greyed out due to mutual exclusivity */
-  function getGreyedOut() {
-    const greyed = new Set();
-    pageServices.forEach((svcId) => {
-      if (!checked[svcId]) return;
-      const def = SERVICES[svcId];
-      if (!def) return;
-      def.exclusiveWith.forEach((excl) => {
-        if (pageServices.includes(excl) && excl !== svcId) greyed.add(excl);
-      });
-    });
-    return greyed;
-  }
-
-  const greyedOut = getGreyedOut();
-
-  function toggleService(svcId) {
-    if (greyedOut.has(svcId)) return; // disabled by exclusivity
-    setChecked((prev) => ({ ...prev, [svcId]: !prev[svcId] }));
-  }
-
-  function setAll(value) {
-    const next = {};
-    pageServices.forEach((s) => {
-      next[s] = value;
-    });
-    setChecked(next);
-  }
-
-  const aiServices = pageServices.filter((s) => SERVICES[s]?.type === 'ai');
-  const mcpServices = pageServices.filter((s) => SERVICES[s]?.type === 'mcp');
-  const checkedCount = pageServices.filter((s) => checked[s]).length;
-
-  return (
-    <div className="space-y-6">
-      {/* Page selector */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm">Select a Page</CardTitle>
-          <CardDescription className="text-xs">
-            Choose a site page to view and configure which AI / MCP services it uses.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Select value={selectedPage} onValueChange={setSelectedPage}>
-            <SelectTrigger className="w-full max-w-md">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {SITE_PAGES.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {page && (
-            <p className="mt-2 text-xs text-slate-500">
-              <span className="font-mono text-slate-400">{page.path}</span> — {page.description}
-            </p>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Service matrix */}
-      {page && (
-        <Card>
-          <CardHeader className="pb-2">
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="text-sm">{page.label} — Service Matrix</CardTitle>
-                <CardDescription className="text-xs mt-0.5">
-                  {checkedCount} of {pageServices.length} services enabled for this page. Services
-                  greyed out are mutually exclusive with an active selection.
-                </CardDescription>
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-xs h-7"
-                  onClick={() => setAll(true)}
-                >
-                  All
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-xs h-7"
-                  onClick={() => setAll(false)}
-                >
-                  None
-                </Button>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {aiServices.length > 0 && (
-              <div>
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
-                  AI Providers
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {aiServices.map((svcId) => {
-                    const def = SERVICES[svcId] || { label: svcId, icon: '🔲', exclusiveWith: [] };
-                    const isGreyed = greyedOut.has(svcId);
-                    const isChecked = Boolean(checked[svcId]);
-                    const checkedColor = 'indigo';
-                    return (
-                      <button
-                        key={svcId}
-                        onClick={() => toggleService(svcId)}
-                        disabled={isGreyed}
-                        className={`flex items-center gap-3 p-3 rounded-lg border text-left transition-colors ${getServiceCardClassName(
-                          isGreyed,
-                          isChecked,
-                          checkedColor
-                        )}`}
-                      >
-                        {getServiceSelectionIcon(isChecked, isGreyed, checkedColor)}
-                        <span className="text-base leading-none">{def.icon}</span>
-                        <div className="min-w-0">
-                          <p className="text-xs font-medium truncate">{def.label}</p>
-                          {isGreyed && (
-                            <p className="text-xs text-slate-400">
-                              Mutually exclusive — deselect conflicting service first
-                            </p>
-                          )}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {mcpServices.length > 0 && (
-              <div>
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
-                  MCP Servers
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {mcpServices.map((svcId) => {
-                    const def = SERVICES[svcId] || { label: svcId, icon: '🔲', exclusiveWith: [] };
-                    const isGreyed = greyedOut.has(svcId);
-                    const isChecked = Boolean(checked[svcId]);
-                    const checkedColor = 'emerald';
-                    return (
-                      <button
-                        key={svcId}
-                        onClick={() => toggleService(svcId)}
-                        disabled={isGreyed}
-                        className={`flex items-center gap-3 p-3 rounded-lg border text-left transition-colors ${getServiceCardClassName(
-                          isGreyed,
-                          isChecked,
-                          checkedColor
-                        )}`}
-                      >
-                        {getServiceSelectionIcon(isChecked, isGreyed, checkedColor)}
-                        <span className="text-base leading-none">{def.icon}</span>
-                        <div className="min-w-0">
-                          <p className="text-xs font-medium truncate">{def.label}</p>
-                          {isGreyed && <p className="text-xs text-slate-400">Mutually exclusive</p>}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-    </div>
-  );
-}
-
 const UsageTab = lazy(() => import('@/pages/admin/AIEngineUsageTab'));
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
+const HELP = [
+  'AI Services holds the order of preference: a call goes to the first enabled provider with a key, and falls through to the next when that one cannot serve. Each card can pin one model for every purpose, or stay on Auto.',
+  'Routing assigns a provider, a model and a fallback chain to one task (drafting, grading, captions, Telegram…). A task with no route follows the order of preference.',
+  'Where AI is used (on AI Services) switches a task off entirely; Routing decides who serves it when it is on.',
+  'MCP Servers are tool servers the Playground and the bots can call; keys stay in app settings named MCP_* and are never sent to the browser.',
+  'Usage & Cost lists every recorded call. Since ADR 0033 every call through the router records one row, sourced to its task.',
+];
+
 export default function AIEnginePage() {
-  const [activeTab, setActiveTab] = useState('services');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = resolveTab(searchParams.get('tab'));
   const [providers, setProviders] = useState([]);
   const [servers, setServers] = useState([]);
-  const [seeded, setSeeded] = useState(false);
+  const [seed, setSeed] = useState({ status: 'seeding', error: null });
 
-  // Seed and subscribe on mount
-  useEffect(() => {
-    seedAiEngineIfEmpty().then(() => setSeeded(true));
+  // Seed and subscribe on mount. A failed seed is said, with a retry: until
+  // ADR 0033 the promise had no catch, so a 403 or an offline API left the
+  // spinner turning forever.
+  const runSeed = useCallback(() => {
+    seedAiEngineIfEmpty()
+      .then(() => setSeed({ status: 'ready', error: null }))
+      .catch((err) =>
+        setSeed({ status: 'error', error: err?.message || 'The configuration could not be read.' })
+      );
   }, []);
 
   useEffect(() => {
-    if (!seeded) return;
+    runSeed();
+  }, [runSeed]);
+
+  const retrySeed = () => {
+    setSeed({ status: 'seeding', error: null });
+    runSeed();
+  };
+
+  useEffect(() => {
+    if (seed.status !== 'ready') return undefined;
     const unsubP = subscribeProviders(setProviders);
     const unsubS = subscribeMcpServers(setServers);
     return () => {
       unsubP();
       unsubS();
     };
-  }, [seeded]);
+  }, [seed.status]);
+
+  const setTab = (id) => {
+    if (id === activeTab) return;
+    setSearchParams({ tab: id });
+  };
 
   const enabledCount = providers.filter((p) => p.enabled && p.status !== 'unavailable').length;
   const mcpCount = servers.filter((s) => s.enabled).length;
 
+  const PANELS = {
+    services: () => <ServicesTab providers={providers} />,
+    routing: () => <RoutingTab providers={providers} />,
+    mcp: () => <McpTab servers={servers} />,
+    playground: () => <PlaygroundTab providers={providers} servers={servers} />,
+    usage: () => (
+      <Suspense
+        fallback={
+          <div className="flex justify-center py-8">
+            <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+          </div>
+        }
+      >
+        <UsageTab />
+      </Suspense>
+    ),
+  };
+
+  let body;
+  if (seed.status === 'error') {
+    body = (
+      <EmptyState
+        variant="error"
+        title="The AI configuration could not be read"
+        description={seed.error}
+        onRetry={retrySeed}
+      />
+    );
+  } else if (seed.status === 'seeding') {
+    body = (
+      <div className="flex justify-center py-12" role="status" aria-label="Reading configuration">
+        <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+      </div>
+    );
+  } else {
+    // Elements, not component types: a map of arrow components rebuilt each
+    // render would remount the panel on every provider refresh and lose its
+    // local state (a reorder in flight, a Playground draft).
+    body = PANELS[activeTab]();
+  }
+
   return (
-    <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
-      {/* Page header */}
-      <div className="flex items-center gap-3">
-        <div className="p-2 rounded-lg bg-indigo-100 dark:bg-indigo-900/40">
-          <Bot className="h-6 w-6 text-indigo-600 dark:text-indigo-400" />
-        </div>
-        <div>
-          <h1 className="text-xl font-bold">AI Engine</h1>
-          <p className="text-sm text-slate-500">
-            {enabledCount} AI provider{enabledCount !== 1 ? 's' : ''} · {mcpCount} MCP server
-            {mcpCount !== 1 ? 's' : ''} active
-          </p>
-        </div>
-      </div>
+    <div className="max-w-5xl mx-auto space-y-6">
+      <PageHeader
+        icon={Bot}
+        title="AI Engine"
+        status={
+          seed.status === 'ready' ? (
+            <span className="text-muted-foreground">
+              {enabledCount} AI provider{enabledCount !== 1 ? 's' : ''} enabled · {mcpCount} MCP
+              server{mcpCount !== 1 ? 's' : ''} active
+            </span>
+          ) : null
+        }
+        help={HELP}
+      />
 
-      {/* Tab nav */}
-      <div className="flex gap-1 border-b border-slate-200 dark:border-slate-700">
-        {TABS.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            onClick={() => setActiveTab(id)}
-            className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
-              activeTab === id
-                ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400'
-                : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-            }`}
-          >
-            <Icon className="h-4 w-4" />
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {/* Tab content */}
-      {!seeded ? (
-        <div className="flex justify-center py-12">
-          <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
-        </div>
-      ) : (
-        <>
-          {activeTab === 'services' && <ServicesTab providers={providers} />}
-          {activeTab === 'mcp' && <McpTab servers={servers} />}
-          {activeTab === 'siteservices' && <SiteServicesTab />}
-          {activeTab === 'playground' && <PlaygroundTab providers={providers} servers={servers} />}
-          {activeTab === 'usage' && (
-            <Suspense
-              fallback={
-                <div className="flex justify-center py-8">
-                  <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
-                </div>
-              }
-            >
-              <UsageTab />
-            </Suspense>
-          )}
-        </>
-      )}
+      <HubTabs
+        tabs={TABS}
+        active={activeTab}
+        onSelect={setTab}
+        idPrefix="ai-engine"
+        label="AI Engine"
+      >
+        <div className="pt-4">{body}</div>
+      </HubTabs>
     </div>
   );
 }

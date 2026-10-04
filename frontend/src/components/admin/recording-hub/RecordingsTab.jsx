@@ -340,7 +340,8 @@ function LibraryTab({ isConnected, reloadKey }) {
               onClose={() => setRoutingRec(null)}
               onRouted={(contentId) => {
                 setRoutingRec(null);
-                navigate(`/admin/editor?id=${contentId}`);
+                // The editor route is /admin/editor/:blogId (App.jsx); `?id=` opened the list.
+                navigate(`/admin/editor/${encodeURIComponent(contentId)}`);
               }}
             />
           )}

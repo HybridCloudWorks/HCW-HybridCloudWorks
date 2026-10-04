@@ -42,9 +42,15 @@
  *     `speaker` names in `speech_config` — so the labels are load-bearing and
  *     are written from the same map that assigns the voices.
  *   - **The session context is 32k tokens**, and a whole episode script is
- *     capped at 9,000 bytes (~2.5k tokens). One request per episode, no
- *     chunking — unlike the Azure path, which chunks against a ten-minute
- *     audio cap.
+ *     capped at 9,000 bytes (~2.5k tokens) — but a TTS reply is bounded by
+ *     AUDIO length, not by the context window, and a 9,000-byte script came
+ *     back `incomplete` often enough to be a risk worth removing (ADR 0033
+ *     §4, the Audio Library slice). The dialogue is therefore chunked on
+ *     sentence boundaries under `GEMINI_MAX_REQUEST_BYTES`, each part is
+ *     rendered in its own request, and the PCM is concatenated BEFORE the
+ *     one MP3 encode — so the episode is one continuous stream rather than
+ *     a byte-joined set of MP3 files. The Azure path chunks against its
+ *     ten-minute audio cap for the same reason; the split rule is shared.
  *
  * The audio block's `mime_type`, `sample_rate` and `channels` have no
  * documented defaults. The guide says the models produce 24 kHz 16-bit PCM, so
@@ -58,25 +64,36 @@
  * provider is kept alongside this one rather than deleted — see speech/index.js.
  */
 import { encodePcmToMp3, pcmDurationSeconds } from './mp3.js';
+import { chunkTurns } from './azure.js';
 
 const INTERACTIONS_URL = 'https://generativelanguage.googleapis.com/v1beta/interactions';
 
 /**
  * Default model, overridable with `LISTEN_AND_LEARN_TTS_MODEL`.
  *
- * `gemini-3.1-flash-tts-preview` is the model the guide's own multi-speaker
- * example uses and the one the owner asked for (#458); `COST_TABLE` in
- * lib/ai/router.js prices it. The three TTS models the guide lists on
+ * `gemini-2.5-flash-preview-tts` is the cheapest sensible voice and, from
+ * ADR 0033 §4 on, the one that reads when nothing is stored and nothing is
+ * chosen: half the price of 3.1 flash per audio token in `COST_TABLE`, and
+ * the admin page says so beside the per-episode estimate. 3.1 flash stays
+ * on offer as "Best" (#458). The three TTS models the guide lists on
  * 2026-09-09 are all preview:
  *
- *   gemini-3.1-flash-tts-preview   <- default here
- *   gemini-2.5-flash-preview-tts   older, half the price
- *   gemini-2.5-pro-preview-tts     higher quality
+ *   gemini-2.5-flash-preview-tts   <- default here (Economy)
+ *   gemini-3.1-flash-tts-preview   newest voice, twice the price (Best)
+ *   gemini-2.5-pro-preview-tts     higher quality, not offered
  *
  * The same guide lists 30 voices, each with a one-word descriptor, and the two
  * used here are both in it — see GEMINI_DEFAULT_VOICES.
  */
-const DEFAULT_MODEL = 'gemini-3.1-flash-tts-preview';
+const DEFAULT_MODEL = 'gemini-2.5-flash-preview-tts';
+
+/**
+ * The most UTF-8 bytes of dialogue sent in one request. Well under the
+ * 9,000-byte script cap, so every episode is at least two requests; chosen
+ * so that one part is a few minutes of speech, which the model completes
+ * reliably where a whole episode did not (ADR 0033 §4).
+ */
+export const GEMINI_MAX_REQUEST_BYTES = 4500;
 /** Named for index.js, which prices a run against this model before it starts. */
 export { DEFAULT_MODEL as GEMINI_DEFAULT_MODEL };
 
@@ -162,7 +179,24 @@ export function readVoiceOverrides(env = process.env) {
 export function buildDialoguePrompt(turns, speakers) {
   const [a, b] = speakers;
   const transcript = turns.map((turn) => `${turn.speaker}: ${turn.text}`).join('\n');
+  // One speaker is a narrator reading a chapter (ADR 0033 §4, a manual book
+  // chapter spoken from pasted text); "a conversation between A and
+  // undefined" would be read aloud as written.
+  if (speakers.length === 1) return `TTS the following text read by ${a}:\n${transcript}`;
   return `TTS the following conversation between ${a} and ${b}:\n${transcript}`;
+}
+
+/**
+ * Split a dialogue into the parts one request may carry: `chunkTurns` from
+ * the Azure provider, which keeps turns whole where it can and splits an
+ * over-long turn on sentence boundaries, at this provider's byte budget.
+ *
+ * @param {{speaker: string, text: string}[]} turns
+ * @param {number} [limit]
+ * @returns {{speaker: string, text: string}[][]}
+ */
+export function chunkDialogueForGemini(turns, limit = GEMINI_MAX_REQUEST_BYTES) {
+  return chunkTurns(turns, limit);
 }
 
 /** The distinct speakers in a dialogue, in the order they first appear. */
@@ -283,36 +317,51 @@ export function parseWav(bytes) {
     const size = bytes.readUInt32LE(offset + 4);
     const body = offset + 8;
     if (id === 'fmt ') {
-      // The chunk declares its own size; a short one must not be read into
-      // the chunk after it and passed off as a sample rate.
-      if (size < 16 || body + 16 > bytes.length) {
-        throw new GeminiSpeechError('malformed WAV: fmt chunk too short');
-      }
-      format = {
-        codec: bytes.readUInt16LE(body),
-        channels: bytes.readUInt16LE(body + 2),
-        sampleRate: bytes.readUInt32LE(body + 4),
-        bitsPerSample: bytes.readUInt16LE(body + 14),
-      };
-      // Rejected here, before any sample is read: a header is untrusted
-      // input, and 0 Hz or 0 channels would otherwise reach the duration
-      // arithmetic and the encoder as a divide-by-zero.
-      if (format.codec !== 1 || format.bitsPerSample !== 16) {
-        throw new GeminiSpeechError(
-          `WAV audio is format ${format.codec} at ${format.bitsPerSample}-bit; only 16-bit PCM can be encoded`
-        );
-      }
-      assertFormat(format, 'WAV audio');
+      format = readFmtChunk(bytes, body, size);
     } else if (id === 'data') {
-      if (!format) throw new GeminiSpeechError('WAV audio has a data chunk before its fmt chunk');
-      // A streaming writer may leave the size 0 or 0xFFFFFFFF; the bytes that
-      // are actually present are the truth either way.
-      const end = size === 0 || body + size > bytes.length ? bytes.length : body + size;
-      return { pcm: bytes.subarray(body, end), sampleRate: format.sampleRate, channels: format.channels };
+      return dataChunk(bytes, body, size, format);
     }
     offset = body + size + (size % 2); // chunks are word-aligned
   }
   throw new GeminiSpeechError('WAV audio has no data chunk');
+}
+
+/** The format a `fmt ` chunk declares, rejected before any sample is read. */
+function readFmtChunk(bytes, body, size) {
+  // The chunk declares its own size; a short one must not be read into
+  // the chunk after it and passed off as a sample rate.
+  if (size < 16 || body + 16 > bytes.length) {
+    throw new GeminiSpeechError('malformed WAV: fmt chunk too short');
+  }
+  const format = {
+    codec: bytes.readUInt16LE(body),
+    channels: bytes.readUInt16LE(body + 2),
+    sampleRate: bytes.readUInt32LE(body + 4),
+    bitsPerSample: bytes.readUInt16LE(body + 14),
+  };
+  // Rejected here, before any sample is read: a header is untrusted
+  // input, and 0 Hz or 0 channels would otherwise reach the duration
+  // arithmetic and the encoder as a divide-by-zero.
+  if (format.codec !== 1 || format.bitsPerSample !== 16) {
+    throw new GeminiSpeechError(
+      `WAV audio is format ${format.codec} at ${format.bitsPerSample}-bit; only 16-bit PCM can be encoded`
+    );
+  }
+  assertFormat(format, 'WAV audio');
+  return format;
+}
+
+/** The samples a `data` chunk carries, in the format the `fmt ` chunk declared. */
+function dataChunk(bytes, body, size, format) {
+  if (!format) throw new GeminiSpeechError('WAV audio has a data chunk before its fmt chunk');
+  // A streaming writer may leave the size 0 or 0xFFFFFFFF; the bytes that
+  // are actually present are the truth either way.
+  const end = size === 0 || body + size > bytes.length ? bytes.length : body + size;
+  return {
+    pcm: bytes.subarray(body, end),
+    sampleRate: format.sampleRate,
+    channels: format.channels,
+  };
 }
 
 /**
@@ -333,7 +382,11 @@ function assertFormat({ sampleRate, channels }, where) {
   if (!Number.isInteger(channels) || channels < 1 || channels > 2) {
     throw new GeminiSpeechError(`${where}: ${channels} channels is not mono or stereo`);
   }
-  if (!Number.isInteger(sampleRate) || sampleRate < MIN_SAMPLE_RATE || sampleRate > MAX_SAMPLE_RATE) {
+  if (
+    !Number.isInteger(sampleRate) ||
+    sampleRate < MIN_SAMPLE_RATE ||
+    sampleRate > MAX_SAMPLE_RATE
+  ) {
     throw new GeminiSpeechError(
       `${where}: ${sampleRate} Hz is outside the ${MIN_SAMPLE_RATE}–${MAX_SAMPLE_RATE} Hz band this module encodes`
     );
@@ -466,7 +519,9 @@ function describeShape(payload) {
   if (steps.length === 0) return payload?.output_audio ? 'output_audio without data' : 'no steps';
   return steps
     .map((step) => {
-      const types = Array.isArray(step?.content) ? step.content.map((c) => c?.type || 'unknown') : [];
+      const types = Array.isArray(step?.content)
+        ? step.content.map((c) => c?.type || 'unknown')
+        : [];
       return `${step?.type || 'unknown'}[${types.join(',')}]`;
     })
     .join(', ');
@@ -477,7 +532,9 @@ function describeErrors(payload) {
   const errors = Array.isArray(payload?.errors) ? payload.errors : [];
   if (errors.length === 0) return 'no error detail';
   return errors
-    .map((e) => `${e?.code || 'unknown'}: ${String(e?.message || '').slice(0, 200) || 'no message'}`)
+    .map(
+      (e) => `${e?.code || 'unknown'}: ${String(e?.message || '').slice(0, 200) || 'no message'}`
+    )
     .join('; ');
 }
 
@@ -511,48 +568,35 @@ export async function synthesizeWithGemini({
   assertTwoSpeakers(speakers, resolvedVoices);
 
   const model = readSetting(env, 'LISTEN_AND_LEARN_TTS_MODEL') || DEFAULT_MODEL;
+  const speechConfig = speakers.map((speaker) => ({ speaker, voice: resolvedVoices[speaker] }));
 
-  const payload = await requestAudio(
-    {
-      model,
-      input: buildDialoguePrompt(dialogue, speakers),
-      response_format: { type: 'audio' },
-      generation_config: {
-        speech_config: speakers.map((speaker) => ({
-          speaker,
-          voice: resolvedVoices[speaker],
-        })),
+  // Sequential on purpose: the parts are joined in order, and a parallel
+  // burst is the reliable way to meet a 429.
+  const chunks = chunkDialogueForGemini(dialogue);
+  const parts = [];
+  const usages = [];
+  for (const [index, chunk] of chunks.entries()) {
+    const payload = await requestAudio(
+      {
+        model,
+        input: buildDialoguePrompt(chunk, speakers),
+        response_format: { type: 'audio' },
+        generation_config: { speech_config: speechConfig },
       },
-    },
-    { key, fetchImpl, sleep }
-  );
-
-  // A 200 is the transport succeeding; whether the model did is `status`.
-  // `failed` carries the reason in `errors`; `incomplete` means the model hit
-  // a limit, so any audio present would stop mid-sentence and is not shipped.
-  const status = String(payload?.status || 'unknown');
-  if (status === 'failed') {
-    throw new GeminiSpeechError(`Gemini TTS failed (status failed): ${describeErrors(payload)}.`);
+      { key, fetchImpl, sleep }
+    );
+    parts.push(audioFromReply(payload, { part: index + 1, of: chunks.length }));
+    usages.push(payload?.usage);
   }
-  if (status === 'incomplete') {
+
+  const [{ sampleRate }] = parts;
+  const odd = parts.find((p) => p.sampleRate !== sampleRate);
+  if (odd) {
     throw new GeminiSpeechError(
-      `Gemini TTS stopped early (status incomplete), so the audio would be truncated: ${describeErrors(payload)}.`
+      `Gemini returned parts at different sample rates (${sampleRate} Hz and ${odd.sampleRate} Hz), which cannot be joined without resampling`
     );
   }
-
-  const found = extractAudio(payload);
-  if (!found) {
-    // A 200 with no audio is a real outcome — a safety block, or a model that
-    // answered in text. Saying what came back instead beats a zero-byte MP3
-    // nobody can play, and a shape by type is content-free.
-    throw new GeminiSpeechError(
-      `Gemini returned no audio for this dialogue (status ${status}; the reply held ${describeShape(payload)}; ${describeErrors(payload)}).`
-    );
-  }
-
-  const pcm = downmixToMono(found.pcm, found.channels);
-  const { sampleRate } = found;
-  assertPcm16(pcm, 'Gemini audio');
+  const pcm = parts.length === 1 ? parts[0].pcm : Buffer.concat(parts.map((p) => p.pcm));
 
   // The encoder throws a plain Error. The episode card and the provider
   // selector key on SpeechError, so it is rewrapped as one; its messages are
@@ -569,11 +613,67 @@ export async function synthesizeWithGemini({
   return {
     audio,
     bytes: audio.length,
-    requests: 1,
+    requests: chunks.length,
     model,
     estimatedSeconds: Math.round(seconds),
-    ...tokenUsage(payload?.usage, seconds),
+    ...summedTokenUsage(usages, seconds),
   };
+}
+
+/**
+ * One reply → mono PCM at its sample rate, or a SpeechError saying why not.
+ *
+ * A 200 is the transport succeeding; whether the model did is `status`.
+ * `failed` carries the reason in `errors`; `incomplete` means the model hit
+ * a limit, so any audio present would stop mid-sentence and is not shipped.
+ * The part number is in every message, because with chunking "part 3 of 4
+ * stopped early" is the fact an operator retries on.
+ */
+function audioFromReply(payload, { part, of }) {
+  const where = of > 1 ? ` (part ${part} of ${of})` : '';
+  const status = String(payload?.status || 'unknown');
+  if (status === 'failed') {
+    throw new GeminiSpeechError(
+      `Gemini TTS failed${where} (status failed): ${describeErrors(payload)}.`
+    );
+  }
+  if (status === 'incomplete') {
+    throw new GeminiSpeechError(
+      `Gemini TTS stopped early${where} (status incomplete), so the audio would be truncated: ${describeErrors(payload)}.`
+    );
+  }
+
+  const found = extractAudio(payload);
+  if (!found) {
+    // A 200 with no audio is a real outcome — a safety block, or a model that
+    // answered in text. Saying what came back instead beats a zero-byte MP3
+    // nobody can play, and a shape by type is content-free.
+    throw new GeminiSpeechError(
+      `Gemini returned no audio for this dialogue${where} (status ${status}; the reply held ${describeShape(payload)}; ${describeErrors(payload)}).`
+    );
+  }
+
+  const pcm = downmixToMono(found.pcm, found.channels);
+  assertPcm16(pcm, `Gemini audio${where}`);
+  return { pcm, sampleRate: found.sampleRate };
+}
+
+/**
+ * Billing across every part. Reported counts are summed when every reply
+ * carried them; if any part reported none the whole call is estimated from
+ * the audio length, because mixing a billed number with a derived one would
+ * put a half-fictional figure on the portal's spend page as a real one.
+ */
+function summedTokenUsage(usages, seconds) {
+  const each = usages.map((usage) => tokenUsage(usage, 0));
+  if (each.every((u) => !u.estimatedTokens)) {
+    return {
+      promptTokens: each.reduce((sum, u) => sum + u.promptTokens, 0),
+      completionTokens: each.reduce((sum, u) => sum + u.completionTokens, 0),
+      estimatedTokens: false,
+    };
+  }
+  return tokenUsage(null, seconds);
 }
 
 /**
