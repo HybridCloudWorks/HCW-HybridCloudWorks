@@ -182,12 +182,12 @@ export function summarizeToken(payload, expectations, nowMs = Date.now()) {
     typeof payload.scp === 'string' ? payload.scp.split(' ').filter(Boolean).map(String) : [];
   // `azp` (v2) or `appid` (v1) — the client that ASKED for this token, as
   // distinct from `aud`, the API it is for.
-  const azp =
-    typeof payload.azp === 'string'
-      ? payload.azp
-      : typeof payload.appid === 'string'
-        ? payload.appid
-        : null;
+  let azp = null;
+  if (typeof payload.azp === 'string') {
+    ({ azp } = payload);
+  } else if (typeof payload.appid === 'string') {
+    azp = payload.appid;
+  }
 
   return {
     claimNames: Object.keys(payload).sort(),
@@ -761,7 +761,7 @@ function Row({ label, children }) {
   return (
     <div className="flex flex-col gap-0.5 text-sm sm:flex-row sm:gap-3">
       <span className="w-48 shrink-0 text-muted-foreground">{label}</span>
-      <span className="min-w-0 break-words font-mono text-xs leading-5">{children}</span>
+      <span className="min-w-0 wrap-break-word font-mono text-xs leading-5">{children}</span>
     </div>
   );
 }

@@ -317,40 +317,51 @@ export function parseWav(bytes) {
     const size = bytes.readUInt32LE(offset + 4);
     const body = offset + 8;
     if (id === 'fmt ') {
-      // The chunk declares its own size; a short one must not be read into
-      // the chunk after it and passed off as a sample rate.
-      if (size < 16 || body + 16 > bytes.length) {
-        throw new GeminiSpeechError('malformed WAV: fmt chunk too short');
-      }
-      format = {
-        codec: bytes.readUInt16LE(body),
-        channels: bytes.readUInt16LE(body + 2),
-        sampleRate: bytes.readUInt32LE(body + 4),
-        bitsPerSample: bytes.readUInt16LE(body + 14),
-      };
-      // Rejected here, before any sample is read: a header is untrusted
-      // input, and 0 Hz or 0 channels would otherwise reach the duration
-      // arithmetic and the encoder as a divide-by-zero.
-      if (format.codec !== 1 || format.bitsPerSample !== 16) {
-        throw new GeminiSpeechError(
-          `WAV audio is format ${format.codec} at ${format.bitsPerSample}-bit; only 16-bit PCM can be encoded`
-        );
-      }
-      assertFormat(format, 'WAV audio');
+      format = readFmtChunk(bytes, body, size);
     } else if (id === 'data') {
-      if (!format) throw new GeminiSpeechError('WAV audio has a data chunk before its fmt chunk');
-      // A streaming writer may leave the size 0 or 0xFFFFFFFF; the bytes that
-      // are actually present are the truth either way.
-      const end = size === 0 || body + size > bytes.length ? bytes.length : body + size;
-      return {
-        pcm: bytes.subarray(body, end),
-        sampleRate: format.sampleRate,
-        channels: format.channels,
-      };
+      return dataChunk(bytes, body, size, format);
     }
     offset = body + size + (size % 2); // chunks are word-aligned
   }
   throw new GeminiSpeechError('WAV audio has no data chunk');
+}
+
+/** The format a `fmt ` chunk declares, rejected before any sample is read. */
+function readFmtChunk(bytes, body, size) {
+  // The chunk declares its own size; a short one must not be read into
+  // the chunk after it and passed off as a sample rate.
+  if (size < 16 || body + 16 > bytes.length) {
+    throw new GeminiSpeechError('malformed WAV: fmt chunk too short');
+  }
+  const format = {
+    codec: bytes.readUInt16LE(body),
+    channels: bytes.readUInt16LE(body + 2),
+    sampleRate: bytes.readUInt32LE(body + 4),
+    bitsPerSample: bytes.readUInt16LE(body + 14),
+  };
+  // Rejected here, before any sample is read: a header is untrusted
+  // input, and 0 Hz or 0 channels would otherwise reach the duration
+  // arithmetic and the encoder as a divide-by-zero.
+  if (format.codec !== 1 || format.bitsPerSample !== 16) {
+    throw new GeminiSpeechError(
+      `WAV audio is format ${format.codec} at ${format.bitsPerSample}-bit; only 16-bit PCM can be encoded`
+    );
+  }
+  assertFormat(format, 'WAV audio');
+  return format;
+}
+
+/** The samples a `data` chunk carries, in the format the `fmt ` chunk declared. */
+function dataChunk(bytes, body, size, format) {
+  if (!format) throw new GeminiSpeechError('WAV audio has a data chunk before its fmt chunk');
+  // A streaming writer may leave the size 0 or 0xFFFFFFFF; the bytes that
+  // are actually present are the truth either way.
+  const end = size === 0 || body + size > bytes.length ? bytes.length : body + size;
+  return {
+    pcm: bytes.subarray(body, end),
+    sampleRate: format.sampleRate,
+    channels: format.channels,
+  };
 }
 
 /**

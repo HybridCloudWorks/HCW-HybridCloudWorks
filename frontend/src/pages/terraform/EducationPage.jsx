@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Helmet } from 'react-helmet-async';
 import CatalogueFreshness from '@/components/education/CatalogueFreshness';
-import CertStatusBadge from '@/components/education/CertStatusBadge';
+import CertificationBrowser from '@/components/education/CertificationBrowser';
+import FeaturedCertSection from '@/components/education/FeaturedCertSection';
 import ProviderLabsSection from '@/components/labs/ProviderLabsSection';
 import { DATA_AS_OF, DATA_SOURCE, certifications } from '@/data/terraform/certifications';
 import { deriveStatus, useToday } from '@/lib/certStatus';
@@ -26,6 +27,30 @@ const LEVEL_META = {
 const FILTER_LEVELS = ['All', 'Associate', 'Advanced'];
 const STATUS_FILTER = ['All', 'Active'];
 const VISIBLE_COUNT = 4;
+
+// The hub's colour classes, handed to the shared education components so
+// their markup names no colour. Full class strings, so Tailwind sees them.
+const TONE = {
+  activeFilter: 'bg-purple-500/25 border-purple-400 text-purple-300',
+  cardHover: 'hover:shadow-[0_0_20px_rgba(168,85,247,0.15)] hover:border-purple-400/40',
+  titleHover: 'group-hover:text-purple-300',
+  linkHover: 'hover:bg-purple-500/20 hover:text-purple-300',
+  accentText: 'text-purple-400',
+  articleHover: 'hover:shadow-[0_0_25px_rgba(168,85,247,0.15)] hover:border-purple-400/50',
+  badge: 'bg-purple-500/20 border border-purple-500/30 text-purple-300',
+  button: 'bg-purple-600 hover:bg-purple-500 text-white',
+  gettingStartedCard: 'bg-gradient-to-br from-purple-500/20 to-violet-900/20 backdrop-blur-md border border-purple-500/30',
+};
+
+/** The hub's own link to the issuer's full catalogue, under the featured credential. */
+const ALL_CERTS = { href: 'https://www.hashicorp.com/certification', label: 'View All HashiCorp Certs ↗' };
+
+/** The "Getting Started" card beside the catalogue: where a newcomer begins. */
+const GETTING_STARTED = {
+  text: 'New to HashiCorp? TA-003 (Terraform Associate) is the most widely adopted IaC certification and the ideal first HashiCorp exam.',
+  href: 'https://developer.hashicorp.com/certifications/infrastructure-automation',
+  label: 'Start with TA-003',
+};
 
 function getLevelFilterClass(levelFilter, level) {
   if (levelFilter !== level) {
@@ -292,89 +317,19 @@ export default function TerraformEducationPage() {
             </div>
           </div>
 
-          {/* Filters */}
-          <div className="flex flex-wrap gap-3 mb-6">
-            <div className="flex flex-wrap gap-2">
-              {FILTER_LEVELS.map((level) => (
-                <button
-                  key={level}
-                  onClick={() => handleLevelFilter(level)}
-                  className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all duration-200 ${getLevelFilterClass(levelFilter, level)}`}
-                >
-                  {level}
-                </button>
-              ))}
-            </div>
-            <div className="w-px bg-card/50 hidden sm:block" />
-            <div className="flex flex-wrap gap-2">
-              {STATUS_FILTER.map((s) => (
-                <button
-                  key={s}
-                  onClick={() => handleStatusFilter(s)}
-                  className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all duration-200 ${
-                    statusFilter === s
-                      ? 'bg-purple-500/25 border-purple-400 text-purple-300'
-                      : 'bg-card/30 border-card/50 text-foreground/60 hover:text-foreground hover:border-foreground/40'
-                  }`}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 min-h-[220px]">
-            {visibleCerts.length === 0 ? (
-              <div className="col-span-4 flex items-center justify-center py-16 text-foreground/50">
-                No certifications match the selected filters.
-              </div>
-            ) : (
-              visibleCerts.map((cert) => {
-                const meta = LEVEL_META[cert.level];
-                return (
-                  <article
-                    key={cert.id}
-                    className={`group bg-card/40 backdrop-blur-md border border-card/50 border-l-4 ${meta.accent} rounded-2xl p-6 hover:shadow-[0_0_20px_rgba(168,85,247,0.15)] hover:border-purple-400/40 transition-all duration-300 flex flex-col`}
-                  >
-                    <div className="flex items-start justify-between mb-2 gap-1 flex-wrap">
-                      <span className={`px-2.5 py-1 border text-[10px] font-bold rounded ${meta.badge}`}>
-                        {cert.level}
-                      </span>
-                      <span className="text-xs text-foreground/50 font-mono">{cert.hours}h</span>
-                    </div>
-                    <CertStatusBadge cert={cert} today={today} className="self-start mb-2" />
-                    <div className="text-xs font-mono text-foreground/40 mb-1">{cert.code}</div>
-                    <h3 className="text-sm font-bold text-slate-950 dark:text-white mb-2 line-clamp-3 group-hover:text-purple-300 transition-colors flex-1">
-                      {cert.title}
-                    </h3>
-                    <p className="text-xs text-foreground mb-4 line-clamp-2">{cert.description}</p>
-                    <div className="flex flex-wrap gap-1 mb-4">
-                      {cert.topics.slice(0, 2).map((topic, i) => (
-                        <span
-                          key={i}
-                          className="px-2 py-0.5 bg-card/50 text-foreground/60 text-[10px] rounded-full"
-                        >
-                          {topic}
-                        </span>
-                      ))}
-                    </div>
-                    <div className="mt-auto flex gap-2">
-                      <a
-                        href={cert.learnUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex-1 h-9 bg-card/50 hover:bg-purple-500/20 hover:text-purple-300 text-foreground rounded text-xs font-semibold transition-colors flex items-center justify-center gap-1"
-                      >
-                        View Details
-                        <span className="material-symbols-outlined text-[12px]" aria-hidden="true">open_in_new</span>
-                      </a>
-                    </div>
-                  </article>
-                );
-              })
-            )}
-          </div>
+          <CertificationBrowser
+            filterLevels={FILTER_LEVELS}
+            statusFilters={STATUS_FILTER}
+            levelFilter={levelFilter}
+            statusFilter={statusFilter}
+            onLevelFilter={handleLevelFilter}
+            onStatusFilter={handleStatusFilter}
+            getLevelFilterClass={getLevelFilterClass}
+            levelMeta={LEVEL_META}
+            certs={visibleCerts}
+            today={today}
+            tone={TONE}
+          />
 
           {/* Pagination */}
           {totalPages > 1 && (
@@ -419,137 +374,14 @@ export default function TerraformEducationPage() {
         </section>
 
         {/* ── Featured Cert + Sidebar ──────────────────────────────────── */}
-        <section className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-8 mb-16">
-          {featuredCert && (
-            <article className="bg-card/40 backdrop-blur-md border border-card/50 rounded-2xl overflow-hidden hover:shadow-[0_0_25px_rgba(168,85,247,0.15)] hover:border-purple-400/50 transition-all duration-300">
-              <div className="grid grid-cols-1 lg:grid-cols-2">
-                <div className="p-8 flex flex-col justify-between">
-                  <div>
-                    <div className="mb-4 flex items-center gap-3 flex-wrap">
-                      <span className="px-3 py-1 bg-purple-500/20 border border-purple-500/30 text-purple-300 text-xs font-bold rounded">
-                        Recommended Starting Point
-                      </span>
-                      <span className={`px-3 py-1 border text-xs font-bold rounded ${LEVEL_META[featuredCert.level].badge}`}>
-                        {featuredCert.level}
-                      </span>
-                    </div>
-                    <h2 className="text-2xl sm:text-3xl font-bold text-slate-950 dark:text-white mb-1">
-                      {featuredCert.title}
-                    </h2>
-                    <div className="text-sm font-mono text-foreground/50 mb-3">
-                      {featuredCert.code}
-                    </div>
-                    <p className="text-foreground mb-6">{featuredCert.description}</p>
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-foreground uppercase tracking-wider mb-3">
-                      Topics Covered
-                    </h3>
-                    <div className="grid grid-cols-2 gap-3 mb-8">
-                      {featuredCert.topics.map((topic, i) => (
-                        <div key={i} className="flex items-center gap-2">
-                          <span className="text-purple-400 material-symbols-outlined text-[16px]" aria-hidden="true">
-                            check_circle
-                          </span>
-                          <span className="text-foreground text-sm">{topic}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <a
-                      href={featuredCert.learnUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="block w-full h-11 px-4 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-lg transition-colors text-center leading-[44px]"
-                    >
-                      Start Preparation
-                    </a>
-                  </div>
-                </div>
-                <div className="bg-card/60 p-8 flex flex-col justify-between">
-                  <div className="space-y-6">
-                    <div className="text-center">
-                      <div className="text-4xl font-bold text-purple-400 mb-2">
-                        {featuredCert.hours}
-                      </div>
-                      <div className="text-sm text-foreground">Hours of Study</div>
-                    </div>
-                    <div className="border-t border-slate-700 pt-6 text-center">
-                      <div className="text-sm text-foreground mb-2">Estimated Preparation</div>
-                      <div className="text-2xl font-bold text-slate-950 dark:text-white">{featuredCert.prepTime}</div>
-                    </div>
-                  </div>
-                  <div className="pt-6 border-t border-slate-700">
-                    <a
-                      href="https://www.hashicorp.com/certification"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="block w-full h-11 px-4 bg-card/50 hover:bg-card/70 text-foreground font-semibold rounded-lg transition-colors text-sm text-center leading-[44px]"
-                    >
-                      View All HashiCorp Certs ↗
-                    </a>
-                  </div>
-                </div>
-              </div>
-            </article>
-          )}
-
-          {/* Sidebar */}
-          <aside className="h-fit sticky top-28 space-y-6">
-            <div className="bg-card/40 backdrop-blur-md border border-card/50 rounded-2xl p-6">
-              <h3 className="text-lg font-bold text-slate-950 dark:text-white mb-4 flex items-center gap-2">
-                <span className="text-purple-400 text-[20px] material-symbols-outlined" aria-hidden="true">
-                  emoji_events
-                </span>
-                All Certifications
-              </h3>
-              <div className="space-y-1 max-h-56 overflow-y-auto pr-1">
-                {certifications.map((cert) => (
-                  <div
-                    key={cert.id}
-                    className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-card/50 transition-colors"
-                  >
-                    <span className={`w-2 h-2 rounded-full shrink-0 ${LEVEL_META[cert.level].dot}`} />
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-semibold text-foreground line-clamp-1">
-                        {cert.code}
-                      </div>
-                      <div className="text-xs text-foreground/50 line-clamp-1">{cert.title}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-4 pt-4 border-t border-slate-700 grid grid-cols-2 gap-1.5">
-                {Object.entries(LEVEL_META).map(([level, meta]) => (
-                  <div key={level} className="flex items-center gap-1.5 text-xs text-foreground/60">
-                    <span className={`w-2 h-2 rounded-full ${meta.dot}`} />
-                    {level}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-gradient-to-br from-purple-500/20 to-violet-900/20 backdrop-blur-md border border-purple-500/30 rounded-2xl p-6">
-              <h3 className="text-lg font-bold text-slate-950 dark:text-white mb-2 flex items-center gap-2">
-                <span className="text-purple-400 text-[20px] material-symbols-outlined" aria-hidden="true">
-                  rocket_launch
-                </span>
-                Getting Started
-              </h3>
-              <p className="text-sm text-foreground mb-4">
-                New to HashiCorp? TA-003 (Terraform Associate) is the most widely adopted IaC
-                certification and the ideal first HashiCorp exam.
-              </p>
-              <a
-                href="https://developer.hashicorp.com/certifications/infrastructure-automation"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block w-full h-11 px-4 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-lg transition-colors text-sm text-center leading-[44px]"
-              >
-                Start with TA-003
-              </a>
-            </div>
-          </aside>
-        </section>
+        <FeaturedCertSection
+          featuredCert={featuredCert}
+          certifications={certifications}
+          levelMeta={LEVEL_META}
+          allCerts={ALL_CERTS}
+          gettingStarted={GETTING_STARTED}
+          tone={TONE}
+        />
 
         {/* ── Learning Paths ───────────────────────────────────────────── */}
         <section className="mb-16">

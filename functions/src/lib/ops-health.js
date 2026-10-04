@@ -96,6 +96,63 @@ const IMAGES_PROBE_BOUND = 2000;
  */
 const ORPHAN_PROBE_BATCH = 100;
 
+/** An image's content id as a key, or '' when it has none. */
+const contentIdOf = (image) => String(image?.contentId || '').trim();
+
+/**
+ * Orphan detection (T-711): how many generated images name a content
+ * document that no longer exists, or none at all.
+ *
+ * This used to be `Promise.all(generatedImages.map(… readDoc …))` — an
+ * unthrottled fan-out of up to IMAGES_PROBE_BOUND (2000) concurrent point
+ * reads, purely to produce one count. Every /status, /queue, /alerts,
+ * /digest and /ai reaches it, AND so does every free-form Telegram
+ * message, so one chat message could exhaust the RU budget the anonymous
+ * public list endpoints share and 429 the website.
+ *
+ * Two properties do the work. Images are keyed by contentId and a single
+ * content document can carry up to four generated images, so deduplicating
+ * removes most of the reads before any I/O. What remains is answered in
+ * batches with ARRAY_CONTAINS instead of one request each: ~2000 point
+ * reads become a handful of queries, and the count is identical.
+ */
+async function countOrphanedImages(store, generatedImages) {
+  const idsToProbe = [...new Set(generatedImages.map(contentIdOf))].filter(Boolean);
+  // An image with no contentId is an orphan by definition and needs no probe.
+  const missingIdCount = generatedImages.filter((image) => !contentIdOf(image)).length;
+
+  const existingIds = new Set();
+  for (let i = 0; i < idsToProbe.length; i += ORPHAN_PROBE_BATCH) {
+    const batch = idsToProbe.slice(i, i + ORPHAN_PROBE_BATCH);
+    const rows = await store.queryDocs(
+      'content',
+      'SELECT c.id FROM c WHERE ARRAY_CONTAINS(@ids, c.id)',
+      [{ name: '@ids', value: batch }]
+    );
+    for (const row of rows || []) existingIds.add(row.id);
+  }
+  return (
+    missingIdCount +
+    generatedImages.filter((image) => {
+      const contentId = contentIdOf(image);
+      return contentId && !existingIds.has(contentId);
+    }).length
+  );
+}
+
+/**
+ * The autonomous forge's rolling day bucket (content/forge.js) as the Health
+ * page shows it: when the forge last did anything, and how much today.
+ */
+function forgeSummary(forgeStats, lastCheckedAt) {
+  return {
+    updatedAt: forgeStats?.updatedAt ?? null,
+    todayDate: forgeStats?.today?.date ?? null,
+    forgedToday: Number(forgeStats?.today?.forged) || 0,
+    lastCheckedAt,
+  };
+}
+
 /**
  * @param {object} deps
  * @param {{ requireRole: Function }} deps.guard
@@ -223,44 +280,7 @@ export function createOpsHealthHandlers({
         getWorkflowAlertStatus(alert) !== 'resolved'
     ).length;
 
-    // Orphan detection (T-711).
-    //
-    // This used to be `Promise.all(generatedImages.map(… readDoc …))` — an
-    // unthrottled fan-out of up to IMAGES_PROBE_BOUND (2000) concurrent point
-    // reads, purely to produce one count. Every /status, /queue, /alerts,
-    // /digest and /ai reaches it, AND so does every free-form Telegram
-    // message, so one chat message could exhaust the RU budget the anonymous
-    // public list endpoints share and 429 the website.
-    //
-    // Two properties do the work. Images are keyed by contentId and a single
-    // content document can carry up to four generated images, so deduplicating
-    // removes most of the reads before any I/O. What remains is answered in
-    // batches with ARRAY_CONTAINS instead of one request each: ~2000 point
-    // reads become a handful of queries, and the count is identical.
-    const idsToProbe = [
-      ...new Set(generatedImages.map((image) => String(image?.contentId || '').trim())),
-    ].filter(Boolean);
-    // An image with no contentId is an orphan by definition and needs no probe.
-    const missingIdCount = generatedImages.filter(
-      (image) => !String(image?.contentId || '').trim()
-    ).length;
-
-    const existingIds = new Set();
-    for (let i = 0; i < idsToProbe.length; i += ORPHAN_PROBE_BATCH) {
-      const batch = idsToProbe.slice(i, i + ORPHAN_PROBE_BATCH);
-      const rows = await store.queryDocs(
-        'content',
-        'SELECT c.id FROM c WHERE ARRAY_CONTAINS(@ids, c.id)',
-        [{ name: '@ids', value: batch }]
-      );
-      for (const row of rows || []) existingIds.add(row.id);
-    }
-    const orphanedGeneratedImages =
-      missingIdCount +
-      generatedImages.filter((image) => {
-        const contentId = String(image?.contentId || '').trim();
-        return contentId && !existingIds.has(contentId);
-      }).length;
+    const orphanedGeneratedImages = await countOrphanedImages(store, generatedImages);
 
     const operationalSignals = {
       queueBreachCount,
@@ -284,13 +304,6 @@ export function createOpsHealthHandlers({
       lastCheckedAt,
     };
 
-    const forge = {
-      updatedAt: forgeStats?.updatedAt ?? null,
-      todayDate: forgeStats?.today?.date ?? null,
-      forgedToday: Number(forgeStats?.today?.forged) || 0,
-      lastCheckedAt,
-    };
-
     return {
       success: true,
       generatedAt: lastCheckedAt,
@@ -300,7 +313,7 @@ export function createOpsHealthHandlers({
       alerts,
       operationalSignals,
       storage,
-      forge,
+      forge: forgeSummary(forgeStats, lastCheckedAt),
       telegramNotifyState: { ...(notifyState || {}), lastCheckedAt },
     };
   }

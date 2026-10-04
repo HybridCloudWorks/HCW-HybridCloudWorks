@@ -4,7 +4,11 @@
  * a reject that landed while it was being sent.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { createNewsletterAdminHandlers, NEWSLETTER_AI_BUDGET_MS } from './admin-handlers.js';
+import {
+  createNewsletterAdminHandlers,
+  NEWSLETTER_AI_BUDGET_MS,
+  parseIssuePatch,
+} from './admin-handlers.js';
 import { NEWSLETTER_FROM } from './handlers.js';
 import { INTRO_INSTRUCTION, introInstruction } from './issue.js';
 import { createTemplateCache } from './template-source.js';
@@ -25,7 +29,13 @@ const draftIssue = (over = {}) => ({
   customNote: '',
   periodStart: '2026-09-07T12:00:00Z',
   periodEnd: NOW.toISOString(),
-  sections: [{ id: 'articles', title: 'New', items: [{ title: 'A', url: 'https://hybridcloudworks.com/a' }] }],
+  sections: [
+    {
+      id: 'articles',
+      title: 'New',
+      items: [{ title: 'A', url: 'https://hybridcloudworks.com/a' }],
+    },
+  ],
   itemCount: 1,
   _etag: 'e1',
   ...over,
@@ -78,24 +88,43 @@ function makeStore({ issue = draftIssue(), settings = completeSettings } = {}) {
  * `templates` answers GET /templates/{id}: `{ [id]: [status, body] | Error }`,
  * or a function of the id. Unlisted ids are 404.
  */
-function makeResend({ failBroadcast = false, noAnswer = false, onBroadcast, failEmail = false, templates = {} } = {}) {
+function makeResend({
+  failBroadcast = false,
+  noAnswer = false,
+  onBroadcast,
+  failEmail = false,
+  templates = {},
+} = {}) {
   const broadcasts = [];
   const emails = [];
-  const reply = (status, data) => ({ ok: status < 300, status, text: async () => JSON.stringify(data) });
+  const reply = (status, data) => ({
+    ok: status < 300,
+    status,
+    text: async () => JSON.stringify(data),
+  });
   const fetch = vi.fn(async (url, init = {}) => {
     const { pathname } = new URL(url);
     if (pathname.startsWith('/templates/')) {
       const id = decodeURIComponent(pathname.slice('/templates/'.length));
       const answer = typeof templates === 'function' ? templates(id) : templates[id];
       if (answer instanceof Error) throw answer;
-      return answer ? reply(...answer) : reply(404, { name: 'not_found', message: `Template ${id} not found` });
+      return answer
+        ? reply(...answer)
+        : reply(404, { name: 'not_found', message: `Template ${id} not found` });
     }
     if (pathname === '/segments') {
-      return reply(200, { object: 'list', has_more: false, data: [{ id: 'seg-news', name: 'Newsletter' }] });
+      return reply(200, {
+        object: 'list',
+        has_more: false,
+        data: [{ id: 'seg-news', name: 'Newsletter' }],
+      });
     }
     if (pathname === '/emails') {
       if (failEmail) {
-        return reply(403, { name: 'validation_error', message: `The domain is not verified for ${JSON.parse(init.body).to}` });
+        return reply(403, {
+          name: 'validation_error',
+          message: `The domain is not verified for ${JSON.parse(init.body).to}`,
+        });
       }
       emails.push(JSON.parse(init.body));
       return reply(200, { id: `em-${emails.length}` });
@@ -178,23 +207,39 @@ describe('get', () => {
     const { handlers, store } = build();
     const res = await handlers.get(request({ id: '../admin_config/x' }), context());
     expect(res.status).toBe(404);
-    expect(store.readDoc).not.toHaveBeenCalledWith('newsletters', '../admin_config/x', expect.anything());
+    expect(store.readDoc).not.toHaveBeenCalledWith(
+      'newsletters',
+      '../admin_config/x',
+      expect.anything()
+    );
   });
 });
 
 describe('update', () => {
   it('saves the note on a draft', async () => {
     const { handlers, store } = build();
-    const res = await handlers.update(request({ body: { customNote: '  Hello readers  ', etag: 'e1' } }), context());
+    const res = await handlers.update(
+      request({ body: { customNote: '  Hello readers  ', etag: 'e1' } }),
+      context()
+    );
     expect(res.status).toBe(200);
     expect(store.docs.get(`newsletters/${ID}`).customNote).toBe('Hello readers');
   });
 
   it('refuses unknown fields and edits to anything but a draft', async () => {
     const { handlers } = build();
-    expect((await handlers.update(request({ body: { status: 'sent', etag: 'e1' } }), context())).status).toBe(400);
+    expect(
+      (await handlers.update(request({ body: { status: 'sent', etag: 'e1' } }), context())).status
+    ).toBe(400);
     const scheduled = build({ store: makeStore({ issue: draftIssue({ status: 'scheduled' }) }) });
-    expect((await scheduled.handlers.update(request({ body: { customNote: 'x', etag: 'e1' } }), context())).status).toBe(409);
+    expect(
+      (
+        await scheduled.handlers.update(
+          request({ body: { customNote: 'x', etag: 'e1' } }),
+          context()
+        )
+      ).status
+    ).toBe(409);
   });
 });
 
@@ -204,7 +249,10 @@ describe('concurrency through the etag', () => {
     const read = bodyOf(await handlers.get(request(), context()));
     expect(read.issue.etag).toBe('e1');
     const saved = bodyOf(
-      await handlers.update(request({ body: { customNote: 'Hello', etag: read.issue.etag } }), context())
+      await handlers.update(
+        request({ body: { customNote: 'Hello', etag: read.issue.etag } }),
+        context()
+      )
     );
     expect(saved.issue.etag).toBeTruthy();
     expect(saved.issue.etag).not.toBe('e1');
@@ -230,7 +278,10 @@ describe('concurrency through the etag', () => {
   it('refuses an edit made from a stale view, and writes nothing', async () => {
     const { handlers, store } = build();
     const first = bodyOf(await handlers.get(request(), context()));
-    await handlers.update(request({ body: { customNote: 'Theirs', etag: first.issue.etag } }), context());
+    await handlers.update(
+      request({ body: { customNote: 'Theirs', etag: first.issue.etag } }),
+      context()
+    );
     const res = await handlers.update(
       request({ body: { customNote: 'Mine', etag: first.issue.etag } }),
       context()
@@ -243,7 +294,10 @@ describe('concurrency through the etag', () => {
   it('refuses a reject made from a stale view', async () => {
     const { handlers, store } = build();
     const first = bodyOf(await handlers.get(request(), context()));
-    await handlers.update(request({ body: { subject: 'Changed', etag: first.issue.etag } }), context());
+    await handlers.update(
+      request({ body: { subject: 'Changed', etag: first.issue.etag } }),
+      context()
+    );
     const res = await handlers.reject(request({ body: { etag: first.issue.etag } }), context());
     expect(res.status).toBe(409);
     expect(store.docs.get(`newsletters/${ID}`).status).toBe('draft');
@@ -277,10 +331,16 @@ describe('approve', () => {
   });
 
   it('sends now, without scheduled_at, when the slot is most of a week away', async () => {
-    const { handlers, store, resend } = build({ role: 'publisher', now: new Date('2026-09-16T15:00:00Z') });
+    const { handlers, store, resend } = build({
+      role: 'publisher',
+      now: new Date('2026-09-16T15:00:00Z'),
+    });
     await handlers.approve(request(approveBody), context());
     expect(resend.broadcasts[0]).not.toHaveProperty('scheduled_at');
-    expect(store.docs.get(`newsletters/${ID}`)).toMatchObject({ status: 'sent', sentAt: '2026-09-16T15:00:00.000Z' });
+    expect(store.docs.get(`newsletters/${ID}`)).toMatchObject({
+      status: 'sent',
+      sentAt: '2026-09-16T15:00:00.000Z',
+    });
   });
 
   it('broadcasts ONCE when approved twice at the same moment', async () => {
@@ -295,7 +355,10 @@ describe('approve', () => {
 
   it('will not send an issue edited after the approver opened it', async () => {
     const { handlers, store, resend } = build({ role: 'publisher' });
-    await handlers.update(request({ body: { subject: 'Edited by someone else', etag: 'e1' } }), context());
+    await handlers.update(
+      request({ body: { subject: 'Edited by someone else', etag: 'e1' } }),
+      context()
+    );
     const res = await handlers.approve(request(approveBody), context());
     expect(res.status).toBe(409);
     expect(bodyOf(res).code).toBe('ISSUE_CHANGED');
@@ -321,10 +384,11 @@ describe('approve', () => {
       onBroadcast: async () => {
         // The owner clears the stuck send from another tab mid-request.
         const current = store.docs.get(`newsletters/${ID}`);
-        const res = await createNewsletterAdminHandlers({ guard: allow('editor'), store, now: () => NOW }).reject(
-          request({ body: { etag: current._etag } }),
-          context()
-        );
+        const res = await createNewsletterAdminHandlers({
+          guard: allow('editor'),
+          store,
+          now: () => NOW,
+        }).reject(request({ body: { etag: current._etag } }), context());
         expect(res.status).toBe(200);
       },
     });
@@ -344,13 +408,19 @@ describe('approve', () => {
     });
     const res = await handlers.approve(request(approveBody), context());
     expect(res.status).toBe(409);
-    expect(bodyOf(res)).toMatchObject({ code: 'SETTINGS_INCOMPLETE', missingSettings: ['postal address'] });
+    expect(bodyOf(res)).toMatchObject({
+      code: 'SETTINGS_INCOMPLETE',
+      missingSettings: ['postal address'],
+    });
     expect(resend.fetch).not.toHaveBeenCalled();
     expect(store.docs.get(`newsletters/${ID}`).status).toBe('draft');
   });
 
   it("returns the issue to draft with Resend's reason, and clears the approval, when the broadcast is refused", async () => {
-    const { handlers, store } = build({ role: 'publisher', resend: makeResend({ failBroadcast: true }) });
+    const { handlers, store } = build({
+      role: 'publisher',
+      resend: makeResend({ failBroadcast: true }),
+    });
     const ctx = context();
     const res = await handlers.approve(request(approveBody), ctx);
     expect(res.status).toBe(502);
@@ -382,7 +452,10 @@ describe('approve', () => {
   });
 
   it('keeps the issue in sending, not draft, when Resend gives no answer', async () => {
-    const { handlers, store, resend } = build({ role: 'publisher', resend: makeResend({ noAnswer: true }) });
+    const { handlers, store, resend } = build({
+      role: 'publisher',
+      resend: makeResend({ noAnswer: true }),
+    });
     const res = await handlers.approve(request(approveBody), context());
     expect(res.status).toBe(502);
     expect(bodyOf(res).code).toBe('SEND_OUTCOME_UNKNOWN');
@@ -411,14 +484,21 @@ describe('approve', () => {
     expect(resend.broadcasts).toHaveLength(1);
     const body = bodyOf(res);
     expect(body.warning).toContain('Do not approve again');
-    expect(body).toMatchObject({ ok: true, issue: { id: ID, status: 'sending' }, sendingEnabled: true });
+    expect(body).toMatchObject({
+      ok: true,
+      issue: { id: ID, status: 'sending' },
+      sendingEnabled: true,
+    });
     expect(body.preview).toBeTruthy();
     expect(body.issue.etag).toBe(store.docs.get(`newsletters/${ID}`)._etag);
   });
 
   it('logs only the name and code of a store error, never its message', async () => {
     const store = makeStore();
-    const cosmosError = Object.assign(new Error(`Entity with the specified id ${ID} does not exist`), { code: 503 });
+    const cosmosError = Object.assign(
+      new Error(`Entity with the specified id ${ID} does not exist`),
+      { code: 503 }
+    );
     store.replaceDocIfMatch = vi.fn(async () => {
       throw cosmosError;
     });
@@ -449,7 +529,10 @@ describe('approve', () => {
 
   it('refuses an issue that is not a draft, including one stuck mid-send', async () => {
     for (const status of ['sending', 'scheduled', 'sent', 'rejected']) {
-      const { handlers, resend } = build({ role: 'publisher', store: makeStore({ issue: draftIssue({ status }) }) });
+      const { handlers, resend } = build({
+        role: 'publisher',
+        store: makeStore({ issue: draftIssue({ status }) }),
+      });
       expect((await handlers.approve(request(approveBody), context())).status, status).toBe(409);
       expect(resend.fetch, status).not.toHaveBeenCalled();
     }
@@ -481,8 +564,12 @@ describe('approve', () => {
       ['TRUE', false],
       ['1', false],
     ]) {
-      const { handlers } = build({ env: { RESEND_API_KEY: API_KEY, NEWSLETTER_SENDING_ENABLED: value } });
-      expect(bodyOf(await handlers.get(request(), context())).sendingEnabled, String(value)).toBe(expected);
+      const { handlers } = build({
+        env: { RESEND_API_KEY: API_KEY, NEWSLETTER_SENDING_ENABLED: value },
+      });
+      expect(bodyOf(await handlers.get(request(), context())).sendingEnabled, String(value)).toBe(
+        expected
+      );
     }
   });
 
@@ -500,7 +587,9 @@ describe('reject', () => {
   });
 
   it('clears an issue stuck in sending', async () => {
-    const { handlers, store } = build({ store: makeStore({ issue: draftIssue({ status: 'sending' }) }) });
+    const { handlers, store } = build({
+      store: makeStore({ issue: draftIssue({ status: 'sending' }) }),
+    });
     expect((await handlers.reject(request({ body: { etag: 'e1' } }), context())).status).toBe(200);
     expect(store.docs.get(`newsletters/${ID}`).status).toBe('rejected');
   });
@@ -525,7 +614,7 @@ describe('list', () => {
     expect(body.issues[0]).not.toHaveProperty('sections');
   });
 
-  it('carries each row\'s etag and leaves deleted issues out', async () => {
+  it("carries each row's etag and leaves deleted issues out", async () => {
     const { handlers, store } = build();
     const body = bodyOf(await handlers.list(request(), context()));
     expect(body.issues[0].etag).toBe('e1');
@@ -549,7 +638,9 @@ describe('list', () => {
   it('refuses a malformed month before querying', async () => {
     const { handlers, store } = build();
     for (const month of ['2026-9', '2026-13', 'september', '2026-09-01']) {
-      expect((await handlers.list(request({ query: { month } }), context())).status, month).toBe(400);
+      expect((await handlers.list(request({ query: { month } }), context())).status, month).toBe(
+        400
+      );
     }
     expect(store.queryDocs).not.toHaveBeenCalled();
   });
@@ -561,23 +652,36 @@ describe('save', () => {
     const res = await handlers.save(request({ body: { etag: 'e1' } }), context());
     expect(res.status).toBe(200);
     const stored = store.docs.get(`newsletters/${ID}`);
-    expect(stored).toMatchObject({ status: 'draft', savedAt: NOW.toISOString(), savedBy: 'owner-oid' });
+    expect(stored).toMatchObject({
+      status: 'draft',
+      savedAt: NOW.toISOString(),
+      savedBy: 'owner-oid',
+    });
     expect(bodyOf(res).issue).toMatchObject({ savedAt: NOW.toISOString(), etag: stored._etag });
   });
 
   it('does not write again for a draft that is already saved', async () => {
-    const { handlers, store } = build({ store: makeStore({ issue: draftIssue({ savedAt: '2026-09-13T10:00:00Z' }) }) });
+    const { handlers, store } = build({
+      store: makeStore({ issue: draftIssue({ savedAt: '2026-09-13T10:00:00Z' }) }),
+    });
     expect((await handlers.save(request({ body: { etag: 'e1' } }), context())).status).toBe(200);
     expect(store.replaceDocIfMatch).not.toHaveBeenCalled();
   });
 
   it('requires the etag and refuses a stale one or a non-draft', async () => {
     const { handlers } = build();
-    expect(bodyOf(await handlers.save(request({ body: {} }), context())).code).toBe('ETAG_REQUIRED');
-    expect(bodyOf(await handlers.save(request({ body: { etag: 'old' } }), context())).code).toBe('ISSUE_CHANGED');
+    expect(bodyOf(await handlers.save(request({ body: {} }), context())).code).toBe(
+      'ETAG_REQUIRED'
+    );
+    expect(bodyOf(await handlers.save(request({ body: { etag: 'old' } }), context())).code).toBe(
+      'ISSUE_CHANGED'
+    );
     for (const status of ['sending', 'scheduled', 'sent', 'rejected']) {
       const other = build({ store: makeStore({ issue: draftIssue({ status }) }) });
-      expect((await other.handlers.save(request({ body: { etag: 'e1' } }), context())).status, status).toBe(409);
+      expect(
+        (await other.handlers.save(request({ body: { etag: 'e1' } }), context())).status,
+        status
+      ).toBe(409);
     }
   });
 });
@@ -589,7 +693,10 @@ describe('remove', () => {
       const res = await handlers.remove(request({ body: { etag: 'e1' } }), context());
       expect(res.status, status).toBe(200);
       expect(bodyOf(res)).toEqual({ ok: true, id: ID });
-      expect(store.docs.get(`newsletters/${ID}`)).toMatchObject({ status: 'deleted', deletedBy: 'owner-oid' });
+      expect(store.docs.get(`newsletters/${ID}`)).toMatchObject({
+        status: 'deleted',
+        deletedBy: 'owner-oid',
+      });
       expect((await handlers.get(request(), context())).status, status).toBe(404);
     }
   });
@@ -597,7 +704,10 @@ describe('remove', () => {
   it('never deletes an issue that was approved', async () => {
     for (const status of ['sending', 'scheduled', 'sent']) {
       const { handlers, store } = build({ store: makeStore({ issue: draftIssue({ status }) }) });
-      expect((await handlers.remove(request({ body: { etag: 'e1' } }), context())).status, status).toBe(409);
+      expect(
+        (await handlers.remove(request({ body: { etag: 'e1' } }), context())).status,
+        status
+      ).toBe(409);
       expect(store.docs.get(`newsletters/${ID}`).status, status).toBe(status);
     }
   });
@@ -605,7 +715,11 @@ describe('remove', () => {
   it('loses to an approval that claimed the issue first', async () => {
     const { handlers, store } = build();
     // The approval's claim lands between the page's read and the delete.
-    store.docs.set(`newsletters/${ID}`, { ...store.docs.get(`newsletters/${ID}`), status: 'draft', _etag: 'e9' });
+    store.docs.set(`newsletters/${ID}`, {
+      ...store.docs.get(`newsletters/${ID}`),
+      status: 'draft',
+      _etag: 'e9',
+    });
     const res = await handlers.remove(request({ body: { etag: 'e1' } }), context());
     expect(bodyOf(res).code).toBe('ISSUE_CHANGED');
     expect(store.docs.get(`newsletters/${ID}`).status).toBe('draft');
@@ -638,7 +752,10 @@ const patch = (fields) => request({ body: { etag: 'e1', ...fields } });
 describe('update: preheader', () => {
   it('stores trimmed preview text, returns it, and renders it hidden at the top of the email', async () => {
     const { handlers, store } = build();
-    const res = await handlers.update(patch({ preheader: '  Five things   from <this> week  ' }), context());
+    const res = await handlers.update(
+      patch({ preheader: '  Five things   from <this> week  ' }),
+      context()
+    );
     expect(res.status).toBe(200);
     expect(store.docs.get(`newsletters/${ID}`).preheader).toBe('Five things from <this> week');
     const body = bodyOf(res);
@@ -648,9 +765,13 @@ describe('update: preheader', () => {
 
   it('refuses preview text over 150 characters or not a string, and writes nothing', async () => {
     const { handlers, store } = build();
-    expect((await handlers.update(patch({ preheader: 'x'.repeat(151) }), context())).status).toBe(400);
+    expect((await handlers.update(patch({ preheader: 'x'.repeat(151) }), context())).status).toBe(
+      400
+    );
     expect((await handlers.update(patch({ preheader: 42 }), context())).status).toBe(400);
-    expect((await handlers.update(patch({ preheader: 'x'.repeat(150) }), context())).status).toBe(200);
+    expect((await handlers.update(patch({ preheader: 'x'.repeat(150) }), context())).status).toBe(
+      200
+    );
     expect(store.replaceDocIfMatch).toHaveBeenCalledTimes(1);
   });
 
@@ -660,7 +781,10 @@ describe('update: preheader', () => {
   });
 
   it('is sent by approve, because approve renders the stored issue', async () => {
-    const { handlers, resend } = build({ role: 'publisher', store: makeStore({ issue: draftIssue({ preheader: 'Inbox preview' }) }) });
+    const { handlers, resend } = build({
+      role: 'publisher',
+      store: makeStore({ issue: draftIssue({ preheader: 'Inbox preview' }) }),
+    });
     expect((await handlers.approve(request(approveBody), context())).status).toBe(200);
     expect(resend.broadcasts[0].html).toContain('Inbox preview');
   });
@@ -712,7 +836,12 @@ describe('update: sections', () => {
 
   it('refuses an added item, an edited field, a moved item, an added section and duplicates, writing nothing', async () => {
     const refused = {
-      'added item': [{ id: 'articles', items: [{ url: itemA.url }, { title: 'New', url: 'https://hybridcloudworks.com/new' }] }],
+      'added item': [
+        {
+          id: 'articles',
+          items: [{ url: itemA.url }, { title: 'New', url: 'https://hybridcloudworks.com/new' }],
+        },
+      ],
       'edited title': [{ id: 'articles', items: [{ ...itemA, title: 'Better title' }] }],
       'edited url': [{ id: 'articles', items: [{ url: 'javascript:alert(1)' }] }],
       'added field': [{ id: 'articles', items: [{ url: itemA.url, summary: 'rewritten' }] }],
@@ -742,26 +871,43 @@ describe('update: sections', () => {
     const sent = build({ store: makeStore({ issue: { ...twoSections(), status: 'sent' } }) });
     expect((await sent.handlers.update(patch({ sections }), context())).status).toBe(409);
     const stale = build({ store: makeStore({ issue: twoSections() }) });
-    const res = await stale.handlers.update(request({ body: { sections, etag: 'old' } }), context());
+    const res = await stale.handlers.update(
+      request({ body: { sections, etag: 'old' } }),
+      context()
+    );
     expect(bodyOf(res).code).toBe('ISSUE_CHANGED');
     const missing = build({ store: makeStore({ issue: twoSections() }) });
-    expect(bodyOf(await missing.handlers.update(request({ body: { sections } }), context())).code).toBe('ETAG_REQUIRED');
+    expect(
+      bodyOf(await missing.handlers.update(request({ body: { sections } }), context())).code
+    ).toBe('ETAG_REQUIRED');
   });
 });
 
-const makeDrafter = (result = { title: 'Zones', postContent: '**This week** we looked at [zones](https://x).' }) => ({
+const makeDrafter = (
+  result = { title: 'Zones', postContent: '**This week** we looked at [zones](https://x).' }
+) => ({
   generateDraft: vi.fn(async () => (result instanceof Error ? Promise.reject(result) : result)),
 });
 
 describe('intro', () => {
   it("regenerates a draft's intro with the builder's instruction, clears introError and keeps the subject", async () => {
     const drafter = makeDrafter();
-    const { handlers, store } = build({ drafter, store: makeStore({ issue: draftIssue({ introError: 'AI was off' }) }) });
+    const { handlers, store } = build({
+      drafter,
+      store: makeStore({ issue: draftIssue({ introError: 'AI was off' }) }),
+    });
     const res = await handlers.intro(request({ body: { etag: 'e1' } }), context());
     expect(res.status).toBe(200);
     const stored = store.docs.get(`newsletters/${ID}`);
-    expect(stored).toMatchObject({ intro: 'This week we looked at zones.', introError: null, subject: 'Landing zones' });
-    expect(bodyOf(res).issue).toMatchObject({ intro: 'This week we looked at zones.', etag: stored._etag });
+    expect(stored).toMatchObject({
+      intro: 'This week we looked at zones.',
+      introError: null,
+      subject: 'Landing zones',
+    });
+    expect(bodyOf(res).issue).toMatchObject({
+      intro: 'This week we looked at zones.',
+      etag: stored._etag,
+    });
     const [call] = drafter.generateDraft.mock.calls[0];
     expect(call.customInstructionPrompt).toBe(introInstruction('professional'));
     expect(call.customInstructionPrompt.startsWith(INTRO_INSTRUCTION)).toBe(true);
@@ -787,7 +933,10 @@ describe('intro', () => {
     const ctx = { ...context(), invocationId: 'inv-7' };
     const res = await handlers.intro(request({ body: { etag: 'e1' } }), ctx);
     expect(res.status).toBe(502);
-    expect(bodyOf(res)).toMatchObject({ code: 'AI_FAILED', error: expect.stringContaining('disabled') });
+    expect(bodyOf(res)).toMatchObject({
+      code: 'AI_FAILED',
+      error: expect.stringContaining('disabled'),
+    });
     expect(store.replaceDocIfMatch).not.toHaveBeenCalled();
     expect(store.docs.get(`newsletters/${ID}`).intro).toBe('We covered a lot.');
     const logged = ctx.error.mock.calls.flat().join('\n');
@@ -805,10 +954,16 @@ describe('intro', () => {
   it('requires the etag, refuses a stale one or a non-draft before calling the AI', async () => {
     const drafter = makeDrafter();
     const { handlers } = build({ drafter });
-    expect(bodyOf(await handlers.intro(request({ body: {} }), context())).code).toBe('ETAG_REQUIRED');
-    expect(bodyOf(await handlers.intro(request({ body: { etag: 'old' } }), context())).code).toBe('ISSUE_CHANGED');
+    expect(bodyOf(await handlers.intro(request({ body: {} }), context())).code).toBe(
+      'ETAG_REQUIRED'
+    );
+    expect(bodyOf(await handlers.intro(request({ body: { etag: 'old' } }), context())).code).toBe(
+      'ISSUE_CHANGED'
+    );
     const sent = build({ drafter, store: makeStore({ issue: draftIssue({ status: 'sent' }) }) });
-    expect((await sent.handlers.intro(request({ body: { etag: 'e1' } }), context())).status).toBe(409);
+    expect((await sent.handlers.intro(request({ body: { etag: 'e1' } }), context())).status).toBe(
+      409
+    );
     expect(drafter.generateDraft).not.toHaveBeenCalled();
   });
 
@@ -816,14 +971,21 @@ describe('intro', () => {
     const store = makeStore();
     const drafter = {
       generateDraft: vi.fn(async () => {
-        store.docs.set(`newsletters/${ID}`, { ...store.docs.get(`newsletters/${ID}`), customNote: 'Theirs', _etag: 'e9' });
+        store.docs.set(`newsletters/${ID}`, {
+          ...store.docs.get(`newsletters/${ID}`),
+          customNote: 'Theirs',
+          _etag: 'e9',
+        });
         return { title: 't', postContent: 'New intro.' };
       }),
     };
     const { handlers } = build({ store, drafter });
     const res = await handlers.intro(request({ body: { etag: 'e1' } }), context());
     expect(bodyOf(res).code).toBe('ISSUE_CHANGED');
-    expect(store.docs.get(`newsletters/${ID}`)).toMatchObject({ customNote: 'Theirs', intro: 'We covered a lot.' });
+    expect(store.docs.get(`newsletters/${ID}`)).toMatchObject({
+      customNote: 'Theirs',
+      intro: 'We covered a lot.',
+    });
   });
 
   it('is at least an editor decision, and 503 without a drafter', async () => {
@@ -833,7 +995,9 @@ describe('intro', () => {
       drafter: makeDrafter(),
     });
     expect((await denied.intro(request({ body: { etag: 'e1' } }), context())).status).toBe(403);
-    expect((await build().handlers.intro(request({ body: { etag: 'e1' } }), context())).status).toBe(503);
+    expect(
+      (await build().handlers.intro(request({ body: { etag: 'e1' } }), context())).status
+    ).toBe(503);
   });
 });
 
@@ -841,7 +1005,16 @@ describe('subjects', () => {
   it('returns up to five cleaned, deduplicated suggestions of at most 120 characters, and writes nothing', async () => {
     const drafter = makeDrafter({
       title: 'Landing zones, again',
-      keyTopics: ['landing zones, AGAIN', '"**Quoted** idea"', 'y'.repeat(200), 'Fourth', 'Fifth', 'Sixth', 7, ''],
+      keyTopics: [
+        'landing zones, AGAIN',
+        '"**Quoted** idea"',
+        'y'.repeat(200),
+        'Fourth',
+        'Fifth',
+        'Sixth',
+        7,
+        '',
+      ],
     });
     const { handlers, store } = build({ drafter });
     const res = await handlers.subjects(request(), context());
@@ -875,7 +1048,14 @@ describe('subjects', () => {
       drafter: makeDrafter(),
     });
     expect((await denied.subjects(request(), context())).status).toBe(401);
-    expect((await build({ drafter: makeDrafter() }).handlers.subjects(request({ id: 'issue-2020-01-01' }), context())).status).toBe(404);
+    expect(
+      (
+        await build({ drafter: makeDrafter() }).handlers.subjects(
+          request({ id: 'issue-2020-01-01' }),
+          context()
+        )
+      ).status
+    ).toBe(404);
   });
 });
 
@@ -884,8 +1064,15 @@ describe('intro and subjects: the AI time budget', () => {
     // The page waits on these under the client's 20 s default, so a slow
     // first provider has to fail over inside it (router.js header).
     for (const route of ['intro', 'subjects']) {
-      const drafter = makeDrafter({ title: 'One', postContent: 'New intro.', keyTopics: ['Two', 'Three'] });
-      const res = await build({ drafter }).handlers[route](request({ body: { etag: 'e1' } }), context());
+      const drafter = makeDrafter({
+        title: 'One',
+        postContent: 'New intro.',
+        keyTopics: ['Two', 'Three'],
+      });
+      const res = await build({ drafter }).handlers[route](
+        request({ body: { etag: 'e1' } }),
+        context()
+      );
       expect(res.status, route).toBe(200);
       const { budgetMs } = drafter.generateDraft.mock.calls[0][0];
       expect(budgetMs, route).toBeLessThanOrEqual(NEWSLETTER_AI_BUDGET_MS);
@@ -900,14 +1087,22 @@ describe('test send', () => {
   it('emails one [TEST] copy to the reply-to address only, even when the body names another', async () => {
     const { handlers, store, resend } = build({ role: 'publisher' });
     const res = await handlers.test(
-      testBody({ to: 'attacker@example.net', replyTo: 'attacker@example.net', sentTo: 'attacker@example.net' }),
+      testBody({
+        to: 'attacker@example.net',
+        replyTo: 'attacker@example.net',
+        sentTo: 'attacker@example.net',
+      }),
       context()
     );
     expect(res.status).toBe(200);
     const stored = store.docs.get(`newsletters/${ID}`);
     expect(bodyOf(res)).toEqual({ ok: true, sentTo: 'owner@example.com', etag: stored._etag });
     expect(resend.emails).toHaveLength(1);
-    expect(resend.emails[0]).toMatchObject({ from: NEWSLETTER_FROM, to: ['owner@example.com'], subject: '[TEST] Landing zones' });
+    expect(resend.emails[0]).toMatchObject({
+      from: NEWSLETTER_FROM,
+      to: ['owner@example.com'],
+      subject: '[TEST] Landing zones',
+    });
     expect(JSON.stringify(resend.emails[0])).not.toContain('attacker');
     expect(resend.broadcasts).toHaveLength(0);
     expect(resend.fetch.mock.calls.map(([url]) => new URL(url).pathname)).toEqual(['/emails']);
@@ -927,7 +1122,10 @@ describe('test send', () => {
 
   it('works while sending is switched off, because it cannot reach subscribers', async () => {
     for (const value of [undefined, 'false']) {
-      const { handlers, resend } = build({ role: 'publisher', env: { RESEND_API_KEY: API_KEY, NEWSLETTER_SENDING_ENABLED: value } });
+      const { handlers, resend } = build({
+        role: 'publisher',
+        env: { RESEND_API_KEY: API_KEY, NEWSLETTER_SENDING_ENABLED: value },
+      });
       expect((await handlers.test(testBody(), context())).status, String(value)).toBe(200);
       expect(resend.emails, String(value)).toHaveLength(1);
     }
@@ -944,14 +1142,22 @@ describe('test send', () => {
     // Even with the old etag, a second press inside the minute is "too soon".
     expect((await first.handlers.test(testBody(), context())).status).toBe(429);
     expect(resend.emails).toHaveLength(1);
-    const later = build({ role: 'publisher', store, resend, now: new Date(NOW.getTime() + 60_000) });
+    const later = build({
+      role: 'publisher',
+      store,
+      resend,
+      now: new Date(NOW.getTime() + 60_000),
+    });
     expect((await later.handlers.test(testBody({ etag: sent.etag }), context())).status).toBe(200);
     expect(resend.emails).toHaveLength(2);
   });
 
   it('sends once when pressed twice at the same moment', async () => {
     const { handlers, resend } = build({ role: 'publisher' });
-    const [a, b] = await Promise.all([handlers.test(testBody(), context()), handlers.test(testBody(), context())]);
+    const [a, b] = await Promise.all([
+      handlers.test(testBody(), context()),
+      handlers.test(testBody(), context()),
+    ]);
     expect([a.status, b.status].sort()).toEqual([200, 429]);
     expect(resend.emails).toHaveLength(1);
   });
@@ -964,12 +1170,36 @@ describe('test send', () => {
 
   it('refuses without the settings, the Resend key, the etag, a draft or a fresh view, and sends nothing', async () => {
     const cases = [
-      [build({ role: 'publisher', store: makeStore({ settings: { ...completeSettings, replyTo: '' } }) }), testBody(), 409, 'SETTINGS_INCOMPLETE'],
-      [build({ role: 'publisher', store: makeStore({ settings: { ...completeSettings, postalAddress: '' } }) }), testBody(), 409, 'SETTINGS_INCOMPLETE'],
+      [
+        build({
+          role: 'publisher',
+          store: makeStore({ settings: { ...completeSettings, replyTo: '' } }),
+        }),
+        testBody(),
+        409,
+        'SETTINGS_INCOMPLETE',
+      ],
+      [
+        build({
+          role: 'publisher',
+          store: makeStore({ settings: { ...completeSettings, postalAddress: '' } }),
+        }),
+        testBody(),
+        409,
+        'SETTINGS_INCOMPLETE',
+      ],
       [build({ role: 'publisher', env: {} }), testBody(), 503, undefined],
       [build({ role: 'publisher' }), request({ body: {} }), 400, 'ETAG_REQUIRED'],
       [build({ role: 'publisher' }), testBody({ etag: 'old' }), 409, 'ISSUE_CHANGED'],
-      [build({ role: 'publisher', store: makeStore({ issue: draftIssue({ status: 'scheduled' }) }) }), testBody(), 409, undefined],
+      [
+        build({
+          role: 'publisher',
+          store: makeStore({ issue: draftIssue({ status: 'scheduled' }) }),
+        }),
+        testBody(),
+        409,
+        undefined,
+      ],
     ];
     for (const [{ handlers, resend, store }, req, status, code] of cases) {
       const res = await handlers.test(req, context());
@@ -1016,8 +1246,11 @@ describe('Resend template as the design (#557)', () => {
     { object: 'template', id: TEMPLATE_ID, name: 'Weekly', status: 'published', html },
   ];
   const templatePaths = (resend) =>
-    resend.fetch.mock.calls.map(([url]) => new URL(url).pathname).filter((path) => path.startsWith('/templates/'));
-  const allLogs = (ctx) => [...ctx.log.mock.calls, ...ctx.warn.mock.calls, ...ctx.error.mock.calls].flat().join('\n');
+    resend.fetch.mock.calls
+      .map(([url]) => new URL(url).pathname)
+      .filter((path) => path.startsWith('/templates/'));
+  const allLogs = (ctx) =>
+    [...ctx.log.mock.calls, ...ctx.warn.mock.calls, ...ctx.error.mock.calls].flat().join('\n');
 
   describe('preview', () => {
     it('renders the issue inside the chosen template', async () => {
@@ -1034,7 +1267,12 @@ describe('Resend template as the design (#557)', () => {
 
     it('shows the built-in design with templateProblem when the template cannot be fetched, and logs only the code', async () => {
       const resend = makeResend({
-        templates: { [TEMPLATE_ID]: [500, { name: 'internal_server_error', message: 'Template tpl-weekly-1 exploded' }] },
+        templates: {
+          [TEMPLATE_ID]: [
+            500,
+            { name: 'internal_server_error', message: 'Template tpl-weekly-1 exploded' },
+          ],
+        },
       });
       const { handlers } = build({ store: makeStore({ settings: withTemplate }), resend });
       const ctx = { ...context(), invocationId: 'inv-t1' };
@@ -1055,14 +1293,26 @@ describe('Resend template as the design (#557)', () => {
 
     it('names each fallback: not published, not found, unusable, no Resend key', async () => {
       const cases = [
-        [{ [TEMPLATE_ID]: [200, { id: TEMPLATE_ID, status: 'draft', html: templateHtml() }] }, undefined, 'TEMPLATE_NOT_PUBLISHED'],
+        [
+          { [TEMPLATE_ID]: [200, { id: TEMPLATE_ID, status: 'draft', html: templateHtml() }] },
+          undefined,
+          'TEMPLATE_NOT_PUBLISHED',
+        ],
         [{}, undefined, 'TEMPLATE_NOT_FOUND'],
-        [{ [TEMPLATE_ID]: published('<html><body>no marker</body></html>') }, undefined, 'TEMPLATE_MARKER_MISSING'],
+        [
+          { [TEMPLATE_ID]: published('<html><body>no marker</body></html>') },
+          undefined,
+          'TEMPLATE_MARKER_MISSING',
+        ],
         [{ [TEMPLATE_ID]: published() }, {}, 'RESEND_NOT_CONFIGURED'],
       ];
       for (const [templates, env, code] of cases) {
         const resend = makeResend({ templates });
-        const { handlers } = build({ store: makeStore({ settings: withTemplate }), resend, ...(env ? { env } : {}) });
+        const { handlers } = build({
+          store: makeStore({ settings: withTemplate }),
+          resend,
+          ...(env ? { env } : {}),
+        });
         const body = bodyOf(await handlers.get(request(), context()));
         expect(body.templateProblem?.code, code).toBe(code);
         expect(body.preview.html, code).toContain('HybridCloudWorks Weekly ·');
@@ -1079,7 +1329,9 @@ describe('Resend template as the design (#557)', () => {
     it('fetches a template once within five minutes, again after, and again when the chosen design changes', async () => {
       let clock = 0;
       const templateCache = createTemplateCache({ now: () => clock });
-      const resend = makeResend({ templates: { [TEMPLATE_ID]: published(), 'tpl-other': published() } });
+      const resend = makeResend({
+        templates: { [TEMPLATE_ID]: published(), 'tpl-other': published() },
+      });
       const store = makeStore({ settings: withTemplate });
       const { handlers } = build({ store, resend, templateCache });
 
@@ -1093,7 +1345,10 @@ describe('Resend template as the design (#557)', () => {
 
       // Settings saved with another template, then the built-in design, then
       // back: each change refetches.
-      store.docs.set('admin_config/newsletter_settings', { ...withTemplate, templateId: 'tpl-other' });
+      store.docs.set('admin_config/newsletter_settings', {
+        ...withTemplate,
+        templateId: 'tpl-other',
+      });
       await handlers.get(request(), context());
       store.docs.set('admin_config/newsletter_settings', { ...withTemplate, templateId: '' });
       await handlers.get(request(), context());
@@ -1111,7 +1366,9 @@ describe('Resend template as the design (#557)', () => {
       let answer = [200, { id: TEMPLATE_ID, status: 'draft', html: templateHtml() }];
       const resend = makeResend({ templates: () => answer });
       const { handlers } = build({ store: makeStore({ settings: withTemplate }), resend });
-      expect(bodyOf(await handlers.get(request(), context())).templateProblem.code).toBe('TEMPLATE_NOT_PUBLISHED');
+      expect(bodyOf(await handlers.get(request(), context())).templateProblem.code).toBe(
+        'TEMPLATE_NOT_PUBLISHED'
+      );
       answer = published();
       expect(bodyOf(await handlers.get(request(), context())).templateProblem).toBeNull();
     });
@@ -1120,7 +1377,11 @@ describe('Resend template as the design (#557)', () => {
   describe('test send', () => {
     it('sends the test in the template, with the unsubscribe link inert', async () => {
       const resend = makeResend({ templates: { [TEMPLATE_ID]: published() } });
-      const { handlers } = build({ role: 'publisher', store: makeStore({ settings: withTemplate }), resend });
+      const { handlers } = build({
+        role: 'publisher',
+        store: makeStore({ settings: withTemplate }),
+        resend,
+      });
       const res = await handlers.test(request({ body: { etag: 'e1' } }), context());
       expect(res.status).toBe(200);
       expect(bodyOf(res).templateProblem).toBeUndefined();
@@ -1134,9 +1395,15 @@ describe('Resend template as the design (#557)', () => {
 
     it('sends the built-in design when the template is unusable, and says so', async () => {
       const resend = makeResend({
-        templates: { [TEMPLATE_ID]: published(templateHtml('{{{NEWSLETTER_BODY}}}{{{NEWSLETTER_BODY}}}')) },
+        templates: {
+          [TEMPLATE_ID]: published(templateHtml('{{{NEWSLETTER_BODY}}}{{{NEWSLETTER_BODY}}}')),
+        },
       });
-      const { handlers } = build({ role: 'publisher', store: makeStore({ settings: withTemplate }), resend });
+      const { handlers } = build({
+        role: 'publisher',
+        store: makeStore({ settings: withTemplate }),
+        resend,
+      });
       const res = await handlers.test(request({ body: { etag: 'e1' } }), context());
       expect(res.status).toBe(200);
       expect(bodyOf(res).templateProblem).toMatchObject({ code: 'TEMPLATE_MARKER_REPEATED' });
@@ -1148,7 +1415,9 @@ describe('Resend template as the design (#557)', () => {
   describe('approve', () => {
     it('refuses with 409 TEMPLATE_UNUSABLE before any claim or broadcast when the template is unusable', async () => {
       const cases = [
-        makeResend({ templates: { [TEMPLATE_ID]: published('<html><body>no marker</body></html>') } }),
+        makeResend({
+          templates: { [TEMPLATE_ID]: published('<html><body>no marker</body></html>') },
+        }),
         makeResend({ templates: { [TEMPLATE_ID]: [503, { name: 'service_unavailable' }] } }),
         makeResend({ templates: { [TEMPLATE_ID]: new Error('socket hang up') } }),
         makeResend({ templates: {} }),
@@ -1207,6 +1476,53 @@ describe('Resend template as the design (#557)', () => {
       // The answer's preview is the same design, from the cached copy.
       expect(bodyOf(res).preview.html).toBe(broadcast.html);
       expect(templatePaths(resend)).toHaveLength(1);
+    });
+  });
+});
+
+describe('parseIssuePatch', () => {
+  const now = () => new Date('2026-10-03T12:00:00.000Z');
+
+  it('normalises each scalar field and leaves out the ones not sent', () => {
+    const parsed = parseIssuePatch(
+      { customNote: 'line one\r\nline two  ', subject: '  Weekly   news ', etag: 'x' },
+      now
+    );
+    expect(parsed).toEqual({ patch: { customNote: 'line one\nline two', subject: 'Weekly news' } });
+  });
+
+  it('collapses whitespace in the preheader and clears sendAt on null or an empty string', () => {
+    expect(parseIssuePatch({ preheader: ' a   b ', sendAt: null }, now)).toEqual({
+      patch: { preheader: 'a b', sendAt: null },
+    });
+    expect(parseIssuePatch({ sendAt: '' }, now)).toEqual({ patch: { sendAt: null } });
+  });
+
+  it('writes a future sendAt as an ISO instant and refuses a past or unparsable one', () => {
+    expect(parseIssuePatch({ sendAt: '2026-10-04T09:00:00Z' }, now)).toEqual({
+      patch: { sendAt: '2026-10-04T09:00:00.000Z' },
+    });
+    expect(parseIssuePatch({ sendAt: '2026-10-03T11:00:00Z' }, now)).toEqual({
+      error: 'sendAt must be in the future',
+    });
+    expect(parseIssuePatch({ sendAt: 'tomorrow' }, now)).toEqual({
+      error: 'sendAt must be an ISO instant or null',
+    });
+  });
+
+  it('reports the first unacceptable field, in body order: customNote, subject, preheader, sendAt', () => {
+    expect(parseIssuePatch({ customNote: 7, subject: '' }, now)).toEqual({
+      error: 'customNote must be a string',
+    });
+    expect(parseIssuePatch({ subject: '', preheader: 3 }, now)).toEqual({
+      error: 'subject must be 1 to 120 characters',
+    });
+    expect(parseIssuePatch({ preheader: 3 }, now)).toEqual({ error: 'preheader must be a string' });
+    expect(parseIssuePatch({ customNote: 'x'.repeat(2001) }, now)).toEqual({
+      error: 'customNote must be at most 2000 characters',
+    });
+    expect(parseIssuePatch({ preheader: 'x'.repeat(151) }, now)).toEqual({
+      error: 'preheader must be at most 150 characters',
     });
   });
 });

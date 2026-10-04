@@ -137,6 +137,24 @@ const byteLength = (text) => Buffer.byteLength(String(text || ''), 'utf8');
  * speech. Falls back to a hard byte split only if a single "sentence" is
  * itself over budget, which means punctuation-free text.
  */
+/**
+ * A sentence with no boundary to use, split on characters: the full chunks,
+ * each at most `limit` bytes plus one multi-byte character, and the
+ * remainder still open.
+ */
+function splitByBytes(sentence, limit) {
+  const parts = [];
+  let chunk = '';
+  for (const char of sentence) {
+    if (byteLength(chunk) + byteLength(char) > limit) {
+      parts.push(chunk.trim());
+      chunk = '';
+    }
+    chunk += char;
+  }
+  return { parts, remainder: chunk };
+}
+
 function splitTurnText(text, limit) {
   const sentences = String(text).match(/[^.!?]+[.!?]*\s*/g) || [String(text)];
   const parts = [];
@@ -148,19 +166,10 @@ function splitTurnText(text, limit) {
       buffer = '';
     }
     if (byteLength(sentence) > limit) {
-      // No sentence boundary to use. Split on characters; the byte length of
-      // a chunk is then at most `limit` plus one multi-byte character.
       if (buffer.trim()) parts.push(buffer.trim());
-      buffer = '';
-      let chunk = '';
-      for (const char of sentence) {
-        if (byteLength(chunk) + byteLength(char) > limit) {
-          parts.push(chunk.trim());
-          chunk = '';
-        }
-        chunk += char;
-      }
-      buffer = chunk;
+      const split = splitByBytes(sentence, limit);
+      parts.push(...split.parts);
+      buffer = split.remainder;
       continue;
     }
     buffer += sentence;

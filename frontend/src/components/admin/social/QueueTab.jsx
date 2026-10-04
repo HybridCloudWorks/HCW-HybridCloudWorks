@@ -11,8 +11,11 @@
  * PATCH cms/social-posts/{id} changes the caption or the time, and the
  * change feed pushes the new text and time to Publer for every post id it
  * holds. Deletes confirm first.
+ *
+ * The state is useSocialQueue; this file is the cards and the three bodies
+ * the tab can show, first match wins (PR #841).
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -33,16 +36,9 @@ import StatusBadge from '@/components/admin/shared/StatusBadge';
 import { useToast } from '@/components/ui/use-toast';
 import { AlertCircle, Clock, Loader2, Pencil, RefreshCw, Trash2 } from 'lucide-react';
 import { sendJSON } from '@/lib/api';
-import {
-  deleteSocialPostDoc,
-  listSocialPosts,
-  publerCallFailed,
-  publerDeletePost,
-  publerListPosts,
-  readPublerPosts,
-} from './publerApi';
 import { firstText, fmtDate } from './socialView';
 import { PlatformBadge } from './shared';
+import useSocialQueue from './useSocialQueue';
 
 /** A record's status as the shared vocabulary reads it. */
 const recordStatus = (post) => {
@@ -278,109 +274,39 @@ function EditRecordDialog({ post, onClose, onSaved }) {
   );
 }
 
-export default function QueueTab() {
-  const { toast } = useToast();
+function QueueLoading() {
+  return (
+    <div className="flex items-center justify-center py-12">
+      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+    </div>
+  );
+}
 
-  const [publerPosts, setPublerPosts] = useState([]);
-  const [publerNotice, setPublerNotice] = useState('');
-  const [localPosts, setLocalPosts] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [deletingId, setDeletingId] = useState(null);
-  // `{ kind: 'publer' | 'local', post }` while the confirm dialog is open.
-  const [pendingDelete, setPendingDelete] = useState(null);
-  const [editing, setEditing] = useState(null);
+function QueueUnavailable({ error, refresh }) {
+  return (
+    <EmptyState
+      variant="error"
+      title="The queue could not be read"
+      description={error}
+      onRetry={refresh}
+    />
+  );
+}
 
-  const load = useCallback(async () => {
-    setError('');
-    try {
-      const [publerRes, snap] = await Promise.all([
-        publerListPosts('scheduled').catch(publerCallFailed),
-        listSocialPosts(),
-      ]);
-      const { posts, notice } = readPublerPosts(publerRes);
-      setPublerPosts(posts);
-      setPublerNotice(notice);
-      setLocalPosts(Array.isArray(snap) ? snap : []);
-    } catch (err) {
-      // A failed read empties both lists rather than leaving rows beside an
-      // error saying they could not be read (#555).
-      setPublerPosts([]);
-      setLocalPosts([]);
-      setError(err?.message || 'Could not load the queue.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    queueMicrotask(() => {
-      load();
-    });
-  }, [load]);
-
-  const refresh = () => {
-    setLoading(true);
-    load();
-  };
-
-  const handleDeletePubler = async (postId) => {
-    // Ignore a second click while the first delete is unanswered rather than
-    // sending it twice (#555).
-    if (deletingId) return;
-    setDeletingId(postId);
-    try {
-      await publerDeletePost(postId);
-      setPublerPosts((prev) => prev.filter((p) => p.id !== postId));
-      toast({ title: 'Post deleted from Publer' });
-    } catch (err) {
-      toast({ title: 'Delete failed', description: err.message, variant: 'destructive' });
-    } finally {
-      setDeletingId(null);
-    }
-  };
-
-  const handleDeleteLocal = async (docId) => {
-    if (deletingId) return;
-    setDeletingId(docId);
-    try {
-      await deleteSocialPostDoc(docId);
-      setLocalPosts((prev) => prev.filter((p) => p.id !== docId));
-      toast({ title: 'Post record removed' });
-    } catch (err) {
-      toast({ title: 'Delete failed', description: err.message, variant: 'destructive' });
-    } finally {
-      setDeletingId(null);
-    }
-  };
-
-  const confirmDelete = () => {
-    const pending = pendingDelete;
-    setPendingDelete(null);
-    if (!pending) return;
-    if (pending.kind === 'publer') handleDeletePubler(pending.post.id);
-    else handleDeleteLocal(pending.post.id);
-  };
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <EmptyState
-        variant="error"
-        title="The queue could not be read"
-        description={error}
-        onRetry={refresh}
-      />
-    );
-  }
-
+/** Publer's queue above, the hub's own records below, and the two dialogs. */
+function QueueLists({
+  publerPosts,
+  publerNotice,
+  localPosts,
+  deletingId,
+  pendingDelete,
+  setPendingDelete,
+  editing,
+  setEditing,
+  refresh,
+  confirmDelete,
+  applyEdit,
+}) {
   const totalPubler = publerPosts.length;
   const totalLocal = localPosts.length;
 
@@ -464,17 +390,21 @@ export default function QueueTab() {
       />
 
       {editing && (
-        <EditRecordDialog
-          post={editing}
-          onClose={() => setEditing(null)}
-          onSaved={(updated) => {
-            setLocalPosts((prev) =>
-              prev.map((p) => (p.id === updated.id ? { ...p, ...updated } : p))
-            );
-            setEditing(null);
-          }}
-        />
+        <EditRecordDialog post={editing} onClose={() => setEditing(null)} onSaved={applyEdit} />
       )}
     </div>
   );
+}
+
+/** The three bodies the tab can show, first match wins. */
+const QUEUE_VIEWS = [
+  [(q) => q.loading, QueueLoading],
+  [(q) => Boolean(q.error), QueueUnavailable],
+  [() => true, QueueLists],
+];
+
+export default function QueueTab() {
+  const queue = useSocialQueue();
+  const [, View] = QUEUE_VIEWS.find(([when]) => when(queue));
+  return <View {...queue} />;
 }

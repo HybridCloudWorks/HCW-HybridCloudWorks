@@ -72,6 +72,55 @@ function getRecencyScore(item) {
   );
 }
 
+/** The editor opens the source record when the live one carries a pointer to it. */
+function editorTargetId(item) {
+  return [item.sourceContentId, item.publishedContentId, item.id].find(Boolean) ?? '';
+}
+
+/** One live page: its title, badges and URL, with Open Editor, Delete and Open Live Page. */
+function LivePageRow({ item, deleting, onDelete }) {
+  const liveUrl = getLiveUrl(item);
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border p-4 lg:flex-row lg:items-center">
+      <div className="min-w-0 flex-1">
+        <p className="truncate font-medium">{getTitle(item)}</p>
+        <div className="mt-1 flex flex-wrap items-center gap-2">
+          <StatusBadge content={item} />
+          <Badge variant="outline">{getProvider(item)}</Badge>
+          <Badge variant="secondary">{getTypeLabel(item)}</Badge>
+          <TaxonomyChips item={item} />
+        </div>
+        <a
+          href={safeUrl(liveUrl, '#')}
+          target={liveUrl ? '_blank' : undefined}
+          rel={liveUrl ? 'noreferrer' : undefined}
+          className={`mt-2 block truncate text-sm ${liveUrl ? 'text-blue-600 hover:underline' : 'text-muted-foreground'}`}
+        >
+          {liveUrl || 'Live URL unavailable on record'}
+        </a>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <Button size="sm" variant="outline" asChild>
+          <Link to={`/admin/editor/${editorTargetId(item)}`}>Open Editor</Link>
+        </Button>
+        <Button size="sm" variant="destructive" onClick={() => onDelete(item)} disabled={deleting}>
+          <Trash2 className="mr-2 h-4 w-4" />
+          {deleting ? 'Deleting...' : 'Delete Live Page'}
+        </Button>
+        {liveUrl && (
+          <Button size="sm" asChild>
+            <a href={safeUrl(liveUrl)} target="_blank" rel="noreferrer">
+              <ExternalLink className="mr-2 h-4 w-4" />
+              Open Live Page
+            </a>
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function LivePagesPage() {
   const { authReady } = useAuthReady();
   const [includeLegacyPages, setIncludeLegacyPages] = useState(false);
@@ -241,58 +290,14 @@ export default function LivePagesPage() {
             <CardTitle className="text-base">Published URLs</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            {liveItems.map((item) => {
-              const liveUrl = getLiveUrl(item);
-              const editorTargetId =
-                item.sourceContentId || item.publishedContentId || item.id || '';
-              return (
-                <div
-                  key={item.id}
-                  className="flex flex-col gap-3 rounded-lg border p-4 lg:flex-row lg:items-center"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium">{getTitle(item)}</p>
-                    <div className="mt-1 flex flex-wrap items-center gap-2">
-                      <StatusBadge content={item} />
-                      <Badge variant="outline">{getProvider(item)}</Badge>
-                      <Badge variant="secondary">{getTypeLabel(item)}</Badge>
-                      <TaxonomyChips item={item} />
-                    </div>
-                    <a
-                      href={safeUrl(liveUrl, '#')}
-                      target={liveUrl ? '_blank' : undefined}
-                      rel={liveUrl ? 'noreferrer' : undefined}
-                      className={`mt-2 block truncate text-sm ${liveUrl ? 'text-blue-600 hover:underline' : 'text-muted-foreground'}`}
-                    >
-                      {liveUrl || 'Live URL unavailable on record'}
-                    </a>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <Button size="sm" variant="outline" asChild>
-                      <Link to={`/admin/editor/${editorTargetId}`}>Open Editor</Link>
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      onClick={() => setDeleteTarget(item)}
-                      disabled={deletingId === item.id}
-                    >
-                      <Trash2 className="mr-2 h-4 w-4" />
-                      {deletingId === item.id ? 'Deleting...' : 'Delete Live Page'}
-                    </Button>
-                    {liveUrl && (
-                      <Button size="sm" asChild>
-                        <a href={safeUrl(liveUrl)} target="_blank" rel="noreferrer">
-                          <ExternalLink className="mr-2 h-4 w-4" />
-                          Open Live Page
-                        </a>
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+            {liveItems.map((item) => (
+              <LivePageRow
+                key={item.id}
+                item={item}
+                deleting={deletingId === item.id}
+                onDelete={setDeleteTarget}
+              />
+            ))}
           </CardContent>
         </Card>
       )}

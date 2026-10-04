@@ -374,7 +374,7 @@ export default function EducationIndexPage() {
         />
       </Helmet>
 
-      <div className="relative z-10 max-w-[1200px] mx-auto w-full px-4 md:px-8 py-12 flex flex-col gap-12">
+      <div className="relative z-10 max-w-300 mx-auto w-full px-4 md:px-8 py-12 flex flex-col gap-12">
         <header>
           <h1 className="display-heading text-3xl sm:text-4xl text-slate-950 dark:text-white mb-3">
             Learn any cloud
@@ -464,7 +464,7 @@ export default function EducationIndexPage() {
             aria-labelledby="equivalence-heading"
             className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700"
           >
-            <table className="w-full min-w-[72rem] border-collapse text-left">
+            <table className="w-full min-w-6xl border-collapse text-left">
               <caption className="sr-only">
                 Certification levels across nine providers. Each row is a level; each column is a
                 provider; each cell lists that provider&rsquo;s certifications at that level, or an

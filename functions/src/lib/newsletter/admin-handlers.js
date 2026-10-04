@@ -294,6 +294,817 @@ async function resolveSender(raw, client) {
   return { from: parsed.from };
 }
 
+/** The issue the path names, or null: not an id, not found, not an issue, or deleted. */
+async function readIssueDoc(store, request) {
+  const id = String(request.params?.id ?? '');
+  if (!ISSUE_ID_PATTERN.test(id)) return null;
+  const doc = await store.readDoc('newsletters', id, id);
+  return doc?.kind === 'weekly_issue' && doc.status !== 'deleted' ? doc : null;
+}
+
+/**
+ * An ETag-conditional write of an issue: `{ doc }` as stored (the document
+ * passed, when the store returns nothing), or `{ conflict: true }` when the
+ * issue changed since it was read (412). Any other failure throws.
+ */
+async function replaceIssueIfMatch(store, doc) {
+  try {
+    return { doc: (await store.replaceDocIfMatch('newsletters', doc)) ?? doc };
+  } catch (error) {
+    if (error?.code === 412) return { conflict: true };
+    throw error;
+  }
+}
+
+/**
+ * The list's lazy reconcile: full documents for the overdue scheduled rows,
+ * asked of Resend, and the rows replaced by what came back. Silent without
+ * a key. Never throws: a list must not fail because Resend did.
+ */
+async function reconcileOverdueRows({ store, now, clientOrNull }, rows, context) {
+  const client = clientOrNull();
+  const at = now();
+  const candidates = (rows || [])
+    .filter((row) => overdue(row, at) && row.broadcastId !== null)
+    .slice(0, LIST_RECONCILE_LIMIT);
+  if (!client || candidates.length === 0) return { rows, warnings: [] };
+  try {
+    const issues = (
+      await Promise.all(candidates.map((row) => store.readDoc('newsletters', row.id, row.id)))
+    ).filter(Boolean);
+    const outcome = await reconcileIssues({
+      store,
+      client,
+      issues,
+      now,
+      all: true,
+      limit: LIST_RECONCILE_LIMIT,
+      log: context,
+    });
+    if (outcome.changed.length === 0) return { rows, warnings: outcome.warnings };
+    const refreshed = await Promise.all(
+      outcome.changed.map((id) => store.readDoc('newsletters', id, id))
+    );
+    const byId = new Map(refreshed.filter(Boolean).map((doc) => [doc.id, doc]));
+    return {
+      rows: rows.map((row) => (byId.has(row.id) ? byId.get(row.id) : row)),
+      warnings: outcome.warnings,
+    };
+  } catch (error) {
+    context.warn?.(`listNewsletters reconcile skipped: ${errorMeta(error)}`);
+    return { rows, warnings: [] };
+  }
+}
+
+// ── PATCH fields: each normaliser answers `{ value }` or `{ error }` ─────────
+
+function normalizeCustomNote(raw) {
+  if (typeof raw !== 'string') return { error: 'customNote must be a string' };
+  const note = raw.replace(/\r\n/g, '\n').trim();
+  if (note.length > MAX_CUSTOM_NOTE_LENGTH) {
+    return { error: `customNote must be at most ${MAX_CUSTOM_NOTE_LENGTH} characters` };
+  }
+  return { value: note };
+}
+
+function normalizeSubject(raw) {
+  const subject = typeof raw === 'string' ? raw.replace(/\s+/g, ' ').trim() : '';
+  if (!subject || subject.length > MAX_SUBJECT_LENGTH) {
+    return { error: `subject must be 1 to ${MAX_SUBJECT_LENGTH} characters` };
+  }
+  return { value: subject };
+}
+
+/** One line in an inbox list, so whitespace collapses like the subject's. */
+function normalizePreheader(raw) {
+  if (typeof raw !== 'string') return { error: 'preheader must be a string' };
+  const preheader = raw.replace(/\s+/g, ' ').trim();
+  if (preheader.length > MAX_PREHEADER_LENGTH) {
+    return { error: `preheader must be at most ${MAX_PREHEADER_LENGTH} characters` };
+  }
+  return { value: preheader };
+}
+
+/** A per-issue send time (ADR 0033): null (or '') clears it back to the settings slot. */
+function normalizeSendAt(raw, now) {
+  if (raw === null || raw === '') return { value: null };
+  const when = typeof raw === 'string' ? Date.parse(raw) : NaN;
+  if (!Number.isFinite(when)) return { error: 'sendAt must be an ISO instant or null' };
+  if (when <= now().getTime()) return { error: 'sendAt must be in the future' };
+  return { value: new Date(when).toISOString() };
+}
+
+/** In the order their errors are reported. `sections` is checked against the stored issue, later. */
+const PATCH_NORMALIZERS = [
+  ['customNote', normalizeCustomNote],
+  ['subject', normalizeSubject],
+  ['preheader', normalizePreheader],
+  ['sendAt', normalizeSendAt],
+];
+
+/**
+ * The scalar fields of a PATCH body, normalised: `{ patch }` holding only the
+ * fields sent, or `{ error }` naming the first one that is not acceptable.
+ */
+export function parseIssuePatch(body, now) {
+  const patch = {};
+  for (const [field, normalize] of PATCH_NORMALIZERS) {
+    if (body[field] === undefined) continue;
+    const result = normalize(body[field], now);
+    if (result.error) return { error: result.error };
+    patch[field] = result.value;
+  }
+  return { patch };
+}
+
+/**
+ * The issue rendered in the design chosen in settings: the built-in one when
+ * no template is chosen, else the template, or the built-in one plus
+ * `templateProblem` when the template cannot be fetched or used. Never
+ * throws for a template problem; the log line carries only its fixed code.
+ * `deps` is the factory's { env, fetchImpl, templateCache }.
+ */
+async function renderChosenDesign(
+  { env, fetchImpl, templateCache },
+  issue,
+  renderSettings,
+  settings,
+  context
+) {
+  if (!settings.templateId) {
+    templateCache.select(BUILT_IN_TEMPLATE_ID);
+    return { ...renderIssue(issue, renderSettings), templateProblem: null };
+  }
+  const loaded = await loadTemplateHtml({
+    templateId: settings.templateId,
+    apiKey: readKey(env, 'RESEND_API_KEY'),
+    fetch: fetchImpl,
+    cache: templateCache,
+  });
+  const rendered = loaded.problem
+    ? {
+        ...renderIssue(issue, renderSettings),
+        templateProblem: loaded.problem,
+      }
+    : renderIssueInTemplate(issue, renderSettings, loaded.html);
+  if (rendered.templateProblem) {
+    context?.warn?.(
+      `newsletter template not used [invocation ${context?.invocationId ?? 'unknown'}]: ${rendered.templateProblem.code}`
+    );
+  }
+  return rendered;
+}
+
+/** The send plan for the preview, or null when the settings cannot make one. */
+function planOrNull(issue, settings, at) {
+  try {
+    return planFor(issue, settings, at);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * An issue as the page receives it: the summary, the editable fields, the
+ * preview in the chosen design, and what stands between it and a send.
+ * `deps` is the factory's { render, now, sendingEnabled, fromAddress }.
+ */
+async function presentIssue(
+  { render, now, sendingEnabled, fromAddress },
+  issue,
+  settings,
+  context
+) {
+  const { templateProblem, ...preview } = await render(
+    issue,
+    { postalAddress: settings.postalAddress || ADDRESS_NOT_SET },
+    settings,
+    context
+  );
+  const missing = missingForSending(settings);
+  return {
+    ok: true,
+    issue: {
+      ...pick(issue, SUMMARY_FIELDS),
+      preheader: issue.preheader ?? '',
+      intro: issue.intro ?? '',
+      introError: issue.introError ?? null,
+      customNote: issue.customNote ?? '',
+      sections: issue.sections ?? [],
+      problems: issue.problems ?? [],
+      broadcastId: issue.broadcastId ?? null,
+      sendAt: issue.sendAt ?? null,
+      versions: (Array.isArray(issue.versions) ? issue.versions : []).map(summariseVersion),
+      // Echo this back as `etag` on PATCH, approve or reject; a stale one is a 409.
+      etag: issue._etag ?? null,
+    },
+    preview,
+    readyToSend: missing.length === 0 && !templateProblem,
+    missingSettings: missing,
+    sendingEnabled: sendingEnabled(),
+    sendPlan: planOrNull(issue, settings, now()),
+    fromAddress: await fromAddress(context),
+    // Set when a template is chosen but the preview is the built-in design.
+    templateProblem,
+  };
+}
+
+/**
+ * A read's reconcile: a scheduled issue is asked of Resend before it is
+ * shown, so a send that went is never shown as pending (ADR 0033). Silent
+ * without a key, and never throws: a read must not fail because Resend did.
+ * `{ issue, reconcileWarning }`, the issue as stored afterwards.
+ */
+async function reconcileForRead({ store, now, clientOrNull }, issue, context) {
+  const client = reconcilable(issue) ? clientOrNull() : null;
+  if (!client) return { issue, reconcileWarning: null };
+  try {
+    const outcome = await reconcileIssue({ store, client, issue, now, log: context });
+    return { issue: outcome.issue, reconcileWarning: outcome.reason || null };
+  } catch (error) {
+    context.warn?.(`getNewsletter reconcile skipped: ${errorMeta(error)}`);
+    return { issue, reconcileWarning: null };
+  }
+}
+
+/**
+ * The 429 a test send gets inside TEST_SEND_INTERVAL_MS of the issue's last
+ * one, or null when a test may go. `at` is the moment being judged.
+ */
+function testRateLimit(doc, at) {
+  const last = Date.parse(doc?.lastTestAt ?? '');
+  if (!Number.isFinite(last) || at.getTime() - last >= TEST_SEND_INTERVAL_MS) return null;
+  const retryAfterSeconds = Math.max(
+    1,
+    Math.ceil((last + TEST_SEND_INTERVAL_MS - at.getTime()) / 1000)
+  );
+  return json(429, {
+    ok: false,
+    code: 'TEST_RATE_LIMITED',
+    retryAfterSeconds,
+    error: `A test of this issue was sent under a minute ago. Try again in ${retryAfterSeconds} seconds.`,
+  });
+}
+
+/**
+ * Write an approval claim's outcome ONLY if the issue is still the claim
+ * (`sending`, approved at `approvedAt`). Reject is allowed from `sending` (to
+ * clear a stuck send), so an owner can reject while approval is between the
+ * claim and Resend's answer; an unconditional write here would silently undo
+ * that. The fresh read supplies the ETag the conditional replace needs.
+ *
+ * @returns {Promise<{ written: true, doc: object } | { written: false, current: object|null }>}
+ */
+async function settleClaim(store, issueId, approvedAt, next) {
+  const current = await store.readDoc('newsletters', issueId, issueId);
+  if (current?.status !== 'sending' || current?.approvedAt !== approvedAt) {
+    return { written: false, current };
+  }
+  try {
+    const doc = await store.replaceDocIfMatch('newsletters', {
+      ...next,
+      _etag: current._etag,
+    });
+    return { written: true, doc: doc ?? next };
+  } catch (error) {
+    if (error?.code === 412) return { written: false, current: null };
+    throw error;
+  }
+}
+
+// ── Routes hoisted out of the factory (PR #841 quality round) ─────────────
+//
+// `update`, `intro`, `test` and `approve` take the factory's `ctx` first;
+// everything they read from it is destructured on their first line, so their
+// bodies read as they did inside the factory.
+
+async function update(ctx, request, context) {
+  const { guard, store, now, readSettings, readIssue, present } = ctx;
+  const auth = await guard.requireRole(request, 'editor');
+  if (auth.error) return auth.error;
+  const body = await request.json().catch(() => null);
+  // No body, or not an object, is a write with no etag: the same structured
+  // answer reject gives, so a client handles one error shape for both.
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return etagRequired();
+  const unknown = Object.keys(body).filter((key) => !EDITABLE_FIELDS.includes(key));
+  if (unknown.length)
+    return json(400, {
+      ok: false,
+      error: `Unknown field(s): ${unknown.join(', ')}`,
+    });
+  if (missingEtag(body)) return etagRequired();
+
+  const parsed = parseIssuePatch(body, now);
+  if (parsed.error) return json(400, { ok: false, error: parsed.error });
+  const { patch } = parsed;
+
+  try {
+    const issue = await readIssue(request);
+    if (!issue) return notFound();
+    if (issue.status !== 'draft') {
+      return json(409, {
+        ok: false,
+        error: `Only a draft can be edited; this issue is ${issue.status}.`,
+      });
+    }
+    if (staleView(body, issue)) return changedElsewhere();
+    if (body.sections !== undefined) {
+      // Checked against the stored issue, which is the version the etag names.
+      const edit = applySectionEdit(issue.sections, body.sections);
+      if (edit.error)
+        return json(400, {
+          ok: false,
+          code: 'SECTIONS_INVALID',
+          error: edit.error,
+        });
+      patch.sections = edit.sections;
+      patch.itemCount = edit.itemCount;
+    }
+    const at = now().toISOString();
+    // The version being replaced goes into history first, so Reset and a
+    // later look-back both have what the owner saw before this save.
+    const versions = pushVersion(issue, auth.user?.oid || auth.user?.sub || null, at);
+    const updated = { ...issue, ...patch, versions, updatedAt: at };
+    const written = await replaceIssueIfMatch(store, updated);
+    if (written.conflict) return changedElsewhere();
+    // The stored document, so the response carries the NEW etag.
+    return json(200, await present(written.doc, await readSettings(), context));
+  } catch (error) {
+    context.error?.(`updateNewsletter failed: ${error?.message ?? error}`);
+    return json(500, {
+      ok: false,
+      error: 'Failed to save the newsletter issue',
+    });
+  }
+}
+
+/**
+ * Regenerate a draft's intro with the builder's own drafter, instruction
+ * and saved tone (issue.js draftIntro). Only the intro is written, never the
+ * subject, which the owner may have edited. An AI failure writes nothing.
+ */
+async function intro(ctx, request, context) {
+  const { guard, store, now, drafter, aiBudgetMs, readSettings, readIssue, present } = ctx;
+  const budgetLeft = startBudgetClock(aiBudgetMs);
+  const auth = await guard.requireRole(request, 'editor');
+  if (auth.error) return auth.error;
+  const body = await request.json().catch(() => null);
+  if (missingEtag(body)) return etagRequired();
+  const ref = `[invocation ${context?.invocationId ?? 'unknown'}]`;
+  if (!drafter)
+    return json(503, {
+      ok: false,
+      error: 'AI drafting is not configured for newsletters.',
+    });
+  try {
+    const issue = await readIssue(request);
+    if (!issue) return notFound();
+    if (issue.status !== 'draft') {
+      return json(409, {
+        ok: false,
+        error: `Only a draft's intro can be regenerated; this issue is ${issue.status}.`,
+      });
+    }
+    if (staleView(body, issue)) return changedElsewhere();
+
+    // The saved tone (Newsletter settings → Content), the same one a build uses.
+    const settings = await readSettings();
+    let intro;
+    try {
+      ({ intro } = await draftIntro({
+        drafter,
+        sections: issue.sections ?? [],
+        subject: issue.subject,
+        tone: settings.introTone,
+        budgetMs: budgetLeft(),
+      }));
+    } catch (error) {
+      context.error?.(`regenerateNewsletterIntro AI failed ${ref}: ${errorMeta(error)}`);
+      return json(502, {
+        ok: false,
+        code: 'AI_FAILED',
+        error: `The intro was not regenerated: ${describeAiError(error)}`,
+      });
+    }
+    if (!intro) {
+      return json(502, {
+        ok: false,
+        code: 'AI_FAILED',
+        error: 'The intro was not regenerated: the AI returned an empty intro. Try again.',
+      });
+    }
+
+    // Conditional on the version read above, so an edit that landed while
+    // the model was writing is not overwritten.
+    const updated = {
+      ...issue,
+      intro,
+      introError: null,
+      updatedAt: now().toISOString(),
+    };
+    const written = await replaceIssueIfMatch(store, updated);
+    if (written.conflict) return changedElsewhere();
+    return json(200, await present(written.doc, settings, context));
+  } catch (error) {
+    context.error?.(`regenerateNewsletterIntro failed ${ref}: ${errorMeta(error)}`);
+    return json(500, {
+      ok: false,
+      error: 'Failed to regenerate the intro',
+    });
+  }
+}
+
+/**
+ * Email ONE test copy of a draft to the reply-to address in Newsletter
+ * settings.
+ *
+ * This cannot reach a subscriber, which is why it is NOT gated on
+ * NEWSLETTER_SENDING_ENABLED: the recipient is read from settings, never
+ * from the request body, and the call is Resend's single-email endpoint,
+ * not a broadcast to the segment. Publisher, because it still sends mail
+ * from the newsletter's address.
+ *
+ * One test per issue per minute: `lastTestAt` is written with an
+ * ETag-conditional replace BEFORE Resend is called, so a double click
+ * sends once and the loser gets 429. A refused send still counts toward the
+ * minute. The write changes the issue's etag, so the answer carries the
+ * new one for the page to keep editing with.
+ */
+async function test(ctx, request, context) {
+  const {
+    guard,
+    store,
+    env,
+    fetchImpl,
+    now,
+    readSettings,
+    readIssue,
+    renderChosenDesign,
+    fromAddress,
+  } = ctx;
+  const auth = await guard.requireRole(request, 'publisher');
+  if (auth.error) return auth.error;
+  const body = await request.json().catch(() => null);
+  if (missingEtag(body)) return etagRequired();
+  // Log lines carry this, never the issue id or an address (content-free telemetry).
+  const ref = `[invocation ${context?.invocationId ?? 'unknown'}]`;
+
+  const apiKey = readKey(env, 'RESEND_API_KEY');
+  if (!apiKey)
+    return json(503, {
+      ok: false,
+      error: 'Resend is not configured: RESEND_API_KEY is not set',
+    });
+
+  let settings;
+  let issue;
+  try {
+    settings = await readSettings();
+    issue = await readIssue(request);
+  } catch (error) {
+    context.error?.(`testNewsletter read failed ${ref}: ${errorMeta(error)}`);
+    return json(500, {
+      ok: false,
+      error: 'Failed to read the newsletter issue',
+    });
+  }
+  if (!issue) return notFound();
+
+  const missing = missingForSending(settings);
+  if (missing.length) {
+    return json(409, {
+      ok: false,
+      code: 'SETTINGS_INCOMPLETE',
+      missingSettings: missing,
+      error: `Add the ${missing.join(' and ')} in Newsletter settings before sending a test.`,
+    });
+  }
+  if (issue.status !== 'draft') {
+    return json(409, {
+      ok: false,
+      error: `Only a draft can be test-sent; this issue is ${issue.status}.`,
+    });
+  }
+
+  const at = now();
+  const tooSoon = (doc) => testRateLimit(doc, at);
+  // Before the stale check: a second press inside the minute is "too soon"
+  // whichever etag it carries.
+  const limited = tooSoon(issue);
+  if (limited) return limited;
+  if (staleView(body, issue)) return changedElsewhere();
+
+  // In the chosen design; an unusable template falls back to the built-in
+  // one for a test, and the answer says so.
+  let rendered;
+  try {
+    rendered = await renderChosenDesign(
+      issue,
+      { postalAddress: settings.postalAddress, testSend: true },
+      settings,
+      context
+    );
+  } catch (error) {
+    context.error?.(`testNewsletter render failed ${ref}: ${errorMeta(error)}`);
+    return json(500, {
+      ok: false,
+      error: 'Failed to render the newsletter issue',
+    });
+  }
+
+  let claimed;
+  try {
+    claimed = await store.replaceDocIfMatch('newsletters', {
+      ...issue,
+      lastTestAt: at.toISOString(),
+    });
+  } catch (error) {
+    if (error?.code === 412) {
+      // Another test (or an edit) got there first; say which.
+      const current = await store.readDoc('newsletters', issue.id, issue.id).catch(() => null);
+      return tooSoon(current) ?? changedElsewhere();
+    }
+    context.error?.(`testNewsletter claim failed ${ref}: ${errorMeta(error)}`);
+    return json(500, { ok: false, error: 'Failed to send the test email' });
+  }
+
+  const sentTo = settings.replyTo;
+  const client = createResendClient({ apiKey, fetch: fetchImpl });
+  const sent = await client.sendEmail({
+    from: await fromAddress(context),
+    to: [sentTo],
+    subject: `[TEST] ${rendered.subject}`,
+    html: rendered.html,
+    text: rendered.text,
+  });
+  const etag = claimed?._etag ?? null;
+  if (!sent.ok) {
+    context.error?.(`testNewsletter not sent ${ref}: ${describeForLog(sent)}`);
+    return json(502, {
+      ok: false,
+      etag,
+      ...(rendered.templateProblem ? { templateProblem: rendered.templateProblem } : {}),
+      error: `Resend did not accept the test email: ${describeForOwner(sent)}`,
+    });
+  }
+  context.log?.(`testNewsletter sent ${ref}`);
+  return json(200, {
+    ok: true,
+    sentTo,
+    etag,
+    ...(rendered.templateProblem ? { templateProblem: rendered.templateProblem } : {}),
+  });
+}
+
+async function approve(ctx, request, context) {
+  const {
+    guard,
+    store,
+    env,
+    fetchImpl,
+    now,
+    readSettings,
+    readIssue,
+    renderChosenDesign,
+    present,
+    fromAddress,
+    sendingEnabled,
+  } = ctx;
+  const auth = await guard.requireRole(request, 'publisher');
+  if (auth.error) return auth.error;
+  const body = await request.json().catch(() => null);
+  if (missingEtag(body)) return etagRequired();
+  // Log lines carry this, never the issue or broadcast id (content-free telemetry).
+  const ref = `[invocation ${context?.invocationId ?? 'unknown'}]`;
+
+  // The owner's switch comes first: while it is off, nothing is read,
+  // claimed or sent, whatever the issue or settings say.
+  if (!sendingEnabled()) {
+    return json(503, {
+      ok: false,
+      code: 'NEWSLETTER_SENDING_DISABLED',
+      error:
+        'Sending is switched off. Set newsletter_sending_enabled to true in Terraform to allow approval.',
+    });
+  }
+
+  const apiKey = readKey(env, 'RESEND_API_KEY');
+  if (!apiKey)
+    return json(503, {
+      ok: false,
+      error: 'Resend is not configured: RESEND_API_KEY is not set',
+    });
+
+  let settings;
+  let issue;
+  try {
+    settings = await readSettings();
+    issue = await readIssue(request);
+  } catch (error) {
+    context.error?.(`approveNewsletter read failed ${ref}: ${errorMeta(error)}`);
+    return json(500, {
+      ok: false,
+      error: 'Failed to read the newsletter issue',
+    });
+  }
+  if (!issue) return notFound();
+
+  const missing = missingForSending(settings);
+  if (missing.length) {
+    return json(409, {
+      ok: false,
+      code: 'SETTINGS_INCOMPLETE',
+      missingSettings: missing,
+      error: `Add the ${missing.join(' and ')} in Newsletter settings before approving.`,
+    });
+  }
+  if (issue.status !== 'draft') {
+    return json(409, {
+      ok: false,
+      error: `Only a draft can be approved; this issue is ${issue.status}.`,
+    });
+  }
+  // Approve what the approver saw: an issue edited since they opened it is
+  // not sent with content they never read.
+  if (staleView(body, issue)) return changedElsewhere();
+
+  // Everything that can fail on the site's own data is worked out BEFORE the
+  // claim, so a bad settings document refuses the approval instead of
+  // leaving the issue stuck in `sending` with nothing sent.
+  let plan;
+  try {
+    plan = planFor(issue, settings, now());
+  } catch (error) {
+    context.error?.(`approveNewsletter send slot invalid ${ref}: ${errorMeta(error)}`);
+    return json(409, {
+      ok: false,
+      code: 'SETTINGS_INVALID',
+      error:
+        'The send day, time or time zone in Newsletter settings is not valid. Save them again, then approve.',
+    });
+  }
+  let rendered;
+  try {
+    rendered = await renderChosenDesign(
+      issue,
+      { postalAddress: settings.postalAddress },
+      settings,
+      context
+    );
+  } catch (error) {
+    context.error?.(`approveNewsletter render failed ${ref}: ${errorMeta(error)}`);
+    return json(500, {
+      ok: false,
+      error: 'Failed to render the newsletter issue',
+    });
+  }
+  // The chosen template could not be fetched or used. The preview showed
+  // the built-in design with a warning; sending that instead of the design
+  // the owner chose is refused, before anything is claimed.
+  if (rendered.templateProblem) {
+    context.error?.(`approveNewsletter template unusable ${ref}: ${rendered.templateProblem.code}`);
+    return json(409, {
+      ok: false,
+      code: 'TEMPLATE_UNUSABLE',
+      templateProblem: rendered.templateProblem,
+      error: `The template chosen in Newsletter settings cannot be used: ${rendered.templateProblem.message} Fix it in Resend or choose the built-in design, check the preview, then approve.`,
+    });
+  }
+
+  const approvedAt = now().toISOString();
+  const approvedBy = auth.user?.oid || auth.user?.sub || null;
+  const claimed = {
+    ...issue,
+    status: 'sending',
+    approvedAt,
+    approvedBy,
+    lastError: null,
+    updatedAt: approvedAt,
+  };
+  try {
+    await store.replaceDocIfMatch('newsletters', claimed);
+  } catch (error) {
+    if (error?.code === 412) return changedElsewhere();
+    context.error?.(`approveNewsletter claim failed ${ref}: ${errorMeta(error)}`);
+    return json(500, {
+      ok: false,
+      error: 'Failed to approve the newsletter issue',
+    });
+  }
+
+  const client = createResendClient({ apiKey, fetch: fetchImpl });
+
+  /** The claim's outcome, written only while the issue is still this claim (settleClaim). */
+  const settle = (next) => settleClaim(store, issue.id, approvedAt, next);
+
+  // `reason` reaches the issue and the page; `logSummary` is all that is logged.
+  const revert = async (reason, logSummary) => {
+    context.error?.(`approveNewsletter not sent ${ref}: ${logSummary}`);
+    await settle({
+      ...claimed,
+      status: 'draft',
+      // Not approved after all: nothing was scheduled, so the issue must not
+      // read as approved in the list or the preview.
+      approvedAt: null,
+      approvedBy: null,
+      lastError: reason,
+      updatedAt: now().toISOString(),
+    }).catch((error) =>
+      context.error?.(`approveNewsletter could not revert ${ref}: ${errorMeta(error)}`)
+    );
+    return json(502, {
+      ok: false,
+      error: `Resend did not accept the newsletter: ${reason}`,
+    });
+  };
+
+  let segmentId;
+  try {
+    segmentId = await resolveSegmentId(client);
+  } catch (error) {
+    return revert(error.message, errorMeta(error));
+  }
+
+  const { subject, html, text } = rendered;
+  const created = await client.createBroadcast({
+    segmentId,
+    from: await fromAddress(context),
+    replyTo: settings.replyTo,
+    subject,
+    html,
+    text,
+    name: `HybridCloudWorks Weekly ${issue.id.slice('issue-'.length)}`,
+    scheduledAt: plan.sendNow ? undefined : plan.scheduledAt,
+  });
+  if (created.status === 0) {
+    // No answer at all (timeout, connection reset): Resend may have accepted
+    // the broadcast. Returning to draft would invite a second approval and a
+    // second send, so the issue stays `sending` for the owner to check.
+    context.error?.(`approveNewsletter no answer from Resend ${ref}`);
+    await settle({
+      ...claimed,
+      lastError: 'No answer from Resend; it may or may not have accepted the broadcast.',
+      updatedAt: now().toISOString(),
+    }).catch((error) =>
+      context.error?.(`approveNewsletter could not record ${ref}: ${errorMeta(error)}`)
+    );
+    return json(502, {
+      ok: false,
+      code: 'SEND_OUTCOME_UNKNOWN',
+      error:
+        "Resend did not answer, so it may have accepted the newsletter. Check Resend's Broadcasts list before anything else; reject this issue here only once you have.",
+    });
+  }
+  if (!created.ok || !created.data?.id)
+    return revert(describeForOwner(created), describeForLog(created));
+
+  const done = {
+    ...claimed,
+    status: plan.sendNow ? 'sent' : 'scheduled',
+    broadcastId: created.data.id,
+    ...(plan.sendNow ? { sentAt: now().toISOString() } : { scheduledAt: plan.scheduledAt }),
+    updatedAt: now().toISOString(),
+  };
+  let outcome;
+  try {
+    outcome = await settle(done);
+  } catch (error) {
+    // The broadcast exists; the record of it did not save. Say so rather
+    // than report a failure that would invite a second approval.
+    context.error?.(`approveNewsletter sent but not recorded ${ref}: ${errorMeta(error)}`);
+    // Same shape as every other success (issue, preview, sendPlan...), plus
+    // `warning`, so a caller handles one payload. The issue is re-read so it
+    // shows `sending`, which offers no second approval; the claim stands in
+    // if even that read fails.
+    let latest = claimed;
+    try {
+      latest = (await store.readDoc('newsletters', issue.id, issue.id)) ?? claimed;
+    } catch (readError) {
+      context.error?.(`approveNewsletter re-read failed ${ref}: ${errorMeta(readError)}`);
+    }
+    return json(200, {
+      ...(await present(latest, settings, context)),
+      warning: `Resend accepted broadcast ${created.data.id}, but the site could not record it. Do not approve again.`,
+    });
+  }
+  if (!outcome.written) {
+    // Rejected (or otherwise changed) while Resend was being asked. The
+    // broadcast exists and the owner's reject stands, so the only honest
+    // answer names the broadcast and what to do about it.
+    context.error?.(
+      `approveNewsletter broadcast created but issue changed to ${outcome.current?.status ?? 'unknown'} meanwhile ${ref}`
+    );
+    return json(409, {
+      ok: false,
+      code: 'CHANGED_DURING_SEND',
+      broadcastId: created.data.id,
+      error: `Resend accepted broadcast ${created.data.id}, but this issue was changed while it was being sent. If it should not go out, cancel it in Resend's Broadcasts page.`,
+    });
+  }
+  context.log?.(`approveNewsletter ${done.status} ${ref}`);
+  return json(200, await present(outcome.doc, settings, context));
+}
+
 /**
  * @param {object} deps
  * @param {{ requireRole: Function }} deps.guard
@@ -324,12 +1135,7 @@ export function createNewsletterAdminHandlers({
     return presentSetting('newsletter-settings', doc).value;
   }
 
-  async function readIssue(request) {
-    const id = String(request.params?.id ?? '');
-    if (!ISSUE_ID_PATTERN.test(id)) return null;
-    const doc = await store.readDoc('newsletters', id, id);
-    return doc?.kind === 'weekly_issue' && doc.status !== 'deleted' ? doc : null;
-  }
+  const readIssue = (request) => readIssueDoc(store, request);
 
   /** A Resend client, or null without the key. Reads that reconcile use it; nothing else does. */
   const clientOrNull = () => {
@@ -344,117 +1150,13 @@ export function createNewsletterAdminHandlers({
   // "true" is off, so a missing or mistyped setting cannot send.
   const sendingEnabled = () => env?.NEWSLETTER_SENDING_ENABLED === 'true';
 
-  /**
-   * The issue rendered in the design chosen in settings: the built-in one when
-   * no template is chosen, else the template, or the built-in one plus
-   * `templateProblem` when the template cannot be fetched or used. Never
-   * throws for a template problem; the log line carries only its fixed code.
-   */
-  async function renderChosenDesign(issue, renderSettings, settings, context) {
-    if (!settings.templateId) {
-      templateCache.select(BUILT_IN_TEMPLATE_ID);
-      return { ...renderIssue(issue, renderSettings), templateProblem: null };
-    }
-    const loaded = await loadTemplateHtml({
-      templateId: settings.templateId,
-      apiKey: readKey(env, 'RESEND_API_KEY'),
-      fetch: fetchImpl,
-      cache: templateCache,
-    });
-    const rendered = loaded.problem
-      ? {
-          ...renderIssue(issue, renderSettings),
-          templateProblem: loaded.problem,
-        }
-      : renderIssueInTemplate(issue, renderSettings, loaded.html);
-    if (rendered.templateProblem) {
-      context?.warn?.(
-        `newsletter template not used [invocation ${context?.invocationId ?? 'unknown'}]: ${rendered.templateProblem.code}`
-      );
-    }
-    return rendered;
-  }
+  /** The issue in the chosen design (renderChosenDesign), with this factory's template source. */
+  const render = (issue, renderSettings, settings, context) =>
+    renderChosenDesign({ env, fetchImpl, templateCache }, issue, renderSettings, settings, context);
 
-  async function present(issue, settings, context) {
-    const { templateProblem, ...preview } = await renderChosenDesign(
-      issue,
-      { postalAddress: settings.postalAddress || ADDRESS_NOT_SET },
-      settings,
-      context
-    );
-    const missing = missingForSending(settings);
-    let sendPlan = null;
-    try {
-      sendPlan = planFor(issue, settings, now());
-    } catch {
-      sendPlan = null;
-    }
-    return {
-      ok: true,
-      issue: {
-        ...pick(issue, SUMMARY_FIELDS),
-        preheader: issue.preheader ?? '',
-        intro: issue.intro ?? '',
-        introError: issue.introError ?? null,
-        customNote: issue.customNote ?? '',
-        sections: issue.sections ?? [],
-        problems: issue.problems ?? [],
-        broadcastId: issue.broadcastId ?? null,
-        sendAt: issue.sendAt ?? null,
-        versions: (Array.isArray(issue.versions) ? issue.versions : []).map(summariseVersion),
-        // Echo this back as `etag` on PATCH, approve or reject; a stale one is a 409.
-        etag: issue._etag ?? null,
-      },
-      preview,
-      readyToSend: missing.length === 0 && !templateProblem,
-      missingSettings: missing,
-      sendingEnabled: sendingEnabled(),
-      sendPlan,
-      fromAddress: await fromAddress(context),
-      // Set when a template is chosen but the preview is the built-in design.
-      templateProblem,
-    };
-  }
-
-  /**
-   * The list's lazy reconcile: full documents for the overdue scheduled rows,
-   * asked of Resend, and the rows replaced by what came back. Silent without
-   * a key. Never throws: a list must not fail because Resend did.
-   */
-  async function reconcileOverdueRows(rows, context) {
-    const client = clientOrNull();
-    const at = now();
-    const candidates = (rows || [])
-      .filter((row) => overdue(row, at) && row.broadcastId !== null)
-      .slice(0, LIST_RECONCILE_LIMIT);
-    if (!client || candidates.length === 0) return { rows, warnings: [] };
-    try {
-      const issues = (
-        await Promise.all(candidates.map((row) => store.readDoc('newsletters', row.id, row.id)))
-      ).filter(Boolean);
-      const outcome = await reconcileIssues({
-        store,
-        client,
-        issues,
-        now,
-        all: true,
-        limit: LIST_RECONCILE_LIMIT,
-        log: context,
-      });
-      if (outcome.changed.length === 0) return { rows, warnings: outcome.warnings };
-      const refreshed = await Promise.all(
-        outcome.changed.map((id) => store.readDoc('newsletters', id, id))
-      );
-      const byId = new Map(refreshed.filter(Boolean).map((doc) => [doc.id, doc]));
-      return {
-        rows: rows.map((row) => (byId.has(row.id) ? byId.get(row.id) : row)),
-        warnings: outcome.warnings,
-      };
-    } catch (error) {
-      context.warn?.(`listNewsletters reconcile skipped: ${errorMeta(error)}`);
-      return { rows, warnings: [] };
-    }
-  }
+  /** An issue as the page receives it (presentIssue), rendered through `render`. */
+  const present = (issue, settings, context) =>
+    presentIssue({ render, now, sendingEnabled, fromAddress }, issue, settings, context);
 
   // cancel, reschedule and retry live in issue-actions.js (PR #841); they
   // read, render and present an issue through the same functions as the
@@ -466,10 +1168,32 @@ export function createNewsletterAdminHandlers({
     readIssue,
     readSettings,
     present,
-    renderChosenDesign,
+    renderChosenDesign: render,
     clientOrNull,
     fromAddress,
   });
+
+  /**
+   * What the routes hoisted out of this factory (`update`, `intro`, `test`,
+   * `approve`, the reads' reconciles) need from it: the dependencies and the
+   * shared readers.
+   */
+  const ctx = {
+    guard,
+    store,
+    env,
+    fetchImpl,
+    now,
+    clientOrNull,
+    readSettings,
+    readIssue,
+    renderChosenDesign: render,
+    present,
+    fromAddress,
+    sendingEnabled,
+    drafter,
+    aiBudgetMs,
+  };
 
   return {
     async list(request, context) {
@@ -501,7 +1225,7 @@ export function createNewsletterAdminHandlers({
         }
         // Scheduled issues whose time has passed: ask Resend before answering,
         // so the list never shows a send as pending after it went (ADR 0033).
-        const reconciled = await reconcileOverdueRows(rows || [], context);
+        const reconciled = await reconcileOverdueRows(ctx, rows || [], context);
         return json(200, {
           ok: true,
           issues: reconciled.rows.map(summarise),
@@ -520,25 +1244,9 @@ export function createNewsletterAdminHandlers({
       const auth = await guard.requireRole(request, 'editor');
       if (auth.error) return auth.error;
       try {
-        let issue = await readIssue(request);
-        if (!issue) return notFound();
-        let reconcileWarning = null;
-        const client = reconcilable(issue) ? clientOrNull() : null;
-        if (client) {
-          try {
-            const outcome = await reconcileIssue({
-              store,
-              client,
-              issue,
-              now,
-              log: context,
-            });
-            issue = outcome.issue;
-            if (outcome.reason) reconcileWarning = outcome.reason;
-          } catch (error) {
-            context.warn?.(`getNewsletter reconcile skipped: ${errorMeta(error)}`);
-          }
-        }
+        const stored = await readIssue(request);
+        if (!stored) return notFound();
+        const { issue, reconcileWarning } = await reconcileForRead(ctx, stored, context);
         return json(200, {
           ...(await present(issue, await readSettings(), context)),
           ...(reconcileWarning ? { reconcileWarning } : {}),
@@ -552,202 +1260,9 @@ export function createNewsletterAdminHandlers({
       }
     },
 
-    async update(request, context) {
-      const auth = await guard.requireRole(request, 'editor');
-      if (auth.error) return auth.error;
-      const body = await request.json().catch(() => null);
-      // No body, or not an object, is a write with no etag: the same structured
-      // answer reject gives, so a client handles one error shape for both.
-      if (!body || typeof body !== 'object' || Array.isArray(body)) return etagRequired();
-      const unknown = Object.keys(body).filter((key) => !EDITABLE_FIELDS.includes(key));
-      if (unknown.length)
-        return json(400, {
-          ok: false,
-          error: `Unknown field(s): ${unknown.join(', ')}`,
-        });
-      if (missingEtag(body)) return etagRequired();
+    update: (request, context) => update(ctx, request, context),
 
-      const patch = {};
-      if (body.customNote !== undefined) {
-        if (typeof body.customNote !== 'string')
-          return json(400, { ok: false, error: 'customNote must be a string' });
-        const note = body.customNote.replace(/\r\n/g, '\n').trim();
-        if (note.length > MAX_CUSTOM_NOTE_LENGTH) {
-          return json(400, {
-            ok: false,
-            error: `customNote must be at most ${MAX_CUSTOM_NOTE_LENGTH} characters`,
-          });
-        }
-        patch.customNote = note;
-      }
-      if (body.subject !== undefined) {
-        const subject =
-          typeof body.subject === 'string' ? body.subject.replace(/\s+/g, ' ').trim() : '';
-        if (!subject || subject.length > MAX_SUBJECT_LENGTH) {
-          return json(400, {
-            ok: false,
-            error: `subject must be 1 to ${MAX_SUBJECT_LENGTH} characters`,
-          });
-        }
-        patch.subject = subject;
-      }
-      if (body.preheader !== undefined) {
-        if (typeof body.preheader !== 'string')
-          return json(400, { ok: false, error: 'preheader must be a string' });
-        // One line in an inbox list, so whitespace collapses like the subject's.
-        const preheader = body.preheader.replace(/\s+/g, ' ').trim();
-        if (preheader.length > MAX_PREHEADER_LENGTH) {
-          return json(400, {
-            ok: false,
-            error: `preheader must be at most ${MAX_PREHEADER_LENGTH} characters`,
-          });
-        }
-        patch.preheader = preheader;
-      }
-      if (body.sendAt !== undefined) {
-        // A per-issue send time (ADR 0033): null clears it back to the settings slot.
-        if (body.sendAt === null || body.sendAt === '') {
-          patch.sendAt = null;
-        } else {
-          const when = typeof body.sendAt === 'string' ? Date.parse(body.sendAt) : NaN;
-          if (!Number.isFinite(when))
-            return json(400, {
-              ok: false,
-              error: 'sendAt must be an ISO instant or null',
-            });
-          if (when <= now().getTime())
-            return json(400, {
-              ok: false,
-              error: 'sendAt must be in the future',
-            });
-          patch.sendAt = new Date(when).toISOString();
-        }
-      }
-
-      try {
-        const issue = await readIssue(request);
-        if (!issue) return notFound();
-        if (issue.status !== 'draft') {
-          return json(409, {
-            ok: false,
-            error: `Only a draft can be edited; this issue is ${issue.status}.`,
-          });
-        }
-        if (staleView(body, issue)) return changedElsewhere();
-        if (body.sections !== undefined) {
-          // Checked against the stored issue, which is the version the etag names.
-          const edit = applySectionEdit(issue.sections, body.sections);
-          if (edit.error)
-            return json(400, {
-              ok: false,
-              code: 'SECTIONS_INVALID',
-              error: edit.error,
-            });
-          patch.sections = edit.sections;
-          patch.itemCount = edit.itemCount;
-        }
-        const at = now().toISOString();
-        // The version being replaced goes into history first, so Reset and a
-        // later look-back both have what the owner saw before this save.
-        const versions = pushVersion(issue, auth.user?.oid || auth.user?.sub || null, at);
-        const updated = { ...issue, ...patch, versions, updatedAt: at };
-        let written;
-        try {
-          written = await store.replaceDocIfMatch('newsletters', updated);
-        } catch (error) {
-          if (error?.code === 412) return changedElsewhere();
-          throw error;
-        }
-        // The stored document, so the response carries the NEW etag.
-        return json(200, await present(written ?? updated, await readSettings(), context));
-      } catch (error) {
-        context.error?.(`updateNewsletter failed: ${error?.message ?? error}`);
-        return json(500, {
-          ok: false,
-          error: 'Failed to save the newsletter issue',
-        });
-      }
-    },
-
-    /**
-     * Regenerate a draft's intro with the builder's own drafter, instruction
-     * and saved tone (issue.js draftIntro). Only the intro is written, never the
-     * subject, which the owner may have edited. An AI failure writes nothing.
-     */
-    async intro(request, context) {
-      const budgetLeft = startBudgetClock(aiBudgetMs);
-      const auth = await guard.requireRole(request, 'editor');
-      if (auth.error) return auth.error;
-      const body = await request.json().catch(() => null);
-      if (missingEtag(body)) return etagRequired();
-      const ref = `[invocation ${context?.invocationId ?? 'unknown'}]`;
-      if (!drafter)
-        return json(503, {
-          ok: false,
-          error: 'AI drafting is not configured for newsletters.',
-        });
-      try {
-        const issue = await readIssue(request);
-        if (!issue) return notFound();
-        if (issue.status !== 'draft') {
-          return json(409, {
-            ok: false,
-            error: `Only a draft's intro can be regenerated; this issue is ${issue.status}.`,
-          });
-        }
-        if (staleView(body, issue)) return changedElsewhere();
-
-        // The saved tone (Newsletter settings → Content), the same one a build uses.
-        const settings = await readSettings();
-        let intro;
-        try {
-          ({ intro } = await draftIntro({
-            drafter,
-            sections: issue.sections ?? [],
-            subject: issue.subject,
-            tone: settings.introTone,
-            budgetMs: budgetLeft(),
-          }));
-        } catch (error) {
-          context.error?.(`regenerateNewsletterIntro AI failed ${ref}: ${errorMeta(error)}`);
-          return json(502, {
-            ok: false,
-            code: 'AI_FAILED',
-            error: `The intro was not regenerated: ${describeAiError(error)}`,
-          });
-        }
-        if (!intro) {
-          return json(502, {
-            ok: false,
-            code: 'AI_FAILED',
-            error: 'The intro was not regenerated: the AI returned an empty intro. Try again.',
-          });
-        }
-
-        // Conditional on the version read above, so an edit that landed while
-        // the model was writing is not overwritten.
-        const updated = {
-          ...issue,
-          intro,
-          introError: null,
-          updatedAt: now().toISOString(),
-        };
-        let written;
-        try {
-          written = await store.replaceDocIfMatch('newsletters', updated);
-        } catch (error) {
-          if (error?.code === 412) return changedElsewhere();
-          throw error;
-        }
-        return json(200, await present(written ?? updated, settings, context));
-      } catch (error) {
-        context.error?.(`regenerateNewsletterIntro failed ${ref}: ${errorMeta(error)}`);
-        return json(500, {
-          ok: false,
-          error: 'Failed to regenerate the intro',
-        });
-      }
-    },
+    intro: (request, context) => intro(ctx, request, context),
 
     /** Subject-line suggestions for the page to offer. Writes nothing, so no etag. */
     async subjects(request, context) {
@@ -789,410 +1304,9 @@ export function createNewsletterAdminHandlers({
       }
     },
 
-    /**
-     * Email ONE test copy of a draft to the reply-to address in Newsletter
-     * settings.
-     *
-     * This cannot reach a subscriber, which is why it is NOT gated on
-     * NEWSLETTER_SENDING_ENABLED: the recipient is read from settings, never
-     * from the request body, and the call is Resend's single-email endpoint,
-     * not a broadcast to the segment. Publisher, because it still sends mail
-     * from the newsletter's address.
-     *
-     * One test per issue per minute: `lastTestAt` is written with an
-     * ETag-conditional replace BEFORE Resend is called, so a double click
-     * sends once and the loser gets 429. A refused send still counts toward the
-     * minute. The write changes the issue's etag, so the answer carries the
-     * new one for the page to keep editing with.
-     */
-    async test(request, context) {
-      const auth = await guard.requireRole(request, 'publisher');
-      if (auth.error) return auth.error;
-      const body = await request.json().catch(() => null);
-      if (missingEtag(body)) return etagRequired();
-      // Log lines carry this, never the issue id or an address (content-free telemetry).
-      const ref = `[invocation ${context?.invocationId ?? 'unknown'}]`;
+    test: (request, context) => test(ctx, request, context),
 
-      const apiKey = readKey(env, 'RESEND_API_KEY');
-      if (!apiKey)
-        return json(503, {
-          ok: false,
-          error: 'Resend is not configured: RESEND_API_KEY is not set',
-        });
-
-      let settings;
-      let issue;
-      try {
-        settings = await readSettings();
-        issue = await readIssue(request);
-      } catch (error) {
-        context.error?.(`testNewsletter read failed ${ref}: ${errorMeta(error)}`);
-        return json(500, {
-          ok: false,
-          error: 'Failed to read the newsletter issue',
-        });
-      }
-      if (!issue) return notFound();
-
-      const missing = missingForSending(settings);
-      if (missing.length) {
-        return json(409, {
-          ok: false,
-          code: 'SETTINGS_INCOMPLETE',
-          missingSettings: missing,
-          error: `Add the ${missing.join(' and ')} in Newsletter settings before sending a test.`,
-        });
-      }
-      if (issue.status !== 'draft') {
-        return json(409, {
-          ok: false,
-          error: `Only a draft can be test-sent; this issue is ${issue.status}.`,
-        });
-      }
-
-      const at = now();
-      const tooSoon = (doc) => {
-        const last = Date.parse(doc?.lastTestAt ?? '');
-        if (!Number.isFinite(last) || at.getTime() - last >= TEST_SEND_INTERVAL_MS) return null;
-        const retryAfterSeconds = Math.max(
-          1,
-          Math.ceil((last + TEST_SEND_INTERVAL_MS - at.getTime()) / 1000)
-        );
-        return json(429, {
-          ok: false,
-          code: 'TEST_RATE_LIMITED',
-          retryAfterSeconds,
-          error: `A test of this issue was sent under a minute ago. Try again in ${retryAfterSeconds} seconds.`,
-        });
-      };
-      // Before the stale check: a second press inside the minute is "too soon"
-      // whichever etag it carries.
-      const limited = tooSoon(issue);
-      if (limited) return limited;
-      if (staleView(body, issue)) return changedElsewhere();
-
-      // In the chosen design; an unusable template falls back to the built-in
-      // one for a test, and the answer says so.
-      let rendered;
-      try {
-        rendered = await renderChosenDesign(
-          issue,
-          { postalAddress: settings.postalAddress, testSend: true },
-          settings,
-          context
-        );
-      } catch (error) {
-        context.error?.(`testNewsletter render failed ${ref}: ${errorMeta(error)}`);
-        return json(500, {
-          ok: false,
-          error: 'Failed to render the newsletter issue',
-        });
-      }
-
-      let claimed;
-      try {
-        claimed = await store.replaceDocIfMatch('newsletters', {
-          ...issue,
-          lastTestAt: at.toISOString(),
-        });
-      } catch (error) {
-        if (error?.code === 412) {
-          // Another test (or an edit) got there first; say which.
-          const current = await store.readDoc('newsletters', issue.id, issue.id).catch(() => null);
-          return tooSoon(current) ?? changedElsewhere();
-        }
-        context.error?.(`testNewsletter claim failed ${ref}: ${errorMeta(error)}`);
-        return json(500, { ok: false, error: 'Failed to send the test email' });
-      }
-
-      const sentTo = settings.replyTo;
-      const client = createResendClient({ apiKey, fetch: fetchImpl });
-      const sent = await client.sendEmail({
-        from: await fromAddress(context),
-        to: [sentTo],
-        subject: `[TEST] ${rendered.subject}`,
-        html: rendered.html,
-        text: rendered.text,
-      });
-      const etag = claimed?._etag ?? null;
-      if (!sent.ok) {
-        context.error?.(`testNewsletter not sent ${ref}: ${describeForLog(sent)}`);
-        return json(502, {
-          ok: false,
-          etag,
-          ...(rendered.templateProblem ? { templateProblem: rendered.templateProblem } : {}),
-          error: `Resend did not accept the test email: ${describeForOwner(sent)}`,
-        });
-      }
-      context.log?.(`testNewsletter sent ${ref}`);
-      return json(200, {
-        ok: true,
-        sentTo,
-        etag,
-        ...(rendered.templateProblem ? { templateProblem: rendered.templateProblem } : {}),
-      });
-    },
-
-    async approve(request, context) {
-      const auth = await guard.requireRole(request, 'publisher');
-      if (auth.error) return auth.error;
-      const body = await request.json().catch(() => null);
-      if (missingEtag(body)) return etagRequired();
-      // Log lines carry this, never the issue or broadcast id (content-free telemetry).
-      const ref = `[invocation ${context?.invocationId ?? 'unknown'}]`;
-
-      // The owner's switch comes first: while it is off, nothing is read,
-      // claimed or sent, whatever the issue or settings say.
-      if (!sendingEnabled()) {
-        return json(503, {
-          ok: false,
-          code: 'NEWSLETTER_SENDING_DISABLED',
-          error:
-            'Sending is switched off. Set newsletter_sending_enabled to true in Terraform to allow approval.',
-        });
-      }
-
-      const apiKey = readKey(env, 'RESEND_API_KEY');
-      if (!apiKey)
-        return json(503, {
-          ok: false,
-          error: 'Resend is not configured: RESEND_API_KEY is not set',
-        });
-
-      let settings;
-      let issue;
-      try {
-        settings = await readSettings();
-        issue = await readIssue(request);
-      } catch (error) {
-        context.error?.(`approveNewsletter read failed ${ref}: ${errorMeta(error)}`);
-        return json(500, {
-          ok: false,
-          error: 'Failed to read the newsletter issue',
-        });
-      }
-      if (!issue) return notFound();
-
-      const missing = missingForSending(settings);
-      if (missing.length) {
-        return json(409, {
-          ok: false,
-          code: 'SETTINGS_INCOMPLETE',
-          missingSettings: missing,
-          error: `Add the ${missing.join(' and ')} in Newsletter settings before approving.`,
-        });
-      }
-      if (issue.status !== 'draft') {
-        return json(409, {
-          ok: false,
-          error: `Only a draft can be approved; this issue is ${issue.status}.`,
-        });
-      }
-      // Approve what the approver saw: an issue edited since they opened it is
-      // not sent with content they never read.
-      if (staleView(body, issue)) return changedElsewhere();
-
-      // Everything that can fail on the site's own data is worked out BEFORE the
-      // claim, so a bad settings document refuses the approval instead of
-      // leaving the issue stuck in `sending` with nothing sent.
-      let plan;
-      try {
-        plan = planFor(issue, settings, now());
-      } catch (error) {
-        context.error?.(`approveNewsletter send slot invalid ${ref}: ${errorMeta(error)}`);
-        return json(409, {
-          ok: false,
-          code: 'SETTINGS_INVALID',
-          error:
-            'The send day, time or time zone in Newsletter settings is not valid. Save them again, then approve.',
-        });
-      }
-      let rendered;
-      try {
-        rendered = await renderChosenDesign(
-          issue,
-          { postalAddress: settings.postalAddress },
-          settings,
-          context
-        );
-      } catch (error) {
-        context.error?.(`approveNewsletter render failed ${ref}: ${errorMeta(error)}`);
-        return json(500, {
-          ok: false,
-          error: 'Failed to render the newsletter issue',
-        });
-      }
-      // The chosen template could not be fetched or used. The preview showed
-      // the built-in design with a warning; sending that instead of the design
-      // the owner chose is refused, before anything is claimed.
-      if (rendered.templateProblem) {
-        context.error?.(
-          `approveNewsletter template unusable ${ref}: ${rendered.templateProblem.code}`
-        );
-        return json(409, {
-          ok: false,
-          code: 'TEMPLATE_UNUSABLE',
-          templateProblem: rendered.templateProblem,
-          error: `The template chosen in Newsletter settings cannot be used: ${rendered.templateProblem.message} Fix it in Resend or choose the built-in design, check the preview, then approve.`,
-        });
-      }
-
-      const approvedAt = now().toISOString();
-      const approvedBy = auth.user?.oid || auth.user?.sub || null;
-      const claimed = {
-        ...issue,
-        status: 'sending',
-        approvedAt,
-        approvedBy,
-        lastError: null,
-        updatedAt: approvedAt,
-      };
-      try {
-        await store.replaceDocIfMatch('newsletters', claimed);
-      } catch (error) {
-        if (error?.code === 412) return changedElsewhere();
-        context.error?.(`approveNewsletter claim failed ${ref}: ${errorMeta(error)}`);
-        return json(500, {
-          ok: false,
-          error: 'Failed to approve the newsletter issue',
-        });
-      }
-
-      const client = createResendClient({ apiKey, fetch: fetchImpl });
-
-      /**
-       * Write the claim's outcome ONLY if the issue is still the claim. Reject is
-       * allowed from `sending` (to clear a stuck send), so an owner can reject
-       * while this request is between the claim and Resend's answer; an
-       * unconditional write here would silently undo that. The fresh read
-       * supplies the ETag the conditional replace needs.
-       *
-       * @returns {Promise<{ written: true, doc: object } | { written: false, current: object|null }>}
-       */
-      const settle = async (next) => {
-        const current = await store.readDoc('newsletters', issue.id, issue.id);
-        if (current?.status !== 'sending' || current?.approvedAt !== approvedAt) {
-          return { written: false, current };
-        }
-        try {
-          const doc = await store.replaceDocIfMatch('newsletters', {
-            ...next,
-            _etag: current._etag,
-          });
-          return { written: true, doc: doc ?? next };
-        } catch (error) {
-          if (error?.code === 412) return { written: false, current: null };
-          throw error;
-        }
-      };
-
-      // `reason` reaches the issue and the page; `logSummary` is all that is logged.
-      const revert = async (reason, logSummary) => {
-        context.error?.(`approveNewsletter not sent ${ref}: ${logSummary}`);
-        await settle({
-          ...claimed,
-          status: 'draft',
-          // Not approved after all: nothing was scheduled, so the issue must not
-          // read as approved in the list or the preview.
-          approvedAt: null,
-          approvedBy: null,
-          lastError: reason,
-          updatedAt: now().toISOString(),
-        }).catch((error) =>
-          context.error?.(`approveNewsletter could not revert ${ref}: ${errorMeta(error)}`)
-        );
-        return json(502, {
-          ok: false,
-          error: `Resend did not accept the newsletter: ${reason}`,
-        });
-      };
-
-      let segmentId;
-      try {
-        segmentId = await resolveSegmentId(client);
-      } catch (error) {
-        return revert(error.message, errorMeta(error));
-      }
-
-      const { subject, html, text } = rendered;
-      const created = await client.createBroadcast({
-        segmentId,
-        from: await fromAddress(context),
-        replyTo: settings.replyTo,
-        subject,
-        html,
-        text,
-        name: `HybridCloudWorks Weekly ${issue.id.slice('issue-'.length)}`,
-        scheduledAt: plan.sendNow ? undefined : plan.scheduledAt,
-      });
-      if (created.status === 0) {
-        // No answer at all (timeout, connection reset): Resend may have accepted
-        // the broadcast. Returning to draft would invite a second approval and a
-        // second send, so the issue stays `sending` for the owner to check.
-        context.error?.(`approveNewsletter no answer from Resend ${ref}`);
-        await settle({
-          ...claimed,
-          lastError: 'No answer from Resend; it may or may not have accepted the broadcast.',
-          updatedAt: now().toISOString(),
-        }).catch((error) =>
-          context.error?.(`approveNewsletter could not record ${ref}: ${errorMeta(error)}`)
-        );
-        return json(502, {
-          ok: false,
-          code: 'SEND_OUTCOME_UNKNOWN',
-          error:
-            "Resend did not answer, so it may have accepted the newsletter. Check Resend's Broadcasts list before anything else; reject this issue here only once you have.",
-        });
-      }
-      if (!created.ok || !created.data?.id)
-        return revert(describeForOwner(created), describeForLog(created));
-
-      const done = {
-        ...claimed,
-        status: plan.sendNow ? 'sent' : 'scheduled',
-        broadcastId: created.data.id,
-        ...(plan.sendNow ? { sentAt: now().toISOString() } : { scheduledAt: plan.scheduledAt }),
-        updatedAt: now().toISOString(),
-      };
-      let outcome;
-      try {
-        outcome = await settle(done);
-      } catch (error) {
-        // The broadcast exists; the record of it did not save. Say so rather
-        // than report a failure that would invite a second approval.
-        context.error?.(`approveNewsletter sent but not recorded ${ref}: ${errorMeta(error)}`);
-        // Same shape as every other success (issue, preview, sendPlan...), plus
-        // `warning`, so a caller handles one payload. The issue is re-read so it
-        // shows `sending`, which offers no second approval; the claim stands in
-        // if even that read fails.
-        let latest = claimed;
-        try {
-          latest = (await store.readDoc('newsletters', issue.id, issue.id)) ?? claimed;
-        } catch (readError) {
-          context.error?.(`approveNewsletter re-read failed ${ref}: ${errorMeta(readError)}`);
-        }
-        return json(200, {
-          ...(await present(latest, settings, context)),
-          warning: `Resend accepted broadcast ${created.data.id}, but the site could not record it. Do not approve again.`,
-        });
-      }
-      if (!outcome.written) {
-        // Rejected (or otherwise changed) while Resend was being asked. The
-        // broadcast exists and the owner's reject stands, so the only honest
-        // answer names the broadcast and what to do about it.
-        context.error?.(
-          `approveNewsletter broadcast created but issue changed to ${outcome.current?.status ?? 'unknown'} meanwhile ${ref}`
-        );
-        return json(409, {
-          ok: false,
-          code: 'CHANGED_DURING_SEND',
-          broadcastId: created.data.id,
-          error: `Resend accepted broadcast ${created.data.id}, but this issue was changed while it was being sent. If it should not go out, cancel it in Resend's Broadcasts page.`,
-        });
-      }
-      context.log?.(`approveNewsletter ${done.status} ${ref}`);
-      return json(200, await present(outcome.doc, settings, context));
-    },
+    approve: (request, context) => approve(ctx, request, context),
 
     /**
      * Cancel a scheduled broadcast. Resend's cancel is `DELETE /broadcasts/{id}`
@@ -1377,14 +1491,9 @@ export function createNewsletterAdminHandlers({
           savedBy: auth.user?.oid || auth.user?.sub || null,
           updatedAt: savedAt,
         };
-        let written;
-        try {
-          written = await store.replaceDocIfMatch('newsletters', saved);
-        } catch (error) {
-          if (error?.code === 412) return changedElsewhere();
-          throw error;
-        }
-        return json(200, await present(written ?? saved, await readSettings(), context));
+        const written = await replaceIssueIfMatch(store, saved);
+        if (written.conflict) return changedElsewhere();
+        return json(200, await present(written.doc, await readSettings(), context));
       } catch (error) {
         context.error?.(`saveNewsletter failed: ${error?.message ?? error}`);
         return json(500, {
@@ -1417,12 +1526,8 @@ export function createNewsletterAdminHandlers({
           deletedBy: auth.user?.oid || auth.user?.sub || null,
           updatedAt: deletedAt,
         };
-        try {
-          await store.replaceDocIfMatch('newsletters', deleted);
-        } catch (error) {
-          if (error?.code === 412) return changedElsewhere();
-          throw error;
-        }
+        const written = await replaceIssueIfMatch(store, deleted);
+        if (written.conflict) return changedElsewhere();
         return json(200, { ok: true, id: issue.id });
       } catch (error) {
         context.error?.(`deleteNewsletter failed: ${error?.message ?? error}`);
@@ -1457,14 +1562,9 @@ export function createNewsletterAdminHandlers({
           rejectedAt,
           updatedAt: rejectedAt,
         };
-        let written;
-        try {
-          written = await store.replaceDocIfMatch('newsletters', rejected);
-        } catch (error) {
-          if (error?.code === 412) return changedElsewhere();
-          throw error;
-        }
-        return json(200, await present(written ?? rejected, await readSettings(), context));
+        const written = await replaceIssueIfMatch(store, rejected);
+        if (written.conflict) return changedElsewhere();
+        return json(200, await present(written.doc, await readSettings(), context));
       } catch (error) {
         context.error?.(`rejectNewsletter failed: ${error?.message ?? error}`);
         return json(500, {

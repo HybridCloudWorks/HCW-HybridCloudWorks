@@ -3,6 +3,8 @@ import { Helmet } from 'react-helmet-async';
 import { Link } from 'react-router';
 import { getProviderPath, routes } from '@/lib/routeFactory';
 import ProviderLabsSection from '@/components/labs/ProviderLabsSection';
+import { plural } from '@/components/labs/labsWords';
+import ResourceLink, { resourceCta } from '@/components/education/ResourceLink';
 import { labsForProvider } from '@/data/labs/catalogue';
 import {
   DATA_AS_OF,
@@ -333,30 +335,11 @@ const resources = [
     title: 'Browser labs',
     description:
       'Hands-on Azure exercises on this site: validate a Landing Zone Builder download with terraform and az already installed, step by step, in your browser.',
-    count: `${labsForProvider('azure').length} ${labsForProvider('azure').length === 1 ? 'lab' : 'labs'}`,
+    count: plural(labsForProvider('azure').length, 'lab'),
     icon: 'science',
     to: routes.labs('azure'),
   },
 ];
-
-/**
- * A resource card is an in-site link when the entry carries `to`, and an
- * external one opening in a new tab when it carries `url`.
- */
-function ResourceLink({ resource, className, children }) {
-  if (resource.to) {
-    return (
-      <Link to={resource.to} className={className}>
-        {children}
-      </Link>
-    );
-  }
-  return (
-    <a href={resource.url} target="_blank" rel="noopener noreferrer" className={className}>
-      {children}
-    </a>
-  );
-}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -1744,9 +1727,9 @@ export default function AzureEducationPage() {
                 <div className="flex items-center justify-between pt-4 border-t border-slate-700">
                   <span className="text-sm font-bold text-primary">{resource.count}</span>
                   <span className="flex items-center gap-1.5 text-foreground text-sm font-semibold group-hover:text-primary transition-colors">
-                    {resource.to ? 'Open' : 'Explore'}
+                    {resourceCta(resource).label}
                     <span className="material-symbols-outlined text-[14px]" aria-hidden="true">
-                      {resource.to ? 'arrow_forward' : 'open_in_new'}
+                      {resourceCta(resource).icon}
                     </span>
                   </span>
                 </div>

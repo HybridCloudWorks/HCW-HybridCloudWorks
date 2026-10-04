@@ -185,6 +185,87 @@ export function ifNoneMatchMatches(header, etag) {
 const etagMatches = (request, etag) =>
   ifNoneMatchMatches(request.headers?.get?.('if-none-match'), etag);
 
+const notFound = () => json(404, { error: 'Not found' });
+
+function unsatisfiable(totalLength) {
+  return {
+    status: 416,
+    headers: {
+      'Content-Range': `bytes */${totalLength}`,
+      'Accept-Ranges': 'bytes',
+      'Cache-Control': 'no-store',
+    },
+  };
+}
+
+/**
+ * HEAD: the 200's headers, sized for the whole blob, and no body. Without a
+ * properties reader (`canHead`) the full read supplies them.
+ */
+async function head(storage, canHead, container, blobPath, request) {
+  const cacheControl = cacheControlFor(container, blobPath);
+  const blob = canHead
+    ? await storage.headBlobForDelivery(container, blobPath)
+    : await storage.readBlobForDelivery(container, blobPath);
+  if (!blob) return notFound();
+  if (etagMatches(request, blob.etag)) return notModified(blob.etag, cacheControl);
+  return {
+    status: 200,
+    headers: {
+      ...deliveryHeaders(blob, cacheControl),
+      'Content-Length': String(blob.contentLength ?? blob.body?.length ?? 0),
+    },
+  };
+}
+
+/** A single satisfiable-or-not byte range: 206, 416, or 304. */
+async function partial(storage, container, blobPath, request, range) {
+  const cacheControl = cacheControlFor(container, blobPath);
+  // A conditional request or a suffix needs the blob's properties before
+  // any bytes are read: the first so a matching ETag answers 304 without
+  // a ranged download it would then discard, the second because a suffix
+  // is relative to a size this route does not know yet. One properties
+  // read serves both.
+  const conditional = Boolean(request.headers?.get?.('if-none-match'));
+  let offsets = range;
+  if (conditional || 'suffix' in range) {
+    const blob = await storage.headBlobForDelivery(container, blobPath);
+    if (!blob) return notFound();
+    if (etagMatches(request, blob.etag)) return notModified(blob.etag, cacheControl);
+    if ('suffix' in range) {
+      offsets = resolveRange(range, blob.contentLength);
+      if (!offsets) return unsatisfiable(blob.contentLength);
+    }
+  }
+
+  const chunk = await storage.readBlobRangeForDelivery(container, blobPath, offsets);
+  if (!chunk) return notFound();
+  if (chunk.unsatisfiable) return unsatisfiable(chunk.totalLength);
+
+  return {
+    status: 206,
+    headers: {
+      ...deliveryHeaders(chunk, cacheControl),
+      'Content-Range': `bytes ${chunk.start}-${chunk.end}/${chunk.totalLength}`,
+      'Content-Length': String(chunk.body.length),
+    },
+    body: chunk.body,
+  };
+}
+
+/** The whole blob, exactly as before ranges existed, plus `Accept-Ranges`. */
+async function full(storage, container, blobPath, request) {
+  const cacheControl = cacheControlFor(container, blobPath);
+  const blob = await storage.readBlobForDelivery(container, blobPath);
+  if (!blob) return notFound();
+  if (etagMatches(request, blob.etag)) return notModified(blob.etag, cacheControl);
+  return {
+    status: 200,
+    headers: deliveryHeaders(blob, cacheControl),
+    body: blob.body,
+  };
+}
+
 /**
  * All three readers are required: the route registers HEAD and honours
  * Range, and `functions/public-media.js` wires all three. A storage that
@@ -204,82 +285,6 @@ export function createPublicMediaHandlers({ storage }) {
   const canRange = typeof storage.readBlobRangeForDelivery === 'function';
   const canHead = typeof storage.headBlobForDelivery === 'function';
 
-  /** HEAD: the 200's headers, sized for the whole blob, and no body. */
-  async function head(container, blobPath, request) {
-    const cacheControl = cacheControlFor(container, blobPath);
-    const blob = canHead
-      ? await storage.headBlobForDelivery(container, blobPath)
-      : await storage.readBlobForDelivery(container, blobPath);
-    if (!blob) return json(404, { error: 'Not found' });
-    if (etagMatches(request, blob.etag)) return notModified(blob.etag, cacheControl);
-    return {
-      status: 200,
-      headers: {
-        ...deliveryHeaders(blob, cacheControl),
-        'Content-Length': String(blob.contentLength ?? blob.body?.length ?? 0),
-      },
-    };
-  }
-
-  /** A single satisfiable-or-not byte range: 206, 416, or 304. */
-  async function partial(container, blobPath, request, range) {
-    const cacheControl = cacheControlFor(container, blobPath);
-    // A conditional request or a suffix needs the blob's properties before
-    // any bytes are read: the first so a matching ETag answers 304 without
-    // a ranged download it would then discard, the second because a suffix
-    // is relative to a size this route does not know yet. One properties
-    // read serves both.
-    const conditional = Boolean(request.headers?.get?.('if-none-match'));
-    let offsets = range;
-    if (conditional || 'suffix' in range) {
-      const blob = await storage.headBlobForDelivery(container, blobPath);
-      if (!blob) return json(404, { error: 'Not found' });
-      if (etagMatches(request, blob.etag)) return notModified(blob.etag, cacheControl);
-      if ('suffix' in range) {
-        offsets = resolveRange(range, blob.contentLength);
-        if (!offsets) return unsatisfiable(blob.contentLength);
-      }
-    }
-
-    const chunk = await storage.readBlobRangeForDelivery(container, blobPath, offsets);
-    if (!chunk) return json(404, { error: 'Not found' });
-    if (chunk.unsatisfiable) return unsatisfiable(chunk.totalLength);
-
-    return {
-      status: 206,
-      headers: {
-        ...deliveryHeaders(chunk, cacheControl),
-        'Content-Range': `bytes ${chunk.start}-${chunk.end}/${chunk.totalLength}`,
-        'Content-Length': String(chunk.body.length),
-      },
-      body: chunk.body,
-    };
-  }
-
-  function unsatisfiable(totalLength) {
-    return {
-      status: 416,
-      headers: {
-        'Content-Range': `bytes */${totalLength}`,
-        'Accept-Ranges': 'bytes',
-        'Cache-Control': 'no-store',
-      },
-    };
-  }
-
-  /** The whole blob, exactly as before ranges existed, plus `Accept-Ranges`. */
-  async function full(container, blobPath, request) {
-    const cacheControl = cacheControlFor(container, blobPath);
-    const blob = await storage.readBlobForDelivery(container, blobPath);
-    if (!blob) return json(404, { error: 'Not found' });
-    if (etagMatches(request, blob.etag)) return notModified(blob.etag, cacheControl);
-    return {
-      status: 200,
-      headers: deliveryHeaders(blob, cacheControl),
-      body: blob.body,
-    };
-  }
-
   /** Every outcome for one request, body included where the method allows one. */
   async function dispatch(request, context) {
     const container = String(request.params?.container || '').trim();
@@ -288,30 +293,26 @@ export function createPublicMediaHandlers({ storage }) {
     // Order matters: an unknown container must not be distinguishable from a
     // known-but-empty one by response shape, and neither reveals whether a
     // private container exists.
-    if (!PUBLIC_MEDIA_CONTAINERS.has(container)) {
-      return json(404, { error: 'Not found' });
-    }
-    if (!isValidBlobPath(blobPath)) {
-      return json(404, { error: 'Not found' });
-    }
+    if (!PUBLIC_MEDIA_CONTAINERS.has(container)) return notFound();
+    if (!isValidBlobPath(blobPath)) return notFound();
 
     try {
       if (String(request.method || '').toUpperCase() === 'HEAD') {
         if (!canHead) context.warn?.('getMedia: no headBlobForDelivery; HEAD via full read');
-        return await head(container, blobPath, request);
+        return await head(storage, canHead, container, blobPath, request);
       }
       const range = parseRangeHeader(request.headers?.get?.('range'));
       if (range) {
         // The ranged path needs both readers: bytes from one, and the size
         // and ETag a suffix or a conditional needs from the other.
-        if (canRange && canHead) return await partial(container, blobPath, request, range);
+        if (canRange && canHead) {
+          return await partial(storage, container, blobPath, request, range);
+        }
         context.warn?.('getMedia: ranged readers not wired; Range ignored, serving in full');
       }
-      return await full(container, blobPath, request);
+      return await full(storage, container, blobPath, request);
     } catch (error) {
-      if (error?.statusCode === 404 || error?.code === 'BlobNotFound') {
-        return json(404, { error: 'Not found' });
-      }
+      if (error?.statusCode === 404 || error?.code === 'BlobNotFound') return notFound();
       context.error('getMedia failed:', error);
       return json(500, { error: 'Failed to read media' });
     }

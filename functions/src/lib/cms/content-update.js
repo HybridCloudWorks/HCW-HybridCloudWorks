@@ -69,6 +69,32 @@ function firstFilled(records, keys) {
 }
 
 /**
+ * The content id and the validated, normalised updates a body carries, or
+ * the 400 refusing it: a missing id or a non-object `updates`, then any
+ * rule the validator throws.
+ */
+function parseUpdateBody(body) {
+  const { contentId, updates = {} } = body || {};
+  if (!contentId || typeof updates !== "object") {
+    return {
+      error: json(400, { error: "contentId and updates object required" }),
+    };
+  }
+  let validatedUpdates;
+  try {
+    validatedUpdates = validateAndNormalizeUpdateContentItemUpdates(updates);
+  } catch (error) {
+    return { error: json(400, { error: String(error.message || error) }) };
+  }
+  return {
+    contentId,
+    normalizedUpdates: normalizeContentBodyFields(
+      normalizeContentUpdatesForBlogOnly(validatedUpdates),
+    ),
+  };
+}
+
+/**
  * POST/PATCH updateContentItem — validated partial update + version history +
  * audit row. Source :3564.
  *
@@ -90,23 +116,9 @@ export function createContentUpdateHandler({
     const { user } = auth;
 
     try {
-      const body = await request.json().catch(() => null);
-      const { contentId, updates = {} } = body || {};
-      if (!contentId || typeof updates !== "object") {
-        return json(400, { error: "contentId and updates object required" });
-      }
-
-      let validatedUpdates;
-      try {
-        validatedUpdates =
-          validateAndNormalizeUpdateContentItemUpdates(updates);
-      } catch (error) {
-        return json(400, { error: String(error.message || error) });
-      }
-
-      const normalizedUpdates = normalizeContentBodyFields(
-        normalizeContentUpdatesForBlogOnly(validatedUpdates),
-      );
+      const parsed = parseUpdateBody(await request.json().catch(() => null));
+      if (parsed.error) return parsed.error;
+      const { contentId, normalizedUpdates } = parsed;
 
       const currentData = await store.readDoc("content", contentId, contentId);
       if (!currentData) {

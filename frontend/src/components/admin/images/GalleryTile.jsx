@@ -44,7 +44,7 @@ function TileActions({
   onRestore,
 }) {
   return (
-    <div className="absolute inset-x-0 bottom-0 flex flex-wrap justify-end gap-1 bg-gradient-to-t from-black/70 to-transparent p-2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+    <div className="absolute inset-x-0 bottom-0 flex flex-wrap justify-end gap-1 bg-linear-to-t from-black/70 to-transparent p-2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
       <Button
         type="button"
         size="sm"

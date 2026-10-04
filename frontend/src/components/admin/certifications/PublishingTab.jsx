@@ -107,7 +107,7 @@ function ChangesUnavailable({ published }) {
   if (published.error) {
     return (
       <div className="flex flex-wrap items-center gap-3 text-sm">
-        <p className="min-w-0 flex-1 break-words">
+        <p className="min-w-0 flex-1 wrap-break-word">
           Can&apos;t compare until the public snapshot is read: {published.error}
         </p>
         <Button variant="outline" size="sm" onClick={published.refresh}>

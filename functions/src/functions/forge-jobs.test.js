@@ -58,7 +58,14 @@ describe('the store the jobs hand to the forge (ADR 0033)', () => {
   });
 
   it('carries every method the calibration job and the drafter call too', () => {
-    for (const file of ['../lib/content/forge-studio.js', '../lib/content/drafting.js']) {
+    // forge-studio.js is a re-export shim since PR #841; the calibration job's
+    // store calls live in forge-studio/calibration.js. The non-empty check
+    // keeps this loop from passing vacuously if that file moves again.
+    // The drafter reaches the store through its own deps, so only the
+    // calibration module is held to a non-empty call list.
+    expect(storeMethodsIn('../lib/content/forge-studio/calibration.js').length).toBeGreaterThan(0);
+    const files = ['../lib/content/forge-studio/calibration.js', '../lib/content/drafting.js'];
+    for (const file of files) {
       for (const method of storeMethodsIn(file)) {
         expect(typeof forgeStore[method], `${file} → forgeStore.${method}`).toBe('function');
       }

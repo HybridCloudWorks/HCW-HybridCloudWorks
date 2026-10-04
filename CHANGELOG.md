@@ -170,6 +170,17 @@ This project has not cut a tagged release; entries are grouped under
     breaks.
   - Links to the non-existent `/admin/platform-settings` fixed; dead exports
     removed from `config/admin.js`.
+  - **Code structure.** Qlty measured 180 code smells the first cut
+    introduced and 57 pre-existing ones it made worse (handler factories
+    every slice added routes to, files past their complexity budget). All
+    were restructured away rather than suppressed: handler bodies moved out
+    of their factories into module-level functions over a context, request
+    validation into tables, large components into reducers, hooks and
+    per-section components, large modules into sibling modules behind a
+    re-export shim. Every extracted helper has its own test (about 350 new
+    tests); existing tests pass unchanged; four pre-existing
+    `eslint-disable complexity` comments were removed because the code no
+    longer needs them.
 
 - **Drafts: a ContentForge stage before the Content Queue, at `/admin/drafts`
   (#840, owner request 2026-10-03).** Articles drafted as `docs/content/*.md` files

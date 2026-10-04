@@ -37,6 +37,9 @@ import { logAdminAction } from '@/lib/auditLog';
 import { requestContentInspection } from '@/lib/contentWorkflow';
 import { getPublishTargetForItem } from '@/lib/contentModel';
 import { useContentTransitions } from './useContentTransitions';
+import { enqueueForgeBatches, forgeFailureMessage, forgeQueuedMessage } from './forgeSelected';
+
+export { FORGE_MAX_BATCH } from './forgeSelected';
 
 /** Two per-item maps as one: a value in `b` wins unless it is null/undefined. */
 function mergeItemMaps(a, b) {
@@ -47,10 +50,6 @@ function mergeItemMaps(a, b) {
   }
   return merged;
 }
-
-/** Mirrors FORGE_MAX_BATCH in functions/src/functions/forge-jobs.js — the
- * job rejects a larger batch, so a bigger selection is chunked here. */
-export const FORGE_MAX_BATCH = 10;
 
 /**
  * @param {object} params
@@ -112,12 +111,8 @@ export function useQueueActions({ items, setItems, statusFilter, contentTypeFilt
   const [forgeError, setForgeError] = useState(null);
 
   /**
-   * "Forge Selected" (Blog Machine T-603): enqueue the checked documents in
-   * ≤FORGE_MAX_BATCH chunks and let the pipeline run under the job budget —
-   * fire-and-forget like the Forge-from-URL box, because a forge run takes
-   * minutes and its results land back in this queue as forge_ready/editing.
-   * The pipeline's own gates (title dedupe 409, empty-source refusal) decide
-   * per document; nothing is filtered here beyond "still on screen".
+   * "Forge Selected" (Blog Machine T-603): the checked documents, enqueued in
+   * chunks by forgeSelected.js; this is the state around that run.
    */
   const handleForgeSelected = async () => {
     const ids = Array.from(selectedIds).filter((id) => items.some((it) => it.id === id));
@@ -125,36 +120,14 @@ export function useQueueActions({ items, setItems, statusFilter, contentTypeFilt
     setForgingSelected(true);
     setForgeError(null);
     setForgeMessage(null);
-    const jobIds = [];
-    const failures = [];
     try {
-      for (let start = 0; start < ids.length; start += FORGE_MAX_BATCH) {
-        const chunk = ids.slice(start, start + FORGE_MAX_BATCH);
-        try {
-          const accepted = await postJSON('enqueueJob', {
-            type: 'forge-article',
-            payload: { sourceContentIds: chunk },
-          });
-          if (!accepted?.ok || !accepted.jobId) {
-            throw new Error(accepted?.error || 'Job was not accepted');
-          }
-          jobIds.push(accepted.jobId);
-        } catch (err) {
-          failures.push({ count: chunk.length, message: err?.message || 'Unknown error' });
-        }
-      }
+      const { jobIds, failures } = await enqueueForgeBatches(ids);
       if (jobIds.length) {
         await logAdminAction('content_forge_enqueued', { count: ids.length, jobIds });
         setSelectedIds(new Set());
-        setForgeMessage(
-          `Forge queued for ${ids.length - failures.reduce((n, f) => n + f.count, 0)} item${ids.length === 1 ? '' : 's'} (job${jobIds.length === 1 ? '' : 's'} ${jobIds.join(', ')}). Results land back here as forge_ready or editing — refresh in a few minutes.`
-        );
+        setForgeMessage(forgeQueuedMessage(ids.length, jobIds, failures));
       }
-      if (failures.length) {
-        setForgeError(
-          `${failures.reduce((n, f) => n + f.count, 0)} item(s) failed to queue: ${failures[0].message}`
-        );
-      }
+      if (failures.length) setForgeError(forgeFailureMessage(failures));
     } finally {
       setForgingSelected(false);
     }

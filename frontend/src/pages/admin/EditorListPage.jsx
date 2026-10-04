@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router';
 import { usePublicData } from '@/hooks/usePublicData';
 import { useAuthReady } from '@/hooks/useAuthReady';
 import { getCoverImageUrl, formatPostDate } from '@/lib/blogUtils';
-import { byNewest, toDate } from '@/lib/dateUtils';
+import { toDate } from '@/lib/dateUtils';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -14,11 +14,17 @@ import PageHeader from '@/components/admin/shared/PageHeader';
 import StatusBadge from '@/components/admin/shared/StatusBadge';
 import TaxonomyChips from '@/components/admin/shared/TaxonomyChips';
 import { getJSON } from '@/lib/api';
-import { getLiveUrl } from '@/lib/livePages';
 import { safeUrl } from '@/lib/safeUrl';
-import { PROVIDER_OPTIONS as ADMIN_PROVIDER_OPTIONS } from '@/config/admin';
-import { getCanonicalContentType } from '@/lib/contentModel';
 import { useContentTransitions } from './queue/useContentTransitions';
+import ArchiveBoard from './editor-list/ArchiveBoard';
+import {
+  TYPE_BADGE,
+  filterAndSortDraftItems,
+  filterAndSortLiveItems,
+  getContentType,
+  getProviderDisplay,
+  getPublicUrl,
+} from './editor-list/editorItems';
 import {
   PenLine,
   ExternalLink,
@@ -26,9 +32,6 @@ import {
   Loader2,
   Archive,
   EyeOff,
-  ChevronDown,
-  ChevronUp,
-  ExternalLink as LinkIcon,
   Clock3,
   PenTool,
 } from 'lucide-react';
@@ -39,111 +42,6 @@ const EDITOR_HELP = [
   'What to do: Edit opens the editor; Send to Publish from inside it moves the item to the Publish page. Unpublish or Archive a live item from its row.',
   'Where it goes next: the Publish page for anything not yet live; the Archive board, below, for pages taken down for good.',
 ];
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function getContentType(item) {
-  return getCanonicalContentType(item);
-}
-
-/** The one live-URL rule every surface shares (lib/livePages.js, ADR 0033 §2). */
-const getPublicUrl = (item) => getLiveUrl(item) || null;
-
-function getProviderDisplay(item) {
-  return item['Cloud Provider'] || item.cloudProvider || '—';
-}
-
-const TYPE_BADGE = {
-  blog: 'bg-sky-100 text-sky-800 dark:bg-sky-900/50 dark:text-sky-300',
-  framework: 'bg-violet-100 text-violet-800 dark:bg-violet-900/50 dark:text-violet-300',
-  architecture: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300',
-  coder_corner: 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300',
-  news: 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300',
-};
-
-// Every provider the site routes, from the registry (config/admin.js), so the
-// filter cannot fall behind it again: VMware and Ansible were missing here.
-// Matched by substring of the stored value, so the label's lower case works.
-const PROVIDER_OPTIONS = ['All', ...ADMIN_PROVIDER_OPTIONS.map((option) => option.label)];
-
-function matchesProviderFilter(item, providerFilter) {
-  if (providerFilter === 'All') return true;
-  const raw = (item['Cloud Provider'] || item.cloudProvider || '').toLowerCase();
-  return raw.includes(providerFilter.toLowerCase());
-}
-
-function matchesItemSearch(item, queryText) {
-  const query = queryText.trim().toLowerCase();
-  if (!query) return true;
-  const title = String(item.Title || item.title || '').toLowerCase();
-  const provider = String(item['Cloud Provider'] || item.cloudProvider || '').toLowerCase();
-  return title.includes(query) || provider.includes(query);
-}
-
-function filterByType(items, typeFilter) {
-  if (typeFilter === 'all') return items;
-  return items.filter((item) => getContentType(item) === typeFilter);
-}
-
-// Every comparator in this file was timestamp-object-only, so against the ISO strings
-// Cosmos returns each scored 0 and the sorts were permanent no-ops — the lists
-// rendered in raw Cosmos order while the controls appeared to work
-// (T-304).
-const sortByPublishedDateDesc = byNewest('blogPublishedAt');
-const sortByUpdatedDateDesc = byNewest('updatedAt', 'blogEditedAt');
-
-function filterAndSortLiveItems(items, typeFilter, searchText) {
-  const byType = filterByType(items, typeFilter);
-  const bySearch = byType.filter((item) => matchesItemSearch(item, searchText));
-  return [...bySearch].sort(sortByPublishedDateDesc);
-}
-
-function filterAndSortDraftItems(items, typeFilter, searchText) {
-  const notLive = items.filter((item) => item.Live !== true);
-  const byType = filterByType(notLive, typeFilter);
-  const bySearch = byType.filter((item) => matchesItemSearch(item, searchText));
-  return [...bySearch].sort(sortByUpdatedDateDesc);
-}
-
-const ARCHIVE_SORT_COMPARE = {
-  // `archivedAt` and `updatedAt` were byte-identical before, so the two menu
-  // entries did the same thing even once the comparator worked. Kept distinct
-  // now, which is what the labels promise.
-  archivedAt: byNewest('archivedAt', 'updatedAt'),
-  updatedAt: byNewest('updatedAt'),
-  publishedAt: byNewest('blogPublishedAt'),
-  provider: (a, b) => getProviderDisplay(a).localeCompare(getProviderDisplay(b)),
-};
-
-function compareArchivedItems(a, b, archiveSortField, archiveSortDir) {
-  const compare = ARCHIVE_SORT_COMPARE[archiveSortField];
-  if (!compare) return 0;
-  const dir = archiveSortDir === 'asc' ? 1 : -1;
-  return compare(a, b) * dir;
-}
-
-function filterAndSortArchivedItems(
-  items,
-  archiveProviderFilter,
-  archiveSearch,
-  archiveSortField,
-  archiveSortDir
-) {
-  const byProvider =
-    archiveProviderFilter === 'All'
-      ? items
-      : items.filter((item) => matchesProviderFilter(item, archiveProviderFilter));
-  const query = archiveSearch.trim().toLowerCase();
-  const bySearch =
-    query.length === 0
-      ? byProvider
-      : byProvider.filter((item) =>
-          String(item.Title || item.title || '')
-            .toLowerCase()
-            .includes(query)
-        );
-  return [...bySearch].sort((a, b) => compareArchivedItems(a, b, archiveSortField, archiveSortDir));
-}
 
 // ── Live item row ─────────────────────────────────────────────────────────────
 
@@ -243,70 +141,6 @@ function LiveItemRow({ item, onArchive, onUnpublish, actionId }) {
   );
 }
 
-// ── Archive board row ─────────────────────────────────────────────────────────
-
-function ArchiveRow({ item }) {
-  const publicUrl = getPublicUrl(item);
-  const provider = getProviderDisplay(item);
-  const type = getContentType(item);
-  const archivedAt = toDate(item.archivedAt) || toDate(item.updatedAt);
-  const publishedAt = toDate(item.blogPublishedAt);
-
-  return (
-    <div className="flex items-center gap-3 px-4 py-2.5 rounded-lg border bg-muted/20 hover:bg-muted/40 transition-colors text-sm">
-      <div className="flex-1 min-w-0">
-        <p className="font-medium truncate text-sm">{item.Title || item.title || 'Untitled'}</p>
-        <div className="flex flex-wrap items-center gap-2 mt-0.5">
-          <Badge variant="outline" className="text-[11px]">
-            {provider}
-          </Badge>
-          <span
-            className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-medium ${TYPE_BADGE[type] || TYPE_BADGE.blog}`}
-          >
-            {type}
-          </span>
-          {publishedAt && (
-            <span className="text-xs text-muted-foreground">
-              Published{' '}
-              {new Intl.DateTimeFormat('en-US', {
-                month: 'short',
-                day: 'numeric',
-                year: 'numeric',
-              }).format(publishedAt)}
-            </span>
-          )}
-          {archivedAt && (
-            <span className="text-xs text-muted-foreground">
-              · Archived{' '}
-              {new Intl.DateTimeFormat('en-US', {
-                month: 'short',
-                day: 'numeric',
-                year: 'numeric',
-                hour: 'numeric',
-                minute: '2-digit',
-              }).format(archivedAt)}
-            </span>
-          )}
-        </div>
-      </div>
-      {publicUrl && (
-        <a
-          href={safeUrl(publicUrl)}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-1 text-xs text-blue-500 hover:underline shrink-0"
-        >
-          <LinkIcon className="h-3.5 w-3.5" />
-          View
-        </a>
-      )}
-      <Badge variant="secondary" className="text-[10px] shrink-0">
-        archived
-      </Badge>
-    </div>
-  );
-}
-
 function DraftItemRow({ item }) {
   const type = getContentType(item);
   const provider = getProviderDisplay(item);
@@ -383,13 +217,6 @@ export default function EditorListPage() {
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
 
-  // Archive board state
-  const [archiveSearch, setArchiveSearch] = useState('');
-  const [archiveProviderFilter, setArchiveProviderFilter] = useState('All');
-  const [archiveSortField, setArchiveSortField] = useState('archivedAt');
-  const [archiveSortDir, setArchiveSortDir] = useState('desc');
-  const [showArchive, setShowArchive] = useState(false);
-
   // Action state
   const [actionId, setActionId] = useState('');
   const [localActionError, setActionError] = useState('');
@@ -419,17 +246,6 @@ export default function EditorListPage() {
     return filterAndSortDraftItems(draftList, typeFilter, search);
   }, [draftList, search, typeFilter]);
 
-  // Filtered + sorted archive items
-  const filteredArchive = useMemo(() => {
-    return filterAndSortArchivedItems(
-      archivedList,
-      archiveProviderFilter,
-      archiveSearch,
-      archiveSortField,
-      archiveSortDir
-    );
-  }, [archivedList, archiveSearch, archiveProviderFilter, archiveSortField, archiveSortDir]);
-
   const TYPE_TABS = [
     { key: 'all', label: `All (${liveList.length})` },
     { key: 'blog', label: `Blogs (${counts.blog})` },
@@ -438,67 +254,6 @@ export default function EditorListPage() {
     { key: 'coder_corner', label: `Code (${counts.coder_corner})` },
     { key: 'news', label: `News / RSS (${counts.news})` },
   ];
-
-  const SORT_OPTIONS = [
-    { value: 'archivedAt', label: 'Archived Date' },
-    { value: 'publishedAt', label: 'Published Date' },
-    { value: 'provider', label: 'Technology' },
-  ];
-
-  const emptyArchiveMessage =
-    archiveSearch || archiveProviderFilter !== 'All'
-      ? 'No archived items match your filters.'
-      : 'No archived content yet.';
-
-  function renderSortChevron(optionValue) {
-    if (archiveSortField !== optionValue) {
-      return null;
-    }
-
-    return archiveSortDir === 'asc' ? (
-      <ChevronUp className="h-3 w-3" />
-    ) : (
-      <ChevronDown className="h-3 w-3" />
-    );
-  }
-
-  function renderArchiveContent() {
-    if (archiveLoading) {
-      return (
-        <div className="flex items-center justify-center py-6">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-        </div>
-      );
-    }
-
-    if (filteredArchive.length === 0) {
-      return (
-        <EmptyState
-          compact
-          variant={archiveSearch || archiveProviderFilter !== 'All' ? 'filtered' : 'empty'}
-          title={emptyArchiveMessage}
-          description="Archive a live item from its row above and it is listed here."
-        />
-      );
-    }
-
-    return (
-      <div className="space-y-1.5">
-        {filteredArchive.map((item) => (
-          <ArchiveRow key={item.id} item={item} />
-        ))}
-      </div>
-    );
-  }
-
-  function toggleSort(field) {
-    if (archiveSortField === field) {
-      setArchiveSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-    } else {
-      setArchiveSortField(field);
-      setArchiveSortDir('desc');
-    }
-  }
 
   // ── Actions ──────────────────────────────────────────────────────────────
 
@@ -529,7 +284,7 @@ export default function EditorListPage() {
     return (
       <section className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
-          <div className="relative flex-1 min-w-[200px]">
+          <div className="relative flex-1 min-w-50">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
             <Input
               value={search}
@@ -606,83 +361,6 @@ export default function EditorListPage() {
     );
   }
 
-  function renderArchiveSection() {
-    return (
-      <section>
-        <button
-          type="button"
-          className="flex items-center gap-2 w-full text-left"
-          onClick={() => setShowArchive((v) => !v)}
-        >
-          <Archive className="h-5 w-5 text-muted-foreground" />
-          <h2 className="text-lg font-semibold tracking-tight">Archive ({archivedList.length})</h2>
-          {showArchive ? (
-            <ChevronUp className="h-4 w-4 text-muted-foreground ml-auto" />
-          ) : (
-            <ChevronDown className="h-4 w-4 text-muted-foreground ml-auto" />
-          )}
-        </button>
-
-        {showArchive && (
-          <Card className="mt-3">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-muted-foreground">
-                Archived articles — removed from live site. Sorted by{' '}
-                {SORT_OPTIONS.find((o) => o.value === archiveSortField)?.label}.
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="relative flex-1 min-w-[180px]">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                  <Input
-                    value={archiveSearch}
-                    onChange={(e) => setArchiveSearch(e.target.value)}
-                    placeholder="Search archive…"
-                    className="pl-9 h-8 text-sm"
-                  />
-                </div>
-                <div className="flex gap-1 flex-wrap">
-                  {PROVIDER_OPTIONS.map((p) => (
-                    <button
-                      key={p}
-                      onClick={() => setArchiveProviderFilter(p)}
-                      className={`px-2 py-1 rounded-md text-[11px] font-medium transition-colors ${
-                        archiveProviderFilter === p
-                          ? 'bg-primary text-primary-foreground'
-                          : 'bg-muted text-muted-foreground hover:text-foreground'
-                      }`}
-                    >
-                      {p}
-                    </button>
-                  ))}
-                </div>
-                <div className="flex gap-1 ml-auto">
-                  {SORT_OPTIONS.map((opt) => (
-                    <button
-                      key={opt.value}
-                      onClick={() => toggleSort(opt.value)}
-                      className={`flex items-center gap-0.5 px-2 py-1 rounded-md text-[11px] font-medium transition-colors ${
-                        archiveSortField === opt.value
-                          ? 'bg-muted text-foreground'
-                          : 'text-muted-foreground hover:text-foreground'
-                      }`}
-                    >
-                      {opt.label}
-                      {renderSortChevron(opt.value)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {renderArchiveContent()}
-            </CardContent>
-          </Card>
-        )}
-      </section>
-    );
-  }
-
   return (
     <div className="space-y-6">
       <PageHeader
@@ -705,7 +383,7 @@ export default function EditorListPage() {
       </PageHeader>
 
       {renderLiveBoardSection()}
-      {renderArchiveSection()}
+      <ArchiveBoard archivedList={archivedList} loading={archiveLoading} />
 
       {/* ── Confirm modals ── */}
       <ConfirmModal

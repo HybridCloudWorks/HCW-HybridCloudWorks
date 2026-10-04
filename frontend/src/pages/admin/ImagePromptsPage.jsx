@@ -120,6 +120,48 @@ function LibraryBody(props) {
   return <View {...props} />;
 }
 
+/** The header's count line: active sets, archived sets, assigned pages. */
+function LibraryStatus({ sets, archivedCount, assignedCount }) {
+  const active = sets.length - archivedCount;
+  return (
+    <span className="text-muted-foreground">
+      {active} active set{active === 1 ? '' : 's'}
+      {archivedCount ? ` · ${archivedCount} archived` : ''} · {assignedCount} page
+      {assignedCount === 1 ? '' : 's'} assigned
+    </span>
+  );
+}
+
+/** The search box and the archived toggle above the grid. */
+function LibraryFilters({ query, onQuery, showArchived, onShowArchived, archivedCount }) {
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <div className="relative min-w-[16rem] flex-1">
+        <Search
+          className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground"
+          aria-hidden="true"
+        />
+        <Input
+          value={query}
+          onChange={(e) => onQuery(e.target.value)}
+          placeholder="Search sets by name, purpose, theme, prompt or tag"
+          aria-label="Search image sets"
+          className="pl-8"
+        />
+      </div>
+      <label className="flex items-center gap-2 text-xs">
+        <input
+          type="checkbox"
+          checked={showArchived}
+          onChange={(e) => onShowArchived(e.target.checked)}
+          className="h-3.5 w-3.5"
+        />
+        Show archived ({archivedCount})
+      </label>
+    </div>
+  );
+}
+
 export default function ImagePromptsPage() {
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -348,12 +390,11 @@ export default function ImagePromptsPage() {
         help={HELP}
         status={
           library ? (
-            <span className="text-muted-foreground">
-              {sets.length - archivedCount} active set{sets.length - archivedCount === 1 ? '' : 's'}
-              {archivedCount ? ` · ${archivedCount} archived` : ''} ·{' '}
-              {Object.keys(pageAssignments).length} page
-              {Object.keys(pageAssignments).length === 1 ? '' : 's'} assigned
-            </span>
+            <LibraryStatus
+              sets={sets}
+              archivedCount={archivedCount}
+              assignedCount={Object.keys(pageAssignments).length}
+            />
           ) : null
         }
         actions={
@@ -366,30 +407,13 @@ export default function ImagePromptsPage() {
       />
 
       {!editing && library && sets.length > 0 && (
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative min-w-[16rem] flex-1">
-            <Search
-              className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground"
-              aria-hidden="true"
-            />
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search sets by name, purpose, theme, prompt or tag"
-              aria-label="Search image sets"
-              className="pl-8"
-            />
-          </div>
-          <label className="flex items-center gap-2 text-xs">
-            <input
-              type="checkbox"
-              checked={showArchived}
-              onChange={(e) => setShowArchived(e.target.checked)}
-              className="h-3.5 w-3.5"
-            />
-            Show archived ({archivedCount})
-          </label>
-        </div>
+        <LibraryFilters
+          query={query}
+          onQuery={setQuery}
+          showArchived={showArchived}
+          onShowArchived={setShowArchived}
+          archivedCount={archivedCount}
+        />
       )}
 
       {body}

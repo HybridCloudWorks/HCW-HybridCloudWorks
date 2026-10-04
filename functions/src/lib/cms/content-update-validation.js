@@ -212,6 +212,18 @@ function isDateLikeField(field) {
   return /At$/.test(field) || /Date$/.test(field) || field === "publishedDate";
 }
 
+/**
+ * The dual-casing text fields, either spelling -> the pair that is always
+ * written together and the length the pair shares. A Map, so a field named
+ * like an Object prototype member cannot read as a pair.
+ */
+const PAIRED_TEXT_FIELDS = new Map([
+  ["title", { keys: ["title", "Title"], maxLength: 240 }],
+  ["Title", { keys: ["title", "Title"], maxLength: 240 }],
+  ["summary", { keys: ["summary", "Summary"], maxLength: 10_000 }],
+  ["Summary", { keys: ["summary", "Summary"], maxLength: 10_000 }],
+]);
+
 function tryNormalizeKnownField(normalized, field, value) {
   if (isUrlField(field)) {
     normalized[field] = assertOptionalHttpUrl(value, field, {
@@ -229,20 +241,15 @@ function tryNormalizeKnownField(normalized, field, value) {
       return true;
     }
   }
-  if (field === "title" || field === "Title") {
-    const t = assertStringLength(value, "title", 240, {
+  const pair = PAIRED_TEXT_FIELDS.get(field);
+  if (pair) {
+    const text = assertStringLength(value, pair.keys[0], pair.maxLength, {
       allowEmpty: true,
     }).trim();
-    normalized.title = t;
-    normalized.Title = t;
-    return true;
-  }
-  if (field === "summary" || field === "Summary") {
-    const s = assertStringLength(value, "summary", 10_000, {
-      allowEmpty: true,
-    }).trim();
-    normalized.summary = s;
-    normalized.Summary = s;
+    Object.assign(
+      normalized,
+      Object.fromEntries(pair.keys.map((key) => [key, text])),
+    );
     return true;
   }
   if (field === "cloudProvider" || field === "Cloud Provider") {
@@ -375,23 +382,30 @@ export function validateAndNormalizeUpdateContentItemUpdates(updates = {}) {
   for (const [key, value] of entries) {
     const field = String(key || "").trim();
     if (!field) continue;
-    if (field.length > 120) {
-      throw new Error(
-        `updates contains a field name that exceeds 120 characters`,
-      );
-    }
-    if (FORBIDDEN_CONTENT_UPDATE_KEYS.has(field)) {
-      throw new Error(`updates cannot modify protected field: ${field}`);
-    }
-    if (value === undefined) continue;
-    if (value === null) {
-      normalized[field] = null;
-      continue;
-    }
-    if (tryNormalizeKnownField(normalized, field, value)) continue;
-    normalizeGenericField(normalized, field, value);
+    normalizeEntry(normalized, field, value);
   }
   return normalized;
+}
+
+/**
+ * One update entry onto `normalized`: the name checked against the length
+ * ceiling and the denylist, an undefined value skipped, a null kept as a
+ * deletion, then the known-field normalizers before the generic one.
+ */
+function normalizeEntry(normalized, field, value) {
+  if (field.length > 120) {
+    throw new Error(`updates contains a field name that exceeds 120 characters`);
+  }
+  if (FORBIDDEN_CONTENT_UPDATE_KEYS.has(field)) {
+    throw new Error(`updates cannot modify protected field: ${field}`);
+  }
+  if (value === undefined) return;
+  if (value === null) {
+    normalized[field] = null;
+    return;
+  }
+  if (tryNormalizeKnownField(normalized, field, value)) return;
+  normalizeGenericField(normalized, field, value);
 }
 
 /**

@@ -17,6 +17,10 @@
  * After a write the stored overrides are re-read through their generation
  * guard; `stored.refresh` never throws, so the write's own outcome is what
  * this hook reports.
+ *
+ * The two writes are module-level functions over the hook's context, the
+ * shape useCertifications uses: the hook holds state, the functions hold the
+ * exits, and the hook stays inside Qlty's return-count budget.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -40,6 +44,46 @@ export const DISCARD_CONFIRM = {
 };
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+/** Upsert the open form once; the editor closes when the write lands. */
+async function saveEvent(ctx) {
+  if (ctx.savingRef.current) return;
+  ctx.savingRef.current = true;
+  const docId =
+    ctx.editingId === 'new' ? `event-${ctx.editingEvent?.id || Date.now()}` : ctx.editingId;
+  ctx.setSaving(docId);
+  ctx.setError('');
+  try {
+    const data = buildSpeakingEventPayload(ctx.editingEvent, ctx.form);
+    await postJSON('upsertSpeakerEvent', { docId, data, merge: true });
+    await ctx.stored.refresh();
+    ctx.close();
+  } catch (err) {
+    ctx.setError(`Save failed: ${err?.message}`);
+  } finally {
+    ctx.savingRef.current = false;
+    ctx.setSaving(null);
+  }
+}
+
+/** Delete one stored document once; the editor closes if it was open on it. */
+async function removeEvent(ctx, docId) {
+  if (ctx.deletingRef.current.has(docId)) return;
+  ctx.deletingRef.current.add(docId);
+  ctx.setDeleting(docId);
+  ctx.setError('');
+  try {
+    await postJSON('deleteSpeakerEvent', { docId });
+    await ctx.stored.refresh();
+    // Read the editor as it is now, not as it was when Delete was clicked.
+    if (ctx.editingIdRef.current === docId) ctx.close();
+  } catch (err) {
+    ctx.setError(`Delete failed: ${err?.message}`);
+  } finally {
+    ctx.deletingRef.current.delete(docId);
+    ctx.setDeleting((current) => (current === docId ? null : current));
+  }
+}
 
 export default function useEventEditor(stored) {
   // editingId: null=closed, 'new'=new override or manual entry, else a stored docId
@@ -108,42 +152,23 @@ export default function useEventEditor(stored) {
     if (next) open(next.id, next.event, next.form);
   };
 
-  const save = async () => {
-    if (savingRef.current) return;
-    savingRef.current = true;
-    const docId = editingId === 'new' ? `event-${editingEvent?.id || Date.now()}` : editingId;
-    setSaving(docId);
-    setError('');
-    try {
-      const data = buildSpeakingEventPayload(editingEvent, form);
-      await postJSON('upsertSpeakerEvent', { docId, data, merge: true });
-      await stored.refresh();
-      close();
-    } catch (err) {
-      setError(`Save failed: ${err?.message}`);
-    } finally {
-      savingRef.current = false;
-      setSaving(null);
-    }
+  // What the writes read and set: the open form as it is on this render, and
+  // the refs that guard a second click.
+  const ctx = {
+    stored,
+    editingId,
+    editingEvent,
+    form,
+    close,
+    savingRef,
+    deletingRef,
+    editingIdRef,
+    setSaving,
+    setDeleting,
+    setError,
   };
-
-  const remove = async (docId) => {
-    if (deletingRef.current.has(docId)) return;
-    deletingRef.current.add(docId);
-    setDeleting(docId);
-    setError('');
-    try {
-      await postJSON('deleteSpeakerEvent', { docId });
-      await stored.refresh();
-      // Read the editor as it is now, not as it was when Delete was clicked.
-      if (editingIdRef.current === docId) close();
-    } catch (err) {
-      setError(`Delete failed: ${err?.message}`);
-    } finally {
-      deletingRef.current.delete(docId);
-      setDeleting((current) => (current === docId ? null : current));
-    }
-  };
+  const save = () => saveEvent(ctx);
+  const remove = (docId) => removeEvent(ctx, docId);
 
   const requestRemove = (docId) => {
     if (deletingRef.current.has(docId)) return;

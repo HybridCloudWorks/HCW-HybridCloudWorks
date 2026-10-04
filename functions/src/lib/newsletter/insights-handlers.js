@@ -331,26 +331,81 @@ const csvRowFor = (contact) =>
     .join(',');
 
 /**
+ * Every page of the segment, SUMMARY_PAGE_SIZE contacts at a time, handed to
+ * `onRows` up to `maxPages`. `{ truncated }` says whether the cap stopped it
+ * short of the end; a Resend refusal comes back as `{ refusal }` for the
+ * route to pass on. No segment yet means no pages.
+ */
+async function eachSegmentPage(client, segmentId, maxPages, onRows) {
+  if (!segmentId) return { truncated: false };
+  let after;
+  for (let pageNumber = 0; pageNumber < maxPages; pageNumber += 1) {
+    const listed = await client.listSegmentContacts(segmentId, { limit: SUMMARY_PAGE_SIZE, after });
+    if (!listed.ok) return { refusal: listed };
+    const rows = rowsOf(listed);
+    onRows(rows);
+    after = nextCursor(listed, rows);
+    if (!after) return { truncated: false };
+  }
+  return { truncated: true };
+}
+
+/**
  * Every contact of the segment as CSV lines, header first, paging to
  * EXPORT_MAX_PAGES and ending with a comment row when it stopped short. A
  * Resend refusal comes back as `{ refusal }` for the route to pass on.
  */
 async function collectAudienceCsv(client, segmentId) {
   const lines = [AUDIENCE_CSV_HEADER];
-  if (!segmentId) return { lines };
-  let after;
-  for (let pageNumber = 0; pageNumber < EXPORT_MAX_PAGES; pageNumber += 1) {
-    const listed = await client.listSegmentContacts(segmentId, { limit: SUMMARY_PAGE_SIZE, after });
-    if (!listed.ok) return { refusal: listed };
-    const rows = rowsOf(listed);
+  const paged = await eachSegmentPage(client, segmentId, EXPORT_MAX_PAGES, (rows) => {
     for (const row of rows) lines.push(csvRowFor(projectContact(row)));
-    after = nextCursor(listed, rows);
-    if (!after) return { lines };
+  });
+  if (paged.refusal) return { refusal: paged.refusal };
+  if (paged.truncated) {
+    lines.push(
+      `# truncated: the list is longer than ${EXPORT_MAX_PAGES * SUMMARY_PAGE_SIZE} contacts`
+    );
   }
-  lines.push(
-    `# truncated: the list is longer than ${EXPORT_MAX_PAGES * SUMMARY_PAGE_SIZE} contacts`
-  );
   return { lines };
+}
+
+/**
+ * Every matching contact of the whole segment (`scope=all`): Resend has no
+ * contact search, so every page is read here, to EXPORT_MAX_PAGES (ADR 0033
+ * Amplify slice). `{ value }` is the answer's body; `{ refusal }` a Resend
+ * refusal.
+ */
+async function searchWholeSegment(client, segmentId, matches) {
+  const contacts = [];
+  const paged = await eachSegmentPage(client, segmentId, EXPORT_MAX_PAGES, (rows) => {
+    contacts.push(...rows.map(projectContact).filter(matches));
+  });
+  if (paged.refusal) return paged;
+  return {
+    value: {
+      ok: true,
+      segmentFound: true,
+      contacts,
+      has_more: false,
+      next_after: null,
+      searchScope: 'all',
+      truncated: paged.truncated,
+    },
+  };
+}
+
+/** Counts for the whole segment, to SUMMARY_MAX_PAGES. `{ value }` or `{ refusal }`. */
+async function countSegment(client, segmentId) {
+  let total = 0;
+  let unsubscribed = 0;
+  const paged = await eachSegmentPage(client, segmentId, SUMMARY_MAX_PAGES, (rows) => {
+    total += rows.length;
+    unsubscribed += rows.filter((row) => row?.unsubscribed === true).length;
+  });
+  if (paged.refusal) return paged;
+  return {
+    value: { total, subscribed: total - unsubscribed, unsubscribed, truncated: paged.truncated },
+  };
 }
 
 /** A CSV download: CRLF line ends, a trailing newline, never cached. */
@@ -364,23 +419,431 @@ const csvAttachment = (filename, lines) => ({
   body: `${lines.join('\r\n')}\r\n`,
 });
 
+// ── Route plumbing ──────────────────────────────────────────────────────────
+
+const ref = (context) => `[invocation ${context?.invocationId ?? 'unknown'}]`;
+
+/**
+ * A Resend failure as an HTTP answer. Logs the route, the status and the
+ * invocation only; Resend's name and message go to the caller, trimmed.
+ */
+function refused(route, result, context) {
+  const status = result?.status ?? 0;
+  context.warn?.(`${route} Resend HTTP ${status} ${ref(context)}`);
+  const name = typeof result?.data?.name === 'string' ? result.data.name : '';
+  const message = typeof result?.data?.message === 'string' ? result.data.message : '';
+  const text =
+    [name, message].filter(Boolean).join(': ') ||
+    (status ? `HTTP ${status}` : 'No answer from Resend');
+  const error = text.slice(0, ERROR_TEXT_LIMIT);
+  if (status === 429) {
+    const seconds = Number.parseInt(String(result?.retryAfter ?? ''), 10);
+    const retryAfterSeconds = Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds, 3600) : 1;
+    return json(
+      429,
+      { ok: false, status, retryAfterSeconds, error },
+      { 'Retry-After': String(retryAfterSeconds) }
+    );
+  }
+  return json(502, { ok: false, status, error });
+}
+
+/** An exception as a 500. The error's name is logged; nothing else of it is. */
+function failed(route, error, context) {
+  const name = typeof error?.name === 'string' ? error.name : 'Error';
+  context.error?.(`${route} failed ${name} ${ref(context)}`);
+  return json(500, {
+    ok: false,
+    error: 'The Newsletter Hub request failed.',
+  });
+}
+
+/** GET through `call`, projecting the successful body with `project`. */
+async function relay(route, context, call, project) {
+  const result = await call();
+  if (!result.ok) return refused(route, result, context);
+  return json(200, { ok: true, ...project(result) });
+}
+
+/**
+ * A write through `call`, acknowledged with `{ ok: true, ...body }` and a
+ * content-free log line. `onOk` runs first on success (cache invalidation).
+ */
+async function acknowledged(route, context, call, { body = {}, onOk } = {}) {
+  const result = await call();
+  if (!result.ok) return refused(route, result, context);
+  onOk?.();
+  context.log?.(`${route} ok ${ref(context)}`);
+  return json(200, { ok: true, ...body });
+}
+
+/** One page of rows under `key`, with Resend's paging beside it. */
+function pageOf(result, key, project) {
+  const rows = rowsOf(result);
+  return {
+    [key]: rows.map(project),
+    has_more: Boolean(result.data?.has_more),
+    next_after: nextCursor(result, rows),
+  };
+}
+
+/**
+ * A route: the role, then the key (`ctx.open`), then `body` inside the
+ * catch-all that turns an exception into a content-free 500. `body` gets
+ * `{ client, auth, request, context, route }`.
+ */
+const handler = (ctx, route, role, body) => async (request, context) => {
+  const opened = await ctx.open(request, role);
+  if (opened.response) return opened.response;
+  try {
+    return await body({ ...opened, request, context, route });
+  } catch (error) {
+    return failed(route, error, context);
+  }
+};
+
+/**
+ * The Newsletter segment's id, found by name and never created: these are
+ * reads, and creating a segment is confirm's job (handlers.js). `{ id }`
+ * (null when there is no such segment yet) or `{ result }` for a refusal.
+ */
+async function findNewsletterSegment(client) {
+  let after;
+  for (let pageNumber = 0; pageNumber < 20; pageNumber += 1) {
+    const listed = await client.listSegments(after);
+    if (!listed.ok) return { result: listed };
+    const rows = rowsOf(listed);
+    const found = rows.find((row) => row?.name === NEWSLETTER_SEGMENT_NAME);
+    if (found?.id) return { id: found.id };
+    if (!listed.data?.has_more || rows.length === 0) break;
+    after = rows[rows.length - 1].id;
+  }
+  return { id: null };
+}
+
+// ── Request readers: `{ error }` or the checked value ───────────────────────
+
+/** `broadcast_id` or `issue_id`, at most one, each in its own shape. */
+function readMetricsIds(request) {
+  const broadcastRaw = queryValue(request, 'broadcast_id');
+  const issueRaw = queryValue(request, 'issue_id');
+  if (broadcastRaw && issueRaw) return { error: 'Send broadcast_id or issue_id, not both' };
+  if (broadcastRaw && !ID_PATTERN.test(broadcastRaw)) {
+    return { error: 'broadcast_id is not a Resend id' };
+  }
+  if (issueRaw && !ISSUE_ID_PATTERN.test(issueRaw)) {
+    return { error: 'issue_id must be issue-YYYY-MM-DD' };
+  }
+  return { broadcastRaw, issueRaw };
+}
+
+/** `start_date` and `end_date`, defaulted to the last DEFAULT_METRICS_DAYS days, in order. */
+function readMetricsWindow(request, now) {
+  const start = readDate(request, 'start_date');
+  if (start.error) return start;
+  const end = readDate(request, 'end_date');
+  if (end.error) return end;
+  const endDate = end.value ?? now().toISOString();
+  const startDate =
+    start.value ?? new Date(Date.parse(endDate) - DEFAULT_METRICS_DAYS * DAY_MS).toISOString();
+  if (Date.parse(startDate) > Date.parse(endDate)) {
+    return { error: 'start_date must not be after end_date' };
+  }
+  return { startDate, endDate };
+}
+
+/** `granularity`, one of GRANULARITIES, daily when absent. */
+function readGranularity(request) {
+  const granularity = queryValue(request, 'granularity') || 'daily';
+  if (!GRANULARITIES.includes(granularity)) {
+    return { error: `granularity must be one of ${GRANULARITIES.join(', ')}` };
+  }
+  return { granularity };
+}
+
+/** The whole metrics query, checked. */
+function readMetricsQuery(request, now) {
+  const ids = readMetricsIds(request);
+  if (ids.error) return ids;
+  const window = readMetricsWindow(request, now);
+  if (window.error) return window;
+  const granularity = readGranularity(request);
+  if (granularity.error) return granularity;
+  return { ...ids, ...window, ...granularity };
+}
+
+/**
+ * The broadcast the metrics are for: the `broadcast_id` as sent, or the
+ * issue's recorded broadcast. `{ response }` when the issue is missing or
+ * was never sent.
+ */
+async function broadcastForQuery(store, { broadcastRaw, issueRaw }) {
+  if (!issueRaw) return { broadcastId: broadcastRaw || undefined };
+  const issue = await store.readDoc('newsletters', issueRaw, issueRaw);
+  if (!issue || issue.kind !== 'weekly_issue' || issue.status === 'deleted') {
+    return { response: json(404, { ok: false, error: 'Issue not found' }) };
+  }
+  if (typeof issue.broadcastId !== 'string' || !ID_PATTERN.test(issue.broadcastId)) {
+    return {
+      response: json(404, {
+        ok: false,
+        code: 'NO_BROADCAST',
+        error: 'This issue has not been sent to Resend, so it has no metrics yet.',
+      }),
+    };
+  }
+  return { broadcastId: issue.broadcastId };
+}
+
+/** The audience page: `?limit&after` and an optional `search`, length-capped. */
+function readAudienceQuery(request) {
+  const page = readPage(request);
+  if (page.error) return page;
+  const search = queryValue(request, 'search');
+  if (search !== null && search.length > MAX_SEARCH_LENGTH) {
+    return { error: `search must be at most ${MAX_SEARCH_LENGTH} characters` };
+  }
+  return { page: page.value, search };
+}
+
+/** A contact id from the path, in Resend's shape, or null. */
+function readContactId(request) {
+  const contactId = String(request.params?.contactId ?? '');
+  return ID_PATTERN.test(contactId) ? contactId : null;
+}
+
+/** `{ unsubscribed }` from a body that holds exactly that boolean. */
+function readUnsubscribedBody(body) {
+  if (!isPlainObject(body)) return { error: 'Send a JSON body { unsubscribed: true | false }' };
+  const unknown = Object.keys(body).filter((key) => key !== 'unsubscribed');
+  if (unknown.length) return { error: `Unknown field(s): ${unknown.join(', ')}` };
+  if (typeof body.unsubscribed !== 'boolean')
+    return { error: 'unsubscribed must be true or false' };
+  return { unsubscribed: body.unsubscribed };
+}
+
+/** `{ name, region }` from a body naming a sending domain and, optionally, its region. */
+function readDomainBody(body) {
+  if (!isPlainObject(body)) return { error: 'Send a JSON body { name }' };
+  const unknown = Object.keys(body).filter((key) => !['name', 'region'].includes(key));
+  if (unknown.length) return { error: `Unknown field(s): ${unknown.join(', ')}` };
+  const name = typeof body.name === 'string' ? body.name.trim().toLowerCase() : '';
+  if (!name || name.length > MAX_HOSTNAME_LENGTH || !HOSTNAME_PATTERN.test(name)) {
+    return { error: 'name must be a domain name such as news.example.com' };
+  }
+  if (body.region !== undefined && !DOMAIN_REGIONS.includes(body.region)) {
+    return { error: `region must be one of ${DOMAIN_REGIONS.join(', ')}` };
+  }
+  return { name, region: body.region };
+}
+
+const TRACKING_FIELDS = ['open_tracking', 'click_tracking'];
+
+/** `{ openTracking, clickTracking }` from a body with at least one of the two booleans. */
+function readTrackingBody(body) {
+  if (!isPlainObject(body)) {
+    return { error: 'Send a JSON body { open_tracking, click_tracking }' };
+  }
+  const unknown = Object.keys(body).filter((key) => !TRACKING_FIELDS.includes(key));
+  if (unknown.length) return { error: `Unknown field(s): ${unknown.join(', ')}` };
+  const present = TRACKING_FIELDS.filter((key) => body[key] !== undefined);
+  if (present.length === 0) return { error: 'Send open_tracking, click_tracking or both' };
+  if (present.some((key) => typeof body[key] !== 'boolean')) {
+    return { error: 'open_tracking and click_tracking must be true or false' };
+  }
+  return { openTracking: body.open_tracking, clickTracking: body.click_tracking };
+}
+
+// ── Detail projections ──────────────────────────────────────────────────────
+
+/** A log with its bodies, redacted of credentials and addresses. */
+const projectLogDetail = (data) => ({
+  ...projectLog(data),
+  ...(typeof data?.user_agent === 'string' ? { user_agent: redactText(data.user_agent) } : {}),
+  request_body: redactSensitive(data?.request_body ?? null),
+  response_body: redactSensitive(data?.response_body ?? null),
+});
+
+const projectTemplateDetail = (data) => ({
+  ...projectTemplate(data),
+  html: typeof data?.html === 'string' ? data.html : null,
+});
+
+// ── Routes ──────────────────────────────────────────────────────────────────
+//
+// Each takes the factory's `ctx` and the opened call: `{ client, auth,
+// request, context, route }`. The role check, the key and the catch-all are
+// `handler`'s, so a body only validates, calls Resend and projects.
+
+async function metrics(ctx, { client, request, context, route }) {
+  const query = readMetricsQuery(request, ctx.now);
+  if (query.error) return badRequest(query.error);
+  const target = await broadcastForQuery(ctx.store, query);
+  if (target.response) return target.response;
+  const { broadcastId } = target;
+  const { startDate, endDate, granularity } = query;
+  return relay(
+    route,
+    context,
+    () =>
+      client.getEmailMetrics({
+        startDate,
+        endDate,
+        metrics: METRICS,
+        // One row per broadcast when asking about one; a time series otherwise.
+        dimensions: broadcastId ? ['broadcast'] : ['period'],
+        granularity,
+        broadcastId,
+      }),
+    ({ data }) => ({
+      start_date: data?.start_date ?? startDate,
+      end_date: data?.end_date ?? endDate,
+      granularity: data?.granularity ?? granularity,
+      broadcast_id: broadcastId ?? null,
+      totals: projectTotals(data?.totals),
+      data: Array.isArray(data?.data) ? data.data.map(projectMetricRow) : [],
+    })
+  );
+}
+
+async function clickedLinks(ctx, { client, request, context, route }) {
+  const broadcastId = readPathId(request, 'broadcastId');
+  if (!broadcastId) return badRequest('broadcastId is not a Resend id');
+  const page = readPage(request);
+  if (page.error) return badRequest(page.error);
+  return relay(
+    route,
+    context,
+    () => client.listBroadcastClickedLinks(broadcastId, page.value),
+    (result) => pageOf(result, 'links', projectClickedLink)
+  );
+}
+
+async function recipients(ctx, { client, request, context, route }) {
+  const broadcastId = readPathId(request, 'broadcastId');
+  if (!broadcastId) return badRequest('broadcastId is not a Resend id');
+  const type = queryValue(request, 'type');
+  if (!type || !RECIPIENT_TYPES.includes(type)) {
+    return badRequest(`type must be one of ${RECIPIENT_TYPES.join(', ')}`);
+  }
+  const page = readPage(request);
+  if (page.error) return badRequest(page.error);
+  return relay(
+    route,
+    context,
+    () => client.listBroadcastRecipients(broadcastId, { type, ...page.value }),
+    (result) => ({ type, ...pageOf(result, 'recipients', projectRecipient) })
+  );
+}
+
+/**
+ * One page of the Newsletter segment. `search` filters THAT PAGE by a
+ * case-insensitive email substring; it does not search the whole list, so
+ * `has_more` and `next_after` still describe Resend's paging. With
+ * `scope=all` and a search, every page is read and every match answered
+ * (searchWholeSegment).
+ */
+async function audience(ctx, { client, request, context, route }) {
+  const query = readAudienceQuery(request);
+  if (query.error) return badRequest(query.error);
+  const segment = await ctx.segmentId(client);
+  if (segment.result) return refused(route, segment.result, context);
+  if (!segment.id) {
+    return json(200, {
+      ok: true,
+      segmentFound: false,
+      contacts: [],
+      has_more: false,
+      next_after: null,
+      searchScope: 'page',
+    });
+  }
+  const needle = query.search ? query.search.trim().toLowerCase() : '';
+  const matches = (contact) =>
+    !needle ||
+    String(contact.email ?? '')
+      .toLowerCase()
+      .includes(needle);
+  if (needle && queryValue(request, 'scope') === 'all') {
+    const found = await searchWholeSegment(client, segment.id, matches);
+    return found.refusal ? refused(route, found.refusal, context) : json(200, found.value);
+  }
+  return relay(
+    route,
+    context,
+    () => client.listSegmentContacts(segment.id, query.page),
+    (result) => {
+      const rows = rowsOf(result);
+      return {
+        segmentFound: true,
+        contacts: rows.map(projectContact).filter(matches),
+        has_more: Boolean(result.data?.has_more),
+        next_after: nextCursor(result, rows),
+        searchScope: 'page',
+      };
+    }
+  );
+}
+
+/**
+ * Counts for the whole segment, paging 100 at a time up to
+ * SUMMARY_MAX_PAGES; `truncated` says the cap was hit. Cached per process
+ * for SUMMARY_CACHE_MS, successes only.
+ */
+async function audienceSummary(ctx, { client, context, route }) {
+  const at = ctx.now().getTime();
+  const cached = ctx.readSummary();
+  if (cached && at - cached.at < SUMMARY_CACHE_MS) {
+    return json(200, {
+      ok: true,
+      ...cached.value,
+      cachedAt: new Date(cached.at).toISOString(),
+    });
+  }
+  const segment = await ctx.segmentId(client);
+  if (segment.result) return refused(route, segment.result, context);
+  const counted = await countSegment(client, segment.id);
+  if (counted.refusal) return refused(route, counted.refusal, context);
+  ctx.writeSummary({ at, value: counted.value });
+  return json(200, {
+    ok: true,
+    ...counted.value,
+    cachedAt: new Date(at).toISOString(),
+  });
+}
+
+/**
+ * PUBLISHER. The whole Newsletter segment as CSV (ADR 0033 Amplify slice):
+ * email, first name, last name, joined, status. Publisher because it is
+ * every subscriber's address in one file. Pages to EXPORT_MAX_PAGES and
+ * says so in a trailing comment row when it stopped short.
+ */
+async function exportAudience(ctx, { client, context, route }) {
+  const segment = await ctx.segmentId(client);
+  if (segment.result) return refused(route, segment.result, context);
+  const collected = await collectAudienceCsv(client, segment.id);
+  if (collected.refusal) return refused(route, collected.refusal, context);
+  context.log?.(`${route} ${collected.lines.length - 1} row(s) ${ref(context)}`);
+  const day = ctx.now().toISOString().slice(0, 10);
+  return csvAttachment(`newsletter-audience-${day}.csv`, collected.lines);
+}
+
 /**
  * Invite mode of addContact (ADR 0033 Amplify slice): double opt-in
  * respected. The address gets the same signed confirmation link the signup
  * form sends, and nothing is written to the list until it is opened.
- * `deps` is the factory's { env, store, now, ref, refused }.
  */
-async function inviteContact(deps, route, opened, email, context) {
+async function inviteContact(ctx, { client, context, route }, email) {
   const sent = await sendConfirmationEmail({
-    client: opened.client,
-    apiKey: readKey(deps.env, 'RESEND_API_KEY'),
+    client,
+    apiKey: readKey(ctx.env, 'RESEND_API_KEY'),
     email,
     source: 'website',
-    now: () => deps.now().getTime(),
-    from: await resolveFromAddress(deps.store, context),
+    now: () => ctx.now().getTime(),
+    from: await resolveFromAddress(ctx.store, context),
   });
-  if (!sent.ok) return deps.refused(route, sent, context);
-  context.log?.(`${route} invited ${deps.ref(context)}`);
+  if (!sent.ok) return refused(route, sent, context);
+  context.log?.(`${route} invited ${ref(context)}`);
   return json(202, {
     ok: true,
     mode: 'invite',
@@ -392,34 +855,28 @@ async function inviteContact(deps, route, opened, email, context) {
  * Confirmed mode of addContact: consent was recorded elsewhere, so the
  * contact is added subscribed with the same read-back the public confirm
  * does, and the consent date is written beside the audit trail — never in a
- * log line. `deps.invalidateSummary` drops the cached audience summary.
+ * log line. The cached audience summary is dropped.
  */
 async function addConfirmedContact(
-  deps,
-  route,
-  opened,
-  { email, mode, consentRecordedOn },
-  context
+  ctx,
+  { client, auth, context, route },
+  { email, mode, consentRecordedOn }
 ) {
-  const segment = await resolveSegmentId(opened.client);
-  const ensured = await ensureConfirmedContact({
-    client: opened.client,
-    email,
-    segmentId: segment,
-  });
+  const segment = await resolveSegmentId(client);
+  const ensured = await ensureConfirmedContact({ client, email, segmentId: segment });
   if (!ensured.ok) {
-    context.warn?.(`${route} not confirmed: ${ensured.why} ${deps.ref(context)}`);
+    context.warn?.(`${route} not confirmed: ${ensured.why} ${ref(context)}`);
     return json(502, {
       ok: false,
       error: `Resend did not confirm the contact: ${ensured.why}`,
     });
   }
-  deps.invalidateSummary();
-  await deps.store.upsertDoc?.('admin_audit_logs', {
-    id: `newsletter-consent-${deps.now().getTime()}-${Math.random().toString(36).slice(2, 8)}`,
+  ctx.invalidateSummary();
+  await ctx.store.upsertDoc?.('admin_audit_logs', {
+    id: `newsletter-consent-${ctx.now().getTime()}-${Math.random().toString(36).slice(2, 8)}`,
     action: 'newsletter_subscriber_added',
-    userId: opened.auth?.user?.oid ?? null,
-    timestamp: deps.now().toISOString(),
+    userId: auth?.user?.oid ?? null,
+    timestamp: ctx.now().toISOString(),
     details: { consentRecordedOn, mode, emailMasked: maskEmail(email) },
     compliance: {
       schemaVersion: 1,
@@ -427,7 +884,7 @@ async function addConfirmedContact(
       identityVerified: true,
     },
   });
-  context.log?.(`${route} confirmed ${deps.ref(context)}`);
+  context.log?.(`${route} confirmed ${ref(context)}`);
   return json(200, {
     ok: true,
     mode,
@@ -435,6 +892,170 @@ async function addConfirmedContact(
     message: 'Added as a confirmed subscriber.',
   });
 }
+
+/**
+ * PUBLISHER. Add a subscriber from the admin (ADR 0033 Amplify slice).
+ * Body `{ email, mode, consentRecordedOn? }`:
+ *
+ *   mode: 'invite'     double opt-in respected — the address gets the same
+ *                      signed confirmation link the signup form sends, and
+ *                      nothing is written to the list until it is opened.
+ *   mode: 'confirmed'  consent was recorded elsewhere (a conference form,
+ *                      a written request); `consentRecordedOn` is required,
+ *                      a date, and the contact is added subscribed with
+ *                      the same read-back the public confirm does.
+ */
+async function addContact(ctx, call) {
+  const body = await call.request.json().catch(() => null);
+  const parsed = parseAddContactBody(body, ctx.now().getTime());
+  if (parsed.error) return badRequest(parsed.error);
+  return parsed.mode === 'invite'
+    ? inviteContact(ctx, call, parsed.email)
+    : addConfirmedContact(ctx, call, parsed);
+}
+
+/** PUBLISHER. Body `{ unsubscribed: boolean }` only. */
+async function updateContact(ctx, { client, request, context, route }) {
+  const contactId = readContactId(request);
+  if (!contactId) return badRequest('The path must carry a Resend contact id');
+  const parsed = readUnsubscribedBody(await request.json().catch(() => null));
+  if (parsed.error) return badRequest(parsed.error);
+  return acknowledged(
+    route,
+    context,
+    () => client.setContactUnsubscribed(contactId, parsed.unsubscribed),
+    { onOk: ctx.invalidateSummary }
+  );
+}
+
+/** PUBLISHER. Removes the contact from Resend altogether, not just the segment. */
+async function deleteContact(ctx, { client, request, context, route }) {
+  const contactId = readContactId(request);
+  if (!contactId) return badRequest('The path must carry a Resend contact id');
+  return acknowledged(route, context, () => client.deleteContact(contactId), {
+    onOk: ctx.invalidateSummary,
+  });
+}
+
+async function listDomains(ctx, { client, context, route }) {
+  return relay(
+    route,
+    context,
+    () => client.listDomains(),
+    (result) => ({ domains: rowsOf(result).map(projectDomain) })
+  );
+}
+
+async function getDomain(ctx, { client, request, context, route }) {
+  const domainId = readPathId(request, 'domainId');
+  if (!domainId) return badRequest('domainId is not a Resend id');
+  return relay(
+    route,
+    context,
+    () => client.getDomain(domainId),
+    (result) => ({ domain: projectDomainDetail(result.data) })
+  );
+}
+
+/** PUBLISHER. Body `{ name, region? }`. */
+async function createDomain(ctx, { client, request, context, route }) {
+  const parsed = readDomainBody(await request.json().catch(() => null));
+  if (parsed.error) return badRequest(parsed.error);
+  const result = await client.createDomain({ name: parsed.name, region: parsed.region });
+  if (!result.ok) return refused(route, result, context);
+  context.log?.(`${route} ok ${ref(context)}`);
+  return json(201, { ok: true, domain: projectDomainDetail(result.data) });
+}
+
+/** PUBLISHER. Asks Resend to check the DNS records again. */
+async function verifyDomain(ctx, { client, request, context, route }) {
+  const domainId = readPathId(request, 'domainId');
+  if (!domainId) return badRequest('domainId is not a Resend id');
+  return acknowledged(route, context, () => client.verifyDomain(domainId), {
+    body: { id: domainId },
+  });
+}
+
+/** PUBLISHER. Body `{ open_tracking?, click_tracking? }`, booleans, at least one. */
+async function updateDomain(ctx, { client, request, context, route }) {
+  const domainId = readPathId(request, 'domainId');
+  if (!domainId) return badRequest('domainId is not a Resend id');
+  const parsed = readTrackingBody(await request.json().catch(() => null));
+  if (parsed.error) return badRequest(parsed.error);
+  return acknowledged(
+    route,
+    context,
+    () =>
+      client.updateDomainTracking(domainId, {
+        openTracking: parsed.openTracking,
+        clickTracking: parsed.clickTracking,
+      }),
+    { body: { id: domainId } }
+  );
+}
+
+/** PUBLISHER: request and response bodies, redacted of credentials and addresses. */
+async function getLog(ctx, { client, request, context, route }) {
+  const logId = readPathId(request, 'logId');
+  if (!logId) return badRequest('logId is not a Resend id');
+  return relay(
+    route,
+    context,
+    () => client.getLog(logId),
+    ({ data }) => ({ log: projectLogDetail(data) })
+  );
+}
+
+async function getTemplate(ctx, { client, request, context, route }) {
+  const templateId = readPathId(request, 'templateId');
+  if (!templateId) return badRequest('templateId is not a Resend id');
+  return relay(
+    route,
+    context,
+    () => client.getTemplate(templateId),
+    ({ data }) => ({ template: projectTemplateDetail(data) })
+  );
+}
+
+/** A paged list: `?limit&after` relayed to the client's `method`, rows projected under `key`. */
+const pagedList = (method, key, project) =>
+  async function list(ctx, { client, request, context, route }) {
+    const page = readPage(request);
+    if (page.error) return badRequest(page.error);
+    return relay(
+      route,
+      context,
+      () => client[method](page.value),
+      (result) => pageOf(result, key, project)
+    );
+  };
+
+/** Every route: the name its log lines carry, the role it requires, its body. */
+const ROUTES = Object.freeze({
+  metrics: ['mailingListMetrics', 'editor', metrics],
+  clickedLinks: ['mailingListClickedLinks', 'editor', clickedLinks],
+  recipients: ['mailingListRecipients', 'editor', recipients],
+  audience: ['mailingListAudience', 'editor', audience],
+  audienceSummary: ['mailingListAudienceSummary', 'editor', audienceSummary],
+  exportAudience: ['mailingListAudienceExport', 'publisher', exportAudience],
+  addContact: ['mailingListContactAdd', 'publisher', addContact],
+  updateContact: ['mailingListContactUpdate', 'publisher', updateContact],
+  deleteContact: ['mailingListContactDelete', 'publisher', deleteContact],
+  listDomains: ['mailingListDomains', 'editor', listDomains],
+  getDomain: ['mailingListDomain', 'editor', getDomain],
+  createDomain: ['mailingListDomainCreate', 'publisher', createDomain],
+  verifyDomain: ['mailingListDomainVerify', 'publisher', verifyDomain],
+  updateDomain: ['mailingListDomainUpdate', 'publisher', updateDomain],
+  listLogs: ['mailingListLogs', 'editor', pagedList('listLogs', 'logs', projectLog)],
+  getLog: ['mailingListLog', 'publisher', getLog],
+  listEmails: ['mailingListEmails', 'editor', pagedList('listEmails', 'emails', projectEmail)],
+  listTemplates: [
+    'mailingListTemplates',
+    'editor',
+    pagedList('listTemplates', 'templates', projectTemplate),
+  ],
+  getTemplate: ['mailingListTemplate', 'editor', getTemplate],
+});
 
 /**
  * @param {object} deps
@@ -456,8 +1077,6 @@ export function createNewsletterInsightsHandlers({
   /** Per process: `{ at, value }` of the last audience summary. */
   let summaryCache = null;
 
-  const ref = (context) => `[invocation ${context?.invocationId ?? 'unknown'}]`;
-
   const clientOrNull = () => {
     const apiKey = readKey(env, 'RESEND_API_KEY');
     return apiKey ? createResendClient({ apiKey, fetch: fetchImpl }) : null;
@@ -469,43 +1088,9 @@ export function createNewsletterInsightsHandlers({
     });
 
   /**
-   * A Resend failure as an HTTP answer. Logs the route, the status and the
-   * invocation only; Resend's name and message go to the caller, trimmed.
-   */
-  function refused(route, result, context) {
-    const status = result?.status ?? 0;
-    context.warn?.(`${route} Resend HTTP ${status} ${ref(context)}`);
-    const name = typeof result?.data?.name === 'string' ? result.data.name : '';
-    const message = typeof result?.data?.message === 'string' ? result.data.message : '';
-    const text =
-      [name, message].filter(Boolean).join(': ') ||
-      (status ? `HTTP ${status}` : 'No answer from Resend');
-    const error = text.slice(0, ERROR_TEXT_LIMIT);
-    if (status === 429) {
-      const seconds = Number.parseInt(String(result?.retryAfter ?? ''), 10);
-      const retryAfterSeconds =
-        Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds, 3600) : 1;
-      return json(
-        429,
-        { ok: false, status, retryAfterSeconds, error },
-        { 'Retry-After': String(retryAfterSeconds) }
-      );
-    }
-    return json(502, { ok: false, status, error });
-  }
-
-  const failed = (route, error, context) => {
-    const name = typeof error?.name === 'string' ? error.name : 'Error';
-    context.error?.(`${route} failed ${name} ${ref(context)}`);
-    return json(500, {
-      ok: false,
-      error: 'The Newsletter Hub request failed.',
-    });
-  };
-
-  /**
-   * The route's common opening: role, then the key. `{ client }` or `{ response }`.
-   * Role first, so an under-privileged caller learns nothing about configuration.
+   * The route's common opening: role, then the key. `{ client, auth }` or
+   * `{ response }`. Role first, so an under-privileged caller learns nothing
+   * about configuration.
    */
   async function open(request, role) {
     const auth = await guard.requireRole(request, role);
@@ -513,25 +1098,6 @@ export function createNewsletterInsightsHandlers({
     const client = clientOrNull();
     if (!client) return { response: notConfigured() };
     return { client, auth };
-  }
-
-  /**
-   * The Newsletter segment's id, found by name and never created: these are
-   * reads, and creating a segment is confirm's job (handlers.js). `{ id }`
-   * (null when there is no such segment yet) or `{ result }` for a refusal.
-   */
-  async function findNewsletterSegment(client) {
-    let after;
-    for (let pageNumber = 0; pageNumber < 20; pageNumber += 1) {
-      const listed = await client.listSegments(after);
-      if (!listed.ok) return { result: listed };
-      const rows = rowsOf(listed);
-      const found = rows.find((row) => row?.name === NEWSLETTER_SEGMENT_NAME);
-      if (found?.id) return { id: found.id };
-      if (!listed.data?.has_more || rows.length === 0) break;
-      after = rows[rows.length - 1].id;
-    }
-    return { id: null };
   }
 
   async function segmentId(client) {
@@ -546,643 +1112,26 @@ export function createNewsletterInsightsHandlers({
     return segmentIdPromise;
   }
 
-  /** GET through `call`, projecting the successful body with `project`. */
-  async function relay(route, context, call, project) {
-    const result = await call();
-    if (!result.ok) return refused(route, result, context);
-    return json(200, { ok: true, ...project(result) });
-  }
-
-  /** What the addContact helpers need from this factory; summaryCache is state, so it is a function. */
-  const contactDeps = {
+  /** What the routes need from this factory. The summary cache is state, so it is read and written through functions. */
+  const ctx = {
     env,
     store,
     now,
-    ref,
-    refused,
+    open,
+    segmentId,
+    readSummary: () => summaryCache,
+    writeSummary: (entry) => {
+      summaryCache = entry;
+    },
     invalidateSummary: () => {
       summaryCache = null;
     },
   };
 
-  return {
-    async metrics(request, context) {
-      const route = 'mailingListMetrics';
-      const opened = await open(request, 'editor');
-      if (opened.response) return opened.response;
-      try {
-        const broadcastRaw = queryValue(request, 'broadcast_id');
-        const issueRaw = queryValue(request, 'issue_id');
-        if (broadcastRaw && issueRaw) return badRequest('Send broadcast_id or issue_id, not both');
-        if (broadcastRaw && !ID_PATTERN.test(broadcastRaw))
-          return badRequest('broadcast_id is not a Resend id');
-        if (issueRaw && !ISSUE_ID_PATTERN.test(issueRaw))
-          return badRequest('issue_id must be issue-YYYY-MM-DD');
-        const start = readDate(request, 'start_date');
-        if (start.error) return badRequest(start.error);
-        const end = readDate(request, 'end_date');
-        if (end.error) return badRequest(end.error);
-        const granularityRaw = queryValue(request, 'granularity');
-        if (granularityRaw && !GRANULARITIES.includes(granularityRaw)) {
-          return badRequest(`granularity must be one of ${GRANULARITIES.join(', ')}`);
-        }
-        const endDate = end.value ?? now().toISOString();
-        const startDate =
-          start.value ??
-          new Date(Date.parse(endDate) - DEFAULT_METRICS_DAYS * DAY_MS).toISOString();
-        if (Date.parse(startDate) > Date.parse(endDate))
-          return badRequest('start_date must not be after end_date');
-
-        let broadcastId = broadcastRaw || undefined;
-        if (issueRaw) {
-          const issue = await store.readDoc('newsletters', issueRaw, issueRaw);
-          if (!issue || issue.kind !== 'weekly_issue' || issue.status === 'deleted') {
-            return json(404, { ok: false, error: 'Issue not found' });
-          }
-          if (typeof issue.broadcastId !== 'string' || !ID_PATTERN.test(issue.broadcastId)) {
-            return json(404, {
-              ok: false,
-              code: 'NO_BROADCAST',
-              error: 'This issue has not been sent to Resend, so it has no metrics yet.',
-            });
-          }
-          broadcastId = issue.broadcastId;
-        }
-
-        return await relay(
-          route,
-          context,
-          () =>
-            opened.client.getEmailMetrics({
-              startDate,
-              endDate,
-              metrics: METRICS,
-              // One row per broadcast when asking about one; a time series otherwise.
-              dimensions: broadcastId ? ['broadcast'] : ['period'],
-              granularity: granularityRaw || 'daily',
-              broadcastId,
-            }),
-          ({ data }) => ({
-            start_date: data?.start_date ?? startDate,
-            end_date: data?.end_date ?? endDate,
-            granularity: data?.granularity ?? (granularityRaw || 'daily'),
-            broadcast_id: broadcastId ?? null,
-            totals: projectTotals(data?.totals),
-            data: Array.isArray(data?.data) ? data.data.map(projectMetricRow) : [],
-          })
-        );
-      } catch (error) {
-        return failed(route, error, context);
-      }
-    },
-
-    async clickedLinks(request, context) {
-      const route = 'mailingListClickedLinks';
-      const opened = await open(request, 'editor');
-      if (opened.response) return opened.response;
-      const broadcastId = readPathId(request, 'broadcastId');
-      if (!broadcastId) return badRequest('broadcastId is not a Resend id');
-      const pageOptions = readPage(request);
-      if (pageOptions.error) return badRequest(pageOptions.error);
-      try {
-        return await relay(
-          route,
-          context,
-          () => opened.client.listBroadcastClickedLinks(broadcastId, pageOptions.value),
-          (result) => {
-            const rows = rowsOf(result);
-            return {
-              links: rows.map(projectClickedLink),
-              has_more: Boolean(result.data?.has_more),
-              next_after: nextCursor(result, rows),
-            };
-          }
-        );
-      } catch (error) {
-        return failed(route, error, context);
-      }
-    },
-
-    async recipients(request, context) {
-      const route = 'mailingListRecipients';
-      const opened = await open(request, 'editor');
-      if (opened.response) return opened.response;
-      const broadcastId = readPathId(request, 'broadcastId');
-      if (!broadcastId) return badRequest('broadcastId is not a Resend id');
-      const type = queryValue(request, 'type');
-      if (!type || !RECIPIENT_TYPES.includes(type)) {
-        return badRequest(`type must be one of ${RECIPIENT_TYPES.join(', ')}`);
-      }
-      const pageOptions = readPage(request);
-      if (pageOptions.error) return badRequest(pageOptions.error);
-      try {
-        return await relay(
-          route,
-          context,
-          () =>
-            opened.client.listBroadcastRecipients(broadcastId, {
-              type,
-              ...pageOptions.value,
-            }),
-          (result) => {
-            const rows = rowsOf(result);
-            return {
-              type,
-              recipients: rows.map(projectRecipient),
-              has_more: Boolean(result.data?.has_more),
-              next_after: nextCursor(result, rows),
-            };
-          }
-        );
-      } catch (error) {
-        return failed(route, error, context);
-      }
-    },
-
-    /**
-     * One page of the Newsletter segment. `search` filters THAT PAGE by a
-     * case-insensitive email substring; it does not search the whole list, so
-     * `has_more` and `next_after` still describe Resend's paging.
-     */
-    async audience(request, context) {
-      const route = 'mailingListAudience';
-      const opened = await open(request, 'editor');
-      if (opened.response) return opened.response;
-      const pageOptions = readPage(request);
-      if (pageOptions.error) return badRequest(pageOptions.error);
-      const search = queryValue(request, 'search');
-      if (search !== null && search.length > MAX_SEARCH_LENGTH) {
-        return badRequest(`search must be at most ${MAX_SEARCH_LENGTH} characters`);
-      }
-      try {
-        const segment = await segmentId(opened.client);
-        if (segment.result) return refused(route, segment.result, context);
-        if (!segment.id) {
-          return json(200, {
-            ok: true,
-            segmentFound: false,
-            contacts: [],
-            has_more: false,
-            next_after: null,
-            searchScope: 'page',
-          });
-        }
-        const needle = search ? search.trim().toLowerCase() : '';
-        const matches = (contact) =>
-          !needle ||
-          String(contact.email ?? '')
-            .toLowerCase()
-            .includes(needle);
-        // `scope=all` with a search: Resend has no contact search, so page
-        // the whole segment here and answer every match (ADR 0033 Amplify
-        // slice). Capped at EXPORT_MAX_PAGES, and `truncated` says when.
-        if (needle && queryValue(request, 'scope') === 'all') {
-          const contacts = [];
-          let after;
-          let truncated = false;
-          for (let pageNumber = 0; ; pageNumber += 1) {
-            if (pageNumber === EXPORT_MAX_PAGES) {
-              truncated = true;
-              break;
-            }
-            const listed = await opened.client.listSegmentContacts(segment.id, {
-              limit: SUMMARY_PAGE_SIZE,
-              after,
-            });
-            if (!listed.ok) return refused(route, listed, context);
-            const rows = rowsOf(listed);
-            contacts.push(...rows.map(projectContact).filter(matches));
-            const cursor = nextCursor(listed, rows);
-            if (!cursor) break;
-            after = cursor;
-          }
-          return json(200, {
-            ok: true,
-            segmentFound: true,
-            contacts,
-            has_more: false,
-            next_after: null,
-            searchScope: 'all',
-            truncated,
-          });
-        }
-        return await relay(
-          route,
-          context,
-          () => opened.client.listSegmentContacts(segment.id, pageOptions.value),
-          (result) => {
-            const rows = rowsOf(result);
-            const contacts = rows.map(projectContact).filter(matches);
-            return {
-              segmentFound: true,
-              contacts,
-              has_more: Boolean(result.data?.has_more),
-              next_after: nextCursor(result, rows),
-              searchScope: 'page',
-            };
-          }
-        );
-      } catch (error) {
-        return failed(route, error, context);
-      }
-    },
-
-    /**
-     * Counts for the whole segment, paging 100 at a time up to
-     * SUMMARY_MAX_PAGES; `truncated` says the cap was hit. Cached per process
-     * for SUMMARY_CACHE_MS, successes only.
-     */
-    async audienceSummary(request, context) {
-      const route = 'mailingListAudienceSummary';
-      const opened = await open(request, 'editor');
-      if (opened.response) return opened.response;
-      const at = now().getTime();
-      if (summaryCache && at - summaryCache.at < SUMMARY_CACHE_MS) {
-        return json(200, {
-          ok: true,
-          ...summaryCache.value,
-          cachedAt: new Date(summaryCache.at).toISOString(),
-        });
-      }
-      try {
-        const segment = await segmentId(opened.client);
-        if (segment.result) return refused(route, segment.result, context);
-        let total = 0;
-        let unsubscribed = 0;
-        let truncated = false;
-        if (segment.id) {
-          let after;
-          for (let pageNumber = 0; ; pageNumber += 1) {
-            if (pageNumber === SUMMARY_MAX_PAGES) {
-              truncated = true;
-              break;
-            }
-            const listed = await opened.client.listSegmentContacts(segment.id, {
-              limit: SUMMARY_PAGE_SIZE,
-              after,
-            });
-            if (!listed.ok) return refused(route, listed, context);
-            const rows = rowsOf(listed);
-            total += rows.length;
-            unsubscribed += rows.filter((row) => row?.unsubscribed === true).length;
-            const cursor = nextCursor(listed, rows);
-            if (!cursor) break;
-            after = cursor;
-          }
-        }
-        const value = {
-          total,
-          subscribed: total - unsubscribed,
-          unsubscribed,
-          truncated,
-        };
-        summaryCache = { at, value };
-        return json(200, {
-          ok: true,
-          ...value,
-          cachedAt: new Date(at).toISOString(),
-        });
-      } catch (error) {
-        return failed(route, error, context);
-      }
-    },
-
-    /**
-     * PUBLISHER. The whole Newsletter segment as CSV (ADR 0033 Amplify slice):
-     * email, first name, last name, joined, status. Publisher because it is
-     * every subscriber's address in one file. Pages to EXPORT_MAX_PAGES and
-     * says so in a trailing comment row when it stopped short.
-     */
-    async exportAudience(request, context) {
-      const route = 'mailingListAudienceExport';
-      const opened = await open(request, 'publisher');
-      if (opened.response) return opened.response;
-      try {
-        const segment = await segmentId(opened.client);
-        if (segment.result) return refused(route, segment.result, context);
-        const collected = await collectAudienceCsv(opened.client, segment.id);
-        if (collected.refusal) return refused(route, collected.refusal, context);
-        context.log?.(`${route} ${collected.lines.length - 1} row(s) ${ref(context)}`);
-        const day = now().toISOString().slice(0, 10);
-        return csvAttachment(`newsletter-audience-${day}.csv`, collected.lines);
-      } catch (error) {
-        return failed(route, error, context);
-      }
-    },
-
-    /**
-     * PUBLISHER. Add a subscriber from the admin (ADR 0033 Amplify slice).
-     * Body `{ email, mode, consentRecordedOn? }`:
-     *
-     *   mode: 'invite'     double opt-in respected — the address gets the same
-     *                      signed confirmation link the signup form sends, and
-     *                      nothing is written to the list until it is opened.
-     *   mode: 'confirmed'  consent was recorded elsewhere (a conference form,
-     *                      a written request); `consentRecordedOn` is required,
-     *                      a date, and the contact is added subscribed with
-     *                      the same read-back the public confirm does.
-     */
-    async addContact(request, context) {
-      const route = 'mailingListContactAdd';
-      const opened = await open(request, 'publisher');
-      if (opened.response) return opened.response;
-      const body = await request.json().catch(() => null);
-      const parsed = parseAddContactBody(body, now().getTime());
-      if (parsed.error) return badRequest(parsed.error);
-      try {
-        return parsed.mode === 'invite'
-          ? await inviteContact(contactDeps, route, opened, parsed.email, context)
-          : await addConfirmedContact(contactDeps, route, opened, parsed, context);
-      } catch (error) {
-        return failed(route, error, context);
-      }
-    },
-
-    /** PUBLISHER. Body `{ unsubscribed: boolean }` only. */
-    async updateContact(request, context) {
-      const route = 'mailingListContactUpdate';
-      const opened = await open(request, 'publisher');
-      if (opened.response) return opened.response;
-      const contactId = String(request.params?.contactId ?? '');
-      if (!ID_PATTERN.test(contactId)) return badRequest('The path must carry a Resend contact id');
-      const body = await request.json().catch(() => null);
-      if (!isPlainObject(body))
-        return badRequest('Send a JSON body { unsubscribed: true | false }');
-      const unknown = Object.keys(body).filter((key) => key !== 'unsubscribed');
-      if (unknown.length) return badRequest(`Unknown field(s): ${unknown.join(', ')}`);
-      if (typeof body.unsubscribed !== 'boolean')
-        return badRequest('unsubscribed must be true or false');
-      try {
-        const result = await opened.client.setContactUnsubscribed(contactId, body.unsubscribed);
-        if (!result.ok) return refused(route, result, context);
-        summaryCache = null;
-        context.log?.(`${route} ok ${ref(context)}`);
-        return json(200, { ok: true });
-      } catch (error) {
-        return failed(route, error, context);
-      }
-    },
-
-    /** PUBLISHER. Removes the contact from Resend altogether, not just the segment. */
-    async deleteContact(request, context) {
-      const route = 'mailingListContactDelete';
-      const opened = await open(request, 'publisher');
-      if (opened.response) return opened.response;
-      const contactId = String(request.params?.contactId ?? '');
-      if (!ID_PATTERN.test(contactId)) return badRequest('The path must carry a Resend contact id');
-      try {
-        const result = await opened.client.deleteContact(contactId);
-        if (!result.ok) return refused(route, result, context);
-        summaryCache = null;
-        context.log?.(`${route} ok ${ref(context)}`);
-        return json(200, { ok: true });
-      } catch (error) {
-        return failed(route, error, context);
-      }
-    },
-
-    async listDomains(request, context) {
-      const route = 'mailingListDomains';
-      const opened = await open(request, 'editor');
-      if (opened.response) return opened.response;
-      try {
-        return await relay(
-          route,
-          context,
-          () => opened.client.listDomains(),
-          (result) => ({
-            domains: rowsOf(result).map(projectDomain),
-          })
-        );
-      } catch (error) {
-        return failed(route, error, context);
-      }
-    },
-
-    async getDomain(request, context) {
-      const route = 'mailingListDomain';
-      const opened = await open(request, 'editor');
-      if (opened.response) return opened.response;
-      const domainId = readPathId(request, 'domainId');
-      if (!domainId) return badRequest('domainId is not a Resend id');
-      try {
-        return await relay(
-          route,
-          context,
-          () => opened.client.getDomain(domainId),
-          (result) => ({
-            domain: projectDomainDetail(result.data),
-          })
-        );
-      } catch (error) {
-        return failed(route, error, context);
-      }
-    },
-
-    /** PUBLISHER. Body `{ name, region? }`. */
-    async createDomain(request, context) {
-      const route = 'mailingListDomainCreate';
-      const opened = await open(request, 'publisher');
-      if (opened.response) return opened.response;
-      const body = await request.json().catch(() => null);
-      if (!isPlainObject(body)) return badRequest('Send a JSON body { name }');
-      const unknown = Object.keys(body).filter((key) => !['name', 'region'].includes(key));
-      if (unknown.length) return badRequest(`Unknown field(s): ${unknown.join(', ')}`);
-      const name = typeof body.name === 'string' ? body.name.trim().toLowerCase() : '';
-      if (!name || name.length > MAX_HOSTNAME_LENGTH || !HOSTNAME_PATTERN.test(name)) {
-        return badRequest('name must be a domain name such as news.example.com');
-      }
-      if (body.region !== undefined && !DOMAIN_REGIONS.includes(body.region)) {
-        return badRequest(`region must be one of ${DOMAIN_REGIONS.join(', ')}`);
-      }
-      try {
-        const result = await opened.client.createDomain({
-          name,
-          region: body.region,
-        });
-        if (!result.ok) return refused(route, result, context);
-        context.log?.(`${route} ok ${ref(context)}`);
-        return json(201, {
-          ok: true,
-          domain: projectDomainDetail(result.data),
-        });
-      } catch (error) {
-        return failed(route, error, context);
-      }
-    },
-
-    /** PUBLISHER. Asks Resend to check the DNS records again. */
-    async verifyDomain(request, context) {
-      const route = 'mailingListDomainVerify';
-      const opened = await open(request, 'publisher');
-      if (opened.response) return opened.response;
-      const domainId = readPathId(request, 'domainId');
-      if (!domainId) return badRequest('domainId is not a Resend id');
-      try {
-        const result = await opened.client.verifyDomain(domainId);
-        if (!result.ok) return refused(route, result, context);
-        context.log?.(`${route} ok ${ref(context)}`);
-        return json(200, { ok: true, id: domainId });
-      } catch (error) {
-        return failed(route, error, context);
-      }
-    },
-
-    /** PUBLISHER. Body `{ open_tracking?, click_tracking? }`, booleans, at least one. */
-    async updateDomain(request, context) {
-      const route = 'mailingListDomainUpdate';
-      const opened = await open(request, 'publisher');
-      if (opened.response) return opened.response;
-      const domainId = readPathId(request, 'domainId');
-      if (!domainId) return badRequest('domainId is not a Resend id');
-      const body = await request.json().catch(() => null);
-      if (!isPlainObject(body))
-        return badRequest('Send a JSON body { open_tracking, click_tracking }');
-      const allowed = ['open_tracking', 'click_tracking'];
-      const unknown = Object.keys(body).filter((key) => !allowed.includes(key));
-      if (unknown.length) return badRequest(`Unknown field(s): ${unknown.join(', ')}`);
-      const present = allowed.filter((key) => body[key] !== undefined);
-      if (present.length === 0) return badRequest('Send open_tracking, click_tracking or both');
-      if (present.some((key) => typeof body[key] !== 'boolean')) {
-        return badRequest('open_tracking and click_tracking must be true or false');
-      }
-      try {
-        const result = await opened.client.updateDomainTracking(domainId, {
-          openTracking: body.open_tracking,
-          clickTracking: body.click_tracking,
-        });
-        if (!result.ok) return refused(route, result, context);
-        context.log?.(`${route} ok ${ref(context)}`);
-        return json(200, { ok: true, id: domainId });
-      } catch (error) {
-        return failed(route, error, context);
-      }
-    },
-
-    async listLogs(request, context) {
-      const route = 'mailingListLogs';
-      const opened = await open(request, 'editor');
-      if (opened.response) return opened.response;
-      const pageOptions = readPage(request);
-      if (pageOptions.error) return badRequest(pageOptions.error);
-      try {
-        return await relay(
-          route,
-          context,
-          () => opened.client.listLogs(pageOptions.value),
-          (result) => {
-            const rows = rowsOf(result);
-            return {
-              logs: rows.map(projectLog),
-              has_more: Boolean(result.data?.has_more),
-              next_after: nextCursor(result, rows),
-            };
-          }
-        );
-      } catch (error) {
-        return failed(route, error, context);
-      }
-    },
-
-    /** PUBLISHER: request and response bodies, redacted of credentials and addresses. */
-    async getLog(request, context) {
-      const route = 'mailingListLog';
-      const opened = await open(request, 'publisher');
-      if (opened.response) return opened.response;
-      const logId = readPathId(request, 'logId');
-      if (!logId) return badRequest('logId is not a Resend id');
-      try {
-        return await relay(
-          route,
-          context,
-          () => opened.client.getLog(logId),
-          ({ data }) => ({
-            log: {
-              ...projectLog(data),
-              ...(typeof data?.user_agent === 'string'
-                ? { user_agent: redactText(data.user_agent) }
-                : {}),
-              request_body: redactSensitive(data?.request_body ?? null),
-              response_body: redactSensitive(data?.response_body ?? null),
-            },
-          })
-        );
-      } catch (error) {
-        return failed(route, error, context);
-      }
-    },
-
-    async listEmails(request, context) {
-      const route = 'mailingListEmails';
-      const opened = await open(request, 'editor');
-      if (opened.response) return opened.response;
-      const pageOptions = readPage(request);
-      if (pageOptions.error) return badRequest(pageOptions.error);
-      try {
-        return await relay(
-          route,
-          context,
-          () => opened.client.listEmails(pageOptions.value),
-          (result) => {
-            const rows = rowsOf(result);
-            return {
-              emails: rows.map(projectEmail),
-              has_more: Boolean(result.data?.has_more),
-              next_after: nextCursor(result, rows),
-            };
-          }
-        );
-      } catch (error) {
-        return failed(route, error, context);
-      }
-    },
-
-    async listTemplates(request, context) {
-      const route = 'mailingListTemplates';
-      const opened = await open(request, 'editor');
-      if (opened.response) return opened.response;
-      const pageOptions = readPage(request);
-      if (pageOptions.error) return badRequest(pageOptions.error);
-      try {
-        return await relay(
-          route,
-          context,
-          () => opened.client.listTemplates(pageOptions.value),
-          (result) => {
-            const rows = rowsOf(result);
-            return {
-              templates: rows.map(projectTemplate),
-              has_more: Boolean(result.data?.has_more),
-              next_after: nextCursor(result, rows),
-            };
-          }
-        );
-      } catch (error) {
-        return failed(route, error, context);
-      }
-    },
-
-    async getTemplate(request, context) {
-      const route = 'mailingListTemplate';
-      const opened = await open(request, 'editor');
-      if (opened.response) return opened.response;
-      const templateId = readPathId(request, 'templateId');
-      if (!templateId) return badRequest('templateId is not a Resend id');
-      try {
-        return await relay(
-          route,
-          context,
-          () => opened.client.getTemplate(templateId),
-          ({ data }) => ({
-            template: {
-              ...projectTemplate(data),
-              html: typeof data?.html === 'string' ? data.html : null,
-            },
-          })
-        );
-      } catch (error) {
-        return failed(route, error, context);
-      }
-    },
-  };
+  return Object.fromEntries(
+    Object.entries(ROUTES).map(([name, [route, role, body]]) => [
+      name,
+      handler(ctx, route, role, (call) => body(ctx, call)),
+    ])
+  );
 }

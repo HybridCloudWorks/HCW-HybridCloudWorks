@@ -20,158 +20,255 @@
  *   - softDeleteLivePage keeps the source's resolution order (contentId, then
  *     blogId as a legacy alias for the content id) and its `blogRefs: []` —
  *     the legacy blogs fan-out was already retired upstream.
+ *
+ * Each handler is a module-level function over `ctx` — the factory's deps —
+ * and the factory only binds them (PR #841). The editor save and its pure
+ * rules are in ./content-workflow/editor.js, the schedule routes in
+ * ./content-workflow/schedule.js; both are re-exported here so every caller
+ * and test keeps its import path.
  */
 import { randomUUID } from 'node:crypto';
-import { ensureTldrSectionAtEnd } from './cms/content-quality.js';
-import {
-  assertStringLength,
-  assertOptionalDateString,
-  normalizeCurrentStatusForBlogOnly,
-} from './cms/content-update-validation.js';
-import { normalizePublishTarget } from './cms/publish-targets.js';
-import { toValidDate } from './cms/content-status.js';
+import { normalizeCurrentStatusForBlogOnly } from './cms/content-update-validation.js';
+import { actor, auditRow, json, readBody, workflowFailure } from './content-workflow/shared.js';
+import { saveEditorDraft } from './content-workflow/editor.js';
+import { saveContentSchedule, unscheduleContent } from './content-workflow/schedule.js';
 
-/**
- * Why an unschedule cannot proceed, as the response to send, or null when it
- * can (PR #841). The one 200 here is the idempotent case: nothing scheduled.
- */
-function unscheduleRefusal(contentId, validId, contentData) {
+export {
+  assertImageUrlList,
+  buildContentImageUpdates,
+  buildContentImageFieldUpdates,
+  editedAtMillis,
+  assertNoEditConflict,
+  validateSaveEditorDraftBody,
+} from './content-workflow/editor.js';
+
+const UNPUBLISHABLE_STATUSES = ['published', 'approved'];
+
+/** Why an unpublish cannot proceed, as the response to send, or null. */
+function unpublishRefusal({ contentId, validId, notesOk, currentData, previousStatus }) {
   if (!validId) return json(400, { error: 'contentId required' });
-  if (!contentData) return json(404, { error: `content ${contentId} not found` });
-  if (contentData.Live === true) {
-    return json(409, { error: 'This content is live; unpublish it instead of unscheduling it.' });
-  }
-  if (!contentData.scheduledPublishDate) {
-    return json(200, { success: true, contentId, alreadyUnscheduled: true });
+  if (!notesOk) return json(400, { error: 'reviewNotes exceeds 5000 characters' });
+  if (!currentData) return json(404, { error: `content ${contentId} not found` });
+  if (!UNPUBLISHABLE_STATUSES.includes(previousStatus)) {
+    return json(400, {
+      error: `Cannot unpublish content from status ${previousStatus}`,
+      allowedStatuses: UNPUBLISHABLE_STATUSES,
+    });
   }
   return null;
 }
 
-const json = (status, body) => ({
-  status,
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify(body),
-});
+/** POST /api/unpublishContentToInspected — source :4635; publisher. */
+async function unpublishContentToInspected({ guard, store, now, uuid }, request, context) {
+  const auth = await guard.requireRole(request, 'publisher');
+  if (auth.error) return auth.error;
+  const { user } = auth;
 
-export function assertImageUrlList(urls = []) {
-  if (!Array.isArray(urls)) {
-    throw new Error('orderedImageUrls must be an array');
-  }
-  return urls.map((value) => {
-    const normalized = String(value || '').trim();
-    if (!normalized) return normalized;
-    if (!/^https?:\/\//i.test(normalized)) {
-      throw new Error('orderedImageUrls must contain absolute http(s) URLs');
-    }
-    if (normalized.length > 2048) {
-      throw new Error('orderedImageUrls contains an entry that exceeds 2048 characters');
-    }
-    return normalized;
-  });
-}
-
-/** Source :596 — hero/secondary/aiImageUrls slots from the ordered list. */
-export function buildContentImageUpdates(urls = [], existing = {}) {
-  const normalized = (Array.isArray(urls) ? urls : [])
-    .map((value) => String(value || '').trim())
-    .filter(Boolean)
-    .slice(0, 4);
-
-  const heroImageUrl = normalized[0] || null;
-  const secondaryImageUrls = normalized.slice(1, 4);
-  const nextAiImageUrls = {};
-  ['hero', 'secondary1', 'secondary2', 'secondary3'].forEach((slot, index) => {
-    if (normalized[index]) {
-      nextAiImageUrls[slot] = normalized[index];
-    }
-  });
-
-  if (existing?.aiImageUrls?.content && normalized.includes(existing.aiImageUrls.content)) {
-    nextAiImageUrls.content = existing.aiImageUrls.content;
-  }
-
-  return {
-    heroImageUrl,
-    contentImageUrl: heroImageUrl,
-    altCoverImage: heroImageUrl,
-    secondaryImageUrls,
-    aiImageUrls: nextAiImageUrls,
-  };
-}
-
-/** Source :625 — cleared slots become deletions (undefined = patchDoc delete). */
-export function buildContentImageFieldUpdates(imageUpdates = {}) {
-  return {
-    heroImageUrl: imageUpdates.heroImageUrl || undefined,
-    contentImageUrl: imageUpdates.contentImageUrl || undefined,
-    altCoverImage: imageUpdates.altCoverImage || undefined,
-    secondaryImageUrls:
-      Array.isArray(imageUpdates.secondaryImageUrls) && imageUpdates.secondaryImageUrls.length > 0
-        ? imageUpdates.secondaryImageUrls
-        : undefined,
-    aiImageUrls: imageUpdates.aiImageUrls || {},
-  };
-}
-
-/** Millis from Timestamp-like, Date, or ISO string — see header. */
-export function editedAtMillis(value) {
-  if (!value) return 0;
-  if (typeof value.toMillis === 'function') return value.toMillis();
-  if (typeof value.toDate === 'function') return value.toDate().getTime();
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
-}
-
-export function assertNoEditConflict(currentData, expectedEditedAtMs, force) {
-  const currentEditedAtMs = editedAtMillis(currentData.blogEditedAt);
-  if (!force && Number(currentEditedAtMs) !== Number(expectedEditedAtMs || 0)) {
-    throw new Error('EDIT_CONFLICT');
-  }
-}
-
-/** Source :3396 — validate/normalize the saveEditorDraft body. */
-export function validateSaveEditorDraftBody(body) {
   try {
-    const normalizedDraft = ensureTldrSectionAtEnd(
-      assertStringLength(body.draft, 'draft', 200000, { allowEmpty: true })
+    const { contentId, reviewNotes = '' } = await readBody(request);
+    const validId = Boolean(contentId) && typeof contentId === 'string';
+    const notesOk = String(reviewNotes || '').length <= 5000;
+    const currentData =
+      validId && notesOk ? await store.readDoc('content', contentId, contentId) : null;
+    const previousStatus = normalizeCurrentStatusForBlogOnly(
+      currentData?.contentStatus || 'ingested'
     );
-    assertStringLength(body.title, 'title', 250, { allowEmpty: true });
-    const resolvedAuthor =
-      assertStringLength(body.authorName, 'authorName', 120, {
-        allowEmpty: true,
-      }).trim() || 'Hybrid Cloud Works';
-    assertStringLength(body.summary, 'summary', 5000, { allowEmpty: true });
-    assertStringLength(body.sidebarContent, 'sidebarContent', 12000, {
-      allowEmpty: true,
+    const refusal = unpublishRefusal({ contentId, validId, notesOk, currentData, previousStatus });
+    if (refusal) return refusal;
+    const contentTitle = currentData.Title || currentData.title || '';
+
+    const nowIso = now().toISOString();
+    await store.patchDoc('content', contentId, {
+      contentStatus: 'inspected',
+      Live: false,
+      approvedForNews: false,
+      scheduledPublishDate: null,
+      reviewNotes: String(reviewNotes || ''),
+      reviewedAt: nowIso,
+      reviewedBy: actor(user),
+      updatedAt: nowIso,
+      updatedBy: actor(user),
     });
-    const validatedImageUrls = assertImageUrlList(body.orderedImageUrls)
-      .filter(Boolean)
-      .slice(0, 4);
-    const nextPublishedDate = assertOptionalDateString(body.publishedDate, 'publishedDate');
-    const normalizedTags = String(body.tags || '')
-      .split(',')
-      .map((tag) => tag.trim())
-      .filter(Boolean);
-    if (normalizedTags.length > 25) {
-      throw new Error('tags exceeds 25 entries');
-    }
-    normalizedTags.forEach((tag) => {
-      if (tag.length > 80) {
-        throw new Error('tag exceeds 80 characters');
-      }
+
+    await store.upsertDoc(
+      'admin_audit_logs',
+      auditRow(uuid, {
+        action: 'content_unpublished',
+        user,
+        request,
+        details: {
+          contentId,
+          fromStatus: previousStatus,
+          toStatus: 'inspected',
+          reviewNotes: String(reviewNotes || ''),
+        },
+        contentId,
+        contentTitle,
+        nowIso,
+      })
+    );
+
+    return json(200, {
+      success: true,
+      contentId,
+      from: previousStatus,
+      to: 'inspected',
     });
-    return {
-      ok: true,
-      normalizedDraft,
-      resolvedAuthor,
-      normalizedTags,
-      validatedImageUrls,
-      nextPublishedDate,
-    };
   } catch (error) {
-    return { ok: false, error: String(error.message || error) };
+    return workflowFailure(
+      context,
+      'unpublishContentToInspected',
+      error,
+      'Failed to unpublish content'
+    );
   }
 }
+
+/** POST /api/deleteContentItem — source :4724; publisher; hard delete. */
+async function deleteContentItem({ guard, store, onContentDeleted }, request, context) {
+  const auth = await guard.requireRole(request, 'publisher');
+  if (auth.error) return auth.error;
+
+  try {
+    const { contentId } = await readBody(request);
+    if (!contentId) return json(400, { error: 'contentId required' });
+
+    try {
+      await store.deleteDoc('content', contentId);
+    } catch (err) {
+      // Firestore .delete() on a missing doc is a no-op; keep that.
+      if (err?.code !== 404) throw err;
+    }
+    // The change feed never delivers a delete (T-324): move the dashboard
+    // counters here, best-effort.
+    if (onContentDeleted) {
+      await onContentDeleted(contentId).catch((err) =>
+        context.warn?.(`deleteContentItem: counters not updated for ${contentId}: ${err?.message}`)
+      );
+    }
+    return json(200, { success: true, contentId });
+  } catch (error) {
+    return workflowFailure(context, 'deleteContentItem', error, 'Failed to delete content');
+  }
+}
+
+/** The live page a soft delete names: by contentId, then blogId as a legacy alias. */
+async function resolveLivePage(store, { contentId, blogId }) {
+  const doc = contentId ? await store.readDoc('content', contentId, contentId) : null;
+  if (!doc && blogId) return store.readDoc('content', blogId, blogId);
+  return doc;
+}
+
+/** POST /api/softDeleteLivePage — source :5840; publisher; 24h grace. */
+async function softDeleteLivePage({ guard, store, now }, request, context) {
+  const auth = await guard.requireRole(request, 'publisher');
+  if (auth.error) return auth.error;
+  const { user } = auth;
+
+  try {
+    const { contentId = '', blogId = '', reason = '' } = await readBody(request);
+    if (!contentId && !blogId) {
+      return json(400, { error: 'contentId or blogId required' });
+    }
+
+    const doc = await resolveLivePage(store, { contentId, blogId });
+    if (!doc) return json(404, { error: 'No matching live page record found' });
+
+    const nowDate = now();
+    const deletedAtIso = nowDate.toISOString();
+    const expiresAtIso = new Date(nowDate.getTime() + 24 * 60 * 60 * 1000).toISOString();
+
+    await store.patchDoc('content', doc.id, {
+      Live: false,
+      Status: 'Archived',
+      contentStatus: 'archived',
+      archivedAt: deletedAtIso,
+      softDeletedAt: deletedAtIso,
+      softDeleteExpiresAt: expiresAtIso,
+      scheduledPublishDate: null,
+      deletionRequestedBy: actor(user),
+      deletionReason: String(reason || '').trim(),
+      updatedAt: deletedAtIso,
+    });
+
+    return json(200, {
+      success: true,
+      contentId: doc.id,
+      blogIds: [], // the legacy blogs fan-out was retired upstream
+      softDeleteExpiresAt: expiresAtIso,
+    });
+  } catch (error) {
+    return workflowFailure(context, 'softDeleteLivePage', error, 'Failed to soft-delete page');
+  }
+}
+
+/**
+ * The two editor resets share a shape: a valid id, an existing document,
+ * one patch. `fields` is what each one writes beside the stamps.
+ */
+async function patchExistingContent(
+  { guard, store, now },
+  request,
+  context,
+  { label, message, fields }
+) {
+  const auth = await guard.requireRole(request, 'editor');
+  if (auth.error) return auth.error;
+  const { user } = auth;
+
+  try {
+    const { contentId } = await readBody(request);
+    if (!contentId || typeof contentId !== 'string') {
+      return json(400, { error: 'contentId required' });
+    }
+
+    const doc = await store.readDoc('content', contentId, contentId);
+    if (!doc) return json(404, { error: `content ${contentId} not found` });
+
+    await store.patchDoc('content', contentId, {
+      ...fields,
+      updatedAt: now().toISOString(),
+      updatedBy: actor(user),
+    });
+
+    return json(200, { success: true, contentId });
+  } catch (error) {
+    return workflowFailure(context, label, error, message);
+  }
+}
+
+/** POST /api/requestContentInspection — source :4839; editor. */
+const requestContentInspection = (ctx, request, context) =>
+  patchExistingContent(ctx, request, context, {
+    label: 'requestContentInspection',
+    message: 'Failed to request inspection',
+    fields: { inspectTrigger: true, contentStatus: 'ingested' },
+  });
+
+/** POST /api/resetContentReviewState — source :4931; editor. */
+const resetContentReviewState = (ctx, request, context) =>
+  patchExistingContent(ctx, request, context, {
+    label: 'resetContentReviewState',
+    message: 'Failed to reset review state',
+    fields: {
+      inspectTrigger: false,
+      contentStatus: 'ingested',
+      inspectError: null,
+      Live: false,
+      scheduledPublishDate: null,
+    },
+  });
+
+const HANDLERS = Object.freeze({
+  saveEditorDraft,
+  unpublishContentToInspected,
+  deleteContentItem,
+  saveContentSchedule,
+  unscheduleContent,
+  softDeleteLivePage,
+  requestContentInspection,
+  resetContentReviewState,
+});
 
 /**
  * @param {object} deps
@@ -187,514 +284,11 @@ export function createContentWorkflowHandlers({
   now = () => new Date(),
   uuid = randomUUID,
 }) {
-  const actor = (user) => user.email || user.preferred_username || user.oid || 'admin';
-
-  const auditRow = ({ action, user, request, details, contentId, contentTitle, nowIso }) => ({
-    id: uuid(),
-    action,
-    userId: user.oid ?? user.sub ?? null,
-    userEmail: user.email || null,
-    timestamp: nowIso,
-    details,
-    userAgent: request.headers?.get?.('user-agent') || null,
-    contentId,
-    contentTitle,
-    compliance: {
-      schemaVersion: 1,
-      detailsSanitized: true,
-      identityVerified: true,
-    },
-  });
-
-  return {
-    /** POST /api/saveEditorDraft — source :3437; 409 on edit conflict. */
-    async saveEditorDraft(request, context) {
-      const auth = await guard.requireRole(request, 'editor');
-      if (auth.error) return auth.error;
-      const { user } = auth;
-
-      try {
-        const body = (await request.json().catch(() => null)) || {};
-        const {
-          contentId,
-          expectedEditedAtMs = 0,
-          force = false,
-          draft = '',
-          title = '',
-          authorName = '',
-          publishedDate = '',
-          summary = '',
-          tags = '',
-          sidebarContent = '',
-          orderedImageUrls = [],
-        } = body;
-
-        if (!contentId || typeof contentId !== 'string') {
-          return json(400, { error: 'contentId required' });
-        }
-
-        const validation = validateSaveEditorDraftBody({
-          draft,
-          title,
-          authorName,
-          summary,
-          sidebarContent,
-          orderedImageUrls,
-          publishedDate,
-          tags,
-        });
-        if (!validation.ok) return json(400, { error: validation.error });
-        const {
-          normalizedDraft,
-          resolvedAuthor,
-          normalizedTags,
-          validatedImageUrls,
-          nextPublishedDate,
-        } = validation;
-
-        const currentData = await store.readDoc('content', contentId, contentId);
-        if (!currentData) return json(404, { error: `content ${contentId} not found` });
-        const currentTitle = currentData.Title || currentData.title || '';
-
-        try {
-          assertNoEditConflict(currentData, expectedEditedAtMs, force);
-        } catch {
-          return json(409, { error: 'EDIT_CONFLICT' });
-        }
-
-        const nowIso = now().toISOString();
-        const currentStatus = String(currentData.contentStatus || '');
-        // A live article keeps its status through a save: `published` with the
-        // Live flag is the canonical spelling, `published_*` the Firestore-era
-        // one (ADR 0033 §1). Anything else becomes `editing`.
-        const staysPublished =
-          currentStatus.startsWith('published_') ||
-          (currentStatus === 'published' && currentData.Live === true);
-        const nextStatus = staysPublished ? currentStatus : 'editing';
-        const imageUpdates = buildContentImageUpdates(validatedImageUrls, currentData);
-
-        await store.patchDoc('content', contentId, {
-          blogDraft: normalizedDraft,
-          Title: String(title || ''),
-          title: String(title || ''),
-          editorAuthor: resolvedAuthor,
-          siteAuthor: resolvedAuthor,
-          publishedDate: nextPublishedDate,
-          Summary: String(summary || ''),
-          summary: String(summary || ''),
-          sidebarContent: String(sidebarContent || ''),
-          Tags: normalizedTags,
-          ...buildContentImageFieldUpdates(imageUpdates),
-          blogEditedAt: nowIso,
-          contentStatus: nextStatus,
-          updatedAt: nowIso,
-          updatedBy: actor(user),
-        });
-
-        await store.upsertDoc('content_versions', {
-          id: uuid(),
-          contentId,
-          title: title || currentTitle || '',
-          summary: summary || currentData.Summary || currentData.summary || '',
-          draft: normalizedDraft || '',
-          authorName: resolvedAuthor || '',
-          tags: normalizedTags || [],
-          sidebarContent: sidebarContent || '',
-          publishedDate: nextPublishedDate || currentData.publishedDate || '',
-          orderedImageUrls: validatedImageUrls || [],
-          versionCreatedAt: nowIso,
-          versionCreatedBy: actor(user),
-          versionReason: force ? 'draft_force_saved' : 'draft_saved',
-        });
-
-        await store.upsertDoc(
-          'admin_audit_logs',
-          auditRow({
-            action: force ? 'draft_force_saved' : 'draft_saved',
-            user,
-            request,
-            details: {
-              contentId,
-              force: Boolean(force),
-              fieldUpdated: 'blogDraft',
-              imageCount: validatedImageUrls.length,
-            },
-            contentId,
-            contentTitle: currentTitle,
-            nowIso,
-          })
-        );
-
-        return json(200, {
-          success: true,
-          contentId,
-          // The marker this write just stamped. The editor needs it for two
-          // things it could not do without it (T-208):
-          //
-          //   1. Recognise its OWN write when the poll returns it. The client
-          //      used a one-shot boolean, which was consumed by whatever the
-          //      next poll happened to return — under `onSnapshot` that was our
-          //      own write within milliseconds; under a 20-second poll it can be
-          //      a collaborator's, and adopting their marker lets the next save
-          //      pass this very conflict check and overwrite them silently.
-          //   2. Send a correct `expectedEditedAtMs` on an immediately
-          //      following save. Without it the client keeps the pre-save value
-          //      until the next poll, so a second save inside the poll window
-          //      conflicts with the caller's own previous one.
-          blogEditedAt: nowIso,
-          normalizedDraft,
-          editorAuthor: resolvedAuthor,
-          tagCount: normalizedTags.length,
-        });
-      } catch (error) {
-        context.error('saveEditorDraft failed:', error);
-        return json(500, {
-          error: 'Failed to save draft',
-          message: error?.message || 'Unknown error',
-        });
-      }
-    },
-
-    /** POST /api/unpublishContentToInspected — source :4635; publisher. */
-    async unpublishContentToInspected(request, context) {
-      const auth = await guard.requireRole(request, 'publisher');
-      if (auth.error) return auth.error;
-      const { user } = auth;
-
-      try {
-        const body = (await request.json().catch(() => null)) || {};
-        const { contentId, reviewNotes = '' } = body;
-        if (!contentId || typeof contentId !== 'string') {
-          return json(400, { error: 'contentId required' });
-        }
-        if (String(reviewNotes || '').length > 5000) {
-          return json(400, { error: 'reviewNotes exceeds 5000 characters' });
-        }
-
-        const currentData = await store.readDoc('content', contentId, contentId);
-        if (!currentData) return json(404, { error: `content ${contentId} not found` });
-
-        const previousStatus = normalizeCurrentStatusForBlogOnly(
-          currentData.contentStatus || 'ingested'
-        );
-        const contentTitle = currentData.Title || currentData.title || '';
-        const allowedStatuses = ['published', 'approved'];
-        if (!allowedStatuses.includes(previousStatus)) {
-          return json(400, {
-            error: `Cannot unpublish content from status ${previousStatus}`,
-            allowedStatuses,
-          });
-        }
-
-        const nowIso = now().toISOString();
-        await store.patchDoc('content', contentId, {
-          contentStatus: 'inspected',
-          Live: false,
-          approvedForNews: false,
-          scheduledPublishDate: null,
-          reviewNotes: String(reviewNotes || ''),
-          reviewedAt: nowIso,
-          reviewedBy: actor(user),
-          updatedAt: nowIso,
-          updatedBy: actor(user),
-        });
-
-        await store.upsertDoc(
-          'admin_audit_logs',
-          auditRow({
-            action: 'content_unpublished',
-            user,
-            request,
-            details: {
-              contentId,
-              fromStatus: previousStatus,
-              toStatus: 'inspected',
-              reviewNotes: String(reviewNotes || ''),
-            },
-            contentId,
-            contentTitle,
-            nowIso,
-          })
-        );
-
-        return json(200, {
-          success: true,
-          contentId,
-          from: previousStatus,
-          to: 'inspected',
-        });
-      } catch (error) {
-        context.error('unpublishContentToInspected failed:', error);
-        return json(500, {
-          error: 'Failed to unpublish content',
-          message: error?.message || 'Unknown error',
-        });
-      }
-    },
-
-    /** POST /api/deleteContentItem — source :4724; publisher; hard delete. */
-    async deleteContentItem(request, context) {
-      const auth = await guard.requireRole(request, 'publisher');
-      if (auth.error) return auth.error;
-
-      try {
-        const body = (await request.json().catch(() => null)) || {};
-        const { contentId } = body;
-        if (!contentId) return json(400, { error: 'contentId required' });
-
-        try {
-          await store.deleteDoc('content', contentId);
-        } catch (err) {
-          // Firestore .delete() on a missing doc is a no-op; keep that.
-          if (err?.code !== 404) throw err;
-        }
-        // The change feed never delivers a delete (T-324): move the dashboard
-        // counters here, best-effort.
-        if (onContentDeleted) {
-          await onContentDeleted(contentId).catch((err) =>
-            context.warn?.(
-              `deleteContentItem: counters not updated for ${contentId}: ${err?.message}`
-            )
-          );
-        }
-        return json(200, { success: true, contentId });
-      } catch (error) {
-        context.error('deleteContentItem failed:', error);
-        return json(500, {
-          error: 'Failed to delete content',
-          message: error?.message || 'Unknown error',
-        });
-      }
-    },
-
-    /** POST /api/saveContentSchedule — source :4866; publisher. */
-    async saveContentSchedule(request, context) {
-      const auth = await guard.requireRole(request, 'publisher');
-      if (auth.error) return auth.error;
-      const { user } = auth;
-
-      try {
-        const body = (await request.json().catch(() => null)) || {};
-        const {
-          contentId,
-          instantPublish = true,
-          scheduledPublishDate = null,
-          publishTarget = null,
-        } = body;
-
-        if (!contentId || typeof contentId !== 'string') {
-          return json(400, { error: 'contentId required' });
-        }
-
-        const contentData = await store.readDoc('content', contentId, contentId);
-        if (!contentData) return json(404, { error: `content ${contentId} not found` });
-
-        const resolvedPublishTarget = normalizePublishTarget(
-          publishTarget,
-          contentData.publishTarget || contentData.type || contentData.contentType
-        );
-        const nowIso = now().toISOString();
-        // A forge-ready item keeps its status: it is already one click from
-        // publishing, and a reschedule from the Calendar must not demote it
-        // (ADR 0033 Amplify slice). Everything else is approved by scheduling.
-        const keepsStatus = String(contentData.contentStatus || '') === 'forge_ready';
-        const updates = {
-          ...(keepsStatus ? {} : { contentStatus: 'approved' }),
-          publishTarget: resolvedPublishTarget,
-          Live: false,
-          updatedAt: nowIso,
-          updatedBy: actor(user),
-        };
-
-        let scheduledIso = null;
-        if (instantPublish) {
-          updates.scheduledPublishDate = null;
-        } else {
-          const scheduleDate = toValidDate(scheduledPublishDate);
-          if (!scheduleDate) {
-            return json(400, { error: 'Valid scheduledPublishDate required' });
-          }
-          if (scheduleDate.getTime() <= now().getTime()) {
-            return json(400, {
-              error: 'scheduledPublishDate must be in the future',
-            });
-          }
-          scheduledIso = scheduleDate.toISOString();
-          updates.scheduledPublishDate = scheduledIso;
-        }
-
-        await store.patchDoc('content', contentId, updates);
-
-        return json(200, {
-          success: true,
-          contentId,
-          instantPublish: Boolean(instantPublish),
-          scheduledPublishDate: scheduledIso,
-        });
-      } catch (error) {
-        context.error('saveContentSchedule failed:', error);
-        return json(500, {
-          error: 'Failed to save schedule',
-          message: error?.message || 'Unknown error',
-        });
-      }
-    },
-
-    /**
-     * POST /api/unscheduleContent — publisher (ADR 0033 Amplify slice). Clears
-     * the schedule and nothing else: the status stays, so an approved item
-     * returns to the Calendar's Unscheduled panel rather than to review.
-     */
-    async unscheduleContent(request, context) {
-      const auth = await guard.requireRole(request, 'publisher');
-      if (auth.error) return auth.error;
-      const { user } = auth;
-      try {
-        const body = (await request.json().catch(() => null)) || {};
-        const { contentId } = body;
-        const validId = Boolean(contentId) && typeof contentId === 'string';
-        const contentData = validId ? await store.readDoc('content', contentId, contentId) : null;
-        const refusal = unscheduleRefusal(contentId, validId, contentData);
-        if (refusal) return refusal;
-        await store.patchDoc('content', contentId, {
-          scheduledPublishDate: null,
-          updatedAt: now().toISOString(),
-          updatedBy: actor(user),
-        });
-        return json(200, {
-          success: true,
-          contentId,
-          previousScheduledPublishDate: contentData.scheduledPublishDate,
-        });
-      } catch (error) {
-        context.error('unscheduleContent failed:', error);
-        return json(500, {
-          error: 'Failed to unschedule content',
-          message: error?.message || 'Unknown error',
-        });
-      }
-    },
-
-    /** POST /api/softDeleteLivePage — source :5840; publisher; 24h grace. */
-    async softDeleteLivePage(request, context) {
-      const auth = await guard.requireRole(request, 'publisher');
-      if (auth.error) return auth.error;
-      const { user } = auth;
-
-      try {
-        const body = (await request.json().catch(() => null)) || {};
-        const { contentId = '', blogId = '', reason = '' } = body;
-        if (!contentId && !blogId) {
-          return json(400, { error: 'contentId or blogId required' });
-        }
-
-        // Source resolution order: contentId, then blogId as a legacy alias.
-        let resolvedId = contentId || null;
-        let doc = resolvedId ? await store.readDoc('content', resolvedId, resolvedId) : null;
-        if (!doc && blogId) {
-          doc = await store.readDoc('content', blogId, blogId);
-        }
-        if (!doc) return json(404, { error: 'No matching live page record found' });
-
-        const nowDate = now();
-        const deletedAtIso = nowDate.toISOString();
-        const expiresAtIso = new Date(nowDate.getTime() + 24 * 60 * 60 * 1000).toISOString();
-
-        await store.patchDoc('content', doc.id, {
-          Live: false,
-          Status: 'Archived',
-          contentStatus: 'archived',
-          archivedAt: deletedAtIso,
-          softDeletedAt: deletedAtIso,
-          softDeleteExpiresAt: expiresAtIso,
-          scheduledPublishDate: null,
-          deletionRequestedBy: actor(user),
-          deletionReason: String(reason || '').trim(),
-          updatedAt: deletedAtIso,
-        });
-
-        return json(200, {
-          success: true,
-          contentId: doc.id,
-          blogIds: [], // the legacy blogs fan-out was retired upstream
-          softDeleteExpiresAt: expiresAtIso,
-        });
-      } catch (error) {
-        context.error('softDeleteLivePage failed:', error);
-        return json(500, {
-          error: 'Failed to soft-delete page',
-          message: error?.message || 'Unknown error',
-        });
-      }
-    },
-
-    /** POST /api/requestContentInspection — source :4839; editor. */
-    async requestContentInspection(request, context) {
-      const auth = await guard.requireRole(request, 'editor');
-      if (auth.error) return auth.error;
-      const { user } = auth;
-
-      try {
-        const body = (await request.json().catch(() => null)) || {};
-        const { contentId } = body;
-        if (!contentId || typeof contentId !== 'string') {
-          return json(400, { error: 'contentId required' });
-        }
-
-        const doc = await store.readDoc('content', contentId, contentId);
-        if (!doc) return json(404, { error: `content ${contentId} not found` });
-
-        await store.patchDoc('content', contentId, {
-          inspectTrigger: true,
-          contentStatus: 'ingested',
-          updatedAt: now().toISOString(),
-          updatedBy: actor(user),
-        });
-
-        return json(200, { success: true, contentId });
-      } catch (error) {
-        context.error('requestContentInspection failed:', error);
-        return json(500, {
-          error: 'Failed to request inspection',
-          message: error?.message || 'Unknown error',
-        });
-      }
-    },
-
-    /** POST /api/resetContentReviewState — source :4931; editor. */
-    async resetContentReviewState(request, context) {
-      const auth = await guard.requireRole(request, 'editor');
-      if (auth.error) return auth.error;
-      const { user } = auth;
-
-      try {
-        const body = (await request.json().catch(() => null)) || {};
-        const { contentId } = body;
-        if (!contentId || typeof contentId !== 'string') {
-          return json(400, { error: 'contentId required' });
-        }
-
-        const doc = await store.readDoc('content', contentId, contentId);
-        if (!doc) return json(404, { error: `content ${contentId} not found` });
-
-        await store.patchDoc('content', contentId, {
-          inspectTrigger: false,
-          contentStatus: 'ingested',
-          inspectError: null,
-          Live: false,
-          scheduledPublishDate: null,
-          updatedAt: now().toISOString(),
-          updatedBy: actor(user),
-        });
-
-        return json(200, { success: true, contentId });
-      } catch (error) {
-        context.error('resetContentReviewState failed:', error);
-        return json(500, {
-          error: 'Failed to reset review state',
-          message: error?.message || 'Unknown error',
-        });
-      }
-    },
-  };
+  const ctx = { guard, store, onContentDeleted, now, uuid };
+  return Object.fromEntries(
+    Object.entries(HANDLERS).map(([name, handler]) => [
+      name,
+      (request, context) => handler(ctx, request, context),
+    ])
+  );
 }

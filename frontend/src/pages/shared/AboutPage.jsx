@@ -6,6 +6,7 @@ import { fetchPublicSnapshot } from '@/lib/publicApi';
 import { newerSnapshot } from '@/lib/speakingEvents';
 import CustomSessionizeWidget from '@/components/widgets/CustomSessionizeWidget';
 import { resolveMediaUrl } from '../../lib/functionsBase';
+import { normalizeCertification } from './about/certifications';
 
 /**
  * The build-time copy of the snapshot, whole — rows AND the stamp — so it can
@@ -24,136 +25,6 @@ async function loadStaticSnapshot(path) {
   } catch {
     return null;
   }
-}
-
-function normalizeCertification(rawData) {
-  // Use the raw data directly for maximum precision with Firestore field names
-  const raw = rawData;
-
-  const get = (obj, candidates) => {
-    for (const k of candidates) {
-      if (obj[k] !== undefined && obj[k] !== null) return obj[k];
-    }
-    return undefined;
-  };
-
-  // A stored date is a calendar day (`YYYY-MM-DD`, or a timestamp whose
-  // leading day is the one meant). Anchored at local noon so the day shown
-  // is the day named — `new Date('2026-10-01')` is midnight UTC and read as
-  // 30 September everywhere west of Greenwich (ADR 0033 §1).
-  const toDate = (v) => {
-    if (!v) return undefined;
-    if (typeof v?.toDate === 'function') return v.toDate();
-    if (typeof v === 'string') {
-      const match = v.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
-      if (match) return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12);
-      const parsed = new Date(v);
-      return Number.isNaN(parsed.getTime()) ? undefined : parsed;
-    }
-    if (typeof v === 'number') return new Date(v);
-    return undefined;
-  };
-
-  const toBool = (v) => {
-    if (v === undefined || v === null) return undefined;
-    if (typeof v === 'boolean') return v;
-    if (typeof v === 'string') return v.toLowerCase() === 'true';
-    if (typeof v === 'number') return v !== 0;
-    return undefined;
-  };
-
-  // 5. Image Resolution Strategy
-  const resolveImageUrl = () => {
-    // Helper to clean/validate URLs
-    const cleanUrl = (val) => {
-      if (!val || typeof val !== 'string') return undefined;
-      const key = val.trim();
-      if (key === '') return undefined;
-      // The Firebase Storage bucket is gone (#518). This used to rewrite the
-      // GCS form into the Firebase REST form "so storage rules apply"; both
-      // point at the same decommissioned project, so the rewrite produced one
-      // dead URL from another. Undefined, so the caller’s existing falsy
-      // branch omits the image rather than rendering a broken frame.
-      // `http` and case-insensitive, matching what blogUtils.js gets for free
-      // from `new URL().hostname` — the two must agree or one page renders a
-      // broken image the other has already learned to skip.
-      if (/^https?:\/\/(storage|firebasestorage)\.googleapis\.com\//i.test(key)) return undefined;
-      // Case-insensitive: `startsWith('http')` treated `HTTPS://example.com/x`
-      // as a relative path and prefixed it with `/`, producing a URL that
-      // resolves nowhere.
-      return /^(https?:\/\/|\/|data:)/i.test(key) ? key : `/${key}`;
-    };
-
-    // A. Priority: Complex Object/Array from Firestore (Rowy image upload fields)
-    // Checks all known field names for badge/credential images
-    let complexData = get(raw, [
-      'image',
-      'Image',
-      'badge',
-      'Badge',
-      'credentialImage',
-      'CredentialImage', // DB schema field name
-    ]);
-
-    // Unwrap Array if necessary
-    if (Array.isArray(complexData)) {
-      complexData = complexData.length > 0 ? complexData[0] : undefined;
-    }
-
-    // Attempt to extract URL from Object
-    if (complexData && typeof complexData === 'object') {
-      const urlCandidate =
-        complexData.downloadURL ||
-        complexData.downloadUrl ||
-        complexData.url ||
-        complexData.src ||
-        complexData.link;
-
-      const cleaned = cleanUrl(urlCandidate);
-      if (cleaned) return cleaned;
-    }
-
-    // B. Fallback: Simple string URL fields
-    const simpleUrl = get(raw, [
-      'imageUrl',
-      'ImageUrl',
-      'image_url',
-      'credentialImage',
-      'CredentialImage', // also check as plain string
-    ]);
-    return cleanUrl(simpleUrl);
-  };
-
-  const normalized = {
-    id: raw.id,
-    name: get(raw, ['name', 'Name']),
-    issuer: (() => {
-      const iv = get(raw, ['issuer', 'Issuer']);
-      if (Array.isArray(iv)) return iv[0] ?? 'Other';
-      if (!iv) return 'Other';
-      if (iv === 'Microsft') return 'Microsoft';
-      if (typeof iv === 'string') {
-        const s = iv.trim();
-        const low = s.toLowerCase();
-        if (low === 'google cloud partners' || low === 'google cloud partner')
-          return 'Google Cloud Partners';
-        if (low === 'google cloud') return 'Google Cloud';
-      }
-      return iv;
-    })(),
-    issue_date: toDate(get(raw, ['issueDate', 'issue_date', 'IssueDate'])),
-    exp_date: toDate(get(raw, ['expDate', 'exp_date', 'ExpDate'])),
-    certState: toBool(get(raw, ['certState', 'isValid', 'is_valid', 'cert_state'])),
-    code: get(raw, ['code', 'Code']),
-    verify_url: get(raw, ['verifyUrl', 'verify_url', 'VerifyUrl']),
-    image_url: resolveImageUrl(),
-    display_order: get(raw, ['displayOrder', 'display_order', 'DisplayOrder']) ?? 999,
-    tags: get(raw, ['tags', 'Tags']) || [],
-    display: get(raw, ['display', 'Display']) === true,
-    // "Feature in Spotlight" in the admin: featured certs lead the page.
-    featured: get(raw, ['featured', 'Featured']) === true,
-  };
-  return normalized;
 }
 
 const CertificationCard = ({ cert, onImageClick }) => {

@@ -12,7 +12,8 @@
  * message on the board, a real `saving` state on the buttons, and no
  * navigation after a save that did not land. Until 2026-10-03 the handlers
  * swallowed every error to console.error, passed `saving={false}` and
- * navigated regardless (ADR 0033 §1, bug 7).
+ * navigated regardless (ADR 0033 §1, bug 7). The writes are
+ * review/useReviewActions; the page is one return over a view table.
  */
 import React, { useCallback, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router';
@@ -34,11 +35,10 @@ import StatusBadge from '@/components/admin/shared/StatusBadge';
 import TaxonomyChips from '@/components/admin/shared/TaxonomyChips';
 import TaxonomyPicker from '@/components/admin/shared/TaxonomyPicker';
 import { postJSON, getJSON } from '@/lib/api';
-import { logAdminAction } from '@/lib/auditLog';
-import { getPublishTargetForType } from '@/lib/contentModel';
 import { contentStatusInfo } from '@/lib/status';
 import { resolveIdeaOrigin, resolveKind } from '@/lib/taxonomy';
 import { useContentTransitions } from './queue/useContentTransitions';
+import { useReviewActions } from './review/useReviewActions';
 
 const REVIEW_HELP = [
   'What arrives here: one item from the Review Queue, on the board its type calls for (blog, framework, architecture blueprint or Coder Corner).',
@@ -180,124 +180,74 @@ function CoderCornerReviewPanel({ blog, blogId, onTransitioned }) {
   );
 }
 
-export default function ReviewPage() {
-  const { blogId } = useParams();
-  const navigate = useNavigate();
-  const { toast } = useToast();
-  const [version, setVersion] = useState(0);
-  const refresh = useCallback(() => setVersion((n) => n + 1), []);
-  const {
-    data: blog,
-    error,
-    loading,
-  } = usePublicData(
-    () =>
-      getJSON(`cms/content/item?contentId=${encodeURIComponent(blogId)}`).then((res) => res.item),
-    blogId ? `review:${blogId}:${version}` : ''
-  );
-  const [frameworkDeleteOpen, setFrameworkDeleteOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [boardError, setBoardError] = useState(null);
-
-  const transitions = useContentTransitions({
-    onTransitioned: (_id, result) => {
-      toast({
-        title: result?.to ? `Moved to ${contentStatusInfo(result.to).label}` : 'Status updated',
-      });
-      refresh();
-    },
-  });
-
-  const boardLabel = useMemo(() => BOARD_LABEL[blog?.type] || 'Blog review', [blog?.type]);
-
-  /** Save the board's fields; true when the write landed. */
-  const saveFields = useCallback(
-    async (formData, noun) => {
-      setSaving('save');
-      setBoardError(null);
-      try {
-        await postJSON('updateContentItem', { contentId: blogId, updates: formData });
-        toast({ title: `${noun} saved` });
-        return true;
-      } catch (err) {
-        const message = `Save failed: ${err?.message || 'Unknown error'}`;
-        setBoardError(message);
-        toast({ title: `${noun} not saved`, description: err?.message, variant: 'destructive' });
-        return false;
-      } finally {
-        setSaving(false);
-      }
-    },
-    [blogId, toast]
-  );
-
-  /** Save, then approve; navigate only when both landed. */
-  const publishFields = useCallback(
-    async (formData, type, noun) => {
-      if (!(await saveFields(formData, noun))) return;
-      setSaving('publish');
-      setBoardError(null);
-      try {
-        const result = await transitions.approve(blogId, {
-          publishTarget: getPublishTargetForType(type),
-          reviewNotes: `${noun} review complete and sent to publish stage`,
-        });
-        if (!result) {
-          setBoardError(transitions.errors[blogId] || 'Approve failed.');
-          return;
-        }
-        navigate(`/admin/queue?contentType=${type}`);
-      } finally {
-        setSaving(false);
-      }
-    },
-    [blogId, navigate, saveFields, transitions]
-  );
-
-  const doFrameworkDelete = async () => {
-    setFrameworkDeleteOpen(false);
-    setSaving('delete');
-    setBoardError(null);
-    try {
-      await postJSON('deleteContentItem', { contentId: blogId });
-      // deleteContentItem writes no server audit row; this one is the record.
-      await logAdminAction('framework_deleted', { contentId: blogId });
-      toast({ title: 'Framework deleted' });
-      navigate('/admin/queue?contentType=framework');
-    } catch (err) {
-      setBoardError(`Delete failed: ${err?.message || 'Unknown error'}`);
-      toast({ title: 'Framework not deleted', description: err?.message, variant: 'destructive' });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (loading && !blog) {
+/** The board the item's type calls for, wired to the page's writes. */
+function ReviewBoard({ blog, blogId, refresh, boardError, actions }) {
+  if (blog.type === 'architecture') {
     return (
-      <div className="flex items-center justify-center py-12 text-muted-foreground" role="status">
-        <Loader2 className="mr-2 h-5 w-5 animate-spin" aria-hidden="true" /> Loading content…
-      </div>
-    );
-  }
-
-  if (error || !blog) {
-    return (
-      <EmptyState
-        variant="error"
-        title="This item could not be loaded"
-        description={error?.message || 'It may have been deleted, or the request failed.'}
-        onRetry={refresh}
-        action={
-          <Button variant="outline" size="sm" onClick={() => navigate('/admin/queue')}>
-            Back to Queue
-          </Button>
-        }
+      <ArchitectureReviewBoard
+        blog={blog}
+        saving={actions.saving}
+        error={boardError}
+        onSave={(formData) => actions.saveFields(formData, 'Blueprint')}
+        onPublish={(formData) => actions.publishFields(formData, 'architecture', 'Blueprint')}
       />
     );
   }
+  if (blog.type === 'framework') {
+    return (
+      <>
+        <FrameworkReviewBoard
+          blog={blog}
+          saving={actions.saving}
+          error={boardError}
+          onSave={(formData) => actions.saveFields(formData, 'Framework')}
+          onPublish={(formData) => actions.publishFields(formData, 'framework', 'Framework')}
+          onDelete={() => actions.setFrameworkDeleteOpen(true)}
+        />
+        <ConfirmModal
+          open={actions.frameworkDeleteOpen}
+          title="Delete this framework?"
+          description="This content item will be permanently deleted. This cannot be undone."
+          confirmLabel="Delete"
+          onConfirm={actions.doFrameworkDelete}
+          onCancel={() => actions.setFrameworkDeleteOpen(false)}
+        />
+      </>
+    );
+  }
+  if (blog.type === 'coder_corner') {
+    return <CoderCornerReviewPanel blog={blog} blogId={blogId} onTransitioned={refresh} />;
+  }
+  return <BlogReviewBoard blog={blog} blogId={blogId} onChanged={refresh} />;
+}
 
-  const boardErrorFor = boardError || transitions.errors[blogId] || null;
+function ReviewLoading() {
+  return (
+    <div className="flex items-center justify-center py-12 text-muted-foreground" role="status">
+      <Loader2 className="mr-2 h-5 w-5 animate-spin" aria-hidden="true" /> Loading content…
+    </div>
+  );
+}
 
+function ReviewUnavailable({ error, refresh, navigate }) {
+  return (
+    <EmptyState
+      variant="error"
+      title="This item could not be loaded"
+      description={error?.message || 'It may have been deleted, or the request failed.'}
+      onRetry={refresh}
+      action={
+        <Button variant="outline" size="sm" onClick={() => navigate('/admin/queue')}>
+          Back to Queue
+        </Button>
+      }
+    />
+  );
+}
+
+function ReviewContent({ blog, blogId, refresh, navigate, transitions, actions }) {
+  const boardLabel = BOARD_LABEL[blog.type] || 'Blog review';
+  const boardError = actions.boardError || transitions.errors[blogId] || null;
   return (
     <div className="space-y-6">
       <PageHeader
@@ -322,44 +272,62 @@ export default function ReviewPage() {
         <PipelineStepper item={blog} />
       </PageHeader>
 
-      {blog.type === 'architecture' && (
-        <ArchitectureReviewBoard
-          blog={blog}
-          saving={saving}
-          error={boardErrorFor}
-          onSave={(formData) => saveFields(formData, 'Blueprint')}
-          onPublish={(formData) => publishFields(formData, 'architecture', 'Blueprint')}
-        />
-      )}
-
-      {blog.type === 'framework' && (
-        <>
-          <FrameworkReviewBoard
-            blog={blog}
-            saving={saving}
-            error={boardErrorFor}
-            onSave={(formData) => saveFields(formData, 'Framework')}
-            onPublish={(formData) => publishFields(formData, 'framework', 'Framework')}
-            onDelete={() => setFrameworkDeleteOpen(true)}
-          />
-          <ConfirmModal
-            open={frameworkDeleteOpen}
-            title="Delete this framework?"
-            description="This content item will be permanently deleted. This cannot be undone."
-            confirmLabel="Delete"
-            onConfirm={doFrameworkDelete}
-            onCancel={() => setFrameworkDeleteOpen(false)}
-          />
-        </>
-      )}
-
-      {blog.type === 'coder_corner' && (
-        <CoderCornerReviewPanel blog={blog} blogId={blogId} onTransitioned={refresh} />
-      )}
-
-      {!['architecture', 'framework', 'coder_corner'].includes(blog.type) && (
-        <BlogReviewBoard blog={blog} blogId={blogId} onChanged={refresh} />
-      )}
+      <ReviewBoard
+        blog={blog}
+        blogId={blogId}
+        refresh={refresh}
+        boardError={boardError}
+        actions={actions}
+      />
     </div>
+  );
+}
+
+/** Loading, unavailable, or the item on its board — first match wins. */
+const REVIEW_VIEWS = [
+  [(p) => p.loading && !p.blog, ReviewLoading],
+  [(p) => Boolean(p.error) || !p.blog, ReviewUnavailable],
+  [() => true, ReviewContent],
+];
+
+export default function ReviewPage() {
+  const { blogId } = useParams();
+  const navigate = useNavigate();
+  const { toast } = useToast();
+  const [version, setVersion] = useState(0);
+  const refresh = useCallback(() => setVersion((n) => n + 1), []);
+  const {
+    data: blog,
+    error,
+    loading,
+  } = usePublicData(
+    () =>
+      getJSON(`cms/content/item?contentId=${encodeURIComponent(blogId)}`).then((res) => res.item),
+    blogId ? `review:${blogId}:${version}` : ''
+  );
+
+  const transitions = useContentTransitions({
+    onTransitioned: (_id, result) => {
+      toast({
+        title: result?.to ? `Moved to ${contentStatusInfo(result.to).label}` : 'Status updated',
+      });
+      refresh();
+    },
+  });
+  const actions = useReviewActions({ blogId, transitions, navigate, toast });
+
+  const view = useMemo(() => ({ blog, error, loading }), [blog, error, loading]);
+  const [, View] = REVIEW_VIEWS.find(([when]) => when(view));
+  return (
+    <View
+      blog={blog}
+      blogId={blogId}
+      error={error}
+      loading={loading}
+      refresh={refresh}
+      navigate={navigate}
+      transitions={transitions}
+      actions={actions}
+    />
   );
 }
