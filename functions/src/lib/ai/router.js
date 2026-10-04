@@ -815,15 +815,50 @@ export function createAiRouter({
   onKeyVerdict = null,
   now = () => Date.now(),
 } = {}) {
+  const ctx = createRouterContext({ env, fetchImpl, sleep, log, store, configTtlMs, onKeyVerdict, now });
+  return {
+    availableProviders: () => keyedProviders(ctx),
+    getActiveAiProvider: () => activeProvider(ctx),
+    resolveProvider: (feature) => firstProvider(ctx, feature),
+    resolveProviderChain: (feature) => providerChain(ctx, feature),
+    defaultModelFor: (provider, purpose) => modelFor(ctx, provider, purpose),
+    generateTextResponse: (params) => generateText(ctx, params),
+    generateJsonResponse: (params) => generateJson(ctx, params),
+    generateGroundedJsonResponse: (params) => generateGroundedJson(ctx, params),
+    callProvider: (params) => callNamedProvider(ctx, params),
+    getCostEstimate,
+    invalidateConfig: ctx.config.invalidate,
+  };
+}
+
+/**
+ * The router's context: every dependency the functions below share, built
+ * once per router (#843, 2026-10-04).
+ *
+ * Until then those functions were closures inside `createAiRouter`, one
+ * 780-line factory with 24 return statements and a complexity of 137 that
+ * qlty flagged on every PR touching this file. The move is mechanical: each
+ * function takes `ctx` as its first argument where it used to capture a
+ * variable, and the factory is reduced to building `ctx` and binding the
+ * public surface to it. Key handling (`readKey`, `KEY_ENV`), the
+ * `CONTENTFORGE_AI_PROVIDER` pin, per-feature placement and routing,
+ * failover order, retry and time budgets are unchanged; router.test.js,
+ * sync-budgets.test.js, nvidia-provider.test.js and
+ * probe-ai-providers.test.js hold that.
+ *
+ * The internal names differ from the public ones on purpose. The foot of
+ * this file declares `export const { defaultModelFor, … } = defaultRouter`,
+ * and a module-level `function defaultModelFor` beside that binding would be
+ * a duplicate declaration. So `modelFor(ctx, …)` is bound as
+ * `defaultModelFor`, `generateText(ctx, …)` as `generateTextResponse`, and
+ * so on; the factory above is the table.
+ */
+function createRouterContext({ env, fetchImpl, sleep, log, store, configTtlMs, onKeyVerdict, now }) {
   // With no store the loader reports "no configuration", and every path below
   // falls back to exactly the environment-only behaviour this router had before
   // the portal's settings were wired up. That is what keeps unit tests — and
   // any caller that does not hand over a Cosmos client — working unchanged.
   const config = createAiConfigLoader({ store, ttlMs: configTtlMs, log });
-  // The router's clock, handed to withRetry so a test can drive the backoff.
-  const clock = { sleep, now };
-
-  const availableProviders = () => PROVIDERS.filter((p) => readKey(env, KEY_ENV[p]));
 
   // One guard per router, so the process-wide router paces every call site in
   // this instance together. See NVIDIA_DEFAULT_RPM for the multi-instance note.
@@ -852,341 +887,353 @@ export function createAiRouter({
     log,
     source: 'ai-router',
   });
-  const reportKeyVerdict = (provider, verdict) => reportVerdict(KEY_ENV[provider], verdict);
 
-  const pinnedProvider = () =>
-    String(env.CONTENTFORGE_AI_PROVIDER || '')
-      .toLowerCase()
-      .trim();
+  const ctx = {
+    env,
+    fetchImpl,
+    log,
+    store,
+    now,
+    // The router's clock, handed to withRetry so a test can drive the backoff.
+    clock: { sleep, now },
+    config,
+    nvidiaLimit,
+    nvidiaPacer,
+    reportKeyVerdict: (provider, verdict) => reportVerdict(KEY_ENV[provider], verdict),
+  };
+  ctx.openAiCompatible = openAiCompatibleTable(ctx);
+  return ctx;
+}
 
-  /**
-   * The provider chosen from KEYS ALONE, ignoring anything stored in the portal.
-   *
-   * Kept synchronous and kept env-only on purpose: callers use it to label and
-   * to log, and an await there would ripple through four modules for no gain.
-   * It is NOT the provider a call will use once an administrator has reordered
-   * or disabled something — for that, read `usageOut` after the call, which
-   * records what actually ran. `resolveProvider` is the real selection.
-   */
-  function getActiveAiProvider() {
-    const available = availableProviders();
-    const pinned = pinnedProvider();
-    if (pinned) {
-      if (available.includes(pinned)) return pinned;
-      log.warn?.(
-        `[ai-router] CONTENTFORGE_AI_PROVIDER=${pinned} but its key is not present; falling back to ${available[0] || 'none'}`
-      );
-    }
-    return available[0] || null;
+const keyedProviders = (ctx) => PROVIDERS.filter((p) => readKey(ctx.env, KEY_ENV[p]));
+
+const pinnedProvider = (ctx) =>
+  String(ctx.env.CONTENTFORGE_AI_PROVIDER || '')
+    .toLowerCase()
+    .trim();
+
+/**
+ * The provider chosen from KEYS ALONE, ignoring anything stored in the portal.
+ *
+ * Kept synchronous and kept env-only on purpose: callers use it to label and
+ * to log, and an await there would ripple through four modules for no gain.
+ * It is NOT the provider a call will use once an administrator has reordered
+ * or disabled something — for that, read `usageOut` after the call, which
+ * records what actually ran. `firstProvider` is the real selection.
+ */
+function activeProvider(ctx) {
+  const available = keyedProviders(ctx);
+  const pinned = pinnedProvider(ctx);
+  if (pinned) {
+    if (available.includes(pinned)) return pinned;
+    ctx.log.warn?.(
+      `[ai-router] CONTENTFORGE_AI_PROVIDER=${pinned} but its key is not present; falling back to ${available[0] || 'none'}`
+    );
   }
+  return available[0] || null;
+}
 
-  /**
-   * The ordered list of providers a call may use, best first.
-   *
-   * Returns every eligible provider rather than only the winner, because
-   * "order of preference" has to mean preference — see `callWithFailover`.
-   *
-   * @param {string|null} feature A key of AI_FEATURES, or null to skip the gate.
-   * @returns {Promise<Array<{provider: string, model: string|null}>>}
-   */
-  async function resolveProviderChain(feature = null) {
-    const { chain, disabled, excluded } = await resolveChainDetails(feature);
+/**
+ * The ordered list of providers a call may use, best first.
+ *
+ * Returns every eligible provider rather than only the winner, because
+ * "order of preference" has to mean preference — see `callWithFailover`.
+ *
+ * @param {string|null} feature A key of AI_FEATURES, or null to skip the gate.
+ * @returns {Promise<Array<{provider: string, model: string|null}>>}
+ */
+async function providerChain(ctx, feature = null) {
+  const { chain, disabled, excluded } = await chainDetails(ctx, feature);
 
-    if (chain.length === 0) {
-      if (excluded.length > 0 && disabled.length === 0) {
-        throw new AiNotConfiguredError(
-          `The only configured AI provider (${excluded.join(', ')}) is not used for ${feature ? `'${feature}'` : 'calls that name no feature'}. Seed GEMINI_API_KEY, OPENAI_API_KEY or ANTHROPIC_API_KEY (Required-Inputs §4.6), or change its placement under AI Engine → Where AI is used where that is allowed.`
-        );
-      }
+  if (chain.length === 0) {
+    if (excluded.length > 0 && disabled.length === 0) {
       throw new AiNotConfiguredError(
-        disabled.length > 0
-          ? `Every configured AI provider is disabled in the admin portal (${disabled.join(', ')}). Re-enable one under AI Engine → AI Services.`
-          : 'No AI provider is configured. Seed GEMINI_API_KEY, OPENAI_API_KEY or ANTHROPIC_API_KEY in Key Vault (Required-Inputs §4.6) and the matching provider turns on.'
+        `The only configured AI provider (${excluded.join(', ')}) is not used for ${feature ? `'${feature}'` : 'calls that name no feature'}. Seed GEMINI_API_KEY, OPENAI_API_KEY or ANTHROPIC_API_KEY (Required-Inputs §4.6), or change its placement under AI Engine → Where AI is used where that is allowed.`
       );
     }
-
-    return chain;
-  }
-
-  /**
-   * The chain and how it was arrived at — the selection behind
-   * `resolveProviderChain`, kept separate so the grounded path can apply the
-   * SAME selection and then say precisely why Gemini is not in it. The empty
-   * chain is left to the callers, who have different sentences for it.
-   *
-   * @returns {Promise<{chain: Array<{provider: string, model: string|null}>,
-   *                    disabled: string[], excluded: string[], pinned: string}>}
-   */
-  async function resolveChainDetails(feature = null) {
-    const { providers: docs, features, routing } = await config.load();
-
-    if (feature && !isFeatureEnabled(features, feature)) {
-      throw new AiFeatureDisabledError(feature);
-    }
-
-    const available = availableProviders();
-    const resolved = resolveProviderOrder(docs, available);
-    const { disabled } = resolved;
-    // Per-feature placement after the global order: it can move a provider
-    // or remove it, never add one (ai-config.js, rule 1). A pin below is
-    // checked against THIS order, so pinning nvidia cannot route a public
-    // feature to it.
-    const { order, excluded } = applyFeaturePlacement(resolved.order, features, feature);
-
-    // Per-task routing (ADR 0033 §4) after placement: a route reorders the
-    // providers this feature may use and names a model per step; it cannot
-    // add a provider that has no key, is switched off, or is placed off.
-    const route = routeFor(routing, feature);
-    const routed = applyFeatureRoute(order, route);
-    if (route && routed.skipped.length) {
-      log.warn?.(
-        `[ai-router] '${feature}' routes to ${routed.skipped.join(', ')} but ${
-          routed.skipped.length === 1 ? 'it is' : 'they are'
-        } not available (no key, disabled, or placed off); serving from ${
-          routed.chain[0]?.provider || 'none'
-        }`
-      );
-    }
-
-    const pinned = pinnedProvider();
-    let chain = routed.chain;
-    if (pinned) {
-      if (order.includes(pinned)) {
-        // An explicit pin is an instruction, not a preference: it selects one
-        // provider and does NOT fall through to the others — a route is a
-        // preference, so the pin wins over it too.
-        chain = routed.chain.filter((entry) => entry.provider === pinned);
-      } else {
-        let why = 'its key is not present';
-        if (disabled.includes(pinned)) why = 'it is disabled in the admin portal';
-        else if (excluded.includes(pinned)) why = `it is not used for '${feature || 'no feature'}'`;
-        log.warn?.(
-          `[ai-router] CONTENTFORGE_AI_PROVIDER=${pinned} but ${why}; falling back to ${order[0] || 'none'}`
-        );
-      }
-    }
-
-    return {
-      // The model named on the route wins over the provider card's pin; a
-      // step with no routed model keeps the card's choice (then the purpose
-      // table, in callWith).
-      chain: chain.map(({ provider, model }) => ({
-        provider,
-        model: model || configuredModelFor(docs, provider),
-      })),
-      disabled,
-      excluded,
-      pinned,
-      routed: Boolean(route),
-    };
-  }
-
-  /**
-   * Try each provider in order until one answers.
-   *
-   * WHY THIS EXISTS. The portal calls its list an "order of preference" and the
-   * page says the next provider down is used if the first cannot serve. Until
-   * this, that was only true of key presence and the enabled switch — an actual
-   * FAILURE from the first provider failed the whole call. That gap became
-   * dangerous the moment the default order changed to Gemini first (2026-08-23):
-   * the Gemini model ids were ported from upstream's Vertex table, and if one of
-   * them is not a valid public Generative Language API model, every AI feature
-   * that worked through Anthropic the day before would return 404 and stop.
-   *
-   * A provider that fails is logged at warn with the reason, because silently
-   * spending Anthropic money to paper over a broken Gemini configuration is its
-   * own kind of failure. `usageOut` records the provider that actually served.
-   *
-   * With a `budget` (header: SYNCHRONOUS CALLS HAVE A TIME BUDGET), each
-   * provider gets a share of what is left, and every attempt's `timeoutMs` is
-   * cut to that share. When too little is left to try the next provider, the
-   * call ends with AI_BUDGET_EXHAUSTED rather than sending an attempt that
-   * cannot finish. Without one, nothing here differs from before budgets.
-   */
-  /**
-   * Every call that reaches a model is recorded in `ai_usage` HERE, once
-   * (ADR 0033: "every call site records usage"). Until this, five of fourteen
-   * call sites wrote a row and the rest spent invisibly. The row's `source`
-   * is the feature (`ai:<feature>`), and its id travels back on the caller's
-   * `usageOut` entry as `recordedRowId`, so a caller that re-records the same
-   * entry with a more specific source (Listen & Learn, the podcast) UPSERTS
-   * the same row instead of adding a second one. With no store (unit tests)
-   * nothing is written and the entries still reach the caller.
-   */
-  async function recordCallUsage(entries, feature) {
-    if (!store?.upsertDoc) return entries;
-    const recorded = [];
-    for (const entry of entries) {
-      const row = await recordAiUsage(
-        { store, ai: { getCostEstimate, isPriced } },
-        { ...entry, source: featureSource(feature) }
-      );
-      recorded.push(row ? { ...entry, recordedRowId: row.id } : entry);
-    }
-    return recorded;
-  }
-
-  async function callWithFailover({
-    chain,
-    explicitModel,
-    budget = null,
-    feature = null,
-    usageOut = null,
-    ...args
-  }) {
-    const attempts = [];
-    // Collected here, recorded once the call has an answer, then handed to
-    // the caller's array with the row ids attached (recordCallUsage).
-    const collected = [];
-
-    for (const [index, { provider, model: configuredModel }] of chain.entries()) {
-      const shareEnd = budget ? shareEndFor(now, budget, { chain, index, attempts }) : null;
-      // An explicit model from the call site wins; then the route's or the
-      // administrator's choice in the portal; then the purpose table.
-      const model = explicitModel || configuredModel;
-      try {
-        const result = await withRetry(
-          clock,
-          () => callWith(provider, attemptArgs(provider, { args, collected, model, shareEnd })),
-          { provider, shareEnd }
-        );
-        await reportKeyVerdict(provider, { ok: true });
-        const recorded = await recordCallUsage(collected, feature);
-        if (Array.isArray(usageOut)) usageOut.push(...recorded);
-        return result;
-      } catch (error) {
-        attempts.push({ provider, error });
-        await failOverOrThrow(provider, error, chain);
-      }
-    }
-
-    // Unreachable: the loop either returns or throws on its last iteration.
-    throw attempts.at(-1)?.error || new AiNotConfiguredError('No AI provider was tried');
-  }
-
-  /**
-   * One attempt's arguments. Under a budget, the provider's own timeout is
-   * cut to what is left of its share; withRetry starts no attempt once less
-   * than MIN_ATTEMPT_MS is left.
-   */
-  function attemptArgs(provider, { args, collected, model, shareEnd }) {
-    const timeout =
-      shareEnd === null
-        ? {}
-        : { timeoutMs: Math.min(providerTimeoutMs(provider), shareEnd - now()) };
-    return { ...args, usageOut: collected, model, ...timeout };
-  }
-
-  /**
-   * After a provider failed: report a bad credential, then either hand the
-   * call to the next provider (a warning, so silently spending the next
-   * provider's money is visible) or rethrow when there is none or the
-   * failure is not the provider's.
-   */
-  async function failOverOrThrow(provider, error, chain) {
-    const status = Number(error?.status);
-    // 401/403 ONLY. A 404 means the model id is wrong and a 429 means the
-    // account is busy — neither says the credential is bad, and reporting
-    // them would turn the light red for something no rotation can fix.
-    if ([401, 403].includes(status)) await reportKeyVerdict(provider, { ok: false, status });
-    const last = chain[chain.length - 1].provider === provider;
-    if (last || !isProviderUnusable(error, provider)) throw error;
-    log.warn?.(
-      `[ai-router] ${provider} could not serve this call (${error?.message || error}); trying the next provider`
+    throw new AiNotConfiguredError(
+      disabled.length > 0
+        ? `Every configured AI provider is disabled in the admin portal (${disabled.join(', ')}). Re-enable one under AI Engine → AI Services.`
+        : 'No AI provider is configured. Seed GEMINI_API_KEY, OPENAI_API_KEY or ANTHROPIC_API_KEY in Key Vault (Required-Inputs §4.6) and the matching provider turns on.'
     );
   }
 
-  /**
-   * The single best provider, for callers that only need to name one.
-   *
-   * @param {string|null} feature A key of AI_FEATURES, or null to skip the gate.
-   * @returns {Promise<{provider: string, model: string|null}>}
-   */
-  async function resolveProvider(feature = null) {
-    return (await resolveProviderChain(feature))[0];
+  return chain;
+}
+
+/**
+ * The chain and how it was arrived at — the selection behind
+ * `providerChain`, kept separate so the grounded path can apply the SAME
+ * selection and then say precisely why Gemini is not in it. The empty chain
+ * is left to the callers, who have different sentences for it.
+ *
+ * @returns {Promise<{chain: Array<{provider: string, model: string|null}>,
+ *                    disabled: string[], excluded: string[], pinned: string}>}
+ */
+async function chainDetails(ctx, feature = null) {
+  const { providers: docs, features, routing } = await ctx.config.load();
+
+  if (feature && !isFeatureEnabled(features, feature)) {
+    throw new AiFeatureDisabledError(feature);
   }
 
-  function defaultModelFor(provider, purpose = 'general') {
-    const entry = DEFAULT_MODEL_TABLE[provider];
-    if (!entry) return DEFAULT_MODEL_TABLE.gemini.general[1];
-    const [envVar, fallback] = entry[purpose] || entry.general;
-    return env[envVar] || fallback;
+  const available = keyedProviders(ctx);
+  const resolved = resolveProviderOrder(docs, available);
+  const { disabled } = resolved;
+  // Per-feature placement after the global order: it can move a provider
+  // or remove it, never add one (ai-config.js, rule 1). A pin below is
+  // checked against THIS order, so pinning nvidia cannot route a public
+  // feature to it.
+  const { order, excluded } = applyFeaturePlacement(resolved.order, features, feature);
+
+  // Per-task routing (ADR 0033 §4) after placement: a route reorders the
+  // providers this feature may use and names a model per step; it cannot
+  // add a provider that has no key, is switched off, or is placed off.
+  const route = routeFor(routing, feature);
+  const routed = applyFeatureRoute(order, route);
+  if (route && routed.skipped.length) {
+    ctx.log.warn?.(
+      `[ai-router] '${feature}' routes to ${routed.skipped.join(', ')} but ${
+        routed.skipped.length === 1 ? 'it is' : 'they are'
+      } not available (no key, disabled, or placed off); serving from ${
+        routed.chain[0]?.provider || 'none'
+      }`
+    );
   }
 
-  const logUsage = (provider, usage, model, purpose) => {
-    if (env.CONTENTFORGE_LOG_TOKEN_USAGE === 'true') {
-      log.warn?.(`[ai-model] ${provider} token usage`, {
-        ...usage,
-        model,
-        purpose,
-      });
+  const pinned = pinnedProvider(ctx);
+  let chain = routed.chain;
+  if (pinned) {
+    if (order.includes(pinned)) {
+      // An explicit pin is an instruction, not a preference: it selects one
+      // provider and does NOT fall through to the others — a route is a
+      // preference, so the pin wins over it too.
+      chain = routed.chain.filter((entry) => entry.provider === pinned);
+    } else {
+      let why = 'its key is not present';
+      if (disabled.includes(pinned)) why = 'it is disabled in the admin portal';
+      else if (excluded.includes(pinned)) why = `it is not used for '${feature || 'no feature'}'`;
+      ctx.log.warn?.(
+        `[ai-router] CONTENTFORGE_AI_PROVIDER=${pinned} but ${why}; falling back to ${order[0] || 'none'}`
+      );
     }
+  }
+
+  return {
+    // The model named on the route wins over the provider card's pin; a
+    // step with no routed model keeps the card's choice (then the purpose
+    // table, in callWith).
+    chain: chain.map(({ provider, model }) => ({
+      provider,
+      model: model || configuredModelFor(docs, provider),
+    })),
+    disabled,
+    excluded,
+    pinned,
+    routed: Boolean(route),
   };
+}
 
-  async function callAnthropic({
-    prompt,
-    parts,
-    model,
-    purpose,
-    expectJson,
-    systemPrompt,
-    usageOut,
-    timeoutMs,
-  }) {
-    const apiKey = readKey(env, KEY_ENV.anthropic);
-    const selectedModel = model || defaultModelFor('anthropic', purpose);
-    // A static system prompt is marked for the prompt cache; the JSON-only
-    // instruction trails it uncached so the cache boundary stays on the
-    // expensive context.
-    let system;
-    if (systemPrompt) {
-      system = [
-        {
-          type: 'text',
-          text: systemPrompt,
-          cache_control: { type: 'ephemeral' },
-        },
-      ];
-      if (expectJson) system.push({ type: 'text', text: JSON_ONLY });
-    } else if (expectJson) {
-      system = JSON_ONLY;
+/**
+ * Every call that reaches a model is recorded in `ai_usage` HERE, once
+ * (ADR 0033: "every call site records usage"). Until this, five of fourteen
+ * call sites wrote a row and the rest spent invisibly. The row's `source`
+ * is the feature (`ai:<feature>`), and its id travels back on the caller's
+ * `usageOut` entry as `recordedRowId`, so a caller that re-records the same
+ * entry with a more specific source (Listen & Learn, the podcast) UPSERTS
+ * the same row instead of adding a second one. With no store (unit tests)
+ * nothing is written and the entries still reach the caller.
+ */
+async function recordCallUsage(ctx, entries, feature) {
+  const { store } = ctx;
+  if (!store?.upsertDoc) return entries;
+  const recorded = [];
+  for (const entry of entries) {
+    const row = await recordAiUsage(
+      { store, ai: { getCostEstimate, isPriced } },
+      { ...entry, source: featureSource(feature) }
+    );
+    recorded.push(row ? { ...entry, recordedRowId: row.id } : entry);
+  }
+  return recorded;
+}
+
+/**
+ * Try each provider in order until one answers.
+ *
+ * WHY THIS EXISTS. The portal calls its list an "order of preference" and the
+ * page says the next provider down is used if the first cannot serve. Until
+ * this, that was only true of key presence and the enabled switch — an actual
+ * FAILURE from the first provider failed the whole call. That gap became
+ * dangerous the moment the default order changed to Gemini first (2026-08-23):
+ * the Gemini model ids were ported from upstream's Vertex table, and if one of
+ * them is not a valid public Generative Language API model, every AI feature
+ * that worked through Anthropic the day before would return 404 and stop.
+ *
+ * A provider that fails is logged at warn with the reason, because silently
+ * spending Anthropic money to paper over a broken Gemini configuration is its
+ * own kind of failure. `usageOut` records the provider that actually served.
+ *
+ * With a `budget` (header: SYNCHRONOUS CALLS HAVE A TIME BUDGET), each
+ * provider gets a share of what is left, and every attempt's `timeoutMs` is
+ * cut to that share. When too little is left to try the next provider, the
+ * call ends with AI_BUDGET_EXHAUSTED rather than sending an attempt that
+ * cannot finish. Without one, nothing here differs from before budgets.
+ */
+async function callWithFailover(
+  ctx,
+  { chain, explicitModel, budget = null, feature = null, usageOut = null, ...args }
+) {
+  const attempts = [];
+  // Collected here, recorded once the call has an answer, then handed to
+  // the caller's array with the row ids attached (recordCallUsage).
+  const collected = [];
+
+  for (const [index, { provider, model: configuredModel }] of chain.entries()) {
+    const shareEnd = budget ? shareEndFor(ctx.now, budget, { chain, index, attempts }) : null;
+    // An explicit model from the call site wins; then the route's or the
+    // administrator's choice in the portal; then the purpose table.
+    const model = explicitModel || configuredModel;
+    try {
+      const result = await withRetry(
+        ctx.clock,
+        () =>
+          callWith(ctx, provider, attemptArgs(ctx, provider, { args, collected, model, shareEnd })),
+        { provider, shareEnd }
+      );
+      await ctx.reportKeyVerdict(provider, { ok: true });
+      const recorded = await recordCallUsage(ctx, collected, feature);
+      if (Array.isArray(usageOut)) usageOut.push(...recorded);
+      return result;
+    } catch (error) {
+      attempts.push({ provider, error });
+      await failOverOrThrow(ctx, provider, error, chain);
     }
-    const data = await postJson(fetchImpl, 'https://api.anthropic.com/v1/messages', {
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-beta': 'prompt-caching-2024-07-31',
-      },
-      body: {
-        model: selectedModel,
-        max_tokens: 4096,
-        temperature: 0.2,
-        messages: [{ role: 'user', content: toAnthropicContent(parts, prompt) }],
-        ...(system !== undefined ? { system } : {}),
-      },
-      // Undefined keeps postJson's CHAT_TIMEOUT_MS.
-      timeoutMs,
-    });
-    const usage = data?.usage || {};
-    recordUsage(usageOut, 'anthropic', selectedModel, usage.input_tokens, usage.output_tokens);
-    logUsage('anthropic', usage, selectedModel, purpose);
-    return (data?.content || [])
-      .filter((b) => b?.type === 'text')
-      .map((b) => b.text)
-      .join('\n');
   }
 
-  /**
-   * The OpenAI chat-completions request path, shared by every provider that
-   * speaks it. OpenAI and NVIDIA differ only in the rows of this table.
-   *
-   * NVIDIA's differences, each for a reason: plain-string user content and
-   * the JSON rule as an instruction rather than `response_format`, because
-   * neither array content nor `json_object` is accepted by every model on the
-   * catalogue and an unaccepted field is a 400; an explicit `max_tokens`; a
-   * longer timeout; `<think>` stripped from the answer.
-   */
-  const OPENAI_COMPATIBLE = {
+  // Unreachable: the loop either returns or throws on its last iteration.
+  throw attempts.at(-1)?.error || new AiNotConfiguredError('No AI provider was tried');
+}
+
+/**
+ * One attempt's arguments. Under a budget, the provider's own timeout is
+ * cut to what is left of its share; withRetry starts no attempt once less
+ * than MIN_ATTEMPT_MS is left.
+ */
+function attemptArgs(ctx, provider, { args, collected, model, shareEnd }) {
+  const timeout =
+    shareEnd === null
+      ? {}
+      : { timeoutMs: Math.min(providerTimeoutMs(ctx, provider), shareEnd - ctx.now()) };
+  return { ...args, usageOut: collected, model, ...timeout };
+}
+
+/**
+ * After a provider failed: report a bad credential, then either hand the
+ * call to the next provider (a warning, so silently spending the next
+ * provider's money is visible) or rethrow when there is none or the
+ * failure is not the provider's.
+ */
+async function failOverOrThrow(ctx, provider, error, chain) {
+  const status = Number(error?.status);
+  // 401/403 ONLY. A 404 means the model id is wrong and a 429 means the
+  // account is busy — neither says the credential is bad, and reporting
+  // them would turn the light red for something no rotation can fix.
+  if ([401, 403].includes(status)) await ctx.reportKeyVerdict(provider, { ok: false, status });
+  const last = chain[chain.length - 1].provider === provider;
+  if (last || !isProviderUnusable(error, provider)) throw error;
+  ctx.log.warn?.(
+    `[ai-router] ${provider} could not serve this call (${error?.message || error}); trying the next provider`
+  );
+}
+
+/**
+ * The single best provider, for callers that only need to name one.
+ *
+ * @param {string|null} feature A key of AI_FEATURES, or null to skip the gate.
+ * @returns {Promise<{provider: string, model: string|null}>}
+ */
+async function firstProvider(ctx, feature = null) {
+  return (await providerChain(ctx, feature))[0];
+}
+
+function modelFor(ctx, provider, purpose = 'general') {
+  const entry = DEFAULT_MODEL_TABLE[provider];
+  if (!entry) return DEFAULT_MODEL_TABLE.gemini.general[1];
+  const [envVar, fallback] = entry[purpose] || entry.general;
+  return ctx.env[envVar] || fallback;
+}
+
+const logUsage = (ctx, provider, usage, model, purpose) => {
+  if (ctx.env.CONTENTFORGE_LOG_TOKEN_USAGE === 'true') {
+    ctx.log.warn?.(`[ai-model] ${provider} token usage`, {
+      ...usage,
+      model,
+      purpose,
+    });
+  }
+};
+
+async function callAnthropic(
+  ctx,
+  { prompt, parts, model, purpose, expectJson, systemPrompt, usageOut, timeoutMs }
+) {
+  const apiKey = readKey(ctx.env, KEY_ENV.anthropic);
+  const selectedModel = model || modelFor(ctx, 'anthropic', purpose);
+  // A static system prompt is marked for the prompt cache; the JSON-only
+  // instruction trails it uncached so the cache boundary stays on the
+  // expensive context.
+  let system;
+  if (systemPrompt) {
+    system = [
+      {
+        type: 'text',
+        text: systemPrompt,
+        cache_control: { type: 'ephemeral' },
+      },
+    ];
+    if (expectJson) system.push({ type: 'text', text: JSON_ONLY });
+  } else if (expectJson) {
+    system = JSON_ONLY;
+  }
+  const data = await postJson(ctx.fetchImpl, 'https://api.anthropic.com/v1/messages', {
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-beta': 'prompt-caching-2024-07-31',
+    },
+    body: {
+      model: selectedModel,
+      max_tokens: 4096,
+      temperature: 0.2,
+      messages: [{ role: 'user', content: toAnthropicContent(parts, prompt) }],
+      ...(system !== undefined ? { system } : {}),
+    },
+    // Undefined keeps postJson's CHAT_TIMEOUT_MS.
+    timeoutMs,
+  });
+  const usage = data?.usage || {};
+  recordUsage(usageOut, 'anthropic', selectedModel, usage.input_tokens, usage.output_tokens);
+  logUsage(ctx, 'anthropic', usage, selectedModel, purpose);
+  return (data?.content || [])
+    .filter((b) => b?.type === 'text')
+    .map((b) => b.text)
+    .join('\n');
+}
+
+/**
+ * The OpenAI chat-completions request path, shared by every provider that
+ * speaks it. OpenAI and NVIDIA differ only in the rows of this table.
+ *
+ * NVIDIA's differences, each for a reason: plain-string user content and
+ * the JSON rule as an instruction rather than `response_format`, because
+ * neither array content nor `json_object` is accepted by every model on the
+ * catalogue and an unaccepted field is a 400; an explicit `max_tokens`; a
+ * longer timeout; `<think>` stripped from the answer. Built per router
+ * because the pacing guard is the router's.
+ */
+function openAiCompatibleTable(ctx) {
+  return {
     openai: {
       url: 'https://api.openai.com/v1/chat/completions',
       jsonAsResponseFormat: true,
@@ -1200,156 +1247,188 @@ export function createAiRouter({
       timeoutMs: NVIDIA_TIMEOUT_MS,
       clean: stripThinking,
       pace: () => {
-        if (!nvidiaPacer.take()) throw pacedError(nvidiaLimit);
+        if (!ctx.nvidiaPacer.take()) throw pacedError(ctx.nvidiaLimit);
       },
     },
   };
+}
 
-  async function callOpenAiCompatible(
-    provider,
-    { prompt, parts, model, purpose, expectJson, systemPrompt, usageOut, maxTokens, timeoutMs }
-  ) {
-    const spec = OPENAI_COMPATIBLE[provider];
-    const apiKey = readKey(env, KEY_ENV[provider]);
-    const selectedModel = model || defaultModelFor(provider, purpose);
-    const messages = [];
-    const system =
-      expectJson && !spec.jsonAsResponseFormat
-        ? [systemPrompt, JSON_ONLY].filter(Boolean).join('\n\n')
-        : systemPrompt;
-    if (system) messages.push({ role: 'system', content: system });
-    messages.push({ role: 'user', content: spec.content(parts, prompt) });
-    // Last, after every refusal that could still happen locally: a request
-    // that is never sent must not spend a slot in the window.
-    spec.pace?.();
-    const data = await postJson(fetchImpl, spec.url, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-      body: {
-        model: selectedModel,
-        messages,
+async function callOpenAiCompatible(ctx, provider, args) {
+  const { purpose, usageOut, timeoutMs } = args;
+  const spec = ctx.openAiCompatible[provider];
+  const apiKey = readKey(ctx.env, KEY_ENV[provider]);
+  const selectedModel = args.model || modelFor(ctx, provider, purpose);
+  const body = openAiCompatibleBody(spec, selectedModel, args);
+  // Last, after every refusal that could still happen locally: a request
+  // that is never sent must not spend a slot in the window.
+  spec.pace?.();
+  const data = await postJson(ctx.fetchImpl, spec.url, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body,
+    ...timeoutArg(timeoutMs ?? spec.timeoutMs),
+  });
+  const usage = data?.usage || {};
+  recordUsage(usageOut, provider, selectedModel, usage.prompt_tokens, usage.completion_tokens);
+  logUsage(ctx, provider, usage, selectedModel, purpose);
+  const text = data?.choices?.[0]?.message?.content || '';
+  return spec.clean ? spec.clean(text) : text;
+}
+
+/**
+ * One chat-completions request body. The system turn carries the JSON rule
+ * where the table row cannot send `response_format`; `max_tokens` goes only
+ * where the row sends it at all (OpenAI's reasoning models refuse the
+ * field), and a caller's cap (the portal's Test) wins over the row's.
+ */
+function openAiCompatibleBody(spec, model, { prompt, parts, expectJson, systemPrompt, maxTokens }) {
+  const messages = [];
+  const system =
+    expectJson && !spec.jsonAsResponseFormat
+      ? [systemPrompt, JSON_ONLY].filter(Boolean).join('\n\n')
+      : systemPrompt;
+  if (system) messages.push({ role: 'system', content: system });
+  messages.push({ role: 'user', content: spec.content(parts, prompt) });
+  return {
+    model,
+    messages,
+    temperature: 0.2,
+    ...(spec.maxTokens ? { max_tokens: maxTokens ?? spec.maxTokens } : {}),
+    ...(expectJson && spec.jsonAsResponseFormat
+      ? { response_format: { type: 'json_object' } }
+      : {}),
+  };
+}
+
+/** `{ timeoutMs }` when a limit is set; nothing otherwise, so postJson keeps CHAT_TIMEOUT_MS. */
+const timeoutArg = (timeoutMs) => (timeoutMs ? { timeoutMs } : {});
+
+/**
+ * A provider's own attempt timeout: its table row's (NVIDIA's 120 s), else
+ * CHAT_TIMEOUT_MS. A budgeted call cuts it to the provider's share.
+ */
+const providerTimeoutMs = (ctx, provider) =>
+  ctx.openAiCompatible[provider]?.timeoutMs ?? CHAT_TIMEOUT_MS;
+
+async function callGemini(
+  ctx,
+  { prompt, parts, model, purpose, expectJson, systemPrompt, usageOut, timeoutMs }
+) {
+  const apiKey = readKey(ctx.env, KEY_ENV.gemini);
+  const selectedModel = model || modelFor(ctx, 'gemini', purpose);
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(selectedModel)}:generateContent`;
+  const data = await postJson(ctx.fetchImpl, url, {
+    headers: { 'x-goog-api-key': apiKey },
+    body: {
+      contents: [{ role: 'user', parts: toGeminiParts(parts, prompt) }],
+      ...(systemPrompt ? { systemInstruction: { parts: [{ text: systemPrompt }] } } : {}),
+      generationConfig: {
         temperature: 0.2,
-        // A caller's cap (the portal's Test) wins, but only where the table
-        // sends max_tokens at all: OpenAI's reasoning models refuse the field.
-        ...(spec.maxTokens ? { max_tokens: maxTokens ?? spec.maxTokens } : {}),
-        ...(expectJson && spec.jsonAsResponseFormat
-          ? { response_format: { type: 'json_object' } }
-          : {}),
+        ...(expectJson ? { responseMimeType: 'application/json' } : {}),
       },
-      ...((timeoutMs ?? spec.timeoutMs) ? { timeoutMs: timeoutMs ?? spec.timeoutMs } : {}),
-    });
-    const usage = data?.usage || {};
-    recordUsage(usageOut, provider, selectedModel, usage.prompt_tokens, usage.completion_tokens);
-    logUsage(provider, usage, selectedModel, purpose);
-    const text = data?.choices?.[0]?.message?.content || '';
-    return spec.clean ? spec.clean(text) : text;
+    },
+    // Undefined keeps postJson's CHAT_TIMEOUT_MS.
+    timeoutMs,
+  });
+  const usage = data?.usageMetadata || {};
+  // Reasoning tokens bill at the output rate — count them as output.
+  const outTokens =
+    (Number(usage.candidatesTokenCount) || 0) + (Number(usage.thoughtsTokenCount) || 0);
+  recordUsage(usageOut, 'gemini', selectedModel, usage.promptTokenCount, outTokens);
+  logUsage(ctx, 'gemini', usage, selectedModel, purpose);
+  return (data?.candidates?.[0]?.content?.parts || [])
+    .filter((p) => typeof p?.text === 'string' && !p.thought)
+    .map((p) => p.text)
+    .join('');
+}
+
+const CALLERS = {
+  anthropic: callAnthropic,
+  openai: (ctx, args) => callOpenAiCompatible(ctx, 'openai', args),
+  gemini: callGemini,
+  nvidia: (ctx, args) => callOpenAiCompatible(ctx, 'nvidia', args),
+};
+
+/**
+ * The chain a call carrying these parts can use. A text-only provider is
+ * left out of a call with an image in it — sending it would be a refusal,
+ * and a refusal does not fail over. An empty result says so rather than
+ * reporting "not configured".
+ */
+function chainForParts(chain, parts) {
+  if (!hasNonTextParts(parts)) return chain;
+  const usable = chain.filter(({ provider }) => !TEXT_ONLY_PROVIDERS.includes(provider));
+  if (usable.length === 0) {
+    throw new AiNotConfiguredError(
+      `This call carries non-text parts and the only provider in its chain (${chain
+        .map((c) => c.provider)
+        .join(', ')}) takes text only.`
+    );
   }
+  return usable;
+}
 
-  const callOpenAi = (args) => callOpenAiCompatible('openai', args);
-  const callNvidia = (args) => callOpenAiCompatible('nvidia', args);
+function callWith(ctx, provider, args) {
+  const caller = CALLERS[provider];
+  if (!caller) throw new AiNotConfiguredError(`Unknown AI provider: ${provider}`);
+  return caller(ctx, args);
+}
 
-  /**
-   * A provider's own attempt timeout: its table row's (NVIDIA's 120 s), else
-   * CHAT_TIMEOUT_MS. A budgeted call cuts it to the provider's share.
-   */
-  const providerTimeoutMs = (provider) => OPENAI_COMPATIBLE[provider]?.timeoutMs ?? CHAT_TIMEOUT_MS;
+/**
+ * A call's budget, started now: before the configuration read, which is
+ * part of the call's time. No `budgetMs` is no budget (header).
+ */
+const budgetFor = (ctx, budgetMs) =>
+  budgetMs === null || budgetMs === undefined ? null : startBudget(budgetMs, ctx.now());
 
-  async function callGemini({
-    prompt,
+/** Resolve the chain and call it: the shared body of both generate calls. */
+async function generate(ctx, { feature, parts, model, budget, ...args }) {
+  const chain = chainForParts(await providerChain(ctx, feature), parts);
+  return callWithFailover(ctx, {
+    chain,
+    explicitModel: model,
+    parts,
+    budget,
+    feature,
+    ...args,
+  });
+}
+
+/**
+ * @param {object} [params]
+ * @param {number} [params.budgetMs] Synchronous callers only: the time this
+ *   call may take, from now, failover included (header: SYNCHRONOUS CALLS
+ *   HAVE A TIME BUDGET). Omitted, the call runs as it always has.
+ */
+async function generateText(
+  ctx,
+  {
+    prompt = '',
+    parts = null,
+    model = null,
+    purpose = 'general',
+    systemPrompt = '',
+    usageOut = null,
+    feature = null,
+    budgetMs = null,
+  } = {}
+) {
+  return generate(ctx, {
+    feature,
     parts,
     model,
+    budget: budgetFor(ctx, budgetMs),
+    prompt,
     purpose,
-    expectJson,
+    expectJson: false,
     systemPrompt,
     usageOut,
-    timeoutMs,
-  }) {
-    const apiKey = readKey(env, KEY_ENV.gemini);
-    const selectedModel = model || defaultModelFor('gemini', purpose);
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(selectedModel)}:generateContent`;
-    const data = await postJson(fetchImpl, url, {
-      headers: { 'x-goog-api-key': apiKey },
-      body: {
-        contents: [{ role: 'user', parts: toGeminiParts(parts, prompt) }],
-        ...(systemPrompt ? { systemInstruction: { parts: [{ text: systemPrompt }] } } : {}),
-        generationConfig: {
-          temperature: 0.2,
-          ...(expectJson ? { responseMimeType: 'application/json' } : {}),
-        },
-      },
-      // Undefined keeps postJson's CHAT_TIMEOUT_MS.
-      timeoutMs,
-    });
-    const usage = data?.usageMetadata || {};
-    // Reasoning tokens bill at the output rate — count them as output.
-    const outTokens =
-      (Number(usage.candidatesTokenCount) || 0) + (Number(usage.thoughtsTokenCount) || 0);
-    recordUsage(usageOut, 'gemini', selectedModel, usage.promptTokenCount, outTokens);
-    logUsage('gemini', usage, selectedModel, purpose);
-    return (data?.candidates?.[0]?.content?.parts || [])
-      .filter((p) => typeof p?.text === 'string' && !p.thought)
-      .map((p) => p.text)
-      .join('');
-  }
+  });
+}
 
-  const CALLERS = {
-    anthropic: callAnthropic,
-    openai: callOpenAi,
-    gemini: callGemini,
-    nvidia: callNvidia,
-  };
-
-  /**
-   * The chain a call carrying these parts can use. A text-only provider is
-   * left out of a call with an image in it — sending it would be a refusal,
-   * and a refusal does not fail over. An empty result says so rather than
-   * reporting "not configured".
-   */
-  function chainForParts(chain, parts) {
-    if (!hasNonTextParts(parts)) return chain;
-    const usable = chain.filter(({ provider }) => !TEXT_ONLY_PROVIDERS.includes(provider));
-    if (usable.length === 0) {
-      throw new AiNotConfiguredError(
-        `This call carries non-text parts and the only provider in its chain (${chain
-          .map((c) => c.provider)
-          .join(', ')}) takes text only.`
-      );
-    }
-    return usable;
-  }
-
-  function callWith(provider, args) {
-    const caller = CALLERS[provider];
-    if (!caller) throw new AiNotConfiguredError(`Unknown AI provider: ${provider}`);
-    return caller(args);
-  }
-
-  /**
-   * A call's budget, started now: before the configuration read, which is
-   * part of the call's time. No `budgetMs` is no budget (header).
-   */
-  const budgetFor = (budgetMs) =>
-    budgetMs === null || budgetMs === undefined ? null : startBudget(budgetMs, now());
-
-  /** Resolve the chain and call it: the shared body of both generate calls. */
-  async function generate({ feature, parts, model, budget, ...args }) {
-    const chain = chainForParts(await resolveProviderChain(feature), parts);
-    return callWithFailover({
-      chain,
-      explicitModel: model,
-      parts,
-      budget,
-      feature,
-      ...args,
-    });
-  }
-
-  /**
-   * @param {object} [params]
-   * @param {number} [params.budgetMs] Synchronous callers only: the time this
-   *   call may take, from now, failover included (header: SYNCHRONOUS CALLS
-   *   HAVE A TIME BUDGET). Omitted, the call runs as it always has.
-   */
-  async function generateTextResponse({
+/** As generateText, parsed as JSON, with one repair round trip. */
+async function generateJson(
+  ctx,
+  {
     prompt = '',
     parts = null,
     model = null,
@@ -1358,94 +1437,73 @@ export function createAiRouter({
     usageOut = null,
     feature = null,
     budgetMs = null,
-  } = {}) {
-    return generate({
-      feature,
-      parts,
+  } = {}
+) {
+  const budget = budgetFor(ctx, budgetMs);
+  const text = await generate(ctx, {
+    feature,
+    parts,
+    model,
+    budget,
+    prompt,
+    purpose,
+    expectJson: true,
+    systemPrompt,
+    usageOut,
+  });
+  try {
+    return parseJsonWithFallbacks(text);
+  } catch (parseError) {
+    // One repair round trip, then the original parse error wins. Inside a
+    // budget the repair shares the same deadline. It is skipped when it
+    // could not have a whole attempt, because the parse error says more
+    // than "out of time" would.
+    if (budget && budget.deadline - ctx.now() < MIN_ATTEMPT_MS) throw parseError;
+    const repaired = await generate(ctx, {
+      prompt: `The following should be JSON but is malformed. Repair it and return ONLY valid JSON with no markdown fences, no explanation, and no extra keys.\n\n${sanitizeJsonText(text).slice(0, 30000)}`,
+      parts: null,
       model,
-      budget: budgetFor(budgetMs),
-      prompt,
       purpose,
       expectJson: false,
-      systemPrompt,
+      systemPrompt:
+        'You repair malformed JSON. Return only strict RFC 8259 JSON. Do not add commentary.',
       usageOut,
-    });
-  }
-
-  /** As generateTextResponse, parsed as JSON, with one repair round trip. */
-  async function generateJsonResponse({
-    prompt = '',
-    parts = null,
-    model = null,
-    purpose = 'general',
-    systemPrompt = '',
-    usageOut = null,
-    feature = null,
-    budgetMs = null,
-  } = {}) {
-    const budget = budgetFor(budgetMs);
-    const text = await generate({
+      // The repair belongs to the call that is already permitted; re-checking
+      // under the same cached settings keeps the two halves consistent.
       feature,
-      parts,
-      model,
       budget,
-      prompt,
-      purpose,
-      expectJson: true,
-      systemPrompt,
-      usageOut,
     });
     try {
-      return parseJsonWithFallbacks(text);
-    } catch (parseError) {
-      // One repair round trip, then the original parse error wins. Inside a
-      // budget the repair shares the same deadline. It is skipped when it
-      // could not have a whole attempt, because the parse error says more
-      // than "out of time" would.
-      if (budget && budget.deadline - now() < MIN_ATTEMPT_MS) throw parseError;
-      const repaired = await generate({
-        prompt: `The following should be JSON but is malformed. Repair it and return ONLY valid JSON with no markdown fences, no explanation, and no extra keys.\n\n${sanitizeJsonText(text).slice(0, 30000)}`,
-        parts: null,
-        model,
-        purpose,
-        expectJson: false,
-        systemPrompt:
-          'You repair malformed JSON. Return only strict RFC 8259 JSON. Do not add commentary.',
-        usageOut,
-        // The repair belongs to the call that is already permitted; re-checking
-        // under the same cached settings keeps the two halves consistent.
-        feature,
-        budget,
-      });
-      try {
-        return parseJsonWithFallbacks(repaired);
-      } catch {
-        throw parseError;
-      }
+      return parseJsonWithFallbacks(repaired);
+    } catch {
+      throw parseError;
     }
   }
+}
 
-  /**
-   * Ground a JSON generation on owner-supplied pages and YouTube videos.
-   *
-   * Gemini only, through the Interactions endpoint — the header says why. The
-   * chain is resolved exactly as for every other call, and then Gemini has to
-   * be in it; anything else is `AiNotConfiguredError` with the reason, before
-   * a byte is sent. There is no failover and no JSON repair round trip: both
-   * would go through the generic chain, which is precisely what this entry
-   * point exists to avoid, and JSON mode on this endpoint returns JSON or
-   * reports a status other than `completed`.
-   *
-   * @param {object} params
-   * @param {string} params.prompt
-   * @param {Array<{kind: 'page'|'video', url: string}>} params.sources
-   * @param {string} [params.systemPrompt]
-   * @param {string} [params.purpose]       Model table purpose; `analysis` by default.
-   * @param {string|null} [params.model]    Explicit model; wins over the portal pin.
-   * @param {Array|null} [params.usageOut]  Receives one usage row, provider `gemini`.
-   * @param {string|null} [params.feature]  A key of AI_FEATURES.
-   */
-  async function generateGroundedJsonResponse({
+/**
+ * Ground a JSON generation on owner-supplied pages and YouTube videos.
+ *
+ * Gemini only, through the Interactions endpoint — the header says why. The
+ * chain is resolved exactly as for every other call, and then Gemini has to
+ * be in it; anything else is `AiNotConfiguredError` with the reason, before
+ * a byte is sent. There is no failover and no JSON repair round trip: both
+ * would go through the generic chain, which is precisely what this entry
+ * point exists to avoid, and JSON mode on this endpoint returns JSON or
+ * reports a status other than `completed`.
+ *
+ * @param {object} params
+ * @param {string} params.prompt
+ * @param {Array<{kind: 'page'|'video', url: string}>} params.sources
+ * @param {string} [params.systemPrompt]
+ * @param {string} [params.purpose]       Model table purpose; `analysis` by default.
+ * @param {string|null} [params.model]    Explicit model; wins over the portal pin.
+ * @param {Array|null} [params.usageOut]  Receives one usage row, provider `gemini`.
+ * @param {string|null} [params.feature]  A key of AI_FEATURES.
+ */
+async function generateGroundedJson(
+  ctx,
+  {
     prompt = '',
     sources = [],
     systemPrompt = '',
@@ -1453,141 +1511,146 @@ export function createAiRouter({
     model = null,
     usageOut = null,
     feature = null,
-  } = {}) {
-    // Validation first: a bad list must not cost a configuration read, and a
-    // good list must not be sent when the provider cannot take it.
-    const { pages, videos } = validateGroundingSources(sources);
+  } = {}
+) {
+  // Validation first: a bad list must not cost a configuration read, and a
+  // good list must not be sent when the provider cannot take it.
+  const { pages, videos } = validateGroundingSources(sources);
 
-    const { chain, disabled, pinned } = await resolveChainDetails(feature);
-    const gemini = chain.find((entry) => entry.provider === 'gemini');
-    if (!gemini) {
-      throw new AiNotConfiguredError(
-        groundingUnavailable({ available: availableProviders(), disabled, pinned })
-      );
-    }
-
-    const selectedModel = model || gemini.model || defaultModelFor('gemini', purpose);
-    const body = buildGroundedRequest({
-      model: selectedModel,
-      prompt,
-      pages,
-      videos,
-      systemPrompt,
-    });
-
-    let data;
-    try {
-      data = await withRetry(clock, () =>
-        postJson(fetchImpl, INTERACTIONS_URL, {
-          headers: { 'x-goog-api-key': readKey(env, KEY_ENV.gemini) },
-          body,
-          timeoutMs: GROUNDED_TIMEOUT_MS,
-        })
-      );
-    } catch (error) {
-      // Same rule as callWithFailover: 401/403 only, and then the call fails
-      // here — there is nothing to hand on to.
-      const status = Number(error?.status);
-      if ([401, 403].includes(status)) await reportKeyVerdict('gemini', { ok: false, status });
-      throw error;
-    }
-    await reportKeyVerdict('gemini', { ok: true });
-
-    // Usage before the status check, so a failed-but-billed interaction is
-    // still on the spend page. Tool-use tokens are the fetched pages — prompt
-    // side; thought tokens bill as output, as on the chat endpoint.
-    const usage = data?.usage || {};
-    const collected = [];
-    recordUsage(
-      collected,
-      'gemini',
-      selectedModel,
-      (Number(usage.total_input_tokens) || 0) + (Number(usage.total_tool_use_tokens) || 0),
-      (Number(usage.total_output_tokens) || 0) + (Number(usage.total_thought_tokens) || 0)
+  const { chain, disabled, pinned } = await chainDetails(ctx, feature);
+  const gemini = chain.find((entry) => entry.provider === 'gemini');
+  if (!gemini) {
+    throw new AiNotConfiguredError(
+      groundingUnavailable({ available: keyedProviders(ctx), disabled, pinned })
     );
-    const recorded = await recordCallUsage(collected, feature);
-    if (Array.isArray(usageOut)) usageOut.push(...recorded);
-    logUsage('gemini', usage, selectedModel, purpose);
-
-    const status = data?.status;
-    if (status !== 'completed') {
-      const detail = (Array.isArray(data?.errors) ? data.errors : [])
-        .map((e) => e?.message)
-        .filter(Boolean)
-        .join('; ');
-      throw new Error(
-        `Gemini reported status '${status || 'none'}' for the grounded call, not 'completed'${detail ? `: ${detail}` : ''}.`
-      );
-    }
-
-    const unread = failedRetrievals(data);
-    if (unread.length) {
-      throw new Error(
-        `Gemini could not read ${unread.length === 1 ? 'a source' : `${unread.length} sources`} — ${unread.join(', ')}. The generation was not used, because it would be grounded on less than it claims.`
-      );
-    }
-
-    return parseJsonWithFallbacks(groundedOutputText(data));
   }
 
-  /** The aiProxy / testAiProvider shape: an explicit provider, text back with token counts. */
-  /**
-   * One call to one named provider, with no failover (the portal's Test and
-   * Playground, and the weekly probe that runs the Test). `maxTokens` is an optional per-call cap for providers whose
-   * table row sends one (NVIDIA). `timeoutMs` is an optional per-call limit
-   * that every provider honours; a budgeted call passes the same argument.
-   * The Test passes small values of both, so a reasoning model proves it
-   * answers in seconds instead of thinking past the edge's request limit
-   * (#701, 2026-09-29: 56-58 s).
-   */
-  async function callProvider({
-    provider,
-    model,
+  const selectedModel = model || gemini.model || modelFor(ctx, 'gemini', purpose);
+  const body = buildGroundedRequest({
+    model: selectedModel,
     prompt,
-    systemPrompt = '',
+    pages,
+    videos,
+    systemPrompt,
+  });
+
+  const data = await groundedInteraction(ctx, body);
+
+  // Usage before the status check, so a failed-but-billed interaction is
+  // still on the spend page.
+  const usage = data?.usage || {};
+  const recorded = await recordCallUsage(ctx, groundedUsageRow(selectedModel, usage), feature);
+  if (Array.isArray(usageOut)) usageOut.push(...recorded);
+  logUsage(ctx, 'gemini', usage, selectedModel, purpose);
+
+  assertGroundedComplete(data);
+  return parseJsonWithFallbacks(groundedOutputText(data));
+}
+
+/**
+ * The usage row of a grounded call. Tool-use tokens are the fetched pages —
+ * prompt side; thought tokens bill as output, as on the chat endpoint.
+ */
+function groundedUsageRow(model, usage) {
+  const collected = [];
+  recordUsage(
+    collected,
+    'gemini',
+    model,
+    (Number(usage.total_input_tokens) || 0) + (Number(usage.total_tool_use_tokens) || 0),
+    (Number(usage.total_output_tokens) || 0) + (Number(usage.total_thought_tokens) || 0)
+  );
+  return collected;
+}
+
+/**
+ * A grounded generation is used only when the interaction completed and
+ * every source was read; otherwise it would be grounded on less than it
+ * claims, and the error says which.
+ */
+function assertGroundedComplete(data) {
+  const status = data?.status;
+  if (status !== 'completed') {
+    const detail = (Array.isArray(data?.errors) ? data.errors : [])
+      .map((e) => e?.message)
+      .filter(Boolean)
+      .join('; ');
+    throw new Error(
+      `Gemini reported status '${status || 'none'}' for the grounded call, not 'completed'${detail ? `: ${detail}` : ''}.`
+    );
+  }
+  const unread = failedRetrievals(data);
+  if (unread.length) {
+    throw new Error(
+      `Gemini could not read ${unread.length === 1 ? 'a source' : `${unread.length} sources`} — ${unread.join(', ')}. The generation was not used, because it would be grounded on less than it claims.`
+    );
+  }
+}
+
+/**
+ * The grounded call itself, with the key verdict it reports. Same rule as
+ * callWithFailover: 401/403 only, and then the call fails here — there is
+ * nothing to hand on to.
+ */
+async function groundedInteraction(ctx, body) {
+  let data;
+  try {
+    data = await withRetry(ctx.clock, () =>
+      postJson(ctx.fetchImpl, INTERACTIONS_URL, {
+        headers: { 'x-goog-api-key': readKey(ctx.env, KEY_ENV.gemini) },
+        body,
+        timeoutMs: GROUNDED_TIMEOUT_MS,
+      })
+    );
+  } catch (error) {
+    const status = Number(error?.status);
+    if ([401, 403].includes(status)) await ctx.reportKeyVerdict('gemini', { ok: false, status });
+    throw error;
+  }
+  await ctx.reportKeyVerdict('gemini', { ok: true });
+  return data;
+}
+
+/**
+ * One call to one named provider, with no failover (the portal's Test and
+ * Playground, and the weekly probe that runs the Test): the aiProxy /
+ * testAiProvider shape, an explicit provider, text back with token counts.
+ * `maxTokens` is an optional per-call cap for providers whose table row
+ * sends one (NVIDIA). `timeoutMs` is an optional per-call limit that every
+ * provider honours; a budgeted call passes the same argument. The Test
+ * passes small values of both, so a reasoning model proves it answers in
+ * seconds instead of thinking past the edge's request limit (#701,
+ * 2026-09-29: 56-58 s).
+ */
+async function callNamedProvider(
+  ctx,
+  { provider, model, prompt, systemPrompt = '', maxTokens, timeoutMs }
+) {
+  if (!PROVIDERS.includes(provider))
+    throw new AiNotConfiguredError(`Unknown AI provider: ${provider}`);
+  if (!readKey(ctx.env, KEY_ENV[provider])) {
+    throw new AiNotConfiguredError(
+      `${provider} is not configured: ${KEY_ENV[provider]} is not set`
+    );
+  }
+  const usageOut = [];
+  const text = await callWith(ctx, provider, {
+    prompt,
+    parts: null,
+    model,
+    purpose: 'general',
+    expectJson: false,
+    systemPrompt,
+    usageOut,
     maxTokens,
     timeoutMs,
-  }) {
-    if (!PROVIDERS.includes(provider))
-      throw new AiNotConfiguredError(`Unknown AI provider: ${provider}`);
-    if (!readKey(env, KEY_ENV[provider])) {
-      throw new AiNotConfiguredError(
-        `${provider} is not configured: ${KEY_ENV[provider]} is not set`
-      );
-    }
-    const usageOut = [];
-    const text = await callWith(provider, {
-      prompt,
-      parts: null,
-      model,
-      purpose: 'general',
-      expectJson: false,
-      systemPrompt,
-      usageOut,
-      maxTokens,
-      timeoutMs,
-    });
-    const usage = usageOut[0] || {};
-    return {
-      text,
-      promptTokens: usage.promptTokens || 0,
-      completionTokens: usage.completionTokens || 0,
-      model: usage.model || model,
-    };
-  }
-
+  });
+  const usage = usageOut[0] || {};
   return {
-    availableProviders,
-    getActiveAiProvider,
-    resolveProvider,
-    resolveProviderChain,
-    defaultModelFor,
-    generateTextResponse,
-    generateJsonResponse,
-    generateGroundedJsonResponse,
-    callProvider,
-    getCostEstimate,
-    invalidateConfig: config.invalidate,
+    text,
+    promptTokens: usage.promptTokens || 0,
+    completionTokens: usage.completionTokens || 0,
+    model: usage.model || model,
   };
 }
 

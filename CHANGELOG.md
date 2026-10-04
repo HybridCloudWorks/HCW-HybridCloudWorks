@@ -2307,6 +2307,25 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **AI router: the factory's closures are module-level functions over a
+  context (#843).** `createAiRouter` in `functions/src/lib/ai/router.js` was
+  one 780-line factory with 24 return statements and a complexity of 137,
+  flagged by qlty on every PR that touched the file. It now builds a context
+  (`env`, `fetch`, the clock, log, store, the configuration loader, the
+  NVIDIA pacing guard and the key-verdict reporter) and binds the public
+  surface to it; chain resolution, `callWithFailover`, the per-provider
+  callers and the generate calls take `ctx` as their first argument. Two of
+  the hoisted functions were over the threshold on their own, so the
+  OpenAI-compatible request body, the grounded call's usage row and its
+  completion check are their own functions. In the touched code no function
+  has more than three returns and none is above complexity 18 by ESLint's
+  rule. Key handling, the `CONTENTFORGE_AI_PROVIDER` pin, per-feature
+  placement and routing, failover order, retry and time budgets are
+  unchanged: `router.test.js`, `sync-budgets.test.js`,
+  `ai-call-sites.test.js`, `nvidia-provider.test.js` and
+  `probe-ai-providers.test.js` pass without edits (4,604 backend tests in
+  all).
+
 - **NVIDIA's setup note and the seeding reference warn that a fresh key is
   refused for a while (#701).** On 2026-10-04 a key seeded at 08:02 UTC got
   `403 Authorization failed` from the app at 1, 12 and 13 minutes, the same
