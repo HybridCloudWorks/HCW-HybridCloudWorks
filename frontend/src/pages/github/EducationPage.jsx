@@ -1,10 +1,9 @@
 import React, { useState } from 'react';
 import { Helmet } from 'react-helmet-async';
-import CatalogueFreshness from '@/components/education/CatalogueFreshness';
-import CertificationBrowser from '@/components/education/CertificationBrowser';
+import CertificationCarouselSection from '@/components/education/CertificationCarouselSection';
+import { useCertificationCarousel } from '@/components/education/useCertificationCarousel';
 import FeaturedCertSection from '@/components/education/FeaturedCertSection';
 import { DATA_AS_OF, DATA_SOURCE, certifications } from '@/data/github/certifications';
-import { deriveStatus, useToday } from '@/lib/certStatus';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -36,6 +35,8 @@ const VISIBLE_COUNT = 4;
 // The hub's colour classes, handed to the shared education components so
 // their markup names no colour. Full class strings, so Tailwind sees them.
 const TONE = {
+  headingIcon: 'text-slate-300',
+  activeDot: 'bg-slate-400',
   activeFilter: 'bg-slate-500/25 border-slate-400 text-slate-300',
   cardHover: 'hover:shadow-[0_0_20px_rgba(148,163,184,0.12)] hover:border-slate-400/40',
   titleHover: 'group-hover:text-slate-300',
@@ -184,37 +185,15 @@ const resources = [
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function GitHubEducationPage() {
-  const [levelFilter, setLevelFilter] = useState('All');
-  const [statusFilter, setStatusFilter] = useState('All');
-  const [carouselPage, setCarouselPage] = useState(0);
   const [selectedPathId, setSelectedPathId] = useState(0);
-  const today = useToday(DATA_AS_OF);
+  const carousel = useCertificationCarousel(certifications, {
+    visibleCount: VISIBLE_COUNT,
+    asOf: DATA_AS_OF,
+  });
 
   const featuredCert = certifications.find((c) => c.featured);
 
-  const filteredCerts = certifications.filter((c) => {
-    const levelOk = levelFilter === 'All' || c.level === levelFilter;
-    const statusOk =
-      statusFilter === 'All' || deriveStatus(c, today) === statusFilter.toLowerCase();
-    return levelOk && statusOk;
-  });
-
-  const totalPages = Math.ceil(filteredCerts.length / VISIBLE_COUNT);
-  const visibleCerts = filteredCerts.slice(
-    carouselPage * VISIBLE_COUNT,
-    carouselPage * VISIBLE_COUNT + VISIBLE_COUNT
-  );
-
   const selectedPath = learningPaths[selectedPathId];
-
-  const handleLevelFilter = (l) => {
-    setLevelFilter(l);
-    setCarouselPage(0);
-  };
-  const handleStatusFilter = (s) => {
-    setStatusFilter(s);
-    setCarouselPage(0);
-  };
 
   return (
     <>
@@ -334,81 +313,16 @@ export default function GitHubEducationPage() {
         </section>
 
         {/* ── Browse Certifications Carousel ───────────────────────────── */}
-        <section className="mb-16">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-            <div>
-              <h3 className="text-2xl font-bold text-slate-950 dark:text-white flex items-center gap-2">
-                <span
-                  className="text-slate-300 text-[24px] material-symbols-outlined"
-                  aria-hidden="true"
-                >
-                  school
-                </span>
-                Browse Certifications
-              </h3>
-              <CatalogueFreshness asOf={DATA_AS_OF} source={DATA_SOURCE} className="mt-1" />
-            </div>
-          </div>
-
-          <CertificationBrowser
-            filterLevels={FILTER_LEVELS}
-            statusFilters={STATUS_FILTER}
-            levelFilter={levelFilter}
-            statusFilter={statusFilter}
-            onLevelFilter={handleLevelFilter}
-            onStatusFilter={handleStatusFilter}
-            getLevelFilterClass={getLevelFilterClass}
-            levelMeta={LEVEL_META}
-            certs={visibleCerts}
-            today={today}
-            tone={TONE}
-          />
-
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-center gap-3 mt-6">
-              <button
-                onClick={() => setCarouselPage((p) => Math.max(0, p - 1))}
-                disabled={carouselPage === 0}
-                aria-label="Previous page"
-                className="h-9 w-9 bg-card/40 hover:bg-card/60 disabled:opacity-30 border border-card/50 rounded-lg flex items-center justify-center transition-colors"
-              >
-                <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
-                  chevron_left
-                </span>
-              </button>
-              {Array.from({ length: totalPages }).map((_, i) => (
-                <button
-                  key={i}
-                  onClick={() => setCarouselPage(i)}
-                  aria-label={`Page ${i + 1} of ${totalPages}`}
-                  aria-current={i === carouselPage ? 'true' : undefined}
-                  className="group flex h-6 min-w-6 items-center justify-center rounded-full"
-                >
-                  <span
-                    aria-hidden="true"
-                    className={`block h-2.5 rounded-full transition-all ${i === carouselPage ? 'bg-slate-400 w-5' : 'w-2.5 bg-card/60 group-hover:bg-card/80'}`}
-                  />
-                </button>
-              ))}
-              <button
-                onClick={() => setCarouselPage((p) => Math.min(totalPages - 1, p + 1))}
-                disabled={carouselPage === totalPages - 1}
-                aria-label="Next page"
-                className="h-9 w-9 bg-card/40 hover:bg-card/60 disabled:opacity-30 border border-card/50 rounded-lg flex items-center justify-center transition-colors"
-              >
-                <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
-                  chevron_right
-                </span>
-              </button>
-              <span className="text-xs text-foreground/50 ml-2">
-                {carouselPage * VISIBLE_COUNT + 1}–
-                {Math.min((carouselPage + 1) * VISIBLE_COUNT, filteredCerts.length)} of{' '}
-                {filteredCerts.length}
-              </span>
-            </div>
-          )}
-        </section>
+        <CertificationCarouselSection
+          asOf={DATA_AS_OF}
+          source={DATA_SOURCE}
+          filterLevels={FILTER_LEVELS}
+          statusFilters={STATUS_FILTER}
+          levelMeta={LEVEL_META}
+          getLevelFilterClass={getLevelFilterClass}
+          tone={TONE}
+          carousel={carousel}
+        />
 
         {/* ── Featured Cert + Sidebar ──────────────────────────────────── */}
         <FeaturedCertSection

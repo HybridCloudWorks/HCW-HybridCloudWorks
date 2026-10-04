@@ -32,6 +32,9 @@ const storeOf = (rows) => ({
   }),
 });
 
+/** A newsletter issue as the collector reads it: its id, status, subject and the instants that place it. */
+const issueRow = (id, status, subject, when) => ({ id, status, subject, ...when });
+
 describe('toInstant', () => {
   it('reads a calendar date as an all-day UTC midnight and an ISO instant as timed', () => {
     expect(toInstant('2026-10-05')).toEqual({
@@ -110,25 +113,14 @@ describe('collectors', () => {
   it('newsletter: scheduled by scheduledAt, sent by sentAt, drafts never', async () => {
     const store = storeOf({
       newsletters: [
-        {
-          id: 'issue-2026-10-06',
-          status: 'scheduled',
-          subject: 'Next',
+        issueRow('issue-2026-10-06', 'scheduled', 'Next', {
           scheduledAt: '2026-10-06T14:00:00.000Z',
-        },
-        {
-          id: 'issue-2026-09-29',
-          status: 'sent',
-          subject: 'Last',
+        }),
+        issueRow('issue-2026-09-29', 'sent', 'Last', {
           sentAt: '2026-10-01T14:00:00.000Z',
           scheduledAt: '2026-09-29T14:00:00.000Z',
-        },
-        {
-          id: 'issue-2026-10-07',
-          status: 'draft',
-          subject: 'Draft',
-          scheduledAt: '2026-10-07T14:00:00.000Z',
-        },
+        }),
+        issueRow('issue-2026-10-07', 'draft', 'Draft', { scheduledAt: '2026-10-07T14:00:00.000Z' }),
       ],
     });
     const items = await collectNewsletterIssues({ store, from: FROM, to: TO });

@@ -151,6 +151,68 @@ export function configuredModelFor(docs, provider) {
   return model || null;
 }
 
+/** What an unreadable or absent configuration reads as: nothing known. */
+const EMPTY = Object.freeze({
+  providers: null,
+  features: null,
+  routing: null,
+});
+
+/** The three documents, read together and normalised. */
+async function readAiConfig(store) {
+  const [providers, features, routing] = await Promise.all([
+    store.queryDocs(PROVIDERS_CONTAINER, 'SELECT * FROM c'),
+    store.readDoc(SETTINGS_CONTAINER, FEATURES_DOC_ID, FEATURES_DOC_ID),
+    // Per-task routing (ADR 0033). A missing document is "no routes", which
+    // is the global order — the same answer every call got before routing.
+    store.readDoc(SETTINGS_CONTAINER, ROUTING_DOC_ID, ROUTING_DOC_ID),
+  ]);
+  return {
+    providers: Array.isArray(providers) ? providers : [],
+    features: features || null,
+    routing: routing ? normalizeRouting(routing) : null,
+  };
+}
+
+/** A successful read: cached from now, and the in-flight slot freed. */
+function settleRead(state, now, value) {
+  state.cache = { at: now(), value };
+  state.inflight = null;
+  return value;
+}
+
+/**
+ * A failed read. Stale beats nothing: an administrator's disable stays in
+ * force through a Cosmos blip rather than silently reverting to "everything
+ * on", so the cached value is re-stamped and served; with no cache, EMPTY.
+ */
+function recoverFromFailedRead(state, { now, log }, error) {
+  state.inflight = null;
+  log.warn?.(`[ai-config] could not read AI configuration: ${error?.message || error}`);
+  if (state.cache) {
+    state.cache = { at: now(), value: state.cache.value };
+    return state.cache.value;
+  }
+  return EMPTY;
+}
+
+/**
+ * The configuration, from the cache while it is fresh, else from one shared
+ * read: concurrent callers during a refresh await the same promise.
+ */
+function loadAiConfig(state, deps) {
+  const { store, ttlMs, now } = deps;
+  if (!store) return EMPTY;
+  if (state.cache && now() - state.cache.at < ttlMs) return state.cache.value;
+  if (!state.inflight) {
+    state.inflight = readAiConfig(store).then(
+      (value) => settleRead(state, now, value),
+      (error) => recoverFromFailedRead(state, deps, error)
+    );
+  }
+  return state.inflight;
+}
+
 /**
  * Reads both documents, cached, with a stale-over-nothing failure policy.
  *
@@ -166,55 +228,10 @@ export function createAiConfigLoader({
   now = () => Date.now(),
   log = console,
 } = {}) {
-  const EMPTY = Object.freeze({
-    providers: null,
-    features: null,
-    routing: null,
-  });
-
-  let cache = null; // { at, value }
-  let inflight = null;
-
-  async function read() {
-    const [providers, features, routing] = await Promise.all([
-      store.queryDocs(PROVIDERS_CONTAINER, 'SELECT * FROM c'),
-      store.readDoc(SETTINGS_CONTAINER, FEATURES_DOC_ID, FEATURES_DOC_ID),
-      // Per-task routing (ADR 0033). A missing document is "no routes", which
-      // is the global order — the same answer every call got before routing.
-      store.readDoc(SETTINGS_CONTAINER, ROUTING_DOC_ID, ROUTING_DOC_ID),
-    ]);
-    return {
-      providers: Array.isArray(providers) ? providers : [],
-      features: features || null,
-      routing: routing ? normalizeRouting(routing) : null,
-    };
-  }
-
-  async function load() {
-    if (!store) return EMPTY;
-    if (cache && now() - cache.at < ttlMs) return cache.value;
-    if (inflight) return inflight;
-
-    inflight = read().then(
-      (value) => {
-        cache = { at: now(), value };
-        inflight = null;
-        return value;
-      },
-      (error) => {
-        inflight = null;
-        log.warn?.(`[ai-config] could not read AI configuration: ${error?.message || error}`);
-        // Stale beats nothing: an administrator's disable stays in force through
-        // a Cosmos blip rather than silently reverting to "everything on".
-        if (cache) {
-          cache = { at: now(), value: cache.value };
-          return cache.value;
-        }
-        return EMPTY;
-      }
-    );
-    return inflight;
-  }
-
-  return { load, invalidate: () => (cache = null) };
+  const state = { cache: null, inflight: null }; // cache: { at, value }
+  const deps = { store, ttlMs, now, log };
+  return {
+    load: async () => loadAiConfig(state, deps),
+    invalidate: () => (state.cache = null),
+  };
 }

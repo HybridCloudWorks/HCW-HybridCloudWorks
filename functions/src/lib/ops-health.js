@@ -50,42 +50,73 @@ export function getWorkflowAlertStatus(alert = {}) {
   return alert.status || (alert.active === false ? 'resolved' : 'open');
 }
 
-/** Per-action update payload for a workflow_alert doc (source :5907). */
-export function buildWorkflowAlertUpdates({
-  action,
-  nowIso,
-  actor,
-  normalizedResolutionNote,
-  alertData,
-}) {
-  const updates = { updatedAt: nowIso, updatedBy: actor };
-  if (action === 'acknowledge') {
-    updates.acknowledgedAt = nowIso;
-    updates.acknowledgedBy = actor;
-    updates.status = 'acknowledged';
-  } else if (action === 'resolve') {
-    updates.active = false;
-    updates.resolvedAt = nowIso;
-    updates.resolvedBy = actor;
-    updates.status = 'resolved';
-    updates.resolutionNote = normalizedResolutionNote;
+/**
+ * What each action writes onto a workflow_alert doc, beside the updatedAt /
+ * updatedBy stamp every action carries (source :5907). The keys are the
+ * actions updateWorkflowAlert accepts.
+ */
+const WORKFLOW_ALERT_ACTION_UPDATES = Object.freeze({
+  acknowledge: ({ nowIso, actor }) => ({
+    acknowledgedAt: nowIso,
+    acknowledgedBy: actor,
+    status: 'acknowledged',
+  }),
+  resolve: ({ nowIso, actor, normalizedResolutionNote, alertData }) => ({
+    active: false,
+    resolvedAt: nowIso,
+    resolvedBy: actor,
+    status: 'resolved',
+    resolutionNote: normalizedResolutionNote,
     // Cleared on resolve so the alert's next activation announces again
     // (lib/triggers/activation-notice.js).
-    updates.activationNotifiedAt = null;
-    if (!alertData?.acknowledgedAt) {
-      updates.acknowledgedAt = nowIso;
-      updates.acknowledgedBy = actor;
-    }
-  } else if (action === 'reopen') {
-    updates.active = true;
-    updates.status = 'open';
-    updates.resolvedAt = null;
-    updates.resolvedBy = null;
-    updates.resolutionNote = null;
+    activationNotifiedAt: null,
+    // Resolving an alert nobody acknowledged acknowledges it in the same write.
+    ...(alertData?.acknowledgedAt ? {} : { acknowledgedAt: nowIso, acknowledgedBy: actor }),
+  }),
+  reopen: () => ({
+    active: true,
+    status: 'open',
+    resolvedAt: null,
+    resolvedBy: null,
+    resolutionNote: null,
     // Reopen must announce: cleared in the same write that sets active.
-    updates.activationNotifiedAt = null;
+    activationNotifiedAt: null,
+  }),
+});
+
+/** The actions updateWorkflowAlert accepts, as its 400 lists them. */
+export const WORKFLOW_ALERT_ACTIONS = Object.freeze(Object.keys(WORKFLOW_ALERT_ACTION_UPDATES));
+
+/** Per-action update payload for a workflow_alert doc (source :5907). */
+export function buildWorkflowAlertUpdates(change) {
+  const { action, nowIso, actor } = change;
+  const forAction = Object.hasOwn(WORKFLOW_ALERT_ACTION_UPDATES, action)
+    ? WORKFLOW_ALERT_ACTION_UPDATES[action](change)
+    : {};
+  return { updatedAt: nowIso, updatedBy: actor, ...forAction };
+}
+
+/**
+ * The 400 an updateWorkflowAlert body earns before the alert is read, or
+ * null: both ids present, an action from the table, and a resolution note
+ * when resolving.
+ */
+export function alertUpdateRefusal({ alertId, action, normalizedResolutionNote }) {
+  if (!alertId || !action) {
+    return json(400, { error: 'alertId and action required' });
   }
-  return updates;
+  if (!WORKFLOW_ALERT_ACTIONS.includes(action)) {
+    return json(400, {
+      error: 'Invalid action',
+      validActions: [...WORKFLOW_ALERT_ACTIONS],
+    });
+  }
+  if (action === 'resolve' && !normalizedResolutionNote) {
+    return json(400, {
+      error: 'resolutionNote is required when resolving an alert',
+    });
+  }
+  return null;
 }
 
 const IMAGES_PROBE_BOUND = 2000;
@@ -355,20 +386,8 @@ export function createOpsHealthHandlers({
         const body = (await request.json().catch(() => null)) || {};
         const { alertId, action, resolutionNote = '' } = body;
         const normalizedResolutionNote = String(resolutionNote || '').trim();
-        if (!alertId || !action) {
-          return json(400, { error: 'alertId and action required' });
-        }
-        if (!['acknowledge', 'resolve', 'reopen'].includes(action)) {
-          return json(400, {
-            error: 'Invalid action',
-            validActions: ['acknowledge', 'resolve', 'reopen'],
-          });
-        }
-        if (action === 'resolve' && !normalizedResolutionNote) {
-          return json(400, {
-            error: 'resolutionNote is required when resolving an alert',
-          });
-        }
+        const refused = alertUpdateRefusal({ alertId, action, normalizedResolutionNote });
+        if (refused) return refused;
 
         const alertData = await store.readDoc('workflow_alerts', alertId, alertId);
         if (!alertData) {

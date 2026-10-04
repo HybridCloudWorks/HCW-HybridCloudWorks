@@ -41,6 +41,29 @@ import { enqueueForgeBatches, forgeFailureMessage, forgeQueuedMessage } from './
 
 export { FORGE_MAX_BATCH } from './forgeSelected';
 
+/** `prev` with `id` toggled: removed when present, added when not. */
+export function toggleId(prev, id) {
+  const next = new Set(prev);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  return next;
+}
+
+/**
+ * Header select-all over the ids currently on screen: everything visible
+ * selected → clear, anything unselected → select all visible.
+ */
+export function toggleAllIds(prev, visibleIds) {
+  const ids = (visibleIds || []).filter(Boolean);
+  const allSelected = ids.length > 0 && ids.every((id) => prev.has(id));
+  return allSelected ? new Set() : new Set(ids);
+}
+
+/** The selected ids that are still on screen; a stale selection acts on nothing. */
+export function selectedOnScreen(selectedIds, items) {
+  return Array.from(selectedIds).filter((id) => items.some((it) => it.id === id));
+}
+
 /** Two per-item maps as one: a value in `b` wins unless it is null/undefined. */
 function mergeItemMaps(a, b) {
   const merged = { ...a };
@@ -85,26 +108,14 @@ export function useQueueActions({ items, setItems, statusFilter, contentTypeFilt
     setSelectedIds(new Set());
   }, [statusFilter, contentTypeFilter]);
 
-  const toggleSelected = useCallback((id) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
+  const toggleSelected = useCallback((id) => setSelectedIds((prev) => toggleId(prev, id)), []);
 
-  // Header select-all over the ids currently on screen: everything visible
-  // selected → clear, anything unselected → select all visible. Operates on
-  // the caller-supplied visible ids rather than `items` so a sorted or
-  // paged view selects exactly what the admin is looking at.
-  const toggleSelectAll = useCallback((visibleIds) => {
-    setSelectedIds((prev) => {
-      const ids = (visibleIds || []).filter(Boolean);
-      const allSelected = ids.length > 0 && ids.every((id) => prev.has(id));
-      return allSelected ? new Set() : new Set(ids);
-    });
-  }, []);
+  // Operates on the caller-supplied visible ids rather than `items` so a
+  // sorted or paged view selects exactly what the admin is looking at.
+  const toggleSelectAll = useCallback(
+    (visibleIds) => setSelectedIds((prev) => toggleAllIds(prev, visibleIds)),
+    []
+  );
 
   const [forgingSelected, setForgingSelected] = useState(false);
   const [forgeMessage, setForgeMessage] = useState(null);
@@ -115,7 +126,7 @@ export function useQueueActions({ items, setItems, statusFilter, contentTypeFilt
    * chunks by forgeSelected.js; this is the state around that run.
    */
   const handleForgeSelected = async () => {
-    const ids = Array.from(selectedIds).filter((id) => items.some((it) => it.id === id));
+    const ids = selectedOnScreen(selectedIds, items);
     if (ids.length === 0) return;
     setForgingSelected(true);
     setForgeError(null);
@@ -134,9 +145,8 @@ export function useQueueActions({ items, setItems, statusFilter, contentTypeFilt
   };
 
   const handleBulkReject = () => {
-    const ids = Array.from(selectedIds).filter((id) => items.some((it) => it.id === id));
-    if (ids.length < 2) return;
-    setConfirmTarget({ type: 'bulkReject', ids });
+    const ids = selectedOnScreen(selectedIds, items);
+    if (ids.length >= 2) setConfirmTarget({ type: 'bulkReject', ids });
   };
 
   const doBulkReject = async (ids) => {
@@ -191,11 +201,8 @@ export function useQueueActions({ items, setItems, statusFilter, contentTypeFilt
   };
 
   const handleDeleteRejectedNow = () => {
-    if (statusFilter !== 'rejected') {
-      setBulkDeleteError('Switch the filter to Rejected to bulk delete those items.');
-      return;
-    }
-    setConfirmTarget({ type: 'bulkDelete' });
+    if (statusFilter === 'rejected') setConfirmTarget({ type: 'bulkDelete' });
+    else setBulkDeleteError('Switch the filter to Rejected to bulk delete those items.');
   };
 
   const doBulkDelete = async () => {
@@ -269,12 +276,14 @@ export function useQueueActions({ items, setItems, statusFilter, contentTypeFilt
   const handleConfirm = async () => {
     const target = confirmTarget;
     setConfirmTarget(null);
-    if (!target) return;
-    if (target.type === 'reject') await doReject(target.id);
-    else if (target.type === 'bulkDelete') await doBulkDelete();
-    else if (target.type === 'bulkReject') await doBulkReject(target.ids || []);
-    else if (target.type === 'restore') await doRestore(target.id);
-    else if (target.type === 'deleteRejected') await doPermanentDelete(target.id);
+    const run = {
+      reject: () => doReject(target.id),
+      bulkDelete: () => doBulkDelete(),
+      bulkReject: () => doBulkReject(target.ids || []),
+      restore: () => doRestore(target.id),
+      deleteRejected: () => doPermanentDelete(target.id),
+    };
+    if (target) await run[target.type]?.();
   };
 
   const handleReinspect = async (contentId) => {

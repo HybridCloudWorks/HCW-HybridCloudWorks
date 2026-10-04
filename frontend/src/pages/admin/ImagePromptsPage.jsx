@@ -11,7 +11,7 @@
  * `?set=NAME` opens a set, which is how the gallery and the review board
  * link here.
  */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { Image as ImageIcon, Plus, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -23,6 +23,12 @@ import PromptSetEditor from '@/components/admin/images/PromptSetEditor';
 import KeywordMatrixPanel from '@/components/admin/KeywordMatrixPanel';
 import { useImagePrompts } from '@/hooks/useImagePrompts';
 import { useToast } from '@/components/ui/use-toast';
+import {
+  buildSetHandlers,
+  filterSets,
+  indexPageAssignments,
+  usePromptLibrary,
+} from './imagePrompts/libraryState';
 
 const HELP = [
   'An image set is a creative brief: a shared primary prompt, style rules, what to avoid, an aspect ratio and tags. Everything generated from it looks like it belongs together.',
@@ -166,73 +172,27 @@ export default function ImagePromptsPage() {
   const { toast } = useToast();
   const navigate = useNavigate();
   const location = useLocation();
-  const {
-    fetchPromptLibrary,
-    savePromptSet,
-    deletePromptSet,
-    savePrompt,
-    deletePrompt,
-    savePageAssignment,
-    duplicatePromptSet,
-    renamePromptSet,
-    archivePromptSet,
-    restorePromptSet,
-    generateSetSample,
-    loading,
-    error: hookError,
-  } = useImagePrompts();
+  const api = useImagePrompts();
+  const { fetchPromptLibrary, loading, error: hookError } = api;
 
-  const [library, setLibrary] = useState(null);
-  const [loadError, setLoadError] = useState('');
+  const { library, loadError, refresh } = usePromptLibrary(fetchPromptLibrary);
   const [query, setQuery] = useState('');
   const [showArchived, setShowArchived] = useState(false);
   const [openName, setOpenName] = useState(
     () => new URLSearchParams(location.search).get('set') || ''
   );
   const [creating, setCreating] = useState(false);
-  const [generation, setGeneration] = useState(0);
 
-  useEffect(() => {
-    let cancelled = false;
-    fetchPromptLibrary().then((next) => {
-      if (cancelled) return;
-      if (next) {
-        setLibrary(next);
-        setLoadError('');
-      } else {
-        setLoadError('The prompt library could not be read.');
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [fetchPromptLibrary, generation]);
-
-  const refresh = useCallback(() => setGeneration((g) => g + 1), []);
   const sets = useMemo(() => library?.sets || [], [library]);
   const openSet = useMemo(
     () => sets.find((set) => set.name === openName) || null,
     [sets, openName]
   );
-  const pageAssignments = useMemo(() => {
-    const map = {};
-    for (const set of sets) {
-      for (const page of set.pages)
-        map[page.pagePath] = { setName: set.name, promptName: page.promptName };
-    }
-    return map;
-  }, [sets]);
-  const visibleSets = useMemo(() => {
-    const term = query.trim().toLowerCase();
-    return sets.filter((set) => {
-      if (!showArchived && set.archivedAt) return false;
-      if (!term) return true;
-      return [set.name, set.purpose, set.theme, set.primaryPrompt, set.tags.join(' ')]
-        .join(' ')
-        .toLowerCase()
-        .includes(term);
-    });
-  }, [sets, query, showArchived]);
+  const pageAssignments = useMemo(() => indexPageAssignments(sets), [sets]);
+  const visibleSets = useMemo(
+    () => filterSets(sets, query, showArchived),
+    [sets, query, showArchived]
+  );
   const archivedCount = sets.filter((set) => set.archivedAt).length;
 
   const open = (name) => {
@@ -241,113 +201,8 @@ export default function ImagePromptsPage() {
     const search = name ? `?set=${encodeURIComponent(name)}` : '';
     navigate(`${location.pathname}${search}`, { replace: true });
   };
-  const ok = (title, description) => toast({ title, description });
-  const bad = (title, description) => toast({ title, description, variant: 'destructive' });
 
-  /** Run a write; on success say so and reload; on failure show the hook's error. */
-  const act = async (work, success, failure) => {
-    const result = await work();
-    if (result) {
-      ok(success.title, success.description);
-      refresh();
-    } else {
-      bad(failure, hookError || 'The server did not accept the change.');
-    }
-    return result;
-  };
-
-  const handlers = {
-    onSaveSet: (name, fields) =>
-      act(
-        () => savePromptSet(name, fields),
-        { title: 'Set saved', description: `"${name}" updated.` },
-        'Set not saved'
-      ),
-    onCreateSet: async (name, fields) => {
-      const saved = await act(
-        () => savePromptSet(name, fields),
-        { title: 'Set created', description: `"${name}" is ready for prompts and pages.` },
-        'Set not created'
-      );
-      if (saved) open(name);
-    },
-    onDeleteSet: async (name) => {
-      const done = await act(
-        () => deletePromptSet(name),
-        { title: 'Set deleted', description: `"${name}" and its prompts were removed.` },
-        'Set not deleted'
-      );
-      if (done) open('');
-    },
-    onArchiveSet: (name) =>
-      act(
-        () => archivePromptSet(name),
-        {
-          title: 'Set archived',
-          description: `"${name}" is hidden from generators; its pages are unassigned.`,
-        },
-        'Set not archived'
-      ),
-    onRestoreSet: (name) =>
-      act(
-        () => restorePromptSet(name),
-        { title: 'Set restored', description: `"${name}" can be assigned again.` },
-        'Set not restored'
-      ),
-    onDuplicateSet: async (name, newName) => {
-      const res = await act(
-        () => duplicatePromptSet(name, newName),
-        { title: 'Set duplicated', description: `"${newName}" copied from "${name}".` },
-        'Set not duplicated'
-      );
-      if (res) open(newName);
-    },
-    onRenameSet: async (name, newName) => {
-      const res = await act(
-        () => renamePromptSet(name, newName),
-        { title: 'Set renamed', description: `"${name}" is now "${newName}".` },
-        'Set not renamed'
-      );
-      if (res) open(newName);
-    },
-    onSavePrompt: (setName, promptName, fields) =>
-      act(
-        () => savePrompt(setName, promptName, fields.additionalParameters, fields.slotTemplates),
-        { title: 'Prompt saved', description: `"${promptName}" is in "${setName}".` },
-        'Prompt not saved'
-      ),
-    onDeletePrompt: (setName, promptName) =>
-      act(
-        () => deletePrompt(setName, promptName),
-        { title: 'Prompt deleted', description: `"${promptName}" removed from "${setName}".` },
-        'Prompt not deleted'
-      ),
-    onAssignPage: (pagePath, setName, promptName) =>
-      act(
-        () => savePageAssignment(pagePath, setName, promptName),
-        setName
-          ? {
-              title: 'Page assigned',
-              description: `${pagePath} now generates with "${setName}"${promptName ? ` / ${promptName}` : ''}.`,
-            }
-          : {
-              title: 'Page unassigned',
-              description: `${pagePath} falls back to the built-in prompt.`,
-            },
-        'Assignment not saved'
-      ),
-    onGenerateSample: async (body) => {
-      const result = await generateSetSample(body);
-      ok('Sample generated', `Filed under "${body.setName}" in the gallery.`);
-      refresh();
-      return result;
-    },
-    onOpenGallery: (name) => navigate(`/admin/image-gallery?set=${encodeURIComponent(name)}`),
-    onOpenImage: (image) =>
-      navigate(
-        `/admin/image-gallery?set=${encodeURIComponent(image.promptSet || openName)}&q=${encodeURIComponent(image.id)}`
-      ),
-  };
+  const handlers = buildSetHandlers({ api, open, openName, navigate, toast, hookError, refresh });
 
   const editing = creating || Boolean(openSet);
   const body = (

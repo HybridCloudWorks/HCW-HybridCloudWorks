@@ -95,6 +95,42 @@ function parseUpdateBody(body) {
 }
 
 /**
+ * kind / ideaOrigin against the saved taxonomy (ADR 0033 §4), written onto
+ * `normalizedUpdates`. The current record is passed so a disabled id it
+ * already carries survives an edit of other fields; moving onto a disabled
+ * id is the 400 returned here. Null when nothing refuses.
+ */
+async function taxonomyRefusal(store, normalizedUpdates, currentData) {
+  if (!hasTaxonomyFields(normalizedUpdates)) return null;
+  try {
+    Object.assign(
+      normalizedUpdates,
+      await validateTaxonomyFieldsWithStore(store, normalizedUpdates, {
+        existing: currentData,
+      }),
+    );
+    return null;
+  } catch (error) {
+    if (error instanceof TaxonomyFieldError)
+      return json(400, { error: error.message });
+    throw error;
+  }
+}
+
+/**
+ * The stored document an update lands on, with the taxonomy fields of the
+ * update checked against it — or the 404 / 400 refusing the update.
+ */
+async function readUpdateTarget(store, contentId, normalizedUpdates) {
+  const currentData = await store.readDoc("content", contentId, contentId);
+  if (!currentData) {
+    return { error: json(404, { error: `Content ${contentId} not found` }) };
+  }
+  const refused = await taxonomyRefusal(store, normalizedUpdates, currentData);
+  return refused ? { error: refused } : { currentData };
+}
+
+/**
  * POST/PATCH updateContentItem — validated partial update + version history +
  * audit row. Source :3564.
  *
@@ -120,28 +156,13 @@ export function createContentUpdateHandler({
       if (parsed.error) return parsed.error;
       const { contentId, normalizedUpdates } = parsed;
 
-      const currentData = await store.readDoc("content", contentId, contentId);
-      if (!currentData) {
-        return json(404, { error: `Content ${contentId} not found` });
-      }
-
-      // kind / ideaOrigin against the saved taxonomy (ADR 0033 §4). The
-      // current record is passed so a disabled id it already carries survives
-      // an edit of other fields; moving onto a disabled id is refused.
-      if (hasTaxonomyFields(normalizedUpdates)) {
-        try {
-          Object.assign(
-            normalizedUpdates,
-            await validateTaxonomyFieldsWithStore(store, normalizedUpdates, {
-              existing: currentData,
-            }),
-          );
-        } catch (error) {
-          if (error instanceof TaxonomyFieldError)
-            return json(400, { error: error.message });
-          throw error;
-        }
-      }
+      const target = await readUpdateTarget(
+        store,
+        contentId,
+        normalizedUpdates,
+      );
+      if (target.error) return target.error;
+      const { currentData } = target;
 
       const editor = actorName(user);
       const nowIso = now().toISOString();
@@ -340,6 +361,76 @@ export function createContentStatusTransitioner({
   };
 }
 
+/** The roles that may make content live; editors stop at the review workflow. */
+const PUBLISHING_ROLES = ["publisher", "super_admin"];
+
+/**
+ * What refuses a transition request before any read: the live transition
+ * for a non-publisher (403 — the dedicated publishContent endpoint enforces
+ * the same boundary), then the request-shape rules of
+ * validateTransitionRequest. Null when nothing refuses.
+ */
+function transitionRequestRefusal(auth, { normalizedStatus, ...request }) {
+  if (
+    normalizedStatus === "published" &&
+    !PUBLISHING_ROLES.includes(String(auth.role || "").toLowerCase())
+  ) {
+    return json(403, {
+      error: "publisher access required for live publishing",
+    });
+  }
+  const validation = validateTransitionRequest({
+    ...request,
+    normalizedStatus,
+  });
+  return validation.ok ? null : json(validation.status, validation.error);
+}
+
+/**
+ * The content id a transition applies to. Older API calls pass blogId
+ * instead of contentId; the document carrying it as publishedBlogId is
+ * looked up, or the 404 says there is none.
+ */
+async function resolveTransitionTarget(store, contentId, blogId) {
+  if (contentId) return { resolvedContentId: contentId, legacyBlogId: null };
+  const rows = await store.queryDocs(
+    "content",
+    "SELECT TOP 1 c.id FROM c WHERE c.publishedBlogId = @blogId",
+    [{ name: "@blogId", value: blogId }],
+  );
+  if (rows.length === 0) {
+    return {
+      error: json(404, {
+        error: "legacy content document not found for this blogId",
+      }),
+    };
+  }
+  return { resolvedContentId: rows[0].id, legacyBlogId: blogId };
+}
+
+/** The transitioner's outcome as the handler's response, the success logged. */
+function transitionResponse(
+  context,
+  result,
+  { resolvedContentId, legacyBlogId, reviewedBy },
+) {
+  if (!result.ok) {
+    const { status, ok: _ok, ...errorBody } = result;
+    return json(status, errorBody);
+  }
+  context.warn(
+    `transitionStatus ${resolvedContentId}: ${result.from} → ${result.to} by ${reviewedBy}`,
+  );
+  return json(200, {
+    success: true,
+    contentId: resolvedContentId,
+    legacyBlogId,
+    collectionName: "content",
+    from: result.from,
+    to: result.to,
+  });
+}
+
 /**
  * POST transitionContentStatus — the state machine's single writer.
  * Source :6813.
@@ -381,20 +472,8 @@ export function createContentTransitionHandler({
       const normalizedStatus = normalizeStatusForBlogOnly(newStatus);
 
       // Editors may move content through the review workflow, but the live
-      // transition is reserved for publishers. The dedicated publishContent
-      // endpoint enforces the same boundary.
-      if (
-        normalizedStatus === "published" &&
-        !["publisher", "super_admin"].includes(
-          String(auth.role || "").toLowerCase(),
-        )
-      ) {
-        return json(403, {
-          error: "publisher access required for live publishing",
-        });
-      }
-
-      const validation = validateTransitionRequest({
+      // transition is reserved for publishers.
+      const refused = transitionRequestRefusal(auth, {
         contentId,
         blogId,
         normalizedStatus,
@@ -402,27 +481,15 @@ export function createContentTransitionHandler({
         reviewNotes,
         reviewedBy,
       });
-      if (!validation.ok) {
-        return json(validation.status, validation.error);
-      }
+      if (refused) return refused;
 
-      // Fallback for older API calls that pass blogId instead of contentId.
-      let resolvedContentId = contentId || null;
-      let legacyBlogId = null;
-      if (!resolvedContentId) {
-        const rows = await store.queryDocs(
-          "content",
-          "SELECT TOP 1 c.id FROM c WHERE c.publishedBlogId = @blogId",
-          [{ name: "@blogId", value: blogId }],
-        );
-        if (rows.length === 0) {
-          return json(404, {
-            error: "legacy content document not found for this blogId",
-          });
-        }
-        resolvedContentId = rows[0].id;
-        legacyBlogId = blogId;
-      }
+      const target = await resolveTransitionTarget(
+        store,
+        contentId || null,
+        blogId,
+      );
+      if (target.error) return target.error;
+      const { resolvedContentId, legacyBlogId } = target;
 
       const result = await applyTransition({
         contentId: resolvedContentId,
@@ -435,22 +502,10 @@ export function createContentTransitionHandler({
         userAgent: request.headers?.get?.("user-agent") || null,
         legacyBlogId,
       });
-
-      if (!result.ok) {
-        const { status, ok: _ok, ...errorBody } = result;
-        return json(status, errorBody);
-      }
-
-      context.warn(
-        `transitionStatus ${resolvedContentId}: ${result.from} → ${result.to} by ${reviewedBy}`,
-      );
-      return json(200, {
-        success: true,
-        contentId: resolvedContentId,
+      return transitionResponse(context, result, {
+        resolvedContentId,
         legacyBlogId,
-        collectionName: "content",
-        from: result.from,
-        to: result.to,
+        reviewedBy,
       });
     } catch (error) {
       context.error("transitionContentStatus failed:", error);

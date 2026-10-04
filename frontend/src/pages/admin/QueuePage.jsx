@@ -12,17 +12,23 @@ import TaxonomyPicker from '@/components/admin/shared/TaxonomyPicker';
 import { useTaxonomy } from '@/components/admin/shared/useTaxonomy';
 import { enabledEntries } from '@/lib/taxonomy';
 import {
-  forgedTodayFromStats,
   formatPublishedDate,
   getConfirmModalCopy,
   getRootDomain,
   SORT_OPTIONS,
-  sortQueueItems,
   sortQueueItemsBy,
 } from './queue/itemHelpers';
 import { QueueList } from './queue/QueueList';
 import { CONTENT_TYPE_OPTIONS, STATUS_FILTERS } from './queue/constants';
 import { useQueueActions } from './queue/useQueueActions';
+import { useForgeMeter, useQueueSnapshot } from './queue/useQueueData';
+import {
+  buildQueueSearchParams,
+  PAGE_SIZES,
+  readPageSize,
+  readSortDirection,
+  readSortKey,
+} from './queue/viewParams';
 import {
   XCircle,
   RefreshCw,
@@ -312,9 +318,6 @@ export default function QueuePage() {
   const navigate = useNavigate();
   const { authReady } = useAuthReady();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [items, setItems] = useState([]);
-  const [totalCount, setTotalCount] = useState(0);
-  const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || 'needs_review');
   const [contentTypeFilter, setContentTypeFilter] = useState(
     searchParams.get('contentType') || 'all'
@@ -322,20 +325,18 @@ export default function QueuePage() {
   const [kindFilter, setKindFilter] = useState(searchParams.get('kind') || 'all');
   const [ideaOriginFilter, setIdeaOriginFilter] = useState(searchParams.get('ideaOrigin') || 'all');
   const { taxonomy } = useTaxonomy();
-  const [sortKey, setSortKey] = useState(() => {
-    const v = searchParams.get('sort');
-    return v && SORT_OPTIONS[v] ? v : 'published';
+  const [sortKey, setSortKey] = useState(() => readSortKey(searchParams));
+  const [sortDirection, setSortDirection] = useState(() => readSortDirection(searchParams));
+  const [pageSize, setPageSize] = useState(() => readPageSize(searchParams));
+  const { items, setItems, totalCount, loading, loadError } = useQueueSnapshot({
+    authReady,
+    statusFilter,
+    contentTypeFilter,
+    kindFilter,
+    ideaOriginFilter,
+    pageSize,
   });
-  const [sortDirection, setSortDirection] = useState(() => {
-    const v = searchParams.get('dir');
-    return v === 'asc' ? 'asc' : 'desc';
-  });
-  const [loadError, setLoadError] = useState(null);
-  const [forgeMeter, setForgeMeter] = useState(null);
-  const [pageSize, setPageSize] = useState(() => {
-    const fromUrl = Number(searchParams.get('pageSize'));
-    return [50, 100, 200].includes(fromUrl) ? fromUrl : 100;
-  });
+  const forgeMeter = useForgeMeter(authReady);
   const {
     actionLoading,
     actionError,
@@ -373,40 +374,18 @@ export default function QueuePage() {
   const confirmModalPreview = <BulkRejectPreview confirmTarget={confirmTarget} items={items} />;
 
   useEffect(() => {
-    if (!authReady) return;
-    async function loadItems() {
-      setLoading(true);
-      setLoadError(null);
-      try {
-        const result = await postJSON('getQueueSnapshot', {
-          statusFilter,
-          contentTypeFilter,
-          kindFilter,
-          ideaOriginFilter,
-          itemLimit: pageSize,
-        });
-        setItems((result.items || []).sort(sortQueueItems));
-        setTotalCount(result.totalCount || 0);
-      } catch (err) {
-        console.error('Error loading queue:', err);
-        setLoadError(err.message || 'Failed to load queue items.');
-      } finally {
-        setLoading(false);
-      }
-    }
-    loadItems();
-  }, [authReady, statusFilter, contentTypeFilter, kindFilter, ideaOriginFilter, pageSize]);
-
-  useEffect(() => {
-    const next = new URLSearchParams();
-    next.set('status', statusFilter);
-    next.set('contentType', contentTypeFilter);
-    if (kindFilter !== 'all') next.set('kind', kindFilter);
-    if (ideaOriginFilter !== 'all') next.set('ideaOrigin', ideaOriginFilter);
-    next.set('pageSize', String(pageSize));
-    next.set('sort', sortKey);
-    next.set('dir', sortDirection);
-    setSearchParams(next, { replace: true });
+    setSearchParams(
+      buildQueueSearchParams({
+        statusFilter,
+        contentTypeFilter,
+        kindFilter,
+        ideaOriginFilter,
+        pageSize,
+        sortKey,
+        sortDirection,
+      }),
+      { replace: true }
+    );
   }, [
     statusFilter,
     contentTypeFilter,
@@ -417,29 +396,6 @@ export default function QueuePage() {
     sortDirection,
     setSearchParams,
   ]);
-
-  // The forged-today meter (T-607). Best effort: a failed read leaves the
-  // header without a meter rather than without a queue.
-  useEffect(() => {
-    if (!authReady) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const config = await postJSON('getForgeConfig', {});
-        if (cancelled || !config?.ok) return;
-        setForgeMeter({
-          forged: forgedTodayFromStats(config.stats),
-          limit: Number(config.prompts?.autoForge?.dailyLimit) || 0,
-          enabled: Boolean(config.prompts?.autoForge?.enabled),
-        });
-      } catch {
-        // No meter; the queue itself is unaffected.
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [authReady]);
 
   return (
     <div className="space-y-6 max-w-5xl">
@@ -581,7 +537,7 @@ export default function QueuePage() {
             <div>
               <Label className="text-xs">Show per page</Label>
               <div className="flex flex-wrap gap-2 mt-2">
-                {[50, 100, 200].map((size) => (
+                {PAGE_SIZES.map((size) => (
                   <Button
                     key={size}
                     variant={pageSize === size ? 'default' : 'outline'}

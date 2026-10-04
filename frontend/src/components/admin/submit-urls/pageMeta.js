@@ -226,3 +226,17 @@ export function buildReadinessChecks({
     },
   ];
 }
+
+/**
+ * The id the builder files its preview images under: `preview-<ms>-<8 hex>`,
+ * unique per page load so two builders open at once never share a gallery.
+ */
+export function createPreviewSessionId(now = Date.now()) {
+  const rand =
+    typeof globalThis.crypto?.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID().slice(0, 8)
+      : Array.from(globalThis.crypto.getRandomValues(new Uint8Array(4)), (b) =>
+          b.toString(16).padStart(2, '0')
+        ).join('');
+  return `preview-${now}-${rand}`;
+}

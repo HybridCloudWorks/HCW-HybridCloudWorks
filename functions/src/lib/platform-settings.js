@@ -923,6 +923,25 @@ const auditDetailsForLog = (details) =>
     : { ...details, templateId: details.templateId ? '[set]' : null };
 
 /**
+ * A PUT body as the value the setting stores, or the 400 refusing it: not a
+ * JSON object (or past MAX_BODY_JSON), then whatever the spec's normalizer
+ * refuses. Any other error the normalizer throws is the handler's 500.
+ */
+function normalizedSettingValue(spec, body) {
+  if (!isPlainObject(body) || JSON.stringify(body).length > MAX_BODY_JSON) {
+    return { error: json(400, { error: 'Body must be a JSON object' }) };
+  }
+  try {
+    return { value: spec.normalize(body) };
+  } catch (error) {
+    if (error instanceof PlatformSettingValidationError) {
+      return { error: json(400, { error: error.message }) };
+    }
+    throw error;
+  }
+}
+
+/**
  * GET /api/cms/platform-settings/history?setting=&limit=&after=
  *
  * The `platform_setting_updated` audit rows, newest first. Editor, the same
@@ -1021,20 +1040,9 @@ export function createPlatformSettingsHandlers({
       const spec = resolve(request);
       if (!spec) return json(404, { error: 'Unknown platform setting' });
 
-      const body = await request.json().catch(() => null);
-      if (!isPlainObject(body) || JSON.stringify(body).length > MAX_BODY_JSON) {
-        return json(400, { error: 'Body must be a JSON object' });
-      }
-
-      let value;
-      try {
-        value = spec.normalize(body);
-      } catch (error) {
-        if (error instanceof PlatformSettingValidationError) {
-          return json(400, { error: error.message });
-        }
-        throw error;
-      }
+      const parsed = normalizedSettingValue(spec, await request.json().catch(() => null));
+      if (parsed.error) return parsed.error;
+      const { value } = parsed;
 
       try {
         const updatedAt = now().toISOString();

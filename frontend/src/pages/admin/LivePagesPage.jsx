@@ -8,16 +8,22 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { getCanonicalContentType } from '@/lib/contentModel';
 import ConfirmModal from '@/components/admin/ConfirmModal';
 import EmptyState from '@/components/admin/shared/EmptyState';
 import PageHeader from '@/components/admin/shared/PageHeader';
 import StatusBadge from '@/components/admin/shared/StatusBadge';
 import TaxonomyChips from '@/components/admin/shared/TaxonomyChips';
-import { postJSON, getJSON } from '@/lib/api';
-import { toMillis } from '@/lib/dateUtils';
+import { getJSON } from '@/lib/api';
 import { safeUrl } from '@/lib/safeUrl';
-import { getLiveUrl, isLiveRecord } from '@/lib/livePages';
+import { getLiveUrl } from '@/lib/livePages';
+import {
+  editorTargetId,
+  getProvider,
+  getTitle,
+  getTypeLabel,
+  selectLiveItems,
+} from './livePages/liveItems';
+import { useLivePageDeletion } from './livePages/useLivePageDeletion';
 
 const LIVE_PAGES_HELP = [
   'What is here: every page visitors can open right now — the records whose Live flag is set, with the URL the site serves them at.',
@@ -34,48 +40,6 @@ const LIVE_PAGES_HELP = [
  * orders newest first: every published document carries publishedAt.
  */
 export const LIVE_PAGES_QUERY = 'cms/content?live=true&limit=500&sort=publishedAt';
-
-function getProvider(item) {
-  return item['Cloud Provider'] || item.cloudProvider || item.provider || 'Unknown';
-}
-
-function getTitle(item) {
-  return item.Title || item.title || 'Untitled';
-}
-
-function getTypeLabel(item) {
-  const type = getCanonicalContentType(item);
-  switch (type) {
-    case 'framework':
-      return 'Framework';
-    case 'architecture':
-      return 'Architecture';
-    case 'coder_corner':
-      return 'Coder Corner';
-    case 'news':
-      return 'News';
-    case 'blog':
-    default:
-      return 'Blog';
-  }
-}
-
-function getRecencyScore(item) {
-  return Math.max(
-    toMillis(item?.publishedDate),
-    toMillis(item?.datePublished),
-    toMillis(item?.['Published At']),
-    toMillis(item?.blogPublishedAt),
-    toMillis(item?.publishedAt),
-    toMillis(item?.updatedAt),
-    toMillis(item?.createdAt)
-  );
-}
-
-/** The editor opens the source record when the live one carries a pointer to it. */
-function editorTargetId(item) {
-  return [item.sourceContentId, item.publishedContentId, item.id].find(Boolean) ?? '';
-}
 
 /** One live page: its title, badges and URL, with Open Editor, Delete and Open Live Page. */
 function LivePageRow({ item, deleting, onDelete }) {
@@ -139,78 +103,21 @@ export default function LivePagesPage() {
     authReady && includeLegacyPages ? 'live-pages:legacy' : ''
   );
   const [query, setQuery] = useState('');
-  const [deleteTarget, setDeleteTarget] = useState(null);
-  const [deletingId, setDeletingId] = useState('');
-  const [deleteError, setDeleteError] = useState('');
-  const [locallyDeletedKeys, setLocallyDeletedKeys] = useState({});
+  const {
+    deleteTarget,
+    setDeleteTarget,
+    deletingId,
+    deleteError,
+    locallyDeletedKeys,
+    handleDeleteLivePage,
+  } = useLivePageDeletion();
   const loading = contentLoading || (includeLegacyPages && blogsLoading);
 
-  const liveItems = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-    const mergedItems = [
-      ...(contentItems || []).map((item) => ({ ...item, __source: 'content' })),
-      ...(includeLegacyPages
-        ? (blogItems || []).map((item) => ({ ...item, __source: 'blogs' }))
-        : []),
-    ];
-    const deduped = [];
-    const seen = new Set();
-
-    mergedItems.forEach((item) => {
-      if (!isLiveRecord(item)) return;
-      const liveUrl = getLiveUrl(item);
-      if (!liveUrl) return;
-      const normalizedUrl = liveUrl.trim().toLowerCase();
-      if (locallyDeletedKeys[normalizedUrl]) return;
-
-      const dedupeKey = normalizedUrl;
-
-      if (seen.has(dedupeKey)) return;
-      seen.add(dedupeKey);
-      deduped.push(item);
-    });
-
-    return deduped
-      .filter((item) => {
-        const liveUrl = getLiveUrl(item);
-        if (!normalizedQuery) return true;
-        const haystack = [getTitle(item), getProvider(item), getTypeLabel(item), liveUrl]
-          .join(' ')
-          .toLowerCase();
-        return haystack.includes(normalizedQuery);
-      })
-      .sort((a, b) => getRecencyScore(b) - getRecencyScore(a));
-  }, [blogItems, contentItems, includeLegacyPages, locallyDeletedKeys, query]);
-
-  const handleDeleteLivePage = async () => {
-    if (!deleteTarget) return;
-    const liveUrl = getLiveUrl(deleteTarget);
-    const normalizedUrl = String(liveUrl || '')
-      .trim()
-      .toLowerCase();
-    setDeleteError('');
-    setDeletingId(deleteTarget.id);
-    try {
-      await postJSON('softDeleteLivePage', {
-        contentId:
-          deleteTarget.sourceContentId ||
-          deleteTarget.publishedContentId ||
-          (deleteTarget.__source === 'content' ? deleteTarget.id : ''),
-        blogId:
-          deleteTarget.publishedBlogId ||
-          deleteTarget.blogId ||
-          (deleteTarget.__source === 'blogs' ? deleteTarget.id : ''),
-      });
-      if (normalizedUrl) {
-        setLocallyDeletedKeys((prev) => ({ ...prev, [normalizedUrl]: true }));
-      }
-      setDeleteTarget(null);
-    } catch (err) {
-      setDeleteError(err.message || 'Failed to delete live page');
-    } finally {
-      setDeletingId('');
-    }
-  };
+  const liveItems = useMemo(
+    () =>
+      selectLiveItems({ contentItems, blogItems, includeLegacyPages, locallyDeletedKeys, query }),
+    [blogItems, contentItems, includeLegacyPages, locallyDeletedKeys, query]
+  );
 
   return (
     <div className="space-y-6">

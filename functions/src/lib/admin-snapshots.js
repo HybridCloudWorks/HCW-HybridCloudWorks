@@ -215,55 +215,59 @@ export function summarizeDashboardItems(items = []) {
 
 // ── query plumbing ──────────────────────────────────────────────────────────
 
-/** statusFilter -> { where clause, params, sortField } (source :6333-6358). */
-export function queueFilterFor(statusFilter) {
-  const inList = (statuses) => ({
-    where: "ARRAY_CONTAINS(@statuses, c.contentStatus)",
-    params: [{ name: "@statuses", value: statuses }],
-  });
-  if (statusFilter === "needs_review") {
+/**
+ * The queue views (source :6333-6358), by what their Cosmos window matches:
+ * `statuses` is an ARRAY_CONTAINS over contentStatus, `status` one stored
+ * value, `where` a clause of its own. Any other filter is one stored status.
+ */
+const QUEUE_FILTERS = Object.freeze({
+  needs_review: {
+    statuses: ["draft", "ingested", "inspected"],
+    sortField: "fetchedAt",
+  },
+  // forge_ready is publishable (content-status.js PUBLISHABLE_NORMALIZED_STATUSES)
+  // and until 2026-10-03 appeared on no screen at all (ADR 0033 §1).
+  ready_to_publish: {
+    statuses: ["approved", "forge_ready", "published"],
+    sortField: "updatedAt",
+  },
+  published_live: { where: "c.Live = true", sortField: "publishedAt" },
+  // The same set the dashboard counts as inProgress (triggers/dashboard-stats.js),
+  // so the Editor badge never counts an item this view cannot show.
+  in_progress: {
+    statuses: [
+      "approved",
+      "in_review",
+      "editing",
+      "forge_ready",
+      "needs_rework",
+    ],
+    sortField: "updatedAt",
+  },
+  soft_deleted: { status: "rejected", sortField: "fetchedAt" },
+});
+
+/** A queue view's WHERE clause and its parameters. */
+function queueWhere(view) {
+  if (view.statuses) {
     return {
-      ...inList(["draft", "ingested", "inspected"]),
-      sortField: "fetchedAt",
+      where: "ARRAY_CONTAINS(@statuses, c.contentStatus)",
+      params: [{ name: "@statuses", value: [...view.statuses] }],
     };
   }
-  if (statusFilter === "ready_to_publish") {
-    // forge_ready is publishable (content-status.js PUBLISHABLE_NORMALIZED_STATUSES)
-    // and until 2026-10-03 appeared on no screen at all (ADR 0033 §1).
-    return {
-      ...inList(["approved", "forge_ready", "published"]),
-      sortField: "updatedAt",
-    };
-  }
-  if (statusFilter === "published_live") {
-    return { where: "c.Live = true", params: [], sortField: "publishedAt" };
-  }
-  if (statusFilter === "in_progress") {
-    // The same set the dashboard counts as inProgress (triggers/dashboard-stats.js),
-    // so the Editor badge never counts an item this view cannot show.
-    return {
-      ...inList([
-        "approved",
-        "in_review",
-        "editing",
-        "forge_ready",
-        "needs_rework",
-      ]),
-      sortField: "updatedAt",
-    };
-  }
-  if (statusFilter === "soft_deleted") {
-    return {
-      where: "c.contentStatus = @status",
-      params: [{ name: "@status", value: "rejected" }],
-      sortField: "fetchedAt",
-    };
-  }
+  if (view.where) return { where: view.where, params: [] };
   return {
     where: "c.contentStatus = @status",
-    params: [{ name: "@status", value: String(statusFilter) }],
-    sortField: "fetchedAt",
+    params: [{ name: "@status", value: view.status }],
   };
+}
+
+/** statusFilter -> { where clause, params, sortField } (source :6333-6358). */
+export function queueFilterFor(statusFilter) {
+  const view = Object.hasOwn(QUEUE_FILTERS, statusFilter)
+    ? QUEUE_FILTERS[statusFilter]
+    : { status: String(statusFilter), sortField: "fetchedAt" };
+  return { ...queueWhere(view), sortField: view.sortField };
 }
 
 const sortDescBy = (field) => (a, b) => toMillis(b[field]) - toMillis(a[field]);

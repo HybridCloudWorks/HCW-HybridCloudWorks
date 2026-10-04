@@ -75,6 +75,57 @@ describe('validateAndNormalizeUpdateContentItemUpdates', () => {
     );
   });
 
+  it('treats url, every …Url/…URL spelling and docLink as URL fields, and nothing else', () => {
+    // The field test is one regex plus docLink; these pin what it must keep
+    // matching (the six names the original spelled out) and what it must not.
+    const out = validateAndNormalizeUpdateContentItemUpdates({
+      url: 'https://example.com/',
+      sourceUrl: 'https://example.com/s',
+      diagramUrl: 'https://example.com/d',
+      coverURL: 'https://example.com/c',
+      docLink: 'https://example.com/doc',
+    });
+    expect(out).toEqual({
+      url: 'https://example.com/',
+      sourceUrl: 'https://example.com/s',
+      diagramUrl: 'https://example.com/d',
+      coverURL: 'https://example.com/c',
+      docLink: 'https://example.com/doc',
+    });
+    for (const field of ['url', 'coverURL', 'docLink']) {
+      expect(() =>
+        validateAndNormalizeUpdateContentItemUpdates({ [field]: 'ftp://example.com/x' })
+      ).toThrow(/http\(s\) URL/);
+    }
+    // Not a URL field: stored as plain text, however it reads.
+    expect(validateAndNormalizeUpdateContentItemUpdates({ urlNote: 'not a url' })).toEqual({
+      urlNote: 'not a url',
+    });
+  });
+
+  it('gives …Html, …Code and …Draft fields the large string ceiling and others the default', () => {
+    const large = 'x'.repeat(12_001);
+    for (const field of ['overviewHtml', 'terraformCode', 'blogDraft', 'bodyHTML']) {
+      expect(validateAndNormalizeUpdateContentItemUpdates({ [field]: large })[field]).toBe(large);
+    }
+    expect(() => validateAndNormalizeUpdateContentItemUpdates({ summaryText: large })).toThrow(
+      /exceeds 12000 characters/
+    );
+    expect(() =>
+      validateAndNormalizeUpdateContentItemUpdates({ overviewHtml: 'x'.repeat(120_001) })
+    ).toThrow(/exceeds 120000 characters/);
+  });
+
+  it('a date-like field with a value the date normalizer cannot take falls through to the generic rules', () => {
+    expect(validateAndNormalizeUpdateContentItemUpdates({ scheduledAt: 1700000000 })).toEqual({
+      scheduledAt: 1700000000,
+    });
+    const asDate = new Date('2026-01-01T00:00:00.000Z');
+    expect(validateAndNormalizeUpdateContentItemUpdates({ scheduledAt: asDate }).scheduledAt).toBe(
+      asDate
+    );
+  });
+
   it('parses date-like string fields to Dates and rejects garbage', () => {
     const out = validateAndNormalizeUpdateContentItemUpdates({ fetchedAt: '2026-01-01' });
     expect(out.fetchedAt).toBeInstanceOf(Date);

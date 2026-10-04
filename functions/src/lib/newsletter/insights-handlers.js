@@ -1057,6 +1057,51 @@ const ROUTES = Object.freeze({
   getTemplate: ['mailingListTemplate', 'editor', getTemplate],
 });
 
+// ── The factory's shared opening and caches ─────────────────────────────────
+
+const notConfigured = () =>
+  json(503, {
+    ok: false,
+    error: 'Resend is not configured: RESEND_API_KEY is not set',
+  });
+
+/** A Resend client on the key, or null without one. */
+function resendClientOrNull(env, fetchImpl) {
+  const apiKey = readKey(env, 'RESEND_API_KEY');
+  return apiKey ? createResendClient({ apiKey, fetch: fetchImpl }) : null;
+}
+
+/**
+ * The route's common opening: role, then the key. `{ client, auth }` or
+ * `{ response }`. Role first, so an under-privileged caller learns nothing
+ * about configuration.
+ */
+async function openRoute({ guard, env, fetchImpl }, request, role) {
+  const auth = await guard.requireRole(request, role);
+  if (auth?.error) return { response: auth.error };
+  const client = resendClientOrNull(env, fetchImpl);
+  if (!client) return { response: notConfigured() };
+  return { client, auth };
+}
+
+/**
+ * The Newsletter segment's id, found once per process: it does not change.
+ * Only a found id is cached; a refusal or a not-yet-created segment is asked
+ * again next time.
+ */
+function segmentIdCache() {
+  let promise = null;
+  return (client) => {
+    if (!promise) {
+      promise = findNewsletterSegment(client).then((found) => {
+        if (!found.id) promise = null;
+        return found;
+      });
+    }
+    return promise;
+  };
+}
+
 /**
  * @param {object} deps
  * @param {{ requireRole: Function }} deps.guard
@@ -1072,53 +1117,16 @@ export function createNewsletterInsightsHandlers({
   fetch: fetchImpl = globalThis.fetch,
   now = () => new Date(),
 }) {
-  /** Per process: the Newsletter segment's id does not change. Failures are not cached. */
-  let segmentIdPromise = null;
   /** Per process: `{ at, value }` of the last audience summary. */
   let summaryCache = null;
-
-  const clientOrNull = () => {
-    const apiKey = readKey(env, 'RESEND_API_KEY');
-    return apiKey ? createResendClient({ apiKey, fetch: fetchImpl }) : null;
-  };
-  const notConfigured = () =>
-    json(503, {
-      ok: false,
-      error: 'Resend is not configured: RESEND_API_KEY is not set',
-    });
-
-  /**
-   * The route's common opening: role, then the key. `{ client, auth }` or
-   * `{ response }`. Role first, so an under-privileged caller learns nothing
-   * about configuration.
-   */
-  async function open(request, role) {
-    const auth = await guard.requireRole(request, role);
-    if (auth?.error) return { response: auth.error };
-    const client = clientOrNull();
-    if (!client) return { response: notConfigured() };
-    return { client, auth };
-  }
-
-  async function segmentId(client) {
-    if (!segmentIdPromise) {
-      segmentIdPromise = findNewsletterSegment(client).then((found) => {
-        // Cache only a found id: a refusal or a not-yet-created segment is
-        // asked again next time.
-        if (!found.id) segmentIdPromise = null;
-        return found;
-      });
-    }
-    return segmentIdPromise;
-  }
 
   /** What the routes need from this factory. The summary cache is state, so it is read and written through functions. */
   const ctx = {
     env,
     store,
     now,
-    open,
-    segmentId,
+    open: (request, role) => openRoute({ guard, env, fetchImpl }, request, role),
+    segmentId: segmentIdCache(),
     readSummary: () => summaryCache,
     writeSummary: (entry) => {
       summaryCache = entry;

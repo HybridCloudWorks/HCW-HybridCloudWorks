@@ -16,6 +16,7 @@ import {
 } from './admin-handlers.js';
 import { DEFAULT_NEWSLETTER_FROM } from './sender.js';
 import { createTemplateCache } from './template-source.js';
+import { fakeResend as makeResend } from './fake-resend.test-helper.js';
 
 const API_KEY = 'not-a-real-resend-key-EXAMPLE-VALUE-FOR-TESTS';
 const NOW = new Date('2026-10-03T12:00:00Z'); // Saturday
@@ -84,73 +85,6 @@ function makeStore({ issue = issueOf(), extra = [] } = {}) {
       return { ...stored };
     }),
   };
-}
-
-/**
- * A fake Resend for the broadcast lifecycle: `broadcast` is what GET answers,
- * `refuseDelete` makes DELETE answer 403 with a plan-style message, `domains`
- * is what GET /domains lists.
- */
-function makeResend({
-  broadcast = { status: 'scheduled' },
-  refuseDelete = false,
-  failCreate = false,
-  domains = [],
-} = {}) {
-  const calls = [];
-  const reply = (status, data) => ({
-    ok: status < 300,
-    status,
-    text: async () => JSON.stringify(data),
-  });
-  const fetch = vi.fn(async (url, init = {}) => {
-    const { pathname } = new URL(url);
-    const method = init.method ?? 'GET';
-    calls.push({
-      method,
-      pathname,
-      body: init.body ? JSON.parse(init.body) : undefined,
-    });
-    if (pathname === '/segments')
-      return reply(200, {
-        data: [{ id: 'seg-news', name: 'Newsletter' }],
-        has_more: false,
-      });
-    if (pathname === '/domains') return reply(200, { data: domains });
-    if (pathname.startsWith('/broadcasts/') && method === 'GET') {
-      if (broadcast === 404)
-        return reply(404, {
-          name: 'not_found',
-          message: 'Broadcast not found',
-        });
-      return reply(200, {
-        id: pathname.slice('/broadcasts/'.length),
-        ...broadcast,
-      });
-    }
-    if (pathname.startsWith('/broadcasts/') && method === 'DELETE') {
-      if (refuseDelete)
-        return reply(403, {
-          name: 'restricted_api_key',
-          message: 'Scheduled broadcasts cannot be deleted on this plan',
-        });
-      return reply(200, {
-        object: 'broadcast',
-        id: pathname.slice('/broadcasts/'.length),
-        deleted: true,
-      });
-    }
-    if (pathname === '/broadcasts' && method === 'POST') {
-      if (failCreate)
-        return reply(422, {
-          name: 'validation_error',
-          message: 'scheduled_at is in the past',
-        });
-      return reply(200, { id: `bc-new-${calls.length}` });
-    }
-    return reply(404, { name: 'unexpected' });
-  });
-  return { fetch, calls };
 }
 
 const allow = (role = 'publisher') => ({
@@ -353,7 +287,7 @@ describe('cancel and reschedule', () => {
       status: 'scheduled',
       scheduledAt: '2026-10-07T14:00:00.000Z',
       sendAt: '2026-10-07T14:00:00.000Z',
-      broadcastId: expect.stringMatching(/^bc-new/),
+      broadcastId: expect.stringMatching(/^bc-\d+$/),
     });
   });
 

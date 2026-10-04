@@ -12,6 +12,7 @@ import {
 import { NEWSLETTER_FROM } from './handlers.js';
 import { INTRO_INSTRUCTION, introInstruction } from './issue.js';
 import { createTemplateCache } from './template-source.js';
+import { fakeResend as makeResend } from './fake-resend.test-helper.js';
 
 const API_KEY = 'not-a-real-resend-key-EXAMPLE-VALUE-FOR-TESTS';
 
@@ -82,69 +83,6 @@ function makeStore({ issue = draftIssue(), settings = completeSettings } = {}) {
       return { ...stored };
     }),
   };
-}
-
-/**
- * `templates` answers GET /templates/{id}: `{ [id]: [status, body] | Error }`,
- * or a function of the id. Unlisted ids are 404.
- */
-function makeResend({
-  failBroadcast = false,
-  noAnswer = false,
-  onBroadcast,
-  failEmail = false,
-  templates = {},
-} = {}) {
-  const broadcasts = [];
-  const emails = [];
-  const reply = (status, data) => ({
-    ok: status < 300,
-    status,
-    text: async () => JSON.stringify(data),
-  });
-  const fetch = vi.fn(async (url, init = {}) => {
-    const { pathname } = new URL(url);
-    if (pathname.startsWith('/templates/')) {
-      const id = decodeURIComponent(pathname.slice('/templates/'.length));
-      const answer = typeof templates === 'function' ? templates(id) : templates[id];
-      if (answer instanceof Error) throw answer;
-      return answer
-        ? reply(...answer)
-        : reply(404, { name: 'not_found', message: `Template ${id} not found` });
-    }
-    if (pathname === '/segments') {
-      return reply(200, {
-        object: 'list',
-        has_more: false,
-        data: [{ id: 'seg-news', name: 'Newsletter' }],
-      });
-    }
-    if (pathname === '/emails') {
-      if (failEmail) {
-        return reply(403, {
-          name: 'validation_error',
-          message: `The domain is not verified for ${JSON.parse(init.body).to}`,
-        });
-      }
-      emails.push(JSON.parse(init.body));
-      return reply(200, { id: `em-${emails.length}` });
-    }
-    if (pathname === '/broadcasts') {
-      if (noAnswer) throw new Error('The operation was aborted due to timeout');
-      if (failBroadcast) {
-        // A provider message that echoes the payload, as refusals sometimes do.
-        return reply(422, {
-          name: 'validation_error',
-          message: `from domain not verified for PO Box 1, Austin, TX in ${JSON.parse(init.body).subject}`,
-        });
-      }
-      broadcasts.push(JSON.parse(init.body));
-      await onBroadcast?.();
-      return reply(200, { id: `bc-${broadcasts.length}` });
-    }
-    return reply(404, { name: 'unexpected' });
-  });
-  return { fetch, broadcasts, emails };
 }
 
 const allow = (role = 'publisher') => ({

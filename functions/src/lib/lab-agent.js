@@ -47,223 +47,254 @@ const CLAIM_SCAN_LIMIT = 20;
 const clampOutput = (value) => String(value ?? '').slice(0, OUTPUT_CAP_BYTES);
 
 /**
+ * Every agent request's first two steps, in this order: the body must be
+ * JSON (400 otherwise), then `requireAgent` checks the credential against
+ * the agent the body names. The body and the registry record on success,
+ * the response on refusal.
+ */
+async function authenticatedAgentBody(guard, request) {
+  let body;
+  try {
+    body = (await request.json()) ?? {};
+  } catch {
+    return { error: json(400, { ok: false, error: 'Body must be valid JSON' }) };
+  }
+
+  const auth = await guard.requireAgent(request, body.agentId);
+  if (auth.error) return { error: auth.error };
+  return { body, agent: auth.agent };
+}
+
+/**
+ * The claimable jobs for these capabilities, oldest first.
+ *
+ * Two claimable shapes: never claimed, or claimed by an agent that has since
+ * gone away. Without the second, a host that dies mid-claim strands its jobs
+ * permanently, as jobs stuck in 'claimed' forever.
+ *
+ * FIFO in the query itself (ADR 0033 inventory): without ORDER BY, TOP 20
+ * was whichever 20 candidates Cosmos returned, so with more than twenty
+ * queued the oldest could wait behind newer ones indefinitely. Every
+ * lab_jobs document carries createdAt (enqueueLabJob and the public submit
+ * both write it), so the sort drops nothing.
+ */
+async function claimCandidates(store, capabilities, now) {
+  const staleBefore = new Date(now().getTime() - CLAIM_LEASE_MS).toISOString();
+  const candidates = await store.queryDocs(
+    'lab_jobs',
+    `SELECT TOP @limit * FROM c
+        WHERE ARRAY_CONTAINS(@types, c.type)
+          AND (c.status = 'queued'
+               OR (c.status = 'claimed' AND (NOT IS_DEFINED(c.claimedAt) OR c.claimedAt < @staleBefore)))
+        ORDER BY c.createdAt ASC`,
+    [
+      { name: '@limit', value: CLAIM_SCAN_LIMIT },
+      { name: '@types', value: capabilities },
+      { name: '@staleBefore', value: staleBefore },
+    ]
+  );
+
+  // Oldest first, again in memory, so a store that ignores ORDER BY (a test
+  // double, a future mirror) still hands out the oldest.
+  return [...candidates].sort((a, b) =>
+    String(a.createdAt ?? '').localeCompare(String(b.createdAt ?? ''))
+  );
+}
+
+/** The claimed job as the agent receives it. */
+function claimedJobBody(claimed) {
+  return {
+    id: claimed.id,
+    type: claimed.type,
+    payload: typeof claimed.payload === 'string' ? claimed.payload : '',
+    // Written by enqueueLabJob from its allowlist; a document from
+    // before #675 has none and is a text payload.
+    payloadEncoding: claimed.payloadEncoding === 'tar' ? 'tar' : 'text',
+  };
+}
+
+/**
+ * The first candidate this agent wins. The contended write is a single
+ * document, so an ETag-guarded replace is the whole of the locking: two
+ * agents racing for the same job produce one 412, and the loser simply
+ * tries the next candidate.
+ */
+async function claimFirstAvailable({ store, now }, context, agentId, ordered) {
+  for (const job of ordered) {
+    try {
+      const claimed = await store.replaceDocIfMatch('lab_jobs', {
+        ...job,
+        status: 'claimed',
+        agentId,
+        claimedAt: now().toISOString(),
+      });
+      return json(200, { ok: true, job: claimedJobBody(claimed) });
+    } catch (err) {
+      // 412: someone else claimed it between our read and our write. Try the
+      // next candidate rather than failing the poll.
+      if (err?.code === 412) continue;
+      context.error('claimLabJob write failed:', err?.message);
+      return json(500, { ok: false, error: 'Failed to claim job' });
+    }
+  }
+  return json(200, { ok: true, job: null });
+}
+
+/**
+ * Claim one queued job.
+ *
+ * Capabilities come from the registry record, NOT from the request. The
+ * source agent sent its own capability list and filtered client-side; an
+ * agent that can name its own capabilities can claim any job type, which
+ * makes the enqueue-side `LAB_JOB_TYPES` allowlist decorative.
+ */
+async function claimLabJob(ctx, request, context) {
+  const parsed = await authenticatedAgentBody(ctx.guard, request);
+  if (parsed.error) return parsed.error;
+  const { agent } = parsed;
+
+  const capabilities = Array.isArray(agent.capabilities) ? agent.capabilities : [];
+  if (capabilities.length === 0) {
+    // Not an error: an agent registered with no capabilities has nothing to
+    // do, and should keep heartbeating rather than crash-loop.
+    return json(200, { ok: true, job: null });
+  }
+
+  const ordered = await claimCandidates(ctx.store, capabilities, ctx.now);
+  return claimFirstAvailable(ctx, context, agent.agentId, ordered);
+}
+
+/**
+ * Record liveness for this agent.
+ *
+ * Writes `lastSeenAt`. The stub agent wrote `lastPing` while `labs.js:188`
+ * read `lastSeenAt`, so the Labs "connected" indicator could never be true
+ * (T-401). Fixing it here rather than in the agent is deliberate:
+ * the field name is now the server's business, and no future agent can get
+ * it wrong.
+ *
+ * `capabilities` and `oid` are NOT writable through this path — they are
+ * the registry's authorization inputs, and an endpoint the VPS can reach
+ * must not be able to grant the VPS new job types or rebind its identity.
+ */
+async function heartbeatAgent({ guard, store, now }, request, context) {
+  const parsed = await authenticatedAgentBody(guard, request);
+  if (parsed.error) return parsed.error;
+  const { body, agent } = parsed;
+
+  const activeJobs =
+    Number.isInteger(body.activeJobs) && body.activeJobs >= 0 ? body.activeJobs : 0;
+  const status = ['idle', 'busy', 'stopping', 'offline'].includes(body.status)
+    ? body.status
+    : 'idle';
+
+  // Built conditionally, not with `undefined` placeholders: patchDoc treats
+  // an undefined value as a field DELETION, so spreading absent optionals
+  // would wipe the stored hostname and version on every heartbeat — and
+  // would route each one through the read-modify-write path, turning a
+  // 30-second poll into two round trips instead of one.
+  const updates = {
+    status: activeJobs > 0 ? 'busy' : status,
+    activeJobs,
+    lastSeenAt: now().toISOString(),
+  };
+  if (typeof body.hostname === 'string') updates.hostname = body.hostname.slice(0, 255);
+  if (typeof body.version === 'string') updates.version = body.version.slice(0, 64);
+
+  try {
+    await store.patchDoc('lab_agents', agent.agentId, updates, {
+      partitionKey: agent.agentId,
+    });
+  } catch (err) {
+    context.error('heartbeatAgent failed:', err?.message);
+    return json(500, { ok: false, error: 'Failed to record heartbeat' });
+  }
+
+  return json(200, { ok: true });
+}
+
+/** The 400s a completion body earns before any read: no jobId, or a status an agent may not report. */
+function completionRefusal(jobId, status) {
+  if (!jobId) return json(400, { ok: false, error: 'jobId is required' });
+  if (!AGENT_TERMINAL_STATUSES.includes(status)) {
+    return json(400, {
+      ok: false,
+      error: `status must be one of ${AGENT_TERMINAL_STATUSES.join(', ')}`,
+    });
+  }
+  return null;
+}
+
+/**
+ * Why this agent may not complete this job, or null when it may.
+ *
+ * The ownership check is the point. Without it a compromised VPS could
+ * overwrite any job's output — including jobs run by other agents — which
+ * turns the results surface into an arbitrary write.
+ */
+function heldJobRefusal(job, jobId, agent, context) {
+  if (!job) return json(404, { ok: false, error: 'Job not found' });
+
+  if (job.agentId !== agent.agentId) {
+    context.warn?.(`agent ${agent.agentId} tried to complete job ${jobId} it does not hold`);
+    return json(403, { ok: false, error: 'Job is not held by this agent' });
+  }
+
+  // A job the operator cancelled, or one already reported, must not be
+  // reopened by a late-arriving result. `claimed` is the only state a held
+  // job is ever in: the agent reports nothing between claim and completion
+  // (JOB_STATUSES in labs.js).
+  if (job.status !== 'claimed') {
+    return json(409, { ok: false, error: `Job is ${job.status}` });
+  }
+  return null;
+}
+
+/** Write a terminal result for a job this agent holds. */
+async function completeLabJob({ guard, store, now }, request, context) {
+  const parsed = await authenticatedAgentBody(guard, request);
+  if (parsed.error) return parsed.error;
+  const { body, agent } = parsed;
+
+  const jobId = typeof body.jobId === 'string' ? body.jobId.trim() : '';
+  const refused = completionRefusal(jobId, body.status);
+  if (refused) return refused;
+
+  const job = await store.readDoc('lab_jobs', jobId, jobId);
+  const notHeld = heldJobRefusal(job, jobId, agent, context);
+  if (notHeld) return notHeld;
+
+  try {
+    await store.patchDoc(
+      'lab_jobs',
+      jobId,
+      {
+        status: body.status,
+        exitCode: Number.isInteger(body.exitCode) ? body.exitCode : -1,
+        output: clampOutput(body.output),
+        finishedAt: now().toISOString(),
+      },
+      { partitionKey: jobId }
+    );
+  } catch (err) {
+    context.error('completeLabJob failed:', err?.message);
+    return json(500, { ok: false, error: 'Failed to record result' });
+  }
+
+  return json(200, { ok: true });
+}
+
+/**
  * @param {object} deps
  * @param {{ requireAgent: Function }} deps.guard
  * @param {{ queryDocs: Function, readDoc: Function, patchDoc: Function, replaceDocIfMatch: Function }} deps.store
  * @param {() => Date} [deps.now]
  */
 export function createLabAgentHandlers({ guard, store, now = () => new Date() }) {
-  /**
-   * Claim one queued job.
-   *
-   * The contended write is a single document, so an ETag-guarded replace is
-   * the whole of the locking: two agents racing for the same job produce
-   * one 412, and the loser simply tries the next candidate.
-   *
-   * Capabilities come from the registry record, NOT from the request. The
-   * source agent sent its own capability list and filtered client-side; an
-   * agent that can name its own capabilities can claim any job type, which
-   * makes the enqueue-side `LAB_JOB_TYPES` allowlist decorative.
-   */
-  async function claimLabJob(request, context) {
-    let body;
-    try {
-      body = (await request.json()) ?? {};
-    } catch {
-      return json(400, { ok: false, error: 'Body must be valid JSON' });
-    }
-
-    const auth = await guard.requireAgent(request, body.agentId);
-    if (auth.error) return auth.error;
-
-    const capabilities = Array.isArray(auth.agent.capabilities) ? auth.agent.capabilities : [];
-    if (capabilities.length === 0) {
-      // Not an error: an agent registered with no capabilities has nothing to
-      // do, and should keep heartbeating rather than crash-loop.
-      return json(200, { ok: true, job: null });
-    }
-
-    const nowMs = now().getTime();
-    const staleBefore = new Date(nowMs - CLAIM_LEASE_MS).toISOString();
-
-    // Two claimable shapes: never claimed, or claimed by an agent that has
-    // since gone away. Without the second, a host that dies mid-claim strands
-    // its jobs permanently, as jobs stuck in 'claimed' forever.
-    //
-    // FIFO in the query itself (ADR 0033 inventory): without ORDER BY, TOP 20
-    // was whichever 20 candidates Cosmos returned, so with more than twenty
-    // queued the oldest could wait behind newer ones indefinitely. Every
-    // lab_jobs document carries createdAt (enqueueLabJob and the public
-    // submit both write it), so the sort drops nothing.
-    const candidates = await store.queryDocs(
-      'lab_jobs',
-      `SELECT TOP @limit * FROM c
-        WHERE ARRAY_CONTAINS(@types, c.type)
-          AND (c.status = 'queued'
-               OR (c.status = 'claimed' AND (NOT IS_DEFINED(c.claimedAt) OR c.claimedAt < @staleBefore)))
-        ORDER BY c.createdAt ASC`,
-      [
-        { name: '@limit', value: CLAIM_SCAN_LIMIT },
-        { name: '@types', value: capabilities },
-        { name: '@staleBefore', value: staleBefore },
-      ]
-    );
-
-    // Oldest first, again in memory, so a store that ignores ORDER BY (a test
-    // double, a future mirror) still hands out the oldest.
-    const ordered = [...candidates].sort((a, b) =>
-      String(a.createdAt ?? '').localeCompare(String(b.createdAt ?? ''))
-    );
-
-    for (const job of ordered) {
-      try {
-        const claimed = await store.replaceDocIfMatch('lab_jobs', {
-          ...job,
-          status: 'claimed',
-          agentId: auth.agent.agentId,
-          claimedAt: now().toISOString(),
-        });
-        return json(200, {
-          ok: true,
-          job: {
-            id: claimed.id,
-            type: claimed.type,
-            payload: typeof claimed.payload === 'string' ? claimed.payload : '',
-            // Written by enqueueLabJob from its allowlist; a document from
-            // before #675 has none and is a text payload.
-            payloadEncoding: claimed.payloadEncoding === 'tar' ? 'tar' : 'text',
-          },
-        });
-      } catch (err) {
-        // 412: someone else claimed it between our read and our write. Try the
-        // next candidate rather than failing the poll.
-        if (err?.code === 412) continue;
-        context.error('claimLabJob write failed:', err?.message);
-        return json(500, { ok: false, error: 'Failed to claim job' });
-      }
-    }
-
-    return json(200, { ok: true, job: null });
-  }
-
-  /**
-   * Record liveness for this agent.
-   *
-   * Writes `lastSeenAt`. The stub agent wrote `lastPing` while `labs.js:188`
-   * read `lastSeenAt`, so the Labs "connected" indicator could never be true
-   * (T-401). Fixing it here rather than in the agent is deliberate:
-   * the field name is now the server's business, and no future agent can get
-   * it wrong.
-   *
-   * `capabilities` and `oid` are NOT writable through this path — they are
-   * the registry's authorization inputs, and an endpoint the VPS can reach
-   * must not be able to grant the VPS new job types or rebind its identity.
-   */
-  async function heartbeatAgent(request, context) {
-    let body;
-    try {
-      body = (await request.json()) ?? {};
-    } catch {
-      return json(400, { ok: false, error: 'Body must be valid JSON' });
-    }
-
-    const auth = await guard.requireAgent(request, body.agentId);
-    if (auth.error) return auth.error;
-
-    const activeJobs =
-      Number.isInteger(body.activeJobs) && body.activeJobs >= 0 ? body.activeJobs : 0;
-    const status = ['idle', 'busy', 'stopping', 'offline'].includes(body.status)
-      ? body.status
-      : 'idle';
-
-    // Built conditionally, not with `undefined` placeholders: patchDoc treats
-    // an undefined value as a field DELETION, so spreading absent optionals
-    // would wipe the stored hostname and version on every heartbeat — and
-    // would route each one through the read-modify-write path, turning a
-    // 30-second poll into two round trips instead of one.
-    const updates = {
-      status: activeJobs > 0 ? 'busy' : status,
-      activeJobs,
-      lastSeenAt: now().toISOString(),
-    };
-    if (typeof body.hostname === 'string') updates.hostname = body.hostname.slice(0, 255);
-    if (typeof body.version === 'string') updates.version = body.version.slice(0, 64);
-
-    try {
-      await store.patchDoc('lab_agents', auth.agent.agentId, updates, {
-        partitionKey: auth.agent.agentId,
-      });
-    } catch (err) {
-      context.error('heartbeatAgent failed:', err?.message);
-      return json(500, { ok: false, error: 'Failed to record heartbeat' });
-    }
-
-    return json(200, { ok: true });
-  }
-
-  /**
-   * Write a terminal result for a job this agent holds.
-   *
-   * The ownership check is the point. Without it a compromised VPS could
-   * overwrite any job's output — including jobs run by other agents — which
-   * turns the results surface into an arbitrary write.
-   */
-  async function completeLabJob(request, context) {
-    let body;
-    try {
-      body = (await request.json()) ?? {};
-    } catch {
-      return json(400, { ok: false, error: 'Body must be valid JSON' });
-    }
-
-    const auth = await guard.requireAgent(request, body.agentId);
-    if (auth.error) return auth.error;
-
-    const jobId = typeof body.jobId === 'string' ? body.jobId.trim() : '';
-    if (!jobId) return json(400, { ok: false, error: 'jobId is required' });
-
-    if (!AGENT_TERMINAL_STATUSES.includes(body.status)) {
-      return json(400, {
-        ok: false,
-        error: `status must be one of ${AGENT_TERMINAL_STATUSES.join(', ')}`,
-      });
-    }
-
-    const job = await store.readDoc('lab_jobs', jobId, jobId);
-    if (!job) return json(404, { ok: false, error: 'Job not found' });
-
-    if (job.agentId !== auth.agent.agentId) {
-      context.warn?.(`agent ${auth.agent.agentId} tried to complete job ${jobId} it does not hold`);
-      return json(403, { ok: false, error: 'Job is not held by this agent' });
-    }
-
-    // A job the operator cancelled, or one already reported, must not be
-    // reopened by a late-arriving result. `claimed` is the only state a held
-    // job is ever in: the agent reports nothing between claim and completion
-    // (JOB_STATUSES in labs.js).
-    if (job.status !== 'claimed') {
-      return json(409, { ok: false, error: `Job is ${job.status}` });
-    }
-
-    try {
-      await store.patchDoc(
-        'lab_jobs',
-        jobId,
-        {
-          status: body.status,
-          exitCode: Number.isInteger(body.exitCode) ? body.exitCode : -1,
-          output: clampOutput(body.output),
-          finishedAt: now().toISOString(),
-        },
-        { partitionKey: jobId }
-      );
-    } catch (err) {
-      context.error('completeLabJob failed:', err?.message);
-      return json(500, { ok: false, error: 'Failed to record result' });
-    }
-
-    return json(200, { ok: true });
-  }
-
-  return { claimLabJob, heartbeatAgent, completeLabJob };
+  const ctx = { guard, store, now };
+  return {
+    claimLabJob: (request, context) => claimLabJob(ctx, request, context),
+    heartbeatAgent: (request, context) => heartbeatAgent(ctx, request, context),
+    completeLabJob: (request, context) => completeLabJob(ctx, request, context),
+  };
 }

@@ -195,21 +195,25 @@ export const FORBIDDEN_CONTENT_UPDATE_KEYS = new Set([
 ]);
 
 // Per-field-type normalizers used by validateAndNormalizeUpdateContentItemUpdates.
-// Each tries to handle the field; returns true if it consumed the entry,
-// false to fall through to the next normalizer.
+// KNOWN_FIELD_NORMALIZERS below pairs each field test with what it writes;
+// the first whose test holds consumes the entry, and none holding falls
+// through to the generic normalizer.
+
+/** `url`, `sourceUrl`, `diagramUrl`, any `…Url`/`…URL`, and `docLink`. */
 function isUrlField(field) {
-  return (
-    /Url$/i.test(field) ||
-    /URL$/i.test(field) ||
-    field === "url" ||
-    field === "sourceUrl" ||
-    field === "docLink" ||
-    field === "diagramUrl"
-  );
+  return /Url$/i.test(field) || field === "docLink";
 }
 
 function isDateLikeField(field) {
   return /At$/.test(field) || /Date$/.test(field) || field === "publishedDate";
+}
+
+/** A date-like field with a value the date normalizer can take; any other value falls through. */
+function isDateLikeEntry(field, value) {
+  return (
+    isDateLikeField(field) &&
+    (typeof value === "string" || value instanceof Date)
+  );
 }
 
 /**
@@ -224,118 +228,132 @@ const PAIRED_TEXT_FIELDS = new Map([
   ["Summary", { keys: ["summary", "Summary"], maxLength: 10_000 }],
 ]);
 
-function tryNormalizeKnownField(normalized, field, value) {
-  if (isUrlField(field)) {
-    normalized[field] = assertOptionalHttpUrl(value, field, {
-      allowEmpty: true,
-    });
-    return true;
-  }
-  if (isDateLikeField(field)) {
-    if (typeof value === "string") {
-      normalized[field] = assertOptionalDateString(value, field);
-      return true;
-    }
-    if (value instanceof Date) {
-      normalized[field] = value;
-      return true;
-    }
-  }
+function normalizeUrlField(normalized, field, value) {
+  normalized[field] = assertOptionalHttpUrl(value, field, {
+    allowEmpty: true,
+  });
+}
+
+function normalizeDateLikeField(normalized, field, value) {
+  normalized[field] =
+    typeof value === "string" ? assertOptionalDateString(value, field) : value;
+}
+
+function normalizePairedTextField(normalized, field, value) {
   const pair = PAIRED_TEXT_FIELDS.get(field);
-  if (pair) {
-    const text = assertStringLength(value, pair.keys[0], pair.maxLength, {
-      allowEmpty: true,
-    }).trim();
-    Object.assign(
-      normalized,
-      Object.fromEntries(pair.keys.map((key) => [key, text])),
+  const text = assertStringLength(value, pair.keys[0], pair.maxLength, {
+    allowEmpty: true,
+  }).trim();
+  Object.assign(
+    normalized,
+    Object.fromEntries(pair.keys.map((key) => [key, text])),
+  );
+}
+
+function normalizeCloudProviderField(normalized, _field, value) {
+  const provider = normalizeProviderName(value);
+  if (!provider) {
+    throw new Error(
+      `cloudProvider must be one of: ${Object.values(STORED_PROVIDER_VALUES).join(", ")}`,
     );
-    return true;
   }
-  if (field === "cloudProvider" || field === "Cloud Provider") {
-    const provider = normalizeProviderName(value);
-    if (!provider) {
-      throw new Error(
-        `cloudProvider must be one of: ${Object.values(STORED_PROVIDER_VALUES).join(", ")}`,
-      );
-    }
-    normalized.cloudProvider = provider;
-    normalized["Cloud Provider"] = provider;
-    return true;
-  }
-  if (field === "publishTarget") {
-    normalized.publishTarget = normalizePublishTarget(value);
-    return true;
-  }
-  if (field === "kind" || field === "ideaOrigin") {
-    // Shape only — a slug id, as taxonomy.js stores them. Membership in the
-    // saved taxonomy is checked by the handler, which has the store and the
-    // current record (content-update.js, ADR 0033 §4).
-    const id = String(value || "")
-      .trim()
-      .toLowerCase();
-    if (!TAXONOMY_ID_PATTERN.test(id)) {
-      throw new Error(
-        `${field} must be a taxonomy id (2-40 lower-case letters, digits or hyphens)`,
-      );
-    }
-    normalized[field] = id;
-    return true;
-  }
-  return tryNormalizeArrayField(normalized, field, value);
+  normalized.cloudProvider = provider;
+  normalized["Cloud Provider"] = provider;
+}
+
+function normalizePublishTargetField(normalized, _field, value) {
+  normalized.publishTarget = normalizePublishTarget(value);
 }
 
 /** The id shape taxonomy.js enforces when the lists are saved. */
 const TAXONOMY_ID_PATTERN = /^[a-z0-9][a-z0-9-]{1,39}$/;
 
-function tryNormalizeArrayField(normalized, field, value) {
-  if (field === "tags" || field === "Tags") {
-    const tags =
-      assertStringArray(value, "tags", { maxItems: 60, maxItemLength: 60 }) ||
-      [];
-    const cleaned = tags.map((t) => String(t || "").trim()).filter(Boolean);
-    normalized.tags = cleaned;
-    normalized.Tags = cleaned;
-    return true;
+/**
+ * Shape only — a slug id, as taxonomy.js stores them. Membership in the
+ * saved taxonomy is checked by the handler, which has the store and the
+ * current record (content-update.js, ADR 0033 §4).
+ */
+function normalizeTaxonomyIdField(normalized, field, value) {
+  const id = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (!TAXONOMY_ID_PATTERN.test(id)) {
+    throw new Error(
+      `${field} must be a taxonomy id (2-40 lower-case letters, digits or hyphens)`,
+    );
   }
-  if (field === "keyTopics") {
-    const topics =
-      assertStringArray(value, "keyTopics", {
-        maxItems: 40,
-        maxItemLength: 120,
-      }) || [];
-    normalized.keyTopics = topics
-      .map((t) => String(t || "").trim())
-      .filter(Boolean);
-    return true;
-  }
-  if (field === "frameworkSourceUrls") {
-    const urls =
-      assertStringArray(value, "frameworkSourceUrls", {
-        maxItems: 30,
-        maxItemLength: 2048,
-      }) || [];
-    urls.forEach((u) => {
-      if (u)
-        assertOptionalHttpUrl(u, "frameworkSourceUrls", { allowEmpty: true });
-    });
-    normalized.frameworkSourceUrls = urls.filter(Boolean);
-    return true;
-  }
-  return false;
+  normalized[field] = id;
+}
+
+function normalizeTagsField(normalized, _field, value) {
+  const tags =
+    assertStringArray(value, "tags", { maxItems: 60, maxItemLength: 60 }) || [];
+  const cleaned = tags.map((t) => String(t || "").trim()).filter(Boolean);
+  normalized.tags = cleaned;
+  normalized.Tags = cleaned;
+}
+
+function normalizeKeyTopicsField(normalized, _field, value) {
+  const topics =
+    assertStringArray(value, "keyTopics", {
+      maxItems: 40,
+      maxItemLength: 120,
+    }) || [];
+  normalized.keyTopics = topics
+    .map((t) => String(t || "").trim())
+    .filter(Boolean);
+}
+
+function normalizeFrameworkSourceUrlsField(normalized, _field, value) {
+  const urls =
+    assertStringArray(value, "frameworkSourceUrls", {
+      maxItems: 30,
+      maxItemLength: 2048,
+    }) || [];
+  urls.forEach((u) => {
+    if (u)
+      assertOptionalHttpUrl(u, "frameworkSourceUrls", { allowEmpty: true });
+  });
+  normalized.frameworkSourceUrls = urls.filter(Boolean);
+}
+
+const isOneOf =
+  (...names) =>
+  (field) =>
+    names.includes(field);
+
+/**
+ * [matches(field, value), normalize(normalized, field, value)], in the order
+ * the fields are tried: the first match consumes the entry.
+ */
+const KNOWN_FIELD_NORMALIZERS = [
+  [isUrlField, normalizeUrlField],
+  [isDateLikeEntry, normalizeDateLikeField],
+  [(field) => PAIRED_TEXT_FIELDS.has(field), normalizePairedTextField],
+  [isOneOf("cloudProvider", "Cloud Provider"), normalizeCloudProviderField],
+  [isOneOf("publishTarget"), normalizePublishTargetField],
+  [isOneOf("kind", "ideaOrigin"), normalizeTaxonomyIdField],
+  [isOneOf("tags", "Tags"), normalizeTagsField],
+  [isOneOf("keyTopics"), normalizeKeyTopicsField],
+  [isOneOf("frameworkSourceUrls"), normalizeFrameworkSourceUrlsField],
+];
+
+/** True when a known-field normalizer consumed the entry. */
+function tryNormalizeKnownField(normalized, field, value) {
+  const match = KNOWN_FIELD_NORMALIZERS.find(([matches]) =>
+    matches(field, value),
+  );
+  if (!match) return false;
+  match[1](normalized, field, value);
+  return true;
 }
 
 const MAX_STRING_DEFAULT = 12_000;
 const MAX_STRING_LARGE = 120_000;
 
+/** `overviewHtml`, `terraformCode`, `blogDraft` and every other `…Html`/`…Code`/`…Draft`. */
 function isLargeStringField(field) {
-  return (
-    /Html$/i.test(field) ||
-    /Code$/i.test(field) ||
-    /Draft$/i.test(field) ||
-    field === "overviewHtml" ||
-    field === "terraformCode"
-  );
+  return /(Html|Code|Draft)$/i.test(field);
 }
 
 function normalizeGenericField(normalized, field, value) {
@@ -394,7 +412,9 @@ export function validateAndNormalizeUpdateContentItemUpdates(updates = {}) {
  */
 function normalizeEntry(normalized, field, value) {
   if (field.length > 120) {
-    throw new Error(`updates contains a field name that exceeds 120 characters`);
+    throw new Error(
+      `updates contains a field name that exceeds 120 characters`,
+    );
   }
   if (FORBIDDEN_CONTENT_UPDATE_KEYS.has(field)) {
     throw new Error(`updates cannot modify protected field: ${field}`);

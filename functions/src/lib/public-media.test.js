@@ -15,6 +15,7 @@ import {
   ifNoneMatchMatches,
   parseRangeHeader,
   resolveRange,
+  resolveRangeOffsets,
 } from './public-media.js';
 import {
   GENERATED_MEDIA_CONTAINERS,
@@ -268,6 +269,62 @@ describe('ifNoneMatchMatches (RFC 9110 §13.1.2)', () => {
       );
       expect(res.status, header).toBe(304);
     }
+  });
+});
+
+describe('resolveRangeOffsets', () => {
+  const headStorage = (blob) => ({
+    headBlobForDelivery: vi.fn(async () => blob),
+  });
+  const ranged = (range, headers = {}) => ({
+    container: 'covers',
+    blobPath: 'post-1/cover.png',
+    request: makeRequest({ headers }),
+    range,
+  });
+
+  it('passes an absolute range straight through, with no properties read', async () => {
+    const storage = headStorage({ etag: '"e1"', contentLength: 100 });
+    const range = { start: 0, end: 9 };
+    expect(await resolveRangeOffsets(storage, ranged(range))).toEqual({ offsets: range });
+    expect(storage.headBlobForDelivery).not.toHaveBeenCalled();
+  });
+
+  it('reads the properties for a suffix and resolves it against the size', async () => {
+    const storage = headStorage({ etag: '"e1"', contentLength: 100 });
+    expect(await resolveRangeOffsets(storage, ranged({ suffix: 10 }))).toEqual({
+      offsets: { start: 90, end: 99 },
+    });
+    expect(storage.headBlobForDelivery).toHaveBeenCalledWith('covers', 'post-1/cover.png');
+  });
+
+  it('answers 304 to a matching If-None-Match before any bytes are read', async () => {
+    const storage = headStorage({ etag: '"e1"', contentLength: 100 });
+    const { response } = await resolveRangeOffsets(
+      storage,
+      ranged({ start: 0, end: 9 }, { 'if-none-match': '"e1"' })
+    );
+    expect(response.status).toBe(304);
+    expect(response.headers.ETag).toBe('"e1"');
+  });
+
+  it('keeps an absolute range once a non-matching conditional has been checked', async () => {
+    const storage = headStorage({ etag: '"e1"', contentLength: 100 });
+    const range = { start: 5, end: null };
+    expect(
+      await resolveRangeOffsets(storage, ranged(range, { 'if-none-match': '"other"' }))
+    ).toEqual({ offsets: range });
+  });
+
+  it('refuses a suffix nothing can satisfy with 416, and a missing blob with 404', async () => {
+    const empty = await resolveRangeOffsets(
+      headStorage({ etag: '"e1"', contentLength: 0 }),
+      ranged({ suffix: 10 })
+    );
+    expect(empty.response.status).toBe(416);
+    expect(empty.response.headers['Content-Range']).toBe('bytes */0');
+    const missing = await resolveRangeOffsets(headStorage(null), ranged({ suffix: 10 }));
+    expect(missing.response.status).toBe(404);
   });
 });
 

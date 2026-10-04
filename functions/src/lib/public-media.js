@@ -100,12 +100,8 @@ const json = (status, body) => ({
  * @returns {{start: number, end: number|null}|{suffix: number}|null}
  */
 export function parseRangeHeader(value) {
-  const raw = String(value || '').trim();
-  if (!raw) return null;
-  const match = /^bytes=(.*)$/i.exec(raw);
-  if (!match) return null;
-  const spec = match[1].trim();
-  if (!spec || spec.includes(',')) return null;
+  const spec = singleByteRangeSpec(value);
+  if (spec === null) return null;
 
   const suffix = /^-(\d+)$/.exec(spec);
   if (suffix) return { suffix: Number(suffix[1]) };
@@ -114,8 +110,18 @@ export function parseRangeHeader(value) {
   if (!pair) return null;
   const start = Number(pair[1]);
   const end = pair[2] === '' ? null : Number(pair[2]);
-  if (end !== null && end < start) return null;
-  return { start, end };
+  return end !== null && end < start ? null : { start, end };
+}
+
+/**
+ * The one range-spec after `bytes=`, or null for a header the route ignores:
+ * absent, another unit, empty, or more than one range.
+ */
+function singleByteRangeSpec(value) {
+  const match = /^bytes=(.*)$/i.exec(String(value || '').trim());
+  if (!match) return null;
+  const spec = match[1].trim();
+  return !spec || spec.includes(',') ? null : spec;
 }
 
 /**
@@ -218,27 +224,37 @@ async function head(storage, canHead, container, blobPath, request) {
   };
 }
 
+/**
+ * The inclusive offsets a ranged read is made with, or the answer that
+ * pre-empts the read. A conditional request or a suffix needs the blob's
+ * properties before any bytes are read: the first so a matching ETag answers
+ * 304 without a ranged download it would then discard, the second because a
+ * suffix is relative to a size this route does not know yet. One properties
+ * read serves both; a plain absolute range needs none.
+ *
+ * @returns {Promise<{offsets: {start: number, end: number|null}} | {response: object}>}
+ */
+export async function resolveRangeOffsets(storage, { container, blobPath, request, range }) {
+  const conditional = Boolean(request.headers?.get?.('if-none-match'));
+  if (!conditional && !('suffix' in range)) return { offsets: range };
+
+  const blob = await storage.headBlobForDelivery(container, blobPath);
+  if (!blob) return { response: notFound() };
+  if (etagMatches(request, blob.etag)) {
+    return { response: notModified(blob.etag, cacheControlFor(container, blobPath)) };
+  }
+  if (!('suffix' in range)) return { offsets: range };
+  const offsets = resolveRange(range, blob.contentLength);
+  return offsets ? { offsets } : { response: unsatisfiable(blob.contentLength) };
+}
+
 /** A single satisfiable-or-not byte range: 206, 416, or 304. */
 async function partial(storage, container, blobPath, request, range) {
   const cacheControl = cacheControlFor(container, blobPath);
-  // A conditional request or a suffix needs the blob's properties before
-  // any bytes are read: the first so a matching ETag answers 304 without
-  // a ranged download it would then discard, the second because a suffix
-  // is relative to a size this route does not know yet. One properties
-  // read serves both.
-  const conditional = Boolean(request.headers?.get?.('if-none-match'));
-  let offsets = range;
-  if (conditional || 'suffix' in range) {
-    const blob = await storage.headBlobForDelivery(container, blobPath);
-    if (!blob) return notFound();
-    if (etagMatches(request, blob.etag)) return notModified(blob.etag, cacheControl);
-    if ('suffix' in range) {
-      offsets = resolveRange(range, blob.contentLength);
-      if (!offsets) return unsatisfiable(blob.contentLength);
-    }
-  }
+  const resolved = await resolveRangeOffsets(storage, { container, blobPath, request, range });
+  if (resolved.response) return resolved.response;
 
-  const chunk = await storage.readBlobRangeForDelivery(container, blobPath, offsets);
+  const chunk = await storage.readBlobRangeForDelivery(container, blobPath, resolved.offsets);
   if (!chunk) return notFound();
   if (chunk.unsatisfiable) return unsatisfiable(chunk.totalLength);
 
@@ -266,6 +282,84 @@ async function full(storage, container, blobPath, request) {
   };
 }
 
+// ── the per-method responders ──────────────────────────────────────────────
+// Each takes the one request as `{ media: { storage, canRange, canHead },
+// container, blobPath, request, context, method, range }`.
+
+function respondHead({ media, container, blobPath, request, context }) {
+  if (!media.canHead) context.warn?.('getMedia: no headBlobForDelivery; HEAD via full read');
+  return head(media.storage, media.canHead, container, blobPath, request);
+}
+
+function respondPartial({ media, container, blobPath, request, range }) {
+  return partial(media.storage, container, blobPath, request, range);
+}
+
+/** A Range the storage cannot serve: warned, then the full answer (RFC 9110 permits ignoring it). */
+function respondFullIgnoringRange(req) {
+  req.context.warn?.('getMedia: ranged readers not wired; Range ignored, serving in full');
+  return respondFull(req);
+}
+
+function respondFull({ media, container, blobPath, request }) {
+  return full(media.storage, container, blobPath, request);
+}
+
+/**
+ * Guard → responder, tried in order; the first guard that holds answers.
+ * The ranged path needs both readers: bytes from one, and the size and ETag
+ * a suffix or a conditional needs from the other.
+ */
+const RESPONDERS = [
+  [(req) => req.method === 'HEAD', respondHead],
+  [(req) => req.range !== null && req.media.canRange && req.media.canHead, respondPartial],
+  [(req) => req.range !== null, respondFullIgnoringRange],
+  [() => true, respondFull],
+];
+
+/** Every outcome for one request, body included where the method allows one. */
+async function dispatch(media, request, context) {
+  const container = String(request.params?.container || '').trim();
+  const blobPath = String(request.params?.blobPath || '').trim();
+
+  // Order matters: an unknown container must not be distinguishable from a
+  // known-but-empty one by response shape, and neither reveals whether a
+  // private container exists.
+  if (!PUBLIC_MEDIA_CONTAINERS.has(container)) return notFound();
+  if (!isValidBlobPath(blobPath)) return notFound();
+
+  try {
+    const req = {
+      media,
+      container,
+      blobPath,
+      request,
+      context,
+      method: String(request.method || '').toUpperCase(),
+      range: parseRangeHeader(request.headers?.get?.('range')),
+    };
+    const [, respond] = RESPONDERS.find(([when]) => when(req));
+    return await respond(req);
+  } catch (error) {
+    if (error?.statusCode === 404 || error?.code === 'BlobNotFound') return notFound();
+    context.error('getMedia failed:', error);
+    return json(500, { error: 'Failed to read media' });
+  }
+}
+
+/** GET|HEAD /api/public/media/{container}/{*blobPath} */
+async function getMedia(media, request, context) {
+  const result = await dispatch(media, request, context);
+  // A HEAD response carries headers only, on every status: the 404s and
+  // the 500 above are shaped for GET, and a body on a HEAD is a protocol
+  // error the host would otherwise pass through.
+  if (String(request.method || '').toUpperCase() === 'HEAD' && result && 'body' in result) {
+    const { body: _dropped, ...headersOnly } = result;
+    return headersOnly;
+  }
+  return result;
+}
+
 /**
  * All three readers are required: the route registers HEAD and honours
  * Range, and `functions/public-media.js` wires all three. A storage that
@@ -282,54 +376,12 @@ async function full(storage, container, blobPath, request) {
  * }} deps.storage
  */
 export function createPublicMediaHandlers({ storage }) {
-  const canRange = typeof storage.readBlobRangeForDelivery === 'function';
-  const canHead = typeof storage.headBlobForDelivery === 'function';
-
-  /** Every outcome for one request, body included where the method allows one. */
-  async function dispatch(request, context) {
-    const container = String(request.params?.container || '').trim();
-    const blobPath = String(request.params?.blobPath || '').trim();
-
-    // Order matters: an unknown container must not be distinguishable from a
-    // known-but-empty one by response shape, and neither reveals whether a
-    // private container exists.
-    if (!PUBLIC_MEDIA_CONTAINERS.has(container)) return notFound();
-    if (!isValidBlobPath(blobPath)) return notFound();
-
-    try {
-      if (String(request.method || '').toUpperCase() === 'HEAD') {
-        if (!canHead) context.warn?.('getMedia: no headBlobForDelivery; HEAD via full read');
-        return await head(storage, canHead, container, blobPath, request);
-      }
-      const range = parseRangeHeader(request.headers?.get?.('range'));
-      if (range) {
-        // The ranged path needs both readers: bytes from one, and the size
-        // and ETag a suffix or a conditional needs from the other.
-        if (canRange && canHead) {
-          return await partial(storage, container, blobPath, request, range);
-        }
-        context.warn?.('getMedia: ranged readers not wired; Range ignored, serving in full');
-      }
-      return await full(storage, container, blobPath, request);
-    } catch (error) {
-      if (error?.statusCode === 404 || error?.code === 'BlobNotFound') return notFound();
-      context.error('getMedia failed:', error);
-      return json(500, { error: 'Failed to read media' });
-    }
-  }
-
+  const media = {
+    storage,
+    canRange: typeof storage.readBlobRangeForDelivery === 'function',
+    canHead: typeof storage.headBlobForDelivery === 'function',
+  };
   return {
-    /** GET|HEAD /api/public/media/{container}/{*blobPath} */
-    async getMedia(request, context) {
-      const result = await dispatch(request, context);
-      // A HEAD response carries headers only, on every status: the 404s and
-      // the 500 above are shaped for GET, and a body on a HEAD is a protocol
-      // error the host would otherwise pass through.
-      if (String(request.method || '').toUpperCase() === 'HEAD' && result && 'body' in result) {
-        const { body: _dropped, ...headersOnly } = result;
-        return headersOnly;
-      }
-      return result;
-    },
+    getMedia: (request, context) => getMedia(media, request, context),
   };
 }

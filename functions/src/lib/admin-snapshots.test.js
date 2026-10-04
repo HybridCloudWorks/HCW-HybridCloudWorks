@@ -143,6 +143,58 @@ describe("classification helpers", () => {
     expect(queueFilterFor("soft_deleted").params[0].value).toBe("rejected");
     expect(queueFilterFor("editing").params[0].value).toBe("editing"); // passthrough
   });
+
+  it("queueFilterFor answers the same three-key shape for every filter", () => {
+    const views = [
+      "needs_review",
+      "ready_to_publish",
+      "published_live",
+      "in_progress",
+      "soft_deleted",
+      "editing",
+    ];
+    for (const view of views) {
+      const filter = queueFilterFor(view);
+      expect(Object.keys(filter).sort(), view).toEqual([
+        "params",
+        "sortField",
+        "where",
+      ]);
+      expect(typeof filter.where, view).toBe("string");
+      expect(Array.isArray(filter.params), view).toBe(true);
+    }
+    expect(queueFilterFor("in_progress")).toEqual({
+      where: "ARRAY_CONTAINS(@statuses, c.contentStatus)",
+      params: [
+        {
+          name: "@statuses",
+          value: [
+            "approved",
+            "in_review",
+            "editing",
+            "forge_ready",
+            "needs_rework",
+          ],
+        },
+      ],
+      sortField: "updatedAt",
+    });
+    expect(queueFilterFor("soft_deleted")).toEqual({
+      where: "c.contentStatus = @status",
+      params: [{ name: "@status", value: "rejected" }],
+      sortField: "fetchedAt",
+    });
+    // A table lookup, not a property read: a prototype name is a passthrough status.
+    expect(queueFilterFor("constructor").params[0].value).toBe("constructor");
+    // Each call hands out its own status list, so a caller cannot mutate the table.
+    const first = queueFilterFor("needs_review").params[0].value;
+    first.push("tampered");
+    expect(queueFilterFor("needs_review").params[0].value).toEqual([
+      "draft",
+      "ingested",
+      "inspected",
+    ]);
+  });
 });
 
 describe("getQueueSnapshot", () => {

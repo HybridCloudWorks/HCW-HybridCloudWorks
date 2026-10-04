@@ -133,3 +133,22 @@ export function writeBuilderSnapshot(snapshot) {
     return false;
   }
 }
+
+const REUSE_IMAGE_STORAGE_KEY = 'contentforge_reuse_image';
+
+/**
+ * The image another page asked this builder to reuse as the hero: the
+ * `?reuseImage=` query wins, else the one the gallery left in localStorage,
+ * which is consumed (removed) on read so it is used once. '' when neither.
+ */
+export function takeReuseImage(search) {
+  const queryReuseImage = new URLSearchParams(search).get('reuseImage');
+  let cachedReuseImage = '';
+  try {
+    cachedReuseImage = window.localStorage.getItem(REUSE_IMAGE_STORAGE_KEY) || '';
+    window.localStorage.removeItem(REUSE_IMAGE_STORAGE_KEY);
+  } catch {
+    cachedReuseImage = '';
+  }
+  return queryReuseImage || cachedReuseImage;
+}

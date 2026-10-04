@@ -7,6 +7,8 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import {
+  WORKFLOW_ALERT_ACTIONS,
+  alertUpdateRefusal,
   createOpsHealthHandlers,
   buildWorkflowAlertUpdates,
   getWorkflowAlertStatus,
@@ -47,6 +49,53 @@ const ENV = {
 const fixed = { now: () => NOW, uuid: () => 'fixed-uuid', env: ENV };
 
 describe('helpers', () => {
+  it('alertUpdateRefusal refuses the body before any read, in the handler order', () => {
+    const body = (status, error) => ({ status, error });
+    const refusal = (fields) => {
+      const response = alertUpdateRefusal(fields);
+      return response && body(response.status, JSON.parse(response.body).error);
+    };
+    expect(refusal({ alertId: '', action: 'resolve', normalizedResolutionNote: 'x' })).toEqual(
+      body(400, 'alertId and action required')
+    );
+    expect(refusal({ alertId: 'a1', action: undefined, normalizedResolutionNote: '' })).toEqual(
+      body(400, 'alertId and action required')
+    );
+    const invalid = alertUpdateRefusal({ alertId: 'a1', action: 'snooze' });
+    expect(JSON.parse(invalid.body)).toEqual({
+      error: 'Invalid action',
+      validActions: ['acknowledge', 'resolve', 'reopen'],
+    });
+    expect(refusal({ alertId: 'a1', action: 'resolve', normalizedResolutionNote: '' })).toEqual(
+      body(400, 'resolutionNote is required when resolving an alert')
+    );
+    // Nothing refuses: every accepted action with what it needs.
+    for (const action of WORKFLOW_ALERT_ACTIONS) {
+      expect(alertUpdateRefusal({ alertId: 'a1', action, normalizedResolutionNote: 'done' })).toBe(
+        null
+      );
+    }
+    expect(WORKFLOW_ALERT_ACTIONS).toEqual(['acknowledge', 'resolve', 'reopen']);
+  });
+
+  it('buildWorkflowAlertUpdates stamps every action and writes nothing else for an unknown one', () => {
+    const base = { nowIso: '2026-01-01T00:00:00.000Z', actor: 'ops@example.test' };
+    expect(buildWorkflowAlertUpdates({ ...base, action: 'unknown' })).toEqual({
+      updatedAt: base.nowIso,
+      updatedBy: base.actor,
+    });
+    expect(Object.keys(buildWorkflowAlertUpdates({ ...base, action: 'reopen' }))).toEqual([
+      'updatedAt',
+      'updatedBy',
+      'active',
+      'status',
+      'resolvedAt',
+      'resolvedBy',
+      'resolutionNote',
+      'activationNotifiedAt',
+    ]);
+  });
+
   it('getWorkflowAlertStatus falls back through status -> active flag -> open', () => {
     expect(getWorkflowAlertStatus({ status: 'acknowledged' })).toBe('acknowledged');
     expect(getWorkflowAlertStatus({ active: false })).toBe('resolved');
