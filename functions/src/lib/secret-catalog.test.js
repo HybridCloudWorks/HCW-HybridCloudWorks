@@ -17,7 +17,12 @@ import { terraformSource } from '../../test/terraform-source.js';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { PROVIDERS } from './ai/router.js';
+import { KEYLESS_PROVIDERS, PROVIDERS } from './ai/router.js';
+
+// The providers with a secret behind them: the only ones the API-keys page can
+// show, and so the only ones whose verdicts the router reports (#849 added a
+// keyless one, Foundry, reached with the app's identity).
+const KEYED_PROVIDERS = PROVIDERS.filter((p) => !KEYLESS_PROVIDERS.includes(p));
 import {
   GENERATABLE_SECRETS,
   SECRET_CATALOG,
@@ -108,7 +113,7 @@ describe('secret catalogue ↔ Terraform', () => {
     // of names, since a name with no reporter behind it is the promise this
     // test exists to refuse.
     const probed = [...new Set(SECRET_CATALOG.filter((e) => e.probe).map((e) => e.probe))].sort();
-    expect(probed).toEqual([...PROVIDERS, 'publer', 'telegram'].sort());
+    expect(probed).toEqual([...KEYED_PROVIDERS, 'publer', 'telegram'].sort());
   });
 
   it('carries the Publer probe on BOTH the key and the workspace id', () => {
@@ -141,7 +146,7 @@ describe('AI provider help text (#815)', () => {
   const providerEntries = SECRET_CATALOG.filter((e) => PROVIDERS.includes(e.probe));
 
   it('covers every provider the router implements', () => {
-    expect(providerEntries.map((e) => e.probe).sort()).toEqual([...PROVIDERS].sort());
+    expect(providerEntries.map((e) => e.probe).sort()).toEqual([...KEYED_PROVIDERS].sort());
   });
 
   it('names no position in the order, which the AI Engine page can change', () => {

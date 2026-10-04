@@ -110,6 +110,29 @@ describe('the request', () => {
   });
 });
 
+describe('a rejection', () => {
+  it('reports no key verdict: a 401 or 403 is a missing role, and there is no API-keys row for it', async () => {
+    const onKeyVerdict = vi.fn(async () => {});
+    const fetchImpl = vi.fn(async () => ({
+      ok: false,
+      status: 403,
+      text: async () => JSON.stringify({ error: { message: 'no role' } }),
+    }));
+    const r = createAiRouter({
+      env: KEYS,
+      fetch: fetchImpl,
+      sleep: noSleep,
+      log: quiet,
+      getToken: async () => token('tok-1', 3_600_000),
+      onKeyVerdict,
+    });
+    await expect(r.callProvider({ provider: 'foundry', prompt: 'ping' })).rejects.toMatchObject({
+      status: 403,
+    });
+    expect(onKeyVerdict).not.toHaveBeenCalled();
+  });
+});
+
 describe('the token', () => {
   it('is fetched for the Cognitive Services scope and reused until five minutes before expiry', async () => {
     let now = 1_000_000;

@@ -232,6 +232,15 @@ const KEY_ENV = Object.freeze({
   foundry: 'FOUNDRY_ENDPOINT',
 });
 
+/**
+ * Providers with no secret behind them. A 401/403 from one of these is a
+ * missing role, not a bad key, so the router reports no key verdict for it:
+ * there is no API-keys row to turn red, and the secret catalogue (which the
+ * Terraform cross-check holds to the vault references exactly) carries no
+ * entry for it. secret-catalog.test.js pins the probed set to the rest.
+ */
+export const KEYLESS_PROVIDERS = Object.freeze(['foundry']);
+
 // Provider × purpose → [env var, default model].
 export const DEFAULT_MODEL_TABLE = Object.freeze({
   anthropic: {
@@ -996,7 +1005,10 @@ function createRouterContext({
     config,
     nvidiaLimit,
     nvidiaPacer,
-    reportKeyVerdict: (provider, verdict) => reportVerdict(KEY_ENV[provider], verdict),
+    reportKeyVerdict: (provider, verdict) =>
+      KEYLESS_PROVIDERS.includes(provider)
+        ? Promise.resolve()
+        : reportVerdict(KEY_ENV[provider], verdict),
     foundryToken: createFoundryTokenProvider({ getToken, now }),
   };
   ctx.openAiCompatible = openAiCompatibleTable(ctx);

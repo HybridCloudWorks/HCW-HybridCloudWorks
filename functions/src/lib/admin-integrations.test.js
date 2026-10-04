@@ -955,7 +955,7 @@ describe('AI routing by task (ADR 0033 §4)', () => {
       },
     });
     expect(body.catalogue.forgeDrafting.label).toBe('Forge drafting');
-    expect(body.providers).toEqual(['gemini', 'openai', 'anthropic', 'nvidia']);
+    expect(body.providers).toEqual(['gemini', 'openai', 'anthropic', 'nvidia', 'foundry']);
     expect(store.readDoc).toHaveBeenCalledWith('admin_settings', 'ai-routing', 'ai-routing');
   });
 
