@@ -93,6 +93,7 @@ function ProviderIcon({ provider }) {
     anthropic: '🟣',
     gemini: '🔵',
     nvidia: '🟩',
+    foundry: '🟦',
     perplexity: '🔍',
     azure: '🪟',
     bedrock: '🟠',
@@ -296,7 +297,7 @@ export function ProviderCard({ provider, onToggle, onModelChange, onTest }) {
  * than no switch at all — it reads as working.
  */
 /** Display names for providers placed per feature (#701). */
-const PLACED_PROVIDER_LABELS = { nvidia: 'NVIDIA' };
+const PLACED_PROVIDER_LABELS = { nvidia: 'NVIDIA', foundry: 'Foundry' };
 
 /**
  * What each placement means, in the words the select shows. 'order' is the
@@ -304,9 +305,9 @@ const PLACED_PROVIDER_LABELS = { nvidia: 'NVIDIA' };
  * that decision: in order, as a backup.
  */
 const PLACEMENT_OPTIONS = [
-  { value: 'first', label: 'First — free, others take over' },
+  { value: 'first', label: 'First — tried before every other provider' },
   { value: 'order', label: 'In order — the backup' },
-  { value: 'off', label: 'Off' },
+  { value: 'off', label: 'Off — never for this feature' },
 ];
 
 export function FeatureSwitches() {

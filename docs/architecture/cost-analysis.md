@@ -10,8 +10,11 @@ to carry described resources that were never created; see *Corrected
 
 **Currency:** USD
 
-**Budget ceilings:** two, both **subscription**-scoped — USD 150 on the
-application subscription (live) and USD 25 on Platform Management.
+**Budgets:** three. Two are **subscription**-scoped — USD 150 on the
+application subscription (live) and USD 25 on Platform Management — and
+since #849 (declared 2026-10-04, applied with the owner's next TFC run) one
+sits on the `rg-ai-site-prod-cus` resource group at USD 75 for the Microsoft
+Foundry account. A budget alerts at its thresholds; none of them stops spend.
 
 > **The branch this page kept citing is gone.** Several lines here described a
 > control as "declared in `fix/go-live-remediation`, **not applied**" — the
@@ -38,7 +41,7 @@ about:
 | What this page said | What is actually built |
 | --- | --- |
 | "Selective Private Link and network — $25–35, four endpoints" | **No private endpoint exists.** `grep private_endpoint infra/*.tf` returns nothing. The network posture that was built is service endpoints on the Functions integration subnet, VNet rules on Cosmos, Key Vault and both storage accounts, and default-`Deny` firewalls. That line is USD 0 |
-| "Azure OpenAI — $0–40" | **No Azure OpenAI account exists.** `oai-site-prod-cus` and its resource group were retired on 2026-08-19 ([Naming-Convention](../standards/naming-convention.md)); the subscription holds zero model quota. Model calls go to external provider APIs keyed from Key Vault, so AI spend is on the provider's bill and no Azure budget sees it |
+| "Azure OpenAI — $0–40" | **No Azure OpenAI account existed until #849.** `oai-site-prod-cus` and its resource group were retired on 2026-08-19 ([Naming-Convention](../standards/naming-convention.md)); the subscription holds zero model quota. From 2026-10-04 a Microsoft Foundry account, `ais-site-prod-cus-01` (gpt-5-nano and gpt-5-mini, Global Standard), is declared in `infra/foundry.tf` under a USD 75 resource-group budget, with the first measured month pending. Every other model call still goes to an external provider API keyed from Key Vault, on the provider's bill, where no Azure budget sees it |
 | "Resource-group monthly budget: USD 150" | The budget is **subscription**-scoped and has been since the workload split into six resource groups. A resource-group budget would have watched one of the six and ignored the other five (`infra/main.tf`, the `azurerm_consumption_budget_subscription.hcw` header) |
 | "`enable_ai = false` until model/capacity approval" | There is no `enable_ai` variable. Provider availability is decided at runtime by key presence in Key Vault (`functions/src/lib/ai/router.js`), not by a Terraform switch |
 | "Service-specific alerts for Function execution, Cosmos RU/429, Storage, Log Analytics ingestion, AI tokens" | **Zero alert rules of any kind existed** in either subscription when the review ran on 2026-08-24. Five were added and are now declared on `main` in `infra/observability.tf` — see [Alerting and support](../runbooks/alerting-and-support.md) |
@@ -245,10 +248,13 @@ same rule this page applies to every other figure.
 | --- | --- | ---: | --- |
 | `hcw-monthly-budget` | Subscription `sub-app-site-prod-cus` | USD 150 | The workload — Static Web Apps, Functions, Cosmos, storage, Key Vault |
 | `plat-mgmt-monthly-budget` | Subscription `sub-plat-mgmt-prod-cus` | USD 25 | Log Analytics ingestion and retention. **Declared, not applied** |
+| `hcw-foundry-monthly-budget` | Resource group `rg-ai-site-prod-cus` | USD 75 | The Microsoft Foundry account and its deployments (#849). **Declared 2026-10-04, applied with the owner's next TFC run**; first measured month pending |
 
-Both carry the same ladder: actual-cost notifications at 50/75/90/100% and a
-forecast notification at 100%, which is the one that leaves time to act. Both
-route to the ops action group *and* to `budget_alert_email` directly.
+The two subscription budgets carry the same ladder: actual-cost notifications
+at 50/75/90/100% and a forecast notification at 100%, which is the one that
+leaves time to act. The Foundry budget's ladder is 50/90/100% actual and 100%
+forecast. All three route to the ops action group *and* to
+`budget_alert_email` directly. A budget notifies; it does not stop spend.
 
 Two things about that are worth keeping in mind:
 

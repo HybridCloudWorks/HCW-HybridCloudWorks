@@ -36,9 +36,11 @@ locals {
     stor = "Content storage account and its blob containers — prevent_destroy"
     sec  = "Key Vault — prevent_destroy"
     conn = "Spoke virtual network and the Functions integration subnet"
-    # No `ai` group. It held the Azure OpenAI account, which was removed when
-    # AI moved to external provider APIs — a group with nothing in it is a
-    # group someone will put something unrelated into.
+    # Back since #849 (2026-10-04) for the Microsoft Foundry account and its
+    # budget. The earlier `ai` group held the Azure OpenAI account removed
+    # when AI moved to external provider APIs; this one holds exactly the
+    # account foundry.tf declares, and nothing unrelated goes in it.
+    ai = "Microsoft Foundry account, its deployments and its budget (foundry.tf)"
   }
 }
 

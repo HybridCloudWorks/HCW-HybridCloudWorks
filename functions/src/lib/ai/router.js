@@ -147,6 +147,31 @@
  * The weekly probe (lib/timers/ai-provider-probe.js) is the evidence for
  * placing it first again.
  *
+ * MICROSOFT FOUNDRY (#849, 2026-10-04). A fifth provider, `foundry`, on the
+ * OpenAI-compatible v1 chat endpoint of a Foundry account the estate owns
+ * (infra/foundry.tf): `${FOUNDRY_ENDPOINT}/openai/v1/chat/completions`, with
+ * the deployment name in `model`. Owner decision that day: of a USD 75 a
+ * month budget, the first call is Foundry as a PAID provider for content,
+ * with the cheapest text models — gpt-5-nano ($0.05 in / $0.40 out per 1M
+ * tokens) for short calls and gpt-5-mini ($0.25 / $2.00) for drafts and
+ * analysis. It differs from the other four in three ways:
+ *
+ *   - NO KEY. The account has local authentication off; the Function App's
+ *     system-assigned identity holds "Cognitive Services OpenAI User" and
+ *     the router sends an Entra token for the audience the Foundry v1
+ *     endpoint documents, https://ai.azure.com (FOUNDRY_TOKEN_SCOPE in the
+ *     environment overrides it), fetched through @azure/identity and cached
+ *     until five minutes before it expires. What makes the provider POSSIBLE is the
+ *     endpoint setting, which Terraform writes from the account; KEY_ENV
+ *     names it so every "has a key" check reads the same way. Locally,
+ *     `FOUNDRY_API_KEY` set in functions/.env sends an api-key header
+ *     instead, for a developer's own account.
+ *   - PLACED PER FEATURE, like NVIDIA: 'first' for the content features the
+ *     owner triggers, 'off' for the anonymous public explain route and for
+ *     the Gemini-only grounded call (features-catalogue.js).
+ *   - Its spend has its own Cost Management budget on the `ai` resource
+ *     group (USD 75, alerts at 50/90/100 %), beside the subscription one.
+ *
  * A Key Vault reference that did not resolve arrives as the literal
  * `@Microsoft.KeyVault(...)` string. That is not a key; `readKey` says so.
  */
@@ -203,7 +228,19 @@ const KEY_ENV = Object.freeze({
   openai: 'OPENAI_API_KEY',
   gemini: 'GEMINI_API_KEY',
   nvidia: 'NVIDIA_API_KEY',
+  // Not a key (header: MICROSOFT FOUNDRY): the endpoint Terraform sets. Its
+  // presence is what makes the provider available; the token is fetched.
+  foundry: 'FOUNDRY_ENDPOINT',
 });
+
+/**
+ * Providers with no secret behind them. A 401/403 from one of these is a
+ * missing role, not a bad key, so the router reports no key verdict for it:
+ * there is no API-keys row to turn red, and the secret catalogue (which the
+ * Terraform cross-check holds to the vault references exactly) carries no
+ * entry for it. secret-catalog.test.js pins the probed set to the rest.
+ */
+export const KEYLESS_PROVIDERS = Object.freeze(['foundry']);
 
 // Provider × purpose → [env var, default model].
 export const DEFAULT_MODEL_TABLE = Object.freeze({
@@ -252,6 +289,15 @@ export const DEFAULT_MODEL_TABLE = Object.freeze({
     analysis: ['CONTENTFORGE_NVIDIA_ANALYSIS_MODEL', 'z-ai/glm-5.3'],
     multimodal: ['CONTENTFORGE_NVIDIA_MULTIMODAL_MODEL', 'z-ai/glm-5.3'],
     general: ['CONTENTFORGE_NVIDIA_MODEL', 'z-ai/glm-5.3'],
+  },
+  // Microsoft Foundry (#849): deployment names, which infra/foundry.tf keeps
+  // equal to the model names. Mini for the work that reads a whole draft,
+  // nano for the short calls; the owner picks otherwise on the card.
+  foundry: {
+    draft: ['CONTENTFORGE_FOUNDRY_DRAFT_MODEL', 'gpt-5-mini'],
+    analysis: ['CONTENTFORGE_FOUNDRY_ANALYSIS_MODEL', 'gpt-5-mini'],
+    multimodal: ['CONTENTFORGE_FOUNDRY_MULTIMODAL_MODEL', 'gpt-5-mini'],
+    general: ['CONTENTFORGE_FOUNDRY_MODEL', 'gpt-5-nano'],
   },
 });
 
@@ -349,6 +395,15 @@ export const COST_TABLE = Object.freeze({
     'z-ai/glm-5.3-flash': [0, 0],
     'deepseek-ai/deepseek-v4.1-flash': [0, 0],
     default: [0, 0],
+  },
+  // Microsoft Foundry (#849): Global Standard, USD per 1M tokens, read from
+  // the Azure OpenAI pricing page on 2026-10-04. `default` is the mini rate
+  // so a deployment added on the card prices high rather than free.
+  foundry: {
+    'gpt-5-nano': [0.05, 0.4],
+    'gpt-5-mini': [0.25, 2.0],
+    'gpt-4.1-nano': [0.1, 0.4],
+    default: [0.25, 2.0],
   },
   replicate: {
     'meta/llama-3.1-405b-instruct': [0.65, 2.75],
@@ -564,6 +619,58 @@ function toGeminiParts(parts, prompt) {
 // NVIDIA API Catalog (#701).
 
 export const NVIDIA_BASE_URL = 'https://integrate.api.nvidia.com/v1';
+
+/**
+ * The Entra audience the Foundry v1 endpoint accepts. Microsoft's pages name
+ * two: the keyless-authentication guide for Foundry resources on the
+ * /openai/v1 path says tokens must carry `https://ai.azure.com/.default`,
+ * while older Azure OpenAI pages say `https://cognitiveservices.azure.com`.
+ * This is the documented one for the resource kind foundry.tf creates;
+ * FOUNDRY_TOKEN_SCOPE in the environment overrides it, so a 401 on the other
+ * audience is an app setting away rather than a deploy.
+ */
+export const FOUNDRY_TOKEN_SCOPE = 'https://ai.azure.com/.default';
+
+/** The audience to request: the environment's override, else FOUNDRY_TOKEN_SCOPE. */
+export const foundryTokenScope = (env) => readKey(env, 'FOUNDRY_TOKEN_SCOPE') || FOUNDRY_TOKEN_SCOPE;
+
+/** The account's base URL for the OpenAI v1 surface, from FOUNDRY_ENDPOINT without a trailing slash. */
+export function foundryBaseUrl(env) {
+  return readKey(env, KEY_ENV.foundry).replace(/\/+$/, '');
+}
+
+/**
+ * An Entra token for Foundry, fetched through @azure/identity and reused
+ * until five minutes before it expires (#849). `getToken(scope)` is the
+ * credential's own shape, `{ token, expiresOnTimestamp }`, so a test hands
+ * in a stub and production hands in DefaultAzureCredential: the Function
+ * App's system-assigned identity there, `az login` on a workstation.
+ */
+export function createFoundryTokenProvider({
+  getToken,
+  now = () => Date.now(),
+  scope = FOUNDRY_TOKEN_SCOPE,
+}) {
+  const EARLY_MS = 5 * 60_000;
+  let cached = null;
+  return async () => {
+    if (cached && cached.expiresOnTimestamp - now() > EARLY_MS) return cached.token;
+    cached = await getToken(scope);
+    return cached.token;
+  };
+}
+
+/**
+ * Production's token source: @azure/identity, imported only when Foundry is
+ * first called. The specifier is a variable with `@vite-ignore` because the
+ * frontend's contract tests import this module through Vite, which would
+ * otherwise try to resolve a package only the Function App installs.
+ */
+async function defaultGetToken(scope) {
+  const identity = '@azure/identity';
+  const { DefaultAzureCredential } = await import(/* @vite-ignore */ identity);
+  return new DefaultAzureCredential().getToken(scope);
+}
 
 /**
  * Requests per rolling minute this instance will send to NVIDIA.
@@ -814,8 +921,19 @@ export function createAiRouter({
   configTtlMs = 60_000,
   onKeyVerdict = null,
   now = () => Date.now(),
+  getToken = defaultGetToken,
 } = {}) {
-  const ctx = createRouterContext({ env, fetchImpl, sleep, log, store, configTtlMs, onKeyVerdict, now });
+  const ctx = createRouterContext({
+    env,
+    fetchImpl,
+    sleep,
+    log,
+    store,
+    configTtlMs,
+    onKeyVerdict,
+    now,
+    getToken,
+  });
   return {
     availableProviders: () => keyedProviders(ctx),
     getActiveAiProvider: () => activeProvider(ctx),
@@ -853,7 +971,17 @@ export function createAiRouter({
  * `defaultModelFor`, `generateText(ctx, …)` as `generateTextResponse`, and
  * so on; the factory above is the table.
  */
-function createRouterContext({ env, fetchImpl, sleep, log, store, configTtlMs, onKeyVerdict, now }) {
+function createRouterContext({
+  env,
+  fetchImpl,
+  sleep,
+  log,
+  store,
+  configTtlMs,
+  onKeyVerdict,
+  now,
+  getToken,
+}) {
   // With no store the loader reports "no configuration", and every path below
   // falls back to exactly the environment-only behaviour this router had before
   // the portal's settings were wired up. That is what keeps unit tests — and
@@ -899,7 +1027,11 @@ function createRouterContext({ env, fetchImpl, sleep, log, store, configTtlMs, o
     config,
     nvidiaLimit,
     nvidiaPacer,
-    reportKeyVerdict: (provider, verdict) => reportVerdict(KEY_ENV[provider], verdict),
+    reportKeyVerdict: (provider, verdict) =>
+      KEYLESS_PROVIDERS.includes(provider)
+        ? Promise.resolve()
+        : reportVerdict(KEY_ENV[provider], verdict),
+    foundryToken: createFoundryTokenProvider({ getToken, now, scope: foundryTokenScope(env) }),
   };
   ctx.openAiCompatible = openAiCompatibleTable(ctx);
   return ctx;
@@ -1231,6 +1363,12 @@ async function callAnthropic(
  * catalogue and an unaccepted field is a 400; an explicit `max_tokens`; a
  * longer timeout; `<think>` stripped from the answer. Built per router
  * because the pacing guard is the router's.
+ *
+ * Foundry's one difference is `auth`: a row without it sends the provider's
+ * key as the bearer; Foundry sends an Entra token, or the api-key header a
+ * developer set locally (header: MICROSOFT FOUNDRY). The URL is read when
+ * the table is built, so a router built without FOUNDRY_ENDPOINT carries a
+ * row it can never be routed to — availability is KEY_ENV's job.
  */
 function openAiCompatibleTable(ctx) {
   return {
@@ -1238,6 +1376,16 @@ function openAiCompatibleTable(ctx) {
       url: 'https://api.openai.com/v1/chat/completions',
       jsonAsResponseFormat: true,
       content: toOpenAiContent,
+    },
+    foundry: {
+      url: `${foundryBaseUrl(ctx.env)}/openai/v1/chat/completions`,
+      jsonAsResponseFormat: true,
+      content: toOpenAiContent,
+      auth: async () => {
+        const local = readKey(ctx.env, 'FOUNDRY_API_KEY');
+        if (local) return { 'api-key': local };
+        return { Authorization: `Bearer ${await ctx.foundryToken()}` };
+      },
     },
     nvidia: {
       url: `${NVIDIA_BASE_URL}/chat/completions`,
@@ -1256,14 +1404,16 @@ function openAiCompatibleTable(ctx) {
 async function callOpenAiCompatible(ctx, provider, args) {
   const { purpose, usageOut, timeoutMs } = args;
   const spec = ctx.openAiCompatible[provider];
-  const apiKey = readKey(ctx.env, KEY_ENV[provider]);
   const selectedModel = args.model || modelFor(ctx, provider, purpose);
   const body = openAiCompatibleBody(spec, selectedModel, args);
+  const headers = spec.auth
+    ? await spec.auth()
+    : { Authorization: `Bearer ${readKey(ctx.env, KEY_ENV[provider])}` };
   // Last, after every refusal that could still happen locally: a request
   // that is never sent must not spend a slot in the window.
   spec.pace?.();
   const data = await postJson(ctx.fetchImpl, spec.url, {
-    headers: { Authorization: `Bearer ${apiKey}` },
+    headers,
     body,
     ...timeoutArg(timeoutMs ?? spec.timeoutMs),
   });
@@ -1346,6 +1496,7 @@ const CALLERS = {
   openai: (ctx, args) => callOpenAiCompatible(ctx, 'openai', args),
   gemini: callGemini,
   nvidia: (ctx, args) => callOpenAiCompatible(ctx, 'nvidia', args),
+  foundry: (ctx, args) => callOpenAiCompatible(ctx, 'foundry', args),
 };
 
 /**

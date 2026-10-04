@@ -119,7 +119,7 @@ export const FEATURE_NAMES = Object.freeze(Object.keys(AI_FEATURES));
  * the portal can move it and switch it off like any other provider); a
  * placement then moves it or removes it for one feature.
  */
-export const PER_FEATURE_PROVIDERS = Object.freeze(['nvidia']);
+export const PER_FEATURE_PROVIDERS = Object.freeze(['nvidia', 'foundry']);
 
 export const PLACEMENTS = Object.freeze(['first', 'order', 'off']);
 
@@ -157,23 +157,39 @@ export const PLACEMENTS = Object.freeze(['first', 'order', 'off']);
  * moving a feature back to 'first' is a choice made on evidence. The Telegram
  * assistant is owner-only chat rather than content, and was 'order' already.
  */
-export const PROVIDER_PLACEMENT_DEFAULTS = Object.freeze({
-  nvidia: Object.freeze({
-    inspector: 'order',
-    critique: 'order',
-    forgeDrafting: 'order',
-    forgeGrading: 'order',
-    voiceCalibration: 'order',
-    socialCaption: 'order',
-    listenAndLearn: 'order',
-    podcastScript: 'order',
-    telegram: 'order',
-    forgeAssist: 'order',
-    altText: 'off',
+/**
+ * One provider's table: every content feature at `content`, altText as
+ * given (it sends images, so it depends on the provider's models), and the
+ * three locks 'off' for every per-feature provider: the anonymous public
+ * explain route and the Gemini-only grounded call.
+ */
+const placements = ({ content, altText }) =>
+  Object.freeze({
+    inspector: content,
+    critique: content,
+    forgeDrafting: content,
+    forgeGrading: content,
+    voiceCalibration: content,
+    socialCaption: content,
+    listenAndLearn: content,
+    podcastScript: content,
+    telegram: content,
+    forgeAssist: content,
+    altText,
     sourceGrounding: 'off',
     pricingExplain: 'off',
     landingZoneExplain: 'off',
-  }),
+  });
+
+export const PROVIDER_PLACEMENT_DEFAULTS = Object.freeze({
+  // The backup since 2026-09-29 (the comment above); its text models are not
+  // chosen for images.
+  nvidia: placements({ content: 'order', altText: 'off' }),
+  // Microsoft Foundry (#849). Owner decision 2026-10-04: first for the
+  // content features, not for the public route. It is a paid provider under
+  // its own budget, so 'first' is the point of it; altText is included
+  // because gpt-5-mini reads images.
+  foundry: placements({ content: 'first', altText: 'first' }),
 });
 
 /**

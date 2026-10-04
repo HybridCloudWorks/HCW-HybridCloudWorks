@@ -519,6 +519,28 @@ variable "purge_protection_enabled" {
 # -----------------------------------------------------------------------------
 # Budget
 # -----------------------------------------------------------------------------
+variable "foundry_account_name" {
+  description = <<-EOT
+    The Microsoft Foundry (AIServices) account the `foundry` provider calls
+    (#849). Also its custom subdomain, so it must be globally unique, lowercase
+    letters, digits and hyphens: the router reaches
+    https://<name>.openai.azure.com/openai/v1/chat/completions.
+  EOT
+  type        = string
+  default     = "ais-site-prod-cus-01"
+
+  validation {
+    condition     = can(regex("^[a-z0-9][a-z0-9-]{1,62}$", var.foundry_account_name))
+    error_message = "foundry_account_name must be 2-63 lowercase letters, digits or hyphens."
+  }
+}
+
+variable "foundry_budget_amount_usd" {
+  description = "Monthly budget amount in USD for the Foundry resource group's alerts (#849, owner decision 2026-10-04). A budget notifies at its thresholds; it does not stop spend"
+  type        = number
+  default     = 75
+}
+
 variable "budget_amount_usd" {
   description = "Monthly budget ceiling in USD for the APPLICATION subscription"
   type        = number

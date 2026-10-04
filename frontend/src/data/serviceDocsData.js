@@ -10,6 +10,7 @@
  *  Anthropic   — https://docs.anthropic.com
  *  OpenAI      — https://platform.openai.com/docs
  *  NVIDIA API  — https://build.nvidia.com/models
+ *  Foundry     — https://learn.microsoft.com/azure/foundry/
  *  Gemini API   — https://ai.google.dev/gemini-api/docs
  *  Perplexity  — https://docs.perplexity.ai
  *  Azure OAI   — https://learn.microsoft.com/en-us/azure/ai-services/openai
@@ -746,6 +747,140 @@ export const SERVICE_DOCS = {
       {
         label: 'API keys',
         url: 'https://build.nvidia.com/settings/api-keys',
+      },
+    ],
+  },
+
+  // ── Microsoft Foundry ────────────────────────────────────────────────────
+  foundry: {
+    id: 'foundry',
+    name: 'Microsoft Foundry',
+    type: 'ai_provider',
+    tagline: 'GPT-5 nano and mini on an Azure account the estate owns, paid, under its own budget.',
+    requirements: [
+      {
+        label: 'Terraform applied',
+        detail:
+          'infra/foundry.tf creates the account, the two deployments, the role for the app and the budget; the owner applies it through TFC',
+        required: true,
+      },
+      {
+        label: 'Azure Function App setting',
+        detail: 'FOUNDRY_ENDPOINT, written by Terraform from the account; nothing is seeded',
+        required: true,
+      },
+      {
+        label: 'Entra admin access',
+        detail: 'Required to use the authenticated AI Engine routes',
+        required: true,
+      },
+    ],
+    hcwUses: [
+      {
+        feature: 'ContentForge Pipeline',
+        usage:
+          'First for the content features the owner triggers (drafting, grading, the inspector, captions, alt text, Listen & Learn and podcast scripts), unless Where AI is used places it otherwise. Locked off the anonymous public explain route and the grounded call.',
+        files: ['functions/src/lib/ai/router.js', 'functions/src/lib/ai/features-catalogue.js'],
+        status: HCW_STATUS.ACTIVE,
+      },
+      {
+        feature: 'AI Engine Test and the weekly probe',
+        usage:
+          "The card's Test and the Monday 06:15 UTC probe record its latency; Usage & Cost prices every call at the Global Standard rates.",
+        files: ['functions/src/lib/ai/proxy.js', 'functions/src/lib/timers/ai-provider-probe.js'],
+        status: HCW_STATUS.ACTIVE,
+      },
+    ],
+    sections: {
+      install: {
+        title: 'Configure',
+        steps: [
+          {
+            heading: 'Apply the Terraform',
+            body: "infra/foundry.tf declares the AIServices account (local authentication off), the gpt-5-nano and gpt-5-mini deployments, the Cognitive Services OpenAI User role for the Function App identity, and a USD 75 monthly budget on the ai resource group. The TFC run is the owner's; after it, FOUNDRY_ENDPOINT is on the Function App and the card reads Connected after Test.",
+            codes: [],
+          },
+          {
+            heading: 'Local development',
+            body: 'With no FOUNDRY_API_KEY, the router asks @azure/identity for a token, which on a workstation is the az login session; that account needs Cognitive Services OpenAI User on the resource. A developer with a Foundry account of their own can set FOUNDRY_ENDPOINT and FOUNDRY_API_KEY in functions/.env instead. The command prompts for the key and never shows it.',
+            codes: [
+              {
+                lang: 'powershell',
+                label: 'Append to functions/.env (repository root)',
+                content:
+                  '$k = Read-Host -AsSecureString "Foundry key"; Add-Content -Path functions/.env -Value ("FOUNDRY_API_KEY=" + [System.Net.NetworkCredential]::new("", $k).Password)',
+              },
+            ],
+          },
+        ],
+      },
+      use: {
+        title: 'Use',
+        steps: [
+          {
+            heading: 'Available models',
+            body: 'The deployment names are the model names. Leave the card on Auto and the router uses mini for drafts and analysis and nano for short calls; pick one to pin it for every purpose.',
+            codes: [
+              {
+                lang: 'text',
+                label: 'Model reference (USD per 1M tokens, Global Standard, 2026-10-04)',
+                content:
+                  'gpt-5-nano — $0.05 in / $0.40 out; short calls and captions\n' +
+                  'gpt-5-mini — $0.25 in / $2.00 out; drafts, grading, analysis',
+              },
+            ],
+          },
+          {
+            heading: 'Use the AI Engine Playground',
+            body: 'Navigate to /admin/ai-engine → AI Services or Playground → select "Microsoft Foundry" → click Test or Send. Requests are authenticated with Entra and proxied by Azure Functions, which signs in to Foundry with its own identity.',
+            codes: [],
+          },
+          {
+            heading: 'Watch the budget',
+            body: 'The Foundry resource group has its own Cost Management budget of USD 75 a month, with alerts at 50, 90 and 100 % actual and 100 % forecast to the ops action group. A budget alerts; it does not stop spend, so the response to an alert is to turn the provider off here. The Usage & Cost tab prices each call from the same rates.',
+            codes: [],
+          },
+        ],
+      },
+      uninstall: {
+        title: 'Disconnect',
+        steps: [
+          {
+            heading: 'Disable in AI Engine',
+            body: 'Turn Foundry off, or change its placement under Where AI is used, in /admin/ai-engine. The Azure API honors the stored configuration on every request.',
+            codes: [],
+          },
+          {
+            heading: 'Remove the account',
+            body: 'Remove foundry.tf and the FOUNDRY_ENDPOINT setting and apply; with no endpoint the router treats the provider as absent and the others serve as before. There is no key to revoke.',
+            codes: [],
+          },
+        ],
+      },
+      advanced: {
+        title: 'Advanced',
+        steps: [
+          {
+            heading: 'Token, not key',
+            body: 'The router fetches an Entra token for https://ai.azure.com/.default (the audience the Foundry v1 endpoint documents; the FOUNDRY_TOKEN_SCOPE app setting overrides it) through @azure/identity and reuses it until five minutes before expiry. A 401 or 403 from Foundry therefore means the role assignment or the audience, not a secret: check that the Function App identity holds Cognitive Services OpenAI User on the account.',
+            codes: [],
+          },
+          {
+            heading: 'Reasoning models and max_tokens',
+            body: 'GPT-5 deployments refuse the max_tokens field, so the row sends none, as for OpenAI; JSON generation asks for response_format json_object with one repair round trip.',
+            codes: [],
+          },
+        ],
+      },
+    },
+    references: [
+      {
+        label: 'Microsoft Foundry documentation',
+        url: 'https://learn.microsoft.com/azure/foundry/',
+      },
+      {
+        label: 'Azure OpenAI pricing',
+        url: 'https://azure.microsoft.com/pricing/details/azure-openai/',
       },
     ],
   },

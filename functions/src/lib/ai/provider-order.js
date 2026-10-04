@@ -16,5 +16,16 @@
  * a page, write alt text, grade a draft — is well inside what the cheap model
  * does correctly. `CONTENTFORGE_AI_PROVIDER` still pins a provider outright,
  * and per-provider `order` in the portal overrides this list.
+ *
+ * Foundry (#849, 2026-10-04) is appended too and is also placed per feature:
+ * 'first' for the content features the owner triggers, 'off' for the public
+ * ones. Its global position is last so a stored card that predates it keeps
+ * its order; the placement is what moves it to the front where it serves.
  */
-export const DEFAULT_PROVIDER_ORDER = Object.freeze(['gemini', 'openai', 'anthropic', 'nvidia']);
+export const DEFAULT_PROVIDER_ORDER = Object.freeze([
+  'gemini',
+  'openai',
+  'anthropic',
+  'nvidia',
+  'foundry',
+]);
