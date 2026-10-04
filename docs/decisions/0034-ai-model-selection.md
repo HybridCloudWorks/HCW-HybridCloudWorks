@@ -64,7 +64,7 @@ Three documents and two code tables replace the three overlapping controls.
 | **Model catalogue** | `admin_config/ai-model-catalog` (Cosmos) | Every model the site may select, per provider, with capabilities, pricing, context and status. Populated by a timer from each provider's list endpoint, enriched from a code table, editable only for `hidden` and `pinnedLabel`. |
 | **Task registry** | `functions/src/lib/ai/tasks.js` (code) | Every AI task the site runs, with its modality, the capability it needs, whether it is public-facing, and its recommended model with the reason. Replaces `AI_FEATURES` as the unit of configuration; the feature switches stay. |
 | **Selection document** | `admin_settings/ai-routing` v2 (Cosmos) | The global priority list and the per-task mode and chain. Replaces provider `order`, per-feature placement and the v1 routes. |
-| **Provider adapters** | `functions/src/lib/ai/providers/<id>.js` | Today's rows in `router.js` made explicit: how to call, how to list models, which capabilities the provider can carry, and policy flags (`trialTier`, `metered`). |
+| **Provider adapters** | `functions/src/lib/ai/providers/<id>.js` | Today's rows in `router.js` made explicit: how to call, how to list models, which capabilities the provider can carry, policy flags (`trialTier`, `metered`), and `recommendedByModality` — the provider's own best model per modality (`text`, `json`, `vision`, …), with a reason and an `asOf` date, reviewed like any other code table. |
 | **Resolver** | `functions/src/lib/ai/select.js` | One pure function: (task, selection, catalogue, availability) → ordered chain of `{provider, model, why}`. The router calls it and nothing else decides. |
 
 ### 2. Data model
@@ -98,8 +98,13 @@ Three documents and two code tables replace the three overlapping controls.
 ```
 
 `status` is `live | retired | unknown`: `retired` when a model the catalogue
-knew is absent from two consecutive refreshes, `unknown` when the provider's
-list could not be read (the last good list is kept and the page says so).
+knew is absent from two consecutive *successful* refreshes, `unknown` only
+for a model never confirmed by a provider list (a manual entry awaiting its
+first refresh). A refresh that fails changes no model's status: each
+provider carries `refresh: { lastOk, lastAttempt, lastError }`, the page
+shows the age from `lastOk`, and a model whose provider's `lastOk` is older
+than two refresh periods is treated as `stale` — still eligible, badged on
+the page, never recommended until the next successful refresh.
 `capabilities` come from the enrichment table keyed by id pattern, never from
 the provider's free text; a model with no row is `["text"]` and **unpriced**,
 and an unpriced model is selectable only by explicit choice, never by
@@ -144,7 +149,7 @@ instead of their own fields.
   },
   "tasks": {
     "forgeDrafting": { "mode": "recommended" },
-    "inspector":     { "mode": "global" },
+    "inspector":     { "mode": "global", "exclude": ["nvidia"] },
     "podcastVoice":  { "mode": "custom", "chain": [{ "provider": "elevenlabs", "model": "eleven_v3" }], "thenGlobal": false },
     "pricingExplain": { "mode": "global" }
   },
@@ -155,10 +160,18 @@ instead of their own fields.
 
 `global.priority` is the editable Priority 1, 2, 3 … list; a `model` of
 `null` means "that provider's recommended model for the task's modality",
-so one list serves text and vision alike. A task's `mode` is
+read from the adapter's `recommendedByModality` table (code, reviewed, with
+a reason and an `asOf` date per entry, refreshed in the same pull request as
+a pricing row), so one list serves text and vision alike. A provider whose
+table has no entry for the task's modality is skipped for that task and the
+page says so; the owner can always name a concrete model in the list
+instead. A task's `mode` is
 `recommended | global | custom`; `chain` exists only for `custom`;
 `thenGlobal` says whether the global list follows the chain (default true,
 so a custom chain can never leave a task with fewer options than the list).
+`exclude` lists providers that never serve this task whatever the mode or
+the global list says — the administrator's "off" for one task, kept apart
+from the code-level locks, which no document can lift.
 
 ### 3. Precedence
 
@@ -174,7 +187,8 @@ For one call, in order, and the first rule that yields a model wins:
 4. **Task mode `global`** (the default for every task) → the global priority
    list, Priority 1 first.
 5. **Always, applied to every candidate:** the provider is enabled and holds
-   a key (or endpoint); the model is `live` and carries `needs`; and the
+   a key (or endpoint); the provider is not in the task's `exclude` list;
+   the model is `live` or `stale` (below) and carries `needs`; and the
    policy locks hold — a `trialTier` provider never serves a `public: true`
    task, `sourceGrounding` is Gemini-only — so no document can place a
    provider where code forbids it. The page shows a locked candidate as
@@ -256,9 +270,10 @@ models that a task or the priority list still names.
 - `recommended` pointing at a retired or unpriced model falls through to
   `global` and is flagged; the registry's `asOf` makes a stale
   recommendation visible.
-- Catalogue refresh failure keeps the last good list, sets the provider's
-  models to `status: unknown`, and the page shows the age; selection keeps
-  working from the stored list.
+- Catalogue refresh failure keeps the last good list and every model's
+  last-known status, records the error on the provider's `refresh` field,
+  and the page shows the age; selection keeps working from the stored list,
+  with `stale` models eligible but not recommended (§2).
 - Concurrent edits: the selection document carries `updatedAt`, and a save
   sends the value it read; a mismatch returns 409 and the page reloads
   rather than overwriting.
@@ -270,8 +285,11 @@ models that a task or the priority list still names.
   `order` → `global.priority` in that order with each card's pin as its
   `model`; v1 routes → `custom` chains with `thenGlobal: true`; a placement
   of `first` → that provider prepended to the task's chain; `order` →
-  nothing; `off` → nothing (the locks move to the task registry). Tasks not
-  touched by any of these start in `global` mode.
+  nothing; `off` → the provider added to the task's `exclude` list, which
+  `applyFeaturePlacement` removed it with today and the resolver's rule 5
+  removes it with tomorrow (the code-level locks move to the task registry
+  and need no document). Tasks not touched by any of these start in
+  `global` mode.
 
 ### 7. Extensibility and model onboarding
 
