@@ -3,7 +3,7 @@ title: Docker Desktop for the labs
 subtitle: Install Docker Desktop on Windows or macOS, find your way round its dashboard, give it what the lab image needs, and run the labs' follow-along line in a folder of your own.
 date: 2026-09-29
 track: how-to
-part: 2 of 2
+part: 2 of 3
 tags: [docker, docker-desktop, containers, wsl, labs]
 reading: 13
 ---

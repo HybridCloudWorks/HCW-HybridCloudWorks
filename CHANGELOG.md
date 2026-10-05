@@ -19,6 +19,27 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Docker article series, part 3: "Publishing to Docker Hub from GitHub
+  Actions without a token" (#787).** `docs/content/blog-docker-03-docker-hub-oidc.md`,
+  a how-to taken from the live setup (#790, the `publish-dockerhub` job and
+  the Docker Hub publishing runbook): why a stored Docker token is the
+  liability, how the OIDC exchange works (GitHub's ID token for the audience
+  `https://identity.docker.com`, the RFC 8693 exchange at Docker, a 300 s
+  token), finding the subject the repository presents (`gh api
+  .../actions/oidc/customization/sub` and the immutable-form string built
+  from the owner and repository IDs, plus a step that prints a real token's
+  claims), the connection form in Docker Home with every field value, the ID
+  and switch as repository variables, the job itself (login with no
+  password, copy by digest with `--prefer-index=false` and a read-back,
+  one attestation per registry), verification from the outside (a pull by
+  the GHCR digest, `gh attestation verify --bundle-from-oci --source-ref`),
+  deleting the old secret, and the failure table (`400 access_denied` and
+  the explain step, `insufficient_scope`, the expired token, the digest
+  mismatch, the plan gate), with the one-off local copy for an organisation
+  that cannot create a connection yet. Parts 1 and 2 now read `of 3`. The
+  owner imports it from /admin/drafts and sends it to In Review; the
+  article's names are the template's generic ones, and the verification
+  runs against this site's real image so the output is real.
 - **Replicate image spend is recorded and bounded (owner request
   2026-10-05).** Replicate bills on its own account, where no Azure budget
   sees it, and until now a generated image carried a per-image price for
