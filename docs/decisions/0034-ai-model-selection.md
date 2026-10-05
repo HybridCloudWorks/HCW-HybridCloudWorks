@@ -1,6 +1,6 @@
 # ADR 0034: AI model selection — one priority list, per-task overrides, a live model catalogue
 
-**Status:** Proposed 2026-10-04 (owner brief that day; design only, no code in this record)
+**Status:** Accepted 2026-10-04 (owner brief and acceptance the same day; design only, the slices are board issues)
 
 ## Context
 
