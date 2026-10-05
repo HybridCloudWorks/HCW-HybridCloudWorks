@@ -428,8 +428,8 @@ export default function SettingsTab({ hub }) {
         sets the latest application directly, outside the funnel, and the record says it was set
         here.
       </p>
-      <ReadsStatus reads={[programs]} label="programs" />
-      {allLanded([programs]) && (
+      <ReadsStatus reads={[programs, applications]} label="programs and applications" />
+      {allLanded([programs, applications]) && (
         <>
           <div className="flex justify-end">
             <Button size="sm" onClick={() => setEditing({})}>

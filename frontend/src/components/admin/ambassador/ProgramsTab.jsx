@@ -221,12 +221,12 @@ export default function ProgramsTab({ hub, nav }) {
                     <CardTitle className="flex items-start justify-between gap-2 text-base">
                       <span>{program.name}</span>
                       <span className="flex flex-wrap justify-end gap-1">
-                        {program.membershipStatus && program.membershipStatus !== 'none' && (
-                          <StatusBadge
-                            size="xs"
-                            status={MEMBERSHIP_STATUS[program.membershipStatus]}
-                          />
-                        )}
+                        <StatusBadge
+                          size="xs"
+                          status={
+                            MEMBERSHIP_STATUS[program.membershipStatus] || MEMBERSHIP_STATUS.none
+                          }
+                        />
                         <StatusBadge
                           size="xs"
                           status={

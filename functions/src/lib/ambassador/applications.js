@@ -44,6 +44,11 @@ const applicationDefaults = () => ({
 export async function createApplication(ctx, request, auth) {
   const loaded = await loadCreate(ctx, request, KINDS.application);
   if (loaded.error) return loaded.error;
+  // A control field for PATCH (patchApplication checks the role); on a
+  // create it would be stored as data by the spread below.
+  if ('statusOverride' in loaded.value) {
+    return json(400, { error: 'statusOverride is accepted only when updating an application' });
+  }
   const program = await ctx.readKind('program', loaded.value.programId);
   if (!program) return json(400, { error: `Unknown programId ${loaded.value.programId}` });
   const stamp = ctx.nowIso();
@@ -151,7 +156,26 @@ export async function patchApplication(ctx, request, auth) {
     override: Boolean(statusOverride),
   });
   if (refused) return refused;
-  const updated = await ctx.store.patchDoc(CONTAINER, id, { ...updates, updatedAt: stamp });
+  // The history row above was derived from `existing`: write only if that
+  // is still what is stored, so two Settings changes at once cannot each
+  // append to the same old history and the later one erase the first.
+  let updated;
+  try {
+    updated = await ctx.store.patchDoc(
+      CONTAINER,
+      id,
+      { ...updates, updatedAt: stamp },
+      existing._etag ? { ifMatch: existing._etag } : {}
+    );
+  } catch (error) {
+    if (error?.code === 412 || error?.statusCode === 412) {
+      return json(409, {
+        error: 'The application changed since it was read; reload and try again',
+        code: 'CONFLICT',
+      });
+    }
+    throw error;
+  }
   await ctx.audit('ambassador_application_updated', auth, request, {
     applicationId: id,
     fields: Object.keys(updates),

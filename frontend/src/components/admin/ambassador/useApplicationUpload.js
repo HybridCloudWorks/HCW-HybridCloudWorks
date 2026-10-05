@@ -21,8 +21,22 @@ export const UPLOAD_ACCEPT = 'image/*,.pdf,.docx,.xlsx,.pptx,.csv,.txt,.md';
 export const isUploadable = (file) =>
   Boolean(file?.type) && (file.type.startsWith('image/') || DOCUMENT_TYPES.includes(file.type));
 import { useState } from 'react';
-import { postJSON } from '@/lib/api';
+import { authedFetch, postJSON } from '@/lib/api';
 import { useToast } from '@/components/ui/use-toast';
+
+const PRIVATE_CONTAINER = 'speakerevents';
+
+/** What identifies a stored file: its private path, else its URL. */
+export const fileKey = (file) => file?.path || file?.url || '';
+
+/** The download route for a private reference, path encoded segment by segment. */
+export function downloadPath(file) {
+  const encoded = String(file.path)
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+  return `cms/ambassador/files/${encodeURIComponent(file.container || PRIVATE_CONTAINER)}/${encoded}`;
+}
 
 function readAsBase64(file) {
   return new Promise((resolve, reject) => {
@@ -45,14 +59,18 @@ export default function useApplicationUpload(application, hub) {
   const [uploading, setUploading] = useState(false);
 
   const store = async (file) => {
-    const result = await postJSON('cms/uploads/speakerevents', {
+    const result = await postJSON(`cms/uploads/${PRIVATE_CONTAINER}`, {
       path: uploadPath(application.id, file),
       contentType: file.type,
       dataBase64: await readAsBase64(file),
     });
+    // A private container answers no URL; the reference is what is kept,
+    // and the editor-guarded download route serves it (review on #873).
     const entry = {
       name: file.name,
-      url: result.url,
+      url: result.url || null,
+      container: result.container || PRIVATE_CONTAINER,
+      path: result.path,
       bytes: file.size,
       uploadedAt: new Date().toISOString(),
     };
@@ -89,15 +107,33 @@ export default function useApplicationUpload(application, hub) {
     }
   };
 
-  const removeFile = (url) =>
+  const removeFile = (key) =>
     hub.writes.patchApplication(
       application.id,
       {
-        files: (application.files || []).filter((f) => f.url !== url),
-        images: (application.images || []).filter((f) => f.url !== url),
+        files: (application.files || []).filter((f) => fileKey(f) !== key),
+        images: (application.images || []).filter((f) => fileKey(f) !== key),
       },
       { quiet: true }
     );
 
-  return { uploading, upload, removeFile };
+  /** Fetch a private file with the admin token and hand it to the browser as a download. */
+  const download = async (file) => {
+    try {
+      const res = await authedFetch(downloadPath(file), { method: 'GET' });
+      const blob = await res.blob();
+      const href = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = href;
+      anchor.download = file.name || 'file';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(href);
+    } catch (err) {
+      toast({ title: 'Download failed', description: err?.message, variant: 'destructive' });
+    }
+  };
+
+  return { uploading, upload, removeFile, download };
 }

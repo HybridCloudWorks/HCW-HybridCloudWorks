@@ -11,6 +11,7 @@
  * super_admin changes program settings (roles.js).
  */
 import { randomUUID } from 'node:crypto';
+import { createFileDownload } from './files.js';
 import { createApplication, listApplications, patchApplication } from './applications.js';
 import { createEvidence, importEvidence, listEvidence, listImportSources } from './evidence.js';
 import { CONTAINER } from './model.js';
@@ -88,6 +89,7 @@ async function readiness(ctx, request) {
  * @param {object} deps
  * @param {{ requireRole: Function }} deps.guard
  * @param {{ queryDocs: Function, readDoc: Function, upsertDoc: Function, patchDoc: Function }} deps.store
+ * @param {{ readBlobForDelivery: Function }|null} [deps.storage] blob storage for the private file download
  * @param {() => Date} [deps.now]
  * @param {() => string} [deps.uuid]
  * @param {{ error?: Function, warn?: Function }} [deps.log]
@@ -95,6 +97,7 @@ async function readiness(ctx, request) {
 export function createAmbassadorHandlers({
   guard,
   store,
+  storage = null,
   now = () => new Date(),
   uuid = randomUUID,
   log = console,
@@ -102,6 +105,8 @@ export function createAmbassadorHandlers({
   const ctx = createContext({ store, now, uuid, log });
   const guarded = (role, name, fn) => guardedHandler({ guard, ctx }, role, name, fn);
   return {
+    /** GET cms/ambassador/files/{container}/{*blobPath} — a privately stored file, as a download. */
+    downloadFile: guarded('editor', 'download file', createFileDownload({ storage })),
     listPrograms: guarded('editor', 'list programs', listPrograms),
     createProgram: guarded('super_admin', 'create program', createProgram),
     /** `enabled:false` disables; nothing here deletes. */

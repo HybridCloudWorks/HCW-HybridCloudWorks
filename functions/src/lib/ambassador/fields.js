@@ -5,6 +5,7 @@
  * never throwing: refusal is the validator's job.
  */
 import { isHttpUrl, toCalendarDate } from './model.js';
+import { isValidBlobPath } from '../blob-paths.js';
 
 export const str = (value, max = 4000) =>
   typeof value === 'string' ? value.trim().slice(0, max) : '';
@@ -37,16 +38,27 @@ export function cleanLinks(value) {
     .slice(0, 50);
 }
 
+/**
+ * A stored file is either a URL (a public container's delivery URL, or a
+ * link) or a PRIVATE reference `{ container, path }` that only the
+ * editor-guarded download route serves (ambassador/files.js). An entry with
+ * neither is nothing to keep. Until 2026-10-05 only the URL form existed,
+ * and a private upload — which answers no URL — was dropped here.
+ */
 export function cleanFiles(value) {
   if (!Array.isArray(value)) return [];
   return value
     .map((item) => {
       if (!item || typeof item !== 'object') return null;
       const url = str(item.url, 2000);
-      if (!url) return null;
+      const rawPath = str(item.path, 300);
+      const path = rawPath && isValidBlobPath(rawPath) ? rawPath : '';
+      if (!url && !path) return null;
       return {
-        name: str(item.name, 300) || url.split('/').pop(),
-        url,
+        name: str(item.name, 300) || (path || url).split('/').pop(),
+        url: url || null,
+        container: path ? str(item.container, 80) || 'speakerevents' : null,
+        path: path || null,
         bytes: Number.isFinite(Number(item.bytes)) ? Number(item.bytes) : null,
         uploadedAt: item.uploadedAt ? String(item.uploadedAt) : null,
       };

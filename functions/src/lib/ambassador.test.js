@@ -393,6 +393,95 @@ describe('applications', () => {
     expect(plain.status).toBe(400);
   });
 
+  it('refuses statusOverride on a create, and answers 409 when the record changed under a patch', async () => {
+    const { h, store } = await seeded('super_admin');
+    const refused = await h.createApplication(
+      makeRequest({ body: { programId: 'program-microsoft-mct', statusOverride: true } }),
+      context
+    );
+    expect(refused.status).toBe(400);
+
+    const id = parse(
+      await h.createApplication(
+        makeRequest({ body: { programId: 'program-microsoft-mct' } }),
+        context
+      )
+    ).id;
+    store.data.get('ambassador').get(id)._etag = 'etag-1';
+    store.patchDoc.mockImplementationOnce(async () => {
+      throw Object.assign(new Error('precondition failed'), { code: 412 });
+    });
+    const conflict = await h.patchApplication(
+      makeRequest({ params: { id }, body: { status: 'preparing' } }),
+      context
+    );
+    expect(conflict.status).toBe(409);
+    expect(parse(conflict).code).toBe('CONFLICT');
+    // The write carried the ETag it read.
+    const [, , , options] = store.patchDoc.mock.calls.at(-1);
+    expect(options).toEqual({ ifMatch: 'etag-1' });
+  });
+
+  it('keeps a privately stored file by its { container, path } reference, and serves it as a download', async () => {
+    const { h } = await seeded('editor');
+    const created = parse(
+      await h.createApplication(
+        makeRequest({
+          body: {
+            programId: 'program-microsoft-mct',
+            files: [
+              { name: 'agreement.pdf', path: 'ambassador/app-1/1-agreement.pdf', container: 'speakerevents', bytes: 10 },
+              { name: 'no-reference-at-all' },
+              { name: 'linked', url: 'https://example.com/x.pdf' },
+            ],
+          },
+        }),
+        context
+      )
+    ).item;
+    expect(created.files).toEqual([
+      {
+        name: 'agreement.pdf',
+        url: null,
+        container: 'speakerevents',
+        path: 'ambassador/app-1/1-agreement.pdf',
+        bytes: 10,
+        uploadedAt: null,
+      },
+      { name: 'linked', url: 'https://example.com/x.pdf', container: null, path: null, bytes: null, uploadedAt: null },
+    ]);
+
+    const storage = {
+      readBlobForDelivery: vi.fn(async (_c, path) =>
+        path === 'ambassador/app-1/1-agreement.pdf'
+          ? { body: Buffer.from('%PDF'), contentType: 'application/pdf', etag: '"e1"' }
+          : null
+      ),
+    };
+    const withStorage = createAmbassadorHandlers({ guard: guardAs('editor'), store: memStore(), storage, ...fixed });
+    const ok = await withStorage.downloadFile(
+      makeRequest({ params: { container: 'speakerevents', blobPath: 'ambassador/app-1/1-agreement.pdf' } }),
+      context
+    );
+    expect(ok.status).toBe(200);
+    expect(ok.headers['Content-Type']).toBe('application/pdf');
+    expect(ok.headers['Content-Disposition']).toBe('attachment; filename="1-agreement.pdf"');
+    expect(ok.headers['Cache-Control']).toBe('private, no-store');
+    expect(ok.headers['X-Content-Type-Options']).toBe('nosniff');
+    expect(ok.body.toString()).toBe('%PDF');
+
+    for (const params of [
+      { container: 'certifications', blobPath: 'ambassador/app-1/1-agreement.pdf' },
+      { container: 'speakerevents', blobPath: 'events/2026/hero.png' },
+      { container: 'speakerevents', blobPath: 'ambassador/../secret.pdf' },
+      { container: 'speakerevents', blobPath: 'ambassador/app-1/missing.pdf' },
+    ]) {
+      expect((await withStorage.downloadFile(makeRequest({ params }), context)).status).toBe(404);
+    }
+    expect(storage.readBlobForDelivery).toHaveBeenCalledTimes(2);
+    expect((await h.downloadFile(makeRequest({ params: { container: 'speakerevents', blobPath: 'ambassador/a/b.pdf' } }), context)).status).toBe(503);
+  });
+
   it('deletes softly and only as publisher', async () => {
     const { h, store } = await seeded();
     const id = parse(
