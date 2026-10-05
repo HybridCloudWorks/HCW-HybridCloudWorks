@@ -16,7 +16,7 @@
  * Its address lands on Routing, which answers the question it posed.
  */
 
-import React, { useCallback, useEffect, useState, lazy, Suspense } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, lazy, Suspense } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -58,6 +58,7 @@ import {
   subscribeProviders,
   subscribeMcpServers,
 } from '@/lib/aiEngine';
+import { catalogEntries, describeRefresh, withCatalogModels } from '@/lib/aiEngine/catalog';
 import HubTabs from '@/components/admin/HubTabs';
 import PageHeader from '@/components/admin/shared/PageHeader';
 import EmptyState from '@/components/admin/shared/EmptyState';
@@ -147,7 +148,150 @@ export function describeLastTest(provider, now = Date.now()) {
 
 // ─── Services Tab ─────────────────────────────────────────────────────────────
 
-export function ProviderCard({ provider, onToggle, onModelChange, onTest }) {
+const MODEL_BADGE = 'text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded border';
+const MODEL_BADGES = {
+  retired: { label: 'retired', cls: 'bg-slate-100 text-slate-500 border-slate-200' },
+  unknown: { label: 'unconfirmed', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+  unpriced: { label: 'unpriced', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+  hidden: { label: 'hidden', cls: 'bg-slate-100 text-slate-500 border-slate-200' },
+};
+
+function ModelBadge({ kind }) {
+  const { label, cls } = MODEL_BADGES[kind];
+  return <span className={`${MODEL_BADGE} ${cls}`}>{label}</span>;
+}
+
+/**
+ * The card's model list from the catalogue (ADR 0034 slice 2, #857): every
+ * model the provider's list endpoint has named, with the ones the API has
+ * stopped listing marked retired, the ones the cost table cannot price
+ * marked unpriced, and a Hide / Show per model. Hidden and retired models
+ * leave the selects above; they stay here so they can be shown again, and so
+ * a retirement is visible before a pinned model fails.
+ */
+function ModelList({ provider, entry, onHideModel }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(null);
+  const rows = catalogEntries(entry);
+  const refreshLine = describeRefresh(entry);
+  const lastError = entry?.refresh?.lastError;
+
+  const toggle = async (model) => {
+    if (!onHideModel) return;
+    setBusy(model.id);
+    try {
+      await onHideModel(provider.id, model.id, !model.hidden);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="mt-1">
+      <button
+        type="button"
+        className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600 transition-colors"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-label={`Models for ${provider.name}`}
+      >
+        {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        Models ({rows.length})<span className="text-slate-300 dark:text-slate-600">·</span>
+        <span className={entry?.stale ? 'text-amber-600' : ''}>{refreshLine}</span>
+      </button>
+      {open && (
+        <div className="mt-1 space-y-0.5 max-h-48 overflow-y-auto">
+          {rows.length === 0 && (
+            <p className="text-xs text-slate-400 italic">No models listed yet.</p>
+          )}
+          {rows.map((m) => (
+            <div
+              key={m.id}
+              className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 dark:bg-slate-800 rounded text-xs"
+            >
+              <span
+                className={`font-mono truncate ${
+                  m.hidden || m.status === 'retired' ? 'text-slate-400 line-through' : ''
+                }`}
+              >
+                {m.id}
+              </span>
+              {m.status === 'retired' && <ModelBadge kind="retired" />}
+              {m.status === 'unknown' && <ModelBadge kind="unknown" />}
+              {m.unpriced && <ModelBadge kind="unpriced" />}
+              {m.hidden && <ModelBadge kind="hidden" />}
+              <button
+                type="button"
+                className="ml-auto text-xs text-indigo-600 hover:underline disabled:opacity-50"
+                disabled={busy === m.id || !onHideModel}
+                onClick={() => toggle(m)}
+                aria-label={`${m.hidden ? 'Show' : 'Hide'} ${m.id} for ${provider.name}`}
+              >
+                {m.hidden ? 'Show' : 'Hide'}
+              </button>
+            </div>
+          ))}
+          {lastError && (
+            <p className="text-xs text-red-600 dark:text-red-400 pt-1">
+              Last refresh failed: {lastError}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The card's pin: one model for every purpose, or Auto. The list is the
+ * catalogue's (#857), merged onto the card by the page. A pin the catalogue
+ * no longer lists (hidden, retired, or never listed) stays selectable so it
+ * can be seen and cleared, and is said to be so.
+ */
+function ModelPin({ provider, onModelChange }) {
+  const models = Array.isArray(provider.models) ? provider.models : [];
+  const unlistedPin = Boolean(provider.defaultModel) && !models.includes(provider.defaultModel);
+  if (models.length === 0 && !unlistedPin) return null;
+  return (
+    <div className="mt-2">
+      <Select
+        value={provider.defaultModel || AUTO_MODEL}
+        onValueChange={(val) => onModelChange(provider.id, val === AUTO_MODEL ? null : val)}
+      >
+        <SelectTrigger
+          className="h-7 text-xs w-full max-w-xs"
+          aria-label={`Model for ${provider.name}`}
+        >
+          <SelectValue placeholder="Select model" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={AUTO_MODEL} className="text-xs">
+            Auto (per task)
+          </SelectItem>
+          {models.map((m) => (
+            <SelectItem key={m} value={m} className="text-xs">
+              {m}
+            </SelectItem>
+          ))}
+          {unlistedPin && (
+            <SelectItem value={provider.defaultModel} className="text-xs">
+              {provider.defaultModel} (not listed)
+            </SelectItem>
+          )}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+export function ProviderCard({
+  provider,
+  catalogEntry = null,
+  onToggle,
+  onModelChange,
+  onTest,
+  onHideModel,
+}) {
   const [testing, setTesting] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const navigate = useNavigate();
@@ -183,32 +327,9 @@ export function ProviderCard({ provider, onToggle, onModelChange, onTest }) {
             <p className="text-xs text-slate-500 mt-0.5">{provider.description}</p>
 
             {/* Model selector: a pin for every purpose, or Auto */}
-            {!isUnavailable && provider.models?.length > 0 && (
-              <div className="mt-2">
-                <Select
-                  value={provider.defaultModel || AUTO_MODEL}
-                  onValueChange={(val) =>
-                    onModelChange(provider.id, val === AUTO_MODEL ? null : val)
-                  }
-                >
-                  <SelectTrigger
-                    className="h-7 text-xs w-full max-w-xs"
-                    aria-label={`Model for ${provider.name}`}
-                  >
-                    <SelectValue placeholder="Select model" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={AUTO_MODEL} className="text-xs">
-                      Auto (per task)
-                    </SelectItem>
-                    {provider.models.map((m) => (
-                      <SelectItem key={m} value={m} className="text-xs">
-                        {m}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+            {!isUnavailable && <ModelPin provider={provider} onModelChange={onModelChange} />}
+            {!isUnavailable && catalogEntry && (
+              <ModelList provider={provider} entry={catalogEntry} onHideModel={onHideModel} />
             )}
 
             {/* Last tested, by the button or the weekly check */}
@@ -475,9 +596,28 @@ export function FeatureSwitches() {
   );
 }
 
-function ServicesTab({ providers }) {
+/** One sentence for the toast after a refresh: who listed, who was skipped, who failed. */
+export function describeRefreshSummary(summary) {
+  const rows = Object.entries(summary?.providers || {});
+  const listed = rows.filter(([, r]) => !r?.error && !r?.skipped);
+  const failed = rows.filter(([, r]) => r?.error);
+  const added = listed.reduce((n, [, r]) => n + (r.added || 0), 0);
+  const retired = listed.reduce((n, [, r]) => n + (r.retired || 0), 0);
+  const parts = [
+    `${listed.length} provider${listed.length === 1 ? '' : 's'} listed`,
+    `${added} new`,
+    `${retired} retired`,
+  ];
+  if (failed.length > 0) {
+    parts.push(`failed: ${failed.map(([p, r]) => `${p} (${r.error})`).join(', ')}`);
+  }
+  return { text: parts.join(' · '), failed: failed.length > 0 };
+}
+
+function ServicesTab({ providers, catalog, onCatalogChanged }) {
   const { toast } = useToast();
   const [reordering, setReordering] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Each write says so when it fails. Until ADR 0033 a rejected PATCH here
   // was an unhandled promise: the switch stayed where it was clicked while
@@ -514,6 +654,35 @@ function ServicesTab({ providers }) {
     }
   };
 
+  // The catalogue (#857): a hide or a refresh lands on the API, then the
+  // page re-reads the document so every card shows what it holds.
+  const handleHideModel = async (id, model, hidden) => {
+    try {
+      await aiEngine.setModelHidden(id, model, hidden);
+      await onCatalogChanged?.();
+    } catch (err) {
+      failed(hidden ? 'Could not hide the model' : 'Could not show the model')(err);
+    }
+  };
+
+  const handleRefreshCatalog = async () => {
+    setRefreshing(true);
+    try {
+      const summary = await aiEngine.refreshModelCatalog();
+      const { text, failed: anyFailed } = describeRefreshSummary(summary);
+      toast({
+        title: anyFailed ? 'Model lists refreshed, with errors' : 'Model lists refreshed',
+        description: text,
+        ...(anyFailed ? { variant: 'destructive' } : {}),
+      });
+      await onCatalogChanged?.();
+    } catch (err) {
+      failed('Could not refresh the model lists')(err);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   // The API tries providers in this order and uses the first one that is both
   // enabled and holds a key, so the sort here is the real running order.
   const ordered = [...providers].sort((a, b) => (a.order ?? 99) - (b.order ?? 99));
@@ -545,7 +714,7 @@ function ServicesTab({ providers }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="font-semibold text-lg">AI Services</h2>
           <p className="text-sm text-slate-500 mt-0.5">
@@ -553,6 +722,21 @@ function ServicesTab({ providers }) {
             to verify your API key
           </p>
         </div>
+        <Button
+          size="sm"
+          variant="outline"
+          className="shrink-0"
+          onClick={handleRefreshCatalog}
+          disabled={refreshing}
+          title="List every provider's models now; the weekly check does this on Mondays"
+        >
+          {refreshing ? (
+            <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+          ) : (
+            <RefreshCw className="h-3.5 w-3.5 mr-1" />
+          )}
+          Refresh model lists
+        </Button>
       </div>
 
       <Card>
@@ -621,9 +805,11 @@ function ServicesTab({ providers }) {
           <ProviderCard
             key={p.id}
             provider={p}
+            catalogEntry={catalog?.providers?.[p.id] || null}
             onToggle={handleToggle}
             onModelChange={handleModelChange}
             onTest={handleTest}
+            onHideModel={handleHideModel}
           />
         ))}
       </div>
@@ -1267,7 +1453,7 @@ const UsageTab = lazy(() => import('@/pages/admin/AIEngineUsageTab'));
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 const HELP = [
-  'AI Services holds the order of preference: a call goes to the first enabled provider with a key, and falls through to the next when that one cannot serve. Each card can pin one model for every purpose, or stay on Auto.',
+  'AI Services holds the order of preference: a call goes to the first enabled provider with a key, and falls through to the next when that one cannot serve. Each card can pin one model for every purpose, or stay on Auto. The model lists come from the providers themselves, refreshed by the weekly check or the Refresh model lists button; a model can be hidden from the selects per card.',
   'Routing assigns a provider, a model and a fallback chain to one task (drafting, grading, captions, Telegram…). A task with no route follows the order of preference.',
   'Where AI is used (on AI Services) switches a task off entirely; Routing decides who serves it when it is on.',
   'MCP Servers are tool servers the Playground and the bots can call; keys stay in app settings named MCP_* and are never sent to the browser.',
@@ -1311,6 +1497,30 @@ export default function AIEnginePage() {
     };
   }, [seed.status]);
 
+  // The model catalogue (#857): read once the seed is ready, and again after
+  // a hide or a refresh. A catalogue that cannot be read leaves the cards on
+  // whatever their stored documents carry rather than emptying the selects.
+  const [catalog, setCatalog] = useState(null);
+  const loadCatalog = useCallback(
+    () =>
+      aiEngine
+        .fetchModelCatalog()
+        .then(setCatalog)
+        .catch((err) => console.error('[aiEngine] model catalogue load failed:', err)),
+    []
+  );
+  useEffect(() => {
+    if (seed.status !== 'ready') return;
+    loadCatalog();
+  }, [seed.status, loadCatalog]);
+
+  // The one place the catalogue's lists reach the provider documents: every
+  // tab below reads `provider.models` and none of them keeps a list.
+  const providersWithModels = useMemo(
+    () => withCatalogModels(providers, catalog),
+    [providers, catalog]
+  );
+
   const setTab = (id) => {
     if (id === activeTab) return;
     setSearchParams({ tab: id });
@@ -1320,10 +1530,16 @@ export default function AIEnginePage() {
   const mcpCount = servers.filter((s) => s.enabled).length;
 
   const PANELS = {
-    services: () => <ServicesTab providers={providers} />,
-    routing: () => <RoutingTab providers={providers} />,
+    services: () => (
+      <ServicesTab
+        providers={providersWithModels}
+        catalog={catalog}
+        onCatalogChanged={loadCatalog}
+      />
+    ),
+    routing: () => <RoutingTab providers={providersWithModels} />,
     mcp: () => <McpTab servers={servers} />,
-    playground: () => <PlaygroundTab providers={providers} servers={servers} />,
+    playground: () => <PlaygroundTab providers={providersWithModels} servers={servers} />,
     usage: () => (
       <Suspense
         fallback={

@@ -32,6 +32,16 @@ export const PROVIDER_SCHEMA_VERSION = 2;
  * are seed values only: `order` and `enabled` are the administrator's to change
  * from this page, and the API honours both on every call.
  *
+ * NO MODEL LISTS HERE (ADR 0034 slice 2, #857). Each card's models come from
+ * the model catalogue the API refreshes weekly from the providers' own list
+ * endpoints (`cms/ai-model-catalog`, merged onto the cards by
+ * aiEngine/catalog.js). A list typed in here was a copy that went stale the
+ * way the provider list once did, and `aiEngine.test.js` refuses one. A
+ * stored document from before that day may still carry a `models` array;
+ * the page ignores it. `defaultModel` stays the seed's: a pin the router's
+ * own table serves, and the card shows a pin the catalogue no longer lists
+ * as "not listed" rather than dropping it.
+ *
  * Replicate has NOT gone away — it generates article cover images, reached
  * directly through REPLICATE_API_KEY. It was never a text provider, and listing
  * it as one is what made this page confusing.
@@ -44,13 +54,6 @@ export const DEFAULT_PROVIDERS = [
     icon: '🔵',
     enabled: true,
     defaultModel: 'gemini-3.5-flash-lite',
-    models: [
-      'gemini-3.5-flash-lite',
-      'gemini-3.6-flash',
-      'gemini-2.5-pro',
-      'gemini-2.5-flash',
-      'gemini-2.5-flash-lite',
-    ],
     apiKeyEnvVar: 'GEMINI_API_KEY',
     docsUrl: 'https://ai.google.dev/gemini-api/docs',
     status: 'untested',
@@ -66,7 +69,6 @@ export const DEFAULT_PROVIDERS = [
     icon: '🟢',
     enabled: true,
     defaultModel: 'gpt-5-mini',
-    models: ['gpt-5-mini', 'gpt-5-nano', 'gpt-4o', 'gpt-4o-mini'],
     apiKeyEnvVar: 'OPENAI_API_KEY',
     docsUrl: 'https://platform.openai.com/docs',
     status: 'untested',
@@ -82,7 +84,6 @@ export const DEFAULT_PROVIDERS = [
     icon: '🟣',
     enabled: true,
     defaultModel: 'claude-sonnet-4-6',
-    models: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
     apiKeyEnvVar: 'ANTHROPIC_API_KEY',
     docsUrl: 'https://docs.anthropic.com',
     status: 'untested',
@@ -104,7 +105,6 @@ export const DEFAULT_PROVIDERS = [
     // purpose, the one trial-tier model that answered inside the Test's 45 s
     // on 2026-10-04 (#701). Choosing one here pins it for every purpose.
     defaultModel: null,
-    models: ['z-ai/glm-5.3'],
     apiKeyEnvVar: 'NVIDIA_API_KEY',
     docsUrl: 'https://build.nvidia.com/models',
     status: 'untested',
@@ -128,7 +128,6 @@ export const DEFAULT_PROVIDERS = [
     // analysis and nano for short calls. Choosing one here pins it for every
     // purpose.
     defaultModel: null,
-    models: ['gpt-5-nano', 'gpt-5-mini'],
     apiKeyEnvVar: 'FOUNDRY_ENDPOINT',
     docsUrl: 'https://learn.microsoft.com/azure/foundry/',
     status: 'untested',
@@ -295,39 +294,6 @@ export function providerDisplayPatches(stored, defaults = DEFAULT_PROVIDERS) {
   });
 }
 
-/**
- * `[{ id, patch }]` bringing each stored provider's `models` back to the seed,
- * and releasing a pin on a model the seed no longer offers.
- *
- * The model list is what the router serves, a fact of the code rather than a
- * choice anyone makes on the page, which has no control to edit it. The pin
- * (`defaultModel`) is the administrator's, and stays wherever it is still
- * offered. But a pin can only be picked from the list, so a pin outside it is
- * one the code has withdrawn, and the router would keep sending every call
- * to it. It goes back to the seed's own value: Auto for NVIDIA.
- *
- * #701, 2026-10-04: the NVIDIA card was first written on 2026-09-25 pinned to
- * z-ai/glm-5.3-flash, which then took 70 s to answer on the trial tier. The
- * router's defaults moved to z-ai/glm-5.3, but neither the list nor the pin
- * on the stored card would ever have followed.
- */
-export function providerModelPatches(stored, defaults = DEFAULT_PROVIDERS) {
-  return (stored || []).flatMap((existing) => {
-    const seed = defaults.find((p) => p.id === existing?.id);
-    if (!Array.isArray(seed?.models) || seed.models.length === 0) return [];
-    const patch = {};
-    const storedModels = Array.isArray(existing.models) ? existing.models : [];
-    if (JSON.stringify(storedModels) !== JSON.stringify(seed.models)) {
-      patch.models = [...seed.models];
-    }
-    const pin = existing.defaultModel;
-    if (pin && !seed.models.includes(pin) && pin !== seed.defaultModel) {
-      patch.defaultModel = seed.defaultModel ?? null;
-    }
-    return Object.keys(patch).length ? [{ id: existing.id, patch }] : [];
-  });
-}
-
 // Providers and servers that have been permanently removed from defaults.
 //
 // `openai` used to be on this list and was deleted from the container on every
@@ -439,11 +405,8 @@ export async function seedAiEngineIfEmpty() {
     ...providerDisplayPatches(providers).map(({ id, patch }) =>
       patchConfig('ai-providers', id, patch)
     ),
-    // The model list follows the router, and a pin it no longer offers is
-    // released, so a withdrawn model stops receiving calls (#701).
-    ...providerModelPatches(providers).map(({ id, patch }) =>
-      patchConfig('ai-providers', id, patch)
-    ),
+    // The model lists are the catalogue's (#857), never patched from here; a
+    // pin the catalogue no longer lists shows on the card as "not listed".
     // ─ MCP Servers ───────────────────────────────────────────────
     ...seedCollectionWrites('mcp-servers', servers, DEFAULT_MCP_SERVERS, DEPRECATED_MCP_SERVERS),
     ...serverEndpointWrites(servers),

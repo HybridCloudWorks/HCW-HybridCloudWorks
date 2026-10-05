@@ -223,7 +223,7 @@ export {
  */
 export const PROVIDERS = DEFAULT_PROVIDER_ORDER;
 
-const KEY_ENV = Object.freeze({
+export const KEY_ENV = Object.freeze({
   anthropic: 'ANTHROPIC_API_KEY',
   openai: 'OPENAI_API_KEY',
   gemini: 'GEMINI_API_KEY',
@@ -666,7 +666,7 @@ export function createFoundryTokenProvider({
  * frontend's contract tests import this module through Vite, which would
  * otherwise try to resolve a package only the Function App installs.
  */
-async function defaultGetToken(scope) {
+export async function defaultGetToken(scope) {
   const identity = '@azure/identity';
   const { DefaultAzureCredential } = await import(/* @vite-ignore */ identity);
   return new DefaultAzureCredential().getToken(scope);

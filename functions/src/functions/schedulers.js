@@ -259,9 +259,24 @@ timer('probeAiProviders', 'PROBE_AI_PROVIDERS', '0 15 6 * * 1', async (context) 
   // the results land on the provider cards (lib/timers/ai-provider-probe.js).
   // The process-wide router, so the probe shares NVIDIA's pacing guard with
   // every other call on this instance.
-  const [ai, { createAiProviderProbe }] = await Promise.all([
+  //
+  // ADR 0034 slice 2 (#857): the same run then lists each keyed provider's
+  // models into admin_settings/ai-model-catalog (lib/ai/model-catalog.js),
+  // after the Tests so a catalogue failure cannot cost the results already
+  // written. Foundry lists with the app identity's token, built the way the
+  // router builds its own.
+  const [ai, { createAiProviderProbe }, catalog] = await Promise.all([
     import('../lib/ai/router.js'),
     import('../lib/timers/ai-provider-probe.js'),
+    import('../lib/ai/model-catalog.js'),
   ]);
-  return createAiProviderProbe({ store, ai, log: context }).run();
+  const refresh = () => {
+    const ctx = catalog.createListContext();
+    return catalog.refreshModelCatalog({
+      store,
+      providers: ai.availableProviders(),
+      listModels: (provider) => catalog.listModels(ctx, provider),
+    });
+  };
+  return createAiProviderProbe({ store, ai, catalog: { refresh }, log: context }).run();
 });
