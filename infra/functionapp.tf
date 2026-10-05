@@ -473,8 +473,8 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # day; change it with the model) and the monthly budget the generators
     # refuse to exceed, in dollars of priced rows. CONTENTFORGE_IMAGE_MONTHLY_MAX
     # (default 200 images) is the ceiling that holds even when the price is
-    # unset. Replicate's own spend limit, set in its billing page, is the
-    # backstop behind both.
+    # unset. There is NO Replicate-side spend limit: the owner declined one on
+    # 2026-10-05 (the balance there is small), so this guard is the only stop.
     "CONTENTFORGE_IMAGE_COST_USD"           = "0.02"
     "CONTENTFORGE_IMAGE_MONTHLY_BUDGET_USD" = "10"
     "PERPLEXITY_API_KEY"                    = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/PERPLEXITY-API-KEY)"
