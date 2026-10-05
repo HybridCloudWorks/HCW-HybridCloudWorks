@@ -12,7 +12,7 @@ import {
   selectChain,
 } from './select.js';
 import { AI_TASKS, PUBLIC_TASKS, TASK_NAMES } from './tasks.js';
-import { DEFAULT_PROVIDER_ORDER } from './provider-order.js';
+import { DEFAULT_PROVIDER_ORDER, KNOWN_PROVIDERS } from './provider-order.js';
 import { RECOMMENDED_BY_MODALITY, recommendedModelFor } from './provider-recommendations.js';
 import { seedModelsFor } from './model-catalog.js';
 import { enrichmentFor } from './model-enrichment.js';
@@ -548,8 +548,12 @@ describe('precedence (ADR 0034 §3)', () => {
   it('every provider in the modality table resolves a null for the modalities it names', () => {
     for (const [provider, table] of Object.entries(RECOMMENDED_BY_MODALITY)) {
       for (const modality of Object.keys(table)) {
-        const task = { id: null, label: 't', modality, needs: ['text'], public: false, recommended: null };
-        const { chain } = selectChain({ task, selection: doc([provider]), catalog: null, availability: everything });
+        // A media modality needs its own capability; a text one is judged on text.
+        const needs = ['tts', 'image'].includes(modality) ? [modality] : ['text'];
+        const task = { id: null, label: 't', modality, needs, public: false, recommended: null };
+        // Every known provider keyed, the media ones included (slice 5).
+        const known = { keyed: [...KNOWN_PROVIDERS], enabled: [...KNOWN_PROVIDERS] };
+        const { chain } = selectChain({ task, selection: doc([provider]), catalog: null, availability: known });
         expect(chain[0]?.modalityModel, `${provider}/${modality}`).toBe(table[modality].model);
       }
     }

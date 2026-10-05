@@ -17,11 +17,21 @@
  *   they do for a real call — the public explain route is never tested
  *   against the trial tier (ai-tasks.test.js).
  *
+ * A MEDIA TASK'S TEST SPENDS NOTHING (ADR 0034 slice 5, #860). The Test
+ * above sends a one-word prompt down a chat chain, which costs a fraction
+ * of a cent; a voice or an image model has no one-word prompt, and the
+ * cheapest audio or image is real money on an account the Usage tab can
+ * see. So for a task whose modality is tts, image, stt, ocr or embedding
+ * the Test resolves the chain and answers the candidate it WOULD use, with
+ * the resolver's reason, and never calls the provider: `dryRun: true`,
+ * `wouldUse: { provider, model, why }` (null when nothing is eligible),
+ * `answeredBy: null`, `skipped: []`. The page says so on the line.
+ *
  * Each handler body is a module-level function over `ctx` (guard, store,
  * now, uuid, clock, ai, effectiveSelection); the factory at the bottom only
  * wires them.
  */
-import { TASK_NAMES } from '../ai/tasks.js';
+import { AI_TASKS, TASK_NAMES, isMediaTask } from '../ai/tasks.js';
 import { testTaskCandidate } from '../ai/proxy.js';
 import { json } from '../http/admin-handler.js';
 
@@ -81,9 +91,34 @@ async function walkChain(ctx, chain, context) {
 }
 
 /**
+ * A media task's answer (header): the first eligible candidate as the call
+ * site would read it (router.js modelForTask: a step naming no model
+ * answers the model it was judged on), nothing called.
+ */
+function dryRunReport(task, resolved) {
+  const first = resolved.chain[0] || null;
+  const wouldUse = first
+    ? { provider: first.provider, model: first.model || first.modalityModel || null, why: first.why || '' }
+    : null;
+  return {
+    ok: Boolean(wouldUse),
+    task,
+    mode: resolved.mode,
+    dryRun: true,
+    wouldUse,
+    answeredBy: null,
+    skipped: [],
+    rejected: resolved.rejected,
+    flags: resolved.flags,
+    ...(wouldUse ? {} : { error: 'No candidate of the chain is eligible' }),
+  };
+}
+
+/**
  * POST /api/cms/ai-routing/test/{task} — run the task's effective chain with
  * the Test's limits. 200 with `ok: false` when no candidate answered, as the
  * card's Test answers: a chain that cannot serve is an answer, not a fault.
+ * A media task is a dry run (header).
  */
 async function testAiTask(ctx, request, context) {
   const auth = await ctx.guard.requireRole(request, 'editor');
@@ -96,6 +131,7 @@ async function testAiTask(ctx, request, context) {
   try {
     const { tasks } = await ctx.effectiveSelection();
     const resolved = tasks[param.task];
+    if (isMediaTask(AI_TASKS[param.task])) return json(200, dryRunReport(param.task, resolved));
     const { answeredBy, skipped } = await walkChain(ctx, resolved.chain, context);
     return json(200, {
       ok: Boolean(answeredBy),

@@ -17,7 +17,7 @@ import { JOBS_CONTAINER, newJobDoc } from '../jobs.js';
 // a field message that names the wrong problem.
 import { isPlainObject } from '../cms/content-update-validation.js';
 import { EPISODE_CONTAINER, SET_CONTAINER, setId, speakableTextOf } from './publish.js';
-import { readStoredListenAndLearnModel, voiceSettingsOf } from './speech-settings.js';
+import { voiceSettingsOf } from './speech-settings.js';
 import { estimateSpeechCostUsd } from './speech/index.js';
 
 export const PRODUCT = 'listenAndLearn';
@@ -204,14 +204,16 @@ export async function queueJob(
 
 /**
  * What speaking `bytes` of text would cost for a book, before it is spent:
- * the book's provider and model, else the run's model, else the stored
- * default — the same resolution the worker applies. Null when no provider
- * would run, which the page shows as "transcript only".
+ * the book's provider, and the `listenAndLearnSpeech` task's model read
+ * through the router (ADR 0034 slice 5, #860) — the same resolution the
+ * worker applies (listen-and-learn-jobs.js resolveRunModel). With no router
+ * wired, or a task with nothing eligible, the model is null and the switch
+ * prices its own default. Null when no provider would run, which the page
+ * shows as "transcript only".
  */
-export async function estimateFor({ store, env }, set, { bytes, ttsModel = null }) {
+export async function estimateFor({ env, ai = null }, set, { bytes }) {
   const voice = voiceSettingsOf(set);
-  const stored = await readStoredListenAndLearnModel(store.readDoc).catch(() => null);
-  const model = voice.model || ttsModel || stored || null;
+  const model = await taskModelOrNull(ai);
   const estimate = estimateSpeechCostUsd({
     product: PRODUCT,
     ceilingBytes: bytes,
@@ -227,4 +229,20 @@ export async function estimateFor({ store, env }, set, { bytes, ttsModel = null 
         estimatedCostUsd: estimate.estimatedCostUsd,
       }
     : { provider: null, model, bytes, estimatedCostUsd: null };
+}
+
+/**
+ * The `listenAndLearnSpeech` task's model, or null: no router wired, nothing
+ * eligible, or the task switched off — an estimate is a figure shown before
+ * spending and must not fail the page for want of it; the run itself says
+ * why (listen-and-learn-jobs.js resolveRunModel).
+ */
+async function taskModelOrNull(ai) {
+  if (typeof ai?.modelForTask !== 'function') return null;
+  try {
+    const chosen = await ai.modelForTask({ task: 'listenAndLearnSpeech' });
+    return chosen?.model || null;
+  } catch {
+    return null;
+  }
 }

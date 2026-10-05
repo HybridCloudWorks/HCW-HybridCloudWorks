@@ -15,7 +15,6 @@ vi.mock('../lib/cosmos-client.js', () => ({
   readDoc: vi.fn(),
   upsertDoc: vi.fn(),
   patchDoc: vi.fn(),
-  // The partition speech-settings.js reads the stored model default at.
   ADMIN_CONFIG_PARTITION: 'admin_config',
 }));
 vi.mock('../lib/blob-storage.js', () => ({ uploadBlob: vi.fn() }));
@@ -33,14 +32,10 @@ const {
   roundUpUsd,
   speechEstimateForRun,
   MAX_AREAS_PER_RUN,
-  STORED_MODEL_NOTE,
+  TASK_MODEL_NOTE,
 } = await import('./listen-and-learn-jobs.js');
 const { MAX_SCRIPT_BYTES } = await import('../lib/listen-and-learn/script.js');
 const { estimateGeminiCostUsd } = await import('../lib/listen-and-learn/speech/index.js');
-const { LISTEN_AND_LEARN_SPEECH_CONFIG_ID } = await import(
-  '../lib/listen-and-learn/speech-settings.js'
-);
-const { ADMIN_CONFIG_PARTITION } = await import('../lib/cosmos-client.js');
 
 const BEST = 'gemini-3.1-flash-tts-preview';
 const ECONOMY = 'gemini-2.5-flash-preview-tts';
@@ -128,80 +123,67 @@ describe('parseGeneratePayload', () => {
     expect(parseGeneratePayload(null).error).toBeTruthy();
   });
 
-  describe('ttsModel — the owner’s button, per run', () => {
-    it('carries either of the two offered models through, and null for none', () => {
-      expect(parseGeneratePayload(valid({ ttsModel: BEST })).value.ttsModel).toBe(BEST);
-      expect(parseGeneratePayload(valid({ ttsModel: ECONOMY })).value.ttsModel).toBe(ECONOMY);
-      expect(parseGeneratePayload(valid()).value.ttsModel).toBeNull();
-      expect(parseGeneratePayload(valid({ ttsModel: '' })).value.ttsModel).toBeNull();
-      expect(parseGeneratePayload(valid({ ttsModel: null })).value.ttsModel).toBeNull();
-    });
-
-    it('refuses any other model id by sentence, before anything else is checked', () => {
-      // The id is sent to a paid API as the model name; a near-miss is a
-      // request to read before spending on it, not a request to correct.
-      const rule = `ttsModel must be one of ${BEST}, ${ECONOMY}`;
-      for (const ttsModel of ['gemini-2.5-pro-preview-tts', 'eleven_v3', ` ${BEST}`, 'best', 7]) {
-        expect(parseGeneratePayload(valid({ ttsModel })).error).toBe(rule);
+  describe('ttsModel — ignored since the Tasks tab owns the model (ADR 0034 slice 5, #860)', () => {
+    it('carries no model through, whatever the payload names', () => {
+      // A client written before this slice still gets its 202; the worker
+      // reads the model for the listenAndLearnSpeech task when it runs.
+      for (const ttsModel of [BEST, ECONOMY, '', null, 'polly', 7]) {
+        const { value, error } = parseGeneratePayload(valid({ ttsModel }));
+        expect(error, String(ttsModel)).toBeUndefined();
+        expect(value, String(ttsModel)).not.toHaveProperty('ttsModel');
       }
-      // Refused even on a payload that would fail later for another reason.
-      expect(parseGeneratePayload({ ttsModel: 'polly' }).error).toBe(rule);
+      expect(parseGeneratePayload(valid()).value).not.toHaveProperty('ttsModel');
     });
 
-    it('applies to a source-grounded run too', () => {
+    it('is ignored on a source-grounded run too', () => {
       const source = {
         platform: 'azure',
         examCode: 'AZ-104',
         title: 'Entra ID basics',
         sources: [{ kind: 'page', url: 'https://learn.microsoft.com/entra' }],
       };
-      expect(parseGeneratePayload({ ...source, ttsModel: ECONOMY }).value).toMatchObject({
+      expect(parseGeneratePayload({ ...source, ttsModel: 'polly' }).value).toMatchObject({
         kind: 'source',
-        ttsModel: ECONOMY,
       });
-      expect(parseGeneratePayload(source).value.ttsModel).toBeNull();
-      expect(parseGeneratePayload({ ...source, ttsModel: 'polly' }).error).toMatch(
-        /ttsModel must be one of/
+      expect(parseGeneratePayload({ ...source, ttsModel: ECONOMY }).value).not.toHaveProperty(
+        'ttsModel'
       );
     });
   });
 });
 
 describe('resolveRunModel', () => {
-  // Precedence: the run's choice → the stored default → null, which
-  // speech/index.js and gemini.js resolve to LISTEN_AND_LEARN_TTS_MODEL and
-  // the module default.
-  const storeWith = (doc) => ({ readDoc: vi.fn(async () => doc) });
-
-  it('takes the run’s choice without reading the setting', async () => {
-    const store = storeWith({ geminiModel: ECONOMY });
-    expect(await resolveRunModel(BEST, store)).toBe(BEST);
-    expect(store.readDoc).not.toHaveBeenCalled();
+  // The model is the listenAndLearnSpeech task's, read through the router
+  // (ADR 0034 slice 5, #860): the resolver names the Gemini model; Azure AI
+  // Speech stays the switch's own fallback, so a task with nothing eligible
+  // answers null and lets the switch decide; a task switched off fails the
+  // run before the voice is called.
+  const routerWith = (outcome) => ({
+    modelForTask: vi.fn(async () => {
+      if (outcome instanceof Error) throw outcome;
+      return outcome;
+    }),
   });
 
-  it('reads the stored default from admin_config when the run chose nothing', async () => {
-    const store = storeWith({ id: LISTEN_AND_LEARN_SPEECH_CONFIG_ID, geminiModel: ECONOMY });
-    expect(await resolveRunModel(null, store)).toBe(ECONOMY);
-    expect(store.readDoc).toHaveBeenCalledWith(
-      'admin_config',
-      LISTEN_AND_LEARN_SPEECH_CONFIG_ID,
-      ADMIN_CONFIG_PARTITION
-    );
+  it('reads the task’s model through the router, naming the task', async () => {
+    const ai = routerWith({ provider: 'gemini', model: BEST, selection: 'custom', why: 'custom chain, step 1' });
+    expect(await resolveRunModel(ai)).toBe(BEST);
+    expect(ai.modelForTask).toHaveBeenCalledWith({ task: 'listenAndLearnSpeech' });
   });
 
-  it('is null when nothing is stored, or the stored value is not one of the two ids', async () => {
-    expect(await resolveRunModel(null, storeWith(null))).toBeNull();
-    expect(await resolveRunModel(null, storeWith({ geminiModel: 'gemini-2.5-pro-preview-tts' }))).toBeNull();
-    expect(await resolveRunModel(null, storeWith({}))).toBeNull();
+  it('is null when the task has nothing eligible, leaving the switch to Azure or "not configured"', async () => {
+    const refused = new Error("No eligible model carries 'tts' for 'listenAndLearnSpeech'");
+    refused.code = 'AI_NOT_CONFIGURED';
+    expect(await resolveRunModel(routerWith(refused))).toBeNull();
+    expect(await resolveRunModel(routerWith({ provider: 'gemini', model: null }))).toBeNull();
   });
 
-  it('lets a settings read failure fail the run rather than reading in a voice nobody chose', async () => {
-    const store = {
-      readDoc: vi.fn(async () => {
-        throw new Error('Cosmos unavailable');
-      }),
-    };
-    await expect(resolveRunModel(null, store)).rejects.toThrow('Cosmos unavailable');
+  it('lets a switched-off task fail the run rather than reading in a voice nobody chose', async () => {
+    const off = new Error("The 'listenAndLearnSpeech' AI feature is turned off in the admin portal.");
+    off.code = 'AI_FEATURE_DISABLED';
+    await expect(resolveRunModel(routerWith(off))).rejects.toBe(off);
+    const broken = new Error('Cosmos is down');
+    await expect(resolveRunModel(routerWith(broken))).rejects.toBe(broken);
   });
 });
 
@@ -213,14 +195,15 @@ describe('speechEstimateForRun', () => {
   const ALL = { ELEVENLABS_API_KEY: 'e', GEMINI_API_KEY: 'g' };
   const perEpisode = (model) => estimateGeminiCostUsd(model, MAX_SCRIPT_BYTES);
 
-  it('prices every requested area at the script ceiling, with Gemini', () => {
-    const estimate = speechEstimateForRun(valid({ areas: ['a', 'b'], ttsModel: BEST }), GEMINI);
+  it('prices every requested area at the script ceiling, with Gemini, at the dearer model', () => {
+    const estimate = speechEstimateForRun(valid({ areas: ['a', 'b'] }), GEMINI);
     expect(MAX_SCRIPT_BYTES).toBe(9000);
     expect(perEpisode(BEST)).toBeGreaterThan(0);
     expect(estimate).toEqual({
       provider: 'gemini',
-      model: BEST,
-      modelSource: 'run',
+      model: null,
+      modelSource: 'task',
+      modelNote: TASK_MODEL_NOTE,
       episodes: 2,
       perEpisodeUsd: perEpisode(BEST),
       estimatedCostUsd: roundUpUsd(perEpisode(BEST) * 2),
@@ -228,28 +211,35 @@ describe('speechEstimateForRun', () => {
     expect(estimate.estimatedCostUsd).toBeGreaterThanOrEqual(perEpisode(BEST) * 2);
   });
 
-  it('does not name a model it cannot know: no ttsModel means the stored default, priced at the dearer model', () => {
+  it('does not name a model it cannot know: the task chooses when the run starts, so the figure is the dearer model’s', () => {
     // The hook is synchronous and sees only the payload; the worker reads the
-    // stored default from admin_config. Saying "3.1" here when "2.5" is
-    // stored would be a 202 that disagrees with the run (Copilot on #462), so
-    // the model is null with a sentence, and the figure is the ceiling
-    // whichever is stored.
-    for (const payload of [valid({ areas: ['a', 'b'] }), valid({ areas: ['a', 'b'], ttsModel: '' })]) {
+    // listenAndLearnSpeech task's model through the router (ADR 0034 slice 5).
+    // Saying "2.5" here when the task resolves to "3.1" would be a 202 that
+    // disagrees with the run (Copilot on #462), so the model is null with a
+    // sentence, and the figure is the ceiling whichever the task chooses. A
+    // ttsModel in the payload is ignored, never echoed back.
+    for (const payload of [
+      valid({ areas: ['a', 'b'] }),
+      valid({ areas: ['a', 'b'], ttsModel: '' }),
+      valid({ areas: ['a', 'b'], ttsModel: ECONOMY }),
+      valid({ areas: ['a', 'b'], ttsModel: 'gemini-2.5-pro-preview-tts' }),
+    ]) {
       const estimate = speechEstimateForRun(payload, GEMINI);
       expect(estimate).toEqual({
         provider: 'gemini',
         model: null,
-        modelSource: 'stored',
-        modelNote: STORED_MODEL_NOTE,
+        modelSource: 'task',
+        modelNote: TASK_MODEL_NOTE,
         episodes: 2,
         perEpisodeUsd: perEpisode(BEST),
         estimatedCostUsd: roundUpUsd(perEpisode(BEST) * 2),
       });
       expect(estimate.perEpisodeUsd).toBeGreaterThan(perEpisode(ECONOMY));
+      expect(JSON.stringify(estimate)).not.toContain('pro-preview');
     }
-    expect(STORED_MODEL_NOTE).toBe('the stored default applies; see Platform settings');
+    expect(TASK_MODEL_NOTE).toBe('the model is chosen under AI Engine → Tasks (Listen & Learn speech)');
     // A LISTEN_AND_LEARN_TTS_MODEL setting naming a cheaper model does not
-    // lower the figure either: the stored default could still be Best.
+    // lower the figure either: the task could still resolve to Best.
     expect(
       speechEstimateForRun(valid({ areas: ['a'] }), { ...GEMINI, LISTEN_AND_LEARN_TTS_MODEL: ECONOMY })
         .perEpisodeUsd
@@ -269,35 +259,14 @@ describe('speechEstimateForRun', () => {
   });
 
   it('describes Gemini even when the ElevenLabs key is present — that key is the podcast’s', () => {
-    const estimate = speechEstimateForRun(valid({ areas: ['a'], ttsModel: BEST }), ALL);
+    const estimate = speechEstimateForRun(valid({ areas: ['a'] }), ALL);
     expect(estimate.provider).toBe('gemini');
-    expect(estimate.model).toBe(BEST);
+    expect(estimate.model).toBeNull();
     expect(estimate.perEpisodeUsd).toBe(perEpisode(BEST));
   });
 
-  it('names the run’s chosen model and prices it', () => {
-    const estimate = speechEstimateForRun(valid({ areas: ['a'], ttsModel: ECONOMY }), GEMINI);
-    expect(estimate).toMatchObject({
-      provider: 'gemini',
-      model: ECONOMY,
-      modelSource: 'run',
-      perEpisodeUsd: perEpisode(ECONOMY),
-      estimatedCostUsd: perEpisode(ECONOMY),
-    });
-    expect(perEpisode(ECONOMY)).toBeCloseTo(perEpisode(BEST) / 2, 6);
-  });
-
-  it('treats a model id that is not offered as absent, never echoing it back', () => {
-    // The worker refuses it by sentence; the estimate is best effort and
-    // must not let an untrusted field choose a path or appear in the 202.
-    const estimate = speechEstimateForRun(valid({ ttsModel: 'gemini-2.5-pro-preview-tts' }), GEMINI);
-    expect(estimate.model).toBeNull();
-    expect(estimate.modelSource).toBe('stored');
-    expect(JSON.stringify(estimate)).not.toContain('pro-preview');
-  });
-
   it('assumes the most a run may generate when the areas are not yet known', () => {
-    const estimate = speechEstimateForRun(valid({ ttsModel: BEST }), GEMINI);
+    const estimate = speechEstimateForRun(valid(), GEMINI);
     expect(estimate.episodes).toBe(MAX_AREAS_PER_RUN);
     expect(estimate.estimatedCostUsd).toBeCloseTo(perEpisode(BEST) * MAX_AREAS_PER_RUN, 6);
   });

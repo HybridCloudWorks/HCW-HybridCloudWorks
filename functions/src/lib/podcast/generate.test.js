@@ -196,11 +196,14 @@ describe('a full run', () => {
     // (speech/index.js), never the Listen & Learn voice. Nothing is stored
     // in admin_config/podcast_voices here, so no voices are handed over and
     // the provider would refuse with "Choose the podcast voices first".
+    // `model: null`: no modelForTask on this test's `ai`, so the switch's own
+    // default reads (ADR 0034 slice 5; production hands the router's over).
     expect(deps.synthesize).toHaveBeenCalledWith({
       product: 'podcast',
       dialogue: [{ speaker: 'Maya', text: 'Hello' }],
       env: {},
       voices: null,
+      model: null,
     });
     expect(storage.uploadBlob.mock.calls[0].slice(0, 2)).toEqual([
       'podcast',
@@ -219,9 +222,14 @@ describe('a full run', () => {
 
     const usageRows = Object.values(store.docs.ai_usage);
     expect(usageRows.map((r) => r.source).sort()).toEqual(
-      [USAGE_SOURCES.podcastScript, USAGE_SOURCES.podcastAudio].sort()
+      [USAGE_SOURCES.podcastScript, 'ai:podcastVoice'].sort()
     );
     expect(USAGE_SOURCES.podcastScript).toBe('podcast:script');
+    // The audio row is the podcastVoice task's (ADR 0034 slice 5), its old
+    // slug kept as `product` for the pages that find rows by it.
+    expect(usageRows.find((r) => r.source === 'ai:podcastVoice').product).toBe(
+      USAGE_SOURCES.podcastAudio
+    );
     expect(USAGE_SOURCES.podcastAudio).toBe('podcast:audio');
 
     expect(report).toMatchObject({
@@ -433,7 +441,7 @@ describe('audio failures degrade; the transcript is still saved', () => {
     // The synthesis happened and was paid for, so it is still attributed.
     expect(saved.speechProvider).toBe('gemini');
     expect(Object.values(store.docs.ai_usage).map((r) => r.source).sort()).toEqual(
-      [USAGE_SOURCES.podcastAudio, USAGE_SOURCES.podcastScript].sort()
+      ['ai:podcastVoice', USAGE_SOURCES.podcastScript].sort()
     );
     expect(report.audioBytes).toBe(0);
   });

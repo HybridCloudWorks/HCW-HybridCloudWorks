@@ -190,6 +190,8 @@ const CONFLICT_CODES = new Set(['quota_exceeded', 'paid_plan_required', VOICES_N
 /** The HTTP status for a speech failure on the sample route. */
 function statusFor(error) {
   if (error?.name === 'SpeechNotConfiguredError') return 503;
+  // The podcastVoice task has nothing eligible, or is switched off (ADR 0034 slice 5).
+  if (error?.code === 'AI_NOT_CONFIGURED' || error?.code === 'AI_FEATURE_DISABLED') return 503;
   if (CONFLICT_CODES.has(error?.code)) return 409;
   return 502;
 }
@@ -557,12 +559,29 @@ async function renderSample(deps, request, context) {
   const { key, voices, refusal } = await samplePreconditions(deps, context);
   if (refusal) return refusal;
 
+  // The sample reads with the podcastVoice task's model (ADR 0034 slice 5),
+  // so a check hears the voice an episode will get; a task with nothing
+  // eligible or switched off is refused with the resolver's sentence.
+  let model = null;
+  if (typeof deps.ai?.modelForTask === 'function') {
+    try {
+      model = (await deps.ai.modelForTask({ task: 'podcastVoice' })).model;
+    } catch (error) {
+      context.log?.(`elevenLabsSample: refused (${error?.code || error?.name || 'error'})`);
+      return json(statusFor(error), {
+        error: error?.message || String(error),
+        code: error?.code || error?.name || null,
+      });
+    }
+  }
+
   let rendered;
   try {
     rendered = await deps.synthesize({
       product: 'podcast',
       dialogue: SAMPLE_DIALOGUE,
       voices,
+      model,
       env: deps.env,
       fetchImpl: deps.fetchImpl,
     });

@@ -84,10 +84,10 @@ export async function fetchPublishedEpisodes({ platform, examCode } = {}) {
 // ── admin ───────────────────────────────────────────────────────────────────
 
 /**
- * The two Gemini TTS models the owner may choose between, by their short
- * names — the owner's button (functions/src/lib/listen-and-learn/
- * speech-settings.js is the source; the server prices them). Used to name
- * the model on the queued line; the form's labels come from the server.
+ * The two Gemini TTS models by their short names (functions/src/lib/
+ * listen-and-learn/speech-settings.js is the source). Used to name the
+ * model on the queued line; the choice itself is the Listen & Learn speech
+ * task's, under AI Engine → Tasks (ADR 0034 slice 5).
  */
 export const GEMINI_TTS_MODEL_TIERS = Object.freeze({
   'gemini-3.1-flash-tts-preview': 'Best',
@@ -95,24 +95,11 @@ export const GEMINI_TTS_MODEL_TIERS = Object.freeze({
 });
 
 /**
- * The stored default model and the offered choices with their per-episode
- * ceiling, from the Platform settings route. The generation form defaults
- * its per-run choice to `geminiModel`.
- *
- * @returns {Promise<{geminiModel: string|null, options: Array<{id: string, tier: string, label: string, perEpisodeUsd: number|null, isDefault?: boolean}>}>}
- */
-export async function fetchSpeechSettings() {
-  const body = await getJSON('cms/platform-settings/listen-and-learn-speech');
-  return {
-    geminiModel: typeof body?.value?.geminiModel === 'string' ? body.value.geminiModel : null,
-    options: Array.isArray(body?.options) ? body.options : [],
-  };
-}
-
-/**
- * What the Settings tab and the voice dialog offer: models with the default
- * marked, voices per provider, providers with their configuration state and
- * the one that would run, the pin, and the speaking-rate bounds.
+ * What the Generate tab, the Settings tab and the voice dialog read: the
+ * Listen & Learn speech task's model with its reason and per-episode
+ * ceiling (`model`, chosen under AI Engine → Tasks — ADR 0034 slice 5),
+ * voices per provider, providers with their configuration state and the
+ * one that would run, the pin, and the speaking-rate bounds.
  */
 export async function fetchSpeechOptions() {
   return getJSON('cms/listen-and-learn/speech-options');
@@ -124,10 +111,9 @@ export async function fetchSpeechOptions() {
  *
  * @returns {Promise<{provider: string|null, model: string|null, bytes: number, estimatedCostUsd: number|null}>}
  */
-export async function estimateSpeech({ text, bytes, ttsModel, platform, examCode } = {}) {
+export async function estimateSpeech({ text, bytes, platform, examCode } = {}) {
   return postJSON('cms/listen-and-learn/estimate', {
     ...(typeof text === 'string' ? { text } : { bytes }),
-    ...(ttsModel ? { ttsModel } : {}),
     ...(platform && examCode ? { platform, examCode } : {}),
   });
 }
@@ -239,19 +225,23 @@ const RUN_WAIT_MS = 26 * 60 * 1000;
  * 202 carries `speech`, the expected spend, which `onAccepted` receives.
  */
 export async function regenerateChapter(
-  { platform, examCode, chapterId, ttsModel },
+  { platform, examCode, chapterId },
   { onUpdate, onAccepted, signal } = {}
 ) {
-  return runJob('regenerate-chapter', ttsModel ? { ttsModel } : {}, {
-    fetchers: {
-      enqueue: ({ payload }) =>
-        postJSON(`${chapterRoute(platform, examCode, chapterId)}/regenerate`, payload),
-    },
-    onUpdate,
-    onAccepted,
-    signal,
-    maxWaitMs: RUN_WAIT_MS,
-  });
+  return runJob(
+    'regenerate-chapter',
+    {},
+    {
+      fetchers: {
+        enqueue: ({ payload }) =>
+          postJSON(`${chapterRoute(platform, examCode, chapterId)}/regenerate`, payload),
+      },
+      onUpdate,
+      onAccepted,
+      signal,
+      maxWaitMs: RUN_WAIT_MS,
+    }
+  );
 }
 
 /**
@@ -281,8 +271,6 @@ export async function followJob(accepted, { onUpdate, signal } = {}) {
  * out, because the areas that finished are already stored.
  *
  * @param {object} params
- * @param {string} [params.ttsModel] the Gemini model for this run (one of
- *   GEMINI_TTS_MODEL_TIERS); omitted, the stored default reads
  * @param {(job: object) => void} [params.onUpdate]
  * @param {(accepted: {speech?: object}) => void} [params.onAccepted] the 202,
  *   which carries `speech: { provider, model, estimatedCostUsd, … }` — what
@@ -296,7 +284,6 @@ export async function generateEpisodes({
   certTitle,
   certSlug,
   areas,
-  ttsModel,
   onUpdate,
   onAccepted,
   signal,
@@ -310,7 +297,6 @@ export async function generateEpisodes({
       ...(certTitle ? { certTitle } : {}),
       ...(certSlug ? { certSlug } : {}),
       ...(areas?.length ? { areas } : {}),
-      ...(ttsModel ? { ttsModel } : {}),
     },
     {
       onUpdate,

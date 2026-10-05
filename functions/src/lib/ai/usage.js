@@ -72,6 +72,14 @@ export const USAGE_SOURCES = Object.freeze({
  */
 export const FEATURE_SOURCE_PREFIX = 'ai:';
 
+/**
+ * Since ADR 0034 slice 5 (#860) the audio and image rows carry this too:
+ * `ai:listenAndLearnSpeech`, `ai:podcastVoice`, `ai:coverArt`,
+ * `ai:manualImages` — so the Usage tab groups them by task beside the text
+ * tasks — and their old slug (USAGE_SOURCES.podcastAudio and friends)
+ * travels as `product`. The sample row (podcast:sample) and the Test rows
+ * keep their own sources: a check is not the task's spend.
+ */
 export function featureSource(feature) {
   const name = String(feature || '').trim();
   return name ? `${FEATURE_SOURCE_PREFIX}${name}` : USAGE_SOURCES.aiUnspecified;
@@ -105,6 +113,11 @@ export function featureSource(feature) {
  *   that served (ADR 0034 §3): `explicit`, `recommended`, `custom` or
  *   `global`; absent on rows from before the resolver and on callers that
  *   name a provider themselves
+ * @param {string} [record.product] the more specific slug a media row
+ *   carried as its `source` before ADR 0034 slice 5 (#860) — `podcast:audio`,
+ *   `listen-and-learn:audio`, `images:cover`, `images:manual` — kept beside
+ *   the task source so the audio pages and the ElevenLabs card can still
+ *   find their own rows while the Usage tab groups by task
  * @returns {Promise<object|null>} the row written, or null if the write failed
  */
 export async function recordAiUsage(
@@ -120,6 +133,7 @@ export async function recordAiUsage(
     recordedRowId,
     unpriced,
     selection,
+    product,
   }
 ) {
   // Everything is inside the try, including building the row. Pricing it calls
@@ -151,6 +165,7 @@ export async function recordAiUsage(
       ...(estimatedTokens ? { estimatedTokens: true } : {}),
       ...(isUnpriced ? { unpriced: true } : {}),
       ...(typeof selection === 'string' && selection ? { selection } : {}),
+      ...(typeof product === 'string' && product ? { product } : {}),
       timestamp: now().toISOString(),
     };
 

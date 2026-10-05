@@ -344,6 +344,25 @@ models that a task or the priority list still names.
   table ever leaves the router; then §2's reading is one marked line in
   `select.js` (`NULL MODEL`).
 
+- **2026-10-05 (slice 5, #860): landed; the media providers are
+  keyed-is-enabled.** The audio and image tasks of §2 are rows of the
+  registry and the selection document; ElevenLabs and Replicate are
+  catalogue providers with no card — a key is what switches them on, there
+  is no order to set and no Test to run on a card, and the catalogue drawer
+  says so. Two things §2 and §3 did not say, decided here: a media task
+  defaults to mode `recommended`, because the Priority list is the chat
+  list and a media provider never joins it; and each media task carries
+  `only`, a product rule in code no document lifts (the podcast voice is
+  ElevenLabs-only, Listen & Learn speech Gemini-only, the images
+  Replicate-only — ADR 0029 §2b), without which the list's Gemini step would
+  have read the podcast. A media task's recommendation stands while the
+  catalogue has not yet confirmed it (`unknown`, never `retired`): it has no
+  list behind it, and the week between a deploy and the next refresh must
+  not be a week of silence; a chat task keeps §3's strict reading. The
+  per-task Test of a media task is a dry run that spends nothing. The
+  settings pages lost their model fields as the consequences section says;
+  `recordingTranscript`, `pageOcr` and `embeddings` are registered as planned
+  with no provider, shown as "no eligible model".
 ## Alternatives considered
 
 - **Keep the three mechanisms and document the tie-break.** Rejected: the

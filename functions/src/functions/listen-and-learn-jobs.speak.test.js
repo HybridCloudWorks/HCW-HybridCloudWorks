@@ -79,14 +79,15 @@ beforeEach(() => {
 });
 
 describe('parseSpeakChapterPayload', () => {
-  it('accepts the set and chapter, and refuses a bad model or a malformed id', () => {
+  it('accepts the set and chapter, ignores a model (the task’s, ADR 0034 slice 5) and refuses a malformed id', () => {
     expect(parseSpeakChapterPayload({ ...payload, platform: 'AZURE' }).value).toEqual({
       platform: 'azure',
       examCode: 'AZ-104',
       chapterId: 'manual_x',
-      ttsModel: null,
     });
-    expect(parseSpeakChapterPayload({ ...payload, ttsModel: 'nope' }).error).toMatch(/ttsModel/);
+    expect(parseSpeakChapterPayload({ ...payload, ttsModel: 'nope' }).value).not.toHaveProperty(
+      'ttsModel'
+    );
     expect(parseSpeakChapterPayload({ ...payload, chapterId: '../x' }).error).toMatch(/chapterId/);
     expect(parseSpeakChapterPayload({}).error).toMatch(/platform/);
   });

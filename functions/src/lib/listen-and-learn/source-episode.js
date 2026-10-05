@@ -33,9 +33,9 @@
  * spending. Same sentences each time, because they are the same function.
  */
 import { validateGroundingSources } from '../ai/router.js';
-import { recordAiUsageBatch, totalCostUsd, USAGE_SOURCES } from '../ai/usage.js';
+import { featureSource, recordAiUsageBatch, totalCostUsd, USAGE_SOURCES } from '../ai/usage.js';
 import { generateEpisodeScript } from './script.js';
-import { synthesizeDialogue } from './speech/index.js';
+import { SPEECH_TASKS, synthesizeDialogue } from './speech/index.js';
 import { renderAudio, SUPPORTED_PLATFORMS, isSupportedPlatform } from './generate.js';
 import {
   EPISODE_KIND,
@@ -186,7 +186,7 @@ function resolveDeps(deps = {}) {
  * @param {object} params.storage Blob: uploadBlob
  * @param {{ generateGroundedJsonResponse: Function, getCostEstimate: Function }} params.ai the router
  * @param {object} [params.env]
- * @param {string|null} [params.ttsModel] the Gemini model the job resolved, or null (speech-settings.js)
+ * @param {string|null} [params.ttsModel] the model the job resolved for the listenAndLearnSpeech task, or null (listen-and-learn-jobs.js)
  * @param {string|null} [params.actorId]
  * @param {string} [params.now]
  * @param {object} [params.deps] test seams; see resolveDeps
@@ -324,7 +324,8 @@ export async function generateSourceEpisode({
             promptTokens: audio.promptTokens,
             completionTokens: audio.completionTokens,
             estimatedTokens: audio.estimatedTokens,
-            source: USAGE_SOURCES.listenAndLearnAudio,
+            source: featureSource(SPEECH_TASKS.listenAndLearn),
+            product: USAGE_SOURCES.listenAndLearnAudio,
           },
         ]
       : []),

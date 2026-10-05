@@ -11,6 +11,7 @@ import { httpRoute } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
 import { queryDocs, readDoc, patchDoc, upsertDoc } from '../lib/cosmos-client.js';
 import { uploadBlob } from '../lib/blob-storage.js';
+import { modelForTask } from '../lib/ai/router.js';
 import { createReplicateClient } from '../lib/triggers/ai-cover.js';
 import { createManualImageHandlers } from '../lib/manual-images.js';
 
@@ -19,7 +20,8 @@ const handlers = () =>
     guard: getDefaultGuard(),
     store: { queryDocs, readDoc, patchDoc, upsertDoc },
     storage: { uploadBlob },
-    replicate: createReplicateClient({ store: { queryDocs, upsertDoc } }),
+    // modelForTask: the manualImages task's model (ADR 0034 slice 5, #860).
+    replicate: createReplicateClient({ store: { queryDocs, upsertDoc }, modelForTask }),
     uuid: () => crypto.randomUUID(),
   });
 

@@ -183,3 +183,42 @@ export const COST_TABLE = Object.freeze({
     default: [0.35, 1.4],
   },
 });
+
+/**
+ * The media providers' own default models (ADR 0034 slice 5, #860): what
+ * the catalogue seeds for them before their first list, as
+ * DEFAULT_MODEL_TABLE seeds the chat providers. ElevenLabs lists its models
+ * (model-catalog.js); Replicate has no list endpoint the site reads, so its
+ * entry IS its list — the image models this repository calls, one today.
+ */
+export const MEDIA_DEFAULT_MODELS = Object.freeze({
+  elevenlabs: Object.freeze(['eleven_v3']),
+  replicate: Object.freeze(['google/imagen-4-fast']),
+});
+
+/**
+ * The unit a provider's cost rows are expressed in, where it is not tokens.
+ * ElevenLabs bills characters and its rows are USD per 1M characters
+ * (speech/elevenlabs.js header); Replicate bills per output image and has
+ * no per-1M shape at all, so its price is PER_IMAGE_USD below and the
+ * catalogue carries `unit: 'image'` rather than a token rate that would
+ * price nothing. Everything else is `1M tokens`, the table's own unit.
+ */
+export const PRICING_UNITS = Object.freeze({
+  elevenlabs: '1M characters',
+  replicate: 'image',
+});
+
+/**
+ * USD per output image, by model, for the catalogue's price column and the
+ * recommendation rule (a recommended model must be priced). Read from
+ * replicate.com/google/imagen-4-fast on 2026-10-05 ("$0.02 per output
+ * image, or 50 images for $1"), the same figure Terraform sets
+ * CONTENTFORGE_IMAGE_COST_USD to; the usage rows are priced from that
+ * setting (triggers/ai-cover.js), and this table is what the page shows.
+ */
+export const PER_IMAGE_USD = Object.freeze({
+  replicate: Object.freeze({
+    'google/imagen-4-fast': 0.02,
+  }),
+});

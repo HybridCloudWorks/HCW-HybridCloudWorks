@@ -10,12 +10,7 @@
  * - a FAILED read empties the list rather than leaving the previous book's
  *   chapters beside an error saying they could not be read.
  */
-import {
-  fetchSetForReview,
-  fetchSets,
-  fetchSpeechOptions,
-  fetchSpeechSettings,
-} from '@/lib/listenAndLearn';
+import { fetchSetForReview, fetchSets, fetchSpeechOptions } from '@/lib/listenAndLearn';
 
 /** One call, as `{ value }` or `{ error }` — never throws. */
 export async function outcome(run) {
@@ -97,20 +92,12 @@ export function startSetsRead(state) {
 }
 
 /**
- * The stored model default and the priced choices, best effort: a failed load
- * leaves the field on "Stored default", which is what the server applies to a
- * run that names no model, so nothing is lost but the price. The catalogue
- * (voices, providers, default) is read beside it for the Settings tab and
- * the voice dialog.
+ * The speech catalogue — the task's model with its price, the voices, the
+ * providers and which would run — read for the Generate tab, the Settings
+ * tab and the voice dialog. The model itself is chosen under AI Engine →
+ * Tasks (ADR 0034 slice 5); nothing here reads a stored default any more.
  */
 export function startSpeechRead(state) {
-  fetchSpeechSettings()
-    .then(({ geminiModel, options }) => {
-      if (!state.alive.current) return;
-      state.setSpeechOptions(options);
-      if (geminiModel) state.setStoredModel(geminiModel);
-    })
-    .catch(() => {});
   fetchSpeechOptions()
     .then((catalog) => {
       if (state.alive.current) state.setCatalog(catalog || null);

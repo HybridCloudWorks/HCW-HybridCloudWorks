@@ -15,14 +15,12 @@ import { firstError } from './validate.js';
 import {
   AZURE_VOICES,
   GEMINI_VOICES,
+  LISTEN_AND_LEARN_DEFAULT_MODEL,
   SPEAKING_RATE,
   VOICE_PROVIDERS,
-  listenAndLearnModelOptions,
-  LISTEN_AND_LEARN_DEFAULT_MODEL,
-  parseTtsModel,
-  readStoredListenAndLearnModel,
 } from './speech-settings.js';
-import { describeSpeechProviders } from './speech/index.js';
+import { MAX_SCRIPT_BYTES } from './script.js';
+import { SPEECH_TASKS, describeSpeechProviders, estimateGeminiCostUsd } from './speech/index.js';
 import { PRODUCT, json, parseBody } from './handlers-shared.js';
 
 /** UTF-8 bytes of `text`, else the non-negative `bytes` given, else null. */
@@ -32,15 +30,11 @@ function speechBytesOf(body) {
   return Number.isFinite(bytes) && bytes >= 0 ? Math.ceil(bytes) : null;
 }
 
-/** `{ bytes? | text?, ttsModel?, platform?, examCode? }` for the estimate. */
+/** `{ bytes? | text?, platform?, examCode? }` for the estimate; a `ttsModel` is ignored (the model is the task's). */
 function parseEstimateBody(body) {
-  const model = parseTtsModel(body.ttsModel);
-  if (model.error) return { error: model.error };
   const bytes = speechBytesOf(body);
   if (bytes === null) return { error: 'Give text or a byte count to price' };
-  return {
-    value: { bytes, ttsModel: model.value, platform: body.platform, examCode: body.examCode },
-  };
+  return { value: { bytes, platform: body.platform, examCode: body.examCode } };
 }
 
 /**
@@ -67,26 +61,48 @@ function parseReviewBody(body) {
 }
 
 /**
- * GET /api/cms/listen-and-learn/speech-options — what the Settings tab
- * and the book voice dialog offer: the models with their ceilings and
- * which is the default, the voices per provider, the providers with
- * their configuration state and the one that would run, the pin, and
- * the speaking-rate bounds. Read from the server so the page cannot
- * describe a fallback the code does not have.
+ * The `listenAndLearnSpeech` task's effective model for the Settings tab
+ * (ADR 0034 slice 5, #860): the provider and model the resolver answers,
+ * the reason, and the per-episode ceiling at the script cap — or `error`
+ * with the resolver's own sentence when nothing is eligible or the task is
+ * switched off, and null with no router wired. The page links to AI Engine
+ * → Tasks to change it; nothing here is editable.
  */
-export const speechOptions = ({ store, env, guarded }) =>
+async function taskModelReport(ai) {
+  if (typeof ai?.modelForTask !== 'function') return null;
+  try {
+    const chosen = await ai.modelForTask({ task: 'listenAndLearnSpeech' });
+    return {
+      task: SPEECH_TASKS.listenAndLearn,
+      provider: chosen.provider,
+      model: chosen.model,
+      why: chosen.why,
+      perEpisodeUsd:
+        chosen.provider === 'gemini' ? estimateGeminiCostUsd(chosen.model, MAX_SCRIPT_BYTES) : null,
+    };
+  } catch (err) {
+    return { task: SPEECH_TASKS.listenAndLearn, provider: null, model: null, error: err?.message || String(err) };
+  }
+}
+
+/**
+ * GET /api/cms/listen-and-learn/speech-options — what the Settings tab
+ * and the book voice dialog offer: the task's effective model (`model`,
+ * read-only here; chosen under AI Engine → Tasks), the voices per provider,
+ * the providers with their configuration state and the one that would
+ * run, the pin, and the speaking-rate bounds. Read from the server so the
+ * page cannot describe a fallback the code does not have.
+ */
+export const speechOptions = ({ env, ai, guarded }) =>
   guarded(
     'editor',
     'listenAndLearnSpeechOptions',
     'Failed to read the speech options',
     async () => {
-      const stored = await readStoredListenAndLearnModel(store.readDoc).catch(() => null);
       return json(200, {
         success: true,
-        models: listenAndLearnModelOptions(),
+        model: await taskModelReport(ai),
         defaultModel: LISTEN_AND_LEARN_DEFAULT_MODEL,
-        storedModel: stored,
-        effectiveModel: stored || LISTEN_AND_LEARN_DEFAULT_MODEL,
         voices: { gemini: GEMINI_VOICES, azure: AZURE_VOICES },
         voiceProviders: VOICE_PROVIDERS,
         speakingRate: SPEAKING_RATE,
@@ -97,11 +113,11 @@ export const speechOptions = ({ store, env, guarded }) =>
 
 /**
  * POST /api/cms/listen-and-learn/estimate
- * `{ bytes? | text?, ttsModel?, platform?, examCode? }`
+ * `{ bytes? | text?, platform?, examCode? }`
  *
  * What speaking this much text would cost, before it is spoken: by the
- * book's voice when one is named, else by the run's model or the stored
- * default. A ceiling, in the same arithmetic the 202 uses.
+ * book's voice when one is named, with the task's model. A ceiling, in the
+ * same arithmetic the 202 uses. A `ttsModel` in the body is ignored.
  */
 export const estimateSpeech = ({ store, estimateFor, guarded }) =>
   guarded(
@@ -111,7 +127,7 @@ export const estimateSpeech = ({ store, estimateFor, guarded }) =>
     async ({ request }) => {
       const read = parseBody(await request.json().catch(() => null), parseEstimateBody);
       if (!read.ok) return json(read.status, { error: read.error });
-      const { bytes, ttsModel, platform, examCode } = read.parsed;
+      const { bytes, platform, examCode } = read.parsed;
 
       let set = null;
       if (platform && examCode) {
@@ -120,7 +136,7 @@ export const estimateSpeech = ({ store, estimateFor, guarded }) =>
       }
       return json(200, {
         success: true,
-        ...(await estimateFor(set, { bytes, ttsModel })),
+        ...(await estimateFor(set, { bytes })),
       });
     }
   );

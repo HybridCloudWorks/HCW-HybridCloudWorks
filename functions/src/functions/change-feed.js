@@ -56,7 +56,8 @@ async function handlers(context) {
     aiCover: createAiCoverGenerator({
       store,
       storage,
-      replicate: createReplicateClient({ store }),
+      // modelForTask: the coverArt task's model (ADR 0034 slice 5, #860).
+      replicate: createReplicateClient({ store, modelForTask: ai.modelForTask }),
       uuid: () => crypto.randomUUID(),
       log: context,
     }),

@@ -60,8 +60,6 @@ export default function useListenAndLearn(ready) {
   const [chapterProgress, setChapterProgress] = useState({});
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState(null);
-  const [speechOptions, setSpeechOptions] = useState([]);
-  const [storedModel, setStoredModel] = useState('');
   const [catalog, setCatalog] = useState(null);
   const [includeArchived, setIncludeArchivedState] = useState(false);
 
@@ -89,8 +87,6 @@ export default function useListenAndLearn(ready) {
       setChapterProgress,
       setGenerating,
       setProgress,
-      setSpeechOptions,
-      setStoredModel,
       setCatalog,
       setIncludeArchived: setIncludeArchivedState,
       generation,
@@ -135,10 +131,7 @@ export default function useListenAndLearn(ready) {
     [state]
   );
   const reorder = useCallback((order) => reorderFlow(state, order), [state]);
-  const regenerate = useCallback(
-    (chapterId, ttsModel) => regenerateFlow(state, chapterId, ttsModel),
-    [state]
-  );
+  const regenerate = useCallback((chapterId) => regenerateFlow(state, chapterId), [state]);
   const deleteVersion = useCallback(
     (chapterId, versionId) => deleteVersionFlow(state, chapterId, versionId),
     [state]
@@ -160,8 +153,6 @@ export default function useListenAndLearn(ready) {
     chapterProgress,
     generating,
     progress,
-    speechOptions,
-    storedModel,
     catalog,
     includeArchived,
     setIncludeArchived,

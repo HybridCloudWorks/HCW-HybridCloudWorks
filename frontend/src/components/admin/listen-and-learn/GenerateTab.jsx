@@ -13,38 +13,60 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Loader2, Play } from 'lucide-react';
+import { Link } from 'react-router';
 import { GENERATE_PLATFORMS, GITHUB_GENERATE_NOTE } from '@/lib/listenAndLearn';
 import SourceGroundingPanel from '@/pages/admin/SourceGroundingPanel';
-import VoiceModelField from './VoiceModelField';
+import { tabHref } from '@/components/admin/ai-engine/tabs';
 import { formatCost } from './episodeView';
 
+/**
+ * The model a run will read with (ADR 0034 slice 5, #860): the Listen &
+ * Learn speech task's, as `GET cms/listen-and-learn/speech-options` reports
+ * it. Nothing here chooses it; the line says where to.
+ */
+export function VoiceModelLine({ catalog }) {
+  const model = catalog?.model;
+  const tasks = tabHref('routing');
+  let said;
+  if (catalog?.error) said = <>The voice model could not be read: {catalog.error}.</>;
+  else if (!catalog) said = <>Reading the voice model…</>;
+  else if (model?.error) said = <>No voice model is eligible right now: {model.error}</>;
+  else if (model?.model) {
+    said = (
+      <>
+        This run is read with <code className="text-foreground">{model.model}</code>
+        {model.provider ? ` via ${model.provider}` : ''}.
+      </>
+    );
+  } else said = <>The voice model is the Listen &amp; Learn speech task&apos;s.</>;
+  return (
+    <p className="text-xs text-muted-foreground" data-testid="voice-model-line">
+      {said} The model is chosen under{' '}
+      <Link to={tasks} className="text-primary underline underline-offset-4">
+        AI Engine → Tasks
+      </Link>
+      .
+    </p>
+  );
+}
+
 export default function GenerateTab({ hub }) {
-  const { generating, progress, speechOptions, storedModel, catalog, loadSets, openSet, generate } =
-    hub;
+  const { generating, progress, catalog, loadSets, openSet, generate } = hub;
   const [form, setForm] = useState({
     platform: 'azure',
     examCode: '',
     studyGuideUrl: '',
     certTitle: '',
-    ttsModel: null,
   });
 
-  // `null` is "not chosen yet", so the stored default shows once it loads;
-  // `''` is the operator choosing "Stored default" on purpose. Both send no
-  // model, and keeping them distinct is what lets a late settings response
-  // fill an untouched field without overriding a choice already made —
-  // derived rather than written back into state by an effect, which would be
-  // a second source of truth for the same value.
-  const ttsModel = form.ttsModel === null ? storedModel : form.ttsModel;
-
   // What one lesson is expected to cost with the model that will run: the
-  // chosen one, else the stored default, else the server's default (Economy).
-  const effective = ttsModel || catalog?.effectiveModel || null;
-  const perEpisode = (speechOptions || []).find((o) => o.id === effective)?.perEpisodeUsd;
+  // task's, priced by the server at the script ceiling (speech-options).
+  const effective = catalog?.model?.model || null;
+  const perEpisode = catalog?.model?.perEpisodeUsd;
 
   const onSubmit = (event) => {
     event.preventDefault();
-    generate({ ...form, ttsModel });
+    generate({ ...form });
   };
 
   return (
@@ -102,13 +124,7 @@ export default function GenerateTab({ hub }) {
                 placeholder="Azure Administrator Associate"
               />
             </label>
-            <VoiceModelField
-              value={ttsModel}
-              options={speechOptions}
-              defaultModel={catalog?.defaultModel}
-              disabled={generating}
-              onChange={(ttsModel) => setForm((f) => ({ ...f, ttsModel }))}
-            />
+            <VoiceModelLine catalog={catalog} />
             <div className="flex flex-wrap items-center gap-3">
               <Button type="submit" disabled={generating}>
                 {generating ? (
@@ -130,9 +146,9 @@ export default function GenerateTab({ hub }) {
               leaves finished lessons behind. Re-running an exam code adds a new take to each lesson
               and keeps its approval and your renames; a lesson the new guide no longer lists is
               marked &ldquo;Not in current guide&rdquo; in the Library rather than removed. Each run
-              is read by Gemini TTS on the chosen voice model (never ElevenLabs, which is the
-              podcast voice) and the expected spend is shown here as soon as the run is accepted;
-              the actual spend is logged to the AI Engine usage tab.
+              is read by Gemini TTS on the model the Listen &amp; Learn speech task names (never
+              ElevenLabs, which is the podcast voice) and the expected spend is shown here as soon
+              as the run is accepted; the actual spend is logged to the AI Engine usage tab.
             </p>
             <p className="text-[11px] text-muted-foreground">{GITHUB_GENERATE_NOTE}</p>
           </form>

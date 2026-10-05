@@ -37,15 +37,39 @@
  * routes and the grounded call, exactly as features-catalogue.js has them.
  * `defaultSelection()` is that document; the router uses it when the loader
  * has none.
+ *
+ * THE MEDIA MODEL FIELDS (ADR 0034 slice 5, #860). The Listen & Learn
+ * speech model stored on Platform settings (`admin_config/
+ * listen_and_learn_speech`, `geminiModel`) and the podcast voice model
+ * setting (`LISTEN_AND_LEARN_ELEVENLABS_MODEL`) were the two model choices
+ * the settings pages carried; the Tasks tab owns them now. `media` carries
+ * what they held, and the rule is one sentence: a stored model that differs
+ * from the task's recommendation becomes that task's `custom` chain —
+ * `[{ provider: the recommended provider, model: the stored one }]` with
+ * `thenGlobal: false`, since the Priority list is a chat list and cannot
+ * follow a speech task — so nothing changes for the owner on merge. One
+ * that equals the recommendation, or none, leaves the task on its default
+ * mode (`recommended`). Applied by `applyMediaMigration` to a v1 migration
+ * AND to a stored v2 document that has no entry for the task yet: a v2
+ * document saved by slice 4, before these tasks existed, must not lose a
+ * choice its author never saw on the page. A v2 entry for the task, of any
+ * mode, is left alone. The placements never touch a media task: a chat
+ * provider's `first` or `off` means nothing to a voice.
  */
 import { DEFAULT_PROVIDER_ORDER } from './provider-order.js';
 import { PER_FEATURE_PROVIDERS, placementFor } from './features-catalogue.js';
 import { normalizeRouting } from './routing-table.js';
-import { TASK_NAMES } from './tasks.js';
+import { AI_TASKS, TASK_NAMES, isMediaTask } from './tasks.js';
 import { SELECTION_VERSION, isSelectionV2, normalizeSelection } from './selection.js';
 
 /** The version this module migrates from. */
 export const MIGRATED_FROM_VERSION = 1;
+
+/**
+ * The media tasks whose model a settings page or setting used to carry, and
+ * the key `media` names each under (header).
+ */
+export const MEDIA_MIGRATION_TASKS = Object.freeze(['listenAndLearnSpeech', 'podcastVoice']);
 
 const isPlainObject = (value) =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -132,23 +156,70 @@ export function taskEntryFor({ task, route, features, providers }) {
  * @param {object|null} docs.features          The `ai-features` document.
  * @param {object|null} docs.routing           The `ai-routing` document, v1 or v2.
  */
-export function migrateSelection({ providers = null, features = null, routing = null } = {}) {
-  if (isSelectionV2(routing)) return routing;
+export function migrateSelection({
+  providers = null,
+  features = null,
+  routing = null,
+  media = null,
+} = {}) {
+  if (isSelectionV2(routing)) return applyMediaMigration(routing, media);
   const cards = cardsOf(providers);
   const order = orderedProviders(cards);
   const { routes } = normalizeRouting(routing);
   const tasks = {};
   for (const task of TASK_NAMES) {
+    // The placements and the v1 routes were written for chat providers; a
+    // media task never had either (header).
+    if (isMediaTask(AI_TASKS[task])) continue;
     const entry = taskEntryFor({ task, route: routes[task] || null, features, providers });
     if (entry) tasks[task] = entry;
   }
-  return normalizeSelection({
-    version: SELECTION_VERSION,
-    global: { priority: order.map((provider) => ({ provider, model: pinOf(cards, provider) })) },
-    tasks,
-    updatedAt: isPlainObject(routing) && typeof routing.updatedAt === 'string' ? routing.updatedAt : null,
-    updatedBy: 'migration',
-  });
+  return applyMediaMigration(
+    normalizeSelection({
+      version: SELECTION_VERSION,
+      global: { priority: order.map((provider) => ({ provider, model: pinOf(cards, provider) })) },
+      tasks,
+      updatedAt:
+        isPlainObject(routing) && typeof routing.updatedAt === 'string' ? routing.updatedAt : null,
+      updatedBy: 'migration',
+    }),
+    media
+  );
+}
+
+/** A stored media model id, trimmed, or null. */
+const storedModelOf = (media, task) => {
+  const value = media?.[task];
+  const model = typeof value === 'string' ? value.trim() : '';
+  return model || null;
+};
+
+/**
+ * The media rule (header) over a normalised v2 document: for each task in
+ * MEDIA_MIGRATION_TASKS with no entry, a stored model that differs from the
+ * recommendation becomes a custom chain on the recommended provider,
+ * `thenGlobal: false`. Returns the document itself when nothing applies,
+ * so an idempotent read stays cheap.
+ *
+ * @param {object} selection  A v2 document (normalised or stored).
+ * @param {Record<string, string|null>|null} media  `{ listenAndLearnSpeech, podcastVoice }`.
+ */
+export function applyMediaMigration(selection, media) {
+  if (!media) return selection;
+  const added = {};
+  for (const task of MEDIA_MIGRATION_TASKS) {
+    if (isPlainObject(selection?.tasks?.[task])) continue;
+    const model = storedModelOf(media, task);
+    const recommended = AI_TASKS[task]?.recommended;
+    if (!model || !recommended || model === recommended.model) continue;
+    added[task] = {
+      mode: 'custom',
+      chain: [{ provider: recommended.provider, model }],
+      thenGlobal: false,
+    };
+  }
+  if (!Object.keys(added).length) return selection;
+  return normalizeSelection({ ...selection, tasks: { ...(selection.tasks || {}), ...added } });
 }
 
 let defaults = null;

@@ -25,7 +25,7 @@ import { httpRoute } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
 import { queryDocs, readDoc, upsertDoc, patchDoc } from '../lib/cosmos-client.js';
 import { headBlobForDelivery, uploadBlob } from '../lib/blob-storage.js';
-import { getCostEstimate } from '../lib/ai/router.js';
+import { getCostEstimate, modelForTask } from '../lib/ai/router.js';
 import { JOBS_QUEUE } from '../lib/jobs.js';
 import { createPodcastHandlers } from '../lib/podcast/handlers.js';
 import { createElevenLabsHandlers } from '../lib/podcast/elevenlabs-admin.js';
@@ -101,7 +101,8 @@ const elevenLabs = () =>
     store: { queryDocs, upsertDoc, readDoc },
     // headBlobForDelivery: whether the last sample's blob is still there.
     storage: { uploadBlob, headBlobForDelivery },
-    ai: { getCostEstimate },
+    // modelForTask: the podcastVoice task's model for the live check (ADR 0034 slice 5).
+    ai: { getCostEstimate, modelForTask },
   });
 
 // The Audio tab's ElevenLabs card: plan, credits used / limit, reset date,

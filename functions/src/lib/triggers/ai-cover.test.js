@@ -263,6 +263,8 @@ describe('createReplicateClient: usage rows and the monthly budget (2026-10-05)'
     expect(url).toBe('https://img.example/x.png');
     expect(store.written).toHaveLength(1);
     expect(store.written[0].container).toBe('ai_usage');
+    // The row is the coverArt task's (ADR 0034 slice 5), the image slug kept
+    // as `product` for the gallery and the budget query.
     expect(store.written[0].doc).toMatchObject({
       id: 'row-1',
       provider: 'replicate',
@@ -270,7 +272,8 @@ describe('createReplicateClient: usage rows and the monthly budget (2026-10-05)'
       estimatedCostUsd: 0.02,
       promptTokens: 0,
       completionTokens: 0,
-      source: 'images:cover',
+      source: 'ai:coverArt',
+      product: 'images:cover',
       timestamp: NOW.toISOString(),
     });
     expect(store.written[0].doc).not.toHaveProperty('unpriced');
@@ -289,7 +292,8 @@ describe('createReplicateClient: usage rows and the monthly budget (2026-10-05)'
     expect(store.written[0].doc).toMatchObject({
       estimatedCostUsd: 0,
       unpriced: true,
-      source: 'images:manual',
+      source: 'ai:manualImages',
+      product: 'images:manual',
     });
   });
 
@@ -368,5 +372,69 @@ describe('createReplicateClient: usage rows and the monthly budget (2026-10-05)'
   it('with no store, generates and records nothing', async () => {
     const client = createReplicateClient({ env, fetch: fetchOk(), sleep: noSleep, now });
     await expect(client.generate('x')).resolves.toBe('https://img.example/x.png');
+  });
+});
+
+describe('createReplicateClient: the model is the task’s (ADR 0034 slice 5, #860)', () => {
+  const settled = { id: 'p1', status: 'succeeded', output: 'https://img.example/x.png' };
+  const fetchOk = () => vi.fn(async () => ({ ok: true, status: 200, json: async () => settled }));
+  const noSleep = async () => {};
+  const env = { REPLICATE_API_KEY: 'r8_test', CONTENTFORGE_IMAGE_MODEL: 'env/model' };
+  const routerWith = (outcome) => ({
+    modelForTask: vi.fn(async () => {
+      if (outcome instanceof Error) throw outcome;
+      return outcome;
+    }),
+  });
+
+  it('without a resolver the setting or the default is the model, as before', async () => {
+    const fetchImpl = fetchOk();
+    const client = createReplicateClient({ env, fetch: fetchImpl, sleep: noSleep });
+    expect(client.model).toBe('env/model');
+    await client.generate('x');
+    expect(fetchImpl.mock.calls[0][0]).toBe('https://api.replicate.com/v1/models/env/model/predictions');
+    expect(createReplicateClient({ env: { REPLICATE_API_KEY: 'r8' } }).model).toBe('google/imagen-4-fast');
+  });
+
+  it('resolves the coverArt task for a cover and the manualImages task otherwise, and calls that model', async () => {
+    const fetchImpl = fetchOk();
+    const ai = routerWith({ provider: 'replicate', model: 'google/imagen-4', selection: 'custom' });
+    const client = createReplicateClient({ env, fetch: fetchImpl, sleep: noSleep, modelForTask: ai.modelForTask });
+    expect(client.model).toBe('env/model');
+    await client.generate('a cover', { source: 'images:cover' });
+    expect(ai.modelForTask).toHaveBeenLastCalledWith({ task: 'coverArt' });
+    expect(fetchImpl.mock.calls[0][0]).toBe('https://api.replicate.com/v1/models/google/imagen-4/predictions');
+    // What the gallery record and modelInfo read: the model the last generation used.
+    expect(client.model).toBe('google/imagen-4');
+    await client.generate('a preview', { source: 'images:manual' });
+    expect(ai.modelForTask).toHaveBeenLastCalledWith({ task: 'manualImages' });
+    await client.generate('a sample');
+    expect(ai.modelForTask).toHaveBeenLastCalledWith({ task: 'manualImages' });
+  });
+
+  it('a task with nothing eligible, or switched off, refuses before any call to Replicate', async () => {
+    const fetchImpl = fetchOk();
+    const refused = new Error("No eligible model carries 'image' for 'coverArt'");
+    refused.code = 'AI_NOT_CONFIGURED';
+    const client = createReplicateClient({
+      env,
+      fetch: fetchImpl,
+      sleep: noSleep,
+      modelForTask: routerWith(refused).modelForTask,
+    });
+    await expect(client.generate('x', { source: 'images:cover' })).rejects.toBe(refused);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('a task that resolves to a provider this client cannot call is a refusal, not a substitution', async () => {
+    const fetchImpl = fetchOk();
+    const client = createReplicateClient({
+      env,
+      fetch: fetchImpl,
+      sleep: noSleep,
+      modelForTask: routerWith({ provider: 'gemini', model: 'imagen-4.0-generate-001' }).modelForTask,
+    });
+    await expect(client.generate('x')).rejects.toThrow(/resolved to gemini, which this image client cannot call/);
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });

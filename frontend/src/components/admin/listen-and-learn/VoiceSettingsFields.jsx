@@ -1,15 +1,17 @@
 /**
- * A book's voice (ADR 0033 §4): which provider reads it, which Gemini model,
- * which voice per host and for a narrator, the language and the speaking
- * rate. Rendered inside the book dialog; the catalogue of voices, models and
- * providers comes from `GET cms/listen-and-learn/speech-options` so the
- * choices are the server's, not a list kept here.
+ * A book's voice (ADR 0033 §4): which provider reads it, which voice per
+ * host and for a narrator, the language and the speaking rate. The model is
+ * the Listen & Learn speech task's (ADR 0034 slice 5). Rendered inside the
+ * book dialog; the catalogue of voices and providers comes from
+ * `GET cms/listen-and-learn/speech-options` so the choices are the
+ * server's, not a list kept here.
  *
  * Native `<select>` and `<input>` elements with labels, so every control is
  * keyboard-operable and named without a component library in between.
  */
 import React from 'react';
 import { Input } from '@/components/ui/input';
+import { tabHref } from '@/components/admin/ai-engine/tabs';
 
 const field = 'h-9 w-full rounded-md border border-input bg-background px-3 text-sm';
 
@@ -58,12 +60,16 @@ function VoiceSelect({ id, label, value, voices, onChange, allowAny }) {
   );
 }
 
+/**
+ * The provider a book is read by. The model is not a book's to choose since
+ * ADR 0034 slice 5 (#860): it is the Listen & Learn speech task's, and the
+ * line says where it is chosen.
+ */
 function ProviderAndModel({ voice, catalog, idPrefix, set }) {
   const provider = voice.provider || 'auto';
-  const azure = provider === 'azure';
-  const models = catalog?.models || [];
   const providers = (catalog?.speech?.providers || []).filter((p) => p.allowed);
   const wouldRun = catalog?.speech?.wouldRun;
+  const model = catalog?.model?.model;
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       <label htmlFor={`${idPrefix}-provider`} className="block space-y-1 text-xs font-medium">
@@ -83,26 +89,18 @@ function ProviderAndModel({ voice, catalog, idPrefix, set }) {
           ))}
         </select>
       </label>
-      <label htmlFor={`${idPrefix}-model`} className="block space-y-1 text-xs font-medium">
-        <span>Gemini model</span>
-        <select
-          id={`${idPrefix}-model`}
-          className={field}
-          value={voice.model || ''}
-          disabled={azure}
-          onChange={(e) => set({ model: e.target.value || null })}
-        >
-          <option value="">
-            Stored default{catalog?.effectiveModel ? ` (${catalog.effectiveModel})` : ''}
-          </option>
-          {models.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.label}
-              {m.isDefault ? ' · default' : ''}
-            </option>
-          ))}
-        </select>
-      </label>
+      <p className="self-end text-xs text-muted-foreground" data-testid={`${idPrefix}-model-note`}>
+        {model ? (
+          <>
+            Read with <code>{model}</code>.{' '}
+          </>
+        ) : null}
+        The model is chosen under{' '}
+        <a href={tabHref('routing')} className="text-primary underline underline-offset-4">
+          AI Engine → Tasks
+        </a>
+        .
+      </p>
     </div>
   );
 }

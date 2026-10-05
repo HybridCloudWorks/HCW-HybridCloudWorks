@@ -37,10 +37,18 @@
  * reading. The out-of-credit fallthrough #447 added (ElevenLabs → Gemini) is
  * gone with it: its only use was the cross-product one this rule forbids.
  *
- * The Gemini model is a choice, not a fixed default: `synthesizeDialogue` and
- * `estimateSpeechCostUsd` take `model`, and the job resolves it per run →
- * stored setting → `LISTEN_AND_LEARN_TTS_MODEL` → the module default (see
- * ../speech-settings.js).
+ * THE MODEL IS THE TASK'S (ADR 0034 slice 5, #860). `synthesizeDialogue` and
+ * `estimateSpeechCostUsd` take `model`, and the caller reads it from the
+ * selection document through the router's `modelForTask` — the Listen &
+ * Learn job for `listenAndLearnSpeech`, the podcast pipeline for
+ * `podcastVoice` (SPEECH_TASKS) — in place of the per-run, per-book and
+ * stored fields the settings pages used to carry. A model is handed to the
+ * provider whose id-space it belongs to and to no other: a `gemini-*-tts*`
+ * id overlays the Gemini setting, an `eleven_*` id overlays the ElevenLabs
+ * setting, and a Gemini id reaching the podcast is ignored exactly as before
+ * (elevenlabs.js header: it would be sent as `model_id` and fail every run).
+ * With no model — a caller with no resolver, a unit test — each provider
+ * reads its own setting and module default, as it always has.
  *
  * All three return MP3, so everything downstream — the blob path, the stored
  * `contentType`, the `<audio>` element — is identical whichever ran. That is
@@ -70,6 +78,15 @@ export const CONTENT_TYPE = 'audio/mpeg';
 
 /** The setting gemini.js reads its model from; `model` overrides it per call. */
 export const GEMINI_MODEL_SETTING = 'LISTEN_AND_LEARN_TTS_MODEL';
+
+/** The task each product's model is chosen under on the Tasks tab (ai/tasks.js). */
+export const SPEECH_TASKS = Object.freeze({
+  listenAndLearn: 'listenAndLearnSpeech',
+  podcast: 'podcastVoice',
+});
+
+/** True for an id in ElevenLabs's own space (`eleven_*`); any other is Gemini's. */
+const isElevenLabsModel = (model) => /^eleven_/i.test(String(model || ''));
 
 export class SpeechError extends Error {
   constructor(message, { status = null, provider = null } = {}) {
@@ -305,14 +322,23 @@ export function speakableTurns(dialogue) {
 }
 
 /**
- * The environment a provider runs with. A chosen Gemini model is handed to
- * gemini.js through the setting it already reads — an overlay on a COPY of the
- * env, never a write to `process.env` — so the provider module is untouched and
- * the precedence "caller's choice beats the setting" holds in one place.
+ * The environment a provider runs with. A chosen model is handed to the
+ * provider through the setting it already reads — an overlay on a COPY of
+ * the env, never a write to `process.env` — so the provider module is
+ * untouched and the precedence "caller's choice beats the setting" holds in
+ * one place. Each provider takes only an id of its own (header): Gemini any
+ * id that is not ElevenLabs's, ElevenLabs an `eleven_*` id; Azure has no
+ * model to choose.
  */
 function providerEnv(provider, env, model) {
-  if (!model || provider.name !== 'gemini') return env;
-  return { ...env, [GEMINI_MODEL_SETTING]: model };
+  if (!model) return env;
+  if (provider.name === 'gemini' && !isElevenLabsModel(model)) {
+    return { ...env, [GEMINI_MODEL_SETTING]: model };
+  }
+  if (provider.name === 'elevenlabs' && isElevenLabsModel(model)) {
+    return { ...env, [ELEVENLABS_MODEL_SETTING]: model };
+  }
+  return env;
 }
 
 /**
@@ -328,7 +354,7 @@ function providerEnv(provider, env, model) {
  * @param {keyof typeof SPEECH_PRODUCTS} params.product
  * @param {{speaker: string, text: string}[]} params.dialogue
  * @param {Record<string,string>} [params.voices] speaker name → provider voice
- * @param {string|null} [params.model] a Gemini model id; ignored by the other providers
+ * @param {string|null} [params.model] the task's model (header): a Gemini id for Gemini, an `eleven_*` id for ElevenLabs; ignored by Azure
  * @param {string|null} [params.provider] a book's own provider (ADR 0033 §4); null for the product's order and pin
  * @param {string} [params.lang] BCP 47 tag; Azure puts it on the SSML, Gemini infers it
  * @param {number} [params.speakingRate] 1 is the voice's pace; Azure honours it, Gemini has no rate
@@ -375,10 +401,18 @@ export async function synthesizeDialogue({
  */
 function modelFor(providerName, env, model) {
   if (providerName === 'elevenlabs') {
-    return readSetting(env, ELEVENLABS_MODEL_SETTING) || ELEVENLABS_DEFAULT_MODEL;
+    return (
+      (isElevenLabsModel(model) ? model : null) ||
+      readSetting(env, ELEVENLABS_MODEL_SETTING) ||
+      ELEVENLABS_DEFAULT_MODEL
+    );
   }
   if (providerName === 'gemini') {
-    return model || readSetting(env, GEMINI_MODEL_SETTING) || GEMINI_DEFAULT_MODEL;
+    return (
+      (model && !isElevenLabsModel(model) ? model : null) ||
+      readSetting(env, GEMINI_MODEL_SETTING) ||
+      GEMINI_DEFAULT_MODEL
+    );
   }
   return null;
 }
@@ -428,7 +462,7 @@ export function estimateGeminiCostUsd(model, bytes) {
  * @param {keyof typeof SPEECH_PRODUCTS} params.product
  * @param {{speaker: string, text: string}[]} [params.dialogue]
  * @param {number} [params.ceilingBytes] a ceiling in UTF-8 bytes (see above)
- * @param {string|null} [params.model] a Gemini model id; ignored by the other providers
+ * @param {string|null} [params.model] the task's model, applied to the provider it belongs to (header)
  * @param {object} [params.env]
  * @returns {{provider: string, model: string|null, bytes: number, characters: number|null, estimatedCostUsd: number|null}|null}
  *   `bytes` is what was measured or the ceiling; `characters` is the

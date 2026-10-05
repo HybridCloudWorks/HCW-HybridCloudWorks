@@ -25,6 +25,7 @@ import {
   visibleModelsFor,
 } from './model-catalog.js';
 import { COST_TABLE, DEFAULT_MODEL_TABLE, PROVIDERS, isPriced } from './router.js';
+import { KNOWN_PROVIDERS } from './provider-order.js';
 import { CAPABILITIES, MODALITIES } from './tasks.js';
 import { RECOMMENDED_BY_MODALITY } from './provider-recommendations.js';
 
@@ -123,16 +124,25 @@ describe('enrichment', () => {
     }
   });
 
-  it('speech, audio, image and embedding ids carry no text capability', () => {
+  it('speech and image ids carry their own capability, never text (ADR 0034 slice 5, #860)', () => {
+    for (const id of ['gemini-2.5-flash-preview-tts', 'gemini-3.1-flash-tts-preview', 'gpt-4o-mini-tts']) {
+      expect(enrichModel('gemini', id), id).toMatchObject({ capabilities: ['tts'], modality: 'tts' });
+    }
+    expect(enrichModel('elevenlabs', 'eleven_v3')).toMatchObject({ capabilities: ['tts'], modality: 'tts' });
+    for (const id of ['google/imagen-4-fast', 'imagen-4.0-generate-001', 'dall-e-3']) {
+      expect(enrichModel('replicate', id), id).toMatchObject({ capabilities: ['image'], modality: 'image' });
+    }
+    expect(enrichModel('replicate', 'google/imagen-4-fast').pricing).toEqual({ perUnitUsd: 0.02, unit: 'image' });
+    expect(enrichModel('elevenlabs', 'eleven_v3').pricing).toEqual({ inputPer1M: 0, outputPer1M: 100, unit: '1M characters' });
+  });
+
+  it('audio-in, transcription and embedding ids carry no capability yet', () => {
     for (const id of [
-      'gemini-2.5-flash-preview-tts',
       'gpt-4o-realtime-preview',
       'gpt-4o-transcribe',
       'whisper-1',
       'text-embedding-3-small',
       'gemini-embedding-001',
-      'dall-e-3',
-      'imagen-4.0-generate-001',
     ]) {
       expect(enrichModel('openai', id).capabilities, id).toEqual([]);
     }
@@ -562,7 +572,7 @@ describe('readModelCatalog', () => {
   it('seeds a provider with no entry from the router table, unknown and stale, without writing', async () => {
     const store = makeStore();
     const catalog = await readModelCatalog({ store, now: () => T0 });
-    expect(Object.keys(catalog.providers)).toEqual([...PROVIDERS]);
+    expect(Object.keys(catalog.providers)).toEqual([...KNOWN_PROVIDERS]);
     expect(catalog.providers.nvidia).toMatchObject({ stale: true, seeded: true });
     expect(catalog.providers.nvidia.refresh).toEqual({ lastOk: null, lastAttempt: null, lastError: null });
     expect(Object.keys(catalog.providers.nvidia.models)).toEqual(seedModelsFor('nvidia'));

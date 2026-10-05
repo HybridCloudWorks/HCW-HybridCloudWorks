@@ -23,6 +23,7 @@ import { getDefaultGuard } from '../lib/auth/default-guard.js';
 import { queryDocs, readDoc, upsertDoc, patchDoc } from '../lib/cosmos-client.js';
 import { deleteBlob } from '../lib/blob-storage.js';
 import { JOBS_QUEUE } from '../lib/jobs.js';
+import { modelForTask } from '../lib/ai/router.js';
 import { createListenAndLearnHandlers } from '../lib/listen-and-learn/handlers.js';
 
 const queueOutput = output.storageQueue({
@@ -35,6 +36,8 @@ const handlers = () =>
     guard: getDefaultGuard(),
     store: { queryDocs, readDoc, upsertDoc, patchDoc },
     storage: { deleteBlob },
+    // The task's model for the speech options and the estimate (ADR 0034 slice 5).
+    ai: { modelForTask },
   });
 
 /** The queue output as the enqueue handlers take it. */

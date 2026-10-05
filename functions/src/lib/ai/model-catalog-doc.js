@@ -13,8 +13,8 @@
  *
  * The three rules of the catalogue are in the model-catalog.js header.
  */
-import { COST_TABLE, DEFAULT_MODEL_TABLE } from './model-tables.js';
-import { DEFAULT_PROVIDER_ORDER as PROVIDERS } from './provider-order.js';
+import { COST_TABLE, DEFAULT_MODEL_TABLE, MEDIA_DEFAULT_MODELS, PER_IMAGE_USD, PRICING_UNITS } from './model-tables.js';
+import { KNOWN_PROVIDERS as PROVIDERS } from './provider-order.js';
 import { SETTINGS_CONTAINER } from './containers.js';
 import { CAPABILITIES, MODALITIES } from './tasks.js';
 import { enrichmentFor } from './model-enrichment.js';
@@ -38,12 +38,26 @@ export const STALE_AFTER_MS = 8 * 24 * 60 * 60 * 1000;
 // Capabilities, modality and context by id pattern: model-enrichment.js.
 // Pricing is never there; COST_TABLE prices, and a model it lacks is unpriced.
 
-/** `{ inputPer1M, outputPer1M }` from the cost table's own row, or null. */
+/**
+ * `{ inputPer1M, outputPer1M }` from the cost table's own row, or null. A
+ * provider whose rows are not tokens carries `unit` (model-tables.js
+ * PRICING_UNITS): ElevenLabs rows are per 1M characters; Replicate bills per
+ * image and has no per-1M row at all, so its price is `{ perUnitUsd, unit:
+ * 'image' }` from PER_IMAGE_USD rather than a token rate posing as one
+ * (ADR 0034 slice 5, #860).
+ */
 export function pricingFor(provider, id) {
+  const perUnit = PER_IMAGE_USD[provider];
+  if (perUnit) {
+    return typeof perUnit[id] === 'number'
+      ? { perUnitUsd: perUnit[id], unit: PRICING_UNITS[provider] || 'image' }
+      : null;
+  }
   const rates = COST_TABLE[provider];
   if (!rates || !Object.hasOwn(rates, id) || !Array.isArray(rates[id])) return null;
   const [inputPer1M, outputPer1M] = rates[id];
-  return { inputPer1M, outputPer1M };
+  const unit = PRICING_UNITS[provider];
+  return unit ? { inputPer1M, outputPer1M, unit } : { inputPer1M, outputPer1M };
 }
 
 /**
@@ -56,8 +70,12 @@ export function enrichModel(provider, id) {
   return { ...enrichmentFor(id), pricing, unpriced: pricing === null };
 }
 
-/** The models the router's own table names for a provider, in table order, unique. */
+/**
+ * The models the router's own table names for a provider, in table order,
+ * unique; for a media provider, its own defaults (MEDIA_DEFAULT_MODELS).
+ */
 export function seedModelsFor(provider) {
+  if (MEDIA_DEFAULT_MODELS[provider]) return [...MEDIA_DEFAULT_MODELS[provider]];
   const purposes = DEFAULT_MODEL_TABLE[provider];
   if (!purposes) return [];
   return [...new Set(Object.values(purposes).map(([, model]) => model))];
@@ -210,31 +228,39 @@ export async function readModelCatalog({ store, now = () => new Date() }) {
 }
 
 /**
- * The ids a card may offer for a provider: live or unknown, carrying the
- * `text` capability, not hidden, in a stable order — live first, then by
- * id. The capability rule keeps the speech, transcription, embedding and
- * image ids the list endpoints also return out of the pin, Routing and the
- * Playground, where a text call to them fails; they stay in the card's
- * disclosure. Reads the document shape `readModelCatalog` returns; the
- * frontend carries the same rule (frontend/src/lib/aiEngine/catalog.js) and
- * aiEngine.test.js holds the two equal.
+ * The ids a select may offer for a provider and a task's `needs`: live or
+ * unknown, carrying every capability named, not hidden, in a stable order
+ * — live first, then by id. A chat pin asks for `['text']`, which keeps
+ * the speech, transcription, embedding and image ids the list endpoints
+ * also return out of the pin, the Priority list and the Playground, where
+ * a text call to them fails; a speech task's chain editor asks for
+ * `['tts']` and gets the TTS ids instead (ADR 0034 slice 5, #860). Reads
+ * the document shape `readModelCatalog` returns; the frontend carries the
+ * same rule (frontend/src/lib/aiEngine/catalog.js) and aiEngine.test.js
+ * holds the two equal.
  */
-export function visibleModelsFor(catalog, provider) {
+export function selectableModelsFor(catalog, provider, needs = ['text']) {
   const models = catalog?.providers?.[provider]?.models;
   if (!isPlainObject(models)) return [];
   const rank = (status) => (status === 'live' ? 0 : 1);
   return Object.values(models)
-    .filter(isSelectable)
+    .filter((model) => isSelectable(model, needs))
     .sort((a, b) => rank(a.status) - rank(b.status) || a.id.localeCompare(b.id))
     .map((m) => m.id);
 }
 
-/** Offered in a pin: confirmed or awaiting its first list, not hidden, and able to answer a text call. */
-function isSelectable(model) {
+/** The ids a card may offer: `selectableModelsFor` with the text capability. */
+export function visibleModelsFor(catalog, provider) {
+  return selectableModelsFor(catalog, provider, ['text']);
+}
+
+/** Offered in a select: confirmed or awaiting its first list, not hidden, and carrying every need. */
+function isSelectable(model, needs) {
   const confirmedOrPending = model.status === 'live' || model.status === 'unknown';
   const shown = model.hidden !== true;
-  const answersText = Array.isArray(model.capabilities) && model.capabilities.includes('text');
-  return confirmedOrPending && shown && answersText;
+  const carries =
+    Array.isArray(model.capabilities) && needs.every((need) => model.capabilities.includes(need));
+  return confirmedOrPending && shown && carries;
 }
 
 /** The vocabularies the enrichment table must stay inside; pinned by model-catalog.test.js. */

@@ -21,6 +21,7 @@ import { aiEngine } from '@/lib/aiEngine';
 import TaskChainEditor from './TaskChainEditor';
 import useSelection from './useSelection';
 import {
+  chainProvidersFor,
   describeEffective,
   draftEntry,
   firstRejection,
@@ -109,9 +110,33 @@ function ExcludeControls({ task, label, draft, providers, disabled, onToggle }) 
   );
 }
 
-/** The per-task Test's result: who answered, how fast, and who did not, with why. */
+/**
+ * The per-task Test's result: who answered, how fast, and who did not, with
+ * why. A media task's Test is a dry run (ADR 0034 slice 5): the candidate
+ * the task would use and the resolver's reason, and no audio or image made.
+ */
 function TestResult({ result, providers }) {
   if (!result) return null;
+  if (result.dryRun) {
+    return (
+      <div
+        className="rounded border border-border/60 bg-muted/30 p-2 text-xs"
+        data-testid="task-test-result"
+      >
+        {result.wouldUse ? (
+          <p>
+            Would use <span className="font-medium">{result.wouldUse.model}</span> via{' '}
+            {providerLabel(result.wouldUse.provider, providers)}
+            {result.wouldUse.why ? ` — ${result.wouldUse.why}` : ''}. No audio or image was made.
+          </p>
+        ) : (
+          <p className="text-destructive">
+            {result.error || 'No candidate is eligible.'} No audio or image was made.
+          </p>
+        )}
+      </div>
+    );
+  }
   return (
     <div
       className="rounded border border-border/60 bg-muted/30 p-2 text-xs"
@@ -146,7 +171,7 @@ function TestResult({ result, providers }) {
  * document's `updatedAt`, so a save elsewhere, or a 409 reload, remounts
  * it on what is stored rather than keeping a stale draft.
  */
-function TaskRow({ task, resolved, selection, providers, catalog, saving, onSave }) {
+function TaskRow({ task, resolved, selection, providers, availability, catalog, saving, onSave }) {
   const [draft, setDraft] = useState(() => draftEntry(resolved.entry));
   const [error, setError] = useState(null);
   const [testing, setTesting] = useState(false);
@@ -155,6 +180,14 @@ function TaskRow({ task, resolved, selection, providers, catalog, saving, onSave
   const dirty = isDirty(draft, resolved.entry);
   const badges = taskBadges(resolved, catalog);
   const rejection = firstRejection(resolved, providers);
+  // The providers that can serve this task: the cards and, for a media task,
+  // the media providers, by what each carries (ADR 0034 slice 5).
+  const chainProviders = chainProvidersFor(resolved, providers, availability);
+  const media = resolved.media === true;
+  let testTitle = 'Run the effective chain with the Test’s limits';
+  if (dirty) testTitle = 'Save first; the Test runs the stored chain';
+  else if (media)
+    testTitle = 'Resolve the chain and say which model would serve; makes no audio or image';
 
   const handleSave = async () => {
     setError(null);
@@ -219,7 +252,7 @@ function TaskRow({ task, resolved, selection, providers, catalog, saving, onSave
           task={task}
           label={resolved.label}
           draft={draft}
-          providers={providers}
+          providers={chainProviders}
           disabled={saving}
           onToggle={(id, excluded) => setDraft((d) => toggleExclude(d, id, excluded))}
         />
@@ -232,7 +265,7 @@ function TaskRow({ task, resolved, selection, providers, catalog, saving, onSave
           needs={resolved.needs}
           chain={draft.chain}
           thenGlobal={draft.thenGlobal}
-          providers={providers}
+          providers={chainProviders}
           catalog={catalog}
           disabled={saving}
           onChain={(change) => setDraft((d) => ({ ...d, chain: updateChain(d.chain, change) }))}
@@ -273,11 +306,7 @@ function TaskRow({ task, resolved, selection, providers, catalog, saving, onSave
           disabled={testing || dirty}
           onClick={handleTest}
           aria-label={`Test ${resolved.label}`}
-          title={
-            dirty
-              ? 'Save first; the Test runs the stored chain'
-              : 'Run the effective chain with the Test’s limits'
-          }
+          title={testTitle}
         >
           {testing ? (
             <Loader2 className="mr-1 h-3 w-3 animate-spin" />
@@ -286,6 +315,11 @@ function TaskRow({ task, resolved, selection, providers, catalog, saving, onSave
           )}
           Test
         </Button>
+        {media && (
+          <span className="text-[11px] text-muted-foreground">
+            Test resolves the chain only; it makes no audio or image.
+          </span>
+        )}
         {error && (
           <p className="text-xs text-destructive" role="alert" data-testid={`save-error-${task}`}>
             {error}
@@ -341,6 +375,7 @@ export default function TasksTab({ providers = [], catalog = null, onOpenCatalog
         resolved={resolved}
         selection={state.selection}
         providers={cards}
+        availability={state.effective?.availability || {}}
         catalog={catalog}
         saving={saving}
         onSave={save}
@@ -382,7 +417,9 @@ export default function TasksTab({ providers = [], catalog = null, onOpenCatalog
             Recommended uses the model the site recommends for the task when it is live and priced;
             Global follows the Priority list; Custom names a chain of its own. A provider with no
             key or switched off never serves, and the public tasks never reach a trial tier,
-            whatever the list says.
+            whatever the list says. The audio and image tasks are chosen here too: the Priority list
+            is a chat list, so they default to Recommended, and ElevenLabs and Replicate are
+            switched on by their key alone — they have no card.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-1">{rows}</CardContent>

@@ -299,3 +299,119 @@ describe('TasksTab', () => {
     expect(await screen.findByText('Forge drafting')).toBeInTheDocument();
   });
 });
+
+describe('the media tasks (ADR 0034 slice 5, #860)', () => {
+  const MEDIA_EFFECTIVE = {
+    ...EFFECTIVE,
+    tasks: {
+      ...EFFECTIVE.tasks,
+      podcastVoice: task({
+        label: 'Podcast voice',
+        modality: 'tts',
+        needs: ['tts'],
+        media: true,
+        planned: false,
+        only: ['elevenlabs'],
+        recommended: {
+          provider: 'elevenlabs',
+          model: 'eleven_v3',
+          reason: 'The one model the dialogue endpoint serves.',
+          asOf: '2026-10-05',
+        },
+        entry: { mode: 'recommended' },
+        mode: 'recommended',
+        chain: [
+          {
+            provider: 'elevenlabs',
+            model: 'eleven_v3',
+            modalityModel: 'eleven_v3',
+            selection: 'recommended',
+            why: 'recommended for this task: The one model the dialogue endpoint serves.',
+          },
+        ],
+      }),
+      embeddings: task({
+        label: 'Embeddings',
+        modality: 'embedding',
+        needs: ['embedding'],
+        media: true,
+        planned: true,
+        only: null,
+        chain: [],
+        rejected: [
+          {
+            provider: 'gemini',
+            model: null,
+            code: 'capability',
+            why: 'not eligible: gemini cannot carry embedding',
+          },
+        ],
+      }),
+    },
+    availability: {
+      keyed: ['gemini', 'openai', 'foundry', 'elevenlabs'],
+      enabled: ['gemini', 'openai', 'foundry', 'elevenlabs'],
+      disabled: [],
+      media: ['elevenlabs', 'replicate'],
+      capabilities: {
+        gemini: ['text', 'json', 'vision', 'grounding', 'tts'],
+        openai: ['text', 'json', 'vision'],
+        anthropic: ['text', 'json', 'vision'],
+        nvidia: ['text', 'json'],
+        foundry: ['text', 'json', 'vision'],
+        elevenlabs: ['tts'],
+        replicate: ['image'],
+      },
+    },
+  };
+
+  beforeEach(() => {
+    getEffectiveRouting.mockReset().mockResolvedValue(MEDIA_EFFECTIVE);
+  });
+
+  it('renders a media row with its modality, the effective model via the media provider, and "no eligible model" for a planned task', async () => {
+    renderTab();
+    expect(await screen.findByText('Podcast voice')).toBeInTheDocument();
+    expect(screen.getByText('tts')).toBeInTheDocument();
+    expect(screen.getByTestId('effective-podcastVoice')).toHaveTextContent(
+      'eleven_v3 via ElevenLabs'
+    );
+    expect(screen.getByTestId('effective-embeddings')).toHaveTextContent('No eligible model');
+    expect(screen.getByText('embedding')).toBeInTheDocument();
+    const row = screen.getByText('Podcast voice').closest('[data-task]');
+    expect(within(row).getByText(/makes no audio or image/)).toBeInTheDocument();
+  });
+
+  it('offers a media task only the providers under its product rule, ElevenLabs among them, in the chain editor and the exclusions', async () => {
+    renderTab();
+    const row = (await screen.findByText('Podcast voice')).closest('[data-task]');
+    expect(within(row).getByLabelText('ElevenLabs')).toBeInTheDocument();
+    expect(within(row).queryByLabelText('Gemini')).toBeNull();
+    fireEvent.click(within(row).getByRole('radio', { name: /Custom/ }));
+    fireEvent.click(within(row).getByRole('button', { name: 'Add step' }));
+    const provider = within(row).getByLabelText('Step 1');
+    expect([...provider.options].map((o) => o.textContent)).toEqual(['ElevenLabs']);
+  });
+
+  it('the Test of a media task is a dry run: the candidate it would use, the reason, and nothing made', async () => {
+    testAiTask.mockResolvedValue({
+      ok: true,
+      task: 'podcastVoice',
+      mode: 'recommended',
+      dryRun: true,
+      wouldUse: { provider: 'elevenlabs', model: 'eleven_v3', why: 'recommended for this task' },
+      answeredBy: null,
+      skipped: [],
+      rejected: [],
+      flags: [],
+    });
+    renderTab();
+    const row = (await screen.findByText('Podcast voice')).closest('[data-task]');
+    fireEvent.click(within(row).getByRole('button', { name: 'Test Podcast voice' }));
+    expect(testAiTask).toHaveBeenCalledWith('podcastVoice');
+    const result = await within(row).findByTestId('task-test-result');
+    expect(result).toHaveTextContent(
+      'Would use eleven_v3 via ElevenLabs — recommended for this task. No audio or image was made.'
+    );
+  });
+});

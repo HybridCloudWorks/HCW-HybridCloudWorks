@@ -9,9 +9,9 @@
  *
  * `features-catalogue.js` derives AI_FEATURES (label, description, route) from
  * this table, so the feature switches, the call-site test and the portal's
- * toggles keep working unchanged; the ids are the feature names. Slices 2–5
- * of ADR 0034 add the catalogue, the resolver and the Tasks tab on top of
- * this file; nothing reads `modality`, `needs` or `recommended` yet.
+ * toggles keep working unchanged; the ids are the feature names. The
+ * catalogue (slice 2), the resolver (slice 3) and the Tasks tab (slice 4)
+ * read `modality`, `needs` and `recommended`.
  *
  * RECOMMENDATIONS ARE CLAIMS WITH A DATE. Each names a provider and a model
  * the cost table prices (tasks.test.js refuses an unpriced one), and says
@@ -26,13 +26,58 @@
  * draft or article, nano for short answers. The public route stays on
  * Gemini Flash-Lite, the cheapest fast model the owner has run there since
  * 2026-08-23. Source grounding is Gemini by construction (router.js header).
+ *
+ * THE AUDIO AND IMAGE TASKS (ADR 0034 slice 5, #860). Listen & Learn
+ * speech, the podcast voice, the cover art and the manual images are tasks
+ * here with their own `needs` (`tts`, `image`), and their call sites read
+ * the selection document through the router's `modelForTask` instead of a
+ * model field of their own; the settings pages that carried those fields
+ * lost them. Each recommends the model that was its default the day before
+ * — the migration (migrate-selection.js) turns a stored choice that
+ * differed into that task's custom chain, so nothing changed for the owner
+ * on merge. They default to mode `recommended` (`defaultMode`) because the
+ * Priority list is a chat list and a media provider never joins it: a media
+ * task in `global` mode would have nothing eligible. Three more tasks —
+ * `recordingTranscript` (stt), `pageOcr` (ocr), `embeddings` (embedding) —
+ * are registered with no provider carrying their need yet (`planned`): the
+ * Tasks tab shows them as "no eligible model" rather than omitting them,
+ * they have no feature switch and no call site, and `recommended` is null
+ * because a recommendation nobody can serve would be a claim about nothing.
+ *
+ * `only` IS A PRODUCT RULE IN CODE, and no document lifts it (select.js
+ * policy locks): the podcast voice is ElevenLabs and only ElevenLabs,
+ * Listen & Learn is read by Gemini and never by ElevenLabs (ADR 0029 §2b;
+ * Azure AI Speech is the adapter's own fallback, not a catalogue provider),
+ * and the images are made by the one Replicate client. Without it the
+ * Priority list's Gemini step, judged on Gemini's TTS recommendation, would
+ * read the podcast the day the ElevenLabs recommendation was not yet
+ * confirmed by a refresh.
  */
 
-/** The kinds of answer a task asks for. Slice 5 adds the audio and image ones. */
-export const MODALITIES = Object.freeze(['text', 'json', 'vision']);
+/** The kinds of answer a task asks for, the audio and image ones included (ADR 0034 §2). */
+export const MODALITIES = Object.freeze([
+  'text',
+  'json',
+  'vision',
+  'tts',
+  'image',
+  'stt',
+  'ocr',
+  'embedding',
+]);
 
 /** The capabilities a model can carry; a task's `needs` is a subset. */
-export const CAPABILITIES = Object.freeze(['text', 'json', 'vision', 'grounding']);
+export const CAPABILITIES = Object.freeze([
+  'text',
+  'json',
+  'vision',
+  'grounding',
+  'tts',
+  'image',
+  'stt',
+  'ocr',
+  'embedding',
+]);
 
 const ASOF = '2026-10-05';
 
@@ -203,6 +248,109 @@ export const AI_TASKS = Object.freeze({
     public: true,
     recommended: geminiLite('Anonymous traffic, short answers, cached.'),
   }),
+  // ── audio and image (ADR 0034 slice 5, #860) ──────────────────────────────
+  listenAndLearnSpeech: task({
+    label: 'Listen & Learn speech',
+    description: 'Reads a Listen & Learn episode or chapter aloud.',
+    route:
+      'Every Listen & Learn run that makes audio. Off means the run fails before the voice is called; existing audio stays. Azure AI Speech stays the adapter’s own fallback (listen-and-learn/speech/index.js).',
+    modality: 'tts',
+    needs: ['tts'],
+    public: false,
+    only: ['gemini'],
+    defaultMode: 'recommended',
+    recommended: Object.freeze({
+      provider: 'gemini',
+      model: 'gemini-2.5-flash-preview-tts',
+      reason:
+        'The Economy voice: $0.50 in / $10.00 out per 1M tokens, half the price of 3.1 Flash TTS per audio token, and the default that read when nothing was stored (ADR 0033 §4). Best (gemini-3.1-flash-tts-preview) is one Custom step away.',
+      asOf: ASOF,
+    }),
+  }),
+  podcastVoice: task({
+    label: 'Podcast voice',
+    description: 'Reads a podcast transcript aloud for RSS.com.',
+    route:
+      'Every podcast render and the Audio tab’s live check. Off means the transcript is saved without audio. ElevenLabs is the only podcast voice (ADR 0029 §2b).',
+    modality: 'tts',
+    needs: ['tts'],
+    public: false,
+    only: ['elevenlabs'],
+    defaultMode: 'recommended',
+    recommended: Object.freeze({
+      provider: 'elevenlabs',
+      model: 'eleven_v3',
+      reason:
+        'The one model the Text to Dialogue endpoint serves, USD 0.10 per 1,000 characters on the Starter and Creator plans (read 2026-09-08); the default since the podcast voice landed (#436).',
+      asOf: ASOF,
+    }),
+  }),
+  coverArt: task({
+    label: 'Cover art',
+    description: 'Generates the cover image for a content document.',
+    route:
+      'The cover trigger on publish (change feed) and Generate cover on the Publish page. Off means the document stages with the default hero instead.',
+    modality: 'image',
+    needs: ['image'],
+    public: false,
+    only: ['replicate'],
+    defaultMode: 'recommended',
+    recommended: Object.freeze({
+      provider: 'replicate',
+      model: 'google/imagen-4-fast',
+      reason:
+        'USD 0.02 per output image on replicate.com (read 2026-10-05), about three seconds a cover; the model every cover has been made with since the port.',
+      asOf: ASOF,
+    }),
+  }),
+  manualImages: task({
+    label: 'Images made by hand',
+    description: 'Generates images from the Images pages: previews, curated article images, samples.',
+    route:
+      'The Generate buttons on the Images pages. Off means each button answers that the feature is switched off; nothing is generated.',
+    modality: 'image',
+    needs: ['image'],
+    public: false,
+    only: ['replicate'],
+    defaultMode: 'recommended',
+    recommended: Object.freeze({
+      provider: 'replicate',
+      model: 'google/imagen-4-fast',
+      reason:
+        'The same model and price as the cover art (USD 0.02 per image, read 2026-10-05); one image path, not two.',
+      asOf: ASOF,
+    }),
+  }),
+  recordingTranscript: task({
+    label: 'Recording transcripts',
+    description: 'Transcribes an uploaded recording to text.',
+    route: 'No provider carries speech-to-text yet; the task is listed so the gap is visible.',
+    modality: 'stt',
+    needs: ['stt'],
+    public: false,
+    planned: true,
+    recommended: null,
+  }),
+  pageOcr: task({
+    label: 'Page OCR',
+    description: 'Reads the text in a scanned page or screenshot.',
+    route: 'No provider carries OCR yet; the task is listed so the gap is visible.',
+    modality: 'ocr',
+    needs: ['ocr'],
+    public: false,
+    planned: true,
+    recommended: null,
+  }),
+  embeddings: task({
+    label: 'Embeddings',
+    description: 'Turns text into vectors for search and similarity.',
+    route: 'No provider carries embeddings yet; the task is listed so the gap is visible.',
+    modality: 'embedding',
+    needs: ['embedding'],
+    public: false,
+    planned: true,
+    recommended: null,
+  }),
 });
 
 export const TASK_NAMES = Object.freeze(Object.keys(AI_TASKS));
@@ -214,3 +362,15 @@ export function taskFor(id) {
 
 /** The ids anonymous visitors can trigger: where a trial-tier provider must never serve. */
 export const PUBLIC_TASKS = Object.freeze(TASK_NAMES.filter((id) => AI_TASKS[id].public));
+
+/** The modalities whose call sites spend on audio or images, never on tokens (slice 5). */
+export const MEDIA_MODALITIES = Object.freeze(['tts', 'image', 'stt', 'ocr', 'embedding']);
+
+/** True for a task that answers with audio, an image, a transcript, OCR text or vectors. */
+export const isMediaTask = (task) => Boolean(task) && MEDIA_MODALITIES.includes(task.modality);
+
+/** The tasks registered ahead of any provider that can serve them (header). */
+export const PLANNED_TASKS = Object.freeze(TASK_NAMES.filter((id) => AI_TASKS[id].planned === true));
+
+/** The mode a task is in when the selection document says nothing about it. */
+export const defaultModeFor = (task) => task?.defaultMode || 'global';

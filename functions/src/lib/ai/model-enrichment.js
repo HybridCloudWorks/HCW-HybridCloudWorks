@@ -18,17 +18,32 @@ const TEXT_JSON_VISION = Object.freeze(['text', 'json', 'vision']);
 /**
  * Capabilities and context by id pattern, first match wins. Small and
  * honest: a context is written only where the provider publishes one for
- * the family, and a model that is not a chat model (speech, audio,
- * transcription, image generation, embeddings, moderation) carries no
- * capability at all until slice 5 names the audio and image modalities.
+ * the family, and a model that is not a chat model (realtime, audio in,
+ * transcription, embeddings, moderation, video) carries no capability at
+ * all until a call path exists for it — the task registry lists `stt`,
+ * `ocr` and `embedding` as planned (tasks.js), and a capability nobody can
+ * call would make a model selectable for a task that then fails.
+ *
+ * The audio and image rows (ADR 0034 slice 5, #860) come first because the
+ * Gemini TTS ids start with `gemini-` and would otherwise read as chat
+ * models: `*-tts` and ElevenLabs's `eleven_*` carry `tts`; Replicate's
+ * image models and Gemini's `imagen-*` carry `image`. Pricing is never
+ * here (model-catalog-doc.js pricingFor).
  *
  * `modality` is the kind of answer the model is listed for, in the task
  * registry's vocabulary (tasks.js MODALITIES); null for a model whose
  * modality that registry does not name yet.
  */
 export const ENRICHMENT_TABLE = Object.freeze([
+  { pattern: /(^|[-/_])tts([-/._]|$)|^eleven_/i, capabilities: ['tts'], modality: 'tts', context: null },
   {
-    pattern: /(^|[-/])(tts|audio|realtime|transcribe|whisper|embedding|embed|moderation|image|imagen|veo|dall-e)([-/.]|$)/i,
+    pattern: /(^|[-/])(imagen|image|dall-e|flux|sdxl|stable-diffusion)([-/.]|$)/i,
+    capabilities: ['image'],
+    modality: 'image',
+    context: null,
+  },
+  {
+    pattern: /(^|[-/])(audio|realtime|transcribe|whisper|embedding|embed|moderation|veo)([-/.]|$)/i,
     capabilities: [],
     modality: null,
     context: null,

@@ -24,7 +24,7 @@
 import { fetchStudyGuide } from './studyguide.js';
 import { findVideosForAreas } from './videos.js';
 import { generateEpisodeScript } from './script.js';
-import { synthesizeDialogue, SpeechNotConfiguredError } from './speech/index.js';
+import { SPEECH_TASKS, synthesizeDialogue, SpeechNotConfiguredError } from './speech/index.js';
 import {
   saveEpisode,
   saveEpisodeFailure,
@@ -34,7 +34,7 @@ import {
   STATUS,
 } from './publish.js';
 import { speechArgsFor, voiceSettingsOf } from './speech-settings.js';
-import { recordAiUsageBatch, totalCostUsd, USAGE_SOURCES } from '../ai/usage.js';
+import { featureSource, recordAiUsageBatch, totalCostUsd, USAGE_SOURCES } from '../ai/usage.js';
 
 /**
  * Site platform → study-guide provider.
@@ -87,13 +87,13 @@ function resolveDeps(deps = {}) {
  * renders one episode's audio under exactly this policy.
  *
  * Always the `listenAndLearn` product: Gemini TTS, with Azure AI Speech as
- * the fallback, never ElevenLabs (speech/index.js). `model` is the Gemini
- * model the job resolved — the run's choice or the stored default — or null
- * for the setting and module default. `voice` is the book's own voice
- * settings (speech-settings.js `voiceSettingsOf`, ADR 0033 §4): the hosts'
- * voices, a narrator for a single-voice chapter, the language, the rate,
- * and an explicit provider or model, each of which outranks the defaults
- * for this book only. `now` stamps the blob path so this take has a path of
+ * the fallback, never ElevenLabs (speech/index.js). `model` is the model the
+ * job resolved for the `listenAndLearnSpeech` task (ADR 0034 slice 5,
+ * router.js modelForTask), or null for the setting and module default.
+ * `voice` is the book's own voice settings (speech-settings.js
+ * `voiceSettingsOf`, ADR 0033 §4): the hosts' voices, a narrator for a
+ * single-voice chapter, the language, the rate, and an explicit provider,
+ * each of which outranks the defaults for this book only. `now` stamps the blob path so this take has a path of
  * its own and never overwrites the one before it.
  */
 export async function renderAudio({
@@ -116,8 +116,7 @@ export async function renderAudio({
     rendered = await synthesize({
       product: 'listenAndLearn',
       dialogue: script.dialogue,
-      // The book's model wins over the run's: it is the more specific choice.
-      model: speech.model || model,
+      model,
       voices: speech.voices,
       provider: speech.provider,
       lang: speech.lang,
@@ -257,7 +256,8 @@ async function generateOneArea({
             promptTokens: audio.promptTokens,
             completionTokens: audio.completionTokens,
             estimatedTokens: audio.estimatedTokens,
-            source: USAGE_SOURCES.listenAndLearnAudio,
+            source: featureSource(SPEECH_TASKS.listenAndLearn),
+            product: USAGE_SOURCES.listenAndLearnAudio,
           },
         ]
       : []),
@@ -283,9 +283,9 @@ async function generateOneArea({
  * partial success is the normal outcome when a quota runs out mid-run, and
  * the admin page needs to show which areas are missing and why.
  *
- * `ttsModel` is the Gemini model the job resolved for this run (the run's
- * choice or the stored default; see speech-settings.js), or null to let the
- * setting and the module default decide.
+ * `ttsModel` is the model the job resolved for the `listenAndLearnSpeech`
+ * task (listen-and-learn-jobs.js resolveRunModel, ADR 0034 slice 5), or null
+ * to let the setting and the module default decide.
  */
 export async function generateEpisodes({
   platform,

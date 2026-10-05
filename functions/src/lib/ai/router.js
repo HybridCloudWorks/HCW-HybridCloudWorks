@@ -187,6 +187,20 @@
  * the router's own: the feature switch, the key check, the
  * `CONTENTFORGE_AI_PROVIDER` pin, failover, retries, budgets and usage.
  *
+ * THE AUDIO AND IMAGE TASKS READ THE SAME DOCUMENT (ADR 0034 slice 5, #860).
+ * Listen & Learn speech, the podcast voice, the cover art and the manual
+ * images are tasks in the registry with `needs` of `tts` or `image`, and
+ * ElevenLabs and Replicate are providers the resolver knows: keyed is
+ * enabled for them (MEDIA_KEY_ENV; no card, no switch), they are listed in
+ * `availability` beside the chat providers, and they never join the
+ * Priority list or this router's chat chain — `callWithFailover` has no
+ * caller for them and never sees them, because a chat task's `needs` turn
+ * them away. `modelForTask` is the one door the media call sites use: the
+ * task's effective chain through `chainDetails` (the feature switch, the
+ * pin and the resolver all apply), and the first candidate's provider and
+ * model back, with the reason and the rejected candidates. The adapters
+ * keep their own voices, licences and settings; only the model moved.
+ *
  * A Key Vault reference that did not resolve arrives as the literal
  * `@Microsoft.KeyVault(...)` string. That is not a key; `readKey` says so.
  */
@@ -197,13 +211,14 @@ import {
   isFeatureEnabled,
   resolveProviderOrder,
 } from './ai-config.js';
+import { MEDIA_PROVIDERS, PROVIDER_CAPABILITIES } from './provider-order.js';
 // The resolver (ADR 0034 §3, #858): one pure function decides the chain
 // from the selection document, the catalogue and what holds a key. The
 // per-feature placement and the v1 routes it replaced are migrated into
 // that document by the loader (migrate-selection.js).
 import { UNDECLARED_TASK, selectChain } from './select.js';
 import { defaultSelection } from './migrate-selection.js';
-import { AI_TASKS, TASK_NAMES, taskFor } from './tasks.js';
+import { AI_TASKS, TASK_NAMES, defaultModeFor, isMediaTask, taskFor } from './tasks.js';
 import { recommendedModelFor } from './provider-recommendations.js';
 import { featureSource, recordAiUsage } from './usage.js';
 import { COST_TABLE, DEFAULT_MODEL_TABLE } from './model-tables.js';
@@ -261,6 +276,18 @@ export const KEY_ENV = Object.freeze({
  * entry for it. secret-catalog.test.js pins the probed set to the rest.
  */
 export const KEYLESS_PROVIDERS = Object.freeze(['foundry']);
+
+/**
+ * The media providers' keys (header: THE AUDIO AND IMAGE TASKS). Kept apart
+ * from KEY_ENV on purpose: KEY_ENV is the chat providers', read by
+ * `availableProviders`, the weekly probe's Test and the API-keys page, and
+ * none of those can call a voice or an image model. `availableMediaProviders`
+ * reads this one; the resolver's `availability` is the union.
+ */
+export const MEDIA_KEY_ENV = Object.freeze({
+  elevenlabs: 'ELEVENLABS_API_KEY',
+  replicate: 'REPLICATE_API_KEY',
+});
 
 // The purpose → model table and the cost table live in model-tables.js
 // (#858, so the catalogue can read them without this module); every caller
@@ -789,6 +816,7 @@ export function createAiRouter({
   });
   return {
     availableProviders: () => keyedProviders(ctx),
+    availableMediaProviders: () => keyedMediaProviders(ctx),
     getActiveAiProvider: () => activeProvider(ctx),
     resolveProvider: (feature) => firstProvider(ctx, feature),
     resolveProviderChain: (feature) => providerChain(ctx, feature),
@@ -797,6 +825,7 @@ export function createAiRouter({
     generateJsonResponse: (params) => generateJson(ctx, params),
     generateGroundedJsonResponse: (params) => generateGroundedJson(ctx, params),
     callProvider: (params) => callNamedProvider(ctx, params),
+    modelForTask: (params) => taskModel(ctx, params),
     getCostEstimate,
     invalidateConfig: ctx.config.invalidate,
     resolveEffectiveSelection: () => effectiveSelection(ctx),
@@ -840,7 +869,7 @@ function createRouterContext({
   // falls back to exactly the environment-only behaviour this router had before
   // the portal's settings were wired up. That is what keeps unit tests — and
   // any caller that does not hand over a Cosmos client — working unchanged.
-  const config = createAiConfigLoader({ store, ttlMs: configTtlMs, log });
+  const config = createAiConfigLoader({ store, ttlMs: configTtlMs, log, env });
 
   // One guard per router, so the process-wide router paces every call site in
   // this instance together. See NVIDIA_DEFAULT_RPM for the multi-instance note.
@@ -893,6 +922,22 @@ function createRouterContext({
 
 const keyedProviders = (ctx) => PROVIDERS.filter((p) => readKey(ctx.env, KEY_ENV[p]));
 
+/** The media providers holding a key: enabled by that alone (header: THE AUDIO AND IMAGE TASKS). */
+const keyedMediaProviders = (ctx) =>
+  MEDIA_PROVIDERS.filter((p) => readKey(ctx.env, MEDIA_KEY_ENV[p]));
+
+/**
+ * What the resolver may choose from: the chat providers holding a key and
+ * those switched on, each list joined by the keyed media providers, which
+ * have no switch.
+ */
+function availabilityOf(ctx, docs) {
+  const keyed = keyedProviders(ctx);
+  const { order: enabled, disabled } = resolveProviderOrder(docs, keyed);
+  const media = keyedMediaProviders(ctx);
+  return { keyed: [...keyed, ...media], enabled: [...enabled, ...media], disabled };
+}
+
 const pinnedProvider = (ctx) =>
   String(ctx.env.CONTENTFORGE_AI_PROVIDER || '')
     .toLowerCase()
@@ -929,13 +974,24 @@ function activeProvider(ctx) {
  * @returns {Promise<Array<{provider: string, model: string|null}>>}
  */
 async function providerChain(ctx, feature = null) {
-  const { chain, disabled, excluded, uncapable, retired, noModel, modality } = await chainDetails(
-    ctx,
-    feature
-  );
+  return chainOrThrow(await chainDetails(ctx, feature), feature);
+}
+
+/** The chain of a resolved `chainDetails`, or the AiNotConfiguredError sentence an empty one earns. */
+function chainOrThrow({ chain, disabled, excluded, uncapable, retired, noModel, modality }, feature) {
 
   if (chain.length === 0) {
     const name = feature ? `'${feature}'` : 'this call';
+    // A media task with a product rule (tasks.js `only`): the sentence names
+    // the providers that may serve it and the key each needs, not the chat
+    // keys and a placement that no longer exists (ADR 0034 slice 5).
+    const only = feature ? taskFor(feature)?.only : null;
+    if (Array.isArray(only) && disabled.length === 0) {
+      const keys = only.map((p) => MEDIA_KEY_ENV[p] || KEY_ENV[p]).filter(Boolean);
+      throw new AiNotConfiguredError(
+        `${name} is served by ${only.join(' or ')} only, and ${only.length === 1 ? 'it holds' : 'none of them holds'} a usable key or model. Seed ${keys.join(' or ')} in Key Vault (Required-Inputs §4.6), or pick a model under AI Engine → Tasks${uncapable.length || retired.length ? ` (${[...uncapable, ...retired].map((r) => `${r.provider}: ${r.why}`).join('; ')})` : ''}.`
+      );
+    }
     if (excluded.length > 0 && disabled.length === 0) {
       throw new AiNotConfiguredError(
         `The only configured AI provider (${excluded.join(', ')}) is not used for ${feature ? `'${feature}'` : 'calls that name no feature'}. Seed GEMINI_API_KEY, OPENAI_API_KEY or ANTHROPIC_API_KEY (Required-Inputs §4.6), or change its placement under AI Engine → Where AI is used where that is allowed.`
@@ -1002,8 +1058,7 @@ async function chainDetails(ctx, feature = null) {
     throw new AiFeatureDisabledError(feature);
   }
 
-  const keyed = keyedProviders(ctx);
-  const { order: enabled, disabled } = resolveProviderOrder(docs, keyed);
+  const { keyed, enabled, disabled } = availabilityOf(ctx, docs);
   const selected = selectChain({
     task: feature,
     selection: selection || defaultSelection(),
@@ -1059,11 +1114,14 @@ async function chainDetails(ctx, feature = null) {
 
   return {
     // A null model is the provider's default for the call's purpose
-    // (callWith → modelFor), as the select.js header explains.
-    chain: chain.map(({ provider, model, selection: source }) => ({
+    // (callWith → modelFor), as the select.js header explains; the model it
+    // was judged on and the reason travel for `modelForTask` and the page.
+    chain: chain.map(({ provider, model, selection: source, modalityModel, why }) => ({
       provider,
       model,
       selection: source,
+      modalityModel: modalityModel ?? null,
+      why,
     })),
     disabled,
     excluded,
@@ -1104,8 +1162,7 @@ async function effectiveSelection(ctx) {
   ctx.config.invalidate();
   const { providers: docs, selection: loaded, catalog } = await ctx.config.load();
   const selection = loaded || defaultSelection();
-  const keyed = keyedProviders(ctx);
-  const { order: enabled, disabled } = resolveProviderOrder(docs, keyed);
+  const { keyed, enabled, disabled } = availabilityOf(ctx, docs);
   const availability = { keyed, enabled };
 
   const tasks = {};
@@ -1120,7 +1177,12 @@ async function effectiveSelection(ctx) {
       needs: [...def.needs],
       public: def.public,
       recommended: def.recommended,
-      entry: selection.tasks?.[task] || { mode: 'global' },
+      planned: def.planned === true,
+      media: isMediaTask(def),
+      // The product rule, when the task has one (tasks.js `only`): the page
+      // offers a chain only those providers.
+      only: Array.isArray(def.only) ? [...def.only] : null,
+      entry: selection.tasks?.[task] || { mode: defaultModeFor(def) },
       mode,
       chain,
       rejected,
@@ -1143,7 +1205,17 @@ async function effectiveSelection(ctx) {
   return {
     tasks,
     priority,
-    availability: { keyed, enabled, disabled },
+    // The media providers are keyed-is-enabled and the page has no card for
+    // them; `media` names them and `capabilities` says what each provider
+    // can carry, so the chain editor offers a task only the providers that
+    // can serve it (ADR 0034 slice 5, #860).
+    availability: {
+      keyed,
+      enabled,
+      disabled,
+      media: [...MEDIA_PROVIDERS],
+      capabilities: PROVIDER_CAPABILITIES,
+    },
     updatedAt: selection.updatedAt ?? null,
   };
 }
@@ -1273,6 +1345,43 @@ async function failOverOrThrow(ctx, provider, error, chain) {
  */
 async function firstProvider(ctx, feature = null) {
   return (await providerChain(ctx, feature))[0];
+}
+
+/**
+ * The model a media task will use (header: THE AUDIO AND IMAGE TASKS): the
+ * first candidate of the task's effective chain, exactly as `providerChain`
+ * resolves it — the feature switch (AiFeatureDisabledError), the key check,
+ * the `CONTENTFORGE_AI_PROVIDER` pin, the policy locks and the task's
+ * `needs` all apply, and an empty chain throws the same AiNotConfiguredError
+ * sentence a text call would see. A candidate with no named model (a custom
+ * step naming the provider alone) answers the model it was judged on, the
+ * provider's recommendation for the task's modality
+ * (provider-recommendations.js), because a voice has no purpose table to
+ * fall back on. The rejected candidates and the flags travel back so a
+ * call site can log why the chain is what it is.
+ *
+ * Call sites name their task here as text sites name their feature, and
+ * ai-call-sites.test.js reads the source for both.
+ *
+ * @param {{ task: string }} params
+ * @returns {Promise<{ task: string, provider: string, model: string|null,
+ *   selection: string, why: string, rejected: Array<object>, flags: string[] }>}
+ */
+async function taskModel(ctx, { task }) {
+  const name = String(task || '').trim();
+  if (!taskFor(name)) throw new AiNotConfiguredError(`Unknown AI task: ${name || '(none)'}`);
+  const details = await chainDetails(ctx, name);
+  // The same empty-chain sentences as every other call (providerChain).
+  const first = chainOrThrow(details, name)[0];
+  return {
+    task: name,
+    provider: first.provider,
+    model: first.model || first.modalityModel || null,
+    selection: first.selection,
+    why: first.why || '',
+    rejected: details.rejected,
+    flags: details.flags,
+  };
 }
 
 function modelFor(ctx, provider, purpose = 'general') {
@@ -1828,6 +1937,8 @@ const defaultRouter = createAiRouter({
 
 export const {
   availableProviders,
+  availableMediaProviders,
+  modelForTask,
   getActiveAiProvider,
   resolveProvider,
   defaultModelFor,

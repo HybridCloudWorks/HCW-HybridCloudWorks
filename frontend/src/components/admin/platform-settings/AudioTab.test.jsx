@@ -1,7 +1,8 @@
 /**
  * Audio: the podcast feeds card keeps the main feed and the provider rows
- * together on the way to a save, the voice card offers the server's priced
- * choices, and each card loads and fails on its own. The podcast voice card
+ * together on the way to a save, the Listen & Learn voice card says where the
+ * model is chosen (AI Engine → Tasks, ADR 0034 slice 5) and loads nothing,
+ * and each card loads and fails on its own. The podcast voice card
  * (ElevenLabs, 2026-09-26) has its own tests in ElevenLabsCard.test.jsx, and
  * its Podcast voices picker (#725) in PodcastVoices.test.jsx; here it is one
  * more card that loads beside the others.
@@ -10,7 +11,7 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
-import AudioTab, { ListenAndLearnSpeechCard, PodcastFeedsCard } from './AudioTab';
+import AudioTab, { ListenAndLearnVoiceCard, PodcastFeedsCard } from './AudioTab';
 import { ELEVENLABS_STATUS_ROUTE } from './ElevenLabsCard';
 import { PODCAST_PROVIDERS, settingRoute } from './settingShared';
 
@@ -173,80 +174,35 @@ describe('PodcastFeedsCard', () => {
   });
 });
 
-describe('ListenAndLearnSpeechCard', () => {
-  it('offers the two priced choices as radios with the owner’s labels, selecting the stored one', () => {
-    const onChange = vi.fn();
-    render(
-      <ListenAndLearnSpeechCard
-        value={{ geminiModel: BEST }}
-        options={SPEECH_OPTIONS}
-        meta={meta}
-        saving={false}
-        onChange={onChange}
-        onSave={vi.fn()}
-      />
+describe('ListenAndLearnVoiceCard', () => {
+  it('says where the model is chosen and links there, and holds no control (ADR 0034 slice 5)', () => {
+    render(<ListenAndLearnVoiceCard />);
+    expect(screen.getByText('Listen & Learn voice')).toBeTruthy();
+    const note = screen.getByTestId('listen-and-learn-voice-note');
+    expect(note.textContent).toContain('The model is chosen under AI Engine → Tasks');
+    expect(screen.getByRole('link', { name: 'AI Engine → Tasks' }).getAttribute('href')).toBe(
+      '/admin/ai-engine?tab=routing'
     );
-    const best = screen.getByLabelText(/Best — newest voice, about twice the cost/);
-    const economy = screen.getByLabelText(/Economy — cheaper/);
-    expect(best.checked).toBe(true);
-    expect(economy.checked).toBe(false);
-    expect(screen.getByText(/up to \$0\.44 an episode/)).toBeTruthy();
-    expect(screen.getByText(/up to \$0\.22 an episode/)).toBeTruthy();
-    expect(screen.getByText(/newer certifications: Best; older ones: Economy/)).toBeTruthy();
-    // ElevenLabs is named only to say it is never used here.
+    expect(screen.queryByRole('radio')).toBeNull();
     expect(screen.getByText(/ElevenLabs is the podcast voice and is never used here/)).toBeTruthy();
-
-    fireEvent.click(economy);
-    expect(onChange).toHaveBeenCalledWith({ geminiModel: ECONOMY });
-  });
-
-  it('says so, rather than rendering nothing, when the server offered no choices', () => {
-    render(
-      <ListenAndLearnSpeechCard
-        value={{ geminiModel: ECONOMY }}
-        options={[]}
-        meta={meta}
-        saving={false}
-        onChange={vi.fn()}
-        onSave={vi.fn()}
-      />
-    );
-    expect(screen.getByText(/The server offered no choices/)).toBeTruthy();
-    expect(screen.getByText(ECONOMY)).toBeTruthy();
   });
 });
 
 describe('the Audio tab', () => {
-  it('loads its three settings and the podcast voice status, and nothing else', async () => {
+  it('loads its two settings and the podcast voice status, and nothing else', async () => {
     render(<AudioTab />);
     await screen.findByText('Podcast feeds');
     await screen.findByText('Listen & Learn voice');
     await screen.findByText('Not configured');
-    await waitFor(() => expect(getJSON).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(getJSON).toHaveBeenCalledTimes(3));
     expect(getJSON).toHaveBeenCalledWith(settingRoute('podcast-feeds'));
-    expect(getJSON).toHaveBeenCalledWith(settingRoute('listen-and-learn-speech'));
+    // The Listen & Learn voice is no setting here any more (ADR 0034 slice 5).
+    expect(getJSON).not.toHaveBeenCalledWith(settingRoute('listen-and-learn-speech'));
     expect(getJSON).toHaveBeenCalledWith(settingRoute('podcast-voices'));
     expect(getJSON).toHaveBeenCalledWith(ELEVENLABS_STATUS_ROUTE);
     // With no key the voice list is not asked for: it is the account's own.
     // The live check spends credits, so loading the tab never runs it.
     expect(postJSON).not.toHaveBeenCalled();
-  });
-
-  it('PUTs the chosen Gemini model to the listen-and-learn-speech route, with the options from GET', async () => {
-    render(<AudioTab />);
-    const economy = await screen.findByLabelText(/Economy — cheaper/);
-    expect(screen.getByLabelText(/Best — newest voice/).checked).toBe(true);
-    fireEvent.click(economy);
-    fireEvent.submit(economy.closest('form'));
-    await waitFor(() =>
-      expect(sendJSON).toHaveBeenCalledWith(settingRoute('listen-and-learn-speech'), 'PUT', {
-        geminiModel: ECONOMY,
-      })
-    );
-    await waitFor(() =>
-      expect(toast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Saved' }))
-    );
-    expect(screen.getByLabelText(/Economy — cheaper/).checked).toBe(true);
   });
 
   it('surfaces a refused write as the server said it and keeps the edit', async () => {

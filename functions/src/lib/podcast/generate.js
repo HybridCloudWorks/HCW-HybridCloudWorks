@@ -31,7 +31,7 @@
  */
 import { isPublicDocument } from '../public-reads.js';
 import { generateArticleScript } from '../listen-and-learn/article-script.js';
-import { synthesizeDialogue } from '../listen-and-learn/speech/index.js';
+import { SPEECH_TASKS, synthesizeDialogue } from '../listen-and-learn/speech/index.js';
 import { readStoredPodcastVoices } from './voice-settings.js';
 import {
   STATUS,
@@ -40,7 +40,7 @@ import {
   saveTranscriptFor,
   uploadSourceAudio,
 } from './store.js';
-import { recordAiUsageBatch, totalCostUsd, USAGE_SOURCES } from '../ai/usage.js';
+import { featureSource, recordAiUsageBatch, totalCostUsd, USAGE_SOURCES } from '../ai/usage.js';
 
 /** Where articles live. The same container `GET /api/cms/content/item` reads. */
 export const ARTICLE_CONTAINER = 'content';
@@ -126,8 +126,16 @@ export function resolvePipelineDeps(deps = {}, { writeScript = generateArticleSc
  * before it sends anything and its "Choose the podcast voices first"
  * sentence is the `audioError`. A failed read is an `audioError` too, never
  * a render in voices nobody chose.
+ *
+ * The model is the `podcastVoice` task's (ADR 0034 slice 5, #860), read
+ * through the router's `modelForTask` when the pipeline's `ai` carries it —
+ * production does (podcast-jobs.js); a test that hands in an `ai` without
+ * it gets the switch's own default, as before. A task with nothing eligible
+ * or switched off is an `audioError` with the resolver's sentence: the
+ * podcast has one voice and no fallback (ADR 0029 §2b), so there is nothing
+ * to read with instead.
  */
-async function renderAudio({ script, source, store, storage, env, synthesize, readVoices, uploadAudio }) {
+async function renderAudio({ script, source, store, storage, env, ai, synthesize, readVoices, uploadAudio }) {
   let voices;
   try {
     voices = await readVoices(store);
@@ -135,9 +143,18 @@ async function renderAudio({ script, source, store, storage, env, synthesize, re
     return { error: `The podcast voices could not be read: ${err?.message || err}` };
   }
 
+  let model = null;
+  if (typeof ai?.modelForTask === 'function') {
+    try {
+      model = (await ai.modelForTask({ task: 'podcastVoice' })).model;
+    } catch (err) {
+      return { error: err?.message || String(err) };
+    }
+  }
+
   let rendered;
   try {
-    rendered = await synthesize({ product: 'podcast', dialogue: script.dialogue, env, voices });
+    rendered = await synthesize({ product: 'podcast', dialogue: script.dialogue, env, voices, model });
   } catch (err) {
     return { error: err?.message || String(err) };
   }
@@ -240,6 +257,7 @@ export async function finishTranscript({
     store,
     storage,
     env,
+    ai,
     synthesize,
     readVoices,
     uploadAudio,
@@ -263,7 +281,8 @@ export async function finishTranscript({
             promptTokens: audio.promptTokens,
             completionTokens: audio.completionTokens,
             estimatedTokens: audio.estimatedTokens,
-            source: USAGE_SOURCES.podcastAudio,
+            source: featureSource(SPEECH_TASKS.podcast),
+            product: USAGE_SOURCES.podcastAudio,
           },
         ]
       : []),

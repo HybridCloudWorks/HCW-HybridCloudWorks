@@ -22,25 +22,20 @@ import ListenAndLearnPage from './ListenAndLearnPage';
 const generateEpisodes = vi.fn();
 const fetchSets = vi.fn();
 const fetchSetForReview = vi.fn();
-const fetchSpeechSettings = vi.fn();
 const fetchSpeechOptions = vi.fn();
 
 const BEST = 'gemini-3.1-flash-tts-preview';
 const ECONOMY = 'gemini-2.5-flash-preview-tts';
-const OPTIONS = [
-  {
-    id: BEST,
-    tier: 'best',
-    label: 'Best — newest voice, about twice the cost',
-    perEpisodeUsd: 0.44,
-  },
-  { id: ECONOMY, tier: 'economy', label: 'Economy — cheaper', perEpisodeUsd: 0.22 },
-];
 const CATALOG = {
-  models: OPTIONS.map((o) => ({ ...o, isDefault: o.id === ECONOMY })),
+  // The Listen & Learn speech task's model, as the server resolves it (ADR 0034 slice 5).
+  model: {
+    task: 'listenAndLearnSpeech',
+    provider: 'gemini',
+    model: ECONOMY,
+    why: 'recommended for this task: the Economy voice',
+    perEpisodeUsd: 0.22,
+  },
   defaultModel: ECONOMY,
-  storedModel: null,
-  effectiveModel: ECONOMY,
   voices: { gemini: [{ id: 'Kore', descriptor: 'Firm' }], azure: [] },
   voiceProviders: ['auto', 'gemini', 'azure'],
   speakingRate: { min: 0.5, max: 2, default: 1 },
@@ -97,7 +92,6 @@ vi.mock('@/lib/listenAndLearn', () => ({
   fetchSets: (...args) => fetchSets(...args),
   fetchBooks: (...args) => fetchSets(...args),
   fetchSetForReview: (...args) => fetchSetForReview(...args),
-  fetchSpeechSettings: (...args) => fetchSpeechSettings(...args),
   fetchSpeechOptions: (...args) => fetchSpeechOptions(...args),
   generateEpisodes: (...args) => generateEpisodes(...args),
   reviewEpisode: vi.fn(),
@@ -134,7 +128,6 @@ const resetMocks = () => {
   searchParams = '';
   fetchSets.mockResolvedValue([]);
   fetchSetForReview.mockResolvedValue({ set: null, episodes: [] });
-  fetchSpeechSettings.mockResolvedValue({ geminiModel: BEST, options: OPTIONS });
   fetchSpeechOptions.mockResolvedValue(CATALOG);
 };
 
@@ -154,9 +147,10 @@ describe('the header and tabs', () => {
     fireEvent.click(screen.getByRole('button', { name: /How the Audio Library works/ }));
     expect(screen.getByText(/A book or course is a set of audio chapters/)).toBeInTheDocument();
     expect(screen.getByText(/A version is one take/)).toBeInTheDocument();
-    // The status line names the provider that would run and the default model.
+    // The status line names the provider that would run and the task's model
+    // (chosen under AI Engine → Tasks, ADR 0034 slice 5).
     expect(
-      await screen.findByText(/Speech by gemini · default model gemini-2.5-flash-preview-tts/)
+      await screen.findByText(/Speech by gemini · model gemini-2.5-flash-preview-tts/)
     ).toBeInTheDocument();
   });
 
@@ -256,7 +250,7 @@ describe('the Generate tab', () => {
     // has its own Generate button on the same page.
     const examCode = screen.getByPlaceholderText('AZ-104');
     const form = within(examCode.closest('form'));
-    await waitFor(() => expect(form.getByLabelText('Voice model').value).toBe(BEST));
+    await waitFor(() => expect(form.getByTestId('voice-model-line')).toHaveTextContent(ECONOMY));
     fireEvent.change(examCode, { target: { value: 'AZ-104' } });
     fireEvent.change(form.getByPlaceholderText(/study-guides\/az-104/), {
       target: { value: 'https://learn.microsoft.com/az-104' },
@@ -264,14 +258,13 @@ describe('the Generate tab', () => {
     return form;
   };
 
-  it('loads the books, the speech settings and the speech catalogue once auth is ready', async () => {
+  it('loads the books and the speech catalogue once auth is ready; nothing reads a stored model any more', async () => {
     render(<ListenAndLearnPage />);
     await waitFor(() => expect(fetchSets).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(fetchSpeechSettings).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(fetchSpeechOptions).toHaveBeenCalledTimes(1));
   });
 
-  it('defaults the run to the stored model and shows the expected spend as soon as the run is accepted', async () => {
+  it('names the task’s model, links to where it is chosen, sends no model, and shows the expected spend as soon as the run is accepted', async () => {
     // The job never finishes during this test; the assertion is about the
     // moment between acceptance and the first poll.
     generateEpisodes.mockImplementation(async ({ onAccepted }) => {
@@ -280,7 +273,9 @@ describe('the Generate tab', () => {
         jobId: 'j1',
         speech: {
           provider: 'gemini',
-          model: BEST,
+          model: null,
+          modelSource: 'task',
+          modelNote: 'the model is chosen under AI Engine → Tasks (Listen & Learn speech)',
           episodes: 8,
           perEpisodeUsd: 0.44,
           estimatedCostUsd: 3.52,
@@ -291,76 +286,74 @@ describe('the Generate tab', () => {
 
     render(<ListenAndLearnPage />);
     const form = await submitGuideForm();
+    // The model is the Listen & Learn speech task's (ADR 0034 slice 5): said
+    // on the form with where it is chosen, and no longer a field of its own.
+    const line = form.getByTestId('voice-model-line');
+    expect(line).toHaveTextContent(`This run is read with ${ECONOMY} via gemini.`);
+    expect(within(line).getByRole('link', { name: 'AI Engine → Tasks' })).toHaveAttribute(
+      'href',
+      '/admin/ai-engine?tab=routing'
+    );
+    expect(form.queryByLabelText('Voice model')).toBeNull();
     // Before the run: the per-lesson ceiling for the model that will read.
     expect(
-      form.getByText(/Up to \$0\.44 per lesson with gemini-3\.1-flash-tts-preview/)
+      form.getByText(/Up to \$0\.22 per lesson with gemini-2\.5-flash-preview-tts/)
     ).toBeInTheDocument();
     fireEvent.click(form.getByRole('button', { name: /^generate$/i }));
 
     expect(
       await screen.findByText(
-        'Queued — speech by Gemini Best (gemini-3.1-flash-tts-preview), up to $3.52 (8 episodes × $0.44)'
+        'Queued — speech by Gemini (the model is chosen under AI Engine → Tasks (Listen & Learn speech)), up to $3.52 (8 episodes × $0.44)'
       )
     ).toBeInTheDocument();
-    expect(generateEpisodes).toHaveBeenCalledWith(
-      expect.objectContaining({
-        platform: 'azure',
-        examCode: 'AZ-104',
-        studyGuideUrl: 'https://learn.microsoft.com/az-104',
-        ttsModel: BEST,
-        onAccepted: expect.any(Function),
-      })
-    );
-  });
-
-  it('sends the per-run choice when the operator picks Economy', async () => {
-    generateEpisodes.mockImplementation(async () => new Promise(() => {}));
-    render(<ListenAndLearnPage />);
-    const form = await submitGuideForm();
-    fireEvent.change(form.getByLabelText('Voice model'), { target: { value: ECONOMY } });
-    fireEvent.click(form.getByRole('button', { name: /^generate$/i }));
-    await waitFor(() =>
-      expect(generateEpisodes).toHaveBeenCalledWith(expect.objectContaining({ ttsModel: ECONOMY }))
-    );
-  });
-
-  it('sends no ttsModel when the operator picks Best and then returns to Stored default, which names Economy', async () => {
-    // Copilot on #462: the override must be undoable within the page, and
-    // undoing it means the payload carries no model at all.
-    generateEpisodes.mockImplementation(async () => new Promise(() => {}));
-    render(<ListenAndLearnPage />);
-    const form = await submitGuideForm();
-    const select = form.getByLabelText('Voice model');
-    await waitFor(() =>
-      expect(within(select).getAllByRole('option')[0].textContent).toMatch(/Economy unless changed/)
-    );
-    fireEvent.change(select, { target: { value: BEST } });
-    expect(select.value).toBe(BEST);
-    fireEvent.change(select, { target: { value: '' } });
-    expect(select.value).toBe('');
-    fireEvent.click(form.getByRole('button', { name: /^generate$/i }));
-    await waitFor(() => expect(generateEpisodes).toHaveBeenCalled());
     const [[call]] = generateEpisodes.mock.calls;
-    expect(call.ttsModel).toBeUndefined();
-    expect(call).toMatchObject({ platform: 'azure', examCode: 'AZ-104' });
+    expect(call).toMatchObject({
+      platform: 'azure',
+      examCode: 'AZ-104',
+      studyGuideUrl: 'https://learn.microsoft.com/az-104',
+      onAccepted: expect.any(Function),
+    });
+    expect(call).not.toHaveProperty('ttsModel');
   });
 
-  it('leaves the choice on the stored default when the settings fail to load', async () => {
-    fetchSpeechSettings.mockRejectedValue(new Error('500'));
-    fetchSpeechOptions.mockRejectedValue(new Error('500'));
+  it('says so when the task has nothing eligible, and still lets the run be queued', async () => {
+    fetchSpeechOptions.mockResolvedValue({
+      ...CATALOG,
+      model: {
+        task: 'listenAndLearnSpeech',
+        provider: null,
+        model: null,
+        error: "No eligible model carries 'tts' for 'listenAndLearnSpeech'",
+      },
+    });
     generateEpisodes.mockImplementation(async () => new Promise(() => {}));
     render(<ListenAndLearnPage />);
-    await waitFor(() => expect(fetchSpeechSettings).toHaveBeenCalled());
+    await waitFor(() => expect(fetchSpeechOptions).toHaveBeenCalled());
     const examCode = screen.getByPlaceholderText('AZ-104');
     const form = within(examCode.closest('form'));
-    expect(form.getByLabelText('Voice model').value).toBe('');
+    expect(form.getByTestId('voice-model-line')).toHaveTextContent(
+      /No voice model is eligible right now: No eligible model carries 'tts'/
+    );
     fireEvent.change(examCode, { target: { value: 'AZ-104' } });
     fireEvent.change(form.getByPlaceholderText(/study-guides\/az-104/), {
       target: { value: 'https://learn.microsoft.com/az-104' },
     });
     fireEvent.click(form.getByRole('button', { name: /^generate$/i }));
     await waitFor(() => expect(generateEpisodes).toHaveBeenCalled());
-    expect(generateEpisodes.mock.calls[0][0].ttsModel).toBeUndefined();
+    expect(generateEpisodes.mock.calls[0][0]).not.toHaveProperty('ttsModel');
+  });
+
+  it('says the catalogue could not be read when the speech options fail to load', async () => {
+    fetchSpeechOptions.mockRejectedValue(new Error('500'));
+    render(<ListenAndLearnPage />);
+    await waitFor(() => expect(fetchSpeechOptions).toHaveBeenCalled());
+    const examCode = screen.getByPlaceholderText('AZ-104');
+    const form = within(examCode.closest('form'));
+    await waitFor(() =>
+      expect(form.getByTestId('voice-model-line')).toHaveTextContent(
+        'The voice model could not be read: 500.'
+      )
+    );
   });
 });
 
@@ -372,13 +365,16 @@ describe('the Settings tab', () => {
 
   it('says which model reads by default, lists the voices, and describes the providers from the server', async () => {
     render(<ListenAndLearnPage />);
-    expect(
-      await screen.findByText(/the cheapest sensible voice, the default when nothing is stored/)
-    ).toBeInTheDocument();
+    // The task's model, its reason and its ceiling, from the server; the
+    // choice itself is on the Tasks tab (ADR 0034 slice 5).
+    expect(await screen.findByTestId('task-model-line')).toHaveTextContent(
+      `Episodes are read with ${ECONOMY} via gemini, at up to $0.22 an episode — recommended for this task: the Economy voice.`
+    );
     expect(screen.getByText('Kore · Firm')).toBeInTheDocument();
-    expect(
-      screen.getByRole('link', { name: /Change the stored default on Platform settings/ })
-    ).toHaveAttribute('href', '/admin/platform?tab=audio');
+    expect(screen.getByRole('link', { name: 'AI Engine → Tasks' })).toHaveAttribute(
+      'href',
+      '/admin/ai-engine?tab=routing'
+    );
     fireEvent.click(screen.getByRole('button', { name: /Advanced — providers and fallback/ }));
     expect(screen.getByText('runs today')).toBeInTheDocument();
     expect(screen.getByText(/not for Listen & Learn — podcast only/)).toBeInTheDocument();

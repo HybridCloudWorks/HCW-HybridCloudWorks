@@ -36,7 +36,11 @@ import { selectChain } from './select.js';
 import { seedModelsFor } from './model-catalog.js';
 import { enrichmentFor } from './model-enrichment.js';
 import { DEFAULT_PROVIDER_ORDER } from './provider-order.js';
-import { TASK_NAMES } from './tasks.js';
+import { AI_TASKS, TASK_NAMES, isMediaTask } from './tasks.js';
+
+// The media tasks (slice 5) had no router chain before the resolver: they are
+// held by select.test.js and migrate-selection.test.js, not by this contract.
+const CHAT_TASKS = TASK_NAMES.filter((task) => !isMediaTask(AI_TASKS[task]));
 import {
   FEATURES,
   PROVIDERS,
@@ -115,7 +119,7 @@ describe('the resolver returns the chain the router produced before, for every t
   for (const [docsLabel, docs] of Object.entries(DOCS)) {
     for (const [keysLabel, keyed] of Object.entries(KEY_SETS)) {
       it(`${docsLabel}; ${keysLabel}`, () => {
-        for (const task of TASK_NAMES) {
+        for (const task of CHAT_TASKS) {
           expect(after(docs, keyed, task), task).toEqual(before(docs, keyed, task));
         }
       });
@@ -147,7 +151,7 @@ describe('the resolver returns the chain the router produced before, for every t
     for (const entry of Object.values(unknown.providers)) {
       for (const model of Object.values(entry.models)) model.status = 'unknown';
     }
-    for (const task of TASK_NAMES) {
+    for (const task of CHAT_TASKS) {
       expect(after(docs, DEFAULT_PROVIDER_ORDER, task, unknown), task).toEqual(
         before(docs, DEFAULT_PROVIDER_ORDER, task)
       );

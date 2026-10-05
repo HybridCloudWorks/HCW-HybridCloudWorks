@@ -100,6 +100,7 @@ const ROUTES = Object.freeze({
  *   `upsertDoc` is needed by the enqueues and the creates, which write documents
  * @param {{ deleteBlob?: Function }} [deps.storage] needed only to delete a version's audio
  * @param {object} [deps.env] for the speech options read
+ * @param {{ modelForTask: Function }} [deps.ai] the router, for the task's model (ADR 0034 slice 5); omitted, the estimate and the options price the switch's own default
  * @param {() => Date} [deps.now]
  * @param {() => string} [deps.uuid]
  */
@@ -108,11 +109,12 @@ export function createListenAndLearnHandlers({
   store,
   storage = {},
   env = process.env,
+  ai = null,
   now = () => new Date(),
   uuid = () => crypto.randomUUID(),
 }) {
   const stamp = () => now().toISOString();
-  const deps = { store, storage, env, uuid, stamp };
+  const deps = { store, storage, env, ai, uuid, stamp };
   const ctx = {
     ...deps,
     actorOf: (auth) => auth.user?.oid || null,

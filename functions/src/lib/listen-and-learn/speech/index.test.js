@@ -435,6 +435,29 @@ describe('synthesizeDialogue', () => {
       expect(env).toEqual(GEMINI);
     });
 
+
+    it('an eleven_* id reaches ElevenLabs and no other provider (ADR 0034 slice 5: the task’s model, by id-space)', async () => {
+      // The podcastVoice task resolves to an ElevenLabs id; a Gemini id for
+      // Listen & Learn never reaches ElevenLabs, as the test above holds.
+      const fetchImpl = elevenOk();
+      const result = await synthesizeDialogue({
+        ...POD,
+        dialogue: DIALOGUE,
+        model: 'eleven_v4',
+        env: ELEVEN,
+        fetchImpl,
+      });
+      expect(result.model).toBe('eleven_v4');
+      expect(JSON.parse(dialogueCalls(fetchImpl)[0][1].body).model_id).toBe('eleven_v4');
+      // And the estimate prices the same model the render would use.
+      expect(
+        estimateSpeechCostUsd({ product: 'podcast', dialogue: DIALOGUE, model: 'eleven_v4', env: ELEVEN })
+      ).toMatchObject({ provider: 'elevenlabs', model: 'eleven_v4' });
+      // An ElevenLabs id handed to Listen & Learn is not a Gemini model and is ignored there.
+      expect(
+        estimateSpeechCostUsd({ product: 'listenAndLearn', dialogue: DIALOGUE, model: 'eleven_v3', env: GEMINI })
+      ).toMatchObject({ provider: 'gemini', model: 'gemini-2.5-flash-preview-tts' });
+    });
     it('is ignored by the podcast, whose model is ElevenLabs’s own', async () => {
       const fetchImpl = elevenOk();
       const result = await synthesizeDialogue({

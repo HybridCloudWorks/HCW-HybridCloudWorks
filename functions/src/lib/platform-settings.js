@@ -7,7 +7,9 @@
  *   default-heroes          → admin_config/default_heroes          read by triggers/ai-cover.js
  *   social-autopost         → admin_config/social_autopost         read by triggers/social-caption-trigger.js
  *   podcast-feeds           → admin_config/podcast_feeds           read by timers/podcasts.js
- *   listen-and-learn-speech → admin_config/listen_and_learn_speech read by functions/listen-and-learn-jobs.js
+ *   (listen-and-learn-speech → admin_config/listen_and_learn_speech left this page with ADR 0034
+ *                             slice 5, #860: the model is chosen under AI Engine → Tasks, and the
+ *                             stored document is read once by lib/ai/ai-config.js as the migration's input)
  *   podcast-voices          → admin_config/podcast_voices          read by podcast/voice-settings.js, for
  *                             every podcast render (episodes and the live check, #725)
  *   newsletter-settings     → admin_config/newsletter_settings     read by lib/newsletter/admin-handlers.js
@@ -41,13 +43,6 @@ import {
   dedupeFeedsByProvider,
   isValidFeedEntry,
 } from './timers/podcasts.js';
-import {
-  LISTEN_AND_LEARN_GEMINI_MODEL_IDS,
-  LISTEN_AND_LEARN_SPEECH_CONFIG_ID,
-  isListenAndLearnGeminiModel,
-  listenAndLearnModelOptions,
-} from './listen-and-learn/speech-settings.js';
-import { GEMINI_DEFAULT_MODEL } from './listen-and-learn/speech/gemini.js';
 import { isElevenLabsVoiceId } from './listen-and-learn/speech/elevenlabs-voice-plan.js';
 import { PODCAST_HOSTS, PODCAST_VOICES_CONFIG_ID } from './podcast/voice-settings.js';
 import {
@@ -349,25 +344,6 @@ export function normalizePodcastFeeds(body) {
   return mainFeedUrl === '' ? { feeds: deduped } : { mainFeedUrl, feeds: deduped };
 }
 
-// ── Listen & Learn speech ──────────────────────────────────────────────────
-
-/**
- * `{ geminiModel }` → the document listen-and-learn-jobs.js reads for the
- * stored default (speech-settings.js). Exactly one of the two offered ids,
- * matched exactly: this value is sent to a paid API as the model name, so a
- * near-miss is refused rather than corrected.
- */
-export function normalizeListenAndLearnSpeech(body) {
-  if (!isPlainObject(body)) fail('Body must be a JSON object');
-  assertOnlyKeys(body, ['geminiModel'], 'body');
-  const raw = body.geminiModel;
-  if (typeof raw !== 'string') fail('geminiModel must be a string');
-  if (!isListenAndLearnGeminiModel(raw)) {
-    fail(`geminiModel must be one of ${LISTEN_AND_LEARN_GEMINI_MODEL_IDS.join(', ')}`);
-  }
-  return { geminiModel: raw };
-}
-
 // ── podcast voices ─────────────────────────────────────────────────────────
 
 /**
@@ -628,14 +604,6 @@ export const PLATFORM_SETTINGS = Object.freeze({
     normalize: normalizePodcastFeeds,
     empty: () => ({ feeds: [] }),
   }),
-  'listen-and-learn-speech': Object.freeze({
-    docId: LISTEN_AND_LEARN_SPEECH_CONFIG_ID,
-    normalize: normalizeListenAndLearnSpeech,
-    // Nothing stored means the module default reads — the card shows that
-    // choice selected rather than nothing, because that is what will run.
-    empty: () => ({ geminiModel: GEMINI_DEFAULT_MODEL }),
-    options: listenAndLearnModelOptions,
-  }),
   'podcast-voices': Object.freeze({
     docId: PODCAST_VOICES_CONFIG_ID,
     normalize: normalizePodcastVoices,
@@ -870,9 +838,6 @@ const AUDIT_SUMMARIES = Object.freeze({
   // Whether a main feed is set, never which one: the audit row records
   // counts, and a URL is content.
   'podcast-feeds': (value) => ({ feeds: value.feeds.length, mainFeed: Boolean(value.mainFeedUrl) }),
-  // A model id is a setting, not content, and which one was chosen is
-  // the whole point of the row.
-  'listen-and-learn-speech': (value) => ({ geminiModel: value.geminiModel }),
   // Ids are settings; labels and descriptions are content, so only
   // which entries exist and which are on is recorded.
   'content-taxonomy': (value) => ({

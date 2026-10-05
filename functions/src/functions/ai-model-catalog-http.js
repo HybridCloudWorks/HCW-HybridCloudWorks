@@ -10,7 +10,7 @@
 import { httpRoute } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
 import { readDoc, replaceDocIfMatch, upsertDoc } from '../lib/cosmos-client.js';
-import { availableProviders, invalidateConfig } from '../lib/ai/router.js';
+import { availableMediaProviders, availableProviders, invalidateConfig } from '../lib/ai/router.js';
 import { createListContext, listModels, refreshModelCatalog } from '../lib/ai/model-catalog.js';
 import { createModelCatalogHandlers } from '../lib/ai/model-catalog-handlers.js';
 
@@ -27,7 +27,8 @@ const handlers = () =>
       const ctx = createListContext();
       return refreshModelCatalog({
         store,
-        providers: availableProviders(),
+        // The media providers list too (ADR 0034 slice 5): keyed is enabled for them.
+        providers: [...availableProviders(), ...availableMediaProviders()],
         listModels: (provider) => listModels(ctx, provider),
       });
     },

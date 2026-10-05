@@ -52,7 +52,6 @@ describe('normalizeVoiceSettings', () => {
     });
     expect(value).toEqual({
       provider: 'auto',
-      model: null,
       speakers: { Maya: 'Sulafat', Elena: 'Leda' },
       narrator: 'Kore',
       language: 'en-GB',
@@ -68,8 +67,13 @@ describe('normalizeVoiceSettings', () => {
     expect(normalizeVoiceSettings({ provider: 'elevenlabs' }).error).toMatch(
       /provider must be one of/
     );
-    expect(normalizeVoiceSettings({ model: 'gemini-2.5-pro-preview-tts' }).error).toMatch(
-      /voice\.model/
+    // A model is ignored, not refused: the listenAndLearnSpeech task owns it
+    // (ADR 0034 slice 5), and a client from before still saves its book.
+    expect(normalizeVoiceSettings({ model: 'gemini-2.5-pro-preview-tts' }).value).toEqual(
+      DEFAULT_VOICE_SETTINGS
+    );
+    expect(normalizeVoiceSettings({ model: 'gemini-3.1-flash-tts-preview' }).value).not.toHaveProperty(
+      'model'
     );
     expect(normalizeVoiceSettings({ language: 'english' }).error).toMatch(/BCP 47/);
     expect(normalizeVoiceSettings({ speakingRate: SPEAKING_RATE.max + 1 }).error).toMatch(
@@ -98,11 +102,10 @@ describe('speechArgsFor', () => {
       lang: 'en-US',
       speakingRate: 1,
       provider: null,
-      model: null,
     });
   });
 
-  it('hands a narrator chapter one voice, and an explicit provider and model through', () => {
+  it('hands a narrator chapter one voice and an explicit provider through, never a model (the task’s)', () => {
     const voice = {
       ...DEFAULT_VOICE_SETTINGS,
       provider: 'azure',
@@ -114,7 +117,6 @@ describe('speechArgsFor', () => {
       lang: 'en-US',
       speakingRate: 1,
       provider: 'azure',
-      model: 'gemini-3.1-flash-tts-preview',
     });
   });
 });

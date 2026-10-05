@@ -21,6 +21,19 @@
  * 'first' for the content features the owner triggers, 'off' for the public
  * ones. Its global position is last so a stored card that predates it keeps
  * its order; the placement is what moves it to the front where it serves.
+ *
+ * MEDIA PROVIDERS (ADR 0034 slice 5, #860). ElevenLabs (the podcast voice)
+ * and Replicate (image generation) join the catalogue and the resolver as
+ * providers, so the audio and image tasks are chosen on the Tasks tab like
+ * every other task. They are NOT in DEFAULT_PROVIDER_ORDER: that list is the
+ * chat list — the Priority list on the AI Services tab, the chain the text
+ * router fails over along, the cards with a switch — and a media provider
+ * answers no chat call. They have no card either: a key is what switches
+ * them on ("keyed is enabled"), and the catalogue drawer says so.
+ * KNOWN_PROVIDERS is the set the selection document and the resolver accept
+ * in a task's custom chain; PROVIDER_CAPABILITIES says what each provider
+ * can carry at all, which is how a chain for a speech task can name
+ * ElevenLabs and a chain for a drafting task cannot.
  */
 export const DEFAULT_PROVIDER_ORDER = Object.freeze([
   'gemini',
@@ -29,3 +42,35 @@ export const DEFAULT_PROVIDER_ORDER = Object.freeze([
   'nvidia',
   'foundry',
 ]);
+
+/** The providers that serve audio and images only: keyed is enabled, no card, never in the Priority list. */
+export const MEDIA_PROVIDERS = Object.freeze(['elevenlabs', 'replicate']);
+
+/** Every provider a task's chain may name: the chat list, then the media providers. */
+export const KNOWN_PROVIDERS = Object.freeze([...DEFAULT_PROVIDER_ORDER, ...MEDIA_PROVIDERS]);
+
+/**
+ * The capabilities each provider can carry at all (tasks.js CAPABILITIES),
+ * whatever its models say: a chain step naming a provider that cannot carry
+ * the task's `needs` is refused on save and turned away by the resolver.
+ * Gemini's TTS models read through the Interactions API the speech side
+ * already uses (listen-and-learn/speech/gemini.js); ElevenLabs is the
+ * podcast voice (ADR 0029 §2b); Replicate makes the cover and manual images
+ * (triggers/ai-cover.js). No provider carries `stt`, `ocr` or `embedding`
+ * yet, so those tasks show "no eligible model" rather than being absent.
+ */
+export const PROVIDER_CAPABILITIES = Object.freeze({
+  gemini: Object.freeze(['text', 'json', 'vision', 'grounding', 'tts']),
+  openai: Object.freeze(['text', 'json', 'vision']),
+  anthropic: Object.freeze(['text', 'json', 'vision']),
+  nvidia: Object.freeze(['text', 'json']),
+  foundry: Object.freeze(['text', 'json', 'vision']),
+  elevenlabs: Object.freeze(['tts']),
+  replicate: Object.freeze(['image']),
+});
+
+/** True when the provider can carry every capability in `needs`. */
+export function providerCarries(provider, needs) {
+  const carried = PROVIDER_CAPABILITIES[provider];
+  return Array.isArray(carried) && (needs || []).every((need) => carried.includes(need));
+}

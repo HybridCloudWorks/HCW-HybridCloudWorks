@@ -26,8 +26,13 @@ import {
 } from '../lib/listen-and-learn/source-episode.js';
 import { readDoc, upsertDoc, patchDoc } from '../lib/cosmos-client.js';
 import { uploadBlob } from '../lib/blob-storage.js';
-import { generateJsonResponse, getActiveAiProvider, getCostEstimate } from '../lib/ai/router.js';
-import { recordAiUsageBatch, totalCostUsd, USAGE_SOURCES } from '../lib/ai/usage.js';
+import {
+  generateJsonResponse,
+  getActiveAiProvider,
+  getCostEstimate,
+  modelForTask,
+} from '../lib/ai/router.js';
+import { featureSource, recordAiUsageBatch, totalCostUsd, USAGE_SOURCES } from '../lib/ai/usage.js';
 import { registerJobType } from '../lib/jobs.js';
 import {
   generateEpisodes,
@@ -48,16 +53,15 @@ import {
 } from '../lib/listen-and-learn/publish.js';
 import { MAX_SCRIPT_BYTES } from '../lib/listen-and-learn/script.js';
 import {
+  SPEECH_TASKS,
+  estimateGeminiCostUsd,
   estimateSpeechCostUsd,
   resolveSpeechProvider,
   synthesizeDialogue,
 } from '../lib/listen-and-learn/speech/index.js';
 import {
+  LISTEN_AND_LEARN_GEMINI_MODELS,
   NARRATOR_SPEAKER,
-  listenAndLearnModelOptions,
-  parseTtsModel,
-  readStoredListenAndLearnModel,
-  resolveListenAndLearnModel,
   voiceSettingsOf,
 } from '../lib/listen-and-learn/speech-settings.js';
 
@@ -101,31 +105,27 @@ export const MAX_AREAS_PER_RUN = 8;
  * not known, or not this product's — the run will still go ahead, and its
  * audio step will fail with a sentence naming the pin).
  *
- * `model` is the Gemini model the run will read with when the payload names
- * a valid `ttsModel` (`modelSource: 'run'`). When it names none — the
- * generation form sends none when the operator leaves "Stored default" or
- * when the settings failed to load, and any other caller may omit it — the
- * worker will read the stored default from `admin_config`, and this hook is
- * synchronous and sees only the payload, so it cannot know which model that
- * is. It does not guess: `model` is null, `modelSource` is `'stored'`,
- * `modelNote` says where the default lives, and the ceiling is priced at
- * the DEARER of the two offered models so that it is still a ceiling
- * whichever one is stored (Copilot on #462).
+ * The model is the `listenAndLearnSpeech` task's (ADR 0034 slice 5, #860):
+ * the worker reads it from the selection document when it runs
+ * (`resolveRunModel`), and this hook is synchronous and sees only the
+ * payload, so it cannot know which model that is. It does not guess:
+ * `model` is null, `modelSource` is `'task'`, `modelNote` says where the
+ * choice lives, and the ceiling is priced at the DEARER of the two Gemini
+ * TTS models so that it is still a ceiling whichever one the task resolves
+ * to (Copilot on #462). A `ttsModel` in the payload is ignored, never
+ * echoed back.
  *
  * @param {object} payload the raw enqueue payload
  * @param {object} [env]
- * @returns {{provider: string|null, model: string|null, modelSource: 'run'|'stored'|null, modelNote?: string, episodes: number, perEpisodeUsd: number|null, estimatedCostUsd: number|null, reason?: 'not_configured'|'pin_unavailable'}}
+ * @returns {{provider: string|null, model: string|null, modelSource: 'task'|null, modelNote?: string, episodes: number, perEpisodeUsd: number|null, estimatedCostUsd: number|null, reason?: 'not_configured'|'pin_unavailable'}}
  */
 export function speechEstimateForRun(payload, env = process.env) {
   const areas = Array.isArray(payload?.areas) ? payload.areas.length : 0;
   const episodes = areas > 0 ? Math.min(areas, MAX_AREAS_PER_RUN) : MAX_AREAS_PER_RUN;
-  // An allowlist lookup: a value that is not one of the two ids is treated as
-  // absent here (the worker refuses it by sentence), never echoed back.
-  const requested = parseTtsModel(payload?.ttsModel).value ?? null;
   const perEpisode = estimateSpeechCostUsd({
     product: PRODUCT,
     ceilingBytes: MAX_SCRIPT_BYTES,
-    model: requested || dearestOfferedModel(),
+    model: dearestOfferedModel(),
     env,
   });
   if (!perEpisode) {
@@ -141,12 +141,12 @@ export function speechEstimateForRun(payload, env = process.env) {
   }
   const perEpisodeUsd = perEpisode.estimatedCostUsd;
   // Only Gemini has a model to name; Azure's is null with nothing to say.
-  const unknownStored = perEpisode.provider === 'gemini' && !requested;
+  const taskChooses = perEpisode.provider === 'gemini';
   return {
     provider: perEpisode.provider,
-    model: unknownStored ? null : perEpisode.model,
-    modelSource: perEpisode.model ? (requested ? 'run' : 'stored') : null,
-    ...(unknownStored ? { modelNote: STORED_MODEL_NOTE } : {}),
+    model: null,
+    modelSource: taskChooses ? 'task' : null,
+    ...(taskChooses ? { modelNote: TASK_MODEL_NOTE } : {}),
     episodes,
     perEpisodeUsd,
     estimatedCostUsd:
@@ -155,14 +155,18 @@ export function speechEstimateForRun(payload, env = process.env) {
 }
 
 /** What the 202 says in place of a model it cannot know. */
-export const STORED_MODEL_NOTE = 'the stored default applies; see Platform settings';
+export const TASK_MODEL_NOTE = 'the model is chosen under AI Engine → Tasks (Listen & Learn speech)';
 
 /**
- * The offered model with the highest per-episode ceiling, so an estimate made
- * without knowing which is stored is never below the one that will run.
+ * The Gemini TTS model with the highest per-episode ceiling, so an estimate
+ * made without knowing the task's choice is never below the one that will
+ * run.
  */
 function dearestOfferedModel() {
-  return listenAndLearnModelOptions().reduce((dearest, option) =>
+  return LISTEN_AND_LEARN_GEMINI_MODELS.map((m) => ({
+    id: m.id,
+    perEpisodeUsd: estimateGeminiCostUsd(m.id, MAX_SCRIPT_BYTES),
+  })).reduce((dearest, option) =>
     (option.perEpisodeUsd ?? -1) > (dearest.perEpisodeUsd ?? -1) ? option : dearest
   ).id;
 }
@@ -185,21 +189,17 @@ function noProviderReason(env) {
  * Validate a generate payload. Returns `{ value }` or `{ error }` so the rules
  * are testable on their own and the job worker stays a thin adapter.
  *
- * `ttsModel` is checked first and for both kinds of run: an id that is not
- * one of the two offered is refused by sentence before anything is spent,
- * and an absent one is null — "the stored default" — in the value.
+ * A `ttsModel` in the payload is ignored for both kinds of run (ADR 0034
+ * slice 5, #860): the model is the task's, read by the worker when it runs,
+ * and a client written before this slice still gets its 202.
  */
 export function parseGeneratePayload(payload) {
-  const model = parseTtsModel(payload?.ttsModel);
-  if (model.error) return { error: model.error };
-
   // A source list makes this a source-grounded episode, whatever else the
   // payload carries: the presence of the field is the switch, not its
   // length, so an empty list is refused by the source rules ("needs at least
   // one source") rather than silently becoming a guide run.
   if (payload && typeof payload === 'object' && payload.sources !== undefined) {
-    const parsed = parseSourceEpisodePayload(payload);
-    return parsed.error ? parsed : { value: { ...parsed.value, ttsModel: model.value } };
+    return parseSourceEpisodePayload(payload);
   }
 
   const platform = String(payload?.platform || '').toLowerCase();
@@ -228,7 +228,6 @@ export function parseGeneratePayload(payload) {
       examCode,
       studyGuideUrl,
       areas,
-      ttsModel: model.value,
       cert: {
         title: String(payload?.certTitle || '').trim() || null,
         slug: String(payload?.certSlug || '').trim() || null,
@@ -238,16 +237,26 @@ export function parseGeneratePayload(payload) {
 }
 
 /**
- * The Gemini model this run reads with: the run's choice, else the stored
- * default, else null for `LISTEN_AND_LEARN_TTS_MODEL` and the module default
- * (speech-settings.js). Read once per run, before anything is spent.
+ * The model this run reads with: the `listenAndLearnSpeech` task's, from the
+ * selection document through the router (ADR 0034 slice 5, #860), read once
+ * per run before anything is spent. The resolver names the Gemini model;
+ * Azure AI Speech stays the adapter's own fallback (speech/index.js), so a
+ * task with nothing eligible — Gemini holds no key — answers null and lets
+ * the switch decide between Azure and "not configured", as it did before
+ * the resolver. A task switched off in the portal fails the run before the
+ * voice is called, as the registry's route text says.
  *
- * @param {string|null} requested the validated `ttsModel` from the payload
- * @param {{ readDoc: Function }} store
+ * @param {{ modelForTask: Function }} ai the router
+ * @returns {Promise<string|null>}
  */
-export async function resolveRunModel(requested, store) {
-  if (requested) return requested;
-  return resolveListenAndLearnModel({ stored: await readStoredListenAndLearnModel(store.readDoc) });
+export async function resolveRunModel(ai) {
+  try {
+    const chosen = await ai.modelForTask({ task: 'listenAndLearnSpeech' });
+    return chosen?.model || null;
+  } catch (err) {
+    if (err?.code === 'AI_NOT_CONFIGURED') return null;
+    throw err;
+  }
 }
 
 /** One generation run against production dependencies. */
@@ -256,7 +265,7 @@ export async function runListenAndLearnGeneration(payload, { context, job } = {}
   if (parsed.error) throw new Error(parsed.error);
 
   const store = { readDoc, upsertDoc, patchDoc };
-  const ttsModel = await resolveRunModel(parsed.value.ttsModel, store);
+  const ttsModel = await resolveRunModel({ modelForTask });
 
   if (parsed.value.kind === 'source') {
     const source = parsed.value;
@@ -306,12 +315,11 @@ export async function runListenAndLearnGeneration(payload, { context, job } = {}
 }
 
 /**
- * Validate a speak-chapter payload (ADR 0033 §4): the set, the chapter id
- * and an optional model. `{ value }` or `{ error }`, like the guide payload.
+ * Validate a speak-chapter payload (ADR 0033 §4): the set and the chapter
+ * id; a `ttsModel` is ignored (the model is the task's). `{ value }` or
+ * `{ error }`, like the guide payload.
  */
 export function parseSpeakChapterPayload(payload) {
-  const model = parseTtsModel(payload?.ttsModel);
-  if (model.error) return { error: model.error };
   const platform = String(payload?.platform || '')
     .trim()
     .toLowerCase();
@@ -320,7 +328,7 @@ export function parseSpeakChapterPayload(payload) {
   if (!/^[a-z][a-z0-9-]{1,30}$/.test(platform)) return { error: 'platform is required' };
   if (!examCode) return { error: 'examCode is required' };
   if (!/^[a-z0-9][a-z0-9_-]{0,120}$/.test(chapterId)) return { error: 'chapterId is required' };
-  return { value: { platform, examCode, chapterId, ttsModel: model.value } };
+  return { value: { platform, examCode, chapterId } };
 }
 
 /**
@@ -353,7 +361,7 @@ export async function runSpeakChapter(payload, { context, job } = {}) {
 
   const now = new Date().toISOString();
   const actorId = job?.requestedBy?.oid || null;
-  const ttsModel = await resolveRunModel(parsed.value.ttsModel, store);
+  const ttsModel = await resolveRunModel({ modelForTask });
   const voice = voiceSettingsOf(set);
 
   let audio;
@@ -413,7 +421,8 @@ export async function runSpeakChapter(payload, { context, job } = {}) {
       promptTokens: audio.promptTokens,
       completionTokens: audio.completionTokens,
       estimatedTokens: audio.estimatedTokens,
-      source: USAGE_SOURCES.listenAndLearnAudio,
+      source: featureSource(SPEECH_TASKS.listenAndLearn),
+      product: USAGE_SOURCES.listenAndLearnAudio,
     },
   ]);
   const costUsd = totalCostUsd(usage);

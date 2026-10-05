@@ -18,7 +18,6 @@ import {
   versionsOf,
 } from './publish.js';
 import { parseChapterCreate, parseChapterPatch, parseReorder, toChapterView } from './library.js';
-import { parseTtsModel } from './speech-settings.js';
 import {
   isSoftDeleted,
   json,
@@ -35,11 +34,8 @@ import {
   regenerationPlan,
 } from './chapter-plans.js';
 
-/** `{ ttsModel? }` → `{ value: { ttsModel } }`, null when none was named. */
-function parseTtsModelBody(body) {
-  const model = parseTtsModel(body.ttsModel);
-  return model.error ? { error: model.error } : { value: { ttsModel: model.value } };
-}
+/** The regenerate body carries nothing the server reads; a `ttsModel` is ignored (the model is the task's). */
+const parseRegenerateBody = () => ({ value: {} });
 
 /** Queue the first reading of a new chapter; the 202 body, or null unwired. */
 async function speakNewChapter(ctx, { ref, doc, set, sourceText, user, enqueue, context }) {
@@ -283,7 +279,7 @@ export const deleteVersion = ({ store, storage, stamp, actorOf, loadChapter, gua
 
 /**
  * POST /api/cms/listen-and-learn/{platform}/{examCode}/chapters/{chapterId}/regenerate
- * `{ ttsModel? }`
+ * `{}` — a `ttsModel` is ignored; the model is the task's (ADR 0034 slice 5)
  *
  * One chapter, a new take (ADR 0033 §4). Which job runs depends on the
  * chapter's kind — `REGENERATION_PLANS` in chapter-plans.js. Each lands as
@@ -299,12 +295,11 @@ export const regenerateChapter = (ctx) =>
       const { store, loadChapter, estimateFor, queueJob } = ctx;
       const read = await readRequest(request, {
         chapter: true,
-        parse: parseTtsModelBody,
+        parse: parseRegenerateBody,
         emptyBody: true,
       });
       if (!read.ok) return json(read.status, { error: read.error });
-      const { ref, chapterId, parsed } = read;
-      const { ttsModel } = parsed;
+      const { ref, chapterId } = read;
 
       const [set, chapter] = await Promise.all([
         store.readDoc(SET_CONTAINER, ref.id, ref.id),
@@ -316,10 +311,10 @@ export const regenerateChapter = (ctx) =>
         return json(500, { error: 'Job queue is not configured' });
       }
 
-      const plan = regenerationPlan({ chapter, chapterId, set, ref, ttsModel });
+      const plan = regenerationPlan({ chapter, chapterId, set, ref });
       if (!plan.ok) return json(plan.status, { error: plan.error });
 
-      const speech = await estimateFor(set, { bytes: plan.bytes, ttsModel });
+      const speech = await estimateFor(set, { bytes: plan.bytes });
       context.log?.(`regenerateListenAndLearnChapter: ${ref.id}/${chapterId} as ${plan.type}`);
       return await queueJob({
         type: plan.type,

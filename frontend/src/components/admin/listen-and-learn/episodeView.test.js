@@ -64,6 +64,25 @@ describe('queuedMessage', () => {
     ).toBe('Queued — speech by Gemini (the stored default model applies), up to $1.00');
   });
 
+  it('says the task chooses when the 202 names no model (ADR 0034 slice 5), with the ceiling priced at the dearer one', () => {
+    expect(
+      queuedMessage({
+        provider: 'gemini',
+        model: null,
+        modelSource: 'task',
+        modelNote: 'the model is chosen under AI Engine → Tasks (Listen & Learn speech)',
+        episodes: 8,
+        perEpisodeUsd: 0.44,
+        estimatedCostUsd: 3.52,
+      })
+    ).toBe(
+      'Queued — speech by Gemini (the model is chosen under AI Engine → Tasks (Listen & Learn speech)), up to $3.52 (8 episodes × $0.44)'
+    );
+    expect(
+      queuedMessage({ provider: 'gemini', model: null, modelSource: 'task', estimatedCostUsd: 1 })
+    ).toBe('Queued — speech by Gemini (the model is chosen under AI Engine → Tasks), up to $1.00');
+  });
+
   it('shows a model outside the pair as sent, and none at all without inventing one', () => {
     expect(
       queuedMessage({
