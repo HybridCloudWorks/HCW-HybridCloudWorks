@@ -284,33 +284,50 @@ async function readDetailOrUnknown({ fetchImpl, config, context }) {
  * Never throws, never carries the token.
  */
 export async function readTokenExpiry({ fetchImpl, config, context, now = () => Date.now() }) {
-  if (!config?.token) return { known: false, reason: 'unset' };
-  const keyId = tokenKeyId(config.token);
-  if (!keyId) return { known: false, reason: 'shape' };
+  const keyId = tokenKeyId(config?.token);
+  if (!config?.token || !keyId) return unknownExpiry(config?.token ? 'shape' : 'unset');
+  let key;
   try {
-    const key = await coderGet(
+    key = await coderGet(
       fetchImpl,
       config,
       `/api/v2/users/me/keys/${encodeURIComponent(keyId)}`,
       config.token
     );
-    const ms = Date.parse(typeof key?.expires_at === 'string' ? key.expires_at : '');
-    if (!Number.isFinite(ms)) return { known: false, reason: 'shape' };
-    const daysLeft = Math.floor((ms - now()) / 86_400_000);
-    return {
-      known: true,
-      expiresAt: new Date(ms).toISOString(),
-      daysLeft,
-      renewSoon: daysLeft <= TOKEN_RENEW_WARNING_DAYS,
-      tokenName: typeof key.token_name === 'string' ? key.token_name : null,
-      scopes: Array.isArray(key.scopes) ? key.scopes.filter((s) => typeof s === 'string') : [],
-    };
   } catch (error) {
-    if (error?.status === 403) return { known: false, reason: 'scope', scope: TOKEN_SCOPE_FOR_EXPIRY };
-    if (error?.status === 401) return { known: false, reason: 'refused' };
-    context?.warn?.(`coder-status: the token's own record could not be read: ${error?.message ?? error}`);
-    return { known: false, reason: 'error' };
+    return unknownExpiry(reasonForRefusal(error, context), error);
   }
+  return expiryFromRecord(key, now());
+}
+
+/** `{ known: false, reason }`, naming the scope to add when that is the reason. */
+function unknownExpiry(reason) {
+  return reason === 'scope'
+    ? { known: false, reason, scope: TOKEN_SCOPE_FOR_EXPIRY }
+    : { known: false, reason };
+}
+
+/** Why Coder would not give the record: the scope (403), the token (401), or something else, logged. */
+function reasonForRefusal(error, context) {
+  if (error?.status === 403) return 'scope';
+  if (error?.status === 401) return 'refused';
+  context?.warn?.(`coder-status: the token's own record could not be read: ${error?.message ?? error}`);
+  return 'error';
+}
+
+/** The record's expiry as the card's answer, or `shape` when it carries no usable date. */
+function expiryFromRecord(key, nowMs) {
+  const ms = Date.parse(typeof key?.expires_at === 'string' ? key.expires_at : '');
+  if (!Number.isFinite(ms)) return unknownExpiry('shape');
+  const daysLeft = Math.floor((ms - nowMs) / 86_400_000);
+  return {
+    known: true,
+    expiresAt: new Date(ms).toISOString(),
+    daysLeft,
+    renewSoon: daysLeft <= TOKEN_RENEW_WARNING_DAYS,
+    tokenName: typeof key.token_name === 'string' ? key.token_name : null,
+    scopes: Array.isArray(key.scopes) ? key.scopes.filter((s) => typeof s === 'string') : [],
+  };
 }
 
 /**
