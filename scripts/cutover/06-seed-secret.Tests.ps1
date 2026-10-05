@@ -112,3 +112,89 @@ Describe '06-seed-secret.ps1 -Mode List' {
         foreach ($name in $generatable) { $output | Should -Match ([regex]::Escape($name)) }
     }
 }
+
+Describe '06-seed-secret.ps1 seed path, with az mocked' {
+    # The whole script runs here with every external call mocked: az answers
+    # by argument shape, the value comes from a mocked prompt, -MyIp skips
+    # ipify, -Confirm:$false skips the ShouldProcess prompts. What is pinned
+    # is the 2026-10-05 incident: az refused the write on stderr with a
+    # non-zero exit, and the script printed "set" over it and crashed on the
+    # read-back. Now the write stops the run and the window still closes.
+    BeforeAll {
+        # In a BeforeAll, not the Describe body: Pester 5 runs the body at
+        # discovery, and a function defined there is gone by the time an It runs.
+        function Invoke-Seed {
+            & $scriptPath -Name ANTHROPIC-API-KEY -MyIp 203.0.113.9 -Confirm:$false 6>&1 | Out-String
+        }
+    }
+
+    BeforeEach {
+        # Global, not $script: — inside a Mock body $script: is Pester's own
+        # scope, so a $script: list is null there, .Add throws, the script's
+        # try/catch around the vault lookup swallows it, and every test fails
+        # as "vault not in the subscription".
+        $global:azCalls = [System.Collections.Generic.List[string]]::new()
+        Mock Read-Host { ConvertTo-SecureString 'sk-test-value-1234567890' -AsPlainText -Force }
+        Mock Invoke-RestMethod { throw 'ipify must not be called when -MyIp is given' }
+        Mock Start-Sleep { }
+    }
+
+    It 'a refused write throws NOTHING WAS WRITTEN, never prints set, and still closes the window' {
+        Mock az {
+            $call = ($args -join ' ')
+            $global:azCalls.Add($call)
+            $global:LASTEXITCODE = 0
+            if ($call -like 'keyvault list*') { return '/subscriptions/s/resourceGroups/rg/providers/Microsoft.KeyVault/vaults/kv' }
+            if ($call -like 'ad signed-in-user*') { return 'oid' }
+            if ($call -like 'role assignment list*') { return 'Key Vault Secrets Officer' }
+            if ($call -like 'keyvault secret set*') {
+                [Console]::Error.WriteLine('(Forbidden) Caller is not authorized to perform action on resource.')
+                $global:LASTEXITCODE = 1
+                return
+            }
+            if ($call -like 'keyvault show*') { return '' }
+            return
+        }
+        $output = ''
+        { $output = Invoke-Seed } | Should -Throw -ExpectedMessage '*NOTHING WAS WRITTEN*'
+        $output | Should -Not -Match 'ANTHROPIC-API-KEY  set'
+        ($global:azCalls | Where-Object { $_ -like 'keyvault network-rule add*' }).Count | Should -Be 1
+        ($global:azCalls | Where-Object { $_ -like 'keyvault network-rule remove*' }).Count | Should -Be 1
+        ($global:azCalls | Where-Object { $_ -like 'keyvault secret show*' }).Count | Should -Be 0
+    }
+
+    It 'a read-back that returns nothing throws rather than hashing null' {
+        Mock az {
+            $call = ($args -join ' ')
+            $global:azCalls.Add($call)
+            $global:LASTEXITCODE = 0
+            if ($call -like 'keyvault list*') { return '/subscriptions/s/resourceGroups/rg/providers/Microsoft.KeyVault/vaults/kv' }
+            if ($call -like 'ad signed-in-user*') { return 'oid' }
+            if ($call -like 'role assignment list*') { return 'Key Vault Secrets Officer' }
+            if ($call -like 'keyvault secret show*') { $global:LASTEXITCODE = 1; return }
+            return
+        }
+        { Invoke-Seed } | Should -Throw -ExpectedMessage '*Could not read ANTHROPIC-API-KEY back*'
+        ($global:azCalls | Where-Object { $_ -like 'keyvault network-rule remove*' }).Count | Should -Be 1
+    }
+
+    It 'a write that round-trips reports it, byte for byte' {
+        Mock az {
+            $call = ($args -join ' ')
+            $global:azCalls.Add($call)
+            $global:LASTEXITCODE = 0
+            if ($call -like 'keyvault list*') { return '/subscriptions/s/resourceGroups/rg/providers/Microsoft.KeyVault/vaults/kv' }
+            if ($call -like 'ad signed-in-user*') { return 'oid' }
+            if ($call -like 'role assignment list*') { return 'Key Vault Secrets Officer' }
+            if ($call -like 'keyvault secret show*') { return 'sk-test-value-1234567890' }
+            return
+        }
+        $output = Invoke-Seed
+        $output | Should -Match 'ANTHROPIC-API-KEY  set'
+        $output | Should -Match 'round-trips byte for byte'
+        ($global:azCalls | Where-Object { $_ -like 'keyvault network-rule remove*' }).Count | Should -Be 1
+    }
+
+    AfterAll { Remove-Variable -Name azCalls -Scope Global -ErrorAction SilentlyContinue }
+}
+
