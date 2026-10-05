@@ -8,14 +8,17 @@
  */
 import { httpRoute, httpRouteByMethod } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
-import { queryDocs, readDoc, upsertDoc, patchDoc } from '../lib/cosmos-client.js';
+import { createDoc, queryDocs, readDoc, upsertDoc, patchDoc } from '../lib/cosmos-client.js';
 import { readBlobForDelivery } from '../lib/blob-storage.js';
 import { createAmbassadorHandlers } from '../lib/ambassador.js';
 
 const handlers = (context) =>
   createAmbassadorHandlers({
     guard: getDefaultGuard(),
-    store: { queryDocs, readDoc, upsertDoc, patchDoc },
+    // createDoc is the atomic insert: an imported evidence row and a missing
+    // seed are created, never upserted, so two overlapping requests cannot
+    // both persist one (lib/ambassador/evidence.js, steps.js).
+    store: { queryDocs, readDoc, createDoc, upsertDoc, patchDoc },
     // The private file download (lib/ambassador/files.js): an application's
     // archived documents live in a container the media route never serves.
     storage: { readBlobForDelivery },

@@ -145,7 +145,8 @@ const limitOrNull = (value) => (isBlank(value) ? null : wholeNumber(value) || nu
  * The program's official application questions, in the form's order. Each
  * needs an id (unique within the program), a prompt and one of the kinds the
  * guided workspace renders; `options` serve choice, scale and links, `rows`
- * the scale grid, `maxChars` a text, `maxItems` links and activities.
+ * the scale grid, `maxChars` a text, `maxItems` links and activities, and
+ * `allowOther` lets a choice take a typed value beside its options.
  */
 function cleanApplicationQuestions(value) {
   if (!Array.isArray(value)) refuse('applicationQuestions must be an array');
@@ -169,6 +170,7 @@ function cleanApplicationQuestions(value) {
       kind,
       maxChars: limitOrNull(item.maxChars),
       options: stringList(item.options, 100),
+      allowOther: item.allowOther === true,
       rows: stringList(item.rows, 100),
       maxItems: limitOrNull(item.maxItems),
       hint: str(item.hint, 2000),
@@ -232,14 +234,18 @@ const APPLICATION_DATE_FIELDS = [
   'renewalDate',
 ];
 
+/** A program may ask up to 200 questions; the free list before it held up to 100. Both fit, and more is refused rather than clipped. */
+const RESPONSES_MAX = 300;
+
 function cleanResponses(value) {
   if (!Array.isArray(value)) return [];
+  if (value.length > RESPONSES_MAX)
+    refuse(`responses must hold at most ${RESPONSES_MAX} entries (${value.length} sent)`);
   return value
     .map((r) =>
       isRecord(r) ? { questionId: str(r.questionId, 120), text: str(r.text, 20000) } : null
     )
-    .filter((r) => r && r.questionId)
-    .slice(0, 100);
+    .filter((r) => r && r.questionId);
 }
 
 function cleanBadgeUrl(value) {

@@ -71,7 +71,13 @@ This project has not cut a tagged release; entries are grouped under
   renewal, the MCT Lounge and the Metrics That Matter classes export, which
   the Evidence tab now imports as "MCT classes (Metrics That Matter CSV)"
   through a CSV reader on the existing import route, one manual row per
-  class id. A program with questions turns the workspace's Responses into a
+  class id (a row without one is skipped and counted by reason; a text over
+  1,000,000 characters is a 413 naming the limit, and the dialog refuses it
+  first). An imported row is stored under an id derived from its source
+  pair with the atomic create, so two imports racing for one source
+  document leave one row; a missing seed is inserted the same way, and a
+  409 from an overlapping read keeps what is stored. A program with
+  questions turns the workspace's Responses into a
   guided form, section by section, each question rendered by its kind (text
   with the live count, choice, yes/no, URL, a frequency grid, network + URL
   rows, activities picked from the attached evidence) with Copy on every

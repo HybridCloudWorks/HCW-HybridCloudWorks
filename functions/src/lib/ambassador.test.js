@@ -9,10 +9,12 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   APPLICATION_STATUSES,
   APPLICATION_TRANSITIONS,
+  CSV_IMPORT_MAX_CHARS,
   DEFAULT_PROGRAMS,
   canTransition,
   computeReadiness,
   createAmbassadorHandlers,
+  importedEvidenceId,
   isNotProvisioned,
   parsePeriod,
   toCalendarDate,
@@ -64,6 +66,12 @@ function memStore(seed = {}) {
       return docType ? rows.filter((r) => r.docType === docType && !r.softDeletedAt) : rows;
     }),
     readDoc: vi.fn(async (name, id) => table(name).get(id) || null),
+    // The atomic insert: a second create of the same id is Cosmos's 409.
+    createDoc: vi.fn(async (name, doc) => {
+      if (table(name).has(doc.id)) throw Object.assign(new Error('Conflict'), { code: 409 });
+      table(name).set(doc.id, doc);
+      return doc;
+    }),
     upsertDoc: vi.fn(async (name, doc) => {
       table(name).set(doc.id, doc);
       return doc;
@@ -246,14 +254,19 @@ describe('programs', () => {
     expect(
       body.items.every((p) => p.enabled && p.docType === 'program' && p.requirements.length > 0)
     ).toBe(true);
-    expect(store.upsertDoc).toHaveBeenCalledTimes(DEFAULT_PROGRAMS.length);
+    // Each seed is created atomically, never upserted.
+    expect(store.createDoc).toHaveBeenCalledTimes(DEFAULT_PROGRAMS.length);
+    expect(store.upsertDoc).not.toHaveBeenCalledWith(
+      'ambassador',
+      expect.objectContaining({ docType: 'program' })
+    );
     // Every seeded requirement says it is a starting point.
     for (const program of DEFAULT_PROGRAMS) {
       for (const req of program.requirements) expect(req.description).toMatch(/Edit to match/);
     }
     // A second read seeds nothing.
     await h.listPrograms(makeRequest(), context);
-    expect(store.upsertDoc).toHaveBeenCalledTimes(DEFAULT_PROGRAMS.length);
+    expect(store.createDoc).toHaveBeenCalledTimes(DEFAULT_PROGRAMS.length);
   });
 
   it('every seed passes its own validator, questions included, and none carries an answer', () => {
@@ -318,11 +331,55 @@ describe('programs', () => {
     // Appended after the highest stored order (7), in seed order.
     expect(body.items.slice(7).map((p) => p.order)).toEqual([8, 9, 10]);
     expect(body.items.find((p) => p.id === 'program-github-star').enabled).toBe(false);
-    expect(store.upsertDoc).toHaveBeenCalledTimes(3);
+    expect(store.createDoc).toHaveBeenCalledTimes(3);
     expect(store.data.get('ambassador').get(gone.id).softDeletedAt).toBe(stamp);
     // Nothing more on the next read.
     await h.listPrograms(makeRequest(), context);
-    expect(store.upsertDoc).toHaveBeenCalledTimes(3);
+    expect(store.createDoc).toHaveBeenCalledTimes(3);
+  });
+
+  it('two overlapping reads that both miss a seed leave the first insert, edits included, and never surface a soft-deleted one', async () => {
+    const stamp = NOW.toISOString();
+    const base = { docType: 'program', enabled: true, createdAt: stamp, updatedAt: stamp };
+    const stored = DEFAULT_PROGRAMS.slice(0, 7).map((p, i) => ({ ...p, ...base, order: i + 1 }));
+    const miee = DEFAULT_PROGRAMS.find((p) => p.id === 'program-microsoft-elevate-educator-expert');
+    const gitkraken = DEFAULT_PROGRAMS.find((p) => p.id === 'program-gitkraken-ambassador');
+    // What the first read inserted and the owner then edited, and what it
+    // inserted and the owner then soft-deleted — both present in the store
+    // while this (second) read's list and first readDoc predate them.
+    const edited = { ...miee, ...base, seeded: true, order: 8, name: 'MIEE (my edit)' };
+    const deleted = { ...gitkraken, ...base, seeded: true, order: 9, softDeletedAt: stamp };
+    const store = memStore({ ambassador: [...stored, edited, deleted] });
+    const listRows = store.queryDocs.getMockImplementation();
+    store.queryDocs.mockImplementationOnce(async (name, query, params) =>
+      (await listRows(name, query, params)).filter((r) => ![miee.id, gitkraken.id].includes(r.id))
+    );
+    const readRows = store.readDoc.getMockImplementation();
+    const stale = new Set([miee.id, gitkraken.id]);
+    store.readDoc.mockImplementation(async (name, id) => {
+      if (stale.has(id)) {
+        stale.delete(id);
+        return null;
+      }
+      return readRows(name, id);
+    });
+    const h = createAmbassadorHandlers({ guard: guardAs('editor'), store, ...fixed });
+    const body = parse(await h.listPrograms(makeRequest(), context));
+    expect(body.items.find((p) => p.id === miee.id).name).toBe('MIEE (my edit)');
+    expect(body.items.find((p) => p.id === gitkraken.id)).toBeUndefined();
+    expect(store.data.get('ambassador').get(miee.id).name).toBe('MIEE (my edit)');
+    expect(store.data.get('ambassador').get(gitkraken.id).softDeletedAt).toBe(stamp);
+    expect(store.upsertDoc).not.toHaveBeenCalledWith(
+      'ambassador',
+      expect.objectContaining({ docType: 'program' })
+    );
+    // The two seeds the first read never inserted are created once each.
+    expect(store.createDoc.mock.calls.map(([, doc]) => doc.id)).toEqual([
+      miee.id,
+      gitkraken.id,
+      'program-microsoft-management-community',
+      'program-microsoft-mct-regional-lead',
+    ]);
   });
 
   it('backfills a stored seed with the questions and scoring it gained, and nothing else', async () => {
@@ -722,6 +779,14 @@ describe('evidence', () => {
       )
     );
     expect(first.created.map((e) => e.title)).toEqual(['KCDC', 'Meetup']);
+    // One id per (sourceModule, sourceId), created atomically rather than upserted.
+    expect(first.created[0].id).toBe(importedEvidenceId('speaking', 'event-1'));
+    expect(first.created[0].id).toMatch(/^evidence-import-[0-9a-f]{40}$/);
+    expect(store.createDoc).toHaveBeenCalledTimes(2);
+    expect(store.upsertDoc).not.toHaveBeenCalledWith(
+      'ambassador',
+      expect.objectContaining({ docType: 'evidence' })
+    );
     expect(first.created[0]).toMatchObject({
       sourceModule: 'speaking',
       sourceId: 'event-1',
@@ -758,7 +823,82 @@ describe('evidence', () => {
     ).toBe(400);
   });
 
-  it('imports MCT classes from a pasted Metrics That Matter CSV, once per class id', async () => {
+  it('two imports racing for one source document leave one row, and a UUID-era row is still recognised', async () => {
+    const store = memStore({
+      speakerevents: [
+        { id: 'event-1', eventName: 'KCDC', date: '2026-08-14' },
+        { id: 'event-2', name: 'Meetup', date: '2026-09-01' },
+      ],
+      ambassador: [
+        {
+          id: 'evidence-legacy-uuid',
+          docType: 'evidence',
+          title: 'Meetup (imported last year)',
+          date: '2026-09-01',
+          sourceModule: 'speaking',
+          sourceId: 'event-2',
+        },
+      ],
+    });
+    const h = createAmbassadorHandlers({ guard: guardAs('editor'), store, ...fixed });
+    const first = parse(
+      await h.importEvidence(
+        makeRequest({ body: { sourceModule: 'speaking', ids: ['event-1', 'event-2'] } }),
+        context
+      )
+    );
+    const id = importedEvidenceId('speaking', 'event-1');
+    expect(first.created.map((e) => e.id)).toEqual([id]);
+    expect(first.existing).toEqual(['evidence-legacy-uuid']);
+
+    // The owner edits the imported row, then a second import whose pre-check
+    // read the list before the first landed (stale: no evidence) races in.
+    await h.patchEvidence(
+      makeRequest({ params: { id }, body: { title: 'KCDC (my title)' } }),
+      context
+    );
+    const listEvidence = store.queryDocs.getMockImplementation();
+    store.queryDocs.mockImplementationOnce(async (name, query, params) =>
+      params?.some((p) => p.value === 'evidence') ? [] : listEvidence(name, query, params)
+    );
+    const second = parse(
+      await h.importEvidence(
+        makeRequest({ body: { sourceModule: 'speaking', ids: ['event-1'] } }),
+        context
+      )
+    );
+    expect(second.created).toEqual([]);
+    expect(second.existing).toEqual([id]);
+    expect(store.createDoc).toHaveBeenCalledTimes(2);
+    expect(store.data.get('ambassador').get(id).title).toBe('KCDC (my title)');
+    expect([...store.data.get('ambassador').values()].filter((e) => e.sourceId === 'event-1'))
+      .toHaveLength(1);
+  });
+
+  it('refuses a CSV over the character limit with a 413 that names it, never a clipped import', async () => {
+    const store = memStore();
+    const h = createAmbassadorHandlers({ guard: guardAs('editor'), store, ...fixed });
+    const header = 'MTM Class ID,Course,Start Date\n';
+    const text = header + 'x'.repeat(CSV_IMPORT_MAX_CHARS + 1 - header.length);
+    const res = await h.importEvidence(
+      makeRequest({ body: { reader: 'mct-classes', text } }),
+      context
+    );
+    expect(res.status).toBe(413);
+    expect(parse(res)).toEqual({
+      error: 'text is 1,000,001 characters; the limit is 1,000,000. Split the export and import each part.',
+      limit: 1_000_000,
+    });
+    expect(store.createDoc).not.toHaveBeenCalled();
+    // Exactly at the limit is taken.
+    const atLimit = header + 'y'.repeat(CSV_IMPORT_MAX_CHARS - header.length);
+    expect(
+      (await h.importEvidence(makeRequest({ body: { reader: 'mct-classes', text: atLimit } }), context))
+        .status
+    ).toBe(200);
+  });
+
+  it('imports MCT classes from a pasted Metrics That Matter CSV, once per class id, skipping rows without one', async () => {
     const store = memStore();
     const h = createAmbassadorHandlers({ guard: guardAs('editor'), store, ...fixed });
     const text = [
@@ -766,6 +906,8 @@ describe('evidence', () => {
       '1001,"AZ-104: Microsoft Azure Administrator",Virtual ILT,J. Doe,3/2/2026,3/5/2026,Remote,14',
       '1002,"SC-900, Security Fundamentals",ILT,J. Doe,2026-04-10,2026-04-10,Chicago,',
       ',,ILT,J. Doe,2026-05-01,,,',
+      ',"AZ-900: Azure Fundamentals",ILT,J. Doe,2026-05-02,2026-05-02,Remote,9',
+      '1003,"AZ-900: Azure Fundamentals",ILT,J. Doe,,,,',
     ].join('\r\n');
     const first = parse(
       await h.importEvidence(
@@ -789,13 +931,19 @@ describe('evidence', () => {
       snapshot: { title: 'AZ-104: Microsoft Azure Administrator', date: '2026-03-02', url: null },
     });
     expect(first.created[1].metrics.attendees).toBeNull();
-    expect(first.skipped).toBe(1);
+    expect(first.created[0].id).toBe(importedEvidenceId('manual', 'mct-class:1001'));
+    // Two rows without a class id (one of them a full class) and one without a date.
+    expect(first.skipped).toBe(3);
+    expect(first.skippedReasons).toEqual({ 'missing-class-id': 2, 'missing-course-or-date': 1 });
 
     const again = parse(
       await h.importEvidence(makeRequest({ body: { reader: 'mct-classes', text } }), context)
     );
     expect(again.created).toEqual([]);
-    expect(again.existing).toEqual(['mct-class:1001', 'mct-class:1002']);
+    expect(again.existing).toEqual([
+      importedEvidenceId('manual', 'mct-class:1001'),
+      importedEvidenceId('manual', 'mct-class:1002'),
+    ]);
 
     expect(
       (await h.importEvidence(makeRequest({ body: { reader: 'nope', text } }), context)).status

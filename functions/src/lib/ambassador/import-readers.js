@@ -89,6 +89,19 @@ function curatedUrl(doc) {
 // ── CSV readers: a file the owner exports, pasted or uploaded ────────────────
 
 /**
+ * The most CSV text one import takes, in characters. The API answers 413
+ * past it and the import dialog refuses the file or paste before sending;
+ * frontend/src/components/admin/ambassador/ambassadorModel.js mirrors it.
+ */
+export const CSV_IMPORT_MAX_CHARS = 1_000_000;
+
+/** Why a CSV row was not imported, as the import summary counts them. */
+export const SKIP_REASONS = Object.freeze({
+  classId: 'missing-class-id',
+  courseOrDate: 'missing-course-or-date',
+});
+
+/**
  * The text inside a quoted segment, from the character after the opening
  * quote to the closing one (a doubled quote is one literal quote), and the
  * index after the closing quote. An unterminated quote runs to the end.
@@ -206,25 +219,38 @@ export function csvDate(value) {
  * The Metrics That Matter classes-delivered export as evidence seeds: one
  * row per class, titled by the course, dated by the start date, the method,
  * instructor, dates and location in the description, attendees when the
- * export carries a count. Rows with no course name or start date are
- * skipped. `sourceId` is the MTM class id so the import stays idempotent.
+ * export carries a count. `sourceId` is the MTM class id, which keeps the
+ * import idempotent; a row without one is skipped (`missing-class-id`)
+ * rather than keyed on course and date, which would merge two classes of
+ * the same course on the same day. A row without a course name or start
+ * date is skipped too (`missing-course-or-date`). `skipped` counts them and
+ * `reasons` says why.
  */
 export function mctClassesToEvidence(text) {
   const [header, ...lines] = parseCsv(text);
-  if (!header) return { items: [], skipped: 0 };
+  if (!header) return { items: [], skipped: 0, reasons: {} };
   const at = mtmColumnIndexes(header);
   const cell = (cells, column) => (at[column] >= 0 ? String(cells[at[column]] ?? '').trim() : '');
   const items = [];
+  const reasons = {};
   let skipped = 0;
+  const skip = (reason) => {
+    skipped += 1;
+    reasons[reason] = (reasons[reason] || 0) + 1;
+  };
   for (const cells of lines) {
+    const classId = cell(cells, 'classId');
     const title = cell(cells, 'course').slice(0, 300);
     const date = csvDate(cell(cells, 'start'));
+    if (!classId) {
+      skip(SKIP_REASONS.classId);
+      continue;
+    }
     if (!title || !date) {
-      skipped += 1;
+      skip(SKIP_REASONS.courseOrDate);
       continue;
     }
     const end = csvDate(cell(cells, 'end'));
-    const classId = cell(cells, 'classId');
     const attendees = Number(cell(cells, 'attendees'));
     const facts = [
       cell(cells, 'method'),
@@ -233,7 +259,7 @@ export function mctClassesToEvidence(text) {
       cell(cells, 'location'),
     ].filter(Boolean);
     items.push({
-      sourceId: classId ? `mct-class:${classId}` : `mct-class:${title}|${date}`,
+      sourceId: `mct-class:${classId}`,
       title,
       date,
       url: null,
@@ -246,7 +272,7 @@ export function mctClassesToEvidence(text) {
       description: `MCT class delivered: ${facts.join(' · ')}`.slice(0, 8000),
     });
   }
-  return { items, skipped };
+  return { items, skipped, reasons };
 }
 
 /**

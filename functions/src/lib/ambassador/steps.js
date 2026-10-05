@@ -45,10 +45,11 @@ export const KINDS = Object.freeze({
 
 // ── the context every handler reads ───────────────────────────────────────────
 
-async function readJsonObject(request) {
+/** The request body as a JSON object within `max` characters, or null; a route with a larger payload (the CSV import) names its own cap. */
+async function readJsonObject(request, max = MAX_DOC_JSON) {
   const body = await request.json().catch(() => null);
   const isObject = body && typeof body === 'object' && !Array.isArray(body);
-  return isObject && JSON.stringify(body).length <= MAX_DOC_JSON ? body : null;
+  return isObject && JSON.stringify(body).length <= max ? body : null;
 }
 
 async function writeAudit(ctx, action, auth, request, details) {
@@ -103,11 +104,27 @@ export async function ensureSeededPrograms(ctx, rows) {
     const stored = await ctx.store.readDoc(CONTAINER, program.id, program.id);
     if (stored) continue;
     order += 1;
-    const doc = seededDoc(ctx, program, order);
-    await ctx.store.upsertDoc(CONTAINER, doc);
-    added.push(doc);
+    const inserted = await insertSeed(ctx, seededDoc(ctx, program, order));
+    if (inserted) added.push(inserted);
   }
   return [...current, ...added];
+}
+
+/**
+ * Create the seed atomically. Two overlapping reads can both find it
+ * missing; the second's create answers 409, and the row the first inserted
+ * — with whatever the owner edited since — wins: it is re-read and used as
+ * stored, or left out when it was soft-deleted in the meantime. Nothing is
+ * ever overwritten.
+ */
+async function insertSeed(ctx, doc) {
+  try {
+    return (await ctx.store.createDoc(CONTAINER, doc)) || doc;
+  } catch (error) {
+    if (error?.code !== 409) throw error;
+    const stored = await ctx.store.readDoc(CONTAINER, doc.id, doc.id);
+    return stored && !stored.softDeletedAt ? stored : null;
+  }
 }
 
 const SEEDS_BY_ID = new Map(DEFAULT_PROGRAMS.map((program) => [program.id, program]));

@@ -3,7 +3,8 @@
  * from a source module with a snapshot of what the source said at link time.
  * Import is idempotent on (sourceModule, sourceId).
  */
-import { CSV_READERS, IMPORT_READERS } from './import-readers.js';
+import { createHash } from 'node:crypto';
+import { CSV_IMPORT_MAX_CHARS, CSV_READERS, IMPORT_READERS } from './import-readers.js';
 import { CONTAINER } from './model.js';
 import { evidenceRelevant, inPeriod, parsePeriod } from './readiness.js';
 import { KINDS, byDateDesc, json, loadCreate, stamped } from './steps.js';
@@ -64,8 +65,17 @@ export async function createEvidence(ctx, request, auth) {
   return json(200, { success: true, id: doc.id, item: doc });
 }
 
+/**
+ * The id an imported row is stored under: one per (sourceModule, sourceId),
+ * so two imports racing for the same source document collide on the store
+ * instead of each persisting a row. Rows imported before this carry a UUID
+ * id and are still recognised by their (sourceModule, sourceId).
+ */
+export const importedEvidenceId = (sourceModule, sourceId) =>
+  `evidence-import-${createHash('sha1').update(`${sourceModule}:${sourceId}`).digest('hex')}`;
+
 function importedEvidence(ctx, { seed, programIds, sourceModule, sourceId, stamp }, auth) {
-  return stamped(
+  const doc = stamped(
     ctx,
     KINDS.evidence,
     {
@@ -85,6 +95,27 @@ function importedEvidence(ctx, { seed, programIds, sourceModule, sourceId, stamp
     },
     auth
   );
+  return { ...doc, id: importedEvidenceId(sourceModule, sourceId) };
+}
+
+/**
+ * Persist an imported row atomically. A 409 means another import landed the
+ * same (sourceModule, sourceId) first; that row, owner edits included, is
+ * kept as it is. Answers the stored row, or null when one already existed.
+ */
+async function createImported(ctx, doc) {
+  try {
+    return (await ctx.store.createDoc(CONTAINER, doc)) || doc;
+  } catch (error) {
+    if (error?.code !== 409) throw error;
+    return null;
+  }
+}
+
+/** The rows already imported from one source, by sourceId — UUID-era rows and deterministic ones alike. */
+async function importedBySource(ctx, sourceModule) {
+  const current = (await ctx.listKind('evidence')).filter((e) => e.sourceModule === sourceModule);
+  return new Map(current.map((e) => [String(e.sourceId), e]));
 }
 
 /**
@@ -92,8 +123,7 @@ function importedEvidence(ctx, { seed, programIds, sourceModule, sourceId, stamp
  * `existing`, a source document that is gone as `missing`, the rest created.
  */
 async function importFromSource(ctx, { reader, sourceModule, ids, programIds }, auth) {
-  const current = (await ctx.listKind('evidence')).filter((e) => e.sourceModule === sourceModule);
-  const bySource = new Map(current.map((e) => [String(e.sourceId), e]));
+  const bySource = await importedBySource(ctx, sourceModule);
   const created = [];
   const existing = [];
   const missing = [];
@@ -111,9 +141,11 @@ async function importFromSource(ctx, { reader, sourceModule, ids, programIds }, 
     }
     const seed = reader.toEvidence(source);
     const doc = importedEvidence(ctx, { seed, programIds, sourceModule, sourceId, stamp }, auth);
-    await ctx.store.upsertDoc(CONTAINER, doc);
-    bySource.set(sourceId, doc);
-    created.push(doc);
+    const stored = await createImported(ctx, doc);
+    if (stored) {
+      bySource.set(sourceId, stored);
+      created.push(stored);
+    } else existing.push(doc.id);
   }
   return { created, existing, missing };
 }
@@ -121,33 +153,39 @@ async function importFromSource(ctx, { reader, sourceModule, ids, programIds }, 
 const unknownSource = () =>
   json(400, { error: `sourceModule must be one of ${Object.keys(IMPORT_READERS).join(', ')}` });
 
-const MAX_CSV_TEXT = 150_000;
+const count = (n) => n.toLocaleString('en-US');
+
+/** The JSON around a CSV at the limit (escaped line breaks and quotes) still fits; past this the body is refused as not an object. */
+const IMPORT_BODY_MAX = 4 * CSV_IMPORT_MAX_CHARS;
 
 /**
  * Import the rows of a pasted file: every seed the reader produces becomes
  * one evidence row under the reader's source, idempotent on the seed's
- * `sourceId`; rows the reader could not read are counted as `skipped`.
+ * `sourceId`; rows the reader could not read are counted as `skipped`, by
+ * reason in `skippedReasons`.
  */
 async function importFromCsv(ctx, request, { reader, readerId, text, programIds }, auth) {
   const { sourceModule } = reader;
-  const { items, skipped } = reader.toEvidence(text);
+  const { items, skipped, reasons } = reader.toEvidence(text);
   if (items.length === 0 && skipped === 0)
     return json(400, { error: 'text holds no rows under a header line' });
-  const current = (await ctx.listKind('evidence')).filter((e) => e.sourceModule === sourceModule);
-  const bySource = new Set(current.map((e) => String(e.sourceId)));
+  const bySource = await importedBySource(ctx, sourceModule);
   const created = [];
   const existing = [];
   const stamp = ctx.nowIso();
   for (const { sourceId, ...rest } of items) {
-    if (bySource.has(sourceId)) {
-      existing.push(sourceId);
+    const already = bySource.get(sourceId);
+    if (already) {
+      existing.push(already.id);
       continue;
     }
     const seed = { ...rest, tags: [readerId] };
     const doc = importedEvidence(ctx, { seed, programIds, sourceModule, sourceId, stamp }, auth);
-    await ctx.store.upsertDoc(CONTAINER, doc);
-    bySource.add(sourceId);
-    created.push(doc);
+    const stored = await createImported(ctx, doc);
+    if (stored) {
+      bySource.set(sourceId, stored);
+      created.push(stored);
+    } else existing.push(doc.id);
   }
   await ctx.audit('ambassador_evidence_imported', auth, request, {
     reader: readerId,
@@ -155,7 +193,28 @@ async function importFromCsv(ctx, request, { reader, readerId, text, programIds 
     existing: existing.length,
     skipped,
   });
-  return json(200, { success: true, created, existing, missing: [], skipped });
+  return json(200, {
+    success: true,
+    created,
+    existing,
+    missing: [],
+    skipped,
+    skippedReasons: reasons,
+  });
+}
+
+/** The CSV text of an import body, or the 413 that names the limit when it is over. */
+function csvText(body) {
+  const raw = typeof body.text === 'string' ? body.text : '';
+  if (raw.length > CSV_IMPORT_MAX_CHARS) {
+    return {
+      error: json(413, {
+        error: `text is ${count(raw.length)} characters; the limit is ${count(CSV_IMPORT_MAX_CHARS)}. Split the export and import each part.`,
+        limit: CSV_IMPORT_MAX_CHARS,
+      }),
+    };
+  }
+  return { text: raw.trim() };
 }
 
 /**
@@ -163,22 +222,25 @@ async function importFromCsv(ctx, request, { reader, readerId, text, programIds 
  * `{ sourceModule, ids[] }` imports documents from a source module, one
  * evidence row each with a snapshot of what the source said now;
  * `{ reader, text }` imports the rows of a pasted CSV through a CSV_READERS
- * entry. Both take `programIds[]` and are idempotent on
+ * entry; a text over CSV_IMPORT_MAX_CHARS is a 413 naming the limit, never
+ * a clipped import. Both take `programIds[]` and are idempotent on
  * (sourceModule, sourceId): a row already imported is reported as
- * `existing`, never duplicated.
+ * `existing`, never duplicated, and a row is stored under an id derived
+ * from that pair so two imports racing for it cannot both create one.
  */
 export async function importEvidence(ctx, request, auth) {
-  const body = await ctx.readBody(request);
+  const body = await ctx.readBody(request, IMPORT_BODY_MAX);
   if (!body) return json(400, { error: 'Body must be a JSON object' });
   const readerId = str(body.reader, 40);
   if (readerId) {
     const reader = CSV_READERS[readerId];
     if (!reader)
       return json(400, { error: `reader must be one of ${Object.keys(CSV_READERS).join(', ')}` });
-    const text = str(body.text, MAX_CSV_TEXT);
-    if (!text) return json(400, { error: 'text is required' });
+    const checked = csvText(body);
+    if (checked.error) return checked.error;
+    if (!checked.text) return json(400, { error: 'text is required' });
     const programIds = stringList(body.programIds);
-    return importFromCsv(ctx, request, { reader, readerId, text, programIds }, auth);
+    return importFromCsv(ctx, request, { reader, readerId, text: checked.text, programIds }, auth);
   }
   const sourceModule = str(body.sourceModule, 40);
   const reader = IMPORT_READERS[sourceModule];

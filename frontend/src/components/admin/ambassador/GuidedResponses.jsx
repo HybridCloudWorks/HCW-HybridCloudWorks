@@ -9,7 +9,7 @@
  * one `{ questionId, text }` each, structured kinds JSON-encoded into `text`
  * (applicationQuestions.js). Nothing here is ever published.
  */
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -74,16 +74,50 @@ function TextAnswer({ id, question, text, onChange, error }) {
   );
 }
 
+const OTHER = '__other__';
+
+/**
+ * One choice from the options. With `allowOther` the list ends in "Other…",
+ * which opens a text input for a value the list does not carry; a stored
+ * value off the list opens in that mode.
+ */
 function ChoiceAnswer({ id, question, text, onChange }) {
+  const listed = text === '' || question.options.includes(text);
+  const [otherMode, setOtherMode] = useState(question.allowOther && !listed);
+  const pick = (value) => {
+    if (value === OTHER) {
+      setOtherMode(true);
+      if (listed) onChange('');
+      return;
+    }
+    setOtherMode(false);
+    onChange(value);
+  };
   return (
-    <select id={id} className={INPUT} value={text} onChange={(e) => onChange(e.target.value)}>
-      <option value="">Choose…</option>
-      {question.options.map((option) => (
-        <option key={option} value={option}>
-          {option}
-        </option>
-      ))}
-    </select>
+    <div className="space-y-1.5">
+      <select
+        id={id}
+        className={INPUT}
+        value={otherMode ? OTHER : text}
+        onChange={(e) => pick(e.target.value)}
+      >
+        <option value="">Choose…</option>
+        {question.options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+        {question.allowOther && <option value={OTHER}>Other…</option>}
+      </select>
+      {otherMode && (
+        <Input
+          aria-label={`${question.prompt} (other)`}
+          placeholder="Type the value as the form lists it"
+          value={text}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      )}
+    </div>
   );
 }
 
@@ -195,11 +229,17 @@ function LinksAnswer({ question, text, onChange }) {
   );
 }
 
-/** Activities tagged from the attached evidence; the answer is the evidence ids. */
+/**
+ * Activities tagged from the attached evidence; the answer is the evidence
+ * ids. An id no longer attached (detached, or deleted) is still a selection
+ * — it counts toward the limit — so it is shown as a row of its own with its
+ * checkbox ticked, which is how it is removed.
+ */
 function ActivitiesAnswer({ id, question, text, onChange, evidence }) {
   const chosen = parseAnswer('activities', text);
   const max = question.maxItems || null;
   const full = max ? chosen.length >= max : false;
+  const unavailable = chosen.filter((x) => !evidence.some((item) => item.id === x));
   const toggle = (evidenceId) =>
     onChange(
       serialiseAnswer(
@@ -216,11 +256,12 @@ function ActivitiesAnswer({ id, question, text, onChange, evidence }) {
         attached to this application
         {max ? ` · ${chosen.length} / ${max}` : ` · ${chosen.length}`}.
       </p>
-      {evidence.length === 0 ? (
+      {evidence.length === 0 && (
         <p className="text-xs text-muted-foreground">
           Nothing attached yet. Attach evidence from the requirement checklist above first.
         </p>
-      ) : (
+      )}
+      {(evidence.length > 0 || unavailable.length > 0) && (
         <ul className="space-y-1">
           {evidence.map((item) => {
             const on = chosen.includes(item.id);
@@ -240,6 +281,19 @@ function ActivitiesAnswer({ id, question, text, onChange, evidence }) {
               </li>
             );
           })}
+          {unavailable.map((evidenceId) => (
+            <li key={evidenceId} className="flex items-center gap-2 text-sm">
+              <input
+                id={`${id}-${evidenceId}`}
+                type="checkbox"
+                checked
+                onChange={() => toggle(evidenceId)}
+              />
+              <label htmlFor={`${id}-${evidenceId}`} className="text-muted-foreground">
+                No longer attached ({evidenceId}) — untick to remove it from the answer
+              </label>
+            </li>
+          ))}
         </ul>
       )}
     </div>

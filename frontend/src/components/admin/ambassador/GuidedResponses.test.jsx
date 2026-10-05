@@ -28,6 +28,14 @@ const questions = [
   },
   { id: 'links', section: 'Network', prompt: 'Networks', kind: 'links', options: ['GitHub'] },
   { id: 'acts', section: 'Expertise', prompt: 'Activities', kind: 'activities', maxItems: 1 },
+  {
+    id: 'area',
+    section: 'Expertise',
+    prompt: 'Technology area',
+    kind: 'choice',
+    options: ['Azure: Networking'],
+    allowOther: true,
+  },
 ];
 
 const evidence = [
@@ -35,13 +43,13 @@ const evidence = [
   { id: 'e2', title: 'Meetup', date: '2026-09-01' },
 ];
 
-function Harness({ initial = [], onChange = () => {} }) {
+function Harness({ initial = [], onChange = () => {}, attached = evidence }) {
   const [responses, setResponses] = useState(initial);
   return (
     <GuidedResponses
       questions={questions}
       responses={responses}
-      evidence={evidence}
+      evidence={attached}
       title="MVP 2026"
       onChange={(next) => {
         setResponses(next);
@@ -61,7 +69,7 @@ describe('GuidedResponses', () => {
     render(<Harness />);
     const legends = screen.getAllByRole('group').map((g) => g.querySelector('legend').textContent);
     expect(legends).toEqual(['Profile', 'Questions', 'Tools', 'Network', 'Expertise']);
-    expect(screen.getByText('0 of 8 answered', { exact: false })).toBeInTheDocument();
+    expect(screen.getByText('0 of 9 answered', { exact: false })).toBeInTheDocument();
     expect(screen.getByLabelText('First name')).toHaveAttribute('type', 'text');
     expect(screen.getByLabelText('Why?').tagName).toBe('TEXTAREA');
     expect(within(screen.getByRole('radiogroup')).getAllByRole('radio')).toHaveLength(2);
@@ -92,7 +100,54 @@ describe('GuidedResponses', () => {
     // Clearing an answer removes its entry rather than leaving an empty one.
     fireEvent.change(screen.getByLabelText('Why?'), { target: { value: '' } });
     expect(onChange.mock.calls.at(-1)[0].map((r) => r.questionId)).toEqual(['mct', 'grid']);
-    expect(screen.getByText('2 of 8 answered', { exact: false })).toBeInTheDocument();
+    expect(screen.getByText('2 of 9 answered', { exact: false })).toBeInTheDocument();
+  });
+
+  it('lets a choice with allowOther take a typed value, and opens a stored off-list value in that mode', () => {
+    const onChange = vi.fn();
+    render(<Harness onChange={onChange} />);
+    const select = screen.getByLabelText('Technology area');
+    expect(screen.queryByLabelText('Technology area (other)')).toBeNull();
+    fireEvent.change(select, { target: { value: '__other__' } });
+    const other = screen.getByLabelText('Technology area (other)');
+    fireEvent.change(other, { target: { value: 'M365: Teams' } });
+    expect(onChange).toHaveBeenLastCalledWith([{ questionId: 'area', text: 'M365: Teams' }]);
+    // Back to a listed option closes the input and stores the option.
+    fireEvent.change(select, { target: { value: 'Azure: Networking' } });
+    expect(onChange).toHaveBeenLastCalledWith([{ questionId: 'area', text: 'Azure: Networking' }]);
+    expect(screen.queryByLabelText('Technology area (other)')).toBeNull();
+  });
+
+  it('opens a stored off-list choice in other mode, and a choice without allowOther offers no Other', () => {
+    render(<Harness initial={[{ questionId: 'area', text: 'Data Platform: SQL' }]} />);
+    expect(screen.getByLabelText('Technology area (other)')).toHaveValue('Data Platform: SQL');
+    expect(screen.getByLabelText('Technology area')).toHaveValue('__other__');
+    expect(
+      within(screen.getByLabelText('Category'))
+        .getAllByRole('option')
+        .map((o) => o.textContent)
+    ).toEqual(['Choose…', 'A', 'B']);
+  });
+
+  it('shows an activity no longer attached as a removable row, even with nothing attached, and frees the limit on removal', () => {
+    const onChange = vi.fn();
+    render(<Harness initial={[{ questionId: 'acts', text: '["gone"]' }]} onChange={onChange} />);
+    // At the limit of 1 with an invisible selection: the attached rows are blocked...
+    expect(screen.getByLabelText(/KCDC talk/)).toBeDisabled();
+    const gone = screen.getByLabelText(/No longer attached \(gone\)/);
+    expect(gone).toBeChecked();
+    // ...until the stale selection is removed.
+    fireEvent.click(gone);
+    expect(onChange).toHaveBeenLastCalledWith([]);
+    expect(screen.getByLabelText(/KCDC talk/)).not.toBeDisabled();
+    expect(screen.queryByLabelText(/No longer attached/)).toBeNull();
+  });
+
+  it('shows a stale activity when no evidence is attached at all', () => {
+    render(<Harness initial={[{ questionId: 'acts', text: '["gone"]' }]} attached={[]} />);
+    expect(screen.getByText(/Nothing attached yet/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/No longer attached \(gone\)/)).toBeChecked();
+    expect(screen.getByText(/1 \/ 1/)).toBeInTheDocument();
   });
 
   it('names a bad URL and keeps the link rows as network + URL', () => {

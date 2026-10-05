@@ -30,6 +30,7 @@ const question = (id, section, prompt, kind, extra = {}) => ({
   kind,
   maxChars: null,
   options: [],
+  allowOther: false,
   rows: [],
   maxItems: null,
   hint: '',
@@ -89,6 +90,38 @@ const MVP_CDM_AREAS = [
   'On-Premises Storage',
   'Windows Server',
 ].map((area) => `Cloud and Datacenter Management: ${area}`);
+
+const MVP_SECURITY_AREAS = [
+  'Cloud Security',
+  'Identity & Access',
+  'Microsoft Intune',
+  'Microsoft Purview',
+  'Microsoft Security Copilot',
+  'SIEM & XDR',
+].map((area) => `Security: ${area}`);
+
+const MVP_DEVELOPER_AREAS = [
+  '.NET',
+  'C++',
+  'Developer Security',
+  'Developer Tools',
+  'DevOps',
+  'Java',
+  'Python',
+  'Web Development',
+].map((area) => `Developer Technologies: ${area}`);
+
+/**
+ * The technology areas grouped by award category, for the categories whose
+ * published list is in hand; the other seven categories take a typed value
+ * (`allowOther`) until their lists are added here.
+ */
+const MVP_TECHNOLOGY_AREAS = [
+  ...MVP_AZURE_AREAS,
+  ...MVP_CDM_AREAS,
+  ...MVP_SECURITY_AREAS,
+  ...MVP_DEVELOPER_AREAS,
+];
 
 const MVP_ACTIVITY_TYPES =
   'Activity types and the fields the form asks for: Speaker/Presenter (title, audience, description, private description, primary and additional technology areas, date, in-person attendees, livestream views, on-demand views, URL); Book/E-Book; Open Source/Project/Sample code/Tools; Product Feedback; Blog; Article; Online Support; Mentorship/Coaching; Webinar/Online Training/Video/Livestream; Podcast.';
@@ -173,8 +206,9 @@ const MVP_APPLICATION_QUESTIONS = [
     options: MVP_AWARD_CATEGORIES,
   }),
   question('mvp-technology-area', MVP_TECHNOLOGY, 'Primary Technology Area', 'choice', {
-    options: [...MVP_AZURE_AREAS, ...MVP_CDM_AREAS],
-    hint: 'The areas listed are those of Microsoft Azure and Cloud and Datacenter Management; other categories list their own on the form.',
+    options: MVP_TECHNOLOGY_AREAS,
+    allowOther: true,
+    hint: 'Grouped by award category where the published list is known (Microsoft Azure, Cloud and Datacenter Management, Security, Developer Technologies). For another category choose Other and type the area as the form lists it.',
   }),
   question('mvp-technology-areas-more', MVP_TECHNOLOGY, 'Additional Technology Areas', 'text', {
     maxChars: 500,

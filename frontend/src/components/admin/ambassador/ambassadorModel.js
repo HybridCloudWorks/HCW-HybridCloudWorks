@@ -123,6 +123,14 @@ export const SOURCE_LABELS = Object.freeze({
 /** The three sources the import picker offers (the API reads these containers). */
 export const IMPORT_SOURCES = Object.freeze(['speaking', 'certifications', 'content']);
 
+/**
+ * The most CSV text one import takes, in characters — the API's
+ * CSV_IMPORT_MAX_CHARS (functions/src/lib/ambassador/import-readers.js),
+ * which answers 413 past it. The dialog refuses an oversized file or paste
+ * before sending, so nothing is ever clipped on the way.
+ */
+export const CSV_IMPORT_MAX_CHARS = 1_000_000;
+
 /** The files the import can read (the API's CSV_READERS): the reader id, its label, the source its rows land under. */
 export const CSV_IMPORTS = Object.freeze([
   {

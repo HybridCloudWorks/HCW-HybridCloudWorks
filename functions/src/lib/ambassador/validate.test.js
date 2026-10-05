@@ -118,11 +118,32 @@ describe('field rules', () => {
       kind: 'scale',
       maxChars: null,
       options: ['Daily', 'Never'],
+      allowOther: false,
       rows: ['Teams'],
       maxItems: 24,
       hint: '',
       required: false,
     });
+    // A choice may take a typed value beside its options; only `true` turns it on.
+    expect(
+      q({ id: 'area', prompt: 'Area', kind: 'choice', options: ['A'], allowOther: true }).value
+        .applicationQuestions[0].allowOther
+    ).toBe(true);
+    expect(
+      q({ id: 'area', prompt: 'Area', kind: 'choice', options: ['A'], allowOther: 'yes' }).value
+        .applicationQuestions[0].allowOther
+    ).toBe(false);
+  });
+
+  it('application: responses hold up to 300 entries — 200 guided plus 100 free-list — and more is refused, not clipped', () => {
+    const entries = (n) =>
+      Array.from({ length: n }, (_, i) => ({ questionId: `q${i}`, text: `a${i}` }));
+    expect(
+      validateApplication({ programId: 'p', responses: entries(300) }).value.responses
+    ).toHaveLength(300);
+    expect(validateApplication({ programId: 'p', responses: entries(301) }).error).toBe(
+      'responses must hold at most 300 entries (301 sent)'
+    );
   });
 
   it('program: scoring is null or a credits unit with labelled tiers; evidence metrics carry credits', () => {

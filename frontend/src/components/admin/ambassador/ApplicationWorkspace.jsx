@@ -249,40 +249,61 @@ function ChecklistSection({ program, application, evidence, readiness, onToggle,
   );
 }
 
-/** The packet's responses: the program's sections and questions when it has them, the free list otherwise. */
-function PacketResponses({ application, program, attached }) {
+/** Free-list responses as the packet prints them: the question id, then the answer. */
+function FreeResponseList({ responses }) {
+  return responses.map((r) => (
+    <div key={r.questionId} className="mt-2">
+      <p className="font-medium">{r.questionId}</p>
+      <p className="whitespace-pre-wrap">{r.text}</p>
+    </div>
+  ));
+}
+
+/**
+ * The packet's responses: the program's sections and questions when it has
+ * them, with any answer written before the program had its question list
+ * kept after them under "Other responses"; the free list otherwise.
+ */
+export function PacketResponses({ application, program, attached }) {
   const responses = application.responses || [];
   const questions = program?.applicationQuestions;
   if (Array.isArray(questions) && questions.length > 0) {
     const by = responsesMap(responses);
+    const known = new Set(questions.map((q) => q.id));
+    const leftovers = responses.filter((r) => !known.has(r.questionId));
     const evidenceById = new Map(attached.map((e) => [e.id, e]));
-    return questionSections(questions).map(({ section, questions: list }) => (
-      <section key={section}>
-        <h3 className="font-semibold">{section}</h3>
-        {list.map((question) => {
-          const answer = answerText(question, by.get(question.id) || '', { evidenceById });
-          return (
-            <div key={question.id} className="mt-2">
-              <p className="font-medium">{question.prompt}</p>
-              <p className={`whitespace-pre-wrap${answer ? '' : ' text-muted-foreground'}`}>
-                {answer || '(not answered)'}
-              </p>
-            </div>
-          );
-        })}
-      </section>
-    ));
+    return (
+      <>
+        {questionSections(questions).map(({ section, questions: list }) => (
+          <section key={section}>
+            <h3 className="font-semibold">{section}</h3>
+            {list.map((question) => {
+              const answer = answerText(question, by.get(question.id) || '', { evidenceById });
+              return (
+                <div key={question.id} className="mt-2">
+                  <p className="font-medium">{question.prompt}</p>
+                  <p className={`whitespace-pre-wrap${answer ? '' : ' text-muted-foreground'}`}>
+                    {answer || '(not answered)'}
+                  </p>
+                </div>
+              );
+            })}
+          </section>
+        ))}
+        {leftovers.length > 0 && (
+          <section>
+            <h3 className="font-semibold">Other responses</h3>
+            <FreeResponseList responses={leftovers} />
+          </section>
+        )}
+      </>
+    );
   }
   return (
     <section>
       <h3 className="font-semibold">Responses</h3>
       {responses.length === 0 && <p className="text-muted-foreground">None written yet.</p>}
-      {responses.map((r) => (
-        <div key={r.questionId} className="mt-2">
-          <p className="font-medium">{r.questionId}</p>
-          <p className="whitespace-pre-wrap">{r.text}</p>
-        </div>
-      ))}
+      <FreeResponseList responses={responses} />
     </section>
   );
 }
