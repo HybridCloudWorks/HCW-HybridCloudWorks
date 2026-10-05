@@ -75,6 +75,46 @@ This project has not cut a tagged release; entries are grouped under
   that names an unpriced model, a public task that recommends the trial
   tier, or a grounding need outside Gemini. Nothing reads the new fields
   yet; slices 2–5 do.
+- **The model catalogue, refreshed weekly from the providers' own lists
+  (ADR 0034 slice 2, #857).** Each AI Services card's model list was typed
+  into the frontend seed, so a new deployment, a retired id or a price
+  change was a pull request, and a card could offer a model its provider
+  had stopped serving. `functions/src/lib/ai/model-catalog.js` now keeps
+  `admin_settings/ai-model-catalog` (beside `ai-features` and `ai-routing`;
+  ADR 0034 §1 names `admin_config`, which holds nothing the AI code reads):
+  per provider `refresh: { lastOk, lastAttempt, lastError }` and per model
+  `status: live | retired | unknown`, `firstSeen`, `lastSeen`, `missed`,
+  `hidden`, capabilities and context from a code table keyed by id pattern,
+  and pricing from `COST_TABLE` or `unpriced: true`. The weekly
+  `probeAiProviders` timer lists every provider with a key after its Tests
+  (OpenAI and NVIDIA `/v1/models`, Anthropic `/v1/models` paged, Gemini
+  `models.list` filtered to `generateContent`, Foundry `/openai/v1/models`
+  with the app identity's token); a catalogue failure is logged and reported
+  and never costs the Tests already written. A failed list changes no model
+  and records only `lastAttempt` and `lastError` (ADR 0034 review finding
+  3); `retired` takes two consecutive successful lists without the model; a
+  refresh never touches `hidden`. Three editor routes: `GET
+  cms/ai-model-catalog` (every provider, `stale` when `lastOk` is missing or
+  older than 8 days, the router's defaults seeded in memory for a provider
+  never refreshed), `PATCH cms/ai-model-catalog/{provider}/{model}` with
+  `{ hidden }` (the id URL-encoded, since NVIDIA's carry a slash) and `POST
+  cms/ai-model-catalog/refresh`; every write drops the router's cache. The
+  AI Services page reads the catalogue once and after every hide or
+  refresh, merges each card's `models` from it in one place
+  (`frontend/src/lib/aiEngine/catalog.js`), shows a "Models (N)" disclosure
+  per card with `retired`, `unpriced` and `hidden` badges, a Hide / Show per
+  model and the "List refreshed" line, and a "Refresh model lists" button in
+  the section header. The seed's `models` arrays and `providerModelPatches`
+  are gone; a pin the catalogue no longer lists reads "(not listed)" on the
+  select instead of being released. `model-catalog.test.js` pins the
+  adapters, the enrichment contract (every router default and every
+  recommendation priced; every capability from the registry's vocabulary),
+  the retire rule, the failed-refresh rule and the read rule;
+  `model-catalog-handlers.test.js` the routes and the encoded id;
+  `ai-provider-probe.test.js` the order and the isolation of the catalogue
+  step; `aiEngine.test.js` holds the page's visibility rule equal to the
+  API's and refuses a model list in the seed. No app setting or Terraform
+  run: the first list lands on the next Monday probe, or on the button.
 - **OpenAI's gpt-5-mini and gpt-5-nano are priced** ($0.25 / $2.00 and
   $0.05 / $0.40 per 1M tokens, OpenAI's published rates, the same figures
   Azure lists for the same models; owner confirmation 2026-10-05). They had

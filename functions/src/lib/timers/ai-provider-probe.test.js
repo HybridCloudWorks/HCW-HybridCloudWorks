@@ -158,3 +158,58 @@ describe('probeAiProviders', () => {
     expect(store.patchDoc).not.toHaveBeenCalled();
   });
 });
+
+describe('probeAiProviders — the model catalogue step (ADR 0034 slice 2, #857)', () => {
+  const probeWith = ({ store = makeStore(), ai, clock, refresh, log = { error: vi.fn() } }) =>
+    createAiProviderProbe({
+      store,
+      ai,
+      catalog: { refresh },
+      log,
+      now: () => NOW,
+      uuid: () => 'row-1',
+      clock,
+    });
+
+  it('refreshes the catalogue after the Tests and reports its summary', async () => {
+    const { ai, clock } = makeAi();
+    const order = [];
+    ai.callProvider.mockImplementation(async () => {
+      order.push('test');
+      return { text: 'ok', promptTokens: 9, completionTokens: 2, model: 'm' };
+    });
+    const listed = { gemini: { listed: 3, added: 1, retired: 0, error: null } };
+    const refresh = vi.fn(async () => {
+      order.push('refresh');
+      return { updatedAt: NOW.toISOString(), providers: listed };
+    });
+    const summary = await probeWith({ ai, clock, refresh }).run();
+
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(['test', 'test', 'test', 'test', 'refresh']);
+    expect(summary.probed).toBe(4);
+    expect(summary.catalog).toEqual({ updatedAt: NOW.toISOString(), providers: listed });
+  });
+
+  it('a catalogue that cannot be refreshed is logged and reported; the Tests already written stand', async () => {
+    const store = makeStore();
+    const log = { error: vi.fn() };
+    const { ai, clock } = makeAi();
+    const refresh = vi.fn(async () => {
+      throw new Error('cosmos down');
+    });
+    const summary = await probeWith({ store, ai, clock, refresh, log }).run();
+
+    expect(store.patchDoc).toHaveBeenCalledTimes(4);
+    expect(summary).toMatchObject({ probed: 4, connected: 4, catalog: { error: 'cosmos down' } });
+    expect(log.error).toHaveBeenCalledWith(
+      'probeAiProviders catalogue refresh failed:',
+      expect.any(Error)
+    );
+  });
+
+  it('without a catalogue dependency the run is the probe alone, as before', async () => {
+    const { ai, clock } = makeAi();
+    expect(await build({ ai, clock }).run()).not.toHaveProperty('catalog');
+  });
+});

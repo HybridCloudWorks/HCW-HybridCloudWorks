@@ -26,14 +26,19 @@ import {
   aggregateByProvider,
   aggregateBySource,
   providerDisplayPatches,
-  providerModelPatches,
   SEED_OWNED_PROVIDER_FIELDS,
 } from './aiEngine.js';
+import { visibleModelsFor as visibleModelsOnThePage } from './aiEngine/catalog.js';
 import {
   DEFAULT_MODEL_TABLE,
   PROVIDERS,
   getCostEstimate,
 } from '../../../functions/src/lib/ai/router.js';
+import {
+  readModelCatalog,
+  seedModelsFor,
+  visibleModelsFor as visibleModelsInTheApi,
+} from '../../../functions/src/lib/ai/model-catalog.js';
 import { USAGE_SOURCES } from '../../../functions/src/lib/ai/usage.js';
 import { SOURCE_LABELS, labelForSource } from '../pages/admin/AIEngineUsageTab.jsx';
 
@@ -78,7 +83,15 @@ describe('DEFAULT_PROVIDERS matches the API', () => {
     expect(DEFAULT_PROVIDERS.every((p) => p.enabled === true)).toBe(true);
   });
 
-  it('lists its defaultModel among its own models', () => {
+  it('carries no model list of its own; the catalogue is the list (ADR 0034 slice 2, #857)', () => {
+    // A list typed in here is a copy that goes stale the way the provider
+    // list once did. The cards read cms/ai-model-catalog instead.
+    for (const provider of DEFAULT_PROVIDERS) {
+      expect(provider, provider.id).not.toHaveProperty('models');
+    }
+  });
+
+  it('pins a defaultModel the router’s own table serves, or no pin at all', () => {
     for (const provider of DEFAULT_PROVIDERS) {
       // NVIDIA and Foundry seed no pin, so the router's per-purpose table
       // decides (#701, #849): a pin here would apply one model to drafting,
@@ -87,16 +100,50 @@ describe('DEFAULT_PROVIDERS matches the API', () => {
         expect(provider.defaultModel).toBeNull();
         continue;
       }
-      expect(provider.models, provider.id).toContain(provider.defaultModel);
+      expect(seedModelsFor(provider.id), provider.id).toContain(provider.defaultModel);
     }
   });
 
-  it('offers exactly the NVIDIA models the router defaults to, per purpose', () => {
-    const nvidia = DEFAULT_PROVIDERS.find((p) => p.id === 'nvidia');
+  it('before the first refresh, a card offers exactly the models the router defaults to', async () => {
+    // The API seeds a never-refreshed provider from the router table in
+    // memory; the page's visibility rule over that answer is the card's list.
+    const catalog = await readModelCatalog({ store: { readDoc: async () => null } });
     const routerDefaults = [
       ...new Set(Object.values(DEFAULT_MODEL_TABLE.nvidia).map(([, m]) => m)),
     ];
-    expect([...nvidia.models].sort()).toEqual(routerDefaults.sort());
+    expect([...visibleModelsOnThePage(catalog, 'nvidia')].sort()).toEqual(routerDefaults.sort());
+    for (const provider of PROVIDERS) {
+      expect(visibleModelsOnThePage(catalog, provider).length, provider).toBeGreaterThan(0);
+    }
+  });
+
+  it('the page and the API agree on which models a card may offer', async () => {
+    const seeded = await readModelCatalog({ store: { readDoc: async () => null } });
+    const catalog = {
+      providers: {
+        ...seeded.providers,
+        openai: {
+          ...seeded.providers.openai,
+          models: {
+            'gpt-5-nano': { id: 'gpt-5-nano', status: 'live', hidden: false },
+            'gpt-4o': { id: 'gpt-4o', status: 'retired', hidden: false },
+            'gpt-5-mini': { id: 'gpt-5-mini', status: 'live', hidden: true },
+            'o3-mini': { id: 'o3-mini', status: 'unknown', hidden: false },
+            'gpt-4o-mini': { id: 'gpt-4o-mini', status: 'live', hidden: false },
+          },
+        },
+      },
+    };
+    for (const provider of PROVIDERS) {
+      expect(visibleModelsOnThePage(catalog, provider), provider).toEqual(
+        visibleModelsInTheApi(catalog, provider)
+      );
+    }
+    expect(visibleModelsOnThePage(catalog, 'openai')).toEqual([
+      'gpt-4o-mini',
+      'gpt-5-nano',
+      'o3-mini',
+    ]);
   });
 
   it('prices every NVIDIA call at zero, so the usage view shows the saving', () => {
@@ -148,42 +195,6 @@ describe('a stored provider follows the seed for what the card shows', () => {
     expect(only.patch).not.toHaveProperty('defaultModel');
     expect(only.patch).not.toHaveProperty('enabled');
     expect(providerDisplayPatches([{ id: 'someone-else', name: 'x' }])).toEqual([]);
-  });
-});
-
-describe('providerModelPatches', () => {
-  // The NVIDIA card as the page first wrote it on 2026-09-25 (#701).
-  const nvidiaAsSeeded = {
-    id: 'nvidia',
-    name: 'NVIDIA API',
-    defaultModel: 'z-ai/glm-5.3-flash',
-    models: ['z-ai/glm-5.3', 'z-ai/glm-5.3-flash', 'deepseek-ai/deepseek-v4.1-flash'],
-    status: 'error',
-  };
-
-  it('brings the 2026-09-25 NVIDIA card to the router defaults and releases its withdrawn pin', () => {
-    expect(providerModelPatches([nvidiaAsSeeded])).toEqual([
-      { id: 'nvidia', patch: { models: ['z-ai/glm-5.3'], defaultModel: null } },
-    ]);
-  });
-
-  it('keeps a pin the list still offers', () => {
-    const stored = [{ ...nvidiaAsSeeded, defaultModel: 'z-ai/glm-5.3' }];
-    expect(providerModelPatches(stored)).toEqual([
-      { id: 'nvidia', patch: { models: ['z-ai/glm-5.3'] } },
-    ]);
-  });
-
-  it('writes nothing when every stored document already matches the seed', () => {
-    expect(providerModelPatches(DEFAULT_PROVIDERS.map((p) => ({ ...p })))).toEqual([]);
-  });
-
-  it('leaves providers the seed does not know, and every field but models and the pin', () => {
-    expect(
-      providerModelPatches([{ id: 'someone-else', models: ['x'], defaultModel: 'y' }])
-    ).toEqual([]);
-    const [only] = providerModelPatches([nvidiaAsSeeded]);
-    expect(Object.keys(only.patch).sort()).toEqual(['defaultModel', 'models']);
   });
 });
 

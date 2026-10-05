@@ -131,6 +131,40 @@ export async function removeMcpServer(serverId) {
   await notifyConfigSubscribers('mcp-servers');
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// The model catalogue (ADR 0034 slice 2, #857) — admin_settings/ai-model-catalog
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Every provider's model list as the API holds it, with `stale` per provider
+ * and the router's defaults seeded for a provider never refreshed. The page
+ * merges it onto the provider cards (aiEngine/catalog.js withCatalogModels).
+ */
+export async function fetchModelCatalog() {
+  const res = await getJSON('cms/ai-model-catalog');
+  return res.catalog || { providers: {} };
+}
+
+/**
+ * Hide or show one model on its card. The model id travels URL-encoded —
+ * NVIDIA's carry a slash — and the API decodes it. Returns the stored entry.
+ */
+export async function setModelHidden(providerId, model, hidden) {
+  const route = `cms/ai-model-catalog/${encodeURIComponent(providerId)}/${encodeURIComponent(model)}`;
+  const res = await sendJSON(route, 'PATCH', { hidden: Boolean(hidden) });
+  return res.model || null;
+}
+
+/**
+ * List every provider with a key now, rather than waiting for the weekly
+ * probe. Returns the summary: per provider `{ listed, added, retired, error }`,
+ * or `{ skipped: true }` for one with no key.
+ */
+export async function refreshModelCatalog() {
+  const res = await sendJSON('cms/ai-model-catalog/refresh', 'POST', {});
+  return res.summary || { providers: {} };
+}
+
 /**
  * Persist a new preference order.
  *

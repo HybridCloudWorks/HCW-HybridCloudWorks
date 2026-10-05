@@ -35,6 +35,14 @@
  * A provider that fails is a RESULT, not a failure of the timer. The run
  * returns it, the card shows it, and the timer succeeds. The timer throws
  * only when it cannot run at all.
+ *
+ * THE LIST STEP (ADR 0034 slice 2, #857). After the Tests, the same run
+ * refreshes the model catalogue (lib/ai/model-catalog.js) for every provider
+ * with a key, through the optional `catalog.refresh` dependency. It runs
+ * AFTER the probe so a catalogue failure — Cosmos refusing the write, every
+ * list endpoint down — cannot cost the probe results already written onto
+ * the cards: it is logged, reported under `catalog.error`, and the run
+ * still returns the Tests.
  */
 import { testProviderConnection } from '../ai/proxy.js';
 
@@ -43,12 +51,23 @@ import { testProviderConnection } from '../ai/proxy.js';
  * @param {{ upsertDoc: Function, patchDoc: Function }} deps.store
  * @param {{ availableProviders: Function, callProvider: Function,
  *   getCostEstimate: Function }} deps.ai
+ * @param {{ refresh: () => Promise<object> }} [deps.catalog] the model
+ *   catalogue refresh; absent, the run is the probe alone
  * @param {object} [deps.log] the invocation context
  * @param {() => Date} [deps.now]
  * @param {() => string} [deps.uuid]
  * @param {() => number} [deps.clock]
  */
-export function createAiProviderProbe({ store, ai, log = {}, now, uuid, clock }) {
+export function createAiProviderProbe({ store, ai, catalog = null, log = {}, now, uuid, clock }) {
+  async function refreshCatalog() {
+    try {
+      return await catalog.refresh();
+    } catch (error) {
+      log.error?.('probeAiProviders catalogue refresh failed:', error);
+      return { error: String(error?.message || error) };
+    }
+  }
+
   async function run() {
     const providers = ai.availableProviders();
     const results = [];
@@ -64,11 +83,13 @@ export function createAiProviderProbe({ store, ai, log = {}, now, uuid, clock })
         ...(outcome.error ? { error: outcome.error } : {}),
       });
     }
-    return {
+    const summary = {
       probed: results.length,
       connected: results.filter((r) => r.status === 'connected').length,
       results,
     };
+    if (catalog) summary.catalog = await refreshCatalog();
+    return summary;
   }
   return { run };
 }
