@@ -168,17 +168,65 @@ describe('the service registry', () => {
       await expect(runnerFor('replicate')()).rejects.toThrow(/Unauthenticated/);
     });
 
-    it('tests the Hybrid Lab through the public coder-status read', async () => {
-      getJSON.mockResolvedValueOnce({
+    it('tests the Hybrid Lab through the public coder-status read, then says when the token expires', async () => {
+      const healthy = {
         configured: true,
         reachable: true,
         templates: [{ name: 'a' }],
         capacity: { running: 1, max: 4 },
+      };
+      getJSON.mockResolvedValueOnce(healthy).mockResolvedValueOnce({
+        configured: true,
+        warningDays: 30,
+        token: {
+          known: true,
+          expiresAt: '2027-09-28T10:00:00.000Z',
+          daysLeft: 357,
+          renewSoon: false,
+        },
       });
+      await expect(runnerFor('hybrid-lab')()).resolves.toBe(
+        'Connected — 1 template(s), 1 of 4 workspaces running. Status token expires on 2027-09-28 (357 days).'
+      );
+      expect(getJSON).toHaveBeenCalledWith('public/labs/coder-status');
+      expect(getJSON).toHaveBeenCalledWith('cms/labs/coder-token');
+
+      // Inside the warning window the card goes red and names the steps.
+      getJSON.mockResolvedValueOnce(healthy).mockResolvedValueOnce({
+        configured: true,
+        token: {
+          known: true,
+          expiresAt: '2026-10-20T10:00:00.000Z',
+          daysLeft: 15,
+          renewSoon: true,
+        },
+      });
+      await expect(runnerFor('hybrid-lab')()).rejects.toThrow(
+        /expires on 2026-10-20 \(15 days\): renew it/
+      );
+
+      // A token made before the api_key:read scope: still green, says what to add.
+      getJSON.mockResolvedValueOnce(healthy).mockResolvedValueOnce({
+        configured: true,
+        token: { known: false, reason: 'scope', scope: 'api_key:read' },
+      });
+      await expect(runnerFor('hybrid-lab')()).resolves.toMatch(
+        /expiry unknown: add the api_key:read scope/
+      );
+
+      // Expired or revoked: red.
+      getJSON.mockResolvedValueOnce(healthy).mockResolvedValueOnce({
+        configured: true,
+        token: { known: false, reason: 'refused' },
+      });
+      await expect(runnerFor('hybrid-lab')()).rejects.toThrow(/expired or been revoked/);
+
+      // A failed token read leaves the Coder sentence as it was.
+      getJSON.mockResolvedValueOnce(healthy).mockRejectedValueOnce(new Error('403'));
       await expect(runnerFor('hybrid-lab')()).resolves.toBe(
         'Connected — 1 template(s), 1 of 4 workspaces running.'
       );
-      expect(getJSON).toHaveBeenCalledWith('public/labs/coder-status');
+
       getJSON.mockResolvedValueOnce({ configured: false });
       await expect(runnerFor('hybrid-lab')()).rejects.toThrow(/CODER_URL/);
       getJSON.mockResolvedValueOnce({ configured: true, reachable: false });

@@ -219,6 +219,39 @@ async function testElevenLabs() {
   return `Connected${tier}${credits}.`;
 }
 
+/**
+ * The status token's expiry, as a sentence to append, or an Error to throw
+ * (#763): the token is made with a one-year lifetime and nothing renews it,
+ * so the card is the reminder. `renewSoon` (inside the server's warning
+ * window) turns the card red with the renewal steps named; an unknown
+ * expiry says why — the token predates the `api_key:read` scope that lets
+ * it read its own record, or it is not set.
+ */
+export function describeTokenExpiry(read) {
+  const token = read?.token;
+  if (!read?.configured || !token) return '';
+  if (token.known) {
+    const day = String(token.expiresAt).slice(0, 10);
+    const left = `${token.daysLeft} day${token.daysLeft === 1 ? '' : 's'}`;
+    if (token.renewSoon) {
+      throw new Error(
+        `Status token expires on ${day} (${left}): renew it — lab-host/README.md, "The status token for the site".`
+      );
+    }
+    return ` Status token expires on ${day} (${left}).`;
+  }
+  if (token.reason === 'refused') {
+    throw new Error(
+      'Coder refused the status token: it has expired or been revoked. Renew it — lab-host/README.md, "The status token for the site".'
+    );
+  }
+  if (token.reason === 'scope') {
+    return ` Status token expiry unknown: add the ${token.scope} scope at the next renewal and the card will show it.`;
+  }
+  if (token.reason === 'unset') return ' No status token is set.';
+  return '';
+}
+
 async function testHybridLab() {
   // The public labs card's own read (public/labs/coder-status), which the
   // server answers from CODER_URL and CODER_STATUS_TOKEN and caches.
@@ -228,7 +261,11 @@ async function testHybridLab() {
   const templates = Array.isArray(res.templates) ? res.templates.length : 0;
   const running = res.capacity?.running ?? 'unknown';
   const max = res.capacity?.max ?? 'unknown';
-  return `Connected — ${templates} template(s), ${running} of ${max} workspaces running.`;
+  const base = `Connected — ${templates} template(s), ${running} of ${max} workspaces running.`;
+  // The token's own expiry (cms/labs/coder-token, editor); a failed read
+  // leaves the sentence as it was rather than hiding a working Coder.
+  const expiry = await getJSON('cms/labs/coder-token').catch(() => null);
+  return `${base}${describeTokenExpiry(expiry)}`;
 }
 
 async function testCloudPricing() {

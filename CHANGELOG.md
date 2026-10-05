@@ -19,6 +19,20 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The Coder status token's expiry on the Integrations card, so no
+  calendar is needed (#763).** `CODER_STATUS_TOKEN` is made with a one-year
+  lifetime and nothing renews it. `readTokenExpiry` in
+  `lib/labs/coder-status.js` reads the token's own record from Coder
+  (`GET /api/v2/users/me/keys/{id}`; the id is the token's part before the
+  dash) and `GET cms/labs/coder-token` (editor) answers the expiry, the days
+  left and whether that is inside the 30-day warning window. The Hybrid Lab
+  card's test ends `Status token expires on <day> (<n> days)`, goes red
+  inside the window or when Coder refuses the token, and — for a token made
+  before the `api_key:read` scope, which is what lets a token read its own
+  record — says `expiry unknown: add the api_key:read scope at the next
+  renewal`. The README's create line carries the scope. Tests: the key id
+  off the token, the record read and both outcomes of the window, the five
+  reasons, the guard, and the card's sentences.
 - **Ambassador hub: membership status and a direct application-state select
   on Settings, documents archived on an application (owner request
   2026-10-05).** Each program carries a `membershipStatus` — Not a member /

@@ -7,10 +7,14 @@ import {
   CODER_TIMEOUT_MS,
   DEFAULT_CODER_MAX_WORKSPACES,
   MAX_TEMPLATES,
+  TOKEN_RENEW_WARNING_DAYS,
+  TOKEN_SCOPE_FOR_EXPIRY,
   createCoderStatusHandlers,
   readCoderConfig,
   readMaxWorkspaces,
   readSetting,
+  readTokenExpiry,
+  tokenKeyId,
 } from './coder-status.js';
 
 const NOW = Date.parse('2026-09-25T12:00:00Z');
@@ -19,6 +23,7 @@ const ENV = {
   CODER_STATUS_TOKEN: 'read-only-token',
   CODER_MAX_WORKSPACES: '5',
 };
+const ENV_NO_TOKEN = { CODER_URL: 'https://coder.lab.example/', CODER_MAX_WORKSPACES: '5' };
 const V1 = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 const V2 = '11111111-2222-4333-8444-555555555555';
 
@@ -388,5 +393,84 @@ describe('GET /api/public/labs/coder-status', () => {
     expect(res.status).toBe(500);
     expect(body(res)).toEqual({ error: 'Failed to read Coder status' });
     expect(error).toHaveBeenCalled();
+  });
+});
+
+describe('the status token\'s own expiry (#763)', () => {
+  const KEY_ENV = { ...ENV, CODER_STATUS_TOKEN: 'AbCdEf1234-s3cr3ts3cr3t' };
+  const keyPath = '/api/v2/users/me/keys/AbCdEf1234';
+  const guardAs = (error = null) => ({
+    requireRole: vi.fn(async () => (error ? { error } : { user: { oid: 'u1' }, role: 'editor' })),
+  });
+  const config = () => readCoderConfig(KEY_ENV);
+
+  it('reads the key id off the token, and nothing off a value that is not a Coder key', () => {
+    expect(tokenKeyId('AbCdEf1234-s3cr3t')).toBe('AbCdEf1234');
+    expect(tokenKeyId('  AbCdEf1234-s3cr3t\n')).toBe('AbCdEf1234');
+    expect(tokenKeyId('read-only-token-with-dashes')).toBe('');
+    expect(tokenKeyId('nodash')).toBe('');
+    expect(tokenKeyId('')).toBe('');
+  });
+
+  it('answers the expiry, days left and renewSoon from the key record, with the token in the header', async () => {
+    const expires = new Date(NOW + 200 * 86_400_000).toISOString();
+    const fetchImpl = coderFetch({
+      [keyPath]: { id: 'AbCdEf1234', expires_at: expires, token_name: 'hcw-status', scopes: ['template:read', 'workspace:read', 'api_key:read'] },
+    });
+    const out = await readTokenExpiry({ fetchImpl, config: config(), context, now: () => NOW });
+    expect(out).toEqual({
+      known: true,
+      expiresAt: expires,
+      daysLeft: 200,
+      renewSoon: false,
+      tokenName: 'hcw-status',
+      scopes: ['template:read', 'workspace:read', 'api_key:read'],
+    });
+    const call = fetchImpl.calls.find(({ url }) => url.endsWith(keyPath));
+    expect(call.options.headers['Coder-Session-Token']).toBe('AbCdEf1234-s3cr3ts3cr3t');
+
+    const soon = new Date(NOW + (TOKEN_RENEW_WARNING_DAYS - 1) * 86_400_000).toISOString();
+    const near = await readTokenExpiry({
+      fetchImpl: coderFetch({ [keyPath]: { expires_at: soon } }),
+      config: config(),
+      context,
+      now: () => NOW,
+    });
+    expect(near).toMatchObject({ known: true, daysLeft: TOKEN_RENEW_WARNING_DAYS - 1, renewSoon: true, tokenName: null, scopes: [] });
+  });
+
+  it('says why when it cannot: no token, not a key, the scope (403), refused (401), a failure', async () => {
+    expect(await readTokenExpiry({ fetchImpl: vi.fn(), config: readCoderConfig(ENV_NO_TOKEN), context })).toEqual({ known: false, reason: 'unset' });
+    expect(await readTokenExpiry({ fetchImpl: vi.fn(), config: readCoderConfig(ENV), context })).toEqual({ known: false, reason: 'shape' });
+    const refusedBy = (status) => coderFetch({ [keyPath]: () => ({ ok: false, status, json: async () => ({}) }) });
+    expect(await readTokenExpiry({ fetchImpl: refusedBy(403), config: config(), context })).toEqual({ known: false, reason: 'scope', scope: TOKEN_SCOPE_FOR_EXPIRY });
+    expect(await readTokenExpiry({ fetchImpl: refusedBy(401), config: config(), context })).toEqual({ known: false, reason: 'refused' });
+    const warn = vi.fn();
+    expect(await readTokenExpiry({ fetchImpl: refusedBy(500), config: config(), context: { warn } })).toEqual({ known: false, reason: 'error' });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('could not be read'));
+    expect(await readTokenExpiry({ fetchImpl: coderFetch({ [keyPath]: { expires_at: 'soon' } }), config: config(), context })).toEqual({ known: false, reason: 'shape' });
+  });
+
+  it('GET cms/labs/coder-token: editor only, unconfigured without a URL, the token read otherwise, never cached', async () => {
+    const denied = { status: 403, headers: {}, body: '{}' };
+    const h = createCoderStatusHandlers({ store: makeStore(), guard: guardAs(denied), fetchImpl: vi.fn(), env: KEY_ENV, now: () => NOW });
+    expect(await h.getCoderToken(request(), context)).toBe(denied);
+
+    const unconfigured = createCoderStatusHandlers({ store: makeStore(), guard: guardAs(), fetchImpl: vi.fn(), env: {}, now: () => NOW });
+    expect(body(await unconfigured.getCoderToken(request(), context))).toEqual({ configured: false });
+
+    const expires = new Date(NOW + 10 * 86_400_000).toISOString();
+    const fetchImpl = coderFetch({ [keyPath]: { expires_at: expires } });
+    const res = await createCoderStatusHandlers({ store: makeStore(), guard: guardAs(), fetchImpl, env: KEY_ENV, now: () => NOW }).getCoderToken(request(), context);
+    expect(res.status).toBe(200);
+    expect(res.headers['Cache-Control']).toBeUndefined();
+    expect(body(res)).toEqual({
+      configured: true,
+      warningDays: TOKEN_RENEW_WARNING_DAYS,
+      token: { known: true, expiresAt: expires, daysLeft: 10, renewSoon: true, tokenName: null, scopes: [] },
+    });
+    // Without a guard the read refuses to run rather than answer anonymously.
+    const unguarded = createCoderStatusHandlers({ store: makeStore(), fetchImpl, env: KEY_ENV, now: () => NOW });
+    expect((await unguarded.getCoderToken(request(), context)).status).toBe(500);
   });
 });
