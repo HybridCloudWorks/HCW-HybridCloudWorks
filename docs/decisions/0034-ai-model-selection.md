@@ -1,6 +1,6 @@
 # ADR 0034: AI model selection — one priority list, per-task overrides, a live model catalogue
 
-**Status:** Proposed 2026-10-04 (owner brief that day; design only, no code in this record)
+**Status:** Accepted 2026-10-04 (owner brief and acceptance the same day; design only). Implementation: #856 (task registry and recommendations), #857 (model catalogue and refresh), #858 (selection v2, resolver, migration), #859 (Priority list and Tasks tab), #860 (audio and image tasks), on the board at P2, slice 5 at P3.
 
 ## Context
 
@@ -352,6 +352,7 @@ models that a task or the priority list still names.
   of the selection document).
 - #701 (NVIDIA, per-feature placement), #849 and #850 (Foundry, the second
   per-feature provider and the screenshots that prompted this record).
+- Implementation slices, in dependency order: #856, #857, #858, #859, #860.
 - `functions/src/lib/ai/router.js`, `ai-config.js`, `features-catalogue.js`,
   `routing-table.js`; `frontend/src/lib/aiEngine/seed.js`,
   `frontend/src/components/admin/ai-engine/RoutingTab.jsx`.
