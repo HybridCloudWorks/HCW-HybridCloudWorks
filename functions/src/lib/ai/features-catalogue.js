@@ -6,6 +6,8 @@
  * case are in the ai-config.js header.
  */
 
+import { AI_TASKS } from './tasks.js';
+
 /**
  * The features an administrator can switch off, and what actually stops when
  * they do. Every entry corresponds to a real call site — this catalogue is not
@@ -14,87 +16,19 @@
  *
  * `route` is the human answer to "what will I notice?", which is the question
  * someone is holding when they look at a toggle.
+ *
+ * Derived from the task registry (tasks.js, ADR 0034 slice 1): a feature is a
+ * task's label, description and route, under the same id. One list, kept in
+ * one place; the modality, needs and recommendation live on the task.
  */
-export const AI_FEATURES = Object.freeze({
-  inspector: Object.freeze({
-    label: 'Content Inspector',
-    description: 'Generates title, summary and tags for an ingested article.',
-    route: 'Article ingest (change feed) and the Inspect action in the portal.',
-  }),
-  altText: Object.freeze({
-    label: 'Image alt text',
-    description: 'Writes alt text for images found on an inspected page.',
-    route: 'Runs with the inspector; accessibility text on article images.',
-  }),
-  critique: Object.freeze({
-    label: 'Inspector critique',
-    description: 'Second pass that judges and improves the inspector output.',
-    route: 'Article ingest. Turning it off keeps the inspector, drops the review.',
-  }),
-  forgeDrafting: Object.freeze({
-    label: 'Forge drafting',
-    description: 'Writes the draft body for a Content Forge job.',
-    route: 'Forge jobs and the nightly Auto-Forge timer. This is the writing.',
-  }),
-  forgeGrading: Object.freeze({
-    label: 'Forge grading',
-    description: 'Scores a forged draft before it is offered for publication.',
-    route: 'Forge jobs. Off means drafts arrive ungraded, not that they stop.',
-  }),
-  telegram: Object.freeze({
-    label: 'Telegram assistant',
-    description: 'Free-form replies to messages sent to the Telegram bot.',
-    route: 'The bot answers commands either way; only AI replies stop.',
-  }),
-  voiceCalibration: Object.freeze({
-    label: 'Voice calibration',
-    description: 'Suggests voice-profile additions from recent published posts.',
-    route: 'The Calibrate button in Forge Studio. Suggestions only, never auto-applied.',
-  }),
-  socialCaption: Object.freeze({
-    label: 'Social captions',
-    description: 'Writes a social-media caption for a published article.',
-    route: 'The Social Hub Generate button and the on-publish auto-queue to Publer.',
-  }),
-  listenAndLearn: Object.freeze({
-    label: 'Listen & Learn scripts',
-    description: 'Scripts a two-host study episode for one skill area of a certification guide.',
-    route:
-      'The Generate button on the Listen & Learn page, and Regenerate on one area. Off means the run fails before the model is called; existing episodes stay.',
-  }),
-  sourceGrounding: Object.freeze({
-    label: 'Source grounding',
-    description: 'Reads owner-supplied web pages and YouTube videos to ground a generation.',
-    route: 'Listen & Learn source-grounded episodes (#433).',
-  }),
-  podcastScript: Object.freeze({
-    label: 'Podcast transcripts',
-    description: 'Scripts a two-host podcast episode from a published article.',
-    route:
-      'The Podcast transcript action on the Publish page. Off means the job fails before the model is called; existing transcripts stay.',
-  }),
-  pricingExplain: Object.freeze({
-    label: 'Pricing explanations',
-    description:
-      'Explains a priced scenario on the public cloud pricing comparison: which provider is cheapest and what could flip it.',
-    route:
-      'The "Explain this number" button on /tools/comparison — the one anonymous AI call. Off answers "Explanations are not available" before any quota is counted; cached explanations still serve (#613).',
-  }),
-  forgeAssist: Object.freeze({
-    label: 'Forge Studio assist',
-    description:
-      'Outlines, expands, condenses, rewrites, retitles or fact-checks a draft from an action in Forge Studio.',
-    route:
-      'The AI actions on the Draft tab in Forge Studio (ADR 0033). Off means each button answers that the feature is switched off; the draft text is untouched.',
-  }),
-  landingZoneExplain: Object.freeze({
-    label: 'Landing zone explanations',
-    description:
-      'Explains one Landing Zone Builder component for the learner’s selection and options: why it matters, and what changes without it.',
-    route:
-      'The "Explain this component" button on /tools/landing-zone — the same anonymous explain route, cache and quota as pricing explanations, as kind landing-zone. Off answers "Explanations are not available" before any quota is counted; cached explanations still serve (#669).',
-  }),
-});
+export const AI_FEATURES = Object.freeze(
+  Object.fromEntries(
+    Object.entries(AI_TASKS).map(([id, task]) => [
+      id,
+      Object.freeze({ label: task.label, description: task.description, route: task.route }),
+    ])
+  )
+);
 
 export const FEATURE_NAMES = Object.freeze(Object.keys(AI_FEATURES));
 

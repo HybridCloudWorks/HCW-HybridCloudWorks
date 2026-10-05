@@ -352,9 +352,9 @@ describe('cost table (ported from upstream ai-model-router.cost.test.js)', () =>
     expect(getCostEstimate('nope', 'x', 1_000_000, 1_000_000)).toBe(0);
   });
 
-  it('has an explicit row for every Anthropic, Gemini, NVIDIA and Foundry default (OpenAI gpt-5 rates are deliberately unpriced)', () => {
+  it('has an explicit row for every provider default', () => {
     const r = createAiRouter({ env: {}, log: quiet });
-    for (const provider of ['anthropic', 'gemini', 'nvidia', 'foundry']) {
+    for (const provider of ['anthropic', 'gemini', 'nvidia', 'foundry', 'openai']) {
       for (const purpose of Object.keys(DEFAULT_MODEL_TABLE[provider])) {
         const model = r.defaultModelFor(provider, purpose);
         expect(
@@ -2073,18 +2073,19 @@ describe('every call records usage once (ADR 0033)', () => {
   });
 });
 
-describe('unpriced models (ADR 0033)', () => {
-  it('gpt-5-mini and gpt-5-nano cost 0 and are reported unpriced, instead of being charged at gpt-4o', () => {
-    expect(isPriced('openai', 'gpt-5-mini')).toBe(false);
-    expect(isPriced('openai', 'gpt-5-nano')).toBe(false);
-    expect(getCostEstimate('openai', 'gpt-5-mini', 1_000_000, 1_000_000)).toBe(0);
+describe('unpriced models (ADR 0033) and the GPT-5 rates (2026-10-05)', () => {
+  it('gpt-5-mini and gpt-5-nano price at the published rates the owner confirmed on 2026-10-05', () => {
+    expect(isPriced('openai', 'gpt-5-mini')).toBe(true);
+    expect(isPriced('openai', 'gpt-5-nano')).toBe(true);
+    expect(getCostEstimate('openai', 'gpt-5-mini', 1_000_000, 1_000_000)).toBeCloseTo(2.25, 6);
+    expect(getCostEstimate('openai', 'gpt-5-nano', 1_000_000, 1_000_000)).toBeCloseTo(0.45, 6);
     // A model with no row at all still prices at the provider default.
     expect(isPriced('openai', 'gpt-4.1-something')).toBe(true);
     expect(getCostEstimate('openai', 'gpt-4.1-something', 1_000_000, 0)).toBe(5);
     expect(isPriced('gemini', 'gemini-3.6-flash')).toBe(true);
   });
 
-  it('the usage entry a call pushes carries the flag', async () => {
+  it('the usage entry a call pushes is priced, and carries no flag', async () => {
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
@@ -2107,10 +2108,8 @@ describe('unpriced models (ADR 0033)', () => {
       feature: 'telegram',
       usageOut,
     });
-    expect(usageOut[0]).toMatchObject({
-      model: 'gpt-5-nano',
-      costUsd: 0,
-      unpriced: true,
-    });
+    expect(usageOut[0]).toMatchObject({ model: 'gpt-5-nano' });
+    expect(usageOut[0].costUsd).toBeCloseTo(0.00000045, 12);
+    expect(usageOut[0]).not.toHaveProperty('unpriced');
   });
 });
