@@ -48,6 +48,9 @@ export const SOURCE_LABELS = {
   'podcast:sample': 'Podcast voice — live check',
   admin_test: 'AI Engine — Test',
   'ai-engine:probe': 'AI Engine — weekly check',
+  // Replicate image generation (2026-10-05): one row per output image, priced per image.
+  'images:cover': 'Cover images (Replicate)',
+  'images:manual': 'Images made on the Images pages (Replicate)',
   // A router call whose site named no feature (ADR 0033); the call-sites
   // test keeps production code from writing it.
   'ai:unspecified': 'AI — task not named',
