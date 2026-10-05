@@ -45,14 +45,21 @@ function refreshSnapshot(state) {
 }
 
 /** The first read on mount; its cleanup supersedes whatever is in flight. */
-function startSnapshot(state) {
-  readSnapshot(state, ++state.generation.current, false);
+function startSnapshot(state, fresh) {
+  readSnapshot(state, ++state.generation.current, fresh);
   return () => {
     state.generation.current += 1;
   };
 }
 
-export default function usePublicSnapshot() {
+/**
+ * @param {{ fresh?: boolean }} [options] `fresh` makes the FIRST read ask past
+ *   the caches too: the page passes it once a publish has landed this
+ *   session, so a tab mounted after Update Cert Catalog reads the snapshot
+ *   that publish wrote, in one request rather than a cached read and a
+ *   refresh (#871 review).
+ */
+export default function usePublicSnapshot({ fresh = false } = {}) {
   // undefined: not read yet; null: no snapshot has ever been published.
   const [snapshot, setSnapshot] = useState(undefined);
   const [pending, setPending] = useState(true);
@@ -61,7 +68,10 @@ export default function usePublicSnapshot() {
 
   const state = useMemo(() => ({ setSnapshot, setPending, setError, generation }), []);
 
-  useEffect(() => startSnapshot(state), [state]);
+  // `fresh` is read once, at mount: a later change is a publish during
+  // this mount, which the tab answers with `refresh`.
+  const initialFresh = useRef(fresh);
+  useEffect(() => startSnapshot(state, initialFresh.current), [state]);
   const refresh = useCallback(() => refreshSnapshot(state), [state]);
 
   return {

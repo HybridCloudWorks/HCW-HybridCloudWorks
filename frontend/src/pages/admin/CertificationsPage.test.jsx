@@ -254,7 +254,7 @@ describe('the duty tabs', () => {
   it('Publishing shows the last publish and what changed since, and re-reads after a publish', async () => {
     searchParams = 'tab=publishing';
     postJSON.mockResolvedValue({ certifications: 2, speakerevents: 0, generatedAt: 'now' });
-    render(<CertificationsPage />);
+    const { rerender } = render(<CertificationsPage />);
     expect(await panel().findByText('Not yet public (1)')).toBeInTheDocument();
     expect(panel().getByText('Solutions Architect · AWS')).toBeInTheDocument();
     expect(fetchPublicSnapshot).toHaveBeenCalledWith('certifications', { fresh: false });
@@ -270,6 +270,18 @@ describe('the duty tabs', () => {
     await waitFor(() =>
       expect(fetchPublicSnapshot).toHaveBeenLastCalledWith('certifications', { fresh: true })
     );
+    expect(fetchPublicSnapshot).toHaveBeenCalledTimes(2);
+
+    // Leave and come back (the URL write landed, as the router would): one
+    // read, fresh — not a cached read plus a refresh.
+    fetchPublicSnapshot.mockClear();
+    searchParams = 'tab=catalog';
+    rerender(<CertificationsPage />);
+    expect(selectedTab()).toBe('Catalog');
+    searchParams = 'tab=publishing';
+    rerender(<CertificationsPage />);
+    await waitFor(() => expect(fetchPublicSnapshot).toHaveBeenCalledTimes(1));
+    expect(fetchPublicSnapshot).toHaveBeenLastCalledWith('certifications', { fresh: true });
   });
 });
 

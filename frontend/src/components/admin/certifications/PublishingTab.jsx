@@ -13,7 +13,7 @@
  * page). The page bumps `publishCount` when a publish lands and this tab
  * re-reads the snapshot past every cache.
  */
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -121,12 +121,16 @@ function ChangesUnavailable({ published }) {
 }
 
 export default function PublishingTab({ certs, publishCount = 0 }) {
-  const published = usePublicSnapshot();
-  // Re-read after a publish from the header; `refresh` is a stable callback
-  // (usePublicSnapshot), so the effect fires once per publish.
+  // Mounted after a publish this session: the first read is a fresh one.
+  // A publish DURING this mount is a count change, answered by one refresh;
+  // the count seen at mount is remembered so a remount does not read twice.
+  const published = usePublicSnapshot({ fresh: publishCount > 0 });
   const { refresh } = published;
+  const seenCount = useRef(publishCount);
   useEffect(() => {
-    if (publishCount > 0) refresh();
+    if (publishCount === seenCount.current) return;
+    seenCount.current = publishCount;
+    refresh();
   }, [publishCount, refresh]);
   return (
     <div className="space-y-4">
