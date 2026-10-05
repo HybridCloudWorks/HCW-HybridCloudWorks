@@ -240,37 +240,47 @@ const SNAPSHOT_COLLECTIONS = ['certifications', 'speakerevents'];
  * @param {{ blobExists: (path: string) => Promise<boolean>, patch: ((id: string, changes: object) => Promise<unknown>)|null, log: object }} deps
  * @returns {Promise<{ rows: object[], repointed: number, missing: string[] }>}
  */
-async function repointLegacyBadges(rows, { blobExists, patch, log }) {
+async function repointLegacyBadges(rows, deps) {
   const out = [];
   const missing = [];
   let repointed = 0;
   for (const row of rows) {
-    const paths = legacyBadgePathsOf(row);
-    if (paths.length === 0) {
-      out.push(row);
-      continue;
-    }
-    let current = row;
-    for (const path of paths) {
-      if (!(await blobExists(path))) {
-        missing.push(`${row.name || row.Name || row.id}: ${path}`);
-        continue;
-      }
-      const { doc, changes } = repointCertification(current, path);
-      if (Object.keys(changes).length === 0) continue;
-      current = doc;
-      repointed += 1;
-      if (patch) {
-        try {
-          await patch(row.id, changes);
-        } catch (error) {
-          log?.warn?.(`[publishSnapshot] could not persist the re-pointed badge of ${row.id}: ${error?.message || error}`);
-        }
-      }
-    }
-    out.push(current);
+    const outcome = await repointRow(row, deps);
+    out.push(outcome.row);
+    repointed += outcome.repointed;
+    missing.push(...outcome.missing);
   }
   return { rows: out, repointed, missing };
+}
+
+/** One row: every legacy path it names, checked and rewritten in turn. */
+async function repointRow(row, { blobExists, patch, log }) {
+  const missing = [];
+  let current = row;
+  let repointed = 0;
+  for (const path of legacyBadgePathsOf(row)) {
+    if (!(await blobExists(path))) {
+      missing.push(`${row.name || row.Name || row.id}: ${path}`);
+      continue;
+    }
+    const { doc, changes } = repointCertification(current, path);
+    if (Object.keys(changes).length === 0) continue;
+    current = doc;
+    repointed += 1;
+    if (patch) await persistRepoint(patch, row.id, changes, log);
+  }
+  return { row: current, repointed, missing };
+}
+
+/** Persist a rewrite; a failure is logged, never fatal — the publish still carries the URL. */
+async function persistRepoint(patch, id, changes, log) {
+  try {
+    await patch(id, changes);
+  } catch (error) {
+    log?.warn?.(
+      `[publishSnapshot] could not persist the re-pointed badge of ${id}: ${error?.message || error}`
+    );
+  }
 }
 
 /**
