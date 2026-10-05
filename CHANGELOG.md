@@ -3007,6 +3007,15 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **`06-seed-secret.ps1` no longer reports a refused write as done.** On
+  2026-10-05 it printed `ANTHROPIC-API-KEY  set` over a `ForbiddenByRbac`
+  from `az` (the data-plane role grant had been skipped), then crashed on
+  the read-back with a null-argument error, and the operator read a seed
+  that never happened as complete. `az` reports a refused call on stderr
+  and exits non-zero without throwing, so both the write and the read-back
+  now check `$LASTEXITCODE`, stop the run, and name the missing role as the
+  likely cause; the firewall window still closes in the `finally` block.
+
 - **GPT-5 models refused every OpenAI and Foundry call over `temperature`
   (#849).** The owner's first Test of the Foundry card, after the apply and
   deploy, reached the account and was authorised, then failed with
