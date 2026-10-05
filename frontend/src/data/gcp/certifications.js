@@ -90,10 +90,44 @@
  * the alarm takes over again. `DATA_AS_OF` is deliberately NOT bumped — one
  * row was re-read, not all fifteen credentials.
  *
+ *
+ * FULL RE-READ 2026-10-05 (owner request: review every Learn portal for exams
+ * newly in beta or expired). All fifteen credential pages and the index were
+ * live-fetched; the index still lists fifteen in the same three tiers, still
+ * labelled "Agentic Architect (Beta)" for PAA, and every H1 matched its row's
+ * title. No retirement, rename or new credential. Two things moved:
+ *
+ *   Professional Agentic Architect — Google has dated the next step. Index
+ *     and page banner: "Professional Agentic Architect beta registration is
+ *     closed. GA registration opens November 2." Button: "GA registration
+ *     opens Nov 2". The beta FAQ: "The exam GA will be available to the
+ *     public in mid-November.", "a 2-hour session with official results
+ *     provided in 7–10 business days", "$200 USD", and the beta's results
+ *     "at the end of October" with the required labs due by December 31,
+ *     2026. That is a REGISTRATION day, not an exam-available day — setting
+ *     `availableDate: '2026-11-02'` would flip the row to `active` on a day
+ *     nobody can sit the exam — so the row stays `upcoming` with no date and
+ *     the description carries the two facts. Set `availableDate` when Google
+ *     names the exam day (mid-November is not a date).
+ *     https://cloud.google.com/learn/certification/agentic-architect
+ *     https://support.google.com/cloud-certification/answer/18080541
+ *   Professional Machine Learning Engineer — content, not status: "This exam
+ *     was updated to reflect the transition from Vertex AI to Gemini
+ *     Enterprise Agent Platform, updates to Google Cloud's data and analytics
+ *     stack, and prioritizes Google Cloud native solutions." The row's
+ *     description and topics named Vertex AI; they now name what the exam
+ *     guide does. The index carries the same note for every exam ("Our exams
+ *     are being updated to reflect product updates announced at Google Cloud
+ *     Next '26"), so PAA's "Vertex AI Agents" topic follows too.
+ *     https://cloud.google.com/learn/certification/machine-learning-engineer
+ *
+ * Google's beta-exams help page names no running beta. All fifteen rows were
+ * re-read, so `DATA_AS_OF` moves for the first time since 2026-09-10.
+ *
  * `status` and any dates are read through `@/lib/certStatus` at render time;
  * `src/data/education-catalogues.test.js` fails when a dated row is past.
  */
-export const DATA_AS_OF = '2026-09-10';
+export const DATA_AS_OF = '2026-10-05';
 
 export const DATA_SOURCE = {
   label: 'Google Cloud certifications',
@@ -289,8 +323,14 @@ export const certifications = [
     level: 'Professional',
     status: 'active',
     description:
-      'Design, build, and productionize ML models using Vertex AI and MLOps on Google Cloud.',
-    topics: ['Vertex AI', 'TFX', 'MLOps', 'Feature Store', 'Pipelines'],
+      'Design, build, and productionize ML and generative AI solutions on Google Cloud with Gemini Enterprise Agent Platform, MLOps and the data and analytics stack.',
+    topics: [
+      'Gemini Enterprise Agent Platform',
+      'MLOps',
+      'Pipelines',
+      'Model Evaluation',
+      'Data & Analytics',
+    ],
     hours: 55,
     prepTime: '~5 months',
     featured: false,
@@ -319,8 +359,14 @@ export const certifications = [
     level: 'Professional',
     status: 'upcoming',
     description:
-      'Design, build, deploy and operate agentic systems on Google Cloud. The beta closed on September 30, 2026 and Google has not yet dated the GA exam. The beta was three hours, ~80 questions, $120 at the beta discount against a $200 retail price, English only, with a one-year validity rather than the usual two.',
-    topics: ['Agentic Systems', 'Vertex AI Agents', 'Orchestration', 'Evaluation', 'Operations'],
+      'Design, build, deploy and operate agentic systems on Google Cloud. The beta closed on September 30, 2026; registration for the GA exam opens November 2, 2026 and Google expects the exam itself in mid-November as a two-hour, $200 exam with hands-on labs to follow a pass. The beta was three hours, ~80 questions, $120 at the beta discount, English only, with a one-year validity rather than the usual two.',
+    topics: [
+      'Agentic Systems',
+      'Gemini Enterprise Agent Platform',
+      'Orchestration',
+      'Evaluation',
+      'Operations',
+    ],
     hours: 50,
     prepTime: '~4 months',
     featured: false,
