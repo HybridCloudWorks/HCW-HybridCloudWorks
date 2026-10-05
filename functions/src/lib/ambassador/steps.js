@@ -143,7 +143,12 @@ const hasQuestions = (doc) =>
 const BACKFILL_FIELDS = [
   ['applicationQuestions', (stored, seed) => hasQuestions(seed) && !hasQuestions(stored)],
   ['scoring', (stored, seed) => Boolean(seed.scoring) && !stored.scoring],
-  ['parentProgramId', (stored, seed) => Boolean(seed.parentProgramId) && !stored.parentProgramId],
+  // Absent, not falsy: the owner clearing "Additional to" stores an explicit
+  // null, and that is an edit to keep, not a gap to fill (#881 review).
+  [
+    'parentProgramId',
+    (stored, seed) => Boolean(seed.parentProgramId) && !('parentProgramId' in stored),
+  ],
 ];
 
 /**
@@ -268,9 +273,17 @@ export function stamped(ctx, kind, doc, auth) {
 
 /**
  * A program's `parentProgramId`, checked against the catalogue: the parent
- * must exist, must not be the program itself, and must not have a parent of
- * its own (one level — additional requirements, not a tree). Null or an
- * empty string clears it. Returns the 400 to answer, or null when fine.
+ * must exist, must not be the program itself, must not have a parent of its
+ * own, and the program being parented must not have children of its own
+ * (one level — additional requirements, not a tree). Null or an empty
+ * string clears it. Returns the 400 to answer, or null when fine.
+ *
+ * Two super_admin PATCHes interleaving inside one read-then-write window
+ * could still both pass (A under B and B under A); the catalogue has one
+ * editor and no lock is taken for that. The readers are built so the
+ * outcome is visible rather than silent: `programsInPlay` (frontend model)
+ * lists a program whose parent is itself parented at top level, so nothing
+ * disappears, and the next PATCH on either row is refused by the rules here.
  */
 export async function checkParentProgram(ctx, value, selfId = null) {
   if (!('parentProgramId' in value)) return null;
@@ -280,13 +293,19 @@ export async function checkParentProgram(ctx, value, selfId = null) {
   return reason ? json(400, { error: reason }) : null;
 }
 
-/** The sentence refusing `parentId` as a parent, or null when it may be one. */
+/** The sentence refusing `parentId` as a parent of `selfId`, or null when it may be one. */
 async function parentRefusal(ctx, parentId, selfId) {
   if (selfId && parentId === selfId) return 'A program cannot be additional to itself';
   const parent = await ctx.readKind('program', parentId);
   if (!parent) return `Unknown parentProgramId ${parentId}`;
   if (parent.parentProgramId) {
     return `${parent.name} is itself additional to another program; one level only`;
+  }
+  if (selfId) {
+    const children = (await ctx.listKind('program')).filter((p) => p.parentProgramId === selfId);
+    if (children.length > 0) {
+      return `${children.map((c) => c.name).join(', ')} ${children.length === 1 ? 'is' : 'are'} already additional to this program; one level only`;
+    }
   }
   return null;
 }

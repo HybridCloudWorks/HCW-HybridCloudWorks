@@ -358,10 +358,17 @@ export function childProgramsOf(programs, parentId) {
  */
 export function programsInPlay(programs) {
   const byId = programById(programs);
-  const top = (programs || []).filter((p) => !p.parentProgramId);
+  // Top level is also where a program lands when its parent is itself
+  // parented (a chain or a cycle the API's one-level rule did not catch in a
+  // race): shown, not hidden, so the catalogue can be repaired on Settings.
+  const topLevel = (p) =>
+    !p.parentProgramId || Boolean(byId.get(p.parentProgramId)?.parentProgramId);
+  const top = (programs || []).filter(topLevel);
   return top.flatMap((parent) => [
     parent,
-    ...childProgramsOf(programs, parent.id).filter((child) => programGate(child, byId).unlocked),
+    ...childProgramsOf(programs, parent.id)
+      .filter((child) => !topLevel(child))
+      .filter((child) => programGate(child, byId).unlocked),
   ]);
 }
 

@@ -1179,5 +1179,40 @@ describe('additional programs (owner request 2026-10-05): MCT Regional Lead unde
     expect(seedBackfillFor(stored, seed)).toEqual({ parentProgramId: MCT });
     expect(seedBackfillFor({ ...seed, seeded: true }, seed)).toBeNull();
     expect(seedBackfillFor({ ...stored, parentProgramId: 'program-other' }, seed)).toBeNull();
+    // An explicit clear (null) is the owner's edit, not a gap: never refilled.
+    expect(seedBackfillFor({ ...stored, parentProgramId: null }, seed)).toBeNull();
+  });
+
+  it('a cleared parent stays cleared on the next catalogue read (#881 review)', async () => {
+    const { h, store } = await seeded();
+    const cleared = await h.patchProgram(
+      makeRequest({ params: { id: RL }, body: { parentProgramId: '' } }),
+      context
+    );
+    expect(cleared.status).toBe(200);
+    const listed = parse(await h.listPrograms(makeRequest(), context)).items;
+    expect(listed.find((p) => p.id === RL).parentProgramId).toBeNull();
+    expect(store.data.get('ambassador').get(RL).parentProgramId).toBeNull();
+  });
+
+  it('refuses a parent on a program that already has children (#881 review)', async () => {
+    const { h, store } = await seeded();
+    // Regional Lead is under MCT, so MCT cannot go under the MVP.
+    const res = await h.patchProgram(
+      makeRequest({ params: { id: MCT }, body: { parentProgramId: 'program-microsoft-mvp' } }),
+      context
+    );
+    expect(res.status).toBe(400);
+    expect(parse(res).error).toBe(
+      'MCT Regional Lead is already additional to this program; one level only'
+    );
+    expect(store.data.get('ambassador').get(MCT).parentProgramId).toBeUndefined();
+    // Once the child is detached, the same move is allowed.
+    await h.patchProgram(makeRequest({ params: { id: RL }, body: { parentProgramId: null } }), context);
+    const moved = await h.patchProgram(
+      makeRequest({ params: { id: MCT }, body: { parentProgramId: 'program-microsoft-mvp' } }),
+      context
+    );
+    expect(moved.status).toBe(200);
   });
 });
