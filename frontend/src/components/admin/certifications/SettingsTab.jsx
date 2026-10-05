@@ -20,7 +20,8 @@ function ImageRulesCard() {
       <CardContent>
         <ul className="list-disc space-y-1 pl-5 text-sm">
           <li>
-            {IMAGE_RULES.formats} (any image type), at most {IMAGE_RULES.maxLabel}.
+            {IMAGE_RULES.formats} (any image type), at most {IMAGE_RULES.maxLabel};{' '}
+            {IMAGE_RULES.stored}.
           </li>
           <li>
             Uploaded through the Azure API to Blob Storage, under the certification&apos;s id.

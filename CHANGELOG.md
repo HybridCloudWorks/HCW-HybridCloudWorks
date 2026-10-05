@@ -19,6 +19,21 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Certification badges are normalised on upload: PNG or SVG in, a
+  512 × 512 PNG out (owner request 2026-10-05).** The Settings tab promised
+  "PNG / JPG / SVG" while the upload route refused SVG into `certifications`
+  (a publicly served container, where an SVG is a scriptable document), and a
+  PNG was stored at whatever size the issuer shipped. `lib/badge-image.js`
+  decodes every badge with sharp and re-encodes a transparent 512-pixel
+  square (contained, EXIF rotation applied, metadata dropped); an SVG is
+  rasterised at 300 dpi and the PNG is what is stored, which is why the
+  route now accepts the type there. The stored path takes the `.png`
+  extension and the response's `path`/`url` name it; bytes that do not
+  decode are a 415 "Not a decodable image" and nothing is written. Other
+  containers are unchanged (SVG still refused into `blogs`/`covers`, `content`
+  stored as sent). `admin-uploads.test.js` pins the SVG, JPEG, undecodable
+  and as-sent cases with real decoding; `sharp` joins the functions
+  dependencies (prebuilt linux-x64 in the lockfile for the deploy runner).
 - **AI Engine: audio and image tasks join the Tasks table (ADR 0034 slice 5,
   #860).** The last slice of the ADR: the non-text paths are tasks of the
   same registry and selection document as the text ones, and their settings
