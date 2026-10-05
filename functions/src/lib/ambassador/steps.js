@@ -135,13 +135,15 @@ const hasQuestions = (doc) =>
 /**
  * The fields a seed gained after it was stored that a stored seed may take
  * without losing an edit: the official `applicationQuestions` when the
- * document has none, and `scoring` when it has none. Each is a whole value
+ * document has none, `scoring` when it has none, and `parentProgramId` when
+ * the seed became additional to another program. Each is a whole value
  * the owner has never set (missing or empty), so filling it in cannot
  * overwrite anything; the field's own editor takes over from there.
  */
 const BACKFILL_FIELDS = [
   ['applicationQuestions', (stored, seed) => hasQuestions(seed) && !hasQuestions(stored)],
   ['scoring', (stored, seed) => Boolean(seed.scoring) && !stored.scoring],
+  ['parentProgramId', (stored, seed) => Boolean(seed.parentProgramId) && !stored.parentProgramId],
 ];
 
 /**
@@ -264,11 +266,42 @@ export function stamped(ctx, kind, doc, auth) {
   };
 }
 
-/** PATCH {kind}/{id}: the cleaned fields over the stored document, audited. */
-export function patchHandler(kind, { action, details }) {
+/**
+ * A program's `parentProgramId`, checked against the catalogue: the parent
+ * must exist, must not be the program itself, and must not have a parent of
+ * its own (one level — additional requirements, not a tree). Null or an
+ * empty string clears it. Returns the 400 to answer, or null when fine.
+ */
+export async function checkParentProgram(ctx, value, selfId = null) {
+  if (!('parentProgramId' in value)) return null;
+  const parentId = value.parentProgramId;
+  if (!parentId) value.parentProgramId = null;
+  const reason = parentId ? await parentRefusal(ctx, parentId, selfId) : null;
+  return reason ? json(400, { error: reason }) : null;
+}
+
+/** The sentence refusing `parentId` as a parent, or null when it may be one. */
+async function parentRefusal(ctx, parentId, selfId) {
+  if (selfId && parentId === selfId) return 'A program cannot be additional to itself';
+  const parent = await ctx.readKind('program', parentId);
+  if (!parent) return `Unknown parentProgramId ${parentId}`;
+  if (parent.parentProgramId) {
+    return `${parent.name} is itself additional to another program; one level only`;
+  }
+  return null;
+}
+
+/**
+ * PATCH {kind}/{id}: the cleaned fields over the stored document, audited.
+ * `check(ctx, loaded)` may answer a response to refuse the write after the
+ * body passed its validator — the program parent rule lives there.
+ */
+export function patchHandler(kind, { action, details, check = null }) {
   return async (ctx, request, auth) => {
     const loaded = await loadPatch(ctx, request, kind);
     if (loaded.error) return loaded.error;
+    const refused = check ? await check(ctx, loaded) : null;
+    if (refused) return refused;
     const updated = await ctx.store.patchDoc(CONTAINER, loaded.id, {
       ...loaded.updates,
       updatedAt: ctx.nowIso(),

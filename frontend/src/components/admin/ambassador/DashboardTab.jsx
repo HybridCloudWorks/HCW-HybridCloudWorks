@@ -19,6 +19,7 @@ import {
   ambassadorStatusInfo,
   expiringEvidence,
   programById,
+  programsInPlay,
   recentEvidence,
   recommendedActions,
   sourceLabel,
@@ -146,7 +147,7 @@ export default function DashboardTab({ hub, nav }) {
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4" role="group" aria-label="Overview">
             <Stat
               label="Programs"
-              value={programs.data.filter((p) => p.enabled !== false).length}
+              value={programsInPlay(programs.data).filter((p) => p.enabled !== false).length}
               hint={`${programs.data.length} in the catalogue`}
             />
             <Stat label="Pursued" value={pursued.length} hint="applications in progress" />

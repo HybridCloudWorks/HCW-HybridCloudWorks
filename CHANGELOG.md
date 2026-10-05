@@ -19,6 +19,25 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Ambassador hub: a program can be additional to another, and MCT
+  Regional Lead now is (owner request 2026-10-05).** A program may carry
+  `parentProgramId`; the seeded MCT Regional Lead names Microsoft Certified
+  Trainer, and a stored Regional Lead from before takes it on the next read
+  (`seedBackfillFor`). The child is shown, and its application may start,
+  only while the parent's membership is Active: the Programs tab lists it
+  as its own card right after the parent once that is so (and until then
+  the parent's card says what opens and when), the Settings row disables
+  its Application state with the reason, `POST cms/ambassador/applications`
+  answers 409 `PARENT_NOT_ACTIVE` otherwise, and `GET readiness/{id}`
+  reports the gate and counts evidence filed under the parent for the
+  child too. One level only: a parent must exist, be another program and
+  have no parent of its own (400). The Regional Lead seed gains the role's
+  requirements and expectations as application questions (nomination,
+  consecutive years, MCT-eligible certifications, Lounge and Regional Hub
+  activity, the term's commitments), from Microsoft's published role
+  description; the October form's own questions are not published and the
+  seed says to edit against them when the invitation arrives.
+
 - **The Coder status token's expiry on the Integrations card, so no
   calendar is needed (#763).** `CODER_STATUS_TOKEN` is made with a one-year
   lifetime and nothing renews it. `readTokenExpiry` in

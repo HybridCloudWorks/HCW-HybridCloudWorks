@@ -4,7 +4,7 @@
  * explanation says how the number was computed and that acceptance is the
  * program's decision, never this page's promise.
  */
-import { toCalendarDate } from './model.js';
+import { programGate, toCalendarDate } from './model.js';
 
 const DAY_MS = 86_400_000;
 
@@ -32,9 +32,13 @@ export function inPeriod(day, period) {
  * counts only for those; when it names none it is general evidence and counts
  * for every program.
  */
-export function evidenceRelevant(item, programId) {
+export function evidenceRelevant(item, programId, parentProgramId = null) {
   const ids = Array.isArray(item.programIds) ? item.programIds : [];
-  return ids.length === 0 || ids.includes(programId);
+  return (
+    ids.length === 0 ||
+    ids.includes(programId) ||
+    (Boolean(parentProgramId) && ids.includes(parentProgramId))
+  );
 }
 
 /** The unit a program's requirements count in: evidence items, or their `metrics.credits` summed. */
@@ -105,11 +109,20 @@ function expiringSoon(relevant, { period, today }) {
  * reaches `minCount`; the score is the met weight over the total weight, as
  * a percentage; the explanation says so in words.
  */
-export function computeReadiness(program, evidence, { period = null, today = null } = {}) {
+export function computeReadiness(
+  program,
+  evidence,
+  { period = null, today = null, parent = null } = {}
+) {
   const requirements = Array.isArray(program?.requirements) ? program.requirements : [];
+  // Evidence filed under the parent program counts for the child too: an
+  // MCT's classes and Lounge posts are the Regional Lead's record as well.
+  const parentId = program?.parentProgramId || null;
   const relevant = (evidence || []).filter(
     (item) =>
-      !item.softDeletedAt && evidenceRelevant(item, program.id) && inPeriod(item.date, period)
+      !item.softDeletedAt &&
+      evidenceRelevant(item, program.id, parentId) &&
+      inPeriod(item.date, period)
   );
   const unit = readinessUnit(program);
   const rows = requirements.map((req) => scoreRequirement(req, relevant, unit));
@@ -135,6 +148,7 @@ export function computeReadiness(program, evidence, { period = null, today = nul
     programId: program.id,
     period,
     unit,
+    gate: programGate(program, parent),
     requirements: rows,
     score,
     explanation,

@@ -213,6 +213,7 @@ const PROGRAM = {
     reminders: field(cleanReminders),
     customFields: field(cleanCustomFields),
     membershipStatus: field(oneOf(MEMBERSHIP_STATUSES, 'membershipStatus')),
+    parentProgramId: field(bounded(200)),
     applicationQuestions: field(cleanApplicationQuestions),
     scoring: field(cleanScoring),
   },

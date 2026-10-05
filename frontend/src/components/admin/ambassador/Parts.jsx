@@ -11,7 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Check, Copy, Plus, Trash2 } from 'lucide-react';
 import { TabError, TabLoading } from '@/components/admin/integrations/TabNotice';
 import StatusBadge from '@/components/admin/shared/StatusBadge';
-import { daysUntil, sourceLabel, todayIso } from './ambassadorModel';
+import { daysUntil, MEMBERSHIP_STATUS, sourceLabel, todayIso } from './ambassadorModel';
 
 export const INPUT = 'w-full text-sm border border-border rounded-md px-3 py-1.5 bg-background';
 
@@ -315,6 +315,13 @@ export function ReadinessPanel({ readiness, compact = false }) {
         />
       </div>
       <p className="text-xs text-muted-foreground">{readiness.explanation}</p>
+      {readiness.gate?.gated && !readiness.gate.unlocked && (
+        <p className="text-xs text-amber-700 dark:text-amber-400" data-testid="readiness-gate">
+          Additional to {readiness.gate.parent?.name || 'another program'}: opens when that
+          membership is Active (now{' '}
+          {MEMBERSHIP_STATUS[readiness.gate.parent?.membershipStatus]?.label || 'None'}).
+        </p>
+      )}
       <ul className="space-y-1.5">
         {readiness.requirements.map((req) => (
           <li key={req.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">

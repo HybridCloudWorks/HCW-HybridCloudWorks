@@ -11,12 +11,15 @@ import {
   APPLICATION_TRANSITIONS,
   CSV_IMPORT_MAX_CHARS,
   DEFAULT_PROGRAMS,
+  UNLOCKING_MEMBERSHIP,
   canTransition,
   computeReadiness,
   createAmbassadorHandlers,
   importedEvidenceId,
   isNotProvisioned,
   parsePeriod,
+  programGate,
+  seedBackfillFor,
   toCalendarDate,
   validateApplication,
   validateEvidence,
@@ -1008,5 +1011,173 @@ describe('evidence', () => {
     expect(
       (await h.readiness(makeRequest({ params: { programId: 'nope' } }), context)).status
     ).toBe(404);
+  });
+});
+
+describe('additional programs (owner request 2026-10-05): MCT Regional Lead under MCT', () => {
+  const RL = 'program-microsoft-mct-regional-lead';
+  const MCT = 'program-microsoft-mct';
+
+  async function seeded(role = 'super_admin') {
+    const store = memStore();
+    const h = createAmbassadorHandlers({ guard: guardAs(role), store, ...fixed });
+    await h.listPrograms(makeRequest(), context);
+    return { store, h };
+  }
+
+  it('seeds the Regional Lead additional to MCT, with the role requirements as questions', () => {
+    const rl = DEFAULT_PROGRAMS.find((p) => p.id === RL);
+    expect(rl.parentProgramId).toBe(MCT);
+    expect(DEFAULT_PROGRAMS.find((p) => p.id === MCT).parentProgramId).toBeUndefined();
+    const sections = rl.applicationQuestions.map((q) => q.section);
+    expect(sections.filter((s, i) => sections.indexOf(s) === i)).toEqual([
+      'Nomination and eligibility',
+      'MCT community support',
+      'Role expectations',
+    ]);
+    expect(rl.applicationQuestions.find((q) => q.id === 'rl-commitments')).toMatchObject({
+      kind: 'scale',
+      options: ['Yes', 'Partly', 'No'],
+    });
+    // One level only, in the seeds as in the validator below.
+    for (const program of DEFAULT_PROGRAMS) {
+      if (!program.parentProgramId) continue;
+      const parent = DEFAULT_PROGRAMS.find((p) => p.id === program.parentProgramId);
+      expect(parent, program.id).toBeDefined();
+      expect(parent.parentProgramId).toBeUndefined();
+    }
+  });
+
+  it('programGate: shut without a parent or while the parent is not Active, open when it is', () => {
+    const child = { id: RL, parentProgramId: MCT };
+    expect(programGate({ id: MCT }, null)).toEqual({ gated: false, unlocked: true, parent: null });
+    expect(programGate(child, null)).toEqual({
+      gated: true,
+      unlocked: false,
+      parent: { id: MCT, name: null, membershipStatus: 'none' },
+    });
+    expect(programGate(child, { id: MCT, name: 'MCT', membershipStatus: 'working' })).toMatchObject(
+      { gated: true, unlocked: false, parent: { name: 'MCT', membershipStatus: 'working' } }
+    );
+    expect(programGate(child, { id: MCT, name: 'MCT', membershipStatus: 'active' }).unlocked).toBe(
+      true
+    );
+    expect(UNLOCKING_MEMBERSHIP).toBe('active');
+  });
+
+  it('refuses a Regional Lead application until the MCT membership is Active, then takes it', async () => {
+    const { h } = await seeded();
+    const refused = await h.createApplication(makeRequest({ body: { programId: RL } }), context);
+    expect(refused.status).toBe(409);
+    expect(parse(refused)).toMatchObject({ code: 'PARENT_NOT_ACTIVE', parentProgramId: MCT });
+    expect(parse(refused).error).toMatch(/additional to Microsoft Certified Trainer/);
+    expect(parse(refused).error).toMatch(/Active on Settings/);
+
+    // The Settings row's "Application state" starts an application the same way: refused too.
+    const fromSettings = await h.createApplication(
+      makeRequest({ body: { programId: RL, status: 'preparing' } }),
+      context
+    );
+    expect(fromSettings.status).toBe(409);
+
+    await h.patchProgram(
+      makeRequest({ params: { id: MCT }, body: { membershipStatus: 'active' } }),
+      context
+    );
+    const taken = await h.createApplication(makeRequest({ body: { programId: RL } }), context);
+    expect(taken.status).toBe(200);
+    expect(parse(taken).item.programId).toBe(RL);
+
+    // Moving an existing application onto a locked child is refused the same way.
+    await h.patchProgram(
+      makeRequest({ params: { id: MCT }, body: { membershipStatus: 'working' } }),
+      context
+    );
+    const mvp = parse(
+      await h.createApplication(makeRequest({ body: { programId: 'program-microsoft-mvp' } }), context)
+    );
+    const moved = await h.patchApplication(
+      makeRequest({ params: { id: mvp.id }, body: { programId: RL } }),
+      context
+    );
+    expect(moved.status).toBe(409);
+  });
+
+  it('readiness counts evidence filed under the parent for the child and reports the gate', async () => {
+    const { h, store } = await seeded();
+    const evidence = (id, programIds, extra = {}) => ({
+      id,
+      docType: 'evidence',
+      title: id,
+      date: '2026-09-01',
+      sourceModule: 'manual',
+      programIds,
+      ...extra,
+    });
+    store.data.get('ambassador').set('e-mct', evidence('e-mct', [MCT]));
+    store.data.get('ambassador').set('e-rl', evidence('e-rl', [RL]));
+    store.data.get('ambassador').set('e-mvp', evidence('e-mvp', ['program-microsoft-mvp']));
+    store.data.get('ambassador').set('e-any', evidence('e-any', []));
+
+    const locked = parse(await h.readiness(makeRequest({ params: { programId: RL } }), context));
+    const lounge = locked.readiness.requirements.find((r) => r.id === 'lounge');
+    expect(lounge.items.map((i) => i.id).sort()).toEqual(['e-any', 'e-mct', 'e-rl']);
+    expect(locked.readiness.gate).toEqual({
+      gated: true,
+      unlocked: false,
+      parent: { id: MCT, name: 'Microsoft Certified Trainer', membershipStatus: 'none' },
+    });
+
+    await h.patchProgram(
+      makeRequest({ params: { id: MCT }, body: { membershipStatus: 'active' } }),
+      context
+    );
+    const open = parse(await h.readiness(makeRequest({ params: { programId: RL } }), context));
+    expect(open.readiness.gate.unlocked).toBe(true);
+    // The parent's own readiness is ungated and does not read the child's evidence.
+    const mct = parse(await h.readiness(makeRequest({ params: { programId: MCT } }), context));
+    expect(mct.readiness.gate).toEqual({ gated: false, unlocked: true, parent: null });
+    const teaching = mct.readiness.requirements.find((r) => r.id === 'teaching');
+    expect(teaching.items.map((i) => i.id).sort()).toEqual(['e-any', 'e-mct']);
+  });
+
+  it('a program parent must exist, be another program, and have no parent of its own; empty clears', async () => {
+    const { h, store } = await seeded();
+    const patch = (id, body) => h.patchProgram(makeRequest({ params: { id }, body }), context);
+    expect(parse(await patch(MCT, { parentProgramId: 'program-nope' }))).toEqual({
+      error: 'Unknown parentProgramId program-nope',
+    });
+    expect(parse(await patch(MCT, { parentProgramId: MCT })).error).toMatch(/to itself/);
+    // Two levels: MCT under the Regional Lead, which is already under MCT.
+    expect(parse(await patch(MCT, { parentProgramId: RL })).error).toMatch(/one level only/);
+    expect(store.data.get('ambassador').get(MCT).parentProgramId).toBeUndefined();
+
+    const cleared = await patch(RL, { parentProgramId: '' });
+    expect(cleared.status).toBe(200);
+    expect(store.data.get('ambassador').get(RL).parentProgramId).toBeNull();
+
+    const created = await h.createProgram(
+      makeRequest({ body: { name: 'MCT Mentor', parentProgramId: MCT } }),
+      context
+    );
+    expect(created.status).toBe(200);
+    expect(parse(created).item.parentProgramId).toBe(MCT);
+    expect(
+      parse(
+        await h.createProgram(
+          makeRequest({ body: { name: 'Nested', parentProgramId: parse(created).id } }),
+          context
+        )
+      ).error
+    ).toMatch(/one level only/);
+  });
+
+  it('backfills parentProgramId onto a stored Regional Lead from before it was additional', () => {
+    const seed = DEFAULT_PROGRAMS.find((p) => p.id === RL);
+    const stored = { ...seed, seeded: true };
+    delete stored.parentProgramId;
+    expect(seedBackfillFor(stored, seed)).toEqual({ parentProgramId: MCT });
+    expect(seedBackfillFor({ ...seed, seeded: true }, seed)).toBeNull();
+    expect(seedBackfillFor({ ...stored, parentProgramId: 'program-other' }, seed)).toBeNull();
   });
 });

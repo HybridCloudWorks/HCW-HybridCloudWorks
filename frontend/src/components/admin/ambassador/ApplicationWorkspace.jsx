@@ -147,7 +147,7 @@ function StatusChange({ application, onChange, busy }) {
 
 function RequirementChecklist({ program, application, evidence, readiness, onToggle, busy }) {
   const attached = new Set(application.evidenceIds || []);
-  const relevant = evidence.filter((e) => evidenceRelevant(e, program.id));
+  const relevant = evidence.filter((e) => evidenceRelevant(e, program.id, program.parentProgramId));
   return (
     <div className="space-y-4">
       {(program.requirements || []).map((req) => {

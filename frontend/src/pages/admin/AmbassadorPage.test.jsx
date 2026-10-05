@@ -73,7 +73,27 @@ const PROGRAMS = [
     applicationWindow: { opens: null, closes: null, note: '' },
     requirements: [],
   },
+  // Additional to the MVP: shown, and startable, only while the MVP
+  // membership is Active (owner request 2026-10-05).
+  {
+    id: 'program-lead',
+    docType: 'program',
+    name: 'MVP Regional Lead',
+    provider: 'Microsoft',
+    category: 'community-expert',
+    description: 'Leads the region.',
+    enabled: true,
+    order: 3,
+    parentProgramId: 'program-mvp',
+    applicationWindow: { opens: null, closes: null, note: '' },
+    requirements: [],
+  },
 ];
+
+/** The catalogue with the MVP membership Active, which opens the program additional to it. */
+const PROGRAMS_MVP_ACTIVE = PROGRAMS.map((p) =>
+  p.id === 'program-mvp' ? { ...p, membershipStatus: 'active' } : p
+);
 
 const inDays = (n) => {
   const d = new Date();
@@ -219,7 +239,12 @@ describe('Programs', () => {
     searchParams = 'tab=programs';
     render(<AmbassadorPage />);
     const cards = await panel().findAllByTestId('program-card');
+    // The program additional to the MVP is not a card while the MVP membership is not Active.
     expect(cards).toHaveLength(2);
+    expect(panel().queryByText('MVP Regional Lead')).not.toBeInTheDocument();
+    expect(panel().getByTestId('additional-programs')).toHaveTextContent(
+      'Additional requirements — MVP Regional Lead — open when this membership is Active.'
+    );
     expect(panel().getByText('Disabled')).toBeInTheDocument();
     const mvp = within(cards.find((c) => c.textContent.includes('Microsoft MVP')));
     await act(async () => {
@@ -234,6 +259,29 @@ describe('Programs', () => {
         application: 'application-new',
       })
     );
+  });
+
+  it('shows the program additional to the MVP as its own card once the MVP membership is Active', async () => {
+    searchParams = 'tab=programs';
+    getJSON.mockImplementation(
+      routes({ 'cms/ambassador/programs': { items: PROGRAMS_MVP_ACTIVE } })
+    );
+    render(<AmbassadorPage />);
+    const cards = await panel().findAllByTestId('program-card');
+    // The additional program follows its parent, ahead of the disabled one.
+    const names = ['Microsoft MVP', 'MVP Regional Lead', 'GitHub Star'];
+    expect(cards.map((c) => names.find((n) => c.textContent.startsWith(n)))).toEqual(names);
+    const lead = within(cards[1]);
+    expect(lead.getByText(/additional to Microsoft MVP/)).toBeInTheDocument();
+    expect(panel().getByTestId('additional-programs')).toHaveTextContent(
+      'Additional requirements open: MVP Regional Lead.'
+    );
+    await act(async () => {
+      fireEvent.click(lead.getByRole('button', { name: /Start application/ }));
+    });
+    expect(postJSON).toHaveBeenCalledWith('cms/ambassador/applications', {
+      programId: 'program-lead',
+    });
   });
 });
 
@@ -333,6 +381,13 @@ describe('Settings', () => {
       statusNote: 'Set from Settings',
       statusOverride: true,
     });
+    // A program additional to another cannot be given an application state until
+    // that membership is Active; the row says so and the API would refuse it.
+    const lead = (await panel().findByText('MVP Regional Lead')).closest('tr');
+    expect(
+      within(lead).getByText(/additional to Microsoft MVP \(opens when Active\)/)
+    ).toBeInTheDocument();
+    expect(within(lead).getByLabelText('Application state for MVP Regional Lead')).toBeDisabled();
     // A program with no application starts one at the chosen state.
     const star = (await panel().findByText('GitHub Star')).closest('tr');
     await act(async () => {
