@@ -172,6 +172,32 @@ describe('additional programs (owner request 2026-10-05)', () => {
     expect(childProgramsOf([rl, mct, mvp], 'mvp')).toEqual([]);
   });
 
+  it('shows a program whose parent is itself parented at top level rather than hiding it (#881 review)', () => {
+    // A chain the API did not catch in a race: rl → mct → mvp. Nothing vanishes.
+    const chained = { ...mct, parentProgramId: 'mvp', membershipStatus: 'active' };
+    const activeMvp = { ...mvp, membershipStatus: 'active' };
+    expect(
+      programsInPlay([rl, chained, activeMvp])
+        .map((p) => p.id)
+        .sort()
+    ).toEqual(['mct', 'mvp', 'rl']);
+    // The same chain with the root membership inactive: the middle program
+    // has a parent and children, so it is promoted too — nothing hidden.
+    expect(
+      programsInPlay([rl, chained, mvp])
+        .map((p) => p.id)
+        .sort()
+    ).toEqual(['mct', 'mvp', 'rl']);
+    // A two-program cycle: both at top level.
+    const a = { id: 'a', name: 'A', parentProgramId: 'b', membershipStatus: 'active' };
+    const b = { id: 'b', name: 'B', parentProgramId: 'a', membershipStatus: 'active' };
+    expect(
+      programsInPlay([a, b])
+        .map((p) => p.id)
+        .sort()
+    ).toEqual(['a', 'b']);
+  });
+
   it('carries parentProgramId through the program form both ways, empty as null', () => {
     expect(programForm({ name: 'X', parentProgramId: 'mct' }).parentProgramId).toBe('mct');
     expect(programForm({ name: 'X' }).parentProgramId).toBe('');

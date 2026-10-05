@@ -3476,6 +3476,17 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Ambassador sub-programs: a cleared parent stays cleared, a program with
+  children takes no parent, and a malformed chain shows rather than hides
+  (#881 review).** The seed backfill treated an explicit `parentProgramId:
+  null` as missing and restored the seeded MCT parent on the next read, so
+  "Additional to → none" could not stick; it now fills the field only when it
+  is absent. `checkParentProgram` also refuses a parent on a program that
+  already has children (one level only), and the frontend's `programsInPlay`
+  lists a program whose parent is itself parented at top level, so a chain or
+  cycle two overlapping edits could leave behind is visible and repairable on
+  Settings rather than hidden.
+
 - **CodeQL alert 383 (note).** `platform-settings.test.js` still imported
   three names from the Listen & Learn speech settings that ADR 0034 slice 5
   (#867) removed from that module or left unused; the import block is gone.
