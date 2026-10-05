@@ -56,7 +56,7 @@ async function handlers(context) {
     aiCover: createAiCoverGenerator({
       store,
       storage,
-      replicate: createReplicateClient(),
+      replicate: createReplicateClient({ store }),
       uuid: () => crypto.randomUUID(),
       log: context,
     }),

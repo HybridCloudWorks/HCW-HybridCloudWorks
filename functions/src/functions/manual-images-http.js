@@ -19,7 +19,7 @@ const handlers = () =>
     guard: getDefaultGuard(),
     store: { queryDocs, readDoc, patchDoc, upsertDoc },
     storage: { uploadBlob },
-    replicate: createReplicateClient(),
+    replicate: createReplicateClient({ store: { queryDocs, upsertDoc } }),
     uuid: () => crypto.randomUUID(),
   });
 

@@ -338,7 +338,10 @@ describe('lineage and the keyword matrix', () => {
     const body = JSON.parse(res.body);
     expect(body.promptLogs.hero).toContain('Include the Kiro icon.');
     expect(body).toMatchObject({ imageProvider: 'replicate', imageModel: 'm', costPerImageUsd: 0.02 });
-    expect(replicate.generate.mock.calls[0][1]).toEqual({ aspectRatio: '1:1' });
+    expect(replicate.generate.mock.calls[0][1]).toEqual({
+      aspectRatio: '1:1',
+      source: 'images:manual',
+    });
     expect(store.upsertDoc).toHaveBeenCalledWith(
       'generated_content_images',
       expect.objectContaining({
@@ -385,7 +388,10 @@ describe('lineage and the keyword matrix', () => {
     });
     expect(body.prompt).toContain('Set prompt');
     expect(body.prompt).toContain('Slot composition: wide shot');
-    expect(replicate.generate.mock.calls[0][1]).toEqual({ aspectRatio: '1:1' });
+    expect(replicate.generate.mock.calls[0][1]).toEqual({
+      aspectRatio: '1:1',
+      source: 'images:manual',
+    });
     expect(storage.uploadBlob.mock.calls[0][1]).toBe('promptset-s-hero-20260828120000.png');
     expect(store.upsertDoc).toHaveBeenCalledWith(
       'generated_content_images',

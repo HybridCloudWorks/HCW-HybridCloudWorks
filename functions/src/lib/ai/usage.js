@@ -46,6 +46,13 @@ export const USAGE_SOURCES = Object.freeze({
   // provider with a key (#701, 2026-09-29). Its own row so the check's
   // spend, a fraction of a cent a week, is not read as someone testing.
   aiProviderProbe: 'ai-engine:probe',
+  // Replicate image generation (2026-10-05): one row per output image,
+  // priced per image (CONTENTFORGE_IMAGE_COST_USD) rather than per token,
+  // because Replicate bills on its own account where no Azure budget can
+  // see it. Covers the change feed writes and images made by hand on the
+  // Images pages are two rows, so each product's spend is attributable.
+  imageCover: 'images:cover',
+  imageManual: 'images:manual',
   // A router call whose call site named no feature (ADR 0033). The call-sites
   // test keeps this from happening in production code; the row exists so a
   // call that somehow slips through is still visible rather than unrecorded.
@@ -163,4 +170,28 @@ export async function recordAiUsageBatch(deps, records = []) {
 /** Total estimated spend across rows, for reporting a run's cost back. */
 export function totalCostUsd(rows = []) {
   return parseFloat(rows.reduce((sum, r) => sum + (r?.estimatedCostUsd || 0), 0).toFixed(6));
+}
+
+/**
+ * One provider's spend and row count since the first of the current month
+ * (UTC), from `ai_usage`. The image budget reads it before every generation
+ * (triggers/ai-cover.js). A read that fails is the caller's to treat as
+ * "unknown" rather than "zero" or "blocked"; this function only throws.
+ *
+ * @returns {Promise<{since: string, count: number, costUsd: number}>}
+ */
+export async function monthToDateUsage({ store, now = () => new Date() }, provider) {
+  const start = new Date(now());
+  start.setUTCDate(1);
+  start.setUTCHours(0, 0, 0, 0);
+  const since = start.toISOString();
+  const rows = await store.queryDocs(
+    USAGE_CONTAINER,
+    'SELECT c.estimatedCostUsd FROM c WHERE c.provider = @provider AND c.timestamp >= @since',
+    [
+      { name: '@provider', value: provider },
+      { name: '@since', value: since },
+    ]
+  );
+  return { since, count: rows.length, costUsd: totalCostUsd(rows) };
 }
