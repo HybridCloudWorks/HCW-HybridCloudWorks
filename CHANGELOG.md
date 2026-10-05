@@ -30,11 +30,17 @@ This project has not cut a tagged release; entries are grouped under
   shows Replicate beside the token providers. Before every generation the
   client sums the month's rows and refuses with `IMAGE_BUDGET_EXHAUSTED`
   (429) at `CONTENTFORGE_IMAGE_MONTHLY_BUDGET_USD` (Terraform: `10`) or at
-  `CONTENTFORGE_IMAGE_MONTHLY_MAX` images (200), so an unpriced month still
-  has a ceiling; a failed month read never blocks the work. The
-  Required-Inputs rows name the owner's backstop, Replicate's own spend
-  limit. `ai-cover.test.js` pins the row, the unpriced row, both ceilings
-  and the never-block rule.
+  `CONTENTFORGE_IMAGE_MONTHLY_MAX` images (200), counting the image it is
+  about to make, so an unpriced month still has a ceiling. The guard fails
+  closed: a month that cannot be read refuses with 503, because **no
+  account-level stop is configured** (the owner declined a Replicate-side
+  spend limit on 2026-10-05; the application guard is the only stop).
+  Concurrent generations can overshoot by their number times the per-image
+  price, a few cents, which is accepted and documented. The manual image
+  routes answer the guard's 429 or 503 with its code rather than a generic
+  500. `ai-cover.test.js` pins the row, the unpriced row, both ceilings,
+  the pending-image rule and the fail-closed rule; `manual-images.test.js`
+  pins the route's 429.
 
 - **Microsoft Foundry as a paid AI provider (#849, owner decision
   2026-10-04).** Of a budget of about USD 75 a month, the first call was

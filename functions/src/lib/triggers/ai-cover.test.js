@@ -310,6 +310,7 @@ describe('createReplicateClient: usage rows and the monthly budget (2026-10-05)'
   });
 
   it('counts images as well as dollars, so an unpriced month still has a ceiling', async () => {
+    // 199 made this month: the 200th is the last allowed, so the 201st is refused.
     const store = usageStore(Array.from({ length: 200 }, () => ({ estimatedCostUsd: 0 })));
     const client = createReplicateClient({
       env: { REPLICATE_API_KEY: 'r8_test' },
@@ -333,15 +334,33 @@ describe('createReplicateClient: usage rows and the monthly budget (2026-10-05)'
     await expect(client.generate('x')).rejects.toMatchObject({ code: 'IMAGE_BUDGET_EXHAUSTED' });
   });
 
-  it('never lets the bookkeeping block the work: a failed month read generates, a failed row write still returns the image', async () => {
-    const store = {
-      queryDocs: vi.fn(async () => {
-        throw new Error('cosmos down');
-      }),
-      upsertDoc: vi.fn(async () => {
-        throw new Error('cosmos down');
-      }),
-    };
+  it('fails closed: a month that cannot be read refuses with 503 before any call to Replicate', async () => {
+    const store = usageStore([]);
+    store.queryDocs = vi.fn(async () => {
+      throw new Error('cosmos down');
+    });
+    const fetchImpl = fetchOk();
+    const client = createReplicateClient({ env, fetch: fetchImpl, sleep: noSleep, store, now });
+    await expect(client.generate('x')).rejects.toMatchObject({
+      code: 'IMAGE_BUDGET_UNKNOWN',
+      status: 503,
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('counts the image it is about to make: $9.99 used does not permit a $0.02 image, $9.98 does', async () => {
+    const at = (total) => usageStore([{ estimatedCostUsd: total }]);
+    const refused = createReplicateClient({ env, fetch: fetchOk(), sleep: noSleep, store: at(9.99), now });
+    await expect(refused.generate('x')).rejects.toMatchObject({ code: 'IMAGE_BUDGET_EXHAUSTED' });
+    const allowed = createReplicateClient({ env, fetch: fetchOk(), sleep: noSleep, store: at(9.98), now });
+    await expect(allowed.generate('x')).resolves.toBe('https://img.example/x.png');
+  });
+
+  it('a failed row write still returns the image: the record is best effort, the guard is not', async () => {
+    const store = usageStore([]);
+    store.upsertDoc = vi.fn(async () => {
+      throw new Error('cosmos down');
+    });
     const client = createReplicateClient({ env, fetch: fetchOk(), sleep: noSleep, store, now });
     await expect(client.generate('x')).resolves.toBe('https://img.example/x.png');
   });

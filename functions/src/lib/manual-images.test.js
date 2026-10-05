@@ -197,6 +197,23 @@ describe('generateCuratedArticleImage', () => {
     ).toBe(400);
   });
 
+  it('answers the image budget\'s 429 with its code, not a generic 500 (#854)', async () => {
+    const { handlers, replicate, storage } = makeHandlers();
+    replicate.generate = vi.fn(async () => {
+      throw Object.assign(new Error('Image generation paused: $10.00 of the $10 monthly image budget used'), {
+        code: 'IMAGE_BUDGET_EXHAUSTED',
+        status: 429,
+      });
+    });
+    const res = await handlers.generateCuratedArticleImage(
+      request({ articleId: 'a1', articleTitle: 'Title' }),
+      context
+    );
+    expect(res.status).toBe(429);
+    expect(JSON.parse(res.body)).toMatchObject({ code: 'IMAGE_BUDGET_EXHAUSTED' });
+    expect(storage.uploadBlob).not.toHaveBeenCalled();
+  });
+
   it('500s and stores nothing when the generated file is not an image (#415)', async () => {
     const { handlers, storage, store } = makeHandlers({
       fetchImage: vi.fn(async () => ({

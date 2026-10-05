@@ -322,21 +322,41 @@ function predictionImageUrl(prediction) {
 }
 
 /**
- * Refuse before the call, not after the bill. A month read that fails does
- * not block: the bookkeeping must never be able to stop the work it is
- * bookkeeping, so an unreadable month generates and the row written
- * afterwards is the record. Module-level over the client's bookkeeping so
- * the factory itself stays small (qlty, #854).
+ * Refuse before the call, not after the bill. The guard FAILS CLOSED: there
+ * is no Replicate-side limit (the owner declined one, 2026-10-05), so a
+ * month that cannot be read is a month that cannot be bounded, and the
+ * generation waits rather than runs. The image about to be made is counted
+ * against the budget too, so $9.99 used does not permit a $0.02 image.
+ *
+ * What this does not do is serialise: two generations that read the month
+ * at the same moment can both pass, so the overshoot is bounded by the
+ * number of concurrent generations times the per-image price — a few cents
+ * on this site — not unbounded. An atomic reservation document would close
+ * that gap at the cost of a write per image and a reconciliation path;
+ * revisit if the per-image price or the concurrency grows. Module-level
+ * over the client's bookkeeping so the factory stays small (qlty, #854).
  */
-async function assertImageBudget({ store, now, monthlyBudgetUsd, monthlyMaxImages }) {
+async function assertImageBudget({
+  store,
+  now,
+  costPerImageUsd,
+  monthlyBudgetUsd,
+  monthlyMaxImages,
+}) {
   if (!store?.queryDocs) return;
   let used;
   try {
     used = await monthToDateUsage({ store, now }, IMAGE_PROVIDER);
-  } catch {
-    return;
+  } catch (cause) {
+    const err = new Error(
+      `Image generation paused: this month's image spend could not be read (${cause?.message || cause}), and with no account-side limit the budget cannot be enforced blind. Try again shortly.`
+    );
+    err.code = 'IMAGE_BUDGET_UNKNOWN';
+    err.status = 503;
+    throw err;
   }
-  if (used.costUsd < monthlyBudgetUsd && used.count < monthlyMaxImages) return;
+  const pending = costPerImageUsd ?? 0;
+  if (used.costUsd + pending <= monthlyBudgetUsd && used.count + 1 <= monthlyMaxImages) return;
   const err = new Error(
     `Image generation paused: $${used.costUsd.toFixed(2)} of the $${monthlyBudgetUsd} monthly image budget used, ${used.count} images since ${used.since.slice(0, 10)}. Raise CONTENTFORGE_IMAGE_MONTHLY_BUDGET_USD (or CONTENTFORGE_IMAGE_MONTHLY_MAX) or wait for the first of the month.`
   );
