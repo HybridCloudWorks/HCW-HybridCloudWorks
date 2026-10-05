@@ -322,6 +322,48 @@ describe('content-type allowlist (T-307)', () => {
   });
 });
 
+describe('documents into private containers (owner request 2026-10-05)', () => {
+  const pdfBody = (path = 'ambassador/app-1/1-agreement.pdf') => ({
+    path,
+    contentType: 'application/pdf',
+    dataBase64: Buffer.from('%PDF-1.7 fake').toString('base64'),
+  });
+
+  it('accepts a PDF into speakerevents (private, where the Ambassador hub archives documents)', async () => {
+    const storage = { uploadBlob: vi.fn(async () => 'https://acct.blob/x/y.pdf') };
+    const h = createAdminUploadHandlers({ guard: allowGuard(), storage });
+    const res = await h.uploadFile(makeRequest({ container: 'speakerevents', body: pdfBody() }), context);
+    expect(res.status).toBe(200);
+    const [, path, , contentType] = storage.uploadBlob.mock.calls[0];
+    expect([path, contentType]).toEqual(['ambassador/app-1/1-agreement.pdf', 'application/pdf']);
+    expect(JSON.parse(res.body).url).toBe('');
+  });
+
+  it('refuses the same PDF into a publicly served container', async () => {
+    const storage = { uploadBlob: vi.fn() };
+    const h = createAdminUploadHandlers({ guard: allowGuard(), storage });
+    for (const container of ['blogs', 'certifications']) {
+      const res = await h.uploadFile(
+        makeRequest({ container, body: pdfBody('post-1/images/agreement.pdf') }),
+        context
+      );
+      expect(res.status).toBe(415);
+    }
+    expect(storage.uploadBlob).not.toHaveBeenCalled();
+  });
+
+  it('still ties the extension to the declared document type', async () => {
+    const storage = { uploadBlob: vi.fn() };
+    const h = createAdminUploadHandlers({ guard: allowGuard(), storage });
+    const res = await h.uploadFile(
+      makeRequest({ container: 'speakerevents', body: pdfBody('ambassador/app-1/evil.html') }),
+      context
+    );
+    expect(res.status).toBe(415);
+    expect(storage.uploadBlob).not.toHaveBeenCalled();
+  });
+});
+
 describe('badge normalisation (owner request 2026-10-05)', () => {
   const SVG =
     '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><circle cx="12" cy="12" r="10" fill="#0ea5e9"/></svg>';

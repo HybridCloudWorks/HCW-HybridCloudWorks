@@ -19,6 +19,32 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Ambassador hub: membership status and a direct application-state select
+  on Settings, documents archived on an application (owner request
+  2026-10-05).** Each program carries a `membershipStatus` — Not a member /
+  Working / Active / Denied — separate from the application funnel, set on
+  the Settings row or in the editor and shown as a badge on the Programs
+  card. The Settings row also sets the program's latest application to any
+  state directly: a super_admin `statusOverride` the API accepts outside
+  the transition table and records in the history row (an editor is
+  refused), starting an application at that state when none exists. The
+  application's upload takes documents as well as images (PDF, Word, Excel,
+  PowerPoint, CSV, text): the upload route accepts those types into private
+  containers only, never a publicly served one. That exposed a standing gap
+  (review): a private upload answered no URL and the application cleaner
+  dropped the entry, so every file ever uploaded to an application was
+  orphaned behind a success toast — a file now keeps a `{ container, path }`
+  reference and a new editor-guarded `GET cms/ambassador/files/{container}/
+  {*blobPath}` serves it as a download (private containers, `ambassador/`
+  prefix only, nosniff, no-store). The application patch writes with the
+  row's ETag and answers 409 on a conflict; `statusOverride` is refused on a
+  create; the Programs card always shows the membership badge; the Settings
+  selects wait for the applications read. "ageing" on the Dashboard reads
+  "aging". Tests: the override (403 for an editor, history `override` for a
+  super_admin, the plain table still enforced, refused on create), the 409,
+  the file reference and the download route's four refusals, the
+  private-only document types, the membership vocabulary through the form,
+  and `latestApplicationFor`.
 - **Certification badges are normalised on upload: PNG or SVG in, a
   512 × 512 PNG out (owner request 2026-10-05).** The Settings tab promised
   "PNG / JPG / SVG" while the upload route refused SVG into `certifications`

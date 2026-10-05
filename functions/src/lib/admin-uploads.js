@@ -102,6 +102,24 @@ export const ALLOWED_UPLOAD_MEDIA_TYPES = new Map([
 export const PUBLIC_DENIED_MEDIA_TYPES = new Set(['image/svg+xml']);
 
 /**
+ * Document types accepted ONLY into containers the anonymous media route
+ * does not serve (owner request 2026-10-05: the Ambassador hub archives a
+ * program's agreements, role descriptions and exports beside the
+ * application, under `ambassador/{id}/` in the private `speakerevents`
+ * container). Never into a public container: a PDF or an Office file served
+ * from the media origin is a document a browser opens, not an image.
+ */
+export const PRIVATE_ONLY_MEDIA_TYPES = new Map([
+  ['application/pdf', ['pdf']],
+  ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', ['docx']],
+  ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', ['xlsx']],
+  ['application/vnd.openxmlformats-officedocument.presentationml.presentation', ['pptx']],
+  ['text/csv', ['csv']],
+  ['text/plain', ['txt', 'md']],
+  ['text/markdown', ['md']],
+]);
+
+/**
  * Strip parameters and case from a media type: `Image/PNG; charset=x` →
  * `image/png`.
  *
@@ -141,7 +159,10 @@ export function extensionOf(path) {
  * @returns {{ok: true}|{ok: false, message: string}}
  */
 export function checkUploadMediaType({ container, path, contentType }) {
-  const extensions = ALLOWED_UPLOAD_MEDIA_TYPES.get(contentType);
+  const isPublic = PUBLIC_MEDIA_CONTAINERS.has(container);
+  const extensions =
+    ALLOWED_UPLOAD_MEDIA_TYPES.get(contentType) ||
+    (isPublic ? undefined : PRIVATE_ONLY_MEDIA_TYPES.get(contentType));
   if (!extensions) {
     return { ok: false, message: 'Unsupported content type' };
   }

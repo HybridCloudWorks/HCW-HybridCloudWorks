@@ -19,7 +19,13 @@ import { ExternalLink, Loader2, Play } from 'lucide-react';
 import EmptyState from '@/components/admin/shared/EmptyState';
 import StatusBadge from '@/components/admin/shared/StatusBadge';
 import { TabLoading } from '@/components/admin/integrations/TabNotice';
-import { PURSUING_STATUSES, sourceLabel, todayIso, windowState } from './ambassadorModel';
+import {
+  MEMBERSHIP_STATUS,
+  PURSUING_STATUSES,
+  sourceLabel,
+  todayIso,
+  windowState,
+} from './ambassadorModel';
 import { ReadinessPanel, ReadsStatus, allLanded } from './Parts';
 import useReadiness from './useReadiness';
 
@@ -214,19 +220,27 @@ export default function ProgramsTab({ hub, nav }) {
                   <CardHeader className="pb-2">
                     <CardTitle className="flex items-start justify-between gap-2 text-base">
                       <span>{program.name}</span>
-                      <StatusBadge
-                        size="xs"
-                        status={
-                          disabled
-                            ? {
-                                id: 'disabled',
-                                label: 'Disabled',
-                                tone: 'off',
-                                help: 'Hidden from new applications; re-enable on Settings.',
-                              }
-                            : WINDOW_BADGE[windowState(program, today)]
-                        }
-                      />
+                      <span className="flex flex-wrap justify-end gap-1">
+                        <StatusBadge
+                          size="xs"
+                          status={
+                            MEMBERSHIP_STATUS[program.membershipStatus] || MEMBERSHIP_STATUS.none
+                          }
+                        />
+                        <StatusBadge
+                          size="xs"
+                          status={
+                            disabled
+                              ? {
+                                  id: 'disabled',
+                                  label: 'Disabled',
+                                  tone: 'off',
+                                  help: 'Hidden from new applications; re-enable on Settings.',
+                                }
+                              : WINDOW_BADGE[windowState(program, today)]
+                          }
+                        />
+                      </span>
                     </CardTitle>
                     <CardDescription>
                       {program.provider} · {program.category}

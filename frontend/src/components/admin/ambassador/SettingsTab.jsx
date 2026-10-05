@@ -19,9 +19,14 @@ import { ArrowDown, ArrowUp, Loader2, Pencil, Plus, Trash2 } from 'lucide-react'
 import ConfirmModal from '@/components/admin/ConfirmModal';
 import StatusBadge from '@/components/admin/shared/StatusBadge';
 import {
+  AMBASSADOR_STATUS,
+  APPLICATION_STATUSES,
   EMPTY_REQUIREMENT,
   EVIDENCE_SOURCES,
+  MEMBERSHIP_STATUS,
+  MEMBERSHIP_STATUSES,
   PROGRAM_STATE,
+  latestApplicationFor,
   programForm,
   programPayload,
   sourceLabel,
@@ -286,6 +291,17 @@ export function ProgramEditor({ program, onClose, onSave, saving }) {
               className="md:col-span-2"
               hint="Leave the dates empty for a rolling program."
             />
+            <SelectField
+              id="program-membership"
+              label="Membership status"
+              hint="Where you stand with the program; separate from an application's state."
+              value={form.membershipStatus}
+              onChange={set('membershipStatus')}
+              options={MEMBERSHIP_STATUSES.map((s) => ({
+                value: s,
+                label: MEMBERSHIP_STATUS[s].label,
+              }))}
+            />
             <TextField
               id="program-renewal"
               label="Renewal cadence"
@@ -350,13 +366,42 @@ export function ProgramEditor({ program, onClose, onSave, saving }) {
   );
 }
 
-const COLUMNS = ['Order', 'Program', 'Requirements', 'Reminders', 'State', ''];
+const COLUMNS = [
+  'Order',
+  'Program',
+  'Requirements',
+  'Reminders',
+  'State',
+  'Membership',
+  'Application state',
+  '',
+];
+
+const NO_APPLICATION = '';
 
 export default function SettingsTab({ hub }) {
-  const { programs } = hub;
+  const { programs, applications } = hub;
   const [editing, setEditing] = useState(null); // null | {} (new) | program
   const [confirmDelete, setConfirmDelete] = useState(null);
   const ordered = [...programs.data].sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+
+  // The Application state select (owner request 2026-10-05): sets the
+  // program's latest application to ANY status, outside the funnel, recorded
+  // as an override in its history (super_admin); with no application yet it
+  // starts one at that status.
+  const setApplicationState = async (program, status) => {
+    if (!status) return;
+    const latest = latestApplicationFor(applications?.data, program.id);
+    if (latest) {
+      await hub.writes.patchApplication(latest.id, {
+        status,
+        statusNote: 'Set from Settings',
+        statusOverride: true,
+      });
+    } else {
+      await hub.writes.createApplication({ programId: program.id, status });
+    }
+  };
 
   const save = async (payload) => {
     const saved = editing?.id
@@ -379,10 +424,12 @@ export default function SettingsTab({ hub }) {
       <p className="text-sm text-muted-foreground">
         The catalogue, its requirements and evidence types, reminder lead times and custom fields.
         Disabling a program hides it from new applications and keeps its history; nothing here
-        deletes an application.
+        deletes an application. Membership is where you stand with the program; Application state
+        sets the latest application directly, outside the funnel, and the record says it was set
+        here.
       </p>
-      <ReadsStatus reads={[programs]} label="programs" />
-      {allLanded([programs]) && (
+      <ReadsStatus reads={[programs, applications]} label="programs and applications" />
+      {allLanded([programs, applications]) && (
         <>
           <div className="flex justify-end">
             <Button size="sm" onClick={() => setEditing({})}>
@@ -440,6 +487,46 @@ export default function SettingsTab({ hub }) {
                       size="xs"
                       status={PROGRAM_STATE[disabled ? 'disabled' : 'enabled']}
                     />
+                  </td>
+                  <td className="px-4 py-3">
+                    <select
+                      className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                      aria-label={`Membership status for ${program.name}`}
+                      value={
+                        MEMBERSHIP_STATUSES.includes(program.membershipStatus)
+                          ? program.membershipStatus
+                          : 'none'
+                      }
+                      disabled={busy}
+                      onChange={(e) =>
+                        hub.writes.patchProgram(program.id, { membershipStatus: e.target.value })
+                      }
+                    >
+                      {MEMBERSHIP_STATUSES.map((s) => (
+                        <option key={s} value={s}>
+                          {MEMBERSHIP_STATUS[s].label}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="px-4 py-3">
+                    <select
+                      className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                      aria-label={`Application state for ${program.name}`}
+                      value={
+                        latestApplicationFor(applications?.data, program.id)?.status ||
+                        NO_APPLICATION
+                      }
+                      disabled={busy}
+                      onChange={(e) => setApplicationState(program, e.target.value)}
+                    >
+                      <option value={NO_APPLICATION}>— no application —</option>
+                      {APPLICATION_STATUSES.map((s) => (
+                        <option key={s} value={s}>
+                          {AMBASSADOR_STATUS[s].label}
+                        </option>
+                      ))}
+                    </select>
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex justify-end gap-1">

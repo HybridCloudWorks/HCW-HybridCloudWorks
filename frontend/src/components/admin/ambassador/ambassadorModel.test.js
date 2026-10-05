@@ -18,6 +18,9 @@ import {
   statusCounts,
   upcomingDeadlines,
   windowState,
+  MEMBERSHIP_STATUS,
+  MEMBERSHIP_STATUSES,
+  latestApplicationFor,
 } from './ambassadorModel';
 
 const TODAY = '2026-10-03';
@@ -157,5 +160,29 @@ describe('program form', () => {
       /Requirement 1/
     );
     expect(programPayload({ ...form, applicationUrl: 'mvp.microsoft.com' }).error).toMatch(/http/);
+  });
+});
+
+describe('membership status (owner request 2026-10-05)', () => {
+  it('is a four-word vocabulary with none first, carried through the program form both ways', () => {
+    expect(MEMBERSHIP_STATUSES).toEqual(['none', 'working', 'active', 'denied']);
+    expect(MEMBERSHIP_STATUS.active.label).toBe('Active');
+    expect(programForm({ name: 'X', membershipStatus: 'working' }).membershipStatus).toBe(
+      'working'
+    );
+    expect(programForm({ name: 'X', membershipStatus: 'bogus' }).membershipStatus).toBe('none');
+    const payload = programPayload({ ...programForm({ name: 'X' }), membershipStatus: 'denied' });
+    expect(payload.value.membershipStatus).toBe('denied');
+  });
+
+  it('latestApplicationFor picks the most recently updated application of a program', () => {
+    const apps = [
+      { id: 'a', programId: 'p1', status: 'interested', updatedAt: '2026-09-01T00:00:00Z' },
+      { id: 'b', programId: 'p1', status: 'denied', updatedAt: '2026-10-01T00:00:00Z' },
+      { id: 'c', programId: 'p2', status: 'active', updatedAt: '2026-10-02T00:00:00Z' },
+    ];
+    expect(latestApplicationFor(apps, 'p1')?.id).toBe('b');
+    expect(latestApplicationFor(apps, 'p3')).toBeNull();
+    expect(latestApplicationFor(undefined, 'p1')).toBeNull();
   });
 });

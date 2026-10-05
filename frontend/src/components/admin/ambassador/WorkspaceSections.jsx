@@ -5,6 +5,7 @@
  * The form state and every write stay in ApplicationWorkspace.jsx.
  */
 import React, { useRef } from 'react';
+import { UPLOAD_ACCEPT, fileKey } from './useApplicationUpload';
 import { Button } from '@/components/ui/button';
 import { CardHeader, CardTitle } from '@/components/ui/card';
 import { Download, FileText, Loader2, Save, Trash2, Upload } from 'lucide-react';
@@ -181,18 +182,36 @@ export function ResponsesSection({ responses, onChange }) {
   );
 }
 
-/** One stored file: its name, size and date, and Remove. */
-function FileRow({ file, busy, onRemove }) {
+/** One stored file: its name, size and date, Download for a private one, and Remove. */
+function FileRow({ file, busy, onRemove, onDownload }) {
   const size = file.bytes ? `· ${Math.round(file.bytes / 1024)} KB` : '';
   const when = file.uploadedAt ? `· ${file.uploadedAt.slice(0, 10)}` : '';
   return (
     <li className="flex items-center justify-between gap-2">
       <span>
-        {file.name}{' '}
+        {file.url ? (
+          <a href={file.url} target="_blank" rel="noreferrer" className="underline">
+            {file.name}
+          </a>
+        ) : (
+          file.name
+        )}{' '}
         <span className="text-xs text-muted-foreground">
           {size} {when}
         </span>
       </span>
+      {file.path && (
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          aria-label={`Download file ${file.name}`}
+          onClick={onDownload}
+          disabled={busy}
+        >
+          <Download className="h-3.5 w-3.5" />
+        </Button>
+      )}
       <Button
         type="button"
         size="sm"
@@ -221,9 +240,9 @@ export function FilesSection({ application, files, form, set, busy }) {
         <input
           ref={uploadRef}
           type="file"
-          accept="image/*"
+          accept={UPLOAD_ACCEPT}
           className="hidden"
-          aria-label="Upload an image"
+          aria-label="Upload a file"
           onChange={(e) => {
             const file = e.target.files?.[0];
             if (file) files.upload(file);
@@ -242,16 +261,23 @@ export function FilesSection({ application, files, form, set, busy }) {
           ) : (
             <Upload className="mr-1 h-3.5 w-3.5" />
           )}
-          Upload image
+          Upload file
         </Button>
         <span className="text-xs text-muted-foreground">
-          Stored privately under this application; images only, documents as links below.
+          Stored privately under this application: images, and documents to archive (PDF, Word,
+          Excel, PowerPoint, CSV, text). Anything else as a link below.
         </span>
       </div>
       {stored.length > 0 && (
         <ul className="space-y-1 text-sm">
           {stored.map((f) => (
-            <FileRow key={f.url} file={f} busy={busy} onRemove={() => files.removeFile(f.url)} />
+            <FileRow
+              key={fileKey(f)}
+              file={f}
+              busy={busy}
+              onRemove={() => files.removeFile(fileKey(f))}
+              onDownload={() => files.download(f)}
+            />
           ))}
         </ul>
       )}
