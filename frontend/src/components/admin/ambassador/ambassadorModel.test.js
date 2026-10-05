@@ -181,6 +181,13 @@ describe('additional programs (owner request 2026-10-05)', () => {
         .map((p) => p.id)
         .sort()
     ).toEqual(['mct', 'mvp', 'rl']);
+    // The same chain with the root membership inactive: the middle program
+    // has a parent and children, so it is promoted too — nothing hidden.
+    expect(
+      programsInPlay([rl, chained, mvp])
+        .map((p) => p.id)
+        .sort()
+    ).toEqual(['mct', 'mvp', 'rl']);
     // A two-program cycle: both at top level.
     const a = { id: 'a', name: 'A', parentProgramId: 'b', membershipStatus: 'active' };
     const b = { id: 'b', name: 'B', parentProgramId: 'a', membershipStatus: 'active' };

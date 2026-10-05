@@ -302,7 +302,11 @@ async function parentRefusal(ctx, parentId, selfId) {
     return `${parent.name} is itself additional to another program; one level only`;
   }
   if (selfId) {
-    const children = (await ctx.listKind('program')).filter((p) => p.parentProgramId === selfId);
+    // The effective catalogue — seeds filled in and backfilled — not only
+    // the stored rows: a seeded child not yet inserted, or not yet carrying
+    // its parent, would otherwise appear on the next read under a program
+    // that just took a parent of its own (#883 review).
+    const children = (await ctx.listPrograms()).filter((p) => p.parentProgramId === selfId);
     if (children.length > 0) {
       return `${children.map((c) => c.name).join(', ')} ${children.length === 1 ? 'is' : 'are'} already additional to this program; one level only`;
     }
