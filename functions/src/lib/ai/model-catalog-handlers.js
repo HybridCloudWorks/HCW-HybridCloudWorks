@@ -42,27 +42,37 @@ async function getModelCatalog(ctx, request, context) {
   }
 }
 
+/**
+ * The PATCH route's inputs, validated: `{ provider, model, hidden }`, or
+ * `{ error }` with the 400 sentence. The provider must be one the router
+ * implements, the model id is URL-decoded (NVIDIA ids carry a `/`), and
+ * the body is exactly `{ hidden: boolean }`.
+ */
+async function parsePatchRequest(request) {
+  const provider = String(request.params.provider || '').trim();
+  if (!PROVIDERS.includes(provider)) {
+    return { error: `Unknown AI provider: ${provider}. Known: ${PROVIDERS.join(', ')}` };
+  }
+  const decoded = decodeModelParam(request.params.model);
+  if (decoded.error) return { error: decoded.error };
+  const body = validBody(await request.json().catch(() => null));
+  if (!body || typeof body.hidden !== 'boolean') {
+    return { error: 'Body must be { hidden: boolean }' };
+  }
+  return { provider, model: decoded.model, hidden: body.hidden };
+}
+
 /** PATCH /api/cms/ai-model-catalog/{provider}/{model} — body { hidden: boolean }. */
 async function patchModelCatalogModel(ctx, request, context) {
   const auth = await ctx.guard.requireRole(request, 'editor');
   if (auth.error) return auth.error;
-  const provider = String(request.params.provider || '').trim();
-  if (!PROVIDERS.includes(provider)) {
-    return json(400, { error: `Unknown AI provider: ${provider}. Known: ${PROVIDERS.join(', ')}` });
-  }
-  const decoded = decodeModelParam(request.params.model);
-  if (decoded.error) return json(400, { error: decoded.error });
-  const body = validBody(await request.json().catch(() => null));
-  if (!body || typeof body.hidden !== 'boolean') {
-    return json(400, { error: 'Body must be { hidden: boolean }' });
-  }
+  const change = await parsePatchRequest(request);
+  if (change.error) return json(400, { error: change.error });
+  const { provider } = change;
   try {
-    const model = await setModelHidden(
-      { store: ctx.store, now: ctx.now },
-      { provider, model: decoded.model, hidden: body.hidden }
-    );
+    const model = await setModelHidden({ store: ctx.store, now: ctx.now }, change);
     if (!model) {
-      return json(404, { error: `${provider} has no model ${decoded.model} in the catalogue` });
+      return json(404, { error: `${provider} has no model ${change.model} in the catalogue` });
     }
     ctx.aiConfigChanged();
     return json(200, { success: true, provider, model });

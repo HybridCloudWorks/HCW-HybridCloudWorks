@@ -231,21 +231,29 @@ const LISTERS = {
       url.searchParams.set('pageSize', '1000');
       if (pageToken) url.searchParams.set('pageToken', pageToken);
       const data = await getJson(ctx.fetchImpl, url.toString(), headers, ctx.timeoutMs);
-      for (const model of Array.isArray(data.models) ? data.models : []) {
-        const methods = Array.isArray(model?.supportedGenerationMethods)
-          ? model.supportedGenerationMethods
-          : [];
-        if (!methods.includes('generateContent')) continue;
-        const name = typeof model?.name === 'string' ? model.name : '';
-        const id = name.replace(/^models\//, '').trim();
-        if (id) ids.push(id);
-      }
+      ids.push(...geminiChatIdsOf(data.models));
       if (!data.nextPageToken) break;
       pageToken = data.nextPageToken;
     }
     return ids;
   },
 };
+
+/**
+ * One Gemini page's chat-capable ids: `models/<id>` entries whose
+ * `supportedGenerationMethods` include `generateContent`; embedding and
+ * image-only models (which the list also returns) are left out.
+ */
+function geminiChatIdsOf(models) {
+  const chatCapable = (model) =>
+    Array.isArray(model?.supportedGenerationMethods) &&
+    model.supportedGenerationMethods.includes('generateContent');
+  return (Array.isArray(models) ? models : [])
+    .filter(chatCapable)
+    .map((model) => (typeof model?.name === 'string' ? model.name : ''))
+    .map((name) => name.replace(/^models\//, '').trim())
+    .filter(Boolean);
+}
 
 /**
  * The context `listModels` reads: the environment, a fetch, and the Foundry
