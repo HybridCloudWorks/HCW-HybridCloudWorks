@@ -96,6 +96,10 @@ export function featureSource(feature) {
  * @param {boolean} [record.unpriced] true when the cost table has no rate
  *   for the model; the row then costs 0 and says so, instead of a default
  *   rate posing as a figure
+ * @param {string} [record.selection] how the resolver chose the candidate
+ *   that served (ADR 0034 §3): `explicit`, `recommended`, `custom` or
+ *   `global`; absent on rows from before the resolver and on callers that
+ *   name a provider themselves
  * @returns {Promise<object|null>} the row written, or null if the write failed
  */
 export async function recordAiUsage(
@@ -110,6 +114,7 @@ export async function recordAiUsage(
     estimatedTokens,
     recordedRowId,
     unpriced,
+    selection,
   }
 ) {
   // Everything is inside the try, including building the row. Pricing it calls
@@ -140,6 +145,7 @@ export async function recordAiUsage(
       // is what every historical row is.
       ...(estimatedTokens ? { estimatedTokens: true } : {}),
       ...(isUnpriced ? { unpriced: true } : {}),
+      ...(typeof selection === 'string' && selection ? { selection } : {}),
       timestamp: now().toISOString(),
     };
 

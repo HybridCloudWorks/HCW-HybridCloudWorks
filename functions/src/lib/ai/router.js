@@ -172,21 +172,39 @@
  *   - Its spend has its own Cost Management budget on the `ai` resource
  *     group (USD 75, alerts at 50/90/100 %), beside the subscription one.
  *
+ * ONE RESOLVER DECIDES THE CHAIN (ADR 0034 slice 3, #858, 2026-10-05). The
+ * per-feature placement and the per-task routes described above are how
+ * the chain was decided until that day; they are now READ through the
+ * selection document, `admin_settings/ai-routing` version 2 (selection.js:
+ * the Priority list and each task's mode and chain). The config loader
+ * migrates a stored v1 document, the placements and the card pins into
+ * that shape in memory (migrate-selection.js), and `chainDetails` hands the
+ * document, the model catalogue and what holds a key to `selectChain`
+ * (select.js), which answers the ordered candidates and why each other one
+ * was turned away. The locks the placement defaults carried — the trial
+ * tier never on the public explain route, grounding Gemini-only — are the
+ * resolver's policy locks, and no document lifts them. What stays here is
+ * the router's own: the feature switch, the key check, the
+ * `CONTENTFORGE_AI_PROVIDER` pin, failover, retries, budgets and usage.
+ *
  * A Key Vault reference that did not resolve arrives as the literal
  * `@Microsoft.KeyVault(...)` string. That is not a key; `readKey` says so.
  */
 
 import {
   DEFAULT_PROVIDER_ORDER,
-  applyFeaturePlacement,
-  applyFeatureRoute,
   createAiConfigLoader,
-  configuredModelFor,
   isFeatureEnabled,
   resolveProviderOrder,
-  routeFor,
 } from './ai-config.js';
+// The resolver (ADR 0034 §3, #858): one pure function decides the chain
+// from the selection document, the catalogue and what holds a key. The
+// per-feature placement and the v1 routes it replaced are migrated into
+// that document by the loader (migrate-selection.js).
+import { selectChain } from './select.js';
+import { defaultSelection } from './migrate-selection.js';
 import { featureSource, recordAiUsage } from './usage.js';
+import { COST_TABLE, DEFAULT_MODEL_TABLE } from './model-tables.js';
 // Source grounding (#433): the pure half — source checks, prompt, request
 // body, response readers — is grounding.js; the call is on the router below.
 // The public names are re-exported so callers and tests are unchanged.
@@ -242,177 +260,10 @@ export const KEY_ENV = Object.freeze({
  */
 export const KEYLESS_PROVIDERS = Object.freeze(['foundry']);
 
-// Provider × purpose → [env var, default model].
-export const DEFAULT_MODEL_TABLE = Object.freeze({
-  anthropic: {
-    draft: ['CONTENTFORGE_ANTHROPIC_DRAFT_MODEL', 'claude-sonnet-4-6'],
-    analysis: ['CONTENTFORGE_ANTHROPIC_ANALYSIS_MODEL', 'claude-sonnet-4-6'],
-    multimodal: ['CONTENTFORGE_ANTHROPIC_MULTIMODAL_MODEL', 'claude-sonnet-4-6'],
-    general: ['CONTENTFORGE_ANTHROPIC_MODEL', 'claude-haiku-4-5'],
-  },
-  openai: {
-    draft: ['CONTENTFORGE_OPENAI_DRAFT_MODEL', 'gpt-5-mini'],
-    analysis: ['CONTENTFORGE_OPENAI_ANALYSIS_MODEL', 'gpt-5-mini'],
-    multimodal: ['CONTENTFORGE_OPENAI_MULTIMODAL_MODEL', 'gpt-5-mini'],
-    general: ['CONTENTFORGE_OPENAI_MODEL', 'gpt-5-nano'],
-  },
-  // Same model ids as upstream's Vertex table; the public Gemini API serves
-  // them too. Env var names keep the GEMINI_ prefix so a Vertex-era override
-  // cannot silently apply here.
-  gemini: {
-    draft: ['CONTENTFORGE_GEMINI_DRAFT_MODEL', 'gemini-3.5-flash-lite'],
-    analysis: ['CONTENTFORGE_GEMINI_ANALYSIS_MODEL', 'gemini-3.6-flash'],
-    multimodal: ['CONTENTFORGE_GEMINI_MULTIMODAL_MODEL', 'gemini-3.6-flash'],
-    general: ['CONTENTFORGE_GEMINI_MODEL', 'gemini-3.5-flash-lite'],
-  },
-  // NVIDIA API Catalog (#701). Ids read from each model's page on
-  // https://build.nvidia.com on 2026-09-25 — the `model` value in the page's
-  // own curl sample, which is NOT always the URL slug (the page
-  // build.nvidia.com/z-ai/glm-5-3 serves `z-ai/glm-5.3`):
-  //   deepseek-ai/deepseek-v4.1-flash  build.nvidia.com/deepseek-ai/deepseek-v4.1-flash
-  //   z-ai/glm-5.3                     build.nvidia.com/z-ai/glm-5-3
-  //   z-ai/glm-5.3-flash               build.nvidia.com/z-ai/glm-5-3-flash
-  // GLM-5.3, the large text MoE, serves every purpose. On the trial tier the
-  // "flash" models were the slow ones, measured direct from a workstation on
-  // 2026-10-04 with a one-line prompt: z-ai/glm-5.3 2.6 s,
-  // z-ai/glm-5.3-flash 70 s, deepseek-ai/deepseek-v4.1-flash over 120 s. The
-  // portal's Test gives up at 45 s, so the GLM-5.3-Flash default failed every
-  // Test while the key was good (#701). Both keep their cost-table rows, so
-  // history still prices, and a CONTENTFORGE_NVIDIA_*_MODEL override can bring
-  // either back once NVIDIA serves it faster; the portal offers only the
-  // defaults below (frontend aiEngine.test.js holds the two lists equal).
-  // Kimi K3 is on the catalogue too, but its page's sample left `model` blank
-  // on the day, so it is not a default. The catalogue changes often: a
-  // retired id is a 404, which fails over to the next provider.
-  nvidia: {
-    draft: ['CONTENTFORGE_NVIDIA_DRAFT_MODEL', 'z-ai/glm-5.3'],
-    analysis: ['CONTENTFORGE_NVIDIA_ANALYSIS_MODEL', 'z-ai/glm-5.3'],
-    multimodal: ['CONTENTFORGE_NVIDIA_MULTIMODAL_MODEL', 'z-ai/glm-5.3'],
-    general: ['CONTENTFORGE_NVIDIA_MODEL', 'z-ai/glm-5.3'],
-  },
-  // Microsoft Foundry (#849): deployment names, which infra/foundry.tf keeps
-  // equal to the model names. Mini for the work that reads a whole draft,
-  // nano for the short calls; the owner picks otherwise on the card.
-  foundry: {
-    draft: ['CONTENTFORGE_FOUNDRY_DRAFT_MODEL', 'gpt-5-mini'],
-    analysis: ['CONTENTFORGE_FOUNDRY_ANALYSIS_MODEL', 'gpt-5-mini'],
-    multimodal: ['CONTENTFORGE_FOUNDRY_MULTIMODAL_MODEL', 'gpt-5-mini'],
-    general: ['CONTENTFORGE_FOUNDRY_MODEL', 'gpt-5-nano'],
-  },
-});
-
-/**
- * Cost table: provider → model → [input USD per 1M, output USD per 1M].
- * Ported verbatim, including rows for providers this router no longer calls
- * (vertex, azure, perplexity, bedrock, replicate): `ai_usage` holds history
- * recorded against them and the admin usage page prices it through here.
- * Re-pricing history would rewrite past spend attribution.
- */
-export const COST_TABLE = Object.freeze({
-  anthropic: {
-    'claude-opus-4-6': [15.0, 75.0],
-    'claude-sonnet-4-6': [3.0, 15.0],
-    'claude-haiku-4-5': [0.8, 4.0],
-    'claude-haiku-4-5-20251001': [0.8, 4.0],
-    default: [3.0, 15.0],
-  },
-  openai: {
-    'gpt-4o': [5.0, 15.0],
-    'gpt-4o-mini': [0.15, 0.6],
-    o1: [15.0, 60.0],
-    'o3-mini': [1.1, 4.4],
-    // gpt-5-mini / gpt-5-nano were UNPRICED (null) from ADR 0033 until
-    // 2026-10-05, when the owner confirmed OpenAI's published rates — the
-    // same figures the Azure OpenAI pricing page lists for the same models
-    // (read 2026-10-04). Rows written while they were null stay at 0 with
-    // `unpriced: true`; the Usage tab counts and says so. A null row is still
-    // how a model with no confirmed rate is kept honest (isPriced).
-    'gpt-5-mini': [0.25, 2.0],
-    'gpt-5-nano': [0.05, 0.4],
-    default: [5.0, 15.0],
-  },
-  gemini: {
-    'gemini-3.6-flash': [1.5, 7.5],
-    'gemini-3.5-flash': [1.5, 9.0],
-    'gemini-3.5-flash-lite': [0.3, 2.5],
-    'gemini-2.5-pro': [3.5, 10.5],
-    'gemini-2.5-flash': [0.3, 2.5],
-    'gemini-2.5-flash-lite': [0.1, 0.4],
-    // Text-to-speech (Listen & Learn). The output rate prices AUDIO tokens and
-    // is an order of magnitude above the text rates, which is why an episode's
-    // cost is dominated by its length rather than its prompt. Read from the
-    // published paid-tier pricing on 2026-08-24; the flash TTS model is half
-    // the price of the other two, which is why it is the default in
-    // listen-and-learn/speech/gemini.js.
-    'gemini-2.5-flash-preview-tts': [0.5, 10.0],
-    'gemini-2.5-pro-preview-tts': [1.0, 20.0],
-    'gemini-3.1-flash-tts-preview': [1.0, 20.0],
-    default: [0.3, 2.5],
-  },
-  vertex: {
-    'gemini-3.6-flash': [1.5, 7.5],
-    'gemini-3.5-flash': [1.5, 9.0],
-    'gemini-3.5-flash-lite': [0.3, 2.5],
-    'gemini-2.5-pro': [3.5, 10.5],
-    'gemini-2.5-flash': [0.3, 2.5],
-    'gemini-2.5-flash-lite': [0.1, 0.4],
-    default: [0.3, 2.5],
-  },
-  perplexity: {
-    'sonar-pro': [3.0, 15.0],
-    sonar: [1.0, 1.0],
-    default: [3.0, 15.0],
-  },
-  azure: {
-    'gpt-4o': [5.0, 15.0],
-    'gpt-4o-mini': [0.15, 0.6],
-    default: [5.0, 15.0],
-  },
-  bedrock: {
-    'amazon.nova-micro-v1:0': [0.035, 0.14],
-    'amazon.nova-lite-v1:0': [0.06, 0.24],
-    'amazon.nova-pro-v1:0': [0.8, 3.2],
-    default: [0.06, 0.24],
-  },
-  // ElevenLabs speech (Listen & Learn), priced PER CHARACTER: the "output"
-  // unit of a row is the billed character count, promptTokens is always 0,
-  // and USD 0.10 per 1,000 characters is USD 100 per 1M. Read from the API
-  // pricing page for the Starter and Creator plans on 2026-09-08. Expressed
-  // in the table's per-1M shape so getCostEstimate and the admin usage page
-  // price these rows without learning a new unit — see the header of
-  // listen-and-learn/speech/elevenlabs.js.
-  elevenlabs: {
-    eleven_v3: [0, 100.0],
-    default: [0, 100.0],
-  },
-  // NVIDIA API Catalog trial tier (#701): free, so every row is zero — the
-  // Usage tab then shows these calls, and what they did not cost, instead of
-  // pricing them at a guessed rate. `default` covers a model the portal or an
-  // env override pins. If the owner ever moves to a paid NVIDIA plan, these
-  // rows are what change.
-  nvidia: {
-    'z-ai/glm-5.3': [0, 0],
-    'z-ai/glm-5.3-flash': [0, 0],
-    'deepseek-ai/deepseek-v4.1-flash': [0, 0],
-    default: [0, 0],
-  },
-  // Microsoft Foundry (#849): Global Standard, USD per 1M tokens, read from
-  // the Azure OpenAI pricing page on 2026-10-04. `default` is the mini rate
-  // so a deployment added on the card prices high rather than free.
-  foundry: {
-    'gpt-5-nano': [0.05, 0.4],
-    'gpt-5-mini': [0.25, 2.0],
-    'gpt-4.1-nano': [0.1, 0.4],
-    default: [0.25, 2.0],
-  },
-  replicate: {
-    'meta/llama-3.1-405b-instruct': [0.65, 2.75],
-    'meta/llama-3.1-70b-instruct': [0.35, 1.4],
-    'meta/llama-3.1-8b-instruct': [0.05, 0.25],
-    'mistralai/mistral-7b-instruct-v0.2': [0.05, 0.25],
-    default: [0.35, 1.4],
-  },
-});
+// The purpose → model table and the cost table live in model-tables.js
+// (#858, so the catalogue can read them without this module); every caller
+// keeps importing them from here.
+export { COST_TABLE, DEFAULT_MODEL_TABLE } from './model-tables.js';
 
 /**
  * Does the cost table price this model? False for a row deliberately set to
@@ -1075,12 +926,20 @@ function activeProvider(ctx) {
  * @returns {Promise<Array<{provider: string, model: string|null}>>}
  */
 async function providerChain(ctx, feature = null) {
-  const { chain, disabled, excluded } = await chainDetails(ctx, feature);
+  const { chain, disabled, excluded, uncapable } = await chainDetails(ctx, feature);
 
   if (chain.length === 0) {
     if (excluded.length > 0 && disabled.length === 0) {
       throw new AiNotConfiguredError(
         `The only configured AI provider (${excluded.join(', ')}) is not used for ${feature ? `'${feature}'` : 'calls that name no feature'}. Seed GEMINI_API_KEY, OPENAI_API_KEY or ANTHROPIC_API_KEY (Required-Inputs §4.6), or change its placement under AI Engine → Where AI is used where that is allowed.`
+      );
+    }
+    if (uncapable.length > 0 && disabled.length === 0) {
+      // ADR 0034 §6: a task whose `needs` no configured provider can carry
+      // fails naming the capability, not with a 500 or "not configured".
+      const capabilities = [...new Set(uncapable.flatMap((r) => r.missing))];
+      throw new AiNotConfiguredError(
+        `No eligible model carries ${capabilities.map((c) => `'${c}'`).join(', ')} for ${feature ? `'${feature}'` : 'this call'}: ${uncapable.map((r) => `${r.provider} (${r.why})`).join('; ')}. Enable a provider whose models carry it under AI Engine → AI Services, or name one in the task's chain.`
       );
     }
     throw new AiNotConfiguredError(
@@ -1093,76 +952,100 @@ async function providerChain(ctx, feature = null) {
   return chain;
 }
 
+/** Rejections a provider earned for the task's sake, not for want of a key or a switch. */
+const NOT_USED_CODES = Object.freeze(['excluded', 'policy']);
+/** Rejections for want of a model that carries the task's needs. */
+const NO_MODEL_CODES = Object.freeze(['capability', 'retired', 'no-model']);
+
 /**
  * The chain and how it was arrived at — the selection behind
  * `providerChain`, kept separate so the grounded path can apply the SAME
  * selection and then say precisely why Gemini is not in it. The empty chain
  * is left to the callers, who have different sentences for it.
  *
- * @returns {Promise<{chain: Array<{provider: string, model: string|null}>,
- *                    disabled: string[], excluded: string[], pinned: string}>}
+ * The decision is the resolver's (select.js, ADR 0034 §3): the selection
+ * document (a v1 routing document is migrated in memory by the loader; no
+ * document at all is the code defaults), the catalogue, and what holds a
+ * key and is switched on. What stays here is the router's own: the feature
+ * switch, the key check, and the `CONTENTFORGE_AI_PROVIDER` pin, which is
+ * an instruction rather than a preference — it selects one provider from
+ * the resolved chain and does NOT fall through to the others, and it cannot
+ * add a provider the resolver turned away.
+ *
+ * @returns {Promise<{chain: Array<{provider: string, model: string|null, selection: string}>,
+ *                    disabled: string[], excluded: string[], uncapable: Array<object>,
+ *                    rejected: Array<object>, flags: string[], pinned: string}>}
  */
 async function chainDetails(ctx, feature = null) {
-  const { providers: docs, features, routing } = await ctx.config.load();
+  const { providers: docs, features, selection, catalog } = await ctx.config.load();
 
   if (feature && !isFeatureEnabled(features, feature)) {
     throw new AiFeatureDisabledError(feature);
   }
 
-  const available = keyedProviders(ctx);
-  const resolved = resolveProviderOrder(docs, available);
-  const { disabled } = resolved;
-  // Per-feature placement after the global order: it can move a provider
-  // or remove it, never add one (ai-config.js, rule 1). A pin below is
-  // checked against THIS order, so pinning nvidia cannot route a public
-  // feature to it.
-  const { order, excluded } = applyFeaturePlacement(resolved.order, features, feature);
-
-  // Per-task routing (ADR 0033 §4) after placement: a route reorders the
-  // providers this feature may use and names a model per step; it cannot
-  // add a provider that has no key, is switched off, or is placed off.
-  const route = routeFor(routing, feature);
-  const routed = applyFeatureRoute(order, route);
-  if (route && routed.skipped.length) {
+  const keyed = keyedProviders(ctx);
+  const { order: enabled, disabled } = resolveProviderOrder(docs, keyed);
+  const selected = selectChain({
+    task: feature,
+    selection: selection || defaultSelection(),
+    catalog,
+    availability: { keyed, enabled },
+  });
+  for (const flag of selected.flags) {
+    ctx.log.warn?.(`[ai-router] '${feature || 'no feature'}': ${flag}`);
+  }
+  // A custom chain step that cannot serve is logged, as a skipped v1 route
+  // was: the administrator named it and should see why it did not answer.
+  const skipped = selected.rejected.filter((r) => r.selection === 'custom');
+  if (skipped.length) {
     ctx.log.warn?.(
-      `[ai-router] '${feature}' routes to ${routed.skipped.join(', ')} but ${
-        routed.skipped.length === 1 ? 'it is' : 'they are'
-      } not available (no key, disabled, or placed off); serving from ${
-        routed.chain[0]?.provider || 'none'
+      `[ai-router] '${feature}' routes to ${skipped.map((r) => r.provider).join(', ')} but ${
+        skipped.length === 1 ? 'it is' : 'they are'
+      } not available (${skipped.map((r) => r.why).join('; ')}); serving from ${
+        selected.chain[0]?.provider || 'none'
       }`
     );
   }
+  // Providers that hold a key and are on, but may not serve this task; and
+  // those that may but have no model that carries what it needs. Each is
+  // the subject of a different sentence in providerChain.
+  const excluded = selected.rejected
+    .filter((r) => NOT_USED_CODES.includes(r.code))
+    .map((r) => r.provider);
+  const uncapable = selected.rejected.filter((r) => NO_MODEL_CODES.includes(r.code));
 
   const pinned = pinnedProvider(ctx);
-  let chain = routed.chain;
+  let { chain } = selected;
   if (pinned) {
-    if (order.includes(pinned)) {
-      // An explicit pin is an instruction, not a preference: it selects one
-      // provider and does NOT fall through to the others — a route is a
-      // preference, so the pin wins over it too.
-      chain = routed.chain.filter((entry) => entry.provider === pinned);
+    if (chain.some((entry) => entry.provider === pinned)) {
+      chain = chain.filter((entry) => entry.provider === pinned);
     } else {
       let why = 'its key is not present';
       if (disabled.includes(pinned)) why = 'it is disabled in the admin portal';
       else if (excluded.includes(pinned)) why = `it is not used for '${feature || 'no feature'}'`;
+      else if (uncapable.some((r) => r.provider === pinned)) {
+        why = `no model of its carries what '${feature || 'no feature'}' needs`;
+      }
       ctx.log.warn?.(
-        `[ai-router] CONTENTFORGE_AI_PROVIDER=${pinned} but ${why}; falling back to ${order[0] || 'none'}`
+        `[ai-router] CONTENTFORGE_AI_PROVIDER=${pinned} but ${why}; falling back to ${chain[0]?.provider || 'none'}`
       );
     }
   }
 
   return {
-    // The model named on the route wins over the provider card's pin; a
-    // step with no routed model keeps the card's choice (then the purpose
-    // table, in callWith).
-    chain: chain.map(({ provider, model }) => ({
+    // A null model is the provider's default for the call's purpose
+    // (callWith → modelFor), as the select.js header explains.
+    chain: chain.map(({ provider, model, selection: source }) => ({
       provider,
-      model: model || configuredModelFor(docs, provider),
+      model,
+      selection: source,
     })),
     disabled,
     excluded,
+    uncapable,
+    rejected: selected.rejected,
+    flags: selected.flags,
     pinned,
-    routed: Boolean(route),
   };
 }
 
@@ -1221,10 +1104,10 @@ async function callWithFailover(
   // the caller's array with the row ids attached (recordCallUsage).
   const collected = [];
 
-  for (const [index, { provider, model: configuredModel }] of chain.entries()) {
+  for (const [index, { provider, model: configuredModel, selection }] of chain.entries()) {
     const shareEnd = budget ? shareEndFor(ctx.now, budget, { chain, index, attempts }) : null;
-    // An explicit model from the call site wins; then the route's or the
-    // administrator's choice in the portal; then the purpose table.
+    // An explicit model from the call site wins; then the resolver's choice
+    // (the chain's or the document's); then the purpose table.
     const model = explicitModel || configuredModel;
     try {
       const result = await withRetry(
@@ -1234,6 +1117,10 @@ async function callWithFailover(
         { provider, shareEnd }
       );
       await ctx.reportKeyVerdict(provider, { ok: true });
+      // How the candidate was chosen (ADR 0034 §3), on the row the Usage
+      // tab reads: `explicit` for a call-site model, else the chain's.
+      const source = explicitModel ? 'explicit' : selection;
+      if (source) for (const entry of collected) entry.selection ??= source;
       const recorded = await recordCallUsage(ctx, collected, feature);
       if (Array.isArray(usageOut)) usageOut.push(...recorded);
       return result;
@@ -1683,6 +1570,7 @@ async function generateGroundedJson(
   }
 
   const selectedModel = model || gemini.model || modelFor(ctx, 'gemini', purpose);
+  const selection = model ? 'explicit' : gemini.selection;
   const body = buildGroundedRequest({
     model: selectedModel,
     prompt,
@@ -1696,7 +1584,11 @@ async function generateGroundedJson(
   // Usage before the status check, so a failed-but-billed interaction is
   // still on the spend page.
   const usage = data?.usage || {};
-  const recorded = await recordCallUsage(ctx, groundedUsageRow(selectedModel, usage), feature);
+  const recorded = await recordCallUsage(
+    ctx,
+    groundedUsageRow(selectedModel, usage).map((row) => ({ ...row, selection })),
+    feature
+  );
   if (Array.isArray(usageOut)) usageOut.push(...recorded);
   logUsage(ctx, 'gemini', usage, selectedModel, purpose);
 

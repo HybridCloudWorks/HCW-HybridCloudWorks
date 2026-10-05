@@ -1126,6 +1126,8 @@ describe('source grounding — the call (#433)', () => {
         promptTokens: 1100,
         completionTokens: 25,
         costUsd: getCostEstimate('gemini', 'gemini-3.6-flash', 1100, 25),
+        // No document: the task is in global mode (ADR 0034 §3, #858).
+        selection: 'global',
       },
     ]);
   });
@@ -1202,25 +1204,26 @@ describe('source grounding — the call (#433)', () => {
       expect(fetch).not.toHaveBeenCalled();
     });
 
-    it('CONTENTFORGE_AI_PROVIDER pins another provider: the pin is named, nothing is called', async () => {
-      const fetch = vi.fn();
+    it('CONTENTFORGE_AI_PROVIDER pins another provider: the pin is named and not honoured, Gemini serves', async () => {
+      // Since the resolver (ADR 0034 §3, #858) grounding is a policy lock,
+      // Gemini-only, like the trial tier on the public route: a pin on a
+      // provider the lock turns away falls back with a warning naming it,
+      // exactly as a pin on nvidia for the public route always has. Before
+      // the resolver the pin emptied the chain and the call failed.
+      const fetch = vi.fn(async () => interactionReply('{}'));
+      const log = { warn: vi.fn() };
       const r = createAiRouter({
         env: { ...keys, CONTENTFORGE_AI_PROVIDER: 'openai' },
         fetch,
         sleep: noSleep,
-        log: quiet,
+        log,
       });
-      await expect(
-        r.generateGroundedJsonResponse({
-          prompt: 'p',
-          sources,
-          feature: 'sourceGrounding',
-        })
-      ).rejects.toMatchObject({
-        code: 'AI_NOT_CONFIGURED',
-        message: expect.stringMatching(/CONTENTFORGE_AI_PROVIDER pins openai/),
-      });
-      expect(fetch).not.toHaveBeenCalled();
+      await r.generateGroundedJsonResponse({ prompt: 'p', sources, feature: 'sourceGrounding' });
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(new URL(fetch.mock.calls[0][0]).host).toBe('generativelanguage.googleapis.com');
+      expect(log.warn).toHaveBeenCalledWith(
+        expect.stringMatching(/CONTENTFORGE_AI_PROVIDER=openai but it is not used for 'sourceGrounding'/)
+      );
     });
 
     it('a pin on gemini itself is fine', async () => {

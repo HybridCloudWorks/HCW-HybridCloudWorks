@@ -1,0 +1,415 @@
+/**
+ * select.js — the resolver (ADR 0034 §3, slice 3, #858): ONE pure function
+ * from (task, selection document, model catalogue, availability) to the
+ * ordered chain of candidates a call may use, each with the reason it is
+ * there, beside every candidate that was considered and turned away, with
+ * the reason it was. The router calls it and nothing else decides; the
+ * Tasks tab (slice 4) shows its answer, so the page can never disagree
+ * with production.
+ *
+ * PRECEDENCE, the first rule that yields a model wins:
+ *
+ *   1. An explicit model from the call site: every candidate carries it,
+ *      and usage records the call as `explicit`.
+ *   2. Task mode `recommended`: the registry's recommended model (tasks.js),
+ *      if it is `live` in the catalogue, priced, its provider keyed and
+ *      enabled, and it carries the task's `needs`. Otherwise it is skipped
+ *      with a flag and the global list serves. When it is eligible the
+ *      global list still follows it, so a task is never left with fewer
+ *      options than the list (failover is unchanged).
+ *   3. Task mode `custom`: the chain in order, then the global list if
+ *      `thenGlobal`. A custom chain with no eligible entry and `thenGlobal`
+ *      off is read as `global` and flagged (§6).
+ *   4. Task mode `global`, the default: the Priority list, Priority 1 first.
+ *   5. Always, for every candidate: the provider holds a key (or endpoint)
+ *      and is enabled; it is not in the task's `exclude`; the model is not
+ *      `retired` and carries `needs`; and the policy locks hold. A locked or
+ *      ineligible candidate is in `rejected` with a sentence, never silently
+ *      dropped.
+ *
+ * THE POLICY LOCKS ARE CODE, and no document lifts them:
+ *   - a trial-tier provider (TRIAL_TIER_PROVIDERS) never serves a task with
+ *     `public: true`, nor a call that names no task — an undeclared call is
+ *     not one anybody chose to send to a trial tier;
+ *   - a task whose `needs` include `grounding` is served by Gemini only
+ *     (router.js header: the Interactions API is the one door to pages and
+ *     YouTube).
+ * `ai-config.test.js` tested the placement locks in both directions; the
+ * tests here do the same for these.
+ *
+ * A MODEL THE CATALOGUE DOES NOT KNOW IS ALLOWED, WITH A FLAG. A pinned id
+ * before the first refresh, a model listed as `unknown`, or no catalogue at
+ * all (the loader could not read it): the candidate stays, judged on the
+ * code enrichment table's capabilities, and the chain says so. A fresh
+ * deployment never goes dark for want of a list. Only `retired` removes.
+ *
+ * A NULL MODEL IS THE PROVIDER'S DEFAULT FOR THE CALL'S PURPOSE. Today a
+ * step with no model is served by DEFAULT_MODEL_TABLE (router.js) by the
+ * call's purpose — mini for a draft, nano for a short answer on Foundry —
+ * and the owner's 2026-10-04 decision ("GPT-5 mini for anything that reads a
+ * whole draft") lives in that table and in each task's recommendation. ADR
+ * 0034 §2 reads a null as the provider's recommended model for the task's
+ * MODALITY (provider-recommendations.js); on a text task that is nano, so
+ * applying it here would move every drafting task to nano the moment this
+ * merged, before the Tasks tab exists to choose Recommended. So this slice
+ * applies §2 to ELIGIBILITY — a null step is judged on the modality
+ * recommendation, which is what keeps a vision task off a provider whose
+ * text model cannot read images — and reports it as `modalityModel`, while
+ * `model` stays null for the router's purpose table, exactly as before.
+ * Slice 4 (#859) makes `model` the modality recommendation when it ships
+ * the control to choose otherwise: one line, marked NULL MODEL below. The
+ * contract test (select.contract.test.js) holds this slice to the chains
+ * the pre-slice router produced.
+ *
+ * Free of I/O and of `ctx`: everything it reads is an argument.
+ */
+import { DEFAULT_PROVIDER_ORDER } from './provider-order.js';
+import { taskFor } from './tasks.js';
+import { recommendedModelFor } from './provider-recommendations.js';
+import { enrichmentFor } from './model-enrichment.js';
+
+/** Providers on a trial tier: free, rate-limited, under trial terms (router.js header, #701). */
+export const TRIAL_TIER_PROVIDERS = Object.freeze(['nvidia']);
+/** The providers that can ground a generation on pages and YouTube (#433). */
+export const GROUNDING_PROVIDERS = Object.freeze(['gemini']);
+
+/** How a chain entry was chosen; the usage row carries it. */
+export const SELECTION_SOURCES = Object.freeze(['explicit', 'recommended', 'custom', 'global']);
+
+/**
+ * What a call that names no task (or an unknown one) is judged as: a text
+ * call, and public — the trial tier never serves it, as `placementFor`
+ * answered 'off' for a call with no feature.
+ */
+export const UNDECLARED_TASK = Object.freeze({
+  id: null,
+  label: 'a call that names no task',
+  modality: 'text',
+  needs: Object.freeze(['text']),
+  public: true,
+  recommended: null,
+});
+
+/** The Priority list a document with none reads as: the default order, provider defaults. */
+export const DEFAULT_PRIORITY = Object.freeze(
+  DEFAULT_PROVIDER_ORDER.map((provider) => Object.freeze({ provider, model: null }))
+);
+
+const isPlainObject = (value) =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+/** The task definition for an id: the registry's, or UNDECLARED_TASK. */
+function definitionOf(task) {
+  if (isPlainObject(task) && Array.isArray(task.needs)) return task;
+  const found = typeof task === 'string' ? taskFor(task) : undefined;
+  return found ? { id: task, ...found } : UNDECLARED_TASK;
+}
+
+/** The task's entry in the document: `{ mode, chain?, thenGlobal?, exclude? }`, `global` when absent. */
+function entryOf(selection, def) {
+  const entry = def.id ? selection?.tasks?.[def.id] : null;
+  return isPlainObject(entry) ? entry : { mode: 'global' };
+}
+
+/**
+ * What the catalogue says about one model, or what the code says when the
+ * catalogue does not list it: `listed` false, status `unknown`, the
+ * enrichment table's capabilities, pricing unknown.
+ */
+function catalogEntry(catalog, provider, model) {
+  const providerEntry = catalog?.providers?.[provider];
+  const stored = providerEntry?.models?.[model];
+  if (isPlainObject(stored)) {
+    return {
+      listed: true,
+      status: stored.status || 'unknown',
+      capabilities: Array.isArray(stored.capabilities) ? stored.capabilities : [],
+      unpriced: stored.unpriced === true,
+      stale: providerEntry.stale === true,
+    };
+  }
+  return {
+    listed: false,
+    status: 'unknown',
+    capabilities: enrichmentFor(model).capabilities,
+    unpriced: null,
+    stale: providerEntry?.stale === true,
+  };
+}
+
+/** A turned-away candidate: where it came from (`selection`), the code a caller can key on, the sentence a page shows. */
+const reject = (step, code, why) => ({
+  provider: step.provider,
+  model: step.model,
+  selection: step.selection,
+  code,
+  why,
+});
+
+/**
+ * Rule 5's provider half: keyed, enabled, not excluded, and the locks. A
+ * rejection, or null when the provider may serve this task.
+ */
+function providerRejection(step, { def, availability, exclude }) {
+  const { provider } = step;
+  if (!DEFAULT_PROVIDER_ORDER.includes(provider)) {
+    return reject(step, 'unknown', `not available: ${provider} is not a provider the router implements`);
+  }
+  if (!availability.keyed.includes(provider)) {
+    return reject(step, 'no-key', `not available: ${provider} holds no key`);
+  }
+  if (!availability.enabled.includes(provider)) {
+    return reject(step, 'disabled', `not available: ${provider} is switched off in the admin portal`);
+  }
+  if (exclude.includes(provider)) {
+    return reject(step, 'excluded', `not used: ${provider} is excluded for this task`);
+  }
+  if (TRIAL_TIER_PROVIDERS.includes(provider) && def.public) {
+    return reject(step, 'policy', 'not eligible: trial tier on a public route');
+  }
+  if (def.needs.includes('grounding') && !GROUNDING_PROVIDERS.includes(provider)) {
+    return reject(step, 'policy', 'not eligible: grounding is Gemini-only');
+  }
+  return null;
+}
+
+/**
+ * Rule 5's model half for a named model: not retired, carries `needs`. A
+ * rejection, or `{ note }` with the flag a not-yet-listed model earns.
+ */
+function modelVerdict(step, model, { def, catalog }) {
+  const { provider } = step;
+  const entry = catalogEntry(catalog, provider, model);
+  if (entry.status === 'retired') {
+    return { rejection: reject(step, 'retired', `not eligible: ${model} is retired on ${provider}`) };
+  }
+  const missing = def.needs.filter((need) => !entry.capabilities.includes(need));
+  if (missing.length) {
+    return {
+      rejection: reject(
+        step,
+        'capability',
+        `not eligible: ${model} on ${provider} does not carry ${missing.join(', ')}`
+      ),
+      missing,
+    };
+  }
+  let note = null;
+  if (!entry.listed) note = `${model} on ${provider} is not in the catalogue yet; allowed until a refresh says otherwise`;
+  else if (entry.status === 'unknown') note = `${model} on ${provider} has not been confirmed by a catalogue refresh yet`;
+  return { entry, note };
+}
+
+/**
+ * Rule 2's stricter model half: the recommendation must be `live` (a stale
+ * provider's live model still counts, with a note) and priced.
+ */
+function recommendedVerdict(step, { def, catalog }) {
+  const verdict = modelVerdict(step, step.model, { def, catalog });
+  if (verdict.rejection) return verdict;
+  const { entry } = verdict;
+  if (entry.status !== 'live') {
+    return {
+      rejection: reject(
+        step,
+        entry.listed ? 'not-live' : 'not-listed',
+        `not recommended: ${step.model} on ${step.provider} is ${entry.listed ? entry.status : 'not'} in the catalogue`
+      ),
+    };
+  }
+  if (entry.unpriced) {
+    return {
+      rejection: reject(step, 'unpriced', `not recommended: ${step.model} on ${step.provider} is unpriced`),
+    };
+  }
+  return { entry, note: entry.stale ? `${step.provider}'s catalogue list is stale` : null };
+}
+
+/**
+ * One candidate judged: `{ accepted }` or `{ rejection }`. The accepted
+ * entry carries `model` (null for a provider default — header), the
+ * `modalityModel` a null was judged on, `selection` and `why`.
+ */
+function judge(step, where, deps) {
+  const rejection = providerRejection(step, deps);
+  if (rejection) return { rejection };
+  const { def, explicitModel, catalog } = deps;
+
+  if (explicitModel) {
+    return {
+      accepted: {
+        provider: step.provider,
+        model: explicitModel,
+        modalityModel: null,
+        selection: 'explicit',
+        why: `explicit model from the call site; ${where}`,
+      },
+    };
+  }
+
+  if (step.selection === 'recommended') {
+    const verdict = recommendedVerdict(step, deps);
+    if (verdict.rejection) return verdict;
+    return {
+      accepted: {
+        provider: step.provider,
+        model: step.model,
+        modalityModel: step.model,
+        selection: 'recommended',
+        why: [`recommended for this task: ${def.recommended?.reason || ''}`.trim(), verdict.note]
+          .filter(Boolean)
+          .join(' · '),
+      },
+    };
+  }
+
+  const named = step.model;
+  const modality = named ? null : recommendedModelFor(step.provider, def.modality);
+  if (!named && !modality) {
+    return {
+      rejection: reject(
+        step,
+        'no-model',
+        `no model: ${step.provider} has no recommended model for ${def.modality}`
+      ),
+    };
+  }
+  const judged = named || modality.model;
+  const verdict = modelVerdict(step, judged, { def, catalog });
+  if (verdict.rejection) return verdict;
+  return {
+    accepted: {
+      provider: step.provider,
+      // NULL MODEL (header): slice 4 makes this `judged` for a null step.
+      model: named,
+      modalityModel: judged,
+      selection: step.selection,
+      why: [
+        where,
+        named ? `model ${named}` : `model: the provider's default for the call's purpose (${judged} for ${def.modality})`,
+        verdict.note,
+      ]
+        .filter(Boolean)
+        .join(' · '),
+    },
+  };
+}
+
+/** The Priority list's steps, labelled `global`, with the fallback for an empty list. */
+function globalSteps(selection, flags) {
+  const priority = selection?.global?.priority;
+  if (Array.isArray(priority) && priority.length) {
+    return priority.map((step, index) => ({
+      ...step,
+      selection: 'global',
+      where: `Priority ${index + 1}`,
+    }));
+  }
+  if (selection) flags.push('the Priority list is empty; using the default provider order');
+  return DEFAULT_PRIORITY.map((step, index) => ({
+    ...step,
+    selection: 'global',
+    where: `Priority ${index + 1} (default order)`,
+  }));
+}
+
+/** Rejection codes that hold for the provider whatever model a later step names. */
+const PROVIDER_LEVEL = Object.freeze(['unknown', 'no-key', 'disabled', 'excluded', 'policy']);
+
+/**
+ * Walk the steps in order, one entry per provider, collecting rejections. A
+ * provider accepted once is not judged again; one turned away for its own
+ * sake (no key, switched off, excluded, locked) is not judged again either,
+ * so the page sees one sentence per provider; a model-level rejection (a
+ * retired or unable model) leaves a later step naming another model its
+ * chance.
+ */
+function walk(steps, deps, rejected) {
+  const chain = [];
+  const settled = new Set();
+  for (const step of steps) {
+    if (settled.has(step.provider)) continue;
+    const { accepted, rejection } = judge(step, step.where, deps);
+    if (accepted) {
+      chain.push(accepted);
+      settled.add(step.provider);
+    } else {
+      rejected.push(rejection);
+      if (PROVIDER_LEVEL.includes(rejection.code)) settled.add(step.provider);
+    }
+  }
+  return chain;
+}
+
+/**
+ * The chain for one call.
+ *
+ * @param {object} params
+ * @param {string|object|null} params.task  A task id (tasks.js), the task
+ *   object, or null for a call that names none.
+ * @param {object|null} params.selection  The v2 document as normalizeSelection
+ *   returns it; null reads as the default order and every task `global`.
+ * @param {object|null} params.catalog  As readModelCatalog returns it; null
+ *   when it could not be read (every model then judged by the code table).
+ * @param {{ keyed: string[], enabled: string[] }} params.availability
+ *   Providers holding a key, and those not switched off.
+ * @param {string|null} [params.explicitModel]  A model the call site named.
+ * @returns {{ mode: string, chain: Array<{ provider: string, model: string|null,
+ *   modalityModel: string|null, selection: string, why: string }>,
+ *   rejected: Array<{ provider: string, model: string|null, code: string, why: string }>,
+ *   flags: string[] }}
+ */
+export function selectChain({ task, selection = null, catalog = null, availability, explicitModel = null }) {
+  const def = definitionOf(task);
+  const entry = entryOf(selection, def);
+  const exclude = Array.isArray(entry.exclude) ? entry.exclude : [];
+  const deps = {
+    def,
+    catalog,
+    exclude,
+    explicitModel: typeof explicitModel === 'string' && explicitModel.trim() ? explicitModel.trim() : null,
+    availability: {
+      keyed: Array.isArray(availability?.keyed) ? availability.keyed : [],
+      enabled: Array.isArray(availability?.enabled) ? availability.enabled : [],
+    },
+  };
+  const flags = [];
+  const rejected = [];
+  let mode = entry.mode;
+  const global = globalSteps(selection, flags);
+
+  if (mode === 'recommended') {
+    const steps = [];
+    if (def.recommended && !deps.explicitModel) {
+      steps.push({ ...def.recommended, selection: 'recommended', where: 'recommended' });
+    } else if (!def.recommended) {
+      flags.push(`${def.label} has no recommended model; using the Priority list`);
+      mode = 'global';
+    }
+    const chain = walk([...steps, ...global], deps, rejected);
+    if (steps.length && chain[0]?.selection !== 'recommended') {
+      const why = rejected.find((r) => r.provider === steps[0].provider && r.model === steps[0].model);
+      flags.push(`the recommended model is not eligible (${why?.why || 'see rejected'}); using the Priority list`);
+      mode = 'global';
+    }
+    return { mode, chain, rejected, flags };
+  }
+
+  if (mode === 'custom') {
+    const custom = (Array.isArray(entry.chain) ? entry.chain : []).map((step, index) => ({
+      ...step,
+      selection: 'custom',
+      where: `custom chain, step ${index + 1}`,
+    }));
+    const thenGlobal = entry.thenGlobal !== false;
+    const chain = walk(thenGlobal ? [...custom, ...global] : custom, deps, rejected);
+    if (chain.length) return { mode, chain, rejected, flags };
+    if (!thenGlobal) {
+      flags.push('no entry of the custom chain is eligible and the Priority list does not follow it; using the Priority list');
+      return { mode: 'global', chain: walk(global, deps, rejected), rejected, flags };
+    }
+    return { mode, chain, rejected, flags };
+  }
+
+  return { mode: 'global', chain: walk(global, deps, rejected), rejected, flags };
+}

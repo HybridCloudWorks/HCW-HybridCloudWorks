@@ -13,6 +13,14 @@
  * leaves the card's choice (or the purpose table) in force.
  *
  * Split from ai-config.js, which re-exports everything here.
+ *
+ * DEPRECATED: the v1 document (ADR 0034 slice 3, #858). The router no
+ * longer calls `applyFeatureRoute`; a stored v1 document is migrated in
+ * memory to the version 2 selection document (migrate-selection.js: a
+ * route → a `custom` chain with `thenGlobal: true`) and the first PUT after
+ * the merge stores version 2. `normalizeRouting` stays as the migration's
+ * reader and for the v1 view the Routing tab reads until slice 4 (#859)
+ * replaces it with the Tasks tab.
  */
 import { FEATURE_NAMES } from './features-catalogue.js';
 import { DEFAULT_PROVIDER_ORDER } from './provider-order.js';

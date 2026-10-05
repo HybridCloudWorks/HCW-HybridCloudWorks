@@ -40,8 +40,6 @@
  * badged on the card and never recommended (ADR 0034 §2).
  */
 import {
-  COST_TABLE,
-  DEFAULT_MODEL_TABLE,
   KEY_ENV,
   NVIDIA_BASE_URL,
   PROVIDERS,
@@ -51,97 +49,47 @@ import {
   foundryTokenScope,
   readKey,
 } from './router.js';
-import { SETTINGS_CONTAINER } from './ai-config.js';
-import { CAPABILITIES, MODALITIES } from './tasks.js';
+import { SETTINGS_CONTAINER } from './containers.js';
+import {
+  CATALOG_DOC_ID,
+  CATALOG_SCHEMA_VERSION,
+  RETIRE_AFTER_MISSED,
+  isPlainObject,
+  normalizeModel,
+  normalizeProvider,
+  seedModelsFor,
+  unknownModel,
+} from './model-catalog-doc.js';
 
-export const CATALOG_DOC_ID = 'ai-model-catalog';
-export const CATALOG_SCHEMA_VERSION = 1;
-export const MODEL_STATUSES = Object.freeze(['live', 'retired', 'unknown']);
-/** Consecutive successful lists without a model before it is retired. */
-export const RETIRE_AFTER_MISSED = 2;
-/** The refresh is weekly; a `lastOk` older than this is `stale` at read time. */
-export const STALE_AFTER_MS = 8 * 24 * 60 * 60 * 1000;
+/**
+ * The document half — its shape, enrichment, the seeded defaults and the
+ * read path — is model-catalog-doc.js since slice 3 (#858), so the config
+ * loader can read the catalogue without the list adapters below; every
+ * caller keeps importing from here.
+ */
+export {
+  CATALOG_DOC_ID,
+  CATALOG_SCHEMA_VERSION,
+  DEFAULT_ENRICHMENT,
+  ENRICHMENT_TABLE,
+  ENRICHMENT_VOCABULARY,
+  MODEL_STATUSES,
+  RETIRE_AFTER_MISSED,
+  STALE_AFTER_MS,
+  enrichModel,
+  isStale,
+  pricingFor,
+  readModelCatalog,
+  seedModelsFor,
+  seedProviderEntry,
+  visibleModelsFor,
+} from './model-catalog-doc.js';
+
 /** One list call's limit; a provider that takes longer records a timeout. */
 export const LIST_TIMEOUT_MS = 20_000;
 /** Pages followed per provider; Anthropic pages at 100 and Gemini at 1000. */
 const MAX_PAGES = 20;
 
-// ── enrichment ───────────────────────────────────────────────────────────────
-
-const TEXT_JSON = Object.freeze(['text', 'json']);
-const TEXT_JSON_VISION = Object.freeze(['text', 'json', 'vision']);
-
-/**
- * Capabilities and context by id pattern, first match wins. Small and
- * honest: a context is written only where the provider publishes one for
- * the family, and a model that is not a chat model (speech, audio,
- * transcription, image generation, embeddings, moderation) carries no
- * capability at all until slice 5 names the audio and image modalities.
- * Pricing is never here; COST_TABLE prices, and a model it lacks is unpriced.
- *
- * `modality` is the kind of answer the model is listed for, in the task
- * registry's vocabulary (tasks.js MODALITIES); null for a model whose
- * modality that registry does not name yet.
- */
-export const ENRICHMENT_TABLE = Object.freeze([
-  {
-    pattern: /(^|[-/])(tts|audio|realtime|transcribe|whisper|embedding|embed|moderation|image|imagen|veo|dall-e)([-/.]|$)/i,
-    capabilities: [],
-    modality: null,
-    context: null,
-  },
-  // Gemini: every generateContent model reads images and returns JSON; the
-  // Interactions API grounds on pages and YouTube (router.js header).
-  { pattern: /^gemini-/, capabilities: ['text', 'json', 'vision', 'grounding'], modality: 'text', context: 1_048_576 },
-  { pattern: /^gpt-5/, capabilities: TEXT_JSON_VISION, modality: 'text', context: 400_000 },
-  { pattern: /^gpt-4\.1/, capabilities: TEXT_JSON_VISION, modality: 'text', context: 1_047_576 },
-  { pattern: /^gpt-4/, capabilities: TEXT_JSON_VISION, modality: 'text', context: 128_000 },
-  { pattern: /^o\d/, capabilities: TEXT_JSON, modality: 'text', context: 200_000 },
-  { pattern: /^claude-/, capabilities: TEXT_JSON_VISION, modality: 'text', context: 200_000 },
-  // NVIDIA's catalogue ids are `<org>/<model>`; context is not published
-  // per trial-tier model, so it stays null rather than guessed.
-  { pattern: /^z-ai\/glm-/, capabilities: TEXT_JSON, modality: 'text', context: null },
-  { pattern: /^(deepseek-ai\/)?deepseek-/, capabilities: TEXT_JSON, modality: 'text', context: null },
-]);
-
-/** The row for a model no pattern names: text only, unpriced (ADR 0034 §2). */
-export const DEFAULT_ENRICHMENT = Object.freeze({
-  capabilities: Object.freeze(['text']),
-  modality: 'text',
-  context: null,
-});
-
-/** `{ inputPer1M, outputPer1M }` from the cost table's own row, or null. */
-export function pricingFor(provider, id) {
-  const rates = COST_TABLE[provider];
-  if (!rates || !Object.hasOwn(rates, id) || !Array.isArray(rates[id])) return null;
-  const [inputPer1M, outputPer1M] = rates[id];
-  return { inputPer1M, outputPer1M };
-}
-
-/**
- * What the code knows about a model: capabilities, modality and context from
- * ENRICHMENT_TABLE, pricing from COST_TABLE. `unpriced` is the badge the
- * card shows and the recommendation rule reads.
- */
-export function enrichModel(provider, id) {
-  const row = ENRICHMENT_TABLE.find(({ pattern }) => pattern.test(id)) || DEFAULT_ENRICHMENT;
-  const pricing = pricingFor(provider, id);
-  return {
-    capabilities: [...row.capabilities],
-    modality: row.modality,
-    context: row.context,
-    pricing,
-    unpriced: pricing === null,
-  };
-}
-
-/** The models the router's own table names for a provider, in table order, unique. */
-export function seedModelsFor(provider) {
-  const purposes = DEFAULT_MODEL_TABLE[provider];
-  if (!purposes) return [];
-  return [...new Set(Object.values(purposes).map(([, model]) => model))];
-}
 
 // ── list adapters ────────────────────────────────────────────────────────────
 
@@ -312,72 +260,6 @@ export async function listModels(ctx, provider) {
   return [...new Set(ids)];
 }
 
-// ── the document ─────────────────────────────────────────────────────────────
-
-const emptyRefresh = () => ({ lastOk: null, lastAttempt: null, lastError: null });
-
-function emptyDoc() {
-  return {
-    id: CATALOG_DOC_ID,
-    schemaVersion: CATALOG_SCHEMA_VERSION,
-    updatedAt: null,
-    providers: {},
-  };
-}
-
-const isPlainObject = (value) =>
-  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-
-/** One stored model entry, every field present and typed, enrichment re-applied. */
-function normalizeModel(provider, id, stored) {
-  const base = isPlainObject(stored) ? stored : {};
-  return {
-    id,
-    status: MODEL_STATUSES.includes(base.status) ? base.status : 'unknown',
-    firstSeen: typeof base.firstSeen === 'string' ? base.firstSeen : null,
-    lastSeen: typeof base.lastSeen === 'string' ? base.lastSeen : null,
-    missed: Number.isInteger(base.missed) && base.missed >= 0 ? base.missed : 0,
-    hidden: base.hidden === true,
-    ...enrichModel(provider, id),
-  };
-}
-
-/** One provider's entry as stored, or an empty one. */
-function normalizeProvider(provider, stored) {
-  const base = isPlainObject(stored) ? stored : {};
-  const refresh = isPlainObject(base.refresh) ? base.refresh : {};
-  const models = {};
-  for (const [id, model] of Object.entries(isPlainObject(base.models) ? base.models : {})) {
-    models[id] = normalizeModel(provider, id, model);
-  }
-  return {
-    refresh: {
-      lastOk: typeof refresh.lastOk === 'string' ? refresh.lastOk : null,
-      lastAttempt: typeof refresh.lastAttempt === 'string' ? refresh.lastAttempt : null,
-      lastError: typeof refresh.lastError === 'string' ? refresh.lastError : null,
-    },
-    models,
-  };
-}
-
-/**
- * The stored document with every present provider normalised; providers
- * are never dropped. READ PATH ONLY: the writes below start from the raw
- * stored document and normalise one provider at a time, after its own
- * successful listing, so a failed list cannot change a model's enrichment
- * or drop a stored field.
- */
-function normalizeDoc(stored) {
-  const doc = emptyDoc();
-  if (!isPlainObject(stored)) return doc;
-  doc.updatedAt = typeof stored.updatedAt === 'string' ? stored.updatedAt : null;
-  for (const [provider, entry] of Object.entries(
-    isPlainObject(stored.providers) ? stored.providers : {}
-  )) {
-    doc.providers[provider] = normalizeProvider(provider, entry);
-  }
-  return doc;
-}
 
 /**
  * The stored document as a document to write: the stored fields (Cosmos
@@ -450,30 +332,6 @@ async function writeCatalog(store, build) {
   throw lastError;
 }
 
-/** A never-listed model in a provider's entry: `unknown` until a list confirms it. */
-function unknownModel(provider, id) {
-  return {
-    id,
-    status: 'unknown',
-    firstSeen: null,
-    lastSeen: null,
-    missed: 0,
-    hidden: false,
-    ...enrichModel(provider, id),
-  };
-}
-
-/**
- * The provider's entry before its first refresh: the router's own defaults
- * as `unknown` models, so the card has a list on day one. In memory only;
- * nothing is written until a refresh or a hide.
- */
-export function seedProviderEntry(provider) {
-  return {
-    refresh: emptyRefresh(),
-    models: Object.fromEntries(seedModelsFor(provider).map((id) => [id, unknownModel(provider, id)])),
-  };
-}
 
 /** Apply one successful list to a provider's entry (mutates); returns the counts. */
 function applyListing(provider, entry, ids, nowIso) {
@@ -573,59 +431,6 @@ export async function refreshModelCatalog({ store, providers, listModels: list, 
   return writeCatalog(store, (stored) => applyOutcomes(stored, outcomes, nowIso));
 }
 
-/** True when the provider's last successful list is missing or older than STALE_AFTER_MS. */
-export function isStale(refresh, now = new Date()) {
-  const lastOk = refresh?.lastOk ? new Date(refresh.lastOk).getTime() : NaN;
-  if (!Number.isFinite(lastOk)) return true;
-  return now.getTime() - lastOk > STALE_AFTER_MS;
-}
-
-/**
- * The provider's entry as the page should read it. Until the first
- * SUCCESSFUL list (`refresh.lastOk` set) the router's defaults are seeded in
- * memory under whatever is stored — a first list that failed leaves an entry
- * with no models and an error, and a Hide before the first refresh leaves
- * one with a single model — so the card always has its list on day one, and
- * a stored model (its `hidden` included) wins over the default of the same
- * id. `seeded` says the list is the router's, not the provider's.
- */
-function readableProviderEntry(provider, entry) {
-  if (entry?.refresh?.lastOk) return { ...entry, seeded: false };
-  const seed = seedProviderEntry(provider);
-  return {
-    refresh: entry?.refresh || seed.refresh,
-    models: { ...seed.models, ...(entry?.models || {}) },
-    seeded: true,
-  };
-}
-
-/**
- * The document as the page reads it: every provider the router implements,
- * `stale` derived from `lastOk` at read time, and a provider with no
- * successful refresh yet seeded in memory from the router's defaults so the
- * card has a list before the first list lands (`seeded: true`, nothing
- * written).
- *
- * @param {object} deps
- * @param {{ readDoc: Function }} deps.store
- * @param {() => Date} [deps.now]
- */
-export async function readModelCatalog({ store, now = () => new Date() }) {
-  const stored = await store.readDoc(SETTINGS_CONTAINER, CATALOG_DOC_ID, CATALOG_DOC_ID);
-  const doc = normalizeDoc(stored);
-  const at = now();
-  const providers = {};
-  for (const provider of PROVIDERS) {
-    const resolved = readableProviderEntry(provider, doc.providers[provider]);
-    providers[provider] = { ...resolved, stale: isStale(resolved.refresh, at) };
-  }
-  return {
-    id: CATALOG_DOC_ID,
-    schemaVersion: CATALOG_SCHEMA_VERSION,
-    updatedAt: doc.updatedAt,
-    providers,
-  };
-}
 
 /**
  * The hide applied to the stored document: `{ doc, result }`, with a null
@@ -664,33 +469,3 @@ export async function setModelHidden({ store, now = () => new Date() }, change) 
   return writeCatalog(store, (stored) => applyHidden(stored, change, nowIso));
 }
 
-/**
- * The ids a card may offer for a provider: live or unknown, carrying the
- * `text` capability, not hidden, in a stable order — live first, then by
- * id. The capability rule keeps the speech, transcription, embedding and
- * image ids the list endpoints also return out of the pin, Routing and the
- * Playground, where a text call to them fails; they stay in the card's
- * disclosure. Reads the document shape `readModelCatalog` returns; the
- * frontend carries the same rule (frontend/src/lib/aiEngine/catalog.js) and
- * aiEngine.test.js holds the two equal.
- */
-export function visibleModelsFor(catalog, provider) {
-  const models = catalog?.providers?.[provider]?.models;
-  if (!isPlainObject(models)) return [];
-  const rank = (status) => (status === 'live' ? 0 : 1);
-  return Object.values(models)
-    .filter(isSelectable)
-    .sort((a, b) => rank(a.status) - rank(b.status) || a.id.localeCompare(b.id))
-    .map((m) => m.id);
-}
-
-/** Offered in a pin: confirmed or awaiting its first list, not hidden, and able to answer a text call. */
-function isSelectable(model) {
-  const confirmedOrPending = model.status === 'live' || model.status === 'unknown';
-  const shown = model.hidden !== true;
-  const answersText = Array.isArray(model.capabilities) && model.capabilities.includes('text');
-  return confirmedOrPending && shown && answersText;
-}
-
-/** The vocabularies the enrichment table must stay inside; pinned by model-catalog.test.js. */
-export const ENRICHMENT_VOCABULARY = Object.freeze({ CAPABILITIES, MODALITIES });

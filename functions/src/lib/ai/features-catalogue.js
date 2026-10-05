@@ -4,6 +4,15 @@
  * ai-config.js (which re-exports everything here) so the catalogue and the
  * placement rules read as one page; the three rules that decide every edge
  * case are in the ai-config.js header.
+ *
+ * DEPRECATED: the per-feature placement (ADR 0034 slice 3, #858). The router
+ * no longer calls `applyFeaturePlacement`; the selection document carries
+ * what a placement said (migrate-selection.js: `first` → a custom chain,
+ * `off` → `exclude`), and its locks are the resolver's policy locks
+ * (select.js). `placementFor` and `PROVIDER_PLACEMENT_DEFAULTS` stay as the
+ * migration's input and as the default document's source until slice 4
+ * (#859) removes the "Where AI is used" placement controls; the feature
+ * switches (`isFeatureEnabled`, AI_FEATURES) are not deprecated.
  */
 
 import { AI_TASKS } from './tasks.js';
