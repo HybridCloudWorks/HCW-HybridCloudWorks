@@ -32,7 +32,7 @@ import {
   getCostEstimate,
   modelForTask,
 } from '../lib/ai/router.js';
-import { featureSource, recordAiUsageBatch, totalCostUsd, USAGE_SOURCES } from '../lib/ai/usage.js';
+import { recordAiUsageBatch, totalCostUsd } from '../lib/ai/usage.js';
 import { registerJobType } from '../lib/jobs.js';
 import {
   generateEpisodes,
@@ -53,10 +53,10 @@ import {
 } from '../lib/listen-and-learn/publish.js';
 import { MAX_SCRIPT_BYTES } from '../lib/listen-and-learn/script.js';
 import {
-  SPEECH_TASKS,
   estimateGeminiCostUsd,
   estimateSpeechCostUsd,
   resolveSpeechProvider,
+  speechUsageRows,
   synthesizeDialogue,
 } from '../lib/listen-and-learn/speech/index.js';
 import {
@@ -414,17 +414,10 @@ export async function runSpeakChapter(payload, { context, job } = {}) {
     };
   }
 
-  const usage = await recordAiUsageBatch({ store, ai: { getCostEstimate } }, [
-    {
-      provider: audio.speechProvider,
-      model: audio.speechModel,
-      promptTokens: audio.promptTokens,
-      completionTokens: audio.completionTokens,
-      estimatedTokens: audio.estimatedTokens,
-      source: featureSource(SPEECH_TASKS.listenAndLearn),
-      product: USAGE_SOURCES.listenAndLearnAudio,
-    },
-  ]);
+  const usage = await recordAiUsageBatch(
+    { store, ai: { getCostEstimate } },
+    speechUsageRows('listenAndLearn', audio)
+  );
   const costUsd = totalCostUsd(usage);
 
   const fresh = {

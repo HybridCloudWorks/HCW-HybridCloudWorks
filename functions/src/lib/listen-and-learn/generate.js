@@ -24,7 +24,7 @@
 import { fetchStudyGuide } from './studyguide.js';
 import { findVideosForAreas } from './videos.js';
 import { generateEpisodeScript } from './script.js';
-import { SPEECH_TASKS, synthesizeDialogue, SpeechNotConfiguredError } from './speech/index.js';
+import { speechUsageRows, synthesizeDialogue, SpeechNotConfiguredError } from './speech/index.js';
 import {
   saveEpisode,
   saveEpisodeFailure,
@@ -34,7 +34,7 @@ import {
   STATUS,
 } from './publish.js';
 import { speechArgsFor, voiceSettingsOf } from './speech-settings.js';
-import { featureSource, recordAiUsageBatch, totalCostUsd, USAGE_SOURCES } from '../ai/usage.js';
+import { recordAiUsageBatch, totalCostUsd, USAGE_SOURCES } from '../ai/usage.js';
 
 /**
  * Site platform → study-guide provider.
@@ -248,19 +248,7 @@ async function generateOneArea({
   // best-effort (ai/usage.js) so it cannot fail an episode that succeeded.
   const usage = await recordUsage([
     ...scriptUsage.map((u) => ({ ...u, source: USAGE_SOURCES.listenAndLearnScript })),
-    ...(audio.speechProvider
-      ? [
-          {
-            provider: audio.speechProvider,
-            model: audio.speechModel,
-            promptTokens: audio.promptTokens,
-            completionTokens: audio.completionTokens,
-            estimatedTokens: audio.estimatedTokens,
-            source: featureSource(SPEECH_TASKS.listenAndLearn),
-            product: USAGE_SOURCES.listenAndLearnAudio,
-          },
-        ]
-      : []),
+    ...speechUsageRows('listenAndLearn', audio),
   ]);
 
   return {

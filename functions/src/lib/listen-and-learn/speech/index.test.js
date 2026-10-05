@@ -21,12 +21,14 @@ import {
   GEMINI_MODEL_SETTING,
   SPEECH_PIN_SETTINGS,
   SPEECH_PRODUCTS,
+  SPEECH_USAGE_PRODUCTS,
   SpeechNotConfiguredError,
   estimateGeminiCostUsd,
   estimateSpeechCostUsd,
   readSetting,
   resolveSpeechProvider,
   speakableTurns,
+  speechUsageRows,
   synthesizeDialogue,
 } from './index.js';
 
@@ -870,5 +872,46 @@ describe('estimateSpeechCostUsd', () => {
         },
       })
     ).toMatchObject({ provider: 'elevenlabs', model: 'eleven_v4', estimatedCostUsd: 0.1 });
+  });
+});
+
+describe('speechUsageRows — the one audio row every pipeline writes (ADR 0034 slice 5)', () => {
+  const audio = {
+    speechProvider: 'gemini',
+    speechModel: 'gemini-2.5-flash-preview-tts',
+    promptTokens: 12,
+    completionTokens: 3400,
+    estimatedTokens: true,
+  };
+
+  it('writes the row under the product’s task, with the old slug as product', () => {
+    expect(speechUsageRows('listenAndLearn', audio)).toEqual([
+      {
+        provider: 'gemini',
+        model: 'gemini-2.5-flash-preview-tts',
+        promptTokens: 12,
+        completionTokens: 3400,
+        estimatedTokens: true,
+        source: 'ai:listenAndLearnSpeech',
+        product: 'listen-and-learn:audio',
+      },
+    ]);
+    expect(speechUsageRows('podcast', { ...audio, speechProvider: 'elevenlabs', speechModel: 'eleven_v3' })[0]).toMatchObject({
+      provider: 'elevenlabs',
+      source: 'ai:podcastVoice',
+      product: 'podcast:audio',
+    });
+    expect(SPEECH_USAGE_PRODUCTS).toEqual({
+      listenAndLearn: 'listen-and-learn:audio',
+      podcast: 'podcast:audio',
+    });
+  });
+
+  it('writes nothing when no provider spoke, and refuses an unknown product like every entry point', () => {
+    expect(speechUsageRows('listenAndLearn', { speechProvider: null })).toEqual([]);
+    expect(speechUsageRows('podcast', { error: 'not configured' })).toEqual([]);
+    expect(speechUsageRows('podcast', null)).toEqual([]);
+    expect(() => speechUsageRows('radio', audio)).toThrow(/unknown product "radio"/);
+    expect(() => speechUsageRows(undefined, audio)).toThrow(/none was given/);
   });
 });

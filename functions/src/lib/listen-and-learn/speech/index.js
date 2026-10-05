@@ -56,6 +56,7 @@
  * must not leak into the document shape.
  */
 import { getCostEstimate } from '../../ai/router.js';
+import { USAGE_SOURCES, featureSource } from '../../ai/usage.js';
 import {
   synthesizeWithElevenLabs,
   ELEVENLABS_DEFAULT_VOICES,
@@ -84,6 +85,42 @@ export const SPEECH_TASKS = Object.freeze({
   listenAndLearn: 'listenAndLearnSpeech',
   podcast: 'podcastVoice',
 });
+
+/** The slug each product's audio rows carried as `source` before slice 5, kept as `product` (ai/usage.js). */
+export const SPEECH_USAGE_PRODUCTS = Object.freeze({
+  listenAndLearn: USAGE_SOURCES.listenAndLearnAudio,
+  podcast: USAGE_SOURCES.podcastAudio,
+});
+
+/**
+ * The usage rows a rendered dialogue earns, for `recordAiUsageBatch`: one
+ * row under the product's task (`ai:<task>` as `source`, the old slug as
+ * `product`, ADR 0034 slice 5) when a provider spoke, none when the audio
+ * step was skipped (`audio.speechProvider` null — not configured, or an
+ * error the pipeline recorded instead). The one shape every pipeline
+ * writes — Listen & Learn guide and source episodes, a spoken chapter, the
+ * podcast — so the Usage tab reads one row kind for audio.
+ *
+ * @param {keyof typeof SPEECH_PRODUCTS} product
+ * @param {{ speechProvider?: string|null, speechModel?: string|null, promptTokens?: number,
+ *   completionTokens?: number, estimatedTokens?: boolean }} audio  renderAudio's result
+ * @returns {Array<object>}
+ */
+export function speechUsageRows(product, audio) {
+  const name = resolveProduct(product);
+  if (!audio?.speechProvider) return [];
+  return [
+    {
+      provider: audio.speechProvider,
+      model: audio.speechModel,
+      promptTokens: audio.promptTokens,
+      completionTokens: audio.completionTokens,
+      estimatedTokens: audio.estimatedTokens,
+      source: featureSource(SPEECH_TASKS[name]),
+      product: SPEECH_USAGE_PRODUCTS[name],
+    },
+  ];
+}
 
 /** True for an id in ElevenLabs's own space (`eleven_*`); any other is Gemini's. */
 const isElevenLabsModel = (model) => /^eleven_/i.test(String(model || ''));

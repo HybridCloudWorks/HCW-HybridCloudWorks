@@ -31,7 +31,7 @@
  */
 import { isPublicDocument } from '../public-reads.js';
 import { generateArticleScript } from '../listen-and-learn/article-script.js';
-import { SPEECH_TASKS, synthesizeDialogue } from '../listen-and-learn/speech/index.js';
+import { speechUsageRows, synthesizeDialogue } from '../listen-and-learn/speech/index.js';
 import { readStoredPodcastVoices } from './voice-settings.js';
 import {
   STATUS,
@@ -40,7 +40,7 @@ import {
   saveTranscriptFor,
   uploadSourceAudio,
 } from './store.js';
-import { featureSource, recordAiUsageBatch, totalCostUsd, USAGE_SOURCES } from '../ai/usage.js';
+import { recordAiUsageBatch, totalCostUsd, USAGE_SOURCES } from '../ai/usage.js';
 
 /** Where articles live. The same container `GET /api/cms/content/item` reads. */
 export const ARTICLE_CONTAINER = 'content';
@@ -273,19 +273,7 @@ export async function finishTranscript({
     ((records) => recordAiUsageBatch({ store, ai: { getCostEstimate: ai.getCostEstimate } }, records));
   const usage = await record([
     ...scriptUsage.map((u) => ({ ...u, source: USAGE_SOURCES.podcastScript })),
-    ...(audio.speechProvider
-      ? [
-          {
-            provider: audio.speechProvider,
-            model: audio.speechModel,
-            promptTokens: audio.promptTokens,
-            completionTokens: audio.completionTokens,
-            estimatedTokens: audio.estimatedTokens,
-            source: featureSource(SPEECH_TASKS.podcast),
-            product: USAGE_SOURCES.podcastAudio,
-          },
-        ]
-      : []),
+    ...speechUsageRows('podcast', audio),
   ]);
 
   return {
