@@ -322,6 +322,45 @@ function predictionImageUrl(prediction) {
 }
 
 /**
+ * Refuse before the call, not after the bill. A month read that fails does
+ * not block: the bookkeeping must never be able to stop the work it is
+ * bookkeeping, so an unreadable month generates and the row written
+ * afterwards is the record. Module-level over the client's bookkeeping so
+ * the factory itself stays small (qlty, #854).
+ */
+async function assertImageBudget({ store, now, monthlyBudgetUsd, monthlyMaxImages }) {
+  if (!store?.queryDocs) return;
+  let used;
+  try {
+    used = await monthToDateUsage({ store, now }, IMAGE_PROVIDER);
+  } catch {
+    return;
+  }
+  if (used.costUsd < monthlyBudgetUsd && used.count < monthlyMaxImages) return;
+  const err = new Error(
+    `Image generation paused: $${used.costUsd.toFixed(2)} of the $${monthlyBudgetUsd} monthly image budget used, ${used.count} images since ${used.since.slice(0, 10)}. Raise CONTENTFORGE_IMAGE_MONTHLY_BUDGET_USD (or CONTENTFORGE_IMAGE_MONTHLY_MAX) or wait for the first of the month.`
+  );
+  err.code = 'IMAGE_BUDGET_EXHAUSTED';
+  err.status = 429;
+  throw err;
+}
+
+/** One row per output image. recordAiUsage swallows its own failures. */
+async function recordImageUsage({ store, now, uuid, model, costPerImageUsd }, source) {
+  if (!store?.upsertDoc) return;
+  await recordAiUsage(
+    { store, ai: { getCostEstimate: () => costPerImageUsd ?? 0 }, uuid, now },
+    {
+      provider: IMAGE_PROVIDER,
+      model,
+      costUsd: costPerImageUsd ?? undefined,
+      unpriced: costPerImageUsd === null,
+      source: source || USAGE_SOURCES.imageManual,
+    }
+  );
+}
+
+/**
  * Replicate over REST. `generate(prompt)` resolves to the image URL.
  * @param {{ env?: object, fetch?: typeof fetch, sleep?: Function }} deps
  */
@@ -350,47 +389,11 @@ export function createReplicateClient({
   );
   const monthlyMaxImages = positiveNumber(env.CONTENTFORGE_IMAGE_MONTHLY_MAX, IMAGE_COUNT_DEFAULT);
 
-  /**
-   * Refuse before the call, not after the bill. A month read that fails
-   * does not block: the bookkeeping must never be able to stop the work it
-   * is bookkeeping, so an unreadable month generates and the row written
-   * afterwards is the record.
-   */
-  async function assertWithinBudget() {
-    if (!store?.queryDocs) return;
-    let used;
-    try {
-      used = await monthToDateUsage({ store, now }, IMAGE_PROVIDER);
-    } catch {
-      return;
-    }
-    if (used.costUsd < monthlyBudgetUsd && used.count < monthlyMaxImages) return;
-    const err = new Error(
-      `Image generation paused: $${used.costUsd.toFixed(2)} of the $${monthlyBudgetUsd} monthly image budget used, ${used.count} images since ${used.since.slice(0, 10)}. Raise CONTENTFORGE_IMAGE_MONTHLY_BUDGET_USD (or CONTENTFORGE_IMAGE_MONTHLY_MAX) or wait for the first of the month.`
-    );
-    err.code = 'IMAGE_BUDGET_EXHAUSTED';
-    err.status = 429;
-    throw err;
-  }
-
-  /** One row per output image. recordAiUsage swallows its own failures. */
-  async function recordImage(source) {
-    if (!store?.upsertDoc) return;
-    await recordAiUsage(
-      { store, ai: { getCostEstimate: () => costPerImageUsd ?? 0 }, uuid, now },
-      {
-        provider: IMAGE_PROVIDER,
-        model,
-        costUsd: costPerImageUsd ?? undefined,
-        unpriced: costPerImageUsd === null,
-        source: source || USAGE_SOURCES.imageManual,
-      }
-    );
-  }
+  const bookkeeping = { store, now, uuid, model, costPerImageUsd, monthlyBudgetUsd, monthlyMaxImages };
 
   async function generate(prompt, { aspectRatio, source } = {}) {
     if (!apiKey) throw new Error('REPLICATE_API_KEY is not configured');
-    await assertWithinBudget();
+    await assertImageBudget(bookkeeping);
     const input = {
       prompt,
       aspect_ratio: aspectRatio || '16:9',
@@ -409,7 +412,7 @@ export function createReplicateClient({
       sleep,
     });
     const imageUrl = predictionImageUrl(settled);
-    await recordImage(source);
+    await recordImageUsage(bookkeeping, source);
     return imageUrl;
   }
 
