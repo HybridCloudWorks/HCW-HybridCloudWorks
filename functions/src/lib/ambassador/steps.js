@@ -275,19 +275,18 @@ export function stamped(ctx, kind, doc, auth) {
 export async function checkParentProgram(ctx, value, selfId = null) {
   if (!('parentProgramId' in value)) return null;
   const parentId = value.parentProgramId;
-  if (!parentId) {
-    value.parentProgramId = null;
-    return null;
-  }
-  if (selfId && parentId === selfId) {
-    return json(400, { error: 'A program cannot be additional to itself' });
-  }
+  if (!parentId) value.parentProgramId = null;
+  const reason = parentId ? await parentRefusal(ctx, parentId, selfId) : null;
+  return reason ? json(400, { error: reason }) : null;
+}
+
+/** The sentence refusing `parentId` as a parent, or null when it may be one. */
+async function parentRefusal(ctx, parentId, selfId) {
+  if (selfId && parentId === selfId) return 'A program cannot be additional to itself';
   const parent = await ctx.readKind('program', parentId);
-  if (!parent) return json(400, { error: `Unknown parentProgramId ${parentId}` });
+  if (!parent) return `Unknown parentProgramId ${parentId}`;
   if (parent.parentProgramId) {
-    return json(400, {
-      error: `${parent.name} is itself additional to another program; one level only`,
-    });
+    return `${parent.name} is itself additional to another program; one level only`;
   }
   return null;
 }
