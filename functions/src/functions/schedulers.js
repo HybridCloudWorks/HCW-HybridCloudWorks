@@ -206,7 +206,12 @@ timer('cleanupUnusedCertImages', 'CLEANUP_UNUSED_CERT_IMAGES', '0 0 5 * * *', (c
 // ── Certifications ───────────────────────────────────────────────────────────
 
 timer('reVerifyCertifications', 'REVERIFY_CERTIFICATIONS', '0 0 0 * * 0', (context) => {
-  const snapshots = createSnapshotPublishHandlers({ guard: getDefaultGuard(), store });
+  const snapshots = createSnapshotPublishHandlers({
+    guard: getDefaultGuard(),
+    store,
+    storage: blobStorage,
+    log: context,
+  });
   return createCertReverify({
     store,
     publishSnapshots: snapshots.publishSnapshots,

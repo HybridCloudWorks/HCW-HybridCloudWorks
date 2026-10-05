@@ -8,6 +8,7 @@
 import { httpRoute, httpRouteByMethod } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
 import { queryDocs, readDoc, upsertDoc, patchDoc } from '../lib/cosmos-client.js';
+import { headBlobForDelivery } from '../lib/blob-storage.js';
 import { createPublishHandlers } from '../lib/cms/publish.js';
 import { createDefaultInlineImageRehoster } from '../lib/cms/inline-images-default.js';
 import { createRehostImageHandlers } from '../lib/cms/rehost-images.js';
@@ -73,8 +74,12 @@ httpRoute('publishSnapshot', {
   authLevel: 'anonymous',
   route: 'publishSnapshot',
   handler: (request, context) =>
-    createSnapshotPublishHandlers({ guard: getDefaultGuard(), store }).publishSnapshot(
-      request,
-      context
-    ),
+    createSnapshotPublishHandlers({
+      guard: getDefaultGuard(),
+      store,
+      // Legacy badge references are re-pointed at publish when the blob
+      // exists (lib/legacy-badge-url.js, #868).
+      storage: { headBlobForDelivery },
+      log: context,
+    }).publishSnapshot(request, context),
 });

@@ -40,9 +40,15 @@ export default function PublishSnapshotButton({ onPublished } = {}) {
     try {
       const result = await postJSON('publishSnapshot', {});
       setState('done');
+      const legacy = result.legacyBadges;
+      const legacyLine = legacy
+        ? ` · Badges re-pointed: ${legacy.repointed}${
+            legacy.missing?.length ? ` · still missing: ${legacy.missing.length}` : ''
+          }`
+        : '';
       toast({
         title: 'Snapshot published',
-        description: `Certifications: ${result.certifications} · Events: ${result.speakerevents}`,
+        description: `Certifications: ${result.certifications} · Events: ${result.speakerevents}${legacyLine}`,
       });
       onPublished?.(result);
       if (resetTimer.current) clearTimeout(resetTimer.current);

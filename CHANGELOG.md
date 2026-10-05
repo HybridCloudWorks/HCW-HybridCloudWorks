@@ -34,6 +34,34 @@ This project has not cut a tagged release; entries are grouped under
   stored as sent). `admin-uploads.test.js` pins the SVG, JPEG, undecodable
   and as-sent cases with real decoding; `sharp` joins the functions
   dependencies (prebuilt linux-x64 in the lockfile for the deploy runner).
+- **Legacy badge references are re-pointed at publish, so a fifth of the
+  certification registry gets its badge back (#868).** 22 of the 109
+  published certifications still named the decommissioned Firebase bucket,
+  which the About page skips rather than renders broken; the migration had
+  copied the blobs into the `certifications` container under the same
+  paths (20 of the 21 distinct ones answer from `public/media`). New
+  `lib/legacy-badge-url.js` turns either Firebase URL shape for a
+  `certifications/…` object into the media delivery URL; `publishSnapshot`
+  (the button, and the weekly `reVerifyCertifications` timer) asks blob
+  storage whether each such blob exists, rewrites `imageUrl`,
+  `credentialImage` and `image[0].downloadURL` in the published item, and
+  persists the same rewrite to the document so the editor's card agrees.
+  A missing blob is reported by name in the response's `legacyBadges` and
+  the document is left as stored; the Publish toast shows the counts. The
+  persist is one conditional write per row on the `_etag` it was queried
+  with; a 412 re-reads the row, decides again from what is stored now and
+  writes once more, and a second 412 publishes the fresh row as stored. A
+  row whose `imageUrl` is a live selection is never rewritten (its old
+  upload metadata would otherwise come back in front of the new badge),
+  and the sanitizer now publishes the editor's `imageUrl` ahead of a legacy
+  `credentialImage`, which a re-uploaded badge over a migrated row needed.
+  The nightly cleanup's URL parser recognises the media route, so a
+  re-pointed badge is a referenced blob, never a deletion candidate.
+  `legacy-badge-url.test.js` pins the URL shapes, the alias rewrite, the
+  edited-row rule and `repointAll`; `snapshots-publish.test.js` pins the
+  exists / missing / no-storage / ETag / 412 / edited-row / cleanup cases;
+  the About page's test pins that a dead legacy upload falls past to the
+  published URL.
 - **AI Engine: audio and image tasks join the Tasks table (ADR 0034 slice 5,
   #860).** The last slice of the ADR: the non-text paths are tasks of the
   same registry and selection document as the text ones, and their settings
@@ -3301,6 +3329,13 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The weekly certification re-verify could not republish the snapshot
+  (#868).** `schedulers.js` handed `createCertReverify` a
+  `snapshots.publishSnapshots` that `createSnapshotPublishHandlers` never
+  returned, so the Sunday run threw "is not a function" after marking a
+  certificate expired, revoked or renewed, and the public snapshot stayed
+  stale. The handler object now carries `publishSnapshots`; the timers test
+  pins the name against the real factory.
 - **`06-seed-secret.ps1` no longer reports a refused write as done.** On
   2026-10-05 it printed `ANTHROPIC-API-KEY  set` over a `ForbiddenByRbac`
   from `az` (the data-plane role grant had been skipped), then crashed on
