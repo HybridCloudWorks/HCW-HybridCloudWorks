@@ -17,11 +17,12 @@ import { createEvidence, importEvidence, listEvidence, listImportSources } from 
 import { CONTAINER } from './model.js';
 import { computeReadiness, parsePeriod } from './readiness.js';
 import {
-  KINDS,
+  checkParentProgram,
   createContext,
   deleteHandler,
   guardedHandler,
   json,
+  KINDS,
   loadCreate,
   patchHandler,
   stamped,
@@ -53,6 +54,8 @@ const programDefaults = () => ({
 async function createProgram(ctx, request, auth) {
   const loaded = await loadCreate(ctx, request, KINDS.program);
   if (loaded.error) return loaded.error;
+  const badParent = await checkParentProgram(ctx, loaded.value);
+  if (badParent) return badParent;
   const existing = await ctx.listPrograms();
   const doc = stamped(ctx, KINDS.program, {
     ...programDefaults(),
@@ -77,9 +80,12 @@ async function readiness(ctx, request) {
   if (!program) return json(404, { error: `Program ${programId} not found` });
   const period = parsePeriod(request.query?.get?.('period'));
   const evidence = await ctx.listKind('evidence');
+  const parent = program.parentProgramId
+    ? await ctx.readKind('program', program.parentProgramId)
+    : null;
   return json(200, {
     success: true,
-    readiness: computeReadiness(program, evidence, { period, today: ctx.today() }),
+    readiness: computeReadiness(program, evidence, { period, today: ctx.today(), parent }),
   });
 }
 
@@ -116,6 +122,7 @@ export function createAmbassadorHandlers({
       patchHandler(KINDS.program, {
         action: 'ambassador_program_updated',
         details: ({ id, updates }) => ({ programId: id, fields: Object.keys(updates) }),
+        check: (ctx, { id, updates }) => checkParentProgram(ctx, updates, id),
       })
     ),
     /** Soft; disable is the usual path. */

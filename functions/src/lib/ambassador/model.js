@@ -60,6 +60,37 @@ export function canTransition(from, to) {
  */
 export const MEMBERSHIP_STATUSES = Object.freeze(['none', 'working', 'active', 'denied']);
 
+/**
+ * A program may be additional to another (`parentProgramId`): MCT Regional
+ * Lead to Microsoft Certified Trainer (owner request 2026-10-05). The child's
+ * requirements and questions are the extra ones, and they apply — its card
+ * shows, its application may start — only while the parent's membership is
+ * this status. A Regional Lead is an MCT first; nothing about the role makes
+ * sense before that.
+ */
+export const UNLOCKING_MEMBERSHIP = 'active';
+
+/**
+ * Whether `program` is gated behind a parent and, if so, whether the parent
+ * unlocks it today. `parent` is the stored parent program, or null when the
+ * id names nothing (the gate then stays shut and says why).
+ */
+export function programGate(program, parent) {
+  if (!program?.parentProgramId) return { gated: false, unlocked: true, parent: null };
+  const membershipStatus = MEMBERSHIP_STATUSES.includes(parent?.membershipStatus)
+    ? parent.membershipStatus
+    : 'none';
+  return {
+    gated: true,
+    unlocked: Boolean(parent) && membershipStatus === UNLOCKING_MEMBERSHIP,
+    parent: {
+      id: program.parentProgramId,
+      name: parent?.name || null,
+      membershipStatus,
+    },
+  };
+}
+
 export const EVIDENCE_SOURCES = Object.freeze([
   'speaking',
   'certifications',

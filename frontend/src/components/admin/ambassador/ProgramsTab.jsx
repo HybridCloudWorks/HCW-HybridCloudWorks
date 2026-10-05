@@ -22,6 +22,10 @@ import { TabLoading } from '@/components/admin/integrations/TabNotice';
 import {
   MEMBERSHIP_STATUS,
   PURSUING_STATUSES,
+  childProgramsOf,
+  programById,
+  programGate,
+  programsInPlay,
   sourceLabel,
   todayIso,
   windowState,
@@ -45,6 +49,8 @@ const WINDOW_BADGE = {
   },
 };
 
+const byIdOf = (programs) => programById(programs);
+
 function Bullets({ title, items }) {
   if (!items?.length) return null;
   return (
@@ -61,9 +67,91 @@ function Bullets({ title, items }) {
   );
 }
 
-export function ProgramDetails({ program, onClose, onStart, starting, pursuing }) {
+/**
+ * The programs additional to this one, each with whether this membership has
+ * opened it (ProgramDetails), or the sentence a card carries about them.
+ */
+function AdditionalPrograms({ program, additional, byId, asLine = false }) {
+  if (!additional.length) return null;
+  const { unlocked } = programGate(additional[0], byId);
+  const names = additional.map((c) => c.name).join(', ');
+  if (asLine) {
+    return (
+      <p className="text-xs text-muted-foreground" data-testid="additional-programs">
+        {unlocked
+          ? `Additional requirements open: ${names}.`
+          : `Additional requirements — ${names} — open when this membership is Active.`}
+      </p>
+    );
+  }
+  return (
+    <div>
+      <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        Additional programs
+      </h4>
+      <ul className="mt-1 space-y-0.5 text-sm">
+        {additional.map((child) => (
+          <li key={child.id} className="flex flex-wrap items-center gap-2">
+            <span>{child.name}</span>
+            <StatusBadge
+              size="xs"
+              status={
+                unlocked
+                  ? {
+                      id: 'open',
+                      label: 'Open',
+                      tone: 'ok',
+                      help: `Shown as its own card now that ${program.name} is Active.`,
+                    }
+                  : {
+                      id: 'locked',
+                      label: 'Opens when Active',
+                      tone: 'off',
+                      help: `Set the ${program.name} membership to Active on Settings and this appears with its own requirements and application.`,
+                    }
+              }
+            />
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** The window and expiry lines of the details dialog, when the program has them. */
+function WindowAndExpiry({ program }) {
+  return (
+    <>
+      {program.applicationWindow?.note && (
+        <p className="text-xs text-muted-foreground">
+          Window: {program.applicationWindow.opens || '—'} to{' '}
+          {program.applicationWindow.closes || '—'} · {program.applicationWindow.note}
+        </p>
+      )}
+      {program.expirationRule && (
+        <p className="text-xs text-muted-foreground">Expiry: {program.expirationRule}</p>
+      )}
+    </>
+  );
+}
+
+/** The one line a program additional to another opens with. */
+function ParentNote({ gate }) {
+  if (!gate.gated) return null;
+  return (
+    <p className="text-xs text-muted-foreground" data-testid="program-parent">
+      Additional to {gate.parent.name || gate.parent.id}: the requirements and questions here come
+      on top of that program&apos;s, and its evidence counts here too.
+    </p>
+  );
+}
+
+export function ProgramDetails({ program, programs, onClose, onStart, starting, pursuing }) {
   const readiness = useReadiness(program?.id, '', { enabled: Boolean(program) });
+  const byId = useMemo(() => programById(programs), [programs]);
   if (!program) return null;
+  const gate = programGate(program, byId);
+  const additional = childProgramsOf(programs, program.id);
   return (
     <Dialog
       open
@@ -80,6 +168,7 @@ export function ProgramDetails({ program, onClose, onStart, starting, pursuing }
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
+          <ParentNote gate={gate} />
           <p className="text-sm">{program.description}</p>
           {program.applicationUrl && (
             <a
@@ -91,15 +180,7 @@ export function ProgramDetails({ program, onClose, onStart, starting, pursuing }
               Program page <ExternalLink className="h-3 w-3" />
             </a>
           )}
-          {program.applicationWindow?.note && (
-            <p className="text-xs text-muted-foreground">
-              Window: {program.applicationWindow.opens || '—'} to{' '}
-              {program.applicationWindow.closes || '—'} · {program.applicationWindow.note}
-            </p>
-          )}
-          {program.expirationRule && (
-            <p className="text-xs text-muted-foreground">Expiry: {program.expirationRule}</p>
-          )}
+          <WindowAndExpiry program={program} />
           <Bullets title="Eligibility" items={program.eligibility} />
           <Bullets title="Criteria" items={program.criteria} />
           <div>
@@ -125,6 +206,7 @@ export function ProgramDetails({ program, onClose, onStart, starting, pursuing }
             </ul>
           </div>
           <Bullets title="Recommended activities" items={program.recommendedActivities} />
+          <AdditionalPrograms program={program} additional={additional} byId={byId} />
           <div className="rounded-md border border-border p-3">
             <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Readiness from your evidence
@@ -139,7 +221,7 @@ export function ProgramDetails({ program, onClose, onStart, starting, pursuing }
             </Button>
             <Button
               onClick={() => onStart(program.id)}
-              disabled={starting || program.enabled === false}
+              disabled={starting || program.enabled === false || !gate.unlocked}
             >
               {starting ? (
                 <Loader2 className="mr-1 h-4 w-4 animate-spin" />
@@ -171,11 +253,15 @@ export default function ProgramsTab({ hub, nav }) {
       ),
     [applications.data]
   );
-  const ordered = useMemo(
-    () =>
-      [...programs.data].sort((a, b) => Number(b.enabled !== false) - Number(a.enabled !== false)),
-    [programs.data]
-  );
+  // Top-level programs, enabled first; a program additional to another follows
+  // its parent, and only once that membership is Active (programsInPlay).
+  const ordered = useMemo(() => {
+    const inPlay = programsInPlay(programs.data);
+    const rank = (p) =>
+      Number((byIdOf(programs.data).get(p.parentProgramId) || p).enabled !== false);
+    return [...inPlay].sort((a, b) => rank(b) - rank(a));
+  }, [programs.data]);
+  const byId = useMemo(() => programById(programs.data), [programs.data]);
 
   const start = async (programId) => {
     setStarting(programId);
@@ -245,6 +331,8 @@ export default function ProgramsTab({ hub, nav }) {
                     </CardTitle>
                     <CardDescription>
                       {program.provider} · {program.category}
+                      {program.parentProgramId &&
+                        ` · additional to ${byId.get(program.parentProgramId)?.name || 'another program'}`}
                       {pursuedPrograms.has(program.id) && ' · in progress'}
                     </CardDescription>
                   </CardHeader>
@@ -257,6 +345,12 @@ export default function ProgramsTab({ hub, nav }) {
                         ? ` · ${program.applicationWindow.note}`
                         : ''}
                     </p>
+                    <AdditionalPrograms
+                      program={program}
+                      additional={childProgramsOf(programs.data, program.id)}
+                      byId={byId}
+                      asLine
+                    />
                     <div className="flex gap-2">
                       <Button size="sm" variant="outline" onClick={() => setDetailsId(program.id)}>
                         Details
@@ -282,6 +376,7 @@ export default function ProgramsTab({ hub, nav }) {
         ))}
       <ProgramDetails
         program={details}
+        programs={programs.data}
         onClose={() => setDetailsId(null)}
         onStart={start}
         starting={Boolean(starting)}

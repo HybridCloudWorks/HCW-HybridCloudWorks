@@ -20,7 +20,12 @@ import {
   windowState,
   MEMBERSHIP_STATUS,
   MEMBERSHIP_STATUSES,
+  UNLOCKING_MEMBERSHIP,
+  childProgramsOf,
   latestApplicationFor,
+  programById,
+  programGate,
+  programsInPlay,
 } from './ambassadorModel';
 
 const TODAY = '2026-10-03';
@@ -126,6 +131,54 @@ describe('export and relevance', () => {
   it('treats evidence naming no program as relevant to every program', () => {
     expect(evidenceRelevant({ programIds: [] }, 'p1')).toBe(true);
     expect(evidenceRelevant({ programIds: ['p2'] }, 'p1')).toBe(false);
+  });
+
+  it('counts evidence filed under the parent program for the program additional to it', () => {
+    expect(evidenceRelevant({ programIds: ['mct'] }, 'rl', 'mct')).toBe(true);
+    expect(evidenceRelevant({ programIds: ['mvp'] }, 'rl', 'mct')).toBe(false);
+    expect(evidenceRelevant({ programIds: ['mct'] }, 'rl')).toBe(false);
+  });
+});
+
+describe('additional programs (owner request 2026-10-05)', () => {
+  const mct = { id: 'mct', name: 'MCT', order: 2, membershipStatus: 'working' };
+  const rl = { id: 'rl', name: 'MCT Regional Lead', order: 3, parentProgramId: 'mct' };
+  const mvp = { id: 'mvp', name: 'MVP', order: 1 };
+
+  it('programGate is shut until the parent membership is Active, and names the parent', () => {
+    expect(UNLOCKING_MEMBERSHIP).toBe('active');
+    const byId = programById([mvp, mct, rl]);
+    expect(programGate(mvp, byId)).toEqual({ gated: false, unlocked: true, parent: null });
+    expect(programGate(rl, byId)).toEqual({
+      gated: true,
+      unlocked: false,
+      parent: { id: 'mct', name: 'MCT', membershipStatus: 'working' },
+    });
+    expect(
+      programGate(rl, programById([mvp, { ...mct, membershipStatus: 'active' }, rl]))
+    ).toMatchObject({ unlocked: true });
+    // A parent that is gone keeps the gate shut rather than opening it.
+    expect(programGate(rl, programById([mvp, rl]))).toMatchObject({
+      unlocked: false,
+      parent: { id: 'mct', name: null, membershipStatus: 'none' },
+    });
+  });
+
+  it('lists the programs in play: top level, each followed by the children its membership opened', () => {
+    expect(programsInPlay([rl, mct, mvp]).map((p) => p.id)).toEqual(['mct', 'mvp']);
+    const active = { ...mct, membershipStatus: 'active' };
+    expect(programsInPlay([rl, active, mvp]).map((p) => p.id)).toEqual(['mct', 'rl', 'mvp']);
+    expect(childProgramsOf([rl, mct, mvp], 'mct')).toEqual([rl]);
+    expect(childProgramsOf([rl, mct, mvp], 'mvp')).toEqual([]);
+  });
+
+  it('carries parentProgramId through the program form both ways, empty as null', () => {
+    expect(programForm({ name: 'X', parentProgramId: 'mct' }).parentProgramId).toBe('mct');
+    expect(programForm({ name: 'X' }).parentProgramId).toBe('');
+    expect(
+      programPayload(programForm({ name: 'X', parentProgramId: 'mct' })).value.parentProgramId
+    ).toBe('mct');
+    expect(programPayload(programForm({ name: 'X' })).value.parentProgramId).toBeNull();
   });
 });
 

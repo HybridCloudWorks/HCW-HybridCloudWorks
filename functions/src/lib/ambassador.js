@@ -39,9 +39,11 @@ export {
   NOT_PROVISIONED,
   QUESTION_KINDS,
   SCORING_UNITS,
+  UNLOCKING_MEMBERSHIP,
   VERIFICATION_STATUSES,
   canTransition,
   isHttpUrl,
+  programGate,
   toCalendarDate,
 } from './ambassador/model.js';
 export { DEFAULT_PROGRAMS } from './ambassador/programs.js';

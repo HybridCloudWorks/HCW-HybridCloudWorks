@@ -27,7 +27,9 @@ import {
   MEMBERSHIP_STATUSES,
   PROGRAM_STATE,
   latestApplicationFor,
+  programById,
   programForm,
+  programGate,
   programPayload,
   sourceLabel,
 } from './ambassadorModel';
@@ -176,8 +178,16 @@ function CustomFieldsEditor({ rows, onChange }) {
   );
 }
 
-export function ProgramEditor({ program, onClose, onSave, saving }) {
+export function ProgramEditor({ program, programs = [], onClose, onSave, saving }) {
   const [form, setForm] = useState(() => programForm(program));
+  // A parent is a top-level program other than this one: one level only,
+  // as the API enforces.
+  const parentOptions = [
+    { value: '', label: '— none —' },
+    ...programs
+      .filter((p) => !p.parentProgramId && p.id !== program?.id)
+      .map((p) => ({ value: p.id, label: p.name })),
+  ];
   const [error, setError] = useState('');
   const set = (key) => (value) => setForm((f) => ({ ...f, [key]: value }));
   const setWindow = (key) => (value) =>
@@ -302,6 +312,14 @@ export function ProgramEditor({ program, onClose, onSave, saving }) {
                 label: MEMBERSHIP_STATUS[s].label,
               }))}
             />
+            <SelectField
+              id="program-parent"
+              label="Additional to"
+              hint="Its card, questions and application open only while that program's membership is Active; that program's evidence counts here too."
+              value={form.parentProgramId}
+              onChange={set('parentProgramId')}
+              options={parentOptions}
+            />
             <TextField
               id="program-renewal"
               label="Renewal cadence"
@@ -379,11 +397,64 @@ const COLUMNS = [
 
 const NO_APPLICATION = '';
 
+const ROW_SELECT = 'h-8 rounded-md border border-input bg-background px-2 text-xs';
+
+/** The row's Membership select: where the owner stands with the program. */
+function MembershipSelect({ program, busy, onChange }) {
+  return (
+    <select
+      className={ROW_SELECT}
+      aria-label={`Membership status for ${program.name}`}
+      value={
+        MEMBERSHIP_STATUSES.includes(program.membershipStatus) ? program.membershipStatus : 'none'
+      }
+      disabled={busy}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      {MEMBERSHIP_STATUSES.map((s) => (
+        <option key={s} value={s}>
+          {MEMBERSHIP_STATUS[s].label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/**
+ * The row's Application state select. A program additional to another is
+ * disabled until that membership is Active, and the tooltip says so — the
+ * API would answer 409 PARENT_NOT_ACTIVE to the same request.
+ */
+function ApplicationStateSelect({ program, gate, busy, value, onChange }) {
+  return (
+    <select
+      className={ROW_SELECT}
+      aria-label={`Application state for ${program.name}`}
+      title={
+        gate.unlocked
+          ? undefined
+          : `Opens when the ${gate.parent.name || 'parent'} membership is Active`
+      }
+      value={value}
+      disabled={busy || !gate.unlocked}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      <option value={NO_APPLICATION}>— no application —</option>
+      {APPLICATION_STATUSES.map((s) => (
+        <option key={s} value={s}>
+          {AMBASSADOR_STATUS[s].label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 export default function SettingsTab({ hub }) {
   const { programs, applications } = hub;
   const [editing, setEditing] = useState(null); // null | {} (new) | program
   const [confirmDelete, setConfirmDelete] = useState(null);
   const ordered = [...programs.data].sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+  const byId = programById(programs.data);
 
   // The Application state select (owner request 2026-10-05): sets the
   // program's latest application to ANY status, outside the funnel, recorded
@@ -440,6 +511,7 @@ export default function SettingsTab({ hub }) {
             {ordered.map((program, index) => {
               const busy = hub.busyIds.has(program.id);
               const disabled = program.enabled === false;
+              const gate = programGate(program, byId);
               return (
                 <tr key={program.id} className={disabled ? 'opacity-60' : ''}>
                   <td className="px-4 py-3">
@@ -468,7 +540,13 @@ export default function SettingsTab({ hub }) {
                   </td>
                   <td className="px-4 py-3">
                     <div className="font-medium">{program.name}</div>
-                    <div className="text-xs text-muted-foreground">{program.provider}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {program.provider}
+                      {gate.gated &&
+                        ` · additional to ${gate.parent.name || gate.parent.id}${
+                          gate.unlocked ? '' : ' (opens when Active)'
+                        }`}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-xs">
                     {(program.requirements || []).length} ·{' '}
@@ -489,44 +567,25 @@ export default function SettingsTab({ hub }) {
                     />
                   </td>
                   <td className="px-4 py-3">
-                    <select
-                      className="h-8 rounded-md border border-input bg-background px-2 text-xs"
-                      aria-label={`Membership status for ${program.name}`}
-                      value={
-                        MEMBERSHIP_STATUSES.includes(program.membershipStatus)
-                          ? program.membershipStatus
-                          : 'none'
+                    <MembershipSelect
+                      program={program}
+                      busy={busy}
+                      onChange={(value) =>
+                        hub.writes.patchProgram(program.id, { membershipStatus: value })
                       }
-                      disabled={busy}
-                      onChange={(e) =>
-                        hub.writes.patchProgram(program.id, { membershipStatus: e.target.value })
-                      }
-                    >
-                      {MEMBERSHIP_STATUSES.map((s) => (
-                        <option key={s} value={s}>
-                          {MEMBERSHIP_STATUS[s].label}
-                        </option>
-                      ))}
-                    </select>
+                    />
                   </td>
                   <td className="px-4 py-3">
-                    <select
-                      className="h-8 rounded-md border border-input bg-background px-2 text-xs"
-                      aria-label={`Application state for ${program.name}`}
+                    <ApplicationStateSelect
+                      program={program}
+                      gate={gate}
+                      busy={busy}
                       value={
                         latestApplicationFor(applications?.data, program.id)?.status ||
                         NO_APPLICATION
                       }
-                      disabled={busy}
-                      onChange={(e) => setApplicationState(program, e.target.value)}
-                    >
-                      <option value={NO_APPLICATION}>— no application —</option>
-                      {APPLICATION_STATUSES.map((s) => (
-                        <option key={s} value={s}>
-                          {AMBASSADOR_STATUS[s].label}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(value) => setApplicationState(program, value)}
+                    />
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex justify-end gap-1">
@@ -568,6 +627,7 @@ export default function SettingsTab({ hub }) {
       {editing && (
         <ProgramEditor
           program={editing.id ? editing : null}
+          programs={programs.data}
           onClose={() => setEditing(null)}
           onSave={save}
           saving={editing.id ? hub.busyIds.has(editing.id) : hub.busyIds.has('program:new')}

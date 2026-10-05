@@ -6,9 +6,27 @@
  */
 import { actorName } from '../auth/actor-name.js';
 import { satisfiesRole } from '../auth/roles.js';
-import { APPLICATION_TRANSITIONS, CONTAINER, canTransition } from './model.js';
+import { APPLICATION_TRANSITIONS, canTransition, CONTAINER, programGate } from './model.js';
 import { KINDS, byUpdatedDesc, json, loadCreate, loadPatch, stamped } from './steps.js';
 import { str } from './fields.js';
+
+/**
+ * An application for a program additional to another (MCT Regional Lead to
+ * MCT) may start only while the parent's membership is Active: the 409 to
+ * answer otherwise, naming the Settings step that opens it, or null.
+ */
+async function parentLocked(ctx, program) {
+  if (!program.parentProgramId) return null;
+  const parent = await ctx.readKind('program', program.parentProgramId);
+  const gate = programGate(program, parent);
+  if (gate.unlocked) return null;
+  const parentName = gate.parent.name || program.parentProgramId;
+  return json(409, {
+    code: 'PARENT_NOT_ACTIVE',
+    error: `${program.name} is additional to ${parentName}: set that membership to Active on Settings before starting this application.`,
+    parentProgramId: program.parentProgramId,
+  });
+}
 
 /** GET cms/ambassador/applications?programId=&status= */
 export async function listApplications(ctx, request) {
@@ -51,6 +69,8 @@ export async function createApplication(ctx, request, auth) {
   }
   const program = await ctx.readKind('program', loaded.value.programId);
   if (!program) return json(400, { error: `Unknown programId ${loaded.value.programId}` });
+  const locked = await parentLocked(ctx, program);
+  if (locked) return locked;
   const stamp = ctx.nowIso();
   const status = loaded.value.status || 'interested';
   const doc = stamped(
@@ -145,6 +165,8 @@ export async function patchApplication(ctx, request, auth) {
   if (updates.programId && updates.programId !== existing.programId) {
     const program = await ctx.readKind('program', updates.programId);
     if (!program) return json(400, { error: `Unknown programId ${updates.programId}` });
+    const locked = await parentLocked(ctx, program);
+    if (locked) return locked;
   }
   const stamp = ctx.nowIso();
   const refused = applyTransition(updates, {

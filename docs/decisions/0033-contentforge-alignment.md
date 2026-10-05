@@ -166,6 +166,10 @@ existing documents plus new `admin_config` documents (constant partition).
   Programs are seeded with Microsoft MVP, MCT, AWS Hero, AWS Ambassador,
   GitHub Star, Docker Captain, VMware vExpert; all editable, disable-able.
   Evidence items link by `{sourceModule, sourceId}` and keep a `snapshot`.
+  Amended 2026-10-05: a program may be additional to another
+  (`parentProgramId`, one level); its card, questions and application open
+  only while the parent's membership is Active, and the parent's evidence
+  counts for it. MCT Regional Lead is additional to MCT.
 - **Labs** catalogue rows gain `providers[]`, `objectives[]`,
   `prerequisites[]`, `steps[]`, `difficulty`, `validation`.
 

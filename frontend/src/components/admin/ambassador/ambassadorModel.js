@@ -307,10 +307,62 @@ export function evidenceForApplication(application, evidence) {
   return (evidence || []).filter((item) => ids.has(item.id));
 }
 
-/** Evidence relevant to a program: names it, or names no program at all. */
-export function evidenceRelevant(item, programId) {
+/**
+ * Evidence relevant to a program: names it, names no program at all, or —
+ * for a program additional to another — names the parent (an MCT's record
+ * is the Regional Lead's record too; the API's readiness.js agrees).
+ */
+export function evidenceRelevant(item, programId, parentProgramId = null) {
   const ids = Array.isArray(item.programIds) ? item.programIds : [];
-  return ids.length === 0 || ids.includes(programId);
+  return (
+    ids.length === 0 ||
+    ids.includes(programId) ||
+    (Boolean(parentProgramId) && ids.includes(parentProgramId))
+  );
+}
+
+/**
+ * A program additional to another (`parentProgramId`; MCT Regional Lead to
+ * MCT, owner request 2026-10-05) is shown, and may start an application,
+ * only while the parent's membership is this status. The API refuses the
+ * application otherwise (409 PARENT_NOT_ACTIVE); the tabs hide the card and
+ * disable the controls so the refusal is never the first thing seen.
+ */
+export const UNLOCKING_MEMBERSHIP = 'active';
+
+/** `{ gated, unlocked, parent }` for a program, given the catalogue as `programById` holds it. */
+export function programGate(program, byId) {
+  if (!program?.parentProgramId) return { gated: false, unlocked: true, parent: null };
+  const parent = byId?.get?.(program.parentProgramId) || null;
+  const membershipStatus = MEMBERSHIP_STATUSES.includes(parent?.membershipStatus)
+    ? parent.membershipStatus
+    : 'none';
+  return {
+    gated: true,
+    unlocked: Boolean(parent) && membershipStatus === UNLOCKING_MEMBERSHIP,
+    parent: { id: program.parentProgramId, name: parent?.name || null, membershipStatus },
+  };
+}
+
+/** The programs additional to `parentId`, in catalogue order. */
+export function childProgramsOf(programs, parentId) {
+  return (programs || [])
+    .filter((p) => p.parentProgramId === parentId)
+    .sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+}
+
+/**
+ * The programs in play: every top-level program, each followed by the
+ * additional programs its membership has unlocked. A locked child is not
+ * listed — it appears the day the parent goes Active.
+ */
+export function programsInPlay(programs) {
+  const byId = programById(programs);
+  const top = (programs || []).filter((p) => !p.parentProgramId);
+  return top.flatMap((parent) => [
+    parent,
+    ...childProgramsOf(programs, parent.id).filter((child) => programGate(child, byId).unlocked),
+  ]);
 }
 
 /**
@@ -366,6 +418,7 @@ export const EMPTY_PROGRAM_FORM = Object.freeze({
   reminders: { daysBeforeDeadline: 14, daysBeforeRenewal: 30 },
   customFields: [],
   membershipStatus: 'none',
+  parentProgramId: '',
 });
 
 export const EMPTY_REQUIREMENT = Object.freeze({
@@ -413,6 +466,7 @@ export function programForm(program) {
     membershipStatus: MEMBERSHIP_STATUSES.includes(program.membershipStatus)
       ? program.membershipStatus
       : 'none',
+    parentProgramId: textOf(program.parentProgramId),
     requirements: (program.requirements || []).map((r) => ({ ...EMPTY_REQUIREMENT, ...r })),
     evidenceTypes: program.evidenceTypes || [],
     reminders: {
@@ -449,6 +503,7 @@ export function programPayload(form) {
       membershipStatus: MEMBERSHIP_STATUSES.includes(form.membershipStatus)
         ? form.membershipStatus
         : 'none',
+      parentProgramId: String(form.parentProgramId || '').trim() || null,
       description: form.description.trim(),
       applicationUrl: form.applicationUrl.trim() || null,
       eligibility: lines(form.eligibility),

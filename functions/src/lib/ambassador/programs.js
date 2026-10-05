@@ -352,6 +352,106 @@ const MANAGEMENT_TIERS = [
 const CREDIT_NOTE =
   'Credits as published for 2025: Survey 1, Focus Group or Design Exercise 3, Private Preview 3 to 6. Record each as manual evidence with its credits; readiness sums them.';
 
+
+// ── MCT Regional Lead: the role requirements as the nominee answers them ─────
+//
+// Microsoft publishes the role's requirements and expectations ("MCT Regional
+// Lead Team — Role Requirements & Expectations"), not the October form's
+// questions: the form goes only to nominees. So the questions below are the
+// document's own requirements and expectations, each asked as the thing a
+// nominee must show or commit to. Edit them against the form when the
+// invitation arrives; the answers are the applicant's and never seeded.
+
+const RL_NOMINATION = 'Nomination and eligibility';
+const RL_COMMUNITY = 'MCT community support';
+const RL_EXPECTATIONS = 'Role expectations';
+
+const MCT_REGIONAL_LEAD_QUESTIONS = [
+  question(
+    'rl-nominated-by',
+    RL_NOMINATION,
+    'Which current MCT Regional Lead nominated you, and in which country or region?',
+    'text',
+    {
+      maxChars: 300,
+      required: true,
+      hint: 'A nomination by a current Regional Lead during September starts the process; an active Regional Lead may self-nominate.',
+    }
+  ),
+  question(
+    'rl-consecutive-years',
+    RL_NOMINATION,
+    'How many consecutive years have you held MCT status?',
+    'choice',
+    {
+      options: ['2', '3', '4', '5 or more'],
+      required: true,
+      hint: 'Two consecutive years of MCT status are required to be nominated.',
+    }
+  ),
+  question(
+    'rl-certifications',
+    RL_NOMINATION,
+    'Which MCT-eligible Microsoft certifications do you hold? List each one.',
+    'text',
+    {
+      maxChars: 1000,
+      required: true,
+      hint: 'Two or more MCT-eligible certifications are required. The Certifications hub is the record.',
+    }
+  ),
+  question(
+    'rl-lounge-activity',
+    RL_COMMUNITY,
+    'Describe your involvement in the MCT Lounge: discussions started or answered in the Community Café, and how you have helped distribute MCT Program Announcements.',
+    'text',
+    {
+      maxChars: 2000,
+      required: true,
+      hint: 'Dated posts and threads make the strongest answer; the Evidence tab holds the log.',
+    }
+  ),
+  question(
+    'rl-community-support',
+    RL_COMMUNITY,
+    'What MCT community support activities have you led or taken part in — mentoring new trainers, promoting MCT career opportunities, local or virtual MCT events?',
+    'activities',
+    { maxItems: 12, required: true }
+  ),
+  question(
+    'rl-regional-hub',
+    RL_COMMUNITY,
+    'How would you support and curate your Regional Hub: discussions on its forum, new or localised articles on its blog, events on its calendar?',
+    'text',
+    { maxChars: 2000 }
+  ),
+  question(
+    'rl-commitments',
+    RL_EXPECTATIONS,
+    'Confirm you can meet the role expectations for the full one-year term (1 January to 31 December).',
+    'scale',
+    {
+      rows: [
+        'Review the Regional Lead Team channels weekly',
+        'Attend the monthly Regional Lead meetings and periodic discussion sessions',
+        'Monitor the MCT Community Café and answer MCT questions',
+        'Promote the MCT Program Announcements blog',
+        'Promote the Regional Hub among MCTs in your area',
+        'Plan virtual or in-person local events',
+      ],
+      options: ['Yes', 'Partly', 'No'],
+      required: true,
+    }
+  ),
+  question(
+    'rl-why',
+    RL_EXPECTATIONS,
+    'Why do you want to be an MCT Regional Lead, and what would MCTs in your region gain from it?',
+    'text',
+    { maxChars: 2000, required: true }
+  ),
+];
+
 export const DEFAULT_PROGRAMS = Object.freeze([
   {
     id: 'program-microsoft-mvp',
@@ -443,6 +543,7 @@ export const DEFAULT_PROGRAMS = Object.freeze([
       'Renew the qualifying certification before it lapses',
       'Export the classes-delivered report from Metrics That Matter and import it as evidence',
       'Stay active in the MCT Lounge on the Microsoft Tech Community',
+      'Once Active: the MCT Regional Lead role opens as additional requirements',
     ],
   },
   {
@@ -812,6 +913,10 @@ export const DEFAULT_PROGRAMS = Object.freeze([
   },
   {
     id: 'program-microsoft-mct-regional-lead',
+    // Additional to MCT (owner request 2026-10-05): the card, the questions
+    // and Start application appear only while the MCT membership is Active,
+    // and MCT evidence counts here too (readiness.js, model.js programGate).
+    parentProgramId: 'program-microsoft-mct',
     name: 'MCT Regional Lead',
     provider: 'Microsoft',
     category: 'training',
@@ -861,5 +966,6 @@ export const DEFAULT_PROGRAMS = Object.freeze([
       'Keep a dated log of MCT Lounge posts and Regional Hub articles',
       'Hold two consecutive years of MCT status before the window',
     ],
+    applicationQuestions: MCT_REGIONAL_LEAD_QUESTIONS,
   },
 ]);
