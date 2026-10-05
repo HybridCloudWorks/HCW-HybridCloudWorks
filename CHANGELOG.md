@@ -3423,6 +3423,9 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **CodeQL alert 383 (note).** `platform-settings.test.js` still imported
+  three names from the Listen & Learn speech settings that ADR 0034 slice 5
+  (#867) removed from that module or left unused; the import block is gone.
 - **The weekly certification re-verify could not republish the snapshot
   (#868).** `schedulers.js` handed `createCertReverify` a
   `snapshots.publishSnapshots` that `createSnapshotPublishHandlers` never
