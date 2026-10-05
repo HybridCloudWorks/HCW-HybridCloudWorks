@@ -652,6 +652,14 @@ belonged to another user:
   count answered `0` while the workspace ran, and the card would have shown
   an idle lab.
 - **The two scopes**, because they cap Template Admin at reading.
+- **`api_key:read` as well, since 2026-10-05 (#763)**, so the token can read
+  its own record — `GET /api/v2/users/me/keys/{id}`, the id being the part
+  of the token before the dash — and the Integrations card can say when it
+  expires: `Status token expires on <day> (<n> days)`, red inside the last
+  30 days with the renewal steps named. Coder documents the scope as "View
+  API keys"; it reads key metadata, never a secret. A token made without it
+  (the 2026-09-28 one) is refused that read with 403, and the card says
+  `expiry unknown: add the api_key:read scope at the next renewal`.
 
 | `hcw-status`'s role, and the token's scope | The three calls | Change a template | Delete a template | Stop a workspace |
 | --- | --- | --- | --- | --- |
@@ -724,7 +732,7 @@ appears on a command line.
    it is never on the screen, and success prints nothing:
 
    ```powershell
-   $s = $t | ssh hcw-lab "sudo -n docker exec -i -e CODER_URL=http://127.0.0.1:7080 coder sh -c 'tr -d \\r | { read -r CODER_SESSION_TOKEN; export CODER_SESSION_TOKEN; coder tokens create --user hcw-status --lifetime 1y --scope template:read --scope workspace:read; }'"
+   $s = $t | ssh hcw-lab "sudo -n docker exec -i -e CODER_URL=http://127.0.0.1:7080 coder sh -c 'tr -d \\r | { read -r CODER_SESSION_TOKEN; export CODER_SESSION_TOKEN; coder tokens create --user hcw-status --lifetime 1y --scope template:read --scope workspace:read --scope api_key:read; }'"
    ```
 
    Check what `$s` holds, PowerShell:
@@ -756,7 +764,9 @@ appears on a command line.
    Success is `configured` `True` and `reachable` `True`, with `capacity`
    showing `running` as a number and `max` 5, and `templates` listing
    `hcw-lab` once it is published ("Publishing the template", above; empty
-   before that). `running` still empty (no number) means Coder refused the
+   before that). On https://hybridcloudworks.com/admin/integrations the
+   Hybrid Lab card's test then ends `Status token expires on <day> (<n>
+   days)` — the reminder that replaces a calendar (#763). `running` still empty (no number) means Coder refused the
    token, and the check in step 3 tells why. `reachable` `False` means Coder
    did not answer at all, token or not.
 

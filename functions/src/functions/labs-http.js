@@ -24,6 +24,7 @@ import { getDefaultGuard } from '../lib/auth/default-guard.js';
 import { createDoc, deleteDoc, queryDocs, readDoc, upsertDoc, patchDoc } from '../lib/cosmos-client.js';
 import { createLabHandlers } from '../lib/labs.js';
 import { createAgentRegistryHandlers } from '../lib/labs/agent-registry.js';
+import { createCoderStatusHandlers } from '../lib/labs/coder-status.js';
 
 const handlers = () =>
   createLabHandlers({
@@ -80,4 +81,16 @@ httpRouteByMethod('cmsLabAgent', {
     PATCH: (request, context) => registry().setAgentActive(request, context),
     DELETE: (request, context) => registry().removeAgent(request, context),
   },
+});
+
+// When the status token expires, for the Integrations card (#763): the
+// same module as the public status read, with the editor guard.
+const coderToken = () =>
+  createCoderStatusHandlers({ guard: getDefaultGuard(), store: { readDoc, upsertDoc } });
+
+httpRoute('cmsLabsCoderToken', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'cms/labs/coder-token',
+  handler: (request, context) => coderToken().getCoderToken(request, context),
 });

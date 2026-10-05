@@ -85,6 +85,18 @@ export const DEFAULT_CODER_MAX_WORKSPACES = 5;
 /** Templates shown, and therefore version lookups made, per refresh. */
 export const MAX_TEMPLATES = 10;
 
+/** The Integrations card turns red this many days before the status token expires (#763). */
+export const TOKEN_RENEW_WARNING_DAYS = 30;
+
+/**
+ * The Coder scope that lets a token read its own record (`GET
+ * /api/v2/users/me/keys/{id}`), documented by Coder as "View API keys". A
+ * token scoped to `template:read` and `workspace:read` alone is refused that
+ * read (403), so the card can only say "unknown" until the token is renewed
+ * with this scope added (lab-host/README.md, "The status token for the site").
+ */
+export const TOKEN_SCOPE_FOR_EXPIRY = 'api_key:read';
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
@@ -138,6 +150,26 @@ export function readCoderConfig(env = process.env) {
 
 /** The address is set but unusable — worth one warning line. */
 const hasCoderUrl = (env) => Boolean(readSetting(env, 'CODER_URL'));
+
+/**
+ * An authenticated answer no cache may keep: `private, no-store`, so a
+ * browser does not show last month's expiry after a renewal. (`jsonResponse`
+ * with 0 seconds only omits the header, which leaves the default heuristics.)
+ */
+const privateJson = (status, body) => ({
+  status,
+  headers: { 'Content-Type': 'application/json', 'Cache-Control': 'private, no-store' },
+  body: JSON.stringify(body),
+});
+
+/**
+ * Coder API keys are `<id>-<secret>`; the id, before the dash, is what the
+ * key record is read by. '' for anything that is not that shape.
+ */
+export function tokenKeyId(token) {
+  const match = /^([A-Za-z0-9]{6,})-[A-Za-z0-9]+$/.exec(String(token || '').trim());
+  return match ? match[1] : '';
+}
 
 /**
  * A GET to Coder, with the token only when one is given. Throws on anything
@@ -253,14 +285,78 @@ async function readDetailOrUnknown({ fetchImpl, config, context }) {
 }
 
 /**
+ * When CODER_STATUS_TOKEN expires, from Coder itself (#763). The token's
+ * one-year lifetime is set at creation and nothing renews it; until this,
+ * the only reminder was a calendar. Reads the token's own record; answers
+ * `{ known: true, expiresAt, daysLeft, renewSoon, tokenName, scopes }`, or
+ * `{ known: false, reason }` with `reason` one of `unset`, `shape` (not a
+ * Coder key, or a record without a date), `scope` (403: the token lacks
+ * TOKEN_SCOPE_FOR_EXPIRY), `refused` (401: expired or revoked) or `error`.
+ * Never throws, never carries the token.
+ */
+export async function readTokenExpiry({ fetchImpl, config, context, now = () => Date.now() }) {
+  const keyId = tokenKeyId(config?.token);
+  if (!config?.token || !keyId) return unknownExpiry(config?.token ? 'shape' : 'unset');
+  let key;
+  try {
+    key = await coderGet(
+      fetchImpl,
+      config,
+      `/api/v2/users/me/keys/${encodeURIComponent(keyId)}`,
+      config.token
+    );
+  } catch (error) {
+    return unknownExpiry(reasonForRefusal(error, context));
+  }
+  return expiryFromRecord(key, now());
+}
+
+/** `{ known: false, reason }`, naming the scope to add when that is the reason. */
+function unknownExpiry(reason) {
+  return reason === 'scope'
+    ? { known: false, reason, scope: TOKEN_SCOPE_FOR_EXPIRY }
+    : { known: false, reason };
+}
+
+/**
+ * Why Coder would not give the record: the scope (403), the token (401), or
+ * something else — logged as a status only, never the message, which
+ * carries the request path and with it the key id.
+ */
+function reasonForRefusal(error, context) {
+  if (error?.status === 403) return 'scope';
+  if (error?.status === 401) return 'refused';
+  const status = Number.isInteger(error?.status) ? `Coder answered ${error.status}` : 'no answer';
+  context?.warn?.(`coder-status: the token's own record could not be read (${status})`);
+  return 'error';
+}
+
+/** The record's expiry as the card's answer, or `shape` when it carries no usable date. */
+function expiryFromRecord(key, nowMs) {
+  const ms = Date.parse(typeof key?.expires_at === 'string' ? key.expires_at : '');
+  if (!Number.isFinite(ms)) return unknownExpiry('shape');
+  const daysLeft = Math.floor((ms - nowMs) / 86_400_000);
+  return {
+    known: true,
+    expiresAt: new Date(ms).toISOString(),
+    daysLeft,
+    renewSoon: daysLeft <= TOKEN_RENEW_WARNING_DAYS,
+    tokenName: typeof key.token_name === 'string' ? key.token_name : null,
+    scopes: Array.isArray(key.scopes) ? key.scopes.filter((s) => typeof s === 'string') : [],
+  };
+}
+
+/**
  * @param {object} deps
  * @param {{ readDoc: Function, upsertDoc: Function }} deps.store
+ * @param {{ requireRole: Function }} [deps.guard] - needed only by the admin token read
  * @param {Function} [deps.fetchImpl]
  * @param {Record<string, string|undefined>} [deps.env]
  * @param {() => number} [deps.now] - epoch ms
  */
 export function createCoderStatusHandlers({
   store,
+  guard = null,
   fetchImpl = globalThis.fetch,
   env = process.env,
   now = () => Date.now(),
@@ -312,6 +408,25 @@ export function createCoderStatusHandlers({
 
   return {
     readStatus,
+
+    /**
+     * GET /api/cms/labs/coder-token — editor. When the status token expires,
+     * for the Integrations card (#763). Not cached: it is read on demand.
+     */
+    async getCoderToken(request, context) {
+      if (!guard) return privateJson(500, { error: 'The token read is not wired with a guard' });
+      const auth = await guard.requireRole(request, 'editor');
+      if (auth.error) return auth.error;
+      const config = readCoderConfig(env);
+      if (!config) return privateJson(200, { configured: false });
+      try {
+        const token = await readTokenExpiry({ fetchImpl, config, context, now });
+        return privateJson(200, { configured: true, token, warningDays: TOKEN_RENEW_WARNING_DAYS });
+      } catch (error) {
+        context.error('cmsLabsCoderToken failed:', error);
+        return privateJson(500, { error: 'Failed to read the Coder status token' });
+      }
+    },
 
     /** GET /api/public/labs/coder-status */
     async getCoderStatus(request, context) {
