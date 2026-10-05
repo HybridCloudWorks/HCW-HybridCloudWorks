@@ -12,7 +12,9 @@ import { postJSON } from '@/lib/api';
  * new content without a full site redeploy (ADR 0033, Spotlight slice).
  *
  * `onPublished(result)` is called after a publish lands, so a page showing
- * the snapshot (the two Publishing tabs) can re-read it.
+ * the snapshot (the two Publishing tabs) can re-read it. `label` is the idle
+ * text: the Certifications Hub calls it "Update Cert Catalog" in its header
+ * (owner request 2026-10-05); the Speaking Events tab keeps the default.
  *
  * Race-safety: the in-flight guard is a ref checked before any await — the
  * disabled attribute only takes effect after the re-render the first click
@@ -20,7 +22,7 @@ import { postJSON } from '@/lib/api';
  * flash is a timer that is cleared on unmount, so it never sets state on a
  * component that has gone.
  */
-export default function PublishSnapshotButton({ onPublished } = {}) {
+export default function PublishSnapshotButton({ onPublished, label = 'Publish snapshot' } = {}) {
   const { toast } = useToast();
   const [state, setState] = useState('idle'); // idle | publishing | done
   const inFlight = useRef(false);
@@ -81,7 +83,7 @@ export default function PublishSnapshotButton({ onPublished } = {}) {
       {state === 'idle' && <UploadCloud className="h-4 w-4 mr-1.5" />}
       {state === 'publishing' && 'Publishing…'}
       {state === 'done' && 'Published'}
-      {state === 'idle' && 'Publish snapshot'}
+      {state === 'idle' && label}
     </Button>
   );
 }

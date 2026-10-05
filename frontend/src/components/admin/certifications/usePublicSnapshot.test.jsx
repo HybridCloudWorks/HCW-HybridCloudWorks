@@ -41,6 +41,13 @@ describe('usePublicSnapshot', () => {
     expect(result.current.snapshot).toEqual(NEW);
   });
 
+  it('reads past the caches on mount when told a publish already happened', async () => {
+    fetchPublicSnapshot.mockResolvedValue({ generatedAt: 'now', items: [] });
+    renderHook(() => usePublicSnapshot({ fresh: true }));
+    await waitFor(() => expect(fetchPublicSnapshot).toHaveBeenCalledTimes(1));
+    expect(fetchPublicSnapshot).toHaveBeenLastCalledWith('certifications', { fresh: true });
+  });
+
   it('reports "never published" as null, not as loading', async () => {
     fetchPublicSnapshot.mockResolvedValueOnce(null);
     const { result } = renderHook(() => usePublicSnapshot());

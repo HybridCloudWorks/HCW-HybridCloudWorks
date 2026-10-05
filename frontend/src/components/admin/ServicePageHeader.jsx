@@ -21,6 +21,8 @@ import React from 'react';
  *   poweredBy    — Service brand name for the top-right pill (defaults to `service`)
  *   accent       — Tailwind color stem for the pill border/text, e.g. 'pink' | 'violet'
  *                  Defaults to 'slate'.
+ *   actions      — Optional node rendered under the pill, right-aligned: the page's
+ *                  one primary action (the Certifications Hub's Update Cert Catalog).
  */
 export default function ServicePageHeader({
   icon: Icon,
@@ -30,6 +32,7 @@ export default function ServicePageHeader({
   description,
   poweredBy,
   accent = 'slate',
+  actions = null,
 }) {
   let dotClass = 'bg-rose-400';
   let statusText = `${service} disconnected`;
@@ -74,12 +77,17 @@ export default function ServicePageHeader({
           <p className="text-sm text-muted-foreground mt-1.5 max-w-3xl">{description}</p>
         )}
       </div>
-      {hasPowerSource && (
-        <span
-          className={`shrink-0 inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${pillClasses}`}
-        >
-          Powered by {hasPowerSource}
-        </span>
+      {(hasPowerSource || actions) && (
+        <div className="flex shrink-0 flex-col items-end gap-2">
+          {hasPowerSource && (
+            <span
+              className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${pillClasses}`}
+            >
+              Powered by {hasPowerSource}
+            </span>
+          )}
+          {actions}
+        </div>
       )}
     </div>
   );

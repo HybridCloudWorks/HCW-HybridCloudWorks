@@ -7,16 +7,17 @@
  * needs the certification list; when that failed, the diff says so and the
  * snapshot half carries on.
  *
- * Publish snapshot writes the certifications AND speaking-events snapshots
- * (one `publishSnapshot` call, shared with the Speaking Events page), then
+ * The button is Update Cert Catalog in the page header (CertificationsPage),
+ * one click from every tab; it writes the certifications AND speaking-events
+ * snapshots (one `publishSnapshot` call, shared with the Speaking Events
+ * page). The page bumps `publishCount` when a publish lands and this tab
  * re-reads the snapshot past every cache.
  */
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { TabError, TabLoading } from '@/components/admin/integrations/TabNotice';
-import PublishSnapshotButton from '@/components/admin/PublishSnapshotButton';
 import usePublicSnapshot from './usePublicSnapshot';
 import { CertListNotice, TabIntro } from './shared';
 import { diffSnapshot, issuerOf } from './certView';
@@ -119,25 +120,32 @@ function ChangesUnavailable({ published }) {
   return <p className="text-sm text-muted-foreground">Needs the public snapshot.</p>;
 }
 
-export default function PublishingTab({ certs }) {
-  const published = usePublicSnapshot();
+export default function PublishingTab({ certs, publishCount = 0 }) {
+  // Mounted after a publish this session: the first read is a fresh one.
+  // A publish DURING this mount is a count change, answered by one refresh;
+  // the count seen at mount is remembered so a remount does not read twice.
+  const published = usePublicSnapshot({ fresh: publishCount > 0 });
+  const { refresh } = published;
+  const seenCount = useRef(publishCount);
+  useEffect(() => {
+    if (publishCount === seenCount.current) return;
+    seenCount.current = publishCount;
+    refresh();
+  }, [publishCount, refresh]);
   return (
     <div className="space-y-4">
       <TabIntro>
         The About page reads a published snapshot, not the collection, and renders whichever is
         newer — this snapshot or the JSON baked into the last deploy — so a publish shows to
-        visitors right away. Edits appear there after the next publish: yours, or the re-verify
-        timer&apos;s when it changes a cert.
+        visitors right away. Edits appear there after the next Update Cert Catalog (the button in
+        the page header), or when the re-verify timer changes a cert.
       </TabIntro>
       <Card>
-        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-4 space-y-0">
-          <div className="space-y-1.5">
-            <CardTitle className="text-lg">Public snapshot</CardTitle>
-            <CardDescription>
-              Publishing also refreshes the speaking-events snapshot.
-            </CardDescription>
-          </div>
-          <PublishSnapshotButton onPublished={published.refresh} />
+        <CardHeader>
+          <CardTitle className="text-lg">Public snapshot</CardTitle>
+          <CardDescription>
+            Update Cert Catalog also refreshes the speaking-events snapshot.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <SnapshotSummary published={published} />

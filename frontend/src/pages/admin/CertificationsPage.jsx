@@ -33,6 +33,7 @@ import { Award } from 'lucide-react';
 import { useAuthReady } from '@/hooks/useAuthReady';
 import { useToast } from '@/components/ui/use-toast';
 import ServicePageHeader from '@/components/admin/ServicePageHeader';
+import PublishSnapshotButton from '@/components/admin/PublishSnapshotButton';
 import HubTabs from '@/components/admin/HubTabs';
 import CatalogTab from '@/components/admin/certifications/CatalogTab';
 import FeaturedTab from '@/components/admin/certifications/FeaturedTab';
@@ -108,6 +109,14 @@ export default function CertificationsPage() {
 
   const ActivePanel = PANELS[activeTab];
 
+  // Update Cert Catalog lives in the header, under the Powered-by pill, so
+  // it is one click from every tab (owner request 2026-10-05; it had moved
+  // onto the Publishing tab with the tabbed page). The tab keeps the
+  // snapshot summary and the diff; this counter tells it a publish landed
+  // so it re-reads past every cache.
+  const [publishCount, setPublishCount] = useState(0);
+  const onPublished = useCallback(() => setPublishCount((n) => n + 1), []);
+
   return (
     <div className="space-y-6">
       <ServicePageHeader
@@ -118,6 +127,7 @@ export default function CertificationsPage() {
         description="Curate the certification showcase on the About page — feature the wins, hide the noise, and stay ahead of renewals."
         poweredBy="Cosmos DB"
         accent="amber"
+        actions={<PublishSnapshotButton label="Update Cert Catalog" onPublished={onPublished} />}
       />
 
       <HubTabs
@@ -127,7 +137,13 @@ export default function CertificationsPage() {
         idPrefix="certifications"
         label="Certifications Hub"
       >
-        <ActivePanel certs={certs} nowMs={nowMs} actions={actions} onNew={onNew} />
+        <ActivePanel
+          certs={certs}
+          nowMs={nowMs}
+          actions={actions}
+          onNew={onNew}
+          publishCount={publishCount}
+        />
       </HubTabs>
 
       {editing && (
