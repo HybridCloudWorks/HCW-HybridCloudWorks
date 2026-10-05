@@ -152,6 +152,17 @@ export function readCoderConfig(env = process.env) {
 const hasCoderUrl = (env) => Boolean(readSetting(env, 'CODER_URL'));
 
 /**
+ * An authenticated answer no cache may keep: `private, no-store`, so a
+ * browser does not show last month's expiry after a renewal. (`jsonResponse`
+ * with 0 seconds only omits the header, which leaves the default heuristics.)
+ */
+const privateJson = (status, body) => ({
+  status,
+  headers: { 'Content-Type': 'application/json', 'Cache-Control': 'private, no-store' },
+  body: JSON.stringify(body),
+});
+
+/**
  * Coder API keys are `<id>-<secret>`; the id, before the dash, is what the
  * key record is read by. '' for anything that is not that shape.
  */
@@ -295,7 +306,7 @@ export async function readTokenExpiry({ fetchImpl, config, context, now = () => 
       config.token
     );
   } catch (error) {
-    return unknownExpiry(reasonForRefusal(error, context), error);
+    return unknownExpiry(reasonForRefusal(error, context));
   }
   return expiryFromRecord(key, now());
 }
@@ -307,11 +318,16 @@ function unknownExpiry(reason) {
     : { known: false, reason };
 }
 
-/** Why Coder would not give the record: the scope (403), the token (401), or something else, logged. */
+/**
+ * Why Coder would not give the record: the scope (403), the token (401), or
+ * something else — logged as a status only, never the message, which
+ * carries the request path and with it the key id.
+ */
 function reasonForRefusal(error, context) {
   if (error?.status === 403) return 'scope';
   if (error?.status === 401) return 'refused';
-  context?.warn?.(`coder-status: the token's own record could not be read: ${error?.message ?? error}`);
+  const status = Number.isInteger(error?.status) ? `Coder answered ${error.status}` : 'no answer';
+  context?.warn?.(`coder-status: the token's own record could not be read (${status})`);
   return 'error';
 }
 
@@ -398,21 +414,17 @@ export function createCoderStatusHandlers({
      * for the Integrations card (#763). Not cached: it is read on demand.
      */
     async getCoderToken(request, context) {
-      if (!guard) return jsonResponse(500, { error: 'The token read is not wired with a guard' }, 0);
+      if (!guard) return privateJson(500, { error: 'The token read is not wired with a guard' });
       const auth = await guard.requireRole(request, 'editor');
       if (auth.error) return auth.error;
       const config = readCoderConfig(env);
-      if (!config) return jsonResponse(200, { configured: false }, 0);
+      if (!config) return privateJson(200, { configured: false });
       try {
         const token = await readTokenExpiry({ fetchImpl, config, context, now });
-        return jsonResponse(
-          200,
-          { configured: true, token, warningDays: TOKEN_RENEW_WARNING_DAYS },
-          0
-        );
+        return privateJson(200, { configured: true, token, warningDays: TOKEN_RENEW_WARNING_DAYS });
       } catch (error) {
         context.error('cmsLabsCoderToken failed:', error);
-        return jsonResponse(500, { error: 'Failed to read the Coder status token' }, 0);
+        return privateJson(500, { error: 'Failed to read the Coder status token' });
       }
     },
 

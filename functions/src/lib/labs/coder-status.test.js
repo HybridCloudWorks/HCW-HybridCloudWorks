@@ -447,7 +447,8 @@ describe('the status token\'s own expiry (#763)', () => {
     expect(await readTokenExpiry({ fetchImpl: refusedBy(401), config: config(), context })).toEqual({ known: false, reason: 'refused' });
     const warn = vi.fn();
     expect(await readTokenExpiry({ fetchImpl: refusedBy(500), config: config(), context: { warn } })).toEqual({ known: false, reason: 'error' });
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('could not be read'));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('could not be read (Coder answered 500)'));
+    expect(warn.mock.calls[0][0]).not.toContain('AbCdEf1234');
     expect(await readTokenExpiry({ fetchImpl: coderFetch({ [keyPath]: { expires_at: 'soon' } }), config: config(), context })).toEqual({ known: false, reason: 'shape' });
   });
 
@@ -463,7 +464,7 @@ describe('the status token\'s own expiry (#763)', () => {
     const fetchImpl = coderFetch({ [keyPath]: { expires_at: expires } });
     const res = await createCoderStatusHandlers({ store: makeStore(), guard: guardAs(), fetchImpl, env: KEY_ENV, now: () => NOW }).getCoderToken(request(), context);
     expect(res.status).toBe(200);
-    expect(res.headers['Cache-Control']).toBeUndefined();
+    expect(res.headers['Cache-Control']).toBe('private, no-store');
     expect(body(res)).toEqual({
       configured: true,
       warningDays: TOKEN_RENEW_WARNING_DAYS,
