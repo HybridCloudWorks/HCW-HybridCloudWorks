@@ -19,6 +19,18 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Blog run: the October 2026 certification calendar for Azure, AWS and
+  Google Cloud (owner request 2026-10-05).** Three drafts in `docs/content`
+  for Admin → Drafts "Import from docs/content", each built only from vendor
+  sentences read during the 2026-10-05 catalogue re-read: Azure (AI-500 out
+  of beta, PL-400 → AB-400 on October 16, MS-102's last eight weeks, the
+  DP-420 rename, retired exams and their successors), AWS (the November
+  version bumps and AWS's 2026-10-02 correction of the SAP/DVA last days,
+  the two open betas, ANS-C01, the language retirements) and Google Cloud
+  (Agentic Architect GA registration on November 2 and why that is not an
+  exam day, the PMLE move away from Vertex AI). `drafts-handlers.test.js`
+  now expects fourteen importable files.
+
 - **Learn catalogues: the 2026-10-05 re-read of Azure, AWS and GCP against
   their vendor pages (owner request 2026-10-05).** Every row of the three
   catalogues was read on the day and `DATA_AS_OF` moves to 2026-10-05 on all
