@@ -19,6 +19,26 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Learn catalogues: the 2026-10-05 re-read of Azure, AWS and GCP against
+  their vendor pages (owner request 2026-10-05).** Every row of the three
+  catalogues was read on the day and `DATA_AS_OF` moves to 2026-10-05 on all
+  three. Azure: AI-500 is out of beta (`active`); PL-400 is `expiring` with
+  `expiryDate` 2026-10-30 and hands over to the new AB-400 row (`upcoming`,
+  `availableDate` 2026-10-16, Microsoft's study-guide outline included);
+  MS-102 and the retired AZ-204, AZ-500, PL-200 and MB-280 name the
+  successors Microsoft recommends; the DP-420 rename (2026-10-06) and
+  PL-400 → AB-400 (2026-10-16) join the timeline; the MB-330 retirement
+  Microsoft expects in December is noted without a date, as it has none;
+  twenty-two `learnUrl`s that 404'd or pointed at the browse root carry the
+  live credential page. The study-guide outlines were regenerated (AB-400 in,
+  AZ-800/AZ-801 out as retired, MS-721 and SC-300 changed on Learn). GCP:
+  PAA stays `upcoming` without a date and says that GA registration opens
+  November 2, 2026 with the exam expected mid-November; PMLE no longer names
+  Vertex AI, following Google's note on the exam's transition to Gemini
+  Enterprise Agent Platform. AWS: nothing stored moved; AWS corrected its
+  SAP-C02 and DVA-C02 exam pages on 2026-10-02 to the dates the file kept.
+  `education-catalogues.test.js` pins the re-read.
+
 - **Ambassador hub: a program can be additional to another, and MCT
   Regional Lead now is (owner request 2026-10-05).** A program may carry
   `parentProgramId`; the seeded MCT Regional Lead names Microsoft Certified
