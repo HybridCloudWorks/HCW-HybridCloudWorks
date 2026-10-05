@@ -14,10 +14,13 @@
  * This module is the missing half. It reads that configuration and turns it
  * into three answers the router asks for:
  *
- *   1. Which providers, in which order?   resolveProviderOrder()
+ *   1. Which providers hold a key and     resolveProviderOrder()
+ *      are switched on?
  *   2. May this feature call a model?     isFeatureEnabled()
- *   3. Where does a per-feature provider  applyFeaturePlacement()  (#701)
- *      go for this feature?
+ *   3. Which candidates, in which order?  selection + catalog → select.js
+ *      (ADR 0034 slice 3, #858; until then applyFeaturePlacement (#701)
+ *      and applyFeatureRoute (ADR 0033), which the loader now migrates
+ *      into the selection document in memory — migrate-selection.js)
  *
  * THREE RULES DECIDE EVERY EDGE CASE HERE. They are worth stating plainly
  * because each one is the answer to "what happens when configuration and
@@ -50,7 +53,11 @@
  */
 
 import { DEFAULT_PROVIDER_ORDER } from './provider-order.js';
+import { FEATURES_DOC_ID, PROVIDERS_CONTAINER, SETTINGS_CONTAINER } from './containers.js';
 import { ROUTING_DOC_ID, normalizeRouting } from './routing-table.js';
+import { isSelectionV2, normalizeSelection } from './selection.js';
+import { migrateSelection } from './migrate-selection.js';
+import { readModelCatalog } from './model-catalog-doc.js';
 
 /**
  * The catalogue, the placement rules and the routing table live in sibling
@@ -77,9 +84,8 @@ export {
 } from './routing-table.js';
 export { DEFAULT_PROVIDER_ORDER };
 
-export const PROVIDERS_CONTAINER = 'ai_providers';
-export const SETTINGS_CONTAINER = 'admin_settings';
-export const FEATURES_DOC_ID = 'ai-features';
+/** The containers and document ids: containers.js, so the catalogue's read path can name them too. */
+export { FEATURES_DOC_ID, PROVIDERS_CONTAINER, SETTINGS_CONTAINER } from './containers.js';
 
 /** Ranked lowest-first, so an unordered provider sorts after every ordered one. */
 function rankOf(doc, id) {
@@ -156,21 +162,56 @@ const EMPTY = Object.freeze({
   providers: null,
   features: null,
   routing: null,
+  selection: null,
+  catalog: null,
 });
 
-/** The three documents, read together and normalised. */
-async function readAiConfig(store) {
-  const [providers, features, routing] = await Promise.all([
+/**
+ * The model catalogue (ADR 0034 slice 2), read beside the three documents
+ * through its document half (model-catalog-doc.js, which imports neither
+ * the router nor this module). A catalogue that cannot be read is null —
+ * the resolver then judges every model by the code enrichment table and
+ * nothing goes dark — and never fails the other three.
+ */
+async function readCatalog(store, { now, log }) {
+  try {
+    return await readModelCatalog({ store, now: () => new Date(now()) });
+  } catch (error) {
+    log.warn?.(`[ai-config] could not read the model catalogue: ${error?.message || error}`);
+    return null;
+  }
+}
+
+/**
+ * The selection document (ADR 0034 §2) as the resolver reads it: a stored
+ * version 2 normalised, anything else — the v1 `{ routes }` document, or
+ * none — migrated in memory from the three documents. Nothing is written
+ * on read; the first PUT after the migration stores version 2.
+ */
+export function selectionFrom({ providers, features, routing }) {
+  return isSelectionV2(routing)
+    ? normalizeSelection(routing)
+    : migrateSelection({ providers, features, routing });
+}
+
+/** The three documents and the catalogue, read together and normalised. */
+async function readAiConfig(store, deps) {
+  const [providers, features, routing, catalog] = await Promise.all([
     store.queryDocs(PROVIDERS_CONTAINER, 'SELECT * FROM c'),
     store.readDoc(SETTINGS_CONTAINER, FEATURES_DOC_ID, FEATURES_DOC_ID),
-    // Per-task routing (ADR 0033). A missing document is "no routes", which
-    // is the global order — the same answer every call got before routing.
+    // The selection document (ADR 0034 §2), or the per-task routing it
+    // migrates from (ADR 0033). A missing document is the code defaults.
     store.readDoc(SETTINGS_CONTAINER, ROUTING_DOC_ID, ROUTING_DOC_ID),
+    readCatalog(store, deps),
   ]);
+  const cards = Array.isArray(providers) ? providers : [];
   return {
-    providers: Array.isArray(providers) ? providers : [],
+    providers: cards,
     features: features || null,
+    // The v1 view, kept for the Routing tab until slice 4 removes it.
     routing: routing ? normalizeRouting(routing) : null,
+    selection: selectionFrom({ providers: cards, features: features || null, routing: routing || null }),
+    catalog,
   };
 }
 
@@ -205,7 +246,7 @@ function loadAiConfig(state, deps) {
   if (!store) return EMPTY;
   if (state.cache && now() - state.cache.at < ttlMs) return state.cache.value;
   if (!state.inflight) {
-    state.inflight = readAiConfig(store).then(
+    state.inflight = readAiConfig(store, deps).then(
       (value) => settleRead(state, now, value),
       (error) => recoverFromFailedRead(state, deps, error)
     );
@@ -214,7 +255,9 @@ function loadAiConfig(state, deps) {
 }
 
 /**
- * Reads both documents, cached, with a stale-over-nothing failure policy.
+ * Reads the documents and the catalogue, cached, with a stale-over-nothing
+ * failure policy. `load()` answers `{ providers, features, routing,
+ * selection, catalog }`.
  *
  * @param {object} deps
  * @param {{queryDocs: Function, readDoc: Function}} [deps.store] Omit and the

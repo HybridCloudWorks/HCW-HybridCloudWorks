@@ -584,6 +584,9 @@ describe('usage — recorded, at zero cost', () => {
         promptTokens: 120,
         completionTokens: 30,
         costUsd: 0,
+        // Placed first by the store above, which the selection document
+        // migrates to a custom chain (ADR 0034 §6, #858).
+        selection: 'custom',
       },
     ]);
   });

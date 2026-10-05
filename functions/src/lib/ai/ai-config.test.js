@@ -79,6 +79,8 @@ describe('rule 2 — unreadable configuration is not empty configuration', () =>
       providers: null,
       features: null,
       routing: null,
+      selection: null,
+      catalog: null,
     });
   });
 
@@ -232,6 +234,8 @@ describe('caching', () => {
       providers: null,
       features: null,
       routing: null,
+      selection: null,
+      catalog: null,
     });
   });
 });

@@ -122,6 +122,66 @@ This project has not cut a tagged release; entries are grouped under
   step; `aiEngine.test.js` holds the page's visibility rule equal to the
   API's and refuses a model list in the seed. No app setting or Terraform
   run: the first list lands on the next Monday probe, or on the button.
+- **AI model selection: the version 2 document, the resolver and the
+  migration (ADR 0034 slice 3, #858).** Three mechanisms decided which
+  provider served a call — the cards' order, the per-feature placement and
+  the v1 routing table — and they overlapped. `admin_settings/ai-routing`
+  is now version 2 (`functions/src/lib/ai/selection.js`): `global.priority`,
+  the Priority 1, 2, 3 … list of `{ provider, model|null }`, and per task
+  `{ mode: recommended | global | custom, chain?, thenGlobal?, exclude? }`.
+  One pure resolver, `select.js`, decides the chain for every call and
+  nothing else does — explicit call-site model, then the task's recommended
+  model if it is `live`, priced, keyed, enabled and carries the task's
+  `needs`, then a custom chain and the Priority list after it, then the
+  Priority list — with every candidate filtered by key, switch, `exclude`,
+  catalogue status (retired out; unknown or not yet listed allowed with a
+  flag, so a fresh deployment never goes dark) and `needs`, and the policy
+  locks no document lifts: the trial tier never serves a public task or a
+  call that names no task, and grounding is Gemini-only. A turned-away
+  candidate is in `rejected` with its sentence ("not eligible: trial tier
+  on a public route"), never silently dropped. The migration
+  (`migrate-selection.js`, pure, idempotent on a v2 document) keeps every
+  choice: card order and pin → the Priority list; a v1 route → a custom
+  chain with `thenGlobal: true`; a placement of `first` → that provider
+  after the route's steps (the route ran after placement) or alone as the
+  chain; `off` → `exclude`; everything else `global`. The config loader
+  reads the catalogue beside the three documents (same cache, a catalogue
+  that cannot be read is null) and migrates a v1 document in memory on
+  every read, writing nothing; the router's `chainDetails` calls the
+  resolver, `applyFeaturePlacement` and `applyFeatureRoute` are no longer
+  called and their modules are marked deprecated, an empty chain for want
+  of a capability fails with `AI_NOT_CONFIGURED` naming it, the
+  `CONTENTFORGE_AI_PROVIDER` pin keeps its meaning (one provider the
+  resolver found eligible, no fall-through), and every usage row gains
+  `selection: explicit | recommended | custom | global`. `GET cms/ai-routing`
+  answers the v2 document (`migrated: true` when derived from a stored v1)
+  beside the v1 `routes` view the Routing tab still renders; `PUT` takes a
+  v2 document (validated whole, 409 on an `updatedAt` that is not the one
+  read) or the v1 `{ routes }` body the tab sends, and stores version 2
+  from the first save either way — after which the "Where AI is used"
+  placements and the card pins no longer reach the router, having been
+  migrated into the document; slice 4 (#859) removes those controls. A
+  `null` model in a chain or the list stays the provider's default for the
+  call's purpose (`DEFAULT_MODEL_TABLE`), judged for eligibility on the
+  provider's modality recommendation and reported as `modalityModel`;
+  making it that recommendation outright (ADR 0034 §2) is one marked line
+  for slice 4, when the Tasks tab lets the owner choose Recommended for the
+  drafting tasks the owner's 2026-10-04 decision keeps on GPT-5 mini.
+  `select.contract.test.js` holds the resolver, on a representative fixture
+  of the 2026-10-04 documents (`fixtures/selection-2026-10-04.js`; the
+  production export was not readable from the session) migrated to v2, to
+  the chain the pre-slice router produced for every task under five
+  document variants and four key sets, before and after the first
+  catalogue refresh; the two differences are documented there (the grounded
+  task's chain is Gemini alone, as the grounded call always was; a call
+  naming no task may use Foundry, never the trial tier). `select.test.js`
+  pins the precedence and the locks in both directions (the public explain
+  task cannot be given NVIDIA by the list, a chain or a recommendation; a
+  document cannot enable a provider with no key); `selection.test.js` the
+  read and save rules of §6; `migrate-selection.test.js` the migration;
+  `admin-integrations.test.js` both PUT shapes, the 409 and the "would have
+  no model" refusal. No app setting or Terraform run: the first admin save
+  writes the v2 document.
 - **OpenAI's gpt-5-mini and gpt-5-nano are priced** ($0.25 / $2.00 and
   $0.05 / $0.40 per 1M tokens, OpenAI's published rates, the same figures
   Azure lists for the same models; owner confirmation 2026-10-05). They had

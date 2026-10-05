@@ -31,6 +31,7 @@ const routingHandlers = () =>
     guard: getDefaultGuard(),
     store: { queryDocs, readDoc, upsertDoc, patchDoc, deleteDoc },
     onAiConfigChanged: ai.invalidateConfig,
+    availableProviders: ai.availableProviders,
   });
 
 httpRoute('aiProxy', {

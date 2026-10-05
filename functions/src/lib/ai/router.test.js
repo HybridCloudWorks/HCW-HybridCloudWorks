@@ -1126,6 +1126,8 @@ describe('source grounding — the call (#433)', () => {
         promptTokens: 1100,
         completionTokens: 25,
         costUsd: getCostEstimate('gemini', 'gemini-3.6-flash', 1100, 25),
+        // No document: the task is in global mode (ADR 0034 §3, #858).
+        selection: 'global',
       },
     ]);
   });
@@ -1202,25 +1204,26 @@ describe('source grounding — the call (#433)', () => {
       expect(fetch).not.toHaveBeenCalled();
     });
 
-    it('CONTENTFORGE_AI_PROVIDER pins another provider: the pin is named, nothing is called', async () => {
-      const fetch = vi.fn();
+    it('CONTENTFORGE_AI_PROVIDER pins another provider: the pin is named and not honoured, Gemini serves', async () => {
+      // Since the resolver (ADR 0034 §3, #858) grounding is a policy lock,
+      // Gemini-only, like the trial tier on the public route: a pin on a
+      // provider the lock turns away falls back with a warning naming it,
+      // exactly as a pin on nvidia for the public route always has. Before
+      // the resolver the pin emptied the chain and the call failed.
+      const fetch = vi.fn(async () => interactionReply('{}'));
+      const log = { warn: vi.fn() };
       const r = createAiRouter({
         env: { ...keys, CONTENTFORGE_AI_PROVIDER: 'openai' },
         fetch,
         sleep: noSleep,
-        log: quiet,
+        log,
       });
-      await expect(
-        r.generateGroundedJsonResponse({
-          prompt: 'p',
-          sources,
-          feature: 'sourceGrounding',
-        })
-      ).rejects.toMatchObject({
-        code: 'AI_NOT_CONFIGURED',
-        message: expect.stringMatching(/CONTENTFORGE_AI_PROVIDER pins openai/),
-      });
-      expect(fetch).not.toHaveBeenCalled();
+      await r.generateGroundedJsonResponse({ prompt: 'p', sources, feature: 'sourceGrounding' });
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(new URL(fetch.mock.calls[0][0]).host).toBe('generativelanguage.googleapis.com');
+      expect(log.warn).toHaveBeenCalledWith(
+        expect.stringMatching(/CONTENTFORGE_AI_PROVIDER=openai but it is not used for 'sourceGrounding'/)
+      );
     });
 
     it('a pin on gemini itself is fine', async () => {
@@ -1967,6 +1970,72 @@ describe('per-task routing, applied end to end (ADR 0033 §4)', () => {
     });
     const chain = await r.resolveProviderChain('telegram');
     expect(chain.map((c) => c.provider)).toEqual(['gemini']);
+  });
+});
+
+describe('an empty chain says why (ADR 0034 §6, #858)', () => {
+  /** A store with a v2 selection document and a refreshed catalogue, by id. */
+  const storeOf = ({ selection = null, catalog = null } = {}) => ({
+    queryDocs: vi.fn(async () => []),
+    readDoc: vi.fn(async (_c, id) =>
+      id === 'ai-routing' ? selection : id === 'ai-model-catalog' ? catalog : null
+    ),
+  });
+  const v2 = (priority) => ({
+    id: 'ai-routing',
+    version: 2,
+    global: { priority },
+    tasks: {},
+  });
+  /** A catalogue document whose named models carry the given status, listed once. */
+  const catalogWith = (provider, models) => ({
+    id: 'ai-model-catalog',
+    providers: {
+      [provider]: {
+        refresh: { lastOk: '2026-10-05T00:00:00Z', lastAttempt: '2026-10-05T00:00:00Z', lastError: null },
+        models: Object.fromEntries(Object.entries(models).map(([id, status]) => [id, { id, status }])),
+      },
+    },
+  });
+  const router = (env, store) =>
+    createAiRouter({ env, fetch: vi.fn(), sleep: noSleep, log: quiet, store });
+
+  it('names the capability no eligible model carries', async () => {
+    const r = router(
+      { NVIDIA_API_KEY: 'nvapi-x' },
+      storeOf({ selection: v2([{ provider: 'nvidia', model: 'z-ai/glm-5.3' }]) })
+    );
+    await expect(r.resolveProviderChain('altText')).rejects.toMatchObject({
+      code: 'AI_NOT_CONFIGURED',
+      message: expect.stringMatching(/^No eligible model carries 'vision' for 'altText': nvidia \(not eligible: z-ai\/glm-5.3 on nvidia does not carry vision\)/),
+    });
+  });
+
+  it('says every eligible model is retired, naming them, when the catalogue retired them', async () => {
+    const r = router(
+      { GEMINI_API_KEY: 'g' },
+      storeOf({
+        selection: v2([{ provider: 'gemini', model: null }]),
+        catalog: catalogWith('gemini', { 'gemini-3.5-flash-lite': 'retired', 'gemini-3.6-flash': 'retired' }),
+      })
+    );
+    await expect(r.resolveProviderChain('telegram')).rejects.toMatchObject({
+      code: 'AI_NOT_CONFIGURED',
+      message: expect.stringMatching(
+        /^Every eligible model for 'telegram' is retired in the catalogue \(gemini-3.5-flash-lite on gemini\); pick another under AI Engine → Tasks\./
+      ),
+    });
+  });
+
+  it('says no provider offers a model for the modality when a null step has no recommendation', async () => {
+    const r = router(
+      { NVIDIA_API_KEY: 'nvapi-x' },
+      storeOf({ selection: v2([{ provider: 'nvidia', model: null }]) })
+    );
+    await expect(r.resolveProviderChain('altText')).rejects.toMatchObject({
+      code: 'AI_NOT_CONFIGURED',
+      message: expect.stringMatching(/^No provider offers a model for 'altText' \(vision\): nvidia\./),
+    });
   });
 });
 

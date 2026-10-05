@@ -923,52 +923,97 @@ describe('partial MCP/AI config updates never disturb a stored secret', () => {
   });
 });
 
-describe('AI routing by task (ADR 0033 §4)', () => {
+describe('AI routing by task: the selection document (ADR 0033 §4 → ADR 0034 §2, #858)', () => {
   const onAiConfigChanged = vi.fn();
-  const handlers = (store) =>
+  const handlers = (store, extra = {}) =>
     createAdminIntegrationHandlers({
       guard: allowGuard,
       store,
       onAiConfigChanged,
       ...fixed,
+      ...extra,
     });
 
-  it('GET answers the normalised routes with the catalogue and the provider list', async () => {
-    const store = makeStore({
-      readDoc: vi.fn(async () => ({
+  /** A store whose ai-routing and ai-features documents are given by id. */
+  const docsStore = ({ routing = null, features = null, providers = [] } = {}) =>
+    makeStore({
+      queryDocs: vi.fn(async () => providers),
+      readDoc: vi.fn(async (_c, id) => (id === 'ai-routing' ? routing : id === 'ai-features' ? features : null)),
+    });
+
+  it('GET answers the v2 document, migrated in memory from a v1 store, beside its v1 view and the catalogue', async () => {
+    const store = docsStore({
+      routing: {
         id: 'ai-routing',
         routes: {
           forgeDrafting: { provider: 'anthropic', model: 'claude-opus-4-6' },
           junk: { provider: 'x' },
         },
         updatedAt: '2026-10-01T00:00:00Z',
-      })),
+      },
     });
     const res = await handlers(store).getAiRouting(makeRequest(), context);
     const body = JSON.parse(res.body);
     expect(res.status).toBe(200);
-    expect(body.routes).toEqual({
-      forgeDrafting: {
-        provider: 'anthropic',
-        model: 'claude-opus-4-6',
-        fallbacks: [],
-      },
+    expect(body.migrated).toBe(true);
+    expect(body.selection.version).toBe(2);
+    expect(body.selection.global.priority.map((s) => s.provider)).toEqual([
+      'gemini',
+      'openai',
+      'anthropic',
+      'nvidia',
+      'foundry',
+    ]);
+    // The route leads; Foundry's default placement ('first') follows it.
+    expect(body.selection.tasks.forgeDrafting).toEqual({
+      mode: 'custom',
+      chain: [
+        { provider: 'anthropic', model: 'claude-opus-4-6' },
+        { provider: 'foundry', model: null },
+      ],
+      thenGlobal: true,
     });
+    expect(body.routes.forgeDrafting).toEqual({
+      provider: 'anthropic',
+      model: 'claude-opus-4-6',
+      fallbacks: [{ provider: 'foundry', model: null }],
+    });
+    expect(body.updatedAt).toBe('2026-10-01T00:00:00Z');
     expect(body.catalogue.forgeDrafting.label).toBe('Forge drafting');
     expect(body.providers).toEqual(['gemini', 'openai', 'anthropic', 'nvidia', 'foundry']);
+    expect(body.maxFallbacks).toBe(3);
     expect(store.readDoc).toHaveBeenCalledWith('admin_settings', 'ai-routing', 'ai-routing');
+    expect(store.upsertDoc).not.toHaveBeenCalled();
   });
 
-  it('PUT merges routes, removes one with null, writes the whole map, and invalidates the router cache', async () => {
-    onAiConfigChanged.mockClear();
-    const store = makeStore({
-      readDoc: vi.fn(async () => ({
+  it('GET answers a stored v2 document as it is, not migrated', async () => {
+    const store = docsStore({
+      routing: {
         id: 'ai-routing',
+        version: 2,
+        global: { priority: [{ provider: 'foundry', model: null }] },
+        tasks: { inspector: { mode: 'recommended' } },
+        updatedAt: '2026-10-05T00:00:00Z',
+      },
+    });
+    const body = JSON.parse((await handlers(store).getAiRouting(makeRequest(), context)).body);
+    expect(body.migrated).toBe(false);
+    expect(body.selection.global.priority).toEqual([{ provider: 'foundry', model: null }]);
+    expect(body.selection.tasks).toEqual({ inspector: { mode: 'recommended' } });
+    expect(body.routes).toEqual({});
+  });
+
+  it('PUT with the v1 shape merges routes, puts a task back with null, and writes version 2', async () => {
+    onAiConfigChanged.mockClear();
+    const store = docsStore({
+      routing: {
+        id: 'ai-routing',
+        _etag: 'keep-me',
         routes: {
           telegram: { provider: 'openai' },
           inspector: { provider: 'gemini' },
         },
-      })),
+      },
     });
     const res = await handlers(store).putAiRouting(
       makeRequest({
@@ -987,16 +1032,159 @@ describe('AI routing by task (ADR 0033 §4)', () => {
     );
     const body = JSON.parse(res.body);
     expect(res.status).toBe(200);
-    expect(Object.keys(body.routes).sort()).toEqual(['forgeDrafting', 'telegram']);
-    expect(body.routes.forgeDrafting.fallbacks).toEqual([{ provider: 'gemini', model: null }]);
+    expect(body.routes.forgeDrafting).toEqual({
+      provider: 'anthropic',
+      model: 'claude-opus-4-6',
+      fallbacks: [
+        { provider: 'gemini', model: null },
+        { provider: 'foundry', model: null },
+      ],
+    });
+    expect(body.routes.telegram.provider).toBe('openai');
+    // Back to what its placements alone say: Foundry first, by default.
+    expect(body.routes.inspector).toEqual({ provider: 'foundry', model: null, fallbacks: [] });
     const [container, doc] = store.upsertDoc.mock.calls[0];
     expect(container).toBe('admin_settings');
     expect(doc.id).toBe('ai-routing');
-    expect(doc.routes.inspector).toBeUndefined();
+    expect(doc.version).toBe(2);
+    expect(doc.routes).toBeUndefined();
+    expect(doc._etag).toBe('keep-me');
+    expect(doc.tasks.inspector).toEqual({
+      mode: 'custom',
+      chain: [{ provider: 'foundry', model: null }],
+      thenGlobal: true,
+    });
+    expect(doc.updatedAt).toBe('2026-08-06T12:00:00.000Z');
+    expect(doc.updatedBy).toBe('u1');
+    expect(body.updatedAt).toBe('2026-08-06T12:00:00.000Z');
     expect(onAiConfigChanged).toHaveBeenCalledTimes(1);
   });
 
-  it('PUT refuses an unknown feature, an unknown provider, a duplicate fallback and a bad shape, writing nothing', async () => {
+  it('PUT with a v2 document validates, normalises and writes it, naming the actor', async () => {
+    onAiConfigChanged.mockClear();
+    const store = docsStore({
+      routing: { id: 'ai-routing', version: 2, global: { priority: [] }, tasks: {}, updatedAt: 'r1' },
+    });
+    const res = await handlers(store).putAiRouting(
+      makeRequest({
+        body: {
+          version: 2,
+          global: { priority: [{ provider: 'Foundry ', model: ' gpt-5-mini ' }, { provider: 'gemini' }] },
+          tasks: {
+            pricingExplain: { mode: 'global', exclude: ['nvidia'] },
+            forgeDrafting: { mode: 'custom', chain: [{ provider: 'anthropic', model: null }], thenGlobal: false },
+            telegram: { mode: 'recommended' },
+          },
+          updatedAt: 'r1',
+        },
+      }),
+      context
+    );
+    const body = JSON.parse(res.body);
+    expect(res.status).toBe(200);
+    const doc = store.upsertDoc.mock.calls[0][1];
+    expect(doc.version).toBe(2);
+    expect(doc.global.priority).toEqual([
+      { provider: 'foundry', model: 'gpt-5-mini' },
+      { provider: 'gemini', model: null },
+    ]);
+    expect(doc.tasks.forgeDrafting).toEqual({
+      mode: 'custom',
+      chain: [{ provider: 'anthropic', model: null }],
+      thenGlobal: false,
+    });
+    expect(doc.tasks.telegram).toEqual({ mode: 'recommended' });
+    expect(doc.updatedBy).toBe('u1');
+    expect(body.selection.tasks.pricingExplain).toEqual({ mode: 'global', exclude: ['nvidia'] });
+    expect(onAiConfigChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it('PUT with a v2 document whose updatedAt is not the one read is a 409, and nothing is written', async () => {
+    const store = docsStore({
+      routing: { id: 'ai-routing', version: 2, global: { priority: [{ provider: 'gemini' }] }, updatedAt: 'r2' },
+    });
+    const res = await handlers(store).putAiRouting(
+      makeRequest({
+        body: { version: 2, global: { priority: [{ provider: 'gemini' }] }, tasks: {}, updatedAt: 'r1' },
+      }),
+      context
+    );
+    expect(res.status).toBe(409);
+    expect(JSON.parse(res.body).updatedAt).toBe('r2');
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+  });
+
+  it('PUT judges a chain over the catalogue the router reads: a keyed chain whose only model is retired would have no model', async () => {
+    const store = makeStore({
+      queryDocs: vi.fn(async () => []),
+      readDoc: vi.fn(async (_c, id) =>
+        id === 'ai-model-catalog'
+          ? {
+              id,
+              providers: {
+                anthropic: {
+                  refresh: { lastOk: '2026-10-05T00:00:00Z', lastAttempt: null, lastError: null },
+                  models: { 'claude-sonnet-4-6': { id: 'claude-sonnet-4-6', status: 'retired' } },
+                },
+              },
+            }
+          : null
+      ),
+    });
+    const res = await handlers(store, {
+      availableProviders: () => ['gemini', 'anthropic'],
+    }).putAiRouting(
+      makeRequest({
+        body: {
+          version: 2,
+          global: { priority: [{ provider: 'gemini' }] },
+          tasks: {
+            forgeDrafting: {
+              mode: 'custom',
+              chain: [{ provider: 'anthropic', model: 'claude-sonnet-4-6' }],
+              thenGlobal: false,
+            },
+          },
+          updatedAt: null,
+        },
+      }),
+      context
+    );
+    expect(res.status).toBe(400);
+    expect(JSON.parse(res.body).error).toMatch(/tasks\.forgeDrafting: this task would have no model/);
+    expect(store.readDoc).toHaveBeenCalledWith('admin_settings', 'ai-model-catalog', 'ai-model-catalog');
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+  });
+
+  it('PUT refuses a v2 document that would leave a task with no model (§6), naming the task', async () => {
+    const store = docsStore({ providers: [{ id: 'anthropic', enabled: false }] });
+    const res = await handlers(store, {
+      availableProviders: () => ['gemini', 'anthropic'],
+    }).putAiRouting(
+      makeRequest({
+        body: {
+          version: 2,
+          global: { priority: [{ provider: 'gemini' }] },
+          tasks: {
+            // Anthropic is switched off, so the chain has no eligible entry.
+            forgeDrafting: { mode: 'custom', chain: [{ provider: 'anthropic' }], thenGlobal: false },
+            // Nvidia is locked off the public route; the list does not follow.
+            pricingExplain: { mode: 'custom', chain: [{ provider: 'nvidia' }], thenGlobal: false },
+          },
+          updatedAt: null,
+        },
+      }),
+      context
+    );
+    expect(res.status).toBe(400);
+    const { errors } = JSON.parse(res.body);
+    expect(errors).toHaveLength(2);
+    expect(errors[0]).toMatch(/tasks\.forgeDrafting: this task would have no model/);
+    expect(errors[1]).toMatch(/tasks\.pricingExplain: this task would have no model/);
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+  });
+
+  it('PUT refuses an unknown feature, an unknown provider, a duplicate fallback, a bad v2 shape and a bad shape, writing nothing', async () => {
     const store = makeStore();
     const h = handlers(store);
     const bad = [
@@ -1018,6 +1206,11 @@ describe('AI routing by task (ADR 0033 §4)', () => {
       { routes: { telegram: 'gemini' } },
       { routes: [] },
       {},
+      { version: 1, global: { priority: [{ provider: 'gemini' }] } },
+      { version: 2, global: { priority: [] } },
+      { version: 2, global: { priority: [{ provider: 'gemini' }] }, tasks: { nope: { mode: 'global' } } },
+      { version: 2, global: { priority: [{ provider: 'gemini' }] }, tasks: { telegram: { mode: 'always' } } },
+      { version: 2, global: { priority: [{ provider: 'gemini' }] }, tasks: { telegram: { mode: 'global', chain: [] } } },
     ];
     for (const body of bad) {
       expect(

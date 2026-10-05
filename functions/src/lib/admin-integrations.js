@@ -354,6 +354,10 @@ export function createAdminIntegrationHandlers({
   // change applies on the next call rather than after the TTL (ADR 0033).
   // Other warm instances converge within the TTL, as before.
   onAiConfigChanged = () => {},
+  // The providers holding a key (router.availableProviders), for the
+  // selection document's "would have no model" rule (ADR 0034 §6, #858).
+  // Omitted, that one rule is not checked on save.
+  availableProviders = null,
 }) {
   const aiConfigChanged = () => {
     try {
@@ -362,7 +366,7 @@ export function createAdminIntegrationHandlers({
       // Invalidation is a convenience; the write already happened.
     }
   };
-  const ctx = { guard, store, now, uuid, aiConfigChanged };
+  const ctx = { guard, store, now, uuid, aiConfigChanged, availableProviders };
 
   return {
     listRecordings: (request, context) => listRecordings(ctx, request, context),
