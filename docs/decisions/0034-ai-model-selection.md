@@ -322,6 +322,27 @@ models that a task or the priority list still names.
 - Recommended models are a code table, so a change is a PR with a reason —
   deliberate, since a recommendation is a claim about cost and quality that
   the usage page can later contradict.
+- **Amendment 2026-10-05 (slice 4, #859): a `null` model in the Priority
+  list or a custom chain is the provider's default per purpose, not §2's
+  modality recommendation.** §2 reads a null as "that provider's recommended
+  model for the task's modality", which on a text task is the cheapest tier
+  (nano on Foundry, Flash-Lite on Gemini). Applying that would have moved
+  every drafting task to nano the day slice 3 merged, against the owner's
+  2026-10-04 decision ("GPT-5 mini for anything that reads a whole draft or
+  article, nano for short answers") and the contract the pre-ADR routing
+  honoured: a step with no model took `DEFAULT_MODEL_TABLE` by the call's
+  purpose (draft, analysis, multimodal, general), environment overrides
+  included. So a null keeps that meaning; the resolver still judges a null
+  step's *eligibility* on the modality recommendation (which is what keeps
+  a vision task off a provider whose text model cannot read images) and
+  reports it as `modalityModel`; and the Priority row's helper text says
+  what the default resolves to for text and for vision, as the effective
+  read (`GET cms/ai-routing/effective`) reports it. A task that should use
+  the registry's recommendation — one model, chosen by evidence with a
+  reason and a date — gets it through the Tasks tab's **Recommended** mode,
+  which is the control §4 designed for exactly that. Revisit if the purpose
+  table ever leaves the router; then §2's reading is one marked line in
+  `select.js` (`NULL MODEL`).
 
 ## Alternatives considered
 
@@ -354,5 +375,6 @@ models that a task or the priority list still names.
   per-feature provider and the screenshots that prompted this record).
 - Implementation slices, in dependency order: #856, #857, #858, #859, #860.
 - `functions/src/lib/ai/router.js`, `ai-config.js`, `features-catalogue.js`,
-  `routing-table.js`; `frontend/src/lib/aiEngine/seed.js`,
-  `frontend/src/components/admin/ai-engine/RoutingTab.jsx`.
+  `routing-table.js`, `select.js`; `frontend/src/lib/aiEngine/seed.js`,
+  `frontend/src/components/admin/ai-engine/TasksTab.jsx` and
+  `PriorityList.jsx` (the Routing tab until slice 4).

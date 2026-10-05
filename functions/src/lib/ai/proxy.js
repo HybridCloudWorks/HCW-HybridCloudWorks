@@ -28,6 +28,9 @@
  * `probeAiProviders` timer (lib/timers/ai-provider-probe.js) runs it too.
  * Both write the same fields onto the provider document, so the card reads a
  * probe result exactly as it reads a click; `lastTestedBy` says which it was.
+ * A third caller, the Tasks tab's per-task Test (ADR 0034 slice 4, #859),
+ * runs only the call half (`testTaskCandidate`) down a task's chain and
+ * writes nothing onto the cards.
  */
 
 import { recordAiUsage, USAGE_SOURCES } from './usage.js';
@@ -64,6 +67,75 @@ const TEST_TRIGGERS = Object.freeze({
 });
 
 /**
+ * The call half of the Test: one short prompt to one named provider and
+ * model, timed, with a usage row under `source` when it answers. Never
+ * throws for the provider — a refusal or a timeout is the `ok: false`
+ * outcome with the message. Writes nothing onto the provider document; the
+ * two callers below decide that.
+ */
+async function runTestCall(
+  { store, ai, now = () => new Date(), uuid = () => crypto.randomUUID(), clock = () => Date.now(), log = null },
+  { providerId, model, source, label }
+) {
+  const startedAt = clock();
+  try {
+    const result = await ai.callProvider({
+      provider: providerId,
+      model,
+      prompt: TEST_PROMPT,
+      maxTokens: TEST_MAX_TOKENS,
+      timeoutMs: TEST_TIMEOUT_MS,
+    });
+    const outcome = {
+      ok: true,
+      status: 'connected',
+      latencyMs: clock() - startedAt,
+      model: result.model,
+    };
+    await recordAiUsage(
+      { store, ai, uuid, now },
+      {
+        provider: providerId,
+        model: result.model,
+        promptTokens: result.promptTokens,
+        completionTokens: result.completionTokens,
+        source,
+      }
+    );
+    return outcome;
+  } catch (error) {
+    log?.error?.(`${label}(${providerId}) failed:`, error);
+    return {
+      ok: false,
+      status: 'error',
+      latencyMs: clock() - startedAt,
+      error: error?.message || 'The provider call failed',
+      code: error?.code || null,
+    };
+  }
+}
+
+/**
+ * One candidate of a task's chain, tried with the Test's prompt and caps
+ * (ADR 0034 §4, slice 4, #859): the Tasks tab's per-task Test walks the
+ * effective chain with this until one answers. The usage row's source is
+ * `ai-engine:task-test`; the provider document is NOT written, because a
+ * model named in a chain that the provider refuses is the chain's fault,
+ * not a verdict on the provider's key.
+ *
+ * @param {Parameters<typeof testProviderConnection>[0]} deps
+ * @param {{ providerId: string, model?: string|null }} candidate
+ */
+export function testTaskCandidate(deps, { providerId, model = null }) {
+  return runTestCall(deps, {
+    providerId,
+    model,
+    source: USAGE_SOURCES.aiTaskTest,
+    label: 'testAiTask',
+  });
+}
+
+/**
  * The Test itself: one short call to one named provider, a usage row, and the
  * verdict written onto its `ai_providers` document. No HTTP and no auth, so
  * the Test button and the weekly probe run the same code.
@@ -87,56 +159,12 @@ const TEST_TRIGGERS = Object.freeze({
  * @returns {Promise<{ok: boolean, status: 'connected'|'error', latencyMs: number,
  *   model?: string, error?: string, code?: string|null}>}
  */
-export async function testProviderConnection(
-  {
-    store,
-    ai,
-    now = () => new Date(),
-    uuid = () => crypto.randomUUID(),
-    clock = () => Date.now(),
-    log = null,
-  },
-  { providerId, model = null, trigger = 'admin' }
-) {
+export async function testProviderConnection(deps, { providerId, model = null, trigger = 'admin' }) {
   const { source, label } = TEST_TRIGGERS[trigger] || {};
   if (!source) throw new TypeError(`Unknown test trigger: ${trigger}`);
+  const { store, now = () => new Date(), log = null } = deps;
 
-  const startedAt = clock();
-  let outcome;
-  try {
-    const result = await ai.callProvider({
-      provider: providerId,
-      model,
-      prompt: TEST_PROMPT,
-      maxTokens: TEST_MAX_TOKENS,
-      timeoutMs: TEST_TIMEOUT_MS,
-    });
-    outcome = {
-      ok: true,
-      status: 'connected',
-      latencyMs: clock() - startedAt,
-      model: result.model,
-    };
-    await recordAiUsage(
-      { store, ai, uuid, now },
-      {
-        provider: providerId,
-        model: result.model,
-        promptTokens: result.promptTokens,
-        completionTokens: result.completionTokens,
-        source,
-      }
-    );
-  } catch (error) {
-    log?.error?.(`${label}(${providerId}) failed:`, error);
-    outcome = {
-      ok: false,
-      status: 'error',
-      latencyMs: clock() - startedAt,
-      error: error?.message || 'The provider call failed',
-      code: error?.code || null,
-    };
-  }
+  const outcome = await runTestCall(deps, { providerId, model, source, label });
 
   try {
     await store.patchDoc(PROVIDERS_CONTAINER, providerId, {

@@ -612,82 +612,42 @@ describe('AI feature switches', () => {
     }
   });
 
-  describe('per-feature provider placement (#701)', () => {
-    it('GET resolves every feature, with the public ones locked off for nvidia', async () => {
+  describe('the per-feature placement left the API (ADR 0034 slice 4, #859)', () => {
+    it('GET answers features and the catalogue only, whatever the document still stores', async () => {
       const store = makeStore({
         readDoc: vi.fn(async () => ({
           features: {},
-          placement: {
-            nvidia: { forgeDrafting: 'first', pricingExplain: 'first' },
-          },
+          placement: { nvidia: { forgeDrafting: 'first' } },
         })),
       });
       const body = JSON.parse((await handlers(store).getAiFeatures(makeRequest(), context)).body);
-      expect(Object.keys(body.placement.nvidia).sort()).toEqual(Object.keys(body.features).sort());
-      // A stored choice is reported as stored; everything else is the
-      // default, which for content features is the backup (2026-09-29).
-      expect(body.placement.nvidia.forgeDrafting).toBe('first');
-      expect(body.placement.nvidia.inspector).toBe('order');
-      expect(body.placementDefaults.nvidia.forgeDrafting).toBe('order');
-      // A stored 'first' on a locked feature is reported as what happens: off.
-      expect(body.placement.nvidia.pricingExplain).toBe('off');
-      expect(body.placement.nvidia.landingZoneExplain).toBe('off');
-      expect(body.placementDefaults.nvidia.pricingExplain).toBe('off');
+      expect(Object.keys(body).sort()).toEqual(['catalogue', 'features', 'success']);
     });
 
-    it('PUT merges one placement without clearing the others or the switches', async () => {
+    it('PUT refuses a placement body, and a features save leaves a stored placement untouched', async () => {
       const store = makeStore({
         readDoc: vi.fn(async () => ({
           features: { critique: false },
           placement: { nvidia: { critique: 'off' } },
         })),
       });
-      const response = await handlers(store).putAiFeatures(
-        makeRequest({
-          body: { placement: { nvidia: { forgeDrafting: 'order' } } },
-        }),
+      const refused = await handlers(store).putAiFeatures(
+        makeRequest({ body: { placement: { nvidia: { forgeDrafting: 'order' } } } }),
         context
       );
-      expect(response.status).toBe(200);
+      expect(refused.status).toBe(400);
+      expect(store.patchDoc).not.toHaveBeenCalled();
+      // The migration reads the stored placement until the first v2 save of
+      // the selection document; a switch flip must not clear it.
+      const saved = await handlers(store).putAiFeatures(
+        makeRequest({ body: { features: { forgeDrafting: false } } }),
+        context
+      );
+      expect(saved.status).toBe(200);
       expect(store.patchDoc).toHaveBeenCalledWith('admin_settings', 'ai-features', {
-        features: { critique: false },
-        placement: { nvidia: { critique: 'off', forgeDrafting: 'order' } },
+        features: { critique: false, forgeDrafting: false },
         updatedAt: '2026-08-06T12:00:00.000Z',
       });
-    });
-
-    it('PUT refuses to place nvidia in a locked feature — configuration cannot enable', async () => {
-      const store = makeStore();
-      for (const value of ['first', 'order']) {
-        const response = await handlers(store).putAiFeatures(
-          makeRequest({
-            body: { placement: { nvidia: { landingZoneExplain: value } } },
-          }),
-          context
-        );
-        expect(response.status).toBe(400);
-        expect(JSON.parse(response.body).error).toMatch(/never used for landingZoneExplain/);
-      }
-      expect(store.upsertDoc).not.toHaveBeenCalled();
-      expect(store.patchDoc).not.toHaveBeenCalled();
-    });
-
-    it('PUT 400s an unknown provider, feature or value', async () => {
-      const store = makeStore();
-      for (const placement of [
-        { gemini: { forgeDrafting: 'first' } },
-        { nvidia: { forgeDraftin: 'first' } },
-        { nvidia: { forgeDrafting: 'always' } },
-        { nvidia: ['first'] },
-        [],
-      ]) {
-        const response = await handlers(store).putAiFeatures(
-          makeRequest({ body: { placement } }),
-          context
-        );
-        expect(response.status, JSON.stringify(placement)).toBe(400);
-      }
-      expect(store.upsertDoc).not.toHaveBeenCalled();
     });
   });
 
@@ -941,7 +901,7 @@ describe('AI routing by task: the selection document (ADR 0033 §4 → ADR 0034 
       readDoc: vi.fn(async (_c, id) => (id === 'ai-routing' ? routing : id === 'ai-features' ? features : null)),
     });
 
-  it('GET answers the v2 document, migrated in memory from a v1 store, beside its v1 view and the catalogue', async () => {
+  it('GET answers the v2 document, migrated in memory from a v1 store, beside the catalogue', async () => {
     const store = docsStore({
       routing: {
         id: 'ai-routing',
@@ -973,15 +933,12 @@ describe('AI routing by task: the selection document (ADR 0033 §4 → ADR 0034 
       ],
       thenGlobal: true,
     });
-    expect(body.routes.forgeDrafting).toEqual({
-      provider: 'anthropic',
-      model: 'claude-opus-4-6',
-      fallbacks: [{ provider: 'foundry', model: null }],
-    });
+    // The v1 `routes` view left with the Routing tab (slice 4, #859).
+    expect(body).not.toHaveProperty('routes');
+    expect(body).not.toHaveProperty('maxFallbacks');
     expect(body.updatedAt).toBe('2026-10-01T00:00:00Z');
     expect(body.catalogue.forgeDrafting.label).toBe('Forge drafting');
     expect(body.providers).toEqual(['gemini', 'openai', 'anthropic', 'nvidia', 'foundry']);
-    expect(body.maxFallbacks).toBe(3);
     expect(store.readDoc).toHaveBeenCalledWith('admin_settings', 'ai-routing', 'ai-routing');
     expect(store.upsertDoc).not.toHaveBeenCalled();
   });
@@ -1000,64 +957,23 @@ describe('AI routing by task: the selection document (ADR 0033 §4 → ADR 0034 
     expect(body.migrated).toBe(false);
     expect(body.selection.global.priority).toEqual([{ provider: 'foundry', model: null }]);
     expect(body.selection.tasks).toEqual({ inspector: { mode: 'recommended' } });
-    expect(body.routes).toEqual({});
   });
 
-  it('PUT with the v1 shape merges routes, puts a task back with null, and writes version 2', async () => {
+  it('PUT refuses the v1 { routes } body now that the Routing tab is gone (slice 4, #859), writing nothing', async () => {
     onAiConfigChanged.mockClear();
     const store = docsStore({
-      routing: {
-        id: 'ai-routing',
-        _etag: 'keep-me',
-        routes: {
-          telegram: { provider: 'openai' },
-          inspector: { provider: 'gemini' },
-        },
-      },
+      routing: { id: 'ai-routing', routes: { telegram: { provider: 'openai' } } },
     });
     const res = await handlers(store).putAiRouting(
       makeRequest({
-        body: {
-          routes: {
-            forgeDrafting: {
-              provider: 'anthropic',
-              model: 'claude-opus-4-6',
-              fallbacks: [{ provider: 'gemini', model: null }],
-            },
-            inspector: null,
-          },
-        },
+        body: { routes: { forgeDrafting: { provider: 'anthropic', model: 'claude-opus-4-6' } } },
       }),
       context
     );
-    const body = JSON.parse(res.body);
-    expect(res.status).toBe(200);
-    expect(body.routes.forgeDrafting).toEqual({
-      provider: 'anthropic',
-      model: 'claude-opus-4-6',
-      fallbacks: [
-        { provider: 'gemini', model: null },
-        { provider: 'foundry', model: null },
-      ],
-    });
-    expect(body.routes.telegram.provider).toBe('openai');
-    // Back to what its placements alone say: Foundry first, by default.
-    expect(body.routes.inspector).toEqual({ provider: 'foundry', model: null, fallbacks: [] });
-    const [container, doc] = store.upsertDoc.mock.calls[0];
-    expect(container).toBe('admin_settings');
-    expect(doc.id).toBe('ai-routing');
-    expect(doc.version).toBe(2);
-    expect(doc.routes).toBeUndefined();
-    expect(doc._etag).toBe('keep-me');
-    expect(doc.tasks.inspector).toEqual({
-      mode: 'custom',
-      chain: [{ provider: 'foundry', model: null }],
-      thenGlobal: true,
-    });
-    expect(doc.updatedAt).toBe('2026-08-06T12:00:00.000Z');
-    expect(doc.updatedBy).toBe('u1');
-    expect(body.updatedAt).toBe('2026-08-06T12:00:00.000Z');
-    expect(onAiConfigChanged).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(400);
+    expect(JSON.parse(res.body).error).toMatch(/version must be 2/);
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+    expect(onAiConfigChanged).not.toHaveBeenCalled();
   });
 
   it('PUT with a v2 document validates, normalises and writes it, naming the actor', async () => {

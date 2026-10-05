@@ -56,10 +56,13 @@
  * recommendation, which is what keeps a vision task off a provider whose
  * text model cannot read images — and reports it as `modalityModel`, while
  * `model` stays null for the router's purpose table, exactly as before.
- * Slice 4 (#859) makes `model` the modality recommendation when it ships
- * the control to choose otherwise: one line, marked NULL MODEL below. The
- * contract test (select.contract.test.js) holds this slice to the chains
- * the pre-slice router produced.
+ * Slice 4 (#859) KEPT that meaning (ADR 0034, amendment of 2026-10-05): a
+ * null is the provider's default per purpose, the Priority row's helper
+ * text says what that resolves to, and the Tasks tab's Recommended mode is
+ * how a task gets the registry's recommendation. The line marked NULL
+ * MODEL below is where the other reading would go, should the owner ever
+ * ask for it. The contract test (select.contract.test.js) holds the
+ * resolver to the chains the pre-slice router produced.
  *
  * Free of I/O and of `ctx`: everything it reads is an argument.
  */
@@ -327,7 +330,8 @@ function judgeStep(step, where, { def, catalog }) {
   return {
     accepted: {
       provider: step.provider,
-      // NULL MODEL (header): slice 4 makes this `judged` for a null step.
+      // NULL MODEL (header): `judged` here would make a null step the
+      // modality recommendation; the 2026-10-05 amendment keeps it null.
       model: named,
       modalityModel: judged,
       selection: step.selection,

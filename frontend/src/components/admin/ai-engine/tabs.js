@@ -1,20 +1,22 @@
 /**
- * The AI Engine's tabs, and where old addresses land (ADR 0033).
+ * The AI Engine's tabs, and where old addresses land (ADR 0033, ADR 0034).
  *
  * Kept out of the page module so a link builder elsewhere can import the ids
  * without pulling the lazily loaded page into the main bundle. A tab is one
  * entry here plus its panel in AIEnginePage's `PANELS`.
  *
  * `siteservices` was a placeholder tab whose state saved nothing; its
- * question ("which provider serves what") is answered by Routing, so the old
- * address lands there.
+ * question ("which provider serves what") is answered by the Tasks tab, so
+ * the old address lands there. The tab was called Routing until ADR 0034
+ * slice 4 (#859) made it one row per task; its id stays `routing` so every
+ * link written down since ADR 0033 still opens it, and `tasks` is an alias.
  */
 
 export const AI_ENGINE_PATH = '/admin/ai-engine';
 
 export const TABS = Object.freeze([
   { id: 'services', label: 'AI Services' },
-  { id: 'routing', label: 'Routing' },
+  { id: 'routing', label: 'Tasks' },
   { id: 'mcp', label: 'MCP Servers' },
   { id: 'playground', label: 'Playground' },
   { id: 'usage', label: 'Usage & Cost' },
@@ -29,8 +31,10 @@ export const MOVED_TABS = Object.freeze({
   siteservices: 'routing',
   'site-services': 'routing',
   routes: 'routing',
+  tasks: 'routing',
   providers: 'services',
   features: 'services',
+  priority: 'services',
   'where-ai-is-used': 'services',
   servers: 'mcp',
   tools: 'mcp',

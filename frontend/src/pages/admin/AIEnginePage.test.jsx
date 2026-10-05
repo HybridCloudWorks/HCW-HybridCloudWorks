@@ -1,25 +1,22 @@
 /**
- * "Where AI is used" — the per-feature NVIDIA placement (#701).
+ * "Where AI is used" — the feature switches, and the provider card.
  *
- * The page renders placement from the API's resolved answer and its code-level
- * defaults, never from a list of its own. Two things matter on screen: a
- * content feature offers the choice, and a locked feature (the anonymous
- * public explain buttons) says it is not used there instead of offering a
- * control the API would refuse.
+ * The switches render from the API's catalogue, never from a list of their
+ * own. The per-feature placement selects that sat under each switch (#701)
+ * left with ADR 0034 slice 4 (#859): which provider serves a task is the
+ * Tasks tab's question, and this card offers nothing but the switch.
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 const getAiFeatures = vi.fn();
-const setAiPlacement = vi.fn();
 const setAiFeature = vi.fn();
 const toast = vi.fn();
 
 vi.mock('@/lib/aiEngine', () => ({
   aiEngine: {
     getAiFeatures: (...a) => getAiFeatures(...a),
-    setAiPlacement: (...a) => setAiPlacement(...a),
     setAiFeature: (...a) => setAiFeature(...a),
   },
   seedAiEngineIfEmpty: vi.fn(),
@@ -29,7 +26,8 @@ vi.mock('@/lib/aiEngine', () => ({
 vi.mock('@/components/ui/use-toast', () => ({ useToast: () => ({ toast }) }));
 vi.mock('react-router', () => ({ useNavigate: () => vi.fn() }));
 
-const { FeatureSwitches, ProviderCard, describeLastTest } = await import('./AIEnginePage.jsx');
+const { FeatureSwitches, ProviderCard, describeLastTest, orderByPriority } =
+  await import('./AIEnginePage.jsx');
 
 const catalogue = {
   forgeDrafting: { label: 'Forge drafting', description: 'd', route: 'r' },
@@ -37,93 +35,77 @@ const catalogue = {
   pricingExplain: { label: 'Pricing explanations', description: 'd', route: 'r' },
 };
 
-/**
- * The API's answer, shaped as it arrives. The defaults are the API's own
- * since 2026-09-29: 'order' (the backup) for content features, 'off' locked
- * for the public ones. The stored placement puts Forge drafting first, the
- * choice an administrator made while 'first' was the default, which is what
- * the owner will find on the page after the change.
- */
-function answer(overrides = {}) {
-  return {
-    features: { forgeDrafting: true, telegram: true, pricingExplain: true },
-    catalogue,
-    placement: { nvidia: { forgeDrafting: 'first', telegram: 'order', pricingExplain: 'off' } },
-    placementDefaults: {
-      nvidia: { forgeDrafting: 'order', telegram: 'order', pricingExplain: 'off' },
-    },
-    ...overrides,
-  };
-}
-
 beforeEach(() => {
   getAiFeatures.mockReset();
-  setAiPlacement.mockReset();
+  setAiFeature.mockReset();
   toast.mockReset();
 });
 
-describe('FeatureSwitches — NVIDIA placement', () => {
-  it('offers a placement for content features and shows the resolved value', async () => {
-    getAiFeatures.mockResolvedValue(answer());
-    render(<FeatureSwitches />);
-    const drafting = await screen.findByLabelText('NVIDIA', {
-      selector: '#placement-nvidia-forgeDrafting',
+describe('FeatureSwitches', () => {
+  it('renders one switch per catalogue entry and nothing that places a provider', async () => {
+    getAiFeatures.mockResolvedValue({
+      features: { forgeDrafting: true, telegram: false, pricingExplain: true },
+      catalogue,
     });
-    expect(drafting.value).toBe('first');
-    expect(screen.getByLabelText('NVIDIA', { selector: '#placement-nvidia-telegram' }).value).toBe(
-      'order'
-    );
+    render(<FeatureSwitches />);
+    expect(await screen.findByText('Forge drafting')).toBeTruthy();
+    expect(screen.getAllByRole('switch')).toHaveLength(3);
+    expect(
+      screen.getByRole('switch', { name: 'Telegram assistant' }).getAttribute('aria-checked')
+    ).toBe('false');
+    expect(screen.getByText('1 of 3 switched off.')).toBeTruthy();
+    expect(document.querySelector('select')).toBeNull();
+    expect(screen.queryByText(/not used here/)).toBeNull();
   });
 
-  it('shows a locked feature as not used, with no control', async () => {
-    getAiFeatures.mockResolvedValue(answer());
+  it('saves a switch and reconciles with what the API stored', async () => {
+    getAiFeatures.mockResolvedValue({
+      features: { forgeDrafting: true, telegram: true, pricingExplain: true },
+      catalogue,
+    });
+    setAiFeature.mockResolvedValue({ forgeDrafting: false, telegram: true, pricingExplain: true });
     render(<FeatureSwitches />);
-    await screen.findByText('Pricing explanations');
-    expect(screen.getByText('NVIDIA: not used here')).toBeTruthy();
-    expect(document.querySelector('#placement-nvidia-pricingExplain')).toBeNull();
+    const drafting = await screen.findByRole('switch', { name: 'Forge drafting' });
+    fireEvent.click(drafting);
+    expect(setAiFeature).toHaveBeenCalledWith('forgeDrafting', false);
+    await waitFor(() => expect(drafting.getAttribute('aria-checked')).toBe('false'));
   });
 
-  it('saves a change and reconciles with what the API stored', async () => {
-    getAiFeatures.mockResolvedValue(answer());
-    setAiPlacement.mockResolvedValue({
-      nvidia: { forgeDrafting: 'order', telegram: 'order', pricingExplain: 'off' },
+  it('puts the switch back and says so when the save fails', async () => {
+    getAiFeatures.mockResolvedValue({
+      features: { forgeDrafting: true, telegram: true, pricingExplain: true },
+      catalogue,
     });
+    setAiFeature.mockRejectedValue(new Error('nope'));
     render(<FeatureSwitches />);
-    const drafting = await screen.findByLabelText('NVIDIA', {
-      selector: '#placement-nvidia-forgeDrafting',
-    });
-    fireEvent.change(drafting, { target: { value: 'order' } });
-    expect(setAiPlacement).toHaveBeenCalledWith('nvidia', 'forgeDrafting', 'order');
-    await waitFor(() => expect(drafting.value).toBe('order'));
-  });
-
-  it('puts the value back and says so when the save fails', async () => {
-    getAiFeatures.mockResolvedValue(answer());
-    setAiPlacement.mockRejectedValue(new Error('nope'));
-    render(<FeatureSwitches />);
-    const drafting = await screen.findByLabelText('NVIDIA', {
-      selector: '#placement-nvidia-forgeDrafting',
-    });
-    fireEvent.change(drafting, { target: { value: 'off' } });
+    const drafting = await screen.findByRole('switch', { name: 'Forge drafting' });
+    fireEvent.click(drafting);
     await waitFor(() => expect(toast).toHaveBeenCalled());
-    expect(drafting.value).toBe('first');
+    expect(drafting.getAttribute('aria-checked')).toBe('true');
   });
+});
 
-  it('renders no placement at all against an API that does not send one', async () => {
-    getAiFeatures.mockResolvedValue(answer({ placement: {}, placementDefaults: {} }));
-    render(<FeatureSwitches />);
-    await screen.findByText('Forge drafting');
-    expect(screen.queryByText(/NVIDIA/)).toBeNull();
-  });
-
-  it('with nothing stored, shows the default, the backup, in the owner’s words', async () => {
-    getAiFeatures.mockResolvedValue(answer({ placement: {} }));
-    render(<FeatureSwitches />);
-    const drafting = await screen.findByLabelText('NVIDIA', {
-      selector: '#placement-nvidia-forgeDrafting',
-    });
-    expect(drafting.value).toBe('order');
-    expect(drafting.selectedOptions[0].textContent).toBe('In order — the backup');
+describe('orderByPriority — the cards follow the Priority list', () => {
+  it('lists the named providers in list order, then the rest in their own order', () => {
+    const cards = [
+      { id: 'gemini', order: 1 },
+      { id: 'openai', order: 2 },
+      { id: 'foundry', order: 5 },
+      { id: 'nvidia', order: 4 },
+    ];
+    const selection = { global: { priority: [{ provider: 'foundry' }, { provider: 'gemini' }] } };
+    expect(orderByPriority(cards, selection).map((c) => c.id)).toEqual([
+      'foundry',
+      'gemini',
+      'openai',
+      'nvidia',
+    ]);
+    expect(orderByPriority(cards, null).map((c) => c.id)).toEqual([
+      'gemini',
+      'openai',
+      'nvidia',
+      'foundry',
+    ]);
   });
 });
 
@@ -164,7 +146,6 @@ describe('ProviderCard — a Test result, from the button or the weekly probe (#
       <ProviderCard
         provider={{ ...probed, lastTested: threeDaysAgo }}
         onToggle={vi.fn()}
-        onModelChange={vi.fn()}
         onTest={vi.fn()}
       />
     );
@@ -173,17 +154,25 @@ describe('ProviderCard — a Test result, from the button or the weekly probe (#
     expect(screen.getByText('Error')).toBeTruthy();
   });
 
-  it('shows the latency beside the badge when the probe connected', () => {
+  it('shows the latency beside the badge when the probe connected, and no model pin', () => {
     render(
       <ProviderCard
-        provider={{ ...probed, status: 'connected', latencyMs: 2_140, lastTestError: null }}
+        provider={{
+          ...probed,
+          status: 'connected',
+          latencyMs: 2_140,
+          lastTestError: null,
+          models: ['z-ai/glm-5.3'],
+          defaultModel: 'z-ai/glm-5.3',
+        }}
         onToggle={vi.fn()}
-        onModelChange={vi.fn()}
         onTest={vi.fn()}
       />
     );
     expect(screen.getByText('2140ms')).toBeTruthy();
     expect(screen.getByText('Connected')).toBeTruthy();
     expect(screen.queryByText('timeout after 45000 ms')).toBeNull();
+    // The pin left with ADR 0034 slice 4: the Priority list names the model.
+    expect(screen.queryByRole('combobox')).toBeNull();
   });
 });

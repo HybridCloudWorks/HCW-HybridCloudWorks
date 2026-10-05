@@ -1,7 +1,8 @@
 /**
- * The AI Engine page shell after ADR 0033: tabs from tabs.js under `?tab=`,
- * the Routing tab in place of the Site Services placeholder, a failed seed
- * said with a retry, and a provider card that can go back to Auto.
+ * The AI Engine page shell after ADR 0033 and ADR 0034: tabs from tabs.js
+ * under `?tab=`, the Tasks tab where Site Services was, a failed seed said
+ * with a retry, the Priority list above the cards, and the catalogue's
+ * model list on each card.
  *
  * Separate from AIEnginePage.test.jsx because that file replaces
  * react-router wholesale for its component-level tests; this one needs a
@@ -16,8 +17,9 @@ const seedAiEngineIfEmpty = vi.fn();
 const subscribeProviders = vi.fn();
 const subscribeMcpServers = vi.fn();
 const getAiRouting = vi.fn();
+const getEffectiveRouting = vi.fn();
+const saveAiRouting = vi.fn();
 const getAiFeatures = vi.fn();
-const setProviderModel = vi.fn();
 const setEnabled = vi.fn();
 const fetchModelCatalog = vi.fn();
 const setModelHidden = vi.fn();
@@ -27,14 +29,14 @@ const toast = vi.fn();
 vi.mock('@/lib/aiEngine', () => ({
   aiEngine: {
     getAiRouting: (...a) => getAiRouting(...a),
+    getEffectiveRouting: (...a) => getEffectiveRouting(...a),
+    saveAiRouting: (...a) => saveAiRouting(...a),
     getAiFeatures: (...a) => getAiFeatures(...a),
-    setProviderModel: (...a) => setProviderModel(...a),
     setEnabled: (...a) => setEnabled(...a),
     fetchModelCatalog: (...a) => fetchModelCatalog(...a),
     setModelHidden: (...a) => setModelHidden(...a),
     refreshModelCatalog: (...a) => refreshModelCatalog(...a),
-    setAiRoute: vi.fn(),
-    setProviderOrder: vi.fn(),
+    testAiTask: vi.fn(),
     testProvider: vi.fn(),
   },
   seedAiEngineIfEmpty: (...a) => seedAiEngineIfEmpty(...a),
@@ -45,8 +47,8 @@ vi.mock('@/components/ui/use-toast', () => ({ useToast: () => ({ toast }) }));
 
 const { default: AIEnginePage } = await import('./AIEnginePage.jsx');
 
-// Stored documents from before #857 still carry a `models` array; the page
-// ignores it once the catalogue has answered.
+// Stored documents from before #857 still carry a `models` array and a
+// `defaultModel` pin; the page ignores both once the catalogue has answered.
 const PROVIDERS = [
   {
     id: 'gemini',
@@ -105,6 +107,60 @@ const CATALOG = {
   },
 };
 
+/** The selection document and the resolver's answer (ADR 0034 §2, §4). */
+const SELECTION = {
+  version: 2,
+  global: {
+    priority: [
+      { provider: 'gemini', model: null },
+      { provider: 'openai', model: 'gpt-5-mini' },
+    ],
+  },
+  tasks: {},
+  updatedAt: 'r1',
+};
+const EFFECTIVE = {
+  tasks: {
+    forgeDrafting: {
+      label: 'Forge drafting',
+      description: 'Writes the draft.',
+      modality: 'text',
+      needs: ['text'],
+      public: false,
+      recommended: null,
+      entry: { mode: 'global' },
+      mode: 'global',
+      chain: [{ provider: 'gemini', model: null, modalityModel: 'gemini-3.5-flash-lite' }],
+      rejected: [],
+      flags: [],
+    },
+  },
+  priority: [
+    {
+      provider: 'gemini',
+      model: null,
+      keyed: true,
+      enabled: true,
+      defaults: {
+        draft: 'gemini-3.5-flash-lite',
+        general: 'gemini-3.5-flash-lite',
+        multimodal: 'gemini-3.6-flash',
+      },
+      modality: { text: 'gemini-3.5-flash-lite', vision: 'gemini-3.6-flash' },
+    },
+    {
+      provider: 'openai',
+      model: 'gpt-5-mini',
+      keyed: true,
+      enabled: true,
+      defaults: { draft: 'gpt-5-mini', general: 'gpt-5-nano', multimodal: 'gpt-5-mini' },
+      modality: { text: 'gpt-5-nano', vision: 'gpt-5-mini' },
+    },
+  ],
+  availability: { keyed: ['gemini', 'openai'], enabled: ['gemini', 'openai'], disabled: [] },
+  updatedAt: 'r1',
+};
+
 function renderPage(entry = '/admin/ai-engine') {
   return render(
     <MemoryRouter initialEntries={[entry]}>
@@ -126,15 +182,15 @@ beforeEach(() => {
     return () => {};
   });
   getAiRouting.mockReset().mockResolvedValue({
-    routes: {},
+    selection: SELECTION,
+    migrated: false,
     catalogue: { forgeDrafting: { label: 'Forge drafting', description: 'd', route: 'r' } },
     providers: ['gemini', 'openai'],
-    maxFallbacks: 3,
+    updatedAt: 'r1',
   });
-  getAiFeatures
-    .mockReset()
-    .mockResolvedValue({ features: {}, catalogue: {}, placement: {}, placementDefaults: {} });
-  setProviderModel.mockReset().mockResolvedValue(undefined);
+  getEffectiveRouting.mockReset().mockResolvedValue(EFFECTIVE);
+  saveAiRouting.mockReset().mockResolvedValue({ selection: SELECTION, updatedAt: 'r1' });
+  getAiFeatures.mockReset().mockResolvedValue({ features: {}, catalogue: {} });
   fetchModelCatalog.mockReset().mockResolvedValue(CATALOG);
   setModelHidden.mockReset().mockResolvedValue({ id: 'gpt-5-mini', hidden: true });
   refreshModelCatalog.mockReset().mockResolvedValue({
@@ -148,25 +204,29 @@ beforeEach(() => {
 });
 
 describe('AIEnginePage shell', () => {
-  it('shows the five tabs with Routing where Site Services was, and no Site Services at all', async () => {
+  it('shows the five tabs with Tasks where Site Services was, and no Site Services or Routing at all', async () => {
     renderPage();
-    expect(await screen.findByRole('tab', { name: 'Routing' })).toBeInTheDocument();
+    expect(await screen.findByRole('tab', { name: 'Tasks' })).toBeInTheDocument();
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
       'AI Services',
-      'Routing',
+      'Tasks',
       'MCP Servers',
       'Playground',
       'Usage & Cost',
     ]);
     expect(screen.queryByText(/Site Services/)).toBeNull();
+    expect(screen.queryByRole('tab', { name: 'Routing' })).toBeNull();
     expect(screen.getByRole('heading', { level: 1, name: /AI Engine/ })).toBeInTheDocument();
   });
 
-  it('the old Site Services address lands on Routing, which reads the routing table', async () => {
+  it('the old Site Services address lands on Tasks, which reads the resolver’s answer', async () => {
     renderPage('/admin/ai-engine?tab=siteservices');
-    expect(await screen.findByRole('tab', { selected: true })).toHaveTextContent('Routing');
+    expect(await screen.findByRole('tab', { selected: true })).toHaveTextContent('Tasks');
     expect(await screen.findByText('Forge drafting')).toBeInTheDocument();
-    expect(getAiRouting).toHaveBeenCalled();
+    expect(getEffectiveRouting).toHaveBeenCalled();
+    expect(screen.getByTestId('effective-forgeDrafting')).toHaveTextContent(
+      'Provider default (gemini-3.5-flash-lite) via Gemini'
+    );
   });
 
   it('a failed seed is said, with a retry that seeds again', async () => {
@@ -178,31 +238,51 @@ describe('AIEnginePage shell', () => {
     expect(alert).toHaveTextContent('403 from the API');
     fireEvent.click(screen.getByRole('button', { name: /Try again/ }));
     await waitFor(() => expect(seedAiEngineIfEmpty).toHaveBeenCalledTimes(2));
-    expect(await screen.findByText('Order of preference')).toBeInTheDocument();
+    expect(await screen.findByText('Priority')).toBeInTheDocument();
   });
 
-  it('a provider with no pinned model reads Auto, and a pinned one reads its model', async () => {
+  it('the Priority list reads the document: P1 on the provider default, P2 on its named model, no card pin', async () => {
     renderPage();
-    const gemini = await screen.findByRole('combobox', { name: 'Model for Gemini' });
-    expect(gemini).toHaveTextContent('Auto (per task)');
-    expect(screen.getByRole('combobox', { name: 'Model for OpenAI' })).toHaveTextContent(
-      'gpt-5-mini'
+    const gemini = await screen.findByLabelText('Model for Gemini');
+    expect(gemini.value).toBe('__default__');
+    expect(screen.getByLabelText('Model for OpenAI').value).toBe('gpt-5-mini');
+    expect(screen.getByText('P1 — default')).toBeInTheDocument();
+    expect(screen.getByTestId('priority-will-use-openai')).toHaveTextContent(
+      'Will use gpt-5-mini for every task.'
     );
+    // The one model control per provider is the Priority row's; the cards
+    // carry no pin any more.
+    expect(gemini.closest('[data-provider="gemini"]')).not.toBeNull();
+    expect(screen.getAllByRole('combobox', { name: /^Model for/ })).toHaveLength(2);
+    expect(screen.queryByText('Auto (per task)')).toBeNull();
+  });
+
+  it('moving a row saves the whole document with the updatedAt it read', async () => {
+    renderPage();
+    const down = await screen.findByRole('button', { name: 'Move Gemini down' });
+    fireEvent.click(down);
+    await waitFor(() => expect(saveAiRouting).toHaveBeenCalledTimes(1));
+    expect(saveAiRouting.mock.calls[0][0]).toMatchObject({
+      global: {
+        priority: [
+          { provider: 'openai', model: 'gpt-5-mini' },
+          { provider: 'gemini', model: null },
+        ],
+      },
+      updatedAt: 'r1',
+    });
+    // The resolver's answer is read again after the save.
+    await waitFor(() => expect(getEffectiveRouting).toHaveBeenCalledTimes(2));
   });
 
   it('the cards list the catalogue’s models, not the stored array', async () => {
-    // Radix Select cannot open under jsdom (scrollIntoView), so the list is
-    // read through the Models disclosure, which renders the same catalogue.
     renderPage();
     const disclosure = await screen.findByRole('button', { name: 'Models for Gemini' });
     await waitFor(() => expect(fetchModelCatalog).toHaveBeenCalled());
     fireEvent.click(disclosure);
-    expect(screen.getByText('gemini-3.6-flash')).toBeInTheDocument();
+    // Once in the disclosure, once as an option on the Priority row's select.
+    expect(screen.getAllByText('gemini-3.6-flash')).toHaveLength(2);
     expect(screen.queryByText('typed-into-the-seed')).toBeNull();
-    // A pin the catalogue still lists reads as itself on the select.
-    expect(screen.getByRole('combobox', { name: 'Model for OpenAI' })).toHaveTextContent(
-      'gpt-5-mini'
-    );
   });
 
   it('the Models disclosure shows every model with its badges, says when the list was refreshed, and hides on click', async () => {
@@ -243,13 +323,25 @@ describe('AIEnginePage shell', () => {
     await waitFor(() => expect(fetchModelCatalog).toHaveBeenCalledTimes(2));
   });
 
+  it('the Model catalogue drawer opens from AI Services with every model, its price, and Hide', async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'Model catalogue' }));
+    expect(await screen.findByRole('dialog', { name: 'Model catalogue' })).toBeInTheDocument();
+    const table = screen.getByRole('region', { name: 'Models for OpenAI' });
+    expect(table).toHaveTextContent('gpt-4o');
+    expect(table).toHaveTextContent('unpriced');
+    expect(screen.getByRole('button', { name: 'Hide gpt-5-mini for OpenAI' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Refresh now/ })).toBeInTheDocument();
+  });
+
   it('a catalogue that cannot be read leaves the cards on their stored lists, with no model list to show', async () => {
     fetchModelCatalog.mockRejectedValueOnce(new Error('503'));
     const silenced = vi.spyOn(console, 'error').mockImplementation(() => {});
     renderPage();
-    // Gemini has no pin, so its select renders only because the stored
-    // array still fills `models`: the page did not empty it.
-    expect(await screen.findByRole('combobox', { name: 'Model for Gemini' })).toBeInTheDocument();
+    // The Priority list still renders from the document; its dropdown offers
+    // only the provider default because the catalogue has no list.
+    const gemini = await screen.findByLabelText('Model for Gemini');
+    expect([...gemini.options].map((o) => o.value)).toEqual(['__default__']);
     await waitFor(() => expect(fetchModelCatalog).toHaveBeenCalled());
     expect(screen.queryByRole('button', { name: 'Models for Gemini' })).toBeNull();
     silenced.mockRestore();

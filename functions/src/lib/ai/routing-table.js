@@ -19,8 +19,12 @@
  * memory to the version 2 selection document (migrate-selection.js: a
  * route → a `custom` chain with `thenGlobal: true`) and the first PUT after
  * the merge stores version 2. `normalizeRouting` stays as the migration's
- * reader and for the v1 view the Routing tab reads until slice 4 (#859)
- * replaces it with the Tasks tab.
+ * reader (migrate-selection.js imports it), which is why slice 4 (#859) —
+ * which removed the Routing tab, the v1 PUT body and the `routes` view —
+ * left this module in place: a stored v1 document is still read through
+ * it until its first v2 save. `applyFeatureRoute` and `routeFor` are
+ * called by nothing but ai-config.test.js and the "before" half of
+ * select.contract.test.js.
  */
 import { FEATURE_NAMES } from './features-catalogue.js';
 import { DEFAULT_PROVIDER_ORDER } from './provider-order.js';

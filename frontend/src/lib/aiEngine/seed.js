@@ -39,8 +39,9 @@ export const PROVIDER_SCHEMA_VERSION = 2;
  * way the provider list once did, and `aiEngine.test.js` refuses one. A
  * stored document from before that day may still carry a `models` array;
  * the page ignores it. `defaultModel` stays the seed's: a pin the router's
- * own table serves, and the card shows a pin the catalogue no longer lists
- * as "not listed" rather than dropping it.
+ * own table serves, read once by the migration into the Priority list's
+ * per-row model (ADR 0034 §6); since slice 4 (#859) the cards show no pin
+ * and the Priority row names the model instead.
  *
  * Replicate has NOT gone away — it generates article cover images, reached
  * directly through REPLICATE_API_KEY. It was never a text provider, and listing

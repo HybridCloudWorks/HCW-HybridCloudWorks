@@ -46,6 +46,11 @@ export const USAGE_SOURCES = Object.freeze({
   // provider with a key (#701, 2026-09-29). Its own row so the check's
   // spend, a fraction of a cent a week, is not read as someone testing.
   aiProviderProbe: 'ai-engine:probe',
+  // The Tasks tab's per-task Test (ADR 0034 slice 4, #859): the same
+  // one-word prompt and caps, sent down a task's effective chain until one
+  // candidate answers. Its own row so a check of the routing never reads as
+  // the task's own spend.
+  aiTaskTest: 'ai-engine:task-test',
   // Replicate image generation (2026-10-05): one row per output image,
   // priced per image (CONTENTFORGE_IMAGE_COST_USD) rather than per token,
   // because Replicate bills on its own account where no Azure budget can
