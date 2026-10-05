@@ -38,7 +38,9 @@ export function StatsStrip({ items, nowMs }) {
       <Stat label="Expiring 90d" className="text-2xl font-bold text-rose-500">
         {stats.expiringSoon}
       </Stat>
-      <Stat label="Top issuer" className="text-sm font-bold truncate">
+      {/* Two lines, not an ellipsis: issuer labels run long ("Microsoft Global
+          Channel Partner…") and the card has the height (owner, 2026-10-05). */}
+      <Stat label="Top issuer" className="text-sm font-bold leading-snug line-clamp-2 break-words">
         {stats.topIssuer ? `${stats.topIssuer[0]} (${stats.topIssuer[1]})` : '—'}
       </Stat>
     </div>

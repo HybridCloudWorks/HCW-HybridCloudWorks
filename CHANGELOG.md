@@ -2682,6 +2682,14 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Anthropic is a certification issuer, and the Top issuer stat wraps
+  (owner request 2026-10-05).** `lib/certIssuers.js` gains `anthropic`
+  (aliases `claude`, `anthropic pbc`; learn link anthropic.com/learn; its
+  own colour), so the Certifications editor's issuer combobox offers it and
+  a cert typed as "Claude" maps to it. The Catalog tab's Top issuer card
+  shows two lines instead of an ellipsis for a long label. New
+  `certIssuers.test.js` pins the registry's shape, the exact-or-alias
+  matching, and what a cert gets from its issuer.
 - **Update Cert Catalog sits in the Certifications Hub header (owner
   request 2026-10-05).** The publish button was on the Publishing tab, one
   tab away from where edits happen; it is now under the Powered-by pill on

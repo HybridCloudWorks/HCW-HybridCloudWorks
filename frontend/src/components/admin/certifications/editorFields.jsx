@@ -9,7 +9,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Award, Loader2, UploadCloud, X, ChevronDown } from 'lucide-react';
-import { detectIssuer, getVendorForIssuer, VENDOR_LABELS, getIssuerColor } from '@/lib/certIssuers';
+import {
+  detectIssuer,
+  getIssuerOptions,
+  getVendorForIssuer,
+  VENDOR_LABELS,
+  getIssuerColor,
+} from '@/lib/certIssuers';
 import { resolveMediaUrl } from '@/lib/functionsBase';
 import { issuerOf } from './certView';
 
@@ -28,19 +34,22 @@ export const IMAGE_RULES = Object.freeze({
 });
 
 /**
- * The issuer picker list, built from real values in the certifications
- * collection, case-insensitive deduped, sorted alphabetically. This is the
- * source of truth — admins should never see a curated list that doesn't match
- * what's actually on disk.
+ * The issuer picker list: every real value in the certifications collection
+ * PLUS the curated registry (lib/certIssuers.js), case-insensitive deduped
+ * with the collection's spelling winning, sorted alphabetically. The
+ * collection half keeps the list honest about what is on disk; the registry
+ * half is how an issuer no cert carries yet (Anthropic, 2026-10-05) can be
+ * picked rather than typed — a typed label still works.
  */
-export function issuerOptionsFrom(allCerts) {
+export function issuerOptionsFrom(allCerts, curated = getIssuerOptions()) {
   const map = new Map();
-  (allCerts || []).forEach((c) => {
-    const v = issuerOf(c);
+  const add = (v) => {
     if (!v || v === 'Unknown') return;
     const key = v.toLowerCase();
     if (!map.has(key)) map.set(key, v);
-  });
+  };
+  (allCerts || []).forEach((c) => add(issuerOf(c)));
+  (curated || []).forEach(add);
   return Array.from(map.values()).sort((a, b) => a.localeCompare(b));
 }
 
