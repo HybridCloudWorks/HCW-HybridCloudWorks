@@ -385,6 +385,60 @@ describe('precedence (ADR 0034 §3)', () => {
     expect(chain[0].why).toMatch(/explicit model from the call site/);
   });
 
+  it('1. an explicit model is still held to rule 5: retired is turned away, and settles the provider', () => {
+    const { chain, rejected } = selectChain({
+      task: 'telegram',
+      selection: doc(['gemini', 'openai'], {
+        telegram: { mode: 'custom', chain: [{ provider: 'gemini', model: null }], thenGlobal: true },
+      }),
+      catalog: catalogue({ 'gemini/gemini-3.6-flash': { status: 'retired' } }),
+      availability: everything,
+      explicitModel: 'gemini-3.6-flash',
+    });
+    expect(chain.map((c) => [c.provider, c.model, c.selection])).toEqual([['openai', 'gemini-3.6-flash', 'explicit']]);
+    expect(rejected).toEqual([
+      {
+        provider: 'gemini',
+        model: 'gemini-3.6-flash',
+        selection: 'custom',
+        code: 'retired',
+        why: 'not eligible: gemini-3.6-flash is retired on gemini',
+      },
+    ]);
+  });
+
+  it('1. an explicit model that does not carry the task\'s needs is turned away', () => {
+    const { chain, rejected } = selectChain({
+      task: 'altText',
+      selection: doc(['anthropic', 'openai']),
+      catalog: catalogue({ 'anthropic/claude-haiku-4-5': { capabilities: ['text', 'json'] } }),
+      availability: everything,
+      explicitModel: 'claude-haiku-4-5',
+    });
+    expect(chain.map((c) => c.provider)).toEqual(['openai']);
+    expect(rejected[0]).toMatchObject({
+      provider: 'anthropic',
+      model: 'claude-haiku-4-5',
+      code: 'capability',
+      why: 'not eligible: claude-haiku-4-5 on anthropic does not carry vision',
+    });
+  });
+
+  it('1. an explicit model the catalogue does not list is accepted, with the note', () => {
+    const { chain, rejected } = selectChain({
+      task: 'telegram',
+      selection: doc(['foundry']),
+      catalog: catalogue(),
+      availability: everything,
+      explicitModel: 'gpt-5.4-nano',
+    });
+    expect(rejected).toEqual([]);
+    expect(chain[0]).toMatchObject({ provider: 'foundry', model: 'gpt-5.4-nano', selection: 'explicit' });
+    expect(chain[0].why).toBe(
+      'explicit model from the call site; Priority 1 · gpt-5.4-nano on foundry is not in the catalogue yet; allowed until a refresh says otherwise'
+    );
+  });
+
   it('2. recommended: the registry model leads when live, priced, keyed, enabled and able; the list follows', () => {
     const { mode, chain, flags } = selectChain({
       task: 'forgeDrafting',

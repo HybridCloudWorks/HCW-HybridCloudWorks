@@ -44,6 +44,7 @@ import {
   validateSelection,
 } from '../ai/selection.js';
 import { taskEntryFor } from '../ai/migrate-selection.js';
+import { readModelCatalog } from '../ai/model-catalog-doc.js';
 import { actorName } from '../auth/actor-name.js';
 import { json, validBody } from '../http/admin-handler.js';
 
@@ -167,17 +168,33 @@ export function applyRoutesToSelection(selection, incoming, { features, provider
   return normalizeSelection({ ...selection, tasks });
 }
 
-/** The three documents the current selection is derived from (a v1 store migrates in memory). */
-async function readCurrent(ctx) {
-  const [stored, providers, features] = await Promise.all([
+/**
+ * The model catalogue as the router reads it, so what a save judges eligible
+ * is what a call will. A catalogue that cannot be read is null, as in the
+ * config loader: the save then judges every model by the code table.
+ */
+async function readCatalogOrNull(ctx, context) {
+  try {
+    return await readModelCatalog({ store: ctx.store, now: ctx.now });
+  } catch (error) {
+    context?.error?.('putAiRouting: could not read the model catalogue:', error);
+    return null;
+  }
+}
+
+/** The three documents the current selection is derived from (a v1 store migrates in memory), and the catalogue. */
+async function readCurrent(ctx, context) {
+  const [stored, providers, features, catalog] = await Promise.all([
     ctx.store.readDoc(SETTINGS_CONTAINER, ROUTING_DOC_ID, ROUTING_DOC_ID),
     ctx.store.queryDocs(PROVIDERS_CONTAINER, 'SELECT * FROM c'),
     ctx.store.readDoc(SETTINGS_CONTAINER, FEATURES_DOC_ID, FEATURES_DOC_ID),
+    readCatalogOrNull(ctx, context),
   ]);
   const cards = Array.isArray(providers) ? providers : [];
   return {
     stored,
     cards,
+    catalog,
     features: features || null,
     selection: selectionFrom({ providers: cards, features: features || null, routing: stored || null }),
   };
@@ -204,7 +221,7 @@ async function getAiRouting(ctx, request, context) {
   const auth = await ctx.guard.requireRole(request, 'editor');
   if (auth.error) return auth.error;
   try {
-    const { stored, selection } = await readCurrent(ctx);
+    const { stored, selection } = await readCurrent(ctx, context);
     return json(
       200,
       answer(selection, {
@@ -230,11 +247,14 @@ function availabilityFor(ctx, cards) {
 /**
  * The next document for a PUT body, or `{ status, body }` to answer with. A
  * v2 body is validated whole (§6) and its `updatedAt` must be the one the
- * page read; a v1 body is validated as before and merged.
+ * page read; a v1 body is validated as before, merged, and the result held
+ * to the same §6 rule. Both judge eligibility over the catalogue the router
+ * reads, so a save never accepts a chain a call would turn away.
  */
 function nextSelection(ctx, body, current) {
+  const eligibility = { availability: availabilityFor(ctx, current.cards), catalog: current.catalog };
   if (body.version !== undefined || body.global !== undefined || body.tasks !== undefined) {
-    const errors = validateSelection(body, { availability: availabilityFor(ctx, current.cards) });
+    const errors = validateSelection(body, eligibility);
     if (errors.length) return { status: 400, body: { error: errors[0], errors } };
     if ((body.updatedAt ?? null) !== (current.selection.updatedAt ?? null)) {
       return {
@@ -249,12 +269,13 @@ function nextSelection(ctx, body, current) {
   }
   const problem = routingRequestError(body.routes);
   if (problem) return { status: 400, body: { error: problem } };
-  return {
-    selection: applyRoutesToSelection(current.selection, body.routes, {
-      features: current.features,
-      providers: current.cards,
-    }),
-  };
+  const selection = applyRoutesToSelection(current.selection, body.routes, {
+    features: current.features,
+    providers: current.cards,
+  });
+  const errors = validateSelection(selection, eligibility);
+  if (errors.length) return { status: 400, body: { error: errors[0], errors } };
+  return { selection };
 }
 
 /**
@@ -269,7 +290,7 @@ async function putAiRouting(ctx, request, context) {
     const body = validBody(await request.json().catch(() => null));
     if (!body) return json(400, { error: routingRequestError(null) });
 
-    const current = await readCurrent(ctx);
+    const current = await readCurrent(ctx, context);
     const next = nextSelection(ctx, body, current);
     if (next.status) return json(next.status, next.body);
 

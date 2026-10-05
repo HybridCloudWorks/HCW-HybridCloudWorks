@@ -1973,6 +1973,72 @@ describe('per-task routing, applied end to end (ADR 0033 §4)', () => {
   });
 });
 
+describe('an empty chain says why (ADR 0034 §6, #858)', () => {
+  /** A store with a v2 selection document and a refreshed catalogue, by id. */
+  const storeOf = ({ selection = null, catalog = null } = {}) => ({
+    queryDocs: vi.fn(async () => []),
+    readDoc: vi.fn(async (_c, id) =>
+      id === 'ai-routing' ? selection : id === 'ai-model-catalog' ? catalog : null
+    ),
+  });
+  const v2 = (priority) => ({
+    id: 'ai-routing',
+    version: 2,
+    global: { priority },
+    tasks: {},
+  });
+  /** A catalogue document whose named models carry the given status, listed once. */
+  const catalogWith = (provider, models) => ({
+    id: 'ai-model-catalog',
+    providers: {
+      [provider]: {
+        refresh: { lastOk: '2026-10-05T00:00:00Z', lastAttempt: '2026-10-05T00:00:00Z', lastError: null },
+        models: Object.fromEntries(Object.entries(models).map(([id, status]) => [id, { id, status }])),
+      },
+    },
+  });
+  const router = (env, store) =>
+    createAiRouter({ env, fetch: vi.fn(), sleep: noSleep, log: quiet, store });
+
+  it('names the capability no eligible model carries', async () => {
+    const r = router(
+      { NVIDIA_API_KEY: 'nvapi-x' },
+      storeOf({ selection: v2([{ provider: 'nvidia', model: 'z-ai/glm-5.3' }]) })
+    );
+    await expect(r.resolveProviderChain('altText')).rejects.toMatchObject({
+      code: 'AI_NOT_CONFIGURED',
+      message: expect.stringMatching(/^No eligible model carries 'vision' for 'altText': nvidia \(not eligible: z-ai\/glm-5.3 on nvidia does not carry vision\)/),
+    });
+  });
+
+  it('says every eligible model is retired, naming them, when the catalogue retired them', async () => {
+    const r = router(
+      { GEMINI_API_KEY: 'g' },
+      storeOf({
+        selection: v2([{ provider: 'gemini', model: null }]),
+        catalog: catalogWith('gemini', { 'gemini-3.5-flash-lite': 'retired', 'gemini-3.6-flash': 'retired' }),
+      })
+    );
+    await expect(r.resolveProviderChain('telegram')).rejects.toMatchObject({
+      code: 'AI_NOT_CONFIGURED',
+      message: expect.stringMatching(
+        /^Every eligible model for 'telegram' is retired in the catalogue \(gemini-3.5-flash-lite on gemini\); pick another under AI Engine → Tasks\./
+      ),
+    });
+  });
+
+  it('says no provider offers a model for the modality when a null step has no recommendation', async () => {
+    const r = router(
+      { NVIDIA_API_KEY: 'nvapi-x' },
+      storeOf({ selection: v2([{ provider: 'nvidia', model: null }]) })
+    );
+    await expect(r.resolveProviderChain('altText')).rejects.toMatchObject({
+      code: 'AI_NOT_CONFIGURED',
+      message: expect.stringMatching(/^No provider offers a model for 'altText' \(vision\): nvidia\./),
+    });
+  });
+});
+
 describe('every call records usage once (ADR 0033)', () => {
   const keys = { GEMINI_API_KEY: 'g', OPENAI_API_KEY: 'o' };
   const okFetch = () =>

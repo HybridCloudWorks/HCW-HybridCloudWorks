@@ -201,18 +201,24 @@ const PROVIDER_CHECKS = Object.freeze([
 function modelVerdict(step, model, { def, catalog }) {
   const { provider } = step;
   const entry = catalogEntry(catalog, provider, model);
+  // A rejection names the model it was judged on — for a null step, the
+  // modality recommendation — and a capability rejection carries `missing`,
+  // which the router's sentence names.
+  const judged = { ...step, model };
   if (entry.status === 'retired') {
-    return { rejection: reject(step, 'retired', `not eligible: ${model} is retired on ${provider}`) };
+    return { rejection: reject(judged, 'retired', `not eligible: ${model} is retired on ${provider}`) };
   }
   const missing = def.needs.filter((need) => !entry.capabilities.includes(need));
   if (missing.length) {
     return {
-      rejection: reject(
-        step,
-        'capability',
-        `not eligible: ${model} on ${provider} does not carry ${missing.join(', ')}`
-      ),
-      missing,
+      rejection: {
+        ...reject(
+          judged,
+          'capability',
+          `not eligible: ${model} on ${provider} does not carry ${missing.join(', ')}`
+        ),
+        missing,
+      },
     };
   }
   let note = null;
@@ -261,15 +267,23 @@ function judge(step, where, deps) {
   return verdict;
 }
 
-/** Rule 1: the call site's model, on whatever provider the step names. */
-function acceptExplicit(step, where, { explicitModel }) {
+/**
+ * Rule 1: the call site's model, on whatever provider the step names — and
+ * rule 5 still: a retired model or one that does not carry the task's
+ * needs is turned away like any other candidate; an unpriced one, or one
+ * the catalogue has not listed, is allowed with the note.
+ */
+function acceptExplicit(step, where, { explicitModel, def, catalog }) {
+  const named = { ...step, model: explicitModel };
+  const verdict = modelVerdict(named, explicitModel, { def, catalog });
+  if (verdict.rejection) return verdict;
   return {
     accepted: {
       provider: step.provider,
       model: explicitModel,
       modalityModel: null,
       selection: 'explicit',
-      why: `explicit model from the call site; ${where}`,
+      why: [`explicit model from the call site; ${where}`, verdict.note].filter(Boolean).join(' · '),
     },
   };
 }
@@ -355,7 +369,8 @@ const PROVIDER_LEVEL = Object.freeze(['unknown', 'no-key', 'disabled', 'excluded
  * sake (no key, switched off, excluded, locked) is not judged again either,
  * so the page sees one sentence per provider; a model-level rejection (a
  * retired or unable model) leaves a later step naming another model its
- * chance.
+ * chance — unless the call site named the model, which every step of that
+ * provider would be judged on alike.
  */
 function walk(steps, deps, rejected) {
   const chain = [];
@@ -368,7 +383,7 @@ function walk(steps, deps, rejected) {
       settled.add(step.provider);
     } else {
       rejected.push(rejection);
-      if (PROVIDER_LEVEL.includes(rejection.code)) settled.add(step.provider);
+      if (deps.explicitModel || PROVIDER_LEVEL.includes(rejection.code)) settled.add(step.provider);
     }
   }
   return chain;

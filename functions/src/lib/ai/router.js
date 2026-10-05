@@ -201,8 +201,9 @@ import {
 // from the selection document, the catalogue and what holds a key. The
 // per-feature placement and the v1 routes it replaced are migrated into
 // that document by the loader (migrate-selection.js).
-import { selectChain } from './select.js';
+import { UNDECLARED_TASK, selectChain } from './select.js';
 import { defaultSelection } from './migrate-selection.js';
+import { taskFor } from './tasks.js';
 import { featureSource, recordAiUsage } from './usage.js';
 import { COST_TABLE, DEFAULT_MODEL_TABLE } from './model-tables.js';
 // Source grounding (#433): the pure half — source checks, prompt, request
@@ -926,20 +927,35 @@ function activeProvider(ctx) {
  * @returns {Promise<Array<{provider: string, model: string|null}>>}
  */
 async function providerChain(ctx, feature = null) {
-  const { chain, disabled, excluded, uncapable } = await chainDetails(ctx, feature);
+  const { chain, disabled, excluded, uncapable, retired, noModel, modality } = await chainDetails(
+    ctx,
+    feature
+  );
 
   if (chain.length === 0) {
+    const name = feature ? `'${feature}'` : 'this call';
     if (excluded.length > 0 && disabled.length === 0) {
       throw new AiNotConfiguredError(
         `The only configured AI provider (${excluded.join(', ')}) is not used for ${feature ? `'${feature}'` : 'calls that name no feature'}. Seed GEMINI_API_KEY, OPENAI_API_KEY or ANTHROPIC_API_KEY (Required-Inputs §4.6), or change its placement under AI Engine → Where AI is used where that is allowed.`
       );
     }
+    // ADR 0034 §6: a task no configured provider can serve fails naming why
+    // — the capability no model carries, a retired model, no model for the
+    // modality — not with a 500 or "not configured".
     if (uncapable.length > 0 && disabled.length === 0) {
-      // ADR 0034 §6: a task whose `needs` no configured provider can carry
-      // fails naming the capability, not with a 500 or "not configured".
       const capabilities = [...new Set(uncapable.flatMap((r) => r.missing))];
       throw new AiNotConfiguredError(
-        `No eligible model carries ${capabilities.map((c) => `'${c}'`).join(', ')} for ${feature ? `'${feature}'` : 'this call'}: ${uncapable.map((r) => `${r.provider} (${r.why})`).join('; ')}. Enable a provider whose models carry it under AI Engine → AI Services, or name one in the task's chain.`
+        `No eligible model carries ${capabilities.map((c) => `'${c}'`).join(', ')} for ${name}: ${uncapable.map((r) => `${r.provider} (${r.why})`).join('; ')}. Enable a provider whose models carry it under AI Engine → AI Services, or name one in the task's chain.`
+      );
+    }
+    if (retired.length > 0 && disabled.length === 0) {
+      throw new AiNotConfiguredError(
+        `Every eligible model for ${name} is retired in the catalogue (${retired.map((r) => `${r.model} on ${r.provider}`).join(', ')}); pick another under AI Engine → Tasks.`
+      );
+    }
+    if (noModel.length > 0 && disabled.length === 0) {
+      throw new AiNotConfiguredError(
+        `No provider offers a model for ${name} (${modality}): ${noModel.map((r) => r.provider).join(', ')}. Name one in the task's chain under AI Engine → Tasks, or enable a provider that recommends one.`
       );
     }
     throw new AiNotConfiguredError(
@@ -954,7 +970,7 @@ async function providerChain(ctx, feature = null) {
 
 /** Rejections a provider earned for the task's sake, not for want of a key or a switch. */
 const NOT_USED_CODES = Object.freeze(['excluded', 'policy']);
-/** Rejections for want of a model that carries the task's needs. */
+/** Rejections for want of a model: no capability, retired, or none for the modality. */
 const NO_MODEL_CODES = Object.freeze(['capability', 'retired', 'no-model']);
 
 /**
@@ -974,6 +990,7 @@ const NO_MODEL_CODES = Object.freeze(['capability', 'retired', 'no-model']);
  *
  * @returns {Promise<{chain: Array<{provider: string, model: string|null, selection: string}>,
  *                    disabled: string[], excluded: string[], uncapable: Array<object>,
+ *                    retired: Array<object>, noModel: Array<object>, modality: string,
  *                    rejected: Array<object>, flags: string[], pinned: string}>}
  */
 async function chainDetails(ctx, feature = null) {
@@ -1012,7 +1029,13 @@ async function chainDetails(ctx, feature = null) {
   const excluded = selected.rejected
     .filter((r) => NOT_USED_CODES.includes(r.code))
     .map((r) => r.provider);
-  const uncapable = selected.rejected.filter((r) => NO_MODEL_CODES.includes(r.code));
+  // The capability sentence is for rejections that name a missing one; a
+  // retired model and a provider with no model for the modality each have
+  // their own (providerChain).
+  const uncapable = selected.rejected.filter((r) => r.code === 'capability' && r.missing?.length);
+  const retired = selected.rejected.filter((r) => r.code === 'retired');
+  const noModel = selected.rejected.filter((r) => r.code === 'no-model');
+  const withoutModel = selected.rejected.filter((r) => NO_MODEL_CODES.includes(r.code));
 
   const pinned = pinnedProvider(ctx);
   let { chain } = selected;
@@ -1023,7 +1046,7 @@ async function chainDetails(ctx, feature = null) {
       let why = 'its key is not present';
       if (disabled.includes(pinned)) why = 'it is disabled in the admin portal';
       else if (excluded.includes(pinned)) why = `it is not used for '${feature || 'no feature'}'`;
-      else if (uncapable.some((r) => r.provider === pinned)) {
+      else if (withoutModel.some((r) => r.provider === pinned)) {
         why = `no model of its carries what '${feature || 'no feature'}' needs`;
       }
       ctx.log.warn?.(
@@ -1043,6 +1066,9 @@ async function chainDetails(ctx, feature = null) {
     disabled,
     excluded,
     uncapable,
+    retired,
+    noModel,
+    modality: (feature && taskFor(feature)?.modality) || UNDECLARED_TASK.modality,
     rejected: selected.rejected,
     flags: selected.flags,
     pinned,

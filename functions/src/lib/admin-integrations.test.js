@@ -1114,6 +1114,48 @@ describe('AI routing by task: the selection document (ADR 0033 §4 → ADR 0034 
     expect(store.upsertDoc).not.toHaveBeenCalled();
   });
 
+  it('PUT judges a chain over the catalogue the router reads: a keyed chain whose only model is retired would have no model', async () => {
+    const store = makeStore({
+      queryDocs: vi.fn(async () => []),
+      readDoc: vi.fn(async (_c, id) =>
+        id === 'ai-model-catalog'
+          ? {
+              id,
+              providers: {
+                anthropic: {
+                  refresh: { lastOk: '2026-10-05T00:00:00Z', lastAttempt: null, lastError: null },
+                  models: { 'claude-sonnet-4-6': { id: 'claude-sonnet-4-6', status: 'retired' } },
+                },
+              },
+            }
+          : null
+      ),
+    });
+    const res = await handlers(store, {
+      availableProviders: () => ['gemini', 'anthropic'],
+    }).putAiRouting(
+      makeRequest({
+        body: {
+          version: 2,
+          global: { priority: [{ provider: 'gemini' }] },
+          tasks: {
+            forgeDrafting: {
+              mode: 'custom',
+              chain: [{ provider: 'anthropic', model: 'claude-sonnet-4-6' }],
+              thenGlobal: false,
+            },
+          },
+          updatedAt: null,
+        },
+      }),
+      context
+    );
+    expect(res.status).toBe(400);
+    expect(JSON.parse(res.body).error).toMatch(/tasks\.forgeDrafting: this task would have no model/);
+    expect(store.readDoc).toHaveBeenCalledWith('admin_settings', 'ai-model-catalog', 'ai-model-catalog');
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+  });
+
   it('PUT refuses a v2 document that would leave a task with no model (§6), naming the task', async () => {
     const store = docsStore({ providers: [{ id: 'anthropic', enabled: false }] });
     const res = await handlers(store, {
