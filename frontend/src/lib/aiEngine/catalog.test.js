@@ -14,7 +14,14 @@ import {
 } from './catalog.js';
 
 const NOW = Date.parse('2026-10-12T12:00:00.000Z');
-const model = (id, over = {}) => ({ id, status: 'live', hidden: false, unpriced: false, ...over });
+const model = (id, over = {}) => ({
+  id,
+  status: 'live',
+  hidden: false,
+  unpriced: false,
+  capabilities: ['text'],
+  ...over,
+});
 
 const catalog = {
   providers: {
@@ -27,6 +34,8 @@ const catalog = {
         'gpt-5-mini': model('gpt-5-mini', { hidden: true }),
         'o3-mini': model('o3-mini', { status: 'unknown', unpriced: true }),
         'gpt-4o-mini': model('gpt-4o-mini'),
+        // Listed by the provider, enriched with no text capability.
+        'gpt-4o-mini-tts': model('gpt-4o-mini-tts', { capabilities: [] }),
       },
     },
     nvidia: {
@@ -39,8 +48,12 @@ const catalog = {
 };
 
 describe('visibleModelsFor', () => {
-  it('offers live and unknown models that are not hidden, live first then by id', () => {
+  it('offers live and unknown text models that are not hidden, live first then by id', () => {
+    // The speech model is in the disclosure, never in a select.
     expect(visibleModelsFor(catalog, 'openai')).toEqual(['gpt-4o-mini', 'gpt-5-nano', 'o3-mini']);
+    expect(
+      visibleModelsFor({ providers: { x: { models: { a: { id: 'a', status: 'live' } } } } }, 'x')
+    ).toEqual([]);
     expect(visibleModelsFor(catalog, 'nvidia')).toEqual(['z-ai/glm-5.3']);
     expect(visibleModelsFor(catalog, 'gemini')).toEqual([]);
     expect(visibleModelsFor(null, 'openai')).toEqual([]);
@@ -51,6 +64,7 @@ describe('catalogEntries', () => {
   it('lists every model including hidden and retired: live, unknown, retired, by id', () => {
     expect(catalogEntries(catalog.providers.openai).map((m) => m.id)).toEqual([
       'gpt-4o-mini',
+      'gpt-4o-mini-tts',
       'gpt-5-mini',
       'gpt-5-nano',
       'o3-mini',

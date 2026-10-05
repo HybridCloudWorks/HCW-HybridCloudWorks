@@ -68,7 +68,14 @@ const PROVIDERS = [
   },
 ];
 
-const model = (id, over = {}) => ({ id, status: 'live', hidden: false, unpriced: false, ...over });
+const model = (id, over = {}) => ({
+  id,
+  status: 'live',
+  hidden: false,
+  unpriced: false,
+  capabilities: ['text'],
+  ...over,
+});
 
 /** The catalogue as the API answers it (ADR 0034 slice 2, #857). */
 const CATALOG = {
@@ -92,6 +99,7 @@ const CATALOG = {
         'gpt-5-nano': model('gpt-5-nano', { hidden: true }),
         'gpt-4o': model('gpt-4o', { status: 'retired' }),
         'o3-mini': model('o3-mini', { unpriced: true }),
+        'gpt-4o-mini-tts': model('gpt-4o-mini-tts', { capabilities: [] }),
       },
     },
   },
@@ -200,7 +208,7 @@ describe('AIEnginePage shell', () => {
   it('the Models disclosure shows every model with its badges, says when the list was refreshed, and hides on click', async () => {
     renderPage();
     const disclosure = await screen.findByRole('button', { name: 'Models for OpenAI' });
-    expect(disclosure).toHaveTextContent('Models (4)');
+    expect(disclosure).toHaveTextContent('Models (5)');
     expect(disclosure).toHaveTextContent('List refreshed 2d ago');
     expect(screen.getByRole('button', { name: 'Models for Gemini' })).toHaveTextContent(
       'List not refreshed yet'

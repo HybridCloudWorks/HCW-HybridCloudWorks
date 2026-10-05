@@ -90,17 +90,24 @@ This project has not cut a tagged release; entries are grouped under
   (OpenAI and NVIDIA `/v1/models`, Anthropic `/v1/models` paged, Gemini
   `models.list` filtered to `generateContent`, Foundry `/openai/v1/models`
   with the app identity's token); a catalogue failure is logged and reported
-  and never costs the Tests already written. A failed list changes no model
-  and records only `lastAttempt` and `lastError` (ADR 0034 review finding
-  3); `retired` takes two consecutive successful lists without the model; a
-  refresh never touches `hidden`. Three editor routes: `GET
-  cms/ai-model-catalog` (every provider, `stale` when `lastOk` is missing or
-  older than 8 days, the router's defaults seeded in memory for a provider
-  never refreshed), `PATCH cms/ai-model-catalog/{provider}/{model}` with
-  `{ hidden }` (the id URL-encoded, since NVIDIA's carry a slash) and `POST
-  cms/ai-model-catalog/refresh`; every write drops the router's cache. The
-  AI Services page reads the catalogue once and after every hide or
-  refresh, merges each card's `models` from it in one place
+  and never costs the Tests already written. A 200 without the provider's
+  collection is a malformed list, not an empty one. A failed list changes
+  no model — the stored models are written back byte for byte — and records
+  only `lastAttempt` and `lastError` (ADR 0034 review finding 3); `retired`
+  takes two consecutive successful lists without the model; a refresh never
+  touches `hidden`. Both writes are ETag-conditioned (`replaceDocIfMatch`,
+  re-read and re-apply on 412), so a Hide and a refresh landing together
+  both survive. Three editor routes: `GET cms/ai-model-catalog` (every
+  provider, `stale` when `lastOk` is missing or older than 8 days, the
+  router's defaults seeded in memory under whatever is stored until the
+  first successful list), `PATCH cms/ai-model-catalog/{provider}/{model}`
+  with `{ hidden }` (the id URL-encoded, since NVIDIA's carry a slash) and
+  `POST cms/ai-model-catalog/refresh`; every write drops the router's
+  cache. A card's selectable list is live or unknown, not hidden, and
+  carrying the `text` capability; the speech, transcription, embedding and
+  image ids the lists also return stay in the disclosure only. The AI
+  Services page reads the catalogue once and after every hide or refresh,
+  merges each card's `models` from it in one place
   (`frontend/src/lib/aiEngine/catalog.js`), shows a "Models (N)" disclosure
   per card with `retired`, `unpriced` and `hidden` badges, a Hide / Show per
   model and the "List refreshed" line, and a "Refresh model lists" button in

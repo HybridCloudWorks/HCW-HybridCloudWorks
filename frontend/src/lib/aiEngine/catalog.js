@@ -26,16 +26,22 @@ export function catalogEntryFor(catalog, provider) {
   return isObject(entry) ? entry : null;
 }
 
+/** A model a text call can be sent to: the `text` capability from the enrichment table. */
+const servesText = (m) => Array.isArray(m?.capabilities) && m.capabilities.includes('text');
+
 /**
- * The ids a card may offer: live or unknown, not hidden, live first then by
- * id. Mirrors the API's `visibleModelsFor`.
+ * The ids a card may offer: live or unknown, carrying the `text` capability,
+ * not hidden, live first then by id. Mirrors the API's `visibleModelsFor`.
+ * Speech, transcription, embedding and image ids the list endpoints also
+ * return stay in the disclosure (`catalogEntries`) and out of every select,
+ * where a text call to them fails.
  */
 export function visibleModelsFor(catalog, provider) {
   const models = catalogEntryFor(catalog, provider)?.models;
   if (!isObject(models)) return [];
   const rank = (status) => (status === 'live' ? 0 : 1);
   return Object.values(models)
-    .filter((m) => SELECTABLE.has(m?.status) && m.hidden !== true)
+    .filter((m) => SELECTABLE.has(m?.status) && m.hidden !== true && servesText(m))
     .sort((a, b) => rank(a.status) - rank(b.status) || a.id.localeCompare(b.id))
     .map((m) => m.id);
 }

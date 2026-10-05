@@ -31,8 +31,9 @@ const parse = (res) => JSON.parse(res.body);
 
 function makeStore(doc = null) {
   return {
-    readDoc: vi.fn(async () => (doc ? structuredClone(doc) : null)),
+    readDoc: vi.fn(async () => (doc ? structuredClone({ _etag: 'etag-1', ...doc }) : null)),
     upsertDoc: vi.fn(async (_c, d) => d),
+    replaceDocIfMatch: vi.fn(async (_c, d) => d),
   };
 }
 
@@ -76,6 +77,7 @@ describe('auth', () => {
     for (const call of calls) expect((await call).status).toBe(403);
     expect(store.readDoc).not.toHaveBeenCalled();
     expect(store.upsertDoc).not.toHaveBeenCalled();
+    expect(store.replaceDocIfMatch).not.toHaveBeenCalled();
     expect(refresh).not.toHaveBeenCalled();
   });
 });
@@ -102,7 +104,7 @@ describe('GET cms/ai-model-catalog', () => {
 });
 
 describe('PATCH cms/ai-model-catalog/{provider}/{model}', () => {
-  it('hides a model whose id arrives URL-encoded, drops the router cache, answers the entry', async () => {
+  it('hides a model whose id arrives URL-encoded, writes on the ETag, drops the router cache, answers the entry', async () => {
     const { h, store, aiConfigChanged } = build({ store: makeStore(storedDoc) });
     const res = await h.patchModelCatalogModel(
       makeRequest({ params: { provider: 'nvidia', model: 'z-ai%2Fglm-5.3' }, body: { hidden: true } }),
@@ -110,8 +112,24 @@ describe('PATCH cms/ai-model-catalog/{provider}/{model}', () => {
     );
     expect(res.status).toBe(200);
     expect(parse(res)).toMatchObject({ success: true, provider: 'nvidia', model: { id: 'z-ai/glm-5.3', hidden: true } });
-    expect(store.upsertDoc.mock.calls[0][1].providers.nvidia.models['z-ai/glm-5.3'].hidden).toBe(true);
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+    const [, writtenDoc, options] = store.replaceDocIfMatch.mock.calls[0];
+    expect(writtenDoc._etag).toBe('etag-1');
+    expect(writtenDoc.providers.nvidia.models['z-ai/glm-5.3'].hidden).toBe(true);
+    expect(options).toEqual({ partitionKey: CATALOG_DOC_ID });
     expect(aiConfigChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it('a write that keeps conflicting is a 500, and the cache is left alone', async () => {
+    const store = makeStore(storedDoc);
+    store.replaceDocIfMatch.mockRejectedValue(Object.assign(new Error('precondition'), { code: 412 }));
+    const { h, aiConfigChanged } = build({ store });
+    const res = await h.patchModelCatalogModel(
+      makeRequest({ params: { provider: 'nvidia', model: 'z-ai%2Fglm-5.3' }, body: { hidden: true } }),
+      context
+    );
+    expect(res.status).toBe(500);
+    expect(aiConfigChanged).not.toHaveBeenCalled();
   });
 
   it('accepts the same id already decoded by the host', async () => {
@@ -138,6 +156,7 @@ describe('PATCH cms/ai-model-catalog/{provider}/{model}', () => {
     expect(parse(missing).error).toContain('nobody/such');
 
     expect(store.upsertDoc).not.toHaveBeenCalled();
+    expect(store.replaceDocIfMatch).not.toHaveBeenCalled();
     expect(aiConfigChanged).not.toHaveBeenCalled();
   });
 

@@ -176,14 +176,25 @@ async function getJson(fetchImpl, url, headers, timeoutMs) {
   return data;
 }
 
+/**
+ * The provider's model collection, or a thrown "malformed list". A 200 whose
+ * body lacks the collection (`{}`, an HTML interstitial parsed as an object,
+ * a renamed field) is NOT an empty list: read as one, two such answers would
+ * retire every stored model. It is a failed refresh, recorded as such.
+ */
+function collectionOf(data, field) {
+  if (!Array.isArray(data?.[field])) {
+    throw new Error(`Malformed list: no "${field}" array in the answer`);
+  }
+  return data[field];
+}
+
 const idsOf = (rows) =>
-  (Array.isArray(rows) ? rows : [])
-    .map((row) => (typeof row?.id === 'string' ? row.id.trim() : ''))
-    .filter(Boolean);
+  rows.map((row) => (typeof row?.id === 'string' ? row.id.trim() : '')).filter(Boolean);
 
 async function listOpenAiCompatible(ctx, url, headers) {
   const data = await getJson(ctx.fetchImpl, url, headers, ctx.timeoutMs);
-  return idsOf(data.data);
+  return idsOf(collectionOf(data, 'data'));
 }
 
 const LISTERS = {
@@ -216,7 +227,7 @@ const LISTERS = {
       url.searchParams.set('limit', '100');
       if (afterId) url.searchParams.set('after_id', afterId);
       const data = await getJson(ctx.fetchImpl, url.toString(), headers, ctx.timeoutMs);
-      ids.push(...idsOf(data.data));
+      ids.push(...idsOf(collectionOf(data, 'data')));
       if (!data.has_more || !data.last_id) break;
       afterId = data.last_id;
     }
@@ -231,7 +242,7 @@ const LISTERS = {
       url.searchParams.set('pageSize', '1000');
       if (pageToken) url.searchParams.set('pageToken', pageToken);
       const data = await getJson(ctx.fetchImpl, url.toString(), headers, ctx.timeoutMs);
-      ids.push(...geminiChatIdsOf(data.models));
+      ids.push(...geminiChatIdsOf(collectionOf(data, 'models')));
       if (!data.nextPageToken) break;
       pageToken = data.nextPageToken;
     }
@@ -248,7 +259,7 @@ function geminiChatIdsOf(models) {
   const chatCapable = (model) =>
     Array.isArray(model?.supportedGenerationMethods) &&
     model.supportedGenerationMethods.includes('generateContent');
-  return (Array.isArray(models) ? models : [])
+  return models
     .filter(chatCapable)
     .map((model) => (typeof model?.name === 'string' ? model.name : ''))
     .map((name) => name.replace(/^models\//, '').trim())
@@ -349,7 +360,13 @@ function normalizeProvider(provider, stored) {
   };
 }
 
-/** The stored document with every present provider normalised; providers are never dropped. */
+/**
+ * The stored document with every present provider normalised; providers
+ * are never dropped. READ PATH ONLY: the writes below start from the raw
+ * stored document and normalise one provider at a time, after its own
+ * successful listing, so a failed list cannot change a model's enrichment
+ * or drop a stored field.
+ */
 function normalizeDoc(stored) {
   const doc = emptyDoc();
   if (!isPlainObject(stored)) return doc;
@@ -360,6 +377,77 @@ function normalizeDoc(stored) {
     doc.providers[provider] = normalizeProvider(provider, entry);
   }
   return doc;
+}
+
+/**
+ * The stored document as a document to write: the stored fields (Cosmos
+ * system fields included, so `_etag` travels to the conditional replace),
+ * the id and schema version pinned, and every provider's entry cloned raw,
+ * byte for byte. Nothing is normalised here.
+ */
+function rawDocForWrite(stored) {
+  const base = isPlainObject(stored) ? structuredClone(stored) : {};
+  return {
+    ...base,
+    id: CATALOG_DOC_ID,
+    schemaVersion: CATALOG_SCHEMA_VERSION,
+    updatedAt: typeof base.updatedAt === 'string' ? base.updatedAt : null,
+    providers: isPlainObject(base.providers) ? base.providers : {},
+  };
+}
+
+/** The raw stored provider entry with its refresh fields typed; models untouched. */
+function rawProviderEntry(entry) {
+  const base = isPlainObject(entry) ? entry : {};
+  const refresh = isPlainObject(base.refresh) ? base.refresh : {};
+  return {
+    ...base,
+    refresh: {
+      ...refresh,
+      lastOk: typeof refresh.lastOk === 'string' ? refresh.lastOk : null,
+      lastAttempt: typeof refresh.lastAttempt === 'string' ? refresh.lastAttempt : null,
+      lastError: typeof refresh.lastError === 'string' ? refresh.lastError : null,
+    },
+    models: isPlainObject(base.models) ? base.models : {},
+  };
+}
+
+/** Attempts at an ETag-conditioned write before the conflict is reported. */
+export const WRITE_ATTEMPTS = 4;
+
+const isConflict = (error) => error?.code === 412 || error?.code === 409;
+
+/**
+ * Read the document, build the next version from it, and write it only if
+ * nothing else wrote in between (`replaceDocIfMatch` on the ETag it was
+ * read with). On a conflict the document is re-read and `build` runs again
+ * over the newer version, so a Hide that landed while the lists were being
+ * fetched survives the refresh, and a refresh that landed while a Hide was
+ * being decided keeps its new models. The first document, when none is
+ * stored, is created with an upsert.
+ *
+ * `build(stored)` returns `{ doc, result }`; a null `doc` means there is
+ * nothing to write and `result` is returned as is.
+ */
+async function writeCatalog(store, build) {
+  let lastError = null;
+  for (let attempt = 0; attempt < WRITE_ATTEMPTS; attempt += 1) {
+    const stored = await store.readDoc(SETTINGS_CONTAINER, CATALOG_DOC_ID, CATALOG_DOC_ID);
+    const { doc, result } = build(stored);
+    if (!doc) return result;
+    try {
+      if (stored) {
+        await store.replaceDocIfMatch(SETTINGS_CONTAINER, doc, { partitionKey: CATALOG_DOC_ID });
+      } else {
+        await store.upsertDoc(SETTINGS_CONTAINER, doc);
+      }
+      return result;
+    } catch (error) {
+      if (!isConflict(error)) throw error;
+      lastError = error;
+    }
+  }
+  throw lastError;
 }
 
 /** A never-listed model in a provider's entry: `unknown` until a list confirms it. */
@@ -417,12 +505,63 @@ function applyListing(provider, entry, ids, nowIso) {
 }
 
 /**
+ * Every provider's listing, before anything is written: `{ ids }`,
+ * `{ error }`, or `{ skipped: true }` for one with no key.
+ */
+async function listEveryProvider(providers, list) {
+  const outcomes = {};
+  for (const provider of providers) {
+    if (!PROVIDERS.includes(provider)) continue;
+    try {
+      const ids = await list(provider);
+      outcomes[provider] = ids === null ? { skipped: true } : { ids };
+    } catch (error) {
+      outcomes[provider] = { error: String(error?.message || error) };
+    }
+  }
+  return outcomes;
+}
+
+/**
+ * Apply the listings to the stored document: `{ doc, result }`. A provider
+ * that listed is normalised (enrichment re-applied) and then updated; one
+ * that failed keeps its models exactly as stored and gains only
+ * `lastAttempt` and `lastError`; one that was skipped is untouched.
+ */
+function applyOutcomes(stored, outcomes, nowIso) {
+  const doc = rawDocForWrite(stored);
+  const summary = {};
+  for (const [provider, outcome] of Object.entries(outcomes)) {
+    if (outcome.skipped) {
+      summary[provider] = { skipped: true };
+      continue;
+    }
+    if (outcome.error) {
+      const entry = rawProviderEntry(doc.providers[provider]);
+      entry.refresh.lastAttempt = nowIso;
+      entry.refresh.lastError = outcome.error;
+      doc.providers[provider] = entry;
+      summary[provider] = { listed: 0, added: 0, retired: 0, error: outcome.error };
+      continue;
+    }
+    const entry = normalizeProvider(provider, doc.providers[provider]);
+    entry.refresh.lastAttempt = nowIso;
+    doc.providers[provider] = entry;
+    summary[provider] = applyListing(provider, entry, outcome.ids, nowIso);
+  }
+  doc.updatedAt = nowIso;
+  return { doc, result: { updatedAt: nowIso, providers: summary } };
+}
+
+/**
  * List every provider and write the document. One provider's failure is a
- * line in its `refresh` and in the summary; the others still refresh. Only a
+ * line in its `refresh` and in the summary; the others still refresh. The
+ * lists are fetched first and the document written after, conditionally on
+ * its ETag (writeCatalog), so a Hide that lands meanwhile is kept. Only a
  * store that cannot be read or written throws.
  *
  * @param {object} deps
- * @param {{ readDoc: Function, upsertDoc: Function }} deps.store
+ * @param {{ readDoc: Function, upsertDoc: Function, replaceDocIfMatch: Function }} deps.store
  * @param {string[]} deps.providers   the providers with a key (ai.availableProviders())
  * @param {(provider: string) => Promise<string[] | null>} deps.listModels
  * @param {() => Date} [deps.now]
@@ -430,35 +569,8 @@ function applyListing(provider, entry, ids, nowIso) {
  */
 export async function refreshModelCatalog({ store, providers, listModels: list, now = () => new Date() }) {
   const nowIso = now().toISOString();
-  const stored = await store.readDoc(SETTINGS_CONTAINER, CATALOG_DOC_ID, CATALOG_DOC_ID);
-  const doc = normalizeDoc(stored);
-  const summary = {};
-
-  for (const provider of providers) {
-    if (!PROVIDERS.includes(provider)) continue;
-    const entry = doc.providers[provider] || { refresh: emptyRefresh(), models: {} };
-    let ids;
-    try {
-      ids = await list(provider);
-    } catch (error) {
-      doc.providers[provider] = entry;
-      entry.refresh.lastAttempt = nowIso;
-      entry.refresh.lastError = String(error?.message || error);
-      summary[provider] = { listed: 0, added: 0, retired: 0, error: entry.refresh.lastError };
-      continue;
-    }
-    if (ids === null) {
-      summary[provider] = { skipped: true };
-      continue;
-    }
-    doc.providers[provider] = entry;
-    entry.refresh.lastAttempt = nowIso;
-    summary[provider] = applyListing(provider, entry, ids, nowIso);
-  }
-
-  doc.updatedAt = nowIso;
-  await store.upsertDoc(SETTINGS_CONTAINER, doc);
-  return { updatedAt: nowIso, providers: summary };
+  const outcomes = await listEveryProvider(providers, list);
+  return writeCatalog(store, (stored) => applyOutcomes(stored, outcomes, nowIso));
 }
 
 /** True when the provider's last successful list is missing or older than STALE_AFTER_MS. */
@@ -469,10 +581,30 @@ export function isStale(refresh, now = new Date()) {
 }
 
 /**
+ * The provider's entry as the page should read it. Until the first
+ * SUCCESSFUL list (`refresh.lastOk` set) the router's defaults are seeded in
+ * memory under whatever is stored — a first list that failed leaves an entry
+ * with no models and an error, and a Hide before the first refresh leaves
+ * one with a single model — so the card always has its list on day one, and
+ * a stored model (its `hidden` included) wins over the default of the same
+ * id. `seeded` says the list is the router's, not the provider's.
+ */
+function readableProviderEntry(provider, entry) {
+  if (entry?.refresh?.lastOk) return { ...entry, seeded: false };
+  const seed = seedProviderEntry(provider);
+  return {
+    refresh: entry?.refresh || seed.refresh,
+    models: { ...seed.models, ...(entry?.models || {}) },
+    seeded: true,
+  };
+}
+
+/**
  * The document as the page reads it: every provider the router implements,
- * `stale` derived from `lastOk` at read time, and a provider with no entry
- * yet seeded in memory from the router's defaults so the card has a list
- * before the first refresh (`seeded: true`, nothing written).
+ * `stale` derived from `lastOk` at read time, and a provider with no
+ * successful refresh yet seeded in memory from the router's defaults so the
+ * card has a list before the first list lands (`seeded: true`, nothing
+ * written).
  *
  * @param {object} deps
  * @param {{ readDoc: Function }} deps.store
@@ -484,14 +616,8 @@ export async function readModelCatalog({ store, now = () => new Date() }) {
   const at = now();
   const providers = {};
   for (const provider of PROVIDERS) {
-    const entry = doc.providers[provider];
-    const seeded = !entry;
-    const resolved = entry || seedProviderEntry(provider);
-    providers[provider] = {
-      ...resolved,
-      stale: isStale(resolved.refresh, at),
-      seeded,
-    };
+    const resolved = readableProviderEntry(provider, doc.providers[provider]);
+    providers[provider] = { ...resolved, stale: isStale(resolved.refresh, at) };
   }
   return {
     id: CATALOG_DOC_ID,
@@ -502,44 +628,64 @@ export async function readModelCatalog({ store, now = () => new Date() }) {
 }
 
 /**
- * Set `hidden` on one model and write the document. A model the catalogue
- * has never listed but the router's table names is materialised as
- * `unknown` so it can be hidden before the first refresh; any other id is
- * not found. Returns the model entry, or null when not found.
- *
- * @param {object} deps
- * @param {{ readDoc: Function, upsertDoc: Function }} deps.store
- * @param {() => Date} [deps.now]
- * @param {{ provider: string, model: string, hidden: boolean }} change
+ * The hide applied to the stored document: `{ doc, result }`, with a null
+ * `doc` (nothing to write) when the model is not found. Only the one model's
+ * `hidden` changes; every other stored field, model and provider is kept as
+ * it was. A model the catalogue has never listed but the router's table
+ * names is materialised as `unknown` so it can be hidden before the first
+ * refresh.
  */
-export async function setModelHidden({ store, now = () => new Date() }, { provider, model, hidden }) {
-  const stored = await store.readDoc(SETTINGS_CONTAINER, CATALOG_DOC_ID, CATALOG_DOC_ID);
-  const doc = normalizeDoc(stored);
-  const entry = doc.providers[provider] || { refresh: emptyRefresh(), models: {} };
-  if (!entry.models[model]) {
-    if (!seedModelsFor(provider).includes(model)) return null;
+function applyHidden(stored, { provider, model, hidden }, nowIso) {
+  const doc = rawDocForWrite(stored);
+  const entry = rawProviderEntry(doc.providers[provider]);
+  if (!isPlainObject(entry.models[model])) {
+    if (!seedModelsFor(provider).includes(model)) return { doc: null, result: null };
     entry.models[model] = unknownModel(provider, model);
   }
-  entry.models[model].hidden = hidden === true;
+  entry.models[model] = { ...entry.models[model], hidden: hidden === true };
   doc.providers[provider] = entry;
-  doc.updatedAt = now().toISOString();
-  await store.upsertDoc(SETTINGS_CONTAINER, doc);
-  return entry.models[model];
+  doc.updatedAt = nowIso;
+  return { doc, result: normalizeModel(provider, model, entry.models[model]) };
 }
 
 /**
- * The ids a card may offer for a provider: live or unknown, not hidden, in a
- * stable order — live first, then by id. Reads the document shape
- * `readModelCatalog` returns; the frontend carries the same rule
- * (frontend/src/lib/aiEngine/catalog.js) and aiEngine.test.js holds the two
- * equal.
+ * Set `hidden` on one model and write the document, conditionally on its
+ * ETag (writeCatalog) so a refresh that lands meanwhile keeps its new models
+ * and this hide still applies. Returns the model entry, or null when the id
+ * is neither in the catalogue nor a router default.
+ *
+ * @param {object} deps
+ * @param {{ readDoc: Function, upsertDoc: Function, replaceDocIfMatch: Function }} deps.store
+ * @param {() => Date} [deps.now]
+ * @param {{ provider: string, model: string, hidden: boolean }} change
+ */
+export async function setModelHidden({ store, now = () => new Date() }, change) {
+  const nowIso = now().toISOString();
+  return writeCatalog(store, (stored) => applyHidden(stored, change, nowIso));
+}
+
+/**
+ * The ids a card may offer for a provider: live or unknown, carrying the
+ * `text` capability, not hidden, in a stable order — live first, then by
+ * id. The capability rule keeps the speech, transcription, embedding and
+ * image ids the list endpoints also return out of the pin, Routing and the
+ * Playground, where a text call to them fails; they stay in the card's
+ * disclosure. Reads the document shape `readModelCatalog` returns; the
+ * frontend carries the same rule (frontend/src/lib/aiEngine/catalog.js) and
+ * aiEngine.test.js holds the two equal.
  */
 export function visibleModelsFor(catalog, provider) {
   const models = catalog?.providers?.[provider]?.models;
   if (!isPlainObject(models)) return [];
   const rank = (status) => (status === 'live' ? 0 : 1);
   return Object.values(models)
-    .filter((m) => (m.status === 'live' || m.status === 'unknown') && m.hidden !== true)
+    .filter(
+      (m) =>
+        (m.status === 'live' || m.status === 'unknown') &&
+        m.hidden !== true &&
+        Array.isArray(m.capabilities) &&
+        m.capabilities.includes('text')
+    )
     .sort((a, b) => rank(a.status) - rank(b.status) || a.id.localeCompare(b.id))
     .map((m) => m.id);
 }

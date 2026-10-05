@@ -9,12 +9,15 @@
  */
 import { httpRoute } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
-import { readDoc, upsertDoc } from '../lib/cosmos-client.js';
+import { readDoc, replaceDocIfMatch, upsertDoc } from '../lib/cosmos-client.js';
 import { availableProviders, invalidateConfig } from '../lib/ai/router.js';
 import { createListContext, listModels, refreshModelCatalog } from '../lib/ai/model-catalog.js';
 import { createModelCatalogHandlers } from '../lib/ai/model-catalog-handlers.js';
 
-const store = { readDoc, upsertDoc };
+// `replaceDocIfMatch`: the catalogue's writes are ETag-conditioned, so a
+// Hide and a refresh landing together both survive (model-catalog.js
+// writeCatalog); `upsertDoc` creates the first document only.
+const store = { readDoc, upsertDoc, replaceDocIfMatch };
 
 const handlers = () =>
   createModelCatalogHandlers({

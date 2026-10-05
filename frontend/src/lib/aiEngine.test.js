@@ -125,11 +125,33 @@ describe('DEFAULT_PROVIDERS matches the API', () => {
         openai: {
           ...seeded.providers.openai,
           models: {
-            'gpt-5-nano': { id: 'gpt-5-nano', status: 'live', hidden: false },
-            'gpt-4o': { id: 'gpt-4o', status: 'retired', hidden: false },
-            'gpt-5-mini': { id: 'gpt-5-mini', status: 'live', hidden: true },
-            'o3-mini': { id: 'o3-mini', status: 'unknown', hidden: false },
-            'gpt-4o-mini': { id: 'gpt-4o-mini', status: 'live', hidden: false },
+            'gpt-5-nano': {
+              id: 'gpt-5-nano',
+              status: 'live',
+              hidden: false,
+              capabilities: ['text'],
+            },
+            'gpt-4o': { id: 'gpt-4o', status: 'retired', hidden: false, capabilities: ['text'] },
+            'gpt-5-mini': {
+              id: 'gpt-5-mini',
+              status: 'live',
+              hidden: true,
+              capabilities: ['text'],
+            },
+            'o3-mini': { id: 'o3-mini', status: 'unknown', hidden: false, capabilities: ['text'] },
+            'gpt-4o-mini': {
+              id: 'gpt-4o-mini',
+              status: 'live',
+              hidden: false,
+              capabilities: ['text'],
+            },
+            // A speech model the list endpoint also returns: no text capability, never selectable.
+            'gpt-4o-mini-tts': {
+              id: 'gpt-4o-mini-tts',
+              status: 'live',
+              hidden: false,
+              capabilities: [],
+            },
           },
         },
       },
