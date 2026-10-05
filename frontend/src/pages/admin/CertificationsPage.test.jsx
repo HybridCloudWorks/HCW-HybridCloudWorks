@@ -100,6 +100,12 @@ describe('the header and tabs', () => {
     render(<CertificationsPage />);
     expect(screen.getByRole('heading', { name: /Certifications Hub/ })).toBeInTheDocument();
     expect(await screen.findByText('Cosmos DB connected')).toBeInTheDocument();
+    // Update Cert Catalog is in the header, beside the Powered-by pill, on
+    // every tab — not inside a panel (owner request 2026-10-05).
+    const button = screen.getByRole('button', { name: 'Update Cert Catalog' });
+    expect(button).toBeInTheDocument();
+    expect(screen.getByText('Powered by Cosmos DB').parentElement).toContainElement(button);
+    expect(panel().queryByRole('button', { name: /Update Cert Catalog/ })).toBeNull();
     expect(
       hubTabs()
         .getAllByRole('tab')
@@ -253,8 +259,12 @@ describe('the duty tabs', () => {
     expect(panel().getByText('Solutions Architect · AWS')).toBeInTheDocument();
     expect(fetchPublicSnapshot).toHaveBeenCalledWith('certifications', { fresh: false });
 
+    // The button is the header's, not the tab's; the tab still re-reads.
+    expect(
+      panel().queryByRole('button', { name: /Publish snapshot|Update Cert Catalog/ })
+    ).toBeNull();
     await act(async () => {
-      fireEvent.click(panel().getByRole('button', { name: /Publish snapshot/ }));
+      fireEvent.click(screen.getByRole('button', { name: 'Update Cert Catalog' }));
     });
     expect(postJSON).toHaveBeenCalledWith('publishSnapshot', {});
     await waitFor(() =>

@@ -432,7 +432,7 @@ export default function CertEditor({ cert, allCerts, onClose, onSaved }) {
             </DialogTitle>
             <DialogDescription>
               Dates are calendar days. Only certifications with Show on About page ticked are
-              published, at the next Publish snapshot.
+              published, at the next Update Cert Catalog.
             </DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-2 gap-3">

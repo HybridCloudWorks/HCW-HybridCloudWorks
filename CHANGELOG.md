@@ -2682,6 +2682,16 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Update Cert Catalog sits in the Certifications Hub header (owner
+  request 2026-10-05).** The publish button was on the Publishing tab, one
+  tab away from where edits happen; it is now under the Powered-by pill on
+  every tab, renamed Update Cert Catalog. `ServicePageHeader` gains an
+  `actions` slot and `PublishSnapshotButton` a `label` (the Speaking Events
+  tab keeps "Publish snapshot"). The Publishing tab keeps the snapshot
+  summary and the changes-since diff, and re-reads after a header publish;
+  the delete dialog, the editor and the moved-tab note name the new button.
+  `CertificationsPage.test.jsx` pins the button in the header and out of the
+  panel, and the tab's re-read after a header publish.
 - **About page: a composition root over per-section modules (#842).**
   `frontend/src/pages/shared/AboutPage.jsx` was one component with 70
   return statements and a complexity of 130 under a file-wide

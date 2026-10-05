@@ -23,9 +23,10 @@ const TAB_IDS = new Set(TABS.map((tab) => tab.id));
 
 /**
  * Ids that were never tabs here but name what a tab now holds: the one-scroll
- * page's view toggle (all / featured / expiring / hidden) and the header's
- * Publish snapshot button. A bookmark or a hand-typed link lands where its
- * content went rather than on Catalog by accident.
+ * page's view toggle (all / featured / expiring / hidden) and `publish`, which
+ * opens Publishing (the snapshot summary and the diff; the button itself is
+ * Update Cert Catalog in the page header). A bookmark or a hand-typed link
+ * lands where its content went rather than on Catalog by accident.
  */
 export const MOVED_TABS = Object.freeze({
   all: 'catalog',

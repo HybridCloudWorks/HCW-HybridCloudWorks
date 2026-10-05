@@ -43,7 +43,7 @@ export function DeleteCertDialog({ cert, busy, onCancel, onConfirm }) {
           </div>
           <p className="text-xs text-slate-500">
             <strong>{cert.name}</strong> will be permanently removed. The About page keeps showing
-            it until you run Publish snapshot on the Publishing tab.
+            it until you run Update Cert Catalog in the page header.
           </p>
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={onCancel} disabled={busy}>
