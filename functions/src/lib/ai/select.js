@@ -151,27 +151,48 @@ const reject = (step, code, why) => ({
  * rejection, or null when the provider may serve this task.
  */
 function providerRejection(step, { def, availability, exclude }) {
-  const { provider } = step;
-  if (!DEFAULT_PROVIDER_ORDER.includes(provider)) {
-    return reject(step, 'unknown', `not available: ${provider} is not a provider the router implements`);
-  }
-  if (!availability.keyed.includes(provider)) {
-    return reject(step, 'no-key', `not available: ${provider} holds no key`);
-  }
-  if (!availability.enabled.includes(provider)) {
-    return reject(step, 'disabled', `not available: ${provider} is switched off in the admin portal`);
-  }
-  if (exclude.includes(provider)) {
-    return reject(step, 'excluded', `not used: ${provider} is excluded for this task`);
-  }
-  if (TRIAL_TIER_PROVIDERS.includes(provider) && def.public) {
-    return reject(step, 'policy', 'not eligible: trial tier on a public route');
-  }
-  if (def.needs.includes('grounding') && !GROUNDING_PROVIDERS.includes(provider)) {
-    return reject(step, 'policy', 'not eligible: grounding is Gemini-only');
-  }
-  return null;
+  const facts = { provider: step.provider, def, availability, exclude };
+  const failed = PROVIDER_CHECKS.find((check) => check.fails(facts));
+  return failed ? reject(step, failed.code, failed.why(facts)) : null;
 }
+
+/**
+ * Rule 5's provider checks, in the order they are asked; the first that
+ * fails is the rejection. The two last are the policy locks (header).
+ */
+const PROVIDER_CHECKS = Object.freeze([
+  {
+    code: 'unknown',
+    fails: ({ provider }) => !DEFAULT_PROVIDER_ORDER.includes(provider),
+    why: ({ provider }) => `not available: ${provider} is not a provider the router implements`,
+  },
+  {
+    code: 'no-key',
+    fails: ({ provider, availability }) => !availability.keyed.includes(provider),
+    why: ({ provider }) => `not available: ${provider} holds no key`,
+  },
+  {
+    code: 'disabled',
+    fails: ({ provider, availability }) => !availability.enabled.includes(provider),
+    why: ({ provider }) => `not available: ${provider} is switched off in the admin portal`,
+  },
+  {
+    code: 'excluded',
+    fails: ({ provider, exclude }) => exclude.includes(provider),
+    why: ({ provider }) => `not used: ${provider} is excluded for this task`,
+  },
+  {
+    code: 'policy',
+    fails: ({ provider, def }) => TRIAL_TIER_PROVIDERS.includes(provider) && def.public,
+    why: () => 'not eligible: trial tier on a public route',
+  },
+  {
+    code: 'policy',
+    fails: ({ provider, def }) =>
+      def.needs.includes('grounding') && !GROUNDING_PROVIDERS.includes(provider),
+    why: () => 'not eligible: grounding is Gemini-only',
+  },
+]);
 
 /**
  * Rule 5's model half for a named model: not retired, carries `needs`. A
@@ -232,37 +253,49 @@ function recommendedVerdict(step, { def, catalog }) {
  */
 function judge(step, where, deps) {
   const rejection = providerRejection(step, deps);
-  if (rejection) return { rejection };
-  const { def, explicitModel, catalog } = deps;
+  let verdict;
+  if (rejection) verdict = { rejection };
+  else if (deps.explicitModel) verdict = acceptExplicit(step, where, deps);
+  else if (step.selection === 'recommended') verdict = judgeRecommended(step, deps);
+  else verdict = judgeStep(step, where, deps);
+  return verdict;
+}
 
-  if (explicitModel) {
-    return {
-      accepted: {
-        provider: step.provider,
-        model: explicitModel,
-        modalityModel: null,
-        selection: 'explicit',
-        why: `explicit model from the call site; ${where}`,
-      },
-    };
-  }
+/** Rule 1: the call site's model, on whatever provider the step names. */
+function acceptExplicit(step, where, { explicitModel }) {
+  return {
+    accepted: {
+      provider: step.provider,
+      model: explicitModel,
+      modalityModel: null,
+      selection: 'explicit',
+      why: `explicit model from the call site; ${where}`,
+    },
+  };
+}
 
-  if (step.selection === 'recommended') {
-    const verdict = recommendedVerdict(step, deps);
-    if (verdict.rejection) return verdict;
-    return {
-      accepted: {
-        provider: step.provider,
-        model: step.model,
-        modalityModel: step.model,
-        selection: 'recommended',
-        why: [`recommended for this task: ${def.recommended?.reason || ''}`.trim(), verdict.note]
-          .filter(Boolean)
-          .join(' · '),
-      },
-    };
-  }
+/** Rule 2: the task's recommendation, under the stricter verdict. */
+function judgeRecommended(step, deps) {
+  const verdict = recommendedVerdict(step, deps);
+  if (verdict.rejection) return verdict;
+  return {
+    accepted: {
+      provider: step.provider,
+      model: step.model,
+      modalityModel: step.model,
+      selection: 'recommended',
+      why: [`recommended for this task: ${deps.def.recommended?.reason || ''}`.trim(), verdict.note]
+        .filter(Boolean)
+        .join(' · '),
+    },
+  };
+}
 
+/**
+ * Rules 3 and 4: a chain or list step, with its named model or — for a
+ * null — the provider's modality recommendation to judge it on.
+ */
+function judgeStep(step, where, { def, catalog }) {
   const named = step.model;
   const modality = named ? null : recommendedModelFor(step.provider, def.modality);
   if (!named && !modality) {
@@ -362,11 +395,10 @@ function walk(steps, deps, rejected) {
 export function selectChain({ task, selection = null, catalog = null, availability, explicitModel = null }) {
   const def = definitionOf(task);
   const entry = entryOf(selection, def);
-  const exclude = Array.isArray(entry.exclude) ? entry.exclude : [];
   const deps = {
     def,
     catalog,
-    exclude,
+    exclude: Array.isArray(entry.exclude) ? entry.exclude : [],
     explicitModel: typeof explicitModel === 'string' && explicitModel.trim() ? explicitModel.trim() : null,
     availability: {
       keyed: Array.isArray(availability?.keyed) ? availability.keyed : [],
@@ -375,41 +407,60 @@ export function selectChain({ task, selection = null, catalog = null, availabili
   };
   const flags = [];
   const rejected = [];
-  let mode = entry.mode;
-  const global = globalSteps(selection, flags);
+  const plan = planFor(entry, { def, deps, global: globalSteps(selection, flags), flags });
+  const chain = walk(plan.steps, deps, rejected);
+  const outcome = settle(plan, chain, { deps, rejected, flags });
+  return { mode: outcome.mode, chain: outcome.chain, rejected, flags };
+}
 
-  if (mode === 'recommended') {
-    const steps = [];
-    if (def.recommended && !deps.explicitModel) {
-      steps.push({ ...def.recommended, selection: 'recommended', where: 'recommended' });
-    } else if (!def.recommended) {
-      flags.push(`${def.label} has no recommended model; using the Priority list`);
-      mode = 'global';
-    }
-    const chain = walk([...steps, ...global], deps, rejected);
-    if (steps.length && chain[0]?.selection !== 'recommended') {
-      const why = rejected.find((r) => r.provider === steps[0].provider && r.model === steps[0].model);
-      flags.push(`the recommended model is not eligible (${why?.why || 'see rejected'}); using the Priority list`);
-      mode = 'global';
-    }
-    return { mode, chain, rejected, flags };
+/**
+ * The steps the task's mode puts before the walk, and the mode it reads
+ * as: `{ mode, steps, lead?, thenGlobal?, global? }`. The recommendation,
+ * when the mode asks for it and the call site named no model, is `lead`.
+ */
+function planFor(entry, { def, deps, global, flags }) {
+  if (entry.mode === 'recommended') return recommendedPlan(def, deps, global, flags);
+  if (entry.mode === 'custom') return customPlan(entry, global);
+  return { mode: 'global', steps: global };
+}
+
+/** Rule 2's plan: the recommendation then the list, or the list alone, flagged, when the task has none. */
+function recommendedPlan(def, deps, global, flags) {
+  if (!def.recommended) {
+    flags.push(`${def.label} has no recommended model; using the Priority list`);
+    return { mode: 'global', steps: global };
   }
+  const lead = deps.explicitModel
+    ? null
+    : { ...def.recommended, selection: 'recommended', where: 'recommended' };
+  return { mode: 'recommended', steps: lead ? [lead, ...global] : global, lead };
+}
 
-  if (mode === 'custom') {
-    const custom = (Array.isArray(entry.chain) ? entry.chain : []).map((step, index) => ({
-      ...step,
-      selection: 'custom',
-      where: `custom chain, step ${index + 1}`,
-    }));
-    const thenGlobal = entry.thenGlobal !== false;
-    const chain = walk(thenGlobal ? [...custom, ...global] : custom, deps, rejected);
-    if (chain.length) return { mode, chain, rejected, flags };
-    if (!thenGlobal) {
-      flags.push('no entry of the custom chain is eligible and the Priority list does not follow it; using the Priority list');
-      return { mode: 'global', chain: walk(global, deps, rejected), rejected, flags };
-    }
-    return { mode, chain, rejected, flags };
+/** Rule 3's plan: the chain, then the list if `thenGlobal`. */
+function customPlan(entry, global) {
+  const custom = (Array.isArray(entry.chain) ? entry.chain : []).map((step, index) => ({
+    ...step,
+    selection: 'custom',
+    where: `custom chain, step ${index + 1}`,
+  }));
+  const thenGlobal = entry.thenGlobal !== false;
+  return { mode: 'custom', steps: thenGlobal ? [...custom, ...global] : custom, thenGlobal, global };
+}
+
+/**
+ * What the walk came to, and the flag it earns: a recommendation that did
+ * not lead reads as `global`; a custom chain with nothing eligible and no
+ * list behind it reads as `global` and the list is walked (§6).
+ */
+function settle(plan, chain, { deps, rejected, flags }) {
+  if (plan.mode === 'recommended' && plan.lead && chain[0]?.selection !== 'recommended') {
+    const why = rejected.find((r) => r.provider === plan.lead.provider && r.model === plan.lead.model);
+    flags.push(`the recommended model is not eligible (${why?.why || 'see rejected'}); using the Priority list`);
+    return { mode: 'global', chain };
   }
-
-  return { mode: 'global', chain: walk(global, deps, rejected), rejected, flags };
+  if (plan.mode === 'custom' && !chain.length && !plan.thenGlobal) {
+    flags.push('no entry of the custom chain is eligible and the Priority list does not follow it; using the Priority list');
+    return { mode: 'global', chain: walk(plan.global, deps, rejected) };
+  }
+  return { mode: plan.mode, chain };
 }

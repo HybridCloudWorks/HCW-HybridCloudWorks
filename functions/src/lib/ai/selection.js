@@ -154,45 +154,114 @@ function stepErrors(where, raw, limit) {
   return errors;
 }
 
-/** Errors in one task's entry. */
+/** The mode rule of one task's entry: an error, or null. */
+const modeError = (where, raw) =>
+  SELECTION_MODES.includes(raw.mode)
+    ? null
+    : `${where}.mode must be one of ${SELECTION_MODES.join(', ')}`;
+
+/** The chain rule: present only for `custom`, required for it, and well-formed. */
+function chainErrors(where, raw) {
+  if (raw.chain === undefined) {
+    return raw.mode === 'custom' ? [`${where}.chain is required for mode custom`] : [];
+  }
+  if (raw.mode !== 'custom') return [`${where}.chain is only for mode custom`];
+  return stepErrors(`${where}.chain`, raw.chain, MAX_CHAIN_LENGTH);
+}
+
+/** The thenGlobal rule: absent or a boolean. */
+const thenGlobalError = (where, raw) =>
+  raw.thenGlobal === undefined || typeof raw.thenGlobal === 'boolean'
+    ? null
+    : `${where}.thenGlobal must be a boolean`;
+
+/** The exclude rule: absent, or an array of known providers. */
+function excludeErrors(where, raw) {
+  if (raw.exclude === undefined) return [];
+  if (!Array.isArray(raw.exclude)) return [`${where}.exclude must be an array of providers`];
+  return raw.exclude
+    .filter((entry) => !isKnownProvider(cleanProvider(entry)))
+    .map((entry) => `${where}.exclude: unknown provider "${entry ?? ''}"`);
+}
+
+/** Errors in one task's entry: each rule's, in the order the shape reads. */
 function taskErrors(task, raw) {
   const where = `tasks.${task}`;
   if (!isPlainObject(raw)) return [`${where} must be { mode, chain?, thenGlobal?, exclude? }`];
-  const errors = [];
-  if (!SELECTION_MODES.includes(raw.mode)) {
-    errors.push(`${where}.mode must be one of ${SELECTION_MODES.join(', ')}`);
+  return [
+    modeError(where, raw),
+    ...chainErrors(where, raw),
+    thenGlobalError(where, raw),
+    ...excludeErrors(where, raw),
+  ].filter(Boolean);
+}
+
+/** The version rule: an error, or null. */
+const versionError = (doc) =>
+  doc.version === SELECTION_VERSION ? null : `version must be ${SELECTION_VERSION}`;
+
+/** The Priority list's rules: an object, well-formed steps, at least one. */
+function globalErrors(doc) {
+  if (!isPlainObject(doc.global)) return ['global must be { priority: [{ provider, model? }] }'];
+  const priority = stepErrors('global.priority', doc.global.priority, Infinity);
+  if (!priority.length && doc.global.priority.length === 0) {
+    return ['global.priority needs at least one provider'];
   }
-  if (raw.chain !== undefined) {
-    if (raw.mode !== 'custom') errors.push(`${where}.chain is only for mode custom`);
-    else errors.push(...stepErrors(`${where}.chain`, raw.chain, MAX_CHAIN_LENGTH));
-  } else if (raw.mode === 'custom') {
-    errors.push(`${where}.chain is required for mode custom`);
-  }
-  if (raw.thenGlobal !== undefined && typeof raw.thenGlobal !== 'boolean') {
-    errors.push(`${where}.thenGlobal must be a boolean`);
-  }
-  if (raw.exclude !== undefined) {
-    if (!Array.isArray(raw.exclude)) errors.push(`${where}.exclude must be an array of providers`);
-    else {
-      for (const entry of raw.exclude) {
-        if (!isKnownProvider(cleanProvider(entry))) {
-          errors.push(`${where}.exclude: unknown provider "${entry ?? ''}"`);
-        }
-      }
-    }
-  }
-  return errors;
+  return priority;
+}
+
+/** The tasks' rules: an object of known tasks, each entry checked by taskErrors. */
+function tasksErrors(doc) {
+  if (doc.tasks !== undefined && !isPlainObject(doc.tasks)) return ['tasks must be an object'];
+  return Object.entries(doc.tasks || {}).flatMap(([task, raw]) =>
+    TASK_NAMES.includes(task)
+      ? taskErrors(task, raw)
+      : [`Unknown AI task: ${task}. Known: ${TASK_NAMES.join(', ')}`]
+  );
+}
+
+/** The updatedAt rule: absent, null or a string. */
+const updatedAtError = (doc) =>
+  doc.updatedAt === undefined || doc.updatedAt === null || typeof doc.updatedAt === 'string'
+    ? null
+    : 'updatedAt must be a string or null';
+
+/** Every shape error, in the order the document reads: version, global, tasks, updatedAt. */
+function shapeErrors(doc) {
+  return [versionError(doc), ...globalErrors(doc), ...tasksErrors(doc), updatedAtError(doc)].filter(
+    Boolean
+  );
+}
+
+/**
+ * §6's first rule, the one that needs more than the document: a `custom`
+ * chain with no eligible candidate and `thenGlobal: false` "would have no
+ * model". On read the resolver falls back to the Priority list for this
+ * case and flags it; on save it is refused. So the question is whether any
+ * entry of the chain itself was eligible, not whether the chain is empty.
+ */
+function noModelErrors(doc, { availability, catalog }) {
+  const normalized = normalizeSelection(doc);
+  return Object.entries(normalized.tasks)
+    .filter(([, entry]) => entry.mode === 'custom' && !entry.thenGlobal)
+    .filter(([task]) => {
+      const { chain } = selectChain({ task, selection: normalized, catalog, availability });
+      return !chain.some((candidate) => candidate.selection === 'custom');
+    })
+    .map(
+      ([task]) =>
+        `tasks.${task}: this task would have no model — no entry of its custom chain is eligible and the Priority list does not follow it (${AI_TASKS[task].label})`
+    );
 }
 
 /**
  * Every error in a document a save would store, as sentences; empty when it
  * is valid. Stricter than normalizeSelection on purpose (header).
  *
- * The one rule that needs more than the document is §6's first: a `custom`
- * chain with no eligible candidate and `thenGlobal: false` "would have no
- * model". Eligibility is the resolver's (select.js), run here over the
- * `availability` and `catalog` the caller read; without `availability` the
- * rule is not checked (a unit test of the shape alone).
+ * The shape rules come first; only a well-shaped document is then held to
+ * §6's "would have no model" rule, which runs the resolver (select.js) over
+ * the `availability` and `catalog` the caller read. Without `availability`
+ * that rule is not checked (a unit test of the shape alone).
  *
  * @param {unknown} doc
  * @param {{ availability?: { keyed: string[], enabled: string[] }, catalog?: object|null }} [deps]
@@ -200,43 +269,6 @@ function taskErrors(task, raw) {
  */
 export function validateSelection(doc, { availability, catalog = null } = {}) {
   if (!isPlainObject(doc)) return ['Body must be { version: 2, global: { priority }, tasks }'];
-  const errors = [];
-  if (doc.version !== SELECTION_VERSION) errors.push(`version must be ${SELECTION_VERSION}`);
-  if (!isPlainObject(doc.global)) errors.push('global must be { priority: [{ provider, model? }] }');
-  else {
-    const priority = stepErrors('global.priority', doc.global.priority, Infinity);
-    errors.push(...priority);
-    if (!priority.length && doc.global.priority.length === 0) {
-      errors.push('global.priority needs at least one provider');
-    }
-  }
-  if (doc.tasks !== undefined && !isPlainObject(doc.tasks)) errors.push('tasks must be an object');
-  else {
-    for (const [task, raw] of Object.entries(doc.tasks || {})) {
-      if (!TASK_NAMES.includes(task)) {
-        errors.push(`Unknown AI task: ${task}. Known: ${TASK_NAMES.join(', ')}`);
-        continue;
-      }
-      errors.push(...taskErrors(task, raw));
-    }
-  }
-  if (doc.updatedAt !== undefined && doc.updatedAt !== null && typeof doc.updatedAt !== 'string') {
-    errors.push('updatedAt must be a string or null');
-  }
-  if (errors.length || !availability) return errors;
-
-  const normalized = normalizeSelection(doc);
-  for (const [task, entry] of Object.entries(normalized.tasks)) {
-    if (entry.mode !== 'custom' || entry.thenGlobal) continue;
-    // On read the resolver falls back to the Priority list for this case
-    // and flags it; on save it is refused. So the question is whether any
-    // entry of the chain itself was eligible, not whether the chain is empty.
-    const { chain } = selectChain({ task, selection: normalized, catalog, availability });
-    if (!chain.some((candidate) => candidate.selection === 'custom')) {
-      errors.push(
-        `tasks.${task}: this task would have no model — no entry of its custom chain is eligible and the Priority list does not follow it (${AI_TASKS[task].label})`
-      );
-    }
-  }
-  return errors;
+  const errors = shapeErrors(doc);
+  return errors.length || !availability ? errors : noModelErrors(doc, { availability, catalog });
 }
